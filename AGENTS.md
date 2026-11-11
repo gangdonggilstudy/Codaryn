@@ -39,6 +39,14 @@
 - 후보 채택은 Codex가 검증 결과, 변경 내용, 사용자 변경과의 충돌 여부를 검토해 결정한다.
 - 단계별 완료 기준은 docs/roadmap.md, 작업 절차는 docs/development-workflow.md를 따른다.
 
+## 커밋과 푸시
+
+- 작성자는 gangdonggil, 이메일은 gangdonggilstudy@gmail.com으로 설정한다.
+- 커밋 메시지에 Git trailer를 붙이지 않는다. Co-authored-by, Signed-off-by, Claude-Session, Reviewed-by, 기타 자동 귀속 문구를 추가하지 않는다.
+- --signoff와 --trailer를 사용하지 않는다. Claude의 자동 커밋 귀속은 .claude/settings.json에서 비활성화한다.
+- 논리적으로 완결된 변경 단위로 커밋한다. 담당 worktree 커밋은 Codex가 검토하며, 원격 푸시는 Codex가 통합과 검증 후 수행한다.
+- 푸시 전 새 커밋의 작성자와 메시지를 검사한다. 사용자 변경이나 기존 이력을 임의로 재작성하지 않고 force push를 하지 않는다.
+
 ## 민감정보와 실행 경계
 
 - API 키나 원문 대응표를 채팅, 문서, Git, 로그에 넣지 않는다. 키 파일은 읽거나 출력하지 않는다.

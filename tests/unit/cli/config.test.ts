@@ -160,6 +160,7 @@ describe("parseArgs (phase 1b options)", () => {
         configPath: "c.json",
         varsFile: ".env",
         cancelFile: null,
+        quiet: false,
       },
     });
   });

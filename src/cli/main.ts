@@ -1,20 +1,29 @@
 #!/usr/bin/env node
 /**
- * Process entry point. Writes exactly one JSON line to stdout and exits with its code.
- * `codaryn revert ...` goes to runRevert, everything else to runCli (`run`, or a usage error).
+ * Process entry point (`bin.codaryn` in package.json). Writes exactly one output to stdout and
+ * exits with its code: one JSON line for `run` and `revert` (and errors of every command), text
+ * for `report`, `doctor`, `--help` and `--version` (`--json` makes report and doctor print JSON).
+ * `run` writes progress lines to stderr unless `--quiet` is given (U-8).
  * Any exception becomes `internal_error` (exit code 70) without its text or stack (S-6).
  */
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { revertRun } from "../store/index.js";
-import { assembleRun, createRevertCommand } from "./assemble.js";
+import { INTEGRITY_CONNECTED, assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
-import { runGuarded } from "./guard.js";
+import { runDoctor } from "./doctor.js";
+import { renderOutcome, runGuardedCommand } from "./guard.js";
+import type { CommandOutcome } from "./guard.js";
+import { helpRequest, helpText, versionText } from "./help.js";
+import { findInstall } from "./install.js";
+import type { InstallInfo } from "./install.js";
+import { runReport } from "./report.js";
 import { runRevert } from "./revert.js";
 import { runCli } from "./run.js";
-import { locateInWorkspace } from "./security/index.js";
+import { locateInWorkspace, relateRealPaths } from "./security/index.js";
 
 const argv = process.argv.slice(2);
 const isDirectory = async (dir: string): Promise<boolean> => {
@@ -24,24 +33,68 @@ const isDirectory = async (dir: string): Promise<boolean> => {
     return false;
   }
 };
+const isFile = async (file: string): Promise<boolean> => {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+};
 const clock = { now: () => Date.now() };
 const random = (size: number): Uint8Array => randomBytes(size);
+const readText = (file: string): Promise<string> => readFile(file, "utf8");
 
-const outcome = await runGuarded(() =>
-  argv[0] === "revert"
-    ? runRevert({
+// A closed stderr (EPIPE) must not end a run: progress is best effort.
+process.stderr.on("error", () => {});
+
+async function install(): Promise<InstallInfo | null> {
+  try {
+    return await findInstall(fileURLToPath(import.meta.url), readText);
+  } catch {
+    return null;
+  }
+}
+
+async function dispatch(): Promise<CommandOutcome> {
+  const info = await install();
+  // U-3: null means the package root was not found; every run is then refused.
+  const installDir = info?.dir ?? null;
+  const asked = helpRequest(argv);
+  if (asked !== null) {
+    return { text: asked.kind === "version" ? versionText(info?.version ?? null) : helpText(asked.command), exitCode: 0 };
+  }
+  switch (argv[0]) {
+    case "revert":
+      return runRevert({
         argv,
         cwd: process.cwd(),
         isDirectory,
         clock,
         randomBytes: random,
         revert: createRevertCommand(revertRun),
-      })
-    : runCli({
+      });
+    case "report":
+      return runReport({ argv, cwd: process.cwd(), env: process.env });
+    case "doctor":
+      return runDoctor({
         argv,
         env: process.env,
         cwd: process.cwd(),
-        readFile: (file) => readFile(file, "utf8"),
+        nodeVersion: process.versions.node,
+        installDir,
+        readFile: readText,
+        isDirectory,
+        isFile,
+        locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),
+        relatePaths: (target, base) => relateRealPaths(target, base),
+        integrityConnected: INTEGRITY_CONNECTED,
+      });
+    default:
+      return runCli({
+        argv,
+        env: process.env,
+        cwd: process.cwd(),
+        readFile: readText,
         isDirectory,
         // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
         loadEnvFile: (file) => process.loadEnvFile(file),
@@ -50,6 +103,11 @@ const outcome = await runGuarded(() =>
         clock,
         randomBytes: random,
         assemble: assembleRun,
+        installDir,
+        relatePaths: (target, base) => relateRealPaths(target, base),
+        writeProgress: (line) => {
+          process.stderr.write(line);
+        },
         cancelSignal: (cancelFile) =>
           createCancelSource({
             cancelFile,
@@ -59,8 +117,10 @@ const outcome = await runGuarded(() =>
               return () => process.off(name, handler);
             },
           }),
-      }),
-);
+      });
+  }
+}
 
-process.stdout.write(`${JSON.stringify(outcome.output)}\n`);
+const outcome = await runGuardedCommand(dispatch);
+process.stdout.write(renderOutcome(outcome));
 process.exitCode = outcome.exitCode;

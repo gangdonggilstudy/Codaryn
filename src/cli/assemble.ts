@@ -40,7 +40,16 @@ export interface AssemblyInput {
   readonly secrets: readonly string[];
   readonly clock: Clock;
   readonly signal: AbortSignal;
+  /** U-1: the config file's `integrity.paths`, already checked by the CLI. Absent means none. */
+  readonly integrityPaths?: readonly string[];
 }
+
+/**
+ * Whether this build checks protected material (U-1). The checker (`createIntegrityChecker`,
+ * K2) is connected after it is merged; until then a run that names `integrity.paths` is refused
+ * before the lock is taken, so a configured check is never silently skipped.
+ */
+export const INTEGRITY_CONNECTED = false;
 
 export type AssemblyOutcome =
   | {
@@ -123,6 +132,13 @@ export function createRevertCommand(revertRun: RevertRun): RevertCommand {
 
 export const assembleRun: Assemble = async (input) => {
   const { task, runId, model, secrets, clock, signal } = input;
+  if (!INTEGRITY_CONNECTED && (input.integrityPaths?.length ?? 0) > 0) {
+    return {
+      ok: false,
+      code: "invalid_config",
+      message: "integrity.paths is set, but this build does not check protected material yet; nothing was run",
+    };
+  }
 
   let workspace: Workspace;
   try {

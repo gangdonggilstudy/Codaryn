@@ -6,7 +6,7 @@
 
 import path from "node:path";
 import { CLI_ERROR_EXIT_CODES, RESULT_SCHEMA_VERSION } from "../contracts/index.js";
-import type { CliErrorCode, CliOutput, Clock, ModelProvider, RunTask } from "../contracts/index.js";
+import type { CliErrorCode, CliOutput, Clock, EngineResult, ModelProvider, RunTask } from "../contracts/index.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { anthropicAvailability, createScriptedProvider, parseScript } from "../model/index.js";
 import type { ProviderEnvironment } from "../model/index.js";
@@ -96,8 +96,13 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   try {
     const assembled = await io.assemble({ task, runId, model, secrets, clock: io.clock, signal: cancel.signal });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
-    const result = await (io.runTask ?? engineRunTask)(assembled.deps);
-    await assembled.finish(result);
+    let result: EngineResult | null = null;
+    try {
+      result = await (io.runTask ?? engineRunTask)(assembled.deps);
+    } finally {
+      // Releases the workspace lock even when the run threw.
+      await assembled.finish(result);
+    }
     return { output: result, exitCode: result.exitCode };
   } catch {
     return error("internal_error", "the run stopped because of an internal error");

@@ -32,7 +32,7 @@ function taskJson(overrides: Record<string, unknown> = {}): Record<string, unkno
 
 function cli(files: Record<string, unknown>, options: Partial<CliEnvironment> = {}) {
   const assembled: AssemblyInput[] = [];
-  const finished: EngineResult[] = [];
+  const finished: (EngineResult | null)[] = [];
   const result: EngineResult = {
     schemaVersion: 1,
     kind: "run",

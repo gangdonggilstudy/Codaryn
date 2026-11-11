@@ -8,11 +8,13 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { assembleRun } from "./assemble.js";
+import { revertRun } from "../store/index.js";
+import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runGuarded } from "./guard.js";
 import { runRevert } from "./revert.js";
 import { runCli } from "./run.js";
+import { locateInWorkspace } from "./security/index.js";
 
 const argv = process.argv.slice(2);
 const isDirectory = async (dir: string): Promise<boolean> => {
@@ -33,7 +35,7 @@ const outcome = await runGuarded(() =>
         isDirectory,
         clock,
         randomBytes: random,
-        // `revert` stays unset until the store's revertRun is connected (createRevertCommand).
+        revert: createRevertCommand(revertRun),
       })
     : runCli({
         argv,
@@ -43,6 +45,8 @@ const outcome = await runGuarded(() =>
         isDirectory,
         // C-2: only when --env-file is given. Variables already set in the environment win.
         loadEnvFile: (file) => process.loadEnvFile(file),
+        // S-1: real paths, so links and 8.3 names cannot hide a file inside the workspace.
+        locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),
         clock,
         randomBytes: random,
         assemble: assembleRun,

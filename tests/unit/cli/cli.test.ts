@@ -9,6 +9,7 @@ import { RUN_ID_PATTERN, createRunId } from "../../../src/cli/run-id.js";
 import { runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment } from "../../../src/cli/run.js";
 import { parseTask } from "../../../src/cli/task.js";
+import { lexicalLocate } from "./locate.js";
 
 const FAKE_SECRET = "fake-secret-VALUE-0001";
 const FAKE_KEY = "fake-api-key-not-real-0001";
@@ -73,6 +74,7 @@ function cli(files: Record<string, unknown>, options: Partial<CliEnvironment> = 
     loadEnvFile: () => {
       throw new Error("no env file in this test");
     },
+    locateInWorkspace: lexicalLocate,
     clock: { now: () => Date.UTC(2026, 10, 12, 3, 15, 0) },
     randomBytes: (size) => new Uint8Array(size).fill(0xab),
     assemble,
@@ -164,7 +166,9 @@ describe("runCli", () => {
   });
 
   test("AD-07 the anthropic provider stops before assembly, with or without settings", async () => {
-    const task = taskJson({ model: { provider: "anthropic" } });
+    // S-7: an anthropic task needs a token limit, so these tasks state one.
+    const limits = { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 10_000, maxDurationMs: 10_000 };
+    const task = taskJson({ model: { provider: "anthropic" }, limits });
     const missing = cli({ "task.json": task });
     const notConfigured = await runCli(missing.io);
     assert.equal(notConfigured.output.kind === "error" ? notConfigured.output.code : "", "provider_not_configured");
@@ -173,7 +177,7 @@ describe("runCli", () => {
 
     // Phase 1b also needs an output cap. `createAnthropicProvider: null` keeps the unconnected path.
     const present = cli(
-      { "task.json": taskJson({ model: { provider: "anthropic", maxOutputTokens: 1024 } }) },
+      { "task.json": taskJson({ model: { provider: "anthropic", maxOutputTokens: 1024 }, limits }) },
       {
         env: { CODARYN_TEST_SECRET: FAKE_SECRET, ANTHROPIC_API_KEY: FAKE_KEY, CODARYN_MODEL: "fake-model" },
         createAnthropicProvider: null,

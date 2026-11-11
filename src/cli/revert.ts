@@ -19,8 +19,8 @@ export interface RevertEnvironment {
   readonly clock: Clock;
   readonly randomBytes: (size: number) => Uint8Array;
   /**
-   * `createRevertCommand(revertRun)` from assemble.ts. Absent while the store's `revertRun` is
-   * not connected; the command then stops before anything is read or changed.
+   * `createRevertCommand(revertRun)` from assemble.ts; main.ts always passes it. When absent
+   * (a build without the store), the command stops before anything is read or changed.
    */
   readonly revert?: RevertCommand;
 }

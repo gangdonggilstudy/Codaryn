@@ -25,11 +25,11 @@ import type {
 } from "../../../src/contracts/index.js";
 import { parseArgs } from "../../../src/cli/args.js";
 import type { Assemble, AssemblyInput } from "../../../src/cli/assemble.js";
-import { normalizeApiBaseUrl, parseConfig } from "../../../src/cli/config.js";
-import { findKeyInFile } from "../../../src/cli/keys.js";
+import { parseConfig } from "../../../src/cli/config.js";
 import { runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../../../src/cli/run.js";
 import { resolveAnthropicSettings } from "../../../src/cli/settings.js";
+import { lexicalLocate } from "./locate.js";
 
 const BASE = path.resolve("/tmp/codaryn-config-unit");
 /** Not a real key format. */
@@ -38,7 +38,8 @@ const FAKE_KEY = "fake-api-key-not-real-0001";
 const KEY_SHAPED = ["sk", "ant", "FAKEfake0000FAKEfake0000"].join("-");
 const FAKE_SECRET = "fake-secret-VALUE-0003";
 
-const LIMITS = { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: null, maxDurationMs: 10_000 };
+/** S-7: anthropic tasks must have a token limit. */
+const LIMITS = { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 10_000, maxDurationMs: 10_000 };
 
 function anthropicTask(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -125,6 +126,7 @@ function harness(
         if (env[name] === undefined) env[name] = value;
       }
     },
+    locateInWorkspace: lexicalLocate,
     clock: { now: () => Date.UTC(2026, 10, 12, 3, 15, 0) },
     randomBytes: (size) => new Uint8Array(size).fill(0xcd),
     assemble,
@@ -214,46 +216,103 @@ describe("parseConfig", () => {
     }
   });
 
-  test("base URL: https anywhere, http on loopback only, no user info, query or fragment", () => {
-    assert.equal(normalizeApiBaseUrl("https://api.example.test/v/"), "https://api.example.test/v");
-    assert.equal(normalizeApiBaseUrl("http://localhost:9000"), "http://localhost:9000");
-    assert.equal(normalizeApiBaseUrl("http://[::1]:9000"), "http://[::1]:9000");
-    for (const bad of ["http://10.0.0.1", "ftp://x", "not a url", "https://u:p@x.test", "https://x.test?a=1", "https://x.test#f"]) {
-      assert.equal(normalizeApiBaseUrl(bad), null, bad);
-    }
+  test("S-9 base URL: https anywhere, http on loopback only, nothing the parser would repair", () => {
+    const url = (value: string): string | null => {
+      const parsed = parseConfig(config({ apiBaseUrl: value }));
+      return parsed.ok ? (parsed.config.apiBaseUrl ?? null) : null;
+    };
+    assert.equal(url("https://api.example.test/v/"), "https://api.example.test/v");
+    assert.equal(url("http://localhost:9000"), "http://localhost:9000");
+    assert.equal(url("http://[::1]:9000"), "http://[::1]:9000");
+    const bad = [
+      "http://10.0.0.1",
+      "ftp://x",
+      "not a url",
+      "https://u:p@x.test",
+      "https://x.test?a=1",
+      "https://x.test#f",
+      // S-9: a bare `?` or `#`, characters the parser rewrites, and a base that already names /v1.
+      "https://x.test?",
+      "https://x.test/#",
+      "https://x.test\\proxy",
+      "https://x.test/v1",
+    ];
+    for (const value of bad) assert.equal(url(value), null, value);
+  });
+
+  test("S-7 requestTimeoutMs and verifier timeoutMs fit a Node timer", () => {
+    assert.ok(parseConfig(config({ requestTimeoutMs: 2_147_483_647 })).ok);
+    assert.equal(parseConfig(config({ requestTimeoutMs: 2_147_483_648 })).ok, false);
+    const verifier = (timeoutMs: number) => config({ verifiers: [{ id: "v", kind: "command", executable: "node", args: [], timeoutMs }] });
+    assert.ok(parseConfig(verifier(2_147_483_647)).ok);
+    assert.equal(parseConfig(verifier(2_147_483_648)).ok, false);
+  });
+
+  test("S-3 secretEnv entries must be variable names; the message gives the position only", () => {
+    const parsed = parseConfig(config({ secretEnv: ["GOOD_NAME", `fake-db-password-${FAKE_SECRET}`] }));
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.ok ? "" : parsed.message, "secretEnv[1] is not a valid environment variable name");
   });
 });
 
-describe("findKeyInFile (C-1)", () => {
-  test("finds key fields at any depth and names only the location", () => {
-    const cases: [unknown, string][] = [
-      [{ apiKey: FAKE_KEY }, "apiKey"],
-      [{ model: { provider: "anthropic", api_key: FAKE_KEY } }, "model.api_key"],
+describe("key detection in runCli (C-1, S-6)", () => {
+  const QUICK = ["run", "--workspace", "work", "--goal", "g", "--config", "c.json"];
+
+  test("finds key fields at any depth and names only known fields in the location", async () => {
+    // S-6 moved the location rule: only schema field names and plain key field names are written.
+    const cases: [Record<string, unknown>, string][] = [
+      [{ apiKey: "v" }, "apiKey"],
+      [{ model: { provider: "anthropic", api_key: "v" } }, "model.api_key"],
       [{ ANTHROPIC_API_KEY: "" }, "ANTHROPIC_API_KEY"],
-      [{ headers: { "x-api-key": "v" } }, "headers.x-api-key"],
+      [{ headers: { "x-api-key": "v" } }, "<field>.<field>"],
       [{ verifiers: [{ token: "v" }] }, "verifiers[0].token"],
       [{ password: "v" }, "password"],
-      [{ goal: `use ${KEY_SHAPED}` }, "goal"],
-      [{ [KEY_SHAPED]: 1 }, "<field>"],
     ];
-    for (const [value, where] of cases) {
-      const found = findKeyInFile(value, null);
-      assert.equal(found, where);
-      assert.equal(found?.includes(KEY_SHAPED), false);
+    for (const [extra, where] of cases) {
+      const outcome = await runCli(harness({ "c.json": config(extra) }, { argv: QUICK }).io);
+      assert.equal(code(outcome), "key_in_file", where);
+      assert.ok(outcome.output.kind === "error" && outcome.output.message.includes(` at ${where};`), where);
     }
   });
 
-  test("finds the current key value, but not a short one", () => {
-    assert.equal(findKeyInFile({ goal: `x ${FAKE_KEY} y` }, FAKE_KEY), "goal");
-    assert.equal(findKeyInFile({ goal: "abc" }, "abc"), null);
+  test("a key value is found in the raw text first, so no location is given", async () => {
+    for (const extra of [{ goal: `use ${KEY_SHAPED}` }, { [KEY_SHAPED]: 1 }, { model: `x ${FAKE_KEY} y` }]) {
+      const outcome = await runCli(harness({ "c.json": config(extra) }, { argv: QUICK, env: KEY_ENV }).io);
+      assert.equal(code(outcome), "key_in_file");
+      assert.ok(outcome.output.kind === "error" && outcome.output.message.startsWith("the config file contains a key value"));
+      assertNoKey(outcome);
+    }
   });
 
-  test("ordinary task and config fields are not keys", () => {
-    assert.equal(findKeyInFile(anthropicTask({ model: { provider: "anthropic", maxOutputTokens: 1 } }), FAKE_KEY), null);
-    assert.equal(
-      findKeyInFile(config({ apiBaseUrl: "https://x.test", maxRetries: 1, requestTimeoutMs: 1, secretEnv: ["A"] }), FAKE_KEY),
-      null,
+  test("a short current key is not searched for, and ordinary fields are not keys", async () => {
+    const short = await runCli(harness({ "c.json": config({ model: "abc", limits: LIMITS, maxOutputTokens: 1 }) }, { argv: QUICK, env: { ANTHROPIC_API_KEY: "abc" } }).io);
+    assert.equal(code(short), "done");
+    const ordinary = harness(
+      {
+        "task.json": anthropicTask({ model: { provider: "anthropic", model: "m", maxOutputTokens: 1 } }),
+        "c.json": config({ apiBaseUrl: "https://x.test", maxRetries: 1, requestTimeoutMs: 1, secretEnv: ["A"] }),
+      },
+      { argv: ["run", "--task", "task.json", "--config", "c.json"], env: { ...KEY_ENV, A: "fake-a-value" } },
     );
+    assert.equal(code(await runCli(ordinary.io)), "done");
+  });
+
+  test("S-6 nesting deeper than 64 levels is invalid input, not a crash", async () => {
+    const deep = `{"schemaVersion":1,"x":${"[".repeat(65)}${"]".repeat(65)}}`;
+    const asConfig = await runCli(harness({ "c.json": deep }, { argv: QUICK }).io);
+    assert.equal(code(asConfig), "invalid_config");
+    const asTask = await runCli(harness({ "task.json": deep }).io);
+    assert.equal(code(asTask), "invalid_task");
+    assert.ok(asTask.output.kind === "error" && asTask.output.message.includes("nested more than 64 levels"));
+  });
+
+  test("S-8 a key in --goal is rejected before any file is read", async () => {
+    const shaped = harness({}, { argv: ["run", "--workspace", "work", "--goal", `fix ${KEY_SHAPED}`] });
+    const outcome = await runCli(shaped.io);
+    assert.equal(code(outcome), "key_in_file");
+    assertNoKey(outcome);
+    const current = harness({}, { argv: ["run", "--workspace", "work", "--goal", `fix ${FAKE_KEY}`], env: KEY_ENV });
+    assert.equal(code(await runCli(current.io)), "key_in_file");
   });
 });
 
@@ -402,12 +461,12 @@ describe("runCli with settings", () => {
     assert.equal(outcome.exitCode, 2);
   });
 
-  test("C-6 limits: per field from the task, else from the config; missing everywhere is rejected", async () => {
-    const files = {
-      "task.json": anthropicTask({ limits: { maxModelTurns: 9 }, model: { provider: "anthropic", model: "m", maxOutputTokens: 5 } }),
-      "c.json": config({ limits: { maxModelTurns: 1, maxToolCalls: 2, maxTotalTokens: 3000, maxDurationMs: 4000 } }),
-    };
-    const merged = harness(files, { argv: ["run", "--task", "task.json", "--config", "c.json"], env: KEY_ENV });
+  test("C-6, S-7 limits: per field from the task, else from the config; the config is an upper bound", async () => {
+    const task = (limits: Record<string, unknown>) =>
+      anthropicTask({ limits, model: { provider: "anthropic", model: "m", maxOutputTokens: 5 } });
+    const configFile = config({ limits: { maxModelTurns: 10, maxToolCalls: 2, maxTotalTokens: 3000, maxDurationMs: 4000 } });
+    const argv = ["run", "--task", "task.json", "--config", "c.json"];
+    const merged = harness({ "task.json": task({ maxModelTurns: 9 }), "c.json": configFile }, { argv, env: KEY_ENV });
     assert.equal(code(await runCli(merged.io)), "done");
     assert.deepEqual(merged.assembled[0]?.task.limits, {
       maxModelTurns: 9,
@@ -418,10 +477,34 @@ describe("runCli with settings", () => {
       maxSameFailures: DEFAULT_MAX_SAME_FAILURES,
     });
 
-    const none = harness({ "task.json": files["task.json"] }, { env: KEY_ENV });
+    // S-7: the task may lower a config limit, never raise it or lift the token limit.
+    for (const raised of [{ maxModelTurns: 11 }, { maxTotalTokens: null }, { maxTotalTokens: 3001 }]) {
+      const over = harness({ "task.json": task(raised), "c.json": configFile }, { argv, env: KEY_ENV });
+      const outcome = await runCli(over.io);
+      assert.equal(code(outcome), "invalid_task", JSON.stringify(raised));
+      assert.equal(over.assembled.length, 0);
+    }
+
+    const none = harness({ "task.json": task({ maxModelTurns: 9 }) }, { env: KEY_ENV });
     const outcome = await runCli(none.io);
     assert.equal(code(outcome), "invalid_task");
     assert.equal(outcome.output.kind === "error" && outcome.output.message.includes("limits.maxToolCalls"), true);
+  });
+
+  test("S-7 an anthropic run needs a token limit and every limit has an absolute cap", async () => {
+    const argv = ["run", "--task", "task.json"];
+    const model = { provider: "anthropic", model: "m", maxOutputTokens: 5 };
+    const unlimited = harness({ "task.json": anthropicTask({ model, limits: { ...LIMITS, maxTotalTokens: null } }) }, { argv, env: KEY_ENV });
+    assert.equal(code(await runCli(unlimited.io)), "invalid_task");
+    const fromConfig = harness(
+      { "c.json": config({ model: "m", maxOutputTokens: 5, limits: { ...LIMITS, maxTotalTokens: null } }) },
+      { argv: ["run", "--workspace", "work", "--goal", "g", "--config", "c.json"], env: KEY_ENV },
+    );
+    assert.equal(code(await runCli(fromConfig.io)), "invalid_config");
+    const huge = harness({ "task.json": anthropicTask({ model, limits: { ...LIMITS, maxModelTurns: 1001 } }) }, { argv, env: KEY_ENV });
+    assert.equal(code(await runCli(huge.io)), "invalid_task");
+    const repairs = harness({ "task.json": anthropicTask({ model, limits: { ...LIMITS, maxRepairAttempts: 21 } }) }, { argv, env: KEY_ENV });
+    assert.equal(code(await runCli(repairs.io)), "invalid_task");
   });
 
   test("C-8 quick form builds the task from the config file", async () => {
@@ -514,7 +597,36 @@ describe("runCli with settings", () => {
     assert.deepEqual(h.assembled[0]?.secrets, ["fake-a-value", "fake-b-value", FAKE_KEY]);
 
     const missing = harness(files, { argv, env: { ...KEY_ENV, A_ENV: "fake-a-value" } });
-    assert.equal(code(await runCli(missing.io)), "secret_env_missing");
+    const outcome = await runCli(missing.io);
+    assert.equal(code(outcome), "secret_env_missing");
+    // S-3: the position in the file it came from, never the name.
+    assert.equal(outcome.output.kind === "error" ? outcome.output.message : "", "secretEnv[1] names an environment variable that is not set");
+
+    const ownMissing = harness(files, { argv, env: { ...KEY_ENV, B_ENV: "fake-b-value" } });
+    const own = await runCli(ownMissing.io);
+    assert.equal(own.output.kind === "error" ? own.output.message : "", "privacy.secretEnv[0] names an environment variable that is not set");
+  });
+
+  test("S-4 values the env file newly sets are secrets; settings, short values and set variables are not", async () => {
+    const files = { "task.json": anthropicTask({ model: { provider: "anthropic", model: "m", maxOutputTokens: 4 } }), "x.env": "" };
+    const h = harness(files, {
+      argv: ["run", "--task", "task.json", "--env-file", "x.env"],
+      env: { ALREADY_SET: "fake-already-set-value" },
+      envFile: {
+        ANTHROPIC_API_KEY: FAKE_KEY,
+        OTHER_SERVICE_PASSWORD: "fake-other-password-1",
+        SHORT: "1234567",
+        CODARYN_MODEL: "fake-model-from-env",
+        ALREADY_SET: "fake-ignored-by-loader",
+      },
+    });
+    assert.equal(code(await runCli(h.io)), "done");
+    const secrets = h.assembled[0]?.secrets ?? [];
+    assert.ok(secrets.includes("fake-other-password-1"));
+    assert.ok(secrets.includes(FAKE_KEY));
+    for (const value of ["1234567", "fake-model-from-env", "fake-already-set-value", "fake-ignored-by-loader"]) {
+      assert.equal(secrets.includes(value), false, value);
+    }
   });
 
   test("the scripted provider rejects anthropic-only model fields", async () => {

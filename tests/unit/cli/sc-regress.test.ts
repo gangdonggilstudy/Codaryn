@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -17,6 +17,8 @@ import { assembleRun } from "../../../src/cli/assemble.js";
 import { runGuarded } from "../../../src/cli/guard.js";
 import { runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment } from "../../../src/cli/run.js";
+import { locateInWorkspace } from "../../../src/cli/security/index.js";
+import { recordedText } from "./locate.js";
 
 /** Not a real key format. */
 const FAKE_KEY = "fake-api-key-not-real-0077";
@@ -42,6 +44,7 @@ function io(base: string, env: Record<string, string | undefined>, extra: Partia
     loadEnvFile: () => {
       throw new Error("no env file in this test");
     },
+    locateInWorkspace: (file, root) => locateInWorkspace(file, root),
     clock: { now: () => Date.now() },
     randomBytes: (size) => randomBytes(size),
     assemble: assembleRun,
@@ -84,12 +87,7 @@ async function scriptedKeyReader(): Promise<string> {
 }
 
 async function stateText(base: string): Promise<string> {
-  const runs = path.join(base, "work", ".codaryn", "runs");
-  let text = "";
-  for (const runId of await readdir(runs)) {
-    for (const name of await readdir(path.join(runs, runId))) text += await readFile(path.join(runs, runId, name), "utf8");
-  }
-  return text;
+  return recordedText(path.join(base, "work"));
 }
 
 describe("S-2 the key is a secret whatever the provider", () => {
@@ -163,8 +161,15 @@ describe("S-6 the top level turns any exception into one internal_error object",
     const deep = `${"[".repeat(20_000)}${"]".repeat(20_000)}`;
     await writeFile(path.join(base, "task.json"), `{"schemaVersion":1,"id":"deep","extra":${deep}}`, "utf8");
     const outcome = await runGuarded(() => runCli(io(base, {})));
-    // Until the depth limit of S-6 is connected, the key check overflows the stack: internal_error.
-    assertInternalError(outcome);
+    // With the S-6 depth limit connected, the key scan stops at 64 levels: invalid_task, exit 2.
+    assert.equal(outcome.exitCode, 2);
+    assert.deepEqual(outcome.output, {
+      schemaVersion: 1,
+      kind: "error",
+      code: "invalid_task",
+      exitCode: 2,
+      message: "the task file is nested more than 64 levels deep",
+    });
     assert.equal(await stat(path.join(base, "work", ".codaryn")).then(() => true, () => false), false);
   });
 });

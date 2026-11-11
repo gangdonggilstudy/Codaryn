@@ -25,9 +25,11 @@ import { runRevert } from "../../../src/cli/revert.js";
 import type { RevertEnvironment } from "../../../src/cli/revert.js";
 import { runCli } from "../../../src/cli/run.js";
 import { buildQuickTask, parseTask } from "../../../src/cli/task.js";
+import { lexicalLocate } from "./locate.js";
 
 const BASE = path.resolve("/tmp/codaryn-repair-cli-unit");
-const BUDGET = { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: null, maxDurationMs: 10_000 };
+/** A numeric token limit: the quick form is anthropic, which needs one (S-7). */
+const BUDGET = { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 10_000, maxDurationMs: 10_000 };
 const POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false };
 const temporaryDirs: string[] = [];
 
@@ -188,6 +190,7 @@ describe("R-5 policy.protectedPaths", () => {
       loadEnvFile: () => {
         throw new Error("no env file");
       },
+      locateInWorkspace: lexicalLocate,
       clock: { now: () => 0 },
       randomBytes: (size) => new Uint8Array(size),
       assemble,

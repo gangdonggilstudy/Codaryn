@@ -17,7 +17,7 @@ import {
   writeResult,
 } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
-import { createCommandRunner, createToolRunner } from "../tools/index.js";
+import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
@@ -138,7 +138,9 @@ export const assembleRun: Assemble = async (input) => {
   try {
     const privacy = createPrivacyGateway({ secrets });
     const policy = createPolicyGate({ config: task.policy, workspace });
-    const commandRunner = createCommandRunner();
+    // T-1: one runner for tools and verifiers. The value check keeps registered secrets out of
+    // the child environment; the workspace root lets .cmd/.bat run (and refuses those inside it).
+    const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
     // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
     const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
     const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });

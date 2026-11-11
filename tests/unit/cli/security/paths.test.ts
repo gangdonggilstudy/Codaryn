@@ -154,3 +154,27 @@ describe("S-1 locateInWorkspace (real paths)", () => {
     assert.equal(await locateInWorkspace(path.join(dangling, "codaryn.json"), root), "unknown");
   });
 });
+
+describe("T-14 an alternate data stream of the workspace root is inside (policy review L3)", () => {
+  test("root:stream is inside whether or not the stream exists", { skip: !IS_WINDOWS }, async () => {
+    const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codaryn-ads-")));
+    try {
+      const root = path.join(base, "ws");
+      fs.mkdirSync(root);
+      fs.mkdirSync(path.join(base, "ws-other"));
+      assert.equal(await locateInWorkspace(`${root}:cfg`, root), "inside");
+      try {
+        fs.writeFileSync(`${root}:cfg`, "{}");
+      } catch {
+        // Some volumes refuse streams on directories; the missing-stream case above still ran.
+      }
+      assert.equal(await locateInWorkspace(`${root}:cfg`, root), "inside");
+      assert.equal(await locateInWorkspace(`${root}:cfg:$DATA`, root), "inside");
+      // A sibling that only shares the name prefix stays outside.
+      assert.equal(await locateInWorkspace(path.join(base, "ws-other:cfg"), root), "outside");
+      assert.equal(await locateInWorkspace(`${path.join(base, "ws-other")}:cfg`, root), "outside");
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});

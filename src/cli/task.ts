@@ -8,6 +8,7 @@
 import path from "node:path";
 import {
   DENY_ALL_POLICY,
+  MAX_OUTPUT_TOKENS_LIMIT,
   QUICK_TASK_ID,
   QUICK_TASK_WORKFLOW,
   TASK_ID_PATTERN_SOURCE,
@@ -21,9 +22,11 @@ import type {
   ModelConfig,
   ModelProviderName,
   PolicyConfig,
+  ProtectedPathProblemReason,
   ResolvedTaskSpec,
   VerifierConfig,
 } from "../contracts/index.js";
+import { checkProtectedPaths } from "../policy/index.js";
 import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "./security/index.js";
 
 /** `invalid_config` when the config file caused the failure (S-7 bounds, quick form). */
@@ -80,6 +83,15 @@ export function optionalPositive(value: unknown, field: string): number | undefi
   return value === undefined ? undefined : positive(value, field);
 }
 
+/** T-14: an output token cap per request, at most MAX_OUTPUT_TOKENS_LIMIT. */
+export function optionalOutputTokens(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > MAX_OUTPUT_TOKENS_LIMIT) {
+    fail(`${field} must be a positive integer of at most ${MAX_OUTPUT_TOKENS_LIMIT}`);
+  }
+  return value;
+}
+
 export function optionalText(value: unknown, field: string): string | undefined {
   return value === undefined ? undefined : text(value, field);
 }
@@ -122,7 +134,7 @@ function parseModel(value: unknown, baseDir: string): ModelConfig {
   if (rec["provider"] === "anthropic") {
     if (rec["scriptPath"] !== undefined) fail("model.scriptPath is only for the scripted provider");
     const model = optionalText(rec["model"], "model.model");
-    const maxOutputTokens = optionalPositive(rec["maxOutputTokens"], "model.maxOutputTokens");
+    const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], "model.maxOutputTokens");
     return {
       provider: "anthropic",
       ...(model === undefined ? {} : { model }),
@@ -132,23 +144,28 @@ function parseModel(value: unknown, baseDir: string): ModelConfig {
   return fail('model.provider must be "scripted" or "anthropic"');
 }
 
+const PROTECTED_PATH_MESSAGES: { readonly [R in ProtectedPathProblemReason]: string } = {
+  not_a_list: "must be an array of relative paths",
+  not_a_string: "must be a string",
+  empty: "must be a non-empty path",
+  absolute: "must be relative to the workspace root",
+  parent_segment: "must not contain a '..' segment",
+  invalid_name: "is not a name that can address an ordinary file",
+};
+
 /**
- * `policy.protectedPaths`: relative path prefixes, `/` or `\` separated, without a `..` segment.
- * Kept as written; the policy gate compares them with resolved paths (R-5).
+ * `policy.protectedPaths` (T-13): the policy module's `checkProtectedPaths` decides, so the CLI
+ * rejects exactly what the gate would treat as unusable. The message names the position only.
+ * Entries are kept as written; the gate compares them with resolved paths (R-5).
  */
 function parseProtectedPaths(value: unknown): string[] {
   const field = "policy.protectedPaths";
-  const entries = strings(value, field);
-  for (const [index, entry] of entries.entries()) {
-    const at = `${field}[${index}]`;
-    if (entry.trim().length === 0) fail(`${at} must be a non-empty path`);
-    if (entry.includes("\0")) fail(`${at} must not contain a NUL character`);
-    if (path.posix.isAbsolute(entry) || path.win32.isAbsolute(entry) || /^[A-Za-z]:/.test(entry)) {
-      fail(`${at} must be relative to the workspace root`);
-    }
-    if (entry.split(/[\\/]/).includes("..")) fail(`${at} must not contain a '..' segment`);
+  const [problem] = checkProtectedPaths(value);
+  if (problem !== undefined) {
+    const at = problem.index === null ? field : `${field}[${problem.index}]`;
+    fail(`${at} ${PROTECTED_PATH_MESSAGES[problem.reason]}`);
   }
-  return entries;
+  return [...(value as readonly string[])];
 }
 
 export function parsePolicy(value: unknown): PolicyConfig {

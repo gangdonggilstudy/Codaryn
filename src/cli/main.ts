@@ -43,7 +43,7 @@ const outcome = await runGuarded(() =>
         cwd: process.cwd(),
         readFile: (file) => readFile(file, "utf8"),
         isDirectory,
-        // C-2: only when --env-file is given. Variables already set in the environment win.
+        // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
         loadEnvFile: (file) => process.loadEnvFile(file),
         // S-1: real paths, so links and 8.3 names cannot hide a file inside the workspace.
         locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),

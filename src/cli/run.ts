@@ -5,7 +5,7 @@
  *
  * Order (security checks S-1 to S-9 from `./security`):
  *  1. arguments; every path given on the command line must be a local path (S-5)
- *  2. `--env-file`: read, reject a BOM, load; values it newly set become secrets (S-4)
+ *  2. `--vars-file` (T-15): read, reject a BOM, load; values it newly set become secrets (S-4)
  *  3. current key; CODARYN_CONFIG must be a local path (S-5); `--goal` must not hold a key (S-8)
  *  4. config and task files: read, key check on the raw text, parse, key check on the parsed
  *     value with a depth limit (S-6). A key stops the run before anything else is checked
@@ -63,7 +63,7 @@ export interface CliEnvironment {
   readonly readFile: (path: string) => Promise<string>;
   readonly isDirectory: (path: string) => Promise<boolean>;
   /**
-   * Loads an env file given by `--env-file` into `env` (process.loadEnvFile in the real CLI).
+   * Loads the variables file given by `--vars-file` into `env` (process.loadEnvFile in the real CLI).
    * Variables already set keep their values. Throws when the file cannot be read.
    */
   readonly loadEnvFile: (path: string) => void;
@@ -140,7 +140,7 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     [args.input.kind === "task" ? args.input.taskPath : null, "invalid_task", "--task"],
     [args.input.kind === "quick" ? args.input.workspace : null, "invalid_arguments", "--workspace"],
     [args.configPath, "invalid_config", "--config"],
-    [args.envFile, "invalid_config", "--env-file"],
+    [args.varsFile, "invalid_config", "--vars-file"],
     [args.cancelFile, "invalid_arguments", "--cancel-file"],
   ];
   for (const [given, code, option] of argumentPaths) {
@@ -152,23 +152,23 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   // 2. The env file. S-4: values it newly sets are registered as secrets later.
   let envPath: string | null = null;
   let envSecrets: readonly string[] = [];
-  if (args.envFile !== null) {
-    envPath = path.resolve(io.cwd, args.envFile);
+  if (args.varsFile !== null) {
+    envPath = path.resolve(io.cwd, args.varsFile);
     let envText: string;
     try {
       envText = await io.readFile(envPath);
     } catch {
-      return error("invalid_config", "the file given by --env-file cannot be read");
+      return error("invalid_config", "the file given by --vars-file cannot be read");
     }
     // process.loadEnvFile would read a BOM as part of the first name and silently skip that variable.
     if (envText.startsWith("﻿")) {
-      return error("invalid_config", "the file given by --env-file starts with a byte order mark; save it as UTF-8 without BOM");
+      return error("invalid_config", "the file given by --vars-file starts with a byte order mark; save it as UTF-8 without BOM");
     }
     const before = { ...io.env };
     try {
       io.loadEnvFile(envPath);
     } catch {
-      return error("invalid_config", "the file given by --env-file cannot be read");
+      return error("invalid_config", "the file given by --vars-file cannot be read");
     }
     envSecrets = selectEnvFileSecrets(before, { ...io.env });
   }
@@ -252,10 +252,12 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     return error("workspace_not_found", "workspaceRoot is not an existing directory");
   }
   const located: [string | null, CliErrorCode, string][] = [
-    [envPath, "invalid_config", "the file given by --env-file"],
+    [envPath, "invalid_config", "the file given by --vars-file"],
     [configFile?.path ?? null, "invalid_config", "the config file"],
     [taskFile?.path ?? null, "invalid_task", "the task file"],
     [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file"],
+    // T-12: a cancel file inside the workspace could be created by the run itself.
+    [args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile), "invalid_arguments", "the file given by --cancel-file"],
   ];
   for (const [file, code, label] of located) {
     if (file === null) continue;

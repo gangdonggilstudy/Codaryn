@@ -10,7 +10,7 @@ import { checkTimerMs, normalizeApiBaseUrlStrict } from "./security/index.js";
 import {
   InputError,
   fail,
-  optionalPositive,
+  optionalOutputTokens,
   optionalText,
   parsePartialLimits,
   parsePolicy,
@@ -62,7 +62,7 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
     ]);
     if (rec["schemaVersion"] !== CONFIG_SCHEMA_VERSION) fail("config schemaVersion must be 1");
     const model = optionalText(rec["model"], "model");
-    const maxOutputTokens = optionalPositive(rec["maxOutputTokens"], "maxOutputTokens");
+    const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], "maxOutputTokens");
     const apiBaseUrl = parseApiBaseUrl(rec["apiBaseUrl"]);
     const requestTimeoutMs = parseRequestTimeout(rec["requestTimeoutMs"]);
     const maxRetries = parseMaxRetries(rec["maxRetries"]);

@@ -1,8 +1,8 @@
 # Codaryn
 
-Codaryn은 로컬에서 실행하는 범용 작업 에이전트 CLI다. 코딩과 문서 작업을 처리하며, 작업 공간 하나 안에서 파일을 읽고 고치고 허용한 명령을 실행한다. 모든 작업은 정해진 권한 정책 안에서 이루어진다. 등록한 비밀은 모델에 보내기 전에 가리고, 성공 여부는 검증기가 판정한다. 모델은 Anthropic API를 쓴다.
+Codaryn은 로컬에서 실행하는 범용 작업 에이전트 CLI다. 코딩과 문서 작업을 처리하며, 작업 공간 하나 안에서 파일을 읽고 고치고 허용한 명령을 실행한다. 모든 작업은 정해진 권한 정책 안에서 이루어진다. 등록한 비밀은 모델에 보내기 전에 가리고, 성공 여부는 검증기가 판정한다. 검증에 실패하면 근거를 모델에 돌려보내 다시 고치게 할 수 있고, 실행이 바꾼 파일은 `revert`로 되돌릴 수 있다. 모델은 Anthropic API를 쓴다.
 
-**현재 상태:** 오프라인 검증(유닛·프로세스 통합)과 모의 API 검증을 통과했다. 실제 API로는 아직 검증하지 않았다.
+**현재 상태:** 단계 2(재수정 반복, 보호 경로, 스냅샷과 되돌리기)까지 구현했다. 오프라인 검증(유닛, 프로세스 통합)과 로컬 가짜 서버를 쓴 모의 API 검증을 통과했다. 실제 Anthropic API로는 아직 검증하지 않았으므로 처음에는 [실제 호출 점검](docs/usage.md#12-실제-호출-점검)부터 한다. OS 수준 격리는 없다([알려진 한계](docs/usage.md#14-알려진-한계)).
 
 ## 빠른 시작 (PowerShell)
 
@@ -12,12 +12,16 @@ New-Item -ItemType Directory -Force D:\codaryn-settings | Out-Null; Copy-Item .e
 # 위 .env를 편집기로 열어 키와 CODARYN_MODEL을 채우고 BOM 없는 UTF-8로 저장한다. 설정은 작업 공간 밖에 둔다
 Copy-Item -Recurse examples D:\codaryn-examples   # 모델이 파일을 고치므로 예시는 사본에서 실행한다
 node dist/src/cli/main.js run --task D:\codaryn-examples\doc-task.json `
-  --config D:\codaryn-examples\config.example.json --env-file D:\codaryn-settings\.env
+  --config D:\codaryn-examples\config.example.json --vars-file D:\codaryn-settings\.env
+# 결과의 runId로 되돌린다
+node dist/src/cli/main.js revert --workspace D:\codaryn-examples\workspaces\notes --run <runId>
 ```
+
+변수 파일은 `--vars-file`로 준다. `--env-file`은 Node가 먼저 가로채므로 쓰지 않는다.
 
 ## 문서
 
-- [사용 안내](docs/usage.md): 설정, 실행, 결과, 비밀, 정책, 점검표, 한계, 문제 해결
+- [사용 안내](docs/usage.md): 설정, 실행, 재수정 반복, 결과, 되돌리기, 비밀, 정책, 점검표, 한계, 문제 해결
 - [CLI·공통 계약](docs/cli-contract.md)
 - [문서 안내](docs/README.md)
 - [공통 개발 지침](AGENTS.md), [Claude 작업 지침](CLAUDE.md)

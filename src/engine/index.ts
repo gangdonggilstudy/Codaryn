@@ -45,17 +45,41 @@ import { validateToolArgs } from "./validate-args.js";
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { validateToolArgs } from "./validate-args.js";
 
-/** Fixed instructions for the model. It contains no task data. */
+/**
+ * Fixed instructions for the model. It contains no task data.
+ * Fixed model-bound text must never spell the privacy token marker: masking would treat it as
+ * a protected fragment and turn it into a token. Placeholders are described in words instead.
+ */
 export const SYSTEM_PROMPT = [
   "You are Codaryn, a local task agent working inside one workspace directory.",
   "Use the tools to read, search, change files and run allowed commands.",
   "Before changing a file, read it and pass the returned hash as expectedHash. Use null only for a new file.",
-  "Text like [[CODARYN_SECRET:...]] is a protected placeholder. Keep it exactly where it is. Never copy, move, alter or remove it.",
+  "Some text is replaced by protected placeholders: an uppercase label, a colon and 16 hex digits inside double square brackets.",
+  "Keep each placeholder exactly where it is. Never copy, move, alter or remove it. A line that holds a placeholder cannot be changed.",
   "A denied tool call is final for that request. Do not try to work around it.",
   "When the work is finished, reply without tool calls. Verifiers decide whether the task succeeded.",
 ].join("\n");
 
 const NO_VERIFIER_NOTICE = "no automatic verification: no verifier is configured for this task";
+const UNKNOWN_TOOL_MESSAGE = "unknown tool";
+const INVALID_ARGS_MESSAGE = "invalid arguments for this tool";
+const WRITE_NOT_APPLIED_MESSAGE = "the write was not applied";
+const VERIFIER_NOT_RUN_EVIDENCE = "the verifier could not be run";
+const VERIFIER_NOT_RUN_CHECKED = "nothing: the verifier did not complete";
+
+/** Every fixed text the engine sends to a model or records. Tests mask these with the real gateway. */
+export const FIXED_MODEL_TEXTS: readonly string[] = [
+  SYSTEM_PROMPT,
+  NO_VERIFIER_NOTICE,
+  UNKNOWN_TOOL_MESSAGE,
+  INVALID_ARGS_MESSAGE,
+  WRITE_NOT_APPLIED_MESSAGE,
+  VERIFIER_NOT_RUN_EVIDENCE,
+  VERIFIER_NOT_RUN_CHECKED,
+  "denied by policy: ",
+  "token not usable in field: ",
+  "malformed model response: stop=",
+];
 const MAX_TIMER_MS = 2_147_483_647;
 
 interface End {
@@ -205,7 +229,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
           ? "hash" in seen.payload && seen.payload.hash === expected
           : seen.code === "not_found" && expected === null;
         if (!untouched) return UNKNOWN_OUTCOME;
-        return { ok: false, code: "io_error", message: asRawText("the write was not applied") };
+        return { ok: false, code: "io_error", message: asRawText(WRITE_NOT_APPLIED_MESSAGE) };
       } catch {
         return UNKNOWN_OUTCOME;
       }
@@ -224,7 +248,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         permission: null,
         code: "unknown_tool",
       });
-      return errorResult(call, "unknown_tool", "unknown tool");
+      return errorResult(call, "unknown_tool", UNKNOWN_TOOL_MESSAGE);
     }
     const name = call.name;
     const descriptor = BUILTIN_TOOLS[name];
@@ -238,7 +262,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         permission: null,
         code: "invalid_args",
       });
-      return errorResult(call, "invalid_args", "invalid arguments for this tool");
+      return errorResult(call, "invalid_args", INVALID_ARGS_MESSAGE);
     };
     if (validateToolArgs(name, call.args) === null) return invalidArgs();
 
@@ -447,8 +471,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
           id: config.id,
           kind: config.kind,
           outcome: "inconclusive" as const,
-          evidence: asRawText("the verifier could not be run"),
-          checked: ["nothing: the verifier did not complete"],
+          evidence: asRawText(VERIFIER_NOT_RUN_EVIDENCE),
+          checked: [VERIFIER_NOT_RUN_CHECKED],
           limits: [],
         };
       }

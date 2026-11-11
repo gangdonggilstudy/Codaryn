@@ -19,7 +19,7 @@ import type {
   RevertOutput,
   VerifierResult,
 } from "../../src/contracts/index.js";
-import { runDirOf, startCli } from "./cli.js";
+import { describeRun, runDirOf, startCli } from "./cli.js";
 import type { CliRun, StartOptions } from "./cli.js";
 
 export type RepairStartedRecord = Extract<JournalRecord, { type: "repair_started" }>;
@@ -129,9 +129,9 @@ export function workspaceBytes(workspace: string): Map<string, Buffer> {
 
 /** Like parseCliOutput, for any command: one JSON line whose exitCode equals the process exit code. */
 export function parseCommandOutput(run: CliRun): CommandOutput {
-  assert.equal(run.timedOut, false, `CLI did not finish in time. stderr: ${run.stderr.slice(0, 2000)}`);
+  assert.equal(run.timedOut, false, `CLI did not finish in time. ${describeRun(run)}`);
   const lines = run.stdout.split(/\r?\n/).filter((line) => line.trim() !== "");
-  assert.equal(lines.length, 1, `stdout must be one JSON line, got: ${JSON.stringify(run.stdout.slice(0, 2000))}`);
+  assert.equal(lines.length, 1, `stdout must be one JSON line, got ${lines.length}; ${describeRun(run)}`);
   const parsed = JSON.parse(lines[0] ?? "") as CommandOutput;
   assert.equal(parsed.schemaVersion, 1);
   assert.equal(parsed.exitCode, run.exitCode, "exitCode in stdout must equal the process exit code");

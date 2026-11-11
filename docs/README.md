@@ -17,6 +17,7 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [전문 페르소나](personas.md) | 설계, 구현, 보안, 검증 역할과 제출 기준 |
 | [개발 절차](development-workflow.md) | worktree 분리, 작업 배분, 리뷰, 통합과 보고 |
 | [작업 인수인계](session-handoff.md) | 완료 상태, 작업 공간, 다음 단계의 확인 사항 |
+| [단계 1a 기능 작업 지시서](work-orders/phase-1a.md) | 구현 승인 대기 상태의 작업 분담, 파일 소유 범위와 수용 기준 |
 
 ## 문서 적용 원칙
 

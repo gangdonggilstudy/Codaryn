@@ -1,6 +1,6 @@
 # 개발 진행 현황
 
-단계 1a(오프라인 최소 CLI)는 2026-11-12에 임시 PM(Claude, w1:p3, 위임 pm-20261112-01)이 채택했다. 이어서 사용자의 직접 지시로 설정 처리와 Anthropic 제공자를 구현해 모의 API 검증까지 마쳤다. 실제 Anthropic API는 한 번도 호출하지 않았으므로 1b와 단계 1 전체는 완료가 아니다. Codex는 회수 권한을 유지한다.
+단계 1a(오프라인 최소 CLI)는 2026-11-12에 임시 PM(Claude, w1:p3, 위임 pm-20261112-01)이 채택했다. 이어서 사용자의 직접 지시로 설정 처리와 Anthropic 제공자(1b 구현분), 단계 2 재수정 반복, 투입 준비 작업을 구현해 오프라인 검증과 모의 API 검증까지 마쳤다. 실제 Anthropic API는 한 번도 호출하지 않았으므로 1b의 실 API 검증과 단계 2의 실 API 검증은 완료가 아니다. Codex는 회수 권한을 유지한다.
 
 PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [단계 1a 작업 배분](work-orders/phase-1a-assignments.md)에 있다.
 
@@ -18,6 +18,11 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | E1 설정 계약·CLI·조립 | 수석 아키텍트, CLI 개발자 | w1:p1 | claude/core-engine | 완료. `86f3d62`, `7a2d02d`, `7359cef` 병합 |
 | E2 Anthropic 제공자 | CLI 개발자, 보안·개인정보 검토자 | w1:p8 | claude/anthropic-provider | 완료. `a5f62e7` 병합. 실제 API 미실행 |
 | E3 가짜 서버 통합 검증 | 검증 엔지니어 | w1:p4 | claude/cli-verification | 완료. `e8dbdb9` 병합, 모의 API 54건 통과. 실제 호출 점검 스크립트는 미실행 |
+| F 단계 2 재수정 반복(계약, 엔진, 정책, 스냅샷·되돌리기, 도구 연동) | CLI 개발자, 보안·개인정보 검토자 | p1, p5~p8 | 여러 브랜치 | 완료. main `4074d5c` |
+| G1 Windows `.cmd`/`.bat` 실행 | CLI 개발자 | w1:p6 | claude/core-tools | 완료. `2506bff`, `a51002c` 병합 |
+| G2 사용 문서와 예시 | 문서·데이터 작업 전문가 | w1:p5 | claude/security-core | 1차 병합(`6df69be`, `9d1eea1`). 단계 2 반영 갱신 진행 |
+| S, T 교차 검토 결함 수정(S-1~S-12, T-1~T-15) | 각 모듈 담당 | p1, p5~p8 | 여러 브랜치 | 완료. main `4074d5c` |
+| F5 단계 2 통합 검증 | 검증 엔지니어 | w1:p4 | claude/cli-verification | 완료. 통합 273건 통과 |
 
 각 작업은 별도 worktree를 쓴다. 소유 파일은 배분 문서 1절, 수용 기준은 [작업 지시서](work-orders/phase-1a.md) 4절을 따른다.
 
@@ -46,6 +51,8 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | G4 | main `db1c55c` | `npm run typecheck`, `npm run test:unit`, `npm run test:integration`, `node scripts/check-secrets.mjs --tracked` | 타입 검사 통과, 유닛 189건 통과, 통합 76건 통과(실패 0, 취소 0, 건너뜀 0), 비밀 발견 없음 |
 | 설정·제공자 | main `e6532ed` | `npm run typecheck`, `npm run test:unit`, `npm run test:integration` | 타입 검사 통과, 유닛 234건 통과, 통합 76건 통과 |
 | 모의 API | main `dd930e2` | 같은 세 명령, `node scripts/check-secrets.mjs --tracked` | 타입 검사 통과, 유닛 234건 통과, 통합 130건 통과(로컬 가짜 서버 사례 54건 포함, 실패 0, 건너뜀 0), 비밀 발견 없음 |
+| 단계 2 연결 직후 | `claude/core-engine` `3f3756d` 기준 p4 실행 | 타입 검사, 유닛, 통합 | 유닛 402건 중 401 통과·1 건너뜀. 통합 246건 중 238 통과·8 실패(결함 3건: 명령 실행기 옵션 미전달, 검증기 출력의 원문 절단, Node의 `--env-file` 가로채기) |
+| 수정 묶음 T 뒤 | 합친 트리(PM 실행) → main `4074d5c` | `npx tsc --noEmit`, `npm run test:unit`, `npm run test:integration`, `node scripts/check-secrets.mjs --tracked` | 타입 검사 통과, 유닛 472건 중 471 통과·실패 0·건너뜀 1, 통합 273건 통과·실패 0·건너뜀 0, 비밀 발견 없음 |
 | 실제 API | — | `node --test dist/tests/live/anthropic-live.js` | **미실행.** 사용자가 키와 모델을 설정하고 직접 실행한다 |
 
 - 통합 테스트 통과는 검사한 사례의 증거다. 교차 검토에서 그 사례에 없던 결함이 재현되어 회귀 테스트와 함께 고쳤다. 같은 종류의 미발견 결함이 더 없다는 뜻은 아니다.
@@ -80,10 +87,15 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 - 2026-11-12 교차 검토: 구현자와 다른 담당자가 각 모듈을 읽기 전용으로 검토했다(`docs/reviews/`). 재현된 결함은 회귀 테스트를 먼저 추가한 뒤 고쳤다. 원위치 규칙 강화, 가림본 검색, 필드별 가림 등의 결정은 pm-status.md의 PM 결정에 있다.
 - 2026-11-12 G4: 1a 오프라인 검증을 채택했다. 1b는 위임 범위 밖이라 열지 않았다.
 - 2026-11-12 설정과 제공자: 사용자의 직접 지시("설정 가능하게 해")를 모델·키·한도의 설정화와 Anthropic 제공자 구현으로 해석했다. 결정 C-1~C-8은 `work-orders/phase-1b-config.md`에 있다. 전송은 SDK 대신 내장 `fetch`를 쓴다.
+- 2026-11-12 단계 2: 사용자의 직접 지시로 진행했다. 결정 R-1~R-8, S-1~S-12, T-1~T-15와 근거는 `work-orders/phase-2-repair-loop.md`에 있다. 구현자가 아닌 담당자의 교차 검토를 세 차례(1a, 설정·제공자, 단계 2) 했고 원문은 `docs/reviews/`에 있다.
+- 2026-11-12: p1 세션이 주간 사용 한도로 멈춰 PM이 p1의 계약 변경을 검증 후 커밋(`f45959a`)하고 CLI 작업을 p7에, 엔진 작업을 p5에 재배정했다.
 - 계약의 미정 항목에 대한 PM 결정 P-1~P-7은 배분 문서 3절에 있다.
 
 ## 남은 문제
 
+- 재수정을 켜면 검증기 명령이 모델이 쓴 코드를 실행하고 그 출력이 모델에 돌아간다. 명령 허용 목록이 비어 있어도 같다. OS 격리가 없는 동안의 구조적 한계다.
+- 스냅샷(변경 전 원문)은 파일 도구로는 닿을 수 없지만 실행된 명령은 읽을 수 있다. 분리된 자손 프로세스는 실행이 끝난 뒤에도 남을 수 있다.
+- p1 세션의 주간 사용 한도(11월 15일 초기화). 선택은 사용자가 정한다.
 - 실제 Anthropic API 미검증. 503 분류, `retry-after` 형식, 빈 `tool_result`, thinking 블록 없는 도구 반복은 실제 호출로만 확정된다.
 - architecture.md와 decisions.md는 "공식 SDK" 사용으로 적혀 있어 `fetch` 구현과 다르다.
 - Windows에서 `.cmd`/`.bat`(예: npm)은 셸 없이 실행되지 않는다. 명령 도구와 명령 검증기는 `node` 같은 실행 파일만 쓸 수 있다.

@@ -23,16 +23,18 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-7 | 설정과 제공자 | 사용자 직접 지시("설정 가능하게 해")에 따라 설정 계약 `86f3d62`, CLI 설정 처리 `7a2d02d`, Anthropic 제공자 `a5f62e7`, 조립 `7359cef`, 가짜 서버 통합 테스트와 실제 호출 점검 스크립트 `e8dbdb9`를 병합. main `dd930e2`에서 유닛 234건, 통합 130건 통과. 실제 API 미실행 | `dd930e2`와 이 문서를 담은 커밋 | 완료 |
 | CP-8 | 단계 2 착수 | 사용자 직접 지시("단계 2 재수정 반복도 이어서 진행해", "세션들 최대한 활용해서 진행해줘 투입 가능하게")에 따라 작업 지시서 `docs/work-orders/phase-2-repair-loop.md` 작성. F1(p1), F5 준비(p4), G1(p6), G2(p5), H1(p7), H2(p8) 배정. 작업자 브랜치를 main `0164b10`에 맞춤 | `0164b10`과 이 문서를 담은 커밋 | 완료 |
 | CP-9 | 단계 2 구현과 검토 | 재수정 반복 엔진, 보호 경로, 스냅샷·되돌리기, `.cmd` 실행, 제공자 수정, CLI 보안 모듈, 사용 문서를 main에 병합(`5989d79`까지). 교차 검토 H1·H2·F6와 결정 S-1~S-12, T-1~T-15를 기록(`1037593`). p1의 연결 커밋 `3f3756d`는 통합 8건 실패가 남아 main 미병합. p1이 주간 사용 한도로 멈춰 PM이 p1의 계약 변경을 검증 후 `f45959a`로 커밋하고 나머지를 p5~p8에 재배정 | `1037593`과 이 문서를 담은 커밋 | 완료 |
+| CP-10 | 단계 2 병합 | 수정 묶음 T(p5 `b807001`, p6 `a51002c`, p7 `c3d9865`, p8 `2f014a4` `c748821` `1677b1c`, 계약 `f45959a`)와 p4의 통합 테스트 `52a634d` `2410686`를 합친 뒤 PM이 병합 전에 전체를 실행해 통과를 확인하고 main `4074d5c`로 병합 | `4074d5c`와 이 문서를 담은 커밋 | 완료 |
 
-## 현재 상태 (CP-9)
+## 현재 상태 (CP-10)
 
-- 사용자 직접 지시로 단계 2와 투입 준비를 진행 중이다. `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.
-- main(`1037593`)은 통과 상태다: 유닛 388건 중 387 통과·1 건너뜀, 통합 130건 통과(`5989d79`에서 실행. 그 뒤 main에는 스크립트와 문서 커밋만 있다). 실제 API는 호출한 적이 없다.
-- main에 없는 것: 단계 2 조립과 보안 검사 S-1~S-9의 실행 경로 연결. 로컬 브랜치 `claude/core-engine`(`3f3756d`, 계약 추가 `f45959a`)에 있다. 이 브랜치 기준으로 p4가 돌린 통합은 246건 중 238 통과·8 실패이며, 실패는 제품 결함 3건(T-1, T-6, T-15)에서 나온다.
-- **차단 요인: w1:p1이 주간 사용 한도에 걸려 멈췄다(11월 15일 오전 3시 초기화).** 화면에 선택 창이 떠 있다: 1) 멈추고 초기화를 기다림 2) 여기서 기다렸다가 자동으로 계속 3) 사용 크레딧으로 전환. 과금이 걸린 선택이라 PM은 답하지 않았다. 창 내용을 읽으려고 PM이 Down 키를 네 번 눌러 선택 표시가 2번으로 옮겨져 있다(확정하지 않음). 다른 세션도 같은 한도에 걸릴 수 있다.
-- p1의 worktree `claude-design`(브랜치 `claude/core-engine`)은 `f45959a`에서 깨끗한 상태로 멈춰 있다. p1이 쓰고 커밋하지 못한 계약 변경은 PM이 타입 검사와 유닛(405건 중 404 통과·1 건너뜀)을 확인한 뒤 그대로 커밋했다. p1이 다시 움직이면 다른 세션과 겹치지 않게 먼저 지시를 갱신해야 한다.
-- 재배정(수정 묶음 T): p5 엔진(`src/engine`), p6 도구(`src/tools`), p7 정책·보안 모듈·CLI(`src/policy`, `src/cli`, `docs/cli-contract.md`), p8 검증기·저장소(`src/verify`, `src/store`). 모두 `claude/core-engine`을 자기 브랜치에 병합해 작업한다. p4는 통합 재실행 대기다.
-- 공용 Git 훅(`.git/hooks/pre-commit`)이 모든 worktree에서 비밀을 검사한다. 검토 보고서의 가짜 키 대입 문장도 막으므로 문서에는 값 없이 적는다.
+- 사용자 직접 지시로 단계 2와 투입 준비를 진행했다. `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.
+- main `4074d5c`에 단계 2 전체가 있다: 재수정 반복, 보호 경로, 스냅샷과 `codaryn revert`, Windows `.cmd`/`.bat` 실행, 설정과 Anthropic 제공자, CLI 보안 검사 S-1~S-9, 수정 묶음 T-1~T-15.
+- 실행한 검증(병합 직전의 합친 트리, PM 실행): `npx tsc --noEmit` 통과, `npm run test:unit` 472건 중 471 통과·실패 0·건너뜀 1(대소문자를 구분하는 파일 시스템 전용 사례), `npm run test:integration` 273건 통과·실패 0·건너뜀 0, `node scripts/check-secrets.mjs --tracked` 발견 없음.
+- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** 통합의 anthropic 사례는 로컬 가짜 서버를 쓰는 모의 API 검증이다. Windows 외 OS, OS 수준 격리와 네트워크 차단, 강제 종료 시 파일 원자성도 검증하지 않았다.
+- 교차 검토 결과(H1, H2, F6 다섯 건)와 결정 S-1~S-12, T-1~T-15는 `docs/reviews/`와 `docs/work-orders/phase-2-repair-loop.md`에 있다. 고치지 않고 한계로 둔 것은 그 문서와 `docs/cli-contract.md` 10절에 적었다.
+- **차단 요인: w1:p1이 주간 사용 한도에 걸려 멈춰 있다(11월 15일 오전 3시 초기화).** 화면의 선택 창(멈춤 / 기다렸다 자동 계속 / 사용 크레딧 전환)에 PM은 답하지 않았다. 선택 표시는 PM의 Down 키 입력으로 2번에 가 있다. 다른 세션은 아직 한도에 걸리지 않았다.
+- p1의 worktree `claude-design`(브랜치 `claude/core-engine`, `f45959a`)은 깨끗하며 그 내용은 모두 main에 들어갔다. p1이 다시 움직이면 먼저 지시를 갱신해야 한다(2단계 CLI 작업은 p7이 이미 끝냈다).
+- 진행 중: p5가 사용 문서(`README.md`, `docs/usage.md`, `examples/`)를 현재 동작에 맞게 갱신한다. 나머지 세션(p4, p6, p7, p8)은 대기다.
 
 ### PM 결정 (CP-4, CP-5)
 
@@ -49,16 +51,16 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 1a 자리표시자 `src/model/anthropic.ts`와 그 유닛 2건은 실제 제공자로 대체되어 삭제했다. 같은 동작은 `tests/unit/cli/anthropic-wire.test.ts`와 통합 m02가 확인한다.
 - 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
 
-## 세션 (CP-9)
+## 세션 (CP-10)
 
 | pane | tab | 현재 작업 | worktree | 브랜치 | 상태 |
 | --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | (역할 1, CLI) | `claude-design` | `claude/core-engine` | **주간 사용 한도로 정지. 선택 창 대기** |
-| w1:p4 | main | 통합 검증 | `claude-operations` | `claude/cli-verification` | 수정 병합 뒤 재실행 대기 |
-| w1:p5 | optional | 수정 T 엔진 | `claude-quality` | `claude/security-core` | 진행 |
-| w1:p6 | optional | 수정 T 도구 | `claude-tools` | `claude/core-tools` | 진행 |
-| w1:p7 | optional | 수정 T 정책·보안·CLI | `claude-workspace` | `claude/workspace-policy` | 진행 |
-| w1:p8 | optional | 수정 T 검증기·저장소 | `claude-store` | `claude/revert-store` | 진행 |
+| w1:p1 | main | (역할 1) | `claude-design` | `claude/core-engine` | **주간 사용 한도로 정지. 선택 창 대기** |
+| w1:p4 | main | 통합 검증 | `claude-operations` | `claude/cli-verification` | 병합됨. 대기 |
+| w1:p5 | optional | 사용 문서 갱신 | `claude-quality` | `claude/security-core` | 진행 |
+| w1:p6 | optional | 도구 | `claude-tools` | `claude/core-tools` | 병합됨. 대기 |
+| w1:p7 | optional | 정책·보안·CLI | `claude-workspace` | `claude/workspace-policy` | 병합됨. 대기 |
+| w1:p8 | optional | 검증기·저장소 | `claude-store` | `claude/revert-store` | 병합됨. 대기 |
 | w1:p3 | main | PM·통합 | main | `main` | 진행 |
 | w1:p2 | main | Codex | — | — | 대기(회수 권한 보유) |
 
@@ -66,10 +68,10 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 
 ## 다음 행동
 
-1. p5~p8의 수정 커밋을 `scripts/review-branch.mjs`(기준이 main이므로 `claude/core-engine`의 커밋도 함께 보인다. 각 브랜치 자체 커밋의 파일을 확인한다)와 유닛으로 검토한다.
-2. `claude/core-engine`과 네 수정 브랜치를 p4 브랜치에 모아 통합을 다시 돌린다. 통과하면 main에 병합하고 전체를 다시 실행한다.
-3. 사용 문서(`docs/usage.md`, `examples/`)를 `--vars-file`, 재수정 반복, `revert`, 새 한계에 맞게 갱신한다.
-4. 투입 조건 대조: 실제 호출 점검(사용자 실행), 단계 2 통합 통과, `.cmd` 실행이 실제 CLI에서 동작, 검토 결함 수정.
+1. p5의 사용 문서 갱신을 검토·병합한다.
+2. 투입 조건 중 남은 것은 사용자가 직접 실행하는 실제 호출 점검(`tests/live/README.md`)이다. 결과로 "실제 API 미검증" 항목(503 분류, `retry-after` 형식, 빈 `tool_result`, thinking 블록 없는 도구 반복)을 확정한다.
+3. 실제 호출이 통과하면 중요하지 않은 저장소에서 `node --test` 또는 `npm test` 검증기와 보호 경로를 두고 시험 투입한다.
+4. Codex 판단이 필요한 것: architecture.md와 decisions.md의 "공식 SDK" 서술(구현은 내장 `fetch`), 작업 브랜치와 worktree 정리, 단계 3(자기 소스 후보 개발) 착수 여부.
 5. p1의 사용 한도 선택은 사용자가 정한다.
 
 ## 회수 시 인계 방법

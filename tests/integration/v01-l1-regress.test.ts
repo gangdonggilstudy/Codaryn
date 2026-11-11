@@ -3,8 +3,11 @@
  * - V-1: the failure signature normalizes only numbers that change from run to run (times,
  *   durations, dates, addresses). A failure that moves (a different actual value) is progress,
  *   not the same failure.
- * - V-2: a command whose output the runner stopped reading (exit grace, time limit, cancel) is
- *   `truncated`, so the slack rule drops a secret cut at that point; complete lines before stay.
+ * - V-2 (revised 2026-11-12, W-6): output the runner settled before reading it to the end (exit
+ *   grace, exit wait, time limit, cancel) is not `truncated`; the runner drops each stream's last
+ *   incomplete line instead (after the last line feed, at most 4096 bytes). A secret cut at that
+ *   point can only be in that line, so none of it remains, and every complete line stays.
+ *   (The first V-2 marked such output `truncated`, which dropped short normal output whole.)
  * - V-3: `--env-file-if-exists` is refused like `--env-file` (Node reads both names itself).
  */
 
@@ -78,7 +81,7 @@ test("V-1 실패 지점이 옮겨 가면(실제 값이 바뀜) 같은 실패로 
   assert.equal(PRICE_FIXED, toFixed.after, "test assumption: the last edit is the real fix");
 });
 
-test("V-2 실행기가 끝까지 읽지 못한 출력: 끊긴 비밀의 앞부분은 없고 완전한 줄은 남는다", { timeout: 120_000 }, async (t) => {
+test("V-2 실행기가 끝까지 읽지 못한 출력: truncated 아님, 끊긴 비밀의 앞부분(마지막 불완전한 줄)만 버리고 완전한 줄은 남는다", { timeout: 120_000 }, async (t) => {
   const sb = createSandbox(t);
   writeRepairProject(sb, { secret: FRAGMENT_SECRET });
   const taskPath = writeTask(
@@ -100,9 +103,13 @@ test("V-2 실행기가 끝까지 읽지 못한 출력: 끊긴 비밀의 앞부�
 
   const payload = payloadOf<RunCommandPayload>(toolResultFor(files.records, "c-cut"));
   t.diagnostic(`c-cut: exitCode ${String(payload.exitCode)}, truncated ${String(payload.truncated)}, stdout ${payload.stdout.length} chars`);
-  assert.equal(payload.truncated, true, "output the runner stopped reading is marked truncated (V-2)");
-  assert.ok(payload.stdout.includes(CUT_COMPLETE_MARK), "complete lines well before the cut stay");
+  // W-6: settled early is not the capture cap; nothing is marked truncated.
+  assert.equal(payload.truncated, false, "output settled before its end is not truncated (revised V-2)");
   assert.equal(payload.stdout.includes(CUT_LATE_MARK), false, "test assumption: the late line came after the cut");
+  // Only the incomplete last line (the half secret) is dropped; every complete line stays.
+  assert.ok(payload.stdout.startsWith(`${CUT_COMPLETE_MARK}\n`), "the first complete line stays");
+  assert.equal(payload.stdout.split("\n").filter((line) => line === "f".repeat(100)).length, 60, "all 60 filler lines stay");
+  assert.ok(payload.stdout.endsWith("\n"), "the output ends at the last line feed");
 
   const sources = [
     { label: "stdout", text: run.stdout },

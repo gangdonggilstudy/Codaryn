@@ -13,8 +13,10 @@ import {
   asRawText,
 } from "../contracts/index.js";
 import type {
+  ChangeRecorder,
   PathAccess,
   PrivacyGateway,
+  RawText,
   RawToolOutcome,
   ReadFileArgs,
   ResolvedPath,
@@ -60,6 +62,12 @@ export interface ToolRunnerOptions {
    * `workspaceRoot: workspace.root`. Inject a fake in unit tests.
    */
   readonly commandRunner?: CommandRunner;
+  /**
+   * Keeps the original of every file `write_file` changes, for revert (R-6). When given,
+   * `write_file` calls `saveOriginal` after all its checks and right before it writes, and does
+   * not write when that fails. Without it, files are written as before and nothing is kept.
+   */
+  readonly changeRecorder?: ChangeRecorder;
 }
 
 /**
@@ -125,7 +133,7 @@ function fail(code: ToolErrorCode, message: string): Failure {
 }
 
 export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
-  const { workspace, privacy } = options;
+  const { workspace, privacy, changeRecorder } = options;
   const commandRunner =
     options.commandRunner ??
     createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot: workspace.root });
@@ -247,14 +255,18 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     const resolved = await resolvePath(args.path, "write");
     if (!resolved.ok) return resolved;
 
-    // 1. Local snapshot of the current file (raw, never leaves this function).
+    // 1. Local snapshot of the current file (raw, never leaves this function except to the
+    //    change recorder, which keeps it in the state directory).
     const read = await workspace.readText(resolved.path);
+    let original: RawText | null;
     let currentText: string | null;
     let currentHash: string | null;
     if (read.ok) {
+      original = read.snapshot.text;
       currentText = read.snapshot.text;
       currentHash = read.snapshot.hash;
     } else if (read.code === "not_found") {
+      original = null;
       currentText = null;
       currentHash = null;
     } else {
@@ -296,7 +308,17 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     });
     if (!rebuilt.ok) return fail(rebuilt.code, `change rejected: ${rebuilt.code}`);
 
-    // 5. Put the BOM back and write with the version check.
+    // 5. Every check passed. Keep the original for revert; without it, do not write.
+    if (changeRecorder !== undefined) {
+      try {
+        await changeRecorder.saveOriginal(resolved.path, original);
+      } catch {
+        // No detail: it could carry raw paths or file text.
+        return fail("io_error", "keeping the original for revert failed; nothing was written");
+      }
+    }
+
+    // 6. Put the BOM back and write with the version check.
     const nextText: string = rebuilt.text;
     const finalText = hadBom && !nextText.startsWith(BOM) ? BOM + nextText : nextText;
     const written = await workspace.writeText({

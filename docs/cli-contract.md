@@ -249,6 +249,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
     - `--task`, `workspaceRoot`, `scriptPath`: `invalid_task`
     - `--config`, `--vars-file`, `CODARYN_CONFIG`: `invalid_config`
     - `--workspace`(run과 revert), `--cancel-file`: `invalid_arguments`
+  - 명령 규칙과 검증기(X-1): `policy.commands[i].executable`, 명령 검증기의 `executable`과 `cwd`는 적힌 그대로 같은 검사를 한다. task에서는 `invalid_task`, 설정 파일에서는 `invalid_config`이고, 메시지는 필드 위치만 적는다(`policy.commands[0].executable is a network or device path`). 그래서 `run`도 `doctor`도 이 값으로 다른 기계에 닿지 않는다. 인자(`argsPrefix`, `args`)는 대상이 아니다.
 - **작업 공간 밖에 둘 것(S-1, T-12).** 작업 공간을 확인한 직후, 변수 파일, 설정 파일, task 파일, 대본 파일, 취소 파일의 실경로가 작업 공간 실경로 안에 있으면 실행 전에 거부한다.
   - 실경로는 링크, 정션, 8.3 이름을 푼 경로다.
   - 위치를 확인할 수 없는 경우(끊긴 링크, 권한 오류)도 거부한다.
@@ -481,15 +482,26 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - Markdown 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차, 통과하지 않은 검증기의 증거), 보호 대상, 변경, 사용량, 검사하지 않은 범위(검증기마다의 한계와 고정 문구), 알림.
 - 실행 디렉터리가 링크(정션 포함)이면 따라가지 않고 `invalid_run_record`다. 기록은 모두 그 실행의 것이어야 하고(`runId`, 1부터 연속인 `seq`, 첫 기록 `run_started`), 보고서가 쓰는 필드는 형식을 확인한다. 모르는 종류의 기록은 건너뛴다. `result.json`은 확인한 필드만으로 다시 만든다.
+- 실행이 남기지 않는 기록은 `invalid_run_record`다(X-2). 검증기 근거가 `MAX_EVIDENCE_BYTES`(8192바이트)보다 길면 거부한다. 엔진은 그보다 길게 기록하지 않으므로, 실행 뒤에 바뀐 기록이다. 그리기가 실패해도 내부 오류(70)가 아니라 `invalid_run_record`로 끝난다.
+  - 그리기는 인자를 펼치지 않고 반복으로 한다. 그래서 백틱 묶음이 많거나 줄이 많은 다른 기록 문자열도 스택을 넘기지 않고 출력된다.
 - 출력 글의 제어 문자(ESC, CR, 양방향 제어 문자 등)는 `?`로 바꾸고, 인라인 코드와 코드 블록은 내용 속 백틱보다 긴 울타리를 쓴다. 키 모양 문자열과 현재 `ANTHROPIC_API_KEY` 값은 `[key]`로 가린다. 기록이 실행 중 명령으로 바뀌었을 경우를 위한 방어이며, 등록된 다른 비밀 값은 report가 알지 못한다.
 
 ### doctor의 세부 (U-6)
 
 - 변수 파일은 `util.parseEnv`로 해석만 하고 프로세스 환경에 적재하지 않는다. 이미 있는 변수가 우선한다(`run`과 같다).
 - 설정·task 파일은 `run`과 같은 순서(원문 키 검사 → 파싱 → 키 검사 → 검증)로 본다. 실패 메시지는 검증기의 필드 위치 문구다.
-- `commands`: 정책의 `commands[i].executable`과 명령 검증기의 `executable`을 PATH의 절대 항목과 PATHEXT(Windows)로 찾는다. 디렉터리가 붙은 이름은 작업 공간(검증기는 그 `cwd`) 기준이다. 실제 실행 때의 추가 거부(작업 공간 안의 실행 파일, `.cmd`·`.bat`의 문자 제한 등)는 점검하지 않는다.
+- `commands`(X-1, X-3): 정책의 `commands[i]`(`argsPrefix`와 함께)와 명령 검증기(`args`, `cwd`와 함께)를 `run`과 같은 규칙으로 판정한다.
+  - 자식 환경은 명령 실행기처럼 `buildChildEnv`로 만든다. 검증기 `cwd`는 검증기 실행기처럼 작업 공간이 푼다. `outside_root`, `state_dir`, `invalid_path`면 실행 때 거부되므로 `fail`이다.
+  - Windows에서는 실행기의 `planWindowsLaunch`로 판정한다. 다음은 "rejected at run time"으로 `fail`이다.
+    - 작업 공간 안으로 풀리는 실행 파일(`executable_refused`)
+    - 작업 공간 안에 있거나 허용 문자 밖 인자를 받는 `.cmd`·`.bat`(`script_refused`)
+    - 그 밖의 형식(`unsupported_type`)
+  - POSIX의 실행기는 이름을 `spawn`에 넘기므로 doctor도 존재만 본다.
+  - PATH의 UNC·장치 항목은 stat도 하지 않는다. 개수만 "not checked: remote paths are not accessed"로 알리고 `warn`이다. 로컬 항목에서 찾지 못한 이름은 "not found in local PATH entries"로 `warn`이다. 실행 때는 실행기가 그 원격 항목을 찾아볼 수 있기 때문이다.
+  - 작업 공간이 없으면 존재만 보고, 실행 규칙은 보지 않았다고 적는다.
+  - 마지막 줄의 "No network access was made"는 이 규칙과 X-1의 입력 검사로 지킨다. 설정·task·변수·대본 파일, `integrity.paths`, 작업 공간은 S-5 검사를 거친 로컬 경로만 읽는다.
 - `integrity_paths`: 각 경로가 있는지, 작업 공간이 주어지면 그 밖에 있는지 본다. 위치만 적고 경로는 내지 않는다.
-- 현재 `warn`을 내는 항목은 없다. 계약에는 남겨 둔다.
+- `warn`은 지금 `commands`에서만 나온다(원격 PATH 항목).
 
 ### 도움말, 버전, 설치 (U-7)
 

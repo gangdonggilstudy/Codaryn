@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_KEY_PATTERN_SOURCE,
   CHILD_ENV_ALLOWLIST,
   JOURNAL_FILE_NAME,
   LOCK_FILE_NAME,
@@ -26,8 +27,11 @@ import type {
   CliOutput,
   EngineResult,
   JournalRecord,
+  ModelProviderName,
   ToolResult,
 } from "../../src/contracts/index.js";
+import { FAKE_API_KEYS } from "../fixtures/secrets.js";
+import { NET_GUARD_LOG_ENV } from "./net-guard.js";
 
 /** Compiled location is `dist/tests/support/cli.js`, so the repository root is three levels up. */
 export const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -44,12 +48,17 @@ export interface EnvOptions {
   readonly extra?: Readonly<Record<string, string>>;
   /** Drop PATH and PATHEXT so the CLI cannot find git, npm or other tools. */
   readonly omitPath?: boolean;
+  /**
+   * Sets ANTHROPIC_API_KEY for mock API tests. Only a value from FAKE_API_KEYS is accepted, and
+   * it must not have the shape of a real key. Anything else throws.
+   */
+  readonly fakeApiKey?: string;
 }
 
 /**
  * Minimal environment for the CLI process. Only CHILD_ENV_ALLOWLIST names are inherited, so a
  * developer's ANTHROPIC_API_KEY or CODARYN_MODEL never reaches the CLI. An API key can never be
- * added through `extra`.
+ * added through `extra`; mock API tests set one of the fake keys with `fakeApiKey`.
  */
 export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
   const allow = new Set<string>(CHILD_ENV_ALLOWLIST);
@@ -66,6 +75,13 @@ export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
       throw new Error("Integration tests never set an API key variable.");
     }
     env[name] = value;
+  }
+  if (options.fakeApiKey !== undefined) {
+    const value = options.fakeApiKey;
+    if (!FAKE_API_KEYS.includes(value) || new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(value)) {
+      throw new Error("Integration tests set only the fake API keys from tests/fixtures/secrets.ts.");
+    }
+    env[ANTHROPIC_API_KEY_ENV] = value;
   }
   return env;
 }
@@ -90,14 +106,25 @@ export interface StartOptions {
   readonly cwd: string;
   readonly cancelFile?: string;
   readonly timeoutMs?: number;
+  /**
+   * Preloads the network guard (`net-guard.js`) into the CLI process and names the file where it
+   * logs blocked hosts. Mock API tests always set it, so the CLI can reach loopback hosts only.
+   */
+  readonly netGuardLog?: string;
 }
+
+/** Compiled next to this file as `dist/tests/support/net-guard.js`. */
+const NET_GUARD_URL = new URL("./net-guard.js", import.meta.url).href;
 
 export function startCli(args: readonly string[], options: StartOptions): StartedCli {
   assertCliBuilt();
   const started = Date.now();
-  const child = spawn(NODE, [CLI_PATH, ...args], {
+  const guard = options.netGuardLog;
+  const baseEnv = options.env ?? cliEnv();
+  const nodeArgs = guard === undefined ? [CLI_PATH, ...args] : ["--import", NET_GUARD_URL, CLI_PATH, ...args];
+  const child = spawn(NODE, nodeArgs, {
     cwd: options.cwd,
-    env: options.env ?? cliEnv(),
+    env: guard === undefined ? baseEnv : { ...baseEnv, [NET_GUARD_LOG_ENV]: guard },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -152,13 +179,16 @@ export function parseCliOutput(run: CliRun): CliOutput {
   return parsed;
 }
 
-/** A run result produced by the scripted provider. */
-export function expectRunResult(run: CliRun): EngineResult {
+/**
+ * A run result produced by `provider`. Offline tests use the default, "scripted". Mock API tests
+ * pass "anthropic" (a local fake server, never the real API).
+ */
+export function expectRunResult(run: CliRun, provider: ModelProviderName = "scripted"): EngineResult {
   const output = parseCliOutput(run);
   if (output.kind !== "run") {
     assert.fail(`expected a run result, got ${JSON.stringify(output)}; stderr: ${run.stderr.slice(0, 2000)}`);
   }
-  assert.equal(output.provider, "scripted", "offline runs must report the scripted provider");
+  assert.equal(output.provider, provider, `the run must report the ${provider} provider`);
   return output;
 }
 

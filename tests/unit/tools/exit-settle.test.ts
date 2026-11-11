@@ -49,15 +49,16 @@ function cleanup(pid: number | null): void {
 /**
  * Node starts a detached background node that inherits the output pipes, prints its pid and
  * exits with 3 right away. The background process writes "early;" after 100 ms and "late;"
- * after 1500 ms, then waits 20 s.
+ * after 1500 ms, then waits 20 s. Every write is a whole line: a stream that is not read to its
+ * end loses its unfinished last line (V-2).
  */
 function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: string): CommandRunRequest {
-  const body = "setTimeout(() => process.stdout.write('early;'), 100); setTimeout(() => process.stdout.write('late;'), 1500); setTimeout(() => {}, 20000);";
+  const body = "setTimeout(() => process.stdout.write('early;\\n'), 100); setTimeout(() => process.stdout.write('late;\\n'), 1500); setTimeout(() => {}, 20000);";
   const script = [
     "const { spawn } = require('node:child_process');",
     `const c = spawn(process.execPath, ['-e', ${JSON.stringify(body)}], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });`,
     "c.unref();",
-    "process.stdout.write('bg ' + c.pid + ';');",
+    "process.stdout.write('bg ' + c.pid + ';\\n');",
     // Optional: tells the test that the command is about to exit.
     ...(exitMarker === undefined ? [] : [`require('node:fs').writeFileSync(${JSON.stringify(exitMarker)}, '');`]),
     "process.exit(3);",
@@ -94,7 +95,7 @@ test("T-2: output in flight right after the exit is kept for a short grace; late
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
   const pid = backgroundPid(result.stdout);
   try {
-    assert.match(result.stdout, /^bg \d+;early;$/);
+    assert.match(result.stdout, /^bg \d+;\nearly;\n$/);
     assert.equal(result.exitCode, 3);
   } finally {
     cleanup(pid);
@@ -139,7 +140,10 @@ test("T-2: cancelling after the command exited returns at once with its exit cod
     assert.ok(Date.now() - abortedAt < 400, "no kill and no close wait after the exit");
     assert.equal(result.exitCode, 3, "the exit code stays final: nothing was stopped");
     assert.equal(result.timedOut, false);
-    assert.equal(result.truncated, true, "V-2: the pipes were closed before their end");
+    // V-2 (revised): closing the pipes early drops only an unfinished last line; whole lines stay
+    // and `truncated` keeps meaning the capture cap.
+    assert.equal(result.truncated, false);
+    assert.match(result.stdout, /^bg \d+;\n/);
   } finally {
     cleanup(pid);
   }

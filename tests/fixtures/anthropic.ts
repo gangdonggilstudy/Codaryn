@@ -8,6 +8,8 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CodarynConfig, CommandRule, Limits, VerifierConfig } from "../../src/contracts/index.js";
+import { fakeModel } from "../support/fake-models.js";
+import type { FakeModel } from "../support/fake-models.js";
 import { DEFAULT_LIMITS } from "./builders.js";
 import type { Sandbox } from "./builders.js";
 
@@ -16,6 +18,18 @@ import type { Sandbox } from "./builders.js";
  * token limit (`maxTotalTokens: null` is refused), and every limit stays under the absolute caps.
  */
 export const ANTHROPIC_LIMITS: Limits = { ...DEFAULT_LIMITS, maxTotalTokens: 200_000 };
+
+/**
+ * Models the fake server lists for `codaryn models` (Y-1). With the fake's page size of 2 they
+ * span three pages. The last one has no `type` or `created_at` (both unconfirmed fields).
+ */
+export const FAKE_MODEL_CATALOG: readonly FakeModel[] = [
+  fakeModel("cdy-fake-model-alpha", "Fake Model Alpha", 1_000_000, 128_000, { createdAt: "2026-05-01T00:00:00Z" }),
+  fakeModel("cdy-fake-model-beta", "Fake Model Beta", 1_000_000, 64_000, { createdAt: "2026-04-01T00:00:00Z" }),
+  fakeModel("cdy-fake-model-gamma", "Fake Model Gamma", 200_000, 64_000, { createdAt: "2026-03-01T00:00:00Z" }),
+  fakeModel("cdy-fake-model-delta", "Fake Model Delta", 200_000, 8_192, { createdAt: "2026-02-01T00:00:00Z" }),
+  fakeModel("cdy-fake-model-epsilon", "Fake Model Epsilon", 100_000, 4_096, { omitUnconfirmed: true }),
+];
 
 export const FAKE_MODEL_TASK = "cdy-fake-model-task";
 export const FAKE_MODEL_ENV = "cdy-fake-model-env";

@@ -113,6 +113,11 @@ export interface StartOptions {
   readonly netGuardLog?: string;
   /** Another build of the CLI to run (for example a copy, see installCopy). Defaults to CLI_PATH. */
   readonly cliPath?: string;
+  /**
+   * The CLI's standard input. "ignore" (default) is the null device. "pipe" is a pipe the test
+   * keeps open and never writes to: not a terminal, and a read on it would wait (Y-3 prompts).
+   */
+  readonly stdin?: "ignore" | "pipe";
 }
 
 /** Compiled next to this file as `dist/tests/support/net-guard.js`. */
@@ -129,7 +134,7 @@ export function startCli(args: readonly string[], options: StartOptions): Starte
   const child = spawn(NODE, nodeArgs, {
     cwd: options.cwd,
     env: guard === undefined ? baseEnv : { ...baseEnv, [NET_GUARD_LOG_ENV]: guard },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options.stdin ?? "ignore", "pipe", "pipe"],
     windowsHide: true,
   });
   const out: Buffer[] = [];

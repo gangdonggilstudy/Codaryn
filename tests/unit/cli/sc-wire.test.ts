@@ -193,7 +193,7 @@ describe("S-1 files that shape a run must lie outside the workspace", () => {
       [["run", "--task", "work/task.json"], {}, "invalid_task"],
       [["run", "--task", "task.json"], {}, "ok"],
       [["run", "--task", "task.json", "--config", "work/c.json"], {}, "invalid_config"],
-      [["run", "--task", "task.json", "--env-file", "work/x.env"], { loadEnvFile: () => {} }, "invalid_config"],
+      [["run", "--task", "task.json", "--vars-file", "work/x.env"], { loadEnvFile: () => {} }, "invalid_config"],
     ];
     for (const [argv, extra, expected] of cases) {
       const outcome = await runCli(realIo(base, argv, extra));
@@ -255,7 +255,7 @@ describe("S-5 network and device paths are rejected before any file access", () 
       [["run", "--task", DEVICE], {}, "invalid_task"],
       [["run", "--workspace", UNC, "--goal", "g"], {}, "invalid_arguments"],
       [["run", "--task", "t.json", "--config", UNC], {}, "invalid_config"],
-      [["run", "--task", "t.json", "--env-file", UNC], {}, "invalid_config"],
+      [["run", "--task", "t.json", "--vars-file", UNC], {}, "invalid_config"],
       [["run", "--task", "t.json", "--cancel-file", DEVICE], {}, "invalid_arguments"],
       [["run", "--task", "t.json"], { CODARYN_CONFIG: UNC }, "invalid_config"],
     ];

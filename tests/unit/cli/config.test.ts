@@ -151,14 +151,14 @@ const KEY_ENV = { ANTHROPIC_API_KEY: FAKE_KEY };
 
 describe("parseArgs (phase 1b options)", () => {
   test("quick form and settings options", () => {
-    const parsed = parseArgs(["run", "--workspace", "w", "--goal", "fix it", "--config", "c.json", "--env-file", ".env"]);
+    const parsed = parseArgs(["run", "--workspace", "w", "--goal", "fix it", "--config", "c.json", "--vars-file", ".env"]);
     assert.deepEqual(parsed, {
       ok: true,
       args: {
         command: "run",
         input: { kind: "quick", workspace: "w", goal: "fix it" },
         configPath: "c.json",
-        envFile: ".env",
+        varsFile: ".env",
         cancelFile: null,
       },
     });
@@ -553,14 +553,14 @@ describe("runCli with settings", () => {
     assert.deepEqual(h.assembled[0]?.task.verifiers, []);
   });
 
-  test("C-2 --env-file is loaded only when given; set variables win; unreadable is invalid_config", async () => {
+  test("C-2 --vars-file is loaded only when given; set variables win; unreadable is invalid_config", async () => {
     const files = {
       "task.json": anthropicTask({ model: { provider: "anthropic", maxOutputTokens: 4 } }),
       "local.env": "# loaded by the fake loader below\n",
       "bom.env": "﻿ANTHROPIC_API_KEY=x\n",
     };
     const loaded = harness(files, {
-      argv: ["run", "--task", "task.json", "--env-file", "local.env"],
+      argv: ["run", "--task", "task.json", "--vars-file", "local.env"],
       env: { CODARYN_MODEL: "already-set" },
       envFile: { ANTHROPIC_API_KEY: FAKE_KEY, CODARYN_MODEL: "from-file" },
     });
@@ -575,11 +575,11 @@ describe("runCli with settings", () => {
     assert.equal(code(await runCli(notGiven.io)), "provider_not_configured");
     assert.deepEqual(notGiven.envFiles, []);
 
-    const unreadable = harness(files, { argv: ["run", "--task", "task.json", "--env-file", "x.env"], envFile: "unreadable" });
+    const unreadable = harness(files, { argv: ["run", "--task", "task.json", "--vars-file", "x.env"], envFile: "unreadable" });
     assert.equal(code(await runCli(unreadable.io)), "invalid_config");
 
     // Node's loader would take the BOM as part of the first name and skip that variable silently.
-    const bom = harness(files, { argv: ["run", "--task", "task.json", "--env-file", "bom.env"], envFile: { ANTHROPIC_API_KEY: FAKE_KEY } });
+    const bom = harness(files, { argv: ["run", "--task", "task.json", "--vars-file", "bom.env"], envFile: { ANTHROPIC_API_KEY: FAKE_KEY } });
     const rejected = await runCli(bom.io);
     assert.equal(code(rejected), "invalid_config");
     assert.deepEqual(bom.envFiles, []);
@@ -610,7 +610,7 @@ describe("runCli with settings", () => {
   test("S-4 values the env file newly sets are secrets; settings, short values and set variables are not", async () => {
     const files = { "task.json": anthropicTask({ model: { provider: "anthropic", model: "m", maxOutputTokens: 4 } }), "x.env": "" };
     const h = harness(files, {
-      argv: ["run", "--task", "task.json", "--env-file", "x.env"],
+      argv: ["run", "--task", "task.json", "--vars-file", "x.env"],
       env: { ALREADY_SET: "fake-already-set-value" },
       envFile: {
         ANTHROPIC_API_KEY: FAKE_KEY,

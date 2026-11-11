@@ -104,7 +104,9 @@ export async function locateInWorkspace(
   const fold = (value: string): string => (platform === "win32" ? value.toLowerCase() : value);
   const normalizedRoot = fold(root.replace(/[\\/]+$/, ""));
   const normalizedFile = fold(real);
-  const separator = platform === "win32" ? /[\\/]/ : /\//;
+  // On Windows a ":" right after the root starts an alternate data stream of the root
+  // directory itself (`<root>:cfg`), which belongs to the workspace (T-14).
+  const separator = platform === "win32" ? /[\\/:]/ : /\//;
   if (normalizedFile === normalizedRoot) return "inside";
   if (normalizedFile.startsWith(normalizedRoot) && separator.test(normalizedFile.charAt(normalizedRoot.length))) {
     return "inside";

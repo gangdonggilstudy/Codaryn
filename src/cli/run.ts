@@ -12,6 +12,7 @@ import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, CODARYN_CONFIG_ENV, RESULT
 import type {
   AnthropicProviderDeps,
   CliErrorCode,
+  CliErrorOutput,
   CliOutput,
   Clock,
   CodarynConfig,
@@ -62,10 +63,13 @@ export interface CliRunOutcome {
   readonly exitCode: number;
 }
 
-function error(code: CliErrorCode, message: string): CliRunOutcome {
+function error(code: CliErrorCode, message: string): { output: CliErrorOutput; exitCode: number } {
   const exitCode = CLI_ERROR_EXIT_CODES[code];
   return { output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message }, exitCode };
 }
+
+/** One CliErrorOutput and its exit code. The message must not contain secrets or file contents. */
+export const cliError = error;
 
 /** Task, config and script files may start with a UTF-8 byte order mark (common on Windows). */
 async function readJson(io: CliEnvironment, file: string): Promise<{ ok: true; value: unknown } | { ok: false }> {
@@ -160,12 +164,15 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     }
     if (!secrets.includes(value)) secrets.push(value);
   }
+  // S-2: the key is masked in every run, whatever the provider. A scripted task can still read
+  // a workspace file that holds it.
+  if (currentKey !== null && !secrets.includes(currentKey)) secrets.push(currentKey);
 
   let model: ModelProvider;
   if (task.model.provider === "anthropic") {
     const resolved = resolveAnthropicSettings(task.model, io.env, config);
     if (!resolved.ok) return error(resolved.code, resolved.message);
-    // The key is masked like any other secret if it ever shows up in a file or command output.
+    // Already registered above (S-2); kept so the key sent is always a registered secret.
     if (!secrets.includes(resolved.settings.apiKey)) secrets.push(resolved.settings.apiKey);
     const factory = io.createAnthropicProvider === undefined ? anthropicProviderFactory : io.createAnthropicProvider;
     if (factory === null) {

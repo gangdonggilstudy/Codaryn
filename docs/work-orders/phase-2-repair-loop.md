@@ -57,3 +57,31 @@
 
 - F6(단계 2 교차 검토)은 F1~F4 병합 뒤 손이 비는 세션에 배정한다. 구현자가 자기 모듈을 검토하지 않게 한다.
 - 투입 조건: (1) 사용자가 `tests/live` 실제 호출 점검을 직접 실행해 통과, (2) 단계 2 병합과 통합 통과, (3) G1 병합, (4) H1·H2에서 재현된 결함 수정. PM과 작업자는 실제 API를 호출하지 않는다.
+
+## 교차 검토 H1·H2 결함 수정 (2026-11-12 추가)
+
+검토 원문은 `docs/reviews/2026-11-12-cross-review-anthropic-provider.md`(H1)와 `docs/reviews/2026-11-12-cross-review-cli-config.md`(H2)다. 실제 키를 넣기 전에 고친다.
+
+| 번호 | 결정 | 대상 결함 |
+| --- | --- | --- |
+| S-1 | env 파일, 설정 파일, task 파일, 대본 파일의 실경로가 작업 공간 실경로 안에 있으면 실행 전에 거부한다. 모델이 다음 실행의 API 주소, 정책, 검증기, 한도를 바꾸는 경로를 없앤다. 문서 예시의 `.env`는 작업 공간 밖에 두는 것으로 고친다 | H2-1(높음), H2-4 |
+| S-2 | `ANTHROPIC_API_KEY`가 환경에 있으면 제공자와 관계없이 비밀로 등록한다 | H2-2 |
+| S-3 | `secretEnv` 이름은 `^[A-Za-z_][A-Za-z0-9_]*$`만 허용한다. 오류 메시지에는 위치만 적고 항목 내용을 적지 않는다 | H2-3 |
+| S-4 | `--env-file`이 새로 설정한 변수의 값은 비밀로 등록한다. `CODARYN_MODEL`, `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`과 8자 미만 값은 제외한다 | H2-4 |
+| S-5 | `workspaceRoot`, `scriptPath`, `--task`, `--config`, `--env-file`, `CODARYN_CONFIG`의 UNC와 장치 경로는 파일 시스템 접근 전에 거부한다 | H2-5 |
+| S-6 | 키 검사는 재귀 대신 반복으로 하고 깊이 64를 넘으면 `invalid_task` 또는 `invalid_config`다. `JSON.parse` 전 원문에도 키 모양과 현재 키 검사를 적용한다. 위치 문자열에는 알려진 필드 이름만 적는다. CLI 최상위에서 예외를 잡아 `internal_error` JSON을 출력한다 | H2-6, H2-10, H2-11 |
+| S-7 | 설정 파일의 한도는 상한이다. task 값은 설정 값 이하여야 하고 넘으면 `invalid_task`다. anthropic 제공자에서는 `maxTotalTokens: null`을 허용하지 않는다. 코드의 절대 상한: 턴 1000, 도구 호출 5000, 총 토큰 50,000,000, 실행 시간 24시간. 모든 시간 값은 2,147,483,647ms 이하다 | H2-7, H2-8 |
+| S-8 | `--goal`에도 키 모양과 현재 키 검사를 적용해 거부한다. goal이 전송·기록된다는 점을 문서에 적는다 | H2-9 |
+| S-9 | `apiBaseUrl`은 끝의 단독 `?`나 `#`도 거부한다 | H1-4 |
+| S-10 | 제공자는 응답 본문을 상한까지만 읽는다(성공 응답 8MB, 오류 응답 4096바이트). 넘으면 `malformed_response` 또는 `api_error`다 | H1-1 |
+| S-11 | 키는 출력 가능한 ASCII만 허용하고 아니면 전송 전에 거부한다. 전송 계층의 형식 오류(`TypeError`)는 재시도하지 않고, 그 오류 문구를 메시지에 옮기지 않는다 | H1-2 |
+| S-12 | 오류 본문을 메시지에 옮길 때 제어 문자와 공백을 먼저 정리한 뒤 키 조각을 지운다 | H1-3 |
+
+고치지 않고 기록만 하는 것: thinking 블록을 다음 요청에 보내지 않는 점(H1-6)과 시간 초과 뒤 POST 재시도(H1-7)는 실제 호출 점검에서 확인한다. 키 필드 이름 목록의 빈틈(H2-12)은 닫힌 스키마가 다른 오류로 막는다.
+
+| 작업 | pane | worktree / 브랜치 | 소유 파일 |
+| --- | --- | --- | --- |
+| S-A CLI 보안 검사 모듈(S-1, S-3~S-9의 순수 함수와 유닛) | w1:p7 | `claude-workspace` / `claude/workspace-policy` | `src/cli/security/**`, `tests/unit/cli/security/**` (신규 디렉터리) |
+| S-B 제공자 수정(S-10~S-12) | w1:p5 | `claude-quality` / `claude/security-core` | `src/model/anthropic/**`, `tests/unit/model/anthropic/**` (p8에서 이관) |
+| S-C CLI 연결(S-2 포함)과 문서 | w1:p1 | `claude-design` / `claude/core-engine` | `src/cli/**`(security 제외), `docs/cli-contract.md` — F1 뒤에 한다 |
+| S-D 통합 회귀 | w1:p4 | `claude-operations` / `claude/cli-verification` | `tests/integration/**` — F5와 함께 |

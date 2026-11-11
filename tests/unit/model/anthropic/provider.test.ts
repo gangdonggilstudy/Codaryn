@@ -423,10 +423,20 @@ test("AD-04 a retry that succeeds returns the response; retry-after is honoured"
   assert.equal(new Set(transport.sent.map((sent) => sent.body)).size, 1);
 });
 
+/**
+ * The shape Node's fetch uses for a connection failure: TypeError "fetch failed" whose cause carries
+ * a system error code (observed on Node 26 against a closed loopback port).
+ */
+function connectionError(code = "ECONNREFUSED"): TypeError {
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error(`connect ${code} 127.0.0.1:59999`), { code }),
+  });
+}
+
 test("AD-04 network errors are retried as api_error; redirects are not followed", async () => {
   const failing = fakeFetch([
     () => {
-      throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED") });
+      throw connectionError();
     },
   ]);
   const timer = recordingSleep();
@@ -437,7 +447,7 @@ test("AD-04 network errors are retried as api_error; redirects are not followed"
 
   const recovering = fakeFetch([
     () => {
-      throw new TypeError("fetch failed");
+      throw connectionError("ECONNRESET");
     },
     json(200, message([{ type: "text", text: "ok" }])),
   ]);
@@ -591,4 +601,218 @@ test("the provider never throws: a broken transport becomes an outcome", async (
   const outcome = await provider.complete(SIMPLE_REQUEST, live());
   assertFailure(outcome, "api_error");
   assert.equal(provider.name, "anthropic");
+});
+
+// Regression cases from docs/reviews/2026-11-12-cross-review-anthropic-provider.md (S-10 to S-12).
+
+const SUCCESS_BODY_LIMIT = 8 * 1024 * 1024;
+const ERROR_BODY_LIMIT = 4096;
+
+/**
+ * A body that never ends. Each pull waits one turn of the event loop, so a reader that does not
+ * stop is slowed down rather than racing. The stream errors when the request signal aborts, as a
+ * real fetch body does.
+ */
+function endlessBody(sent: SentRequest, chunkBytes: number): { stream: ReadableStream<Uint8Array>; stats: { pulled: number; cancelled: boolean } } {
+  const stats = { pulled: 0, cancelled: false };
+  const chunk = new Uint8Array(chunkBytes).fill(0x78);
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (sent.signal?.aborted) {
+          controller.error(new DOMException("aborted", "AbortError"));
+          return;
+        }
+        stats.pulled += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        stats.cancelled = true;
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return { stream, stats };
+}
+
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+test("S-10 an endless 200 body stops at 8 MiB as malformed_response without retry", { timeout: 30_000 }, async () => {
+  let stats = { pulled: 0, cancelled: false };
+  const transport = fakeFetch([
+    (sent) => {
+      const body = endlessBody(sent, 16 * 1024);
+      stats = body.stats;
+      return new Response(body.stream, { status: 200, headers: { "content-type": "application/json" } });
+    },
+  ]);
+  const provider = createAnthropicProvider(settings({ requestTimeoutMs: 2_000, maxRetries: 2 }), {
+    fetch: transport.fetch,
+    sleep: recordingSleep().sleep,
+  });
+  const text = assertFailure(await provider.complete(SIMPLE_REQUEST, live()), "malformed_response");
+  await settle();
+  assert.match(text, /larger than/);
+  assert.equal(transport.sent.length, 1);
+  assert.ok(stats.pulled <= SUCCESS_BODY_LIMIT + 2 * 16 * 1024, `pulled ${stats.pulled} bytes`);
+  assert.equal(stats.cancelled, true);
+});
+
+test("S-10 the success limit is exact: 8 MiB parses, one byte more is malformed_response", async () => {
+  const base = JSON.stringify(message([{ type: "text", text: "" }]));
+  const padding = SUCCESS_BODY_LIMIT - base.length;
+  const exact = JSON.stringify(message([{ type: "text", text: "a".repeat(padding) }]));
+  assert.equal(Buffer.byteLength(exact), SUCCESS_BODY_LIMIT);
+  const over = JSON.stringify(message([{ type: "text", text: "a".repeat(padding + 1) }]));
+  const reply = (body: string): Reply => () => new Response(body, { status: 200 });
+
+  const fits = createAnthropicProvider(settings(), { fetch: fakeFetch([reply(exact)]).fetch });
+  const ok = await fits.complete(SIMPLE_REQUEST, live());
+  assert.ok(ok.ok);
+  assert.equal(ok.response.text.length, padding);
+
+  const tooBig = createAnthropicProvider(settings(), { fetch: fakeFetch([reply(over)]).fetch });
+  assertFailure(await tooBig.complete(SIMPLE_REQUEST, live()), "malformed_response");
+});
+
+test("S-10 an error body is read only up to 4096 bytes", { timeout: 30_000 }, async () => {
+  let stats = { pulled: 0, cancelled: false };
+  const transport = fakeFetch([
+    (sent) => {
+      const body = endlessBody(sent, 1024);
+      stats = body.stats;
+      return new Response(body.stream, { status: 400 });
+    },
+  ]);
+  const provider = createAnthropicProvider(settings({ requestTimeoutMs: 2_000, maxRetries: 0 }), {
+    fetch: transport.fetch,
+  });
+  const text = assertFailure(await provider.complete(SIMPLE_REQUEST, live()), "api_error");
+  await settle();
+  assert.match(text, /HTTP 400/);
+  assert.ok(stats.pulled <= ERROR_BODY_LIMIT + 2 * 1024, `pulled ${stats.pulled} bytes`);
+  assert.equal(stats.cancelled, true);
+});
+
+test("S-11 a key outside printable ASCII is refused before any request, without position or code", async () => {
+  const keys = [
+    "fake-key-0000\u0007-codaryn-review", // control character (review input)
+    "fake-key-한-codaryn-review", // Hangul (review input: index 9, value 54620)
+    "fake-key-é-codaryn-review", // Latin-1, which fetch would send as is
+    "fake key-codaryn-review", // inner space
+    "fake-key-\u007f-codaryn-review", // DEL
+  ];
+  for (const apiKey of keys) {
+    const transport = fakeFetch([json(200, message([{ type: "text", text: "x" }]))]);
+    const provider = createAnthropicProvider(settings({ apiKey }), { fetch: transport.fetch, sleep: recordingSleep().sleep });
+    const outcome = await provider.complete(SIMPLE_REQUEST, live());
+    assert.equal(outcome.ok, false, JSON.stringify(apiKey));
+    if (outcome.ok) continue;
+    assert.equal(outcome.kind, "not_configured", JSON.stringify(apiKey));
+    assert.equal(transport.sent.length, 0, JSON.stringify(apiKey));
+    assert.ok(!/index|54620|\d{3,}|\\u/.test(outcome.message), outcome.message);
+    assert.ok(!outcome.message.includes(apiKey));
+  }
+});
+
+test("S-11 a format TypeError from fetch is not retried and its text is not copied", async () => {
+  const formatErrors: readonly [string, () => never][] = [
+    [
+      "invalid header (fetch failed, UND_ERR_INVALID_ARG)",
+      () => {
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("invalid x-api-key header"), { code: "UND_ERR_INVALID_ARG" }),
+        });
+      },
+    ],
+    [
+      "ByteString conversion",
+      () => {
+        throw new TypeError(
+          "Cannot convert argument to a ByteString because the character at index 9 has a value of 54620 which is greater than 255.",
+        );
+      },
+    ],
+    [
+      "invalid URL",
+      () => {
+        throw new TypeError("Failed to parse URL", { cause: Object.assign(new TypeError("Invalid URL"), { code: "ERR_INVALID_URL" }) });
+      },
+    ],
+  ];
+  for (const [label, thrower] of formatErrors) {
+    const transport = fakeFetch([thrower]);
+    const timer = recordingSleep();
+    const provider = createAnthropicProvider(settings({ maxRetries: 2 }), { fetch: transport.fetch, sleep: timer.sleep });
+    const text = assertFailure(await provider.complete(SIMPLE_REQUEST, live()), "api_error");
+    assert.equal(transport.sent.length, 1, label);
+    assert.equal(timer.waits.length, 0, label);
+    assert.ok(!/x-api-key|ByteString|index 9|54620|Invalid URL|UND_ERR/.test(text), `${label}: ${text}`);
+  }
+});
+
+test("S-11 connection errors are retried and reported with a fixed phrase only", async () => {
+  const transport = fakeFetch([
+    () => {
+      throw connectionError("ECONNREFUSED");
+    },
+  ]);
+  const timer = recordingSleep();
+  const provider = createAnthropicProvider(settings({ maxRetries: 2 }), { fetch: transport.fetch, sleep: timer.sleep });
+  const text = assertFailure(await provider.complete(SIMPLE_REQUEST, live()), "api_error");
+  assert.equal(transport.sent.length, 3);
+  assert.match(text, /ECONNREFUSED/);
+  assert.ok(!text.includes("127.0.0.1:59999"), text);
+
+  // A connection dropped while the body is read is a connection failure too.
+  const dropped = fakeFetch([
+    () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError("terminated", { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }));
+          },
+        }),
+        { status: 200 },
+      ),
+    json(200, message([{ type: "text", text: "recovered" }])),
+  ]);
+  const second = createAnthropicProvider(settings({ maxRetries: 1 }), { fetch: dropped.fetch, sleep: recordingSleep().sleep });
+  const outcome = await second.complete(SIMPLE_REQUEST, live());
+  assert.ok(outcome.ok);
+  assert.equal(outcome.response.text, "recovered");
+  assert.equal(dropped.sent.length, 2);
+});
+
+test("S-12 a key split by line breaks or spaces leaves no fragment in the message", async () => {
+  const chunks7 = FAKE_KEY.match(/.{1,7}/g) ?? [];
+  const chunks5 = FAKE_KEY.match(/.{1,5}/g) ?? [];
+  const variants: readonly [string, string][] = [
+    ["every 7 chars with LF (review input)", chunks7.join("\n")],
+    ["every 7 chars with CRLF", chunks7.join("\r\n")],
+    ["every 5 chars with spaces", chunks5.join(" ")],
+    ["every 7 chars with tabs and NBSP", chunks7.join("\t ")],
+    ["two halves with a space", `${FAKE_KEY.slice(0, 25)} ${FAKE_KEY.slice(25)}`],
+  ];
+  for (const [label, echoed] of variants) {
+    for (const reply of [
+      json(401, apiError("authentication_error", `invalid key: ${echoed}`)),
+      () => new Response(`upstream rejected ${echoed}`, { status: 401 }),
+    ]) {
+      const transport = fakeFetch([reply]);
+      const provider = createAnthropicProvider(settings({ maxRetries: 0 }), { fetch: transport.fetch });
+      const text = assertFailure(await provider.complete(SIMPLE_REQUEST, live()), "auth_failed");
+      const compact = text.replace(/\s+/g, "");
+      for (const chunk of [...chunks7, ...chunks5].filter((piece) => piece.length >= 5)) {
+        assert.ok(!text.includes(chunk), `${label}: chunk ${chunk} in ${text}`);
+      }
+      for (let index = 0; index + 8 <= FAKE_KEY.length; index += 1) {
+        assert.ok(!compact.includes(FAKE_KEY.slice(index, index + 8)), `${label}: ${text}`);
+      }
+      assert.ok(!/[\u0000-\u001f\u007f]/.test(text), label);
+    }
+  }
 });

@@ -30,7 +30,23 @@ for (const [hash, author, committer, body] of commits) {
   if (TRAILER.test(body)) problems.push(`${short}: trailer or attribution line in message`);
 }
 
-const files = git(["diff", "--name-only", `${BASE}...${branch}`]).split("\n").filter(Boolean);
+// Files touched by the branch's own (non-merge) commits. A three-dot diff is wrong when the
+// branch merged main more than once: it picks an old merge base and lists files that came from main.
+const files = [
+  ...new Set(
+    git(["log", "--no-merges", "--name-only", "--format=", `${BASE}..${branch}`]).split("\n").filter(Boolean),
+  ),
+];
+// What merging the branch would actually change must also stay inside the owned paths.
+const mergeTree = spawnSync("git", ["merge-tree", "--write-tree", "--name-only", BASE, branch], { encoding: "utf8" });
+if (mergeTree.status === 0) {
+  const tree = (mergeTree.stdout.split("\n")[0] ?? "").trim();
+  for (const file of git(["diff", "--name-only", BASE, tree]).split("\n").filter(Boolean)) {
+    if (!files.includes(file)) files.push(file);
+  }
+} else {
+  problems.push("merge with main would conflict");
+}
 for (const file of files) {
   if (!prefixes.some((p) => file === p || file.startsWith(p.endsWith("/") ? p : `${p}/`))) {
     problems.push(`outside owned paths: ${file}`);

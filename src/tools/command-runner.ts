@@ -2,9 +2,19 @@
  * Real command runner: starts one process without a shell, with a filtered environment,
  * a time limit, an output cap and cancellation.
  *
+ * Windows: the name is looked up with PATH and PATHEXT of the child environment (see
+ * `windows-launch.ts`). `.exe` and `.com` start without a shell. `.cmd` and `.bat` start through
+ * `cmd.exe /d /s /c` only when the script is outside the workspace and the script path and
+ * every argument use a narrow character set; anything else is refused as `spawnFailed`.
+ * Other systems: the name is passed to `spawn` as before (no shell).
+ *
  * Known limits (not OS isolation):
- * - Windows: `.cmd` and `.bat` files cannot be started without a shell. Only real executables
- *   (for example `node`) work. Such a start is reported as `spawnFailed`.
+ * - Windows scripts: arguments with spaces, quotes, `%`, `!`, parentheses, `,`, `;`, wildcards
+ *   or non-ASCII characters cannot be passed to a `.cmd`/`.bat`. A script under a path with
+ *   such characters (for example `Program Files (x86)`) or on a UNC path is refused.
+ *   Batch files see `=` and `,` as delimiters in `%1`..`%9`; `%*` keeps the arguments as given.
+ * - What a script starts (for example the scripts in `package.json` that `npm test` runs) is
+ *   not checked by this runner. Such files can be workspace content.
  * - Tree termination is best effort. Windows uses `taskkill /T /F` (forced, no graceful stop).
  *   POSIX signals the process group (SIGTERM, then SIGKILL). Descendants that left the tree or
  *   the group (detached, re-parented after their parent exited, own session) are not reached.
@@ -22,6 +32,9 @@ import path from "node:path";
 
 import { CHILD_ENV_ALLOWLIST, MAX_COMMAND_OUTPUT_BYTES } from "../contracts/index.js";
 import type { RunCommandPayload } from "../contracts/index.js";
+
+import { envValue, planWindowsLaunch, realExecutableFileSystem } from "./windows-launch.js";
+import type { WindowsLaunch } from "./windows-launch.js";
 
 export interface CommandRunRequest {
   readonly executable: string;
@@ -60,6 +73,11 @@ export interface CommandRunnerOptions {
    * Production code injects `envValueFreeOfSecrets(privacy)`. Without it, values are not checked.
    */
   readonly allowEnvValue?: (value: string) => boolean;
+  /**
+   * Real path of the workspace root. Windows only: `.cmd` and `.bat` files inside it are not run,
+   * and without it no `.cmd` or `.bat` file is run at all.
+   */
+  readonly workspaceRoot?: string;
 }
 
 /** Extra bytes captured beyond MAX_COMMAND_OUTPUT_BYTES, so that masking happens before the cut. */
@@ -126,12 +144,36 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
   const parentEnv = options.parentEnv ?? process.env;
   const platform = options.platform ?? process.platform;
   const isWindows = platform === "win32";
+  const systemRoot = envValue(parentEnv, "SystemRoot") ?? "C:\\Windows";
+
+  /** Decides what to start. Windows looks the name up itself; other systems leave it to spawn. */
+  async function plan(
+    request: CommandRunRequest,
+    env: Record<string, string>,
+  ): Promise<WindowsLaunch | CommandSpawnFailure> {
+    if (!isWindows) {
+      return { file: request.executable, args: request.args, verbatimArguments: false, env };
+    }
+    try {
+      const planned = await planWindowsLaunch({
+        executable: request.executable,
+        args: request.args,
+        cwdAbsolute: request.cwdAbsolute,
+        env,
+        workspaceRoot: options.workspaceRoot,
+        systemRoot,
+        fileSystem: realExecutableFileSystem,
+      });
+      return planned.ok ? planned.launch : { spawnFailed: true, message: planned.message };
+    } catch {
+      return { spawnFailed: true, message: "could not start process (unknown)" };
+    }
+  }
 
   function killTree(child: ChildProcess): NodeJS.Timeout | undefined {
     const pid = child.pid;
     if (pid === undefined) return undefined;
     if (isWindows) {
-      const systemRoot = parentEnv["SystemRoot"] ?? parentEnv["SYSTEMROOT"] ?? "C:\\Windows";
       const taskkill = path.win32.join(systemRoot, "System32", "taskkill.exe");
       try {
         const killer = spawn(taskkill, ["/PID", String(pid), "/T", "/F"], {
@@ -156,8 +198,15 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
     return setTimeout(() => signalGroup("SIGKILL"), TERM_TO_KILL_MS);
   }
 
+  const notStarted: RunCommandPayload = { exitCode: null, stdout: "", stderr: "", timedOut: false, truncated: false };
+
   return {
-    run(request, signal) {
+    async run(request, signal) {
+      if (signal.aborted) return notStarted;
+      const launch = await plan(request, buildChildEnv(parentEnv, platform, options.allowEnvValue));
+      if ("spawnFailed" in launch) return launch;
+      if (signal.aborted) return notStarted;
+
       return new Promise((resolve) => {
         const stdout = new OutputCapture();
         const stderr = new OutputCapture();
@@ -169,18 +218,15 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
           truncated: stdout.truncated || stderr.truncated,
         });
 
-        if (signal.aborted) {
-          resolve(payload(null, false));
-          return;
-        }
-
         let child: ChildProcess;
         try {
-          child = spawn(request.executable, [...request.args], {
+          child = spawn(launch.file, [...launch.args], {
             cwd: request.cwdAbsolute,
-            env: buildChildEnv(parentEnv, platform, options.allowEnvValue),
+            env: launch.env,
             shell: false,
             windowsHide: true,
+            // Only cmd.exe gets a command line built by `planWindowsLaunch`, passed as is.
+            windowsVerbatimArguments: launch.verbatimArguments,
             stdio: ["ignore", "pipe", "pipe"],
             // POSIX: own process group, so the whole group can be signalled.
             detached: !isWindows,

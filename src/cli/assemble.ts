@@ -3,9 +3,13 @@
  * Other modules are used through their public `index.ts` exports only.
  */
 
+import { stat } from "node:fs/promises";
+import path from "node:path";
+import { JOURNAL_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { acquireLock, createJournal, releaseLock, writeResult } from "../store/index.js";
+import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createToolRunner } from "../tools/index.js";
 import { createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -16,6 +20,8 @@ import type {
   EngineResult,
   ModelProvider,
   ResolvedTaskSpec,
+  RevertOutcome,
+  RevertRun,
   Workspace,
 } from "../contracts/index.js";
 
@@ -43,6 +49,65 @@ export type AssemblyOutcome =
 
 export type Assemble = (input: AssemblyInput) => Promise<AssemblyOutcome>;
 
+function lockedMessage(holder: LockInfo | null): string {
+  const who = holder === null ? "an unreadable lock file" : `run ${holder.runId} (pid ${holder.pid})`;
+  return `the workspace is locked by ${who}`;
+}
+
+export interface RevertCommandInput {
+  /** Absolute path of an existing directory. */
+  readonly workspace: string;
+  /** The run to revert. Already checked against RUN_ID_PATTERN. */
+  readonly runId: string;
+  /** Id under which this revert holds the workspace lock. */
+  readonly lockId: string;
+  readonly clock: Clock;
+}
+
+export type RevertCommandOutcome =
+  | { readonly ok: true; readonly outcome: RevertOutcome }
+  | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
+
+export type RevertCommand = (input: RevertCommandInput) => Promise<RevertCommandOutcome>;
+
+async function isFile(file: string): Promise<boolean> {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `codaryn revert` around the store's `revertRun` (R-7). The run must have a journal in this
+ * workspace. The workspace lock is held while files are put back, so no run can start meanwhile,
+ * and a running task makes the revert stop with `workspace_locked` before anything changes.
+ */
+export function createRevertCommand(revertRun: RevertRun): RevertCommand {
+  return async ({ workspace, runId, lockId, clock }) => {
+    let workspaceRoot: string;
+    try {
+      workspaceRoot = (await createWorkspace({ root: workspace })).root;
+    } catch {
+      return { ok: false, code: "workspace_not_found", message: "the workspace is not an existing directory" };
+    }
+    const journal = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId, JOURNAL_FILE_NAME);
+    if (!(await isFile(journal))) {
+      return { ok: false, code: "run_not_found", message: "the workspace has no journal for that run id; nothing was changed" };
+    }
+
+    const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
+    if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
+    try {
+      return { ok: true, outcome: await revertRun({ workspaceRoot, runId }) };
+    } catch {
+      return { ok: false, code: "invalid_run_record", message: "the run's journal cannot be read; nothing was changed" };
+    } finally {
+      await releaseLock({ workspaceRoot, runId: lockId });
+    }
+  };
+}
+
 export const assembleRun: Assemble = async (input) => {
   const { task, runId, model, secrets, clock, signal } = input;
 
@@ -55,10 +120,7 @@ export const assembleRun: Assemble = async (input) => {
   const workspaceRoot = workspace.root;
 
   const lock = await acquireLock({ workspaceRoot, runId, clock });
-  if (!lock.ok) {
-    const holder = lock.holder === null ? "an unreadable lock file" : `run ${lock.holder.runId} (pid ${lock.holder.pid})`;
-    return { ok: false, code: "workspace_locked", message: `the workspace is locked by ${holder}` };
-  }
+  if (!lock.ok) return { ok: false, code: "workspace_locked", message: lockedMessage(lock.holder) };
 
   try {
     const privacy = createPrivacyGateway({ secrets });

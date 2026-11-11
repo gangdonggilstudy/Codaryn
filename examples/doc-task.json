@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "example-doc",
+  "workflow": "document",
+  "goal": "README.md에 '## 설치' 절을 '## 사용법' 절 앞에 추가한다. Node 26 이상이 필요하다는 문장과 npm ci 명령을 적는다. 다른 줄은 바꾸지 않는다.",
+  "workspaceRoot": "workspaces/notes",
+  "model": { "provider": "anthropic", "maxOutputTokens": 4096 },
+  "policy": { "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false },
+  "privacy": { "secretEnv": [] },
+  "limits": { "maxModelTurns": 8, "maxToolCalls": 12, "maxTotalTokens": 60000, "maxDurationMs": 300000 },
+  "verifiers": [
+    {
+      "id": "install-section",
+      "kind": "file_rules",
+      "rules": [
+        { "type": "contains", "path": "README.md", "text": "## 설치" },
+        { "type": "contains", "path": "README.md", "text": "npm ci" },
+        { "type": "contains", "path": "README.md", "text": "## 사용법" }
+      ]
+    }
+  ]
+}

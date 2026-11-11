@@ -44,13 +44,20 @@ export type {
   CommandRunRequest,
   CommandSpawnFailure,
 } from "./command-runner.js";
+export { planWindowsLaunch } from "./windows-launch.js";
+export type {
+  ExecutableFileSystem,
+  WindowsLaunch,
+  WindowsLaunchInput,
+  WindowsLaunchPlan,
+} from "./windows-launch.js";
 
 export interface ToolRunnerOptions {
   readonly workspace: Workspace;
   readonly privacy: PrivacyGateway;
   /**
-   * Defaults to the real runner with `allowEnvValue: envValueFreeOfSecrets(privacy)`.
-   * Inject a fake in unit tests.
+   * Defaults to the real runner with `allowEnvValue: envValueFreeOfSecrets(privacy)` and
+   * `workspaceRoot: workspace.root`. Inject a fake in unit tests.
    */
   readonly commandRunner?: CommandRunner;
 }
@@ -121,7 +128,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   const { workspace, privacy } = options;
   const commandRunner =
     options.commandRunner ??
-    createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy) });
+    createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot: workspace.root });
 
   /** Masks a text or reports that the whole call must fail with `masking_failed`. */
   function maskText(text: string): string | null {

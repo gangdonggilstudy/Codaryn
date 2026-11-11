@@ -7,6 +7,16 @@
  *   strings removed before it leaves this module.
  * - A request carries only what the engine passed in `ModelRequest` (MaskedText) plus the fixed
  *   `TOOL_DEFINITIONS`. Thinking blocks the API returns are not echoed back on later requests.
+ *
+ * Review fixes (decisions S-10 to S-12, 2026-11-12):
+ * - Bodies are read as a byte stream and the read stops at a limit: 8 MiB for a success body
+ *   (more is `malformed_response`), 4096 bytes for an error body. Nothing past the limit is buffered.
+ * - A key outside printable ASCII (0x21-0x7E) is refused before any request (`not_configured`).
+ * - A transport error is a connection failure only when its cause carries a known connection code;
+ *   such failures are retried. Any other `TypeError` from fetch is a format error and is not retried.
+ *   No text of a transport error is copied into a message, only fixed phrases and allowlisted codes.
+ * - Before key fragments are removed, control characters and white space are ignored, so a key split
+ *   by line breaks or spaces is still found. A body that is not a JSON error object is not quoted.
  */
 
 import {
@@ -38,11 +48,73 @@ export const ANTHROPIC_MESSAGES_PATH = "/v1/messages";
 
 /** Longest message an outcome carries. */
 export const MAX_ERROR_MESSAGE_CHARS = 300;
-/** Only this much of an error body is looked at. */
+/** A success body larger than this is `malformed_response`. The read stops at the limit. */
+export const MAX_SUCCESS_BODY_BYTES = 8 * 1024 * 1024;
+/** Only this much of an error body is read. */
+export const MAX_ERROR_BODY_BYTES = 4096;
+/** Only this much of any text is looked at before it becomes a message. */
 const MAX_ERROR_SOURCE_CHARS = 4096;
 /** A run of this many characters that also occurs in the key is removed from messages. */
 const KEY_FRAGMENT_CHARS = 8;
 const REDACTED = "[redacted]";
+
+/** One character that separates nothing in a key: control characters, white space, invisible marks. */
+const SEPARATOR = /[\s\u0000-\u001f\u007f-\u009f​-‍⁠﻿]/;
+const SEPARATOR_RUN = /[\s\u0000-\u001f\u007f-\u009f​-‍⁠﻿]+/g;
+
+/** A key may hold printable ASCII only (0x21-0x7E): no space, no control or non-ASCII character. */
+const USABLE_KEY = /^[\x21-\x7e]+$/;
+
+/** True when `apiKey` can be sent in a header as is. The CLI may call this before building a provider. */
+export function isUsableApiKey(apiKey: string): boolean {
+  return USABLE_KEY.test(apiKey);
+}
+
+/** Cause codes of Node's fetch that mean the connection failed. These attempts are retried. */
+const CONNECTION_CODES: ReadonlySet<string> = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ECONNABORTED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENETDOWN",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CLOSED",
+]);
+/** Cause codes that mean the TLS handshake or certificate check failed. Not retried. */
+const TLS_CODE = /^(CERT_[A-Z_]{1,40}|ERR_TLS_[A-Z_]{1,40}|ERR_SSL_[A-Z_]{1,40}|UNABLE_TO_[A-Z_]{1,40}|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN)$/;
+
+type TransportError =
+  | { readonly kind: "connection"; readonly code: string }
+  | { readonly kind: "tls"; readonly code: string }
+  | { readonly kind: "format" }
+  | { readonly kind: "unknown" };
+
+function causeCode(error: unknown): string | null {
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  const code = (cause as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : null;
+}
+
+/**
+ * Connection and format errors both arrive as `TypeError` (often "fetch failed"). Only the cause's
+ * code tells them apart: a known connection code is a connection failure; any other `TypeError`
+ * (invalid header, ByteString conversion, invalid URL, blocked port) is a format error.
+ */
+function classifyTransportError(error: unknown): TransportError {
+  const code = causeCode(error);
+  if (code !== null && CONNECTION_CODES.has(code)) return { kind: "connection", code };
+  if (code !== null && TLS_CODE.test(code)) return { kind: "tls", code };
+  if (error instanceof TypeError) return { kind: "format" };
+  return { kind: "unknown" };
+}
 
 const BASE_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8_000;
@@ -85,16 +157,13 @@ function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function describeError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const cause = (error as { cause?: unknown }).cause;
-  const causeText = cause instanceof Error ? cause.message : cause === undefined ? "" : String(cause);
-  return causeText.length > 0 && causeText !== error.message
-    ? `${error.message} (${causeText})`
-    : error.message;
-}
-
-/** Builds the function every outgoing message passes through. */
+/**
+ * Builds the function every outgoing message passes through.
+ *
+ * Matching runs on a compact view of the text with every separator (control character, white space,
+ * invisible mark) left out, so a key split by line breaks or spaces is still found. A match marks
+ * the original range it spans, separators included. Only then are separator runs turned into one space.
+ */
 function createRedactor(apiKey: string): (text: string) => string {
   const fragments = new Set<string>();
   for (let index = 0; index + KEY_FRAGMENT_CHARS <= apiKey.length; index += 1) {
@@ -103,37 +172,95 @@ function createRedactor(apiKey: string): (text: string) => string {
   const keyShape = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g");
 
   return (input: string): string => {
-    let text = input.length > MAX_ERROR_SOURCE_CHARS ? input.slice(0, MAX_ERROR_SOURCE_CHARS) : input;
-    text = text.split(apiKey).join(REDACTED);
+    const text = input.length > MAX_ERROR_SOURCE_CHARS ? input.slice(0, MAX_ERROR_SOURCE_CHARS) : input;
 
-    if (fragments.size > 0 && text.length >= KEY_FRAGMENT_CHARS) {
-      const covered = new Uint8Array(text.length);
-      for (let index = 0; index + KEY_FRAGMENT_CHARS <= text.length; index += 1) {
-        if (fragments.has(text.slice(index, index + KEY_FRAGMENT_CHARS))) {
-          covered.fill(1, index, index + KEY_FRAGMENT_CHARS);
-        }
-      }
-      let out = "";
-      let index = 0;
-      while (index < text.length) {
-        if (covered[index] === 1) {
-          out += REDACTED;
-          while (index < text.length && covered[index] === 1) index += 1;
-        } else {
-          out += text[index];
-          index += 1;
-        }
-      }
-      text = out;
+    // Compact view: kept characters and where each one sits in `text`.
+    const positions: number[] = [];
+    let compact = "";
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index] as string;
+      if (SEPARATOR.test(char)) continue;
+      positions.push(index);
+      compact += char;
     }
 
-    text = text.replace(keyShape, REDACTED);
-    text = text.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
-    return text.length > MAX_ERROR_MESSAGE_CHARS
-      ? `${text.slice(0, MAX_ERROR_MESSAGE_CHARS - 3)}...`
-      : text;
+    const covered = new Uint8Array(text.length);
+    const cover = (start: number, length: number): void => {
+      const from = positions[start];
+      const to = positions[start + length - 1];
+      if (from !== undefined && to !== undefined) covered.fill(1, from, to + 1);
+    };
+    for (let at = compact.indexOf(apiKey); apiKey.length > 0 && at !== -1; at = compact.indexOf(apiKey, at + 1)) {
+      cover(at, apiKey.length);
+    }
+    for (let index = 0; fragments.size > 0 && index + KEY_FRAGMENT_CHARS <= compact.length; index += 1) {
+      if (fragments.has(compact.slice(index, index + KEY_FRAGMENT_CHARS))) cover(index, KEY_FRAGMENT_CHARS);
+    }
+    for (const match of compact.matchAll(keyShape)) cover(match.index, match[0].length);
+
+    let out = "";
+    let index = 0;
+    while (index < text.length) {
+      if (covered[index] === 1) {
+        out += REDACTED;
+        while (index < text.length && covered[index] === 1) index += 1;
+      } else {
+        out += text[index];
+        index += 1;
+      }
+    }
+
+    out = out.replace(SEPARATOR_RUN, " ").trim();
+    return out.length > MAX_ERROR_MESSAGE_CHARS ? `${out.slice(0, MAX_ERROR_MESSAGE_CHARS - 3)}...` : out;
   };
 }
+
+/** Result of reading a body up to a byte limit. */
+interface LimitedBody {
+  readonly bytes: Uint8Array;
+  /** True when the body had more bytes than the limit. The rest was neither read nor kept. */
+  readonly over: boolean;
+}
+
+/**
+ * Reads at most `limit` bytes of the body, then cancels the stream so the transfer stops.
+ * A body that is `null` (no content) is empty. A response without a readable body throws.
+ */
+async function readLimited(response: Response, limit: number): Promise<LimitedBody> {
+  const stream = response.body;
+  if (stream === null) return { bytes: new Uint8Array(0), over: false };
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let over = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const room = limit - size;
+    if (value.byteLength > room) {
+      if (room > 0) chunks.push(value.subarray(0, room));
+      size += Math.max(room, 0);
+      over = true;
+      // Stop the transfer. Waiting for the cancellation is not needed and could hang.
+      reader.cancel().catch(() => undefined);
+      break;
+    }
+    chunks.push(value);
+    size += value.byteLength;
+  }
+  return { bytes: Buffer.concat(chunks, size), over };
+}
+
+/** Lets go of a body that will not be read. */
+function discardBody(response: Response): void {
+  try {
+    response.body?.cancel().catch(() => undefined);
+  } catch {
+    // A locked or broken body is left to the garbage collector.
+  }
+}
+
+const decoder = new TextDecoder("utf-8");
 
 function validateSettings(settings: ResolvedAnthropicSettings): string {
   if (typeof settings.apiKey !== "string" || settings.apiKey.length === 0) {
@@ -335,23 +462,34 @@ function retryAfterMs(header: string | null, now: number): number | undefined {
   return Number.isNaN(date) ? undefined : Math.max(0, date - now);
 }
 
-function describeHttpError(status: number, text: string): string {
-  try {
-    const value: unknown = JSON.parse(text);
-    if (isPlainObject(value) && isPlainObject(value.error)) {
-      const type = typeof value.error.type === "string" ? ` ${value.error.type}` : "";
-      const message = typeof value.error.message === "string" ? `: ${value.error.message}` : "";
-      const requestId =
-        typeof value.request_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.request_id)
-          ? ` (request ${value.request_id})`
-          : "";
-      return `HTTP ${status}${type}${message}${requestId}`;
+/**
+ * Describes an error response. Only a JSON error object is quoted: its `error.type` (when it is a
+ * plain identifier), its `error.message` and a well-formed request id. Any other body (HTML from a
+ * proxy, plain text, a body cut at the limit) is not quoted at all.
+ */
+function describeHttpError(status: number, body: LimitedBody): string {
+  if (!body.over) {
+    try {
+      const value: unknown = JSON.parse(decoder.decode(body.bytes));
+      if (isPlainObject(value) && isPlainObject(value.error)) {
+        const type =
+          typeof value.error.type === "string" && /^[A-Za-z0-9_]{1,64}$/.test(value.error.type)
+            ? ` ${value.error.type}`
+            : "";
+        const message = typeof value.error.message === "string" ? `: ${value.error.message}` : "";
+        const requestId =
+          typeof value.request_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.request_id)
+            ? ` (request ${value.request_id})`
+            : "";
+        return `HTTP ${status}${type}${message}${requestId}`;
+      }
+    } catch {
+      // Not JSON: not quoted.
     }
-  } catch {
-    // Not JSON: fall through to the raw text.
   }
-  const snippet = text.trim();
-  return snippet.length > 0 ? `HTTP ${status}: ${snippet}` : `HTTP ${status}`;
+  if (body.bytes.byteLength === 0) return `HTTP ${status}`;
+  const why = body.over ? `longer than ${MAX_ERROR_BODY_BYTES} bytes` : "not a JSON error object";
+  return `HTTP ${status} (the error body is ${why} and is not shown)`;
 }
 
 function classifyStatus(status: number): { kind: ModelErrorKind; retryable: boolean } {
@@ -383,6 +521,7 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
   deps: AnthropicProviderDeps = {},
 ): ModelProvider => {
   const url = validateSettings(settings);
+  const keyUsable = isUsableApiKey(settings.apiKey);
   const doFetch = deps.fetch ?? globalThis.fetch;
   const sleep = deps.sleep ?? defaultSleep;
   const redact = createRedactor(settings.apiKey);
@@ -405,7 +544,8 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
       controller.abort();
     }, settings.requestTimeoutMs);
 
-    const transportFailure = (error: unknown): Attempt => {
+    /** `stage` says whether the request was being sent or its response body read. */
+    const transportFailure = (error: unknown, stage: "send" | "read"): Attempt => {
       if (signal.aborted) return { type: "aborted" };
       if (timedOut) {
         return {
@@ -415,12 +555,30 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
           retryable: true,
         };
       }
-      return { type: "failed", kind: "api_error", message: `network error: ${describeError(error)}`, retryable: true };
+      // Fixed phrases only: the error's own text may hold a header value or a character code.
+      const failure = classifyTransportError(error);
+      switch (failure.kind) {
+        case "connection":
+          return { type: "failed", kind: "api_error", message: `network error: connection failed (${failure.code})`, retryable: true };
+        case "tls":
+          return { type: "failed", kind: "api_error", message: `network error: TLS connection failed (${failure.code})`, retryable: false };
+        case "format":
+          return {
+            type: "failed",
+            kind: "api_error",
+            message:
+              stage === "send"
+                ? "the transport refused the request format (header, URL or port); nothing was sent"
+                : "the response body could not be read",
+            retryable: false,
+          };
+        case "unknown":
+          return { type: "failed", kind: "api_error", message: "network error: unknown transport failure", retryable: false };
+      }
     };
 
     try {
       let response: Response;
-      let text: string;
       try {
         response = await doFetch(url, {
           method: "POST",
@@ -429,15 +587,18 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
           signal: controller.signal,
           redirect: "manual",
         });
-        text = await response.text();
       } catch (error) {
-        return transportFailure(error);
+        return transportFailure(error, "send");
       }
-      if (signal.aborted) return { type: "aborted" };
+      if (signal.aborted) {
+        discardBody(response);
+        return { type: "aborted" };
+      }
 
       const status = response.status;
-      if (status >= 200 && status < 300) return { type: "done", outcome: parseMessageBody(text) };
-      if (response.type === "opaqueredirect" || status === 0 || (status >= 300 && status < 400)) {
+      const success = status >= 200 && status < 300;
+      if (!success && (response.type === "opaqueredirect" || status === 0 || (status >= 300 && status < 400))) {
+        discardBody(response);
         return {
           type: "failed",
           kind: "api_error",
@@ -445,12 +606,27 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
           retryable: false,
         };
       }
+
+      let read: LimitedBody;
+      try {
+        read = await readLimited(response, success ? MAX_SUCCESS_BODY_BYTES : MAX_ERROR_BODY_BYTES);
+      } catch (error) {
+        return transportFailure(error, "read");
+      }
+      if (signal.aborted) return { type: "aborted" };
+
+      if (success) {
+        if (read.over) {
+          return { type: "done", outcome: malformed(`the response body is larger than ${MAX_SUCCESS_BODY_BYTES} bytes`) };
+        }
+        return { type: "done", outcome: parseMessageBody(decoder.decode(read.bytes)) };
+      }
       const { kind, retryable } = classifyStatus(status);
       const after = retryable ? retryAfterMs(response.headers.get("retry-after"), Date.now()) : undefined;
       return {
         type: "failed",
         kind,
-        message: describeHttpError(status, text.slice(0, MAX_ERROR_SOURCE_CHARS)),
+        message: describeHttpError(status, read),
         retryable,
         ...(after === undefined ? {} : { retryAfterMs: after }),
       };
@@ -462,6 +638,13 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
 
   async function complete(request: ModelRequest, signal: AbortSignal): Promise<ModelOutcome> {
     if (signal.aborted) return aborted("before the request was sent");
+    if (!keyUsable) {
+      // No position, length or character code: any of them would describe the key.
+      return fail(
+        "not_configured",
+        "the API key may hold printable ASCII characters only (0x21-0x7E, no spaces); nothing was sent",
+      );
+    }
     const built = buildBody(settings, request);
     if (typeof built === "string") return fail("api_error", `request not sent: ${built}`);
 
@@ -494,9 +677,10 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
     async complete(request: ModelRequest, signal: AbortSignal): Promise<ModelOutcome> {
       try {
         return await complete(request, signal);
-      } catch (error) {
+      } catch {
         if (signal.aborted) return aborted("during the request");
-        return fail("api_error", `unexpected provider failure: ${describeError(error)}`);
+        // Fixed phrase: the error's text is not copied (S-11).
+        return fail("api_error", "unexpected provider failure");
       }
     },
   };

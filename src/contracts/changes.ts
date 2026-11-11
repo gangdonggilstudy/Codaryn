@@ -6,9 +6,10 @@
  * the originals back later, also after the process that ran the task has ended.
  *
  * Snapshots are raw local text and may hold secrets (R-8). They are kept like the workspace files
- * themselves: never written to the journal, never sent to a model, never printed. No tool can
- * reach them, because they live in the state directory. They stay until the user deletes the run
- * directory; nothing removes them automatically.
+ * themselves: never written to the journal, never sent to a model, never printed. File tools
+ * cannot reach them, because they live in the state directory. A command the policy allows runs
+ * with the user's rights, so it can read them (T-11). They stay until the user deletes the run
+ * directory; nothing removes them automatically. Delete it once the run is no longer needed.
  */
 
 import type { RawText } from "./text.js";
@@ -58,9 +59,11 @@ export type RevertAction = "restored" | "deleted";
 /**
  * changed_since_run: the file's current state is not what the run left (a later edit, or the
  * file is gone). missing_snapshot: no original was kept for this path. io_error: reading or
- * writing this file failed.
+ * writing this file failed. missing_record: an original was kept for this path but the journal
+ * has no `file_changed` for it (the run stopped between the snapshot and the record), so the
+ * state the run left is unknown and the file is not touched (T-10).
  */
-export type RevertSkipReason = "changed_since_run" | "missing_snapshot" | "io_error";
+export type RevertSkipReason = "changed_since_run" | "missing_snapshot" | "io_error" | "missing_record";
 
 /**
  * `path` is the path from the journal's `file_changed` record: relative to the workspace root,
@@ -73,6 +76,11 @@ export interface RevertedFile {
 }
 
 export interface SkippedFile {
+  /**
+   * As for RevertedFile, except `missing_record`: there is no journal record, so the path comes
+   * from the snapshot index. That is the path as the workspace resolved it, not masked; a file
+   * name that holds a registered secret would show it.
+   */
   readonly path: string;
   readonly reason: RevertSkipReason;
 }
@@ -93,8 +101,13 @@ export interface RevertOutcome {
  *   Otherwise the file is not touched and is reported in `skipped`.
  * - A path recorded with a privacy token cannot be matched to its snapshot and is reported as
  *   `missing_snapshot`.
+ * - A path in the snapshot index that has no `file_changed` record is reported as
+ *   `missing_record` and not touched, so the outcome is partial (T-10). A path recorded with a
+ *   token therefore shows up twice: masked as `missing_snapshot`, unmasked as `missing_record`.
+ * - A last journal line that was cut off (no final LF, not parseable) is ignored (T-10).
  * - A failure on one file is reported for that file and the others continue. It rejects only
- *   when the journal cannot be read or parsed, and then nothing was changed.
+ *   when the journal cannot be read or another line cannot be parsed, and then nothing was
+ *   changed.
  * - The caller holds the workspace lock while it runs. Nothing is written to the run's journal.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

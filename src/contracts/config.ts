@@ -35,7 +35,7 @@ export const CONFIG_SCHEMA_VERSION = 1;
 export interface CodarynConfig {
   readonly schemaVersion: 1;
   readonly model?: string;
-  /** Positive integer. */
+  /** Positive integer, at most MAX_OUTPUT_TOKENS_LIMIT. */
   readonly maxOutputTokens?: number;
   /** `https:` URL, or `http:` for a loopback host only (local test servers). */
   readonly apiBaseUrl?: string;
@@ -57,6 +57,11 @@ export const DEFAULT_ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";
 export const DEFAULT_REQUEST_TIMEOUT_MS = 600_000;
 export const DEFAULT_MAX_RETRIES = 2;
 export const MAX_RETRIES_LIMIT = 10;
+/**
+ * Absolute cap for `maxOutputTokens`, in the task (`model.maxOutputTokens`) and in the config
+ * file (T-14). A larger value is `invalid_task` or `invalid_config`.
+ */
+export const MAX_OUTPUT_TOKENS_LIMIT = 200_000;
 
 /** Policy for the quick form when the config file has none: no commands, nothing restored. */
 export const DENY_ALL_POLICY: PolicyConfig = {

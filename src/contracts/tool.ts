@@ -9,6 +9,13 @@ import type { ContentHash, JsonObject, MaskedText, RawText } from "./text.js";
 export const TOOL_NAMES = ["read_file", "search_files", "write_file", "run_command"] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
+/**
+ * Largest `run_command.timeoutMs` a model may ask for (T-3). The engine rejects a larger value as
+ * `invalid_args`, and TOOL_DEFINITIONS states it as the schema maximum. The run's own
+ * `maxDurationMs` still ends the run first when it is shorter.
+ */
+export const MAX_COMMAND_TIMEOUT_MS = 600_000;
+
 /** All paths are relative to the workspace root and use `/` or the platform separator. */
 export interface ReadFileArgs {
   readonly path: string;
@@ -42,7 +49,7 @@ export interface RunCommandArgs {
   readonly args: readonly string[];
   /** Working directory relative to the workspace root. Defaults to ".". */
   readonly cwd?: string;
-  /** Defaults to DEFAULT_COMMAND_TIMEOUT_MS. */
+  /** Defaults to DEFAULT_COMMAND_TIMEOUT_MS. At most MAX_COMMAND_TIMEOUT_MS; more is `invalid_args` (T-3). */
   readonly timeoutMs?: number;
 }
 
@@ -331,7 +338,7 @@ export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
         executable: { type: "string", minLength: 1 },
         args: { type: "array", items: { type: "string" } },
         cwd: { type: "string", description: 'Working directory relative to the workspace root. Default ".".' },
-        timeoutMs: { type: "integer", minimum: 1 },
+        timeoutMs: { type: "integer", minimum: 1, maximum: MAX_COMMAND_TIMEOUT_MS },
       },
       required: ["executable", "args"],
       additionalProperties: false,

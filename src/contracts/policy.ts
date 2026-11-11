@@ -54,3 +54,38 @@ export interface PolicyGateOptions {
 
 /** Signature of `createPolicyGate`, exported by `src/policy/index.ts`. */
 export type CreatePolicyGate = (options: PolicyGateOptions) => PolicyGate;
+
+/**
+ * Why a `protectedPaths` value or entry is not usable:
+ * - not_a_list: the value is not an array (`index` is null)
+ * - not_a_string, empty: the entry is not a non-empty string
+ * - absolute: absolute, drive-relative, UNC or device path
+ * - parent_segment: a `..` segment
+ * - invalid_name: a name that cannot address an ordinary file (on Windows: forbidden characters,
+ *   a colon, a trailing dot or space, a DOS device name)
+ */
+export const PROTECTED_PATH_PROBLEMS = [
+  "not_a_list",
+  "not_a_string",
+  "empty",
+  "absolute",
+  "parent_segment",
+  "invalid_name",
+] as const;
+export type ProtectedPathProblemReason = (typeof PROTECTED_PATH_PROBLEMS)[number];
+
+export interface ProtectedPathProblem {
+  /** Position of the entry in the list, or null when the value itself is not a list. */
+  readonly index: number | null;
+  readonly reason: ProtectedPathProblemReason;
+}
+
+/**
+ * Signature of `checkProtectedPaths`, exported by `src/policy/index.ts` (T-13). The single format
+ * check for `PolicyConfig.protectedPaths`: the CLI rejects the task or config file when it returns
+ * a problem, and `createPolicyGate` denies every write (fail closed) for a value it would reject.
+ * Pure and lexical: no file system access. `undefined` and an empty list have no problem.
+ * Problems are in list order; an empty result means the value is usable.
+ * Messages built from it name the position only, never the entry.
+ */
+export type CheckProtectedPaths = (value: unknown) => readonly ProtectedPathProblem[];

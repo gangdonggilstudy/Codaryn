@@ -85,3 +85,29 @@
 | S-B 제공자 수정(S-10~S-12) | w1:p5 | `claude-quality` / `claude/security-core` | `src/model/anthropic/**`, `tests/unit/model/anthropic/**` (p8에서 이관) |
 | S-C CLI 연결(S-2 포함)과 문서 | w1:p1 | `claude-design` / `claude/core-engine` | `src/cli/**`(security 제외), `docs/cli-contract.md` — F1 뒤에 한다 |
 | S-D 통합 회귀 | w1:p4 | `claude-operations` / `claude/cli-verification` | `tests/integration/**` — F5와 함께 |
+
+## 단계 2 교차 검토(F6) 결함 수정 (2026-11-12 추가)
+
+검토 원문은 `docs/reviews/2026-11-12-f6-review-*.md` 다섯 건이다. 높음 1건, 중간 9건이 재현됐다. 기준 브랜치는 p1의 연결 커밋 `3f3756d`(`claude/core-engine`)다.
+
+| 번호 | 결정 | 대상 결함 | 담당 |
+| --- | --- | --- | --- |
+| T-1 | 조립에서 명령 실행기를 자식 환경 값 검사(`envValueFreeOfSecrets`)와 작업 공간 루트를 넣어 만들고, 도구와 검증기가 같은 실행기를 쓴다. 지금은 옵션 없이 만들어 `.cmd` 실행이 항상 거부되고 환경 값 검사가 꺼져 있다 | tools F6-1(높음) | p1 |
+| T-2 | 자식이 끝나면 종료 코드를 그때 확정하고, 파이프는 짧은 유예(500ms) 뒤 닫는다. 트리 종료는 자식이 살아 있을 때만 한다(끝난 PID에 `taskkill`을 쓰지 않는다). 분리된 자손이 남을 수 있다는 점은 문서에 적는다 | tools F6-3 | p6 |
+| T-3 | 모델이 주는 `run_command.timeoutMs`는 `MAX_COMMAND_TIMEOUT_MS`(600000) 이하만 받는다. 넘으면 `invalid_args`다 | tools F6-6, wiring 3 | p5 |
+| T-4 | 실행 파일이 작업 공간 안으로 풀리면 확장자와 관계없이 실행하지 않는다 | tools F6-7 | p6 |
+| T-5 | 실패 서명은 검증기 id, 결과, 그리고 숫자를 정규화한 가림 근거로 만든다(연속한 숫자와 소수는 한 기호로 바꾼다). 실행 시간처럼 매번 바뀌는 숫자 때문에 같은 실패 감지가 무력화되지 않게 한다 | engine 1 | p5 |
+| T-6 | 검증기는 근거를 원문 상태에서 자르지 않는다. 실행기가 준 출력을 그대로 넘기고 잘렸는지 표시한다(`evidenceTruncated`). 엔진이 가린 뒤에 자르며, 잘린 출력이면 끝의 여유 구간을 버린 다음 자른다. 기록용 근거 상한은 `MAX_EVIDENCE_BYTES`(8192)다 | engine 2 | p8(검증기), p5(엔진), p1(계약) |
+| T-7 | 재수정을 켜면 검증기 명령이 모델이 쓴 코드를 실행하고 그 출력이 모델에 돌아간다. 코드는 바꾸지 않고 알려진 한계로 문서에 적는다. OS 격리가 없는 동안의 한계다 | engine 3 | p1(문서) |
+| T-8 | 실행 시간 한도가 검증 도중 끝나면 `budget-exhausted`/`max_duration`이다 | engine 4 | p5 |
+| T-9 | 죽은 잠금 회수를 원자적으로 한다(고유 이름으로 옮긴 뒤 내용 확인). `EPERM`과 `EBUSY`는 `workspace_locked`로 처리한다 | store 1 | p8 |
+| T-10 | 스냅샷 색인에는 있는데 journal에 `file_changed`가 없는 경로는 되돌리기에서 `skipped`(`missing_record`)로 보고해 `partial`이 되게 한다. journal의 잘린 마지막 줄은 무시하고 계속한다 | store 2, 4 | p8, p1(계약) |
+| T-11 | 스냅샷은 파일 도구로는 닿을 수 없지만 실행된 명령은 읽을 수 있다. 계약 주석과 문서를 그렇게 고치고, 쓰고 난 실행 디렉터리를 지우라고 안내한다 | store 3 | p1(문서) |
+| T-12 | `revert`의 `--workspace`에도 UNC와 장치 경로 검사를 적용한다. `--cancel-file`이 작업 공간 안이면 거부한다 | wiring 1, 4 | p1 |
+| T-13 | `protectedPaths` 형식 검사를 정책 모듈의 함수 하나로 통일해 CLI와 게이트가 같은 판정을 한다. 항목이 링크이면 실경로도 보호 목록에 넣고, 실경로가 작업 공간 밖이면 형식 오류다 | wiring 2, policy M1, L4 | p7, p1(연결) |
+| T-14 | 키 검사: 이스케이프한 키를 중복 필드에 둔 경우를 잡고, 오류 위치에는 알려진 필드 이름만 적는다. 작업 공간 루트의 대체 데이터 스트림은 작업 공간 안으로 판정한다. `maxOutputTokens`에 절대 상한을 둔다 | policy L1~L3, wiring 5 | p7, p1(연결) |
+| T-15 | env 파일 옵션 이름을 `--env-file`에서 `--vars-file`로 바꾼다. Node 26이 스크립트 이름 뒤의 `--env-file`도 스스로 확인해, 없는 파일이면 CLI보다 먼저 종료 9로 끝나고 UNC 경로면 CLI의 검사보다 먼저 접근하기 때문이다. `--env-file`은 받지 않는다 | p4 통합 검증의 결함 후보 3 | p1, p5(문서), p4(테스트) |
+
+고치지 않고 한계로 기록하는 것: 여유 구간(4096바이트)보다 긴 비밀 변형의 경계 노출, 상태 디렉터리를 조작한 경우의 되돌리기, 삭제 직전의 짧은 경쟁, 서로 다른 실패를 번갈아 내는 경우.
+
+순서: p1이 계약 추가분을 먼저 커밋한다 → p5(엔진), p6(도구), p7(정책과 보안 모듈), p8(검증기와 저장소)이 `claude/core-engine`을 병합해 병렬로 고친다 → p1이 연결한다 → p4의 통합 테스트와 함께 병합한다.

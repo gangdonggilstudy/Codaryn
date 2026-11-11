@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CODARYN_MODEL_ENV, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
+import { ANTHROPIC_LIMITS } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import { writeProgram } from "../fixtures/programs.js";
 import { FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
@@ -78,7 +79,8 @@ function assertNoRun(workspace: string): void {
 
 test("A10 anthropic provider without key and model -> provider_not_configured, no run", { timeout: 60_000 }, async (t) => {
   const sb = createSandbox(t);
-  const taskPath = writeTask(sb, { id: "a10-none", model: { provider: "anthropic" } });
+  // S-7: an anthropic task needs a numeric token limit, or invalid_task comes first.
+  const taskPath = writeTask(sb, { id: "a10-none", model: { provider: "anthropic" }, limits: ANTHROPIC_LIMITS });
   const run = await runTask(taskPath, { cwd: sb.base, env: cliEnv() });
   expectCliError(run, "provider_not_configured");
   assert.equal(run.exitCode, 7);
@@ -87,7 +89,7 @@ test("A10 anthropic provider without key and model -> provider_not_configured, n
 
 test("A10 anthropic provider with model but no key -> provider_not_configured, no run", { timeout: 60_000 }, async (t) => {
   const sb = createSandbox(t);
-  const taskPath = writeTask(sb, { id: "a10-model-only", model: { provider: "anthropic" } });
+  const taskPath = writeTask(sb, { id: "a10-model-only", model: { provider: "anthropic" }, limits: ANTHROPIC_LIMITS });
   const run = await runTask(taskPath, { cwd: sb.base, env: cliEnv({ extra: { [CODARYN_MODEL_ENV]: "fake-model-for-tests" } }) });
   expectCliError(run, "provider_not_configured");
   assertNoRun(sb.workspace);

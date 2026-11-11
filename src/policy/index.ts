@@ -18,6 +18,9 @@ import type {
 import { lexicalCheck } from "../workspace/lexical.js";
 import { compileProtectedPaths } from "./protected.js";
 
+/** T-13: the single format rule for `protectedPaths`, used by the CLI and by this gate. */
+export { checkProtectedPaths } from "./protected.js";
+
 type Denial = Extract<PolicyDecision, { allowed: false }>;
 
 const ALLOWED: PolicyDecision = { allowed: true };
@@ -177,8 +180,9 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
           const outcome = await workspace.resolve(value, access);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
-          } else if (access === "write" && protectedPaths.covers(outcome.path.relative)) {
-            // Compared after links are resolved, so a link cannot lead around a protected path.
+          } else if (access === "write" && (await protectedPaths.coversEffective(outcome.path.relative, workspace))) {
+            // Compared after links are resolved, so a link cannot lead around a protected path,
+            // and each entry is resolved too, so a link entry protects its real path (T-13).
             denials.push(deny("path", "protected_path"));
           }
         }
@@ -187,3 +191,4 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
     },
   };
 };
+

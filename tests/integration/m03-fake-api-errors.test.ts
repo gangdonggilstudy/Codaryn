@@ -17,11 +17,11 @@ import type {
   ModelErrorKind,
   VerifierConfig,
 } from "../../src/contracts/index.js";
-import { FAKE_MODEL_CONFIG, fakeApiConfig, writeAnthropicTask, writeConfigFile } from "../fixtures/anthropic.js";
-import { DEFAULT_LIMITS, createSandbox, writeWorkspaceFile } from "../fixtures/builders.js";
+import { ANTHROPIC_LIMITS, FAKE_MODEL_CONFIG, fakeApiConfig, writeAnthropicTask, writeConfigFile } from "../fixtures/anthropic.js";
+import { createSandbox, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { FAKE_API_KEY } from "../fixtures/secrets.js";
-import { cliEnv, expectRunResult, readRunFiles } from "../support/cli.js";
+import { cliEnv, expectCliError, expectRunResult, readRunFiles } from "../support/cli.js";
 import {
   HANG,
   MOCK_LABEL,
@@ -71,7 +71,7 @@ async function fakeRun(t: TestContext, setup: FakeRunSetup): Promise<FakeRunOutc
   );
   const taskPath = writeAnthropicTask(sb, {
     id: setup.id,
-    limits: { ...DEFAULT_LIMITS, maxDurationMs: 120_000, ...setup.limits },
+    limits: { ...ANTHROPIC_LIMITS, maxDurationMs: 120_000, ...setup.limits },
     verifiers: setup.verifiers ?? README_EXISTS,
   });
   const run = await runGuarded(sb, ["run", "--task", taskPath, "--config", configPath], cliEnv({ fakeApiKey: FAKE_API_KEY }), 110_000);
@@ -177,13 +177,22 @@ test(`${MOCK_LABEL} E3-i usage 누락과 토큰 한도`, { timeout: 120_000 }, a
     assertProtocolClean(outcome.api);
   });
 
-  await t.test("usage missing without a token limit -> the run goes on and totals stay unknown", async (st) => {
-    const outcome = await fakeRun(st, { id: "m03-usage-free", steps: readThenFinish(null), limits: { maxTotalTokens: null } });
-    assert.equal(outcome.result.status, "done");
-    assert.equal(outcome.api.requests.length, 2);
-    assert.equal(outcome.result.usage.inputTokens, null);
-    assert.equal(outcome.result.usage.outputTokens, null);
-    assertProtocolClean(outcome.api);
+  // S-7 moved this case: anthropic no longer runs without a token limit, so a run whose usage is
+  // missing can never go on unchecked. A task that states `maxTotalTokens: null` is refused first.
+  await t.test("no token limit (null) with anthropic -> invalid_task before any request (S-7)", async (st) => {
+    const sb = createSandbox(st);
+    writeWorkspaceFile(sb, "README.md", "# 문서\n");
+    const api = await startFakeAnthropic(st, readThenFinish(null));
+    const configPath = writeConfigFile(sb, fakeApiConfig(api.url, { model: FAKE_MODEL_CONFIG }));
+    const taskPath = writeAnthropicTask(sb, {
+      id: "m03-usage-free",
+      limits: { ...ANTHROPIC_LIMITS, maxTotalTokens: null },
+      verifiers: README_EXISTS,
+    });
+    const run = await runGuarded(sb, ["run", "--task", taskPath, "--config", configPath], cliEnv({ fakeApiKey: FAKE_API_KEY }));
+    expectCliError(run, "invalid_task");
+    assert.equal(api.requests.length, 0);
+    assert.equal(existsSync(join(sb.workspace, ".codaryn", "runs")), false);
   });
 
   await t.test("reported usage over the token limit -> budget-exhausted/max_total_tokens", async (st) => {

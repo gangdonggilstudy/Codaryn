@@ -12,7 +12,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from "../contracts/index.js";
 import type { CliErrorCode, CodarynConfig, ModelConfig, ResolvedAnthropicSettings } from "../contracts/index.js";
-import { API_BASE_URL_RULE, normalizeApiBaseUrl } from "./config.js";
+import { normalizeApiBaseUrlStrict } from "./security/index.js";
 
 export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -57,11 +57,10 @@ export function resolveAnthropicSettings(
   const fromEnv = envValue(env, CODARYN_API_BASE_URL_ENV);
   let apiBaseUrl: string;
   if (fromEnv !== null) {
-    const normalized = normalizeApiBaseUrl(fromEnv);
-    if (normalized === null) {
-      return { ok: false, code: "invalid_config", message: `${CODARYN_API_BASE_URL_ENV} ${API_BASE_URL_RULE}` };
-    }
-    apiBaseUrl = normalized;
+    // S-9: the same strict rule as the config file's apiBaseUrl.
+    const normalized = normalizeApiBaseUrlStrict(fromEnv, CODARYN_API_BASE_URL_ENV);
+    if (!normalized.ok) return { ok: false, code: "invalid_config", message: normalized.message };
+    apiBaseUrl = normalized.url;
   } else {
     apiBaseUrl = config?.apiBaseUrl ?? DEFAULT_ANTHROPIC_API_BASE_URL;
   }

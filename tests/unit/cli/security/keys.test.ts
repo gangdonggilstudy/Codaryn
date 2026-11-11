@@ -76,3 +76,30 @@ describe("S-8 goalHoldsKey", () => {
     assert.equal(goalHoldsKey("fix the failing tests in src/", CURRENT), false);
   });
 });
+
+describe("T-14 key checks (policy review L1, L2)", () => {
+  test("L1: an escaped key in the first of two duplicate fields is caught on the raw text", () => {
+    // Built from the character code so that no tool or editor turns the escape into the letter.
+    const BS = String.fromCharCode(92);
+    const escapedShape = `${BS}u0073${FAKE_SHAPED.slice(1)}`;
+    const text = `{"goal":"${escapedShape}","goal":"g2"}`;
+    assert.ok(text.includes(BS) && !text.includes(FAKE_SHAPED), "the raw text holds only the escaped form");
+    assert.deepEqual(findKeyInJson(JSON.parse(text) as unknown, null), { kind: "none" });
+    assert.equal(rawTextHoldsKey(text, null), true);
+    const escapedCurrent = `${BS}u0066${CURRENT.slice(1)}`;
+    assert.equal(rawTextHoldsKey(`{"model":"${escapedCurrent}","model":"m"}`, CURRENT), true);
+    // Ordinary escapes that do not form a key stay fine, including an escaped backslash before "u".
+    assert.equal(rawTextHoldsKey(`{"goal":"tab${BS}tand ${BS}u00e9 and ${BS}${BS}u0073k"}`, CURRENT), false);
+  });
+
+  test("L2: a key field name is printed only when it is exactly a key field name", () => {
+    assert.deepEqual(findKeyInJson({ apikeyHunter2Secret: "x" }, null), { kind: "key", location: "<field>" });
+    const withFragment = `apikey${CURRENT.slice(3, 23)}`;
+    const outcome = findKeyInJson({ limits: { [withFragment]: "x" } }, CURRENT);
+    assert.deepEqual(outcome, { kind: "key", location: "limits.<field>" });
+    assert.ok(!JSON.stringify(outcome).includes(CURRENT.slice(3, 23)));
+    for (const name of ["apiKey", "api_key", "API-KEY", "token", "Authorization", "secretKey"]) {
+      assert.deepEqual(findKeyInJson({ model: { [name]: "x" } }, null), { kind: "key", location: `model.${name}` }, name);
+    }
+  });
+});

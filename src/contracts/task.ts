@@ -50,7 +50,7 @@ export type ModelConfig =
       readonly provider: "anthropic";
       /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
       readonly model?: string;
-      /** Output token cap per request. Overrides the config file's value. */
+      /** Output token cap per request, at most MAX_OUTPUT_TOKENS_LIMIT. Overrides the config file's value. */
       readonly maxOutputTokens?: number;
     };
 
@@ -83,7 +83,10 @@ export interface PolicyConfig {
    *   "tests" covers "tests" and "tests/a.ts", not "tests2". `.` covers the whole workspace.
    * - It is compared with `ResolvedPath.relative`, after links are resolved, so a link cannot
    *   lead around it. On Windows the comparison ignores case.
-   * - Entries are relative, use `/` or the platform separator, and have no `..` segment.
+   * - An entry that is itself a link (junction, symbolic link) also protects its real path. A
+   *   real path outside the workspace makes the entry unusable: every write is denied (T-13).
+   * - Entries are relative, use `/` or the platform separator, and have no `..` segment. The
+   *   format rule is `checkProtectedPaths` (policy.ts), shared by the CLI and the policy gate.
    * - Absent or empty: nothing is protected. Only the task or config file sets it. A model,
    *   the other task fields and files in the workspace cannot change it.
    * - Commands allowed by `commands` can still change these paths. It guards the file tools only.

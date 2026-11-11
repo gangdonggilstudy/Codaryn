@@ -3,7 +3,7 @@
  * Whether a call is permitted is decided by the policy gate.
  */
 
-import { CONTENT_HASH_PATTERN_SOURCE } from "../contracts/index.js";
+import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS } from "../contracts/index.js";
 import type { JsonObject, JsonValue, ToolArgsByName, ToolName } from "../contracts/index.js";
 
 const HASH_PATTERN = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
@@ -68,9 +68,13 @@ function isValid(name: ToolName, args: JsonObject): boolean {
       if (!Array.isArray(list) || !list.every((item) => typeof item === "string")) return false;
       if (!isOptionalString(args["cwd"])) return false;
       const timeout = args["timeoutMs"];
+      // T-3: a model may not ask for a longer command time limit than MAX_COMMAND_TIMEOUT_MS.
       return (
         timeout === undefined ||
-        (typeof timeout === "number" && Number.isInteger(timeout) && timeout > 0)
+        (typeof timeout === "number" &&
+          Number.isInteger(timeout) &&
+          timeout > 0 &&
+          timeout <= MAX_COMMAND_TIMEOUT_MS)
       );
     }
   }

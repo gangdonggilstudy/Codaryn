@@ -27,13 +27,15 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * - apiBaseUrl: CODARYN_API_BASE_URL → `apiBaseUrl` → DEFAULT_ANTHROPIC_API_BASE_URL.
  * - requestTimeoutMs, maxRetries: this file → the DEFAULT_ constants.
  * - limits: each field from the task's `limits`, else from this file. A field set in neither is an error.
+ *   This file's values are upper bounds: a task may lower them, never raise them or lift a token
+ *   limit with null. An anthropic run needs a token limit. Absolute caps apply to both (S-7).
  * - policy, verifiers: used by the quick form only. A task file states its own.
  * - secretEnv: added to the task's `privacy.secretEnv` in both forms.
  */
 export interface CodarynConfig {
   readonly schemaVersion: 1;
   readonly model?: string;
-  /** Positive integer. */
+  /** Positive integer, at most MAX_OUTPUT_TOKENS_LIMIT. */
   readonly maxOutputTokens?: number;
   /** `https:` URL, or `http:` for a loopback host only (local test servers). */
   readonly apiBaseUrl?: string;
@@ -55,6 +57,11 @@ export const DEFAULT_ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";
 export const DEFAULT_REQUEST_TIMEOUT_MS = 600_000;
 export const DEFAULT_MAX_RETRIES = 2;
 export const MAX_RETRIES_LIMIT = 10;
+/**
+ * Absolute cap for `maxOutputTokens`, in the task (`model.maxOutputTokens`) and in the config
+ * file (T-14). A larger value is `invalid_task` or `invalid_config`.
+ */
+export const MAX_OUTPUT_TOKENS_LIMIT = 200_000;
 
 /** Policy for the quick form when the config file has none: no commands, nothing restored. */
 export const DENY_ALL_POLICY: PolicyConfig = {
@@ -70,8 +77,9 @@ export const QUICK_TASK_WORKFLOW = "general";
 
 /**
  * Field names that hold a key. A task or config file with such a field at any depth is
- * rejected as `key_in_file` before anything else. Compared after lowercasing and removing
- * every character other than a-z and 0-9. Any name containing "apikey" also matches.
+ * rejected as `key_in_file` before anything else. Compared after NFKC normalization (so
+ * full-width forms fold to ASCII), lowercasing and removing every character other than a-z
+ * and 0-9. Any name containing "apikey" also matches.
  */
 export const KEY_FIELD_NAMES = [
   "apikey",
@@ -87,7 +95,8 @@ export const KEY_FIELD_NAMES = [
 ] as const;
 
 /**
- * Shape of an Anthropic API key. A string value of this shape in a task or config file is
- * rejected as `key_in_file`, as is the current ANTHROPIC_API_KEY value.
+ * Shape of an Anthropic API key. A string value of this shape in a task or config file (in the
+ * raw text and in the parsed value) or in `--goal` is rejected as `key_in_file`, as is the
+ * current ANTHROPIC_API_KEY value when it has at least 16 characters.
  */
 export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";

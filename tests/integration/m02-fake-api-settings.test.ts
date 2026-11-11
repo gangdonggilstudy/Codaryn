@@ -31,6 +31,7 @@ import {
   writeConfigFile,
   writeEnvFile,
 } from "../fixtures/anthropic.js";
+import { ANTHROPIC_LIMITS } from "../fixtures/anthropic.js";
 import type { AnthropicTaskOptions } from "../fixtures/anthropic.js";
 import { DEFAULT_LIMITS, createSandbox, withBom, writeAt, writeWorkspaceFile } from "../fixtures/builders.js";
 import { FAKE_API_KEY, FAKE_API_KEY_DECOY, FAKE_API_KEY_ENV_FILE } from "../fixtures/secrets.js";
@@ -139,7 +140,8 @@ test(`${MOCK_LABEL} E3-d 키·모델·출력 상한·한도가 없으면 요청 
     const sb = createSandbox(st);
     writeWorkspaceFile(sb, "README.md", "# 문서\n");
     const api = await startFakeAnthropic(st, [replyText("끝")]);
-    const configPath = writeConfigFile(sb, fakeApiConfig(api.url, { model: FAKE_MODEL_CONFIG, limits: DEFAULT_LIMITS }));
+    // S-7: config limits for anthropic carry a numeric token limit.
+    const configPath = writeConfigFile(sb, fakeApiConfig(api.url, { model: FAKE_MODEL_CONFIG, limits: ANTHROPIC_LIMITS }));
     const taskPath = writeAnthropicTask(sb, { id: "m02-config-limits", limits: "omit", verifiers: README_EXISTS });
     const run = await runGuarded(sb, ["run", "--task", taskPath, "--config", configPath], cliEnv({ fakeApiKey: FAKE_API_KEY }));
     const result = expectRunResult(run, "anthropic");
@@ -328,7 +330,8 @@ test(`${MOCK_LABEL} E3-g task 파일의 apiBaseUrl과 자동 탐색 파일로는
   });
 });
 
-test(`${MOCK_LABEL} E3-j --env-file로 준 임시 파일의 변수로 실행`, { timeout: 90_000 }, async (t) => {
+// T-15: the option is `--vars-file`. `--env-file` is refused (Node reads that name itself).
+test(`${MOCK_LABEL} E3-j --vars-file로 준 임시 파일의 변수로 실행`, { timeout: 90_000 }, async (t) => {
   await t.test("key, model and address come from the named env file", async (st) => {
     const sb = createSandbox(st);
     writeWorkspaceFile(sb, "README.md", "# 문서\n");
@@ -341,7 +344,7 @@ test(`${MOCK_LABEL} E3-j --env-file로 준 임시 파일의 변수로 실행`, {
     });
     const taskPath = writeAnthropicTask(sb, { id: "m02-env-file", maxOutputTokens: 500, verifiers: README_EXISTS });
 
-    const run = await runGuarded(sb, ["run", "--task", taskPath, "--env-file", envFile], cliEnv());
+    const run = await runGuarded(sb, ["run", "--task", taskPath, "--vars-file", envFile], cliEnv());
     const result = expectRunResult(run, "anthropic");
     readRunFiles(sb.workspace, result);
 
@@ -368,7 +371,21 @@ test(`${MOCK_LABEL} E3-j --env-file로 준 임시 파일의 변수로 실행`, {
     ].join("\n");
     const envFile = writeAt(sb.base, "bom-vars.env", withBom(envText));
     const taskPath = writeAnthropicTask(sb, { id: "m02-env-bom", maxOutputTokens: 500 });
-    const run = await runGuarded(sb, ["run", "--task", taskPath, "--env-file", envFile], cliEnv());
+    const run = await runGuarded(sb, ["run", "--task", taskPath, "--vars-file", envFile], cliEnv());
     assertRefusedBeforeSending(run, [api], sb.workspace, ["invalid_config"], [FAKE_API_KEY_ENV_FILE]);
+  });
+
+  await t.test("--env-file is not accepted -> invalid_arguments, nothing read or sent (T-15)", async (st) => {
+    const sb = createSandbox(st);
+    const api = await startFakeAnthropic(st, [replyText("끝")]);
+    // The file exists: for a missing path the Node runtime itself stops first (exit 9), see report.
+    const envFile = writeEnvFile(join(sb.base, "fake-vars.env"), {
+      [ANTHROPIC_API_KEY_ENV]: FAKE_API_KEY_ENV_FILE,
+      [CODARYN_MODEL_ENV]: FAKE_MODEL_ENV_FILE,
+      [CODARYN_API_BASE_URL_ENV]: api.url,
+    });
+    const taskPath = writeAnthropicTask(sb, { id: "m02-env-file-refused", maxOutputTokens: 500 });
+    const run = await runGuarded(sb, ["run", "--task", taskPath, "--env-file", envFile], cliEnv());
+    assertRefusedBeforeSending(run, [api], sb.workspace, ["invalid_arguments"], [FAKE_API_KEY_ENV_FILE]);
   });
 });

@@ -42,12 +42,28 @@ export type VerifierKind = VerifierConfig["kind"];
  */
 export type VerifierOutcome = "pass" | "fail" | "inconclusive";
 
+/**
+ * Upper bound, in UTF-8 bytes, for the evidence of one verifier result as recorded and printed
+ * (T-6). The engine cuts after masking, never the verifier on raw text.
+ */
+export const MAX_EVIDENCE_BYTES = 8192;
+
 /** Local result. It must be masked before it is recorded or printed. */
 export interface RawVerifierResult {
   readonly id: string;
   readonly kind: VerifierKind;
   readonly outcome: VerifierOutcome;
+  /**
+   * Raw evidence. A verifier does not cut it (T-6): command output is passed on as the command
+   * runner captured it, up to MAX_COMMAND_OUTPUT_BYTES plus the runner's capture slack per stream.
+   */
   readonly evidence: RawText;
+  /**
+   * True when the command runner dropped output beyond its capture, so `evidence` ends at an
+   * arbitrary byte. The engine then masks, drops the trailing slack where a cut secret variant
+   * could remain, and only then cuts to MAX_EVIDENCE_BYTES. Absent means false.
+   */
+  readonly evidenceTruncated?: boolean;
   /** What was checked. Required, at least one entry. */
   readonly checked: readonly string[];
   /** What this verifier does not check. Required. An empty list states "no known limits". */

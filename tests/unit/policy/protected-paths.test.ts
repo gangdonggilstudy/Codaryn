@@ -14,7 +14,7 @@ import type {
   ToolDescriptor,
   Workspace,
 } from "../../../src/contracts/index.js";
-import { createPolicyGate } from "../../../src/policy/index.js";
+import { checkProtectedPaths, createPolicyGate } from "../../../src/policy/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 
 const IS_WINDOWS = process.platform === "win32";
@@ -274,5 +274,99 @@ describe("PO-07 protected paths", () => {
     const g = gate(["tests"]);
     assert.deepEqual(await write(g, "../outside.txt"), { allowed: false, permission: "path", code: "outside_root" });
     assert.deepEqual(await write(g, ".codaryn/x"), { allowed: false, permission: "path", code: "state_dir" });
+  });
+});
+
+describe("T-13 checkProtectedPaths: one format rule for the CLI and the gate", () => {
+  test("absent and empty lists have no problem; a usable list has none either", () => {
+    assert.deepEqual(checkProtectedPaths(undefined), []);
+    assert.deepEqual(checkProtectedPaths([]), []);
+    assert.deepEqual(checkProtectedPaths(["tests", "./docs/spec.md", "a/b/", "."]), []);
+  });
+
+  test("reports each unusable entry by position and reason, never by value", () => {
+    assert.deepEqual(checkProtectedPaths("tests"), [{ index: null, reason: "not_a_list" }]);
+    assert.deepEqual(checkProtectedPaths(null), [{ index: null, reason: "not_a_list" }]);
+    assert.deepEqual(checkProtectedPaths(["ok", 5, "", "   ", "/abs", "../x", "a/../b", "a\0b"]), [
+      { index: 1, reason: "not_a_string" },
+      { index: 2, reason: "empty" },
+      { index: 3, reason: "empty" },
+      { index: 4, reason: "absolute" },
+      { index: 5, reason: "parent_segment" },
+      { index: 6, reason: "parent_segment" },
+      { index: 7, reason: "invalid_name" },
+    ]);
+  });
+
+  test("Windows names the gate cannot match are invalid_name (the L4 inputs)", { skip: !IS_WINDOWS }, () => {
+    assert.deepEqual(checkProtectedPaths(["tests ", "tests.", "a|b", "nul", "src/con.txt", "ab:c", "a*b"]), [
+      { index: 0, reason: "invalid_name" },
+      { index: 1, reason: "invalid_name" },
+      { index: 2, reason: "invalid_name" },
+      { index: 3, reason: "invalid_name" },
+      { index: 4, reason: "invalid_name" },
+      { index: 5, reason: "invalid_name" },
+      { index: 6, reason: "invalid_name" },
+    ]);
+    // "a:b" names drive A: relative to its current directory, so it is absolute too.
+    assert.deepEqual(checkProtectedPaths(["C:tests", "a:b", "C:\\tests", "\\\\server\\share", "\\tests"]), [
+      { index: 0, reason: "absolute" },
+      { index: 1, reason: "absolute" },
+      { index: 2, reason: "absolute" },
+      { index: 3, reason: "absolute" },
+      { index: 4, reason: "absolute" },
+    ]);
+  });
+
+  test("the gate denies every write exactly when checkProtectedPaths reports a problem", async () => {
+    const samples: unknown[] = [["tests"], ["tests", "../x"], ["ok", ""], "tests", ["src/a.ts"]];
+    if (IS_WINDOWS) samples.push(["tests "], ["tests."], ["a|b"], ["nul"]);
+    for (const value of samples) {
+      const unusable = checkProtectedPaths(value).length > 0;
+      const decision = await write(gate(value), "free/unrelated.txt");
+      assert.deepEqual(decision, unusable ? PROTECTED : ALLOW, JSON.stringify(value));
+    }
+  });
+});
+
+describe("T-13 an entry that is a link protects its real path too (M1)", () => {
+  test("a junction entry also protects the directory it points to", async (t) => {
+    fs.mkdirSync(path.join(root, "shared", "fixtures"), { recursive: true });
+    fs.writeFileSync(path.join(root, "shared", "fixtures", "expected.txt"), "expected\n");
+    if (!tryJunction(path.join(root, "shared", "fixtures"), path.join(root, "fixtures"))) {
+      t.skip("cannot create a directory link on this system");
+      return;
+    }
+    const g = gate(["fixtures"]);
+    const effective = (target: string) =>
+      g.checkEffective({ id: "c1", name: "write_file", args: writeArgs(target) } as unknown as EffectiveToolCall, BUILTIN_TOOLS.write_file);
+    assert.deepEqual(await effective("fixtures/expected.txt"), PROTECTED);
+    assert.deepEqual(await effective("shared/fixtures/expected.txt"), PROTECTED);
+    assert.deepEqual(await effective("shared/fixtures/new.txt"), PROTECTED);
+    if (IS_WINDOWS) assert.deepEqual(await effective("SHARED/FIXTURES/expected.txt"), PROTECTED);
+    // Only the linked directory is covered, not its parent or a sibling.
+    assert.deepEqual(await effective("shared/other.txt"), ALLOW);
+    assert.deepEqual(await effective("shared/fixtures2/x.txt"), ALLOW);
+  });
+
+  test("an entry whose real path is outside the workspace makes every write fail closed", async (t) => {
+    const outsideDir = path.join(base, "outside-fixtures");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    if (!tryJunction(outsideDir, path.join(root, "linked-out"))) {
+      t.skip("cannot create a directory link on this system");
+      return;
+    }
+    const g = gate(["linked-out"]);
+    const call = { id: "c1", name: "write_file", args: writeArgs("src/a.ts") } as unknown as EffectiveToolCall;
+    assert.deepEqual(await g.checkEffective(call, BUILTIN_TOOLS.write_file), PROTECTED);
+    // Reading stays allowed.
+    const read = { id: "c1", name: "read_file", args: { path: "src/a.ts" } } as unknown as EffectiveToolCall;
+    assert.deepEqual(await g.checkEffective(read, BUILTIN_TOOLS.read_file), ALLOW);
+  });
+
+  test("an entry that does not exist yet keeps its lexical form", async () => {
+    const g = gate(["generated"]);
+    assert.deepEqual(await write(g, "generated/out.txt"), PROTECTED);
+    assert.deepEqual(await write(g, "src/a.ts"), ALLOW);
   });
 });

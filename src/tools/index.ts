@@ -36,6 +36,7 @@ import type { CommandRunner } from "./command-runner.js";
 
 export {
   COMMAND_CAPTURE_SLACK_BYTES,
+  PIPE_GRACE_AFTER_EXIT_MS,
   OutputCapture,
   buildChildEnv,
   createCommandRunner,
@@ -58,8 +59,10 @@ export interface ToolRunnerOptions {
   readonly workspace: Workspace;
   readonly privacy: PrivacyGateway;
   /**
-   * Defaults to the real runner with `allowEnvValue: envValueFreeOfSecrets(privacy)` and
-   * `workspaceRoot: workspace.root`. Inject a fake in unit tests.
+   * Defaults to `createWorkspaceCommandRunner({ workspace, privacy })`. A runner passed here is
+   * used as given: build it with `createWorkspaceCommandRunner` too (the CLI shares one runner
+   * with the verifiers), never with a bare `createCommandRunner()`, or the env value check and the
+   * workspace rules are missing. Unit tests inject a fake.
    */
   readonly commandRunner?: CommandRunner;
   /**
@@ -80,6 +83,36 @@ export function envValueFreeOfSecrets(privacy: PrivacyGateway): (value: string) 
     const masked = privacy.mask(value);
     return masked.ok && masked.text === value;
   };
+}
+
+export interface WorkspaceCommandRunnerOptions {
+  /** The run's workspace. Its real root decides which files are inside the workspace (T-4). */
+  readonly workspace: Pick<Workspace, "root">;
+  /** The run's gateway. Allow-listed variables whose value holds a registered secret are dropped. */
+  readonly privacy: PrivacyGateway;
+  /** For tests. Defaults to `process.env`. */
+  readonly parentEnv?: NodeJS.ProcessEnv;
+  /** For tests. Defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
+}
+
+/**
+ * THE way to build the command runner for a run (T-1). It sets both options the runner needs:
+ * `allowEnvValue: envValueFreeOfSecrets(privacy)` and `workspaceRoot: workspace.root`.
+ * Build it once per run and pass the same runner to `createToolRunner({ commandRunner })` and to
+ * the verifier runner. A runner from `createCommandRunner()` without these options passes secret
+ * values in allow-listed variables to the child and, on Windows, refuses every `.cmd`/`.bat` and
+ * does not refuse executables inside the workspace.
+ *
+ * CLI assembly: `const commandRunner = createWorkspaceCommandRunner({ workspace, privacy });`
+ */
+export function createWorkspaceCommandRunner(options: WorkspaceCommandRunnerOptions): CommandRunner {
+  return createCommandRunner({
+    ...(options.parentEnv === undefined ? {} : { parentEnv: options.parentEnv }),
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
+    allowEnvValue: envValueFreeOfSecrets(options.privacy),
+    workspaceRoot: options.workspace.root,
+  });
 }
 
 const TOKEN_PATTERN = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE, "g");
@@ -136,7 +169,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   const { workspace, privacy, changeRecorder } = options;
   const commandRunner =
     options.commandRunner ??
-    createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot: workspace.root });
+    createWorkspaceCommandRunner({ workspace, privacy });
 
   /** Masks a text or reports that the whole call must fail with `masking_failed`. */
   function maskText(text: string): string | null {

@@ -402,8 +402,9 @@ describe("revertRun (WS-06)", () => {
       const journalFile = runPath(root, JOURNAL_FILE_NAME);
       const good = await readFile(journalFile, "utf8");
 
+      // A cut LAST line is ignored (T-10, tested below). Any other unparseable line still rejects.
       const broken: Record<string, string> = {
-        "incomplete last line": `${good}{"seq":2`,
+        "cut line that is not the last": `{"seq":0,"runId":"${RUN_ID}"\n${good}`,
         "line that is not JSON": `${good}not json\n`,
         "record of another run": `${good}${JSON.stringify({ seq: 2, runId: "other-run", type: "run_finished" })}\n`,
         "file_changed without a valid newHash": `${good}${JSON.stringify({ seq: 2, runId: RUN_ID, type: "file_changed", path: "a.txt", previousHash: null, newHash: "nope", created: true })}\n`,
@@ -418,6 +419,100 @@ describe("revertRun (WS-06)", () => {
         });
         assert.equal(await readFile(join(root, "a.txt"), "utf8"), "a by the run\n", label);
       }
+    });
+  });
+});
+
+describe("revertRun (T-10)", () => {
+  test("a path with a kept original but no file_changed record is reported as missing_record and not touched", async () => {
+    // Review input (store-revert 2, E4a): b.txt is recorded; a.txt is written but its record is lost.
+    await withRoot(async (root) => {
+      await put(root, "a.txt", "a0\n");
+      await put(root, "b.txt", "b0\n");
+      const run = await startRun(root);
+      await change(run, "b.txt", "b1\n");
+      const resolved = await run.workspace.resolve("a.txt", "write");
+      assert.ok(resolved.ok);
+      await run.recorder.saveOriginal(resolved.path, raw("a0\n"));
+      const written = await run.workspace.writeText({ path: resolved.path, expectedHash: sha("a0\n"), text: raw("a1\n") });
+      assert.ok(written.ok);
+      await run.journal.close();
+
+      const outcome = await revertKeepingJournal(root);
+      assert.deepEqual(outcome, {
+        reverted: [{ path: "b.txt", action: "restored" }],
+        skipped: [{ path: "a.txt", reason: "missing_record" }],
+      });
+      assert.equal(await readFile(join(root, "a.txt"), "utf8"), "a1\n");
+      assert.equal(await readFile(join(root, "b.txt"), "utf8"), "b0\n");
+    });
+  });
+
+  test("a cut last journal line is ignored; its path, kept in the index, is missing_record", async () => {
+    // Review input (store-revert 4, E4b): complete records followed by a line cut by a crash.
+    await withRoot(async (root) => {
+      await put(root, "x.txt", "x0\n");
+      await put(root, "y.txt", "y0\n");
+      await put(root, "z.txt", "z0\n");
+      const run = await startRun(root);
+      await change(run, "x.txt", "x1\n");
+      await change(run, "y.txt", "y1\n");
+      await change(run, "z.txt", "z1\n");
+      await run.journal.close();
+
+      const journalFile = runPath(root, JOURNAL_FILE_NAME);
+      const lines = (await readFile(journalFile, "utf8")).split("\n");
+      const last = lines[2] ?? "";
+      await writeFile(journalFile, `${lines[0]}\n${lines[1]}\n${last.slice(0, Math.floor(last.length / 2))}`, "utf8");
+
+      const outcome = await revertRun({ workspaceRoot: root, runId: RUN_ID });
+      assert.deepEqual(outcome, {
+        reverted: [
+          { path: "x.txt", action: "restored" },
+          { path: "y.txt", action: "restored" },
+        ],
+        skipped: [{ path: "z.txt", reason: "missing_record" }],
+      });
+      assert.equal(await readFile(join(root, "z.txt"), "utf8"), "z1\n");
+
+      // A last line without LF that is still complete JSON is a record like any other.
+      await put(root, "x.txt", "x1\n");
+      await writeFile(journalFile, `${lines[0]}`, "utf8");
+      const whole = await revertRun({ workspaceRoot: root, runId: RUN_ID });
+      assert.deepEqual(whole.reverted, [{ path: "x.txt", action: "restored" }]);
+    });
+  });
+
+  test("a path recorded with a token shows up masked as missing_snapshot and from the index as missing_record", async () => {
+    await withRoot(async (root) => {
+      const secretName = "fake-secret-name-9921.txt";
+      await put(root, secretName, "before\n");
+      const run = await startRun(root);
+      const resolved = await run.workspace.resolve(secretName, "write");
+      assert.ok(resolved.ok);
+      await run.recorder.saveOriginal(resolved.path, raw("before\n"));
+      const written = await run.workspace.writeText({ path: resolved.path, expectedHash: sha("before\n"), text: raw("after\n") });
+      assert.ok(written.ok);
+      const tokenPath = "[[CODARYN_SECRET:00112233445566ff]]";
+      await run.journal.append({
+        type: "file_changed",
+        callId: "call-1",
+        path: masked(tokenPath),
+        previousHash: written.previousHash,
+        newHash: written.newHash,
+        created: false,
+      });
+      await run.journal.close();
+
+      const outcome = await revertKeepingJournal(root);
+      assert.deepEqual(outcome, {
+        reverted: [],
+        skipped: [
+          { path: tokenPath, reason: "missing_snapshot" },
+          { path: secretName, reason: "missing_record" },
+        ],
+      });
+      assert.equal(await readFile(join(root, secretName), "utf8"), "after\n");
     });
   });
 });

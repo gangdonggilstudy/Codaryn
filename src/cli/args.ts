@@ -3,7 +3,7 @@
  *
  *   codaryn run --task <task.json> [options]
  *   codaryn run --workspace <dir> --goal <text> [options]
- *   options: --config <config.json>  --env-file <path>  --cancel-file <path>
+ *   options: --config <config.json>  --vars-file <path>  --cancel-file <path>
  *   codaryn revert --workspace <dir> --run <runId>
  */
 
@@ -17,8 +17,8 @@ export interface RunArgs {
   readonly input: RunInput;
   /** `--config`. When null, CODARYN_CONFIG may name the file. */
   readonly configPath: string | null;
-  /** `--env-file`. Read only when given (C-2). */
-  readonly envFile: string | null;
+  /** `--vars-file`: variables to load. Read only when given (C-2, T-15). */
+  readonly varsFile: string | null;
   readonly cancelFile: string | null;
 }
 
@@ -30,9 +30,16 @@ export const REVERT_USAGE = "codaryn revert --workspace <dir> --run <runId>";
 
 export const USAGE =
   "usage: codaryn run (--task <task.json> | --workspace <dir> --goal <text>) " +
-  `[--config <config.json>] [--env-file <path>] [--cancel-file <path>] | ${REVERT_USAGE}`;
+  `[--config <config.json>] [--vars-file <path>] [--cancel-file <path>] | ${REVERT_USAGE}`;
 
-const OPTIONS = ["--task", "--workspace", "--goal", "--config", "--env-file", "--cancel-file"] as const;
+const OPTIONS = ["--task", "--workspace", "--goal", "--config", "--vars-file", "--cancel-file"] as const;
+
+/**
+ * T-15: Node 26 reads `--env-file` itself, even after the script name: a missing file ends the
+ * process (exit 9) and a UNC path is opened before codaryn can check it. codaryn does not take it.
+ */
+export const ENV_FILE_REFUSED_MESSAGE =
+  "--env-file is not a codaryn option: Node reads that name itself before codaryn starts. Use --vars-file <path>";
 type Option = (typeof OPTIONS)[number];
 
 const REVERT_OPTIONS = ["--workspace", "--run"] as const;
@@ -91,6 +98,10 @@ export function parseRevertArgs(argv: readonly string[]): ParseRevertArgsOutcome
 export function parseArgs(argv: readonly string[]): ParseArgsOutcome {
   const [command, ...rest] = argv;
   if (command !== "run") return { ok: false, message: USAGE };
+  // Checked by name before anything else, so the hint is not lost in the generic usage message.
+  if (rest.some((item, index) => index % 2 === 0 && (item === "--env-file" || item.startsWith("--env-file=")))) {
+    return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
+  }
 
   const read = readOptions<Option>(rest, OPTIONS);
   if (!read.ok) return read;
@@ -119,7 +130,7 @@ export function parseArgs(argv: readonly string[]): ParseArgsOutcome {
       command: "run",
       input,
       configPath: values.get("--config") ?? null,
-      envFile: values.get("--env-file") ?? null,
+      varsFile: values.get("--vars-file") ?? null,
       cancelFile: values.get("--cancel-file") ?? null,
     },
   };

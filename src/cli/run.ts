@@ -3,12 +3,25 @@
  * assembled engine. Every outcome becomes one CliOutput object and its exit code.
  * Messages never contain secret values, keys or file contents.
  *
- * Order: arguments → `--env-file` → read the config and task files → key check on both
- * (`key_in_file`) → validate the config, then the task → workspace → secret values → model.
+ * Order (security checks S-1 to S-9 from `./security`):
+ *  1. arguments; every path given on the command line must be a local path (S-5)
+ *  2. `--vars-file` (T-15): read, reject a BOM, load; values it newly set become secrets (S-4)
+ *  3. current key; CODARYN_CONFIG must be a local path (S-5); `--goal` must not hold a key (S-8)
+ *  4. config and task files: read, key check on the raw text, parse, key check on the parsed
+ *     value with a depth limit (S-6). A key stops the run before anything else is checked
+ *  5. validate the config (S-3, S-7, S-9), then the task (S-3, S-5, S-7)
+ *  6. the workspace exists; the env, config, task and script files are outside it (S-1)
+ *  7. secret values: secretEnv (S-3 messages), the key in every run (S-2), env file values (S-4)
+ *  8. model, then the assembled engine
  */
 
 import path from "node:path";
-import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, CODARYN_CONFIG_ENV, RESULT_SCHEMA_VERSION } from "../contracts/index.js";
+import {
+  ANTHROPIC_API_KEY_ENV,
+  CLI_ERROR_EXIT_CODES,
+  CODARYN_CONFIG_ENV,
+  RESULT_SCHEMA_VERSION,
+} from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   CliErrorCode,
@@ -26,12 +39,20 @@ import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
 import type { Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
-import { findKeyInFile } from "./keys.js";
 import { anthropicProviderFactory } from "./provider.js";
 import { createRunId } from "./run-id.js";
+import {
+  MAX_KEY_SCAN_DEPTH,
+  findKeyInJson,
+  goalHoldsKey,
+  rawTextHoldsKey,
+  secretEnvNotSetMessage,
+  selectEnvFileSecrets,
+} from "./security/index.js";
+import type { WorkspaceLocation } from "./security/index.js";
 import { envValue, resolveAnthropicSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { buildQuickTask, parseTask, withConfigSecrets } from "./task.js";
+import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 
 export interface CliEnvironment {
   readonly argv: readonly string[];
@@ -42,10 +63,15 @@ export interface CliEnvironment {
   readonly readFile: (path: string) => Promise<string>;
   readonly isDirectory: (path: string) => Promise<boolean>;
   /**
-   * Loads an env file given by `--env-file` into `env` (process.loadEnvFile in the real CLI).
+   * Loads the variables file given by `--vars-file` into `env` (process.loadEnvFile in the real CLI).
    * Variables already set keep their values. Throws when the file cannot be read.
    */
   readonly loadEnvFile: (path: string) => void;
+  /**
+   * S-1: where a file really is relative to the workspace root, after links (the security
+   * module's `locateInWorkspace` in the real CLI). Anything but "outside" is rejected.
+   */
+  readonly locateInWorkspace: (file: string, workspaceRoot: string) => Promise<WorkspaceLocation>;
   readonly clock: Clock;
   readonly randomBytes: (size: number) => Uint8Array;
   readonly assemble: Assemble;
@@ -72,9 +98,17 @@ function error(code: CliErrorCode, message: string): { output: CliErrorOutput; e
 export const cliError = error;
 
 /** Task, config and script files may start with a UTF-8 byte order mark (common on Windows). */
-async function readJson(io: CliEnvironment, file: string): Promise<{ ok: true; value: unknown } | { ok: false }> {
+async function readText(io: CliEnvironment, file: string): Promise<string | null> {
   try {
-    return { ok: true, value: JSON.parse((await io.readFile(file)).replace(/^﻿/, "")) as unknown };
+    return (await io.readFile(file)).replace(/^﻿/, "");
+  } catch {
+    return null;
+  }
+}
+
+function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown };
   } catch {
     return { ok: false };
   }
@@ -87,93 +121,177 @@ function scrub(message: string, secrets: readonly string[]): string {
 
 const KEY_HINT = `keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`;
 
+/** A file read before the run, with where it came from and the error code that belongs to it. */
+interface InputFile {
+  readonly label: string;
+  readonly path: string;
+  readonly code: "invalid_config" | "invalid_task";
+  readonly text: string;
+  value?: unknown;
+}
+
 export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const parsed = parseArgs(io.argv);
   if (!parsed.ok) return error("invalid_arguments", parsed.message);
   const args = parsed.args;
 
-  if (args.envFile !== null) {
-    const envPath = path.resolve(io.cwd, args.envFile);
+  // 1. S-5: nothing given on the command line may reach another machine or a device.
+  const argumentPaths: [string | null, CliErrorCode, string][] = [
+    [args.input.kind === "task" ? args.input.taskPath : null, "invalid_task", "--task"],
+    [args.input.kind === "quick" ? args.input.workspace : null, "invalid_arguments", "--workspace"],
+    [args.configPath, "invalid_config", "--config"],
+    [args.varsFile, "invalid_config", "--vars-file"],
+    [args.cancelFile, "invalid_arguments", "--cancel-file"],
+  ];
+  for (const [given, code, option] of argumentPaths) {
+    if (given === null) continue;
+    const problem = localPathProblem(given, io.cwd);
+    if (problem !== null) return error(code, `the path given by ${option} ${problem}`);
+  }
+
+  // 2. The env file. S-4: values it newly sets are registered as secrets later.
+  let envPath: string | null = null;
+  let envSecrets: readonly string[] = [];
+  if (args.varsFile !== null) {
+    envPath = path.resolve(io.cwd, args.varsFile);
     let envText: string;
     try {
       envText = await io.readFile(envPath);
     } catch {
-      return error("invalid_config", "the file given by --env-file cannot be read");
+      return error("invalid_config", "the file given by --vars-file cannot be read");
     }
     // process.loadEnvFile would read a BOM as part of the first name and silently skip that variable.
     if (envText.startsWith("﻿")) {
-      return error("invalid_config", "the file given by --env-file starts with a byte order mark; save it as UTF-8 without BOM");
+      return error("invalid_config", "the file given by --vars-file starts with a byte order mark; save it as UTF-8 without BOM");
     }
+    const before = { ...io.env };
     try {
       io.loadEnvFile(envPath);
     } catch {
-      return error("invalid_config", "the file given by --env-file cannot be read");
+      return error("invalid_config", "the file given by --vars-file cannot be read");
     }
+    envSecrets = selectEnvFileSecrets(before, { ...io.env });
   }
 
-  const configSource = args.configPath ?? envValue(io.env, CODARYN_CONFIG_ENV);
-  let configJson: { readonly value: unknown } | null = null;
+  // 3. The current key, the config path from the environment, and the goal (S-5, S-8).
+  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const configFromEnv = args.configPath === null ? envValue(io.env, CODARYN_CONFIG_ENV) : null;
+  if (configFromEnv !== null) {
+    const problem = localPathProblem(configFromEnv, io.cwd);
+    if (problem !== null) return error("invalid_config", `the path given by ${CODARYN_CONFIG_ENV} ${problem}`);
+  }
+  if (args.input.kind === "quick" && goalHoldsKey(args.input.goal, currentKey)) {
+    return error("key_in_file", `the goal contains a key value; ${KEY_HINT}`);
+  }
+
+  // 4. Read both files, then look for a key in each before anything else is judged (C-1, S-6).
+  const files: InputFile[] = [];
+  const configSource = args.configPath ?? configFromEnv;
   if (configSource !== null) {
-    const read = await readJson(io, path.resolve(io.cwd, configSource));
-    if (!read.ok) return error("invalid_config", "the config file cannot be read as JSON");
-    configJson = { value: read.value };
+    const configPath = path.resolve(io.cwd, configSource);
+    const text = await readText(io, configPath);
+    if (text === null) return error("invalid_config", "the config file cannot be read as JSON");
+    files.push({ label: "config file", path: configPath, code: "invalid_config", text });
   }
-
-  let taskFile: { readonly value: unknown; readonly dir: string } | null = null;
   if (args.input.kind === "task") {
     const taskPath = path.resolve(io.cwd, args.input.taskPath);
-    const read = await readJson(io, taskPath);
-    if (!read.ok) return error("invalid_task", "the task file cannot be read as JSON");
-    taskFile = { value: read.value, dir: path.dirname(taskPath) };
+    const text = await readText(io, taskPath);
+    if (text === null) return error("invalid_task", "the task file cannot be read as JSON");
+    files.push({ label: "task file", path: taskPath, code: "invalid_task", text });
   }
-
-  // C-1: a key in either file stops the run before anything else is checked.
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
-  for (const [label, file] of [["config file", configJson], ["task file", taskFile]] as const) {
-    if (file === null) continue;
-    const where = findKeyInFile(file.value, currentKey);
-    if (where !== null) return error("key_in_file", `the ${label} has a key field or key value at ${where}; ${KEY_HINT}`);
+  for (const file of files) {
+    if (rawTextHoldsKey(file.text, currentKey)) return error("key_in_file", `the ${file.label} contains a key value; ${KEY_HINT}`);
   }
+  for (const file of files) {
+    const json = parseJson(file.text);
+    if (!json.ok) return error(file.code, `the ${file.label} cannot be read as JSON`);
+    file.value = json.value;
+  }
+  for (const file of files) {
+    const found = findKeyInJson(file.value, currentKey);
+    if (found.kind === "key") {
+      return error("key_in_file", `the ${file.label} has a key field or key value at ${found.location}; ${KEY_HINT}`);
+    }
+    if (found.kind === "too_deep") {
+      return error(file.code, `the ${file.label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`);
+    }
+  }
+  const configFile = files.find((file) => file.code === "invalid_config") ?? null;
+  const taskFile = files.find((file) => file.code === "invalid_task") ?? null;
 
+  // 5. Validate the config, then the task.
   let config: CodarynConfig | null = null;
-  if (configJson !== null) {
-    const outcome = parseConfig(configJson.value);
+  if (configFile !== null) {
+    const outcome = parseConfig(configFile.value);
     if (!outcome.ok) return error("invalid_config", outcome.message);
     config = outcome.config;
   }
 
   const taskOutcome =
     taskFile !== null
-      ? parseTask(taskFile.value, taskFile.dir, { limits: config?.limits })
+      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: config?.limits })
       : args.input.kind === "quick"
         ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config })
         : null;
   if (taskOutcome === null) return error("internal_error", "no task input");
-  if (!taskOutcome.ok) return error(taskFile !== null ? "invalid_task" : "invalid_config", taskOutcome.message);
+  if (!taskOutcome.ok) return error(taskOutcome.code, taskOutcome.message);
+
+  // Where each secret name came from, for S-3 messages that give a position, never a name.
+  const secretSources: { readonly name: string; readonly field: string; readonly index: number }[] = [];
+  const ownField = taskFile !== null ? "privacy.secretEnv" : "secretEnv";
+  taskOutcome.task.privacy.secretEnv.forEach((name, index) => secretSources.push({ name, field: ownField, index }));
+  if (taskFile !== null) {
+    (config?.secretEnv ?? []).forEach((name, index) => {
+      if (!secretSources.some((source) => source.name === name)) secretSources.push({ name, field: "secretEnv", index });
+    });
+  }
   const task = withConfigSecrets(taskOutcome.task, config);
 
+  // 6. The workspace, and S-1: no file that shapes this or a later run may lie inside it.
   if (!(await io.isDirectory(task.workspaceRoot))) {
     return error("workspace_not_found", "workspaceRoot is not an existing directory");
   }
-
-  const secrets: string[] = [];
-  for (const name of task.privacy.secretEnv) {
-    const value = io.env[name];
-    if (value === undefined || value.length === 0) {
-      return error("secret_env_missing", `environment variable ${name} listed in privacy.secretEnv is not set`);
+  const located: [string | null, CliErrorCode, string][] = [
+    [envPath, "invalid_config", "the file given by --vars-file"],
+    [configFile?.path ?? null, "invalid_config", "the config file"],
+    [taskFile?.path ?? null, "invalid_task", "the task file"],
+    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file"],
+    // T-12: a cancel file inside the workspace could be created by the run itself.
+    [args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile), "invalid_arguments", "the file given by --cancel-file"],
+  ];
+  for (const [file, code, label] of located) {
+    if (file === null) continue;
+    const where = await io.locateInWorkspace(file, task.workspaceRoot);
+    if (where !== "outside") {
+      return error(code, `${label} is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it`);
     }
-    if (!secrets.includes(value)) secrets.push(value);
+  }
+
+  // 7. Secret values.
+  const secrets: string[] = [];
+  const addSecret = (value: string): void => {
+    if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
+  };
+  for (const source of secretSources) {
+    const value = io.env[source.name];
+    if (value === undefined || value.length === 0) {
+      return error("secret_env_missing", secretEnvNotSetMessage(source.field, source.index));
+    }
+    addSecret(value);
   }
   // S-2: the key is masked in every run, whatever the provider. A scripted task can still read
   // a workspace file that holds it.
-  if (currentKey !== null && !secrets.includes(currentKey)) secrets.push(currentKey);
+  if (currentKey !== null) addSecret(currentKey);
+  // S-4: what the env file set, so a value read back from a file or an output is masked too.
+  envSecrets.forEach(addSecret);
 
+  // 8. The model.
   let model: ModelProvider;
   if (task.model.provider === "anthropic") {
     const resolved = resolveAnthropicSettings(task.model, io.env, config);
     if (!resolved.ok) return error(resolved.code, resolved.message);
     // Already registered above (S-2); kept so the key sent is always a registered secret.
-    if (!secrets.includes(resolved.settings.apiKey)) secrets.push(resolved.settings.apiKey);
+    addSecret(resolved.settings.apiKey);
     const factory = io.createAnthropicProvider === undefined ? anthropicProviderFactory : io.createAnthropicProvider;
     if (factory === null) {
       return error("provider_not_implemented", "the anthropic provider is not connected; nothing was sent");
@@ -185,8 +303,9 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
       return error("internal_error", "the anthropic provider rejected the resolved settings; nothing was sent");
     }
   } else {
-    const scriptJson = await readJson(io, task.model.scriptPath);
-    if (!scriptJson.ok) return error("invalid_script", "the script file cannot be read as JSON");
+    const scriptText = await readText(io, task.model.scriptPath);
+    const scriptJson = scriptText === null ? null : parseJson(scriptText);
+    if (scriptJson === null || !scriptJson.ok) return error("invalid_script", "the script file cannot be read as JSON");
     const script = parseScript(scriptJson.value);
     if (!script.ok) return error("invalid_script", script.message);
     model = createScriptedProvider(script.script);

@@ -11,6 +11,7 @@ import { parseRevertArgs } from "./args.js";
 import type { RevertCommand, RevertCommandOutcome } from "./assemble.js";
 import { cliError } from "./run.js";
 import { createRunId } from "./run-id.js";
+import { localPathProblem } from "./task.js";
 
 export interface RevertEnvironment {
   readonly argv: readonly string[];
@@ -19,8 +20,8 @@ export interface RevertEnvironment {
   readonly clock: Clock;
   readonly randomBytes: (size: number) => Uint8Array;
   /**
-   * `createRevertCommand(revertRun)` from assemble.ts. Absent while the store's `revertRun` is
-   * not connected; the command then stops before anything is read or changed.
+   * `createRevertCommand(revertRun)` from assemble.ts; main.ts always passes it. When absent
+   * (a build without the store), the command stops before anything is read or changed.
    */
   readonly revert?: RevertCommand;
 }
@@ -34,6 +35,10 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
   const parsed = parseRevertArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
   const { runId } = parsed.args;
+
+  // T-12 (S-5): a network or device path is refused before the file system is touched.
+  const problem = localPathProblem(parsed.args.workspace, io.cwd);
+  if (problem !== null) return cliError("invalid_arguments", `the path given by --workspace ${problem}`);
 
   const workspace = path.resolve(io.cwd, parsed.args.workspace);
   if (!(await io.isDirectory(workspace))) {

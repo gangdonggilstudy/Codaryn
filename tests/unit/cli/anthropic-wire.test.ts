@@ -7,13 +7,15 @@
 
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 import { assembleRun } from "../../../src/cli/assemble.js";
 import { runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../../../src/cli/run.js";
+import { locateInWorkspace } from "../../../src/cli/security/index.js";
+import { recordedText } from "./locate.js";
 
 const FAKE_KEY = "fake-api-key-not-real-0042";
 const FAKE_SECRET = "fake-secret-VALUE-0042";
@@ -97,7 +99,8 @@ async function setup(options: {
         model: { provider: "anthropic" },
         policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false },
         privacy: { secretEnv: ["CODARYN_UNIT_SECRET"] },
-        limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: null, maxDurationMs: 60_000 },
+        // S-7: an anthropic task needs a token limit.
+        limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 100_000, maxDurationMs: 60_000 },
         verifiers: [{ id: "notes", kind: "file_rules", rules: [{ type: "exists", path: "notes.md" }] }],
         ...(options.task ?? {}),
       }),
@@ -123,6 +126,7 @@ function io(base: string, transport: ReturnType<typeof fakeTransport>, extra: Pa
     loadEnvFile: () => {
       throw new Error("no env file in this test");
     },
+    locateInWorkspace: (file, root) => locateInWorkspace(file, root),
     clock: { now: () => Date.now() },
     randomBytes: (size) => randomBytes(size),
     assemble: assembleRun,
@@ -132,13 +136,9 @@ function io(base: string, transport: ReturnType<typeof fakeTransport>, extra: Pa
   };
 }
 
+/** The journal and result.json; snapshots are raw originals by design (R-8). */
 async function stateFiles(base: string): Promise<string> {
-  const runs = path.join(base, "work", ".codaryn", "runs");
-  let text = "";
-  for (const runId of await readdir(runs)) {
-    for (const name of await readdir(path.join(runs, runId))) text += await readFile(path.join(runs, runId, name), "utf8");
-  }
-  return text;
+  return recordedText(path.join(base, "work"));
 }
 
 function assertNowhere(value: string, where: string, ...texts: string[]): void {

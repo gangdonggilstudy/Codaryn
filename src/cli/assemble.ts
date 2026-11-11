@@ -8,9 +8,16 @@ import path from "node:path";
 import { JOURNAL_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createJournal, releaseLock, writeResult } from "../store/index.js";
+import {
+  RevertRunError,
+  acquireLock,
+  createChangeRecorder,
+  createJournal,
+  releaseLock,
+  writeResult,
+} from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
-import { createCommandRunner, createToolRunner } from "../tools/index.js";
+import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
@@ -100,8 +107,14 @@ export function createRevertCommand(revertRun: RevertRun): RevertCommand {
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
     try {
       return { ok: true, outcome: await revertRun({ workspaceRoot, runId }) };
-    } catch {
-      return { ok: false, code: "invalid_run_record", message: "the run's journal cannot be read; nothing was changed" };
+    } catch (error) {
+      // revertRun rejects only before it changes anything. Its text is not passed on.
+      const code = error instanceof RevertRunError && error.code === "run_not_found" ? "run_not_found" : "invalid_run_record";
+      const message =
+        code === "run_not_found"
+          ? "the workspace has no journal for that run id; nothing was changed"
+          : "the run's journal cannot be read; nothing was changed";
+      return { ok: false, code, message };
     } finally {
       await releaseLock({ workspaceRoot, runId: lockId });
     }
@@ -125,8 +138,12 @@ export const assembleRun: Assemble = async (input) => {
   try {
     const privacy = createPrivacyGateway({ secrets });
     const policy = createPolicyGate({ config: task.policy, workspace });
-    const commandRunner = createCommandRunner();
-    const tools = createToolRunner({ workspace, privacy, commandRunner });
+    // T-1: one runner for tools and verifiers. The value check keeps registered secrets out of
+    // the child environment; the workspace root lets .cmd/.bat run (and refuses those inside it).
+    const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
+    // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
+    const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
+    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     const journal = createJournal({ workspaceRoot, runId, clock });
 

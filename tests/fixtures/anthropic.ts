@@ -11,6 +11,12 @@ import type { CodarynConfig, CommandRule, Limits, VerifierConfig } from "../../s
 import { DEFAULT_LIMITS } from "./builders.js";
 import type { Sandbox } from "./builders.js";
 
+/**
+ * Limits for runs with provider "anthropic". S-7: the anthropic provider never runs without a
+ * token limit (`maxTotalTokens: null` is refused), and every limit stays under the absolute caps.
+ */
+export const ANTHROPIC_LIMITS: Limits = { ...DEFAULT_LIMITS, maxTotalTokens: 200_000 };
+
 export const FAKE_MODEL_TASK = "cdy-fake-model-task";
 export const FAKE_MODEL_ENV = "cdy-fake-model-env";
 export const FAKE_MODEL_CONFIG = "cdy-fake-model-config";
@@ -28,7 +34,7 @@ export interface AnthropicTaskOptions {
   readonly maxOutputTokens?: number;
   readonly commands?: readonly CommandRule[];
   readonly secretEnv?: readonly string[];
-  /** Written as given (fields may be missing). "omit" leaves `limits` out. Default DEFAULT_LIMITS. */
+  /** Written as given (fields may be missing). "omit" leaves `limits` out. Default ANTHROPIC_LIMITS. */
   readonly limits?: Partial<Limits> | "omit";
   readonly verifiers?: readonly VerifierConfig[];
   /** Extra top-level fields, written as given. Used to try fields a task file must not have. */
@@ -56,7 +62,7 @@ export function writeAnthropicTask(sandbox: Sandbox, options: AnthropicTaskOptio
     policy: { commands: options.commands ?? [], network: "deny", destructive: "deny", restorePathTokens: false },
     privacy: { secretEnv: options.secretEnv ?? [] },
   };
-  if (options.limits !== "omit") task["limits"] = options.limits ?? DEFAULT_LIMITS;
+  if (options.limits !== "omit") task["limits"] = options.limits ?? ANTHROPIC_LIMITS;
   task["verifiers"] = options.verifiers ?? [];
   Object.assign(task, options.extraTop);
   writeFileSync(sandbox.taskPath, JSON.stringify(task, null, 2));

@@ -1,14 +1,16 @@
 /**
  * Config file validation. The file is read only when `--config` or CODARYN_CONFIG names it.
  * Error messages name fields only, never values from the file.
+ * The base URL (S-9), timer values (S-7) and variable names (S-3) follow `./security`.
  */
 
 import { CONFIG_SCHEMA_VERSION, MAX_RETRIES_LIMIT } from "../contracts/index.js";
 import type { CodarynConfig } from "../contracts/index.js";
+import { checkTimerMs, normalizeApiBaseUrlStrict } from "./security/index.js";
 import {
   InputError,
   fail,
-  optionalPositive,
+  optionalOutputTokens,
   optionalText,
   parsePartialLimits,
   parsePolicy,
@@ -21,32 +23,18 @@ export type ParseConfigOutcome =
   | { readonly ok: true; readonly config: CodarynConfig }
   | { readonly ok: false; readonly message: string };
 
-const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
-
-/**
- * Returns the base URL without a trailing slash, or `null` when it is not allowed:
- * it must be `https:`, or `http:` on a loopback host, with no user info, query or fragment.
- */
-export function normalizeApiBaseUrl(value: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  const secure = url.protocol === "https:";
-  const loopback = url.protocol === "http:" && LOOPBACK_HOSTS.includes(url.hostname);
-  if (!secure && !loopback) return null;
-  if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") return null;
-  return url.href.replace(/\/+$/, "");
+/** S-9: the strict form, without a trailing slash. */
+function parseApiBaseUrl(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = normalizeApiBaseUrlStrict(value, "apiBaseUrl");
+  return normalized.ok ? normalized.url : fail(normalized.message);
 }
 
-export const API_BASE_URL_RULE = "must be an https URL (http only on a loopback host) without user info, query or fragment";
-
-function parseApiBaseUrl(value: unknown): string | undefined {
-  const raw = optionalText(value, "apiBaseUrl");
-  if (raw === undefined) return undefined;
-  return normalizeApiBaseUrl(raw) ?? fail(`apiBaseUrl ${API_BASE_URL_RULE}`);
+/** S-7: a request time limit Node timers can honour. */
+function parseRequestTimeout(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const checked = checkTimerMs(value, "requestTimeoutMs");
+  return checked.ok ? (value as number) : fail(checked.message);
 }
 
 function parseMaxRetries(value: unknown): number | undefined {
@@ -74,9 +62,9 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
     ]);
     if (rec["schemaVersion"] !== CONFIG_SCHEMA_VERSION) fail("config schemaVersion must be 1");
     const model = optionalText(rec["model"], "model");
-    const maxOutputTokens = optionalPositive(rec["maxOutputTokens"], "maxOutputTokens");
+    const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], "maxOutputTokens");
     const apiBaseUrl = parseApiBaseUrl(rec["apiBaseUrl"]);
-    const requestTimeoutMs = optionalPositive(rec["requestTimeoutMs"], "requestTimeoutMs");
+    const requestTimeoutMs = parseRequestTimeout(rec["requestTimeoutMs"]);
     const maxRetries = parseMaxRetries(rec["maxRetries"]);
     const limits = rec["limits"] === undefined ? undefined : parsePartialLimits(rec["limits"]);
     const policy = rec["policy"] === undefined ? undefined : parsePolicy(rec["policy"]);

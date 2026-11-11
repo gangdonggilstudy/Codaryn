@@ -4,8 +4,9 @@
  * Passing says nothing about other transformations.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { RUNS_DIR_NAME, SNAPSHOTS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
 
 export interface Variant {
   readonly name: string;
@@ -136,16 +137,36 @@ export function decodedSource(label: string, text: string, jsonLines: boolean): 
 }
 
 /** Every file under `dir`, decoded as UTF-8, labelled by its path relative to `labelRoot`. */
-export function readTreeTexts(dir: string, labelRoot: string): TextSource[] {
+export function readTreeTexts(dir: string, labelRoot: string, skipDir?: (relativeDir: string[]) => boolean): TextSource[] {
   const sources: TextSource[] = [];
   const walk = (current: string): void => {
     for (const name of readdirSync(current)) {
       const full = join(current, name);
       const stat = statSync(full);
-      if (stat.isDirectory()) walk(full);
-      else if (stat.isFile()) sources.push({ label: relative(labelRoot, full), text: readFileSync(full, "utf8") });
+      if (stat.isDirectory()) {
+        if (skipDir?.(relative(dir, full).split(sep)) !== true) walk(full);
+      } else if (stat.isFile()) {
+        sources.push({ label: relative(labelRoot, full), text: readFileSync(full, "utf8") });
+      }
     }
   };
   walk(dir);
   return sources;
+}
+
+/**
+ * Every record under `<workspace>/.codaryn/` (journals, results, lock), each decoded as UTF-8.
+ * Change snapshots (`runs/<runId>/snapshots/`) are left out on purpose: by contract they are raw
+ * copies of workspace files and may hold secrets, like the workspace itself (R-8,
+ * src/contracts/changes.ts). Only that directory is skipped; anything else in the state
+ * directory, including unknown files, is scanned.
+ */
+export function stateRecordTexts(workspace: string): TextSource[] {
+  const stateDir = join(workspace, STATE_DIR_NAME);
+  if (!existsSync(stateDir)) return [];
+  return readTreeTexts(
+    stateDir,
+    workspace,
+    (parts) => parts.length === 3 && parts[0] === RUNS_DIR_NAME && parts[2] === SNAPSHOTS_DIR_NAME,
+  );
 }

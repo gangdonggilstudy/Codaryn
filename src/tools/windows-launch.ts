@@ -4,7 +4,8 @@
  * - The name is looked up with PATH and PATHEXT from the environment the child receives.
  *   The working directory is not searched, and relative PATH entries are skipped.
  *   A name with a directory part is resolved against the working directory instead.
- * - `.exe` and `.com` start directly, without a shell, as before.
+ * - `.exe` and `.com` start directly, without a shell, as before, unless they lie inside the
+ *   workspace (T-4): a program that resolves into the workspace is never run, whatever its type.
  * - `.cmd` and `.bat` start as `cmd.exe /d /s /c ""<script>" <args>"`, but only when the script
  *   path and every argument use a narrow character set, and only when the script is outside
  *   the workspace (a script the model wrote is never run through a shell).
@@ -147,40 +148,63 @@ function typeOf(file: string): string {
   return path.win32.extname(file).toLowerCase();
 }
 
+/**
+ * Real path of `found`, and whether it lies in the workspace. Both the found path and its real
+ * path are compared with both the root as given and its real path, so a link cannot lead around
+ * the check in either direction. `null` when a real path cannot be resolved.
+ */
+async function locate(
+  found: string,
+  workspaceRoot: string,
+  fileSystem: ExecutableFileSystem,
+): Promise<{ readonly real: string; readonly inside: boolean } | null> {
+  let real: string;
+  let rootReal: string;
+  try {
+    real = await fileSystem.realpath(found);
+    rootReal = await fileSystem.realpath(workspaceRoot);
+  } catch {
+    return null;
+  }
+  const inside = [found, real].some((candidate) =>
+    [workspaceRoot, rootReal].some((root) => insideOrSame(candidate, root)),
+  );
+  return { real, inside };
+}
+
 export async function planWindowsLaunch(input: WindowsLaunchInput): Promise<WindowsLaunchPlan> {
   const found = await findExecutable(input);
   if (found === null) return { ok: false, message: NOT_FOUND };
+  const { workspaceRoot, fileSystem } = input;
 
   const type = typeOf(found);
   if (DIRECT_TYPES.has(type)) {
+    // T-4: a program inside the workspace (one the model could have placed there) is not run,
+    // whether it was named with a directory part or found through a PATH entry in the workspace.
+    // Without a known root this check cannot be made; the CLI always supplies the root.
+    if (workspaceRoot !== undefined) {
+      const located = await locate(found, workspaceRoot, fileSystem);
+      if (located === null) return { ok: false, message: NOT_FOUND };
+      if (located.inside) return refuse("executable_refused", "executables inside the workspace are not run");
+    }
     return { ok: true, launch: { file: found, args: input.args, verbatimArguments: false, env: input.env } };
   }
   if (!SCRIPT_TYPES.has(type)) {
     return refuse("unsupported_type", "only .exe, .com, .cmd and .bat files can be started");
   }
 
-  const { workspaceRoot, fileSystem } = input;
   if (workspaceRoot === undefined) {
     return refuse("script_refused", "the workspace root is not known, so .cmd and .bat files are not run");
   }
-  let script: string;
-  let rootReal: string;
-  try {
-    script = await fileSystem.realpath(found);
-    rootReal = await fileSystem.realpath(workspaceRoot);
-  } catch {
-    return { ok: false, message: NOT_FOUND };
-  }
+  const located = await locate(found, workspaceRoot, fileSystem);
+  if (located === null) return { ok: false, message: NOT_FOUND };
+  const script = located.real;
   // A link may lead elsewhere: the file cmd.exe would open must be a script too.
   if (!SCRIPT_TYPES.has(typeOf(script))) {
     return refuse("unsupported_type", "only .exe, .com, .cmd and .bat files can be started");
   }
-  for (const candidate of [found, script]) {
-    for (const root of [workspaceRoot, rootReal]) {
-      if (insideOrSame(candidate, root)) {
-        return refuse("script_refused", ".cmd and .bat files inside the workspace are not run");
-      }
-    }
+  if (located.inside) {
+    return refuse("script_refused", ".cmd and .bat files inside the workspace are not run");
   }
   if (!SCRIPT_PATH.test(script)) {
     return refuse(

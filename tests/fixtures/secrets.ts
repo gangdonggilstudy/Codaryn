@@ -33,11 +33,25 @@ export const VARIANT_SECRET = "cdyVar/?>cdycdycdyKx";
  * `cliEnv({ fakeApiKey })` accepts only these values.
  */
 export const FAKE_API_KEY = "cdy-fake-apikey-Xq7Lm2Vt9Rw4";
-/** Written only into a temporary file passed with `--env-file`. */
+/** Written only into a temporary file passed with `--vars-file`. */
 export const FAKE_API_KEY_ENV_FILE = "cdy-fake-envfile-Hp3Zs8Nk6Dy";
 /** Written only into `.env` files that the CLI must never load on its own. */
 export const FAKE_API_KEY_DECOY = "cdy-fake-decoy-Bw6Jt1Qc5Gm";
-export const FAKE_API_KEYS: readonly string[] = [FAKE_API_KEY, FAKE_API_KEY_ENV_FILE, FAKE_API_KEY_DECOY];
+/** S-11: keys must be printable ASCII without spaces. These two are malformed on purpose. */
+export const FAKE_API_KEY_SPACE = "cdy-fake apikey-Mb5Tq8Lw";
+export const FAKE_API_KEY_NON_ASCII = "cdy-fake-apikey-ü-Wd3Kp9";
+export const FAKE_API_KEYS: readonly string[] = [
+  FAKE_API_KEY,
+  FAKE_API_KEY_ENV_FILE,
+  FAKE_API_KEY_DECOY,
+  FAKE_API_KEY_SPACE,
+  FAKE_API_KEY_NON_ASCII,
+];
+
+/** S-4: a value an env file sets. Eight characters or more, so it is registered as a secret. */
+export const FAKE_ENV_FILE_VALUE = "cdyEnvFileValueN4q8Tz";
+/** S-4: shorter than eight characters, so it is not registered (and stays readable). */
+export const SHORT_ENV_FILE_VALUE = "cdy1234";
 
 /** A variable outside CHILD_ENV_ALLOWLIST that must not reach child processes. */
 export const PROBE_ENV = "CODARYN_IT_PROBE";

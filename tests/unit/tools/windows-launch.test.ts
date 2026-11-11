@@ -120,9 +120,10 @@ test("G1: relative, empty and quoted PATH entries; the working directory is neve
 test("G1: a name with a directory part is resolved against the working directory, not PATH", async () => {
   const files = [`${WS}\\tools\\run.exe`, "C:\\t\\run.exe", "C:\\abs\\x.exe"];
   const env = { PATH: "C:\\t", PATHEXT: ".EXE" };
-  const relative = launchOf(await planWindowsLaunch(input({ executable: ".\\tools\\run", env, files })));
+  // No workspace root, so only the lookup is under test here; T-4 refuses these with a root.
+  const relative = launchOf(await planWindowsLaunch(input({ executable: ".\\tools\\run", env, files, workspaceRoot: undefined })));
   assert.equal(relative.file, `${WS}\\tools\\run.exe`);
-  const slash = launchOf(await planWindowsLaunch(input({ executable: "tools/run.exe", env, files })));
+  const slash = launchOf(await planWindowsLaunch(input({ executable: "tools/run.exe", env, files, workspaceRoot: undefined })));
   assert.equal(slash.file, `${WS}\\tools\\run.exe`);
   const absolute = launchOf(await planWindowsLaunch(input({ executable: "C:\\abs\\x.exe", env, files })));
   assert.equal(absolute.file, "C:\\abs\\x.exe");
@@ -270,3 +271,74 @@ test("G1: other file types, trailing-dot names and links to non-scripts are refu
     /^could not start process \(unsupported_type\): /,
   );
 });
+
+// ---- T-4: any executable that resolves into the workspace is refused, whatever its type ----
+
+const EXE_REFUSED = "could not start process (executable_refused): executables inside the workspace are not run";
+
+test("T-4: an .exe or .com found through a PATH entry inside the workspace is refused (review F6-7)", async () => {
+  // The review's input: workspace D:\work\proj, its tools folder on PATH, `npm` asked for.
+  const root = "D:\\work\\proj";
+  const env = { PATH: `${root}\\tools;C:\\Program Files\\nodejs`, PATHEXT: ".COM;.EXE;.BAT;.CMD" };
+  for (const file of [`${root}\\tools\\npm.exe`, `${root}\\tools\\npm.com`]) {
+    const plan = await planWindowsLaunch(
+      input({ executable: "npm", env, cwdAbsolute: root, workspaceRoot: root, files: [file, NPM_CMD] }),
+    );
+    assert.equal(refusal(plan), EXE_REFUSED, file);
+  }
+});
+
+test("T-4: a name with a directory part that resolves into the workspace is refused", async () => {
+  const env = { PATH: "C:\\t", PATHEXT: ".EXE;.COM" };
+  const files = [`${WS}\\tools\\run.exe`, `${WS}\\sub\\bin\\tool.exe`, `${WS}\\x.com`, "C:\\t\\run.exe"];
+  for (const [executable, cwdAbsolute] of [
+    [".\\tools\\run", WS],
+    ["tools/run.exe", WS],
+    ["bin\\tool.exe", `${WS}\\sub`],
+    ["..\\x.com", `${WS}\\sub`],
+    [`${WS}\\tools\\run.exe`, WS],
+  ] as const) {
+    assert.equal(refusal(await planWindowsLaunch(input({ executable, cwdAbsolute, env, files }))), EXE_REFUSED, executable);
+  }
+});
+
+test("T-4: links are judged by both the found path and the real path; case does not matter", async () => {
+  const env = { PATH: "C:\\t;C:\\u", PATHEXT: ".EXE" };
+  // Found outside, real file inside the workspace.
+  const intoWorkspace = fakeFiles([`${WS}\\real.exe`], { "C:\\t\\tool.exe": `${WS}\\real.exe` });
+  assert.equal(
+    refusal(await planWindowsLaunch(input({ executable: "tool", env, fileSystem: intoWorkspace.fileSystem }))),
+    EXE_REFUSED,
+  );
+  // Found through the workspace, real file outside.
+  const outOfWorkspace = fakeFiles(["C:\\out\\x.exe"], { [`${WS}\\link\\x.exe`]: "C:\\out\\x.exe" });
+  assert.equal(
+    refusal(await planWindowsLaunch(input({ executable: "link\\x.exe", env, fileSystem: outOfWorkspace.fileSystem }))),
+    EXE_REFUSED,
+  );
+  // A PATH entry spelled with another case.
+  const otherCase = { PATH: "d:\\WS\\bin", PATHEXT: ".EXE" };
+  assert.equal(
+    refusal(await planWindowsLaunch(input({ executable: "tool", env: otherCase, files: ["d:\\WS\\bin\\tool.exe"] }))),
+    EXE_REFUSED,
+  );
+});
+
+test("T-4: relative PATH entries never lead to a workspace executable", async () => {
+  const files = [`${WS}\\node.exe`, `${WS}\\bin\\node.exe`, "C:\\nodejs\\node.exe"];
+  const { fileSystem, probes } = fakeFiles(files);
+  const env = { PATH: ".;bin;.\\bin;C:\\nodejs", PATHEXT: ".EXE" };
+  const launch = launchOf(await planWindowsLaunch(input({ executable: "node", env, fileSystem })));
+  assert.equal(launch.file, "C:\\nodejs\\node.exe");
+  assert.ok(probes.every((probe) => !probe.toLowerCase().startsWith("d:\\ws")), JSON.stringify(probes));
+});
+
+test("T-4: executables outside the workspace still start, including a sibling that shares the name prefix", async () => {
+  const env = { PATH: "D:\\ws2;C:\\nodejs", PATHEXT: ".EXE" };
+  const sibling = launchOf(await planWindowsLaunch(input({ executable: "tool", env, files: ["D:\\ws2\\tool.exe"] })));
+  assert.equal(sibling.file, "D:\\ws2\\tool.exe");
+  const node = launchOf(await planWindowsLaunch(input({ executable: "node", env, files: ["C:\\nodejs\\node.exe"] })));
+  assert.equal(node.file, "C:\\nodejs\\node.exe");
+  assert.equal(node.verbatimArguments, false);
+});
+

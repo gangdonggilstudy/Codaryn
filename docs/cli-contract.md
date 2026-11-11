@@ -1,6 +1,6 @@
-# 단계 1a CLI·공통 계약
+# CLI·공통 계약 (1a, 1b 설정)
 
-`src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 현재 구현된 것은 계약 파일뿐이며 엔진, 도구, CLI, 테스트는 아직 없다. 실제 API는 호출하지 않는다.
+`src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 1a 오프라인 CLI는 구현되어 있다. 1b의 설정 계약과 CLI 처리(11절)는 E1에서 추가했다. Anthropic 제공자(E2)는 아직 연결되지 않았으며, 설정이 다 갖춰져도 `provider_not_implemented`로 전송 없이 끝난다.
 
 ## 1. import 규칙과 공개 진입점
 
@@ -12,7 +12,10 @@
 | `src/policy/index.ts` | `createPolicyGate` | `CreatePolicyGate` → `PolicyGate` |
 | `src/workspace/index.ts` | `createWorkspace` | `CreateWorkspace` → `Promise<Workspace>` |
 | `src/engine/index.ts` | `runTask` | `RunTask` = `(deps: EngineDeps) => Promise<EngineResult>` |
+| `src/model/anthropic/index.ts` (E2) | `createAnthropicProvider` | `CreateAnthropicProvider` = `(settings: ResolvedAnthropicSettings, deps?: AnthropicProviderDeps) => ModelProvider` |
 | `src/cli/main.ts` | CLI 진입 파일 | `package.json`의 `bin.codaryn`이 `dist/src/cli/main.js`를 가리킨다 |
+
+- CLI가 Anthropic 제공자를 가져오는 곳은 `src/cli/provider.ts`의 `anthropicProviderFactory` 하나다. E2가 병합되기 전에는 `null`이며, PM이 알리면 이 파일만 바꿔 연결한다.
 
 - `PrivacyGateway`: `mask(text)`, `resolveToolArgs(request)`, `rebuildDocument(request)`.
 - `PolicyGate`: `checkRequested(call, descriptor)`, `restorableFields(descriptor)`, `checkEffective(call, descriptor)`.
@@ -22,10 +25,16 @@
 ## 2. 실행
 
 ```
-node dist/src/cli/main.js run --task <task.json> [--cancel-file <경로>]
+node dist/src/cli/main.js run --task <task.json> [옵션]
+node dist/src/cli/main.js run --workspace <디렉터리> --goal <문장> [옵션]
+옵션: --config <config.json>  --env-file <경로>  --cancel-file <경로>
 ```
 
-입력은 task 파일 하나다. 키 없이 실행된다. task에는 비밀 값이나 API 키를 넣지 않는다. 취소는 `SIGINT`/`SIGTERM`, 또는 `--cancel-file`로 지정한 파일이 생기는 것으로 받는다(P-2). 둘 다 `EngineDeps.signal`을 abort한다.
+- task 파일 형식은 1a와 같다. scripted 모델은 키 없이 실행된다.
+- 간편 형식(`--workspace`, `--goal`)은 task 파일 없이 설정 파일의 기본값으로 실행한다. 제공자는 항상 anthropic이다(11절).
+- `--task`와 간편 형식은 함께 쓸 수 없다. `--workspace`와 `--goal`은 함께 써야 한다. 같은 옵션을 두 번 쓰거나 모르는 옵션을 쓰면 `invalid_arguments`다.
+- task 파일과 설정 파일에는 비밀 값이나 API 키를 넣지 않는다.
+- 취소는 `SIGINT`/`SIGTERM`, 또는 `--cancel-file`로 지정한 파일이 생기는 것으로 받는다(P-2). 둘 다 `EngineDeps.signal`을 abort한다.
 
 ## 3. task.json (`TaskSpec`)
 
@@ -47,7 +56,9 @@ node dist/src/cli/main.js run --task <task.json> [--cancel-file <경로>]
 - `workspaceRoot`와 `scriptPath`는 절대 경로이거나 task 파일의 디렉터리 기준 상대 경로다. 허용 루트는 `workspaceRoot` 하나다. `workflow`는 표시용 문자열이며 엔진은 이 값으로 분기하지 않는다.
 - `privacy.secretEnv`에는 환경 변수 이름만 적는다. 값은 실행 시 환경에서 읽어 비밀로 등록한다.
 - 권한은 경로, 명령(`executable`과 `args`), 네트워크, 파괴적 동작을 각각 판정한다. `network`와 `destructive`는 1a에서 `"deny"`만 있다. 네트워크 차단이 아니라 네트워크를 쓰는 도구가 없다는 뜻이다.
-- `model.provider`가 `"anthropic"`이면 `ANTHROPIC_API_KEY`나 `CODARYN_MODEL`이 없을 때 `provider_not_configured`, 있어도 `provider_not_implemented`로 전송 없이 끝난다.
+- `model.provider`가 `"anthropic"`이면 `model`에 선택 필드 `model`(모델 ID)과 `maxOutputTokens`(요청당 출력 토큰 상한)를 둘 수 있다. scripted에는 이 필드를 쓸 수 없다. 키, 모델, 출력 상한 중 하나라도 정해지지 않으면 `provider_not_configured`로 전송 없이 끝난다(11절).
+- `limits`와 그 필드는 설정 파일이 채울 수 있으면 생략해도 된다. 필드마다 task 값이 우선한다. 어디에도 없는 필드가 있으면 `invalid_task`다.
+- task 파일과 설정 파일은 UTF-8이며 BOM이 있어도 읽는다.
 - 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`) 두 종류다. 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
 
 ## 4. scripted 모델 파일 (`ScriptedModelScript`)
@@ -78,6 +89,7 @@ node dist/src/cli/main.js run --task <task.json> [--cancel-file <경로>]
 - `change`는 `{kind:"replace_all", content}` 또는 `{kind:"replace_text", oldText, newText}`다.
 - 요구 권한, 복원 가능 필드, 문서 필드는 `BUILTIN_TOOLS`에 고정되어 있다. 모델과 task가 낮출 수 없다. 오류 코드는 `TOOL_ERROR_CODES`, 상한은 `MAX_READ_BYTES` 등 `tool.ts`의 상수를 쓴다. 자식 프로세스 환경은 `CHILD_ENV_ALLOWLIST`만 전달한다.
 - 거부된 호출은 실행을 끝내지 않는다. `ok:false`인 `ToolResult`로 모델에 돌아간다.
+- 제공자가 모델에 보내는 도구 설명과 입력 JSON Schema는 `TOOL_DEFINITIONS`다. mask를 거치지 않는 고정 문장이므로 토큰 표식을 쓰지 않는다. 스키마는 엔진의 인자 형식 검증과 같은 필드를 가진다(`tests/unit/contracts`가 확인).
 
 ## 6. 도구 호출 처리 순서
 
@@ -105,7 +117,8 @@ stdout에는 JSON 한 줄(`CliOutput`)만 쓴다. 진행 표시는 stderr다.
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_script`·`secret_env_missing`·`workspace_not_found` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70.
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70.
+- 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다.
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
   - `runs/<runId>/journal.jsonl`: 한 줄에 `JournalRecord` 하나(`seq`, `at`, `runId`와 이벤트). 가림본만 담는다. `runs/<runId>/result.json`은 stdout과 같은 객체다.
@@ -130,3 +143,92 @@ stdout에는 JSON 한 줄(`CliOutput`)만 쓴다. 진행 표시는 stderr다.
 - 해시 비교와 파일 교체 사이에 다른 프로세스가 쓰면 그 변경을 덮어쓸 수 있다(경쟁 구간).
 - Windows에서 `.cmd`와 `.bat`은 셸 없이 실행할 수 없다(`spawn_failed`).
 - 파일 해시가 모델과 기록에 노출되어 짧은 비밀이 든 파일은 추측 검증이 가능하다(P-7).
+
+알려진 한계(1b 설정):
+
+- 키 값 검사는 Anthropic 키 모양과 현재 `ANTHROPIC_API_KEY` 값만 찾는다. 다른 형식의 키나 잘린 키는 찾지 못한다.
+- `--env-file`로 읽은 값은 CLI 프로세스의 환경에 들어간다. 자식 프로세스에는 `CHILD_ENV_ALLOWLIST`만 전달되므로 키는 넘어가지 않는다.
+- Anthropic 제공자는 아직 연결되지 않았다(E2 병합 전). 실제 API로 검증한 적이 없다.
+
+## 11. 설정 (1b)
+
+### 설정 파일 (`CodarynConfig`)
+
+`--config <경로>` 또는 환경 변수 `CODARYN_CONFIG`로 지정한 파일만 읽는다. 둘 다 있으면 `--config`가 우선한다. 작업 공간 안에서 자동으로 찾지 않는다(C-3). 상대 경로는 현재 디렉터리 기준이다.
+
+```json
+{
+  "schemaVersion": 1,
+  "model": "<모델 ID>",
+  "maxOutputTokens": 4096,
+  "requestTimeoutMs": 600000,
+  "maxRetries": 2,
+  "limits": { "maxModelTurns": 20, "maxToolCalls": 40, "maxTotalTokens": 200000, "maxDurationMs": 600000 },
+  "policy": { "commands": [{ "executable": "node", "argsPrefix": ["--test"], "allowExtraArgs": false }],
+              "network": "deny", "destructive": "deny", "restorePathTokens": false },
+  "verifiers": [{ "id": "tests", "kind": "command", "executable": "node", "args": ["--test"] }],
+  "secretEnv": ["MY_DB_PASSWORD"]
+}
+```
+
+- `schemaVersion`만 필수다. 모르는 필드나 잘못된 값은 `invalid_config`다.
+- `apiBaseUrl`은 `https:` 주소다. `http:`는 루프백 호스트(`localhost`, `127.0.0.1`, `[::1]`)에만 허용한다(가짜 서버 시험용). 사용자 정보, 쿼리, 조각은 쓸 수 없고 끝의 `/`는 뗀다.
+- `maxRetries`는 0~10 정수다. 다른 수는 양의 정수다. `limits`는 task와 같은 규칙이며 일부 필드만 적어도 된다.
+- `policy`와 `verifiers`는 간편 형식에만 쓴다. task 파일은 자기 값을 적는다. 간편 형식에서 `policy`가 없으면 `DENY_ALL_POLICY`(명령 없음)를 쓰고, `verifiers`가 없으면 `needs-input`/`no_verifier`로 끝난다.
+- `secretEnv`는 두 형식 모두에서 task의 `privacy.secretEnv`에 더한다.
+
+### 환경 변수와 env 파일
+
+| 이름 | 뜻 |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | API 키. 이 환경 변수로만 받는다(C-1) |
+| `CODARYN_MODEL` | 모델 ID |
+| `CODARYN_CONFIG` | 설정 파일 경로. `--config`가 없을 때 쓴다 |
+| `CODARYN_API_BASE_URL` | API 주소. 설정 파일의 `apiBaseUrl`보다 우선한다 |
+
+- 비어 있거나 공백뿐인 값은 설정되지 않은 것으로 본다.
+- `--env-file <경로>`를 줄 때만 그 파일을 `process.loadEnvFile`로 읽는다(C-2). `.env`를 자동으로 찾지 않는다. 이미 설정된 환경 변수가 파일 값보다 우선한다.
+- BOM이 있는 env 파일은 첫 변수를 조용히 놓치므로 `invalid_config`로 거부한다.
+- `.env.example`을 `.env`로 복사해 값을 채우고 `--env-file .env`로 쓴다. `.env`는 Git이 무시한다.
+
+### 우선순위
+
+| 항목 | 순서(왼쪽이 우선) | 어디에도 없을 때 |
+| --- | --- | --- |
+| 키 | `ANTHROPIC_API_KEY` | `provider_not_configured` |
+| 모델 | task `model.model` → `CODARYN_MODEL` → 설정 `model` | `provider_not_configured`. 코드 기본값 없음(C-4) |
+| 출력 토큰 상한 | task `model.maxOutputTokens` → 설정 `maxOutputTokens` | `provider_not_configured` |
+| API 주소 | `CODARYN_API_BASE_URL` → 설정 `apiBaseUrl` → `https://api.anthropic.com` | task로는 바꿀 수 없다(C-5) |
+| 요청 시간 제한, 재시도 | 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`(600000), `DEFAULT_MAX_RETRIES`(2) | 기본값 |
+| 한도 | 필드마다 task `limits` → 설정 `limits` | task 형식은 `invalid_task`, 간편 형식은 `invalid_config`(C-6) |
+
+해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. 키도 비밀로 등록하므로 파일 내용이나 명령 출력에 나타나면 가려진다.
+
+### 키 거부 (`key_in_file`)
+
+설정 파일과 task 파일을 JSON으로 읽은 직후, 다른 검사보다 먼저 확인한다. 다음이 하나라도 있으면 종료 코드 2로 거부한다. 메시지에는 위치(필드 이름)만 적고 값은 적지 않는다.
+
+- 어느 깊이든 키 필드 이름. 소문자로 바꾸고 영숫자만 남긴 이름이 `KEY_FIELD_NAMES`(`apikey`, `key`, `secret`, `token`, `password` 등)에 있거나 `apikey`를 포함하면 키 필드다. 예: `apiKey`, `api_key`, `x-api-key`, `ANTHROPIC_API_KEY`.
+- Anthropic 키 모양의 값(`ANTHROPIC_KEY_PATTERN_SOURCE`).
+- 현재 `ANTHROPIC_API_KEY` 값과 같은 문자열(16자 이상일 때).
+
+### 처리 순서
+
+인자 → `--env-file` → 설정·task 파일 읽기 → 키 거부 → 설정 검증 → task 검증(또는 간편 형식 구성) → 작업 공간 확인 → 비밀 값 → 제공자 설정 해석 → 제공자 생성 → 조립과 실행.
+
+### 실행 예시 (PowerShell)
+
+```powershell
+# 1) 간편 형식: 키와 모델은 .env, 한도·정책·검증기는 설정 파일
+Copy-Item .env.example .env   # 값을 채우고 UTF-8(BOM 없음)으로 저장한다
+node dist/src/cli/main.js run --workspace D:\work\notes --goal "README에 설치 절을 추가한다" `
+  --config D:\codaryn\config.json --env-file .env
+
+# 2) task 파일: 모델은 환경 변수, 빠진 한도는 설정 파일이 채운다
+$env:CODARYN_MODEL = "<모델 ID>"
+$env:CODARYN_CONFIG = "D:\codaryn\config.json"
+node dist/src/cli/main.js run --task .\task.json --env-file .env
+
+# 3) 로컬 가짜 서버로 시험할 때(E3)
+$env:CODARYN_API_BASE_URL = "http://127.0.0.1:8123"
+```

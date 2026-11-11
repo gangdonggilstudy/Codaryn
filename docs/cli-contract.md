@@ -465,7 +465,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### doctor (U-6)
 
-- `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json>] [--workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
+- `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
+- `--task`와 `--workspace`는 함께 쓸 수 없다(`invalid_arguments`, W-5). task 파일이 자기 작업 공간(`workspaceRoot`)을 정하기 때문이다. 작업 공간을 보는 항목(`workspace`, `file_locations`, `install_dir`, `integrity_paths`의 위치 판정)은 task의 `workspaceRoot`나 `--workspace`를 쓰고, 둘 다 없으면 `skipped`다.
 - 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`. 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
 - 종료(`DOCTOR_EXIT_CODES`): 가장 나쁜 항목에 따라 `ok` 0, `warn` 3, `fail` 1이다(`skipped`는 `ok`로 센다). 인자 오류는 `invalid_arguments`(`CliErrorOutput`)다.
 - 메시지는 고정 문구, 필드 위치(`policy.commands[2]` 등), 개수로만 만든다. 파일이나 환경에서 읽은 값은 내지 않으며, 키는 있음·없음만 적는다.

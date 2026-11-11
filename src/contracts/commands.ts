@@ -69,9 +69,14 @@ export interface ReportOutput {
 }
 
 /**
- * `codaryn doctor [--config <file>] [--vars-file <file>] [--task <task.json>] [--workspace <dir>] [--json]`
+ * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--json]`
  * checks what a run would need without running one: no network access, no model request, no
  * write. One check per id, in this order. A check that has nothing to look at is `skipped`.
+ *
+ * `--task` and `--workspace` cannot be combined (`invalid_arguments`, W-5): a task file names its
+ * own workspace (`workspaceRoot`). The workspace checks (`workspace`, `file_locations`,
+ * `install_dir`, and the position part of `integrity_paths`) use the task's `workspaceRoot` or
+ * `--workspace`; with neither they are `skipped`.
  */
 export const DOCTOR_CHECK_IDS = [
   "node_version",

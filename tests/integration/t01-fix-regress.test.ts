@@ -50,7 +50,7 @@ import {
 } from "../support/cli.js";
 import type { CliRun } from "../support/cli.js";
 import { MOCK_LABEL, replyText, runGuarded, sentMaxTokens, startFakeAnthropic } from "../support/fake-anthropic.js";
-import { expectRevertOutput, revertSummary, runRevert } from "../support/repair-check.js";
+import { expectRevertOutput, revertSummary, runRevert, treeBytes } from "../support/repair-check.js";
 import { callStep, editStep, finalStep, replaceAllStep } from "../support/repair-script.js";
 
 const IS_WINDOWS = process.platform === "win32";
@@ -196,7 +196,7 @@ test("T-12 revert의 --workspace UNC 거부, run의 --cancel-file이 작업 공�
   });
 });
 
-test("T-13 protectedPaths 항목이 링크면 실경로도 보호하고, 밖을 가리키면 invalid_task", { skip: IS_WINDOWS ? false : "junctions", timeout: 60_000 }, async (t) => {
+test("T-13 protectedPaths 항목이 링크면 실경로도 보호하고, 밖을 가리키면 모든 쓰기 거부", { skip: IS_WINDOWS ? false : "junctions", timeout: 60_000 }, async (t) => {
   await t.test("작업 공간 안 정션 → 실경로(test/) 쓰기도 protected_path", async (st) => {
     const sb = createSandbox(st);
     writeRepairProject(sb);
@@ -219,7 +219,9 @@ test("T-13 protectedPaths 항목이 링크면 실경로도 보호하고, 밖을 
     }
     assert.equal(readFileSync(join(sb.workspace, "test", "price.test.js"), "utf8"), PRICE_TEST);
   });
-  await t.test("작업 공간 밖을 가리키는 정션 → invalid_task", async (st) => {
+  // T-13 (settled after integration): the format check stays lexical, so the run starts; the gate
+  // then denies every write (fail closed). Before this decision the case expected invalid_task.
+  await t.test("작업 공간 밖을 가리키는 정션 → 실행은 시작되고 모든 쓰기가 거부된다(fail closed)", async (st) => {
     const sb = createSandbox(st);
     writeRepairProject(sb);
     const outside = join(sb.base, "outside");
@@ -230,35 +232,36 @@ test("T-13 protectedPaths 항목이 링크면 실경로도 보호하고, 밖을 
       st.skip(`junction could not be created: ${String(error)}`);
       return;
     }
-    const taskPath = writeTask(sb, { id: "t13-outside", protectedPaths: ["out-link"] }, [finalStep("끝")]);
-    assertPreRun(await runTask(taskPath, { cwd: sb.base }), "invalid_task", sb);
-  });
-  // Holds however T-13 is implemented: refused before the run, or the run denies every write.
-  await t.test("안전 조건: 밖을 가리키는 정션 항목이 있으면 어떤 쓰기도 일어나지 않는다", async (st) => {
-    const sb = createSandbox(st);
-    writeRepairProject(sb);
-    const outside = join(sb.base, "outside");
-    mkdirSync(outside);
-    try {
-      symlinkSync(outside, join(sb.workspace, "out-link"), "junction");
-    } catch (error) {
-      st.skip(`junction could not be created: ${String(error)}`);
-      return;
-    }
+    const before = treeBytes(sb.workspace, true);
+    const writes = ["w-src", "c-new", "w-through-link"];
     const taskPath = writeTask(
       sb,
-      { id: "t13-outside-safe", protectedPaths: ["out-link"], verifiers: [{ id: "x", kind: "file_rules", rules: [{ type: "exists", path: PRICE_PATH }] }] },
-      [editStep("w-src", EDIT_WRONG_FIX), replaceAllStep("c-new", "new.txt", null, "x\n"), finalStep("끝")],
+      {
+        id: "t13-outside",
+        protectedPaths: ["out-link"],
+        verifiers: [{ id: "x", kind: "file_rules", rules: [{ type: "exists", path: PRICE_PATH }] }],
+      },
+      [
+        editStep("w-src", EDIT_WRONG_FIX),
+        replaceAllStep("c-new", "new.txt", null, "x\n"),
+        replaceAllStep("w-through-link", "out-link/planted.txt", null, "x\n"),
+        finalStep("끝"),
+      ],
     );
     const run = await runTask(taskPath, { cwd: sb.base });
-    const output = parseCliOutput(run);
-    st.diagnostic(`outcome: ${output.kind === "run" ? `${output.status}/${output.reason}` : output.code}`);
-    if (output.kind === "run") {
-      const { records } = readRunFiles(sb.workspace, output);
-      for (const id of ["w-src", "c-new"]) assertRefused(records, id, ["policy_denied"]);
+    const result = expectRunResult(run);
+    const { records } = readRunFiles(sb.workspace, result);
+    st.diagnostic(`outcome: ${result.status}/${result.reason}`);
+
+    for (const id of writes) assertRefused(records, id, ["policy_denied"]);
+    for (const id of ["w-src", "c-new"]) {
+      const decision = deniedDecision(records, id);
+      assert.equal(decision.code, "protected_path", id);
+      assert.equal(decision.permission, "path", id);
     }
+    assert.equal(result.changes.length, 0, "no change was applied");
     assert.equal(readFileSync(join(sb.workspace, "src", "price.js"), "utf8"), PRICE_BUG);
-    assert.equal(existsSync(join(sb.workspace, "new.txt")), false);
+    assert.deepEqual(treeBytes(sb.workspace, true), before, "the workspace is byte for byte unchanged");
     assert.deepEqual(readdirSync(outside), [], "nothing was written through the link");
   });
 });

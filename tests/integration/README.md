@@ -116,7 +116,7 @@
 | T-9 | `t01-fix-regress` | 죽은 잠금에 6개 프로세스가 동시에 시작 → 하나만 실행, 나머지 `workspace_locked` |
 | T-10 | `t01-fix-regress` | 스냅샷은 있고 기록이 잘린 경로 → `missing_record`·`partial`. 잘린 마지막 줄만 있으면 `complete` |
 | T-12 | `t01-fix-regress` | `revert --workspace` UNC, 작업 공간 안 `--cancel-file` → `invalid_arguments` |
-| T-13 | `t01-fix-regress` | 링크 항목은 실경로도 보호. 밖을 가리키는 링크 항목은 `invalid_task`(결정), 어느 쪽이든 쓰기 0건(안전 조건) |
+| T-13 | `t01-fix-regress` | 링크 항목은 실경로도 보호. 밖을 가리키는 링크 항목이 있으면 실행은 시작되고 모든 쓰기가 `policy_denied`(fail closed, 확정 결정). 작업 공간과 링크 너머에 쓰기 0건 |
 | T-14 | `t01-fix-regress` | 이스케이프한 키를 앞선 중복 필드에 둠 → `key_in_file`, 위치에 모르는 필드 이름 없음, 작업 공간 루트의 대체 데이터 스트림 설정 거부, `maxOutputTokens` 200000 초과 거부·200000 허용 |
 | T-15 | `m02`, `s01` | `--vars-file`로 바꿈. `--env-file`은 있는 파일이어도 `invalid_arguments`, 값을 읽지 않음 |
 

@@ -33,6 +33,9 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 그대로 지키는 한계: PM과 작업자는 실제 Anthropic API를 호출하지 않고 키 파일을 읽지 않는다. 과금이 걸린 선택(세션 사용 한도 창 등)과 force push, 이력 재작성은 하지 않는다. `docs/pm-control.json`이 active가 아니면 멈춘다.
 - 실제 API 검증이 필요한 완료 판단(1b, 단계 2·3의 실 API 기준)은 "미수행"으로 적고 다음 단계의 오프라인 작업을 계속한다.
 
+- 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
+- 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
+
 ## 현재 상태 (CP-10)
 
 - 사용자 직접 지시로 단계 2와 투입 준비를 진행했다. `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.

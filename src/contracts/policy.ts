@@ -19,6 +19,8 @@ export const POLICY_DENIAL_CODES = [
   "network_denied",
   "destructive_denied",
   "restore_denied",
+  /** A write under `PolicyConfig.protectedPaths` (R-5). Permission `path`. */
+  "protected_path",
 ] as const;
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 

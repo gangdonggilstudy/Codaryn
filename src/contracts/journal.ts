@@ -1,6 +1,7 @@
 /**
  * Run journal: append-only, masked records under `<workspaceRoot>/.codaryn/`.
  * Free text fields are MaskedText, so raw text cannot be recorded by construction.
+ * File originals kept for revert (`SNAPSHOTS_DIR_NAME`) are never part of the journal.
  */
 
 import type { Limits, ModelProviderName } from "./task.js";
@@ -33,6 +34,7 @@ export type JournalEvent =
       readonly taskId: string;
       readonly workflow: MaskedText;
       readonly provider: ModelProviderName;
+      /** The resolved limits. Phase 2 records all six fields; earlier journals have four. */
       readonly limits: Limits;
     }
   | {
@@ -76,6 +78,19 @@ export type JournalEvent =
       readonly created: boolean;
     }
   | { readonly type: "verifier_result"; readonly result: VerifierResult }
+  | {
+      /**
+       * A failed verification is sent back to the model (R-1). Recorded before the repair
+       * message is sent. The message itself is recorded by the next `model_request`.
+       */
+      readonly type: "repair_started";
+      /** 1 for the first repair of the run, then 2, 3, ... */
+      readonly attempt: number;
+      /** Ids of the verifiers that failed, in task order. */
+      readonly failedVerifiers: readonly string[];
+      /** True when evidence in the repair message was cut at its share of MAX_FEEDBACK_BYTES. */
+      readonly feedbackTruncated: boolean;
+    }
   | {
       readonly type: "run_finished";
       readonly status: TerminalRunStatus;

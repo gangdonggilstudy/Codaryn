@@ -152,23 +152,80 @@ export function prepareEvidence(masked: string, runnerCut: boolean): CutText {
   return { text: cut.text, truncated: runnerCut || cut.truncated };
 }
 
-const TOKEN_OR_NUMBER = new RegExp(`(${PRIVACY_TOKEN_PATTERN_SOURCE})|\\d+(?:\\.\\d+)?`, "g");
+/**
+ * V-1: what changes from run to run of the same failure. Each pass skips privacy tokens (the
+ * token alternative comes first and is returned unchanged), and the passes run in this order so
+ * that an earlier, wider form is replaced before its parts could match a later one.
+ */
+const NUMBER = String.raw`\d+(?:\.\d+)?`;
+const VOLATILE_PASSES: readonly { readonly source: string; readonly replace: (groups: Record<string, string | undefined>) => string | null }[] = [
+  {
+    // ISO dates with an optional time and zone, compact timestamps (20261112T031500Z, run ids),
+    // and clock times with seconds (07:37:48.123). Two-part "6:10" is a line and column: kept.
+    source: String.raw`(?<![\w.:])(?<date>\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?|\d{8}T\d{6}(?:\.\d+)?Z?|\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?)(?![\w:])`,
+    replace: () => "#",
+  },
+  {
+    // Hex of 8 or more digits (addresses, ids, hashes). It must have a 0x prefix or a letter, so
+    // a plain decimal value such as an expected 12345678 is kept.
+    source: String.raw`(?<![\w])(?<hex>(?:0[xX])?[0-9a-fA-F]{8,})(?![\w])`,
+    replace: ({ hex = "" }) => (/^0x|[a-f]/i.test(hex) ? "#" : null),
+  },
+  {
+    // A number with a time unit: (0.7457ms), 1.5 s, 250µs, 12ns. The unit is kept.
+    source: String.raw`(?<![\w.])(?<num>${NUMBER})(?<unit>[ \t]?(?:ms|s|µs|μs|ns))(?![\w])`,
+    replace: ({ unit = "" }) => `#${unit}`,
+  },
+  {
+    // The value of a duration, elapsed or time key: "duration_ms 83.1", "elapsed=3", "startTime": 5.
+    source: String.raw`(?<![\w])(?<key>[A-Za-z_][\w-]*)(?<sep>["']?[ \t]*[:=][ \t]*["']?|[ \t]+)(?<value>${NUMBER})(?!\w)`,
+    replace: ({ key = "", sep = "" }) => (isTimeKey(key) ? `${key}${sep}#` : null),
+  },
+];
 
-/** Replaces every run of digits (with a decimal fraction) by "#", leaving privacy tokens as they are. */
-export function normalizeNumbers(text: string): string {
-  return text.replace(TOKEN_OR_NUMBER, (match, token: string | undefined) => (token !== undefined ? match : "#"));
+const TIME_KEY_WORDS: ReadonlySet<string> = new Set(["duration", "elapsed", "time", "timestamp", "runtime"]);
+
+/** True when one word of the key (split at `_`, `-` and camelCase) is a time word. `timeout` is not. */
+function isTimeKey(key: string): boolean {
+  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[_-]+/);
+  return words.some((word) => TIME_KEY_WORDS.has(word));
+}
+
+const VOLATILE_PATTERNS = VOLATILE_PASSES.map((pass) => ({
+  pattern: new RegExp(`(?<token>${PRIVACY_TOKEN_PATTERN_SOURCE})|${pass.source}`, "g"),
+  replace: pass.replace,
+}));
+
+/**
+ * Replaces the values that change from run to run of one failure by "#" (V-1): times with a unit,
+ * values of duration/elapsed/time keys, dates and clock times, and hex of 8 or more digits.
+ * Line and column numbers, counts, test names and actual/expected values are kept, so a failure
+ * that moves to another assertion or another value is a different failure. Privacy tokens are
+ * left as they are, so different secrets stay different.
+ */
+export function normalizeVolatile(text: string): string {
+  let out = text;
+  for (const { pattern, replace } of VOLATILE_PATTERNS) {
+    out = out.replace(pattern, (match: string, ...rest: unknown[]) => {
+      const groups = rest.at(-1) as Record<string, string | undefined>;
+      if (groups["token"] !== undefined) return match;
+      return replace(groups) ?? match;
+    });
+  }
+  return out;
 }
 
 /**
- * Failure signature (R-3, T-5): SHA-256 of the failed verifiers in task order, each as its id,
- * its outcome and its masked evidence with numbers normalized. Two verifications fail "the same
- * way" when their signatures are equal, so a run time or a count that differs does not count.
+ * Failure signature (R-3, T-5, V-1): SHA-256 of the failed verifiers in task order, each as its
+ * id, its outcome and its masked evidence with run-to-run values normalized (`normalizeVolatile`).
+ * Two verifications fail "the same way" when their signatures are equal: a different run time
+ * does not count, a different assertion line or value does.
  */
 export function failureSignature(
   failed: readonly (Pick<VerifierResult, "id" | "evidence"> & { readonly outcome?: VerifierOutcome })[],
 ): string {
   const material = JSON.stringify(
-    failed.map((result) => [result.id, result.outcome ?? null, normalizeNumbers(result.evidence)]),
+    failed.map((result) => [result.id, result.outcome ?? null, normalizeVolatile(result.evidence)]),
   );
   return createHash("sha256").update(material, "utf8").digest("hex");
 }

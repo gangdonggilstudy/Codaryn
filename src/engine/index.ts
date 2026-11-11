@@ -70,7 +70,7 @@ export {
   buildRepairFeedback,
   cutMiddle,
   failureSignature,
-  normalizeNumbers,
+  normalizeVolatile,
   prepareEvidence,
 } from "./feedback.js";
 export type { CutText, FailedForFeedback, RepairFeedback } from "./feedback.js";

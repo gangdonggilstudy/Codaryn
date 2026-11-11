@@ -3,8 +3,13 @@
  *
  * - Protected entries come from `policy.protectedPaths` (relative to the workspace root) and the
  *   config file's `integrity.paths` (absolute, outside the workspace).
- * - An entry is followed to its real path (T-13); links below an entry are recorded as `link`
- *   with the SHA-256 of their stored target text and never followed.
+ * - An entry is followed to its real path (T-13). A link below an entry is recorded as `link`
+ *   with the SHA-256 of its stored target text. W-2: when its real target is inside the workspace,
+ *   the target's content is listed too, under the target's own workspace-relative path (a write
+ *   there is not a write to a protected path, so the policy allows it). A target outside the
+ *   workspace is not listed: that content is checked only when `integrity.paths` names it.
+ *   Each real directory is entered once per capture through links, so cycles end; followed
+ *   content counts toward the limits of the entry being listed.
  * - The state directory at the workspace root is never entered.
  * - Nothing here rejects for a file-level problem: such a path becomes `unchecked`.
  * - The manifest stays local. Its paths are raw text; the engine masks what it records.
@@ -175,6 +180,14 @@ export function buildIntegrityChecker(
     return folded === stateDir || folded.startsWith(`${stateDir}${path.sep}`);
   };
 
+  /** `/` separated path of a real path relative to the workspace root, or null when outside. */
+  const workspaceRelative = (real: string): string | null => {
+    const relative = path.relative(workspaceRoot, real);
+    if (relative === "") return ".";
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+    return relative.split(path.sep).join("/");
+  };
+
   async function capture(): Promise<IntegrityManifest> {
     const found = new Map<string, IntegrityEntry>();
     const add = (entry: IntegrityEntry): void => {
@@ -191,8 +204,17 @@ export function buildIntegrityChecker(
       if (fileCount > limits.maxFiles) throw new LimitReached();
     };
 
+    /**
+     * Real directories (and followed real files) entered in this capture, folded. A link whose
+     * target is already here is not followed again, which ends cycles (W-2).
+     */
+    const entered = new Set<string>();
+
+    /** A directory to list: real path, display path, and whether a link led to it. */
+    type Pending = readonly [dir: string, display: string, followed: boolean];
+
     /** One file, link or other leaf at `absolute`, shown as `display`. Directories are queued. */
-    async function visit(absolute: string, display: string, listed: IntegrityEntry[], queue: [string, string][]): Promise<void> {
+    async function visit(absolute: string, display: string, followed: boolean, listed: IntegrityEntry[], queue: Pending[]): Promise<void> {
       let info: IntegrityStat;
       try {
         info = await files.lstat(absolute);
@@ -202,7 +224,7 @@ export function buildIntegrityChecker(
         return;
       }
       if (info.isDirectory()) {
-        queue.push([absolute, display]);
+        queue.push([absolute, display, followed]);
         return;
       }
       countFile();
@@ -212,7 +234,9 @@ export function buildIntegrityChecker(
           listed.push({ path: asRawText(display), kind: "link", sha256: createHash("sha256").update(target, "utf8").digest("hex") });
         } catch {
           listed.push(unreadable(display));
+          return;
         }
+        await follow(absolute, display, listed, queue);
         return;
       }
       if (!info.isFile()) {
@@ -232,6 +256,38 @@ export function buildIntegrityChecker(
       listed.push({ path: asRawText(display), kind: "file", sha256: hashed.sha256 });
     }
 
+    /**
+     * W-2: the content behind a link below an entry, when its real target is inside the workspace,
+     * listed under the target's workspace-relative path. Outside, missing, or inside the state
+     * directory: the link entry alone. A target that cannot be resolved otherwise is unreadable.
+     */
+    async function follow(link: string, linkDisplay: string, listed: IntegrityEntry[], queue: Pending[]): Promise<void> {
+      let real: string;
+      try {
+        real = await files.realpath(link);
+      } catch (error) {
+        if (!isMissing(error)) listed.push(unreadable(linkDisplay));
+        return;
+      }
+      const display = workspaceRelative(real);
+      if (display === null || isStateDir(real)) return;
+      const key = fold(real);
+      if (entered.has(key)) return;
+      let info: IntegrityStat;
+      try {
+        info = await files.lstat(real);
+      } catch {
+        listed.push(unreadable(linkDisplay));
+        return;
+      }
+      if (info.isDirectory()) {
+        queue.push([real, display, true]);
+        return;
+      }
+      entered.add(key);
+      await visit(real, display, true, listed, queue);
+    }
+
     /** Everything one protected entry adds. Throws LimitReached. */
     async function listRoot(root: Root): Promise<IntegrityEntry[]> {
       const absent: IntegrityEntry[] = [{ path: asRawText(root.display), kind: "absent" }];
@@ -245,10 +301,15 @@ export function buildIntegrityChecker(
       }
       if (isStateDir(real)) return [];
       const listed: IntegrityEntry[] = [];
-      const queue: [string, string][] = [];
-      await visit(real, root.display, listed, queue);
+      const queue: Pending[] = [];
+      await visit(real, root.display, false, listed, queue);
       while (queue.length > 0) {
-        const [dir, display] = queue.pop() as [string, string];
+        const [dir, display, followed] = queue.pop() as Pending;
+        const key = fold(dir);
+        // Directories of the entry itself are always listed under the entry's display path; a
+        // directory reached through a link is listed once per capture.
+        if (followed && entered.has(key)) continue;
+        entered.add(key);
         let names: string[];
         try {
           names = await files.readdir(dir);
@@ -260,7 +321,7 @@ export function buildIntegrityChecker(
         for (const name of names) {
           const child = path.join(dir, name);
           if (isStateDir(child)) continue;
-          await visit(child, childDisplay(display, name), listed, queue);
+          await visit(child, childDisplay(display, name), followed, listed, queue);
         }
       }
       return listed;

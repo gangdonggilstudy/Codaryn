@@ -290,20 +290,38 @@ test("lock: acquire writes pid, runId and startedAt; a second run is refused; re
   });
 });
 
-test("lock: a lock left by a dead process is reclaimed", async () => {
-  await withTempDir(async (root) => {
-    await mkdir(join(root, ".codaryn"), { recursive: true });
-    const stale = { pid: exitedPid(), runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" };
-    await writeFile(lockFile(root), `${JSON.stringify(stale)}\n`, "utf8");
+/** The real liveness check (signal 0), as acquireLock uses it by default. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: unknown }).code === "EPERM";
+  }
+}
 
-    const outcome = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock() });
-    assert.equal(outcome.ok, true);
-    assert.deepEqual(JSON.parse(await readFile(lockFile(root), "utf8")), {
-      pid: process.pid,
-      runId: RUN_ID,
-      startedAt: "2026-11-12T03:04:05.000Z",
+test("lock: a lock left by a dead process is reclaimed", async () => {
+  // This case keeps the real liveness check. W-4: the system may give the exited process's pid to
+  // a new process before the lock is read; then the lock is rightly held, so the case is repeated
+  // with a fresh pid. Only a refusal while the pid is still dead fails it.
+  let reused = true;
+  for (let attempt = 1; reused; attempt += 1) {
+    await withTempDir(async (root) => {
+      await mkdir(join(root, ".codaryn"), { recursive: true });
+      const stale = { pid: exitedPid(), runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" };
+      await writeFile(lockFile(root), `${JSON.stringify(stale)}\n`, "utf8");
+
+      const outcome = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock() });
+      reused = !outcome.ok && outcome.holder?.pid === stale.pid && alive(stale.pid) && attempt < 5;
+      if (reused) return;
+      assert.equal(outcome.ok, true);
+      assert.deepEqual(JSON.parse(await readFile(lockFile(root), "utf8")), {
+        pid: process.pid,
+        runId: RUN_ID,
+        startedAt: "2026-11-12T03:04:05.000Z",
+      });
     });
-  });
+  }
 });
 
 test("lock: an unreadable lock file is not reclaimed", async () => {

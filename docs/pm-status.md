@@ -22,17 +22,17 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-6 | G4 | 교차 검토 수정 `7a74c2c`(privacy), `df1ceff`(tools), `7eca0c0`(workspace), `54e59fd` `2323ad6` `2b5167c`(engine, 계약 문서), 회귀 통합 테스트 `db1e043` 병합. main `db1c55c`에서 유닛 189건, 통합 76건 통과. 수용 기준 A1~A12 대조 후 1a 오프라인 검증을 채택 | `db1c55c`와 이 문서를 담은 커밋 | 완료 |
 | CP-7 | 설정과 제공자 | 사용자 직접 지시("설정 가능하게 해")에 따라 설정 계약 `86f3d62`, CLI 설정 처리 `7a2d02d`, Anthropic 제공자 `a5f62e7`, 조립 `7359cef`, 가짜 서버 통합 테스트와 실제 호출 점검 스크립트 `e8dbdb9`를 병합. main `dd930e2`에서 유닛 234건, 통합 130건 통과. 실제 API 미실행 | `dd930e2`와 이 문서를 담은 커밋 | 완료 |
 | CP-8 | 단계 2 착수 | 사용자 직접 지시("단계 2 재수정 반복도 이어서 진행해", "세션들 최대한 활용해서 진행해줘 투입 가능하게")에 따라 작업 지시서 `docs/work-orders/phase-2-repair-loop.md` 작성. F1(p1), F5 준비(p4), G1(p6), G2(p5), H1(p7), H2(p8) 배정. 작업자 브랜치를 main `0164b10`에 맞춤 | `0164b10`과 이 문서를 담은 커밋 | 완료 |
+| CP-9 | 단계 2 구현과 검토 | 재수정 반복 엔진, 보호 경로, 스냅샷·되돌리기, `.cmd` 실행, 제공자 수정, CLI 보안 모듈, 사용 문서를 main에 병합(`5989d79`까지). 교차 검토 H1·H2·F6와 결정 S-1~S-12, T-1~T-15를 기록(`1037593`). p1의 연결 커밋 `3f3756d`는 통합 8건 실패가 남아 main 미병합. p1이 주간 사용 한도로 멈춰 PM이 p1의 계약 변경을 검증 후 `f45959a`로 커밋하고 나머지를 p5~p8에 재배정 | `1037593`과 이 문서를 담은 커밋 | 완료 |
 
-## 현재 상태 (CP-7)
+## 현재 상태 (CP-9)
 
-- 단계 1a 오프라인 검증은 채택됐다(G4, CP-6). 그 뒤 사용자가 PM에게 직접 "설정 가능하게 해"라고 지시했다. PM은 이를 모델·키·한도를 설정으로 정할 수 있게 하고 그 설정으로 동작하는 Anthropic 제공자를 만들라는 뜻으로 해석했다(`docs/work-orders/phase-1b-config.md`). `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.
-- main `dd930e2`: 설정 파일(`--config`, `CODARYN_CONFIG`), env 파일(`--env-file`), 환경 변수(`ANTHROPIC_API_KEY`, `CODARYN_MODEL`, `CODARYN_API_BASE_URL`), 간편 형식(`--workspace`, `--goal`), 실제 Anthropic 제공자가 들어 있다. 설정 항목과 우선순위는 `docs/cli-contract.md` 11절이다.
-- 실행한 검증(main `dd930e2`): `npm run typecheck` 통과, `npm run test:unit` 234건 통과, `npm run test:integration` 130건 통과(기존 76 + 로컬 가짜 서버를 쓰는 모의 API 54, 실패 0, 건너뜀 0), `node scripts/check-secrets.mjs --tracked` 발견 없음.
-- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** 1b는 완료가 아니다. `tests/live/anthropic-live.ts`는 사용자가 `CODARYN_LIVE=1`, 키, 모델을 환경에 두고 직접 실행하는 점검이며 PM과 작업자는 실행하지 않았다. 그 밖에 Windows 외 OS, OS 수준 격리와 네트워크 차단, 강제 종료 시 파일 원자성도 검증하지 않았다.
-- 실제 API로 확인하지 못한 항목(`docs/cli-contract.md` 10절): 503의 분류, `retry-after` 형식, 빈 `tool_result` 허용 여부, thinking 블록 없이 도구 반복을 이어갈 수 있는지.
-- 모든 작업자(p1, p4, p5, p6, p7, p8)는 대기 중이고 각 worktree는 깨끗하다. p8의 worktree `claude-store`는 브랜치 `claude/anthropic-provider`로 바꿨다. 작업 브랜치는 모두 main에 병합됐고 삭제하지 않았다.
-- 권한 창 처리, p5 모델 변경 관찰, 공용 Git 훅은 CP-6까지의 기록과 같다(작업 디렉터리 밖 읽기 창은 3번으로 닫았고, p5의 Opus 5.5 변경은 PM이 한 것이 아니며, `.git/hooks/pre-commit`이 모든 worktree에서 비밀을 검사한다).
-- 차단 요인: 실제 호출 검증에는 사용자의 키와 모델 선택이 필요하다.
+- 사용자 직접 지시로 단계 2와 투입 준비를 진행 중이다. `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.
+- main(`1037593`)은 통과 상태다: 유닛 388건 중 387 통과·1 건너뜀, 통합 130건 통과(`5989d79`에서 실행. 그 뒤 main에는 스크립트와 문서 커밋만 있다). 실제 API는 호출한 적이 없다.
+- main에 없는 것: 단계 2 조립과 보안 검사 S-1~S-9의 실행 경로 연결. 로컬 브랜치 `claude/core-engine`(`3f3756d`, 계약 추가 `f45959a`)에 있다. 이 브랜치 기준으로 p4가 돌린 통합은 246건 중 238 통과·8 실패이며, 실패는 제품 결함 3건(T-1, T-6, T-15)에서 나온다.
+- **차단 요인: w1:p1이 주간 사용 한도에 걸려 멈췄다(11월 15일 오전 3시 초기화).** 화면에 선택 창이 떠 있다: 1) 멈추고 초기화를 기다림 2) 여기서 기다렸다가 자동으로 계속 3) 사용 크레딧으로 전환. 과금이 걸린 선택이라 PM은 답하지 않았다. 창 내용을 읽으려고 PM이 Down 키를 네 번 눌러 선택 표시가 2번으로 옮겨져 있다(확정하지 않음). 다른 세션도 같은 한도에 걸릴 수 있다.
+- p1의 worktree `claude-design`(브랜치 `claude/core-engine`)은 `f45959a`에서 깨끗한 상태로 멈춰 있다. p1이 쓰고 커밋하지 못한 계약 변경은 PM이 타입 검사와 유닛(405건 중 404 통과·1 건너뜀)을 확인한 뒤 그대로 커밋했다. p1이 다시 움직이면 다른 세션과 겹치지 않게 먼저 지시를 갱신해야 한다.
+- 재배정(수정 묶음 T): p5 엔진(`src/engine`), p6 도구(`src/tools`), p7 정책·보안 모듈·CLI(`src/policy`, `src/cli`, `docs/cli-contract.md`), p8 검증기·저장소(`src/verify`, `src/store`). 모두 `claude/core-engine`을 자기 브랜치에 병합해 작업한다. p4는 통합 재실행 대기다.
+- 공용 Git 훅(`.git/hooks/pre-commit`)이 모든 worktree에서 비밀을 검사한다. 검토 보고서의 가짜 키 대입 문장도 막으므로 문서에는 값 없이 적는다.
 
 ### PM 결정 (CP-4, CP-5)
 
@@ -49,29 +49,28 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 1a 자리표시자 `src/model/anthropic.ts`와 그 유닛 2건은 실제 제공자로 대체되어 삭제했다. 같은 동작은 `tests/unit/cli/anthropic-wire.test.ts`와 통합 m02가 확인한다.
 - 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
 
-## 세션 (CP-8)
+## 세션 (CP-9)
 
 | pane | tab | 현재 작업 | worktree | 브랜치 | 상태 |
 | --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | F1 계약·엔진 반복·CLI (역할 1) | `claude-design` | `claude/core-engine` | 진행 |
-| w1:p4 | main | F5 단계 2 통합 검증 준비 | `claude-operations` | `claude/cli-verification` | 진행 |
-| w1:p5 | optional | G2 사용 문서와 예시 | `claude-quality` | `claude/security-core` | 진행 |
-| w1:p6 | optional | G1 `.cmd` 실행, 이어서 F4 | `claude-tools` | `claude/core-tools` | 진행 |
-| w1:p7 | optional | H1 제공자 교차 검토, 이어서 F2 | `claude-workspace` | `claude/workspace-policy` | 진행 |
-| w1:p8 | optional | H2 CLI 설정 교차 검토, 이어서 F3 | `claude-store` | `claude/revert-store` | 진행 |
+| w1:p1 | main | (역할 1, CLI) | `claude-design` | `claude/core-engine` | **주간 사용 한도로 정지. 선택 창 대기** |
+| w1:p4 | main | 통합 검증 | `claude-operations` | `claude/cli-verification` | 수정 병합 뒤 재실행 대기 |
+| w1:p5 | optional | 수정 T 엔진 | `claude-quality` | `claude/security-core` | 진행 |
+| w1:p6 | optional | 수정 T 도구 | `claude-tools` | `claude/core-tools` | 진행 |
+| w1:p7 | optional | 수정 T 정책·보안·CLI | `claude-workspace` | `claude/workspace-policy` | 진행 |
+| w1:p8 | optional | 수정 T 검증기·저장소 | `claude-store` | `claude/revert-store` | 진행 |
 | w1:p3 | main | PM·통합 | main | `main` | 진행 |
 | w1:p2 | main | Codex | — | — | 대기(회수 권한 보유) |
-
-각 worktree의 미커밋 파일은 작업 중인 변경이다. 작업자 보고서는 각 worktree의 `.codaryn/report-*.md`(Git 무시)에 있다.
 
 세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 보존된 이전 브랜치: `claude/cli-foundation`(기반, 병합됨), `claude/quality`, `claude/quality-ready` 등 초안 브랜치는 삭제하지 않았다.
 
 ## 다음 행동
 
-1. p1의 계약 커밋을 검토·병합하고 F2(p7), F3(p8), F4(p6), F5(p4)에 알린다.
-2. G1, G2와 교차 검토 H1, H2의 결과를 검토한다. 재현된 결함은 담당자에게 회귀 테스트와 함께 배정한다.
-3. F1~F4 병합 뒤 p1이 조립을 끝내면 main에서 타입 검사, 유닛, 통합 전체를 돌리고 F6 교차 검토를 배정한다.
-4. 투입 조건(`work-orders/phase-2-repair-loop.md`의 병행 작업 절)을 대조해 보고한다. 실제 호출 점검은 사용자가 직접 실행한다.
+1. p5~p8의 수정 커밋을 `scripts/review-branch.mjs`(기준이 main이므로 `claude/core-engine`의 커밋도 함께 보인다. 각 브랜치 자체 커밋의 파일을 확인한다)와 유닛으로 검토한다.
+2. `claude/core-engine`과 네 수정 브랜치를 p4 브랜치에 모아 통합을 다시 돌린다. 통과하면 main에 병합하고 전체를 다시 실행한다.
+3. 사용 문서(`docs/usage.md`, `examples/`)를 `--vars-file`, 재수정 반복, `revert`, 새 한계에 맞게 갱신한다.
+4. 투입 조건 대조: 실제 호출 점검(사용자 실행), 단계 2 통합 통과, `.cmd` 실행이 실제 CLI에서 동작, 검토 결함 수정.
+5. p1의 사용 한도 선택은 사용자가 정한다.
 
 ## 회수 시 인계 방법
 

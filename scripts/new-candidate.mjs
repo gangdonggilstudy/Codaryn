@@ -10,8 +10,11 @@
 //   repository's HEAD commit. The candidate holds the tracked files of that commit only.
 // - Writes two templates into <state>, a directory outside the candidate:
 //   <name>.config.json (model placeholder, conservative limits, maxRepairAttempts, suggested
-//   protectedPaths, verifiers, an empty integrity.paths slot) and <name>.task.json (goal placeholder,
+//   protectedPaths, verifiers, integrity.paths) and <name>.task.json (goal placeholder,
 //   workspaceRoot = the candidate). Both must be edited before a run. They hold no key or secret.
+// - integrity.paths (W-3) lists what the script knows outside the candidate: the repository's
+//   shared Git directory's `hooks` and `config`, and the CLI installation's `dist`. A path that does
+//   not exist is left out (the CLI refuses missing ones) and named in the output.
 //
 // What it refuses (exit 1, nothing changed):
 // - the candidate directory already exists (even empty), the branch or a conflicting ref exists,
@@ -271,13 +274,41 @@ function conflictingRef(repo, branch) {
   });
 }
 
+/** True when `target` exists and its real path resolves (a dangling link does not). */
+function resolvable(target) {
+  try {
+    fs.realpathSync.native(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * W-3: material outside the candidate that the script knows and that commands in the candidate
+ * could change: the shared Git directory's hooks and config (used by later Git commands in the
+ * original repository) and the CLI installation's dist (the running CLI). Only existing paths are
+ * listed, because the CLI refuses a missing one; the others are reported.
+ */
+function integrityPaths(repository, install) {
+  const known = [
+    { path: path.join(repository.commonDir, "hooks"), what: "shared Git hooks" },
+    { path: path.join(repository.commonDir, "config"), what: "shared Git config" },
+    { path: path.join(install, "dist"), what: "CLI installation dist" },
+  ];
+  return {
+    present: known.filter((entry) => resolvable(entry.path)),
+    missing: known.filter((entry) => !resolvable(entry.path)),
+  };
+}
+
 function suggestedProtectedPaths(repo, base) {
   const names = gitOk(repo, ["ls-tree", "--name-only", "-z", base], "git ls-tree").split("\0").filter(Boolean);
   const extra = names.filter((name) => VERIFICATION_CONFIG.some((pattern) => pattern.test(name))).sort();
   return [...BASE_PROTECTED, ...extra.filter((name) => !BASE_PROTECTED.includes(name))];
 }
 
-function templates({ name, out, protectedPaths, hasPackageJson }) {
+function templates({ name, out, protectedPaths, hasPackageJson, integrity }) {
   const policy = {
     commands: [],
     network: "deny",
@@ -298,7 +329,7 @@ function templates({ name, out, protectedPaths, hasPackageJson }) {
     policy,
     verifiers,
     secretEnv: [],
-    integrity: { paths: [] },
+    integrity: { paths: integrity.present.map((entry) => entry.path) },
   };
   const task = {
     schemaVersion: 1,
@@ -357,7 +388,15 @@ function plan(args) {
 
   const protectedPaths = suggestedProtectedPaths(repository.top, repository.base);
   const hasPackageJson = git(repository.top, ["cat-file", "-e", `${repository.base}:package.json`]).status === 0;
-  return { install, repository, branch, files, ...templates({ name: args.name, out: args.out, protectedPaths, hasPackageJson }) };
+  const integrity = integrityPaths(repository, install);
+  return {
+    install,
+    repository,
+    branch,
+    files,
+    integrity,
+    ...templates({ name: args.name, out: args.out, protectedPaths, hasPackageJson, integrity }),
+  };
 }
 
 /** Removes `dir` and its parents up to `top`, each only when empty. */
@@ -442,6 +481,9 @@ function describe(args, planned, dryRun) {
     `  candidate    ${args.out}`,
     `  config       ${planned.files.config}`,
     `  task         ${planned.files.task}`,
+    `integrity.paths: ${planned.integrity.present.length} path(s) filled in`,
+    ...planned.integrity.present.map((entry) => `  ${entry.path} (${entry.what})`),
+    ...planned.integrity.missing.map((entry) => `integrity.paths: not found, not added: ${entry.path} (${entry.what})`),
   ];
   if (dryRun) {
     lines.push(

@@ -17,28 +17,36 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-1 | 인수 | 위임 확인, 이 문서 생성 | `789733f` | 완료 |
 | CP-2 | G2 | 기반 커밋 `cba57fa` 검토·병합, 작업자 worktree와 브랜치 준비, 배분 문서 작성 | `cc29b50`, `35b5102` | 완료 |
 | CP-3 | 배분 | 여섯 작업(B1, B2, B3, C1, C2, D)을 Herdr로 전달. 검증 체계와 비밀 검사 스크립트·커밋 전 훅 추가 | 이 문서를 담은 커밋 | 완료 |
+| CP-4 | G3a | B2 `9496d14`, B3 `d3e6350` `6d35746`, C1 `ec4aa5f`, C2 `ae27dc1` `063605d` `bca12d3`을 검토·병합. main 유닛 108건 통과. D의 통합 테스트 `8b40f46` `7942bfd` 병합(아직 실행 전). B1 조립과 교차 검토 지시 | `7b39c96`과 이 문서를 담은 커밋 | 완료 |
 
-## 현재 상태 (CP-3)
+## 현재 상태 (CP-4)
 
-- 단계 1a. G0, G1, G2는 열렸다. G3(구현 인수)와 G4(채택)는 대기다.
-- main에는 프로젝트 설정과 `src/contracts/**`, `docs/cli-contract.md`만 있다. 엔진, 도구, CLI, 테스트는 아직 없다.
-- 실행한 검증: main과 다섯 worktree에서 `npm ci`, `tsc --noEmit` 통과. main에서 `npm run build` 통과.
-- 실행하지 않은 검증: 유닛 테스트(0개), 프로세스 통합 테스트, 실제 API(1b 미수행).
-- 사용자 추가 지시(2026-11-12): 빨리 개발 도구로 쓸 수 있게 진행, API 키는 커밋에서 배제, 열린 세션에 모듈을 나눠 배정, 검증 체계를 잘 갖출 것. 배분 문서 5절과 6절에 반영했다.
-- 여섯 작업자가 모두 작업 중이다. 각 worktree의 미커밋 파일은 작업 중인 변경이다.
-- 공용 Git 훅을 추가했다: `.git/hooks/pre-commit`과 `.git/hooks/check-secrets.mjs`(추적되지 않음, 모든 worktree에 적용).
+- 단계 1a. G0, G1, G2, G3a는 열렸다. G3b(B1 조립 병합)와 G4(채택)는 대기다.
+- main에는 계약, privacy, policy, workspace, tools, verify, store와 통합 테스트 파일이 있다. 엔진, 모의 모델, CLI는 `claude/core-engine`(`b67b620`)에 있고 아직 main에 없다.
+- 실행한 검증: 각 작업 브랜치에서 `scripts/review-branch.mjs` PASS와 유닛 통과(C1 22, B2 35, C2 33, B3 18, B1 1단계 44). 병합 후 main에서 `npm run typecheck`, `npm run test:unit` 108건 통과, `check-secrets --tracked` 발견 없음.
+- 실행하지 않은 검증: 프로세스 통합 테스트(CLI가 main에 없어 미실행), 실제 API(1b 미수행).
+- 진행 중: p1이 main을 병합해 실제 모듈을 CLI에 조립한다. p5(대상 tools), p6(대상 policy·workspace), p7(대상 privacy)이 읽기 전용 교차 검토를 한다. p4와 p8은 대기다.
+- 관찰: p5 세션에서 `/model`로 모델이 Opus 5.5로 바뀌어 있었다. PM이 바꾼 것이 아니며 그대로 두었다.
+- 공용 Git 훅: `.git/hooks/pre-commit`과 `.git/hooks/check-secrets.mjs`(추적되지 않음, 모든 worktree에 적용).
 - 차단 요인: 없음.
+
+### PM 결정 (CP-4)
+
+- 도구가 `workspace.resolve` 거부를 `policy_denied`로 돌려주는 것을 승인했다. 계약에 도구 전용 코드를 추가하지 않는다.
+- 정책의 거부 사유 보고 순서(path, command, network, destructive, restore)와 내장 도구 고정 요구 표와의 합산 판정을 승인했다.
+- Workspace 계약에 `exists`/`stat`을 추가하지 않는다.
+- 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
 
 ## 세션
 
 | pane | tab | 작업 | worktree | 브랜치 | 기준 커밋 | 상태 |
 | --- | --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | B1 엔진·모의 모델·CLI, 역할 1 | `claude-design` | `claude/core-engine` | `cc29b50` | 진행 |
-| w1:p6 | optional | B2 도구·명령 실행기 | `claude-tools` | `claude/core-tools` | `cc29b50` | 진행 |
-| w1:p8 | optional | B3 검증기·기록·잠금 | `claude-store` | `claude/core-store` | `cc29b50` | 진행 |
-| w1:p5 | optional | C1 민감정보 게이트 | `claude-quality` | `claude/security-core` | `cc29b50` | 진행 |
-| w1:p7 | optional | C2 정책·작업 공간 | `claude-workspace` | `claude/workspace-policy` | `cc29b50` | 진행 |
-| w1:p4 | main | D 독립 통합 검증 | `claude-operations` | `claude/cli-verification` | `cc29b50` | 진행 |
+| w1:p1 | main | B1 엔진·모의 모델·CLI, 역할 1 | `claude-design` | `claude/core-engine` | `cc29b50` | 2단계 조립 진행 |
+| w1:p6 | optional | B2 도구·명령 실행기 | `claude-tools` | `claude/core-tools` | `cc29b50` | 병합됨. 교차 검토 중 |
+| w1:p8 | optional | B3 검증기·기록·잠금 | `claude-store` | `claude/core-store` | `cc29b50` | 병합됨. 대기 |
+| w1:p5 | optional | C1 민감정보 게이트 | `claude-quality` | `claude/security-core` | `cc29b50` | 병합됨. 교차 검토 중 |
+| w1:p7 | optional | C2 정책·작업 공간 | `claude-workspace` | `claude/workspace-policy` | `cc29b50` | 병합됨. 교차 검토 중 |
+| w1:p4 | main | D 독립 통합 검증 | `claude-operations` | `claude/cli-verification` | `cc29b50` | 테스트 작성분 병합됨. 최종 실행 대기 |
 | w1:p3 | main | PM·통합 | main | `main` | — | 진행 |
 | w1:p2 | main | Codex | — | — | — | 대기(회수 권한 보유) |
 
@@ -46,11 +54,10 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 
 ## 다음 행동
 
-1. 작업자 보고를 받는다.
-2. B2, B3, C1, C2의 커밋을 `scripts/review-branch.mjs`와 유닛 실행으로 검토한다. 통과하면 main에 병합한다(G3a).
-3. p1이 main을 병합해 조립을 끝내면 B1을 검토·병합한다(G3b).
-4. D의 통합 테스트를 실행하고 수용 기준 A1~A12와 대조한다(G4).
-5. 각 단계에서 이 문서와 progress.md를 갱신하고 push한다.
+1. p1의 조립 보고를 받아 `claude/core-engine`을 검토·병합한다(G3b). main에서 타입 검사와 유닛 전체를 다시 돌린다.
+2. main에서 `npm run test:integration`을 실행하고 실패를 모듈 담당자에게 재현 사례로 돌려준다.
+3. 교차 검토 결과 중 확인된 결함을 담당자에게 배정하고 회귀 테스트와 함께 고치게 한다.
+4. 수용 기준 A1~A12와 대조해 G4를 판단하고 이 문서와 progress.md를 갱신한다.
 
 ## 회수 시 인계 방법
 

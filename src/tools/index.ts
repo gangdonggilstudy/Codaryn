@@ -31,23 +31,23 @@ import type {
   WriteFileArgs,
 } from "../contracts/index.js";
 
-import { COMMAND_CAPTURE_SLACK_BYTES, createCommandRunner } from "./command-runner.js";
+import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 
 export {
   COMMAND_CAPTURE_SLACK_BYTES,
+  MAX_UNFINISHED_LINE_DROP_BYTES,
   PIPE_GRACE_AFTER_EXIT_MS,
   OutputCapture,
   buildChildEnv,
   createCommandRunner,
+  dropUnfinishedLine,
 } from "./command-runner.js";
 export type {
   CommandRunner,
   CommandRunnerOptions,
-  CommandRunPayload,
   CommandRunRequest,
   CommandSpawnFailure,
-  CutStreams,
 } from "./command-runner.js";
 export { planWindowsLaunch } from "./windows-launch.js";
 export type {
@@ -181,29 +181,23 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
 
   /**
    * Masks one raw output stream, then cuts it to MAX_COMMAND_OUTPUT_BYTES outside any token.
-   * A cut stream (`rawCut`: the capture cap, the exit grace, the time limit or a cancel stopped the
-   * reading, V-2) may end inside a secret. Its last COMMAND_CAPTURE_SLACK_BYTES raw bytes are not
-   * trusted: only the part of the masked text that is the same as masking the raw text without
-   * them (and without anything past MAX_COMMAND_OUTPUT_BYTES) is kept. So a cut secret of at most
-   * COMMAND_CAPTURE_SLACK_BYTES never survives, even when earlier long secrets made the masked text
-   * shorter than the raw capture. A cut stream shorter than the slack is dropped whole. This is the
-   * same slack the engine drops from cut verifier evidence (EVIDENCE_SLACK_BYTES).
+   * When the runner dropped bytes, its capture may end inside a secret. Only the part of the
+   * masked text that is the same as masking the first MAX_COMMAND_OUTPUT_BYTES raw bytes is
+   * kept, so a cut secret of at most COMMAND_CAPTURE_SLACK_BYTES never survives, even when
+   * earlier long secrets made the masked text shorter than the raw capture.
+   * Output the runner did not read to its end arrives without its unfinished last line (V-2).
    */
-  function maskOutput(raw: string, rawCut: boolean): { text: string; truncated: boolean } | null {
+  function maskOutput(raw: string, rawTruncated: boolean): { text: string; truncated: boolean } | null {
     const full = maskText(raw);
     if (full === null) return null;
     let limit = indexForUtf8Bytes(full, MAX_COMMAND_OUTPUT_BYTES);
-    if (rawCut) {
-      const trustedBytes = Math.min(
-        MAX_COMMAND_OUTPUT_BYTES,
-        Buffer.byteLength(raw, "utf8") - COMMAND_CAPTURE_SLACK_BYTES,
-      );
-      const head = maskText(raw.slice(0, indexForUtf8Bytes(raw, trustedBytes)));
+    if (rawTruncated) {
+      const head = maskText(raw.slice(0, indexForUtf8Bytes(raw, MAX_COMMAND_OUTPUT_BYTES)));
       if (head === null) return null;
       limit = Math.min(limit, commonPrefixLength(full, head));
     }
     const cut = tokenSafeCut(full, limit);
-    return { text: full.slice(0, cut), truncated: rawCut || cut < full.length };
+    return { text: full.slice(0, cut), truncated: rawTruncated || cut < full.length };
   }
 
   async function resolvePath(
@@ -400,20 +394,17 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     if ("spawnFailed" in result) return fail("spawn_failed", result.message);
     if (signal.aborted) return fail("cancelled", "command cancelled");
     // The runner returns raw output with slack beyond the cap. Mask first, then cut.
-    // V-2: a runner that does not say which stream was cut has both treated as cut.
-    const cut = result.cutStreams ?? { stdout: result.truncated, stderr: result.truncated };
-    const stdout = maskOutput(result.stdout, cut.stdout);
-    const stderr = maskOutput(result.stderr, cut.stderr);
+    const stdout = maskOutput(result.stdout, result.truncated);
+    const stderr = maskOutput(result.stderr, result.truncated);
     if (stdout === null || stderr === null) {
       return fail("masking_failed", "masking the command output failed");
     }
-    // Built field by field: `cutStreams` is the runner's, not part of the tool payload.
     const payload: RunCommandPayload = {
       exitCode: result.exitCode,
       stdout: stdout.text,
       stderr: stderr.text,
       timedOut: result.timedOut,
-      truncated: result.truncated || stdout.truncated || stderr.truncated,
+      truncated: stdout.truncated || stderr.truncated,
     };
     return { ok: true, payload };
   }

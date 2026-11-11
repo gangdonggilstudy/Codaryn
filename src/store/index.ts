@@ -5,55 +5,24 @@
  * whose free text fields are MaskedText. A raw string cannot be passed to them.
  */
 
-import { link, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  JOURNAL_FILE_NAME,
-  LOCK_FILE_NAME,
-  RESULT_FILE_NAME,
-  RUNS_DIR_NAME,
-  STATE_DIR_NAME,
-} from "../contracts/index.js";
+import { JOURNAL_FILE_NAME, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
 import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 
 export { RevertRunError, createChangeRecorder, revertRun, snapshotsRelativePath } from "./changes.js";
 export type { RevertRunErrorCode } from "./changes.js";
+export { acquireLock, nodeLockFileSystem, releaseLock } from "./lock.js";
+export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ReleaseLockOptions } from "./lock.js";
 
 export interface JournalOptions {
   /** Real absolute path of the workspace root. */
   readonly workspaceRoot: string;
   readonly runId: string;
   readonly clock: Clock;
-}
-
-export interface LockInfo {
-  readonly pid: number;
-  readonly runId: string;
-  /** ISO 8601 UTC time. */
-  readonly startedAt: string;
-}
-
-export interface AcquireLockOptions {
-  readonly workspaceRoot: string;
-  readonly runId: string;
-  readonly clock: Clock;
-}
-
-export type AcquireLockOutcome =
-  | { readonly ok: true; readonly lock: LockInfo }
-  | {
-      readonly ok: false;
-      readonly code: "workspace_locked";
-      /** `null` when the existing lock file could not be understood. It is never reclaimed then. */
-      readonly holder: LockInfo | null;
-    };
-
-export interface ReleaseLockOptions {
-  readonly workspaceRoot: string;
-  readonly runId: string;
 }
 
 /** Value for `EngineResult.journalPath`: relative to the workspace root, `/` separated. */
@@ -138,90 +107,4 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
   const temporary = `${target}.${process.pid}.tmp`;
   await writeFile(temporary, `${JSON.stringify(result)}\n`, "utf8");
   await rename(temporary, target);
-}
-
-function parseLock(text: string): LockInfo | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (typeof value !== "object" || value === null) return null;
-  const { pid, runId, startedAt } = value as Record<string, unknown>;
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
-  if (typeof runId !== "string" || typeof startedAt !== "string") return null;
-  return { pid, runId, startedAt };
-}
-
-async function readLock(lockFile: string): Promise<LockInfo | null | "missing"> {
-  try {
-    return parseLock(await readFile(lockFile, "utf8"));
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") return "missing";
-    throw error;
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM: the process exists but belongs to someone else.
-    return errorCode(error) === "EPERM";
-  }
-}
-
-/**
- * Takes `<root>/.codaryn/lock.json` (`{pid, runId, startedAt}`).
- * A lock whose pid is not alive is reclaimed. A lock whose pid is alive, or a lock file that
- * cannot be parsed, makes this fail with `workspace_locked`.
- */
-export async function acquireLock(options: AcquireLockOptions): Promise<AcquireLockOutcome> {
-  const { workspaceRoot, runId, clock } = options;
-  assertRunId(runId);
-  const stateDir = await ensureStateDir(workspaceRoot);
-  const lockFile = join(stateDir, LOCK_FILE_NAME);
-  const lock: LockInfo = {
-    pid: process.pid,
-    runId,
-    startedAt: new Date(clock.now()).toISOString(),
-  };
-  // The complete content is written first and then linked into place, so a reader never
-  // sees a half-written lock and creation fails when the lock already exists.
-  const temporary = join(stateDir, `${LOCK_FILE_NAME}.${process.pid}.${runId}.tmp`);
-  await writeFile(temporary, `${JSON.stringify(lock)}\n`, "utf8");
-  try {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        await link(temporary, lockFile);
-        return { ok: true, lock };
-      } catch (error) {
-        if (errorCode(error) !== "EEXIST") throw error;
-      }
-      const holder = await readLock(lockFile);
-      if (holder === "missing") continue;
-      if (holder === null || isProcessAlive(holder.pid)) {
-        return { ok: false, code: "workspace_locked", holder };
-      }
-      await rm(lockFile, { force: true });
-    }
-    const holder = await readLock(lockFile);
-    return { ok: false, code: "workspace_locked", holder: holder === "missing" ? null : holder };
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
-
-/** Removes the lock only when this process and this run hold it. Resolves to whether it was removed. */
-export async function releaseLock(options: ReleaseLockOptions): Promise<boolean> {
-  const { workspaceRoot, runId } = options;
-  assertRunId(runId);
-  const lockFile = join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME);
-  const holder = await readLock(lockFile);
-  if (holder === "missing" || holder === null) return false;
-  if (holder.runId !== runId || holder.pid !== process.pid) return false;
-  await rm(lockFile, { force: true });
-  return true;
 }

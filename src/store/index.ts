@@ -1,5 +1,6 @@
 /**
- * Run store under `<workspaceRoot>/.codaryn/`: append-only journal, result.json and the workspace lock.
+ * Run store under `<workspaceRoot>/.codaryn/`: append-only journal, result.json, the workspace lock,
+ * and the change snapshots with revert (changes.ts).
  * Recording functions accept only the contract's JournalEvent and EngineResult,
  * whose free text fields are MaskedText. A raw string cannot be passed to them.
  */
@@ -16,6 +17,10 @@ import {
   STATE_DIR_NAME,
 } from "../contracts/index.js";
 import type { Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
+import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
+
+export { RevertRunError, createChangeRecorder, revertRun, snapshotsRelativePath } from "./changes.js";
+export type { RevertRunErrorCode } from "./changes.js";
 
 export interface JournalOptions {
   /** Real absolute path of the workspace root. */
@@ -49,34 +54,6 @@ export type AcquireLockOutcome =
 export interface ReleaseLockOptions {
   readonly workspaceRoot: string;
   readonly runId: string;
-}
-
-const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
-function assertRunId(runId: string): void {
-  if (typeof runId !== "string" || !RUN_ID_PATTERN.test(runId) || runId.includes("..")) {
-    throw new TypeError("runId must be 1-128 characters of [A-Za-z0-9._-] and must not contain '..'");
-  }
-}
-
-function errorCode(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException | null)?.code;
-}
-
-/** Creates the state directory and keeps its content out of version control tools. */
-async function ensureStateDir(workspaceRoot: string): Promise<string> {
-  const stateDir = join(workspaceRoot, STATE_DIR_NAME);
-  await mkdir(stateDir, { recursive: true });
-  try {
-    await writeFile(join(stateDir, ".gitignore"), "*\n", { encoding: "utf8", flag: "wx" });
-  } catch (error) {
-    if (errorCode(error) !== "EEXIST") throw error;
-  }
-  return stateDir;
-}
-
-function runDir(workspaceRoot: string, runId: string): string {
-  return join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
 }
 
 /** Value for `EngineResult.journalPath`: relative to the workspace root, `/` separated. */

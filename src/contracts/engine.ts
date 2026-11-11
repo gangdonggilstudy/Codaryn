@@ -3,6 +3,8 @@
  */
 
 import type { RevertOutcome } from "./changes.js";
+import type { DoctorOutput, ReportOutput } from "./commands.js";
+import type { IntegrityChecker } from "./integrity.js";
 import type { Journal } from "./journal.js";
 import type { ModelProvider } from "./model.js";
 import type { PolicyGate } from "./policy.js";
@@ -57,7 +59,11 @@ export interface RunReasonByStatus {
    * repeated_failure: the same failure signature occurred `maxSameFailures` times in a row (R-3).
    */
   readonly failed: "verifier_failed" | "model_error" | "repeated_failure";
-  readonly "needs-input": "verifier_inconclusive" | "no_verifier" | "unknown_tool_outcome";
+  /**
+   * protected_changed (U-2): an integrity check found protected material changed, or could not
+   * show it unchanged (`unchecked` entries). The run is not repaired; see `EngineDeps.integrity`.
+   */
+  readonly "needs-input": "verifier_inconclusive" | "no_verifier" | "unknown_tool_outcome" | "protected_changed";
   readonly cancelled: "cancelled";
   readonly "budget-exhausted":
     | "max_model_turns"
@@ -91,6 +97,11 @@ export const CLI_ERROR_EXIT_CODES = {
   invalid_script: 2,
   secret_env_missing: 2,
   workspace_not_found: 2,
+  /**
+   * U-3: the workspace's real path is the running CLI's install directory (the package root that
+   * holds the entry file), lies inside it or contains it. Checked before the lock; nothing is written.
+   */
+  workspace_is_install_dir: 2,
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
@@ -153,6 +164,12 @@ export interface EngineResult {
   readonly journalPath: string;
   /** Short masked notes, for example "no automatic verification". */
   readonly notices: readonly MaskedText[];
+  /**
+   * U-2: present when the run recorded at least one `integrity_checked`; the `changed` list of the
+   * last one. Empty when nothing changed. Non-empty only with reason `protected_changed`.
+   * Absent when the run had no integrity checker (nothing was protected).
+   */
+  readonly protectedChanged?: readonly MaskedText[];
 }
 
 /** Printed on stdout as one JSON line when the CLI stops before a run starts. */
@@ -186,8 +203,12 @@ export interface RevertOutput {
   readonly skipped: RevertOutcome["skipped"];
 }
 
-/** Everything the `codaryn` process can print: `run` prints CliOutput, `revert` prints RevertOutput or CliErrorOutput. */
-export type CommandOutput = CliOutput | RevertOutput;
+/**
+ * Every JSON object the `codaryn` process can print: `run` prints CliOutput, `revert` prints
+ * RevertOutput or CliErrorOutput, and `report --json` and `doctor --json` print ReportOutput and
+ * DoctorOutput (their default output is text, see commands.ts) or CliErrorOutput.
+ */
+export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput;
 
 /** Injected time source in milliseconds. */
 export interface Clock {
@@ -206,6 +227,20 @@ export interface EngineDeps {
   readonly clock: Clock;
   /** Aborting it cancels the run. */
   readonly signal: AbortSignal;
+  /**
+   * U-1, U-2: integrity of protected material. The CLI passes it when `policy.protectedPaths` or
+   * the config file's `integrity.paths` has an entry, and leaves it out otherwise. Absent: no
+   * check and no `integrity_checked` record, as before phase 3. When present the engine checks:
+   * - run_start: after `run_started`, before the first model request. `baseline = capture()`,
+   *   `changed = compare(baseline, baseline)` (the paths that cannot be checked).
+   * - before_verify: before each verification round. `changed = compare(baseline, capture())`.
+   *   When it is not empty the round's verifiers are not run.
+   * - after_verify: after the round's verifiers. `changed = compare(baseline, capture())`.
+   * Every check is recorded as one `integrity_checked` with `changed` masked. A non-empty list ends
+   * the run at once as `needs-input`/`protected_changed`: no repair and no further model request,
+   * whatever the verifiers said. The comparison is always against the run_start baseline.
+   */
+  readonly integrity?: IntegrityChecker;
 }
 
 /** Signature of `runTask`, exported by `src/engine/index.ts`. */

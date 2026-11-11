@@ -14,4 +14,6 @@ export * from "./policy.js";
 export * from "./verify.js";
 export * from "./journal.js";
 export * from "./changes.js";
+export * from "./integrity.js";
 export * from "./engine.js";
+export * from "./commands.js";

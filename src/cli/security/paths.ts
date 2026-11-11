@@ -76,6 +76,45 @@ async function realPathOf(target: string, files: RealpathFs): Promise<string | n
   }
 }
 
+/** How one real path relates to another. "unknown": either cannot be resolved. */
+export type PathRelation = "same" | "inside" | "contains" | "separate" | "unknown";
+
+function isBelow(child: string, parent: string, platform: NodeJS.Platform): boolean {
+  // Same separator rule as locateInWorkspace: on Windows `<dir>:x` is a stream of `<dir>` itself.
+  const separator = platform === "win32" ? /[\\/:]/ : /\//;
+  return child.startsWith(parent) && separator.test(child.charAt(parent.length));
+}
+
+/**
+ * U-1, U-3: where the real path of `target` lies relative to the real path of `base`, after
+ * links and short names are resolved: the same path, inside it, containing it, or neither.
+ * Both must exist. Windows compares without case.
+ */
+export async function relateRealPaths(
+  target: string,
+  base: string,
+  files: RealpathFs = nodeRealpathFs,
+  platform: NodeJS.Platform = process.platform,
+): Promise<PathRelation> {
+  if (typeof target !== "string" || target.length === 0 || typeof base !== "string" || base.length === 0) return "unknown";
+  const api = platform === "win32" ? path.win32 : path.posix;
+  let realTarget: string;
+  let realBase: string;
+  try {
+    realTarget = await files.realpath(api.resolve(target));
+    realBase = await files.realpath(api.resolve(base));
+  } catch {
+    return "unknown";
+  }
+  const fold = (value: string): string => (platform === "win32" ? value.toLowerCase() : value).replace(/[\\/]+$/, "");
+  const a = fold(realTarget);
+  const b = fold(realBase);
+  if (a === b) return "same";
+  if (isBelow(a, b, platform)) return "inside";
+  if (isBelow(b, a, platform)) return "contains";
+  return "separate";
+}
+
 export type WorkspaceLocation = "inside" | "outside" | "unknown";
 
 /**

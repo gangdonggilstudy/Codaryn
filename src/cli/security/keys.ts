@@ -19,7 +19,7 @@ export const KNOWN_FIELD_NAMES: ReadonlySet<string> = new Set([
   "destructive", "restorePathTokens", "protectedPaths", "privacy", "secretEnv", "limits",
   "maxModelTurns", "maxToolCalls", "maxTotalTokens", "maxDurationMs", "maxRepairAttempts",
   "maxSameFailures", "verifiers", "kind", "args", "cwd", "timeoutMs", "expectExitCode", "rules",
-  "type", "path", "text", "apiBaseUrl", "requestTimeoutMs", "maxRetries",
+  "type", "path", "text", "apiBaseUrl", "requestTimeoutMs", "maxRetries", "integrity", "paths",
 ]);
 
 const KEY_NAMES: ReadonlySet<string> = new Set(KEY_FIELD_NAMES);

@@ -99,15 +99,17 @@ describe("T-5 the failure signature ignores numbers that change from run to run"
     assert.notEqual(one, two);
   });
 
-  test("a change in counts only is the same failure (consequence of T-5)", async () => {
+  test("V-1 narrows T-5: a change in counts is a new failure, and its repeat still stops", async () => {
+    // T-5 normalized every number, so "3 failing" then "1 failing" stopped after one repair.
+    // V-1 keeps counts: round 2 is a new failure (repaired), round 3 repeats it (stops).
     const h = harness({
-      steps: Array.from({ length: 4 }, () => () => finalAnswer()),
+      steps: Array.from({ length: 5 }, () => () => finalAnswer()),
       task: { limits: { maxRepairAttempts: 5 } },
       verifiers: new FakeVerifiers({ v1: "fail" }, { v1: ["3 failing", "1 failing"] }),
     });
     const result = await runTask(h.deps);
     assert.equal(result.reason, "repeated_failure");
-    assert.equal(result.usage.repairAttempts, 1);
+    assert.equal(result.usage.repairAttempts, 2);
   });
 });
 

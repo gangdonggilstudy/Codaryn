@@ -1,6 +1,9 @@
 /**
  * Verifier runner: `command` (exit code) and `file_rules` (literal file checks).
  * Nothing here uses Git. Every path goes through `Workspace.resolve`.
+ *
+ * Also exports `createIntegrityChecker` (U-1, K2, `./integrity.ts`): the SHA-256 list of protected
+ * material that the engine compares around each verification round.
  */
 
 import { stat } from "node:fs/promises";
@@ -18,6 +21,8 @@ import type {
   VerifierRunner,
   Workspace,
 } from "../contracts/index.js";
+
+export { createIntegrityChecker } from "./integrity.js";
 
 export interface CommandRunRequest {
   readonly executable: string;

@@ -10,7 +10,8 @@
  *  4. config and task files: read, key check on the raw text, parse, key check on the parsed
  *     value with a depth limit (S-6). A key stops the run before anything else is checked
  *  5. validate the config (S-3, S-7, S-9), then the task (S-3, S-5, S-7)
- *  6. the workspace exists; the env, config, task and script files are outside it (S-1)
+ *  6. the workspace exists and is apart from the CLI's install directory (U-3); the env, config,
+ *     task, script and cancel files are outside it (S-1); `integrity.paths` exist outside it (U-1)
  *  7. secret values: secretEnv (S-3 messages), the key in every run (S-2), env file values (S-4)
  *  8. model, then the assembled engine
  */
@@ -41,15 +42,17 @@ import type { Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
 import { anthropicProviderFactory } from "./provider.js";
 import { createRunId } from "./run-id.js";
+import { withProgress } from "./progress.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   findKeyInJson,
   goalHoldsKey,
   rawTextHoldsKey,
+  relateRealPaths,
   secretEnvNotSetMessage,
   selectEnvFileSecrets,
 } from "./security/index.js";
-import type { WorkspaceLocation } from "./security/index.js";
+import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, resolveAnthropicSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
@@ -82,6 +85,15 @@ export interface CliEnvironment {
   readonly anthropicDeps?: AnthropicProviderDeps;
   /** Cancellation for the run. Created from the parsed arguments. */
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
+  /**
+   * U-3: the running CLI's package root (`findInstall` in the real CLI, which always sets it).
+   * Undefined: not checked (in-process tests). Null: it could not be found, so every run is refused.
+   */
+  readonly installDir?: string | null;
+  /** U-1, U-3: real path relation (`relateRealPaths` when absent). */
+  readonly relatePaths?: (target: string, base: string) => Promise<PathRelation>;
+  /** U-8: writes one progress line (with its line feed) to stderr. Absent or `--quiet`: no progress. */
+  readonly writeProgress?: (line: string) => void;
 }
 
 export interface CliRunOutcome {
@@ -251,6 +263,19 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   if (!(await io.isDirectory(task.workspaceRoot))) {
     return error("workspace_not_found", "workspaceRoot is not an existing directory");
   }
+  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
+  // U-3: the running CLI must not work on its own installation, by real paths.
+  if (io.installDir !== undefined) {
+    const relation = io.installDir === null ? "unknown" : await relate(task.workspaceRoot, io.installDir);
+    if (relation !== "separate") {
+      return error(
+        "workspace_is_install_dir",
+        relation === "unknown"
+          ? "cannot confirm that the workspace is outside the CLI's install directory; nothing was run"
+          : "the workspace is the CLI's install directory, lies inside it or contains it; use a separate candidate directory",
+      );
+    }
+  }
   const located: [string | null, CliErrorCode, string][] = [
     [envPath, "invalid_config", "the file given by --vars-file"],
     [configFile?.path ?? null, "invalid_config", "the config file"],
@@ -264,6 +289,15 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     const where = await io.locateInWorkspace(file, task.workspaceRoot);
     if (where !== "outside") {
       return error(code, `${label} is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it`);
+    }
+  }
+  // U-1: protected material outside the workspace must exist and stay apart from it.
+  const integrityPaths = config?.integrity?.paths ?? [];
+  for (const [index, entry] of integrityPaths.entries()) {
+    const relation = await relate(entry, task.workspaceRoot);
+    if (relation === "unknown") return error("invalid_config", `integrity.paths[${index}] does not exist or cannot be resolved`);
+    if (relation !== "separate") {
+      return error("invalid_config", `integrity.paths[${index}] must be outside the workspace and must not contain it`);
     }
   }
 
@@ -314,11 +348,17 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
   const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
   try {
-    const assembled = await io.assemble({ task, runId, model, secrets, clock: io.clock, signal: cancel.signal });
+    const assembled = await io.assemble({ task, runId, model, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
+    // U-8: progress lines follow the journal; they start only once the run has started.
+    const write = args.quiet ? undefined : io.writeProgress;
+    const deps =
+      write === undefined
+        ? assembled.deps
+        : { ...assembled.deps, journal: withProgress(assembled.deps.journal, assembled.deps.privacy, write) };
     let result: EngineResult | null = null;
     try {
-      result = await (io.runTask ?? engineRunTask)(assembled.deps);
+      result = await (io.runTask ?? engineRunTask)(deps);
     } finally {
       // Releases the workspace lock even when the run threw.
       await assembled.finish(result);

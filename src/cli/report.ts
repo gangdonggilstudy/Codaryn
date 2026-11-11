@@ -1,0 +1,500 @@
+/**
+ * `codaryn report --workspace <dir> --run <runId> [--json]` (U-5): a summary of one run for a
+ * person, built from `<root>/.codaryn/runs/<runId>/result.json` and `journal.jsonl` only.
+ * Those files hold masked text; nothing else is read and nothing is changed. The run directory
+ * must be the workspace's own (not a link), every record must belong to the run, and every field
+ * the report uses is checked. Printed text has control characters replaced and key-shaped text
+ * hidden (`./text-safety.ts`), because commands allowed during the run could have written into
+ * the records.
+ */
+
+import { realpath as realpathCallback } from "node:fs";
+import { lstat, readFile } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+import {
+  ANTHROPIC_API_KEY_ENV,
+  CONTENT_HASH_PATTERN_SOURCE,
+  INTEGRITY_PHASES,
+  JOURNAL_FILE_NAME,
+  MAX_REPORT_FILE_BYTES,
+  REPORT_EXIT_CODES,
+  RESULT_FILE_NAME,
+  RESULT_SCHEMA_VERSION,
+  RUNS_DIR_NAME,
+  STATE_DIR_NAME,
+  TERMINAL_RUN_STATUSES,
+} from "../contracts/index.js";
+import type {
+  EngineResult,
+  FileChangeRecord,
+  IntegrityPhase,
+  Limits,
+  MaskedText,
+  ModelProviderName,
+  ReportJournalSummary,
+  ReportOutput,
+  ReportStatus,
+  RunReason,
+  RunReasonByStatus,
+  RunUsage,
+  TerminalRunStatus,
+  VerifierResult,
+} from "../contracts/index.js";
+import { parseReportArgs } from "./args.js";
+import type { CommandOutcome } from "./guard.js";
+import { cliError } from "./run.js";
+import { envValue } from "./settings.js";
+import type { SettingsEnvironment } from "./settings.js";
+import { localPathProblem } from "./task.js";
+import { cleanText, hideKeys } from "./text-safety.js";
+
+export interface ReportEnvironment {
+  readonly argv: readonly string[];
+  readonly cwd: string;
+  /** Read only to keep the current key out of the printed report. */
+  readonly env: SettingsEnvironment;
+  readonly platform?: NodeJS.Platform;
+}
+
+const realpathNative = promisify(realpathCallback.native);
+
+/** Every reason, per status. The type keeps each entry a valid reason for its status. */
+const REASONS: { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] } = {
+  done: ["verified"],
+  failed: ["verifier_failed", "model_error", "repeated_failure"],
+  "needs-input": ["verifier_inconclusive", "no_verifier", "unknown_tool_outcome", "protected_changed"],
+  cancelled: ["cancelled"],
+  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
+};
+
+const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
+const VERIFIER_KINDS = ["command", "file_rules"] as const;
+const VERIFIER_OUTCOMES = ["pass", "fail", "inconclusive"] as const;
+const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
+
+/** A record failed a check. Its message is fixed text, never record content. */
+class RecordError extends Error {}
+
+function bad(message: string): never {
+  throw new RecordError(message);
+}
+
+type Obj = Record<string, unknown>;
+
+function obj(value: unknown): Obj {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Obj) : bad("a record is not an object");
+}
+
+function str(value: unknown): string {
+  return typeof value === "string" ? value : bad("a record has a field of the wrong type");
+}
+
+/** Text read back from the run's own masked records. Not new masking: the run masked it when recording. */
+function recorded(value: unknown): MaskedText {
+  return str(value) as MaskedText;
+}
+
+function recordedList(value: unknown): MaskedText[] {
+  return Array.isArray(value) ? value.map(recorded) : bad("a record has a field of the wrong type");
+}
+
+function int(value: unknown, min = 0): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= min ? value : bad("a record has a number out of range");
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : bad("a record has an unknown value");
+}
+
+function statusAndReason(statusValue: unknown, reasonValue: unknown): { status: TerminalRunStatus; reason: RunReason } {
+  const status = oneOf(statusValue, TERMINAL_RUN_STATUSES);
+  const reason = oneOf<RunReason>(reasonValue, REASONS[status] as readonly RunReason[]);
+  return { status, reason };
+}
+
+function limitsOf(value: unknown): Limits {
+  const rec = obj(value);
+  const tokens = rec["maxTotalTokens"];
+  return {
+    maxModelTurns: int(rec["maxModelTurns"], 1),
+    maxToolCalls: int(rec["maxToolCalls"], 1),
+    maxTotalTokens: tokens === null ? null : int(tokens, 1),
+    maxDurationMs: int(rec["maxDurationMs"], 1),
+    ...(rec["maxRepairAttempts"] === undefined ? {} : { maxRepairAttempts: int(rec["maxRepairAttempts"]) }),
+    ...(rec["maxSameFailures"] === undefined ? {} : { maxSameFailures: int(rec["maxSameFailures"], 1) }),
+  };
+}
+
+function verifierOf(value: unknown): VerifierResult {
+  const rec = obj(value);
+  return {
+    id: str(rec["id"]),
+    kind: oneOf(rec["kind"], VERIFIER_KINDS),
+    outcome: oneOf(rec["outcome"], VERIFIER_OUTCOMES),
+    evidence: recorded(rec["evidence"]),
+    checked: recordedList(rec["checked"]),
+    limits: recordedList(rec["limits"]),
+  };
+}
+
+function hashOf(value: unknown): string {
+  return typeof value === "string" && HASH.test(value) ? value : bad("a record has an invalid hash");
+}
+
+function changeOf(rec: Obj): FileChangeRecord {
+  const created = rec["created"];
+  if (typeof created !== "boolean") bad("a record has a field of the wrong type");
+  return {
+    path: recorded(rec["path"]),
+    previousHash: rec["previousHash"] === null ? null : hashOf(rec["previousHash"]),
+    newHash: hashOf(rec["newHash"]),
+    created,
+  };
+}
+
+function usageOf(value: unknown): RunUsage {
+  const rec = obj(value);
+  const tokens = (item: unknown): number | null => (item === null ? null : int(item));
+  return {
+    modelTurns: int(rec["modelTurns"]),
+    toolCalls: int(rec["toolCalls"]),
+    inputTokens: tokens(rec["inputTokens"]),
+    outputTokens: tokens(rec["outputTokens"]),
+    durationMs: int(rec["durationMs"]),
+    ...(rec["repairAttempts"] === undefined ? {} : { repairAttempts: int(rec["repairAttempts"]) }),
+  };
+}
+
+/**
+ * The journal summary. Records must be JSON objects of this run with `seq` 1, 2, 3, ... and the
+ * first must be `run_started`. A last line without its line feed is ignored when the run has no
+ * result.json (still being written) and is an error otherwise.
+ */
+export function summarizeJournal(text: string, runId: string, hasResult: boolean): ReportJournalSummary {
+  const lines = text.split("\n");
+  const tail = lines.pop();
+  if (tail !== undefined && tail.length > 0 && hasResult) bad("the journal ends inside a record");
+  if (lines.length === 0) bad("the journal has no records");
+
+  let started: { taskId: string; workflow: MaskedText; provider: ModelProviderName; limits: Limits } | null = null;
+  let modelRequests = 0;
+  let deniedToolCalls = 0;
+  let repairs = 0;
+  let lastRound: VerifierResult[] = [];
+  const changes: FileChangeRecord[] = [];
+  const integrityChecks: { phase: IntegrityPhase; changed: MaskedText[] }[] = [];
+  let finished: { status: TerminalRunStatus; reason: RunReason } | null = null;
+
+  lines.forEach((line, index) => {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      bad("a journal line is not JSON");
+    }
+    const rec = obj(value);
+    if (rec["runId"] !== runId) bad("a journal record belongs to another run");
+    if (rec["seq"] !== index + 1) bad("journal records are out of order");
+    const type = rec["type"];
+    if (index === 0) {
+      if (type !== "run_started") bad("the journal does not start with run_started");
+      started = {
+        taskId: str(rec["taskId"]),
+        workflow: recorded(rec["workflow"]),
+        provider: oneOf(rec["provider"], PROVIDERS),
+        limits: limitsOf(rec["limits"]),
+      };
+      return;
+    }
+    switch (type) {
+      case "model_request":
+        modelRequests += 1;
+        break;
+      case "tool_decision":
+        if (rec["allowed"] === false) deniedToolCalls += 1;
+        break;
+      case "repair_started":
+        repairs += 1;
+        lastRound = [];
+        break;
+      case "verifier_result":
+        lastRound.push(verifierOf(rec["result"]));
+        break;
+      case "file_changed":
+        changes.push(changeOf(rec));
+        break;
+      case "integrity_checked":
+        integrityChecks.push({ phase: oneOf(rec["phase"], INTEGRITY_PHASES), changed: recordedList(rec["changed"]) });
+        break;
+      case "run_finished":
+        finished = statusAndReason(rec["status"], rec["reason"]);
+        break;
+      default:
+        // Other records, including types added later, are not part of the summary.
+        break;
+    }
+  });
+
+  const start = started as { taskId: string; workflow: MaskedText; provider: ModelProviderName; limits: Limits } | null;
+  if (start === null) return bad("the journal does not start with run_started");
+  return {
+    taskId: start.taskId,
+    workflow: start.workflow,
+    provider: start.provider,
+    limits: start.limits,
+    records: lines.length,
+    modelRequests,
+    deniedToolCalls,
+    repairs,
+    lastRound,
+    changes,
+    integrityChecks,
+    finished,
+  };
+}
+
+/** result.json, rebuilt from the checked fields only. */
+export function readResult(text: string, runId: string, taskId: string): EngineResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    bad("result.json is not JSON");
+  }
+  const rec = obj(value);
+  if (rec["schemaVersion"] !== RESULT_SCHEMA_VERSION || rec["kind"] !== "run") bad("result.json is not a run result");
+  if (rec["runId"] !== runId) bad("result.json belongs to another run");
+  if (rec["taskId"] !== taskId) bad("result.json names another task than the journal");
+  const { status, reason } = statusAndReason(rec["status"], rec["reason"]);
+  const verifiers = rec["verifiers"];
+  const changes = rec["changes"];
+  if (!Array.isArray(verifiers) || !Array.isArray(changes)) bad("result.json has a field of the wrong type");
+  const protectedChanged = rec["protectedChanged"];
+  return {
+    schemaVersion: 1,
+    kind: "run",
+    runId,
+    taskId,
+    status,
+    reason,
+    exitCode: int(rec["exitCode"]),
+    provider: oneOf(rec["provider"], PROVIDERS),
+    verifiers: verifiers.map(verifierOf),
+    changes: changes.map((item) => changeOf(obj(item))),
+    usage: usageOf(rec["usage"]),
+    journalPath: str(rec["journalPath"]),
+    notices: recordedList(rec["notices"]),
+    ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Markdown
+
+/** Inline code that cannot be closed early by the text it shows. */
+function code(text: string): string {
+  const clean = cleanText(text);
+  const longest = Math.max(0, ...[...clean.matchAll(/`+/g)].map((match) => match[0].length));
+  const fence = "`".repeat(longest + 1);
+  const pad = clean.startsWith("`") || clean.endsWith("`") || clean.length === 0 ? " " : "";
+  return `${fence}${pad}${clean}${pad}${fence}`;
+}
+
+/** A fenced block that the text inside cannot close. */
+function block(text: string): string[] {
+  const clean = cleanText(text, true);
+  const longest = Math.max(0, ...[...clean.matchAll(/`+/g)].map((match) => match[0].length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return [fence, ...clean.split("\n"), fence];
+}
+
+function short(hash: string | null): string {
+  return hash === null ? "none" : hash.slice(0, 12);
+}
+
+const PHASE_LABEL: { readonly [P in IntegrityPhase]: string } = {
+  run_start: "at run start",
+  before_verify: "before verification",
+  after_verify: "after verification",
+};
+
+/** What a run report never covers. Each verifier's own limits are listed with it. */
+export const REPORT_FIXED_LIMITS: readonly string[] = [
+  "A pass means the configured verifiers passed. It is not a review of the change.",
+  "The change list holds file tool writes only. Commands allowed by the policy may have changed other files.",
+  "There is no OS isolation: allowed commands ran with the user's rights and could reach the network.",
+  "This report reads the run's own records. Commands allowed during the run could have changed them.",
+];
+
+export function renderReport(report: ReportOutput): string {
+  const { result, journal } = report;
+  const out: string[] = ["# Codaryn run report", ""];
+  out.push(`- Run: ${code(report.runId)}`);
+  out.push(`- Task: ${code(journal.taskId)} (workflow ${code(journal.workflow)})`);
+  out.push(
+    `- Provider: ${code(journal.provider)}${journal.provider === "scripted" ? " (scripted model; no API was called)" : ""}`,
+  );
+  if (result !== null) {
+    out.push(`- Result: ${code(result.status)} / ${code(result.reason)}, exit code ${result.exitCode}`);
+  } else {
+    out.push("- Result: none. The run has no result.json: it is still running, or it stopped without writing one.");
+    out.push(
+      journal.finished === null
+        ? "- The journal has no end record."
+        : `- The journal's end record: ${code(journal.finished.status)} / ${code(journal.finished.reason)}`,
+    );
+  }
+  out.push(`- Report: ${report.status} (${journal.records} journal records)`);
+
+  const verifiers = result?.verifiers ?? journal.lastRound;
+  out.push("", "## Verification", "");
+  if (verifiers.length === 0) {
+    out.push("No verifier result was recorded for the last round.");
+  } else {
+    for (const verifier of verifiers) {
+      out.push(`- ${code(verifier.id)} (${verifier.kind}): **${verifier.outcome}**`);
+      for (const item of verifier.checked) out.push(`  - checked: ${code(item)}`);
+      if (verifier.outcome !== "pass" && verifier.evidence.length > 0) {
+        out.push("", ...block(verifier.evidence).map((line) => `  ${line}`));
+      }
+    }
+  }
+  if (journal.repairs > 0) out.push("", `Repairs started: ${journal.repairs}.`);
+
+  out.push("", "## Protected material", "");
+  const lastCheck = journal.integrityChecks[journal.integrityChecks.length - 1];
+  const changedNow = result?.protectedChanged ?? lastCheck?.changed;
+  if (journal.integrityChecks.length === 0 && changedNow === undefined) {
+    out.push("Not checked: the run had no integrity check (nothing was protected, or it ran without the check).");
+  } else {
+    const phases = journal.integrityChecks.map((check) => PHASE_LABEL[check.phase]);
+    out.push(`Checked ${journal.integrityChecks.length} time(s)${phases.length > 0 ? `: ${phases.join(", ")}` : ""}.`);
+    if (changedNow === undefined || changedNow.length === 0) {
+      out.push("No protected path changed since the run started.");
+    } else {
+      out.push("Changed since the run started, or not checkable:");
+      for (const item of changedNow) out.push(`- ${code(item)}`);
+    }
+  }
+
+  const changes = result?.changes ?? journal.changes;
+  out.push("", `## Changes (${changes.length})`, "");
+  if (changes.length === 0) out.push("No file tool write was recorded.");
+  for (const change of changes) {
+    out.push(
+      change.created
+        ? `- ${code(change.path)} created (${short(change.newHash)})`
+        : `- ${code(change.path)} changed (${short(change.previousHash)} -> ${short(change.newHash)})`,
+    );
+  }
+
+  out.push("", "## Usage", "");
+  const limits = journal.limits;
+  if (result !== null) {
+    const usage = result.usage;
+    out.push(`- Model turns: ${usage.modelTurns} of ${limits.maxModelTurns}`);
+    out.push(`- Tool calls: ${usage.toolCalls} of ${limits.maxToolCalls} (denied: ${journal.deniedToolCalls})`);
+    const tokens =
+      usage.inputTokens === null || usage.outputTokens === null
+        ? "not reported by every response"
+        : `input ${usage.inputTokens}, output ${usage.outputTokens}`;
+    out.push(`- Tokens: ${tokens} (limit: ${limits.maxTotalTokens === null ? "none" : limits.maxTotalTokens})`);
+    out.push(`- Duration: ${usage.durationMs} ms of ${limits.maxDurationMs} ms`);
+  } else {
+    out.push(`- Model requests recorded: ${journal.modelRequests} (limit ${limits.maxModelTurns})`);
+    out.push(`- Denied tool calls: ${journal.deniedToolCalls}`);
+  }
+  out.push(`- Repairs: ${journal.repairs}${limits.maxRepairAttempts === undefined ? "" : ` of ${limits.maxRepairAttempts}`}`);
+
+  out.push("", "## Not checked", "");
+  for (const verifier of verifiers) {
+    for (const item of verifier.limits) out.push(`- ${code(verifier.id)}: ${code(item)}`);
+  }
+  for (const item of REPORT_FIXED_LIMITS) out.push(`- ${item}`);
+
+  const notices = result?.notices ?? [];
+  if (notices.length > 0) {
+    out.push("", "## Notices", "");
+    for (const notice of notices) out.push(`- ${code(notice)}`);
+  }
+  return `${out.join("\n")}\n`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Files
+
+type FileState = "file" | "missing" | "other" | "too_large";
+
+async function fileState(file: string): Promise<FileState> {
+  try {
+    const info = await lstat(file);
+    if (!info.isFile()) return "other";
+    return info.size > MAX_REPORT_FILE_BYTES ? "too_large" : "file";
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "other";
+  }
+}
+
+async function readRecordFile(file: string): Promise<string> {
+  const bytes = await readFile(file);
+  if (bytes.length > MAX_REPORT_FILE_BYTES) bad("a run file is too large");
+  return bytes.toString("utf8");
+}
+
+export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> {
+  const parsed = parseReportArgs(io.argv);
+  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  const { runId, json } = parsed.args;
+
+  // S-5: a network or device path is refused before the file system is touched.
+  const problem = localPathProblem(parsed.args.workspace, io.cwd);
+  if (problem !== null) return cliError("invalid_arguments", `the path given by --workspace ${problem}`);
+
+  let root: string;
+  try {
+    root = await realpathNative(path.resolve(io.cwd, parsed.args.workspace));
+    if (!(await lstat(root)).isDirectory()) throw new Error("not a directory");
+  } catch {
+    return cliError("workspace_not_found", "the workspace is not an existing directory");
+  }
+
+  const runDir = path.join(root, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
+  const fold = (value: string): string => ((io.platform ?? process.platform) === "win32" ? value.toLowerCase() : value);
+  let realRunDir: string;
+  try {
+    realRunDir = await realpathNative(runDir);
+  } catch {
+    return cliError("run_not_found", "the workspace has no records for that run id");
+  }
+  if (fold(realRunDir) !== fold(runDir)) {
+    return cliError("invalid_run_record", "the run directory is a link; the report reads only the workspace's own records");
+  }
+
+  const journalFile = path.join(runDir, JOURNAL_FILE_NAME);
+  const resultFile = path.join(runDir, RESULT_FILE_NAME);
+  const journalState = await fileState(journalFile);
+  if (journalState === "missing") return cliError("run_not_found", "the workspace has no journal for that run id");
+  const resultState = await fileState(resultFile);
+  for (const state of [journalState, resultState]) {
+    if (state === "too_large") return cliError("invalid_run_record", `a run file is larger than ${MAX_REPORT_FILE_BYTES} bytes`);
+    if (state === "other") return cliError("invalid_run_record", "a run file is not a regular file or cannot be read");
+  }
+
+  let report: ReportOutput;
+  try {
+    const hasResult = resultState === "file";
+    const journal = summarizeJournal(await readRecordFile(journalFile), runId, hasResult);
+    const result = hasResult ? readResult(await readRecordFile(resultFile), runId, journal.taskId) : null;
+    const status: ReportStatus = result === null ? "incomplete" : "complete";
+    report = { schemaVersion: 1, kind: "report", runId, status, exitCode: REPORT_EXIT_CODES[status], result, journal };
+  } catch (error) {
+    if (error instanceof RecordError) return cliError("invalid_run_record", `the run's records cannot be used: ${error.message}`);
+    return cliError("invalid_run_record", "the run's records cannot be read");
+  }
+
+  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const text = json ? `${JSON.stringify(report)}\n` : renderReport(report);
+  return { text: hideKeys(text, currentKey), exitCode: report.exitCode };
+}

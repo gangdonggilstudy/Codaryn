@@ -91,7 +91,7 @@ describe("parseArgs", () => {
   test("accepts run with a task and an optional cancel file", () => {
     assert.deepEqual(parseArgs(["run", "--task", "t.json"]), {
       ok: true,
-      args: { command: "run", input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, cancelFile: null },
+      args: { command: "run", input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, cancelFile: null, quiet: false },
     });
     const parsed = parseArgs(["run", "--cancel-file", "stop", "--task", "t.json"]);
     assert.ok(parsed.ok);

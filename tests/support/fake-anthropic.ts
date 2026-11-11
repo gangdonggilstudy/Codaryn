@@ -22,12 +22,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
-import { STATE_DIR_NAME, TOOL_DEFINITIONS, TOOL_NAMES } from "../../src/contracts/index.js";
+import { TOOL_DEFINITIONS, TOOL_NAMES } from "../../src/contracts/index.js";
 import type { ToolName } from "../../src/contracts/index.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { startCli } from "./cli.js";
 import type { CliRun } from "./cli.js";
-import { decodedSource, readTreeTexts } from "./leak.js";
+import { decodedSource, stateRecordTexts } from "./leak.js";
 import type { TextSource } from "./leak.js";
 
 /** Prefix of every mock API test name. */
@@ -548,12 +548,12 @@ export function otherHeaderSources(api: FakeAnthropic): TextSource[] {
 }
 
 /**
- * stdout, stderr and every file under `<workspace>/.codaryn/` (journal, result.json, lock), each
+ * stdout, stderr and every record under `<workspace>/.codaryn/` (journal, result.json, lock), each
  * also fully decoded when it is JSON. Used to show that a fake key or secret never left memory.
+ * Change snapshots are raw copies of workspace files by contract (R-8) and are not scanned.
  */
 export function cliOutputSources(workspace: string, run: CliRun): TextSource[] {
-  const stateDir = join(workspace, STATE_DIR_NAME);
-  const files = existsSync(stateDir) ? readTreeTexts(stateDir, workspace) : [];
+  const files = stateRecordTexts(workspace);
   const decodedFiles = files
     .filter((file) => file.label.endsWith(".json") || file.label.endsWith(".jsonl"))
     .map((file) => decodedSource(file.label, file.text, file.label.endsWith(".jsonl")));

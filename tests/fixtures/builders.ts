@@ -78,6 +78,8 @@ export interface TaskOptions {
   readonly workflow?: string;
   readonly commands?: readonly CommandRule[];
   readonly restorePathTokens?: boolean;
+  /** Written to `policy.protectedPaths` only when given. */
+  readonly protectedPaths?: readonly string[];
   readonly secretEnv?: readonly string[];
   readonly limits?: Partial<Limits>;
   readonly verifiers?: readonly VerifierConfig[];
@@ -103,6 +105,7 @@ export function writeTask(sandbox: Sandbox, options: TaskOptions, steps?: readon
       network: "deny",
       destructive: "deny",
       restorePathTokens: options.restorePathTokens ?? false,
+      ...(options.protectedPaths === undefined ? {} : { protectedPaths: options.protectedPaths }),
     },
     privacy: { secretEnv: options.secretEnv ?? [] },
     limits: { ...DEFAULT_LIMITS, ...options.limits },

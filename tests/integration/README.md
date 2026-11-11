@@ -59,6 +59,35 @@
 - 네트워크 울타리: 모의 API 테스트는 CLI 프로세스에 `tests/support/net-guard.ts`를 `--import`로 미리 올린다. 전역 `fetch`가 루프백 밖으로 나가려 하면 막고 기록하며 테스트가 실패한다. 설정이 무시되는 결함이 있어도 가짜 키가 실제 주소로 가지 않는다. `fetch`만 감싼다.
 - 가짜 키는 `tests/fixtures/secrets.ts`의 `FAKE_API_KEYS`뿐이다. `cliEnv({ fakeApiKey })`는 이 값만 받고 실제 키 모양이면 예외를 던진다.
 
+## 단계 2 재수정 반복 (`p01`~`p05`, 작업 F5)
+
+[작업 지시](../../docs/work-orders/phase-2-repair-loop.md) R-1~R-8과 `src/contracts`(main `d16d372`)가 기준이다. 연습 프로젝트는 `tests/fixtures/repair-project.ts`(Git 없음, `node --test`로 실패하는 작은 코드와 테스트)이고, 대본은 `tests/support/repair-script.ts`의 시도 단위로 쓴다(첫 수정은 틀리고, 실패 근거를 받은 다음 요청에서 고친다). 대본 끝의 여분 최종 답은 멈춰야 할 때 요청되지 않았는지를 `usage.modelTurns`로 보여 준다.
+
+| 사례 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| F5-a 실패 → 재수정 → 통과 | `p01-repair-loop` | `done`, 검증 회차 fail→pass, `repair_started` 1건, 기록 순서(검증 → 재수정 → 요청), 재수정 메시지에 실패한 테스트 이름, 변경 해시 사슬 |
+| F5-b 재수정 한도 소진 | `p01-repair-loop` | `failed`/`verifier_failed`, 재수정 2건, 한도 뒤 요청 없음, 적용한 변경 유지 |
+| F5-c 한도 생략 | `p01-repair-loop` | 기본 0으로 단계 1과 같음, `run_started.limits`에 기본값 2개 기록 |
+| F5-d·d2 같은 실패 반복 | `p01-repair-loop` | 결정적 검사기로 같은 근거 연속 → `repeated_failure`. 기본 2는 1번, 3은 2번 재수정 |
+| F5-e 연속 아닌 같은 실패 | `p01-repair-loop` | A, B, A 뒤 통과(`done`, 재수정 3건) |
+| F5-f inconclusive | `p01-repair-loop` | 검증 명령 시간 초과 → `needs-input`/`verifier_inconclusive`, 재수정 0건 |
+| F5-g 기존 한도 | `p01-repair-loop` | 재수정이 남아도 `maxModelTurns`에서 `budget-exhausted` |
+| F5-h 취소 | `p01-repair-loop` | `repair_started` 뒤 cancel-file → `cancelled`, 지연된 수정 미적용 |
+| F5-i 실패 근거 절단 | `p02-repair-feedback` | `feedbackTruncated`, 가린 근거의 앞뒤 보존·가운데 생략, 원문·변형·4자 조각 0건, 토큰 온전, U+FFFD 없음 |
+| F5-j 검증기 출력 끝 절단 | `p02-repair-feedback` | 검증기가 출력 끝 2000자를 남기는 경계에 비밀을 걸쳐도 근거·기록·재수정 메시지에 4자 조각 0건 |
+| F5-k 스냅샷 | `p02-repair-feedback` | 원문은 `snapshots/`에만 있고 journal·결과·모델 요청·검색 결과에 없다 |
+| F5-l 보호 경로 | `p03-protected-paths` | 테스트 파일 쓰기 `protected_path`, 읽기 허용, 목표 문장으로 풀리지 않음, 코드 수정으로 통과 |
+| F5-m 경로 변형 | `p03-protected-paths` | `./`, `..`, 새 파일, 폴더 자체, 대소문자·`\`(Windows), 정션 모두 거부. `test-data/`, `src/test/`는 허용 |
+| F5-n·o | `p03-protected-paths` | `"."`는 전체 보호. `..`·절대 경로 항목은 `invalid_task` |
+| F5-p 되돌리기 | `p04-revert` | BOM·CRLF·한글 원문(두 번 고친 파일은 첫 원문), 비밀 원문 바이트 복원, 새 파일 삭제, 사용자 변경·삭제 보존, journal 불변, 출력에 비밀 없음 |
+| F5-q·q2 | `p04-revert` | 두 번째 되돌리기는 아무것도 바꾸지 않음(`partial`), 변경 없는 실행은 `complete` |
+| F5-r 오류 | `p04-revert` | `run_not_found`, runs 밖을 가리키는 id 거부, `workspace_locked`, 깨진 journal `invalid_run_record`, 모두 무변경 |
+| F5-s·t 모의 API | `p05-repair-fake-api` | 가짜 서버로 실패 → 재수정 → 통과(요청 형식, 재수정 요청의 user 메시지, 본문에 스냅샷 원문 없음). 간편 형식에서 설정 파일의 `protectedPaths`·`maxRepairAttempts` 적용 |
+| G1-a~d `.cmd` | `g01-windows-cmd` | PATH의 `.cmd`·`.bat` 실행과 인자 보존, 메타문자 인자 미실행, 작업 공간의 같은 이름 `.cmd` 미실행, 작업 공간 안으로 풀리면 거부(Windows만) |
+
+- `node --test`는 소요 시간을 출력하므로 같은 코드라도 출력 바이트가 매번 다르다. 같은 실패 반복 사례는 출력이 코드에만 달린 `checks/price-check.mjs`를 쓴다.
+- 기록 검사에서 `runs/<runId>/snapshots/`는 뺀다(`stateRecordTexts`). 계약상 스냅샷은 작업 공간 파일과 같은 원문 자료다(R-8). 그 밖의 상태 디렉터리 파일은 모두 검사한다.
+
 ## 격리
 
 - 사례마다 `<tmp>/codaryn-it-*/`를 만들고 끝나면 지운다. task와 대본은 작업 공간 밖(base)에 둔다.

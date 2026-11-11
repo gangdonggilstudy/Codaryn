@@ -101,6 +101,30 @@ export const EDIT_NO_PROGRESS = fileEdit(
   "// Total of the cart after the discount.\nexport function totalPrice(items, discountRate) {",
 );
 
+/** Two more comment-only repairs chained after EDIT_NO_PROGRESS. The checker output stays the same. */
+export const EDITS_MORE_NO_PROGRESS: readonly FileEdit[] = (() => {
+  const second = fileEdit(PRICE_PATH, EDIT_NO_PROGRESS.after, "// Total of the cart", "// Sum of the cart");
+  const third = fileEdit(PRICE_PATH, second.after, "// Sum of the cart", "// Price of the cart");
+  return [second, third];
+})();
+
+/**
+ * Undoes EDITS_STILL_WRONG[0]: the code is PRICE_WRONG_FIX again, so the checker prints the
+ * failure of EDIT_WRONG_FIX again, but not right after itself.
+ */
+export const EDIT_BACK_TO_WRONG_FIX = fileEdit(
+  PRICE_PATH,
+  EDITS_STILL_WRONG[0]?.after ?? "",
+  "return sum * discountRate;",
+  "return sum - discountRate;",
+);
+
+/** Appears only in the original of NOTES_PATH. Not a secret: a marker for where originals go. */
+export const SNAPSHOT_MARKER = "snapshot-only-marker-Q8v3Zt";
+export const NOTES_PATH = "notes/draft.md";
+export const NOTES_ORIGINAL = `# Draft\n\nfirst version ${SNAPSHOT_MARKER}\n`;
+export const NOTES_REPLACEMENT = "# Draft\n\nsecond version\n";
+
 export const PACKAGE_JSON = `${JSON.stringify(
   { name: "repair-practice", version: "1.0.0", private: true, type: "module", scripts: { test: "node --test test/" } },
   null,
@@ -147,25 +171,39 @@ export const PRICE_CHECK = [
   "",
 ].join("\n");
 
-export const NOISY_HEAD_MARK = "NOISY-HEAD first line of the check output";
-export const NOISY_TAIL_MARK = "NOISY-TAIL summary: 1 failing check, totals differ";
+/** First stdout line of `noisy-check.mjs <count>`. */
+export function noisyHeadMark(count: number): string {
+  return `NOISY-HEAD n=${count} first line of the check output`;
+}
+
+/** Last stdout line of `noisy-check.mjs <count>`. */
+export function noisyTailMark(count: number): string {
+  return `NOISY-TAIL n=${count} summary: 1 failing check, totals differ`;
+}
+
+/** Last stderr line of `noisy-check.mjs <count>`. */
+export function noisyErrEndMark(count: number): string {
+  return `NOISY-ERR-END n=${count}`;
+}
 
 /**
- * `node checks/noisy-check.mjs <lines>`: prints a head line, `<lines>` numbered lines that each
- * hold the secret from data/settings.txt next to Korean text (multi-byte), and a tail summary on
- * stdout; a shorter block on stderr; exits 1. Any cut of this output lands near a secret.
+ * `node checks/noisy-check.mjs <count>`: on stdout a head line, `<count>` numbered lines that each
+ * hold the secret from data/settings.txt next to Korean text (multi-byte), and a tail summary;
+ * on stderr `<count>/4` lines with the secret and an end line; exits 1. The marks carry `<count>`,
+ * so two verifiers with different counts can be told apart. Any cut of this output lands near a
+ * secret.
  */
 export const NOISY_CHECK = [
   'import { readFileSync } from "node:fs";',
   'const count = Number(process.argv[2] ?? "400");',
   'const token = /^token=(.*)$/m.exec(readFileSync("data/settings.txt", "utf8"))[1];',
-  `const out = [${JSON.stringify(NOISY_HEAD_MARK)}];`,
+  "const out = [`NOISY-HEAD n=${count} first line of the check output`];",
   "for (let i = 1; i <= count; i += 1) {",
   '  out.push(`${String(i).padStart(4, "0")} 검사 출력 줄 token=${token} 끝`);',
   "}",
-  `out.push(${JSON.stringify(NOISY_TAIL_MARK)});`,
+  "out.push(`NOISY-TAIL n=${count} summary: 1 failing check, totals differ`);",
   'process.stdout.write(out.join("\\n") + "\\n");',
-  'process.stderr.write(`오류 요약 token=${token}\\n`.repeat(Math.ceil(count / 4)));',
+  'process.stderr.write(`오류 요약 token=${token}\\n`.repeat(Math.ceil(count / 4)) + `NOISY-ERR-END n=${count}\\n`);',
   "process.exit(1);",
   "",
 ].join("\n");

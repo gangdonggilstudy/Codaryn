@@ -7,11 +7,16 @@
  * The same steps can be replayed by the mock Messages API server (`stepsToReplies`).
  */
 
-import type { ScriptStep } from "../../src/contracts/index.js";
+import type { JsonObject, ScriptStep } from "../../src/contracts/index.js";
 import type { FileEdit } from "../fixtures/repair-project.js";
 import { sha256Hex } from "./cli.js";
 import { replyText, replyTools, toolUse } from "./fake-anthropic.js";
 import type { FakeReply } from "./fake-anthropic.js";
+
+/** One tool call of any name, for calls the other helpers do not cover. */
+export function callStep(id: string, name: string, args: JsonObject): ScriptStep {
+  return { toolCalls: [{ id, name, args }] };
+}
 
 export function readStep(id: string, path: string): ScriptStep {
   return { toolCalls: [{ id, name: "read_file", args: { path } }] };
@@ -29,6 +34,22 @@ export function editStep(id: string, edit: FileEdit): ScriptStep {
           expectedHash: sha256Hex(edit.before),
           change: { kind: "replace_text", oldText: edit.oldText, newText: edit.newText },
         },
+      },
+    ],
+  };
+}
+
+/**
+ * `write_file` with `replace_all`. `before` is the current file (text or bytes) for the hash, or
+ * `null` to create a file that must not exist yet. The model never has to read the file first.
+ */
+export function replaceAllStep(id: string, path: string, before: string | Uint8Array | null, content: string): ScriptStep {
+  return {
+    toolCalls: [
+      {
+        id,
+        name: "write_file",
+        args: { path, expectedHash: before === null ? null : sha256Hex(before), change: { kind: "replace_all", content } },
       },
     ],
   };

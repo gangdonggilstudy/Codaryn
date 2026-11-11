@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { PRIVACY_TOKEN_PREFIX, STATE_DIR_NAME } from "../../src/contracts/index.js";
+import { PRIVACY_TOKEN_PREFIX } from "../../src/contracts/index.js";
 import type { SearchFilesPayload } from "../../src/contracts/index.js";
 import { createSandbox, nodeCommand, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
@@ -44,15 +44,18 @@ import {
   toolResultFor,
 } from "../support/cli.js";
 import type { CliRun, RunFiles } from "../support/cli.js";
-import { decodedSource, findFragments, findLeaks, readTreeTexts } from "../support/leak.js";
+import { decodedSource, findFragments, findLeaks, stateRecordTexts } from "../support/leak.js";
 import type { TextSource } from "../support/leak.js";
 
-/** Every place a run writes or prints, both as text and with nested JSON decoded. */
+/**
+ * Every place a run writes or prints, both as text and with nested JSON decoded. Change
+ * snapshots are raw copies of workspace files by contract (R-8) and are not records.
+ */
 function runSources(sb: Sandbox, run: CliRun, files: RunFiles): TextSource[] {
   return [
     { label: "stdout", text: run.stdout },
     { label: "stderr", text: run.stderr },
-    ...readTreeTexts(join(sb.workspace, STATE_DIR_NAME), sb.workspace),
+    ...stateRecordTexts(sb.workspace),
     decodedSource("journal", files.journalText, true),
     decodedSource("result.json", files.resultText, false),
     decodedSource("stdout", run.stdout, false),

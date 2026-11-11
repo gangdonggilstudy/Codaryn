@@ -201,10 +201,11 @@ describe("EN-04 the same failure in a row stops the loop (R-3)", () => {
   });
 
   test("a failure that changes is not a repeat", async () => {
+    // T-5 normalizes numbers, so the change is in the words: other tests fail now.
     const h = harness({
       steps: [() => finalAnswer(), () => finalAnswer(), () => finalAnswer()],
       task: { limits: { maxRepairAttempts: 5 } },
-      verifiers: new FakeVerifiers({ v1: ["fail", "fail", "pass"] }, { v1: ["3 failing", "1 failing", "ok"] }),
+      verifiers: new FakeVerifiers({ v1: ["fail", "fail", "pass"] }, { v1: ["failing: sum, mean, max", "failing: max", "ok"] }),
     });
     const result = await runTask(h.deps);
     assert.equal(result.status, "done");

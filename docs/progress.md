@@ -9,12 +9,12 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | 작업 | 담당 페르소나 | pane | 브랜치 | 상태 |
 | --- | --- | --- | --- | --- |
 | A 기반과 공통 계약 | 수석 아키텍트, CLI 개발자 | w1:p1 | claude/cli-foundation | 완료. `cba57fa`, main `cc29b50`에 병합 |
-| B1 엔진·모의 모델·CLI | CLI 개발자 | w1:p1 | claude/core-engine | 1단계 `b67b620` 검토 통과(유닛 44). 2단계 조립 진행 |
+| B1 엔진·모의 모델·CLI | CLI 개발자 | w1:p1 | claude/core-engine | `b67b620`, `e8b5bd2`, `5333feb` 병합. 교차 검토 결함 수정 진행 |
 | B2 도구·명령 실행기 | CLI 개발자 | w1:p6 | claude/core-tools | 완료. `9496d14` 병합 |
 | B3 검증기·기록·잠금 | CLI 개발자, 검증 엔지니어 | w1:p8 | claude/core-store | 완료. `d3e6350`, `6d35746` 병합 |
 | C1 민감정보 게이트 | 보안·개인정보 검토자 | w1:p5 | claude/security-core | 완료. `ec4aa5f` 병합 |
 | C2 정책·작업 공간 | 보안·개인정보 검토자 | w1:p7 | claude/workspace-policy | 완료. `ae27dc1`, `063605d`, `bca12d3` 병합 |
-| D 독립 통합 검증 | 검증 엔지니어 | w1:p4 | claude/cli-verification | 테스트 작성분 `8b40f46`, `7942bfd` 병합. 실행은 G3b 뒤 |
+| D 독립 통합 검증 | 검증 엔지니어 | w1:p4 | claude/cli-verification | `8b40f46`, `7942bfd` 병합, 63건 통과. 회귀 테스트 추가 진행 |
 
 각 작업은 별도 worktree를 쓴다. 소유 파일은 배분 문서 1절, 수용 기준은 [작업 지시서](work-orders/phase-1a.md) 4절을 따른다.
 
@@ -23,7 +23,7 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 - G0 사용자 개발 지시와 공통 지침 반영: 완료.
 - G1 개발 환경: Windows, Node.js 26.13.0, npm 11.20.0, TypeScript 엄격 검사와 Node 기본 테스트 러너. 개발 의존성은 typescript 7.0.2, @types/node 26.6.6이다.
 - G2 기반 인수: 완료(2026-11-12, 임시 PM). 계약 11개 파일과 `docs/cli-contract.md`를 검토했다. 타입 검사와 빌드가 통과했고 계약에 Git이나 테스트 러너를 전제로 한 필드가 없다.
-- G3 구현 인수: G3a 완료(B2, B3, C1, C2 병합, main `7b39c96`). G3b(B1 조립 병합) 대기.
+- G3 구현 인수: G3a 완료(B2, B3, C1, C2 병합, main `7b39c96`). G3b 완료(B1 조립 병합, main `58dcfde`, 수정 포함 `3982a6c`).
 - G4 채택: 대기.
 
 ## 검증 기록
@@ -36,8 +36,11 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | 배분 | 임시 저장소 | 가짜 키와 `.env`를 스테이징해 `check-secrets.mjs --staged` 자체 시험 | 두 건 모두 탐지(종료 코드 1) |
 | G3a 전 | 작업 브랜치 5개 | `node scripts/review-branch.mjs`, 각 worktree `npm run test:unit` | 모두 PASS. 유닛 C1 22, B2 35, C2 33, B3 18, B1 1단계 44 통과, 실패 0 |
 | G3a | main `7b39c96` | `npm run typecheck`, `npm run test:unit`, `check-secrets --tracked` | 통과. 유닛 108건 통과, 실패 0, 건너뜀 0. 비밀 발견 없음 |
+| G3b | main `58dcfde` | `npm run typecheck`, `npm run test:unit`, `npm run test:integration` | 타입 검사 통과, 유닛 156건 통과. 통합 63건 중 50 통과, 13 실패(거부된 호출의 `tool_result` 미기록) |
+| G3b 수정 후 | main `3982a6c` | 같은 세 명령, `check-secrets --tracked` | 타입 검사 통과, 유닛 157건 통과, 통합 63건 통과(실패 0, 건너뜀 0), 비밀 발견 없음 |
+| 교차 검토 | 임시 폴더의 main 사본 | p5, p6, p7이 가짜 비밀로 재현 실험 | 재현된 결함 13건. 원문은 `docs/reviews/` |
 
-- 프로세스 통합 테스트는 작성되어 main에 있으나 CLI가 아직 main에 없어 실행하지 않았다. 유닛 통과를 통합 검증 통과로 보지 않는다.
+- 통합 테스트 통과는 검사한 사례의 증거다. 교차 검토에서 그 사례에 없던 결함이 재현되어 수정 중이며, 수정과 회귀 테스트가 병합되기 전에는 1a를 완료로 보지 않는다.
 - 실제 API 검증은 실행하지 않았다(1b 미수행). 모의 모델을 이용한 오프라인 검증을 실제 API 성공으로 표시하지 않는다.
 
 ## 결정 기록
@@ -51,7 +54,7 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 
 - `CODARYN_SECRET` 리터럴이 든 파일은 치환 계층이 변형 토큰으로 보아 수정할 수 없다. Codaryn 자신의 소스가 해당하므로 자기 개발 단계 전에 완화 여부를 정해야 한다.
 - Windows에서 `.cmd`/`.bat`(예: npm)은 셸 없이 실행되지 않는다. 명령 도구와 명령 검증기는 `node` 같은 실행 파일만 쓸 수 있다.
-- 교차 검토(p5, p6, p7) 결과 대기.
+- 교차 검토 결함 수정 중(`docs/reviews/` 참조). 높음 2건: 토큰 주변 문맥을 바꿔 비밀을 옮기는 변경이 통과함, 검색 일치 여부로 비밀을 한 글자씩 알아낼 수 있음.
 - 지원 OS와 Windows에서 자식 프로세스 트리 종료를 검증하는 방법(통합 검증에서 확인).
 - 파일 해시가 모델과 기록에 노출되는 점(알려진 한계로 기록).
 - 실제 Anthropic 어댑터는 1a에 넣지 않는다. AD-01~06은 "미도입"으로 보고한다.

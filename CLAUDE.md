@@ -11,4 +11,4 @@
 - 커밋 작성자는 gangdonggil <gangdonggilstudy@gmail.com>이다. Co-authored-by, Signed-off-by, Claude-Session 등 어떠한 Git trailer나 자동 귀속 문구도 추가하지 않는다.
 - --signoff와 --trailer를 사용하지 않는다. 작업 범위 안의 커밋만 만들고, 푸시는 Codex가 검토와 통합 후 수행한다.
 - API 키를 요청에 포함하거나 읽어 출력하지 않는다. API 제공자는 Anthropic을 우선한다.
-- 현재 단계는 문서 작성과 검토다. 구현과 실제 API 호출은 별도 단계 지시 이후 진행한다.
+- 현재 단계는 1a 최소 CLI와 오프라인 검증이다. 지정 작업 범위의 제품 코드·테스트·개발 의존성 설치를 허용한다. 실제 API 호출은 지시하지 않았으므로 실행하지 않는다.

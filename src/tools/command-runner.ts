@@ -9,6 +9,11 @@
  *   POSIX signals the process group (SIGTERM, then SIGKILL). Descendants that left the tree or
  *   the group (detached, re-parented after their parent exited, own session) are not reached.
  * - The child's file and network access are not restricted.
+ * - Output is captured raw and decoded as UTF-8. The caller masks it. A secret written in another
+ *   encoding (UTF-16LE, CP949) is not recognized by masking.
+ * - Allow-listed variables are dropped when `allowEnvValue` rejects their value. On Windows,
+ *   libuv still adds its own required variables (USERNAME, USERDOMAIN, HOMEDRIVE, HOMEPATH,
+ *   LOGONSERVER, SYSTEMDRIVE) from the parent, without that check.
  */
 
 import { spawn } from "node:child_process";
@@ -30,7 +35,14 @@ export interface CommandSpawnFailure {
   readonly message: string;
 }
 
-/** Shared shape. `src/verify` declares the same shape in its own directory. */
+/**
+ * Shared shape. `src/verify` declares the same shape in its own directory.
+ *
+ * The runner returns RAW output: each stream holds up to MAX_COMMAND_OUTPUT_BYTES plus
+ * COMMAND_CAPTURE_SLACK_BYTES, and `truncated` means bytes beyond that capture were dropped.
+ * The slack lets the caller mask first and cut afterwards, so a secret that crosses the cap is
+ * still whole when it is masked. `run_command` masks and cuts to MAX_COMMAND_OUTPUT_BYTES.
+ */
 export interface CommandRunner {
   run(
     request: CommandRunRequest,
@@ -43,35 +55,53 @@ export interface CommandRunnerOptions {
   readonly parentEnv?: NodeJS.ProcessEnv;
   /** Defaults to `process.platform`. */
   readonly platform?: NodeJS.Platform;
+  /**
+   * Value check for allow-listed variables. A variable whose value fails it is not passed.
+   * Production code injects `envValueFreeOfSecrets(privacy)`. Without it, values are not checked.
+   */
+  readonly allowEnvValue?: (value: string) => boolean;
 }
+
+/** Extra bytes captured beyond MAX_COMMAND_OUTPUT_BYTES, so that masking happens before the cut. */
+export const COMMAND_CAPTURE_SLACK_BYTES = 4_096;
+const CAPTURE_LIMIT_BYTES = MAX_COMMAND_OUTPUT_BYTES + COMMAND_CAPTURE_SLACK_BYTES;
 
 /** After a kill request, wait this long for the process to close before giving up on it. */
 const CLOSE_WAIT_AFTER_KILL_MS = 5_000;
 /** POSIX only: time between SIGTERM and SIGKILL. */
 const TERM_TO_KILL_MS = 2_000;
 
-/** Keeps only CHILD_ENV_ALLOWLIST variables. Names compare case-insensitively on Windows. */
+/**
+ * Keeps only CHILD_ENV_ALLOWLIST variables. Names compare case-insensitively on Windows.
+ * With `allowValue`, an allow-listed variable whose value fails the check is dropped too.
+ */
 export function buildChildEnv(
   parentEnv: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
+  allowValue?: (value: string) => boolean,
 ): Record<string, string> {
   const allowed = new Set<string>(CHILD_ENV_ALLOWLIST);
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(parentEnv)) {
     if (value === undefined) continue;
     const key = platform === "win32" ? name.toUpperCase() : name;
-    if (allowed.has(key)) env[name] = value;
+    if (!allowed.has(key)) continue;
+    if (allowValue !== undefined && !allowValue(value)) continue;
+    env[name] = value;
   }
   return env;
 }
 
-class CappedOutput {
+/** Collects at most `limitBytes` of a stream. `truncated` is set when bytes were dropped. */
+export class OutputCapture {
   private readonly chunks: Buffer[] = [];
   private bytes = 0;
   truncated = false;
 
+  constructor(private readonly limitBytes: number = CAPTURE_LIMIT_BYTES) {}
+
   push(chunk: Buffer): void {
-    const remaining = MAX_COMMAND_OUTPUT_BYTES - this.bytes;
+    const remaining = this.limitBytes - this.bytes;
     if (chunk.length > remaining) this.truncated = true;
     if (remaining <= 0) return;
     const kept = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
@@ -129,8 +159,8 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
   return {
     run(request, signal) {
       return new Promise((resolve) => {
-        const stdout = new CappedOutput();
-        const stderr = new CappedOutput();
+        const stdout = new OutputCapture();
+        const stderr = new OutputCapture();
         const payload = (exitCode: number | null, timedOut: boolean): RunCommandPayload => ({
           exitCode,
           stdout: stdout.text(),
@@ -148,7 +178,7 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
         try {
           child = spawn(request.executable, [...request.args], {
             cwd: request.cwdAbsolute,
-            env: buildChildEnv(parentEnv, platform),
+            env: buildChildEnv(parentEnv, platform, options.allowEnvValue),
             shell: false,
             windowsHide: true,
             stdio: ["ignore", "pipe", "pipe"],

@@ -131,6 +131,14 @@ function repositoryState(sb: Sandbox): string {
   ].join("---\n");
 }
 
+/** The package this script belongs to: the CLI installation the script protects. */
+const PACKAGE_ROOT = path.dirname(path.dirname(SCRIPT));
+
+function assertSamePaths(actual: readonly string[], expected: readonly string[]): void {
+  const fold = (value: string) => (FOLD ? path.resolve(value).toLowerCase() : path.resolve(value));
+  assert.deepEqual(actual.map(fold), expected.map(fold), JSON.stringify(actual));
+}
+
 function assertStopped(result: RunResult, pattern: RegExp): void {
   assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, pattern);
@@ -161,7 +169,7 @@ test("creates the candidate worktree on candidate/<name> and both templates outs
   assert.notEqual(taskText.charCodeAt(0), 0xfeff, "no BOM");
   const config = JSON.parse(configText) as Record<string, unknown> & {
     model: string;
-    integrity: unknown;
+    integrity: { paths: string[] };
     limits: Record<string, number>;
     policy: { commands: unknown[]; protectedPaths: string[] };
     verifiers: unknown[];
@@ -171,7 +179,18 @@ test("creates the candidate worktree on candidate/<name> and both templates outs
   assert.deepEqual(findKeyInJson(task, null), { kind: "none" });
 
   assert.equal(config.model, "<모델 ID>");
-  assert.deepEqual(config.integrity, { paths: [] });
+  // W-3: what the script knows lies outside the candidate and feeds verification or later Git use:
+  // the shared Git directory's hooks and config, and the running CLI installation's dist.
+  assertSamePaths(config.integrity.paths, [
+    path.join(sb.repo, ".git", "hooks"),
+    path.join(sb.repo, ".git", "config"),
+    path.join(PACKAGE_ROOT, "dist"),
+  ]);
+  for (const entry of config.integrity.paths) {
+    assert.ok(path.isAbsolute(entry) && fs.existsSync(entry), `integrity path exists: ${entry}`);
+  }
+  assert.match(result.stdout, /integrity\.paths: 3 path\(s\) filled in/);
+  assert.doesNotMatch(result.stdout, /not found/);
   assert.equal(config.limits["maxRepairAttempts"], 2);
   assert.deepEqual(config.policy.commands, [], "no command is allowed until a person adds one");
   for (const entry of ["tests", "scripts", ".github", "package.json", "tsconfig.json", ".git", "node_modules"]) {
@@ -184,10 +203,10 @@ test("creates the candidate worktree on candidate/<name> and both templates outs
   assert.deepEqual(task.verifiers, config.verifiers);
   assert.equal(config.verifiers.length, 1, "the base commit has package.json, so npm test is suggested");
 
-  // The CLI's own validation accepts both templates. `integrity` is checked above: its parser is K1's.
-  const { integrity: _integrity, ...configWithoutIntegrity } = config;
-  const parsedConfig = parseConfig(configWithoutIntegrity);
+  // The CLI's own validation accepts both templates as written, `integrity` included.
+  const parsedConfig = parseConfig(config);
   assert.ok(parsedConfig.ok, parsedConfig.ok ? "" : parsedConfig.message);
+  assert.equal(parsedConfig.config.integrity?.paths.length, 3);
   const parsedTask = parseTask(task, state, { limits: parsedConfig.config.limits });
   assert.ok(parsedTask.ok, parsedTask.ok ? "" : parsedTask.message);
   assert.equal(parsedTask.task.workspaceRoot, out);
@@ -207,10 +226,34 @@ test("a dry run checks everything, prints the plan and changes nothing", { skip 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /dry run, nothing was changed/);
   assert.match(result.stdout, /worktree add -b candidate\/dry -- /);
+  assert.match(result.stdout, /integrity\.paths: 3 path\(s\) filled in/);
   assert.match(result.stdout, /"workspaceRoot"/);
   assert.equal(fs.existsSync(out), false);
   assert.equal(fs.existsSync(state), false);
   assert.equal(repositoryState(sb), before);
+});
+
+test("W-3: integrity paths that do not exist are left out and named in the output", { skip }, () => {
+  const sb = sandbox();
+  // A repository without a hooks directory, and a CLI installation that was never built.
+  fs.rmSync(path.join(sb.repo, ".git", "hooks"), { recursive: true, force: true });
+  const cli = path.join(sb.root, "cli");
+  write(path.join(cli, "package.json"), '{ "name": "codaryn-copy", "private": true }\n');
+  const copy = path.join(cli, "scripts", "new-candidate.mjs");
+  fs.mkdirSync(path.dirname(copy));
+  fs.copyFileSync(SCRIPT, copy);
+  const state = path.join(sb.root, "settings");
+
+  const result = run(sb, candidateArgs(sb, "gaps", path.join(sb.root, "cand"), state), copy);
+  assert.equal(result.status, 0, result.stderr);
+  const config = JSON.parse(fs.readFileSync(path.join(state, "gaps.config.json"), "utf8")) as { integrity: { paths: string[] } };
+  assertSamePaths(config.integrity.paths, [path.join(sb.repo, ".git", "config")]);
+  assert.match(result.stdout, /integrity\.paths: 1 path\(s\) filled in/);
+  assert.match(result.stdout, /integrity\.paths: not found, not added: .*[\\/]\.git[\\/]hooks \(shared Git hooks\)/);
+  assert.match(result.stdout, /integrity\.paths: not found, not added: .*[\\/]cli[\\/]dist \(CLI installation dist\)/);
+  // The CLI accepts the template as written: every listed path exists.
+  const parsed = parseConfig(config);
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
 });
 
 // ---- P0: existing targets are kept as they are ----

@@ -225,21 +225,19 @@ function invalidRecord(): RevertRunError {
   return new RevertRunError("invalid_run_record", "the run's journal cannot be parsed; nothing was changed");
 }
 
-/** Distinct paths of the `file_changed` records, in order of first appearance. */
+/**
+ * Distinct paths of the `file_changed` records, in order of first appearance.
+ * Every line ends with LF. A last line without LF was being written when the run stopped: it is
+ * used when it still parses and ignored when it was cut off (T-10). Any other line that does not
+ * parse, or a record that does not belong to this run, rejects.
+ */
 function changedPaths(text: string, runId: string): ChangedPath[] {
-  if (text.length > 0 && !text.endsWith("\n")) throw invalidRecord();
   const lines = text.split("\n");
-  lines.pop();
+  const last = lines.pop() ?? "";
   const byPath = new Map<string, ChangedPath>();
-  for (const line of lines) {
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      throw invalidRecord();
-    }
+  const take = (record: unknown): void => {
     if (!isRecord(record) || record["runId"] !== runId || typeof record["type"] !== "string") throw invalidRecord();
-    if (record["type"] !== "file_changed") continue;
+    if (record["type"] !== "file_changed") return;
     const { path, previousHash, newHash } = record;
     const validBefore = previousHash === null || (typeof previousHash === "string" && CONTENT_HASH.test(previousHash));
     if (typeof path !== "string" || path.length === 0 || !validBefore || typeof newHash !== "string" || !CONTENT_HASH.test(newHash)) {
@@ -251,6 +249,25 @@ function changedPaths(text: string, runId: string): ChangedPath[] {
     } else {
       known.after = newHash;
     }
+  };
+  for (const line of lines) {
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      throw invalidRecord();
+    }
+    take(record);
+  }
+  if (last.length > 0) {
+    let record: unknown;
+    let complete = true;
+    try {
+      record = JSON.parse(last);
+    } catch {
+      complete = false;
+    }
+    if (complete) take(record);
   }
   return [...byPath.values()];
 }
@@ -343,7 +360,8 @@ async function revertFile(change: ChangedPath, snapshots: Snapshots, workspace: 
 
 /**
  * Puts back the originals of one run. See `RevertRun` in src/contracts/changes.ts.
- * Rejects with RevertRunError, before changing anything, when the journal is missing or invalid.
+ * Rejects with RevertRunError, before changing anything, when the journal is missing or invalid
+ * (a cut-off last line excepted, T-10). Index paths without a record are `missing_record`.
  * Restores go through the workspace (links resolved, root and state directory enforced, atomic
  * replace that checks the hash again right before it). A deletion checks the hash right before it.
  */
@@ -366,27 +384,37 @@ export const revertRun: RevertRun = async (request) => {
 
   const reverted: RevertedFile[] = [];
   const skipped: SkippedFile[] = [];
-  if (changes.length === 0) return { reverted, skipped };
-
   const snapshots = await loadSnapshots(join(dir, SNAPSHOTS_DIR_NAME));
-  let workspace: Workspace | null;
-  try {
-    workspace = await createWorkspace({ root: workspaceRoot });
-  } catch {
-    workspace = null;
+
+  if (changes.length > 0) {
+    let workspace: Workspace | null;
+    try {
+      workspace = await createWorkspace({ root: workspaceRoot });
+    } catch {
+      workspace = null;
+    }
+    for (const change of changes) {
+      let outcome: FileOutcome;
+      try {
+        outcome = await revertFile(change, snapshots, workspace);
+      } catch {
+        outcome = { reason: "io_error" };
+      }
+      if ("action" in outcome) {
+        reverted.push({ path: change.path, action: outcome.action });
+      } else {
+        skipped.push({ path: change.path, reason: outcome.reason });
+      }
+    }
   }
 
-  for (const change of changes) {
-    let outcome: FileOutcome;
-    try {
-      outcome = await revertFile(change, snapshots, workspace);
-    } catch {
-      outcome = { reason: "io_error" };
-    }
-    if ("action" in outcome) {
-      reverted.push({ path: change.path, action: outcome.action });
-    } else {
-      skipped.push({ path: change.path, reason: outcome.reason });
+  // T-10: an original was kept but the run stopped before its record. The state the run left is
+  // unknown, so the file is not touched; reporting it keeps the outcome from claiming "complete".
+  // The path comes from the index (unmasked), see SkippedFile.
+  if (snapshots.kind === "found") {
+    const recorded = new Set(changes.map((change) => change.path));
+    for (const path of snapshots.byPath.keys()) {
+      if (!recorded.has(path)) skipped.push({ path, reason: "missing_record" });
     }
   }
   return { reverted, skipped };

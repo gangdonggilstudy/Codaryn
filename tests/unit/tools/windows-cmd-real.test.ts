@@ -208,3 +208,63 @@ test("G1 real: a timeout on a .cmd run also ends the process started under cmd.e
     if (pid > 0 && alive(pid)) process.kill(pid);
   }
 });
+
+test("T-2 real: a .cmd that starts a background process with start /b and exits is not a timeout (review F6-3)", { skip: !IS_WINDOWS }, async (t) => {
+  const box = sandbox(t);
+  if (box === null) return;
+  const pidFile = path.join(box.bin, "bg-pid.txt");
+  fs.writeFileSync(
+    path.join(box.bin, "sleeper.mjs"),
+    "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 20000);\n",
+  );
+  writeScript(path.join(box.bin, "bgstart.cmd"), `start "" /b "${process.execPath}" "%~dp0sleeper.mjs" "${pidFile}"\r\nexit /b 0`);
+  const started = Date.now();
+  const result = await box.runner.run(box.request("bgstart", [], 2_000), live());
+  const elapsed = Date.now() - started;
+  await waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").length > 0, 5_000);
+  const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8") : "0");
+  try {
+    assert.ok(!("spawnFailed" in result), JSON.stringify(result));
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.timedOut, false);
+    assert.ok(elapsed < 1_900, `settled after ${elapsed} ms, before the 2000 ms limit`);
+  } finally {
+    // Known limit: the background process outlives the command; end it here.
+    if (pid > 0 && alive(pid)) process.kill(pid);
+  }
+});
+
+test("T-4 real: an .exe inside the workspace is not started, by path or through PATH", { skip: !IS_WINDOWS }, async (t) => {
+  const box = sandbox(t);
+  if (box === null) return;
+  const tools = path.join(box.ws, "tools");
+  fs.mkdirSync(tools);
+  const systemRoot = process.env["SystemRoot"] ?? "C:\\Windows";
+  // A small harmless system program under the name node.exe (it only prints usage if it ever ran).
+  try {
+    fs.copyFileSync(path.join(systemRoot, "System32", "where.exe"), path.join(tools, "node.exe"));
+  } catch {
+    t.skip("cannot copy a system program into the temporary workspace");
+    return;
+  }
+  const runner = createCommandRunner({
+    parentEnv: { Path: `${tools};${path.join(systemRoot, "System32")}`, PATHEXT: ".COM;.EXE", SystemRoot: systemRoot },
+    workspaceRoot: box.ws,
+  });
+  for (const executable of ["node", ".\\tools\\node.exe", "tools/node"]) {
+    const result = await runner.run(box.request(executable, ["-e", "process.stdout.write('ran')"]), live());
+    assert.deepEqual(
+      result,
+      { spawnFailed: true, message: "could not start process (executable_refused): executables inside the workspace are not run" },
+      executable,
+    );
+  }
+  // The same file name outside the workspace still starts.
+  const outside = createCommandRunner({
+    parentEnv: { Path: path.dirname(process.execPath), PATHEXT: ".COM;.EXE", SystemRoot: systemRoot },
+    workspaceRoot: box.ws,
+  });
+  const ran = await outside.run(box.request("node", ["-e", "process.stdout.write('ran')"]), live());
+  assert.ok(!("spawnFailed" in ran), JSON.stringify(ran));
+  assert.equal(ran.stdout, "ran");
+});

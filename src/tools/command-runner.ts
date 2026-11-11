@@ -3,12 +3,23 @@
  * a time limit, an output cap and cancellation.
  *
  * Windows: the name is looked up with PATH and PATHEXT of the child environment (see
- * `windows-launch.ts`). `.exe` and `.com` start without a shell. `.cmd` and `.bat` start through
- * `cmd.exe /d /s /c` only when the script is outside the workspace and the script path and
- * every argument use a narrow character set; anything else is refused as `spawnFailed`.
- * Other systems: the name is passed to `spawn` as before (no shell).
+ * `windows-launch.ts`). Nothing that resolves into the workspace is started (T-4). `.exe` and
+ * `.com` start without a shell. `.cmd` and `.bat` start through `cmd.exe /d /s /c` only when the
+ * script path and every argument use a narrow character set; anything else is refused as
+ * `spawnFailed`. Other systems: the name is passed to `spawn` as before (no shell).
+ *
+ * Production code builds the runner with `createWorkspaceCommandRunner` (index.ts), which sets
+ * `allowEnvValue` and `workspaceRoot`. Without them the env value check is off and, on Windows,
+ * every `.cmd`/`.bat` is refused and executables are not checked against the workspace.
+ *
+ * Settling (T-2): the run ends when the child process exits. Its exit code is final then, and the
+ * time limit no longer applies. The pipes are read for PIPE_GRACE_AFTER_EXIT_MS more and then
+ * closed, even when a descendant still holds them. The tree is ended (time limit or cancel) only
+ * while the child is alive; an ended child's PID is never signalled or passed to taskkill.
  *
  * Known limits (not OS isolation):
+ * - Descendants that are still running when the child exits (a server started in the background,
+ *   `start /b`, a detached process) are not ended. They can outlive the run and the CLI.
  * - Windows scripts: arguments with spaces, quotes, `%`, `!`, parentheses, `,`, `;`, wildcards
  *   or non-ASCII characters cannot be passed to a `.cmd`/`.bat`. A script under a path with
  *   such characters (for example `Program Files (x86)`) or on a UNC path is refused.
@@ -16,8 +27,10 @@
  * - What a script starts (for example the scripts in `package.json` that `npm test` runs) is
  *   not checked by this runner. Such files can be workspace content.
  * - Tree termination is best effort. Windows uses `taskkill /T /F` (forced, no graceful stop).
- *   POSIX signals the process group (SIGTERM, then SIGKILL). Descendants that left the tree or
- *   the group (detached, re-parented after their parent exited, own session) are not reached.
+ *   POSIX signals the process group (SIGTERM, then SIGKILL after 2 s, also when the leader has
+ *   already exited: a group id is not reused while the group has members). Descendants that left
+ *   the tree or the group (detached, re-parented after their parent exited, own session) are not
+ *   reached. The child can also exit between the alive check and taskkill.
  * - The child's file and network access are not restricted.
  * - Output is captured raw and decoded as UTF-8. The caller masks it. A secret written in another
  *   encoding (UTF-16LE, CP949) is not recognized by masking.
@@ -86,6 +99,11 @@ const CAPTURE_LIMIT_BYTES = MAX_COMMAND_OUTPUT_BYTES + COMMAND_CAPTURE_SLACK_BYT
 
 /** After a kill request, wait this long for the process to close before giving up on it. */
 const CLOSE_WAIT_AFTER_KILL_MS = 5_000;
+/**
+ * After the child exits, keep reading the pipes this long for output still in flight (T-2).
+ * Then the run is settled even when a descendant still holds the pipes.
+ */
+export const PIPE_GRACE_AFTER_EXIT_MS = 500;
 /** POSIX only: time between SIGTERM and SIGKILL. */
 const TERM_TO_KILL_MS = 2_000;
 
@@ -140,6 +158,12 @@ function errorCode(error: unknown): string {
   return "unknown";
 }
 
+/**
+ * Low-level constructor: uses exactly the options given. For a run, build the runner with
+ * `createWorkspaceCommandRunner({ workspace, privacy })` from index.ts instead, and hand that one
+ * runner to both `createToolRunner` and the verifier runner. `createCommandRunner()` without
+ * options passes allow-listed variables unchecked and does not know the workspace.
+ */
 export function createCommandRunner(options: CommandRunnerOptions = {}): CommandRunner {
   const parentEnv = options.parentEnv ?? process.env;
   const platform = options.platform ?? process.platform;
@@ -240,8 +264,12 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
         let stopping = false;
         let timedOut = false;
         let started = false;
+        /** Set when the child process itself has ended (T-2). Its exit code is final then. */
+        let exited = false;
+        let exitCode: number | null = null;
         let escalateTimer: NodeJS.Timeout | undefined;
         let closeWaitTimer: NodeJS.Timeout | undefined;
+        let graceTimer: NodeJS.Timeout | undefined;
 
         const settle = (result: RunCommandPayload | CommandSpawnFailure): void => {
           if (settled) return;
@@ -249,20 +277,29 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
           clearTimeout(timeoutTimer);
           clearTimeout(escalateTimer);
           clearTimeout(closeWaitTimer);
+          clearTimeout(graceTimer);
           signal.removeEventListener("abort", onAbort);
           resolve(result);
         };
 
+        /** Stops reading: a descendant may keep the pipes open for as long as it likes. */
+        const settleWithoutPipes = (): void => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          settle(payload(stopping ? null : exitCode, timedOut));
+        };
+
         const stop = (): void => {
           if (stopping || settled) return;
+          // T-2: the tree is only ended while the child is alive. An ended child's PID may already
+          // belong to an unrelated process, so it is never signalled or passed to taskkill.
+          if (exited) {
+            settleWithoutPipes();
+            return;
+          }
           stopping = true;
           escalateTimer = killTree(child);
-          // A descendant may keep the pipes open. Do not wait for it forever.
-          closeWaitTimer = setTimeout(() => {
-            child.stdout?.destroy();
-            child.stderr?.destroy();
-            settle(payload(null, timedOut));
-          }, CLOSE_WAIT_AFTER_KILL_MS);
+          closeWaitTimer = setTimeout(settleWithoutPipes, CLOSE_WAIT_AFTER_KILL_MS);
         };
 
         const onAbort = (): void => stop();
@@ -283,8 +320,18 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
           }
           // After start an error means a failed kill. Close or the wait timer settles the run.
         });
+        child.on("exit", (code) => {
+          exited = true;
+          exitCode = code;
+          // The command finished: its time limit no longer applies (T-2).
+          clearTimeout(timeoutTimer);
+          // A stop in progress keeps its own wait (POSIX may still escalate to the group).
+          // Otherwise output still in flight gets a short grace, then the pipes are closed even
+          // when a background descendant holds them.
+          if (!stopping) graceTimer = setTimeout(settleWithoutPipes, PIPE_GRACE_AFTER_EXIT_MS);
+        });
         child.on("close", (code) => {
-          settle(payload(stopping ? null : code, timedOut));
+          settle(payload(stopping ? null : (exitCode ?? code), timedOut));
         });
       });
     },

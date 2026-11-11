@@ -6,8 +6,10 @@
 
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
+  MAX_COMMAND_OUTPUT_BYTES,
   MAX_SEARCH_ENTRIES,
   MAX_SEARCH_MATCHES_PER_FILE,
+  PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
 } from "../contracts/index.js";
 import type {
@@ -17,6 +19,7 @@ import type {
   ReadFileArgs,
   ResolvedPath,
   RunCommandArgs,
+  RunCommandPayload,
   SearchEntry,
   SearchFilesArgs,
   SearchMatch,
@@ -29,7 +32,12 @@ import type {
 import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 
-export { buildChildEnv, createCommandRunner } from "./command-runner.js";
+export {
+  COMMAND_CAPTURE_SLACK_BYTES,
+  OutputCapture,
+  buildChildEnv,
+  createCommandRunner,
+} from "./command-runner.js";
 export type {
   CommandRunner,
   CommandRunnerOptions,
@@ -40,11 +48,66 @@ export type {
 export interface ToolRunnerOptions {
   readonly workspace: Workspace;
   readonly privacy: PrivacyGateway;
-  /** Defaults to the real runner from `createCommandRunner()`. Inject a fake in unit tests. */
+  /**
+   * Defaults to the real runner with `allowEnvValue: envValueFreeOfSecrets(privacy)`.
+   * Inject a fake in unit tests.
+   */
   readonly commandRunner?: CommandRunner;
 }
 
-const BOM = "﻿";
+/**
+ * Value check for `createCommandRunner({ allowEnvValue })`: true only when masking leaves the
+ * value unchanged, so a value that holds a registered secret (or a listed variant) is dropped.
+ * A masking failure also drops the value.
+ */
+export function envValueFreeOfSecrets(privacy: PrivacyGateway): (value: string) => boolean {
+  return (value) => {
+    const masked = privacy.mask(value);
+    return masked.ok && masked.text === value;
+  };
+}
+
+const TOKEN_PATTERN = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE, "g");
+
+/** Largest index <= `limit` that is not inside a privacy token or a surrogate pair. */
+function tokenSafeCut(text: string, limit: number): number {
+  if (limit >= text.length) return text.length;
+  let cut = limit;
+  for (const match of text.matchAll(TOKEN_PATTERN)) {
+    const start = match.index;
+    if (start >= cut) break;
+    if (start + match[0].length > cut) {
+      cut = start;
+      break;
+    }
+  }
+  const before = text.charCodeAt(cut - 1);
+  if (cut > 0 && before >= 0xd800 && before <= 0xdbff) cut -= 1;
+  return cut;
+}
+
+/** Largest code point boundary whose UTF-8 prefix fits in `maxBytes`. */
+function indexForUtf8Bytes(text: string, maxBytes: number): number {
+  let bytes = 0;
+  let index = 0;
+  while (index < text.length) {
+    const code = text.codePointAt(index) ?? 0;
+    const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    if (bytes + size > maxBytes) return index;
+    bytes += size;
+    index += code > 0xffff ? 2 : 1;
+  }
+  return index;
+}
+
+function commonPrefixLength(a: string, b: string): number {
+  const length = Math.min(a.length, b.length);
+  let index = 0;
+  while (index < length && a.charCodeAt(index) === b.charCodeAt(index)) index += 1;
+  return index;
+}
+
+const BOM = "\uFEFF";
 /** Longest line text reported by `search_files`. Longer lines are cut and mark `truncated`. */
 export const MAX_SEARCH_LINE_CHARS = 1_000;
 
@@ -56,7 +119,35 @@ function fail(code: ToolErrorCode, message: string): Failure {
 
 export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   const { workspace, privacy } = options;
-  const commandRunner = options.commandRunner ?? createCommandRunner();
+  const commandRunner =
+    options.commandRunner ??
+    createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy) });
+
+  /** Masks a text or reports that the whole call must fail with `masking_failed`. */
+  function maskText(text: string): string | null {
+    const masked = privacy.mask(text);
+    return masked.ok ? masked.text : null;
+  }
+
+  /**
+   * Masks one raw output stream, then cuts it to MAX_COMMAND_OUTPUT_BYTES outside any token.
+   * When the runner dropped bytes, its capture may end inside a secret. Only the part of the
+   * masked text that is the same as masking the first MAX_COMMAND_OUTPUT_BYTES raw bytes is
+   * kept, so a cut secret of at most COMMAND_CAPTURE_SLACK_BYTES never survives, even when
+   * earlier long secrets made the masked text shorter than the raw capture.
+   */
+  function maskOutput(raw: string, rawTruncated: boolean): { text: string; truncated: boolean } | null {
+    const full = maskText(raw);
+    if (full === null) return null;
+    let limit = indexForUtf8Bytes(full, MAX_COMMAND_OUTPUT_BYTES);
+    if (rawTruncated) {
+      const head = maskText(raw.slice(0, indexForUtf8Bytes(raw, MAX_COMMAND_OUTPUT_BYTES)));
+      if (head === null) return null;
+      limit = Math.min(limit, commonPrefixLength(full, head));
+    }
+    const cut = tokenSafeCut(full, limit);
+    return { text: full.slice(0, cut), truncated: rawTruncated || cut < full.length };
+  }
 
   async function resolvePath(
     path: string,
@@ -92,11 +183,15 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     const listed = await workspace.list(resolved.path);
     if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
 
+    // Matching works on masked text only: the path names and the file contents a model would
+    // see. Matching raw text would let the result reveal secrets one character at a time.
     let truncated = listed.truncated;
     const entries: SearchEntry[] = [];
     for (const entry of listed.entries) {
       if (signal.aborted) return fail("cancelled", "search cancelled");
-      if (args.nameContains !== undefined && !entry.relative.includes(args.nameContains)) continue;
+      const maskedPath = maskText(entry.relative);
+      if (maskedPath === null) return fail("masking_failed", "masking a path failed");
+      if (args.nameContains !== undefined && !maskedPath.includes(args.nameContains)) continue;
 
       let matches: SearchMatch[] | undefined;
       if (args.text !== undefined) {
@@ -106,8 +201,11 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         if (!file.ok) continue;
         const read = await workspace.readText(file.path);
         if (!read.ok) continue;
+        const raw: string = read.snapshot.text;
+        const masked = maskText(raw.startsWith(BOM) ? raw.slice(BOM.length) : raw);
+        if (masked === null) return fail("masking_failed", "masking a file failed");
         matches = [];
-        const lines = read.snapshot.text.split("\n");
+        const lines = masked.split("\n");
         for (let index = 0; index < lines.length; index += 1) {
           let line = lines[index] ?? "";
           if (!line.includes(args.text)) continue;
@@ -115,10 +213,9 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
             truncated = true;
             break;
           }
-          if (index === 0 && line.startsWith(BOM)) line = line.slice(BOM.length);
           if (line.endsWith("\r")) line = line.slice(0, -1);
           if (line.length > MAX_SEARCH_LINE_CHARS) {
-            line = line.slice(0, MAX_SEARCH_LINE_CHARS);
+            line = line.slice(0, tokenSafeCut(line, MAX_SEARCH_LINE_CHARS));
             truncated = true;
           }
           matches.push({ line: index + 1, text: line });
@@ -132,8 +229,8 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
       }
       entries.push(
         matches === undefined
-          ? { path: entry.relative, kind: entry.kind }
-          : { path: entry.relative, kind: entry.kind, matches },
+          ? { path: maskedPath, kind: entry.kind }
+          : { path: maskedPath, kind: entry.kind, matches },
       );
     }
     return { ok: true, payload: { entries, truncated } };
@@ -231,7 +328,20 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     );
     if ("spawnFailed" in result) return fail("spawn_failed", result.message);
     if (signal.aborted) return fail("cancelled", "command cancelled");
-    return { ok: true, payload: result };
+    // The runner returns raw output with slack beyond the cap. Mask first, then cut.
+    const stdout = maskOutput(result.stdout, result.truncated);
+    const stderr = maskOutput(result.stderr, result.truncated);
+    if (stdout === null || stderr === null) {
+      return fail("masking_failed", "masking the command output failed");
+    }
+    const payload: RunCommandPayload = {
+      exitCode: result.exitCode,
+      stdout: stdout.text,
+      stderr: stderr.text,
+      timedOut: result.timedOut,
+      truncated: stdout.truncated || stderr.truncated,
+    };
+    return { ok: true, payload };
   }
 
   return {

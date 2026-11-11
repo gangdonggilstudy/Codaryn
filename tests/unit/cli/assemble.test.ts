@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -14,6 +14,8 @@ import type { RunTask } from "../../../src/contracts/index.js";
 import { assembleRun } from "../../../src/cli/assemble.js";
 import { runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment } from "../../../src/cli/run.js";
+import { locateInWorkspace } from "../../../src/cli/security/index.js";
+import { recordedText } from "./locate.js";
 
 const FAKE_SECRET = "fake-secret-VALUE-0001";
 const temporaryDirs: string[] = [];
@@ -66,6 +68,7 @@ function io(base: string, extra: Partial<CliEnvironment> = {}): CliEnvironment {
     loadEnvFile: () => {
       throw new Error("no env file in this test");
     },
+    locateInWorkspace: (file, root) => locateInWorkspace(file, root),
     clock: { now: () => Date.now() },
     randomBytes: (size) => randomBytes(size),
     assemble: assembleRun,
@@ -74,13 +77,9 @@ function io(base: string, extra: Partial<CliEnvironment> = {}): CliEnvironment {
   };
 }
 
+/** The journal and result.json; snapshots are raw originals by design (R-8). */
 async function stateFiles(base: string): Promise<string> {
-  const runs = path.join(base, "work", ".codaryn", "runs");
-  let text = "";
-  for (const runId of await readdir(runs)) {
-    for (const name of await readdir(path.join(runs, runId))) text += await readFile(path.join(runs, runId, name), "utf8");
-  }
-  return text;
+  return recordedText(path.join(base, "work"));
 }
 
 describe("runCli with the real assembly", () => {

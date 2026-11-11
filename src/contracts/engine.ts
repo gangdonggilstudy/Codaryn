@@ -86,7 +86,7 @@ export const CLI_ERROR_EXIT_CODES = {
   invalid_task: 2,
   /** The config file cannot be read, or a value in it is invalid. */
   invalid_config: 2,
-  /** A task or config file has a key field or a key value. Nothing else is checked first. */
+  /** A task or config file, or `--goal`, has a key field or a key value. Checked before anything else in those inputs. */
   key_in_file: 2,
   invalid_script: 2,
   secret_env_missing: 2,

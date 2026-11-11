@@ -1,12 +1,12 @@
 /**
  * task.json validation, and the quick form task built from the config file.
  * Error messages name fields only, never values from the file.
+ * Security rules come from `./security`: variable names (S-3), local paths (S-5),
+ * bounded limits (S-7) and timer values (S-7).
  */
 
 import path from "node:path";
 import {
-  DEFAULT_MAX_REPAIR_ATTEMPTS,
-  DEFAULT_MAX_SAME_FAILURES,
   DENY_ALL_POLICY,
   QUICK_TASK_ID,
   QUICK_TASK_WORKFLOW,
@@ -19,23 +19,34 @@ import type {
   FileRule,
   Limits,
   ModelConfig,
+  ModelProviderName,
   PolicyConfig,
-  ResolvedLimits,
   ResolvedTaskSpec,
   VerifierConfig,
 } from "../contracts/index.js";
+import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "./security/index.js";
+
+/** `invalid_config` when the config file caused the failure (S-7 bounds, quick form). */
+export type TaskErrorCode = "invalid_task" | "invalid_config";
 
 export type ParseTaskOutcome =
   | { readonly ok: true; readonly task: ResolvedTaskSpec }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: false; readonly code: TaskErrorCode; readonly message: string };
 
 export type Rec = Record<string, unknown>;
 
-/** A validation failure. Its message names a field, never a value. */
-export class InputError extends Error {}
+/** A validation failure. Its message names a field, never a value. `code` overrides the default. */
+export class InputError extends Error {
+  constructor(
+    message: string,
+    readonly code?: TaskErrorCode,
+  ) {
+    super(message);
+  }
+}
 
-export function fail(message: string): never {
-  throw new InputError(message);
+export function fail(message: string, code?: TaskErrorCode): never {
+  throw new InputError(message, code);
 }
 
 export function record(value: unknown, field: string, keys: readonly string[]): Rec {
@@ -73,8 +84,31 @@ export function optionalText(value: unknown, field: string): string | undefined 
   return value === undefined ? undefined : text(value, field);
 }
 
-function resolveFrom(baseDir: string, target: string): string {
+/**
+ * S-5: a path must not reach another machine or a device, as written or once resolved.
+ * Returns the fixed reason, or null when the path is a plain local path.
+ */
+export function localPathProblem(raw: string, baseDir: string): string | null {
+  for (const candidate of [raw, path.resolve(baseDir, raw)]) {
+    const syntax = checkLocalPathSyntax(candidate);
+    if (!syntax.ok) return syntax.reason === "invalid" ? "is not a valid local path" : "is a network or device path";
+  }
+  return null;
+}
+
+/** Resolves a path from a file against `baseDir` after the S-5 check. */
+function resolveLocal(baseDir: string, target: string, field: string): string {
+  const problem = localPathProblem(target, baseDir);
+  if (problem !== null) fail(`${field} ${problem}`);
   return path.resolve(baseDir, target);
+}
+
+/** S-7: a time value Node timers can honour. */
+function timerMs(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  const checked = checkTimerMs(value, field);
+  if (!checked.ok) fail(checked.message);
+  return value as number;
 }
 
 function parseModel(value: unknown, baseDir: string): ModelConfig {
@@ -83,7 +117,7 @@ function parseModel(value: unknown, baseDir: string): ModelConfig {
     if (rec["model"] !== undefined || rec["maxOutputTokens"] !== undefined) {
       fail("model.model and model.maxOutputTokens are only for the anthropic provider");
     }
-    return { provider: "scripted", scriptPath: resolveFrom(baseDir, text(rec["scriptPath"], "model.scriptPath")) };
+    return { provider: "scripted", scriptPath: resolveLocal(baseDir, text(rec["scriptPath"], "model.scriptPath"), "model.scriptPath") };
   }
   if (rec["provider"] === "anthropic") {
     if (rec["scriptPath"] !== undefined) fail("model.scriptPath is only for the scripted provider");
@@ -161,7 +195,11 @@ function nonNegative(value: unknown, field: string): number {
   return value;
 }
 
-/** Validates the limit fields that are present. Absent fields stay absent. */
+/**
+ * Validates the shape and the type of the limit fields that are present. Absent fields stay absent.
+ * Upper bounds (config over task, absolute caps, no null tokens for anthropic) are S-7's
+ * `resolveBoundedLimits`, applied once the provider is known.
+ */
 export function parsePartialLimits(value: unknown): Partial<Limits> {
   const rec = record(value, "limits", LIMIT_FIELDS);
   const limits: MutableLimits = {};
@@ -181,30 +219,15 @@ export function parsePartialLimits(value: unknown): Partial<Limits> {
   return limits;
 }
 
-/**
- * Each field from `own` when present there, else from `defaults`. The four budget limits must end
- * up set. The repair limits fall back to DEFAULT_MAX_REPAIR_ATTEMPTS and DEFAULT_MAX_SAME_FAILURES.
- */
-export function mergeLimits(own: Partial<Limits> | undefined, defaults: Partial<Limits> | undefined): ResolvedLimits {
-  const find = <K extends keyof Limits>(field: K): Limits[K] | undefined => {
-    if (own !== undefined && Object.hasOwn(own, field)) return own[field];
-    if (defaults !== undefined && Object.hasOwn(defaults, field)) return defaults[field];
-    return undefined;
-  };
-  const pick = <K extends "maxModelTurns" | "maxToolCalls" | "maxTotalTokens" | "maxDurationMs">(field: K): Limits[K] => {
-    const value = find(field);
-    if (value !== undefined) return value;
-    const hint = field === "maxTotalTokens" ? " (use null for no limit)" : "";
-    return fail(`limits.${field} is not set in the task or the config file${hint}`);
-  };
-  return {
-    maxModelTurns: pick("maxModelTurns"),
-    maxToolCalls: pick("maxToolCalls"),
-    maxTotalTokens: pick("maxTotalTokens"),
-    maxDurationMs: pick("maxDurationMs"),
-    maxRepairAttempts: find("maxRepairAttempts") ?? DEFAULT_MAX_REPAIR_ATTEMPTS,
-    maxSameFailures: find("maxSameFailures") ?? DEFAULT_MAX_SAME_FAILURES,
-  };
+/** S-7: the run's limits, with the config file's values as upper bounds. */
+function boundedLimits(
+  form: "task" | "quick",
+  provider: ModelProviderName,
+  own: Partial<Limits> | undefined,
+  config: Partial<Limits> | undefined,
+): ResolvedTaskSpec["limits"] {
+  const outcome = resolveBoundedLimits({ form, provider, task: own, config });
+  return outcome.ok ? outcome.limits : fail(outcome.message, outcome.code);
 }
 
 /** Parses a verifier list and checks that ids are unique. */
@@ -216,11 +239,10 @@ export function parseVerifiers(value: unknown): VerifierConfig[] {
   return verifiers;
 }
 
-/** Parses a list of environment variable names. */
+/** S-3: a list of environment variable names. The message gives a position, never an entry. */
 export function parseSecretEnv(value: unknown, field: string): string[] {
-  const names = strings(value, field);
-  if (names.some((name) => name.length === 0)) fail(`${field} names must not be empty`);
-  return names;
+  const outcome = validateSecretEnvNames(value, field);
+  return outcome.ok ? [...outcome.names] : fail(outcome.message);
 }
 
 const RULE_TYPES = ["exists", "absent", "contains", "not_contains"];
@@ -249,7 +271,7 @@ function parseVerifier(value: unknown, index: number): VerifierConfig {
       fail(`${field}.expectExitCode must be an integer`);
     }
     const cwd = optionalText(rec["cwd"], `${field}.cwd`);
-    const timeoutMs = optionalPositive(rec["timeoutMs"], `${field}.timeoutMs`);
+    const timeoutMs = timerMs(rec["timeoutMs"], `${field}.timeoutMs`);
     return {
       id: text(rec["id"], `${field}.id`),
       kind: "command",
@@ -273,27 +295,29 @@ function parseVerifier(value: unknown, index: number): VerifierConfig {
   return fail(`${field}.kind must be "command" or "file_rules"`);
 }
 
-/** Values a task file may leave to the config file. */
+/** Values from the config file that bound or complete a task file. */
 export interface TaskDefaults {
+  /** Upper bounds, and values for the fields the task leaves out (S-7). */
   readonly limits?: Partial<Limits> | undefined;
 }
 
 /** Runs a validation and turns an InputError into a failed outcome. */
-function attempt(build: () => ResolvedTaskSpec): ParseTaskOutcome {
+function attempt(code: TaskErrorCode, build: () => ResolvedTaskSpec): ParseTaskOutcome {
   try {
     return { ok: true, task: build() };
   } catch (error) {
-    if (error instanceof InputError) return { ok: false, message: error.message };
+    if (error instanceof InputError) return { ok: false, code: error.code ?? code, message: error.message };
     throw error;
   }
 }
 
 /**
- * Validates a parsed task file. `workspaceRoot` and `scriptPath` are resolved against
- * `taskDir` and returned as absolute paths. Limit fields the task leaves out come from `defaults`.
+ * Validates a parsed task file. `workspaceRoot` and `scriptPath` must be local paths (S-5); they
+ * are resolved against `taskDir` and returned as absolute paths. Limits are bounded by the config
+ * file's (S-7); a failure caused by the config file's limits has the code `invalid_config`.
  */
 export function parseTask(value: unknown, taskDir: string, defaults: TaskDefaults = {}): ParseTaskOutcome {
-  return attempt(() => {
+  return attempt("invalid_task", () => {
     const rec = record(value, "task", [
       "schemaVersion",
       "id",
@@ -313,17 +337,22 @@ export function parseTask(value: unknown, taskDir: string, defaults: TaskDefault
     const secretEnv = parseSecretEnv(privacy["secretEnv"], "privacy.secretEnv");
     const verifiers = parseVerifiers(rec["verifiers"]);
     const ownLimits = rec["limits"] === undefined ? undefined : parsePartialLimits(rec["limits"]);
+    const goal = text(rec["goal"], "goal");
+    const workflow = text(rec["workflow"], "workflow");
+    const workspaceRoot = resolveLocal(taskDir, text(rec["workspaceRoot"], "workspaceRoot"), "workspaceRoot");
+    const model = parseModel(rec["model"], taskDir);
+    const policy = parsePolicy(rec["policy"]);
 
     return {
       schemaVersion: 1,
       id,
-      goal: text(rec["goal"], "goal"),
-      workflow: text(rec["workflow"], "workflow"),
-      workspaceRoot: resolveFrom(taskDir, text(rec["workspaceRoot"], "workspaceRoot")),
-      model: parseModel(rec["model"], taskDir),
-      policy: parsePolicy(rec["policy"]),
+      goal,
+      workflow,
+      workspaceRoot,
+      model,
+      policy,
       privacy: { secretEnv },
-      limits: mergeLimits(ownLimits, defaults.limits),
+      limits: boundedLimits("task", model.provider, ownLimits, defaults.limits),
       verifiers,
     };
   });
@@ -339,10 +368,11 @@ export interface QuickTaskInput {
 
 /**
  * The quick form (`--workspace`, `--goal`): an anthropic task whose policy, limits, verifiers and
- * secret names come from the config file. Limits must be set there; nothing else is required.
+ * secret names come from the config file. Limits must be set there, with a token limit (S-7).
+ * The caller checks `--workspace` with `localPathProblem` first (S-5). Failures are `invalid_config`.
  */
 export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
-  return attempt(() => ({
+  return attempt("invalid_config", () => ({
     schemaVersion: 1,
     id: QUICK_TASK_ID,
     goal: text(input.goal, "--goal"),
@@ -351,7 +381,7 @@ export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
     model: { provider: "anthropic" },
     policy: input.config?.policy ?? DENY_ALL_POLICY,
     privacy: { secretEnv: [...(input.config?.secretEnv ?? [])] },
-    limits: mergeLimits(undefined, input.config?.limits),
+    limits: boundedLimits("quick", "anthropic", undefined, input.config?.limits),
     verifiers: [...(input.config?.verifiers ?? [])],
   }));
 }

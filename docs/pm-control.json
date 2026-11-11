@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "delegation_id": "pm-20261112-01",
+  "status": "active",
+  "owner": "claude-temporary-pm",
+  "owner_pane": "w1:p3",
+  "owner_session_id": "9e1f6ad3-ed8e-4c37-9a0d-ff5f98137423",
+  "scope": "phase-1a-offline-cli",
+  "recall_phrase": "PM 회수",
+  "on_revoke": "Stop new assignments and mutations, preserve worktrees, report checkpoint."
+}

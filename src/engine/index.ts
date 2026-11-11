@@ -116,11 +116,16 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
   const record = (event: JournalEvent): Promise<void> => journal.append(event);
 
-  /** Builds the masked result of a call that was not executed or failed. */
-  const errorResult = (call: ToolCall, code: ToolErrorCode, message: string): ToolResult | End => {
+  /**
+   * Builds, records and returns the masked result of a call that was rejected before execution.
+   * Every result handed back to the model is recorded as a tool_result.
+   */
+  const errorResult = async (call: ToolCall, code: ToolErrorCode, message: string): Promise<ToolResult | End> => {
     const content = mask(message);
     if (content === null) return MASKING_FAILED;
-    return { callId: call.id, tool: call.name, ok: false, content, errorCode: code };
+    const result: ToolResult = { callId: call.id, tool: call.name, ok: false, content, errorCode: code };
+    await record({ type: "tool_result", result });
+    return result;
   };
 
   const denied = async (

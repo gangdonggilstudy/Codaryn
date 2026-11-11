@@ -89,6 +89,8 @@ node dist/src/cli/main.js run --task <task.json> [--cancel-file <경로>]
 6. `PrivacyGateway.mask`: 결과를 치환해 `ToolResult`로 만든다. 실패하면 기록도 전송도 하지 않는다.
 7. `Journal.append` 후 모델에 전달한다. 기록과 모델 요청에는 `MaskedText`만 들어간다.
 
+1·2·3·4단계에서 거부된 호출도 `tool_decision` 뒤에 `ok:false`인 `tool_result`(가림본, `errorCode` 포함)를 기록한다. 모델에 돌려준 모든 도구 결과가 기록에 남는다.
+
 `write_file`은 5단계 안에서 현재 파일을 읽고(`LocalSnapshot`), 가림 상태에서 변경을 적용한 뒤 `rebuildDocument`로 원문을 만든다. 토큰 열이 원본과 같아야 하며 새 토큰, 복제, 이동, 삭제, 변형은 `protected_span_violation`으로 변경 전체를 거부한다. 이어서 `Workspace.writeText`가 `expectedHash`와 현재 해시를 비교해 다르면 `conflict`로 쓰지 않는다.
 
 ## 7. BOM·CRLF 책임

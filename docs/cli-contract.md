@@ -1,4 +1,4 @@
-# CLI·공통 계약 (1a, 1b 설정, 2 재수정 반복)
+# CLI·공통 계약 (1a, 1b 설정, 2 재수정 반복, 3 준비)
 
 `src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 1a 오프라인 CLI는 구현되어 있다. 1b의 설정 계약과 CLI 처리(11절)는 E1에서 추가했다. Anthropic 제공자(E2)는 CLI에 연결되어 있어, 키·모델·출력 상한·한도가 모두 정해지면 실제로 전송한다. 실제 API로는 아직 검증하지 않았다(10절 "실제 API 미검증"). 단계 2(F1)의 재수정 반복, 새 한도, 보호 경로, 스냅샷과 되돌리기는 12~14절이며 모두 조립에 연결되어 있다. 교차 검토(H1·H2) 결함 수정 S-1~S-9의 CLI 처리는 8·11절이다.
 
@@ -15,6 +15,7 @@
 | `src/model/anthropic/index.ts` (E2) | `createAnthropicProvider` | `CreateAnthropicProvider` = `(settings: ResolvedAnthropicSettings, deps?: AnthropicProviderDeps) => ModelProvider` |
 | `src/store/index.ts` (F3) | `createChangeRecorder`, `revertRun` | `CreateChangeRecorder` = `({ workspaceRoot, runId }) => ChangeRecorder`, `RevertRun` = `(request: RevertRequest) => Promise<RevertOutcome>` |
 | `src/tools/index.ts` (F4) | `createToolRunner`의 선택 인자 `changeRecorder` | `ChangeRecorder`(14절) |
+| `src/verify/index.ts` (K2) | `createIntegrityChecker` | `CreateIntegrityChecker` = `({ workspace, protectedPaths, externalPaths }) => IntegrityChecker`(15절) |
 | `src/cli/main.ts` | CLI 진입 파일 | `package.json`의 `bin.codaryn`이 `dist/src/cli/main.js`를 가리킨다 |
 
 - CLI가 Anthropic 제공자를 가져오는 곳은 `src/cli/provider.ts`의 `anthropicProviderFactory` 하나이며, `createAnthropicProvider`에 연결되어 있다. CLI는 설정을 모두 해석한 뒤에만 이를 호출한다. 1a 자리표시자 `src/model/anthropic.ts`는 제거했다. `provider_not_implemented`는 계약에 남아 있지만 실제 CLI에서는 더 이상 나오지 않는다.
@@ -134,7 +135,7 @@ stdout에는 JSON 한 줄만 쓴다. `run`은 `CliOutput`, `revert`는 `RevertOu
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70.
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절).
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
@@ -413,3 +414,44 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 스냅샷은 원문을 담고, journal과 result에는 비밀이 없다.
   - 모르는 runId는 `run_not_found`다.
 - `revert`는 `RevertEnvironment.revert`가 없는 빌드에서만 `internal_error`(종료 70)로 아무것도 하지 않고 끝난다. 실제 CLI에는 해당하지 않는다.
+
+## 15. 단계 3 계약 (U-1~U-3, U-5, U-6)
+
+단계 3 준비(`docs/work-orders/phase-3-self-development.md`)의 계약이다. K1 1단계 커밋은 계약만 추가했다. CLI 처리(U-3, U-5~U-8)와 조립 연결은 K1 2단계, 무결성 모듈은 K2(`src/verify`), 엔진 연동은 K3(`src/engine`)가 구현한다. 이 절의 동작은 그 구현이 병합되기 전까지 실행되지 않는다.
+
+### 보호 대상 무결성 (U-1, U-2)
+
+- 설정 파일의 `integrity.paths`(`IntegrityConfig`)는 작업 공간 밖 검증 자료(기준 테스트, 검증 설정 등)의 절대 경로 목록이다. 간편 형식과 task 형식 모두에 적용되고, task 파일로는 정할 수 없다.
+  - 최대 `MAX_INTEGRITY_PATHS`(64)개다. 배열이 아님, 빈 문자열, NUL, 상대 경로, UNC·장치 경로는 파일을 읽을 때 `invalid_config`다.
+  - 실행 시작 전(잠금 전)에 각 경로가 있어야 하고, 실경로가 작업 공간 루트와 같거나, 그 안에 있거나, 그것을 포함하면 안 된다. 어기면 `invalid_config`이고 메시지는 `integrity.paths[i]`처럼 위치만 적는다.
+- 모듈: `src/verify/index.ts`가 `createIntegrityChecker({ workspace, protectedPaths, externalPaths })`(`CreateIntegrityChecker`)를 export한다. `capture()`는 그 순간의 `IntegrityManifest`, `compare(before, after)`는 바뀐 표시 경로 목록(`RawText[]`)이다. 목록은 로컬 전용이며 기록·출력·전송하지 않는다.
+- 항목(`IntegrityEntry`): `file`(바이트의 SHA-256), `link`(보호 항목 아래의 링크. 따라가지 않고 대상 문자열의 SHA-256), `absent`(없는 보호 항목), `unchecked`(`unreadable`은 읽거나 나열할 수 없음, `limit`은 상한 도달). 디렉터리는 자기 항목이 없고 그 아래 항목의 집합이다. 경로의 코드 단위 순으로 정렬하고 중복이 없다.
+- 표시 경로: `protectedPaths` 항목과 그 아래는 작업 공간 기준 `/` 구분이며 정규화한 항목으로 시작한다(`./tests/`는 `tests`, `.`은 루트 내용). `integrity.paths` 항목과 그 아래는 `/` 구분 절대 경로다. 루트의 상태 디렉터리 `.codaryn`에는 들어가지 않는다. 보호 항목 자체가 링크면 실경로를 따라간다(T-13).
+- 상한: 한 번 계산할 때 파일(링크 포함) `MAX_INTEGRITY_FILES`(10,000)개, `MAX_INTEGRITY_BYTES`(256 MiB)다. 도달하면 나열 중이던 항목과 그 뒤의 항목을 각각 `unchecked`/`limit` 항목 하나로 남긴다. `compare`는 어느 쪽에서든 `unchecked`인 경로를 바뀐 것으로 내므로, 보호 대상이 너무 많으면 실행은 첫 모델 요청 전에 `needs-input`/`protected_changed`로 끝난다(fail closed). 보호 대상을 줄여야 한다.
+- 비교: 한쪽에만 있는 경로, 종류나 해시가 다른 경로, 어느 쪽에서든 `unchecked`인 경로를 정렬해 중복 없이 낸다. `compare(m, m)`은 `m`의 `unchecked` 경로다.
+- 엔진(`EngineDeps.integrity`, 선택): CLI는 `policy.protectedPaths`나 `integrity.paths`에 항목이 있을 때만 넘긴다. 없으면 확인도 기록도 없다(단계 2와 같다). 있으면 다음과 같이 확인한다.
+  - `run_start`: `run_started` 뒤, 첫 모델 요청 전. 기준 목록 = `capture()`, `changed = compare(기준, 기준)`.
+  - `before_verify`: 검증 회차마다 검증기 실행 전. `changed = compare(기준, capture())`. 비어 있지 않으면 그 회차의 검증기를 실행하지 않는다.
+  - `after_verify`: 그 회차의 검증기를 실행한 뒤. 같은 비교다.
+  - 확인마다 기록 `integrity_checked { phase, changed }`(가림본)를 남긴다. `changed`가 비어 있지 않으면 검증 결과와 관계없이 바로 `needs-input`/`protected_changed`(종료 3)로 끝난다. 재수정하지 않고 모델 요청도 더 하지 않는다. 비교 기준은 항상 `run_start`의 목록이다.
+- 결과: `EngineResult.protectedChanged`(선택)는 `integrity_checked`가 하나라도 기록된 실행에만 있고, 마지막 확인의 `changed`다. 바뀐 것이 없으면 빈 목록이며, 비어 있지 않으면 이유는 `protected_changed`다.
+- 한계: 사후 탐지다. 변경을 막지 못하고, 바뀐 자료 위에서 한 검증을 믿지 않을 뿐이다. 두 확인 사이에 바뀌었다가 다음 확인 전에 되돌려진 변경과, 검증기 프로세스 안에서 일어나는 일(후보 코드가 이미 읽힌 테스트를 바꾸는 것 등)은 탐지하지 못한다. OS 격리가 아니다.
+
+### 실행본 자기 보호 (U-3)
+
+- `workspace_is_install_dir`(종료 2): 작업 공간의 실경로가 실행 중인 CLI의 설치 위치(진입 파일이 속한 패키지 루트)와 같거나, 그 안에 있거나, 그것을 포함하면 실행 전(잠금 전)에 거부한다. 아무것도 쓰지 않는다. 후보 작업 공간은 설치 위치 밖에 둔다.
+
+### report (U-5)
+
+- `codaryn report --workspace <디렉터리> --run <runId> [--json]`은 `.codaryn/runs/<runId>/`의 `result.json`과 `journal.jsonl`만 읽어(가림본) 사람이 읽는 Markdown 요약을 stdout에 낸다. `--json`이면 `ReportOutput` 한 줄이다. 아무것도 바꾸지 않고 잠금도 잡지 않는다.
+- 상태(`REPORT_EXIT_CODES`): `complete`(0)는 둘 다 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. `incomplete`는 기록만으로 만들고, 줄바꿈 없는 마지막 줄은 아직 쓰는 중으로 보고 무시한다.
+- 오류(`CliErrorOutput`): `invalid_arguments`, `workspace_not_found`, `run_not_found`(그 실행의 기록이 없음), `invalid_run_record`(읽기·해석 실패, `MAX_REPORT_FILE_BYTES`(256 MiB) 초과, 다른 실행의 파일).
+- `ReportOutput`: `schemaVersion`, `kind:"report"`, `runId`, `status`, `exitCode`, `result`(`EngineResult` 또는 null), `journal`(`ReportJournalSummary`: 작업 id, 워크플로, 제공자, 한도, 기록 수, 모델 요청 수, 거부된 도구 호출 수, 재수정 수, 마지막 검증 회차, 변경 목록, 무결성 확인, 종료 기록).
+- 한계: 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로 실행 중 허용된 명령이 바꿀 수 있다.
+
+### doctor (U-6)
+
+- `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json>] [--workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
+- 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`. 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
+- 종료(`DOCTOR_EXIT_CODES`): 가장 나쁜 항목에 따라 `ok` 0, `warn` 3, `fail` 1이다(`skipped`는 `ok`로 센다). 인자 오류는 `invalid_arguments`(`CliErrorOutput`)다.
+- 메시지는 고정 문구, 필드 위치(`policy.commands[2]` 등), 개수로만 만든다. 파일이나 환경에서 읽은 값은 내지 않으며, 키는 있음·없음만 적는다.

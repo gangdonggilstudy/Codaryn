@@ -31,6 +31,7 @@ export const CONFIG_SCHEMA_VERSION = 1;
  *   limit with null. An anthropic run needs a token limit. Absolute caps apply to both (S-7).
  * - policy, verifiers: used by the quick form only. A task file states its own.
  * - secretEnv: added to the task's `privacy.secretEnv` in both forms.
+ * - integrity: this file only, in both forms. A task file cannot set it (U-1).
  */
 export interface CodarynConfig {
   readonly schemaVersion: 1;
@@ -51,6 +52,25 @@ export interface CodarynConfig {
   readonly verifiers?: readonly VerifierConfig[];
   /** Names of environment variables whose values are registered as secrets. */
   readonly secretEnv?: readonly string[];
+  /** Protected material outside the workspace (U-1). Absent: only `policy.protectedPaths` is checked. */
+  readonly integrity?: IntegrityConfig;
+}
+
+/**
+ * U-1: material outside the workspace that a run must not change, such as baseline tests or
+ * verifier settings. It is hashed with `policy.protectedPaths` at run start and before and after
+ * each verification round (`IntegrityChecker`). Unknown fields are rejected.
+ */
+export interface IntegrityConfig {
+  /**
+   * Absolute local paths of files or directories, at most MAX_INTEGRITY_PATHS entries, each a
+   * non-empty string without NUL. UNC and device paths are refused (S-5). These are format
+   * errors, `invalid_config`, found when the file is read.
+   * When the run starts, before the lock is taken, each must exist, and its real path must not be
+   * the workspace root, lie inside it or contain it; otherwise the run stops as `invalid_config`.
+   * Messages name the position (`integrity.paths[i]`), never the path. An empty list checks nothing.
+   */
+  readonly paths: readonly string[];
 }
 
 export const DEFAULT_ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";

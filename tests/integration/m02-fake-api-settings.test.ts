@@ -31,6 +31,7 @@ import {
   writeConfigFile,
   writeEnvFile,
 } from "../fixtures/anthropic.js";
+import { ANTHROPIC_LIMITS } from "../fixtures/anthropic.js";
 import type { AnthropicTaskOptions } from "../fixtures/anthropic.js";
 import { DEFAULT_LIMITS, createSandbox, withBom, writeAt, writeWorkspaceFile } from "../fixtures/builders.js";
 import { FAKE_API_KEY, FAKE_API_KEY_DECOY, FAKE_API_KEY_ENV_FILE } from "../fixtures/secrets.js";
@@ -139,7 +140,8 @@ test(`${MOCK_LABEL} E3-d 키·모델·출력 상한·한도가 없으면 요청 
     const sb = createSandbox(st);
     writeWorkspaceFile(sb, "README.md", "# 문서\n");
     const api = await startFakeAnthropic(st, [replyText("끝")]);
-    const configPath = writeConfigFile(sb, fakeApiConfig(api.url, { model: FAKE_MODEL_CONFIG, limits: DEFAULT_LIMITS }));
+    // S-7: config limits for anthropic carry a numeric token limit.
+    const configPath = writeConfigFile(sb, fakeApiConfig(api.url, { model: FAKE_MODEL_CONFIG, limits: ANTHROPIC_LIMITS }));
     const taskPath = writeAnthropicTask(sb, { id: "m02-config-limits", limits: "omit", verifiers: README_EXISTS });
     const run = await runGuarded(sb, ["run", "--task", taskPath, "--config", configPath], cliEnv({ fakeApiKey: FAKE_API_KEY }));
     const result = expectRunResult(run, "anthropic");

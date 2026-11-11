@@ -91,7 +91,8 @@ test(`${MOCK_LABEL} F5-s 가짜 서버로 실패 → 재수정 → 통과`, { ti
     goal: "src/price.js의 totalPrice를 고쳐 테스트를 통과시킨다",
     workflow: "code",
     model: FAKE_MODEL_TASK,
-    limits: { maxModelTurns: 12, maxToolCalls: 12, maxTotalTokens: null, maxDurationMs: 150_000, maxRepairAttempts: 2 },
+    maxOutputTokens: 800,
+    limits: { maxModelTurns: 12, maxToolCalls: 12, maxTotalTokens: 200_000, maxDurationMs: 150_000, maxRepairAttempts: 2 },
     verifiers: [TESTS_VERIFIER],
   });
   const run = await runGuarded(
@@ -158,7 +159,7 @@ test(`${MOCK_LABEL} F5-t 간편 형식: 설정 파일의 protectedPaths와 maxRe
     sb,
     fakeApiConfig(api.url, {
       model: FAKE_MODEL_CONFIG,
-      limits: { maxModelTurns: 12, maxToolCalls: 12, maxTotalTokens: null, maxDurationMs: 150_000, maxRepairAttempts: 1 },
+      limits: { maxModelTurns: 12, maxToolCalls: 12, maxTotalTokens: 200_000, maxDurationMs: 150_000, maxRepairAttempts: 1 },
       policy,
       verifiers: [TESTS_VERIFIER],
     }),

@@ -18,6 +18,7 @@ import {
 } from "../../src/contracts/index.js";
 import type { ModelErrorKind } from "../../src/contracts/index.js";
 import {
+  ANTHROPIC_LIMITS,
   FAKE_MODEL_CONFIG,
   FAKE_MODEL_ENV,
   FAKE_MODEL_TASK,
@@ -25,7 +26,7 @@ import {
   writeAnthropicTask,
   writeConfigFile,
 } from "../fixtures/anthropic.js";
-import { DEFAULT_LIMITS, createSandbox, nodeCommand, writeWorkspaceFile } from "../fixtures/builders.js";
+import { createSandbox, nodeCommand, writeWorkspaceFile } from "../fixtures/builders.js";
 import { writeProgram } from "../fixtures/programs.js";
 import {
   FAKE_API_KEY,
@@ -327,7 +328,8 @@ test(`${MOCK_LABEL} E3-k 간편 형식 --workspace --goal 실행 -> done`, { tim
     fakeApiConfig(api.url, {
       model: FAKE_MODEL_CONFIG,
       maxOutputTokens: 700,
-      limits: DEFAULT_LIMITS,
+      // S-7: no anthropic run without a token limit.
+      limits: ANTHROPIC_LIMITS,
       policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false },
       verifiers: [{ id: "notes", kind: "file_rules", rules: [{ type: "contains", path: "NOTES.md", text: "## 요약" }] }],
     }),

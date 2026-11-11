@@ -58,6 +58,8 @@ const EDGE_CHARS = 80;
  */
 const VERIFY_TAIL_CHARS = 2000;
 
+const MARKER_QUERY = SNAPSHOT_MARKER.slice(SNAPSHOT_MARKER.indexOf("-") + 1);
+
 /** Two failing attempts that only claim success, so the run sends exactly one repair message. */
 const CLAIM_ONLY = attemptSteps([
   { edits: [], claim: "끝났다" },
@@ -205,7 +207,9 @@ test("F5-k 스냅샷 원문은 journal, 결과, 모델 요청, 검색 결과에 
     [
       // Replaced without reading: the model never sees the original text.
       replaceAllStep("w-notes", NOTES_PATH, NOTES_ORIGINAL, NOTES_REPLACEMENT),
-      callStep("s-text", "search_files", { path: ".", text: SNAPSHOT_MARKER }),
+      // The query is a strict part of the marker: the call itself is recorded, so the full marker
+      // in the journal can only come from a search hit (or another leak), never from the query.
+      callStep("s-text", "search_files", { path: ".", text: MARKER_QUERY }),
       callStep("s-name", "search_files", { path: ".", nameContains: "draft" }),
       finalStep("메모를 바꿨다"),
     ],

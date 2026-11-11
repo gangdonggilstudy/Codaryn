@@ -85,6 +85,25 @@
 | F5-s·t 모의 API | `p05-repair-fake-api` | 가짜 서버로 실패 → 재수정 → 통과(요청 형식, 재수정 요청의 user 메시지, 본문에 스냅샷 원문 없음). 간편 형식에서 설정 파일의 `protectedPaths`·`maxRepairAttempts` 적용 |
 | G1-a~d `.cmd` | `g01-windows-cmd` | PATH의 `.cmd`·`.bat` 실행과 인자 보존, 메타문자 인자 미실행, 작업 공간의 같은 이름 `.cmd` 미실행, 작업 공간 안으로 풀리면 거부(Windows만) |
 
+## 교차 검토 결함 수정 회귀 (`s01-security-regress`, 작업 S-D)
+
+[작업 지시](../../docs/work-orders/phase-2-repair-loop.md)의 S-1~S-11 결정을 실제 CLI 프로세스로 확인한다. anthropic이 필요한 사례는 가짜 서버(모의 API, 실제 API 아님)와 네트워크 울타리로 돌린다.
+
+| 결정 | 판정 근거 |
+| --- | --- |
+| S-1 | 작업 공간 안의 task(`invalid_task`)·대본(`invalid_script`)·설정과 `CODARYN_CONFIG`(`invalid_config`)·env 파일(`invalid_config`) 거부, 밖에 두면 실행(대조군). 가짜 서버 2개: 모델이 작업 공간에 쓴 설정·`.env`를 다음 실행에 줘도 거부되고 그 주소로 요청 0건 |
+| S-2 | scripted 실행에서도 환경의 키를 읽은 결과가 가려지고 journal·결과·출력에 키 없음 |
+| S-3 | `secretEnv`에 값을 적은 실수(task, 설정 파일, 미설정 이름): 오류 출력에 값 없음 |
+| S-4 | env 파일이 새로 설정한 8자 이상 값은 가려지고 8자 미만 값은 그대로 |
+| S-5 | UNC·`\\?\UNC`·장치 경로를 `--task`·`--config`·`--env-file`·`--cancel-file`·`--workspace`·`CODARYN_CONFIG`·`workspaceRoot`·`scriptPath`에 주면 정해진 코드로 즉시 거부(루프백 주소만 쓰고 net-guard로 fetch 차단 확인). 없는 env 파일도 CLI JSON 오류여야 한다 |
+| S-6 | 깊이 20000 JSON의 task·설정 → `invalid_task`·`invalid_config` 한 줄, stderr 없음 |
+| S-7 | task 한도 > 설정 한도 거부(같으면 실행), 절대 상한 4종, 검증기 `timeoutMs` 2^31 거부·2^31-1 허용, 설정의 상한 초과·`requestTimeoutMs` 2^31 거부(요청 0건) |
+| S-8 | `--goal`의 키 모양 값과 현재 키 값 → `key_in_file`, 요청 0건 |
+| S-10 | 끝없는 성공 본문 → `malformed_response`, 끝없는 오류 본문 → `api_error`. 요청 시간 한도(60초)가 아니라 본문 상한으로 빨리 끝나고 클라이언트가 먼저 끊는다 |
+| S-11 | 가운데 공백, ASCII 밖 문자가 든 키 → 요청 0건 |
+
+단계 2 결정으로 기존 사례의 기대값을 옮긴 곳: anthropic task·설정 한도에 숫자 토큰 한도(`ANTHROPIC_LIMITS`, S-7), E3-i의 "토큰 한도 없음" 사례는 `invalid_task`·요청 0건으로(S-7), 기록 검사에서 `snapshots/` 제외(R-8).
+
 - `node --test`는 소요 시간을 출력하므로 같은 코드라도 출력 바이트가 매번 다르다. 같은 실패 반복 사례는 출력이 코드에만 달린 `checks/price-check.mjs`를 쓴다.
 - 기록 검사에서 `runs/<runId>/snapshots/`는 뺀다(`stateRecordTexts`). 계약상 스냅샷은 작업 공간 파일과 같은 원문 자료다(R-8). 그 밖의 상태 디렉터리 파일은 모두 검사한다.
 

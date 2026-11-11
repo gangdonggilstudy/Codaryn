@@ -66,7 +66,19 @@ export type FakeReply =
       readonly retryAfterSeconds?: number;
     }
   /** Never answers. Only the client's own time limit ends the request. */
-  | { readonly kind: "hang" };
+  | { readonly kind: "hang" }
+  /**
+   * Streams a JSON-looking body of `totalBytes` filler bytes, or one that never ends (`null`),
+   * honouring backpressure. `sent` counts what the connection accepted before the client hung up.
+   */
+  | { readonly kind: "flood"; readonly status: number; readonly totalBytes: number | null; readonly sent: FloodCounter };
+
+export interface FloodCounter {
+  /** Bytes the server handed to the connection. */
+  bytes: number;
+  /** True when the client closed the connection before the body ended. */
+  closedEarly: boolean;
+}
 
 /**
  * scripted: answered with the next script step (which may itself be an error).
@@ -124,6 +136,44 @@ export function replyError(status: number, errorType: string, retryAfterSeconds?
 }
 
 export const HANG: FakeReply = { kind: "hang" };
+
+/** A body of `totalBytes` filler (`null`: endless). Read `sent` after the run. */
+export function replyFlood(status: number, totalBytes: number | null): { reply: FakeReply; sent: FloodCounter } {
+  const sent: FloodCounter = { bytes: 0, closedEarly: false };
+  return { reply: { kind: "flood", status, totalBytes, sent }, sent };
+}
+
+const FLOOD_CHUNK = Buffer.alloc(64 * 1024, "x");
+
+function writeFlood(response: ServerResponse, reply: Extract<FakeReply, { kind: "flood" }>, hanging: Set<ServerResponse>): void {
+  const { sent, totalBytes } = reply;
+  let finished = false;
+  hanging.add(response);
+  response.on("close", () => {
+    hanging.delete(response);
+    if (!finished) sent.closedEarly = true;
+  });
+  response.writeHead(reply.status, { "content-type": "application/json" });
+  const head = Buffer.from('{"type":"message","content":[{"type":"text","text":"', "utf8");
+  response.write(head);
+  sent.bytes += head.length;
+  const pump = (): void => {
+    while (!response.destroyed) {
+      if (totalBytes !== null && sent.bytes >= totalBytes) {
+        finished = true;
+        response.end('"}]}');
+        return;
+      }
+      const ok = response.write(FLOOD_CHUNK);
+      sent.bytes += FLOOD_CHUNK.length;
+      if (!ok) {
+        response.once("drain", pump);
+        return;
+      }
+    }
+  };
+  pump();
+}
 
 export function repeatReply(reply: FakeReply, count: number): FakeReply[] {
   return Array.from({ length: count }, () => reply);
@@ -362,6 +412,9 @@ function answer(response: ServerResponse, reply: FakeReply, context: AnswerConte
     case "hang":
       hanging.add(response);
       response.on("close", () => hanging.delete(response));
+      return;
+    case "flood":
+      writeFlood(response, reply, hanging);
       return;
     case "error": {
       const headers: Record<string, string> = { "content-type": "application/json", "request-id": `req_fake_${context.index}` };

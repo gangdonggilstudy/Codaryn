@@ -1,5 +1,5 @@
 /**
- * Command line parsing for `codaryn run`, `revert`, `report` and `doctor`.
+ * Command line parsing for `codaryn run`, `revert`, `report`, `doctor` and `models`.
  *
  *   codaryn run --task <task.json> [options]
  *   codaryn run --workspace <dir> --goal <text> [options]
@@ -7,6 +7,7 @@
  *   codaryn revert --workspace <dir> --run <runId>
  *   codaryn report --workspace <dir> --run <runId> [--json]
  *   codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--json]
+ *   codaryn models [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]
  *
  * Options take one value, which must not be empty or start with "--". Switches take none.
  * Each may appear once.
@@ -41,7 +42,11 @@ export const REPORT_USAGE = "codaryn report --workspace <dir> --run <runId> [--j
 export const DOCTOR_USAGE =
   "codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--json]";
 
-export const USAGE = `usage: ${RUN_USAGE} | ${REVERT_USAGE} | ${REPORT_USAGE} | ${DOCTOR_USAGE} | codaryn --help | codaryn --version`;
+export const MODELS_USAGE = "codaryn models [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]";
+
+export const USAGE =
+  `usage: ${RUN_USAGE} | ${REVERT_USAGE} | ${REPORT_USAGE} | ${DOCTOR_USAGE} | ${MODELS_USAGE} | ` +
+  "codaryn --help | codaryn --version";
 
 const OPTIONS = ["--task", "--workspace", "--goal", "--config", "--vars-file", "--cancel-file"] as const;
 type Option = (typeof OPTIONS)[number];
@@ -201,6 +206,41 @@ export function parseDoctorArgs(argv: readonly string[]): ParseDoctorArgsOutcome
       varsFile: read.values.get("--vars-file") ?? null,
       taskPath,
       workspace,
+      json: read.switches.has("--json"),
+    },
+  };
+}
+
+const MODELS_OPTIONS = ["--config", "--vars-file", "--use"] as const;
+type ModelsOption = (typeof MODELS_OPTIONS)[number];
+
+export interface ModelsArgs {
+  readonly command: "models";
+  readonly configPath: string | null;
+  readonly varsFile: string | null;
+  /** `--use`: a 1-based number from the list or a listed model id. */
+  readonly use: string | null;
+  readonly json: boolean;
+}
+
+export type ParseModelsArgsOutcome =
+  | { readonly ok: true; readonly args: ModelsArgs }
+  | { readonly ok: false; readonly message: string };
+
+/** `codaryn models [--config <file>] [--vars-file <path>] [--json] [--use <number|id>]` (Y-1). */
+export function parseModelsArgs(argv: readonly string[]): ParseModelsArgsOutcome {
+  const [command, ...rest] = argv;
+  if (command !== "models") return { ok: false, message: USAGE };
+  if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
+  const read = readOptions<ModelsOption, JsonSwitch>(rest, MODELS_OPTIONS, `usage: ${MODELS_USAGE}`, JSON_SWITCH);
+  if (!read.ok) return read;
+  return {
+    ok: true,
+    args: {
+      command: "models",
+      configPath: read.values.get("--config") ?? null,
+      varsFile: read.values.get("--vars-file") ?? null,
+      use: read.values.get("--use") ?? null,
       json: read.switches.has("--json"),
     },
   };

@@ -11,7 +11,13 @@ import {
   DEFAULT_MAX_RETRIES,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from "../contracts/index.js";
-import type { CliErrorCode, CodarynConfig, ModelConfig, ResolvedAnthropicSettings } from "../contracts/index.js";
+import type {
+  AnthropicListSettings,
+  CliErrorCode,
+  CodarynConfig,
+  ModelConfig,
+  ResolvedAnthropicSettings,
+} from "../contracts/index.js";
 import { normalizeApiBaseUrlStrict } from "./security/index.js";
 
 export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
@@ -54,6 +60,21 @@ export function resolveAnthropicSettings(
     return { ok: false, code: "provider_not_configured", message: `not set: ${missing.join("; ")}. Nothing was sent` };
   }
 
+  const connection = resolveConnection(apiKey, env, config);
+  if (!connection.ok) return connection;
+  return { ok: true, settings: { ...connection.settings, model: modelId, maxOutputTokens } };
+}
+
+export type ResolveConnectionOutcome =
+  | { readonly ok: true; readonly settings: AnthropicListSettings }
+  | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
+
+/**
+ * The key, API address, request time limit and retries: the part of the settings `run` and
+ * `codaryn models` (Y-2) share. apiBaseUrl: CODARYN_API_BASE_URL (S-9 strict rule) → config
+ * `apiBaseUrl` → the official address. requestTimeoutMs, maxRetries: config → defaults.
+ */
+export function resolveConnection(apiKey: string, env: SettingsEnvironment, config: CodarynConfig | null): ResolveConnectionOutcome {
   const fromEnv = envValue(env, CODARYN_API_BASE_URL_ENV);
   let apiBaseUrl: string;
   if (fromEnv !== null) {
@@ -64,16 +85,22 @@ export function resolveAnthropicSettings(
   } else {
     apiBaseUrl = config?.apiBaseUrl ?? DEFAULT_ANTHROPIC_API_BASE_URL;
   }
-
   return {
     ok: true,
     settings: {
       apiKey,
-      model: modelId,
-      maxOutputTokens,
       apiBaseUrl,
       requestTimeoutMs: config?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       maxRetries: config?.maxRetries ?? DEFAULT_MAX_RETRIES,
     },
   };
+}
+
+/** Y-2: the key and connection for listing models. No model or output cap is needed. */
+export function resolveListSettings(env: SettingsEnvironment, config: CodarynConfig | null): ResolveConnectionOutcome {
+  const apiKey = envValue(env, ANTHROPIC_API_KEY_ENV);
+  if (apiKey === null) {
+    return { ok: false, code: "provider_not_configured", message: `not set: ${ANTHROPIC_API_KEY_ENV}. Nothing was sent` };
+  }
+  return resolveConnection(apiKey, env, config);
 }

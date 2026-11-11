@@ -111,17 +111,21 @@ export interface StartOptions {
    * logs blocked hosts. Mock API tests always set it, so the CLI can reach loopback hosts only.
    */
   readonly netGuardLog?: string;
+  /** Another build of the CLI to run (for example a copy, see installCopy). Defaults to CLI_PATH. */
+  readonly cliPath?: string;
 }
 
 /** Compiled next to this file as `dist/tests/support/net-guard.js`. */
 const NET_GUARD_URL = new URL("./net-guard.js", import.meta.url).href;
 
 export function startCli(args: readonly string[], options: StartOptions): StartedCli {
-  assertCliBuilt();
+  const cli = options.cliPath ?? CLI_PATH;
+  if (options.cliPath === undefined) assertCliBuilt();
+  else assert.ok(existsSync(cli), `CLI copy is missing: ${cli}`);
   const started = Date.now();
   const guard = options.netGuardLog;
   const baseEnv = options.env ?? cliEnv();
-  const nodeArgs = guard === undefined ? [CLI_PATH, ...args] : ["--import", NET_GUARD_URL, CLI_PATH, ...args];
+  const nodeArgs = guard === undefined ? [cli, ...args] : ["--import", NET_GUARD_URL, cli, ...args];
   const child = spawn(NODE, nodeArgs, {
     cwd: options.cwd,
     env: guard === undefined ? baseEnv : { ...baseEnv, [NET_GUARD_LOG_ENV]: guard },

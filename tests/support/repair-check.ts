@@ -64,6 +64,15 @@ export function repairMessages(records: readonly JournalRecord[]): string[] {
   return messages;
 }
 
+export type IntegrityCheckedRecord = Extract<JournalRecord, { type: "integrity_checked" }>;
+
+/** `integrity_checked` records (U-1) as `phase` and `changed`, in order. */
+export function integrityChecks(records: readonly JournalRecord[]): { phase: string; changed: readonly string[] }[] {
+  return records
+    .filter((record): record is IntegrityCheckedRecord => record.type === "integrity_checked")
+    .map((record) => ({ phase: record.phase, changed: record.changed }));
+}
+
 export function verifierResults(records: readonly JournalRecord[]): VerifierResult[] {
   const results: VerifierResult[] = [];
   for (const record of records) if (record.type === "verifier_result") results.push(record.result);

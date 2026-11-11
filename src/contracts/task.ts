@@ -1,6 +1,9 @@
 /**
- * Task file (task.json) shape. This is the only input of `codaryn run`.
- * The file never contains secret values or API keys.
+ * The resolved task the engine runs, and the task file (task.json) it comes from.
+ * The file has this shape, except that `limits` and each of its fields may be left out when the
+ * config file supplies them (see `CodarynConfig`). The quick form (`--workspace`, `--goal`)
+ * builds a TaskSpec from the config file instead.
+ * Neither file ever contains secret values or API keys.
  */
 
 import type { VerifierConfig } from "./verify.js";
@@ -35,11 +38,13 @@ export type ModelConfig =
       /** Scripted model file. Absolute, or relative to the directory of the task file. */
       readonly scriptPath: string;
     }
-  | { readonly provider: "anthropic" };
-
-/** Environment variables the anthropic provider needs. Values are never read from the task. */
-export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
-export const CODARYN_MODEL_ENV = "CODARYN_MODEL";
+  | {
+      readonly provider: "anthropic";
+      /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
+      readonly model?: string;
+      /** Output token cap per request. Overrides the config file's value. */
+      readonly maxOutputTokens?: number;
+    };
 
 export interface PrivacyConfig {
   /**

@@ -26,6 +26,7 @@ export type ModelMessage =
 export interface ModelRequest {
   readonly system: MaskedText;
   readonly messages: readonly ModelMessage[];
+  /** Tools offered in this request. A provider describes each one with `TOOL_DEFINITIONS`. */
   readonly tools: readonly ToolName[];
 }
 
@@ -51,6 +52,16 @@ export const MODEL_ERROR_KINDS = [
   "script_exhausted",
   "malformed_response",
   "aborted",
+  /** The API rejected the key (HTTP 401 or 403). */
+  "auth_failed",
+  /** HTTP 429 after the allowed retries. */
+  "rate_limited",
+  /** HTTP 529 (or 503) after the allowed retries. */
+  "overloaded",
+  /** A request did not finish within `requestTimeoutMs`, after the allowed retries. */
+  "timeout",
+  /** Any other API or network failure. */
+  "api_error",
 ] as const;
 export type ModelErrorKind = (typeof MODEL_ERROR_KINDS)[number];
 
@@ -63,6 +74,35 @@ export interface ModelProvider {
   /** Never throws for provider-level failures. Rejects nothing: errors come back as an outcome. */
   complete(request: ModelRequest, signal: AbortSignal): Promise<ModelOutcome>;
 }
+
+/**
+ * Settings the CLI resolves before it creates the anthropic provider. Every field is set:
+ * the CLI refuses to start (nothing is sent) when the key, the model or the output cap is missing.
+ */
+export interface ResolvedAnthropicSettings {
+  /** From ANTHROPIC_API_KEY. Memory only: never logged, recorded, printed or put in an error message. */
+  readonly apiKey: string;
+  readonly model: string;
+  /** Sent as `max_tokens` on every request. */
+  readonly maxOutputTokens: number;
+  /** Without a trailing slash. The provider appends the API path. */
+  readonly apiBaseUrl: string;
+  readonly requestTimeoutMs: number;
+  readonly maxRetries: number;
+}
+
+/** Injection points for tests. Defaults: the global `fetch` and a timer-based sleep. */
+export interface AnthropicProviderDeps {
+  readonly fetch?: typeof fetch;
+  /** Waits between retries. Should end early when `signal` aborts. */
+  readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+/** Signature of `createAnthropicProvider`, exported by `src/model/anthropic/index.ts`. */
+export type CreateAnthropicProvider = (
+  settings: ResolvedAnthropicSettings,
+  deps?: AnthropicProviderDeps,
+) => ModelProvider;
 
 export const SCRIPT_SCHEMA_VERSION = 1;
 

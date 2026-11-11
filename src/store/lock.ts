@@ -11,6 +11,13 @@
  *   lock: a link cannot replace an existing file, and only its owner removes a live lock.
  * - A reclaim file whose owner is dead (a reclaimer that crashed) is removed the same way: moved
  *   to a unique name and deleted only when its content is the one that was read.
+ * - W-4: a reclaim file written by this process is judged by what this process holds right now,
+ *   not by its pid (which is always alive here). One left behind by a finished attempt (its
+ *   removal failed with EPERM or EBUSY) is cleared like a dead reclaimer's, so contenders in one
+ *   process keep making progress. Every attempt writes a unique reclaim text for this.
+ * - Liveness is `process.kill(pid, 0)`. A pid the system has given to a new process makes a dead
+ *   lock look held until that process ends (known limit; the lock records no process start time).
+ *   Tests inject `isProcessAlive` so that they do not depend on pid reuse.
  * - EPERM and EBUSY (Windows reports them for files that are being deleted or are in use) are
  *   retried a few times and then end as `workspace_locked`, never as an exception.
  * - A lock file that cannot be understood is never reclaimed.
@@ -62,6 +69,11 @@ export interface AcquireLockOptions {
    * EBUSY. A live holder ends the attempt at once. Defaults to DEFAULT_LOCK_RETRY_MS.
    */
   readonly retryForMs?: number;
+  /**
+   * Whether the process with this pid is alive. Defaults to `process.kill(pid, 0)`. Tests pass a
+   * fixed answer, because the system may give an exited process's pid to a new process at any time.
+   */
+  readonly isProcessAlive?: (pid: number) => boolean;
 }
 
 export type AcquireLockOutcome =
@@ -116,6 +128,17 @@ function isProcessAlive(pid: number): boolean {
     return errorCode(error) === "EPERM";
   }
 }
+
+/**
+ * Reclaim texts that attempts in this process hold right now (W-4). Shared through `globalThis`
+ * so that two copies of this module in one process still agree.
+ */
+const HELD_RECLAIMS_KEY = Symbol.for("codaryn.store.lock.heldReclaims");
+const heldReclaims: Set<string> = (() => {
+  const shared = globalThis as { [HELD_RECLAIMS_KEY]?: Set<string> };
+  shared[HELD_RECLAIMS_KEY] ??= new Set<string>();
+  return shared[HELD_RECLAIMS_KEY];
+})();
 
 function uniqueSuffix(): string {
   return `${process.pid}.${randomBytes(6).toString("hex")}`;
@@ -193,6 +216,7 @@ type Step = { readonly kind: "acquired" } | { readonly kind: "locked"; readonly 
 export async function acquireLock(options: AcquireLockOptions): Promise<AcquireLockOutcome> {
   const { workspaceRoot, runId, clock } = options;
   const fs = options.fileSystem ?? nodeLockFileSystem;
+  const alive = options.isProcessAlive ?? isProcessAlive;
   assertRunId(runId);
   const locked = (holder: LockInfo | null): AcquireLockOutcome => ({ ok: false, code: "workspace_locked", holder });
 
@@ -207,23 +231,47 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   const reclaimFile = join(stateDir, RECLAIM_FILE_NAME);
   const lock: LockInfo = { pid: process.pid, runId, startedAt: new Date(clock.now()).toISOString() };
   const lockText = `${JSON.stringify(lock)}\n`;
+  // Unique per attempt, so this process can tell its own held reclaim from a left-over one (W-4).
+  const reclaimText = `${JSON.stringify({ ...lock, reclaim: uniqueSuffix() })}\n`;
   const temporary = join(stateDir, `${LOCK_FILE_NAME}.${runId}.${uniqueSuffix()}.tmp`);
   const reclaimTemporary = join(stateDir, `${RECLAIM_FILE_NAME}.${runId}.${uniqueSuffix()}.tmp`);
 
-  /** Takes the reclaim file. "busy" while a live process holds it. */
+  /** Whether the reclaim file read is held by a reclaimer that is still at work. */
+  function reclaimInUse(held: { readonly text: string; readonly holder: LockInfo | null }): boolean {
+    if (held.holder === null) return false;
+    // This process: only an attempt that holds it right now counts, whatever the pid says.
+    if (held.holder.pid === process.pid) return heldReclaims.has(held.text);
+    return alive(held.holder.pid);
+  }
+
+  /** Takes the reclaim file. "busy" while a reclaimer at work holds it. */
   async function takeReclaim(): Promise<"taken" | "busy"> {
-    if (await tryLink(fs, reclaimTemporary, reclaimFile)) return "taken";
+    // Registered before the link, so no reader in this process can see it unregistered.
+    heldReclaims.add(reclaimText);
+    let taken = false;
+    try {
+      taken = await tryLink(fs, reclaimTemporary, reclaimFile);
+    } finally {
+      if (!taken) heldReclaims.delete(reclaimText);
+    }
+    if (taken) return "taken";
     const held = await readState(fs, reclaimFile);
     if (held === "missing") return "busy";
-    if (held.holder !== null && isProcessAlive(held.holder.pid)) return "busy";
-    // A reclaimer that died (or a file that is not ours to understand) is cleared, then retried.
+    if (reclaimInUse(held)) return "busy";
+    // A reclaimer that died or finished without removing it (or a file that is not ours to
+    // understand) is cleared, then retried.
     await removeIfUnchanged(fs, stateDir, reclaimFile, held.text);
     return "busy";
   }
 
   async function releaseReclaim(): Promise<void> {
-    const held = await readState(fs, reclaimFile).catch(() => "missing" as const);
-    if (held !== "missing" && held.text === lockText) await fs.remove(reclaimFile).catch(() => undefined);
+    try {
+      const held = await readState(fs, reclaimFile).catch(() => "missing" as const);
+      if (held !== "missing" && held.text === reclaimText) await fs.remove(reclaimFile).catch(() => undefined);
+    } finally {
+      // Not held any more, also when the removal failed: the file is then cleared as left over.
+      heldReclaims.delete(reclaimText);
+    }
   }
 
   /** With the reclaim file held: removes `lock.json` only when it is still the dead lock read before. */
@@ -242,14 +290,14 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     if (await tryLink(fs, temporary, lockFile)) return { kind: "acquired" };
     const seen = await readState(fs, lockFile);
     if (seen === "missing") return { kind: "retry" };
-    if (seen.holder === null || isProcessAlive(seen.holder.pid)) return { kind: "locked", holder: seen.holder };
+    if (seen.holder === null || alive(seen.holder.pid)) return { kind: "locked", holder: seen.holder };
     await reclaim(seen.text);
     return { kind: "retry" };
   }
 
   try {
     await guarded(() => fs.writeNew(temporary, lockText));
-    await guarded(() => fs.writeNew(reclaimTemporary, lockText));
+    await guarded(() => fs.writeNew(reclaimTemporary, reclaimText));
   } catch (error) {
     await fs.remove(temporary).catch(() => undefined);
     await fs.remove(reclaimTemporary).catch(() => undefined);

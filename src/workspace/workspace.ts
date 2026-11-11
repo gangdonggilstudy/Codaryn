@@ -200,14 +200,15 @@ export async function createWorkspaceWithFileLayer(
       return { ok: false, code: "io_error" };
     }
 
-    let currentHash: ContentHash | null;
-    try {
-      currentHash = sha256(await files.readFile(target.absolute));
-    } catch (error) {
-      if (!isMissing(error)) {
-        return { ok: false, code: "io_error" };
-      }
-      currentHash = null;
+    /** Conflict with the current hash, or io_error when the current state cannot be read. */
+    const conflictNow = async (): Promise<WriteTextOutcome> => {
+      const now = await hashOf(target.absolute);
+      return now === undefined ? { ok: false, code: "io_error" } : { ok: false, code: "conflict", currentHash: now };
+    };
+
+    const currentHash = await hashOf(target.absolute);
+    if (currentHash === undefined) {
+      return { ok: false, code: "io_error" };
     }
     if (currentHash !== request.expectedHash) {
       return { ok: false, code: "conflict", currentHash };
@@ -219,19 +220,48 @@ export async function createWorkspaceWithFileLayer(
       directory,
       `.${path.basename(target.absolute)}.${randomBytes(8).toString("hex")}.codaryn-tmp`,
     );
-    try {
-      if (currentHash === null) {
-        await files.mkdirRecursive(directory);
-      }
-      await files.writeNewFile(temporary, bytes);
-      await files.rename(temporary, target.absolute);
-    } catch {
+    const removeTemporary = async (): Promise<void> => {
       try {
         await files.remove(temporary);
       } catch {
         // Nothing was created, or the rename already moved it.
       }
+    };
+
+    try {
+      if (currentHash === null) {
+        await files.mkdirRecursive(directory);
+      }
+      await files.writeNewFile(temporary, bytes);
+    } catch {
+      await removeTemporary();
       return { ok: false, code: "io_error" };
+    }
+
+    if (currentHash === null) {
+      // The file must not exist: publish with an operation that fails when the name is taken,
+      // so a file created by someone else in the meantime is never overwritten.
+      const placed = await placeNewFile(temporary, target.absolute, bytes);
+      await removeTemporary();
+      if (placed === "exists") {
+        return conflictNow();
+      }
+      if (placed === "failed") {
+        return { ok: false, code: "io_error" };
+      }
+    } else {
+      // Check again right before replacing. This narrows the window; it is not a lock.
+      const latest = await hashOf(target.absolute);
+      if (latest !== currentHash) {
+        await removeTemporary();
+        return latest === undefined ? { ok: false, code: "io_error" } : { ok: false, code: "conflict", currentHash: latest };
+      }
+      try {
+        await files.rename(temporary, target.absolute);
+      } catch {
+        await removeTemporary();
+        return { ok: false, code: "io_error" };
+      }
     }
     return {
       ok: true,
@@ -239,6 +269,41 @@ export async function createWorkspaceWithFileLayer(
       newHash: sha256(bytes),
       created: currentHash === null,
     };
+  }
+
+  /** SHA-256 of the file, `null` when it does not exist, `undefined` when it cannot be read. */
+  async function hashOf(file: string): Promise<ContentHash | null | undefined> {
+    try {
+      return sha256(await files.readFile(file));
+    } catch (error) {
+      return isMissing(error) ? null : undefined;
+    }
+  }
+
+  /**
+   * Gives the complete temporary file the target name only when that name is free.
+   * A hard link publishes all bytes at once. File systems without hard links (FAT, exFAT,
+   * some network shares) fall back to an exclusive create, which is not atomic.
+   */
+  async function placeNewFile(
+    temporary: string,
+    target: string,
+    bytes: Uint8Array,
+  ): Promise<"placed" | "exists" | "failed"> {
+    try {
+      await files.link(temporary, target);
+      return "placed";
+    } catch (error) {
+      if (errorCode(error) === "EEXIST") {
+        return "exists";
+      }
+    }
+    try {
+      await files.writeNewFile(target, bytes);
+      return "placed";
+    } catch (error) {
+      return errorCode(error) === "EEXIST" ? "exists" : "failed";
+    }
   }
 
   return { root, resolve, readText, list, writeText };

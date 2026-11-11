@@ -41,14 +41,24 @@ import type {
   VerifierOutcome,
   VerifierResult,
 } from "../contracts/index.js";
-import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature } from "./feedback.js";
+import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
+import type { FailedForFeedback } from "./feedback.js";
 import { RunState } from "./state.js";
 import { validateToolArgs } from "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { validateToolArgs } from "./validate-args.js";
-export { REPAIR_HEADER, buildRepairFeedback, cutMiddle, failureSignature } from "./feedback.js";
-export type { CutText, RepairFeedback } from "./feedback.js";
+export {
+  EVIDENCE_CAPTURE_NOTE,
+  EVIDENCE_SLACK_BYTES,
+  REPAIR_HEADER,
+  buildRepairFeedback,
+  cutMiddle,
+  failureSignature,
+  normalizeNumbers,
+  prepareEvidence,
+} from "./feedback.js";
+export type { CutText, FailedForFeedback, RepairFeedback } from "./feedback.js";
 
 /**
  * Fixed instructions for the model. It contains no task data.
@@ -99,7 +109,7 @@ const UNKNOWN_OUTCOME: End = { status: "needs-input", reason: "unknown_tool_outc
 
 /** A verification that failed in a way a repair may fix. */
 interface RepairNeeded {
-  readonly failed: readonly VerifierResult[];
+  readonly failed: readonly FailedForFeedback[];
 }
 
 function isEnd(value: object): value is End {
@@ -497,6 +507,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       return { status: "needs-input", reason: "no_verifier" };
     }
     verifierResults.length = 0;
+    /** Whether each recorded evidence of this round was cut (T-6), by verifier id. */
+    const evidenceCut = new Map<string, boolean>();
     const outcomes: VerifierOutcome[] = [];
     for (const config of task.verifiers) {
       const stop = interrupted();
@@ -514,25 +526,31 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
           limits: [],
         };
       }
-      const evidence = mask(raw.evidence);
+      const masked = mask(raw.evidence);
       const checked = raw.checked.map(mask);
       const limitNotes = raw.limits.map(mask);
-      if (evidence === null || checked.includes(null) || limitNotes.includes(null)) {
+      if (masked === null || checked.includes(null) || limitNotes.includes(null)) {
         return MASKING_FAILED;
       }
+      // T-6: masked first, then the runner's slack dropped and the text cut. A cut of masked text
+      // plus a fixed note holds nothing that was not already masked.
+      const prepared = prepareEvidence(masked, raw.evidenceTruncated === true);
       const result: VerifierResult = {
         id: raw.id,
         kind: raw.kind,
         outcome: raw.outcome,
-        evidence,
+        evidence: prepared.text as MaskedText,
         checked: checked as MaskedText[],
         limits: limitNotes as MaskedText[],
       };
       verifierResults.push(result);
+      evidenceCut.set(result.id, prepared.truncated);
       outcomes.push(raw.outcome);
       await record({ type: "verifier_result", result });
     }
-    if (signal.aborted) return CANCELLED;
+    // T-8: the user's cancel, or the duration limit ending while the last verifier ran.
+    const stopped = interrupted();
+    if (stopped !== null) return stopped;
     if (!outcomes.includes("fail")) {
       return outcomes.includes("inconclusive")
         ? { status: "needs-input", reason: "verifier_inconclusive" }
@@ -540,11 +558,15 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     }
     // R-1: a verifier that could not decide is not something the model can fix, so no repair.
     if (outcomes.includes("inconclusive")) return { status: "failed", reason: "verifier_failed" };
-    return decideRepair(verifierResults.filter((result) => result.outcome === "fail"));
+    return decideRepair(
+      verifierResults
+        .filter((result) => result.outcome === "fail")
+        .map((result) => ({ ...result, evidenceCut: evidenceCut.get(result.id) === true })),
+    );
   };
 
   /** R-2, R-3: a repair only while attempts are left and the same failure has not repeated too often. */
-  const decideRepair = (failed: readonly VerifierResult[]): End | RepairNeeded => {
+  const decideRepair = (failed: readonly FailedForFeedback[]): End | RepairNeeded => {
     const signature = failureSignature(failed);
     sameFailures = signature === lastSignature ? sameFailures + 1 : 1;
     lastSignature = signature;

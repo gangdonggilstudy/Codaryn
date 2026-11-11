@@ -6,6 +6,10 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { MODELS_EXIT_CODES } from "../../src/contracts/index.js";
+import type { ModelsOutput } from "../../src/contracts/index.js";
+import type { CliRun } from "./cli.js";
+import { parseCommandOutput } from "./repair-check.js";
 import type { FakeAnthropic, RecordedRequest } from "./fake-anthropic.js";
 import { messagesRequests, modelsRequests } from "./fake-anthropic.js";
 import { MODELS_PATH } from "./fake-models.js";
@@ -25,6 +29,19 @@ export function modelsArgs(args: ModelsArgs): string[] {
   if (args.use !== undefined) out.push("--use", args.use);
   if (args.json === true) out.push("--json");
   return out;
+}
+
+/** `models --json` output that keeps the contract's invariants: exit code by status, numbers 1..n. */
+export function expectModelsOutput(run: CliRun): ModelsOutput {
+  const output = parseCommandOutput(run);
+  if (output.kind !== "models") assert.fail(`expected a models result, got ${JSON.stringify(output).slice(0, 500)}`);
+  assert.equal(output.exitCode, MODELS_EXIT_CODES[output.status]);
+  assert.deepEqual(
+    output.models.map((model) => model.number),
+    output.models.map((_, index) => index + 1),
+    "numbers run from 1 in list order",
+  );
+  return output;
 }
 
 export function readJsonFile(path: string): Record<string, unknown> {

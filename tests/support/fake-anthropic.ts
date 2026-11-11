@@ -546,9 +546,10 @@ export async function runGuarded(
   args: readonly string[],
   env: NodeJS.ProcessEnv,
   timeoutMs = 60_000,
+  stdin?: "ignore" | "pipe",
 ): Promise<GuardedRun> {
   const log = join(sandbox.base, "net-guard.log");
-  const run = await startCli(args, { cwd: sandbox.base, env, timeoutMs, netGuardLog: log }).done;
+  const run = await startCli(args, { cwd: sandbox.base, env, timeoutMs, netGuardLog: log, ...(stdin === undefined ? {} : { stdin }) }).done;
   const blockedOrigins = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line !== "") : [];
   assert.deepEqual(blockedOrigins, [], "the CLI tried to reach a host other than the local fake server");
   return { ...run, blockedOrigins };

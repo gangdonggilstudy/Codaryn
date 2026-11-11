@@ -106,6 +106,31 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     }
   };
 
+  /**
+   * Masks a structured value for JSON transport. Every string value (nested included) is masked
+   * before serialization, so an already escaped secret is not escaped again and missed.
+   * The serialized text is masked once more in case escaping itself formed a secret.
+   * Returns null when any masking fails.
+   */
+  const maskJson = (value: unknown): MaskedText | null => {
+    let failed = false;
+    const walk = (item: unknown): unknown => {
+      if (failed) return null;
+      if (typeof item === "string") {
+        const masked = mask(item);
+        if (masked === null) failed = true;
+        return masked;
+      }
+      if (Array.isArray(item)) return item.map(walk);
+      if (typeof item === "object" && item !== null) {
+        return Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, walk(entry)]));
+      }
+      return item;
+    };
+    const masked = walk(value);
+    return failed ? null : mask(JSON.stringify(masked));
+  };
+
   const interrupted = (): End | null => {
     if (signal.aborted) return CANCELLED;
     if (deadline.signal.aborted || clock.now() - startedAt >= limits.maxDurationMs) {
@@ -259,7 +284,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (isEnd(outcome)) return outcome;
 
     // Mask before anything is recorded or returned to the model.
-    const content = mask(outcome.ok ? JSON.stringify(outcome.payload) : outcome.message);
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(outcome.message);
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,
@@ -345,7 +370,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       if (text === null) return MASKING_FAILED;
       const echoed: MaskedToolCall[] = [];
       for (const call of response.toolCalls) {
-        const argsJson = mask(JSON.stringify(call.args));
+        const argsJson = maskJson(call.args);
         if (argsJson === null) return MASKING_FAILED;
         echoed.push({ id: call.id, name: call.name, argsJson });
       }

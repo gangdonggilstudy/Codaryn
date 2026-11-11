@@ -241,6 +241,35 @@ export const CAPTURE_CUT = [
   "",
 ].join("\n");
 
+export const CUT_AFTER_EXIT_PATH = "checks/cut-after-exit.mjs";
+/** First stdout line of cut-after-exit.mjs; more than COMMAND_CAPTURE_SLACK_BYTES before the cut. */
+export const CUT_COMPLETE_MARK = "CUT-COMPLETE-LINE written well before the cut";
+/** Written 4 s after the parent exits, so it is never read. */
+export const CUT_LATE_MARK = "CUT-LATE-LINE";
+
+/**
+ * `node checks/cut-after-exit.mjs`: starts a detached child that inherits stdout and exits after
+ * one second. The child writes CUT_COMPLETE_MARK, about 6 KB of filler lines and the first half
+ * of the secret from data/settings.txt at once, and the rest of the secret plus CUT_LATE_MARK only
+ * four seconds later. A runner that stops reading shortly after the parent exits (V-2) therefore
+ * holds output that ends inside the secret.
+ */
+export const CUT_AFTER_EXIT = [
+  'import { spawn } from "node:child_process";',
+  'import { readFileSync } from "node:fs";',
+  'if (process.argv[2] === "child") {',
+  '  const token = /^token=(.*)$/m.exec(readFileSync("data/settings.txt", "utf8"))[1];',
+  "  const half = token.slice(0, Math.floor(token.length / 2));",
+  `  process.stdout.write(${JSON.stringify(`${CUT_COMPLETE_MARK}\n`)} + ("f".repeat(100) + "\\n").repeat(60) + half);`,
+  `  setTimeout(() => process.stdout.write(token.slice(half.length) + "\\n" + ${JSON.stringify(`${CUT_LATE_MARK}\n`)}), 4000);`,
+  "} else {",
+  '  const child = spawn(process.execPath, [process.argv[1], "child"], { detached: true, stdio: ["ignore", "inherit", "inherit"] });',
+  "  child.unref();",
+  "  setTimeout(() => process.exit(0), 1000);",
+  "}",
+  "",
+].join("\n");
+
 /**
  * `<after>` for TAIL_CUT so that a cut keeping the last `keep` characters of stdout starts
  * `offset` characters into a secret of length `secretLength` (0 < offset < secretLength).
@@ -273,6 +302,7 @@ export function writeRepairProject(sandbox: Sandbox, options: RepairProjectOptio
       [NOISY_CHECK_PATH, NOISY_CHECK],
       [TAIL_CUT_PATH, TAIL_CUT],
       [CAPTURE_CUT_PATH, CAPTURE_CUT],
+      [CUT_AFTER_EXIT_PATH, CUT_AFTER_EXIT],
       [SETTINGS_PATH, `name=demo\ntoken=${options.secret}\n`],
     );
   }

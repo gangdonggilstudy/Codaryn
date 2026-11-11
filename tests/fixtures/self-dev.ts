@@ -162,10 +162,17 @@ export function writeProtectedVerifier(sandbox: Sandbox, id = "candidate-tests")
   };
 }
 
-/** Appended by the scripted model in the passing flow: a comment only. */
-export const BENIGN_NOTE = "\n// rehearsal: a comment-only change made by the scripted model\n";
-/** Appended by the scripted model in the failing flow: a type error the protected verifier reports. */
-export const TYPE_ERROR_SNIPPET = '\nexport const rehearsalBroken: number = "not a number";\n';
+/**
+ * The one line of REHEARSAL_TARGET the scripted model changes, with `replace_text`. The target
+ * mentions `CODARYN_SECRET` itself, and the privacy gateway treats such text as a protected span:
+ * the model may edit other lines, but text it sends that holds the fragment is `invalid_token`.
+ * So the rehearsal never resends the whole file (`replace_all`); it edits a line without it.
+ */
+export const REHEARSAL_ANCHOR = "const MAX_ID_ATTEMPTS = 8;";
+/** The passing change: the same line with a comment. */
+export const REHEARSAL_BENIGN_LINE = `${REHEARSAL_ANCHOR} // rehearsal: a comment-only change made by the scripted model`;
+/** The failing change: a type error (TS2322) the protected verifier reports. */
+export const REHEARSAL_BROKEN_LINE = 'const MAX_ID_ATTEMPTS: number = "8";';
 
 /**
  * Programs an allowed command runs to change what it should not: `node tamper.mjs <mode> <path>`.

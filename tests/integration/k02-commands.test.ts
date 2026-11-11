@@ -248,12 +248,10 @@ function assertDoctorSilent(run: CliRun, s: DoctorSetup): void {
 
 test(`${MOCK_LABEL} U-6 doctor --json: 항목별 점검, 키 값·경로 없음, 요청 0건, 쓰기 없음`, { timeout: 60_000 }, async (t) => {
   const s = await doctorSetup(t);
-  const run = await runGuarded(
-    s.sb,
-    doctorArgs({ config: s.configPath, varsFile: s.varsFile, task: s.taskPath, workspace: s.sb.workspace }),
-    cliEnv(),
-  );
+  // `--task` names its own workspace; doctor refuses `--task` with `--workspace` (cli-contract usage).
+  const run = await runGuarded(s.sb, doctorArgs({ config: s.configPath, varsFile: s.varsFile, task: s.taskPath }), cliEnv());
   const output = expectDoctorOutput(run);
+  assert.equal(checkOf(output, "workspace").status, "ok", checkOf(output, "workspace").message);
   for (const id of ["node_version", "config_file", "vars_file", "task_file", "api_key", "model", "limits"] as const) {
     assert.equal(checkOf(output, id).status, "ok", `${id}: ${checkOf(output, id).message}`);
   }
@@ -262,7 +260,7 @@ test(`${MOCK_LABEL} U-6 doctor --json: 항목별 점검, 키 값·경로 없음,
 
 test(`${MOCK_LABEL} U-6 doctor 기본 출력(글): 키 값·경로 없음, 종료 코드는 --json과 같다`, { timeout: 60_000 }, async (t) => {
   const s = await doctorSetup(t);
-  const given = { config: s.configPath, varsFile: s.varsFile, task: s.taskPath, workspace: s.sb.workspace };
+  const given = { config: s.configPath, varsFile: s.varsFile, task: s.taskPath };
   const json = expectDoctorOutput(await runGuarded(s.sb, doctorArgs(given), cliEnv()));
   const text = await runGuarded(s.sb, doctorArgs({ ...given, json: false }), cliEnv());
   assert.equal(text.exitCode, json.exitCode);
@@ -273,7 +271,7 @@ test(`${MOCK_LABEL} U-6 doctor 기본 출력(글): 키 값·경로 없음, 종�
 test(`${MOCK_LABEL} U-6 doctor가 문제를 항목으로 알린다(값은 쓰지 않음)`, { timeout: 120_000 }, async (t) => {
   await t.test("키 없음 → api_key가 ok가 아님", async (st) => {
     const s = await doctorSetup(st);
-    const run = await runGuarded(s.sb, doctorArgs({ config: s.configPath, task: s.taskPath, workspace: s.sb.workspace }), cliEnv());
+    const run = await runGuarded(s.sb, doctorArgs({ config: s.configPath, task: s.taskPath }), cliEnv());
     const output = expectDoctorOutput(run);
     assert.notEqual(checkOf(output, "api_key").status, "ok");
     assertDoctorSilent(run, s);
@@ -284,7 +282,7 @@ test(`${MOCK_LABEL} U-6 doctor가 문제를 항목으로 알린다(값은 쓰지
     const taskPath = writeTask(s.sb, { id: "k02-doctor-cmd", commands: [{ executable: missing, argsPrefix: [], allowExtraArgs: true }] }, [
       finalStep("끝"),
     ]);
-    const run = await runGuarded(s.sb, doctorArgs({ task: taskPath, workspace: s.sb.workspace }), cliEnv());
+    const run = await runGuarded(s.sb, doctorArgs({ task: taskPath }), cliEnv());
     const output = expectDoctorOutput(run);
     const commands = checkOf(output, "commands");
     assert.notEqual(commands.status, "ok");
@@ -405,10 +403,12 @@ test(`${MOCK_LABEL} U-8 진행 표시에 가짜 키가 없다(가짜 서버 실�
   const api = await startFakeAnthropic(t, [replyTools([toolUse("toolu_r1", "read_file", { path: "README.md" })]), replyText("읽었다")]);
   const configPath = writeConfigFile(sb, fakeApiConfig(api.url, { model: FAKE_MODEL_CONFIG }));
   const taskPath = writeAnthropicTask(sb, {
-    id: "k02-progress-api",
+    id: "k02-progress-mock",
     verifiers: [{ id: "readme", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] }],
   });
   const run = await runGuarded(sb, ["run", "--task", taskPath, "--config", configPath], cliEnv({ fakeApiKey: FAKE_API_KEY }));
   assert.equal(expectRunResult(run, "anthropic").status, "done");
-  assertProgressClean(run, { secrets: [FAKE_API_KEY], fragmentSecrets: [FAKE_API_KEY] }, 1);
+  // Pieces of the fake key's readable start ("cdy-", "fake", "-api") also occur in ordinary text
+  // such as ids and fake model names. Its random tail is the part whose pieces mean a leak.
+  assertProgressClean(run, { secrets: [FAKE_API_KEY], fragmentSecrets: [FAKE_API_KEY.slice(-12)] }, 1);
 });

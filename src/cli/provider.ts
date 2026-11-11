@@ -1,14 +1,10 @@
 /**
- * The one place where `codaryn run` gets the anthropic provider implementation.
- *
- * Until `src/model/anthropic/index.ts` (E2) is merged this is `null`, and a run with resolved
- * settings stops as `provider_not_implemented` before anything is sent. To connect it when the
- * PM says so, replace the declaration below with:
- *
- *   import { createAnthropicProvider } from "../model/anthropic/index.js";
- *   export const anthropicProviderFactory: CreateAnthropicProvider | null = createAnthropicProvider;
+ * The one place where `codaryn run` gets the anthropic provider implementation (E2).
+ * `run.ts` calls it only after the key, the model, the output cap and the limits are resolved,
+ * so a missing setting is still rejected before anything is sent.
  */
 
 import type { CreateAnthropicProvider } from "../contracts/index.js";
+import { createAnthropicProvider } from "../model/anthropic/index.js";
 
-export const anthropicProviderFactory: CreateAnthropicProvider | null = null;
+export const anthropicProviderFactory: CreateAnthropicProvider = createAnthropicProvider;

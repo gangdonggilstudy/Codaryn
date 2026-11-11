@@ -10,6 +10,7 @@
 import path from "node:path";
 import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, CODARYN_CONFIG_ENV, RESULT_SCHEMA_VERSION } from "../contracts/index.js";
 import type {
+  AnthropicProviderDeps,
   CliErrorCode,
   CliOutput,
   Clock,
@@ -48,8 +49,10 @@ export interface CliEnvironment {
   readonly randomBytes: (size: number) => Uint8Array;
   readonly assemble: Assemble;
   readonly runTask?: RunTask;
-  /** Overrides `anthropicProviderFactory` in tests. `null` means not connected. */
+  /** Overrides `anthropicProviderFactory` in tests. `null` stands for a provider that is not connected. */
   readonly createAnthropicProvider?: CreateAnthropicProvider | null;
+  /** Passed to the anthropic provider. Tests inject `fetch` here; the real CLI leaves it unset. */
+  readonly anthropicDeps?: AnthropicProviderDeps;
   /** Cancellation for the run. Created from the parsed arguments. */
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
 }
@@ -166,9 +169,14 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     if (!secrets.includes(resolved.settings.apiKey)) secrets.push(resolved.settings.apiKey);
     const factory = io.createAnthropicProvider === undefined ? anthropicProviderFactory : io.createAnthropicProvider;
     if (factory === null) {
-      return error("provider_not_implemented", "the anthropic provider is not connected yet; nothing was sent");
+      return error("provider_not_implemented", "the anthropic provider is not connected; nothing was sent");
     }
-    model = factory(resolved.settings);
+    try {
+      model = factory(resolved.settings, io.anthropicDeps);
+    } catch {
+      // The provider re-checks the settings and throws only if they disagree with the CLI's checks.
+      return error("internal_error", "the anthropic provider rejected the resolved settings; nothing was sent");
+    }
   } else {
     const scriptJson = await readJson(io, task.model.scriptPath);
     if (!scriptJson.ok) return error("invalid_script", "the script file cannot be read as JSON");

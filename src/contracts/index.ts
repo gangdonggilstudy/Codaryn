@@ -5,6 +5,7 @@
 
 export * from "./text.js";
 export * from "./task.js";
+export * from "./config.js";
 export * from "./tool.js";
 export * from "./model.js";
 export * from "./privacy.js";

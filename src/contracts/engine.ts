@@ -73,6 +73,10 @@ export const RUN_EXIT_CODES: { readonly [S in TerminalRunStatus]: number } = {
 export const CLI_ERROR_EXIT_CODES = {
   invalid_arguments: 2,
   invalid_task: 2,
+  /** The config file cannot be read, or a value in it is invalid. */
+  invalid_config: 2,
+  /** A task or config file has a key field or a key value. Nothing else is checked first. */
+  key_in_file: 2,
   invalid_script: 2,
   secret_env_missing: 2,
   workspace_not_found: 2,

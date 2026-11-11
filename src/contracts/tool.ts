@@ -3,6 +3,7 @@
  * Requirements are fixed here in code. A model, a task or a project file cannot lower them.
  */
 
+import { CONTENT_HASH_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, JsonObject, MaskedText, RawText } from "./text.js";
 
 export const TOOL_NAMES = ["read_file", "search_files", "write_file", "run_command"] as const;
@@ -230,6 +231,111 @@ export const BUILTIN_TOOLS: { readonly [N in ToolName]: ToolDescriptor & { reado
     },
     restoreFields: ["cwd"],
     documentFields: [],
+  },
+};
+
+/**
+ * What a provider tells the model about a tool. Fixed text: it must never spell the privacy
+ * token marker, because it reaches the model without passing `PrivacyGateway.mask`.
+ */
+export interface ToolDefinition {
+  readonly description: string;
+  /** JSON Schema of the args object. It mirrors the engine's shape validation. */
+  readonly inputSchema: JsonObject;
+}
+
+const PATH_PROPERTY: JsonObject = {
+  type: "string",
+  minLength: 1,
+  description: "Path relative to the workspace root.",
+};
+
+export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
+  read_file: {
+    description:
+      "Read a UTF-8 text file in the workspace. Returns its content and its hash. " +
+      "Pass that hash as expectedHash when you change the file.",
+    inputSchema: {
+      type: "object",
+      properties: { path: PATH_PROPERTY },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  search_files: {
+    description:
+      "List files and directories under a workspace directory, recursively. " +
+      "nameContains keeps paths that contain that literal string. " +
+      "text keeps files that contain that literal string and returns the matching lines.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          description: 'Directory relative to the workspace root. Use "." for the root.',
+        },
+        nameContains: { type: "string" },
+        text: { type: "string" },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  write_file: {
+    description:
+      "Create or change a UTF-8 text file in the workspace. expectedHash is the hash from your " +
+      "last read_file of this path, or null for a file that must not exist yet. The change either " +
+      "replaces the whole content or replaces one exact occurrence of oldText that appears only once.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: PATH_PROPERTY,
+        expectedHash: {
+          type: ["string", "null"],
+          pattern: CONTENT_HASH_PATTERN_SOURCE,
+          description: "64 lowercase hex characters from read_file, or null for a new file.",
+        },
+        change: {
+          anyOf: [
+            {
+              type: "object",
+              properties: { kind: { const: "replace_all" }, content: { type: "string" } },
+              required: ["kind", "content"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "replace_text" },
+                oldText: { type: "string", minLength: 1 },
+                newText: { type: "string" },
+              },
+              required: ["kind", "oldText", "newText"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: ["path", "expectedHash", "change"],
+      additionalProperties: false,
+    },
+  },
+  run_command: {
+    description:
+      "Run a program without a shell inside the workspace. Only commands the task policy allows " +
+      "will run. Returns the exit code, stdout and stderr.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        executable: { type: "string", minLength: 1 },
+        args: { type: "array", items: { type: "string" } },
+        cwd: { type: "string", description: 'Working directory relative to the workspace root. Default ".".' },
+        timeoutMs: { type: "integer", minimum: 1 },
+      },
+      required: ["executable", "args"],
+      additionalProperties: false,
+    },
   },
 };
 

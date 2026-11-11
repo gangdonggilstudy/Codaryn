@@ -222,6 +222,25 @@ export const TAIL_CUT = [
   "",
 ].join("\n");
 
+export const CAPTURE_CUT_PATH = "checks/capture-cut.mjs";
+
+/**
+ * `node checks/capture-cut.mjs <outPad> <errPad>`: on stdout `<outPad>` filler characters, the
+ * secret from data/settings.txt and 8000 more; on stderr the same with `<errPad>`, or one short
+ * line when `<errPad>` is 0; exits 1. Choosing a pad places the secret across the command
+ * runner's capture limit, so the captured text ends inside the secret.
+ */
+export const CAPTURE_CUT = [
+  'import { readFileSync } from "node:fs";',
+  'const outPad = Number(process.argv[2] ?? "0");',
+  'const errPad = Number(process.argv[3] ?? "0");',
+  'const token = /^token=(.*)$/m.exec(readFileSync("data/settings.txt", "utf8"))[1];',
+  'process.stdout.write("y".repeat(outPad) + token + "z".repeat(8000) + "\\n");',
+  'process.stderr.write(errPad === 0 ? "short stderr line\\n" : "w".repeat(errPad) + token + "v".repeat(8000) + "\\n");',
+  "process.exit(1);",
+  "",
+].join("\n");
+
 /**
  * `<after>` for TAIL_CUT so that a cut keeping the last `keep` characters of stdout starts
  * `offset` characters into a secret of length `secretLength` (0 < offset < secretLength).
@@ -237,7 +256,7 @@ export function tailCutAfter(keep: number, secretLength: number, offset: number)
 export interface RepairProjectOptions {
   /** Contents of src/price.js. Defaults to PRICE_BUG. */
   readonly price?: string;
-  /** Writes checks/noisy-check.mjs, checks/tail-cut.mjs and data/settings.txt with this secret. */
+  /** Writes the secret programs (noisy-check, tail-cut, capture-cut) and data/settings.txt with this secret. */
   readonly secret?: string;
 }
 
@@ -250,7 +269,12 @@ export function writeRepairProject(sandbox: Sandbox, options: RepairProjectOptio
     [PRICE_CHECK_PATH, PRICE_CHECK],
   ];
   if (options.secret !== undefined) {
-    files.push([NOISY_CHECK_PATH, NOISY_CHECK], [TAIL_CUT_PATH, TAIL_CUT], [SETTINGS_PATH, `name=demo\ntoken=${options.secret}\n`]);
+    files.push(
+      [NOISY_CHECK_PATH, NOISY_CHECK],
+      [TAIL_CUT_PATH, TAIL_CUT],
+      [CAPTURE_CUT_PATH, CAPTURE_CUT],
+      [SETTINGS_PATH, `name=demo\ntoken=${options.secret}\n`],
+    );
   }
   for (const [path, text] of files) writeWorkspaceFile(sandbox, path, text);
   return files.map(([path]) => path);

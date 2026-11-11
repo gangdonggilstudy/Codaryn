@@ -33,7 +33,7 @@ export const VARIANT_SECRET = "cdyVar/?>cdycdycdyKx";
  * `cliEnv({ fakeApiKey })` accepts only these values.
  */
 export const FAKE_API_KEY = "cdy-fake-apikey-Xq7Lm2Vt9Rw4";
-/** Written only into a temporary file passed with `--env-file`. */
+/** Written only into a temporary file passed with `--vars-file`. */
 export const FAKE_API_KEY_ENV_FILE = "cdy-fake-envfile-Hp3Zs8Nk6Dy";
 /** Written only into `.env` files that the CLI must never load on its own. */
 export const FAKE_API_KEY_DECOY = "cdy-fake-decoy-Bw6Jt1Qc5Gm";

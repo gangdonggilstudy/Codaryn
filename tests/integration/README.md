@@ -52,7 +52,7 @@
 | g task의 주소 | `m02-fake-api-settings` | task의 `apiBaseUrl`은 거부(`invalid_task`) 또는 무시, 다른 서버 요청 0건. 주변 설정 모양 파일과 `.env`는 읽지 않음 |
 | h 오류와 재시도 | `m03-fake-api-errors` | 401 `auth_failed`(재시도 없음), 429 `rate_limited`, 529 `overloaded`, 시간 초과 `timeout`, 요청 수 = 1 + `maxRetries`, 재시도 본문 동일, 1회 실패 후 회복 |
 | i 사용량 누락 | `m03-fake-api-errors` | 토큰 한도가 있으면 `usage_unknown`, 두 번째 요청 없음. 한도가 없으면 계속하고 합계는 `null`. 보고된 사용량은 한도에 반영 |
-| j `--env-file` | `m02-fake-api-settings` | 임시 폴더의 가짜 값 파일에서 키·모델·주소를 읽음. BOM이 있는 env 파일은 `invalid_config`, 요청 0건 |
+| j `--vars-file` | `m02-fake-api-settings` | 임시 폴더의 가짜 값 파일에서 키·모델·주소를 읽음. BOM이 있는 파일은 `invalid_config`, 요청 0건. `--env-file`은 `invalid_arguments`(T-15) |
 | k 간편 형식 | `m01-fake-api-runs` | `--workspace`·`--goal`·`--config`로 `done`, `taskId`는 `QUICK_TASK_ID` |
 
 - 가짜 서버는 실제 API 규칙 일부를 흉내 내 요청을 검사한다(필수 헤더, `max_tokens`, 빈 텍스트 블록, `tool_use`/`tool_result` 짝, 마지막 메시지 역할). 어기면 400으로 답하고 위반으로 기록한다. 실제 API의 모든 규칙은 아니다.
@@ -95,12 +95,30 @@
 | S-2 | scripted 실행에서도 환경의 키를 읽은 결과가 가려지고 journal·결과·출력에 키 없음 |
 | S-3 | `secretEnv`에 값을 적은 실수(task, 설정 파일, 미설정 이름): 오류 출력에 값 없음 |
 | S-4 | env 파일이 새로 설정한 8자 이상 값은 가려지고 8자 미만 값은 그대로 |
-| S-5 | UNC·`\\?\UNC`·장치 경로를 `--task`·`--config`·`--env-file`·`--cancel-file`·`--workspace`·`CODARYN_CONFIG`·`workspaceRoot`·`scriptPath`에 주면 정해진 코드로 즉시 거부(루프백 주소만 쓰고 net-guard로 fetch 차단 확인). 없는 env 파일도 CLI JSON 오류여야 한다 |
+| S-5 | UNC·`\\?\UNC`·장치 경로를 `--task`·`--config`·`--vars-file`·`--cancel-file`·`--workspace`·`CODARYN_CONFIG`·`workspaceRoot`·`scriptPath`에 주면 정해진 코드로 즉시 거부(루프백 주소만 쓰고 net-guard로 fetch 차단 확인). 없는 변수 파일도 CLI JSON 오류 |
 | S-6 | 깊이 20000 JSON의 task·설정 → `invalid_task`·`invalid_config` 한 줄, stderr 없음 |
 | S-7 | task 한도 > 설정 한도 거부(같으면 실행), 절대 상한 4종, 검증기 `timeoutMs` 2^31 거부·2^31-1 허용, 설정의 상한 초과·`requestTimeoutMs` 2^31 거부(요청 0건) |
 | S-8 | `--goal`의 키 모양 값과 현재 키 값 → `key_in_file`, 요청 0건 |
 | S-10 | 끝없는 성공 본문 → `malformed_response`, 끝없는 오류 본문 → `api_error`. 요청 시간 한도(60초)가 아니라 본문 상한으로 빨리 끝나고 클라이언트가 먼저 끊는다 |
 | S-11 | 가운데 공백, ASCII 밖 문자가 든 키 → 요청 0건 |
+
+## 단계 2 교차 검토 수정 회귀 (수정 묶음 T)
+
+| 결정 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| T-1 | `g01-windows-cmd`, `s01` | PATH의 `.cmd`·`.bat` 실행. 메타문자 인자와 작업 공간 안 스크립트는 **이유까지** 확인(`script_refused` 문구, "workspace root is not known"이면 실패). 작업 공간의 같은 이름 `.cmd`가 아니라 PATH의 것이 실행됨. 비밀이 든 허용 변수(LANG)가 자식에 가지 않음 |
+| T-2 | `g01-windows-cmd` | 분리된 배경 프로세스를 남기고 끝나는 명령과 검증기가 시간 초과가 아님 |
+| T-3 | `t01-fix-regress` | `run_command.timeoutMs` 600001 → `invalid_args`, 600000 허용 |
+| T-4 | `g01-windows-cmd` | 작업 공간 안 `.exe`(이름, 상대 경로, 절대 경로) → `executable_refused`, 실행 흔적 없음 |
+| T-5 | `p01-repair-loop` F5-d3 | `node --test`의 같은 실패(숫자만 다름) → `repeated_failure` |
+| T-6 | `p02-repair-feedback` F5-i·j·j2 | 기록 근거 ≤ `MAX_EVIDENCE_BYTES`, 이전 2000자 경계와 실행기 캡처 한계에 걸친 비밀의 조각 0건 |
+| T-8 | `p01-repair-loop` F5-g2 | 검증 도중 시간 한도 → `budget-exhausted`/`max_duration` |
+| T-9 | `t01-fix-regress` | 죽은 잠금에 6개 프로세스가 동시에 시작 → 하나만 실행, 나머지 `workspace_locked` |
+| T-10 | `t01-fix-regress` | 스냅샷은 있고 기록이 잘린 경로 → `missing_record`·`partial`. 잘린 마지막 줄만 있으면 `complete` |
+| T-12 | `t01-fix-regress` | `revert --workspace` UNC, 작업 공간 안 `--cancel-file` → `invalid_arguments` |
+| T-13 | `t01-fix-regress` | 링크 항목은 실경로도 보호. 밖을 가리키는 링크 항목은 `invalid_task`(결정), 어느 쪽이든 쓰기 0건(안전 조건) |
+| T-14 | `t01-fix-regress` | 이스케이프한 키를 앞선 중복 필드에 둠 → `key_in_file`, 위치에 모르는 필드 이름 없음, 작업 공간 루트의 대체 데이터 스트림 설정 거부, `maxOutputTokens` 200000 초과 거부·200000 허용 |
+| T-15 | `m02`, `s01` | `--vars-file`로 바꿈. `--env-file`은 있는 파일이어도 `invalid_arguments`, 값을 읽지 않음 |
 
 단계 2 결정으로 기존 사례의 기대값을 옮긴 곳: anthropic task·설정 한도에 숫자 토큰 한도(`ANTHROPIC_LIMITS`, S-7), E3-i의 "토큰 한도 없음" 사례는 `invalid_task`·요청 0건으로(S-7), 기록 검사에서 `snapshots/` 제외(R-8).
 

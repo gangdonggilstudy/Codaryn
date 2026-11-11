@@ -234,6 +234,47 @@ test("F5-d2 maxSameFailures 3: 같은 실패를 두 번 고쳐 보고 세 번째
   assert.equal(result.usage.modelTurns, attemptTurns(attempts));
 });
 
+test("F5-d3 T-5 node --test의 같은 실패도 반복으로 본다(소요 시간 숫자만 다름) → repeated_failure", { timeout: 150_000 }, async (t) => {
+  const attempts: Attempt[] = [{ edits: [EDIT_WRONG_FIX] }, { edits: [EDIT_NO_PROGRESS], claim: "주석을 달았다" }];
+  const { exitCode, result, records } = await runLoop(t, "f5-d3", attempts, { maxRepairAttempts: 5 }, TESTS_VERIFIER, 3);
+
+  const failures = verifierFailEvidence(records);
+  assert.equal(failures.length, 2);
+  const digitsOut = (text: string): string => text.replace(/\d+(?:\.\d+)?/g, "#");
+  assert.equal(digitsOut(failures[0] ?? ""), digitsOut(failures[1] ?? ""), "test assumption: only numbers differ between the two runs");
+  t.diagnostic(`raw evidence identical: ${String(failures[0] === failures[1])} (before T-5 a difference here defeated R-3)`);
+
+  assert.equal(exitCode, RUN_EXIT_CODES.failed);
+  assert.equal(result.reason, "repeated_failure");
+  assert.deepEqual(
+    repairStarts(records).map((record) => record.attempt),
+    [1],
+  );
+  assert.equal(result.usage.modelTurns, attemptTurns(attempts));
+});
+
+test("F5-g2 T-8 검증 도중 실행 시간 한도가 끝나면 budget-exhausted/max_duration", { timeout: 120_000 }, async (t) => {
+  const sb = createSandbox(t);
+  writeRepairProject(sb);
+  writeProgram(sb, "sleep.mjs");
+  const taskPath = writeTask(
+    sb,
+    {
+      id: "f5-g2",
+      limits: { maxDurationMs: 4_000, maxRepairAttempts: 2 },
+      verifiers: [{ id: "slow", kind: "command", executable: NODE, args: ["sleep.mjs"], timeoutMs: 60_000 }],
+    },
+    [finalStep("끝났다"), ...spareSteps(2)],
+  );
+  const run = await runTask(taskPath, { cwd: sb.base, timeoutMs: 100_000 });
+  const result = expectRunResult(run);
+  readRunFiles(sb.workspace, result);
+  assert.equal(run.exitCode, RUN_EXIT_CODES["budget-exhausted"]);
+  assert.equal(result.status, "budget-exhausted");
+  assert.equal(result.reason, "max_duration");
+  assert.ok(run.durationMs < 30_000, `the run took ${run.durationMs} ms; the verifier was not stopped at the limit`);
+});
+
 test("F5-e 연속이 아닌 같은 실패는 멈추지 않는다: A, B, A 뒤 통과", { timeout: 180_000 }, async (t) => {
   const attempts: Attempt[] = [
     { edits: [EDIT_WRONG_FIX] },

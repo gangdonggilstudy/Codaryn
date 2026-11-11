@@ -6,10 +6,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_FEEDBACK_BYTES } from "../../src/contracts/index.js";
+import { MAX_COMMAND_OUTPUT_BYTES, MAX_EVIDENCE_BYTES, MAX_FEEDBACK_BYTES } from "../../src/contracts/index.js";
 import type { CommandVerifierConfig, JournalRecord, SearchFilesPayload } from "../../src/contracts/index.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import {
+  CAPTURE_CUT_PATH,
   NOISY_CHECK_PATH,
   NOTES_ORIGINAL,
   NOTES_PATH,
@@ -53,10 +54,17 @@ const FRAME_ALLOWANCE_BYTES = 4096;
 /** Characters compared at each end of a masked evidence text. */
 const EDGE_CHARS = 80;
 /**
- * src/verify keeps this many characters at the end of each output stream before the evidence is
- * masked (EVIDENCE_OUTPUT_TAIL_CHARS, an implementation constant). F5-j places secrets across it.
+ * Before T-6, src/verify kept only this many characters at the end of each output stream, cut
+ * before masking, so a secret across that cut left a piece. F5-j keeps secrets across that old
+ * position as a regression case.
  */
 const VERIFY_TAIL_CHARS = 2000;
+/**
+ * Bytes the command runner captures per stream: MAX_COMMAND_OUTPUT_BYTES plus its capture slack
+ * (4096, COMMAND_CAPTURE_SLACK_BYTES in src/tools). Output past it is dropped, so the capture can
+ * end inside a secret; T-6 has the engine drop that slack after masking (F5-j2).
+ */
+const CAPTURE_LIMIT_BYTES = MAX_COMMAND_OUTPUT_BYTES + 4096;
 
 const MARKER_QUERY = SNAPSHOT_MARKER.slice(SNAPSHOT_MARKER.indexOf("-") + 1);
 
@@ -125,6 +133,12 @@ test("F5-i 실패 근거: 가린 뒤 자르고 앞뒤를 남기며 토큰과 UTF
 
   await t.test("잘림 표시와 상한", () => {
     assert.equal(repairs[0]?.feedbackTruncated, true);
+    for (const evidence of verifierResults(files.records)) {
+      assert.ok(
+        Buffer.byteLength(evidence.evidence) <= MAX_EVIDENCE_BYTES,
+        `${evidence.id}: recorded evidence is ${Buffer.byteLength(evidence.evidence)} bytes (T-6 cap ${MAX_EVIDENCE_BYTES})`,
+      );
+    }
     for (const evidence of firstRound) {
       assert.equal(message.includes(evidence.evidence), false, `${evidence.id}: the middle must be left out`);
     }
@@ -186,6 +200,45 @@ test("F5-j 검증기 출력 끝 절단 경계에 걸친 비밀: 근거·기록·
   for (const evidence of verifierResults(files.records).slice(0, verifiers.length)) {
     assert.equal(evidence.outcome, "fail");
     assert.ok(evidence.evidence.includes("zzzz"), `test assumption: ${evidence.id} output reached the evidence`);
+  }
+  assert.deepEqual(findLeaks(runSources(run, files, message), [FRAGMENT_SECRET], { extended: true }), []);
+  assert.deepEqual(findFragments(runSources(run, files, message), FRAGMENT_SECRET, 4), []);
+});
+
+test("F5-j2 T-6 명령 실행기 캡처 한계에 걸친 비밀: 조각 0건(stdout만 잘림, 둘 다 잘림)", { timeout: 180_000 }, async (t) => {
+  const sb = createSandbox(t);
+  writeRepairProject(sb, { secret: FRAGMENT_SECRET });
+  const across = (offset: number): string => String(CAPTURE_LIMIT_BYTES - offset);
+  const verifiers: CommandVerifierConfig[] = [
+    // stdout captured up to the limit ends 10 characters into the secret; stderr is short.
+    { id: "cap-out", kind: "command", executable: NODE, args: [CAPTURE_CUT_PATH, across(10), "0"], timeoutMs: 30_000 },
+    // Both streams end inside the secret, at different offsets.
+    { id: "cap-both", kind: "command", executable: NODE, args: [CAPTURE_CUT_PATH, across(5), across(15)], timeoutMs: 30_000 },
+    // Control: across MAX_COMMAND_OUTPUT_BYTES the secret is still whole inside the capture.
+    {
+      id: "cap-max",
+      kind: "command",
+      executable: NODE,
+      args: [CAPTURE_CUT_PATH, String(MAX_COMMAND_OUTPUT_BYTES - 10), "0"],
+      timeoutMs: 30_000,
+    },
+  ];
+  const taskPath = writeTask(
+    sb,
+    { id: "f5-j2", secretEnv: [FAKE_SECRET_ENV_A], limits: { maxRepairAttempts: 1 }, verifiers },
+    [...CLAIM_ONLY, ...spareSteps(1)],
+  );
+  const run = await runTask(taskPath, {
+    cwd: sb.base,
+    env: cliEnv({ extra: { [FAKE_SECRET_ENV_A]: FRAGMENT_SECRET } }),
+    timeoutMs: 170_000,
+  });
+  const result = expectRunResult(run);
+  const files = readRunFiles(sb.workspace, result);
+  const message = onlyRepairMessage(files.records);
+
+  for (const evidence of verifierResults(files.records).slice(0, verifiers.length)) {
+    assert.equal(evidence.outcome, "fail", `test assumption: ${evidence.id} failed`);
   }
   assert.deepEqual(findLeaks(runSources(run, files, message), [FRAGMENT_SECRET], { extended: true }), []);
   assert.deepEqual(findFragments(runSources(run, files, message), FRAGMENT_SECRET, 4), []);

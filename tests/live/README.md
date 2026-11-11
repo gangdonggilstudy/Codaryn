@@ -18,6 +18,8 @@ node --test dist/tests/live/anthropic-live.js
 
 세 변수(`CODARYN_LIVE=1`, `ANTHROPIC_API_KEY`, `CODARYN_MODEL`) 중 하나라도 없으면 테스트는 "건너뜀"으로 표시되고 아무것도 전송하지 않는다.
 
+이 점검은 변수 파일을 쓰지 않고 위 환경 변수만 CLI에 넘긴다. CLI를 직접 쓸 때 키를 파일로 주려면 `--vars-file <작업 공간 밖 경로>`를 쓴다. `--env-file`은 받지 않는다(T-15: Node가 그 이름을 스스로 먼저 읽는다).
+
 ## 하는 일
 
 임시 폴더에 문서 하나를 만들고, CLI가 `README.md`에 `## 점검` 절을 추가하게 한다. 검증기는 `file_rules`의 `contains`다.

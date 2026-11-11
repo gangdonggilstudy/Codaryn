@@ -144,11 +144,11 @@ test("S-1 작업 공간 안의 task·대본·설정·env 파일은 실행 전에
     );
   });
 
-  await t.test("env 파일이 작업 공간 안 → invalid_config", async (st) => {
+  await t.test("변수 파일(--vars-file)이 작업 공간 안 → invalid_config", async (st) => {
     const sb = createSandbox(st);
     const taskPath = scriptedTask(sb, "s1-env");
     const envFile = writeEnvFile(join(sb.workspace, ".env"), { CODARYN_IT_PLAIN: "plain-value" });
-    assertPreRun(await runCli(sb, ["run", "--task", taskPath, "--env-file", envFile]), "invalid_config", sb);
+    assertPreRun(await runCli(sb, ["run", "--task", taskPath, "--vars-file", envFile]), "invalid_config", sb);
   });
 
   await t.test("대조군: 같은 파일을 작업 공간 밖에 두면 실행된다", async (st) => {
@@ -156,7 +156,7 @@ test("S-1 작업 공간 안의 task·대본·설정·env 파일은 실행 전에
     const taskPath = scriptedTask(sb, "s1-control");
     const config = writeConfigFile(sb, { schemaVersion: 1 });
     const envFile = writeEnvFile(join(sb.base, "vars.env"), { CODARYN_IT_PLAIN: "plain-value" });
-    const run = await runCli(sb, ["run", "--task", taskPath, "--config", config, "--env-file", envFile]);
+    const run = await runCli(sb, ["run", "--task", taskPath, "--config", config, "--vars-file", envFile]);
     assert.equal(expectRunResult(run).status, "done");
   });
 });
@@ -196,7 +196,7 @@ test(`${MOCK_LABEL} S-1 모델이 작업 공간에 쓴 설정·.env로는 다음
   expectCliError(viaConfig, "invalid_config");
   const viaEnv = await runGuarded(
     sb,
-    ["run", "--task", taskPath, "--config", legitConfig, "--env-file", join(sb.workspace, ".env")],
+    ["run", "--task", taskPath, "--config", legitConfig, "--vars-file", join(sb.workspace, ".env")],
     env,
   );
   expectCliError(viaEnv, "invalid_config");
@@ -287,7 +287,7 @@ test("S-4 env 파일이 새로 설정한 값은 비밀로 가려지고 8자 미�
     readStep("r-conf", "data/conf.txt"),
     finalStep("읽었다"),
   ]);
-  const run = await runCli(sb, ["run", "--task", taskPath, "--env-file", envFile]);
+  const run = await runCli(sb, ["run", "--task", taskPath, "--vars-file", envFile]);
   const result = expectRunResult(run);
   const files = readRunFiles(sb.workspace, result);
   const content = payloadOf<ReadFilePayload>(toolResultFor(files.records, "r-conf")).content;
@@ -312,7 +312,7 @@ test("S-5 UNC·장치 경로는 파일 접근 전에 거부된다(네트워크 �
     { label: "--task \\\\?\\UNC", code: "invalid_task", args: () => ["run", "--task", "\\\\?\\UNC\\127.0.0.1\\codaryn-it-absent\\task.json"] },
     { label: "--config", code: "invalid_config", args: (_sb, task) => ["run", "--task", task, "--config", unc("c.json")] },
     { label: "--config device", code: "invalid_config", args: (_sb, task) => ["run", "--task", task, "--config", "\\\\.\\pipe\\codaryn-it"] },
-    { label: "--env-file", code: "invalid_config", args: (_sb, task) => ["run", "--task", task, "--env-file", unc("x.env")] },
+    { label: "--vars-file", code: "invalid_config", args: (_sb, task) => ["run", "--task", task, "--vars-file", unc("x.env")] },
     { label: "--cancel-file", code: "invalid_arguments", args: (_sb, task) => ["run", "--task", task, "--cancel-file", unc("cancel")] },
     { label: "--workspace", code: "invalid_arguments", args: () => ["run", "--workspace", unc("ws"), "--goal", "목표"] },
     { label: CODARYN_CONFIG_ENV, code: "invalid_config", args: (_sb, task) => ["run", "--task", task], env: { [CODARYN_CONFIG_ENV]: unc("c.json") } },
@@ -345,14 +345,24 @@ test("S-5 UNC·장치 경로는 파일 접근 전에 거부된다(네트워크 �
   }
 });
 
-// The Node runtime also reads `--env-file` from the arguments after the script name and checks the
-// file before the CLI starts. This case shows whether the CLI still answers with its own JSON.
-test("--env-file 경로를 CLI가 먼저 판정한다: 없는 파일 → invalid_config JSON 한 줄", { timeout: 60_000 }, async (t) => {
+// T-15: the Node runtime reads `--env-file` from the arguments after the script name and checks the
+// file before the CLI starts, so the option is now `--vars-file`. Its path is judged by the CLI.
+test("--vars-file 경로를 CLI가 판정한다: 없는 파일 → invalid_config JSON 한 줄", { timeout: 60_000 }, async (t) => {
   const sb = createSandbox(t);
-  const taskPath = scriptedTask(sb, "envfile-missing");
-  const run = await runCli(sb, ["run", "--task", taskPath, "--env-file", join(sb.base, "missing.env")]);
+  const taskPath = scriptedTask(sb, "varsfile-missing");
+  const run = await runCli(sb, ["run", "--task", taskPath, "--vars-file", join(sb.base, "missing.env")]);
   t.diagnostic(`exit ${String(run.exitCode)}, stderr ${JSON.stringify(run.stderr.slice(0, 200))}`);
   assertPreRun(run, "invalid_config", sb);
+  assert.equal(run.stderr, "");
+});
+
+test("T-15 --env-file은 받지 않는다: 있는 파일을 줘도 invalid_arguments, 값은 읽히지 않음", { timeout: 60_000 }, async (t) => {
+  const sb = createSandbox(t);
+  writeWorkspaceFile(sb, "README.md", "# 연습\n");
+  writeWorkspaceFile(sb, "data/conf.txt", `service=${FAKE_ENV_FILE_VALUE}\n`);
+  const taskPath = writeTask(sb, { id: "envfile-refused", verifiers: README_EXISTS }, [readStep("r-conf", "data/conf.txt"), finalStep("끝")]);
+  const envFile = writeEnvFile(join(sb.base, "vars.env"), { CODARYN_IT_SERVICE_TOKEN: FAKE_ENV_FILE_VALUE });
+  assertPreRun(await runCli(sb, ["run", "--task", taskPath, "--env-file", envFile]), "invalid_arguments", sb, [FAKE_ENV_FILE_VALUE]);
 });
 
 test("S-6 깊게 중첩된 JSON은 JSON 한 줄 오류로 끝난다(스택 없음)", { timeout: 60_000 }, async (t) => {

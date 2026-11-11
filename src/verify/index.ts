@@ -5,7 +5,7 @@
 
 import { stat } from "node:fs/promises";
 
-import { asRawText, DEFAULT_COMMAND_TIMEOUT_MS } from "../contracts/index.js";
+import { asRawText, DEFAULT_COMMAND_TIMEOUT_MS, MAX_COMMAND_OUTPUT_BYTES } from "../contracts/index.js";
 import type {
   CommandVerifierConfig,
   FileRule,
@@ -49,13 +49,14 @@ export interface RawVerifierResultInput {
   readonly kind: VerifierKind;
   readonly outcome: VerifierOutcome;
   readonly evidence: string;
+  /** True when the command runner dropped output (T-6). Kept on the result only when true. */
+  readonly evidenceTruncated?: boolean;
   readonly checked: readonly string[];
   readonly limits: readonly string[];
 }
 
 const OUTCOMES: readonly string[] = ["pass", "fail", "inconclusive"];
 const KINDS: readonly string[] = ["command", "file_rules"];
-const EVIDENCE_OUTPUT_TAIL_CHARS = 2000;
 
 function isStringList(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -90,11 +91,15 @@ export function createRawVerifierResult(input: RawVerifierResultInput): RawVerif
   if (!isStringList(value.limits)) {
     throw new TypeError("verifier result: limits is required (use an empty list for no known limits)");
   }
+  if (value.evidenceTruncated !== undefined && typeof value.evidenceTruncated !== "boolean") {
+    throw new TypeError("verifier result: evidenceTruncated must be a boolean when given");
+  }
   return {
     id: value.id,
     kind: value.kind as VerifierKind,
     outcome: value.outcome as VerifierOutcome,
     evidence: asRawText(value.evidence),
+    ...(value.evidenceTruncated === true ? { evidenceTruncated: true } : {}),
     checked: [...value.checked],
     limits: [...value.limits],
   };
@@ -104,10 +109,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function tail(text: string): string {
-  return text.length <= EVIDENCE_OUTPUT_TAIL_CHARS
-    ? text
-    : `...${text.slice(text.length - EVIDENCE_OUTPUT_TAIL_CHARS)}`;
+/**
+ * The command output for the evidence, exactly as the runner returned it (T-6: raw text is never
+ * cut here; the engine masks first and cuts afterwards).
+ *
+ * When the runner dropped output, a stream may end at an arbitrary byte, possibly inside a secret.
+ * The contract has the engine drop the trailing slack of truncated evidence, so a stream that may
+ * have been cut goes last. Only a stream longer than MAX_COMMAND_OUTPUT_BYTES can have reached the
+ * runner's capture limit. When both did, the first one's end lies more than
+ * MAX_COMMAND_OUTPUT_BYTES from either end of the evidence, beyond MAX_EVIDENCE_BYTES.
+ */
+function commandOutput(ran: RunCommandPayload): string {
+  const streams = [
+    { label: "stdout", text: ran.stdout },
+    { label: "stderr", text: ran.stderr },
+  ].filter((stream) => stream.text.length > 0);
+  if (ran.truncated) {
+    const mayBeCut = (text: string): boolean => Buffer.byteLength(text, "utf8") > MAX_COMMAND_OUTPUT_BYTES;
+    streams.sort((a, b) => Number(mayBeCut(a.text)) - Number(mayBeCut(b.text)));
+  }
+  return streams.map((stream) => `\n${stream.label}:\n${stream.text}`).join("");
 }
 
 const COMMAND_LIMITS: readonly string[] = [
@@ -125,12 +146,13 @@ async function runCommandVerifier(
   const checked = [
     `exit code of ${JSON.stringify([config.executable, ...config.args])} in "${cwd}" equals ${expected}`,
   ];
-  const result = (outcome: VerifierOutcome, evidence: string): RawVerifierResult =>
+  const result = (outcome: VerifierOutcome, evidence: string, evidenceTruncated = false): RawVerifierResult =>
     createRawVerifierResult({
       id: config.id,
       kind: "command",
       outcome,
       evidence,
+      evidenceTruncated,
       checked,
       limits: COMMAND_LIMITS,
     });
@@ -155,17 +177,17 @@ async function runCommandVerifier(
   if ("spawnFailed" in ran) {
     return result("inconclusive", `the command could not be started: ${ran.message}`);
   }
-  const output =
-    (ran.stdout.length > 0 ? `\nstdout:\n${tail(ran.stdout)}` : "") +
-    (ran.stderr.length > 0 ? `\nstderr:\n${tail(ran.stderr)}` : "");
-  if (ran.timedOut) return result("inconclusive", `the command timed out${output}`);
-  if (signal.aborted) return result("inconclusive", `cancelled while the command was running${output}`);
+  const output = commandOutput(ran);
+  const cut = ran.truncated;
+  if (ran.timedOut) return result("inconclusive", `the command timed out${output}`, cut);
+  if (signal.aborted) return result("inconclusive", `cancelled while the command was running${output}`, cut);
   if (ran.exitCode === null) {
-    return result("inconclusive", `the command did not exit normally${output}`);
+    return result("inconclusive", `the command did not exit normally${output}`, cut);
   }
   return result(
     ran.exitCode === expected ? "pass" : "fail",
     `exit code ${ran.exitCode}, expected ${expected}${output}`,
+    cut,
   );
 }
 

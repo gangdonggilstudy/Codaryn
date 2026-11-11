@@ -3,7 +3,7 @@
  */
 
 import type { RevertOutcome } from "./changes.js";
-import type { DoctorOutput, ReportOutput } from "./commands.js";
+import type { DoctorOutput, ModelsOutput, ReportOutput } from "./commands.js";
 import type { IntegrityChecker } from "./integrity.js";
 import type { Journal } from "./journal.js";
 import type { ModelProvider } from "./model.js";
@@ -105,6 +105,10 @@ export const CLI_ERROR_EXIT_CODES = {
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
+  /** `codaryn models` (Y-1): the Models API request failed. The message names the ModelErrorKind. */
+  model_list_failed: 8,
+  /** `codaryn models --use` (Y-3): the config file could not be written. It was left as it was. */
+  config_write_failed: 2,
   /** `codaryn revert`: the workspace has no journal for that run id. */
   run_not_found: 2,
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
@@ -205,10 +209,11 @@ export interface RevertOutput {
 
 /**
  * Every JSON object the `codaryn` process can print: `run` prints CliOutput, `revert` prints
- * RevertOutput or CliErrorOutput, and `report --json` and `doctor --json` print ReportOutput and
- * DoctorOutput (their default output is text, see commands.ts) or CliErrorOutput.
+ * RevertOutput or CliErrorOutput, and `report --json`, `doctor --json` and `models --json` print
+ * ReportOutput, DoctorOutput and ModelsOutput (their default output is text, see commands.ts) or
+ * CliErrorOutput.
  */
-export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput;
+export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput | ModelsOutput;
 
 /** Injected time source in milliseconds. */
 export interface Clock {

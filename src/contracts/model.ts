@@ -104,6 +104,50 @@ export type CreateAnthropicProvider = (
   deps?: AnthropicProviderDeps,
 ) => ModelProvider;
 
+/**
+ * One model of the Anthropic Models API (Y-1): `GET /v1/models` and `GET /v1/models/{id}`, sent
+ * with the same `x-api-key` and `anthropic-version` headers as Messages requests. Only these fields
+ * are kept; `capabilities` and anything else in the API object are dropped.
+ */
+export interface ModelInfo {
+  /** `id`: the value for `model` in a task or config file. */
+  readonly id: string;
+  /** `display_name`, or the id when it is missing or not a string. */
+  readonly displayName: string;
+  /** `created_at` as the API gives it (RFC 3339 text), or null when it is missing or not a string. */
+  readonly createdAt: string | null;
+  /** `max_input_tokens` (context window), or null when missing or not a positive integer. */
+  readonly maxInputTokens: number | null;
+  /** `max_tokens` (output cap), or null when missing or not a positive integer. */
+  readonly maxOutputTokens: number | null;
+}
+
+/** What listing needs: the resolved settings without a model or an output cap. */
+export type AnthropicListSettings = Pick<ResolvedAnthropicSettings, "apiKey" | "apiBaseUrl" | "requestTimeoutMs" | "maxRetries">;
+
+export type ListModelsOutcome =
+  | { readonly ok: true; readonly models: readonly ModelInfo[] }
+  /** Same kinds as a Messages request (`auth_failed`, `rate_limited`, `timeout`, `aborted`, ...). */
+  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string };
+
+/** Most pages one listing reads. More is `api_error` (a bound on requests, not an expected size). */
+export const MAX_MODEL_LIST_PAGES = 20;
+
+/**
+ * Signature of `listAnthropicModels`, exported by `src/model/anthropic/index.ts` (Y-1, p5).
+ * - Reads every page: while `has_more` is true, the next request passes the previous `last_id` as
+ *   `after_id`, up to MAX_MODEL_LIST_PAGES pages. Models keep the order the API gives.
+ * - Same timeout per request, retries, and error kinds as Messages requests. Never throws for an
+ *   API or network failure; `signal` aborting gives `aborted`.
+ * - The key goes into the `x-api-key` header only: never into a message, URL or log.
+ * - An entry without a string `id` makes the whole listing `malformed_response`.
+ */
+export type ListAnthropicModels = (
+  settings: AnthropicListSettings,
+  deps?: AnthropicProviderDeps,
+  signal?: AbortSignal,
+) => Promise<ListModelsOutcome>;
+
 export const SCRIPT_SCHEMA_VERSION = 1;
 
 /** Scripted model file. Step N answers the Nth model request of the run. */

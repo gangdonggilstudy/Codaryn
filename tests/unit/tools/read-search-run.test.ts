@@ -180,9 +180,7 @@ test("run_command resolves cwd through the workspace and applies the default tim
   ]);
 });
 
-test("run_command passes a timed-out, truncated payload's status through and drops its cut end (V-2)", async () => {
-  // The output was cut at an arbitrary byte: its last COMMAND_CAPTURE_SLACK_BYTES are not trusted,
-  // so 7 bytes of cut output are dropped whole. Exit code, timeout and the cut mark pass through.
+test("run_command passes a timed-out, truncated payload through unchanged", async () => {
   const timedOut = { exitCode: null, stdout: "partial", stderr: "", timedOut: true, truncated: true };
   const tools = createToolRunner({
     workspace: createFakeWorkspace(),
@@ -193,7 +191,7 @@ test("run_command passes a timed-out, truncated payload's status through and dro
     { id: "1", name: "run_command", args: { executable: "node", args: [] } },
     never,
   );
-  assert.deepEqual(payloadOf(outcome), { ...timedOut, stdout: "" });
+  assert.deepEqual(payloadOf(outcome), timedOut);
 });
 
 test("run_command does not start a process for a rejected cwd or an aborted signal", async () => {

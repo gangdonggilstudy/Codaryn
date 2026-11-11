@@ -17,9 +17,11 @@
  * closed, even when a descendant still holds them. The tree is ended (time limit or cancel) only
  * while the child is alive; an ended child's PID is never signalled or passed to taskkill.
  *
- * Cut output (V-2): when the run settles before a stream was read to its end (pipes closed after
- * the grace or the close wait), or a stop ended the command, that output may end inside a secret.
- * It is marked `truncated` (per stream in `cutStreams`), so the caller drops its untrusted end.
+ * Unfinished output (V-2): when the run settles before a stream was read to its end (pipes closed
+ * after the grace or the close wait), or a stop (time limit, cancel) ended the command, the stream
+ * may end inside a secret. Such a cut can only fall in the stream's last line, so the runner drops
+ * that unfinished line before it returns (`dropUnfinishedLine`, at most 4096 bytes). Complete lines
+ * stay. `truncated` is not set for this; it means the capture cap only.
  *
  * Known limits (not OS isolation):
  * - Descendants that are still running when the child exits (a server started in the background,
@@ -65,38 +67,20 @@ export interface CommandSpawnFailure {
   readonly message: string;
 }
 
-/** Per stream: true when its capture may end at an arbitrary byte (V-2). */
-export interface CutStreams {
-  readonly stdout: boolean;
-  readonly stderr: boolean;
-}
-
-/**
- * What the runner returns: the shared payload, plus which stream was cut. `cutStreams` is not part
- * of the tool contract; `run_command` drops it. A runner without it (a test double) has both
- * streams treated as cut whenever `truncated` is set.
- */
-export interface CommandRunPayload extends RunCommandPayload {
-  readonly cutStreams?: CutStreams;
-}
-
 /**
  * Shared shape. `src/verify` declares the same shape in its own directory.
  *
  * The runner returns RAW output: each stream holds up to MAX_COMMAND_OUTPUT_BYTES plus
- * COMMAND_CAPTURE_SLACK_BYTES. `truncated` means the output may end at an arbitrary byte, possibly
- * inside a secret (V-2): bytes beyond the capture were dropped, or the runner settled before it had
- * read a stream to its end (pipes closed after the exit grace or the close wait, or the command was
- * ended by its time limit or a cancel). Output read to its end keeps `truncated: false`.
- * The slack lets the caller mask first and cut afterwards, so a secret that crosses the cut is
- * still whole when it is masked. `run_command` masks, drops the untrusted end and cuts to
- * MAX_COMMAND_OUTPUT_BYTES.
+ * COMMAND_CAPTURE_SLACK_BYTES, and `truncated` means bytes beyond that capture were dropped.
+ * The slack lets the caller mask first and cut afterwards, so a secret that crosses the cap is
+ * still whole when it is masked. `run_command` masks and cuts to MAX_COMMAND_OUTPUT_BYTES.
+ * A stream that was not read to its end comes without its unfinished last line (V-2).
  */
 export interface CommandRunner {
   run(
     request: CommandRunRequest,
     signal: AbortSignal,
-  ): Promise<CommandRunPayload | CommandSpawnFailure>;
+  ): Promise<RunCommandPayload | CommandSpawnFailure>;
 }
 
 export interface CommandRunnerOptions {
@@ -107,6 +91,8 @@ export interface CommandRunnerOptions {
   /**
    * Value check for allow-listed variables. A variable whose value fails it is not passed.
    * Production code injects `envValueFreeOfSecrets(privacy)`. Without it, values are not checked.
+   * The same check (true: the text holds no registered secret) keeps the V-2 cut of an unfinished
+   * line from splitting a registered secret that is whole in the output (`dropUnfinishedLine`).
    */
   readonly allowEnvValue?: (value: string) => boolean;
   /**
@@ -129,6 +115,92 @@ const CLOSE_WAIT_AFTER_KILL_MS = 5_000;
 export const PIPE_GRACE_AFTER_EXIT_MS = 500;
 /** POSIX only: time between SIGTERM and SIGKILL. */
 const TERM_TO_KILL_MS = 2_000;
+
+/** V-2: at most this many bytes of a stream's unfinished last line are dropped. */
+export const MAX_UNFINISHED_LINE_DROP_BYTES = 4_096;
+/** V-2: how far before a cut a registered secret that crosses it is looked for (UTF-16 units). */
+const CROSSING_SEARCH_UNITS = 16_384;
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** UTF-8 size of one UTF-16 unit that is not part of a pair. */
+function unitUtf8Bytes(code: number): number {
+  return code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
+}
+
+/**
+ * V-2: what is kept of a stream that was not read to its end. Its last line, the text after the
+ * last "\n" (all of it when there is none), may stop inside a secret, so it is dropped, but at most
+ * MAX_UNFINISHED_LINE_DROP_BYTES of it: a longer line keeps its beginning. Complete lines stay.
+ *
+ * `secretFree` (true when a text holds no registered secret, as `envValueFreeOfSecrets`) moves the
+ * cut back to the start of a registered secret that is whole in `text` but crosses the cut: a cut
+ * inside a long line, or a multi-line secret around the last line break. Masking would recognize
+ * such a secret only when it is whole. Without `secretFree`, the cut is not moved.
+ *
+ * Limit: a multi-line secret that the stop itself cut after one of its line breaks keeps its first
+ * lines, because it is not whole anywhere and masking cannot recognize the part.
+ */
+export function dropUnfinishedLine(text: string, secretFree?: (text: string) => boolean): string {
+  const lineStart = text.lastIndexOf("\n") + 1;
+  let cut = text.length;
+  let dropped = 0;
+  while (cut > lineStart) {
+    const last = text.charCodeAt(cut - 1);
+    const pair = cut - 2 >= lineStart && isLowSurrogate(last) && isHighSurrogate(text.charCodeAt(cut - 2));
+    const bytes = pair ? 4 : unitUtf8Bytes(last);
+    if (dropped + bytes > MAX_UNFINISHED_LINE_DROP_BYTES) break;
+    dropped += bytes;
+    cut -= pair ? 2 : 1;
+  }
+  return text.slice(0, secretFree === undefined ? cut : crossingSafeCut(text, cut, secretFree));
+}
+
+/**
+ * `cut`, or the start of a registered secret that is whole in `text` and crosses `cut`.
+ * `secretFree` only says whether a text holds a secret, so the crossing one is found by narrowing:
+ * the longest secret-free stretch that ends at the cut, the longest one that starts there, and,
+ * when the two together hold a secret, the last start whose window still holds it. Occurrences are
+ * assumed not to overlap. A secret that starts more than CROSSING_SEARCH_UNITS before the cut is
+ * not looked for.
+ */
+function crossingSafeCut(text: string, cut: number, secretFree: (text: string) => boolean): number {
+  const free = (from: number, to: number): boolean => secretFree(text.slice(from, to));
+  // Smallest `from` with text[from, cut) free: a shorter window of a free one is free too.
+  let low = Math.max(0, cut - CROSSING_SEARCH_UNITS);
+  let high = cut;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (free(mid, cut)) high = mid;
+    else low = mid + 1;
+  }
+  const left = low;
+  // Largest `to` with text[cut, to) free.
+  low = cut;
+  high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (free(cut, mid)) low = mid;
+    else high = mid - 1;
+  }
+  const right = low;
+  if (free(left, right)) return cut;
+  // Only a secret across the cut makes text[left, right) hold one. Find where it starts.
+  low = left;
+  high = cut - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (!free(mid, right)) low = mid;
+    else high = mid - 1;
+  }
+  return low;
+}
 
 /**
  * Keeps only CHILD_ENV_ALLOWLIST variables. Names compare case-insensitively on Windows.
@@ -259,22 +331,23 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
         const stderr = new OutputCapture();
         /** Set when a stream delivered its end: everything written to it has been read. */
         const ended = { stdout: false, stderr: false };
-        const payload = (exitCode: number | null, timedOut: boolean): CommandRunPayload => {
-          // V-2: a stream is cut when its capture dropped bytes, when a stop (time limit, cancel)
-          // ended the command at an arbitrary point, or when reading stopped before its end.
-          const cutStreams: CutStreams = {
-            stdout: stdout.truncated || stopping || !ended.stdout,
-            stderr: stderr.truncated || stopping || !ended.stderr,
-          };
-          return {
-            exitCode,
-            stdout: stdout.text(),
-            stderr: stderr.text(),
-            timedOut,
-            truncated: cutStreams.stdout || cutStreams.stderr,
-            cutStreams,
-          };
+        /**
+         * V-2: a stream that a stop (time limit, cancel) ended, or that was not read to its end,
+         * loses its unfinished last line. A stream cut by the capture cap is left to the caller's
+         * slack rule (`truncated`). A stream read to its end without a stop is complete.
+         */
+        const settledText = (capture: OutputCapture, reachedEnd: boolean): string => {
+          const text = capture.text();
+          if (capture.truncated || (reachedEnd && !stopping)) return text;
+          return dropUnfinishedLine(text, options.allowEnvValue);
         };
+        const payload = (exitCode: number | null, timedOut: boolean): RunCommandPayload => ({
+          exitCode,
+          stdout: settledText(stdout, ended.stdout),
+          stderr: settledText(stderr, ended.stderr),
+          timedOut,
+          truncated: stdout.truncated || stderr.truncated,
+        });
 
         let child: ChildProcess;
         try {

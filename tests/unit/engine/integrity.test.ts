@@ -430,8 +430,9 @@ describe("K3 material that cannot be checked fails closed (contract: unchecked, 
   });
 });
 
-describe("K3 order with cancel and limits", () => {
-  test("a cancel already in effect when the round starts: cancelled, before_verify is not made", async () => {
+describe("K3 order with cancel and limits (W-1: the end check still runs)", () => {
+  test("a cancel already in effect when the round starts: cancelled; the round is not checked, the end is", async () => {
+    // K3 skipped every check here, so the change made in the model turn went unreported.
     const integrity = new FakeIntegrity();
     const box: { controller?: AbortController } = {};
     const h = harness({
@@ -447,12 +448,16 @@ describe("K3 order with cancel and limits", () => {
     const result = await runTask(withIntegrity(h, integrity));
 
     assert.equal(result.status, "cancelled");
-    assert.deepEqual(phases(h), ["run_start"]);
-    assert.deepEqual(result.protectedChanged, []);
-    assert.equal(integrity.captures, 1);
+    assert.equal(result.reason, "cancelled");
+    assert.equal(h.journal.ofType("verifier_result").length, 0);
+    // The end check uses before_verify (no run_end phase in the contract yet): no round ran.
+    assert.deepEqual(phases(h), ["run_start", "before_verify"]);
+    assert.deepEqual(result.protectedChanged, [TEST_FILE]);
+    assert.ok(result.notices.some((notice) => notice.includes("by the end of the run") && notice.includes(TEST_FILE)));
+    assert.equal(integrity.captures, 2);
   });
 
-  test("cancel during verification wins over a change made in that round: no after_verify capture", async () => {
+  test("cancel during verification: cancelled, and the change made in that round is recorded at the end", async () => {
     const integrity = new FakeIntegrity();
     const box: { controller?: AbortController } = {};
     const verifiers = new HookVerifiers(
@@ -467,12 +472,13 @@ describe("K3 order with cancel and limits", () => {
     const result = await runTask({ ...withIntegrity(h, integrity), verifiers });
 
     assert.equal(result.status, "cancelled");
-    assert.deepEqual(phases(h), ["run_start", "before_verify"]);
-    assert.deepEqual(result.protectedChanged, []);
-    assert.equal(integrity.captures, 2);
+    // Verifiers ran since the last check, so the end check is recorded as after_verify.
+    assert.deepEqual(phases(h), ["run_start", "before_verify", "after_verify"]);
+    assert.deepEqual(result.protectedChanged, [TEST_FILE]);
+    assert.equal(integrity.captures, 3);
   });
 
-  test("the duration limit reached during verification stays budget-exhausted (T-8); no after_verify capture", async () => {
+  test("the duration limit reached during verification stays budget-exhausted (T-8); the change is recorded at the end", async () => {
     const integrity = new FakeIntegrity();
     const clock = new FakeClock();
     const verifiers = new HookVerifiers(
@@ -487,7 +493,8 @@ describe("K3 order with cancel and limits", () => {
 
     assert.equal(result.status, "budget-exhausted");
     assert.equal(result.reason, "max_duration");
-    assert.deepEqual(phases(h), ["run_start", "before_verify"]);
+    assert.deepEqual(phases(h), ["run_start", "before_verify", "after_verify"]);
+    assert.deepEqual(result.protectedChanged, [TEST_FILE]);
   });
 
   test("a check that is made wins over the duration limit reached during its own capture", async () => {
@@ -522,7 +529,7 @@ describe("K3 order with cancel and limits", () => {
     assert.deepEqual(result.protectedChanged, []);
   });
 
-  test("a task without verifiers has no verification round, so only run_start is checked", async () => {
+  test("a task without verifiers has no verification round; the change is recorded by the end check", async () => {
     const integrity = new FakeIntegrity();
     const tools = new FakeTools(() => {
       integrity.change(TEST_FILE);
@@ -530,7 +537,151 @@ describe("K3 order with cancel and limits", () => {
     });
     const h = harness({ steps: [() => response([runCommand("c1")]), () => finalAnswer()], tools, task: { verifiers: [] } });
     const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.status, "needs-input");
     assert.equal(result.reason, "no_verifier");
+    assert.deepEqual(phases(h), ["run_start", "before_verify"]);
+    assert.deepEqual(result.protectedChanged, [TEST_FILE]);
+  });
+});
+
+/**
+ * W-1 (M review, engine finding 1): a run that ends without a final after_verify check is checked
+ * once more at its end. Before W-1 these runs reported `protectedChanged: []` although a command
+ * had changed protected material, and the next run took the changed file as its baseline.
+ */
+describe("W-1 every run that ends after activity since its last check is checked once more", () => {
+  const tamper = (integrity: FakeIntegrity): FakeTools =>
+    new FakeTools((call) => {
+      if (call.name === "run_command") integrity.change(TEST_FILE);
+      return COMMAND_OK;
+    });
+
+  test("review case A: the turn limit ends the run after a command changed a protected test", async () => {
+    const integrity = new FakeIntegrity();
+    const h = harness({
+      steps: [() => response([runCommand("c1")]), () => response([runCommand("c2")])],
+      tools: tamper(integrity),
+      task: { limits: { maxModelTurns: 2 } },
+    });
+    const result = await runTask(withIntegrity(h, integrity));
+
+    assert.equal(result.status, "budget-exhausted");
+    assert.equal(result.reason, "max_model_turns");
+    assert.deepEqual(phases(h), ["run_start", "before_verify"]);
+    assert.deepEqual(h.journal.ofType("integrity_checked")[1]?.changed, [TEST_FILE]);
+    assert.deepEqual(result.protectedChanged, [TEST_FILE]);
+    assert.ok(result.notices.some((notice) => notice.includes("by the end of the run") && notice.includes(TEST_FILE)));
+    // The check comes before run_finished.
+    const types = eventTypes(h);
+    assert.equal(types.indexOf("run_finished"), types.lastIndexOf("integrity_checked") + 1);
+  });
+
+  test("review case B: no verifier, the command changed a protected test", async () => {
+    const integrity = new FakeIntegrity();
+    const h = harness({ steps: [() => response([runCommand("c1")]), () => finalAnswer()], tools: tamper(integrity), task: { verifiers: [] } });
+    const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.reason, "no_verifier");
+    assert.deepEqual(result.protectedChanged, [TEST_FILE]);
+  });
+
+  test("the tool call limit, a model error and an unknown tool outcome keep their end and record the change", async () => {
+    const toolLimit = new FakeIntegrity();
+    const a = harness({
+      steps: [() => response([runCommand("c1"), runCommand("c2")])],
+      tools: tamper(toolLimit),
+      task: { limits: { maxToolCalls: 1 } },
+    });
+    const first = await runTask(withIntegrity(a, toolLimit));
+    assert.equal(first.reason, "max_tool_calls");
+    assert.deepEqual(first.protectedChanged, [TEST_FILE]);
+
+    const modelError = new FakeIntegrity();
+    const b = harness({
+      steps: [() => response([runCommand("c1")]), () => ({ ok: false, kind: "api_error", message: "fake failure" })],
+      tools: tamper(modelError),
+    });
+    const second = await runTask(withIntegrity(b, modelError));
+    assert.equal(second.status, "failed");
+    assert.equal(second.reason, "model_error");
+    assert.deepEqual(second.protectedChanged, [TEST_FILE]);
+
+    const unknown = new FakeIntegrity();
+    const throwing = new FakeTools(() => {
+      unknown.change(TEST_FILE);
+      throw new Error("runner lost the outcome");
+    });
+    const c = harness({ steps: [() => response([runCommand("c1")])], tools: throwing });
+    const third = await runTask(withIntegrity(c, unknown));
+    assert.equal(third.reason, "unknown_tool_outcome");
+    assert.deepEqual(third.protectedChanged, [TEST_FILE]);
+  });
+
+  test("the end check is recorded even when nothing changed", async () => {
+    const integrity = new FakeIntegrity();
+    const h = harness({ steps: [() => response([runCommand("c1")]), () => response([runCommand("c2")])], tools: new FakeTools(() => COMMAND_OK), task: { limits: { maxModelTurns: 2 } } });
+    const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.reason, "max_model_turns");
+    assert.deepEqual(phases(h), ["run_start", "before_verify"]);
+    assert.deepEqual(result.protectedChanged, []);
+    assert.equal(result.notices.length, 0);
+  });
+
+  test("no extra check when nothing ran since the last one: a done run keeps its three checks", async () => {
+    const integrity = new FakeIntegrity();
+    const h = harness({ steps: [() => finalAnswer()] });
+    const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.status, "done");
+    assert.deepEqual(phases(h), ["run_start", "before_verify", "after_verify"]);
+    assert.equal(integrity.captures, 3);
+  });
+
+  test("no extra check when the repair cannot start: the failed round's after_verify was the last action", async () => {
+    const integrity = new FakeIntegrity();
+    const h = harness({
+      steps: [() => finalAnswer()],
+      task: { limits: { maxModelTurns: 1, maxRepairAttempts: 2 } },
+      verifiers: new FakeVerifiers({ v1: "fail" }),
+    });
+    const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.reason, "max_model_turns");
+    assert.deepEqual(phases(h), ["run_start", "before_verify", "after_verify"]);
+  });
+
+  test("a capture that rejects at the end keeps the end and says so; no record", async () => {
+    const integrity = new FakeIntegrity();
+    integrity.failOn = 2;
+    const h = harness({ steps: [() => response([runCommand("c1")]), () => response([runCommand("c2")])], tools: tamper(integrity), task: { limits: { maxModelTurns: 2 } } });
+    const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.reason, "max_model_turns");
     assert.deepEqual(phases(h), ["run_start"]);
+    assert.deepEqual(result.protectedChanged, []);
+    assert.ok(result.notices.some((notice) => notice.includes("could not be completed (run end)")));
+  });
+
+  test("a changed path that cannot be masked at the end is not recorded; the end stays and a notice says so", async () => {
+    const SECRET_PATH = `tests/${FAKE_SECRET}.json`;
+    const integrity = new FakeIntegrity({ [SECRET_PATH]: { kind: "file", sha256: SHA_1 } });
+    const tools = new FakeTools(() => {
+      integrity.change(SECRET_PATH);
+      return COMMAND_OK;
+    });
+    const h = harness({
+      steps: [() => response([runCommand("c1")]), () => response([runCommand("c2")])],
+      tools,
+      task: { limits: { maxModelTurns: 2 } },
+      privacy: fakePrivacy({ failWhen: (text) => text.includes(FAKE_SECRET) }),
+    });
+    const result = await runTask(withIntegrity(h, integrity));
+    assert.equal(result.reason, "max_model_turns");
+    assert.deepEqual(phases(h), ["run_start"]);
+    assert.equal(JSON.stringify(h.journal.events).includes(FAKE_SECRET), false);
+    assert.equal(JSON.stringify(result).includes(FAKE_SECRET), false);
+    assert.ok(result.notices.some((notice) => notice.includes("could not be masked")));
+  });
+
+  test("the new end texts are part of FIXED_MODEL_TEXTS", () => {
+    for (const lead of ["by the end of the run", "could not be masked", "could not be completed ("]) {
+      assert.ok(FIXED_MODEL_TEXTS.some((text) => text.includes(lead)), lead);
+    }
   });
 });

@@ -20,19 +20,18 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-4 | G3a | B2 `9496d14`, B3 `d3e6350` `6d35746`, C1 `ec4aa5f`, C2 `ae27dc1` `063605d` `bca12d3`을 검토·병합. main 유닛 108건 통과. D의 통합 테스트 `8b40f46` `7942bfd` 병합(아직 실행 전). B1 조립과 교차 검토 지시 | `7b39c96`과 이 문서를 담은 커밋 | 완료 |
 | CP-5 | G3b와 교차 검토 | B1 조립 `e8b5bd2` 병합(`58dcfde`). 첫 통합 실행에서 13건 실패, 원인은 거부된 호출의 `tool_result` 미기록. 엔진 수정 `5333feb` 병합(`3982a6c`) 뒤 유닛 157건, 통합 63건 통과. 교차 검토 보고 3건을 `docs/reviews/`에 기록(`e70b827`)하고 결함 수정과 회귀 테스트를 배정 | `3982a6c`, `e70b827`과 이 문서를 담은 커밋 | 완료 |
 | CP-6 | G4 | 교차 검토 수정 `7a74c2c`(privacy), `df1ceff`(tools), `7eca0c0`(workspace), `54e59fd` `2323ad6` `2b5167c`(engine, 계약 문서), 회귀 통합 테스트 `db1e043` 병합. main `db1c55c`에서 유닛 189건, 통합 76건 통과. 수용 기준 A1~A12 대조 후 1a 오프라인 검증을 채택 | `db1c55c`와 이 문서를 담은 커밋 | 완료 |
+| CP-7 | 설정과 제공자 | 사용자 직접 지시("설정 가능하게 해")에 따라 설정 계약 `86f3d62`, CLI 설정 처리 `7a2d02d`, Anthropic 제공자 `a5f62e7`, 조립 `7359cef`, 가짜 서버 통합 테스트와 실제 호출 점검 스크립트 `e8dbdb9`를 병합. main `dd930e2`에서 유닛 234건, 통합 130건 통과. 실제 API 미실행 | `dd930e2`와 이 문서를 담은 커밋 | 완료 |
 
-## 현재 상태 (CP-6)
+## 현재 상태 (CP-7)
 
-- 단계 1a 오프라인 검증을 임시 PM이 채택했다(G4, 2026-11-12). 1b(실제 API)는 수행하지 않았으며 위임 범위 밖이다. 단계 1 전체는 완료가 아니다.
-- main `db1c55c`: `node dist/src/cli/main.js run --task <task.json>`이 모의 모델로 코드 작업과 Git 없는 문서 작업을 끝까지 실행한다.
-- 실행한 검증(main `db1c55c`): `npm run typecheck` 통과, `npm run test:unit` 189건 통과, `npm run test:integration` 76건 통과(실패 0, 건너뜀 0), `node scripts/check-secrets.mjs --tracked` 발견 없음.
-- 실행하지 않은 검증: 실제 Anthropic API(1b), Windows 외 OS, OS 수준 격리와 네트워크 차단, 강제 종료 시 파일 원자성. AD-01~06과 PR-04, PR-12는 1a 미도입이다.
-- 교차 검토에서 재현된 결함 13건 중 수정 대상 11건을 회귀 테스트와 함께 고쳤다. 나머지는 알려진 한계로 `docs/cli-contract.md` 10절과 progress.md에 적었다.
-- 모든 작업자(p1, p4, p5, p6, p7, p8)는 대기 중이고 각 worktree는 깨끗하다. 작업 브랜치는 모두 main에 병합됐고 삭제하지 않았다.
-- 권한 창 처리: p1, p4, p5에서 "작업 디렉터리 밖 읽기 허용" 창이 떴을 때 PM이 3번(아니오, 다음에 다시 묻기)으로 닫았다. 사용자 설정은 바꾸지 않았다.
-- 관찰: p5 세션의 모델이 Opus 5.5로 바뀌어 있었다. PM이 바꾼 것이 아니며 그대로 두었다.
-- 공용 Git 훅: `.git/hooks/pre-commit`과 `.git/hooks/check-secrets.mjs`(추적되지 않음, 모든 worktree에 적용).
-- 차단 요인: 다음 단계(1b)는 범위 결정이 필요하다.
+- 단계 1a 오프라인 검증은 채택됐다(G4, CP-6). 그 뒤 사용자가 PM에게 직접 "설정 가능하게 해"라고 지시했다. PM은 이를 모델·키·한도를 설정으로 정할 수 있게 하고 그 설정으로 동작하는 Anthropic 제공자를 만들라는 뜻으로 해석했다(`docs/work-orders/phase-1b-config.md`). `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.
+- main `dd930e2`: 설정 파일(`--config`, `CODARYN_CONFIG`), env 파일(`--env-file`), 환경 변수(`ANTHROPIC_API_KEY`, `CODARYN_MODEL`, `CODARYN_API_BASE_URL`), 간편 형식(`--workspace`, `--goal`), 실제 Anthropic 제공자가 들어 있다. 설정 항목과 우선순위는 `docs/cli-contract.md` 11절이다.
+- 실행한 검증(main `dd930e2`): `npm run typecheck` 통과, `npm run test:unit` 234건 통과, `npm run test:integration` 130건 통과(기존 76 + 로컬 가짜 서버를 쓰는 모의 API 54, 실패 0, 건너뜀 0), `node scripts/check-secrets.mjs --tracked` 발견 없음.
+- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** 1b는 완료가 아니다. `tests/live/anthropic-live.ts`는 사용자가 `CODARYN_LIVE=1`, 키, 모델을 환경에 두고 직접 실행하는 점검이며 PM과 작업자는 실행하지 않았다. 그 밖에 Windows 외 OS, OS 수준 격리와 네트워크 차단, 강제 종료 시 파일 원자성도 검증하지 않았다.
+- 실제 API로 확인하지 못한 항목(`docs/cli-contract.md` 10절): 503의 분류, `retry-after` 형식, 빈 `tool_result` 허용 여부, thinking 블록 없이 도구 반복을 이어갈 수 있는지.
+- 모든 작업자(p1, p4, p5, p6, p7, p8)는 대기 중이고 각 worktree는 깨끗하다. p8의 worktree `claude-store`는 브랜치 `claude/anthropic-provider`로 바꿨다. 작업 브랜치는 모두 main에 병합됐고 삭제하지 않았다.
+- 권한 창 처리, p5 모델 변경 관찰, 공용 Git 훅은 CP-6까지의 기록과 같다(작업 디렉터리 밖 읽기 창은 3번으로 닫았고, p5의 Opus 5.5 변경은 PM이 한 것이 아니며, `.git/hooks/pre-commit`이 모든 worktree에서 비밀을 검사한다).
+- 차단 요인: 실제 호출 검증에는 사용자의 키와 모델 선택이 필요하다.
 
 ### PM 결정 (CP-4, CP-5)
 
@@ -44,6 +43,9 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 겹치는 비밀 일치는 구간을 합쳐 하나의 보호 구간으로 만든다. 원문의 `CODARYN_SECRET` 조각은 거부하지 않고 보호 구간으로 가린다(자기 소스 수정이 가능해지도록).
 - 검색은 가림본을 대상으로 한다. 자르기는 가린 뒤 토큰 경계에서 한다. 엔진은 직렬화 전에 문자열 필드별로 가린다.
 - `allowExtraArgs:true`인 명령 규칙은 추가 인자의 경로를 검사하지 않는다. 코드는 바꾸지 않고 알려진 한계로 문서화한다.
+- 설정 결정 C-1~C-8(`docs/work-orders/phase-1b-config.md`): 키는 환경 변수로만, 설정·env 파일은 명시했을 때만, 모델과 출력 상한에 코드 기본값 없음, API 주소는 task로 바꿀 수 없음, 한도 없이는 호출하지 않음.
+- 전송은 SDK 대신 Node 내장 `fetch`를 쓴다. 허용 의존성을 넓히지 않기 위해서이며 architecture와 decisions의 "공식 SDK" 선택과 다르다. 두 문서의 갱신은 Codex 판단에 맡긴다.
+- 1a 자리표시자 `src/model/anthropic.ts`와 그 유닛 2건은 실제 제공자로 대체되어 삭제했다. 같은 동작은 `tests/unit/cli/anthropic-wire.test.ts`와 통합 m02가 확인한다.
 - 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
 
 ## 세션
@@ -63,12 +65,10 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 
 ## 다음 행동
 
-위임 범위(단계 1a)의 작업은 끝났다. 아래는 PM을 인계받는 쪽이나 범위를 넓힌 뒤에 할 일이다.
-
-1. 1b 결정: 실제 Anthropic 어댑터 구현과 호출을 열지 정한다. 필요한 것은 모델 결정(O-1), 로컬 `ANTHROPIC_API_KEY`와 `CODARYN_MODEL`, 호출·비용 한도다. 어댑터 유닛 AD-01~06을 구현과 함께 넣는다.
-2. 개발 도구로 쓰기 위한 최소 추가: 실제 모델 연결(1b), 검증 실패를 반영한 재수정 반복(단계 2), Windows에서 `npm` 같은 `.cmd` 실행 방법.
+1. 실제 호출 검증(1b 완료 판단): 사용자가 키와 모델을 환경에 두고 `tests/live/README.md`의 절차를 직접 실행한다. 결과로 "실제 API 미검증" 네 항목을 확정한다.
+2. 개발 도구로 쓰기 위한 다음 작업: 검증 실패를 반영한 재수정 반복(단계 2), Windows에서 `npm` 같은 `.cmd` 실행 방법.
 3. 알려진 한계 중 우선 판단할 것: 비밀이 든 줄은 수정할 수 없음, `allowExtraArgs:true` 규칙의 추가 인자 경로 미검사, 파일 해시 노출.
-4. 작업 브랜치와 worktree 정리 여부는 Codex가 정한다. PM은 삭제하지 않았다.
+4. architecture.md와 decisions.md의 "공식 SDK" 서술을 `fetch` 구현에 맞게 고칠지 Codex가 정한다. 작업 브랜치와 worktree 정리도 Codex가 정한다.
 
 ## 회수 시 인계 방법
 

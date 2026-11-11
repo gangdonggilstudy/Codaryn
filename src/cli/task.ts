@@ -5,6 +5,8 @@
 
 import path from "node:path";
 import {
+  DEFAULT_MAX_REPAIR_ATTEMPTS,
+  DEFAULT_MAX_SAME_FAILURES,
   DENY_ALL_POLICY,
   QUICK_TASK_ID,
   QUICK_TASK_WORKFLOW,
@@ -18,12 +20,13 @@ import type {
   Limits,
   ModelConfig,
   PolicyConfig,
-  TaskSpec,
+  ResolvedLimits,
+  ResolvedTaskSpec,
   VerifierConfig,
 } from "../contracts/index.js";
 
 export type ParseTaskOutcome =
-  | { readonly ok: true; readonly task: TaskSpec }
+  | { readonly ok: true; readonly task: ResolvedTaskSpec }
   | { readonly ok: false; readonly message: string };
 
 export type Rec = Record<string, unknown>;
@@ -134,19 +137,31 @@ export function parsePartialLimits(value: unknown): Partial<Limits> {
   return limits;
 }
 
-/** Each field from `own` when present there, else from `defaults`. Every field must end up set. */
-export function mergeLimits(own: Partial<Limits> | undefined, defaults: Partial<Limits> | undefined): Limits {
+/**
+ * Each field from `own` when present there, else from `defaults`. The four budget limits must end
+ * up set. The repair limits fall back to DEFAULT_MAX_REPAIR_ATTEMPTS and DEFAULT_MAX_SAME_FAILURES.
+ */
+export function mergeLimits(own: Partial<Limits> | undefined, defaults: Partial<Limits> | undefined): ResolvedLimits {
+  const lookup = <K extends keyof Limits>(field: K): { found: true; value: Limits[K] } | { found: false } => {
+    if (own !== undefined && Object.hasOwn(own, field)) return { found: true, value: own[field] as Limits[K] };
+    if (defaults !== undefined && Object.hasOwn(defaults, field)) return { found: true, value: defaults[field] as Limits[K] };
+    return { found: false };
+  };
   const pick = <K extends keyof Limits>(field: K): Limits[K] => {
-    if (own !== undefined && Object.hasOwn(own, field)) return own[field] as Limits[K];
-    if (defaults !== undefined && Object.hasOwn(defaults, field)) return defaults[field] as Limits[K];
+    const hit = lookup(field);
+    if (hit.found) return hit.value;
     const hint = field === "maxTotalTokens" ? " (use null for no limit)" : "";
     return fail(`limits.${field} is not set in the task or the config file${hint}`);
   };
+  const repair = lookup("maxRepairAttempts");
+  const same = lookup("maxSameFailures");
   return {
     maxModelTurns: pick("maxModelTurns"),
     maxToolCalls: pick("maxToolCalls"),
     maxTotalTokens: pick("maxTotalTokens"),
     maxDurationMs: pick("maxDurationMs"),
+    maxRepairAttempts: repair.found && repair.value !== undefined ? repair.value : DEFAULT_MAX_REPAIR_ATTEMPTS,
+    maxSameFailures: same.found && same.value !== undefined ? same.value : DEFAULT_MAX_SAME_FAILURES,
   };
 }
 
@@ -222,7 +237,7 @@ export interface TaskDefaults {
 }
 
 /** Runs a validation and turns an InputError into a failed outcome. */
-function attempt(build: () => TaskSpec): ParseTaskOutcome {
+function attempt(build: () => ResolvedTaskSpec): ParseTaskOutcome {
   try {
     return { ok: true, task: build() };
   } catch (error) {
@@ -300,7 +315,7 @@ export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
 }
 
 /** Adds the config file's secret names to the task's, without duplicates. */
-export function withConfigSecrets(task: TaskSpec, config: CodarynConfig | null): TaskSpec {
+export function withConfigSecrets(task: ResolvedTaskSpec, config: CodarynConfig | null): ResolvedTaskSpec {
   const extra = (config?.secretEnv ?? []).filter((name) => !task.privacy.secretEnv.includes(name));
   if (extra.length === 0) return task;
   return { ...task, privacy: { secretEnv: [...task.privacy.secretEnv, ...extra] } };

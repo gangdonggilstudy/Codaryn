@@ -15,12 +15,12 @@ import type {
   EngineDeps,
   EngineResult,
   ModelProvider,
-  TaskSpec,
+  ResolvedTaskSpec,
   Workspace,
 } from "../contracts/index.js";
 
 export interface AssemblyInput {
-  readonly task: TaskSpec;
+  readonly task: ResolvedTaskSpec;
   readonly runId: string;
   readonly model: ModelProvider;
   /** Secret values registered for this run. Never printed or recorded. */

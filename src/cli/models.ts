@@ -60,7 +60,11 @@ export interface ModelsEnvironment {
   readonly readFile: (file: string) => Promise<string>;
   /** Loads `--vars-file` into `env` (process.loadEnvFile in the real CLI). */
   readonly loadEnvFile: (file: string) => void;
-  /** `listAnthropicModels`. Absent: listing is not connected in this build, and nothing is sent. */
+  /**
+   * `anthropicModelLister` (provider.ts, i.e. `listAnthropicModels`); main.ts always passes it.
+   * Absent: listing is not connected, and nothing is sent. It is never filled in by default, so a
+   * test that leaves it out cannot reach the network.
+   */
   readonly listModels?: ListAnthropicModels;
   /** Passed to `listModels`. Tests inject `fetch` here. */
   readonly anthropicDeps?: AnthropicProviderDeps;

@@ -349,3 +349,45 @@ test("an invalid write without expectedHash is rejected before policy and execut
   assert.equal(h.tools.executed.length, 0);
   assert.equal(h.journal.ofType("tool_decision")[0]?.code, "invalid_args");
 });
+
+test("every rejected call is recorded as a masked ok:false tool_result after its tool_decision", async () => {
+  const policy = new FakePolicy({
+    requested: (call) =>
+      call.id === "denied-requested" ? { allowed: false, permission: "command", code: "command_not_allowed" } : { allowed: true },
+    effective: (call) =>
+      call.id === "denied-effective" ? { allowed: false, permission: "path", code: "outside_root" } : { allowed: true },
+  });
+  const calls = [
+    { id: "unknown", name: "delete_everything", args: {} },
+    { id: "invalid", name: "read_file", args: { path: 7 } },
+    { id: "denied-requested", name: "run_command", args: { executable: "rm", args: [] } },
+    { id: "unresolved", name: "run_command", args: { executable: FAKE_TOKEN, args: [] } },
+    readCall("denied-effective", `${FAKE_TOKEN}/x.txt`),
+  ];
+  const expected: Record<string, string> = {
+    unknown: "unknown_tool",
+    invalid: "invalid_args",
+    "denied-requested": "policy_denied",
+    unresolved: "unresolved_token",
+    "denied-effective": "policy_denied",
+  };
+  const h = harness({ policy, steps: [() => response(calls), () => finalAnswer()] });
+  await runTask(h.deps);
+  assert.equal(h.tools.executed.length, 0);
+
+  for (const call of calls) {
+    const decisionIndex = h.journal.events.findIndex((event) => event.type === "tool_decision" && event.callId === call.id);
+    const resultIndex = h.journal.events.findIndex((event) => event.type === "tool_result" && event.result.callId === call.id);
+    assert.ok(decisionIndex >= 0, `decision for ${call.id}`);
+    assert.ok(resultIndex > decisionIndex, `tool_result after tool_decision for ${call.id}`);
+    const recorded = h.journal.events[resultIndex];
+    assert.ok(recorded?.type === "tool_result");
+    assert.equal(recorded.result.ok, false);
+    assert.equal(recorded.result.errorCode, expected[call.id]);
+  }
+  assert.equal(h.journal.ofType("tool_result").length, calls.length);
+  assert.equal(JSON.stringify(h.journal.events).includes(FAKE_SECRET), false);
+
+  const sent = h.model.requests[1]?.messages.at(-1);
+  assert.equal(sent?.role === "tool" ? sent.results.length : 0, calls.length);
+});

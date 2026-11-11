@@ -1,5 +1,7 @@
 /**
- * Engine: runs one task once. It repeats model and tool calls, then lets verifiers decide.
+ * Engine: runs one task. It repeats model and tool calls, then lets verifiers decide.
+ * When a verification fails and repairs are left, the masked, cut evidence goes back to the
+ * model and the loop continues (phase 2, R-1 to R-4). All limits cover the whole run.
  * It knows no Git, no test runner and no provider format.
  *
  * Everything bound for a model or the journal goes through `privacy.mask` first.
@@ -39,11 +41,14 @@ import type {
   VerifierOutcome,
   VerifierResult,
 } from "../contracts/index.js";
+import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature } from "./feedback.js";
 import { RunState } from "./state.js";
 import { validateToolArgs } from "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { validateToolArgs } from "./validate-args.js";
+export { REPAIR_HEADER, buildRepairFeedback, cutMiddle, failureSignature } from "./feedback.js";
+export type { CutText, RepairFeedback } from "./feedback.js";
 
 /**
  * Fixed instructions for the model. It contains no task data.
@@ -79,6 +84,7 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   "denied by policy: ",
   "token not usable in field: ",
   "malformed model response: stop=",
+  ...REPAIR_FIXED_TEXTS,
 ];
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -90,6 +96,11 @@ interface End {
 const MASKING_FAILED: End = { status: "failed", reason: "model_error" };
 const CANCELLED: End = { status: "cancelled", reason: "cancelled" };
 const UNKNOWN_OUTCOME: End = { status: "needs-input", reason: "unknown_tool_outcome" };
+
+/** A verification that failed in a way a repair may fix. */
+interface RepairNeeded {
+  readonly failed: readonly VerifierResult[];
+}
 
 function isEnd(value: object): value is End {
   return "status" in value && "reason" in value;
@@ -114,6 +125,14 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const notices: MaskedText[] = [];
   /** Results by call id. A call id that was already answered is never executed again. */
   const answered = new Map<string, ToolResult>();
+  /** The model-bound conversation. It keeps growing across repairs. */
+  const messages: ModelMessage[] = [];
+  /** How many messages earlier `model_request` records already hold. */
+  let sent = 0;
+  let repairAttempts = 0;
+  /** Signature of the latest failed verification, and how many times in a row it occurred. */
+  let lastSignature: string | null = null;
+  let sameFailures = 0;
 
   // Real-time deadline so that a model or tool call in flight is interrupted at the duration limit.
   const deadline = new AbortController();
@@ -334,7 +353,26 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     return result;
   };
 
-  const converse = async (): Promise<End | null> => {
+  /** Why no further model call may start, or null when one may. */
+  const budgetStop = (): End | null => {
+    const stop = interrupted();
+    if (stop !== null) return stop;
+    if (modelTurns >= limits.maxModelTurns) {
+      return { status: "budget-exhausted", reason: "max_model_turns" };
+    }
+    if (
+      limits.maxTotalTokens !== null &&
+      inputTokens !== null &&
+      outputTokens !== null &&
+      inputTokens + outputTokens >= limits.maxTotalTokens
+    ) {
+      return { status: "budget-exhausted", reason: "max_total_tokens" };
+    }
+    return null;
+  };
+
+  /** Masks the fixed instructions and the goal, records run_started and opens the conversation. */
+  const start = async (): Promise<MaskedText | End> => {
     const system = mask(SYSTEM_PROMPT);
     const goal = mask(task.goal);
     const workflow = mask(task.workflow);
@@ -349,24 +387,15 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       limits,
     });
     state.transition("running");
+    messages.push({ role: "user", content: goal });
+    return system;
+  };
 
-    const messages: ModelMessage[] = [{ role: "user", content: goal }];
-    let sent = 0;
-
+  /** Model and tool calls until the model replies without tool calls (null) or the run ends. */
+  const converse = async (system: MaskedText): Promise<End | null> => {
     for (;;) {
-      const stop = interrupted();
+      const stop = budgetStop();
       if (stop !== null) return stop;
-      if (modelTurns >= limits.maxModelTurns) {
-        return { status: "budget-exhausted", reason: "max_model_turns" };
-      }
-      if (
-        limits.maxTotalTokens !== null &&
-        inputTokens !== null &&
-        outputTokens !== null &&
-        inputTokens + outputTokens >= limits.maxTotalTokens
-      ) {
-        return { status: "budget-exhausted", reason: "max_total_tokens" };
-      }
 
       const turn = modelTurns + 1;
       await record({
@@ -420,7 +449,11 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       }
 
       const wantsTools = response.toolCalls.length > 0;
-      if (response.stop === "final" && !wantsTools) return null;
+      if (response.stop === "final" && !wantsTools) {
+        // Kept so that a repair message follows the model's own reply.
+        messages.push({ role: "assistant", text, toolCalls: [] });
+        return null;
+      }
       if (response.stop !== "tool_calls" || !wantsTools) {
         const message = mask(`malformed model response: stop=${response.stop}`);
         if (message !== null) {
@@ -452,13 +485,18 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     }
   };
 
-  const verify = async (): Promise<End> => {
+  /**
+   * Runs every verifier once (one round). `EngineResult.verifiers` holds the latest round.
+   * Returns the end of the run, or the failed results when a repair may follow.
+   */
+  const verify = async (): Promise<End | RepairNeeded> => {
     state.transition("verifying");
     if (task.verifiers.length === 0) {
       const notice = mask(NO_VERIFIER_NOTICE);
       if (notice !== null) notices.push(notice);
       return { status: "needs-input", reason: "no_verifier" };
     }
+    verifierResults.length = 0;
     const outcomes: VerifierOutcome[] = [];
     for (const config of task.verifiers) {
       const stop = interrupted();
@@ -495,15 +533,64 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       await record({ type: "verifier_result", result });
     }
     if (signal.aborted) return CANCELLED;
-    if (outcomes.includes("fail")) return { status: "failed", reason: "verifier_failed" };
-    if (outcomes.includes("inconclusive")) {
-      return { status: "needs-input", reason: "verifier_inconclusive" };
+    if (!outcomes.includes("fail")) {
+      return outcomes.includes("inconclusive")
+        ? { status: "needs-input", reason: "verifier_inconclusive" }
+        : { status: "done", reason: "verified" };
     }
-    return { status: "done", reason: "verified" };
+    // R-1: a verifier that could not decide is not something the model can fix, so no repair.
+    if (outcomes.includes("inconclusive")) return { status: "failed", reason: "verifier_failed" };
+    return decideRepair(verifierResults.filter((result) => result.outcome === "fail"));
+  };
+
+  /** R-2, R-3: a repair only while attempts are left and the same failure has not repeated too often. */
+  const decideRepair = (failed: readonly VerifierResult[]): End | RepairNeeded => {
+    const signature = failureSignature(failed);
+    sameFailures = signature === lastSignature ? sameFailures + 1 : 1;
+    lastSignature = signature;
+    if (repairAttempts >= limits.maxRepairAttempts) return { status: "failed", reason: "verifier_failed" };
+    if (sameFailures >= limits.maxSameFailures) return { status: "failed", reason: "repeated_failure" };
+    return { failed: [...failed] };
+  };
+
+  /**
+   * Starts a repair: records repair_started, goes back to running and adds the masked, cut
+   * evidence as the next user message. Nothing starts when no model call could follow.
+   */
+  const repair = async (needed: RepairNeeded): Promise<End | null> => {
+    const stop = budgetStop();
+    if (stop !== null) return stop;
+    const attempt = repairAttempts + 1;
+    const feedback = buildRepairFeedback(needed.failed, attempt, limits.maxRepairAttempts);
+    const content = mask(feedback.text);
+    if (content === null) return MASKING_FAILED;
+    repairAttempts = attempt;
+    await record({
+      type: "repair_started",
+      attempt,
+      failedVerifiers: needed.failed.map((result) => result.id),
+      feedbackTruncated: feedback.truncated,
+    });
+    state.transition("running");
+    messages.push({ role: "user", content });
+    return null;
+  };
+
+  const runLoop = async (): Promise<End> => {
+    const system = await start();
+    if (typeof system !== "string") return system;
+    for (;;) {
+      const conversed = await converse(system);
+      if (conversed !== null) return conversed;
+      const verdict = await verify();
+      if (isEnd(verdict)) return verdict;
+      const repaired = await repair(verdict);
+      if (repaired !== null) return repaired;
+    }
   };
 
   try {
-    const end = (await converse()) ?? (await verify());
+    const end = await runLoop();
     if (state.status === "created" && end.status !== "cancelled") state.transition("running");
     state.transition(end.status);
 
@@ -513,6 +600,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       inputTokens,
       outputTokens,
       durationMs: clock.now() - startedAt,
+      repairAttempts,
     };
     await record({ type: "run_finished", status: end.status, reason: end.reason, usage });
     return {

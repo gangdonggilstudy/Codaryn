@@ -98,8 +98,27 @@ function parseModel(value: unknown, baseDir: string): ModelConfig {
   return fail('model.provider must be "scripted" or "anthropic"');
 }
 
+/**
+ * `policy.protectedPaths`: relative path prefixes, `/` or `\` separated, without a `..` segment.
+ * Kept as written; the policy gate compares them with resolved paths (R-5).
+ */
+function parseProtectedPaths(value: unknown): string[] {
+  const field = "policy.protectedPaths";
+  const entries = strings(value, field);
+  for (const [index, entry] of entries.entries()) {
+    const at = `${field}[${index}]`;
+    if (entry.trim().length === 0) fail(`${at} must be a non-empty path`);
+    if (entry.includes("\0")) fail(`${at} must not contain a NUL character`);
+    if (path.posix.isAbsolute(entry) || path.win32.isAbsolute(entry) || /^[A-Za-z]:/.test(entry)) {
+      fail(`${at} must be relative to the workspace root`);
+    }
+    if (entry.split(/[\\/]/).includes("..")) fail(`${at} must not contain a '..' segment`);
+  }
+  return entries;
+}
+
 export function parsePolicy(value: unknown): PolicyConfig {
-  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens"]);
+  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths"]);
   if (!Array.isArray(rec["commands"])) fail("policy.commands must be an array");
   const commands = (rec["commands"] as unknown[]).map((item, index): CommandRule => {
     const field = `policy.commands[${index}]`;
@@ -114,12 +133,33 @@ export function parsePolicy(value: unknown): PolicyConfig {
   if (rec["network"] !== "deny") fail('policy.network must be "deny"');
   if (rec["destructive"] !== "deny") fail('policy.destructive must be "deny"');
   if (typeof rec["restorePathTokens"] !== "boolean") fail("policy.restorePathTokens must be a boolean");
-  return { commands, network: "deny", destructive: "deny", restorePathTokens: rec["restorePathTokens"] };
+  const protectedPaths = rec["protectedPaths"] === undefined ? undefined : parseProtectedPaths(rec["protectedPaths"]);
+  return {
+    commands,
+    network: "deny",
+    destructive: "deny",
+    restorePathTokens: rec["restorePathTokens"],
+    ...(protectedPaths === undefined ? {} : { protectedPaths }),
+  };
 }
 
-const LIMIT_FIELDS = ["maxModelTurns", "maxToolCalls", "maxTotalTokens", "maxDurationMs"] as const;
+const LIMIT_FIELDS = [
+  "maxModelTurns",
+  "maxToolCalls",
+  "maxTotalTokens",
+  "maxDurationMs",
+  "maxRepairAttempts",
+  "maxSameFailures",
+] as const;
 
 type MutableLimits = { -readonly [K in keyof Limits]?: Limits[K] };
+
+function nonNegative(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    fail(`${field} must be an integer of 0 or more`);
+  }
+  return value;
+}
 
 /** Validates the limit fields that are present. Absent fields stay absent. */
 export function parsePartialLimits(value: unknown): Partial<Limits> {
@@ -128,10 +168,14 @@ export function parsePartialLimits(value: unknown): Partial<Limits> {
   for (const field of LIMIT_FIELDS) {
     if (!Object.hasOwn(rec, field)) continue;
     const item = rec[field];
+    const name = `limits.${field}`;
     if (field === "maxTotalTokens") {
-      limits.maxTotalTokens = item === null ? null : positive(item, `limits.${field}`);
+      limits.maxTotalTokens = item === null ? null : positive(item, name);
+    } else if (field === "maxRepairAttempts") {
+      limits.maxRepairAttempts = nonNegative(item, name);
     } else {
-      limits[field] = positive(item, `limits.${field}`);
+      // maxSameFailures, like the budget limits, is at least 1.
+      limits[field] = positive(item, name);
     }
   }
   return limits;
@@ -142,26 +186,24 @@ export function parsePartialLimits(value: unknown): Partial<Limits> {
  * up set. The repair limits fall back to DEFAULT_MAX_REPAIR_ATTEMPTS and DEFAULT_MAX_SAME_FAILURES.
  */
 export function mergeLimits(own: Partial<Limits> | undefined, defaults: Partial<Limits> | undefined): ResolvedLimits {
-  const lookup = <K extends keyof Limits>(field: K): { found: true; value: Limits[K] } | { found: false } => {
-    if (own !== undefined && Object.hasOwn(own, field)) return { found: true, value: own[field] as Limits[K] };
-    if (defaults !== undefined && Object.hasOwn(defaults, field)) return { found: true, value: defaults[field] as Limits[K] };
-    return { found: false };
+  const find = <K extends keyof Limits>(field: K): Limits[K] | undefined => {
+    if (own !== undefined && Object.hasOwn(own, field)) return own[field];
+    if (defaults !== undefined && Object.hasOwn(defaults, field)) return defaults[field];
+    return undefined;
   };
-  const pick = <K extends keyof Limits>(field: K): Limits[K] => {
-    const hit = lookup(field);
-    if (hit.found) return hit.value;
+  const pick = <K extends "maxModelTurns" | "maxToolCalls" | "maxTotalTokens" | "maxDurationMs">(field: K): Limits[K] => {
+    const value = find(field);
+    if (value !== undefined) return value;
     const hint = field === "maxTotalTokens" ? " (use null for no limit)" : "";
     return fail(`limits.${field} is not set in the task or the config file${hint}`);
   };
-  const repair = lookup("maxRepairAttempts");
-  const same = lookup("maxSameFailures");
   return {
     maxModelTurns: pick("maxModelTurns"),
     maxToolCalls: pick("maxToolCalls"),
     maxTotalTokens: pick("maxTotalTokens"),
     maxDurationMs: pick("maxDurationMs"),
-    maxRepairAttempts: repair.found && repair.value !== undefined ? repair.value : DEFAULT_MAX_REPAIR_ATTEMPTS,
-    maxSameFailures: same.found && same.value !== undefined ? same.value : DEFAULT_MAX_SAME_FAILURES,
+    maxRepairAttempts: find("maxRepairAttempts") ?? DEFAULT_MAX_REPAIR_ATTEMPTS,
+    maxSameFailures: find("maxSameFailures") ?? DEFAULT_MAX_SAME_FAILURES,
   };
 }
 

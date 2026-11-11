@@ -4,6 +4,7 @@
  * File originals kept for revert (`SNAPSHOTS_DIR_NAME`) are never part of the journal.
  */
 
+import type { IntegrityPhase } from "./integrity.js";
 import type { Limits, ModelProviderName } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ModelMessage, ModelStop, ModelUsage, MaskedToolCall } from "./model.js";
@@ -90,6 +91,13 @@ export type JournalEvent =
       readonly failedVerifiers: readonly string[];
       /** True when evidence in the repair message was cut at its share of MAX_FEEDBACK_BYTES. */
       readonly feedbackTruncated: boolean;
+    }
+  | {
+      /** U-1: one integrity check, recorded only when `EngineDeps.integrity` is present. */
+      readonly type: "integrity_checked";
+      readonly phase: IntegrityPhase;
+      /** `IntegrityChecker.compare` for this check, masked, in its order. Empty: nothing changed. */
+      readonly changed: readonly MaskedText[];
     }
   | {
       readonly type: "run_finished";

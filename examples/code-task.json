@@ -9,10 +9,18 @@
     "commands": [{ "executable": "node", "argsPrefix": ["--test"], "allowExtraArgs": false }],
     "network": "deny",
     "destructive": "deny",
-    "restorePathTokens": false
+    "restorePathTokens": false,
+    "protectedPaths": ["sum.test.mjs"]
   },
   "privacy": { "secretEnv": [] },
-  "limits": { "maxModelTurns": 12, "maxToolCalls": 24, "maxTotalTokens": 150000, "maxDurationMs": 600000 },
+  "limits": {
+    "maxModelTurns": 12,
+    "maxToolCalls": 24,
+    "maxTotalTokens": 150000,
+    "maxDurationMs": 600000,
+    "maxRepairAttempts": 2,
+    "maxSameFailures": 2
+  },
   "verifiers": [
     { "id": "tests", "kind": "command", "executable": "node", "args": ["--test"], "timeoutMs": 120000 },
     {

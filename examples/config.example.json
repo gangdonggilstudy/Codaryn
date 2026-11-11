@@ -8,13 +8,16 @@
     "maxModelTurns": 12,
     "maxToolCalls": 24,
     "maxTotalTokens": 150000,
-    "maxDurationMs": 600000
+    "maxDurationMs": 600000,
+    "maxRepairAttempts": 2,
+    "maxSameFailures": 2
   },
   "policy": {
     "commands": [{ "executable": "node", "argsPrefix": ["--test"], "allowExtraArgs": false }],
     "network": "deny",
     "destructive": "deny",
-    "restorePathTokens": false
+    "restorePathTokens": false,
+    "protectedPaths": ["test", "tests"]
   },
   "verifiers": [
     { "id": "tests", "kind": "command", "executable": "node", "args": ["--test"], "timeoutMs": 120000 }

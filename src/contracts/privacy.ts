@@ -70,10 +70,12 @@ export interface PrivacyGateway {
 
   /**
    * Turns a masked next text back into local text.
-   * The token sequence of `maskedNext` must equal the token sequence of `mask(original)`:
-   * same tokens, same order, same count. Each token is replaced by the original bytes of the
-   * protected span at the same position. A new, duplicated, moved, removed or altered token
-   * rejects the whole change. With `original: null` any token is a violation.
+   * Both `mask(original)` and `maskedNext` are split into lines at LF. The lines that contain a
+   * token must be identical in content and order in both: a line holding a secret cannot be
+   * changed, moved, duplicated or removed. Lines without a token may be added, removed or changed
+   * freely. Protected lines are restored to the original bytes of that line. Any difference in
+   * the token lines rejects the whole change with `protected_span_violation`.
+   * With `original: null` any token is a violation.
    */
   rebuildDocument(request: RebuildDocumentRequest): RebuildDocumentOutcome;
 }

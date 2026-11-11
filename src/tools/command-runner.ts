@@ -17,6 +17,10 @@
  * closed, even when a descendant still holds them. The tree is ended (time limit or cancel) only
  * while the child is alive; an ended child's PID is never signalled or passed to taskkill.
  *
+ * Cut output (V-2): when the run settles before a stream was read to its end (pipes closed after
+ * the grace or the close wait), or a stop ended the command, that output may end inside a secret.
+ * It is marked `truncated` (per stream in `cutStreams`), so the caller drops its untrusted end.
+ *
  * Known limits (not OS isolation):
  * - Descendants that are still running when the child exits (a server started in the background,
  *   `start /b`, a detached process) are not ended. They can outlive the run and the CLI.
@@ -61,19 +65,38 @@ export interface CommandSpawnFailure {
   readonly message: string;
 }
 
+/** Per stream: true when its capture may end at an arbitrary byte (V-2). */
+export interface CutStreams {
+  readonly stdout: boolean;
+  readonly stderr: boolean;
+}
+
+/**
+ * What the runner returns: the shared payload, plus which stream was cut. `cutStreams` is not part
+ * of the tool contract; `run_command` drops it. A runner without it (a test double) has both
+ * streams treated as cut whenever `truncated` is set.
+ */
+export interface CommandRunPayload extends RunCommandPayload {
+  readonly cutStreams?: CutStreams;
+}
+
 /**
  * Shared shape. `src/verify` declares the same shape in its own directory.
  *
  * The runner returns RAW output: each stream holds up to MAX_COMMAND_OUTPUT_BYTES plus
- * COMMAND_CAPTURE_SLACK_BYTES, and `truncated` means bytes beyond that capture were dropped.
- * The slack lets the caller mask first and cut afterwards, so a secret that crosses the cap is
- * still whole when it is masked. `run_command` masks and cuts to MAX_COMMAND_OUTPUT_BYTES.
+ * COMMAND_CAPTURE_SLACK_BYTES. `truncated` means the output may end at an arbitrary byte, possibly
+ * inside a secret (V-2): bytes beyond the capture were dropped, or the runner settled before it had
+ * read a stream to its end (pipes closed after the exit grace or the close wait, or the command was
+ * ended by its time limit or a cancel). Output read to its end keeps `truncated: false`.
+ * The slack lets the caller mask first and cut afterwards, so a secret that crosses the cut is
+ * still whole when it is masked. `run_command` masks, drops the untrusted end and cuts to
+ * MAX_COMMAND_OUTPUT_BYTES.
  */
 export interface CommandRunner {
   run(
     request: CommandRunRequest,
     signal: AbortSignal,
-  ): Promise<RunCommandPayload | CommandSpawnFailure>;
+  ): Promise<CommandRunPayload | CommandSpawnFailure>;
 }
 
 export interface CommandRunnerOptions {
@@ -234,13 +257,24 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
       return new Promise((resolve) => {
         const stdout = new OutputCapture();
         const stderr = new OutputCapture();
-        const payload = (exitCode: number | null, timedOut: boolean): RunCommandPayload => ({
-          exitCode,
-          stdout: stdout.text(),
-          stderr: stderr.text(),
-          timedOut,
-          truncated: stdout.truncated || stderr.truncated,
-        });
+        /** Set when a stream delivered its end: everything written to it has been read. */
+        const ended = { stdout: false, stderr: false };
+        const payload = (exitCode: number | null, timedOut: boolean): CommandRunPayload => {
+          // V-2: a stream is cut when its capture dropped bytes, when a stop (time limit, cancel)
+          // ended the command at an arbitrary point, or when reading stopped before its end.
+          const cutStreams: CutStreams = {
+            stdout: stdout.truncated || stopping || !ended.stdout,
+            stderr: stderr.truncated || stopping || !ended.stderr,
+          };
+          return {
+            exitCode,
+            stdout: stdout.text(),
+            stderr: stderr.text(),
+            timedOut,
+            truncated: cutStreams.stdout || cutStreams.stderr,
+            cutStreams,
+          };
+        };
 
         let child: ChildProcess;
         try {
@@ -311,6 +345,12 @@ export function createCommandRunner(options: CommandRunnerOptions = {}): Command
 
         child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
         child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+        child.stdout?.on("end", () => {
+          ended.stdout = true;
+        });
+        child.stderr?.on("end", () => {
+          ended.stderr = true;
+        });
         child.on("spawn", () => {
           started = true;
         });

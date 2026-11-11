@@ -70,6 +70,9 @@ function cli(files: Record<string, unknown>, options: Partial<CliEnvironment> = 
       return typeof value === "string" ? value : JSON.stringify(value);
     },
     isDirectory: async (dir) => dir === path.join(BASE, "work"),
+    loadEnvFile: () => {
+      throw new Error("no env file in this test");
+    },
     clock: { now: () => Date.UTC(2026, 10, 12, 3, 15, 0) },
     randomBytes: (size) => new Uint8Array(size).fill(0xab),
     assemble,
@@ -86,7 +89,7 @@ describe("parseArgs", () => {
   test("accepts run with a task and an optional cancel file", () => {
     assert.deepEqual(parseArgs(["run", "--task", "t.json"]), {
       ok: true,
-      args: { command: "run", taskPath: "t.json", cancelFile: null },
+      args: { command: "run", input: { kind: "task", taskPath: "t.json" }, configPath: null, envFile: null, cancelFile: null },
     });
     const parsed = parseArgs(["run", "--cancel-file", "stop", "--task", "t.json"]);
     assert.ok(parsed.ok);
@@ -168,9 +171,13 @@ describe("runCli", () => {
     assert.equal(notConfigured.exitCode, 7);
     assert.equal(missing.assembled.length, 0);
 
+    // Phase 1b also needs an output cap. `createAnthropicProvider: null` keeps the unconnected path.
     const present = cli(
-      { "task.json": task },
-      { env: { CODARYN_TEST_SECRET: FAKE_SECRET, ANTHROPIC_API_KEY: FAKE_KEY, CODARYN_MODEL: "fake-model" } },
+      { "task.json": taskJson({ model: { provider: "anthropic", maxOutputTokens: 1024 } }) },
+      {
+        env: { CODARYN_TEST_SECRET: FAKE_SECRET, ANTHROPIC_API_KEY: FAKE_KEY, CODARYN_MODEL: "fake-model" },
+        createAnthropicProvider: null,
+      },
     );
     const notImplemented = await runCli(present.io);
     assert.equal(notImplemented.output.kind === "error" ? notImplemented.output.code : "", "provider_not_implemented");

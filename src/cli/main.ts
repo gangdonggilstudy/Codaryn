@@ -22,6 +22,8 @@ const outcome = await runCli({
       return false;
     }
   },
+  // C-2: only when --env-file is given. Variables already set in the environment win.
+  loadEnvFile: (file) => process.loadEnvFile(file),
   clock: { now: () => Date.now() },
   randomBytes: (size) => randomBytes(size),
   assemble: assembleRun,

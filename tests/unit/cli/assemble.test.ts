@@ -63,6 +63,9 @@ function io(base: string, extra: Partial<CliEnvironment> = {}): CliEnvironment {
         return false;
       }
     },
+    loadEnvFile: () => {
+      throw new Error("no env file in this test");
+    },
     clock: { now: () => Date.now() },
     randomBytes: (size) => randomBytes(size),
     assemble: assembleRun,

@@ -339,6 +339,11 @@ export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
   },
 };
 
+/**
+ * Created by `createToolRunner` (src/tools). Besides the workspace and the privacy gateway it
+ * takes an optional `changeRecorder` (`ChangeRecorder`, see changes.ts). When one is given,
+ * `write_file` hands it the file's original before writing, and does not write when that fails.
+ */
 export interface ToolRunner {
   /** Executes one call that already passed every check. Never throws for tool-level failures. */
   execute(call: EffectiveToolCall, signal: AbortSignal): Promise<RawToolOutcome>;

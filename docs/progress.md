@@ -9,11 +9,12 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | 작업 | 담당 페르소나 | pane | 브랜치 | 상태 |
 | --- | --- | --- | --- | --- |
 | A 기반과 공통 계약 | 수석 아키텍트, CLI 개발자 | w1:p1 | claude/cli-foundation | 완료. `cba57fa`, main `cc29b50`에 병합 |
-| B1 엔진·모의 모델·CLI | CLI 개발자 | w1:p1 | claude/core-engine | 배정 |
-| B2 도구·검증기·기록 | CLI 개발자 | w1:p6 | claude/core-tools | 배정 |
-| C1 민감정보 게이트 | 보안·개인정보 검토자 | w1:p5 | claude/security-core | 배정 |
-| C2 정책·작업 공간 | 보안·개인정보 검토자 | w1:p7 | claude/workspace-policy | 배정 |
-| D 독립 통합 검증 | 검증 엔지니어 | w1:p4 | claude/cli-verification | 배정. 최종 실행은 G3 뒤 |
+| B1 엔진·모의 모델·CLI | CLI 개발자 | w1:p1 | claude/core-engine | 진행 |
+| B2 도구·명령 실행기 | CLI 개발자 | w1:p6 | claude/core-tools | 진행 |
+| B3 검증기·기록·잠금 | CLI 개발자, 검증 엔지니어 | w1:p8 | claude/core-store | 진행 |
+| C1 민감정보 게이트 | 보안·개인정보 검토자 | w1:p5 | claude/security-core | 진행 |
+| C2 정책·작업 공간 | 보안·개인정보 검토자 | w1:p7 | claude/workspace-policy | 진행 |
+| D 독립 통합 검증 | 검증 엔지니어 | w1:p4 | claude/cli-verification | 진행. 최종 실행은 G3 뒤 |
 
 각 작업은 별도 worktree를 쓴다. 소유 파일은 배분 문서 1절, 수용 기준은 [작업 지시서](work-orders/phase-1a.md) 4절을 따른다.
 
@@ -22,7 +23,7 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 - G0 사용자 개발 지시와 공통 지침 반영: 완료.
 - G1 개발 환경: Windows, Node.js 26.13.0, npm 11.20.0, TypeScript 엄격 검사와 Node 기본 테스트 러너. 개발 의존성은 typescript 7.0.2, @types/node 26.6.6이다.
 - G2 기반 인수: 완료(2026-11-12, 임시 PM). 계약 11개 파일과 `docs/cli-contract.md`를 검토했다. 타입 검사와 빌드가 통과했고 계약에 Git이나 테스트 러너를 전제로 한 필드가 없다.
-- G3 구현 인수: 대기. G3a(B2, C1, C2 병합) 뒤 G3b(B1 조립 병합) 순서다.
+- G3 구현 인수: 대기. G3a(B2, B3, C1, C2 병합) 뒤 G3b(B1 조립 병합) 순서다.
 - G4 채택: 대기.
 
 ## 검증 기록
@@ -30,7 +31,9 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | 시점 | 위치 | 명령 | 결과 |
 | --- | --- | --- | --- |
 | G2 | main `cc29b50` | `npm ci`, `npm run typecheck`, `npm run build` | 통과 |
-| G2 | worktree 5개 | `npm ci`, `npx tsc -p tsconfig.json --noEmit` | 통과 |
+| G2 | worktree 6개 | `npm ci`, `npx tsc -p tsconfig.json --noEmit` | 통과 |
+| 배분 | main | `node scripts/check-secrets.mjs --tracked` | 발견 없음 |
+| 배분 | 임시 저장소 | 가짜 키와 `.env`를 스테이징해 `check-secrets.mjs --staged` 자체 시험 | 두 건 모두 탐지(종료 코드 1) |
 
 - 유닛 테스트와 프로세스 통합 테스트는 아직 0개이며 실행 결과가 없다. 기반 단계의 타입 검사 통과를 제품 테스트 통과로 보지 않는다.
 - 실제 API 검증은 실행하지 않았다(1b 미수행). 모의 모델을 이용한 오프라인 검증을 실제 API 성공으로 표시하지 않는다.
@@ -39,6 +42,7 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 
 - 2026-11-12 G2: 기반 계약을 재설계 없이 채택했다. 중단 시점의 파일이 타입 검사를 통과했고 문서 계약과 일치했다.
 - 2026-11-12: 작업 B를 B1/B2로, 작업 C를 C1/C2로 나눴다. 디렉터리 단위로 소유가 겹치지 않고 계약 인터페이스로만 연결되므로 병렬 진행이 가능하다. optional 탭의 빈 세션 p5, p6, p7을 사용자 승인에 따라 배정했다.
+- 2026-11-12: 사용자 지시에 따라 작업 B2에서 검증기·기록을 B3(p8)로 다시 나눴고, 검증 체계(배분 문서 5절)와 API 키 커밋 배제 수단(6절)을 추가했다.
 - 계약의 미정 항목에 대한 PM 결정 P-1~P-7은 배분 문서 3절에 있다.
 
 ## 남은 문제

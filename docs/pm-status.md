@@ -15,36 +15,39 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | 번호 | 시점 | 내용 | main 커밋 | push |
 | --- | --- | --- | --- | --- |
 | CP-1 | 인수 | 위임 확인, 이 문서 생성 | `789733f` | 완료 |
-| CP-2 | G2 | 기반 커밋 `cba57fa` 검토·병합, 작업자 worktree와 브랜치 준비, 배분 문서 작성 | `cc29b50`과 이 문서를 담은 다음 커밋 | 완료 |
+| CP-2 | G2 | 기반 커밋 `cba57fa` 검토·병합, 작업자 worktree와 브랜치 준비, 배분 문서 작성 | `cc29b50`, `35b5102` | 완료 |
+| CP-3 | 배분 | 여섯 작업(B1, B2, B3, C1, C2, D)을 Herdr로 전달. 검증 체계와 비밀 검사 스크립트·커밋 전 훅 추가 | 이 문서를 담은 커밋 | 완료 |
 
-## 현재 상태 (CP-2)
+## 현재 상태 (CP-3)
 
 - 단계 1a. G0, G1, G2는 열렸다. G3(구현 인수)와 G4(채택)는 대기다.
 - main에는 프로젝트 설정과 `src/contracts/**`, `docs/cli-contract.md`만 있다. 엔진, 도구, CLI, 테스트는 아직 없다.
 - 실행한 검증: main과 다섯 worktree에서 `npm ci`, `tsc --noEmit` 통과. main에서 `npm run build` 통과.
 - 실행하지 않은 검증: 유닛 테스트(0개), 프로세스 통합 테스트, 실제 API(1b 미수행).
-- 미커밋 파일: 없음(main과 모든 worktree가 깨끗한 상태에서 배분했다).
+- 사용자 추가 지시(2026-11-12): 빨리 개발 도구로 쓸 수 있게 진행, API 키는 커밋에서 배제, 열린 세션에 모듈을 나눠 배정, 검증 체계를 잘 갖출 것. 배분 문서 5절과 6절에 반영했다.
+- 여섯 작업자가 모두 작업 중이다. 각 worktree의 미커밋 파일은 작업 중인 변경이다.
+- 공용 Git 훅을 추가했다: `.git/hooks/pre-commit`과 `.git/hooks/check-secrets.mjs`(추적되지 않음, 모든 worktree에 적용).
 - 차단 요인: 없음.
 
 ## 세션
 
 | pane | tab | 작업 | worktree | 브랜치 | 기준 커밋 | 상태 |
 | --- | --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | B1 엔진·모의 모델·CLI, 역할 1 | `claude-design` | `claude/core-engine` | `cc29b50` | 배정 |
-| w1:p6 | optional | B2 도구·검증기·기록 | `claude-tools` | `claude/core-tools` | `cc29b50` | 배정 |
-| w1:p5 | optional | C1 민감정보 게이트 | `claude-quality` | `claude/security-core` | `cc29b50` | 배정 |
-| w1:p7 | optional | C2 정책·작업 공간 | `claude-workspace` | `claude/workspace-policy` | `cc29b50` | 배정 |
-| w1:p4 | main | D 독립 통합 검증 | `claude-operations` | `claude/cli-verification` | `cc29b50` | 배정 |
+| w1:p1 | main | B1 엔진·모의 모델·CLI, 역할 1 | `claude-design` | `claude/core-engine` | `cc29b50` | 진행 |
+| w1:p6 | optional | B2 도구·명령 실행기 | `claude-tools` | `claude/core-tools` | `cc29b50` | 진행 |
+| w1:p8 | optional | B3 검증기·기록·잠금 | `claude-store` | `claude/core-store` | `cc29b50` | 진행 |
+| w1:p5 | optional | C1 민감정보 게이트 | `claude-quality` | `claude/security-core` | `cc29b50` | 진행 |
+| w1:p7 | optional | C2 정책·작업 공간 | `claude-workspace` | `claude/workspace-policy` | `cc29b50` | 진행 |
+| w1:p4 | main | D 독립 통합 검증 | `claude-operations` | `claude/cli-verification` | `cc29b50` | 진행 |
 | w1:p3 | main | PM·통합 | main | `main` | — | 진행 |
-| w1:p8 | optional | 예비 | — | — | — | 미배정 |
 | w1:p2 | main | Codex | — | — | — | 대기(회수 권한 보유) |
 
 세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 보존된 이전 브랜치: `claude/cli-foundation`(기반, 병합됨), `claude/quality`, `claude/quality-ready` 등 초안 브랜치는 삭제하지 않았다.
 
 ## 다음 행동
 
-1. 다섯 작업자에게 배분을 전달하고 이해 확인을 받는다.
-2. B2, C1, C2의 커밋을 검토한다(소유 범위, 유닛 P0, 작성자와 메시지). 통과하면 main에 병합한다(G3a).
+1. 작업자 보고를 받는다.
+2. B2, B3, C1, C2의 커밋을 `scripts/review-branch.mjs`와 유닛 실행으로 검토한다. 통과하면 main에 병합한다(G3a).
 3. p1이 main을 병합해 조립을 끝내면 B1을 검토·병합한다(G3b).
 4. D의 통합 테스트를 실행하고 수용 기준 A1~A12와 대조한다(G4).
 5. 각 단계에서 이 문서와 progress.md를 갱신하고 push한다.

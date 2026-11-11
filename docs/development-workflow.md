@@ -11,11 +11,11 @@ Codex와 여러 Claude 세션이 함께 작업할 때의 배분, 격리, 인수�
 
 | worktree | 브랜치 | 담당 문서 범위 |
 | --- | --- | --- |
-| `D:\project\Codaryn\.worktrees\claude-design` | `claude/design` | 설계 문서(architecture, roadmap, decisions) |
-| `D:\project\Codaryn\.worktrees\claude-quality` | `claude/quality` | 품질 문서(privacy, testing, unit-test-plan) |
-| `D:\project\Codaryn\.worktrees\claude-operations` | `claude/operations` | `docs/personas.md`, `docs/development-workflow.md` |
+| `D:\project\Codaryn\.worktrees\claude-design` | `claude/design-ready` | 설계 담당 준비 공간 |
+| `D:\project\Codaryn\.worktrees\claude-quality` | `claude/quality-ready` | 보안·검증 담당 준비 공간 |
+| `D:\project\Codaryn\.worktrees\claude-operations` | `claude/operations-ready` | 개발 운영 담당 준비 공간 |
 
-claude-design과 claude-quality의 파일 목록은 문서 목록에 따른 구분이다. 실제 소유 파일은 각 작업 요청이 정하며, 다르면 작업 요청이 우선한다.
+준비용 브랜치는 문서 통합이 끝난 main에서 생성한다. 초안 브랜치 `claude/design`, `claude/quality`, `claude/operations`는 보존하며 이력을 재작성하지 않는다. 다음 작업은 Codex가 최신 main 기준의 작업 브랜치를 별도로 배정한 뒤 시작한다. 실제 소유 파일과 브랜치는 각 작업 요청이 정한다.
 
 - [관리] worktree는 파일 변경을 분리하는 수단이다. 파일 접근이나 네트워크를 막는 보안 샌드박스가 아니다. 다른 경로도 읽고 쓸 수 있으므로 격리는 절차로 지킨다.
 
@@ -52,12 +52,12 @@ Codex가 작성한다. 다음 항목을 모두 포함한다.
 목표: 민감정보 치환·복원 설계 초안 작성(문서 단계, 구현 없음)
 페르소나: 보안·개인정보 검토자
 worktree: D:\project\Codaryn\.worktrees\claude-quality
-브랜치: claude/quality
+브랜치: claude/task-privacy-doc
 소유 파일: docs/privacy.md
 기준: 치환 대상, 복원 권한, 대응표 보관 위치를 확정/관리/미정으로 구분.
       git diff --check 통과, 문서 자체 검토 완료
 한도: 150줄 이내. API 호출·패키지 설치 금지. 자기 브랜치에 한 커밋, push 금지.
-의존: docs/architecture.md(claude/design, 읽기 전용)
+의존: docs/architecture.md(main 통합본, 읽기 전용)
 ```
 
 ## 4. 사전 교육과 이해 확인
@@ -116,7 +116,7 @@ worktree들은 하나의 저장소를 공유하지만 모든 것이 공용은 �
 
 ```
 페르소나: Development Process Architect
-worktree/브랜치: D:\project\Codaryn\.worktrees\claude-operations / claude/operations
+worktree/브랜치: D:\project\Codaryn\.worktrees\claude-operations / claude/task-process-doc
 적용 지침: (핵심 3개)
 파일: docs/personas.md, docs/development-workflow.md
 검토: git diff --check 통과, 자체 검토 완료 / 제품 테스트·실제 API: 미실행(문서 단계)

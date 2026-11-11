@@ -124,6 +124,8 @@ node dist/src/cli/main.js revert --workspace <디렉터리> --run <runId>
 
 stdout에는 JSON 한 줄만 쓴다. `run`은 `CliOutput`, `revert`는 `RevertOutput` 또는 `CliErrorOutput`이다(합쳐서 `CommandOutput`). 진행 표시는 stderr다.
 
+- 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
+
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
@@ -237,7 +239,7 @@ stdout에는 JSON 한 줄만 쓴다. `run`은 `CliOutput`, `revert`는 `RevertOu
 | 요청 시간 제한, 재시도 | 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`(600000), `DEFAULT_MAX_RETRIES`(2) | 기본값 |
 | 한도 | 필드마다 task `limits` → 설정 `limits` | task 형식은 `invalid_task`, 간편 형식은 `invalid_config`(C-6). 재수정 한도 둘은 0과 2 |
 
-해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. 키도 비밀로 등록하므로 파일 내용이나 명령 출력에 나타나면 가려진다.
+해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. `ANTHROPIC_API_KEY`가 설정되어 있으면(앞뒤 공백을 뗀 값) 제공자와 관계없이 scripted 실행에서도 비밀로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2).
 
 ### 키 거부 (`key_in_file`)
 

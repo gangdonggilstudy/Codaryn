@@ -2,19 +2,22 @@
 /**
  * Process entry point (`bin.codaryn` in package.json). Writes exactly one output to stdout and
  * exits with its code: one JSON line for `run` and `revert` (and errors of every command), text
- * for `report`, `doctor`, `--help` and `--version` (`--json` makes report and doctor print JSON).
- * `run` writes progress lines to stderr unless `--quiet` is given (U-8).
+ * for `report`, `doctor`, `models`, `--help` and `--version` (`--json` makes report, doctor and
+ * models print JSON). `run` writes progress lines to stderr unless `--quiet` is given (U-8).
+ * `models` may ask for a number at a terminal (Y-3); the question goes to stdout.
  * Any exception becomes `internal_error` (exit code 70) without its text or stack (S-6).
  */
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { revertRun } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runDoctor } from "./doctor.js";
+import { runModels } from "./models.js";
 import { renderOutcome, runGuardedCommand } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { helpRequest, helpText, versionText } from "./help.js";
@@ -43,6 +46,18 @@ const isFile = async (file: string): Promise<boolean> => {
 const clock = { now: () => Date.now() };
 const random = (size: number): Uint8Array => randomBytes(size);
 const readText = (file: string): Promise<string> => readFile(file, "utf8");
+
+/** One line typed at the terminal, or null when the input ends first. */
+async function askLine(question: string): Promise<string | null> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await prompt.question(question);
+  } catch {
+    return null;
+  } finally {
+    prompt.close();
+  }
+}
 
 // A closed stderr (EPIPE) must not end a run: progress is best effort.
 process.stderr.on("error", () => {});
@@ -75,6 +90,19 @@ async function dispatch(): Promise<CommandOutcome> {
       });
     case "report":
       return runReport({ argv, cwd: process.cwd(), env: process.env });
+    case "models":
+      return runModels({
+        argv,
+        env: process.env,
+        cwd: process.cwd(),
+        readFile: readText,
+        // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
+        loadEnvFile: (file) => process.loadEnvFile(file),
+        // Y-1: listAnthropicModels (src/model/anthropic, p5) is connected once it is merged.
+        // Until then the command stops with provider_not_implemented and sends nothing.
+        // Y-3: the number is asked only when both stdin and stdout are terminals.
+        ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask: askLine } : {}),
+      });
     case "doctor":
       return runDoctor({
         argv,

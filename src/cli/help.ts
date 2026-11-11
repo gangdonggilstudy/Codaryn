@@ -3,9 +3,9 @@
  * (U-7). Plain text on stdout, exit code 0. Nothing is read except package.json for the version.
  */
 
-import { DOCTOR_USAGE, REPORT_USAGE, REVERT_USAGE, RUN_USAGE } from "./args.js";
+import { DOCTOR_USAGE, MODELS_USAGE, REPORT_USAGE, REVERT_USAGE, RUN_USAGE } from "./args.js";
 
-export const COMMANDS = ["run", "revert", "report", "doctor"] as const;
+export const COMMANDS = ["run", "revert", "report", "doctor", "models"] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
 export function isCommandName(value: string | undefined): value is CommandName {
@@ -21,6 +21,7 @@ const GENERAL_HELP = [
   `  ${REVERT_USAGE}`,
   `  ${REPORT_USAGE}`,
   `  ${DOCTOR_USAGE}`,
+  `  ${MODELS_USAGE}`,
   "  codaryn --help | codaryn help <command> | codaryn <command> --help",
   "  codaryn --version",
   "",
@@ -63,9 +64,22 @@ const COMMAND_HELP: { readonly [C in CommandName]: readonly string[] } = {
     "Checks what a run would need without running one: Node.js version, config, variables and",
     "task files, whether the key is set (never its value), model and limits, file locations,",
     "whether allowed commands are found, the workspace and the install directory.",
-    "No network access is made and nothing is changed.",
+    "No network access is made and nothing is changed, so it does not check that the model",
+    "exists: `codaryn models` lists the models the key can use.",
     "  --json   print the result object as one JSON line instead",
     "Exit codes: ok 0, fail 1, warn 3, argument errors 2.",
+  ],
+  models: [
+    `usage: ${MODELS_USAGE}`,
+    "",
+    "Lists the models the key can use, numbered, with input and output token limits, and marks the",
+    "current model (CODARYN_MODEL, else the config file's model). This sends a request to the API:",
+    "the key comes from ANTHROPIC_API_KEY (or --vars-file) and goes into the request header only.",
+    "  --use <number|id>  write that model into the config file's model (--config or CODARYN_CONFIG);",
+    "                     other fields are kept; a missing config file is created",
+    "  --json             print the result object as one JSON line instead",
+    "At a terminal without --use and --json, it asks for a number. No workspace is needed.",
+    "Exit codes: 0, argument and config errors 2, no key 7, API request failed 8.",
   ],
 };
 

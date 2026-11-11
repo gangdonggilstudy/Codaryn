@@ -51,6 +51,10 @@ import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
 import { hideKeys } from "./text-safety.js";
 
+/** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
+export const MODELS_HINT = "`codaryn models` lists the models the key can use";
+export const MODEL_EXISTENCE_NOT_CHECKED = `whether the model exists is not checked (no network access); ${MODELS_HINT}`;
+
 /** The Node.js major version `package.json` requires (`engines.node`). */
 export const REQUIRED_NODE_MAJOR = 26;
 
@@ -425,9 +429,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     if (maxOutputTokens === null) missing.push("maxOutputTokens (task model.maxOutputTokens or config maxOutputTokens)");
     const baseUrl = envValue(env, CODARYN_API_BASE_URL_ENV);
     const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV);
-    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}`);
+    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}`);
     else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", baseUrlProblem.message);
-    else set("model", "ok", "the model and maxOutputTokens are set");
+    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}`);
   }
 
   // limits

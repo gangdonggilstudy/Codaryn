@@ -8,10 +8,11 @@ Codaryn은 로컬에서 실행하는 범용 작업 에이전트 CLI다. 코딩�
 
 ```powershell
 npm ci; npm run build
-Copy-Item .env.example .env                       # 편집기로 키와 CODARYN_MODEL을 채우고 BOM 없는 UTF-8로 저장
+New-Item -ItemType Directory -Force D:\codaryn-settings | Out-Null; Copy-Item .env.example D:\codaryn-settings\.env
+# 위 .env를 편집기로 열어 키와 CODARYN_MODEL을 채우고 BOM 없는 UTF-8로 저장한다. 설정은 작업 공간 밖에 둔다
 Copy-Item -Recurse examples D:\codaryn-examples   # 모델이 파일을 고치므로 예시는 사본에서 실행한다
 node dist/src/cli/main.js run --task D:\codaryn-examples\doc-task.json `
-  --config D:\codaryn-examples\config.example.json --env-file .env
+  --config D:\codaryn-examples\config.example.json --env-file D:\codaryn-settings\.env
 ```
 
 ## 문서

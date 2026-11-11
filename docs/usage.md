@@ -6,8 +6,7 @@ Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동
 
 ## 1. 요구 사항
 
-- Node.js 26 이상(`package.json`의 `engines`). 새 런타임 의존성은 없다.
-- 검증은 Windows에서 했다. 다른 OS에서의 동작은 확인하지 않았다.
+- Node.js 26 이상(`package.json`의 `engines`). 검증은 Windows에서 했고 다른 OS는 확인하지 않았다.
 - 실제 호출에는 Anthropic API 키와 모델 ID가 필요하다.
 
 ## 2. 설치와 빌드
@@ -22,10 +21,10 @@ node dist/src/cli/main.js run ... # 실행 형식은 4절
 
 - 키는 환경 변수 `ANTHROPIC_API_KEY`로만 받는다. 두 가지 방법 중 하나를 쓴다.
   - Windows 사용자 환경 변수에 등록한다.
-  - `.env`에 적고 `--env-file .env`로 읽는다.
+  - 작업 공간 밖의 `.env`에 적고 `--env-file <경로>`로 읽는다.
 - 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일에 키 이름의 필드(`apiKey`, `token`, `password` 등)나 Anthropic 키 모양의 값이 있으면 `key_in_file`로 바로 멈춘다.
-- `.env` 만들기:
-  - `Copy-Item .env.example .env` 후 편집기에서 값을 채운다. `.env`는 Git이 무시한다.
+- `.env` 만들기: `New-Item -ItemType Directory -Force D:\codaryn-settings`와 `Copy-Item .env.example D:\codaryn-settings\.env`로 만들고 편집기에서 값을 채운다.
+- 위치: `.env`, 설정 파일, task 파일은 **작업 공간 밖**에 둔다. 작업 공간 안에 두면 모델이 고쳐 다음 실행의 API 주소, 정책, 검증기, 한도를 바꿀 수 있다. 작업 공간 안의 이런 파일을 거부하는 검사는 준비 중이다.
   - BOM 없는 UTF-8로 저장한다. BOM이 있으면 `invalid_config`다. 메모장의 "UTF-8"은 BOM이 없다. PowerShell 5.1의 `Set-Content -Encoding utf8`은 BOM을 붙이므로 쓰지 않는다.
 - `.env`는 `--env-file`을 줄 때만 읽고 자동으로 찾지 않는다. 이미 설정된 환경 변수가 파일 값보다 우선한다.
 - 환경 변수:
@@ -70,10 +69,11 @@ node dist/src/cli/main.js run ... # 실행 형식은 4절
 ```powershell
 # 간편 형식: 정책·한도·검증기는 설정 파일에서, 제공자는 항상 anthropic
 node dist/src/cli/main.js run --workspace D:\work\notes --goal "README에 설치 절을 추가한다" `
-  --config D:\codaryn\config.json --env-file .env
+  --config D:\codaryn-settings\config.json --env-file D:\codaryn-settings\.env
 
-# task 파일 형식
-node dist/src/cli/main.js run --task D:\codaryn\tasks\fix-sum.json --config D:\codaryn\config.json --env-file .env
+# task 파일 형식 (task 파일도 작업 공간 밖에 둔다)
+node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json `
+  --config D:\codaryn-settings\config.json --env-file D:\codaryn-settings\.env
 ```
 
 - 예시를 직접 돌릴 때는 `examples` 폴더를 다른 곳에 복사한 뒤 그 사본의 task를 실행한다. 모델이 예시 파일을 실제로 고치고, 작업 공간에 `.codaryn/`가 생긴다.
@@ -86,11 +86,9 @@ node dist/src/cli/main.js run --task D:\codaryn\tasks\fix-sum.json --config D:\c
 stdout에는 JSON 한 줄만 나온다.
 
 - **실행이 시작되었으면 `kind:"run"`:**
-  - `status`, `reason`, `exitCode`.
+  - `status`, `reason`, `exitCode`, `journalPath`, `notices`.
   - `verifiers`: 검증기별 `outcome`, `evidence`, `checked`, `limits`.
-  - `changes`: 적용한 파일 변경과 해시.
-  - `usage`: 턴, 도구 호출, 토큰, 시간.
-  - `journalPath`, `notices`.
+  - `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간).
 - **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`. 메시지에는 값 대신 필드 이름만 적힌다.
 
 | 종료 코드 | 뜻 |
@@ -130,7 +128,7 @@ stdout에는 JSON 한 줄만 나온다.
             "network": "deny", "destructive": "deny", "restorePathTokens": false }
 ```
 
-- **`executable`:** 모델이 요청한 문자열과 정확히 같아야 허용된다. 셸 없이 실행한다.
+- **`executable`:** 모델이 요청한 문자열과 정확히 같아야 허용된다. `.exe`·`.com`은 셸 없이, `.cmd`·`.bat`은 11절의 조건을 만족할 때만 `cmd.exe`로 실행한다.
 - **`allowExtraArgs: false`(권장):** 인자가 `argsPrefix`와 정확히 같을 때만 허용한다. `true`면 접두가 같을 때 뒤의 인자를 무엇이든 허용하며, 그 인자 속 경로는 검사하지 않는다.
 - **규칙 작성 요령:** 필요한 명령마다 규칙을 하나씩 만든다. 인자까지 고정한다(예: `["--test"]`). `node -e`처럼 임의 코드를 실행하는 형태는 넣지 않는다.
 - **`network`, `destructive`:** `"deny"`만 있다. 네트워크 도구가 없다는 뜻일 뿐이며, 허용한 명령의 네트워크 사용을 막지는 않는다.
@@ -149,15 +147,15 @@ $env:CODARYN_MODEL = "<모델 ID>"
 node --test dist/tests/live/anthropic-live.js
 ```
 
-- 임시 폴더 문서에 절 하나를 추가하는 작업을 실행하고 `done`인지 확인한다.
+- 임시 폴더 문서에 절 하나를 추가하는 작업을 실행하고 `done`인지, stdout·stderr·기록에 키가 없는지 확인한다.
 - 고정 상한: 턴 4, 도구 호출 4, 출력 1024토큰/요청, 총 30000토큰, 3분, HTTP 요청 최대 8건.
-- stdout, stderr, 기록에 키가 남지 않았는지 검사한다.
 - 세 변수 중 하나라도 없으면 아무것도 보내지 않고 "건너뜀"으로 끝난다.
 
 ## 10. 투입 전 점검표
 
 - [ ] `npm run build`가 성공하고 Node 26 이상이다.
 - [ ] 키가 사용자 환경 변수나 `.env`(BOM 없음)에만 있다. task·설정 파일과 명령 기록에는 없다.
+- [ ] `.env`, 설정 파일, task 파일이 작업 공간 밖에 있다.
 - [ ] 9절 실제 호출 점검이 `done`이다.
 - [ ] 작업 공간이 Git으로 커밋되어 있거나 사본이다. Codaryn에는 되돌리기 명령이 없다.
 - [ ] 작업 공간 안의 비밀 값을 `secretEnv`로 등록했다.
@@ -171,7 +169,10 @@ node --test dist/tests/live/anthropic-live.js
 - **보호 줄 주변:** 그 줄 앞뒤의 다른 줄을 바꿔 여러 줄에 걸친 식의 의미가 달라지는 것은 막지 못한다.
 - **OS 격리 없음:** 허용한 명령은 사용자 권한으로 실행된다. 작업 공간 밖 파일 접근과 네트워크 사용을 OS 수준에서 막지 않는다.
 - **목록 밖 변형:** 7절 목록 밖의 변형, 다른 값과 함께 인코딩된 Base64, UTF-16·CP949 출력, 그 밖의 임의 변환은 가려지지 않는다. 아주 짧은 비밀은 엉뚱한 곳까지 가려질 수 있다.
-- **`.cmd`·`.bat` 실행:** Windows에서 실행할 수 없다(`spawn_failed`). `npm`, `npx` 대신 `node`를 직접 쓴다. 지원은 작업 중이다.
+- **실행 파일 찾기:** 이름은 자식에게 넘기는 `PATH`와 `PATHEXT`로 찾고, 작업 디렉터리는 찾지 않는다. `.exe`, `.com`, `.cmd`, `.bat`만 실행한다.
+- **`.cmd`·`.bat` 실행:** `cmd.exe`로 실행하되 다음 경우는 실행하지 않는다(`spawn_failed`). 정책 판정은 모델이 요청한 이름(예: `npm`)으로 하며, 실제 `npm` 실행은 아직 점검하지 않았다.
+  - 작업 공간 안의 스크립트(경로로 부르든 `PATH`로 찾든).
+  - 허용 문자 밖의 인자가 하나라도 있을 때. 인자는 영문, 숫자, `_ - . : / \ = + @ ~ #`만 쓸 수 있다. 공백, 따옴표, `& | < > ^ % ! ( )`, 쉼표, 세미콜론, 한글, 빈 인자는 안 된다. 스크립트 경로도 같은 집합과 공백만 쓸 수 있다.
 - **보호 경로 설정 없음:** 정책에 보호 경로 설정이 없어 모델이 테스트 파일도 고칠 수 있다. 검증기와 `changes`로 확인한다.
 - **파일 해시 노출:** 파일 해시가 모델과 기록에 남는다. 짧은 비밀이 든 파일은 추측 검증이 가능하다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
@@ -191,7 +192,7 @@ node --test dist/tests/live/anthropic-live.js
 | `needs-input`/`no_verifier` | 검증기를 추가한다 |
 | `budget-exhausted` | `reason`의 한도를 올리거나 목표를 작게 나눈다 |
 | 도구 `policy_denied` | 명령이나 경로가 정책 밖이다. 규칙과 `goal`의 명령이 정확히 같은지 본다 |
-| 도구 `spawn_failed` | 실행 파일을 찾지 못했거나 `.cmd`·`.bat`이다 |
+| 도구 `spawn_failed` | 실행 파일을 `PATH`에서 찾지 못했거나(`ENOENT`), 지원하지 않는 형식이거나, `.cmd`·`.bat`이 거부되었다(`script_refused`: 작업 공간 안의 스크립트이거나 허용 문자 밖의 인자) |
 
 ## 13. 준비 중
 

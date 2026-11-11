@@ -3,13 +3,14 @@
  * They replace other modules at the contract boundary only. All secrets are fake.
  */
 
-import { asRawText } from "../../../src/contracts/index.js";
+import { DEFAULT_MAX_REPAIR_ATTEMPTS, DEFAULT_MAX_SAME_FAILURES, asRawText } from "../../../src/contracts/index.js";
 import type {
   EffectiveToolCall,
   EngineDeps,
   JournalEvent,
   JsonObject,
   JsonValue,
+  Limits,
   MaskedText,
   ModelOutcome,
   ModelRequest,
@@ -18,7 +19,7 @@ import type {
   PrivacyGateway,
   RawToolOutcome,
   RawVerifierResult,
-  TaskSpec,
+  ResolvedTaskSpec,
   ToolCall,
   VerifierConfig,
   VerifierOutcome,
@@ -32,7 +33,11 @@ export const HASH_B = "b".repeat(64);
 
 export type Log = string[];
 
-export function makeTask(overrides: Partial<TaskSpec> = {}): TaskSpec {
+/** Task fields to override. Limits left out keep their defaults (repairs: 0 and 2, as the CLI resolves). */
+export type TaskOverrides = Partial<Omit<ResolvedTaskSpec, "limits">> & { readonly limits?: Partial<Limits> };
+
+export function makeTask(overrides: TaskOverrides = {}): ResolvedTaskSpec {
+  const { limits, ...rest } = overrides;
   return {
     schemaVersion: 1,
     id: "unit-task",
@@ -42,9 +47,17 @@ export function makeTask(overrides: Partial<TaskSpec> = {}): TaskSpec {
     model: { provider: "scripted", scriptPath: "/work/script.json" },
     policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: true },
     privacy: { secretEnv: [] },
-    limits: { maxModelTurns: 10, maxToolCalls: 10, maxTotalTokens: null, maxDurationMs: 600_000 },
     verifiers: [{ id: "v1", kind: "file_rules", rules: [{ type: "exists", path: "a.txt" }] }],
-    ...overrides,
+    ...rest,
+    limits: {
+      maxModelTurns: 10,
+      maxToolCalls: 10,
+      maxTotalTokens: null,
+      maxDurationMs: 600_000,
+      maxRepairAttempts: DEFAULT_MAX_REPAIR_ATTEMPTS,
+      maxSameFailures: DEFAULT_MAX_SAME_FAILURES,
+      ...limits,
+    },
   };
 }
 
@@ -225,7 +238,7 @@ export interface Harness {
 
 export function harness(parts: {
   steps: ((request: ModelRequest) => ModelOutcome)[];
-  task?: Partial<TaskSpec>;
+  task?: TaskOverrides;
   privacy?: PrivacyGateway;
   policy?: FakePolicy;
   tools?: FakeTools;

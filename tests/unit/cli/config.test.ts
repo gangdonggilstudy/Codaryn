@@ -9,7 +9,9 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import {
   DEFAULT_ANTHROPIC_API_BASE_URL,
+  DEFAULT_MAX_REPAIR_ATTEMPTS,
   DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_SAME_FAILURES,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DENY_ALL_POLICY,
   QUICK_TASK_ID,
@@ -412,6 +414,8 @@ describe("runCli with settings", () => {
       maxToolCalls: 2,
       maxTotalTokens: 3000,
       maxDurationMs: 4000,
+      maxRepairAttempts: DEFAULT_MAX_REPAIR_ATTEMPTS,
+      maxSameFailures: DEFAULT_MAX_SAME_FAILURES,
     });
 
     const none = harness({ "task.json": files["task.json"] }, { env: KEY_ENV });
@@ -442,7 +446,7 @@ describe("runCli with settings", () => {
       model: { provider: "anthropic" },
       policy,
       privacy: { secretEnv: ["FAKE_SECRET_ENV"] },
-      limits: LIMITS,
+      limits: { ...LIMITS, maxRepairAttempts: DEFAULT_MAX_REPAIR_ATTEMPTS, maxSameFailures: DEFAULT_MAX_SAME_FAILURES },
       verifiers,
     });
     assert.equal(h.settings[0]?.model, "m");

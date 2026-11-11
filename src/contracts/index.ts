@@ -13,4 +13,5 @@ export * from "./workspace.js";
 export * from "./policy.js";
 export * from "./verify.js";
 export * from "./journal.js";
+export * from "./changes.js";
 export * from "./engine.js";

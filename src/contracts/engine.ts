@@ -2,11 +2,12 @@
  * Run states, exit codes, the engine entry point and the CLI output objects.
  */
 
+import type { RevertOutcome } from "./changes.js";
 import type { Journal } from "./journal.js";
 import type { ModelProvider } from "./model.js";
 import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
-import type { ModelProviderName, TaskSpec } from "./task.js";
+import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolRunner } from "./tool.js";
 import type { VerifierResult, VerifierRunner } from "./verify.js";
@@ -32,11 +33,14 @@ export const TERMINAL_RUN_STATUSES = [
 ] as const;
 export type TerminalRunStatus = (typeof TERMINAL_RUN_STATUSES)[number];
 
-/** Allowed transitions. Any transition not listed here is rejected. */
+/**
+ * Allowed transitions. Any transition not listed here is rejected.
+ * `verifying → running` is a repair: a failed verification goes back to the model (R-1).
+ */
 export const RUN_TRANSITIONS: { readonly [S in RunStatus]: readonly RunStatus[] } = {
   created: ["running", "cancelled"],
   running: ["verifying", "failed", "needs-input", "cancelled", "budget-exhausted"],
-  verifying: ["done", "failed", "needs-input", "cancelled", "budget-exhausted"],
+  verifying: ["running", "done", "failed", "needs-input", "cancelled", "budget-exhausted"],
   done: [],
   failed: [],
   "needs-input": [],
@@ -48,7 +52,11 @@ export const RUN_TRANSITIONS: { readonly [S in RunStatus]: readonly RunStatus[] 
 export interface RunReasonByStatus {
   /** Every configured verifier passed. */
   readonly done: "verified";
-  readonly failed: "verifier_failed" | "model_error";
+  /**
+   * verifier_failed: a verifier failed and no repair is left (`maxRepairAttempts` used up, or 0).
+   * repeated_failure: the same failure signature occurred `maxSameFailures` times in a row (R-3).
+   */
+  readonly failed: "verifier_failed" | "model_error" | "repeated_failure";
   readonly "needs-input": "verifier_inconclusive" | "no_verifier" | "unknown_tool_outcome";
   readonly cancelled: "cancelled";
   readonly "budget-exhausted":
@@ -69,7 +77,10 @@ export const RUN_EXIT_CODES: { readonly [S in TerminalRunStatus]: number } = {
   cancelled: 5,
 };
 
-/** Errors that end the CLI before a run starts. No journal is written for them. */
+/**
+ * Errors that end the CLI before a run starts, or before a revert changes anything.
+ * No journal is written for them.
+ */
 export const CLI_ERROR_EXIT_CODES = {
   invalid_arguments: 2,
   invalid_task: 2,
@@ -83,6 +94,10 @@ export const CLI_ERROR_EXIT_CODES = {
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
+  /** `codaryn revert`: the workspace has no journal for that run id. */
+  run_not_found: 2,
+  /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
+  invalid_run_record: 2,
   internal_error: 70,
 } as const;
 export type CliErrorCode = keyof typeof CLI_ERROR_EXIT_CODES;
@@ -94,7 +109,20 @@ export interface RunUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly durationMs: number;
+  /**
+   * Repairs started in this run (`repair_started` records). The phase 2 engine always sets it.
+   * It is optional only because journals and results written before phase 2 do not have it.
+   */
+  readonly repairAttempts?: number;
 }
+
+/**
+ * Upper bound, in UTF-8 bytes, for the verifier evidence in one repair message (R-4).
+ * The failed verifiers share it equally. Evidence is masked first and cut afterwards: the head and
+ * the tail are kept and the middle is replaced by an omission note, which counts toward the share.
+ * A cut never falls inside a privacy token or a UTF-8 sequence.
+ */
+export const MAX_FEEDBACK_BYTES = 8192;
 
 export interface FileChangeRecord {
   readonly path: MaskedText;
@@ -139,13 +167,35 @@ export interface CliErrorOutput {
 
 export type CliOutput = EngineResult | CliErrorOutput;
 
+/** `complete`: every changed file was reverted (or nothing had changed). `partial`: some were skipped. */
+export const REVERT_EXIT_CODES = { complete: 0, partial: 3 } as const;
+export type RevertStatus = keyof typeof REVERT_EXIT_CODES;
+
+/**
+ * Printed on stdout as one JSON line by `codaryn revert --workspace <dir> --run <runId>`.
+ * Its errors use CliErrorOutput (for example `run_not_found` or `workspace_locked`).
+ */
+export interface RevertOutput {
+  readonly schemaVersion: 1;
+  readonly kind: "revert";
+  readonly runId: string;
+  readonly status: RevertStatus;
+  readonly exitCode: number;
+  /** Paths as the run's journal recorded them (masked). See `RevertRun`. */
+  readonly reverted: RevertOutcome["reverted"];
+  readonly skipped: RevertOutcome["skipped"];
+}
+
+/** Everything the `codaryn` process can print: `run` prints CliOutput, `revert` prints RevertOutput or CliErrorOutput. */
+export type CommandOutput = CliOutput | RevertOutput;
+
 /** Injected time source in milliseconds. */
 export interface Clock {
   now(): number;
 }
 
 export interface EngineDeps {
-  readonly task: TaskSpec;
+  readonly task: ResolvedTaskSpec;
   readonly runId: string;
   readonly model: ModelProvider;
   readonly privacy: PrivacyGateway;

@@ -1,6 +1,6 @@
 # CLI·공통 계약 (1a, 1b 설정)
 
-`src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 1a 오프라인 CLI는 구현되어 있다. 1b의 설정 계약과 CLI 처리(11절)는 E1에서 추가했다. Anthropic 제공자(E2)는 아직 연결되지 않았으며, 설정이 다 갖춰져도 `provider_not_implemented`로 전송 없이 끝난다.
+`src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 1a 오프라인 CLI는 구현되어 있다. 1b의 설정 계약과 CLI 처리(11절)는 E1에서 추가했다. Anthropic 제공자(E2)는 CLI에 연결되어 있어, 키·모델·출력 상한·한도가 모두 정해지면 실제로 전송한다. 실제 API로는 아직 검증하지 않았다(10절 "실제 API 미검증").
 
 ## 1. import 규칙과 공개 진입점
 
@@ -15,7 +15,7 @@
 | `src/model/anthropic/index.ts` (E2) | `createAnthropicProvider` | `CreateAnthropicProvider` = `(settings: ResolvedAnthropicSettings, deps?: AnthropicProviderDeps) => ModelProvider` |
 | `src/cli/main.ts` | CLI 진입 파일 | `package.json`의 `bin.codaryn`이 `dist/src/cli/main.js`를 가리킨다 |
 
-- CLI가 Anthropic 제공자를 가져오는 곳은 `src/cli/provider.ts`의 `anthropicProviderFactory` 하나다. E2가 병합되기 전에는 `null`이며, PM이 알리면 이 파일만 바꿔 연결한다.
+- CLI가 Anthropic 제공자를 가져오는 곳은 `src/cli/provider.ts`의 `anthropicProviderFactory` 하나이며, `createAnthropicProvider`에 연결되어 있다. CLI는 설정을 모두 해석한 뒤에만 이를 호출한다. 1a 자리표시자 `src/model/anthropic.ts`는 제거했다. `provider_not_implemented`는 계약에 남아 있지만 실제 CLI에서는 더 이상 나오지 않는다.
 
 - `PrivacyGateway`: `mask(text)`, `resolveToolArgs(request)`, `rebuildDocument(request)`.
 - `PolicyGate`: `checkRequested(call, descriptor)`, `restorableFields(descriptor)`, `checkEffective(call, descriptor)`.
@@ -148,7 +148,17 @@ stdout에는 JSON 한 줄(`CliOutput`)만 쓴다. 진행 표시는 stderr다.
 
 - 키 값 검사는 Anthropic 키 모양과 현재 `ANTHROPIC_API_KEY` 값만 찾는다. 다른 형식의 키나 잘린 키는 찾지 못한다.
 - `--env-file`로 읽은 값은 CLI 프로세스의 환경에 들어간다. 자식 프로세스에는 `CHILD_ENV_ALLOWLIST`만 전달되므로 키는 넘어가지 않는다.
-- Anthropic 제공자는 아직 연결되지 않았다(E2 병합 전). 실제 API로 검증한 적이 없다.
+
+실제 API 미검증(1b 제공자 연결 상태):
+
+- 연결: `codaryn run`은 해석한 `ResolvedAnthropicSettings`로 `createAnthropicProvider`를 만들어 Messages API(`<apiBaseUrl>/v1/messages`)를 Node 내장 `fetch`로 호출한다.
+- 검증한 것: 주입한 가짜 `fetch`를 쓴 유닛 테스트(제공자 단위, CLI 조립 단위)뿐이다. 요청 주소, 모델, `max_tokens`, 키가 `x-api-key` 헤더에만 있고 본문·stdout·기록에 없음, 가짜 비밀 가림, 401 처리를 확인했다. 이것은 모의 검증이며 실제 API 검증이 아니다.
+- 실제 API에서 확인하지 않은 것:
+  - HTTP 503 분류. 제공자는 529와 같은 `overloaded`(재시도 대상)로 본다.
+  - `retry-after` 헤더 형식. 제공자는 초(소수 포함)와 HTTP 날짜를 해석하고 60초로 자른다.
+  - 빈 `tool_result`. 내용이 빈 문자열인 도구 결과를 API가 받아들이는지 확인하지 않았다.
+  - thinking 블록 없이 도구 루프 지속. 제공자는 응답의 thinking 블록을 다음 요청에 되돌려 보내지 않는다. 이 상태로 도구 사용 루프가 계속되는지 확인하지 않았다.
+- 실제 호출 검증(1b 완료 판단)은 사용자가 키를 설정하고 직접 실행하거나 Codex가 연다.
 
 ## 11. 설정 (1b)
 

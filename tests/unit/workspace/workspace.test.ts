@@ -290,14 +290,26 @@ describe("Workspace.writeText", () => {
             fs.writeFileSync(target, bytes.subarray(0, 3));
             throw Object.assign(new Error("injected write failure"), { code: "ENOSPC" });
           }
+          if (step === "rename" && !target.endsWith(".codaryn-tmp")) {
+            // The exclusive-create fallback that publishes a new file fails as well.
+            throw Object.assign(new Error("injected create failure"), { code: "ENOSPC" });
+          }
           await nodeFileLayer.writeNewFile(target, bytes);
         },
+        // "rename" stands for the publish step: rename for a replacement, link for a new file.
         rename: async (from, to) => {
           calls.push("rename");
           if (step === "rename") {
             throw Object.assign(new Error("injected rename failure"), { code: "EPERM" });
           }
           await nodeFileLayer.rename(from, to);
+        },
+        link: async (existing, to) => {
+          calls.push("link");
+          if (step === "rename") {
+            throw Object.assign(new Error("injected link failure"), { code: "EPERM" });
+          }
+          await nodeFileLayer.link(existing, to);
         },
       };
       const faulty = await createWorkspaceWithFileLayer({ root }, failing);
@@ -325,6 +337,103 @@ describe("Workspace.writeText", () => {
       assert.deepEqual(fs.readdirSync(dir), ["data.txt"]);
     });
   }
+
+  /** A file layer that runs `change` once, right after the temporary file is written. */
+  function racingLayer(target: string, change: () => void): FileLayer {
+    let fired = false;
+    return {
+      ...nodeFileLayer,
+      writeNewFile: async (file, bytes) => {
+        await nodeFileLayer.writeNewFile(file, bytes);
+        if (!fired && file !== target) {
+          fired = true;
+          change();
+        }
+      },
+    };
+  }
+
+  test("WS-01 race: a file created by someone else during a create is not overwritten", async () => {
+    const dir = path.join(root, "race-new");
+    fs.mkdirSync(dir);
+    const file = path.join(dir, "new.txt");
+    const userBytes = Buffer.from("created by the user\r\n", "utf8");
+    const racing = await createWorkspaceWithFileLayer({ root }, racingLayer(file, () => fs.writeFileSync(file, userBytes)));
+    const target = await racing.resolve("race-new/new.txt", "write");
+    assert.ok(target.ok);
+
+    const outcome = await racing.writeText({ path: target.path, expectedHash: null, text: asRawText("mine\n") });
+
+    assert.deepEqual(outcome, { ok: false, code: "conflict", currentHash: sha256(userBytes) });
+    assert.deepEqual(fs.readFileSync(file), userBytes);
+    assert.deepEqual(fs.readdirSync(dir), ["new.txt"]);
+  });
+
+  test("WS-01 race: a change made after the hash check and before the replace is not overwritten", async () => {
+    const dir = path.join(root, "race-edit");
+    fs.mkdirSync(dir);
+    const file = path.join(dir, "data.txt");
+    const original = Buffer.from("원본\r\n", "utf8");
+    const userBytes = Buffer.from("사용자가 고친 내용\r\n", "utf8");
+    fs.writeFileSync(file, original);
+    const racing = await createWorkspaceWithFileLayer({ root }, racingLayer(file, () => fs.writeFileSync(file, userBytes)));
+    const target = await racing.resolve("race-edit/data.txt", "write");
+    assert.ok(target.ok);
+
+    const outcome = await racing.writeText({ path: target.path, expectedHash: sha256(original), text: asRawText("mine\n") });
+
+    assert.deepEqual(outcome, { ok: false, code: "conflict", currentHash: sha256(userBytes) });
+    assert.deepEqual(fs.readFileSync(file), userBytes);
+    assert.deepEqual(fs.readdirSync(dir), ["data.txt"]);
+  });
+
+  test("creates a new file with an exclusive create when hard links are not supported", async () => {
+    const dir = path.join(root, "no-links");
+    fs.mkdirSync(dir);
+    const file = path.join(dir, "new.txt");
+    const userBytes = Buffer.from("user\n");
+    let raced = false;
+    const noLinks: FileLayer = {
+      ...nodeFileLayer,
+      link: async () => {
+        // FAT and exFAT reject hard links. The second call simulates a concurrent creator.
+        if (raced) fs.writeFileSync(file, userBytes);
+        throw Object.assign(new Error("hard links not supported"), { code: "ENOTSUP" });
+      },
+    };
+    const local = await createWorkspaceWithFileLayer({ root }, noLinks);
+    const target = await local.resolve("no-links/new.txt", "write");
+    assert.ok(target.ok);
+
+    const created = await local.writeText({ path: target.path, expectedHash: null, text: asRawText("새 파일\r\n") });
+    const bytes = Buffer.from("새 파일\r\n", "utf8");
+    assert.deepEqual(created, { ok: true, previousHash: null, newHash: sha256(bytes), created: true });
+    assert.deepEqual(fs.readFileSync(file), bytes);
+    assert.deepEqual(fs.readdirSync(dir), ["new.txt"]);
+
+    fs.rmSync(file);
+    raced = true;
+    const conflict = await local.writeText({ path: target.path, expectedHash: null, text: asRawText("mine\n") });
+    assert.deepEqual(conflict, { ok: false, code: "conflict", currentHash: sha256(userBytes) });
+    assert.deepEqual(fs.readFileSync(file), userBytes);
+    assert.deepEqual(fs.readdirSync(dir), ["new.txt"]);
+  });
+
+  test("WS-01 race: a file deleted after the hash check is not recreated", async () => {
+    const dir = path.join(root, "race-delete");
+    fs.mkdirSync(dir);
+    const file = path.join(dir, "data.txt");
+    const original = Buffer.from("old\n");
+    fs.writeFileSync(file, original);
+    const racing = await createWorkspaceWithFileLayer({ root }, racingLayer(file, () => fs.rmSync(file)));
+    const target = await racing.resolve("race-delete/data.txt", "write");
+    assert.ok(target.ok);
+
+    const outcome = await racing.writeText({ path: target.path, expectedHash: sha256(original), text: asRawText("mine\n") });
+
+    assert.deepEqual(outcome, { ok: false, code: "conflict", currentHash: null });
+    assert.deepEqual(fs.readdirSync(dir), []);
+  });
 
   test("WS-03 keeps CRLF line endings and every untouched byte", async () => {
     const file = path.join(root, "crlf.txt");

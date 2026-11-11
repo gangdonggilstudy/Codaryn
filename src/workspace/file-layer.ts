@@ -30,8 +30,13 @@ export interface FileLayer {
   readFile(path: string): Promise<Uint8Array>;
   readdir(path: string): Promise<readonly DirEntry[]>;
   mkdirRecursive(path: string): Promise<void>;
-  /** Creates a new file with exactly these bytes. Fails when the path already exists. */
+  /**
+   * Creates a new file with exactly these bytes. Fails with EEXIST when the path already exists.
+   * When writing fails after the file was created, the created file is removed before rejecting.
+   */
   writeNewFile(path: string, bytes: Uint8Array): Promise<void>;
+  /** Adds the name `to` for the file `existing`. Fails with EEXIST when `to` already exists. */
+  link(existing: string, to: string): Promise<void>;
   /** Replaces `to` with `from`. */
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -52,10 +57,15 @@ export const nodeFileLayer: FileLayer = {
     try {
       await handle.writeFile(bytes);
       await handle.sync();
-    } finally {
-      await handle.close();
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      // This call created the file, so removing it cannot touch anyone else's data.
+      await fs.unlink(path).catch(() => undefined);
+      throw error;
     }
+    await handle.close();
   },
+  link: (existing, to) => fs.link(existing, to),
   rename: (from, to) => fs.rename(from, to),
   remove: (path) => fs.unlink(path),
 };

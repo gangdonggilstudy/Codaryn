@@ -19,19 +19,20 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-3 | 배분 | 여섯 작업(B1, B2, B3, C1, C2, D)을 Herdr로 전달. 검증 체계와 비밀 검사 스크립트·커밋 전 훅 추가 | 이 문서를 담은 커밋 | 완료 |
 | CP-4 | G3a | B2 `9496d14`, B3 `d3e6350` `6d35746`, C1 `ec4aa5f`, C2 `ae27dc1` `063605d` `bca12d3`을 검토·병합. main 유닛 108건 통과. D의 통합 테스트 `8b40f46` `7942bfd` 병합(아직 실행 전). B1 조립과 교차 검토 지시 | `7b39c96`과 이 문서를 담은 커밋 | 완료 |
 | CP-5 | G3b와 교차 검토 | B1 조립 `e8b5bd2` 병합(`58dcfde`). 첫 통합 실행에서 13건 실패, 원인은 거부된 호출의 `tool_result` 미기록. 엔진 수정 `5333feb` 병합(`3982a6c`) 뒤 유닛 157건, 통합 63건 통과. 교차 검토 보고 3건을 `docs/reviews/`에 기록(`e70b827`)하고 결함 수정과 회귀 테스트를 배정 | `3982a6c`, `e70b827`과 이 문서를 담은 커밋 | 완료 |
+| CP-6 | G4 | 교차 검토 수정 `7a74c2c`(privacy), `df1ceff`(tools), `7eca0c0`(workspace), `54e59fd` `2323ad6` `2b5167c`(engine, 계약 문서), 회귀 통합 테스트 `db1e043` 병합. main `db1c55c`에서 유닛 189건, 통합 76건 통과. 수용 기준 A1~A12 대조 후 1a 오프라인 검증을 채택 | `db1c55c`와 이 문서를 담은 커밋 | 완료 |
 
-## 현재 상태 (CP-5)
+## 현재 상태 (CP-6)
 
-- 단계 1a. G0, G1, G2, G3a, G3b는 열렸다. G4(채택)는 교차 검토 결함 수정 뒤에 판단한다.
-- main `3982a6c`에 계약, privacy, policy, workspace, tools, verify, store, engine, model, cli와 통합 테스트가 모두 있다. `node dist/src/cli/main.js run --task <task.json>`이 모의 모델로 끝까지 실행된다.
-- 실행한 검증(main `3982a6c`): `npm run typecheck` 통과, `npm run test:unit` 157건 통과, `npm run test:integration` 63건 통과(실패 0, 건너뜀 0), `check-secrets --tracked` 발견 없음.
-- 실행하지 않은 검증: 실제 API(1b 미수행). 통합 통과는 검사한 사례의 증거이며 아래 교차 검토 결함은 그 사례에 없던 경로다.
-- 교차 검토 결과(`docs/reviews/2026-11-12-cross-review-*.md`): 재현된 결함은 privacy 6건(높음 1), tools 5건(높음 1)과 엔진 경계 1건, workspace 1건이다. 설계 한계로 분류한 것은 문서에 기록한다.
-- 진행 중인 수정: p5(privacy: 원위치 규칙 강화, 겹치는 비밀, 토큰 조각 리터럴, 재가림 안정성, 변형 목록 확장), p6(tools: 가림본 검색, 가린 뒤 자르기, 출력 상한 경계, 자식 환경 값 검사), p7(workspace: 새 파일 덮어쓰기 경쟁), p1(engine: 직렬화 전 필드별 가림, 계약 주석과 알려진 한계 문서), p4(위 결함의 프로세스 수준 회귀 테스트). p8은 대기다.
-- 권한 창 처리: p1, p4, p5에서 "작업 디렉터리 밖 읽기 허용" 창이 떴다. 사용자 설정을 바꾸지 않도록 PM이 3번(아니오, 다음에 다시 묻기)으로 닫고, 검토 원문을 저장소 `docs/reviews/`에 커밋해 그 경로를 읽게 했다. 작업자 보고서는 각 worktree의 `.codaryn/`(Git 무시)에 저장하게 했다.
+- 단계 1a 오프라인 검증을 임시 PM이 채택했다(G4, 2026-11-12). 1b(실제 API)는 수행하지 않았으며 위임 범위 밖이다. 단계 1 전체는 완료가 아니다.
+- main `db1c55c`: `node dist/src/cli/main.js run --task <task.json>`이 모의 모델로 코드 작업과 Git 없는 문서 작업을 끝까지 실행한다.
+- 실행한 검증(main `db1c55c`): `npm run typecheck` 통과, `npm run test:unit` 189건 통과, `npm run test:integration` 76건 통과(실패 0, 건너뜀 0), `node scripts/check-secrets.mjs --tracked` 발견 없음.
+- 실행하지 않은 검증: 실제 Anthropic API(1b), Windows 외 OS, OS 수준 격리와 네트워크 차단, 강제 종료 시 파일 원자성. AD-01~06과 PR-04, PR-12는 1a 미도입이다.
+- 교차 검토에서 재현된 결함 13건 중 수정 대상 11건을 회귀 테스트와 함께 고쳤다. 나머지는 알려진 한계로 `docs/cli-contract.md` 10절과 progress.md에 적었다.
+- 모든 작업자(p1, p4, p5, p6, p7, p8)는 대기 중이고 각 worktree는 깨끗하다. 작업 브랜치는 모두 main에 병합됐고 삭제하지 않았다.
+- 권한 창 처리: p1, p4, p5에서 "작업 디렉터리 밖 읽기 허용" 창이 떴을 때 PM이 3번(아니오, 다음에 다시 묻기)으로 닫았다. 사용자 설정은 바꾸지 않았다.
 - 관찰: p5 세션의 모델이 Opus 5.5로 바뀌어 있었다. PM이 바꾼 것이 아니며 그대로 두었다.
 - 공용 Git 훅: `.git/hooks/pre-commit`과 `.git/hooks/check-secrets.mjs`(추적되지 않음, 모든 worktree에 적용).
-- 차단 요인: 없음.
+- 차단 요인: 다음 단계(1b)는 범위 결정이 필요하다.
 
 ### PM 결정 (CP-4, CP-5)
 
@@ -49,12 +50,12 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 
 | pane | tab | 작업 | worktree | 브랜치 | 기준 커밋 | 상태 |
 | --- | --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | B1 엔진·모의 모델·CLI, 역할 1 | `claude-design` | `claude/core-engine` | `cc29b50` | 병합됨. 엔진 수정 진행 |
-| w1:p6 | optional | B2 도구·명령 실행기 | `claude-tools` | `claude/core-tools` | `cc29b50` | 병합됨. 결함 수정 진행 |
+| w1:p1 | main | B1 엔진·모의 모델·CLI, 역할 1 | `claude-design` | `claude/core-engine` | `cc29b50` | 병합됨. 대기 |
+| w1:p6 | optional | B2 도구·명령 실행기 | `claude-tools` | `claude/core-tools` | `cc29b50` | 병합됨. 대기 |
 | w1:p8 | optional | B3 검증기·기록·잠금 | `claude-store` | `claude/core-store` | `cc29b50` | 병합됨. 대기 |
-| w1:p5 | optional | C1 민감정보 게이트 | `claude-quality` | `claude/security-core` | `cc29b50` | 병합됨. 결함 수정 진행 |
-| w1:p7 | optional | C2 정책·작업 공간 | `claude-workspace` | `claude/workspace-policy` | `cc29b50` | 병합됨. 결함 수정 진행 |
-| w1:p4 | main | D 독립 통합 검증 | `claude-operations` | `claude/cli-verification` | `cc29b50` | 63건 통과. 회귀 테스트 추가 진행 |
+| w1:p5 | optional | C1 민감정보 게이트 | `claude-quality` | `claude/security-core` | `cc29b50` | 병합됨. 대기 |
+| w1:p7 | optional | C2 정책·작업 공간 | `claude-workspace` | `claude/workspace-policy` | `cc29b50` | 병합됨. 대기 |
+| w1:p4 | main | D 독립 통합 검증 | `claude-operations` | `claude/cli-verification` | `cc29b50` | 76건 통과. 대기 |
 | w1:p3 | main | PM·통합 | main | `main` | — | 진행 |
 | w1:p2 | main | Codex | — | — | — | 대기(회수 권한 보유) |
 
@@ -62,10 +63,12 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 
 ## 다음 행동
 
-1. 수정 브랜치 다섯 개(`claude/security-core`, `claude/core-tools`, `claude/workspace-policy`, `claude/core-engine`, `claude/cli-verification`)의 보고를 받아 `scripts/review-branch.mjs`와 유닛으로 검토하고 병합한다. 모듈 수정을 먼저, 회귀 통합 테스트를 나중에 병합한다.
-2. main에서 타입 검사, 유닛, 통합 전체를 다시 돌린다. 남는 실패는 담당자에게 재현 사례로 돌려준다.
-3. 수용 기준 A1~A12와 대조해 G4를 판단하고 결과와 알려진 한계를 progress.md에 기록한다.
-4. 1a 완료를 보고한다. 실제 API 연결(1b)은 위임 범위 밖이므로 범위 확대 여부를 사용자와 Codex가 정한다.
+위임 범위(단계 1a)의 작업은 끝났다. 아래는 PM을 인계받는 쪽이나 범위를 넓힌 뒤에 할 일이다.
+
+1. 1b 결정: 실제 Anthropic 어댑터 구현과 호출을 열지 정한다. 필요한 것은 모델 결정(O-1), 로컬 `ANTHROPIC_API_KEY`와 `CODARYN_MODEL`, 호출·비용 한도다. 어댑터 유닛 AD-01~06을 구현과 함께 넣는다.
+2. 개발 도구로 쓰기 위한 최소 추가: 실제 모델 연결(1b), 검증 실패를 반영한 재수정 반복(단계 2), Windows에서 `npm` 같은 `.cmd` 실행 방법.
+3. 알려진 한계 중 우선 판단할 것: 비밀이 든 줄은 수정할 수 없음, `allowExtraArgs:true` 규칙의 추가 인자 경로 미검사, 파일 해시 노출.
+4. 작업 브랜치와 worktree 정리 여부는 Codex가 정한다. PM은 삭제하지 않았다.
 
 ## 회수 시 인계 방법
 

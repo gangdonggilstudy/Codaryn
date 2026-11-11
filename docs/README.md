@@ -20,6 +20,9 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [개발 진행 현황](progress.md) | 현재 작업 배분, 검토 단계와 실제 검증 결과 |
 | [임시 PM 인수인계](pm-handoff.md) | 현재 위임 범위, 작업 상태와 PM 회수 절차 |
 | [단계 1a 기능 작업 지시서](work-orders/phase-1a.md) | 구현 승인 대기 상태의 작업 분담, 파일 소유 범위와 수용 기준 |
+| [단계 1a 작업 배분](work-orders/phase-1a-assignments.md) | 세션별 worktree·브랜치·소유 파일, 통합 순서, PM 결정 |
+| [CLI·공통 계약](cli-contract.md) | 실행 형식, task와 대본 파일, 도구, 종료 코드, 상태 디렉터리 |
+| [임시 PM 상태](pm-status.md) | PM 체크포인트와 세션 현황, 회수 시 인계 방법 |
 
 ## 문서 적용 원칙
 

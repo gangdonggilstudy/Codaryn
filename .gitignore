@@ -7,3 +7,12 @@ dist/
 coverage/
 .codaryn/
 *.log
+
+# Local secrets and credentials. Never commit these.
+*.pem
+*.key
+id_rsa
+id_ed25519
+.npmrc
+secrets/
+*.local.json

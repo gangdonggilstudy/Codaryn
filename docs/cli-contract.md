@@ -521,7 +521,14 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 결정은 `docs/work-orders/phase-3-self-development.md`의 "모델 목록 조회와 선택"이다. Y 1단계 커밋은 계약을, Y 2단계 커밋은 `codaryn models` 명령(p7)을 추가했다. 목록 조회 함수 `listAnthropicModels`는 p5(`src/model/anthropic`)가 구현한다.
 
-- 연결 상태: Y 2단계 커밋의 진입 파일은 목록 조회 함수를 아직 넘기지 않는다. 그래서 실제 CLI의 `codaryn models`는 키와 설정을 확인한 뒤 `provider_not_implemented`(종료 7)로 멈추고 아무것도 보내지 않는다. p5 구현이 병합되면 연결한다. 명령의 동작은 주입한 가짜 함수로 유닛에서 확인했다.
+- 연결 상태(연결 완료):
+  - 진입 파일은 `src/cli/provider.ts`의 `anthropicModelLister`(= `listAnthropicModels`)를 `codaryn models`에 넘긴다. 키와 주소를 정한 뒤에만 부르고, 전송은 전역 `fetch`다.
+  - Y 2단계 커밋(`3d0eadd`)에서는 연결 전이라 `provider_not_implemented`로 멈췄다.
+  - `ModelsEnvironment.listModels`를 넘기지 않은 호출(시험 등)은 지금도 연결되지 않은 것으로 보고 아무것도 보내지 않는다. 기본값으로 채우지 않으므로 시험이 네트워크에 닿을 수 없다.
+  - 유닛 `tests/unit/cli/y-wire.test.ts`가 실제 목록 함수와 주입한 가짜 `fetch`로 다음을 확인한다.
+    - 요청이 설정한 주소(`CODARYN_API_BASE_URL`, 없으면 설정 파일 `apiBaseUrl`)의 `/v1/models`로 가고, 모든 쪽을 읽는다(`after_id`).
+    - 키는 `x-api-key` 헤더에만 있다. URL, 다른 헤더, 출력에는 없다.
+    - 401은 `model_list_failed`(`auth_failed`)이며 재시도하지 않는다.
 
 ### 목록 조회 함수 (`ListAnthropicModels`)
 

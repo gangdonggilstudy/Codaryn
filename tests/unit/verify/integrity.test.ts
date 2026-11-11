@@ -179,6 +179,131 @@ describe("K2 capture", () => {
   });
 });
 
+describe("W-2 links below a protected entry", () => {
+  test("a link whose target is inside the workspace adds the target's content under its real path (review M-1)", async (t) => {
+    const sb = await sandbox(t);
+    await put(sb.ws, "shared/data.txt", "expected=0\n");
+    await put(sb.ws, "shared/deep/more.txt", "more\n");
+    await put(sb.ws, "tests/a.test.js", "a\n");
+    const link = join(sb.ws, "tests", "fixtures");
+    await dirLink(join(sb.ws, "shared"), link);
+
+    const checker = createIntegrityChecker({ workspace: sb.workspace, protectedPaths: ["tests"], externalPaths: [] });
+    const before = await checker.capture();
+    assert.deepEqual(before.entries, [
+      { path: "shared/data.txt", kind: "file", sha256: sha("expected=0\n") },
+      { path: "shared/deep/more.txt", kind: "file", sha256: sha("more\n") },
+      { path: "tests/a.test.js", kind: "file", sha256: sha("a\n") },
+      { path: "tests/fixtures", kind: "link", sha256: sha(await readlink(link)) },
+    ]);
+
+    // The write the policy allows (to the unprotected real path) is now seen.
+    await put(sb.ws, "shared/data.txt", "expected=1\n");
+    await put(sb.ws, "shared/new.txt", "new\n");
+    assert.deepEqual(checker.compare(before, await checker.capture()), ["shared/data.txt", "shared/new.txt"]);
+  });
+
+  test("a link whose target is outside the workspace is recorded as the link only; its content belongs in integrity.paths", async (t) => {
+    const sb = await sandbox(t);
+    const outsideData = join(sb.outside, "fixtures");
+    await put(outsideData, "data.txt", "x\n");
+    await put(sb.ws, "tests/a.test.js", "a\n");
+    const link = join(sb.ws, "tests", "external");
+    await dirLink(outsideData, link);
+
+    const checker = createIntegrityChecker({ workspace: sb.workspace, protectedPaths: ["tests"], externalPaths: [] });
+    const before = await checker.capture();
+    assert.deepEqual(before.entries, [
+      { path: "tests/a.test.js", kind: "file", sha256: sha("a\n") },
+      { path: "tests/external", kind: "link", sha256: sha(await readlink(link)) },
+    ]);
+    // Known limit (W-2): content outside is checked only when integrity.paths names it.
+    await put(outsideData, "data.txt", "y\n");
+    assert.deepEqual(checker.compare(before, await checker.capture()), []);
+    const withExternal = createIntegrityChecker({ workspace: sb.workspace, protectedPaths: ["tests"], externalPaths: [outsideData] });
+    const listed = await withExternal.capture();
+    await put(outsideData, "data.txt", "z\n");
+    assert.deepEqual(withExternal.compare(listed, await withExternal.capture()), [`${shown(outsideData)}/data.txt`]);
+  });
+
+  test("cycles end: a link back to an entry, to its own parent, and two directories linking each other", async (t) => {
+    const sb = await sandbox(t);
+    await put(sb.ws, "tests/a.test.js", "a\n");
+    await put(sb.ws, "tests/sub/b.test.js", "b\n");
+    await put(sb.ws, "left/l.txt", "l\n");
+    await put(sb.ws, "right/r.txt", "r\n");
+    await dirLink(join(sb.ws, "tests"), join(sb.ws, "tests", "loop"));
+    await dirLink(join(sb.ws, "tests", "sub"), join(sb.ws, "tests", "sub", "self"));
+    await dirLink(join(sb.ws, "left"), join(sb.ws, "tests", "to-left"));
+    await dirLink(join(sb.ws, "right"), join(sb.ws, "left", "to-right"));
+    await dirLink(join(sb.ws, "left"), join(sb.ws, "right", "to-left"));
+
+    const checker = createIntegrityChecker({ workspace: sb.workspace, protectedPaths: ["tests"], externalPaths: [] });
+    const manifest = await checker.capture();
+    assert.deepEqual(paths(manifest), [
+      "left/l.txt",
+      "left/to-right",
+      "right/r.txt",
+      "right/to-left",
+      "tests/a.test.js",
+      "tests/loop",
+      "tests/sub/b.test.js",
+      "tests/sub/self",
+      "tests/to-left",
+    ]);
+    assert.deepEqual(checker.compare(manifest, await checker.capture()), []);
+  });
+
+  test("a link to the workspace root lists the root without the state directory; a link into the state directory adds only itself", async (t) => {
+    const sb = await sandbox(t);
+    await put(sb.ws, "tests/a.test.js", "a\n");
+    await put(sb.ws, "top.txt", "top\n");
+    await put(sb.ws, ".codaryn/runs/r1/journal.jsonl", "{}\n");
+    await dirLink(sb.ws, join(sb.ws, "tests", "root"));
+    await dirLink(join(sb.ws, ".codaryn", "runs"), join(sb.ws, "tests", "state"));
+
+    const checker = createIntegrityChecker({ workspace: sb.workspace, protectedPaths: ["tests"], externalPaths: [] });
+    assert.deepEqual(paths(await checker.capture()), ["tests/a.test.js", "tests/root", "tests/state", "top.txt"]);
+  });
+
+  test("followed content counts toward the file limit of the entry that holds the link", async (t) => {
+    const sb = await sandbox(t);
+    await put(sb.ws, "tests/a.test.js", "a\n");
+    for (let i = 0; i < 4; i += 1) await put(sb.ws, `big/f${i}.txt`, String(i));
+    await dirLink(join(sb.ws, "big"), join(sb.ws, "tests", "big"));
+    await put(sb.ws, "later/l.txt", "l\n");
+    const checker = buildIntegrityChecker(
+      { workspace: sb.workspace, protectedPaths: ["tests", "later"], externalPaths: [] },
+      { maxFiles: 4, maxBytes: DEFAULT_INTEGRITY_LIMITS.maxBytes },
+    );
+    assert.deepEqual((await checker.capture()).entries, [
+      { path: "later", kind: "unchecked", why: "limit" },
+      { path: "tests", kind: "unchecked", why: "limit" },
+    ]);
+  });
+
+  test("a link whose target cannot be resolved for another reason than a missing file is unreadable", async (t) => {
+    const sb = await sandbox(t);
+    await put(sb.ws, "shared/data.txt", "x\n");
+    await put(sb.ws, "tests/a.test.js", "a\n");
+    await dirLink(join(sb.ws, "shared"), join(sb.ws, "tests", "fixtures"));
+    await dirLink(join(sb.outside, "missing"), join(sb.ws, "tests", "dangling"));
+    const files: IntegrityFileSystem = {
+      ...nodeIntegrityFileSystem,
+      realpath: (target) =>
+        target.endsWith("fixtures")
+          ? Promise.reject(Object.assign(new Error("ELOOP: injected"), { code: "ELOOP" }))
+          : nodeIntegrityFileSystem.realpath(target),
+    };
+    const manifest = await buildIntegrityChecker({ workspace: sb.workspace, protectedPaths: ["tests"], externalPaths: [] }, DEFAULT_INTEGRITY_LIMITS, files).capture();
+    assert.deepEqual(manifest.entries.map((entry) => [entry.path, entry.kind]), [
+      ["tests/a.test.js", "file"],
+      ["tests/dangling", "link"],
+      ["tests/fixtures", "unchecked"],
+    ]);
+  });
+});
+
 describe("K2 paths outside the workspace (integrity.paths)", () => {
   test("a file and a directory are listed by absolute, '/' separated paths, and their changes are reported", async (t) => {
     const sb = await sandbox(t);

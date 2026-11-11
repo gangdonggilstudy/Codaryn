@@ -1,4 +1,4 @@
-# CLI·공통 계약 (1a, 1b 설정, 2 재수정 반복, 3 준비)
+# CLI·공통 계약 (1a, 1b 설정, 2 재수정 반복, 3 준비, 모델 목록)
 
 `src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 1a 오프라인 CLI는 구현되어 있다. 1b의 설정 계약과 CLI 처리(11절)는 E1에서 추가했다. Anthropic 제공자(E2)는 CLI에 연결되어 있어, 키·모델·출력 상한·한도가 모두 정해지면 실제로 전송한다. 실제 API로는 아직 검증하지 않았다(10절 "실제 API 미검증"). 단계 2(F1)의 재수정 반복, 새 한도, 보호 경로, 스냅샷과 되돌리기는 12~14절이며 모두 조립에 연결되어 있다. 교차 검토(H1·H2) 결함 수정 S-1~S-9의 CLI 처리는 8·11절이다.
 
@@ -13,6 +13,7 @@
 | `src/workspace/index.ts` | `createWorkspace` | `CreateWorkspace` → `Promise<Workspace>` |
 | `src/engine/index.ts` | `runTask` | `RunTask` = `(deps: EngineDeps) => Promise<EngineResult>` |
 | `src/model/anthropic/index.ts` (E2) | `createAnthropicProvider` | `CreateAnthropicProvider` = `(settings: ResolvedAnthropicSettings, deps?: AnthropicProviderDeps) => ModelProvider` |
+| `src/model/anthropic/index.ts` (Y, p5) | `listAnthropicModels` | `ListAnthropicModels` = `(settings: AnthropicListSettings, deps?: AnthropicProviderDeps, signal?: AbortSignal) => Promise<ListModelsOutcome>`(16절) |
 | `src/store/index.ts` (F3) | `createChangeRecorder`, `revertRun` | `CreateChangeRecorder` = `({ workspaceRoot, runId }) => ChangeRecorder`, `RevertRun` = `(request: RevertRequest) => Promise<RevertOutcome>` |
 | `src/tools/index.ts` (F4) | `createToolRunner`의 선택 인자 `changeRecorder` | `ChangeRecorder`(14절) |
 | `src/verify/index.ts` (K2) | `createIntegrityChecker` | `CreateIntegrityChecker` = `({ workspace, protectedPaths, externalPaths }) => IntegrityChecker`(15절) |
@@ -141,7 +142,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절).
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다.
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
@@ -249,6 +250,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
     - `--task`, `workspaceRoot`, `scriptPath`: `invalid_task`
     - `--config`, `--vars-file`, `CODARYN_CONFIG`: `invalid_config`
     - `--workspace`(run과 revert), `--cancel-file`: `invalid_arguments`
+  - 명령 규칙과 검증기(X-1): `policy.commands[i].executable`, 명령 검증기의 `executable`과 `cwd`는 적힌 그대로 같은 검사를 한다. task에서는 `invalid_task`, 설정 파일에서는 `invalid_config`이고, 메시지는 필드 위치만 적는다(`policy.commands[0].executable is a network or device path`). 그래서 `run`도 `doctor`도 이 값으로 다른 기계에 닿지 않는다. 인자(`argsPrefix`, `args`)는 대상이 아니다.
 - **작업 공간 밖에 둘 것(S-1, T-12).** 작업 공간을 확인한 직후, 변수 파일, 설정 파일, task 파일, 대본 파일, 취소 파일의 실경로가 작업 공간 실경로 안에 있으면 실행 전에 거부한다.
   - 실경로는 링크, 정션, 8.3 이름을 푼 경로다.
   - 위치를 확인할 수 없는 경우(끊긴 링크, 권한 오류)도 거부한다.
@@ -481,15 +483,26 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - Markdown 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차, 통과하지 않은 검증기의 증거), 보호 대상, 변경, 사용량, 검사하지 않은 범위(검증기마다의 한계와 고정 문구), 알림.
 - 실행 디렉터리가 링크(정션 포함)이면 따라가지 않고 `invalid_run_record`다. 기록은 모두 그 실행의 것이어야 하고(`runId`, 1부터 연속인 `seq`, 첫 기록 `run_started`), 보고서가 쓰는 필드는 형식을 확인한다. 모르는 종류의 기록은 건너뛴다. `result.json`은 확인한 필드만으로 다시 만든다.
+- 실행이 남기지 않는 기록은 `invalid_run_record`다(X-2). 검증기 근거가 `MAX_EVIDENCE_BYTES`(8192바이트)보다 길면 거부한다. 엔진은 그보다 길게 기록하지 않으므로, 실행 뒤에 바뀐 기록이다. 그리기가 실패해도 내부 오류(70)가 아니라 `invalid_run_record`로 끝난다.
+  - 그리기는 인자를 펼치지 않고 반복으로 한다. 그래서 백틱 묶음이 많거나 줄이 많은 다른 기록 문자열도 스택을 넘기지 않고 출력된다.
 - 출력 글의 제어 문자(ESC, CR, 양방향 제어 문자 등)는 `?`로 바꾸고, 인라인 코드와 코드 블록은 내용 속 백틱보다 긴 울타리를 쓴다. 키 모양 문자열과 현재 `ANTHROPIC_API_KEY` 값은 `[key]`로 가린다. 기록이 실행 중 명령으로 바뀌었을 경우를 위한 방어이며, 등록된 다른 비밀 값은 report가 알지 못한다.
 
 ### doctor의 세부 (U-6)
 
 - 변수 파일은 `util.parseEnv`로 해석만 하고 프로세스 환경에 적재하지 않는다. 이미 있는 변수가 우선한다(`run`과 같다).
 - 설정·task 파일은 `run`과 같은 순서(원문 키 검사 → 파싱 → 키 검사 → 검증)로 본다. 실패 메시지는 검증기의 필드 위치 문구다.
-- `commands`: 정책의 `commands[i].executable`과 명령 검증기의 `executable`을 PATH의 절대 항목과 PATHEXT(Windows)로 찾는다. 디렉터리가 붙은 이름은 작업 공간(검증기는 그 `cwd`) 기준이다. 실제 실행 때의 추가 거부(작업 공간 안의 실행 파일, `.cmd`·`.bat`의 문자 제한 등)는 점검하지 않는다.
+- `commands`(X-1, X-3): 정책의 `commands[i]`(`argsPrefix`와 함께)와 명령 검증기(`args`, `cwd`와 함께)를 `run`과 같은 규칙으로 판정한다.
+  - 자식 환경은 명령 실행기처럼 `buildChildEnv`로 만든다. 검증기 `cwd`는 검증기 실행기처럼 작업 공간이 푼다. `outside_root`, `state_dir`, `invalid_path`면 실행 때 거부되므로 `fail`이다.
+  - Windows에서는 실행기의 `planWindowsLaunch`로 판정한다. 다음은 "rejected at run time"으로 `fail`이다.
+    - 작업 공간 안으로 풀리는 실행 파일(`executable_refused`)
+    - 작업 공간 안에 있거나 허용 문자 밖 인자를 받는 `.cmd`·`.bat`(`script_refused`)
+    - 그 밖의 형식(`unsupported_type`)
+  - POSIX의 실행기는 이름을 `spawn`에 넘기므로 doctor도 존재만 본다.
+  - PATH의 UNC·장치 항목은 stat도 하지 않는다. 개수만 "not checked: remote paths are not accessed"로 알리고 `warn`이다. 로컬 항목에서 찾지 못한 이름은 "not found in local PATH entries"로 `warn`이다. 실행 때는 실행기가 그 원격 항목을 찾아볼 수 있기 때문이다.
+  - 작업 공간이 없으면 존재만 보고, 실행 규칙은 보지 않았다고 적는다.
+  - 마지막 줄의 "No network access was made"는 이 규칙과 X-1의 입력 검사로 지킨다. 설정·task·변수·대본 파일, `integrity.paths`, 작업 공간은 S-5 검사를 거친 로컬 경로만 읽는다.
 - `integrity_paths`: 각 경로가 있는지, 작업 공간이 주어지면 그 밖에 있는지 본다. 위치만 적고 경로는 내지 않는다.
-- 현재 `warn`을 내는 항목은 없다. 계약에는 남겨 둔다.
+- `warn`은 지금 `commands`에서만 나온다(원격 PATH 항목).
 
 ### 도움말, 버전, 설치 (U-7)
 
@@ -502,3 +515,51 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
 - 줄은 기록(가림본)에서만 만들고, 실행의 개인정보 게이트로 다시 가린 뒤 제어 문자를 바꾼다. 내장 도구가 아닌 도구 이름은 `(unknown tool)`, 형식에 맞지 않는 id는 `?`로 쓴다.
 - 실행 전 오류에는 진행 표시가 없다. `--quiet`이면 쓰지 않는다. stderr 쓰기 실패는 실행에 영향을 주지 않는다. stdout은 그대로 JSON 한 줄이다.
+
+## 16. 모델 목록 조회와 선택 (Y-1~Y-4)
+
+결정은 `docs/work-orders/phase-3-self-development.md`의 "모델 목록 조회와 선택"이다. Y 1단계 커밋은 계약만 추가했다. 목록 조회 함수는 p5(`src/model/anthropic`), `codaryn models` 명령은 Y 2단계(p7)가 구현한다. 이 절의 동작은 그 구현이 병합되기 전까지 실행되지 않는다.
+
+### 목록 조회 함수 (`ListAnthropicModels`)
+
+- `src/model/anthropic/index.ts`가 `listAnthropicModels(settings, deps?, signal?)`를 export한다.
+  - `settings`(`AnthropicListSettings`): `apiKey`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`
+  - `deps`: `AnthropicProviderDeps`(가짜 `fetch` 주입)
+- 요청: `GET <apiBaseUrl>/v1/models`. 헤더는 Messages 요청과 같은 `x-api-key`와 `anthropic-version`이다.
+- 페이지 나눔: `has_more`가 참이면 직전 `last_id`를 `after_id`로 넘겨 다음 쪽을 읽는다. 최대 `MAX_MODEL_LIST_PAGES`(20)쪽이며, 넘으면 `api_error`다. 모델 순서는 API가 준 순서다.
+- 결과:
+  - 성공은 `{ ok: true, models: ModelInfo[] }`다.
+  - 실패는 `{ ok: false, kind: ModelErrorKind, message }`다. 종류와 재시도, 시간 제한은 Messages 요청과 같다. API나 네트워크 실패로 throw하지 않는다.
+  - 키는 헤더에만 넣는다. 메시지, URL, 기록에는 넣지 않는다.
+- `ModelInfo`: API 객체에서 다음만 남긴다. `capabilities`와 그 밖의 필드는 버린다.
+  - `id`
+  - `displayName`: `display_name`. 없으면 `id`다.
+  - `createdAt`: `created_at` 문자열. 없거나 문자열이 아니면 null이다.
+  - `maxInputTokens`: `max_input_tokens`. 양의 정수가 아니면 null이다.
+  - `maxOutputTokens`: `max_tokens`. 양의 정수가 아니면 null이다.
+- 문자열 `id`가 없는 항목이 하나라도 있으면 목록 전체가 `malformed_response`다.
+- API 형식 확인 범위(claude-api 스킬 문서 기준, 실제 API는 호출하지 않음):
+  - 확인함: `GET /v1/models/{id}`, 헤더 `x-api-key`·`anthropic-version`, 모델 필드 `id`·`display_name`·`max_input_tokens`·`max_tokens`·`capabilities`, Models 목록의 `after_id`·`before_id` 매개변수와 `has_more`·`first_id`·`last_id` 응답 필드
+  - 미확인: `created_at`의 정확한 형식, 목록 응답의 항목 배열 이름(같은 방식의 다른 목록은 `data`), `limit` 매개변수의 최댓값
+
+### `codaryn models`
+
+```
+codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <번호|id>]
+```
+
+- 작업 공간은 필요 없다. 실제 API에 접속하므로 키가 필요하다.
+  - 키와 주소는 `run`과 같은 규칙으로 정한다: `ANTHROPIC_API_KEY`, `--vars-file`, `--config` 또는 `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`.
+  - 키가 없으면 `provider_not_configured`(종료 7)이고 아무것도 보내지 않는다.
+- 출력:
+  - 기본은 번호가 붙은 표다. `--json`이면 `ModelsOutput` 한 줄이다.
+  - `ModelsOutput`의 필드: `schemaVersion`, `kind:"models"`, `status`(`listed`/`selected`), `exitCode`, `models`(`number`가 붙은 `ModelInfo`), `current`, `selected`
+  - `current`: 지금 실행이 쓸 모델(`CODARYN_MODEL`, 없으면 설정 파일 `model`), 그 출처, 그 모델이 목록에 있는지
+  - `selected`: 쓴 모델, 설정 파일을 새로 만들었는지, `CODARYN_MODEL`이 덮어쓰는지
+- 종료(`MODELS_EXIT_CODES`): `listed` 0, `selected` 0
+- 오류(`CliErrorOutput`):
+  - `invalid_arguments`, `invalid_config`, `key_in_file`: 종료 2
+  - `provider_not_configured`: 종료 7
+  - `model_list_failed`: 종료 8. API 요청이 실패했고, 메시지에 종류가 있다. 아무것도 쓰지 않았다.
+  - `config_write_failed`: 종료 2. 설정 파일을 쓰지 못했고, 파일은 그대로다.
+- `--use <번호|id>`: 목록의 번호(1부터)나 목록에 있는 id만 받는다. 그 밖은 `invalid_arguments`이고 아무것도 쓰지 않는다. `--config`(또는 `CODARYN_CONFIG`)가 필요하다. 쓰는 방식과 보존 범위는 Y 2단계에서 정해 이 절에 적는다.

@@ -2,10 +2,15 @@
  * T-9: reclaiming a dead lock is atomic. Several runs that reclaim the same dead lock at the same
  * time end with exactly one holder, and lock.json names that holder. EPERM and EBUSY end as
  * workspace_locked, not as an exception. Review input: store-revert 1 (exp-lock.mjs).
+ *
+ * W-4: the crashed run's pid is a fixed number that the injected liveness check calls dead. The
+ * cases used to take the pid of a process that had just exited; under the load of the whole unit
+ * suite the system gave that pid to a new process, the dead lock looked held, and a round ended
+ * with no winner (seen 11 times in 1,800 rounds, each time with that pid alive again).
  */
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,11 +20,9 @@ import { acquireLock } from "../../../src/store/index.js";
 
 const clock = { now: () => Date.UTC(2026, 10, 12, 6, 0, 0) };
 
-function exitedPid(): number {
-  const child = spawnSync(process.execPath, ["-e", ""]);
-  assert.equal(child.status, 0);
-  return child.pid;
-}
+/** The crashed run's pid. Only the injected check decides that it is dead. */
+const CRASHED_PID = 4_000_001;
+const crashedIsDead = (pid: number): boolean => pid !== CRASHED_PID;
 
 async function withRoot(run: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "codaryn-lock-"));
@@ -37,13 +40,31 @@ async function leaveDeadLock(root: string, pid: number): Promise<void> {
   await writeFile(lockFile(root), `${JSON.stringify({ pid, runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" })}\n`);
 }
 
+test("W-4: the injected liveness check decides, so a pid given to another live process does not keep a dead lock", async () => {
+  // The parent process stands for a new process that received the crashed run's pid.
+  const reused = process.ppid;
+  await withRoot(async (root) => {
+    await leaveDeadLock(root, reused);
+    const ids = ["run-a", "run-b", "run-c"];
+    const outcomes = await Promise.all(
+      ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, isProcessAlive: (pid) => pid !== reused })),
+    );
+    const winners = ids.filter((_, index) => outcomes[index]?.ok === true);
+    assert.equal(winners.length, 1, `winners ${JSON.stringify(winners)}`);
+    const holder = JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string };
+    assert.equal(holder.runId, winners[0]);
+  });
+});
+
 test("T-9: contenders reclaiming one dead lock in the same process end with exactly one holder", async () => {
-  const dead = exitedPid();
+  const dead = CRASHED_PID;
   for (let round = 0; round < 40; round += 1) {
     await withRoot(async (root) => {
       await leaveDeadLock(root, dead);
       const ids = ["run-a", "run-b", "run-c"];
-      const outcomes = await Promise.all(ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock })));
+      const outcomes = await Promise.all(
+        ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, isProcessAlive: crashedIsDead })),
+      );
       const winners = ids.filter((_, index) => outcomes[index]?.ok === true);
       assert.equal(winners.length, 1, `round ${round}: winners ${JSON.stringify(winners)}`);
       const holder = JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string; pid: number };
@@ -59,7 +80,7 @@ test("T-9: contenders reclaiming one dead lock in the same process end with exac
 
 test("T-9: separate processes reclaiming one dead lock at the same moment end with one holder", async () => {
   const storeUrl = new URL("../../../src/store/index.js", import.meta.url).href;
-  const dead = exitedPid();
+  const dead = CRASHED_PID;
   for (let round = 0; round < 6; round += 1) {
     await withRoot(async (root) => {
       await leaveDeadLock(root, dead);
@@ -69,7 +90,7 @@ test("T-9: separate processes reclaiming one dead lock at the same moment end wi
       const script = [
         `const { acquireLock } = await import(${JSON.stringify(storeUrl)});`,
         `while (Date.now() < ${startAt}) {}`,
-        `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 } });`,
+        `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 }, isProcessAlive: (pid) => pid !== ${dead} });`,
         "process.stdout.write(JSON.stringify({ ok: outcome.ok, code: outcome.code ?? null }));",
         `await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${startAt + 900} - Date.now())));`,
       ].join("\n");

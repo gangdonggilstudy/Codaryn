@@ -1,11 +1,13 @@
 /**
- * Output objects of `codaryn report` (U-5) and `codaryn doctor` (U-6). Both print human-readable
- * text on stdout by default and these objects as one JSON line with `--json`. Errors that stop
- * either command print CliErrorOutput as one JSON line, as `run` and `revert` do.
+ * Output objects of `codaryn report` (U-5), `codaryn doctor` (U-6) and `codaryn models` (Y-1).
+ * All print human-readable text on stdout by default and these objects as one JSON line with
+ * `--json`. Errors that stop any of them print CliErrorOutput as one JSON line, as `run` and
+ * `revert` do.
  */
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
+import type { ModelInfo } from "./model.js";
 import type { Limits, ModelProviderName } from "./task.js";
 import type { MaskedText } from "./text.js";
 import type { VerifierResult } from "./verify.js";
@@ -121,4 +123,50 @@ export interface DoctorOutput {
   readonly exitCode: number;
   /** One per DOCTOR_CHECK_IDS entry, in that order. */
   readonly checks: readonly DoctorCheck[];
+}
+
+/**
+ * `codaryn models [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]`
+ * (Y-1 to Y-3). Lists the models the key can use through `listAnthropicModels` (a real API
+ * request) and can write one of them into the config file's `model`. No workspace is needed.
+ *
+ * - Key and API address: the same rules as `run` (ANTHROPIC_API_KEY, `--vars-file`, `--config` or
+ *   CODARYN_CONFIG, CODARYN_API_BASE_URL). The key goes into the request header only.
+ * - Errors (CliErrorOutput): `invalid_arguments`, `invalid_config`, `key_in_file`,
+ *   `provider_not_configured` (no key; nothing is sent), `model_list_failed` (the API request
+ *   failed; the message names the ModelErrorKind, nothing is written), `config_write_failed`
+ *   (the config file could not be written; it is left as it was).
+ * - `--use` takes a 1-based number from the list or a listed id. Anything else is
+ *   `invalid_arguments` and nothing is written. It needs `--config` (or CODARYN_CONFIG).
+ */
+export const MODELS_STATUSES = ["listed", "selected"] as const;
+/** listed: the list only. selected: a model was written into the config file. */
+export type ModelsStatus = (typeof MODELS_STATUSES)[number];
+export const MODELS_EXIT_CODES: { readonly [S in ModelsStatus]: number } = { listed: 0, selected: 0 };
+
+/** One listed model and the number `--use` accepts for it. */
+export interface ModelsListEntry extends ModelInfo {
+  /** 1-based position in the list. */
+  readonly number: number;
+}
+
+/** Printed by `codaryn models --json`. Without `--json` a numbered table. */
+export interface ModelsOutput {
+  readonly schemaVersion: 1;
+  readonly kind: "models";
+  readonly status: ModelsStatus;
+  readonly exitCode: number;
+  /** In the API's order. */
+  readonly models: readonly ModelsListEntry[];
+  /**
+   * The model a run without a task `model.model` would use now: CODARYN_MODEL, else the config
+   * file's `model`. `listed` says whether that id is in `models`. Null when neither is set.
+   */
+  readonly current: { readonly id: string; readonly source: "CODARYN_MODEL" | "config"; readonly listed: boolean } | null;
+  /**
+   * The model written by `--use` or chosen at the terminal prompt, or null. `created`: the config
+   * file did not exist and was created with `schemaVersion` and `model` only.
+   * `overriddenBy`: CODARYN_MODEL is set, so runs keep using it until it is unset.
+   */
+  readonly selected: { readonly id: string; readonly created: boolean; readonly overriddenBy: "CODARYN_MODEL" | null } | null;
 }

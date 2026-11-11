@@ -9,6 +9,7 @@
  * only, by the same rule. Printed text also passes `hideKeys`.
  */
 
+import fs from "node:fs/promises";
 import path from "node:path";
 import { parseEnv } from "node:util";
 import {
@@ -27,14 +28,19 @@ import type {
   DoctorOutput,
   DoctorStatus,
   ResolvedTaskSpec,
+  Workspace,
 } from "../contracts/index.js";
 import { parseScript } from "../model/index.js";
+import { buildChildEnv, planWindowsLaunch } from "../tools/index.js";
+import type { ExecutableFileSystem } from "../tools/index.js";
+import { createWorkspace } from "../workspace/index.js";
 import { parseDoctorArgs } from "./args.js";
 import { parseConfig } from "./config.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError } from "./run.js";
 import {
   MAX_KEY_SCAN_DEPTH,
+  checkLocalPathSyntax,
   findKeyInJson,
   normalizeApiBaseUrlStrict,
   rawTextHoldsKey,
@@ -61,6 +67,8 @@ export interface DoctorEnvironment {
   readonly isDirectory: (dir: string) => Promise<boolean>;
   /** True when `file` names an existing regular file. Never throws. */
   readonly isFile: (file: string) => Promise<boolean>;
+  /** Real path, as the command runner resolves it (`fs.realpath` when absent). */
+  readonly realpath?: (file: string) => Promise<string>;
   readonly locateInWorkspace: (file: string, workspaceRoot: string) => Promise<WorkspaceLocation>;
   readonly relatePaths: (target: string, base: string) => Promise<PathRelation>;
   readonly platform?: NodeJS.Platform;
@@ -97,34 +105,170 @@ function variable(env: SettingsEnvironment, name: string, platform: NodeJS.Platf
   return key === undefined ? undefined : env[key];
 }
 
+/** One executable a run may start: a command rule (run_command) or a command verifier. */
+interface CommandEntry {
+  /** `policy.commands[i]` or `verifiers[i]`. */
+  readonly position: string;
+  readonly executable: string;
+  /** The rule's `argsPrefix`, or the verifier's `args`. */
+  readonly args: readonly string[];
+  /** The verifier's `cwd` as written; null for a rule (the model chooses the cwd per call). */
+  readonly cwd: string | null;
+}
+
 /**
- * Whether a command name would be found: a name with a directory part against `baseDir`,
- * otherwise in the absolute PATH entries (relative entries are skipped, as the runner does),
- * with PATHEXT on Windows.
+ * PATH entries split into those that may be looked at and the number of network or device
+ * entries (X-1): those are never touched, not even with stat. Quotes are dropped on Windows, as
+ * the runner does.
  */
-async function findExecutable(
-  io: DoctorEnvironment,
+function pathEntries(value: string | undefined, platform: NodeJS.Platform): { local: string[]; remote: number } {
+  const local: string[] = [];
+  let remote = 0;
+  for (const raw of (value ?? "").split(platform === "win32" ? ";" : ":")) {
+    const entry = platform === "win32" ? raw.replaceAll('"', "") : raw;
+    if (entry.length === 0) continue;
+    if (checkLocalPathSyntax(entry, platform).ok) local.push(entry);
+    else remote += 1;
+  }
+  return { local, remote };
+}
+
+function hasDirectoryPart(name: string, platform: NodeJS.Platform): boolean {
+  if (name.includes("/")) return true;
+  return platform === "win32" && (name.includes(path.win32.sep) || /^[A-Za-z]:/.test(name));
+}
+
+/**
+ * Whether a command name would be found (existence only): a name with a directory part against
+ * `baseDir`, otherwise in the absolute local PATH entries, with PATHEXT on Windows. Used where
+ * the run applies no further rule (POSIX) or none can be judged (no workspace).
+ */
+async function existsOnPath(
   name: string,
-  env: SettingsEnvironment,
+  localDirs: readonly string[],
+  env: Readonly<Record<string, string>>,
   baseDir: string,
   platform: NodeJS.Platform,
+  isFile: (file: string) => Promise<boolean>,
 ): Promise<boolean> {
   const pathApi = platform === "win32" ? path.win32 : path.posix;
   const extensions =
     platform === "win32" && pathApi.extname(name) === ""
       ? (variable(env, "PATHEXT", platform) ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => ext.length > 0)
       : [""];
-  const hasDir = name.includes("/") || (platform === "win32" && name.includes(pathApi.sep));
-  const dirs = hasDir
-    ? [pathApi.dirname(pathApi.resolve(baseDir, name))]
-    : (variable(env, "PATH", platform) ?? "").split(pathApi.delimiter).filter((dir) => dir.length > 0 && pathApi.isAbsolute(dir));
+  const hasDir = hasDirectoryPart(name, platform);
+  const dirs = hasDir ? [pathApi.dirname(pathApi.resolve(baseDir, name))] : localDirs.filter((dir) => pathApi.isAbsolute(dir));
   const base = hasDir ? pathApi.basename(name) : name;
   for (const dir of dirs) {
     for (const ext of extensions) {
-      if (await io.isFile(pathApi.join(dir, `${base}${ext}`))) return true;
+      if (await isFile(pathApi.join(dir, `${base}${ext}`))) return true;
     }
   }
   return false;
+}
+
+/** The reason code in a launch refusal such as "could not start process (executable_refused): ...". */
+function reasonOf(message: string): string {
+  const open = message.indexOf("(");
+  const close = message.indexOf(")", open + 1);
+  return open >= 0 && close > open ? message.slice(open + 1, close) : "refused";
+}
+
+/**
+ * X-1, X-3: the `commands` check with the run's rules. The child environment is built as the
+ * command runner builds it (`buildChildEnv`). A verifier's cwd is resolved by the workspace as
+ * the verifier runner does (`outside_root`, `state_dir`, `invalid_path`). On Windows each
+ * executable goes through the runner's own `planWindowsLaunch` (T-4: nothing inside the
+ * workspace; `.cmd`/`.bat` only outside it with the narrow character set). Network and device
+ * paths are never touched: PATH entries of that kind are left out and counted, and the file
+ * access refuses such paths.
+ */
+async function checkCommands(
+  io: DoctorEnvironment,
+  entries: readonly CommandEntry[],
+  env: SettingsEnvironment,
+  workspaceRoot: string | null,
+  platform: NodeJS.Platform,
+): Promise<{ status: DoctorCheckStatus; message: string }> {
+  const isLocal = (file: string): boolean => checkLocalPathSyntax(file, platform).ok;
+  const childEnv = buildChildEnv(env as NodeJS.ProcessEnv, platform);
+  const pathKey = Object.keys(childEnv).find((key) => (platform === "win32" ? key.toUpperCase() === "PATH" : key === "PATH"));
+  const { local, remote } = pathEntries(pathKey === undefined ? undefined : childEnv[pathKey], platform);
+  const launchEnv: Record<string, string> =
+    pathKey === undefined ? childEnv : { ...childEnv, [pathKey]: local.join(platform === "win32" ? ";" : ":") };
+  const realpathOf = io.realpath ?? ((file: string) => fs.realpath(file));
+  const fileSystem: ExecutableFileSystem = {
+    isFile: async (file) => isLocal(file) && (await io.isFile(file)),
+    realpath: async (file) => {
+      if (!isLocal(file)) throw new Error("not a local path");
+      return realpathOf(file);
+    },
+  };
+
+  let workspace: Workspace | null = null;
+  if (workspaceRoot !== null) {
+    try {
+      workspace = await createWorkspace({ root: workspaceRoot });
+    } catch {
+      workspace = null;
+    }
+  }
+  const systemRoot = variable(env, "SystemRoot", platform) ?? `C:${path.win32.sep}Windows`;
+  const rejected: string[] = [];
+  const notFound: string[] = [];
+  const notFoundLocally: string[] = [];
+  let allowed = 0;
+  for (const entry of entries) {
+    let cwdAbsolute = workspace?.root ?? io.cwd;
+    if (workspace !== null && entry.cwd !== null) {
+      const resolved = await workspace.resolve(entry.cwd, "cwd");
+      if (!resolved.ok) {
+        rejected.push(`${entry.position}.cwd (${resolved.code})`);
+        continue;
+      }
+      cwdAbsolute = resolved.path.absolute;
+    }
+    const missing = (): void => {
+      const couldBeRemote = remote > 0 && !hasDirectoryPart(entry.executable, platform);
+      (couldBeRemote ? notFoundLocally : notFound).push(entry.position);
+    };
+    if (platform === "win32" && workspace !== null) {
+      const plan = await planWindowsLaunch({
+        executable: entry.executable,
+        args: entry.args,
+        cwdAbsolute,
+        env: launchEnv,
+        workspaceRoot: workspace.root,
+        systemRoot,
+        fileSystem,
+      });
+      if (plan.ok) allowed += 1;
+      else if (reasonOf(plan.message) === "ENOENT") missing();
+      else rejected.push(`${entry.position} (${reasonOf(plan.message)})`);
+      continue;
+    }
+    if (await existsOnPath(entry.executable, local, launchEnv, cwdAbsolute, platform, fileSystem.isFile)) allowed += 1;
+    else missing();
+  }
+
+  const parts: string[] = [];
+  if (rejected.length > 0) parts.push(`rejected at run time: ${rejected.join(", ")}`);
+  if (notFound.length > 0) parts.push(`not found: ${notFound.join(", ")}`);
+  if (notFoundLocally.length > 0) parts.push(`not found in local PATH entries: ${notFoundLocally.join(", ")}`);
+  if (remote > 0) {
+    parts.push(`${remote} network or device PATH ${remote === 1 ? "entry" : "entries"} not checked: remote paths are not accessed`);
+  }
+  if (rejected.length > 0 || notFound.length > 0) return { status: "fail", message: parts.join("; ") };
+  if (parts.length > 0) {
+    return { status: "warn", message: allowed > 0 ? `${allowed} executable(s) found; ${parts.join("; ")}` : parts.join("; ") };
+  }
+  return {
+    status: "ok",
+    message:
+      workspace !== null
+        ? `${allowed} executable(s) found and allowed by the run's rules`
+        : `${allowed} executable(s) found; the run's rules need a workspace and were not checked`,
+  };
 }
 
 function worst(checks: readonly DoctorCheck[]): DoctorStatus {
@@ -335,12 +479,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   // commands
   const policy = task?.policy ?? (args.taskPath === null ? config?.policy : undefined);
   const verifiers = task?.verifiers ?? (args.taskPath === null ? config?.verifiers : undefined) ?? [];
-  const commandEntries: [string, string, string][] = [];
-  (policy?.commands ?? []).forEach((rule, index) => commandEntries.push([`policy.commands[${index}]`, rule.executable, workspaceRoot ?? io.cwd]));
+  const commandEntries: CommandEntry[] = [];
+  (policy?.commands ?? []).forEach((rule, index) =>
+    commandEntries.push({ position: `policy.commands[${index}]`, executable: rule.executable, args: rule.argsPrefix, cwd: null }),
+  );
   verifiers.forEach((verifier, index) => {
     if (verifier.kind === "command") {
-      const base = workspaceRoot === null ? io.cwd : path.resolve(workspaceRoot, verifier.cwd ?? ".");
-      commandEntries.push([`verifiers[${index}]`, verifier.executable, base]);
+      commandEntries.push({ position: `verifiers[${index}]`, executable: verifier.executable, args: verifier.args, cwd: verifier.cwd ?? "." });
     }
   });
   if (taskUnusable) {
@@ -348,12 +493,8 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   } else if (commandEntries.length === 0) {
     set("commands", "skipped", "no command is allowed and no command verifier is configured");
   } else {
-    const missing: string[] = [];
-    for (const [position, executable, base] of commandEntries) {
-      if (!(await findExecutable(io, executable, env, base, platform))) missing.push(position);
-    }
-    if (missing.length > 0) set("commands", "fail", `not found: ${missing.join(", ")}`);
-    else set("commands", "ok", `${commandEntries.length} executable(s) found`);
+    const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
+    set("commands", checked.status, checked.message);
   }
 
   // install_dir (U-3)

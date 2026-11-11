@@ -108,6 +108,18 @@ export function localPathProblem(raw: string, baseDir: string): string | null {
   return null;
 }
 
+/**
+ * X-1 (S-5): an executable or a working directory as written in a command rule or a verifier.
+ * It must not name a network or device path (UNC, `\\.\`, `\\?\`, a DOS device name, `/dev/`),
+ * so neither a run nor `doctor` reaches another machine through it. The value is kept as written.
+ */
+function localPathText(value: unknown, field: string): string {
+  const raw = text(value, field);
+  const syntax = checkLocalPathSyntax(raw);
+  if (!syntax.ok) fail(`${field} ${syntax.reason === "invalid" ? "is not a valid local path" : "is a network or device path"}`);
+  return raw;
+}
+
 /** Resolves a path from a file against `baseDir` after the S-5 check. */
 function resolveLocal(baseDir: string, target: string, field: string): string {
   const problem = localPathProblem(target, baseDir);
@@ -176,7 +188,7 @@ export function parsePolicy(value: unknown): PolicyConfig {
     const rule = record(item, field, ["executable", "argsPrefix", "allowExtraArgs"]);
     if (typeof rule["allowExtraArgs"] !== "boolean") fail(`${field}.allowExtraArgs must be a boolean`);
     return {
-      executable: text(rule["executable"], `${field}.executable`),
+      executable: localPathText(rule["executable"], `${field}.executable`),
       argsPrefix: strings(rule["argsPrefix"], `${field}.argsPrefix`),
       allowExtraArgs: rule["allowExtraArgs"],
     };
@@ -287,12 +299,12 @@ function parseVerifier(value: unknown, index: number): VerifierConfig {
     if (expect !== undefined && (typeof expect !== "number" || !Number.isInteger(expect))) {
       fail(`${field}.expectExitCode must be an integer`);
     }
-    const cwd = optionalText(rec["cwd"], `${field}.cwd`);
+    const cwd = rec["cwd"] === undefined ? undefined : localPathText(rec["cwd"], `${field}.cwd`);
     const timeoutMs = timerMs(rec["timeoutMs"], `${field}.timeoutMs`);
     return {
       id: text(rec["id"], `${field}.id`),
       kind: "command",
-      executable: text(rec["executable"], `${field}.executable`),
+      executable: localPathText(rec["executable"], `${field}.executable`),
       args: strings(rec["args"], `${field}.args`),
       ...(cwd === undefined ? {} : { cwd }),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),

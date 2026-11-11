@@ -17,6 +17,7 @@ import {
   CONTENT_HASH_PATTERN_SOURCE,
   INTEGRITY_PHASES,
   JOURNAL_FILE_NAME,
+  MAX_EVIDENCE_BYTES,
   MAX_REPORT_FILE_BYTES,
   REPORT_EXIT_CODES,
   RESULT_FILE_NAME,
@@ -128,11 +129,14 @@ function limitsOf(value: unknown): Limits {
 
 function verifierOf(value: unknown): VerifierResult {
   const rec = obj(value);
+  const evidence = recorded(rec["evidence"]);
+  // X-2: a run never records more evidence than MAX_EVIDENCE_BYTES (T-6). More was changed later.
+  if (Buffer.byteLength(evidence, "utf8") > MAX_EVIDENCE_BYTES) bad("a verifier result has more evidence than a run records");
   return {
     id: str(rec["id"]),
     kind: oneOf(rec["kind"], VERIFIER_KINDS),
     outcome: oneOf(rec["outcome"], VERIFIER_OUTCOMES),
-    evidence: recorded(rec["evidence"]),
+    evidence,
     checked: recordedList(rec["checked"]),
     limits: recordedList(rec["limits"]),
   };
@@ -292,10 +296,24 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
 // ---------------------------------------------------------------------------------------------
 // Markdown
 
+/**
+ * Length of the longest run of backticks. A loop, not `Math.max(...runs)`: recorded text can hold
+ * any number of runs, and spreading them as arguments overflows the stack (X-2).
+ */
+function longestBacktickRun(text: string): number {
+  let longest = 0;
+  let current = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    current = text.charCodeAt(index) === 0x60 ? current + 1 : 0;
+    if (current > longest) longest = current;
+  }
+  return longest;
+}
+
 /** Inline code that cannot be closed early by the text it shows. */
 function code(text: string): string {
   const clean = cleanText(text);
-  const longest = Math.max(0, ...[...clean.matchAll(/`+/g)].map((match) => match[0].length));
+  const longest = longestBacktickRun(clean);
   const fence = "`".repeat(longest + 1);
   const pad = clean.startsWith("`") || clean.endsWith("`") || clean.length === 0 ? " " : "";
   return `${fence}${pad}${clean}${pad}${fence}`;
@@ -304,9 +322,8 @@ function code(text: string): string {
 /** A fenced block that the text inside cannot close. */
 function block(text: string): string[] {
   const clean = cleanText(text, true);
-  const longest = Math.max(0, ...[...clean.matchAll(/`+/g)].map((match) => match[0].length));
-  const fence = "`".repeat(Math.max(3, longest + 1));
-  return [fence, ...clean.split("\n"), fence];
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(clean) + 1));
+  return [fence].concat(clean.split(String.fromCharCode(10)), [fence]);
 }
 
 function short(hash: string | null): string {
@@ -356,7 +373,8 @@ export function renderReport(report: ReportOutput): string {
       out.push(`- ${code(verifier.id)} (${verifier.kind}): **${verifier.outcome}**`);
       for (const item of verifier.checked) out.push(`  - checked: ${code(item)}`);
       if (verifier.outcome !== "pass" && verifier.evidence.length > 0) {
-        out.push("", ...block(verifier.evidence).map((line) => `  ${line}`));
+        out.push("");
+        for (const line of block(verifier.evidence)) out.push(`  ${line}`);
       }
     }
   }
@@ -495,6 +513,13 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   }
 
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
-  const text = json ? `${JSON.stringify(report)}\n` : renderReport(report);
+  let text: string;
+  try {
+    text = json ? `${JSON.stringify(report)}\n` : renderReport(report);
+  } catch {
+    // X-2: everything printed comes from the records, so a failure here means records a run
+    // would not write (changed or broken after the run), not an internal error.
+    return cliError("invalid_run_record", "the run's records cannot be shown");
+  }
   return { text: hideKeys(text, currentKey), exitCode: report.exitCode };
 }

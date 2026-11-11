@@ -6,6 +6,18 @@
  *
  * Everything bound for a model or the journal goes through `privacy.mask` first.
  * When masking fails, the text is neither sent nor recorded and the run ends.
+ *
+ * Integrity (phase 3, U-1, U-2): with `EngineDeps.integrity` the engine takes a baseline of the
+ * protected material at run start and compares it again before and after every verification
+ * round. A change, or material that cannot be shown unchanged, ends the run as
+ * `needs-input`/`protected_changed` without a repair. Order with interruptions:
+ * - A cancel or the duration limit already in effect when a check is due ends the run as before,
+ *   and that check is not made (a capture can hash up to MAX_INTEGRITY_BYTES).
+ * - A check that is made is recorded. A non-empty result ends the run ahead of the verifiers'
+ *   outcomes, repairs, and an interruption that arrived during its own capture.
+ * - A capture that rejects (not a file-level problem; those are `unchecked` entries) fails
+ *   closed: `protected_changed` with a notice, and no `integrity_checked` record, since there is no
+ *   list of paths to record.
  */
 
 import {
@@ -23,11 +35,14 @@ import type {
   EngineDeps,
   EngineResult,
   FileChangeRecord,
+  IntegrityManifest,
+  IntegrityPhase,
   JournalEvent,
   MaskedText,
   MaskedToolCall,
   ModelMessage,
   PolicyDecision,
+  RawText,
   RawToolOutcome,
   RawVerifierResult,
   RunReason,
@@ -82,6 +97,15 @@ const WRITE_NOT_APPLIED_MESSAGE = "the write was not applied";
 const VERIFIER_NOT_RUN_EVIDENCE = "the verifier could not be run";
 const VERIFIER_NOT_RUN_CHECKED = "nothing: the verifier did not complete";
 
+/** U-2 notices: a fixed lead per check, then the changed display paths. */
+const INTEGRITY_NOTICE_LEADS: { readonly [P in IntegrityPhase]: string } = {
+  run_start: "protected material could not be checked at run start: ",
+  before_verify: "protected material changed or could not be checked before verification; the verifiers were not run: ",
+  after_verify: "protected material changed or could not be checked after verification; the result is not trusted: ",
+};
+const INTEGRITY_MORE_PATHS = [", and ", " more"] as const;
+const INTEGRITY_FAILED_NOTICE = ["the integrity check could not be completed (", "); protected material is treated as changed"] as const;
+
 /** Every fixed text the engine sends to a model or records. Tests mask these with the real gateway. */
 export const FIXED_MODEL_TEXTS: readonly string[] = [
   SYSTEM_PROMPT,
@@ -95,8 +119,14 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   "token not usable in field: ",
   "malformed model response: stop=",
   ...REPAIR_FIXED_TEXTS,
+  ...Object.values(INTEGRITY_NOTICE_LEADS),
+  ...INTEGRITY_MORE_PATHS,
+  ...INTEGRITY_FAILED_NOTICE,
 ];
 const MAX_TIMER_MS = 2_147_483_647;
+
+/** Most changed paths one integrity notice names (U-2). The record and the result keep them all. */
+export const INTEGRITY_NOTICE_PATHS = 10;
 
 interface End {
   readonly status: TerminalRunStatus;
@@ -106,6 +136,7 @@ interface End {
 const MASKING_FAILED: End = { status: "failed", reason: "model_error" };
 const CANCELLED: End = { status: "cancelled", reason: "cancelled" };
 const UNKNOWN_OUTCOME: End = { status: "needs-input", reason: "unknown_tool_outcome" };
+const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_changed" };
 
 /** A verification that failed in a way a repair may fix. */
 interface RepairNeeded {
@@ -121,7 +152,7 @@ function isToolName(name: string): name is ToolName {
 }
 
 export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> => {
-  const { task, runId, model, privacy, policy, tools, verifiers, journal, clock, signal } = deps;
+  const { task, runId, model, privacy, policy, tools, verifiers, journal, clock, signal, integrity } = deps;
   const limits = task.limits;
   const state = new RunState();
   const startedAt = clock.now();
@@ -143,6 +174,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   /** Signature of the latest failed verification, and how many times in a row it occurred. */
   let lastSignature: string | null = null;
   let sameFailures = 0;
+  /** The run_start manifest (U-1). Every later check compares with it. Local only, never recorded. */
+  let baseline: IntegrityManifest | null = null;
+  /** `changed` of the latest recorded `integrity_checked`; undefined while none was recorded. */
+  let protectedChanged: readonly MaskedText[] | undefined;
 
   // Real-time deadline so that a model or tool call in flight is interrupted at the duration limit.
   const deadline = new AbortController();
@@ -193,6 +228,51 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   };
 
   const record = (event: JournalEvent): Promise<void> => journal.append(event);
+
+  /**
+   * One integrity check (U-1, U-2): capture, compare with the run_start baseline, record the
+   * masked list, and end the run when it is not empty. Paths are masked one by one for the record
+   * and the result; the notice is built from the raw paths and masked as a whole.
+   */
+  const checkIntegrity = async (phase: IntegrityPhase): Promise<End | null> => {
+    if (integrity === undefined) return null;
+    let changedRaw: readonly RawText[];
+    try {
+      const current = await integrity.capture();
+      if (phase === "run_start") baseline = current;
+      if (baseline === null) throw new Error("no run_start baseline");
+      changedRaw = integrity.compare(baseline, current);
+    } catch {
+      // Not a file-level problem (those are `unchecked` entries): the material cannot be shown
+      // unchanged, so the run fails closed. There is no list of paths, so nothing is recorded.
+      const notice = mask(`${INTEGRITY_FAILED_NOTICE[0]}${phase}${INTEGRITY_FAILED_NOTICE[1]}`);
+      if (notice !== null) notices.push(notice);
+      return PROTECTED_CHANGED;
+    }
+    const changed: MaskedText[] = [];
+    for (const path of changedRaw) {
+      const masked = mask(path);
+      if (masked === null) return MASKING_FAILED;
+      changed.push(masked);
+    }
+    await record({ type: "integrity_checked", phase, changed });
+    protectedChanged = changed;
+    if (changed.length === 0) return null;
+    const shown = changedRaw.slice(0, INTEGRITY_NOTICE_PATHS).join(", ");
+    const hidden = changedRaw.length - INTEGRITY_NOTICE_PATHS;
+    const more = hidden > 0 ? `${INTEGRITY_MORE_PATHS[0]}${hidden}${INTEGRITY_MORE_PATHS[1]}` : "";
+    const notice = mask(`${INTEGRITY_NOTICE_LEADS[phase]}${shown}${more}`);
+    if (notice !== null) notices.push(notice);
+    return PROTECTED_CHANGED;
+  };
+
+  /** A check point: an interruption already in effect comes first and skips the check. */
+  const checkPoint = async (phase: IntegrityPhase): Promise<End | null> => {
+    if (integrity === undefined) return null;
+    const stop = interrupted();
+    if (stop !== null) return stop;
+    return checkIntegrity(phase);
+  };
 
   /**
    * Builds, records and returns the masked result of a call that was rejected before execution.
@@ -506,6 +586,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       if (notice !== null) notices.push(notice);
       return { status: "needs-input", reason: "no_verifier" };
     }
+    // U-1: when protected material changed since run start, this round's verifiers are not run.
+    // EngineResult.verifiers then keeps the previous round, as when a limit ends the run here.
+    const before = await checkPoint("before_verify");
+    if (before !== null) return before;
     verifierResults.length = 0;
     /** Whether each recorded evidence of this round was cut (T-6), by verifier id. */
     const evidenceCut = new Map<string, boolean>();
@@ -551,6 +635,15 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     // T-8: the user's cancel, or the duration limit ending while the last verifier ran.
     const stopped = interrupted();
     if (stopped !== null) return stopped;
+    // U-1, U-2: a change made during the round (a verifier command, for example) makes the whole
+    // round untrusted, whatever the verifiers said, and is not repaired.
+    const after = await checkPoint("after_verify");
+    if (after !== null) return after;
+    if (integrity !== undefined) {
+      // The capture itself may have outlasted the duration limit or met a cancel.
+      const late = interrupted();
+      if (late !== null) return late;
+    }
     if (!outcomes.includes("fail")) {
       return outcomes.includes("inconclusive")
         ? { status: "needs-input", reason: "verifier_inconclusive" }
@@ -601,6 +694,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const runLoop = async (): Promise<End> => {
     const system = await start();
     if (typeof system !== "string") return system;
+    // U-1: the baseline, after run_started and before the first model request.
+    const unchecked = await checkPoint("run_start");
+    if (unchecked !== null) return unchecked;
     for (;;) {
       const conversed = await converse(system);
       if (conversed !== null) return conversed;
@@ -639,6 +735,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       usage,
       journalPath: `${STATE_DIR_NAME}/${RUNS_DIR_NAME}/${runId}/${JOURNAL_FILE_NAME}`,
       notices,
+      // U-2: only when at least one integrity_checked was recorded; the last one's list.
+      ...(protectedChanged !== undefined ? { protectedChanged } : {}),
     };
   } finally {
     clearTimeout(timer);

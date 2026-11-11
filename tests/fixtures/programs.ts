@@ -82,6 +82,39 @@ export const PROGRAMS = {
   /** Runs for ten minutes unless killed. */
   "sleep.mjs": ["setTimeout(() => {}, 600000);", ""].join("\n"),
 
+  /**
+   * Prints `pad` filler characters followed by the secret from data/secret.txt, on stdout and
+   * stderr, so the secret straddles the output size limit.
+   */
+  "print-boundary.mjs": [
+    'import { readFileSync } from "node:fs";',
+    'const secret = readFileSync("data/secret.txt", "utf8").split("\\n")[0];',
+    "const pad = Number(process.argv[2]);",
+    'process.stdout.write("y".repeat(pad) + secret + "\\n");',
+    'process.stderr.write("w".repeat(pad) + secret + "\\n");',
+    "",
+  ].join("\n"),
+
+  /** Prints JSON that holds the secret from data/secret.txt (so the secret is JSON-escaped). */
+  "print-json.mjs": [
+    'import { readFileSync } from "node:fs";',
+    'const secret = readFileSync("data/secret.txt", "utf8").split("\\n")[0];',
+    'process.stdout.write(JSON.stringify({ value: secret, nested: { list: [secret] } }) + "\\n");',
+    "",
+  ].join("\n"),
+
+  /** Prints unpadded Base64, base64url and lowercase percent encoding of the secret. */
+  "print-variants.mjs": [
+    'import { readFileSync } from "node:fs";',
+    'const secret = readFileSync("data/secret.txt", "utf8").split("\\n")[0];',
+    'const bytes = Buffer.from(secret, "utf8");',
+    'process.stdout.write("nopad:" + bytes.toString("base64").replace(/=+$/, "") + "\\n");',
+    'process.stdout.write("url64:" + bytes.toString("base64url") + "\\n");',
+    "const lower = encodeURIComponent(secret).replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());",
+    'process.stdout.write("pct:" + lower + "\\n");',
+    "",
+  ].join("\n"),
+
   /** Exits with the code given as the first argument (default 1). */
   "exit-code.mjs": ['process.exit(Number(process.argv[2] ?? "1"));', ""].join("\n"),
 } as const;

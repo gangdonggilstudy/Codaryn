@@ -85,6 +85,8 @@ export interface TaskOptions {
   readonly verifiers?: readonly VerifierConfig[];
   /** Defaults to the scripted provider with `./script.json`. */
   readonly model?: ModelConfig;
+  /** Defaults to "./ws" (the sandbox workspace). An absolute path points the run elsewhere. */
+  readonly workspaceRoot?: string;
 }
 
 /**
@@ -98,7 +100,7 @@ export function writeTask(sandbox: Sandbox, options: TaskOptions, steps?: readon
     id: options.id,
     goal: options.goal ?? "통합 테스트 작업",
     workflow: options.workflow ?? "code",
-    workspaceRoot: "./ws",
+    workspaceRoot: options.workspaceRoot ?? "./ws",
     model,
     policy: {
       commands: options.commands ?? [],

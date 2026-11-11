@@ -198,8 +198,8 @@ export interface InstallCopy {
  * (U-3) is tried against this copy, so no test ever points a run at this repository or its
  * parent. The CLI has no runtime dependencies, so the copy runs on its own.
  */
-export function installCopy(sandbox: Sandbox): InstallCopy {
-  const root = join(sandbox.base, "install");
+export function installCopy(sandbox: Sandbox, parent: string = sandbox.base): InstallCopy {
+  const root = join(parent, "install");
   cpSync(join(REPO_ROOT, "dist", "src"), join(root, "dist", "src"), { recursive: true });
   copyFileSync(join(REPO_ROOT, "package.json"), join(root, "package.json"));
   return { root, cliPath: join(root, "dist", "src", "cli", "main.js") };

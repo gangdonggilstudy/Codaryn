@@ -125,6 +125,16 @@ describe("Workspace.resolve", () => {
     }
   });
 
+  test("an 8.3 short name of the state directory is still the state directory", { skip: !IS_WINDOWS }, async (t) => {
+    const short = fs.readdirSync(root).includes(".codaryn") ? path.join(root, "CODARY~1") : "";
+    if (short === "" || !fs.existsSync(short)) {
+      t.skip("8.3 short names are not generated on this volume");
+      return;
+    }
+    assert.equal(await denial("CODARY~1/journal.jsonl"), "state_dir");
+    assert.equal(await denial("CODARY~1/new.txt"), "state_dir");
+  });
+
   test("compares without case on Windows", { skip: !IS_WINDOWS }, async () => {
     const upper = await resolved(path.join(workspace.root.toUpperCase(), "SRC", "A.TXT"));
     assert.equal(upper.relative, "src/a.txt");

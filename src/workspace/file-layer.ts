@@ -3,7 +3,11 @@
  * failures (WS-02). Product code always uses `nodeFileLayer`.
  */
 
+import { realpath as realpathCallback } from "node:fs";
 import fs from "node:fs/promises";
+import { promisify } from "node:util";
+
+const realpathNative = promisify(realpathCallback.native);
 
 export interface FileStat {
   readonly size: number;
@@ -34,7 +38,8 @@ export interface FileLayer {
 }
 
 export const nodeFileLayer: FileLayer = {
-  realpath: (path) => fs.realpath(path),
+  // The native call expands Windows 8.3 short names (`CODARY~1` -> `.codaryn`); the JS one does not.
+  realpath: (path) => realpathNative(path),
   lstat: (path) => fs.lstat(path),
   stat: (path) => fs.stat(path),
   readFile: (path) => fs.readFile(path),

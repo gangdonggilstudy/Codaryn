@@ -16,6 +16,7 @@ import type {
   ToolRequirements,
 } from "../contracts/index.js";
 import { lexicalCheck } from "../workspace/lexical.js";
+import { compileProtectedPaths } from "./protected.js";
 
 type Denial = Extract<PolicyDecision, { allowed: false }>;
 
@@ -86,6 +87,8 @@ function matchesRule(rule: CommandRule, args: readonly string[]): boolean {
 
 export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
   const tokenLike = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
+  // Only the config decides what is protected. Writes are denied; reads and `cwd` are not.
+  const protectedPaths = compileProtectedPaths(config.protectedPaths);
 
   function restorableFields(descriptor: ToolDescriptor): readonly string[] {
     return config.restorePathTokens === true ? [...descriptor.restoreFields] : [];
@@ -152,6 +155,8 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
           const outcome = lexicalCheck(workspace.root, value);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
+          } else if (access === "write" && protectedPaths.covers(outcome.relative)) {
+            denials.push(deny("path", "protected_path"));
           }
         }
       }
@@ -172,6 +177,9 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
           const outcome = await workspace.resolve(value, access);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
+          } else if (access === "write" && protectedPaths.covers(outcome.path.relative)) {
+            // Compared after links are resolved, so a link cannot lead around a protected path.
+            denials.push(deny("path", "protected_path"));
           }
         }
       }

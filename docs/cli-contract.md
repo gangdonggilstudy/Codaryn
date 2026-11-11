@@ -35,6 +35,7 @@ node dist/src/cli/main.js run --workspace <디렉터리> --goal <문장> [옵션
 node dist/src/cli/main.js revert --workspace <디렉터리> --run <runId>
 node dist/src/cli/main.js report --workspace <디렉터리> --run <runId> [--json]
 node dist/src/cli/main.js doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]
+node dist/src/cli/main.js models [--config <config.json>] [--vars-file <경로>] [--json] [--use <번호|id>]
 node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 ```
 
@@ -518,7 +519,9 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ## 16. 모델 목록 조회와 선택 (Y-1~Y-4)
 
-결정은 `docs/work-orders/phase-3-self-development.md`의 "모델 목록 조회와 선택"이다. Y 1단계 커밋은 계약만 추가했다. 목록 조회 함수는 p5(`src/model/anthropic`), `codaryn models` 명령은 Y 2단계(p7)가 구현한다. 이 절의 동작은 그 구현이 병합되기 전까지 실행되지 않는다.
+결정은 `docs/work-orders/phase-3-self-development.md`의 "모델 목록 조회와 선택"이다. Y 1단계 커밋은 계약을, Y 2단계 커밋은 `codaryn models` 명령(p7)을 추가했다. 목록 조회 함수 `listAnthropicModels`는 p5(`src/model/anthropic`)가 구현한다.
+
+- 연결 상태: Y 2단계 커밋의 진입 파일은 목록 조회 함수를 아직 넘기지 않는다. 그래서 실제 CLI의 `codaryn models`는 키와 설정을 확인한 뒤 `provider_not_implemented`(종료 7)로 멈추고 아무것도 보내지 않는다. p5 구현이 병합되면 연결한다. 명령의 동작은 주입한 가짜 함수로 유닛에서 확인했다.
 
 ### 목록 조회 함수 (`ListAnthropicModels`)
 
@@ -562,4 +565,19 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
   - `provider_not_configured`: 종료 7
   - `model_list_failed`: 종료 8. API 요청이 실패했고, 메시지에 종류가 있다. 아무것도 쓰지 않았다.
   - `config_write_failed`: 종료 2. 설정 파일을 쓰지 못했고, 파일은 그대로다.
-- `--use <번호|id>`: 목록의 번호(1부터)나 목록에 있는 id만 받는다. 그 밖은 `invalid_arguments`이고 아무것도 쓰지 않는다. `--config`(또는 `CODARYN_CONFIG`)가 필요하다. 쓰는 방식과 보존 범위는 Y 2단계에서 정해 이 절에 적는다.
+- `--use <번호|id>`: 목록의 번호(1부터)나 목록에 있는 id만 받는다. 그 밖은 `invalid_arguments`이고 아무것도 쓰지 않는다.
+  - `--config`(또는 `CODARYN_CONFIG`)가 필요하다. 없으면 요청을 보내기 전에 `invalid_arguments`다.
+  - 쓰기 전에 설정 파일을 `run`과 같은 순서로 검사한다(원문 키 검사, 파싱, 키 필드 검사, `parseConfig`). 키 필드나 키 값이 있으면 지금처럼 `key_in_file`이고, 요청도 쓰기도 하지 않는다.
+  - 고른 id가 일반 모델 id 형식(영숫자로 시작, 영숫자와 `._:-`, 200자 이하)이 아니거나 키를 담고 있으면 `config_write_failed`이고 쓰지 않는다.
+  - 원자적 쓰기: 같은 디렉터리의 임시 파일에 쓰고 이름을 바꾼다. 바꾸기 직전에 파일이 읽었을 때와 같은지 확인하고, 다르면 쓰지 않는다(`config_write_failed`). 링크면 가리키는 파일을 바꾸고 링크는 그대로 둔다. POSIX에서는 원래 파일의 권한을 옮긴다. 실패하면 임시 파일을 지우고 원래 파일은 그대로다.
+  - 설정 파일이 없으면 `{ "schemaVersion": 1, "model": <id> }`만 있는 파일을 새로 만든다(배타 생성). `--use` 없이 설정 파일이 없으면 `run`과 같이 `invalid_config`다.
+  - 보존하는 것: 모든 필드와 값, 필드 순서(`model`은 원래 자리, 없으면 `schemaVersion` 다음), BOM, 줄 끝(CRLF/LF), 첫 들여쓰기 줄의 들여쓰기(공백 또는 탭), 끝 줄바꿈
+  - 새로 쓰는 것: 공백 배치, 숫자 표기(`1e3`은 `1000`), 문자열 이스케이프 형태, 중복 필드(마지막 값만 남음)
+  - `CODARYN_MODEL`이 설정되어 있으면 쓰기는 하되, 그 변수가 우선한다고 출력에 적는다(`selected.overriddenBy`).
+- 터미널에서 번호 묻기(Y-3): `--use`와 `--json`이 없고, 설정 파일 경로가 있고, 표준 입력과 출력이 모두 터미널일 때만 표와 함께 번호나 id를 묻는다. 빈 줄이면 쓰지 않는다. 터미널이 아니면 묻지 않는다.
+- 출력의 이름과 id는 제어 문자를 바꾸고(`cleanText`), 키 값과 변수 파일에서 온 값은 가린다.
+
+### 모델 없음 안내와 doctor (Y-4)
+
+- 실행이 모델 오류로 끝났고, 그 모델 요청이 HTTP 404로 응답받았으면(제공자 문구가 `HTTP 404`로 시작) CLI가 결과의 `notices`에 안내 한 줄을 더한다: `codaryn models`로 목록을 보라는 내용이다. `result.json`에도 같은 안내가 들어가고, 진행 표시가 켜져 있으면 stderr에도 한 줄을 쓴다. 오류 종류(`api_error`)와 분류는 제공자(p5)의 것이며 바꾸지 않는다.
+- `doctor`는 네트워크에 접속하지 않으므로 모델이 있는지 확인하지 않는다. `model` 항목의 메시지에 그 사실과 `codaryn models` 안내를 적는다. 모델이 설정되지 않았을 때의 `fail` 메시지에도 같은 안내를 붙인다.

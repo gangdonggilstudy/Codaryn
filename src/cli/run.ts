@@ -32,7 +32,9 @@ import type {
   CodarynConfig,
   CreateAnthropicProvider,
   EngineResult,
+  Journal,
   ModelProvider,
+  PrivacyGateway,
   RunTask,
 } from "../contracts/index.js";
 import { runTask as engineRunTask } from "../engine/index.js";
@@ -42,7 +44,7 @@ import type { Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
 import { anthropicProviderFactory } from "./provider.js";
 import { createRunId } from "./run-id.js";
-import { withProgress } from "./progress.js";
+import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   findKeyInJson,
@@ -108,6 +110,31 @@ function error(code: CliErrorCode, message: string): { output: CliErrorOutput; e
 
 /** One CliErrorOutput and its exit code. The message must not contain secrets or file contents. */
 export const cliError = error;
+
+/**
+ * Y-4: added to the result's notices (and, with progress on, to stderr) when the run ended with a
+ * model error whose request was answered with HTTP 404. The error kind stays the provider's.
+ */
+export const MODEL_NOT_FOUND_HINT =
+  "the API answered HTTP 404, which usually means the model id is unknown: run `codaryn models` to list the models this key can use";
+
+/** The provider describes an HTTP failure as "HTTP <status>..." (src/model/anthropic). */
+function isModelNotFound(message: string): boolean {
+  return message.startsWith("HTTP 404");
+}
+
+function withModelHint(result: EngineResult, privacy: PrivacyGateway, write: ((line: string) => void) | undefined): EngineResult {
+  const masked = privacy.mask(MODEL_NOT_FOUND_HINT);
+  if (!masked.ok) return result;
+  if (write !== undefined) {
+    try {
+      write(`${PROGRESS_PREFIX}${masked.text}\n`);
+    } catch {
+      // Progress is best effort.
+    }
+  }
+  return { ...result, notices: [...result.notices, masked.text] };
+}
 
 /** Task, config and script files may start with a UTF-8 byte order mark (common on Windows). */
 async function readText(io: CliEnvironment, file: string): Promise<string | null> {
@@ -350,15 +377,24 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   try {
     const assembled = await io.assemble({ task, runId, model, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
+    // Y-4: watch for a model request answered with HTTP 404 (usually an unknown model id).
+    const recorded = assembled.deps.journal;
+    let modelNotFound = false;
+    const watched: Journal = {
+      async append(event) {
+        await recorded.append(event);
+        if (event.type === "model_error" && isModelNotFound(event.message)) modelNotFound = true;
+      },
+      close: () => recorded.close(),
+    };
     // U-8: progress lines follow the journal; they start only once the run has started.
     const write = args.quiet ? undefined : io.writeProgress;
-    const deps =
-      write === undefined
-        ? assembled.deps
-        : { ...assembled.deps, journal: withProgress(assembled.deps.journal, assembled.deps.privacy, write) };
+    const privacy = assembled.deps.privacy;
+    const deps = { ...assembled.deps, journal: write === undefined ? watched : withProgress(watched, privacy, write) };
     let result: EngineResult | null = null;
     try {
-      result = await (io.runTask ?? engineRunTask)(deps);
+      const ended = await (io.runTask ?? engineRunTask)(deps);
+      result = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write) : ended;
     } finally {
       // Releases the workspace lock even when the run threw.
       await assembled.finish(result);

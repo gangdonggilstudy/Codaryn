@@ -22,10 +22,10 @@
 ## 2. 실행
 
 ```
-node dist/src/cli/main.js run --task <task.json>
+node dist/src/cli/main.js run --task <task.json> [--cancel-file <경로>]
 ```
 
-입력은 task 파일 하나다. 키 없이 실행된다. task에는 비밀 값이나 API 키를 넣지 않는다. 취소는 `EngineDeps.signal`(AbortSignal)로 전달하며, CLI가 이를 어떤 입력에 연결할지는 미정이다.
+입력은 task 파일 하나다. 키 없이 실행된다. task에는 비밀 값이나 API 키를 넣지 않는다. 취소는 `SIGINT`/`SIGTERM`, 또는 `--cancel-file`로 지정한 파일이 생기는 것으로 받는다(P-2). 둘 다 `EngineDeps.signal`을 abort한다.
 
 ## 3. task.json (`TaskSpec`)
 
@@ -107,7 +107,8 @@ stdout에는 JSON 한 줄(`CliOutput`)만 쓴다. 진행 표시는 stderr다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다.
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
   - `runs/<runId>/journal.jsonl`: 한 줄에 `JournalRecord` 하나(`seq`, `at`, `runId`와 이벤트). 가림본만 담는다. `runs/<runId>/result.json`은 stdout과 같은 객체다.
-  - `lock.json`: 실행 중인 작업 공간 잠금. 이미 있으면 `workspace_locked`.
+  - `lock.json`: 실행 중인 작업 공간 잠금이며 내용은 `{pid, runId, startedAt}`이다. 기록된 pid가 살아 있으면 `workspace_locked`, 살아 있지 않으면 회수한다(P-4).
+- `runId`는 `<UTC yyyymmddThhmmssZ>-<8자리 16진 난수>`다(P-3). 예: `20261112T031500Z-9f2c41ab`.
 - 치환 대응표와 원문 스냅샷은 실행 중 메모리에만 둔다. 영구 금고, 재개, 되돌리기 명령은 없다.
 
 ## 9. 계약 변경 절차
@@ -116,5 +117,5 @@ stdout에는 JSON 한 줄(`CliOutput`)만 쓴다. 진행 표시는 stderr다.
 
 ## 10. 미정
 
-- 취소 신호를 CLI에 연결하는 방법(Windows 포함), `runId` 형식, `lock.json`의 내용과 죽은 잠금 회수.
-- 파일 해시가 모델과 기록에 노출되는 점(짧은 비밀이 든 파일의 추측 검증 가능성), 보호 구간 삭제 허용 여부(1a는 거부).
+- 알려진 한계: 파일 해시가 모델과 기록에 노출되어 짧은 비밀이 든 파일은 추측 검증이 가능하다(P-7). 보호 구간 삭제는 1a에서 거부한다(P-6).
+- 알려진 한계: `CODARYN_SECRET` 리터럴이 든 파일은 토큰으로 오인되어 `write_file`로 수정할 수 없다.

@@ -51,13 +51,15 @@ function cleanup(pid: number | null): void {
  * exits with 3 right away. The background process writes "early;" after 100 ms and "late;"
  * after 1500 ms, then waits 20 s.
  */
-function backgroundRequest(cwdAbsolute: string, timeoutMs: number): CommandRunRequest {
+function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: string): CommandRunRequest {
   const body = "setTimeout(() => process.stdout.write('early;'), 100); setTimeout(() => process.stdout.write('late;'), 1500); setTimeout(() => {}, 20000);";
   const script = [
     "const { spawn } = require('node:child_process');",
     `const c = spawn(process.execPath, ['-e', ${JSON.stringify(body)}], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });`,
     "c.unref();",
     "process.stdout.write('bg ' + c.pid + ';');",
+    // Optional: tells the test that the command is about to exit.
+    ...(exitMarker === undefined ? [] : [`require('node:fs').writeFileSync(${JSON.stringify(exitMarker)}, '');`]),
     "process.exit(3);",
   ].join("\n");
   return { executable: process.execPath, args: ["-e", script], cwdAbsolute, timeoutMs };
@@ -117,8 +119,16 @@ test("T-2: cancelling after the command exited returns at once with its exit cod
   const ws = workspaceDir();
   const runner = createCommandRunner({ parentEnv: parentEnv(), workspaceRoot: ws });
   const controller = new AbortController();
-  const running = runner.run(backgroundRequest(ws, 10_000), controller.signal);
-  // Long enough for the command to have exited, well inside the 500 ms grace on a normal machine.
+  const marker = path.join(ws, "exiting");
+  const running = runner.run(backgroundRequest(ws, 10_000, marker), controller.signal);
+  // The command writes the marker right before it exits. A fixed wait from the start was not
+  // enough under the load of the full unit run. 150 ms after the marker the exit has been seen,
+  // well inside the 500 ms grace.
+  const deadline = Date.now() + 10_000;
+  while (!fs.existsSync(marker)) {
+    if (Date.now() > deadline) throw new Error("test setup: the command did not reach its exit");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   await new Promise((resolve) => setTimeout(resolve, 150));
   const abortedAt = Date.now();
   controller.abort();
@@ -129,6 +139,7 @@ test("T-2: cancelling after the command exited returns at once with its exit cod
     assert.ok(Date.now() - abortedAt < 400, "no kill and no close wait after the exit");
     assert.equal(result.exitCode, 3, "the exit code stays final: nothing was stopped");
     assert.equal(result.timedOut, false);
+    assert.equal(result.truncated, true, "V-2: the pipes were closed before their end");
   } finally {
     cleanup(pid);
   }

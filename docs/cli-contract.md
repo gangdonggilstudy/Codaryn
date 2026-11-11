@@ -45,7 +45,9 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 - `--task`와 간편 형식은 함께 쓸 수 없다. `--workspace`와 `--goal`은 함께 써야 한다. 같은 옵션을 두 번 쓰거나 모르는 옵션을 쓰면 `invalid_arguments`다.
 - task 파일과 설정 파일에는 비밀 값이나 API 키를 넣지 않는다.
 - 취소는 `SIGINT`/`SIGTERM`, 또는 `--cancel-file`로 지정한 파일이 생기는 것으로 받는다(P-2). 둘 다 `EngineDeps.signal`을 abort한다. 취소 파일은 작업 공간 밖이어야 한다. 실행이 그 파일을 만들어 스스로 취소하지 못하게 하기 위해서이며, 안이면 `invalid_arguments`다(T-12).
-- `--env-file`은 받지 않는다(`invalid_arguments`, T-15). Node 26은 스크립트 이름 뒤의 `--env-file`도 스스로 읽어서, 없는 파일이면 CLI보다 먼저 종료 9로 끝나고 UNC 경로면 CLI의 검사보다 먼저 접근한다. 변수 파일은 `--vars-file`로 준다.
+- `--env-file`과 `--env-file-if-exists`는 쓰지 않는다. 두 이름 모두 어느 명령에서든(`=값` 형식 포함) 같은 안내와 함께 `invalid_arguments`다(T-15, V-3). 변수 파일은 `--vars-file`로 준다.
+  - Node 26은 스크립트 이름 뒤의 두 옵션도 스스로 처리한다. `--env-file`은 파일이 없으면 CLI보다 먼저 종료 9로 끝나고, `--env-file-if-exists`는 없는 파일을 stderr에 알리고 계속한다. 어느 쪽이든 경로가 UNC면 CLI의 검사(S-5)보다 먼저 접근할 수 있다.
+  - CLI의 거부는 안내일 뿐이다. Node가 먼저 그 경로에 접근하는 것은 CLI가 막을 수 없으므로, 명령줄에 두 이름을 아예 쓰지 않는다.
 
 ## 3. task.json (`TaskSpec`)
 
@@ -319,7 +321,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 ### 처리 순서
 
 1. 인자. 명령줄 경로가 로컬 경로인지 확인한다(S-5).
-2. `--vars-file`. 읽기 → BOM 거부 → 적재 → 새로 설정된 값을 고른다(S-4). `--env-file`은 1단계에서 거부한다(T-15).
+2. `--vars-file`. 읽기 → BOM 거부 → 적재 → 새로 설정된 값을 고른다(S-4). `--env-file`과 `--env-file-if-exists`는 1단계에서 거부한다(T-15, V-3).
 3. 현재 키, `CODARYN_CONFIG` 경로 확인(S-5), `--goal` 키 검사(S-8).
 4. 설정·task 파일. 읽기 → 원문 키 검사 → 파싱 → 파싱 뒤 키 검사와 깊이 상한(S-6).
 5. 설정 검증(S-3, S-7, S-9) → task 검증(S-3, S-5, S-7) 또는 간편 형식 구성.
@@ -423,7 +425,13 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 단계 3 준비(`docs/work-orders/phase-3-self-development.md`)의 계약과 CLI 처리다. K1은 계약(1단계)과 CLI 처리(2단계: U-3 검사, `integrity.paths` 검증, `report`, `doctor`, 도움말·버전, 진행 표시)를 구현했다. 무결성 모듈은 K2(`src/verify`), 엔진 연동은 K3(`src/engine`)다.
 
-- 조립 연결: K1 커밋 시점의 조립은 무결성 확인기를 아직 만들지 않는다(`src/cli/assemble.ts`의 `INTEGRITY_CONNECTED`가 false). 그동안 `integrity.paths`가 있는 실행은 잠금 전에 `invalid_config`로 멈춘다. 설정한 확인이 조용히 빠지지 않게 하기 위해서다. `protectedPaths`만 있는 실행은 단계 2처럼 확인 없이 돈다.
+- 조립 연결(V-3과 함께, 연결 완료): `assembleRun`은 `policy.protectedPaths`나 설정의 `integrity.paths`에 항목이 있으면 `createIntegrityChecker({ workspace, protectedPaths, externalPaths })`를 만들어 `EngineDeps.integrity`로 넘긴다. 둘 다 비어 있으면 넘기지 않으므로 기록에 `integrity_checked`가 없고 결과에 `protectedChanged`도 없다(단계 2와 같다).
+  - K1 2단계 커밋(`b39f945`)에서는 연결 전이라 `integrity.paths`가 있는 실행을 잠금 전에 `invalid_config`로 멈췄다. 연결과 함께 그 거부를 없앴다.
+  - 유닛(`tests/unit/cli/v3.test.ts`)에서 실제 조립으로 확인했다.
+    - 보호 경로만 있는 실행은 시작, 검증 전, 검증 후에 확인하고 `protectedChanged`가 빈 목록이다.
+    - 검증기 명령이 보호 파일을 바꾸면 `needs-input`/`protected_changed`(종료 3)이다.
+    - 작업 공간 밖 `integrity.paths`의 파일이 바뀌어도 같다.
+    - 보호 대상이 없으면 확인 기록이 없다.
 
 ### 보호 대상 무결성 (U-1, U-2)
 
@@ -479,7 +487,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 변수 파일은 `util.parseEnv`로 해석만 하고 프로세스 환경에 적재하지 않는다. 이미 있는 변수가 우선한다(`run`과 같다).
 - 설정·task 파일은 `run`과 같은 순서(원문 키 검사 → 파싱 → 키 검사 → 검증)로 본다. 실패 메시지는 검증기의 필드 위치 문구다.
 - `commands`: 정책의 `commands[i].executable`과 명령 검증기의 `executable`을 PATH의 절대 항목과 PATHEXT(Windows)로 찾는다. 디렉터리가 붙은 이름은 작업 공간(검증기는 그 `cwd`) 기준이다. 실제 실행 때의 추가 거부(작업 공간 안의 실행 파일, `.cmd`·`.bat`의 문자 제한 등)는 점검하지 않는다.
-- `integrity_paths`: 무결성 확인이 연결되지 않은 빌드에서는 `fail`이다.
+- `integrity_paths`: 각 경로가 있는지, 작업 공간이 주어지면 그 밖에 있는지 본다. 위치만 적고 경로는 내지 않는다.
 - 현재 `warn`을 내는 항목은 없다. 계약에는 남겨 둔다.
 
 ### 도움말, 버전, 설치 (U-7)

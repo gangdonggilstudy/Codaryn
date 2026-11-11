@@ -18,7 +18,7 @@ import {
 } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
-import { createVerifierRunner } from "../verify/index.js";
+import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
   CliErrorCode,
@@ -43,13 +43,6 @@ export interface AssemblyInput {
   /** U-1: the config file's `integrity.paths`, already checked by the CLI. Absent means none. */
   readonly integrityPaths?: readonly string[];
 }
-
-/**
- * Whether this build checks protected material (U-1). The checker (`createIntegrityChecker`,
- * K2) is connected after it is merged; until then a run that names `integrity.paths` is refused
- * before the lock is taken, so a configured check is never silently skipped.
- */
-export const INTEGRITY_CONNECTED = false;
 
 export type AssemblyOutcome =
   | {
@@ -132,13 +125,6 @@ export function createRevertCommand(revertRun: RevertRun): RevertCommand {
 
 export const assembleRun: Assemble = async (input) => {
   const { task, runId, model, secrets, clock, signal } = input;
-  if (!INTEGRITY_CONNECTED && (input.integrityPaths?.length ?? 0) > 0) {
-    return {
-      ok: false,
-      code: "invalid_config",
-      message: "integrity.paths is set, but this build does not check protected material yet; nothing was run",
-    };
-  }
 
   let workspace: Workspace;
   try {
@@ -162,8 +148,28 @@ export const assembleRun: Assemble = async (input) => {
     const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     const journal = createJournal({ workspaceRoot, runId, clock });
+    // U-1 (K1 connection): only when something is protected, so runs without protection keep
+    // the phase 2 journal. The engine checks at run start and around each verification round.
+    const protectedPaths = task.policy.protectedPaths ?? [];
+    const externalPaths = input.integrityPaths ?? [];
+    const integrity =
+      protectedPaths.length > 0 || externalPaths.length > 0
+        ? createIntegrityChecker({ workspace, protectedPaths, externalPaths })
+        : undefined;
 
-    const deps: EngineDeps = { task, runId, model, privacy, policy, tools, verifiers, journal, clock, signal };
+    const deps: EngineDeps = {
+      task,
+      runId,
+      model,
+      privacy,
+      policy,
+      tools,
+      verifiers,
+      journal,
+      clock,
+      signal,
+      ...(integrity === undefined ? {} : { integrity }),
+    };
     return {
       ok: true,
       deps,

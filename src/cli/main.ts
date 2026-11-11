@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { revertRun } from "../store/index.js";
-import { INTEGRITY_CONNECTED, assembleRun, createRevertCommand } from "./assemble.js";
+import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runDoctor } from "./doctor.js";
 import { renderOutcome, runGuardedCommand } from "./guard.js";
@@ -87,7 +87,6 @@ async function dispatch(): Promise<CommandOutcome> {
         isFile,
         locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),
         relatePaths: (target, base) => relateRealPaths(target, base),
-        integrityConnected: INTEGRITY_CONNECTED,
       });
     default:
       return runCli({

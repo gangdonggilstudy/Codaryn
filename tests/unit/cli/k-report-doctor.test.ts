@@ -257,7 +257,6 @@ function doctorIo(base: string, argv: readonly string[], extra: Partial<DoctorEn
     },
     locateInWorkspace: (file, root) => locateInWorkspace(file, root),
     relatePaths: (target, root) => relateRealPaths(target, root),
-    integrityConnected: false,
     ...extra,
   };
 }
@@ -365,19 +364,12 @@ describe("U-6 doctor", () => {
     assert.equal(json.status["commands"], "fail");
     assert.equal(json.message["commands"], "not found: policy.commands[1], verifiers[0]");
     assert.equal(json.status["integrity_paths"], "fail");
-    assert.ok(json.message["integrity_paths"]?.includes("does not check it yet"));
+    assert.equal(json.message["integrity_paths"], "integrity.paths[0] does not exist");
     assert.equal(json.raw.includes(marker), false);
-
-    const connected = await doctorJson(
-      doctorIo(base, ["--config", config, "--workspace", work], { env: keyEnv(), integrityConnected: true }),
-    );
-    assert.equal(connected.message["integrity_paths"], "integrity.paths[0] does not exist");
 
     const insideConfig = path.join(work, "inside-config.json");
     await writeFile(insideConfig, JSON.stringify({ schemaVersion: 1, ...QUICK_CONFIG, integrity: { paths: [work] } }));
-    const inside = await doctorJson(
-      doctorIo(base, ["--config", insideConfig, "--workspace", work], { env: keyEnv(), integrityConnected: true }),
-    );
+    const inside = await doctorJson(doctorIo(base, ["--config", insideConfig, "--workspace", work], { env: keyEnv() }));
     assert.equal(inside.status["file_locations"], "fail");
     assert.equal(inside.message["integrity_paths"], "integrity.paths[0] is not outside the workspace");
   });

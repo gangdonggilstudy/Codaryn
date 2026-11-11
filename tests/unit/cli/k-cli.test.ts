@@ -13,7 +13,6 @@ import { fileURLToPath } from "node:url";
 
 import { MAX_INTEGRITY_PATHS, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { Assemble, AssemblyInput } from "../../../src/cli/assemble.js";
-import { INTEGRITY_CONNECTED } from "../../../src/cli/assemble.js";
 import { parseArgs, parseDoctorArgs, parseReportArgs } from "../../../src/cli/args.js";
 import { parseConfig, parseIntegrity } from "../../../src/cli/config.js";
 import { renderOutcome } from "../../../src/cli/guard.js";
@@ -222,16 +221,16 @@ describe("U-1 integrity.paths in the config file", () => {
     assert.deepEqual(outcome.inputs[0]?.integrityPaths, [path.join(outcome.base, "baseline"), path.join(outcome.base, "script.json")]);
   });
 
-  test("until the checker is connected the real assembly refuses them, before the lock", async () => {
-    assert.equal(INTEGRITY_CONNECTED, false);
+  test("the real assembly checks them (V-3 connection): unchanged material lets the run finish", async () => {
     const base = await setupRun({ "README.md": "# Title\n" }, {}, [{ text: "done" }]);
     await mkdir(path.join(base, "baseline"));
+    await writeFile(path.join(base, "baseline", "spec.txt"), "spec\n");
     await writeFile(path.join(base, "config.json"), JSON.stringify({ schemaVersion: 1, integrity: { paths: [path.join(base, "baseline")] } }));
     const io = cliIo(base);
     const outcome = await runCli({ ...io, argv: [...io.argv, "--config", path.join(base, "config.json")] });
-    assert.equal(outcome.exitCode, 2);
-    assert.equal(outcome.output.kind === "error" ? outcome.output.code : "", "invalid_config");
-    assert.equal(await exists(path.join(base, "work", STATE_DIR_NAME)), false);
+    assert.equal(outcome.exitCode, 0);
+    assert.equal(outcome.output.kind === "run" ? outcome.output.status : "", "done");
+    assert.deepEqual(outcome.output.kind === "run" ? outcome.output.protectedChanged : null, []);
   });
 });
 

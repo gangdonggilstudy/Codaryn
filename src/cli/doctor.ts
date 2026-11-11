@@ -63,8 +63,6 @@ export interface DoctorEnvironment {
   readonly isFile: (file: string) => Promise<boolean>;
   readonly locateInWorkspace: (file: string, workspaceRoot: string) => Promise<WorkspaceLocation>;
   readonly relatePaths: (target: string, base: string) => Promise<PathRelation>;
-  /** Whether a run checks `integrity.paths` in this build (`INTEGRITY_CONNECTED`). */
-  readonly integrityConnected: boolean;
   readonly platform?: NodeJS.Platform;
 }
 
@@ -375,8 +373,6 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   const integrityPaths = config?.integrity?.paths ?? [];
   if (integrityPaths.length === 0) {
     set("integrity_paths", "skipped", "integrity.paths is not set");
-  } else if (!io.integrityConnected) {
-    set("integrity_paths", "fail", "integrity.paths is set, but this build does not check it yet; a run stops with invalid_config");
   } else {
     const problems: string[] = [];
     for (const [index, entry] of integrityPaths.entries()) {

@@ -49,11 +49,16 @@ const SWITCHES = ["--quiet"] as const;
 type Switch = (typeof SWITCHES)[number];
 
 /**
- * T-15: Node 26 reads `--env-file` itself, even after the script name: a missing file ends the
- * process (exit 9) and a UNC path is opened before codaryn can check it. codaryn does not take it.
+ * T-15, V-3: Node 26 reads `--env-file` and `--env-file-if-exists` itself, even after the script
+ * name: a missing `--env-file` ends the process (exit 9), `--env-file-if-exists` notes a missing
+ * file on stderr, and either path is opened before codaryn can check it. codaryn refuses both
+ * names in every command, with this hint; it cannot stop Node's own access.
  */
 export const ENV_FILE_REFUSED_MESSAGE =
-  "--env-file is not a codaryn option: Node reads that name itself before codaryn starts. Use --vars-file <path>";
+  "--env-file and --env-file-if-exists are not codaryn options: Node reads those names itself before codaryn starts. Use --vars-file <path>";
+
+/** `--env-file`, `--env-file-if-exists`, alone or with `=value`. No value can start with "--". */
+const NODE_ENV_FILE_FLAG = /^--env-file(-if-exists)?(=|$)/;
 
 const REVERT_OPTIONS = ["--workspace", "--run"] as const;
 type RevertOption = (typeof REVERT_OPTIONS)[number];
@@ -123,6 +128,7 @@ export type ParseRevertArgsOutcome =
 export function parseRevertArgs(argv: readonly string[]): ParseRevertArgsOutcome {
   const [command, ...rest] = argv;
   if (command !== "revert") return { ok: false, message: USAGE };
+  if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<RevertOption>(rest, REVERT_OPTIONS, USAGE);
   if (!read.ok) return read;
   const workspace = read.values.get("--workspace");
@@ -150,6 +156,7 @@ export type ParseReportArgsOutcome =
 export function parseReportArgs(argv: readonly string[]): ParseReportArgsOutcome {
   const [command, ...rest] = argv;
   if (command !== "report") return { ok: false, message: USAGE };
+  if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<ReportOption, JsonSwitch>(rest, REPORT_OPTIONS, `usage: ${REPORT_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
   const workspace = read.values.get("--workspace");
@@ -200,7 +207,7 @@ export function parseDoctorArgs(argv: readonly string[]): ParseDoctorArgsOutcome
 }
 
 function isEnvFileFlag(item: string): boolean {
-  return item === "--env-file" || item.startsWith("--env-file=");
+  return NODE_ENV_FILE_FLAG.test(item);
 }
 
 export function parseArgs(argv: readonly string[]): ParseArgsOutcome {

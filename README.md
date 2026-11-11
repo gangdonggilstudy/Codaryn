@@ -1,11 +1,22 @@
 # Codaryn
 
-CLI부터 개발하는 범용 작업 에이전트다. 코딩, 문서 작성, 자료 분석, 파일 정리를 공통 작업·도구·권한·검증 구조로 지원하도록 설계한다.
+Codaryn은 로컬에서 실행하는 범용 작업 에이전트 CLI다. 코딩과 문서 작업을 처리하며, 작업 공간 하나 안에서 파일을 읽고 고치고 허용한 명령을 실행한다. 모든 작업은 정해진 권한 정책 안에서 이루어진다. 등록한 비밀은 모델에 보내기 전에 가리고, 성공 여부는 검증기가 판정한다. 모델은 Anthropic API를 쓴다.
 
-첫 번째 개발 대상은 Anthropic API로 코드 수정과 테스트를 반복하는 작업이다. 이후 검증된 버전이 별도 후보 작업 디렉터리에서 자신의 다음 버전 소스를 개발하도록 확장한다. GUI와 VS Code 연동은 공통 엔진이 안정된 다음 단계에 추가한다.
+**현재 상태:** 오프라인 검증(유닛·프로세스 통합)과 모의 API 검증을 통과했다. 실제 API로는 아직 검증하지 않았다.
 
-설계와 개발 지침 정리를 완료했다. 다음 단계는 최소 CLI의 오프라인 구현과 유닛 테스트이며, 실행 가능한 제품 CLI는 아직 없다.
+## 빠른 시작 (PowerShell)
 
+```powershell
+npm ci; npm run build
+Copy-Item .env.example .env                       # 편집기로 키와 CODARYN_MODEL을 채우고 BOM 없는 UTF-8로 저장
+Copy-Item -Recurse examples D:\codaryn-examples   # 모델이 파일을 고치므로 예시는 사본에서 실행한다
+node dist/src/cli/main.js run --task D:\codaryn-examples\doc-task.json `
+  --config D:\codaryn-examples\config.example.json --env-file .env
+```
+
+## 문서
+
+- [사용 안내](docs/usage.md): 설정, 실행, 결과, 비밀, 정책, 점검표, 한계, 문제 해결
+- [CLI·공통 계약](docs/cli-contract.md)
 - [문서 안내](docs/README.md)
-- [공통 개발 지침](AGENTS.md)
-- [Claude 작업 지침](CLAUDE.md)
+- [공통 개발 지침](AGENTS.md), [Claude 작업 지침](CLAUDE.md)

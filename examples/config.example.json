@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "model": "<모델 ID>",
+  "maxOutputTokens": 4096,
+  "requestTimeoutMs": 600000,
+  "maxRetries": 2,
+  "limits": {
+    "maxModelTurns": 12,
+    "maxToolCalls": 24,
+    "maxTotalTokens": 150000,
+    "maxDurationMs": 600000
+  },
+  "policy": {
+    "commands": [{ "executable": "node", "argsPrefix": ["--test"], "allowExtraArgs": false }],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false
+  },
+  "verifiers": [
+    { "id": "tests", "kind": "command", "executable": "node", "args": ["--test"], "timeoutMs": 120000 }
+  ],
+  "secretEnv": []
+}

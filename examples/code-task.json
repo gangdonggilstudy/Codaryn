@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "example-code",
+  "workflow": "code",
+  "goal": "sum.mjs의 sum 함수가 빈 배열에서 0을 돌려주도록 고친다. sum.test.mjs는 바꾸지 않는다. 테스트는 run_command로 executable \"node\", args [\"--test\"]만 실행할 수 있다.",
+  "workspaceRoot": "workspaces/calc",
+  "model": { "provider": "anthropic", "maxOutputTokens": 4096 },
+  "policy": {
+    "commands": [{ "executable": "node", "argsPrefix": ["--test"], "allowExtraArgs": false }],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false
+  },
+  "privacy": { "secretEnv": [] },
+  "limits": { "maxModelTurns": 12, "maxToolCalls": 24, "maxTotalTokens": 150000, "maxDurationMs": 600000 },
+  "verifiers": [
+    { "id": "tests", "kind": "command", "executable": "node", "args": ["--test"], "timeoutMs": 120000 },
+    {
+      "id": "test-kept",
+      "kind": "file_rules",
+      "rules": [{ "type": "contains", "path": "sum.test.mjs", "text": "assert.equal(sum([]), 0);" }]
+    }
+  ]
+}

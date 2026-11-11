@@ -193,16 +193,30 @@ export class FakeTools {
   }
 }
 
+/** One value for every round, or one per round (the last one repeats). */
+export type PerRound<T> = T | readonly T[];
+
+function forRound<T>(value: PerRound<T> | undefined, round: number, fallback: T): T {
+  if (value === undefined) return fallback;
+  if (!Array.isArray(value)) return value as T;
+  const list = value as readonly T[];
+  return list[Math.min(round, list.length - 1)] ?? fallback;
+}
+
 export class FakeVerifiers {
   readonly runs: string[] = [];
-  constructor(private readonly outcomes: Record<string, VerifierOutcome> = {}) {}
+  constructor(
+    private readonly outcomes: Record<string, PerRound<VerifierOutcome>> = {},
+    private readonly evidence: Record<string, PerRound<string>> = {},
+  ) {}
   async run(config: VerifierConfig): Promise<RawVerifierResult> {
+    const round = this.runs.filter((id) => id === config.id).length;
     this.runs.push(config.id);
     return {
       id: config.id,
       kind: config.kind,
-      outcome: this.outcomes[config.id] ?? "pass",
-      evidence: asRawText("evidence"),
+      outcome: forRound(this.outcomes[config.id], round, "pass"),
+      evidence: asRawText(forRound(this.evidence[config.id], round, "evidence")),
       checked: ["the configured rule"],
       limits: [],
     };

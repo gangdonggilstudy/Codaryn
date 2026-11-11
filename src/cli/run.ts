@@ -12,6 +12,7 @@ import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, CODARYN_CONFIG_ENV, RESULT
 import type {
   AnthropicProviderDeps,
   CliErrorCode,
+  CliErrorOutput,
   CliOutput,
   Clock,
   CodarynConfig,
@@ -62,10 +63,13 @@ export interface CliRunOutcome {
   readonly exitCode: number;
 }
 
-function error(code: CliErrorCode, message: string): CliRunOutcome {
+function error(code: CliErrorCode, message: string): { output: CliErrorOutput; exitCode: number } {
   const exitCode = CLI_ERROR_EXIT_CODES[code];
   return { output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message }, exitCode };
 }
+
+/** One CliErrorOutput and its exit code. The message must not contain secrets or file contents. */
+export const cliError = error;
 
 /** Task, config and script files may start with a UTF-8 byte order mark (common on Windows). */
 async function readJson(io: CliEnvironment, file: string): Promise<{ ok: true; value: unknown } | { ok: false }> {

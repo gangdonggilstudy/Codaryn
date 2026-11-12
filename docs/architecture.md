@@ -1,8 +1,8 @@
 # Codaryn 아키텍처
 
-상태: 2026-11-12, main `7d35d61` 기준.
+상태: 2026-11-12, main `9d86212` 기준.
 - 단계 0 설계(같은 날 Codex 채택)를 바탕으로 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 기구와 `codaryn models`가 구현·병합됐다.
-- 사용성 개선(N-1~N-13)은 결정만 있고 구현이 진행 중이다. 단계 4·5 설계(어댑터 계약, VS Code 확장, 범용 작업 워크플로, 독립 GUI)는 PM이 채택했고 구현은 착수 단계다(코드 없음).
+- 사용성 개선(N-1~N-19)은 결정만 있고 구현이 진행 중이다. 단계 4·5 설계(어댑터 계약, VS Code 확장, 범용 작업 워크플로, 독립 GUI)는 PM이 채택했고 구현은 착수 단계다(코드 없음).
 - **실제 Anthropic API는 한 번도 호출하지 않았다**(`tests/live` 미실행). 모든 검증은 대본 모델, 가짜 HTTP 서버, 실제 CLI 프로세스로 한 오프라인 검증이다.
 - 이 문서는 구조를 설명한다. 각 기능의 파일, 결정 번호, 시험은 [구현 위치표](design/implementation-map.md)에 있다. 단계 4·5 설계의 세부는 [설계 문서 색인](design/README.md)의 문서들이 기준이다.
 
@@ -221,7 +221,7 @@ revert --run <적용 runId>         이동을 되돌리고 보관함의 파일�
 | `report --workspace <d> --run <id> [--json]` | result.json과 journal만 읽어 사람이 읽는 보고서를 만든다. 잠금을 잡지 않는다(U-5, X-2) | 구현 |
 | `doctor [--config] [--vars-file] [--task \| --workspace] [--json]` | 네트워크 없이 12개 항목을 점검한다. 키 값은 출력하지 않는다(U-6, W-5, X-1, X-3) | 구현 |
 | `--help`, `help <명령>`, `--version` | 도움말과 버전(U-7) | 구현 |
-| `models [--json] [--use <번호\|id> --config]` | 모델 목록 조회와 선택(Y-1~Y-4). 키와 실제 접속이 필요하다 | 구현(유닛 `cli/y-models`). 통합 사례는 `claude/cli-verification`에만 있고 main 미병합. 실제 API 미실행 |
+| `models [--json] [--use <번호\|id> --config]` | 모델 목록 조회와 선택(Y-1~Y-4). 키와 실제 접속이 필요하다 | 구현(유닛 `cli/y-models`, 통합 `y01-models`는 가짜 서버). 실제 API 미실행 |
 | `init` | 기본 설정 위치에 설정 파일을 만든다. 키는 받지 않는다(N-2) | 결정만(N-A) |
 | `runs --workspace <d>`, `--run latest` | 실행 목록과 가장 최근 실행(N-7) | 결정만(N-C) |
 | `revert --dry-run` | 바꾸지 않고 되돌릴 것만 보인다(N-7) | 결정만(N-C) |

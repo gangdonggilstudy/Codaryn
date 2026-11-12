@@ -1,9 +1,9 @@
 # Codaryn 단계별 계획
 
-현재 상태(2026-11-12, main `7d35d61`)
+현재 상태(2026-11-12, main `9d86212`)
 - 단계 1a·2·3의 오프라인 구현이 main에 있다. 1b는 모의 API 검증까지다.
 - **실제 Anthropic API는 한 번도 호출하지 않았다.** 그래서 1b와 단계 2·3의 실 API 기준은 미수행이다.
-- 단계와 별도로 사용성 개선(N-1~N-13)을 구현하고 있다(아래 "사용성 개선").
+- 단계와 별도로 사용성 개선(N-1~N-19)을 구현하고 있다(아래 "사용성 개선").
 - 단계 4·5는 설계를 채택했고 구현 착수 단계다.
 
 일정과 비용은 정하지 않았다. 단계 전환과 후보 채택은 Codex(위임 기간에는 임시 PM)가 판단한다. 이 계획의 설계 선택은 2026-11-12 Codex가 검토해 채택했다. 구조는 [architecture.md](architecture.md), 근거는 [decisions.md](decisions.md)를 따른다.
@@ -129,7 +129,7 @@
 ## 사용성 개선 (단계와 별도)
 
 - 사용자 지시(U-20)로 편의성 개선을 진행한다. 지시서 파일 이름은 `phase-4-usability.md`이지만 단계 4(범용 작업 확장)의 완료 기준과는 별개다.
-- 결정은 N-1~N-13([사용성 개선 지시](work-orders/phase-4-usability.md))이고, 근거는 [사용성 검토](design/usability-review.md)와 [UX 설계](design/ux-design.md)다.
+- 결정은 N-1~N-19([사용성 개선 지시](work-orders/phase-4-usability.md))이고, 근거는 [사용성 검토](design/usability-review.md)와 [UX 설계](design/ux-design.md)다.
 - 구현 상태
   - N-12(체험 예시와 사용 문서)는 main에 있다.
   - 나머지(`init`, 기본 설정 위치, 두 언어, 사람용 출력, `runs`, 프로필, 한 줄 실행)는 N-A~N-E가 구현 중이다.

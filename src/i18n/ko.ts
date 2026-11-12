@@ -126,8 +126,10 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.damaged": "손상(기록을 확인할 수 없음)",
   "runs.revert_record_damaged": "되돌리기 기록 손상(실행 기록은 정상)",
   "runs.records_changed": "기록 변경됨(실행이 아닌 것이 실행 기록을 바꿈)",
+  "runs.plan_applied": "계획 적용됨(적용 실행 {runId})",
   "report.records_changed": "이 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 보고서가 실제로 일어난 일과 다를 수 있습니다.",
   "changes.records_changed": "이 실행에는 기록 변경 표시가 있어 파일 글을 보이지 않습니다. 경로와 상태만 보입니다.",
+  "changes.apply_run": "이 실행은 실행 {runId}의 계획을 적용했습니다. 적용한 동작: {count}개. 그 계획의 이동·폐기이며 이 실행이 쓴 파일이 아니어서 여기에는 파일 글이 보이지 않습니다. 이 실행의 보고서에 동작 목록이 있습니다.",
   "runs.reverted": "되돌림",
   "runs.omitted": "표시하지 않은 실행 {count}개가 더 있습니다. 보려면 --limit을 늘리세요.",
 
@@ -422,6 +424,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.kept.used_by_kept_apply": "남긴 적용 실행이 쓰는 계획 실행. 지우면 그 적용을 되돌릴 수 없음",
   "cleanup.kept.partly_removed": "옮겨 두었지만 다 지우지 못함. 남은 것은 다음 정리에 보이는 폴더에 있음",
   "apply.notice.plan_records_unchecked": "상태 디렉터리가 너무 커서 다 확인하지 못해, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하고, codaryn cleanup으로 상태 디렉터리를 확인할 수 있는 크기로 줄이세요.",
+  "apply.notice.plan_task_differs": "계획은 이 적용에 준 것과 다른 작업으로 만들었습니다(예: 계획은 task 파일, 적용은 간편 형식). 쓰인 검증과 규칙은 계획의 작업이 아니라 이 적용의 것입니다. 이 때문에 적용을 멈추지는 않았습니다. 계획 실행과 같은 작업 지정 방식으로 적용하면 그 작업의 검증과 규칙이 쓰입니다.",
 
   "diagnostic.file.config": "설정 파일",
   "diagnostic.file.task": "task 파일",

@@ -6,6 +6,10 @@
  * G-A, UXM-23: no text takes a digest or a time. The renderer puts the digest's first characters
  * after plan.digest_label and plan.next_apply, the apply's time after plan.applied_by, the code in
  * parentheses after changes.unavailable.<reason>, and prompt.yes_no_default_no after a question.
+ *
+ * PM (combined board 0229b40): a text carries no mark the renderer joins it with (a colon, a
+ * semicolon, parentheses around it, a space at either end), in both languages. The renderers
+ * (unit/U-36-nc-human plan-commands.ts, unit/U-36-p5a-adapter changes.ts) add them.
  */
 
 import assert from "node:assert/strict";
@@ -54,8 +58,9 @@ describe("U-36: the text of plan, apply's questions, review and changes", () => 
     const { en } = MESSAGE_TEXTS;
     const format = loose(createMessageCatalog("en"));
     assert.equal(format("plan.heading", { runId: RUN, count: 1, status: format("plan.status.pending") }), `Plan of run ${RUN}: 1 action(s), pending`);
-    assert.equal(`${en["plan.digest_label"]} ${DIGEST}`, `Digest: ${DIGEST}`);
-    assert.equal(en["plan.discard_kept"], "(kept in .codaryn/discarded/ until removed)");
+    assert.equal(`${en["plan.digest_label"]}: ${DIGEST}`, `Digest: ${DIGEST}`);
+    assert.equal(`(${en["plan.discard_kept"]})`, "(kept in .codaryn/discarded/ until removed)");
+    assert.equal(en["review.unchanged"], "The run's result and records are unchanged; `codaryn report` shows the verdict.");
     assert.equal(en["plan.inventory_limit"], "The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.");
     assert.equal(
       `${format("plan.next_apply", { runId: RUN })} ${DIGEST.slice(0, 12)}`,
@@ -92,12 +97,23 @@ describe("U-36: the text of plan, apply's questions, review and changes", () => 
       assert.ok(t["plan.next_apply"].includes("--run {runId}"), language);
       // It stands alone when the time is left out, and the time can follow it.
       assert.ok(!/\.$|\d{4}/.test(t["plan.applied_by"]), language);
-      assert.ok(t["plan.digest_label"].endsWith(":"), language);
       // The questions end as questions; [y/N] is the renderer's (prompt.yes_no_default_no).
       for (const id of ["apply.question", "apply.unsafe_move_question"] as const) {
         assert.ok(t[id].endsWith("?") && !t[id].includes("[y/N]"), `${language} ${id}`);
       }
     }
+  });
+
+  test("no text carries a mark the renderer joins it with (PM)", () => {
+    for (const language of ["en", "ko"] as const) {
+      const t = MESSAGE_TEXTS[language];
+      for (const id of [...FIXED, ...LISTED]) {
+        assert.equal(t[id], t[id].trim(), `${language} ${id}: a space at an end`);
+        assert.ok(!/[:;]$/.test(t[id]), `${language} ${id}: ends with a colon or semicolon`);
+        assert.ok(!/^\(.*\)$/.test(t[id]), `${language} ${id}: in parentheses`);
+      }
+    }
+    assert.deepEqual([MESSAGE_TEXTS.en["plan.digest_label"], MESSAGE_TEXTS.ko["plan.digest_label"]], ["Digest", "다이제스트"]);
   });
 
   test("why a file's text is not shown: one lead, then the reason in words; the code is the renderer's", () => {
@@ -123,10 +139,9 @@ describe("U-36: the text of plan, apply's questions, review and changes", () => 
   test("the Korean is in Korean, with no decision number", () => {
     const { ko } = MESSAGE_TEXTS;
     for (const id of [...FIXED, ...LISTED]) {
-      assert.ok(HANGUL.test(ko[id]) || id === "plan.digest_label", `ko ${id}`);
+      assert.ok(HANGUL.test(ko[id]), `ko ${id}`);
       assert.ok(!/\b(DR|U|R|N|G)-\d/.test(ko[id]), `ko ${id}`);
     }
-    assert.equal(ko["plan.digest_label"], "다이제스트:");
     assert.ok(ko["plan.discard_kept"].includes("폐기 보관함"));
   });
 });

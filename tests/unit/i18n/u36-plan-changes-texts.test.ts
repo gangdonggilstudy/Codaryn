@@ -79,9 +79,11 @@ describe("U-36: the text of plan, apply's questions, review and changes", () => 
     assert.deepEqual([en["changes.state.missing"], en["changes.state.unknown"]], ["no longer exists", "could not be read now"]);
     assert.equal(en["changes.no_difference"], "no difference to the original");
     assert.equal(format("changes.more_lines", { count: 5 }), "... 5 more lines");
-    // g-changes-wire and changes.test pin this line and the one DR-29 line.
+    // g-changes-wire and changes.test pin this line.
     assert.equal(`${en["changes.unavailable.masking_unverified"]} (masking_unverified)`, "the text is not shown (masking_unverified)");
-    assert.equal(en["changes.no_text_note"].match(/DR-29/g)?.length, 1);
+    // R66-L4 (PM): the English catalog drops "(DR-29)" too; changes.ts's own English (no catalog) keeps it.
+    assert.ok(!/\bDR-\d/.test(en["changes.no_text_note"]), en["changes.no_text_note"]);
+    assert.match(en["changes.no_text_note"], /the others have their path and state only$/);
     // The listed words of plan and review are the codes the lines showed.
     assert.deepEqual(
       [...PLAN_STATUSES, ...PLAN_ACTION_KINDS, ...REVIEW_VERDICTS].map((code) => code),
@@ -97,6 +99,8 @@ describe("U-36: the text of plan, apply's questions, review and changes", () => 
       assert.ok(t["plan.next_apply"].includes("--run {runId}"), language);
       // It stands alone when the time is left out, and the time can follow it.
       assert.ok(!/\.$|\d{4}/.test(t["plan.applied_by"]), language);
+      // R66-L1: no parentheses of its own, so the time the renderer adds in them is the only pair.
+      assert.ok(!/[()]/.test(t["plan.applied_by"]), language);
       // The questions end as questions; [y/N] is the renderer's (prompt.yes_no_default_no).
       for (const id of ["apply.question", "apply.unsafe_move_question"] as const) {
         assert.ok(t[id].endsWith("?") && !t[id].includes("[y/N]"), `${language} ${id}`);
@@ -132,8 +136,22 @@ describe("U-36: the text of plan, apply's questions, review and changes", () => 
   test("the unsafe-move question says the same in both languages", () => {
     const { en, ko } = MESSAGE_TEXTS;
     // The catalog's words for it (summary.unsafe_moves, plan.problem.unsafe_move); no promise words (UX 1.4).
-    assert.match(en["apply.unsafe_move_question"], /^\{count\} move\(s\) of this plan could replace a file at the destination, since the drive has no hard links\. Nothing was moved\..*for this apply only\?$/);
+    // R66-L3 (PM): the English reads the same for one move and for many (no "move(s)", no "them").
+    assert.equal(
+      en["apply.unsafe_move_question"],
+      "Moves of this plan that could replace a file at the destination, since the drive has no hard links: {count}. Nothing was moved. Apply again and make such moves anyway, for this apply only?",
+    );
+    assert.ok(!/\(s\)|\bthem\b|\bit\b/.test(en["apply.unsafe_move_question"]));
     assert.match(ko["apply.unsafe_move_question"], /이동 \{count\}개는 이 드라이브에 하드 링크가 없어 대상 자리의 파일을 덮어쓸 수 있습니다\. 아무것도 옮기지 않았습니다\..*이번 적용에서만.*\?$/);
+  });
+
+  test("R66-L1, I1: the Korean apply time line has one pair of parentheses, and the question tells the answers it takes", () => {
+    const { ko } = MESSAGE_TEXTS;
+    // The renderer adds " (<local time>)" after plan.applied_by. No particle after the bare run id.
+    assert.equal(ko["plan.applied_by"], "적용 실행 {runId}에서 적용함");
+    // apply, revert and init take y, yes, 예 and 네 (init also ㅇ); the Korean prompt names them.
+    assert.equal(ko["prompt.yes_no_default_no"], "[y/N] (y·예·네: 예, Enter: 아니오)");
+    for (const answer of ["y", "예", "네"]) assert.ok(ko["prompt.yes_no_default_no"].includes(answer), answer);
   });
 
   test("the Korean is in Korean, with no decision number", () => {

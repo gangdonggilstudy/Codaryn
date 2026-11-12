@@ -241,7 +241,9 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.lock.held": "a running process holds the workspace lock; if no Codaryn is running, delete .codaryn/lock.json (a reused process id can make this wrong)",
   "doctor.lock.stale": "a lock left by a process that has ended; the next run reclaims it",
   "doctor.lock.unreadable": "the workspace lock file (.codaryn/lock.json) cannot be read",
-  "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json.",
+  "doctor.lock.reclaim_left":
+    "a lock reclaim file (.codaryn/lock.json.reclaim) is left, so a lock left by an ended process is not reclaimed; if no Codaryn is running in this workspace, remove that file",
+  "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.",
 
   "error.invalid_arguments.what": "the command arguments are not valid",
   "error.invalid_arguments.fix": "See codaryn help <command> for the usage.",
@@ -337,6 +339,8 @@ export const EN_MESSAGES: MessageTexts = {
   "tool.search_files": "search files",
   "tool.write_file": "write file",
   "tool.run_command": "run command",
+  "tool.inspect_files": "inspect files",
+  "tool.propose_plan": "propose a plan",
 
   "revert.skip.changed_since_run": "changed again after the run",
   "revert.skip.missing_snapshot": "snapshot missing",

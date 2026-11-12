@@ -240,7 +240,9 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.held": "실행 중인 프로세스가 작업 공간을 잠그고 있습니다. 실행 중인 Codaryn이 없다면 .codaryn/lock.json을 지우세요(프로세스 번호가 다시 쓰이면 이 판정은 틀릴 수 있습니다)",
   "doctor.lock.stale": "끝난 프로세스가 남긴 잠금이 있습니다. 다음 실행이 회수합니다",
   "doctor.lock.unreadable": "작업 공간 잠금 파일(.codaryn/lock.json)을 읽을 수 없습니다",
-  "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json을 지우세요.",
+  "doctor.lock.reclaim_left":
+    "잠금 회수 파일(.codaryn/lock.json.reclaim)이 남아 있어, 끝난 프로세스가 남긴 잠금을 회수하지 못합니다. 이 작업 공간에서 실행 중인 Codaryn이 없으면 그 파일을 지우세요",
+  "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
   "error.invalid_arguments.fix": "codaryn help <명령>으로 사용법을 확인하세요.",
@@ -336,6 +338,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.search_files": "파일 검색",
   "tool.write_file": "파일 쓰기",
   "tool.run_command": "명령 실행",
+  "tool.inspect_files": "파일 목록 보기",
+  "tool.propose_plan": "계획 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

@@ -37,7 +37,9 @@ async function tree(dir: string): Promise<Record<string, string>> {
   const walk = async (current: string, prefix: string): Promise<void> => {
     for (const entry of await readdir(current, { withFileTypes: true })) {
       const key = `${prefix}${entry.name}`;
-      if (entry.isDirectory()) {
+      if (entry.isSymbolicLink()) {
+        out[key] = "link";
+      } else if (entry.isDirectory()) {
         out[`${key}/`] = "dir";
         await walk(join(current, entry.name), `${key}/`);
       } else {
@@ -149,7 +151,7 @@ describe("revertRun on an apply run (G-E)", () => {
     assert.equal(await readFile(join(root, "inbox", "old.log"), "utf8"), LOG);
   });
 
-  test("a path recorded with a privacy token goes back through the stored plan; without a plan the revert rejects (DR-24 f)", async () => {
+  test("a path recorded with a privacy token goes back through the stored plan; without a plan run the revert rejects (DR-24 f, R-9c C-1)", async () => {
     const masked = `inbox/${TOKEN}.txt`;
     const withPlan = await appliedWorkspace({ recordedFrom: masked });
     const outcome = await revertRun({ workspaceRoot: withPlan.root, runId: APPLY_RUN });
@@ -158,7 +160,7 @@ describe("revertRun on an apply run (G-E)", () => {
 
     const noPlan = await appliedWorkspace({ recordedFrom: masked, withPlan: false });
     for (const dryRun of [true, false]) {
-      await assert.rejects(revertRun({ workspaceRoot: noPlan.root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "invalid_run_record");
+      await assert.rejects(revertRun({ workspaceRoot: noPlan.root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "plan_run_missing");
     }
     assert.equal(await readFile(join(noPlan.root, "docs", "report.txt"), "utf8"), REPORT, "not touched");
   });
@@ -371,5 +373,90 @@ describe("R-9b N-1 (DR-27 a): an action done but not recorded, as the engine's j
     assert.deepEqual(outcome.reverted, []);
     assert.deepEqual(outcome.skipped, [{ path: "inbox/report.txt", reason: "changed_since_run" }]);
     assert.deepEqual(await tree(root), before, "nothing is touched");
+  });
+});
+
+describe("R-9c C-2: a discard whose directory was never made, or is gone", () => {
+  /** A plan with one discard. The apply stops right after the start record, before the discarded directory exists. */
+  async function stoppedBeforeDiscardDir(): Promise<string> {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-d1-")));
+    roots.push(root);
+    await mkdir(join(root, "inbox"));
+    await writeFile(join(root, "inbox", "old.log"), LOG, "utf8");
+    const digest = await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan([{ kind: "discard", path: "inbox/old.log", sha256: sha(LOG) }]);
+    const journal = createApplyJournal({ workspaceRoot: root, runId: APPLY_RUN, clock });
+    await journal.append({ type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "organize-task", digest, approval: "cli-flag", actions: 1, maxDurationMs: 60_000 });
+    await journal.append({ type: "plan_checked", problems: [], inventoryLimitReached: false });
+    await journal.append({ type: "plan_item_started", index: 0, action: { kind: "discard", path: "inbox/old.log" as MaskedText, sha256: sha(LOG) } });
+    await journal.close();
+    return root;
+  }
+
+  test("review reproduction D1: a started discard with no discarded directory and the file in place was not done: not listed", async () => {
+    const root = await stoppedBeforeDiscardDir();
+    const before = await tree(root);
+    for (const dryRun of [true, false]) {
+      const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun });
+      assert.deepEqual([outcome.reverted, outcome.skipped], [[], []], `dryRun ${dryRun}`);
+    }
+    assert.deepEqual(await tree(root), before);
+  });
+
+  test("a recorded discard whose discarded directory is gone is changed_since_run, or already_reverted when the file is back", async () => {
+    const { root, discarded } = await appliedWorkspace();
+    await rm(discarded, { recursive: true });
+    const gone = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true });
+    assert.deepEqual(gone.skipped, [{ path: "inbox/old.log", reason: "changed_since_run" }]);
+    await writeFile(join(root, "inbox", "old.log"), LOG, "utf8");
+    const back = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true });
+    assert.deepEqual(back.skipped, [{ path: "inbox/old.log", reason: "already_reverted" }]);
+  });
+
+  test("a discarded directory that is a link is still not read: io_error, nothing moved", async () => {
+    const { root, discarded } = await appliedWorkspace();
+    const elsewhere = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-elsewhere-")));
+    roots.push(elsewhere);
+    await rename(join(discarded, "1"), join(elsewhere, "1"));
+    await rm(discarded, { recursive: true });
+    await symlink(elsewhere, discarded, "junction");
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.skipped, [{ path: "inbox/old.log", reason: "io_error" }]);
+    assert.equal(await readFile(join(elsewhere, "1"), "utf8"), LOG, "the file behind the link stays");
+  });
+});
+
+describe("R-9c C-1: an apply whose plan run is gone", () => {
+  const rejectsWith = async (root: string, code: string): Promise<void> => {
+    const before = await tree(root);
+    for (const dryRun of [true, false]) {
+      await assert.rejects(revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === code, `dryRun ${dryRun}`);
+    }
+    assert.deepEqual(await tree(root), before, "nothing changes");
+  };
+
+  test("review reproduction F5: the plan run's directory was deleted: plan_run_missing, not invalid_run_record", async () => {
+    const { root } = await appliedWorkspace();
+    await rm(join(root, ".codaryn", "runs", PLAN_RUN), { recursive: true });
+    await rejectsWith(root, "plan_run_missing");
+  });
+
+  test("the plan run's directory stays but its plan.json was deleted: plan_run_missing", async () => {
+    const { root } = await appliedWorkspace();
+    await rm(join(root, ".codaryn", "runs", PLAN_RUN, "plan.json"));
+    await rejectsWith(root, "plan_run_missing");
+  });
+
+  test("a plan.json that exists but differs, or a plan run directory that is a link, stays invalid_run_record", async () => {
+    const changed = await appliedWorkspace();
+    await writeFile(join(changed.root, ".codaryn", "runs", PLAN_RUN, "plan.json"), "{}\n", "utf8");
+    await rejectsWith(changed.root, "invalid_run_record");
+
+    const linked = await appliedWorkspace();
+    const elsewhere = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-planrun-")));
+    roots.push(elsewhere);
+    const planDir = join(linked.root, ".codaryn", "runs", PLAN_RUN);
+    await rename(planDir, join(elsewhere, PLAN_RUN));
+    await symlink(join(elsewhere, PLAN_RUN), planDir, "junction");
+    await rejectsWith(linked.root, "invalid_run_record");
   });
 });

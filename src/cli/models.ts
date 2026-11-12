@@ -37,7 +37,7 @@ import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey, selectEnvFileSecrets } from "./security/index.js";
-import { envValue, knownKeyValues, realModel, resolveListSettings } from "./settings.js";
+import { envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys } from "./text-safety.js";
@@ -327,7 +327,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       status: "listed",
       exitCode: MODELS_EXIT_CODES.listed,
       models,
-      current: currentModel(modelFromEnv, config?.model ?? null, models),
+      current: currentModel(modelFromEnv, providerSettingsOf(config, "anthropic").model ?? null, models),
       selected: null,
     };
     const shown = hideKeys(scrub(renderModels(before, true), secrets), currentKey);
@@ -336,7 +336,8 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
   }
 
   let selected: ModelsOutput["selected"] = null;
-  let writtenModel = config?.model ?? null;
+  // SP-4: anthropic's model, at the top level or in providers.anthropic (models lists anthropic until SP-6).
+  let writtenModel = providerSettingsOf(config, "anthropic").model ?? null;
   if (choice !== null && configPath !== null) {
     const asNumber = /^[1-9][0-9]*$/.test(choice) ? Number(choice) : null;
     const picked = asNumber !== null ? models[asNumber - 1] : models.find((model) => model.id === choice);

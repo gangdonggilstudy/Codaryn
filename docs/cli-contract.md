@@ -335,7 +335,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
   - 설정이 숫자인데 task가 `maxTotalTokens: null`이면 상한을 푸는 것이므로 `invalid_task`다.
   - 설정이 `null`이면 그 필드는 절대 상한만 적용한다.
   - 설정에 없는 필드는 task 값을 쓴다.
-- **anthropic 제공자는 `maxTotalTokens: null`을 쓸 수 없다.** task가 준 `null`이면 `invalid_task`, 설정이 준 `null`이면 `invalid_config`다. scripted는 `null`을 허용한다.
+- **API 제공자(anthropic, openai)는 `maxTotalTokens: null`을 쓸 수 없다**(19.2). task가 준 `null`이면 `invalid_task`, 설정이 준 `null`이면 `invalid_config`다. scripted는 `null`을 허용한다.
 - **코드의 절대 상한(`ABSOLUTE_LIMITS`):**
   - 턴 1000
   - 도구 호출 5000
@@ -989,3 +989,66 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - store에는 `RevertRequest.unsafeMoveConsent { channel, runId }`로 넘긴다. 그렇게 옮긴 파일은 `reverted`에 `unsafe: true`로 나온다.
 - `revert.json`(RevertRecord)에는 동의 경로(`unsafeMoveConsent`, 없으면 null)와, `reverted` 중 `unsafe`인 항목 수(`unsafeMoves`)를 쓴다.
 - 드라이 런이 옮길 파일을 나열하면 출력에 `moveSafetyUnchecked: true`가 붙는다. 사람용 요약은 `revert.dry_run_move_unchecked`로 그 사실을 알린다.
+
+## 19. 제공자 선택과 설정 해석 (SP-4, DR-31)
+
+계약: `CodarynConfig.provider`·`providers`, `ConfigProfile.provider`, `ProviderSettings`, `API_PROVIDERS`(`src/contracts/config.ts`). 11절의 anthropic 규칙은 그대로이고, 아래는 다른 API 제공자를 고를 때 더해지는 규칙이다.
+
+### 19.1 설정 파일
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "provider": "openai",                       // 간편 형식의 제공자. 없으면 anthropic
+  "model": "…", "maxOutputTokens": 4096,      // 최상위 제공자 설정은 anthropic 몫(예전 그대로)
+  "providers": {
+    "openai": { "model": "…", "maxOutputTokens": 4096, "apiBaseUrl": "…", "requestTimeoutMs": 60000, "maxRetries": 2 }
+  },
+  "profiles": { "fast": { "provider": "anthropic" } }
+}
+```
+
+- `provider`, `profiles.<이름>.provider`: `API_PROVIDER_NAMES` 중 하나다. scripted는 task 파일에서만 고른다. 다른 값은 `invalid_config`다.
+- `providers`: 키는 `API_PROVIDER_NAMES` 중 하나다. 다른 키는 그 이름을 되풀이하지 않고 `invalid_config`로 거부한다.
+  - 항목의 필드는 `model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`뿐이다. 규칙은 최상위 필드와 같고, 아래 둘은 그 제공자의 것을 쓴다.
+    - 출력 토큰: `API_PROVIDERS[<이름>].minOutputTokens` 이상, `maxOutputTokensLimit` 이하(openai는 16 이상).
+    - 주소의 경로 규칙: `baseUrlPath`. 공통 규칙(S-9, https, 루프백만 http, 사용자 정보·질의·조각·공백·역슬래시 없음)은 같다.
+      - `without_version`(anthropic): `/v1`, `/v1/messages`로 끝나면 거부한다. 어댑터가 `/v1/messages`를 붙인다.
+      - `with_version`(openai): `/responses`, `/models`로 끝나면 거부한다. 기본 주소는 `https://api.openai.com/v1`이다.
+  - 오류 글은 위치를 `providers.<이름>.<필드>`로 적는다.
+- `providers.anthropic`과 최상위 제공자 설정(`model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`)을 함께 쓰면 `invalid_config`다. 둘은 같은 설정이라 어느 쪽인지 모호하다.
+
+### 19.2 제공자 고르기
+
+| 실행 형식 | 제공자 |
+| --- | --- |
+| task 파일 | `model.provider`(scripted 또는 `API_PROVIDER_NAMES`). 설정의 `provider`는 쓰지 않는다 |
+| 간편 형식(`run`, `doctor`) | `--profile`의 `provider` → 설정 `provider` → anthropic |
+
+- task 파일의 `model: { provider: "openai", model?, maxOutputTokens? }`의 출력 토큰은 그 제공자의 범위로 검사한다.
+- 고른 제공자가 API 제공자이면 `limits.maxTotalTokens`는 숫자여야 한다(11절 "한도"의 anthropic 규칙과 같다). 오류 글은 제공자 이름을 적는다.
+
+### 19.3 해석 (`resolveApiSettings`, `src/cli/settings.ts`)
+
+모두 고른 제공자 몫으로 해석한다. 그 제공자의 설정은 `providers.<이름>`이고, anthropic은 그것이 없으면 최상위 필드다(`providerSettingsOf`). 다른 제공자의 항목은 읽지 않는다.
+
+| 값 | 순서 |
+| --- | --- |
+| 키 | `API_PROVIDERS[<이름>].keyEnv`만(anthropic `ANTHROPIC_API_KEY`, openai `OPENAI_API_KEY`). 다른 제공자의 키는 대신하지 않는다 |
+| 모델 | task `model.model` → `CODARYN_MODEL` → 제공자 설정 `model` |
+| 출력 토큰 | task `model.maxOutputTokens` → 제공자 설정 `maxOutputTokens` |
+| API 주소 | `CODARYN_API_BASE_URL`(그 제공자의 경로 규칙으로 검사) → 제공자 설정 `apiBaseUrl` → `defaultApiBaseUrl` |
+| 요청 시간 한도, 재시도 | 제공자 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`, `DEFAULT_MAX_RETRIES` |
+
+- `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 고른 제공자에만 적용한다(SP-D5). 한 제공자용 값을 둔 채 제공자를 바꾸면 그 값이 새 제공자로 간다(검토 R-19 I-4). `doctor`가 이를 알리는 것은 제공자 연결 단계(SP-6)에서 한다.
+- 빠진 키·모델·출력 토큰은 `provider_not_configured`이고, 글은 그 제공자의 키 변수와 설정 위치(`providers.openai.model` 등)를 적는다.
+- `resolveAnthropicSettings`, `resolveListSettings`, `resolveConnection`은 예전 이름과 인자로 남는다. 제공자를 주지 않으면 anthropic이고, 결과는 SP-4 전과 같다(고정 시험 SP-0 P-7).
+
+### 19.4 명령
+
+- `run`: openai를 고르면 아직 `provider_not_implemented`로 끝나고 아무것도 보내지 않는다. 어댑터 연결은 SP-6이다.
+- `doctor`: `api_key`, `model` 점검은 고른 제공자의 키 변수(`doctor.api_key.ok {keyEnv}`, `doctor.api_key.missing {keyEnv, provider}`), 설정, 주소 규칙으로 한다.
+- `models`: 아직 anthropic 목록만 보이고, 현재 모델은 anthropic 설정(최상위 또는 `providers.anthropic`)에서 읽는다.
+  - `--use`는 최상위 `model`에 쓴다. 설정이 `providers.anthropic`을 쓰면 쓴 결과가 위 모호성 규칙에 걸리므로, 파일을 바꾸지 않고 `config_write_failed`로 끝난다.
+  - `--provider <name>`과 제공자 자리에 쓰기는 SP-6이다. 도움말의 `--provider` 줄도 그때 `models`에 붙는다.
+- `init`: 지금처럼 anthropic 설정을 쓴다. 키 안내 글은 `{keyEnv}`를 받는다.

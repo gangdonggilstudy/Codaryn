@@ -63,11 +63,20 @@ import {
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, knownKeyValues, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
+import {
+  configFieldOf,
+  envValue,
+  knownKeyValues,
+  missingModelText,
+  missingOutputCapText,
+  modelPlaceholderSeen,
+  providerSettingsOf,
+  resolveModelId,
+} from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
-import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
+import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
 
@@ -576,7 +585,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     }
   }
   const taskUnusable = args.taskPath !== null && task === null;
-  const provider = task?.model.provider ?? "anthropic";
+  // SP-D3, SP-D10: the task's provider, else the quick form's (the profile's, else the file's, else
+  // anthropic; the profile was laid over above).
+  const provider = task?.model.provider ?? quickProvider(config);
 
   // api_key: present or not, nothing else.
   if (taskUnusable) {
@@ -606,17 +617,21 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       const field = fieldOf(undefined, script.message);
       set("model", "fail", script.message, field === null ? { id: "doctor.model.script_invalid_unlocated" } : { id: "doctor.model.script_invalid", params: { field } });
     } else set("model", "ok", "the scripted model file is valid", { id: "doctor.model.scripted_ok" });
-  } else {
-    const fromTask = task !== null && task.model.provider === "anthropic" ? task.model : null;
+  } else if (provider !== "scripted") {
+    // SP-4: the chosen API provider's model, cap and address (its config entry and path rule).
+    // With a task, `provider` is its model.provider, so the task's model settings are this provider's.
+    const fromTask = task !== null && task.model.provider !== "scripted" ? task.model : null;
     // N-3: a placeholder (blank or <...>) counts as not set at every level.
-    const modelId = resolveModelId(fromTask?.model, env, config);
-    const maxOutputTokens = fromTask?.maxOutputTokens ?? config?.maxOutputTokens ?? null;
+    const modelId = resolveModelId(fromTask?.model, env, config, provider);
+    const maxOutputTokens = fromTask?.maxOutputTokens ?? providerSettingsOf(config, provider).maxOutputTokens ?? null;
     const missing: string[] = [];
-    if (modelId === null) missing.push(missingModelText(modelPlaceholderSeen(fromTask?.model, env, config)));
-    if (maxOutputTokens === null) missing.push("maxOutputTokens (task model.maxOutputTokens or config maxOutputTokens)");
+    if (modelId === null) {
+      missing.push(missingModelText(modelPlaceholderSeen(fromTask?.model, env, config, provider), configFieldOf(config, provider, "model")));
+    }
+    if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
     const baseUrl = envValue(env, CODARYN_API_BASE_URL_ENV);
-    const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV);
-    const placeholder = modelPlaceholderSeen(fromTask?.model, env, config);
+    const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV, API_PROVIDERS[provider].baseUrlPath);
+    const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);
     const missingText: DoctorText =
       modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
     if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}`, missingText);

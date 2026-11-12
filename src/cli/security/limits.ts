@@ -99,9 +99,11 @@ export function resolveBoundedLimits(input: BoundedLimitsInput): BoundedLimitsOu
       } else {
         return { ok: false, code: missingCode, message: `limits.${field} is not set in the task or the config file` };
       }
-      if (field === "maxTotalTokens" && resolved[field] === null && input.provider === "anthropic") {
+      // SP-4 (design 4.5): every API provider run needs a token limit, not only anthropic's; the
+      // message names the provider, so anthropic's is the one before SP-4.
+      if (field === "maxTotalTokens" && resolved[field] === null && input.provider !== "scripted") {
         const source: Source = fromTask !== undefined ? "task" : "config";
-        throw new LimitError(source, "limits.maxTotalTokens must be a number for the anthropic provider; null is not allowed");
+        throw new LimitError(source, `limits.maxTotalTokens must be a number for the ${input.provider} provider; null is not allowed`);
       }
     }
   } catch (error) {

@@ -29,5 +29,6 @@ export {
 export type { EnvSnapshot, SecretEnvNamesOutcome } from "./env.js";
 export { ABSOLUTE_LIMITS, MAX_TIMER_MS, checkTimerMs, resolveBoundedLimits } from "./limits.js";
 export type { BoundedLimitsInput, BoundedLimitsOutcome } from "./limits.js";
-export { API_BASE_URL_STRICT_RULE, normalizeApiBaseUrlStrict } from "./url.js";
+export { API_BASE_URL_STRICT_RULE, API_BASE_URL_WITH_VERSION_RULE, normalizeApiBaseUrlStrict } from "./url.js";
+export type { ApiBaseUrlPath } from "./url.js";
 export type { ApiBaseUrlOutcome } from "./url.js";

@@ -104,6 +104,8 @@ const dialogs: string[] = [];
 let refuseWidening = false;
 /** DR-44: answer the next "also remove the records of runs not reverted?" dialog with "keep them". */
 let keepNotReverted = false;
+/** R47-I4: answer the next "also delete the discarded files?" dialog with "keep them". */
+let keepDiscarded = false;
 
 startGui({
   // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
@@ -127,6 +129,10 @@ startGui({
     dialogs.push(id);
     if (id === "cleanup.notReverted.message" && keepNotReverted) {
       keepNotReverted = false;
+      return 1;
+    }
+    if (id === "cleanup.discarded.message" && keepDiscarded) {
+      keepDiscarded = false;
       return 1;
     }
     if (id === "widen.message" && refuseWidening) {
@@ -545,8 +551,9 @@ startGui({
 
       // 5j2. U-13 (DR-53): an apply run whose discarded files stay keeps its records. A plan run
       // (organize) discards sub/deeper/c.txt and is applied. A cleanup of the apply run's records only
-      // (its not-reverted question answered "remove") keeps them as discarded_left and says so; with
-      // its discarded files chosen too and their deletion agreed to, both go.
+      // (its not-reverted question answered "remove") keeps them as discarded_left and says so. With
+      // its discarded files chosen too, R47-I4: "keep them" in the third dialog keeps both; agreeing to
+      // delete them removes both.
       const beforeDiscard = await resultId();
       await taskWith("organize", "sub/deeper/c.txt를 폐기한다");
       const discardPlanId = await newResult(beforeDiscard);
@@ -557,7 +564,7 @@ startGui({
       const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);
       const discardRecords = join(SECOND, ".codaryn", "runs", discardApplyId);
       results["discardApplied"] = { fileGone: !existsSync(join(SECOND, "sub", "deeper", "c.txt")), box: existsSync(discardBox) };
-      const cleanupOf = async (chooseDiscarded: boolean): Promise<Record<string, unknown>> => {
+      const cleanupOf = async (chooseDiscarded: boolean, keepThem = false): Promise<Record<string, unknown>> => {
         const asked = dialogs.length;
         await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
         await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
@@ -567,6 +574,7 @@ startGui({
         const plan = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
         const warnings = await js(`document.querySelector('#cleanup-items [data-target="run"][data-id="${discardApplyId}"]')?.getAttribute('data-warnings') ?? null`);
         const planNotice = await js("document.getElementById('cleanup-plan-discarded-left') !== null");
+        keepDiscarded = keepThem;
         await js("document.getElementById('cleanup-apply')?.click(); true");
         const result = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
         return {
@@ -584,6 +592,7 @@ startGui({
         };
       };
       results["discardLeftKept"] = await cleanupOf(false);
+      results["discardLeftKeepBox"] = await cleanupOf(true, true);
       results["discardLeftBoth"] = await cleanupOf(true);
 
       // 5k. U-11 (3.11): the first-run guide on this workspace. The config file exists (used as it is), the

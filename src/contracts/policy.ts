@@ -28,6 +28,27 @@ export const POLICY_DENIAL_CODES = [
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 
 /**
+ * U-15 (AXM-6): what the model is told to do next after a refusal, one sentence with no value in it.
+ * The engine adds it after the code of a policy denial (`denied by policy: <permission>/<code>`) and
+ * of a placeholder refusal before execution (`token not usable in field: <field>`, the restore codes
+ * of ResolveArgsOutcome). Fixed model-bound text (FIXED_MODEL_TEXTS).
+ */
+export const REFUSAL_HINTS: { readonly [C in PolicyDenialCode | "unresolved_token" | "invalid_token"]: string } = {
+  outside_root: "Paths must stay inside the workspace.",
+  state_dir: "Codaryn's own records folder cannot be used; work on the task's files only.",
+  invalid_path: "Give a relative path inside the workspace with plain names.",
+  command_not_allowed: "Only the commands this task allows can be run.",
+  args_not_allowed: "This command can be run only with the arguments this task allows.",
+  network_denied: "This task does not allow network access.",
+  destructive_denied: "This task does not allow destructive actions.",
+  restore_denied: "A protected placeholder cannot be used in this field.",
+  protected_path: "This path is protected in this task; do not write to it.",
+  plan_action_not_allowed: "This task does not allow this kind of plan action.",
+  unresolved_token: "A protected placeholder cannot be used in this field.",
+  invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
+};
+
+/**
  * Phase 1a is non-interactive: a decision is allow or deny, never "ask".
  * G-A: unchanged in stage 4. Plan approval happens between runs (plan.ts, DR-1), not here. The
  * in-run permission question (N-11) is decided as DR-3 and comes at the start of stage 5; its

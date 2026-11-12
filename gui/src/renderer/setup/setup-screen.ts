@@ -9,6 +9,8 @@
  *    check boxes, all off. Nothing chosen means documents only, no command. Chosen ones go through
  *    the settings proposals, so a command is asked about by the main process (widening, 6.6).
  * 4. Checks: the same checks as the checks screen, in words; without a key, how to register it.
+ * R45-L-1: when the settings cannot be read (a missing or broken file), pages 1 to 3 say so and lead
+ * to page 4, whose checks run anyway and say why (the config check).
  */
 
 import type { Texts } from "../i18n/catalog.js";
@@ -68,13 +70,21 @@ export function setupScreen(deps: SetupDeps): Screen {
       );
       void (async () => {
         const settings = asSettings(await api.settings());
+        const workspace = deps.current();
         if (!settings.ok) {
-          body.replaceChildren(errorLine(t, settings.code));
-          body.setAttribute("data-ready", "error");
+          if (step !== "checks") {
+            body.replaceChildren(errorLine(t, settings.code), el("p", t.format("setup.unreadable"), { class: "notice", id: "setup-unreadable" }), button(t.format("setup.toChecks"), () => go("checks"), { id: "setup-to-checks" }));
+            body.setAttribute("data-ready", "error");
+            return;
+          }
+          // Page 4 without the settings: the checks only (the config check says why the file cannot be read).
+          body.replaceChildren(errorLine(t, settings.code), el("p", t.format("checks.checking")));
+          const reply = asDoctor(await api.doctor(workspace?.handle ?? null));
+          body.replaceChildren(errorLine(t, settings.code), ...(reply.ok ? doctorParts(t, reply) : [errorLine(t, reply.code)]));
+          body.setAttribute("data-ready", reply.ok ? "ok" : "error");
           return;
         }
         const view = settings.view;
-        const workspace = deps.current();
         if (step === "folder") {
           const file = view.file;
           if (file === null) {

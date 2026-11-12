@@ -470,16 +470,42 @@ export type ApplyJournalEvent =
 
 export type ApplyJournalEventType = ApplyJournalEvent["type"];
 
-/** A stored line of an apply journal: the event plus the fields every journal adds. */
+/**
+ * R-9 I-4: written right before the executor carries out action `index`, after the checks for a
+ * cancel and the duration. An action is done first and recorded (`file_moved`, `file_discarded`)
+ * after, so a journal that ends between the two (the process stopped) still names the action, and
+ * a revert can find it (changes.ts RevertRun). It is a recovery record, not progress: it is kept
+ * out of ApplyJournalEvent so readers that show ApplyJournalEvent stay as they are, and a reader of
+ * stored lines skips a type it does not show. Every action the executor was asked to carry out has
+ * one; an action that was not reached has none.
+ */
+export interface PlanItemStartedEvent {
+  readonly type: "plan_item_started";
+  readonly index: number;
+  /** The plan action as recorded: paths masked (the masked plan the apply checked before claiming it). */
+  readonly action: MaskedPlanAction;
+}
+
+/** What an apply run appends to its journal: the shown records plus the start records. */
+export type ApplyJournalEntry = ApplyJournalEvent | PlanItemStartedEvent;
+
+/**
+ * A stored line of an apply journal: the event plus the fields every journal adds. Lines of
+ * PlanItemStartedEvent, with the same added fields, may appear between them (R-9 I-4).
+ */
 export type ApplyJournalRecord = ApplyJournalEvent & {
   readonly seq: number;
   readonly at: string;
   readonly runId: string;
 };
 
-/** Same contract as Journal (append-only, masked text only), for apply records. */
+/**
+ * Same contract as Journal (append-only, masked text only), for apply records. A wrapper that also
+ * shows progress (HumanOutput.applyProgressLine) passes on every entry and shows only
+ * ApplyJournalEvent; `plan_item_started` has no progress line.
+ */
 export interface ApplyJournal {
-  append(event: ApplyJournalEvent): Promise<void>;
+  append(event: ApplyJournalEntry): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -505,9 +531,9 @@ export interface ApplyJournal {
  *    failed one; when it is aborted (or the duration is over) the apply ends as cancelled (or
  *    budget-exhausted), not as `apply_incomplete`, and that action is recorded as not done.
  *    In every case what was done stays, is listed in `ApplyResult.applied`, and `codaryn revert
- *    --run <apply runId>` undoes it. Known limit (R-9 I-4): an action is recorded after it is
- *    done, so a process that ends between the two leaves that action unrecorded and a revert does
- *    not see it.
+ *    --run <apply runId>` undoes it. R-9 I-4: before each action `plan_item_started` is recorded,
+ *    so an action done just before the process ended, but not yet recorded as done, is still
+ *    named in the journal and the revert handles it (PlanItemStartedEvent).
  * 5. Verification: the inventory check (VF-05, always first), then the task's verifiers, each
  *    recorded as `verifier_result`; integrity checks around them as in a run. No repair: no model.
  * 6. `run_finished` and the result: all pass → `done`/`verified`; a fail → `failed`/`verifier_failed`;

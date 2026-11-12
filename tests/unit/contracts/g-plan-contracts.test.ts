@@ -67,7 +67,10 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  ApplyJournalEntry,
   ApplyJournalEvent,
+  ContentHash,
+  MaskedText,
   ApplyResult,
   ApplySummaryContext,
   CodarynConfig,
@@ -154,7 +157,15 @@ const legacyEntry: RunListEntry = {
   changes: 1,
   reverted: null,
 };
-void [noConsentInFiles, applyEntry, legacyEntry];
+/** R-9 I-4: the start record is an apply journal entry, not a shown record (progress stays as it is). */
+type StartIsShown = Extract<ApplyJournalEvent, { type: "plan_item_started" }> extends never ? false : true;
+const startNotShown: StartIsShown = false;
+const startEntry: ApplyJournalEntry = {
+  type: "plan_item_started",
+  index: 0,
+  action: { kind: "discard", path: "b.tmp" as MaskedText, sha256: "a".repeat(64) as ContentHash },
+};
+void [noConsentInFiles, applyEntry, legacyEntry, startNotShown, startEntry];
 /** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
 // @ts-expect-error a raw note cannot be stored
 const rawNote: ReviewRecord["note"] = "typed by a person" as string;

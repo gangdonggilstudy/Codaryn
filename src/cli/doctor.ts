@@ -568,7 +568,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       if (outcome.ok) {
         config = outcome.config;
         configPath = loaded.path;
-        set("config_file", "ok", `the config file${where} is valid`, { id: "doctor.config_file.valid_at", params: { location: candidate.display } });
+        // N-A 32.3 (0d38bfa): valid_at names the default location; a file given by --config or
+        // CODARYN_CONFIG is valid_given (valid_at called every source "the default location").
+        const validText: DoctorText =
+          candidate.source === "default"
+            ? { id: "doctor.config_file.valid_at", params: { location: candidate.display } }
+            : { id: "doctor.config_file.valid_given", params: { location: candidate.display } };
+        set("config_file", "ok", `the config file${where} is valid`, validText);
       } else {
         const field = fieldOf(outcome.position);
         set(
@@ -686,8 +692,14 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     const baseUrl = envValue(env, baseUrlEnv);
     const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, baseUrlEnv, API_PROVIDERS[provider].baseUrlPath);
     const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);
+    // N-A 33.3 (0d38bfa): the provider's model variable and the config places in the person's text.
+    const placeOf = (field: "model" | "maxOutputTokens") => toSchemaFieldPath(configFieldOf(config, provider, field)) ?? (toSchemaFieldPath(field) as SchemaFieldPath);
     const missingText: DoctorText =
-      modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
+      modelId === null
+        ? placeholder
+          ? { id: "doctor.model.placeholder" }
+          : { id: "doctor.model.missing", params: { variable: API_PROVIDERS[provider].modelEnv, field: placeOf("model") } }
+        : { id: "doctor.model.output_cap_missing", params: { field: placeOf("maxOutputTokens") } };
     // SP-6, review R-19 I-4: another provider's model or address variable is not read by this run;
     // say so, so a value left for one provider is not silently ignored (names only, never values).
     // DR-36 (b): the same as notes, one catalog text per variable.

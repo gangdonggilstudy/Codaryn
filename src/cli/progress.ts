@@ -50,6 +50,11 @@ export function progressLine(event: JournalEvent): string | null {
       return event.changed.length === 0
         ? `protected material ${event.phase}: unchanged`
         : `protected material ${event.phase}: ${count(event.changed.length, "path", "paths")} changed or not checkable`;
+    case "state_checked":
+      // DR-38: a check of the run records around commands and verification. Only a change or a
+      // part that could not be checked is worth a line; an unchanged check says nothing.
+      if (event.changed.length > 0) return `run records ${safeToken(event.phase)}: ${count(event.changed.length, "path", "paths")} changed outside the run`;
+      return event.limited ? `run records ${safeToken(event.phase)}: part of the state could not be checked` : null;
     case "run_finished":
       return `finished: ${safeToken(event.status)} (${safeToken(event.reason)})`;
     case "model_response":

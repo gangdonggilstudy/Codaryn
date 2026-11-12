@@ -200,22 +200,21 @@ describe("runChanges", () => {
  * Unit U-36 (UXM-7 ③, survey docs/reviews/2026-11-13-u19-korean-gaps-survey.md 3 D), the `changes`
  * part: the text of `codaryn changes` comes from the message catalog (the contract's ids, U-36
  * contract 1ca962e), so a person reads it in their language. Pinned:
- * - English: without a catalog (the fallback) and with the English catalog, the text is the one
- *   before U-36 character for character. The no-text line keeps "(DR-29)", as the English catalog
- *   and g-changes-wire keep it (the Korean leaves it out), so the PM's exception is not used.
+ * - English without a catalog (the fallback): the text before U-36 character for character. The
+ *   no-text line keeps "(DR-29)", as the English catalog and g-changes-wire keep it (the Korean
+ *   leaves it out), so the PM's exception is not used.
+ * - English with the English catalog: the same, but for the lines the PM accepted otherwise (U-36,
+ *   after ENGLISH_TODO): `changes.apply_run`'s sentence and the reason words of
+ *   `changes.unavailable.<reason>` (all but masking_unverified). They are pinned here as they are.
  * - `changes --json` is not changed.
  * - With a catalog every piece of text is the catalog's: no fixed English word is left.
  * - A run with a records-changed mark (ChangesOutput.recordsChanged, U-43) says so with the catalog's
  *   `changes.records_changed`, which nothing used before.
  * Reproduced first (e4865d6, todo, in u36-changes-texts.test.ts, moved here to stay in this owner's
- * file); the renderer takes the catalog now, with unit/U-36-nb-i18n's texts (2794d22). The English
- * catalog case is todo for a PM question (ENGLISH_TODO). Fake values only.
+ * file); the renderer takes the catalog now, with unit/U-36-nb-i18n's texts (2794d22, ea6b7c1). The
+ * English catalog case was todo for a PM question (ENGLISH_TODO); the PM accepted the catalog's
+ * English. Fake values only.
  */
-
-/** PM question (U-36): the English catalog (unit/U-36-nb-i18n 2794d22) words these lines otherwise. */
-const ENGLISH_TODO = {
-  todo: "U-36: the English catalog words changes.apply_run and changes.unavailable.<reason> (all but masking_unverified) otherwise than the text before U-36",
-};
 
 const RUN = "20261113T010203Z-0123abcd";
 const BASE = { schemaVersion: 1, kind: "changes", runId: RUN, exitCode: 0, masking: "current_secrets" } as const;
@@ -269,6 +268,27 @@ const ALL_EN = [
 const NONE_EN = `${HEADING}\nthe run changed no file\n`;
 const APPLY_EN = `${HEADING}\nthe run is an apply run: it applied 2 action(s) of the plan of run 20261113T000000Z-89abcdef (moves and discards, not file writes); codaryn report lists them\n`;
 
+/** The PM's decision (U-36): the English catalog's lines that differ from the text before U-36. */
+const ALL_EN_CATALOG = ALL_EN.replace("   the text is not shown (unreadable)", "   the text is not shown: the file could not be read (unreadable)");
+const APPLY_EN_CATALOG = `${HEADING}\nThis run applied the plan of run 20261113T000000Z-89abcdef; actions applied: 2. They are moves and discards of that plan, not files this run wrote, so no file text is shown here; the run's report lists them.\n`;
+const REASONS = ["masked_path", "snapshot_missing", "not_text", "too_large", "unreadable", "mask_failed", "masking_unverified"] as const;
+/** Every reason a file's text is not shown, one file each. */
+const UNAVAILABLE: ChangesOutput = {
+  ...BASE,
+  files: REASONS.map((reason, index) => ({ path: `f${index}.md` as never, created: false, state: "as_run_left" as const, before: null, after: null, unavailable: reason })),
+};
+/** Each reason's line: before U-36 (the fallback), and with the English catalog. */
+const UNAVAILABLE_LINES: readonly (readonly [string, string])[] = [
+  ["   the text is not shown (masked_path)", "   the text is not shown: its recorded path has a masked part (masked_path)"],
+  ["   the text is not shown (snapshot_missing)", "   the text is not shown: no usable copy of the original was kept (snapshot_missing)"],
+  ["   the text is not shown (not_text)", "   the text is not shown: the original or the file now is not UTF-8 text (not_text)"],
+  ["   the text is not shown (too_large)", "   the text is not shown: the file is too large (too_large)"],
+  ["   the text is not shown (unreadable)", "   the text is not shown: the file could not be read (unreadable)"],
+  ["   the text is not shown (mask_failed)", "   the text is not shown: it could not be masked (mask_failed)"],
+  ["   the text is not shown (masking_unverified)", "   the text is not shown (masking_unverified)"],
+];
+const reasonLines = (shown: string): string[] => shown.split("\n").filter((line) => line.startsWith("   the text is not shown"));
+
 /** Every fixed English word of the text before U-36. */
 const ENGLISH = [
   "changes of run",
@@ -304,13 +324,18 @@ describe("U-36: changes' English text is as before", () => {
     assert.equal(renderChanges(APPLY), APPLY_EN);
   });
 
-  test("with the English catalog: the same text as without one", ENGLISH_TODO, () => {
+  test("with the English catalog: the same text but the lines the PM accepted otherwise (apply run, the reasons)", () => {
     const en = createMessageCatalog("en");
     // Not vacuous: the renderer falls back to English when the catalog refuses an id.
     for (const id of ["changes.none", "changes.no_text_note", "changes.state.missing", "changes.unavailable.unreadable"] as const) assert.doesNotThrow(() => en.format(id), id);
-    assert.equal(renderChanges(ALL, en), ALL_EN);
+    assert.equal(renderChanges(ALL, en), ALL_EN_CATALOG);
     assert.equal(renderChanges(NONE, en), NONE_EN);
-    assert.equal(renderChanges(APPLY, en), APPLY_EN);
+    assert.equal(renderChanges(APPLY, en), APPLY_EN_CATALOG);
+    assert.deepEqual(reasonLines(renderChanges(UNAVAILABLE, en)), UNAVAILABLE_LINES.map(([, catalog]) => catalog));
+  });
+
+  test("without a catalog: each reason's line as before U-36", () => {
+    assert.deepEqual(reasonLines(renderChanges(UNAVAILABLE)), UNAVAILABLE_LINES.map(([before]) => before));
   });
 
   test("changes --json is not changed", async () => {

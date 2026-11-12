@@ -62,7 +62,7 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.config_default": "기본 위치의 설정 파일을 씁니다: {location}",
   "progress.turn": "{turn}턴",
   "progress.model_error": "{turn}턴 — 모델 호출 오류 ({kind})",
-  "progress.tool_allowed": "{tool} — 허용",
+  "progress.tool_allowed": "{tool} — 권한 규칙 검사 통과",
   "progress.tool_denied": "{tool} — 거부 ({permission}/{code})",
   "progress.tool_rejected": "{tool} — 호출 검사에서 거부 ({code})",
   "progress.tool_failed": "{tool} — 실패 ({code})",

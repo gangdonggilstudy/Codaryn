@@ -125,7 +125,7 @@ describe("i18n P0: no file or environment value in a message", () => {
     const en = createMessageCatalog("en");
     const ko = createMessageCatalog("ko");
     const outside = en.format("summary.changes", { count: 3 });
-    assert.equal(loose(ko)("progress.tool_allowed", { tool: outside }), "? — 허용");
+    assert.equal(loose(ko)("progress.tool_allowed", { tool: outside }), "? — 권한 규칙 검사 통과");
   });
 
   test("the fixed texts have no key shape, no privacy marker, no key assignment and no expanded location", () => {

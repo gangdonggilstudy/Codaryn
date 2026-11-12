@@ -63,7 +63,7 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.config_default": "using the config file in the default location: {location}",
   "progress.turn": "turn {turn}",
   "progress.model_error": "turn {turn} — model request failed ({kind})",
-  "progress.tool_allowed": "{tool} — allowed",
+  "progress.tool_allowed": "{tool} — passed the policy check",
   "progress.tool_denied": "{tool} — denied ({permission}/{code})",
   "progress.tool_rejected": "{tool} — rejected by a check of the call ({code})",
   "progress.tool_failed": "{tool} — failed ({code})",

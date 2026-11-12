@@ -1,7 +1,8 @@
 /**
  * U-18 (AXM-4): an allowed call that then failed is told, a command that ran and exited with a code
  * other than 0 or timed out is told (not a failed call, PM Q-2 (a)), and the end summary counts the
- * failed calls.
+ * failed calls. The allowed line says the call passed the policy check, so it is not read as the
+ * call's result (PM; "허용" was read as "done").
  */
 
 import assert from "node:assert/strict";
@@ -13,6 +14,14 @@ import { loose } from "./support.js";
 const LANGUAGES = ["en", "ko"] as const;
 
 describe("U-18: allowed, failed, and what a command did", () => {
+  test("the allowed line names the policy check, not a result", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    assert.equal(en["progress.tool_allowed"], "{tool} — passed the policy check");
+    assert.equal(ko["progress.tool_allowed"], "{tool} — 권한 규칙 검사 통과");
+    assert.ok(!/\ballowed\b|\bdone\b|succeed|success/i.test(en["progress.tool_allowed"]));
+    assert.ok(!/허용|완료|성공/.test(ko["progress.tool_allowed"]));
+  });
+
   test("a failed call: the tool, then failed and its code, as a denied call's line is made", () => {
     for (const language of LANGUAGES) {
       const t = MESSAGE_TEXTS[language];

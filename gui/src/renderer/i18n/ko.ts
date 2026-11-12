@@ -66,8 +66,10 @@ export const KO = {
   "error.adapter_host_exited": "엔진 프로세스가 끝났습니다. 앱을 다시 시작하세요.",
   "error.adapter_timeout": "엔진 프로세스가 제시간에 답하지 않았습니다.",
   "error.unknown_workspace": "작업 공간을 다시 여세요.",
+  "home.recentIn": "{folder} 폴더 안",
   "error.workspace_missing": "그 폴더를 찾을 수 없습니다.",
   "error.workspace_not_local": "네트워크 위치나 장치 경로의 폴더는 열 수 없습니다. 이 컴퓨터의 드라이브에 있는 폴더를 고르세요.",
+  "error.too_many_requests": "목록을 너무 자주 가져왔습니다. 잠시 뒤에 다시 하세요.",
   "error.unknown_entry": "그 항목은 더 이상 쓸 수 없습니다. 목록을 다시 가져오세요.",
   "error.missing_api_key": "API 키가 없습니다. 키를 등록한 뒤 앱을 다시 시작하세요.",
 

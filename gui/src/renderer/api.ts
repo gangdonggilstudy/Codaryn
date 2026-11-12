@@ -99,8 +99,8 @@ export function asOpen(value: unknown): OpenReply {
 export function asRecent(value: unknown): RecentView[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item): RecentView[] =>
-    isObj(item) && str(item["id"]) && HEX.test(item["id"]) && str(item["name"]) && str(item["path"]) && typeof item["exists"] === "boolean"
-      ? [{ id: item["id"], name: item["name"], path: item["path"], exists: item["exists"] }]
+    isObj(item) && str(item["id"]) && HEX.test(item["id"]) && str(item["name"]) && str(item["where"]) && typeof item["exists"] === "boolean"
+      ? [{ id: item["id"], name: item["name"], where: item["where"], exists: item["exists"] }]
       : [],
   );
 }

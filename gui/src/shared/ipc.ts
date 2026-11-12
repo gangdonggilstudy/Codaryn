@@ -171,11 +171,15 @@ export type DoctorReply =
  */
 export type OpenFolderReply = OpenReply | null;
 
-/** One remembered workspace. `path` is the folder the person chose; it is shown in the recent list only. */
+/**
+ * One remembered workspace: the folder's own name and (R21-I-1, R-10b I-2) the name of the folder it
+ * is in, "" for a drive root, so two folders of the same name can be told apart. Never the full
+ * path: a folder from a second start's command line was not chosen in this window's dialog.
+ */
 export interface RecentView {
   readonly id: string;
   readonly name: string;
-  readonly path: string;
+  readonly where: string;
   readonly exists: boolean;
 }
 

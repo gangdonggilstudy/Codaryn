@@ -111,6 +111,10 @@ test("workspaces: open, recent with fresh ids, open again from the list, forget,
 
     const recent = await workspaces.recent();
     assert.deepEqual(recent.map((item) => [item.name, item.exists]), [["two", true], ["one", true]]);
+    // R21-I-1: the window gets the folder's name and its parent folder's name, never the full path.
+    assert.deepEqual(recent.map((item) => item.where), [path.basename(dir), path.basename(dir)]);
+    assert.equal(JSON.stringify(recent).includes(dir.split(path.sep).slice(0, -1).join(path.sep)), false, "no full path in the recent views");
+    assert.equal(JSON.stringify(recent).includes(dir), false);
     const again = await workspaces.recent();
     assert.deepEqual(await workspaces.openRecent(recent[0]?.id), { ok: false, code: "unknown_recent" }, "ids of an earlier listing stop working");
     const reopened = await workspaces.openRecent(again[1]?.id);

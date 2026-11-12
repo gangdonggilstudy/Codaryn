@@ -177,6 +177,7 @@ const expected = [
   ["treeText", (v) => typeof v === "string" && !v.includes("FAKEFAKE") && !v.includes(second)],
   ["recentShown", (v) => v === "2"],
   ["recentNames", (v) => JSON.stringify(v) === JSON.stringify([secondName, firstName])],
+  ["recentText", (v) => typeof v === "string" && v.length > 0 && !v.includes(first) && !v.includes(second) && !v.includes(tmpdir())],
   ["stateFile", (v) => JSON.stringify(v) === JSON.stringify([secondName, firstName])],
   ["checks", (v) => v === "ok"],
   ["checksShown", (v) => typeof v === "number" && v >= 5],

@@ -40,7 +40,7 @@ import {
 import type { DoctorReply, InfoView, ModelsReply, OpenFolderReply, OpenReply, RecentView, SelectModelReply, SettingsReply, SettingsView, TreeReply } from "../shared/ipc.js";
 import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
-import type { ModelEntries } from "./model-entries.js";
+import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { RevertPreview, RunHistory } from "./history.js";
 import type { ChangesReply, PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
@@ -73,6 +73,8 @@ export interface IpcDeps {
   readonly initialWorkspace: () => { readonly handle: string; readonly name: string } | null;
   /** GU-6: the models of the last list, by entry id. */
   readonly modelEntries: ModelEntries;
+  /** R21-I-3: one model list at a time, a few a minute. */
+  readonly modelListLimit: ModelListLimit;
   /** Whether CODARYN_MODEL and CODARYN_LANG are set in the app's environment (never their values). */
   readonly envFacts: () => SettingsView["env"];
   /** GU-3: the one run at a time. */
@@ -236,8 +238,15 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
+    // R21-I-3: the provider's API is asked only within the limit (the screen asks on a press only).
+    if (!deps.modelListLimit.begin()) return { ok: false, code: "too_many_requests" };
     deps.modelEntries.clear();
-    const response = await state.host.call("listModels", { provider: parsed.provider }, MODELS_TIMEOUT_MS);
+    let response: Awaited<ReturnType<EngineHost["call"]>>;
+    try {
+      response = await state.host.call("listModels", { provider: parsed.provider }, MODELS_TIMEOUT_MS);
+    } finally {
+      deps.modelListLimit.end();
+    }
     if (!response.ok) return { ok: false, code: response.error.code };
     const list = toHostModelList(response.value);
     if (!list.ok) return list;

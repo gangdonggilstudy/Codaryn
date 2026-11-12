@@ -15,6 +15,8 @@ import { startGui } from "../../src/main/app.js";
 const GUI = fileURLToPath(new URL("../../../", import.meta.url));
 
 startGui({
+  // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
+  loopbackOnly: true,
   guiRoot: GUI,
   userDataDir: join(GUI, "build", "life-profile"),
   stateFile: null,

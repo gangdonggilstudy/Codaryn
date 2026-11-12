@@ -512,8 +512,34 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 
 **사람용 출력(stderr):** 사람이 읽는 글은 stderr에 나온다. stdout에는 결과 JSON 한 줄이 나온다. 다만 콘솔처럼 stdout과 stderr가 둘 다 터미널이면, `--json`이나 `--quiet`가 없는 한 그 줄을 내지 않는다(10절 "터미널에서").
 
-- 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
-- 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 가림 개수(가릴 값을 등록한 실행), 에이전트의 마지막 답(있을 때), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 허용됐지만 실패한 호출과 명령의 종료 코드·시간 초과(아래 "실패한 호출"), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
+- 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수, 실패한 호출 수(있을 때), 허용 방법, 사용량(턴, 도구 호출, 초), 가림 개수(가릴 값을 등록한 실행), 에이전트의 마지막 답(있을 때), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- **실패한 호출(U-18, AXM-4):** 정책이 허용했지만 해 보니 실패한 도구 호출은, 허용 줄 다음에 `<도구> — failed (<코드>)` 줄이 하나 더 붙는다. 실행이 끝나면 끝 요약에 `Failed calls: <수>`가 `Denied calls` 다음에 나온다.
+  - 명령이 0이 아닌 코드로 끝나거나 시간 한도에 걸린 것은 실패로 세지 않는다. 대신 줄 하나가 붙는다. 실행 자체는 된 것이기 때문이다.
+  - 거부된 호출(정책 밖, 인자 검사)은 실패로 세지 않는다. 거부 줄 하나뿐이다.
+  - 실패가 없는 실행의 출력은 예전과 같다(3절).
+  - 실제 출력(main `4010905`, stderr, 일부). 대본이 차례로 다음을 부른 실행이다: 없는 파일 읽기, 틀린 해시로 쓰기, 허용했지만 없는 실행 파일, `process.exit(3)`, 400 ms 한도를 넘는 명령, 정책 밖 명령(`git status`).
+
+    ```
+    codaryn: read file — allowed (read_file)
+    codaryn: read file — failed (not_found)
+    codaryn: write file — allowed (write_file)
+    codaryn: write file — failed (conflict)
+    codaryn: run command — allowed (run_command)
+    codaryn: run command — failed (spawn_failed)
+    codaryn: run command — allowed (run_command)
+    codaryn: command ran — exit code 3
+    codaryn: run command — allowed (run_command)
+    codaryn: command ran — stopped at its time limit
+    codaryn: run command — denied (command/command_not_allowed)
+    ```
+
+    끝 요약에는 `Denied calls: 1` 다음에 `Failed calls: 3`이 나왔다(그 사이의 `turn` 줄은 뺐다). 실행은 검증을 통과해 `done`(종료 0)이었다.
+  - 한국어 줄:
+    - `파일 읽기 — 실패 (not_found)`, `파일 쓰기 — 실패 (conflict)`, `명령 실행 — 실패 (spawn_failed)`
+    - `명령 실행됨 — 종료 코드 3`, `명령 실행됨 — 제한 시간이 지나 멈춤`
+    - 끝 요약 `거부된 호출: 1건`, `실패한 호출: 3건`
+  - 보고서는 10절 "보고서"를 본다.
 - **가림 개수(DR-52):** 가릴 값이 하나라도 등록된 실행이면 끝 요약의 사용량 다음 줄에 두 개수가 나온다. 개수만 나오고 값, 위치, 길이는 나오지 않는다. 진행 줄에는 없다. `--quiet`이면 이 줄도 없고, stdout JSON의 `masking`은 그대로다(10절).
 
   ```
@@ -655,7 +681,10 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 ```
 
 - 그 실행의 `result.json`과 `journal.jsonl`(가림본)만 읽어 Markdown 요약을 낸다. 아무것도 바꾸지 않고 잠금도 잡지 않는다.
-- 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차와 통과하지 않은 검증기의 근거. 검증기는 순번), 보호 대상, 변경, 에이전트의 마지막 답(있을 때. 검증된 사실이 아니라는 머리말과 함께, 8절), 사용량(한도 대비, 거부된 도구 호출 수), 검사하지 않은 범위.
+- 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차와 통과하지 않은 검증기의 근거. 검증기는 순번), 보호 대상, 변경, 에이전트의 마지막 답(있을 때. 검증된 사실이 아니라는 머리말과 함께, 8절), 사용량(한도 대비, 거부된 도구 호출 수, 실패한 도구 호출 수), 검사하지 않은 범위.
+- 사용량의 도구 호출 줄은 실패가 있으면 그 수를 함께 적는다(U-18). 8절 "실패한 호출"의 실행에서는 `- Tool calls: 5 of 12 (denied: 1, failed: 3)`였다. 실패가 없으면 `, failed`가 붙지 않아 예전과 같다(3절 체험의 `Tool calls: 3 of 8 (denied: 1)`).
+  - `result.json`이 없는 실행(`incomplete`)의 보고서는 기록에서 센 `- Denied tool calls: 1`과 `- Failed tool calls: 3` 줄을 적는다. 같은 실행의 `result.json`을 지우고 확인했다(main `4010905`).
+  - `report --json`과 `run`의 결과 JSON에는 실패 수가 없다.
 - `--json`은 `kind:"report"` 한 줄이다. `result`는 그 실행의 `result.json`(마지막 답은 `result.finalMessage`. 없으면 `null`이고 `incomplete`다), `journal`은 기록에서 읽은 요약이다.
 - 종료: `complete`(0)는 두 파일을 모두 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. 이때는 기록만으로 만들고 "Result: none"과 기록의 종료 기록을 적는다.
 - 오류(종료 2): 그 runId의 기록이 없으면 `run_not_found`, 기록을 읽거나 해석할 수 없으면 `invalid_run_record`, 작업 공간이 없으면 `workspace_not_found`다.
@@ -925,7 +954,19 @@ node --test dist/tests/live/anthropic-live.js
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).
   - 실행이 끝난 뒤 변경 기록 파일의 다이제스트를 지금 값으로 바꿔 넣으면, `changes`를 다른 가릴 값으로 볼 때 실행 때 가렸던 값이 그대로 보인다(DR-37 (b)). 드러나는 값은 작업 공간 파일에 이미 있는 값이다.
   - `report`는 실행 기록만큼만 믿을 수 있다.
-- **출력 언어:** `report`의 Markdown과 `models`의 표는 `CODARYN_LANG`과 관계없이 영어다. 오류 JSON의 `message`, `--json` 출력도 영어다. `plan`·`apply`·`review`·`changes`의 도움말과 적용·동의를 묻는 터미널 질문도 아직 영어다. `plan`의 본문은 섞여 있다: 머리 줄(`Plan of run …`), `Digest:` 줄, 동작 줄, 적용 명령 줄(`To apply it: …`), `Applied by run …` 줄은 영어이고, 기록 변경 경고, 에이전트의 설명 머리말, 적용할 수 없다는 줄, 다이제스트가 묶는 것을 말하는 끝 문장은 한국어 설정에서 한국어다(main `a191a50`, 18.3절).
+- **출력 언어:** main `4010905`의 실제 CLI를 `CODARYN_LANG=ko`로 돌려 다시 쟀다. 한국어 설정에서도 영어로 나오는 것은 다음이다.
+  - `report`의 Markdown. 실행 보고서와 적용 실행 보고서 모두다.
+  - `plan` 본문의 일부: 머리 줄(`Plan of run …`), `Digest:` 줄, 동작 줄, 적용 명령 줄(`To apply it: …`), `Applied by run …` 줄. 기록 변경 경고, 에이전트의 설명 머리말, 적용할 수 없다는 줄, 다이제스트가 묶는 것을 말하는 끝 문장은 한국어다(18.3절).
+  - `apply`의 터미널 질문 `Apply this plan? [y/N]`과, 그 앞에 보이는 계획 본문의 위 영어 줄들
+  - `changes`의 머리 줄(`changes of run …, masked with the secrets registered now (not the run's own masking)`)과 파일 줄(`== summary.md: created by the run; as the run left it`)
+  - 도움말의 사용법 줄(`usage: codaryn …`), 옵션 이름, 종료 코드 줄의 상태 낱말(`done 0`, `preview 0` 등)
+  - 오류 JSON의 `message`와 모든 `--json` 출력(고정)
+- 이번에 한국어로 나온 것:
+  - 진행 줄과 끝 요약(실패한 호출 줄 포함, 8절), `runs`, `revert`의 글, `doctor`, `init`
+  - 오류 설명
+  - `cleanup`의 안내 전부(U-34, 18.8절)
+  - 모든 명령의 도움말 설명, 옵션 설명, 종료 코드 설명. `plan`·`apply`·`review`·`changes`·`cleanup`의 도움말도 이제 한국어다(U-35)
+- 이번에 다시 재지 못한 것: `models`의 표(키와 모델 목록이 있어야 나온다. 예전 판에서는 영어였다), 하드 링크가 없는 드라이브의 동의 질문(예전 판에서는 영어였다), `review`의 결과 글.
 - **OS 언어 판단:** `CODARYN_LANG`과 설정의 `language`가 없으면 Node의 `Intl` 기본 로캘로 언어를 고른다. Windows에서는 이것이 표시 언어가 아니라 지역 형식을 따를 수 있다. 원하는 언어가 아니면 `CODARYN_LANG`이나 설정의 `language`로 고정한다(8절). Linux·macOS에서는 확인하지 않았다.
 - **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다(5초 안으로 맞으면 같은 프로세스로 본다). 끝난 실행의 잠금은 다음 실행이 회수한다. 시작 시각이 없는 잠금(이 확인이 생기기 전의 판이 쓴 것)은 프로세스 id만으로 판정하므로, 그 id를 다른 프로그램이 다시 쓰면 그 프로그램이 끝날 때까지 쥔 것으로 보인다(17절 "멈춘 실행의 잠금이 남아 막힐 때").
 - **심한 부하에서의 잠금:** 시작 시각 조회(Windows PowerShell)가 5초 안에 답하지 않으면 그 잠금을 "쥐고 있음"으로 본다. 그래서 컴퓨터가 몹시 바쁠 때는 이미 끝난 실행의 잠금인데도 `workspace_locked`(종료 6)로 끝날 수 있다. 두 실행이 함께 작업 공간을 쓰지 않게 하려고 안전한 쪽으로 끝내는 것이다. 잠시 뒤 다시 실행하고, 계속되면 `doctor`의 작업 공간 잠금 항목을 본다(17절).
@@ -1014,7 +1055,7 @@ node --test dist/tests/live/anthropic-live.js
 
 작업 종류는 실행에 쓸 도구, 고정 지시, 계획 확인 여부, 끝나는 방식을 묶은 것이다. 작업 종류를 고르지 않은 task는 지금까지와 같이 실행된다(도구 넷 `read_file`, `search_files`, `write_file`, `run_command`, 계획 없음, 검증기로 완료).
 
-새 명령 `plan`, `apply`, `review`, `changes`는 모델을 부르지 않는다. 도움말은 사용법 줄과 영어 한 문장이고, 적용과 동의를 묻는 터미널 질문도 아직 영어로만 나온다.
+새 명령 `plan`, `apply`, `review`, `changes`는 모델을 부르지 않는다. 도움말은 영어 사용법 줄 아래에 설명, 옵션, 종료 코드를 한국어·영어로 보인다(U-35). 적용을 묻는 터미널 질문은 아직 영어다(16절 "출력 언어").
 
 ### 18.1 작업 종류 고르기
 
@@ -1171,6 +1212,47 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T200121Z-da084c3e
 - 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등. 콘솔에서는 `--json`이나 `--quiet`일 때만, 10절 "터미널에서"), 같은 내용이 그 실행의 `result.json`이 된다.
 - 폐기한 파일은 `.codaryn\discarded\<적용 실행 id>\` 아래에 동작 번호 이름(`2`)으로 있다.
 - `runs`에는 적용 실행이 맨 위에 `3  done (done/verified)`로 나온다(`changes`는 적용한 동작 수). `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> at <시각>` 줄이 붙는다.
+- **실행 목록의 계획 실행 줄(U-16):** 결과 칸이 그 계획의 적용이 어떻게 되었는지 말한다. 판정은 적용 실행의 기록으로 한다(계약의 `planApplyStateOf`).
+
+  | 상태 | 결과 칸(영어) | 한국어 | 언제 |
+  | --- | --- | --- | --- |
+  | `applied` | `plan applied by run <적용 실행 id> (needs-input/plan_pending)` | `계획 적용됨(적용 실행 <id>)` | 적용 실행이 `done` |
+  | `unfinished` | `plan apply not finished (apply run <id>, verifier_failed) (needs-input/plan_pending)` | `계획 적용이 끝나지 않음(적용 실행 <id>, verifier_failed)` | 적용 실행이 `done`이 아닌 채 끝남. 괄호에 그 이유 |
+  | `applying` | `plan being applied, or its apply stopped (apply run <id>, no result yet) (needs-input/plan_pending)` | `계획 적용 중이거나 적용이 멈춤(적용 실행 <id>, 결과 없음)` | 적용 실행에 결과가 아직 없음 |
+  | `reverted` | `plan applied, then reverted (apply run <id>) (needs-input/plan_pending)` | `계획을 적용했다가 되돌림(적용 실행 <id>)` | 적용 실행의 되돌리기가 `complete` |
+  | `record_missing` | `no readable records of the apply run <id> (removed, or cannot be checked) (needs-input/plan_pending)` | `적용 실행 <id>의 기록 없음(지웠거나 확인할 수 없음)` | 그 적용 실행의 기록이 목록에 없음 |
+
+  - 적용한 적이 없는 계획 실행은 예전처럼 `needs input (needs-input/plan_pending)`(한국어 `확인 필요`)이다.
+  - 사전 점검에서 멈춘 적용(`plan_stale`)은 계획을 적용한 것으로 남기지 않는다. 그래서 계획 줄도 그대로다.
+  - `runs --json`의 계획 실행 항목에는 `appliedBy`(`runId`, `at`)만 있다. 상태 낱말은 사람용 글에만 있다.
+  - 확인(main `4010905`의 실제 CLI, 18.2절 예시, 두 언어). 상태마다 이렇게 만들었다.
+    - `applied`: 적용
+    - `unfinished`: 계획 뒤에 task에 실패하는 검증기를 더해 적용. 동작은 했고 `failed`/`verifier_failed`로 끝났다.
+    - `applying`: 적용 실행의 `result.json`을 지움
+    - `reverted`: 적용 실행을 되돌림
+    - `record_missing`: 적용 실행 폴더를 지움
+- **기록을 확인하지 못했다는 알림(U-8, U-29, U-33, DR-55):** 적용은 계획 실행의 기록이 바뀌지 않았는지 상태 디렉터리를 살펴 확인한다. 다 확인하지 못하면 적용을 멈추지는 않고 한 줄로 알린다. 까닭은 둘이고 글이 다르다.
+  - **적용 자신이 다 살펴보지 못함:** 상태 디렉터리가 너무 크다. 코드의 한도는 셋이다: 항목이 20,000개를 넘을 때, 지문을 뜰 파일의 합이 32 MiB를 넘을 때, 그 실행 자신의 기록 밖(다른 실행의 폴더, `.codaryn\` 바로 아래 파일 등)에 1 MiB를 넘는 파일이 있을 때(`src/store/state-guard.ts`, `src/contracts/state.ts`).
+
+    ```
+    The plan run's records could not be checked for changes, because the state directory is too large to check entirely; the apply was not stopped for this. Read the result, and run codaryn cleanup to make the state directory small enough to check.
+    ```
+
+    한국어는 `상태 디렉터리가 너무 커서 다 확인하지 못해, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하고, codaryn cleanup으로 상태 디렉터리를 확인할 수 있는 크기로 줄이세요.`다.
+  - **계획 뒤의 실행이 다 확인하지 못함:** 적용 자신의 확인은 온전하다. 그러나 계획 실행이나 그 뒤의 실행 가운데, 상태 디렉터리를 다 확인하지 못했거나 끝 기록 없이 멈춘 실행이 있다. 같은 초에 시작한 실행도 계획 뒤로 센다(DR-55).
+
+    ```
+    The plan run's records could not be checked for changes, because the plan run or a run after it could not check the state directory entirely or stopped part way; the apply was not stopped for this. Read the result.
+    ```
+
+    한국어는 `계획 실행이나 그 뒤의 실행 가운데 상태 디렉터리를 다 확인하지 못했거나 중간에 멈춘 실행이 있어, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하세요.`다.
+  - 둘 다 결과 JSON의 `noticeKinds`에 `plan_records_unchecked`가 들어간다. 뒤의 것만 `planRecordsUncheckedCause: "run_since_plan"`이 있다. 둘이 겹치면 앞의 것(적용 자신의 것)을 알린다.
+  - 적용 실행의 보고서에는 `## Notices` 절에 한 줄이 나온다. 뒤의 까닭이면 `` `a run since the plan was made could not check the state directory entirely, so the plan run's records may have changed without a mark (plan_records_unchecked)` ``였다.
+  - 다 살펴보지 못한 실행의 진행 줄은 `codaryn: part of the state directory was too large to check; the run goes on`이다. 한국어는 `상태 디렉터리 일부가 너무 커서 확인하지 못했습니다. 실행은 계속합니다`다.
+  - 확인(main `4010905`의 실제 CLI, 두 언어, 18.2절 예시):
+    - 앞의 까닭: 계획 실행 뒤 `.codaryn\`에 2 MiB 파일을 두고 적용했다.
+    - 뒤의 까닭: 그 파일을 둔 채 같은 작업 공간에서 다른 실행을 하나 마친 뒤, 파일을 지우고 적용했다.
+    - 두 적용 모두 `done`(종료 0)이었다.
 - `report --run <적용 실행 id>`는 적용 실행의 보고서다(실제 출력, 앞부분):
 
 ```
@@ -1291,6 +1373,14 @@ node dist/src/cli/main.js revert --workspace <작업 공간> --run <적용 실�
 ```
 
 - 적용 실행을 되돌리면 이동은 원래 자리로 옮기고(`moved_back`), 폐기는 폐기 보관함에서 되살린다(`restored_from_discard`). 뒤의 동작부터 되돌린다. 적용이 만든 폴더는 남긴다.
+- **계획 실행을 `revert`하면(U-16):** 계획 실행은 스스로 파일을 바꾸지 않으므로 되돌릴 것이 없다(`complete`, 종료 0). 그 계획을 적용한 실행이 있으면 stderr에 그렇다는 줄과, 위 실행 목록의 상태에 맞는 줄이 붙는다. 되돌리라고 하는 것은 `applied`와 `unfinished`일 때뿐이다. 실제 출력(main `4010905`, `--dry-run`, 상태마다 둘째 문장):
+  - 공통 첫 문장: `This run only made a plan and changed no file itself, so it has nothing of its own to put back and it is not marked as reverted.`
+  - `applied`, `unfinished`: `To undo the changes of its plan, revert the run that applied it (--run <적용 실행 id>).`
+  - `applying`: `The run that applies its plan (<id>) has no result yet: it is still going, or it stopped. Look at that run before you revert anything.`
+  - `reverted`: `The run that applied its plan (<id>) has already been reverted: nothing of it is left to undo.`
+  - `record_missing`: `The run that applied its plan (<id>) has no readable records in this workspace any more, so Codaryn cannot revert it.`
+  - 적용한 적이 없는 계획 실행이면 이 줄들이 없다.
+  - 한국어는 `이 실행은 계획만 만들었고 파일을 직접 바꾸지 않아, 되돌릴 것이 없으며 되돌린 것으로 표시하지 않습니다.`로 시작한다.
 - 원래 자리에 다른 파일이 생겼으면 덮어쓰지 않고 건너뛴다(`original_path_taken`). 옮긴 파일이 그 뒤 바뀌었으면 `changed_since_run`이다. 하나라도 건너뛰면 `partial`(종료 3)이다.
 - 적용이 동작 도중 멈췄으면, 시작 기록만 있는 동작도 실제 파일 상태를 보고 되돌린다. 상태가 분명하지 않으면 건드리지 않고 `changed_since_run`으로 알린다.
 - **계획 실행의 폴더가 필요하다.** 실제 경로는 계획 실행의 `plan.json`에서 읽는다.

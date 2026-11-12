@@ -198,6 +198,6 @@ describe("DR-43 (a): doctor and the progress lines", () => {
       limits: LIMITS,
       policyNarrowings: [{ kind: "verifiers_dropped", count: 1 }],
     } as unknown as JournalEvent;
-    assert.deepEqual(narrowingLines(event), ["the workflow's own checks leave out configured verifiers that take their ids: 1"]);
+    assert.deepEqual(narrowingLines(event), ["the task type's own checks leave out checks given in the config or task with the same id: 1"]);
   });
 });

@@ -50,9 +50,9 @@ describe("DR-43 (b): the run's start names what the workflow's rules left out", 
     const lines = await written();
     assert.equal(lines.length, 4, JSON.stringify(lines));
     assert.ok(lines.every((line) => line.startsWith(PROGRESS_PREFIX) && line.endsWith("\n")), JSON.stringify(lines));
-    assert.equal(lines[1], `${PROGRESS_PREFIX}the workflow's own rules leave out command rules of the configured policy: 2\n`);
-    assert.equal(lines[2], `${PROGRESS_PREFIX}the workflow's own rules leave out plan actions of the configured policy: 1\n`);
-    assert.equal(lines[3], `${PROGRESS_PREFIX}the workflow's own rules turn off restoring path tokens, which the configured policy allows\n`);
+    assert.equal(lines[1], `${PROGRESS_PREFIX}the task type's own rules leave out command rules of the configured policy: 2\n`);
+    assert.equal(lines[2], `${PROGRESS_PREFIX}the task type's own rules leave out plan actions of the configured policy: 1\n`);
+    assert.equal(lines[3], `${PROGRESS_PREFIX}the task type's own rules turn off restoring path tokens, which the configured policy allows\n`);
   });
 
   test("no narrowing: only the start line, as before", async () => {

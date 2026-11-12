@@ -56,8 +56,10 @@ import {
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_NAMES,
   REFUSAL_HINTS,
+  TOOL_FAILURE_HINTS,
   asRawText,
   failedToolContent,
+  toolFailureMessage,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -200,6 +202,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   INVALID_ARGS_LEAD,
   ...Object.values(ARGS_RULES),
   ...Object.values(REFUSAL_HINTS),
+  // U-50 (AXM-6): the hint after a tool runner's failure.
+  ...(Object.values(TOOL_FAILURE_HINTS) as string[]),
   ...FAILED_CONTENT_PARTS,
   WRITE_NOT_APPLIED_MESSAGE,
   VERIFIER_NOT_RUN_EVIDENCE,
@@ -316,6 +320,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const offeredWorkflow = offered.filter(isWorkflowToolName);
   /** GT-E3: set when `propose_plan` stored a plan; the run then ends as plan_pending. */
   let proposedPlan: ProposedPlan | null = null;
+  /** U-59 (AXM-15): the made-safe summary of the propose_plan call that stored proposedPlan. */
+  let planSummary: MaskedText | null = null;
   /** GT-E4: the masked checklist of a run that ends as awaiting_review. */
   let reviewChecklist: readonly MaskedText[] | null = null;
   const state = new RunState();
@@ -714,7 +720,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     name: WorkflowToolName,
     outcome: RawWorkflowToolOutcome,
   ): Promise<ToolResult | End> => {
-    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, outcome.message));
+    // U-50 (AXM-6): a runner's failure gets its code's hint (TOOL_FAILURE_HINTS), then the one form.
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, toolFailureMessage(outcome.code, outcome.message)));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,
@@ -806,6 +813,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (isEnd(result) || !outcome.ok) return result;
     if (!isProposedPlan(outcome.payload)) return UNKNOWN_OUTCOME;
     proposedPlan = { digest: outcome.payload.digest, actions: outcome.payload.actions.length };
+    // U-59 (AXM-15): the agent's description of this plan, masked and made safe as the last message.
+    const maskedSummary = mask(args.summary);
+    planSummary = maskedSummary === null ? null : (finalMessageOf(maskedSummary, (text) => privacy.mask(text))?.text ?? null);
     return result;
   };
 
@@ -940,7 +950,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (isEnd(outcome)) return outcome;
 
     // Mask before anything is recorded or returned to the model.
-    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, outcome.message));
+    // U-50 (AXM-6): a runner's failure gets its code's hint (TOOL_FAILURE_HINTS), then the one form.
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, toolFailureMessage(outcome.code, outcome.message)));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,
@@ -1376,6 +1387,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       ...(finalMessage !== null ? { finalMessage } : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
+      // U-59 (AXM-15): apart from `plan`, whose two fields stay.
+      ...(end.reason === "plan_pending" && proposedPlan !== null && planSummary !== null ? { planSummary } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),
     };
   } finally {

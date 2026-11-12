@@ -59,7 +59,7 @@ import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js
 import { jsonSyntaxPosition } from "./json-position.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { cliError } from "./run.js";
+import { argumentsError, cliError } from "./run.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   checkLocalPathSyntax,
@@ -477,7 +477,7 @@ function renderDoctorEnglish(output: DoctorOutput): string {
 
 export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> {
   const parsed = parseDoctorArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
   const platform = io.platform ?? process.platform;
 

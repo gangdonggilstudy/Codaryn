@@ -122,7 +122,8 @@ describe("R-16 L-1: a file a revert moved aside and could not put back is findab
 
 describe("R-12 L-2: an error's hint reaches the person's stderr too", () => {
   test("the quick form's config need has a hint and its own message id", () => {
-    assert.deepEqual([...CLI_ERROR_HINTS], ["quick_form_needs_task"]);
+    // U-37 added the reasons of argument, input and setting errors after it (g-u37-error-hints).
+    assert.equal(CLI_ERROR_HINTS[0], "quick_form_needs_task");
     assert.ok((MESSAGE_IDS as readonly string[]).includes("error.hint.quick_form_needs_task"));
     const output: CliErrorOutput = { schemaVersion: 1, kind: "error", code: "invalid_config", exitCode: 2, message: "m", hint: "quick_form_needs_task" };
     assert.equal(output.hint, "quick_form_needs_task");

@@ -686,6 +686,14 @@ export interface ApplyDeps {
    */
   readonly stateGuard?: StateGuard;
   /**
+   * U-29 (R-44 R44-L1): whether a run before this apply could not check the plan run's records (the
+   * store's StateUncheckedSince for `planRunId`). True, or a question that cannot be answered, adds
+   * the notice kind `plan_records_unchecked` as the apply's own limited check does, once; the apply
+   * goes on. Asked once, after the U-1 check. The CLI passes it; without it only the apply's own
+   * checks count (as before).
+   */
+  readonly planRecordsUnchecked?: () => Promise<boolean>;
+  /**
    * U-1 (R-33 R33-L3): whether the plan run (`planRunId`) has a records-changed mark, as the store's
    * `hasRecordsChangedMark` says (fail closed). The CLI passes it, and the app layer through the
    * CLI; without it the apply does not check (as before). Called once, right after `apply_started`.

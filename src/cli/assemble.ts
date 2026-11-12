@@ -5,7 +5,8 @@
 
 import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
-import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME, planApplyStateOf } from "../contracts/index.js";
+import type { PlanApplyState, RunId, RunListEntry, RunReason } from "../contracts/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
@@ -116,17 +117,14 @@ export type RevertCommandOutcome =
 export type RevertCommand = (input: RevertCommandInput) => Promise<RevertCommandOutcome>;
 
 /**
- * U-16, R-55 L-1: the apply run that used a plan run's plan, as the run list sees it.
- * - not_reverted: a checked entry without a revert record; it is the run to revert
- * - reverted / partly_reverted: its last revert was complete / partial
- * - missing: no entry of that id (its records were removed, by a cleanup for example)
- * - damaged: its records do not pass the checks
- * - unknown: the run list could not be read
+ * U-16, R-55 L-1: the apply run that used a plan run's plan, judged by the contract's one rule
+ * (planApplyStateOf over the run list), or `unknown` when the run list could not be read.
  */
-export type PlanApplyState = "not_reverted" | "reverted" | "partly_reverted" | "missing" | "damaged" | "unknown";
 export interface PlanApply {
   readonly runId: string;
-  readonly state: PlanApplyState;
+  readonly state: PlanApplyState | "unknown";
+  /** The apply run's reason, for `unfinished`. */
+  readonly reason?: RunReason;
 }
 
 export interface RevertCommandOptions {
@@ -298,23 +296,18 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       } catch {
         return {};
       }
-      let state: PlanApplyState;
       try {
-        const entry = (await (options.listRuns ?? storeListRuns)({ workspaceRoot })).runs.find((run) => run.runId === applyRunId);
-        state =
-          entry === undefined
-            ? "missing"
-            : entry.state !== "checked"
-              ? "damaged"
-              : entry.reverted === null
-                ? "not_reverted"
-                : entry.reverted.status === "complete"
-                  ? "reverted"
-                  : "partly_reverted";
+        const entries = (await (options.listRuns ?? storeListRuns)({ workspaceRoot })).runs;
+        // The plan run's own entry, naming the apply run applied.json names (the store's list gives
+        // appliedBy from the same file; this keeps the one the revert just read).
+        type Checked = Extract<RunListEntry, { readonly state: "checked" }>;
+        const own = entries.find((run): run is Checked => run.state === "checked" && run.runId === runId);
+        const judged = planApplyStateOf({ ...(own ?? ({} as Checked)), appliedBy: { runId: applyRunId as RunId, at: "" } }, entries);
+        if (judged === null) return {};
+        return { planApply: { runId: applyRunId, state: judged.state, ...(judged.reason === undefined ? {} : { reason: judged.reason }) } };
       } catch {
-        state = "unknown";
+        return { planApply: { runId: applyRunId, state: "unknown" } };
       }
-      return { planApply: { runId: applyRunId, state } };
     };
 
     if (dryRun && options.dryRun !== undefined) {

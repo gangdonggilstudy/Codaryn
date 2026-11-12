@@ -1162,4 +1162,4 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 ### 18.15 적용된 계획 실행의 되돌리기 (U-16, UXM-5, R-55 L-1)
 
 - 계획 실행은 스스로 파일을 바꾸지 않는다. 그 계획을 적용한 실행이 있고 이번 되돌리기가 되돌린 것도 건너뛴 것도 없으면 되돌리기 기록을 쓰지 않는다(목록에 "되돌림"이 붙지 않음). JSON 줄은 그대로다.
-- stderr의 안내 한 줄은 그 적용 실행이 실행 목록에서 어떤지에 따라 고른다: 목록에 있고 되돌리지 않았으면 그 실행을 되돌리라고(`--run <적용 실행>`), 되돌렸으면 이미 되돌렸다고, 일부만 되돌렸으면 그렇다고, 목록에 없으면 그 기록이 더는 없어 되돌릴 수 없다고, 기록이 검사를 통과하지 못하면 그렇다고, 목록을 읽지 못하면 그렇다고 말한다. 되돌리라는 안내는 첫 경우에만 한다. `--dry-run`도 같다.
+- stderr의 안내는 `revert.plan_only` 한 줄과, 그 적용 실행을 계약의 규칙 `planApplyStateOf`(실행 목록)로 판정한 상태의 줄이다. `PLAN_APPLY_STATES_TO_REVERT`(`applied`, `unfinished`)일 때만 그 실행을 되돌리라고 한다(`revert.plan_revert_apply`, `--run <적용 실행>`). `applying`(결과가 아직 없음), `reverted`(마지막 되돌리기가 complete), `record_missing`(목록에 없거나 손상)은 그렇다고만 말한다(`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`). 목록을 읽지 못하면 그렇다고 말한다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다. `--dry-run`도 같다.

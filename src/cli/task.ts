@@ -713,6 +713,22 @@ export interface QuickTaskInput {
   readonly config: CodarynConfig | null;
   /** G-A (DR-2): `--workflow <id>`; it becomes the label and the task's `workflowRef`. */
   readonly workflowRef?: string | null;
+  /**
+   * U-17 (UXM-3, AXM-14): for a command that runs no model and no verifier (`plan`, `review`).
+   * Limits the config file does not give are not an error: READ_ONLY_LIMITS stand in, and nothing
+   * runs under them. Limits that are given are still checked.
+   */
+  readonly readOnly?: boolean;
+}
+
+/** U-17: the limits of a quick form read by a command that runs nothing. Never a run's limits. */
+export const READ_ONLY_LIMITS: ResolvedTaskSpec["limits"] = { maxModelTurns: 1, maxToolCalls: 1, maxTotalTokens: 1, maxDurationMs: 1, maxRepairAttempts: 1, maxSameFailures: 1 };
+
+/** U-17: as boundedLimits, but a limit that is not set (the config's, or a workflow's partial ones) is no error. */
+function readOnlyLimits(provider: ModelProviderName, config: Partial<Limits> | undefined): ResolvedTaskSpec["limits"] {
+  const outcome = resolveBoundedLimits({ form: "quick", provider, task: undefined, config });
+  if (outcome.ok) return outcome.limits;
+  return outcome.message.includes("is not set") ? READ_ONLY_LIMITS : fail(outcome.message, outcome.code);
 }
 
 /**
@@ -733,7 +749,7 @@ export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
     model: { provider: quickProvider(input.config) },
     policy: input.config?.policy ?? DENY_ALL_POLICY,
     privacy: { secretEnv: [...(input.config?.secretEnv ?? [])] },
-    limits: boundedLimits("quick", quickProvider(input.config), undefined, input.config?.limits),
+    limits: input.readOnly === true ? readOnlyLimits(quickProvider(input.config), input.config?.limits) : boundedLimits("quick", quickProvider(input.config), undefined, input.config?.limits),
     verifiers: [...(input.config?.verifiers ?? [])],
   }));
 }

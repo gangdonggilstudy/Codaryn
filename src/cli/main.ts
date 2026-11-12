@@ -224,11 +224,12 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         listRuns,
         announceLatest,
       };
-      if (argv[0] === "plan") return plain(await runPlan(shared));
+      if (argv[0] === "plan") return plain(await runPlan({ ...shared, messages: human.messages }));
       if (argv[0] === "review") return plain(await runReview(shared));
       return plain(
         await runApply({
           ...shared,
+          messages: human.messages,
           human: human.output,
           writeProgress: (line) => writeHuman(line),
           // 6.4 1: at a terminal without --digest the plan is shown and a [y/N] question asked on stderr.

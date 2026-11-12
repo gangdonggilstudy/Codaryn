@@ -140,6 +140,8 @@ export type CreateApplyRecorders = (options: ApplyRecordersOptions) => ApplyReco
  * - `apply` (U-1, R-33 R33-L3): a marked plan run is not applied; its plan may differ from what a
  *   person saw. The caller refuses it as `plan_records_changed` before asking; the engine checks
  *   again under the lock (ApplyDeps.planRecordsChanged) and ends as `failed`/`plan_stale`.
+ * - `plan` (U-14, AXM-2): shown with `recordsChanged`, a warning first and no command to apply it;
+ *   the model's summary is left out.
  * - A mark file that cannot be read or checked counts as a mark (fail closed).
  */
 export const RECORDS_CHANGED_FILE_NAME = "records-changed.json";

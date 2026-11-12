@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import {
-  ANTHROPIC_KEY_PATTERN_SOURCE,
+  ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
   CODARYN_CONFIG_ENV,
   CODARYN_MODEL_ENV,
   MODEL_PLACEHOLDER,
@@ -19,7 +19,7 @@ import {
   STATE_DIR_NAME,
 } from "../../src/contracts/index.js";
 import type { CliErrorCode } from "../../src/contracts/index.js";
-import { ANTHROPIC_LIMITS, fakeApiConfig, writeAnthropicTask, writeConfigFile } from "../fixtures/anthropic.js";
+import { ANTHROPIC_LIMITS, ANTHROPIC_REFUSED_SHAPE, fakeApiConfig, writeAnthropicTask, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { installCopy } from "../fixtures/self-dev.js";
@@ -211,8 +211,8 @@ test(`${MOCK_LABEL} E-8 한 줄 실행(N-9): 현재 디렉터리가 작업 공�
   await t.test("목표에 키 모양 값이 있으면 key_in_file, 요청 0건", async (st) => {
     const s = await setup(st);
     writeUserConfig(s.user, quickConfig(s, MODEL_DEFAULT));
-    const keyShaped = ["sk", "ant", "codaryn0test0shape0only"].join("-");
-    assert.ok(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(keyShaped), "test assumption: the value has the key shape");
+    const keyShaped = ANTHROPIC_REFUSED_SHAPE;
+    assert.ok(new RegExp(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE).test(keyShaped), "test assumption: the value has the key shape");
     const run = await runIn(s, s.sb.workspace, ["run", `이 값을 쓴다 ${keyShaped}`], env(s));
     expectCliError(run, "key_in_file");
     assertNotPrinted(run, [keyShaped], "the key-shaped value");

@@ -3,6 +3,7 @@
  * stdout, left out with `--quiet`. main.ts and run.ts connect it (N-A).
  */
 
+export { HIDDEN_PATH, HUMAN_PREFIX, REVERT_MAX_LISTED, SUMMARY_MAX_PATHS, createHumanOutput } from "./output.js";
 export { TOP_LEVEL_POSITION, closestKnownName, fieldPath, isFieldName } from "./fields.js";
 export type { FieldSegment } from "./fields.js";
 export { jsonSyntaxErrorOffset, jsonSyntaxErrorPosition, positionOf } from "./json-position.js";

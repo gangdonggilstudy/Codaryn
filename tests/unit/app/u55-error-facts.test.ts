@@ -7,8 +7,8 @@
  *   keeps its own. The exit code and the other fields stay as they were.
  * - A run's result reaches the run handle's `done` with the engine's `modelError` as it is (kind,
  *   turn, retryable; retryable absent when it cannot be told).
- * Reproduced first (todo until toCliError fills the facts). Real runs through the app (scripted
- * model), the real store. Fake values only.
+ * Reproduced first (0d8e566, todo); toCliError fills the facts now. Real runs through the app
+ * (scripted model), the real store. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -19,18 +19,17 @@ import { appError, createCodarynApp, fromCliError, toCliError } from "../../../s
 import { runTask as engineRunTask } from "../../../src/engine/index.js";
 import { WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-55: toCliError does not fill category and retryable yet" };
 const CODES = Object.keys(CLI_ERROR_EXIT_CODES) as CliErrorCode[];
 
 describe("U-55: the app layer's CLI error output carries category and retryable", () => {
-  test("every code: cliErrorFacts(code) added, nothing else changed", TODO, () => {
+  test("every code: cliErrorFacts(code) added, nothing else changed", () => {
     for (const code of CODES) {
       const output = toCliError(appError(code, "fixed text"));
       assert.deepEqual(output, { schemaVersion: 1, kind: "error", code, message: "fixed text", ...cliErrorFacts(code), exitCode: CLI_ERROR_EXIT_CODES[code] }, code);
     }
   });
 
-  test("model_list_failed without the listing's model error: retryable left out (unknown), the category given", TODO, () => {
+  test("model_list_failed without the listing's model error: retryable left out (unknown), the category given", () => {
     const output = toCliError(appError("model_list_failed", "fixed text")) as unknown as Record<string, unknown>;
     assert.equal(output["category"], "environment");
     assert.equal("retryable" in output, false);

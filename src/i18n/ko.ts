@@ -77,6 +77,10 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.plan_item_failed": "동작 {number}번 — 실패: {problem}",
   "progress.state_changed": "실행이 아닌 것이 상태 디렉터리를 바꿈: {count}개 — 실행을 멈춥니다",
   "progress.state_unchecked": "상태 디렉터리 일부가 너무 커서 확인하지 못했습니다. 실행은 계속합니다",
+  "progress.workflow_policy.commands_dropped": "작업 종류(workflow) 자체 규칙 때문에 설정한 정책의 명령 규칙 {count}개를 뺐습니다",
+  "progress.workflow_policy.commands_narrowed": "작업 종류(workflow) 자체 규칙 때문에 설정한 정책의 명령 규칙 {count}개를 좁혔습니다",
+  "progress.workflow_policy.plan_actions_dropped": "작업 종류(workflow) 자체 규칙 때문에 설정한 정책의 계획 동작 {count}개를 뺐습니다",
+  "progress.workflow_policy.restore_path_tokens_off": "작업 종류(workflow) 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다",
   "outcome.pass": "통과",
   "outcome.fail": "미통과",
   "outcome.inconclusive": "판단 불가",
@@ -248,6 +252,10 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.commands.none": "허용한 명령도 명령 검증기도 없습니다",
   "doctor.commands.extra_args_with_plan":
     "추가 인수를 받는 명령 규칙 {count}개가 계획 행동(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
+  "doctor.workflow_policy.commands_dropped": "이 작업 종류(workflow)로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
+  "doctor.workflow_policy.commands_narrowed": "이 작업 종류(workflow)로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
+  "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류(workflow)로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",
+  "doctor.workflow_policy.restore_path_tokens_off": "이 작업 종류(workflow)로 실행하면, 설정한 정책이 허용해도 경로 토큰을 복원하지 않습니다",
   "doctor.commands.ok": "실행 파일 {count}개를 찾았고 실행 규칙이 허용합니다",
   "doctor.commands.ok_unchecked": "실행 파일 {count}개를 찾았습니다. 실행 규칙은 작업 공간이 있어야 확인할 수 있어 확인하지 않았습니다",
   "doctor.commands.problems":

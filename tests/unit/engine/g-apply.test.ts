@@ -796,3 +796,38 @@ describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refuse
     }
   });
 });
+
+describe("U-29 (R-44 R44-L1): an apply tells what a run before it could not check", () => {
+  const UNCHECKED = "plan_records_unchecked";
+
+  test("Y1: a run between the plan and the apply was limited, the apply's own checks are not: told once, goes on", async () => {
+    const run = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard() });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.noticeKinds], ["done", "verified", [UNCHECKED]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("a question that cannot be answered counts as unchecked (fail closed)", async () => {
+    const run = setup({
+      planRecordsUnchecked: async () => {
+        throw new Error("journal unreadable");
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.noticeKinds], ["done", [UNCHECKED]]);
+  });
+
+  test("earlier and own checks both limited: the kind and its notice once", async () => {
+    const run = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual(result.noticeKinds, [UNCHECKED]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("nothing earlier, or not asked: nothing is added", async () => {
+    for (const run of [setup({ planRecordsUnchecked: async () => false }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+});

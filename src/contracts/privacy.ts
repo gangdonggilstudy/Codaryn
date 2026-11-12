@@ -78,6 +78,14 @@ export interface PrivacyGateway {
    * With `original: null` any token is a violation.
    */
   rebuildDocument(request: RebuildDocumentRequest): RebuildDocumentOutcome;
+
+  /**
+   * DR-52 (AXM-17): how many distinct values the gateway was made with (PrivacyGatewayOptions.secrets,
+   * the key among them when it was registered); a value's variants do not count apart. A count only,
+   * never a value or a length. createPrivacyGateway sets it; optional only so test fakes may leave it
+   * out (then EngineResult.masking is absent).
+   */
+  readonly registeredValues?: number;
 }
 
 export interface PrivacyGatewayOptions {

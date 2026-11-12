@@ -285,6 +285,11 @@ export interface MarkPlanAppliedRequest {
  * must exist and be plain; otherwise it rejects and nothing is created.
  */
 export async function markPlanApplied(request: MarkPlanAppliedRequest): Promise<"marked" | "already_applied"> {
+  return markPlanAppliedWith(request);
+}
+
+/** DR-38: markPlanApplied that notes the applied.json it creates (createApplyRecorders). */
+export async function markPlanAppliedWith(request: MarkPlanAppliedRequest, notes?: RunWriteNotes): Promise<"marked" | "already_applied"> {
   const { workspaceRoot, planRunId, applyRunId, at } = request;
   assertRunId(planRunId);
   assertRunId(applyRunId);
@@ -292,5 +297,9 @@ export async function markPlanApplied(request: MarkPlanAppliedRequest): Promise<
   const dir = runDir(workspaceRoot, planRunId);
   if (!(await isOwnRunDir(workspaceRoot, planRunId))) throw new Error("the plan run has no directory of its own; nothing was written");
   const record: PlanAppliedRecord = { schemaVersion: 1, kind: "plan_applied", planRunId, applyRunId, at };
-  return (await createExclusive(join(dir, PLAN_APPLIED_FILE_NAME), `${JSON.stringify(record)}\n`)) ? "marked" : "already_applied";
+  const text = `${JSON.stringify(record)}\n`;
+  const file = join(dir, PLAN_APPLIED_FILE_NAME);
+  if (!(await createExclusive(file, text))) return "already_applied";
+  if (notes !== undefined) await notes.file(file, { sha256: sha256Hex(text), size: Buffer.byteLength(text, "utf8") });
+  return "marked";
 }

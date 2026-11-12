@@ -63,7 +63,7 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
   await rename(temporary, target);
 }
 export { listParkedFiles } from "./apply-revert.js";
-export { createRunRecorders } from "./state-guard.js";
-export type { RunRecorders, RunRecordersOptions, StateGuardLimits } from "./state-guard.js";
+export { createApplyRecorders, createRunRecorders } from "./state-guard.js";
+export type { ApplyRecorders, RunRecorders, RunRecordersOptions, StateGuardLimits } from "./state-guard.js";
 export { hasRecordsChangedMark } from "./marks.js";
 export { applyCleanup, planCleanup, summarizeState } from "./cleanup.js";

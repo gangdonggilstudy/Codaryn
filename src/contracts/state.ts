@@ -9,6 +9,10 @@
  * process of the same user before or after the run remains a known limit (DR-37 (b)).
  */
 
+import type { ChangeRecorder } from "./changes.js";
+import type { Clock } from "./engine.js";
+import type { Journal } from "./journal.js";
+import type { ApplyJournal, PlanRecorder } from "./plan.js";
 import type { MaskedText, RawText } from "./text.js";
 
 /** When the engine checks (EngineDeps.stateGuard). */
@@ -70,6 +74,59 @@ export interface StateGuard {
    */
   markRecordsChanged(changed: readonly MaskedText[]): Promise<void>;
 }
+
+/** For tests only: smaller limits than MAX_STATE_ENTRIES and MAX_STATE_HASH_BYTES. */
+export interface StateGuardLimits {
+  readonly maxEntries?: number;
+  readonly maxHashBytes?: number;
+}
+
+export interface RunRecordersOptions {
+  /** Real absolute path of the workspace root. */
+  readonly workspaceRoot: string;
+  readonly runId: string;
+  readonly clock: Clock;
+  readonly limits?: StateGuardLimits;
+}
+
+/** A run's journal and recorders, and the state guard that knows what they write. */
+export interface RunRecorders {
+  readonly journal: Journal;
+  readonly changeRecorder: ChangeRecorder;
+  readonly planRecorder: PlanRecorder;
+  /** EngineDeps.stateGuard for this run. */
+  readonly stateGuard: StateGuard;
+}
+
+/**
+ * Signature of `createRunRecorders`, exported by `src/store/index.ts` (DR-38, store 93eed67). The
+ * CLI and the app make a run's journal, change recorder and plan recorder with it, not with the three
+ * factories apart (a guard knows only the writes of the writers it was made with), and pass
+ * `stateGuard` to the engine as EngineDeps.stateGuard.
+ */
+export type CreateRunRecorders = (options: RunRecordersOptions) => RunRecorders;
+
+export interface ApplyRecordersOptions extends RunRecordersOptions {
+  /** The plan run the apply carries out (its directory gets PLAN_APPLIED_FILE_NAME). */
+  readonly planRunId: string;
+}
+
+/** An apply run's journal and its applied mark, and the state guard that knows what they write. */
+export interface ApplyRecorders {
+  readonly journal: ApplyJournal;
+  /** ApplyDeps.markApplied: writes PLAN_APPLIED_FILE_NAME in the plan run's directory exclusively. */
+  markApplied(): Promise<"marked" | "already_applied">;
+  /** ApplyDeps.stateGuard for this apply run. */
+  readonly stateGuard: StateGuard;
+}
+
+/**
+ * Signature of `createApplyRecorders`, exported by `src/store/index.ts` (DR-38, for apply runs). The
+ * CLI and the app make an apply run's journal and markApplied with it and pass `stateGuard` as
+ * ApplyDeps.stateGuard. The executor's moves into the run's discarded-files folder are not known to
+ * the guard; the engine takes a new base after the actions instead (ApplyDeps.stateGuard).
+ */
+export type CreateApplyRecorders = (options: ApplyRecordersOptions) => ApplyRecorders;
 
 /**
  * `runs/<runId>/records-changed.json`: the run's records were changed by something other than the

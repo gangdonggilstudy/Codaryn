@@ -453,6 +453,16 @@ export const FIXED_MESSAGES = {
   "cleanup.confirm.discarded": { files: "count", bytes: "count" },
   "cleanup.done": { runs: "count", folders: "count", bytes: "count" },
   "cleanup.plan_changed": {},
+  // DR-44 (R-34): shown after cleanup.confirm.runs when above 0: how many of those run records are of
+  // runs not reverted or only partly reverted (CleanupPlan.totals.runs.notReverted), which go only with
+  // their own confirmation (CLI `--include-not-reverted`; the GUI asks apart). Not a question.
+  "cleanup.confirm.not_reverted": { count: "count" },
+  // DR-44 (d): folders an earlier cleanup moved aside and could not remove entirely (StateSummary.
+  // leftovers, CleanupPlan.totals.leftovers, the removed ones): the summary line (when above 0), the
+  // header of their items in a plan (they are always in it), and the outcome's line.
+  "cleanup.summary.leftovers": { count: "count", bytes: "count" },
+  "cleanup.confirm.leftovers": { count: "count", bytes: "count" },
+  "cleanup.done_leftovers": { count: "count", bytes: "count" },
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -482,6 +492,7 @@ export const FIXED_MESSAGES = {
   "progress.workflow_policy.commands_narrowed": { count: "count" },
   "progress.workflow_policy.plan_actions_dropped": { count: "count" },
   "progress.workflow_policy.restore_path_tokens_off": {},
+  "progress.workflow_policy.verifiers_dropped": { count: "count" },
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
@@ -611,6 +622,7 @@ export const FIXED_MESSAGES = {
   "doctor.workflow_policy.commands_narrowed": { count: "count" },
   "doctor.workflow_policy.plan_actions_dropped": { count: "count" },
   "doctor.workflow_policy.restore_path_tokens_off": {},
+  "doctor.workflow_policy.verifiers_dropped": { count: "count" },
   "doctor.install_dir.unknown_env": {},
   "doctor.install_dir.not_found": {},
   "doctor.install_dir.ok": {},

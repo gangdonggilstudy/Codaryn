@@ -26,6 +26,10 @@ import type {
   RawVerifierResult,
   PrivacyGateway,
   ResolvedPlanAction,
+  StateComparison,
+  StateFingerprint,
+  StateGuard,
+  StateTier,
   StoredPlanAction,
   VerifierOutcome,
 } from "../../../src/contracts/index.js";
@@ -653,5 +657,69 @@ describe("applyPlan: verification", () => {
     assert.deepEqual([result.status, result.reason], ["needs-input", "protected_changed"]);
     assert.deepEqual(result.protectedChanged, ["tests/a.test.ts"]);
     assert.equal(result.applied.length, 2);
+  });
+});
+
+/** DR-38: numbers each capture of a tier and reports a change on the capture `change` names. */
+class FakeApplyStateGuard implements StateGuard {
+  readonly captures: { run: number; state: number } = { run: 0, state: 0 };
+  readonly marked: MaskedText[][] = [];
+  constructor(private readonly options: { change?: { tier: StateTier; at: number; paths: string[] }; failCapture?: boolean } = {}) {}
+  async capture(tier: StateTier): Promise<StateFingerprint> {
+    if (this.options.failCapture === true) throw new Error("no fingerprint");
+    this.captures[tier] += 1;
+    return { tier, n: this.captures[tier] } as unknown as StateFingerprint;
+  }
+  compare(before: StateFingerprint, after: StateFingerprint): StateComparison {
+    const { change } = this.options;
+    const to = (after as unknown as { n: number }).n;
+    const from = (before as unknown as { n: number }).n;
+    return { changed: change !== undefined && change.tier === after.tier && to === change.at && from !== to ? (change.paths as never) : [], limited: false };
+  }
+  async markRecordsChanged(changed: readonly MaskedText[]): Promise<void> {
+    this.marked.push([...changed]);
+  }
+}
+
+describe("DR-38: the apply run checks the run records with its state guard (ApplyDeps.stateGuard)", () => {
+  const SHOWN = "runs/20261112T000000Z-0000aaaa/snapshots/shown-0.json";
+  const checks = (run: Setup) => run.journal.ofType("state_checked");
+
+  test("nothing changed: recorded at the start and the end; tier run is taken afresh after the actions", async () => {
+    const guard = new FakeApplyStateGuard();
+    const run = setup({ stateGuard: guard });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(checks(run).map((c) => c.phase), ["run_start", "run_end"]);
+    assert.deepEqual(guard.captures, { run: 3, state: 4 }, "start: state; round: run+state twice; end: run+state");
+    assert.deepEqual(result.stateChanged, []);
+  });
+
+  test("a verifier that changed the records ends the apply failed/state_changed; the moves stay", async () => {
+    const guard = new FakeApplyStateGuard({ change: { tier: "run", at: 2, paths: [SHOWN] } });
+    const run = setup({ stateGuard: guard });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
+    assert.deepEqual(checks(run).at(-1), { type: "state_checked", phase: "after_verify", changed: [SHOWN], limited: false });
+    assert.deepEqual(guard.marked, [[SHOWN]]);
+    assert.deepEqual(result.stateChanged, [SHOWN]);
+    assert.deepEqual(run.executor.applied, [0, 1], "the actions made stay (revert undoes them)");
+  });
+
+  test("a change elsewhere in the state directory found before the round: the verifiers do not run", async () => {
+    const guard = new FakeApplyStateGuard({ change: { tier: "state", at: 2, paths: ["runs/20261111T000000Z-0000eeee/result.json"] } });
+    const run = setup({ stateGuard: guard });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
+    assert.equal(checks(run).at(-1)?.phase, "before_verify");
+    assert.deepEqual(run.verifiers.runs, []);
+  });
+
+  test("a capture that cannot be made ends the apply failed/state_changed; no guard changes nothing", async () => {
+    const result = await applyPlan(setup({ stateGuard: new FakeApplyStateGuard({ failCapture: true }) }).deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
+    const plain = setup();
+    const done = await applyPlan(plain.deps);
+    assert.deepEqual([checks(plain).length, Object.hasOwn(done, "stateChanged")], [0, false]);
   });
 });

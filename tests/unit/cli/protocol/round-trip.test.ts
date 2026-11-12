@@ -2,7 +2,8 @@
  * Round trip of the line protocol: what the CLI side writes (src/cli/protocol) is read by the VS
  * Code extension core (vscode/src/core) to the same events and state, and the core's answer lines
  * are read back by the CLI side. One case runs a real scripted run through the app layer, with a
- * command that forges journal lines (R-4 H-1): they never reach the protocol. Fake values only.
+ * command that forges journal lines (R-4 H-1): they never reach the protocol, and since DR-38 the
+ * engine's state guard ends that run as failed/state_changed. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -81,7 +82,8 @@ describe("a real run over the protocol", () => {
     stderr = startedLine(handle.runId) + stderr;
     const outcome = await handle.done;
     const result = (outcome as { result: EngineResult }).result;
-    assert.equal(result.status, "done");
+    // DR-38: the command changed the run's records, so the engine's state guard ends the run.
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
 
     assert.equal(stderr.includes(FAKE_SECRET), false, "no secret on the protocol");
     assert.equal(stderr.includes('"text":"forged:'), false, "no forged record on the protocol");

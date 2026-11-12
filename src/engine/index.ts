@@ -23,10 +23,10 @@
  *   list of paths to record.
  *
  * General tasks (stage 4, GT-E1 to GT-E5, design general-tasks.md 4.3). The engine reads the task's
- * workflow settings (`workflowSettingsOf`) and never a workflow id. A task without them gets the
+ * task type settings (`workflowSettingsOf`) and never a task type id. A task without them gets the
  * legacy settings, and its requests, records and result are as before.
- * - GT-E1: only the settings' tools are offered (built-in ones in `tools`, workflow tools in
- *   `workflowTools`) and may be called; any other name is `unknown_tool`. Workflow tools take the
+ * - GT-E1: only the settings' tools are offered (built-in ones in `tools`, task type tools in
+ *   `workflowTools`) and may be called; any other name is `unknown_tool`. Task type tools take the
  *   same checks and run through `ToolRunner.executeWorkflowTool`.
  * - GT-E2: `instructions` follow the fixed prompt under INSTRUCTIONS_LABEL, masked with it.
  * - GT-E3, GT-E5: with `plan: "apply"` only read tools and the tool whose descriptor says
@@ -149,8 +149,10 @@ export const SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * GT-E2: the label between the fixed system prompt and a workflow's instructions. The whole system
- * text is masked before it is sent or recorded.
+ * GT-E2: the label between the fixed system prompt and a task type's instructions. The whole system
+ * text is masked before it is sent or recorded. DR-50 (U-28): the model reads the label, not a
+ * person, so its words stay as they are; changing them changes the requests of every run whose
+ * task type has instructions.
  */
 export const INSTRUCTIONS_LABEL = "Workflow instructions:";
 /** GT-E3: a plan run whose model ended without a stored plan. */
@@ -306,7 +308,7 @@ function isProposedPlan(payload: unknown): payload is { readonly digest: Content
 export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> => {
   const { task, runId, model, privacy, policy, tools, verifiers, journal, clock, signal, integrity } = deps;
   const limits = task.limits;
-  // GT-E1 to GT-E4: everything a workflow changes comes from the task's explicit settings.
+  // GT-E1 to GT-E4: everything a task type changes comes from the task's explicit settings.
   // A task without them gets the legacy settings, so its requests, records and result stay as before.
   const settings = workflowSettingsOf(task);
   const offered = offeredTools(settings.tools, settings.plan);
@@ -683,7 +685,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   };
 
   /**
-   * Runs a checked workflow tool call. Like `execute`: when the runner throws, a read is retried
+   * Runs a checked task type tool call. Like `execute`: when the runner throws, a read is retried
    * once and anything else (the plan tool writes plan.json) is an unknown outcome.
    */
   const executeWorkflow = async (
@@ -706,7 +708,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     }
   };
 
-  /** Masks, records and returns the outcome of an executed workflow tool call. */
+  /** Masks, records and returns the outcome of an executed task type tool call. */
   const finishWorkflowCall = async (
     call: ToolCall,
     name: WorkflowToolName,
@@ -807,9 +809,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     return result;
   };
 
-  /** GT-E1: a workflow tool call. Same order as a built-in call: validate, check, restore, check, run. */
+  /** GT-E1: a task type tool call. Same order as a built-in call: validate, check, restore, check, run. */
   const handleWorkflowCall = async (call: ToolCall, name: WorkflowToolName): Promise<ToolResult | End> => {
-    // A runner that cannot run workflow tools answers them as unknown (contract ToolRunner).
+    // A runner that cannot run task type tools answers them as unknown (contract ToolRunner).
     if (tools.executeWorkflowTool === undefined) return unknownTool(call);
     const descriptor = WORKFLOW_TOOLS[name];
     if (descriptor.endsRun === "plan") {
@@ -984,7 +986,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
   /** Masks the fixed instructions and the goal, records run_started and opens the conversation. */
   const start = async (): Promise<MaskedText | End> => {
-    // GT-E2: a workflow's instructions follow the fixed prompt under a fixed label, masked as one text.
+    // GT-E2: a task type's instructions follow the fixed prompt under a fixed label, masked as one text.
     const instructions = settings.instructions;
     const systemText =
       instructions === null || instructions.trim().length === 0
@@ -995,7 +997,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     const workflow = mask(task.workflow);
     if (system === null || goal === null || workflow === null) return MASKING_FAILED;
 
-    // run_started carries the workflow settings only when the task has any, so a legacy run's
+    // run_started carries the task type settings only when the task has any, so a legacy run's
     // record is unchanged.
     const hasWorkflow =
       task.workflowRef !== undefined ||
@@ -1023,7 +1025,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     // name holding a registered secret is left out rather than recorded as a token).
     const profile =
       typeof task.profile === "string" && PROFILE_NAME_PATTERN.test(task.profile) && mask(task.profile) === task.profile ? task.profile : null;
-    // DR-41: what the workflow's rules left out of the given policy, for the run's start lines.
+    // DR-41: what the task type's rules left out of the given policy, for the run's start lines.
     const policyNarrowings = recordableNarrowings(task.policyNarrowings);
     await record({
       type: "run_started",
@@ -1064,7 +1066,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
       // W-1: this turn and its tool calls may change protected material.
       sinceCheck = "model";
-      // GT-E1: the offered tools. A legacy task offers TOOL_NAMES and no workflow tool, so its
+      // GT-E1: the offered tools. A legacy task offers TOOL_NAMES and no task type tool, so its
       // request has the same shape as before (no workflowTools field).
       const request =
         offeredWorkflow.length > 0

@@ -3,7 +3,7 @@
  * decisions GT-D4, GT-D5, GT-D13 and, after the R-1 review, DR-1, DR-5, DR-6, DR-9
  * (docs/work-orders/phase-4-5-design.md).
  *
- * A task whose workflow settings say `plan: "apply"` runs in two steps that a person joins. The
+ * A task whose task type settings say `plan: "apply"` runs in two steps that a person joins. The
  * approval happens between them, never inside a run (DR-1): there is no plan question while a run
  * is going.
  * 1. The plan run. The model may read and call `propose_plan` once. The engine judges every action
@@ -592,7 +592,7 @@ export interface ApplyJournal {
 /**
  * The apply run (`applyPlan`, `src/engine`, G-B). The CLI (or the app layer) has already loaded
  * the plan, checked the digest and that the plan is not applied, resolved the task given to the
- * apply (its workflow settings must say `plan: "apply"`; otherwise `run_not_plan`), registered the
+ * apply (its task type settings must say `plan: "apply"`; otherwise `run_not_plan`), registered the
  * secrets as `run` does, checked (DR-28) that every action masked with those secrets matches its
  * `shown` (planActionShownMatches; otherwise `plan_secrets_differ` before anything is shown, asked
  * or started), checked (U-1) that the plan run has no records-changed mark (otherwise

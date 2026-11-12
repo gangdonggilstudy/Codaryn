@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -399,6 +399,11 @@ startGui({
       const directRunId = await newResult(beforeDirect);
       await js("document.getElementById('run-view-plan')?.click(); true");
       results["directPlanShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      // U-32 (U-14 AXM-15): the model's summary under the agent's-words label, after the actions,
+      // drawn by the engine's quoteModelText.
+      results["planAgentWords"] = await js(
+        "(() => { const ids = [...(document.getElementById('plan')?.children ?? [])].map((c) => c.id); return { label: document.querySelector('#plan-agent-words .notice')?.textContent ?? null, text: document.getElementById('plan-agent-words-text')?.textContent ?? null, afterActions: ids.indexOf('plan-actions') >= 0 && ids.indexOf('plan-actions') < ids.indexOf('plan-agent-words') }; })()",
+      );
       await js("document.getElementById('plan-apply')?.click(); true");
       await newResult(directRunId);
       results["applyByWorkflow"] = await js(
@@ -515,6 +520,13 @@ startGui({
       results["runsUnmarked"] = await js("document.querySelectorAll('[data-records-changed]').length");
       await js(`document.querySelector('[data-report="${analyzeRunId}"]')?.click(); true`);
       results["reportRecordsChanged"] = await waitFor("document.getElementById('report-records-changed') !== null ? true : null", 20_000);
+      // U-32: above the report's tabs; and the revert preview of the marked run says so, as the CLI's revert does.
+      results["reportRecordsChangedFirst"] = await js("document.getElementById('report')?.firstElementChild?.id ?? null");
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-preview="${analyzeRunId}"]')?.click(); true`);
+      await waitFor("(() => { const r = document.getElementById('revert-panel')?.getAttribute('data-preview'); return r && r !== 'loading' ? r : null; })()");
+      results["revertRecordsChanged"] = await js("document.getElementById('revert-records-changed') !== null");
 
       // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
       // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),
@@ -564,8 +576,26 @@ startGui({
       const beforeDiscard = await resultId();
       await taskWith("organize", "sub/deeper/c.txt를 폐기한다");
       const discardPlanId = await newResult(beforeDiscard);
+      // U-32 (UXM-14, U-14 AXM-2): with a records-changed mark (written here, as in 5i2) the pending plan
+      // shows the warning first, no summary and no apply, and the main process gives it no approval
+      // token, so nothing is asked. The test removes the mark it wrote; the plan is then applied as before.
+      const discardMark = join(SECOND, ".codaryn", "runs", String(discardPlanId), "records-changed.json");
+      writeFileSync(discardMark, "{}");
       await js("document.getElementById('run-view-plan')?.click(); true");
       await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      const askedMarked = dialogs.length;
+      results["markedPlan"] = {
+        first: await js("document.getElementById('plan')?.firstElementChild?.id ?? null"),
+        apply: await js("document.getElementById('plan-apply') !== null"),
+        cannotApply: await js("document.getElementById('plan-cannot-apply') !== null"),
+        words: await js("document.getElementById('plan-agent-words') !== null"),
+        approval: await js(`window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(discardPlanId)}, null, 'organize').then((r) => (r.ok ? r.approval : r.code))`),
+        dialogs: dialogs.length - askedMarked,
+      };
+      unlinkSync(discardMark);
+      await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
+      await js("document.getElementById('run-view-plan')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' && document.getElementById('plan-apply') !== null ? r : null; })()");
       await js("document.getElementById('plan-apply')?.click(); true");
       const discardApplyId = String(await newResult(discardPlanId));
       const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);

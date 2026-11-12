@@ -664,7 +664,7 @@ export const FIXED_MESSAGES = {
   // does not check those arguments, so such a command can change files outside an approved plan.
   // A warning in the `commands` check (no new check id).
   "doctor.commands.extra_args_with_plan": { count: "count" },
-  // DR-41: notes of the `commands` check (DoctorCheck.notes): what the workflow's own rules left out
+  // DR-41: notes of the `commands` check (DoctorCheck.notes): what the task type's own rules left out
   // of the configured policy (workflowPolicyNarrowings). Counts only.
   "doctor.workflow_policy.commands_dropped": { count: "count" },
   "doctor.workflow_policy.commands_narrowed": { count: "count" },
@@ -719,7 +719,7 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `reason.<reason>`: the reason as words, e.g. "지정한 검증 모두 통과".
  * - `advice.<reason>`: what the user can do next (UX design section 6).
  * - `tool.<name>`: a tool as words, e.g. "파일 읽기". G-A: for every name in ALL_TOOL_NAMES, the
- *   built-in tools and the workflow tools (`inspect_files`, `propose_plan`), so a workflow tool's
+ *   built-in tools and the task type tools (`inspect_files`, `propose_plan`), so a task type tool's
  *   progress line names it. Only a recorded UNKNOWN_TOOL_RECORD_NAME (AC-D15), a name in no tool
  *   list, is shown as `progress.unknown_tool`.
  * - `revert.skip.<reason>`: why a file was or would be skipped.

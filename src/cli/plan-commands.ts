@@ -84,6 +84,7 @@ import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
 import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
+import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 /** The goal the task form carries for commands that never run a model. */
@@ -472,6 +473,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         stateGuard: recorders.stateGuard,
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
+      // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
+      result = withoutEmptyStateChanged(result);
       await writeResult(workspaceRoot, result as unknown as EngineResult);
     } catch {
       return {

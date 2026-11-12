@@ -29,7 +29,8 @@ import { FAKE_SECRET, IS_WINDOWS, cliIo, isDirectory, setupRun, tempDir } from "
 const ESC = String.fromCharCode(27);
 const SEP = String.fromCharCode(92);
 /** Fake key-shaped text, assembled at run time. */
-const KEY_SHAPED = ["sk", "ant", "k1fake0fake0fake01"].join("-");
+// DR-36 (c): the refusal shape needs 32 or more characters with a digit after sk-ant-.
+const KEY_SHAPED = ["sk", "ant", "k1fake0fake0fake01k1fake0fake0fake01"].join("-");
 /** A fake, not key-shaped value set as the API key variable. */
 const FAKE_DOCTOR_KEY = "fake-doctor-key-value-0001";
 

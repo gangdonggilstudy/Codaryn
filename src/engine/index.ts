@@ -44,6 +44,7 @@ import {
   CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
+  PROFILE_NAME_PATTERN_SOURCE,
   REPLACED_CALL_ID_PREFIX,
   RESULT_SCHEMA_VERSION,
   RUNS_DIR_NAME,
@@ -184,6 +185,7 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
 const MAX_TIMER_MS = 2_147_483_647;
 /** AC-D15: the call ids the engine keeps as given. */
 const CALL_ID_PATTERN = new RegExp(CALL_ID_PATTERN_SOURCE);
+const PROFILE_NAME_PATTERN = new RegExp(PROFILE_NAME_PATTERN_SOURCE);
 
 /** Most changed paths one integrity notice names (U-2). The record and the result keep them all. */
 export const INTEGRITY_NOTICE_PATHS = 10;
@@ -880,6 +882,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       };
     }
 
+    // DR-37 (d): the applied profile, only a name of its pattern that masking leaves unchanged (a
+    // name holding a registered secret is left out rather than recorded as a token).
+    const profile =
+      typeof task.profile === "string" && PROFILE_NAME_PATTERN.test(task.profile) && mask(task.profile) === task.profile ? task.profile : null;
     await record({
       type: "run_started",
       schemaVersion: 1,
@@ -888,6 +894,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       provider: model.name,
       limits,
       ...workflowFields,
+      ...(profile === null ? {} : { profile }),
     });
     state.transition("running");
     messages.push({ role: "user", content: goal });

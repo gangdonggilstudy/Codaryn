@@ -9,7 +9,9 @@ import { describe, test } from "node:test";
 
 import {
   ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE,
   ANTHROPIC_KEY_PATTERN_SOURCE,
+  ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
   API_KEY_ENVS,
   API_KEY_PATTERN_SOURCES,
   API_PROVIDERS,
@@ -81,12 +83,12 @@ const init: Pick<InitOutput, "provider"> = {};
 void [sameNames, sameApiNames, sameSettings, sameFactory, sameList, sameListSettings, apiModel, openaiModel, anthropicOnly, withStatus, withoutStatus, config, models, init];
 
 describe("SP-1: the provider table", () => {
-  test("the anthropic entry holds the values the CLI used before", () => {
+  test("the anthropic entry holds the values the CLI used before, its refusal shape narrowed (DR-36 (c))", () => {
     assert.deepEqual(API_PROVIDERS.anthropic, {
       keyEnv: ANTHROPIC_API_KEY_ENV,
       modelEnv: CODARYN_MODEL_ENV,
       baseUrlEnv: CODARYN_API_BASE_URL_ENV,
-      keyPatternSources: [ANTHROPIC_KEY_PATTERN_SOURCE],
+      keyPatternSources: [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE],
       defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
       baseUrlPath: "without_version",
       maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
@@ -106,7 +108,8 @@ describe("SP-1: the provider table", () => {
   test("every key Codaryn knows is listed, the providers still being added included; the table's are among them", () => {
     assert.deepEqual([...API_KEY_ENVS], ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
     assert.equal(OPENAI_API_KEY_ENV, "OPENAI_API_KEY");
-    assert.deepEqual([...API_KEY_PATTERN_SOURCES], [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE]);
+    assert.deepEqual([...API_KEY_PATTERN_SOURCES], [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE]);
+    assert.equal(ANTHROPIC_KEY_PATTERN_SOURCE, "sk-ant-[A-Za-z0-9_-]{8,}", "the hiding shape is unchanged");
     for (const name of API_PROVIDER_NAMES) {
       assert.ok((API_KEY_ENVS as readonly string[]).includes(API_PROVIDERS[name].keyEnv), name);
       for (const source of API_PROVIDERS[name].keyPatternSources) assert.ok((API_KEY_PATTERN_SOURCES as readonly string[]).includes(source), name);
@@ -150,6 +153,48 @@ describe("SP-1: the provider table", () => {
     for (const [name, text] of Object.entries(ORDINARY)) assert.equal(refuse.test(text), false, name);
     for (const [name, text] of Object.entries(KEY_LIKE)) assert.ok(refuse.test(text), name);
     assert.equal(OPENAI_KEY_PATTERN_SOURCE, `(?:${OPENAI_PREFIXED_KEY_PATTERN_SOURCE})|(?:${OPENAI_LEGACY_KEY_PATTERN_SOURCE})`);
+  });
+
+  /** R-20 F (DR-36 (c)): the ordinary names its review ran through S-8, and more of the Anthropic kind. */
+  const R20_ORDINARY: Record<string, string> = {
+    "pipeline name": p("sk", "-learn-pipeline-for-customer-churn-model-v2"),
+    "feature branch": p("sk", "-feature-branch-add-payment-gateway-integration"),
+    "UUID id": p("sk", "-0f8fad5b-d9cb-469f-a165-70867728950e"),
+    "release folder": p("release/", "sk", "-dashboard-components-and-layout-helpers-v3"),
+    "task name with 34 letters": p("my-task-", "sk", "-", "abcdefghijklmnopq".repeat(2)),
+    "CSS class": p("sk", "-cube-grid-animation-container-wrapper-large"),
+    "runbook path": p("docs/", "sk", "-telecom-network-migration-runbook-final"),
+    "design system (Anthropic prefix)": p("sk", "-ant-", "design-system"),
+    "python package": p("sk", "-learn"),
+    "risk assessment": "risk-assessment-for-the-quarter-and-the-next-one",
+    "underscore key (Stripe style)": p("sk", "_live_", "a".repeat(40)),
+    "upper-case company name": p("SK", "-HYNIX-memory-division-quarterly-report-2026"),
+    "Anthropic prefix, long name without a digit": p("sk", "-ant-", "design-system-components-and-layout-helpers"),
+    "Anthropic prefix inside a word": p("ri", "sk", "-ant-", "colony-simulation-model-2024-final-version"),
+  };
+  /** Real length (as observed: a 93-character body and AA after a type and version), assembled at run time. */
+  const body = (seed: string) => seed.repeat(10).slice(0, 93);
+  const ANTHROPIC_KEY_LIKE: Record<string, string> = {
+    "API key style": p("sk", "-ant-", "api03-", body("Ab3dE_f9-hIjK1"), "AA"),
+    "admin key style": p("sk", "-ant-", "admin01-", body("Zy8xW-v7_uTs6R"), "AA"),
+  };
+
+  test("DR-36 (c): no refusal shape matches R-20's ordinary names; real-length Anthropic key shapes are refused", () => {
+    const refuse = API_KEY_PATTERN_SOURCES.map((source) => new RegExp(source));
+    for (const [name, text] of Object.entries(R20_ORDINARY)) assert.equal(refuse.some((shape) => shape.test(text)), false, name);
+    for (const [name, text] of Object.entries(ANTHROPIC_KEY_LIKE)) assert.ok(refuse.some((shape) => shape.test(text)), name);
+    const hide = API_KEY_MASK_PATTERN_SOURCES.map((source) => new RegExp(source));
+    assert.ok(hide.some((shape) => shape.test(R20_ORDINARY["design system (Anthropic prefix)"] as string)), "hiding keeps the earlier Anthropic shape");
+  });
+
+  test("DR-36 (c): the Anthropic refusal shape's bounds", () => {
+    const refuse = new RegExp(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE);
+    const after = (tail: string) => p("sk", "-ant-", tail);
+    assert.ok(refuse.test(after("a".repeat(31) + "1")), "32 characters with a digit");
+    assert.equal(refuse.test(after("a".repeat(30) + "1")), false, "31 characters");
+    assert.equal(refuse.test(after("a-".repeat(20))), false, "no digit");
+    assert.ok(refuse.test(`key: ${after("Ab3_".repeat(10))}`), "after a space");
+    assert.equal(refuse.test(p("x", after("Ab3_".repeat(10)))), false, "glued to a letter: no word start (a miss left to the registered value)");
   });
 
   test("DR-33 (1): a distinct prefix and 20 or more characters", () => {

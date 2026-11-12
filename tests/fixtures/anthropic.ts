@@ -139,3 +139,19 @@ export function writeEnvFile(path: string, vars: Readonly<Record<string, string>
   writeFileSync(path, `${lines.join("\n")}\n`);
   return path;
 }
+
+/**
+ * DR-36 (c): a value with the Anthropic refusal shape (ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE: `sk-ant-`
+ * at a word start, then 32 or more characters with a digit), built at run time from parts so no
+ * source file holds the shape (the commit hook would flag it). Its words and the missing version
+ * part of a real key (`api03-`) keep it apart from a real key's format. Never sent anywhere: every
+ * case that uses it expects key_in_file before any request.
+ */
+export const ANTHROPIC_REFUSED_SHAPE = ["sk", "ant", "codaryn0test0shape0only0not0a0key"].join("-");
+
+/** DR-36 (c), R-20 F: names that start like an Anthropic key and are no longer refused (built from parts). */
+export const ANTHROPIC_NAMES_NOT_REFUSED: readonly { readonly label: string; readonly value: string }[] = [
+  { label: "짧은 이름", value: ["sk", "ant", "design", "system"].join("-") },
+  { label: "32자 이상이지만 숫자 없음", value: ["sk", "ant", "codaryn-shape-without-any-digit-in-it"].join("-") },
+  { label: "단어에 붙은 sk-ant-", value: ["risk", "ant", "codaryn0test0shape0only0not0a0key"].join("-") },
+];

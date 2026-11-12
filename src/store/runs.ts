@@ -17,9 +17,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  APPLY_REASONS_BY_STATUS,
   APPROVAL_CHANNELS,
   JOURNAL_FILE_NAME,
   MAX_REPORT_FILE_BYTES,
+  MODEL_PROVIDER_NAMES,
   RESULT_FILE_NAME,
   REVERT_RECORD_FILE_NAME,
   CONTENT_HASH_PATTERN_SOURCE,
@@ -47,7 +49,8 @@ const realpathNative = promisify(realpathCallback.native);
 
 const TASK_ID = new RegExp(TASK_ID_PATTERN_SOURCE);
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
-const PROVIDERS: readonly string[] = ["scripted", "anthropic"];
+/** The contract's provider names (every API provider and scripted), not a copy that can fall behind. */
+const PROVIDERS: readonly string[] = MODEL_PROVIDER_NAMES;
 const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
 /** A run id as the CLI makes it (P-3): `<UTC yyyymmddThhmmssZ>-<8 lowercase hex>`. */
 const CLI_RUN_ID = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-[0-9a-f]{8}$/;
@@ -146,24 +149,8 @@ type FirstRecord =
   | { readonly kind: "run"; readonly startedAt: string; readonly taskId: string }
   | { readonly kind: "apply"; readonly startedAt: string; readonly taskId: string; readonly planRunId: string; readonly digest: string };
 
-const APPROVALS: readonly string[] = ["cli-tty", "cli-flag", "adapter"];
+const APPROVALS: readonly string[] = APPROVAL_CHANNELS;
 
-/**
- * The reasons an apply can end with (ApplyResult.reason, src/contracts/plan.ts). The contract
- * lists them in a comment only; they must also be reasons of the result's status.
- */
-const APPLY_REASONS: readonly string[] = [
-  "verified",
-  "verifier_failed",
-  "verifier_inconclusive",
-  "protected_changed",
-  "plan_stale",
-  "apply_incomplete",
-  "cancelled",
-  "max_duration",
-  // DR-21: unsafe moves without the person's consent; nothing was moved.
-  "consent_required",
-];
 
 /**
  * The journal's first record. A first line that is not complete (still being written) or is not
@@ -233,7 +220,8 @@ async function resultOf(
   if (result["exitCode"] !== RUN_EXIT_CODES[status as TerminalRunStatus]) unreadable();
   if (first.kind === "apply") {
     // DR-12: an ApplyResult of this apply's plan and digest; its changes are the applied actions.
-    if (!APPLY_REASONS.includes(reason as string)) unreadable();
+    // The contract's table of the reasons an apply ends with, by status (APPLY_REASONS_BY_STATUS).
+    if (!(APPLY_REASONS_BY_STATUS[status as TerminalRunStatus] as readonly string[]).includes(reason as string)) unreadable();
     if (result["planRunId"] !== first.planRunId || result["digest"] !== first.digest) unreadable();
     const applied = result["applied"];
     if (!Array.isArray(applied) || !applied.every(isAppliedRecord)) unreadable();

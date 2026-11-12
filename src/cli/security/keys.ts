@@ -4,7 +4,7 @@
  * A reported location holds known schema field names and indexes only, never other text.
  */
 
-import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, API_KEY_PATTERN_SOURCES, KEY_FIELD_NAMES } from "../../contracts/index.js";
+import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, KEY_FIELD_NAMES, createKeyRefusalCheck } from "../../contracts/index.js";
 
 /** Containers (objects and arrays) deeper than this are rejected as invalid input. */
 export const MAX_KEY_SCAN_DEPTH = 64;
@@ -25,12 +25,6 @@ export function keyValuesOf(keys: KnownKeys): string[] {
   return [...new Set(list.filter((key) => key.length >= MIN_CURRENT_KEY_LENGTH))];
 }
 
-/**
- * DR-32 (a), DR-33: the key shapes that refuse a run (S-6 files, S-8 arguments), as one regular
- * expression source: the contract's narrowed shapes (API_KEY_PATTERN_SOURCES). They are a second
- * check; refusal rests mainly on the registered key values (S-2).
- */
-export const KEY_REFUSAL_SHAPE_SOURCE = API_KEY_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
 
 /**
  * DR-32 (a): the key shapes hidden in output (API_KEY_MASK_PATTERN_SOURCES): the refusal shapes and
@@ -76,11 +70,32 @@ function isPrintableKeyFieldName(name: string): boolean {
   return PRINTABLE_KEY_FIELD.test(name) && KEY_NAMES.has(normalizedFieldName(name));
 }
 
-/** S-6, S-8: every given key value (SP-2: every known key variable that is set), and the refusal shapes. */
+/**
+ * S-6, S-8 (DR-40): the contract's check (createKeyRefusalCheck): every given key value (SP-2:
+ * every known key variable that is set, from MIN_CURRENT_KEY_LENGTH characters) and the refusal
+ * shapes (DR-33, DR-36 (c), the glued real-format Anthropic key of DR-40 (b)), each on the text as
+ * it is and without the key separators (DR-40 (a): a key split by a line break or an invisible
+ * character), in time linear in the text's length (DR-40 (c)).
+ */
 function keyMatcher(currentKey: KnownKeys): (text: string) => boolean {
-  const shape = new RegExp(KEY_REFUSAL_SHAPE_SOURCE);
-  const values = keyValuesOf(currentKey);
-  return (text) => values.some((value) => text.includes(value)) || shape.test(text);
+  return createKeyRefusalCheck(keyValuesOf(currentKey));
+}
+
+/**
+ * DR-40 (b) (review R-25 L-2): the largest task or config file the CLI reads, in UTF-8 bytes. A
+ * larger one is refused before any check reads it (no legitimate file comes near it; the key
+ * checks' time stays bounded). The contract's constant replaces it when one is issued.
+ */
+export const MAX_INPUT_FILE_BYTES = 1024 * 1024;
+
+/** DR-40 (b): whether a task or config file's text is over MAX_INPUT_FILE_BYTES. */
+export function inputFileTooLarge(text: string): boolean {
+  return text.length > MAX_INPUT_FILE_BYTES || Buffer.byteLength(text, "utf8") > MAX_INPUT_FILE_BYTES;
+}
+
+/** DR-40 (b): the fixed message for such a file; nothing from the file is in it. */
+export function inputFileTooLargeMessage(label: string): string {
+  return `the ${label} is larger than ${MAX_INPUT_FILE_BYTES} bytes (1 MiB); nothing in it was used`;
 }
 
 export type KeyScanOutcome =

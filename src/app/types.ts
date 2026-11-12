@@ -129,7 +129,10 @@ export interface SettingsWidening {
     | "verifier_command_added"
     | "restore_path_tokens_enabled"
     | "plan_action_allowed"
+    /** A provider's API address: top-level `apiBaseUrl`, or `providers.<name>.apiBaseUrl` (GUI F-3). */
     | "api_base_url_changed"
+    /** GUI F-3: quick runs use another provider (`provider`), so the workspace's text goes to another API. */
+    | "provider_changed"
     | "profile_changed"
     | "workflow_changed";
   /** Where: a field path such as "policy.commands[2]". Never a value. */
@@ -190,7 +193,10 @@ export interface SettingsView {
   readonly builtinWorkflows: readonly string[];
   /** N-8, G-A: each profile with the workflow it uses when the task names none (`workflowRef`), or null; file order. */
   readonly profileWorkflows: readonly { readonly profile: string; readonly workflowRef: string | null }[];
-  /** Whether ANTHROPIC_API_KEY is set. Never its value (C-1). */
+  /**
+   * Whether the key of the provider a quick run would use is set (SP-6: the config's `provider`,
+   * else anthropic; ANTHROPIC_API_KEY or OPENAI_API_KEY). Never its value (C-1).
+   */
   readonly keyAvailable: boolean;
 }
 
@@ -286,6 +292,19 @@ export interface ReportRequest {
   readonly runId: string;
 }
 
+/**
+ * GU-3 (standalone-gui 3.7, saving a report): the report exactly as `codaryn report` prints it
+ * without `--json`, from the same records as `report`: Markdown, with every API provider's key value
+ * hidden. For writing to a file the person chose. A window shows the structured `report`; it never
+ * renders this text as HTML.
+ */
+export interface ReportMarkdown {
+  readonly kind: "report_markdown";
+  readonly markdown: string;
+  /** The report's exit code, as `codaryn report` ends with it (the same as `report`'s `exitCode`). */
+  readonly exitCode: number;
+}
+
 export interface RevertRequest {
   readonly workspace: string;
   /** A run id or "latest" (N-7). */
@@ -335,13 +354,21 @@ export interface ResolvedRun {
  * asked for the list. `configPath` null: CODARYN_CONFIG, then the default location (N-1).
  */
 export interface ListModelsRequest {
-  /** Only "anthropic" is connected (DR-22 adds a second provider later). */
+  /**
+   * DR-22, SP-6: one of the API providers (API_PROVIDER_NAMES, CONNECTED_MODEL_PROVIDERS). It decides
+   * the key, the address, the lister and where a choice is written, whatever the config file's
+   * `provider` is. Another name is `invalid_arguments` before anything is read.
+   */
   readonly provider: string;
   readonly configPath: string | null;
   readonly varsFile: string | null;
 }
 
-/** Y-3: lists again and writes this id into the config file's `model`, only when the list holds it. */
+/**
+ * Y-3, SP-6: lists again and writes this id as that provider's model in the config file, only when
+ * the list holds it (as the CLI's `models --use`: anthropic's top-level `model`, or
+ * `providers.<name>.model`).
+ */
 export interface SelectModelRequest extends ListModelsRequest {
   readonly model: string;
 }
@@ -502,6 +529,8 @@ export interface CodarynApp {
   startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome>;
   /** `codaryn report --json` (run id or "latest"): reads the run's records only, takes no lock. */
   report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>>;
+  /** `codaryn report` without `--json`: the same report as Markdown, for saving (GU-3). See ReportMarkdown. */
+  reportMarkdown(request: ReportRequest): Promise<AppCallOutcome<ReportMarkdown>>;
   /** `codaryn revert [--dry-run]` (run id or "latest"). See RevertRequest. */
   revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>>;
   /** N-7: `codaryn runs --json`. Reads only. */

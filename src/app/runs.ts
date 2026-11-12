@@ -7,13 +7,15 @@
  * (app.ts), with the options main.ts gives it.
  */
 
-import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT } from "../contracts/index.js";
+import { LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT } from "../contracts/index.js";
 import type { RunListing, RunsOutput } from "../contracts/index.js";
 import { listRuns as storeListRuns } from "../store/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { resolveRunRef, resolveWorkspaceRoot } from "../cli/runs.js";
+import { knownKeyValues } from "../cli/settings.js";
 import { hideKeys } from "../cli/text-safety.js";
-import { lookupEnv } from "./environment.js";
+import type { KnownKeys } from "../cli/security/index.js";
+import { copyEnvironment } from "./environment.js";
 import { appError, fromCliError } from "./errors.js";
 import type { AppCallOutcome, AppEnvironment, AppError, ListRunsRequest, ResolvedRun, ResolveRunRequest } from "./types.js";
 
@@ -45,7 +47,7 @@ export async function runIdOf(workspaceRoot: string, run: string): Promise<Resol
 }
 
 /** Every string in `value` with key shapes and the current key hidden, as `runs --json` does (N-23 a). */
-function hideKeysInStrings<T>(value: T, currentKey: string | null): T {
+function hideKeysInStrings<T>(value: T, currentKey: KnownKeys): T {
   const walk = (item: unknown): unknown => {
     if (typeof item === "string") return hideKeys(item, currentKey);
     if (Array.isArray(item)) return item.map(walk);
@@ -80,8 +82,8 @@ export async function listRunsIn(environment: AppEnvironment, request: ListRunsR
     runs: listed.value.runs.slice(0, limit),
     omitted: Math.max(0, listed.value.runs.length - limit),
   };
-  const currentKey = lookupEnv(environment.env, ANTHROPIC_API_KEY_ENV, environment.platform)?.trim() || null;
-  return { ok: true, output: hideKeysInStrings(output, currentKey) };
+  // SP-2: every API provider's key, as the CLI's `runs` hides them.
+  return { ok: true, output: hideKeysInStrings(output, knownKeyValues(copyEnvironment(environment.env, environment.platform))) };
 }
 
 /** N-23(b): which run a reference names, with its start time, so an adapter can show it before acting. */

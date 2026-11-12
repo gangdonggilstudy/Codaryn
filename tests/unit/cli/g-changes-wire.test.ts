@@ -54,7 +54,7 @@ describe("changes in help", () => {
   });
 });
 
-describe("DR-29: changes shows paths and states only while runs do not record how they masked the text", () => {
+describe("DR-29: a file's text is shown only when the run's record shows the same masking; each file without it says so", () => {
   const unverified: ChangesOutput = {
     ...VIEW,
     files: [
@@ -64,19 +64,37 @@ describe("DR-29: changes shows paths and states only while runs do not record ho
     ],
   };
 
-  test("the text says once why no text is shown, and gives each file its path and state", async () => {
+  test("the reason is explained once, and each file without text is marked under its own line", async () => {
     const outcome = await runChanges({ argv: ["changes", "--workspace", ".", "--run", "latest"], env: {}, app: { changes: async () => ({ ok: true, output: unverified }) } });
     assert.ok("text" in outcome);
     const lines = outcome.text.split("\n");
     assert.equal(lines.filter((line) => line.includes("DR-29")).length, 1, outcome.text);
-    assert.equal(outcome.text.includes("(masking_unverified)"), false, "no per-file code for the DR-29 case");
-    assert.ok(lines.some((line) => line.startsWith("== notes.md: changed by the run; as the run left it")));
-    assert.ok(lines.some((line) => line.startsWith("== added.md: created by the run; changed since the run")) || outcome.text.includes("added.md"));
+    const after = (header: string): string | undefined => lines[lines.findIndex((line) => line.startsWith(header)) + 1];
+    assert.equal(after("== notes.md: changed by the run; as the run left it"), "   the text is not shown (masking_unverified)", outcome.text);
+    assert.equal(after("== added.md: created by the run; changed again since the run"), "   the text is not shown (masking_unverified)", outcome.text);
     assert.ok(outcome.text.includes("(masked_path)"), "other reasons are still named per file");
   });
 
-  test("help says what changes shows now", () => {
+  test("a result with text for one file and none for another says which has none (app layer's finding)", async () => {
+    const mixed: ChangesOutput = {
+      ...VIEW,
+      files: [
+        { path: "shown.md" as never, created: false, state: "as_run_left", before: "a\n" as never, after: "a\nb\n" as never, unavailable: null },
+        { path: "hidden.md" as never, created: false, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" },
+      ],
+    };
+    const outcome = await runChanges({ argv: ["changes", "--workspace", ".", "--run", "latest"], env: {}, app: { changes: async () => ({ ok: true, output: mixed }) } });
+    assert.ok("text" in outcome);
+    const lines = outcome.text.split("\n");
+    const shownAt = lines.findIndex((line) => line.startsWith("== shown.md:"));
+    const hiddenAt = lines.findIndex((line) => line.startsWith("== hidden.md:"));
+    assert.ok(lines[shownAt + 1]?.startsWith("@@"), outcome.text);
+    assert.equal(lines[hiddenAt + 1], "   the text is not shown (masking_unverified)", outcome.text);
+  });
+
+  test("help says when the text is shown, not that it never is", () => {
     const text = helpText("changes");
-    assert.ok(text.includes("state") && !text.includes("changed lines"), text);
+    assert.ok(text.includes("state") && !text.includes("not shown for now"), text);
+    assert.ok(text.includes("as the run did"), text);
   });
 });

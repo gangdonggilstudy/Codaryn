@@ -146,6 +146,31 @@ describe("DR-38: the run's state guard is the engine's", () => {
   });
 });
 
+describe("DR-38 (PM after bf04750): stateChanged only when something changed", () => {
+  test("a run whose records did not change: no stateChanged in run --json, result.json or report --json", async () => {
+    const base = await setup(WRITE_STEPS);
+    const outcome = await runCli(io(base));
+    assert.equal(outcome.output.kind, "run", JSON.stringify(outcome.output));
+    assert.equal("stateChanged" in outcome.output, false, JSON.stringify(outcome.output));
+    const runId = await onlyRunId(base);
+    const stored = await readFile(path.join(base, "work", STATE_DIR_NAME, RUNS_DIR_NAME, runId, "result.json"), "utf8");
+    assert.equal(stored.includes("stateChanged"), false, stored);
+    assert.equal((await report(base, runId, true)).text.includes("stateChanged"), false);
+  });
+
+  test("report leaves out an empty stateChanged that a result.json holds (written by another writer)", async () => {
+    const base = await setup(WRITE_STEPS);
+    await runCli(io(base));
+    const runId = await onlyRunId(base);
+    const file = path.join(base, "work", STATE_DIR_NAME, RUNS_DIR_NAME, runId, "result.json");
+    const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(file, `${JSON.stringify({ ...stored, stateChanged: [] })}
+`, "utf8");
+    const shown = JSON.parse((await report(base, runId, true)).text) as ReportOutput;
+    assert.equal(shown.result !== null && "stateChanged" in shown.result, false, JSON.stringify(shown.result));
+  });
+});
+
 describe("DR-38: report and revert say a run has a records-changed mark", () => {
   test("report --json: recordsChanged only for a marked run; the human report says it", async () => {
     const base = await setup(WRITE_STEPS);

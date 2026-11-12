@@ -58,6 +58,7 @@ import type {
   WorkflowSettings,
 } from "../contracts/index.js";
 import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
+import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText } from "./text-safety.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
@@ -796,7 +797,8 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     const deps = { ...assembled.deps, journal };
     let result: EngineResult | null = null;
     try {
-      const ended = await (io.runTask ?? engineRunTask)(deps);
+      // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
+      const ended = withoutEmptyStateChanged(await (io.runTask ?? engineRunTask)(deps));
       const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
       const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
       result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));

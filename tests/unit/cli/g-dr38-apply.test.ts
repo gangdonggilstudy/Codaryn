@@ -98,7 +98,11 @@ describe("DR-38: the apply run's state guard is the engine's", () => {
     const result = await apply(base, planned, digest, "task.json");
     assert.deepEqual([result.status, result.reason], ["done", "verified"], JSON.stringify(result));
     assert.equal(await readFile(path.join(base, "ws", "sorted", "a.txt"), "utf8"), "alpha\n");
-    assert.deepEqual(result.stateChanged, []);
+    // PM after bf04750: stateChanged only when something changed, so an apply whose records did not
+    // change prints and stores exactly what it did before DR-38.
+    assert.equal("stateChanged" in result, false, JSON.stringify(result));
+    const stored = await readFile(path.join(base, "ws", STATE_DIR_NAME, RUNS_DIR_NAME, result.runId, "result.json"), "utf8");
+    assert.equal(stored.includes("stateChanged"), false, stored);
   });
 
   test("a verifier that adds a file to the apply run's records ends it failed/state_changed; the move stays", async () => {

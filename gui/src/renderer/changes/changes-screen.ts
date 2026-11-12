@@ -47,6 +47,26 @@ function fileSection(t: Texts, file: ChangedFileItem, index: number): HTMLElemen
     section.setAttribute("data-text", "none");
     return section;
   }
+  // One side only, and its absence is not what the run did (it did not create the file, the file
+  // is not gone): a comparison would show every line as added or removed. Show that side as it is.
+  const onlyAfter = file.before === null && !file.created && file.after !== null;
+  const onlyBefore = file.after === null && file.state !== "missing" && file.before !== null;
+  if (onlyAfter || onlyBefore) {
+    const text = (onlyAfter ? file.after : file.before) ?? "";
+    section.append(el("p", t.format(onlyAfter ? "changes.currentOnly" : "changes.originalOnly"), { class: "notice" }));
+    const rows = text.split("\n");
+    if (rows.length > 1 && rows[rows.length - 1] === "") rows.pop();
+    const list = el("ol", undefined, { class: "diff single", "aria-label": t.format(onlyAfter ? "changes.currentOf" : "changes.originalOf", { path: file.path }) });
+    for (const [k, row] of rows.slice(0, MAX_SHOWN_LINES).entries()) {
+      const item = el("li", undefined, { "data-kind": "same", class: "diff-same" });
+      item.append(el("span", String(k + 1), { class: "no", "aria-hidden": "true" }), el("span", row, { class: "text" }));
+      list.append(item);
+    }
+    section.append(list);
+    if (rows.length > MAX_SHOWN_LINES) section.append(el("p", t.format("changes.truncated", { count: String(rows.length - MAX_SHOWN_LINES) }), { class: "notice" }));
+    section.setAttribute("data-text", onlyAfter ? "current" : "original");
+    return section;
+  }
   const lines = lineDiff(file.before, file.after);
   const starts = new Set(hunkStarts(lines));
   const list = el("ol", undefined, { class: "diff", "aria-label": t.format("changes.diffOf", { path: file.path }) });

@@ -7,6 +7,7 @@
  */
 
 import { failureOf } from "./settings.js";
+import { MAX_CHANGE_TEXT_CHARS } from "../shared/ipc.js";
 import type { HostFailure, Shown } from "./settings.js";
 
 type Obj = Record<string, unknown>;
@@ -69,7 +70,10 @@ export function changesValue(outcome: unknown, shown: Shown, shownText: Shown): 
     let before = typeof file["before"] === "string" ? shownText(file["before"]) : null;
     let after = typeof file["after"] === "string" ? shownText(file["after"]) : null;
     const size = (before?.length ?? 0) + (after?.length ?? 0);
-    if (size > budget) {
+    // Per file: a side longer than the main process takes (masking can lengthen a text) or past the
+    // budget leaves this file without text; the other files keep theirs.
+    const sideTooLong = (before?.length ?? 0) > MAX_CHANGE_TEXT_CHARS || (after?.length ?? 0) > MAX_CHANGE_TEXT_CHARS;
+    if (sideTooLong || size > budget) {
       before = null;
       after = null;
       unavailable = "too_large";

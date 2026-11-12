@@ -29,6 +29,9 @@ export const IPC_CHANNELS = {
   applyPlan: "codaryn:plan:apply",
   review: "codaryn:review:record",
   changes: "codaryn:changes:read",
+  report: "codaryn:report:read",
+  proposeSettings: "codaryn:settings:propose",
+  applySettings: "codaryn:settings:apply",
 } as const;
 
 /**
@@ -185,7 +188,16 @@ export interface RecentView {
 }
 
 /** What opening a remembered or command-line workspace answers. */
-export type OpenReply = { readonly ok: true; readonly handle: string; readonly name: string } | { readonly ok: false; readonly code: string };
+/** A run's task form as the GUI started it (profile and task kind names; null: the config's). */
+export interface RunFormView {
+  readonly profile: string | null;
+  readonly workflow: string | null;
+}
+
+/** `lastForm`: the form of the last run started in this workspace from this app (R21b-L-1), or null. */
+export type OpenReply =
+  | { readonly ok: true; readonly handle: string; readonly name: string; readonly lastForm?: RunFormView | null }
+  | { readonly ok: false; readonly code: string };
 
 /**
  * dir, file: a plain directory or file. link: a link or junction, never followed. state: the
@@ -243,6 +255,8 @@ export const SETTINGS_FILE_SOURCES = ["argument", "environment", "default"] as c
 export interface ProfileView {
   readonly name: string;
   readonly workflowRef: string | null;
+  /** SP-D10: the provider the profile names (it wins over the config's), or null. */
+  readonly provider: string | null;
   /** Limit name and value (null: no limit), as the profile sets them. */
   readonly limits: readonly (readonly [string, number | null])[];
   /** Executables the profile allows to run. */
@@ -265,6 +279,76 @@ export interface SettingsView {
   readonly providers: readonly string[];
   /** Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). */
   readonly env: { readonly model: boolean; readonly language: boolean };
+  /** GU-6: the config file's own rules (3.10): limits, command rules as text, protected paths, secret names. */
+  readonly rules: SettingsRules;
+  /** SP-D3: the provider the config names (null: none, so `defaultProvider` is used). */
+  readonly provider: string | null;
+  readonly defaultProvider: string | null;
+  /** The contract's API providers, in its order (DR-22: no name is written into the screens). */
+  readonly apiProviders: readonly ApiProviderView[];
+}
+
+export interface ApiProviderView {
+  readonly name: string;
+  /** The key variable's name and whether it is set now; never its value (C-1, N-10). */
+  readonly keyEnv: string;
+  readonly keySet: boolean;
+  /** The model variable's name and whether it is set now (it overrides the config's model). */
+  readonly modelEnv: string;
+  readonly modelEnvSet: boolean;
+  /** The model the config keeps for this provider. */
+  readonly model: string | null;
+  /** Whether the app layer lists this provider's models (CONNECTED_MODEL_PROVIDERS). */
+  readonly listable: boolean;
+}
+
+const PROVIDER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+const ENV_NAME_TEXT = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+function toApiProviders(value: unknown): ApiProviderView[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 16) return null;
+  const out: ApiProviderView[] = [];
+  for (const item of value) {
+    if (!isObj(item) || !hasOnlyKeys(item, ["name", "keyEnv", "keySet", "modelEnv", "modelEnvSet", "model", "listable"])) return null;
+    const { name, keyEnv, keySet, modelEnv, modelEnvSet, model, listable } = item;
+    if (typeof name !== "string" || !PROVIDER_NAME.test(name) || typeof keyEnv !== "string" || !ENV_NAME_TEXT.test(keyEnv) || typeof modelEnv !== "string" || !ENV_NAME_TEXT.test(modelEnv)) return null;
+    if (typeof keySet !== "boolean" || typeof modelEnvSet !== "boolean" || typeof listable !== "boolean" || !(model === null || shortText(model))) return null;
+    out.push({ name, keyEnv, keySet, modelEnv, modelEnvSet, model: model as string | null, listable });
+  }
+  return out;
+}
+
+export interface SettingsRules {
+  /**
+   * Whether the config file has its own `policy`. Until it has, a quick run uses its task kind's
+   * policy; once it has, the config's replaces it (src/cli/run.ts, underDefinition).
+   */
+  readonly policySet: boolean;
+  readonly limits: readonly (readonly [string, number | null])[];
+  readonly commands: readonly string[];
+  readonly protectedPaths: readonly string[];
+  /** Names only, and whether each is set now; never a value (S-3). */
+  readonly secretEnv: readonly { readonly name: string; readonly set: boolean }[];
+}
+
+const EMPTY_RULES: SettingsRules = { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+
+function toRules(value: unknown): SettingsRules | null {
+  if (value === undefined) return EMPTY_RULES;
+  if (!isObj(value) || !Array.isArray(value["limits"]) || value["limits"].length > 32 || !textList(value["commands"]) || !textList(value["protectedPaths"]) || !Array.isArray(value["secretEnv"])) return null;
+  const limits: (readonly [string, number | null])[] = [];
+  for (const pair of value["limits"]) {
+    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== "string" || !/^[A-Za-z]{1,40}$/.test(pair[0]) || !(pair[1] === null || (typeof pair[1] === "number" && Number.isFinite(pair[1])))) return null;
+    limits.push([pair[0], pair[1] as number | null]);
+  }
+  const secretEnv: { name: string; set: boolean }[] = [];
+  for (const item of value["secretEnv"]) {
+    if (!isObj(item) || !shortText(item["name"]) || typeof item["set"] !== "boolean") return null;
+    secretEnv.push({ name: item["name"], set: item["set"] });
+  }
+  if (value["policySet"] !== undefined && typeof value["policySet"] !== "boolean") return null;
+  return { policySet: value["policySet"] === true, limits, commands: value["commands"], protectedPaths: value["protectedPaths"], secretEnv };
 }
 
 export type SettingsReply = { readonly ok: true; readonly view: SettingsView } | { readonly ok: false; readonly code: string };
@@ -272,7 +356,9 @@ export type SettingsReply = { readonly ok: true; readonly view: SettingsView } |
 function toProfileView(value: unknown): ProfileView | null {
   if (!isObj(value)) return null;
   const { name, workflowRef, limits, commands, verifiers, protectedPaths } = value;
+  const provider = value["provider"] ?? null;
   if (!shortText(name) || !(workflowRef === null || shortText(workflowRef)) || !textList(commands) || !count(verifiers) || !count(protectedPaths)) return null;
+  if (!(provider === null || (typeof provider === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(provider)))) return null;
   if (!Array.isArray(limits) || limits.length > 32) return null;
   const pairs: (readonly [string, number | null])[] = [];
   for (const pair of limits) {
@@ -282,7 +368,7 @@ function toProfileView(value: unknown): ProfileView | null {
     if (!(limit === null || (typeof limit === "number" && Number.isFinite(limit)))) return null;
     pairs.push([key, limit as number | null]);
   }
-  return { name, workflowRef: workflowRef as string | null, limits: pairs, commands, verifiers, protectedPaths };
+  return { name, workflowRef: workflowRef as string | null, provider: provider as string | null, limits: pairs, commands, verifiers, protectedPaths };
 }
 
 /** The engine host's settings value, checked field by field. `env` is added by the main process. */
@@ -292,6 +378,12 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
   const view = value["view"];
   if (!isObj(view)) return fail;
   const { file, model, language, profiles, workflows, keyAvailable, providers } = view;
+  const rules = toRules(view["rules"]);
+  if (rules === null) return fail;
+  const apiProviders = toApiProviders(view["apiProviders"]);
+  const provider = view["provider"] ?? null;
+  const defaultProvider = view["defaultProvider"] ?? null;
+  if (apiProviders === null || !(provider === null || (typeof provider === "string" && PROVIDER_NAME.test(provider))) || !(defaultProvider === null || (typeof defaultProvider === "string" && PROVIDER_NAME.test(defaultProvider)))) return fail;
   let fileView: SettingsView["file"] = null;
   if (file !== null) {
     if (!isObj(file) || !shortText(file["display"]) || typeof file["exists"] !== "boolean") return fail;
@@ -319,8 +411,61 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
       keyAvailable,
       providers,
       env,
+      rules,
+      provider: provider as string | null,
+      defaultProvider: defaultProvider as string | null,
+      apiProviders,
     },
   };
+}
+
+/** GU-6: a settings change proposal as the window sees it: a token, the changed fields, the widening kinds. */
+export type SettingsProposalReply =
+  | {
+      readonly ok: true;
+      readonly token: string;
+      readonly changes: readonly { readonly field: string; readonly change: string }[];
+      readonly widening: readonly { readonly kind: string; readonly field: string }[];
+    }
+  | { readonly ok: false; readonly code: string };
+
+export type SettingsWrittenReply =
+  | { readonly ok: true; readonly written: boolean; readonly changes: readonly { readonly field: string; readonly change: string }[]; readonly widening: readonly { readonly kind: string; readonly field: string }[] }
+  | { readonly ok: false; readonly code: string };
+
+function fieldList(value: unknown, key: "change" | "kind"): { field: string; change: string }[] | { kind: string; field: string }[] | null {
+  if (!Array.isArray(value) || value.length > MAX_ITEMS) return null;
+  const out: Record<string, string>[] = [];
+  for (const item of value) {
+    if (!isObj(item) || !shortText(item["field"]) || typeof item[key] !== "string" || !WORD.test(item[key] as string)) return null;
+    out.push({ field: item["field"], [key]: item[key] as string });
+  }
+  return out as never;
+}
+
+/** The engine host's proposal, checked; the new config is kept by the main process only. */
+export function toHostProposal(value: unknown): { readonly ok: true; readonly next: Record<string, unknown>; readonly baseDigest: string; readonly changes: { field: string; change: string }[]; readonly widening: { kind: string; field: string }[] } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const { next, baseDigest } = value;
+  const changes = fieldList(value["changes"], "change") as { field: string; change: string }[] | null;
+  const widening = fieldList(value["widening"], "kind") as { kind: string; field: string }[] | null;
+  if (!isObj(next) || typeof baseDigest !== "string" || !DIGEST.test(baseDigest) || changes === null || widening === null) return { ok: false, code: "host_error" };
+  return { ok: true, next, baseDigest, changes, widening };
+}
+
+/** The engine host's written change, checked. */
+export function toWrittenReply(value: unknown): SettingsWrittenReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const changes = fieldList(value["changes"], "change") as { field: string; change: string }[] | null;
+  const widening = fieldList(value["widening"], "kind") as { kind: string; field: string }[] | null;
+  if (typeof value["written"] !== "boolean" || changes === null || widening === null) return { ok: false, code: "host_error" };
+  return { ok: true, written: value["written"], changes, widening };
+}
+
+/** GU-6: `applySettings` arguments: `{token}`, a proposal the main process made. */
+export function parseTokenArgs(value: unknown): { readonly token: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["token"])) return null;
+  return isHandle(value["token"]) ? { token: value["token"] } : null;
 }
 
 /** One listed model as the engine host gives it: `id` exactly as listed (kept by the main process), `shown` for the window. */
@@ -647,6 +792,142 @@ export function toChangesReply(value: unknown): ChangesReply {
   return { ok: true, runId, files: items };
 }
 
+/** GU-3 (3.7): one check of a run's last round, by number (N-24 (a)). */
+export interface ReportVerifierView {
+  readonly number: number;
+  readonly kind: string | null;
+  readonly outcome: string;
+  readonly evidence: string;
+  readonly evidenceCut: boolean;
+  readonly checked: readonly string[];
+  readonly limits: readonly string[];
+}
+
+/** GU-3 (3.7): a run's report as the window shows it. Texts are masked and cleaned. */
+export interface ReportView {
+  readonly runId: string;
+  readonly kind: "run" | "apply";
+  readonly status: "complete" | "incomplete";
+  readonly finished: { readonly status: string; readonly reason: string } | null;
+  readonly usage: RunResultView["usage"] | null;
+  readonly verifiers: readonly ReportVerifierView[];
+  readonly integrity: readonly { readonly phase: string; readonly changed: readonly string[] }[];
+  readonly records: number | null;
+  readonly taskId: string;
+  readonly run: {
+    readonly workflow: string;
+    readonly provider: string | null;
+    readonly modelRequests: number | null;
+    readonly deniedToolCalls: number | null;
+    readonly repairs: number | null;
+    readonly changes: readonly { readonly path: string; readonly created: boolean }[];
+    readonly verdict: { readonly verdict: "accepted" | "rejected"; readonly at: string; readonly note: string | null } | null;
+  } | null;
+  readonly apply: {
+    readonly planRunId: string | null;
+    readonly digest: string | null;
+    readonly approval: string | null;
+    readonly unsafeMoveConsent: string | null;
+    readonly actions: number | null;
+    readonly unsafeMoves: number | null;
+    readonly inventoryLimitReached: boolean;
+    readonly moved: readonly { readonly from: string; readonly to: string; readonly unsafe: boolean }[];
+    readonly discarded: readonly { readonly path: string }[];
+    readonly failed: readonly { readonly number: number; readonly problem: string }[];
+  } | null;
+}
+
+/** `labels`: the shared catalog's words for the finished status and reason, added by the main process. */
+export type ReportReply =
+  | { readonly ok: true; readonly view: ReportView; readonly labels?: { readonly status: string; readonly reason: string } | null }
+  | { readonly ok: false; readonly code: string };
+
+const wordOrNull = (value: unknown): value is string | null => value === null || (typeof value === "string" && WORD.test(value));
+const MAX_EVIDENCE = 5000;
+
+/** The engine host's report value, checked field by field. */
+export function toReportReply(value: unknown): ReportReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { runId, kind, status, finished, usage, verifiers, integrity, records, taskId } = value;
+  if (!isRunId(runId) || (kind !== "run" && kind !== "apply") || (status !== "complete" && status !== "incomplete") || !shortText(taskId) || !numOrNull(records)) return fail;
+  let finishedView: ReportView["finished"] = null;
+  if (finished !== null) {
+    if (!isObj(finished) || typeof finished["status"] !== "string" || !WORD.test(finished["status"]) || typeof finished["reason"] !== "string" || !WORD.test(finished["reason"])) return fail;
+    finishedView = { status: finished["status"], reason: finished["reason"] };
+  }
+  let usageView: ReportView["usage"] = null;
+  if (usage !== null) {
+    if (!isObj(usage)) return fail;
+    const { turns, tools, inputTokens, outputTokens, durationMs } = usage;
+    if (![turns, tools, inputTokens, outputTokens, durationMs].every(numOrNull)) return fail;
+    usageView = { turns: turns as number | null, tools: tools as number | null, inputTokens: inputTokens as number | null, outputTokens: outputTokens as number | null, durationMs: durationMs as number | null };
+  }
+  if (!Array.isArray(verifiers) || verifiers.length > MAX_ITEMS || !Array.isArray(integrity) || integrity.length > MAX_ITEMS) return fail;
+  const verifierViews: ReportVerifierView[] = [];
+  for (const verifier of verifiers) {
+    if (!isObj(verifier) || !count(verifier["number"]) || !wordOrNull(verifier["kind"]) || typeof verifier["outcome"] !== "string" || !WORD.test(verifier["outcome"])) return fail;
+    if (typeof verifier["evidence"] !== "string" || verifier["evidence"].length > MAX_EVIDENCE || typeof verifier["evidenceCut"] !== "boolean" || !textList(verifier["checked"]) || !textList(verifier["limits"])) return fail;
+    verifierViews.push({ number: verifier["number"], kind: verifier["kind"] as string | null, outcome: verifier["outcome"], evidence: verifier["evidence"], evidenceCut: verifier["evidenceCut"], checked: verifier["checked"], limits: verifier["limits"] });
+  }
+  const integrityViews: { phase: string; changed: string[] }[] = [];
+  for (const check of integrity) {
+    if (!isObj(check) || typeof check["phase"] !== "string" || !WORD.test(check["phase"]) || !textList(check["changed"])) return fail;
+    integrityViews.push({ phase: check["phase"], changed: check["changed"] });
+  }
+  let run: ReportView["run"] = null;
+  let apply: ReportView["apply"] = null;
+  if (kind === "run") {
+    const r = value["run"];
+    if (!isObj(r) || !shortText(r["workflow"]) || !wordOrNull(r["provider"]) || ![r["modelRequests"], r["deniedToolCalls"], r["repairs"]].every(numOrNull) || !Array.isArray(r["changes"]) || r["changes"].length > MAX_ITEMS) return fail;
+    const changes: { path: string; created: boolean }[] = [];
+    for (const change of r["changes"]) {
+      if (!isObj(change) || !shortText(change["path"]) || typeof change["created"] !== "boolean") return fail;
+      changes.push({ path: change["path"], created: change["created"] });
+    }
+    let verdict: NonNullable<ReportView["run"]>["verdict"] = null;
+    const given = r["verdict"];
+    if (given !== null) {
+      if (!isObj(given) || (given["verdict"] !== "accepted" && given["verdict"] !== "rejected") || typeof given["at"] !== "string" || !TIME.test(given["at"]) || !(given["note"] === null || shortText(given["note"]))) return fail;
+      verdict = { verdict: given["verdict"], at: given["at"], note: given["note"] as string | null };
+    }
+    run = { workflow: r["workflow"], provider: r["provider"] as string | null, modelRequests: r["modelRequests"] as number | null, deniedToolCalls: r["deniedToolCalls"] as number | null, repairs: r["repairs"] as number | null, changes, verdict };
+  } else {
+    const a = value["apply"];
+    if (!isObj(a) || !(a["planRunId"] === null || isRunId(a["planRunId"])) || !(a["digest"] === null || (typeof a["digest"] === "string" && DIGEST.test(a["digest"])))) return fail;
+    if (!wordOrNull(a["approval"]) || !wordOrNull(a["unsafeMoveConsent"]) || !numOrNull(a["actions"]) || !numOrNull(a["unsafeMoves"]) || typeof a["inventoryLimitReached"] !== "boolean") return fail;
+    if (!Array.isArray(a["moved"]) || a["moved"].length > MAX_ITEMS || !Array.isArray(a["discarded"]) || a["discarded"].length > MAX_ITEMS || !Array.isArray(a["failed"]) || a["failed"].length > MAX_ITEMS) return fail;
+    const moved: { from: string; to: string; unsafe: boolean }[] = [];
+    for (const item of a["moved"]) {
+      if (!isObj(item) || !shortText(item["from"]) || !shortText(item["to"]) || typeof item["unsafe"] !== "boolean") return fail;
+      moved.push({ from: item["from"], to: item["to"], unsafe: item["unsafe"] });
+    }
+    const discarded: { path: string }[] = [];
+    for (const item of a["discarded"]) {
+      if (!isObj(item) || !shortText(item["path"])) return fail;
+      discarded.push({ path: item["path"] });
+    }
+    const failed: { number: number; problem: string }[] = [];
+    for (const item of a["failed"]) {
+      if (!isObj(item) || !count(item["number"]) || typeof item["problem"] !== "string" || !WORD.test(item["problem"])) return fail;
+      failed.push({ number: item["number"], problem: item["problem"] });
+    }
+    apply = {
+      planRunId: a["planRunId"] as string | null,
+      digest: a["digest"] as string | null,
+      approval: a["approval"] as string | null,
+      unsafeMoveConsent: a["unsafeMoveConsent"] as string | null,
+      actions: a["actions"] as number | null,
+      unsafeMoves: a["unsafeMoves"] as number | null,
+      inventoryLimitReached: a["inventoryLimitReached"],
+      moved,
+      discarded,
+      failed,
+    };
+  }
+  return { ok: true, view: { runId, kind, status, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
+}
+
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };
 
 /** The engine host's review value, checked. */
@@ -693,6 +974,11 @@ export type RunListItem =
       readonly changes: number | null;
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
       readonly revertRecordDamaged: boolean;
+      /**
+       * R21b-L-1: the task form the run was started with, when this app started it (the main process
+       * remembers it). Null: unknown (started elsewhere), so a plan of it is shown but not applied here.
+       */
+      readonly form?: RunFormView | null;
     }
   | { readonly state: "damaged"; readonly runId: string };
 

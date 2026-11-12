@@ -15,7 +15,8 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MAX_RUN_ITEM_CHARS, MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
-import { loopbackOnlyFetch } from "./transport.js";
+import net from "node:net";
+import { guardSockets, loopbackOnlyFetch } from "./transport.js";
 import type { HostApp, HostMessages } from "./host.js";
 import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
@@ -40,7 +41,7 @@ function writeLine(line: string): void {
 /** The engine modules this host uses, checked when loaded (src/app/index.ts, src/i18n/index.ts). */
 interface EngineAppModule {
   createNodeAppEnvironment(): Promise<unknown>;
-  createCodarynApp(environment: unknown, hooks?: { readonly anthropicDeps?: { readonly fetch?: typeof fetch } }): HostApp;
+  createCodarynApp(environment: unknown, hooks?: { readonly providerDeps?: Readonly<Record<string, { readonly fetch?: typeof fetch }>> }): HostApp;
   /** DR-22: the providers the app layer connects (an array of names). */
   readonly CONNECTED_MODEL_PROVIDERS?: unknown;
 }
@@ -144,19 +145,42 @@ async function main(): Promise<number> {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
-  // R21-I-3: tests reach this machine only (their fake API); nothing else is sent.
-  const hooks = args.loopbackOnly
-    ? { anthropicDeps: { fetch: loopbackOnlyFetch(fetch, () => log("codaryn engine host: the test transport refused a request outside this machine")) } }
-    : undefined;
-  const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment(), hooks);
-  // R21-I-2: the key variables of every provider the contract knows (API_PROVIDERS), not one name.
+  // The contract's tables: the API providers (API_PROVIDERS) and the known key variables (API_KEY_ENVS).
   const contracts = (await import(pathToFileURL(join(engineDir, "contracts", "index.js")).href)) as Record<string, unknown>;
   const table = contracts["API_PROVIDERS"];
-  const keyEnvs =
+  // R21-I-3, F-2 (app layer providerDeps): in tests every API provider of the table gets a fetch that
+  // reaches this machine only. PM (a)(c): every refusal is counted (the tests end by asking for the
+  // count), and connections made without that fetch (node:net, http, https, tls) are guarded too.
+  let refusedCount = 0;
+  const refused = (): void => {
+    refusedCount += 1;
+    log("codaryn engine host: the test transport refused a request outside this machine");
+  };
+  if (args.loopbackOnly) guardSockets(net, refused);
+  const transport = (): { readonly mode: "loopback-only" | "real"; readonly refused: number } => ({ mode: args.loopbackOnly ? "loopback-only" : "real", refused: refusedCount });
+  const providerNames = typeof table === "object" && table !== null ? Object.keys(table).filter((name) => /^[a-z][a-z0-9_-]{0,31}$/.test(name)) : [];
+  const hooks = args.loopbackOnly ? { providerDeps: Object.fromEntries(providerNames.map((name) => [name, { fetch: loopbackOnlyFetch(fetch, refused) }])) } : undefined;
+  const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment(), hooks);
+  // PM (R-21, app layer note): the contract's whole list of known key variables (API_KEY_ENVS, which
+  // also names providers still being added), with every table entry's keyEnv and Anthropic's as a floor.
+  const listed = contracts["API_KEY_ENVS"];
+  const tableKeyEnvs =
     typeof table === "object" && table !== null
       ? Object.values(table).flatMap((spec) => (typeof spec === "object" && spec !== null && typeof (spec as Record<string, unknown>)["keyEnv"] === "string" ? [(spec as Record<string, string>)["keyEnv"] as string] : []))
       : [];
-  if (!keyEnvs.includes("ANTHROPIC_API_KEY")) keyEnvs.push("ANTHROPIC_API_KEY");
+  const keyEnvs = [
+    ...new Set([...(Array.isArray(listed) ? listed.filter((name): name is string => typeof name === "string") : []), ...tableKeyEnvs, "ANTHROPIC_API_KEY"]),
+  ].filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name));
+  // The settings screen's providers: the table's names and variable names, in its order.
+  const apiProviders =
+    typeof table === "object" && table !== null
+      ? Object.entries(table).flatMap(([name, spec]) => {
+          const record = typeof spec === "object" && spec !== null ? (spec as Record<string, unknown>) : {};
+          const keyEnv = record["keyEnv"];
+          const modelEnv = record["modelEnv"];
+          return /^[a-z][a-z0-9_-]{0,31}$/.test(name) && typeof keyEnv === "string" && typeof modelEnv === "string" ? [{ name, keyEnv, modelEnv }] : [];
+        })
+      : [];
   /** Key shapes, and the value of every provider's key variable now set, hidden. */
   const hideAllKeys = (text: string): string => {
     let out = textSafety.hideKeys(text, null);
@@ -198,7 +222,8 @@ async function main(): Promise<number> {
   process.stdin.setEncoding("utf8");
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
-  await serve(process.stdin, { app, messages, tree, shown, shownText, providers, itemsIn, token, write: writeLine, log });
+  const envSet = (name: string): boolean => (process.env[name] ?? "").length > 0;
+  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, apiProviders, transport, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

@@ -73,8 +73,12 @@ function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: 
 }
 
 const results: Record<string, unknown> = {};
+/** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
+const transportOf = (response: { readonly ok: boolean; readonly value?: unknown; readonly error?: { readonly code: string } }): unknown => (response.ok ? response.value : response.error?.code);
 /** The main process's OS dialogs this test answered, by id. */
 const dialogs: string[] = [];
+/** GU-6: answer the next widening dialog with "do not write". */
+let refuseWidening = false;
 
 startGui({
   // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
@@ -84,6 +88,10 @@ startGui({
   stateFile: STATE,
   answerDialog: async (id) => {
     dialogs.push(id);
+    if (id === "widen.message" && refuseWidening) {
+      refuseWidening = false;
+      return 1;
+    }
     return 0;
   },
   async afterLoad({ window, host, openFromOutside }) {
@@ -249,8 +257,13 @@ startGui({
       await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'sub/b.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
       const planRunId = (await newResult(beforePlan)) as string;
       results["planRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
-      await js("document.getElementById('run-view-plan')?.click(); true");
+      // R21b-L-1: B's plan is opened from the run list, with the form the main process remembered
+      // when B started (profile tidy), and applied from there.
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-plan="${planRunId}"]')?.click(); true`);
       results["planShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      results["planFromList"] = await js("({ apply: document.getElementById('plan-apply') !== null, unknown: document.getElementById('plan-form-unknown') !== null })");
       results["planActions"] = await js("[...document.querySelectorAll('#plan-actions li')].map((li) => li.getAttribute('data-kind'))");
       results["planForged"] = await js(`window.codaryn.applyPlan(${JSON.stringify("0".repeat(32))}, false)`);
       // A fresh approval of the same plan, asking for a consent its apply never needed: refused before any dialog.
@@ -263,6 +276,18 @@ startGui({
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
       results["applyMoved"] = { from: existsSync(join(SECOND, "sub", "b.txt")), to: existsSync(join(SECOND, "moved", "b.txt")) };
+      // The forms are in gui-state.json, which the next start reads (newest first; applies are not remembered).
+      results["stateForms"] = (() => {
+        try {
+          const saved = JSON.parse(readFileSync(STATE, "utf8")) as { workspaceMemory?: { path: string; runs: { runId: string; profile: string | null; workflow: string | null }[] }[] };
+          const name = SECOND.split(/[\\/]/).pop();
+          const entry = (saved.workspaceMemory ?? []).find((item) => item.path.split(/[\\/]/).pop() === name);
+          if (entry === undefined) return null;
+          return entry.runs.filter((run) => run.runId === planRunId || run.runId === directRunId).map((run) => [run.runId === planRunId ? "B" : "A", run.profile, run.workflow]);
+        } catch {
+          return "unreadable";
+        }
+      })();
 
       // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
       const beforeReview = await resultId();
@@ -276,17 +301,135 @@ startGui({
         results["reviewRecorded"] = await waitFor("document.getElementById('review-outcome')?.getAttribute('data-verdict') ?? null", 30_000);
       }
 
-      // 5h. DR-29, DR-32 (c): the analyze run wrote report.md; the same secrets mask it as the run
-      // did, so its text is shown and compared (a created file: every line added).
+      // 5h. DR-29, DR-32 (c): the analyze run wrote report.md and notes.md; the same secrets mask
+      // them as the run did. report.md is still what the run left, so its text is shown and compared
+      // (a created file: every line added). notes.md is changed here after the run: per file, it
+      // shows its path and state only.
+      writeFileSync(join(SECOND, "notes.md"), "changed after the run\n");
       await js("document.getElementById('run-view-changes')?.click(); true");
       results["reportChanges"] = await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()");
       results["reportDiff"] = await js(
         "(() => { const s = document.querySelector('#changes .changed-file'); return s === null ? null : { text: s.getAttribute('data-text'), kinds: [...s.querySelectorAll('.diff li')].map((li) => li.getAttribute('data-kind')), lines: [...s.querySelectorAll('.diff .text')].map((t) => t.textContent) }; })()",
       );
+      results["changesPerFile"] = await js(
+        "[...document.querySelectorAll('#changes .changed-file')].map((s) => ({ path: s.querySelector('.path')?.textContent ?? null, state: s.getAttribute('data-state'), text: s.getAttribute('data-text'), hidden: s.querySelector('[data-text=\"hidden\"]') !== null }))",
+      );
+      results["changesPerFileText"] = await js("document.getElementById('changes')?.textContent ?? ''");
       // F7 moves the focus to the first change.
       results["reportF7"] = await js(
         "(() => { const body = document.getElementById('changes'); const first = body?.querySelector('.changed-file'); if (!body || !first) return 'no file section'; first.focus(); body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F7', bubbles: true })); return document.activeElement?.hasAttribute('data-hunk') === true; })()",
       );
+
+      // 5i. GU-3 (3.7): the analyze run's report from its result: tabs, the summary, the verdict.
+      await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
+      await js("document.getElementById('run-view-report')?.click(); true");
+      results["reportReady"] = await waitFor("(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? r : null; })()");
+      results["reportTabs"] = await js("[...document.querySelectorAll('#report [role=tab]')].map((b) => b.getAttribute('data-tab'))");
+      results["reportSummary"] = await js("document.getElementById('report-status')?.getAttribute('data-reason') ?? null");
+      await js("document.querySelector('#report [role=tab][data-tab=\"review\"]')?.click(); true");
+      results["reportVerdict"] = await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null");
+      results["reportText"] = await js("document.getElementById('report')?.textContent ?? ''");
+      // From the run list: the first run's report (it created made.txt, since reverted).
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-report="${firstRun}"]')?.click(); true`);
+      results["listReport"] = await waitFor(
+        "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
+      );
+
+      // 5j. GU-6 (3.10, 6.6): settings changes, one edit at a time; "Write" sends the main process's token only.
+      // After the runs: once the config has a policy, quick runs use it instead of a task kind's own (src/cli/run.ts).
+      const proposal = (): Promise<unknown> =>
+        waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p && p !== 'asking' ? p : null; })()");
+      const written = (list: string): Promise<unknown> =>
+        waitFor(
+          `(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? [...document.querySelectorAll('#${list} li > span:first-child')].map((s) => s.textContent) : null; })()`,
+        );
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["settingsPolicyFirst"] = await js("document.getElementById('settings-policy-first') !== null");
+      const asked = dialogs.length;
+      // Narrowing: a protected path. No dialog.
+      await js("(() => { document.getElementById('settings-protected-path').value = 'notes/private.md'; document.getElementById('settings-protected-add').click(); return true; })()");
+      results["settingsNarrow"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsNarrowWritten"] = await written("settings-protected");
+      results["settingsNarrowDialogs"] = dialogs.length - asked;
+      // Widening: a command. The first answer is "do not write" (nothing is written), the second "write".
+      const addCommand = "(() => { document.getElementById('settings-command-exe').value = 'node'; document.getElementById('settings-command-args').value = '--version'; document.getElementById('settings-command-add').click(); return true; })()";
+      await js(addCommand);
+      results["settingsWiden"] = await proposal();
+      results["settingsWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal [data-kind]')].map((li) => li.getAttribute('data-kind'))");
+      refuseWidening = true;
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsWidenRefused"] = await waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p === 'not_confirmed' ? p : null; })()");
+      results["settingsAfterRefusal"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { policy?: { commands?: unknown[] } };
+          return config.policy?.commands?.length ?? 0;
+        } catch {
+          return "unreadable";
+        }
+      })();
+      await js(addCommand);
+      await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsWidenWritten"] = await written("settings-commands");
+      results["settingsWidenDialogs"] = dialogs.filter((id) => id === "widen.message").length;
+      // The page cannot send a config, reuse a token or make one up.
+      results["settingsWholeConfig"] = await js("window.codaryn.proposeSettings({ op: 'replace', next: { schemaVersion: 1 } })");
+      results["settingsForgedToken"] = await js(`window.codaryn.applySettings(${JSON.stringify("0".repeat(32))})`);
+      results["settingsTokenOnce"] = await js(
+        "(async () => { const p = await window.codaryn.proposeSettings({ op: 'addSecretEnv', name: 'SMOKE_SECRET_NAME' }); if (!p.ok) return p; const a = await window.codaryn.applySettings(p.token); const b = await window.codaryn.applySettings(p.token); return [a.ok && a.written, b.code]; })()",
+      );
+      // Removing a secret name widens: asked first (6.6).
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      const widenAsked = dialogs.filter((id) => id === "widen.message").length;
+      await js("[...document.querySelectorAll('#settings-secret-names li')].find((li) => li.textContent.includes('SMOKE_SECRET_NAME'))?.querySelector('[data-remove]')?.click(); true");
+      results["settingsSecretRemoval"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsSecretRemoved"] = await waitFor(
+        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); return ready === 'ok' && document.getElementById('settings-proposal')?.getAttribute('data-proposal') === 'written' ? document.getElementById('settings-secrets')?.textContent.includes('SMOKE_SECRET_NAME') === false : null; })()",
+      );
+      results["settingsSecretDialogs"] = dialogs.filter((id) => id === "widen.message").length - widenAsked;
+      results["settingsOnDisk"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { model?: string; policy?: { commands?: unknown[]; protectedPaths?: unknown[] }; secretEnv?: unknown[] };
+          return { model: config.model, commands: config.policy?.commands, protectedPaths: config.policy?.protectedPaths, secretEnv: config.secretEnv ?? [] };
+        } catch {
+          return "unreadable";
+        }
+      })();
+      results["settingsChangeText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+
+      // 5k. PM task (2): the provider choice. The providers come from the contract's table; a key shows
+      // set or not by its variable's name. Switched to openai and back (later runs use anthropic).
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["providerRows"] = await js("[...document.querySelectorAll('#settings-provider li[data-provider]')].map((li) => [li.getAttribute('data-provider'), li.getAttribute('data-key')])");
+      results["providerInUse"] = await js("document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null");
+      const inUse =
+        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? { inUse: document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null, lists: document.querySelectorAll('[data-list-models]').length, noList: document.getElementById('settings-model-no-list') !== null } : null; })()";
+      const choose = (name: string): string =>
+        `(() => { const c = document.getElementById('settings-provider-choice'); c.value = ${JSON.stringify(name)}; document.getElementById('settings-provider-change').click(); return true; })()`;
+      await js(choose("openai"));
+      results["providerProposal"] = await proposal();
+      results["providerWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal [data-kind]')].map((li) => li.getAttribute('data-kind'))");
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["providerOpenai"] = await waitFor(inUse);
+      results["providerText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+      await js(choose("anthropic"));
+      await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["providerBack"] = await waitFor(inUse);
+      results["providerOnDisk"] = (() => {
+        try {
+          return (JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { provider?: string }).provider ?? null;
+        } catch {
+          return "unreadable";
+        }
+      })();
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
@@ -321,6 +464,8 @@ startGui({
         }),
       );
       results["sockets"] = sockets([...pids]);
+      // PM (a): the engine host's test transport refused no request to another machine in steps 1 to 7.
+      results["transportRefused"] = "host" in state ? transportOf(await state.host.call("transport", {}, 10_000)) : state.failure;
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.
@@ -333,6 +478,9 @@ startGui({
       window.close();
       await Promise.race([closed, sleep(30_000)]);
       results["closeGuard"] = { dialogs: [...dialogs], closed: window.isDestroyed(), ms: Date.now() - begin };
+      // And none in step 8 either, while the host still runs.
+      const after = await host();
+      results["transportRefusedEnd"] = "host" in after && !after.host.exited ? transportOf(await after.host.call("transport", {}, 10_000)) : "host ended";
     } catch (error) {
       results["error"] = error instanceof Error ? error.message : String(error);
     } finally {

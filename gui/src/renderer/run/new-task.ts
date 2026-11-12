@@ -2,6 +2,8 @@
  * GU-3: the new task screen (docs/design/standalone-gui.md 3.5), the quick form of `startRun`:
  * the open workspace (a handle), a goal, and the task kind and profile chosen from the settings.
  * - The model is shown, not chosen: settings and profiles decide it (settings > model changes it).
+ *   The notice names the provider the run will use: the chosen profile's, else the config's, else
+ *   the default (SP-D3, SP-D10), with that provider's model.
  * - "Advanced" only says where policy, limits and protected paths come from; the run request has
  *   no field to override them (AC 5.1, M-9).
  * - One run at a time (GUI-D12): the run button is off while a run starts or goes on.
@@ -25,6 +27,8 @@ export interface NewTaskDeps {
   readonly open: () => void;
   /** Goes to the run screen once the run has started. */
   readonly showRun: () => void;
+  /** R21b-L-1: the form of a run that started, as the workspace's last one. */
+  readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
 }
 
 function select(id: string, label: string, options: readonly (readonly [string, string])[], chosen: string): { field: HTMLElement; input: HTMLSelectElement } {
@@ -60,17 +64,33 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         for (const id of view?.workflows.config ?? []) workflows.push([id, t.format("settings.workflowConfig", { workflow: id })]);
         const profiles: [string, string][] = [["", t.format("task.profileNone")]];
         for (const profile of view?.profiles ?? []) profiles.push([profile.name, profile.name]);
-        const workflow = select("task-workflow", t.format("task.workflow"), workflows, run.last?.workflow ?? "");
-        const profile = select("task-profile", t.format("task.profile"), profiles, run.last?.profile ?? "");
+        // The workspace's last form (remembered across restarts), else this session's last request.
+        const last = workspace.lastForm ?? run.last;
+        const known = (value: string | null | undefined, options: readonly (readonly [string, string])[]): string => (value != null && options.some(([id]) => id === value) ? value : "");
+        const workflow = select("task-workflow", t.format("task.workflow"), workflows, known(last?.workflow, workflows));
+        const profile = select("task-profile", t.format("task.profile"), profiles, known(last?.profile, profiles));
 
         const goalField = el("p", undefined, { class: "field" });
         const goal = el("textarea", undefined, { id: "task-goal", rows: "4", maxlength: String(GOAL_LIMIT), "aria-describedby": "task-notice" });
         goal.value = run.last?.goal ?? "";
         goalField.append(el("label", t.format("task.goal"), { for: "task-goal" }), goal);
 
-        const model = el("p", view?.model === null || view === null ? t.format("task.modelNone") : t.format("task.model", { model: view.model }), { id: "task-model" });
-        const provider = view?.providers[0];
-        const notice = el("p", provider === undefined ? t.format("task.noticeAny") : t.format("task.notice", { provider }), { id: "task-notice", class: "notice" });
+        const model = el("p", undefined, { id: "task-model" });
+        const notice = el("p", undefined, { id: "task-notice", class: "notice" });
+        const providerInUse = (): string | null => {
+          const chosen = view?.profiles.find((item) => item.name === profile.input.value);
+          return chosen?.provider ?? view?.provider ?? view?.defaultProvider ?? null;
+        };
+        const describe = (): void => {
+          const provider = providerInUse();
+          const entry = view?.apiProviders.find((item) => item.name === provider);
+          const modelId = entry === undefined ? (view?.model ?? null) : entry.model;
+          model.textContent = modelId === null ? t.format("task.modelNone") : t.format("task.model", { model: modelId });
+          notice.textContent = provider === null ? t.format("task.noticeAny") : t.format("task.notice", { provider });
+          notice.setAttribute("data-provider", provider ?? "none");
+        };
+        describe();
+        profile.input.addEventListener("change", describe);
         const advanced = el("details", undefined, { id: "task-advanced" });
         advanced.append(el("summary", t.format("task.advanced")), el("p", t.format("task.advancedText")));
 
@@ -91,6 +111,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
             const started = asStartRun(await api.startRun(workspace.handle, request.goal, request.profile, request.workflow));
             if (started.ok) {
               run.started(started.runId, Date.now());
+              deps.rememberForm?.({ profile: request.profile, workflow: request.workflow });
               deps.showRun();
             } else {
               run.failedToStart(started.code);

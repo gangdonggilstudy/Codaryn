@@ -17,7 +17,11 @@ import { MAX_CELLS, hunkStarts, lineDiff, splitLines } from "../../src/renderer/
 import { MAX_CHANGE_TEXT_CHARS, toChangesReply } from "../../src/shared/ipc.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
 import type { HostMessage } from "../../src/shared/protocol.js";
+import { changesScreen } from "../../src/renderer/changes/changes-screen.js";
+import type { CodarynApi } from "../../src/renderer/api.js";
+import { textsFor } from "../../src/renderer/i18n/catalog.js";
 import { fakeApp } from "./fake-app.js";
+import { FakeElement, installFakeDom, settle } from "./fake-dom.js";
 
 const WS = path.resolve("ws-for-changes");
 const RUN = "20261112T010203Z-0000abcd";
@@ -129,4 +133,63 @@ test("changes (DR-29): a middle too large to compare is listed as removed then a
   assert.equal(lines.at(-1)?.newNo, n + 2);
   assert.ok(lines.slice(1, n + 1).every((line) => line.kind === "removed"));
   assert.ok(lines.slice(n + 1, 2 * n + 1).every((line) => line.kind === "added"));
+});
+
+test("changes (per file): a side longer than the main process takes leaves only that file without text", async () => {
+  const long = "y".repeat(MAX_CHANGE_TEXT_CHARS + 1);
+  const { call } = host(
+    [
+      { path: "long.md", created: false, state: "as_run_left", before: "short\n", after: long, unavailable: null },
+      { path: "ok.md", created: false, state: "as_run_left", before: "a\n", after: "b\n", unavailable: null },
+    ],
+    (text) => text,
+  );
+  const reply = toChangesReply(await call(1, { workspace: WS, profile: null, runId: RUN }));
+  assert.equal(reply.ok, true, "the whole view is not refused");
+  if (!reply.ok) return;
+  assert.deepEqual(reply.files[0], { path: "<long.md>", created: false, state: "as_run_left", unavailable: "too_large", before: null, after: null });
+  assert.deepEqual(reply.files[1], { path: "<ok.md>", created: false, state: "as_run_left", unavailable: null, before: "a\n", after: "b\n" });
+});
+
+test("changes (per file): the screen shows each file by itself: compared, path and state only, or one side as it is", async () => {
+  const restore = installFakeDom();
+  try {
+    const files = [
+      { path: "shown.md", created: false, state: "as_run_left", unavailable: null, before: "a\n", after: "b\n" },
+      { path: "unverified.md", created: false, state: "changed_since_run", unavailable: "masking_unverified", before: null, after: null },
+      { path: "current.md", created: false, state: "as_run_left", unavailable: "snapshot_missing", before: null, after: "x\ny\n" },
+      { path: "made.md", created: true, state: "as_run_left", unavailable: null, before: null, after: "new\n" },
+    ];
+    const api = new Proxy({} as CodarynApi, { get: (_t, name: string) => async () => (name === "changes" ? { ok: true, runId: RUN, files } : null) });
+    const screen = changesScreen({ texts: textsFor("en"), api, current: () => ({ handle: "1".repeat(32), name: "ws" }) });
+    screen.choose(RUN, null, null);
+    const root = new FakeElement("main");
+    screen.show(root as unknown as HTMLElement);
+    await settle();
+    await settle();
+    const sections = root.findAll((e) => e.getAttribute("class") === "changed-file");
+    assert.deepEqual(
+      sections.map((s) => s.getAttribute("data-text")),
+      ["shown", "none", "current", "shown"],
+    );
+    assert.equal(sections[1]?.findAll((e) => e.getAttribute("data-text") === "hidden").length, 1, "says why there is no text");
+    const current = sections[2]?.findAll((e) => e.tagName === "li") ?? [];
+    assert.deepEqual(
+      current.map((li) => [li.getAttribute("data-kind"), li.textContent]),
+      [
+        ["same", "1x"],
+        ["same", "2y"],
+      ],
+      "no line is marked added: the original is unknown",
+    );
+    assert.ok(sections[2]?.textContent.includes("only the current content is shown"));
+    const made = sections[3]?.findAll((e) => e.tagName === "li") ?? [];
+    assert.deepEqual(
+      made.map((li) => li.getAttribute("data-kind")),
+      ["added"],
+      "a file the run made is compared with nothing: every line added",
+    );
+  } finally {
+    restore();
+  }
 });

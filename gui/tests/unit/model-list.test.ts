@@ -97,7 +97,7 @@ test("model list (R21-I-3): the test transport passes requests to this machine a
   for (const url of ["http://127.0.0.1:4100/v1/models", "http://localhost:9/v1/messages", "http://[::1]:80/x"]) {
     assert.equal((await guarded(url)).status, 200, url);
   }
-  for (const url of ["https://api.anthropic.com/v1/models", "https://api.openai.com/v1/models", "http://192.0.2.1/", "http://127.0.0.1.example.invalid/", "not a url"]) {
+  for (const url of ["https://api.anthropic.com/v1/models", "https://api.openai.com/v1/models", "http://127.0.0.2/", "http://127.0.0.1.example.invalid/", "not a url"]) {
     await assert.rejects(guarded(url), TypeError, url);
   }
   assert.deepEqual(sent, ["http://127.0.0.1:4100/v1/models", "http://localhost:9/v1/messages", "http://[::1]:80/x"]);

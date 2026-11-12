@@ -26,6 +26,10 @@ import {
   toPlanView,
   toReviewReply,
   toChangesReply,
+  toReportReply,
+  toHostProposal,
+  toWrittenReply,
+  parseTokenArgs,
   parseRunArgs,
   parseWorkspaceArgs,
   toRevertView,
@@ -44,7 +48,9 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
-import type { ChangesReply, PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
+import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply, SettingsProposalReply, SettingsWrittenReply } from "../shared/ipc.js";
+import { parseSettingsEdit } from "../shared/settings-edit.js";
+import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
 
@@ -86,6 +92,10 @@ export interface IpcDeps {
   readonly history: RunHistory;
   /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
   readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
+  /** GU-6: the settings change proposals shown. */
+  readonly settingsProposals: SettingsProposals;
+  /** GU-6 (6.6): asks the person (an OS dialog) whether to write a change that widens what runs may do. */
+  readonly confirmWidening: (proposal: SettingsProposal) => Promise<boolean>;
   /** DR-25: asks the person (a separate OS dialog) for the consent to move this run's files back unsafely. */
   readonly confirmRevertConsent: (retry: ConsentRetry) => Promise<boolean>;
   /** GU-5: the plans shown and their approval tokens. */
@@ -236,6 +246,34 @@ export function registerIpc(deps: IpcDeps): void {
     return toSettingsView(response.value, deps.envFacts());
   });
 
+  // GU-6 (3.10): one edit → a proposal (the new config stays here) → applied by token, asked first when it widens.
+  handle(IPC_CHANNELS.proposeSettings, async (args): Promise<SettingsProposalReply> => {
+    const edit = args.length === 1 && typeof args[0] === "object" && args[0] !== null ? parseSettingsEdit((args[0] as Record<string, unknown>)["edit"]) : null;
+    if (edit === null || Object.keys(args[0] as object).some((key) => key !== "edit")) return { ok: false, code: "invalid_args" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("proposeSettings", { edit }, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const proposal = toHostProposal(response.value);
+    if (!proposal.ok) return proposal;
+    const token = deps.settingsProposals.issue({ next: proposal.next, baseDigest: proposal.baseDigest, changes: proposal.changes, widening: proposal.widening });
+    return { ok: true, token, changes: proposal.changes, widening: proposal.widening };
+  });
+
+  handle(IPC_CHANNELS.applySettings, async (args): Promise<SettingsWrittenReply> => {
+    const parsed = args.length === 1 ? parseTokenArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const proposal = deps.settingsProposals.take(parsed.token);
+    if (proposal === null) return { ok: false, code: "unknown_proposal" };
+    const widens = proposal.widening.length > 0;
+    if (widens && !(await deps.confirmWidening(proposal))) return { ok: false, code: "not_confirmed" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("applySettings", { next: proposal.next, baseDigest: proposal.baseDigest, confirmWidening: widens }, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toWrittenReply(response.value);
+  });
+
   handle(IPC_CHANNELS.listModels, async (args): Promise<ModelsReply> => {
     const parsed = args.length === 1 ? parseProviderArgs(args[0]) : null;
     if (parsed === null) return { ok: false, code: "invalid_args" };
@@ -288,6 +326,8 @@ export function registerIpc(deps: IpcDeps): void {
       const runId = value["runId"];
       if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
       deps.runs.begin(token, runId);
+      // R21b-L-1: the run's form, so its plan, changes and report open with it later (also after a restart).
+      await workspaces.rememberRun(parsed.workspace, runId, { profile: parsed.profile, workflow: parsed.workflow });
       return { ok: true, runId };
     } finally {
       starting = false;
@@ -305,8 +345,10 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("listRuns", { workspace: root }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toRunsReply(response.value);
-    if (reply.ok) deps.history.listedRuns(parsed.workspace, reply.runs.map((run) => run.runId));
-    return reply;
+    if (!reply.ok) return reply;
+    deps.history.listedRuns(parsed.workspace, reply.runs.map((run) => run.runId));
+    const forms = await workspaces.runForms(parsed.workspace);
+    return { ...reply, runs: reply.runs.map((run) => (run.state === "checked" ? { ...run, form: forms.get(run.runId) ?? null } : run)) };
   });
 
   handle(IPC_CHANNELS.previewRevert, async (args): Promise<RevertReply> => {
@@ -439,6 +481,26 @@ export function registerIpc(deps: IpcDeps): void {
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toChangesReply(response.value);
     return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
+  });
+
+  // GU-3 (3.7): a run's report. It reads; it changes nothing. A run id, never "latest".
+  handle(IPC_CHANNELS.report, async (args): Promise<ReportReply> => {
+    const parsed = args.length === 1 ? parseRunArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("report", { workspace: root, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const reply = toReportReply(response.value);
+    if (!reply.ok) return reply;
+    if (reply.view.runId !== parsed.runId) return { ok: false, code: "host_error" };
+    const finished = reply.view.finished;
+    if (finished === null) return { ...reply, labels: null };
+    const ids = [`status.${finished.status}`, `reason.${finished.reason}`];
+    const found = await texts(state.host, deps.osLocale(), ids);
+    return { ...reply, labels: { status: found?.texts[ids[0] as string] ?? finished.status, reason: found?.texts[ids[1] as string] ?? finished.reason } };
   });
 
   handle(IPC_CHANNELS.review, async (args): Promise<ReviewReply> => {

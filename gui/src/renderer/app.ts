@@ -15,6 +15,7 @@ import { runScreen } from "./run/run-screen.js";
 import { runsScreen } from "./runs/runs-screen.js";
 import { planScreen } from "./plan/plan-screen.js";
 import { changesScreen } from "./changes/changes-screen.js";
+import { reportScreen } from "./report/report-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
@@ -66,10 +67,24 @@ async function start(): Promise<void> {
   tree = new TreeView(texts, api, shell.filePanel);
   shell.add(homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError }));
   const run = new RunModel();
-  shell.add(newTaskScreen({ texts, api, run, current: () => current, open: openWorkspace, showRun: () => shell?.show("run") }));
+  shell.add(
+    newTaskScreen({
+      texts,
+      api,
+      run,
+      current: () => current,
+      open: openWorkspace,
+      showRun: () => shell?.show("run"),
+      // R21b-L-1: the main process remembers it too; this keeps the open workspace's copy current.
+      rememberForm: (form) => {
+        if (current !== null) current = { ...current, lastForm: form };
+      },
+    }),
+  );
   const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
-  const openPlan = (runId: string, profile: string | null, workflow: string | null): void => {
-    plan.choose(runId, profile, workflow);
+  /** `formKnown` false: the run's form is unknown (started elsewhere); its plan is shown, not applied. */
+  const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true): void => {
+    plan.choose(runId, profile, workflow, formKnown);
     shell?.show("plan");
   };
   const changes = changesScreen({ texts, api, current: () => current });
@@ -77,10 +92,17 @@ async function start(): Promise<void> {
     changes.choose(runId, profile, workflow);
     shell?.show("changes");
   };
-  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges }));
+  const report = reportScreen({ texts, api, current: () => current, openChanges: (runId, form) => openChanges(runId, form?.profile ?? null, form?.workflow ?? null) });
+  /** The report of a run, with the run's own form (for its changes view). */
+  const openReport = (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null): void => {
+    report.choose(runId, form);
+    shell?.show("report");
+  };
+  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport }));
   shell.add(plan);
   shell.add(changes);
-  shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges }));
+  shell.add(report);
+  shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges, openReport }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.setEngine(info.engine);

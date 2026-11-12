@@ -31,8 +31,8 @@ const rootDist = join(gui, "..", "dist");
 const fromRoot = (...parts) => import(pathToFileURL(join(rootDist, ...parts)).href);
 const fakeApi = await fromRoot("tests", "support", "fake-anthropic.js");
 const fakeModels = await fromRoot("tests", "support", "fake-models.js");
-const { FAKE_API_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
-const { ANTHROPIC_API_KEY_ENV } = await fromRoot("src", "contracts", "index.js");
+const { FAKE_API_KEY, FAKE_OPENAI_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
+const { ANTHROPIC_API_KEY_ENV, API_PROVIDERS } = await fromRoot("src", "contracts", "index.js");
 const closeFake = [];
 // Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
 // window); a run that hangs (cancelled by closing the window).
@@ -42,7 +42,10 @@ const steps = [
   { kind: "hang" },
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "sub/b.txt to moved", actions: [{ kind: "move", from: "sub/b.txt", to: "moved/b.txt" }] })]),
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } })]),
+  fakeApi.replyTools([
+    fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } }),
+    fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
+  ]),
   fakeApi.replyText("analysis written"),
   { kind: "hang" },
 ];
@@ -86,12 +89,18 @@ try {
 const env = {};
 for (const [name, value] of Object.entries(process.env)) {
   if (value === undefined) continue;
-  if (/^(ANTHROPIC_API_KEY|CODARYN_CONFIG|CODARYN_LANG|CODARYN_MODEL|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|npm_node_execpath)$/i.test(name)) continue;
+  // Every provider's key, model and address variable of this machine stays out, and every Codaryn variable.
+  const providerVariables = Object.values(API_PROVIDERS).flatMap((spec) => [spec.keyEnv, spec.modelEnv, spec.baseUrlEnv]);
+  if (providerVariables.some((known) => known.toUpperCase() === name.toUpperCase())) continue;
+  if (/^(ANTHROPIC_API_KEY|OPENAI_API_KEY|CODARYN_[A-Z0-9_]+|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|npm_node_execpath)$/i.test(name)) continue;
   env[name] = value;
 }
 env.CODARYN_CONFIG = configFile;
 // The fixtures' fake key, as the root tests set it (tests/support/cli.ts).
 env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
+// The fixtures' fake OpenAI key: the settings screen shows that it is set, never its value. Runs here
+// stay on anthropic; the engine host's test transport reaches this machine only, for every provider.
+env[API_PROVIDERS.openai.keyEnv] = FAKE_OPENAI_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
 
@@ -122,7 +131,13 @@ const run = await new Promise((resolve) => {
     resolve({ status, error: undefined });
   });
 });
-const apiRequests = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
+const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
+const apiRequests = {
+  models: apiRequestRows.filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length,
+  messages: apiRequestRows.filter((r) => r.path === "/v1/messages" && r.method === "POST").length,
+  other: apiRequestRows.filter((r) => !((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
+  allFakeKey: apiRequestRows.every((r) => r.key === true),
+};
 for (const close of closeFake) await close();
 let configModel = null;
 try {
@@ -145,7 +160,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyPlan,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
+const API = "applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -205,14 +220,48 @@ const expected = [
   ["modelChosen", (v) => v === "fake-model-b"],
   ["modelForgedEntry", (v) => v.ok === false && v.code === "unknown_entry"],
   ["modelIdAsEntry", (v) => v.ok === false && v.code === "invalid_args"],
+  // GU-6 (3.10, 6.6): settings changes by the main process's token; widening asked first.
+  ["settingsPolicyFirst", (v) => v === true],
+  ["settingsNarrow", (v) => v === "ready"],
+  ["settingsNarrowWritten", (v) => JSON.stringify(v) === JSON.stringify(["notes/private.md"])],
+  ["settingsNarrowDialogs", (v) => v === 0],
+  ["settingsWiden", (v) => v === "widens"],
+  ["settingsWidenKinds", (v) => JSON.stringify(v) === JSON.stringify(["command_added"])],
+  ["settingsWidenRefused", (v) => v === "not_confirmed"],
+  ["settingsAfterRefusal", (v) => v === 0],
+  ["settingsWidenWritten", (v) => JSON.stringify(v) === JSON.stringify(["node --version"])],
+  ["settingsWidenDialogs", (v) => v === 2],
+  ["settingsWholeConfig", (v) => v.ok === false && v.code === "invalid_args"],
+  ["settingsForgedToken", (v) => v.ok === false && v.code === "unknown_proposal"],
+  ["settingsTokenOnce", (v) => JSON.stringify(v) === JSON.stringify([true, "unknown_proposal"])],
+  ["settingsSecretRemoval", (v) => v === "widens"],
+  ["settingsSecretRemoved", (v) => v === true],
+  ["settingsSecretDialogs", (v) => v === 1],
+  [
+    "settingsOnDisk",
+    (v) =>
+      v.model === "fake-model-b" &&
+      JSON.stringify(v.commands) === JSON.stringify([{ executable: "node", argsPrefix: ["--version"], allowExtraArgs: false }]) &&
+      JSON.stringify(v.protectedPaths) === JSON.stringify(["notes/private.md"]) &&
+      JSON.stringify(v.secretEnv) === "[]",
+  ],
+  ["settingsChangeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes("smoke-config")],
+  // PM task (2): the provider choice; keys set or not by name, never a value; the list only for the provider in use.
+  ["providerRows", (v) => JSON.stringify(v) === JSON.stringify([["anthropic", "set"], ["openai", "set"]])],
+  ["providerInUse", (v) => v === "anthropic"],
+  // F-3 (app layer): a change of provider is a widening; the main process asks first.
+  ["providerProposal", (v) => v === "widens"],
+  ["providerWidenKinds", (v) => JSON.stringify(v) === JSON.stringify(["provider_changed"])],
+  // F-1 (app layer): each provider has its own model list button.
+  ["providerOpenai", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "openai", lists: 2, noList: false })],
+  ["providerBack", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "anthropic", lists: 2, noList: false })],
+  ["providerText", (v) => typeof v === "string" && v.includes(API_PROVIDERS.openai.keyEnv) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(FAKE_API_KEY)],
+  ["providerOnDisk", (v) => v === "anthropic"],
   ["configModel", (v) => v === "fake-model-b"],
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [
     "apiRequests",
-    (v) =>
-      rows(v).filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length >= 2 &&
-      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 8 &&
-      rows(v).every((r) => r.key === true && ((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
+    (v) => v.models >= 2 && v.messages === 8 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -250,6 +299,17 @@ const expected = [
   ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
   ["planRun", (v) => v === "plan_pending"],
   ["planShown", (v) => v === "pending"],
+  // R21b-L-1: opened from the run list with the remembered form, so it can be applied there.
+  ["planFromList", (v) => v.apply === true && v.unknown === false],
+  [
+    "stateForms",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify([
+        ["B", "tidy", null],
+        ["A", null, "organize"],
+      ]),
+  ],
   ["planActions", (v) => JSON.stringify(v) === JSON.stringify(["move"])],
   ["planForged", (v) => v.ok === false && v.code === "unknown_plan"],
   ["consentUnasked", (v) => v.ok === false && v.code === "consent_not_asked"],
@@ -259,10 +319,31 @@ const expected = [
   ["reviewAsked", (v) => v === true],
   ["reviewRecorded", (v) => v === "accepted"],
   // DR-29, DR-32 (c): the write recorded its digests, the same secrets mask it now: the text is compared.
-  ["reportChanges", (v) => v === "1"],
+  ["reportChanges", (v) => v === "2"],
+  // Per file: report.md is still what the run left (its text); notes.md changed after the run (path and state only).
+  [
+    "changesPerFile",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify([
+        { path: "report.md", state: "as_run_left", text: "shown", hidden: false },
+        { path: "notes.md", state: "changed_since_run", text: "none", hidden: true },
+      ]),
+  ],
+  ["changesPerFileText", (v) => typeof v === "string" && !v.includes("changed after the run") && !v.includes("메모")],
   ["reportDiff", (v) => v !== null && v.text === "shown" && JSON.stringify(v.kinds) === JSON.stringify(["added", "added"]) && JSON.stringify(v.lines) === JSON.stringify(["결과 표", "해석"])],
   ["reportF7", (v) => v === true],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // GU-3 (3.7): reports from a result and from the run list.
+  ["reportReady", (v) => v === "run"],
+  ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
+  ["reportSummary", (v) => v === "awaiting_review"],
+  ["reportVerdict", (v) => v === "accepted"],
+  ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
+  ["listReport", (v) => v === "no_verifier"],
+  // PM (a): the engine host's test transport refused no request to another machine.
+  ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
+  ["transportRefusedEnd", (v) => v === "host ended" || JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)
@@ -370,6 +451,7 @@ if (life === null || typeof life.hostPid !== "number") {
   lifeCheck("hostEndsWhenMainKilled", false, "the app did not start");
   held.kill();
 } else {
+  lifeCheck("lifeTransportRefused", JSON.stringify(life.transport) === JSON.stringify({ mode: "loopback-only", refused: 0 }), `transport ${JSON.stringify(life.transport)}`);
   // Kills the main process only (TerminateProcess on Windows), not its children.
   process.kill(life.mainPid);
   const gone = await goneWithin(life.hostPid, 5_000);

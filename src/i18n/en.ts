@@ -420,6 +420,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.kept.not_reverted_not_confirmed": "not reverted or only partly reverted, and removing it was not confirmed apart",
   "cleanup.kept.used_by_kept_apply": "a plan run whose apply run is kept; without it that apply could not be reverted",
   "cleanup.kept.partly_removed": "moved aside but not all of it could be removed; the rest is in a folder the next cleanup shows",
+  "apply.notice.plan_records_unchecked": "The plan run's records could not be checked for changes, because the state directory is too large to check entirely; the apply was not stopped for this. Read the result, and run codaryn cleanup to make the state directory small enough to check.",
 
   "diagnostic.file.config": "config file",
   "diagnostic.file.task": "task file",

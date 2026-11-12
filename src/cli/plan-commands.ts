@@ -573,6 +573,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
       // ApplyDeps.stateGuard. `runId` is this apply run; `planRunId` the plan run it carries out,
       // whose directory gets the applied mark. The journal notes each discarded file as its own.
       const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock, planRunId });
+      const planTaskId = await planTaskIdOf(io, workspaceRoot, planRunId);
       const journal = observeApply(
         recorders.journal,
         privacy,
@@ -611,6 +612,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         stateGuard: recorders.stateGuard,
         // U-1: the same check under the lock, right after apply_started (a mark written since).
         planRecordsChanged,
+        // U-16 (UXM-15): the task the plan run ran with; the engine tells when it is not this one.
+        ...(planTaskId === null ? {} : { planTaskId }),
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
@@ -695,6 +698,22 @@ function observeApply(
     },
     close: () => journal.close(),
   };
+}
+
+/**
+ * U-16 (UXM-15, ApplyDeps.planTaskId): the task id the plan run ran with, as its run list entry
+ * gives it (its run_started.taskId). null when it cannot be read: nothing is compared then.
+ */
+async function planTaskIdOf(io: PlanCommandEnvironment, workspaceRoot: string, planRunId: string): Promise<string | null> {
+  try {
+    const listing = await (io.listRuns ?? storeListRuns)({ workspaceRoot });
+    for (const entry of listing.runs) {
+      if (entry.state === "checked" && entry.runId === planRunId) return typeof entry.taskId === "string" ? entry.taskId : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** The checklist of a run that ended as `needs-input`/`awaiting_review`, from its result.json. */

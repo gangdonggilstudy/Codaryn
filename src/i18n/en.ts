@@ -131,8 +131,10 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.damaged": "damaged (the record could not be checked)",
   "runs.revert_record_damaged": "revert record damaged (the run's records are fine)",
   "runs.records_changed": "records changed (something other than the run changed its records)",
+  "runs.plan_applied": "plan applied by run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",
+  "changes.apply_run": "This run applied the plan of run {runId}; actions applied: {count}. They are moves and discards of that plan, not files this run wrote, so no file text is shown here; the run's report lists them.",
   "runs.reverted": "reverted",
   "runs.omitted": "More runs not shown: {count}. Raise --limit to see them.",
 
@@ -427,6 +429,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.kept.used_by_kept_apply": "a plan run whose apply run is kept; without it that apply could not be reverted",
   "cleanup.kept.partly_removed": "moved aside but not all of it could be removed; the rest is in a folder the next cleanup shows",
   "apply.notice.plan_records_unchecked": "The plan run's records could not be checked for changes, because the state directory is too large to check entirely; the apply was not stopped for this. Read the result, and run codaryn cleanup to make the state directory small enough to check.",
+  "apply.notice.plan_task_differs": "The plan was made with another task than the one given to this apply (for example a task file, and the quick form now): the checks and rules used are this apply's, not those of the plan's task. The apply was not stopped for this. An apply with the same task form as the plan run uses that task's checks and rules.",
 
   "diagnostic.file.config": "config file",
   "diagnostic.file.task": "task file",

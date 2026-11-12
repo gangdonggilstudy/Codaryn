@@ -435,4 +435,24 @@ describe("i18n catalog: language and wording", () => {
     assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");
     assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
   });
+
+  test("U-16 (UXM-4, 5, 15): plan and apply runs are told as what they are", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // UXM-5: an applied plan run is not left as needing input; it names its apply run.
+    assert.match(en["runs.plan_applied"], /plan applied by run \{runId\}/);
+    assert.match(ko["runs.plan_applied"], /계획 적용됨\(적용 실행 \{runId\}\)/);
+    for (const text of [en["runs.plan_applied"], ko["runs.plan_applied"]]) assert.ok(!/needs input|확인 필요/.test(text));
+    // UXM-4: changes of an apply run says it applied a plan, how many actions, and where they are,
+    // not "no file changed".
+    assert.match(en["changes.apply_run"], /applied the plan of run \{runId\}; actions applied: \{count\}.*not files this run wrote.*report lists them/);
+    assert.match(ko["changes.apply_run"], /실행 \{runId\}의 계획을 적용했습니다\. 적용한 동작: \{count\}개.*이 실행이 쓴 파일이 아니어서.*보고서에 동작 목록/);
+    for (const text of [en["changes.apply_run"], ko["changes.apply_run"]]) assert.ok(!/changed no file|바꾼 파일 없음/.test(text));
+    // UXM-15: another task than the plan's: whose checks and rules were used, and not refused.
+    const differsEn = en["apply.notice.plan_task_differs"];
+    const differsKo = ko["apply.notice.plan_task_differs"];
+    assert.match(differsEn, /another task.*checks and rules used are this apply's, not those of the plan's task.*was not stopped/);
+    assert.match(differsKo, /다른 작업으로 만들었습니다.*계획의 작업이 아니라 이 적용의 것.*멈추지는 않았습니다/);
+    // The plan is applied by now: the text does not tell to apply it again.
+    for (const text of [differsEn, differsKo]) assert.ok(!/--digest|apply it again|다시 적용/.test(text));
+  });
 });

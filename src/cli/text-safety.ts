@@ -4,7 +4,8 @@
  * or reorder a line are replaced before printing, and key-shaped text is hidden.
  */
 
-import { KEY_MASK_SHAPE_SOURCE, KEY_SPLITTER_SOURCE, keyValuesOf, withoutKeySplitters } from "./security/index.js";
+import { KEY_SEPARATOR_PATTERN_SOURCE, compactKeyText } from "../contracts/index.js";
+import { KEY_MASK_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
 import type { KnownKeys } from "./security/index.js";
 
 /** Shown in place of a replaced character. */
@@ -76,8 +77,8 @@ function strippedOf(text: string, skip: (cp: number, char: string) => boolean): 
 
 /** DR-40 (a): Unicode format characters (zero-width space and joiners, soft hyphen, BOM): invisible. */
 const FORMAT_CHAR = /^\p{Cf}$/u;
-/** DR-40 (a): every character that can split a key (KEY_SPLITTER_SOURCE: whitespace, controls, format characters). */
-const SPLITTER_CHAR = new RegExp(`^${KEY_SPLITTER_SOURCE}$`, "u");
+/** DR-40 (a): every character that can split a key (the contract's KEY_SEPARATOR_PATTERN_SOURCE: white space, Cc, Cf). */
+const SPLITTER_CHAR = new RegExp(`^${KEY_SEPARATOR_PATTERN_SOURCE}$`, "u");
 
 export function hideKeys(text: string, currentKey: KnownKeys): string {
   const spans: [number, number][] = [];
@@ -101,7 +102,7 @@ export function hideKeys(text: string, currentKey: KnownKeys): string {
   const forValues = strippedOf(text, (cp, char) => isUnsafeCodePoint(cp, false) || SPLITTER_CHAR.test(char));
   const addValue = adder(forValues.kept);
   for (const key of keyValuesOf(currentKey)) {
-    const joined = withoutKeySplitters(key);
+    const joined = compactKeyText(key);
     for (let at = forValues.stripped.indexOf(joined); at !== -1; at = forValues.stripped.indexOf(joined, at + joined.length)) addValue(at, joined.length);
   }
   if (spans.length === 0) return text;

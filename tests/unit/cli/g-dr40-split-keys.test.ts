@@ -8,8 +8,8 @@
  *     registered from the environment or a variables file, and on an openai run without the
  *     Anthropic key (A10). Every case: key_in_file, no request.
  * (b) task and config files have a size cap; a larger one is refused with a fixed message.
- * (c) the 256 KiB task file of R-25 L-2 ends quickly (main 157 ms, the narrowed shape 13.6 s): todo
- *     until the contract's linear refusal shape is connected.
+ * (c) the 256 KiB task file of R-25 L-2 ends quickly (main 157 ms, the narrowed shape 13.6 s), with
+ *     the contract's linear check (createKeyRefusalCheck).
  * The fake key has the real format and is assembled at run time; nothing leaves the machine.
  */
 
@@ -143,7 +143,7 @@ describe("DR-40 (a): a split key is refused like the whole key (R-25 M-1)", () =
     refused(run, setup.requests());
   });
 
-  test("A10: an openai run without the Anthropic key; the split Anthropic key in the goal", { todo: "contract: the refusal shapes on the joined text, with the shared function and the linear shapes (DR-40 (a)(c)); no registered value to compare here" }, async (t) => {
+  test("A10: an openai run without the Anthropic key; the split Anthropic key in the goal", async (t) => {
     const api = await startFakeOpenAI(t, [replyFinal("done")]);
     const { dir, ws, guard } = await base();
     await writeFile(path.join(dir, "config.json"), JSON.stringify({ schemaVersion: 1, provider: "openai", providers: { openai: { model: "gpt-fake", maxOutputTokens: 64 } }, limits: LIMITS }), "utf8");
@@ -177,7 +177,6 @@ describe("DR-40 (b), (c): task and config file size (R-25 L-2)", () => {
 
   test(
     "R-25 L-2: the 256 KiB task file of repeated prefixes ends quickly and is refused, no request",
-    { todo: "contract: the linear refusal shape (DR-40 (c)) on claude/general-tasks, then connected here" },
     async (t) => {
       const setup = await anthropicSetup(t);
       const prefix = `${["sk", "ant"].join("-")}-`;
@@ -207,5 +206,57 @@ describe("DR-40 (a): the CLI's output hiding finds split keys too (hideKeys)", (
     const { hideKeys } = await import("../../../src/cli/text-safety.js");
     const hidden = hideKeys(`use ${KEY} now`, []);
     assert.equal(hidden, "use [key] now");
+  });
+});
+
+describe("DR-40 (b): a real-format key glued to what comes before it is refused without a registered value (R-25 L-1)", () => {
+  /** Another Anthropic key in the environment (A4, A6): the glued one is not registered. */
+  const OTHER = `${["sk", "ant", "api03"].join("-")}-${"Zz9_Yy8-Xx7".repeat(9).slice(0, 91)}AA`;
+  const GLUED: readonly (readonly [string, string])[] = [
+    ["A4: a letter before it", `x${KEY}`],
+    ["A11: a literal backslash-n before it", `\n${KEY}`],
+  ];
+  for (const [name, goal] of GLUED) {
+    test(`${name}, another key registered`, async (t) => {
+      const setup = await anthropicSetup(t);
+      const run = await cli(setup.dir, setup.guard, ["run", "--workspace", setup.ws, "--goal", `use ${goal}`, "--config", "config.json", "--quiet"], {
+        ...setup.env,
+        [ANTHROPIC_API_KEY_ENV]: OTHER,
+      });
+      refused(run, setup.requests());
+    });
+  }
+
+  test("A6: a task file's goal with MY_ before the key, another key registered", async (t) => {
+    const setup = await anthropicSetup(t);
+    await writeFile(
+      path.join(setup.dir, "task.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "dr40b",
+        goal: `use MY_${KEY}`,
+        workflow: "label",
+        workspaceRoot: "./ws",
+        model: { provider: "anthropic" },
+        policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false },
+        privacy: { secretEnv: [] },
+        limits: LIMITS,
+        verifiers: [],
+      }),
+      "utf8",
+    );
+    const run = await cli(setup.dir, setup.guard, ["run", "--task", "task.json", "--config", "config.json", "--quiet"], { ...setup.env, [ANTHROPIC_API_KEY_ENV]: OTHER });
+    refused(run, setup.requests());
+  });
+
+  test("A9: an openai run without the Anthropic key, a letter before the key", async (t) => {
+    const api = await startFakeOpenAI(t, [replyFinal("done")]);
+    const { dir, ws, guard } = await base();
+    await writeFile(path.join(dir, "config.json"), JSON.stringify({ schemaVersion: 1, provider: "openai", providers: { openai: { model: "gpt-fake", maxOutputTokens: 64 } }, limits: LIMITS }), "utf8");
+    const run = await cli(dir, guard, ["run", "--workspace", ws, "--goal", `use x${KEY}`, "--config", "config.json", "--quiet"], {
+      [OPENAI_API_KEY_ENV]: OPENAI_VALUE,
+      [CODARYN_OPENAI_API_BASE_URL_ENV]: api.baseUrl,
+    });
+    refused(run, api.requests.length);
   });
 });

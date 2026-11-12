@@ -4,7 +4,7 @@
  * A reported location holds known schema field names and indexes only, never other text.
  */
 
-import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, API_KEY_PATTERN_SOURCES, KEY_FIELD_NAMES } from "../../contracts/index.js";
+import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, KEY_FIELD_NAMES, createKeyRefusalCheck } from "../../contracts/index.js";
 
 /** Containers (objects and arrays) deeper than this are rejected as invalid input. */
 export const MAX_KEY_SCAN_DEPTH = 64;
@@ -25,12 +25,6 @@ export function keyValuesOf(keys: KnownKeys): string[] {
   return [...new Set(list.filter((key) => key.length >= MIN_CURRENT_KEY_LENGTH))];
 }
 
-/**
- * DR-32 (a), DR-33: the key shapes that refuse a run (S-6 files, S-8 arguments), as one regular
- * expression source: the contract's narrowed shapes (API_KEY_PATTERN_SOURCES). They are a second
- * check; refusal rests mainly on the registered key values (S-2).
- */
-export const KEY_REFUSAL_SHAPE_SOURCE = API_KEY_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
 
 /**
  * DR-32 (a): the key shapes hidden in output (API_KEY_MASK_PATTERN_SOURCES): the refusal shapes and
@@ -77,36 +71,14 @@ function isPrintableKeyFieldName(name: string): boolean {
 }
 
 /**
- * DR-40 (a) (review R-25 M-1): characters that can split a key inside text without showing:
- * whitespace (line breaks, tabs, no-break space), control characters and Unicode format characters
- * (`\p{Cf}`: zero-width space and joiners, word joiner, soft hyphen, byte order mark).
- */
-export const KEY_SPLITTER_SOURCE = "[\\s\\p{Cc}\\p{Cf}]+";
-const KEY_SPLITTERS = new RegExp(KEY_SPLITTER_SOURCE, "gu");
-
-/** DR-40 (a): `text` with every key-splitting character removed (KEY_SPLITTER_SOURCE). */
-export function withoutKeySplitters(text: string): string {
-  return text.replace(KEY_SPLITTERS, "");
-}
-
-/**
- * S-6, S-8: every given key value (SP-2: every known key variable that is set), and the refusal
- * shapes. DR-40 (a): the registered values, the main check, are also compared on the text without
- * key-splitting characters, so a registered key split by a line break or an invisible character is
- * found as a whole. The shapes on that joined text come with the contract's shared function and
- * linear shapes (DR-40 (a)(c)): joining also glues a key to the word before it, which a shape's
- * word start would then miss, and doubles the shapes' time on large files.
+ * S-6, S-8 (DR-40): the contract's check (createKeyRefusalCheck): every given key value (SP-2:
+ * every known key variable that is set, from MIN_CURRENT_KEY_LENGTH characters) and the refusal
+ * shapes (DR-33, DR-36 (c), the glued real-format Anthropic key of DR-40 (b)), each on the text as
+ * it is and without the key separators (DR-40 (a): a key split by a line break or an invisible
+ * character), in time linear in the text's length (DR-40 (c)).
  */
 function keyMatcher(currentKey: KnownKeys): (text: string) => boolean {
-  const shape = new RegExp(KEY_REFUSAL_SHAPE_SOURCE);
-  const values = keyValuesOf(currentKey);
-  const joinedValues = values.map(withoutKeySplitters).filter((value) => value.length >= MIN_CURRENT_KEY_LENGTH);
-  return (text) => {
-    if (values.some((value) => text.includes(value)) || shape.test(text)) return true;
-    if (joinedValues.length === 0) return false;
-    const joined = withoutKeySplitters(text);
-    return joined !== text && joinedValues.some((value) => joined.includes(value));
-  };
+  return createKeyRefusalCheck(keyValuesOf(currentKey));
 }
 
 /**

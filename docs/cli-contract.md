@@ -815,7 +815,13 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - 도구는 워크플로가 허용한 것 안에서만 좁힐 수 있다.
   - `plan: "apply"`는 약하게 바꿀 수 없다.
   - `allowCommands: false`인 워크플로에서는 `policy.commands`를 쓸 수 없다.
+    - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
   - 사람 검토 워크플로에는 확인 목록이 있어야 한다.
+- 정의의 `limits`는 기본값이다(검토 R-11 L-1).
+  - task 파일이 비운 칸을 채우고, 설정 파일의 값보다 크면 그 값까지만 쓴다.
+  - 상한은 설정 파일만 정한다(S-7). 정의 값이 상한이 되지는 않는다.
+  - 간편 형식에서는 설정 파일의 한도가 그 실행의 한도이고, 정의 값은 설정에 없는 칸만 채운다.
+- 간편 형식의 `plan`·`apply`·`review`도 실행 설정(한도 포함)을 설정 파일에서 읽는다. 빠지면 `invalid_config`이고, 계획 실행의 task를 `--task`로 주라고 안내한다(검토 R-11 L-2).
 - task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 워크플로의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
 - 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
 - `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 워크플로, 비밀 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
@@ -876,6 +882,7 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - 터미널 질문은 하지 않는다. `--allow-unsafe-move`는 `invalid_arguments`로 거부한다.
   - `adapter.unsafeMoveConsent`는 **호출자가 사람의 입력으로 받은 것만** 넘긴다. 사람이 화면에서 그 적용 한 번에 동의한 것이어야 한다. task·설정·프로필·계획·모델이나 이전 적용에서 온 값을 넘기지 않는다.
   - 그 동의의 경로는 `adapter`, 다이제스트는 적용하는 계획의 전체 다이제스트여야 한다. 아니면 실행 전에 `invalid_arguments`다. 동의가 null이면 `consent_required`로 끝나고 다시 묻지 않는다. GUI가 사람에게 묻고 다시 부른다.
+- 검증기 명령의 부모 환경(DR-4): `runApply`는 받은 환경(`parentEnv`, 없으면 `env`)을 명령 실행기에 넘기고 `CHILD_ENV_ALLOWLIST`로 거른다. 앱 계층은 변수 파일을 읽어 넣은 실행의 환경 사본을 넘긴다. CLI 자기 프로세스에서는 `process.env`다.
 
 ### 18.5 `codaryn review`
 
@@ -925,6 +932,7 @@ codaryn changes <task 형식> --run <runId|latest> [--json]
 
 ### 18.9 아직 없는 것
 
+- **DR-28(검토 R-11 M-1)**: 계획 실행과 다른 비밀로 `plan`·`apply`를 하면 계획 실행이 가렸던 값이 보이고 적용 기록에 남는다. 계획 파일에 계획 실행 때의 가린 표기를 두는 계약(w3:p9)과 store(w3:p6)가 오면, CLI는 지금 비밀로 다시 가린 결과가 그 표기와 같을 때만 보여 주고 적용한다. 그 전까지는 계획 실행과 같은 task 형식(`--task`)으로 `plan`·`apply`한다. 재현 시험은 `tests/unit/cli/g-r11.test.ts`에 `todo`로 있다.
 - 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.

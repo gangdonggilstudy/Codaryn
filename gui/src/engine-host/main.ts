@@ -153,11 +153,16 @@ async function main(): Promise<number> {
   // R21-I-2: the key variables of every provider the contract knows (API_PROVIDERS), not one name.
   const contracts = (await import(pathToFileURL(join(engineDir, "contracts", "index.js")).href)) as Record<string, unknown>;
   const table = contracts["API_PROVIDERS"];
-  const keyEnvs =
+  // PM (R-21, app layer note): the contract's whole list of known key variables (API_KEY_ENVS, which
+  // also names providers still being added), with every table entry's keyEnv and Anthropic's as a floor.
+  const listed = contracts["API_KEY_ENVS"];
+  const tableKeyEnvs =
     typeof table === "object" && table !== null
       ? Object.values(table).flatMap((spec) => (typeof spec === "object" && spec !== null && typeof (spec as Record<string, unknown>)["keyEnv"] === "string" ? [(spec as Record<string, string>)["keyEnv"] as string] : []))
       : [];
-  if (!keyEnvs.includes("ANTHROPIC_API_KEY")) keyEnvs.push("ANTHROPIC_API_KEY");
+  const keyEnvs = [
+    ...new Set([...(Array.isArray(listed) ? listed.filter((name): name is string => typeof name === "string") : []), ...tableKeyEnvs, "ANTHROPIC_API_KEY"]),
+  ].filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name));
   // The settings screen's providers: the table's names and variable names, in its order.
   const apiProviders =
     typeof table === "object" && table !== null

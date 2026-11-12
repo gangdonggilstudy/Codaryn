@@ -198,6 +198,43 @@ test("host process (R21-I-2): the value of every provider's key variable is hidd
   }
 });
 
+test("host process (PM, R-21): the value of every key variable the contract knows (API_KEY_ENVS) is hidden in names and config texts", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
+  const contracts = (await import(pathToFileURL(path.join(ENGINE_DIR, "contracts", "index.js")).href)) as { API_KEY_ENVS: readonly string[] };
+  assert.ok(contracts.API_KEY_ENVS.length >= 2, "the contract lists more than one key variable");
+  assert.ok(contracts.API_KEY_ENVS.includes("OPENAI_API_KEY"));
+  for (const [index, name] of contracts.API_KEY_ENVS.entries()) {
+    const { dir, cleanup } = await tempDir();
+    try {
+      // A fake value without a key shape, so only the value rule can hide it.
+      const value = `fake-known-key-value-${String(index).padStart(4, "0")}`;
+      const workspace = path.join(dir, "ws");
+      await fs.mkdir(workspace);
+      await fs.writeFile(path.join(workspace, `${value}.txt`), "x");
+      const config = path.join(dir, "config.json");
+      await fs.writeFile(config, JSON.stringify({ schemaVersion: 1, model: `model-${value}` }));
+      const host = await started(options(dir, { env: { ...testEnv(dir), CODARYN_CONFIG: config, [name]: value } }));
+      try {
+        const tree = await host.call("tree", { workspace: await fs.realpath(workspace), dir: "", offset: 0 }, 10_000);
+        assert.equal(tree.ok, true, JSON.stringify(tree));
+        const entry = (tree as { value: { entries: { name: string; shown: string }[] } }).value.entries.find((item) => item.name.includes(value));
+        assert.ok(entry !== undefined);
+        assert.equal(entry.shown.includes(value), false, `${name}: the shown name hides the value`);
+        const settings = await host.call("settings", {}, 10_000);
+        assert.equal(settings.ok, true, JSON.stringify(settings));
+        const text = JSON.stringify((settings as { value: unknown }).value);
+        // Either the app layer refuses a config holding the value (key_in_file), or the host shows the
+        // config with the value hidden; the value never comes back.
+        assert.ok(/key_in_file/.test(text) || text.includes("model-"), `${name}: ${text.slice(0, 200)}`);
+        assert.equal(text.includes(value), false, `${name}: the answer does not hold the value`);
+      } finally {
+        await host.close();
+      }
+    } finally {
+      await cleanup();
+    }
+  }
+});
+
 test("host process: engine output on stdout goes to stderr and cannot break the channel", async () => {
   const { dir, cleanup } = await tempDir();
   const engine = await fakeEngine(

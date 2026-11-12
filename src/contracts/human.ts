@@ -289,7 +289,8 @@ export const DOCTOR_HINT_ERROR_CODES = [
 
 /**
  * The kinds of parameters and the type each one has:
- * - count: number (non-negative integer: counts, turns, attempts, line, column, durations)
+ * - count: number (non-negative integer: counts, turns, attempts, line, column, durations, and a
+ *   command's exit code, U-18)
  * - status, reason, permission, denial, modelError, phase, provider: closed code unions
  * - field: SchemaFieldPath. runId: RunId. text: CatalogText (another message of the same catalog)
  * - location: ConfigLocationDisplay
@@ -353,6 +354,9 @@ export const FIXED_MESSAGES = {
   "summary.no_verifiers": {},
   "summary.changes": { count: "count" },
   "summary.denied": { count: "count" },
+  // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
+  // hint lines come after both).
+  "summary.failed": { count: "count" },
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
@@ -410,6 +414,17 @@ export const FIXED_MESSAGES = {
   "progress.tool_denied": { tool: "text", permission: "permission", code: "denial" },
   // N-22: a call stopped by a check before the policy (validate or restore stage), with no permission.
   "progress.tool_rejected": { tool: "text", code: "denial" },
+  // U-18 (AXM-4, PM Q-1 (a), Q-2 (a)): what became of an allowed call (the failed-call rule at
+  // RunSummaryContext.failedToolCalls). A result that succeeded has no line.
+  // - progress.tool_failed: a failed call, `{code}` its ToolResult.errorCode (a tool error code, which
+  //   the `denial` kind takes, as for progress.tool_rejected).
+  // - progress.command_exited, progress.command_timed_out: a `run_command` result with `ok: true`
+  //   whose content (the masked JSON of RunCommandPayload) has `timedOut: true`, or else an
+  //   `exitCode` that is an integer other than 0. Not failed calls. Content that does not parse, or
+  //   a null exit code without a timeout (a stopped command), gives no line.
+  "progress.tool_failed": { tool: "text", code: "denial" },
+  "progress.command_exited": { exitCode: "count" },
+  "progress.command_timed_out": {},
   "progress.file_created": {},
   "progress.file_changed": {},
   "progress.verifier": { number: "count", outcome: "text" },
@@ -869,6 +884,13 @@ export type DoctorText = {
  * - policySource (N-23): where the run's policy came from, so the denied-call hint points there:
  *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
  *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
+ * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
+ *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the
+ *   report's text: a `tool_result` record with `ok: false` whose `callId` has no `tool_decision`
+ *   with `allowed: false` in the run. A call the policy denied or a check rejected is a denied call
+ *   only (its decision is its line), never counted twice. A command that ran and exited with a code
+ *   other than 0, or timed out, is not a failed call: its result is `ok` (PM Q-2 (a)); it has its
+ *   progress line. `report --json` does not carry the count (PM Q-3).
  */
 export interface RunSummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
@@ -876,6 +898,7 @@ export interface RunSummaryContext {
   readonly profileApplied: boolean;
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
+  readonly failedToolCalls: number;
   readonly policySource: "task" | "config";
 }
 
@@ -904,8 +927,8 @@ export interface HumanOutput {
   error(output: CliErrorOutput): string;
   /**
    * N-5: stderr at the end of `run`: status and reason as words, verifier result, number of
-   * changed files, denied calls (with the hint once, N-17), usage (seconds, N-20), run id, next
-   * commands. The result's `notices` are not shown (N-22): the model-not-found hint is a progress
+   * changed files, denied calls (with the hint once, N-17), failed calls (U-18), usage (seconds,
+   * N-20), run id, next commands. The result's `notices` are not shown (N-22): the model-not-found hint is a progress
    * line (`progress.model_not_found`), and every notice stays in the JSON and the report.
    */
   runSummary(result: EngineResult, context: RunSummaryContext): string;
@@ -915,7 +938,10 @@ export interface HumanOutput {
    * (1-based), the order in which its id first appeared in this run's `verifier_result` records,
    * which the renderer counts itself; the id is never shown. DR-38, U-8: a `state_checked` record is
    * shown when something changed (`progress.state_changed` with the count) or when it is `limited`
-   * (`progress.state_unchecked`), and not otherwise.
+   * (`progress.state_unchecked`), and not otherwise. U-18: a `tool_result` record is shown only as
+   * `progress.tool_failed` (a failed call, by the rule at RunSummaryContext: the renderer remembers
+   * the calls whose decision was not allowed) or `progress.command_exited` /
+   * `progress.command_timed_out`; a result that succeeded is not shown.
    */
   progressLine(event: JournalEvent): string | null;
   /**

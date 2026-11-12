@@ -39,14 +39,18 @@
 
 import {
   ALL_TOOL_DESCRIPTORS,
+  ALL_TOOL_NAMES,
   BUILTIN_TOOLS,
+  CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
+  REPLACED_CALL_ID_PREFIX,
   RESULT_SCHEMA_VERSION,
   RUNS_DIR_NAME,
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
   TOOL_NAMES,
+  UNKNOWN_TOOL_RECORD_NAME,
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_NAMES,
   asRawText,
@@ -177,6 +181,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   INTEGRITY_END_LABEL,
 ];
 const MAX_TIMER_MS = 2_147_483_647;
+/** AC-D15: the call ids the engine keeps as given. */
+const CALL_ID_PATTERN = new RegExp(CALL_ID_PATTERN_SOURCE);
 
 /** Most changed paths one integrity notice names (U-2). The record and the result keep them all. */
 export const INTEGRITY_NOTICE_PATHS = 10;
@@ -265,6 +271,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const notices: MaskedText[] = [];
   /** Results by call id. A call id that was already answered is never executed again. */
   const answered = new Map<string, ToolResult>();
+  /** AC-D15: the recorded id of every model-given call id seen in this run, and the ids in use. */
+  const recordedIds = new Map<string, string>();
+  const usedIds = new Set<string>();
+  let replacedIds = 0;
   /** The model-bound conversation. It keeps growing across repairs. */
   const messages: ModelMessage[] = [];
   /** How many messages earlier `model_request` records already hold. */
@@ -321,6 +331,40 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     };
     const masked = walk(value);
     return failed ? null : mask(JSON.stringify(masked));
+  };
+
+  /**
+   * AC-D15 (DR-13, R-1 L-1): the calls of one model response as the engine records, answers and
+   * sends them back. A name in no tool list becomes UNKNOWN_TOOL_RECORD_NAME (so it is unknown_tool).
+   * An id is kept when it passes CALL_ID_PATTERN_SOURCE, masking leaves it unchanged and no other id
+   * stands for it; otherwise it gets REPLACED_CALL_ID_PREFIX and a number not in use. The same id
+   * keeps its recorded id for the whole run, so a call and its result stay paired and a repeated
+   * call is still answered once. Ids that can be kept are placed first, so a replacement never
+   * takes the place of a valid id given in the same response.
+   */
+  const recordableCalls = (given: readonly ToolCall[]): ToolCall[] => {
+    const keepable = (id: string): boolean => {
+      if (!CALL_ID_PATTERN.test(id) || usedIds.has(id)) return false;
+      return mask(id) === id;
+    };
+    for (const call of given) {
+      if (recordedIds.has(call.id) || !keepable(call.id)) continue;
+      recordedIds.set(call.id, call.id);
+      usedIds.add(call.id);
+    }
+    return given.map((call) => {
+      let id = recordedIds.get(call.id);
+      if (id === undefined) {
+        do {
+          replacedIds += 1;
+          id = `${REPLACED_CALL_ID_PREFIX}${replacedIds}`;
+        } while (usedIds.has(id));
+        recordedIds.set(call.id, id);
+        usedIds.add(id);
+      }
+      const name = (ALL_TOOL_NAMES as readonly string[]).includes(call.name) ? call.name : UNKNOWN_TOOL_RECORD_NAME;
+      return { id, name, args: call.args };
+    });
   };
 
   const interrupted = (): End | null => {
@@ -887,8 +931,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       const response = outcome.response;
       const text = mask(response.text);
       if (text === null) return MASKING_FAILED;
+      // AC-D15: from here on the calls carry only names and ids the engine may record and send back.
+      const calls = recordableCalls(response.toolCalls);
       const echoed: MaskedToolCall[] = [];
-      for (const call of response.toolCalls) {
+      for (const call of calls) {
         const argsJson = maskJson(call.args);
         if (argsJson === null) return MASKING_FAILED;
         echoed.push({ id: call.id, name: call.name, argsJson });
@@ -930,7 +976,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
       messages.push({ role: "assistant", text, toolCalls: echoed });
       const results: ToolResult[] = [];
-      for (const call of response.toolCalls) {
+      for (const call of calls) {
         const interruption = interrupted();
         if (interruption !== null) return interruption;
 

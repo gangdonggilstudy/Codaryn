@@ -248,7 +248,9 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
   const { startedAt, taskId } = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
   checkStartTime(runId, startedAt, now);
   const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, taskId);
-  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
+  // N-23(g): the revert record only marks a reverted run. One that fails its checks takes the
+  // mark away, not the run: the run stays checked and can still be reported and reverted.
+  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId).catch(() => null);
   return {
     state: "checked",
     runId,

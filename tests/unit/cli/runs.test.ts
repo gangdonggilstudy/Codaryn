@@ -336,6 +336,26 @@ describe("listRuns (N-7, N-16)", () => {
     assert.deepEqual(await resolveRunRef(work, LATEST_RUN_ALIAS), { ok: true, value: "20260102T030401Z-00000001" });
   });
 
+  test("N-23(g): a damaged revert record alone leaves the run checked, without a revert mark; reading the record rejects", async () => {
+    const work = await tempDir();
+    await writeRun(work, "20260102T030401Z-00000001", { at: "2026-01-02T03:04:01.000Z" });
+    await writeRun(work, "20260102T030402Z-00000002", { at: "2026-01-02T03:04:02.000Z" });
+    await writeFile(path.join(runsDir(work), "20260102T030402Z-00000002", "revert.json"), "{not json", "utf8");
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.deepEqual(
+      listing.runs.map((run) => [run.runId, run.state]),
+      [
+        ["20260102T030402Z-00000002", "checked"],
+        ["20260102T030401Z-00000001", "checked"],
+      ],
+    );
+    assert.equal(checked(listing.runs[0]).reverted, null);
+    assert.equal(checked(listing.runs[0]).status, "done");
+    assert.equal(await latestRunId(work), "20260102T030402Z-00000002");
+    // N-22 contract: read rejects, and revert goes on without revertedBefore (N-A's revert).
+    await assert.rejects(readRevertRecord(work, "20260102T030402Z-00000002"), RunListError);
+  });
+
   test("records that fail a check are listed as damaged with their id only and never chosen as latest", async () => {
     const work = await tempDir();
     const at = (second: number): string => `2026-01-02T03:04:${String(second).padStart(2, "0")}.000Z`;
@@ -352,8 +372,7 @@ describe("listRuns (N-7, N-16)", () => {
       firstLine: `${JSON.stringify({ seq: 1, at: "yesterday", runId: "20260102T030406Z-00000006", type: "run_started", schemaVersion: 1, taskId: "t", provider: "scripted" })}\n`,
     });
     await writeRun(work, "20260102T030407Z-00000007", { at: at(7), result: { changes: [{ path: "a", created: true, newHash: "zz", previousHash: null }] } as never });
-    await writeRun(work, "20260102T030408Z-00000008", { at: at(8) });
-    await writeFile(path.join(runsDir(work), "20260102T030408Z-00000008", "revert.json"), '{"schemaVersion":1,"kind":"revert_record"}', "utf8");
+    await writeRun(work, "20260102T030408Z-00000008", { at: at(8), resultText: '{"schemaVersion":1,"kind":"run"}' });
     await mkdir(path.join(runsDir(work), "20260102T030409Z-00000009"));
     await writeFile(path.join(runsDir(work), "20260102T030410Z-0000000a"), "a file, not a run directory", "utf8");
     // Not run ids: ignored, not counted.

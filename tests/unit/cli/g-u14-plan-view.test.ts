@@ -34,6 +34,8 @@ const randomBytes = (size: number): Uint8Array => new Uint8Array(size).fill(seed
 const SECRET_ENV = "U14_FAKE_SECRET";
 const SECRET = ["fake", "u14", "secret", "value", "0001"].join("-");
 const SUMMARY = "move the note into the sorted folder";
+/** R-49 R49-M1: key-shaped text that is neither a registered secret nor the current key (synthetic). */
+const KEY_SHAPED = ["sk", "ant", "FAKEfake0000FAKEfake0000FAKEfake00"].join("-");
 
 const io = (base: string, argv: readonly string[]) => ({
   argv,
@@ -149,6 +151,26 @@ describe("U-14 (AXM-15): the model's summary is shown as the agent's description
     const output = await planJson(base, planned.runId, false);
     assert.equal(JSON.stringify(output).includes(SECRET), false);
     assert.ok(typeof output.summary === "string" && output.summary.startsWith("sort "), JSON.stringify(output.summary));
+  });
+
+  test("R-49 R49-M1: key-shaped text in the summary is hidden in --json as in the person's text", async () => {
+    const { base, planned } = await planRun(`sort with ${KEY_SHAPED} now`);
+    const output = await planJson(base, planned.runId, false);
+    assert.equal(JSON.stringify(output).includes(KEY_SHAPED), false, JSON.stringify(output.summary));
+    assert.equal(output.summary, "sort with [key] now");
+    const { text } = await planText(base, planned.runId, false);
+    assert.equal(text.includes(KEY_SHAPED), false, text);
+    assert.ok(text.includes(": sort with [key] now"), text);
+  });
+
+  test("R-49: the summary in --json has no control character and is one line", async () => {
+    const { base, planned } = await planRun("first\nApproved: yes\u001b[2K\u2028end");
+    const summary = (await planJson(base, planned.runId, false)).summary ?? "";
+    for (const char of summary) {
+      const code = char.codePointAt(0) as number;
+      assert.equal(code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029, false, JSON.stringify(summary));
+    }
+    assert.ok(summary.startsWith("first"), JSON.stringify(summary));
   });
 
   test("a journal that cannot be read leaves the summary out and the plan is still shown", async () => {

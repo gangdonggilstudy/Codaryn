@@ -1,8 +1,21 @@
-# 단계 1a 프로세스 통합 테스트
+# 프로세스 통합 테스트
 
-담당: 검증 엔지니어(작업 D). 실제 CLI 프로세스, 실제 파일시스템, 실제 자식 프로세스로 수용 기준을 확인한다. 모델은 scripted 대본이고 API 키는 쓰지 않는다. 실제 API 검증(1b)은 여기에 없다.
+담당: 검증 엔지니어. 실제 CLI 프로세스, 실제 파일시스템, 실제 자식 프로세스로 단계 1a부터 범용 작업까지의 수용 기준과 결정을 확인한다. 모델은 scripted 대본이거나 로컬 가짜 서버(모의 API)다. 실제 API 키와 실제 API는 쓰지 않는다. 실제 호출 점검은 `tests/live/`에 따로 있다.
 
-실행: `npm run test:integration`(빌드 후 `dist/tests/integration/**`). CLI(`dist/src/cli/main.js`)가 없으면 모든 사례가 실패한다. 최종 실행은 G3b 뒤 PM이 지시한다.
+실행: `npm run test:integration`(빌드 후 `dist/tests/integration/**`). CLI(`dist/src/cli/main.js`)가 없으면 모든 사례가 실패한다.
+
+| 파일 | 절 |
+| --- | --- |
+| `a01`~`a10`, `encoding` | 수용 기준 대응 |
+| `r01` | 교차 검토 회귀 |
+| `m01`~`m03` | 모의 API 검증 |
+| `p01`~`p05`, `g01` | 단계 2 재수정 반복 |
+| `s01` | 교차 검토 결함 수정 회귀 |
+| `t01`, `g01` T-2·T-4 | 단계 2 교차 검토 수정 회귀 |
+| `k01`~`k03`, `v01` | 단계 3 자기 개발 |
+| `y01` | 모델 목록 |
+| `n01`~`n05` | 사용성 |
+| `n06`~`n09` | 범용 작업 |
 
 ## 수용 기준 대응
 
@@ -17,7 +30,7 @@
 | A7 치환 후 기록 | `a07-masking` | 카나리 원문과 변형 0건, 토큰 존재, 자식 환경 필터 |
 | A8 한도·취소·자식 정리 | `a08-limits-cancel` | 네 가지 한도, cancel-file, 자식·손자 종료, 잠금 |
 | A9 완료 선언만으로 성공 아님 | `a09-a10-status-provider` | `failed`, `needs-input`(no_verifier, inconclusive) |
-| A10 실제 호출 경로 거부 | `a09-a10-status-provider` | `provider_not_configured`, 실행 디렉터리 없음 |
+| A10 실제 호출 경로 거부 | `a09-a10-status-provider` | `provider_not_configured`, 실행 디렉터리 없음. 비밀 변수·대본이 없는 실행 전 오류 |
 | A11 유닛 P0·타입 검사 | (각 모듈 유닛 테스트) | `npm run typecheck`, `npm run test:unit` 결과 |
 | A12 보고 구분 | (보고서) | 모든 결과의 `provider`가 `scripted`인지 확인, 1b 미수행 명시 |
 | T9 인코딩 | `encoding` | CRLF·BOM·한글 경로 바이트 보존 |
@@ -125,6 +138,22 @@
 - `node --test`는 소요 시간을 출력하므로 같은 코드라도 출력 바이트가 매번 다르다. 같은 실패 반복 사례는 출력이 코드에만 달린 `checks/price-check.mjs`를 쓴다.
 - 기록 검사에서 `runs/<runId>/snapshots/`는 뺀다(`stateRecordTexts`). 계약상 스냅샷은 작업 공간 파일과 같은 원문 자료다(R-8). 그 밖의 상태 디렉터리 파일은 모두 검사한다.
 
+## 단계 3 자기 개발 (`k01`~`k03`, `v01`)
+
+[작업 지시](../../docs/work-orders/phase-3-self-development.md)의 U 결정과 투입 전 최종 검토(L1) 결함 수정(V)을 확인한다. 연습 프로젝트는 `fixtures/repair-project.ts`, 보호 자료를 바꾸는 허용 명령은 `fixtures/self-dev.ts`의 `tamper.mjs`다.
+
+| 결정 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| U-1·U-2 보호 자료 | `k01-integrity` | 허용된 명령이나 검증기 자신이 보호 테스트 또는 작업 공간 밖 `integrity.paths`를 고치면 `needs-input`/`protected_changed`. 그 뒤 검증·재수정·모델 요청 없음. 기준은 실행 시작(재수정 뒤의 변경도 잡음), 바뀐 경로는 가림본. 대조군: 그대로면 정상 판정, 보호가 없으면 확인·기록 없음. `integrity.paths`의 형식·위치 위반은 `invalid_config`(경로 미출력), task 파일로는 못 정함 |
+| U-3 설치 위치 | `k02-commands` | 작업 공간이 CLI 설치 위치와 같거나, 그 안이거나, 그것을 포함하면 실행 전에 거부. 이 저장소가 아니라 빌드한 CLI의 사본으로 확인 |
+| U-5 report | `k02-commands` | `--json`(결과·기록 요약, 무변경, 비밀 없음), Markdown(실행 id), `result.json` 없는 실행은 기록만으로(쓰는 중인 마지막 줄 무시), 오류 4종 |
+| U-6 doctor | `k02-commands` | 모의 API. `--json`의 항목별 점검, 글 출력과 같은 종료 코드, 문제는 항목으로. 키 값·경로 없음, 요청 0건, 쓰기 없음 |
+| U-7·U-8 | `k02-commands` | `--help`, `--version`, 명령별 도움말. 진행 줄은 stderr에(가짜 비밀·변형·조각·가짜 키 없음), stdout은 JSON 한 줄, `--quiet`이면 stderr가 비고 결과는 같음 |
+| 자기 개발 예행 | `k03-self-dev-rehearsal` | 이 저장소 일부(`src/contracts`, `src/privacy`와 그 유닛)의 사본이 후보 작업 공간이다. 작업 공간 밖의 보호된 검증기가 이 저장소의 TypeScript로 컴파일하고 유닛을 돌린다. 작은 변경 통과 → report·revert, 타입 오류 → 재수정 → 통과, 허용 명령이 보호 테스트나 밖의 검증기를 고치면 `protected_changed`, 가짜 서버 모델로 같은 통과 흐름. 이름은 `[예행·모의 모델]`로 시작하며 실제 자기 개발의 증거가 아니다 |
+| V-1 실패 서명 | `v01-l1-regress` | 실행마다 바뀌는 숫자(시각·소요 시간·날짜·주소)만 정규화한다. 실제 값이 바뀐 실패(999.9 → 1000.1)는 같은 실패로 묶지 않고 재수정 2회 뒤 `done` |
+| V-2 덜 읽은 출력 | `v01-l1-regress` | 부모가 끝난 뒤 분리된 자식이 파이프를 쥐고 있어 실행기가 끝까지 읽지 못한 출력은 `truncated`가 아니다. 마지막 불완전한 줄(끊긴 비밀의 앞부분)만 버리고 완전한 줄은 모두 남는다. 기록 어디에도 비밀 4자 조각 없음 |
+| V-3 | `v01-l1-regress` | `--env-file-if-exists`도 `--env-file`처럼 `invalid_arguments`, 값을 읽지 않고 `--vars-file`을 안내 |
+
 ## 모델 목록 (`y01-models`, 모의 API·실제 API 아님)
 
 [CLI·공통 계약](../../docs/cli-contract.md) 16절(Y-1~Y-4)을 가짜 서버의 `GET /v1/models`(`tests/support/fake-models.ts`, 쪽당 2개)로 확인한다. 모든 실행에 네트워크 울타리를 쓴다.
@@ -146,24 +175,24 @@
 
 | 사례 | 파일 | 판정 근거 |
 | --- | --- | --- |
-| 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → report → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄(`codaryn: ` 접두사 줄) 전체, 그 뒤의 끝 요약(실행 id, `codaryn report`·`codaryn revert`, N-5), 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증기를 id가 아닌 순번으로 보임(N-24 (a), `--json`에는 id), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. 키 없음, 네트워크 울타리 |
-
+| 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → runs → report → revert --dry-run → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄(`codaryn: ` 접두사 줄) 전체, 그 뒤의 끝 요약(실행 id, `codaryn report`·`codaryn revert`, N-5), 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증기를 id가 아닌 순번으로 보임(N-24 (a), `--json`에는 id), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. init으로 만든 기본 설정이 있으면 문서의 두 줄이 더 나오고 결과는 같음. 키 없음, 네트워크 울타리 |
 | 처음 쓰는 흐름(E-1), init 세부(E-9) | `n02-first-use` | 샌드박스 안의 기본 설정 위치(`support/usability.ts`)로 init(비대화형 기본값, 자리표시자 모델, 키 없음, 위치는 기호로만) → 다시 init `config_exists` → doctor(기본 설정, 모델·키 실패와 안내) → 체험 예시(기본 설정 사용 알림) → runs → report·revert `--run latest`(고른 실행 id를 stderr에 먼저) → `--dry-run`(파일·기록·잠금 무변경) → revert(원래 바이트, 되돌리기 기록) → 다시 revert(`already_reverted`, `complete`). init의 `--config`, `CODARYN_CONFIG`(`overriddenBy`), 작업 공간 안 거부, 제안 미적용, 키 미기록·미전송, 기본 위치 없음 |
-| 실행 목록과 latest(E-6), R-2 | `n03-runs-latest` | 위조 실행(미래 시각, 시각 불일치, 결과 파일 포함)은 손상으로 표시되고 latest가 되지 않으며 id를 지정해도 `invalid_run_record`(N-26), 사용자 `notes.md` 보존. 결과 파일 없는 실행은 latest 후보 아님. 되돌리기 기록만 손상된 실행은 진행(N-23 g). 기록 없음, `runs/latest` 디렉터리(N-18), `--limit`, 잠금 중 목록 |
+| 실행 목록과 latest(E-6), R-2, R-7 | `n03-runs-latest` | 위조 실행(미래 시각, 시각 불일치, 결과 파일 포함)은 손상으로 표시되고 latest가 되지 않으며 id를 지정해도 `invalid_run_record`(N-26), 사용자 `notes.md` 보존. 결과 파일 없는 실행은 latest 후보 아님. 되돌리기 기록만 손상된 실행은 진행(N-23 g). 기록 없음, `runs/latest` 디렉터리(N-18), `--limit`, 잠금 중 목록. R-7: 손상 실행의 id를 대소문자만 바꿔도 되돌리지 않음(N-27 a), `report --json`도 제어 문자로 끊긴 키 모양을 가림(N-27 c), 손상된 되돌리기 기록이 있어도 runs 글 출력은 종료 0, 살아 있는 잠금의 거부는 stderr에 안내(N-25 a) |
 | 설정 순서·자리표시자·프로필·한 줄 실행(E-2, E-3, E-7, E-8) | `n04-config-profiles` | 모의 API. 요청의 모델로 `--config` > `CODARYN_CONFIG` > 기본 위치, 기본 위치 사용 알림, 작업 공간 안 거부, 상대 경로는 없음과 같음. 자리표시자는 다음 단계로, 모두 자리표시자면 `provider_not_configured`. 프로필의 한도·검증기, 상한·이름 오류, task 파일의 `profiles` 거부. 한 줄 실행의 현재 디렉터리, 설치 위치·키 모양 목표·인자 혼용 거부 |
 | 언어·사람용 출력(E-4, E-5), R-3 | `n05-language-output` | ko·en에서 stdout 동일·stderr만 다름, 고르는 순서, 잘못된 `language` 값 미출력. JSON 문법 오류의 줄·열, 모르는 필드 이름 미출력(N-15), `--quiet`, ASCII JSON(N-19). 검증기 id(`SYNTHETIC_PRIVATE_VALUE` 등)가 진행 줄·끝 요약·Markdown에 없고 `--json`에만 있음(N-24 a) |
 
 - 실행 전 오류의 stderr는 `assertHumanError`로 모양만 본다(코드 괄호, 스택·예외 문구 없음, 같은 줄 반복 없음, 경로·값 없음). `--quiet`이면 비어 있다(`s01`).
 
-## 범용 작업 (`n06`~`n08`, G-G)
+## 범용 작업 (`n06`~`n09`, G-G)
 
-[범용 작업 설계](../../docs/design/general-tasks.md) 10.2절과 G-A 계약(`src/contracts/plan.ts`, `workflow.ts`, `verify.ts`), DR-5·DR-9·DR-12·DR-17·DR-24를 실제 CLI 프로세스로 확인한다. 대본 모델이고, F 계열만 가짜 서버(모의 API)다. 기대 배치는 `fixtures/general-tasks.ts`의 `afterActions`, 집계 기대값은 손으로 계산한 `SALES_BY_REGION`이다. 도우미는 `support/general.ts`.
+[범용 작업 설계](../../docs/design/general-tasks.md) 10.2절과 G-A 계약(`src/contracts/plan.ts`, `workflow.ts`, `verify.ts`), DR-5·DR-9·DR-12·DR-17·DR-24·DR-28을 실제 CLI 프로세스로 확인한다. 대본 모델이고, F 계열만 가짜 서버(모의 API)다. 기대 배치는 `fixtures/general-tasks.ts`의 `afterActions`, 집계 기대값은 손으로 계산한 `SALES_BY_REGION`이다. 도우미는 `support/general.ts`.
 
 | 사례 | 파일 | 판정 근거 |
 | --- | --- | --- |
 | 파일 정리(GI-02~05, C05~C10, R-9) | `n06-organize` | 계획 실행 `plan_pending`(작업 공간 무변경) → `plan`(다이제스트·행동·원본 해시) → `apply --digest`(inventory 통과, 판정 기준과 같은 배치, 보관함 이름은 순번, `applied.json`, `apply_started`부터 시작하는 기록) → 다시 적용 `plan_already_applied` → `revert`(역순, 원래 바이트) → 다시 `already_reverted`. 승인 거부 4종, 오래된 계획 5종(`plan_stale`, 무변경), 계획 단계의 쓰기·명령, 거부 계획 14종, 동시 적용, 적용 뒤 사용자 변경, 계획 아닌 실행·변조, 비밀 이름 가림. R-9: 보관함 정션과 적용 뒤 바뀐 `plan.json`으로 밖 파일·다른 경로를 건드리지 않음 |
 | 자료 분석(GI-06·07, D03~D05) | `n07-analyze` | `data_checks` 통과 → `awaiting_review` → `review --task`(review.json만, 결과·기록 그대로) → report에 판정 → `--reject`로 교체. 틀린 합계 → 근거는 비교한 수만 → 재수정. 숫자 아닌 원본 → `verifier_inconclusive`. review 오류 4종. 원본 칸의 비밀 |
 | 정의·문서·모의 API(GI-01, GI-08, A02~A05, B01·B02, F01·F02) | `n08-workflows` | 사용자 설정에만 등록한 정의로 실행(엔진 변경 없음), 도구 줄이기, 해석 오류 8종(실행 전, 값 미출력), 지시문 비밀 가림, 프로필의 `workflowRef`, 검증기 없는 정의 `no_verifier`, 내장 document, 옛 task의 기록. 모의 API: organize 요청의 도구 묶음과 스키마, 지시문은 system에만 |
+| 다른 비밀의 계획(R-11 M-1) | `n09-plan-secrets` | 등록한 비밀이 이름인 폴더가 든 organize 계획. 계획 실행과 같은 task 형식(같은 비밀)이면 plan·apply가 동작하고 `plan.json` 밖에 비밀 없음(대조군). 비밀을 등록하지 않은 task로(변수가 있든 없든) plan·apply하면 `plan_secrets_differ`(종료 2)와 사람용 오류, 무변경, 적용 실행·기록 없음, 비밀 미출력(DR-28). 반대 방향(비밀 없이 만든 계획을 비밀을 등록하고 보거나 적용)도 같은 거부 |
 
 - task 파일은 `policy`와 `verifiers`를 반드시 적으므로 정의의 정책·검증기 기본값은 간편 형식에만 쓰인다. 그래서 organize task는 `planActions`를 직접 적는다(`writeOrganizeTask`).
 - 하드 링크가 없는 볼륨에서의 동의 없는 이동 중단(DR-21, `consent_required`)은 이 기계(NTFS)에서 재현할 수 없어 통합 사례로 두지 않는다. 읽기 전용 원본도 정상 이동됨을 확인했다. 도구·store 유닛이 맡는다.
@@ -174,6 +203,7 @@
 - `CODARYN_IT_PID_LOG=<작업 디렉터리 밖 파일>`이면 CLI 시작과 `killQuietly`마다 한 줄(`spawn|kill <pid> <ms> ...`)을 덧붙인다. 다른 시험의 CLI pid를 죽이는지 찾는 용도이며 기본은 꺼짐이다.
 - pid로 프로세스를 죽이는 정리는 그 시험이 멈춘 것을 확인하지 못한 pid에만 한다. Windows는 놓인 pid를 몇 초 안에 다른 프로세스에 준다(`a08`, `g01` T-2).
 - `t.after`는 등록한 순서로 실행된다. 샌드박스 삭제보다 먼저 해야 할 정리는 `createSandbox`보다 먼저 등록한다.
+- 분리된 자식의 출력에 기대는 프로그램은 부모가 고정 시간 뒤에 끝나지 않는다. 자식이 쓴 뒤 IPC로 알릴 때 끝난다(`fixtures/repair-project.ts`의 `CUT_AFTER_EXIT`). 부하로 자식 시작이 늦으면, 실행기가 출력이 생기기 전에 부모 종료로 정리해 stdout이 비기 때문이다(`docs/reviews/2026-11-12-z1-investigation.md` 3절, `v01` V-2).
 - 주인이 죽은 잠금(`a08`, `t01` T-9)에는 끝난 프로세스의 pid가 아니라 `UNASSIGNABLE_PID`를 쓴다(Z-2). 잠금의 생존 판정은 pid만 보므로(`src/store/lock.ts`, architecture A-6), 부하 중 그 pid가 다른 프로세스에 다시 주어지면 죽은 잠금이 살아 보인다.
 
 ## 격리

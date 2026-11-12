@@ -841,6 +841,8 @@ export interface ReportVerifierView {
 /** GU-3 (3.7): a run's report as the window shows it. Texts are masked and cleaned. */
 export interface ReportView {
   readonly runId: string;
+  /** UXM-14, DR-38: the run has a records-changed mark; its records are not to be trusted. */
+  readonly recordsChanged?: boolean;
   readonly kind: "run" | "apply";
   readonly status: "complete" | "incomplete";
   readonly finished: { readonly status: string; readonly reason: string } | null;
@@ -888,6 +890,8 @@ export function toReportReply(value: unknown): ReportReply {
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const fail = { ok: false, code: "host_error" } as const;
   const { runId, kind, status, finished, usage, verifiers, integrity, records, taskId } = value;
+  const recordsChanged = value["recordsChanged"] ?? false;
+  if (typeof recordsChanged !== "boolean") return fail;
   if (!isRunId(runId) || (kind !== "run" && kind !== "apply") || (status !== "complete" && status !== "incomplete") || !shortText(taskId) || !numOrNull(records)) return fail;
   let finishedView: ReportView["finished"] = null;
   if (finished !== null) {
@@ -963,7 +967,7 @@ export function toReportReply(value: unknown): ReportReply {
       failed,
     };
   }
-  return { ok: true, view: { runId, kind, status, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
+  return { ok: true, view: { runId, kind, status, recordsChanged, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
 }
 
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };
@@ -1012,6 +1016,8 @@ export type RunListItem =
       readonly changes: number | null;
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
       readonly revertRecordDamaged: boolean;
+      /** UXM-14, DR-38: the run has a records-changed mark; its records are not to be trusted. */
+      readonly recordsChanged?: boolean;
       /**
        * R21b-L-1: the task form the run was started with, when this app started it (the main process
        * remembers it). Null: unknown (started elsewhere), so a plan of it is shown but not applied here.
@@ -1042,11 +1048,13 @@ export function toRunsReply(value: unknown): RunsReply {
       continue;
     }
     const { kind, startedAt, taskId, status, reason, changes, revertRecordDamaged } = run;
+    const recordsChanged = run["recordsChanged"] ?? false;
+    if (typeof recordsChanged !== "boolean") return fail;
     const reverted = revertedMark(run["reverted"]);
     if (run["state"] !== "checked" || (kind !== "run" && kind !== "apply") || !(startedAt === null || (typeof startedAt === "string" && TIME.test(startedAt)))) return fail;
     if (!shortText(taskId) || !(status === null || (typeof status === "string" && WORD.test(status))) || !(reason === null || (typeof reason === "string" && WORD.test(reason)))) return fail;
     if (!(changes === null || count(changes)) || reverted === undefined || typeof revertRecordDamaged !== "boolean") return fail;
-    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged });
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged });
   }
   return { ok: true, runs: items, omitted };
 }

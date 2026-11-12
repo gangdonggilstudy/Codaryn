@@ -400,6 +400,10 @@ const expected = [
       !v.text.includes(FAKE_API_KEY) &&
       !v.text.includes(FAKE_OPENAI_KEY),
   ],
+  // UXM-14: the marked run in the run list (only it) and its report.
+  ["runsRecordsChanged", (v) => v === true],
+  ["runsUnmarked", (v) => v === 1],
+  ["reportRecordsChanged", (v) => v === true],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's

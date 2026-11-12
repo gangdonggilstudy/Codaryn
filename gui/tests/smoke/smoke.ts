@@ -496,6 +496,16 @@ startGui({
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
 
+      // 5i2. UXM-14, DR-38: a records-changed mark on the analyze run, as a command outside the run could
+      // leave it. The run list marks the run and its report warns.
+      writeFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "records-changed.json"), "{}");
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["runsRecordsChanged"] = await js(`document.querySelector('[data-run="${analyzeRunId}"] [data-records-changed]') !== null`);
+      results["runsUnmarked"] = await js("document.querySelectorAll('[data-records-changed]').length");
+      await js(`document.querySelector('[data-report="${analyzeRunId}"]')?.click(); true`);
+      results["reportRecordsChanged"] = await waitFor("document.getElementById('report-records-changed') !== null ? true : null", 20_000);
+
       // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
       // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),
       // and they stay (not_reverted_not_confirmed); nothing is removed.

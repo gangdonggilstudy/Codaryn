@@ -84,8 +84,8 @@ async function start(): Promise<void> {
   );
   const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
   /** `formKnown` false: the run's form is unknown (started elsewhere); its plan is shown, not applied. */
-  const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true): void => {
-    plan.choose(runId, profile, workflow, formKnown);
+  const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true, recordsChanged = false): void => {
+    plan.choose(runId, profile, workflow, formKnown, recordsChanged);
     shell?.show("plan");
   };
   const changes = changesScreen({ texts, api, current: () => current });

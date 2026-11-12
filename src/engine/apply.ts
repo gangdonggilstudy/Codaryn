@@ -302,6 +302,10 @@ export const applyPlan: ApplyPlan = async (deps) => {
     try {
       before = await inventory.capture();
     } catch {
+      // R18-M1: a listing given the cancel signal stops with an AbortError. A cancel (or the
+      // duration limit) is not a failed listing: nothing was claimed, so the plan can be applied again.
+      const stop = interrupted();
+      if (stop !== null) return stop;
       notice(INVENTORY_FAILED_NOTICE);
       return PLAN_STALE;
     }

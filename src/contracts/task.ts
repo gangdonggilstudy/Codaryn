@@ -73,14 +73,21 @@ export type ModelConfig =
       /** Scripted model file. Absolute, or relative to the directory of the task file. */
       readonly scriptPath: string;
     }
-  | {
-      /** SP-1: an API provider (API_PROVIDER_NAMES). */
-      readonly provider: ApiProviderName;
-      /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
-      readonly model?: string;
-      /** Output token cap per request, at most MAX_OUTPUT_TOKENS_LIMIT. Overrides the config file's value. */
-      readonly maxOutputTokens?: number;
-    };
+  | ApiModelConfig;
+
+/**
+ * SP-1, DR-31: the model settings of one API provider (API_PROVIDER_NAMES). A union with one member
+ * per provider, so `Extract<ModelConfig, { provider: "anthropic" }>` keeps working.
+ */
+export type ApiModelConfig = {
+  readonly [P in ApiProviderName]: {
+    readonly provider: P;
+    /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
+    readonly model?: string;
+    /** Output token cap per request, within the provider's limits (API_PROVIDERS). Overrides the config file's value. */
+    readonly maxOutputTokens?: number;
+  };
+}[ApiProviderName];
 
 export interface PrivacyConfig {
   /**

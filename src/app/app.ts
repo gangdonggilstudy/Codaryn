@@ -16,6 +16,8 @@ import { existsSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import type {
   AnthropicProviderDeps,
+  ApiProviderDeps,
+  ApiProviderName,
   ApplyPlan,
   ApplyResult,
   PlanOutput,
@@ -110,6 +112,12 @@ import type {
 export interface AppHooks {
   readonly createAnthropicProvider?: CreateAnthropicProvider;
   readonly anthropicDeps?: AnthropicProviderDeps;
+  /**
+   * GUI F-2 (R21b-I-1): each API provider's injection points (its `fetch`, its `sleep`), as the CLI's
+   * runCli and runModels take them. For anthropic an entry here is used instead of `anthropicDeps`.
+   * Absent: the provider uses the global fetch.
+   */
+  readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
   readonly runTask?: RunTask;
   /** The apply engine (`applyPlan` of src/engine when absent). Tests give a stand-in to see what it was given. */
   readonly applyPlan?: ApplyPlan;
@@ -206,6 +214,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       defaultConfig: defaultConfigOf(),
       createAnthropicProvider: hooks.createAnthropicProvider,
       anthropicDeps: hooks.anthropicDeps,
+      ...(hooks.providerDeps === undefined ? {} : { providerDeps: hooks.providerDeps }),
       ...parts,
     }).catch(() => null);
   }
@@ -451,6 +460,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         // SP-6: each provider's lister, as main.ts gives them; `--provider` (modelsArguments) picks one.
         listers: API_MODEL_LISTERS,
         anthropicDeps: hooks.anthropicDeps,
+        ...(hooks.providerDeps === undefined ? {} : { providerDeps: hooks.providerDeps }),
         defaultConfig: defaultConfigOf(),
         ...(hooks.writeConfig === undefined ? {} : { writeConfig: hooks.writeConfig }),
       });

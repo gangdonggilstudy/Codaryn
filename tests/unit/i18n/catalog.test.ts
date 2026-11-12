@@ -400,6 +400,8 @@ describe("i18n catalog: language and wording", () => {
       const t = withoutNames(text);
       // task type (not workflow, task kind), discarded files (not discard box, run archive).
       assert.ok(!/workflow|task kind|discard box|run archive/i.test(t), `en ${id}`);
+      // R-48 L-5: the folder of the discarded files has one spelling, "discarded-files folder".
+      assert.ok(!/discarded files folder/i.test(t), `en ${id}`);
     }
     // The write block is 보호 경로; the check afterwards keeps its own name, 보호 대상 확인 (ux-design 5).
     assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");

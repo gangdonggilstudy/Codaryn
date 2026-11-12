@@ -156,6 +156,7 @@
 - `CODARYN_IT_PID_LOG=<작업 디렉터리 밖 파일>`이면 CLI 시작과 `killQuietly`마다 한 줄(`spawn|kill <pid> <ms> ...`)을 덧붙인다. 다른 시험의 CLI pid를 죽이는지 찾는 용도이며 기본은 꺼짐이다.
 - pid로 프로세스를 죽이는 정리는 그 시험이 멈춘 것을 확인하지 못한 pid에만 한다. Windows는 놓인 pid를 몇 초 안에 다른 프로세스에 준다(`a08`, `g01` T-2).
 - `t.after`는 등록한 순서로 실행된다. 샌드박스 삭제보다 먼저 해야 할 정리는 `createSandbox`보다 먼저 등록한다.
+- 주인이 죽은 잠금(`a08`, `t01` T-9)에는 끝난 프로세스의 pid가 아니라 `UNASSIGNABLE_PID`를 쓴다(Z-2). 잠금의 생존 판정은 pid만 보므로(`src/store/lock.ts`, architecture A-6), 부하 중 그 pid가 다른 프로세스에 다시 주어지면 죽은 잠금이 살아 보인다.
 
 ## 격리
 

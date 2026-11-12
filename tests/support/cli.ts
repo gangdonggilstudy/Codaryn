@@ -306,6 +306,16 @@ export function lockPath(workspace: string): string {
   return join(workspace, STATE_DIR_NAME, LOCK_FILE_NAME);
 }
 
+/**
+ * A pid no process can have, for a lock whose holder is dead (Z-2). The pid of a process that
+ * has just exited is not usable: under the load of two integration suites Windows gave such a
+ * pid to another process within 68 to 369 ms in 6 of 62 probes, and the lock's liveness check is
+ * by pid only (src/store/lock.ts, known limit A-6), so the dead lock then looked held and every
+ * contender stopped with workspace_locked. Windows pids are multiples of 4 far below this value;
+ * POSIX pid_max is at most 2^22.
+ */
+export const UNASSIGNABLE_PID = 2_147_483_644;
+
 export type ToolDecisionRecord = Extract<JournalRecord, { type: "tool_decision" }>;
 
 export function toolResultFor(records: readonly JournalRecord[], callId: string): ToolResult {

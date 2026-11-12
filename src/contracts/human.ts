@@ -16,7 +16,8 @@
  * numbers, closed code unions, schema field positions (`SchemaFieldPath`), run ids (`RunId`),
  * the fixed display strings below, and text the catalog itself produced (`CatalogText`). No
  * message takes free text, so nothing read from a file or the environment can reach a message
- * through a parameter. A verifier is shown by its number, never by its id; a profile by whether
+ * through a parameter. DR-51 (U-38): the one typed value a message takes is the workspace path of
+ * a next-command hint, as a ShownWorkspace (`toShownWorkspace`: masked, checked, quoted). A verifier is shown by its number, never by its id; a profile by whether
  * one was applied, never by its name.
  */
 
@@ -26,6 +27,7 @@ import type { CleanupBlockCode, CleanupKeptReason, CleanupTarget, CleanupWarning
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { ApiBaseUrlEnv, ApiKeyEnv, ApiModelEnv, DefaultConfigDisplay } from "./config.js";
+import { API_KEY_MASK_PATTERN_SOURCES } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
 import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
@@ -88,6 +90,7 @@ declare const schemaFieldPathBrand: unique symbol;
 declare const runIdBrand: unique symbol;
 declare const catalogTextBrand: unique symbol;
 declare const apiOriginBrand: unique symbol;
+declare const shownWorkspaceBrand: unique symbol;
 
 /** A field position made of schema field names and indices only. Obtain it from `toSchemaFieldPath`. */
 export type SchemaFieldPath = string & { readonly [schemaFieldPathBrand]: "field" };
@@ -112,6 +115,51 @@ export const API_ORIGIN_PATTERN_SOURCE =
  * parse, carries user info, or its origin is not of API_ORIGIN_PATTERN_SOURCE. It is the person's own
  * setting (their environment or config file), shown back to them; never a key.
  */
+/**
+ * DR-51 (U-38): the workspace path a person typed with `--workspace`, in double quotes, fit to show
+ * in a next-command hint of an end summary. Obtain it from `toShownWorkspace`.
+ */
+export type ShownWorkspace = string & { readonly [shownWorkspaceBrand]: "shownWorkspace" };
+
+/** DR-51 (U-38): the longest typed workspace path a hint shows, in characters (code points). */
+export const MAX_SHOWN_WORKSPACE_CHARS = 80;
+
+/**
+ * Characters that end, expand or escape inside double quotes in PowerShell, cmd or a POSIX shell
+ * (`"`, `$`, the backtick, `%`, `!`), and every control, format, surrogate, private-use or
+ * unassigned character and line or paragraph separator (Unicode C, Zl, Zp).
+ */
+const UNSHOWABLE_IN_QUOTES = /["$`%!]|\p{C}|\p{Zl}|\p{Zp}/u;
+const PRIVACY_TOKEN_FRAGMENT = /codaryn_secret/i;
+
+/**
+ * DR-51 (U-38, PM): the hint form of a typed workspace path, or null, when the hint keeps saying
+ * `<workspace>` as before. `masked` is the path after the command's own masking: the run's privacy
+ * gateway (registered values and key shapes) for `run` and `apply`, key shapes only for `revert`,
+ * which knows no registered values; null when masking failed. Null when:
+ * - masking failed or changed the path (a registered value or a key shape was in it);
+ * - it is empty or blank, or longer than MAX_SHOWN_WORKSPACE_CHARS;
+ * - it holds a character that cannot stand in double quotes (UNSHOWABLE_IN_QUOTES), or ends with a
+ *   backslash (which would escape the closing quote);
+ * - it holds a key shape (API_KEY_MASK_PATTERN_SOURCES) or a privacy-token fragment, whoever masked.
+ * Otherwise the path in double quotes, as typed: one form for every shell, nothing escaped.
+ */
+export function toShownWorkspace(typed: string, masked: string | null): ShownWorkspace | null {
+  if (masked !== typed) return null;
+  if (typed.trim().length === 0 || Array.from(typed).length > MAX_SHOWN_WORKSPACE_CHARS) return null;
+  if (UNSHOWABLE_IN_QUOTES.test(typed) || typed.endsWith("\\")) return null;
+  if (PRIVACY_TOKEN_FRAGMENT.test(typed)) return null;
+  if (API_KEY_MASK_PATTERN_SOURCES.some((source) => new RegExp(source).test(typed))) return null;
+  return `"${typed}"` as ShownWorkspace;
+}
+
+/** DR-51 (U-38): whether a value is exactly what toShownWorkspace makes (the catalog's check, N-24). */
+export function isShownWorkspace(value: unknown): value is ShownWorkspace {
+  if (typeof value !== "string" || value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) return false;
+  const typed = value.slice(1, -1);
+  return toShownWorkspace(typed, typed) === value;
+}
+
 export function toApiOrigin(address: string): ApiOrigin | null {
   let url: URL;
   try {
@@ -302,6 +350,8 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - settingEnv (DR-36 (b)): the name of a provider's model or address variable, one of
  *   API_MODEL_ENVS or API_BASE_URL_ENVS (a fixed constant, never its value); written as it is
  * - apiOrigin (DR-36 (b)): ApiOrigin, where a provider's requests (and its key) go; written as it is
+ * - workspace (DR-51, U-38): ShownWorkspace, the typed workspace path in double quotes; written as
+ *   it is
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -323,6 +373,7 @@ export interface MessageParamTypeByKind {
   readonly keyEnv: ApiKeyEnv;
   readonly settingEnv: ApiModelEnv | ApiBaseUrlEnv;
   readonly apiOrigin: ApiOrigin;
+  readonly workspace: ShownWorkspace;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -331,7 +382,8 @@ export type MessageParamKind = keyof MessageParamTypeByKind;
  * parameter as `{name}`; it must use every listed parameter and no other. Words only: the layout
  * (prefixes, separators, line breaks, the code in parentheses) belongs to the renderer.
  * Commands shown in messages are fixed text in the template (for example
- * `codaryn report --workspace <workspace> --run {runId}`); no message takes a typed path.
+ * `codaryn report --workspace <workspace> --run {runId}`); no message takes a typed path, except
+ * the `*_typed` hints below (DR-51), whose `{workspace}` is a ShownWorkspace.
  */
 export const FIXED_MESSAGES = {
   // Errors (N-5): "<error.label> — <what> (<code>)", the diagnostic line (N-15), the fix line.
@@ -365,6 +417,12 @@ export const FIXED_MESSAGES = {
   "summary.next_report_here": { runId: "runId" },
   "summary.next_revert": { runId: "runId" },
   "summary.next_revert_here": { runId: "runId" },
+  // DR-51 (U-38): the same hints with the workspace path the person typed (`{workspace}`, a
+  // ShownWorkspace, in place of `<workspace>`), when the summary's context has `workspaceShown`.
+  // Without it, the hints above, as before. End summaries only (run, apply, revert): not the report,
+  // the plan view, cleanup, runs or the errors.
+  "summary.next_report_typed": { runId: "runId", workspace: "workspace" },
+  "summary.next_revert_typed": { runId: "runId", workspace: "workspace" },
   "summary.config_default": { location: "location" },
   "summary.profile_applied": {},
   // DR-47 (AXM-1): the agent's last message (EngineResult.finalMessage), shown as an item after this
@@ -378,6 +436,8 @@ export const FIXED_MESSAGES = {
   "summary.form.task": {},
   "summary.form.given": {},
   "summary.form.current": {},
+  // DR-51 (U-38): `summary.form.given` with the typed workspace, when the context has `workspaceShown`.
+  "summary.form.typed": { workspace: "workspace" },
   "summary.plan_ready": { actions: "count" },
   "summary.next_plan": { form: "text", runId: "runId" },
   "summary.next_apply": { form: "text", runId: "runId" },
@@ -517,6 +577,8 @@ export const FIXED_MESSAGES = {
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
+  // DR-51 (U-38): the same with the workspace `revert` was given (RevertSummaryContext).
+  "summary.next_revert_unsafe_typed": { runId: "runId", workspace: "workspace" },
 
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
@@ -886,8 +948,11 @@ export type DoctorText = {
 /**
  * What a run summary needs besides the result (N-5, N-17). Nothing in it is a typed or file value.
  * - workspaceForm: how the workspace was given, for the "next command" hints: "current" (one-line
- *   run: `--workspace .`), "given" (`--workspace <dir>`: the hint says `<workspace>`, the typed
- *   path is never repeated), "task" (a task file: the hint says `<workspace>` too).
+ *   run: `--workspace .`), "given" (`--workspace <dir>`: the hint says `<workspace>`, or the typed
+ *   path when workspaceShown is there), "task" (a task file: the hint says `<workspace>`, as before).
+ * - workspaceShown (DR-51, U-38): with "given" only, the typed `--workspace` path as
+ *   `toShownWorkspace` gives it after the run's masking; absent when it gives null. The hints then
+ *   use the `*_typed` ids and `summary.form.typed`. Never in the JSON or the records (UXM-8).
  * - configDefault (N-1): the fixed display form when the config came from the default location.
  * - profileApplied (N-8): whether `--profile` was used. The name is not shown.
  * - deniedToolCalls (N-17): `tool_decision` records with `allowed: false` in this run, the same
@@ -905,13 +970,15 @@ export interface RunSummaryContext {
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
   readonly policySource: "task" | "config";
+  readonly workspaceShown?: ShownWorkspace;
 }
 
 /**
  * Renders outputs as text for people, in the catalog's language. Every method returns complete
  * lines ending with LF (or null where noted) and never reads anything.
  *
- * Paths: messages never take a path. A renderer may print the masked paths that the outputs and
+ * Paths: messages never take a path, except a ShownWorkspace in the `*_typed` next-command hints
+ * (DR-51). A renderer may print the masked paths that the outputs and
  * records already carry (`changes[].path`, `reverted[].path`, `skipped[].path`, `file_changed.path`,
  * and G-A's `file_moved.from`/`to`, `file_discarded.path`, `ApplyResult.applied[].action` paths) as
  * items after a message, with control characters replaced, key shapes hidden and the length cut, as
@@ -950,9 +1017,11 @@ export interface HumanOutput {
    * N-7: stderr after `revert` and `revert --dry-run`. DR-25: `revert.unsafe_moved` when files were
    * moved back unsafely, `summary.next_revert_unsafe` when files were skipped as `unsafe_move`, and
    * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present. R-16 L-1:
-   * `revert.parked` when skipped files carry `parkedAt`.
+   * `revert.parked` when skipped files carry `parkedAt`. DR-51 (U-38): with
+   * `context.workspaceShown`, `summary.next_revert_unsafe_typed` in place of
+   * `summary.next_revert_unsafe`.
    */
-  revertSummary(output: RevertOutput): string;
+  revertSummary(output: RevertOutput, context?: RevertSummaryContext): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;
   /**
@@ -980,9 +1049,22 @@ export interface HumanOutput {
   applySummary?(result: ApplyResult, context: ApplySummaryContext): string;
 }
 
-/** G-A: what an apply summary needs besides the result. As RunSummaryContext's workspaceForm. */
+/**
+ * G-A: what an apply summary needs besides the result. As RunSummaryContext's workspaceForm and,
+ * DR-51 (U-38), its workspaceShown (after the apply's masking).
+ */
 export interface ApplySummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
+  readonly workspaceShown?: ShownWorkspace;
+}
+
+/**
+ * DR-51 (U-38): what a revert summary needs besides the output: the `--workspace` path revert was
+ * given, as `toShownWorkspace` gives it with key shapes masked (revert knows no registered values);
+ * absent when it gives null, and the hint says `<workspace>` as before.
+ */
+export interface RevertSummaryContext {
+  readonly workspaceShown?: ShownWorkspace;
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

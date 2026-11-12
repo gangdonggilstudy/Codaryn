@@ -4,7 +4,7 @@
  * or reorder a line are replaced before printing, and key-shaped text is hidden.
  */
 
-import { KNOWN_KEY_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
+import { KEY_MASK_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
 import type { KnownKeys } from "./security/index.js";
 
 /** Shown in place of a replaced character. */
@@ -77,8 +77,9 @@ export function hideKeys(text: string, currentKey: KnownKeys): string {
     const to = kept[start + length - 1];
     if (from !== undefined && to !== undefined) spans.push([from, to + 1]);
   };
-  // SP-2: every known key shape and every given key value (every key variable that is set).
-  for (const match of stripped.matchAll(new RegExp(KNOWN_KEY_SHAPE_SOURCE, "g"))) add(match.index, match[0].length);
+  // SP-2, DR-32 (a): every hiding shape (the loose one too) and every given key value (every key
+  // variable that is set).
+  for (const match of stripped.matchAll(new RegExp(KEY_MASK_SHAPE_SOURCE, "g"))) add(match.index, match[0].length);
   for (const key of keyValuesOf(currentKey)) {
     for (let at = stripped.indexOf(key); at !== -1; at = stripped.indexOf(key, at + key.length)) add(at, key.length);
   }

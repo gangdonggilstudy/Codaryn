@@ -24,8 +24,11 @@ after(async () => {
 
 /** The OpenAI key value as a person would have it set: not key-shaped, so only S-2 can hide it. */
 const OPENAI_VALUE = ["fake", "openai", "sp2", "value", "0001"].join("-");
-/** An OpenAI-shaped key (the contract's loose shape: `sk-` and 32 or more characters). */
-const OPENAI_SHAPED = `${"sk"}-${"Q".repeat(20)}${"7".repeat(20)}`;
+/**
+ * An OpenAI-shaped key under every refusal shape of the contract (DR-32 (a), DR-33): a distinct
+ * prefix, then upper- and lower-case letters and digits.
+ */
+const OPENAI_SHAPED = `${"sk"}-${"proj"}-${"Ab3x".repeat(10)}`;
 
 const io = (base: string, argv: readonly string[], env: Record<string, string>) => ({
   argv,

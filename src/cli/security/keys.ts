@@ -4,7 +4,7 @@
  * A reported location holds known schema field names and indexes only, never other text.
  */
 
-import { API_KEY_ENVS, API_KEY_PATTERN_SOURCES, KEY_FIELD_NAMES } from "../../contracts/index.js";
+import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, API_KEY_PATTERN_SOURCES, KEY_FIELD_NAMES } from "../../contracts/index.js";
 
 /** Containers (objects and arrays) deeper than this are rejected as invalid input. */
 export const MAX_KEY_SCAN_DEPTH = 64;
@@ -25,8 +25,18 @@ export function keyValuesOf(keys: KnownKeys): string[] {
   return [...new Set(list.filter((key) => key.length >= MIN_CURRENT_KEY_LENGTH))];
 }
 
-/** SP-2: every key shape Codaryn knows (API_KEY_PATTERN_SOURCES), as one regular expression source. */
-export const KNOWN_KEY_SHAPE_SOURCE = API_KEY_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
+/**
+ * DR-32 (a), DR-33: the key shapes that refuse a run (S-6 files, S-8 arguments), as one regular
+ * expression source: the contract's narrowed shapes (API_KEY_PATTERN_SOURCES). They are a second
+ * check; refusal rests mainly on the registered key values (S-2).
+ */
+export const KEY_REFUSAL_SHAPE_SOURCE = API_KEY_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
+
+/**
+ * DR-32 (a): the key shapes hidden in output (API_KEY_MASK_PATTERN_SOURCES): the refusal shapes and
+ * the loose `sk-` one. Hiding an ordinary name costs a word; letting a key through costs the key.
+ */
+export const KEY_MASK_SHAPE_SOURCE = API_KEY_MASK_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
 
 /** Field names of the task and config file schemas. Only these appear in a location as written. */
 export const KNOWN_FIELD_NAMES: ReadonlySet<string> = new Set([
@@ -66,11 +76,11 @@ function isPrintableKeyFieldName(name: string): boolean {
   return PRINTABLE_KEY_FIELD.test(name) && KEY_NAMES.has(normalizedFieldName(name));
 }
 
-/** SP-2: every known key shape, and every given key value. */
+/** S-6, S-8: every given key value (SP-2: every known key variable that is set), and the refusal shapes. */
 function keyMatcher(currentKey: KnownKeys): (text: string) => boolean {
-  const shape = new RegExp(KNOWN_KEY_SHAPE_SOURCE);
+  const shape = new RegExp(KEY_REFUSAL_SHAPE_SOURCE);
   const values = keyValuesOf(currentKey);
-  return (text) => shape.test(text) || values.some((value) => text.includes(value));
+  return (text) => values.some((value) => text.includes(value)) || shape.test(text);
 }
 
 export type KeyScanOutcome =

@@ -7,8 +7,9 @@
 export { checkLocalPathSyntax, locateInWorkspace, relateRealPaths } from "./paths.js";
 export type { PathRelation, PathSyntaxOutcome, RealpathFs, WorkspaceLocation } from "./paths.js";
 export {
+  KEY_MASK_SHAPE_SOURCE,
+  KEY_REFUSAL_SHAPE_SOURCE,
   KNOWN_FIELD_NAMES,
-  KNOWN_KEY_SHAPE_SOURCE,
   MAX_KEY_SCAN_DEPTH,
   MIN_CURRENT_KEY_LENGTH,
   findKeyInJson,

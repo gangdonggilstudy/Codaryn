@@ -533,6 +533,39 @@ startGui({
       results["cleanupForged"] = await js(`window.codaryn.applyCleanup(${JSON.stringify("0".repeat(32))})`);
       results["cleanupText"] = await js("document.getElementById('cleanup')?.textContent ?? ''");
 
+      // 5k. U-11 (3.11): the first-run guide on this workspace. The config file exists (used as it is), the
+      // key is set (by its variable's name), init's suggestions for a package.json with a test script
+      // are off until chosen; the chosen command is asked about by the main process (widening).
+      writeFileSync(join(SECOND, "package.json"), JSON.stringify({ name: "smoke", scripts: { test: "node -e 0" } }));
+      const setupPage = (): Promise<unknown> => waitFor("(() => { const s = document.getElementById('setup'); return s?.getAttribute('data-ready') === 'ok' ? s.getAttribute('data-step') : null; })()");
+      await js("document.querySelector('[data-screen=\"setup\"]')?.click(); true");
+      results["setupFolder"] = await setupPage();
+      results["setupConfig"] = await js("document.getElementById('setup-config')?.getAttribute('data-config') ?? null");
+      results["setupCreateAgain"] = await js("window.codaryn.createSettings(null)");
+      results["setupCreateExists"] = await js("window.codaryn.createSettings(null)");
+      await js("document.getElementById('setup-next')?.click(); true");
+      results["setupModel"] = await setupPage();
+      results["setupKey"] = await js("document.getElementById('setup-key')?.getAttribute('data-key') ?? null");
+      await js("document.getElementById('setup-next')?.click(); true");
+      results["setupPermissions"] = await setupPage();
+      results["setupSuggestions"] = await js("[...document.querySelectorAll('[data-suggest]')].map((box) => [box.getAttribute('data-suggest'), box.getAttribute('data-label'), box.checked])");
+      const askedBeforeSetup = dialogs.length;
+      await js("(() => { for (const box of document.querySelectorAll('[data-suggest]')) box.checked = true; document.getElementById('setup-apply').click(); return true; })()");
+      results["setupApplied"] = await waitFor("(() => { const o = document.getElementById('setup-applied'); return o?.hasAttribute('data-done') ? [...o.querySelectorAll('[data-result]')].map((li) => li.getAttribute('data-result')) : null; })()");
+      results["setupDialogs"] = dialogs.slice(askedBeforeSetup);
+      await js("document.getElementById('setup-next')?.click(); true");
+      results["setupChecks"] = await setupPage();
+      results["setupCheckItems"] = await js("document.querySelectorAll('#setup .checks li').length");
+      results["setupOnDisk"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { policy?: { commands?: { executable: string; argsPrefix: string[] }[]; protectedPaths?: string[] } };
+          return { npmTest: (config.policy?.commands ?? []).some((rule) => rule.executable === "npm" && rule.argsPrefix.join(" ") === "test"), packageJson: (config.policy?.protectedPaths ?? []).includes("package.json") };
+        } catch {
+          return "unreadable";
+        }
+      })();
+      results["setupText"] = await js("document.getElementById('work')?.textContent ?? ''");
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",

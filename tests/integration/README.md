@@ -125,6 +125,38 @@
 - `node --test`는 소요 시간을 출력하므로 같은 코드라도 출력 바이트가 매번 다르다. 같은 실패 반복 사례는 출력이 코드에만 달린 `checks/price-check.mjs`를 쓴다.
 - 기록 검사에서 `runs/<runId>/snapshots/`는 뺀다(`stateRecordTexts`). 계약상 스냅샷은 작업 공간 파일과 같은 원문 자료다(R-8). 그 밖의 상태 디렉터리 파일은 모두 검사한다.
 
+## 모델 목록 (`y01-models`, 모의 API·실제 API 아님)
+
+[CLI·공통 계약](../../docs/cli-contract.md) 16절(Y-1~Y-4)을 가짜 서버의 `GET /v1/models`(`tests/support/fake-models.ts`, 쪽당 2개)로 확인한다. 모든 실행에 네트워크 울타리를 쓴다.
+
+| 결정 | 판정 근거 |
+| --- | --- |
+| Y-1 | 모든 쪽을 API 순서로 읽고 번호·이름·한도·`createdAt`을 낸다. 미확인 필드가 없어도 된다. 표 출력에서 현재 모델 줄. `MAX_MODEL_LIST_PAGES`쪽은 읽고 넘으면 `api_error` |
+| Y-1 현재 모델 | `CODARYN_MODEL` > 설정 파일, 목록에 없으면 `listed: false`, 없으면 `null` |
+| Y-2 | 키 없으면 `provider_not_configured`·요청 0건. 키는 `x-api-key`에만(Messages와 같은 `anthropic-version`), 출력·설정 파일·다른 헤더에 없음. `--vars-file`의 키, `CODARYN_API_BASE_URL` 우선 |
+| Y-2 실패 | 401 → `model_list_failed`(`auth_failed`). 문자열 id가 없는 항목(대조군 포함), 키의 8자 조각이 든 id·이름·`created_at` → `malformed_response`, 아무것도 쓰지 않고 조각을 출력하지 않음 |
+| Y-3 | `--use` 번호·id는 설정 파일의 `model`만 바꾼다. 없는 파일은 `schemaVersion`과 `model`로 만든다. 잘못된 값은 `invalid_arguments`·무변경. 터미널이 아니면 묻지 않는다. 작업 공간 안에 쓴 설정은 `run`이 거부(S-1) |
+| Y-4 | Messages 404로 끝난 실행: 결과 `notices`(= `result.json`)에 `codaryn models` 안내, 기록의 오류는 제공자의 `api_error`·`HTTP 404` 문구 그대로 |
+
+- 목록에 나오는 가짜 모델 id는 `cdy-listed-model-`로 시작한다. 가짜 키가 모두 `cdy-fake`(8자)로 시작하는데, 목록 조회는 키의 8자 조각이 든 항목을 거부하기 때문이다(`src/model/anthropic/index.ts`의 `KEY_FRAGMENT_CHARS`). 새 가짜 값은 `tests/fixtures/anthropic.ts`의 `sharesKeyRun`으로 확인한다.
+
+## 사용성 (`n01`~, N-E)
+
+[사용성 작업 지시](../../docs/work-orders/phase-4-usability.md) 완료 기준 2(처음 쓰는 사람이 문서만 보고 따라 함)를 확인한다. 문서가 출력에 대해 말하는 것은 두 번 확인한다: 문서가 아직 그렇게 말하는지, CLI가 아직 그렇게 하는지. 한쪽만 바뀌면 실패한다.
+
+| 사례 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → report → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄 전체, 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. 키 없음, 네트워크 울타리 |
+
+- `init`, `runs`, `--run latest`, `revert --dry-run`(N-2, N-7)은 N-A 연결이 main에 들어온 뒤 더한다.
+
+## 진단 (Z-1)
+
+- 단언 메시지(`parseCliOutput`, `parseCommandOutput`)는 종료 코드, 신호, 소요 시간, pid, stdout·stderr 앞부분을 담는다(`describeRun`).
+- `CODARYN_IT_PID_LOG=<작업 디렉터리 밖 파일>`이면 CLI 시작과 `killQuietly`마다 한 줄(`spawn|kill <pid> <ms> ...`)을 덧붙인다. 다른 시험의 CLI pid를 죽이는지 찾는 용도이며 기본은 꺼짐이다.
+- pid로 프로세스를 죽이는 정리는 그 시험이 멈춘 것을 확인하지 못한 pid에만 한다. Windows는 놓인 pid를 몇 초 안에 다른 프로세스에 준다(`a08`, `g01` T-2).
+- `t.after`는 등록한 순서로 실행된다. 샌드박스 삭제보다 먼저 해야 할 정리는 `createSandbox`보다 먼저 등록한다.
+
 ## 격리
 
 - 사례마다 `<tmp>/codaryn-it-*/`를 만들고 끝나면 지운다. task와 대본은 작업 공간 밖(base)에 둔다.

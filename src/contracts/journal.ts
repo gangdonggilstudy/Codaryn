@@ -49,6 +49,11 @@ export type JournalEvent =
        * excepted (the first `model_request.system` holds them). Absent: the legacy settings.
        */
       readonly workflowRef?: string | null;
+      /**
+       * DR-37 (d): ResolvedTaskSpec.profile, when a profile was applied and its name passes
+       * PROFILE_NAME_PATTERN_SOURCE. Absent: none (and every journal written before DR-37).
+       */
+      readonly profile?: string;
       readonly tools?: readonly AnyToolName[];
       readonly plan?: PlanMode;
       readonly completion?: CompletionMode;

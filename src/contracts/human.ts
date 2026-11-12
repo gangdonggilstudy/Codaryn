@@ -364,6 +364,9 @@ export const FIXED_MESSAGES = {
   "summary.next_revert_here": { runId: "runId" },
   "summary.config_default": { location: "location" },
   "summary.profile_applied": {},
+  // DR-52 (AXM-17): EngineResult.masking, counts only: `{registered}` values registered for masking,
+  // `{masked}` places masked in what was sent to the model. Shown when the result has it.
+  "summary.masking": { registered: "count", masked: "count" },
   // G-A: plan runs, human review and apply runs. `{form}` is one of `summary.form.*`, chosen by
   // the context's workspaceForm, so a hint repeats the task form the user typed without its value.
   "summary.form.task": {},

@@ -177,8 +177,9 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           readRecord: readRevertRecord,
           writeRecord: writeRevertRecord,
           announceLatest,
-          // N-26: the store judges one run as the run list does.
-          isDamaged: async (workspaceRoot, runId) => (await inspectRun(workspaceRoot, runId)) === "damaged",
+          // N-26, N-27 (a): the store judges one run as the run list does: an id with no entry of
+          // exactly that name is run_not_found, a damaged run is refused.
+          inspect: inspectRun,
         }),
       });
       if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));

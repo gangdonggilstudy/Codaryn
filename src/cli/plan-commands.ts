@@ -51,6 +51,7 @@ import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
   createApplyJournal,
+  inspectRun as storeInspectRun,
   latestRun,
   listRuns as storeListRuns,
   loadPlan as storeLoadPlan,
@@ -61,6 +62,7 @@ import {
   writeResult,
   writeReviewRecord,
 } from "../store/index.js";
+import type { RunInspection } from "../store/index.js";
 import { createCommandRunner, createPlanExecutor, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -88,6 +90,7 @@ export interface PlanCommandEnvironment extends PrepareEnvironment {
   /** Overrides for tests; the store's functions otherwise. */
   readonly listRuns?: ListRuns;
   readonly loadPlan?: LoadPlan;
+  readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
   /** N-23: told which run `--run latest` chose, before anything is read. */
   readonly announceLatest?: (entry: CheckedRun) => void;
 }
@@ -177,8 +180,19 @@ async function prepareFor(
   } catch {
     return { ok: false, outcome: cliError("workspace_not_found", "workspaceRoot is not an existing directory") };
   }
-  const reference = await resolveRunReference(workspaceRoot, run, { exists, listRuns: io.listRuns ?? storeListRuns });
+  const inspect = io.inspectRun ?? storeInspectRun;
+  const reference = await resolveRunReference(workspaceRoot, run, { exists, listRuns: io.listRuns ?? storeListRuns, inspect });
   if (!reference.ok) return { ok: false, outcome: cliError(reference.code, reference.message) };
+  // N-27: a run the run list judges damaged is not shown, applied or reviewed (as revert, N-26).
+  let inspection: RunInspection;
+  try {
+    inspection = await inspect(workspaceRoot, reference.runId);
+  } catch {
+    inspection = "damaged";
+  }
+  if (inspection === "damaged") {
+    return { ok: false, outcome: cliError("invalid_run_record", "the run's records do not pass the checks (`codaryn runs` shows it as damaged); nothing was shown or changed") };
+  }
   if (reference.latest !== null) {
     try {
       io.announceLatest?.(reference.latest);

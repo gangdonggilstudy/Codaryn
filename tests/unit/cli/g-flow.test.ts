@@ -156,7 +156,8 @@ describe("organize: run → plan_pending → plan → apply → revert", () => {
 
   test("apply refuses a task whose workflow does not apply plans, and latest as the plan run", async () => {
     const { base } = await setup("document", [{ text: "done" }]);
-    const outcome = await runApply(applyIo(base, ["apply", "--task", "task.json", "--run", "20261112T030000Z-00000000", "--digest", "0".repeat(12)]));
+    const finished = await run(base);
+    const outcome = await runApply(applyIo(base, ["apply", "--task", "task.json", "--run", finished.runId, "--digest", "0".repeat(12)]));
     assert.ok("output" in outcome && outcome.output.kind === "error" && outcome.output.code === "run_not_plan");
     const latest = await runApply(applyIo(base, ["apply", "--task", "task.json", "--run", "latest", "--digest", "0".repeat(12)]));
     assert.ok("output" in latest && latest.output.kind === "error" && latest.output.code === "invalid_arguments");

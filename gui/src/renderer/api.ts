@@ -50,6 +50,7 @@ export interface CodarynApi {
   listRuns(workspace: string): Promise<unknown>;
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;
+  revertConsent(retry: string): Promise<unknown>;
   plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
@@ -252,7 +253,8 @@ export function asRevert(value: unknown): RevertReply {
   const view = value["view"];
   if (!str(view["runId"]) || !Array.isArray(view["reverted"]) || !Array.isArray(view["skipped"])) return failed(value);
   const preview = str(value["preview"]) && HEX.test(value["preview"]) ? value["preview"] : null;
-  return { ok: true, view: view as unknown as RevertView, preview };
+  const consentRetry = str(value["consentRetry"]) && HEX.test(value["consentRetry"]) ? value["consentRetry"] : null;
+  return { ok: true, view: view as unknown as RevertView, preview, consentRetry };
 }
 
 /** GU-5: a plan view (the main process checked it already) and the approval token its apply takes. */

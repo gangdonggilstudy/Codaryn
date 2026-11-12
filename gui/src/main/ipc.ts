@@ -19,6 +19,7 @@ import {
   parseRevealArgs,
   parseStartRunArgs,
   parsePreviewArgs,
+  parseRetryArgs,
   parsePlanArgs,
   parseApplyArgs,
   parseReviewArgs,
@@ -42,7 +43,7 @@ import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
-import type { RevertPreview, RunHistory } from "./history.js";
+import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
 import type { ChangesReply, PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
@@ -85,6 +86,8 @@ export interface IpcDeps {
   readonly history: RunHistory;
   /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
   readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
+  /** DR-25: asks the person (a separate OS dialog) for the consent to move this run's files back unsafely. */
+  readonly confirmRevertConsent: (retry: ConsentRetry) => Promise<boolean>;
   /** GU-5: the plans shown and their approval tokens. */
   readonly approvals: PlanApprovals;
   /** GU-5 (3.9, 6.6): asks the person (an OS dialog) whether to apply this plan; true only on "apply". */
@@ -320,7 +323,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (!checked.ok) return checked;
     if (checked.view.runId !== parsed.runId || !checked.view.dryRun) return { ok: false, code: "host_error" };
     const preview = deps.history.issuePreview({ workspace: parsed.workspace, runId: parsed.runId, reverted: checked.view.reverted.length, skipped: checked.view.skipped.length });
-    return { ok: true, view: checked.view, preview };
+    return { ok: true, view: checked.view, preview, consentRetry: null };
   });
 
   handle(IPC_CHANNELS.revert, async (args): Promise<RevertReply> => {
@@ -339,7 +342,30 @@ export function registerIpc(deps: IpcDeps): void {
     const checked = toRevertView(response.value);
     if (!checked.ok) return checked;
     if (checked.view.runId !== preview.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
-    return { ok: true, view: checked.view, preview: null };
+    // DR-25: files skipped because their drive has no hard links may go back with the person's consent.
+    const unsafe = checked.view.skipped.filter((file) => file.reason === "unsafe_move").length;
+    const consentRetry = unsafe > 0 ? deps.history.issueConsentRetry({ workspace: preview.workspace, runId: preview.runId, files: unsafe }) : null;
+    return { ok: true, view: checked.view, preview: null, consentRetry };
+  });
+
+  // DR-25: the same run once more with the consent, only from a revert's own result and the person's answer.
+  handle(IPC_CHANNELS.revertConsent, async (args): Promise<RevertReply> => {
+    const parsed = args.length === 1 ? parseRetryArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const retry = deps.history.takeConsentRetry(parsed.retry);
+    if (retry === null) return { ok: false, code: "unknown_retry" };
+    if (deps.runs.running) return { ok: false, code: "run_active" };
+    const root = workspaces.path(retry.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    if (!(await deps.confirmRevertConsent(retry))) return { ok: false, code: "not_confirmed" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("revert", { workspace: root, runId: retry.runId, dryRun: false, consent: true }, REVERT_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const checked = toRevertView(response.value);
+    if (!checked.ok) return checked;
+    if (checked.view.runId !== retry.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
+    return { ok: true, view: checked.view, preview: null, consentRetry: null };
   });
 
   // GU-5 (3.9, 3.7): the plan view, its apply (asked first, DR-21 consent asked separately) and a review.

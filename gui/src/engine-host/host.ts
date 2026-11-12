@@ -40,7 +40,8 @@ export interface HostApp {
   startRun(request: HostStartRunRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
   /** GU-4: the run list (N-7) and a revert, dry run or not (N-7, AC 5.5). */
   listRuns(request: { readonly workspace: string; readonly limit: number }): Promise<unknown>;
-  revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean }): Promise<unknown>;
+  /** DR-25: `unsafeMoveConsent` only after the person agreed in the main process's dialog, naming this run. */
+  revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean; readonly unsafeMoveConsent: { readonly runId: string } | null }): Promise<unknown>;
   /** GU-5: the plan view, its apply (DR-1, DR-2, DR-21) and a person's review (GT-D6). */
   plan(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   applyPlan(request: HostApplyRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
@@ -250,10 +251,13 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       case "revert": {
         // The window never names "latest": a run id the person chose from the list (3.8).
         if (!isObj(args)) throw new ArgsError();
-        const workspace = workspaceArg(args, ["workspace", "runId", "dryRun"]);
+        const workspace = workspaceArg(args, ["workspace", "runId", "dryRun", "consent"]);
         const { runId, dryRun } = args;
-        if (typeof runId !== "string" || !RUN_ID.test(runId) || typeof dryRun !== "boolean") throw new ArgsError();
-        return revertValue(await deps.app.revert({ workspace, runId, dryRun }), deps.shown);
+        const consent = args["consent"] ?? false;
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || typeof dryRun !== "boolean" || typeof consent !== "boolean") throw new ArgsError();
+        // DR-25: a dry run moves nothing and takes no consent; a consent names this run only.
+        if (consent && dryRun) throw new ArgsError();
+        return revertValue(await deps.app.revert({ workspace, runId, dryRun, unsafeMoveConsent: consent ? { runId } : null }), deps.shown);
       }
       case "plan": {
         if (!isObj(args)) throw new ArgsError();

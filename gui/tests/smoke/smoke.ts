@@ -205,6 +205,9 @@ startGui({
       await js("document.getElementById('revert-run')?.click(); true");
       results["revertDone"] = await waitFor("document.getElementById('revert-panel')?.getAttribute('data-revert') ?? null", 60_000);
       results["madeAfterRevert"] = existsSync(join(SECOND, "made.txt"));
+      // DR-25: nothing was skipped as an unsafe move, so no consent is offered; a forged retry token is refused.
+      results["revertNoConsentOffer"] = await js("document.getElementById('revert-consent') === null");
+      results["revertConsentForged"] = await js(`window.codaryn.revertConsent(${JSON.stringify("0".repeat(32))})`);
 
       // 5e'. DR-29: the first run's changed file by path and state (it was reverted, so it is gone now).
       await waitFor(`document.querySelector('[data-changes="${firstRun}"]') !== null ? 'ready' : null`, 30_000);

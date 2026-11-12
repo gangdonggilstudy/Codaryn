@@ -27,6 +27,10 @@ const KO = {
   "consent.detail": "옮기는 도중 같은 이름의 파일이 새로 생기면 그 파일을 덮어쓸 수 있습니다. 동의하지 않으면 아무것도 옮기지 않습니다. 동의는 적용 기록에 남습니다.",
   "consent.agree": "이번 적용에 동의",
   "consent.keep": "동의하지 않음",
+  "revertConsent.message": "이 드라이브는 하드 링크를 쓸 수 없어 파일 {count}개를 되돌리지 못했습니다. 이번 되돌리기 한 번에만 동의할까요? (실행 {runId})",
+  "revertConsent.detail": "되돌리는 도중 원래 자리에 같은 이름의 파일이 새로 생기면 그 파일을 덮어쓸 수 있습니다. 동의하지 않으면 아무것도 바뀌지 않습니다. 동의는 되돌리기 기록에 남습니다.",
+  "revertConsent.agree": "이번 되돌리기에 동의",
+  "revertConsent.keep": "동의하지 않음",
 } as const;
 
 const EN: { readonly [K in keyof typeof KO]: string } = {
@@ -49,6 +53,10 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "consent.detail": "If a file with the same name appears while files are moved, it could be replaced. Without your agreement nothing is moved. The agreement is kept in the apply's record.",
   "consent.agree": "Agree for this apply",
   "consent.keep": "Do not agree",
+  "revertConsent.message": "This drive cannot use hard links, so {count} files were not put back. Agree for this one revert only? (run {runId})",
+  "revertConsent.detail": "If a file with the same name appears at the original place meanwhile, it could be replaced. Without your agreement nothing changes. The agreement is kept in the revert's record.",
+  "revertConsent.agree": "Agree for this revert",
+  "revertConsent.keep": "Do not agree",
 };
 
 export type DialogTextId = keyof typeof KO;

@@ -254,6 +254,13 @@ export function startGui(options: GuiOptions): void {
         const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
         return answer === 0;
       },
+      // DR-25: a separate dialog; "do not agree" is the default. It holds for this one revert.
+      confirmRevertConsent: async (retry) => {
+        const values = { runId: retry.runId, count: retry.files };
+        const buttons = [dialogText(language, "revertConsent.agree"), dialogText(language, "revertConsent.keep")];
+        const answer = await ask("revertConsent.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revertConsent.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
       approvals,
       // 3.9: "do not apply" is the default; the digest's first 12 characters and the counts are shown.
       confirmApply: async (approval) => {

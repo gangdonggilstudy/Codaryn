@@ -572,6 +572,7 @@ describe("i18n catalog: language and wording", () => {
       assert.deepEqual(placeholders(t), [], language);
       assert.notEqual(t, MESSAGE_TEXTS[language][own], language);
     }
+  });
 
   test("U-23 (DR-49): help.output tells the JSON line rule: human lines only at a terminal, the JSON line with --json, through a pipe or a file, and with --quiet", () => {
     const { en, ko } = MESSAGE_TEXTS;

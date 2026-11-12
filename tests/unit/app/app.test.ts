@@ -10,7 +10,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES } from "../../../src/contracts/index.js";
-import type { CliErrorCode, EngineResult, ModelProvider } from "../../../src/contracts/index.js";
+import type { CliErrorCode, EngineResult, JournalRecord, ModelProvider } from "../../../src/contracts/index.js";
 import { MODEL_NOT_FOUND_HINT } from "../../../src/cli/run.js";
 import { RUN_ID_PATTERN } from "../../../src/cli/run-id.js";
 import { runTask as engineRunTask } from "../../../src/engine/index.js";
@@ -56,7 +56,9 @@ describe("startRun", () => {
     assert.equal(result.runId, handle.runId);
 
     const journal = await readJournal(base, handle.runId);
-    assert.deepEqual(records(events), journal, "the events are the journal's lines, in order, as stored");
+    // DR-15: built in memory; `at` is a separate reading of the same clock.
+    const withoutTime = ({ at: _at, ...rest }: JournalRecord) => rest;
+    assert.deepEqual(records(events).map(withoutTime), journal.map(withoutTime), "the events are the engine's records, in order, as stored");
     assert.deepEqual(
       journal.map((record) => record.seq),
       journal.map((_record, index) => index + 1),

@@ -437,7 +437,10 @@ async function planSummary(io: PlanCommandEnvironment, workspaceRoot: string, ru
     if (typeof summary !== "string") return null;
     const masked = privacy.mask(summary);
     if (!masked.ok) return null;
-    const shown = cleanText(masked.text).trim();
+    // R-49 R49-M1: the same hiding as the person's text, here, so every output that carries the
+    // summary (--json, the app layer, apply's question) has it: registered secrets (above), the
+    // current key and key-shaped text, control characters.
+    const shown = cleanText(hideKeys(masked.text, knownKeyValues(io.env))).trim();
     // Masking may lengthen it (tokens); far beyond the tool's limit it is not the tool's record.
     if (shown.length === 0 || shown.length > MAX_PLAN_SUMMARY_CHARS * 4) return null;
     return shown as MaskedText;

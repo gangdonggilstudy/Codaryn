@@ -476,10 +476,13 @@ export interface ChangesApplyRun {
  * - unfinished: it ended otherwise (failed, cancelled, budget-exhausted, needs-input), with its
  *   reason (`runs.plan_apply_unfinished`)
  * - applying: it has no result yet, running or stopped without one (`runs.plan_applying`)
- * - reverted: its last revert was complete (`runs.plan_apply_reverted`); after a partial revert some
- *   changes are left, so it is judged by how it ended
- * - record_missing: the list has no checked entry for it (removed, or damaged)
- *   (`runs.plan_apply_missing`)
+ * - reverted: its last revert was complete (`runs.plan_apply_reverted`)
+ * - record_missing: the list has no records of an apply of this plan under that id
+ *   (`runs.plan_apply_missing`): no checked entry (removed, or damaged), or the entry is not an apply
+ *   run (`kind` not "apply"), or it applied another plan (`planRunId` not this plan run)
+ * A partial revert, or a revert record that cannot be read (revertRecordDamaged; `reverted` then
+ * says nothing), is judged by how the apply ended (a done apply: applied); the apply run's own line
+ * tells of the revert.
  */
 export const PLAN_APPLY_STATES = ["applied", "unfinished", "applying", "reverted", "record_missing"] as const;
 export type PlanApplyState = (typeof PLAN_APPLY_STATES)[number];
@@ -502,7 +505,9 @@ export function planApplyStateOf(
   const applyRunId = entry.appliedBy?.runId;
   if (applyRunId === undefined) return null;
   const apply = entries.find((other): other is Extract<RunListEntry, { readonly state: "checked" }> => other.state === "checked" && other.runId === applyRunId);
-  if (apply === undefined) return { state: "record_missing", applyRunId };
+  // R-55b: only an apply run of this plan says how its apply ended; any other entry of that id is
+  // not the records of that apply.
+  if (apply === undefined || apply.kind !== "apply" || apply.planRunId !== entry.runId) return { state: "record_missing", applyRunId };
   if (apply.reverted?.status === "complete") return { state: "reverted", applyRunId };
   if (apply.status === null) return { state: "applying", applyRunId };
   if (apply.status === "done") return { state: "applied", applyRunId };

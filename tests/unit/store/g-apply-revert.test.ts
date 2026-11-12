@@ -147,7 +147,7 @@ describe("revertRun on an apply run (G-E)", () => {
     assert.equal(await readFile(join(root, "inbox", "old.log"), "utf8"), LOG);
   });
 
-  test("a path recorded with a privacy token goes back through the stored plan; without a plan it is missing_snapshot", async () => {
+  test("a path recorded with a privacy token goes back through the stored plan; without a plan the revert rejects (DR-24 f)", async () => {
     const masked = `inbox/${TOKEN}.txt`;
     const withPlan = await appliedWorkspace({ recordedFrom: masked });
     const outcome = await revertRun({ workspaceRoot: withPlan.root, runId: APPLY_RUN });
@@ -155,8 +155,9 @@ describe("revertRun on an apply run (G-E)", () => {
     assert.equal(await readFile(join(withPlan.root, "inbox", "report.txt"), "utf8"), REPORT, "the real path comes from plan.json");
 
     const noPlan = await appliedWorkspace({ recordedFrom: masked, withPlan: false });
-    const skipped = await revertRun({ workspaceRoot: noPlan.root, runId: APPLY_RUN });
-    assert.deepEqual(skipped.skipped, [{ path: masked, reason: "missing_snapshot" }]);
+    for (const dryRun of [true, false]) {
+      await assert.rejects(revertRun({ workspaceRoot: noPlan.root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "invalid_run_record");
+    }
     assert.equal(await readFile(join(noPlan.root, "docs", "report.txt"), "utf8"), REPORT, "not touched");
   });
 
@@ -204,22 +205,6 @@ describe("revertRun on an apply run (G-E)", () => {
     assert.equal(await readFile(join(outside, "old.log"), "utf8"), LOG);
   });
 
-  test("DR-24 (b): when a hard link cannot be made, nothing is renamed: the move stops", async () => {
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-move-")));
-    roots.push(dir);
-    await writeFile(join(dir, "from.txt"), "x\n", "utf8");
-    for (const code of ["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK", "EIO"]) {
-      const outcome = await moveWithoutReplacing(join(dir, "from.txt"), join(dir, "to", "to.txt"), {
-        link: async () => {
-          throw Object.assign(new Error(code), { code });
-        },
-      });
-      assert.equal(outcome, "failed", code);
-      assert.equal(await exists(join(dir, "to", "to.txt")), false, `${code}: nothing was renamed`);
-    }
-    assert.equal(await readFile(join(dir, "from.txt"), "utf8"), "x\n");
-  });
-
   test("DR-24 (f): plan.json paths are used only when its bytes have the approved digest", async () => {
     const masked = `inbox/${TOKEN}.txt`;
     const { root } = await appliedWorkspace({ recordedFrom: masked });
@@ -227,10 +212,83 @@ describe("revertRun on an apply run (G-E)", () => {
     const stored = JSON.parse(await readFile(planFile, "utf8")) as { actions: { from?: string }[] };
     stored.actions[0] = { ...stored.actions[0], from: "elsewhere/report.txt" };
     await writeFile(planFile, `${JSON.stringify(stored)}\n`, "utf8");
-    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
-    assert.deepEqual(outcome.skipped, [{ path: masked, reason: "missing_snapshot" }], "a changed plan.json is not trusted");
+    for (const dryRun of [true, false]) {
+      await assert.rejects(revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "invalid_run_record", "a changed plan.json is not trusted");
+    }
     assert.equal(await exists(join(root, "elsewhere")), false);
     assert.equal(await readFile(join(root, "docs", "report.txt"), "utf8"), REPORT);
+  });
+
+  test("DR-24 (b): a move back that cannot be made safely is unsafe_move; nothing is renamed", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-move-")));
+    roots.push(dir);
+    await writeFile(join(dir, "from.txt"), "x\n", "utf8");
+    for (const code of ["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK"]) {
+      const outcome = await moveWithoutReplacing(join(dir, "from.txt"), join(dir, "to.txt"), { link: async () => { throw Object.assign(new Error(code), { code }); } });
+      assert.equal(outcome, "unsafe", code);
+    }
+    const other = await moveWithoutReplacing(join(dir, "from.txt"), join(dir, "to.txt"), { link: async () => { throw Object.assign(new Error("EIO"), { code: "EIO" }); } });
+    assert.equal(other, "failed");
+    assert.equal(await exists(join(dir, "to.txt")), false, "nothing was renamed");
+    assert.equal(await readFile(join(dir, "from.txt"), "utf8"), "x\n");
+  });
+
+  test("a record whose hash is not the plan action's, or a stored name outside the contract's pattern, rejects", async () => {
+    for (const bad of [
+      { type: "file_moved", index: 0, from: "inbox/report.txt", to: "docs/report.txt", sha256: sha("other\n") },
+      { type: "file_discarded", index: 1234567, path: "inbox/old.log", stored: "1234567", sha256: sha(LOG) },
+    ]) {
+      const { root } = await appliedWorkspace();
+      const file = join(root, ".codaryn", "runs", APPLY_RUN, "journal.jsonl");
+      const lines = (await readFile(file, "utf8")).trimEnd().split("\n");
+      lines.push(JSON.stringify({ seq: lines.length + 1, at: "2026-01-02T03:05:01.000Z", runId: APPLY_RUN, ...bad }));
+      await writeFile(file, `${lines.join("\n")}\n`, "utf8");
+      const before = await tree(root);
+      await assert.rejects(revertRun({ workspaceRoot: root, runId: APPLY_RUN }), (error: unknown) => error instanceof RevertRunError && error.code === "invalid_run_record", JSON.stringify(bad));
+      assert.deepEqual(await tree(root), before);
+    }
+  });
+
+  test("R-9 I-4: an action started but not recorded is reverted when it was done, ignored when it was not, and skipped otherwise", async () => {
+    // The journal ends after plan_item_started for action 1 (the discard): the process stopped.
+    const started = async (doneDiscard: boolean | "changed"): Promise<Applied> => {
+      const applied = await appliedWorkspace();
+      const file = join(applied.root, ".codaryn", "runs", APPLY_RUN, "journal.jsonl");
+      const lines = (await readFile(file, "utf8")).trimEnd().split("\n").filter((line) => !line.includes('"file_discarded"'));
+      lines.push(JSON.stringify({ seq: lines.length + 1, at: "2026-01-02T03:05:01.000Z", runId: APPLY_RUN, type: "plan_item_started", index: 1, action: { kind: "discard", path: "inbox/old.log", sha256: sha(LOG) } }));
+      await writeFile(file, `${lines.map((line, index) => JSON.stringify({ ...JSON.parse(line), seq: index + 1 })).join("\n")}\n`, "utf8");
+      if (doneDiscard === false) await rename(join(applied.discarded, "1"), join(applied.root, "inbox", "old.log"));
+      if (doneDiscard === "changed") await writeFile(join(applied.discarded, "1"), "changed\n", "utf8");
+      return applied;
+    };
+    const done = await started(true);
+    assert.deepEqual((await revertRun({ workspaceRoot: done.root, runId: APPLY_RUN })).reverted.map((file) => [file.path, file.action]), [
+      ["inbox/old.log", "restored_from_discard"],
+      ["inbox/report.txt", "moved_back"],
+    ]);
+    assert.equal(await readFile(join(done.root, "inbox", "old.log"), "utf8"), LOG);
+
+    const notDone = await started(false);
+    const outcome = await revertRun({ workspaceRoot: notDone.root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted.map((file) => file.path), ["inbox/report.txt"], "the action that was not done is not listed");
+    assert.deepEqual(outcome.skipped, []);
+
+    const changed = await started("changed");
+    const skipped = await revertRun({ workspaceRoot: changed.root, runId: APPLY_RUN });
+    assert.deepEqual(skipped.skipped, [{ path: "inbox/old.log", reason: "changed_since_run" }]);
+    assert.equal(await readFile(join(changed.discarded, "1"), "utf8"), "changed\n", "nothing is touched");
+  });
+
+  test("an action that failed while applying is not listed", async () => {
+    const { root } = await appliedWorkspace();
+    const file = join(root, ".codaryn", "runs", APPLY_RUN, "journal.jsonl");
+    const lines = (await readFile(file, "utf8")).trimEnd().split("\n").filter((line) => !line.includes('"file_discarded"'));
+    lines.push(JSON.stringify({ seq: 0, at: "2026-01-02T03:05:01.000Z", runId: APPLY_RUN, type: "plan_item_started", index: 1, action: { kind: "discard", path: "inbox/old.log", sha256: sha(LOG) } }));
+    lines.push(JSON.stringify({ seq: 0, at: "2026-01-02T03:05:01.000Z", runId: APPLY_RUN, type: "plan_item_failed", index: 1, problem: "io_error" }));
+    await writeFile(file, `${lines.map((line, index) => JSON.stringify({ ...JSON.parse(line), seq: index + 1 })).join("\n")}\n`, "utf8");
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true });
+    assert.deepEqual(outcome.reverted.map((entry) => entry.path), ["inbox/report.txt"]);
+    assert.deepEqual(outcome.skipped, []);
   });
 
   test("a model run's journal is reverted as before; an apply_started that is not first is not an apply run", async () => {

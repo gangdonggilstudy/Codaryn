@@ -21,8 +21,13 @@ import type {
   JournalRecord,
   MaskedText,
   ModelsOutput,
+  CleanupConfirmation,
+  CleanupOutcome,
+  CleanupPlan,
+  CleanupSelection,
   PermissionKind,
   PolicyNarrowingKind,
+  StateSummary,
   ReportOutput,
   RevertOutput,
   RunsOutput,
@@ -343,6 +348,46 @@ export interface RevertConsentRequest {
 }
 
 /** N-7: `codaryn runs --json`. */
+/** DR-39: a workspace whose state directory is summed up. */
+export interface StateSummaryRequest {
+  readonly workspace: string;
+}
+
+export interface StateSummaryView {
+  readonly kind: "state_summary";
+  /** The store's summarizeState: run ids, kinds, statuses, start times and sizes; no file name of a person's. */
+  readonly summary: StateSummary;
+}
+
+/** DR-39: what to remove (CleanupSelection: exact run ids, whole days, `reverted: true`). */
+export interface CleanupPreviewRequest {
+  readonly workspace: string;
+  readonly selection: CleanupSelection;
+}
+
+export interface CleanupPreview {
+  readonly kind: "cleanup_preview";
+  /** The moment the plan counted `olderThanDays` from (RUN_TIMESTAMP_PATTERN_SOURCE); give it back to applyCleanup. */
+  readonly now: string;
+  /** Items with their warnings, blocked items, totals, the parked files (never cleaned) and the digest to confirm. */
+  readonly plan: CleanupPlan;
+}
+
+/** DR-39: the selection and `now` of a preview, and the person's confirmation of its plan. */
+export interface ApplyCleanupRequest {
+  readonly workspace: string;
+  readonly selection: CleanupSelection;
+  readonly now: string;
+  /** The digest of the plan shown, and apart from it whether the discarded-files folders (people's files) may go. */
+  readonly confirmation: CleanupConfirmation;
+}
+
+export interface CleanupApplied {
+  readonly kind: "cleanup_applied";
+  /** The store's outcome: what was removed and kept and why, or why nothing was (plan_changed, workspace_locked). */
+  readonly outcome: CleanupOutcome;
+}
+
 export interface ListRunsRequest {
   readonly workspace: string;
   /** 1 to RUNS_MAX_LIMIT; RUNS_DEFAULT_LIMIT when absent. */
@@ -554,6 +599,12 @@ export interface CodarynApp {
   listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>>;
   /** N-7, N-23(b): the run a reference names and its start time. Reads only. */
   resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>>;
+  /** DR-39: the state directory's runs, discarded files and parked files with their sizes. Reads only. */
+  stateSummary(request: StateSummaryRequest): Promise<AppCallOutcome<StateSummaryView>>;
+  /** DR-39: what a cleanup would remove (the store's plan and its digest). Removes nothing. */
+  previewCleanup(request: CleanupPreviewRequest): Promise<AppCallOutcome<CleanupPreview>>;
+  /** DR-39: removes only a plan the person confirmed (its digest); people's discarded files only with their own yes. */
+  applyCleanup(request: ApplyCleanupRequest): Promise<AppCallOutcome<CleanupApplied>>;
   /** `codaryn doctor --json`: no network access, no write. */
   doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>>;
   /** The config file a run would read and what it holds; profile and workflow names. Reads only. */

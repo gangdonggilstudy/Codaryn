@@ -237,6 +237,14 @@ export interface RunObserver {
   - 어떤 실행이 손상인지, `latest`가 어느 실행인지는 store와 CLI(`listRuns`, `latestRunId`, `resolveRunRef`)가 정한다(N-18, N-23, N-26). 앱 계층은 고르지 않는다.
   - `resolveRun`은 `--run latest`가 고른 실행과 시작 시각을 행동 전에 보이게 한다(N-23 b).
   - `runs --json`처럼 키 모양과 지금 키를 가린다(N-23 a).
+- 상태 디렉터리 보기와 정리(DR-39, GU-4) [구현]. store의 `summarizeState`·`planCleanup`·`applyCleanup`을 앱 계층의 검사와 함께 낸다(`src/app/cleanup.ts`).
+  - `stateSummary({ workspace })` → `{ kind: "state_summary", summary }`: 실행 id·종류·상태·시작 시각과 크기, 폐기 보관함과 parked 파일의 수와 크기. 사람의 파일 이름은 없다.
+  - `previewCleanup({ workspace, selection })` → `{ kind: "cleanup_preview", now, plan }`: 무엇을 지울지(항목과 경고, 막힌 항목, 합계, 정리하지 않는 parked, 다이제스트). 아무것도 지우지 않는다. `now`는 `olderThanDays`를 센 때이고, 적용에 그대로 돌려준다.
+  - `applyCleanup({ workspace, selection, now, confirmation: { digest, discarded } })` → `{ kind: "cleanup_applied", outcome }`
+    - store가 잠금 아래에서 계획을 다시 만들고, 다이제스트가 확인한 것과 같을 때만 지운다. 아니면 `plan_changed`다.
+    - 폐기 보관함(사람의 파일)은 `discarded: true`일 때만 지운다. 아니면 `not_confirmed`로 남는다.
+    - 사람에게 묻는 것은 GUI 메인 프로세스다.
+  - 인자는 읽기 전에 검사한다. 실행 디렉터리 이름 그대로(`isStoredRunId`), 0 이상의 정수 일수, `reverted: true`만, 모르는 필드 없음, 계약의 시각 꼴, 64자리 16진수 다이제스트, 참·거짓인 `discarded`. 아니면 `invalid_arguments`다.
 
 ### 5.5 되돌리기 [구현 A-1]
 

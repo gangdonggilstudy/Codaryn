@@ -157,7 +157,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
     index += 1;
   }
   const workspace = values.get("--workspace");
-  if (workspace === undefined) return usage("--workspace is required");
+  if (workspace === undefined) return usage("--workspace is required. If you mean the current directory, give --workspace .");
 
   const days = (flag: ValueOption): number | undefined | { message: string } => {
     const value = values.get(flag);

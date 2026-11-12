@@ -79,7 +79,7 @@ describe("parseChangesArgs", () => {
       assert.equal(outcome.ok, false, argv.join(" "));
       return (outcome as { message: string }).message;
     };
-    assert.match(refused(["changes", "--run", "latest"]), /either --task or --workspace/);
+    // U-17 (UXM-19, DR-46): with neither, the current directory is the workspace (g-u17-read-commands).
     assert.match(refused(["changes", "--task", "t", "--workspace", "w", "--run", "latest"]), /either --task or --workspace/);
     assert.match(refused(["changes", "--task", "t", "--profile", "p", "--run", "latest"]), /--profile goes with --workspace/);
     assert.match(refused(["changes", "--task", "t"]), /--run is required/);
@@ -145,7 +145,7 @@ describe("runChanges", () => {
     const fake = fakeApp({ ok: false, error: { code: "secret_env_missing", message: "privacy.secretEnv[0] is not set" } });
     const error = errorOf(await runChanges({ argv: ["changes", "--task", "t.json", "--run", "latest"], env: {}, app: fake.app }));
     assert.deepEqual([error.kind, error.code, error.exitCode], ["error", "secret_env_missing", 2]);
-    const bad = errorOf(await runChanges({ argv: ["changes", "--run", "latest"], env: {}, app: fake.app }));
+    const bad = errorOf(await runChanges({ argv: ["changes", "--task", "t.json"], env: {}, app: fake.app }));
     assert.deepEqual([bad.code, fake.seen.length], ["invalid_arguments", 1]);
   });
 

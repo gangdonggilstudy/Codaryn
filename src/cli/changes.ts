@@ -73,7 +73,8 @@ export function parseChangesArgs(argv: readonly string[]): ParseChangesArgsOutco
   }
 
   const taskPath = values.get("--task");
-  const workspace = values.get("--workspace");
+  // U-17 (UXM-19, DR-46): a reading command takes the current directory when neither is given.
+  const workspace = values.get("--workspace") ?? (taskPath === undefined ? "." : undefined);
   const profile = values.get("--profile") ?? null;
   if ((taskPath === undefined) === (workspace === undefined)) {
     return { ok: false, message: `give either --task or --workspace. ${CHANGES_USAGE}` };

@@ -3,7 +3,8 @@
  *
  * - Secrets: the ones a run with the same settings registers now (secretEnv of the task and the
  *   config file, the current key, values the variables file sets). They come from the CLI's own
- *   pre-run steps (see `probeSecrets` in app.ts), so nothing here decides what is a secret.
+ *   steps 1 to 7 as a reading command (see `readingSecrets` in app.ts; U-17: the quick form needs
+ *   no key, model or run limits), so nothing here decides what is a secret.
  * - U-16 (UXM-4): an apply run's view carries `applyRun` (its plan run and the actions it applied,
  *   from the run list), since its moves and discards are no file writes of its own.
  * - The run: judged first as the run list, `report` and `revert` judge it (R-14 L-1). Its changed

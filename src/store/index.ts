@@ -65,4 +65,5 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
 export { listParkedFiles } from "./apply-revert.js";
 export { createApplyRecorders, createRunRecorders } from "./state-guard.js";
 export { hasRecordsChangedMark } from "./marks.js";
-export { applyCleanup, planCleanup, summarizeState } from "./cleanup.js";
+export { applyCleanup, applyCleanupWith, planCleanup, summarizeState } from "./cleanup.js";
+export type { CleanupOperations } from "./cleanup.js";

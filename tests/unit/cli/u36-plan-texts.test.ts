@@ -6,9 +6,9 @@
  *   (ENGLISH below, nb-i18n's), except two lines (reported):
  *   - plan.applied_by: the apply's time in local wall time in parentheses (UXM-23), in place of
  *     " at <ISO time>.";
- *   - apply.unsafe_move_question: one text for every count, so "move"/"moves" and "it"/"them" become
- *     "move(s)" and "them"; and the catalog's words (nb-i18n 2794d22: no text may promise a
- *     guarantee), "could replace a file at the destination, since the drive has no hard links";
+ *   - apply.unsafe_move_question: one text for every count, in the catalog's words (nb-i18n 2794d22:
+ *     no text may promise a guarantee; c71da18 after review R-66: words that read the same for one
+ *     move and for many, the count after a colon).
  * - The layout is the CLI's, not the texts' (PM after 0229b40): plan.digest_label has no colon (the
  *   CLI puts ": " and the digest after it), plan.discard_kept no parentheses (the CLI puts them).
  * - While the catalog does not have a text yet (N-B), the line is main's English, as the U-14 lines.
@@ -62,7 +62,7 @@ const ENGLISH: { readonly [id: string]: string } = {
   "plan.next_apply": "To apply it: codaryn apply <the same task form> --run {runId} --digest",
   "apply.question": "Apply this plan?",
   "apply.unsafe_move_question":
-    "{count} move(s) of this plan could replace a file at the destination, since the drive has no hard links. Nothing was moved. Apply again and make them anyway, for this apply only?",
+    "Moves of this plan that could replace a file at the destination, since the drive has no hard links: {count}. Nothing was moved. Apply again and make such moves anyway, for this apply only?",
   "review.recorded": "Review of run {runId}: {verdict}.",
   "review.recorded_replaced": "Review of run {runId}: {verdict} (an earlier review was replaced).",
   "review.verdict.accepted": "accepted",
@@ -200,7 +200,7 @@ describe("U-36: English stays as on main", () => {
     assert.equal(renderReview(REVIEW(true, "rejected"), NO_KEYS, english).split("\n")[0], MAIN.reviewReplaced);
     assert.equal(
       unsafeMoveQuestion(1, english),
-      "1 move(s) of this plan could replace a file at the destination, since the drive has no hard links. Nothing was moved. Apply again and make them anyway, for this apply only? [y/N] ",
+      "Moves of this plan that could replace a file at the destination, since the drive has no hard links: 1. Nothing was moved. Apply again and make such moves anyway, for this apply only? [y/N] ",
     );
   });
 

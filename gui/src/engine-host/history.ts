@@ -4,6 +4,9 @@
  * - Run ids go on as they are (the shape of RUN_ID); task ids and every path pass `shown`.
  * - Damaged runs keep their id only (N-23 (b), N-26): no report, changes or revert for them.
  * - App errors go on as their code only.
+ * - U-61 (U-16, R-55): a plan run an apply claimed gets `planApply`, judged by the contract's one rule
+ *   (`planApplyStateOf`, the same as the CLI's runs table) over the whole list; without that rule
+ *   (an older engine) no row gets it.
  */
 
 import { failureOf } from "./settings.js";
@@ -23,12 +26,30 @@ function outputOf(outcome: unknown): Obj | null {
   return outcome["output"];
 }
 
+/** The contract's planApplyStateOf(entry, entries) (src/contracts/commands.ts). */
+export type PlanApplyOf = (entry: unknown, entries: readonly unknown[]) => unknown;
+
+const PLAN_APPLY = ["applied", "unfinished", "applying", "reverted", "record_missing"];
+
+/** U-61: the rule's answer for one entry, the three fields only; null when none or not that shape. */
+function planApplyValue(of: PlanApplyOf, entry: Obj, entries: readonly unknown[]): Obj | null {
+  try {
+    const judged = of(entry, entries);
+    if (!isObj(judged) || typeof judged["state"] !== "string" || !PLAN_APPLY.includes(judged["state"])) return null;
+    if (typeof judged["applyRunId"] !== "string" || !RUN_ID.test(judged["applyRunId"])) return null;
+    return { state: judged["state"], applyRunId: judged["applyRunId"], reason: word(judged["reason"]) };
+  } catch {
+    return null;
+  }
+}
+
 /** `listRuns` → `{ok, runs, omitted}` or a failure. */
-export function runsValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+export function runsValue(outcome: unknown, shown: Shown, planApplyOf?: PlanApplyOf): Obj | HostFailure {
   const output = outputOf(outcome);
   if (output === null) return failureOf(outcome);
   const runs: Obj[] = [];
-  for (const entry of Array.isArray(output["runs"]) ? output["runs"].slice(0, MAX_LIST) : []) {
+  const entries: unknown[] = Array.isArray(output["runs"]) ? output["runs"].slice(0, MAX_LIST) : [];
+  for (const entry of entries) {
     if (!isObj(entry) || typeof entry["runId"] !== "string" || !RUN_ID.test(entry["runId"])) continue;
     if (entry["state"] === "damaged") {
       runs.push({ state: "damaged", runId: entry["runId"] });
@@ -48,6 +69,7 @@ export function runsValue(outcome: unknown, shown: Shown): Obj | HostFailure {
       revertRecordDamaged: entry["revertRecordDamaged"] === true,
       // UXM-14, DR-38: a records-changed mark (absent: false).
       recordsChanged: entry["recordsChanged"] === true,
+      planApply: planApplyOf === undefined ? null : planApplyValue(planApplyOf, entry, entries),
     });
   }
   return { ok: true, runs, omitted: count(output["omitted"]) ?? 0 };

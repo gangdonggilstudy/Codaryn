@@ -31,8 +31,12 @@ export interface RunScreenDeps {
   readonly openPlan: (runId: string, profile: string | null, workflow: string | null) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
-  /** GU-3 (3.7): the run's report, with the run's form. */
-  readonly openReport: (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null) => void;
+  /** GU-3 (3.7): the run's report, with the run's form; U-61: and the tab to open first. */
+  readonly openReport: (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null, tab?: string | null) => void;
+  /** U-61 (3.12): the run list with this run's revert preview. */
+  readonly openRevert?: (runId: string) => void;
+  /** U-61 (3.12): the settings screen, where the limits are (3.10). */
+  readonly openSettings?: () => void;
 }
 
 const MAX_NOTE = 500;
@@ -50,6 +54,16 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
   if (result.plan !== null) {
     out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-plan" }));
   }
+  // U-61 (3.12): the next steps the design names for how the run ended. A run or an apply that
+  // changed something can be reverted (done, cancelled, apply_incomplete and the rest alike).
+  const form = run.last === null ? null : { profile: run.last.profile, workflow: run.last.workflow };
+  const changed = (result.kind === "run" && result.changes.length > 0) || (result.kind === "apply" && result.applied.length > 0);
+  const openRevert = deps.openRevert;
+  if (changed && openRevert !== undefined) out.push(button(t.format("run.revertPreview"), () => openRevert(result.runId), { id: "run-revert-preview" }));
+  if (result.reason === "protected_changed") out.push(button(t.format("run.viewProtected"), () => deps.openReport(result.runId, form, "protected"), { id: "run-view-protected" }));
+  const openSettings = deps.openSettings;
+  if (result.status === "budget-exhausted" && openSettings !== undefined) out.push(button(t.format("run.viewLimits"), openSettings, { id: "run-view-limits" }));
+  if (result.reason === "plan_stale") out.push(el("p", t.format("run.planStale"), { class: "notice", id: "run-plan-stale" }), button(t.format("run.newPlan"), deps.newTask, { id: "run-new-plan" }));
   if (result.kind === "apply") {
     const applied = el("div", undefined, { id: "run-applied" });
     applied.append(el("h4", t.format("run.applied", { count: String(result.applied.length) })));

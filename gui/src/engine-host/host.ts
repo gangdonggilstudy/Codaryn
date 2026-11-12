@@ -8,6 +8,7 @@ import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
 import { revertValue, runsValue } from "./history.js";
+import type { PlanApplyOf } from "./history.js";
 import { changesValue, planValue, reviewValue } from "./plans.js";
 import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
@@ -102,6 +103,8 @@ export interface HostDeps {
    * (U-48, model-text.ts). Absent (an engine without it, tests): no model text is shown.
    */
   readonly modelText?: ModelText;
+  /** U-61 (U-16): the contract's planApplyStateOf; absent (an older engine, tests): no plan apply state. */
+  readonly planApplyOf?: PlanApplyOf;
   /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
   readonly providers: readonly string[];
   /** GU-6: whether an environment variable is set now (never its value); absent: none is. */
@@ -288,7 +291,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       case "listRuns": {
         if (!isObj(args)) throw new ArgsError();
         const workspace = workspaceArg(args, ["workspace"]);
-        return runsValue(await deps.app.listRuns({ workspace, limit: RUN_LIST_LIMIT }), deps.shown);
+        return runsValue(await deps.app.listRuns({ workspace, limit: RUN_LIST_LIMIT }), deps.shown, deps.planApplyOf);
       }
       case "revert": {
         // The window never names "latest": a run id the person chose from the list (3.8).

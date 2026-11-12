@@ -197,6 +197,14 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("the parked files texts name the folder they are left in (R-16 L-1)", () => {
+    for (const language of LANGS) {
+      for (const id of ["revert.parked", "doctor.lock.parked_left"] as const) {
+        assert.ok(MESSAGE_TEXTS[language][id].includes(".codaryn/parked/"), `${language} ${id}`);
+      }
+    }
+  });
+
   test("no text claims protection Codaryn does not give (UX 1.4, M-8)", () => {
     const overclaimKo = ["안전", "샌드박스", "차단", "암호화", "보장"];
     const overclaimEn = [/\bsafe/i, /sandbox/i, /\bblock/i, /encrypt/i, /\bsecure/i, /guarantee/i];

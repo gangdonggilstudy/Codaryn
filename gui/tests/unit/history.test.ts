@@ -67,7 +67,7 @@ test("history (GU-4): the run list keeps run ids, cleans task ids, and keeps onl
   assert.equal(reply.ok, true);
   if (!reply.ok) return;
   assert.equal(reply.runs.length, 3, "a row without a run id is left out");
-  assert.deepEqual(reply.runs[0], { state: "checked", runId: RUN_A, kind: "run", startedAt: "2026-11-12T01:02:03.000Z", taskId: "<task\u0007>", status: "done", reason: "verified", changes: 2, reverted: null, revertRecordDamaged: false });
+  assert.deepEqual(reply.runs[0], { state: "checked", runId: RUN_A, kind: "run", startedAt: "2026-11-12T01:02:03.000Z", taskId: "<task\u0007>", status: "done", reason: "verified", changes: 2, reverted: null, revertRecordDamaged: false, recordsChanged: false });
   assert.deepEqual(reply.runs[1]?.state === "checked" && reply.runs[1].reverted, { at: "2026-11-12T03:00:00.000Z", status: "partial" });
   assert.deepEqual(reply.runs[2], { state: "damaged", runId: "20261112T030405Z-0000dead" });
   assert.equal(JSON.stringify(value).includes("never shown"), false);

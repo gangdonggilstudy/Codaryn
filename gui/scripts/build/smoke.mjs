@@ -6,7 +6,7 @@
 // and in the repository root.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,6 +47,8 @@ const steps = [
     fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
   ]),
   fakeApi.replyText("analysis written"),
+  // U-13: a plan run that discards a file; its apply's discarded files stay through a cleanup.
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_c", "propose_plan", { summary: "discard sub/deeper/c.txt", actions: [{ kind: "discard", path: "sub/deeper/c.txt" }] })]),
   { kind: "hang" },
 ];
 const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
@@ -103,6 +105,15 @@ env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
 env[API_PROVIDERS.openai.keyEnv] = FAKE_OPENAI_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
+// U-11: the default config location (N-1: %APPDATA%\Codaryn, else $XDG_CONFIG_HOME/codaryn) of the app's
+// engine host is a folder of this test. createSettings writes there, never into this machine's own.
+const sandboxAppData = join(gui, "build", "smoke-appdata");
+rmSync(sandboxAppData, { recursive: true, force: true });
+mkdirSync(sandboxAppData, { recursive: true });
+const realDefaultConfig = process.platform === "win32" && process.env.APPDATA ? join(process.env.APPDATA, "Codaryn", "config.json") : null;
+const realDefaultBefore = realDefaultConfig !== null && existsSync(realDefaultConfig) ? statSync(realDefaultConfig).mtimeMs : null;
+env.APPDATA = sandboxAppData;
+env.XDG_CONFIG_HOME = sandboxAppData;
 // R29-L1: how many model requests the fake API has received, for the app's steps that cancel or close
 // a run: they wait until that run's request arrived (a file on this machine, rewritten every 50 ms).
 const apiCountFile = join(gui, "build", "smoke-api-count.json");
@@ -147,6 +158,8 @@ const run = await new Promise((resolve) => {
 });
 clearInterval(apiCountTimer);
 rmSync(apiCountFile, { force: true });
+const realDefaultAfter = realDefaultConfig !== null && existsSync(realDefaultConfig) ? statSync(realDefaultConfig).mtimeMs : null;
+const sandboxMade = existsSync(join(sandboxAppData, "Codaryn", "config.json"));
 const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
 const apiRequests = {
   models: apiRequestRows.filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length,
@@ -176,8 +189,11 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,startRun,stateSummary,tree";
+/** U-13 (5j2): the plan's apply, then two cleanups of its apply run (records only; records and discarded files). */
+const U13_DIALOGS = ["apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"];
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
+seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
 seen.configModel = configModel;
 
 const expected = [
@@ -279,7 +295,8 @@ const expected = [
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [
     "apiRequests",
-    (v) => v.models >= 2 && v.messages === 8 && v.other.length === 0 && v.allFakeKey === true,
+    // U-13's plan run (5j2) asks once more: 8 before it.
+    (v) => v.models >= 2 && v.messages === 9 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -384,6 +401,40 @@ const expected = [
   ["cleanupFirstRunGone", (v) => v === true],
   ["cleanupForged", (v) => v.ok === false && v.code === "unknown_preview"],
   ["cleanupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second)],
+  // U-13 (DR-53): the applied discard leaves its file in the apply's discarded files.
+  ["discardApplied", (v) => JSON.stringify(v) === JSON.stringify({ fileGone: true, box: true })],
+  // Its records only: kept as discarded_left (asked about as not reverted, answered "remove"), with
+  // the plan's and the result's notices; the records and the discarded files stay.
+  [
+    "discardLeftKept",
+    (v) =>
+      v.chosen === true &&
+      v.plan === "1" &&
+      typeof v.warnings === "string" &&
+      v.warnings.split(" ").includes("discarded_left") &&
+      v.planNotice === true &&
+      v.result === "done" &&
+      v.removed === "0" &&
+      JSON.stringify(v.kept) === JSON.stringify([["run", "discarded_left"]]) &&
+      typeof v.keptText === "string" &&
+      !v.keptText.includes("discarded_left") &&
+      v.keptNotice === true &&
+      JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message"]) &&
+      JSON.stringify(v.left) === JSON.stringify({ records: true, box: true }),
+  ],
+  // Its discarded files chosen too and their deletion agreed to: both go, nothing kept.
+  [
+    "discardLeftBoth",
+    (v) =>
+      v.chosen === true &&
+      v.plan === "2" &&
+      v.result === "done" &&
+      v.removed === "2" &&
+      JSON.stringify(v.kept) === "[]" &&
+      v.keptNotice === false &&
+      JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"]) &&
+      JSON.stringify(v.left) === JSON.stringify({ records: false, box: false }),
+  ],
   // U-5 (3.6): the run that ended while the window was not active: one OS notification, fixed text and status word.
   ["endNotice", (v) => v !== null && v.title === "Codaryn" && v.body === "Codaryn 실행이 끝났습니다: 확인 필요"],
   ["endNotices", (v) => Array.isArray(v) && v.length >= 1 && v.every((body) => /^Codaryn 실행이 끝났습니다(: [^\n]{1,40}|\. 결과는 실행 목록에서 확인하세요\.)$/.test(body))],
@@ -400,7 +451,29 @@ const expected = [
       !v.text.includes(FAKE_API_KEY) &&
       !v.text.includes(FAKE_OPENAI_KEY),
   ],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // UXM-14: the marked run in the run list (only it) and its report.
+  ["runsRecordsChanged", (v) => v === true],
+  ["runsUnmarked", (v) => v === 1],
+  ["reportRecordsChanged", (v) => v === true],
+  // U-11 (3.11): the first-run guide.
+  ["setupSandbox", (v) => v.made === true && v.realUntouched === true],
+  ["setupFolder", (v) => v === "folder"],
+  ["setupConfig", (v) => v === "exists"],
+  // The guide's create, called directly: CODARYN_CONFIG names the file runs read, so the default location
+  // (the test's folder) gets the defaults, said to be overridden; a second call finds it there.
+  ["setupCreateAgain", (v) => v.ok === true && v.created === true && v.overridden === true],
+  ["setupCreateExists", (v) => v.ok === false && v.code === "config_exists"],
+  ["setupModel", (v) => v === "model"],
+  ["setupKey", (v) => v === "set"],
+  ["setupPermissions", (v) => v === "permissions"],
+  ["setupSuggestions", (v) => JSON.stringify(v) === JSON.stringify([["command", "npm test", false], ["protect", "package.json", false]])],
+  ["setupApplied", (v) => JSON.stringify(v) === JSON.stringify(["written", "written"])],
+  ["setupDialogs", (v) => JSON.stringify(v) === JSON.stringify(["widen.message"])],
+  ["setupChecks", (v) => v === "checks"],
+  ["setupCheckItems", (v) => typeof v === "number" && v >= 5],
+  ["setupOnDisk", (v) => v.npmTest === true && v.packageJson === true],
+  ["setupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)
@@ -517,6 +590,7 @@ if (life === null || typeof life.hostPid !== "number") {
 }
 await sleep(1_000);
 rmSync(lifeFile, { force: true });
+rmSync(sandboxAppData, { recursive: true, force: true });
 rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
 const total = expected.length + 1 + switchChecks + lifeChecks;

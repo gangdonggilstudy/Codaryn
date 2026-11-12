@@ -26,6 +26,7 @@ import {
   toPlanView,
   toReviewReply,
   toChangesReply,
+  toReportReply,
   parseRunArgs,
   parseWorkspaceArgs,
   toRevertView,
@@ -44,7 +45,7 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
-import type { ChangesReply, PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
+import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
 
@@ -439,6 +440,26 @@ export function registerIpc(deps: IpcDeps): void {
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toChangesReply(response.value);
     return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
+  });
+
+  // GU-3 (3.7): a run's report. It reads; it changes nothing. A run id, never "latest".
+  handle(IPC_CHANNELS.report, async (args): Promise<ReportReply> => {
+    const parsed = args.length === 1 ? parseRunArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("report", { workspace: root, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const reply = toReportReply(response.value);
+    if (!reply.ok) return reply;
+    if (reply.view.runId !== parsed.runId) return { ok: false, code: "host_error" };
+    const finished = reply.view.finished;
+    if (finished === null) return { ...reply, labels: null };
+    const ids = [`status.${finished.status}`, `reason.${finished.reason}`];
+    const found = await texts(state.host, deps.osLocale(), ids);
+    return { ...reply, labels: { status: found?.texts[ids[0] as string] ?? finished.status, reason: found?.texts[ids[1] as string] ?? finished.reason } };
   });
 
   handle(IPC_CHANNELS.review, async (args): Promise<ReviewReply> => {

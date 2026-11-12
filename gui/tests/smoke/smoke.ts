@@ -288,6 +288,23 @@ startGui({
         "(() => { const body = document.getElementById('changes'); const first = body?.querySelector('.changed-file'); if (!body || !first) return 'no file section'; first.focus(); body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F7', bubbles: true })); return document.activeElement?.hasAttribute('data-hunk') === true; })()",
       );
 
+      // 5i. GU-3 (3.7): the analyze run's report from its result: tabs, the summary, the verdict.
+      await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
+      await js("document.getElementById('run-view-report')?.click(); true");
+      results["reportReady"] = await waitFor("(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? r : null; })()");
+      results["reportTabs"] = await js("[...document.querySelectorAll('#report [role=tab]')].map((b) => b.getAttribute('data-tab'))");
+      results["reportSummary"] = await js("document.getElementById('report-status')?.getAttribute('data-reason') ?? null");
+      await js("document.querySelector('#report [role=tab][data-tab=\"review\"]')?.click(); true");
+      results["reportVerdict"] = await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null");
+      results["reportText"] = await js("document.getElementById('report')?.textContent ?? ''");
+      // From the run list: the first run's report (it created made.txt, since reverted).
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-report="${firstRun}"]')?.click(); true`);
+      results["listReport"] = await waitFor(
+        "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
+      );
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",

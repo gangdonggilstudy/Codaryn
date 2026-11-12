@@ -9,6 +9,7 @@ import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
 import { revertValue, runsValue } from "./history.js";
 import { changesValue, planValue, reviewValue } from "./plans.js";
+import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
 import { modelsValue, selectedValue, settingsValue } from "./settings.js";
@@ -48,6 +49,8 @@ export interface HostApp {
   review(request: { readonly settings: HostTaskForm; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
   /** DR-7, DR-29: a run's changed files, masked with the task form's secrets (paths and states go on). */
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
+  /** GU-3 (3.7): a run's report (ReportOutput), read only. */
+  report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -197,6 +200,8 @@ export interface HostHandler {
 export function createHostHandler(deps: HostDeps): HostHandler {
   const respond = (response: HostResponse): void => deps.write(encodeLine(response));
   const fail = (id: number, error: HostError): void => respond({ v: 1, id, ok: false, error });
+  /** File texts and evidence keep their lines; without the host's own cleaner each line passes `shown`. */
+  const shownText = deps.shownText ?? ((text: string) => text.split(/\r?\n/).map(deps.shown).join("\n"));
   const items = new Map<"ko" | "en", RunItemOf>();
   let language: "ko" | "en" = "en";
   const runs = createRunRegistry({
@@ -286,8 +291,14 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const workflowRef = nameArg(args["workflowRef"]);
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
-        const shownText = deps.shownText ?? ((text: string) => text.split(/\r?\n/).map(deps.shown).join("\n"));
         return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
+      }
+      case "report": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "runId"]);
+        const runId = args["runId"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
+        return reportValue(await deps.app.report({ workspace, runId }), deps.shown, shownText);
       }
       case "review": {
         if (!isObj(args)) throw new ArgsError();

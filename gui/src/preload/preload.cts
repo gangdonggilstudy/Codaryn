@@ -31,6 +31,7 @@ const CHANNELS = {
   applyPlan: "codaryn:plan:apply",
   review: "codaryn:review:record",
   changes: "codaryn:changes:read",
+  report: "codaryn:report:read",
 } as const;
 
 const EVENTS = {
@@ -83,6 +84,7 @@ const api = Object.freeze({
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
   revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
   /** DR-25: the retry token a revert's result gave; never a consent: the main process asks the person. */
+  report: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.report, { workspace: text(workspace), runId: text(runId) }),
   revertConsent: (retry: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revertConsent, { retry: text(retry) }),
   plan: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.plan, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow) }),

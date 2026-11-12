@@ -15,6 +15,7 @@ import { runScreen } from "./run/run-screen.js";
 import { runsScreen } from "./runs/runs-screen.js";
 import { planScreen } from "./plan/plan-screen.js";
 import { changesScreen } from "./changes/changes-screen.js";
+import { reportScreen } from "./report/report-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
@@ -77,10 +78,16 @@ async function start(): Promise<void> {
     changes.choose(runId, profile, workflow);
     shell?.show("changes");
   };
-  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges }));
+  const report = reportScreen({ texts, api, current: () => current, openChanges: (runId) => openChanges(runId, run.last?.profile ?? null, run.last?.workflow ?? null) });
+  const openReport = (runId: string): void => {
+    report.choose(runId);
+    shell?.show("report");
+  };
+  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport }));
   shell.add(plan);
   shell.add(changes);
-  shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges }));
+  shell.add(report);
+  shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges, openReport }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.setEngine(info.engine);

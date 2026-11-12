@@ -14,6 +14,8 @@ import type {
   ChangedFileItem,
   ChangesReply,
   PlanReply,
+  ReportReply,
+  ReportView,
   PlanView,
   RecentView,
   ReviewReply,
@@ -51,6 +53,7 @@ export interface CodarynApi {
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;
   revertConsent(retry: string): Promise<unknown>;
+  report(workspace: string, runId: string): Promise<unknown>;
   plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
@@ -290,4 +293,17 @@ export function asChanges(value: unknown): ChangesReply {
       : [],
   );
   return { ok: true, runId: value["runId"], files };
+}
+
+/** GU-3: a run's report (the main process checked it already). */
+export function asReport(value: unknown): ReportReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  if (!str(view["runId"]) || (view["kind"] !== "run" && view["kind"] !== "apply") || !Array.isArray(view["verifiers"]) || !Array.isArray(view["integrity"])) return failed(value);
+  const labels = value["labels"];
+  return {
+    ok: true,
+    view: view as unknown as ReportView,
+    labels: isObj(labels) && str(labels["status"]) && str(labels["reason"]) ? { status: labels["status"], reason: labels["reason"] } : null,
+  };
 }

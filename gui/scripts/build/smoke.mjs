@@ -145,7 +145,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyPlan,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
+const API = "applyPlan,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -262,6 +262,13 @@ const expected = [
   ["reportChanges", (v) => v === "1"],
   ["reportDiff", (v) => v !== null && v.text === "shown" && JSON.stringify(v.kinds) === JSON.stringify(["added", "added"]) && JSON.stringify(v.lines) === JSON.stringify(["결과 표", "해석"])],
   ["reportF7", (v) => v === true],
+  // GU-3 (3.7): reports from a result and from the run list.
+  ["reportReady", (v) => v === "run"],
+  ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
+  ["reportSummary", (v) => v === "awaiting_review"],
+  ["reportVerdict", (v) => v === "accepted"],
+  ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
+  ["listReport", (v) => v === "no_verifier"],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's

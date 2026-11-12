@@ -73,6 +73,8 @@ Codex(w3:p3)가 N-A 계약 커밋 `9735b5f`를 읽기 전용으로 검토했다(
 | N-20 | 문구 계약을 넓힌다: 거부 사유·권한 종류·확인 시점·모델 오류 종류를 사람 말로 쓰는 목록 id, 소요 시간을 초 단위로 쓰는 표현, 예·아니오 질문의 기본 답("바꾸지 않음" 쪽, UX 7절), 언어가 어디서 정해졌는지 돌려주는 함수와 그 안내 문구 | N-B 보고 1~4, UX 4.5·7절 |
 | N-21 | `doctor`의 점검 문구와 `--help`도 두 언어 카탈로그에 넣는다. 점검 id와 코드는 영어 그대로다 | N-B 보고 6, N-4 |
 
+| N-22 | N-C 보고의 계약 보완: 검사 단계 거부용 진행 문구 id(`progress.tool_rejected`), 되돌리기 건너뜀 사유 `already_reverted`(현재 해시가 실행 전과 같을 때), `runs`의 오류에 `invalid_run_record`, 실행 목록 검사는 `report`와 같은 엄격한 쪽으로 계약 주석에 명시, `doctor` 안내를 붙일 오류 코드 목록(N-C 가정 그대로) 확정. 되돌리기 기록은 store의 `writeRevertRecord`·`readRevertRecord`를 쓴다. `parseRunsArgs`는 `src/cli/runs.ts`에 둔다. 실행 끝 요약은 notices를 보이지 않는다 | N-C 보고 Q1~Q8 |
+
 - 알려진 한계로 기록: OS 언어 판단은 `Intl` 기본 로캘을 쓴다. Windows에서는 표시 언어가 아니라 지역 형식을 따를 수 있다. `CODARYN_LANG`이나 설정의 `language`로 고정할 수 있다. Linux·macOS는 확인하지 않았다.
 - 도구 주의: TypeScript 7 컴파일러가 정규식 리터럴 안의 U+2028 이스케이프를 원문자로 내보내 실행 때 구문 오류가 난다. 그런 정규식은 문자열로 만든다.
 

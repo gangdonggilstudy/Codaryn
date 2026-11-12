@@ -10,7 +10,7 @@ import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
 import { revertValue, runsValue } from "./history.js";
 import { changesValue, planValue, reviewValue } from "./plans.js";
 import { createRunRegistry, taskForm } from "./runs.js";
-import type { HostStartRunRequest, RunItemOf } from "./runs.js";
+import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
 import { modelsValue, selectedValue, settingsValue } from "./settings.js";
 import type { Shown } from "./settings.js";
 
@@ -42,11 +42,11 @@ export interface HostApp {
   listRuns(request: { readonly workspace: string; readonly limit: number }): Promise<unknown>;
   revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean }): Promise<unknown>;
   /** GU-5: the plan view, its apply (DR-1, DR-2, DR-21) and a person's review (GT-D6). */
-  plan(request: { readonly settings: Record<string, unknown>; readonly runId: string }): Promise<unknown>;
-  applyPlan(request: Record<string, unknown>, observer: { onEvent(event: unknown): void }): Promise<unknown>;
-  review(request: { readonly settings: Record<string, unknown>; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
+  plan(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
+  applyPlan(request: HostApplyRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
+  review(request: { readonly settings: HostTaskForm; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
   /** DR-7, DR-29: a run's changed files, masked with the task form's secrets (paths and states go on). */
-  changes(request: { readonly settings: Record<string, unknown>; readonly runId: string }): Promise<unknown>;
+  changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -63,6 +63,11 @@ export interface HostDeps {
   readonly tree: HostTree;
   /** Text from a file or the API as the window may show it (control characters and key shapes hidden). */
   readonly shown: Shown;
+  /**
+   * A file text as the window may show it: CRLF as LF, line breaks and tabs kept, other control
+   * characters and key shapes hidden. Absent in tests: each line then passes `shown`.
+   */
+  readonly shownText?: Shown;
   /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
   readonly providers: readonly string[];
   /** GU-3: how a run's events become progress items, in the window's language. */
@@ -252,39 +257,44 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       }
       case "plan": {
         if (!isObj(args)) throw new ArgsError();
-        const workspace = workspaceArg(args, ["workspace", "profile", "runId"]);
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId"]);
         const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
-        return planValue(await deps.app.plan({ settings: taskForm(workspace, profile), runId }), deps.shown);
+        return planValue(await deps.app.plan({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown);
       }
       case "applyPlan": {
         if (!isObj(args)) throw new ArgsError();
-        const workspace = workspaceArg(args, ["workspace", "profile", "planRunId", "digest", "consent", "language"]);
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "planRunId", "digest", "consent", "language"]);
         const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
         const { planRunId, digest, consent, language: chosen } = args;
         if (typeof planRunId !== "string" || !RUN_ID.test(planRunId) || typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new ArgsError();
         if (typeof consent !== "boolean" || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
         language = chosen;
-        return runs.startApply({ workspace, profile, planRunId, digest, consent });
+        return runs.startApply({ workspace, profile, workflowRef, planRunId, digest, consent });
       }
       case "changes": {
         if (!isObj(args)) throw new ArgsError();
-        const workspace = workspaceArg(args, ["workspace", "profile", "runId"]);
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId"]);
         const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
-        return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile), runId }), deps.shown);
+        const shownText = deps.shownText ?? ((text: string) => text.split(/\r?\n/).map(deps.shown).join("\n"));
+        return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
       }
       case "review": {
         if (!isObj(args)) throw new ArgsError();
-        const workspace = workspaceArg(args, ["workspace", "profile", "runId", "decision", "note"]);
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId", "decision", "note"]);
         const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
         const { runId, decision } = args;
         const note = args["note"] ?? null;
         if (typeof runId !== "string" || !RUN_ID.test(runId) || (decision !== "accept" && decision !== "reject")) throw new ArgsError();
         if (note !== null && (typeof note !== "string" || note.length > MAX_NOTE_CHARS)) throw new ArgsError();
-        return reviewValue(await deps.app.review({ settings: taskForm(workspace, profile), runId, decision, note }));
+        return reviewValue(await deps.app.review({ settings: taskForm(workspace, profile, workflowRef), runId, decision, note }));
       }
       case "cancelRun": {
         if (!isObj(args) || !onlyKeys(args, ["run"]) || typeof args["run"] !== "string" || !/^[0-9a-f]{32}$/.test(args["run"])) throw new ArgsError();

@@ -50,10 +50,10 @@ export interface CodarynApi {
   listRuns(workspace: string): Promise<unknown>;
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;
-  plan(workspace: string, runId: string, profile: string | null): Promise<unknown>;
+  plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
-  review(workspace: string, runId: string, profile: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
-  changes(workspace: string, runId: string, profile: string | null): Promise<unknown>;
+  review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
+  changes(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -275,7 +275,16 @@ export function asChanges(value: unknown): ChangesReply {
   if (!isObj(value) || value["ok"] !== true || !str(value["runId"]) || !Array.isArray(value["files"])) return failed(value);
   const files: ChangedFileItem[] = value["files"].flatMap((file: unknown): ChangedFileItem[] =>
     isObj(file) && str(file["path"]) && typeof file["created"] === "boolean" && str(file["state"])
-      ? [{ path: file["path"], created: file["created"], state: file["state"] as ChangedFileItem["state"], unavailable: str(file["unavailable"]) ? file["unavailable"] : null }]
+      ? [
+          {
+            path: file["path"],
+            created: file["created"],
+            state: file["state"] as ChangedFileItem["state"],
+            unavailable: str(file["unavailable"]) ? file["unavailable"] : null,
+            before: str(file["before"]) ? file["before"] : null,
+            after: str(file["after"]) ? file["after"] : null,
+          },
+        ]
       : [],
   );
   return { ok: true, runId: value["runId"], files };

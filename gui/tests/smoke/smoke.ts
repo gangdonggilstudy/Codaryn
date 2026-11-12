@@ -206,7 +206,9 @@ startGui({
       await waitFor(`document.querySelector('[data-changes="${firstRun}"]') !== null ? 'ready' : null`, 30_000);
       await js(`document.querySelector('[data-changes="${firstRun}"]')?.click(); true`);
       results["changesShown"] = await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()");
-      results["changesRows"] = await js("[...document.querySelectorAll('#changes-files li')].map((li) => ({ state: li.getAttribute('data-state'), created: li.getAttribute('data-created'), path: li.querySelector('.path')?.textContent ?? null }))");
+      results["changesRows"] = await js(
+        "[...document.querySelectorAll('#changes .changed-file')].map((s) => ({ state: s.getAttribute('data-state'), created: s.getAttribute('data-created'), text: s.getAttribute('data-text'), path: s.querySelector('.path')?.textContent ?? null }))",
+      );
       results["changesText"] = await js("document.getElementById('changes')?.textContent ?? ''");
       results["changesLatest"] = await js(`window.codaryn.changes(${JSON.stringify(secondHandle)}, 'latest', null)`);
 
@@ -219,21 +221,25 @@ startGui({
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
         await js(`(() => { document.getElementById('task-workflow').value = ${JSON.stringify(workflow)}; const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
       };
-      // A: the task kind chosen directly. The app layer's task form has no workflow, so the apply
-      // cannot name organize (reported to the PM); the window shows the error.
+      // A: the task kind chosen directly (R-14 L-3, R21-M-1): the plan view, its apply and the
+      // file moved, through the task form's workflowRef.
       const beforeDirect = await resultId();
       await taskWith("organize", "a.txt를 moved 폴더로 옮긴다");
-      await newResult(beforeDirect);
+      const directRunId = await newResult(beforeDirect);
       await js("document.getElementById('run-view-plan')?.click(); true");
-      await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      results["directPlanShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
       await js("document.getElementById('plan-apply')?.click(); true");
-      results["applyByWorkflow"] = await waitFor("document.querySelector('#plan-message [data-error]')?.getAttribute('data-error') ?? null", 60_000);
+      await newResult(directRunId);
+      results["applyByWorkflow"] = await js(
+        "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
+      );
+      results["applyByWorkflowMoved"] = { from: existsSync(join(SECOND, "a.txt")), to: existsSync(join(SECOND, "moved", "a.txt")) };
 
-      // B: the same through a profile whose workflowRef is organize: the plan's apply takes the same profile.
+      // B: through a profile whose workflowRef is organize: the plan's apply takes the same profile.
       const beforePlan = await resultId();
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
-      await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'a.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
+      await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'sub/b.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
       const planRunId = (await newResult(beforePlan)) as string;
       results["planRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       await js("document.getElementById('run-view-plan')?.click(); true");
@@ -249,7 +255,7 @@ startGui({
       results["applyDone"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
-      results["applyMoved"] = { from: existsSync(join(SECOND, "a.txt")), to: existsSync(join(SECOND, "moved", "a.txt")) };
+      results["applyMoved"] = { from: existsSync(join(SECOND, "sub", "b.txt")), to: existsSync(join(SECOND, "moved", "b.txt")) };
 
       // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
       const beforeReview = await resultId();
@@ -262,6 +268,18 @@ startGui({
         await js("document.getElementById('review-record').click(); true");
         results["reviewRecorded"] = await waitFor("document.getElementById('review-outcome')?.getAttribute('data-verdict') ?? null", 30_000);
       }
+
+      // 5h. DR-29, DR-32 (c): the analyze run wrote report.md; the same secrets mask it as the run
+      // did, so its text is shown and compared (a created file: every line added).
+      await js("document.getElementById('run-view-changes')?.click(); true");
+      results["reportChanges"] = await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()");
+      results["reportDiff"] = await js(
+        "(() => { const s = document.querySelector('#changes .changed-file'); return s === null ? null : { text: s.getAttribute('data-text'), kinds: [...s.querySelectorAll('.diff li')].map((li) => li.getAttribute('data-kind')), lines: [...s.querySelectorAll('.diff .text')].map((t) => t.textContent) }; })()",
+      );
+      // F7 moves the focus to the first change.
+      results["reportF7"] = await js(
+        "(() => { const body = document.getElementById('changes'); const first = body?.querySelector('.changed-file'); if (!body || !first) return 'no file section'; first.focus(); body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F7', bubbles: true })); return document.activeElement?.hasAttribute('data-hunk') === true; })()",
+      );
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

@@ -531,13 +531,19 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   };
 }
 
-/** GU-5: `plan` arguments: the workspace, the plan run chosen, and the profile of its task form (DR-17, DR-28). */
-export function parsePlanArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null } | null {
-  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile"])) return null;
+const nameOrNull = (value: unknown): value is string | null => value === null || (typeof value === "string" && NAME.test(value));
+
+/**
+ * GU-5: `plan` and `changes` arguments: the workspace, the run chosen, and the profile and task kind
+ * of its task form (DR-17, DR-28; R-14 L-3: the task kind the run was started with).
+ */
+export function parsePlanArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly workflow: string | null } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "workflow"])) return null;
   const { workspace, runId } = value;
   const profile = value["profile"] ?? null;
-  if (!isHandle(workspace) || !isRunId(runId) || (profile !== null && (typeof profile !== "string" || !NAME.test(profile)))) return null;
-  return { workspace, runId, profile: profile as string | null };
+  const workflow = value["workflow"] ?? null;
+  if (!isHandle(workspace) || !isRunId(runId) || !nameOrNull(profile) || !nameOrNull(workflow)) return null;
+  return { workspace, runId, profile, workflow };
 }
 
 /**
@@ -552,15 +558,16 @@ export function parseApplyArgs(value: unknown): { readonly approval: string; rea
 }
 
 /** GU-5: `review` arguments. A note is at most 500 characters (MAX_REVIEW_NOTE_CHARS); the CLI checks it for keys (S-8). */
-export function parseReviewArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly decision: "accept" | "reject"; readonly note: string | null } | null {
-  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "decision", "note"])) return null;
+export function parseReviewArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly workflow: string | null; readonly decision: "accept" | "reject"; readonly note: string | null } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "workflow", "decision", "note"])) return null;
   const { workspace, runId, decision } = value;
   const profile = value["profile"] ?? null;
+  const workflow = value["workflow"] ?? null;
   const note = value["note"] ?? null;
   if (!isHandle(workspace) || !isRunId(runId) || (decision !== "accept" && decision !== "reject")) return null;
-  if (profile !== null && (typeof profile !== "string" || !NAME.test(profile))) return null;
+  if (!nameOrNull(profile) || !nameOrNull(workflow)) return null;
   if (note !== null && (typeof note !== "string" || note.length > 500 || note.includes("\u0000"))) return null;
-  return { workspace, runId, profile: profile as string | null, decision, note: note as string | null };
+  return { workspace, runId, profile, workflow, decision, note: note as string | null };
 }
 
 /** GU-5 (3.9): a plan as the window shows it. `approval` is the token its apply takes (null once applied). */
@@ -592,29 +599,45 @@ export function toPlanView(value: unknown): { readonly ok: true; readonly view: 
 
 export const CHANGE_STATES = ["as_run_left", "changed_since_run", "missing", "unknown"] as const;
 
-/** DR-29 (3.4): one changed file as the window shows it: its masked path and state, never its text. */
+/**
+ * DR-29, DR-32 (c) (3.4): one changed file as the window shows it: its masked path and state, and
+ * its masked texts only when the app layer found them masked now as the run masked them (else null,
+ * with `masking_unverified`).
+ */
 export interface ChangedFileItem {
   readonly path: string;
   readonly created: boolean;
   readonly state: (typeof CHANGE_STATES)[number];
   readonly unavailable: string | null;
+  readonly before: string | null;
+  readonly after: string | null;
 }
 
 export type ChangesReply = { readonly ok: true; readonly runId: string; readonly files: readonly ChangedFileItem[] } | { readonly ok: false; readonly code: string };
 
-/** The engine host's changes value, checked; a value that carries file text is refused (DR-29). */
+/** The longest file text one side may have (MAX_READ_BYTES of the app layer is 262,144 bytes), and all of them together. */
+export const MAX_CHANGE_TEXT_CHARS = 300_000;
+export const MAX_CHANGES_TOTAL_CHARS = 3_000_000;
+
+/** The engine host's changes value, checked field by field; no other field is taken. */
 export function toChangesReply(value: unknown): ChangesReply {
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const fail = { ok: false, code: "host_error" } as const;
   const { runId, masking, files } = value;
   if (!isRunId(runId) || masking !== "current_secrets" || !Array.isArray(files) || files.length > 10_000) return fail;
   const items: ChangedFileItem[] = [];
+  let total = 0;
+  const text = (v: unknown): v is string | null => v === null || (typeof v === "string" && v.length <= MAX_CHANGE_TEXT_CHARS);
   for (const file of files) {
-    if (!isObj(file) || !hasOnlyKeys(file, ["path", "created", "state", "unavailable"])) return fail;
+    if (!isObj(file) || !hasOnlyKeys(file, ["path", "created", "state", "unavailable", "before", "after"])) return fail;
     const { path, created, state, unavailable } = file;
+    const before = file["before"] ?? null;
+    const after = file["after"] ?? null;
     if (!shortText(path) || typeof created !== "boolean" || typeof state !== "string" || !(CHANGE_STATES as readonly string[]).includes(state)) return fail;
-    if (!(unavailable === null || (typeof unavailable === "string" && WORD.test(unavailable)))) return fail;
-    items.push({ path, created, state: state as ChangedFileItem["state"], unavailable: unavailable as string | null });
+    if (!(unavailable === null || (typeof unavailable === "string" && WORD.test(unavailable))) || !text(before) || !text(after)) return fail;
+    total += (before?.length ?? 0) + (after?.length ?? 0);
+    if (total > MAX_CHANGES_TOTAL_CHARS) return fail;
+    items.push({ path, created, state: state as ChangedFileItem["state"], unavailable: unavailable as string | null, before, after });
   }
   return { ok: true, runId, files: items };
 }

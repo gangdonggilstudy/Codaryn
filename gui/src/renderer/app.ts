@@ -68,13 +68,13 @@ async function start(): Promise<void> {
   const run = new RunModel();
   shell.add(newTaskScreen({ texts, api, run, current: () => current, open: openWorkspace, showRun: () => shell?.show("run") }));
   const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
-  const openPlan = (runId: string, profile: string | null): void => {
-    plan.choose(runId, profile);
+  const openPlan = (runId: string, profile: string | null, workflow: string | null): void => {
+    plan.choose(runId, profile, workflow);
     shell?.show("plan");
   };
   const changes = changesScreen({ texts, api, current: () => current });
-  const openChanges = (runId: string, profile: string | null): void => {
-    changes.choose(runId, profile);
+  const openChanges = (runId: string, profile: string | null, workflow: string | null): void => {
+    changes.choose(runId, profile, workflow);
     shell?.show("changes");
   };
   shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges }));

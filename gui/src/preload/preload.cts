@@ -81,14 +81,14 @@ const api = Object.freeze({
   listRuns: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listRuns, { workspace: text(workspace) }),
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
   revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
-  plan: (workspace: unknown, runId: unknown, profile: unknown): Promise<unknown> =>
-    ipcRenderer.invoke(CHANNELS.plan, { workspace: text(workspace), runId: text(runId), profile: text(profile) }),
+  plan: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(CHANNELS.plan, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow) }),
   /** Only the plan view's approval token and whether to be asked for the consent: never a consent or digest. */
   applyPlan: (approval: unknown, askConsent: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.applyPlan, { approval: text(approval), askConsent: askConsent === true }),
-  changes: (workspace: unknown, runId: unknown, profile: unknown): Promise<unknown> =>
-    ipcRenderer.invoke(CHANNELS.changes, { workspace: text(workspace), runId: text(runId), profile: text(profile) }),
-  review: (workspace: unknown, runId: unknown, profile: unknown, decision: unknown, note: unknown): Promise<unknown> =>
-    ipcRenderer.invoke(CHANNELS.review, { workspace: text(workspace), runId: text(runId), profile: text(profile), decision: text(decision), note: text(note) }),
+  changes: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(CHANNELS.changes, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow) }),
+  review: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown, decision: unknown, note: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(CHANNELS.review, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow), decision: text(decision), note: text(note) }),
   /** One listener at a time for each; a new one replaces the old. */
   onRunEvents: (listener: unknown): void => {
     runEventsListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;

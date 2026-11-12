@@ -49,7 +49,7 @@ interface EngineWorkspaceModule {
 }
 
 interface EngineTextSafetyModule {
-  cleanText(text: string): string;
+  cleanText(text: string, keepLineBreaks?: boolean): string;
   hideKeys(text: string, currentKey: string | null): string;
 }
 
@@ -157,6 +157,8 @@ async function main(): Promise<number> {
     ? appModule.CONNECTED_MODEL_PROVIDERS.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name))
     : [];
   const shown = (text: string): string => textSafety.hideKeys(textSafety.cleanText(text), process.env["ANTHROPIC_API_KEY"] ?? null);
+  // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
+  const shownText = (text: string): string => textSafety.hideKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true), process.env["ANTHROPIC_API_KEY"] ?? null);
   const tree = createTreeLister({
     createWorkspace: (options) => workspaceModule.createWorkspace(options),
     cleanText: (text) => textSafety.cleanText(text),
@@ -168,7 +170,7 @@ async function main(): Promise<number> {
   process.stdin.setEncoding("utf8");
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
-  await serve(process.stdin, { app, messages, tree, shown, providers, itemsIn, token, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, shown, shownText, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

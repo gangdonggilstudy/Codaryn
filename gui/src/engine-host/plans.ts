@@ -47,20 +47,36 @@ export function planValue(outcome: unknown, shown: Shown): Obj | HostFailure {
 const CHANGE_STATES = ["as_run_left", "changed_since_run", "missing", "unknown"];
 const WORD = /^[a-z][a-z_]{0,39}$/;
 
+/** All file texts of one changes value together, in characters: the channel's line limit is 8 MiB. */
+export const MAX_CHANGES_TEXT_CHARS = 3_000_000;
+
 /**
- * DR-29 (3.4): `changes` → `{ok, runId, masking, files: [{path, created, state, unavailable}]}`. The
- * files' text (`before`, `after`) stays here: until a run records how it masked each file, the
- * window shows paths and states only.
+ * DR-29, DR-32 (c) (3.4): `changes` → `{ok, runId, masking, files: [{path, created, state,
+ * unavailable, before, after}]}`. The app layer gives a file's masked texts only when the secrets
+ * registered now mask them as the run did (`changeShownMatches`); otherwise they are null with
+ * `masking_unverified`. Texts given pass `shownText` (line breaks kept, other control characters and
+ * key shapes hidden). Past MAX_CHANGES_TEXT_CHARS the remaining files go without text (`too_large`).
  */
-export function changesValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+export function changesValue(outcome: unknown, shown: Shown, shownText: Shown): Obj | HostFailure {
   const output = outputOf(outcome);
   if (output === null) return failureOf(outcome);
   const files: Obj[] = [];
+  let budget = MAX_CHANGES_TEXT_CHARS;
   for (const file of Array.isArray(output["files"]) ? output["files"].slice(0, MAX_ACTIONS) : []) {
     if (!isObj(file) || typeof file["path"] !== "string") continue;
     const state = typeof file["state"] === "string" && CHANGE_STATES.includes(file["state"]) ? file["state"] : "unknown";
-    const unavailable = typeof file["unavailable"] === "string" && WORD.test(file["unavailable"]) ? file["unavailable"] : null;
-    files.push({ path: shown(file["path"]), created: file["created"] === true, state, unavailable });
+    let unavailable = typeof file["unavailable"] === "string" && WORD.test(file["unavailable"]) ? file["unavailable"] : null;
+    let before = typeof file["before"] === "string" ? shownText(file["before"]) : null;
+    let after = typeof file["after"] === "string" ? shownText(file["after"]) : null;
+    const size = (before?.length ?? 0) + (after?.length ?? 0);
+    if (size > budget) {
+      before = null;
+      after = null;
+      unavailable = "too_large";
+    } else {
+      budget -= size;
+    }
+    files.push({ path: shown(file["path"]), created: file["created"] === true, state, unavailable, before, after });
   }
   return {
     ok: true,

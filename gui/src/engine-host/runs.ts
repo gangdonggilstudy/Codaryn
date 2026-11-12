@@ -29,10 +29,19 @@ export interface HostStartRunRequest {
   readonly cancelFile: null;
 }
 
+/** The app layer's ApplyPlanRequest as the engine host builds it. */
+export interface HostApplyRequest {
+  readonly settings: HostTaskForm;
+  readonly planRunId: string;
+  readonly digest: string;
+  readonly cancelFile: null;
+  readonly unsafeMoveConsent: { readonly digest: string } | null;
+}
+
 export interface RunsDeps {
   readonly startRun: (request: HostStartRunRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
   /** GU-5: the app layer's applyPlan (ApplyPlanRequest); absent before the general task commands. */
-  readonly applyPlan?: (request: Obj, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
+  readonly applyPlan?: (request: HostApplyRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
   readonly itemOf: RunItemOf;
   readonly shown: Shown;
   readonly token: () => string;
@@ -101,15 +110,33 @@ export interface RunRegistry {
    * GU-5: applies a plan (DR-1, DR-2): the same events and cancel as a run. `consent` is the
    * person's DR-21 consent for this plan's digest, set only by the main process after its dialog.
    */
-  startApply(args: { readonly workspace: string; readonly profile: string | null; readonly planRunId: string; readonly digest: string; readonly consent: boolean }): Promise<Obj | HostFailure>;
+  startApply(args: { readonly workspace: string; readonly profile: string | null; readonly workflowRef: string | null; readonly planRunId: string; readonly digest: string; readonly consent: boolean }): Promise<Obj | HostFailure>;
   cancel(token: string): boolean;
   cancelAll(): void;
   readonly size: number;
 }
 
-/** The task form `plan`, `applyPlan`, `review` and `changes` take (DR-17): the workspace with the config file's defaults. */
-export function taskForm(workspace: string, profile: string | null): Obj {
-  return { input: { kind: "workspace", workspace }, configPath: null, varsFile: null, profile };
+/**
+ * The app layer's `TaskForm` (src/app/types.ts) for the workspace form, field for field. The engine
+ * host does not load the engine's types, so they are repeated here; every field is required, so a
+ * field the app layer needs cannot be left out (R21-M-1: a missing `workflowRef` became
+ * `--workflow undefined` and every plan, apply, review and changes call was refused). A unit test
+ * passes these forms through the built app layer's `taskFormArguments`.
+ */
+export interface HostTaskForm {
+  readonly input: { readonly kind: "workspace"; readonly workspace: string };
+  readonly configPath: null;
+  readonly varsFile: null;
+  readonly profile: string | null;
+  readonly workflowRef: string | null;
+}
+
+/**
+ * The task form `plan`, `applyPlan`, `review` and `changes` take (DR-17): the workspace with the
+ * config file's defaults, the profile, and (R-14 L-3) the task kind the run was started with.
+ */
+export function taskForm(workspace: string, profile: string | null, workflowRef: string | null): HostTaskForm {
+  return { input: { kind: "workspace", workspace }, configPath: null, varsFile: null, profile, workflowRef };
 }
 
 /** An apply's result (AppCallOutcome<ApplyResult>) as the window may see it; `unsafeMoves` from its plan_checked record. */
@@ -250,7 +277,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
         (observer) =>
           applyPlan(
             {
-              settings: taskForm(args.workspace, args.profile),
+              settings: taskForm(args.workspace, args.profile, args.workflowRef),
               planRunId: args.planRunId,
               digest: args.digest,
               cancelFile: null,

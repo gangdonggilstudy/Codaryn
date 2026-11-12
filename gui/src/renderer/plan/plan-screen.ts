@@ -29,8 +29,8 @@ export interface PlanDeps {
 }
 
 export interface PlanScreen extends Screen {
-  /** Which plan run to show next, and the profile of its task form. */
-  choose(runId: string, profile: string | null): void;
+  /** Which plan run to show next, and the profile and task kind of its task form. */
+  choose(runId: string, profile: string | null, workflow: string | null): void;
 }
 
 export function actionLine(t: Texts, action: PlanActionView): string {
@@ -39,12 +39,12 @@ export function actionLine(t: Texts, action: PlanActionView): string {
 
 export function planScreen(deps: PlanDeps): PlanScreen {
   const { texts: t, api, run } = deps;
-  let chosen: { runId: string; profile: string | null } | null = null;
+  let chosen: { runId: string; profile: string | null; workflow: string | null } | null = null;
   return {
     id: "plan",
     title: "nav.plan",
-    choose(runId, profile) {
-      chosen = { runId, profile };
+    choose(runId, profile, workflow) {
+      chosen = { runId, profile, workflow };
     },
     show(root) {
       const workspace = deps.current();
@@ -58,7 +58,7 @@ export function planScreen(deps: PlanDeps): PlanScreen {
       const target = chosen;
       void (async () => {
         body.replaceChildren(el("p", t.format("runs.loading")));
-        const reply = asPlan(await api.plan(workspace.handle, target.runId, target.profile));
+        const reply = asPlan(await api.plan(workspace.handle, target.runId, target.profile, target.workflow));
         if (!reply.ok) {
           body.replaceChildren(el("div", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { role: "alert", class: "error", "data-error": reply.code }));
           body.setAttribute("data-plan-ready", "error");

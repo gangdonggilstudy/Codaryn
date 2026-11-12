@@ -25,9 +25,9 @@ export interface RunsDeps {
   readonly open: () => void;
   readonly announce: (text: string) => void;
   /** GU-5: the plan screen for a run that waits for its plan to be approved. */
-  readonly openPlan: (runId: string, profile: string | null) => void;
-  /** DR-29: the changed files of a run, by path and state. */
-  readonly openChanges: (runId: string, profile: string | null) => void;
+  readonly openPlan: (runId: string, profile: string | null, workflow: string | null) => void;
+  /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
+  readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
 }
 
 function errorBox(t: Texts, code: string): HTMLElement {
@@ -145,7 +145,7 @@ export function runsScreen(deps: RunsDeps): Screen {
           panel.replaceChildren(errorBox(t, reply.code));
           return;
         }
-        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => deps.openPlan(id, null), (id) => deps.openChanges(id, null)))));
+        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => deps.openPlan(id, null, null), (id) => deps.openChanges(id, null, null)))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
       };

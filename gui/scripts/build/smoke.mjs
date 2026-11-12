@@ -41,7 +41,8 @@ const steps = [
   fakeApi.replyText("done"),
   { kind: "hang" },
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "sub/b.txt to moved", actions: [{ kind: "move", from: "sub/b.txt", to: "moved/b.txt" }] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } })]),
   fakeApi.replyText("analysis written"),
   { kind: "hang" },
 ];
@@ -209,7 +210,7 @@ const expected = [
     "apiRequests",
     (v) =>
       rows(v).filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length >= 2 &&
-      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 7 &&
+      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 8 &&
       rows(v).every((r) => r.key === true && ((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
@@ -236,12 +237,14 @@ const expected = [
   ["madeAfterRevert", (v) => v === false],
   // DR-29: paths and states only; the file's content never shows.
   ["changesShown", (v) => v === "1"],
-  ["changesRows", (v) => rows(v).length === 1 && rows(v)[0].state === "missing" && rows(v)[0].created === "true" && rows(v)[0].path === "made.txt"],
+  ["changesRows", (v) => rows(v).length === 1 && rows(v)[0].state === "missing" && rows(v)[0].created === "true" && rows(v)[0].text === "none" && rows(v)[0].path === "made.txt"],
   ["changesText", (v) => typeof v === "string" && !v.includes("made by the smoke run")],
   ["changesLatest", (v) => v.ok === false && v.code === "invalid_args"],
   // GU-5: a plan run, the plan screen, refused requests, an apply the main process asked about, a review.
-  // Reported to the PM: the task form has no workflow, so a plan whose task kind was chosen directly cannot be applied.
-  ["applyByWorkflow", (v) => v === "run_not_plan"],
+  // R-14 L-3, R21-M-1: a plan whose task kind was chosen directly is shown and applied through the task form's workflowRef.
+  ["directPlanShown", (v) => v === "pending"],
+  ["applyByWorkflow", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
+  ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
   ["planRun", (v) => v === "plan_pending"],
   ["planShown", (v) => v === "pending"],
   ["planActions", (v) => JSON.stringify(v) === JSON.stringify(["move"])],
@@ -252,6 +255,10 @@ const expected = [
   ["reviewRun", (v) => v === "awaiting_review"],
   ["reviewAsked", (v) => v === true],
   ["reviewRecorded", (v) => v === "accepted"],
+  // DR-29, DR-32 (c): the write recorded its digests, the same secrets mask it now: the text is compared.
+  ["reportChanges", (v) => v === "1"],
+  ["reportDiff", (v) => v !== null && v.text === "shown" && JSON.stringify(v.kinds) === JSON.stringify(["added", "added"]) && JSON.stringify(v.lines) === JSON.stringify(["결과 표", "해석"])],
+  ["reportF7", (v) => v === true],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's

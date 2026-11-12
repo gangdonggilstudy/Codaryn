@@ -13,6 +13,8 @@
 export interface PlanApproval {
   readonly workspace: string;
   readonly profile: string | null;
+  /** R-14 L-3: the task kind the plan run was started with, or null. */
+  readonly workflowRef: string | null;
   readonly planRunId: string;
   readonly digest: string;
   readonly moves: number;

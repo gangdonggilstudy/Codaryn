@@ -27,9 +27,9 @@ export interface RunScreenDeps {
   readonly announce: (text: string) => void;
   /** GU-5: the open workspace (for a review) and the plan screen for a plan run. */
   readonly current: () => Workspace | null;
-  readonly openPlan: (runId: string, profile: string | null) => void;
-  /** DR-29: the changed files of a run, by path and state. */
-  readonly openChanges: (runId: string, profile: string | null) => void;
+  readonly openPlan: (runId: string, profile: string | null, workflow: string | null) => void;
+  /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
+  readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
 }
 
 const MAX_NOTE = 500;
@@ -39,10 +39,10 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
   const { api, run } = deps;
   const out: HTMLElement[] = [];
   if (result.kind === "run" && result.changes.length > 0) {
-    out.push(button(t.format("run.viewChanges"), () => deps.openChanges(result.runId, run.last?.profile ?? null), { id: "run-view-changes" }));
+    out.push(button(t.format("run.viewChanges"), () => deps.openChanges(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-changes" }));
   }
   if (result.plan !== null) {
-    out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null), { id: "run-view-plan" }));
+    out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-plan" }));
   }
   if (result.kind === "apply") {
     const applied = el("div", undefined, { id: "run-applied" });
@@ -88,7 +88,7 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
       confirm.setAttribute("hidden", "");
       void (async () => {
         const text = note.value.trim();
-        const reply = asReview(await api.review(workspace.handle, result.runId, run.last?.profile ?? null, decision, text === "" ? null : text));
+        const reply = asReview(await api.review(workspace.handle, result.runId, run.last?.profile ?? null, run.last?.workflow ?? null, decision, text === "" ? null : text));
         if (!reply.ok) {
           outcome.replaceChildren(el("p", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { "data-error": reply.code }));
           return;

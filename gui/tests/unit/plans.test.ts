@@ -10,6 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { createHostHandler } from "../../src/engine-host/host.js";
+import type { HostApplyRequest } from "../../src/engine-host/runs.js";
 import { APPROVAL_TTL_MS, PlanApprovals } from "../../src/main/plans.js";
 import { parseApplyArgs, parsePlanArgs, parseReviewArgs, toPlanView, toReviewReply, toRunResultView } from "../../src/shared/ipc.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
@@ -45,7 +46,7 @@ function host(app: Parameters<typeof fakeApp>[0]) {
   return { call, written };
 }
 
-const FORM = (profile: string | null) => ({ input: { kind: "workspace", workspace: WS }, configPath: null, varsFile: null, profile });
+const FORM = (profile: string | null, workflowRef: string | null = null) => ({ input: { kind: "workspace", workspace: WS }, configPath: null, varsFile: null, profile, workflowRef });
 
 test("plans (GU-5): the plan view takes a plan run id and a profile, cleans paths, and passes errors as codes", async () => {
   const calls: unknown[] = [];
@@ -79,8 +80,9 @@ test("plans (GU-5): the plan view takes a plan run id and a profile, cleans path
     assert.equal(await call(id, "plan", args), "invalid_args", `request ${id}`);
   }
   assert.equal(calls.length, 0);
-  const value = await call(4, "plan", { workspace: WS, profile: "doc", runId: PLAN_RUN });
-  assert.deepEqual(calls, [{ settings: FORM("doc"), runId: PLAN_RUN }]);
+  // R-14 L-3: the task kind the plan run was started with goes into the task form.
+  const value = await call(4, "plan", { workspace: WS, profile: "doc", workflowRef: "organize", runId: PLAN_RUN });
+  assert.deepEqual(calls, [{ settings: FORM("doc", "organize"), runId: PLAN_RUN }]);
   assert.deepEqual(toPlanView(value), {
     ok: true,
     view: {
@@ -101,7 +103,7 @@ test("plans (GU-5): the plan view takes a plan run id and a profile, cleans path
 });
 
 test("plans (GU-5, DR-21): the app gets a consent only when the main process says so, and then for this plan's digest", async () => {
-  const requests: Record<string, unknown>[] = [];
+  const requests: HostApplyRequest[] = [];
   let finish: () => void = () => undefined;
   const { call, written } = host({
     applyPlan: async (request, observer) => {
@@ -132,7 +134,7 @@ test("plans (GU-5, DR-21): the app gets a consent only when the main process say
       return { ok: true, handle: { runId: APPLY_RUN, cancel: () => undefined, done } };
     },
   });
-  const good = { workspace: WS, profile: null, planRunId: PLAN_RUN, digest: DIGEST, consent: false, language: "ko" };
+  const good = { workspace: WS, profile: null, workflowRef: "organize", planRunId: PLAN_RUN, digest: DIGEST, consent: false, language: "ko" };
   for (const [id, args] of [
     [1, { ...good, digest: "d".repeat(12) }],
     [2, { ...good, consent: "yes" }],
@@ -143,7 +145,7 @@ test("plans (GU-5, DR-21): the app gets a consent only when the main process say
   }
   assert.equal(requests.length, 0);
   assert.deepEqual(await call(5, "applyPlan", good), { ok: true, run: TOKEN, runId: APPLY_RUN });
-  assert.deepEqual(requests[0], { settings: FORM(null), planRunId: PLAN_RUN, digest: DIGEST, cancelFile: null, unsafeMoveConsent: null });
+  assert.deepEqual(requests[0], { settings: FORM(null, "organize"), planRunId: PLAN_RUN, digest: DIGEST, cancelFile: null, unsafeMoveConsent: null });
   finish();
   await sleep(150);
   const done = written.find((m): m is HostRunMessage & { type: "done" } => "type" in m && m.type === "done");
@@ -187,7 +189,9 @@ test("plans (GU-5, 6.6): the window gives an approval token and a question flag,
   assert.equal(parseApplyArgs({ approval: HANDLE, askConsent: false, digest: DIGEST }), null);
   assert.equal(parseApplyArgs({ approval: DIGEST, askConsent: false }), null, "a digest is no approval token");
   assert.equal(parseApplyArgs({ approval: HANDLE, askConsent: "yes" }), null);
-  assert.deepEqual(parsePlanArgs({ workspace: HANDLE, runId: PLAN_RUN, profile: null }), { workspace: HANDLE, runId: PLAN_RUN, profile: null });
+  assert.deepEqual(parsePlanArgs({ workspace: HANDLE, runId: PLAN_RUN, profile: null }), { workspace: HANDLE, runId: PLAN_RUN, profile: null, workflow: null });
+  assert.deepEqual(parsePlanArgs({ workspace: HANDLE, runId: PLAN_RUN, profile: "doc", workflow: "organize" }), { workspace: HANDLE, runId: PLAN_RUN, profile: "doc", workflow: "organize" });
+  assert.equal(parsePlanArgs({ workspace: HANDLE, runId: PLAN_RUN, profile: null, workflow: "two\nlines" }), null);
   assert.equal(parsePlanArgs({ workspace: HANDLE, runId: "latest", profile: null }), null);
   assert.equal(parseReviewArgs({ workspace: HANDLE, runId: PLAN_RUN, profile: null, decision: "accept", note: "n".repeat(501) }), null);
   const view = { ok: true, runId: PLAN_RUN, status: "pending", digest: DIGEST, actions: [], inventoryLimitReached: false, appliedBy: null };
@@ -200,7 +204,7 @@ test("plans (GU-5, 6.6): the window gives an approval token and a question flag,
 test("plans (GU-5, DR-21): an approval may ask for the consent only after its apply stopped as consent_required", () => {
   let now = 0;
   const approvals = new PlanApprovals((size) => randomBytes(size), () => now);
-  const token = approvals.issue({ workspace: HANDLE, profile: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 1, discards: 1 });
+  const token = approvals.issue({ workspace: HANDLE, profile: null, workflowRef: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 1, discards: 1 });
   assert.equal(approvals.get(token)?.digest, DIGEST);
   assert.equal(approvals.mayAskConsent(token), false, "not before an apply asked for it");
   approvals.applied(token, APPLY_RUN);
@@ -213,10 +217,10 @@ test("plans (GU-5, DR-21): an approval may ask for the consent only after its ap
   assert.equal(approvals.mayAskConsent(token), false, "the consent holds for one apply");
   approvals.ended("20261112T040506Z-0000f00d", "verified");
   assert.equal(approvals.get(token), null, "an apply that ended otherwise forgets the approval");
-  const old = approvals.issue({ workspace: HANDLE, profile: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 0, discards: 0 });
+  const old = approvals.issue({ workspace: HANDLE, profile: null, workflowRef: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 0, discards: 0 });
   now += APPROVAL_TTL_MS + 1;
   assert.equal(approvals.get(old), null);
-  const closed = approvals.issue({ workspace: HANDLE, profile: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 0, discards: 0 });
+  const closed = approvals.issue({ workspace: HANDLE, profile: null, workflowRef: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 0, discards: 0 });
   approvals.forget(HANDLE);
   assert.equal(approvals.get(closed), null);
 });

@@ -341,7 +341,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (root === null) return { ok: false, code: "unknown_workspace" };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("plan", { workspace: root, profile: parsed.profile, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    const response = await state.host.call("plan", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const checked = toPlanView(response.value);
     if (!checked.ok) return checked;
@@ -349,7 +349,7 @@ export function registerIpc(deps: IpcDeps): void {
     const moves = checked.view.actions.filter((action) => action.kind === "move").length;
     const approval =
       checked.view.status === "pending"
-        ? deps.approvals.issue({ workspace: parsed.workspace, profile: parsed.profile, planRunId: parsed.runId, digest: checked.view.digest, moves, discards: checked.view.actions.length - moves })
+        ? deps.approvals.issue({ workspace: parsed.workspace, profile: parsed.profile, workflowRef: parsed.workflow, planRunId: parsed.runId, digest: checked.view.digest, moves, discards: checked.view.actions.length - moves })
         : null;
     return { ok: true, view: checked.view, approval };
   });
@@ -376,7 +376,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (!("host" in state)) return { ok: false, code: state.failure };
     starting = true;
     try {
-      const request = { workspace: root, profile: approval.profile, planRunId: approval.planRunId, digest: approval.digest, consent, language };
+      const request = { workspace: root, profile: approval.profile, workflowRef: approval.workflowRef, planRunId: approval.planRunId, digest: approval.digest, consent, language };
       const response = await state.host.call("applyPlan", request, START_TIMEOUT_MS);
       if (!response.ok) return { ok: false, code: response.error.code };
       const value = response.value as Record<string, unknown> | null;
@@ -400,7 +400,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (root === null) return { ok: false, code: "unknown_workspace" };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("changes", { workspace: root, profile: parsed.profile, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    const response = await state.host.call("changes", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toChangesReply(response.value);
     return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
@@ -413,7 +413,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (root === null) return { ok: false, code: "unknown_workspace" };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("review", { workspace: root, profile: parsed.profile, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
+    const response = await state.host.call("review", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return toReviewReply(response.value);
   });

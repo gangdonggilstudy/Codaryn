@@ -1,44 +1,26 @@
 /**
- * N-4: human-readable messages in Korean and English, and the choice between them.
+ * N-4: human-readable messages in Korean and English, and the choice between them
+ * (src/contracts/human.ts, docs/cli-contract.md 17.4).
  *
- * Usage:
- *   const choice = resolveLanguage({ ...processLanguageInputs(), configLanguage: config?.language });
- *   const t = createTranslator(choice.language);
- *   t.t("error.title", { code: "invalid_config" });
+ *   const language = selectMessageLanguage({ env: process.env.CODARYN_LANG ?? null, config: config?.language ?? null, osLocale: runtimeLocale() });
+ *   const messages = createMessageCatalog(language);
+ *   messages.format("summary.changes", { count: 2 });
  *
- * Messages are for people (stderr, prompts, summaries). Error codes, JSON fields, exit codes and
- * command names stay English. A message never holds a value read from a file or the environment
- * (spec.ts explains the parameter kinds that keep it so).
+ * Error codes, JSON fields, exit codes and command names stay English. A message never holds a
+ * value read from a file or the environment: params.ts turns every parameter into a number, a
+ * fixed code, a schema field position or a fixed display string, or "?".
  */
 
+export { createMessageCatalog, MESSAGE_TEXTS, MessageFormatError, OWN_TEXT_MEMORY, PLACEHOLDER } from "./catalog.js";
+export type { MessageTexts } from "./catalog.js";
+export { DEFAULT_MESSAGE_LANGUAGE, localeLanguage, parseMessageLanguage, runtimeLocale, selectMessageLanguage } from "./language.js";
 export {
-  CODARYN_LANG_ENV,
-  DEFAULT_LANGUAGE,
-  LANGUAGE_SOURCES,
-  LANGUAGES,
-  localeLanguage,
-  osLanguage,
-  parseLanguage,
-  processLanguageInputs,
-  resolveLanguage,
-  runtimeLocale,
-} from "./language.js";
-export type { Language, LanguageChoice, LanguageEnvironment, LanguageInputs, LanguageSetting, LanguageSource } from "./language.js";
-
-export { DISPLAY_GROUPS, FIXED_KINDS, KNOWN_FIELD_NAMES, MAX_SHOWN_PATH, MESSAGE_PARAMS, RECORDED_KINDS, TERM_KINDS } from "./spec.js";
-export type {
-  ConfigSource,
-  InputFile,
-  MessageCatalog,
-  MessageKey,
-  MessageParams,
-  ParamKind,
-  Term,
-  TermKind,
-  TermKinds,
-  TermTables,
-} from "./spec.js";
-
-export { HIDDEN_KEY, REPLACEMENT } from "./params.js";
-export { createTranslator, termLabel, translate } from "./translate.js";
-export type { MessageArgs, Translator } from "./translate.js";
+  cleanLine,
+  DISPLAY_LOCATIONS,
+  formatParam,
+  GENERATED_RUN_ID,
+  HIDDEN_KEY,
+  KNOWN_FIELD_NAMES,
+  MESSAGE_CODES,
+  REPLACEMENT,
+} from "./params.js";

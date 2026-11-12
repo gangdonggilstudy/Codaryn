@@ -1,13 +1,37 @@
 /**
- * Turns message parameters into text by their kind (see spec.ts). Pure: nothing is read from the
- * environment or a file. A value that does not fit its kind becomes REPLACEMENT, never the
- * value itself.
+ * Message parameters by kind (`MessageParamKind`, src/contracts/human.ts), with the N-14
+ * direction applied: a parameter shows a number, a fixed code, a schema field position or a fixed
+ * display string, and nothing read from a file or the environment. A value outside its kind's
+ * closed form becomes REPLACEMENT, never the value itself. Pure: reads nothing.
+ *
+ * Interim rules for kinds the N-14 contract revision is expected to replace:
+ * - path: only the fixed display strings of the config location (DEFAULT_CONFIG_DISPLAY, "--config").
+ * - name: only tool names (verifier ids and profile names come from files; N-14 shows ordinals).
+ * - command: `codaryn` or `npm` followed by words from COMMAND_WORDS, generated run ids,
+ *   `<placeholder>`s and small numbers, joined by single spaces. A typed path cannot pass; the
+ *   hint shows `<workspace>` instead.
+ * - text, detail: only text this catalog produced (`ownText`).
  */
 
-import { ANTHROPIC_KEY_PATTERN_SOURCE } from "../contracts/index.js";
-import type { Language } from "./language.js";
-import { KNOWN_FIELD_NAMES, MAX_FIELD_POSITION, MAX_SHOWN_PATH, TERM_KINDS } from "./spec.js";
-import type { ParamKind, Term, TermKind, TermTables } from "./spec.js";
+import {
+  ANTHROPIC_KEY_PATTERN_SOURCE,
+  CLI_ERROR_EXIT_CODES,
+  CONFIG_SOURCES,
+  DEFAULT_CONFIG_DISPLAY,
+  DOCTOR_CHECK_IDS,
+  DOCTOR_CHECK_STATUSES,
+  INTEGRITY_PHASES,
+  MESSAGE_LANGUAGES,
+  MODEL_ERROR_KINDS,
+  PERMISSION_KINDS,
+  POLICY_DENIAL_CODES,
+  REVERT_SKIP_REASONS,
+  RUN_REASONS,
+  TERMINAL_RUN_STATUSES,
+  TOOL_ERROR_CODES,
+  TOOL_NAMES,
+} from "../contracts/index.js";
+import type { MessageLanguage, MessageParamKind, ModelProviderName, VerifierOutcome } from "../contracts/index.js";
 
 /** Shown in place of a value that does not fit its kind, and of a replaced character. */
 export const REPLACEMENT = "?";
@@ -15,15 +39,159 @@ export const REPLACEMENT = "?";
 export const HIDDEN_KEY = "[key]";
 
 const KEY_PATTERN = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g");
-const ID_PATTERN = /^[A-Za-z0-9._:/-]{1,128}$/;
+
+const VERIFIER_OUTCOMES = ["pass", "fail", "inconclusive"] as const satisfies readonly VerifierOutcome[];
+const PROVIDERS = ["scripted", "anthropic"] as const satisfies readonly ModelProviderName[];
+type MissingOutcome = Exclude<VerifierOutcome, (typeof VERIFIER_OUTCOMES)[number]>;
+type MissingProvider = Exclude<ModelProviderName, (typeof PROVIDERS)[number]>;
+const listsComplete: [MissingOutcome | MissingProvider] extends [never] ? true : false = true;
+void listsComplete;
+
+/** Every code a `code` parameter may hold: the contracts' fixed lists. */
+export const MESSAGE_CODES: ReadonlySet<string> = new Set<string>([
+  ...Object.keys(CLI_ERROR_EXIT_CODES),
+  ...TERMINAL_RUN_STATUSES,
+  ...RUN_REASONS,
+  ...PERMISSION_KINDS,
+  ...POLICY_DENIAL_CODES,
+  ...TOOL_ERROR_CODES,
+  ...TOOL_NAMES,
+  ...INTEGRITY_PHASES,
+  ...MODEL_ERROR_KINDS,
+  ...REVERT_SKIP_REASONS,
+  ...DOCTOR_CHECK_IDS,
+  ...DOCTOR_CHECK_STATUSES,
+  ...CONFIG_SOURCES,
+  ...MESSAGE_LANGUAGES,
+  ...VERIFIER_OUTCOMES,
+  ...PROVIDERS,
+]);
+
+/** Every string a `path` parameter may hold (interim, see above). */
+export const DISPLAY_LOCATIONS: ReadonlySet<string> = new Set<string>([...Object.values(DEFAULT_CONFIG_DISPLAY), "--config"]);
+
+/**
+ * Field names the contracts define (task, config, profiles, verifiers, policy, limits, integrity,
+ * scripted model files). A position shows only these names; any other name (an unknown field,
+ * a profile name) is shown as "?".
+ */
+export const KNOWN_FIELD_NAMES: ReadonlySet<string> = new Set([
+  "schemaVersion",
+  "id",
+  "goal",
+  "workflow",
+  "workspaceRoot",
+  "model",
+  "provider",
+  "scriptPath",
+  "maxOutputTokens",
+  "apiBaseUrl",
+  "requestTimeoutMs",
+  "maxRetries",
+  "language",
+  "profiles",
+  "policy",
+  "commands",
+  "executable",
+  "argsPrefix",
+  "allowExtraArgs",
+  "network",
+  "destructive",
+  "restorePathTokens",
+  "protectedPaths",
+  "privacy",
+  "secretEnv",
+  "limits",
+  "maxModelTurns",
+  "maxToolCalls",
+  "maxTotalTokens",
+  "maxDurationMs",
+  "maxRepairAttempts",
+  "maxSameFailures",
+  "verifiers",
+  "kind",
+  "args",
+  "cwd",
+  "timeoutMs",
+  "expectExitCode",
+  "rules",
+  "type",
+  "path",
+  "text",
+  "integrity",
+  "paths",
+  "steps",
+  "toolCalls",
+  "name",
+  "stop",
+  "usage",
+  "inputTokens",
+  "outputTokens",
+  "delayMs",
+]);
+
+/** A run id as Codaryn creates it: `<UTC yyyymmddThhmmssZ>-<8 lowercase hex>` (P-3). */
+export const GENERATED_RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+
+/**
+ * Words a `command` parameter may use (interim, see above): codaryn's commands and options, and
+ * npm with the script names `codaryn init` may suggest.
+ */
+export const COMMAND_WORDS: ReadonlySet<string> = new Set([
+  "codaryn",
+  "run",
+  "revert",
+  "report",
+  "doctor",
+  "models",
+  "init",
+  "runs",
+  "help",
+  "latest",
+  "--task",
+  "--workspace",
+  "--goal",
+  "--config",
+  "--vars-file",
+  "--cancel-file",
+  "--quiet",
+  "--json",
+  "--use",
+  "--run",
+  "--dry-run",
+  "--profile",
+  "--limit",
+  "--help",
+  "--version",
+  "npm",
+  "test",
+  "build",
+  "lint",
+  "typecheck",
+  "check",
+]);
+const COMMAND_PROGRAMS: ReadonlySet<string> = new Set(["codaryn", "npm"]);
+const COMMAND_PLACEHOLDER = /^<[a-z][a-z0-9_-]{0,30}>$/;
+const COMMAND_NUMBER = /^\d{1,6}$/;
+const MAX_COMMAND = 300;
+
+function isCommandWord(word: string): boolean {
+  return COMMAND_WORDS.has(word) || GENERATED_RUN_ID.test(word) || COMMAND_PLACEHOLDER.test(word) || COMMAND_NUMBER.test(word);
+}
+
+/** A command line in the closed form above, or REPLACEMENT. */
+export function formatCommand(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_COMMAND) return REPLACEMENT;
+  const words = value.split(" ");
+  const [program] = words;
+  if (program === undefined || !COMMAND_PROGRAMS.has(program)) return REPLACEMENT;
+  return words.every(isCommandWord) ? value : REPLACEMENT;
+}
+
+const TOP_LEVEL: { readonly [L in MessageLanguage]: string } = { ko: "최상위", en: "top level" };
+const MAX_FIELD_POSITION = 200;
 const FIELD_NAME = /[A-Za-z_][A-Za-z0-9_]*/y;
 const FIELD_INDEX = /\[(\d{1,6})\]/y;
-
-const TOP_LEVEL: { readonly [L in Language]: string } = { ko: "최상위", en: "the top level" };
-
-function isTermKind(kind: ParamKind): kind is TermKind {
-  return (TERM_KINDS as readonly string[]).includes(kind);
-}
 
 /** C0 and C1 controls, line and paragraph separators, and bidirectional controls. */
 function isUnsafeCodePoint(cp: number): boolean {
@@ -33,8 +201,8 @@ function isUnsafeCodePoint(cp: number): boolean {
 }
 
 /**
- * One line of text for a terminal: every unsafe character (line breaks included) becomes
- * REPLACEMENT and key-shaped text becomes HIDDEN_KEY. The same rules as `src/cli/text-safety.ts`.
+ * One line for a terminal: every unsafe character (line breaks included) becomes REPLACEMENT and
+ * key-shaped text becomes HIDDEN_KEY. The same character rules as `src/cli/text-safety.ts`.
  */
 export function cleanLine(text: string): string {
   let out = "";
@@ -42,56 +210,24 @@ export function cleanLine(text: string): string {
   return out.replace(KEY_PATTERN, HIDDEN_KEY);
 }
 
-/** A recorded path for display: cleaned, and cut to MAX_SHOWN_PATH characters. */
-export function shownPath(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) return REPLACEMENT;
-  const chars = Array.from(cleanLine(value));
-  return chars.length > MAX_SHOWN_PATH ? `${chars.slice(0, MAX_SHOWN_PATH).join("")}...` : chars.join("");
-}
-
-/** A non-negative safe integer, or null. */
-function wholeNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
 export function formatCount(value: unknown): string {
-  const n = wholeNumber(value);
-  return n === null ? REPLACEMENT : String(n);
-}
-
-/** `78 ms`, `4.2 s` / `4.2초`, `3 min 5 s` / `3분 5초`, `2 h 0 min` / `2시간 0분`. */
-export function formatDuration(value: unknown, language: Language): string {
-  const ms = wholeNumber(value);
-  if (ms === null) return REPLACEMENT;
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) {
-    const seconds = (Math.floor(ms / 100) / 10).toFixed(1);
-    return language === "ko" ? `${seconds}초` : `${seconds} s`;
-  }
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  if (minutes < 60) {
-    const seconds = totalSeconds % 60;
-    return language === "ko" ? `${minutes}분 ${seconds}초` : `${minutes} min ${seconds} s`;
-  }
-  const hours = Math.floor(minutes / 60);
-  return language === "ko" ? `${hours}시간 ${minutes % 60}분` : `${hours} h ${minutes % 60} min`;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : REPLACEMENT;
 }
 
 /**
- * A field position: names joined by "." with `[n]` indexes, such as `policy.commands[2].argsPrefix`.
- * "" is the top level. A name outside KNOWN_FIELD_NAMES is shown as "?"; a value that is not
- * such a position at all is REPLACEMENT as a whole.
+ * A field position: known names joined by "." with `[n]` indexes, such as
+ * `policy.commands[2].argsPrefix`. "" is the top level, shown as a word. An unknown name is shown
+ * as "?"; anything that is not a position is REPLACEMENT as a whole.
  */
-export function formatField(value: unknown, language: Language): string {
+export function formatField(value: unknown, language: MessageLanguage): string {
   if (value === "") return TOP_LEVEL[language];
   if (typeof value !== "string" || value.length > MAX_FIELD_POSITION) return REPLACEMENT;
   let out = "";
   let pos = 0;
   while (pos < value.length) {
     FIELD_INDEX.lastIndex = pos;
-    const index = FIELD_INDEX.exec(value);
-    if (index !== null && pos > 0) {
+    const index = pos > 0 ? FIELD_INDEX.exec(value) : null;
+    if (index !== null) {
       out += `[${String(Number(index[1]))}]`;
       pos = FIELD_INDEX.lastIndex;
       continue;
@@ -110,32 +246,39 @@ export function formatField(value: unknown, language: Language): string {
   return out;
 }
 
-export function formatId(value: unknown): string {
-  return typeof value === "string" && ID_PATTERN.test(value) ? value : REPLACEMENT;
+function fromSet(value: unknown, allowed: ReadonlySet<string>): string {
+  return typeof value === "string" && allowed.has(value) ? value : REPLACEMENT;
 }
 
-/** The code and its label, or REPLACEMENT for both when the value is not one of the kind's codes. */
-export function formatTerm(kind: TermKind, value: unknown, terms: TermTables): Term {
-  const table = terms[kind] as Readonly<Record<string, string>>;
-  if (typeof value === "string" && Object.hasOwn(table, value)) {
-    return { code: value, label: table[value] as string };
-  }
-  return { code: REPLACEMENT, label: REPLACEMENT };
-}
+const TOOL_NAME_SET: ReadonlySet<string> = new Set(TOOL_NAMES);
 
-/** One parameter by its kind. */
-export function renderParam(kind: ParamKind, value: unknown, language: Language, terms: TermTables): string | Term {
-  if (isTermKind(kind)) return formatTerm(kind, value, terms);
+/**
+ * One parameter by its kind. `ownText` says whether a string is a message this catalog produced
+ * (for `text` and `detail`).
+ */
+export function formatParam(
+  kind: MessageParamKind,
+  value: unknown,
+  language: MessageLanguage,
+  ownText: (text: string) => boolean,
+): string {
   switch (kind) {
     case "count":
       return formatCount(value);
-    case "durationMs":
-      return formatDuration(value, language);
+    case "code":
+      return fromSet(value, MESSAGE_CODES);
     case "field":
       return formatField(value, language);
-    case "id":
-      return formatId(value);
-    case "recordedPath":
-      return shownPath(value);
+    case "runId":
+      return typeof value === "string" && GENERATED_RUN_ID.test(value) ? value : REPLACEMENT;
+    case "path":
+      return fromSet(value, DISPLAY_LOCATIONS);
+    case "name":
+      return fromSet(value, TOOL_NAME_SET);
+    case "command":
+      return formatCommand(value);
+    case "text":
+    case "detail":
+      return typeof value === "string" && ownText(value) ? value : REPLACEMENT;
   }
 }

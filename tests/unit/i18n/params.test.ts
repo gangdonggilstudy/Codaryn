@@ -1,99 +1,133 @@
-/** N-4 parameter rendering: numbers, durations, field positions, ids and recorded paths. */
+/** N-4 parameter kinds: what each kind accepts, and that anything else is the replacement mark. */
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { HIDDEN_KEY, MAX_SHOWN_PATH, REPLACEMENT } from "../../../src/i18n/index.js";
-import { cleanLine, formatCount, formatDuration, formatField, formatId, shownPath } from "../../../src/i18n/params.js";
+import {
+  CLI_ERROR_EXIT_CODES,
+  DEFAULT_CONFIG_DISPLAY,
+  POLICY_DENIAL_CODES,
+  RUN_REASONS,
+  TERMINAL_RUN_STATUSES,
+  TOOL_NAMES,
+} from "../../../src/contracts/index.js";
+import type { MessageParamKind } from "../../../src/contracts/index.js";
+import { cleanLine, formatParam, HIDDEN_KEY, MESSAGE_CODES, REPLACEMENT } from "../../../src/i18n/index.js";
 import { KEY_SHAPED } from "./support.js";
 
-describe("i18n params: counts and durations", () => {
-  test("counts are non-negative safe integers, anything else is the replacement mark", () => {
-    assert.equal(formatCount(0), "0");
-    assert.equal(formatCount(150000), "150000");
+function show(kind: MessageParamKind, value: unknown, own: readonly string[] = []): string {
+  return formatParam(kind, value, "en", (text) => own.includes(text));
+}
+
+describe("i18n params: numbers and codes", () => {
+  test("count: non-negative safe integers only", () => {
+    assert.equal(show("count", 0), "0");
+    assert.equal(show("count", 150000), "150000");
     for (const value of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, "3", null, undefined, {}]) {
-      assert.equal(formatCount(value), REPLACEMENT, String(value));
+      assert.equal(show("count", value), REPLACEMENT, String(value));
     }
   });
 
-  test("durations carry units in each language", () => {
-    const cases: [number, string, string][] = [
-      [0, "0 ms", "0 ms"],
-      [78, "78 ms", "78 ms"],
-      [999, "999 ms", "999 ms"],
-      [1000, "1.0 s", "1.0초"],
-      [4250, "4.2 s", "4.2초"],
-      [59_999, "59.9 s", "59.9초"],
-      [60_000, "1 min 0 s", "1분 0초"],
-      [185_000, "3 min 5 s", "3분 5초"],
-      [7_260_000, "2 h 1 min", "2시간 1분"],
-    ];
-    for (const [ms, en, ko] of cases) {
-      assert.equal(formatDuration(ms, "en"), en);
-      assert.equal(formatDuration(ms, "ko"), ko);
+  test("code: the contracts' fixed codes only", () => {
+    for (const code of [...Object.keys(CLI_ERROR_EXIT_CODES), ...TERMINAL_RUN_STATUSES, ...RUN_REASONS, ...POLICY_DENIAL_CODES]) {
+      assert.equal(show("code", code), code);
     }
-    assert.equal(formatDuration(-5, "ko"), REPLACEMENT);
-    assert.equal(formatDuration("78", "en"), REPLACEMENT);
+    for (const code of ["pass", "inconclusive", "anthropic", "scripted", "before_verify", "auth_failed", "changed_since_run", "default"]) {
+      assert.ok(MESSAGE_CODES.has(code), code);
+    }
+    for (const value of ["probe-code", "Done", "done ", "needs input", "__proto__", "toString", "", 3, null]) {
+      assert.equal(show("code", value), REPLACEMENT, String(value));
+    }
+  });
+
+  test("name: tool names only (verifier ids and profile names come from files)", () => {
+    for (const tool of TOOL_NAMES) assert.equal(show("name", tool), tool);
+    for (const value of ["unit-tests", "doc", "customer private memo", ""]) assert.equal(show("name", value), REPLACEMENT, value);
+  });
+
+  test("runId: the generated run id form only", () => {
+    assert.equal(show("runId", "20261111T233839Z-d9c21658"), "20261111T233839Z-d9c21658");
+    for (const value of ["latest", "run-1", "20261111T233839Z-D9C21658", "20261111T233839Z-d9c21658\n", ""]) {
+      assert.equal(show("runId", value), REPLACEMENT, value);
+    }
+  });
+
+  test("path: the fixed config location displays only", () => {
+    for (const display of Object.values(DEFAULT_CONFIG_DISPLAY)) assert.equal(show("path", display), display);
+    assert.equal(show("path", "--config"), "--config");
+    for (const value of ["C:\\Users\\a\\AppData\\Roaming\\Codaryn\\config.json", "tests", "docs/INSTALL.md", ""]) {
+      assert.equal(show("path", value), REPLACEMENT, value);
+    }
+  });
+
+  test("command: codaryn or npm with known words, run ids, placeholders and numbers only", () => {
+    for (const value of [
+      "codaryn doctor",
+      "codaryn models --use <number>",
+      "codaryn models --use 3",
+      "codaryn revert --workspace <workspace> --run 20261111T233839Z-d9c21658 --dry-run",
+      "codaryn report --workspace <workspace> --run latest",
+      "npm run build",
+      "npm test",
+    ]) {
+      assert.equal(show("command", value), value);
+    }
+    for (const value of [
+      "codaryn revert --workspace D:\\work --run 20261111T233839Z-d9c21658",
+      "codaryn run probe-goal",
+      "npm run probe-script",
+      "rm -rf x",
+      "codaryn  doctor",
+      " codaryn",
+      "codaryn <Workspace>",
+      `codaryn ${KEY_SHAPED}`,
+      "codaryn\ndoctor",
+      `codaryn ${"--json ".repeat(60)}`.trim(),
+      "",
+      7,
+    ]) {
+      assert.equal(show("command", value), REPLACEMENT, String(value));
+    }
+  });
+
+  test("text and detail: only text the catalog produced", () => {
+    assert.equal(show("text", "완료", ["완료"]), "완료");
+    assert.equal(show("detail", "완료", ["완료"]), "완료");
+    assert.equal(show("text", "완료"), REPLACEMENT);
+    assert.equal(show("detail", 3, ["3"]), REPLACEMENT);
   });
 });
 
 describe("i18n params: field positions", () => {
-  test("known names and indexes pass, unknown names become ?", () => {
-    assert.equal(formatField("policy.commands[2].argsPrefix", "en"), "policy.commands[2].argsPrefix");
-    assert.equal(formatField("limits.maxTotalTokens", "ko"), "limits.maxTotalTokens");
-    assert.equal(formatField("verifiers[0].rules[3].path", "en"), "verifiers[0].rules[3].path");
-    assert.equal(formatField("steps[4].toolCalls[0].name", "en"), "steps[4].toolCalls[0].name");
-    assert.equal(formatField("policy.commands[007]", "en"), "policy.commands[7]");
-    assert.equal(formatField("policy.probeName", "en"), "policy.?");
-    assert.equal(formatField("__proto__.constructor", "en"), "?.?");
+  test("contract field names and indexes pass", () => {
+    assert.equal(show("field", "policy.commands[2].argsPrefix"), "policy.commands[2].argsPrefix");
+    assert.equal(show("field", "verifiers[0].rules[3].path"), "verifiers[0].rules[3].path");
+    assert.equal(show("field", "steps[4].toolCalls[0].name"), "steps[4].toolCalls[0].name");
+    assert.equal(show("field", "policy.commands[007]"), "policy.commands[7]");
   });
 
-  test("the top level has a word in each language", () => {
-    assert.equal(formatField("", "ko"), "최상위");
-    assert.equal(formatField("", "en"), "the top level");
+  test("a name the contracts do not define is shown as ?", () => {
+    assert.equal(show("field", "profiles.probeProfile.limits.maxModelTurns"), "profiles.?.limits.maxModelTurns");
+    assert.equal(show("field", "modle"), "?");
+    assert.equal(show("field", "__proto__.constructor"), "?.?");
   });
 
-  test("anything that is not a position is the replacement mark as a whole", () => {
-    for (const value of [
-      "[0]",
-      "policy..commands",
-      "policy.",
-      ".policy",
-      "policy.commands[]",
-      "policy.commands[1234567]",
-      "policy commands",
-      "policy/commands",
-      "policy.commands[2]x",
-      "1policy",
-      `policy.${"a".repeat(300)}`,
-      null,
-      7,
-      ["policy"],
-    ]) {
-      assert.equal(formatField(value, "en"), REPLACEMENT, String(value));
+  test("the top level is a word in each language", () => {
+    assert.equal(formatParam("field", "", "ko", () => false), "최상위");
+    assert.equal(formatParam("field", "", "en", () => false), "top level");
+  });
+
+  test("anything that is not a position is ? as a whole", () => {
+    for (const value of ["[0]", "policy..commands", "policy.", ".policy", "policy.commands[]", "policy.commands[1234567]", "policy commands", "policy/commands", "policy.commands[2]x", "1policy", `policy.${"a".repeat(300)}`, null, 7]) {
+      assert.equal(show("field", value), REPLACEMENT, String(value));
     }
   });
 });
 
-describe("i18n params: recorded text", () => {
-  test("ids keep the recorded identifier shape only", () => {
-    assert.equal(formatId("20261111T233839Z-d9c21658"), "20261111T233839Z-d9c21658");
-    assert.equal(formatId("unit:tests/a.b"), "unit:tests/a.b");
-    for (const value of ["", "a b", "a\nb", "x".repeat(129), "가", 3, null]) assert.equal(formatId(value), REPLACEMENT, String(value));
-  });
-
-  test("paths are cleaned of controls, hide key-shaped text and are cut", () => {
-    assert.equal(shownPath("docs/INSTALL.md"), "docs/INSTALL.md");
-    assert.equal(shownPath("a\u001b[2Jb\nc‮d"), "a?[2Jb?c?d");
-    assert.equal(shownPath(`notes/${KEY_SHAPED}.txt`), `notes/${HIDDEN_KEY}.txt`);
-    assert.equal(shownPath("[[CODARYN_SECRET:0123456789abcdef]]/a.md"), "[[CODARYN_SECRET:0123456789abcdef]]/a.md");
-    const long = shownPath("가".repeat(MAX_SHOWN_PATH + 50));
-    assert.equal(long, `${"가".repeat(MAX_SHOWN_PATH)}...`);
-    assert.equal(shownPath(""), REPLACEMENT);
-    assert.equal(shownPath(42), REPLACEMENT);
-  });
-
-  test("cleanLine replaces line breaks too, so a message stays one line", () => {
-    assert.equal(cleanLine("a\r\nb\tc d\u0085e"), "a??b?c?d?e");
+describe("i18n params: cleanLine", () => {
+  test("replaces controls and line breaks and hides key-shaped text", () => {
+    assert.equal(cleanLine("a\r\nb\tc\u2028d\u0085e\u202ef"), "a??b?c?d?e?f");
+    assert.equal(cleanLine(`x ${KEY_SHAPED} y`), `x ${HIDDEN_KEY} y`);
+    assert.equal(cleanLine("한국어 그대로"), "한국어 그대로");
   });
 });

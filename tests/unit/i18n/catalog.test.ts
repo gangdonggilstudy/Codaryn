@@ -1,254 +1,169 @@
 /**
- * N-4 catalog: both languages have every message and every code, each message is one clean
- * line that uses all its parameters, codes stay English, and the wording keeps the UX rules.
+ * N-4 catalog (CreateMessageCatalog): both languages have every MessageId, each template uses
+ * exactly its parameters, `format` throws on a wrong id or parameter set, every message is one
+ * clean line, and the wording keeps the UX rules.
  */
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import {
-  CLI_ERROR_EXIT_CODES,
-  DOCTOR_CHECK_IDS,
-  DOCTOR_CHECK_STATUSES,
-  INTEGRITY_PHASES,
-  MODEL_ERROR_KINDS,
-  PERMISSION_KINDS,
-  POLICY_DENIAL_CODES,
-  TERMINAL_RUN_STATUSES,
-  TOOL_ERROR_CODES,
-  TOOL_NAMES,
-} from "../../../src/contracts/index.js";
-import { EN_MESSAGES, EN_TERMS } from "../../../src/i18n/en.js";
-import { KO_MESSAGES, KO_TERMS } from "../../../src/i18n/ko.js";
-import {
-  createTranslator,
-  LANGUAGE_SOURCES,
-  LANGUAGES,
-  MESSAGE_PARAMS,
-  REPLACEMENT,
-  TERM_KINDS,
-  termLabel,
-  translate,
-} from "../../../src/i18n/index.js";
-import type { Language, MessageKey, TermKind } from "../../../src/i18n/index.js";
-import { CONTROL, codesOf, KEYS, LANGS, paramsFor, samples, specOf } from "./support.js";
+import { CLI_ERROR_EXIT_CODES, MESSAGE_IDS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "../../../src/contracts/index.js";
+import type { MessageCatalog, MessageId, MessageLanguage, MessageParams } from "../../../src/contracts/index.js";
+import { createMessageCatalog, MESSAGE_TEXTS, MessageFormatError, PLACEHOLDER, REPLACEMENT } from "../../../src/i18n/index.js";
+import { CONTROL, IDS, LANGS, paramsFor, samples, specOf } from "./support.js";
 
 const HANGUL = /[가-힣]/u;
-
-function render(language: Language, key: MessageKey, params: Record<string, unknown>): string {
-  return (translate as (l: Language, k: MessageKey, p: Record<string, unknown>) => string)(language, key, params);
-}
 
 function sorted(values: Iterable<string>): string[] {
   return [...values].sort();
 }
 
+function placeholders(template: string): string[] {
+  return [...template.matchAll(PLACEHOLDER)].map((match) => match[1] as string);
+}
+
+function format(catalog: MessageCatalog, id: MessageId, params: Record<string, unknown>): string {
+  return catalog.format(id, params as MessageParams);
+}
+
 describe("i18n catalog: completeness", () => {
-  test("both languages define exactly the message keys of the spec", () => {
-    assert.deepEqual(sorted(Object.keys(KO_MESSAGES)), sorted(KEYS));
-    assert.deepEqual(sorted(Object.keys(EN_MESSAGES)), sorted(KEYS));
-    assert.ok(KEYS.length >= 80, `only ${KEYS.length} messages`);
-  });
-
-  test("both languages label the same codes for every term kind", () => {
-    assert.deepEqual(sorted(Object.keys(KO_TERMS)), sorted(TERM_KINDS));
-    assert.deepEqual(sorted(Object.keys(EN_TERMS)), sorted(TERM_KINDS));
-    for (const kind of TERM_KINDS) {
-      assert.deepEqual(sorted(Object.keys(KO_TERMS[kind])), sorted(Object.keys(EN_TERMS[kind])), kind);
-      for (const lang of [KO_TERMS, EN_TERMS]) {
-        for (const label of Object.values(lang[kind] as Record<string, string>)) assert.ok(label.trim().length > 0, kind);
-      }
-    }
-  });
-
-  test("term kinds cover every code the contracts list", () => {
-    const expected: Partial<Record<TermKind, readonly string[]>> = {
-      status: TERMINAL_RUN_STATUSES,
-      tool: TOOL_NAMES,
-      permission: PERMISSION_KINDS,
-      denial: [...POLICY_DENIAL_CODES, ...TOOL_ERROR_CODES],
-      phase: INTEGRITY_PHASES,
-      modelErrorKind: MODEL_ERROR_KINDS,
-      checkStatus: DOCTOR_CHECK_STATUSES,
-      doctorCheck: DOCTOR_CHECK_IDS,
-      errorCode: Object.keys(CLI_ERROR_EXIT_CODES),
-      language: LANGUAGES,
-      languageSource: LANGUAGE_SOURCES,
-    };
-    for (const [kind, codes] of Object.entries(expected) as [TermKind, readonly string[]][]) {
-      assert.deepEqual(sorted(new Set(codesOf(kind))), sorted(new Set(codes)), kind);
-    }
-  });
-});
-
-describe("i18n catalog: every message in both languages", () => {
-  test("renders one non-empty clean line with no leftovers", () => {
+  test("both languages have exactly the contract's message ids", () => {
     for (const language of LANGS) {
-      for (const key of KEYS) {
-        const line = render(language, key, paramsFor(key));
-        assert.ok(line.trim().length > 0, `${language} ${key}`);
-        assert.ok(!CONTROL.test(line), `${language} ${key}: control character`);
-        for (const leftover of ["undefined", "NaN", "Infinity", "[object", "${"]) {
-          assert.ok(!line.includes(leftover), `${language} ${key}: "${leftover}" in ${line}`);
-        }
-      }
+      assert.deepEqual(sorted(Object.keys(MESSAGE_TEXTS[language])), sorted(new Set(MESSAGE_IDS)), language);
     }
+    assert.equal(new Set(MESSAGE_IDS).size, MESSAGE_IDS.length);
   });
 
-  test("accepts the sample values: none renders as the replacement mark", () => {
+  test("each template uses every listed parameter once and no other, with no stray braces", () => {
     for (const language of LANGS) {
-      for (const key of KEYS) {
-        const base = render(language, key, paramsFor(key));
-        for (const name of Object.keys(specOf(key))) {
-          const invalid = render(language, key, paramsFor(key, { name, value: {} }));
-          assert.notEqual(base, invalid, `${language} ${key}: sample for ${name} was rejected`);
-        }
+      for (const id of IDS) {
+        const template = MESSAGE_TEXTS[language][id];
+        const used = placeholders(template);
+        assert.deepEqual(sorted(used), sorted(Object.keys(specOf(id))), `${language} ${id}`);
+        assert.ok(!/[{}]/.test(template.replace(PLACEHOLDER, "")), `${language} ${id}: stray brace`);
+        assert.ok(template.trim().length > 0, `${language} ${id}: empty`);
       }
     }
   });
 
-  test("uses every parameter: changing one changes the line", () => {
-    for (const language of LANGS) {
-      for (const key of KEYS) {
-        const base = render(language, key, paramsFor(key));
-        for (const [name, kind] of Object.entries(specOf(key))) {
-          const other = render(language, key, paramsFor(key, { name, value: samples(kind)[1] }));
-          assert.notEqual(other, base, `${language} ${key}: parameter ${name} is not used`);
-        }
-      }
-    }
-  });
-
-  test("Korean messages are Korean and English messages have no Hangul", () => {
-    for (const key of KEYS) {
-      assert.match(render("ko", key, paramsFor(key)), HANGUL, `ko ${key}`);
-      assert.doesNotMatch(render("en", key, paramsFor(key)), HANGUL, `en ${key}`);
-    }
-  });
-
-  test("every term code renders in every message that takes it", () => {
-    for (const language of LANGS) {
-      for (const key of KEYS) {
-        for (const [name, kind] of Object.entries(specOf(key))) {
-          if (!(TERM_KINDS as readonly string[]).includes(kind)) continue;
-          const invalid = render(language, key, paramsFor(key, { name, value: {} }));
-          for (const code of codesOf(kind as TermKind)) {
-            const line = render(language, key, paramsFor(key, { name, value: code }));
-            assert.notEqual(line, invalid, `${language} ${key} ${name}=${code}: ${line}`);
-          }
-        }
-      }
-    }
-  });
-});
-
-describe("i18n catalog: codes stay English", () => {
-  test("an error line keeps its code in English, after the Korean or English description", () => {
+  test("listed ids cover every error code, status, reason and advice", () => {
+    const ids = new Set<string>(MESSAGE_IDS);
     for (const code of Object.keys(CLI_ERROR_EXIT_CODES)) {
-      const ko = render("ko", "error.title", { code });
-      const en = render("en", "error.title", { code });
-      assert.ok(ko.startsWith("오류 — ") && ko.endsWith(` (${code})`), ko);
-      assert.ok(en.startsWith("error — ") && en.endsWith(` (${code})`), en);
-      assert.ok(render("ko", "error.fix", { code }).startsWith("고치는 법: "));
-      assert.ok(render("en", "error.fix", { code }).startsWith("To fix: "));
+      assert.ok(ids.has(`error.${code}.what`) && ids.has(`error.${code}.fix`), code);
     }
-  });
-
-  test("progress lines put the status and reason codes in parentheses after the words", () => {
-    assert.equal(
-      render("ko", "progress.finished", { status: "done", reason: "verified" }),
-      "끝 — 완료: 지정한 검증 모두 통과 (done/verified)",
-    );
-    assert.equal(
-      render("en", "progress.toolDenied", { tool: "run_command", permission: "command", denial: "command_not_allowed" }),
-      "run command — denied: not in the allowed commands (command/command_not_allowed)",
-    );
-    assert.equal(
-      render("ko", "progress.toolDenied", { tool: "run_command", permission: "command", denial: "command_not_allowed" }),
-      "명령 실행 — 거부: 허용 목록에 없음 (command/command_not_allowed)",
-    );
+    for (const status of TERMINAL_RUN_STATUSES) assert.ok(ids.has(`status.${status}`), status);
+    for (const reason of RUN_REASONS) assert.ok(ids.has(`reason.${reason}`) && ids.has(`advice.${reason}`), reason);
   });
 });
 
-describe("i18n catalog: wording rules (UX 1 and 5)", () => {
-  // Codaryn has no OS isolation (M-8) and masking is not encryption: these words would overclaim.
-  const OVERCLAIM_KO = ["안전", "샌드박스", "차단", "암호화", "보장"];
-  const OVERCLAIM_EN = [/\bsafe/i, /sandbox/i, /\bblock/i, /encrypt/i, /\bsecure/i, /guarantee/i];
+describe("i18n catalog: format", () => {
+  test("renders every message in both languages as one non-empty clean line", () => {
+    for (const language of LANGS) {
+      const catalog = createMessageCatalog(language);
+      for (const id of IDS) {
+        const line = format(catalog, id, paramsFor(catalog, id));
+        assert.ok(line.trim().length > 0, `${language} ${id}`);
+        assert.ok(!CONTROL.test(line), `${language} ${id}: control character`);
+        for (const leftover of ["undefined", "NaN", "[object", "{", "}"]) assert.ok(!line.includes(leftover), `${language} ${id}: ${line}`);
+      }
+    }
+  });
 
-  function everyText(language: Language): string[] {
-    const terms = language === "ko" ? KO_TERMS : EN_TERMS;
-    const labels = TERM_KINDS.flatMap((kind) => Object.values(terms[kind] as Record<string, string>));
-    const lines = KEYS.flatMap((key) => {
-      const out = [render(language, key, paramsFor(key))];
-      for (const [name, kind] of Object.entries(specOf(key))) {
-        if ((TERM_KINDS as readonly string[]).includes(kind)) {
-          for (const code of codesOf(kind as TermKind)) out.push(render(language, key, paramsFor(key, { name, value: code })));
+  test("accepts the sample of every kind and uses every parameter", () => {
+    for (const language of LANGS) {
+      const catalog = createMessageCatalog(language);
+      for (const id of IDS) {
+        const base = format(catalog, id, paramsFor(catalog, id));
+        for (const [name, kind] of Object.entries(specOf(id))) {
+          const rejected = format(catalog, id, paramsFor(catalog, id, { name, value: {} }));
+          const other = format(catalog, id, paramsFor(catalog, id, { name, value: samples(kind, catalog)[1] }));
+          assert.notEqual(base, rejected, `${language} ${id}: sample for ${name} (${kind}) was rejected`);
+          assert.notEqual(base, other, `${language} ${id}: parameter ${name} is not used`);
         }
       }
-      return out;
-    });
-    return [...labels, ...lines];
-  }
-
-  test("no message claims protection Codaryn does not give", () => {
-    for (const text of everyText("ko")) {
-      for (const word of OVERCLAIM_KO) assert.ok(!text.includes(word), `ko "${word}": ${text}`);
-    }
-    for (const text of everyText("en")) {
-      for (const word of OVERCLAIM_EN) assert.doesNotMatch(text, word, text);
     }
   });
 
-  test("passing is always within the configured checks", () => {
-    assert.match(render("ko", "summary.verifiers", { passed: 1, total: 2 }), /지정한 검증 범위에서/);
-    assert.match(render("en", "summary.verifiers", { passed: 1, total: 2 }), /within the configured checks/);
-    assert.match(render("ko", "summary.title", { status: "done", reason: "verified" }), /지정한 검증 모두 통과/);
+  test("throws for an unknown id, a missing parameter and an extra parameter, without the values", () => {
+    const catalog = createMessageCatalog("en");
+    const cases: [() => string, RegExp][] = [
+      [() => format(catalog, "probe.unknown" as MessageId, {}), /^unknown message id$/],
+      [() => format(catalog, "__proto__" as MessageId, {}), /^unknown message id$/],
+      [() => format(catalog, "summary.changes", {}), /^message summary\.changes: missing parameter count$/],
+      [() => catalog.format("summary.changes"), /^message summary\.changes: missing parameter count$/],
+      [() => format(catalog, "summary.changes", { count: 1, probeExtra: "probe-value" }), /^message summary\.changes: unexpected parameter$/],
+      [() => format(catalog, "status.done", { probeExtra: "probe-value" }), /^message status\.done: unexpected parameter$/],
+    ];
+    for (const [call, message] of cases) {
+      assert.throws(call, (error: unknown) => {
+        assert.ok(error instanceof MessageFormatError);
+        assert.match(error.message, message);
+        assert.ok(!error.message.includes("probe-value"));
+        return true;
+      });
+    }
   });
 
-  test("the key is never asked for: guidance only names the variable", () => {
-    for (const language of LANGS) {
-      for (const key of ["key.howToWindows", "key.howToPosix", "key.howToVarsFile", "key.neverAsked"] as const) {
-        const line = render(language, key, {});
-        assert.doesNotMatch(line, /ANTHROPIC_API_KEY\s*[=:]/, line);
-      }
-    }
+  test("examples in both languages", () => {
+    const ko = createMessageCatalog("ko");
+    const en = createMessageCatalog("en");
+    assert.equal(ko.language, "ko");
+    assert.equal(ko.format("error.invalid_config.what"), "설정 파일을 읽을 수 없거나 값이 올바르지 않습니다");
+    assert.equal(ko.format("summary.changes", { count: 2 }), "바뀐 파일: 2개");
+    assert.equal(en.format("summary.verifiers", { passed: 1, total: 2 }), "Checks passed: 1 of 2 (within the configured checks)");
+    assert.equal(
+      ko.format("progress.tool_denied", { tool: ko.format("tool.run_command"), permission: "command", code: "command_not_allowed" }),
+      "명령 실행 — 거부 (command/command_not_allowed)",
+    );
+    const status = ko.format("status.done");
+    assert.equal(ko.format("progress.finished", { status, reason: "verified" }), "끝 — 완료 (verified)");
+    assert.equal(en.format("init.saved", { path: "%APPDATA%\\Codaryn\\config.json" }), "Saved: %APPDATA%\\Codaryn\\config.json");
+  });
+
+  test("an unknown language falls back to en", () => {
+    const catalog = createMessageCatalog("fr" as MessageLanguage);
+    assert.equal(catalog.language, "en");
+    assert.equal(catalog.format("status.done"), "done");
+  });
+
+  test("text and detail take only what this catalog produced", () => {
+    const ko = createMessageCatalog("ko");
+    const en = createMessageCatalog("en");
+    const fromEn = en.format("status.done");
+    assert.equal(ko.format("summary.result", { text: fromEn }), `결과: ${REPLACEMENT}`);
+    assert.equal(ko.format("summary.result", { text: "완료" }), `결과: ${REPLACEMENT}`);
+    const own = ko.format("status.done");
+    assert.equal(ko.format("summary.result", { text: own }), "결과: 완료");
+    assert.equal(ko.format("error.detail", { detail: ko.format("error.invalid_task.what") }), "자세히: task 파일을 읽을 수 없거나 값이 올바르지 않습니다");
   });
 });
 
-describe("i18n translator", () => {
-  test("createTranslator renders in its language and falls back to en for an unknown one", () => {
-    const ko = createTranslator("ko");
-    assert.equal(ko.language, "ko");
-    assert.equal(ko.t("error.title", { code: "invalid_config" }), "오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 않습니다 (invalid_config)");
-    assert.equal(ko.t("error.check"), "점검: codaryn doctor");
-    assert.equal(ko.term("status", "needs-input"), "확인 필요");
-
-    const fallback = createTranslator("fr" as Language);
-    assert.equal(fallback.language, "en");
-    assert.equal(fallback.t("revert.alreadyReverted"), "This run was already reverted.");
+describe("i18n catalog: language and wording", () => {
+  test("Korean texts are Korean, English texts have no Hangul", () => {
+    for (const id of IDS) {
+      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
+      assert.doesNotMatch(MESSAGE_TEXTS.en[id], HANGUL, `en ${id}`);
+    }
   });
 
-  test("an unknown key or code gives the replacement mark, not the key or code", () => {
-    assert.equal(render("en", "probe.unknown" as MessageKey, {}), REPLACEMENT);
-    assert.equal(render("ko", "__proto__" as MessageKey, {}), REPLACEMENT);
-    assert.equal(termLabel("ko", "status", "probe-status" as "done"), REPLACEMENT);
-    assert.equal(termLabel("en", "reason", "toString" as "verified"), REPLACEMENT);
+  test("codes stay English: the status and reason codes pass through unchanged", () => {
+    const ko = createMessageCatalog("ko");
+    assert.equal(ko.format("progress.model_error", { turn: 3, kind: "auth_failed" }), "3턴 — 모델 호출 오류 (auth_failed)");
+    assert.equal(ko.format("progress.integrity_unchanged", { phase: "before_verify" }), "보호 대상 확인 — 바뀌지 않음 (before_verify)");
   });
 
-  test("missing parameters render as the replacement mark", () => {
-    assert.equal(render("en", "progress.turn", {}), "turn ?");
-    assert.equal(render("ko", "summary.title", {}), "── 결과: ? — ? ──");
+  test("no text claims protection Codaryn does not give (UX 1.4, M-8)", () => {
+    const overclaimKo = ["안전", "샌드박스", "차단", "암호화", "보장"];
+    const overclaimEn = [/\bsafe/i, /sandbox/i, /\bblock/i, /encrypt/i, /\bsecure/i, /guarantee/i];
+    for (const id of IDS) {
+      for (const word of overclaimKo) assert.ok(!MESSAGE_TEXTS.ko[id].includes(word), `ko ${id}: ${word}`);
+      for (const word of overclaimEn) assert.doesNotMatch(MESSAGE_TEXTS.en[id], word, `en ${id}`);
+    }
   });
 
-  test("English counts agree in number", () => {
-    assert.equal(render("en", "summary.changes", { count: 1 }), "1 file changed");
-    assert.equal(render("en", "summary.changes", { count: 2 }), "2 files changed");
-    assert.equal(render("en", "summary.changes", { count: 0 }), "0 files changed");
-    assert.equal(render("en", "revert.partial", { reverted: 1, skipped: 2 }), "Reverted 1 file and skipped 2.");
-    assert.equal(render("en", "progress.repair", { attempt: 2, failed: 1 }), "repair 2 — 1 check failed");
-  });
-
-  test("the spec has a group prefix on every key", () => {
-    for (const key of Object.keys(MESSAGE_PARAMS)) assert.match(key, /^[a-z]+\.[A-Za-z]+$/, key);
+  test("a pass is always within the configured checks", () => {
+    assert.match(MESSAGE_TEXTS.ko["summary.verifiers"], /지정한 검증 범위에서/);
+    assert.match(MESSAGE_TEXTS.en["summary.verifiers"], /within the configured checks/);
+    assert.match(MESSAGE_TEXTS.ko["reason.verified"], /지정한 검증/);
   });
 });

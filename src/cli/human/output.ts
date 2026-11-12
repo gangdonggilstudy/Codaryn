@@ -446,7 +446,12 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           continue;
         }
         const pair = validStatusReason(entry.status, entry.reason);
-        let status = pair === null ? catalog.format("runs.incomplete") : `${catalog.format(`status.${pair.status}`)} (${pair.status}/${pair.reason})`;
+        // U-16 (UXM-5): a plan run whose plan was applied is not left as needing input; it names the apply run.
+        const appliedBy: unknown = entry.appliedBy;
+        const appliedRunId: unknown = typeof appliedBy === "object" && appliedBy !== null ? (appliedBy as { runId?: unknown }).runId : undefined;
+        const applyRunId = pair?.reason === "plan_pending" && typeof appliedRunId === "string" ? toRunId(appliedRunId) : null;
+        const words = pair === null ? null : applyRunId !== null ? catalog.format("runs.plan_applied", { runId: applyRunId }) : catalog.format(`status.${pair.status}`);
+        let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
         if (entry.reverted !== null && isOneOf(entry.reverted.status, ["complete", "partial"] as const)) {
           status += ` · ${catalog.format("runs.reverted")} (${entry.reverted.status})`;
         }

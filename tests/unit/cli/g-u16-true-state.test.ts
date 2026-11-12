@@ -108,7 +108,6 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
 
   test(
     "the applied plan run's entry names the apply run",
-    { todo: "contract and store (U-16): RunListEntry of a plan run says it was applied (the apply's run id); then the renderer (N-C) shows it instead of leaving 'needs input'" },
     async () => {
       const { base, planned, digest } = await planRun();
       const applied = await applyWithTask(base, planned, digest);

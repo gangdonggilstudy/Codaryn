@@ -920,6 +920,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
   - 글 출력은 그 이유를 한 번 말하고, 파일마다 경로와 상태만 보인다.
   - 다른 이유(`masked_path`: 경로에 가림 토큰이 있음, `snapshot_missing`, `not_text`, `too_large` 등)는 파일마다 보인다.
   - 실행이 글의 가림을 기록하게 되면(계약·store) 바뀐 구역(`-`/`+` 줄)을 다시 보인다.
+- 실행 id는 18.7의 규칙을 따른다(앱 계층이 store의 `inspectRun`으로 판정). 그 이름 그대로인 실행 디렉터리가 없으면 `run_not_found`, 실행 목록이 손상으로 보는 실행은 `invalid_run_record`(종료 2)이고, 경로도 내지 않는다.
 - 읽기만 한다. 잠금도, 요청도 하지 않는다.
 - `--json`은 `ChangesOutput` ASCII 한 줄이다(N-19). 키 모양은 JSON으로 만들기 전에 문자열마다 가린다(N-27 (c)).
 
@@ -927,7 +928,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
 
 - 실행 id(N-27 (a))
   - 명시한 `--run <id>`는 store의 `inspectRun` 판정을 따른다. 그 이름 그대로인 항목이 없으면 `run_not_found`다. 대소문자만 다른 id도 여기에 걸린다.
-  - 목록이 "손상"으로 보는 실행은 `revert`(N-26), `report`(N-27 (b)), `plan`, `apply`, `review`가 모두 `invalid_run_record`로 거부한다.
+  - 목록이 "손상"으로 보는 실행은 `revert`(N-26), `report`(N-27 (b)), `plan`, `apply`, `review`, `changes`(검토 R-14 L-1, 앱 계층 `0363b69`)가 모두 `invalid_run_record`로 거부한다.
 - 상태별 이유 표(DR-16)
   - 실행과 적용 실행의 이유는 `RUN_REASONS_BY_STATUS`(`isReasonOfStatus`) 하나로 판정한다. CLI는 따로 목록을 두지 않는다.
   - 적용 실행의 이유는 그 부분집합인 `APPLY_REASONS_BY_STATUS`를 쓴다.

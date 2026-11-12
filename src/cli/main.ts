@@ -170,6 +170,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
     case "revert": {
       const outcome = await runRevert({
         argv,
+        // U-16 (R-55 L-1): the hint's lines in the person's language once the catalog has them.
+        messages: human.messages,
         cwd: process.cwd(),
         isDirectory,
         clock,

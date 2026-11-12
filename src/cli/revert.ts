@@ -7,10 +7,10 @@
 
 import path from "node:path";
 import { REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION, UNSAFE_MOVE_CONSENT_ARGUMENT } from "../contracts/index.js";
-import type { CliErrorOutput, Clock, RevertOutput } from "../contracts/index.js";
+import type { CliErrorOutput, Clock, MessageCatalog, PlanApplyState, RevertOutput } from "../contracts/index.js";
 import { parseRevertArgs } from "./args.js";
 import { revertStatus } from "./assemble.js";
-import type { RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
+import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
 import { cliError } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { localPathProblem } from "./task.js";
@@ -33,6 +33,8 @@ export interface RevertEnvironment {
   readonly ask?: (question: string) => Promise<string | null>;
   /** Set by the app layer only (AdapterRevert). Absent: the CLI's channels (argument, terminal). */
   readonly adapter?: AdapterRevert;
+  /** U-16 (R-55 L-1): the catalog of the hint's lines (revert.plan_*); English when absent. */
+  readonly messages?: MessageCatalog;
 }
 
 /**
@@ -61,12 +63,45 @@ export interface RevertCliOutcome {
   readonly hint?: string;
 }
 
-/** U-16 (UXM-5): what reverting an applied plan run tells the person. */
-export function appliedPlanHint(planRunId: string, applyRunId: string, dryRun: boolean): string {
-  return (
-    `Run ${planRunId} only made a plan and changed no file itself, so there ${dryRun ? "is" : "was"} nothing to put back and it is not marked as reverted. ` +
-    `Its plan was applied by run ${applyRunId}: to undo those changes, revert that run (--run ${applyRunId}).`
+/** A catalog text, or `fallback` while this build's catalog does not have the id yet (N-B). */
+function textOr(make: (() => string) | null, fallback: string): string {
+  if (make === null) return fallback;
+  try {
+    return make();
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * U-16 (UXM-5): what reverting an applied plan run tells the person. R-55 L-1: by the contract's
+ * rule (planApplyStateOf), it advises reverting the apply run only for PLAN_APPLY_STATES_TO_REVERT
+ * (its changes are there to undo); otherwise it says what is so. The catalog's lines (revert.plan_*)
+ * when it has them, these English lines otherwise.
+ */
+export function appliedPlanHint(planRunId: string, apply: PlanApply, dryRun: boolean, messages?: MessageCatalog): string {
+  const id = apply.runId;
+  const format = (key: string, params: Record<string, string> = {}): (() => string) | null =>
+    messages === undefined ? null : () => (messages.format as (id: string, params?: Record<string, string>) => string)(key, params);
+  const head = textOr(
+    format("revert.plan_only"),
+    `Run ${planRunId} only made a plan and changed no file itself, so there ${dryRun ? "is" : "was"} nothing to put back and it is not marked as reverted.`,
   );
+  if (apply.state === "unknown") return `${head} Its plan was applied by run ${id}; the run list could not be read to tell whether that run can still be reverted.`;
+  const tail: { readonly [S in PlanApplyState]: string } = {
+    applied: textOr(format("revert.plan_revert_apply", { runId: id }), `Its plan was applied by run ${id}: to undo those changes, revert that run (--run ${id}).`),
+    unfinished: textOr(
+      format("revert.plan_revert_apply", { runId: id }),
+      `Its plan was applied by run ${id}, which did not finish (${apply.reason ?? "no reason recorded"}): to undo what it changed, revert that run (--run ${id}).`,
+    ),
+    applying: textOr(format("revert.plan_applying", { runId: id }), `Its plan is being applied by run ${id}, which has no result yet.`),
+    reverted: textOr(format("revert.plan_apply_reverted", { runId: id }), `Its plan was applied by run ${id}, which was already reverted.`),
+    record_missing: textOr(
+      format("revert.plan_apply_missing", { runId: id }),
+      `Its plan was applied by run ${id}, whose records are no longer in this workspace or do not pass the checks, so that run cannot be reverted any more.`,
+    ),
+  };
+  return `${head} ${tail[apply.state]}`;
 }
 
 const YES = new Set(["y", "yes", "예", "네"]);
@@ -159,6 +194,6 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
     },
     exitCode,
     quiet,
-    ...(result.planAppliedBy === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planAppliedBy, dryRun) }),
+    ...(result.planApply === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planApply, dryRun, io.messages) }),
   };
 }

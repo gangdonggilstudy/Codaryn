@@ -16,11 +16,12 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { ANTHROPIC_API_KEY_ENV } from "../../../src/contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, PLAN_APPLY_STATES, PLAN_APPLY_STATES_TO_REVERT, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { ApplyResult, EngineResult, RunsOutput } from "../../../src/contracts/index.js";
 import { createCodarynApp, createNodeAppEnvironment } from "../../../src/app/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { renderChanges, runChanges } from "../../../src/cli/changes.js";
+import { runCleanup } from "../../../src/cli/cleanup.js";
 import { createHumanOutput } from "../../../src/cli/human/index.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
 import { appliedPlanHint, runRevert } from "../../../src/cli/revert.js";
@@ -127,7 +128,7 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
     assert.equal(await readFile(path.join(ws, "sorted", "a.txt"), "utf8"), "alpha\n", "the apply's move is still there");
     const entry = (await entriesOf(base)).find((run) => run.runId === planned.runId);
     assert.equal(entry?.reverted ?? null, null, JSON.stringify([outcome.output, entry]));
-    assert.equal(outcome.hint, appliedPlanHint(planned.runId, applied.runId, false));
+    assert.equal(outcome.hint, appliedPlanHint(planned.runId, { runId: applied.runId, state: "applied" }, false));
     assert.ok(outcome.hint?.includes(`--run ${applied.runId}`), outcome.hint);
     // The JSON line is as before: complete, nothing reverted, no new field.
     assert.deepEqual(Object.keys(outcome.output).sort(), ["exitCode", "kind", "reverted", "runId", "schemaVersion", "skipped", "status"]);
@@ -138,7 +139,7 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
     const { base, planned, digest } = await planRun();
     const applied = await applyWithTask(base, planned, digest);
     const outcome = await revertOf(base, planned.runId, ["--dry-run"]);
-    assert.equal(outcome.hint, appliedPlanHint(planned.runId, applied.runId, true));
+    assert.equal(outcome.hint, appliedPlanHint(planned.runId, { runId: applied.runId, state: "applied" }, true));
   });
 
   test("a plan run not applied, and the apply run itself, revert as before: no hint, a record", async () => {
@@ -153,6 +154,63 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
     assert.equal(second.hint, undefined);
     assert.equal(await readFile(path.join(ws, "a.txt"), "utf8"), "alpha\n", "the apply's move is undone");
     assert.notEqual((await entriesOf(base)).find((run) => run.runId === applied.runId)?.reverted ?? null, null);
+  });
+
+  // R-55 L-1 (its procedure, exp.mjs 3 d): the hint named a run that was already reverted, or whose
+  // records a cleanup had removed (following it gave run_not_found). It advises reverting the apply
+  // run only while that run is in the list and not reverted; otherwise it says what is so.
+  test("R-55 L-1: the apply run was already reverted: the hint says so and does not advise reverting it", async () => {
+    const { base, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    assert.equal((await revertOf(base, applied.runId)).output.kind, "revert");
+    for (const more of [[], ["--dry-run"]] as const) {
+      const outcome = await revertOf(base, planned.runId, more);
+      const hint = outcome.hint ?? "";
+      assert.ok(hint.includes(applied.runId) && /already reverted/.test(hint), hint);
+      assert.equal(/revert that run|--run /.test(hint), false, hint);
+    }
+    assert.equal((await entriesOf(base)).find((run) => run.runId === planned.runId)?.reverted ?? null, null, "no record on the plan run");
+  });
+
+  test("R-55 L-1: the apply run has no result yet (applying): the hint says so and does not advise reverting it", async () => {
+    const { base, ws, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    // As while the apply is still going, or stopped without a result.
+    await rm(path.join(ws, STATE_DIR_NAME, RUNS_DIR_NAME, applied.runId, RESULT_FILE_NAME));
+    const outcome = await revertOf(base, planned.runId, ["--dry-run"]);
+    const hint = outcome.hint ?? "";
+    assert.ok(hint.includes(applied.runId) && /no result yet/.test(hint), hint);
+    assert.equal(/revert that run|--run /.test(hint), false, hint);
+  });
+
+  test("R-55 L-1: the hint advises reverting the apply run for exactly the contract's PLAN_APPLY_STATES_TO_REVERT", () => {
+    const advised = PLAN_APPLY_STATES.filter((state) => appliedPlanHint("p", { runId: "a", state }, false).includes("--run a"));
+    assert.deepEqual(advised, [...PLAN_APPLY_STATES_TO_REVERT]);
+    assert.equal(appliedPlanHint("p", { runId: "a", state: "unknown" }, false).includes("--run"), false);
+  });
+
+  test("R-55 L-1: the apply run's records were removed by a cleanup: the hint says they are gone; reverting the plan run writes nothing", async () => {
+    const { base, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    assert.equal((await revertOf(base, applied.runId)).output.kind, "revert");
+    // Read loosely: the cleanup JSON names its kind `mode` before U-22 (DR-48) and `status` after it.
+    type Printed = { exitCode: number; plan?: { digest: string }; outcome?: { removed: { runId?: string }[] } };
+    const cleanup = async (more: readonly string[]): Promise<Printed> => {
+      const outcome = await runCleanup({ argv: ["cleanup", "--workspace", "ws", "--run", applied.runId, ...more, "--json"], cwd: base, env: {}, clock, messages: createMessageCatalog("en") });
+      assert.ok("text" in outcome, JSON.stringify(outcome));
+      return JSON.parse(outcome.text) as Printed;
+    };
+    const preview = await cleanup([]);
+    assert.ok(preview.plan !== undefined, JSON.stringify(preview));
+    const done = await cleanup(["--confirm", preview.plan.digest.slice(0, 12)]);
+    assert.deepEqual([done.exitCode, done.outcome?.removed.map((item) => item.runId)], [0, [applied.runId]], JSON.stringify(done));
+    assert.equal((await entriesOf(base)).some((run) => run.runId === applied.runId), false, "the apply run is gone from the list");
+
+    const outcome = await revertOf(base, planned.runId);
+    const hint = outcome.hint ?? "";
+    assert.ok(hint.includes(applied.runId) && /no longer/.test(hint), hint);
+    assert.equal(/revert that run|--run /.test(hint), false, hint);
+    assert.equal((await entriesOf(base)).find((run) => run.runId === planned.runId)?.reverted ?? null, null, "no record on the plan run");
   });
 });
 

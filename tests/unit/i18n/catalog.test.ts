@@ -384,4 +384,27 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.en["summary.verifiers"], /within the configured checks/);
     assert.match(MESSAGE_TEXTS.ko["reason.verified"], /지정한 검증/);
   });
+
+  test("U-24 (DR-50): one word for one thing in what people read", () => {
+    const texts = (language: "en" | "ko") => Object.entries(MESSAGE_TEXTS[language]) as [string, string][];
+    // Option names (--workflow, --digest) and field names (secretEnv, policy.planActions) stay as they are.
+    const withoutNames = (text: string) => text.replace(/--[a-z-]+/g, "").replace(/\b(secretEnv|policy\.planActions)\b/g, "");
+    for (const [id, text] of texts("ko")) {
+      const t = withoutNames(text);
+      // 동작 (not 행동), 작업 종류 (not 워크플로, no "(workflow)"), 다이제스트 (not digest),
+      // 가릴 값 (not 비밀 값), 폐기 보관함 (never 보관함 alone).
+      assert.ok(!/행동|워크플로|workflow|digest|비밀/.test(t), `ko ${id}`);
+      assert.equal((t.match(/보관함/g) ?? []).length, (t.match(/폐기 보관함/g) ?? []).length, `ko ${id}`);
+    }
+    for (const [id, text] of texts("en")) {
+      const t = withoutNames(text);
+      // task type (not workflow, task kind), discarded files (not discard box, run archive).
+      assert.ok(!/workflow|task kind|discard box|run archive/i.test(t), `en ${id}`);
+      // R-48 L-5: the folder of the discarded files has one spelling, "discarded-files folder".
+      assert.ok(!/discarded files folder/i.test(t), `en ${id}`);
+    }
+    // The write block is 보호 경로; the check afterwards keeps its own name, 보호 대상 확인 (ux-design 5).
+    assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");
+    assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
+  });
 });

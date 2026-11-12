@@ -173,7 +173,7 @@ function buildBody(settings: ResolvedAnthropicSettings, request: ModelRequest): 
     seen.add(name);
     tools.push({ name, description: definition.description, input_schema: definition.inputSchema });
   }
-  // G-A, GT-E1: workflow tools follow the built-in ones. Absent or empty: the body is exactly as
+  // G-A, GT-E1: task type tools follow the built-in ones. Absent or empty: the body is exactly as
   // before stage 4 (pinned by tests/unit/model/anthropic/g-workflow-tools.test.ts).
   for (const name of request.workflowTools ?? []) {
     const definition = Object.hasOwn(WORKFLOW_TOOL_DEFINITIONS, name) ? WORKFLOW_TOOL_DEFINITIONS[name] : undefined;

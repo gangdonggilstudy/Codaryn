@@ -249,18 +249,8 @@ describe("DR-44 (라), R-34 L-3: a removal that fails is not reported as removed
     assert.ok(outcome.text.includes(runId), outcome.text);
   });
 
-  test("a hidden cleanup-… folder left behind is shown by the next preview and can be removed", async () => {
-    const { base, work } = await workspace({});
-    const leftover = path.join(work, STATE_DIR_NAME, "cleanup-0123456789abcdef");
-    await mkdir(path.join(leftover, "snapshots"), { recursive: true });
-    await writeFile(path.join(leftover, "snapshots", "x.orig"), "left\n", "utf8");
-    const text = (await cleanup(base, [], false)).text;
-    assert.ok(text.includes("cleanup-0123456789abcdef"), text);
-    const digest = (await preview(base, [])).plan.digest.slice(0, 12);
-    const done = await cleanup(base, ["--confirm", digest]);
-    assert.equal(done.exitCode, 0, JSON.stringify(done));
-    assert.equal(await exists(leftover), false);
-  });
+  // R-34b P-2: a leftover is told by the cleanup's mark, not by its name; the cases (a folder a
+  // failed cleanup really left, and a look-alike that is never removed) are in g-dr44b-cleanup.
 });
 
 describe("DR-44 (contract 73ec895): what the CLI does with the store's new answers", () => {

@@ -6,7 +6,8 @@
  *   message or a thrown error: every message is cut and has the key, its fragments and key-shaped
  *   strings removed before it leaves this module.
  * - A request carries only what the engine passed in `ModelRequest` (MaskedText) plus the fixed
- *   `TOOL_DEFINITIONS`. Thinking blocks the API returns are not echoed back on later requests.
+ *   `TOOL_DEFINITIONS` and, for `ModelRequest.workflowTools` (G-A), `WORKFLOW_TOOL_DEFINITIONS`
+ *   after them. Thinking blocks the API returns are not echoed back on later requests.
  *
  * Review fixes (decisions S-10 to S-12, 2026-11-12):
  * - Bodies are read as a byte stream and the read stops at a limit: 8 MiB for a success body
@@ -27,8 +28,10 @@ import {
   MAX_MODEL_LIST_PAGES,
   MAX_RETRIES_LIMIT,
   TOOL_DEFINITIONS,
+  WORKFLOW_TOOL_DEFINITIONS,
 } from "../../contracts/index.js";
 import type {
+  AnyToolName,
   AnthropicListSettings,
   AnthropicProviderDeps,
   CreateAnthropicProvider,
@@ -46,7 +49,6 @@ import type {
   ModelUsage,
   ResolvedAnthropicSettings,
   ToolCall,
-  ToolName,
 } from "../../contracts/index.js";
 
 /** Value of the `anthropic-version` header. */
@@ -379,9 +381,18 @@ function buildBody(settings: ResolvedAnthropicSettings, request: ModelRequest): 
   }
 
   const seen = new Set<string>();
-  const tools: { name: ToolName; description: string; input_schema: JsonObject }[] = [];
+  const tools: { name: AnyToolName; description: string; input_schema: JsonObject }[] = [];
   for (const name of request.tools) {
     const definition = TOOL_DEFINITIONS[name];
+    if (definition === undefined) return `tool ${JSON.stringify(String(name))} has no definition`;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    tools.push({ name, description: definition.description, input_schema: definition.inputSchema });
+  }
+  // G-A, GT-E1: workflow tools follow the built-in ones. Absent or empty: the body is exactly as
+  // before stage 4 (pinned by tests/unit/model/anthropic/g-workflow-tools.test.ts).
+  for (const name of request.workflowTools ?? []) {
+    const definition = Object.hasOwn(WORKFLOW_TOOL_DEFINITIONS, name) ? WORKFLOW_TOOL_DEFINITIONS[name] : undefined;
     if (definition === undefined) return `tool ${JSON.stringify(String(name))} has no definition`;
     if (seen.has(name)) continue;
     seen.add(name);

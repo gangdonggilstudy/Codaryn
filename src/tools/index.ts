@@ -41,6 +41,7 @@ import { inspectFiles, proposePlan } from "./workflow-tools.js";
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { PlanExecutorDeps } from "./plan-executor.js";
 export { MAX_INSPECT_WALK_ENTRIES } from "./workflow-tools.js";
+export { HARD_LINK_UNAVAILABLE_PROBLEM } from "./plan-files.js";
 export type { PlanFileOps } from "./plan-files.js";
 
 export {

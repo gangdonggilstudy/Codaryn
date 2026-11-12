@@ -46,6 +46,10 @@ export function pathKey(relative: string, platform: NodeJS.Platform): string {
 export interface PlanFileOps {
   lstat(target: string): Promise<BigIntStats>;
   link(existing: string, created: string): Promise<void>;
+  /**
+   * Not used by any move (DR-18 b: `rename` can replace a file). It stays in the interface so a
+   * test can replace it and show that it is never called.
+   */
   rename(from: string, to: string): Promise<void>;
   unlink(target: string): Promise<void>;
   /** Creates one directory; rejects with EEXIST when the name exists. */
@@ -283,51 +287,57 @@ export async function createParents(
   return null;
 }
 
-/** Codes from `link` that mean "no hard links here", not "this move cannot work". */
-const LINK_UNSUPPORTED = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK", "EINVAL", "EACCES"]);
-
-export type MoveOutcome = "moved" | "destination_exists" | "cross_device" | "io_error";
+/**
+ * DR-18 (b): the item problem for a move that stops because hard links cannot be used, so the
+ * file could only be moved by a rename that might replace one created in the meantime. The
+ * contract's own code for it is to be added by the contract owner (w3:p9); until then it is
+ * reported as `io_error`, and only this constant changes when the code exists.
+ */
+export const HARD_LINK_UNAVAILABLE_PROBLEM: PlanItemProblem = "io_error";
 
 /**
- * Renames a file without ever replacing an existing one and without copying.
- * 1. `link(from, to)` fails when `to` exists, then `unlink(from)`. Where hard links are not
- *    supported, or the source cannot be unlinked (a read-only file on Windows), the link is
- *    taken back and step 2 is used.
- * 2. Checks that nothing is at `to`, then `rename`. A file created at `to` between the check and
- *    the rename would be replaced; this window is the known limit of the fallback.
+ * Codes from `link` that mean "no hard links here" (FAT and exFAT volumes, some network shares,
+ * too many links), not "this move cannot work". EACCES is not one of them: a permission problem
+ * would stop any other way of moving too.
+ */
+const LINK_UNSUPPORTED = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK", "EINVAL"]);
+
+export type MoveOutcome = "moved" | "destination_exists" | "cross_device" | "no_hard_link" | "io_error";
+
+/**
+ * Moves a file without ever replacing an existing one and without copying: `link(from, to)`,
+ * which fails when anything exists at `to`, then `unlink(from)`.
+ *
+ * DR-18 (b), R-5 L-1: there is no other way. Node's `rename` replaces an existing file on every
+ * platform, so "check that nothing is there, then rename" would replace a file created between
+ * the two steps. Where hard links cannot be used the move stops as `no_hard_link` and nothing
+ * changes. Where the source cannot be unlinked after the link (a read-only file on Windows), the
+ * second name is taken back and the move stops as `io_error`.
+ *
+ * Hard links are also why a file inside the workspace that shares its content with a file
+ * outside (an existing hard link, R-5 I-1) can be moved: only the workspace name changes; the
+ * outside name and its content stay as they were.
  */
 export async function moveNoReplace(from: string, to: string, ops: PlanFileOps): Promise<MoveOutcome> {
-  let linked = false;
   try {
     await ops.link(from, to);
-    linked = true;
   } catch (error) {
     const code = errorCode(error);
     if (code === "EEXIST") return "destination_exists";
     if (code === "EXDEV") return "cross_device";
-    if (code === undefined || !LINK_UNSUPPORTED.has(code)) return "io_error";
+    if (code !== undefined && LINK_UNSUPPORTED.has(code)) return "no_hard_link";
+    return "io_error";
   }
-  if (linked) {
-    try {
-      await ops.unlink(from);
-      return "moved";
-    } catch {
-      try {
-        await ops.unlink(to);
-      } catch {
-        // Both names now point at the file. Nothing was lost; report it.
-        return "io_error";
-      }
-    }
-  }
-  const found = await exists(to, ops);
-  if (found === "io_error") return "io_error";
-  if (found) return "destination_exists";
   try {
-    await ops.rename(from, to);
+    await ops.unlink(from);
     return "moved";
-  } catch (error) {
-    return errorCode(error) === "EXDEV" ? "cross_device" : "io_error";
+  } catch {
+    try {
+      await ops.unlink(to);
+    } catch {
+      // Both names now point at the file. Nothing was lost; report it.
+    }
+    return "io_error";
   }
 }
 

@@ -38,6 +38,11 @@ export interface ModelRequest {
 
 export type ModelStop = "tool_calls" | "final" | "length";
 
+/**
+ * SP-1: `inputTokens` is the whole input, cached input read and written included; `outputTokens`
+ * is the whole output, reasoning tokens included. An adapter maps its provider's fields to this and
+ * never counts a part twice.
+ */
 export interface ModelUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -62,7 +67,7 @@ export const MODEL_ERROR_KINDS = [
   "auth_failed",
   /** HTTP 429 after the allowed retries. */
   "rate_limited",
-  /** HTTP 529 (or 503) after the allowed retries. */
+  /** The provider said it is overloaded (anthropic: HTTP 529 or 503), after the allowed retries. */
   "overloaded",
   /** A request did not finish within `requestTimeoutMs`, after the allowed retries. */
   "timeout",
@@ -73,7 +78,17 @@ export type ModelErrorKind = (typeof MODEL_ERROR_KINDS)[number];
 
 export type ModelOutcome =
   | { readonly ok: true; readonly response: ModelResponse }
-  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly kind: ModelErrorKind;
+      readonly message: string;
+      /**
+       * SP-1: the HTTP status when the failure is an HTTP response (after redirects were refused),
+       * absent for a connection failure, a timeout, a cancel or a check before sending. Adapters
+       * fill it from SP-3 on; until then it is absent.
+       */
+      readonly httpStatus?: number;
+    };
 
 export interface ModelProvider {
   readonly name: ModelProviderName;
@@ -82,11 +97,12 @@ export interface ModelProvider {
 }
 
 /**
- * Settings the CLI resolves before it creates the anthropic provider. Every field is set:
- * the CLI refuses to start (nothing is sent) when the key, the model or the output cap is missing.
+ * SP-1: settings the CLI resolves before it creates an API provider. Every field is set: the CLI
+ * refuses to start (nothing is sent) when the key, the model or the output cap is missing. The
+ * provider is chosen apart from these values (by the factory), until SP-4 adds it here.
  */
-export interface ResolvedAnthropicSettings {
-  /** From ANTHROPIC_API_KEY. Memory only: never logged, recorded, printed or put in an error message. */
+export interface ResolvedApiSettings {
+  /** From the provider's key variable (API_PROVIDERS). Memory only: never logged, recorded, printed or put in an error message. */
   readonly apiKey: string;
   readonly model: string;
   /** Sent as `max_tokens` on every request. */
@@ -97,18 +113,24 @@ export interface ResolvedAnthropicSettings {
   readonly maxRetries: number;
 }
 
+/** The settings of the Anthropic provider. SP-1: the same type under its first name. */
+export type ResolvedAnthropicSettings = ResolvedApiSettings;
+
 /** Injection points for tests. Defaults: the global `fetch` and a timer-based sleep. */
-export interface AnthropicProviderDeps {
+export interface ApiProviderDeps {
   readonly fetch?: typeof fetch;
   /** Waits between retries. Should end early when `signal` aborts. */
   readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
+/** SP-1: the same injection points under their first name. */
+export type AnthropicProviderDeps = ApiProviderDeps;
+
+/** SP-1: what every API provider's factory looks like. */
+export type CreateApiProvider = (settings: ResolvedApiSettings, deps?: ApiProviderDeps) => ModelProvider;
+
 /** Signature of `createAnthropicProvider`, exported by `src/model/anthropic/index.ts`. */
-export type CreateAnthropicProvider = (
-  settings: ResolvedAnthropicSettings,
-  deps?: AnthropicProviderDeps,
-) => ModelProvider;
+export type CreateAnthropicProvider = CreateApiProvider;
 
 /**
  * One model of the Anthropic Models API (Y-1): `GET /v1/models` and `GET /v1/models/{id}`, sent
@@ -129,12 +151,17 @@ export interface ModelInfo {
 }
 
 /** What listing needs: the resolved settings without a model or an output cap. */
-export type AnthropicListSettings = Pick<ResolvedAnthropicSettings, "apiKey" | "apiBaseUrl" | "requestTimeoutMs" | "maxRetries">;
+export type ListModelsSettings = Pick<ResolvedApiSettings, "apiKey" | "apiBaseUrl" | "requestTimeoutMs" | "maxRetries">;
+/** SP-1: the same type under its first name. */
+export type AnthropicListSettings = ListModelsSettings;
 
 export type ListModelsOutcome =
   | { readonly ok: true; readonly models: readonly ModelInfo[] }
-  /** Same kinds as a Messages request (`auth_failed`, `rate_limited`, `timeout`, `aborted`, ...). */
-  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string };
+  /** Same kinds as a model request (`auth_failed`, `rate_limited`, `timeout`, `aborted`, ...). */
+  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number };
+
+/** SP-1: what every API provider's model listing looks like (the Anthropic one is below). */
+export type ListModels = (settings: ListModelsSettings, deps?: ApiProviderDeps, signal?: AbortSignal) => Promise<ListModelsOutcome>;
 
 /** Most pages one listing reads. More is `api_error` (a bound on requests, not an expected size). */
 export const MAX_MODEL_LIST_PAGES = 20;
@@ -148,11 +175,7 @@ export const MAX_MODEL_LIST_PAGES = 20;
  * - The key goes into the `x-api-key` header only: never into a message, URL or log.
  * - An entry without a string `id` makes the whole listing `malformed_response`.
  */
-export type ListAnthropicModels = (
-  settings: AnthropicListSettings,
-  deps?: AnthropicProviderDeps,
-  signal?: AbortSignal,
-) => Promise<ListModelsOutcome>;
+export type ListAnthropicModels = ListModels;
 
 export const SCRIPT_SCHEMA_VERSION = 1;
 

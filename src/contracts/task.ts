@@ -7,6 +7,7 @@
  * Neither file ever contains secret values or API keys.
  */
 
+import type { ApiProviderName, MODEL_PROVIDER_NAMES } from "./config.js";
 import type { PlanActionKind, PlanMode } from "./plan.js";
 import type { AnyToolName } from "./tool.js";
 import type { VerifierConfig } from "./verify.js";
@@ -63,7 +64,8 @@ export interface ResolvedTaskSpec extends TaskSpec {
   readonly instructions?: string | null;
 }
 
-export type ModelProviderName = "scripted" | "anthropic";
+/** SP-1: the names in MODEL_PROVIDER_NAMES (config.ts). */
+export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];
 
 export type ModelConfig =
   | {
@@ -72,7 +74,8 @@ export type ModelConfig =
       readonly scriptPath: string;
     }
   | {
-      readonly provider: "anthropic";
+      /** SP-1: an API provider (API_PROVIDER_NAMES). */
+      readonly provider: ApiProviderName;
       /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
       readonly model?: string;
       /** Output token cap per request, at most MAX_OUTPUT_TOKENS_LIMIT. Overrides the config file's value. */

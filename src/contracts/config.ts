@@ -256,3 +256,53 @@ export const KEY_FIELD_NAMES = [
  * current ANTHROPIC_API_KEY value when it has at least 16 characters.
  */
 export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
+
+// ---------------------------------------------------------------------------------------------
+// SP-1 (docs/design/second-provider.md 4.1, DR-22, DR-31): one table of the API providers.
+
+/**
+ * The API providers, in the order help and lists show them. Anthropic only for now: the second
+ * one (`openai`, DR-31) is added with its adapter (SP-5). Readers take provider facts from
+ * API_PROVIDERS, never from a list of their own.
+ */
+export const API_PROVIDER_NAMES = ["anthropic"] as const;
+export type ApiProviderName = (typeof API_PROVIDER_NAMES)[number];
+
+/** Every model provider a task may name: the scripted one (tests, offline runs) and the API providers. */
+export const MODEL_PROVIDER_NAMES = ["scripted", ...API_PROVIDER_NAMES] as const;
+
+/** What the CLI needs to know about one API provider. */
+export interface ApiProviderSpec {
+  /** The environment variable the key is read from (the only place a key comes from). */
+  readonly keyEnv: string;
+  /** Key shapes to find in files, arguments and output (regular expression sources). */
+  readonly keyPatternSources: readonly string[];
+  /** Used when neither CODARYN_API_BASE_URL nor the config gives an address. */
+  readonly defaultApiBaseUrl: string;
+  /**
+   * How the address relates to the API path: `without_version` (the adapter adds `/v1/...`, so an
+   * address ending in `/v1` is refused, S-9) or `with_version` (the address includes the version).
+   */
+  readonly baseUrlPath: "without_version" | "with_version";
+  /** Largest `maxOutputTokens` accepted. */
+  readonly maxOutputTokensLimit: number;
+}
+
+/** The provider table. The Anthropic entry holds exactly the values the CLI used before it. */
+export const API_PROVIDERS = {
+  anthropic: {
+    keyEnv: ANTHROPIC_API_KEY_ENV,
+    keyPatternSources: [ANTHROPIC_KEY_PATTERN_SOURCE],
+    defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
+    baseUrlPath: "without_version",
+    maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+  },
+} as const satisfies { readonly [P in ApiProviderName]: ApiProviderSpec };
+
+/** Every API key variable. S-2 (generalised in SP-2) registers all of their values as secrets. */
+export const API_KEY_ENVS: readonly string[] = API_PROVIDER_NAMES.map((name) => API_PROVIDERS[name].keyEnv);
+
+/** Every key shape of every API provider, without repeats. */
+export const API_KEY_PATTERN_SOURCES: readonly string[] = [
+  ...new Set(API_PROVIDER_NAMES.flatMap((name) => API_PROVIDERS[name].keyPatternSources)),
+];

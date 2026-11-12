@@ -52,6 +52,32 @@ export interface RevertRequest {
   /** Real absolute path of the workspace root. */
   readonly workspaceRoot: string;
   readonly runId: string;
+  /**
+   * N-7: decide every file exactly as a revert would, and change nothing: no file is written,
+   * deleted or created, and no lock or record is taken or written. The outcome lists what would be
+   * reverted (`reverted`, with the action it would take) and what would be skipped. Absent: false.
+   */
+  readonly dryRun?: boolean;
+}
+
+/**
+ * N-7: `<root>/.codaryn/runs/<runId>/revert.json`, written by `codaryn revert` (not by a dry run)
+ * after `revertRun` returned, while the lock is still held. It replaces an earlier one, so it
+ * describes the latest revert. `listRuns` reads it to mark reverted runs. It never affects what
+ * `revertRun` decides.
+ */
+export const REVERT_RECORD_FILE_NAME = "revert.json";
+
+export interface RevertRecord {
+  readonly schemaVersion: 1;
+  readonly kind: "revert_record";
+  readonly runId: string;
+  /** When the revert finished, ISO 8601 UTC. */
+  readonly at: string;
+  readonly status: "complete" | "partial";
+  /** Number of files reverted and skipped. */
+  readonly reverted: number;
+  readonly skipped: number;
 }
 
 export type RevertAction = "restored" | "deleted";
@@ -63,7 +89,8 @@ export type RevertAction = "restored" | "deleted";
  * has no `file_changed` for it (the run stopped between the snapshot and the record), so the
  * state the run left is unknown and the file is not touched (T-10).
  */
-export type RevertSkipReason = "changed_since_run" | "missing_snapshot" | "io_error" | "missing_record";
+export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record"] as const;
+export type RevertSkipReason = (typeof REVERT_SKIP_REASONS)[number];
 
 /**
  * `path` is the path from the journal's `file_changed` record: relative to the workspace root,
@@ -109,5 +136,7 @@ export interface RevertOutcome {
  *   when the journal cannot be read or another line cannot be parsed, and then nothing was
  *   changed.
  * - The caller holds the workspace lock while it runs. Nothing is written to the run's journal.
+ * - With `dryRun` (N-7) the same decisions are made and reported, and nothing is changed; the
+ *   caller takes no lock. Errors are the same.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

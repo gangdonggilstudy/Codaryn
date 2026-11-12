@@ -329,7 +329,16 @@ async function originalOf(
   }
 }
 
-async function revertFile(change: ChangedPath, snapshots: Snapshots, workspace: Workspace | null): Promise<FileOutcome> {
+/** What a revert does with one file, decided without changing anything. */
+type FilePlan =
+  | { readonly action: RevertAction; readonly target: ResolvedPath; readonly text: RawText | null }
+  | { readonly reason: RevertSkipReason };
+
+/**
+ * The checks of a revert for one file. Reads only: nothing is written or removed. A real revert
+ * and a dry run (N-7) both decide here, so a dry run reports what the revert would do.
+ */
+async function planFile(change: ChangedPath, snapshots: Snapshots, workspace: Workspace | null): Promise<FilePlan> {
   // A masked path names a token, not the file, so it cannot be matched to a snapshot.
   if (TOKEN_FRAGMENT.test(change.path)) return { reason: "missing_snapshot" };
   const original = await originalOf(change, snapshots);
@@ -344,16 +353,22 @@ async function revertFile(change: ChangedPath, snapshots: Snapshots, workspace: 
   const current = await hashOf(resolved.path.absolute);
   if (current === undefined) return { reason: "io_error" };
   if (current !== change.after) return { reason: "changed_since_run" };
+  return { action: original.text === null ? "deleted" : "restored", target: resolved.path, text: original.text };
+}
 
-  if (original.text === null) {
+/** Carries out a plan. The hash is checked again right before the change. */
+async function applyPlan(change: ChangedPath, plan: FilePlan, workspace: Workspace | null): Promise<FileOutcome> {
+  if ("reason" in plan) return plan;
+  if (workspace === null) return { reason: "io_error" };
+  if (plan.text === null) {
     try {
-      await rm(resolved.path.absolute);
+      await rm(plan.target.absolute);
     } catch (error) {
       return { reason: errorCode(error) === "ENOENT" ? "changed_since_run" : "io_error" };
     }
     return { action: "deleted" };
   }
-  const written = await workspace.writeText({ path: resolved.path, expectedHash: change.after, text: original.text });
+  const written = await workspace.writeText({ path: plan.target, expectedHash: change.after, text: plan.text });
   if (written.ok) return { action: "restored" };
   return { reason: written.code === "conflict" ? "changed_since_run" : "io_error" };
 }
@@ -364,9 +379,14 @@ async function revertFile(change: ChangedPath, snapshots: Snapshots, workspace: 
  * (a cut-off last line excepted, T-10). Index paths without a record are `missing_record`.
  * Restores go through the workspace (links resolved, root and state directory enforced, atomic
  * replace that checks the hash again right before it). A deletion checks the hash right before it.
+ *
+ * `dryRun` (N-7): every file is decided the same way and nothing is changed: no file is written,
+ * deleted or created, and the state directory is not touched. A real revert decides every file
+ * again, so files changed in between are skipped then.
  */
 export const revertRun: RevertRun = async (request) => {
   const { workspaceRoot, runId } = request;
+  const dryRun = request.dryRun === true;
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
 
@@ -396,7 +416,8 @@ export const revertRun: RevertRun = async (request) => {
     for (const change of changes) {
       let outcome: FileOutcome;
       try {
-        outcome = await revertFile(change, snapshots, workspace);
+        const plan = await planFile(change, snapshots, workspace);
+        outcome = dryRun ? ("reason" in plan ? plan : { action: plan.action }) : await applyPlan(change, plan, workspace);
       } catch {
         outcome = { reason: "io_error" };
       }

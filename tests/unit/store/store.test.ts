@@ -19,6 +19,7 @@ import {
   releaseLock,
   writeResult,
 } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 /** Stand-in for `PrivacyGateway.mask` (PM decision P-5). The store itself never produces MaskedText. */
 function masked(text: string): MaskedText {
@@ -314,7 +315,7 @@ test("lock: a lock left by a dead process is reclaimed", async () => {
       const stale = { pid: exitedPid(), runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" };
       await writeFile(lockFile(root), `${JSON.stringify(stale)}\n`, "utf8");
 
-      const outcome = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock() });
+      const outcome = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock(), retryForMs: ACQUIRE_BUDGET_MS });
       reused = !outcome.ok && outcome.holder?.pid === stale.pid && alive(stale.pid) && attempt < 5;
       if (reused) return;
       assert.equal(outcome.ok, true);

@@ -13,6 +13,7 @@ import { after, describe, test } from "node:test";
 
 import type { Clock } from "../../../src/contracts/index.js";
 import { PROCESS_START_TOLERANCE_MS, acquireLock, processStartTime, releaseLock } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS, START_QUERY_BUDGET_MS } from "./lock-budget.js";
 
 const clock: Clock = { now: () => Date.UTC(2026, 0, 2, 3, 4, 5) };
 const roots: string[] = [];
@@ -54,6 +55,7 @@ describe("lock process start time (N-25 b)", () => {
       workspaceRoot: root,
       runId: "run-b",
       clock,
+      retryForMs: ACQUIRE_BUDGET_MS,
       isProcessAlive: (pid) => pid === REUSED_PID,
       processStartTime: async (pid) => {
         asked += 1;
@@ -100,7 +102,7 @@ describe("lock process start time (N-25 b)", () => {
     });
     assert.equal(held.ok, false, "a live pid holds an old-format lock");
     assert.equal(asked, 0);
-    const dead = await acquireLock({ workspaceRoot: root, runId: "run-f", clock, isProcessAlive: () => false, processStartTime: async () => null });
+    const dead = await acquireLock({ workspaceRoot: root, runId: "run-f", clock, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive: () => false, processStartTime: async () => null });
     assert.equal(dead.ok, true, "a dead pid's old-format lock is reclaimed as before");
   });
 
@@ -124,7 +126,7 @@ describe("lock process start time (N-25 b)", () => {
       workspaceRoot: root,
       runId: "run-h",
       clock,
-      retryForMs: 1_000,
+      retryForMs: ACQUIRE_BUDGET_MS,
       isProcessAlive: (pid) => pid === REUSED_PID,
       processStartTime: async (pid) => (pid === REUSED_PID ? HOLDER_START + 60_000 : null),
     });
@@ -140,7 +142,8 @@ describe("processStartTime on this system (N-25 b)", () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], { stdio: "ignore", windowsHide: true });
     try {
       assert.ok(child.pid !== undefined);
-      const started = await processStartTime(child.pid);
+      // Z-1: the real query, given the time a loaded machine needs (the default 5 s answers null then).
+      const started = await processStartTime(child.pid, { timeoutMs: START_QUERY_BUDGET_MS });
       const afterSpawn = Date.now();
       assert.ok(started !== null, "the start time of a running child is known");
       assert.ok(started >= before - PROCESS_START_TOLERANCE_MS && started <= afterSpawn + PROCESS_START_TOLERANCE_MS, `${started} in [${before}, ${afterSpawn}]`);
@@ -148,7 +151,18 @@ describe("processStartTime on this system (N-25 b)", () => {
       child.kill();
     }
     // Windows pids are multiples of 4 and far below this; POSIX pid_max is at most 2^22.
-    assert.equal(await processStartTime(2147483644), null);
+    assert.equal(await processStartTime(2147483644, { timeoutMs: START_QUERY_BUDGET_MS }), null);
+  });
+
+  test("Z-1: a query that takes longer than its timeout answers null (unknown), which keeps a lock held", async () => {
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], { stdio: "ignore", windowsHide: true });
+    try {
+      assert.ok(child.pid !== undefined);
+      // No system tool starts within 1 ms.
+      assert.equal(await processStartTime(child.pid, { timeoutMs: 1 }), null);
+    } finally {
+      child.kill();
+    }
   });
 
   test("Z-2 end to end: a lock naming a live unrelated process that started later is reclaimed with the real checks", async () => {
@@ -157,7 +171,15 @@ describe("processStartTime on this system (N-25 b)", () => {
     try {
       assert.ok(unrelated.pid !== undefined);
       await writeLock(root, { pid: unrelated.pid, runId: "crashed-run", startedAt: "2000-01-01T00:00:00.000Z", processStartedAt: "2000-01-01T00:00:00.000Z" });
-      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-i", clock });
+      // The real liveness and start-time checks; Z-1: the start-time query gets the time a loaded
+      // machine needs, since a null answer (timeout) rightly keeps the lock held.
+      const outcome = await acquireLock({
+        workspaceRoot: root,
+        runId: "run-i",
+        clock,
+        retryForMs: ACQUIRE_BUDGET_MS,
+        processStartTime: (pid) => processStartTime(pid, { timeoutMs: START_QUERY_BUDGET_MS }),
+      });
       assert.equal(outcome.ok, true, "the crashed run's lock is reclaimed although its pid is alive");
       await releaseLock({ workspaceRoot: root, runId: "run-i" });
 

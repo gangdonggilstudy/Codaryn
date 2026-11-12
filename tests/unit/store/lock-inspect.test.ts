@@ -12,6 +12,7 @@ import { describe, test } from "node:test";
 
 import { acquireLock, inspectLock, lockHolderAlive } from "../../../src/store/index.js";
 import type { LockInfo, LockLivenessOptions } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 const clock = { now: () => Date.UTC(2026, 10, 12, 6, 0, 0) };
 const LIVE_PID = 4_000_002;
@@ -48,8 +49,8 @@ async function snapshot(root: string): Promise<Record<string, string>> {
 
 /** What inspectLock says, that it changed nothing, and what acquireLock then does with the same liveness answers. */
 /**
- * `retryForMs`: a case that should acquire gets a budget that survives a loaded machine (it returns as
- * soon as it acquires); a case that should be refused needs none.
+ * `retryForMs`: a case that should acquire gets ACQUIRE_BUDGET_MS (Z-1; it returns as soon as it
+ * acquires); a case that should be refused needs none.
  */
 async function judged(root: string, liveness: LockLivenessOptions, retryForMs: number): Promise<{ state: string; acquired: boolean }> {
   const before = await snapshot(root);
@@ -116,7 +117,7 @@ describe("inspectLock judges as acquireLock does", () => {
     test(name, async () => {
       await withRoot(async (root) => {
         for (const [file, text] of Object.entries(files)) await writeFile(join(root, ".codaryn", file), text);
-        assert.deepEqual(await judged(root, liveness, acquired ? 5_000 : 100), { state, acquired });
+        assert.deepEqual(await judged(root, liveness, acquired ? ACQUIRE_BUDGET_MS : 100), { state, acquired });
       });
     });
   }

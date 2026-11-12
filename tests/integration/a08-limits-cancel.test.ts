@@ -178,9 +178,11 @@ test("A8 cancel while a command runs stops the child and the grandchild", { time
   );
   const childPid = Number(readFileSync(pidFile("child.pid"), "utf8"));
   const grandchildPid = Number(readFileSync(pidFile("grandchild.pid"), "utf8"));
+  // Only a process this test has not seen stop is killed. Once a pid is free, Windows may give it
+  // to another test's CLI within seconds (seen in the Z-1 pid logs), and killing it would end that run.
+  const seenStopped = new Set<number>();
   t.after(() => {
-    killQuietly(childPid);
-    killQuietly(grandchildPid);
+    for (const pid of [childPid, grandchildPid]) if (!seenStopped.has(pid)) killQuietly(pid);
   });
 
   writeFileSync(sb.cancelFile, "cancel");
@@ -195,10 +197,12 @@ test("A8 cancel while a command runs stops the child and the grandchild", { time
 
   await t.test("direct child process stopped", async () => {
     await waitFor(() => !isProcessAlive(childPid), 10_000, `child ${childPid} stopped`);
+    seenStopped.add(childPid);
   });
 
   await t.test("grandchild process stopped (process tree cleanup)", async () => {
     await waitFor(() => !isProcessAlive(grandchildPid), 10_000, `grandchild ${grandchildPid} stopped`);
+    seenStopped.add(grandchildPid);
     const before = readFileSync(pidFile("heartbeat.txt"), "utf8");
     await delay(1000);
     assert.equal(readFileSync(pidFile("heartbeat.txt"), "utf8"), before, "heartbeat must stop");

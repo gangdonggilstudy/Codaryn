@@ -207,7 +207,18 @@ test("G1-e T-4 작업 공간 안으로 풀리는 실행 파일(.exe)은 확장�
 });
 
 test("T-2 배경 프로세스를 남기고 끝나는 명령은 시간 초과로 보고되지 않는다", { timeout: 120_000 }, async (t) => {
+  // Added before createSandbox on purpose: after hooks run in the order they are added, and the
+  // sandbox removal ran first, deleted bg.pids and left the detached processes running (and the
+  // sandbox, which is their cwd). The processes exit by themselves after 30 s; past 25 s their
+  // pids are not killed, since a freed pid may by then belong to another test's process (Z-1).
+  let pidsFile: string | undefined;
+  const startedAt = Date.now();
+  t.after(() => {
+    if (pidsFile === undefined || !existsSync(pidsFile) || Date.now() - startedAt > 25_000) return;
+    for (const line of readFileSync(pidsFile, "utf8").split("\n")) if (line.trim() !== "") killQuietly(Number(line));
+  });
   const sb = createSandbox(t);
+  pidsFile = join(sb.workspace, "bg.pids");
   writeWorkspaceFile(sb, "README.md", "# 안\n");
   // Leaves a detached process that holds the inherited stdout and stderr for 30 s, then exits.
   writeWorkspaceFile(
@@ -223,11 +234,6 @@ test("T-2 배경 프로세스를 남기고 끝나는 명령은 시간 초과로 
       "",
     ].join("\n"),
   );
-  t.after(() => {
-    const file = join(sb.workspace, "bg.pids");
-    if (!existsSync(file)) return;
-    for (const line of readFileSync(file, "utf8").split("\n")) if (line.trim() !== "") killQuietly(Number(line));
-  });
   const taskPath = writeTask(
     sb,
     {

@@ -112,8 +112,8 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | w3:p9 | WORKING-sub | P4-G 범용 작업 워크플로 설계 | `claude-general` | `claude/general-tasks` | 배정 |
 | w3:pA | WORKING-sub | P5-A 어댑터 계약과 VS Code 확장 설계 | `claude-adapter` | `claude/adapter-contract` | 배정 |
 | w3:pB | WORKING-sub | P5-U 독립 GUI 설계 | `claude-gui` | `claude/gui-design` | 배정 |
-| w3:p3 | OPTIONAL | Codex 검증: N-A 계약 검토, 병합 전 합친 트리 재실행 | 읽기 전용 | — | 대상 대기 |
-| w3:p8 | OPTIONAL-sub | Codex 검증: Z-1 반복 재현 | `codex-verify`(분리 HEAD) | — | 배정 |
+| w3:p3 | OPTIONAL | Codex 검증: N-A 계약 검토 완료(`docs/reviews/2026-11-12-n-review-usability-contract.md`) | 읽기 전용 | — | 사용 한도로 정지. 15:43 초기화 뒤 다시 배정. 화면의 한도 증액 질문에는 답하지 않는다 |
+| w3:p8 | OPTIONAL-sub | Codex 검증: 반복 실행 4회 완료(실패는 `models` 연결이 없는 커밋 탓, Z-1 아님) | `codex-verify`(분리 HEAD) | — | 사용 한도로 정지. 15:43 초기화 뒤 다시 배정 |
 
 세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 원격에 남은 이전 브랜치 `claude/core-engine`(정지 전 w1:p1)은 worktree 없이 보존한다. 이전 초안 브랜치도 삭제하지 않는다.
 

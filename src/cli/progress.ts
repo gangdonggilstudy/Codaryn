@@ -10,6 +10,7 @@
 
 import { TOOL_NAMES } from "../contracts/index.js";
 import type { Journal, JournalEvent, PrivacyGateway } from "../contracts/index.js";
+import { createFailedCalls } from "./failed-calls.js";
 import { cleanText, safeToken } from "./text-safety.js";
 
 export const PROGRESS_PREFIX = "codaryn: ";
@@ -55,6 +56,22 @@ export function narrowingLines(event: JournalEvent): string[] {
   });
 }
 
+/**
+ * U-18 (AXM-4): the English lines of one run, records in journal order: progressLines', and for a
+ * call that was allowed and then failed (failed-calls.ts) a line with its tool error code. Each
+ * call gives its own state (the calls denied so far), so give each run its own.
+ */
+export function englishProgressLines(): (event: JournalEvent) => string[] {
+  const failed = createFailedCalls();
+  return (event) => {
+    const lines = progressLines(event);
+    if (failed.observe(event) && event.type === "tool_result") {
+      lines.unshift(`tool ${toolName(event.result.tool)}: failed (${safeToken(event.result.errorCode ?? "none")})`);
+    }
+    return lines;
+  };
+}
+
 /** The lines for one record, without the prefix: progressLine's, then the narrowings at the start. */
 export function progressLines(event: JournalEvent): string[] {
   const line = progressLine(event);
@@ -91,6 +108,7 @@ export function progressLine(event: JournalEvent): string | null {
     case "run_finished":
       return `finished: ${safeToken(event.status)} (${safeToken(event.reason)})`;
     case "model_response":
+    // U-18: a failed call's result needs the run's earlier decisions (englishProgressLines).
     case "tool_result":
       return null;
   }
@@ -106,9 +124,10 @@ export function withProgress(
   write: (line: string) => void,
   /**
    * N-5: the human renderer's `progressLine` in the chosen language; the English lines above
-   * otherwise. DR-43 (b): it may give several lines for one record, each written on its own.
+   * otherwise (one state per journal, U-18). DR-43 (b): it may give several lines for one record,
+   * each written on its own.
    */
-  render: (event: JournalEvent) => string | readonly string[] | null = progressLines,
+  render: (event: JournalEvent) => string | readonly string[] | null = englishProgressLines(),
 ): Journal {
   return {
     async append(event) {

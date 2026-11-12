@@ -187,7 +187,7 @@ function runArgsOf(form: TaskFormArgs, cancelFile: string | null, quiet: boolean
 }
 
 function notes(): RunNotes {
-  return { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+  return { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
 }
 
 async function exists(target: string): Promise<boolean> {

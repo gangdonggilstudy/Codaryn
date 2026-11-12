@@ -133,10 +133,39 @@ function lines(out: readonly string[]): string {
 
 export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): HumanOutput => {
   const verifierNumbers = new Map<string, number>();
+  // U-18 (AXM-4): the calls of this run with a decision that was not allowed. Such a call is a denied
+  // call only (its decision is its line); its failed result is not told again.
+  const deniedCalls = new Set<string>();
 
   // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
     isOneOf<AnyToolName>(name, ALL_TOOL_NAMES) ? catalog.format(`tool.${name}`) : catalog.format("progress.unknown_tool");
+
+  /**
+   * U-18 (AXM-4, PM Q-1 (a), Q-2 (a)): what became of a call, by the rule at
+   * RunSummaryContext.failedToolCalls. A failed result of a call with no "not allowed" decision is a
+   * failed call (`progress.tool_failed`, its tool error code). A `run_command` result that is ok but
+   * timed out, or else exited with a code other than 0, has its line; not a failed call. A result
+   * that succeeded, content that does not parse, an exit code that is not a count, or a null exit
+   * code without a timeout (a stopped command): no line.
+   */
+  const resultLine = (told: { readonly callId?: unknown; readonly tool?: unknown; readonly ok?: unknown; readonly content?: unknown; readonly errorCode?: unknown }): string | null => {
+    if (told.ok === false) {
+      if (deniedCalls.has(String(told.callId))) return null;
+      return isOneOf(told.errorCode, TOOL_ERROR_CODES) ? catalog.format("progress.tool_failed", { tool: toolText(String(told.tool)), code: told.errorCode }) : null;
+    }
+    if (told.ok !== true || told.tool !== "run_command" || typeof told.content !== "string") return null;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(told.content);
+    } catch {
+      return null;
+    }
+    if (typeof payload !== "object" || payload === null) return null;
+    const { exitCode, timedOut } = payload as { readonly exitCode?: unknown; readonly timedOut?: unknown };
+    if (timedOut === true) return catalog.format("progress.command_timed_out");
+    return isCount(exitCode, 1) ? catalog.format("progress.command_exited", { exitCode }) : null;
+  };
 
   // U-16, R-55b M-1b: a plan run's words in the run list by what became of its apply (planApplyStateOf).
   // An unfinished apply names its reason; without one (the list pairs them, so not expected) it is `?`.
@@ -260,6 +289,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
+      // The field is optional: absent (a caller that does not count them) is 0, no line.
+      const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
+      if (failed > 0) out.push(catalog.format("summary.failed", { count: failed }));
       // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
       // it points where the run's policy came from.
       if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
@@ -344,6 +377,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
               : null;
           break;
         case "tool_decision": {
+          if (event.allowed === false) deniedCalls.add(String(event.callId));
           const tool = toolText(event.tool);
           const name = isOneOf<AnyToolName>(event.tool, ALL_TOOL_NAMES) ? event.tool : "?";
           if (event.allowed) {
@@ -402,8 +436,12 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = pair === null ? null : catalog.format("progress.finished", { status: catalog.format(`status.${pair.status}`), reason: pair.reason });
           break;
         }
+        case "tool_result": {
+          const told: unknown = event.result;
+          line = typeof told === "object" && told !== null ? resultLine(told) : null;
+          break;
+        }
         case "model_response":
-        case "tool_result":
           line = null;
           break;
         default:

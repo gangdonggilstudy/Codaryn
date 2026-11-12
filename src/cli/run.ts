@@ -70,6 +70,7 @@ import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js
 import { jsonSyntaxPosition } from "./json-position.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "./run-id.js";
+import { createFailedCalls } from "./failed-calls.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import {
   MAX_KEY_SCAN_DEPTH,
@@ -166,6 +167,8 @@ export interface RunNotes {
   deniedToolCalls: number;
   /** N-23: the denied calls whose permission is `command`. */
   deniedCommandCalls: number;
+  /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
+  failedToolCalls: number;
 }
 
 export interface CliRunOutcome {
@@ -359,7 +362,7 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const parsed = parseArgs(io.argv);
   if (!parsed.ok) return error("invalid_arguments", parsed.message);
   const args = parsed.args;
-  const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+  const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
   const outcome = await runParsed(io, args, notes);
   return { ...outcome, info: { configLanguage: notes.configLanguage, summary: summaryContext(args, notes), quiet: args.quiet } };
 }
@@ -372,6 +375,7 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     profileApplied: args.profile !== null,
     deniedToolCalls: notes.deniedToolCalls,
     deniedCommandCalls: notes.deniedCommandCalls,
+    failedToolCalls: notes.failedToolCalls,
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -755,9 +759,12 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     const assembled = await io.assemble({ task, runId, model: watchedModel, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
     const recorded = assembled.deps.journal;
+    // U-18: the calls allowed and then failed, counted as the records are written.
+    const failed = createFailedCalls();
     const watched: Journal = {
       async append(event) {
         await recorded.append(event);
+        if (failed.observe(event)) notes.failedToolCalls += 1;
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;

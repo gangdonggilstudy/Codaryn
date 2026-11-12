@@ -155,6 +155,19 @@
 
 - 실행 전 오류의 stderr는 `assertHumanError`로 모양만 본다(코드 괄호, 스택·예외 문구 없음, 같은 줄 반복 없음, 경로·값 없음). `--quiet`이면 비어 있다(`s01`).
 
+## 범용 작업 (`n06`~`n08`, G-G)
+
+[범용 작업 설계](../../docs/design/general-tasks.md) 10.2절과 G-A 계약(`src/contracts/plan.ts`, `workflow.ts`, `verify.ts`), DR-5·DR-9·DR-12·DR-17·DR-24를 실제 CLI 프로세스로 확인한다. 대본 모델이고, F 계열만 가짜 서버(모의 API)다. 기대 배치는 `fixtures/general-tasks.ts`의 `afterActions`, 집계 기대값은 손으로 계산한 `SALES_BY_REGION`이다. 도우미는 `support/general.ts`.
+
+| 사례 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| 파일 정리(GI-02~05, C05~C10, R-9) | `n06-organize` | 계획 실행 `plan_pending`(작업 공간 무변경) → `plan`(다이제스트·행동·원본 해시) → `apply --digest`(inventory 통과, 판정 기준과 같은 배치, 보관함 이름은 순번, `applied.json`, `apply_started`부터 시작하는 기록) → 다시 적용 `plan_already_applied` → `revert`(역순, 원래 바이트) → 다시 `already_reverted`. 승인 거부 4종, 오래된 계획 5종(`plan_stale`, 무변경), 계획 단계의 쓰기·명령, 거부 계획 14종, 동시 적용, 적용 뒤 사용자 변경, 계획 아닌 실행·변조, 비밀 이름 가림. R-9: 보관함 정션과 적용 뒤 바뀐 `plan.json`으로 밖 파일·다른 경로를 건드리지 않음 |
+| 자료 분석(GI-06·07, D03~D05) | `n07-analyze` | `data_checks` 통과 → `awaiting_review` → `review --task`(review.json만, 결과·기록 그대로) → report에 판정 → `--reject`로 교체. 틀린 합계 → 근거는 비교한 수만 → 재수정. 숫자 아닌 원본 → `verifier_inconclusive`. review 오류 4종. 원본 칸의 비밀 |
+| 정의·문서·모의 API(GI-01, GI-08, A02~A05, B01·B02, F01·F02) | `n08-workflows` | 사용자 설정에만 등록한 정의로 실행(엔진 변경 없음), 도구 줄이기, 해석 오류 8종(실행 전, 값 미출력), 지시문 비밀 가림, 프로필의 `workflowRef`, 검증기 없는 정의 `no_verifier`, 내장 document, 옛 task의 기록. 모의 API: organize 요청의 도구 묶음과 스키마, 지시문은 system에만 |
+
+- task 파일은 `policy`와 `verifiers`를 반드시 적으므로 정의의 정책·검증기 기본값은 간편 형식에만 쓰인다. 그래서 organize task는 `planActions`를 직접 적는다(`writeOrganizeTask`).
+- 하드 링크가 없는 볼륨에서의 동의 없는 이동 중단(DR-21, `consent_required`)은 이 기계(NTFS)에서 재현할 수 없어 통합 사례로 두지 않는다. 읽기 전용 원본도 정상 이동됨을 확인했다. 도구·store 유닛이 맡는다.
+
 ## 진단 (Z-1)
 
 - 단언 메시지(`parseCliOutput`, `parseCommandOutput`)는 종료 코드, 신호, 소요 시간, pid, stdout·stderr 앞부분을 담는다(`describeRun`).

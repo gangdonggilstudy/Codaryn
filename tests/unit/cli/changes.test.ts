@@ -153,8 +153,11 @@ describe("runChanges", () => {
     assert.equal((outcome as { result: EngineResult }).result.status, "done");
 
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", "latest"], env: {}, app }));
-    assert.match(shown, /== README\.md: changed by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)/);
-    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)/);
+    // DR-29: the reason is given once; each file has its path and state only.
+    assert.match(shown, /paths and states only: .*\(DR-29\)\n/);
+    assert.match(shown, /== README\.md: changed by the run; as the run left it\n/);
+    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n/);
+    assert.equal(shown.includes("(masking_unverified)"), false);
     assert.equal(shown.includes(FAKE_SECRET), false);
   });
 });

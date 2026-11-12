@@ -902,13 +902,23 @@ codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note 
   - 키 모양이 있으면 `key_in_file`
   - 나머지는 지금 비밀로 가려서 저장한다.
 
-### 18.6 `codaryn changes` (DR-7, DR-14)
+### 18.6 `codaryn changes` (DR-7, DR-14, DR-29)
 
 ```
-codaryn changes <task 형식> --run <runId|latest> [--json]
+codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--config <config.json>] [--vars-file <path>] --run <runId|latest> [--json]
 ```
 
-- 실행이 바꾼 파일마다 상태, 실행 전후 내용, 바뀐 구역(`-`/`+` 줄)을 보여 준다. 지금 비밀로 가린다(`masking: "current_secrets"`).
+- 인자: `--workflow`는 받지 않는다(앱 계층 `TaskForm`과 같다, 18.2).
+- 실행이 바꾼 파일마다 아래를 보인다.
+  - 경로: 실행의 기록에 남은 가린 경로를 지금 비밀로 한 번 더 가린 것(`masking: "current_secrets"`)
+  - 실행이 만든 파일인지
+  - 상태: `as_run_left`, `changed_since_run`, `missing`, `unknown`
+- DR-29(검토 R-11과 같은 구조)
+  - 파일 글(실행 전후 내용과 바뀐 구역)은 실행이 그 글을 어떻게 가렸는지 기록했을 때만 보인다. 지금은 실행이 그것을 기록하지 않으므로 글을 내지 않는다.
+  - `--json`에서는 `before`·`after`가 `null`이고 `unavailable: "masking_unverified"`다.
+  - 글 출력은 그 이유를 한 번 말하고, 파일마다 경로와 상태만 보인다.
+  - 다른 이유(`masked_path`: 경로에 가림 토큰이 있음, `snapshot_missing`, `not_text`, `too_large` 등)는 파일마다 보인다.
+  - 실행이 글의 가림을 기록하게 되면(계약·store) 바뀐 구역(`-`/`+` 줄)을 다시 보인다.
 - 읽기만 한다. 잠금도, 요청도 하지 않는다.
 - `--json`은 `ChangesOutput` ASCII 한 줄이다(N-19). 키 모양은 JSON으로 만들기 전에 문자열마다 가린다(N-27 (c)).
 

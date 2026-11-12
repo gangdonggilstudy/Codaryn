@@ -7,6 +7,10 @@
  *   no key, model or run limits), so nothing here decides what is a secret.
  * - U-16 (UXM-4): an apply run's view carries `applyRun` (its plan run and the actions it applied,
  *   from the run list), since its moves and discards are no file writes of its own.
+ * - U-43 (DR-38): a run with a records-changed mark carries `recordsChanged: true`, judged by the
+ *   store's hasRecordsChangedMark (as `report` and `revert` judge it); a mark that cannot be checked
+ *   counts (fail closed). The store gives such a run no `shown` record, so its files have their path
+ *   and state only (`masking_unverified`); the mark says why.
  * - The run: judged first as the run list, `report` and `revert` judge it (R-14 L-1). Its changed
  *   paths, originals and DR-29 record come from the store's `readRunOriginals` (DR-14: it replaced
  *   this module's own reading of the snapshot layout) with the same checks `revertRun` applies.
@@ -36,7 +40,7 @@ import {
   maskedPartsEncoding,
 } from "../contracts/index.js";
 import type { ChangeNow, ChangesApplyRun, ContentHash, ListRuns, MaskedText, PrivacyGateway, ReadRunOriginals, RunOriginal } from "../contracts/index.js";
-import { RevertRunError, inspectRun, listRuns, readRunOriginals } from "../store/index.js";
+import { RevertRunError, hasRecordsChangedMark, inspectRun, listRuns, readRunOriginals } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
@@ -57,6 +61,8 @@ export interface ReadChangesDeps {
   readonly readOriginals?: ReadRunOriginals;
   /** U-16: the store's run list, which says whether the run is an apply run and of which plan run. */
   readonly listRuns?: ListRuns;
+  /** U-43: the store's records-changed mark check (hasRecordsChangedMark). */
+  readonly recordsChanged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
 
 /**
@@ -195,5 +201,24 @@ export async function readChanges(
   } catch {
     return { ok: false, error: appError("invalid_run_record", "the run list cannot be read") };
   }
-  return { ok: true, output: { schemaVersion: 1, kind: "changes", runId, exitCode: 0, masking: "current_secrets", files, ...(applyRun === null ? {} : { applyRun }) } };
+  // U-43 (DR-38): a mark that cannot be checked counts as one (fail closed), as the store judges it.
+  let marked: boolean;
+  try {
+    marked = await (deps.recordsChanged ?? hasRecordsChangedMark)(workspace.root, runId);
+  } catch {
+    marked = true;
+  }
+  return {
+    ok: true,
+    output: {
+      schemaVersion: 1,
+      kind: "changes",
+      runId,
+      exitCode: 0,
+      masking: "current_secrets",
+      files,
+      ...(applyRun === null ? {} : { applyRun }),
+      ...(marked ? { recordsChanged: true as const } : {}),
+    },
+  };
 }

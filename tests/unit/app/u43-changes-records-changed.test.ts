@@ -7,8 +7,8 @@
  * hasRecordsChangedMark (the one `report` and `revert` use; a mark that cannot be checked counts,
  * fail closed), and nothing for a run without one. The CLI's `changes --json` prints the app's
  * output, so it carries it too.
- * Reproduced first (todo until the output carries it). Real runs through the app (scripted model),
- * the real store. Fake values only.
+ * Reproduced first (dd1980f, todo); the output carries it now. Real runs through the app (scripted
+ * model), the real store. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -24,15 +24,10 @@ import { runChanges } from "../../../src/cli/changes.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { WRITE_NOTES, appEnvironment, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-43: the app layer's changes output does not carry recordsChanged yet" };
-
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
   return (outcome as { output: T }).output;
 }
-
-/** The output's recordsChanged field, whatever its type says. */
-const markOf = (output: ChangesOutput): unknown => (output as unknown as Record<string, unknown>)["recordsChanged"];
 
 /** A finished run that created NOTES.md, through the app; `marked` writes a records-changed mark afterwards. */
 async function finishedRun(marked: boolean): Promise<{ base: string; app: CodarynApp; runId: string }> {
@@ -46,10 +41,10 @@ async function finishedRun(marked: boolean): Promise<{ base: string; app: Codary
 }
 
 describe("U-43 (DR-38): changes says when the run has a records-changed mark", () => {
-  test("a marked run: recordsChanged is true", TODO, async () => {
+  test("a marked run: recordsChanged is true", async () => {
     const run = await finishedRun(true);
     const output = ok<ChangesOutput>(await run.app.changes({ settings: taskForm(run.base), runId: run.runId }));
-    assert.equal(markOf(output), true);
+    assert.equal(output.recordsChanged, true);
   });
 
   test("a marked run: its paths and states are listed, no text (as before)", async () => {
@@ -68,14 +63,14 @@ describe("U-43 (DR-38): changes says when the run has a records-changed mark", (
     assert.equal(output.files[0]?.after, "# Notes\n");
   });
 
-  test("a mark that cannot be checked counts as one (fail closed)", TODO, async () => {
+  test("a mark that cannot be checked counts as one (fail closed)", async () => {
     const run = await finishedRun(false);
-    const deps = { recordsChanged: async () => Promise.reject(new Error("cannot be checked")) } as unknown as ReadChangesDeps;
+    const deps = { recordsChanged: async () => Promise.reject(new Error("cannot be checked")) } satisfies ReadChangesDeps;
     const output = ok<ChangesOutput>(await readChanges(path.join(run.base, "work"), run.runId, createPrivacyGateway({ secrets: [] }), deps));
-    assert.equal(markOf(output), true);
+    assert.equal(output.recordsChanged, true);
   });
 
-  test("the CLI's changes --json prints it, as the app gives it", TODO, async () => {
+  test("the CLI's changes --json prints it, as the app gives it", async () => {
     const run = await finishedRun(true);
     const outcome = await runChanges({ argv: ["changes", "--task", path.join(run.base, "task.json"), "--run", run.runId, "--json"], env: {}, app: run.app });
     assert.ok("text" in outcome, JSON.stringify(outcome));

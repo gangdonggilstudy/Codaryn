@@ -994,7 +994,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         answered.set(call.id, handled);
         results.push(handled);
         // GT-E3: a stored plan ends the run. Later calls of this turn are not run.
-        if (proposedPlan !== null) return PLAN_PENDING;
+        // DR-18 (c): a cancel or the duration limit that came while the plan was stored wins; the
+        // run then ends without EngineResult.plan, so its plan.json cannot be applied.
+        if (proposedPlan !== null) return interrupted() ?? PLAN_PENDING;
       }
       messages.push({ role: "tool", results });
     }

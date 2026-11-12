@@ -68,6 +68,8 @@ export type JournalEvent =
       readonly text: MaskedText;
       readonly toolCalls: readonly MaskedToolCall[];
       readonly usage: ModelUsage | null;
+      /** SP-5, DR-31 (c): the count of reasoning items the provider returned (ModelResponse.reasoningItems); never their content. Absent when none were reported. */
+      readonly reasoningItems?: number;
     }
   | {
       readonly type: "model_error";

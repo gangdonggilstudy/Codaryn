@@ -129,6 +129,15 @@ export interface ApplyRecorders {
 export type CreateApplyRecorders = (options: ApplyRecordersOptions) => ApplyRecorders;
 
 /**
+ * U-29 (R-44 R44-L1): signature of `stateUncheckedSince`, exported by `src/store/index.ts`. Whether
+ * the plan run, or a run or apply run whose id sorts after it, recorded a state check that was
+ * limited (`state_checked` with `limited: true`) in its journal, or has a journal that cannot be read
+ * (fail closed): such a run may have changed the plan run's records without a records-changed mark.
+ * Reads only. The CLI passes it as ApplyDeps.planRecordsUnchecked.
+ */
+export type StateUncheckedSince = (request: { readonly workspaceRoot: string; readonly planRunId: string }) => Promise<boolean>;
+
+/**
  * `runs/<runId>/records-changed.json`: the run's records were changed by something other than the
  * run that wrote them. Created exclusively; a later detection replaces it with the joined list.
  * How the views treat a marked run (DR-38 P-3, DR-39 P-5):

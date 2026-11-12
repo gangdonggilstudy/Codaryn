@@ -3,7 +3,8 @@
  * - At a terminal the person reads the human text on stderr, so the JSON line after it is left out
  *   of stdout. With `--json`, or when stdout is not a terminal (a pipe or a file), stdout carries
  *   exactly what it did before. `run`, `revert` and `apply` take `--json` for that.
- * - `codaryn` with no arguments shows the help (as `--help`, exit 0) instead of invalid_arguments.
+ * - `codaryn` with no arguments at a terminal shows the help (as `--help`, exit 0) instead of
+ *   invalid_arguments; through a pipe or into a file it stays invalid_arguments (PM answer, DR-48).
  * The real CLI under the net guard, scripted model, nothing is sent. "At a terminal" is made by a
  * preload that marks the child's stdout as a terminal (process.stdout.isTTY); the product reads no
  * switch of its own for it. The decision itself (guard.ts stdoutText) is tested with the terminal
@@ -20,7 +21,7 @@ import { after, describe, test } from "node:test";
 
 import { RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { ApplyResult, CliErrorOutput, EngineResult, RevertOutput } from "../../../src/contracts/index.js";
-import { APPLY_USAGE, REVERT_USAGE, RUN_USAGE, parseApplyArgs, parseArgs, parseRevertArgs } from "../../../src/cli/args.js";
+import { APPLY_USAGE, REVERT_USAGE, RUN_USAGE, USAGE, parseApplyArgs, parseArgs, parseRevertArgs } from "../../../src/cli/args.js";
 import { jsonLineLeftOut, renderOutcome, stdoutText } from "../../../src/cli/guard.js";
 import type { CommandOutcome } from "../../../src/cli/guard.js";
 import { helpRequest, helpText } from "../../../src/cli/help.js";
@@ -266,17 +267,29 @@ describe("U-23 (DR-49): run, revert and apply take --json and nothing else chang
   });
 });
 
-describe("U-23 (DR-49, UXM-9): codaryn with no arguments shows the help", () => {
-  test("helpRequest: no arguments is a help request for the whole CLI", () => {
-    assert.deepEqual(helpRequest([]), { kind: "help", command: null });
+// PM answer to U-23 (b): the help only at a terminal; through a pipe or into a file it stays
+// invalid_arguments, exit 2, with the same characters (DR-48: what a script reads is not changed).
+describe("U-23 (DR-49, UXM-9): codaryn with no arguments shows the help at a terminal", () => {
+  test("helpRequest: no arguments is a help request only when stdout is a terminal (injected)", () => {
+    assert.deepEqual(helpRequest([], { stdoutIsTerminal: true }), { kind: "help", command: null });
+    assert.equal(helpRequest([], { stdoutIsTerminal: false }), null);
+    assert.equal(helpRequest([]), null, "without the context: as before");
   });
 
-  test("the real CLI: the same text as --help on stdout, exit 0, nothing on stderr, at a terminal and through a pipe", async () => {
+  test("the real CLI at a terminal: the same text as --help on stdout, exit 0, nothing on stderr", async () => {
     const ws = await workspace();
-    for (const terminal of [true, false]) {
-      const bare = ws.cli([], terminal);
-      const help = ws.cli(["--help"], terminal);
-      assert.deepEqual([bare.status, bare.stdout, bare.stderr], [0, help.stdout, ""], bare.stdout + bare.stderr);
-    }
+    const bare = ws.cli([], true);
+    const help = ws.cli(["--help"], true);
+    assert.deepEqual([bare.status, bare.stdout, bare.stderr], [0, help.stdout, ""], bare.stdout + bare.stderr);
+  });
+
+  test("the real CLI through a pipe: invalid_arguments, exit 2, stdout exactly as before", async () => {
+    const ws = await workspace();
+    const bare = ws.cli([], false);
+    const parsed = parseArgs([]);
+    assert.ok(!parsed.ok && parsed.message === USAGE);
+    assert.equal(bare.status, 2, bare.stderr);
+    assert.equal(bare.stdout, renderOutcome(cliError("invalid_arguments", USAGE)));
+    assert.ok(bare.stderr.includes("invalid_arguments"), bare.stderr);
   });
 });

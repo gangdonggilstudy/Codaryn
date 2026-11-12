@@ -1,6 +1,6 @@
 /**
  * `codaryn --help`, `codaryn help [command]`, `codaryn <command> --help` and `codaryn --version`
- * (U-7, N-21), and `codaryn` with no arguments (DR-49). Plain text on stdout, exit code 0. Nothing is read except package.json for the
+ * (U-7, N-21), and `codaryn` with no arguments at a terminal (DR-49). Plain text on stdout, exit code 0. Nothing is read except package.json for the
  * version. The usage lines (command syntax) stay English; every description comes from the
  * message catalog in the chosen language.
  */
@@ -136,10 +136,17 @@ export function versionText(version: string | null): string {
   return version === null ? "codaryn (version unknown)\n" : `codaryn ${version}\n`;
 }
 
-/** What the arguments ask for when it is help or the version; null for a normal command. */
-export function helpRequest(argv: readonly string[]): { kind: "help"; command: CommandName | null } | { kind: "version" } | null {
-  // DR-49 (U-23, UXM-9): `codaryn` alone is not an error; it shows the help, as `--help` does.
-  if (argv.length === 0) return { kind: "help", command: null };
+/**
+ * What the arguments ask for when it is help or the version; null for a normal command.
+ * DR-49 (U-23, UXM-9, PM answer): `codaryn` alone at a terminal (`stdoutIsTerminal`) shows the help,
+ * as `--help` does. Otherwise (a pipe or a file, or no context given) it stays invalid_arguments as
+ * before: what a script reads is not changed (DR-48).
+ */
+export function helpRequest(
+  argv: readonly string[],
+  context: { readonly stdoutIsTerminal: boolean } = { stdoutIsTerminal: false },
+): { kind: "help"; command: CommandName | null } | { kind: "version" } | null {
+  if (argv.length === 0) return context.stdoutIsTerminal ? { kind: "help", command: null } : null;
   const [first, ...rest] = argv;
   if (first === "--version" || first === "-v" || first === "version") return rest.length === 0 ? { kind: "version" } : null;
   if (first === "--help" || first === "-h" || first === "help") {

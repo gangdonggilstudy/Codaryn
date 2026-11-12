@@ -5,7 +5,8 @@
  * for `report`, `doctor`, `models`, `runs`, `init`, `--help` and `--version` (`--json` makes
  * report, doctor, models, runs and init print JSON). Every JSON line is ASCII (N-19).
  * DR-49 (U-23): at a terminal, without `--json` or `--quiet`, the JSON line is left out (the human
- * text on stderr says it); `codaryn` with no arguments shows the help.
+ * text on stderr says it); `codaryn` with no arguments shows the help (through a pipe or into a
+ * file it stays invalid_arguments, as before).
  *
  * Human-readable output goes to stderr in the chosen language (N-4, N-5): an explained error for
  * every CliErrorOutput, the progress lines and end summary of `run`, the summary of `revert`, the
@@ -160,7 +161,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
   const home = homeDirectory();
   const defaultConfig = findDefaultConfigLocation(process.platform, process.env, home);
   const defaultRefused = defaultLocationRefused(process.platform, process.env, home);
-  const asked = helpRequest(argv);
+  // DR-49 (U-23): `codaryn` alone shows the help only at a terminal.
+  const asked = helpRequest(argv, { stdoutIsTerminal: process.stdout.isTTY === true });
   if (asked !== null) {
     if (asked.kind === "version") return plain({ text: versionText(info?.version ?? null), exitCode: 0 });
     return plain({ text: helpText(asked.command, humanFor(null).messages), exitCode: 0 });

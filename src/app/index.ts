@@ -14,6 +14,8 @@ export { applyArguments, applyJournalWithEvents, taskFormArguments } from "./app
 export { planArguments, reviewArguments } from "./plans.js";
 export { profileWorkflowsOf } from "./settings.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
+export { MODEL_TEXT_MAX_ROWS, modelTextRows } from "./model-text.js";
+export type { ModelTextOptions } from "./model-text.js";
 export type {
   AppliedActionRecord,
   ApplyJournalEvent,

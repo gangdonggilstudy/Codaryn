@@ -115,7 +115,7 @@ describe("changedRegion and renderChanges", () => {
 
   // U-16 (UXM-4): an apply run's moves and discards are its plan's actions, not file writes of its
   // own; its view says what it applied (changes.apply_run) instead of "no file changed".
-  test("an apply run's text says which plan run it applied and how many actions, not no file", { todo: "U-16: wait for renderChanges to say an apply run" }, () => {
+  test("an apply run's text says which plan run it applied and how many actions, not no file", () => {
     const view: ChangesOutput = { ...VIEW, files: [], applyRun: { planRunId: "20261112T010000Z-0f0e0d0c" as never, actions: 3 } };
     const shown = renderChanges(view);
     assert.doesNotMatch(shown, /the run changed no file/);

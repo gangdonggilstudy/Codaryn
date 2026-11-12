@@ -19,6 +19,8 @@
  */
 
 import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS } from "../contracts/index.js";
+import type { ChangesApplyRun, MessageCatalog } from "../contracts/index.js";
+import { createMessageCatalog } from "../i18n/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
@@ -144,8 +146,20 @@ export function changedRegion(before: string | null, after: string | null): stri
   return [`@@ -${head + 1},${removed.length} +${head + 1},${added.length} @@`, ...shown("-", removed), ...shown("+", added)];
 }
 
+/**
+ * U-16 (UXM-4): an apply run's line (changes.apply_run): the plan run it applied and how many
+ * actions, which its report lists. The English line stands in while a catalog has no text for it.
+ */
+function applyRunLine(applyRun: ChangesApplyRun, messages: MessageCatalog): string {
+  try {
+    return messages.format("changes.apply_run", { count: applyRun.actions, runId: applyRun.planRunId });
+  } catch {
+    return `an apply run: it applied ${applyRun.actions} action(s) of the plan of run ${applyRun.planRunId}; its report lists them`;
+  }
+}
+
 /** The text form. Every piece comes from the masked output; control characters are replaced. */
-export function renderChanges(output: ChangesOutput): string {
+export function renderChanges(output: ChangesOutput, messages: MessageCatalog = createMessageCatalog("en")): string {
   const out = [`changes of run ${output.runId}, masked with the secrets registered now (not the run's own masking)`];
   // DR-29: a file's text is shown only when the secrets registered now mask it as the run did, by
   // the run's record. Why is said once; which files have no text is said per file, since one result
@@ -153,7 +167,9 @@ export function renderChanges(output: ChangesOutput): string {
   if (output.files.some((file) => file.unavailable === "masking_unverified")) {
     out.push("no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)");
   }
-  if (output.files.length === 0) out.push("the run changed no file");
+  // U-16 (UXM-4): an apply run's moves and discards are its plan's actions, not file writes of its own.
+  if (output.applyRun !== undefined) out.push(cleanText(applyRunLine(output.applyRun, messages)));
+  else if (output.files.length === 0) out.push("the run changed no file");
   for (const file of output.files) {
     const what = file.created ? "created by the run" : "changed by the run";
     out.push(`== ${cleanText(file.path)}: ${what}; ${STATE_TEXT[file.state]}`);
@@ -174,6 +190,8 @@ export interface ChangesEnvironment {
   readonly env: SettingsEnvironment;
   /** The app layer (`createCodarynApp` with the process's environment in main.ts). */
   readonly app: Pick<CodarynApp, "changes">;
+  /** U-16: the person's language for the lines that have catalog texts; English when absent. */
+  readonly messages?: MessageCatalog;
 }
 
 /** `codaryn changes`. Text on stdout, or ChangesOutput as one JSON line with `--json`. Errors are CliErrorOutput. */
@@ -188,6 +206,6 @@ export async function runChanges(io: ChangesEnvironment): Promise<CommandOutcome
   const currentKey = knownKeyValues(io.env);
   // N-19: one ASCII JSON line. N-27 (c): keys are hidden in the strings before the JSON is written
   // (in JSON text a control character becomes a six-character escape the key check cannot see through).
-  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output), currentKey);
+  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output, io.messages ?? createMessageCatalog("en")), currentKey);
   return { text, exitCode: outcome.output.exitCode };
 }

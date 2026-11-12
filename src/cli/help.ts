@@ -24,7 +24,10 @@ const USAGE_ONLY = {
     about: "Applies a plan run's plan after the person approves its digest; `codaryn revert --run <apply run id>` undoes it.",
   },
   review: { usage: REVIEW_USAGE, about: "Records a person's verdict on a run that waits for review (review.json); the run's result is not changed." },
-  changes: { usage: CHANGES_USAGE, about: "Shows a run's changed files and changed lines, masked with the current secrets. Reads only." },
+  changes: {
+    usage: CHANGES_USAGE,
+    about: "Shows a run's changed files and their state, masked with the current secrets; their text is not shown for now (DR-29). Reads only.",
+  },
 } as const;
 type UsageOnlyCommand = keyof typeof USAGE_ONLY;
 

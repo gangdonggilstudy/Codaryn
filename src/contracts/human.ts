@@ -26,11 +26,11 @@ import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { DefaultConfigDisplay } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
-import { CLI_ERROR_EXIT_CODES, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
+import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
 import { INTEGRITY_PHASES } from "./integrity.js";
 import { MODEL_ERROR_KINDS } from "./model.js";
 import { PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
-import type { CliErrorCode, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
+import type { CliErrorCode, CliErrorHint, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
@@ -581,6 +581,7 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  *   The check ids and statuses stay English in the JSON.
  * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
  * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
+ * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -602,7 +603,8 @@ export type ListedMessageId =
   | `doctor.check.${DoctorCheckId}`
   | `doctor.status.${DoctorCheckStatus}`
   | `approval.${ApprovalChannel}`
-  | `plan.problem.${PlanItemProblem}`;
+  | `plan.problem.${PlanItemProblem}`
+  | `error.hint.${CliErrorHint}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -647,6 +649,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...DOCTOR_CHECK_STATUSES.map((status) => `doctor.status.${status}` as const),
   ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
   ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
+  ...CLI_ERROR_HINTS.map((hint) => `error.hint.${hint}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */

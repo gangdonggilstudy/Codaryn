@@ -2,6 +2,9 @@
  * SP-0: the pinned results of sp0-scenarios.ts, computed once on main b05da45 (before SP-1
  * to SP-3). A change to any value here changes what the Anthropic adapter sends or returns: it needs
  * the PM's approval and a reason (docs/design/second-provider.md 7절).
+ *
+ * SP-3 (b) added `httpStatus` to the failures that are HTTP responses (ModelOutcome.httpStatus,
+ * SP-1). Nothing else changed: without that field the values equal the ones computed on b05da45.
  */
 
 export const SP0_GOLDEN: Record<string, unknown> = {
@@ -148,7 +151,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "overloaded",
-        "message": "HTTP 529 overloaded_error: busy (request req_011CAbCdEf) (after 4 attempts)"
+        "message": "HTTP 529 overloaded_error: busy (request req_011CAbCdEf) (after 4 attempts)",
+        "httpStatus": 529
       }
     },
     "unavailableThenServerError": {
@@ -195,7 +199,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "auth_failed",
-        "message": "HTTP 401 authentication_error: invalid x-api-key (request req_011CAbCdEf)"
+        "message": "HTTP 401 authentication_error: invalid x-api-key (request req_011CAbCdEf)",
+        "httpStatus": 401
       }
     },
     "forbidden": {
@@ -204,7 +209,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "auth_failed",
-        "message": "HTTP 403 permission_error: no (request req_011CAbCdEf)"
+        "message": "HTTP 403 permission_error: no (request req_011CAbCdEf)",
+        "httpStatus": 403
       }
     },
     "badRequest": {
@@ -213,7 +219,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 400 invalid_request_error: bad field (request req_011CAbCdEf)"
+        "message": "HTTP 400 invalid_request_error: bad field (request req_011CAbCdEf)",
+        "httpStatus": 400
       }
     },
     "notFound": {
@@ -222,7 +229,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 404 not_found_error: model: test-model-id (request req_011CAbCdEf)"
+        "message": "HTTP 404 not_found_error: model: test-model-id (request req_011CAbCdEf)",
+        "httpStatus": 404
       }
     },
     "serverErrorAlways": {
@@ -235,7 +243,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 500 api_error: boom (request req_011CAbCdEf) (after 4 attempts)"
+        "message": "HTTP 500 api_error: boom (request req_011CAbCdEf) (after 4 attempts)",
+        "httpStatus": 500
       }
     },
     "connectionResetThenOk": {
@@ -313,7 +322,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 302: redirects are not followed, so the key is not sent elsewhere"
+        "message": "HTTP 302: redirects are not followed, so the key is not sent elsewhere",
+        "httpStatus": 302
       }
     },
     "noRetriesAllowed": {
@@ -322,7 +332,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "rate_limited",
-        "message": "HTTP 429 rate_limit_error: slow down (request req_011CAbCdEf)"
+        "message": "HTTP 429 rate_limit_error: slow down (request req_011CAbCdEf)",
+        "httpStatus": 429
       }
     }
   },
@@ -332,7 +343,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 400 invalid_request_error: bad key [redacted] (request req_011CAbCdEf)"
+        "message": "HTTP 400 invalid_request_error: bad key [redacted] (request req_011CAbCdEf)",
+        "httpStatus": 400
       }
     },
     "jsonLongMessage": {
@@ -340,7 +352,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 400 invalid_request_error: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ..."
+        "message": "HTTP 400 invalid_request_error: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ...",
+        "httpStatus": 400
       }
     },
     "jsonOddType": {
@@ -348,7 +361,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 400: m"
+        "message": "HTTP 400: m",
+        "httpStatus": 400
       }
     },
     "htmlBody": {
@@ -356,7 +370,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 502 (the error body is not a JSON error object and is not shown)"
+        "message": "HTTP 502 (the error body is not a JSON error object and is not shown)",
+        "httpStatus": 502
       }
     },
     "emptyBody": {
@@ -364,7 +379,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 500"
+        "message": "HTTP 500",
+        "httpStatus": 500
       }
     },
     "hugeBody": {
@@ -372,7 +388,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "api_error",
-        "message": "HTTP 400 (the error body is longer than 4096 bytes and is not shown)"
+        "message": "HTTP 400 (the error body is longer than 4096 bytes and is not shown)",
+        "httpStatus": 400
       }
     },
     "successNotJson": {
@@ -552,7 +569,8 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "auth_failed",
-        "message": "HTTP 401 authentication_error: bad (request req_011CAbCdEf) (page 2)"
+        "message": "HTTP 401 authentication_error: bad (request req_011CAbCdEf) (page 2)",
+        "httpStatus": 401
       }
     },
     "entryWithoutId": {

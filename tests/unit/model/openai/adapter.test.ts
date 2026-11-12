@@ -412,3 +412,23 @@ describe("SP-U10 (names): every tool name fits the safe function name pattern", 
     }
   });
 });
+
+describe("R-22 L-1, DR-35 (a): 401 and 403 quote nothing of the provider's message", () => {
+  // The reviewer's reproduction: a partial echo of the key (its start, stars, its last 4 characters).
+  const echo = `Incorrect API key provided: ${FAKE_KEY.slice(0, 12)}${"*".repeat(30)}${FAKE_KEY.slice(-4)}.`;
+
+  test("a request: a fixed phrase and the request id only", async () => {
+    for (const status of [401, 403]) {
+      const { outcome } = await once([apiError(status, { type: "invalid_request_error", code: "invalid_api_key", message: echo }, { "x-request-id": "req_401a" })]);
+      const text = failure(outcome).message;
+      assert.equal(text, `HTTP ${status}: the key or its access was refused; the provider's message is not shown (request req_401a)`);
+      assert.equal(text.includes(FAKE_KEY.slice(-4)), false, "no end of the key");
+      assert.deepEqual([failure(outcome).kind, failure(outcome).httpStatus], ["auth_failed", status]);
+    }
+  });
+
+  test("the model listing too", async () => {
+    const outcome = await listOpenAIModels(SETTINGS, fake([apiError(401, { message: echo })]).deps);
+    assert.deepEqual(outcome.ok ? null : [outcome.kind, outcome.message], ["auth_failed", "HTTP 401: the key or its access was refused; the provider's message is not shown"]);
+  });
+});

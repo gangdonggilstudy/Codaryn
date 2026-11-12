@@ -26,7 +26,7 @@
  *   `content_filter` is `api_error` with a fixed phrase (the refusal text is not quoted); other
  *   `incomplete` reasons, `failed` and `cancelled` are `api_error`, quoting a reason or code only when
  *   it is a short identifier.
- * - Errors: 401 and 403 `auth_failed`; 429 `quota_exhausted` (not retried) when the error type is
+ * - Errors: 401 and 403 `auth_failed`, with a fixed phrase (DR-35 (a)); 429 `quota_exhausted` (not retried) when the error type is
  *   `insufficient_quota` or its code is one of OPENAI_QUOTA_ERROR_CODES, otherwise `rate_limited`
  *   (retried); 503 `overloaded`; 408, 409 and other 5xx `api_error`, retried. Only a JSON error
  *   object is quoted: its type and code when they are identifiers, its message, and the
@@ -366,14 +366,21 @@ function classifyStatus(status: number, body: LimitedBody): { kind: ModelErrorKi
   return { kind: "api_error", retryable: false };
 }
 
+/** DR-35 (a): what a 401 or 403 says, whatever the provider's message. */
+export const AUTH_REFUSED_MESSAGE = "the key or its access was refused; the provider's message is not shown";
+
 /**
  * Describes an error response. Only a JSON error object is quoted: its `type` and `code` when they
  * are identifiers, its `message`, and an `x-request-id` header of identifier characters. Any other
  * body (HTML from a proxy, plain text, a body cut at the limit) is not quoted at all.
+ * DR-35 (a), R-22 L-1: a 401 or 403 quotes nothing of the body, only AUTH_REFUSED_MESSAGE and the
+ * request id: its message may echo part of the key (its start and its last characters), and a run
+ * of fewer than KEY_FRAGMENT_CHARS characters is not found by the redactor.
  */
 function describeHttpError(status: number, body: LimitedBody, headers?: Headers): string {
   const header = headers?.get("x-request-id") ?? null;
   const requestId = header !== null && REQUEST_ID.test(header) ? ` (request ${header})` : "";
+  if (status === 401 || status === 403) return `HTTP ${status}: ${AUTH_REFUSED_MESSAGE}${requestId}`;
   const error = errorObject(body);
   if (error !== null) {
     const type = typeof error.type === "string" && IDENTIFIER.test(error.type) ? ` ${error.type}` : "";

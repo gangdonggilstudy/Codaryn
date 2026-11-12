@@ -138,10 +138,35 @@ function parseObject(text: string): Obj {
 }
 
 /**
- * The journal's first record: `startedAt` and `taskId`. A first line that is not complete (still
- * being written) or is not this run's `run_started` makes the run damaged.
+ * DR-12: what the journal's first record says. A model run starts with `run_started`, an apply
+ * run (G-A) with `apply_started`, which also names the plan run and the approved digest.
  */
-async function firstRecord(file: string, runId: string): Promise<{ startedAt: string; taskId: string }> {
+type FirstRecord =
+  | { readonly kind: "run"; readonly startedAt: string; readonly taskId: string }
+  | { readonly kind: "apply"; readonly startedAt: string; readonly taskId: string; readonly planRunId: string; readonly digest: string };
+
+const APPROVALS: readonly string[] = ["cli-tty", "cli-flag", "adapter"];
+
+/**
+ * The reasons an apply can end with (ApplyResult.reason, src/contracts/plan.ts). The contract
+ * lists them in a comment only; they must also be reasons of the result's status.
+ */
+const APPLY_REASONS: readonly string[] = [
+  "verified",
+  "verifier_failed",
+  "verifier_inconclusive",
+  "protected_changed",
+  "plan_stale",
+  "apply_incomplete",
+  "cancelled",
+  "max_duration",
+];
+
+/**
+ * The journal's first record. A first line that is not complete (still being written) or is not
+ * this run's `run_started` or `apply_started` makes the run damaged.
+ */
+async function firstRecord(file: string, runId: string): Promise<FirstRecord> {
   if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") unreadable();
   const handle = await open(file, "r").catch(() => unreadable());
   let text: string;
@@ -157,31 +182,60 @@ async function firstRecord(file: string, runId: string): Promise<{ startedAt: st
   const end = text.indexOf("\n");
   if (end < 0) unreadable();
   const record = parseObject(text.slice(0, end));
-  if (record["runId"] !== runId || record["seq"] !== 1 || record["type"] !== "run_started" || record["schemaVersion"] !== 1) unreadable();
-  if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
+  if (record["runId"] !== runId || record["seq"] !== 1 || record["schemaVersion"] !== 1) unreadable();
   const taskId = record["taskId"];
   if (typeof taskId !== "string" || !TASK_ID.test(taskId)) unreadable();
   const startedAt = timestamp(record["at"]);
   if (startedAt === null) unreadable();
-  return { startedAt, taskId: taskId as string };
+  if (record["type"] === "run_started") {
+    if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
+    return { kind: "run", startedAt, taskId: taskId as string };
+  }
+  if (record["type"] !== "apply_started") unreadable();
+  const { planRunId, digest, approval, actions, maxDurationMs } = record;
+  if (typeof planRunId !== "string" || toRunId(planRunId) === null || planRunId === runId) unreadable();
+  if (typeof digest !== "string" || !HASH.test(digest)) unreadable();
+  if (typeof approval !== "string" || !APPROVALS.includes(approval)) unreadable();
+  if (typeof actions !== "number" || !Number.isSafeInteger(actions) || actions < 1) unreadable();
+  if (typeof maxDurationMs !== "number" || !Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1) unreadable();
+  return { kind: "apply", startedAt, taskId: taskId as string, planRunId, digest };
+}
+
+/** An AppliedActionRecord as an ApplyResult holds it. */
+function isAppliedRecord(value: unknown): boolean {
+  if (!isObj(value)) return false;
+  const { index, action, stored } = value;
+  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || !isObj(action)) return false;
+  if (typeof action["sha256"] !== "string" || !HASH.test(action["sha256"])) return false;
+  if (action["kind"] === "move") return typeof action["from"] === "string" && typeof action["to"] === "string" && stored === null;
+  if (action["kind"] === "discard") return typeof action["path"] === "string" && typeof stored === "string";
+  return false;
 }
 
 /** Status, reason and change count from result.json, or nulls when the run has none. */
 async function resultOf(
   file: string,
   runId: string,
-  taskId: string,
+  first: FirstRecord,
 ): Promise<{ status: TerminalRunStatus | null; reason: RunReason | null; changes: number | null }> {
   if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") return { status: null, reason: null, changes: null };
   const result = parseObject(await readText(file, MAX_REPORT_FILE_BYTES));
-  if (result["schemaVersion"] !== 1 || result["kind"] !== "run" || result["runId"] !== runId) unreadable();
-  if (result["taskId"] !== taskId) unreadable();
+  if (result["schemaVersion"] !== 1 || result["kind"] !== first.kind || result["runId"] !== runId) unreadable();
+  if (result["taskId"] !== first.taskId) unreadable();
   const status = result["status"];
   if (typeof status !== "string" || !(TERMINAL_RUN_STATUSES as readonly string[]).includes(status)) unreadable();
   const reason = result["reason"];
   // DR-16: the contract's one table of reasons per status (G-A reasons included).
   if (typeof reason !== "string" || !isReasonOfStatus(status as TerminalRunStatus, reason)) unreadable();
   if (result["exitCode"] !== RUN_EXIT_CODES[status as TerminalRunStatus]) unreadable();
+  if (first.kind === "apply") {
+    // DR-12: an ApplyResult of this apply's plan and digest; its changes are the applied actions.
+    if (!APPLY_REASONS.includes(reason as string)) unreadable();
+    if (result["planRunId"] !== first.planRunId || result["digest"] !== first.digest) unreadable();
+    const applied = result["applied"];
+    if (!Array.isArray(applied) || !applied.every(isAppliedRecord)) unreadable();
+    return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: applied.length };
+  }
   if (typeof result["provider"] !== "string" || !PROVIDERS.includes(result["provider"])) unreadable();
   const changes = result["changes"];
   if (!Array.isArray(changes) || !changes.every(isChangeRecord)) unreadable();
@@ -254,9 +308,10 @@ function checkStartTime(runId: string, startedAt: string, now: number): void {
 }
 
 async function readEntry(dir: string, runId: RunId, now: number): Promise<CheckedRun> {
-  const { startedAt, taskId } = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  const first = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  const { startedAt, taskId } = first;
   checkStartTime(runId, startedAt, now);
-  const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, taskId);
+  const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, first);
   // N-23(g): the revert record only marks a reverted run. One that fails its checks takes the
   // mark away, not the run: the run stays checked (revertRecordDamaged) and can still be
   // reported and reverted.

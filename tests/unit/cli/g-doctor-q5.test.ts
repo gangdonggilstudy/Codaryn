@@ -59,9 +59,7 @@ describe("Q5: command rules with extra arguments beside plan actions", () => {
     assert.equal(check.status, "warn", JSON.stringify(check));
     assert.ok(check.message.includes("allowExtraArgs") && check.message.includes("policy.planActions"), check.message);
     assert.ok(check.message.startsWith("2 command rule(s)"), check.message);
-    // Until the contract base has doctor.commands.extra_args_with_plan, the check has no typed text
-    // and the renderer prints the English message.
-    assert.equal(check.text, undefined);
+    assert.deepEqual([check.text?.id, check.text?.params], ["doctor.commands.extra_args_with_plan", { count: 2 }]);
   });
 
   test("either alone does not", async () => {

@@ -153,17 +153,18 @@ describe("SP-6: the current model of the chosen provider", () => {
     assert.deepEqual(output.current, { id: FIRST_ID, source: "config", listed: true });
   });
 
-  test(
-    "CODARYN_OPENAI_MODEL as the current model's source",
-    { todo: "contract: ModelsOutput.current.source and selected.overriddenBy name only CODARYN_MODEL; asked to take the provider's model variable" },
-    async (t) => {
-      const api = await startFakeOpenAI(t, [], { models: { models: FAKE_OPENAI_MODEL_CATALOG } });
-      const { output } = await models(api, {}, ["--provider", "openai"], { ...KEYS, [CODARYN_OPENAI_MODEL_ENV]: FIRST_ID });
-      assert.ok(output.kind === "models");
-      if (output.kind !== "models") return;
-      assert.deepEqual(output.current, { id: FIRST_ID, source: CODARYN_OPENAI_MODEL_ENV, listed: true });
-    },
-  );
+  test("CODARYN_OPENAI_MODEL is the current model's source and what overrides a written one (DR-36 (a))", async (t) => {
+    const api = await startFakeOpenAI(t, [], { models: { models: FAKE_OPENAI_MODEL_CATALOG } });
+    const { output } = await models(api, {}, ["--provider", "openai"], { ...KEYS, [CODARYN_OPENAI_MODEL_ENV]: FIRST_ID });
+    assert.ok(output.kind === "models");
+    if (output.kind !== "models") return;
+    assert.deepEqual(output.current, { id: FIRST_ID, source: CODARYN_OPENAI_MODEL_ENV, listed: true });
+    const written = await models(api, { provider: "openai" }, ["--use", "2"], { ...KEYS, [CODARYN_OPENAI_MODEL_ENV]: FIRST_ID });
+    assert.ok(written.output.kind === "models", JSON.stringify(written.output));
+    if (written.output.kind !== "models") return;
+    assert.equal(written.output.selected?.overriddenBy, CODARYN_OPENAI_MODEL_ENV);
+    assert.equal(written.output.current?.source, CODARYN_OPENAI_MODEL_ENV);
+  });
 });
 
 void stat;

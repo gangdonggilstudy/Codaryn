@@ -26,7 +26,7 @@ const USAGE_ONLY = {
   review: { usage: REVIEW_USAGE, about: "Records a person's verdict on a run that waits for review (review.json); the run's result is not changed." },
   changes: {
     usage: CHANGES_USAGE,
-    about: "Shows a run's changed files and their state, masked with the current secrets; their text is not shown for now (DR-29). Reads only.",
+    about: "Shows a run's changed files and their state, masked with the current secrets; a file's changed lines only when the current secrets mask it as the run did (DR-29). Reads only.",
   },
 } as const;
 type UsageOnlyCommand = keyof typeof USAGE_ONLY;

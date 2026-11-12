@@ -13,13 +13,18 @@
  * Widening (UX 7, M-9): a command allowed that was not, any command allowed with extra arguments, a
  * limit raised or removed, a protected path or an integrity path removed, a secret variable no
  * longer masked, a verifier removed, a command verifier added or changed (R-14 L-2), path tokens restored, plan actions allowed, a different API
- * address, a profile or workflow definition changed. Narrowing changes need no confirmation.
+ * address (top-level or a provider's, GUI F-3), another provider for quick runs (F-3), a profile or
+ * workflow definition changed. Narrowing changes need no confirmation.
  * The new text is the config as formatted JSON; the file's own formatting is not kept.
  */
 
 import { createHash } from "node:crypto";
+import { API_PROVIDER_NAMES } from "../contracts/index.js";
 import type { CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
+import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
+import { quickProvider } from "../cli/task.js";
+import { workflowDefinitions } from "../workflows/index.js";
 import { appError } from "./errors.js";
 import { checkConfigText, loadSettingsFile } from "./settings.js";
 import type { ChosenFile, SettingsIo } from "./settings.js";
@@ -51,6 +56,65 @@ function raised(before: number | null | undefined, after: number | null | undefi
   if (after === undefined) return true;
   if (before === null) return false;
   return after === null || after > before;
+}
+
+type PolicyRules = CodarynConfig["policy"];
+type VerifierRules = CodarynConfig["verifiers"];
+
+/** The policy checks of the judgment for one set of rules; `prefix` names whose (e.g. "workflows.docs."). */
+function policyWidening(before: PolicyRules, after: PolicyRules, prefix: string): SettingsWidening[] {
+  const found: SettingsWidening[] = [];
+  const oldRules = new Set((before?.commands ?? []).map(ruleKey));
+  for (const [index, rule] of (after?.commands ?? []).entries()) {
+    if (oldRules.has(ruleKey(rule))) continue;
+    found.push({ kind: "command_added", field: `${prefix}policy.commands[${index}]` });
+    if (rule.allowExtraArgs) found.push({ kind: "extra_args_allowed", field: `${prefix}policy.commands[${index}]` });
+  }
+  const newProtected = new Set(after?.protectedPaths ?? []);
+  if ((before?.protectedPaths ?? []).some((entry) => !newProtected.has(entry))) found.push({ kind: "protected_path_removed", field: `${prefix}policy.protectedPaths` });
+  if (before?.restorePathTokens !== true && after?.restorePathTokens === true) found.push({ kind: "restore_path_tokens_enabled", field: `${prefix}policy.restorePathTokens` });
+  const oldActions = new Set(before?.planActions ?? []);
+  if ((after?.planActions ?? []).some((action) => !oldActions.has(action))) found.push({ kind: "plan_action_allowed", field: `${prefix}policy.planActions` });
+  return found;
+}
+
+/** The verifier checks of the judgment for one set of rules (R-14 L-2 for command verifiers). */
+function verifierWidening(before: VerifierRules, after: VerifierRules, prefix: string): SettingsWidening[] {
+  const found: SettingsWidening[] = [];
+  const oldVerifiers = new Set((before ?? []).map((verifier) => JSON.stringify(verifier)));
+  const newVerifiers = new Set((after ?? []).map((verifier) => JSON.stringify(verifier)));
+  if ((before ?? []).some((verifier) => !newVerifiers.has(JSON.stringify(verifier)))) found.push({ kind: "verifier_removed", field: `${prefix}verifiers` });
+  for (const [index, verifier] of (after ?? []).entries()) {
+    if (verifier.kind === "command" && !oldVerifiers.has(JSON.stringify(verifier))) found.push({ kind: "verifier_command_added", field: `${prefix}verifiers[${index}]` });
+  }
+  return found;
+}
+
+/**
+ * GUI F-5: in the quick form a workflow's own policy and verifiers apply only while the config has
+ * none (src/cli/run.ts `underDefinition`: `config.policy ?? definition.policy`, the same for
+ * verifiers). When the config's `policy` or `verifiers` appears or goes, the rules of every workflow
+ * that has its own (built-in or the config's) change, so they are compared as such runs see them.
+ * A workflow defined on one side only is `workflow_changed` already.
+ */
+function workflowRulesWidening(before: CodarynConfig, after: CodarynConfig): SettingsWidening[] {
+  const policyMoves = (before.policy === undefined) !== (after.policy === undefined);
+  const verifiersMove = (before.verifiers === undefined) !== (after.verifiers === undefined);
+  if (!policyMoves && !verifiersMove) return [];
+  const found: SettingsWidening[] = [];
+  const definitionsAfter = workflowDefinitions(after.workflows);
+  for (const [id, was] of Object.entries(workflowDefinitions(before.workflows))) {
+    const is = definitionsAfter[id];
+    if (is === undefined) continue;
+    const prefix = `workflows.${id}.`;
+    if (policyMoves && (was.policy !== undefined || is.policy !== undefined)) {
+      found.push(...policyWidening(before.policy ?? was.policy, after.policy ?? is.policy, prefix));
+    }
+    if (verifiersMove && (was.verifiers !== undefined || is.verifiers !== undefined)) {
+      found.push(...verifierWidening(before.verifiers ?? was.verifiers, after.verifiers ?? is.verifiers, prefix));
+    }
+  }
+  return found;
 }
 
 /** What `after` lets a run do that `before` did not. */
@@ -98,8 +162,19 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     if (!oldActions.has(action)) found.push({ kind: "plan_action_allowed", field: "policy.planActions" });
   }
   if (!same(before.apiBaseUrl, after.apiBaseUrl)) found.push({ kind: "api_base_url_changed", field: "apiBaseUrl" });
+  // GUI F-3: where the workspace's text and a provider's key go. Each API provider's address as a
+  // run reads it (top-level apiBaseUrl, or providers.<name>.apiBaseUrl), and the provider a quick
+  // run uses (the config's `provider`, else anthropic), with the CLI's own rules.
+  for (const provider of API_PROVIDER_NAMES) {
+    if (!same(providerSettingsOf(before, provider).apiBaseUrl, providerSettingsOf(after, provider).apiBaseUrl)) {
+      const holder = providerSettingsOf(after, provider).apiBaseUrl !== undefined ? after : before;
+      found.push({ kind: "api_base_url_changed", field: configFieldOf(holder, provider, "apiBaseUrl") });
+    }
+  }
+  if (quickProvider(before) !== quickProvider(after)) found.push({ kind: "provider_changed", field: "provider" });
   if (!same(before.profiles, after.profiles)) found.push({ kind: "profile_changed", field: "profiles" });
   if (!same(before.workflows, after.workflows)) found.push({ kind: "workflow_changed", field: "workflows" });
+  found.push(...workflowRulesWidening(before, after));
   // One entry per kind and field.
   const seen = new Set<string>();
   return found.filter((item) => {

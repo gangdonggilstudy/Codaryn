@@ -14,7 +14,7 @@
  *   No text of a transport error is copied into a message, only fixed phrases and allowlisted codes.
  */
 
-import { MAX_RETRIES_LIMIT } from "../../contracts/index.js";
+import { KEY_SEPARATOR_PATTERN_SOURCE, MAX_RETRIES_LIMIT } from "../../contracts/index.js";
 import type { ListModelsSettings, ModelErrorKind } from "../../contracts/index.js";
 
 /** Longest message an outcome carries. */
@@ -29,9 +29,13 @@ const MAX_ERROR_SOURCE_CHARS = 4096;
 export const KEY_FRAGMENT_CHARS = 8;
 const REDACTED = "[redacted]";
 
-/** One character that separates nothing in a key: control characters, white space, invisible marks. */
-const SEPARATOR = /[\s\u0000-\u001f\u007f-\u009f​-‍⁠﻿]/;
-export const SEPARATOR_RUN = /[\s\u0000-\u001f\u007f-\u009f​-‍⁠﻿]+/g;
+/**
+ * One character that separates nothing in a key: white space, control characters and invisible
+ * format characters. DR-40 (a): the contract's set (KEY_SEPARATOR_PATTERN_SOURCE), so the soft hyphen
+ * and the other format characters (Cf) count too.
+ */
+const SEPARATOR = new RegExp(KEY_SEPARATOR_PATTERN_SOURCE, "u");
+export const SEPARATOR_RUN = new RegExp(`${KEY_SEPARATOR_PATTERN_SOURCE}+`, "gu");
 
 /** A key may hold printable ASCII only (0x21-0x7E): no space, no control or non-ASCII character. */
 const USABLE_KEY = /^[\x21-\x7e]+$/;
@@ -494,14 +498,28 @@ export async function sendWithRetries(transport: Transport, request: HttpRequest
 }
 
 
+/**
+ * DR-35 (a), DR-37 (a): what a 401 or 403 says in every provider, whatever the provider's body (its
+ * message may echo part of the key, and a run shorter than KEY_FRAGMENT_CHARS is not redacted).
+ */
+export const AUTH_REFUSED_MESSAGE = "the key or its access was refused; the provider's message is not shown";
+
 export const UNUSABLE_KEY_MESSAGE =
   "the API key may hold printable ASCII characters only (0x21-0x7E, no spaces); nothing was sent";
 
 
 /**
+ * DR-36 (d), R-22 I-3: the longest text createKeyMaterialCheck reads. A longer one counts as holding
+ * key material, unread, so the check's time stays bounded (it grows with the square of the length).
+ * The callers check shorter limits first (model ids and cursors: 256 characters).
+ */
+export const MAX_KEY_MATERIAL_CHECK_CHARS = 4096;
+
+/**
  * True when `text` holds the key, a run of KEY_FRAGMENT_CHARS characters of it, or a key-shaped
  * string, ignoring separators as the redactor does. Used to refuse values from a response that
- * would carry key material out of this module.
+ * would carry key material out of this module. A text longer than MAX_KEY_MATERIAL_CHECK_CHARS is
+ * refused (true) without being read.
  */
 export function createKeyMaterialCheck(apiKey: string, keyShapeSources: readonly string[]): (text: string) => boolean {
   const fragments = new Set<string>();
@@ -511,6 +529,7 @@ export function createKeyMaterialCheck(apiKey: string, keyShapeSources: readonly
   const keyShapes = keyShapeSources.map((source) => new RegExp(source));
   const keyShapesAtStart = keyShapeSources.map((source) => new RegExp(source, "y"));
   return (text: string): boolean => {
+    if (text.length > MAX_KEY_MATERIAL_CHECK_CHARS) return true;
     const compact = text.replace(SEPARATOR_RUN, "");
     if (apiKey.length > 0 && compact.includes(apiKey)) return true;
     for (let index = 0; fragments.size > 0 && index + KEY_FRAGMENT_CHARS <= compact.length; index += 1) {

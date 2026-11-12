@@ -5,8 +5,76 @@
  * purpose; o00 checks that the two agree where both say something (minimum output tokens, the
  * address with `/v1`). Key names and shapes come from the contract (SP-1: OPENAI_API_KEY_ENV,
  * API_KEY_ENVS, API_KEY_PATTERN_SOURCES, API_KEY_MASK_PATTERN_SOURCES).
- * Mock API verification only, not the real API. Task and config writers wait for SP-4's schema.
+ * Mock API verification only, not the real API. Task and config writers follow the SP-4 schema
+ * (task `model.provider: "openai"`, config `provider` and `providers.openai`).
  */
+
+import { writeFileSync } from "node:fs";
+import type { CommandRule, Limits, VerifierConfig } from "../../src/contracts/index.js";
+import { ANTHROPIC_LIMITS } from "./anthropic.js";
+import type { Sandbox } from "./builders.js";
+
+/** Model ids by where they come from, so a request's `model` shows which one won. */
+export const FAKE_OPENAI_MODEL_TASK = "cdy-oai-model-task";
+export const FAKE_OPENAI_MODEL_ENV = "cdy-oai-model-env";
+export const FAKE_OPENAI_MODEL_CONFIG = "cdy-oai-model-config";
+
+/** Every API provider run needs a token limit (SP-4); the same limits as the Anthropic cases. */
+export const OPENAI_LIMITS: Limits = ANTHROPIC_LIMITS;
+
+export interface OpenAITaskOptions {
+  readonly id: string;
+  readonly goal?: string;
+  readonly workflow?: string;
+  /** `model.model`; null leaves it out. Default FAKE_OPENAI_MODEL_TASK. */
+  readonly model?: string | null;
+  /** `model.maxOutputTokens`; null leaves it out. Default 512. */
+  readonly maxOutputTokens?: number | null;
+  readonly commands?: readonly CommandRule[];
+  readonly secretEnv?: readonly string[];
+  readonly limits?: Partial<Limits>;
+  readonly verifiers?: readonly VerifierConfig[];
+}
+
+/** Writes task.json into the sandbox base with provider "openai" and `workspaceRoot: "./ws"`. */
+export function writeOpenAITask(sandbox: Sandbox, options: OpenAITaskOptions): string {
+  const model: Record<string, unknown> = { provider: "openai" };
+  const id = options.model === undefined ? FAKE_OPENAI_MODEL_TASK : options.model;
+  if (id !== null) model["model"] = id;
+  const maxOutputTokens = options.maxOutputTokens === undefined ? 512 : options.maxOutputTokens;
+  if (maxOutputTokens !== null) model["maxOutputTokens"] = maxOutputTokens;
+  const task = {
+    schemaVersion: 1,
+    id: options.id,
+    goal: options.goal ?? "OpenAI 모의 API 통합 테스트 작업",
+    workflow: options.workflow ?? "document",
+    workspaceRoot: "./ws",
+    model,
+    policy: { commands: options.commands ?? [], network: "deny", destructive: "deny", restorePathTokens: false },
+    privacy: { secretEnv: options.secretEnv ?? [] },
+    limits: options.limits ?? OPENAI_LIMITS,
+    verifiers: options.verifiers ?? [],
+  };
+  writeFileSync(sandbox.taskPath, JSON.stringify(task, null, 2));
+  return sandbox.taskPath;
+}
+
+/**
+ * A config file that chooses openai (`provider`) with `providers.openai`: output cap 1024, request
+ * time limit 20 s, 2 retries, and `apiBaseUrl` when given. `openai` and `top` add or replace fields.
+ */
+export function openAIConfig(
+  apiBaseUrl: string | null,
+  openai: Readonly<Record<string, unknown>> = {},
+  top: Readonly<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    provider: "openai",
+    providers: { openai: { maxOutputTokens: 1024, requestTimeoutMs: 20_000, maxRetries: 2, ...(apiBaseUrl === null ? {} : { apiBaseUrl }), ...openai } },
+    ...top,
+  };
+}
 
 /** C-4: paths below the base address, which itself ends with `/v1`. */
 export const OPENAI_VERSION_PATH = "/v1";

@@ -65,6 +65,8 @@ import {
   MAX_KEY_SCAN_DEPTH,
   findKeyInJson,
   goalHoldsKey,
+  inputFileTooLarge,
+  inputFileTooLargeMessage,
   rawTextHoldsKey,
   relateRealPaths,
   secretEnvNotSetMessage,
@@ -486,6 +488,8 @@ export async function prepareTask(
       }
     }
     if (text !== null) {
+      // DR-40 (b): a file over the cap is refused before any check reads it.
+      if (inputFileTooLarge(text)) return error("invalid_config", inputFileTooLargeMessage("config file"));
       files.push({ label: "config file", path: candidate.path, code: "invalid_config", text });
       if (candidate.source === "default") defaultDisplay = io.defaultConfig?.display ?? null;
     }
@@ -494,6 +498,7 @@ export async function prepareTask(
     const taskPath = path.resolve(io.cwd, args.input.taskPath);
     const text = await readText(io, taskPath);
     if (text === null) return error("invalid_task", "the task file cannot be read as JSON");
+    if (inputFileTooLarge(text)) return error("invalid_task", inputFileTooLargeMessage("task file"));
     files.push({ label: "task file", path: taskPath, code: "invalid_task", text });
   }
   for (const file of files) {

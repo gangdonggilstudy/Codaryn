@@ -22,6 +22,7 @@ import {
   LOCK_FILE_NAME,
   PARKED_DIR_NAME,
   STATE_DIR_NAME,
+  toApiOrigin,
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
@@ -59,6 +60,8 @@ import {
   checkLocalPathSyntax,
   findKeyInJson,
   normalizeApiBaseUrlStrict,
+  inputFileTooLarge,
+  inputFileTooLargeMessage,
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
@@ -151,6 +154,8 @@ async function loadJson(io: DoctorEnvironment, file: string, label: string, curr
     return { ok: false, message: `the ${label} cannot be read`, missing: isMissingFile(failure), failure: "unreadable" };
   }
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  // DR-40 (b): a file over the cap is not read further (shown as unreadable, with the reason in the message).
+  if (inputFileTooLarge(text)) return { ok: false, message: inputFileTooLargeMessage(label), failure: "unreadable" };
   if (rawTextHoldsKey(text, currentKey)) return { ok: false, message: `the ${label} contains a key value`, failure: "key" };
   let value: unknown;
   try {
@@ -421,10 +426,22 @@ export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog): s
   const status = (value: DoctorCheckStatus): string => `[${format(`doctor.status.${value}`, value)}]`;
   const labels = output.checks.map((check) => format(`doctor.check.${check.id}`, check.id));
   const width = Math.max(...labels.map((label) => label.length));
-  const lines = output.checks.map((check, index) => {
-    const body =
-      check.text === undefined ? check.message : format(check.text.id, check.message, "params" in check.text ? check.text.params : undefined);
-    return `${status(check.status).padEnd(10)}${(labels[index] ?? check.id).padEnd(width)}  ${body}`;
+  const lines = output.checks.flatMap((check, index) => {
+    // The check's own text; when the catalog has none, the message, which already holds the notes.
+    let fromCatalog = check.text !== undefined;
+    let body = check.message;
+    if (check.text !== undefined) {
+      try {
+        body = raw(check.text.id, "params" in check.text ? check.text.params : undefined);
+      } catch {
+        fromCatalog = false;
+      }
+    }
+    const first = `${status(check.status).padEnd(10)}${(labels[index] ?? check.id).padEnd(width)}  ${body}`;
+    // DR-36 (b): each note on its own line under the check's text.
+    const indent = " ".repeat(10 + width + 2);
+    const notes = fromCatalog ? (check.notes ?? []).map((note) => `${indent}${format(note.id, noteEnglish(note), "params" in note ? note.params : undefined)}`) : [];
+    return [first, ...notes];
   });
   const english = `doctor: ${output.status} (exit code ${output.exitCode}). No network access was made and nothing was changed.`;
   let footer: string;
@@ -435,6 +452,15 @@ export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog): s
   }
   lines.push("", footer);
   return `${lines.join("\n")}\n`;
+}
+
+/** The English of a note when the catalog has no text for it (the message already holds it). */
+function noteEnglish(note: DoctorText): string {
+  if (note.id === "doctor.model.other_provider_variable" && "params" in note) {
+    const { variable, owner, provider } = note.params as { variable: string; owner: string; provider: string };
+    return `${variable} is set but is ${owner}'s; an ${provider} run does not read it`;
+  }
+  return note.id;
 }
 
 function renderDoctorEnglish(output: DoctorOutput): string {
@@ -464,8 +490,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   }
 
   const results = new Map<DoctorCheckId, DoctorCheck>();
-  const set = (id: DoctorCheckId, status: DoctorCheckStatus, message: string, text: DoctorText): void => {
-    results.set(id, { id, status, message, text });
+  // DR-36 (b): `notes` are further lines of the same check (absent when there are none).
+  const set = (id: DoctorCheckId, status: DoctorCheckStatus, message: string, text: DoctorText, notes: readonly DoctorText[] = []): void => {
+    results.set(id, { id, status, message, text, ...(notes.length === 0 ? {} : { notes }) });
   };
 
   // node_version
@@ -599,13 +626,30 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     // count (SP-2 only hides them).
     const keyEnv = API_PROVIDERS[provider].keyEnv;
     if (envValue(env, keyEnv) !== null) {
-      // DR-34 (a): say which address the key goes to (its origin) and where that address is set.
+      // DR-34 (a), DR-36 (b): say where the key goes (the origin of the address, never its path) and
+      // where that address is set, in the message and as the catalog text.
       const destination = keyDestination(env, config, provider);
-      const where =
-        destination === null
-          ? `its address in ${API_PROVIDERS[provider].baseUrlEnv} is not valid (see the model check), so nothing is sent`
-          : `${provider} requests send it only to ${destination.origin} (${destination.source})`;
-      set("api_key", "ok", `${keyEnv} is set; ${where}`, { id: "doctor.api_key.ok", params: { keyEnv } });
+      const origin = destination.kind === "invalid" ? null : toApiOrigin(destination.address);
+      let where: string;
+      let keyText: DoctorText = { id: "doctor.api_key.ok", params: { keyEnv } };
+      if (destination.kind === "invalid") {
+        where = `its address in ${destination.variable} is not valid (see the model check), so nothing is sent`;
+        keyText = { id: "doctor.api_key.address_invalid", params: { keyEnv, variable: destination.variable } };
+      } else if (origin === null) {
+        // An address whose origin is not of the contract's shape is not echoed.
+        where = `${provider} requests send it only to its own address`;
+      } else if (destination.kind === "env") {
+        where = `${provider} requests send it only to ${origin} (${destination.variable})`;
+        keyText = { id: "doctor.api_key.sends_to_env", params: { keyEnv, provider, origin, variable: destination.variable } };
+      } else if (destination.kind === "config") {
+        where = `${provider} requests send it only to ${origin} (config ${destination.field})`;
+        const field = toSchemaFieldPath(destination.field);
+        if (field !== null) keyText = { id: "doctor.api_key.sends_to_config", params: { keyEnv, provider, origin, field } };
+      } else {
+        where = `${provider} requests send it only to ${origin} (the default address)`;
+        keyText = { id: "doctor.api_key.sends_to_default", params: { keyEnv, provider, origin } };
+      }
+      set("api_key", "ok", `${keyEnv} is set; ${where}`, keyText);
     } else {
       set("api_key", "fail", `${keyEnv} is not set; an ${provider} run stops with provider_not_configured`, { id: "doctor.api_key.missing", params: { keyEnv, provider } });
     }
@@ -646,15 +690,17 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
     // SP-6, review R-19 I-4: another provider's model or address variable is not read by this run;
     // say so, so a value left for one provider is not silently ignored (names only, never values).
+    // DR-36 (b): the same as notes, one catalog text per variable.
     const unread = API_PROVIDER_NAMES.filter((other) => other !== provider).flatMap((other) =>
       [API_PROVIDERS[other].modelEnv, API_PROVIDERS[other].baseUrlEnv]
         .filter((name) => envValue(env, name) !== null)
-        .map((name) => `${name} is set but is ${other}'s; an ${provider} run does not read it`),
+        .map((variable) => ({ variable, owner: other })),
     );
-    const note = unread.length === 0 ? "" : `; ${unread.join("; ")}`;
-    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}${note}`, missingText);
-    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", `${baseUrlProblem.message}${note}`, { id: "doctor.model.base_url_invalid" });
-    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}${note}`, { id: "doctor.model.ok" });
+    const note = unread.map(({ variable, owner }) => `; ${variable} is set but is ${owner}'s; an ${provider} run does not read it`).join("");
+    const notes: DoctorText[] = unread.map(({ variable, owner }) => ({ id: "doctor.model.other_provider_variable", params: { variable, owner, provider } }));
+    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}${note}`, missingText, notes);
+    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", `${baseUrlProblem.message}${note}`, { id: "doctor.model.base_url_invalid" }, notes);
+    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}${note}`, { id: "doctor.model.ok" }, notes);
   }
 
   // limits
@@ -833,10 +879,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       parked = 0;
     }
     const parkedWarning = `${parked} file(s) a revert could not put back are in ${STATE_DIR_NAME}/${PARKED_DIR_NAME}/; move them back or delete them`;
+    const parkedText: DoctorText = { id: "doctor.lock.parked_left", params: { count: parked } };
     if (parked > 0 && status === "ok") {
-      set("lock", "warn", parkedWarning, { id: "doctor.lock.parked_left", params: { count: parked } });
+      set("lock", "warn", parkedWarning, parkedText);
     } else {
-      set("lock", status, parked > 0 ? `${message}; ${parkedWarning}` : message, { id: `doctor.lock.${state}` });
+      // DR-37 (c), review R-24 L-2: with another lock state the lock's own text stays, and the
+      // parked files are its note, so the person's output names them too (not only the message).
+      set("lock", status, parked > 0 ? `${message}; ${parkedWarning}` : message, { id: `doctor.lock.${state}` }, parked > 0 ? [parkedText] : []);
     }
   }
 

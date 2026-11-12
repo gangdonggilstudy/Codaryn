@@ -84,7 +84,7 @@ describe("listModels and selectModel (Y-1 to Y-3)", () => {
     assert.equal(process.env[ANTHROPIC_API_KEY_ENV] === FAKE_KEY, false);
   });
 
-  test("no key: nothing is sent; a failed listing is model_list_failed; another provider is refused", async () => {
+  test("no key: nothing is sent; a failed listing is model_list_failed; a name that is not an API provider is refused", async () => {
     const { base, config } = await setup();
     const lister = fakeLister();
     const noKey = createCodarynApp(await appEnvironment(base, { env: {} }), { listModels: lister.list });
@@ -99,16 +99,16 @@ describe("listModels and selectModel (Y-1 to Y-3)", () => {
     assert.equal(failed.ok ? null : failed.error.code, "model_list_failed");
     assert.equal(JSON.stringify(failed).includes(FAKE_KEY), false, "S-12: the key is not in the message");
 
-    const other = await failing.listModels({ provider: "openai", configPath: config, varsFile: null });
-    assert.equal(other.ok ? null : other.error.code, "invalid_arguments", "DR-22: only connected providers");
+    const other = await failing.listModels({ provider: "scripted", configPath: config, varsFile: null });
+    assert.equal(other.ok ? null : other.error.code, "invalid_arguments", "DR-22: only API providers (provider.test.ts has openai)");
   });
 
   test("the arguments are the CLI's, and a flag-like model id is refused before anything is read", () => {
     assert.deepEqual(modelsArguments({ provider: "anthropic", configPath: "c.json", varsFile: "v.env" }), {
       ok: true,
-      argv: ["models", "--config", "c.json", "--vars-file", "v.env", "--json"],
+      argv: ["models", "--provider", "anthropic", "--config", "c.json", "--vars-file", "v.env", "--json"],
     });
-    assert.deepEqual(modelsArguments({ provider: "anthropic", configPath: null, varsFile: null, model: "m" }), { ok: true, argv: ["models", "--json", "--use", "m"] });
+    assert.deepEqual(modelsArguments({ provider: "anthropic", configPath: null, varsFile: null, model: "m" }), { ok: true, argv: ["models", "--provider", "anthropic", "--json", "--use", "m"] });
     const flag = modelsArguments({ provider: "anthropic", configPath: null, varsFile: null, model: "--json" });
     assert.equal(flag.ok ? null : flag.error.code, "invalid_arguments");
   });

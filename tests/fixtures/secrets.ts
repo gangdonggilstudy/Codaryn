@@ -47,6 +47,12 @@ export const FAKE_API_KEY_NON_ASCII = "cdy-fake-apikey-ü-Wd3Kp9";
 export const FAKE_OPENAI_KEY = "cdy-fake-oaikey-Tn4Rw8Kp2Zs6";
 /** For an OpenAI run that the fake server answers 401. */
 export const FAKE_OPENAI_KEY_REJECTED = "cdy-fake-oaikey-rejected-Hv5Jm3";
+/**
+ * R-20 E: placeholder values other tools' documents put in OPENAI_API_KEY (vLLM `EMPTY`, Ollama
+ * `ollama`, a bare `x`). Shorter than MIN_OTHER_PROVIDER_KEY_LENGTH, so a run of another provider
+ * must not register them as secrets (DR-34 (b)).
+ */
+export const OTHER_KEY_PLACEHOLDERS = ["EMPTY", "ollama", "x"] as const;
 export const FAKE_API_KEYS: readonly string[] = [
   FAKE_API_KEY,
   FAKE_API_KEY_ENV_FILE,
@@ -55,6 +61,7 @@ export const FAKE_API_KEYS: readonly string[] = [
   FAKE_API_KEY_NON_ASCII,
   FAKE_OPENAI_KEY,
   FAKE_OPENAI_KEY_REJECTED,
+  ...OTHER_KEY_PLACEHOLDERS,
 ];
 
 /** S-4: a value an env file sets. Eight characters or more, so it is registered as a secret. */

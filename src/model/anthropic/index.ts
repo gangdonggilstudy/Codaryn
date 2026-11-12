@@ -52,6 +52,7 @@ import type {
 } from "../../contracts/index.js";
 
 import {
+  AUTH_REFUSED_MESSAGE,
   createKeyMaterialCheck,
   createRedactor,
   decoder,
@@ -276,12 +277,28 @@ function parseMessageBody(text: string): ModelOutcome {
   return { ok: true, response };
 }
 
+/** ` (request <id>)` for a well-formed `request_id` of a whole JSON body, else nothing. */
+function requestIdOf(body: LimitedBody): string {
+  if (body.over) return "";
+  try {
+    const value: unknown = JSON.parse(decoder.decode(body.bytes));
+    return isPlainObject(value) && typeof value.request_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.request_id)
+      ? ` (request ${value.request_id})`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Describes an error response. Only a JSON error object is quoted: its `error.type` (when it is a
  * plain identifier), its `error.message` and a well-formed request id. Any other body (HTML from a
  * proxy, plain text, a body cut at the limit) is not quoted at all.
+ * DR-37 (a): a 401 or 403 quotes nothing of the body (neither its message nor its error type), only
+ * AUTH_REFUSED_MESSAGE and the request id, as for OpenAI (DR-35 (a)).
  */
 function describeHttpError(status: number, body: LimitedBody): string {
+  if (status === 401 || status === 403) return `HTTP ${status}: ${AUTH_REFUSED_MESSAGE}${requestIdOf(body)}`;
   if (!body.over) {
     try {
       const value: unknown = JSON.parse(decoder.decode(body.bytes));

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { ANTHROPIC_KEY_PATTERN_SOURCE, API_KEY_MASK_PATTERN_SOURCES } from "../../../../src/contracts/index.js";
-import { MAX_RETRY_AFTER_MS, createKeyMaterialCheck, createRedactor, sendWithRetries } from "../../../../src/model/http/index.js";
+import { MAX_KEY_MATERIAL_CHECK_CHARS, MAX_RETRY_AFTER_MS, createKeyMaterialCheck, createRedactor, sendWithRetries } from "../../../../src/model/http/index.js";
 import type { LimitedBody, Transport } from "../../../../src/model/http/index.js";
 
 type Reply = { status: number; body?: string; headers?: Record<string, string> };
@@ -107,6 +107,26 @@ ${shaped.slice(9)} . end`), "key [redacted] . end");
     const wide = transport([big], { errorBodyLimit: 65_536 });
     await send(wide.t);
     assert.equal(wide.seenBodies[0]?.length, 5000);
+  });
+
+  test("DR-36 (d), R-22 I-3: the key-material check reads a bounded text; a longer one counts as key material", () => {
+    const holds = createKeyMaterialCheck("codaryn-fake-key-not-a-credential", API_KEY_MASK_PATTERN_SOURCES);
+    assert.equal(holds("a ".repeat(2048)), false, "4096 characters: read");
+    const started = performance.now();
+    assert.equal(holds("a ".repeat(32_768)), true, "65,536 characters with separators: refused unread");
+    assert.ok(performance.now() - started < 200, "and at once");
+    assert.equal(MAX_KEY_MATERIAL_CHECK_CHARS, 4096);
+    assert.equal(holds(`${"a".repeat(4096)}`), false, "the limit itself is read");
+    assert.equal(holds(`${"a".repeat(4097)}`), true, "one more is not");
+  });
+
+  test("DR-40 (a): a key split by a soft hyphen or another format character is redacted", () => {
+    const key = "codaryn-fake-key-not-a-credential";
+    const redact = createRedactor(key, []);
+    for (const code of [0xad, 0x200e, 0x2060]) {
+      const mark = String.fromCharCode(code);
+      assert.equal(redact(`piece ${key.slice(0, 10)}${mark}${key.slice(10)} end`), "piece [redacted] end", code.toString(16));
+    }
   });
 
   test("the provider's status reading gets the error body", async () => {

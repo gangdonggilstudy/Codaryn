@@ -368,6 +368,20 @@ export const FIXED_MESSAGES = {
   "error.label": {},
   "error.fix_label": {},
   "error.doctor_hint": {},
+  // U-37: the hints whose line takes a value (DETAILED_CLI_ERROR_HINTS, from CliErrorOutput's
+  // CLI_ERROR_HINT_DETAIL); the others are listed (`error.hint.<hint>`). unknown_option names the
+  // argument by its position only (DR-57). provider_settings_missing is followed by one item line
+  // per setting not set, `error.missing.*`:
+  // the key variable; the model (none left, or only a placeholder), with the provider's model
+  // variable and the config's field; the output limit, with the config's field.
+  "error.hint.unknown_option": { position: "count" },
+  "error.hint.key_field_in_task": { field: "field" },
+  "error.hint.key_field_in_config": { field: "field" },
+  "error.hint.provider_settings_missing": {},
+  "error.missing.key": { keyEnv: "keyEnv" },
+  "error.missing.model": { variable: "settingEnv", field: "field" },
+  "error.missing.model_placeholder": { variable: "settingEnv", field: "field" },
+  "error.missing.output_limit": { field: "field" },
 
   // Input diagnostics (N-15). The file is named by `diagnostic.file.<file>`.
   "diagnostic.json_syntax": { line: "count", column: "count" },

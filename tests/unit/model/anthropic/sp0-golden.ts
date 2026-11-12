@@ -8,6 +8,9 @@
  *
  * DR-32 (b) (R-19 L-2) added the scenarios the first pins did not cover; their values were computed
  * on d086e04 and are the same on b05da45 without `httpStatus` (checked).
+ *
+ * DR-37 (a) changed three messages on purpose: a 401 or 403 now says only the fixed phrase and the
+ * request id (p3Retries.unauthorized, p3Retries.forbidden, p6Models.errorOnSecondPage). Nothing else.
  */
 
 export const SP0_GOLDEN: Record<string, unknown> = {
@@ -202,7 +205,7 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "auth_failed",
-        "message": "HTTP 401 authentication_error: invalid x-api-key (request req_011CAbCdEf)",
+        "message": "HTTP 401: the key or its access was refused; the provider's message is not shown (request req_011CAbCdEf)",
         "httpStatus": 401
       }
     },
@@ -212,7 +215,7 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "auth_failed",
-        "message": "HTTP 403 permission_error: no (request req_011CAbCdEf)",
+        "message": "HTTP 403: the key or its access was refused; the provider's message is not shown (request req_011CAbCdEf)",
         "httpStatus": 403
       }
     },
@@ -717,7 +720,7 @@ export const SP0_GOLDEN: Record<string, unknown> = {
       "outcome": {
         "ok": false,
         "kind": "auth_failed",
-        "message": "HTTP 401 authentication_error: bad (request req_011CAbCdEf) (page 2)",
+        "message": "HTTP 401: the key or its access was refused; the provider's message is not shown (request req_011CAbCdEf) (page 2)",
         "httpStatus": 401
       }
     },

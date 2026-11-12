@@ -309,6 +309,10 @@ export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
  *   `sk-ant-` holding a digit (`sk-ant-` and a long versioned name).
  * - Not refused by shape (misses left; the registered value still finds them): a key text of fewer
  *   than 32 characters after `sk-ant-` or without a digit, or glued to a letter, digit or `_` before.
+ * - DR-40 (c), R-25 L-2: as a regular expression this source takes time growing with the square of
+ *   some texts' length (its look-ahead rescans after every prefix). It stays the definition; checks
+ *   use anthropicRefusalShapeIn and holdsRefusedKeyShape (keys.ts), which answer the same in linear
+ *   time.
  */
 export const ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE = "\\bsk-ant-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{32,}";
 
@@ -481,7 +485,9 @@ export type ApiKeyEnv = (typeof API_KEY_ENVS)[number];
 /**
  * Every key shape Codaryn knows (regular expression sources) for refusing keys in files and
  * arguments (S-6, S-8), after the match against registered key values. Each API_PROVIDERS entry's
- * shapes are among them. DR-32 (a), DR-33, DR-36 (c): narrow shapes only.
+ * shapes are among them. DR-32 (a), DR-33, DR-36 (c): narrow shapes only. DR-40: these are the
+ * definitions; a check uses createKeyRefusalCheck or holdsRefusedKeyShape (keys.ts), not a regular
+ * expression joined from them, which can take quadratic time.
  */
 export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
 

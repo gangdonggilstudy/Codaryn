@@ -114,6 +114,8 @@ describe("U-5 report and U-6 doctor outputs", () => {
         "workspace",
         "install_dir",
         "integrity_paths",
+        // N-20: the language of the human output and where it came from.
+        "language",
       ],
     );
     assert.deepEqual([...DOCTOR_CHECK_STATUSES], ["ok", "warn", "fail", "skipped"]);

@@ -10,6 +10,7 @@ import {
   DEFAULT_ANTHROPIC_API_BASE_URL,
   DEFAULT_MAX_RETRIES,
   DEFAULT_REQUEST_TIMEOUT_MS,
+  MODEL_PLACEHOLDER_PATTERN_SOURCE,
 } from "../contracts/index.js";
 import type {
   AnthropicListSettings,
@@ -34,6 +35,45 @@ export function envValue(env: SettingsEnvironment, name: string): string | null 
   return value === undefined || value.length === 0 ? null : value;
 }
 
+const MODEL_PLACEHOLDER = new RegExp(MODEL_PLACEHOLDER_PATTERN_SOURCE);
+
+/** N-3: blank, or `<...>` once trimmed: a value that only holds a place. */
+export function isModelPlaceholder(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length === 0 || MODEL_PLACEHOLDER.test(trimmed);
+}
+
+/** N-3: the value, or null when it is absent or a placeholder. */
+export function realModel(value: string | null | undefined): string | null {
+  return value === null || value === undefined || isModelPlaceholder(value) ? null : value;
+}
+
+/**
+ * N-3: the model a run uses: task `model.model` → CODARYN_MODEL → config `model`, each skipped
+ * when it is absent or a placeholder. Null when none is left.
+ */
+export function resolveModelId(
+  taskModel: string | undefined,
+  env: SettingsEnvironment,
+  config: CodarynConfig | null,
+): string | null {
+  return realModel(taskModel) ?? realModel(envValue(env, CODARYN_MODEL_ENV)) ?? realModel(config?.model);
+}
+
+/** N-3: whether some level holds a placeholder (for the message when no model is left). */
+export function modelPlaceholderSeen(taskModel: string | undefined, env: SettingsEnvironment, config: CodarynConfig | null): boolean {
+  const fromEnv = env[CODARYN_MODEL_ENV];
+  return [taskModel, fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv, config?.model].some(
+    (value) => value !== undefined && isModelPlaceholder(value),
+  );
+}
+
+/** Message part for a missing model; mentions a placeholder when one was found (N-3). */
+export function missingModelText(placeholder: boolean): string {
+  const base = `the model (task model.model, ${CODARYN_MODEL_ENV} or config model)`;
+  return placeholder ? `${base}: only a placeholder such as <model id> was found` : base;
+}
+
 /**
  * Precedence (C-4 to C-6):
  * - key: ANTHROPIC_API_KEY only
@@ -49,12 +89,12 @@ export function resolveAnthropicSettings(
   config: CodarynConfig | null,
 ): ResolveSettingsOutcome {
   const apiKey = envValue(env, ANTHROPIC_API_KEY_ENV);
-  const modelId = model.model ?? envValue(env, CODARYN_MODEL_ENV) ?? config?.model ?? null;
+  const modelId = resolveModelId(model.model, env, config);
   const maxOutputTokens = model.maxOutputTokens ?? config?.maxOutputTokens ?? null;
 
   const missing: string[] = [];
   if (apiKey === null) missing.push(ANTHROPIC_API_KEY_ENV);
-  if (modelId === null) missing.push(`the model (task model.model, ${CODARYN_MODEL_ENV} or config model)`);
+  if (modelId === null) missing.push(missingModelText(modelPlaceholderSeen(model.model, env, config)));
   if (maxOutputTokens === null) missing.push("maxOutputTokens (task model.maxOutputTokens or config maxOutputTokens)");
   if (apiKey === null || modelId === null || maxOutputTokens === null) {
     return { ok: false, code: "provider_not_configured", message: `not set: ${missing.join("; ")}. Nothing was sent` };

@@ -1,7 +1,8 @@
 /**
- * `codaryn revert --workspace <dir> --run <runId>` (R-7): puts back the files a run changed,
- * except those changed again since. Prints one RevertOutput or CliErrorOutput.
- * Paths in the output come from the run's journal, which holds them masked.
+ * `codaryn revert --workspace <dir> --run <runId|latest> [--dry-run] [--quiet]` (R-7, N-7): puts
+ * back the files a run changed, except those changed again since. Prints one RevertOutput or
+ * CliErrorOutput. Paths in the output come from the run's journal, which holds them masked.
+ * `--dry-run` reports the same decisions and changes nothing (no lock, no revert record).
  */
 
 import path from "node:path";
@@ -29,12 +30,14 @@ export interface RevertEnvironment {
 export interface RevertCliOutcome {
   readonly output: RevertOutput | CliErrorOutput;
   readonly exitCode: number;
+  /** `--quiet` (N-5): no human-readable output on stderr. False when the arguments were not parsed. */
+  readonly quiet?: boolean;
 }
 
 export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome> {
   const parsed = parseRevertArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
-  const { runId } = parsed.args;
+  const { runId: requested, dryRun, quiet } = parsed.args;
 
   // T-12 (S-5): a network or device path is refused before the file system is touched.
   const problem = localPathProblem(parsed.args.workspace, io.cwd);
@@ -52,11 +55,11 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
   const lockId = createRunId(new Date(io.clock.now()), io.randomBytes);
   let result: RevertCommandOutcome;
   try {
-    result = await io.revert({ workspace, runId, lockId, clock: io.clock });
+    result = await io.revert({ workspace, runId: requested, lockId, clock: io.clock, dryRun });
   } catch {
-    return cliError("internal_error", "the revert stopped because of an internal error");
+    return { ...cliError("internal_error", "the revert stopped because of an internal error"), quiet };
   }
-  if (!result.ok) return cliError(result.code, result.message);
+  if (!result.ok) return { ...cliError(result.code, result.message), quiet };
 
   const status = result.outcome.skipped.length === 0 ? "complete" : "partial";
   const exitCode = REVERT_EXIT_CODES[status];
@@ -64,12 +67,15 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
     output: {
       schemaVersion: RESULT_SCHEMA_VERSION,
       kind: "revert",
-      runId,
+      runId: result.runId,
       status,
       exitCode,
       reverted: result.outcome.reverted,
       skipped: result.outcome.skipped,
+      ...(dryRun ? { dryRun: true as const } : {}),
+      ...(result.revertedBefore === null ? {} : { revertedBefore: result.revertedBefore }),
     },
     exitCode,
+    quiet,
   };
 }

@@ -27,6 +27,7 @@ import {
   TERMINAL_RUN_STATUSES,
 } from "../contracts/index.js";
 import type {
+  ListRuns,
   EngineResult,
   FileChangeRecord,
   IntegrityPhase,
@@ -43,7 +44,9 @@ import type {
   VerifierResult,
 } from "../contracts/index.js";
 import { parseReportArgs } from "./args.js";
+import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
+import { resolveRunReference } from "./run-ref.js";
 import { cliError } from "./run.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
@@ -56,6 +59,17 @@ export interface ReportEnvironment {
   /** Read only to keep the current key out of the printed report. */
   readonly env: SettingsEnvironment;
   readonly platform?: NodeJS.Platform;
+  /** N-7: the store's `listRuns`, for `--run latest`. Absent: `latest` is not available. */
+  readonly listRuns?: ListRuns;
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const realpathNative = promisify(realpathCallback.native);
@@ -464,7 +478,7 @@ async function readRecordFile(file: string): Promise<string> {
 export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> {
   const parsed = parseReportArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
-  const { runId, json } = parsed.args;
+  const { json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.
   const problem = localPathProblem(parsed.args.workspace, io.cwd);
@@ -477,6 +491,13 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   } catch {
     return cliError("workspace_not_found", "the workspace is not an existing directory");
   }
+  // N-7, N-18: `latest` is the newest checked run; ambiguous when a directory has that name.
+  const reference = await resolveRunReference(root, parsed.args.runId, {
+    exists: pathExists,
+    ...(io.listRuns === undefined ? {} : { listRuns: io.listRuns }),
+  });
+  if (!reference.ok) return cliError(reference.code, reference.message);
+  const runId = reference.runId;
 
   const runDir = path.join(root, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
   const fold = (value: string): string => ((io.platform ?? process.platform) === "win32" ? value.toLowerCase() : value);
@@ -515,7 +536,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
   let text: string;
   try {
-    text = json ? `${JSON.stringify(report)}\n` : renderReport(report);
+    text = json ? jsonLine(report) : renderReport(report);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

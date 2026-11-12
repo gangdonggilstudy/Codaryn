@@ -15,7 +15,7 @@ import { after, describe, test } from "node:test";
 import { planActionShown } from "../../../src/contracts/index.js";
 import type { ContentHash, MaskedPlanAction, MaskedText, ResolvedPlanAction, StoredPlanAction } from "../../../src/contracts/index.js";
 import { RevertRunError, createApplyJournal, createPlanRecorder, prepareDiscardedRoot, revertRun } from "../../../src/store/index.js";
-import { moveWithoutReplacing, removeSecondName } from "../../../src/store/apply-revert.js";
+import { listParkedFiles, moveWithoutReplacing, removeSecondName } from "../../../src/store/apply-revert.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -566,17 +566,63 @@ describe("removeSecondName (R-15 L-1 guard)", () => {
   test("removes a second name of the same file, and never a different file put in its place", async () => {
     const dir = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-second-")));
     roots.push(dir);
-    await mkdir(join(dir, "park"));
+    await mkdir(join(dir, ".codaryn"));
     await writeFile(join(dir, "kept.txt"), REPORT, "utf8");
     await link(join(dir, "kept.txt"), join(dir, "added.txt"));
-    assert.equal(await removeSecondName(join(dir, "added.txt"), join(dir, "kept.txt"), join(dir, "park")), true);
+    const at = { workspaceRoot: dir, runId: APPLY_RUN, index: 0 };
+    assert.deepEqual(await removeSecondName(join(dir, "added.txt"), join(dir, "kept.txt"), at), { kind: "removed" });
     assert.equal(await exists(join(dir, "added.txt")), false);
     assert.equal(await readFile(join(dir, "kept.txt"), "utf8"), REPORT);
 
     // Someone put another file (same content) at the added name: it is not removed.
     await writeFile(join(dir, "added.txt"), REPORT, "utf8");
-    assert.equal(await removeSecondName(join(dir, "added.txt"), join(dir, "kept.txt"), join(dir, "park")), false);
+    assert.deepEqual(await removeSecondName(join(dir, "added.txt"), join(dir, "kept.txt"), at), { kind: "kept" });
     assert.equal(await readFile(join(dir, "added.txt"), "utf8"), REPORT, "put back where it was");
-    assert.deepEqual(await readdir(join(dir, "park")), [], "nothing stays parked");
+    assert.deepEqual(await listParkedFiles(dir), [], "nothing stays parked");
+  });
+});
+
+describe("R-16 L-1: a second name that cannot be put back is left where it can be found", () => {
+  test("review reproduction: the name was taken meanwhile; the file stays in .codaryn/parked/<run>/ and is listed", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-parked-")));
+    roots.push(root);
+    await mkdir(join(root, ".codaryn"), { recursive: true });
+    await writeFile(join(root, "kept.txt"), REPORT, "utf8");
+    // Another file (not the same file) at the added name, and putting it back finds the name taken.
+    await writeFile(join(root, "added.txt"), "other\n", "utf8");
+    const taken = { link: async () => Promise.reject(Object.assign(new Error("EEXIST"), { code: "EEXIST" })) };
+    const outcome = await removeSecondName(join(root, "added.txt"), join(root, "kept.txt"), { workspaceRoot: root, runId: APPLY_RUN, index: 3 }, taken);
+    assert.equal(outcome.kind, "parked");
+    const parked = outcome.kind === "parked" ? outcome.path : "";
+    assert.match(parked, new RegExp(`^\.codaryn/parked/${APPLY_RUN}/3-[0-9a-f]{16}$`));
+    assert.equal(await readFile(join(root, ...parked.split("/")), "utf8"), "other\n", "the person's file is kept, not lost");
+    assert.deepEqual(await listParkedFiles(root), [{ path: parked, runId: APPLY_RUN }]);
+  });
+
+  test("removed or put back leaves nothing parked and no empty folder", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-parked-")));
+    roots.push(root);
+    await mkdir(join(root, ".codaryn"), { recursive: true });
+    await writeFile(join(root, "kept.txt"), REPORT, "utf8");
+    await link(join(root, "kept.txt"), join(root, "added.txt"));
+    const at = { workspaceRoot: root, runId: APPLY_RUN, index: 0 };
+    assert.deepEqual(await removeSecondName(join(root, "added.txt"), join(root, "kept.txt"), at), { kind: "removed" });
+    await writeFile(join(root, "added.txt"), "other\n", "utf8");
+    assert.deepEqual(await removeSecondName(join(root, "added.txt"), join(root, "kept.txt"), at), { kind: "kept" });
+    assert.equal(await readFile(join(root, "added.txt"), "utf8"), "other\n");
+    assert.deepEqual(await listParkedFiles(root), []);
+    assert.equal(await exists(join(root, ".codaryn", "parked", APPLY_RUN)), false);
+  });
+
+  test("listParkedFiles does not follow links and ignores names that are not run directories", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-parked-")));
+    const elsewhere = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-elsewhere-")));
+    roots.push(root, elsewhere);
+    // A name that is not a run id (the contract allows letters, digits, dot, dash and underscore only).
+    await mkdir(join(root, ".codaryn", "parked", "not a run"), { recursive: true });
+    await writeFile(join(root, ".codaryn", "parked", "not a run", "x"), "x", "utf8");
+    await writeFile(join(elsewhere, "y"), "y", "utf8");
+    await symlink(elsewhere, join(root, ".codaryn", "parked", APPLY_RUN), "junction");
+    assert.deepEqual(await listParkedFiles(root), []);
   });
 });

@@ -18,7 +18,7 @@ describe("U-29: an earlier limited check is told by the apply", () => {
       return true;
     };
     const deps: Pick<ApplyDeps, "planRecordsUnchecked"> = {
-      planRecordsUnchecked: () => since({ workspaceRoot: "/work", planRunId: "20261112T135722Z-79868fe5" }),
+      planRecordsUnchecked: () => since({ workspaceRoot: "/work", planRunId: "20261112T135722Z-79868fe5", applyRunId: "20261112T135733Z-194379b2" }),
     };
     assert.equal(await deps.planRecordsUnchecked?.(), true);
     assert.deepEqual(asked, ["20261112T135722Z-79868fe5"]);

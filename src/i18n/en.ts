@@ -187,7 +187,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "help.intro": "codaryn: a local task agent. One run works inside one workspace directory, under a policy, and ends when its checks decide. Records go to <workspace>/.codaryn/.",
   "help.commands_heading": "Commands:",
-  "help.output": "run prints one JSON line on stdout, and progress lines and an end summary on stderr (--quiet turns them off).",
+  "help.output": "At a terminal only the human lines on stderr show (progress, summary, explained error). The result of run, revert and apply, and any error, is also printed as one JSON line on stdout with --json, or when stdout is not a terminal (a pipe or a file). --quiet leaves the human lines out and prints the JSON line, at a terminal too.",
   "help.key": "The API key is read only from the provider's environment variable (or --vars-file), never from a file given with --task or --config; codaryn doctor names the variable.",
   "help.contract": "See docs/cli-contract.md for the full contract.",
   "help.options_heading": "Options:",
@@ -456,6 +456,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.target.discarded": "discarded",
   "cleanup.target.leftover": "leftover",
   "apply.notice.plan_records_unchecked": "The plan run's records could not be checked for changes, because the state directory is too large to check entirely; the apply was not stopped for this. Read the result, and run codaryn cleanup to make the state directory small enough to check.",
+  "apply.notice.plan_records_unchecked.run_since_plan": "The plan run's records could not be checked for changes, because the plan run or a run after it could not check the state directory entirely or stopped part way; the apply was not stopped for this. Read the result.",
   "apply.notice.plan_task_differs": "The plan was made with another task than the one given to this apply (for example a task file, and the quick form now): the checks and rules used are this apply's, not those of the plan's task. The apply was not stopped for this. An apply with the same task form as the plan run uses that task's checks and rules.",
 
   "diagnostic.file.config": "config file",

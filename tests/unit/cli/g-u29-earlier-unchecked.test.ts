@@ -7,9 +7,11 @@
  * and one notice that names the earlier run's check. A run before the plan run does not count.
  * The real CLI under the net guard; scripted model; nothing is sent. The state directory is made too
  * large with one top-level file above the store's per-file hashing limit, as in g-u8.
- * Run ids start with their second; the store orders runs by id, so two runs started in the same
- * second are ordered by their random part. The cases wait for the next second between the runs so
- * "before" and "after" are what the ids say (the same-second case is the store's, reported apart).
+ * Run ids start with their second. U-33 (R-56 Q-2, DR-55): every run that started in the plan run's
+ * second, or later, counts as a run since the plan, whatever the random part of its id. So the
+ * "before" case waits for the next second before the plan run (a run of the same second would count),
+ * and the "after" case waits too, so its run is later by the id's second as well. Runs of the same
+ * second are the store's own tests.
  */
 
 import assert from "node:assert/strict";

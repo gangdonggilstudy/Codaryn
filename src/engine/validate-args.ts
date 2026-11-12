@@ -169,7 +169,7 @@ export function workflowToolArgsProblem(name: WorkflowToolName, args: JsonObject
   }
 }
 
-/** Returns the arguments typed for the workflow tool, or `null` when the shape is invalid. */
+/** Returns the arguments typed for the task type tool, or `null` when the shape is invalid. */
 export function validateWorkflowToolArgs<N extends WorkflowToolName>(
   name: N,
   args: JsonObject,

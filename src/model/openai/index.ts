@@ -13,7 +13,7 @@
  *   `max_output_tokens` and `store: false` (DR-31 (c)): the provider keeps no copy of the response.
  * - Without stored responses the next request must carry the previous responses' `output` items,
  *   reasoning items included (facts C-11). This provider keeps them in memory, for the provider
- *   object's life (one run), and sends them back as they came. They never reach the engine, the run
+ *   object's life (one run), and sends them back as they came, up to MAX_KEPT_OUTPUT_BYTES (DR-35 (d)). They never reach the engine, the run
  *   record, the result or a report: the engine sees text and calls, and the count of reasoning items
  *   (ModelResponse.reasoningItems). Reasoning items are opaque to the privacy gateway (encrypted by
  *   the provider); they go back only to the same provider within the same run.
@@ -130,10 +130,24 @@ function validateSettings(settings: ResolvedApiSettings): string {
 // ---------------------------------------------------------------------------------------------
 // Responses kept in memory (DR-31 (c), (e))
 
+/**
+ * DR-35 (d), R-22 L-4: the most bytes of output items (their JSON as UTF-8) this provider keeps to
+ * send back over a run. Twice the limit of one response body (8 MiB) and far below the provider's
+ * request limit (128 MiB, facts C-13). When the kept items pass it, the next request is not sent and
+ * fails with a fixed message: the provider keeps no copy (`store: false`), so the conversation
+ * cannot go on without them. The response that passed it is still returned (a final answer ends
+ * the run without another request). Memory stays within this limit and one more response.
+ */
+export const MAX_KEPT_OUTPUT_BYTES = 16 * 1024 * 1024;
+
+const encoder = new TextEncoder();
+
 /** One response this provider returned, kept for the rest of the run. */
 interface KeptResponse {
   /** Its `output` items exactly as received, reasoning items included. Sent back as they are. */
   readonly items: readonly unknown[];
+  /** The size of `items` as JSON in UTF-8 bytes (DR-35 (d)). */
+  readonly bytes: number;
   /** Its function calls in order: the original `call_id` and name. */
   readonly calls: readonly { readonly callId: string; readonly name: string }[];
 }
@@ -165,6 +179,10 @@ type Tool = { type: "function"; name: AnyToolName; description: string; paramete
  * any other one is sent as the engine has it (its text and calls, no reasoning items).
  */
 function buildBody(settings: ResolvedApiSettings, request: ModelRequest, kept: readonly KeptResponse[]): { body: string } | string {
+  const keptBytes = kept.reduce((total, response) => total + response.bytes, 0);
+  if (keptBytes > MAX_KEPT_OUTPUT_BYTES) {
+    return `the output items to send back come to more than ${MAX_KEPT_OUTPUT_BYTES} bytes; the provider keeps no copy, so the conversation cannot go on`;
+  }
   const input: unknown[] = [];
   /** The engine's id of a call -> the `call_id` the provider gave it. */
   const callIds = new Map<string, string>();
@@ -340,7 +358,8 @@ function parseResponseBody(text: string): Parsed {
     usage: parseUsage(value.usage),
     ...(reasoningItems > 0 ? { reasoningItems } : {}),
   };
-  return { ok: true, response, kept: stop === "length" ? null : { items: value.output, calls } };
+  const kept = stop === "length" ? null : { items: value.output, bytes: encoder.encode(JSON.stringify(value.output)).byteLength, calls };
+  return { ok: true, response, kept };
 }
 
 // ---------------------------------------------------------------------------------------------

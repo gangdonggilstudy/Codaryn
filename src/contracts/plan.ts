@@ -73,6 +73,9 @@ export const PLAN_FILE_NAME = "plan.json";
  * `<root>/.codaryn/runs/<plan runId>/applied.json` (PlanAppliedRecord): written exclusively by the
  * apply run after its preflight passed and before its first action. Its presence makes a plan
  * applied: a second apply stops as `plan_already_applied`.
+ * DR-24 (c): plan.json and applied.json are created exclusively also on a drive without hard links
+ * (for example by an exclusive-create open), so a plan run and the DR-21 consent path work there.
+ * They are new files, not moves: no consent is involved.
  */
 export const PLAN_APPLIED_FILE_NAME = "applied.json";
 /**
@@ -219,7 +222,9 @@ export interface PlanRecorder {
   /**
    * Writes plan.json for this run, created exclusively (it must not exist), and resolves with the
    * SHA-256 of the bytes written after they were handed to the operating system. Rejects when the
-   * file exists or cannot be written; the tool then reports `io_error` and no plan exists.
+   * file exists or cannot be written; the tool then reports `io_error` and no plan exists. It does
+   * not depend on hard links (DR-24 c). A reader that sees the file half written finds its digest
+   * wrong and reports `invalid_run_record`.
    */
   savePlan(actions: readonly ResolvedPlanAction[]): Promise<ContentHash>;
 }
@@ -247,7 +252,9 @@ export interface LoadPlanRequest {
  * - run_not_found: no journal for that run
  * - run_not_plan: the run's result.json is not `needs-input`/`plan_pending`, or it has no plan.json
  * - invalid_run_record: plan.json or result.json cannot be read or parsed, plan.json names another
- *   run, or its digest is not `EngineResult.plan.digest`
+ *   run, or its digest is not `EngineResult.plan.digest`. DR-24 (d): also when an action's path
+ *   does not pass the workspace's lexical path rules (as `Workspace.resolve` applies them: relative,
+ *   no `..`, not in the state directory, no reserved or aliasing names, no stream suffix)
  */
 export type LoadPlanOutcome =
   | {
@@ -288,6 +295,15 @@ export interface UnsafeMoveConsent {
   readonly digest: ContentHash;
 }
 
+/**
+ * DR-24 (a): the name a discarded file gets inside `.codaryn/discarded/<apply runId>/`: the
+ * action's 0-based index in decimal, one segment (`String(index)`). Readers accept nothing else.
+ */
+export const DISCARDED_STORED_NAME_PATTERN_SOURCE = "^(0|[1-9][0-9]{0,5})$";
+export function discardedStoredName(index: number): string {
+  return String(index);
+}
+
 /** DR-21: the CLI argument by which a person consents to unsafe moves for this apply. */
 export const UNSAFE_MOVE_CONSENT_ARGUMENT = "--allow-unsafe-move";
 
@@ -326,7 +342,7 @@ export interface AppliedPlanAction {
   readonly action: ResolvedPlanAction;
   /** For `discard`: the file's place inside the apply run's discarded directory, `/` separated. Null for `move`. */
   readonly stored: string | null;
-  /** DR-21: present and true for a move made without the exclusive guarantee, after consent. */
+  /** DR-21: present and true for an action (a move, or a discard's move) made without the exclusive guarantee, after consent. */
   readonly unsafe?: true;
 }
 
@@ -349,10 +365,12 @@ export interface PlanExecutor {
   /**
    * Applies one action. A move creates missing parent directories and renames; it never replaces
    * an existing file and never copies. A discard renames the file into the run's discarded
-   * directory under a name built from `index` only. Never rejects for an item-level failure.
-   * DR-21: without `options.allowUnsafeMove` a move that could only be made unsafely is not done
-   * (`unsafe_move`). With it, the executor may make that move by a plain rename right after
-   * checking that the destination is still absent, and marks the outcome `unsafe: true`.
+   * directory as `discardedStoredName(index)` and reports that as `stored`. Never rejects for an
+   * item-level failure.
+   * DR-21: without `options.allowUnsafeMove` a move (or a discard's move) that could only be made
+   * unsafely is not done (`unsafe_move`). With it, the executor may make that move by a plain rename
+   * right after checking that the destination is still absent, and marks the outcome `unsafe: true`.
+   * The engine passes it only for the actions the preflight listed in `unsafeMoves`.
    */
   apply(
     action: ResolvedPlanAction,
@@ -415,8 +433,9 @@ export type ApplyJournalEvent =
       /** DR-6: the workspace has more than MAX_INVENTORY_FILES files, so the apply could not be verified. */
       readonly inventoryLimitReached: boolean;
       /**
-       * DR-21: 0-based indexes of the moves that could only be made unsafely (`unsafe_move` from the
-       * check), in plan order. Absent in journals written before DR-21 (none).
+       * DR-21: 0-based indexes of the actions that could only be made unsafely (`unsafe_move` from
+       * the check), in plan order. A discard counts too: it moves the file into the discarded
+       * directory. Absent in journals written before DR-21 (none).
        */
       readonly unsafeMoves?: readonly number[];
     }
@@ -435,9 +454,11 @@ export type ApplyJournalEvent =
       readonly type: "file_discarded";
       readonly index: number;
       readonly path: MaskedText;
-      /** Built from the action index only, never from the file name. */
+      /** Built from the action index only, never from the file name: `discardedStoredName(index)`. */
       readonly stored: string;
       readonly sha256: ContentHash;
+      /** DR-21: present and true when the file was moved into the discarded directory unsafely, with consent. */
+      readonly unsafe?: true;
     }
   | {
       /** An action failed while applying; the apply ends as `failed`/`apply_incomplete`. */
@@ -484,7 +505,9 @@ export interface ApplyJournal {
  *    failed one; when it is aborted (or the duration is over) the apply ends as cancelled (or
  *    budget-exhausted), not as `apply_incomplete`, and that action is recorded as not done.
  *    In every case what was done stays, is listed in `ApplyResult.applied`, and `codaryn revert
- *    --run <apply runId>` undoes it.
+ *    --run <apply runId>` undoes it. Known limit (R-9 I-4): an action is recorded after it is
+ *    done, so a process that ends between the two leaves that action unrecorded and a revert does
+ *    not see it.
  * 5. Verification: the inventory check (VF-05, always first), then the task's verifiers, each
  *    recorded as `verifier_result`; integrity checks around them as in a run. No repair: no model.
  * 6. `run_finished` and the result: all pass → `done`/`verified`; a fail → `failed`/`verifier_failed`;
@@ -532,7 +555,7 @@ export interface AppliedActionRecord {
   readonly index: number;
   readonly action: MaskedPlanAction;
   readonly stored: string | null;
-  /** DR-21: present and true for a move made unsafely, with consent. */
+  /** DR-21: present and true for an action (a move, or a discard's move) made unsafely, with consent. */
   readonly unsafe?: true;
 }
 

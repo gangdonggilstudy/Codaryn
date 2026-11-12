@@ -53,6 +53,8 @@ import {
   RUN_REASONS_BY_STATUS,
   APPLY_REASONS_BY_STATUS,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
+  DISCARDED_STORED_NAME_PATTERN_SOURCE,
+  discardedStoredName,
   isReasonOfStatus,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
@@ -313,6 +315,22 @@ describe("G-A plan contract", () => {
     for (const [id, expected] of Object.entries(params)) {
       assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], expected, id);
     }
+  });
+
+  test("DR-24 (a): a discarded file's stored name is its action index in decimal, one segment", () => {
+    const pattern = new RegExp(DISCARDED_STORED_NAME_PATTERN_SOURCE);
+    for (const index of [0, 1, 9, 10, 999]) {
+      assert.equal(discardedStoredName(index), String(index));
+      assert.ok(pattern.test(discardedStoredName(index)), String(index));
+    }
+    for (const bad of ["", "0001", "01", "-1", "1.5", "sub/1", "1/2", "..", "a", " 1", "1\\2"]) {
+      assert.equal(pattern.test(bad), false, JSON.stringify(bad));
+    }
+  });
+
+  test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
+    assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
   });
 
   test("DR-18 (b): a move the file system cannot make without risk of replacing a file has its own problem code", () => {

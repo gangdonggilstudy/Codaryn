@@ -1071,7 +1071,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - 목록 함수는 `main.ts`가 넘길 때만 연결된다(`listModels`, `listers`). 넘기지 않으면 아무것도 보내지 않고 `provider_not_implemented`다.
   - 키가 거부되면(`auth_failed`) 안내는 그 제공자의 키 변수(`check OPENAI_API_KEY` 등)를 적는다.
   - 현재 모델: 그 제공자의 모델 변수 → 그 제공자의 설정 `model`.
-    - 계약의 `current.source`와 `selected.overriddenBy`는 `CODARYN_MODEL`만 담을 수 있다. 그래서 openai의 `CODARYN_OPENAI_MODEL`이 설정돼 있으면 `current`는 null이고, 사람용 글이 그 변수가 쓰인다고 적는다. 계약이 그 변수를 담을 수 있게 되면 맞춘다.
+    - `current.source`와 `selected.overriddenBy`는 그 제공자의 모델 변수 이름(`ApiModelEnv`: `CODARYN_MODEL`, `CODARYN_OPENAI_MODEL`)이나 `config`다(DR-36 (a)).
   - `--use`가 쓰는 자리: anthropic은 최상위 `model`이다. 설정이 `providers.anthropic`을 쓰면 `providers.anthropic.model`, 다른 제공자는 `providers.<이름>.model`이다.
     - 다른 필드와 그 순서는 그대로 둔다. 없는 `providers`나 항목은 끝에 더한다.
     - 설정 파일이 없으면 `schemaVersion`과 그 자리의 모델만으로 만든다. `provider`는 쓰지 않는다. 간편 형식의 제공자를 바꾸는 것은 사람이 정한다.

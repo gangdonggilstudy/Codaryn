@@ -147,7 +147,8 @@ export function isProfileName(value: string): boolean {
 
 export type SelectProfileOutcome =
   | { readonly ok: true; readonly config: CodarynConfig }
-  | { readonly ok: false; readonly message: string };
+  /** U-37: `hint` names the reason for the human error (CliErrorOutput.hint). */
+  | { readonly ok: false; readonly message: string; readonly hint: "profile_needs_config" | "profile_not_found" };
 
 /**
  * N-8: the effective config for `--profile <name>`. The profile's `policy` and `verifiers` replace
@@ -156,11 +157,11 @@ export type SelectProfileOutcome =
  * The name is never echoed: it came from the command line and may not exist in the file.
  */
 export function selectProfile(config: CodarynConfig | null, name: string): SelectProfileOutcome {
-  if (config === null) return { ok: false, message: "--profile needs a config file (--config, CODARYN_CONFIG or the default location)" };
+  if (config === null) return { ok: false, message: "--profile needs a config file (--config, CODARYN_CONFIG or the default location)", hint: "profile_needs_config" };
   const profiles = config.profiles ?? {};
-  if (!Object.hasOwn(profiles, name)) return { ok: false, message: "the config file has no profile with the name given by --profile" };
+  if (!Object.hasOwn(profiles, name)) return { ok: false, message: "the config file has no profile with the name given by --profile", hint: "profile_not_found" };
   const profile = profiles[name];
-  if (profile === undefined) return { ok: false, message: "the config file has no profile with the name given by --profile" };
+  if (profile === undefined) return { ok: false, message: "the config file has no profile with the name given by --profile", hint: "profile_not_found" };
   const limits = profile.limits === undefined ? config.limits : { ...(config.limits ?? {}), ...profile.limits };
   const policy = profile.policy ?? config.policy;
   const verifiers = profile.verifiers ?? config.verifiers;

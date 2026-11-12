@@ -15,11 +15,15 @@
  */
 
 import {
+  API_KEY_ENVS,
+  API_MODEL_ENVS,
   APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
+  CLI_ERROR_HINT_DETAIL,
   MAX_FINAL_MESSAGE_CHARS,
   CLI_ERROR_HINTS,
+  DETAILED_CLI_ERROR_HINTS,
   DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
@@ -27,6 +31,7 @@ import {
   PLAN_RECORDS_UNCHECKED_CAUSES,
   PERMISSION_KINDS,
   POLICY_NARROWING_KINDS,
+  PROVIDER_SETTINGS,
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
@@ -133,10 +138,48 @@ function lines(out: readonly string[]): string {
 
 export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): HumanOutput => {
   const verifierNumbers = new Map<string, number>();
+  // U-18 (AXM-4): the calls of this run with a decision that was not allowed. Such a call is a denied
+  // call only (its decision is its line); its failed result is not told again.
+  const deniedCalls = new Set<string>();
+  /**
+   * U-52 (R-65 L-1, I-1): one renderer may draw several runs and applies (the GUI engine host keeps
+   * one per language). What it remembers of one (the verifier numbers, the denied calls) starts
+   * again at the next one's start record: call ids are unique within a run only.
+   */
+  const startAgain = (): void => {
+    verifierNumbers.clear();
+    deniedCalls.clear();
+  };
 
   // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
     isOneOf<AnyToolName>(name, ALL_TOOL_NAMES) ? catalog.format(`tool.${name}`) : catalog.format("progress.unknown_tool");
+
+  /**
+   * U-18 (AXM-4, PM Q-1 (a), Q-2 (a)): what became of a call, by the rule at
+   * RunSummaryContext.failedToolCalls. A failed result of a call with no "not allowed" decision is a
+   * failed call (`progress.tool_failed`, its tool error code). A `run_command` result that is ok but
+   * timed out, or else exited with a code other than 0, has its line; not a failed call. A result
+   * that succeeded, content that does not parse, an exit code that is not a count, or a null exit
+   * code without a timeout (a stopped command): no line.
+   */
+  const resultLine = (told: { readonly callId?: unknown; readonly tool?: unknown; readonly ok?: unknown; readonly content?: unknown; readonly errorCode?: unknown }): string | null => {
+    if (told.ok === false) {
+      if (deniedCalls.has(String(told.callId))) return null;
+      return isOneOf(told.errorCode, TOOL_ERROR_CODES) ? catalog.format("progress.tool_failed", { tool: toolText(String(told.tool)), code: told.errorCode }) : null;
+    }
+    if (told.ok !== true || told.tool !== "run_command" || typeof told.content !== "string") return null;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(told.content);
+    } catch {
+      return null;
+    }
+    if (typeof payload !== "object" || payload === null) return null;
+    const { exitCode, timedOut } = payload as { readonly exitCode?: unknown; readonly timedOut?: unknown };
+    if (timedOut === true) return catalog.format("progress.command_timed_out");
+    return isCount(exitCode, 1) ? catalog.format("progress.command_exited", { exitCode }) : null;
+  };
 
   // U-16, R-55b M-1b: a plan run's words in the run list by what became of its apply (planApplyStateOf).
   // An unfinished apply names its reason; without one (the list pairs them, so not expected) it is `?`.
@@ -198,6 +241,61 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     return `── ${words} (${pair.status}/${pair.reason}) ──`;
   }
 
+  /**
+   * U-37 (R-69 M1): the lines of a hint that takes a value (DETAILED_CLI_ERROR_HINTS), from the error's
+   * CLI_ERROR_HINT_DETAIL. A detail that is absent or does not fit gives no line (the contract:
+   * such a hint's line is left out), and never only part of them.
+   */
+  function detailedHintLines(output: CliErrorOutput): string[] {
+    const hint: unknown = output.hint;
+    const detail: unknown = (output as { readonly [CLI_ERROR_HINT_DETAIL]?: unknown })[CLI_ERROR_HINT_DETAIL];
+    if (!isOneOf(hint, DETAILED_CLI_ERROR_HINTS) || typeof detail !== "object" || detail === null) return [];
+    const { position, field, missing } = detail as { readonly position?: unknown; readonly field?: unknown; readonly missing?: unknown };
+    switch (hint) {
+      case "unknown_option":
+        return isCount(position, 1) ? [`  ${catalog.format("error.hint.unknown_option", { position })}`] : [];
+      case "key_field_in_task":
+      case "key_field_in_config": {
+        const place = typeof field === "string" ? toSchemaFieldPath(field) : null;
+        return place === null ? [] : [`  ${catalog.format(`error.hint.${hint}`, { field: place })}`];
+      }
+      case "provider_settings_missing": {
+        const items = missingItems(missing);
+        return items === null ? [] : [`  ${catalog.format("error.hint.provider_settings_missing")}`, ...items.map((item) => `    - ${item}`)];
+      }
+    }
+  }
+
+  /**
+   * U-37: provider_settings_missing's items, one per setting not set, or null when the list does not
+   * fit: not a list, empty, an item that is not one of ProviderSettingMissing's forms, or the
+   * settings not in PROVIDER_SETTINGS order, each once.
+   */
+  function missingItems(missing: unknown): CatalogText[] | null {
+    if (!Array.isArray(missing) || missing.length === 0) return null;
+    const items: CatalogText[] = [];
+    let last = -1;
+    for (const entry of missing as readonly unknown[]) {
+      if (typeof entry !== "object" || entry === null) return null;
+      const { setting, keyEnv, modelEnv, field, placeholder } = entry as Record<string, unknown>;
+      const order = isOneOf(setting, PROVIDER_SETTINGS) ? PROVIDER_SETTINGS.indexOf(setting) : -1;
+      if (order <= last) return null;
+      last = order;
+      const place = typeof field === "string" ? toSchemaFieldPath(field) : null;
+      if (setting === "key") {
+        if (!isOneOf(keyEnv, API_KEY_ENVS)) return null;
+        items.push(catalog.format("error.missing.key", { keyEnv }));
+      } else if (setting === "model") {
+        if (!isOneOf(modelEnv, API_MODEL_ENVS) || place === null || typeof placeholder !== "boolean") return null;
+        items.push(catalog.format(placeholder ? "error.missing.model_placeholder" : "error.missing.model", { variable: modelEnv, field: place }));
+      } else {
+        if (place === null) return null;
+        items.push(catalog.format("error.missing.output_limit", { field: place }));
+      }
+    }
+    return items;
+  }
+
   /** The run id, and the report and revert commands for it. */
   function nextCommands(id: unknown, here: boolean, revertable: boolean): string[] {
     const runId = toRunId(String(id));
@@ -223,6 +321,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
       // R-12 L-2: the error's own advice (CliErrorOutput.hint), as one more indented line.
       if (isOneOf(output.hint, CLI_ERROR_HINTS)) out.push(`  ${catalog.format(`error.hint.${output.hint}`)}`);
+      // U-37 (R-69 M1): or a hint that takes a value, from the error's detail.
+      else out.push(...detailedHintLines(output));
       return lines(out);
     },
 
@@ -260,6 +360,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
+      // The field is optional: absent (a caller that does not count them) is 0, no line.
+      const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
+      if (failed > 0) out.push(catalog.format("summary.failed", { count: failed }));
       // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
       // it points where the run's policy came from.
       if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
@@ -319,6 +423,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     },
 
     progressLine(event: JournalEvent): string | null {
+      // U-52: a run's or an apply's start begins a new one, well formed or not (the GUI host gives
+      // every record to progressLine first, an apply's too).
+      const type: unknown = (event as { readonly type?: unknown }).type;
+      if (type === "run_started" || type === "apply_started") startAgain();
       let line: string | null;
       switch (event.type) {
         case "run_started": {
@@ -344,6 +452,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
               : null;
           break;
         case "tool_decision": {
+          if (event.allowed === false) deniedCalls.add(String(event.callId));
           const tool = toolText(event.tool);
           const name = isOneOf<AnyToolName>(event.tool, ALL_TOOL_NAMES) ? event.tool : "?";
           if (event.allowed) {
@@ -402,8 +511,12 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = pair === null ? null : catalog.format("progress.finished", { status: catalog.format(`status.${pair.status}`), reason: pair.reason });
           break;
         }
+        case "tool_result": {
+          const told: unknown = event.result;
+          line = typeof told === "object" && told !== null ? resultLine(told) : null;
+          break;
+        }
         case "model_response":
-        case "tool_result":
           line = null;
           break;
         default:
@@ -526,6 +639,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       let line: string | null;
       switch (event.type) {
         case "apply_started": {
+          // U-52: the CLI's apply draws with applyProgressLine only.
+          startAgain();
           const approval: unknown = event.approval;
           if (!isCount(event.actions, 1) || !isOneOf(approval, APPROVAL_CHANNELS)) {
             line = null;

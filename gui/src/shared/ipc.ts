@@ -630,6 +630,28 @@ function toFinalMessage(value: unknown): FinalMessageView | null | "bad" {
   return { text, truncated: value["truncated"] };
 }
 
+/**
+ * U-40 (DR-52, AXM-17): whether masking worked, in counts only (EngineResult.masking): the values
+ * registered for masking, and the places masked in what was sent to the model. Never a value, a
+ * place or a length. The screens show it as the CLI's end summary does (`summary.masking`).
+ */
+export interface MaskingView {
+  readonly registeredValues: number;
+  readonly maskedPlaces: number;
+}
+
+/**
+ * The two counts rebuilt from `value`, or null: when there is none (nothing registered, a result
+ * written before DR-52), and when either is not a count (a whole number from 0), as the CLI's end
+ * summary shows no line then. Nothing else the field holds is carried. The engine host and the
+ * main process both use it.
+ */
+export function maskingOf(value: unknown): MaskingView | null {
+  if (!isObj(value)) return null;
+  const { registeredValues, maskedPlaces } = value;
+  return count(registeredValues) && count(maskedPlaces) ? { registeredValues, maskedPlaces } : null;
+}
+
 /** GU-3 (3.7 summary): what the window shows of a finished run. Texts are masked and cleaned. */
 export interface RunResultView {
   readonly runId: string;
@@ -656,6 +678,8 @@ export interface RunResultView {
   readonly applied: readonly PlanActionView[];
   /** U-21 (DR-47): the agent's last message; null when there is none (a plan or apply run, an older result). */
   readonly finalMessage?: FinalMessageView | null;
+  /** U-40 (DR-52): the masking counts; null when there are none or they are not counts. */
+  readonly masking?: MaskingView | null;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -748,6 +772,8 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       unsafeMoves: unsafeMoves as number | null,
       applied,
       finalMessage,
+      // U-40: counts only; anything else is not shown (no line), the rest of the result stays.
+      masking: maskingOf(result["masking"]),
     },
   };
 }
@@ -806,7 +832,7 @@ export interface PlanView {
   readonly recordsChanged?: true;
   /**
    * U-32 (U-14 AXM-15): the summary the model wrote for this plan, the agent's words and not what is
-   * approved, as rows (the engine's quoteModelText, model-text.ts). Absent when there is none, and
+   * approved, as rows (the app layer's modelTextRows, engine-host/model-text.ts). Absent when there is none, and
    * for a marked plan run.
    */
   readonly summary?: readonly string[];
@@ -877,7 +903,10 @@ export interface ChangedFileItem {
   readonly after: string | null;
 }
 
-export type ChangesReply = { readonly ok: true; readonly runId: string; readonly files: readonly ChangedFileItem[] } | { readonly ok: false; readonly code: string };
+/** U-48 (U-43, DR-38): `recordsChanged`, the run has a records-changed mark (its files then have no text). */
+export type ChangesReply =
+  | { readonly ok: true; readonly runId: string; readonly recordsChanged: boolean; readonly files: readonly ChangedFileItem[] }
+  | { readonly ok: false; readonly code: string };
 
 /** The longest file text one side may have (MAX_READ_BYTES of the app layer is 262,144 bytes), and all of them together. */
 export const MAX_CHANGE_TEXT_CHARS = 300_000;
@@ -889,6 +918,8 @@ export function toChangesReply(value: unknown): ChangesReply {
   const fail = { ok: false, code: "host_error" } as const;
   const { runId, masking, files } = value;
   if (!isRunId(runId) || masking !== "current_secrets" || !Array.isArray(files) || files.length > 10_000) return fail;
+  const recordsChanged = value["recordsChanged"] ?? false;
+  if (typeof recordsChanged !== "boolean") return fail;
   const items: ChangedFileItem[] = [];
   let total = 0;
   const text = (v: unknown): v is string | null => v === null || (typeof v === "string" && v.length <= MAX_CHANGE_TEXT_CHARS);
@@ -903,7 +934,7 @@ export function toChangesReply(value: unknown): ChangesReply {
     if (total > MAX_CHANGES_TOTAL_CHARS) return fail;
     items.push({ path, created, state: state as ChangedFileItem["state"], unavailable: unavailable as string | null, before, after });
   }
-  return { ok: true, runId, files: items };
+  return { ok: true, runId, recordsChanged, files: items };
 }
 
 /** GU-3 (3.7): one check of a run's last round, by number (N-24 (a)). */
@@ -924,6 +955,8 @@ export interface ReportView {
   readonly recordsChanged?: boolean;
   /** U-21 (DR-47): the agent's last message from the run's result; null when there is none. */
   readonly finalMessage?: FinalMessageView | null;
+  /** U-40 (DR-52): the masking counts from the run's result; null when there are none or they are not counts. */
+  readonly masking?: MaskingView | null;
   readonly kind: "run" | "apply";
   readonly status: "complete" | "incomplete";
   readonly finished: { readonly status: string; readonly reason: string } | null;
@@ -1050,7 +1083,8 @@ export function toReportReply(value: unknown): ReportReply {
       failed,
     };
   }
-  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
+  const masking = maskingOf(value["masking"]);
+  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, masking, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
 }
 
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };

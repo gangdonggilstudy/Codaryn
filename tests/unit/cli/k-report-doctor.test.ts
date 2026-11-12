@@ -97,7 +97,7 @@ describe("U-5 report", () => {
     for (const part of [
       "# Codaryn run report",
       `- Run: \`${run.runId}\``,
-      "- Task: `k1-task` (workflow `test`)",
+      "- Task: `k1-task` (task type `test`)",
       "(scripted model; no API was called)",
       "- Result: `done` / `verified`, exit code 0",
       "- Report: complete",

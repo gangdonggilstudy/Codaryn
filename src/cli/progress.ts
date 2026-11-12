@@ -5,11 +5,14 @@
  * terminal as is. Tool names outside the built-in set are not shown. A failing write is ignored:
  * progress never changes the run. stdout keeps its single JSON line.
  * DR-43 (b), review R-31 L-1: a record may give several lines; the run's start names, one line
- * each, what the workflow's rules left out of the given policy (run_started.policyNarrowings).
+ * each, what the task type's rules left out of the given policy (run_started.policyNarrowings).
+ * U-58 (R-65 I-2): without a renderer the English lines give a line for the same records as the
+ * renderer does: a failed call, and a command that exited with a code other than 0 or timed out.
  */
 
 import { TOOL_NAMES } from "../contracts/index.js";
 import type { Journal, JournalEvent, PrivacyGateway } from "../contracts/index.js";
+import { createFailedCalls } from "./failed-calls.js";
 import { cleanText, safeToken } from "./text-safety.js";
 
 export const PROGRESS_PREFIX = "codaryn: ";
@@ -31,8 +34,8 @@ function count(n: number, one: string, many: string): string {
 }
 
 /**
- * DR-43 (b): what the workflow's own rules left out of the given policy, in the words of the
- * catalog's English (progress.workflow_policy.*); kinds and counts only, no rule or path.
+ * DR-43 (b): what the task type's own rules left out of the given policy, in the words of the
+ * catalog's English (progress.workflow_policy.*, DR-50: task type); kinds and counts only, no rule or path.
  */
 export function narrowingLines(event: JournalEvent): string[] {
   if (event.type !== "run_started") return [];
@@ -40,19 +43,61 @@ export function narrowingLines(event: JournalEvent): string[] {
     const shown = Number.isSafeInteger(narrowing.count) && narrowing.count > 0 ? narrowing.count : null;
     switch (narrowing.kind) {
       case "commands_dropped":
-        return shown === null ? [] : [`the workflow's own rules leave out command rules of the configured policy: ${shown}`];
+        return shown === null ? [] : [`the task type's own rules leave out command rules of the configured policy: ${shown}`];
       case "commands_narrowed":
-        return shown === null ? [] : [`the workflow's own rules narrow command rules of the configured policy: ${shown}`];
+        return shown === null ? [] : [`the task type's own rules narrow command rules of the configured policy: ${shown}`];
       case "plan_actions_dropped":
-        return shown === null ? [] : [`the workflow's own rules leave out plan actions of the configured policy: ${shown}`];
+        return shown === null ? [] : [`the task type's own rules leave out plan actions of the configured policy: ${shown}`];
       case "restore_path_tokens_off":
-        return ["the workflow's own rules turn off restoring path tokens, which the configured policy allows"];
+        return ["the task type's own rules turn off restoring path tokens, which the configured policy allows"];
       case "verifiers_dropped":
-        return shown === null ? [] : [`the workflow's own checks leave out configured verifiers that take their ids: ${shown}`];
+        return shown === null ? [] : [`the task type's own checks leave out checks given in the config or task with the same id: ${shown}`];
       default:
         return [];
     }
   });
+}
+
+/**
+ * U-18 (AXM-4): the English lines of one run, records in journal order: progressLines', and for a
+ * call that was allowed and then failed (failed-calls.ts) a line with its tool error code. Each
+ * call gives its own state (the calls denied so far), so give each run its own.
+ */
+export function englishProgressLines(): (event: JournalEvent) => string[] {
+  const failed = createFailedCalls();
+  return (event) => {
+    const lines = progressLines(event);
+    if (failed.observe(event) && event.type === "tool_result") {
+      lines.unshift(`tool ${toolName(event.result.tool)}: failed (${safeToken(event.result.errorCode ?? "none")})`);
+    }
+    // U-58 (R-65 I-2): a command that ran, as the renderer tells it.
+    const command = commandLine(event);
+    if (command !== null) lines.unshift(command);
+    return lines;
+  };
+}
+
+/**
+ * U-58 (R-65 I-2): a `run_command` result that is ok but timed out, or else exited with a code other
+ * than 0, by its content (the masked JSON of RunCommandPayload), in the catalog's English
+ * (progress.command_timed_out, progress.command_exited). Not a failed call (PM Q-2 (a)). Content
+ * that does not parse, an exit code that is not a positive integer, or a null exit code without a
+ * timeout (a stopped command): no line, as with the renderer.
+ */
+function commandLine(event: JournalEvent): string | null {
+  if (event.type !== "tool_result") return null;
+  const told = event.result;
+  if (told.ok !== true || told.tool !== "run_command" || typeof told.content !== "string") return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(told.content);
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null) return null;
+  const { exitCode, timedOut } = payload as { readonly exitCode?: unknown; readonly timedOut?: unknown };
+  if (timedOut === true) return "command ran — stopped at its time limit";
+  return typeof exitCode === "number" && Number.isSafeInteger(exitCode) && exitCode >= 1 ? `command ran — exit code ${exitCode}` : null;
 }
 
 /** The lines for one record, without the prefix: progressLine's, then the narrowings at the start. */
@@ -91,6 +136,7 @@ export function progressLine(event: JournalEvent): string | null {
     case "run_finished":
       return `finished: ${safeToken(event.status)} (${safeToken(event.reason)})`;
     case "model_response":
+    // U-18: a failed call's result needs the run's earlier decisions (englishProgressLines).
     case "tool_result":
       return null;
   }
@@ -106,9 +152,10 @@ export function withProgress(
   write: (line: string) => void,
   /**
    * N-5: the human renderer's `progressLine` in the chosen language; the English lines above
-   * otherwise. DR-43 (b): it may give several lines for one record, each written on its own.
+   * otherwise (one state per journal, U-18). DR-43 (b): it may give several lines for one record,
+   * each written on its own.
    */
-  render: (event: JournalEvent) => string | readonly string[] | null = progressLines,
+  render: (event: JournalEvent) => string | readonly string[] | null = englishProgressLines(),
 ): Journal {
   return {
     async append(event) {

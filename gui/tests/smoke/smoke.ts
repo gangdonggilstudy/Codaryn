@@ -33,6 +33,31 @@ function messagesReceived(): number {
     return -1;
   }
 }
+/** U-40 (DR-52): the masking counts the run's result.json recorded (the CLI's own record); null when unread. */
+function recordedMasking(runId: string): unknown {
+  try {
+    return (JSON.parse(readFileSync(join(SECOND, ".codaryn", "runs", runId, "result.json"), "utf8")) as { masking?: unknown }).masking ?? null;
+  } catch {
+    return null;
+  }
+}
+/**
+ * U-54 (R-65 L-1): what the run's journal recorded of its call codaryn-call-1 (the engine's first
+ * replaced id): whether its decision allowed it and whether its result was ok; null when unread.
+ */
+function replacedCall(runId: string): { decision: boolean | null; result: boolean | null } | null {
+  try {
+    const records = readFileSync(join(SECOND, ".codaryn", "runs", runId, "journal.jsonl"), "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as { type?: string; callId?: string; allowed?: boolean; result?: { callId?: string; ok?: boolean } });
+    const decision = records.find((record) => record.type === "tool_decision" && record.callId === "codaryn-call-1");
+    const result = records.find((record) => record.type === "tool_result" && record.result?.callId === "codaryn-call-1");
+    return { decision: decision?.allowed ?? null, result: result?.result?.ok ?? null };
+  } catch {
+    return null;
+  }
+}
 /** Waits until the fake API has received more model requests than `before`; false after `ms`. */
 async function requestArrived(before: number, ms = 60_000): Promise<boolean> {
   for (let waited = 0; waited < ms; waited += 50) {
@@ -330,11 +355,21 @@ startGui({
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), runId: document.getElementById('run-result-id')?.textContent ?? null }; })()",
       );
       results["runLog"] = await js("[...document.querySelectorAll('#run-log li')].map((li) => li.getAttribute('data-kind'))");
+      // U-54 (R-65 L-1): this run's denial, of the call the engine recorded as codaryn-call-1.
+      results["firstRunDenied"] = {
+        denied: await js("document.querySelectorAll('#run-log li[data-kind=\"tool_denied\"]').length"),
+        call: replacedCall((results["runResult"] as { runId?: string } | null)?.runId ?? ""),
+      };
       results["runCounts"] = await js("document.getElementById('run-counts')?.textContent ?? null");
       // U-21 (DR-47): the run ended with the reply "done": the agent's last message under its label.
       results["runFinalMessage"] = await js(
         "(() => { const box = document.getElementById('run-final-message'); return box === null ? null : { label: box.querySelector('h4')?.textContent ?? null, text: document.getElementById('run-final-message-text')?.textContent ?? null, cut: box.querySelector('p.notice') !== null }; })()",
       );
+      // U-40 (DR-52): the masking counts right after the usage, the counts the run's result recorded.
+      results["runMasking"] = {
+        line: await js("(() => { const line = document.getElementById('run-masking'); return line === null ? null : { text: line.textContent, after: line.previousElementSibling?.id === 'run-usage' }; })()"),
+        recorded: recordedMasking((results["runResult"] as { runId?: string } | null)?.runId ?? ""),
+      };
       results["runText"] = await js("document.getElementById('work')?.textContent ?? ''");
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;
@@ -454,6 +489,12 @@ startGui({
       const beforeReview = await resultId();
       await taskWith("analyze", "a.txt를 분석한다");
       const analyzeRunId = (await newResult(beforeReview)) as string;
+      // U-54 (R-65 L-1): this run's codaryn-call-1 failed after the first run's codaryn-call-1 was
+      // denied, in the same window (one engine host): its line is in this run's progress list.
+      results["failedAfterDenial"] = {
+        call: replacedCall(analyzeRunId),
+        failed: await js("[...document.querySelectorAll('#run-log li[data-kind=\"tool_result\"] .text')].map((s) => s.textContent).filter((text) => text.includes('not_found'))"),
+      };
       results["reviewRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       if ((await js("document.getElementById('review-accept') !== null")) === true) {
         await js("document.getElementById('review-accept').click(); true");
@@ -487,6 +528,12 @@ startGui({
       results["reportReady"] = await waitFor("(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? r : null; })()");
       results["reportTabs"] = await js("[...document.querySelectorAll('#report [role=tab]')].map((b) => b.getAttribute('data-tab'))");
       results["reportSummary"] = await js("document.getElementById('report-status')?.getAttribute('data-reason') ?? null");
+      // U-40 (DR-52): the usage tab has the analyze run's masking counts after the usage line.
+      await js("document.querySelector('#report [role=tab][data-tab=\"usage\"]')?.click(); true");
+      results["reportMasking"] = {
+        line: await js("(() => { const line = document.getElementById('report-masking'); return line === null ? null : { text: line.textContent, after: line.previousElementSibling !== null && line.previousElementSibling === line.parentElement?.firstElementChild }; })()"),
+        recorded: recordedMasking(analyzeRunId),
+      };
       await js("document.querySelector('#report [role=tab][data-tab=\"review\"]')?.click(); true");
       results["reportVerdict"] = await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null");
       results["reportText"] = await js("document.getElementById('report')?.textContent ?? ''");
@@ -527,6 +574,16 @@ startGui({
       await js(`document.querySelector('[data-preview="${analyzeRunId}"]')?.click(); true`);
       await waitFor("(() => { const r = document.getElementById('revert-panel')?.getAttribute('data-preview'); return r && r !== 'loading' ? r : null; })()");
       results["revertRecordsChanged"] = await js("document.getElementById('revert-records-changed') !== null");
+      // U-48 (U-43): the marked run's changes have the warning first; its files come without text (5h showed it before the mark).
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-changes="${analyzeRunId}"]')?.click(); true`);
+      results["changesRecordsChanged"] = {
+        ready: await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()"),
+        ...((await js(
+          "(() => { const body = document.getElementById('changes'); return { first: body?.firstElementChild?.id ?? null, files: body?.querySelectorAll('.changed-file').length ?? 0, hidden: body?.querySelectorAll('[data-text=\"hidden\"]').length ?? 0, diffs: body?.querySelectorAll('.diff').length ?? 0 }; })()",
+        )) as Record<string, unknown>),
+      };
 
       // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
       // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),

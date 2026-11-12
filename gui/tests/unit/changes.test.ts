@@ -71,6 +71,8 @@ test("changes (DR-29): texts the app layer verified go on cleaned with their lin
   assert.deepEqual(toChangesReply(value), {
     ok: true,
     runId: RUN,
+    // U-48 (U-43): no records-changed mark on this run.
+    recordsChanged: false,
     files: [
       { path: "<a.md>", created: false, state: "as_run_left", unavailable: null, before: `[key: ${TOKEN}\nold\n]`, after: `[key: ${TOKEN}\nnew\n]` },
       { path: "<b.md>", created: false, state: "as_run_left", unavailable: "masking_unverified", before: null, after: null },

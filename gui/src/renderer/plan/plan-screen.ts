@@ -11,7 +11,7 @@
  * - U-32 (as the CLI's `plan`, U-14): a plan run with a records-changed mark has its warning first,
  *   no summary, and in place of the apply button that a new run makes a new plan (the main process
  *   gives it no approval token). The model's summary is shown under the label that says it is the
- *   agent's words and not what is approved (rows drawn by the engine's quoteModelText).
+ *   agent's words and not what is approved (rows drawn as the CLI draws them, by the app layer's modelTextRows).
  */
 
 import type { Texts } from "../i18n/catalog.js";

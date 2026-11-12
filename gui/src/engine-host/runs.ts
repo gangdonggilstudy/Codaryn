@@ -11,7 +11,7 @@
  *   no journal path; every text is masked by the engine and cleaned again here.
  */
 
-import { MAX_FINAL_MESSAGE_CHARS } from "../shared/ipc.js";
+import { MAX_FINAL_MESSAGE_CHARS, maskingOf } from "../shared/ipc.js";
 import { encodeLine } from "../shared/protocol.js";
 import type { HostRunItem } from "../shared/protocol.js";
 import { failureOf } from "./settings.js";
@@ -109,6 +109,8 @@ export function runResultValue(outcome: unknown, shown: Shown, shownText: Shown 
       review: isObj(review) ? { checklist: texts(review["checklist"], shown) } : null,
       protectedChanged: Array.isArray(result["protectedChanged"]) ? result["protectedChanged"].length : null,
       finalMessage: finalMessageValue(result["finalMessage"], shownText),
+      // U-40 (DR-52): the masking counts, two counts only; null when none or not counts.
+      masking: maskingOf(result["masking"]),
     },
   };
 }

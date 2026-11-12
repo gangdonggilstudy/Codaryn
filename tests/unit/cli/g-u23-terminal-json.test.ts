@@ -28,7 +28,7 @@ import { APPLY_USAGE, REVERT_USAGE, RUN_USAGE, USAGE, parseApplyArgs, parseArgs,
 import { jsonLineLeftOut, renderOutcome, stdoutText } from "../../../src/cli/guard.js";
 import type { CommandOutcome } from "../../../src/cli/guard.js";
 import { helpRequest, helpText } from "../../../src/cli/help.js";
-import { cliError } from "../../../src/cli/run.js";
+import { cliError, withHint } from "../../../src/cli/run.js";
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -296,9 +296,11 @@ describe("U-23 (DR-49): run, revert and apply take --json and nothing else chang
     assert.ok(helpText("apply").includes("--json"));
   });
 
-  test("U-45 (R58-L2): apply's help says --json or --quiet, and no decision number", () => {
+  // U-35 replaced apply's fixed sentence with the catalog's help: its option list names --json and
+  // --quiet, and what the JSON line does at a terminal is help.output's (R58-L2's texts are N-B's).
+  test("U-45 (R58-L2), U-35: apply's help lists --json and --quiet, and no decision number", () => {
     const help = helpText("apply");
-    assert.ok(help.includes("only with --json or --quiet"), help);
+    for (const option of ["  --json: ", "  --quiet: "]) assert.ok(help.includes(option), help);
     assert.doesNotMatch(help, /\((DR|UXM|AXM)-\d+\)/, help);
   });
 });
@@ -319,13 +321,15 @@ describe("U-23 (DR-49, UXM-9): codaryn with no arguments shows the help at a ter
     assert.deepEqual([bare.status, bare.stdout, bare.stderr], [0, help.stdout, ""], bare.stdout + bare.stderr);
   });
 
-  test("the real CLI through a pipe: invalid_arguments, exit 2, stdout exactly as before", async () => {
+  test("the real CLI through a pipe: invalid_arguments, exit 2, stdout as before but for the U-37 hint", async () => {
     const ws = await workspace();
     const bare = ws.cli([], false);
     const parsed = parseArgs([]);
     assert.ok(!parsed.ok && parsed.message === USAGE);
     assert.equal(bare.status, 2, bare.stderr);
-    assert.equal(bare.stdout, renderOutcome(cliError("invalid_arguments", USAGE)));
+    // U-37 (UXM-2): the line gains only "hint":"unknown_command"; the message is the same.
+    assert.equal(bare.stdout, renderOutcome(withHint(cliError("invalid_arguments", USAGE), "unknown_command")));
+    assert.equal(bare.stdout.replace(',"hint":"unknown_command"', ""), renderOutcome(cliError("invalid_arguments", USAGE)));
     assert.ok(bare.stderr.includes("invalid_arguments"), bare.stderr);
   });
 });

@@ -14,38 +14,11 @@ import { CLEANUP_USAGE } from "./cleanup.js";
 
 export const COMMANDS = HELP_COMMANDS;
 
-/**
- * G-F commands whose help texts are not in the contract yet (HELP_COMMANDS and the `help.*` ids,
- * w3:p9). Until they are, their help is the usage line and one fixed English sentence.
- */
-const USAGE_ONLY = {
-  plan: { usage: PLAN_USAGE, about: "Shows a plan run's stored plan, masked again, with its digest and whether it was applied." },
-  apply: {
-    usage: APPLY_USAGE,
-    about:
-      "Applies a plan run's plan after the person approves its digest; `codaryn revert --run <apply run id>` undoes it. " +
-      "At a terminal the result's JSON line is printed only with --json (DR-49).",
-  },
-  review: { usage: REVIEW_USAGE, about: "Records a person's verdict on a run that waits for review (review.json); the run's result is not changed." },
-  changes: {
-    usage: CHANGES_USAGE,
-    about: "Shows a run's changed files and their state, masked with the current secrets; a file's changed lines only when the current secrets mask it as the run did (DR-29). Reads only.",
-  },
-  cleanup: {
-    usage: CLEANUP_USAGE,
-    about: "Shows how much the state directory holds and what a selection would remove; removes run records only with --confirm <digest>, the records of runs not reverted only with --include-not-reverted besides, and people's discarded files only with --delete-discarded besides. Parked files, the lock and what a revert still needs are never removed (DR-39).",
-  },
-} as const;
-type UsageOnlyCommand = keyof typeof USAGE_ONLY;
-
-export type CommandName = HelpCommand | UsageOnlyCommand;
-
-function isUsageOnly(value: CommandName): value is UsageOnlyCommand {
-  return Object.hasOwn(USAGE_ONLY, value);
-}
+/** U-35 (UXM-7): every command's help comes from the catalog; the five plan and state commands too. */
+export type CommandName = HelpCommand;
 
 export function isCommandName(value: string | undefined): value is CommandName {
-  return (COMMANDS as readonly (string | undefined)[]).includes(value) || (value !== undefined && Object.hasOwn(USAGE_ONLY, value));
+  return (COMMANDS as readonly (string | undefined)[]).includes(value);
 }
 
 const USAGES: { readonly [C in HelpCommand]: string } = {
@@ -56,6 +29,11 @@ const USAGES: { readonly [C in HelpCommand]: string } = {
   models: MODELS_USAGE,
   init: INIT_USAGE,
   runs: RUNS_USAGE,
+  plan: PLAN_USAGE,
+  apply: APPLY_USAGE,
+  review: REVIEW_USAGE,
+  changes: CHANGES_USAGE,
+  cleanup: CLEANUP_USAGE,
 };
 
 /** How each option is written on the command line. */
@@ -76,11 +54,26 @@ const OPTION_SYNTAX: { readonly [O in HelpOption]: string } = {
   limit: "--limit <n>",
   // SP-6: `codaryn models --provider <name>`.
   provider: "--provider <name>",
+  // U-35: apply, review and cleanup (as their usage lines write them).
+  digest: "--digest <first 12+ hex>",
+  plan_run: "--run <runId>",
+  accept: "--accept",
+  reject: "--reject",
+  note: "--note <text>",
+  older_than: "--older-than <days>",
+  run_ids: "--run <id>[,<id>...]",
+  reverted: "--reverted",
+  discarded_older_than: "--discarded-older-than <days>",
+  discarded_run: "--discarded-run <id>[,<id>...]",
+  confirm: "--confirm <first 12+ hex of the digest>",
+  include_not_reverted: "--include-not-reverted",
+  delete_discarded: "--delete-discarded",
 };
 
 /**
- * The options each command's help describes, in order. DR-49 (U-23): `run` and `revert` list
- * `--json` (their JSON line at a terminal), which their usage lines leave out (args.ts SWITCHES).
+ * The options each command's help describes, in order. DR-49 (U-23): `run`, `revert` and `apply`
+ * list `--json` (their JSON line at a terminal), which their usage lines leave out (args.ts
+ * SWITCHES). U-35: the five plan and state commands list theirs in the order of their usage lines.
  */
 export const COMMAND_OPTIONS: { readonly [C in HelpCommand]: readonly HelpOption[] } = {
   run: ["task", "workspace", "goal", "config", "vars_file", "cancel_file", "quiet", "profile", "json"],
@@ -90,6 +83,11 @@ export const COMMAND_OPTIONS: { readonly [C in HelpCommand]: readonly HelpOption
   models: ["provider", "config", "vars_file", "use", "json"],
   init: ["config", "workspace", "json"],
   runs: ["workspace", "limit", "json"],
+  plan: ["task", "workspace", "profile", "config", "vars_file", "run", "json"],
+  apply: ["task", "workspace", "profile", "config", "vars_file", "plan_run", "digest", "allow_unsafe_move", "cancel_file", "quiet", "json"],
+  review: ["task", "workspace", "profile", "config", "vars_file", "run", "accept", "reject", "note", "json"],
+  changes: ["task", "workspace", "profile", "config", "vars_file", "run", "json"],
+  cleanup: ["workspace", "older_than", "run_ids", "reverted", "discarded_older_than", "discarded_run", "confirm", "delete_discarded", "include_not_reverted", "json"],
 };
 
 /**
@@ -114,11 +112,8 @@ export function helpText(command: CommandName | null, catalog: MessageCatalog = 
   if (command === null) {
     lines.push(messages.format("help.intro"), "", messages.format("help.commands_heading"));
     for (const name of COMMANDS) lines.push(`  ${USAGES[name]}`);
-    for (const entry of Object.values(USAGE_ONLY)) lines.push(`  ${entry.usage}`);
     lines.push("  codaryn --help | codaryn help <command> | codaryn <command> --help", "  codaryn --version", "");
     lines.push(messages.format("help.output"), messages.format("help.key"), messages.format("help.contract"));
-  } else if (isUsageOnly(command)) {
-    lines.push(`usage: ${USAGE_ONLY[command].usage}`, "", USAGE_ONLY[command].about);
   } else {
     lines.push(`usage: ${USAGES[command]}`, "", messages.format(`help.command.${command}`), "", messages.format("help.options_heading"));
     const width = Math.max(...COMMAND_OPTIONS[command].map((option) => OPTION_SYNTAX[option].length));

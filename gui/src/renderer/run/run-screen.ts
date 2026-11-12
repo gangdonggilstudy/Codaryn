@@ -5,7 +5,7 @@
  * - Cancel: off until startRun answered ("preparing", AC 5.3); asks in the window first, with
  *   "keep running" as the default; Esc never cancels. Changes already made stay (AC 5.3).
  * - The result: the status word and reason sentence from the shared catalog, the run id, the
- *   changed files (masked paths), the checks by number, usage and notes.
+ *   changed files (masked paths), the checks by number, usage, the masking counts (U-40) and notes.
  */
 
 import type { Texts } from "../i18n/catalog.js";
@@ -17,7 +17,7 @@ import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localTime } from "./run-model.js";
-import { saveReportButton } from "../report/report-screen.js";
+import { maskingLine, saveReportButton } from "../report/report-screen.js";
 import type { RunFilter, RunModel } from "./run-model.js";
 
 export interface RunScreenDeps {
@@ -191,6 +191,10 @@ function resultView(t: Texts, result: RunResultView, labels: { status: string; r
       { id: "run-usage" },
     ),
   );
+  // U-40 (DR-52, AXM-17): whether masking worked, two counts as the CLI's end summary shows them,
+  // after the usage; no line when the result has none.
+  const masking = maskingLine(t, result.masking);
+  if (masking !== null) box.append(el("p", masking, { id: "run-masking" }));
   if (result.plan !== null) box.append(el("p", t.format("run.plan", { actions: String(result.plan.actions ?? "-"), digest: result.plan.digest.slice(0, 12) }), { id: "run-plan" }));
   if (result.review !== null) {
     const review = el("div", undefined, { id: "run-review" });

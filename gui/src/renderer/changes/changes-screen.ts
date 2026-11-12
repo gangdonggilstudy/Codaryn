@@ -4,6 +4,8 @@
  * - A file's texts come only when the app layer found them masked now as the run masked them and
  *   the file is still what the run left; the window then compares them line by line (diff/). Else
  *   it shows the path and state, and says why there is no text (`masking_unverified` and the rest).
+ * - U-48 (U-43, DR-38): a run with a records-changed mark has its warning first, as the run list,
+ *   the plan and the report have theirs; its files come without text, and each says the mark is why.
  * - Keys: F7 and Shift+F7 move to the next and previous change, Alt+F7 and Alt+Shift+F7 to the next
  *   and previous file. Nothing here edits; copying copies the masked text on the screen.
  */
@@ -36,14 +38,14 @@ function word(t: Texts, prefix: string, value: string): string {
   return t.has(id) ? t.format(id) : value;
 }
 
-function fileSection(t: Texts, file: ChangedFileItem, index: number): HTMLElement {
+function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boolean): HTMLElement {
   const section = el("section", undefined, { class: "changed-file", "data-file": String(index), "data-state": file.state, "data-created": String(file.created), tabindex: "-1" });
   const facts = [word(t, "changestate", file.state)];
   if (file.created) facts.push(t.format("changes.created"));
   if (file.unavailable !== null && file.unavailable !== "masking_unverified") facts.push(word(t, "unavailable", file.unavailable));
   section.append(el("h3", file.path, { class: "path" }), el("p", facts.join(" · "), { class: "facts" }));
   if (file.before === null && file.after === null) {
-    if (file.unavailable === "masking_unverified") section.append(el("p", t.format("changes.unverified"), { class: "notice", "data-text": "hidden" }));
+    if (file.unavailable === "masking_unverified") section.append(el("p", t.format(marked ? "changes.unverifiedMarked" : "changes.unverified"), { class: "notice", "data-text": "hidden" }));
     section.setAttribute("data-text", "none");
     return section;
   }
@@ -129,12 +131,15 @@ export function changesScreen(deps: ChangesDeps): ChangesScreen {
           body.setAttribute("data-changes-ready", "error");
           return;
         }
+        // U-48 (DR-38): the mark's warning first; every file below is the marked run's record.
+        const warning = reply.recordsChanged ? [el("p", t.format("changes.recordsChanged"), { class: "notice", id: "changes-records-changed" })] : [];
         body.replaceChildren(
+          ...warning,
           el("p", t.format("changes.of", { runId: reply.runId, count: String(reply.files.length) }), { id: "changes-summary" }),
           el("p", t.format("changes.masking"), { class: "notice" }),
           el("p", t.format("changes.textRule"), { class: "notice" }),
           el("p", t.format("changes.keys"), { class: "notice" }),
-          ...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : reply.files.map((file, index) => fileSection(t, file, index))),
+          ...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged))),
         );
         body.setAttribute("data-changes-ready", String(reply.files.length));
       })();

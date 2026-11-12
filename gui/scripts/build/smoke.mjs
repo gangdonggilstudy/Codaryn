@@ -6,7 +6,7 @@
 // and in the repository root.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,6 +33,21 @@ const fakeApi = await fromRoot("tests", "support", "fake-anthropic.js");
 const fakeModels = await fromRoot("tests", "support", "fake-models.js");
 const { FAKE_API_KEY, FAKE_OPENAI_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
 const { ANTHROPIC_API_KEY_ENV, API_PROVIDERS } = await fromRoot("src", "contracts", "index.js");
+const { KO_MESSAGES } = await fromRoot("src", "i18n", "ko.js");
+/**
+ * U-40 (DR-52): a masking line shown right after the usage, with the CLI's summary.masking words and
+ * the two counts the run's result.json recorded (at least one value registered: the fake keys).
+ */
+const maskingShown = (v) =>
+  v !== null &&
+  v.line !== null &&
+  v.line.after === true &&
+  v.recorded !== null &&
+  Number.isSafeInteger(v.recorded.registeredValues) &&
+  v.recorded.registeredValues >= 1 &&
+  Number.isSafeInteger(v.recorded.maskedPlaces) &&
+  v.recorded.maskedPlaces >= 0 &&
+  v.line.text === KO_MESSAGES["summary.masking"].replace("{registered}", String(v.recorded.registeredValues)).replace("{masked}", String(v.recorded.maskedPlaces));
 const closeFake = [];
 // Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
 // window); a run that hangs (cancelled by closing the window).
@@ -117,15 +132,26 @@ env.XDG_CONFIG_HOME = sandboxAppData;
 // R29-L1: how many model requests the fake API has received, for the app's steps that cancel or close
 // a run: they wait until that run's request arrived (a file on this machine, rewritten every 50 ms).
 const apiCountFile = join(gui, "build", "smoke-api-count.json");
+// U-51: each count is written whole to a temporary file and renamed over the count file, so a read
+// never meets a file half written (written in place, the file is emptied first: the app read -1 and
+// its 5d step waited for a request that had arrived). Renaming over the file while the app has it
+// open fails on Windows (EPERM): the count file then keeps the last whole count, and the next write,
+// 50 ms later, tries again. A count can be a tick late, never wrong or unreadable.
+const apiCountTemp = `${apiCountFile}.tmp`;
+const apiCountWrites = { replaced: 0, retried: 0 };
+const apiMessages = () => api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
 const writeApiCount = () => {
-  const messages = api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
   try {
-    writeFileSync(apiCountFile, JSON.stringify({ messages }));
+    writeFileSync(apiCountTemp, JSON.stringify({ messages: apiMessages() }));
+    renameSync(apiCountTemp, apiCountFile);
+    apiCountWrites.replaced += 1;
   } catch {
-    // The app reads it again on its next try.
+    apiCountWrites.retried += 1;
   }
 };
-writeApiCount();
+// The first count, before the app starts: nothing reads it yet, so it is written in place.
+rmSync(apiCountTemp, { force: true });
+writeFileSync(apiCountFile, JSON.stringify({ messages: apiMessages() }));
 env.CODARYN_SMOKE_API_COUNT = apiCountFile;
 
 // R-10 L-4: a link inside the built renderer to a folder outside it (the temporary folder, on
@@ -158,6 +184,7 @@ const run = await new Promise((resolve) => {
 });
 clearInterval(apiCountTimer);
 rmSync(apiCountFile, { force: true });
+rmSync(apiCountTemp, { force: true });
 const realDefaultAfter = realDefaultConfig !== null && existsSync(realDefaultConfig) ? statSync(realDefaultConfig).mtimeMs : null;
 const sandboxMade = existsSync(join(sandboxAppData, "Codaryn", "config.json"));
 const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
@@ -316,6 +343,8 @@ const expected = [
   ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
   // U-21 (DR-47): the agent's last message, under the label that says it is its own words.
   ["runFinalMessage", (v) => JSON.stringify(v) === JSON.stringify({ label: "에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님)", text: "done", cut: false })],
+  // U-40 (DR-52): the masking counts at the run's end, as the CLI's end summary shows them.
+  ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
   ["cancelReady", (v) => v === "ready"],
@@ -387,6 +416,7 @@ const expected = [
   ["reportReady", (v) => v === "run"],
   ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
   ["reportSummary", (v) => v === "awaiting_review"],
+  ["reportMasking", maskingShown],
   ["reportVerdict", (v) => v === "accepted"],
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
@@ -517,6 +547,8 @@ const expected = [
   // U-32: the report's warning above its tabs; the marked run's revert preview says so, as the CLI's revert.
   ["reportRecordsChangedFirst", (v) => v === "report-records-changed"],
   ["revertRecordsChanged", (v) => v === true],
+  // U-48 (U-43): the marked run's changes: the warning first, every file without text, no comparison.
+  ["changesRecordsChanged", (v) => v !== null && v.first === "changes-records-changed" && v.files >= 1 && v.ready === String(v.files) && v.hidden === v.files && v.diffs === 0],
   // U-11 (3.11): the first-run guide.
   ["setupSandbox", (v) => v.made === true && v.realUntouched === true],
   ["setupFolder", (v) => v === "folder"],
@@ -656,5 +688,8 @@ rmSync(sandboxAppData, { recursive: true, force: true });
 rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
 const total = expected.length + 1 + switchChecks + lifeChecks;
+// U-51: how the request count reached the app (not a check): whole replacements, and the writes a read
+// in progress refused (EPERM on Windows), left to the next one.
+process.stdout.write(`api count file: ${apiCountWrites.replaced} replaced whole, ${apiCountWrites.retried} left to the next write\n`);
 process.stdout.write(`gui smoke: ${total - Math.min(failed, total)} of ${total} checks passed, app exit ${run.status}\n`);
 process.exit(failed === 0 ? 0 : 1);

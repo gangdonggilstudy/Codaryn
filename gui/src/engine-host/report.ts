@@ -6,6 +6,7 @@
  * or the journal goes on.
  */
 
+import { maskingOf } from "../shared/ipc.js";
 import { finalMessageValue } from "./runs.js";
 import { failureOf } from "./settings.js";
 import type { HostFailure, Shown } from "./settings.js";
@@ -73,6 +74,8 @@ export function reportValue(outcome: unknown, shown: Shown, shownText: Shown): O
     recordsChanged: output["recordsChanged"] === true,
     // U-21 (DR-47): the agent's last message, from the run's result (absent before DR-47).
     finalMessage: finalMessageValue(isObj(output["result"]) ? output["result"]["finalMessage"] : undefined, shownText),
+    // U-40 (DR-52): the run's masking counts as its result recorded them; null when none or not counts.
+    masking: maskingOf(isObj(output["result"]) ? output["result"]["masking"] : undefined),
     status: output["status"] === "incomplete" ? "incomplete" : "complete",
     finished: finished(journal["finished"]),
     usage: usage(output["result"]),

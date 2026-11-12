@@ -263,6 +263,7 @@ export const KO = {
   "run.noChecks": "검증 없음",
   "run.check": "검증 {number}: {outcome}",
   "run.usage": "모델 턴 {turns} · 도구 호출 {tools} · 토큰 {tokens} · 시간 {time}",
+  "run.masking": "가림: 등록된 가릴 값 {registered}개 · 모델에 보낸 글에서 가린 곳 {masked}개",
   "run.plan": "계획을 만들었습니다: 동작 {actions}개, 다이제스트 {digest}",
   "run.review": "사람 확인 목록",
   "run.notices": "안내",

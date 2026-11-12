@@ -6,10 +6,11 @@
  *   back as an ok outcome.
  * - A confirmed digest that is not the plan's is the error `cleanup_plan_changed`, and a held lock is
  *   `workspace_locked`; neither is a cleanup outcome. Before, both came back as outcomes.
- * - `--run latest` while the latest run is still going is `run_in_progress`, not `run_not_found` or
- *   another run (the CLI resolves it; the app passes the code on).
- * Reproduced first (584a31c, todo); the app layer follows the contract now. run_in_progress stays
- * todo until the CLI answers it. `partly_failed` needs a removal the OS refuses; the contract's tests show the rule and
+ * - `--run latest` while the only run is still going is `run_in_progress`, not `run_not_found`; with
+ *   a finished run before it, that run is chosen as before (AXM-8). The CLI resolves it; the app
+ *   passes the code on.
+ * Reproduced first (584a31c, todo); the app layer (c59256c) and the CLI (80fec27) follow the
+ * contract now. `partly_failed` needs a removal the OS refuses; the contract's tests show the rule and
  * the app uses the same function. Real runs through the app (scripted model), the real store.
  * Fake values only.
  */
@@ -23,7 +24,6 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp, RunHandle } from "../../../src/app/index.js";
 import { WRITE_NOTES, appEnvironment, exists, setupRun, taskRequest } from "./support.js";
 
-const TODO_CLI = { todo: "U-22: wait for the CLI to answer run_in_progress" };
 const WAIT = { text: "waiting", delayMs: 30_000 };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
@@ -98,11 +98,25 @@ describe("U-22 (DR-48): the app says what a cleanup did", () => {
     }
   });
 
-  test("report --run latest while the latest run is still going: run_in_progress", TODO_CLI, async () => {
+  test("report --run latest while the only run is still going: run_in_progress", async () => {
+    const base = await setupRun({}, {}, []);
+    const lone = { base, workspace: path.join(base, "work"), app: createCodarynApp(await appEnvironment(base)) };
+    const handle = await busyOn(lone);
+    try {
+      assert.equal(codeOf(await lone.app.report({ workspace: lone.workspace, runId: "latest" })), "run_in_progress");
+    } finally {
+      handle.cancel();
+      await handle.done;
+    }
+    // Once it has ended, latest names it.
+    assert.equal(ok(await lone.app.report({ workspace: lone.workspace, runId: "latest" })).runId, handle.runId);
+  });
+
+  test("report --run latest with a finished run before the one still going: the finished one, as before (AXM-8)", async () => {
     const run = await finishedRun();
     const handle = await busyOn(run);
     try {
-      assert.equal(codeOf(await run.app.report({ workspace: run.workspace, runId: "latest" })), "run_in_progress");
+      assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: "latest" })).runId, run.runId);
     } finally {
       handle.cancel();
       await handle.done;
@@ -118,10 +132,14 @@ async function busyOn(run: { base: string; workspace: string; app: CodarynApp })
   await writeFile(busyTask, JSON.stringify({ ...text, workspaceRoot: run.workspace }), "utf8");
   const running = await run.app.startRun(taskRequest(busy));
   assert.ok(running.ok, JSON.stringify(running));
-  // The waiting run holds the lock once its first model turn has started.
-  for (let i = 0; i < 100; i += 1) {
-    if (await exists(path.join(run.workspace, STATE_DIR_NAME, LOCK_FILE_NAME))) break;
+  // The waiting run holds the lock, and then its records appear in the run list (the lock comes
+  // first, so wait for both).
+  const runId = running.handle.runId;
+  for (let i = 0; i < 250; i += 1) {
+    const listed = await run.app.listRuns({ workspace: run.workspace });
+    const held = await exists(path.join(run.workspace, STATE_DIR_NAME, LOCK_FILE_NAME));
+    if (held && listed.ok && listed.output.runs.some((entry) => entry.runId === runId)) return running.handle;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  return running.handle;
+  assert.fail("the waiting run did not show in the run list");
 }

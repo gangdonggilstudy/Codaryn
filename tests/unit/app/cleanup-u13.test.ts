@@ -87,7 +87,7 @@ describe("U-13 (UXM-1): an apply run's records stay while its discarded files st
   test("UXM-1's steps: both folders selected, runs not reverted confirmed, the discarded folders not: the apply run is skipped, the rest removed", async () => {
     const run = await appliedNotReverted(true);
     const applied = await cleanup(run, { runs: { olderThanDays: 0 }, discarded: { olderThanDays: 0 } }, false);
-    assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
+    assert.ok(applied.status === "removed" && applied.outcome.ok, JSON.stringify(applied));
     assert.deepEqual(
       sorted(applied.outcome.kept),
       sorted([
@@ -109,7 +109,9 @@ describe("U-13 (UXM-1): an apply run's records stay while its discarded files st
   test("runs only selected (the discarded folder cannot be confirmed): the apply run is skipped as discarded_left", async () => {
     const run = await appliedNotReverted(false);
     const applied = await cleanup(run, { runs: { olderThanDays: 0 } }, true);
-    assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
+    // DR-48 (U-22): nothing removed, so the cleanup says so and its outcome is not ok.
+    assert.equal(applied.status, "nothing_removed", JSON.stringify(applied));
+    assert.equal(applied.outcome.ok, false);
     assert.deepEqual(
       sorted(applied.outcome.kept),
       sorted([
@@ -124,7 +126,7 @@ describe("U-13 (UXM-1): an apply run's records stay while its discarded files st
   test("the discarded folder's removal confirmed too: the apply run's records go with it", async () => {
     const run = await appliedNotReverted(false);
     const applied = await cleanup(run, { runs: { olderThanDays: 0 }, discarded: { olderThanDays: 0 } }, true);
-    assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
+    assert.ok(applied.status === "removed" && applied.outcome.ok, JSON.stringify(applied));
     assert.deepEqual(applied.outcome.kept, []);
     assert.deepEqual(
       sorted(applied.outcome.removed.map((item) => [item.target, "runId" in item ? item.runId : null])),

@@ -51,6 +51,7 @@ export type {
   ListModelsRequest,
   ApplyCleanupRequest,
   CleanupApplied,
+  CleanupDoneOutcome,
   CleanupPreview,
   CleanupPreviewRequest,
   ListRunsRequest,

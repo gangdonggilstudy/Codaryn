@@ -62,7 +62,7 @@ node dist/src/cli/main.js revert --workspace $demo\workspace --run latest
 
 **doctor:** 모든 항목이 `ok`이거나 `skipped`이고 종료 0이다. `API key` 항목은 "the task uses the scripted model; no key is needed"로 건너뛴다. 기본 설정 파일이 없으면 `config file` 항목도 건너뛴다(4절).
 
-**run:** stdout에는 결과 JSON 한 줄, stderr에는 진행 줄과 끝 요약이 나온다(8절). 아래는 stderr의 실제 출력이다. 실행 id와 시간은 실행마다 다르다.
+**run:** stdout에는 결과 JSON 한 줄, stderr에는 진행 줄과 끝 요약이 나온다(8절). 결과 JSON 줄은 stdout이 파이프나 파일일 때 나온다. 콘솔에서 그대로 치면 stdout과 stderr가 둘 다 터미널이라, 그 줄은 없고 stderr의 글만 보인다(10절 "터미널에서"). 아래는 stderr의 실제 출력이다. 실행 id와 시간은 실행마다 다르다.
 
 ```
 codaryn: run started — provider scripted
@@ -107,7 +107,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T030342Z-42ed82a7
 - `check #1 — not passed (fail)` → `repair 1`: 검증 실패 근거를 모델에 돌려보내 다시 고치게 했다(9절). 검증기는 id가 아니라 순번으로 나온다.
 - 끝 요약의 `Files changed`는 바뀐 파일 수다. `summary.md`를 두 번 썼어도 파일은 하나다.
 - `The agent's last message (…)` 아래의 `|` 줄은 모델이 마지막에 한 답이다(대본의 마지막 단계). 에이전트의 말이며 검증된 사실이 아니다. 무엇이 확인됐는지는 위의 `Checks passed`가 말한다(8절 "에이전트의 마지막 답").
-- stdout의 JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이다. `changes`에는 `summary.md`의 생성과 변경 두 건, `usage.repairAttempts`는 1이다. JSON의 한글은 `\uXXXX`로 나오므로 PowerShell에서 `$r = node dist/src/cli/main.js run --task $demo\task.json | ConvertFrom-Json`처럼 바로 변수로 받을 수 있다.
+- stdout의 JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이다. `changes`에는 `summary.md`의 생성과 변경 두 건, `usage.repairAttempts`는 1이다. JSON의 한글은 `\uXXXX`로 나오므로 PowerShell에서 `$r = node dist/src/cli/main.js run --task $demo\task.json | ConvertFrom-Json`처럼 바로 변수로 받을 수 있다. 이때 stdout은 파이프이므로 콘솔에서도 JSON 줄이 온다.
 - `init`으로 기본 설정을 만든 뒤라면(4절) 두 줄이 더 나온다: 진행 줄 `codaryn: using the config file in the default location: %APPDATA%\Codaryn\config.json`과 요약 줄 `Used the config file in the default location: %APPDATA%\Codaryn\config.json`. `init`의 기본 한도는 이 예시의 한도보다 크므로 실행 결과는 같다.
 
 **runs:** 작업 공간의 실행 목록이다(10절). 실제 출력:
@@ -127,7 +127,7 @@ codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:
 
 stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다. 변경과 사용량 사이에는 `## The agent's last message` 절이 있다. 머리말 `The agent's last message. These are the agent's own words, not a verified fact.` 아래에 끝 요약과 같은 `|` 줄이 코드 블록으로 나온다(8절 "에이전트의 마지막 답").
 
-**revert --dry-run:** 아무것도 바꾸지 않고 무엇을 되돌릴지 보인다. stdout은 `"dryRun":true`가 붙은 결과 JSON 한 줄이고 종료 코드는 실제 되돌리기와 같다(0). stderr:
+**revert --dry-run:** 아무것도 바꾸지 않고 무엇을 되돌릴지 보인다. stdout은 `"dryRun":true`가 붙은 결과 JSON 한 줄이고 종료 코드는 실제 되돌리기와 같다(0). 이 JSON 줄도 파이프나 파일일 때만 나오고, 콘솔에서는 stderr의 글만 보인다. stderr:
 
 ```
 codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
@@ -510,7 +510,7 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 - 취소는 Ctrl+C로 하거나, `--cancel-file`로 지정한 파일(작업 공간 밖)을 만들어서 한다. 상태는 `cancelled`(5)가 되고 이미 적용한 변경은 남는다.
 - 모델은 허용 명령 목록을 따로 받지 않는다. 실행할 명령을 `goal`에 정확히 적는다(예: `code-task.json`).
 
-**사람용 출력(stderr):** stdout은 늘 JSON 한 줄이고, 사람이 읽는 글은 stderr에 나온다.
+**사람용 출력(stderr):** 사람이 읽는 글은 stderr에 나온다. stdout에는 결과 JSON 한 줄이 나온다. 다만 콘솔처럼 stdout과 stderr가 둘 다 터미널이면, `--json`이나 `--quiet`가 없는 한 그 줄을 내지 않는다(10절 "터미널에서").
 
 - 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
 - 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 가림 개수(가릴 값을 등록한 실행), 에이전트의 마지막 답(있을 때), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
@@ -527,6 +527,7 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
   - 0은 "모델에 보낸 글에서 가린 곳이 없었다"는 뜻이다. 값이 모델에 가지 않았다는 보증은 아니다. 가리지 못하는 형태(16절 "가림의 빈틈", "키 거부와 가림의 빈틈")는 세지도 않는다.
   - 가린 곳의 수는 등록 값이 나온 횟수와 다를 수 있다. 표지 글 `CODARYN_SECRET`이 든 파일도 가린 곳으로 센다(12절).
   - 등록한 가릴 값이 없으면 이 줄이 없다.
+  - GUI도 실행 끝 화면과 보고서의 사용량 탭에 같은 글의 줄을 보인다(U-40). 근거는 코드와 검토 R-63이고, GUI는 띄우지 않았다([민감정보 처리](privacy.md) 5절 "가림 개수").
   - 이 줄과 결과의 `masking`은 짧은 가릴 값의 추측을 확인하는 데 쓰일 수 있다. 짧은 비밀을 쓰는 실행의 출력은 공개 로그에 남기지 않는다(12절).
 - **에이전트의 마지막 답(DR-47):** 실행이 모델의 마지막 답(도구 호출 없이 끝낸 응답)으로 끝났으면, 끝 요약의 사용량 다음에 머리말 `The agent's last message (the agent's own words, not a verified fact):`(한국어 `에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님):`) 아래로 그 글이 나온다.
   - 머리말 그대로 에이전트의 말이며 검증된 사실이 아니다. "다 고쳤다"고 써도 검증을 통과했다는 뜻이 아니다. 판정은 검증 결과와 `report`로 한다.
@@ -534,10 +535,10 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
   - 글은 가린 기록에서 만든다. 가릴 값은 토큰(`[[CODARYN_SECRET:…]]`)으로, 키 모양은 `[key]`로 보인다. 제어 문자와 보이지 않는 문자(양방향 제어, 영폭 공백 등)는 빠진다(개인정보 문서 5절).
   - 2,000자(코드 포인트)까지다. 넘으면 앞 2,000자만 보이고 그 아래에 `(cut: only the first 2000 characters are shown)`(한국어 `(잘림: 앞 2000자만 보입니다)`)가 붙는다.
   - 없는 경우: 계획 실행(`plan_pending`, 그 자리는 계획의 요약이다. 18.3절 "계획 보기"), 한도에 걸리는 등 모델의 답 없이 끝난 실행, 답이 비었거나 공백뿐인 실행.
-  - 같은 글이 나오는 곳: stdout JSON과 `result.json`의 `finalMessage`(10절), `report`의 `## The agent's last message` 절(머리말 `The agent's last message. These are the agent's own words, not a verified fact.`, 3절), `report --json`의 `result.finalMessage`, GUI의 실행 결과 화면과 보고서 화면(같은 뜻의 머리말. GUI는 코드로만 확인했고 화면은 띄우지 않았다).
+  - 같은 글이 나오는 곳: stdout JSON(터미널이 아닐 때와 `--json`·`--quiet`일 때, 10절 "터미널에서")과 `result.json`의 `finalMessage`(10절), `report`의 `## The agent's last message` 절(머리말 `The agent's last message. These are the agent's own words, not a verified fact.`, 3절), `report --json`의 `result.finalMessage`, GUI의 실행 결과 화면과 보고서 화면(같은 뜻의 머리말. GUI는 코드로만 확인했고 화면은 띄우지 않았다).
   - **journal에는 모델이 보낸 글이 그대로 남는다.** `journal.jsonl`의 `model_response` 기록마다 `text`에 그 턴의 모델 글이 있다. 등록한 가릴 값만 토큰으로 바뀌어 있고(가림본), 위의 처리(키 모양을 `[key]`로, 제어 문자와 보이지 않는 문자 빼기, 2,000자 자르기)는 거치지 않는다. 마지막이 아닌 답도 남는다. 3절 체험의 journal에는 4턴의 `요약을 만들었다.`와 6턴의 `빠진 '## 할 일' 절을 더했다.`가 둘 다 있고, 끝 요약에는 6턴의 것만 나온다. journal을 열어 보거나 남에게 줄 때는 이 점을 생각한다([민감정보 처리](privacy.md) 5절).
   - 확인(U-21 통합 판 `be5e089`의 실제 CLI): 3절 체험, `analyze` 실행(답 `done`), 가릴 값·키 모양·탭·CRLF·제어 문자·이어진 공백·2,100자를 넣은 대본(영어·한국어), 계획 실행, `max_model_turns`로 끝난 실행, 공백뿐인 답(셋 다 없음). main `a191a50`에서 3절 체험의 끝 요약, `report`, `report --json`, journal을 다시 봤다.
-- 오류 설명: 무엇이 잘못됐는지, 위치(6절 "오류 위치"), 고치는 법, 코드. 실행 전 오류에도 나온다. 오류 JSON의 영어 `message`는 stdout에만 있다. 예:
+- 오류 설명: 무엇이 잘못됐는지, 위치(6절 "오류 위치"), 고치는 법, 코드. 실행 전 오류에도 나온다. 오류 JSON의 영어 `message`는 stdout에만 있다. 콘솔에서는 그 줄이 나오지 않으므로, `message`를 보려면 `--json`을 준다(10절 "터미널에서"). 예:
 
 ```
 codaryn: error — the model provider is not fully configured (key, model, output limit), so nothing was sent (provider_not_configured)
@@ -545,9 +546,9 @@ codaryn: error — the model provider is not fully configured (key, model, outpu
   Check: codaryn doctor
 ```
 
-- 이 예는 키도 모델도 없는 상태(`init` 직후)의 `run --workspace … --goal …`이다(main `3e36b1b`, `CODARYN_LANG=en`). 빠진 것(어느 키 변수인지 포함)은 stdout JSON의 `message`와 `doctor`가 알린다(`not set: ANTHROPIC_API_KEY; the model …`).
+- 이 예는 키도 모델도 없는 상태(`init` 직후)의 `run --workspace … --goal …`이다(main `3e36b1b`, `CODARYN_LANG=en`). 빠진 것(어느 키 변수인지 포함)은 stdout JSON의 `message`와 `doctor`가 알린다(`not set: ANTHROPIC_API_KEY; the model …`). 콘솔에서 `message`를 보려면 `--json`을 준다.
 
-- **`--quiet`**: `run`과 `revert`가 받는다. 진행 줄, 끝 요약, 오류 설명을 모두 생략한다. stdout의 JSON은 그대로다.
+- **`--quiet`**: `run`, `revert`, `apply`가 받는다. 진행 줄, 끝 요약, 오류 설명을 모두 생략한다. stdout의 JSON 한 줄은 그대로이고, 콘솔에서도 나온다(10절 "터미널에서").
 
 **언어:** 사람용 글(위 출력, 도움말, `doctor`)은 한국어와 영어다. 고르는 순서는 `CODARYN_LANG`(`ko`·`en`, 대소문자 무시) → 설정 파일 `language` → OS 표시 언어(한국어면 ko) → en이다. `CODARYN_LANG`이 그 밖의 값이면 무시하고 `doctor`의 메시지 언어 항목이 `[warning]`으로 알린다. 오류 코드, JSON 필드, 종료 코드, 명령 이름, `--json` 출력은 영어로 고정이다. 같은 오류의 한국어 출력 예:
 
@@ -581,15 +582,41 @@ codaryn: 오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 �
 
 ## 10. 결과 읽기
 
-`run`의 stdout에는 JSON 한 줄만 나온다. 비 ASCII 문자는 `\uXXXX`로 나오므로 어느 코드 페이지에서도 JSON으로 읽힌다.
+`run`의 stdout에는 JSON 한 줄만 나온다(콘솔에서는 아래 "터미널에서"). 비 ASCII 문자는 `\uXXXX`로 나오므로 어느 코드 페이지에서도 JSON으로 읽힌다.
 
 - **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다. 에이전트의 마지막 답이 있으면 `finalMessage`(`text`, `truncated`)도 있다(8절). `text`는 끝 요약과 같은 처리를 거친 글이고, 줄바꿈은 LF, 탭은 그대로다. 가릴 값을 등록한 실행이면 `masking`(`registeredValues`, `maskedPlaces`: 정수 둘, 8절 "가림 개수")도 있다. 등록한 값이 없으면 필드가 없고, 등록했지만 가린 곳이 없으면 `maskedPlaces`가 0이다. 실행 폴더의 `result.json`에도 같은 필드가 있다. DR-47 전의 판이 쓴 `result.json`에는 `finalMessage`가, DR-52 전의 판이 쓴 것에는 `masking`이 없다. `report --json`의 `result`에도 같은 두 개수가 있고, `report`의 Markdown 본문에는 가림 개수가 없다.
 - **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절). 메시지에는 값 대신 필드 이름만 적힌다.
-- `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다.
+- `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다(콘솔에서는 아래 "터미널에서").
+- **터미널에서(DR-49, DR-56, U-23, U-45):** stdout과 stderr가 **둘 다** 터미널이면(콘솔에서 그대로 칠 때) 두 가지 JSON 줄을 내지 않는다. `run`·`apply`·`revert`의 결과 JSON 줄과, 어느 명령이든 오류 JSON 줄이다. 사람용 글(끝 요약, 되돌림 요약, 오류 설명)은 stderr에 그대로 나오고, 종료 코드도 같다.
+  - JSON 줄이 나오는 때: 인자 어디에든 `--json`이나 `--quiet`가 있을 때, stdout이 파이프나 파일일 때(`| ConvertFrom-Json`, `> out.json`), stderr를 파일로 돌릴 때(`2> log.txt`). stderr를 돌리면 화면에는 JSON 줄이 남는다.
+  - `--quiet`이면 사람용 글 없이 JSON 한 줄만 낸다. 콘솔에서도 그렇다.
+  - 글을 내는 명령(`report`, `runs`, `plan`, `changes`, `cleanup`, `doctor`, `models`, `init`, 도움말)은 콘솔에서도 그대로다. 그 명령들의 `--json`도 그대로 JSON 한 줄이다.
+  - 계획 실행의 다이제스트는 콘솔에서도 끝 요약의 마지막 줄(`Apply after approval: …` 아래)에 전체가 나온다.
+  - **인자 없이** `codaryn`만 치면, stdout이 터미널일 때 `--help`와 같은 도움말을 보이고 종료 0이다. stdout이 파이프나 파일이면 예전처럼 `invalid_arguments`(종료 2)다. `codaryn --quiet`는 콘솔에서도 오류 JSON 한 줄이다.
+  - 확인(main `9934a9a`의 실제 CLI): 터미널은 시험과 같은 방식으로 흉내 냈다. 미리 읽기로 `process.stdout`·`process.stderr`의 `isTTY`를 참으로 둔 것이고, 실제 콘솔 창은 쓰지 않았다. "없음"은 stdout 0바이트다.
+
+    | 경우 | 파이프 | stdout만 터미널 | stderr만 터미널 | 둘 다 터미널 |
+    | --- | --- | --- | --- | --- |
+    | `run`(완료, 종료 0) | 결과 JSON | 결과 JSON | 결과 JSON | 없음. stderr의 끝 요약 |
+    | `revert --dry-run`(종료 0) | 결과 JSON | 결과 JSON | 결과 JSON | 없음. stderr의 요약 |
+    | 오류: `run --bogus`, 없는 실행의 `report`, 두 번째 `apply`(종료 2) | 오류 JSON | 오류 JSON | 오류 JSON | 없음. stderr의 오류 설명 |
+    | `report`, `runs`(종료 0) | 글 | 글 | 글 | 글 |
+    | 인자 없음 | 오류 JSON(종료 2) | 도움말(종료 0) | 오류 JSON(종료 2) | 도움말(종료 0) |
+
+    - 둘 다 터미널일 때 더 잰 것:
+      - `run --json`과 `revert --dry-run --json`: JSON 한 줄과 stderr의 글
+      - `run --quiet`, `apply --quiet`, `revert --dry-run --quiet`: JSON 한 줄, stderr 0바이트
+      - `apply`(완료): stdout 없음, stderr의 끝 요약
+      - `plan`(글)과 `plan --json`, `report --json`: 그대로
+    - 한국어(`CODARYN_LANG=ko`)도 같았다.
+  - Git Bash(mintty)를 winpty 없이 쓰면 stdout이 파이프로 보일 수 있어 JSON 줄이 나올 것이다(검토 R-58 R58-I5). 돌려 보지 않았다.
 - **`--workspace` 생략(U-17):** 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 작업 공간으로 쓴다. `runs`는 원래 그렇다. 한 줄 실행으로 시작해 그 폴더에 있으면 `codaryn report --run latest`로 된다.
   - 키, 모델, 한도가 없어도 된다(18.1절 "간편 형식"). `plan`·`changes`는 가릴 값을 설정 파일에서 읽으므로, 설정 파일이 깨졌으면 `invalid_config`다(간편 형식은 이번에 쟀고, 생략한 형식은 검토 R-54가 쟀다). `report`와 `runs`는 설정 파일을 읽지 않는다.
   - 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 생략하면 `invalid_arguments`(종료 2)로 아무것도 하지 않는다. 현재 폴더라면 `--workspace .`를 준다.
   - 그 안내(`If you mean the current directory, give --workspace .`)는 stdout JSON의 `message`에만 있다. stderr는 `codaryn help <command>`를 보라는 일반 안내뿐이다.
+  - 그래서 콘솔에서는 이 안내가 어디에도 보이지 않는다(검토 R-61 R61-L2). 오류 JSON 줄을 내지 않기 때문이다(위 "터미널에서"). 보려면 `--json`을 준다.
+    - 확인(main `9934a9a`, 흉내 낸 터미널): 작업 공간 폴더 안에서 `revert --run latest --dry-run`은 종료 2, stdout 0바이트, stderr는 일반 안내 두 줄이었다.
+    - 같은 명령에 `--json`을 더하면 stdout의 `message`가 `--workspace and --run are required. If you mean the current directory, give --workspace . usage: …`였다.
   - `apply`와 `review`의 `message`는 둘 다 주지 않았는데도 `give --task or --workspace, not both`로 시작한다.
   - **작업 공간의 하위 폴더에서** 생략하면 그 하위 폴더를 작업 공간으로 읽는다. 실행 기록은 한 단계 위에 있으므로 `run_not_found`("this workspace has no record of that run")다. 작업 공간 폴더로 옮겨 가거나 `--workspace`를 준다.
   - 확인(main `0ad28bc`의 실제 CLI, 작업 공간 폴더 안, 설정 없음과 한도 있는 설정): `report --run latest`, `plan --run <id>`, `changes --run latest`, `runs`는 종료 0이었다. `revert --run latest --dry-run`, `cleanup --older-than 0`, `apply --run … --digest …`, `review --run … --accept`는 `invalid_arguments`였다.
@@ -865,9 +892,21 @@ node --test dist/tests/live/anthropic-live.js
   - 등록 개수로 다른 제공자의 키 변수가 있는지, 설정한 두 값이 같은지를 알 수 있다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
 - **점검:** `doctor`는 모델이 실제로 있는지 확인하지 않는다.
-- **도움말과 사용법의 빠진 곳(UXM-20):** main `0ad28bc`의 실제 CLI로 확인했다. 아래는 아직 고쳐지지 않았다.
+- **도움말과 사용법의 빠진 곳(UXM-20):** main `0ad28bc`의 실제 CLI로 확인했고, `9934a9a`에서 다시 보았다. 아래는 아직 고쳐지지 않았다.
   - `help run`의 옵션 목록에 `--workflow`가 없다. 사용법 줄에는 `[--workflow <id>]`가 있다(18.1절).
-  - 명령이 없거나 모르는 명령일 때, 그리고 `run`의 옵션 오류일 때, 오류 JSON의 `message`는 여러 명령의 사용법을 이어 붙인 묶음이다. 그 묶음은 `codaryn plan|apply|review ... | codaryn --help | codaryn --version`으로 끝나고 `changes`와 `cleanup`이 없다. 두 명령의 사용법은 `codaryn help changes`, `codaryn help cleanup`으로 본다. 다른 명령의 옵션 오류는 그 명령의 사용법만 보인다.
+  - 다음 경우 오류 JSON의 `message`는 여러 명령의 사용법을 이어 붙인 묶음이다(검토 R-61의 R61-L1, R61-I1).
+    - 모르는 명령일 때
+    - 명령 없이 쳤는데 stdout이 터미널이 아닐 때. 터미널에서는 도움말이 나온다(10절 "터미널에서").
+    - `run`과 `revert`의 옵션 오류일 때
+    - 그 묶음은 `codaryn plan|apply|review ... | codaryn --help | codaryn --version`으로 끝나고 `changes`와 `cleanup`이 없다. 두 명령의 사용법은 `codaryn help changes`, `codaryn help cleanup`으로 본다. 다른 명령의 옵션 오류는 그 명령의 사용법만 보인다.
+    - 콘솔에서는 오류 JSON 줄이 나오지 않으므로, 이 묶음을 보려면 `--json`을 준다(10절 "터미널에서").
+  - `run`, `revert`, `apply`의 사용법 줄에는 `[--json]`이 없다(검토 R-58 R58-L2).
+    - `run`과 `revert`의 옵션 목록에는 `--json: print the result as one JSON line`이 있다. 이 글은 `report`의 것과 같아 "글 대신 JSON"으로 읽히지만, 실제 뜻은 "콘솔에서도 결과 JSON 줄을 낸다"다.
+    - `apply`는 옵션 목록이 없고, 설명 끝에 `At a terminal (stdout and stderr both) the result's JSON line is printed only with --json or --quiet.`가 있다.
+  - `codaryn --help`의 출력 설명은 지금 동작보다 넓거나 좁게 말한다.
+    - 첫 문장 `At a terminal only the human lines on stderr show (progress, summary, explained error).`는 너무 넓다. 콘솔에서도 `report`, `runs`, `plan` 같은 글은 stdout에 보인다.
+    - 둘째 문장은 JSON 줄이 나오는 때로 `--json`과 "stdout is not a terminal (a pipe or a file)"만 든다. stderr를 파일로 돌려도 나온다는 것(U-45)은 말하지 않는다.
+    - 한국어 둘째 문장은 `run·revert·apply의 결과와 오류는`이라, 영어의 "and any error"보다 좁게 읽힌다. 실제로는 어느 명령의 오류든 같은 규칙이다(위 "터미널에서"의 표).
   - `plan`과 `changes`의 사용법 줄은 `(--task <task.json> | --workspace <dir> …)`이라 둘 중 하나가 꼭 있어야 하는 것처럼 보인다. 실제로는 둘 다 없으면 현재 폴더를 쓴다(10절 "`--workspace` 생략").
   - 한국어 `doctor` 표는 열이 맞지 않는다(`[정상]      Node.js 버전  Node.js 26: …`, `[건너뜀]     변수 파일       …`). 영어 표는 맞는다.
 - **실행 기록 변조(결정 DR-38, DR-37 (b)):** `report`, `changes`, `revert`는 `.codaryn\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
@@ -941,6 +980,7 @@ node --test dist/tests/live/anthropic-live.js
 | `codaryn`이 PowerShell에서 막힘 | 실행 정책이 npm의 `.ps1` 실행 파일을 막았다. `codaryn.cmd`로 부른다(2절) |
 | 사람용 글이 원하는 언어가 아님 | `$env:CODARYN_LANG = "ko"` 또는 `"en"`, 또는 설정 파일의 `language`. `doctor`의 메시지 언어 항목이 출처를 알려 준다(8절) |
 | PowerShell에서 `2>`로 stderr를 돌릴 때 `NativeCommandError` | PowerShell 5.1이 네이티브 명령의 stderr 줄을 오류 레코드로 감싸 보여 주는 것이다. 종료 코드(`$LASTEXITCODE`)와 stdout JSON은 영향받지 않는다 |
+| 콘솔에서 결과나 오류의 JSON 줄이 보이지 않음 | 정상이다. stdout과 stderr가 둘 다 터미널이면 `run`·`apply`·`revert`의 결과 JSON 줄과 오류 JSON 줄을 내지 않고 stderr의 글만 보인다. JSON이 필요하면 `--json`을 주거나 파이프로 받는다(`| ConvertFrom-Json`). 오류 `message`의 안내(예: `--workspace .`)도 이때만 보인다(10절 "터미널에서") |
 
 ### 멈춘 실행의 잠금이 남아 막힐 때 (`run_in_progress`, `workspace_locked`)
 
@@ -1017,6 +1057,8 @@ node --test dist/tests/live/anthropic-live.js
   - **`apply`:** 모델은 부르지 않지만 검증기를 그 설정으로 돌리므로, 설정 파일에 한도가 모두 있어야 한다. 한도가 빠졌거나 설정 파일이 없으면 `invalid_config`다.
   - **`plan`, `review`, `changes`:** 실행 한도를 요구하지 않는다. 설정 파일에서는 가릴 값과 작업 종류만 읽고, 키와 모델도 필요 없다. 설정 파일이 없어도 된다. 설정 파일이 JSON으로 읽히지 않으면 `invalid_config`다. 가릴 값을 거기서 읽기 때문이다.
   - 한도가 하나라도 빠진 설정에서는 준 한도의 상한을 검사하지 않는다. 그 한도로 실행되는 것은 없다(검토 R-54 R54-I3). 예: `maxDurationMs: 999999999999` 하나만 둔 설정으로도 `plan`은 종료 0이었다.
+    - 읽기 명령은 한도를 쓰지 않으므로 이 동작은 그대로 둔다(PM 결정, U-47 보고의 7번).
+    - 같은 값을 네 한도와 함께 두면 `plan`, `changes`, `apply` 모두 `invalid_config`(`limits.maxDurationMs must be at most 86400000`)였다. 값의 꼴은 한도가 빠져 있어도 검사한다. `maxModelTurns: 0` 하나만 두면 셋 다 `limits.maxModelTurns must be a positive integer`였다(main `9934a9a`).
   - 확인(main `0ad28bc`의 실제 CLI, 18.2절 예시의 계획 실행, 설정 파일은 기본 위치):
 
     | 명령 | 설정 없음 | 한도 없음 | 한도 하나 | 한도 모두 | 깨진 JSON |
@@ -1081,7 +1123,7 @@ Apply after approval: codaryn apply --task <task.json> --run 20261112T200120Z-c2
 ```
 
 - 계획 실행은 검증기를 돌리지 않는다. task의 검증기는 적용 때 돈다.
-- stdout JSON의 `plan`에 다이제스트와 동작 수가 있다. 다이제스트는 실행마다 다르다(`plan.json`에 실행 id가 들어간다).
+- stdout JSON의 `plan`에 다이제스트와 동작 수가 있다. 다이제스트는 실행마다 다르다(`plan.json`에 실행 id가 들어간다). 콘솔에서는 이 JSON 줄이 없고, 다이제스트는 위 끝 요약의 마지막 줄에 나온다(10절 "터미널에서").
 
 **계획 보기(`plan`):** 실제 출력(stdout).
 
@@ -1126,7 +1168,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T200121Z-da084c3e
 ```
 
 - 검증 1번은 적용이 늘 돌리는 파일 목록 확인(`inventory`)이다. 계획에 있던 이동·폐기만 일어났는지 본다. 2번은 task의 `file_rules`다.
-- 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등), 같은 내용이 그 실행의 `result.json`이 된다.
+- 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등. 콘솔에서는 `--json`이나 `--quiet`일 때만, 10절 "터미널에서"), 같은 내용이 그 실행의 `result.json`이 된다.
 - 폐기한 파일은 `.codaryn\discarded\<적용 실행 id>\` 아래에 동작 번호 이름(`2`)으로 있다.
 - `runs`에는 적용 실행이 맨 위에 `3  done (done/verified)`로 나온다(`changes`는 적용한 동작 수). `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> at <시각>` 줄이 붙는다.
 - `report --run <적용 실행 id>`는 적용 실행의 보고서다(실제 출력, 앞부분):

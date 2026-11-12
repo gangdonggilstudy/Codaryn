@@ -224,6 +224,9 @@ async function main(): Promise<number> {
   const rowsGiven = appModule.MODEL_TEXT_MAX_ROWS;
   const maxRows = Math.min(MAX_PLAN_SUMMARY_ROWS - 1, typeof rowsGiven === "number" && Number.isSafeInteger(rowsGiven) && rowsGiven > 0 ? rowsGiven : MAX_PLAN_SUMMARY_ROWS - 1);
   const modelText: ModelText | undefined = typeof drawRows === "function" ? modelTextOf((text, options) => (drawRows as ModelTextRows)(text, options), maxRows, hideAllKeys) : undefined;
+  // U-61 (U-16, R-55): the contract's one rule for what became of a plan's apply; an engine without it shows none.
+  const judgeApply = contracts["planApplyStateOf"];
+  const planApplyOf = typeof judgeApply === "function" ? (entry: unknown, entries: readonly unknown[]): unknown => (judgeApply as (a: unknown, b: readonly unknown[]) => unknown)(entry, entries) : undefined;
   const shown = (text: string): string => hideAllKeys(textSafety.cleanText(text));
   // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
   const shownText = (text: string): string => hideAllKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true));
@@ -239,7 +242,7 @@ async function main(): Promise<number> {
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
   const envSet = (name: string): boolean => (process.env[name] ?? "").length > 0;
-  await serve(process.stdin, { app, messages, tree, shown, shownText, ...(modelText === undefined ? {} : { modelText }), envSet, apiProviders, transport, providers, itemsIn, token, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, shown, shownText, ...(modelText === undefined ? {} : { modelText }), ...(planApplyOf === undefined ? {} : { planApplyOf }), envSet, apiProviders, transport, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

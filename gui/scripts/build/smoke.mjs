@@ -358,6 +358,8 @@ const expected = [
   ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
+  // U-61 (3.12): a result that changed files offers the revert preview; it opens on the run list.
+  ["revertFromResult", (v) => v !== null && v.offered === true && v.preview === "1" && typeof v.title === "string" && typeof v.runId === "string" && v.title.includes(v.runId)],
   ["cancelReady", (v) => v === "ready"],
   ["secondStartRefused", (v) => v.ok === false && v.code === "run_active"],
   ["cancelAsked", (v) => v === true],
@@ -404,6 +406,8 @@ const expected = [
   ["planForged", (v) => v.ok === false && v.code === "unknown_plan"],
   ["consentUnasked", (v) => v.ok === false && v.code === "consent_not_asked"],
   ["applyDone", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
+  // U-61 (U-16): both applied plans say so in the run list.
+  ["planApplyInList", (v) => JSON.stringify(v) === JSON.stringify(["applied", "applied"])],
   ["applyMoved", (v) => v.from === false && v.to === true],
   ["reviewRun", (v) => v === "awaiting_review"],
   ["reviewAsked", (v) => v === true],

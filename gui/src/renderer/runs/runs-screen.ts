@@ -83,6 +83,11 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   if (run.revertRecordDamaged) item.append(el("span", t.format("runs.revertDamaged"), { class: "damaged" }));
   // UXM-14, DR-38: as the CLI's runs says it.
   if (run.recordsChanged === true) item.append(el("span", t.format("runs.recordsChanged"), { class: "damaged", "data-records-changed": "true" }));
+  // U-61 (U-16, R-55): what became of this plan's apply, by the contract's rule, in the CLI's runs words.
+  if (run.planApply != null) {
+    const { state, applyRunId, reason } = run.planApply;
+    item.append(el("span", t.format(`runs.planApply.${state}`, { runId: applyRunId, reason: reason ?? "-" }), { class: "plan-apply", "data-plan-apply": state }));
+  }
   const open = button(t.format("runs.preview"), () => preview(run.runId), { "data-preview": run.runId });
   open.setAttribute("aria-label", `${t.format("runs.preview")}: ${run.runId}`);
   item.append(button(t.format("run.viewReport"), () => openReport(run.runId), { "data-report": run.runId }), open);
@@ -91,11 +96,20 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   return item;
 }
 
-export function runsScreen(deps: RunsDeps): Screen {
+export interface RunsScreen extends Screen {
+  /** U-61 (3.12): the next time the list is shown, preview the revert of this run (a result's next step). */
+  choosePreview(runId: string): void;
+}
+
+export function runsScreen(deps: RunsDeps): RunsScreen {
   const { texts: t, api } = deps;
+  let pendingPreview: string | null = null;
   return {
     id: "runs",
     title: "nav.runs",
+    choosePreview(runId) {
+      pendingPreview = runId;
+    },
     show(root) {
       const workspace = deps.current();
       if (workspace === null) {
@@ -186,6 +200,10 @@ export function runsScreen(deps: RunsDeps): Screen {
         list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report")))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
+        // U-61: a preview asked from a result, once the list (which the main process checks it against) is in.
+        const chosen = pendingPreview;
+        pendingPreview = null;
+        if (chosen !== null && reply.runs.some((run) => run.state === "checked" && run.runId === chosen)) await showPreview(chosen);
       };
 
       head.append(el("h2", t.format("runs.titleIn", { name: workspace.name })), button(t.format("runs.refresh"), () => void load(), { id: "runs-refresh" }));

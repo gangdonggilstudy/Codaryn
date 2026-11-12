@@ -22,6 +22,7 @@ import {
 } from "../contracts/index.js";
 import type {
   CodarynConfig,
+  DefaultConfigLocation,
   DoctorCheck,
   DoctorCheckId,
   DoctorCheckStatus,
@@ -36,6 +37,9 @@ import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { parseDoctorArgs } from "./args.js";
 import { parseConfig } from "./config.js";
+import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
+import { jsonSyntaxPosition } from "./json-position.js";
+import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError } from "./run.js";
 import {
@@ -46,7 +50,7 @@ import {
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue } from "./settings.js";
+import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
 import { hideKeys } from "./text-safety.js";
@@ -76,17 +80,23 @@ export interface DoctorEnvironment {
   readonly locateInWorkspace: (file: string, workspaceRoot: string) => Promise<WorkspaceLocation>;
   readonly relatePaths: (target: string, base: string) => Promise<PathRelation>;
   readonly platform?: NodeJS.Platform;
+  /** N-1: the default config location (`findDefaultConfigLocation`). Absent or null: none. */
+  readonly defaultConfig?: DefaultConfigLocation | null;
+  /** N-1: a default location exists but is a network or device path, so it is not used. */
+  readonly defaultConfigRefused?: boolean;
 }
 
-type Loaded = { readonly ok: true; readonly value: unknown; readonly path: string } | { readonly ok: false; readonly message: string };
+type Loaded =
+  | { readonly ok: true; readonly value: unknown; readonly path: string }
+  | { readonly ok: false; readonly message: string; readonly missing?: boolean };
 
 /** Read, key check on the raw text, parse, key check on the parsed value: the order `run` uses (S-6). */
 async function loadJson(io: DoctorEnvironment, file: string, label: string, currentKey: string | null): Promise<Loaded> {
   let text: string;
   try {
     text = await io.readFile(file);
-  } catch {
-    return { ok: false, message: `the ${label} cannot be read` };
+  } catch (failure) {
+    return { ok: false, message: `the ${label} cannot be read`, missing: isMissingFile(failure) };
   }
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   if (rawTextHoldsKey(text, currentKey)) return { ok: false, message: `the ${label} contains a key value` };
@@ -94,7 +104,9 @@ async function loadJson(io: DoctorEnvironment, file: string, label: string, curr
   try {
     value = JSON.parse(text);
   } catch {
-    return { ok: false, message: `the ${label} cannot be read as JSON` };
+    // N-15: the position from our own scan, never the parser's message.
+    const at = jsonSyntaxPosition(text);
+    return { ok: false, message: `the ${label} cannot be read as JSON${at === null ? "" : ` (line ${at.line}, column ${at.column})`}` };
   }
   const found = findKeyInJson(value, currentKey);
   if (found.kind === "key") return { ok: false, message: `the ${label} has a key field or key value at ${found.location}` };
@@ -351,29 +363,40 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   }
   const currentKey = envValue(env, ANTHROPIC_API_KEY_ENV);
 
-  // config_file
+  // config_file: --config, CODARYN_CONFIG, then the default location (N-1).
   let config: CodarynConfig | null = null;
   let configPath: string | null = null;
-  const configFromEnv = args.configPath === null ? envValue(env, CODARYN_CONFIG_ENV) : null;
-  const configSource = args.configPath ?? configFromEnv;
-  if (configSource === null) {
-    set("config_file", "skipped", `no --config given and ${CODARYN_CONFIG_ENV} is not set`);
-  } else if (configFromEnv !== null && localPathProblem(configFromEnv, io.cwd) !== null) {
+  const chosen = chooseConfigFile({ argument: args.configPath, env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
+  const refusedNote = io.defaultConfigRefused === true ? "; the default location is a network or device path and is not used" : "";
+  if (!chosen.ok) {
     set("config_file", "fail", `the path given by ${CODARYN_CONFIG_ENV} is not a plain local path`);
+  } else if (chosen.candidate === null) {
+    if (io.defaultConfigRefused === true) set("config_file", "warn", `no --config given and ${CODARYN_CONFIG_ENV} is not set${refusedNote}`);
+    else set("config_file", "skipped", `no --config given, ${CODARYN_CONFIG_ENV} is not set and there is no default location`);
   } else {
-    const loaded = await loadJson(io, path.resolve(io.cwd, configSource), "config file", currentKey);
-    if (!loaded.ok) {
-      set("config_file", "fail", loaded.message);
+    const candidate = chosen.candidate;
+    const where = candidate.source === "default" ? ` at the default location ${candidate.display}` : "";
+    const loaded = await loadJson(io, candidate.path, "config file", currentKey);
+    if (!loaded.ok && candidate.optional && loaded.missing === true) {
+      set("config_file", "skipped", `no --config given, ${CODARYN_CONFIG_ENV} is not set and there is no file at the default location ${candidate.display}; \`codaryn init\` creates one`);
+    } else if (!loaded.ok) {
+      set("config_file", "fail", `${loaded.message}${where}`);
     } else {
       const outcome = parseConfig(loaded.value);
       if (outcome.ok) {
         config = outcome.config;
         configPath = loaded.path;
-        set("config_file", "ok", "the config file is valid");
+        set("config_file", "ok", `the config file${where} is valid`);
       } else {
         set("config_file", "fail", outcome.message);
       }
     }
+  }
+  // N-8: --profile is checked against the config file as a run would.
+  if (args.profile !== null) {
+    const selected = selectProfile(config, args.profile);
+    if (selected.ok) config = selected.config;
+    else set("config_file", "fail", selected.message);
   }
 
   // task_file
@@ -422,10 +445,11 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     else set("model", "ok", "the scripted model file is valid");
   } else {
     const fromTask = task !== null && task.model.provider === "anthropic" ? task.model : null;
-    const modelId = fromTask?.model ?? envValue(env, CODARYN_MODEL_ENV) ?? config?.model ?? null;
+    // N-3: a placeholder (blank or <...>) counts as not set at every level.
+    const modelId = resolveModelId(fromTask?.model, env, config);
     const maxOutputTokens = fromTask?.maxOutputTokens ?? config?.maxOutputTokens ?? null;
     const missing: string[] = [];
-    if (modelId === null) missing.push(`the model (task model.model, ${CODARYN_MODEL_ENV} or config model)`);
+    if (modelId === null) missing.push(missingModelText(modelPlaceholderSeen(fromTask?.model, env, config)));
     if (maxOutputTokens === null) missing.push("maxOutputTokens (task model.maxOutputTokens or config maxOutputTokens)");
     const baseUrl = envValue(env, CODARYN_API_BASE_URL_ENV);
     const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV);
@@ -533,6 +557,6 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);
   const status = worst(checks);
   const output: DoctorOutput = { schemaVersion: 1, kind: "doctor", status, exitCode: DOCTOR_EXIT_CODES[status], checks };
-  const text = args.json ? `${JSON.stringify(output)}\n` : renderDoctor(output);
+  const text = args.json ? jsonLine(output) : renderDoctor(output);
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }

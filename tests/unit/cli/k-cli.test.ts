@@ -175,7 +175,11 @@ describe("U-1 integrity.paths in the config file", () => {
     assert.throws(() => parseIntegrity({ paths: many }, "win32"), /at most 64 entries/);
     assert.throws(() => parseIntegrity({ paths: ["srv/x"] }, "linux"), /must be an absolute path/);
     const viaConfig = parseConfig({ schemaVersion: 1, integrity: { paths: ["relative"] } });
-    assert.deepEqual(viaConfig, { ok: false, message: "integrity.paths[0] must be an absolute path" });
+    assert.deepEqual(viaConfig, {
+      ok: false,
+      message: "integrity.paths[0] must be an absolute path",
+      position: { code: "invalid_value", field: "integrity.paths[0]" },
+    });
   });
 
   test("a key field under integrity is located with the known field name", () => {
@@ -389,7 +393,7 @@ describe("arguments of the new switches and commands", () => {
   test("doctor", () => {
     assert.deepEqual(parseDoctorArgs(["doctor"]), {
       ok: true,
-      args: { command: "doctor", configPath: null, varsFile: null, taskPath: null, workspace: null, json: false },
+      args: { command: "doctor", configPath: null, varsFile: null, taskPath: null, workspace: null, profile: null, json: false },
     });
     const parsed = parseDoctorArgs(["doctor", "--json", "--config", "c.json", "--vars-file", "v", "--task", "t.json"]);
     assert.ok(parsed.ok);

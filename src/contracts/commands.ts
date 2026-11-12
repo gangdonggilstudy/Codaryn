@@ -73,8 +73,7 @@ export interface ReportOutput {
 }
 
 /**
- * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--json]`
- * (`--profile <name>` is added by N-8.)
+ * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--profile <name>] [--json]`
  * checks what a run would need without running one: no network access, no model request, no
  * write. One check per id, in this order. A check that has nothing to look at is `skipped`.
  *

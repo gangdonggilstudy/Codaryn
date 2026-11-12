@@ -6,7 +6,10 @@
  * Neither file ever contains secret values or API keys.
  */
 
+import type { PlanActionKind, PlanMode } from "./plan.js";
+import type { AnyToolName } from "./tool.js";
 import type { VerifierConfig } from "./verify.js";
+import type { CompletionMode, HumanReviewConfig } from "./workflow.js";
 
 export const TASK_SCHEMA_VERSION = 1;
 
@@ -28,14 +31,34 @@ export interface TaskSpec {
   readonly limits: Limits;
   /** May be empty. An empty list ends the run as `needs-input` with reason `no_verifier`. */
   readonly verifiers: readonly VerifierConfig[];
+  /**
+   * G-A (GT-D2): id of a workflow definition (workflow.ts): a built-in or an entry of the config
+   * file's `workflows`. The CLI expands it into the fields below on the resolved task. Absent, and
+   * none of the fields below set: the task runs as before stage 4 (LEGACY_WORKFLOW_SETTINGS).
+   * `workflow` stays a free label either way.
+   */
+  readonly workflowRef?: string;
+  /** G-A: narrows the definition's tools (never widens them). See WorkflowSettings. */
+  readonly tools?: readonly AnyToolName[];
+  /** G-A: "apply" may strengthen a definition's "none", never the reverse. See plan.ts. */
+  readonly plan?: PlanMode;
+  /** G-A: see COMPLETION_MODES. */
+  readonly completion?: CompletionMode;
+  /** G-A: required with `completion: "human_review"`. */
+  readonly humanReview?: HumanReviewConfig;
 }
 
 /**
  * The task as the CLI hands it to the engine: paths are absolute and every limit is set.
  * `EngineDeps.task` has this type. A task file may leave the repair limits out (defaults below).
+ * G-A: when a workflow applies, the CLI sets every WorkflowSettings field (`tools`, `instructions`,
+ * `plan`, `completion`, `humanReview`) to its resolved value. A field left out means the legacy
+ * value; the engine reads them through `workflowSettingsOf`.
  */
 export interface ResolvedTaskSpec extends TaskSpec {
   readonly limits: ResolvedLimits;
+  /** G-A: the definition's instructions (a task file cannot set them), or null. */
+  readonly instructions?: string | null;
 }
 
 export type ModelProviderName = "scripted" | "anthropic";
@@ -92,6 +115,13 @@ export interface PolicyConfig {
    * - Commands allowed by `commands` can still change these paths. It guards the file tools only.
    */
   readonly protectedPaths?: readonly string[];
+  /**
+   * G-A: plan action kinds an approved plan may carry out (plan.ts). Absent or empty: none, so a
+   * plan with any action is denied (`destructive`/`plan_action_not_allowed`). Only the task or
+   * config file sets it. It never gives a model a tool that moves or deletes: actions run only in
+   * an apply run, after a person approved the plan's digest.
+   */
+  readonly planActions?: readonly PlanActionKind[];
 }
 
 export interface CommandRule {

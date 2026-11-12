@@ -12,6 +12,9 @@ import type { PermissionKind, PolicyDenialCode } from "./policy.js";
 import type { ToolErrorCode, ToolResult } from "./tool.js";
 import type { VerifierResult } from "./verify.js";
 import type { RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
+import type { PlanMode } from "./plan.js";
+import type { AnyToolName } from "./tool.js";
+import type { CompletionMode } from "./workflow.js";
 
 /** State directory inside the workspace root. No tool may read, list, write or run in it. */
 export const STATE_DIR_NAME = ".codaryn";
@@ -37,6 +40,15 @@ export type JournalEvent =
       readonly provider: ModelProviderName;
       /** The resolved limits. Phase 2 records all six fields; earlier journals have four. */
       readonly limits: Limits;
+      /**
+       * G-A: present only when the task has workflow settings (a `workflowRef` or any of its
+       * workflow fields): the definition used (or null) and the resolved settings, `instructions`
+       * excepted (the first `model_request.system` holds them). Absent: the legacy settings.
+       */
+      readonly workflowRef?: string | null;
+      readonly tools?: readonly AnyToolName[];
+      readonly plan?: PlanMode;
+      readonly completion?: CompletionMode;
     }
   | {
       readonly type: "model_request";

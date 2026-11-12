@@ -20,6 +20,10 @@ export function samples(kind: MessageParamKind, catalog: MessageCatalog): readon
   switch (kind) {
     case "count":
       return [11, 12];
+    case "seconds":
+      return [4.2, 12];
+    case "language":
+      return ["ko", "en"];
     case "status":
       return ["done", "failed"];
     case "reason":

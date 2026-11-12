@@ -54,6 +54,7 @@ import {
   APPLY_REASONS_BY_STATUS,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
   REVERT_ERROR_CODES,
+  HELP_OPTIONS,
   maskedParts,
   planActionShown,
   planActionShownMatches,
@@ -72,6 +73,7 @@ import {
 } from "../../../src/contracts/index.js";
 import type {
   DoctorMessageId,
+  LoadPlanOutcome,
   MaskedPlanAction,
   PrivacyGateway,
   StoredPlanAction,
@@ -461,6 +463,13 @@ describe("G-A plan contract", () => {
   test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
     assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
     assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
+  });
+
+  test("R-9c C-1: a plan run whose plan.json is gone is its own outcome for plan and apply; help names --allow-unsafe-move", () => {
+    const gone: LoadPlanOutcome = { ok: false, code: "plan_run_missing" };
+    assert.equal(CLI_ERROR_EXIT_CODES[gone.ok ? "internal_error" : gone.code], 2);
+    assert.ok((HELP_OPTIONS as readonly string[]).includes("allow_unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("help.option.allow_unsafe_move"));
   });
 
   test("R-9c C-1: a revert whose plan run is gone says so with its own error code", () => {

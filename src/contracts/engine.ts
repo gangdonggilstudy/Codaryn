@@ -207,7 +207,8 @@ export const CLI_ERROR_EXIT_CODES = {
    * G-A (R-9c C-1), `codaryn revert --run <apply runId>`: the plan run that apply used
    * (`apply_started.planRunId`) has no directory or no plan.json any more. The real paths of the
    * apply's files are known only from that plan (DR-24 f), so nothing was changed. A plan run must
-   * be kept while its apply may be reverted.
+   * be kept while its apply may be reverted. `codaryn plan`, `codaryn apply` (LoadPlanOutcome): the
+   * plan run ended as `plan_pending` but its plan.json is gone; nothing was shown or changed.
    */
   plan_run_missing: 2,
   /**

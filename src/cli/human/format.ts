@@ -135,10 +135,35 @@ export function padEnd(text: string, width: number): string {
 export const MODEL_TEXT_PREFIX = "  | ";
 /** The widest row of quoted model text, prefix included, in terminal columns (folded here, not by the terminal). */
 export const MODEL_TEXT_COLUMNS = 76;
+/** R-52 R52-L1: the width taken for a terminal that does not tell its width. */
+export const MODEL_TEXT_FALLBACK_COLUMNS = 40;
+/** The narrowest row folded for: the prefix and a few characters (a narrower terminal folds anyway). */
+const MODEL_TEXT_MIN_COLUMNS = 8;
+
+/**
+ * R-52 R52-L1: the narrowest terminal the person's output goes to (stdout or stderr, whichever is a
+ * terminal), MODEL_TEXT_FALLBACK_COLUMNS for a terminal that does not tell its width, or null when
+ * neither is a terminal (a file or a pipe: nothing folds it here).
+ */
+export function terminalColumns(): number | null {
+  const widths: number[] = [];
+  for (const stream of [process.stdout, process.stderr]) {
+    if (stream?.isTTY !== true) continue;
+    const columns: unknown = stream.columns;
+    widths.push(typeof columns === "number" && Number.isSafeInteger(columns) && columns > 0 ? columns : MODEL_TEXT_FALLBACK_COLUMNS);
+  }
+  return widths.length === 0 ? null : Math.min(...widths);
+}
+
+/** The widest row for a terminal `columns` wide: one column less (a row that fills the last column may fold), at most MODEL_TEXT_COLUMNS. */
+function modelTextWidth(columns: number | null): number {
+  if (columns === null || !Number.isFinite(columns)) return MODEL_TEXT_COLUMNS;
+  return Math.max(MODEL_TEXT_MIN_COLUMNS, Math.min(MODEL_TEXT_COLUMNS, Math.floor(columns) - 1));
+}
 
 /** Every line break a terminal may honour: CR LF, LF, CR, VT, FF, NEL, and the line and paragraph separators. */
 const MODEL_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
-/** Characters that show nothing: zero-width spaces and joiners, the soft hyphen, the word joiner, the BOM, the Mongolian vowel separator. */
+/** Characters that show nothing: zero-width spaces and joiners, the soft hyphen, the word joiner, the BOM, the Mongolian vowel separator. Shown as REPLACEMENT. */
 const INVISIBLE = /[\u00ad\u180e\u200b-\u200d\u2060\ufeff]/g;
 /** A run of white space of any kind (Unicode spaces, tabs). */
 const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
@@ -146,18 +171,24 @@ const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
 /**
  * U-14 (R-49 R49-L2), DR-47: text a model wrote (a plan's summary, the agent's last message) as rows
  * for people. It is the model's own words, so every row starts with MODEL_TEXT_PREFIX. Runs of
- * white space become one space and invisible characters go, so padding cannot place words at the
- * start of a terminal row; the text is folded here at MODEL_TEXT_COLUMNS (at a space when there is
- * one), so the terminal does not fold it. Key shapes and control characters are replaced as in
- * every line for people. At most `maxRows` rows; the rest are counted in a last "(+N)" row.
- * No rows when nothing is left to show.
+ * white space become one space and invisible characters show as REPLACEMENT, so padding cannot place words at the
+ * start of a terminal row; the text is folded here (at a space when there is one), so the terminal
+ * does not fold it: R-52 R52-L1, for a terminal `columns` wide (by default the terminal's,
+ * terminalColumns) one column narrower, at most MODEL_TEXT_COLUMNS, and MODEL_TEXT_COLUMNS when the
+ * output is not a terminal. Key shapes and control characters are replaced as in every line for
+ * people. At most `maxRows` rows; the rest are counted in a last "(+N)" row. No rows when nothing is
+ * left to show.
  */
-export function quoteModelText(text: string, maxRows: number): string[] {
-  const room = MODEL_TEXT_COLUMNS - displayWidth(MODEL_TEXT_PREFIX);
+export function quoteModelText(text: string, maxRows: number, columns: number | null = terminalColumns()): string[] {
+  const room = modelTextWidth(columns) - displayWidth(MODEL_TEXT_PREFIX);
   const rows: string[] = [];
-  for (const raw of text.split(MODEL_LINE_BREAK)) {
-    // White space first (a tab is a space here, not a control character to mark), then the last step of every line.
-    const line = finalLine(raw.replace(INVISIBLE, "").replace(WHITE_SPACE, " ")).trim();
+  // R-52 R52-M2: key shapes over the whole text first, so a key split by LF, TAB or CRLF (which split
+  // it into rows below) is still found; hideKeys skips control and format characters.
+  for (const raw of hideKeys(text, null).split(MODEL_LINE_BREAK)) {
+    // White space first (a tab is a space here, not a control character to mark), then the last step
+    // of every line. R-52 R52-M1: an invisible character shows as REPLACEMENT; removing it could put a
+    // value back together that was masked apart (a short registered value split by a zero-width space).
+    const line = finalLine(raw.replace(INVISIBLE, REPLACEMENT).replace(WHITE_SPACE, " ")).trim();
     if (line.length === 0) continue;
     let row = "";
     let width = 0;

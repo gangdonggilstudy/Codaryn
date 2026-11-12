@@ -148,7 +148,12 @@
 | --- | --- | --- |
 | 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → report → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄(`codaryn: ` 접두사 줄) 전체, 그 뒤의 끝 요약(실행 id, `codaryn report`·`codaryn revert`, N-5), 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증기를 id가 아닌 순번으로 보임(N-24 (a), `--json`에는 id), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. 키 없음, 네트워크 울타리 |
 
-- `init`, `runs`, `--run latest`, `revert --dry-run`(N-2, N-7)은 N-A 연결이 main에 들어온 뒤 더한다.
+| 처음 쓰는 흐름(E-1), init 세부(E-9) | `n02-first-use` | 샌드박스 안의 기본 설정 위치(`support/usability.ts`)로 init(비대화형 기본값, 자리표시자 모델, 키 없음, 위치는 기호로만) → 다시 init `config_exists` → doctor(기본 설정, 모델·키 실패와 안내) → 체험 예시(기본 설정 사용 알림) → runs → report·revert `--run latest`(고른 실행 id를 stderr에 먼저) → `--dry-run`(파일·기록·잠금 무변경) → revert(원래 바이트, 되돌리기 기록) → 다시 revert(`already_reverted`, `complete`). init의 `--config`, `CODARYN_CONFIG`(`overriddenBy`), 작업 공간 안 거부, 제안 미적용, 키 미기록·미전송, 기본 위치 없음 |
+| 실행 목록과 latest(E-6), R-2 | `n03-runs-latest` | 위조 실행(미래 시각, 시각 불일치, 결과 파일 포함)은 손상으로 표시되고 latest가 되지 않으며 id를 지정해도 `invalid_run_record`(N-26), 사용자 `notes.md` 보존. 결과 파일 없는 실행은 latest 후보 아님. 되돌리기 기록만 손상된 실행은 진행(N-23 g). 기록 없음, `runs/latest` 디렉터리(N-18), `--limit`, 잠금 중 목록 |
+| 설정 순서·자리표시자·프로필·한 줄 실행(E-2, E-3, E-7, E-8) | `n04-config-profiles` | 모의 API. 요청의 모델로 `--config` > `CODARYN_CONFIG` > 기본 위치, 기본 위치 사용 알림, 작업 공간 안 거부, 상대 경로는 없음과 같음. 자리표시자는 다음 단계로, 모두 자리표시자면 `provider_not_configured`. 프로필의 한도·검증기, 상한·이름 오류, task 파일의 `profiles` 거부. 한 줄 실행의 현재 디렉터리, 설치 위치·키 모양 목표·인자 혼용 거부 |
+| 언어·사람용 출력(E-4, E-5), R-3 | `n05-language-output` | ko·en에서 stdout 동일·stderr만 다름, 고르는 순서, 잘못된 `language` 값 미출력. JSON 문법 오류의 줄·열, 모르는 필드 이름 미출력(N-15), `--quiet`, ASCII JSON(N-19). 검증기 id(`SYNTHETIC_PRIVATE_VALUE` 등)가 진행 줄·끝 요약·Markdown에 없고 `--json`에만 있음(N-24 a) |
+
+- 실행 전 오류의 stderr는 `assertHumanError`로 모양만 본다(코드 괄호, 스택·예외 문구 없음, 같은 줄 반복 없음, 경로·값 없음). `--quiet`이면 비어 있다(`s01`).
 
 ## 진단 (Z-1)
 

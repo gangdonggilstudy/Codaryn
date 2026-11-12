@@ -14,7 +14,8 @@ import { isStoredRunId, runIdSecond } from "./runs.js";
 
 /**
  * Whether the journal at `file` cannot be read (missing, not a plain file, too large, empty, a line
- * that is not a JSON object, a last line without its line break) or records a limited state check.
+ * that is not a JSON object, a last line without its line break), records a limited state check, or
+ * (U-33, R-56 R56-L4, PM Q-3) has no `run_finished`: its run ended before its last check.
  */
 async function uncheckedIn(file: string): Promise<boolean> {
   let text: string;
@@ -27,6 +28,7 @@ async function uncheckedIn(file: string): Promise<boolean> {
   }
   // A journal is appended one whole line at a time; a last line without its break was cut off.
   if (!text.endsWith("\n")) return true;
+  let finished = false;
   for (const line of text.slice(0, -1).split("\n")) {
     let record: unknown;
     try {
@@ -37,8 +39,9 @@ async function uncheckedIn(file: string): Promise<boolean> {
     if (typeof record !== "object" || record === null || Array.isArray(record)) return true;
     const { type, limited } = record as { type?: unknown; limited?: unknown };
     if (type === "state_checked" && limited === true) return true;
+    if (type === "run_finished") finished = true;
   }
-  return false;
+  return !finished;
 }
 
 /**
@@ -55,11 +58,12 @@ function since(name: string, planSecond: number | null): boolean {
 
 /**
  * See StateUncheckedSince. The runs counted are the plan run and every entry of the runs folder
- * named as a run id of the plan run's second or later (later runs and apply runs, the apply asking
- * among them; see `since`); other names are not runs. An entry that is not a plain directory, and a
- * missing plan run, count as unchecked (fail closed). Reads only.
+ * named as a run id of the plan run's second or later (later runs and apply runs; see `since`);
+ * other names are not runs. U-33 (R56-L4): the apply that asks, `applyRunId`, is left out, its
+ * journal still being written; only that name, and never the plan run (fail closed). An entry that
+ * is not a plain directory, and a missing plan run, count as unchecked (fail closed). Reads only.
  */
-export const stateUncheckedSince: StateUncheckedSince = async ({ workspaceRoot, planRunId }) => {
+export const stateUncheckedSince: StateUncheckedSince = async ({ workspaceRoot, planRunId, applyRunId }) => {
   assertRunId(planRunId);
   const runsDir = join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
   let names: string[];
@@ -70,7 +74,8 @@ export const stateUncheckedSince: StateUncheckedSince = async ({ workspaceRoot, 
   }
   if (!names.includes(planRunId)) return true;
   const planSecond = runIdSecond(planRunId);
-  for (const name of names.filter((entry) => since(entry, planSecond)).sort()) {
+  const counted = (name: string): boolean => (name !== applyRunId || name === planRunId) && since(name, planSecond);
+  for (const name of names.filter(counted).sort()) {
     const dir = join(runsDir, name);
     try {
       if (!(await lstat(dir)).isDirectory()) return true;

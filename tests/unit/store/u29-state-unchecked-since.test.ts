@@ -5,6 +5,9 @@
  * not count. Reads only. Fake values only.
  * U-33 (R-56 R56-L1, PM Q-2): "since" is by the second a run id names; every run of the plan run's
  * second counts, whatever its random part (fail closed), and so does a run id that names no second.
+ * U-33 (R-56 R56-L4, PM Q-3, contract 1362e4b): a run since the plan whose journal has no
+ * `run_finished` (it ended before its last check) counts too; the apply that asks (applyRunId) is
+ * left out, its journal still being written. Here every run but the asking apply has finished.
  */
 
 import assert from "node:assert/strict";
@@ -25,14 +28,22 @@ const BEFORE = "20260101T020000Z-0000000b"; // a run before the plan run
 const PLAN = "20260101T030000Z-0000000c";
 const LATER = "20260101T040000Z-0000000d"; // a model run after it
 const APPLY = "20260101T050000Z-0000000e"; // an apply run after it
+const ASKING = "20260101T070000Z-00000011"; // the apply that asks: no run_finished yet
 const at = (runId: string): number => Date.UTC(2026, 0, 1, Number(runId.slice(9, 11)), 0, 1);
 const STARTED = { type: "run_started", schemaVersion: 1, taskId: "t", workflow: "organize", provider: "scripted", limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: null, maxDurationMs: 60_000 } } as unknown as JournalEvent;
 const APPLY_STARTED = { type: "apply_started", schemaVersion: 1, planRunId: PLAN, taskId: "t", digest: "a".repeat(64), approval: "cli-flag", actions: 1, maxDurationMs: 60_000 } as unknown as JournalEvent;
 const checked = (limited: boolean, phase = "run_end"): JournalEvent => ({ type: "state_checked", phase, changed: [], limited }) as unknown as JournalEvent;
+const FINISHED = { type: "run_finished", status: "done", reason: "verified", usage: { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs: 5, repairAttempts: 0 } } as unknown as JournalEvent;
 const state = (root: string, ...parts: string[]) => join(root, ".codaryn", ...parts);
-const ask: StateUncheckedSince = stateUncheckedSince;
+const since: StateUncheckedSince = stateUncheckedSince;
+/** The store's question as the apply ASKING asks it, unless the case names another applyRunId. */
+const ask = (request: { readonly workspaceRoot: string; readonly planRunId: string; readonly applyRunId?: string }): Promise<boolean> =>
+  since({ applyRunId: ASKING, ...request });
 
-/** Four runs, each with complete state checks; `limitedIn` names the run whose last check was limited. */
+/**
+ * Four finished runs, each with complete state checks (`limitedIn` names the run whose last check
+ * was limited), and the asking apply, its journal as it is when it asks: started, no run_finished.
+ */
 async function workspace(limitedIn: string | null = null): Promise<string> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-u29-")));
   roots.push(root);
@@ -41,8 +52,13 @@ async function workspace(limitedIn: string | null = null): Promise<string> {
     await journal.append(runId === APPLY ? APPLY_STARTED : STARTED);
     await journal.append(checked(false, "run_start"));
     await journal.append(checked(runId === limitedIn));
+    await journal.append(FINISHED);
     await journal.close();
   }
+  const asking = createJournal({ workspaceRoot: root, runId: ASKING, clock: { now: () => at(ASKING) } });
+  await asking.append(APPLY_STARTED);
+  await asking.append(checked(false, "run_start"));
+  await asking.close();
   return root;
 }
 
@@ -128,6 +144,7 @@ describe("U-33 (R-56 R56-L1, PM Q-2): every run of the plan run's second counts,
     await journal.append(STARTED);
     await journal.append(checked(false, "run_start"));
     await journal.append(checked(limited));
+    await journal.append(FINISHED);
     await journal.close();
   }
 
@@ -165,8 +182,78 @@ describe("U-33 (R-56 R56-L1, PM Q-2): every run of the plan run's second counts,
     const journal = createJournal({ workspaceRoot: root, runId: plan, clock: { now: () => at(PLAN) } });
     await journal.append(STARTED);
     await journal.append(checked(false));
+    await journal.append(FINISHED);
     await journal.close();
     assert.equal(await ask({ workspaceRoot: root, planRunId: plan }), true);
     assert.equal(await ask({ workspaceRoot: await workspace(BEFORE), planRunId: PLAN }), false, "with a run id that names one, the run before does not count");
+  });
+});
+
+describe("U-33 (R-56 R56-L4, PM Q-3): a run since the plan without run_finished counts; the asking apply does not", () => {
+  /** Leaves out the run_finished line of runId's journal, as a run killed before its end leaves it. */
+  async function unfinish(root: string, runId: string): Promise<void> {
+    const file = state(root, "runs", runId, "journal.jsonl");
+    const lines = (await readFile(file, "utf8")).split(String.fromCharCode(10)).filter((line) => line !== "" && (JSON.parse(line) as { type: string }).type !== "run_finished");
+    await writeFile(file, `${lines.join(String.fromCharCode(10))}${String.fromCharCode(10)}`, "utf8");
+  }
+
+  test("the plan run, a later run or a later apply run without run_finished: true", async () => {
+    for (const runId of [PLAN, LATER, APPLY]) {
+      const root = await workspace();
+      await unfinish(root, runId);
+      assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true, runId);
+    }
+  });
+
+  test("a run before the plan run without run_finished does not count", async () => {
+    const root = await workspace();
+    await unfinish(root, BEFORE);
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false);
+  });
+
+  test("a run of the plan run's second without run_finished, whatever its random part: true", async () => {
+    for (const runId of ["20260101T030000Z-00000000", "20260101T030000Z-ffffffff"]) {
+      const root = await workspace();
+      const journal = createJournal({ workspaceRoot: root, runId, clock: { now: () => at(PLAN) } });
+      await journal.append(STARTED);
+      await journal.append(checked(false, "run_start"));
+      await journal.close();
+      assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true, runId);
+    }
+  });
+
+  test("the asking apply is left out: as it is when it asks, with a limited check, a journal that cannot be read or none", async () => {
+    const root = await workspace();
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false, "as it is");
+    const file = state(root, "runs", ASKING, "journal.jsonl");
+    await writeFile(file, `${await readFile(file, "utf8")}${JSON.stringify({ type: "state_checked", phase: "before_verify", changed: [], limited: true })}${String.fromCharCode(10)}`, "utf8");
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false, "a limited check");
+    await writeFile(file, "{", "utf8");
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false, "cannot be read");
+    await rm(state(root, "runs", ASKING), { recursive: true });
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false, "not there");
+  });
+
+  test("only the asking apply's own id is left out: another apply asking, or an id that names no run, leaves ASKING in (fail closed)", async () => {
+    const root = await workspace();
+    for (const applyRunId of [APPLY, "20260101T070000Z-00000012", "../x"]) {
+      assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN, applyRunId }), true, applyRunId);
+    }
+  });
+
+  test("an applyRunId that is the plan run's id leaves the plan run in (fail closed)", async () => {
+    const limited = await workspace(PLAN);
+    assert.equal(await ask({ workspaceRoot: limited, planRunId: PLAN, applyRunId: PLAN }), true, "a limited check");
+    const root = await workspace();
+    await unfinish(root, PLAN);
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN, applyRunId: PLAN }), true, "no run_finished");
+  });
+
+  test("a record that only has run_finished elsewhere (another type, a field) is not a run_finished", async () => {
+    const root = await workspace();
+    const file = state(root, "runs", LATER, "journal.jsonl");
+    await unfinish(root, LATER);
+    await writeFile(file, `${await readFile(file, "utf8")}${JSON.stringify({ type: "notice", text: "run_finished", run_finished: true })}${String.fromCharCode(10)}`, "utf8");
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true);
   });
 });

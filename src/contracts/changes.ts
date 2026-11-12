@@ -72,7 +72,7 @@ export interface RevertRecord {
   readonly schemaVersion: 1;
   readonly kind: "revert_record";
   readonly runId: string;
-  /** When the revert finished, ISO 8601 UTC. */
+  /** When the revert finished, ISO 8601 UTC (RUN_TIMESTAMP_PATTERN_SOURCE). */
   readonly at: string;
   readonly status: "complete" | "partial";
   /** Number of files reverted and skipped. */
@@ -80,7 +80,25 @@ export interface RevertRecord {
   readonly skipped: number;
 }
 
-export type RevertAction = "restored" | "deleted";
+/**
+ * N-22: signatures of `readRevertRecord` and `writeRevertRecord`, exported by `src/store/index.ts`.
+ * - read: the run's checked record, or null when it has none. Rejects when one exists but cannot
+ *   be read or fails the checks (same run id, timestamp pattern, known status); `revert` then
+ *   leaves `revertedBefore` out.
+ * - write: replaces the record atomically (temporary file and rename). The run directory must
+ *   exist; it is not created. Rejects on failure; `revert` treats the record as best effort.
+ */
+export type ReadRevertRecord = (workspaceRoot: string, runId: string) => Promise<RevertRecord | null>;
+export type WriteRevertRecord = (workspaceRoot: string, record: RevertRecord) => Promise<void>;
+
+/**
+ * restored, deleted: a `file_changed` path (phase 2). G-A, for an apply run:
+ * - moved_back: a `file_moved` file was renamed from `to` back to `from`
+ * - restored_from_discard: a `file_discarded` file was renamed from `.codaryn/discarded/<runId>/`
+ *   (DR-9) back to its path
+ */
+export const REVERT_ACTIONS = ["restored", "deleted", "moved_back", "restored_from_discard"] as const;
+export type RevertAction = (typeof REVERT_ACTIONS)[number];
 
 /**
  * changed_since_run: the file's current state is not what the run left (a later edit, or the
@@ -88,8 +106,13 @@ export type RevertAction = "restored" | "deleted";
  * writing this file failed. missing_record: an original was kept for this path but the journal
  * has no `file_changed` for it (the run stopped between the snapshot and the record), so the
  * state the run left is unknown and the file is not touched (T-10).
+ * already_reverted (N-22): the file is already as it was before the run (its current hash equals
+ * the first `previousHash` recorded for it, or it is absent when the run created it). Nothing is
+ * left to do for it, so it does not make the outcome partial.
+ * original_path_taken (G-A): a moved or discarded file cannot go back because something now
+ * exists at its original path; nothing is replaced.
  */
-export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record"] as const;
+export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record", "already_reverted", "original_path_taken"] as const;
 export type RevertSkipReason = (typeof REVERT_SKIP_REASONS)[number];
 
 /**
@@ -100,6 +123,11 @@ export interface RevertedFile {
   readonly path: string;
   /** `deleted`: the run created the file (its original is `null`). */
   readonly action: RevertAction;
+  /**
+   * G-A: for `moved_back`, the masked path the file was moved back from (the record's `to`). For a
+   * moved or discarded file `path` is the place it returned to. Absent for the other actions.
+   */
+  readonly from?: string;
 }
 
 export interface SkippedFile {
@@ -138,5 +166,11 @@ export interface RevertOutcome {
  * - The caller holds the workspace lock while it runs. Nothing is written to the run's journal.
  * - With `dryRun` (N-7) the same decisions are made and reported, and nothing is changed; the
  *   caller takes no lock. Errors are the same.
+ * - G-A, an apply run (its journal starts with `apply_started`, ApplyJournalEvent): its
+ *   `file_moved` and `file_discarded` records are handled in reverse order. A moved file goes back
+ *   from `to` to `from` when the file at `to` has the recorded SHA-256 and nothing exists at
+ *   `from`; a discarded file goes back from `.codaryn/discarded/<runId>/` (DR-9) the same way.
+ *   Otherwise it is skipped (`changed_since_run`, `original_path_taken`). Renames only: nothing is
+ *   copied or replaced. Directories the apply created are left in place.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

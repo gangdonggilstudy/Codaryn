@@ -26,6 +26,7 @@ import type {
   ResolvedTaskSpec,
   VerifierConfig,
 } from "../contracts/index.js";
+import { toSchemaFieldPath } from "../contracts/index.js";
 import { checkProtectedPaths } from "../policy/index.js";
 import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "./security/index.js";
 
@@ -34,7 +35,18 @@ export type TaskErrorCode = "invalid_task" | "invalid_config";
 
 export type ParseTaskOutcome =
   | { readonly ok: true; readonly task: ResolvedTaskSpec }
-  | { readonly ok: false; readonly code: TaskErrorCode; readonly message: string };
+  | { readonly ok: false; readonly code: TaskErrorCode; readonly message: string; readonly position?: InputErrorPosition };
+
+/**
+ * N-15: where a validation failure is, as schema field text. The CLI turns it into an
+ * InputDiagnostic only through `toSchemaFieldPath`, so a position that is not a plain schema path
+ * (a profile or key name, for example) is dropped rather than printed.
+ */
+export interface InputErrorPosition {
+  readonly code: "unknown_field" | "invalid_value" | "missing_field";
+  readonly field: string;
+  readonly suggestion?: string | null;
+}
 
 export type Rec = Record<string, unknown>;
 
@@ -43,20 +55,78 @@ export class InputError extends Error {
   constructor(
     message: string,
     readonly code?: TaskErrorCode,
+    readonly position?: InputErrorPosition,
   ) {
     super(message);
   }
 }
 
-export function fail(message: string, code?: TaskErrorCode): never {
-  throw new InputError(message, code);
+/** N-15: a message that starts with a schema field path names that field. */
+function positionFromMessage(message: string): InputErrorPosition | undefined {
+  const head = message.split(" ", 1)[0] ?? "";
+  return toSchemaFieldPath(head) === null ? undefined : { code: "invalid_value", field: head };
+}
+
+export function fail(message: string, code?: TaskErrorCode, position?: InputErrorPosition): never {
+  throw new InputError(message, code, position ?? positionFromMessage(message));
+}
+
+const ROOT_FIELDS = new Set(["config", "task", "script"]);
+
+/** Optimal string alignment distance, case folded. Small strings only (field names). */
+function nameDistance(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  const rows: number[][] = Array.from({ length: x.length + 1 }, (_, i) => Array.from({ length: y.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= x.length; i += 1) {
+    for (let j = 1; j <= y.length; j += 1) {
+      const row = rows[i] as number[];
+      const up = rows[i - 1] as number[];
+      const cost = x.charAt(i - 1) === y.charAt(j - 1) ? 0 : 1;
+      let best = Math.min((up[j] as number) + 1, (row[j - 1] as number) + 1, (up[j - 1] as number) + cost);
+      if (i > 1 && j > 1 && x.charAt(i - 1) === y.charAt(j - 2) && x.charAt(i - 2) === y.charAt(j - 1)) {
+        best = Math.min(best, ((rows[i - 2] as number[])[j - 2] as number) + 1);
+      }
+      row[j] = best;
+    }
+  }
+  return (rows[x.length] as number[])[y.length] as number;
+}
+
+/**
+ * N-6 (A11): the allowed name closest to an unknown key, or null. Only an allowed name is ever
+ * returned; the unknown key is compared, never shown. Keys longer than 64 characters are not compared.
+ */
+export function closestFieldName(unknown: string, allowed: readonly string[]): string | null {
+  if (unknown.length === 0 || unknown.length > 64) return null;
+  let best: string | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const name of allowed) {
+    const distance = nameDistance(unknown, name);
+    if (distance < bestDistance) {
+      best = name;
+      bestDistance = distance;
+    }
+  }
+  return best !== null && bestDistance <= Math.min(2, Math.floor(best.length / 2)) ? best : null;
 }
 
 export function record(value: unknown, field: string, keys: readonly string[]): Rec {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) fail(`${field} must be an object`);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    fail(`${field} must be an object`, undefined, { code: value === undefined ? "missing_field" : "invalid_value", field });
+  }
   const rec = value as Rec;
   const extra = Object.keys(rec).find((key) => !keys.includes(key));
-  if (extra !== undefined) fail(`${field} has an unknown field`);
+  if (extra !== undefined) {
+    // N-6, N-15: the unknown key itself is never named; the allowed names and the closest one are.
+    const near = closestFieldName(extra, keys);
+    const hint = near === null ? "" : `; did you mean ${near}?`;
+    fail(`${field} has an unknown field; allowed fields: ${keys.join(", ")}${hint}`, undefined, {
+      code: "unknown_field",
+      field,
+      suggestion: near === null ? null : ROOT_FIELDS.has(field) ? near : `${field}.${near}`,
+    });
+  }
   return rec;
 }
 
@@ -145,7 +215,8 @@ function parseModel(value: unknown, baseDir: string): ModelConfig {
   }
   if (rec["provider"] === "anthropic") {
     if (rec["scriptPath"] !== undefined) fail("model.scriptPath is only for the scripted provider");
-    const model = optionalText(rec["model"], "model.model");
+    // N-3: a placeholder (blank or `<...>`) is accepted here and counts as not set.
+    const model = rec["model"] === undefined ? undefined : typeof rec["model"] === "string" ? rec["model"] : fail("model.model must be a string");
     const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], "model.maxOutputTokens");
     return {
       provider: "anthropic",
@@ -335,7 +406,14 @@ function attempt(code: TaskErrorCode, build: () => ResolvedTaskSpec): ParseTaskO
   try {
     return { ok: true, task: build() };
   } catch (error) {
-    if (error instanceof InputError) return { ok: false, code: error.code ?? code, message: error.message };
+    if (error instanceof InputError) {
+      return {
+        ok: false,
+        code: error.code ?? code,
+        message: error.message,
+        ...(error.position === undefined ? {} : { position: error.position }),
+      };
+    }
     throw error;
   }
 }

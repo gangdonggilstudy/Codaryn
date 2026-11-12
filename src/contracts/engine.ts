@@ -14,6 +14,8 @@ import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolRunner } from "./tool.js";
 import type { VerifierResult, VerifierRunner } from "./verify.js";
+import type { ApplyResult, PlanOutput } from "./plan.js";
+import type { ReviewOutput } from "./workflow.js";
 
 export const RUN_STATUSES = [
   "created",
@@ -59,12 +61,29 @@ export interface RunReasonByStatus {
    * verifier_failed: a verifier failed and no repair is left (`maxRepairAttempts` used up, or 0).
    * repeated_failure: the same failure signature occurred `maxSameFailures` times in a row (R-3).
    */
-  readonly failed: "verifier_failed" | "model_error" | "repeated_failure";
+  /**
+   * G-A, apply runs only (plan.ts):
+   * plan_stale: the plan cannot be applied to the workspace as it is now: the preflight found an
+   * action that no longer fits or that the policy denies, the workspace is beyond the inventory
+   * limit (DR-6), or the plan was already applied; nothing was moved. apply_incomplete: an action
+   * failed while applying; the earlier ones stay done and `codaryn revert` undoes them.
+   */
+  readonly failed: "verifier_failed" | "model_error" | "repeated_failure" | "plan_stale" | "apply_incomplete";
   /**
    * protected_changed (U-2): an integrity check found protected material changed, or could not
    * show it unchanged (`unchecked` entries). The run is not repaired; see `EngineDeps.integrity`.
+   * G-A: plan_pending: `propose_plan` stored a plan; nothing changed in the workspace. It waits for
+   * a person's approval and `codaryn apply` (EngineResult.plan). awaiting_review: the workflow's
+   * completion is `human_review` and its verifiers all passed (or there is none); a person records
+   * a verdict with `codaryn review` (EngineResult.review). Neither is ever `done`.
    */
-  readonly "needs-input": "verifier_inconclusive" | "no_verifier" | "unknown_tool_outcome" | "protected_changed";
+  readonly "needs-input":
+    | "verifier_inconclusive"
+    | "no_verifier"
+    | "unknown_tool_outcome"
+    | "protected_changed"
+    | "plan_pending"
+    | "awaiting_review";
   readonly cancelled: "cancelled";
   readonly "budget-exhausted":
     | "max_model_turns"
@@ -91,6 +110,10 @@ export const RUN_REASONS = [
   "max_total_tokens",
   "max_duration",
   "usage_unknown",
+  "plan_stale",
+  "apply_incomplete",
+  "plan_pending",
+  "awaiting_review",
 ] as const satisfies readonly RunReason[];
 /** Compile-time check that RUN_REASONS misses none. */
 export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
@@ -125,6 +148,10 @@ export const CLI_ERROR_EXIT_CODES = {
    * holds the entry file), lies inside it or contains it. Checked before the lock; nothing is written.
    */
   workspace_is_install_dir: 2,
+  /**
+   * Another run (or revert) holds `<workspace>/.codaryn/lock.json`. N-25 (a): the human-readable
+   * error adds `lock.remove_hint`: when no Codaryn is running in that workspace, remove the file.
+   */
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
@@ -138,6 +165,18 @@ export const CLI_ERROR_EXIT_CODES = {
   run_not_found: 2,
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
+  /** G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as `plan_pending`). */
+  run_not_plan: 2,
+  /**
+   * G-A, `codaryn apply`: no approval. `--digest` is missing (without a terminal), shorter than
+   * MIN_PLAN_DIGEST_PREFIX, or not a prefix of the stored plan's digest, or the terminal answer was
+   * no. Nothing was changed.
+   */
+  plan_not_approved: 2,
+  /** G-A, `codaryn apply`: the plan was already applied (applied.json exists). Nothing was changed. */
+  plan_already_applied: 2,
+  /** G-A, `codaryn review`: the run did not end as `needs-input`/`awaiting_review`. Nothing was written. */
+  run_not_awaiting_review: 2,
   internal_error: 70,
 } as const;
 export type CliErrorCode = keyof typeof CLI_ERROR_EXIT_CODES;
@@ -199,6 +238,14 @@ export interface EngineResult {
    * Absent when the run had no integrity checker (nothing was protected).
    */
   readonly protectedChanged?: readonly MaskedText[];
+  /**
+   * G-A: present with reason `plan_pending` only. The stored plan's digest, the one value both
+   * `codaryn apply --digest` and the app layer's `applyPlan(runId, digest)` take (DR-1), and its
+   * number of actions.
+   */
+  readonly plan?: { readonly digest: ContentHash; readonly actions: number };
+  /** G-A: present with reason `awaiting_review` only. The workflow's checklist, masked. */
+  readonly review?: { readonly checklist: readonly MaskedText[] };
 }
 
 /** Printed on stdout as one JSON line when the CLI stops before a run starts. */
@@ -241,7 +288,10 @@ export interface InputDiagnostic {
 
 export type CliOutput = EngineResult | CliErrorOutput;
 
-/** `complete`: every changed file was reverted (or nothing had changed). `partial`: some were skipped. */
+/**
+ * `complete`: every changed file was reverted or was already as before the run (`already_reverted`),
+ * or nothing had changed. `partial`: some file was skipped for any other reason (N-22).
+ */
 export const REVERT_EXIT_CODES = { complete: 0, partial: 3 } as const;
 export type RevertStatus = keyof typeof REVERT_EXIT_CODES;
 
@@ -277,8 +327,20 @@ export interface RevertOutput {
  * RevertOutput or CliErrorOutput, and `report --json`, `doctor --json`, `models --json`,
  * `init --json` and `runs --json` print ReportOutput, DoctorOutput, ModelsOutput, InitOutput and
  * RunsOutput (their default output is text, see commands.ts) or CliErrorOutput.
+ * G-A: `apply` prints ApplyResult or CliErrorOutput; `plan --json` and `review --json` print
+ * PlanOutput and ReviewOutput (their default output is text) or CliErrorOutput.
  */
-export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput | ModelsOutput | InitOutput | RunsOutput;
+export type CommandOutput =
+  | CliOutput
+  | RevertOutput
+  | ReportOutput
+  | DoctorOutput
+  | ModelsOutput
+  | InitOutput
+  | RunsOutput
+  | ApplyResult
+  | PlanOutput
+  | ReviewOutput;
 
 /** Injected time source in milliseconds. */
 export interface Clock {

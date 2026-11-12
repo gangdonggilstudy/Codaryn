@@ -141,6 +141,8 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 
 stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`run`은 `CliOutput`, `revert`는 `RevertOutput` 또는 `CliErrorOutput`). `report`와 `doctor`는 기본이 사람이 읽는 글이고, `--json`이면 `ReportOutput`·`DoctorOutput` JSON 한 줄이다. 어느 명령이든 오류는 `CliErrorOutput` JSON 한 줄이다(이 JSON들을 합쳐 `CommandOutput`). `--help`와 `--version`은 글이다. `run`의 진행 표시는 stderr다(15절 U-8).
 
+- N-19: stdout의 JSON 한 줄(모든 명령의 JSON 출력과 `--json`)은 U+007F보다 큰 문자를 모두 `\uXXXX`로 쓴다(BMP 밖 문자는 서로게이트 쌍). JSON으로 읽으면 값은 같다. Windows PowerShell 5.1의 기본 코드 페이지에서도 깨지지 않게 하기 위해서다. `report`·`doctor`·`models`의 기본 글 출력은 그대로다.
+
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
@@ -477,7 +479,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
 - `--task`와 `--workspace`는 함께 쓸 수 없다(`invalid_arguments`, W-5). task 파일이 자기 작업 공간(`workspaceRoot`)을 정하기 때문이다. 작업 공간을 보는 항목(`workspace`, `file_locations`, `install_dir`, `integrity_paths`의 위치 판정)은 task의 `workspaceRoot`나 `--workspace`를 쓰고, 둘 다 없으면 `skipped`다.
-- 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`. 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
+- 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`, `language`(N-20). 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
 - 종료(`DOCTOR_EXIT_CODES`): 가장 나쁜 항목에 따라 `ok` 0, `warn` 3, `fail` 1이다(`skipped`는 `ok`로 센다). 인자 오류는 `invalid_arguments`(`CliErrorOutput`)다.
 - 메시지는 고정 문구, 필드 위치(`policy.commands[2]` 등), 개수로만 만든다. 파일이나 환경에서 읽은 값은 내지 않으며, 키는 있음·없음만 적는다.
 
@@ -580,7 +582,7 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
   - `model_list_failed`: 종료 8. API 요청이 실패했고, 메시지에 종류가 있다. 아무것도 쓰지 않았다.
   - `config_write_failed`: 종료 2. 설정 파일을 쓰지 못했고, 파일은 그대로다.
 - `--use <번호|id>`: 목록의 번호(1부터)나 목록에 있는 id만 받는다. 그 밖은 `invalid_arguments`이고 아무것도 쓰지 않는다.
-  - `--config`(또는 `CODARYN_CONFIG`)가 필요하다. 없으면 요청을 보내기 전에 `invalid_arguments`다.
+  - `--config`(또는 `CODARYN_CONFIG`)나 기본 위치의 설정 파일(N-1)이 필요하다. 셋 다 없으면 요청을 보내기 전에 `invalid_arguments`다. 기본 위치에는 새 파일을 만들지 않는다(`codaryn init`이 만든다).
   - 쓰기 전에 설정 파일을 `run`과 같은 순서로 검사한다(원문 키 검사, 파싱, 키 필드 검사, `parseConfig`). 키 필드나 키 값이 있으면 지금처럼 `key_in_file`이고, 요청도 쓰기도 하지 않는다.
   - 고른 id가 일반 모델 id 형식(영숫자로 시작, 영숫자와 `._:-`, 200자 이하)이 아니거나 키를 담고 있으면 `config_write_failed`이고 쓰지 않는다.
   - 원자적 쓰기: 같은 디렉터리의 임시 파일에 쓰고 이름을 바꾼다. 바꾸기 직전에 파일이 읽었을 때와 같은지 확인하고, 다르면 쓰지 않는다(`config_write_failed`). 링크면 가리키는 파일을 바꾸고 링크는 그대로 둔다. POSIX에서는 원래 파일의 권한을 옮긴다. 실패하면 임시 파일을 지우고 원래 파일은 그대로다.
@@ -693,7 +695,36 @@ codaryn doctor [...기존] [--profile <이름>]
 - 내보내지 않는 것: JSON 파서의 예외 문구(원문 조각을 담을 수 있다), 값, 모르는 키의 이름. 모르는 키는 그 키를 가진 객체의 위치(`config`, `limits`, `policy.commands[0]`)로만 말한다.
 - 문구는 `diagnostic.<code>`와 `diagnostic.file.<file>`이다. 구현은 N-A(검증기와 CLI)다.
 
-### 17.6 오류 코드 추가
+### 17.6 문구·출력 계약 추가 (N-20~N-23)
+
+N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만 있고, 카탈로그 글(N-B)과 렌더러(N-C)는 이 계약에 맞춰야 컴파일된다(새 id가 `MessageTexts`에 필요하고 `summary.usage`의 매개변수가 바뀌었다).
+
+- **코드의 사람 말(N-20)**: 목록 id `denial.<거부·도구 오류 코드>`, `permission.<권한 종류>`, `phase.<무결성 단계>`, `modelError.<모델 오류 종류>`를 더했다. 진행 줄과 요약은 사람 말을 먼저 쓰고 코드는 괄호에 둔다.
+- **초 단위 시간(N-20)**: 매개변수 종류 `seconds`(0 이상, 소수 한 자리까지)를 더했다. `summary.usage`는 `{ turns, toolCalls, seconds }`다. 렌더러가 ms를 0.1초 단위로 반올림한다.
+- **예·아니오 기본 답(N-20)**: `init.yes_no`를 없애고 `prompt.yes_no_default_yes`, `prompt.yes_no_default_no`를 두었다. 질문별 기본은 `INIT_QUESTION_DEFAULTS`다: 파일 만들기 예, 명령 허용 제안 아니오(실행 권한을 넓히는 질문은 Enter로 바뀌지 않는다), 보호 경로 제안 예. 분명한 예·아니오가 아니면 기본 답, 입력이 끝나면 아니오다.
+- **언어 출처(N-20)**: `explainMessageLanguage`(`ExplainMessageLanguage`)가 `{ language, source, envIgnored }`를 돌려준다(`source`: `env`, `config`, `os`, `default`). 입력 값은 담지 않는다. 문구는 `language.chosen`, `language.source.<출처>`, `language.env_ignored`다. `doctor`에 `language` 점검을 마지막 항목으로 더했다(CODARYN_LANG이 ko·en이 아니면 `warn`).
+- **help와 doctor 문구(N-21)**: 한 줄짜리 고정 id(`help.*`, `doctor.*`)와 목록 id(`help.command.<명령>`, `help.option.<옵션>`, `help.exit.<명령>`, `doctor.check.<점검 id>`, `doctor.status.<상태>`)를 더했다. 사용법 줄(명령 문법)은 영어로 CLI가 찍는다. `DoctorCheck.text`(`DoctorText`, 선택)가 같은 결과를 문구 id와 매개변수로 담고, JSON의 영어 `message`는 그대로 둔다. 점검 id와 상태 값은 영어다.
+- **진행 줄 `progress.tool_rejected`(N-22)**: 권한 판정 전 단계(형식 검사, 복원)에서 멈춘 호출이다. `permission`이 없으므로 `{ tool, code }`만 받는다.
+- **`already_reverted`(N-22)**: 되돌리기 건너뜀 사유에 더했다. 현재 해시가 그 파일의 첫 `previousHash`와 같거나, 실행이 만든 파일이 이미 없을 때다. 할 일이 없으므로 `partial`로 세지 않는다(`complete`가 될 수 있다).
+- **되돌리기 기록(N-22, N-23)**: store의 `readRevertRecord`·`writeRevertRecord`(`ReadRevertRecord`, `WriteRevertRecord`)를 쓴다. 읽기가 실패하거나 기록이 확인을 통과하지 못하면 오류로 끝내지 않고 그 기록 없이 진행한다(`revertedBefore` 없음). 쓰기 실패는 결과를 바꾸지 않는다.
+- **`runs` 오류(N-22)**: `invalid_run_record`(`.codaryn`이나 `runs`가 링크이거나 나열할 수 없음)를 더했다. `--run latest`의 목록 실패도 같다. `parseRunsArgs`와 `RUNS_USAGE`는 `src/cli/runs.ts`에 있다. 실행 목록 확인은 `report`만큼 엄격하다(`RunListEntry` 주석).
+- **`doctor` 안내(N-22)**: `DOCTOR_HINT_ERROR_CODES`(`invalid_config`, `invalid_task`, `key_in_file`, `secret_env_missing`, `workspace_is_install_dir`, `provider_not_configured`, `model_list_failed`)의 오류에만 `error.doctor_hint`를 붙인다.
+- **요약의 notices(N-22)**: 실행 끝 요약은 `notices`를 보이지 않는다. 모델 404 안내는 진행 줄(`progress.model_not_found`)이 맡고, notices는 JSON과 보고서에 남는다.
+- **거부 안내의 정책 위치(N-23)**: `RunSummaryContext.policySource`(`task`, `config`)와 `deniedCommandCalls`(권한이 `command`인 거부 수)를 더했다. 안내는 `deniedCommandCalls`가 1 이상일 때만 낸다. task 파일 실행이면 `summary.denied_hint_task`(task의 `policy.commands`), 간편 형식과 한 줄 실행이면 `summary.denied_hint`(설정 파일이나 프로필)를 쓴다.
+- **`--run latest`가 고른 실행(N-23)**: `revert`와 `report`는 `latest`를 풀면 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 먼저 쓴다(`HumanOutput.latestChosen`, 문구 `latest.chosen`, 시각은 확인된 `startedAt`을 지역 시간으로). `--quiet`이면 쓰지 않는다.
+
+- **N-24(검토 R-3)**
+  - (a) `report`의 Markdown과 진행 줄은 검증기를 id 대신 순번으로 쓴다. id는 `--json`에만 남는다.
+  - (b) 실행 목록 항목의 실행 id·작업 id는 패턴을 통과해도 키 모양일 수 있다. 그래서 JSON과 표 모두 키 모양을 가린다(`report`와 같다).
+  - (d) `SCHEMA_FIELD_NAMES`에 대본의 `usage` 하위 필드 `inputTokens`, `outputTokens`를 더했다.
+  - (e) 문구 함수는 값의 종류를 실행 중에 다시 확인한다. 맞지 않는 값은 내지 않고 고정 대체 글로 둔다(`MessageCatalog` 주석).
+- **N-25(a) 작업 공간 잠금**
+  - `workspace_locked`의 사람용 오류에 `lock.remove_hint`("이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지우세요")를 붙인다.
+  - `doctor`에 `lock` 점검을 마지막 항목으로 더했다. `.codaryn/lock.json`을 바꾸지 않고 읽는다.
+  - 결과: 없음(`ok`), 살아 있는 프로세스가 쥠(`warn`, 안내 포함), 끝난 프로세스가 남김(`ok`, 다음 실행이 회수), 읽을 수 없음(`warn`). 작업 공간이 없으면 `skipped`다.
+  - pid가 다른 프로세스에 다시 주어질 수 있어 "쥠" 판정은 틀릴 수 있다(architecture A-6).
+
+### 17.7 오류 코드 추가
 
 - `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.
 - `config_write_failed`(종료 2)는 `init`에서도 쓴다.

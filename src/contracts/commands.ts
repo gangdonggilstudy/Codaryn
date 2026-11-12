@@ -7,7 +7,7 @@
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
 import type { DefaultConfigDisplay } from "./config.js";
-import type { MessageLanguage, RunId } from "./human.js";
+import type { DoctorText, MessageLanguage, RunId } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
 import type { Limits, ModelProviderName } from "./task.js";
@@ -60,7 +60,11 @@ export interface ReportJournalSummary {
   readonly finished: { readonly status: TerminalRunStatus; readonly reason: RunReason } | null;
 }
 
-/** Printed by `codaryn report --json`. Without `--json` the same content is printed as Markdown. */
+/**
+ * Printed by `codaryn report --json`. Without `--json` the same content is printed as Markdown.
+ * N-24 (a): the Markdown shows each verifier by its number (1-based, in the order of the run's
+ * verifier list), never by its id; the id stays in this JSON only. Key shapes are hidden in both.
+ */
 export interface ReportOutput {
   readonly schemaVersion: 1;
   readonly kind: "report";
@@ -73,13 +77,19 @@ export interface ReportOutput {
 }
 
 /**
- * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--json]`
- * (`--profile <name>` is added by N-8.)
+ * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--profile <name>] [--json]`
  * checks what a run would need without running one: no network access, no model request, no
  * write. One check per id, in this order. A check that has nothing to look at is `skipped`.
  *
  * `--task` and `--workspace` cannot be combined (`invalid_arguments`, W-5): a task file names its
- * own workspace (`workspaceRoot`). `--profile` (N-8) checks the config with that profile applied. The workspace checks (`workspace`, `file_locations`,
+ * own workspace (`workspaceRoot`). `--profile` (N-8) checks the config with that profile applied.
+ * `language` (N-20) says which language the human output uses and where that came from; it warns
+ * when CODARYN_LANG is set to something other than `ko` or `en`. `lock` (N-25 a) reads
+ * `<workspace>/.codaryn/lock.json` without changing it: none, held by a live process (`warn`, with
+ * the hint to remove the file when no Codaryn is running), left by a process that has ended
+ * (`ok`: the next run reclaims it), or unreadable (`warn`); `skipped` without a workspace. Because
+ * a process id can be given to another process later, "held" can be wrong (architecture A-6). The
+ * workspace checks (`workspace`, `file_locations`,
  * `install_dir`, and the position part of `integrity_paths`) use the task's `workspaceRoot` or
  * `--workspace`; with neither they are `skipped`.
  */
@@ -96,6 +106,8 @@ export const DOCTOR_CHECK_IDS = [
   "workspace",
   "install_dir",
   "integrity_paths",
+  "language",
+  "lock",
 ] as const;
 export type DoctorCheckId = (typeof DOCTOR_CHECK_IDS)[number];
 
@@ -111,6 +123,11 @@ export interface DoctorCheck {
    * absent only, and paths, names and contents are not echoed.
    */
   readonly message: string;
+  /**
+   * N-21: the same outcome as a catalog message id and its parameters, used for the human output
+   * in the chosen language. Absent only in outputs from before N-21.
+   */
+  readonly text?: DoctorText;
 }
 
 /** `warn`: a run may work but something needs attention. `fail`: a run would stop. */
@@ -235,7 +252,9 @@ export interface InitOutput {
  * `<workspace>/.codaryn/runs/`, newest first. `--workspace` defaults to the current directory,
  * `--limit` to RUNS_DEFAULT_LIMIT (1 to RUNS_MAX_LIMIT). It changes nothing, takes no lock and
  * does not create the state directory: a workspace without one has no runs (exit 0).
- * Errors (CliErrorOutput): `invalid_arguments`, `workspace_not_found`.
+ * Errors (CliErrorOutput): `invalid_arguments`, `workspace_not_found`, `invalid_run_record`
+ * (N-22: `.codaryn` or `.codaryn/runs` is a link or cannot be listed; the same for `--run latest`).
+ * `parseRunsArgs` and RUNS_USAGE live in `src/cli/runs.ts` (N-22).
  */
 export const RUNS_DEFAULT_LIMIT = 20;
 export const RUNS_MAX_LIMIT = 1000;
@@ -270,9 +289,17 @@ export const RUN_TIMESTAMP_PATTERN_SOURCE = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2
  * - revert.json, when present, has `kind` "revert_record", the same `runId`, `at` matching
  *   RUN_TIMESTAMP_PATTERN_SOURCE, `status` "complete" or "partial";
  * - each file is read at most MAX_REPORT_FILE_BYTES; a missing result.json or revert.json is not
- *   damage (the fields are null), but one that cannot be read, parsed or checked is.
+ *   damage (the fields are null), but a result.json that cannot be read, parsed or checked is.
+ * - N-23 (g): a revert.json that cannot be read, parsed or checked does not make the run damaged:
+ *   the entry stays `checked` with `reverted: null` and `revertRecordDamaged: true`, and
+ *   `revert` goes on without the record. N-26: a `damaged` run is refused by `revert`
+ *   (`invalid_run_record`) even when named by its id.
+ * - N-22: the checks are at least as strict as `report`'s: `run_started` also has
+ *   `schemaVersion` 1 and a known provider; result.json also has `schemaVersion` 1, a known
+ *   provider, the journal's `taskId`, and `changes` entries of the FileChangeRecord shape.
  * Strings put into an entry are only those checked against these patterns, so no control
- * character or key shape can be in them.
+ * character can be in them. The patterns allow a key-shaped run id or task id, so every output
+ * (the JSON line and the table) hides key shapes, as `report` does (N-24 b, review R-3 R3-2).
  */
 export type RunListEntry =
   | {
@@ -289,6 +316,8 @@ export type RunListEntry =
       readonly changes: number | null;
       /** The last revert of this run, from its revert record; null when never reverted. */
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
+      /** N-23 (g): the run has a revert record that failed the checks; it is shown apart and ignored. */
+      readonly revertRecordDamaged: boolean;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
 

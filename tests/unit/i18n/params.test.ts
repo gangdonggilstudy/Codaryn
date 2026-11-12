@@ -33,6 +33,28 @@ describe("i18n params: numbers", () => {
   });
 });
 
+describe("i18n params: seconds (N-20)", () => {
+  test("non-negative numbers with at most one decimal place, in decimal digits", () => {
+    for (const [value, shown] of [
+      [0, "0"],
+      [12, "12"],
+      [4.2, "4.2"],
+      [0.1, "0.1"],
+      [0.30000000000000004, "0.3"],
+      [59.9, "59.9"],
+      [3600, "3600"],
+    ] as const) {
+      assert.equal(show("seconds", value), shown, String(value));
+    }
+  });
+
+  test("anything else is the replacement mark", () => {
+    for (const value of [-0.1, 1.25, Number.NaN, Number.POSITIVE_INFINITY, 1e12, "4.2", null, undefined, {}]) {
+      assert.equal(show("seconds", value), REPLACEMENT, String(value));
+    }
+  });
+});
+
 describe("i18n params: closed codes and fixed strings", () => {
   test("each closed kind accepts exactly the contract's list", () => {
     const expected: [MessageParamKind, readonly string[]][] = [
@@ -46,6 +68,7 @@ describe("i18n params: closed codes and fixed strings", () => {
       ["location", [...Object.values(DEFAULT_CONFIG_DISPLAY), "--config", "CODARYN_CONFIG"]],
       ["suggestedCommand", INIT_SUGGESTED_COMMANDS],
       ["suggestedPath", INIT_SUGGESTED_PROTECTED_PATHS],
+      ["language", ["ko", "en"]],
     ];
     for (const [kind, values] of expected) {
       assert.deepEqual([...CLOSED_KIND_VALUES[kind as keyof typeof CLOSED_KIND_VALUES]].sort(), [...values].sort(), kind);
@@ -69,6 +92,8 @@ describe("i18n params: closed codes and fixed strings", () => {
       ["suggestedCommand", "npm run probe"],
       ["suggestedCommand", "codaryn doctor"],
       ["suggestedPath", "src"],
+      ["language", "KO"],
+      ["language", "ja"],
       ["status", "__proto__"],
       ["reason", "toString"],
       ["status", 1],
@@ -104,6 +129,20 @@ describe("i18n params: cleanLine", () => {
   test("replaces controls and line breaks and hides key-shaped text", () => {
     assert.equal(cleanLine("a\r\nb\tc\u2028d\u0085e\u202ef"), "a??b?c?d?e?f");
     assert.equal(cleanLine(`x ${KEY_SHAPED} y`), `x ${HIDDEN_KEY} y`);
+  });
+
+  test("a key shape broken up by control characters is still hidden (N-23 h, review R-2 L-5)", () => {
+    const BEL = String.fromCharCode(0x07);
+    const ESC = String.fromCharCode(0x1b);
+    const RLO = String.fromCharCode(0x202e);
+    const LF = String.fromCharCode(0x0a);
+    // R-2's input: `sk-ant-AB<BEL>CDEF…` with 30 more key characters.
+    assert.equal(cleanLine(`created sk-ant-AB${BEL}CDEFGHIJKLMNOPQRSTUVWXYZ012345`), `created ${HIDDEN_KEY}`);
+    assert.equal(cleanLine(`a ${KEY_SHAPED.slice(0, 9)}${ESC}${RLO}${KEY_SHAPED.slice(9)} tail${LF}`), `a ${HIDDEN_KEY} tail?`);
+    assert.equal(cleanLine(`${BEL}${KEY_SHAPED}${BEL}`), `?${HIDDEN_KEY}?`);
+    assert.equal(cleanLine(`${KEY_SHAPED} ${BEL} ${KEY_SHAPED}`), `${HIDDEN_KEY} ? ${HIDDEN_KEY}`);
+    assert.equal(cleanLine(`sk-ant-short${BEL}`), "sk-ant-short?");
+    assert.equal(cleanLine(`sk-ant-${BEL}`), "sk-ant-?");
     assert.equal(cleanLine("한국어 그대로"), "한국어 그대로");
   });
 });

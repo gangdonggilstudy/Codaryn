@@ -27,6 +27,7 @@ import {
   TERMINAL_RUN_STATUSES,
 } from "../contracts/index.js";
 import type {
+  ListRuns,
   EngineResult,
   FileChangeRecord,
   IntegrityPhase,
@@ -43,7 +44,10 @@ import type {
   VerifierResult,
 } from "../contracts/index.js";
 import { parseReportArgs } from "./args.js";
+import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
+import { resolveRunReference } from "./run-ref.js";
+import type { CheckedRun } from "./run-ref.js";
 import { cliError } from "./run.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
@@ -56,6 +60,19 @@ export interface ReportEnvironment {
   /** Read only to keep the current key out of the printed report. */
   readonly env: SettingsEnvironment;
   readonly platform?: NodeJS.Platform;
+  /** N-7: the store's `listRuns`, for `--run latest`. Absent: `latest` is not available. */
+  readonly listRuns?: ListRuns;
+  /** N-23: told which run `--run latest` chose, before anything is read. */
+  readonly announceLatest?: (entry: CheckedRun) => void;
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const realpathNative = promisify(realpathCallback.native);
@@ -310,9 +327,20 @@ function longestBacktickRun(text: string): number {
   return longest;
 }
 
+/**
+ * N-23 (review R-2 h): key shapes and the current key are hidden before control characters are
+ * replaced, so a control character cannot break a key into pieces the check misses. Set by
+ * `renderReport` for the duration of one (synchronous) rendering.
+ */
+let renderingKey: string | null = null;
+
+function safe(text: string, keepLineBreaks = false): string {
+  return cleanText(hideKeys(text, renderingKey), keepLineBreaks);
+}
+
 /** Inline code that cannot be closed early by the text it shows. */
 function code(text: string): string {
-  const clean = cleanText(text);
+  const clean = safe(text);
   const longest = longestBacktickRun(clean);
   const fence = "`".repeat(longest + 1);
   const pad = clean.startsWith("`") || clean.endsWith("`") || clean.length === 0 ? " " : "";
@@ -321,7 +349,7 @@ function code(text: string): string {
 
 /** A fenced block that the text inside cannot close. */
 function block(text: string): string[] {
-  const clean = cleanText(text, true);
+  const clean = safe(text, true);
   const fence = "`".repeat(Math.max(3, longestBacktickRun(clean) + 1));
   return [fence].concat(clean.split(String.fromCharCode(10)), [fence]);
 }
@@ -344,7 +372,16 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
 ];
 
-export function renderReport(report: ReportOutput): string {
+export function renderReport(report: ReportOutput, currentKey: string | null = null): string {
+  renderingKey = currentKey;
+  try {
+    return renderReportText(report);
+  } finally {
+    renderingKey = null;
+  }
+}
+
+function renderReportText(report: ReportOutput): string {
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
@@ -369,8 +406,9 @@ export function renderReport(report: ReportOutput): string {
   if (verifiers.length === 0) {
     out.push("No verifier result was recorded for the last round.");
   } else {
-    for (const verifier of verifiers) {
-      out.push(`- ${code(verifier.id)} (${verifier.kind}): **${verifier.outcome}**`);
+    // N-24 (a): a verifier is shown by its number in the run's verifier order; the id is in --json only.
+    for (const [index, verifier] of verifiers.entries()) {
+      out.push(`- verifier ${index + 1} (${verifier.kind}): **${verifier.outcome}**`);
       for (const item of verifier.checked) out.push(`  - checked: ${code(item)}`);
       if (verifier.outcome !== "pass" && verifier.evidence.length > 0) {
         out.push("");
@@ -426,8 +464,8 @@ export function renderReport(report: ReportOutput): string {
   out.push(`- Repairs: ${journal.repairs}${limits.maxRepairAttempts === undefined ? "" : ` of ${limits.maxRepairAttempts}`}`);
 
   out.push("", "## Not checked", "");
-  for (const verifier of verifiers) {
-    for (const item of verifier.limits) out.push(`- ${code(verifier.id)}: ${code(item)}`);
+  for (const [index, verifier] of verifiers.entries()) {
+    for (const item of verifier.limits) out.push(`- verifier ${index + 1}: ${code(item)}`);
   }
   for (const item of REPORT_FIXED_LIMITS) out.push(`- ${item}`);
 
@@ -464,7 +502,7 @@ async function readRecordFile(file: string): Promise<string> {
 export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> {
   const parsed = parseReportArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
-  const { runId, json } = parsed.args;
+  const { json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.
   const problem = localPathProblem(parsed.args.workspace, io.cwd);
@@ -476,6 +514,20 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     if (!(await lstat(root)).isDirectory()) throw new Error("not a directory");
   } catch {
     return cliError("workspace_not_found", "the workspace is not an existing directory");
+  }
+  // N-7, N-18: `latest` is the newest checked run; ambiguous when a directory has that name.
+  const reference = await resolveRunReference(root, parsed.args.runId, {
+    exists: pathExists,
+    ...(io.listRuns === undefined ? {} : { listRuns: io.listRuns }),
+  });
+  if (!reference.ok) return cliError(reference.code, reference.message);
+  const runId = reference.runId;
+  if (reference.latest !== null) {
+    try {
+      io.announceLatest?.(reference.latest);
+    } catch {
+      // The notice is best effort.
+    }
   }
 
   const runDir = path.join(root, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
@@ -515,7 +567,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
   let text: string;
   try {
-    text = json ? `${JSON.stringify(report)}\n` : renderReport(report);
+    text = json ? jsonLine(report) : renderReport(report, currentKey);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

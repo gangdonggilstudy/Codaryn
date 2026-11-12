@@ -244,6 +244,21 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.ko["cleanup.warning.discarded_left"], /남으면/);
   });
 
+  test("R-34b: a damaged run's warning and the separate confirmation name it; an unknown folder is never removed", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // P-1: records that cannot be checked go with the not reverted confirmation, and that line says so.
+    assert.match(en["cleanup.confirm.not_reverted"], /records cannot be checked/);
+    assert.match(ko["cleanup.confirm.not_reverted"], /기록을 확인할 수 없는/);
+    assert.match(en["cleanup.warning.records_unreadable"], /cannot be checked.*may remove the last copies/);
+    assert.match(ko["cleanup.warning.records_unreadable"], /확인할 수 없.*마지막 사본도 지워질 수 있음/);
+    // P-2: a folder named like a leftover without its mark is shown and kept.
+    assert.match(en["cleanup.summary.unknown_folders"], /never removed/);
+    assert.match(ko["cleanup.summary.unknown_folders"], /지우지 않음/);
+    for (const id of ["cleanup.summary.unknown_folders", "cleanup.warning.records_unreadable"] as const) {
+      assert.ok(!en[id].includes("--") && !ko[id].includes("--"), `${id} names no CLI option`);
+    }
+  });
+
   test("the revert preview's next line says to revert, not to apply (catalog review, docs/usage.md bf4cb53)", () => {
     // `apply` is a command of its own; the English line matches docs/usage.md, which n01 compares.
     assert.equal(MESSAGE_TEXTS.en["revert.dry_run_next"], "Run again without --dry-run to revert.");

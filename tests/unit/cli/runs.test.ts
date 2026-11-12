@@ -252,6 +252,7 @@ describe("listRuns (N-7, N-16)", () => {
       reason: "verified",
       changes: 0,
       reverted: null,
+      revertRecordDamaged: false,
     });
   });
 
@@ -270,6 +271,7 @@ describe("listRuns (N-7, N-16)", () => {
         reason: null,
         changes: null,
         reverted: null,
+        revertRecordDamaged: false,
       },
       { state: "damaged", runId: "20260102T030406Z-bbbbbbbb" },
     ]);
@@ -358,6 +360,8 @@ describe("listRuns (N-7, N-16)", () => {
       ],
     );
     assert.equal(checked(listing.runs[0]).reverted, null);
+    assert.equal(checked(listing.runs[0]).revertRecordDamaged, true, "shown apart (bacf1a0)");
+    assert.equal(checked(listing.runs[1]).revertRecordDamaged, false);
     assert.equal(checked(listing.runs[0]).status, "done");
     assert.equal(await latestRunId(work), "20260102T030402Z-00000002");
     // N-22 contract: read rejects, and revert goes on without revertedBefore (N-A's revert).

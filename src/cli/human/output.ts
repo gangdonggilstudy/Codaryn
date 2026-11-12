@@ -381,6 +381,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         if (entry.reverted !== null && isOneOf(entry.reverted.status, ["complete", "partial"] as const)) {
           status += ` · ${catalog.format("runs.reverted")} (${entry.reverted.status})`;
         }
+        if (entry.revertRecordDamaged === true) status += ` · ${catalog.format("runs.revert_record_damaged")}`;
         rows.push([runId, localTime(entry.startedAt) ?? "?", isCount(entry.changes) ? String(entry.changes) : "-", status]);
       }
       // Every column but the last is padded to its widest cell (Hangul counts two columns).

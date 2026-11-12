@@ -4,7 +4,8 @@
  */
 
 import type { PolicyConfig } from "./task.js";
-import type { EffectiveToolCall, ToolCall, ToolDescriptor } from "./tool.js";
+import type { JsonObject } from "./text.js";
+import type { EffectiveToolCall, EffectiveWorkflowToolCall, ToolCall, ToolDescriptor } from "./tool.js";
 import type { Workspace } from "./workspace.js";
 
 export const PERMISSION_KINDS = ["path", "command", "network", "destructive", "restore"] as const;
@@ -50,8 +51,20 @@ export interface PolicyGate {
   /**
    * Second check on the effective arguments after restoration: real paths after resolving
    * links, and the actual command and args. Only an allowed result may be executed.
+   * G-A: besides built-in tool calls it judges workflow tool calls and single plan actions
+   * (PlanActionCall); like the first check it reads the descriptor's fields from `args`.
    */
-  checkEffective(call: EffectiveToolCall, descriptor: ToolDescriptor): Promise<PolicyDecision>;
+  checkEffective(call: EffectiveToolCall | EffectiveWorkflowToolCall | PlanActionCall, descriptor: ToolDescriptor): Promise<PolicyDecision>;
+}
+
+/**
+ * G-A: one plan action as the policy gate judges it, with a name from PLAN_ACTION_DESCRIPTORS and
+ * the action's path fields only (`from` and `to`, or `path`), effective after restoration.
+ */
+export interface PlanActionCall {
+  readonly id: string;
+  readonly name: string;
+  readonly args: JsonObject;
 }
 
 export interface PolicyGateOptions {

@@ -2,7 +2,8 @@
  * The task file (task.json) and the resolved task the engine runs (`ResolvedTaskSpec`).
  * The file has the TaskSpec shape, except that `limits` and each of its fields may be left out
  * when the config file supplies them (see `CodarynConfig`). The quick form (`--workspace`,
- * `--goal`) builds the task from the config file instead.
+ * `--goal`, and G-A's `--workflow <id>` for `workflowRef`) builds the task from the config file
+ * instead.
  * Neither file ever contains secret values or API keys.
  */
 
@@ -35,7 +36,8 @@ export interface TaskSpec {
    * G-A (GT-D2): id of a workflow definition (workflow.ts): a built-in or an entry of the config
    * file's `workflows`. The CLI expands it into the fields below on the resolved task. Absent, and
    * none of the fields below set: the task runs as before stage 4 (LEGACY_WORKFLOW_SETTINGS).
-   * `workflow` stays a free label either way.
+   * `workflow` stays a free label either way. In the quick form it comes from `--workflow <id>`
+   * (QUICK_WORKFLOW_ARGUMENT, DR-2); the other workflow fields have no quick form argument.
    */
   readonly workflowRef?: string;
   /** G-A: narrows the definition's tools (never widens them). See WorkflowSettings. */

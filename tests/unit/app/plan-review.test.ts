@@ -5,13 +5,13 @@
  */
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import type { ApplyResult, PlanOutput, ReviewOutput } from "../../../src/contracts/index.js";
 import { createCodarynApp, planArguments, reviewArguments } from "../../../src/app/index.js";
 import type { AppCallOutcome, ReviewRequest } from "../../../src/app/index.js";
-import { FAKE_SECRET, WRITE_NOTES, appEnvironment, plannedRun, planSteps, runDir, setupRun, taskForm, taskRequest } from "./support.js";
+import { FAKE_SECRET, WRITE_NOTES, appEnvironment, exists, plannedRun, planSteps, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -49,6 +49,32 @@ describe("plan", () => {
     assert.equal(code(await app.plan!({ settings: taskForm(base), runId: "20200101T000000Z-00000000" })), "run_not_found");
     assert.equal(code(await app.plan!({ settings: taskForm(base, { input: { kind: "task", taskPath: path.join(base, "absent.json") } }), runId: "latest" })), "invalid_task");
   });
+});
+
+describe("DR-28 (R-11 M-1)", () => {
+  // The app layer passes plan and apply to the CLI, which compares the masked paths (contract
+  // bed4d81). Until the CLI (w3:p2) and the store (w3:p6) implement it, this case fails; it is a
+  // todo so the suite shows it without failing. Remove the todo once both are merged.
+  test(
+    "a task form with other secrets than the plan run shows and moves nothing: plan_secrets_differ",
+    { todo: "DR-28: the comparison is not implemented in the CLI and the store yet" },
+    async () => {
+      const secretName = `${FAKE_SECRET}.txt`;
+      const { base, app, plan, digest } = await plannedRun({ [secretName]: "alpha\n" }, planSteps(secretName, "sorted/b.txt"));
+      // The same task without the secret variable: the plan run's token for the name is not registered now.
+      const task = JSON.parse(await readFile(path.join(base, "task.json"), "utf8")) as Record<string, unknown>;
+      await writeFile(path.join(base, "other.json"), JSON.stringify({ ...task, privacy: { secretEnv: [] } }), "utf8");
+      const other = taskForm(base, { input: { kind: "task", taskPath: path.join(base, "other.json") } });
+
+      const view = await app.plan!({ settings: other, runId: plan.runId });
+      assert.equal(JSON.stringify(view).includes(FAKE_SECRET), false, "no plaintext of the plan run's secret");
+      assert.equal(code(view), "plan_secrets_differ");
+
+      const started = await app.applyPlan!({ settings: other, planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
+      assert.equal(started.ok ? null : started.error.code, "plan_secrets_differ");
+      assert.equal(await exists(path.join(base, "work", secretName)), true, "nothing was moved");
+    },
+  );
 });
 
 describe("review", () => {

@@ -369,7 +369,11 @@ export interface CleanupPreview {
   readonly kind: "cleanup_preview";
   /** The moment the plan counted `olderThanDays` from (RUN_TIMESTAMP_PATTERN_SOURCE); give it back to applyCleanup. */
   readonly now: string;
-  /** Items with their warnings, blocked items, totals, the parked files (never cleaned) and the digest to confirm. */
+  /**
+   * Items with their warnings, blocked items, totals, the parked files (never cleaned) and the digest to
+   * confirm. DR-44: leftover folders of an earlier cleanup come last (target "leftover"), and
+   * totals.runs.notReverted counts the runs that need their own confirmation.
+   */
   readonly plan: CleanupPlan;
 }
 
@@ -378,13 +382,19 @@ export interface ApplyCleanupRequest {
   readonly workspace: string;
   readonly selection: CleanupSelection;
   readonly now: string;
-  /** The digest of the plan shown, and apart from it whether the discarded-files folders (people's files) may go. */
+  /**
+   * The digest of the plan shown, and each asked apart: whether the discarded-files folders (people's
+   * files) may go, and (DR-44 (a)) whether the records of runs not reverted or only partly reverted may go.
+   */
   readonly confirmation: CleanupConfirmation;
 }
 
 export interface CleanupApplied {
   readonly kind: "cleanup_applied";
-  /** The store's outcome: what was removed and kept and why, or why nothing was (plan_changed, workspace_locked). */
+  /**
+   * The store's outcome: what was removed entirely and what was kept and why (DR-44: partly_removed is
+   * never reported as removed), or why nothing was (plan_changed, workspace_locked).
+   */
   readonly outcome: CleanupOutcome;
 }
 

@@ -6,10 +6,14 @@
  *   blocked items, totals, the parked files that are never cleaned, and the plan's digest) and
  *   removes nothing. It returns the moment the plan counted `olderThanDays` from, so the apply makes
  *   the same plan.
- * - Only what the person confirmed is removed: applyCleanup passes the confirmation (the digest of
- *   the plan shown, and apart from it whether the discarded-files folders, people's own files, may
- *   go) to the store, which makes the plan again under the workspace lock and removes nothing
- *   unless its digest is the confirmed one. The GUI's main process asks the person.
+ * - Only what the person confirmed is removed: applyCleanup passes the confirmation to the store:
+ *   the digest of the plan shown, and apart from it whether the discarded-files folders (people's
+ *   own files) may go and (DR-44 (a)) whether the records of runs not reverted or only partly
+ *   reverted may go. The store makes the plan again under the workspace lock and removes nothing
+ *   unless its digest is the confirmed one. The GUI's main process asks the person each question.
+ * - DR-44: the store's warnings (partly_reverted, discarded_left, leftover), leftover folders and
+ *   kept reasons (partly_removed, not_reverted_not_confirmed, used_by_kept_apply) are passed on as
+ *   they are.
  * - Arguments are checked before anything is read: exact run directory names (isStoredRunId), whole
  *   non-negative day counts, `reverted: true` only, no unknown field, a timestamp of the contract's
  *   form, a 64-hex digest, a boolean for the discarded files.
@@ -80,12 +84,21 @@ export function cleanupSelectionOf(value: unknown): Checked<CleanupSelection> {
   return { ok: true, value: { ...(runs.value === undefined ? {} : { runs: runs.value }), ...(discarded.value === undefined ? {} : { discarded: discarded.value }) } };
 }
 
+/**
+ * The person's confirmation: the plan's digest, and each asked apart (DR-44 (a)): whether the
+ * discarded-files folders (people's files) may go, and whether the records of runs not reverted or
+ * only partly reverted may go. Both are required booleans, so a confirmation never says yes by
+ * leaving one out.
+ */
 function confirmationOf(value: unknown): Checked<CleanupConfirmation> {
-  if (!isRecord(value) || !onlyKeys(value, ["digest", "discarded"])) return invalid("the confirmation is the plan's digest and whether the discarded files may go");
-  const { digest, discarded } = value;
+  if (!isRecord(value) || !onlyKeys(value, ["digest", "discarded", "includeNotReverted"])) {
+    return invalid("the confirmation is the plan's digest, whether the discarded files may go and whether runs not reverted may go");
+  }
+  const { digest, discarded, includeNotReverted } = value;
   if (typeof digest !== "string" || !DIGEST.test(digest)) return invalid("the confirmation's digest must be the plan's 64 hex characters");
   if (typeof discarded !== "boolean") return invalid("the confirmation's discarded must be true or false");
-  return { ok: true, value: { digest, discarded } };
+  if (typeof includeNotReverted !== "boolean") return invalid("the confirmation's includeNotReverted must be true or false");
+  return { ok: true, value: { digest, discarded, includeNotReverted } };
 }
 
 export async function stateSummaryIn(environment: AppEnvironment, request: StateSummaryRequest): Promise<AppCallOutcome<StateSummaryView>> {

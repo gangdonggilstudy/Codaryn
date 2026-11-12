@@ -16,6 +16,7 @@ import { runsScreen } from "./runs/runs-screen.js";
 import { planScreen } from "./plan/plan-screen.js";
 import { changesScreen } from "./changes/changes-screen.js";
 import { reportScreen } from "./report/report-screen.js";
+import { cleanupScreen } from "./runs/cleanup-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
@@ -103,6 +104,7 @@ async function start(): Promise<void> {
   shell.add(changes);
   shell.add(report);
   shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges, openReport }));
+  shell.add(cleanupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.setEngine(info.engine);

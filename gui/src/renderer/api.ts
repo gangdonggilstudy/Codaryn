@@ -38,6 +38,7 @@ import type {
   TreeEntryView,
   TreeReply,
 } from "../shared/ipc.js";
+import type { CleanupPlanView, CleanupResultView, StateSummaryView } from "../shared/cleanup.js";
 
 export interface CodarynApi {
   info(): Promise<unknown>;
@@ -53,6 +54,9 @@ export interface CodarynApi {
   selectModel(entry: string): Promise<unknown>;
   proposeSettings(edit: Readonly<Record<string, unknown>>): Promise<unknown>;
   applySettings(token: string): Promise<unknown>;
+  stateSummary(workspace: string): Promise<unknown>;
+  previewCleanup(workspace: string, selection: Readonly<Record<string, unknown>>): Promise<unknown>;
+  applyCleanup(token: string): Promise<unknown>;
   startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
@@ -408,4 +412,29 @@ export function asReport(value: unknown): ReportReply {
     view: view as unknown as ReportView,
     labels: isObj(labels) && str(labels["status"]) && str(labels["reason"]) ? { status: labels["status"], reason: labels["reason"] } : null,
   };
+}
+
+/** GU-4: the state summary (the main process checked it). */
+export function asStateSummary(value: unknown): { readonly ok: true; readonly summary: StateSummaryView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["summary"])) return failed(value);
+  const summary = value["summary"];
+  if (!Array.isArray(summary["entries"]) || !isObj(summary["runs"]) || !isObj(summary["discarded"]) || !isObj(summary["parked"]) || !isObj(summary["leftovers"])) return failed(value);
+  return { ok: true, summary: summary as unknown as StateSummaryView };
+}
+
+/** GU-4: a cleanup preview: the main process's token and the plan to show. */
+export function asCleanupPreview(value: unknown): { readonly ok: true; readonly token: string; readonly plan: CleanupPlanView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !str(value["token"]) || !HEX.test(value["token"]) || !isObj(value["plan"])) return failed(value);
+  const plan = value["plan"];
+  if (!Array.isArray(plan["items"]) || !Array.isArray(plan["blocked"]) || !isObj(plan["totals"]) || !isObj(plan["parked"]) || !str(plan["digest"])) return failed(value);
+  return { ok: true, token: value["token"], plan: plan as unknown as CleanupPlanView };
+}
+
+/** GU-4: a cleanup's result, or why the main process did not clean (not_confirmed, unknown_preview, ...). */
+export function asCleanupResult(value: unknown): { readonly ok: true; readonly result: CleanupResultView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["result"])) return failed(value);
+  const result = value["result"];
+  if (result["ok"] === false) return { ok: true, result: { ok: false, code: str(result["code"]) ? result["code"] : "host_error" } };
+  if (result["ok"] !== true || !Array.isArray(result["removed"]) || !Array.isArray(result["kept"]) || !isObj(result["totals"])) return failed(value);
+  return { ok: true, result: result as unknown as CleanupResultView };
 }

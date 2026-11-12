@@ -176,7 +176,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -364,7 +364,19 @@ const expected = [
   // R29-L1: the run cancelled in the window and the run closed with it had sent their request first.
   ["cancelRequestArrived", (v) => v === true],
   ["closeRequestArrived", (v) => v === true],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // GU-4 (3.8), DR-39, DR-44: the cleanup of the fully reverted run.
+  ["cleanupReady", (v) => v === "ok"],
+  ["cleanupRunsBefore", (v) => typeof v === "number" && v >= 2],
+  ["cleanupPlan", (v) => v === "1"],
+  ["cleanupPlanItems", (v) => JSON.stringify(v) === JSON.stringify([["run", "first run"]])],
+  ["cleanupResult", (v) => v === "done"],
+  ["cleanupRemoved", (v) => v === "1"],
+  ["cleanupDialogs", (v) => JSON.stringify(v) === JSON.stringify(["cleanup.message"])],
+  ["cleanupRunsAfter", (v) => typeof v === "number" && v >= 1],
+  ["cleanupFirstRunGone", (v) => v === true],
+  ["cleanupForged", (v) => v.ok === false && v.code === "unknown_preview"],
+  ["cleanupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second)],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

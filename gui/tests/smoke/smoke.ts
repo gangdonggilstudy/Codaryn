@@ -456,6 +456,26 @@ startGui({
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
 
+      // 5j. GU-4 (3.8), DR-39, DR-44: the state summary; a cleanup plan of the fully reverted runs (the
+      // first run, reverted in 5e); the cleanup the main process asked about (the plan only: no run
+      // left unreverted, no discard box in it); the record gone; a made-up token refused.
+      await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+      results["cleanupReady"] = await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+      const runsBefore = Number(await js("document.querySelector('#cleanup-summary [data-runs]')?.getAttribute('data-runs') ?? '-1'"));
+      results["cleanupRunsBefore"] = runsBefore;
+      await js("(() => { document.getElementById('cleanup-runs-reverted').checked = true; document.getElementById('cleanup-preview').click(); return true; })()");
+      results["cleanupPlan"] = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+      results["cleanupPlanItems"] = await js(`[...document.querySelectorAll('#cleanup-items li')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-id') === ${JSON.stringify(String(firstRun))} ? 'first run' : li.getAttribute('data-id')])`);
+      const askedBeforeCleanup = dialogs.length;
+      await js("document.getElementById('cleanup-apply')?.click(); true");
+      results["cleanupResult"] = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+      results["cleanupRemoved"] = await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null");
+      results["cleanupDialogs"] = dialogs.slice(askedBeforeCleanup);
+      results["cleanupRunsAfter"] = await waitFor(`(() => { const n = Number(document.querySelector('#cleanup-summary [data-runs]')?.getAttribute('data-runs') ?? '-1'); return n >= 0 && n !== ${runsBefore} ? n : null; })()`, 20_000);
+      results["cleanupFirstRunGone"] = !existsSync(join(SECOND, ".codaryn", "runs", String(firstRun)));
+      results["cleanupForged"] = await js(`window.codaryn.applyCleanup(${JSON.stringify("0".repeat(32))})`);
+      results["cleanupText"] = await js("document.getElementById('cleanup')?.textContent ?? ''");
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",

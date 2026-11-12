@@ -33,6 +33,7 @@ import {
 import type {
   DefaultConfigLocation,
   AnthropicProviderDeps,
+  ApiModelEnv,
   ApiProviderDeps,
   ApiProviderName,
   CodarynConfig,
@@ -210,11 +211,9 @@ function table(models: readonly ModelsListEntry[], currentId: string | null): st
 export interface ModelsTextPlaces {
   readonly modelEnv: string;
   readonly field: string;
-  /** The provider's model variable is set but `current` cannot name it (the contract's source names CODARYN_MODEL only). */
-  readonly hiddenEnvModel: boolean;
 }
 
-const ANTHROPIC_PLACES: ModelsTextPlaces = { modelEnv: CODARYN_MODEL_ENV, field: "model", hiddenEnvModel: false };
+const ANTHROPIC_PLACES: ModelsTextPlaces = { modelEnv: CODARYN_MODEL_ENV, field: "model" };
 
 export function renderModels(output: ModelsOutput, withTable: boolean, places: ModelsTextPlaces = ANTHROPIC_PLACES): string {
   const lines: string[] = [];
@@ -226,20 +225,17 @@ export function renderModels(output: ModelsOutput, withTable: boolean, places: M
     }
   }
   const current = output.current;
-  if (places.hiddenEnvModel) {
-    lines.push(`* current model: the one ${places.modelEnv} names (it is used instead of the config file's ${places.field}).`);
-  } else if (current === null) {
+  if (current === null) {
     lines.push(`No current model: none is set in ${places.modelEnv} or the config file. Choose one with --use <number|id> --config <config.json>.`);
   } else {
-    const from = current.source === "config" ? "the config file" : "CODARYN_MODEL";
+    const from = current.source === "config" ? "the config file" : current.source;
     lines.push(`* current model (from ${from}): ${cleanText(current.id)}${current.listed ? "" : " (not in this list)"}`);
   }
   const selected = output.selected;
   if (selected !== null) {
     lines.push(`Written: ${cleanText(selected.id)} is now the config file's ${places.field}${selected.created ? " (the file was created)" : ""}.`);
-    const overriddenBy = selected.overriddenBy ?? (places.hiddenEnvModel ? places.modelEnv : null);
-    if (overriddenBy !== null) {
-      lines.push(`Note: ${overriddenBy} is set and is used instead of the config file's ${places.field} until it is unset.`);
+    if (selected.overriddenBy !== null) {
+      lines.push(`Note: ${selected.overriddenBy} is set and is used instead of the config file's ${places.field} until it is unset.`);
     }
   }
   return `${lines.join(LF)}${LF}`;
@@ -366,14 +362,10 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
   // SP-6: the provider's own model variable and config place.
   const modelEnv = API_PROVIDERS[provider].modelEnv;
   const modelFromEnv = envValue(io.env, modelEnv);
-  // The contract's `current.source` and `selected.overriddenBy` name CODARYN_MODEL only; another
-  // provider's variable is shown in the text and left out of those fields until the contract can
-  // name it (asked of the contract owner).
-  const hiddenEnvModel = provider !== "anthropic" && realModel(modelFromEnv) !== null;
-  const ownEnvModel = provider === "anthropic" ? modelFromEnv : null;
+  // DR-36 (a): `current.source` and `selected.overriddenBy` name that variable (ApiModelEnv).
   const writePlace: ApiProviderName | null = provider === "anthropic" && config?.providers?.anthropic === undefined ? null : provider;
   const field = writePlace === null ? "model" : `providers.${writePlace}.model`;
-  const places: ModelsTextPlaces = { modelEnv, field, hiddenEnvModel };
+  const places: ModelsTextPlaces = { modelEnv, field };
   const configModel = providerSettingsOf(config, provider).model ?? null;
   if (choice === null && !args.json && io.ask !== undefined && configPath !== null && models.length > 0) {
     prompted = true;
@@ -383,7 +375,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       status: "listed",
       exitCode: MODELS_EXIT_CODES.listed,
       models,
-      current: hiddenEnvModel ? null : currentModel(ownEnvModel, configModel, models),
+      current: currentModel(modelEnv, modelFromEnv, configModel, models),
       selected: null,
       ...(provider === "anthropic" ? {} : { provider }),
     };
@@ -415,7 +407,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     } catch {
       return cliError("config_write_failed", "the config file could not be written, or it changed while models ran; it was left as it was");
     }
-    selected = { id: picked.id, created, overriddenBy: realModel(ownEnvModel) !== null ? "CODARYN_MODEL" : null };
+    selected = { id: picked.id, created, overriddenBy: realModel(modelFromEnv) !== null ? modelEnv : null };
     writtenModel = picked.id;
   }
 
@@ -426,7 +418,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     status,
     exitCode: MODELS_EXIT_CODES[status],
     models,
-    current: hiddenEnvModel ? null : currentModel(ownEnvModel, writtenModel, models),
+    current: currentModel(modelEnv, modelFromEnv, writtenModel, models),
     selected,
     // SP-6: the listed provider; for anthropic it waits for the PM's approval of the SP-0 pin change.
     ...(provider === "anthropic" ? {} : { provider }),
@@ -436,12 +428,13 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
 }
 
 /**
- * The model a run without a task `model.model` would use: CODARYN_MODEL, else the config file's.
+ * The model a run of the listed provider without a task `model.model` would use: its model
+ * variable (`modelEnv`, DR-34, DR-36 (a)), else the config file's model for that provider.
  * N-3: a placeholder (blank or `<...>`) counts as not set.
  */
-function currentModel(fromEnv: string | null, fromConfig: string | null, models: readonly ModelsListEntry[]): ModelsOutput["current"] {
+function currentModel(modelEnv: ApiModelEnv, fromEnv: string | null, fromConfig: string | null, models: readonly ModelsListEntry[]): ModelsOutput["current"] {
   const env = realModel(fromEnv);
   const id = env ?? realModel(fromConfig);
   if (id === null) return null;
-  return { id, source: env !== null ? "CODARYN_MODEL" : "config", listed: models.some((model) => model.id === id) };
+  return { id, source: env !== null ? modelEnv : "config", listed: models.some((model) => model.id === id) };
 }

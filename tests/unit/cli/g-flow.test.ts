@@ -186,7 +186,7 @@ describe("analyze: run → awaiting_review → review", () => {
 
     const wrong = await runReview(shared(base, ["review", "--task", "task.json", "--run", "20261112T010000Z-00000000", "--accept"]));
     assert.ok("output" in wrong && wrong.output.kind === "error" && wrong.output.code === "run_not_found");
-    const keyed = await runReview({ ...shared(base, ["review", "--task", "task.json", "--run", finished.runId, "--accept", "--note", `key ${["sk", "ant", "FAKEfake0000FAKE"].join("-")}`]) });
+    const keyed = await runReview({ ...shared(base, ["review", "--task", "task.json", "--run", finished.runId, "--accept", "--note", `key ${["sk", "ant", "FAKEfake0000FAKEfake0000FAKEfake00"].join("-")}`]) });
     assert.ok("output" in keyed && keyed.output.kind === "error" && keyed.output.code === "key_in_file");
   });
 });

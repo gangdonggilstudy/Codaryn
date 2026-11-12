@@ -104,6 +104,8 @@ const dialogs: string[] = [];
 let refuseWidening = false;
 /** DR-44: answer the next "also remove the records of runs not reverted?" dialog with "keep them". */
 let keepNotReverted = false;
+/** R47-I4: answer the next "also delete the discarded files?" dialog with "keep them". */
+let keepDiscarded = false;
 
 startGui({
   // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
@@ -127,6 +129,10 @@ startGui({
     dialogs.push(id);
     if (id === "cleanup.notReverted.message" && keepNotReverted) {
       keepNotReverted = false;
+      return 1;
+    }
+    if (id === "cleanup.discarded.message" && keepDiscarded) {
+      keepDiscarded = false;
       return 1;
     }
     if (id === "widen.message" && refuseWidening) {
@@ -496,6 +502,16 @@ startGui({
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
 
+      // 5i2. UXM-14, DR-38: a records-changed mark on the analyze run, as a command outside the run could
+      // leave it. The run list marks the run and its report warns.
+      writeFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "records-changed.json"), "{}");
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["runsRecordsChanged"] = await js(`document.querySelector('[data-run="${analyzeRunId}"] [data-records-changed]') !== null`);
+      results["runsUnmarked"] = await js("document.querySelectorAll('[data-records-changed]').length");
+      await js(`document.querySelector('[data-report="${analyzeRunId}"]')?.click(); true`);
+      results["reportRecordsChanged"] = await waitFor("document.getElementById('report-records-changed') !== null ? true : null", 20_000);
+
       // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
       // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),
       // and they stay (not_reverted_not_confirmed); nothing is removed.
@@ -532,6 +548,85 @@ startGui({
       results["cleanupFirstRunGone"] = !existsSync(join(SECOND, ".codaryn", "runs", String(firstRun)));
       results["cleanupForged"] = await js(`window.codaryn.applyCleanup(${JSON.stringify("0".repeat(32))})`);
       results["cleanupText"] = await js("document.getElementById('cleanup')?.textContent ?? ''");
+
+      // 5j2. U-13 (DR-53): an apply run whose discarded files stay keeps its records. A plan run
+      // (organize) discards sub/deeper/c.txt and is applied. A cleanup of the apply run's records only
+      // (its not-reverted question answered "remove") keeps them as discarded_left and says so. With
+      // its discarded files chosen too, R47-I4: "keep them" in the third dialog keeps both; agreeing to
+      // delete them removes both.
+      const beforeDiscard = await resultId();
+      await taskWith("organize", "sub/deeper/c.txt를 폐기한다");
+      const discardPlanId = await newResult(beforeDiscard);
+      await js("document.getElementById('run-view-plan')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      await js("document.getElementById('plan-apply')?.click(); true");
+      const discardApplyId = String(await newResult(discardPlanId));
+      const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);
+      const discardRecords = join(SECOND, ".codaryn", "runs", discardApplyId);
+      results["discardApplied"] = { fileGone: !existsSync(join(SECOND, "sub", "deeper", "c.txt")), box: existsSync(discardBox) };
+      const cleanupOf = async (chooseDiscarded: boolean, keepThem = false): Promise<Record<string, unknown>> => {
+        const asked = dialogs.length;
+        await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+        const chosen = await js(
+          `(() => { const run = document.querySelector('[data-run-select="${discardApplyId}"]'); const box = document.querySelector('[data-discarded-select="${discardApplyId}"]'); if (run === null || box === null) return false; run.checked = true; box.checked = ${chooseDiscarded}; document.getElementById('cleanup-preview').click(); return true; })()`,
+        );
+        const plan = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+        const warnings = await js(`document.querySelector('#cleanup-items [data-target="run"][data-id="${discardApplyId}"]')?.getAttribute('data-warnings') ?? null`);
+        const planNotice = await js("document.getElementById('cleanup-plan-discarded-left') !== null");
+        keepDiscarded = keepThem;
+        await js("document.getElementById('cleanup-apply')?.click(); true");
+        const result = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+        return {
+          chosen,
+          plan,
+          warnings,
+          planNotice,
+          result,
+          removed: await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null"),
+          kept: await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-reason')])"),
+          keptText: await js("document.querySelector('#cleanup-kept [data-reason=\"discarded_left\"]')?.textContent ?? null"),
+          keptNotice: await js("document.getElementById('cleanup-kept-discarded-left') !== null"),
+          dialogs: dialogs.slice(asked),
+          left: { records: existsSync(discardRecords), box: existsSync(discardBox) },
+        };
+      };
+      results["discardLeftKept"] = await cleanupOf(false);
+      results["discardLeftKeepBox"] = await cleanupOf(true, true);
+      results["discardLeftBoth"] = await cleanupOf(true);
+
+      // 5k. U-11 (3.11): the first-run guide on this workspace. The config file exists (used as it is), the
+      // key is set (by its variable's name), init's suggestions for a package.json with a test script
+      // are off until chosen; the chosen command is asked about by the main process (widening).
+      writeFileSync(join(SECOND, "package.json"), JSON.stringify({ name: "smoke", scripts: { test: "node -e 0" } }));
+      const setupPage = (): Promise<unknown> => waitFor("(() => { const s = document.getElementById('setup'); return s?.getAttribute('data-ready') === 'ok' ? s.getAttribute('data-step') : null; })()");
+      await js("document.querySelector('[data-screen=\"setup\"]')?.click(); true");
+      results["setupFolder"] = await setupPage();
+      results["setupConfig"] = await js("document.getElementById('setup-config')?.getAttribute('data-config') ?? null");
+      results["setupCreateAgain"] = await js("window.codaryn.createSettings(null)");
+      results["setupCreateExists"] = await js("window.codaryn.createSettings(null)");
+      await js("document.getElementById('setup-next')?.click(); true");
+      results["setupModel"] = await setupPage();
+      results["setupKey"] = await js("document.getElementById('setup-key')?.getAttribute('data-key') ?? null");
+      await js("document.getElementById('setup-next')?.click(); true");
+      results["setupPermissions"] = await setupPage();
+      results["setupSuggestions"] = await js("[...document.querySelectorAll('[data-suggest]')].map((box) => [box.getAttribute('data-suggest'), box.getAttribute('data-label'), box.checked])");
+      const askedBeforeSetup = dialogs.length;
+      await js("(() => { for (const box of document.querySelectorAll('[data-suggest]')) box.checked = true; document.getElementById('setup-apply').click(); return true; })()");
+      results["setupApplied"] = await waitFor("(() => { const o = document.getElementById('setup-applied'); return o?.hasAttribute('data-done') ? [...o.querySelectorAll('[data-result]')].map((li) => li.getAttribute('data-result')) : null; })()");
+      results["setupDialogs"] = dialogs.slice(askedBeforeSetup);
+      await js("document.getElementById('setup-next')?.click(); true");
+      results["setupChecks"] = await setupPage();
+      results["setupCheckItems"] = await js("document.querySelectorAll('#setup .checks li').length");
+      results["setupOnDisk"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { policy?: { commands?: { executable: string; argsPrefix: string[] }[]; protectedPaths?: string[] } };
+          return { npmTest: (config.policy?.commands ?? []).some((rule) => rule.executable === "npm" && rule.argsPrefix.join(" ") === "test"), packageJson: (config.policy?.protectedPaths ?? []).includes("package.json") };
+        } catch {
+          return "unreadable";
+        }
+      })();
+      results["setupText"] = await js("document.getElementById('work')?.textContent ?? ''");
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

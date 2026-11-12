@@ -239,9 +239,27 @@ describe("i18n catalog: language and wording", () => {
         assert.ok(language === "en" ? /can no longer be reverted/.test(t[id]) : /더는 되돌릴 수 없/.test(t[id]), `${language} ${id}`);
       }
     }
-    // discarded_left is conditional (DR-44 (c)): the files may stay or go.
-    assert.match(MESSAGE_TEXTS.en["cleanup.warning.discarded_left"], /\bif\b/);
-    assert.match(MESSAGE_TEXTS.ko["cleanup.warning.discarded_left"], /남으면/);
+  });
+
+  test("U-13 (DR-53): an apply whose discarded files stay keeps its records, and the texts say why and how they go", () => {
+    for (const language of LANGS) {
+      const t = MESSAGE_TEXTS[language];
+      const ids = ["cleanup.warning.discarded_left", "cleanup.kept.discarded_left", "cleanup.done_discarded_left"] as const;
+      for (const id of ids) {
+        // Why: the records are the only note of each file's own name and place.
+        assert.ok(language === "en" ? /called and where it was/.test(t[id]) : /원래 이름과 자리/.test(t[id]), `${language} ${id}`);
+        // Shown by the CLI and the GUI alike: no CLI option or command in it.
+        assert.ok(!t[id].includes("--") && !t[id].includes("codaryn "), `${language} ${id}`);
+        // The records are kept, not removed (the DR-44 (c) text said they go).
+        assert.ok(language === "en" ? !/records go\b/.test(t[id]) : !/기록은 지워짐/.test(t[id]), `${language} ${id}`);
+      }
+      // The preview says the records are kept unless the files are deleted in the same cleanup.
+      assert.ok(language === "en" ? /kept unless those files are deleted in the same cleanup/.test(t["cleanup.warning.discarded_left"]) : /함께 지우지 않으면 기록을 남김/.test(t["cleanup.warning.discarded_left"]), language);
+      // The result says both ways to remove them: revert the apply, or delete the files too.
+      const done = t["cleanup.done_discarded_left"];
+      assert.ok(done.includes("{count}"), language);
+      assert.ok(language === "en" ? /reverted, or when their discarded files are deleted/.test(done) : /되돌리거나.*함께 지우면/.test(done), language);
+    }
   });
 
   test("U-8: the unchecked-plan notice says what was not checked and what to do, and fits any apply status", () => {
@@ -378,5 +396,28 @@ describe("i18n catalog: language and wording", () => {
     // A cut text says so and how much is shown.
     assert.match(en["summary.final_message_truncated"], /cut.*first \{count\} characters/);
     assert.match(ko["summary.final_message_truncated"], /잘림.*앞 \{count\}자/);
+  });
+
+  test("U-24 (DR-50): one word for one thing in what people read", () => {
+    const texts = (language: "en" | "ko") => Object.entries(MESSAGE_TEXTS[language]) as [string, string][];
+    // Option names (--workflow, --digest) and field names (secretEnv, policy.planActions) stay as they are.
+    const withoutNames = (text: string) => text.replace(/--[a-z-]+/g, "").replace(/\b(secretEnv|policy\.planActions)\b/g, "");
+    for (const [id, text] of texts("ko")) {
+      const t = withoutNames(text);
+      // 동작 (not 행동), 작업 종류 (not 워크플로, no "(workflow)"), 다이제스트 (not digest),
+      // 가릴 값 (not 비밀 값), 폐기 보관함 (never 보관함 alone).
+      assert.ok(!/행동|워크플로|workflow|digest|비밀/.test(t), `ko ${id}`);
+      assert.equal((t.match(/보관함/g) ?? []).length, (t.match(/폐기 보관함/g) ?? []).length, `ko ${id}`);
+    }
+    for (const [id, text] of texts("en")) {
+      const t = withoutNames(text);
+      // task type (not workflow, task kind), discarded files (not discard box, run archive).
+      assert.ok(!/workflow|task kind|discard box|run archive/i.test(t), `en ${id}`);
+      // R-48 L-5: the folder of the discarded files has one spelling, "discarded-files folder".
+      assert.ok(!/discarded files folder/i.test(t), `en ${id}`);
+    }
+    // The write block is 보호 경로; the check afterwards keeps its own name, 보호 대상 확인 (ux-design 5).
+    assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");
+    assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
   });
 });

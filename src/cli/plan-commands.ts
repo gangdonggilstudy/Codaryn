@@ -51,6 +51,7 @@ import type {
   PrivacyGateway,
   ResolvedPlanAction,
   ReviewOutput,
+  StateUncheckedSince,
   StoredPlan,
 } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan } from "../engine/index.js";
@@ -60,6 +61,7 @@ import {
   acquireLock,
   createApplyRecorders,
   hasRecordsChangedMark as storeHasRecordsChangedMark,
+  stateUncheckedSince as storeStateUncheckedSince,
   prepareDiscardedRoot,
   inspectRun as storeInspectRun,
   latestRun,
@@ -142,6 +144,11 @@ export interface AdapterApply {
 
 export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
   readonly applyPlan?: ApplyPlan;
+  /**
+   * U-29 (R-44 R44-L1): the store's `stateUncheckedSince` (the default); injected by tests. Passed to
+   * the engine as ApplyDeps.planRecordsUnchecked, which asks it once after the U-1 check.
+   */
+  readonly stateUncheckedSince?: StateUncheckedSince;
   /** Set by the app layer only (AdapterApply). Absent: the CLI's channels (`--digest`, terminal). */
   readonly adapter?: AdapterApply;
   /**
@@ -617,6 +624,9 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         stateGuard: recorders.stateGuard,
         // U-1: the same check under the lock, right after apply_started (a mark written since).
         planRecordsChanged,
+        // U-29: whether a run since the plan could not check the state directory (told, not refused;
+        // the engine counts a rejection as unchecked).
+        planRecordsUnchecked: () => (io.stateUncheckedSince ?? storeStateUncheckedSince)({ workspaceRoot, planRunId }),
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.

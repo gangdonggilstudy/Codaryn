@@ -423,7 +423,7 @@ export type RunListEntry =
        */
       readonly profile?: string | null;
       /**
-       * DR-37 (d): the workflow definition the run used (what kind of work it was):
+       * DR-37 (d): the task type definition the run used (what kind of work it was):
        * `run_started.workflowRef` (a name of WORKFLOW_ID_PATTERN_SOURCE), or null when it records none
        * (the legacy settings, or no definition). An apply run: null. Absent: a list built before
        * DR-37 (d). For both fields, a recorded value that is neither null nor such a name makes the

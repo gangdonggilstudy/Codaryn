@@ -43,6 +43,8 @@ function word(t: Texts, prefix: string, value: string): string {
 
 function revertList(t: Texts, view: RevertView): HTMLElement[] {
   const out: HTMLElement[] = [];
+  // U-32 (UXM-14, DR-38): as the CLI's revert says it; the revert is not refused.
+  if (view.recordsChanged === true) out.push(el("p", t.format("runs.revertRecordsChanged"), { class: "notice", id: "revert-records-changed" }));
   out.push(el("h4", t.format("runs.toRevert", { count: String(view.reverted.length) })));
   if (view.reverted.length > 0) {
     const list = el("ul", undefined, { class: "revert-files" });

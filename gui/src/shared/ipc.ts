@@ -791,6 +791,9 @@ export function parseReviewArgs(value: unknown): { readonly workspace: string; r
   return { workspace, runId, profile, workflow, decision, note: note as string | null };
 }
 
+/** U-32: the most rows of a plan's summary: the CLI's FINAL_MESSAGE_MAX_LINES (20) and its "… (+N)" row. */
+export const MAX_PLAN_SUMMARY_ROWS = 21;
+
 /** GU-5 (3.9): a plan as the window shows it. `approval` is the token its apply takes (null once applied). */
 export interface PlanView {
   readonly runId: string;
@@ -799,6 +802,30 @@ export interface PlanView {
   readonly actions: readonly PlanActionView[];
   readonly inventoryLimitReached: boolean;
   readonly appliedBy: { readonly runId: string; readonly at: string } | null;
+  /** U-32 (UXM-14, U-14 AXM-2): the plan run has a records-changed mark (PlanOutput.recordsChanged); absent: none. */
+  readonly recordsChanged?: true;
+  /**
+   * U-32 (U-14 AXM-15): the summary the model wrote for this plan, the agent's words and not what is
+   * approved, as rows (the engine's quoteModelText, model-text.ts). Absent when there is none, and
+   * for a marked plan run.
+   */
+  readonly summary?: readonly string[];
+}
+
+/** U-32: whether the main process gives a plan view an approval token: a pending plan without a records-changed mark. */
+export function planApprovable(view: PlanView): boolean {
+  // U-14 (AXM-2), DR-38: the engine refuses a marked plan run (plan_records_changed), so nothing is asked.
+  return view.status === "pending" && view.recordsChanged !== true;
+}
+
+/** A plan's summary rows as the engine host gives them: null when there are none, "bad" when they do not fit. */
+function toSummaryRows(value: unknown): readonly string[] | null | "bad" {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PLAN_SUMMARY_ROWS) return "bad";
+  for (const row of value) {
+    if (!shortText(row) || row.length === 0 || row.includes("\n") || row.includes("\t") || UNSAFE_IN_MESSAGE.test(row)) return "bad";
+  }
+  return value as readonly string[];
 }
 
 export type PlanReply = { readonly ok: true; readonly view: PlanView; readonly approval: string | null } | { readonly ok: false; readonly code: string };
@@ -815,7 +842,23 @@ export function toPlanView(value: unknown): { readonly ok: true; readonly view: 
     if (!isObj(appliedBy) || !isRunId(appliedBy["runId"]) || typeof appliedBy["at"] !== "string" || !TIME.test(appliedBy["at"])) return fail;
     applied = { runId: appliedBy["runId"], at: appliedBy["at"] };
   }
-  return { ok: true, view: { runId, status, digest, actions, inventoryLimitReached, appliedBy: applied } };
+  // U-32: the records-changed mark, and the summary rows; a marked plan run's summary is never passed on.
+  const recordsChanged = value["recordsChanged"] ?? false;
+  const summary = toSummaryRows(value["summary"]);
+  if (typeof recordsChanged !== "boolean" || summary === "bad") return fail;
+  return {
+    ok: true,
+    view: {
+      runId,
+      status,
+      digest,
+      actions,
+      inventoryLimitReached,
+      appliedBy: applied,
+      ...(recordsChanged ? { recordsChanged: true as const } : {}),
+      ...(summary === null || recordsChanged ? {} : { summary }),
+    },
+  };
 }
 
 export const CHANGE_STATES = ["as_run_left", "changed_since_run", "missing", "unknown"] as const;
@@ -1108,6 +1151,8 @@ export interface RevertView {
   readonly skipped: readonly { readonly path: string; readonly reason: string }[];
   readonly moveSafetyUnchecked: boolean;
   readonly revertedBefore: { readonly at: string; readonly status: "complete" | "partial" } | null;
+  /** U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checks every file. Absent: none. */
+  readonly recordsChanged?: true;
 }
 
 /**
@@ -1144,7 +1189,9 @@ export function toRevertView(value: unknown): { readonly ok: true; readonly view
     if (!isObj(file) || !shortText(file["path"]) || typeof file["reason"] !== "string" || !WORD.test(file["reason"])) return fail;
     skips.push({ path: file["path"], reason: file["reason"] });
   }
-  return { ok: true, view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before } };
+  const recordsChanged = value["recordsChanged"] ?? false;
+  if (typeof recordsChanged !== "boolean") return fail;
+  return { ok: true, view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before, ...(recordsChanged ? { recordsChanged: true as const } : {}) } };
 }
 
 /** The engine host's answer to `selectModel`, checked. */

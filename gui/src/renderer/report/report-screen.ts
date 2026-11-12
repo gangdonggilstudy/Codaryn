@@ -55,8 +55,6 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
       ];
       if (view.run !== null) parts.push(el("p", t.format("report.workflow", { workflow: view.run.workflow, provider: view.run.provider ?? "-" })));
       if (view.status === "incomplete") parts.push(el("p", t.format("report.incomplete"), { class: "notice" }));
-      // UXM-14, DR-38: as the CLI's report warns.
-      if (view.recordsChanged === true) parts.push(el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" }));
       // U-21 (DR-47, AXM-1): the agent's last message under the report's label (its own words, not a verified fact).
       if (view.finalMessage !== undefined && view.finalMessage !== null) {
         const words = el("div", undefined, { id: "report-final-message" });
@@ -236,7 +234,9 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
           buttons.push(b);
           bar.append(b);
         });
-        body.replaceChildren(bar, panel, ...saveReportButton(t, api, workspace, runId, "report-save"));
+        // UXM-14, DR-38: as the CLI's report warns; U-32: above the tabs, as every tab is the records' content.
+        const warning = reply.view.recordsChanged === true ? [el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" })] : [];
+        body.replaceChildren(...warning, bar, panel, ...saveReportButton(t, api, workspace, runId, "report-save"));
         select(0);
         body.setAttribute("data-report-ready", reply.view.kind);
       })();

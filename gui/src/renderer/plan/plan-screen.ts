@@ -8,6 +8,10 @@
  *   (an OS dialog) and applies the plan it showed; the apply is a new run (DR-2, GT-D13) with the
  *   run screen's progress and cancel.
  * - A plan applied before shows who applied it, and no apply button.
+ * - U-32 (as the CLI's `plan`, U-14): a plan run with a records-changed mark has its warning first,
+ *   no summary, and in place of the apply button that a new run makes a new plan (the main process
+ *   gives it no approval token). The model's summary is shown under the label that says it is the
+ *   agent's words and not what is approved (rows drawn by the engine's quoteModelText).
  */
 
 import type { Texts } from "../i18n/catalog.js";
@@ -41,6 +45,20 @@ export function actionLine(t: Texts, action: PlanActionView): string {
   return action.kind === "move" ? t.format("plan.move", { from: action.from, to: action.to ?? "" }) : t.format("plan.discard", { path: action.from });
 }
 
+/**
+ * UXM-24: the CLI commands that apply a plan whose form this app does not know, in forms the CLI's
+ * `apply` reads (a unit test parses them with its argument reader): its run and the digest's first
+ * 12 characters filled in, the task part a <placeholder> the person fills in the way the run was
+ * started (a task file, or the workspace folder and its task type).
+ */
+export function applyCommands(t: Texts, runId: string, digest: string): string[] {
+  const plan = `--run ${runId} --digest ${digest.slice(0, 12)}`;
+  return [
+    `codaryn apply --task <${t.format("plan.cli.taskFile")}> ${plan}`,
+    `codaryn apply --workspace <${t.format("plan.cli.workspace")}> --workflow <${t.format("plan.cli.taskType")}> ${plan}`,
+  ];
+}
+
 export function planScreen(deps: PlanDeps): PlanScreen {
   const { texts: t, api, run } = deps;
   let chosen: { runId: string; profile: string | null; workflow: string | null; formKnown: boolean; recordsChanged: boolean } | null = null;
@@ -69,19 +87,39 @@ export function planScreen(deps: PlanDeps): PlanScreen {
           return;
         }
         const view = reply.view;
+        // U-32 (UXM-14, U-14 AXM-2): the mark the plan view itself carries, or the run list's (fail closed).
+        const marked = view.recordsChanged === true || target.recordsChanged;
         const moves = view.actions.filter((action) => action.kind === "move").length;
         const summary = el("p", t.format("plan.summary", { moves: String(moves), discards: String(view.actions.length - moves), digest: view.digest.slice(0, 12) }), { id: "plan-summary" });
         const list = el("ul", undefined, { id: "plan-actions" });
         for (const action of view.actions) list.append(el("li", actionLine(t, action), { "data-kind": action.kind }));
-        const parts: HTMLElement[] = [summary, el("p", t.format("plan.runId", { runId: view.runId }), { lang: "en" }), list];
+        const parts: HTMLElement[] = [];
+        // As the CLI's plan: a marked plan run's warning comes before anything of the plan.
+        if (marked) parts.push(el("p", t.format("plan.recordsChanged"), { class: "notice", id: "plan-records-changed" }));
+        parts.push(summary, el("p", t.format("plan.runId", { runId: view.runId }), { lang: "en" }), list);
+        // U-32 (U-14 AXM-15): the model's summary under the label that says whose words they are and
+        // that they are not what is approved; rows as the engine drew them. None for a marked plan run.
+        if (!marked && view.summary !== undefined && view.summary.length > 0) {
+          const words = el("section", undefined, { id: "plan-agent-words" });
+          words.append(el("p", t.format("plan.summaryLabel"), { class: "notice" }), el("div", view.summary.join("\n"), { class: "agent-words", id: "plan-agent-words-text" }));
+          parts.push(words);
+        }
         if (view.inventoryLimitReached) parts.push(el("p", t.format("plan.inventoryLimit"), { class: "notice", id: "plan-inventory" }));
         parts.push(el("p", t.format("plan.modelMade"), { class: "notice" }));
         const message = el("div", undefined, { id: "plan-message", role: "alert" });
-        if (view.status !== "applied" && target.recordsChanged) {
-          // UXM-14, DR-38: the engine refuses it (plan_records_changed); the window says so first.
-          parts.push(el("p", t.format("plan.recordsChanged"), { class: "notice", id: "plan-records-changed" }));
+        if (view.status !== "applied" && marked) {
+          // DR-38: the engine refuses it (plan_records_changed); in place of the apply button.
+          parts.push(el("p", t.format("plan.cannotApply"), { class: "notice", id: "plan-cannot-apply" }));
         } else if (view.status !== "applied" && reply.approval !== null && !target.formKnown) {
-          parts.push(el("p", t.format("plan.formUnknown", { runId: view.runId }), { class: "notice", id: "plan-form-unknown" }));
+          const unknown = el("div", undefined, { class: "notice", id: "plan-form-unknown" });
+          const commands = el("ul", undefined, { id: "plan-cli-commands" });
+          for (const command of applyCommands(t, view.runId, view.digest)) {
+            const item = el("li");
+            item.append(el("code", command));
+            commands.append(item);
+          }
+          unknown.append(el("p", t.format("plan.formUnknown", { runId: view.runId })), commands);
+          parts.push(unknown);
         } else if (view.status === "applied" || reply.approval === null) {
           parts.push(el("p", view.appliedBy === null ? t.format("plan.applied") : t.format("plan.appliedBy", { runId: view.appliedBy.runId, time: localDateTime(view.appliedBy.at) }), { id: "plan-applied" }));
         } else {

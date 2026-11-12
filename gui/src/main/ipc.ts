@@ -23,6 +23,7 @@ import {
   parsePlanArgs,
   parseApplyArgs,
   parseReviewArgs,
+  planApprovable,
   toPlanView,
   toReviewReply,
   toChangesReply,
@@ -540,8 +541,9 @@ export function registerIpc(deps: IpcDeps): void {
     if (!checked.ok) return checked;
     if (checked.view.runId !== parsed.runId) return { ok: false, code: "host_error" };
     const moves = checked.view.actions.filter((action) => action.kind === "move").length;
+    // U-32: a marked plan run gets no token (planApprovable): its apply is refused before any dialog.
     const approval =
-      checked.view.status === "pending"
+      planApprovable(checked.view)
         ? deps.approvals.issue({ workspace: parsed.workspace, profile: parsed.profile, workflowRef: parsed.workflow, planRunId: parsed.runId, digest: checked.view.digest, moves, discards: checked.view.actions.length - moves })
         : null;
     return { ok: true, view: checked.view, approval };

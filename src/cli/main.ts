@@ -4,6 +4,9 @@
  * exits with its code: one JSON line for `run` and `revert` (and errors of every command), text
  * for `report`, `doctor`, `models`, `runs`, `init`, `--help` and `--version` (`--json` makes
  * report, doctor, models, runs and init print JSON). Every JSON line is ASCII (N-19).
+ * DR-49 (U-23): at a terminal, without `--json` or `--quiet`, the JSON line is left out (the human
+ * text on stderr says it); `codaryn` with no arguments shows the help (through a pipe or into a
+ * file it stays invalid_arguments, as before).
  *
  * Human-readable output goes to stderr in the chosen language (N-4, N-5): an explained error for
  * every CliErrorOutput, the progress lines and end summary of `run`, the summary of `revert`, the
@@ -30,7 +33,7 @@ import { runChanges } from "./changes.js";
 import { runCleanup } from "./cleanup.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
 import { runDoctor } from "./doctor.js";
-import { renderOutcome, runGuardedCommand } from "./guard.js";
+import { runGuardedCommand, stdoutText } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { helpRequest, helpText, versionText } from "./help.js";
 import { createHumanOutput } from "./human/index.js";
@@ -158,7 +161,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
   const home = homeDirectory();
   const defaultConfig = findDefaultConfigLocation(process.platform, process.env, home);
   const defaultRefused = defaultLocationRefused(process.platform, process.env, home);
-  const asked = helpRequest(argv);
+  // DR-49 (U-23): `codaryn` alone shows the help only at a terminal.
+  const asked = helpRequest(argv, { stdoutIsTerminal: process.stdout.isTTY === true });
   if (asked !== null) {
     if (asked.kind === "version") return plain({ text: versionText(info?.version ?? null), exitCode: 0 });
     return plain({ text: helpText(asked.command, humanFor(null).messages), exitCode: 0 });
@@ -361,5 +365,7 @@ if ("output" in outcome && outcome.output.kind === "error") {
     // Human output is best effort.
   }
 }
-process.stdout.write(renderOutcome(outcome));
+// DR-49 (U-23): at a terminal the JSON line after the human text is left out (stdoutText).
+const written = stdoutText(outcome, { argv, stdoutIsTerminal: process.stdout.isTTY === true });
+if (written.length > 0) process.stdout.write(written);
 process.exitCode = outcome.exitCode;

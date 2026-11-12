@@ -343,6 +343,8 @@ const expected = [
   // GU-5: a plan run, the plan screen, refused requests, an apply the main process asked about, a review.
   // R-14 L-3, R21-M-1: a plan whose task kind was chosen directly is shown and applied through the task form's workflowRef.
   ["directPlanShown", (v) => v === "pending"],
+  // U-32 (U-14 AXM-15): the model's summary under the agent's-words label, after the actions, as the engine drew it.
+  ["planAgentWords", (v) => v !== null && typeof v.label === "string" && /agent's own words|에이전트의 말/.test(v.label) && v.text === "a.txt to moved" && v.afterActions === true],
   ["applyByWorkflow", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
   ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
   ["planRun", (v) => v === "plan_pending"],
@@ -419,6 +421,12 @@ const expected = [
   ["cleanupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second)],
   // U-13 (DR-53): the applied discard leaves its file in the apply's discarded files.
   ["discardApplied", (v) => JSON.stringify(v) === JSON.stringify({ fileGone: true, box: true })],
+  // U-32 (UXM-14, U-14 AXM-2): the same plan with a records-changed mark first: the warning first, no
+  // apply and no summary, no approval token from the main process, no dialog. Applied once unmarked.
+  [
+    "markedPlan",
+    (v) => v !== null && v.first === "plan-records-changed" && v.apply === false && v.cannotApply === true && v.words === false && v.approval === null && v.dialogs === 0,
+  ],
   // Its records only: kept as discarded_left (asked about as not reverted, answered "remove"), with
   // the plan's and the result's notices; the records and the discarded files stay.
   [
@@ -506,6 +514,9 @@ const expected = [
   ["runsRecordsChanged", (v) => v === true],
   ["runsUnmarked", (v) => v === 1],
   ["reportRecordsChanged", (v) => v === true],
+  // U-32: the report's warning above its tabs; the marked run's revert preview says so, as the CLI's revert.
+  ["reportRecordsChangedFirst", (v) => v === "report-records-changed"],
+  ["revertRecordsChanged", (v) => v === true],
   // U-11 (3.11): the first-run guide.
   ["setupSandbox", (v) => v.made === true && v.realUntouched === true],
   ["setupFolder", (v) => v === "folder"],

@@ -394,8 +394,8 @@ export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
 };
 
 /**
- * G-A: tools only a workflow offers (design general-tasks.md 5.3 and 6). They are not in
- * TOOL_NAMES, so a task without workflow settings never sees them and everything keyed by
+ * G-A: tools only a task type offers (design general-tasks.md 5.3 and 6). They are not in
+ * TOOL_NAMES, so a task without task type settings never sees them and everything keyed by
  * ToolName (the engine's dispatch, TOOL_DEFINITIONS, `ModelRequest.tools`) is unchanged.
  * A task lists them in `tools` (WorkflowSettings); the engine offers them through
  * `ModelRequest.workflowTools` and runs them with `ToolRunner.executeWorkflowTool`.
@@ -455,7 +455,7 @@ export interface WorkflowToolPayloadByName {
 
 export type WorkflowToolPayload = WorkflowToolPayloadByName[WorkflowToolName];
 
-/** A workflow tool call after the same checks as EffectiveToolCall. */
+/** A task type tool call after the same checks as EffectiveToolCall. */
 export type EffectiveWorkflowToolCall = {
   readonly [N in WorkflowToolName]: {
     readonly id: string;
@@ -469,7 +469,7 @@ export type RawWorkflowToolOutcome =
   | { readonly ok: false; readonly code: ToolErrorCode; readonly message: RawText };
 
 /**
- * Requirements of the workflow tools. `propose_plan` declares no path itself: each action is
+ * Requirements of the task type tools. `propose_plan` declares no path itself: each action is
  * judged with PLAN_ACTION_DESCRIPTORS (plan.ts). It writes plan.json, so its display class is not
  * "read" and a call whose outcome is unknown is not retried.
  */
@@ -501,7 +501,7 @@ export const WORKFLOW_TOOLS: { readonly [N in WorkflowToolName]: ToolDescriptor 
   },
 };
 
-/** Every descriptor by name, built-in and workflow tools. */
+/** Every descriptor by name, built-in and task type tools. */
 export const ALL_TOOL_DESCRIPTORS: { readonly [N in AnyToolName]: ToolDescriptor & { readonly name: N } } = {
   ...BUILTIN_TOOLS,
   ...WORKFLOW_TOOLS,
@@ -513,7 +513,7 @@ const PLAN_PATH_PROPERTY: JsonObject = {
   description: "File path relative to the workspace root.",
 };
 
-/** What a provider tells the model about the workflow tools. Fixed text, as TOOL_DEFINITIONS. */
+/** What a provider tells the model about the task type tools. Fixed text, as TOOL_DEFINITIONS. */
 export const WORKFLOW_TOOL_DEFINITIONS: { readonly [N in WorkflowToolName]: ToolDefinition } = {
   inspect_files: {
     description:
@@ -573,7 +573,7 @@ export const WORKFLOW_TOOL_DEFINITIONS: { readonly [N in WorkflowToolName]: Tool
   },
 };
 
-/** Every definition by name, built-in and workflow tools. */
+/** Every definition by name, built-in and task type tools. */
 export const ALL_TOOL_DEFINITIONS: { readonly [N in AnyToolName]: ToolDefinition } = {
   ...TOOL_DEFINITIONS,
   ...WORKFLOW_TOOL_DEFINITIONS,
@@ -592,9 +592,9 @@ export interface ToolRunner {
   /** Executes one call that already passed every check. Never throws for tool-level failures. */
   execute(call: EffectiveToolCall, signal: AbortSignal): Promise<RawToolOutcome>;
   /**
-   * G-A: executes one workflow tool call that already passed every check (for `propose_plan`, the
+   * G-A: executes one task type tool call that already passed every check (for `propose_plan`, the
    * policy check of every action). Never throws for tool-level failures. A runner without it
-   * cannot run workflow tools: the engine then answers such a call `unknown_tool`.
+   * cannot run task type tools: the engine then answers such a call `unknown_tool`.
    */
   executeWorkflowTool?(call: EffectiveWorkflowToolCall, signal: AbortSignal): Promise<RawWorkflowToolOutcome>;
 }

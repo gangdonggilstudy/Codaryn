@@ -42,7 +42,10 @@ const steps = [
   { kind: "hang" },
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "sub/b.txt to moved", actions: [{ kind: "move", from: "sub/b.txt", to: "moved/b.txt" }] })]),
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } })]),
+  fakeApi.replyTools([
+    fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } }),
+    fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
+  ]),
   fakeApi.replyText("analysis written"),
   { kind: "hang" },
 ];
@@ -285,7 +288,18 @@ const expected = [
   ["reviewAsked", (v) => v === true],
   ["reviewRecorded", (v) => v === "accepted"],
   // DR-29, DR-32 (c): the write recorded its digests, the same secrets mask it now: the text is compared.
-  ["reportChanges", (v) => v === "1"],
+  ["reportChanges", (v) => v === "2"],
+  // Per file: report.md is still what the run left (its text); notes.md changed after the run (path and state only).
+  [
+    "changesPerFile",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify([
+        { path: "report.md", state: "as_run_left", text: "shown", hidden: false },
+        { path: "notes.md", state: "changed_since_run", text: "none", hidden: true },
+      ]),
+  ],
+  ["changesPerFileText", (v) => typeof v === "string" && !v.includes("changed after the run") && !v.includes("메모")],
   ["reportDiff", (v) => v !== null && v.text === "shown" && JSON.stringify(v.kinds) === JSON.stringify(["added", "added"]) && JSON.stringify(v.lines) === JSON.stringify(["결과 표", "해석"])],
   ["reportF7", (v) => v === true],
   // GU-3 (3.7): reports from a result and from the run list.

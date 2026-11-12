@@ -282,13 +282,20 @@ startGui({
         results["reviewRecorded"] = await waitFor("document.getElementById('review-outcome')?.getAttribute('data-verdict') ?? null", 30_000);
       }
 
-      // 5h. DR-29, DR-32 (c): the analyze run wrote report.md; the same secrets mask it as the run
-      // did, so its text is shown and compared (a created file: every line added).
+      // 5h. DR-29, DR-32 (c): the analyze run wrote report.md and notes.md; the same secrets mask
+      // them as the run did. report.md is still what the run left, so its text is shown and compared
+      // (a created file: every line added). notes.md is changed here after the run: per file, it
+      // shows its path and state only.
+      writeFileSync(join(SECOND, "notes.md"), "changed after the run\n");
       await js("document.getElementById('run-view-changes')?.click(); true");
       results["reportChanges"] = await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()");
       results["reportDiff"] = await js(
         "(() => { const s = document.querySelector('#changes .changed-file'); return s === null ? null : { text: s.getAttribute('data-text'), kinds: [...s.querySelectorAll('.diff li')].map((li) => li.getAttribute('data-kind')), lines: [...s.querySelectorAll('.diff .text')].map((t) => t.textContent) }; })()",
       );
+      results["changesPerFile"] = await js(
+        "[...document.querySelectorAll('#changes .changed-file')].map((s) => ({ path: s.querySelector('.path')?.textContent ?? null, state: s.getAttribute('data-state'), text: s.getAttribute('data-text'), hidden: s.querySelector('[data-text=\"hidden\"]') !== null }))",
+      );
+      results["changesPerFileText"] = await js("document.getElementById('changes')?.textContent ?? ''");
       // F7 moves the focus to the first change.
       results["reportF7"] = await js(
         "(() => { const body = document.getElementById('changes'); const first = body?.querySelector('.changed-file'); if (!body || !first) return 'no file section'; first.focus(); body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F7', bubbles: true })); return document.activeElement?.hasAttribute('data-hunk') === true; })()",

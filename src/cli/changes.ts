@@ -12,6 +12,14 @@
  *   text is shown. DR-29: a file's text is shown only when the secrets registered now mask it as
  *   the run did, by the run's record; otherwise (`masking_unverified`) its path and state only, and
  *   the text says why once instead of per file.
+ * - U-36 (UXM-7 ③): the words of the text form come from the message catalog when one is given
+ *   (ChangesEnvironment.messages: the contract's `changes.*` ids); without one, the English below.
+ *   That English is the text before U-36 line for line, with one line more: a run with a
+ *   records-changed mark (ChangesOutput.recordsChanged, U-43) says so after the heading, with or
+ *   without a catalog (`changes.records_changed`, which the PM accepted). The English catalog (main.ts
+ *   gives it) has the same lines but those of `changes.apply_run`, `changes.unavailable.<reason>`
+ *   and `changes.no_text_note` (without "(DR-29)", review R-66); the PM accepted those too. The JSON
+ *   is not touched.
  * Reads only: nothing is created, changed or locked, and no request is made.
  *
  * The parser lives here until N-A moves it into args.ts; main.ts, help and the contract are N-A's
@@ -19,6 +27,7 @@
  */
 
 import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS } from "../contracts/index.js";
+import type { MessageCatalog, RunId } from "../contracts/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
@@ -108,12 +117,76 @@ export function parseChangesArgs(argv: readonly string[]): ParseChangesArgsOutco
 /** Lines shown per file and side before the rest is summarised. */
 export const MAX_SHOWN_LINES = 200;
 
-const STATE_TEXT: { readonly [S in ChangedFileView["state"]]: string } = {
+type FileState = ChangedFileView["state"];
+type Unavailable = NonNullable<ChangedFileView["unavailable"]>;
+
+/** U-36: the words of the text form, one per catalog id (src/contracts/human.ts, `changes.*`). */
+interface ChangesWords {
+  heading(runId: RunId): string;
+  noTextNote(): string;
+  recordsChanged(): string;
+  none(): string;
+  applyRun(count: number, planRunId: RunId): string;
+  file(created: boolean): string;
+  state(state: FileState): string;
+  /** Why the text is not shown; the renderer adds the code in parentheses. */
+  unavailable(reason: Unavailable): string;
+  noDifference(): string;
+  moreLines(count: number): string;
+}
+
+const STATE_TEXT: { readonly [S in FileState]: string } = {
   as_run_left: "as the run left it",
   changed_since_run: "changed again since the run",
   missing: "no longer exists",
   unknown: "could not be read now",
 };
+
+/**
+ * The fallback without a catalog: the text before U-36 character for character, and
+ * `recordsChanged`, the one line U-36 adds (a run with a records-changed mark, U-43).
+ */
+const ENGLISH_WORDS: ChangesWords = {
+  heading: (runId) => `changes of run ${runId}, masked with the secrets registered now (not the run's own masking)`,
+  noTextNote: () =>
+    "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)",
+  recordsChanged: () => "This run has a records-changed mark, so no file text is shown; only paths and states.",
+  none: () => "the run changed no file",
+  applyRun: (count, planRunId) => `the run is an apply run: it applied ${count} action(s) of the plan of run ${cleanText(planRunId)} (moves and discards, not file writes); codaryn report lists them`,
+  file: (created) => (created ? "created by the run" : "changed by the run"),
+  state: (state) => STATE_TEXT[state],
+  unavailable: () => "the text is not shown",
+  noDifference: () => "no difference to the original",
+  moreLines: (count) => `... ${count} more lines`,
+};
+
+/**
+ * U-36: the catalog's words; a text the catalog cannot give (an id or parameter it refuses) is the
+ * English one, as the plan view does (planViewText), so the command still prints.
+ */
+function catalogWords(messages: MessageCatalog): ChangesWords {
+  const or = (text: () => string, english: () => string): string => {
+    try {
+      return text();
+    } catch {
+      return english();
+    }
+  };
+  return {
+    heading: (runId) => or(() => messages.format("changes.heading", { runId }), () => ENGLISH_WORDS.heading(runId)),
+    noTextNote: () => or(() => messages.format("changes.no_text_note"), ENGLISH_WORDS.noTextNote),
+    recordsChanged: () => or(() => messages.format("changes.records_changed"), ENGLISH_WORDS.recordsChanged),
+    none: () => or(() => messages.format("changes.none"), ENGLISH_WORDS.none),
+    applyRun: (count, planRunId) => or(() => messages.format("changes.apply_run", { count, runId: planRunId }), () => ENGLISH_WORDS.applyRun(count, planRunId)),
+    file: (created) => or(() => messages.format(created ? "changes.file.created" : "changes.file.changed"), () => ENGLISH_WORDS.file(created)),
+    state: (state) => or(() => messages.format(`changes.state.${state}`), () => ENGLISH_WORDS.state(state)),
+    unavailable: (reason) => or(() => messages.format(`changes.unavailable.${reason}`), () => ENGLISH_WORDS.unavailable(reason)),
+    noDifference: () => or(() => messages.format("changes.no_difference"), ENGLISH_WORDS.noDifference),
+    moreLines: (count) => or(() => messages.format("changes.more_lines", { count }), () => ENGLISH_WORDS.moreLines(count)),
+  };
+}
+
+const wordsOf = (messages: MessageCatalog | undefined): ChangesWords => (messages === undefined ? ENGLISH_WORDS : catalogWords(messages));
 
 /** Lines without their LF or CRLF ending (a change of line ending alone is not shown). */
 function lines(text: string): string[] {
@@ -122,17 +195,19 @@ function lines(text: string): string[] {
   return all;
 }
 
-function shown(prefix: string, items: readonly string[]): string[] {
+function shown(prefix: string, items: readonly string[], words: ChangesWords): string[] {
   const out = items.slice(0, MAX_SHOWN_LINES).map((line) => `${prefix} ${line}`);
-  if (items.length > MAX_SHOWN_LINES) out.push(`${prefix} ... ${items.length - MAX_SHOWN_LINES} more lines`);
+  if (items.length > MAX_SHOWN_LINES) out.push(`${prefix} ${words.moreLines(items.length - MAX_SHOWN_LINES)}`);
   return out;
 }
 
 /**
  * The changed region of two texts: the lines between their common first and last lines, as one
- * `@@ -start,count +start,count @@` block. Empty when they are the same.
+ * `@@ -start,count +start,count @@` block. Empty when they are the same. `messages` (U-36) words
+ * the "more lines" line of a cut side; English without it.
  */
-export function changedRegion(before: string | null, after: string | null): string[] {
+export function changedRegion(before: string | null, after: string | null, messages?: MessageCatalog): string[] {
+  const words = wordsOf(messages);
   const old = before === null ? [] : lines(before);
   const now = after === null ? [] : lines(after);
   let head = 0;
@@ -142,35 +217,36 @@ export function changedRegion(before: string | null, after: string | null): stri
   const removed = old.slice(head, old.length - tail);
   const added = now.slice(head, now.length - tail);
   if (removed.length === 0 && added.length === 0) return [];
-  return [`@@ -${head + 1},${removed.length} +${head + 1},${added.length} @@`, ...shown("-", removed), ...shown("+", added)];
+  return [`@@ -${head + 1},${removed.length} +${head + 1},${added.length} @@`, ...shown("-", removed, words), ...shown("+", added, words)];
 }
 
-/** The text form. Every piece comes from the masked output; control characters are replaced. */
-export function renderChanges(output: ChangesOutput): string {
-  const out = [`changes of run ${output.runId}, masked with the secrets registered now (not the run's own masking)`];
+/**
+ * The text form. Every piece comes from the masked output; control characters are replaced. U-36:
+ * the words are `messages`' (the person's language); the English before U-36 without it.
+ */
+export function renderChanges(output: ChangesOutput, messages?: MessageCatalog): string {
+  const words = wordsOf(messages);
+  // The app layer gives only run ids that pass RUN_ID_PATTERN.
+  const out = [words.heading(output.runId as RunId)];
+  // U-43 (DR-38): a run with a records-changed mark has no file text; say why first.
+  if (output.recordsChanged === true) out.push(words.recordsChanged());
   // DR-29: a file's text is shown only when the secrets registered now mask it as the run did, by
   // the run's record. Why is said once; which files have no text is said per file, since one result
   // can hold both (the app layer's finding).
-  if (output.files.some((file) => file.unavailable === "masking_unverified")) {
-    out.push("no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)");
-  }
+  if (output.files.some((file) => file.unavailable === "masking_unverified")) out.push(words.noTextNote());
   // U-16 (UXM-4): an apply run's changes are its plan's actions, not file writes of its own; the
-  // app layer gives them as `applyRun` (contract ChangesApplyRun). Fixed English, as the rest here.
+  // app layer gives them as `applyRun` (contract ChangesApplyRun).
   const applyRun = output.applyRun;
-  if (applyRun !== undefined) {
-    out.push(
-      `the run is an apply run: it applied ${applyRun.actions} action(s) of the plan of run ${cleanText(applyRun.planRunId)} (moves and discards, not file writes); codaryn report lists them`,
-    );
-  } else if (output.files.length === 0) out.push("the run changed no file");
+  if (applyRun !== undefined) out.push(words.applyRun(applyRun.actions, applyRun.planRunId));
+  else if (output.files.length === 0) out.push(words.none());
   for (const file of output.files) {
-    const what = file.created ? "created by the run" : "changed by the run";
-    out.push(`== ${cleanText(file.path)}: ${what}; ${STATE_TEXT[file.state]}`);
+    out.push(`== ${cleanText(file.path)}: ${words.file(file.created)}; ${words.state(file.state)}`);
     if (file.unavailable !== null) {
-      out.push(`   the text is not shown (${file.unavailable})`);
+      out.push(`   ${words.unavailable(file.unavailable)} (${file.unavailable})`);
       continue;
     }
-    const region = changedRegion(file.created ? null : file.before, file.after);
-    if (region.length === 0) out.push("   no difference to the original");
+    const region = changedRegion(file.created ? null : file.before, file.after, messages);
+    if (region.length === 0) out.push(`   ${words.noDifference()}`);
     for (const line of region) out.push(cleanText(line));
   }
   return `${out.join("\n")}\n`;
@@ -182,6 +258,8 @@ export interface ChangesEnvironment {
   readonly env: SettingsEnvironment;
   /** The app layer (`createCodarynApp` with the process's environment in main.ts). */
   readonly app: Pick<CodarynApp, "changes">;
+  /** U-36: the person's message catalog for the text form (main.ts's); English without it. The JSON does not use it. */
+  readonly messages?: MessageCatalog;
 }
 
 /** `codaryn changes`. Text on stdout, or ChangesOutput as one JSON line with `--json`. Errors are CliErrorOutput. */
@@ -196,6 +274,6 @@ export async function runChanges(io: ChangesEnvironment): Promise<CommandOutcome
   const currentKey = knownKeyValues(io.env);
   // N-19: one ASCII JSON line. N-27 (c): keys are hidden in the strings before the JSON is written
   // (in JSON text a control character becomes a six-character escape the key check cannot see through).
-  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output), currentKey);
+  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output, io.messages), currentKey);
   return { text, exitCode: outcome.output.exitCode };
 }

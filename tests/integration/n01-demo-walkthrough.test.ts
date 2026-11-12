@@ -196,15 +196,16 @@ test("N-E 체험 예시: 사본에서 doctor → run → report → revert가 �
     assert.ok(existsSync(join(demo.workspace, STATE_DIR_NAME)));
   });
 
-  await t.test("같은 실행을 다시 되돌리면 partial, changed_since_run, 종료 3, 무변경", async () => {
+  await t.test("같은 실행을 다시 되돌리면 already_reverted, complete, 종료 0, 무변경(N-22)", async () => {
     assert.notEqual(runId, "", "the run step must pass first");
-    documented("같은 실행을 한 번 더 되돌리면 `partial`, `skipped[].reason` `changed_since_run`, 종료 3이다");
+    documented("`already_reverted`");
     const run = await demo.cli(["revert", "--workspace", demo.workspace, "--run", runId]);
     const output = expectRevertOutput(run, runId);
-    assert.equal(output.status, "partial");
-    assert.equal(run.exitCode, 3);
+    assert.equal(output.status, "complete");
+    assert.equal(run.exitCode, 0);
     assert.deepEqual(output.reverted, []);
-    assert.ok(output.skipped.length > 0 && output.skipped.every((file) => file.reason === "changed_since_run"), JSON.stringify(output.skipped));
+    assert.deepEqual(output.skipped, [{ path: "summary.md", reason: "already_reverted" }]);
+    assert.equal(output.revertedBefore?.status, "complete");
     assert.deepEqual(workspaceBytes(demo.workspace), demo.original);
   });
 });

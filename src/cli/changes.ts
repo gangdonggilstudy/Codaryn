@@ -13,10 +13,12 @@
  *   the run did, by the run's record; otherwise (`masking_unverified`) its path and state only, and
  *   the text says why once instead of per file.
  * - U-36 (UXM-7 ③): the words of the text form come from the message catalog when one is given
- *   (ChangesEnvironment.messages: the contract's `changes.*` ids); without one, the English below,
- *   which is the text before U-36 as it was (the English catalog gives the same lines but those of
- *   `changes.apply_run` and `changes.unavailable.<reason>`). The JSON is not touched. A run with a
- *   records-changed mark (ChangesOutput.recordsChanged, U-43) says so (`changes.records_changed`).
+ *   (ChangesEnvironment.messages: the contract's `changes.*` ids); without one, the English below.
+ *   That English is the text before U-36 line for line, with one line more: a run with a
+ *   records-changed mark (ChangesOutput.recordsChanged, U-43) says so after the heading, with or
+ *   without a catalog (`changes.records_changed`, which the PM accepted). The English catalog gives
+ *   the same lines but those of `changes.apply_run` and `changes.unavailable.<reason>` (the PM
+ *   accepted those too). The JSON is not touched.
  * Reads only: nothing is created, changed or locked, and no request is made.
  *
  * The parser lives here until N-A moves it into args.ts; main.ts, help and the contract are N-A's
@@ -139,7 +141,10 @@ const STATE_TEXT: { readonly [S in FileState]: string } = {
   unknown: "could not be read now",
 };
 
-/** The text before U-36, character for character: the fallback without a catalog. */
+/**
+ * The fallback without a catalog: the text before U-36 character for character, and
+ * `recordsChanged`, the one line U-36 adds (a run with a records-changed mark, U-43).
+ */
 const ENGLISH_WORDS: ChangesWords = {
   heading: (runId) => `changes of run ${runId}, masked with the secrets registered now (not the run's own masking)`,
   noTextNote: () =>

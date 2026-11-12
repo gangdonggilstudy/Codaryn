@@ -7,7 +7,6 @@
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -27,6 +26,7 @@ import {
   readRunFiles,
   runTask,
   startTask,
+  UNASSIGNABLE_PID,
   waitFor,
 } from "../support/cli.js";
 
@@ -233,10 +233,9 @@ test("A8 workspace lock: a second run is refused; a dead lock is recovered", { t
   await t.test("lock of a dead process is recovered", async (st) => {
     const sb = createSandbox(st);
     writeWorkspaceFile(sb, "README.md", "# a\n");
-    const dead = spawn(NODE, ["-e", ""], { stdio: "ignore" });
-    const deadPid = dead.pid;
-    await new Promise<void>((resolve) => dead.once("exit", () => resolve()));
-    assert.ok(deadPid !== undefined && !isProcessAlive(deadPid));
+    // Not the pid of an exited process: one the system may hand out again during the run (Z-2).
+    const deadPid = UNASSIGNABLE_PID;
+    assert.ok(!isProcessAlive(deadPid), "test assumption: the lock holder is dead");
     mkdirSync(join(sb.workspace, STATE_DIR_NAME), { recursive: true });
     writeFileSync(
       join(sb.workspace, STATE_DIR_NAME, LOCK_FILE_NAME),

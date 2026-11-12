@@ -244,6 +244,19 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.ko["cleanup.warning.discarded_left"], /남으면/);
   });
 
+  test("U-1: a plan run with a records-changed mark is refused before anything is asked, and the fix makes the plan again", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // The same words as the other records-changed texts (report.records_changed, runs.records_changed).
+    assert.match(en["error.plan_records_changed.what"], /records-changed mark.*nothing was asked or changed/);
+    assert.match(ko["error.plan_records_changed.what"], /기록 변경 표시.*아무것도 묻거나 바꾸지 않았습니다/);
+    // Not "approve it anyway": a new plan, read again, is what may be applied.
+    assert.match(en["error.plan_records_changed.fix"], /Make the plan again with codaryn plan/);
+    assert.match(ko["error.plan_records_changed.fix"], /codaryn plan으로 계획을 새로 만들고/);
+    for (const text of [en["error.plan_records_changed.fix"], ko["error.plan_records_changed.fix"]]) {
+      assert.ok(!text.includes("--digest"), "the marked plan's digest is not offered");
+    }
+  });
+
   test("R-34b: a damaged run's warning and the separate confirmation name it; an unknown folder is never removed", () => {
     const { en, ko } = MESSAGE_TEXTS;
     // P-1: records that cannot be checked go with the not reverted confirmation, and that line says so.

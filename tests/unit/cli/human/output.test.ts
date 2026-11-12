@@ -275,6 +275,18 @@ describe("HumanOutput.progressLine (N-5, N-14)", () => {
     for (const [event, expected] of events) assert.equal(human.progressLine(event), expected, event.type);
   });
 
+  test("N-23(h): a key shape split by a control character in a recorded path is hidden", () => {
+    const line = createHumanOutput(strictCatalog()).progressLine({
+      type: "file_changed",
+      callId: "c",
+      path: masked(`sk-ant-AB\u0007CDEFGHIJKLMNOPQRSTUVWXYZ012345.md`),
+      previousHash: null,
+      newHash: "c".repeat(64),
+      created: true,
+    });
+    assert.equal(line, "[progress.file_created] [key].md");
+  });
+
   test("records with values outside their lists give no line instead of passing them on", () => {
     const human = createHumanOutput(strictCatalog());
     assert.equal(human.progressLine({ type: "model_error", turn: 1, kind: SECRET, message: masked("") }), null);

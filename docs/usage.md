@@ -11,8 +11,9 @@ Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동
 ## 1. 요구 사항
 
 - Node.js 26 이상(`package.json`의 `engines`). 검증은 Windows에서 했고 다른 OS는 확인하지 않았다.
-- 실제 호출에는 Anthropic API 키와 모델 ID가 필요하다. 3절의 체험에는 둘 다 필요 없다.
-- 지금은 CLI만 있다. 화면(GUI)과 Anthropic 밖의 모델 제공자는 아직 없다.
+- 실제 호출에는 고른 제공자의 API 키와 모델 ID가 필요하다. 3절의 체험에는 둘 다 필요 없다.
+- 모델 제공자는 Anthropic API(기본)와 OpenAI API(Responses API) 둘이다([4절 "두 번째 제공자"](#두-번째-제공자-openai)).
+- 이 문서는 CLI를 다룬다. 독립 데스크톱 GUI(`gui/`)는 만드는 중이고, 설치 패키지가 없어 개발 환경에서만 띄울 수 있다. VS Code 확장은 만들지 않는다.
 
 ## 2. 설치와 빌드
 

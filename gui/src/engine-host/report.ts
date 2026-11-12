@@ -68,6 +68,8 @@ export function reportValue(outcome: unknown, shown: Shown, shownText: Shown): O
   const base = {
     ok: true,
     runId,
+    // UXM-14, DR-38: the run's records are not to be trusted (absent: false).
+    recordsChanged: output["recordsChanged"] === true,
     status: output["status"] === "incomplete" ? "incomplete" : "complete",
     finished: finished(journal["finished"]),
     usage: usage(output["result"]),

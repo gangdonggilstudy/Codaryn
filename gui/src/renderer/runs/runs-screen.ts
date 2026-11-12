@@ -25,7 +25,7 @@ export interface RunsDeps {
   readonly open: () => void;
   readonly announce: (text: string) => void;
   /** GU-5: the plan screen for a run that waits for its plan to be approved. */
-  readonly openPlan: (runId: string, profile: string | null, workflow: string | null, formKnown?: boolean) => void;
+  readonly openPlan: (runId: string, profile: string | null, workflow: string | null, formKnown?: boolean, recordsChanged?: boolean) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
   /** GU-3 (3.7): the run's report, with the run's form when this app started it. */
@@ -79,6 +79,8 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   item.append(el("span", facts.filter((fact) => fact !== "").join(" · "), { class: "run-facts" }), el("span", run.taskId, { class: "task-id" }), el("code", run.runId, { class: "run-id", lang: "en" }));
   if (run.reverted !== null) item.append(el("span", t.format(run.reverted.status === "partial" ? "runs.revertedPartial" : "runs.reverted", { time: localDateTime(run.reverted.at) }), { class: "reverted" }));
   if (run.revertRecordDamaged) item.append(el("span", t.format("runs.revertDamaged"), { class: "damaged" }));
+  // UXM-14, DR-38: as the CLI's runs says it.
+  if (run.recordsChanged === true) item.append(el("span", t.format("runs.recordsChanged"), { class: "damaged", "data-records-changed": "true" }));
   const open = button(t.format("runs.preview"), () => preview(run.runId), { "data-preview": run.runId });
   open.setAttribute("aria-label", `${t.format("runs.preview")}: ${run.runId}`);
   item.append(button(t.format("run.viewReport"), () => openReport(run.runId), { "data-report": run.runId }), open);
@@ -172,9 +174,10 @@ export function runsScreen(deps: RunsDeps): Screen {
         }
         // R21b-L-1: a row opens with the run's own form when this app started it; else its plan is only shown.
         const forms = new Map(reply.runs.flatMap((run) => (run.state === "checked" ? [[run.runId, run.form ?? null] as const] : [])));
+        const marked = new Set(reply.runs.flatMap((run) => (run.state === "checked" && run.recordsChanged === true ? [run.runId] : [])));
         const openWithForm = (id: string, what: "plan" | "changes" | "report"): void => {
           const form = forms.get(id) ?? null;
-          if (what === "plan") deps.openPlan(id, form?.profile ?? null, form?.workflow ?? null, form !== null);
+          if (what === "plan") deps.openPlan(id, form?.profile ?? null, form?.workflow ?? null, form !== null, marked.has(id));
           else if (what === "changes") deps.openChanges(id, form?.profile ?? null, form?.workflow ?? null);
           else deps.openReport(id, form);
         };

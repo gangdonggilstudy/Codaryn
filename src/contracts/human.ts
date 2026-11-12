@@ -23,14 +23,14 @@
 import { REVERT_SKIP_REASONS } from "./changes.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
-import type { DefaultConfigDisplay } from "./config.js";
+import type { ApiKeyEnv, DefaultConfigDisplay } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
-import { CLI_ERROR_EXIT_CODES, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
+import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
 import { INTEGRITY_PHASES } from "./integrity.js";
 import { MODEL_ERROR_KINDS } from "./model.js";
 import { PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
-import type { CliErrorCode, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
+import type { CliErrorCode, CliErrorHint, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
@@ -145,6 +145,8 @@ export const SCHEMA_FIELD_NAMES = [
   "paths",
   "language",
   "profiles",
+  // SP-D3: the config's providers map (`provider` is listed above).
+  "providers",
   "steps",
   "toolCalls",
   "name",
@@ -231,6 +233,8 @@ export const HELP_OPTIONS = [
   "json",
   "use",
   "limit",
+  // SP-6 (DR-31): `--provider <name>` of `codaryn models`.
+  "provider",
   // DR-21, DR-25: `--allow-unsafe-move` of `apply` and `revert` (UNSAFE_MOVE_CONSENT_ARGUMENT).
   "allow_unsafe_move",
 ] as const;
@@ -260,6 +264,8 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - seconds (N-20): a non-negative number of seconds with at most one decimal place (the
  *   renderer rounds milliseconds to tenths); the catalog writes it in decimal digits
  * - language (N-20): a MessageLanguage code
+ * - keyEnv (SP-D12, DR-31): the name of an API key variable, one of API_KEY_ENVS (a fixed constant,
+ *   never key material); the catalog writes it as it is
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -278,6 +284,7 @@ export interface MessageParamTypeByKind {
   readonly suggestedPath: InitSuggestedProtectedPath;
   readonly seconds: number;
   readonly language: MessageLanguage;
+  readonly keyEnv: ApiKeyEnv;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -395,6 +402,9 @@ export const FIXED_MESSAGES = {
   // DR-25: a dry run did not check whether this drive can move the listed files back safely; the
   // real revert checks it and, without consent, skips the ones it cannot (RevertOutput.moveSafetyUnchecked).
   "revert.dry_run_move_unchecked": {},
+  // R-16 L-1: `{count}` files the revert moved aside could not be put back and were left in
+  // `.codaryn/parked/` (fixed text; SkippedFile.parkedAt). Shown after the skipped list when above 0.
+  "revert.parked": { count: "count" },
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -425,10 +435,11 @@ export const FIXED_MESSAGES = {
   "init.commands_suggest": { command: "suggestedCommand" },
   "init.protected_suggest": { path: "suggestedPath" },
   "init.language_pick": {},
-  "init.key_set": {},
-  "init.key_missing": {},
-  "init.key_hint_windows": {},
-  "init.key_hint_posix": {},
+  // SP-D12: `{keyEnv}` is the chosen provider's key variable (API_KEY_ENVS).
+  "init.key_set": { keyEnv: "keyEnv" },
+  "init.key_missing": { keyEnv: "keyEnv" },
+  "init.key_hint_windows": { keyEnv: "keyEnv" },
+  "init.key_hint_posix": { keyEnv: "keyEnv" },
   "init.saved": { location: "location" },
   "init.next": {},
   "init.overridden_by_env": {},
@@ -488,8 +499,9 @@ export const FIXED_MESSAGES = {
   "doctor.config_file.profile_missing": {},
   "doctor.task_file.skipped": {},
   "doctor.api_key.scripted": {},
-  "doctor.api_key.ok": {},
-  "doctor.api_key.missing": {},
+  // SP-D12: the chosen provider and its key variable.
+  "doctor.api_key.ok": { keyEnv: "keyEnv" },
+  "doctor.api_key.missing": { keyEnv: "keyEnv", provider: "provider" },
   "doctor.model.scripted_ok": {},
   "doctor.model.ok": {},
   "doctor.model.missing": {},
@@ -538,6 +550,10 @@ export const FIXED_MESSAGES = {
   // attempt ends in between; not understood; or its owner still runs). While it stays, a lock left
   // by an ended process is not reclaimed; the text says to remove it when no Codaryn runs here.
   "doctor.lock.reclaim_left": {},
+  // R-16 L-1: a warning in the `lock` check (no new check id), which already looks into the state
+  // directory: `{count}` files a revert left in `.codaryn/parked/` (ListParkedFiles). The person
+  // moves them back or deletes them; nothing removes them on its own.
+  "doctor.lock.parked_left": { count: "count" },
   // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
   // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
@@ -572,6 +588,7 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  *   The check ids and statuses stay English in the JSON.
  * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
  * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
+ * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -593,7 +610,8 @@ export type ListedMessageId =
   | `doctor.check.${DoctorCheckId}`
   | `doctor.status.${DoctorCheckStatus}`
   | `approval.${ApprovalChannel}`
-  | `plan.problem.${PlanItemProblem}`;
+  | `plan.problem.${PlanItemProblem}`
+  | `error.hint.${CliErrorHint}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -638,6 +656,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...DOCTOR_CHECK_STATUSES.map((status) => `doctor.status.${status}` as const),
   ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
   ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
+  ...CLI_ERROR_HINTS.map((hint) => `error.hint.${hint}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */
@@ -741,7 +760,8 @@ export interface HumanOutput {
   /**
    * N-7: stderr after `revert` and `revert --dry-run`. DR-25: `revert.unsafe_moved` when files were
    * moved back unsafely, `summary.next_revert_unsafe` when files were skipped as `unsafe_move`, and
-   * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present.
+   * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present. R-16 L-1:
+   * `revert.parked` when skipped files carry `parkedAt`.
    */
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */

@@ -4,6 +4,7 @@
  * Tool-level failures are returned as RawToolOutcome, never thrown.
  */
 
+import { createHash } from "node:crypto";
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_COMMAND_OUTPUT_BYTES,
@@ -11,9 +12,12 @@ import {
   MAX_SEARCH_MATCHES_PER_FILE,
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
+  maskedParts,
+  maskedPartsEncoding,
 } from "../contracts/index.js";
 import type {
   ChangeRecorder,
+  ContentHash,
   PathAccess,
   PlanRecorder,
   PrivacyGateway,
@@ -306,6 +310,17 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     return { ok: true, payload: { entries, truncated } };
   }
 
+  /**
+   * DR-29, DR-32 (c): the digest of `text` masked by this run's gateway: the SHA-256 of
+   * maskedPartsEncoding(maskedParts(masked text)), as 64 lowercase hex characters. Undefined when
+   * masking fails. It holds no visible text (R-19 L-3).
+   */
+  function shownDigest(text: string): ContentHash | undefined {
+    const masked = privacy.mask(text);
+    if (!masked.ok) return undefined;
+    return createHash("sha256").update(maskedPartsEncoding(maskedParts(masked.text)), "utf8").digest("hex") as ContentHash;
+  }
+
   async function writeFile(args: WriteFileArgs): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "write");
     if (!resolved.ok) return resolved;
@@ -364,9 +379,13 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     if (!rebuilt.ok) return fail(rebuilt.code, `change rejected: ${rebuilt.code}`);
 
     // 5. Every check passed. Keep the original for revert; without it, do not write.
+    //    DR-29, DR-32 (c): with it, how this run masks it (null for a new file). When masking fails
+    //    no digest is given, and the comparison view will show no text for this path.
+    const shownOriginal = changeRecorder === undefined || original === null ? null : shownDigest(original);
     if (changeRecorder !== undefined) {
       try {
-        await changeRecorder.saveOriginal(resolved.path, original);
+        if (shownOriginal === undefined) await changeRecorder.saveOriginal(resolved.path, original);
+        else await changeRecorder.saveOriginal(resolved.path, original, shownOriginal);
       } catch {
         // No detail: it could carry raw paths or file text.
         return fail("io_error", "keeping the original for revert failed; nothing was written");
@@ -385,6 +404,19 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
       return written.code === "conflict"
         ? fail("conflict", "file changed since it was read; read the file again")
         : fail("io_error", "writing the file failed");
+    }
+    // 7. DR-29, DR-32 (c): how this run masks the text it left. Only when the original's form was
+    //    given and this text can be masked; a failure here never changes the outcome (the write
+    //    happened, and the view then finds no record and shows no text).
+    if (changeRecorder?.saveNext !== undefined && shownOriginal !== undefined) {
+      const partsDigest = shownDigest(finalText);
+      if (partsDigest !== undefined) {
+        try {
+          await changeRecorder.saveNext(resolved.path, written.newHash, partsDigest);
+        } catch {
+          // No detail, as above.
+        }
+      }
     }
     return {
       ok: true,

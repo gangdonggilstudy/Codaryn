@@ -68,7 +68,7 @@ import {
   selectEnvFileSecrets,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, knownKeyValues, resolveAnthropicSettings, runKeySecrets } from "./settings.js";
+import { envValue, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
@@ -658,11 +658,17 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
 
   // 8. The model.
   let model: ModelProvider;
-  if (task.model.provider === "anthropic") {
-    const resolved = resolveAnthropicSettings(task.model, io.env, config);
+  if (task.model.provider !== "scripted") {
+    // SP-4, DR-34 (c): every API provider's settings are resolved first, its address variable
+    // checked with its own rule, before any provider is made.
+    const resolved = resolveApiSettings(task.model, io.env, config);
     if (!resolved.ok) return error(resolved.code, resolved.message);
     // Already registered above (S-2); kept so the key sent is always a registered secret.
     addSecret(resolved.settings.apiKey);
+    if (task.model.provider !== "anthropic") {
+      // SP-6 connects the other API providers (DR-31); until then nothing is sent.
+      return error("provider_not_implemented", `the ${task.model.provider} provider is not connected yet; nothing was sent`);
+    }
     const factory = io.createAnthropicProvider === undefined ? anthropicProviderFactory : io.createAnthropicProvider;
     if (factory === null) {
       return error("provider_not_implemented", "the anthropic provider is not connected; nothing was sent");
@@ -673,9 +679,6 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
       // The provider re-checks the settings and throws only if they disagree with the CLI's checks.
       return error("internal_error", "the anthropic provider rejected the resolved settings; nothing was sent");
     }
-  } else if (task.model.provider !== "scripted") {
-    // SP-6 connects the other API providers (DR-31); until then nothing is sent.
-    return error("provider_not_implemented", `the ${task.model.provider} provider is not connected yet; nothing was sent`);
   } else {
     const scriptText = await readText(io, task.model.scriptPath);
     if (scriptText === null) return error("invalid_script", "the script file cannot be read as JSON");

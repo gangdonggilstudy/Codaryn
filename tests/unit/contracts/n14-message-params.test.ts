@@ -104,7 +104,7 @@ test("N-14 (H1): schema field positions accept known field names and indices onl
 });
 
 test("N-14: every fixed message declares only known parameter kinds; listed ids take none", () => {
-  const kinds = new Set(["count", "status", "reason", "permission", "denial", "modelError", "phase", "provider", "field", "runId", "text", "location", "suggestedCommand", "suggestedPath"]);
+  const kinds = new Set(["count", "status", "reason", "permission", "denial", "modelError", "phase", "provider", "field", "runId", "text", "location", "suggestedCommand", "suggestedPath", "seconds", "language"]);
   for (const id of MESSAGE_IDS) {
     for (const kind of Object.values(messageParams(id))) assert.ok(kinds.has(kind), `${id}: ${kind}`);
   }
@@ -145,9 +145,9 @@ test("N-16 (M2): a run list entry is either checked or damaged; a damaged one ca
 });
 
 test("N-17 (M3): the end-of-run summary receives the denied call count", () => {
-  const context: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 1 };
+  const context: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 1, policySource: "config" };
   // @ts-expect-error the count is required
-  const missing: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false };
+  const missing: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, policySource: "config" };
   // @ts-expect-error the typed workspace path is never passed to the renderer
   const typed: RunSummaryContext = { ...context, workspace: SYNTHETIC };
   assert.ok(missing && typed);

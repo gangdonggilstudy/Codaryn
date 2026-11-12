@@ -241,7 +241,10 @@ export interface InputDiagnostic {
 
 export type CliOutput = EngineResult | CliErrorOutput;
 
-/** `complete`: every changed file was reverted (or nothing had changed). `partial`: some were skipped. */
+/**
+ * `complete`: every changed file was reverted or was already as before the run (`already_reverted`),
+ * or nothing had changed. `partial`: some file was skipped for any other reason (N-22).
+ */
 export const REVERT_EXIT_CODES = { complete: 0, partial: 3 } as const;
 export type RevertStatus = keyof typeof REVERT_EXIT_CODES;
 

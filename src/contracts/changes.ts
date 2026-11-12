@@ -72,13 +72,24 @@ export interface RevertRecord {
   readonly schemaVersion: 1;
   readonly kind: "revert_record";
   readonly runId: string;
-  /** When the revert finished, ISO 8601 UTC. */
+  /** When the revert finished, ISO 8601 UTC (RUN_TIMESTAMP_PATTERN_SOURCE). */
   readonly at: string;
   readonly status: "complete" | "partial";
   /** Number of files reverted and skipped. */
   readonly reverted: number;
   readonly skipped: number;
 }
+
+/**
+ * N-22: signatures of `readRevertRecord` and `writeRevertRecord`, exported by `src/store/index.ts`.
+ * - read: the run's checked record, or null when it has none. Rejects when one exists but cannot
+ *   be read or fails the checks (same run id, timestamp pattern, known status); `revert` then
+ *   leaves `revertedBefore` out.
+ * - write: replaces the record atomically (temporary file and rename). The run directory must
+ *   exist; it is not created. Rejects on failure; `revert` treats the record as best effort.
+ */
+export type ReadRevertRecord = (workspaceRoot: string, runId: string) => Promise<RevertRecord | null>;
+export type WriteRevertRecord = (workspaceRoot: string, record: RevertRecord) => Promise<void>;
 
 export type RevertAction = "restored" | "deleted";
 
@@ -88,8 +99,11 @@ export type RevertAction = "restored" | "deleted";
  * writing this file failed. missing_record: an original was kept for this path but the journal
  * has no `file_changed` for it (the run stopped between the snapshot and the record), so the
  * state the run left is unknown and the file is not touched (T-10).
+ * already_reverted (N-22): the file is already as it was before the run (its current hash equals
+ * the first `previousHash` recorded for it, or it is absent when the run created it). Nothing is
+ * left to do for it, so it does not make the outcome partial.
  */
-export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record"] as const;
+export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record", "already_reverted"] as const;
 export type RevertSkipReason = (typeof REVERT_SKIP_REASONS)[number];
 
 /**

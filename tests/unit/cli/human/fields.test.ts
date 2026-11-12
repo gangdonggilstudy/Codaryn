@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { TOP_LEVEL_POSITION, closestKnownName, fieldPath } from "../../../../src/cli/human/fields.js";
+import { toSchemaFieldPath } from "../../../../src/contracts/index.js";
 
 const CONFIG_FIELDS = ["schemaVersion", "model", "maxOutputTokens", "limits", "policy", "verifiers", "secretEnv", "integrity", "language", "profiles"];
 
@@ -20,6 +21,22 @@ describe("fieldPath", () => {
     const shown = fieldPath(["profiles", secret, "limits", -1, 1.5, "a\u001b[31m"]);
     assert.equal(shown, "profiles.?.limits[?][?].?");
     assert.equal(shown.includes("fake"), false);
+  });
+});
+
+describe("fieldPath (N-23 c)", () => {
+  test("only schema field names are shown; profile names, map keys and unknown names become ?", () => {
+    assert.equal(fieldPath(["profiles", "hunter2-secret", "limits", "maxModelTurns"]), "profiles.?.limits.maxModelTurns");
+    assert.equal(fieldPath(["limits", "hunter2Password"]), "limits.?");
+    assert.equal(fieldPath(["hunter2"]), "?");
+    const indexed = fieldPath(["profiles", 3, "limits", "maxModelTurns"]);
+    assert.equal(indexed, "profiles[3].limits.maxModelTurns");
+    assert.notEqual(toSchemaFieldPath(indexed), null, "a position made of schema names is a SchemaFieldPath");
+  });
+
+  test("closestKnownName offers only schema field names", () => {
+    assert.equal(closestKnownName("hunter3", ["hunter2", "model"]), null);
+    assert.equal(closestKnownName("modl", ["hunter2", "model"]), "model");
   });
 });
 

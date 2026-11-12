@@ -120,6 +120,39 @@ export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
 const runReasonsComplete: [MissingRunReason] extends [never] ? true : false = true;
 void runReasonsComplete;
 
+/**
+ * DR-16 (R-4 M-1): the reasons each end status may have, the one table every reader of result.json
+ * and journals uses to check a recorded status and reason (report, the run list, human output).
+ * Readers must not keep their own lists: a reason added here is then accepted everywhere at once.
+ * It covers runs and apply runs (ApplyResult uses the same reasons).
+ */
+export const RUN_REASONS_BY_STATUS = {
+  done: ["verified"],
+  failed: ["verifier_failed", "model_error", "repeated_failure", "plan_stale", "apply_incomplete"],
+  "needs-input": [
+    "verifier_inconclusive",
+    "no_verifier",
+    "unknown_tool_outcome",
+    "protected_changed",
+    "plan_pending",
+    "awaiting_review",
+  ],
+  cancelled: ["cancelled"],
+  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
+} as const satisfies { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] };
+
+/** Compile-time check that RUN_REASONS_BY_STATUS lists every reason of every status. */
+export type MissingReasonByStatus = {
+  [S in TerminalRunStatus]: Exclude<RunReasonByStatus[S], (typeof RUN_REASONS_BY_STATUS)[S][number]>;
+}[TerminalRunStatus];
+const reasonsByStatusComplete: [MissingReasonByStatus] extends [never] ? true : false = true;
+void reasonsByStatusComplete;
+
+/** Whether `reason` is one of `status`'s reasons (RUN_REASONS_BY_STATUS). Pure. */
+export function isReasonOfStatus(status: TerminalRunStatus, reason: string): reason is RunReason {
+  return (RUN_REASONS_BY_STATUS[status] as readonly string[]).includes(reason);
+}
+
 /** Process exit code for each terminal status. */
 export const RUN_EXIT_CODES: { readonly [S in TerminalRunStatus]: number } = {
   done: 0,
@@ -148,6 +181,10 @@ export const CLI_ERROR_EXIT_CODES = {
    * holds the entry file), lies inside it or contains it. Checked before the lock; nothing is written.
    */
   workspace_is_install_dir: 2,
+  /**
+   * Another run (or revert) holds `<workspace>/.codaryn/lock.json`. N-25 (a): the human-readable
+   * error adds `lock.remove_hint`: when no Codaryn is running in that workspace, remove the file.
+   */
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
@@ -161,7 +198,11 @@ export const CLI_ERROR_EXIT_CODES = {
   run_not_found: 2,
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
-  /** G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as `plan_pending`). */
+  /**
+   * G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as
+   * `plan_pending`), or the task given to `apply` does not resolve to `plan: "apply"`. Nothing was
+   * changed.
+   */
   run_not_plan: 2,
   /**
    * G-A, `codaryn apply`: no approval. `--digest` is missing (without a terminal), shorter than

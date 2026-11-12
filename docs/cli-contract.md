@@ -713,6 +713,17 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - **거부 안내의 정책 위치(N-23)**: `RunSummaryContext.policySource`(`task`, `config`)와 `deniedCommandCalls`(권한이 `command`인 거부 수)를 더했다. 안내는 `deniedCommandCalls`가 1 이상일 때만 낸다. task 파일 실행이면 `summary.denied_hint_task`(task의 `policy.commands`), 간편 형식과 한 줄 실행이면 `summary.denied_hint`(설정 파일이나 프로필)를 쓴다.
 - **`--run latest`가 고른 실행(N-23)**: `revert`와 `report`는 `latest`를 풀면 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 먼저 쓴다(`HumanOutput.latestChosen`, 문구 `latest.chosen`, 시각은 확인된 `startedAt`을 지역 시간으로). `--quiet`이면 쓰지 않는다.
 
+- **N-24(검토 R-3)**
+  - (a) `report`의 Markdown과 진행 줄은 검증기를 id 대신 순번으로 쓴다. id는 `--json`에만 남는다.
+  - (b) 실행 목록 항목의 실행 id·작업 id는 패턴을 통과해도 키 모양일 수 있다. 그래서 JSON과 표 모두 키 모양을 가린다(`report`와 같다).
+  - (d) `SCHEMA_FIELD_NAMES`에 대본의 `usage` 하위 필드 `inputTokens`, `outputTokens`를 더했다.
+  - (e) 문구 함수는 값의 종류를 실행 중에 다시 확인한다. 맞지 않는 값은 내지 않고 고정 대체 글로 둔다(`MessageCatalog` 주석).
+- **N-25(a) 작업 공간 잠금**
+  - `workspace_locked`의 사람용 오류에 `lock.remove_hint`("이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지우세요")를 붙인다.
+  - `doctor`에 `lock` 점검을 마지막 항목으로 더했다. `.codaryn/lock.json`을 바꾸지 않고 읽는다.
+  - 결과: 없음(`ok`), 살아 있는 프로세스가 쥠(`warn`, 안내 포함), 끝난 프로세스가 남김(`ok`, 다음 실행이 회수), 읽을 수 없음(`warn`). 작업 공간이 없으면 `skipped`다.
+  - pid가 다른 프로세스에 다시 주어질 수 있어 "쥠" 판정은 틀릴 수 있다(architecture A-6).
+
 ### 17.7 오류 코드 추가
 
 - `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.

@@ -352,7 +352,10 @@ async function planFile(change: ChangedPath, snapshots: Snapshots, workspace: Wo
 
   const current = await hashOf(resolved.path.absolute);
   if (current === undefined) return { reason: "io_error" };
-  if (current !== change.after) return { reason: "changed_since_run" };
+  if (current !== change.after) {
+    // N-22: the file is as it was before the run (a created file is gone): nothing is left to do.
+    return { reason: current === change.before ? "already_reverted" : "changed_since_run" };
+  }
   return { action: original.text === null ? "deleted" : "restored", target: resolved.path, text: original.text };
 }
 

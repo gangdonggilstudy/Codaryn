@@ -165,6 +165,7 @@ export interface ResolveWorkflowInput {
   /** Built-ins and the config file's `workflows`, by id. */
   readonly definitions: { readonly [id: string]: WorkflowDefinition };
   /** The task's fields. `workflowRef` absent: the task has no definition. */
+  /** In the quick form the CLI passes `--workflow <id>` as `task.workflowRef` (DR-2). */
   readonly task: TaskWorkflowFields;
   /** `--profile`'s `workflowRef`, used when the task names none. */
   readonly profileWorkflowRef: string | null;
@@ -189,13 +190,17 @@ export type ResolveWorkflowOutcome =
 export type ResolveWorkflow = (input: ResolveWorkflowInput) => ResolveWorkflowOutcome;
 
 /**
- * `codaryn review --workspace <dir> --run <runId|latest> --accept|--reject [--note <text>] [--json]`
- * records a person's verdict on a run that ended as `needs-input`/`awaiting_review`. It writes
+ * `codaryn review (--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <file>]
+ * [--vars-file <file>] --run <runId|latest> --accept|--reject [--note <text>] [--json]` records a
+ * person's verdict on a run that ended as `needs-input`/`awaiting_review`. It writes
  * REVIEW_FILE_NAME only, under the workspace lock: result.json and the journal stay as they are,
  * and the run's status does not change (M-16). A later review replaces the earlier one.
- * Errors (CliErrorOutput): `invalid_arguments`, `workspace_not_found`, `run_not_found`,
- * `invalid_run_record`, `run_not_awaiting_review`, `key_in_file` (the note holds a key, S-8),
- * `workspace_locked`.
+ * R-4 L-4: it takes the task form like `plan` and `apply` (DR-17) and registers the same secrets
+ * as `run`, and the note is masked with them before it is written, so review.json and every reader
+ * hold masked text only. Without `--note` no secret is needed and none is read.
+ * Errors (CliErrorOutput): `invalid_arguments`, `invalid_task`, `invalid_config`,
+ * `secret_env_missing`, `workspace_not_found`, `run_not_found`, `invalid_run_record`,
+ * `run_not_awaiting_review`, `key_in_file` (the note holds a key, S-8), `workspace_locked`.
  */
 export const REVIEW_FILE_NAME = "review.json";
 export const REVIEW_VERDICTS = ["accepted", "rejected"] as const;
@@ -211,8 +216,11 @@ export interface ReviewRecord {
   /** ISO 8601 UTC. */
   readonly at: string;
   readonly verdict: ReviewVerdict;
-  /** As typed, cleaned of control characters. Never sent to a model. */
-  readonly note: string | null;
+  /**
+   * As typed, cleaned of control characters, then masked with the secrets the command registered
+   * (R-4 L-4). Never sent to a model. Readers show it as it is.
+   */
+  readonly note: MaskedText | null;
 }
 
 export const REVIEW_EXIT_CODES: { readonly [V in ReviewVerdict]: number } = { accepted: 0, rejected: 0 };

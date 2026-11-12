@@ -41,7 +41,39 @@ export function safeToken(value: unknown): string {
  * written into them.
  */
 export function hideKeys(text: string, currentKey: string | null): string {
-  let out = text.replace(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g"), "[key]");
-  if (currentKey !== null && currentKey.length >= MIN_CURRENT_KEY_LENGTH) out = out.split(currentKey).join("[key]");
-  return out;
+  // N-23 (review R-2 L-5): look for key shapes with control characters skipped, so a key broken
+  // by one (`sk-ant-AB<BEL>CDEF...`) is still found. The span covers the skipped characters too.
+  const kept: number[] = [];
+  let stripped = "";
+  for (let index = 0; index < text.length; ) {
+    const cp = text.codePointAt(index) as number;
+    const size = cp > 0xffff ? 2 : 1;
+    if (!isUnsafeCodePoint(cp, false)) {
+      for (let k = 0; k < size; k += 1) kept.push(index + k);
+      stripped += text.slice(index, index + size);
+    }
+    index += size;
+  }
+  const spans: [number, number][] = [];
+  const add = (start: number, length: number): void => {
+    const from = kept[start];
+    const to = kept[start + length - 1];
+    if (from !== undefined && to !== undefined) spans.push([from, to + 1]);
+  };
+  for (const match of stripped.matchAll(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g"))) add(match.index, match[0].length);
+  if (currentKey !== null && currentKey.length >= MIN_CURRENT_KEY_LENGTH) {
+    for (let at = stripped.indexOf(currentKey); at !== -1; at = stripped.indexOf(currentKey, at + currentKey.length)) {
+      add(at, currentKey.length);
+    }
+  }
+  if (spans.length === 0) return text;
+  spans.sort((a, b) => a[0] - b[0]);
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of spans) {
+    if (end <= cursor) continue;
+    if (start >= cursor) out += `${text.slice(cursor, start)}[key]`;
+    cursor = end;
+  }
+  return out + text.slice(cursor);
 }

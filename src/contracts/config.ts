@@ -42,6 +42,9 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * - workflows (G-A): a workflow definition's `policy`, `verifiers` and `limits` lie under the
  *   profile's and the top level's for the quick form; its settings resolve as `ResolveWorkflow`
  *   says. No `workflowRef` anywhere: nothing changes.
+ * - workflowRef (G-A, DR-2): the task file's `workflowRef`; in the quick form `--workflow <id>`;
+ *   else the chosen profile's `workflowRef`; else none (legacy settings). `--workflow` is the quick
+ *   form's only way to name a definition, in `run`, `plan`, `apply` and `review` alike.
  */
 export interface CodarynConfig {
   readonly schemaVersion: 1;
@@ -218,9 +221,15 @@ export const DENY_ALL_POLICY: PolicyConfig = {
   restorePathTokens: false,
 };
 
-/** Task id and workflow label given to a quick form run. */
+/**
+ * Task id and workflow label given to a quick form run. G-A: with `--workflow <id>` the label is
+ * that id and the task's `workflowRef` is the id; without it the label stays QUICK_TASK_WORKFLOW
+ * and the run has no definition (legacy settings), as before.
+ */
 export const QUICK_TASK_ID = "quick";
 export const QUICK_TASK_WORKFLOW = "general";
+/** G-A (DR-2): the quick form's argument that names a workflow definition (TaskSpec.workflowRef). */
+export const QUICK_WORKFLOW_ARGUMENT = "--workflow";
 
 /**
  * Field names that hold a key. A task or config file with such a field at any depth is

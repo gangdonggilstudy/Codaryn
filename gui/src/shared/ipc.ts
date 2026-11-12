@@ -24,6 +24,7 @@ export const IPC_CHANNELS = {
   listRuns: "codaryn:runs:list",
   previewRevert: "codaryn:runs:previewrevert",
   revert: "codaryn:runs:revert",
+  revertConsent: "codaryn:runs:revertconsent",
   plan: "codaryn:plan:read",
   applyPlan: "codaryn:plan:apply",
   review: "codaryn:review:record",
@@ -171,11 +172,15 @@ export type DoctorReply =
  */
 export type OpenFolderReply = OpenReply | null;
 
-/** One remembered workspace. `path` is the folder the person chose; it is shown in the recent list only. */
+/**
+ * One remembered workspace: the folder's own name and (R21-I-1, R-10b I-2) the name of the folder it
+ * is in, "" for a drive root, so two folders of the same name can be told apart. Never the full
+ * path: a folder from a second start's command line was not chosen in this window's dialog.
+ */
 export interface RecentView {
   readonly id: string;
   readonly name: string;
-  readonly path: string;
+  readonly where: string;
   readonly exists: boolean;
 }
 
@@ -733,8 +738,20 @@ export interface RevertView {
   readonly revertedBefore: { readonly at: string; readonly status: "complete" | "partial" } | null;
 }
 
-/** A preview carries the token its revert takes; a revert does not. */
-export type RevertReply = { readonly ok: true; readonly view: RevertView; readonly preview: string | null } | { readonly ok: false; readonly code: string };
+/**
+ * A preview carries the token its revert takes; a revert does not. DR-25: a revert that skipped
+ * files as `unsafe_move` carries `consentRetry`, the token to revert once more with the person's
+ * consent (asked by the main process).
+ */
+export type RevertReply =
+  | { readonly ok: true; readonly view: RevertView; readonly preview: string | null; readonly consentRetry: string | null }
+  | { readonly ok: false; readonly code: string };
+
+/** DR-25: `revertConsent` arguments: `{retry}`, a token a revert's result gave. */
+export function parseRetryArgs(value: unknown): { readonly retry: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["retry"])) return null;
+  return isHandle(value["retry"]) ? { retry: value["retry"] } : null;
+}
 
 /** The engine host's revert value, checked field by field. */
 export function toRevertView(value: unknown): { readonly ok: true; readonly view: RevertView } | { readonly ok: false; readonly code: string } {

@@ -150,11 +150,12 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         model.append(outcome);
 
         const profiles = section("settings-profiles", t.format("settings.profiles"));
-        profiles.append(
-          view.profiles.length === 0 ? el("p", t.format("settings.noProfiles")) : el("ul", undefined, { class: "profiles" }),
-        );
-        const profileList = profiles.querySelector("ul.profiles");
-        if (profileList !== null) profileList.append(...view.profiles.map((profile) => profileItem(t, profile)));
+        if (view.profiles.length === 0) profiles.append(el("p", t.format("settings.noProfiles")));
+        else {
+          const profileList = el("ul", undefined, { class: "profiles" });
+          profileList.append(...view.profiles.map((profile) => profileItem(t, profile)));
+          profiles.append(profileList);
+        }
         profiles.append(el("p", t.format("settings.profilesEdit"), { class: "notice" }));
 
         const workflows = section("settings-workflows", t.format("settings.workflows"));

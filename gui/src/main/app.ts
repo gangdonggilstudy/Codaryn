@@ -26,7 +26,7 @@ import { cancelActiveRun, registerIpc, texts } from "./ipc.js";
 import { RunManager } from "./runs.js";
 import { RunHistory } from "./history.js";
 import { PlanApprovals } from "./plans.js";
-import { ModelEntries } from "./model-entries.js";
+import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
 import { guardContents, secureSession } from "./security.js";
@@ -42,6 +42,11 @@ export interface GuiOptions {
   readonly stateFile?: string | null;
   /** Pass the engine host's stderr through. */
   readonly showHostStderr?: boolean;
+  /**
+   * R21-I-3: smoke tests only (`main.ts` never sets it). The engine host gets the test transport:
+   * requests reach this machine only, so a real API is never called whatever the config says.
+   */
+  readonly loopbackOnly?: boolean;
   /** Called once the window has loaded (smoke tests only; `main.ts` never sets it). */
   readonly afterLoad?: (context: GuiContext) => Promise<void>;
   /**
@@ -98,6 +103,7 @@ async function startHost(options: GuiOptions): Promise<StartOutcome | { readonly
     nodePath,
     hostScript: join(options.guiRoot, "build", "src", "engine-host", "main.js"),
     engineDir,
+    ...(options.loopbackOnly === true ? { transport: "loopback-only" as const } : {}),
     env: hostEnvironment(process.env),
     cwd: app.getPath("home"),
     showStderr: options.showHostStderr === true,
@@ -231,6 +237,7 @@ export function startGui(options: GuiOptions): void {
       osLocale: () => app.getLocale(),
       initialWorkspace: () => initialWorkspace,
       modelEntries: new ModelEntries((size) => randomBytes(size)),
+      modelListLimit: new ModelListLimit(() => Date.now()),
       envFacts: () => ({
         model: (envValue(process.env, "CODARYN_MODEL", process.platform) ?? "").trim().length > 0,
         language: (envValue(process.env, "CODARYN_LANG", process.platform) ?? "").trim().length > 0,
@@ -245,6 +252,13 @@ export function startGui(options: GuiOptions): void {
         const values = { runId: preview.runId, reverted: preview.reverted, skipped: preview.skipped };
         const buttons = [dialogText(language, "revert.confirm"), dialogText(language, "revert.keep")];
         const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
+      // DR-25: a separate dialog; "do not agree" is the default. It holds for this one revert.
+      confirmRevertConsent: async (retry) => {
+        const values = { runId: retry.runId, count: retry.files };
+        const buttons = [dialogText(language, "revertConsent.agree"), dialogText(language, "revertConsent.keep")];
+        const answer = await ask("revertConsent.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revertConsent.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
         return answer === 0;
       },
       approvals,

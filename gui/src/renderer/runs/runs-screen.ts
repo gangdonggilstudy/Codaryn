@@ -100,6 +100,34 @@ export function runsScreen(deps: RunsDeps): Screen {
       const panel = el("section", undefined, { id: "revert-panel", "aria-live": "polite" });
       const head = el("div", undefined, { class: "screen-head" });
 
+      /** A revert's result; DR-25: when files were skipped as unsafe moves, the person may ask to be asked. */
+      const showResult = (runId: string, view: RevertView, consentRetry: string | null): void => {
+        const title = t.format(view.status === "partial" ? "runs.resultPartial" : "runs.resultComplete", { runId });
+        const parts: HTMLElement[] = [el("h3", title, { id: "revert-title" }), ...revertList(t, view)];
+        if (consentRetry !== null) {
+          const unsafe = view.skipped.filter((file) => file.reason === "unsafe_move").length;
+          const message = el("div", undefined, { role: "alert" });
+          const again = button(t.format("runs.consentAsk"), () => {
+            again.setAttribute("disabled", "");
+            void (async () => {
+              const retried = asRevert(await api.revertConsent(consentRetry));
+              if (!retried.ok) {
+                message.replaceChildren(errorBox(t, retried.code));
+                panel.setAttribute("data-revert-consent", retried.code);
+                return;
+              }
+              showResult(runId, retried.view, null);
+              panel.setAttribute("data-revert-consent", retried.view.status);
+              await load();
+            })();
+          }, { id: "revert-consent" });
+          parts.push(el("p", t.format("runs.consentNeeded", { count: String(unsafe) }), { class: "notice" }), again, message);
+        }
+        panel.replaceChildren(...parts);
+        panel.setAttribute("data-revert", view.status);
+        deps.announce(title);
+      };
+
       const showPreview = async (runId: string): Promise<void> => {
         panel.replaceChildren(el("p", t.format("runs.loading")));
         panel.setAttribute("data-preview", "loading");
@@ -121,12 +149,7 @@ export function runsScreen(deps: RunsDeps): Screen {
               panel.setAttribute("data-revert", done.code);
               return;
             }
-            panel.replaceChildren(
-              el("h3", t.format(done.view.status === "partial" ? "runs.resultPartial" : "runs.resultComplete", { runId }), { id: "revert-title" }),
-              ...revertList(t, done.view),
-            );
-            panel.setAttribute("data-revert", done.view.status);
-            deps.announce(t.format(done.view.status === "partial" ? "runs.resultPartial" : "runs.resultComplete", { runId }));
+            showResult(runId, done.view, done.consentRetry);
             await load();
           })();
         }, { id: "revert-run" });

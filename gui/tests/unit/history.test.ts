@@ -11,7 +11,7 @@ import { test } from "node:test";
 
 import { createHostHandler } from "../../src/engine-host/host.js";
 import { PREVIEW_TTL_MS, RunHistory } from "../../src/main/history.js";
-import { parsePreviewArgs, parseRunArgs, toRevertView, toRunsReply } from "../../src/shared/ipc.js";
+import { parsePreviewArgs, parseRetryArgs, parseRunArgs, toRevertView, toRunsReply } from "../../src/shared/ipc.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
 import type { HostMessage } from "../../src/shared/protocol.js";
 import { fakeApp } from "./fake-app.js";
@@ -108,7 +108,7 @@ test("history (GU-4): a revert names a run id, never latest; its paths are clean
   }
   assert.equal(calls.length, 0);
   const value = await call(5, "revert", { workspace: WS, runId: RUN_A, dryRun: true });
-  assert.deepEqual(calls, [{ workspace: WS, runId: RUN_A, dryRun: true }]);
+  assert.deepEqual(calls, [{ workspace: WS, runId: RUN_A, dryRun: true, unsafeMoveConsent: null }]);
   // A file with an action the contract does not have: the main process refuses the whole list
   // rather than show part of it.
   assert.deepEqual(toRevertView(value), { ok: false, code: "host_error" });
@@ -168,4 +168,43 @@ test("history (GU-4): a preview is asked only for a listed run; its token works 
   const first = history.issuePreview({ workspace: HANDLE, runId: RUN_A, reverted: 0, skipped: 0 });
   for (let i = 0; i < 16; i += 1) history.issuePreview({ workspace: HANDLE, runId: RUN_A, reverted: 0, skipped: 0 });
   assert.equal(history.takePreview(first), null, "the oldest tokens go past the limit");
+});
+
+test("history (DR-25): a consent to unsafe moves reaches the app only with a real revert, naming that run", async () => {
+  const calls: unknown[] = [];
+  const call = host({
+    revert: async (request) => {
+      calls.push(request);
+      return { ok: true, output: { kind: "revert", runId: RUN_A, status: "complete", exitCode: 0, reverted: [], skipped: [] } };
+    },
+  });
+  assert.equal(await call(1, "revert", { workspace: WS, runId: RUN_A, dryRun: true, consent: true }), "invalid_args", "a dry run takes no consent");
+  assert.equal(await call(2, "revert", { workspace: WS, runId: RUN_A, dryRun: false, consent: "yes" }), "invalid_args");
+  assert.equal(await call(3, "revert", { workspace: WS, runId: RUN_A, dryRun: false, unsafeMoveConsent: { runId: RUN_B } }), "invalid_args", "the window cannot name a consent");
+  assert.equal(calls.length, 0);
+  await call(4, "revert", { workspace: WS, runId: RUN_A, dryRun: false });
+  await call(5, "revert", { workspace: WS, runId: RUN_A, dryRun: false, consent: true });
+  assert.deepEqual(calls, [
+    { workspace: WS, runId: RUN_A, dryRun: false, unsafeMoveConsent: null },
+    { workspace: WS, runId: RUN_A, dryRun: false, unsafeMoveConsent: { runId: RUN_A } },
+  ]);
+});
+
+test("history (DR-25): a retry token comes from a revert's result, works once, for a while, in its workspace", () => {
+  let now = 0;
+  const history = new RunHistory((size) => randomBytes(size), () => now);
+  const token = history.issueConsentRetry({ workspace: HANDLE, runId: RUN_A, files: 2 });
+  assert.deepEqual(parseRetryArgs({ retry: token }), { retry: token });
+  assert.equal(parseRetryArgs({ retry: token, consent: true }), null);
+  assert.equal(parseRetryArgs({ retry: RUN_A }), null, "a run id is no retry token");
+  assert.equal(history.takePreview(token), null, "a retry token is no preview token");
+  const again = history.issueConsentRetry({ workspace: HANDLE, runId: RUN_A, files: 2 });
+  assert.deepEqual(history.takeConsentRetry(again), { workspace: HANDLE, runId: RUN_A, files: 2 });
+  assert.equal(history.takeConsentRetry(again), null, "once");
+  const late = history.issueConsentRetry({ workspace: HANDLE, runId: RUN_A, files: 1 });
+  now += PREVIEW_TTL_MS + 1;
+  assert.equal(history.takeConsentRetry(late), null, "for a while");
+  const closed = history.issueConsentRetry({ workspace: HANDLE, runId: RUN_A, files: 1 });
+  history.forget(HANDLE);
+  assert.equal(history.takeConsentRetry(closed), null, "the workspace closing forgets it");
 });

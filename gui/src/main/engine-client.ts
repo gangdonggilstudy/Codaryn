@@ -25,6 +25,8 @@ export interface EngineHostOptions {
   readonly closeTimeoutMs?: number;
   /** Pass the host's stderr through (development). Default: discarded. */
   readonly showStderr?: boolean;
+  /** R21-I-3: tests only. The host reaches this machine only; any other request is refused unsent. */
+  readonly transport?: "loopback-only";
 }
 
 export type EngineHostFailure = "host_not_started" | "node_too_old" | "ready_timeout" | "protocol_violation" | "host_exited";
@@ -59,7 +61,8 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
   };
   let child: ChildProcessWithoutNullStreams;
   try {
-    child = spawn(options.nodePath, [options.hostScript, "--engine-dir", options.engineDir], spawnOptions) as ChildProcessWithoutNullStreams;
+    const transport = options.transport === "loopback-only" ? ["--transport", "loopback-only"] : [];
+    child = spawn(options.nodePath, [options.hostScript, "--engine-dir", options.engineDir, ...transport], spawnOptions) as ChildProcessWithoutNullStreams;
   } catch {
     return { ok: false, failure: "host_not_started", nodeVersion: null };
   }

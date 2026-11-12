@@ -7,6 +7,35 @@
 
 import type { HostModelEntry, ModelEntryView } from "../shared/ipc.js";
 
+/**
+ * R21-I-3: how often the window may make the main process ask the provider's API for its model
+ * list. The settings screen asks only when the person presses "get the list" (3.10, Y-2); this
+ * bounds what a page that misbehaved could do with the key: one request at a time, at most
+ * MAX_LISTS_PER_MINUTE in a minute.
+ */
+export const MAX_LISTS_PER_MINUTE = 5;
+
+export class ModelListLimit {
+  private inFlight = false;
+  private readonly started: number[] = [];
+
+  constructor(private readonly now: () => number) {}
+
+  /** True when a list may be asked for now (and counts it); false when one is going on or too many were. */
+  begin(): boolean {
+    const now = this.now();
+    while (this.started.length > 0 && now - (this.started[0] as number) >= 60_000) this.started.shift();
+    if (this.inFlight || this.started.length >= MAX_LISTS_PER_MINUTE) return false;
+    this.inFlight = true;
+    this.started.push(now);
+    return true;
+  }
+
+  end(): void {
+    this.inFlight = false;
+  }
+}
+
 export class ModelEntries {
   private readonly entries = new Map<string, { readonly provider: string; readonly id: string }>();
 

@@ -15,6 +15,7 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MAX_RUN_ITEM_CHARS, MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
+import { loopbackOnlyFetch } from "./transport.js";
 import type { HostApp, HostMessages } from "./host.js";
 import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
@@ -39,7 +40,7 @@ function writeLine(line: string): void {
 /** The engine modules this host uses, checked when loaded (src/app/index.ts, src/i18n/index.ts). */
 interface EngineAppModule {
   createNodeAppEnvironment(): Promise<unknown>;
-  createCodarynApp(environment: unknown): HostApp;
+  createCodarynApp(environment: unknown, hooks?: { readonly anthropicDeps?: { readonly fetch?: typeof fetch } }): HostApp;
   /** DR-22: the providers the app layer connects (an array of names). */
   readonly CONNECTED_MODEL_PROVIDERS?: unknown;
 }
@@ -99,11 +100,16 @@ function runItems(human: ReturnType<EngineHumanModule["createHumanOutput"]>, sho
   };
 }
 
-function engineDirFromArgs(argv: readonly string[]): string | null {
-  if (argv.length !== 2 || argv[0] !== "--engine-dir") return null;
+/**
+ * `--engine-dir <dir> [--transport loopback-only]`. R21-I-3: the transport argument is given only
+ * by tests (the smoke test, the unit tests that start this host); it only takes away (transport.ts).
+ */
+function parseArgs(argv: readonly string[]): { readonly engineDir: string; readonly loopbackOnly: boolean } | null {
+  const loopbackOnly = argv.length === 4 && argv[2] === "--transport" && argv[3] === "loopback-only";
+  if ((argv.length !== 2 && !loopbackOnly) || argv[0] !== "--engine-dir") return null;
   const dir = argv[1] as string;
-  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"], ["cli", "human", "output.js"]];
-  return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? dir : null;
+  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"], ["cli", "human", "output.js"], ["contracts", "index.js"]];
+  return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? { engineDir: dir, loopbackOnly } : null;
 }
 
 async function load<T>(file: string, names: readonly string[]): Promise<T | null> {
@@ -123,11 +129,12 @@ async function main(): Promise<number> {
     log(`codaryn engine host: Node ${MIN_NODE_MAJOR} or later is required`);
     return 3;
   }
-  const engineDir = engineDirFromArgs(process.argv.slice(2));
-  if (engineDir === null) {
-    log("codaryn engine host: usage: main.js --engine-dir <absolute path of the built engine>");
+  const args = parseArgs(process.argv.slice(2));
+  if (args === null) {
+    log("codaryn engine host: usage: main.js --engine-dir <absolute path of the built engine> [--transport loopback-only]");
     return 2;
   }
+  const engineDir = args.engineDir;
   const appModule = await load<EngineAppModule>(join(engineDir, "app", "index.js"), ["createNodeAppEnvironment", "createCodarynApp"]);
   const i18n = await load<EngineI18nModule>(join(engineDir, "i18n", "index.js"), ["selectMessageLanguage", "createMessageCatalog"]);
   const workspaceModule = await load<EngineWorkspaceModule>(join(engineDir, "workspace", "index.js"), ["createWorkspace"]);
@@ -137,7 +144,28 @@ async function main(): Promise<number> {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
-  const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment());
+  // R21-I-3: tests reach this machine only (their fake API); nothing else is sent.
+  const hooks = args.loopbackOnly
+    ? { anthropicDeps: { fetch: loopbackOnlyFetch(fetch, () => log("codaryn engine host: the test transport refused a request outside this machine")) } }
+    : undefined;
+  const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment(), hooks);
+  // R21-I-2: the key variables of every provider the contract knows (API_PROVIDERS), not one name.
+  const contracts = (await import(pathToFileURL(join(engineDir, "contracts", "index.js")).href)) as Record<string, unknown>;
+  const table = contracts["API_PROVIDERS"];
+  const keyEnvs =
+    typeof table === "object" && table !== null
+      ? Object.values(table).flatMap((spec) => (typeof spec === "object" && spec !== null && typeof (spec as Record<string, unknown>)["keyEnv"] === "string" ? [(spec as Record<string, string>)["keyEnv"] as string] : []))
+      : [];
+  if (!keyEnvs.includes("ANTHROPIC_API_KEY")) keyEnvs.push("ANTHROPIC_API_KEY");
+  /** Key shapes, and the value of every provider's key variable now set, hidden. */
+  const hideAllKeys = (text: string): string => {
+    let out = textSafety.hideKeys(text, null);
+    for (const name of keyEnvs) {
+      const value = process.env[name];
+      if (value !== undefined && value.length > 0) out = textSafety.hideKeys(out, value);
+    }
+    return out;
+  };
   const messages: HostMessages = {
     texts(osLocale, ids) {
       const language = i18n.selectMessageLanguage({ env: process.env["CODARYN_LANG"] ?? null, config: null, osLocale });
@@ -156,14 +184,14 @@ async function main(): Promise<number> {
   const providers = Array.isArray(appModule.CONNECTED_MODEL_PROVIDERS)
     ? appModule.CONNECTED_MODEL_PROVIDERS.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name))
     : [];
-  const shown = (text: string): string => textSafety.hideKeys(textSafety.cleanText(text), process.env["ANTHROPIC_API_KEY"] ?? null);
+  const shown = (text: string): string => hideAllKeys(textSafety.cleanText(text));
   // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
-  const shownText = (text: string): string => textSafety.hideKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true), process.env["ANTHROPIC_API_KEY"] ?? null);
+  const shownText = (text: string): string => hideAllKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true));
   const tree = createTreeLister({
     createWorkspace: (options) => workspaceModule.createWorkspace(options),
     cleanText: (text) => textSafety.cleanText(text),
-    hideKeys: (text, key) => textSafety.hideKeys(text, key),
-    currentKey: () => process.env["ANTHROPIC_API_KEY"] ?? null,
+    hideKeys: (text) => hideAllKeys(text),
+    currentKey: () => null,
     platform: process.platform,
   });
   writeLine(encodeLine({ v: 1, type: "ready", node }));

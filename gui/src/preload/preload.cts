@@ -26,6 +26,7 @@ const CHANNELS = {
   listRuns: "codaryn:runs:list",
   previewRevert: "codaryn:runs:previewrevert",
   revert: "codaryn:runs:revert",
+  revertConsent: "codaryn:runs:revertconsent",
   plan: "codaryn:plan:read",
   applyPlan: "codaryn:plan:apply",
   review: "codaryn:review:record",
@@ -81,6 +82,8 @@ const api = Object.freeze({
   listRuns: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listRuns, { workspace: text(workspace) }),
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
   revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
+  /** DR-25: the retry token a revert's result gave; never a consent: the main process asks the person. */
+  revertConsent: (retry: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revertConsent, { retry: text(retry) }),
   plan: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.plan, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow) }),
   /** Only the plan view's approval token and whether to be asked for the consent: never a consent or digest. */

@@ -8,6 +8,7 @@ export { copyEnvironment, createNodeAppEnvironment, loadVarsInto, lookupEnv, rea
 export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } from "./errors.js";
 export { CONNECTED_MODEL_PROVIDERS, modelsArguments } from "./models.js";
 export { initArguments, suggestionsFor } from "./init.js";
+export { changesOf, digestOf, wideningOf } from "./settings-change.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {
   AppliedActionRecord,
@@ -31,6 +32,7 @@ export type {
   ApplyHandle,
   ApplyObserver,
   ApplyPlanRequest,
+  ApplySettingsChangeRequest,
   ChangedFileUnavailable,
   ChangedFileView,
   ChangesOutput,
@@ -54,8 +56,13 @@ export type {
   RunObserver,
   RunOutcome,
   SelectModelRequest,
+  SettingsChangeProposal,
+  SettingsChangeRequest,
+  SettingsFieldChange,
   SettingsSuggestions,
   SettingsSuggestionsRequest,
+  SettingsWidening,
+  SettingsWritten,
   SettingsView,
   StartOutcome,
   StartRunRequest,

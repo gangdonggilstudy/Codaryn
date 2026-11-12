@@ -56,6 +56,7 @@ import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
 import { readSettingsIn } from "./settings.js";
 import { initArguments, suggestionsFor } from "./init.js";
+import { applySettingsChangeIn, proposeSettingsChangeIn } from "./settings-change.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -66,13 +67,17 @@ import type {
   DoctorRequest,
   ListModelsRequest,
   ListRunsRequest,
+  ApplySettingsChangeRequest,
   CreateSettingsRequest,
   ReadSettingsRequest,
   ReportRequest,
   SelectModelRequest,
+  SettingsChangeProposal,
+  SettingsChangeRequest,
   SettingsSuggestions,
   SettingsSuggestionsRequest,
   SettingsView,
+  SettingsWritten,
   ResolvedRun,
   ResolveRunRequest,
   RevertRequest,
@@ -491,6 +496,29 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
+  const settingsIo = () => ({
+    env: copyEnvironment(environment.env, platform),
+    cwd: environment.cwd,
+    readFile: environment.readFile,
+    defaultConfig: defaultConfigOf(),
+  });
+
+  async function proposeSettingsChange(request: SettingsChangeRequest): Promise<AppCallOutcome<SettingsChangeProposal>> {
+    try {
+      return await proposeSettingsChangeIn(settingsIo(), request);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function applySettingsChange(request: ApplySettingsChangeRequest): Promise<AppCallOutcome<SettingsWritten>> {
+    try {
+      return await applySettingsChangeIn(settingsIo(), request, hooks.writeConfig);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
   return {
     startRun,
     report,
@@ -504,5 +532,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     readSettings,
     createSettings,
     settingsSuggestions,
+    proposeSettingsChange,
+    applySettingsChange,
   };
 }

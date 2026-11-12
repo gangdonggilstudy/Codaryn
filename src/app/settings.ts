@@ -9,7 +9,8 @@
  *   → read (a missing file is "no config" only at the default location; a BOM is dropped)
  *   → rawTextHoldsKey (C-1, S-6) → JSON with a line and column on a syntax error (N-6)
  *   → findKeyInJson (depth limit) → parseConfig (with the field position, N-6).
- * Nothing here judges a value itself. Reads only.
+ * Nothing here judges a value itself. Reads only. The settings change (settings-change.ts) uses
+ * the same checks for the text it would write.
  *
  * The CLI keeps this sequence inline in run.ts; a shared config reader there would let this file
  * call one function instead (A-4 report).
@@ -27,42 +28,23 @@ import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsView } from
 
 const KEY_HINT = `keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`;
 
-function failure(code: "invalid_config" | "key_in_file", message: string, diagnostic?: InputDiagnostic): { readonly ok: false; readonly error: AppError } {
+type Failure = { readonly ok: false; readonly error: AppError };
+
+function failure(code: "invalid_config" | "key_in_file", message: string, diagnostic?: InputDiagnostic): Failure {
   return { ok: false, error: diagnostic === undefined ? appError(code, message) : { ...appError(code, message), diagnostic } };
 }
 
-export async function readSettingsIn(
-  io: {
-    readonly env: Readonly<Record<string, string | undefined>>;
-    readonly cwd: string;
-    readonly readFile: (file: string) => Promise<string>;
-    readonly defaultConfig: DefaultConfigLocation | null;
-  },
-  request: ReadSettingsRequest,
-): Promise<AppCallOutcome<SettingsView>> {
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
-  const keyAvailable = currentKey !== null;
-  const chosen = chooseConfigFile({ argument: request.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig });
-  if (!chosen.ok) return failure("invalid_config", chosen.message);
-  const candidate = chosen.candidate;
-  const none = (file: SettingsView["file"]): AppCallOutcome<SettingsView> => ({
-    ok: true,
-    output: { kind: "settings", file, config: null, profiles: [], workflows: [], keyAvailable },
-  });
-  if (candidate === null) return none(null);
+export interface SettingsIo {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly cwd: string;
+  readonly readFile: (file: string) => Promise<string>;
+  readonly defaultConfig: DefaultConfigLocation | null;
+}
 
-  const file = { source: candidate.source, path: candidate.path, display: candidate.display };
-  let text: string;
-  try {
-    text = (await io.readFile(candidate.path)).replace(/^﻿/, "");
-  } catch (error) {
-    if (candidate.optional && isMissingFile(error)) return none({ ...file, exists: false });
-    return failure(
-      "invalid_config",
-      candidate.source === "default" ? `the config file at the default location ${candidate.display} cannot be read` : "the config file cannot be read as JSON",
-    );
-  }
+export type ChosenFile = { readonly source: "argument" | "environment" | "default"; readonly path: string; readonly display: string };
 
+/** Key checks, JSON and parseConfig on a config file's text (BOM dropped), in run.ts's order. */
+export function checkConfigText(text: string, currentKey: string | null): { readonly ok: true; readonly config: CodarynConfig } | Failure {
   if (rawTextHoldsKey(text, currentKey)) return failure("key_in_file", `the config file contains a key value; ${KEY_HINT}`);
   let value: unknown;
   try {
@@ -84,17 +66,54 @@ export async function readSettingsIn(
   }
   const parsed = parseConfig(value);
   if (!parsed.ok) return failure("invalid_config", parsed.message, positionDiagnostic("config", parsed.position));
+  return { ok: true, config: parsed.config };
+}
 
-  const config: CodarynConfig = parsed.config;
+/**
+ * The chosen config file with its raw text (as read, BOM included) and its parsed config.
+ * `file` null: none chosen. `raw` null: the default location has no file yet.
+ */
+export async function loadSettingsFile(
+  io: SettingsIo,
+  configPath: string | null,
+): Promise<
+  | { readonly ok: true; readonly currentKey: string | null; readonly file: ChosenFile | null; readonly raw: string | null; readonly config: CodarynConfig | null }
+  | Failure
+> {
+  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const chosen = chooseConfigFile({ argument: configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig });
+  if (!chosen.ok) return failure("invalid_config", chosen.message);
+  const candidate = chosen.candidate;
+  if (candidate === null) return { ok: true, currentKey, file: null, raw: null, config: null };
+  const file: ChosenFile = { source: candidate.source, path: candidate.path, display: candidate.display };
+  let raw: string;
+  try {
+    raw = await io.readFile(candidate.path);
+  } catch (error) {
+    if (candidate.optional && isMissingFile(error)) return { ok: true, currentKey, file, raw: null, config: null };
+    return failure(
+      "invalid_config",
+      candidate.source === "default" ? `the config file at the default location ${candidate.display} cannot be read` : "the config file cannot be read as JSON",
+    );
+  }
+  const checked = checkConfigText(raw.replace(/^﻿/, ""), currentKey);
+  if (!checked.ok) return checked;
+  return { ok: true, currentKey, file, raw, config: checked.config };
+}
+
+export async function readSettingsIn(io: SettingsIo, request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>> {
+  const loaded = await loadSettingsFile(io, request.configPath);
+  if (!loaded.ok) return loaded;
+  const config = loaded.config;
   return {
     ok: true,
     output: {
       kind: "settings",
-      file: { ...file, exists: true },
+      file: loaded.file === null ? null : { ...loaded.file, exists: loaded.raw !== null },
       config,
-      profiles: Object.keys(config.profiles ?? {}),
-      workflows: Object.keys(config.workflows ?? {}),
-      keyAvailable,
+      profiles: Object.keys(config?.profiles ?? {}),
+      workflows: Object.keys(config?.workflows ?? {}),
+      keyAvailable: loaded.currentKey !== null,
     },
   };
 }

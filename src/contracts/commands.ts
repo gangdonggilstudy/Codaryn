@@ -403,6 +403,13 @@ export type RunListEntry =
       readonly kind?: "run" | "apply";
       /** G-A: for an apply run, the plan run it applied (`apply_started.planRunId`). Absent for a run. */
       readonly planRunId?: RunId;
+      /**
+       * U-16 (UXM-5): for a plan run whose plan was applied, the apply run and when it claimed the
+       * plan (its PLAN_APPLIED_FILE_NAME: `applyRunId`, `at`), so the list does not leave it as
+       * needing input (`runs.plan_applied`). Absent otherwise: not a plan run, a plan not applied, an
+       * applied.json that cannot be read (the plan view still says), or a list built before U-16.
+       */
+      readonly appliedBy?: { readonly runId: RunId; readonly at: string };
       /** `at` of `run_started` (an apply run: of `apply_started`). */
       readonly startedAt: string;
       /** `taskId` of `run_started` (an apply run: of `apply_started`). JSON only: the human table does not show it (N-14). */
@@ -448,6 +455,17 @@ export type RunListEntry =
       readonly recordsChanged?: boolean;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
+
+/**
+ * U-16 (UXM-4): what `changes` says of an apply run, whose moves and discards are its plan's
+ * actions, not file writes of its own (it has no write records, so `files` is empty): the plan run
+ * it applied and how many actions it applied (ApplyResult.applied). The app layer's ChangesOutput
+ * carries it as `applyRun`, present for an apply run only; the text is `changes.apply_run`.
+ */
+export interface ChangesApplyRun {
+  readonly planRunId: RunId;
+  readonly actions: number;
+}
 
 export interface ListRunsRequest {
   /** Real absolute path of the workspace root. */

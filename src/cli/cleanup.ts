@@ -267,8 +267,10 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
 /**
  * Items kept by the person's own choice (a confirmation not given, or what such a choice keeps):
  * they do not make the command fail. Every other reason does (DR-44 (d): partly_removed among them).
+ * U-13: discarded_left is one of them: the apply's discarded files were not chosen or their removal
+ * was not confirmed. When their removal failed, the folder's own item (partly_removed) ends it 1.
  */
-const PERSON_CHOICES: ReadonlySet<CleanupKeptReason> = new Set<CleanupKeptReason>(["not_confirmed", "not_reverted_not_confirmed", "used_by_kept_apply"]);
+const PERSON_CHOICES: ReadonlySet<CleanupKeptReason> = new Set<CleanupKeptReason>(["not_confirmed", "not_reverted_not_confirmed", "discarded_left", "used_by_kept_apply"]);
 
 const sizeText = (size: StateSize): string => `${size.files} file(s), ${size.bytes} bytes`;
 
@@ -319,6 +321,16 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
     if (leftovers.length > 0) {
       const leftoverBytes = leftovers.reduce((sum, item) => sum + item.size.bytes, 0);
       out.push(textOr(() => messages.format("cleanup.done_leftovers", { count: leftovers.length, bytes: leftoverBytes }), `Removed what earlier cleanups left: ${leftovers.length} folder(s), ${leftoverBytes} bytes`));
+    }
+    // U-13 (UXM-1): apply runs whose records stay because their discarded files stay.
+    const discardedLeft = kept.filter((item) => item.target === "run" && item.reason === "discarded_left").length;
+    if (discardedLeft > 0) {
+      out.push(
+        textOr(
+          () => messages.format("cleanup.done_discarded_left", { count: discardedLeft }),
+          `Kept the records of ${discardedLeft} apply run(s) whose discarded files stay; they go once those applies are reverted or their discarded files are deleted too.`,
+        ),
+      );
     }
     for (const item of kept) out.push(`- ${item.target} ${itemName(item)}: ${keptText(item.reason)}`);
     return `${out.join("\n")}\n`;
@@ -408,6 +420,13 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
         );
       }
       if (discarded) out.push("People's discarded files are deleted only with --delete-discarded besides.");
+      // U-13 (UXM-1): an apply's records stay while its discarded files do, whatever else is confirmed.
+      const discardedLeft = plan.items.filter((item) => item.target === "run" && item.warnings.includes("discarded_left")).length;
+      if (discardedLeft > 0) {
+        out.push(
+          `The records of ${discardedLeft} apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.`,
+        );
+      }
     } else if (discarded) {
       out.push(`Nothing was removed. To delete the discarded files, run the same command with --confirm ${digest} --delete-discarded.`);
     } else {

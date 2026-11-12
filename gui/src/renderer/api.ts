@@ -32,6 +32,7 @@ import type {
   SettingsReply,
   SettingsProposalReply,
   SettingsRules,
+  SuggestedCommandView,
   PolicyNarrowingView,
   ApiProviderView,
   SettingsWrittenReply,
@@ -67,6 +68,8 @@ export interface CodarynApi {
   revertConsent(retry: string): Promise<unknown>;
   report(workspace: string, runId: string): Promise<unknown>;
   saveReport(workspace: string, runId: string): Promise<unknown>;
+  createSettings(workspace: string | null): Promise<unknown>;
+  settingsSuggestions(workspace: string): Promise<unknown>;
   plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
@@ -350,6 +353,7 @@ export function asRuns(value: unknown): RunsReply {
         changes: typeof run["changes"] === "number" ? run["changes"] : null,
         reverted,
         revertRecordDamaged: run["revertRecordDamaged"] === true,
+        recordsChanged: run["recordsChanged"] === true,
         form: asForm(run["form"]),
       },
     ];
@@ -444,4 +448,16 @@ export function asCleanupResult(value: unknown): { readonly ok: true; readonly r
 export function asSaveReport(value: unknown): { readonly ok: true; readonly name: string } | { readonly ok: false; readonly code: string } {
   if (!isObj(value) || value["ok"] !== true) return failed(value);
   return str(value["name"]) && value["name"].length <= 260 ? { ok: true, name: value["name"] } : failed(value);
+}
+
+/** U-11: the config file made with the defaults, or why not (config_exists: one is there and is used as it is). */
+export function asCreateSettings(value: unknown): { readonly ok: true; readonly created: boolean; readonly model: "selected" | "placeholder"; readonly keySet: boolean; readonly overridden: boolean } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || typeof value["created"] !== "boolean") return failed(value);
+  return { ok: true, created: value["created"], model: value["model"] === "selected" ? "selected" : "placeholder", keySet: value["keySet"] === true, overridden: value["overridden"] === true };
+}
+
+/** U-11: init's suggestions for the open workspace (the main process checked them). */
+export function asSuggestions(value: unknown): { readonly ok: true; readonly commands: readonly SuggestedCommandView[]; readonly protectedPaths: readonly string[] } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !Array.isArray(value["commands"]) || !strList(value["protectedPaths"])) return failed(value);
+  return { ok: true, commands: value["commands"] as unknown as SuggestedCommandView[], protectedPaths: value["protectedPaths"] };
 }

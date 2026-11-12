@@ -145,6 +145,8 @@ export const SCHEMA_FIELD_NAMES = [
   "paths",
   "language",
   "profiles",
+  // SP-D3: the config's providers map (`provider` is listed above).
+  "providers",
   "steps",
   "toolCalls",
   "name",

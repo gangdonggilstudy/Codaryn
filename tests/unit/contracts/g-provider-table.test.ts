@@ -17,10 +17,16 @@ import {
   DEFAULT_ANTHROPIC_API_BASE_URL,
   MAX_OUTPUT_TOKENS_LIMIT,
   MODEL_PROVIDER_NAMES,
+  OPENAI_API_KEY_ENV,
+  OPENAI_KEY_PATTERN_SOURCE,
+  SCHEMA_FIELD_NAMES,
 } from "../../../src/contracts/index.js";
 import type {
   AnthropicListSettings,
   ApiProviderName,
+  CodarynConfig,
+  InitOutput,
+  ModelsOutput,
   CreateAnthropicProvider,
   CreateApiProvider,
   ListAnthropicModels,
@@ -44,7 +50,16 @@ const sameListSettings: Same<AnthropicListSettings, ListModelsSettings> = true;
 const apiModel: ModelConfig = { provider: "anthropic", model: "m", maxOutputTokens: 1024 };
 const withStatus: ModelOutcome = { ok: false, kind: "api_error", message: "HTTP 404", httpStatus: 404 };
 const withoutStatus: ModelOutcome = { ok: false, kind: "timeout", message: "late" };
-void [sameNames, sameApiNames, sameSettings, sameFactory, sameList, sameListSettings, apiModel, withStatus, withoutStatus];
+/** SP-D3, SP-D10: the config's provider choice and per-provider settings, and a profile's provider. */
+const config: CodarynConfig = {
+  schemaVersion: 1,
+  provider: "anthropic",
+  providers: { anthropic: { model: "m", maxOutputTokens: 2048, apiBaseUrl: "https://api.anthropic.com", requestTimeoutMs: 60_000, maxRetries: 2 } },
+  profiles: { quick: { provider: "anthropic" } },
+};
+const models: Pick<ModelsOutput, "provider"> = { provider: "anthropic" };
+const init: Pick<InitOutput, "provider"> = {};
+void [sameNames, sameApiNames, sameSettings, sameFactory, sameList, sameListSettings, apiModel, withStatus, withoutStatus, config, models, init];
 
 describe("SP-1: the provider table", () => {
   test("the anthropic entry holds the values the CLI used before", () => {
@@ -63,8 +78,31 @@ describe("SP-1: the provider table", () => {
   test("the name lists and the derived lists come from the table", () => {
     assert.deepEqual([...API_PROVIDER_NAMES], Object.keys(API_PROVIDERS));
     assert.deepEqual([...MODEL_PROVIDER_NAMES], ["scripted", "anthropic"]);
-    assert.deepEqual([...API_KEY_ENVS], ["ANTHROPIC_API_KEY"]);
-    assert.deepEqual([...API_KEY_PATTERN_SOURCES], [ANTHROPIC_KEY_PATTERN_SOURCE]);
     assert.equal(new Set(MODEL_PROVIDER_NAMES).size, MODEL_PROVIDER_NAMES.length);
+  });
+
+  test("every key Codaryn knows is listed, the providers still being added included; the table's are among them", () => {
+    assert.deepEqual([...API_KEY_ENVS], ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+    assert.equal(OPENAI_API_KEY_ENV, "OPENAI_API_KEY");
+    assert.deepEqual([...API_KEY_PATTERN_SOURCES], [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE]);
+    for (const name of API_PROVIDER_NAMES) {
+      assert.ok((API_KEY_ENVS as readonly string[]).includes(API_PROVIDERS[name].keyEnv), name);
+      for (const source of API_PROVIDERS[name].keyPatternSources) assert.ok((API_KEY_PATTERN_SOURCES as readonly string[]).includes(source), name);
+    }
+  });
+
+  test("the loose OpenAI key shape finds long sk- text at a word start only (built at run time: no key shape in this file)", () => {
+    const shape = new RegExp(OPENAI_KEY_PATTERN_SOURCE);
+    const long = (prefix: string, length: number) => prefix + "Ab3_-".repeat(Math.ceil(length / 5)).slice(0, length);
+    assert.ok(shape.test(long(["sk", "proj", ""].join("-"), 40)), "a project-style key");
+    assert.ok(shape.test(`key=${long(["sk", ""].join("-"), 32)}`), "32 characters after the prefix");
+    assert.equal(shape.test(long(["sk", ""].join("-"), 31)), false, "31 characters: too short");
+    assert.equal(shape.test(["sk", "learn"].join("-")), false, "a short word");
+    assert.equal(shape.test(long(["task", ""].join("-"), 40)), false, "sk- inside a word");
+  });
+
+  test("the config's providers map is a schema field name", () => {
+    assert.ok((SCHEMA_FIELD_NAMES as readonly string[]).includes("provider"));
+    assert.ok((SCHEMA_FIELD_NAMES as readonly string[]).includes("providers"));
   });
 });

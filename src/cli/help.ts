@@ -24,7 +24,8 @@ const USAGE_ONLY = {
     usage: APPLY_USAGE,
     about:
       "Applies a plan run's plan after the person approves its digest; `codaryn revert --run <apply run id>` undoes it. " +
-      "At a terminal the result's JSON line is printed only with --json (DR-49).",
+      // U-45 (R-58 R58-L2, Q-1): --quiet prints it too; "at a terminal" is stdout and stderr both.
+      "At a terminal (stdout and stderr both) the result's JSON line is printed only with --json or --quiet.",
   },
   review: { usage: REVIEW_USAGE, about: "Records a person's verdict on a run that waits for review (review.json); the run's result is not changed." },
   changes: {

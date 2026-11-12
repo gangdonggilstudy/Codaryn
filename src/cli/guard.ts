@@ -45,17 +45,27 @@ export interface StdoutContext {
   readonly argv: readonly string[];
   /** Whether stdout is a terminal (process.stdout.isTTY). */
   readonly stdoutIsTerminal: boolean;
+  /** U-45 (R-58 Q-1): whether stderr is a terminal (process.stderr.isTTY). */
+  readonly stderrIsTerminal: boolean;
 }
 
 /**
  * DR-49 (U-23, UXM-17): at a terminal the person reads the human text on stderr (the end summary,
- * the explained error), so the JSON line after it is left out. It is written as before with
- * `--json`, when stdout is not a terminal (a pipe or a file), and with `--quiet` (no human text, so
- * nothing else would show). A text outcome is always written. Like `--quiet`, `--json` counts
- * wherever it appears, parsed or not (no option value starts with "--").
+ * the explained error), so the JSON line after it is left out. U-45 (R-58 R58-L1, PM Q-1): only when
+ * stdout and stderr are both a terminal; with stderr sent to a file the human text is not on the
+ * screen, so the JSON line is. It is written as before with `--json`, when stdout is not a terminal
+ * (a pipe or a file), when stderr is not, and with `--quiet` (no human text, so nothing else would
+ * show). A text outcome is always written. Like `--quiet`, `--json` counts wherever it appears,
+ * parsed or not (no option value starts with "--").
  */
 export function jsonLineLeftOut(outcome: CommandOutcome, context: StdoutContext): boolean {
-  return "output" in outcome && context.stdoutIsTerminal && !context.argv.includes("--json") && !context.argv.includes("--quiet");
+  return (
+    "output" in outcome &&
+    context.stdoutIsTerminal &&
+    context.stderrIsTerminal &&
+    !context.argv.includes("--json") &&
+    !context.argv.includes("--quiet")
+  );
 }
 
 /** The bytes for stdout under DR-49: renderOutcome's, or nothing when the JSON line is left out. */

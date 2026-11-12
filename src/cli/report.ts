@@ -25,6 +25,7 @@ import {
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   TERMINAL_RUN_STATUSES,
+  VERIFIER_KINDS,
   isReasonOfStatus,
 } from "../contracts/index.js";
 import type {
@@ -42,6 +43,7 @@ import type {
   RunReason,
   RunUsage,
   TerminalRunStatus,
+  VerifierOutcome,
   VerifierResult,
 } from "../contracts/index.js";
 import { parseReportArgs } from "./args.js";
@@ -91,9 +93,15 @@ const realpathNative = promisify(realpathCallback.native);
 // DR-16: the reasons of each status come from the contract (RUN_REASONS_BY_STATUS through
 // isReasonOfStatus); the report keeps no list of its own.
 
-const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
-const VERIFIER_KINDS = ["command", "file_rules"] as const;
-const VERIFIER_OUTCOMES = ["pass", "fail", "inconclusive"] as const;
+// G-G (integration case n07), as DR-16: the report keeps no list of its own where the contract has
+// one. Verifier kinds are the contract's VERIFIER_KINDS (data_checks and inventory included). The
+// contract has types only for providers and outcomes, so these two lists are checked against
+// those types at compile time: a value added to the type breaks the build here.
+const PROVIDERS = ["scripted", "anthropic"] as const satisfies readonly ModelProviderName[];
+const VERIFIER_OUTCOMES = ["pass", "fail", "inconclusive"] as const satisfies readonly VerifierOutcome[];
+type Missing<All, Listed> = [Exclude<All, Listed>] extends [never] ? true : false;
+const listsComplete: [Missing<ModelProviderName, (typeof PROVIDERS)[number]>, Missing<VerifierOutcome, (typeof VERIFIER_OUTCOMES)[number]>] = [true, true];
+void listsComplete;
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
 /** A record failed a check. Its message is fixed text, never record content. */

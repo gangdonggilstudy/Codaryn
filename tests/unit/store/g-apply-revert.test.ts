@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
@@ -15,7 +15,7 @@ import { after, describe, test } from "node:test";
 import { planActionShown } from "../../../src/contracts/index.js";
 import type { ContentHash, MaskedPlanAction, MaskedText, ResolvedPlanAction, StoredPlanAction } from "../../../src/contracts/index.js";
 import { RevertRunError, createApplyJournal, createPlanRecorder, prepareDiscardedRoot, revertRun } from "../../../src/store/index.js";
-import { moveWithoutReplacing } from "../../../src/store/apply-revert.js";
+import { moveWithoutReplacing, removeSecondName } from "../../../src/store/apply-revert.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -471,5 +471,112 @@ describe("DR-28: a plan stored with each action's masked form", () => {
     assert.deepEqual(outcome.reverted.map((file) => file.action), ["restored_from_discard", "moved_back"]);
     assert.deepEqual(outcome.skipped, []);
     assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
+  });
+});
+
+describe("R-15 L-1: a move cut between its link and the removal of its source (one file, two names)", () => {
+  /**
+   * The engine's journal as an apply leaves it when the process ends inside the executor's move:
+   * the hard link was made, the source not yet removed. `stage` "move": action 0 (the move);
+   * "discard": action 0 recorded, then action 1 (the discard) cut the same way.
+   */
+  async function cutInsideTheMove(stage: "move" | "discard"): Promise<Applied> {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-l1-")));
+    roots.push(root);
+    await mkdir(join(root, "inbox"));
+    await writeFile(join(root, "inbox", "report.txt"), REPORT, "utf8");
+    await writeFile(join(root, "inbox", "old.log"), LOG, "utf8");
+    const actions: ResolvedPlanAction[] = [
+      { kind: "move", from: "inbox/report.txt", to: "docs/report.txt", sha256: sha(REPORT) },
+      { kind: "discard", path: "inbox/old.log", sha256: sha(LOG) },
+    ];
+    const digest = await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(actions);
+    const discarded = await prepareDiscardedRoot(root, APPLY_RUN);
+    const journal = createApplyJournal({ workspaceRoot: root, runId: APPLY_RUN, clock });
+    await journal.append({ type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "organize-task", digest, approval: "cli-flag", actions: 2, maxDurationMs: 60_000 });
+    await journal.append({ type: "plan_checked", problems: [], inventoryLimitReached: false });
+    await journal.append({ type: "plan_item_started", index: 0, action: { kind: "move", from: "inbox/report.txt" as MaskedText, to: "docs/report.txt" as MaskedText, sha256: sha(REPORT) } });
+    await mkdir(join(root, "docs"));
+    if (stage === "move") {
+      await link(join(root, "inbox", "report.txt"), join(root, "docs", "report.txt"));
+    } else {
+      await rename(join(root, "inbox", "report.txt"), join(root, "docs", "report.txt"));
+      await journal.append({ type: "file_moved", index: 0, from: "inbox/report.txt" as MaskedText, to: "docs/report.txt" as MaskedText, sha256: sha(REPORT) });
+      await journal.append({ type: "plan_item_started", index: 1, action: { kind: "discard", path: "inbox/old.log" as MaskedText, sha256: sha(LOG) } });
+      await link(join(root, "inbox", "old.log"), join(discarded, "1"));
+    }
+    await journal.close();
+    return { root, discarded };
+  }
+
+  test("review reproduction C2: the move's added name is removed and the file stays at its original path", async () => {
+    const { root } = await cutInsideTheMove("move");
+    const before = await tree(root);
+    const preview = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true });
+    assert.deepEqual(preview.reverted, [{ path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" }]);
+    assert.deepEqual(await tree(root), before, "a dry run changes nothing");
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted, [{ path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" }]);
+    assert.deepEqual(outcome.skipped, []);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
+    assert.equal(await exists(join(root, "docs", "report.txt")), false);
+    assert.equal((await stat(join(root, "inbox", "report.txt"))).nlink, 1, "one name left");
+    assert.deepEqual((await readdir(join(root, ".codaryn"))).filter((name) => name.endsWith(".tmp")), [], "no parked name stays");
+  });
+
+  test("review reproduction C4: the discard's archived name is removed and the file stays at its original path", async () => {
+    const { root, discarded } = await cutInsideTheMove("discard");
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted.map((file) => [file.path, file.action]), [
+      ["inbox/old.log", "restored_from_discard"],
+      ["inbox/report.txt", "moved_back"],
+    ]);
+    assert.deepEqual(outcome.skipped, []);
+    assert.equal(await readFile(join(root, "inbox", "old.log"), "utf8"), LOG);
+    assert.deepEqual(await readdir(discarded), []);
+  });
+
+  test("a revert cut inside its own move back (recorded move, two names of one file) is finished the same way", async () => {
+    const { root } = await appliedWorkspace();
+    await link(join(root, "docs", "report.txt"), join(root, "inbox", "report.txt"));
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted.find((file) => file.path === "inbox/report.txt"), { path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" });
+    assert.equal(await exists(join(root, "docs", "report.txt")), false);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
+  });
+
+  test("two names with the same content that are two files (a copy, not a link) are left alone", async () => {
+    const started = await cutInsideTheMove("move");
+    await rm(join(started.root, "docs", "report.txt"));
+    await writeFile(join(started.root, "docs", "report.txt"), REPORT, "utf8");
+    const before = await tree(started.root);
+    const outcome = await revertRun({ workspaceRoot: started.root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.skipped, [{ path: "inbox/report.txt", reason: "changed_since_run" }]);
+    assert.deepEqual(await tree(started.root), before);
+
+    const recorded = await appliedWorkspace();
+    await writeFile(join(recorded.root, "inbox", "report.txt"), REPORT, "utf8");
+    const again = await revertRun({ workspaceRoot: recorded.root, runId: APPLY_RUN });
+    assert.deepEqual(again.skipped.find((file) => file.path === "inbox/report.txt"), { path: "inbox/report.txt", reason: "original_path_taken" });
+    assert.equal(await readFile(join(recorded.root, "docs", "report.txt"), "utf8"), REPORT, "nothing removed");
+  });
+});
+
+describe("removeSecondName (R-15 L-1 guard)", () => {
+  test("removes a second name of the same file, and never a different file put in its place", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-second-")));
+    roots.push(dir);
+    await mkdir(join(dir, "park"));
+    await writeFile(join(dir, "kept.txt"), REPORT, "utf8");
+    await link(join(dir, "kept.txt"), join(dir, "added.txt"));
+    assert.equal(await removeSecondName(join(dir, "added.txt"), join(dir, "kept.txt"), join(dir, "park")), true);
+    assert.equal(await exists(join(dir, "added.txt")), false);
+    assert.equal(await readFile(join(dir, "kept.txt"), "utf8"), REPORT);
+
+    // Someone put another file (same content) at the added name: it is not removed.
+    await writeFile(join(dir, "added.txt"), REPORT, "utf8");
+    assert.equal(await removeSecondName(join(dir, "added.txt"), join(dir, "kept.txt"), join(dir, "park")), false);
+    assert.equal(await readFile(join(dir, "added.txt"), "utf8"), REPORT, "put back where it was");
+    assert.deepEqual(await readdir(join(dir, "park")), [], "nothing stays parked");
   });
 });

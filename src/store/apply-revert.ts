@@ -23,6 +23,12 @@
  *   destination, nothing at the original path): it goes back like a recorded one. Not done (the file
  *   at the original path, nothing at the destination): not listed. Anything else:
  *   `changed_since_run`, nothing touched. A failed action was not done and is not listed.
+ * - R-15 L-1: both names hold the action's file and are one file (same device and file id): a move
+ *   ended between its hard link and the removal of its source (the apply's, or a revert's own move
+ *   back). The added name (the destination, or the discarded copy) is removed and the file stays at
+ *   its original path: `moved_back`, `restored_from_discard`. The added name is first renamed to a
+ *   new name in the state directory and deleted only if it is still that file there, so no other
+ *   file is ever removed.
  * - A record that does not belong to the run, a stored name other than the action's
  *   (DISCARDED_STORED_NAME_PATTERN_SOURCE), or a plan that cannot be trusted rejects with
  *   ApplyRecordError (`invalid_run_record`) before anything is changed. A plan run that is gone
@@ -30,7 +36,7 @@
  */
 
 import { createReadStream } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { link, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -346,6 +352,40 @@ async function resolved(workspace: Workspace, path: string): Promise<string | nu
   return outcome.ok && outcome.path.relative === path ? outcome.path.absolute : null;
 }
 
+/** Whether two paths name the same regular file: same device and file id, compared exactly (R-15 L-1). */
+async function sameFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [first, second] = await Promise.all([lstat(a, { bigint: true }), lstat(b, { bigint: true })]);
+    return first.isFile() && second.isFile() && first.ino !== 0n && first.dev === second.dev && first.ino === second.ino;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * R-15 L-1: removes `added`, a second name of the file at `kept`. It is renamed to a new name in
+ * `parkDir` first (nothing exists there to replace), checked again, and deleted only while it is
+ * still that file; otherwise it is put back without replacing anything. False when it was not removed.
+ */
+export async function removeSecondName(added: string, kept: string, parkDir: string): Promise<boolean> {
+  const parked = join(parkDir, `revert-${randomBytes(8).toString("hex")}.tmp`);
+  try {
+    await rename(added, parked);
+  } catch {
+    return false;
+  }
+  if (await sameFile(parked, kept)) {
+    try {
+      await rm(parked);
+      return true;
+    } catch {
+      // Not removed: it goes back below.
+    }
+  }
+  await moveWithoutReplacing(parked, added);
+  return false;
+}
+
 /**
  * One action back: `away` is where the file went (the move's destination, or its place in the
  * discarded directory), `back` its original path. `recorded` false: only a start record exists.
@@ -356,13 +396,19 @@ async function revertItem(
   sha256: ContentHash,
   recorded: boolean,
   action: RevertAction,
-  mode: { readonly dryRun: boolean; readonly consent: boolean },
+  mode: { readonly dryRun: boolean; readonly consent: boolean; readonly parkDir: string },
 ): Promise<Outcome> {
   // `away` null: the place it would have gone is known not to exist (R-9c C-2); nothing is read there.
   const there: FileState = away === null ? { kind: "absent" } : await stateOf(away);
   const original = await stateOf(back);
   if (there.kind === "error" || original.kind === "error") return { reason: "io_error" };
   const isDone = there.kind === "file" && there.sha256 === sha256;
+  // R-15 L-1: one file under both names: the move ended between its link and the removal of its
+  // source. Removing the added name finishes it; the original path keeps the file.
+  if (away !== null && isDone && original.kind === "file" && original.sha256 === sha256 && (await sameFile(away, back))) {
+    if (mode.dryRun) return { action };
+    return (await removeSecondName(away, back, mode.parkDir)) ? { action } : { reason: "io_error" };
+  }
   if (!recorded) {
     const notDone = original.kind === "file" && original.sha256 === sha256 && there.kind === "absent";
     if (notDone) return { unlisted: true };
@@ -384,7 +430,7 @@ async function revertItem(
  * Rejects with ApplyRecordError before anything is changed when a record or the plan fails its checks.
  */
 export async function revertApplyRun(workspaceRoot: string, runId: string, journal: string, dryRun: boolean, consent = false): Promise<RevertOutcome> {
-  const mode = { dryRun, consent: consent && !dryRun };
+  const mode = { dryRun, consent: consent && !dryRun, parkDir: join(workspaceRoot, STATE_DIR_NAME) };
   const { planRunId, digest, items } = applyRecords(journal, runId);
   const reverted: RevertedFile[] = [];
   const skipped: SkippedFile[] = [];

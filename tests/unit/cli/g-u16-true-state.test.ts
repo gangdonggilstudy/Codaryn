@@ -23,12 +23,12 @@ import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { runChanges } from "../../../src/cli/changes.js";
 import { createHumanOutput } from "../../../src/cli/human/index.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
-import { runRevert } from "../../../src/cli/revert.js";
+import { appliedPlanHint, runRevert } from "../../../src/cli/revert.js";
 import { runCli } from "../../../src/cli/run.js";
 import { runRuns } from "../../../src/cli/runs.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
-import { inspectRun, readRevertRecord, revertRun, writeRevertRecord } from "../../../src/store/index.js";
+import { inspectRun, loadPlan, readRevertRecord, revertRun, writeRevertRecord } from "../../../src/store/index.js";
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -117,21 +117,44 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
     },
   );
 
-  test(
-    "reverting the plan run changes nothing and leaves no 'reverted' on it",
-    { todo: "CLI after the contract's decision (U-16): how revert answers for a plan run (a code or a field); it writes no revert record" },
-    async () => {
-      const { base, ws, planned, digest } = await planRun();
-      await applyWithTask(base, planned, digest);
-      const outcome = await runRevert({
-        ...io(base, ["revert", "--workspace", "ws", "--run", planned.runId, "--quiet"]),
-        revert: createRevertCommand(revertRun, { inspect: inspectRun, readRecord: readRevertRecord, writeRecord: writeRevertRecord }),
-      });
-      assert.equal(await readFile(path.join(ws, "sorted", "a.txt"), "utf8"), "alpha\n", "the apply's move is still there");
-      const entry = (await entriesOf(base)).find((run) => run.runId === planned.runId);
-      assert.equal(entry?.reverted ?? null, null, JSON.stringify([outcome.output, entry]));
-    },
-  );
+  const REVERT = { dryRun: revertRun, inspect: inspectRun, readRecord: readRevertRecord, writeRecord: writeRevertRecord, loadPlan };
+  const revertOf = (base: string, runId: string, more: readonly string[] = []) =>
+    runRevert({ ...io(base, ["revert", "--workspace", "ws", "--run", runId, "--quiet", ...more]), revert: createRevertCommand(revertRun, REVERT) });
+
+  test("reverting the applied plan run changes nothing, leaves no 'reverted' on it and names the apply run", async () => {
+    const { base, ws, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    const outcome = await revertOf(base, planned.runId);
+    assert.equal(await readFile(path.join(ws, "sorted", "a.txt"), "utf8"), "alpha\n", "the apply's move is still there");
+    const entry = (await entriesOf(base)).find((run) => run.runId === planned.runId);
+    assert.equal(entry?.reverted ?? null, null, JSON.stringify([outcome.output, entry]));
+    assert.equal(outcome.hint, appliedPlanHint(planned.runId, applied.runId, false));
+    assert.ok(outcome.hint?.includes(`--run ${applied.runId}`), outcome.hint);
+    // The JSON line is as before: complete, nothing reverted, no new field.
+    assert.deepEqual(Object.keys(outcome.output).sort(), ["exitCode", "kind", "reverted", "runId", "schemaVersion", "skipped", "status"]);
+    assert.deepEqual([outcome.output.kind === "revert" && outcome.output.status, outcome.exitCode], ["complete", 0]);
+  });
+
+  test("a dry run of it tells the same and writes nothing", async () => {
+    const { base, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    const outcome = await revertOf(base, planned.runId, ["--dry-run"]);
+    assert.equal(outcome.hint, appliedPlanHint(planned.runId, applied.runId, true));
+  });
+
+  test("a plan run not applied, and the apply run itself, revert as before: no hint, a record", async () => {
+    const pending = await planRun();
+    const first = await revertOf(pending.base, pending.planned.runId);
+    assert.equal(first.hint, undefined);
+    assert.notEqual((await entriesOf(pending.base)).find((run) => run.runId === pending.planned.runId)?.reverted ?? null, null);
+
+    const { base, ws, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    const second = await revertOf(base, applied.runId);
+    assert.equal(second.hint, undefined);
+    assert.equal(await readFile(path.join(ws, "a.txt"), "utf8"), "alpha\n", "the apply's move is undone");
+    assert.notEqual((await entriesOf(base)).find((run) => run.runId === applied.runId)?.reverted ?? null, null);
+  });
 });
 
 describe("U-16 (UXM-4): changes of an apply run does not say the run changed no file", () => {

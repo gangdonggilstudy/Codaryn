@@ -6,12 +6,12 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import { MAX_READ_BYTES, asRawText } from "../../../src/contracts/index.js";
+import { MAX_READ_BYTES, asRawText, changeShownMatches, maskedParts } from "../../../src/contracts/index.js";
 import type { ContentHash, MaskedText } from "../../../src/contracts/index.js";
 import { RevertRunError, createChangeRecorder, createJournal, readRunOriginals } from "../../../src/store/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
@@ -136,5 +136,116 @@ describe("readRunOriginals (DR-14)", () => {
     const started = { seq: 1, at: "2026-01-02T03:04:05.000Z", runId: RUN, type: "apply_started", schemaVersion: 1, planRunId: "20260102T030000Z-00000000", taskId: "t", digest: "d".repeat(64), approval: "cli-flag", actions: 1, maxDurationMs: 1000 };
     await writeFile(join(apply, ".codaryn", "runs", RUN, "journal.jsonl"), `${JSON.stringify(started)}\n`, "utf8");
     assert.deepEqual(await readRunOriginals({ workspaceRoot: apply, runId: RUN }), []);
+  });
+});
+
+describe("DR-29: how the run masked each changed file (shown), kept with its snapshot", () => {
+  const SECRET = "fake-dr29-secret-value";
+  const NOW_TOKEN = "[[CODARYN_SECRET:00000000000000bb]]";
+  /** A stand-in gateway: the registered secrets become tokens (token ids differ per run). */
+  const maskWith = (token: string, secrets: readonly string[]) => (text: string): string => secrets.reduce((masked, secret) => masked.split(secret).join(token), text);
+  const runMask = maskWith(TOKEN, [SECRET]);
+
+  /** A run changes `path` from `before` through `writes`, recording the masked forms as a writing tool does. */
+  async function recorded(root: string, path: string, before: string | null, writes: readonly string[], withShown = true): Promise<void> {
+    const ws = await createWorkspace({ root });
+    const resolved = await ws.resolve(path, "write");
+    assert.ok(resolved.ok);
+    const recorder = createChangeRecorder({ workspaceRoot: root, runId: RUN });
+    const original = before === null ? null : asRawText(before);
+    if (withShown) await recorder.saveOriginal(resolved.path, original, before === null ? null : maskedParts(runMask(before)));
+    else await recorder.saveOriginal(resolved.path, original);
+    let previous = before;
+    for (const text of writes) {
+      await writeFile(join(root, path), text, "utf8");
+      if (withShown) {
+        assert.ok(recorder.saveNext !== undefined, "the store implements saveNext");
+        await recorder.saveNext(resolved.path, sha(text), maskedParts(runMask(text)));
+      }
+      const journal = createJournal({ workspaceRoot: root, runId: RUN, clock });
+      await journal.append({ type: "file_changed", callId: "c", path: path as MaskedText, previousHash: previous === null ? null : sha(previous), newHash: sha(text), created: previous === null });
+      await journal.close();
+      previous = text;
+    }
+  }
+
+  test("review reproduction: masked with other secrets, the run's secret would show; the stored form tells it apart", async () => {
+    const root = await workspace();
+    await startedRun(root);
+    const before = `key: ${SECRET}\nold\n`;
+    const last = `key: ${SECRET}\nnewer\n`;
+    await writeFile(join(root, "notes.md"), before, "utf8");
+    await recorded(root, "notes.md", before, [`key: ${SECRET}\nnew\n`, last]);
+    const [entry] = await readRunOriginals({ workspaceRoot: root, runId: RUN });
+    assert.deepEqual(entry?.shown, { original: ["key: ", "\nold\n"], next: { sha256: sha(last), parts: ["key: ", "\nnewer\n"] } }, "the last write is kept");
+    const nowMask = maskWith(NOW_TOKEN, [SECRET]);
+    assert.equal(changeShownMatches(entry?.shown, { original: nowMask(before), current: { sha256: sha(last), masked: nowMask(last) } }), true, "same secrets, other token ids");
+    assert.equal(changeShownMatches(entry?.shown, { original: before, current: { sha256: sha(last), masked: last } }), false, "without the secret its value would show");
+    assert.equal(changeShownMatches(entry?.shown, { original: nowMask(before), current: { sha256: sha("changed since\n"), masked: "changed since\n" } }), false, "the file changed since the run");
+  });
+
+  test("a created file has no original form; a caller from before DR-29 gives no shown", async () => {
+    const root = await workspace();
+    await startedRun(root);
+    await recorded(root, "new.txt", null, ["x\n"]);
+    await recorded(root, "plain.txt", null, ["y\n"], false);
+    const originals = await readRunOriginals({ workspaceRoot: root, runId: RUN });
+    assert.deepEqual(originals.find((item) => item.path === "new.txt")?.shown, { original: null, next: { sha256: sha("x\n"), parts: ["x\n"] } });
+    assert.equal("shown" in (originals.find((item) => item.path === "plain.txt") ?? {}), false);
+  });
+
+  test("the stored forms hold visible parts only: no secret value and no token", async () => {
+    const root = await workspace();
+    await startedRun(root);
+    const before = `${SECRET}\n`;
+    await writeFile(join(root, "a.txt"), before, "utf8");
+    await recorded(root, "a.txt", before, [`${SECRET} changed\n`]);
+    const dir = join(root, ".codaryn", "runs", RUN, "snapshots");
+    const shownFiles = (await readdir(dir)).filter((name) => name.startsWith("shown-"));
+    assert.equal(shownFiles.length, 1);
+    const text = await readFile(join(dir, shownFiles[0] as string), "utf8");
+    assert.equal(text.includes(SECRET), false);
+    assert.equal(text.includes("CODARYN_SECRET"), false);
+  });
+
+  test("a stored form that fails the checks is not given (the view then shows no text); the rest stays", async () => {
+    const before = "a\n";
+    const after = "b\n";
+    const good = { schemaVersion: 1, path: "a.txt", original: ["a\n"], next: { sha256: sha(after), parts: ["b\n"] } };
+    for (const bad of [
+      { ...good, extra: 1 },
+      { ...good, path: "other.txt" },
+      { ...good, original: null },
+      { ...good, original: [`a${TOKEN}`] },
+      { ...good, original: [] },
+      { ...good, next: { sha256: "x", parts: ["b\n"] } },
+      { ...good, next: { sha256: sha(after), parts: [1] } },
+      { ...good, schemaVersion: 2 },
+    ]) {
+      const root = await workspace();
+      await startedRun(root);
+      await writeFile(join(root, "a.txt"), before, "utf8");
+      await recorded(root, "a.txt", before, [after]);
+      await writeFile(join(root, ".codaryn", "runs", RUN, "snapshots", "shown-0.json"), `${JSON.stringify(bad)}\n`, "utf8");
+      const [entry] = await readRunOriginals({ workspaceRoot: root, runId: RUN });
+      assert.equal(entry !== undefined && "shown" in entry, false, JSON.stringify(bad));
+      assert.deepEqual(entry?.original, { text: before }, "the original is still given");
+    }
+  });
+
+  test("inputs that do not fit are refused before anything is written", async () => {
+    const root = await workspace();
+    const ws = await createWorkspace({ root });
+    const resolved = await ws.resolve("a.txt", "write");
+    assert.ok(resolved.ok);
+    const recorder = createChangeRecorder({ workspaceRoot: root, runId: RUN });
+    await assert.rejects(recorder.saveOriginal(resolved.path, null, ["x"]), TypeError, "a created file has no original form");
+    await assert.rejects(recorder.saveOriginal(resolved.path, asRawText("x"), null), TypeError, "an existing file's form is parts");
+    await assert.rejects(recorder.saveOriginal(resolved.path, asRawText("x"), [`a${TOKEN}`]), TypeError, "no token in a part");
+    assert.ok(recorder.saveNext !== undefined);
+    await assert.rejects(recorder.saveNext(resolved.path, sha("x"), ["x"]), "saveNext before saveOriginal");
+    await recorder.saveOriginal(resolved.path, asRawText("x"), ["x"]);
+    await assert.rejects(recorder.saveNext(resolved.path, "not-a-hash" as ContentHash, ["x"]), TypeError);
+    await assert.rejects(recorder.saveNext(resolved.path, sha("x"), []), TypeError);
   });
 });

@@ -76,7 +76,6 @@ describe("DR-43 (b): the run's start names what the workflow's rules left out", 
 describe("DR-43 (b): on the real CLI, stderr shows the narrowing at the start (human renderer)", () => {
   test(
     "a task file naming organize with a given plan action kind organize does not list",
-    { todo: "output owner (N-C): src/cli/human/output.ts draws run_started.policyNarrowings with progress.workflow_policy.* (withProgress takes several lines now)" },
     async () => {
       const base = await mkdtemp(path.join(tmpdir(), "codaryn-g-dr43-"));
       temporaryDirs.push(base);

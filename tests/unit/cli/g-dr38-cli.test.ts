@@ -263,7 +263,6 @@ describe("DR-38: the run list marks a run whose records were changed", () => {
 
   test(
     "the person's list says it (runs.records_changed)",
-    { todo: "output owner (N-C): src/cli/human/output.ts runsText draws entry.recordsChanged with runs.records_changed" },
     async () => {
       const base = await setup(WRITE_STEPS);
       await runCli(io(base));

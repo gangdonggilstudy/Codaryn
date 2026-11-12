@@ -66,6 +66,7 @@ import type {
 } from "../../contracts/index.js";
 
 import {
+  AUTH_REFUSED_MESSAGE,
   createKeyMaterialCheck,
   createRedactor,
   decoder,
@@ -390,8 +391,8 @@ function classifyStatus(status: number, body: LimitedBody): { kind: ModelErrorKi
   return { kind: "api_error", retryable: false };
 }
 
-/** DR-35 (a): what a 401 or 403 says, whatever the provider's message. */
-export const AUTH_REFUSED_MESSAGE = "the key or its access was refused; the provider's message is not shown";
+/** DR-35 (a): what a 401 or 403 says, whatever the provider's message (shared with Anthropic, DR-37 (a)). */
+export { AUTH_REFUSED_MESSAGE };
 
 /**
  * Describes an error response. Only a JSON error object is quoted: its `type` and `code` when they

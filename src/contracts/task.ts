@@ -62,6 +62,12 @@ export interface ResolvedTaskSpec extends TaskSpec {
   readonly limits: ResolvedLimits;
   /** G-A: the definition's instructions (a task file cannot set them), or null. */
   readonly instructions?: string | null;
+  /**
+   * DR-37 (d): the name of the config profile (N-8) the CLI or the app applied to build this task
+   * (`--profile`, or the profile the GUI chose), of PROFILE_NAME_PATTERN_SOURCE. Absent: none was
+   * applied. The engine records it in `run_started`; it changes nothing else.
+   */
+  readonly profile?: string;
 }
 
 /** SP-1: the names in MODEL_PROVIDER_NAMES (config.ts). */

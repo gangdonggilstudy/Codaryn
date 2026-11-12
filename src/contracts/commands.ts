@@ -405,6 +405,20 @@ export type RunListEntry =
       readonly startedAt: string;
       /** `taskId` of `run_started` (an apply run: of `apply_started`). JSON only: the human table does not show it (N-14). */
       readonly taskId: string;
+      /**
+       * DR-37 (d): the config profile the run was made with: `run_started.profile` (a name of
+       * PROFILE_NAME_PATTERN_SOURCE), or null when it records none. An apply run: null (its plan
+       * run's entry has it). Absent: a list built before DR-37 (d).
+       */
+      readonly profile?: string | null;
+      /**
+       * DR-37 (d): the workflow definition the run used (what kind of work it was):
+       * `run_started.workflowRef` (a name of WORKFLOW_ID_PATTERN_SOURCE), or null when it records none
+       * (the legacy settings, or no definition). An apply run: null. Absent: a list built before
+       * DR-37 (d). For both fields, a recorded value that is neither null nor such a name makes the
+       * run `damaged`, like the other checked strings.
+       */
+      readonly workflowRef?: string | null;
       /** From result.json; null when there is none (still running, or stopped without one). */
       readonly status: TerminalRunStatus | null;
       /**

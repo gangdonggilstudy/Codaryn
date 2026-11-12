@@ -27,6 +27,9 @@ before(async () => {
   const files: Record<string, string> = {
     "data/huge.csv": "v\n1e308\n1e308\n",
     "data/huge-cancel.csv": "v\n1e308\n1e308\n-1e308\n-1e308\n",
+    "data/order-within.csv": "v\n1e308\n-1e308\n1e308\n",
+    "data/order-over.csv": "v\n1e308\n1e308\n-1e308\n",
+    "out/big.csv": "total\n1e308\n",
     "out/five.csv": "total\n5\n",
     "out/zero.csv": "total\n0\n",
     "data/gaps.csv": "k,v\na,1\nb,\nb,\nc,2\n",
@@ -78,6 +81,22 @@ test("R-13 L-1: a source sum or mean beyond a double's range is inconclusive, no
   // The exact sum is 0, but its partial sums overflow: the verifier cannot decide it.
   const cancelling = await run(total("data/huge-cancel.csv", "out/zero.csv"));
   assert.equal(cancelling.outcome, "inconclusive", cancelling.evidence);
+});
+
+test("review R-18 I1, I2: the overflow depends on the row order and concerns sum and mean only; the limits say so", async () => {
+  // The same three values: the running sum stays in range in one order and overflows in the other.
+  const within = await run(total("data/order-within.csv", "out/big.csv"));
+  assert.equal(within.outcome, "pass", within.evidence);
+  const over = await run(total("data/order-over.csv", "out/big.csv"));
+  assert.equal(over.outcome, "inconclusive", over.evidence);
+  // min and max add nothing up: two values of 1e308 are checked.
+  for (const op of ["min", "max"] as const) {
+    const result = await run({ ...total("data/huge.csv", "out/big.csv"), op } as DataRule);
+    assert.equal(result.outcome, "pass", `${op}: ${result.evidence}`);
+  }
+  const line = DATA_CHECKS_LIMITS.find((text) => text.includes("double's range")) ?? "";
+  assert.match(line, /sum and mean cannot be checked when a running sum goes beyond a double's range/);
+  assert.match(line, /depends on the row order/);
 });
 
 test("R-13 L-2 (kept): a group with only empty source cells leaves the rule inconclusive, and the limits say so", async () => {

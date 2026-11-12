@@ -38,13 +38,13 @@ import { findInstall } from "./install.js";
 import type { InstallInfo } from "./install.js";
 import { runModels } from "./models.js";
 import { runApply, runPlan, runReview } from "./plan-commands.js";
-import { anthropicModelLister } from "./provider.js";
+import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { runReport } from "./report.js";
 import { runRevert } from "./revert.js";
 import { runCli } from "./run.js";
 import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
-import { envValue } from "./settings.js";
+import { envValue, knownKeyValues } from "./settings.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 // N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).
 import { explainedErrorText } from "./error-text.js";
@@ -77,7 +77,8 @@ const exists = async (target: string): Promise<boolean> => {
 const clock = { now: () => Date.now() };
 const random = (size: number): Uint8Array => randomBytes(size);
 const readText = (file: string): Promise<string> => readFile(file, "utf8");
-const currentKey = (): string | null => envValue(process.env, "ANTHROPIC_API_KEY");
+// SP-2: every key variable Codaryn knows.
+const currentKey = (): string[] => knownKeyValues(process.env);
 
 /** One line typed at the terminal, or null when the input ends first. `output` shows the question. */
 async function askLine(question: string, output: NodeJS.WritableStream = process.stdout): Promise<string | null> {
@@ -270,9 +271,11 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           readFile: readText,
           // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
           loadEnvFile: (file) => process.loadEnvFile(file),
-          // Y-1: listAnthropicModels (src/model/anthropic) through the CLI's provider module. It is
-          // called only after the key and the address are resolved, with the global fetch.
+          // Y-1, SP-6: each provider's lister through the CLI's provider module (anthropic: listAnthropicModels,
+          // openai: listOpenAIModels). One is called only after that provider's key and address are
+          // resolved, with the global fetch.
           listModels: anthropicModelLister,
+          listers: API_MODEL_LISTERS,
           defaultConfig,
           // Y-3: the number is asked only when both stdin and stdout are terminals.
           ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask: (question: string) => askLine(question) } : {}),

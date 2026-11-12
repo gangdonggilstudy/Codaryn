@@ -87,32 +87,41 @@ export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];
 export interface ApiProviderSpec {
   /** 키를 읽는 환경 변수. */
   readonly keyEnv: string;
-  /** 키 모양(검출용 정규식 원문). 가장 구체적인 것부터. */
+  /** DR-34: task가 모델을 말하지 않을 때 이 제공자의 모델을 정하는 환경 변수. 이 제공자에만 적용. */
+  readonly modelEnv: string;
+  /** DR-34: 이 제공자의 주소를 바꾸는 환경 변수. 이 제공자에만 적용. */
+  readonly baseUrlEnv: string;
+  /** 실행 거부용 키 모양(정규식 원문, 4.3). */
   readonly keyPatternSources: readonly string[];
   readonly defaultApiBaseUrl: string;
   /** 주소 경로 규칙(4.4). */
   readonly baseUrlPath: "without_version" | "with_version";
   /** maxOutputTokens 상한(SP-D9). */
   readonly maxOutputTokensLimit: number;
+  /** maxOutputTokens 하한(openai 16, 사실 C-10). */
+  readonly minOutputTokens: number;
 }
 export const API_PROVIDERS: { readonly [P in ApiProviderName]: ApiProviderSpec };
 ```
 
 - `anthropic` 항목은 지금 값과 같다.
   - `keyEnv: "ANTHROPIC_API_KEY"`
+  - `modelEnv: "CODARYN_MODEL"`, `baseUrlEnv: "CODARYN_API_BASE_URL"`: 두 번째 제공자 전의 이름과 동작 그대로(DR-34)
   - `keyPatternSources: ["sk-ant-[A-Za-z0-9_-]{8,}"]`
   - `defaultApiBaseUrl: "https://api.anthropic.com"`
   - `baseUrlPath: "without_version"`
   - `maxOutputTokensLimit: 200_000`
 - `openai` 항목(SP-5에서 표에 더한다)
   - `keyEnv: "OPENAI_API_KEY"` [확인]
-  - `keyPatternSources`: 느슨한 `sk-` 모양 하나(4.3). 키의 접두·길이·문자 집합은 [미확인]이라, 키를 길이·문자로 검증하지 않는다(DR-31 (g)).
+  - `modelEnv: "CODARYN_OPENAI_MODEL"`, `baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL"`(DR-34)
+  - `keyPatternSources`: 실행 거부용 두 모양(4.3, DR-33). 키의 접두·길이·문자 집합은 [미확인]이라, 키를 길이·문자로 검증하지 않는다(DR-31 (g)).
   - `defaultApiBaseUrl: "https://api.openai.com/v1"` [확인]
   - `baseUrlPath: "with_version"`
   - `maxOutputTokensLimit`: 공식 상한을 문서에서 찾지 못했다. 표의 값은 SP-5에서 PM이 정한다(최소값 16은 [확인]).
 - 표에서 끌어내는 값
   - `API_KEY_ENVS`(모든 키 변수)
-  - `API_KEY_PATTERN_SOURCES`(모든 제공자의 키 모양, 중복 없이)
+  - `API_KEY_PATTERN_SOURCES`(모든 제공자의 실행 거부용 키 모양, 중복 없이)
+  - `API_KEY_MASK_PATTERN_SOURCES`(출력 가림용: 거부용 모양과 느슨한 OpenAI 모양, DR-32 (a))
 - 제공자 이름을 더하면 컴파일이 빠진 곳을 알려 준다(`{ [P in ApiProviderName]: … }`).
 
 ### 4.2 키 환경 변수와 비밀 등록(S-2 일반화)
@@ -121,6 +130,10 @@ export const API_PROVIDERS: { readonly [P in ApiProviderName]: ApiProviderSpec }
 - 등록(보안, 가장 먼저)
   - **알려진 모든 키 변수(`API_KEY_ENVS`)의 값을, 고른 제공자와 상관없이** 비밀로 등록한다. 대본 실행도 같다. 지금 S-2가 `ANTHROPIC_API_KEY`에 하는 일을 표 전체로 넓힌다.
   - 이유: 두 키를 다 가진 사용자가 Anthropic으로 실행하면, OpenAI 키가 작업 파일에서 읽혀 기록과 모델 문맥에 원문으로 갈 수 있다.
+  - 길이(DR-34 (b), R-20 M-2)
+    - 고른 제공자의 키 값은 길이와 상관없이 지금처럼 등록한다.
+    - 고르지 않은 제공자의 키 값은 `MIN_OTHER_PROVIDER_KEY_LENGTH`(20자) 이상일 때만 등록한다.
+    - 이유: 다른 도구를 위해 그 변수에 둔 짧은 자리표시자(`EMPTY`, `ollama`, `x`)가 비밀이 되면 그 낱말이 든 줄을 고칠 수 없고 명령이 시작하지 못한다(재현). 실제 키는 훨씬 길다.
 - 출력 정리: `report`·`runs` 등이 지우는 "현재 키"도 모든 키 변수의 값으로 넓힌다(조사 B6).
 - 인쇄 가능한 필드 이름의 예외(`src/cli/security/keys.ts:49`)는 키 변수 이름 전체로 넓힌다.
 - `doctor`의 `api_key` 점검, `init`의 `keySet`, `models`의 키 안내는 고른 제공자의 키 변수를 쓴다.
@@ -131,16 +144,14 @@ export const API_PROVIDERS: { readonly [P in ApiProviderName]: ApiProviderSpec }
 
 ### 4.3 키 모양 검사
 
-- 다음 다섯 곳이 `API_KEY_PATTERN_SOURCES` 전체를 쓴다.
-  - task·설정·`--goal`의 키 값 검사(S-6, S-8)
-  - 사람용 출력 정리
-  - 문구 매개변수 정리
-  - 제공자 오류 문구의 키 제거
-  - 커밋 훅(`scripts/check-secrets.mjs`, PM 소유)
+- 모양 목록은 둘이다(DR-32 (a), DR-33).
+  - 실행 거부(task·설정·`--goal`의 키 값 검사, S-6, S-8): `API_KEY_PATTERN_SOURCES`. 좁은 모양만 둔다.
+  - 출력 가림(사람용 출력 정리, 문구 매개변수 정리, 제공자 오류 문구의 키 제거): `API_KEY_MASK_PATTERN_SOURCES`. 거부용 모양에 느슨한 OpenAI 모양(`\bsk-[A-Za-z0-9_-]{32,}`)을 더한다. 평범한 이름 몇을 가리는 값은 읽기 불편이지 실행 실패가 아니다.
+  - 커밋 훅(`scripts/check-secrets.mjs`)은 PM 소유다.
 - OpenAI 키의 접두·길이·문자 집합은 공식 문서에 없다 [미확인]. 그래서
   - 키 값을 길이나 문자로 검증하지 않는다(실행은 변수가 비어 있지 않은지만 본다. 출력 가능한 ASCII 검사는 지금처럼 헤더에 넣기 전의 공통 검사다).
-  - 가림·출력 정리·커밋 검사에는 느슨한 `sk-` 모양 하나를 쓴다(DR-31 (g)). 예: `\bsk-[A-Za-z0-9_-]{20,}`. 중간에 `-`가 있는 키도 잡는다. 정확한 정규식과 최소 길이는 SP-2에서 오탐 시험과 함께 정한다.
-- 오탐 관리: `sk-`로 시작하는 짧은 일반 글은 잡지 않도록 최소 길이를 둔다(시험 SP-U03).
+  - 실행 거부용 OpenAI 모양은 둘뿐이다(DR-33): 구분되는 접두사 `sk-proj-`·`sk-svcacct-`·`sk-admin-` 뒤 20자 이상, 또는 접두사 없는 예전 모양으로 `sk-` 뒤 영숫자만 40자 이상이고 숫자·대문자·소문자가 모두 있을 때(하이픈·밑줄이 이어지면 아님). 이 접두사와 길이는 문서에 없는 관행이라 거부의 보조로만 쓴다. 남는 오탐과 놓침은 계약 주석(`OPENAI_KEY_PATTERN_SOURCE`)에 적었다.
+- 오탐 관리: 두 검토(R-19, Codex)의 평범한 이름 모음을 불일치 회귀 시험으로 고정한다(시험 SP-U03).
 - 실제 키 값 자체는 모양과 상관없이 비밀로 등록되어 가려진다(4.2). 모양 검사는 파일·인자·출력에 섞인 **다른** 키 값을 위한 것이다.
 - 키 문자 검사 `isUsableApiKey`(출력 가능한 ASCII)는 공용 모듈로 옮긴다. 제공자 중립이다.
 
@@ -151,9 +162,11 @@ export const API_PROVIDERS: { readonly [P in ApiProviderName]: ApiProviderSpec }
   - `without_version`(anthropic): 지금처럼 `/v1`, `/v1/messages`로 끝나는 주소를 거부한다. 어댑터가 `/v1/messages`를 붙인다.
   - `with_version`(openai): 기본 주소가 `https://api.openai.com/v1`이다 [확인]. 어댑터는 `/responses`, `/models`만 붙인다. 주소가 엔드포인트까지 포함하면(`…/responses`, `…/models`) 거부한다.
 - 주소 우선순위(지금 규칙을 제공자별로)
-  1. `CODARYN_API_BASE_URL`(고른 제공자에만 적용, SP-D5)
+  1. 그 제공자의 주소 변수 `baseUrlEnv`(DR-34): anthropic은 `CODARYN_API_BASE_URL`(이전 그대로), openai는 `CODARYN_OPENAI_API_BASE_URL`. 경로 규칙(`baseUrlPath`)이 이 값에도 적용된다.
   2. 설정의 제공자 몫 `apiBaseUrl`
   3. 표의 `defaultApiBaseUrl`
+- 키는 언제나 그 제공자의 주소로만 보낸다(DR-34, R-20 M-1). 한 변수가 두 제공자의 주소를 정하면, 다른 제공자용으로 둔 주소로 키가 갈 수 있기 때문이다(재현: 설정의 제공자가 openai인데 `models`가 Anthropic 키를 그 주소로 보냄).
+- `models`는 고른 제공자를 따른다. 그 연결(SP-6) 전에는 고른 제공자가 anthropic이 아니면 요청 없이 거부한다. `doctor`는 어느 제공자의 키가 어느 주소로 가는지 보인다(CLI 몫).
 - 고른 제공자 밖의 주소로는 요청하지 않는다. privacy.md의 "외부로 나가는 경로는 Anthropic 요청 하나뿐"은 "고른 제공자의 요청 하나뿐"으로 바뀐다.
 
 ### 4.5 모델 설정과 해석 결과
@@ -242,7 +255,9 @@ export type ModelOutcome =
 - 호출 id(DR-31 (e))
   - OpenAI의 도구 호출은 `output`의 `{ "type": "function_call", "id", "call_id", "name", "arguments" }` 항목이다. 결과는 다음 요청 `input`에 `{ "type": "function_call_output", "call_id", "output" }`로 보낸다. 짝은 `id`가 아니라 `call_id`로 맞춘다 [확인].
   - `call_id`의 형식·길이는 [미확인]이다. 불투명한 문자열로 다룬다.
-  - 어댑터는 `call_id`를 `ToolCall.id`로 넘긴다. 엔진이 기록할 때 AC-D15 규칙(`CALL_ID_PATTERN_SOURCE`, 64자)에 맞지 않으면 안전한 id로 바꾼다. 어댑터는 **실행 중 메모리**에 "기록 id → 원래 `call_id`" 대응을 두고, 다음 요청의 `function_call_output`에는 원래 `call_id`를 싣는다. 대응은 기록하지 않는다.
+  - 어댑터는 `call_id`를 `ToolCall.id`로 넘긴다.
+  - AC-D15 규칙(`CALL_ID_PATTERN_SOURCE`, 64자, 비밀 없음, 다른 id가 쓰지 않음)을 통과한 `call_id`는 Anthropic의 tool_use id처럼 **그대로 기록한다**(DR-35 (c), R-22 L-3). 비밀이 아니며 기록과 요청을 맞춰 보는 데 쓴다.
+  - 통과하지 못하면 엔진이 안전한 id(`codaryn-call-<n>`)로 바꿔 기록한다. 어댑터는 **실행 중 메모리**에 "기록 id → 원래 `call_id`" 대응을 두고, 다음 요청의 `function_call_output`에는 원래 `call_id`를 싣는다. 이 대응은 기록하지 않는다.
   - 한 응답에 여러 호출이 올 수 있다(`parallel_tool_calls` 기본 true) [확인]. 엔진은 한 응답의 여러 호출을 이미 처리하므로 기본값을 그대로 둔다.
 
 ### 4.10 대화 형식, 멈춤, 추론 항목(어댑터 안)
@@ -309,9 +324,12 @@ export type ModelOutcome =
 - task: `model: { provider: "openai", model?, maxOutputTokens? }`. 제공자 이름은 `API_PROVIDER_NAMES`로 검사한다.
 - 간편 형식(`--workspace`): 설정의 `provider`를 쓴다(지금은 늘 anthropic).
 - 프로필(N-8)에 `provider`를 둘지는 SP-D10에서 정한다. 두면 "이 프로필은 openai로"가 된다.
-- 환경 변수(SP-D5)
-  - `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 고른 제공자에만 적용한다.
-  - 제공자를 고르는 환경 변수(`CODARYN_PROVIDER`)는 지금 두지 않는 것을 권고한다(설정이나 task에서만 고른다).
+- 환경 변수(SP-D5, DR-34)
+  - 모델과 주소의 변수는 제공자별이다(표의 `modelEnv`, `baseUrlEnv`).
+    - anthropic: `CODARYN_MODEL`, `CODARYN_API_BASE_URL`(이전 이름과 동작 그대로)
+    - openai: `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`
+  - 한 제공자의 변수는 다른 제공자의 설정을 바꾸지 않는다.
+  - 제공자를 고르는 환경 변수(`CODARYN_PROVIDER`)는 두지 않는다(설정이나 task에서만 고른다).
 - CLI
   - `codaryn models --provider <name>`
   - `doctor`: 고른 제공자의 키 변수·주소·모델을 점검하고 제공자 이름을 보인다.
@@ -355,7 +373,7 @@ export type ModelOutcome =
 | --- | --- | --- | --- | --- |
 | SP-0 | 고정 시험 P-1~P-6을 지금 main에 넣는다(P-7·P-8은 SP-4·SP-6에서 CLI와 함께) | 제공자(w3:p9) | 끝남 `1001e0a` | 고정 시험 통과, 제품 코드 변경 없음 |
 | SP-1 | 계약: 제공자 표(anthropic만), 이름 목록 상수, `ResolvedApiSettings`와 별칭, `ModelOutcome.httpStatus`, 사용량·오류 종류 주석 | 계약(w3:p9) | 끝남 `ecc8466`. 손으로 적은 목록 4곳(`src/cli/human/output.ts:73`, `src/cli/report.ts:111`, `src/i18n/params.ts:41`, `src/store/runs.ts:50`)은 각 담당이 `MODEL_PROVIDER_NAMES`로 바꾼다 | typecheck, 고정 시험 그대로 |
-| SP-2 | 보안: S-2 일반화(`API_KEY_ENVS` 모두 등록), 키 모양 목록 사용(keys, text-safety, i18n params, 출력 정리), 커밋 훅 | CLI(w3:p2), N-B(w3:p5), 제공자(w3:p9), 훅은 PM | 대기. openai 키 변수 이름은 [확인], 모양은 느슨한 `sk-`(4.3) | 두 키가 있을 때 둘 다 가려지는 재현 시험, 고정 시험 그대로, 보안 교차 검토 |
+| SP-2 | 보안: S-2 일반화(`API_KEY_ENVS` 모두 등록), 키 모양 목록 사용(keys, text-safety, i18n params, 출력 정리), 커밋 훅 | CLI(w3:p2), N-B(w3:p5), 제공자(w3:p9), 훅은 PM | 대기. openai 키 변수 이름은 [확인]. 모양은 실행 거부용 두 모양과 출력 가림용 느슨한 모양(4.3, DR-32 (a), DR-33). 다른 제공자의 키 값은 20자 이상일 때만 등록(DR-34 (b)) | 두 키가 있을 때 둘 다 가려지는 재현 시험, 고정 시험 그대로, 보안 교차 검토 |
 | SP-3 | 공용 HTTP 모듈 분리, anthropic 어댑터를 그 위로, `httpStatus` 채움. CLI Y-4가 `httpStatus`를 본다 | 제공자(w3:p9). Y-4는 CLI | 아니오 | 고정 시험 그대로, 공용 모듈 유닛, 교차 검토 |
 | SP-4 | 설정·task 스키마(`provider`, `providers`), 해석기 일반화, 간편 형식·프로필·환경 변수 적용, cli-contract 개정 | 계약(w3:p9), CLI(w3:p2), 문서(N-A) | 아니오(openai 항목 값은 SP-5) | P-7 그대로, 새 스키마 유닛, 하위 호환 시험 |
 | SP-5 | openai 어댑터(Responses API, 가짜 전송 유닛 → 가짜 서버 통합), 표에 openai 항목, 모델 목록, `quota_exhausted` 종류(문구는 N-B), 추론 항목 개수 기록의 계약 | 제공자(w3:p9), 통합(G-G w3:p4) | 사실 확인됨(11절) | 어댑터 유닛, 가짜 서버 통합, 공용 불변식 시험. 실제 API 호출 없음 |
@@ -380,7 +398,7 @@ export type ModelOutcome =
 | SP-U08 | openai 요청 | `POST …/v1/responses`, `Authorization: Bearer`, `instructions`·`input` 항목, 평평한 도구 정의와 `strict: false`, 도구 결과의 `function_call_output`(원래 `call_id`), `max_output_tokens`, `store: false`, 직전 응답의 `output` 항목(추론 항목 포함)을 그대로 다시 보냄 |
 | SP-U09 | openai 응답 | `completed`와 `function_call` 유무로 `final`·`tool_calls`, `incomplete`의 `max_output_tokens`는 `length`, `content_filter`와 `refusal`은 거절, `failed`, 사용량(상세를 더하지 않음), 할당량 소진(type 하나와 code 넷, 예전 code), 429의 `rate_limited`, `Retry-After` 최소 대기 |
 | SP-U10 | 도구 정의 부분 집합 | 모든 도구의 `inputSchema`가 계약의 공통 부분 집합 안이고, 이름이 `^[a-zA-Z0-9_-]{1,64}$` 안이다 |
-| SP-U11 | 호출 id | 규칙 밖 `call_id`는 기록에 대체 id, 다음 요청에는 원래 `call_id`. 대응과 추론 항목은 기록·결과에 없다(기록에는 추론 항목 개수만) |
+| SP-U11 | 호출 id | 규칙을 통과한 `call_id`는 그대로 기록(DR-35 (c)). 규칙 밖 `call_id`는 기록에 대체 id, 다음 요청에는 원래 `call_id`. 대응과 추론 항목은 기록·결과에 없다(기록에는 추론 항목 개수만) |
 
 통합(가짜 서버, "[모의 API·실제 API 아님]")
 | ID | 사례 | 기대 |
@@ -399,7 +417,7 @@ PM이 공식 문서로 확인했다. 기준은 [사실 확인 문서](second-pro
 | --- | --- | --- |
 | C-1 | Responses API(`POST /v1/responses`) [확인] | SP-D2, 4.10 |
 | C-2 | `Authorization: Bearer`, 선택 헤더 `OpenAI-Organization`·`OpenAI-Project` [확인] | 5절(선택 헤더는 처음에 보내지 않음) |
-| C-3 | `OPENAI_API_KEY` [확인]. 키 접두·길이·문자 집합은 [미확인] | 4.1, 4.3: 길이·문자로 검증하지 않고 느슨한 `sk-` 모양만 |
+| C-3 | `OPENAI_API_KEY` [확인]. 키 접두·길이·문자 집합은 [미확인] | 4.1, 4.3: 길이·문자로 검증하지 않는다. 실행 거부는 DR-33의 두 모양(보조), 출력 가림은 느슨한 모양까지 |
 | C-4 | `https://api.openai.com/v1`, `/responses`, `/models` [확인] | 4.4 |
 | C-5 | 오류 본문, 상태 목록, 429의 구분(type `insufficient_quota`와 과금·할당량 code 넷) [확인]. 예전 `code == "insufficient_quota"`는 [미확인] | 4.7 |
 | C-6 | `Retry-After`(초, 최소 대기), `x-ratelimit-*`, `x-request-id` [확인] | 4.7 |
@@ -421,7 +439,7 @@ PM이 공식 문서로 확인했다. 기준은 [사실 확인 문서](second-pro
 | SP-D2 | Responses API(`POST /v1/responses`) | 채택(DR-31 (a)) |
 | SP-D3 | 설정 형식: 최상위 = anthropic(하위 호환), `providers.<name>`, 최상위와 `providers.anthropic`을 함께 쓰면 거부 | 채택(DR-31 (i)) |
 | SP-D4 | S-2 일반화: 알려진 모든 키 값을 늘 등록, 가장 먼저 | 채택 |
-| SP-D5 | `CODARYN_MODEL`·`CODARYN_API_BASE_URL`은 고른 제공자에만. `CODARYN_PROVIDER` 없음 | 채택(DR-31 (i)) |
+| SP-D5 | 모델·주소 변수는 제공자별이다: anthropic `CODARYN_MODEL`·`CODARYN_API_BASE_URL`(이전 그대로), openai `CODARYN_OPENAI_MODEL`·`CODARYN_OPENAI_API_BASE_URL`. `CODARYN_PROVIDER` 없음 | 바뀜(DR-34). 처음 결정("고른 제공자에만 적용")은 한 변수가 두 제공자의 주소를 정해 키가 다른 제공자용 주소로 갈 수 있었다(R-20 M-1) |
 | SP-D6 | `strict: false`를 보낸다(생략하면 strict가 되므로). 인자 검증은 Codaryn | 채택, 바뀜(DR-31 (d)) |
 | SP-D7 | `quota_exhausted`(재시도 없음): `error.type == "insufficient_quota"` 또는 과금·할당량 code 넷, 예전 code도. `Retry-After`는 최소 대기 | 채택, 구체화(DR-31 (f)) |
 | SP-D8 | `store: false`. 응답의 `output` 항목(추론 항목 포함)은 실행 중 메모리에만 두고 다음 요청에 돌려보낸다. 기록에는 추론 항목의 존재와 개수만 | 바뀜(DR-31 (c)). 처음 권고("돌려주지 않음")는 쓸 수 없다 |
@@ -431,7 +449,7 @@ PM이 공식 문서로 확인했다. 기준은 [사실 확인 문서](second-pro
 | SP-D12 | 문구의 키 변수 이름은 닫힌 매개변수 `keyEnv` | 채택(DR-31 (i)) |
 | SP-D13 | `init`의 제공자 질문은 UX 담당 | 채택(DR-31 (i)) |
 | (DR-31 (b)) | 특정 모델(Codex 계열 등)을 전제로 삼지 않는다. 모델의 코드 기본값 없음(C-3) | 채택 |
-| (DR-31 (e)) | 호출 짝은 `call_id`. 기록은 AC-D15의 안전한 id, 원래 `call_id`는 실행 중 메모리 대응 | 채택 |
+| (DR-31 (e)) | 호출 짝은 `call_id`. AC-D15를 통과한 원래 `call_id`는 Anthropic과 같이 그대로 기록하고, 통과하지 못한 것만 엔진의 대체 id로 기록하며 원래 값은 실행 중 메모리 대응으로 둔다 | 채택, 문구 맞춤(DR-35 (c)) |
 | (DR-31 (g)) | 키는 `OPENAI_API_KEY`로만 받고 길이·문자로 검증하지 않음 | 채택 |
 | (DR-31 (h)) | 정상 끝·도구 호출 끝은 `function_call` 유무, `incomplete` 이유와 거부를 중립 결과로 | 채택 |
 

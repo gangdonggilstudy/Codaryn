@@ -7,6 +7,8 @@
 
 import path from "node:path";
 import {
+  API_PROVIDERS,
+  API_PROVIDER_NAMES,
   CONFIG_SCHEMA_VERSION,
   MAX_INTEGRITY_PATHS,
   MAX_PROFILES,
@@ -18,12 +20,23 @@ import {
   MAX_WORKFLOW_INSTRUCTIONS_CHARS,
   WORKFLOW_ID_PATTERN_SOURCE,
 } from "../contracts/index.js";
-import type { CodarynConfig, ConfigProfile, IntegrityConfig, Limits, MessageLanguage, WorkflowDefinition } from "../contracts/index.js";
+import type {
+  ApiProviderName,
+  CodarynConfig,
+  ConfigProfile,
+  IntegrityConfig,
+  Limits,
+  MessageLanguage,
+  ProviderSettings,
+  WorkflowDefinition,
+} from "../contracts/index.js";
 import { checkLocalPathSyntax, checkTimerMs, normalizeApiBaseUrlStrict } from "./security/index.js";
 import {
   InputError,
   fail,
+  isApiProviderName,
   optionalOutputTokens,
+  quotedChoices,
   parsePartialLimits,
   parsePolicy,
   parseSecretEnv,
@@ -45,10 +58,50 @@ function parseApiBaseUrl(value: unknown): string | undefined {
 }
 
 /** S-7: a request time limit Node timers can honour. */
-function parseRequestTimeout(value: unknown): number | undefined {
+function parseRequestTimeout(value: unknown, field = "requestTimeoutMs"): number | undefined {
   if (value === undefined) return undefined;
-  const checked = checkTimerMs(value, "requestTimeoutMs");
+  const checked = checkTimerMs(value, field);
   return checked.ok ? (value as number) : fail(checked.message);
+}
+
+/** SP-D3, SP-D10: an API provider name (API_PROVIDER_NAMES); the scripted model is for task files only. */
+function parseProviderName(value: unknown, at: string): ApiProviderName {
+  return isApiProviderName(value) ? value : fail(`${at} must be ${quotedChoices(API_PROVIDER_NAMES)}`);
+}
+
+/** The top-level fields that are anthropic's provider settings (SP-D3, backward compatible). */
+const TOP_LEVEL_PROVIDER_SETTINGS = ["model", "maxOutputTokens", "apiBaseUrl", "requestTimeoutMs", "maxRetries"] as const;
+
+/**
+ * SP-D3: `providers`, API provider name → its settings, each checked with that provider's rules
+ * (API_PROVIDERS: output token bounds, address path rule). A name that is not an API provider is
+ * invalid and is not echoed.
+ */
+function parseProviders(value: unknown): { [P in ApiProviderName]?: ProviderSettings } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) fail("providers must be an object");
+  const providers: { [P in ApiProviderName]?: ProviderSettings } = {};
+  for (const name of Object.keys(value as Rec)) {
+    if (!isApiProviderName(name)) fail(`providers has an entry that is not an API provider (${API_PROVIDER_NAMES.join(", ")})`);
+    const at = `providers.${name}`;
+    const rec = record((value as Rec)[name], at, [...TOP_LEVEL_PROVIDER_SETTINGS]);
+    const model = prefixed(at, () => parseModelText(rec["model"]));
+    const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], `${at}.maxOutputTokens`, name);
+    let apiBaseUrl: string | undefined;
+    if (rec["apiBaseUrl"] !== undefined) {
+      const normalized = normalizeApiBaseUrlStrict(rec["apiBaseUrl"], `${at}.apiBaseUrl`, API_PROVIDERS[name].baseUrlPath);
+      apiBaseUrl = normalized.ok ? normalized.url : fail(normalized.message);
+    }
+    const requestTimeoutMs = parseRequestTimeout(rec["requestTimeoutMs"], `${at}.requestTimeoutMs`);
+    const maxRetries = prefixed(at, () => parseMaxRetries(rec["maxRetries"]));
+    providers[name] = {
+      ...(model === undefined ? {} : { model }),
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
+      ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
+      ...(maxRetries === undefined ? {} : { maxRetries }),
+    };
+  }
+  return providers;
 }
 
 function parseMaxRetries(value: unknown): number | undefined {
@@ -153,7 +206,9 @@ function parseProfiles(value: unknown, topLimits: Partial<Limits> | undefined): 
     // N-14: a profile is named by its position, never by its name.
     const at = `profiles[${index}]`;
     if (!PROFILE_NAME.test(name)) fail(`${at} has a name that is not a valid profile name`);
-    const rec = record((value as Rec)[name], at, ["policy", "verifiers", "limits", "workflowRef"]);
+    const rec = record((value as Rec)[name], at, ["provider", "policy", "verifiers", "limits", "workflowRef"]);
+    // SP-D10: the quick form's provider with this profile.
+    const provider = rec["provider"] === undefined ? undefined : parseProviderName(rec["provider"], `${at}.provider`);
     const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"]));
     const verifiers = rec["verifiers"] === undefined ? undefined : prefixed(at, () => parseVerifiers(rec["verifiers"]));
     const limits = rec["limits"] === undefined ? undefined : prefixed(at, () => parsePartialLimits(rec["limits"]));
@@ -161,6 +216,7 @@ function parseProfiles(value: unknown, topLimits: Partial<Limits> | undefined): 
     const workflowRef = rec["workflowRef"] === undefined ? undefined : parseWorkflowRef(rec["workflowRef"], `${at}.workflowRef`);
     if (limits !== undefined) checkProfileLimits(at, limits, topLimits);
     profiles[name] = {
+      ...(provider === undefined ? {} : { provider }),
       ...(policy === undefined ? {} : { policy }),
       ...(verifiers === undefined ? {} : { verifiers }),
       ...(limits === undefined ? {} : { limits }),
@@ -248,6 +304,8 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
       "language",
       "profiles",
       "workflows",
+      "provider",
+      "providers",
     ]);
     if (rec["schemaVersion"] !== CONFIG_SCHEMA_VERSION) fail("config schemaVersion must be 1");
     const model = parseModelText(rec["model"]);
@@ -263,6 +321,12 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
     const language = parseLanguage(rec["language"]);
     const profiles = rec["profiles"] === undefined ? undefined : parseProfiles(rec["profiles"], limits);
     const workflows = rec["workflows"] === undefined ? undefined : parseWorkflows(rec["workflows"]);
+    const provider = rec["provider"] === undefined ? undefined : parseProviderName(rec["provider"], "provider");
+    const providers = rec["providers"] === undefined ? undefined : parseProviders(rec["providers"]);
+    // SP-D3: providers.anthropic and the top-level settings are the same thing; both is ambiguous.
+    if (providers?.anthropic !== undefined && TOP_LEVEL_PROVIDER_SETTINGS.some((field) => rec[field] !== undefined)) {
+      fail(`providers.anthropic cannot be given together with the top-level ${TOP_LEVEL_PROVIDER_SETTINGS.join(", ")}: they are the same settings; keep one of them`);
+    }
     const config: CodarynConfig = {
       schemaVersion: 1,
       ...(model === undefined ? {} : { model }),
@@ -278,6 +342,8 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
       ...(language === undefined ? {} : { language }),
       ...(profiles === undefined ? {} : { profiles }),
       ...(workflows === undefined ? {} : { workflows }),
+      ...(provider === undefined ? {} : { provider }),
+      ...(providers === undefined ? {} : { providers }),
     };
     return { ok: true, config };
   } catch (error) {

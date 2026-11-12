@@ -31,6 +31,7 @@ import type {
   ModelProviderName,
   ToolResult,
 } from "../../src/contracts/index.js";
+import { LOOSE_SK_SHAPE, OPENAI_KEY_ENV } from "../fixtures/openai.js";
 import { FAKE_API_KEYS } from "../fixtures/secrets.js";
 import { NET_GUARD_LOG_ENV } from "./net-guard.js";
 
@@ -54,6 +55,21 @@ export interface EnvOptions {
    * it must not have the shape of a real key. Anything else throws.
    */
   readonly fakeApiKey?: string;
+  /**
+   * Sets OPENAI_API_KEY (the second provider, DR-31) the same way: only a value from FAKE_API_KEYS
+   * without the shape of a real key of either provider.
+   */
+  readonly fakeOpenAiKey?: string;
+}
+
+/** Key variables a test can never set through `extra` (contract API_KEY_ENVS once SP-1 is on main). */
+const KEY_ENVS: readonly string[] = [ANTHROPIC_API_KEY_ENV, OPENAI_KEY_ENV];
+
+function checkedFakeKey(value: string): string {
+  if (!FAKE_API_KEYS.includes(value) || new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(value) || LOOSE_SK_SHAPE.test(value)) {
+    throw new Error("Integration tests set only the fake API keys from tests/fixtures/secrets.ts.");
+  }
+  return value;
 }
 
 /**
@@ -88,18 +104,13 @@ export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
   }
   Object.assign(env, DETERMINISTIC_ENV);
   for (const [name, value] of Object.entries(options.extra ?? {})) {
-    if (name.toUpperCase() === ANTHROPIC_API_KEY_ENV) {
+    if (KEY_ENVS.includes(name.toUpperCase())) {
       throw new Error("Integration tests never set an API key variable.");
     }
     env[name] = value;
   }
-  if (options.fakeApiKey !== undefined) {
-    const value = options.fakeApiKey;
-    if (!FAKE_API_KEYS.includes(value) || new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(value)) {
-      throw new Error("Integration tests set only the fake API keys from tests/fixtures/secrets.ts.");
-    }
-    env[ANTHROPIC_API_KEY_ENV] = value;
-  }
+  if (options.fakeApiKey !== undefined) env[ANTHROPIC_API_KEY_ENV] = checkedFakeKey(options.fakeApiKey);
+  if (options.fakeOpenAiKey !== undefined) env[OPENAI_KEY_ENV] = checkedFakeKey(options.fakeOpenAiKey);
   return env;
 }
 

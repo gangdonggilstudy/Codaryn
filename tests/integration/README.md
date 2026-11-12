@@ -16,6 +16,7 @@
 | `y01` | 모델 목록 |
 | `n01`~`n05` | 사용성 |
 | `n06`~`n09` | 범용 작업 |
+| `o00`(`o01`~`o04`는 어댑터 뒤) | OpenAI 모의 API |
 
 ## 수용 기준 대응
 
@@ -196,6 +197,34 @@
 
 - task 파일은 `policy`와 `verifiers`를 반드시 적으므로 정의의 정책·검증기 기본값은 간편 형식에만 쓰인다. 그래서 organize task는 `planActions`를 직접 적는다(`writeOrganizeTask`).
 - 하드 링크가 없는 볼륨에서의 동의 없는 이동 중단(DR-21, `consent_required`)은 이 기계(NTFS)에서 재현할 수 없어 통합 사례로 두지 않는다. 읽기 전용 원본도 정상 이동됨을 확인했다. 도구·store 유닛이 맡는다.
+
+## OpenAI 모의 API (`o00`~, 두 번째 제공자 SP-5 준비)
+
+[두 번째 제공자 설계](../../docs/design/second-provider.md)와 [사실 확인](../../docs/design/second-provider-facts.md)(C-1~C-15)을 따른 가짜 Responses API(`tests/support/fake-openai.ts`)와 값(`tests/fixtures/openai.ts`)이다. **모의 API 검증이며 실제 API 검증이 아니다.** 어댑터(SP-5)가 올라오면 `o01`~`o04`(실행·설정·오류·모델 목록, 사례 목록은 PM이 받은 설계 OI-01~OI-51)를 붙인다.
+
+- 가짜 서버
+  - `POST /v1/responses`와 `GET /v1/models`만 받는다. CLI 설정의 주소는 `<url>/v1`이다(`baseUrl`).
+  - 받은 요청을 모두 기록한다. 서버가 요청을 다 받은 시각도 남겨 Retry-After 최소 대기를 서버 쪽에서 잰다.
+- 규칙: 어기면 400과 OpenAI 오류 본문이고, 대본을 쓰지 않는다. 메시지는 필드와 위치만 말하고 값은 싣지 않는다.
+  - 사실 문서 규칙(C-n)
+    - `Authorization: Bearer`
+    - `model`, `input` 목록, `max_output_tokens` 16 이상, `store: false` 명시
+    - 평평한 함수 도구, `strict: false`, 이름 `^[a-zA-Z0-9_-]{1,64}$`
+    - `function_call_output`의 `call_id`와 문자열 `output`
+    - Chat Completions 필드(`messages`, `function` 감싸기)와 `previous_response_id`가 없음
+  - 설계 규칙(메시지 끝 `(expected by the design)`)
+    - 직전 응답의 출력 항목(추론 항목 포함)을 같은 순서·같은 JSON으로 모두 되돌림
+    - `function_call`과 `function_call_output`이 `call_id`로 하나씩 짝
+    - 다른 제공자의 헤더와 선택 헤더(`OpenAI-Organization`·`-Project`)를 보내지 않음
+    - 모델 목록에 쪽 넘김 질의가 없음
+  - 대화 사슬(매 요청이 앞 요청의 입력과 응답 출력으로 시작)은 서버가 막지 않는다. 사례가 `assertContinuation`으로 단언한다(PM 결정).
+- 가짜 키
+  - `FAKE_OPENAI_KEY`는 `cliEnv({ fakeOpenAiKey })`로만 `OPENAI_API_KEY`에 들어간다.
+  - `extra`로는 어느 키 변수도 넣을 수 없다. `sk-`로 시작하는 값은 가짜 키로도 받지 않는다.
+  - 키 모양 거부 사례용 `sk-` 모양 값은 `skShapedValue`로 실행 중에만 만든다. 소스에 그 모양이 없음을 `o00`이 확인한다.
+- `o00`은 CLI 없이 `fetch`로 가짜 서버만 시험한다. 응답 모양, 사실·설계 규칙 위반, 대본 소진, 사슬 검사, 오류·할당량 본문, 모델 목록, 매달림·범람, `cliEnv` 가드, fixture 불변식을 본다.
+  - 규칙 셋(`store`, `strict`, 출력 되돌림)을 빌드 산출물에서 하나씩 빼면 `o00`이 실패함을 확인했다.
+- 제공자 계약(SP-1)이 main에 오면 `OPENAI_KEY_ENV`와 키 변수 목록을 계약 상수(`OPENAI_API_KEY_ENV`, `API_KEY_ENVS`, `API_KEY_PATTERN_SOURCES`)로 바꾼다.
 
 ## 진단 (Z-1)
 

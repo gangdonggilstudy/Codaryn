@@ -99,12 +99,17 @@ describe("events after R-1 L-1", () => {
     const decision = events.find((event) => event.kind === "record" && event.record.type === "tool_decision");
     assert.ok(decision !== undefined && decision.kind === "record" && decision.record.type === "tool_decision");
     assert.equal(decision.record.tool, UNKNOWN_TOOL_NAME);
-    // AC-D15 (engine, G-A branch): once the engine records an unsafe call id as `codaryn-call-<n>`
-    // and the contract has CALL_ID_PATTERN_SOURCE, the id must match it. Before that, the app layer
-    // masks the model's id, so its prefix stays and the secret becomes a token.
-    const callIdPattern = (contracts as Readonly<Record<string, unknown>>)["CALL_ID_PATTERN_SOURCE"];
+    // AC-D15 (engine 0824dde, in the bundle): the model's id held a registered secret, so the engine
+    // records a replacement, REPLACED_CALL_ID_PREFIX and a number, which passes CALL_ID_PATTERN_SOURCE.
+    // In a tree without AC-D15 (no such constants) the app layer masks the model's id instead, so its
+    // prefix stays and the secret becomes a token.
+    const exported = contracts as Readonly<Record<string, unknown>>;
+    const callIdPattern = exported["CALL_ID_PATTERN_SOURCE"];
+    const replacedPrefix = exported["REPLACED_CALL_ID_PREFIX"];
     if (typeof callIdPattern === "string") {
       assert.match(decision.record.callId, new RegExp(callIdPattern), "the engine's safe call id");
+      assert.equal(typeof replacedPrefix, "string", "AC-D15 has both constants");
+      assert.equal(decision.record.callId.startsWith(String(replacedPrefix)), true, "an id with a secret is replaced, not kept");
     } else {
       assert.equal(decision.record.callId.startsWith("call-"), true, "the id is masked, not dropped");
     }

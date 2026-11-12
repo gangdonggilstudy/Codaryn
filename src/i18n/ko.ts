@@ -11,6 +11,8 @@ export const KO_MESSAGES: MessageTexts = {
   "error.label": "오류",
   "error.fix_label": "고치는 법",
   "error.doctor_hint": "점검: codaryn doctor",
+  "error.hint.quick_form_needs_task":
+    "plan, apply, review의 간편 형식(--workspace)은 한도를 포함한 실행 설정을 설정 파일에서 읽습니다. 대신 계획 실행의 task를 --task로 주세요. task는 자기 설정과 비밀 값을 함께 가져옵니다.",
 
   "diagnostic.json_syntax": "JSON 문법 오류: {line}줄 {column}열",
   "diagnostic.unknown_field": "{field}에 모르는 필드가 있습니다(이름은 표시하지 않습니다)",

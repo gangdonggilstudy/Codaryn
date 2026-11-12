@@ -197,6 +197,13 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("the quick form hint names the quick form and the --task form (R-12 L-2)", () => {
+    for (const language of LANGS) {
+      const text = MESSAGE_TEXTS[language]["error.hint.quick_form_needs_task"];
+      assert.ok(text.includes("--workspace") && text.includes("--task"), language);
+    }
+  });
+
   test("the parked files texts name the folder they are left in (R-16 L-1)", () => {
     for (const language of LANGS) {
       for (const id of ["revert.parked", "doctor.lock.parked_left"] as const) {

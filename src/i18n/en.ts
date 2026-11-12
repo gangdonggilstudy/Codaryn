@@ -12,6 +12,8 @@ export const EN_MESSAGES: MessageTexts = {
   "error.label": "error",
   "error.fix_label": "To fix",
   "error.doctor_hint": "Check: codaryn doctor",
+  "error.hint.quick_form_needs_task":
+    "The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.",
 
   "diagnostic.json_syntax": "JSON syntax error at line {line}, column {column}",
   "diagnostic.unknown_field": "{field} has an unknown field (its name is not shown)",

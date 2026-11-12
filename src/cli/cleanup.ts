@@ -338,6 +338,17 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
       ),
     );
   }
+  // U-3 (R-34b P-2, R-34c L-1): folders named like a leftover but without the cleanup's mark are
+  // shown only; they are never items and never removed (StateSummary.unknownFolders, absent when none).
+  const unknownFolders = summary.unknownFolders;
+  if (unknownFolders !== undefined && unknownFolders.count > 0) {
+    out.push(
+      textOr(
+        () => messages.format("cleanup.summary.unknown_folders", { count: unknownFolders.count, bytes: unknownFolders.bytes }),
+        `Unknown folders (named like a cleanup's leftover but without its mark; never removed): ${unknownFolders.count} (${unknownFolders.bytes} bytes)`,
+      ),
+    );
+  }
   out.push("");
   if (plan.items.length === 0 && plan.blocked.length === 0) {
     out.push(messages.format("cleanup.nothing"));
@@ -392,7 +403,8 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
       out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}.`);
       if (notReverted > 0) {
         out.push(
-          `The records of ${notReverted} run(s) not reverted, or only partly, are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.`,
+          // U-3: the three kinds the head line names (NOT_REVERTED_WARNINGS), a damaged run among them.
+          `The records of ${notReverted} run(s) not reverted, only partly reverted, or whose records cannot be checked are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.`,
         );
       }
       if (discarded) out.push("People's discarded files are deleted only with --delete-discarded besides.");

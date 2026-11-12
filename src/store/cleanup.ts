@@ -15,10 +15,11 @@
 
 import { randomBytes } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { appendFile, lstat, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, lstat, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  CLEANUP_LEFTOVER_MARK_FILE_NAME,
   CLEANUP_LEFTOVER_PATTERN_SOURCE,
   CLEANUP_LOG_FILE_NAME,
   CLEANUP_WARNING_CODES,
@@ -27,11 +28,13 @@ import {
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   cleanupRecordWarnings,
+  isCleanupLeftoverMark,
   needsNotRevertedConfirmation,
   selectedAsReverted,
 } from "../contracts/index.js";
 import type {
   ApplyCleanup,
+  CleanupLeftoverMark,
   CleanupBlockCode,
   CleanupItem,
   CleanupItemRef,
@@ -58,17 +61,20 @@ import { isStoredRunId, listRuns, runIdSecond } from "./runs.js";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LEFTOVER = new RegExp(CLEANUP_LEFTOVER_PATTERN_SOURCE);
 const LEFTOVER_PREFIX = "cleanup-";
-/**
- * DR-44 P-2 (R-34b L-2): the file applyCleanup writes into a folder it moves aside. Only a folder of
- * the leftover name that holds it is a leftover; it is removed last, so what a failed removal leaves
- * still has it.
- */
-const LEFTOVER_MARKER = ".codaryn-cleanup";
+/** A mark file larger than this is not read (the mark is a few dozen bytes). */
+const MAX_MARK_BYTES = 4096;
 
-/** Whether `dir` holds the leftover marker as a regular file. */
-async function hasMarker(dir: string): Promise<boolean> {
+/**
+ * R-34b P-2: whether the folder `dir` holds its own mark (CLEANUP_LEFTOVER_MARK_FILE_NAME as a plain
+ * file whose JSON is isCleanupLeftoverMark for `leftoverId`). applyCleanup writes it right after the
+ * move aside and removes it last, so what a failed removal leaves still has it.
+ */
+async function hasOwnMark(dir: string, leftoverId: string): Promise<boolean> {
+  const file = join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME);
   try {
-    return (await lstat(join(dir, LEFTOVER_MARKER))).isFile();
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > MAX_MARK_BYTES) return false;
+    return isCleanupLeftoverMark(JSON.parse(await readFile(file, "utf8")) as unknown, leftoverId);
   } catch {
     return false;
   }
@@ -144,6 +150,8 @@ interface Scan {
   readonly orphanDiscarded: readonly { readonly runId: RunId; readonly tree: Tree }[];
   /** DR-44 (d): folders an earlier cleanup could not remove entirely, by name. */
   readonly leftovers: readonly { readonly leftoverId: string; readonly tree: Tree }[];
+  /** R-34b P-2: folders named like a leftover without their own mark: shown, never items. */
+  readonly unknownFolders: readonly Tree[];
   readonly parked: StateSize;
   readonly lockHolder: string | null;
 }
@@ -207,6 +215,7 @@ async function scan(workspaceRoot: string): Promise<Scan> {
     if (tree !== null) orphanDiscarded.push({ runId: name as RunId, tree });
   }
   const leftovers: { leftoverId: string; tree: Tree }[] = [];
+  const unknownFolders: Tree[] = [];
   let stateNames: string[] = [];
   try {
     stateNames = await readdir(stateDir);
@@ -214,10 +223,12 @@ async function scan(workspaceRoot: string): Promise<Scan> {
     stateNames = [];
   }
   for (const name of stateNames.filter((entry) => LEFTOVER.test(entry)).sort()) {
-    // P-2: a folder of that name without cleanup's marker is not cleanup's; it is never an item.
-    if (!(await hasMarker(join(stateDir, name)))) continue;
+    const leftoverId = name.slice(LEFTOVER_PREFIX.length);
     const tree = await measure(join(stateDir, name));
-    if (tree !== null) leftovers.push({ leftoverId: name.slice(LEFTOVER_PREFIX.length), tree });
+    if (tree === null) continue;
+    // R-34b P-2: a folder of that name without its own mark is not cleanup's: shown, never an item.
+    if (await hasOwnMark(join(stateDir, name), leftoverId)) leftovers.push({ leftoverId, tree });
+    else unknownFolders.push(tree);
   }
   const parked = (await measure(join(stateDir, PARKED_DIR_NAME)))?.size ?? ZERO;
   let lockHolder: string | null = null;
@@ -227,7 +238,7 @@ async function scan(workspaceRoot: string): Promise<Scan> {
   } catch {
     lockHolder = null;
   }
-  return { runs, orphanDiscarded, leftovers, parked, lockHolder };
+  return { runs, orphanDiscarded, leftovers, unknownFolders, parked, lockHolder };
 }
 
 const sizeOf = (trees: readonly Tree[]): StateSize => ({
@@ -251,6 +262,8 @@ export const summarizeState: SummarizeState = async (request) => {
     discarded: { runs: folders.length, ...sizeOf(folders) },
     parked: found.parked,
     leftovers: { count: found.leftovers.length, ...sizeOf(found.leftovers.map((item) => item.tree)) },
+    // R-34b P-2: absent when there is none.
+    ...(found.unknownFolders.length > 0 ? { unknownFolders: { count: found.unknownFolders.length, ...sizeOf(found.unknownFolders) } } : {}),
   } satisfies StateSummary;
 };
 
@@ -317,18 +330,15 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
       blocked.push({ target: "run", runId: id, code });
       continue;
     }
-    // DR-44 (a)-(c): the contract's one rule for a run's records. P-1 (R-34b L-1): records that cannot
-    // be checked (damaged) may hold changes that were never reverted, so they are treated as not reverted.
-    const warnings =
-      run.summary.kind === null
-        ? ordered(["not_reverted", ...(run.summary.recordsChanged ? (["records_changed"] as const) : [])])
-        : cleanupRecordWarnings({
-            kind: run.summary.kind,
-            changes: run.changes,
-            lastRevert: run.lastRevert,
-            hasDiscarded: run.discardedTree !== null,
-            recordsChanged: run.summary.recordsChanged,
-          });
+    // DR-44 (a)-(c): the contract's one rule for a run's records; R-34b P-1: records that cannot be
+    // checked (kind null) get records_unreadable and are confirmed apart like a run not reverted.
+    const warnings = cleanupRecordWarnings({
+      kind: run.summary.kind,
+      changes: run.changes,
+      lastRevert: run.lastRevert,
+      hasDiscarded: run.discardedTree !== null,
+      recordsChanged: run.summary.recordsChanged,
+    });
     items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings });
     prints.push((run.records as Tree).print);
     facts.push({ kind: run.summary.kind, planRunId: run.planRunId });
@@ -424,10 +434,10 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     }
     let whole = true;
     for (const name of names) {
-      if (name !== LEFTOVER_MARKER && !(await removeTried(join(dir, name)))) whole = false;
+      if (name !== CLEANUP_LEFTOVER_MARK_FILE_NAME && !(await removeTried(join(dir, name)))) whole = false;
     }
     if (!whole) return false;
-    return (await removeTried(join(dir, LEFTOVER_MARKER))) && (await removeTried(dir));
+    return (await removeTried(join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME))) && (await removeTried(dir));
   };
   const stateDir = await ensureStateDir(workspaceRoot);
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
@@ -474,7 +484,7 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       if (item.target === "leftover") {
         const name = `${LEFTOVER_PREFIX}${item.leftoverId}`;
         dir = join(stateDir, name);
-        exact = LEFTOVER.test(name) && (await hasExactEntry(stateDir, name)) && (await hasMarker(dir));
+        exact = LEFTOVER.test(name) && (await hasExactEntry(stateDir, name)) && (await hasOwnMark(dir, item.leftoverId));
       } else {
         const parent = join(stateDir, item.target === "run" ? RUNS_DIR_NAME : DISCARDED_DIR_NAME);
         dir = join(parent, item.runId);
@@ -492,21 +502,18 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       let aside = dir;
       if (item.target !== "leftover") {
         // Renamed aside first, so no half-removed run directory is ever left in place.
-        aside = join(stateDir, `${LEFTOVER_PREFIX}${randomBytes(8).toString("hex")}`);
+        const leftoverId = randomBytes(8).toString("hex");
+        aside = join(stateDir, `${LEFTOVER_PREFIX}${leftoverId}`);
         try {
           await rename(dir, aside);
         } catch {
           keepApply("io_error");
           continue;
         }
-        // P-2: mark it as cleanup's before anything of it is removed; without the mark it goes back.
-        try {
-          await writeFile(join(aside, LEFTOVER_MARKER), `${JSON.stringify({ schemaVersion: 1, kind: "cleanup_leftover", target: item.target, at: new Date().toISOString() })}\n`, { encoding: "utf8", flag: "wx" });
-        } catch {
-          await rename(aside, dir).catch(() => undefined);
-          keepApply("io_error");
-          continue;
-        }
+        // R-34b P-2: its mark, right after the move (exclusive create). One that cannot be written does
+        // not stop the removal; what a failed removal then leaves is an unknown folder.
+        const mark: CleanupLeftoverMark = { schemaVersion: 1, kind: "cleanup_leftover", leftoverId };
+        await writeFile(join(aside, CLEANUP_LEFTOVER_MARK_FILE_NAME), `${JSON.stringify(mark)}\n`, { encoding: "utf8", flag: "wx" }).catch(() => undefined);
       }
       // DR-44 (d): what is left aside is a leftover the next plan shows; not reported or logged as removed.
       if (!(await removeAside(aside))) {

@@ -245,6 +245,8 @@ export interface RunObserver {
     - 폐기 보관함(사람의 파일)은 `discarded: true`일 때만 지운다. 아니면 `not_confirmed`로 남는다.
     - DR-44 (a): 되돌리지 않았거나 일부만 되돌린 실행의 기록은 `includeNotReverted: true`일 때만 지운다. 아니면 `not_reverted_not_confirmed`로 남는다. 막지는 않는다. 미리보기의 `plan.totals.runs.notReverted`가 그 수다.
     - DR-44 (b)~(d): store의 경고(`partly_reverted`, 보관함이 남을 수 있을 때의 `discarded_left`, `leftover`), 남은 폴더 항목(target `leftover`, `leftoverId`), 남긴 까닭(`partly_removed`, `used_by_kept_apply`)을 그대로 넘긴다. 다 지우지 못한 것은 지웠다고 하지 않는다.
+    - R-34b P-1: 기록을 확인할 수 없는(손상된) 실행은 `records_unreadable`이고, 되돌리지 않은 실행과 같이 `includeNotReverted`가 있어야 지운다.
+    - R-34b P-2: 정리가 남긴 표지(`cleanup-leftover.json`)가 없는 `cleanup-<16 hex>` 폴더는 지울 항목이 아니다. 요약의 `unknownFolders`로 보이기만 한다.
     - 사람에게 묻는 것은 GUI 메인 프로세스다.
   - 인자는 읽기 전에 검사한다. 실행 디렉터리 이름 그대로(`isStoredRunId`), 0 이상의 정수 일수, `reverted: true`만, 모르는 필드 없음, 계약의 시각 꼴, 64자리 16진수 다이제스트, 참·거짓인 `discarded`와 `includeNotReverted`(둘 다 꼭 있어야 한다. 빼는 것은 동의가 아니다). 아니면 `invalid_arguments`다.
 

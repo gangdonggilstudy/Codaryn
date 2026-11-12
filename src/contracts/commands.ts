@@ -6,7 +6,7 @@
  */
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
-import type { ApiProviderName, DefaultConfigDisplay } from "./config.js";
+import type { ApiModelEnv, ApiProviderName, DefaultConfigDisplay } from "./config.js";
 import type { DoctorText, MessageLanguage, RunId } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
@@ -253,16 +253,20 @@ export interface ModelsOutput {
   /** In the API's order. */
   readonly models: readonly ModelsListEntry[];
   /**
-   * The model a run without a task `model.model` would use now: CODARYN_MODEL, else the config
-   * file's `model`. `listed` says whether that id is in `models`. Null when neither is set.
+   * The model a run of the listed provider without a task `model.model` would use now: that
+   * provider's model variable (DR-34, DR-36 (a): CODARYN_MODEL for anthropic, CODARYN_OPENAI_MODEL
+   * for openai), else the config file's model for that provider. `source` names which: the
+   * variable's name or "config". `listed` says whether that id is in `models`. Null when neither is
+   * set.
    */
-  readonly current: { readonly id: string; readonly source: "CODARYN_MODEL" | "config"; readonly listed: boolean } | null;
+  readonly current: { readonly id: string; readonly source: ApiModelEnv | "config"; readonly listed: boolean } | null;
   /**
    * The model written by `--use` or chosen at the terminal prompt, or null. `created`: the config
    * file did not exist and was created with `schemaVersion` and `model` only.
-   * `overriddenBy`: CODARYN_MODEL is set, so runs keep using it until it is unset.
+   * `overriddenBy`: the listed provider's model variable (DR-36 (a)) is set, so its runs keep using
+   * that variable's model until it is unset.
    */
-  readonly selected: { readonly id: string; readonly created: boolean; readonly overriddenBy: "CODARYN_MODEL" | null } | null;
+  readonly selected: { readonly id: string; readonly created: boolean; readonly overriddenBy: ApiModelEnv | null } | null;
 }
 
 /**

@@ -14,6 +14,8 @@ import {
   API_KEY_PATTERN_SOURCES,
   API_PROVIDERS,
   API_PROVIDER_NAMES,
+  API_BASE_URL_ENVS,
+  API_MODEL_ENVS,
   CODARYN_API_BASE_URL_ENV,
   CODARYN_MODEL_ENV,
   CODARYN_OPENAI_API_BASE_URL_ENV,
@@ -203,6 +205,17 @@ describe("SP-1: the provider table", () => {
     assert.deepEqual([CODARYN_OPENAI_MODEL_ENV, CODARYN_OPENAI_API_BASE_URL_ENV], ["CODARYN_OPENAI_MODEL", "CODARYN_OPENAI_API_BASE_URL"]);
     const variables = API_PROVIDER_NAMES.flatMap((name) => [API_PROVIDERS[name].keyEnv, API_PROVIDERS[name].modelEnv, API_PROVIDERS[name].baseUrlEnv]);
     assert.equal(new Set(variables).size, variables.length, "no variable is shared by two providers or two uses");
+  });
+
+  test("DR-36 (a): the model and address variable lists are the table's, so outputs can name either provider's", () => {
+    assert.deepEqual([...API_MODEL_ENVS], API_PROVIDER_NAMES.map((name) => API_PROVIDERS[name].modelEnv));
+    assert.deepEqual([...API_BASE_URL_ENVS], API_PROVIDER_NAMES.map((name) => API_PROVIDERS[name].baseUrlEnv));
+    const openaiCurrent: ModelsOutput["current"] = { id: "m", source: "CODARYN_OPENAI_MODEL", listed: true };
+    const openaiSelected: ModelsOutput["selected"] = { id: "m", created: false, overriddenBy: "CODARYN_OPENAI_MODEL" };
+    const anthropicSelected: ModelsOutput["selected"] = { id: "m", created: false, overriddenBy: "CODARYN_MODEL" };
+    // @ts-expect-error an address variable is not a model source
+    const wrong: ModelsOutput["current"] = { id: "m", source: "CODARYN_OPENAI_API_BASE_URL", listed: true };
+    assert.ok(openaiCurrent && openaiSelected && anthropicSelected && wrong);
   });
 
   test("DR-34 (b): another provider's key value is a secret only from 20 characters on", () => {

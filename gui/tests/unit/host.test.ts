@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { createHostHandler, serve } from "../../src/engine-host/host.js";
 import type { HostApp, HostDeps, HostDoctorRequest, HostMessages } from "../../src/engine-host/host.js";
 import { encodeLine, parseHostMessage } from "../../src/shared/protocol.js";
+import { fakeApp } from "./fake-app.js";
 import type { HostMessage } from "../../src/shared/protocol.js";
 
 const ABSOLUTE = path.resolve("workspace-for-test");
@@ -17,17 +18,13 @@ function harness(app: Partial<HostApp> = {}, messages?: HostMessages) {
   const logs: string[] = [];
   const requests: HostDoctorRequest[] = [];
   const deps: HostDeps = {
-    app: {
+    app: fakeApp({
       doctor: async (request) => {
         requests.push(request);
         return DOCTOR_OUTPUT;
       },
-      readSettings: async () => ({ ok: false, error: { code: "invalid_config", message: "not used" } }),
-      listModels: async () => ({ ok: false, error: { code: "missing_api_key", message: "not used" } }),
-      selectModel: async () => ({ ok: false, error: { code: "missing_api_key", message: "not used" } }),
-      startRun: async () => ({ ok: false, error: { code: "invalid_task", message: "not used" } }),
       ...app,
-    },
+    }),
     itemsIn: () => () => null,
     token: () => "0".repeat(32),
     // Marks every text that passed the host's cleaning, so a test sees which ones did.

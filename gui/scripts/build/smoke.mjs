@@ -34,10 +34,10 @@ const fakeModels = await fromRoot("tests", "support", "fake-models.js");
 const { FAKE_API_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
 const { ANTHROPIC_API_KEY_ENV } = await fromRoot("src", "contracts", "index.js");
 const closeFake = [];
-// Model answers in order: a run that reads a file and ends; a run that hangs (cancelled from the
+// Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
 // window); a run that hangs (cancelled by closing the window).
 const steps = [
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "read_file", { path: "a.txt" })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } })]),
   fakeApi.replyText("done"),
   { kind: "hang" },
   { kind: "hang" },
@@ -141,7 +141,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "cancelRun,doctor,forgetRecent,info,listModels,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,recent,reveal,selectModel,settings,startRun,tree";
+const API = "cancelRun,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,previewRevert,recent,reveal,revert,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -220,7 +220,18 @@ const expected = [
   ["secondStartRefused", (v) => v.ok === false && v.code === "run_active"],
   ["cancelAsked", (v) => v === true],
   ["cancelDone", (v) => v === "cancelled"],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // GU-4: the run list, a revert preview, refused requests, and the revert the main process asked about.
+  ["runsListed", (v) => v === "2"],
+  ["runsRows", (v) => rows(v).length === 2 && rows(v).every((r) => r.state === "checked")],
+  ["revertPreview", (v) => v === "1"],
+  ["revertPreviewActions", (v) => JSON.stringify(v) === JSON.stringify(["deleted"])],
+  ["madeBeforeRevert", (v) => v === true],
+  ["revertForged", (v) => v.ok === false && v.code === "unknown_preview"],
+  ["previewLatest", (v) => v.ok === false && v.code === "invalid_args"],
+  ["previewUnlisted", (v) => v.ok === false && v.code === "unknown_run"],
+  ["revertDone", (v) => v === "complete"],
+  ["madeAfterRevert", (v) => v === false],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

@@ -164,6 +164,14 @@ export function clock(seconds: number): string {
   return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
 }
 
+/** An ISO time as local `YYYY-MM-DD HH:MM`, or "" when it is not one. */
+export function localDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
 /** A record's ISO time as local `HH:MM:SS`, or "" when there is none. */
 export function localTime(iso: string | null): string {
   if (iso === null) return "";

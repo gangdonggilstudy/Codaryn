@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHostHandler } from "../../src/engine-host/host.js";
 import { MAX_TREE_ENTRIES, TREE_PAGE_SIZE, createTreeLister, isTreeDir } from "../../src/engine-host/tree.js";
 import type { TreeEngine, TreeResult } from "../../src/engine-host/tree.js";
+import { fakeApp } from "./fake-app.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
 
 const GUI = fileURLToPath(new URL("../../../", import.meta.url));
@@ -157,7 +158,7 @@ test("tree: the host checks the call's arguments before listing", async () => {
   const requests: unknown[] = [];
   const written: unknown[] = [];
   const handler = createHostHandler({
-    app: { doctor: async () => null, readSettings: async () => null, listModels: async () => null, selectModel: async () => null, startRun: async () => null },
+    app: fakeApp(),
     itemsIn: () => () => null,
     token: () => "0".repeat(32),
     messages: { texts: () => ({ language: "en", texts: {} }) },

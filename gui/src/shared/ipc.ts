@@ -21,6 +21,9 @@ export const IPC_CHANNELS = {
   selectModel: "codaryn:models:select",
   startRun: "codaryn:run:start",
   cancelRun: "codaryn:run:cancel",
+  listRuns: "codaryn:runs:list",
+  previewRevert: "codaryn:runs:previewrevert",
+  revert: "codaryn:runs:revert",
 } as const;
 
 /**
@@ -488,6 +491,112 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       protectedChanged: protectedChanged as number | null,
     },
   };
+}
+
+/** GU-4: `listRuns` arguments: `{workspace}`. */
+export function parseWorkspaceArgs(value: unknown): { readonly workspace: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace"])) return null;
+  return isHandle(value["workspace"]) ? { workspace: value["workspace"] } : null;
+}
+
+/** GU-4: `previewRevert` arguments: `{workspace, runId}`, a run id from the list (never "latest"). */
+export function parseRunArgs(value: unknown): { readonly workspace: string; readonly runId: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId"])) return null;
+  const { workspace, runId } = value;
+  return isHandle(workspace) && isRunId(runId) ? { workspace, runId } : null;
+}
+
+/** GU-4: `revert` arguments: `{preview}`, the token of a preview the main process made. */
+export function parsePreviewArgs(value: unknown): { readonly preview: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["preview"])) return null;
+  return isHandle(value["preview"]) ? { preview: value["preview"] } : null;
+}
+
+const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
+const WORD = /^[a-z][a-z_-]{0,39}$/;
+export const REVERT_ACTIONS = ["restored", "deleted", "moved_back", "restored_from_discard"] as const;
+
+/** GU-4 (3.8): one row of the run list. A damaged run has its id only. */
+export type RunListItem =
+  | {
+      readonly state: "checked";
+      readonly runId: string;
+      readonly kind: "run" | "apply";
+      readonly startedAt: string | null;
+      readonly taskId: string;
+      readonly status: string | null;
+      readonly reason: string | null;
+      readonly changes: number | null;
+      readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
+      readonly revertRecordDamaged: boolean;
+    }
+  | { readonly state: "damaged"; readonly runId: string };
+
+export type RunsReply = { readonly ok: true; readonly runs: readonly RunListItem[]; readonly omitted: number } | { readonly ok: false; readonly code: string };
+
+const revertedMark = (value: unknown): { at: string; status: "complete" | "partial" } | null | undefined => {
+  if (value === null) return null;
+  if (!isObj(value) || typeof value["at"] !== "string" || !TIME.test(value["at"]) || (value["status"] !== "complete" && value["status"] !== "partial")) return undefined;
+  return { at: value["at"], status: value["status"] };
+};
+
+/** The engine host's run list, checked field by field. */
+export function toRunsReply(value: unknown): RunsReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { runs, omitted } = value;
+  if (!Array.isArray(runs) || runs.length > 1000 || !count(omitted)) return fail;
+  const items: RunListItem[] = [];
+  for (const run of runs) {
+    if (!isObj(run) || !isRunId(run["runId"])) return fail;
+    if (run["state"] === "damaged") {
+      items.push({ state: "damaged", runId: run["runId"] });
+      continue;
+    }
+    const { kind, startedAt, taskId, status, reason, changes, revertRecordDamaged } = run;
+    const reverted = revertedMark(run["reverted"]);
+    if (run["state"] !== "checked" || (kind !== "run" && kind !== "apply") || !(startedAt === null || (typeof startedAt === "string" && TIME.test(startedAt)))) return fail;
+    if (!shortText(taskId) || !(status === null || (typeof status === "string" && WORD.test(status))) || !(reason === null || (typeof reason === "string" && WORD.test(reason)))) return fail;
+    if (!(changes === null || count(changes)) || reverted === undefined || typeof revertRecordDamaged !== "boolean") return fail;
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged });
+  }
+  return { ok: true, runs: items, omitted };
+}
+
+/** GU-4 (3.8): a revert or its preview. */
+export interface RevertView {
+  readonly runId: string;
+  readonly status: "complete" | "partial";
+  readonly dryRun: boolean;
+  readonly reverted: readonly { readonly path: string; readonly action: (typeof REVERT_ACTIONS)[number]; readonly from: string | null; readonly unsafe: boolean }[];
+  readonly skipped: readonly { readonly path: string; readonly reason: string }[];
+  readonly moveSafetyUnchecked: boolean;
+  readonly revertedBefore: { readonly at: string; readonly status: "complete" | "partial" } | null;
+}
+
+/** A preview carries the token its revert takes; a revert does not. */
+export type RevertReply = { readonly ok: true; readonly view: RevertView; readonly preview: string | null } | { readonly ok: false; readonly code: string };
+
+/** The engine host's revert value, checked field by field. */
+export function toRevertView(value: unknown): { readonly ok: true; readonly view: RevertView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { runId, status, dryRun, reverted, skipped, moveSafetyUnchecked } = value;
+  const before = revertedMark(value["revertedBefore"]);
+  if (!isRunId(runId) || (status !== "complete" && status !== "partial") || typeof dryRun !== "boolean" || typeof moveSafetyUnchecked !== "boolean" || before === undefined) return fail;
+  if (!Array.isArray(reverted) || reverted.length > 1000 || !Array.isArray(skipped) || skipped.length > 1000) return fail;
+  const files: RevertView["reverted"][number][] = [];
+  for (const file of reverted) {
+    if (!isObj(file) || !shortText(file["path"]) || typeof file["action"] !== "string" || !(REVERT_ACTIONS as readonly string[]).includes(file["action"])) return fail;
+    if (!(file["from"] === null || shortText(file["from"])) || typeof file["unsafe"] !== "boolean") return fail;
+    files.push({ path: file["path"], action: file["action"] as (typeof REVERT_ACTIONS)[number], from: file["from"] as string | null, unsafe: file["unsafe"] });
+  }
+  const skips: RevertView["skipped"][number][] = [];
+  for (const file of skipped) {
+    if (!isObj(file) || !shortText(file["path"]) || typeof file["reason"] !== "string" || !WORD.test(file["reason"])) return fail;
+    skips.push({ path: file["path"], reason: file["reason"] });
+  }
+  return { ok: true, view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before } };
 }
 
 /** The engine host's answer to `selectModel`, checked. */

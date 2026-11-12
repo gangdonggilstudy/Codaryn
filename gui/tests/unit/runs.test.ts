@@ -9,7 +9,8 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { createHostHandler, serve } from "../../src/engine-host/host.js";
-import type { HostApp, HostDeps } from "../../src/engine-host/host.js";
+import type { HostDeps } from "../../src/engine-host/host.js";
+import { fakeApp } from "./fake-app.js";
 import { createRunRegistry, runResultValue } from "../../src/engine-host/runs.js";
 import type { HostStartRunRequest } from "../../src/engine-host/runs.js";
 import { RunManager } from "../../src/main/runs.js";
@@ -133,7 +134,7 @@ test("runs (GU-3): the host checks startRun's arguments, cancels by token, and c
   const written: HostMessage[] = [];
   const fake = fakeRun([record(1, "run_started")]);
   const deps: HostDeps = {
-    app: { doctor: async () => null, readSettings: async () => null, listModels: async () => null, selectModel: async () => null, startRun: fake.startRun } as HostApp,
+    app: fakeApp({ startRun: fake.startRun }),
     messages: { texts: () => ({ language: "en", texts: {} }) },
     tree: async () => null,
     shown: (t) => t,
@@ -176,7 +177,7 @@ test("runs (GU-3): the host checks startRun's arguments, cancels by token, and c
     for (const line of lines) yield line;
     await sleep(20);
   }
-  await serve(input(), { ...deps, app: { ...deps.app, startRun: second.startRun } as HostApp, write: () => undefined }, { graceMs: 10 });
+  await serve(input(), { ...deps, app: fakeApp({ startRun: second.startRun }), write: () => undefined }, { graceMs: 10 });
   assert.deepEqual(second.cancelled, [RUN_ID]);
 });
 

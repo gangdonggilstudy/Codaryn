@@ -12,6 +12,7 @@ import { Shell } from "./shell/shell.js";
 import { newTaskScreen } from "./run/new-task.js";
 import { RunModel, clock } from "./run/run-model.js";
 import { runScreen } from "./run/run-screen.js";
+import { runsScreen } from "./runs/runs-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
@@ -65,6 +66,7 @@ async function start(): Promise<void> {
   const run = new RunModel();
   shell.add(newTaskScreen({ texts, api, run, current: () => current, open: openWorkspace, showRun: () => shell?.show("run") }));
   shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text) }));
+  shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text) }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.setEngine(info.engine);

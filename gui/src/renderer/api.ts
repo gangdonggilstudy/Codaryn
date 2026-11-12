@@ -12,7 +12,11 @@ import type {
   OpenReply,
   ProfileView,
   RecentView,
+  RevertReply,
+  RevertView,
   RunDonePayload,
+  RunListItem,
+  RunsReply,
   RunEventsPayload,
   RunItemView,
   RunResultView,
@@ -38,6 +42,9 @@ export interface CodarynApi {
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
   onRunDone(listener: (payload: unknown) => void): void;
+  listRuns(workspace: string): Promise<unknown>;
+  previewRevert(workspace: string, runId: string): Promise<unknown>;
+  revert(preview: string): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -202,4 +209,39 @@ export function asRunDone(value: unknown): RunDonePayload | null {
   const labels = value["labels"];
   if (!isObj(result) || !str(result["status"]) || !str(result["reason"]) || !isObj(labels) || !str(labels["status"]) || !str(labels["reason"])) return null;
   return { runId: value["runId"], ok: true, result: result as unknown as RunResultView, labels: { status: labels["status"], reason: labels["reason"] } };
+}
+
+/** GU-4: the run list. Rows that do not fit are left out. */
+export function asRuns(value: unknown): RunsReply {
+  if (!isObj(value) || value["ok"] !== true || !Array.isArray(value["runs"])) return failed(value);
+  const runs: RunListItem[] = value["runs"].flatMap((run: unknown): RunListItem[] => {
+    if (!isObj(run) || !str(run["runId"]) || !RUN_ID.test(run["runId"])) return [];
+    if (run["state"] === "damaged") return [{ state: "damaged", runId: run["runId"] }];
+    if (run["state"] !== "checked" || (run["kind"] !== "run" && run["kind"] !== "apply") || !str(run["taskId"])) return [];
+    const reverted = isObj(run["reverted"]) && str(run["reverted"]["at"]) ? { at: run["reverted"]["at"], status: run["reverted"]["status"] === "partial" ? ("partial" as const) : ("complete" as const) } : null;
+    return [
+      {
+        state: "checked",
+        runId: run["runId"],
+        kind: run["kind"],
+        startedAt: str(run["startedAt"]) ? run["startedAt"] : null,
+        taskId: run["taskId"],
+        status: str(run["status"]) ? run["status"] : null,
+        reason: str(run["reason"]) ? run["reason"] : null,
+        changes: typeof run["changes"] === "number" ? run["changes"] : null,
+        reverted,
+        revertRecordDamaged: run["revertRecordDamaged"] === true,
+      },
+    ];
+  });
+  return { ok: true, runs, omitted: typeof value["omitted"] === "number" ? value["omitted"] : 0 };
+}
+
+/** GU-4: a revert or its preview (the main process checked the view already). */
+export function asRevert(value: unknown): RevertReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  if (!str(view["runId"]) || !Array.isArray(view["reverted"]) || !Array.isArray(view["skipped"])) return failed(value);
+  const preview = str(value["preview"]) && HEX.test(value["preview"]) ? value["preview"] : null;
+  return { ok: true, view: view as unknown as RevertView, preview };
 }

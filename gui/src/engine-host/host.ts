@@ -7,6 +7,7 @@
 import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
+import { revertValue, runsValue } from "./history.js";
 import { createRunRegistry } from "./runs.js";
 import type { HostStartRunRequest, RunItemOf } from "./runs.js";
 import { modelsValue, selectedValue, settingsValue } from "./settings.js";
@@ -36,6 +37,9 @@ export interface HostApp {
   selectModel(request: HostModelsRequest & { readonly model: string }): Promise<unknown>;
   /** GU-3: `startRun` with the quick form; the observer gets the run's events (RunEvent). */
   startRun(request: HostStartRunRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
+  /** GU-4: the run list (N-7) and a revert, dry run or not (N-7, AC 5.5). */
+  listRuns(request: { readonly workspace: string; readonly limit: number }): Promise<unknown>;
+  revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -140,6 +144,17 @@ function startRunArgs(args: unknown): { workspace: string; goal: string; profile
   return { workspace, goal, profile, workflowRef, language };
 }
 
+/** How many runs the list asks for (RUNS_MAX_LIMIT of the app layer is larger). */
+const RUN_LIST_LIMIT = 200;
+const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
+
+function workspaceArg(args: Obj, keys: readonly string[]): string {
+  if (!onlyKeys(args, keys)) throw new ArgsError();
+  const workspace = args["workspace"];
+  if (typeof workspace !== "string" || workspace.length > MAX_PATH_CHARS || !isAbsolute(workspace) || workspace.includes("\0")) throw new ArgsError();
+  return workspace;
+}
+
 function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] } {
   if (!isObj(args) || !onlyKeys(args, ["osLocale", "ids"])) throw new ArgsError();
   const osLocale = args["osLocale"] ?? null;
@@ -203,6 +218,19 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { language: chosen, ...rest } = startRunArgs(args);
         language = chosen;
         return runs.start(rest);
+      }
+      case "listRuns": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace"]);
+        return runsValue(await deps.app.listRuns({ workspace, limit: RUN_LIST_LIMIT }), deps.shown);
+      }
+      case "revert": {
+        // The window never names "latest": a run id the person chose from the list (3.8).
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "runId", "dryRun"]);
+        const { runId, dryRun } = args;
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || typeof dryRun !== "boolean") throw new ArgsError();
+        return revertValue(await deps.app.revert({ workspace, runId, dryRun }), deps.shown);
       }
       case "cancelRun": {
         if (!isObj(args) || !onlyKeys(args, ["run"]) || typeof args["run"] !== "string" || !/^[0-9a-f]{32}$/.test(args["run"])) throw new ArgsError();

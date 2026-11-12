@@ -12,6 +12,7 @@ import type { HostApp, HostModelsRequest } from "../../src/engine-host/host.js";
 import { ModelEntries } from "../../src/main/model-entries.js";
 import { parseEntryArgs, parseProviderArgs, toHostModelList, toSelectModelReply, toSettingsView } from "../../src/shared/ipc.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
+import { fakeApp } from "./fake-app.js";
 import type { HostMessage } from "../../src/shared/protocol.js";
 
 const CONFIG_PATH = "C:\\Users\\someone\\private-place\\config.json";
@@ -48,8 +49,7 @@ function host(app: Partial<HostApp>) {
   const written: HostMessage[] = [];
   const calls: HostModelsRequest[] = [];
   const handler = createHostHandler({
-    app: {
-      doctor: async () => null,
+    app: fakeApp({
       readSettings: async () => SETTINGS,
       listModels: async (request) => {
         calls.push(request);
@@ -59,9 +59,8 @@ function host(app: Partial<HostApp>) {
         calls.push(request);
         return { ok: true, output: { selected: { id: request.model, created: false, overriddenBy: "CODARYN_MODEL" } } };
       },
-      startRun: async () => null,
       ...app,
-    },
+    }),
     itemsIn: () => () => null,
     token: () => "0".repeat(32),
     messages: { texts: () => ({ language: "en", texts: {} }) },

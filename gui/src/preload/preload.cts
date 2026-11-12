@@ -23,6 +23,9 @@ const CHANNELS = {
   selectModel: "codaryn:models:select",
   startRun: "codaryn:run:start",
   cancelRun: "codaryn:run:cancel",
+  listRuns: "codaryn:runs:list",
+  previewRevert: "codaryn:runs:previewrevert",
+  revert: "codaryn:runs:revert",
 } as const;
 
 const EVENTS = {
@@ -71,6 +74,9 @@ const api = Object.freeze({
   startRun: (workspace: unknown, goal: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.startRun, { workspace: text(workspace), goal: text(goal), profile: text(profile), workflow: text(workflow) }),
   cancelRun: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.cancelRun),
+  listRuns: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listRuns, { workspace: text(workspace) }),
+  previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
+  revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
   /** One listener at a time for each; a new one replaces the old. */
   onRunEvents: (listener: unknown): void => {
     runEventsListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;

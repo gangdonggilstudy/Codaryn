@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -184,6 +184,23 @@ startGui({
       results["cancelAsked"] = await js("document.getElementById('run-confirm')?.hasAttribute('hidden') === false && document.activeElement?.id === 'run-keep'");
       await js("document.getElementById('run-cancel-sure').click(); true");
       results["cancelDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? document.getElementById('run-result')?.getAttribute('data-status') ?? 'no result' : null", 60_000);
+
+      // 5e. GU-4: the run list, a revert preview, refused requests, and the revert (the main process asks).
+      const secondHandle = second.ok ? second.handle : "";
+      const firstRun = (results["runResult"] as { runId?: string } | null)?.runId ?? "";
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      results["runsListed"] = await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["runsRows"] = await js("[...document.querySelectorAll('#runs-list li[data-run]')].map((li) => ({ state: li.getAttribute('data-state'), status: li.getAttribute('data-status') }))");
+      await js(`document.querySelector('[data-preview="${firstRun}"]')?.click(); true`);
+      results["revertPreview"] = await waitFor("(() => { const p = document.getElementById('revert-panel')?.getAttribute('data-preview'); return p && p !== 'loading' ? p : null; })()");
+      results["revertPreviewActions"] = await js("[...document.querySelectorAll('#revert-panel [data-action]')].map((li) => li.getAttribute('data-action'))");
+      results["madeBeforeRevert"] = existsSync(join(SECOND, "made.txt"));
+      results["revertForged"] = await js(`window.codaryn.revert(${JSON.stringify("0".repeat(32))})`);
+      results["previewLatest"] = await js(`window.codaryn.previewRevert(${JSON.stringify(secondHandle)}, 'latest')`);
+      results["previewUnlisted"] = await js(`window.codaryn.previewRevert(${JSON.stringify(secondHandle)}, '20200101T000000Z-00000000')`);
+      await js("document.getElementById('revert-run')?.click(); true");
+      results["revertDone"] = await waitFor("document.getElementById('revert-panel')?.getAttribute('data-revert') ?? null", 60_000);
+      results["madeAfterRevert"] = existsSync(join(SECOND, "made.txt"));
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

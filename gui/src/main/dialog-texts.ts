@@ -15,6 +15,10 @@ const KO = {
   "closeRun.keep": "계속 실행",
   "closeRun.unknown": "실행이 10초 안에 끝나지 않았습니다. 결과를 알 수 없습니다. 다음에 열 때 실행 목록에서 확인하세요.",
   "ok": "확인",
+  "revert.message": "실행 {runId}의 변경을 되돌릴까요?",
+  "revert.detail": "되돌릴 파일 {reverted}개, 건너뛸 파일 {skipped}개(미리보기 기준). 미리보기 뒤에 바뀐 파일은 건너뜁니다.",
+  "revert.confirm": "되돌리기",
+  "revert.keep": "되돌리지 않음",
 } as const;
 
 const EN: { readonly [K in keyof typeof KO]: string } = {
@@ -25,6 +29,10 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "closeRun.keep": "Keep running",
   "closeRun.unknown": "The run did not end within 10 seconds. Its result is not known. Check the run list next time.",
   "ok": "OK",
+  "revert.message": "Revert the changes of run {runId}?",
+  "revert.detail": "{reverted} files to revert, {skipped} to skip (as previewed). Files changed after the preview are skipped.",
+  "revert.confirm": "Revert",
+  "revert.keep": "Do not revert",
 };
 
 export type DialogTextId = keyof typeof KO;

@@ -24,6 +24,7 @@ import { dialogText } from "./dialog-texts.js";
 import type { DialogLanguage, DialogTextId } from "./dialog-texts.js";
 import { cancelActiveRun, registerIpc, texts } from "./ipc.js";
 import { RunManager } from "./runs.js";
+import { RunHistory } from "./history.js";
 import { ModelEntries } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -139,6 +140,7 @@ export function startGui(options: GuiOptions): void {
   });
   let initialWorkspace: { readonly handle: string; readonly name: string } | null = null;
   let language: DialogLanguage = "en";
+  const history = new RunHistory((size) => randomBytes(size), () => Date.now());
   const runs = new RunManager({
     send: (channel, payload) => {
       if (window !== null && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -156,9 +158,9 @@ export function startGui(options: GuiOptions): void {
   });
 
   /** One of the main process's own OS dialogs; resolves to the index of the button chosen. */
-  async function ask(id: DialogTextId, box: Omit<MessageBoxOptions, "message">): Promise<number> {
+  async function ask(id: DialogTextId, box: Omit<MessageBoxOptions, "message">, values: Readonly<Record<string, string | number>> = {}): Promise<number> {
     if (options.answerDialog !== undefined) return options.answerDialog(id);
-    const message = dialogText(language, id);
+    const message = dialogText(language, id, values);
     const shown = window !== null && !window.isDestroyed() ? await dialog.showMessageBox(window, { ...box, message }) : await dialog.showMessageBox({ ...box, message });
     return shown.response;
   }
@@ -234,6 +236,14 @@ export function startGui(options: GuiOptions): void {
       onLanguage: (chosen) => {
         language = chosen;
       },
+      history,
+      // 3.8, 6.6: the main process's own question; "do not revert" is the default.
+      confirmRevert: async (preview) => {
+        const values = { runId: preview.runId, reverted: preview.reverted, skipped: preview.skipped };
+        const buttons = [dialogText(language, "revert.confirm"), dialogText(language, "revert.keep")];
+        const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
     });
 
     const devTools = !app.isPackaged && process.env["CODARYN_GUI_DEVTOOLS"] === "1";
@@ -265,6 +275,7 @@ export function startGui(options: GuiOptions): void {
     window.on("closed", () => {
       window = null;
       workspaces.clear();
+      history.clear();
     });
     await window.loadURL(APP_INDEX_URL);
     if (devTools) window.webContents.openDevTools({ mode: "detach" });

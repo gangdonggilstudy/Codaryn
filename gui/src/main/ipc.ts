@@ -18,6 +18,11 @@ import {
   parseProviderArgs,
   parseRevealArgs,
   parseStartRunArgs,
+  parsePreviewArgs,
+  parseRunArgs,
+  parseWorkspaceArgs,
+  toRevertView,
+  toRunsReply,
   parseTreeArgs,
   isRunId,
   toDoctorView,
@@ -31,6 +36,8 @@ import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
+import type { RevertPreview, RunHistory } from "./history.js";
+import type { RevertReply, RunsReply } from "../shared/ipc.js";
 import type { Workspaces } from "./workspaces.js";
 
 const DOCTOR_TIMEOUT_MS = 60_000;
@@ -42,6 +49,9 @@ const MODELS_TIMEOUT_MS = 120_000;
 /** startRun answers after its checks (the CLI's order), before the engine works; the run itself has no time limit here. */
 const START_TIMEOUT_MS = 120_000;
 const CANCEL_TIMEOUT_MS = 10_000;
+const RUNS_TIMEOUT_MS = 30_000;
+/** A revert waits for the workspace lock and moves files back; its preview only reads. */
+const REVERT_TIMEOUT_MS = 120_000;
 
 /** What `startRun` answers the window. */
 export type StartRunReply = { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string };
@@ -62,6 +72,10 @@ export interface IpcDeps {
   readonly runs: RunManager;
   /** The window's language once the engine host chose it (for the main process's own dialogs). */
   readonly onLanguage: (language: "ko" | "en") => void;
+  /** GU-4: the run lists and revert previews. */
+  readonly history: RunHistory;
+  /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
+  readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -253,6 +267,57 @@ export function registerIpc(deps: IpcDeps): void {
     } finally {
       starting = false;
     }
+  });
+
+  // GU-4 (3.8): the run list, a revert preview (a dry run) and the revert, which takes the preview's token only.
+  handle(IPC_CHANNELS.listRuns, async (args): Promise<RunsReply> => {
+    const parsed = args.length === 1 ? parseWorkspaceArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("listRuns", { workspace: root }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const reply = toRunsReply(response.value);
+    if (reply.ok) deps.history.listedRuns(parsed.workspace, reply.runs.map((run) => run.runId));
+    return reply;
+  });
+
+  handle(IPC_CHANNELS.previewRevert, async (args): Promise<RevertReply> => {
+    const parsed = args.length === 1 ? parseRunArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    if (!deps.history.wasListed(parsed.workspace, parsed.runId)) return { ok: false, code: "unknown_run" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("revert", { workspace: root, runId: parsed.runId, dryRun: true }, REVERT_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const checked = toRevertView(response.value);
+    if (!checked.ok) return checked;
+    if (checked.view.runId !== parsed.runId || !checked.view.dryRun) return { ok: false, code: "host_error" };
+    const preview = deps.history.issuePreview({ workspace: parsed.workspace, runId: parsed.runId, reverted: checked.view.reverted.length, skipped: checked.view.skipped.length });
+    return { ok: true, view: checked.view, preview };
+  });
+
+  handle(IPC_CHANNELS.revert, async (args): Promise<RevertReply> => {
+    const parsed = args.length === 1 ? parsePreviewArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const preview = deps.history.takePreview(parsed.preview);
+    if (preview === null) return { ok: false, code: "unknown_preview" };
+    if (deps.runs.running) return { ok: false, code: "run_active" };
+    const root = workspaces.path(preview.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    if (!(await deps.confirmRevert(preview))) return { ok: false, code: "not_confirmed" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("revert", { workspace: root, runId: preview.runId, dryRun: false }, REVERT_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const checked = toRevertView(response.value);
+    if (!checked.ok) return checked;
+    if (checked.view.runId !== preview.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
+    return { ok: true, view: checked.view, preview: null };
   });
 
   handle(IPC_CHANNELS.cancelRun, async (args): Promise<boolean> => {

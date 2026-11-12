@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE,
   ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
+  API_KEY_PATTERN_SOURCES,
   anthropicRefusalShapeIn,
   createKeyRefusalCheck,
   holdsRefusedKeyShape,
@@ -83,5 +85,35 @@ describe("DR-40 (c), R-25 L-2: the narrowed Anthropic shape in linear time, same
     assert.ok(createKeyRefusalCheck([OTHER])(`x${OTHER}`), "a registered value glued to a letter");
     assert.ok(createKeyRefusalCheck([])(KEY));
     assert.equal(createKeyRefusalCheck(["", OTHER])("plain text"), false, "an empty value is ignored");
+  });
+});
+
+describe("DR-40 (b), R-25 L-1: a real-format key glued to what comes before it is refused", () => {
+  const ADMIN = p(PREFIX, "admin01-", body("Qq1-wW2_eE3rR4"));
+  const OAT = p(PREFIX, "oat01-", body("Ww2_eE3-rR4tT5"));
+
+  test("A4, A6: glued to a letter or to MY_, another key registered", () => {
+    const check = createKeyRefusalCheck([OTHER]);
+    assert.ok(check(`x${KEY}`), "A4");
+    assert.ok(check(`MY_${KEY}`), "A6");
+  });
+
+  test("A9, A11: none registered, glued to a letter or after a literal backslash-n", () => {
+    const check = createKeyRefusalCheck([]);
+    assert.ok(check(`x${ADMIN}`), "A9");
+    assert.ok(check(p("line", String.fromCharCode(92), "n", KEY)), "A11: a backslash and n as two characters");
+    assert.ok(check(`id9${OAT}`), "after a digit, another type");
+  });
+
+  test("the format branch alone: the prefix, 2 to 8 lower-case letters, 2 digits, a hyphen, 32 or more", () => {
+    const format = new RegExp(ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE);
+    assert.ok(format.test(`x${KEY}`));
+    assert.ok(format.test(p(PREFIX, "ab12-", "a".repeat(32))), "32 after the version");
+    assert.equal(format.test(p(PREFIX, "ab12-", "a".repeat(31))), false, "31");
+    assert.equal(format.test(p(PREFIX, "a12-", "a".repeat(40))), false, "one letter");
+    assert.equal(format.test(p(PREFIX, "abcdefghi12-", "a".repeat(40))), false, "nine letters");
+    assert.equal(format.test(p(PREFIX, "api3-", "a".repeat(40))), false, "one digit");
+    for (const name of R20_ORDINARY) assert.equal(format.test(name), false, name);
+    assert.ok((API_KEY_PATTERN_SOURCES as readonly string[]).includes(ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE));
   });
 });

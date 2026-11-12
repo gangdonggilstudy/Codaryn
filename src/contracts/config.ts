@@ -309,12 +309,23 @@ export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
  *   `sk-ant-` holding a digit (`sk-ant-` and a long versioned name).
  * - Not refused by shape (misses left; the registered value still finds them): a key text of fewer
  *   than 32 characters after `sk-ant-` or without a digit, or glued to a letter, digit or `_` before.
+ * - DR-40 (b): a key glued to a letter, digit or `_` is still refused when it has the real key
+ *   format (ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE).
  * - DR-40 (c), R-25 L-2: as a regular expression this source takes time growing with the square of
  *   some texts' length (its look-ahead rescans after every prefix). It stays the definition; checks
  *   use anthropicRefusalShapeIn and holdsRefusedKeyShape (keys.ts), which answer the same in linear
  *   time.
  */
 export const ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE = "\\bsk-ant-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{32,}";
+
+/**
+ * DR-40 (b), R-25 L-1: the second Anthropic refusal shape, with no word start: the real key format,
+ * `sk-ant-`, a type of 2 to 8 lower-case letters, a 2-digit version, `-`, then 32 or more of
+ * `A-Z a-z 0-9 _ -` (`api03-`, `admin01-`, `oat01-` keys). It refuses a key glued to a letter,
+ * digit or `_` (`x`, `MY_`, a literal backslash-n) when no registered value finds it. None of R-20's
+ * ordinary names has this form. Like the other shapes it is a second check, not a key check.
+ */
+export const ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE = "sk-ant-[a-z]{2,8}[0-9]{2}-[A-Za-z0-9_-]{32,}";
 
 // ---------------------------------------------------------------------------------------------
 // SP-1 (docs/design/second-provider.md 4.1, DR-22, DR-31): one table of the API providers.
@@ -455,7 +466,7 @@ export const API_PROVIDERS = {
     keyEnv: ANTHROPIC_API_KEY_ENV,
     modelEnv: CODARYN_MODEL_ENV,
     baseUrlEnv: CODARYN_API_BASE_URL_ENV,
-    keyPatternSources: [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE],
+    keyPatternSources: [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE],
     defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
     baseUrlPath: "without_version",
     maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
@@ -489,7 +500,7 @@ export type ApiKeyEnv = (typeof API_KEY_ENVS)[number];
  * definitions; a check uses createKeyRefusalCheck or holdsRefusedKeyShape (keys.ts), not a regular
  * expression joined from them, which can take quadratic time.
  */
-export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
+export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
 
 /**
  * DR-32 (a), DR-36 (c): the key shapes for hiding key-like text in output (human output, message
@@ -499,6 +510,7 @@ export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, OP
 export const API_KEY_MASK_PATTERN_SOURCES = [
   ANTHROPIC_KEY_PATTERN_SOURCE,
   ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
+  ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE,
   OPENAI_KEY_PATTERN_SOURCE,
   OPENAI_KEY_LOOSE_PATTERN_SOURCE,
 ] as const;

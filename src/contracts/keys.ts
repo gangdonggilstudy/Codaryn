@@ -5,7 +5,7 @@
  * functions give the same answers in time linear in the text's length.
  */
 
-import { OPENAI_LEGACY_KEY_PATTERN_SOURCE, OPENAI_PREFIXED_KEY_PATTERN_SOURCE } from "./config.js";
+import { ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE, OPENAI_LEGACY_KEY_PATTERN_SOURCE, OPENAI_PREFIXED_KEY_PATTERN_SOURCE } from "./config.js";
 
 /**
  * The run ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE needs: the prefix at a word start and 32 or more key
@@ -13,6 +13,7 @@ import { OPENAI_LEGACY_KEY_PATTERN_SOURCE, OPENAI_PREFIXED_KEY_PATTERN_SOURCE } 
  */
 const ANTHROPIC_REFUSAL_RUN = /\bsk-ant-([A-Za-z0-9_-]{32,})/g;
 const DIGIT = /[0-9]/;
+const ANTHROPIC_FORMAT = new RegExp(ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE);
 const OPENAI_PREFIXED = new RegExp(OPENAI_PREFIXED_KEY_PATTERN_SOURCE);
 const OPENAI_LEGACY = new RegExp(OPENAI_LEGACY_KEY_PATTERN_SOURCE);
 
@@ -35,7 +36,7 @@ export function anthropicRefusalShapeIn(text: string): boolean {
  * not a regular expression joined from the sources.
  */
 export function holdsRefusedKeyShape(text: string): boolean {
-  return anthropicRefusalShapeIn(text) || OPENAI_PREFIXED.test(text) || OPENAI_LEGACY.test(text);
+  return anthropicRefusalShapeIn(text) || ANTHROPIC_FORMAT.test(text) || OPENAI_PREFIXED.test(text) || OPENAI_LEGACY.test(text);
 }
 
 /**

@@ -9,6 +9,7 @@ import { describe, test } from "node:test";
 
 import {
   ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE,
   ANTHROPIC_KEY_PATTERN_SOURCE,
   ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
   API_KEY_ENVS,
@@ -87,7 +88,7 @@ describe("SP-1: the provider table", () => {
       keyEnv: ANTHROPIC_API_KEY_ENV,
       modelEnv: CODARYN_MODEL_ENV,
       baseUrlEnv: CODARYN_API_BASE_URL_ENV,
-      keyPatternSources: [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE],
+      keyPatternSources: [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE],
       defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
       baseUrlPath: "without_version",
       maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
@@ -107,7 +108,7 @@ describe("SP-1: the provider table", () => {
   test("every key Codaryn knows is listed, the providers still being added included; the table's are among them", () => {
     assert.deepEqual([...API_KEY_ENVS], ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
     assert.equal(OPENAI_API_KEY_ENV, "OPENAI_API_KEY");
-    assert.deepEqual([...API_KEY_PATTERN_SOURCES], [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE]);
+    assert.deepEqual([...API_KEY_PATTERN_SOURCES], [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE]);
     assert.equal(ANTHROPIC_KEY_PATTERN_SOURCE, "sk-ant-[A-Za-z0-9_-]{8,}", "the hiding shape is unchanged");
     for (const name of API_PROVIDER_NAMES) {
       assert.ok((API_KEY_ENVS as readonly string[]).includes(API_PROVIDERS[name].keyEnv), name);

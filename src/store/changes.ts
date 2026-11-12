@@ -41,7 +41,7 @@ import type {
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { ApplyRecordError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
-import { assertRunId, ensureStateDir, errorCode, isPlainDirectory, runDir } from "./common.js";
+import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
 const CONTENT_FILE_PATTERN = /^([1-9][0-9]{0,8})\.orig$/;
@@ -281,6 +281,15 @@ type Snapshots =
 
 async function loadSnapshots(dir: string): Promise<Snapshots> {
   try {
+    // DR-24 (e): a link in place of the snapshots directory is never read through.
+    try {
+      await lstat(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "ENOENT" || code === "ENOTDIR") return { kind: "missing" };
+      return { kind: "unreadable" };
+    }
+    if (!(await isPlainDirectory(dir))) return { kind: "unreadable" };
     const found = await readIndex(dir);
     if (found === "missing") return { kind: "missing" };
     if (found === "invalid") return { kind: "unreadable" };
@@ -393,6 +402,10 @@ export const revertRun: RevertRun = async (request) => {
   const { workspaceRoot, runId } = request;
   const dryRun = request.dryRun === true;
   assertRunId(runId);
+  // N-27 (a): a run id that differs from the directory's name only in case names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) {
+    throw new RevertRunError("run_not_found", "the workspace has no journal for this run; nothing was changed");
+  }
   const dir = runDir(workspaceRoot, runId);
 
   let text: string;
@@ -521,6 +534,7 @@ export async function readRunOriginals(request: { readonly workspaceRoot: string
   } catch {
     throw new RevertRunError("run_not_found", "the workspace has no records for this run");
   }
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) throw new RevertRunError("run_not_found", "the workspace has no records for this run");
   if (!(await isPlainDirectory(dir))) throw new RevertRunError("invalid_run_record", "the run directory is a link; it is not read");
   let text: string;
   try {

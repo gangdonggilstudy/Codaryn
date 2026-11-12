@@ -18,6 +18,9 @@ import {
   RunListError,
   inspectRun,
   latestRunId,
+  loadPlan,
+  markPlanApplied,
+  readRunOriginals,
   listRuns,
   readRevertRecord,
   revertRun,
@@ -529,6 +532,36 @@ describe("inspectRun (N-26)", () => {
     const listing = await listRuns({ workspaceRoot: work });
     for (const run of listing.runs) assert.equal(await inspectRun(work, run.runId), run.state, run.runId);
     assert.equal(await inspectRun(await tempDir(), "20260102T030401Z-00000001"), "missing", "no state directory at all");
+  });
+});
+
+describe("run ids are matched by exact name (N-27 a)", () => {
+  test("a run id that differs from the directory name only in case names no run: no revert, no originals, no plan", async () => {
+    const { work } = await changingRun();
+    const notes = path.join(work, "notes.txt");
+    const notesText = await readFile(notes, "utf8");
+    // R-7's input: a damaged run directory whose records name the lower-case id.
+    const upper = "20991231T235957Z-0c0ffee0";
+    const lower = upper.toLowerCase();
+    const dir = path.join(runsDir(work), upper);
+    await mkdir(path.join(dir, "snapshots"), { recursive: true });
+    const records = [
+      { seq: 1, at: "2099-12-31T23:59:57.000Z", runId: lower, type: "run_started", schemaVersion: 1, taskId: "forged", workflow: "x", provider: "scripted", limits: { maxModelTurns: 1, maxToolCalls: 1, maxTotalTokens: null, maxDurationMs: 1 } },
+      { seq: 2, at: "2099-12-31T23:59:57.100Z", runId: lower, type: "file_changed", callId: "c", path: "notes.txt", previousHash: null, newHash: sha(notesText), created: true },
+    ];
+    await writeFile(path.join(dir, "journal.jsonl"), records.map((record) => `${JSON.stringify(record)}\n`).join(""), "utf8");
+    await writeFile(path.join(dir, "snapshots", "index.json"), JSON.stringify({ schemaVersion: 1, entries: [{ path: "notes.txt", existed: false }] }), "utf8");
+
+    assert.equal(await inspectRun(work, upper), "damaged");
+    assert.equal(await inspectRun(work, lower), "missing", "the lower-case id names no directory");
+    for (const dryRun of [true, false]) {
+      await assert.rejects(revertRun({ workspaceRoot: work, runId: lower, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "run_not_found");
+    }
+    assert.equal(await readFile(notes, "utf8"), notesText, "the user's file is not deleted");
+    await assert.rejects(readRunOriginals({ workspaceRoot: work, runId: lower }), (error: unknown) => error instanceof RevertRunError && error.code === "run_not_found");
+    assert.deepEqual(await loadPlan({ workspaceRoot: work, runId: lower }), { ok: false, code: "run_not_found" });
+    await assert.rejects(readRevertRecord(work, lower));
+    await assert.rejects(markPlanApplied({ workspaceRoot: work, planRunId: lower, applyRunId: "20260102T030500Z-11111111", at: "2026-01-02T03:05:00Z" }));
   });
 });
 

@@ -2,7 +2,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { realpath as realpathCallback } from "node:fs";
-import { link, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -61,6 +61,9 @@ export async function isPlainDirectory(dir: string): Promise<boolean> {
   }
 }
 
+/** Errors that mean the volume does not make hard links (or not here). */
+const LINK_UNSUPPORTED: ReadonlySet<string> = new Set(["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK"]);
+
 function temporaryBeside(target: string): string {
   return join(dirname(target), `.${randomBytes(8).toString("hex")}.tmp`);
 }
@@ -71,16 +74,31 @@ function temporaryBeside(target: string): string {
  * `target` exists. A reader never sees a half-written file, and of several callers exactly one
  * creates it. False when `target` exists. Other failures reject.
  */
-export async function createExclusive(target: string, data: string | Uint8Array): Promise<boolean> {
+export async function createExclusive(
+  target: string,
+  data: string | Uint8Array,
+  operations: { readonly link?: (existing: string, created: string) => Promise<void> } = {},
+): Promise<boolean> {
+  const linkFile = operations.link ?? link;
   const temporary = temporaryBeside(target);
   try {
     await writeFile(temporary, data, { flag: "wx" });
     try {
-      await link(temporary, target);
+      await linkFile(temporary, target);
       return true;
     } catch (error) {
       if (errorCode(error) === "EEXIST") return false;
-      throw error;
+      if (!LINK_UNSUPPORTED.has(errorCode(error) ?? "")) throw error;
+      // DR-24 (c): a volume without hard links still gets an exclusive create; a reader may then
+      // see the file before it is complete, which loadPlan's digest check turns into
+      // invalid_run_record, and applied.json counts by its presence.
+      try {
+        await writeFile(target, data, { flag: "wx" });
+        return true;
+      } catch (fallback) {
+        if (errorCode(fallback) === "EEXIST") return false;
+        throw fallback;
+      }
     }
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined);
@@ -97,6 +115,25 @@ export async function replaceAtomically(target: string, data: string | Uint8Arra
     await rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * N-27 (a): whether `.codaryn/runs` has an entry named exactly `runId`. On volumes that ignore
+ * case (NTFS, APFS by default) a run id that differs only in case would open another run's
+ * directory; every reader and writer that takes a run id from outside checks this first.
+ */
+export async function hasExactRunEntry(workspaceRoot: string, runId: string): Promise<boolean> {
+  try {
+    const names = await readdir(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME));
+    return names.includes(runId);
+  } catch {
+    return false;
+  }
+}
+
+/** The run's own directory: an entry of exactly this name, a plain directory (no link). */
+export async function isOwnRunDir(workspaceRoot: string, runId: string): Promise<boolean> {
+  return (await hasExactRunEntry(workspaceRoot, runId)) && (await isPlainDirectory(runDir(workspaceRoot, runId)));
 }
 
 /** Creates the state directory and `runs/<runId>/` when missing; the run directory must then be plain. */

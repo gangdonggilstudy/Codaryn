@@ -324,7 +324,26 @@ export interface EngineResult {
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
   /** G-A: present with reason `awaiting_review` only. The workflow's checklist, masked. */
   readonly review?: { readonly checklist: readonly MaskedText[] };
+  /**
+   * DR-47 (AXM-1): the agent's last message: the run's last model response, when it is a final
+   * reply (`stop: "final"`, no tool calls). Absent when the model was asked again after it or the
+   * run ended without a reply (a limit, a model error, a cancel). It is the model's own words, not a
+   * verified fact; every view shows it after a label that says so (`summary.final_message`,
+   * `report.final_message`). Its text is the recorded `model_response.text` made safe by
+   * safeModelText (R-52): line breaks as LF and tabs kept and every other control and invisible
+   * character (KEY_INVISIBLE_PATTERN_SOURCE) left out first, then masked again by the run's gateway
+   * (a registered value those characters split is found whole), then key shapes
+   * (API_KEY_MASK_PATTERN_SOURCES) shown as `[key]`, also across LF and TAB; none when masking
+   * fails. Then cut, never inside a protected token or a `[key]`, to at most
+   * MAX_FINAL_MESSAGE_CHARS characters (code points), `truncated` true then. Absent also when that
+   * text is empty or only white space, and for a plan run (reason `plan_pending`: its place is the
+   * plan's summary, PlanOutput.summary). Results written before DR-47 do not have it.
+   */
+  readonly finalMessage?: { readonly text: MaskedText; readonly truncated: boolean };
 }
+
+/** DR-47: the longest EngineResult.finalMessage text, in characters (code points). */
+export const MAX_FINAL_MESSAGE_CHARS = 2000;
 
 /** Printed on stdout as one JSON line when the CLI stops before a run starts. */
 export interface CliErrorOutput {

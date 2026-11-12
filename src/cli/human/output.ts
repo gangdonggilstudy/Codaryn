@@ -18,6 +18,7 @@ import {
   APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
+  MAX_FINAL_MESSAGE_CHARS,
   CLI_ERROR_HINTS,
   DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
@@ -62,7 +63,7 @@ import type {
   AnyToolName,
 } from "../../contracts/index.js";
 import { isRunTimestamp } from "../../store/index.js";
-import { displayWidth, finalLine, formatLocalTime, padEnd, shownPath, token } from "./format.js";
+import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "./format.js";
 
 /** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
 export const HUMAN_PREFIX = "codaryn: ";
@@ -105,6 +106,9 @@ function validStatusReason(status: unknown, reason: unknown): { status: Terminal
 function localTime(at: unknown): string | null {
   return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
 }
+
+/** DR-47: rows of the agent's last message shown in a run summary (quoteModelText). The rest are counted. */
+export const FINAL_MESSAGE_MAX_LINES = 20;
 
 /** "(+3)" after a cut list. */
 function moreLine(count: number): string {
@@ -255,6 +259,19 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
+      // DR-47 (AXM-1): the agent's last message, after the facts and before the advice. It is the
+      // agent's own words: under its label, each line set apart; not for a plan run.
+      const final: unknown = result.finalMessage;
+      if (pair?.reason !== "plan_pending" && typeof final === "object" && final !== null) {
+        const { text, truncated } = final as { text?: unknown; truncated?: unknown };
+        // R-49 R49-L2: the one way text a model wrote is drawn (quoted rows, single spaces, folded here).
+        const shown = typeof text === "string" && typeof truncated === "boolean" ? quoteModelText(text, FINAL_MESSAGE_MAX_LINES) : [];
+        if (shown.length > 0) {
+          out.push(`${catalog.format("summary.final_message")}:`);
+          out.push(...shown);
+          if (truncated === true) out.push(`  ${catalog.format("summary.final_message_truncated", { count: MAX_FINAL_MESSAGE_CHARS })}`);
+        }
+      }
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
 
       const here = context.workspaceForm === "current";

@@ -310,9 +310,9 @@ export const EN_MESSAGES: MessageTexts = {
   "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.",
 
   "error.invalid_arguments.what": "the command arguments are not valid",
-  "error.invalid_arguments.fix": "See codaryn help <command> for the usage.",
+  "error.invalid_arguments.fix": "See codaryn help <command> for a command's usage, and codaryn --help for the list of commands.",
   "error.invalid_task.what": "the task file cannot be read or has an invalid value",
-  "error.invalid_task.fix": "Fix the named field in the task file. codaryn doctor --task <file> checks it.",
+  "error.invalid_task.fix": "Check that the file given with --task exists and is outside the workspace. If a field is named, fix that field. codaryn doctor --task <file> checks it.",
   "error.invalid_config.what": "the config file cannot be read or has an invalid value",
   "error.invalid_config.fix": "Fix the named field in the config file. Without a config file, codaryn init creates one.",
   "error.key_in_file.what": "a task or config file, or the goal, holds a key field or a key value",

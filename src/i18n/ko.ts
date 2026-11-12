@@ -309,9 +309,9 @@ export const KO_MESSAGES: MessageTexts = {
   "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
-  "error.invalid_arguments.fix": "codaryn help <명령>으로 사용법을 확인하세요.",
+  "error.invalid_arguments.fix": "codaryn help <명령>으로 그 명령의 사용법을, codaryn --help로 명령 목록을 확인하세요.",
   "error.invalid_task.what": "task 파일을 읽을 수 없거나 값이 올바르지 않습니다",
-  "error.invalid_task.fix": "task 파일에서 알려 준 필드를 고치세요. codaryn doctor --task <파일>로 점검할 수 있습니다.",
+  "error.invalid_task.fix": "--task에 준 파일이 있는지, 작업 공간 밖에 있는지 확인하세요. 필드를 알려 주었으면 그 필드를 고치세요. codaryn doctor --task <파일>로 점검할 수 있습니다.",
   "error.invalid_config.what": "설정 파일을 읽을 수 없거나 값이 올바르지 않습니다",
   "error.invalid_config.fix": "설정 파일에서 알려 준 필드를 고치세요. 설정 파일이 없으면 codaryn init으로 만들 수 있습니다.",
   "error.key_in_file.what": "task·설정 파일이나 목표에 키 필드나 키 값이 있습니다",

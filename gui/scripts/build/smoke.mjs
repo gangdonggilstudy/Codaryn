@@ -51,8 +51,16 @@ const maskingShown = (v) =>
 const closeFake = [];
 // Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
 // window); a run that hangs (cancelled by closing the window).
+// U-54 (R-65 L-1): an id the engine cannot keep ("bad id", a space) is replaced in each run, from
+// codaryn-call-1 again. The first run's call with it is denied (a path outside the workspace); the
+// analyze run's call with it, later in the same window, fails (not_found) and must still get its line.
+// No model request is added: the two calls ride in replies the runs already had.
+const U54_ID = "bad id";
 const steps = [
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } })]),
+  fakeApi.replyTools([
+    fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } }),
+    fakeApi.toolUse(U54_ID, "read_file", { path: "../outside-u54.txt" }),
+  ]),
   fakeApi.replyText("done"),
   { kind: "hang" },
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
@@ -60,6 +68,7 @@ const steps = [
   fakeApi.replyTools([
     fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } }),
     fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
+    fakeApi.toolUse(U54_ID, "read_file", { path: "missing-u54.txt" }),
   ]),
   fakeApi.replyText("analysis written"),
   // U-13: a plan run that discards a file; its apply's discarded files stay through a cleanup.
@@ -340,6 +349,8 @@ const expected = [
   ["runDone", (v) => v === "done"],
   ["runResult", (v) => v !== null && ["done", "needs-input"].includes(v.status) && /^\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(v.runId)],
   ["runLog", (v) => rows(v).length >= 2 && rows(v).includes("tool_decision")],
+  // U-54 (R-65 L-1): the first run denied a call the engine recorded as codaryn-call-1, and its log says so.
+  ["firstRunDenied", (v) => v !== null && v.denied >= 1 && JSON.stringify(v.call) === JSON.stringify({ decision: false, result: false })],
   ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
   // U-21 (DR-47): the agent's last message, under the label that says it is its own words.
   ["runFinalMessage", (v) => JSON.stringify(v) === JSON.stringify({ label: "에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님)", text: "done", cut: false })],
@@ -416,6 +427,15 @@ const expected = [
   ["reportReady", (v) => v === "run"],
   ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
   ["reportSummary", (v) => v === "awaiting_review"],
+  // U-54 (R-65 L-1): in the same window, the analyze run's codaryn-call-1 (allowed, then not_found) has
+  // its failed line, the CLI's words, in its progress list.
+  [
+    "failedAfterDenial",
+    (v) =>
+      v !== null &&
+      JSON.stringify(v.call) === JSON.stringify({ decision: true, result: false }) &&
+      JSON.stringify(v.failed) === JSON.stringify([KO_MESSAGES["progress.tool_failed"].replace("{tool}", KO_MESSAGES["tool.read_file"]).replace("{code}", "not_found")]),
+  ],
   ["reportMasking", maskingShown],
   ["reportVerdict", (v) => v === "accepted"],
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],

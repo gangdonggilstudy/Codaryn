@@ -65,6 +65,20 @@ export function createCodarynApp() { return { async doctor(request) { ${doctorBo
 export function createMessageCatalog(language) { return { format(id) { if (id === "needs.params") throw new Error("x"); return language + ":" + id; } }; }
 `,
   );
+  // GU-2: the host also loads the workspace rules and the text safety helpers for the file tree.
+  await fs.mkdir(path.join(engine, "workspace"), { recursive: true });
+  await fs.mkdir(path.join(engine, "cli"), { recursive: true });
+  await fs.writeFile(
+    path.join(engine, "workspace", "index.js"),
+    `export async function createWorkspace(options) { return { root: options.root, async resolve() { return { ok: false, code: "invalid_path" }; } }; }
+`,
+  );
+  await fs.writeFile(
+    path.join(engine, "cli", "text-safety.js"),
+    `export function cleanText(text) { return text; }
+export function hideKeys(text) { return text; }
+`,
+  );
   return engine;
 }
 

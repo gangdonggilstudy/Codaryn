@@ -26,9 +26,13 @@ export interface HostMessages {
   texts(osLocale: string | null, ids: readonly string[]): { readonly language: string; readonly texts: Readonly<Record<string, string>> };
 }
 
+/** GU-2: one directory of a workspace (tree.ts). */
+export type HostTree = (request: { readonly workspace: string; readonly dir: string; readonly offset: number }) => Promise<unknown>;
+
 export interface HostDeps {
   readonly app: HostApp;
   readonly messages: HostMessages;
+  readonly tree: HostTree;
   /** Writes one complete line to the channel. */
   readonly write: (line: string) => void;
   /** Diagnostics for stderr. Never the content of a request or a response. */
@@ -61,6 +65,15 @@ function doctorArgs(args: unknown): HostDoctorRequest {
   return { configPath: null, varsFile: null, taskPath: null, workspace };
 }
 
+function treeArgs(args: unknown): { workspace: string; dir: string; offset: number } {
+  if (!isObj(args) || !onlyKeys(args, ["workspace", "dir", "offset"])) throw new ArgsError();
+  const { workspace, dir, offset } = args;
+  if (typeof workspace !== "string" || workspace.length > MAX_PATH_CHARS || !isAbsolute(workspace) || workspace.includes("\0")) throw new ArgsError();
+  if (typeof dir !== "string" || dir.length > MAX_PATH_CHARS || dir.includes("\0")) throw new ArgsError();
+  if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) throw new ArgsError();
+  return { workspace, dir, offset };
+}
+
 function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] } {
   if (!isObj(args) || !onlyKeys(args, ["osLocale", "ids"])) throw new ArgsError();
   const osLocale = args["osLocale"] ?? null;
@@ -87,6 +100,8 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { osLocale, ids } = messagesArgs(args);
         return deps.messages.texts(osLocale, ids);
       }
+      case "tree":
+        return deps.tree(treeArgs(args));
     }
   }
 

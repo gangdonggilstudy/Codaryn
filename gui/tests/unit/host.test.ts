@@ -25,6 +25,7 @@ function harness(app: Partial<HostApp> = {}, messages?: HostMessages) {
       ...app,
     },
     messages: messages ?? { texts: (_locale, ids) => ({ language: "en", texts: Object.fromEntries(ids.map((id) => [id, `T:${id}`])) }) },
+    tree: async (request) => ({ ok: true, entries: [], total: 0, offset: request.offset, nextOffset: null, dir: request.dir }),
     write: (line) => {
       assert.ok(line.endsWith("\n"));
       const message = parseHostMessage(line.trimEnd());

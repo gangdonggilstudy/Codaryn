@@ -15,6 +15,8 @@ import { pathToFileURL } from "node:url";
 import { MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
 import type { HostApp, HostMessages } from "./host.js";
+import { createTreeLister } from "./tree.js";
+import type { TreeEngine } from "./tree.js";
 
 const channelWrite = process.stdout.write.bind(process.stdout);
 const toStderr = ((chunk: unknown, ...rest: unknown[]): boolean =>
@@ -38,6 +40,15 @@ interface EngineAppModule {
   createCodarynApp(environment: unknown): HostApp;
 }
 
+interface EngineWorkspaceModule {
+  createWorkspace: TreeEngine["createWorkspace"];
+}
+
+interface EngineTextSafetyModule {
+  cleanText(text: string): string;
+  hideKeys(text: string, currentKey: string | null): string;
+}
+
 interface EngineI18nModule {
   selectMessageLanguage(input: { env: string | null; config: null; osLocale: string | null }): string;
   createMessageCatalog(language: string): { format(id: string): string };
@@ -46,7 +57,8 @@ interface EngineI18nModule {
 function engineDirFromArgs(argv: readonly string[]): string | null {
   if (argv.length !== 2 || argv[0] !== "--engine-dir") return null;
   const dir = argv[1] as string;
-  return isAbsolute(dir) && existsSync(join(dir, "app", "index.js")) && existsSync(join(dir, "i18n", "index.js")) ? dir : null;
+  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"]];
+  return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? dir : null;
 }
 
 async function load<T>(file: string, names: readonly string[]): Promise<T | null> {
@@ -73,7 +85,9 @@ async function main(): Promise<number> {
   }
   const appModule = await load<EngineAppModule>(join(engineDir, "app", "index.js"), ["createNodeAppEnvironment", "createCodarynApp"]);
   const i18n = await load<EngineI18nModule>(join(engineDir, "i18n", "index.js"), ["selectMessageLanguage", "createMessageCatalog"]);
-  if (appModule === null || i18n === null) {
+  const workspaceModule = await load<EngineWorkspaceModule>(join(engineDir, "workspace", "index.js"), ["createWorkspace"]);
+  const textSafety = await load<EngineTextSafetyModule>(join(engineDir, "cli", "text-safety.js"), ["cleanText", "hideKeys"]);
+  if (appModule === null || i18n === null || workspaceModule === null || textSafety === null) {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
@@ -93,9 +107,16 @@ async function main(): Promise<number> {
       return { language, texts };
     },
   };
+  const tree = createTreeLister({
+    createWorkspace: (options) => workspaceModule.createWorkspace(options),
+    cleanText: (text) => textSafety.cleanText(text),
+    hideKeys: (text, key) => textSafety.hideKeys(text, key),
+    currentKey: () => process.env["ANTHROPIC_API_KEY"] ?? null,
+    platform: process.platform,
+  });
   writeLine(encodeLine({ v: 1, type: "ready", node }));
   process.stdin.setEncoding("utf8");
-  await serve(process.stdin, { app, messages, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, write: writeLine, log });
   return 0;
 }
 

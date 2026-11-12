@@ -1,14 +1,17 @@
 /**
- * GU-1 smoke test: the real Electron app with the real engine host (DR-26). Started by
- * scripts/build/smoke.mjs as `electron build/tests/smoke/smoke.js`; never part of the product
- * entry (main.ts). It waits for the window to show the checks, probes the renderer's isolation
- * and the blocked requests (loopback addresses only, nothing leaves the machine), counts listening
- * sockets of the app's processes, writes what it saw to build/smoke-result.json and quits.
+ * GU-1/GU-2 smoke test: the real Electron app with the real engine host (DR-26). Started by
+ * scripts/build/smoke.mjs as `electron build/tests/smoke/smoke.js <first workspace>` with the
+ * second workspace in CODARYN_SMOKE_SECOND; never part of the product entry (main.ts).
+ *
+ * It sees the first workspace opened from the command line, opens the second as a second start
+ * of the app would, walks the read-only file tree, the recent list and the checks screen, probes
+ * the renderer's isolation and blocked requests (loopback addresses only), counts sockets and
+ * outside connections of the app's processes, writes what it saw to build/smoke-result.json and
+ * quits.
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -16,6 +19,8 @@ import { startGui } from "../../src/main/app.js";
 
 const GUI = fileURLToPath(new URL("../../../", import.meta.url));
 const RESULT = join(GUI, "build", "smoke-result.json");
+const STATE = join(GUI, "build", "smoke-state", "gui-state.json");
+const SECOND = process.env["CODARYN_SMOKE_SECOND"] ?? "";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -26,16 +31,20 @@ interface Endpoint {
   readonly pid: number;
 }
 
-/** Listening TCP sockets and bound UDP endpoints owned by these processes (Windows PowerShell). */
-function listening(pids: readonly number[]): { tcp: number; udp: number; endpoints: Endpoint[] } | string {
+/**
+ * Listening TCP sockets, bound UDP endpoints and TCP connections to anything but the machine
+ * itself, owned by these processes (Windows PowerShell).
+ */
+function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: number; endpoints: Endpoint[] } | string {
   if (process.platform !== "win32") return "not measured on this platform";
   const powershell = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const list = pids.join(",");
   const script = [
-    `$p = @(${list})`,
+    `$p = @(${pids.join(",")})`,
+    "$local = @('127.0.0.1', '::1', '0.0.0.0', '::')",
     "$t = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $p -contains $_.OwningProcess } | ForEach-Object { 'tcp ' + $_.LocalAddress + ' ' + $_.LocalPort + ' ' + $_.OwningProcess })",
     "$u = @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object { $p -contains $_.OwningProcess } | ForEach-Object { 'udp ' + $_.LocalAddress + ' ' + $_.LocalPort + ' ' + $_.OwningProcess })",
-    "($t + $u) -join \"`n\"",
+    "$o = @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { ($p -contains $_.OwningProcess) -and ($_.State -ne 'Listen') -and -not ($local -contains $_.RemoteAddress) } | ForEach-Object { 'out ' + $_.RemoteAddress + ' ' + $_.RemotePort + ' ' + $_.OwningProcess })",
+    "($t + $u + $o) -join \"`n\"",
   ].join("; ");
   const out = execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
   const endpoints = out
@@ -45,56 +54,90 @@ function listening(pids: readonly number[]): { tcp: number; udp: number; endpoin
       const [proto, address, port, pid] = line.trim().split(" ");
       return { proto: proto ?? "?", address: address ?? "?", port: Number(port), pid: Number(pid) };
     });
-  return { tcp: endpoints.filter((e) => e.proto === "tcp").length, udp: endpoints.filter((e) => e.proto === "udp").length, endpoints };
+  const count = (proto: string): number => endpoints.filter((endpoint) => endpoint.proto === proto).length;
+  return { tcp: count("tcp"), udp: count("udp"), outside: count("out"), endpoints };
 }
 
-const workspace = mkdtempSync(join(tmpdir(), "codaryn-gui-smoke-"));
 const results: Record<string, unknown> = {};
 
 startGui({
   guiRoot: GUI,
   userDataDir: join(GUI, "build", "smoke-profile"),
-  async afterLoad({ window, host, issueWorkspace }) {
+  stateFile: STATE,
+  async afterLoad({ window, host, openFromOutside }) {
     try {
       const contents = window.webContents;
       const js = (code: string): Promise<unknown> => contents.executeJavaScript(code, true);
-      const waitForChecks = async (): Promise<unknown> => {
-        for (let i = 0; i < 600; i += 1) {
-          const state = await js("document.querySelector('[data-doctor-ready]')?.getAttribute('data-doctor-ready') ?? null");
-          if (state !== null) return state;
+      const waitFor = async (code: string, ms = 60_000): Promise<unknown> => {
+        for (let waited = 0; waited < ms; waited += 100) {
+          const value = await js(code);
+          if (value !== null && value !== undefined && value !== false) return value;
           await sleep(100);
         }
         return "timeout";
       };
+      const treeRows = (): Promise<unknown> =>
+        js(
+          "[...document.querySelectorAll('.tree [data-key]')].map((li) => ({ kind: li.getAttribute('data-kind'), masked: li.getAttribute('data-masked'), level: li.getAttribute('aria-level'), expanded: li.getAttribute('aria-expanded'), text: li.textContent }))",
+        );
 
-      results["doctorWithoutWorkspace"] = await waitForChecks();
+      // 1. The workspace from the command line is open and its top level is shown.
+      results["initialTree"] = await waitFor("document.querySelector('.tree')?.getAttribute('data-tree-ready') ?? null");
+      results["initialWorkspace"] = await js("document.getElementById('status-workspace')?.textContent ?? null");
+      results["initialRows"] = await treeRows();
+
+      // 2. A second workspace, as a second start of the app with it on the command line opens it.
+      const second = await openFromOutside(SECOND);
+      results["secondOpened"] = second.ok;
+      results["secondTree"] = await waitFor(
+        `(() => { const t = document.querySelector('.tree'); return t?.getAttribute('data-tree-ready') === 'ok' && document.getElementById('status-workspace')?.textContent?.includes(${JSON.stringify(SECOND.split(/[\\/]/).pop())}) ? 'ok' : null; })()`,
+      );
+      results["secondRows"] = await treeRows();
+
+      // 3. Open the folder "sub" by clicking it; its children appear one level deeper.
+      await js("[...document.querySelectorAll('.tree [data-kind=\"dir\"]')].find((li) => li.textContent.trim().endsWith('sub'))?.click(); true");
+      results["expanded"] = await waitFor("[...document.querySelectorAll('.tree [data-key]')].some((li) => li.getAttribute('aria-level') === '2' && li.textContent.includes('b.txt')) ? 'ok' : null", 20_000);
+      // Keyboard: Home, then Down, then Left/Right keep the focus inside the tree.
+      results["keyboard"] = await js(
+        "(() => { const tree = document.querySelector('.tree'); const first = tree.querySelector('[tabindex=\"0\"]'); first.focus(); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); const last = document.activeElement?.getAttribute('data-key'); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); return { moved: last !== null && last !== document.activeElement?.getAttribute('data-key'), inTree: tree.contains(document.activeElement) }; })()",
+      );
+      results["treeText"] = await js("document.querySelector('.tree')?.textContent ?? ''");
+
+      // 4. The recent list on the workspace screen and in gui-state.json: second first.
+      await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
+      results["recentShown"] = await waitFor("document.querySelector('.recent')?.getAttribute('data-recent-ready') ?? null");
+      results["recentNames"] = await js("[...document.querySelectorAll('.recent .recent-name')].map((n) => n.textContent)");
+      try {
+        const saved = JSON.parse(readFileSync(STATE, "utf8")) as { recentWorkspaces?: { path: string }[] };
+        results["stateFile"] = (saved.recentWorkspaces ?? []).map((item) => item.path.split(/[\\/]/).pop());
+      } catch {
+        results["stateFile"] = "unreadable";
+      }
+
+      // 5. The checks screen for the open workspace.
+      await js("document.querySelector('[data-screen=\"checks\"]')?.click(); true");
+      results["checks"] = await waitFor("document.getElementById('checks')?.getAttribute('data-doctor-ready') ?? null");
       results["checksShown"] = await js("document.querySelectorAll('.checks li').length");
-      results["overall"] = await js("document.querySelector('.overall')?.getAttribute('data-status') ?? null");
       results["lang"] = await js("document.documentElement.lang");
       results["url"] = contents.getURL();
+
+      // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",
       );
-
-      // A workspace as the folder dialog would give it, then the same IPC path as a click.
-      const handle = issueWorkspace(workspace);
-      results["doctorWithWorkspace"] = await js(
-        `window.codaryn.doctor(${JSON.stringify(handle)}).then((r) => r.ok ? { ok: true, workspaceName: r.workspaceName, workspaceCheck: r.view.checks.find((c) => c.id === "workspace")?.status ?? null } : r)`,
-      );
-      results["doctorWithPath"] = await js(`window.codaryn.doctor(${JSON.stringify(workspace)})`);
-      results["doctorUnknownHandle"] = await js(`window.codaryn.doctor(${JSON.stringify("0".repeat(32))})`);
-
-      // Blocked requests and navigation: loopback addresses only. CODARYN_SMOKE_NO_PROBES=1 leaves them out
-      // (to see what the window alone opens).
-      const probes = process.env["CODARYN_SMOKE_NO_PROBES"] !== "1";
-      results["socketsBeforeProbes"] = listening([...new Set([...app.getAppMetrics().map((metric) => metric.pid)])]);
-      if (probes) results["fetchHttp"] = await js("fetch('http://127.0.0.1:9/').then(() => 'reached', () => 'blocked')");
-      if (probes) results["fetchFile"] = await js("fetch('file:///C:/Windows/win.ini').then(() => 'reached', () => 'blocked')");
-      if (probes) results["windowOpen"] = await js("window.open('http://127.0.0.1:9/') === null ? 'blocked' : 'opened'");
-      if (probes) await js("location.href = 'http://127.0.0.1:9/'; true").catch(() => undefined);
+      const handle = second.ok ? second.handle : "";
+      results["treePathString"] = await js(`window.codaryn.tree(${JSON.stringify(SECOND)}, null, 0)`);
+      results["treeUnknownNode"] = await js(`window.codaryn.tree(${JSON.stringify(handle)}, ${JSON.stringify("0".repeat(32))}, 0)`);
+      results["revealUnknown"] = await js(`window.codaryn.reveal(${JSON.stringify(handle)}, ${JSON.stringify("0".repeat(32))})`);
+      results["doctorWithPath"] = await js(`window.codaryn.doctor(${JSON.stringify(SECOND)})`);
+      results["fetchHttp"] = await js("fetch('http://127.0.0.1:9/').then(() => 'reached', () => 'blocked')");
+      results["fetchFile"] = await js("fetch('file:///C:/Windows/win.ini').then(() => 'reached', () => 'blocked')");
+      results["windowOpen"] = await js("window.open('http://127.0.0.1:9/') === null ? 'blocked' : 'opened'");
+      await js("location.href = 'http://127.0.0.1:9/'; true").catch(() => undefined);
       await sleep(500);
       results["urlAfterNavigation"] = contents.getURL();
 
+      // 7. Processes, sockets and outside connections.
       const state = await host();
       results["hostNode"] = "host" in state ? state.host.nodeVersion : state.failure;
       const metrics = app.getAppMetrics();
@@ -106,12 +149,11 @@ startGui({
           return [String(pid), metric === undefined ? "engine host (Node)" : `${metric.type}${metric.serviceName ? ` ${metric.serviceName}` : ""}`];
         }),
       );
-      results["listening"] = listening([...pids]);
+      results["sockets"] = sockets([...pids]);
     } catch (error) {
       results["error"] = error instanceof Error ? error.message : String(error);
     } finally {
       writeFileSync(RESULT, `${JSON.stringify(results, null, 2)}\n`);
-      rmSync(workspace, { recursive: true, force: true });
       app.quit();
     }
   },

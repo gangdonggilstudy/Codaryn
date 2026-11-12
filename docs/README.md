@@ -34,9 +34,9 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [UX 설계](design/ux-design.md) | CLI·GUI 공통 UX: 흐름, 문구, 상태 표현, 위험한 동작 확인, 접근성과 언어 |
 | [구현 위치표](design/implementation-map.md) | 기능별 구현 파일, 결정 번호, 시험 |
 | [어댑터 계약](design/adapter-contract.md) | 어댑터 공통 앱 계층, 이벤트·취소·확인 질문, 줄 프로토콜, CLI 이행 |
-| [VS Code 확장](design/vscode-extension.md) | 실행마다 CLI 자식을 부르는 확장의 화면, 명령, 설정, 시험 |
+| [VS Code 확장](design/vscode-extension.md) | 실행마다 CLI 자식을 부르는 확장의 화면, 명령, 설정, 시험. 설계 기록이다: DR-20으로 만들지 않는다(독립 GUI 하나만) |
 | [범용 작업과 작업 종류](design/general-tasks.md) | 문서 작성·자료 분석·파일 정리, 계획 확인과 적용, 사람 확인 |
-| [독립 GUI](design/standalone-gui.md) | 비개발자용 GUI의 화면 흐름, 형태 후보와 권고, 보안 경계 |
+| [독립 GUI](design/standalone-gui.md) | 비개발자용 GUI의 화면 흐름, 형태 후보와 권고, 보안 경계. 만드는 GUI는 이것 하나다(DR-20, Electron, `gui/`) |
 | [두 번째 제공자](design/second-provider.md) | OpenAI(Codex 계열)를 두 번째 API 제공자로 더한 설계: 제공자 중립화, 설정에서 제공자 고르기, Responses API 연결, 시험과 보안 점검 |
 | [두 번째 제공자 사실 확인](design/second-provider-facts.md) | OpenAI(Responses API)에 대해 공식 문서로 확인한 사실과 미확인 항목. 두 번째 제공자 결정(DR-31)의 사실 기준 |
 

@@ -167,7 +167,11 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
   const discardedOlderThan = days("--discarded-older-than");
   const discardedRunIds = ids("--discarded-run");
   for (const part of [olderThan, runIds, discardedOlderThan, discardedRunIds]) {
-    if (typeof part === "object" && part !== null && "message" in part) return usage(part.message);
+    if (typeof part === "object" && part !== null && "message" in part) {
+      // U-37 (R-69 L2, PM): the --run form error is run_id_form, as other commands' --run is. Not
+      // --discarded-run: the hint names --run.
+      return usage(part.message, part === runIds ? { hint: "run_id_form" } : {});
+    }
   }
   const runs = {
     ...(typeof olderThan === "number" ? { olderThanDays: olderThan } : {}),

@@ -704,19 +704,22 @@ export async function prepareTask(
       );
     }
   }
-  const located: [string | null, CliErrorCode, string][] = [
-    [envPath, "invalid_config", "the file given by --vars-file"],
-    [configFile?.path ?? null, "invalid_config", "the config file"],
-    [taskFile?.path ?? null, "invalid_task", "the task file"],
-    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file"],
+  // U-37: the last element, whether the error gets input_inside_workspace. R-69 L1 (PM): not the
+  // cancel file, which the hint (task, config or variables file) does not name.
+  const located: [string | null, CliErrorCode, string, boolean][] = [
+    [envPath, "invalid_config", "the file given by --vars-file", true],
+    [configFile?.path ?? null, "invalid_config", "the config file", true],
+    [taskFile?.path ?? null, "invalid_task", "the task file", true],
+    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file", true],
     // T-12: a cancel file inside the workspace could be created by the run itself.
-    [args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile), "invalid_arguments", "the file given by --cancel-file"],
+    [args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile), "invalid_arguments", "the file given by --cancel-file", false],
   ];
-  for (const [file, code, label] of located) {
+  for (const [file, code, label, inputHint] of located) {
     if (file === null) continue;
     const where = await io.locateInWorkspace(file, task.workspaceRoot);
     if (where !== "outside") {
-      return withHint(error(code, `${label} is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it`), "input_inside_workspace");
+      const inside = error(code, `${label} is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it`);
+      return inputHint ? withHint(inside, "input_inside_workspace") : inside;
     }
   }
   // U-1: protected material outside the workspace must exist and stay apart from it.

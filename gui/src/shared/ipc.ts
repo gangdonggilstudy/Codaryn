@@ -27,6 +27,7 @@ export const IPC_CHANNELS = {
   plan: "codaryn:plan:read",
   applyPlan: "codaryn:plan:apply",
   review: "codaryn:review:record",
+  changes: "codaryn:changes:read",
 } as const;
 
 /**
@@ -587,6 +588,35 @@ export function toPlanView(value: unknown): { readonly ok: true; readonly view: 
     applied = { runId: appliedBy["runId"], at: appliedBy["at"] };
   }
   return { ok: true, view: { runId, status, digest, actions, inventoryLimitReached, appliedBy: applied } };
+}
+
+export const CHANGE_STATES = ["as_run_left", "changed_since_run", "missing", "unknown"] as const;
+
+/** DR-29 (3.4): one changed file as the window shows it: its masked path and state, never its text. */
+export interface ChangedFileItem {
+  readonly path: string;
+  readonly created: boolean;
+  readonly state: (typeof CHANGE_STATES)[number];
+  readonly unavailable: string | null;
+}
+
+export type ChangesReply = { readonly ok: true; readonly runId: string; readonly files: readonly ChangedFileItem[] } | { readonly ok: false; readonly code: string };
+
+/** The engine host's changes value, checked; a value that carries file text is refused (DR-29). */
+export function toChangesReply(value: unknown): ChangesReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { runId, masking, files } = value;
+  if (!isRunId(runId) || masking !== "current_secrets" || !Array.isArray(files) || files.length > 10_000) return fail;
+  const items: ChangedFileItem[] = [];
+  for (const file of files) {
+    if (!isObj(file) || !hasOnlyKeys(file, ["path", "created", "state", "unavailable"])) return fail;
+    const { path, created, state, unavailable } = file;
+    if (!shortText(path) || typeof created !== "boolean" || typeof state !== "string" || !(CHANGE_STATES as readonly string[]).includes(state)) return fail;
+    if (!(unavailable === null || (typeof unavailable === "string" && WORD.test(unavailable)))) return fail;
+    items.push({ path, created, state: state as ChangedFileItem["state"], unavailable: unavailable as string | null });
+  }
+  return { ok: true, runId, files: items };
 }
 
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };

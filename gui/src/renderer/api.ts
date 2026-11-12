@@ -11,6 +11,8 @@ import type {
   ModelsReply,
   OpenReply,
   ProfileView,
+  ChangedFileItem,
+  ChangesReply,
   PlanReply,
   PlanView,
   RecentView,
@@ -51,6 +53,7 @@ export interface CodarynApi {
   plan(workspace: string, runId: string, profile: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
+  changes(workspace: string, runId: string, profile: string | null): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -265,4 +268,15 @@ export function asPlan(value: unknown): PlanReply {
 export function asReview(value: unknown): ReviewReply {
   if (!isObj(value) || value["ok"] !== true || (value["verdict"] !== "accepted" && value["verdict"] !== "rejected")) return failed(value);
   return { ok: true, verdict: value["verdict"], replaced: value["replaced"] === true };
+}
+
+/** DR-29: a run's changed files, by path and state. Rows that do not fit are left out. */
+export function asChanges(value: unknown): ChangesReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["runId"]) || !Array.isArray(value["files"])) return failed(value);
+  const files: ChangedFileItem[] = value["files"].flatMap((file: unknown): ChangedFileItem[] =>
+    isObj(file) && str(file["path"]) && typeof file["created"] === "boolean" && str(file["state"])
+      ? [{ path: file["path"], created: file["created"], state: file["state"] as ChangedFileItem["state"], unavailable: str(file["unavailable"]) ? file["unavailable"] : null }]
+      : [],
+  );
+  return { ok: true, runId: value["runId"], files };
 }

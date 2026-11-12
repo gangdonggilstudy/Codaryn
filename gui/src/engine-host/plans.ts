@@ -44,6 +44,32 @@ export function planValue(outcome: unknown, shown: Shown): Obj | HostFailure {
   };
 }
 
+const CHANGE_STATES = ["as_run_left", "changed_since_run", "missing", "unknown"];
+const WORD = /^[a-z][a-z_]{0,39}$/;
+
+/**
+ * DR-29 (3.4): `changes` → `{ok, runId, masking, files: [{path, created, state, unavailable}]}`. The
+ * files' text (`before`, `after`) stays here: until a run records how it masked each file, the
+ * window shows paths and states only.
+ */
+export function changesValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+  const output = outputOf(outcome);
+  if (output === null) return failureOf(outcome);
+  const files: Obj[] = [];
+  for (const file of Array.isArray(output["files"]) ? output["files"].slice(0, MAX_ACTIONS) : []) {
+    if (!isObj(file) || typeof file["path"] !== "string") continue;
+    const state = typeof file["state"] === "string" && CHANGE_STATES.includes(file["state"]) ? file["state"] : "unknown";
+    const unavailable = typeof file["unavailable"] === "string" && WORD.test(file["unavailable"]) ? file["unavailable"] : null;
+    files.push({ path: shown(file["path"]), created: file["created"] === true, state, unavailable });
+  }
+  return {
+    ok: true,
+    runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
+    masking: output["masking"] === "current_secrets" ? "current_secrets" : null,
+    files,
+  };
+}
+
 /** `review` → `{ok, runId, verdict, replaced}` or a failure. */
 export function reviewValue(outcome: unknown): Obj | HostFailure {
   const output = outputOf(outcome);

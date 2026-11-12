@@ -24,6 +24,7 @@ import {
   parseReviewArgs,
   toPlanView,
   toReviewReply,
+  toChangesReply,
   parseRunArgs,
   parseWorkspaceArgs,
   toRevertView,
@@ -42,7 +43,7 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { RevertPreview, RunHistory } from "./history.js";
-import type { PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
+import type { ChangesReply, PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
 
@@ -389,6 +390,20 @@ export function registerIpc(deps: IpcDeps): void {
     } finally {
       starting = false;
     }
+  });
+
+  // DR-7, DR-29 (3.4): a run's changed files, by path and state only. It reads; it changes nothing.
+  handle(IPC_CHANNELS.changes, async (args): Promise<ChangesReply> => {
+    const parsed = args.length === 1 ? parsePlanArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("changes", { workspace: root, profile: parsed.profile, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const reply = toChangesReply(response.value);
+    return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
   });
 
   handle(IPC_CHANNELS.review, async (args): Promise<ReviewReply> => {

@@ -202,6 +202,14 @@ startGui({
       results["revertDone"] = await waitFor("document.getElementById('revert-panel')?.getAttribute('data-revert') ?? null", 60_000);
       results["madeAfterRevert"] = existsSync(join(SECOND, "made.txt"));
 
+      // 5e'. DR-29: the first run's changed file by path and state (it was reverted, so it is gone now).
+      await waitFor(`document.querySelector('[data-changes="${firstRun}"]') !== null ? 'ready' : null`, 30_000);
+      await js(`document.querySelector('[data-changes="${firstRun}"]')?.click(); true`);
+      results["changesShown"] = await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()");
+      results["changesRows"] = await js("[...document.querySelectorAll('#changes-files li')].map((li) => ({ state: li.getAttribute('data-state'), created: li.getAttribute('data-created'), path: li.querySelector('.path')?.textContent ?? null }))");
+      results["changesText"] = await js("document.getElementById('changes')?.textContent ?? ''");
+      results["changesLatest"] = await js(`window.codaryn.changes(${JSON.stringify(secondHandle)}, 'latest', null)`);
+
       // 5f. GU-5: a plan run (organize), the plan screen, refused requests, and an apply the main process asked about.
       const resultId = (): Promise<unknown> => js("document.getElementById('run-result-id')?.textContent ?? null");
       const newResult = (previous: unknown, ms = 90_000): Promise<unknown> =>

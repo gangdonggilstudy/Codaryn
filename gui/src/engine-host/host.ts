@@ -8,7 +8,7 @@ import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
 import { revertValue, runsValue } from "./history.js";
-import { planValue, reviewValue } from "./plans.js";
+import { changesValue, planValue, reviewValue } from "./plans.js";
 import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostStartRunRequest, RunItemOf } from "./runs.js";
 import { modelsValue, selectedValue, settingsValue } from "./settings.js";
@@ -45,6 +45,8 @@ export interface HostApp {
   plan(request: { readonly settings: Record<string, unknown>; readonly runId: string }): Promise<unknown>;
   applyPlan(request: Record<string, unknown>, observer: { onEvent(event: unknown): void }): Promise<unknown>;
   review(request: { readonly settings: Record<string, unknown>; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
+  /** DR-7, DR-29: a run's changed files, masked with the task form's secrets (paths and states go on). */
+  changes(request: { readonly settings: Record<string, unknown>; readonly runId: string }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -265,6 +267,14 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         if (typeof consent !== "boolean" || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
         language = chosen;
         return runs.startApply({ workspace, profile, planRunId, digest, consent });
+      }
+      case "changes": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "runId"]);
+        const profile = nameArg(args["profile"]);
+        const runId = args["runId"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
+        return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile), runId }), deps.shown);
       }
       case "review": {
         if (!isObj(args)) throw new ArgsError();

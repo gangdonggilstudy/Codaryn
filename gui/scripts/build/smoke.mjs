@@ -144,7 +144,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyPlan,cancelRun,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,reveal,revert,review,selectModel,settings,startRun,tree";
+const API = "applyPlan,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,reveal,revert,review,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -234,6 +234,11 @@ const expected = [
   ["previewUnlisted", (v) => v.ok === false && v.code === "unknown_run"],
   ["revertDone", (v) => v === "complete"],
   ["madeAfterRevert", (v) => v === false],
+  // DR-29: paths and states only; the file's content never shows.
+  ["changesShown", (v) => v === "1"],
+  ["changesRows", (v) => rows(v).length === 1 && rows(v)[0].state === "missing" && rows(v)[0].created === "true" && rows(v)[0].path === "made.txt"],
+  ["changesText", (v) => typeof v === "string" && !v.includes("made by the smoke run")],
+  ["changesLatest", (v) => v.ok === false && v.code === "invalid_args"],
   // GU-5: a plan run, the plan screen, refused requests, an apply the main process asked about, a review.
   // Reported to the PM: the task form has no workflow, so a plan whose task kind was chosen directly cannot be applied.
   ["applyByWorkflow", (v) => v === "run_not_plan"],

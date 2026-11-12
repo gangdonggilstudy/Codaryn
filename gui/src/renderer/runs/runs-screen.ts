@@ -26,6 +26,8 @@ export interface RunsDeps {
   readonly announce: (text: string) => void;
   /** GU-5: the plan screen for a run that waits for its plan to be approved. */
   readonly openPlan: (runId: string, profile: string | null) => void;
+  /** DR-29: the changed files of a run, by path and state. */
+  readonly openChanges: (runId: string, profile: string | null) => void;
 }
 
 function errorBox(t: Texts, code: string): HTMLElement {
@@ -59,7 +61,7 @@ function revertList(t: Texts, view: RevertView): HTMLElement[] {
   return out;
 }
 
-function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openPlan: (runId: string) => void): HTMLElement {
+function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openPlan: (runId: string) => void, openChanges: (runId: string) => void): HTMLElement {
   const item = el("li", undefined, { "data-run": run.runId, "data-state": run.state });
   if (run.state === "damaged") {
     item.append(el("span", run.runId, { class: "run-id", lang: "en" }), el("span", t.format("runs.damaged"), { class: "damaged" }));
@@ -78,6 +80,7 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   const open = button(t.format("runs.preview"), () => preview(run.runId), { "data-preview": run.runId });
   open.setAttribute("aria-label", `${t.format("runs.preview")}: ${run.runId}`);
   item.append(open);
+  if (run.kind === "run" && run.changes !== null && run.changes > 0) item.append(button(t.format("run.viewChanges"), () => openChanges(run.runId), { "data-changes": run.runId }));
   if (run.reason === "plan_pending") item.append(button(t.format("run.viewPlan"), () => openPlan(run.runId), { "data-plan": run.runId }));
   return item;
 }
@@ -142,7 +145,7 @@ export function runsScreen(deps: RunsDeps): Screen {
           panel.replaceChildren(errorBox(t, reply.code));
           return;
         }
-        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => deps.openPlan(id, null)))));
+        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => deps.openPlan(id, null), (id) => deps.openChanges(id, null)))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
       };

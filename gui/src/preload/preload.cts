@@ -29,6 +29,7 @@ const CHANNELS = {
   plan: "codaryn:plan:read",
   applyPlan: "codaryn:plan:apply",
   review: "codaryn:review:record",
+  changes: "codaryn:changes:read",
 } as const;
 
 const EVENTS = {
@@ -84,6 +85,8 @@ const api = Object.freeze({
     ipcRenderer.invoke(CHANNELS.plan, { workspace: text(workspace), runId: text(runId), profile: text(profile) }),
   /** Only the plan view's approval token and whether to be asked for the consent: never a consent or digest. */
   applyPlan: (approval: unknown, askConsent: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.applyPlan, { approval: text(approval), askConsent: askConsent === true }),
+  changes: (workspace: unknown, runId: unknown, profile: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(CHANNELS.changes, { workspace: text(workspace), runId: text(runId), profile: text(profile) }),
   review: (workspace: unknown, runId: unknown, profile: unknown, decision: unknown, note: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.review, { workspace: text(workspace), runId: text(runId), profile: text(profile), decision: text(decision), note: text(note) }),
   /** One listener at a time for each; a new one replaces the old. */

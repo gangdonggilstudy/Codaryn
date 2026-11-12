@@ -28,6 +28,8 @@ export interface RunScreenDeps {
   /** GU-5: the open workspace (for a review) and the plan screen for a plan run. */
   readonly current: () => Workspace | null;
   readonly openPlan: (runId: string, profile: string | null) => void;
+  /** DR-29: the changed files of a run, by path and state. */
+  readonly openChanges: (runId: string, profile: string | null) => void;
 }
 
 const MAX_NOTE = 500;
@@ -36,6 +38,9 @@ const MAX_NOTE = 500;
 function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
   const { api, run } = deps;
   const out: HTMLElement[] = [];
+  if (result.kind === "run" && result.changes.length > 0) {
+    out.push(button(t.format("run.viewChanges"), () => deps.openChanges(result.runId, run.last?.profile ?? null), { id: "run-view-changes" }));
+  }
   if (result.plan !== null) {
     out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null), { id: "run-view-plan" }));
   }

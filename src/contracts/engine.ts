@@ -323,7 +323,21 @@ export interface EngineResult {
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
   /** G-A: present with reason `awaiting_review` only. The workflow's checklist, masked. */
   readonly review?: { readonly checklist: readonly MaskedText[] };
+  /**
+   * DR-47 (AXM-1): the agent's last message: the text of the run's last model response with
+   * `stop: "final"`, masked as recorded (its `model_response.text`). It is the model's own words,
+   * not a verified fact; every view shows it after a label that says so (`summary.final_message`,
+   * `report.final_message`). Cut after masking, never inside a protected token, to at most
+   * MAX_FINAL_MESSAGE_CHARS characters (code points); `truncated` is true then. Absent when the run
+   * had no such response, when its text is empty or only white space, and for a plan run (reason
+   * `plan_pending`: its place is the plan's summary, PlanOutput.summary). Results written before
+   * DR-47 do not have it.
+   */
+  readonly finalMessage?: { readonly text: MaskedText; readonly truncated: boolean };
 }
+
+/** DR-47: the longest EngineResult.finalMessage text, in characters (code points). */
+export const MAX_FINAL_MESSAGE_CHARS = 2000;
 
 /** Printed on stdout as one JSON line when the CLI stops before a run starts. */
 export interface CliErrorOutput {

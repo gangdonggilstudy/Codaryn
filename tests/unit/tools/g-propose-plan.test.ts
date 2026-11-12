@@ -11,10 +11,13 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { MAX_PLAN_ACTIONS, MAX_PLAN_SOURCE_BYTES } from "../../../src/contracts/index.js";
+import { MAX_PLAN_ACTIONS, MAX_PLAN_SOURCE_BYTES, planActionShown } from "../../../src/contracts/index.js";
 import type {
+  MaskedText,
   PlanActionArgs,
   PlanRecorder,
+  PrivacyGateway,
+  StoredPlanAction,
   RawWorkflowToolOutcome,
   ResolvedPlanAction,
   Workspace,
@@ -22,7 +25,7 @@ import type {
 import { createToolRunner } from "../../../src/tools/index.js";
 import type { PlanFileOps } from "../../../src/tools/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
-import { createFakePrivacy } from "./doubles.js";
+import { FAKE_SECRET_A, TOKEN_A, createFakePrivacy } from "./doubles.js";
 
 const never = new AbortController().signal;
 
@@ -81,11 +84,11 @@ function recorder(behaviour: "resolve" | "reject" = "resolve") {
 async function propose(
   fx: Fixture,
   actions: readonly PlanActionArgs[],
-  options: { planRecorder?: PlanRecorder; signal?: AbortSignal; fileOps?: Partial<PlanFileOps>; platform?: NodeJS.Platform } = {},
+  options: { planRecorder?: PlanRecorder; signal?: AbortSignal; fileOps?: Partial<PlanFileOps>; platform?: NodeJS.Platform; privacy?: PrivacyGateway } = {},
 ): Promise<RawWorkflowToolOutcome> {
   const runner = createToolRunner({
     workspace: fx.workspace,
-    privacy: createFakePrivacy(),
+    privacy: options.privacy ?? createFakePrivacy(),
     ...(options.planRecorder === undefined ? {} : { planRecorder: options.planRecorder }),
     ...(options.fileOps === undefined ? {} : { fileOps: options.fileOps }),
     ...(options.platform === undefined ? {} : { platform: options.platform }),
@@ -128,8 +131,14 @@ test("G-C propose_plan: stores the checked actions with source hashes and change
     ];
     assert.deepEqual(outcome.payload.actions, expected);
     assert.equal(saved.length, 1);
-    assert.deepEqual(saved[0], expected);
-    assert.equal(outcome.payload.digest, sha(JSON.stringify(expected)));
+    // DR-28: the store gets each action with its paths as this run masked them (no secret here).
+    const storedExpected: StoredPlanAction[] = [
+      { ...(expected[0] as Extract<ResolvedPlanAction, { kind: "move" }>), shown: { from: ["a.txt"], to: ["2023/a.txt"] } },
+      { ...(expected[1] as Extract<ResolvedPlanAction, { kind: "discard" }>), shown: { path: ["b.txt"] } },
+      { ...(expected[2] as Extract<ResolvedPlanAction, { kind: "move" }>), shown: { from: ["docs/c.md"], to: ["notes/c.md"] } },
+    ];
+    assert.deepEqual(saved[0], storedExpected);
+    assert.equal(outcome.payload.digest, sha(JSON.stringify(storedExpected)));
     assert.deepEqual(await tree(fx.root), before, "the workspace is unchanged");
   } finally {
     await fx.cleanup();
@@ -328,6 +337,49 @@ test("G-C propose_plan: a cancelled call stores nothing", async () => {
     assert.equal(outcome.ok, false);
     if (!outcome.ok) assert.equal(outcome.code, "cancelled");
     assert.equal(saved.length, 0);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C propose_plan (DR-28): each stored action carries its paths as this run masked them (planActionShown)", async () => {
+  const secretName = `${FAKE_SECRET_A}.txt`;
+  const fx = await fixture({ [secretName]: "alpha", "b.txt": "bravo" });
+  try {
+    const { planRecorder, saved } = recorder();
+    const outcome = await propose(
+      fx,
+      [
+        { kind: "move", from: secretName, to: "dir/x.txt" },
+        { kind: "discard", path: "b.txt" },
+      ],
+      { planRecorder },
+    );
+    assert.equal(outcome.ok, true, JSON.stringify(outcome));
+    const stored = saved[0] as readonly StoredPlanAction[];
+    assert.deepEqual(
+      stored[0]?.shown,
+      planActionShown({ kind: "move", from: `${TOKEN_A}.txt` as MaskedText, to: "dir/x.txt" as MaskedText, sha256: sha("alpha") }),
+    );
+    assert.deepEqual(stored[0]?.shown, { from: ["", ".txt"], to: ["dir/x.txt"] }, "the token is a boundary between visible parts");
+    assert.deepEqual(stored[1]?.shown, { path: ["b.txt"] });
+    assert.doesNotMatch(JSON.stringify(stored.map((action) => action.shown)), /fake-secret/, "the secret is not in the masked form");
+    assert.ok(outcome.ok && "digest" in outcome.payload && outcome.payload.digest === sha(JSON.stringify(stored)), "the digest covers the masked form");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C propose_plan (DR-28): a path that cannot be masked fails the call with io_error and stores nothing", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    const privacy = createFakePrivacy();
+    privacy.failMask = true;
+    const { planRecorder, saved } = recorder();
+    const outcome = await propose(fx, [{ kind: "discard", path: "a.txt" }], { planRecorder, privacy });
+    assert.equal(outcome.ok, false);
+    assert.equal(!outcome.ok && outcome.code, "io_error");
+    assert.equal(saved.length, 0, "nothing was stored");
   } finally {
     await fx.cleanup();
   }

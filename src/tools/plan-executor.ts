@@ -6,7 +6,10 @@
  * - Every workspace path goes through `Workspace.resolve`. The only place written outside it is
  *   the apply run's own `.codaryn/discarded/<runId>/` (DR-9).
  * - A move never replaces an existing file and never copies (`moveNoReplace`). Where hard links
- *   cannot be used it does not move at all (DR-18 b, HARD_LINK_UNAVAILABLE_PROBLEM).
+ *   cannot be used it does not move (DR-18 b, HARD_LINK_UNAVAILABLE_PROBLEM): `check` finds that
+ *   ahead of the apply, and the engine ends the apply as `consent_required` (DR-21). Only with the
+ *   person's consent for this apply (`allowUnsafeMove`) does `apply` look once more that the
+ *   destination is absent and rename (`renameIfAbsent`), marking the outcome `unsafe`.
  * - A discard moves the file the same way into the discarded directory, under a name built from
  *   the action index only, never from the file name.
  * - The source must still be the file the plan hashed: `check` hashes it, and `apply` hashes it
@@ -20,7 +23,7 @@
 
 import path from "node:path";
 
-import { DISCARDED_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import { DISCARDED_DIR_NAME, STATE_DIR_NAME, discardedStoredName } from "../contracts/index.js";
 import type {
   CreatePlanExecutor,
   PlanExecutor,
@@ -43,6 +46,7 @@ import {
   moveNoReplace,
   nodePlanFileOps,
   probeHardLink,
+  renameIfAbsent,
   sameIdentity,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
@@ -165,14 +169,15 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
           const destination = await inspectDestination(workspace, action.to, ops);
           if (!destination.ok) return destination.problem;
         }
-        // Q-8 (user decision pending): for now a volume without hard links stops the apply here.
+        // DR-21: a move that could only be made unsafely is reported here, before any action, so
+        // the engine can list it (plan_checked.unsafeMoves) and ask for the person's consent.
         return await hardLinkProblem(source.absolute, source.identity);
       } catch {
         return "io_error";
       }
     },
 
-    async apply(action, index, signal) {
+    async apply(action, index, signal, options) {
       try {
         if (signal.aborted) return itemFailure("io_error");
         if (!Number.isInteger(index) || index < 0) return itemFailure("io_error");
@@ -190,7 +195,7 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
         } else {
           const discarded = await discardedDir();
           if (!discarded.ok) return itemFailure("io_error");
-          stored = String(index);
+          stored = discardedStoredName(index);
           target = path.join(discarded.dir, stored);
         }
 
@@ -205,15 +210,22 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
           return itemFailure(isMissing(error) ? "source_missing" : "io_error");
         }
 
-        const moved = await moveNoReplace(source.absolute, target, ops);
+        let moved = await moveNoReplace(source.absolute, target, ops);
+        let unsafe = false;
+        if (moved === "no_hard_link") {
+          // DR-18 (b): no move that could replace a file, unless the person consented to that for
+          // this apply (DR-21). The engine passes the consent only for the actions the preflight
+          // listed as unsafe. The source is still the checked file: moveNoReplace changed nothing.
+          if (options?.allowUnsafeMove !== true) return itemFailure(HARD_LINK_UNAVAILABLE_PROBLEM);
+          moved = await renameIfAbsent(source.absolute, target, ops);
+          unsafe = moved === "moved";
+        }
         if (moved !== "moved") {
           // A discard target is new and named by index only: "exists" there is not the plan's fault.
           if (moved === "destination_exists" && action.kind === "discard") return itemFailure("io_error");
-          // DR-18 (b): no hard links here, so no move that could replace a file.
-          if (moved === "no_hard_link") return itemFailure(HARD_LINK_UNAVAILABLE_PROBLEM);
           return itemFailure(moved);
         }
-        return { ok: true, applied: { index, action, stored } };
+        return { ok: true, applied: { index, action, stored, ...(unsafe ? { unsafe: true as const } : {}) } };
       } catch {
         return itemFailure("io_error");
       }

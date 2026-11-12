@@ -94,7 +94,7 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.action.deleted": "삭제(이 실행이 만든 파일)",
   "revert.action.moved_back": "원래 위치로 다시 옮김",
   "revert.action.restored_from_discard": "폐기 보관함에서 되살림",
-  "revert.dry_run_next": "실행하려면 --dry-run 없이 다시 실행하세요.",
+  "revert.dry_run_next": "되돌리려면 --dry-run 없이 다시 실행하세요.",
   "revert.reverted_before": "이 실행은 이미 되돌린 적이 있습니다. 그래서 파일이 실행 뒤에 바뀐 것으로 보일 수 있습니다.",
   "revert.unsafe_moved": "동의를 받아, 덮어쓸 위험이 있는 방식으로 되돌려 옮긴 파일: {count}개",
   "revert.parked":

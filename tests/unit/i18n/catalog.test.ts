@@ -223,7 +223,8 @@ describe("i18n catalog: language and wording", () => {
   test("the revert preview's next line says to revert, not to apply (catalog review, docs/usage.md bf4cb53)", () => {
     // `apply` is a command of its own; the English line matches docs/usage.md, which n01 compares.
     assert.equal(MESSAGE_TEXTS.en["revert.dry_run_next"], "Run again without --dry-run to revert.");
-    for (const language of LANGS) assert.ok(MESSAGE_TEXTS[language]["revert.dry_run_next"].includes("--dry-run"), language);
+    // R-26 L-2: the Korean line says the same, "to revert" (되돌리려면), not "to run" (실행하려면).
+    assert.equal(MESSAGE_TEXTS.ko["revert.dry_run_next"], "되돌리려면 --dry-run 없이 다시 실행하세요.");
   });
 
   test("no text names VS Code: the app is the standalone GUI only (DR-20)", () => {

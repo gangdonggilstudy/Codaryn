@@ -52,6 +52,7 @@ export type {
   ListRunsRequest,
   PlanRequest,
   ReadSettingsRequest,
+  ReportMarkdown,
   ReportRequest,
   ResolvedRun,
   ResolveRunRequest,

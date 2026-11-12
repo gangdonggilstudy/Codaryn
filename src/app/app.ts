@@ -47,7 +47,7 @@ import { runModels } from "../cli/models.js";
 import { runApply, runPlan, runReview } from "../cli/plan-commands.js";
 import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
-import { anthropicModelLister } from "../cli/provider.js";
+import { API_MODEL_LISTERS, anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
 import { runCli } from "../cli/run.js";
@@ -84,6 +84,7 @@ import type {
   ApplySettingsChangeRequest,
   CreateSettingsRequest,
   ReadSettingsRequest,
+  ReportMarkdown,
   ReportRequest,
   SelectModelRequest,
   SettingsChangeProposal,
@@ -357,6 +358,27 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
+  /** GU-3: `codaryn report` without `--json`, as main.ts prints it. */
+  async function reportMarkdown(request: ReportRequest): Promise<AppCallOutcome<ReportMarkdown>> {
+    // The values go after their flags; one that starts with "-" could be read as a flag instead.
+    if (request.workspace.startsWith("-") || request.runId.startsWith("-")) {
+      return { ok: false, error: appError("invalid_arguments", "the workspace and the run id cannot start with '-'") };
+    }
+    try {
+      const outcome = await runReport({
+        argv: ["report", "--workspace", request.workspace, "--run", request.runId],
+        cwd: environment.cwd,
+        env: copyEnvironment(environment.env, platform),
+        platform,
+        listRuns: storeListRuns,
+      });
+      if ("output" in outcome) return { ok: false, error: outcome.output.kind === "error" ? fromCliError(outcome.output) : INTERNAL_ERROR };
+      return { ok: true, output: { kind: "report_markdown", markdown: outcome.text, exitCode: outcome.exitCode } };
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
   async function revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
     // DR-25: only the consent the person gave on screen for this run, as the adapter's consent.
     const consent = revertConsentOf(request);
@@ -448,6 +470,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         readFile: environment.readFile,
         loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
         listModels: hooks.listModels ?? anthropicModelLister,
+        // SP-6: each provider's lister, as main.ts gives them; `--provider` (modelsArguments) picks one.
+        listers: API_MODEL_LISTERS,
         anthropicDeps: hooks.anthropicDeps,
         defaultConfig: defaultConfigOf(),
         ...(hooks.writeConfig === undefined ? {} : { writeConfig: hooks.writeConfig }),
@@ -655,6 +679,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   return {
     startRun,
     report,
+    reportMarkdown,
     revert,
     listRuns,
     resolveRun,

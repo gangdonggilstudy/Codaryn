@@ -223,6 +223,10 @@ export interface RunObserver {
 
 - 실행 결과는 `EngineResult` 그대로다(`engine.ts:151-177`). 적용 결과는 범용 작업의 `ApplyResult`다(5.6). 어댑터마다 다른 결과 형식은 만들지 않는다.
 - `report({ workspace, runId })` → `ReportOutput`(`commands.ts:62-71`). 작업 공간의 기록만 읽고 잠금을 잡지 않는다. 실행 중이면 `incomplete`(종료 3)다.
+- `reportMarkdown({ workspace, runId })` → `{ kind: "report_markdown", markdown, exitCode }`(GU-3 보고서 저장).
+  - `codaryn report`를 `--json` 없이 부른 글 그대로다. Markdown이고 모든 API 제공자의 키 값을 가린다.
+  - 메인이 사람이 고른 파일에 쓰는 데만 쓴다. 창은 구조화된 `report`를 그린다. 이 글을 HTML로 그리지 않는다.
+  - `-`로 시작하는 작업 공간이나 run id는 아무것도 읽기 전에 `invalid_arguments`다(깃발로 읽히지 않게).
 - Markdown 글은 어댑터의 표시 몫이다. CLI의 `renderReport`는 기록에서 온 글을 모두 인라인 코드나 코드 블록에 넣는다(`report.ts:350-437`).
   - 그래서 Markdown으로 열어도 원격 이미지 같은 주입이 없다(R-1 I-6).
   - 어댑터(GUI)가 보고서를 Markdown으로 그려도 되는 근거이므로, 이 성질을 바꾸지 않는다.
@@ -366,8 +370,12 @@ interface ChangedFileView {
 - `doctor({ configPath, varsFile, taskPath, workspace })` → `DoctorOutput` [구현 A-1]. 네트워크 없음.
 - `listModels({ provider, configPath, varsFile })`, `selectModel({ …, model })` → `ModelsOutput` [구현 `4f7c0a7`]. CLI의 `runModels`(`--json`, `--use`)를 `main.ts`와 같은 규칙(설정 파일 출처, 키, 원자적 쓰기)으로 부른다. 터미널 질문은 하지 않는다.
   - 목록은 실제 API에 접속한다(Y-2). 사람이 고를 때만 부른다. 앱이 켜질 때나 실행 전에 부르지 않는다.
-  - 요청에 제공자 이름을 둔다(DR-22). 지금 연결된 것은 `anthropic` 하나이고, 다른 이름은 `invalid_arguments`다.
-  - 고르기는 목록에 있는 id만 설정 파일의 `model`에 쓰고 다른 필드는 바꾸지 않는다.
+  - 요청에 제공자 이름을 둔다(DR-22).
+    - API 제공자(`API_PROVIDER_NAMES`: `anthropic`, `openai`)만 받는다. 다른 이름은 아무것도 읽기 전에 `invalid_arguments`다.
+    - 앱 계층은 그 이름을 `--provider`로 넘긴다(SP-6). 설정 파일의 `provider`와 관계없이 그 제공자의 키·주소·목록 함수를 쓴다.
+    - `CONNECTED_MODEL_PROVIDERS`는 이 목록과 같다. GUI 엔진 호스트가 이것으로 고를 수 있는 제공자를 정한다.
+  - 고르기는 목록에 있는 id만 그 제공자의 모델 자리에 쓰고 다른 필드는 바꾸지 않는다. anthropic은 최상위 `model`(설정에 `providers.anthropic`이 있으면 그곳), 다른 제공자는 `providers.<이름>.model`이다.
+  - 실행은 요청에 제공자를 두지 않는다. CLI `run`과 같이 task의 `model.provider`, 아니면 설정의 `provider`를 따른다(시험: `tests/unit/app/provider.test.ts`).
 
 ### 5.9 권한 확인 질문 [제안, 단계 5 시작에 구현] (DR-1, DR-3)
 
@@ -443,6 +451,9 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   4. JSON 해석. 문법 오류면 줄과 열을 준다.
   5. 값 키 검사(깊이 64).
   6. `parseConfig`. 필드 위치를 준다(N-6).
+  - 키 검사(3, 5)는 지금 설정된 모든 API 제공자의 키 값으로 한다(SP-2, CLI의 `knownKeyValues`). 그래서 OpenAI 키 값이 든 설정 파일도 읽기와 변경 제안·적용에서 `key_in_file`로 거부된다.
+  - `keyAvailable`은 간편 실행이 쓸 제공자(설정의 `provider`, 없으면 anthropic)의 키가 있는지다. 값은 주지 않는다.
+  - `listRuns`의 출력도 모든 API 제공자의 키 값을 가린다(CLI `runs`와 같다). 시험은 `tests/unit/app/provider-keys.test.ts`다.
 - **만들기.**
   - CLI `init`을 `--json`, 질문 없이 부른다. 그래서 기본값만 쓴다: 모델 자리표시자, 기본 한도, 모두 거부하는 정책.
   - 이미 있으면 `config_exists`이고 덮어쓰지 않는다. 작업 공간 안이면 거부한다(S-1). 키는 받지도 쓰지도 않는다(C-1).

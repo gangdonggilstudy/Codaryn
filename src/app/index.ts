@@ -9,6 +9,8 @@ export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } 
 export { CONNECTED_MODEL_PROVIDERS, modelsArguments } from "./models.js";
 export { initArguments, suggestionsFor } from "./init.js";
 export { changesOf, digestOf, wideningOf } from "./settings-change.js";
+export { unsafeMoveConsentOf } from "./consent.js";
+export { profileWorkflowsOf } from "./settings.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {
   AppliedActionRecord,
@@ -67,4 +69,5 @@ export type {
   StartOutcome,
   StartRunRequest,
   TaskForm,
+  UnsafeMoveConsentRequest,
 } from "./types.js";

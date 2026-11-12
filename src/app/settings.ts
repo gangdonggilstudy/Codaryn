@@ -16,7 +16,7 @@
  * call one function instead (A-4 report).
  */
 
-import { ANTHROPIC_API_KEY_ENV } from "../contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, BUILTIN_WORKFLOW_IDS } from "../contracts/index.js";
 import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
@@ -101,6 +101,11 @@ export async function loadSettingsFile(
   return { ok: true, currentKey, file, raw, config: checked.config };
 }
 
+/** Each profile with the workflow it uses when the task names none, in the file's order. Pure. */
+export function profileWorkflowsOf(config: CodarynConfig | null): { readonly profile: string; readonly workflowRef: string | null }[] {
+  return Object.entries(config?.profiles ?? {}).map(([profile, entry]) => ({ profile, workflowRef: entry.workflowRef ?? null }));
+}
+
 export async function readSettingsIn(io: SettingsIo, request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>> {
   const loaded = await loadSettingsFile(io, request.configPath);
   if (!loaded.ok) return loaded;
@@ -113,6 +118,8 @@ export async function readSettingsIn(io: SettingsIo, request: ReadSettingsReques
       config,
       profiles: Object.keys(config?.profiles ?? {}),
       workflows: Object.keys(config?.workflows ?? {}),
+      builtinWorkflows: [...BUILTIN_WORKFLOW_IDS],
+      profileWorkflows: profileWorkflowsOf(config),
       keyAvailable: loaded.currentKey !== null,
     },
   };

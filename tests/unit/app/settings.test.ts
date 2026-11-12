@@ -8,8 +8,9 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { ANTHROPIC_API_KEY_ENV, CODARYN_CONFIG_ENV } from "../../../src/contracts/index.js";
-import { createCodarynApp } from "../../../src/app/index.js";
+import { ANTHROPIC_API_KEY_ENV, BUILTIN_WORKFLOW_IDS, CODARYN_CONFIG_ENV } from "../../../src/contracts/index.js";
+import type { CodarynConfig } from "../../../src/contracts/index.js";
+import { createCodarynApp, profileWorkflowsOf } from "../../../src/app/index.js";
 import type { AppCallOutcome, SettingsView } from "../../../src/app/index.js";
 import { appEnvironment, tempDir } from "./support.js";
 
@@ -36,7 +37,16 @@ describe("readSettings", () => {
     const base = await tempDir("codaryn-unit-app-settings-");
     const app = createCodarynApp(await appEnvironment(base, { env: { [ANTHROPIC_API_KEY_ENV]: FAKE_KEY } }));
     const view = ok(await app.readSettings({ configPath: null }));
-    assert.deepEqual(view, { kind: "settings", file: null, config: null, profiles: [], workflows: [], keyAvailable: true });
+    assert.deepEqual(view, {
+      kind: "settings",
+      file: null,
+      config: null,
+      profiles: [],
+      workflows: [],
+      builtinWorkflows: [...BUILTIN_WORKFLOW_IDS],
+      profileWorkflows: [],
+      keyAvailable: true,
+    });
     assert.equal(JSON.stringify(view).includes(FAKE_KEY), false);
   });
 
@@ -69,6 +79,11 @@ describe("readSettings", () => {
     const byArgument = ok(await app.readSettings({ configPath: explicit }));
     assert.deepEqual([byArgument.file?.source, byArgument.file?.display, byArgument.config?.model], ["argument", "--config", "fake-model-a"]);
     assert.deepEqual(byArgument.profiles, ["doc", "code"]);
+    assert.deepEqual(byArgument.profileWorkflows, [
+      { profile: "doc", workflowRef: null },
+      { profile: "code", workflowRef: null },
+    ]);
+    assert.deepEqual(byArgument.builtinWorkflows, [...BUILTIN_WORKFLOW_IDS]);
   });
 
   test("a file that fails a check is the CLI's error, with its position, and never echoes a value", async () => {
@@ -91,5 +106,20 @@ describe("readSettings", () => {
 
     const absent = await app.readSettings({ configPath: path.join(base, "absent.json") });
     assert.equal(absent.ok ? null : absent.error.code, "invalid_config", "a named file that is missing is an error, not 'no config'");
+  });
+});
+
+describe("profileWorkflowsOf", () => {
+  test("each profile with the workflow it names, or null; the file's order", () => {
+    const config = {
+      schemaVersion: 1,
+      profiles: { tidy: { workflowRef: "organize" }, plain: {}, notes: { workflowRef: "team-notes" } },
+    } as unknown as CodarynConfig;
+    assert.deepEqual(profileWorkflowsOf(config), [
+      { profile: "tidy", workflowRef: "organize" },
+      { profile: "plain", workflowRef: null },
+      { profile: "notes", workflowRef: "team-notes" },
+    ]);
+    assert.deepEqual(profileWorkflowsOf(null), []);
   });
 });

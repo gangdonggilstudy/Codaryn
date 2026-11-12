@@ -182,8 +182,12 @@ export interface SettingsView {
   readonly config: CodarynConfig | null;
   /** N-8: profile names in the file's order, for the new task screen. */
   readonly profiles: readonly string[];
-  /** G-A: workflow ids the config file defines. Built-in ids come with the workflow module (G-B). */
+  /** G-A: workflow ids the config file defines, in the file's order. */
   readonly workflows: readonly string[];
+  /** G-A BUILTIN_WORKFLOW_IDS: the built-in workflows, available with or without a config file. */
+  readonly builtinWorkflows: readonly string[];
+  /** N-8, G-A: each profile with the workflow it uses when the task names none (`workflowRef`), or null; file order. */
+  readonly profileWorkflows: readonly { readonly profile: string; readonly workflowRef: string | null }[];
   /** Whether ANTHROPIC_API_KEY is set. Never its value (C-1). */
   readonly keyAvailable: boolean;
 }
@@ -411,6 +415,20 @@ export interface PlanRequest {
 }
 
 /** DR-1, DR-2, DR-12: the apply takes the task form; its policy and verifiers come from it at apply time (DR-5). */
+/**
+ * DR-21: the person's consent, given on the GUI's screen, to the moves of one apply that can only be
+ * made unsafely (no hard links on that drive, so a file created at the destination meanwhile could
+ * be replaced). The GUI's main process sets it only after the person agreed to those moves (the
+ * apply ended as `needs-input`/`consent_required` with `plan_checked.unsafeMoves`). The app layer
+ * turns it into G-A's UnsafeMoveConsent with channel `adapter` (consent.ts); the GUI cannot name
+ * another channel. A task file, config, profile, plan or model never gives it. It holds for this
+ * one apply: the next apply needs it again.
+ */
+export interface UnsafeMoveConsentRequest {
+  /** The full SHA-256 of the plan the person consented for (64 lowercase hex): the plan being applied. */
+  readonly digest: string;
+}
+
 export interface ApplyPlanRequest {
   readonly settings: TaskForm;
   readonly planRunId: string;
@@ -418,6 +436,8 @@ export interface ApplyPlanRequest {
   readonly digest: string;
   /** `--cancel-file` (DR-2). Outside the workspace (T-12). */
   readonly cancelFile: string | null;
+  /** DR-21: null unless the person consented on screen to this apply's unsafe moves. */
+  readonly unsafeMoveConsent: UnsafeMoveConsentRequest | null;
 }
 
 /** DR-2: an apply run's events: its own records (G-A ApplyJournalRecord), sanitized as run events are. */

@@ -2,6 +2,23 @@
  * Privacy gateway (phase 1a): exact-match masking of registered secrets and their listed
  * variants, token validation, field-scoped restoration and in-place document rebuilding.
  *
+ * DR-40 (a), R-25 M-1 (the run's second defence after the S-6/S-8 refusal): a registered value or
+ * listed variant of MIN_SPLIT_MATCH_LENGTH or more code points is also found split by key separator
+ * characters (KEY_SEPARATOR_PATTERN_SOURCE: white space, line breaks, control and format characters
+ * such as the zero-width space and the soft hyphen, taken whole code point by code point, those
+ * outside the Basic Multilingual Plane included). The span masked is the original one, separators
+ * inside it included, so restoring or rebuilding gives back the exact bytes. Separators before or
+ * after the value stay outside the token.
+ *
+ * DR-42 (a), R-28 I-3: a key-like registered value (the contract's keyLikeSkeleton, DR-43 (c), the
+ * condition the CLI's output hiding uses too: at least MIN_KEY_SKELETON_LENGTH
+ * letters and digits, with a digit and both cases, or 32 or more with a digit and a letter) is also
+ * found in the text's letters and digits alone (keyLettersAndDigits), so a split by a character
+ * that is not a separator (a variation selector, the combining grapheme joiner, a Hangul filler, a
+ * braille blank, a lone surrogate, or visible punctuation as in `'…' + '…'`) is masked too, the
+ * characters between included. A value made of words (R-28 I-1) is not key-like, so this adds no
+ * masking of ordinary text for it.
+ *
  * The table lives in memory for one gateway instance. Its unit is a pair of
  * "matched string" and "token": the raw secret, each listed variant, each merged run of
  * overlapping or touching matches, and each pre-existing `CODARYN_SECRET` fragment are
@@ -36,6 +53,85 @@ import {
   PRIVACY_TOKEN_SUFFIX,
 } from "../contracts/text.js";
 import type { JsonObject, JsonValue, MaskedText } from "../contracts/text.js";
+import { compactKeyText, KEY_SEPARATOR_PATTERN_SOURCE, keyLettersAndDigits, keyLikeSkeleton } from "../contracts/keys.js";
+
+/**
+ * DR-40 (a): the shortest registered value (or listed variant), in code points without separators,
+ * that is also looked for split. The run's own key is registered from 16 characters (S-2,
+ * MIN_CURRENT_KEY_LENGTH), so every key reaches it. A shorter value stays exact-match only: in the
+ * compact view the ends and starts of separate lines run together, and a short value would match
+ * ordinary words there, each match a token and a protected line the model cannot edit.
+ */
+export const MIN_SPLIT_MATCH_LENGTH = 16;
+
+/** One key separator code point (KEY_SEPARATOR_PATTERN_SOURCE), for a single code point. */
+const SEPARATOR = new RegExp(`^${KEY_SEPARATOR_PATTERN_SOURCE}$`, "u");
+
+/**
+ * The compact view of `text` from `from` to `to` (compactKeyText of that slice), with the index in
+ * `text` of each of its UTF-16 units, so a match in the view maps back to its original span. Code
+ * points are taken whole: a separator outside the Basic Multilingual Plane is left out as one, and a
+ * kept one keeps both of its units.
+ */
+export function compactView(text: string, from: number, to: number): { compact: string; at: number[] } {
+  let compact = "";
+  const at: number[] = [];
+  let index = from;
+  for (const char of text.slice(from, to)) {
+    if (!SEPARATOR.test(char)) {
+      compact += char;
+      for (let unit = 0; unit < char.length; unit += 1) at.push(index + unit);
+    }
+    index += char.length;
+  }
+  return { compact, at };
+}
+
+/**
+ * The letters and digits of `text` from `from` to `to` (keyLettersAndDigits of that slice), with the
+ * index in `text` of each, so a match maps back to its original span. All are ASCII, one unit each.
+ */
+export function skeletonView(text: string, from: number, to: number): { skeleton: string; at: number[] } {
+  let skeleton = "";
+  const at: number[] = [];
+  for (let index = from; index < to; index += 1) {
+    const unit = text.charCodeAt(index);
+    if ((unit >= 0x30 && unit <= 0x39) || (unit >= 0x41 && unit <= 0x5a) || (unit >= 0x61 && unit <= 0x7a)) {
+      skeleton += text[index] as string;
+      at.push(index);
+    }
+  }
+  return { skeleton, at };
+}
+
+/**
+ * R-28b L-1: the most UTF-16 units between two neighbouring characters of a split match (in the
+ * separator or the letters-and-digits pass) that stay inside one token. Where the gap is longer the
+ * span is cut there and each piece is masked on its own: every character of the value is still in a
+ * token, and the text between stays visible (5,000 Hangul characters between two halves of a key
+ * were all hidden). Short splits (a variation selector, `" + "`, an emoji sequence, a line break)
+ * stay one token. Counted in units: a character outside the Basic Multilingual Plane counts two;
+ * the cut falls only between kept characters, so no surrogate pair is cut.
+ */
+export const MAX_MATCH_GAP = 8;
+
+/**
+ * Adds the original span of one match in a view (`at`: the text index of each kept unit, `hit` and
+ * `length` in the view), cut where two neighbouring kept units are more than MAX_MATCH_GAP apart.
+ */
+function pushMatchSpans(found: Interval[], at: readonly number[], hit: number, length: number): void {
+  let start = at[hit] as number;
+  let last = start;
+  for (let unit = hit + 1; unit < hit + length; unit += 1) {
+    const index = at[unit] as number;
+    if (index - last - 1 > MAX_MATCH_GAP) {
+      found.push({ start, end: last + 1 });
+      start = index;
+    }
+    last = index;
+  }
+  found.push({ start, end: last + 1 });
+}
 
 const ID_BYTES = PRIVACY_TOKEN_ID_LENGTH / 2;
 const MAX_ID_ATTEMPTS = 8;
@@ -104,6 +200,12 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
     for (const form of listedForms(secret)) knownForms.add(form);
   }
   const forms = [...knownForms];
+  /** DR-40 (a): each form without separators, when long enough to look for split. */
+  const splitForms = [...new Set(forms.map((form) => compactKeyText(form)))].filter(
+    (form) => [...form].length >= MIN_SPLIT_MATCH_LENGTH,
+  );
+  /** DR-42 (a): each key-like form's letters and digits, looked for in the text's. */
+  const skeletonForms = [...new Set(forms.map((form) => keyLettersAndDigits(form)))].filter((form) => keyLikeSkeleton(form));
 
   // Tokens are issued on first match, so a random-source failure surfaces inside `mask`.
   const tokenByForm = new Map<string, string>();
@@ -131,9 +233,9 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
   }
 
   /**
-   * Protected intervals inside `[from, to)`: every occurrence of every registered form and every
-   * `CODARYN_SECRET` fragment, merged when they overlap or touch. A match that would cross `to`
-   * (the start of an issued token) is not taken.
+   * Protected intervals inside `[from, to)`: every occurrence of every registered form, every split
+   * occurrence of a long enough one (DR-40 (a)) and every `CODARYN_SECRET` fragment, merged when they
+   * overlap or touch. A match that would cross `to` (the start of an issued token) is not taken.
    */
   function protectedIntervals(text: string, from: number, to: number): Interval[] {
     const found: Interval[] = [];
@@ -142,6 +244,28 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
       while (at !== -1 && at + form.length <= to) {
         found.push({ start: at, end: at + form.length });
         at = text.indexOf(form, at + 1);
+      }
+    }
+    if (splitForms.length > 0) {
+      const view = compactView(text, from, to);
+      // Without a separator in the range, every split occurrence is an exact one, found above.
+      if (view.compact.length < to - from) {
+        for (const form of splitForms) {
+          for (let hit = view.compact.indexOf(form); hit !== -1; hit = view.compact.indexOf(form, hit + 1)) {
+            pushMatchSpans(found, view.at, hit, form.length);
+          }
+        }
+      }
+    }
+    if (skeletonForms.length > 0) {
+      const view = skeletonView(text, from, to);
+      // Without another character in the range, every such occurrence is an exact one, found above.
+      if (view.skeleton.length < to - from) {
+        for (const form of skeletonForms) {
+          for (let hit = view.skeleton.indexOf(form); hit !== -1; hit = view.skeleton.indexOf(form, hit + 1)) {
+            pushMatchSpans(found, view.at, hit, form.length);
+          }
+        }
       }
     }
     const fragment = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "gi");

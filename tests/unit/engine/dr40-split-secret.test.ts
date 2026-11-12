@@ -4,8 +4,10 @@
  * the run record. Driven through the real engine and the real privacy gateway. The fake key below is
  * built at run time and is not a credential.
  *
- * The gateway matches registered values exactly, so a split value passes unmasked. The fix belongs to
- * the gateway (src/privacy, not this owner's): the reproduction is a todo test until then.
+ * The gateway matched registered values exactly, so a split value passed unmasked (106 of 106 key
+ * characters in the requests and the journal). The gateway now also finds a registered value of 16
+ * or more code points split by key separator characters and masks the original span (src/privacy,
+ * MIN_SPLIT_MATCH_LENGTH); its own tests are in tests/unit/privacy/split-secret.test.ts.
  */
 
 import assert from "node:assert/strict";
@@ -64,12 +66,8 @@ describe("DR-40 (a), second defence: a split registered key leaves nothing in th
   });
 
   for (const [name, mark] of Object.entries(MARKS)) {
-    test(
-      `split by a ${name}, in the goal and in a tool result: 0 key characters in the requests and the journal`,
-      { todo: "src/privacy (not this owner's): the gateway must also match registered values in the compact view (compactKeyText) and mask the original span" },
-      async () => {
-        assert.deepEqual(await runWith(split(mark)), { requests: 0, journal: 0, result: 0 });
-      },
-    );
+    test(`split by a ${name}, in the goal and in a tool result: 0 key characters in the requests and the journal`, async () => {
+      assert.deepEqual(await runWith(split(mark)), { requests: 0, journal: 0, result: 0 });
+    });
   }
 });

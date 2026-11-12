@@ -444,6 +444,8 @@ const expected = [
   ["reportVerdict", (v) => v === "accepted"],
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
+  // U-79: the run waiting for its review is reviewed from the list too: its report's review tab, with the verdict of 5g.
+  ["reviewFromList", (v) => v !== null && v.offered === true && v.tab === "review" && v.verdict === "accepted"],
   // PM (a): the engine host's test transport refused no request to another machine.
   ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
   ["transportRefusedEnd", (v) => v === "host ended" || JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],

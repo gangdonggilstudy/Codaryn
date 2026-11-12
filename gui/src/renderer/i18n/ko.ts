@@ -530,6 +530,8 @@ export const KO = {
   "report.records": "기록 {count}건",
   "report.runCounts": "모델 요청 {requests} · 거부된 도구 호출 {denied} · 재수정 {repairs}",
   "report.noVerdict": "사람의 판정이 없습니다.",
+  "runs.review": "사람 확인",
+  "report.reviewCli": "이 앱이 시작하지 않은 실행이라 작업 지정을 모릅니다. codaryn review로 판정하세요: 실행을 시작한 작업 지정, --run과 실행 id, --accept 또는 --reject.",
   "report.verdictAt": "판정 시각: {time}",
   "report.note": "메모: {note}",
   "phase.run_start": "실행 시작 때",

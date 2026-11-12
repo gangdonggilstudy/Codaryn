@@ -10,7 +10,7 @@
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
-import { asReview, asStartRun } from "../api.js";
+import { asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { actionLine } from "../plan/plan-screen.js";
 import { button, el } from "../shell/dom.js";
@@ -19,6 +19,7 @@ import type { RunItemView, RunResultView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localTime } from "./run-model.js";
 import { maskingLine, saveReportButton } from "../report/report-screen.js";
 import type { RunFilter, RunModel } from "./run-model.js";
+import { reviewPanel } from "./review-panel.js";
 
 export interface RunScreenDeps {
   readonly texts: Texts;
@@ -38,8 +39,6 @@ export interface RunScreenDeps {
   /** U-61 (3.12): the settings screen, where the limits are (3.10). */
   readonly openSettings?: () => void;
 }
-
-const MAX_NOTE = 500;
 
 /** GU-5: what follows a result: the plan, the DR-21 consent question, the applied actions, a review. */
 function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
@@ -89,47 +88,9 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
       out.push(el("p", t.format("run.consentNeeded", { count: String(result.unsafeMoves ?? 0) }), { id: "run-consent-text", class: "notice" }), agree, message);
     }
   }
+  // GU-5 (3.7), U-79: the review panel, the same as the report's review tab has.
   if (result.review !== null && workspace !== null) {
-    const panel = el("section", undefined, { id: "run-review-panel", "aria-labelledby": "run-review-title" });
-    const note = el("textarea", undefined, { id: "review-note", rows: "3", maxlength: String(MAX_NOTE) });
-    const confirm = el("div", undefined, { id: "review-confirm", hidden: "", role: "alertdialog", "aria-labelledby": "review-confirm-text" });
-    const outcome = el("div", undefined, { id: "review-outcome", role: "status" });
-    let decision: "accept" | "reject" = "accept";
-    const ask = (chosen: "accept" | "reject"): void => {
-      decision = chosen;
-      confirmText.textContent = t.format(chosen === "accept" ? "review.confirmAccept" : "review.confirmReject");
-      confirm.removeAttribute("hidden");
-      keep.focus();
-    };
-    const confirmText = el("p", "", { id: "review-confirm-text" });
-    const keep = button(t.format("review.back"), () => confirm.setAttribute("hidden", ""), { id: "review-back" });
-    const record = button(t.format("review.record"), () => {
-      confirm.setAttribute("hidden", "");
-      void (async () => {
-        const text = note.value.trim();
-        const reply = asReview(await api.review(workspace.handle, result.runId, run.last?.profile ?? null, run.last?.workflow ?? null, decision, text === "" ? null : text));
-        if (!reply.ok) {
-          outcome.replaceChildren(el("p", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { "data-error": reply.code }));
-          return;
-        }
-        outcome.replaceChildren(el("p", t.format(reply.verdict === "accepted" ? "review.accepted" : "review.rejected")));
-        outcome.setAttribute("data-verdict", reply.verdict);
-        deps.announce(t.format(reply.verdict === "accepted" ? "review.accepted" : "review.rejected"));
-      })();
-    }, { id: "review-record" });
-    confirm.append(confirmText, keep, record);
-    // No default button (3.7): the person picks one; the window asks once more before recording.
-    panel.append(
-      el("h4", t.format("review.title"), { id: "run-review-title" }),
-      el("p", t.format("review.text")),
-      el("label", t.format("review.note"), { for: "review-note" }),
-      note,
-      button(t.format("review.accept"), () => ask("accept"), { id: "review-accept" }),
-      button(t.format("review.reject"), () => ask("reject"), { id: "review-reject" }),
-      confirm,
-      outcome,
-    );
-    out.push(panel);
+    out.push(reviewPanel({ texts: t, api, workspace, runId: result.runId, profile: run.last?.profile ?? null, workflow: run.last?.workflow ?? null, announce: deps.announce }, { panel: "run-review-panel", title: "run-review-title" }));
   }
   return out;
 }

@@ -182,6 +182,8 @@ export const EN_MESSAGES: MessageTexts = {
 
   "init.location": "Config file location: {location}",
   "init.confirm_create": "Create the config file there?",
+  "init.provider_pick": "Choose the provider by number or name (Enter, or an answer not listed, gives {provider}).",
+  "init.provider_chosen": "Provider: {provider}. The config file is written for it.",
   "init.declined": "Nothing was created.",
   "init.not_terminal": "Not a terminal: nothing was asked and only the defaults were written.",
   "init.model_no_key": "Model: without a key the list cannot be fetched. After registering the key, choose one with codaryn models --use.",

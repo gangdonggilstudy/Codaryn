@@ -181,6 +181,8 @@ export const KO_MESSAGES: MessageTexts = {
 
   "init.location": "설정 파일 위치: {location}",
   "init.confirm_create": "이 위치에 설정 파일을 만들까요?",
+  "init.provider_pick": "제공자를 번호나 이름으로 고르세요(Enter나 목록에 없는 답이면 {provider}).",
+  "init.provider_chosen": "제공자: {provider}. 설정 파일을 이 제공자에 맞춰 씁니다.",
   "init.declined": "아무것도 만들지 않았습니다.",
   "init.not_terminal": "터미널이 아니어서 묻지 않고 기본값만 썼습니다.",
   "init.model_no_key": "모델: 키가 없어 목록을 가져올 수 없습니다. 키를 등록한 뒤 codaryn models --use로 고르세요.",

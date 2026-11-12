@@ -16,8 +16,8 @@
  * policy, the `query_table` tool, Markdown file rules, the `analyze-private` definition.
  */
 
-import type { PlanMode } from "./plan.js";
-import type { Limits, PolicyConfig, ResolvedTaskSpec } from "./task.js";
+import type { PlanActionKind, PlanMode } from "./plan.js";
+import type { CommandRule, Limits, PolicyConfig, ResolvedTaskSpec } from "./task.js";
 import { TOOL_NAMES } from "./tool.js";
 import type { AnyToolName } from "./tool.js";
 import type { MaskedText } from "./text.js";
@@ -106,6 +106,117 @@ export function workflowSettingsOf(task: ResolvedTaskSpec): WorkflowSettings {
   };
 }
 
+/** DR-41: one command line set allowed by both rules, as a rule, or null when they share none. */
+function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | null {
+  if (a.executable !== b.executable) return null;
+  const [shorter, longer] = a.argsPrefix.length <= b.argsPrefix.length ? [a, b] : [b, a];
+  if (!shorter.argsPrefix.every((arg, index) => longer.argsPrefix[index] === arg)) return null;
+  if (shorter.argsPrefix.length === longer.argsPrefix.length) {
+    return { executable: a.executable, argsPrefix: [...a.argsPrefix], allowExtraArgs: a.allowExtraArgs && b.allowExtraArgs };
+  }
+  // The longer prefix allows its own lines only; the shorter one covers them only with extra args.
+  return shorter.allowExtraArgs ? { executable: longer.executable, argsPrefix: [...longer.argsPrefix], allowExtraArgs: longer.allowExtraArgs } : null;
+}
+
+/**
+ * DR-41 (A-8, F-5): the effective policy wherever a workflow definition applies and another policy
+ * is given: in the quick form the profile's, else the config's; in a task file that names a workflow
+ * (`workflowRef`), the task's own policy (PM, after 27afb01). A definition's rules are its safety
+ * rules, so no policy, however given, loosens them. A task naming no workflow keeps its policy as
+ * it is. Pure.
+ * - Either absent: the other, as before.
+ * - protectedPaths: both lists (union), the definition's first, each entry once.
+ * - commands: only command lines both allow (the intersection of the two allow lists, rule by rule).
+ *   Under a definition that allows no command (`allowCommands: false`, organize) every given rule
+ *   is dropped. A task file's own rules there are still refused first (`commands_not_allowed`,
+ *   GT-D10: ResolveWorkflowInput.commandRules counts the task's rules before the merge); the
+ *   profile's or config's are dropped and the person is told (workflowPolicyNarrowings).
+ * - planActions: the configured policy narrows the definition's when it states planActions (only
+ *   kinds both list stay); when it does not state them it leaves the definition's as they are, so a
+ *   general policy that only adds a protected path does not take organize's move and discard away.
+ * - restorePathTokens: true only when both allow it. network, destructive: "deny".
+ */
+export function mergeWorkflowPolicy(definition: PolicyConfig | undefined, configured: PolicyConfig | undefined): PolicyConfig | undefined {
+  if (definition === undefined) return configured;
+  if (configured === undefined) return definition;
+  const protectedPaths = [...new Set([...(definition.protectedPaths ?? []), ...(configured.protectedPaths ?? [])])];
+  const commands: CommandRule[] = [];
+  const seen = new Set<string>();
+  for (const own of definition.commands) {
+    for (const given of configured.commands) {
+      const both = commandRuleIntersection(own, given);
+      if (both === null) continue;
+      const key = JSON.stringify(both);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      commands.push(both);
+    }
+  }
+  const ownActions: readonly PlanActionKind[] = definition.planActions ?? [];
+  const planActions =
+    configured.planActions === undefined ? [...ownActions] : ownActions.filter((kind) => (configured.planActions as readonly PlanActionKind[]).includes(kind));
+  return {
+    commands,
+    network: "deny",
+    destructive: "deny",
+    restorePathTokens: definition.restorePathTokens && configured.restorePathTokens,
+    ...(protectedPaths.length > 0 ? { protectedPaths } : {}),
+    ...(planActions.length > 0 ? { planActions } : {}),
+  };
+}
+
+/**
+ * DR-41 (PM after 27afb01): what mergeWorkflowPolicy left out of the given policy, so doctor and the
+ * run's start can tell the person. Kinds and counts only, never a rule, a command or a path:
+ * - commands_dropped: given command rules that share no command line with the definition's
+ * - commands_narrowed: given command rules kept only in part (no single definition rule allows all
+ *   of their lines)
+ * - plan_actions_dropped: plan action kinds the given policy states that the definition does not list
+ * - restore_path_tokens_off: the given policy allows restoring path tokens, the definition does not
+ */
+export const POLICY_NARROWING_KINDS = ["commands_dropped", "commands_narrowed", "plan_actions_dropped", "restore_path_tokens_off"] as const;
+export type PolicyNarrowingKind = (typeof POLICY_NARROWING_KINDS)[number];
+
+export interface PolicyNarrowing {
+  readonly kind: PolicyNarrowingKind;
+  /** At least 1. */
+  readonly count: number;
+}
+
+function sameCommandRule(a: CommandRule, b: CommandRule): boolean {
+  return (
+    a.executable === b.executable &&
+    a.allowExtraArgs === b.allowExtraArgs &&
+    a.argsPrefix.length === b.argsPrefix.length &&
+    a.argsPrefix.every((arg, index) => b.argsPrefix[index] === arg)
+  );
+}
+
+/**
+ * DR-41: the narrowings of `configured` by `definition` under mergeWorkflowPolicy, in
+ * POLICY_NARROWING_KINDS order, each with a count of at least 1. Empty when either is absent or
+ * nothing was left out. Pure.
+ */
+export function workflowPolicyNarrowings(definition: PolicyConfig | undefined, configured: PolicyConfig | undefined): readonly PolicyNarrowing[] {
+  if (definition === undefined || configured === undefined) return [];
+  let dropped = 0;
+  let narrowed = 0;
+  for (const given of configured.commands) {
+    const kept = definition.commands.map((own) => commandRuleIntersection(own, given)).filter((rule): rule is CommandRule => rule !== null);
+    if (kept.length === 0) dropped += 1;
+    else if (!kept.some((rule) => sameCommandRule(rule, given))) narrowed += 1;
+  }
+  const own = definition.planActions ?? [];
+  const planDropped = configured.planActions === undefined ? 0 : [...new Set(configured.planActions)].filter((kind) => !own.includes(kind)).length;
+  const counts: { readonly [K in PolicyNarrowingKind]: number } = {
+    commands_dropped: dropped,
+    commands_narrowed: narrowed,
+    plan_actions_dropped: planDropped,
+    restore_path_tokens_off: configured.restorePathTokens && !definition.restorePathTokens ? 1 : 0,
+  };
+  return POLICY_NARROWING_KINDS.filter((kind) => counts[kind] > 0).map((kind) => ({ kind, count: counts[kind] }));
+}
+
 /**
  * One entry of the config file's `workflows` (or a built-in). Unknown fields are rejected.
  * - tools: required, the ceiling for every task that uses the definition.
@@ -114,7 +225,9 @@ export function workflowSettingsOf(task: ResolvedTaskSpec): WorkflowSettings {
  * - allowCommands: default true. false (organize) means the effective policy may have no command
  *   rule; one is `invalid_task` or `invalid_config` (GT-D10). `run_command` is then not offered.
  * - policy, verifiers, limits: defaults, laid under a profile's and the task's own values as
- *   `ResolveWorkflow` says. Limits follow S-7 like the config's own.
+ *   `ResolveWorkflow` says. Limits follow S-7 like the config's own. DR-41: its policy is merged
+ *   with the profile's or the config's (quick form) or the task file's own (mergeWorkflowPolicy),
+ *   never replaced by it.
  */
 export interface WorkflowDefinition {
   /** Display only. */

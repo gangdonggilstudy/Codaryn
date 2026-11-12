@@ -144,8 +144,14 @@ describe("i18n catalog: format", () => {
 describe("i18n catalog: language and wording", () => {
   test("Korean texts are Korean, English texts have no Hangul", () => {
     for (const id of IDS) {
-      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
       assert.doesNotMatch(MESSAGE_TEXTS.en[id], HANGUL, `en ${id}`);
+      // `summary.form.*` are command fragments put into a command line: the same in both languages.
+      if (id.startsWith("summary.form.")) {
+        assert.equal(MESSAGE_TEXTS.ko[id], MESSAGE_TEXTS.en[id], id);
+        assert.match(MESSAGE_TEXTS.ko[id], /^--[a-z]+ \S+$/, id);
+        continue;
+      }
+      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
     }
   });
 

@@ -8,9 +8,11 @@
  */
 
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 
+import { RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { EngineResult, ReportOutput } from "../../../src/contracts/index.js";
 import { readResult, runReport } from "../../../src/cli/report.js";
 import { runCli } from "../../../src/cli/run.js";
@@ -101,5 +103,16 @@ describe("U-25 (DR-52): report keeps the run's masking counts as recorded", () =
     ]) {
       assert.throws(() => readResult(recorded({ masking }), RUN, "t"), /not an object|out of range/, JSON.stringify(masking));
     }
+  });
+
+  test("report of a run whose result.json has a damaged masking field: invalid_run_record, nothing of it shown", async () => {
+    const run = await finishedRun("# Title\n");
+    const file = path.join(run.work, STATE_DIR_NAME, RUNS_DIR_NAME, run.result.runId, RESULT_FILE_NAME);
+    const record = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(file, JSON.stringify({ ...record, masking: { registeredValues: 0, maskedPlaces: 0 } }), "utf8");
+    const outcome = await runReport({ argv: ["report", "--workspace", run.work, "--run", run.result.runId, "--json"], cwd: path.dirname(run.work), env: {} });
+    assert.ok("output" in outcome && outcome.output.kind === "error", JSON.stringify(outcome));
+    assert.equal(outcome.output.code, "invalid_run_record");
+    assert.equal(outcome.exitCode, 2);
   });
 });

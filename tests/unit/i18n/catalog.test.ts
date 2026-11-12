@@ -198,6 +198,28 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("the next bundle's texts take only their closed parameters (DR-38, DR-39, N-A 32.3 and 33.3)", () => {
+    for (const language of LANGS) {
+      const format = loose(createMessageCatalog(language));
+      // A config file given by --config or CODARYN_CONFIG; the Korean particle does not depend on it.
+      for (const location of ["--config", "CODARYN_CONFIG"]) {
+        assert.ok(format("doctor.config_file.valid_given", { location }).includes(location), `${language} ${location}`);
+      }
+      // The model's variable and config place: shown as given only when they are closed values.
+      const missing = format("doctor.model.missing", { variable: "CODARYN_OPENAI_MODEL", field: "providers.openai.model" });
+      assert.ok(missing.includes("CODARYN_OPENAI_MODEL") && missing.includes("providers.openai.model"), missing);
+      assert.ok(!format("doctor.model.missing", { variable: "MY_SECRET_VALUE", field: "x y" }).includes("MY_SECRET_VALUE"), language);
+      // Sizes are whole byte counts; anything else is the replacement mark.
+      assert.ok(format("cleanup.summary.runs", { count: 3, bytes: 1048576 }).includes("1048576"), language);
+      assert.ok(format("cleanup.done", { runs: 2, folders: 1, bytes: -5 }).includes("?"), language);
+      assert.ok(format("cleanup.confirm.discarded", { files: 1.5, bytes: 10 }).includes("?"), language);
+    }
+    // No new text names a provider's variable itself (SP-D12, DR-34): only {variable} does.
+    for (const id of ["doctor.model.missing", "doctor.model.output_cap_missing"] as const) {
+      for (const language of LANGS) assert.ok(!/CODARYN_[A-Z_]*MODEL|maxOutputTokens or config maxOutputTokens/.test(MESSAGE_TEXTS[language][id]), `${language} ${id}`);
+    }
+  });
+
   test("the revert preview's next line says to revert, not to apply (catalog review, docs/usage.md bf4cb53)", () => {
     // `apply` is a command of its own; the English line matches docs/usage.md, which n01 compares.
     assert.equal(MESSAGE_TEXTS.en["revert.dry_run_next"], "Run again without --dry-run to revert.");

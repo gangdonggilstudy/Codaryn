@@ -81,6 +81,7 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.workflow_policy.commands_narrowed": "작업 종류(workflow) 자체 규칙 때문에 설정한 정책의 명령 규칙 {count}개를 좁혔습니다",
   "progress.workflow_policy.plan_actions_dropped": "작업 종류(workflow) 자체 규칙 때문에 설정한 정책의 계획 동작 {count}개를 뺐습니다",
   "progress.workflow_policy.restore_path_tokens_off": "작업 종류(workflow) 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다",
+  "progress.workflow_policy.verifiers_dropped": "작업 종류(workflow) 자체 검증과 id가 같아, 설정이나 task에 준 검증 {count}개를 뺐습니다",
   "outcome.pass": "통과",
   "outcome.fail": "미통과",
   "outcome.inconclusive": "판단 불가",
@@ -256,6 +257,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류(workflow)로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류(workflow)로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",
   "doctor.workflow_policy.restore_path_tokens_off": "이 작업 종류(workflow)로 실행하면, 설정한 정책이 허용해도 경로 토큰을 복원하지 않습니다",
+  "doctor.workflow_policy.verifiers_dropped": "이 작업 종류(workflow)로 실행하면, 자체 검증과 id가 같은 설정·task의 검증 {count}개가 빠집니다",
   "doctor.commands.ok": "실행 파일 {count}개를 찾았고 실행 규칙이 허용합니다",
   "doctor.commands.ok_unchecked": "실행 파일 {count}개를 찾았습니다. 실행 규칙은 작업 공간이 있어야 확인할 수 있어 확인하지 않았습니다",
   "doctor.commands.problems":

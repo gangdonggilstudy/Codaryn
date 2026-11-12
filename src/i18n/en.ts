@@ -82,6 +82,7 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.workflow_policy.commands_narrowed": "the workflow's own rules narrow command rules of the configured policy: {count}",
   "progress.workflow_policy.plan_actions_dropped": "the workflow's own rules leave out plan actions of the configured policy: {count}",
   "progress.workflow_policy.restore_path_tokens_off": "the workflow's own rules turn off restoring path tokens, which the configured policy allows",
+  "progress.workflow_policy.verifiers_dropped": "the workflow's own checks leave out checks given in the config or task with the same id: {count}",
   "outcome.pass": "passed",
   "outcome.fail": "not passed",
   "outcome.inconclusive": "inconclusive",
@@ -257,6 +258,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.workflow_policy.commands_narrowed": "a run of this workflow narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this workflow leaves out plan actions of the configured policy: {count}",
   "doctor.workflow_policy.restore_path_tokens_off": "a run of this workflow does not restore path tokens, although the configured policy allows it",
+  "doctor.workflow_policy.verifiers_dropped": "a run of this workflow leaves out checks given in the config or task with the same id as its own: {count}",
   "doctor.commands.ok": "executables found and allowed by the run's rules: {count}",
   "doctor.commands.ok_unchecked": "executables found: {count}; the run's rules need a workspace and were not checked",
   "doctor.commands.problems":

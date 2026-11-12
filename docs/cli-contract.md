@@ -1129,3 +1129,17 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - `report`: 보고서는 그대로 보이고 JSON의 `recordsChanged: true`, 사람용 보고서에 한 줄(`report.records_changed`의 영어 글)을 더한다. 적용 실행의 보고서(`ApplyReportOutput`)는 계약에 자리가 없어 아직 말하지 않는다.
   - `revert`: 막지 않는다(스냅샷·다이제스트 확인은 그대로). 결과에 `recordsChanged: true`(미리보기 포함). 사람용 줄은 렌더러(N-C) 몫이다.
   - 표시가 없으면 두 필드 모두 없다.
+
+
+### 18.13 상태 디렉터리 정리 `codaryn cleanup` (DR-39)
+
+- 모양: `codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] [--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <digest 12자 이상> [--delete-discarded]] [--json]`
+- 기본은 미리보기다. `summarizeState`의 요약과 `planCleanup`의 계획(항목·경고·막힌 것·합계·`parked`·digest)을 보이고 아무것도 지우지 않는다.
+- 확인은 둘이다(DR-39 P-4).
+  - `--confirm <digest>`: 지금 만든 계획의 digest와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `plan_changed`(종료 3)다. store가 잠금 아래에서 계획을 다시 만들어 digest가 같을 때만 지운다.
+  - `--delete-discarded`: `--confirm`과 함께일 때만. 사람의 파일인 폐기 보관함 폴더는 이것이 있을 때만 지운다. 없으면 `not_confirmed`로 남는다.
+- 지우지 않는 것(store가 막음): `parked`, 잠금, `.gitignore`, 진행 중인 실행(`lock_held`), 결과가 없는 실행(`no_result`), 선택되지 않은 적용 실행이 쓰는 계획 실행(`plan_used_by_apply`: 그 적용의 되돌리기에 필요하다). 변경 표시가 있는 실행은 막지 않고 경고한다(P-5).
+- 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).
+- 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
+- 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
+- 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.

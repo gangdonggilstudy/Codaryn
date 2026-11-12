@@ -364,6 +364,12 @@ export const FIXED_MESSAGES = {
   "summary.next_revert_here": { runId: "runId" },
   "summary.config_default": { location: "location" },
   "summary.profile_applied": {},
+  // DR-47 (AXM-1): the agent's last message (EngineResult.finalMessage), shown as an item after this
+  // label, which says it is the agent's own words and not a verified fact; the second line follows
+  // it when the text was cut (`{count}`: MAX_FINAL_MESSAGE_CHARS). The report's section starts with
+  // `report.final_message`, which says the same.
+  "summary.final_message": {},
+  "summary.final_message_truncated": { count: "count" },
   // G-A: plan runs, human review and apply runs. `{form}` is one of `summary.form.*`, chosen by
   // the context's workspaceForm, so a hint repeats the task form the user typed without its value.
   "summary.form.task": {},
@@ -503,6 +509,7 @@ export const FIXED_MESSAGES = {
   // needs-input words: applied by `{runId}`.
   "runs.plan_applied": { runId: "runId" },
   "report.records_changed": {},
+  "report.final_message": {},
   "changes.records_changed": {},
   // U-16 (UXM-4): `changes` of an apply run (ChangesApplyRun) in place of "no file changed": it
   // applied the plan of run `{runId}`, `{count}` actions, which its report lists.

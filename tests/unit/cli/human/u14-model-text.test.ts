@@ -32,8 +32,8 @@ describe("R49-L2: model text cannot put a forged line at the start of a row", ()
     assert.deepEqual(quoteModelText(text, 12), [`${MODEL_TEXT_PREFIX}ok Applied by run x`]);
   });
 
-  test("R49-I3: zero-width and soft-hyphen characters are removed, so they cannot hide or pad anything", () => {
-    assert.deepEqual(quoteModelText("ap​pro­ved⁠ ﻿now‍", 12), [`${MODEL_TEXT_PREFIX}approved now`]);
+  test("R49-I3: zero-width and soft-hyphen characters show as ?, so they cannot hide or pad anything (R-52: not removed, which could join a value)", () => {
+    assert.deepEqual(quoteModelText("ap\u200bpro\u00adved\u2060 \ufeffnow\u200d", 12), [`${MODEL_TEXT_PREFIX}ap?pro?ved? ?now?`]);
   });
 
   test("a long run without spaces is cut into rows; wide characters count two columns", () => {
@@ -58,6 +58,26 @@ describe("R49-L2: model text cannot put a forged line at the start of a row", ()
     const keyShaped = ["sk", "ant", "api03", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"].join("-");
     const rows = quoteModelText(`done \u001b[2K\u001b[1A ${keyShaped} ‮ end`, 12).join("\n");
     assert.equal(/[\u001b‮]/.test(rows) || rows.includes(keyShaped), false, rows);
-    assert.deepEqual(quoteModelText(" 　\n\t​", 12), []);
+    assert.deepEqual(quoteModelText(" \u3000\n\t", 12), []);
+  });
+});
+
+describe("R-52 R52-M2 and R52-M1, the shared function's part", () => {
+  // Key-shaped, made of parts so no file holds the shape (G-10).
+  const KEY = ["sk", "ant", "api03", "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6"].join("-");
+
+  test("M2: a key shape split by LF, TAB or CRLF is hidden before the text is split into rows", () => {
+    for (const cut of ["\n", "\t", "\r\n"]) {
+      const text = `the key is ${KEY.slice(0, 12)}${cut}${KEY.slice(12)} and that is all`;
+      const shown = quoteModelText(text, 12, null).join("\n");
+      assert.ok(shown.includes("[key]"), JSON.stringify(shown));
+      assert.equal(shown.includes(KEY.slice(0, 12)) || shown.includes(KEY.slice(12)), false, JSON.stringify(shown));
+    }
+  });
+
+  test("M1: a short value split by an invisible character is not put back together (the character shows as ?)", () => {
+    const shown = quoteModelText("the value is R52\u200bpass, and R5\u00ad2\u2060pass", 12, null).join("\n");
+    assert.equal(shown.includes("R52pass"), false, shown);
+    assert.ok(shown.includes("R52?pass") && shown.includes("R5?2?pass"), shown);
   });
 });

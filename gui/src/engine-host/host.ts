@@ -246,6 +246,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       return of(event);
     },
     shown: deps.shown,
+    shownText,
     token: deps.token,
     write: deps.write,
     log: deps.log,

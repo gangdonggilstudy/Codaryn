@@ -18,7 +18,7 @@ import { REPO_ROOT, cliEnv, expectCliError, expectRunResult } from "../support/c
 import type { CliRun } from "../support/cli.js";
 import { expectReportOutput } from "../support/commands.js";
 import { runGuarded } from "../support/fake-anthropic.js";
-import { assertHumanError, assertQuiet } from "../support/progress.js";
+import { AGENT_WORDS_PREFIX, assertHumanError, assertQuiet, withoutAgentWords } from "../support/progress.js";
 import { assertNotPrinted } from "../support/usability.js";
 
 const HANGUL = /[가-힣]/;
@@ -65,7 +65,10 @@ test("N-E E-4 언어: 같은 오류의 stdout은 같고 stderr만 바뀐다, 고
     assert.ok(fromConfig.stderr.includes("(read_file)"), "internal codes stay English in parentheses");
     const fromEnv = await cli(sb, ["run", "--task", task, "--config", config], "EN");
     expectRunResult(fromEnv);
-    assert.ok(!HANGUL.test(fromEnv.stderr.replace(/summary\.md|notes\.md/g, "")), "CODARYN_LANG wins over the config");
+    // DR-47 (U-21): the end summary quotes the agent's last message, which the demo's script wrote
+    // in Korean; those rows are the model's words, not the message language.
+    assert.ok(fromEnv.stderr.includes(AGENT_WORDS_PREFIX), "the agent's last message is quoted");
+    assert.ok(!HANGUL.test(withoutAgentWords(fromEnv.stderr).replace(/summary\.md|notes\.md/g, "")), "CODARYN_LANG wins over the config");
   });
 
   await t.test("설정 language가 ko·en 밖이면 invalid_config, 값은 출력하지 않는다", async (st) => {

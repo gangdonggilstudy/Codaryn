@@ -20,6 +20,12 @@ export type RunFilter = "all" | "denied" | "files" | "checks";
  */
 export const GOAL_LIMIT = 20_000;
 
+/**
+ * U-21 (DR-47): the longest agent's last message in characters: MAX_FINAL_MESSAGE_CHARS of
+ * src/shared/ipc.ts (the contract's), repeated for the same reason (a unit test keeps them equal).
+ */
+export const FINAL_MESSAGE_LIMIT = 2000;
+
 /** Most items kept in the window; older ones are dropped first (the report keeps every record). */
 export const MAX_KEPT_ITEMS = 5000;
 

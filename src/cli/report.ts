@@ -20,6 +20,7 @@ import {
   INTEGRITY_PHASES,
   JOURNAL_FILE_NAME,
   MAX_EVIDENCE_BYTES,
+  MAX_FINAL_MESSAGE_CHARS,
   MAX_REPORT_FILE_BYTES,
   MODEL_PROVIDER_NAMES,
   PLAN_ITEM_PROBLEMS,
@@ -71,6 +72,7 @@ import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
+import { FINAL_MESSAGE_MAX_LINES, quoteModelText } from "./human/index.js";
 import { hasRecordsChangedMark, inspectRun, readReviewRecord } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 
@@ -363,7 +365,19 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     ...stateChangedOf(rec["stateChanged"]),
     ...(plan === undefined ? {} : { plan: planOf(plan) }),
     ...(review === undefined ? {} : { review: { checklist: recordedList(obj(review)["checklist"]) } }),
+    // DR-47 (U-21): the agent's last message as recorded; never for a plan run.
+    ...finalMessageOf(rec["finalMessage"], reason),
   };
+}
+
+/** DR-47: EngineResult.finalMessage, absent when the result has none. A plan run has none. */
+function finalMessageOf(value: unknown, reason: RunReason): { finalMessage?: { text: MaskedText; truncated: boolean } } {
+  if (value === undefined) return {};
+  if (reason === "plan_pending") bad("result.json has the agent's last message for a plan run");
+  const rec = obj(value);
+  const truncated = rec["truncated"];
+  if (typeof truncated !== "boolean") bad("result.json has a field of the wrong type");
+  return { finalMessage: { text: recorded(rec["text"]), truncated } };
 }
 
 function planOf(value: unknown): { digest: ContentHash; actions: number } {
@@ -497,6 +511,17 @@ function renderReportText(report: RunReportOutput): string {
         ? `- ${code(change.path)} created (${short(change.newHash)})`
         : `- ${code(change.path)} changed (${short(change.previousHash)} -> ${short(change.newHash)})`,
     );
+  }
+
+  // DR-47 (U-21): the agent's last message, in the words of the catalog's English
+  // (report.final_message, summary.final_message_truncated), quoted as the end summary quotes it.
+  const final = result?.reason === "plan_pending" ? undefined : result?.finalMessage;
+  const quoted = final === undefined ? [] : quoteModelText(final.text, FINAL_MESSAGE_MAX_LINES);
+  if (final !== undefined && quoted.length > 0) {
+    out.push("", "## The agent's last message", "");
+    out.push("The agent's last message. These are the agent's own words, not a verified fact.", "");
+    out.push(...block(quoted.join("\n")));
+    if (final.truncated) out.push("", `(cut: only the first ${MAX_FINAL_MESSAGE_CHARS} characters are shown)`);
   }
 
   out.push("", "## Usage", "");

@@ -9,6 +9,9 @@ import { execFileSync } from "node:child_process";
 
 const RULES = [
   { name: "anthropic-api-key", re: /sk-ant-[A-Za-z0-9_-]{16,}/ },
+  // U-75: OpenAI keys with a distinct prefix, the shape the CLI refuses (OPENAI_PREFIXED_KEY_PATTERN_SOURCE
+  // in src/contracts/config.ts). generic-sk-key below misses them: a hyphen follows the prefix.
+  { name: "openai-api-key", re: /\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/ },
   { name: "generic-sk-key", re: /\bsk-[A-Za-z0-9]{32,}\b/ },
   { name: "private-key-block", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
   { name: "github-token", re: /\bgh[pousr]_[A-Za-z0-9]{30,}\b/ },
@@ -17,7 +20,7 @@ const RULES = [
 ];
 const FORBIDDEN_PATHS = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /\.pem$/, /(^|\/)id_(rsa|ed25519)$/];
 // Values of these environment variables must never appear in a commit, whatever their format.
-const LIVE_ENV = ["ANTHROPIC_API_KEY"];
+const LIVE_ENV = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });

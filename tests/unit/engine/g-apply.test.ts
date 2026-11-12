@@ -664,7 +664,9 @@ describe("applyPlan: verification", () => {
 class FakeApplyStateGuard implements StateGuard {
   readonly captures: { run: number; state: number } = { run: 0, state: 0 };
   readonly marked: MaskedText[][] = [];
-  constructor(private readonly options: { change?: { tier: StateTier; at: number; paths: string[] }; failCapture?: boolean } = {}) {}
+  constructor(
+    private readonly options: { change?: { tier: StateTier; at: number; paths: string[] }; failCapture?: boolean; limitedFrom?: number } = {},
+  ) {}
   async capture(tier: StateTier): Promise<StateFingerprint> {
     if (this.options.failCapture === true) throw new Error("no fingerprint");
     this.captures[tier] += 1;
@@ -674,7 +676,8 @@ class FakeApplyStateGuard implements StateGuard {
     const { change } = this.options;
     const to = (after as unknown as { n: number }).n;
     const from = (before as unknown as { n: number }).n;
-    return { changed: change !== undefined && change.tier === after.tier && to === change.at && from !== to ? (change.paths as never) : [], limited: false };
+    const limited = after.tier === "state" && this.options.limitedFrom !== undefined && to >= this.options.limitedFrom;
+    return { changed: change !== undefined && change.tier === after.tier && to === change.at && from !== to ? (change.paths as never) : [], limited };
   }
   async markRecordsChanged(changed: readonly MaskedText[]): Promise<void> {
     this.marked.push([...changed]);
@@ -763,5 +766,33 @@ describe("U-1 (R-33 R33-L3): a plan run whose records were changed is not applie
     const result = await applyPlan(run.deps);
     assert.deepEqual([result.status, result.reason], ["done", "verified"]);
     assert.deepEqual(order, ["checked after apply_started"]);
+  });
+});
+
+describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refused but says so", () => {
+  const UNCHECKED = "plan_records_unchecked";
+
+  test("too large to check at the start: done, with the notice kind and its notice", async () => {
+    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(result.noticeKinds, [UNCHECKED]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1, "one notice naming the kind");
+    assert.deepEqual(run.journal.ofType("state_checked")[0], { type: "state_checked", phase: "run_start", changed: [], limited: true });
+  });
+
+  test("limited only later in the apply: told the same way, once", async () => {
+    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 3 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.noticeKinds], ["done", [UNCHECKED]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("checked entirely, or no guard: nothing is added", async () => {
+    for (const run of [setup({ stateGuard: new FakeApplyStateGuard() }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+      assert.equal(result.notices.some((notice) => notice.includes(UNCHECKED)), false);
+    }
   });
 });

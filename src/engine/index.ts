@@ -139,7 +139,11 @@ export const SYSTEM_PROMPT = [
   "Some text is replaced by protected placeholders: an uppercase label, a colon and 16 hex digits inside double square brackets.",
   "Keep each placeholder exactly where it is. Never copy, move, alter or remove it. A line that holds a placeholder cannot be changed.",
   "A denied tool call is final for that request. Do not try to work around it.",
-  "When the work is finished, reply without tool calls. Verifiers decide whether the task succeeded.",
+  // U-15 (AXM-16, approved by the PM): the run offers only some tools, nobody can be asked during
+  // it, and the last reply is what a person reads (DR-47).
+  "Only the tools offered in this run exist.",
+  "You cannot ask the person anything during the run. If something is unclear, take the most careful reading of the goal and say which one you took.",
+  "When the work is finished, reply without tool calls: what you changed, what you could not do and why, and what the person should check. Verifiers decide whether the task succeeded.",
 ].join("\n");
 
 /**

@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import type { ModelRequest, ToolCall, ToolResult } from "../../../src/contracts/index.js";
-import { runTask } from "../../../src/engine/index.js";
+import { SYSTEM_PROMPT, runTask } from "../../../src/engine/index.js";
 import { FakePolicy, FakeTools, finalAnswer, harness, response } from "./fakes.js";
 
 /** Runs one call, then a final answer; returns the recorded result and what the model got back. */
@@ -71,5 +71,26 @@ describe("U-15: one form for a failed result, which both providers get as it is"
     const policy = new FakePolicy({ requested: () => ({ allowed: false, permission: "path", code: "protected_path" }) });
     const { recorded } = await oneCall(write({ path: "a.txt", expectedHash: null, change: { kind: "replace_all", content: "x" } }), { policy });
     assert.equal(recorded[0]?.content, "error (policy_denied): denied by policy: path/protected_path. This path is protected in this task; do not write to it.");
+  });
+});
+
+describe("U-15 (AXM-16, approved): what the system prompt tells the model about the run", () => {
+  const LINES = [
+    "Only the tools offered in this run exist.",
+    "You cannot ask the person anything during the run. If something is unclear, take the most careful reading of the goal and say which one you took.",
+    "When the work is finished, reply without tool calls: what you changed, what you could not do and why, and what the person should check. Verifiers decide whether the task succeeded.",
+  ];
+
+  test("the three approved lines, the last one ending the prompt", () => {
+    const lines = SYSTEM_PROMPT.split("\n");
+    for (const line of LINES) assert.ok(lines.includes(line), line);
+    assert.equal(lines.at(-1), LINES[2]);
+    assert.equal(lines.includes("When the work is finished, reply without tool calls. Verifiers decide whether the task succeeded."), false, "the old last line is replaced");
+  });
+
+  test("the model gets them in the first request's system text", async () => {
+    const h = harness({ steps: [() => finalAnswer()] });
+    await runTask(h.deps);
+    assert.ok(h.model.requests[0]?.system.startsWith(SYSTEM_PROMPT));
   });
 });

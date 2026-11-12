@@ -112,7 +112,7 @@ describe("DR-16: report accepts every reason of the contract's table", () => {
 });
 
 describe("DR-12: report tells an apply run apart", () => {
-  test("an apply run is named as such, not as damaged records (its report form is not in the contract yet)", async () => {
+  test("an apply run gets the apply run report (g-report-apply.test.ts has the details)", async () => {
     const { base, ws } = await setup("organize", [PROPOSE]);
     const planned = await run(base);
     const digest = planned.plan?.digest ?? "";
@@ -120,8 +120,34 @@ describe("DR-12: report tells an apply run apart", () => {
     assert.ok("output" in applied && applied.output.kind === "apply", JSON.stringify(applied));
     const result = applied.output as ApplyResult;
     const report = await runReport({ argv: ["report", "--workspace", ws, "--run", result.runId], cwd: base, env: {} });
-    assert.ok("output" in report && report.output.kind === "error", JSON.stringify(report));
-    assert.equal(report.output.code, "invalid_arguments");
-    assert.ok(report.output.message.includes("apply run"));
+    assert.ok("text" in report && report.text.startsWith("# Codaryn apply run report"), JSON.stringify(report));
+  });
+});
+
+describe("N-D 5th round: report shows the person's review verdict", () => {
+  test("before a verdict the report says none; after one it shows the verdict and the note, in text and JSON", async () => {
+    const { base, ws } = await setup("analyze", [{ text: "done" }]);
+    const finished = await run(base);
+    const jsonOf = async () => {
+      const report = await runReport({ argv: ["report", "--workspace", ws, "--run", finished.runId, "--json"], cwd: base, env: {} });
+      assert.ok("text" in report, JSON.stringify(report));
+      return JSON.parse(report.text) as { verdict?: { verdict: string; note: string | null } | null };
+    };
+    assert.equal((await jsonOf()).verdict, null);
+    const before = await runReport({ argv: ["report", "--workspace", ws, "--run", finished.runId], cwd: base, env: {} });
+    assert.ok("text" in before && before.text.includes("No verdict yet"), "text" in before ? before.text : "");
+    const reviewed = await runReview(io(base, ["review", "--task", "task.json", "--run", finished.runId, "--reject", "--note", "totals differ"]));
+    assert.equal(reviewed.exitCode, 0);
+    assert.deepEqual([(await jsonOf()).verdict?.verdict, (await jsonOf()).verdict?.note], ["rejected", "totals differ"]);
+    const after = await runReport({ argv: ["report", "--workspace", ws, "--run", finished.runId], cwd: base, env: {} });
+    assert.ok("text" in after && after.text.includes("rejected") && after.text.includes("totals differ"), "text" in after ? after.text : "");
+  });
+
+  test("a run that does not wait for review has no verdict field", async () => {
+    const { base, ws } = await setup("organize", [PROPOSE]);
+    const planned = await run(base);
+    const report = await runReport({ argv: ["report", "--workspace", ws, "--run", planned.runId, "--json"], cwd: base, env: {} });
+    assert.ok("text" in report);
+    assert.equal("verdict" in (JSON.parse(report.text) as object), false);
   });
 });

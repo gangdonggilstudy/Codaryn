@@ -55,11 +55,13 @@ describe("N-23 (h) keys are hidden before control characters are replaced", () =
 describe("N-25 (a) the workspace lock in doctor", () => {
   test("inspectLockFile reads without changing: none, held, stale, unreadable", async () => {
     const missing = Object.assign(new Error("missing"), { code: "ENOENT" });
-    assert.equal(await inspectLockFile("/w", async () => Promise.reject(missing)), "none");
-    assert.equal(await inspectLockFile("/w", async () => JSON.stringify({ pid: 41, runId: "r" }), () => true), "held");
-    assert.equal(await inspectLockFile("/w", async () => JSON.stringify({ pid: 41, runId: "r" }), () => false), "stale");
-    assert.equal(await inspectLockFile("/w", async () => "{not json", () => true), "unreadable");
-    assert.equal(await inspectLockFile("/w", async () => Promise.reject(new Error("denied"))), "unreadable");
+    // lock.json only; the reclaim file (DR-27 b, n-reclaim.test.ts) is missing here.
+    const lockOnly = (read: () => Promise<string>) => async (file: string) => (path.basename(file) === "lock.json" ? read() : Promise.reject(missing));
+    assert.equal(await inspectLockFile("/w", lockOnly(async () => Promise.reject(missing))), "none");
+    assert.equal(await inspectLockFile("/w", lockOnly(async () => JSON.stringify({ pid: 41, runId: "r", startedAt: "2026-11-12T05:00:00.000Z" })), () => true), "held");
+    assert.equal(await inspectLockFile("/w", lockOnly(async () => JSON.stringify({ pid: 41, runId: "r", startedAt: "2026-11-12T05:00:00.000Z" })), () => false), "stale");
+    assert.equal(await inspectLockFile("/w", lockOnly(async () => "{not json"), () => true), "unreadable");
+    assert.equal(await inspectLockFile("/w", lockOnly(async () => Promise.reject(new Error("denied")))), "unreadable");
   });
 
   test("doctor gives every check a typed text, warns about a held lock and an ignored CODARYN_LANG", async () => {

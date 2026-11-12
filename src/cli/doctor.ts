@@ -63,7 +63,7 @@ import {
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { PROCESS_START_TOLERANCE_MS, isRunTimestamp, processStartTime } from "../store/index.js";
+import { inspectLock, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
@@ -107,8 +107,12 @@ export interface DoctorEnvironment {
   readonly inspectLock?: (workspaceRoot: string) => Promise<LockState>;
 }
 
-/** N-25 (a): none, held by a live process, left by an ended one, or unreadable. */
-export type LockState = "none" | "held" | "stale" | "unreadable";
+/**
+ * N-25 (a): none, held by a live process, left by an ended one, or unreadable. DR-27 (b):
+ * `reclaim_left` when `lock.json.reclaim` is in a state the store never clears, so no lock is
+ * reclaimed while it stays.
+ */
+export type LockState = "none" | "held" | "stale" | "unreadable" | "reclaim_left";
 
 /** Why a JSON input could not be used, for the typed doctor texts (N-21). */
 type LoadFailure = "unreadable" | "key" | "json_syntax" | "too_deep";
@@ -360,53 +364,26 @@ function fieldOf(position: InputErrorPosition | undefined, message?: string): Sc
 }
 
 /**
- * N-25 (a, b), review R-6 low 1: reads the lock file without changing it and judges its holder as
- * the store's `acquireLock` does: a pid that does not run is stale; a lock with
- * `processStartedAt` whose pid now runs a process started at another time (beyond
- * PROCESS_START_TOLERANCE_MS) is stale too, since the pid was given to another process; an unknown
- * start time counts as held; a lock without it (written before N-25 b) is judged by its pid alone.
- * A start time that is not a timestamp is not understood: "unreadable", as the store never reclaims it.
+ * N-25 (a, b), N-27 (d), DR-27 (b): the lock as the next run would find it, judged by the store's
+ * `inspectLock` with acquireLock's own rules (the Linux identity, then the process start time, then
+ * the pid; and `lock.json.reclaim`). Reads only. `readText` and the liveness functions are injected
+ * by tests; when a test injects liveness, the Linux identity is not asked, so the answer does not
+ * depend on the platform. By default the store's functions decide.
  */
 export async function inspectLockFile(
   workspaceRoot: string,
   readText: (file: string) => Promise<string>,
-  isAlive: (pid: number) => boolean = processAlive,
-  startTimeOf: (pid: number) => Promise<number | null> = processStartTime,
+  isAlive?: (pid: number) => boolean,
+  startTimeOf?: (pid: number) => Promise<number | null>,
 ): Promise<LockState> {
-  let text: string;
-  try {
-    text = await readText(path.join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME));
-  } catch (failure) {
-    return isMissingFile(failure) ? "none" : "unreadable";
-  }
-  let pid: unknown;
-  let processStartedAt: unknown;
-  try {
-    ({ pid, processStartedAt } = (JSON.parse(text) ?? {}) as { pid?: unknown; processStartedAt?: unknown });
-  } catch {
-    return "unreadable";
-  }
-  if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return "unreadable";
-  if (processStartedAt !== undefined && (typeof processStartedAt !== "string" || !isRunTimestamp(processStartedAt))) return "unreadable";
-  if (!isAlive(pid)) return "stale";
-  if (processStartedAt === undefined) return "held";
-  let actual: number | null;
-  try {
-    actual = await startTimeOf(pid);
-  } catch {
-    actual = null;
-  }
-  if (actual === null) return "held";
-  return Math.abs(actual - Date.parse(processStartedAt)) <= PROCESS_START_TOLERANCE_MS ? "held" : "stale";
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as { code?: unknown }).code === "EPERM";
-  }
+  const injected = isAlive !== undefined || startTimeOf !== undefined;
+  const inspection = await inspectLock(workspaceRoot, {
+    fileSystem: { ...nodeLockFileSystem, readText },
+    ...(isAlive === undefined ? {} : { isProcessAlive: isAlive }),
+    ...(startTimeOf === undefined ? {} : { processStartTime: startTimeOf }),
+    ...(injected ? { processIdentity: async () => null } : {}),
+  });
+  return inspection.state;
 }
 
 function worst(checks: readonly DoctorCheck[]): DoctorStatus {
@@ -707,7 +684,22 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" });
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
-    set("commands", checked.status, checked.message, checked.text);
+    // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
+    // actions. Codaryn does not check a command's arguments, so such a command can change files
+    // outside an approved plan. Problems found above keep their text; the warning joins the message.
+    const extraArgs = (policy?.commands ?? []).filter((rule) => rule.allowExtraArgs).length;
+    if (extraArgs > 0 && (policy?.planActions ?? []).length > 0) {
+      const warning =
+        `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
+        "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
+      if (checked.status === "ok") {
+        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } });
+      } else {
+        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
+      }
+    } else {
+      set("commands", checked.status, checked.message, checked.text);
+    }
   }
 
   // install_dir (U-3)
@@ -783,6 +775,10 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       held: ["warn", `a process holds ${STATE_DIR_NAME}/${LOCK_FILE_NAME}; if no Codaryn is running in this workspace, remove that file`],
       stale: ["ok", "the lock was left by a process that has ended; the next run reclaims it"],
       unreadable: ["warn", `${STATE_DIR_NAME}/${LOCK_FILE_NAME} cannot be read; if no Codaryn is running in this workspace, remove that file`],
+      reclaim_left: [
+        "warn",
+        `${STATE_DIR_NAME}/${LOCK_FILE_NAME}.reclaim was left by an attempt to reclaim the lock; while it stays, a lock left by an ended process is not reclaimed. If no Codaryn is running in this workspace, remove ${STATE_DIR_NAME}/${LOCK_FILE_NAME}.reclaim (and ${STATE_DIR_NAME}/${LOCK_FILE_NAME} if it is there)`,
+      ],
     };
     const [status, message] = lockMessages[state];
     set("lock", status, message, { id: `doctor.lock.${state}` });

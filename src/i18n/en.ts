@@ -220,6 +220,8 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.file_locations.inside": "input files inside the workspace or not confirmable: {count}; a run refuses them",
   "doctor.file_locations.ok": "input files outside the workspace: {count}",
   "doctor.commands.none": "no command is allowed and no command check is configured",
+  "doctor.commands.extra_args_with_plan":
+    "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
   "doctor.commands.ok": "executables found and allowed by the run's rules: {count}",
   "doctor.commands.ok_unchecked": "executables found: {count}; the run's rules need a workspace and were not checked",
   "doctor.commands.problems":
@@ -241,7 +243,9 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.lock.held": "a running process holds the workspace lock; if no Codaryn is running, delete .codaryn/lock.json (a reused process id can make this wrong)",
   "doctor.lock.stale": "a lock left by a process that has ended; the next run reclaims it",
   "doctor.lock.unreadable": "the workspace lock file (.codaryn/lock.json) cannot be read",
-  "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json.",
+  "doctor.lock.reclaim_left":
+    "a lock reclaim file (.codaryn/lock.json.reclaim) is left, so a lock left by an ended process is not reclaimed; if no Codaryn is running in this workspace, remove that file",
+  "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.",
 
   "error.invalid_arguments.what": "the command arguments are not valid",
   "error.invalid_arguments.fix": "See codaryn help <command> for the usage.",
@@ -282,6 +286,10 @@ export const EN_MESSAGES: MessageTexts = {
   "error.plan_not_approved.fix": "Read the plan with codaryn plan; to approve it, give codaryn apply --digest <at least the first 12 characters of the plan digest>.",
   "error.plan_already_applied.what": "this plan was already applied, so nothing was changed",
   "error.plan_already_applied.fix": "Read the result with codaryn report, and undo it with codaryn revert if needed.",
+  "error.plan_secrets_differ.what": "the secrets registered now hide the plan's paths differently from the plan run, so nothing was shown or changed",
+  "error.plan_secrets_differ.fix": "Use the same task form as the plan run, and so the same secrets, or make the plan again.",
+  "error.plan_run_missing.what": "the plan run this apply used has no record (plan.json) any more, so nothing was changed",
+  "error.plan_run_missing.fix": "An apply can be reverted only while its plan run is kept. Restore that run's folder if you removed it.",
   "error.run_not_awaiting_review.what": "that run is not waiting for a person's review, so nothing was written",
   "error.run_not_awaiting_review.fix": "Give the id of a run that ended waiting for review (awaiting_review). codaryn runs lists them.",
   "error.internal_error.what": "an unexpected internal error occurred",
@@ -337,6 +345,8 @@ export const EN_MESSAGES: MessageTexts = {
   "tool.search_files": "search files",
   "tool.write_file": "write file",
   "tool.run_command": "run command",
+  "tool.inspect_files": "inspect files",
+  "tool.propose_plan": "propose a plan",
 
   "revert.skip.changed_since_run": "changed again after the run",
   "revert.skip.missing_snapshot": "snapshot missing",

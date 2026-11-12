@@ -280,6 +280,10 @@ describe("HumanOutput.progressLine (N-5, N-14)", () => {
       [{ type: "model_request", turn: 2, system: null, newMessages: [] }, "[progress.turn turn=2]"],
       [{ type: "model_error", turn: 2, kind: "rate_limited", message: masked(SECRET) }, "[progress.model_error turn=2 kind=rate_limited]"],
       [{ type: "tool_decision", callId: "c", tool: "read_file", stage: "policy_effective", allowed: true, permission: null, code: null }, "[progress.tool_allowed tool=[tool.read_file]] (read_file)"],
+      // G-A, review R-9b I-2: the workflow tools have names for people too, not "(unknown tool) (?)".
+      [{ type: "tool_decision", callId: "c", tool: "inspect_files", stage: "policy_effective", allowed: true, permission: null, code: null }, "[progress.tool_allowed tool=[tool.inspect_files]] (inspect_files)"],
+      [{ type: "tool_decision", callId: "c", tool: "propose_plan", stage: "policy_effective", allowed: true, permission: null, code: null }, "[progress.tool_allowed tool=[tool.propose_plan]] (propose_plan)"],
+      [{ type: "tool_decision", callId: "c", tool: "propose_plan", stage: "validate", allowed: false, permission: null, code: "invalid_args" }, "[progress.tool_rejected tool=[tool.propose_plan] code=invalid_args]"],
       [
         { type: "tool_decision", callId: "c", tool: "run_command", stage: "policy_effective", allowed: false, permission: "command", code: "command_not_allowed" },
         "[progress.tool_denied tool=[tool.run_command] permission=command code=command_not_allowed]",

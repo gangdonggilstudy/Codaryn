@@ -25,7 +25,8 @@
  *   `changed_since_run`, nothing touched. A failed action was not done and is not listed.
  * - A record that does not belong to the run, a stored name other than the action's
  *   (DISCARDED_STORED_NAME_PATTERN_SOURCE), or a plan that cannot be trusted rejects with
- *   ApplyRecordError (`invalid_run_record`) before anything is changed.
+ *   ApplyRecordError (`invalid_run_record`) before anything is changed. A plan run that is gone
+ *   (no directory or no plan.json) rejects with PlanRunMissingError (`plan_run_missing`, R-9c C-1).
  */
 
 import { createReadStream } from "node:fs";
@@ -46,7 +47,7 @@ import {
 } from "../contracts/index.js";
 import type { ContentHash, RevertAction, RevertOutcome, RevertSkipReason, RevertedFile, ResolvedPlanAction, SkippedFile, Workspace } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { errorCode, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
+import { errorCode, hasExactRunEntry, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
 import { discardedRootPath } from "./discarded.js";
 import { canonicalActions } from "./plan.js";
 
@@ -68,6 +69,16 @@ interface Item {
 
 /** The journal's records failed a check. Thrown as RevertRunError("invalid_run_record") by the caller. */
 export class ApplyRecordError extends Error {}
+
+/**
+ * R-9c C-1: the plan run the apply used has no directory or no plan.json any more, so the real paths
+ * are not known. Thrown as RevertRunError("plan_run_missing") by the caller; nothing was changed.
+ */
+export class PlanRunMissingError extends Error {}
+
+function planRunMissing(): never {
+  throw new PlanRunMissingError("the plan run this apply used is gone; it is needed to revert the apply; nothing was changed");
+}
 
 function bad(): never {
   throw new ApplyRecordError("the apply run's journal or its plan cannot be used; nothing was changed");
@@ -208,14 +219,19 @@ function applyRecords(journal: string, runId: string): { readonly planRunId: str
  */
 async function trustedPlan(workspaceRoot: string, planRunId: string, digest: ContentHash): Promise<readonly ResolvedPlanAction[]> {
   const dir = runDir(workspaceRoot, planRunId);
-  if (!(await isPlainDirectory(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME))) || !(await isPlainDirectory(dir))) return bad();
+  if (!(await isPlainDirectory(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME)))) return bad();
+  // R-9c C-1: no entry of exactly that name (N-27 a), or no plan.json in it: the plan run is gone.
+  // One that exists but is a link, or a plan.json that differs, is invalid_run_record.
+  if (!(await hasExactRunEntry(workspaceRoot, planRunId))) planRunMissing();
+  if (!(await isPlainDirectory(dir))) return bad();
+  const file = join(dir, PLAN_FILE_NAME);
   let bytes: Buffer;
   try {
-    const file = join(dir, PLAN_FILE_NAME);
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) return bad();
     bytes = await readFile(file);
-  } catch {
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") planRunMissing();
     return bad();
   }
   if (createHash("sha256").update(bytes).digest("hex") !== digest) bad();
@@ -306,6 +322,24 @@ async function moveBack(away: string, back: string, action: RevertAction, consen
   }
 }
 
+/**
+ * The run's discarded directory as a revert may read it (DR-24 a): plain directories all the way, or
+ * absent (R-9c C-2: an apply that stopped before its first discard never made it, or a person removed
+ * it), or anything else (a link, a file, unreadable), which is never read.
+ */
+async function discardedState(discardedRoot: string): Promise<"plain" | "absent" | "other"> {
+  for (const dir of [dirname(discardedRoot), discardedRoot]) {
+    try {
+      await lstat(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      return code === "ENOENT" || code === "ENOTDIR" ? "absent" : "other";
+    }
+    if (!(await isPlainDirectory(dir))) return "other";
+  }
+  return "plain";
+}
+
 /** A workspace path to write through, or null when it cannot be resolved as it was given. */
 async function resolved(workspace: Workspace, path: string): Promise<string | null> {
   const outcome = await workspace.resolve(path, "write");
@@ -317,14 +351,15 @@ async function resolved(workspace: Workspace, path: string): Promise<string | nu
  * discarded directory), `back` its original path. `recorded` false: only a start record exists.
  */
 async function revertItem(
-  away: string,
+  away: string | null,
   back: string,
   sha256: ContentHash,
   recorded: boolean,
   action: RevertAction,
   mode: { readonly dryRun: boolean; readonly consent: boolean },
 ): Promise<Outcome> {
-  const there = await stateOf(away);
+  // `away` null: the place it would have gone is known not to exist (R-9c C-2); nothing is read there.
+  const there: FileState = away === null ? { kind: "absent" } : await stateOf(away);
   const original = await stateOf(back);
   if (there.kind === "error" || original.kind === "error") return { reason: "io_error" };
   const isDone = there.kind === "file" && there.sha256 === sha256;
@@ -339,6 +374,7 @@ async function revertItem(
   }
   if (original.kind !== "absent") return { reason: "original_path_taken" };
   if (mode.dryRun) return { action };
+  if (away === null) return { reason: "changed_since_run" };
   return moveBack(away, back, action, mode.consent);
 }
 
@@ -366,7 +402,7 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
     workspace = null;
   }
   const discardedRoot = discardedRootPath(workspaceRoot, runId);
-  const discarded = (await isPlainDirectory(dirname(discardedRoot))) && (await isPlainDirectory(discardedRoot)) ? discardedRoot : null;
+  const discarded = await discardedState(discardedRoot);
 
   for (const item of [...items].reverse()) {
     const planned = plan[item.index] as ResolvedPlanAction;
@@ -383,9 +419,16 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
         outcome =
           back === null
             ? { reason: "changed_since_run" }
-            : discarded === null
+            : discarded === "other"
               ? { reason: "io_error" }
-              : await revertItem(join(discarded, discardedStoredName(item.index)), back, item.sha256, item.recorded, "restored_from_discard", mode);
+              : await revertItem(
+                  discarded === "plain" ? join(discardedRoot, discardedStoredName(item.index)) : null,
+                  back,
+                  item.sha256,
+                  item.recorded,
+                  "restored_from_discard",
+                  mode,
+                );
       }
     } catch {
       outcome = { reason: "io_error" };

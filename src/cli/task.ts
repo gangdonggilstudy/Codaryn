@@ -569,6 +569,32 @@ function parseVerifier(value: unknown, index: number): VerifierConfig {
 export interface TaskDefaults {
   /** Upper bounds, and values for the fields the task leaves out (S-7). */
   readonly limits?: Partial<Limits> | undefined;
+  /**
+   * G-A, review R-11 L-1: a workflow definition's limits. Values for the fields the task leaves
+   * out, taken before the config file's; never a bound (the bound stays `limits`, S-7). A default
+   * above the config file's bound is lowered to it; a null default under a numeric bound is skipped.
+   */
+  readonly workflowLimits?: Partial<Limits> | undefined;
+}
+
+/** R-11 L-1: the task's own limits with the workflow definition's defaults under them. */
+function withWorkflowDefaults(
+  own: Partial<Limits> | undefined,
+  workflow: Partial<Limits> | undefined,
+  bound: Partial<Limits> | undefined,
+): Partial<Limits> | undefined {
+  if (workflow === undefined) return own;
+  const out: Record<string, number | null> = { ...(own as Record<string, number | null> | undefined) };
+  for (const [key, value] of Object.entries(workflow) as [keyof Limits, number | null | undefined][]) {
+    if (value === undefined || Object.hasOwn(out, key)) continue;
+    const cap = bound?.[key];
+    if (value === null) {
+      if (typeof cap !== "number") out[key] = null;
+      continue;
+    }
+    out[key] = typeof cap === "number" ? Math.min(value, cap) : value;
+  }
+  return out as Partial<Limits>;
 }
 
 /** Runs a validation and turns an InputError into a failed outcome. */
@@ -640,7 +666,7 @@ export function parseTask(value: unknown, taskDir: string, defaults: TaskDefault
       model,
       policy,
       privacy: { secretEnv },
-      limits: boundedLimits("task", model.provider, ownLimits, defaults.limits),
+      limits: boundedLimits("task", model.provider, withWorkflowDefaults(ownLimits, defaults.workflowLimits, defaults.limits), defaults.limits),
       verifiers,
       ...(workflowRef === undefined ? {} : { workflowRef }),
       ...(tools === undefined ? {} : { tools }),

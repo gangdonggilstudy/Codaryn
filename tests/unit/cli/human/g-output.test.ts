@@ -121,6 +121,21 @@ describe("runSummary for plan runs and human review (G-A)", () => {
     assert.equal(text.includes(SECRET), false);
   });
 
+  test("N-D 5th round: a plan run does not say 'Checks: none configured'; its checks run when the plan is applied (DR-5)", () => {
+    const human = createHumanOutput(stand_in());
+    const plan = human.runSummary(engineResult({ plan: { digest: DIGEST, actions: 3 }, verifiers: [] }), CONTEXT);
+    assert.equal(plan.includes("summary.no_verifiers"), false, plan);
+    assert.equal(plan.includes("summary.verifiers"), false, plan);
+    // A run that ended otherwise without checks still says so.
+    const done = human.runSummary(engineResult({ status: "needs-input", reason: "no_verifier", exitCode: 3, plan: undefined, verifiers: [] }), CONTEXT);
+    assert.ok(done.includes("[summary.no_verifiers]"), done);
+    for (const language of MESSAGE_LANGUAGES) {
+      const catalog = createMessageCatalog(language);
+      const real = createHumanOutput(catalog).runSummary(engineResult({ plan: { digest: DIGEST, actions: 3 }, verifiers: [] }), CONTEXT);
+      assert.equal(real.includes(catalog.format("summary.no_verifiers")), false, real);
+    }
+  });
+
   test("a run awaiting review lists the checklist as items and says how to record a verdict", () => {
     const checklist = [masked("The summary names every source"), masked(`no \u001b control ${"sk-ant-"}FAKEfake0000FAKEfake0000`)];
     const text = createHumanOutput(stand_in()).runSummary(engineResult({ reason: "awaiting_review", review: { checklist } }), { ...CONTEXT, workspaceForm: "current" });
@@ -175,6 +190,21 @@ describe("applySummary (G-A)", () => {
   });
 });
 
+describe("records a renderer does not show", () => {
+  test("R-9 I-4: a plan_item_started record (not an ApplyJournalEvent) gets no line and no exception", () => {
+    const human = createHumanOutput(stand_in());
+    const started = { type: "plan_item_started", index: 0, action: { kind: "discard", path: masked("old.log"), sha256: HASH } } as unknown as ApplyJournalEvent;
+    assert.equal(human.applyProgressLine?.(started), null);
+  });
+
+  test("a record type the renderer does not know gets null from either renderer, never an exception", () => {
+    const human = createHumanOutput(stand_in());
+    const unknown = { type: "a_later_record", value: SECRET };
+    assert.equal(human.applyProgressLine?.(unknown as unknown as ApplyJournalEvent), null);
+    assert.equal(human.progressLine(unknown as unknown as Parameters<HumanOutput["progressLine"]>[0]), null);
+  });
+});
+
 describe("DR-21 unsafe moves and the plan total (renderer state)", () => {
   const started = (extra: Record<string, unknown> = {}): ApplyJournalEvent =>
     ({ type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "t", digest: DIGEST, approval: "cli-flag", actions: 5, maxDurationMs: 1000, ...extra }) as ApplyJournalEvent;
@@ -226,6 +256,16 @@ describe("plan, review and apply output with the real catalogs", () => {
       ].join("");
       assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(texts), false, texts);
       assert.equal(texts.includes(SECRET), false);
+    });
+
+    test(`${language}: the workflow tools are named in progress lines (review R-9b I-2)`, () => {
+      const catalog = createMessageCatalog(language);
+      const human: HumanOutput = createHumanOutput(catalog);
+      for (const tool of ["inspect_files", "propose_plan"] as const) {
+        const line = human.progressLine({ type: "tool_decision", callId: "c", tool, stage: "policy_effective", allowed: true, permission: null, code: null }) ?? "";
+        assert.equal(line, `${catalog.format("progress.tool_allowed", { tool: catalog.format(`tool.${tool}`) })} (${tool})`);
+        assert.equal(line.includes(catalog.format("progress.unknown_tool")), false, line);
+      }
     });
 
     test(`${language}: DR-21 and DR-25 lines use the catalog's own texts`, () => {

@@ -140,3 +140,24 @@ test("main (R-10 L-1): debugging asked for by argument, by NODE_OPTIONS or by an
   assert.equal(debuggingRequested({ ...none, inspectorUrl: "ws://127.0.0.1:9229/x" }), "inspector");
   assert.equal(debuggingRequested({ ...none, hasSwitch: (name) => name === "remote-debugging-port" }), "remote-debugging-port");
 });
+
+test("main (R-10 L-3): finding Node never touches network or device paths on PATH or in npm_node_execpath", () => {
+  const touched: string[] = [];
+  const isFile = (file: string): boolean => {
+    touched.push(file);
+    return file === "C:\\Program Files\\nodejs\\node.exe";
+  };
+  const found = findDevelopmentNode(
+    {
+      npm_node_execpath: "\\\\server.example.invalid\\share\\node.exe",
+      PATH: "\\\\files.example.invalid\\tools;\\\\.\\pipe\\x;//?/C:/x;.;relative\\bin;C:\\nul\\bin;C:\\Program Files\\nodejs",
+    },
+    "win32",
+    isFile,
+  );
+  assert.equal(found, "C:\\Program Files\\nodejs\\node.exe");
+  assert.deepEqual(touched, ["C:\\Program Files\\nodejs\\node.exe"], "only the local entry is looked at");
+  touched.length = 0;
+  assert.equal(findDevelopmentNode({ PATH: "/dev/fd:/usr/bin" }, "linux", (file) => (touched.push(file), false)), null);
+  assert.deepEqual(touched, ["/usr/bin/node"]);
+});

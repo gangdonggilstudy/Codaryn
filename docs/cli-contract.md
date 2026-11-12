@@ -1119,3 +1119,13 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - `doctor`의 `lock` 점검(`listParkedFiles`)
     - 잠금이 ok이면 점검이 `warn`이 되고 글은 `doctor.lock.parked_left {count}`다.
     - 잠금이 다른 상태(`held`, `unreadable`, `reclaim_left`)이면 그 상태의 글은 그대로 두고, `doctor.lock.parked_left {count}`를 그 점검의 `notes`에 싣는다. 사람용 출력은 잠금 줄 아래에 한 줄로 보인다(DR-37 (c), 검토 R-24 L-2). 전에는 JSON `message`에만 있었다.
+
+
+### 18.12 실행 기록이 바뀐 실행 (DR-38)
+
+- 실행의 기록(journal·snapshots·plan 등)은 `createRunRecorders`(store)가 만든다. 같이 나오는 `stateGuard`를 엔진에 `EngineDeps.stateGuard`로 넘긴다. 엔진의 점검은 실행이 쓴 것 말고 바뀐 것만 변화로 센다(엔진이 아직 쓰지 않으면 아무 것도 바뀌지 않는다).
+- 적용 실행(`codaryn apply`)의 감시기(`createApplyRecorders`)는 `ApplyDeps.stateGuard` 형이 계약에 올라오면 연결한다.
+- 표시(`runs/<runId>/records-changed.json`이 있는 실행. 읽을 수 없는 표시도 표시로 본다):
+  - `report`: 보고서는 그대로 보이고 JSON의 `recordsChanged: true`, 사람용 보고서에 한 줄(`report.records_changed`의 영어 글)을 더한다. 적용 실행의 보고서(`ApplyReportOutput`)는 계약에 자리가 없어 아직 말하지 않는다.
+  - `revert`: 막지 않는다(스냅샷·다이제스트 확인은 그대로). 결과에 `recordsChanged: true`(미리보기 포함). 사람용 줄은 렌더러(N-C) 몫이다.
+  - 표시가 없으면 두 필드 모두 없다.

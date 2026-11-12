@@ -69,7 +69,7 @@ import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
-import { inspectRun, readReviewRecord } from "../store/index.js";
+import { hasRecordsChangedMark, inspectRun, readReviewRecord } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 
 export interface ReportEnvironment {
@@ -89,6 +89,8 @@ export interface ReportEnvironment {
   readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
   /** N-27 (a): the store's `inspectRun` (the default); injected by tests. */
   readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
+  /** DR-38: the store's `hasRecordsChangedMark` (the default); injected by tests. A rejection counts as a mark. */
+  readonly hasRecordsChangedMark?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
 
 async function pathExists(target: string): Promise<boolean> {
@@ -443,6 +445,10 @@ function renderReportText(report: RunReportOutput): string {
     );
   }
   out.push(`- Report: ${report.status} (${journal.records} journal records)`);
+  // DR-38: in the words of the catalog's English (report.records_changed).
+  if (report.recordsChanged === true) {
+    out.push("", "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.");
+  }
 
   const verifiers = result?.verifiers ?? journal.lastRound;
   // N-24 (a): a verifier is shown by its number in the run's verifier order; the id is in --json only.
@@ -888,6 +894,15 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     return cliError("invalid_run_record", "the run directory is a link; the report reads only the workspace's own records");
   }
 
+  // DR-38: the run's records were changed by something else; the report is shown and says so.
+  // A mark that cannot be read counts as one (fail closed).
+  let recordsChanged: boolean;
+  try {
+    recordsChanged = await (io.hasRecordsChangedMark ?? hasRecordsChangedMark)(root, runId);
+  } catch {
+    recordsChanged = true;
+  }
+
   const journalFile = path.join(runDir, JOURNAL_FILE_NAME);
   const resultFile = path.join(runDir, RESULT_FILE_NAME);
   const journalState = await fileState(journalFile);
@@ -927,6 +942,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
         runId,
         status,
         exitCode: REPORT_EXIT_CODES[status],
+        ...(recordsChanged ? { recordsChanged: true as const } : {}),
         result,
         journal,
         ...(verdict === undefined ? {} : { verdict }),

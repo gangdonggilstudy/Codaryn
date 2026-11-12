@@ -11,9 +11,8 @@ import { createPrivacyGateway } from "../privacy/index.js";
 import {
   RevertRunError,
   acquireLock,
-  createChangeRecorder,
-  createPlanRecorder,
-  createJournal,
+  createRunRecorders,
+  hasRecordsChangedMark,
   releaseLock,
   writeResult,
 } from "../store/index.js";
@@ -99,6 +98,8 @@ export type RevertCommandOutcome =
       readonly runId: string;
       /** N-7: the run's checked revert record from before this command, or null. */
       readonly revertedBefore: { readonly at: string; readonly status: RevertStatus } | null;
+      /** DR-38: the run has a records-changed mark (or one that cannot be read). The revert still ran its checks. */
+      readonly recordsChanged?: boolean;
     }
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
@@ -129,6 +130,8 @@ export interface RevertCommandOptions {
    * run_not_found, and without `isDamaged` it judges damage too.
    */
   readonly inspect?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
+  /** DR-38: the store's `hasRecordsChangedMark` (the default); injected by tests. A rejection counts as a mark. */
+  readonly hasRecordsChangedMark?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
 
 /** N-26: `listRuns` as the damage check, until the store's own function is passed. */
@@ -247,11 +250,20 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     } catch {
       revertedBefore = null;
     }
+    // DR-38 (P-3): a marked run is not refused; the output says so. A mark that cannot be read counts.
+    let recordsChanged: boolean;
+    try {
+      recordsChanged = await (options.hasRecordsChangedMark ?? hasRecordsChangedMark)(workspaceRoot, runId);
+    } catch {
+      recordsChanged = true;
+    }
+    // Absent means false, as in RevertOutput.
+    const marked = recordsChanged ? { recordsChanged: true as const } : {};
 
     if (dryRun && options.dryRun !== undefined) {
       // N-7: no lock, no record, nothing written.
       try {
-        return { ok: true, outcome: await options.dryRun({ workspaceRoot, runId, dryRun: true }), runId, revertedBefore };
+        return { ok: true, outcome: await options.dryRun({ workspaceRoot, runId, dryRun: true }), runId, revertedBefore, ...marked };
       } catch (error) {
         return failed(error);
       }
@@ -282,7 +294,7 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       } catch {
         // The record never changes the outcome.
       }
-      return { ok: true, outcome, runId, revertedBefore };
+      return { ok: true, outcome, runId, revertedBefore, ...marked };
     } catch (error) {
       return failed(error);
     } finally {
@@ -312,12 +324,12 @@ export const assembleRun: Assemble = async (input) => {
     // the child environment; the workspace root lets .cmd/.bat run (and refuses those inside it).
     const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
     // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
-    const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
     // G-A, G-F: propose_plan stores plan.json for this run (runs/<runId>/plan.json); the other tools never use it.
-    const planRecorder = createPlanRecorder({ workspaceRoot, runId });
+    // DR-38: the three recorders come with the state guard that knows what they write, so the
+    // engine's checks of the state directory count only what the run did not write as a change.
+    const { journal, changeRecorder, planRecorder, stateGuard } = createRunRecorders({ workspaceRoot, runId, clock });
     const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
-    const journal = createJournal({ workspaceRoot, runId, clock });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep
     // the phase 2 journal. The engine checks at run start and around each verification round.
     const protectedPaths = task.policy.protectedPaths ?? [];
@@ -338,6 +350,7 @@ export const assembleRun: Assemble = async (input) => {
       journal,
       clock,
       signal,
+      stateGuard,
       ...(integrity === undefined ? {} : { integrity }),
     };
     return {

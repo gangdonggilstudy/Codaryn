@@ -23,8 +23,10 @@ import {
   PARKED_DIR_NAME,
   STATE_DIR_NAME,
   mergeWorkflowPolicy,
+  mergeWorkflowVerifiers,
   toApiOrigin,
   workflowPolicyNarrowings,
+  workflowVerifierNarrowings,
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
@@ -780,19 +782,25 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   // DR-41: where a workflow definition applies (the task's workflowRef, else the profile's), the
   // policy a run uses is the given one merged with the definition's (mergeWorkflowPolicy), and what
   // the merge left out is a note of the commands check. The quick form's given policy is the
-  // profile's or the config's; a task file's is its own.
+  // profile's or the config's; a task file's is its own. DR-43 (a): its verifiers likewise, the
+  // definition's always checked and the given ones added (mergeWorkflowVerifiers).
   const givenPolicy = task?.policy ?? (args.taskPath === null ? config?.policy : undefined);
   const profileRef = args.profile === null ? null : (config?.profiles?.[args.profile]?.workflowRef ?? null);
   const workflowRef = (task === null ? undefined : task.workflowRef) ?? profileRef;
   const definitions = workflowDefinitions(config?.workflows);
   const definition = workflowRef !== null && Object.hasOwn(definitions, workflowRef) ? definitions[workflowRef] : undefined;
   const policy = definition === undefined ? givenPolicy : (mergeWorkflowPolicy(definition.policy, givenPolicy) ?? givenPolicy);
-  const policyNotes: DoctorText[] = (definition === undefined ? [] : workflowPolicyNarrowings(definition.policy, givenPolicy)).map((narrowing) =>
+  const givenVerifiers = task?.verifiers ?? (args.taskPath === null ? config?.verifiers : undefined);
+  const narrowings =
+    definition === undefined
+      ? []
+      : [...workflowPolicyNarrowings(definition.policy, givenPolicy), ...workflowVerifierNarrowings(definition.verifiers, givenVerifiers)];
+  const policyNotes: DoctorText[] = narrowings.map((narrowing) =>
     narrowing.kind === "restore_path_tokens_off"
       ? { id: "doctor.workflow_policy.restore_path_tokens_off" }
       : { id: `doctor.workflow_policy.${narrowing.kind}`, params: { count: narrowing.count } },
   );
-  const verifiers = task?.verifiers ?? (args.taskPath === null ? config?.verifiers : undefined) ?? [];
+  const verifiers = (definition === undefined ? givenVerifiers : mergeWorkflowVerifiers(definition.verifiers, givenVerifiers)) ?? [];
   const commandEntries: CommandEntry[] = [];
   (policy?.commands ?? []).forEach((rule, index) =>
     commandEntries.push({ position: `policy.commands[${index}]`, executable: rule.executable, args: rule.argsPrefix, cwd: null }),

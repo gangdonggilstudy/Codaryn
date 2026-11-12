@@ -23,8 +23,10 @@ import {
   LEGACY_WORKFLOW_SETTINGS,
   RESULT_SCHEMA_VERSION,
   mergeWorkflowPolicy,
+  mergeWorkflowVerifiers,
   toSchemaFieldPath,
   workflowPolicyNarrowings,
+  workflowVerifierNarrowings,
 } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
@@ -260,9 +262,9 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
 
 /**
  * G-A: the config as a task sees it when a workflow definition applies: the definition's limits
- * under the config's (and so under the profile's); in the quick form its verifiers under the
- * config's too, and DR-41: its policy merged with the profile's or the config's
- * (mergeWorkflowPolicy), never replaced by it.
+ * under the config's (and so under the profile's); in the quick form, DR-41 and DR-43 (a): its
+ * policy and its verifiers merged with the profile's or the config's (mergeWorkflowPolicy,
+ * mergeWorkflowVerifiers), never replaced by them.
  */
 function underDefinition(config: CodarynConfig | null, definition: WorkflowDefinition, quick: boolean): CodarynConfig {
   const base: CodarynConfig = config ?? { schemaVersion: 1 };
@@ -271,7 +273,7 @@ function underDefinition(config: CodarynConfig | null, definition: WorkflowDefin
   // file gets them through parseTask's workflowLimits, and only the config bounds it (S-7).
   const limits = !quick || definition.limits === undefined ? base.limits : { ...definition.limits, ...(base.limits ?? {}) };
   const policy = quick ? mergeWorkflowPolicy(definition.policy, base.policy) : base.policy;
-  const verifiers = quick ? (base.verifiers ?? definition.verifiers) : base.verifiers;
+  const verifiers = quick ? mergeWorkflowVerifiers(definition.verifiers, base.verifiers) : base.verifiers;
   return {
     ...base,
     ...(limits === undefined ? {} : { limits }),
@@ -561,7 +563,7 @@ export async function prepareTask(
   }
 
   // G-A (GT-D1): the workflow definition named by the task's workflowRef, --workflow or the
-  // profile. Its limits lie under the config's; in the quick form its policy and verifiers too.
+  // profile. Its limits lie under the config's; its policy and verifiers are merged (DR-41, DR-43 (a)).
   const definitions = workflowDefinitions(config?.workflows);
   const rawTaskRef = taskFile === null ? undefined : (taskFile.value as { workflowRef?: unknown } | null)?.workflowRef;
   const requestedRef = (typeof rawTaskRef === "string" ? rawTaskRef : null) ?? args.workflow ?? profileWorkflowRef;
@@ -612,12 +614,19 @@ export async function prepareTask(
   // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
   // own policy is merged with them here (resolveWorkflow above counted its own command rules first,
   // GT-D10); the quick form's was merged in underDefinition. What the merge left out is recorded.
+  // DR-43 (a), R-31 L-2: likewise its verifiers: the definition's always run, the given ones added.
   const givenPolicy = taskFile !== null ? parsed.policy : config?.policy;
-  const policyNarrowings = definition === undefined ? [] : workflowPolicyNarrowings(definition.policy, givenPolicy);
-  const mergedPolicy = taskFile !== null && definition !== undefined ? (mergeWorkflowPolicy(definition.policy, parsed.policy) ?? parsed.policy) : parsed.policy;
+  const givenVerifiers = taskFile !== null ? parsed.verifiers : config?.verifiers;
+  const policyNarrowings =
+    definition === undefined
+      ? []
+      : [...workflowPolicyNarrowings(definition.policy, givenPolicy), ...workflowVerifierNarrowings(definition.verifiers, givenVerifiers)];
+  const mergeHere = taskFile !== null && definition !== undefined;
+  const mergedPolicy = mergeHere ? (mergeWorkflowPolicy(definition.policy, parsed.policy) ?? parsed.policy) : parsed.policy;
+  const mergedVerifiers = mergeHere ? (mergeWorkflowVerifiers(definition.verifiers, parsed.verifiers) ?? parsed.verifiers) : parsed.verifiers;
   const task = withConfigSecrets(
     {
-      ...withWorkflow({ ...parsed, policy: mergedPolicy }, resolved.workflowRef, resolved.settings),
+      ...withWorkflow({ ...parsed, policy: mergedPolicy, verifiers: mergedVerifiers }, resolved.workflowRef, resolved.settings),
       ...(policyNarrowings.length === 0 ? {} : { policyNarrowings }),
     },
     config,

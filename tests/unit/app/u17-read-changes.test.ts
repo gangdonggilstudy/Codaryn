@@ -4,8 +4,8 @@
  * the secrets a run with that form registers now (DR-17, DR-29). The CLI's `changes` command goes
  * through the app's `changes`. Before U-17 the app found those secrets by running the CLI's `run`
  * path up to its assembly, so a config without a provider (or without one at all) refused the
- * reading. Reproduced first, todo until the app prepares the form as a reading command
- * (prepareTask's readOnly, the CLI's part of U-17). Real runs through the app (scripted model).
+ * reading. Reproduced first (9eab69f, todo); the app now prepares the form as a reading command
+ * (prepareTask's readOnly, the CLI's part of U-17, f92328d). Real runs through the app (scripted model).
  * Fake values only.
  */
 
@@ -16,8 +16,6 @@ import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, ChangesOutput, CodarynApp, TaskForm } from "../../../src/app/index.js";
 import { WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
-
-const TODO = { todo: "U-17: wait for the app to prepare the quick form as a reading command" };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -39,14 +37,14 @@ const quickForm = (workspace: string, configPath: string | null): TaskForm => ({
 const pathsOf = (output: ChangesOutput): string[] => JSON.stringify(output).match(/NOTES\.md/g) ?? [];
 
 describe("U-17 (DR-46): changes --workspace needs no provider settings", () => {
-  test("without any config file: the run's changes are read", TODO, async () => {
+  test("without any config file: the run's changes are read", async () => {
     const run = await finishedRun();
     const output = ok<ChangesOutput>(await run.app.changes({ settings: quickForm(run.workspace, null), runId: run.runId }));
     assert.equal(output.runId, run.runId);
     assert.ok(pathsOf(output).length > 0, JSON.stringify(output));
   });
 
-  test("with init's config (placeholder model, no key): the run's changes are read", TODO, async () => {
+  test("with init's config (placeholder model, no key): the run's changes are read", async () => {
     const run = await finishedRun();
     const config = path.join(run.base, "init-config.json");
     await writeFile(

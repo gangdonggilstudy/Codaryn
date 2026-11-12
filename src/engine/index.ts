@@ -96,6 +96,7 @@ import { RunState } from "./state.js";
 import { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
+export { APPLY_FIXED_TEXTS, applyPlan } from "./apply.js";
 export { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 export {
   EVIDENCE_CAPTURE_NOTE,

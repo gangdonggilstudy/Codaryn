@@ -126,7 +126,8 @@ test("N-E E-1 처음 쓰는 흐름: init → doctor → 체험 예시 → runs �
     if (entry?.state !== "checked") return;
     assert.equal(entry.runId, runId);
     assert.equal(entry.status, "done");
-    assert.equal(entry.changes, 2);
+    // N-D 5: the list counts distinct changed paths, as the end summary does (summary.md written twice is 1).
+    assert.equal(entry.changes, 1);
     assert.equal(entry.reverted, null);
     const text = await u.cli(["runs", "--workspace", workspace]);
     assert.equal(text.exitCode, 0);

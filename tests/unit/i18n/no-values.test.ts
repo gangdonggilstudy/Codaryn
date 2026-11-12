@@ -142,7 +142,8 @@ describe("i18n P0: no file or environment value in a message", () => {
     for (const name of files) {
       // Code only: block comments and whole-line comments are removed (they may mention process.env).
       const source = (await readFile(new URL(name, dir), "utf8")).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-      for (const forbidden of [/\bprocess\b/, /["']node:/, /\brequire\(/, /\bimport\(/, /\bglobalThis\b/, /\breadFile/, /\bfetch\(/]) {
+      // `process.` as code (property access), not the word in a message ("a running process").
+      for (const forbidden of [/\bprocess\s*\./, /\bprocess\s*\[/, /["']node:/, /\brequire\(/, /\bimport\(/, /\bglobalThis\b/, /\breadFile/, /\bfetch\(/]) {
         assert.doesNotMatch(source, forbidden, `${name} uses ${String(forbidden)}`);
       }
     }

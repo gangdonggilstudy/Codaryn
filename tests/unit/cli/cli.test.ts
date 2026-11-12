@@ -99,6 +99,7 @@ describe("parseArgs", () => {
         cancelFile: null,
         quiet: false,
         profile: null,
+        workflow: null,
       },
     });
     const parsed = parseArgs(["run", "--cancel-file", "stop", "--task", "t.json"]);

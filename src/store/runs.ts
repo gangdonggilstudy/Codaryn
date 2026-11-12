@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  APPROVAL_CHANNELS,
   JOURNAL_FILE_NAME,
   MAX_REPORT_FILE_BYTES,
   RESULT_FILE_NAME,
@@ -28,6 +29,7 @@ import {
   STATE_DIR_NAME,
   TASK_ID_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
+  isReasonOfStatus,
   toRunId,
 } from "../contracts/index.js";
 import type {
@@ -36,11 +38,10 @@ import type {
   RunListEntry,
   RunListing,
   RunReason,
-  RunReasonByStatus,
   RunId,
   TerminalRunStatus,
 } from "../contracts/index.js";
-import { assertRunId, errorCode, runDir } from "./common.js";
+import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -55,14 +56,6 @@ const FIRST_RECORD_MAX_BYTES = 64 * 1024;
 /** Largest revert record read. It holds a few short fields. */
 const REVERT_RECORD_MAX_BYTES = 4 * 1024;
 
-/** Every reason, per status (as report.ts checks them). */
-const REASONS: { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] } = {
-  done: ["verified"],
-  failed: ["verifier_failed", "model_error", "repeated_failure"],
-  "needs-input": ["verifier_inconclusive", "no_verifier", "unknown_tool_outcome", "protected_changed"],
-  cancelled: ["cancelled"],
-  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
-};
 
 /** The run records directory cannot be listed. The message names no path and no content. */
 export class RunListError extends Error {
@@ -109,9 +102,6 @@ function timestamp(value: unknown): string | null {
   return isRunTimestamp(value) ? value : null;
 }
 
-function sameFsPath(a: string, b: string): boolean {
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-}
 
 /** A regular file no larger than `max` bytes; "missing" when there is none. Anything else is unreadable. */
 async function checkedFile(file: string, max: number): Promise<"file" | "missing"> {
@@ -149,10 +139,37 @@ function parseObject(text: string): Obj {
 }
 
 /**
- * The journal's first record: `startedAt` and `taskId`. A first line that is not complete (still
- * being written) or is not this run's `run_started` makes the run damaged.
+ * DR-12: what the journal's first record says. A model run starts with `run_started`, an apply
+ * run (G-A) with `apply_started`, which also names the plan run and the approved digest.
  */
-async function firstRecord(file: string, runId: string): Promise<{ startedAt: string; taskId: string }> {
+type FirstRecord =
+  | { readonly kind: "run"; readonly startedAt: string; readonly taskId: string }
+  | { readonly kind: "apply"; readonly startedAt: string; readonly taskId: string; readonly planRunId: string; readonly digest: string };
+
+const APPROVALS: readonly string[] = ["cli-tty", "cli-flag", "adapter"];
+
+/**
+ * The reasons an apply can end with (ApplyResult.reason, src/contracts/plan.ts). The contract
+ * lists them in a comment only; they must also be reasons of the result's status.
+ */
+const APPLY_REASONS: readonly string[] = [
+  "verified",
+  "verifier_failed",
+  "verifier_inconclusive",
+  "protected_changed",
+  "plan_stale",
+  "apply_incomplete",
+  "cancelled",
+  "max_duration",
+  // DR-21: unsafe moves without the person's consent; nothing was moved.
+  "consent_required",
+];
+
+/**
+ * The journal's first record. A first line that is not complete (still being written) or is not
+ * this run's `run_started` or `apply_started` makes the run damaged.
+ */
+async function firstRecord(file: string, runId: string): Promise<FirstRecord> {
   if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") unreadable();
   const handle = await open(file, "r").catch(() => unreadable());
   let text: string;
@@ -168,35 +185,66 @@ async function firstRecord(file: string, runId: string): Promise<{ startedAt: st
   const end = text.indexOf("\n");
   if (end < 0) unreadable();
   const record = parseObject(text.slice(0, end));
-  if (record["runId"] !== runId || record["seq"] !== 1 || record["type"] !== "run_started" || record["schemaVersion"] !== 1) unreadable();
-  if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
+  if (record["runId"] !== runId || record["seq"] !== 1 || record["schemaVersion"] !== 1) unreadable();
   const taskId = record["taskId"];
   if (typeof taskId !== "string" || !TASK_ID.test(taskId)) unreadable();
   const startedAt = timestamp(record["at"]);
   if (startedAt === null) unreadable();
-  return { startedAt, taskId: taskId as string };
+  if (record["type"] === "run_started") {
+    if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
+    return { kind: "run", startedAt, taskId: taskId as string };
+  }
+  if (record["type"] !== "apply_started") unreadable();
+  const { planRunId, digest, approval, actions, maxDurationMs } = record;
+  if (typeof planRunId !== "string" || toRunId(planRunId) === null || planRunId === runId) unreadable();
+  if (typeof digest !== "string" || !HASH.test(digest)) unreadable();
+  if (typeof approval !== "string" || !APPROVALS.includes(approval)) unreadable();
+  if (typeof actions !== "number" || !Number.isSafeInteger(actions) || actions < 1) unreadable();
+  if (typeof maxDurationMs !== "number" || !Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1) unreadable();
+  return { kind: "apply", startedAt, taskId: taskId as string, planRunId, digest };
+}
+
+/** An AppliedActionRecord as an ApplyResult holds it. */
+function isAppliedRecord(value: unknown): boolean {
+  if (!isObj(value)) return false;
+  const { index, action, stored } = value;
+  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || !isObj(action)) return false;
+  if (typeof action["sha256"] !== "string" || !HASH.test(action["sha256"])) return false;
+  if (action["kind"] === "move") return typeof action["from"] === "string" && typeof action["to"] === "string" && stored === null;
+  if (action["kind"] === "discard") return typeof action["path"] === "string" && typeof stored === "string";
+  return false;
 }
 
 /** Status, reason and change count from result.json, or nulls when the run has none. */
 async function resultOf(
   file: string,
   runId: string,
-  taskId: string,
+  first: FirstRecord,
 ): Promise<{ status: TerminalRunStatus | null; reason: RunReason | null; changes: number | null }> {
   if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") return { status: null, reason: null, changes: null };
   const result = parseObject(await readText(file, MAX_REPORT_FILE_BYTES));
-  if (result["schemaVersion"] !== 1 || result["kind"] !== "run" || result["runId"] !== runId) unreadable();
-  if (result["taskId"] !== taskId) unreadable();
+  if (result["schemaVersion"] !== 1 || result["kind"] !== first.kind || result["runId"] !== runId) unreadable();
+  if (result["taskId"] !== first.taskId) unreadable();
   const status = result["status"];
   if (typeof status !== "string" || !(TERMINAL_RUN_STATUSES as readonly string[]).includes(status)) unreadable();
   const reason = result["reason"];
-  const reasons = REASONS[status as TerminalRunStatus] as readonly string[];
-  if (typeof reason !== "string" || !reasons.includes(reason)) unreadable();
+  // DR-16: the contract's one table of reasons per status (G-A reasons included).
+  if (typeof reason !== "string" || !isReasonOfStatus(status as TerminalRunStatus, reason)) unreadable();
   if (result["exitCode"] !== RUN_EXIT_CODES[status as TerminalRunStatus]) unreadable();
+  if (first.kind === "apply") {
+    // DR-12: an ApplyResult of this apply's plan and digest; its changes are the applied actions.
+    if (!APPLY_REASONS.includes(reason as string)) unreadable();
+    if (result["planRunId"] !== first.planRunId || result["digest"] !== first.digest) unreadable();
+    const applied = result["applied"];
+    if (!Array.isArray(applied) || !applied.every(isAppliedRecord)) unreadable();
+    return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: applied.length };
+  }
   if (typeof result["provider"] !== "string" || !PROVIDERS.includes(result["provider"])) unreadable();
   const changes = result["changes"];
   if (!Array.isArray(changes) || !changes.every(isChangeRecord)) unreadable();
-  return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: changes.length };
+  // N-D 5: files, not change records, as the end-of-run summary counts them (N-23 d).
+  const paths = new Set((changes as Obj[]).map((change) => change["path"]));
+  return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: paths.size };
 }
 
 /** A FileChangeRecord as result.json holds it (report.ts checks the same fields). */
@@ -219,7 +267,22 @@ function parseRevertRecord(record: Obj, runId: string): RevertRecord {
   const at = timestamp(record["at"]);
   const status = record["status"];
   if (at === null || (status !== "complete" && status !== "partial")) unreadable();
-  return { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted: count(record["reverted"]), skipped: count(record["skipped"]) };
+  const reverted = count(record["reverted"]);
+  const parsed: RevertRecord = { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted, skipped: count(record["skipped"]) };
+  // DR-25: the consent to unsafe moves for that revert and how many files were moved back unsafely.
+  // Absent in records written before DR-25. Unsafe moves need a consent and are reverted files.
+  const consent = record["unsafeMoveConsent"];
+  const unsafeMoves = record["unsafeMoves"];
+  if (consent !== undefined && consent !== null && !(APPROVAL_CHANNELS as readonly unknown[]).includes(consent)) unreadable();
+  if (unsafeMoves !== undefined) {
+    const moved = count(unsafeMoves);
+    if (moved > reverted || (moved > 0 && (consent === undefined || consent === null))) unreadable();
+  }
+  return {
+    ...parsed,
+    ...(consent === undefined ? {} : { unsafeMoveConsent: consent as RevertRecord["unsafeMoveConsent"] }),
+    ...(unsafeMoves === undefined ? {} : { unsafeMoves: unsafeMoves as number }),
+  };
 }
 
 async function revertRecordAt(file: string, runId: string): Promise<RevertRecord | null> {
@@ -265,21 +328,31 @@ function checkStartTime(runId: string, startedAt: string, now: number): void {
 }
 
 async function readEntry(dir: string, runId: RunId, now: number): Promise<CheckedRun> {
-  const { startedAt, taskId } = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  const first = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  const { startedAt, taskId } = first;
   checkStartTime(runId, startedAt, now);
-  const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, taskId);
+  const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, first);
   // N-23(g): the revert record only marks a reverted run. One that fails its checks takes the
-  // mark away, not the run: the run stays checked and can still be reported and reverted.
-  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId).catch(() => null);
+  // mark away, not the run: the run stays checked (revertRecordDamaged) and can still be
+  // reported and reverted.
+  let revertRecordDamaged = false;
+  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId).catch(() => {
+    revertRecordDamaged = true;
+    return null;
+  });
   return {
     state: "checked",
     runId,
+    // G-A: a model run or an apply run (DR-12), and the plan run an apply applied.
+    kind: first.kind,
+    ...(first.kind === "apply" ? { planRunId: first.planRunId as RunId } : {}),
     startedAt,
     taskId,
     status,
     reason,
     changes,
     reverted: record === null ? null : { at: record.at, status: record.status },
+    revertRecordDamaged,
   };
 }
 
@@ -364,6 +437,8 @@ export async function inspectRun(workspaceRoot: string, runId: string, now: numb
     const code = errorCode(error);
     return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
   }
+  // N-27 (a): only the entry of exactly this name; a case variant names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, id))) return "missing";
   const dir = join(runsDir, id);
   try {
     const info = await lstat(dir);
@@ -404,7 +479,7 @@ export function latestRun(runs: readonly RunListEntry[]): CheckedRun | null {
 export async function readRevertRecord(workspaceRoot: string, runId: string): Promise<RevertRecord | null> {
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
-  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
+  if (!(await isOwnRunDir(workspaceRoot, runId))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
   try {
     return await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
   } catch {
@@ -416,15 +491,6 @@ export async function readRevertRecord(workspaceRoot: string, runId: string): Pr
  * The directory exists and is the workspace's own: not a link or junction (as `listRuns` sees run
  * directories), so a record is never read from or written to another place.
  */
-async function isPlainDirectory(dir: string): Promise<boolean> {
-  try {
-    const info = await lstat(dir);
-    if (!info.isDirectory() || info.isSymbolicLink()) return false;
-    return sameFsPath(await realpathNative(dir), dir);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Writes `<root>/.codaryn/runs/<runId>/revert.json` atomically, replacing an earlier record.
@@ -441,7 +507,7 @@ export async function writeRevertRecord(workspaceRoot: string, record: RevertRec
     throw new TypeError("writeRevertRecord needs a valid RevertRecord");
   }
   const dir = runDir(workspaceRoot, record.runId);
-  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; no revert record was written");
+  if (!(await isOwnRunDir(workspaceRoot, record.runId))) throw new RunListError("the run directory is missing or a link; no revert record was written");
   const target = join(dir, REVERT_RECORD_FILE_NAME);
   const temporary = `${target}.${randomBytes(8).toString("hex")}.tmp`;
   try {

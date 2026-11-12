@@ -15,12 +15,14 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
+  MAX_READ_BYTES,
   PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
@@ -39,7 +41,8 @@ import type {
   Workspace,
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
+import { ApplyRecordError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
+import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
 const CONTENT_FILE_PATTERN = /^([1-9][0-9]{0,8})\.orig$/;
@@ -279,6 +282,15 @@ type Snapshots =
 
 async function loadSnapshots(dir: string): Promise<Snapshots> {
   try {
+    // DR-24 (e): a link in place of the snapshots directory is never read through.
+    try {
+      await lstat(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "ENOENT" || code === "ENOTDIR") return { kind: "missing" };
+      return { kind: "unreadable" };
+    }
+    if (!(await isPlainDirectory(dir))) return { kind: "unreadable" };
     const found = await readIndex(dir);
     if (found === "missing") return { kind: "missing" };
     if (found === "invalid") return { kind: "unreadable" };
@@ -391,6 +403,10 @@ export const revertRun: RevertRun = async (request) => {
   const { workspaceRoot, runId } = request;
   const dryRun = request.dryRun === true;
   assertRunId(runId);
+  // N-27 (a): a run id that differs from the directory's name only in case names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) {
+    throw new RevertRunError("run_not_found", "the workspace has no journal for this run; nothing was changed");
+  }
   const dir = runDir(workspaceRoot, runId);
 
   let text: string;
@@ -402,6 +418,19 @@ export const revertRun: RevertRun = async (request) => {
       throw new RevertRunError("run_not_found", "the workspace has no journal for this run; nothing was changed");
     }
     throw new RevertRunError("invalid_run_record", "the run's journal cannot be read; nothing was changed");
+  }
+  // G-A, DR-12: an apply run (its journal starts with apply_started) puts moves and discards back.
+  if (isApplyJournal(text, runId)) {
+    try {
+      // DR-25: a consent counts only for this run and only from a person's channel.
+      const consent = request.unsafeMoveConsent;
+      const consented =
+        consent !== undefined && consent !== null && consent.runId === runId && (APPROVAL_CHANNELS as readonly string[]).includes(consent.channel);
+      return await revertApplyRun(workspaceRoot, runId, text, dryRun, consented);
+    } catch (error) {
+      if (error instanceof ApplyRecordError) throw new RevertRunError("invalid_run_record", error.message);
+      throw error;
+    }
   }
   const changes = changedPaths(text, runId);
 
@@ -443,3 +472,91 @@ export const revertRun: RevertRun = async (request) => {
   }
   return { reverted, skipped };
 };
+
+/** DR-14: why a run's original of a path is not given. */
+export type OriginalUnavailable = "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable";
+
+/** DR-14: one changed path of a run and its original, for a comparison view. */
+export interface RunOriginal {
+  /** As the journal recorded it (masked). */
+  readonly path: string;
+  /** The run created the file: there is no original. */
+  readonly created: boolean;
+  /** The path's first `previousHash` (the state before the run), null when the run created it. */
+  readonly before: ContentHash | null;
+  /** The path's last `newHash` (the state the run left). */
+  readonly after: ContentHash;
+  /**
+   * The original as UTF-8 text (raw local text, R-8: mask it before it leaves the process), why it
+   * is not given, or null for a created file.
+   */
+  readonly original: { readonly text: RawText } | { readonly unavailable: OriginalUnavailable } | null;
+}
+
+/** The kept original of a changed path, checked as `revertRun` checks it, with a finer reason. */
+async function originalText(change: ChangedPath, snapshots: Snapshots): Promise<RunOriginal["original"]> {
+  if (snapshots.kind === "unreadable") return { unavailable: "unreadable" };
+  if (snapshots.kind === "missing") return { unavailable: "snapshot_missing" };
+  const entry = snapshots.byPath.get(change.path);
+  if (entry === undefined || !entry.existed || entry.file === undefined) return { unavailable: "snapshot_missing" };
+  const file = join(snapshots.dir, entry.file);
+  let bytes: Buffer;
+  try {
+    const info = await lstat(file);
+    if (!info.isFile()) return { unavailable: "snapshot_missing" };
+    if (info.size > MAX_READ_BYTES) return { unavailable: "too_large" };
+    bytes = await readFile(file);
+  } catch (error) {
+    const code = errorCode(error);
+    return { unavailable: code === "ENOENT" || code === "ENOTDIR" ? "snapshot_missing" : "unreadable" };
+  }
+  if (bytes.length > MAX_READ_BYTES) return { unavailable: "too_large" };
+  // Not the state the run's first change replaced (see originalOf).
+  if (sha256(bytes) !== change.before) return { unavailable: "snapshot_missing" };
+  try {
+    return { text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) as RawText };
+  } catch {
+    return { unavailable: "not_text" };
+  }
+}
+
+/**
+ * DR-14: a run's changed paths with their originals, for the app layer's comparison view (it
+ * replaces the app's own reading of the snapshot layout). One entry per distinct `file_changed`
+ * path in order of first appearance, with the same checks as `revertRun`: the original only when
+ * its hash is the path's first `previousHash`, UTF-8 text only, at most MAX_READ_BYTES. Paths that
+ * hold a privacy token cannot be matched (`masked_path`). An apply run has no originals (its moves
+ * and discards keep the files themselves). Reads only; no lock, nothing written.
+ * Rejects with RevertRunError like `revertRun`: `run_not_found` (no run directory or journal),
+ * `invalid_run_record` (a linked run directory, or a journal that cannot be read or parsed).
+ */
+export async function readRunOriginals(request: { readonly workspaceRoot: string; readonly runId: string }): Promise<RunOriginal[]> {
+  const { workspaceRoot, runId } = request;
+  assertRunId(runId);
+  const dir = runDir(workspaceRoot, runId);
+  try {
+    await lstat(dir);
+  } catch {
+    throw new RevertRunError("run_not_found", "the workspace has no records for this run");
+  }
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) throw new RevertRunError("run_not_found", "the workspace has no records for this run");
+  if (!(await isPlainDirectory(dir))) throw new RevertRunError("invalid_run_record", "the run directory is a link; it is not read");
+  let text: string;
+  try {
+    text = await readFile(join(dir, JOURNAL_FILE_NAME), "utf8");
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOENT" || code === "ENOTDIR") throw new RevertRunError("run_not_found", "the workspace has no journal for this run");
+    throw new RevertRunError("invalid_run_record", "the run's journal cannot be read");
+  }
+  if (isApplyJournal(text, runId)) return [];
+  const changes = changedPaths(text, runId);
+  const snapshots = await loadSnapshots(join(dir, SNAPSHOTS_DIR_NAME));
+  const originals: RunOriginal[] = [];
+  for (const change of changes) {
+    const created = change.before === null;
+    const original = created ? null : TOKEN_FRAGMENT.test(change.path) ? { unavailable: "masked_path" as const } : await originalText(change, snapshots);
+    originals.push({ path: change.path, created, before: change.before, after: change.after, original });
+  }
+  return originals;
+}

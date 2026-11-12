@@ -76,6 +76,8 @@ export interface RunReasonByStatus {
    * a person's approval and `codaryn apply` (EngineResult.plan). awaiting_review: the workflow's
    * completion is `human_review` and its verifiers all passed (or there is none); a person records
    * a verdict with `codaryn review` (EngineResult.review). Neither is ever `done`.
+   * consent_required (DR-21, apply runs only): the preflight found moves that could only be made
+   * unsafely and the person gave no consent for this apply; nothing was moved.
    */
   readonly "needs-input":
     | "verifier_inconclusive"
@@ -83,7 +85,8 @@ export interface RunReasonByStatus {
     | "unknown_tool_outcome"
     | "protected_changed"
     | "plan_pending"
-    | "awaiting_review";
+    | "awaiting_review"
+    | "consent_required";
   readonly cancelled: "cancelled";
   readonly "budget-exhausted":
     | "max_model_turns"
@@ -114,11 +117,46 @@ export const RUN_REASONS = [
   "apply_incomplete",
   "plan_pending",
   "awaiting_review",
+  "consent_required",
 ] as const satisfies readonly RunReason[];
 /** Compile-time check that RUN_REASONS misses none. */
 export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
 const runReasonsComplete: [MissingRunReason] extends [never] ? true : false = true;
 void runReasonsComplete;
+
+/**
+ * DR-16 (R-4 M-1): the reasons each end status may have, the one table every reader of result.json
+ * and journals uses to check a recorded status and reason (report, the run list, human output).
+ * Readers must not keep their own lists: a reason added here is then accepted everywhere at once.
+ * It covers runs and apply runs (ApplyResult uses the same reasons).
+ */
+export const RUN_REASONS_BY_STATUS = {
+  done: ["verified"],
+  failed: ["verifier_failed", "model_error", "repeated_failure", "plan_stale", "apply_incomplete"],
+  "needs-input": [
+    "verifier_inconclusive",
+    "no_verifier",
+    "unknown_tool_outcome",
+    "protected_changed",
+    "plan_pending",
+    "awaiting_review",
+    "consent_required",
+  ],
+  cancelled: ["cancelled"],
+  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
+} as const satisfies { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] };
+
+/** Compile-time check that RUN_REASONS_BY_STATUS lists every reason of every status. */
+export type MissingReasonByStatus = {
+  [S in TerminalRunStatus]: Exclude<RunReasonByStatus[S], (typeof RUN_REASONS_BY_STATUS)[S][number]>;
+}[TerminalRunStatus];
+const reasonsByStatusComplete: [MissingReasonByStatus] extends [never] ? true : false = true;
+void reasonsByStatusComplete;
+
+/** Whether `reason` is one of `status`'s reasons (RUN_REASONS_BY_STATUS). Pure. */
+export function isReasonOfStatus(status: TerminalRunStatus, reason: string): reason is RunReason {
+  return (RUN_REASONS_BY_STATUS[status] as readonly string[]).includes(reason);
+}
 
 /** Process exit code for each terminal status. */
 export const RUN_EXIT_CODES: { readonly [S in TerminalRunStatus]: number } = {
@@ -165,7 +203,11 @@ export const CLI_ERROR_EXIT_CODES = {
   run_not_found: 2,
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
-  /** G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as `plan_pending`). */
+  /**
+   * G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as
+   * `plan_pending`), or the task given to `apply` does not resolve to `plan: "apply"`. Nothing was
+   * changed.
+   */
   run_not_plan: 2,
   /**
    * G-A, `codaryn apply`: no approval. `--digest` is missing (without a terminal), shorter than
@@ -313,6 +355,8 @@ export interface RevertOutput {
   readonly skipped: RevertOutcome["skipped"];
   /** N-7: present and true for `--dry-run` only. */
   readonly dryRun?: true;
+  /** DR-25: RevertOutcome.moveSafetyUnchecked, passed on (a dry run that lists a file to move back). */
+  readonly moveSafetyUnchecked?: true;
   /**
    * N-7: the run's revert record from before this command, when it had one: the run was already
    * reverted at `at` with that status. A second revert of the same run normally skips every file

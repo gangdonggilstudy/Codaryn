@@ -19,12 +19,14 @@ import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { CODARYN_LANG_ENV, DOCTOR_HINT_ERROR_CODES } from "../contracts/index.js";
+import { CODARYN_LANG_ENV } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
+import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
 import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
+import { runChanges } from "./changes.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
 import { runDoctor } from "./doctor.js";
 import { renderOutcome, runGuardedCommand } from "./guard.js";
@@ -35,6 +37,7 @@ import { runInit } from "./init.js";
 import { findInstall } from "./install.js";
 import type { InstallInfo } from "./install.js";
 import { runModels } from "./models.js";
+import { runApply, runPlan, runReview } from "./plan-commands.js";
 import { anthropicModelLister } from "./provider.js";
 import { runReport } from "./report.js";
 import { runRevert } from "./revert.js";
@@ -43,6 +46,8 @@ import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
 import { envValue } from "./settings.js";
 import { cleanText, hideKeys } from "./text-safety.js";
+// N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).
+import { explainedErrorText } from "./error-text.js";
 
 const argv = process.argv.slice(2);
 /** N-5: `--quiet` anywhere turns the human-readable stderr output off, parsed or not. */
@@ -110,16 +115,14 @@ function humanFor(configLanguage: MessageLanguage | null): { readonly output: Hu
   return { output: createHumanOutput(messages), messages };
 }
 
-/** N-5, N-22, N-25: what happened, how to fix it, the code, and `doctor` or the lock hint where they help. */
+/**
+ * N-5, N-22, N-25: what happened, how to fix it and the code. The renderer adds the doctor hint
+ * itself (N-22); the lock hint is added indented, once (N-D 4.4, `explainedErrorText`).
+ */
 function explainError(output: CliErrorOutput, human: { readonly output: HumanOutput; readonly messages: MessageCatalog }): void {
   let text = "";
   try {
-    text = human.output.error(output);
-    // The renderer may already add these hints; each is written once.
-    const hints: string[] = [];
-    if ((DOCTOR_HINT_ERROR_CODES as readonly string[]).includes(output.code)) hints.push(human.messages.format("error.doctor_hint"));
-    if (output.code === "workspace_locked") hints.push(human.messages.format("lock.remove_hint"));
-    for (const hint of hints) if (!text.includes(hint)) text += `${hint}\n`;
+    text = explainedErrorText(output, human);
   } catch {
     text = "";
   }
@@ -176,9 +179,12 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           readRecord: readRevertRecord,
           writeRecord: writeRevertRecord,
           announceLatest,
-          // N-26: the store judges one run as the run list does.
-          isDamaged: async (workspaceRoot, runId) => (await inspectRun(workspaceRoot, runId)) === "damaged",
+          // N-26, N-27 (a): the store judges one run as the run list does: an id with no entry of
+          // exactly that name is run_not_found, a damaged run is refused.
+          inspect: inspectRun,
         }),
+        // DR-25: at a terminal, files skipped as unsafe_move may go back after a [y/N] question on stderr.
+        ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
       });
       if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));
       return plain(outcome);
@@ -187,6 +193,50 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       return plain(await runReport({ argv, cwd: process.cwd(), env: process.env, listRuns, announceLatest }));
     case "runs":
       return plain(await runRuns({ argv, cwd: process.cwd(), env: process.env, human: human.output }));
+    case "changes":
+      // DR-7, DR-14: the app layer's `changes` with this process's environment; it reads only.
+      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()) }));
+    case "plan":
+    case "apply":
+    case "review": {
+      // G-F (DR-17): the task form of `run`, steps 1 to 7 included; no model is involved.
+      const shared = {
+        argv,
+        env: process.env,
+        cwd: process.cwd(),
+        readFile: readText,
+        isDirectory,
+        loadEnvFile: (file: string) => process.loadEnvFile(file),
+        locateInWorkspace: (file: string, workspaceRoot: string) => locateInWorkspace(file, workspaceRoot),
+        relatePaths: (target: string, base: string) => relateRealPaths(target, base),
+        installDir,
+        defaultConfig,
+        clock,
+        randomBytes: random,
+        listRuns,
+        announceLatest,
+      };
+      if (argv[0] === "plan") return plain(await runPlan(shared));
+      if (argv[0] === "review") return plain(await runReview(shared));
+      return plain(
+        await runApply({
+          ...shared,
+          human: human.output,
+          writeProgress: (line) => writeHuman(line),
+          // 6.4 1: at a terminal without --digest the plan is shown and a [y/N] question asked on stderr.
+          ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
+          cancelSignal: (cancelFile) =>
+            createCancelSource({
+              cancelFile,
+              fileExists: (file) => existsSync(file),
+              onSignal: (name, handler) => {
+                process.on(name, handler);
+                return () => process.off(name, handler);
+              },
+            }),
+        }),
+      );
+    }
     case "init":
       return plain(
         await runInit({

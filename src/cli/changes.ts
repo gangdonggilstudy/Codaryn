@@ -19,11 +19,12 @@ import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS } from "../contracts/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
+import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError } from "./run.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { cleanText, hideKeys } from "./text-safety.js";
+import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
 
 export const CHANGES_USAGE =
   "codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) " +
@@ -174,6 +175,8 @@ export async function runChanges(io: ChangesEnvironment): Promise<CommandOutcome
     return { output, exitCode: output.exitCode };
   }
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
-  const text = parsed.args.json ? `${JSON.stringify(outcome.output)}\n` : renderChanges(outcome.output);
-  return { text: hideKeys(text, currentKey), exitCode: outcome.output.exitCode };
+  // N-19: one ASCII JSON line. N-27 (c): keys are hidden in the strings before the JSON is written
+  // (in JSON text a control character becomes a six-character escape the key check cannot see through).
+  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output), currentKey);
+  return { text, exitCode: outcome.output.exitCode };
 }

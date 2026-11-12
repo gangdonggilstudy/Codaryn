@@ -40,6 +40,7 @@ import {
   PLAN_STATUSES,
   POLICY_DENIAL_CODES,
   QUICK_TASK_WORKFLOW,
+  QUICK_WORKFLOW_ARGUMENT,
   RESULT_FILE_NAME,
   REVERT_ACTIONS,
   REVERT_RECORD_FILE_NAME,
@@ -49,6 +50,12 @@ import {
   REVIEW_VERDICTS,
   RUN_EXIT_CODES,
   RUN_REASONS,
+  RUN_REASONS_BY_STATUS,
+  APPLY_REASONS_BY_STATUS,
+  UNSAFE_MOVE_CONSENT_ARGUMENT,
+  DISCARDED_STORED_NAME_PATTERN_SOURCE,
+  discardedStoredName,
+  isReasonOfStatus,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
   STATE_DIR_NAME,
@@ -60,10 +67,30 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  RevertOutcome,
+  RevertOutput,
+  RevertRecord,
+  RevertRequest,
+  RevertedFile,
+  ApplyJournalEntry,
   ApplyJournalEvent,
+  ContentHash,
+  MaskedText,
+  ApplyResult,
+  ApplySummaryContext,
+  CodarynConfig,
+  ConfigProfile,
+  CreatePlanExecutor,
+  HumanOutput,
+  PolicyConfig,
+  RunId,
+  RunListEntry,
+  TaskSpec,
+  WorkflowDefinition,
   EngineResult,
   JournalEvent,
   ModelRequest,
+  ReviewRecord,
   RunReasonByStatus,
   StoredPlan,
   VerifierConfig,
@@ -89,6 +116,111 @@ type ConfiguredInventory = Extract<VerifierConfig["kind"], "inventory">;
 const inventoryNotConfigurable: [ConfiguredInventory] extends [never] ? true : false = true;
 /** A model request without workflow tools is still a valid request (legacy shape). */
 const legacyRequest: ModelRequest = { system: "" as ModelRequest["system"], messages: [], tools: ["read_file"] };
+/** The renderer's apply methods take the apply records and result; optional until N-C adds them. */
+const renderer: Pick<HumanOutput, "applyProgressLine" | "applySummary"> = {
+  applyProgressLine: (event: ApplyJournalEvent) => (event.type === "file_moved" ? "moved\n" : null),
+  applySummary: (_result: ApplyResult, context: ApplySummaryContext) => `${context.workspaceForm}\n`,
+};
+const noRenderer: Pick<HumanOutput, "applyProgressLine" | "applySummary"> = {};
+void [renderer, noRenderer];
+/** G-C's factory shape: an executor is made from the workspace, its real root and the apply run id. */
+const makeExecutor: CreatePlanExecutor = ({ workspace, workspaceRoot, runId }) => {
+  void [workspace, workspaceRoot, runId];
+  return { check: async () => null, apply: async () => ({ ok: false, problem: "io_error" }) };
+};
+void makeExecutor;
+/** DR-21: consent comes only from a person; no file or definition can carry it. */
+type HasConsentField<T> = "unsafeMoveConsent" extends keyof T ? true : "allowUnsafeMove" extends keyof T ? true : false;
+const noConsentInFiles: [
+  HasConsentField<TaskSpec>,
+  HasConsentField<CodarynConfig>,
+  HasConsentField<ConfigProfile>,
+  HasConsentField<WorkflowDefinition>,
+  HasConsentField<PolicyConfig>,
+  HasConsentField<StoredPlan>,
+] = [false, false, false, false, false, false];
+/**
+ * The run list tells apply runs apart; an entry written before G-A (no kind) still type-checks.
+ * Only the fields this check is about are picked, so fields other owners add to the entry (for
+ * example N-23 g) do not make it fail.
+ */
+type ListEntryFields = Pick<
+  Extract<RunListEntry, { state: "checked" }>,
+  "state" | "runId" | "kind" | "planRunId" | "startedAt" | "taskId" | "status" | "reason" | "changes" | "reverted"
+>;
+const applyEntry: ListEntryFields = {
+  state: "checked",
+  runId: "20261112T120500Z-0000bbbb" as RunId,
+  kind: "apply",
+  planRunId: "20261112T120000Z-0000aaaa" as RunId,
+  startedAt: "2026-11-12T12:05:00Z",
+  taskId: "tidy",
+  status: "needs-input",
+  reason: "consent_required",
+  changes: 0,
+  reverted: null,
+};
+const legacyEntry: ListEntryFields = {
+  state: "checked",
+  runId: "20261112T120000Z-0000aaaa" as RunId,
+  startedAt: "2026-11-12T12:00:00Z",
+  taskId: "t",
+  status: "done",
+  reason: "verified",
+  changes: 1,
+  reverted: null,
+};
+/** R-9 I-4: the start record is an apply journal entry, not a shown record (progress stays as it is). */
+type StartIsShown = Extract<ApplyJournalEvent, { type: "plan_item_started" }> extends never ? false : true;
+const startNotShown: StartIsShown = false;
+const startEntry: ApplyJournalEntry = {
+  type: "plan_item_started",
+  index: 0,
+  action: { kind: "discard", path: "b.tmp" as MaskedText, sha256: "a".repeat(64) as ContentHash },
+};
+/** DR-25: a revert request carries the person's consent for that run; the outcome and record say what was unsafe. */
+const revertWithConsent: RevertRequest = {
+  workspaceRoot: "/work",
+  runId: "20261112T120500Z-0000bbbb",
+  unsafeMoveConsent: { channel: "cli-flag", runId: "20261112T120500Z-0000bbbb" },
+};
+const revertWithout: RevertRequest = { workspaceRoot: "/work", runId: "20261112T120500Z-0000bbbb" };
+const unsafeBack: RevertedFile = { path: "a.jpg", action: "moved_back", from: "2026/a.jpg", unsafe: true };
+/** DR-25: a dry run judges no drive and says so; its outcome and output carry the notice. */
+const dryRunOutcome: RevertOutcome = {
+  reverted: [{ path: "a.jpg", action: "moved_back", from: "2026/a.jpg" }],
+  skipped: [],
+  moveSafetyUnchecked: true,
+};
+const dryRunOutput: Pick<RevertOutput, "dryRun" | "moveSafetyUnchecked"> = { dryRun: true, moveSafetyUnchecked: true };
+const revertRecord: RevertRecord = {
+  schemaVersion: 1,
+  kind: "revert_record",
+  runId: "20261112T120500Z-0000bbbb",
+  at: "2026-11-12T12:10:00Z",
+  status: "complete",
+  reverted: 1,
+  skipped: 0,
+  unsafeMoveConsent: "cli-flag",
+  unsafeMoves: 1,
+};
+void [
+  noConsentInFiles,
+  applyEntry,
+  legacyEntry,
+  startNotShown,
+  startEntry,
+  revertWithConsent,
+  revertWithout,
+  unsafeBack,
+  revertRecord,
+  dryRunOutcome,
+  dryRunOutput,
+];
+/** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
+// @ts-expect-error a raw note cannot be stored
+const rawNote: ReviewRecord["note"] = "typed by a person" as string;
+void rawNote;
 /** A result as phase 3 wrote it still type-checks: `plan` and `review` are optional. */
 const legacyResult: EngineResult = {
   schemaVersion: 1,
@@ -119,6 +251,26 @@ describe("G-A run reasons and exit codes", () => {
     assert.ok(unique(RUN_REASONS));
     assert.deepEqual([...TERMINAL_RUN_STATUSES], ["done", "failed", "needs-input", "cancelled", "budget-exhausted"]);
     assert.deepEqual(RUN_EXIT_CODES, { done: 0, failed: 1, "needs-input": 3, "budget-exhausted": 4, cancelled: 5 });
+  });
+
+  test("DR-16: one table lists every reason under exactly one status, the same reasons as RUN_REASONS", () => {
+    assert.deepEqual(Object.keys(RUN_REASONS_BY_STATUS).sort(), [...TERMINAL_RUN_STATUSES].sort());
+    const listed = Object.values(RUN_REASONS_BY_STATUS).flat() as string[];
+    assert.ok(unique(listed), "no reason under two statuses");
+    assert.deepEqual([...listed].sort(), [...RUN_REASONS].sort());
+    assert.deepEqual(RUN_REASONS_BY_STATUS["needs-input"].filter((reason) => reason === "plan_pending" || reason === "awaiting_review"), [
+      "plan_pending",
+      "awaiting_review",
+    ]);
+    assert.ok(RUN_REASONS_BY_STATUS.failed.includes("plan_stale") && RUN_REASONS_BY_STATUS.failed.includes("apply_incomplete"));
+  });
+
+  test("DR-16: isReasonOfStatus answers from the table", () => {
+    assert.equal(isReasonOfStatus("needs-input", "plan_pending"), true);
+    assert.equal(isReasonOfStatus("done", "plan_pending"), false);
+    assert.equal(isReasonOfStatus("failed", "verified"), false);
+    assert.equal(isReasonOfStatus("done", "verified"), true);
+    assert.equal(isReasonOfStatus("cancelled", "toString"), false);
   });
 
   test("the new CLI errors are input errors (exit code 2)", () => {
@@ -159,6 +311,35 @@ describe("G-A codes and the message catalog", () => {
     assert.ok(unique(MESSAGE_IDS));
   });
 
+  test("apply runs, plan runs and review have their messages; approval channels and item problems are listed ids", () => {
+    const ids = new Set<string>(MESSAGE_IDS);
+    for (const channel of APPROVAL_CHANNELS) assert.ok(ids.has(`approval.${channel}`), channel);
+    for (const problem of PLAN_ITEM_PROBLEMS) assert.ok(ids.has(`plan.problem.${problem}`), problem);
+    const expected: Record<string, Record<string, string>> = {
+      "summary.form.task": {},
+      "summary.form.given": {},
+      "summary.form.current": {},
+      "summary.plan_ready": { actions: "count" },
+      "summary.next_plan": { form: "text", runId: "runId" },
+      "summary.next_apply": { form: "text", runId: "runId" },
+      "summary.review_checklist": { count: "count" },
+      "summary.next_review": { form: "text", runId: "runId" },
+      "summary.apply_actions": { applied: "count", total: "count" },
+      "summary.apply_plan_run": { runId: "runId" },
+      "progress.apply_started": { actions: "count", approval: "text" },
+      "progress.plan_checked": { count: "count" },
+      "progress.plan_item_problem": { number: "count", problem: "text" },
+      "progress.inventory_limit": {},
+      "progress.file_moved": { number: "count" },
+      "progress.file_discarded": { number: "count" },
+      "progress.plan_item_failed": { number: "count", problem: "text" },
+    };
+    for (const [id, params] of Object.entries(expected)) {
+      assert.ok(ids.has(id), id);
+      assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], params, id);
+    }
+  });
+
   test("every revert action has its fixed message without parameters", () => {
     assert.deepEqual([...REVERT_ACTIONS], ["restored", "deleted", "moved_back", "restored_from_discard"]);
     for (const action of REVERT_ACTIONS) {
@@ -175,6 +356,57 @@ describe("G-A plan contract", () => {
   test("plan modes are P0 only; P1's run mode is not part of the contract", () => {
     assert.deepEqual([...PLAN_MODES], ["none", "apply"]);
     assert.deepEqual([...PLAN_ACTION_KINDS], ["move", "discard"]);
+  });
+
+  test("DR-21: unsafe moves need consent; the apply reasons are a subset of the run reasons", () => {
+    assert.ok((RUN_REASONS as readonly string[]).includes("consent_required"));
+    assert.ok((RUN_REASONS_BY_STATUS["needs-input"] as readonly string[]).includes("consent_required"));
+    for (const [status, reasons] of Object.entries(APPLY_REASONS_BY_STATUS)) {
+      const all = RUN_REASONS_BY_STATUS[status as keyof typeof RUN_REASONS_BY_STATUS] as readonly string[];
+      for (const reason of reasons) assert.ok(all.includes(reason), `${status}/${reason}`);
+    }
+    assert.deepEqual(Object.keys(APPLY_REASONS_BY_STATUS).sort(), Object.keys(RUN_REASONS_BY_STATUS).sort());
+    assert.equal(UNSAFE_MOVE_CONSENT_ARGUMENT, "--allow-unsafe-move");
+    const params: Record<string, Record<string, string>> = {
+      "progress.unsafe_moves": { count: "count" },
+      "progress.unsafe_move_consent": { approval: "text" },
+      "summary.unsafe_moves": { count: "count" },
+      "summary.next_apply_unsafe": { form: "text", runId: "runId" },
+      "progress.plan_checked": { count: "count" },
+    };
+    for (const [id, expected] of Object.entries(params)) {
+      assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], expected, id);
+    }
+  });
+
+  test("DR-24 (a): a discarded file's stored name is its action index in decimal, one segment", () => {
+    const pattern = new RegExp(DISCARDED_STORED_NAME_PATTERN_SOURCE);
+    for (const index of [0, 1, 9, 10, 999]) {
+      assert.equal(discardedStoredName(index), String(index));
+      assert.ok(pattern.test(discardedStoredName(index)), String(index));
+    }
+    for (const bad of ["", "0001", "01", "-1", "1.5", "sub/1", "1/2", "..", "a", " 1", "1\\2"]) {
+      assert.equal(pattern.test(bad), false, JSON.stringify(bad));
+    }
+  });
+
+  test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
+    assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
+  });
+
+  test("DR-25: a revert has the same consent path; its messages say what was moved unsafely and how to consent", () => {
+    assert.deepEqual(FIXED_MESSAGES["revert.unsafe_moved"], { count: "count" });
+    assert.deepEqual(FIXED_MESSAGES["summary.next_revert_unsafe"], { runId: "runId" });
+    assert.deepEqual(FIXED_MESSAGES["revert.dry_run_move_unchecked"], {});
+    for (const id of ["revert.unsafe_moved", "summary.next_revert_unsafe", "revert.skip.unsafe_move", "revert.dry_run_move_unchecked"]) {
+      assert.ok((MESSAGE_IDS as readonly string[]).includes(id), id);
+    }
+  });
+
+  test("DR-18 (b): a move the file system cannot make without risk of replacing a file has its own problem code", () => {
+    assert.ok((PLAN_ITEM_PROBLEMS as readonly string[]).includes("unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("plan.problem.unsafe_move"));
   });
 
   test("problem and channel lists have no duplicates", () => {
@@ -219,6 +451,10 @@ describe("G-A workflow ids", () => {
     assert.ok(unique(BUILTIN_WORKFLOW_IDS));
     assert.ok((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(QUICK_TASK_WORKFLOW));
     assert.deepEqual([...COMPLETION_MODES], ["verifiers", "human_review"]);
+  });
+
+  test("DR-2: the quick form names a definition with --workflow", () => {
+    assert.equal(QUICK_WORKFLOW_ARGUMENT, "--workflow");
   });
 
   test("no new task or config field name reads as a key field (S-6)", () => {

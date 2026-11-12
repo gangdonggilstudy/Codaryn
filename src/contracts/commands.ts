@@ -305,19 +305,38 @@ export type RunListEntry =
   | {
       readonly state: "checked";
       readonly runId: RunId;
-      /** `at` of `run_started`. */
+      /**
+       * G-A (N-C request): "run" for a run (journal starts with `run_started`), "apply" for an apply
+       * run (journal starts with `apply_started`, ApplyJournalEvent). Absent means "run": lists
+       * written before G-A have no apply runs.
+       */
+      readonly kind?: "run" | "apply";
+      /** G-A: for an apply run, the plan run it applied (`apply_started.planRunId`). Absent for a run. */
+      readonly planRunId?: RunId;
+      /** `at` of `run_started` (an apply run: of `apply_started`). */
       readonly startedAt: string;
-      /** `taskId` of `run_started`. JSON only: the human table does not show it (N-14). */
+      /** `taskId` of `run_started` (an apply run: of `apply_started`). JSON only: the human table does not show it (N-14). */
       readonly taskId: string;
       /** From result.json; null when there is none (still running, or stopped without one). */
       readonly status: TerminalRunStatus | null;
+      /**
+       * A run's reason is checked against RUN_REASONS_BY_STATUS, an apply run's against
+       * APPLY_REASONS_BY_STATUS (plan.ts).
+       */
       readonly reason: RunReason | null;
-      /** Number of `changes` in result.json; null without one. */
+      /**
+       * Number of distinct files changed: the distinct `path`s of result.json's `changes`, as the
+       * end-of-run summary counts them (N-23 d, N-D 5). An apply run: the number of `applied`
+       * actions. Null without result.json.
+       */
       readonly changes: number | null;
       /** The last revert of this run, from its revert record; null when never reverted. */
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
-      /** N-23 (g): the run has a revert record that failed the checks; it is shown apart and ignored. */
-      readonly revertRecordDamaged: boolean;
+      /**
+       * N-23 (g): the run has a revert record that failed the checks; it is shown apart and ignored.
+       * Absent means false (entries built without the revert record check, as G-A's contract tests do).
+       */
+      readonly revertRecordDamaged?: boolean;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
 

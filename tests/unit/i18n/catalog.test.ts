@@ -7,7 +7,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { CLI_ERROR_EXIT_CODES, INPUT_DIAGNOSTIC_FILES, MESSAGE_IDS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "../../../src/contracts/index.js";
+import {
+  CLI_ERROR_EXIT_CODES,
+  INPUT_DIAGNOSTIC_FILES,
+  MESSAGE_IDS,
+  RUN_REASONS,
+  TERMINAL_RUN_STATUSES,
+  UNSAFE_MOVE_CONSENT_ARGUMENT,
+} from "../../../src/contracts/index.js";
 import type { MessageId, MessageLanguage } from "../../../src/contracts/index.js";
 import { createMessageCatalog, MESSAGE_TEXTS, MessageFormatError, PLACEHOLDER, REPLACEMENT } from "../../../src/i18n/index.js";
 import { CONTROL, IDS, LANGS, loose, paramsFor, samples, specOf } from "./support.js";
@@ -144,8 +151,14 @@ describe("i18n catalog: format", () => {
 describe("i18n catalog: language and wording", () => {
   test("Korean texts are Korean, English texts have no Hangul", () => {
     for (const id of IDS) {
-      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
       assert.doesNotMatch(MESSAGE_TEXTS.en[id], HANGUL, `en ${id}`);
+      // `summary.form.*` are command fragments put into a command line: the same in both languages.
+      if (id.startsWith("summary.form.")) {
+        assert.equal(MESSAGE_TEXTS.ko[id], MESSAGE_TEXTS.en[id], id);
+        assert.match(MESSAGE_TEXTS.ko[id], /^--[a-z]+ \S+$/, id);
+        continue;
+      }
+      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
     }
   });
 
@@ -159,6 +172,18 @@ describe("i18n catalog: language and wording", () => {
     for (const language of LANGS) {
       for (const id of ["summary.next_report", "summary.next_revert"] as const) assert.match(MESSAGE_TEXTS[language][id], /--workspace <workspace> --run \{runId\}$/);
       for (const id of ["summary.next_report_here", "summary.next_revert_here"] as const) assert.match(MESSAGE_TEXTS[language][id], /--workspace \. --run \{runId\}$/);
+    }
+  });
+
+  test("the unsafe move consent hint uses the contract's argument; approval words name no flag (DR-21)", () => {
+    for (const language of LANGS) {
+      assert.ok(MESSAGE_TEXTS[language]["summary.next_apply_unsafe"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
+      assert.ok(MESSAGE_TEXTS[language]["summary.next_revert_unsafe"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
+      assert.ok(MESSAGE_TEXTS[language]["advice.consent_required"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
+      // approval.<channel> words serve both the plan approval and the consent line.
+      for (const id of ["approval.cli-tty", "approval.cli-flag", "approval.adapter"] as const) {
+        assert.doesNotMatch(MESSAGE_TEXTS[language][id], /--[a-z]/, `${language} ${id}`);
+      }
     }
   });
 

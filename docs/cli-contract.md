@@ -728,3 +728,165 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 
 - `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.
 - `config_write_failed`(종료 2)는 `init`에서도 쓴다.
+
+## 18. 범용 작업 명령 (G-F: 워크플로, plan, apply, review, changes)
+
+계약 원문은 `src/contracts/workflow.ts`, `plan.ts`, `changes.ts`, `engine.ts`이고, 설계는 `docs/design/general-tasks.md`, 결정은 `docs/work-orders/phase-4-5-design.md`(DR-1~DR-25)다. 이 절은 CLI가 그 계약을 어떻게 받는지 적는다.
+
+### 18.1 워크플로 해석 (DR-2, DR-3)
+
+- 실행이 쓰는 워크플로는 다음 순서로 처음 있는 것이다.
+  1. task 파일의 `workflowRef`
+  2. 간편 형식의 `--workflow <id>`
+  3. 프로필의 `workflowRef`
+- 셋 다 없으면 단계 1~3의 실행과 같다(워크플로 설정 없음).
+- 간편 형식에서는 `--workflow`의 id가 이름표(`workflow`)도 된다.
+- 내장 워크플로 다섯 개는 `src/workflows`에 있다. 설정 파일의 `workflows`는 새 id만 정의할 수 있고, 내장 id를 다시 정의하면 거부된다.
+
+  | id | 도구 | 계획 | 완료 |
+  | --- | --- | --- | --- |
+  | `general` | 전체 | 없음 | 검증기 |
+  | `code` | 전체 | 없음 | 검증기 |
+  | `document` | 읽기·찾기·쓰기 | 없음 | 검증기 |
+  | `analyze` | 읽기·찾기·쓰기 | 없음 | 사람 검토(확인 목록 2개) |
+  | `organize` | 읽기·찾기·`inspect_files`·`propose_plan` | `apply`, 명령 금지 | 계획 승인 |
+
+- 해석 규칙(`resolveWorkflow`)
+  - 도구는 워크플로가 허용한 것 안에서만 좁힐 수 있다.
+  - `plan: "apply"`는 약하게 바꿀 수 없다.
+  - `allowCommands: false`인 워크플로에서는 `policy.commands`를 쓸 수 없다.
+  - 사람 검토 워크플로에는 확인 목록이 있어야 한다.
+- task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 워크플로의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
+- 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
+- `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 워크플로, 비밀 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
+
+### 18.2 task 형식 (DR-17)
+
+`plan`, `apply`, `review`, `changes`는 `run`과 같은 형식을 받는다.
+
+```
+(--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <config.json>] [--vars-file <path>]
+```
+
+그 설정이 가리는 비밀은 지금 실행을 시작했다면 등록될 비밀이다. 그 비밀로 계획·기록을 다시 가려서 보여 준다(DR-5). 이 명령들은 모델을 부르지 않는다.
+
+### 18.3 `codaryn plan`
+
+```
+codaryn plan <task 형식> --run <runId|latest> [--json]
+```
+
+- 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
+- 출력
+  - `PlanOutput`: 행동 목록(지금 비밀로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
+  - 인벤토리 상한 도달 여부
+  - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
+- 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
+
+### 18.4 `codaryn apply`
+
+```
+codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수> [--allow-unsafe-move] [--cancel-file <path>] [--quiet]
+```
+
+- `--run latest`는 받지 않는다. 승인이 계획 하나를 가리켜야 하기 때문이다.
+- 거부 조건(모두 종료 2, 아무것도 옮기지 않는다)
+  - task가 `plan: "apply"` 워크플로로 해석되지 않으면 `run_not_plan`
+  - 이미 적용된 계획이면 `plan_already_applied`
+- 승인
+  - `--digest`가 저장된 다이제스트의 앞부분이어야 한다(`MIN_PLAN_DIGEST_PREFIX` = 12자 이상).
+  - stdin과 stderr가 터미널이고 `--digest`가 없으면 계획을 보이고 `[y/N]`을 묻는다. 기본은 아니오다.
+  - 어느 쪽도 아니면 `plan_not_approved`(종료 2)다.
+- 적용
+  - 잠금을 잡고 적용 실행을 새로 만든다. 첫 기록은 `apply_started`다.
+  - 지금 task의 정책·검증기·비밀로 적용한다(DR-5).
+  - 폐기한 파일은 `.codaryn/discarded/<적용 runId>/`에 행동 번호 이름으로 남는다(DR-9).
+  - stdout에는 `ApplyResult` 한 줄이 나오고, 같은 내용이 적용 실행의 `result.json`이 된다.
+  - 되돌리기: `codaryn revert --run <적용 runId>`
+- 위험한 이동에 대한 동의(DR-21)
+  - 하드 링크가 없는 드라이브에서는 대상에 생긴 파일을 덮지 않는다는 보장 없이만 옮길 수 있다. 기본은 옮기지 않는다. 적용 전 점검이 그 이동을 `plan_checked.unsafeMoves`에 적고, 적용은 `needs-input`/`consent_required`로 끝난다(아무것도 옮기지 않음).
+  - 동의는 사람의 입력으로만 받는다.
+    - `--allow-unsafe-move`(`cli-flag`)
+    - 터미널에서 그 적용이 `consent_required`로 끝난 뒤 한 번 묻는 `[y/N]`(`cli-tty`). 예이면 동의를 붙여 적용 실행을 하나 더 한다.
+  - task·설정·프로필·계획·모델에는 동의 필드가 없다. task에 그런 필드가 있으면 `invalid_task`다.
+  - 동의는 그 계획의 다이제스트에 대해 그 적용 한 번만 유효하다. `apply_started.unsafeMoveConsent`에 기록되고, 그렇게 옮긴 이동에는 `unsafe: true`가 붙는다.
+- 앱 계층의 적용(DR-1, DR-21, PM 결정: 앱 계층 질문 A-4 1)
+  - 앱 계층은 GUI의 적용에 같은 `runApply`를 부르고, `ApplyCommandEnvironment.adapter`(`AdapterApply`, `src/cli/plan-commands.ts`)를 넘긴다. CLI 자기 프로세스는 이 필드를 쓰지 않는다.
+  - 승인은 `adapter`로 기록된다. GUI의 적용이 `cli-flag`로 기록되지 않는다. 승인할 계획은 여전히 `--digest`로 가리킨다. 없으면 `plan_not_approved`다.
+  - 터미널 질문은 하지 않는다. `--allow-unsafe-move`는 `invalid_arguments`로 거부한다.
+  - `adapter.unsafeMoveConsent`는 **호출자가 사람의 입력으로 받은 것만** 넘긴다. 사람이 화면에서 그 적용 한 번에 동의한 것이어야 한다. task·설정·프로필·계획·모델이나 이전 적용에서 온 값을 넘기지 않는다.
+  - 그 동의의 경로는 `adapter`, 다이제스트는 적용하는 계획의 전체 다이제스트여야 한다. 아니면 실행 전에 `invalid_arguments`다. 동의가 null이면 `consent_required`로 끝나고 다시 묻지 않는다. GUI가 사람에게 묻고 다시 부른다.
+
+### 18.5 `codaryn review`
+
+```
+codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note <text>] [--json]
+```
+
+- 대상: `needs-input`/`awaiting_review`로 끝난 실행. 다른 실행이면 `run_not_awaiting_review`(종료 2)다.
+- 판정을 `review.json`에 쓴다(`ReviewRecord`). 다시 판정하면 이전 판정을 바꾸고 출력에 `replaced`가 나온다. `result.json`은 바뀌지 않는다. 검토로 실행이 `done`이 되지는 않는다.
+- 메모
+  - `MAX_REVIEW_NOTE_CHARS`(500)자 이하
+  - 키 모양이 있으면 `key_in_file`
+  - 나머지는 지금 비밀로 가려서 저장한다.
+
+### 18.6 `codaryn changes` (DR-7, DR-14)
+
+```
+codaryn changes <task 형식> --run <runId|latest> [--json]
+```
+
+- 실행이 바꾼 파일마다 상태, 실행 전후 내용, 바뀐 구역(`-`/`+` 줄)을 보여 준다. 지금 비밀로 가린다(`masking: "current_secrets"`).
+- 읽기만 한다. 잠금도, 요청도 하지 않는다.
+- `--json`은 `ChangesOutput` ASCII 한 줄이다(N-19). 키 모양은 JSON으로 만들기 전에 문자열마다 가린다(N-27 (c)).
+
+### 18.7 기록을 읽는 명령의 공통 규칙
+
+- 실행 id(N-27 (a))
+  - 명시한 `--run <id>`는 store의 `inspectRun` 판정을 따른다. 그 이름 그대로인 항목이 없으면 `run_not_found`다. 대소문자만 다른 id도 여기에 걸린다.
+  - 목록이 "손상"으로 보는 실행은 `revert`(N-26), `report`(N-27 (b)), `plan`, `apply`, `review`가 모두 `invalid_run_record`로 거부한다.
+- 상태별 이유 표(DR-16)
+  - 실행과 적용 실행의 이유는 `RUN_REASONS_BY_STATUS`(`isReasonOfStatus`) 하나로 판정한다. CLI는 따로 목록을 두지 않는다.
+  - 적용 실행의 이유는 그 부분집합인 `APPLY_REASONS_BY_STATUS`를 쓴다.
+- `report`
+  - 계획 실행은 행동 수, 다이제스트, `plan` 명령을 보여 준다.
+  - 검토 대기 실행은 확인 목록을 보여 준다.
+  - 적용 실행(첫 기록 `apply_started`)은 아직 읽지 않는다. `ReportOutput`에 적용 실행의 형태가 없어서 `invalid_arguments`로 "적용 실행"이라고 알린다.
+  - `--json`은 문자열마다 키를 가린 뒤에 만든다(N-27 (c)).
+- 기록의 도구 이름과 호출 id(AC-D15)
+  - 목록 밖의 도구 이름은 `unknown_tool`로 기록한다.
+  - 호출 id는 `[A-Za-z0-9_-]{1,64}`이고 비밀이 없어야 한다. 아니면 `codaryn-call-<n>`으로 기록한다.
+
+### 18.8 오류 코드 추가 (G-A)
+
+- 모두 종료 2이고, 아무것도 바꾸지 않는다.
+- `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
+- 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
+
+### 18.9 아직 없는 것
+
+- 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
+- 영어 고정 글
+  - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
+- `report`는 적용 실행과 검토 판정(`review.json`)을 아직 보여 주지 않는다. `ReportOutput`에 필드가 필요하다(w3:p9).
+
+### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
+
+```
+codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsafe-move] [--quiet]
+```
+
+- 하드 링크가 없는 드라이브에서는 적용 실행이 옮긴 파일을, 원래 자리에 생긴 파일을 덮지 않는다는 보장 없이만 되돌릴 수 있다. 기본은 옮기지 않고 `unsafe_move`로 건너뛴다(DR-24 (b)). 안전하게 되돌릴 수 있는 파일은 언제나 안전하게 되돌린다.
+- 동의는 apply(18.4)와 같이 사람의 입력으로만 받는다.
+  - `--allow-unsafe-move`(`cli-flag`)
+    - 그 명령이 되돌리는 실행(`--run latest`이면 고른 실행)에 대한 동의다.
+    - `--dry-run`과 함께 줄 수 없다. 드라이 런은 아무것도 옮기지 않고 볼륨을 판정하지도 않는다.
+  - 터미널에서 되돌리기가 `unsafe_move`로 건너뛴 파일이 있으면 그 수를 넣어 `[y/N]`을 한 번 묻는다(`cli-tty`).
+    - 예이면 그 실행만 동의를 붙여 다시 되돌린다.
+    - 이미 되돌린 파일은 `already_reverted`로 건드리지 않는다.
+  - 앱 계층: `RevertEnvironment.adapter`(`AdapterRevert`, `src/cli/revert.ts`)
+    - 호출자가 사람의 화면 입력으로 그 되돌리기 한 번에 받은 동의만 넘긴다. 경로는 `adapter`, `runId`는 되돌리는 실행이어야 한다. 아니면 실행 전에 `invalid_arguments`다.
+    - 터미널 질문은 하지 않고, `--allow-unsafe-move`는 거부한다.
+- store에는 `RevertRequest.unsafeMoveConsent { channel, runId }`로 넘긴다. 그렇게 옮긴 파일은 `reverted`에 `unsafe: true`로 나온다.
+- `revert.json`(RevertRecord)에는 동의 경로(`unsafeMoveConsent`, 없으면 null)와, `reverted` 중 `unsafe`인 항목 수(`unsafeMoves`)를 쓴다.
+- 드라이 런이 옮길 파일을 나열하면 출력에 `moveSafetyUnchecked: true`가 붙는다. 사람용 요약은 `revert.dry_run_move_unchecked`로 그 사실을 알린다.

@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import * as contracts from "../../../src/contracts/index.js";
+import { CALL_ID_PATTERN_SOURCE, REPLACED_CALL_ID_PREFIX } from "../../../src/contracts/index.js";
 import type { EngineResult } from "../../../src/contracts/index.js";
 import { UNKNOWN_TOOL_NAME, createCodarynApp } from "../../../src/app/index.js";
 import type { ChangesOutput, RunEvent, RunHandle, RunOutcome, StartOutcome } from "../../../src/app/index.js";
@@ -99,20 +99,10 @@ describe("events after R-1 L-1", () => {
     const decision = events.find((event) => event.kind === "record" && event.record.type === "tool_decision");
     assert.ok(decision !== undefined && decision.kind === "record" && decision.record.type === "tool_decision");
     assert.equal(decision.record.tool, UNKNOWN_TOOL_NAME);
-    // AC-D15 (engine 0824dde, in the bundle): the model's id held a registered secret, so the engine
-    // records a replacement, REPLACED_CALL_ID_PREFIX and a number, which passes CALL_ID_PATTERN_SOURCE.
-    // In a tree without AC-D15 (no such constants) the app layer masks the model's id instead, so its
-    // prefix stays and the secret becomes a token.
-    const exported = contracts as Readonly<Record<string, unknown>>;
-    const callIdPattern = exported["CALL_ID_PATTERN_SOURCE"];
-    const replacedPrefix = exported["REPLACED_CALL_ID_PREFIX"];
-    if (typeof callIdPattern === "string") {
-      assert.match(decision.record.callId, new RegExp(callIdPattern), "the engine's safe call id");
-      assert.equal(typeof replacedPrefix, "string", "AC-D15 has both constants");
-      assert.equal(decision.record.callId.startsWith(String(replacedPrefix)), true, "an id with a secret is replaced, not kept");
-    } else {
-      assert.equal(decision.record.callId.startsWith("call-"), true, "the id is masked, not dropped");
-    }
+    // AC-D15: the model's id held a registered secret, so the engine records a replacement,
+    // REPLACED_CALL_ID_PREFIX and a number, which passes CALL_ID_PATTERN_SOURCE.
+    assert.match(decision.record.callId, new RegExp(CALL_ID_PATTERN_SOURCE), "the engine's safe call id");
+    assert.equal(decision.record.callId.startsWith(REPLACED_CALL_ID_PREFIX), true, "an id with a secret is replaced, not kept");
     const records = events.flatMap((event) => (event.kind === "record" ? [event.record.seq] : []));
     const journal = await readJournal(base, handle.runId);
     assert.deepEqual(records, journal.map((record) => record.seq), "every stored record is still delivered");

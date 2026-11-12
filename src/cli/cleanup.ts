@@ -9,12 +9,12 @@
  *   besides: the two confirmations are apart in the same command (DR-39 P-4). The CLI checks the
  *   given digest against a plan made now; the store makes the plan again under the workspace lock
  *   and removes nothing unless its digest is the same (plan_changed).
- * - DR-44 (가): the records of a run not reverted, or only partly (warned `not_reverted`), need
+ * - DR-44 (가): the records of a run not reverted, or only partly (NOT_REVERTED_WARNINGS), need
  *   `--include-not-reverted` besides (CleanupConfirmation.includeNotReverted): a confirmation apart
  *   from the other two. The preview's head line says how many such runs the plan holds
- *   (cleanup.confirm.not_reverted). Until the store keeps them apart from the rest of a confirmed
- *   plan, a plan that holds one is not applied without it (nothing is removed, `needs_confirmation`,
- *   exit 3); they are never blocked.
+ *   (cleanup.confirm.not_reverted). Without it the store keeps them (not_reverted_not_confirmed),
+ *   and a plan run whose apply stays with them (used_by_kept_apply), and removes the rest; that is
+ *   the person's choice, so the command still ends with 0. They are never blocked.
  * - DR-44 (d): folders an earlier cleanup could not remove entirely (`leftover` items) are in every
  *   plan; the summary, the plan and the outcome name them. A removal that fails after the move is
  *   `partly_removed`: never reported as removed, and the command ends with 1.
@@ -94,18 +94,6 @@ export type CleanupOutput =
       /** The confirmed digest is not the plan's (it changed, or another plan was shown); nothing was removed. */
       readonly mode: "plan_changed";
       readonly exitCode: 3;
-    }
-  | {
-      readonly schemaVersion: 1;
-      readonly kind: "cleanup";
-      /**
-       * DR-44 (가): the plan holds records of runs not reverted (or only partly) and
-       * --include-not-reverted was not given; nothing was removed.
-       */
-      readonly mode: "needs_confirmation";
-      readonly exitCode: 3;
-      /** How many such runs the plan selects. */
-      readonly notReverted: number;
     };
 
 export interface CleanupEnvironment {
@@ -250,8 +238,6 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
       output = { schemaVersion: 1, kind: "cleanup", mode: "preview", exitCode: 0, summary: await summarize({ workspaceRoot }), plan: shown };
     } else if (!shown.digest.startsWith(confirm)) {
       output = { schemaVersion: 1, kind: "cleanup", mode: "plan_changed", exitCode: 3 };
-    } else if (!includeNotReverted && notRevertedRuns(shown) > 0) {
-      output = { schemaVersion: 1, kind: "cleanup", mode: "needs_confirmation", exitCode: 3, notReverted: notRevertedRuns(shown) };
     } else {
       const outcome = await apply({
         workspaceRoot,
@@ -320,14 +306,6 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
     (CLEANUP_KEPT_REASONS as readonly string[]).includes(reason) ? textOr(() => messages.format(`cleanup.kept.${reason}`), reason) : reason;
   if (output.mode === "plan_changed") {
     out.push(messages.format("cleanup.plan_changed"));
-    return `${out.join("\n")}\n`;
-  }
-  if (output.mode === "needs_confirmation") {
-    // No catalog text: fixed English, as the confirmation hints below.
-    out.push(
-      `Nothing was removed: ${output.notReverted} selected run(s) were not reverted, or only partly; a revert could no longer undo them without their records. ` +
-        "Add --include-not-reverted to remove them too, or leave them out of the selection.",
-    );
     return `${out.join("\n")}\n`;
   }
   if (output.mode === "applied") {

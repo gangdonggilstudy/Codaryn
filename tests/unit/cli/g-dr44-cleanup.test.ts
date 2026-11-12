@@ -11,8 +11,7 @@
  *   behind is shown by the next preview and can be removed. The store's and the contract's; the CLI
  *   reports what the store gives.
  * - R-34 I-3: a preview with only discarded files to delete does not say "remove the run records".
- * Cases that need the store or the contract are todo until those are in. Real CLI paths (run,
- * apply, revert with its record, cleanup), scripted model; nothing is sent.
+ * Real CLI paths (run, apply, revert with its record, cleanup), scripted model; nothing is sent.
  */
 
 import assert from "node:assert/strict";
@@ -110,7 +109,6 @@ async function preview(base: string, args: readonly string[]): Promise<Extract<C
 }
 
 const runDir = (work: string, runId: string): string => path.join(work, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
-const STORE_TODO = { todo: "store (DR-44): its plan and confirmation" };
 
 describe("DR-44 (가): the records of a run not reverted go only with --include-not-reverted", () => {
   async function twoRuns(): Promise<{ base: string; work: string; notReverted: string; reverted: string }> {
@@ -131,15 +129,17 @@ describe("DR-44 (가): the records of a run not reverted go only with --include-
     assert.ok(text.includes("--include-not-reverted"), text);
   });
 
-  test("--confirm alone does not remove a run not reverted", async () => {
+  test("--confirm alone does not remove a run not reverted; kept by the person's choice, exit 0", async () => {
     const { base, work, notReverted } = await twoRuns();
     const digest = (await preview(base, ["--older-than", "0"])).plan.digest.slice(0, 12);
     const result = await cleanup(base, ["--older-than", "0", "--confirm", digest]);
-    assert.notEqual(result.exitCode, 0, JSON.stringify(result));
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    assert.ok(result.output?.mode === "applied", JSON.stringify(result.output));
+    assert.deepEqual(result.output.outcome.kept, [{ target: "run", runId: notReverted, reason: "not_reverted_not_confirmed" }]);
     assert.ok(await exists(runDir(work, notReverted)), "its records stay: a revert still needs them");
   });
 
-  test("--confirm alone still removes the reverted run of the same plan", STORE_TODO, async () => {
+  test("--confirm alone still removes the reverted run of the same plan", async () => {
     const { base, work, reverted } = await twoRuns();
     const digest = (await preview(base, ["--older-than", "0"])).plan.digest.slice(0, 12);
     await cleanup(base, ["--older-than", "0", "--confirm", digest]);
@@ -249,12 +249,17 @@ describe("DR-44 (라), R-34 L-3: a removal that fails is not reported as removed
     assert.ok(outcome.text.includes(runId), outcome.text);
   });
 
-  test("a hidden cleanup-… folder left behind is shown by the next preview and can be removed", { todo: "contract and store (DR-44 (라)): the summary and the plan name what a failed removal left" }, async () => {
+  test("a hidden cleanup-… folder left behind is shown by the next preview and can be removed", async () => {
     const { base, work } = await workspace({});
-    await mkdir(path.join(work, STATE_DIR_NAME, "cleanup-0123456789abcdef", "snapshots"), { recursive: true });
-    await writeFile(path.join(work, STATE_DIR_NAME, "cleanup-0123456789abcdef", "snapshots", "x.orig"), "left\n", "utf8");
+    const leftover = path.join(work, STATE_DIR_NAME, "cleanup-0123456789abcdef");
+    await mkdir(path.join(leftover, "snapshots"), { recursive: true });
+    await writeFile(path.join(leftover, "snapshots", "x.orig"), "left\n", "utf8");
     const text = (await cleanup(base, [], false)).text;
-    assert.ok(text.includes("cleanup-0123456789abcdef") || /left by a failed cleanup/i.test(text), text);
+    assert.ok(text.includes("cleanup-0123456789abcdef"), text);
+    const digest = (await preview(base, [])).plan.digest.slice(0, 12);
+    const done = await cleanup(base, ["--confirm", digest]);
+    assert.equal(done.exitCode, 0, JSON.stringify(done));
+    assert.equal(await exists(leftover), false);
   });
 });
 

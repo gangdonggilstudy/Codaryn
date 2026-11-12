@@ -875,10 +875,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       parked = 0;
     }
     const parkedWarning = `${parked} file(s) a revert could not put back are in ${STATE_DIR_NAME}/${PARKED_DIR_NAME}/; move them back or delete them`;
+    const parkedText: DoctorText = { id: "doctor.lock.parked_left", params: { count: parked } };
     if (parked > 0 && status === "ok") {
-      set("lock", "warn", parkedWarning, { id: "doctor.lock.parked_left", params: { count: parked } });
+      set("lock", "warn", parkedWarning, parkedText);
     } else {
-      set("lock", status, parked > 0 ? `${message}; ${parkedWarning}` : message, { id: `doctor.lock.${state}` });
+      // DR-37 (c), review R-24 L-2: with another lock state the lock's own text stays, and the
+      // parked files are its note, so the person's output names them too (not only the message).
+      set("lock", status, parked > 0 ? `${message}; ${parkedWarning}` : message, { id: `doctor.lock.${state}` }, parked > 0 ? [parkedText] : []);
     }
   }
 

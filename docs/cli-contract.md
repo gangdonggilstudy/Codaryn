@@ -1078,3 +1078,12 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
     - 설정 파일이 없으면 `schemaVersion`과 그 자리의 모델만으로 만든다. `provider`는 쓰지 않는다. 간편 형식의 제공자를 바꾸는 것은 사람이 정한다.
   - `ModelsOutput.provider`: anthropic이 아닌 제공자를 보일 때 싣는다. anthropic에도 싣는 것은 SP-0 고정 값(P-8 `models --json`) 변경이라 PM 승인 뒤에 한다.
 - `init`: 지금처럼 anthropic 설정을 쓴다. 키 안내 글은 `{keyEnv}`를 받는다.
+
+### 18.11 되돌리기가 제자리에 놓지 못한 파일 (R-16 L-1, DR-37 (c))
+
+- 되돌리기가 옮겨 둔 파일을 제자리에 다시 놓지 못하면(그 사이 같은 이름의 파일이 생김) 그 파일은 `.codaryn/parked/<runId>/<행동 번호>-<무작위>`에 남는다. 경로에는 사람의 파일 이름이 없고, Codaryn은 이 파일을 지우지 않는다.
+- 알리는 곳
+  - 되돌리기 결과: `skipped[].parkedAt`(JSON)에 그 경로가 있다. 사람용 요약은 수만 적는다(`revert.parked {count}`).
+  - `doctor`의 `lock` 점검(`listParkedFiles`)
+    - 잠금이 ok이면 점검이 `warn`이 되고 글은 `doctor.lock.parked_left {count}`다.
+    - 잠금이 다른 상태(`held`, `unreadable`, `reclaim_left`)이면 그 상태의 글은 그대로 두고, `doctor.lock.parked_left {count}`를 그 점검의 `notes`에 싣는다. 사람용 출력은 잠금 줄 아래에 한 줄로 보인다(DR-37 (c), 검토 R-24 L-2). 전에는 JSON `message`에만 있었다.

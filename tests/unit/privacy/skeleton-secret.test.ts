@@ -190,38 +190,56 @@ describe("DR-42 (a): masking time stays linear", () => {
     return parts.join("");
   }
 
+  /** The same amount of text masked in pieces and at once; see assertLinear. */
+  const PIECES = 64;
+  /** The middle of 1 (linear) and PIECES (square) on a log scale. */
+  const LINEAR_BOUND = 8;
+  const ROUNDS = 5;
+
   /**
-   * Linear growth: 1 MiB within ten times 256 KiB (four is linear, sixteen would be square) and
-   * under 3 s. The small run counts as at least 10 ms, so a very fast run does not turn noise into a
-   * large ratio.
+   * Linear time: masking a text once against masking a sixty-fourth of it sixty-four times, the same
+   * amount of text, each with a new gateway. Linear work takes about as long either way (1.0 to 2.6
+   * times measured for 1 MiB, the larger text's memory); square work takes sixty-four times as long
+   * at once. So the bound sits at the middle on a log scale, eight, and the whole stays under 3 s.
+   *
+   * Load from other processes (R-34 bundle: 13.3 ms for 256 KiB against 138.9 ms for 1 MiB while
+   * other workers' tests ran) only slows a measurement. Both sides take about as long and are timed
+   * in turn ROUNDS times, so load reaches both alike, and the fastest of each is compared.
+   *
+   * 64 KiB is checked before 1 MiB, so a steep square fails in seconds instead of running for minutes.
    */
-  function assertLinear(small: number, large: number): void {
-    const ratio = large / Math.max(10, small);
-    assert.ok(ratio < 10 && large < 3000, `256 KiB ${small.toFixed(1)} ms, 1 MiB ${large.toFixed(1)} ms`);
-  }
-
-  function fastest(gateway: PrivacyGateway, text: string): number {
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 3; i += 1) {
-      const started = performance.now();
-      maskOk(gateway, text);
-      best = Math.min(best, performance.now() - started);
+  function assertLinear(secrets: readonly string[], text: (bytes: number) => string): void {
+    for (const whole of [64 * 1024, 1024 * 1024]) {
+      const piece = text(whole / PIECES);
+      const all = text(whole);
+      let pieces = Number.POSITIVE_INFINITY;
+      let once = Number.POSITIVE_INFINITY;
+      for (let round = 0; round < ROUNDS; round += 1) {
+        const gateways = Array.from({ length: PIECES }, () => gatewayFor(secrets));
+        let started = performance.now();
+        for (const gateway of gateways) maskOk(gateway, piece);
+        pieces = Math.min(pieces, performance.now() - started);
+        const gateway = gatewayFor(secrets);
+        started = performance.now();
+        maskOk(gateway, all);
+        once = Math.min(once, performance.now() - started);
+      }
+      const kib = whole / 1024;
+      const measured = `${kib} KiB at once ${once.toFixed(1)} ms, ${PIECES} x ${kib / PIECES} KiB ${pieces.toFixed(1)} ms`;
+      assert.ok(once < LINEAR_BOUND * pieces && once < 3000, measured);
     }
-    return best;
   }
 
-  test("1 MiB takes about four times 256 KiB, not sixteen, with key-like and word-like values registered", () => {
+  test("1 MiB at once takes about as long as in 64 pieces, not 64 times as long, with key-like and word-like values registered", () => {
     const secrets = [KEY, `${"Q7q".repeat(10)}Z`, "ab12".repeat(10), "summer2026winter", "My Awesome Application"];
-    const small = corpus(256 * 1024);
-    const large = corpus(1024 * 1024);
-    const masked = maskOk(gatewayFor(secrets), large);
+    assertLinear(secrets, corpus);
+    // After the time check, so a square fails at 64 KiB before 1 MiB is masked here.
+    const masked = maskOk(gatewayFor(secrets), corpus(1024 * 1024));
     assert.equal(leaked(masked), 0, "every split key in the corpus is masked");
-    assertLinear(fastest(gatewayFor(secrets), small), fastest(gatewayFor(secrets), large));
   });
 
   test("a near-miss repeated through 1 MiB stays linear", () => {
     const value = `${"Q7q".repeat(10)}Z`;
-    const nearMiss = (bytes: number): string => `${"Q7q-".repeat(Math.ceil(bytes / 4))}`.slice(0, bytes);
-    assertLinear(fastest(gatewayFor([value]), nearMiss(256 * 1024)), fastest(gatewayFor([value]), nearMiss(1024 * 1024)));
+    assertLinear([value], (bytes) => `${"Q7q-".repeat(Math.ceil(bytes / 4))}`.slice(0, bytes));
   });
 });

@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -256,5 +256,40 @@ describe("N-23 --run latest names the chosen run before it acts", () => {
     const outcome = await runRevert({ argv: ["revert", "--workspace", dir, "--run", run], cwd: dir, isDirectory: async () => true, clock: { now: () => 0 }, randomBytes: (size) => new Uint8Array(size), revert: command });
     assert.ok(outcome.output.kind === "revert");
     assert.deepEqual([outcome.output.status, outcome.exitCode], ["complete", 0]);
+  });
+});
+
+describe("N-26 a damaged run is refused even by its id", () => {
+  test("revert stops with invalid_run_record and calls nothing", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "codaryn-unit-damaged-"));
+    temporaryDirs.push(dir);
+    const run = toRunId("20261112T020000Z-0a0b0c0d");
+    assert.ok(run !== null);
+    await mkdir(path.join(dir, ".codaryn", "runs", run), { recursive: true });
+    await writeFile(path.join(dir, ".codaryn", "runs", run, "journal.jsonl"), "", "utf8");
+    const calls: string[] = [];
+    const env = (revert: ReturnType<typeof createRevertCommand>, extra: string[] = []) => ({
+      argv: ["revert", "--workspace", dir, "--run", run, ...extra],
+      cwd: dir,
+      isDirectory: async () => true,
+      clock: { now: () => 0 },
+      randomBytes: (size: number) => new Uint8Array(size),
+      revert,
+    });
+    const reverting = async () => {
+      calls.push("revert");
+      return { reverted: [], skipped: [] };
+    };
+    const viaListing = createRevertCommand(reverting, { listRuns: async () => ({ runs: [{ state: "damaged", runId: run }] }) });
+    const viaStore = createRevertCommand(reverting, { isDamaged: async () => true, dryRun: reverting });
+    for (const outcome of [await runRevert(env(viaListing)), await runRevert(env(viaStore, ["--dry-run"]))]) {
+      assert.ok(outcome.output.kind === "error" && outcome.output.code === "invalid_run_record");
+    }
+    assert.deepEqual(calls, []);
+    // A check that fails is treated as damage (fail closed).
+    const failing = createRevertCommand(reverting, { isDamaged: async () => Promise.reject(new Error("x")) });
+    const outcome = await runRevert(env(failing));
+    assert.ok(outcome.output.kind === "error" && outcome.output.code === "invalid_run_record");
+    assert.equal(await lstat(path.join(dir, ".codaryn", "lock.json")).then(() => true, () => false), false);
   });
 });

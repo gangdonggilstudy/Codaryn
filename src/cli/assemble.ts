@@ -108,6 +108,18 @@ export interface RevertCommandOptions {
   readonly writeRecord?: WriteRevertRecord;
   /** N-23: told which run `--run latest` chose, before anything is read or changed. */
   readonly announceLatest?: (entry: CheckedRun) => void;
+  /**
+   * N-26: whether a run's records pass the run list's checks. A damaged run is refused even when
+   * named by its id. Absent: `listRuns` decides (the run's entry is `damaged`); without either,
+   * nothing is refused.
+   */
+  readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+}
+
+/** N-26: `listRuns` as the damage check, until the store's own function is passed. */
+async function damagedByListing(listRuns: ListRuns, workspaceRoot: string, runId: string): Promise<boolean> {
+  const listing = await listRuns({ workspaceRoot });
+  return listing.runs.some((entry) => entry.runId === runId && entry.state === "damaged");
 }
 
 /**
@@ -174,6 +186,25 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     const journal = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId, JOURNAL_FILE_NAME);
     if (!(await isFile(journal))) {
       return { ok: false, code: "run_not_found", message: "the workspace has no journal for that run id; nothing was changed" };
+    }
+    // N-26: the records of a damaged run are not trusted to decide what to put back.
+    const damageCheck =
+      options.isDamaged ??
+      (options.listRuns === undefined ? undefined : (root: string, id: string) => damagedByListing(options.listRuns as ListRuns, root, id));
+    if (damageCheck !== undefined) {
+      let damaged: boolean;
+      try {
+        damaged = await damageCheck(workspaceRoot, runId);
+      } catch {
+        damaged = true;
+      }
+      if (damaged) {
+        return {
+          ok: false,
+          code: "invalid_run_record",
+          message: "the run's records do not pass the checks (`codaryn runs` shows it as damaged); nothing was changed",
+        };
+      }
     }
     // N-22, N-23: a record that cannot be read or checked is ignored, never an error.
     let revertedBefore: { readonly at: string; readonly status: RevertStatus } | null = null;

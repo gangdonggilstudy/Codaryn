@@ -21,7 +21,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { CODARYN_LANG_ENV, DOCTOR_HINT_ERROR_CODES } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
-import { createMessageCatalog, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
+import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
 import { listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
@@ -240,7 +240,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           defaultConfigRefused: defaultRefused,
           messages: human.messages,
           osLocale: runtimeLocale(),
-          // N-20: `explainLanguage` is passed once src/i18n exports explainMessageLanguage (N-B).
+          // N-20: where the language came from, for the `language` check.
+          explainLanguage: explainMessageLanguage,
         }),
       );
     default: {

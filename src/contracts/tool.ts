@@ -179,6 +179,11 @@ export const TOOL_ERROR_CODES = [
 ] as const;
 export type ToolErrorCode = (typeof TOOL_ERROR_CODES)[number];
 
+/** U-15 (AXM-7): the content of a failed result before masking: the code, then the message. */
+export function failedToolContent(code: ToolErrorCode, message: string): string {
+  return `error (${code}): ${message}`;
+}
+
 /** What a tool runner returns. Local only: it must be masked before it is recorded or sent. */
 export type RawToolOutcome =
   | { readonly ok: true; readonly payload: ToolPayload }
@@ -189,7 +194,11 @@ export interface ToolResult {
   readonly callId: string;
   readonly tool: string;
   readonly ok: boolean;
-  /** JSON text of the payload when ok, otherwise a short masked message. */
+  /**
+   * JSON text of the payload when ok, otherwise a short masked message. U-15 (AXM-7): every failed
+   * result the engine hands back reads `error (<errorCode>): <message>` (failedToolContent), so the
+   * model gets the same text from every provider (Anthropic's `is_error` stays as well).
+   */
   readonly content: MaskedText;
   readonly errorCode: ToolErrorCode | null;
 }

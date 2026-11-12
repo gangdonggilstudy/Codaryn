@@ -343,6 +343,19 @@ describe("revert record (N-7)", () => {
     assert.equal(names.filter((name) => name.endsWith(".tmp")).length, 0, "no temporary file is left");
   });
 
+  test("a run directory that is a link is never written through", async () => {
+    const work = await tempDir();
+    const elsewhere = await tempDir();
+    const runId = "20261112T030405Z-0a1b2c3d";
+    await writeRun(elsewhere, runId);
+    await mkdir(runsDir(work), { recursive: true });
+    await symlink(path.join(runsDir(elsewhere), runId), path.join(runsDir(work), runId), "junction");
+    const record = { schemaVersion: 1, kind: "revert_record", runId, at: "2026-11-12T05:06:07.000Z", status: "complete", reverted: 0, skipped: 0 } as const;
+    await assert.rejects(writeRevertRecord(work, record), RunListError);
+    assert.equal(await exists(path.join(runsDir(elsewhere), runId, "revert.json")), false, "nothing is written where the link leads");
+    await assert.rejects(readRevertRecord(work, runId), RunListError);
+  });
+
   test("an invalid record is not written, and a broken one is not read", async () => {
     const { work, result } = await changingRun();
     await assert.rejects(

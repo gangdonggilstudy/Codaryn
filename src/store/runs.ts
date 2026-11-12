@@ -298,17 +298,34 @@ export async function latestRunId(workspaceRoot: string): Promise<RunId | null> 
  */
 export async function readRevertRecord(workspaceRoot: string, runId: string): Promise<RevertRecord | null> {
   assertRunId(runId);
+  const dir = runDir(workspaceRoot, runId);
+  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
   try {
-    return await revertRecordAt(join(runDir(workspaceRoot, runId), REVERT_RECORD_FILE_NAME), runId);
+    return await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
   } catch {
     throw new RunListError("the run's revert record cannot be read");
   }
 }
 
 /**
+ * The directory exists and is the workspace's own: not a link or junction (as `listRuns` sees run
+ * directories), so a record is never read from or written to another place.
+ */
+async function isPlainDirectory(dir: string): Promise<boolean> {
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return false;
+    return sameFsPath(await realpathNative(dir), dir);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Writes `<root>/.codaryn/runs/<runId>/revert.json` atomically, replacing an earlier record.
  * `revert` calls it after `revertRun` (not a dry run) returned, while it still holds the lock.
- * The run directory must exist (the run has a journal); it is not created here.
+ * The run directory must exist (the run has a journal) and be a plain directory; it is not
+ * created, and a link or junction in its place is refused with RunListError, nothing written.
  */
 export async function writeRevertRecord(workspaceRoot: string, record: RevertRecord): Promise<void> {
   assertRunId(record.runId);
@@ -318,7 +335,9 @@ export async function writeRevertRecord(workspaceRoot: string, record: RevertRec
   } catch {
     throw new TypeError("writeRevertRecord needs a valid RevertRecord");
   }
-  const target = join(runDir(workspaceRoot, record.runId), REVERT_RECORD_FILE_NAME);
+  const dir = runDir(workspaceRoot, record.runId);
+  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; no revert record was written");
+  const target = join(dir, REVERT_RECORD_FILE_NAME);
   const temporary = `${target}.${randomBytes(8).toString("hex")}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(checked)}\n`, { encoding: "utf8", flag: "wx" });

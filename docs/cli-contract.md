@@ -78,7 +78,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 ```
 
 - `workspaceRoot`와 `scriptPath`는 절대 경로이거나 task 파일의 디렉터리 기준 상대 경로다. 네트워크·장치 경로는 쓸 수 없다(11절 "파일 위치 규칙", S-5). 허용 루트는 `workspaceRoot` 하나다. task 파일과 대본 파일은 작업 공간 밖에 둔다(S-1). `workflow`는 표시용 문자열이며 엔진은 이 값으로 분기하지 않는다.
-- `privacy.secretEnv`에는 환경 변수 이름만 적는다(`^[A-Za-z_][A-Za-z0-9_]*$`, S-3). 값은 실행 시 환경에서 읽어 비밀로 등록한다. 오류 메시지는 `privacy.secretEnv[i]`처럼 위치만 적고 항목을 적지 않는다.
+- `privacy.secretEnv`에는 환경 변수 이름만 적는다(`^[A-Za-z_][A-Za-z0-9_]*$`, S-3). 값은 실행 시 환경에서 읽어 가릴 값으로 등록한다. 오류 메시지는 `privacy.secretEnv[i]`처럼 위치만 적고 항목을 적지 않는다.
 - 권한은 경로, 명령(`executable`과 `args`), 네트워크, 파괴적 동작을 각각 판정한다. `network`와 `destructive`는 1a에서 `"deny"`만 있다. 네트워크 차단이 아니라 네트워크를 쓰는 도구가 없다는 뜻이다.
 - `model.provider`가 `"anthropic"`이면 `model`에 선택 필드 `model`(모델 ID)과 `maxOutputTokens`(요청당 출력 토큰 상한, `MAX_OUTPUT_TOKENS_LIMIT` 200,000 이하, T-14)를 둘 수 있다. scripted에는 이 필드를 쓸 수 없다. 키, 모델, 출력 상한 중 하나라도 정해지지 않으면 `provider_not_configured`로 전송 없이 끝난다(11절).
 - `limits`와 그 필드는 설정 파일이 채울 수 있으면 생략해도 된다. 설정 파일의 한도는 상한이다. task는 필드마다 그 값 이하로만 정할 수 있다(11절 "한도", S-7). 예산 한도 넷(`maxModelTurns`, `maxToolCalls`, `maxTotalTokens`, `maxDurationMs`) 중 어디에도 없는 필드가 있으면 `invalid_task`다. anthropic 제공자에서는 `maxTotalTokens: null`을 쓸 수 없다.
@@ -154,7 +154,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
   - 선택 필드
-    - `protectedChanged`: 바뀐 보호 대상(15절 U-1)
+    - `protectedChanged`: 바뀐 보호 경로(15절 U-1)
     - `plan`: `plan_pending`일 때만, `{ digest, actions }`(G-A, 18.3)
     - `review`: `awaiting_review`일 때만, `{ checklist }`(G-A, 18.5)
 - 되돌리기 결과 `RevertOutput`: `schemaVersion`, `kind:"revert"`, `runId`, `status`(`complete`/`partial`), `exitCode`, `reverted[{path, action}]`, `skipped[{path, reason}]`(14절).
@@ -180,7 +180,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
     - `runs/<runId>/plan.json`(`PLAN_FILE_NAME`): 계획 실행의 계획
     - `runs/<runId>/applied.json`(`PLAN_APPLIED_FILE_NAME`): 그 계획을 적용한 실행
     - `runs/<runId>/review.json`(`REVIEW_FILE_NAME`): 사람의 검토 판정
-    - `discarded/<적용 runId>/`(`DISCARDED_DIR_NAME`): 폐기한 파일을 행동 번호 이름으로 보관
+    - `discarded/<적용 runId>/`(`DISCARDED_DIR_NAME`): 폐기한 파일을 동작 번호 이름으로 보관
   - `lock.json`: 작업 공간 잠금.
     - 내용은 `{pid, runId, startedAt}`에, N-25 (b)의 `processStartedAt`과 Linux의 N-27 (d) `processStartTicks`·`bootId`가 더해진다.
     - 주인이 살아 있으면 `workspace_locked`, 끝났으면 회수한다(P-4, T-9). 같은 pid라도 시작 시각이 다르면 끝난 것으로 본다.
@@ -200,7 +200,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 알려진 한계(1a):
 
-- 비밀이 든 줄은 수정할 수 없다. 그 줄의 변경·이동·삭제는 `protected_span_violation`이다(P-6).
+- 가릴 값이 든 줄은 수정할 수 없다. 그 줄의 변경·이동·삭제는 `protected_span_violation`이다(P-6).
 - 치환은 등록한 값과 목록의 변형(Base64, URL 인코딩, JSON 이스케이프, 16진)만 가린다. 목록 밖 변형과 UTF-8이 아닌 인코딩(UTF-16, CP949 등)으로 나온 출력은 가려지지 않는다.
 - `CommandRule.allowExtraArgs`가 `true`이면 추가 인자 속 경로를 검사하지 않으므로, 명령 허용이 경로 허용을 대신할 수 있다. 가능하면 `false`를 쓴다.
 - 이름이나 경로에 `CODARYN_SECRET`이 든 파일은 토큰으로 오인되어 접근할 수 없다. 내용에 이 리터럴이 든 파일도 `write_file`로 수정할 수 없다.
@@ -211,12 +211,12 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 알려진 한계(1b 설정):
 
 - 키 값 검사는 Anthropic 키 모양과 현재 `ANTHROPIC_API_KEY` 값만 찾는다. 다른 형식의 키나 잘린 키는 찾지 못한다.
-- `--vars-file`로 읽은 값은 CLI 프로세스의 환경에 들어간다. 자식 프로세스에는 `CHILD_ENV_ALLOWLIST`만 전달되므로 키는 넘어가지 않는다. 허용 목록의 변수라도 값에 등록된 비밀이 들어 있으면 넘기지 않는다(T-1, `envValueFreeOfSecrets`).
+- `--vars-file`로 읽은 값은 CLI 프로세스의 환경에 들어간다. 자식 프로세스에는 `CHILD_ENV_ALLOWLIST`만 전달되므로 키는 넘어가지 않는다. 허용 목록의 변수라도 값에 등록된 가릴 값이 들어 있으면 넘기지 않는다(T-1, `envValueFreeOfSecrets`).
 
 실제 API 미검증(1b 제공자 연결 상태):
 
 - 연결: `codaryn run`은 해석한 `ResolvedAnthropicSettings`로 `createAnthropicProvider`를 만들어 Messages API(`<apiBaseUrl>/v1/messages`)를 Node 내장 `fetch`로 호출한다.
-- 검증한 것: 주입한 가짜 `fetch`를 쓴 유닛 테스트(제공자 단위, CLI 조립 단위)뿐이다. 요청 주소, 모델, `max_tokens`, 키가 `x-api-key` 헤더에만 있고 본문·stdout·기록에 없음, 가짜 비밀 가림, 401 처리를 확인했다. 이것은 모의 검증이며 실제 API 검증이 아니다.
+- 검증한 것: 주입한 가짜 `fetch`를 쓴 유닛 테스트(제공자 단위, CLI 조립 단위)뿐이다. 요청 주소, 모델, `max_tokens`, 키가 `x-api-key` 헤더에만 있고 본문·stdout·기록에 없음, 가짜 가릴 값의 가림, 401 처리를 확인했다. 이것은 모의 검증이며 실제 API 검증이 아니다.
 - 실제 API에서 확인하지 않은 것:
   - HTTP 503 분류. 제공자는 529와 같은 `overloaded`(재시도 대상)로 본다.
   - `retry-after` 헤더 형식. 제공자는 초(소수 포함)와 HTTP 날짜를 해석하고 60초로 자른다.
@@ -230,11 +230,11 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 스냅샷은 파일 도구로는 닿을 수 없지만, 정책이 허용한 명령은 사용자 권한으로 실행되므로 읽을 수 있다(T-11). 되돌릴 필요가 없어진 실행은 `.codaryn/runs/<runId>/`를 지운다.
 - 재수정을 켜면(`maxRepairAttempts` > 0) 명령형 검증기가 모델이 쓴 코드를 실행하고, 그 출력(가린 뒤)이 재수정 메시지로 모델에 돌아간다(T-7). OS 격리가 없는 동안의 한계다. 모델이 쓴 코드를 실행해도 되는 작업 공간에서만 켠다.
 - 명령이 끝난 뒤에도 분리된 자손 프로세스(예: 백그라운드로 띄운 서버)는 남을 수 있다. 트리 종료는 자식이 살아 있을 때만 한다(T-2).
-- 가림은 출력 끝의 여유 구간(4096바이트) 안에서 잘린 비밀 변형까지 다룬다. 그보다 긴 변형이 경계에서 잘리면 일부가 가려지지 않을 수 있다.
+- 가림은 출력 끝의 여유 구간(4096바이트) 안에서 잘린 가릴 값의 변형까지 다룬다. 그보다 긴 변형이 경계에서 잘리면 일부가 가려지지 않을 수 있다.
 - 보호 경로는 파일 도구의 쓰기만 막는다. 정책이 허용한 명령(`run_command`)과 명령형 검증기는 보호 경로의 파일도 바꿀 수 있다.
 - 명령이 바꾼 파일은 `file_changed`와 스냅샷에 남지 않으므로 되돌리기 대상이 아니다.
 - 실패 근거에 실행 시간이나 임시 경로처럼 매번 바뀌는 내용이 있으면 서명이 달라져 같은 실패로 판정되지 않는다. 그때는 `maxRepairAttempts`와 예산 한도만 반복을 멈춘다.
-- 경로에 등록된 비밀이 든 파일은 기록에 토큰으로 남아 스냅샷과 맞출 수 없다. 되돌리기에서 `missing_snapshot`으로 건너뛴다.
+- 경로에 등록된 가릴 값이 든 파일은 기록에 토큰으로 남아 스냅샷과 맞출 수 없다. 되돌리기에서 `missing_snapshot`으로 건너뛴다.
 - 같은 실행을 두 번 되돌리면 두 번째에는 이미 원래대로인 파일이 `already_reverted`로 건너뛰어지고, `partial`로 세지 않는다(N-22). 실행 뒤 다시 바뀐 파일만 `changed_since_run`이다.
 - 실행 중 다른 프로세스가 같은 파일을 바꾸면 스냅샷(그 실행이 처음 쓰기 직전에 읽은 원문)과 실제 실행 전 상태가 다를 수 있다.
 
@@ -243,7 +243,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 파일 위치 확인과 파일 읽기 사이에 링크를 바꿔치기하면 막지 못한다(확인과 사용 사이의 경쟁).
 - 작업 공간 밖의 하드 링크가 작업 공간 안 파일과 같은 내용을 가리키면 밖으로 판정된다. 파일 도구는 이름을 새 파일로 교체하므로 그 링크를 바꾸지 못하지만, 허용된 명령은 제자리에서 고칠 수 있다.
 - 키 모양 검사는 Anthropic 키 형식(`sk-ant-`)과 현재 키(16자 이상)뿐이다. 다른 서비스 토큰과 키의 인코딩 변형은 잡지 않는다.
-- env 파일이 새로 설정한 8자 이상 값은 모두 비밀로 등록하므로 `postgres` 같은 흔한 값도 가려질 수 있다(S-4의 부작용).
+- env 파일이 새로 설정한 8자 이상 값은 모두 가릴 값으로 등록하므로 `postgres` 같은 흔한 값도 가려질 수 있다(S-4의 부작용).
 - 작업 디렉터리가 UNC 경로이면 모든 상대 경로가 거부된다. POSIX에서는 `/dev/` 아래만 장치 경로로 본다.
 
 ## 11. 설정 (1b)
@@ -312,7 +312,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 비어 있거나 공백뿐인 값은 설정되지 않은 것으로 본다.
 - `--vars-file <경로>`를 줄 때만 그 파일을 `process.loadEnvFile`로 읽는다(C-2, T-15). `.env`를 자동으로 찾지 않는다. 이미 설정된 환경 변수가 파일 값보다 우선한다. 형식은 env 파일과 같다.
 - BOM이 있는 변수 파일은 첫 변수를 조용히 놓치므로 `invalid_config`로 거부한다.
-- 변수 파일이 새로 설정한 변수의 값은 비밀로 등록된다(S-4). 그래서 파일 내용이나 명령 출력에 나타나면 가려진다. 다음은 등록하지 않는다.
+- 변수 파일이 새로 설정한 변수의 값은 가릴 값으로 등록된다(S-4). 그래서 파일 내용이나 명령 출력에 나타나면 가려진다. 다음은 등록하지 않는다.
   - 이미 설정돼 있던 변수. Windows에서는 대소문자를 무시해 비교한다.
   - `CODARYN_MODEL`, `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`
   - 8자 미만 값
@@ -330,7 +330,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | 요청 시간 제한, 재시도 | 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`(600000), `DEFAULT_MAX_RETRIES`(2) | 기본값 |
 | 한도 | 필드마다 task `limits` → 설정 `limits`. 설정 값은 상한이다(아래) | task 형식은 `invalid_task`, 간편 형식은 `invalid_config`(C-6). 재수정 한도 둘은 0과 2 |
 
-해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. 알려진 키 변수(`API_KEY_ENVS`)의 값(앞뒤 공백을 뗀 값)은 scripted 실행에서도 비밀로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2, SP-2). 실행의 제공자 자신의 키는 길이와 상관없이, 그 밖의 키는 20자 이상일 때만 등록한다(DR-34 (b)). `EMPTY`, `ollama`, `x` 같은 자리표시자가 관계없는 실행을 깨뜨리지 않게 하기 위해서다. `CODARYN_API_BASE_URL`에도 설정 파일의 `apiBaseUrl`과 같은 엄격한 규칙을 적용한다(S-9).
+해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. 알려진 키 변수(`API_KEY_ENVS`)의 값(앞뒤 공백을 뗀 값)은 scripted 실행에서도 가릴 값으로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2, SP-2). 실행의 제공자 자신의 키는 길이와 상관없이, 그 밖의 키는 20자 이상일 때만 등록한다(DR-34 (b)). `EMPTY`, `ollama`, `x` 같은 자리표시자가 관계없는 실행을 깨뜨리지 않게 하기 위해서다. `CODARYN_API_BASE_URL`에도 설정 파일의 `apiBaseUrl`과 같은 엄격한 규칙을 적용한다(S-9).
 
 ### 한도 (S-7)
 
@@ -384,7 +384,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 4. 설정·task 파일. 읽기 → 원문 키 검사 → 파싱 → 파싱 뒤 키 검사와 깊이 상한(S-6).
 5. 설정 검증(S-3, S-7, S-9) → task 검증(S-3, S-5, S-7) 또는 간편 형식 구성.
 6. 작업 공간 확인 → 설치 위치와 겹치지 않는지(U-3) → 파일 위치 확인(S-1, 취소 파일 포함 T-12) → `integrity.paths`의 존재와 위치(U-1).
-7. 비밀 값: `secretEnv`(S-3), 키(S-2), 변수 파일 값(S-4).
+7. 가릴 값: `secretEnv`(S-3), 키(S-2), 변수 파일 값(S-4).
 8. 제공자 설정 해석과 제공자 생성(S-9) → 조립과 실행.
 
 명령 밖으로 새어 나온 예외는 `internal_error`(종료 70) 한 줄이 된다(8절).
@@ -475,9 +475,9 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `already_reverted`(N-22): 이미 원래대로인 파일은 건너뛰되 `partial`로 세지 않는다.
 - `missing_record`(T-10): 원문은 있는데 기록이 없는 파일은 건드리지 않는다.
 - 적용 실행(첫 기록 `apply_started`, G-A·DR-24)
-  - 옮긴 파일은 제자리로(`moved_back`), 폐기한 파일은 보관함에서(`restored_from_discard`) 되돌린다.
+  - 옮긴 파일은 제자리로(`moved_back`), 폐기한 파일은 폐기 보관함에서(`restored_from_discard`) 되돌린다.
   - 원래 자리에 무언가 있으면 `original_path_taken`이다.
-  - 시작 기록만 있는 행동(R-9 I-4, `plan_item_started`)도 같은 순서로 다룬다.
+  - 시작 기록만 있는 동작(R-9 I-4, `plan_item_started`)도 같은 순서로 다룬다.
 - 계획 실행이나 그 `plan.json`이 사라진 적용 실행의 되돌리기는 `plan_run_missing`(종료 2)이고 아무것도 바꾸지 않는다. 적용한 파일의 실경로는 그 계획에만 있기 때문이다(R-9c C-1, DR-24 f).
 - 하드 링크 없는 볼륨의 되돌리기(DR-24 (b), DR-25)
   - 기본은 `unsafe_move`로 건너뛴다.
@@ -506,9 +506,9 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
     - 보호 경로만 있는 실행은 시작, 검증 전, 검증 후에 확인하고 `protectedChanged`가 빈 목록이다.
     - 검증기 명령이 보호 파일을 바꾸면 `needs-input`/`protected_changed`(종료 3)이다.
     - 작업 공간 밖 `integrity.paths`의 파일이 바뀌어도 같다.
-    - 보호 대상이 없으면 확인 기록이 없다.
+    - 보호 경로가 없으면 확인 기록이 없다.
 
-### 보호 대상 무결성 (U-1, U-2)
+### 보호 경로 무결성 (U-1, U-2)
 
 - 설정 파일의 `integrity.paths`(`IntegrityConfig`)는 작업 공간 밖 검증 자료(기준 테스트, 검증 설정 등)의 절대 경로 목록이다. 간편 형식과 task 형식 모두에 적용되고, task 파일로는 정할 수 없다.
   - 최대 `MAX_INTEGRITY_PATHS`(64)개다. 배열이 아님, 빈 문자열, NUL, 상대 경로, UNC·장치 경로는 파일을 읽을 때 `invalid_config`다.
@@ -516,7 +516,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 모듈: `src/verify/index.ts`가 `createIntegrityChecker({ workspace, protectedPaths, externalPaths })`(`CreateIntegrityChecker`)를 export한다. `capture()`는 그 순간의 `IntegrityManifest`, `compare(before, after)`는 바뀐 표시 경로 목록(`RawText[]`)이다. 목록은 로컬 전용이며 기록·출력·전송하지 않는다.
 - 항목(`IntegrityEntry`): `file`(바이트의 SHA-256), `link`(보호 항목 아래의 링크. 따라가지 않고 대상 문자열의 SHA-256), `absent`(없는 보호 항목), `unchecked`(`unreadable`은 읽거나 나열할 수 없음, `limit`은 상한 도달). 디렉터리는 자기 항목이 없고 그 아래 항목의 집합이다. 경로의 코드 단위 순으로 정렬하고 중복이 없다.
 - 표시 경로: `protectedPaths` 항목과 그 아래는 작업 공간 기준 `/` 구분이며 정규화한 항목으로 시작한다(`./tests/`는 `tests`, `.`은 루트 내용). `integrity.paths` 항목과 그 아래는 `/` 구분 절대 경로다. 루트의 상태 디렉터리 `.codaryn`에는 들어가지 않는다. 보호 항목 자체가 링크면 실경로를 따라간다(T-13).
-- 상한: 한 번 계산할 때 파일(링크 포함) `MAX_INTEGRITY_FILES`(10,000)개, `MAX_INTEGRITY_BYTES`(256 MiB)다. 도달하면 나열 중이던 항목과 그 뒤의 항목을 각각 `unchecked`/`limit` 항목 하나로 남긴다. `compare`는 어느 쪽에서든 `unchecked`인 경로를 바뀐 것으로 내므로, 보호 대상이 너무 많으면 실행은 첫 모델 요청 전에 `needs-input`/`protected_changed`로 끝난다(fail closed). 보호 대상을 줄여야 한다.
+- 상한: 한 번 계산할 때 파일(링크 포함) `MAX_INTEGRITY_FILES`(10,000)개, `MAX_INTEGRITY_BYTES`(256 MiB)다. 도달하면 나열 중이던 항목과 그 뒤의 항목을 각각 `unchecked`/`limit` 항목 하나로 남긴다. `compare`는 어느 쪽에서든 `unchecked`인 경로를 바뀐 것으로 내므로, 보호 경로가 너무 많으면 실행은 첫 모델 요청 전에 `needs-input`/`protected_changed`로 끝난다(fail closed). 보호 경로를 줄여야 한다.
 - 비교: 한쪽에만 있는 경로, 종류나 해시가 다른 경로, 어느 쪽에서든 `unchecked`인 경로를 정렬해 중복 없이 낸다. `compare(m, m)`은 `m`의 `unchecked` 경로다.
 - 엔진(`EngineDeps.integrity`, 선택): CLI는 `policy.protectedPaths`나 `integrity.paths`에 항목이 있을 때만 넘긴다. 없으면 확인도 기록도 없다(단계 2와 같다). 있으면 다음과 같이 확인한다.
   - `run_start`: `run_started` 뒤, 첫 모델 요청 전. 기준 목록 = `capture()`, `changed = compare(기준, 기준)`.
@@ -535,7 +535,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `codaryn report --workspace <디렉터리> --run <runId> [--json]`은 `.codaryn/runs/<runId>/`의 `result.json`과 `journal.jsonl`만 읽어(가림본) 사람이 읽는 Markdown 요약을 stdout에 낸다. `--json`이면 `ReportOutput` 한 줄이다. 아무것도 바꾸지 않고 잠금도 잡지 않는다.
 - 상태(`REPORT_EXIT_CODES`): `complete`(0)는 둘 다 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. `incomplete`는 기록만으로 만들고, 줄바꿈 없는 마지막 줄은 아직 쓰는 중으로 보고 무시한다.
 - 오류(`CliErrorOutput`): `invalid_arguments`, `workspace_not_found`, `run_not_found`(그 실행의 기록이 없음), `invalid_run_record`(읽기·해석 실패, `MAX_REPORT_FILE_BYTES`(256 MiB) 초과, 다른 실행의 파일).
-- `ReportOutput`: `schemaVersion`, `kind:"report"`, `runId`, `status`, `exitCode`, `result`(`EngineResult` 또는 null), `journal`(`ReportJournalSummary`: 작업 id, 워크플로, 제공자, 한도, 기록 수, 모델 요청 수, 거부된 도구 호출 수, 재수정 수, 마지막 검증 회차, 변경 목록, 무결성 확인, 종료 기록).
+- `ReportOutput`: `schemaVersion`, `kind:"report"`, `runId`, `status`, `exitCode`, `result`(`EngineResult` 또는 null), `journal`(`ReportJournalSummary`: 작업 id, 작업 종류, 제공자, 한도, 기록 수, 모델 요청 수, 거부된 도구 호출 수, 재수정 수, 마지막 검증 회차, 변경 목록, 무결성 확인, 종료 기록).
 - 한계: 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로 실행 중 허용된 명령이 바꿀 수 있다.
 
 ### doctor (U-6)
@@ -554,11 +554,11 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### report의 세부 (U-5)
 
-- Markdown 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차, 통과하지 않은 검증기의 증거), 보호 대상, 변경, 사용량, 검사하지 않은 범위(검증기마다의 한계와 고정 문구), 알림.
+- Markdown 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차, 통과하지 않은 검증기의 증거), 보호 경로, 변경, 사용량, 검사하지 않은 범위(검증기마다의 한계와 고정 문구), 알림.
 - 실행 디렉터리가 링크(정션 포함)이면 따라가지 않고 `invalid_run_record`다. 기록은 모두 그 실행의 것이어야 하고(`runId`, 1부터 연속인 `seq`, 첫 기록 `run_started`), 보고서가 쓰는 필드는 형식을 확인한다. 모르는 종류의 기록은 건너뛴다. `result.json`은 확인한 필드만으로 다시 만든다.
 - 실행이 남기지 않는 기록은 `invalid_run_record`다(X-2). 검증기 근거가 `MAX_EVIDENCE_BYTES`(8192바이트)보다 길면 거부한다. 엔진은 그보다 길게 기록하지 않으므로, 실행 뒤에 바뀐 기록이다. 그리기가 실패해도 내부 오류(70)가 아니라 `invalid_run_record`로 끝난다.
   - 그리기는 인자를 펼치지 않고 반복으로 한다. 그래서 백틱 묶음이 많거나 줄이 많은 다른 기록 문자열도 스택을 넘기지 않고 출력된다.
-- 출력 글의 제어 문자(ESC, CR, 양방향 제어 문자 등)는 `?`로 바꾸고, 인라인 코드와 코드 블록은 내용 속 백틱보다 긴 울타리를 쓴다. 키 모양 문자열과 현재 `ANTHROPIC_API_KEY` 값은 `[key]`로 가린다. 기록이 실행 중 명령으로 바뀌었을 경우를 위한 방어이며, 등록된 다른 비밀 값은 report가 알지 못한다.
+- 출력 글의 제어 문자(ESC, CR, 양방향 제어 문자 등)는 `?`로 바꾸고, 인라인 코드와 코드 블록은 내용 속 백틱보다 긴 울타리를 쓴다. 키 모양 문자열과 현재 `ANTHROPIC_API_KEY` 값은 `[key]`로 가린다. 기록이 실행 중 명령으로 바뀌었을 경우를 위한 방어이며, 등록된 다른 가릴 값은 report가 알지 못한다.
 
 ### doctor의 세부 (U-6)
 
@@ -585,7 +585,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### 진행 표시 (U-8)
 
-- `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
+- `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 경로 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
 - 줄은 기록(가림본)에서만 만들고, 실행의 개인정보 게이트로 다시 가린 뒤 제어 문자를 바꾼다. 내장 도구가 아닌 도구 이름은 `(unknown tool)`, 형식에 맞지 않는 id는 `?`로 쓴다.
 - DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(`withProgress`는 렌더러가 준 줄마다 따로 가리고 쓴다).
   - 실행 시작(`run_started`)에 `policyNarrowings`가 있으면 시작 줄 아래에 하나씩 쓴다(종류와 수만, `progress.workflow_policy.*`).
@@ -811,19 +811,19 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.
 - `config_write_failed`(종료 2)는 `init`에서도 쓴다.
 
-## 18. 범용 작업 명령 (G-F: 워크플로, plan, apply, review, changes)
+## 18. 범용 작업 명령 (G-F: 작업 종류, plan, apply, review, changes)
 
 계약 원문은 `src/contracts/workflow.ts`, `plan.ts`, `changes.ts`, `engine.ts`이고, 설계는 `docs/design/general-tasks.md`, 결정은 `docs/work-orders/phase-4-5-design.md`(DR-1~DR-25)다. 이 절은 CLI가 그 계약을 어떻게 받는지 적는다.
 
-### 18.1 워크플로 해석 (DR-2, DR-3)
+### 18.1 작업 종류 해석 (DR-2, DR-3)
 
-- 실행이 쓰는 워크플로는 다음 순서로 처음 있는 것이다.
+- 실행이 쓰는 작업 종류는 다음 순서로 처음 있는 것이다.
   1. task 파일의 `workflowRef`
   2. 간편 형식의 `--workflow <id>`
   3. 프로필의 `workflowRef`
-- 셋 다 없으면 단계 1~3의 실행과 같다(워크플로 설정 없음).
+- 셋 다 없으면 단계 1~3의 실행과 같다(작업 종류 설정 없음).
 - 간편 형식에서는 `--workflow`의 id가 이름표(`workflow`)도 된다.
-- 내장 워크플로 다섯 개는 `src/workflows`에 있다. 설정 파일의 `workflows`는 새 id만 정의할 수 있고, 내장 id를 다시 정의하면 거부된다.
+- 내장 작업 종류 다섯 개는 `src/workflows`에 있다. 설정 파일의 `workflows`는 새 id만 정의할 수 있고, 내장 id를 다시 정의하면 거부된다.
 
   | id | 도구 | 계획 | 완료 |
   | --- | --- | --- | --- |
@@ -834,19 +834,19 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   | `organize` | 읽기·찾기·`inspect_files`·`propose_plan` | `apply`, 명령 금지 | 계획 승인 |
 
 - 해석 규칙(`resolveWorkflow`)
-  - 도구는 워크플로가 허용한 것 안에서만 좁힐 수 있다.
+  - 도구는 작업 종류가 허용한 것 안에서만 좁힐 수 있다.
   - `plan: "apply"`는 약하게 바꿀 수 없다.
-  - `allowCommands: false`인 워크플로에서는 `policy.commands`를 쓸 수 없다.
+  - `allowCommands: false`인 작업 종류에서는 `policy.commands`를 쓸 수 없다.
     - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
-  - 사람 검토 워크플로에는 확인 목록이 있어야 한다.
+  - 사람 검토 작업 종류에는 확인 목록이 있어야 한다.
 - 정의의 `limits`는 기본값이다(검토 R-11 L-1).
   - task 파일이 비운 칸을 채우고, 설정 파일의 값보다 크면 그 값까지만 쓴다.
   - 상한은 설정 파일만 정한다(S-7). 정의 값이 상한이 되지는 않는다.
   - 간편 형식에서는 설정 파일의 한도가 그 실행의 한도이고, 정의 값은 설정에 없는 칸만 채운다.
 - 간편 형식의 `plan`·`apply`·`review`도 실행 설정(한도 포함)을 설정 파일에서 읽는다. 빠지면 `invalid_config`이고, 계획 실행의 task를 `--task`로 주라고 안내한다(검토 R-11 L-2).
-- task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 워크플로의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
+- task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 작업 종류의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
 - 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
-- `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 워크플로, 비밀 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
+- `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 작업 종류, 가릴 값 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
 
 #### 18.1.1 정책 합치기 (DR-41)
 
@@ -870,7 +870,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 (--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <config.json>] [--vars-file <path>]
 ```
 
-그 설정이 가리는 비밀은 지금 실행을 시작했다면 등록될 비밀이다. 그 비밀로 계획·기록을 다시 가려서 보여 준다(DR-5). 이 명령들은 모델을 부르지 않는다.
+그 설정이 가리는 값은 지금 실행을 시작했다면 등록될 가릴 값이다. 그 값으로 계획·기록을 다시 가려서 보여 준다(DR-5). 이 명령들은 모델을 부르지 않는다.
 
 ### 18.3 `codaryn plan`
 
@@ -880,13 +880,13 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
 
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
-  - `PlanOutput`: 행동 목록(지금 비밀로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
+  - `PlanOutput`: 동작 목록(지금 가릴 값으로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
-- 같은 비밀인지 확인(DR-28, 검토 R-11 M-1)
-  - `plan.json`의 각 행동은 계획 실행이 가린 표기의 보이는 조각(`shown`)을 함께 담는다. 비밀 값이나 그 해시는 담지 않는다.
-  - `plan`과 `apply`는 지금 형식이 등록한 비밀로 다시 가린 결과를 `planActionShownMatches`로 그 조각과 비교한다.
+- 같은 가릴 값인지 확인(DR-28, 검토 R-11 M-1)
+  - `plan.json`의 각 동작은 계획 실행이 가린 표기의 보이는 조각(`shown`)을 함께 담는다. 가릴 값이나 그 해시는 담지 않는다.
+  - `plan`과 `apply`는 지금 형식이 등록한 가릴 값으로 다시 가린 결과를 `planActionShownMatches`로 그 조각과 비교한다.
   - 하나라도 다르거나 `shown`이 없는 계획(DR-28 전)이면, 계획을 읽은 직후 `plan_secrets_differ`(종료 2)로 끝난다. 아무것도 보이거나 묻거나 기록하거나 옮기지 않고, 적용 실행도 만들지 않는다.
   - 계획 실행과 같은 task 형식(`--task`)으로 다시 하거나 계획을 새로 만든다. 엔진의 같은 검사는 두 번째 방어로 남는다.
 
@@ -898,17 +898,17 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
 
 - `--run latest`는 받지 않는다. 승인이 계획 하나를 가리켜야 하기 때문이다.
 - 거부 조건(모두 종료 2, 아무것도 옮기지 않는다)
-  - task가 `plan: "apply"` 워크플로로 해석되지 않으면 `run_not_plan`
+  - task가 `plan: "apply"` 작업 종류로 해석되지 않으면 `run_not_plan`
   - 이미 적용된 계획이면 `plan_already_applied`
 - 승인
   - `--digest`가 저장된 다이제스트의 앞부분이어야 한다(`MIN_PLAN_DIGEST_PREFIX` = 12자 이상).
   - stdin과 stderr가 터미널이고 `--digest`가 없으면 계획을 보이고 `[y/N]`을 묻는다. 기본은 아니오다.
-    - 이때만 계획 보기의 인벤토리 상한 줄을 위해 작업 공간 목록을 한 번 만든다. 그 목록은 적용의 취소 신호를 받고, 취소되면 아무것도 옮기지 않고 `plan_not_approved`로 끝난다. `--digest`나 앱 계층의 적용은 엔진의 목록(행동 앞뒤 두 번)만 만든다(검토 R-18 L1).
+    - 이때만 계획 보기의 인벤토리 상한 줄을 위해 작업 공간 목록을 한 번 만든다. 그 목록은 적용의 취소 신호를 받고, 취소되면 아무것도 옮기지 않고 `plan_not_approved`로 끝난다. `--digest`나 앱 계층의 적용은 엔진의 목록(동작 앞뒤 두 번)만 만든다(검토 R-18 L1).
   - 어느 쪽도 아니면 `plan_not_approved`(종료 2)다.
 - 적용
   - 잠금을 잡고 적용 실행을 새로 만든다. 첫 기록은 `apply_started`다.
-  - 지금 task의 정책·검증기·비밀로 적용한다(DR-5).
-  - 폐기한 파일은 `.codaryn/discarded/<적용 runId>/`에 행동 번호 이름으로 남는다(DR-9).
+  - 지금 task의 정책·검증기·가릴 값으로 적용한다(DR-5).
+  - 폐기한 파일은 `.codaryn/discarded/<적용 runId>/`에 동작 번호 이름으로 남는다(DR-9).
   - stdout에는 `ApplyResult` 한 줄이 나오고, 같은 내용이 적용 실행의 `result.json`이 된다.
   - 되돌리기: `codaryn revert --run <적용 runId>`
 - 위험한 이동에 대한 동의(DR-21)
@@ -937,7 +937,7 @@ codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note 
 - 메모
   - `MAX_REVIEW_NOTE_CHARS`(500)자 이하
   - 키 모양이 있으면 `key_in_file`
-  - 나머지는 지금 비밀로 가려서 저장한다.
+  - 나머지는 지금 가릴 값으로 가려서 저장한다.
 
 ### 18.6 `codaryn changes` (DR-7, DR-14, DR-29)
 
@@ -947,7 +947,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
 
 - 인자: `--workflow`는 받지 않는다(앱 계층 `TaskForm`과 같다, 18.2).
 - 실행이 바꾼 파일마다 아래를 보인다.
-  - 경로: 실행의 기록에 남은 가린 경로를 지금 비밀로 한 번 더 가린 것(`masking: "current_secrets"`)
+  - 경로: 실행의 기록에 남은 가린 경로를 지금 가릴 값으로 한 번 더 가린 것(`masking: "current_secrets"`)
   - 실행이 만든 파일인지
   - 상태: `as_run_left`, `changed_since_run`, `missing`, `unknown`
 - DR-29(검토 R-11과 같은 구조)
@@ -969,7 +969,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
   - 실행과 적용 실행의 이유는 `RUN_REASONS_BY_STATUS`(`isReasonOfStatus`) 하나로 판정한다. CLI는 따로 목록을 두지 않는다.
   - 적용 실행의 이유는 그 부분집합인 `APPLY_REASONS_BY_STATUS`를 쓴다.
 - `report`
-  - 계획 실행은 행동 수, 다이제스트, `plan` 명령을 보여 준다.
+  - 계획 실행은 동작 수, 다이제스트, `plan` 명령을 보여 준다.
   - 검토 대기 실행은 확인 목록과 사람의 판정을 보여 준다.
     - `--json`에서는 `verdict`(`review.json`의 `ReviewRecord`)다. 판정 전이나 기록을 읽을 수 없으면 `null`이다.
     - 검토 대기가 아닌 실행에는 이 필드가 없다.
@@ -977,12 +977,12 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
   - 적용 실행(첫 기록 `apply_started`, DR-12)은 적용 실행 보고서다.
     - `--json`: `ApplyReportOutput`(`kind: "report"`, `runKind: "apply"`, `result`는 `ApplyResult` 또는 null, `journal`은 `ApplyReportJournalSummary`)
     - `ApplyReportJournalSummary`의 필드
-      - 계획 실행, 다이제스트, 승인 경로, 동의 경로, 행동 수
+      - 계획 실행, 다이제스트, 승인 경로, 동의 경로, 동작 수
       - 사전 점검(문제 수, 인벤토리 상한, 위험한 이동 수)
-      - 시작한 행동 수, 옮긴·폐기한·실패한 행동
+      - 시작한 동작 수, 옮긴·폐기한·실패한 동작
       - 검증 결과(인벤토리 먼저), 무결성 점검, 끝 기록
     - `result.json`이 기록과 다른 계획·task·다이제스트를 가리키면 `invalid_run_record`다.
-    - Markdown은 행동마다 무엇을 했는지와 되돌리는 명령을 보여 준다.
+    - Markdown은 동작마다 무엇을 했는지와 되돌리는 명령을 보여 준다.
   - 형은 계약의 것이다: `RunReportOutput`(`verdict`), `ApplyReportOutput`(`runKind: "apply"`), `ApplyReportJournalSummary`, 둘을 합친 `AnyReportOutput`(`src/contracts/commands.ts`).
   - `--json`은 문자열마다 키를 가린 뒤에 만든다(N-27 (c)).
 - 기록의 도구 이름과 호출 id(AC-D15)
@@ -993,7 +993,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
 
 - 모두 종료 2이고, 아무것도 바꾸지 않는다.
 - `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
-- `plan_secrets_differ`(DR-28, 18.3): 지금 비밀이 계획 실행과 다르게 가린다. 계획을 읽은 직후에 확인한다.
+- `plan_secrets_differ`(DR-28, 18.3): 지금 가릴 값이 계획 실행과 다르게 가린다. 계획을 읽은 직후에 확인한다.
 - `plan_run_missing`(R-9c C-1): 계획 실행이 `plan_pending`으로 끝났는데 `plan.json`이 없다(`plan`, `apply`). 적용 실행의 되돌리기에서는 그 계획 실행이나 계획이 사라졌다(14절).
 - 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
 
@@ -1084,7 +1084,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 
   - `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 SP-4 전과 같이 anthropic 전용이다. SP-4에서 "고른 제공자에 적용"이라 했던 규칙은 이것으로 바뀌었다. 그래서 한 제공자용 값이 다른 제공자로 가지 않는다(R-19 I-4도 해소).
   - OpenAI 변수 이름은 계약 담당이 상수로 낼 때까지 CLI(`PROVIDER_SETTING_ENVS`, `src/cli/security/env.ts`)에 적어 둔다.
-  - 변수 파일이 새로 설정한 이 네 변수의 값은 비밀로 등록하지 않는다(설정 값이다).
+  - 변수 파일이 새로 설정한 이 네 변수의 값은 가릴 값으로 등록하지 않는다(설정 값이다).
 - 빠진 키·모델·출력 토큰은 `provider_not_configured`이고, 글은 그 제공자의 키 변수와 설정 위치(`providers.openai.model` 등)를 적는다.
 - `resolveAnthropicSettings`, `resolveListSettings`, `resolveConnection`은 예전 이름과 인자로 남는다. 제공자를 주지 않으면 anthropic이고, 결과는 SP-4 전과 같다(고정 시험 SP-0 P-7).
 
@@ -1136,17 +1136,17 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 ### 18.13 상태 디렉터리 정리 `codaryn cleanup` (DR-39)
 
 - 모양: `codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] [--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <digest 12자 이상> [--delete-discarded]] [--json]`
-- 기본은 미리보기다. `summarizeState`의 요약과 `planCleanup`의 계획(항목·경고·막힌 것·합계·`parked`·digest)을 보이고 아무것도 지우지 않는다.
+- 기본은 미리보기다. `summarizeState`의 요약과 `planCleanup`의 계획(항목·경고·막힌 것·합계·`parked`·다이제스트)을 보이고 아무것도 지우지 않는다.
 - 확인은 둘이다(DR-39 P-4).
-  - `--confirm <digest>`: 지금 만든 계획의 digest와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `plan_changed`(종료 3)다. store가 잠금 아래에서 계획을 다시 만들어 digest가 같을 때만 지운다.
+  - `--confirm <digest>`: 지금 만든 계획의 다이제스트와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `plan_changed`(종료 3)다. store가 잠금 아래에서 계획을 다시 만들어 다이제스트가 같을 때만 지운다.
   - `--delete-discarded`: `--confirm`과 함께일 때만. 사람의 파일인 폐기 보관함 폴더는 이것이 있을 때만 지운다. 없으면 `not_confirmed`로 남는다.
   - `--include-not-reverted`(DR-44 (가)): `--confirm`과 함께일 때만. 되돌리지 않은 실행과 일부만 되돌린 실행(`not_reverted`)의 기록은 이것이 있어야 지운다. 막지는 않는다. 미리보기의 확인 머리줄에 그런 실행의 수를 적는다. 이것 없이 확인하면 store가 그 기록을 `not_reverted_not_confirmed`로, 남는 적용이 쓰는 계획 실행을 `used_by_kept_apply`로 남기고 나머지를 지운다(사람의 선택이라 종료 0). 남은 `cleanup-…` 폴더(DR-44 (라))는 모든 계획에 `leftover` 항목으로 들어가 요약·미리보기·완료 줄에 보이고, 확인하면 지운다. 옮긴 뒤 다 지우지 못하면 `partly_removed`(종료 1)이고 지웠다고 보고·기록하지 않는다.
-  - 끝 줄은 확인할 것을 말한다(R-34 I-3): 지울 실행 기록이 없고 보관함만 있으면 `--confirm <digest> --delete-discarded`를 말한다.
+  - 끝 줄은 확인할 것을 말한다(R-34 I-3): 지울 실행 기록이 없고 폐기 보관함만 있으면 `--confirm <digest> --delete-discarded`를 말한다.
   - 권하는 명령에는 `--include-not-reverted`를 넣지 않는다(R-34b P-3). 되돌리지 않은 실행이 있으면, 사람이 그 인자를 스스로 붙여야 그 기록을 지우고 지우면 그 실행을 되돌릴 수 없게 된다는 것을 따로 한 줄로 알린다.
   - U-3(R-34c L-1): 따로 알리는 줄은 머리줄과 같이 세 가지(되돌리지 않은 실행, 일부만 되돌린 실행, 기록을 확인할 수 없는 실행)를 말한다. 기록을 확인할 수 없는 실행의 경고는 `records_unreadable`이다.
   - U-3: 남은 폴더 이름 꼴이지만 정리의 표지가 없는 폴더는 `StateSummary.unknownFolders`가 있을 때 요약에 `cleanup.summary.unknown_folders` 한 줄로 보이기만 한다. 항목이 아니고, 어떤 확인으로도 지우지 않는다.
 - 지우지 않는 것(store가 막음): `parked`, 잠금, `.gitignore`, 진행 중인 실행(`lock_held`), 결과가 없는 실행(`no_result`), 선택되지 않은 적용 실행이 쓰는 계획 실행(`plan_used_by_apply`: 그 적용의 되돌리기에 필요하다). 변경 표시가 있는 실행은 막지 않고 경고한다(P-5).
-- 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).
+- 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 폐기 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).
 - 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). `applied`는 문제로 남긴 것(`partly_removed` 포함)이 있으면 종료 1이고, 사람의 선택으로 남긴 것(`not_confirmed`, `not_reverted_not_confirmed`, `used_by_kept_apply`)은 0이다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.

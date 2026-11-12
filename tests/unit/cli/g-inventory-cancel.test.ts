@@ -16,7 +16,7 @@ import path from "node:path";
 import { after, describe, test } from "node:test";
 import type { ApplyDeps, ApplyResult, EngineResult } from "../../../src/contracts/index.js";
 import { assembleRun } from "../../../src/cli/assemble.js";
-import { runApply } from "../../../src/cli/plan-commands.js";
+import { runApply, runPlan } from "../../../src/cli/plan-commands.js";
 import { runCli } from "../../../src/cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
 import { applyPlan as engineApplyPlan } from "../../../src/engine/index.js";
@@ -134,4 +134,58 @@ describe("R-13 L-3: the engine ends a cancel during the listing as cancelled", (
       assert.equal(await readFile(path.join(ws, "a.txt"), "utf8"), "alpha\n");
     },
   );
+});
+
+describe("R-18 L1: apply lists the workspace for the plan view only when it asks", () => {
+  /** A factory around the real checker that counts listings and keeps the signals it was given. */
+  function counting(): { factory: (options: { workspaceRoot: string; signal?: AbortSignal }) => ReturnType<typeof createInventoryChecker>; listings: number; signals: (AbortSignal | undefined)[] } {
+    const state = { listings: 0, signals: [] as (AbortSignal | undefined)[] };
+    const factory = (options: { workspaceRoot: string; signal?: AbortSignal }) => {
+      state.signals.push(options.signal);
+      const real = createInventoryChecker(options);
+      return {
+        capture: async () => {
+          state.listings += 1;
+          return real.capture();
+        },
+        check: real.check.bind(real),
+      };
+    };
+    return Object.assign(state, { factory });
+  }
+
+  test("with --digest the CLI makes no listing of its own; the engine lists twice", async () => {
+    const { base, planned } = await planRun();
+    const count = counting();
+    const outcome = await runApply({
+      ...io(base, ["apply", "--task", "task.json", "--run", planned.runId, "--digest", (planned.plan?.digest ?? "").slice(0, 12), "--quiet"]),
+      createInventoryChecker: count.factory,
+      cancelSignal: () => ({ signal: new AbortController().signal, dispose: () => {} }),
+    });
+    assert.ok("output" in outcome && outcome.output.kind === "apply", JSON.stringify(outcome));
+    assert.equal(count.listings, 2, "the engine's two listings, none before them");
+  });
+
+  test("at a terminal the plan view's listing gets the apply's cancel signal", async () => {
+    const { base, planned } = await planRun();
+    const count = counting();
+    const cancel = new AbortController();
+    const outcome = await runApply({
+      ...io(base, ["apply", "--task", "task.json", "--run", planned.runId, "--quiet"]),
+      createInventoryChecker: count.factory,
+      ask: async () => "",
+      cancelSignal: () => ({ signal: cancel.signal, dispose: () => {} }),
+    });
+    assert.ok("output" in outcome && outcome.output.kind === "error" && outcome.output.code === "plan_not_approved", JSON.stringify(outcome));
+    assert.equal(count.listings, 1, "one listing, for the question");
+    assert.equal(count.signals[0], cancel.signal);
+  });
+
+  test("plan still lists the workspace (it shows the inventory limit)", async () => {
+    const { base, planned } = await planRun();
+    const count = counting();
+    const shown = await runPlan({ ...io(base, ["plan", "--task", "task.json", "--run", planned.runId, "--json"]), createInventoryChecker: count.factory });
+    assert.ok("output" in shown || "text" in shown);
+    assert.equal(count.listings, 1);
+  });
 });

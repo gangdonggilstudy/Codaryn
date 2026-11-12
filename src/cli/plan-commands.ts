@@ -29,6 +29,7 @@ import {
 } from "../contracts/index.js";
 import type {
   ApplyJournal,
+  InventoryChecker,
   ApplyJournalEntry,
   ApplyJournalEvent,
   ApplyPlan,
@@ -69,6 +70,7 @@ import {
 import type { RunInspection } from "../store/index.js";
 import { createCommandRunner, createPlanExecutor, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } from "../verify/index.js";
+import type { InventoryCheckerOptions } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { parseApplyArgs, parsePlanArgs, parseReviewArgs } from "./args.js";
 import type { RunArgs, TaskFormArgs } from "./args.js";
@@ -95,6 +97,8 @@ export interface PlanCommandEnvironment extends PrepareEnvironment {
   /** Overrides for tests; the store's functions otherwise. */
   readonly listRuns?: ListRuns;
   readonly loadPlan?: LoadPlan;
+  /** The workspace listing (verify's `createInventoryChecker` when absent). Tests count its listings. */
+  readonly createInventoryChecker?: (options: InventoryCheckerOptions) => InventoryChecker;
   readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
   /** N-23: told which run `--run latest` chose, before anything is read. */
   readonly announceLatest?: (entry: CheckedRun) => void;
@@ -261,6 +265,11 @@ const LOAD_MESSAGES = {
 async function loadShown(
   io: PlanCommandEnvironment,
   value: Prepared,
+  /**
+   * R-18 L1: whether to list the workspace for `inventoryLimitReached` (DR-6). `plan` does; `apply`
+   * does not (false here), and lists it with the apply's cancel signal only when it asks a person.
+   */
+  listInventory: boolean,
 ): Promise<
   | { ok: true; plan: StoredPlan; digest: ContentHash; output: PlanOutput; privacy: PrivacyGateway }
   | { ok: false; outcome: CommandOutcome }
@@ -286,7 +295,9 @@ async function loadShown(
     }
     actions.push(masked);
   }
-  const manifest = await createInventoryChecker({ workspaceRoot: value.workspaceRoot }).capture();
+  const inventoryLimitReached = listInventory
+    ? (await (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot: value.workspaceRoot }).capture()).limitReached
+    : false;
   const status = loaded.applied === null ? "pending" : "applied";
   const output: PlanOutput = {
     schemaVersion: RESULT_SCHEMA_VERSION,
@@ -296,7 +307,7 @@ async function loadShown(
     exitCode: PLAN_EXIT_CODES[status],
     digest: loaded.digest,
     actions,
-    inventoryLimitReached: manifest.limitReached,
+    inventoryLimitReached,
     appliedBy: loaded.applied === null ? null : { runId: loaded.applied.applyRunId, at: loaded.applied.at },
   };
   return { ok: true, plan: loaded.plan, digest: loaded.digest, output, privacy };
@@ -323,7 +334,7 @@ export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcom
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
   const ready = await prepareFor(io, parsed.args.form, parsed.args.runId, null, false);
   if (!ready.ok) return ready.outcome;
-  const shown = await loadShown(io, ready.value);
+  const shown = await loadShown(io, ready.value, true);
   if (!shown.ok) return shown.outcome;
   const currentKey = knownKeyValues(io.env);
   if (parsed.args.json) return { output: shown.output, exitCode: shown.output.exitCode };
@@ -344,7 +355,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   if (workflowSettingsOf(task).plan !== "apply") {
     return cliError("run_not_plan", 'the task given to apply does not resolve to a workflow with plan "apply"; nothing was moved');
   }
-  const shown = await loadShown(io, ready.value);
+  const shown = await loadShown(io, ready.value, false);
   if (!shown.ok) return shown.outcome;
   if (shown.output.appliedBy !== null) {
     return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
@@ -373,8 +384,21 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     }
     approval = adapter === undefined ? "cli-flag" : "adapter";
   } else if (ask !== undefined) {
+    // R-18 L1: the plan view lists the workspace (the inventory limit, DR-6) only here, and the
+    // apply's cancel stops that listing too. A cancel during it ends with nothing moved.
+    const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
+    let inventoryLimitReached: boolean;
+    try {
+      inventoryLimitReached = (await (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }).capture()).limitReached;
+    } catch {
+      if (cancel.signal.aborted) return cliError("plan_not_approved", "the apply was cancelled before the plan was shown; nothing was moved");
+      // Any other failure: the plan is shown without the limit line; the engine's own listing checks it.
+      inventoryLimitReached = false;
+    } finally {
+      cancel.dispose();
+    }
     const currentKey = knownKeyValues(io.env);
-    const question = [renderPlan(shown.output, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
+    const question = [renderPlan({ ...shown.output, inventoryLimitReached }, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
     approval = "cli-tty";
@@ -434,7 +458,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         privacy,
         verifiers: createVerifierRunner({ workspace, commandRunner }),
         // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
-        inventory: createInventoryChecker({ workspaceRoot, signal: cancel.signal }),
+        inventory: (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }),
         journal,
         clock: io.clock,
         signal: cancel.signal,

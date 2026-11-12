@@ -868,6 +868,7 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
 - 승인
   - `--digest`가 저장된 다이제스트의 앞부분이어야 한다(`MIN_PLAN_DIGEST_PREFIX` = 12자 이상).
   - stdin과 stderr가 터미널이고 `--digest`가 없으면 계획을 보이고 `[y/N]`을 묻는다. 기본은 아니오다.
+    - 이때만 계획 보기의 인벤토리 상한 줄을 위해 작업 공간 목록을 한 번 만든다. 그 목록은 적용의 취소 신호를 받고, 취소되면 아무것도 옮기지 않고 `plan_not_approved`로 끝난다. `--digest`나 앱 계층의 적용은 엔진의 목록(행동 앞뒤 두 번)만 만든다(검토 R-18 L1).
   - 어느 쪽도 아니면 `plan_not_approved`(종료 2)다.
 - 적용
   - 잠금을 잡고 적용 실행을 새로 만든다. 첫 기록은 `apply_started`다.

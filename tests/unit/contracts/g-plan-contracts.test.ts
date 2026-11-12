@@ -40,6 +40,7 @@ import {
   PLAN_STATUSES,
   POLICY_DENIAL_CODES,
   QUICK_TASK_WORKFLOW,
+  QUICK_WORKFLOW_ARGUMENT,
   RESULT_FILE_NAME,
   REVERT_ACTIONS,
   REVERT_RECORD_FILE_NAME,
@@ -49,6 +50,8 @@ import {
   REVIEW_VERDICTS,
   RUN_EXIT_CODES,
   RUN_REASONS,
+  RUN_REASONS_BY_STATUS,
+  isReasonOfStatus,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
   STATE_DIR_NAME,
@@ -61,9 +64,11 @@ import {
 } from "../../../src/contracts/index.js";
 import type {
   ApplyJournalEvent,
+  CreatePlanExecutor,
   EngineResult,
   JournalEvent,
   ModelRequest,
+  ReviewRecord,
   RunReasonByStatus,
   StoredPlan,
   VerifierConfig,
@@ -89,6 +94,16 @@ type ConfiguredInventory = Extract<VerifierConfig["kind"], "inventory">;
 const inventoryNotConfigurable: [ConfiguredInventory] extends [never] ? true : false = true;
 /** A model request without workflow tools is still a valid request (legacy shape). */
 const legacyRequest: ModelRequest = { system: "" as ModelRequest["system"], messages: [], tools: ["read_file"] };
+/** G-C's factory shape: an executor is made from the workspace, its real root and the apply run id. */
+const makeExecutor: CreatePlanExecutor = ({ workspace, workspaceRoot, runId }) => {
+  void [workspace, workspaceRoot, runId];
+  return { check: async () => null, apply: async () => ({ ok: false, problem: "io_error" }) };
+};
+void makeExecutor;
+/** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
+// @ts-expect-error a raw note cannot be stored
+const rawNote: ReviewRecord["note"] = "typed by a person" as string;
+void rawNote;
 /** A result as phase 3 wrote it still type-checks: `plan` and `review` are optional. */
 const legacyResult: EngineResult = {
   schemaVersion: 1,
@@ -119,6 +134,26 @@ describe("G-A run reasons and exit codes", () => {
     assert.ok(unique(RUN_REASONS));
     assert.deepEqual([...TERMINAL_RUN_STATUSES], ["done", "failed", "needs-input", "cancelled", "budget-exhausted"]);
     assert.deepEqual(RUN_EXIT_CODES, { done: 0, failed: 1, "needs-input": 3, "budget-exhausted": 4, cancelled: 5 });
+  });
+
+  test("DR-16: one table lists every reason under exactly one status, the same reasons as RUN_REASONS", () => {
+    assert.deepEqual(Object.keys(RUN_REASONS_BY_STATUS).sort(), [...TERMINAL_RUN_STATUSES].sort());
+    const listed = Object.values(RUN_REASONS_BY_STATUS).flat() as string[];
+    assert.ok(unique(listed), "no reason under two statuses");
+    assert.deepEqual([...listed].sort(), [...RUN_REASONS].sort());
+    assert.deepEqual(RUN_REASONS_BY_STATUS["needs-input"].filter((reason) => reason === "plan_pending" || reason === "awaiting_review"), [
+      "plan_pending",
+      "awaiting_review",
+    ]);
+    assert.ok(RUN_REASONS_BY_STATUS.failed.includes("plan_stale") && RUN_REASONS_BY_STATUS.failed.includes("apply_incomplete"));
+  });
+
+  test("DR-16: isReasonOfStatus answers from the table", () => {
+    assert.equal(isReasonOfStatus("needs-input", "plan_pending"), true);
+    assert.equal(isReasonOfStatus("done", "plan_pending"), false);
+    assert.equal(isReasonOfStatus("failed", "verified"), false);
+    assert.equal(isReasonOfStatus("done", "verified"), true);
+    assert.equal(isReasonOfStatus("cancelled", "toString"), false);
   });
 
   test("the new CLI errors are input errors (exit code 2)", () => {
@@ -219,6 +254,10 @@ describe("G-A workflow ids", () => {
     assert.ok(unique(BUILTIN_WORKFLOW_IDS));
     assert.ok((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(QUICK_TASK_WORKFLOW));
     assert.deepEqual([...COMPLETION_MODES], ["verifiers", "human_review"]);
+  });
+
+  test("DR-2: the quick form names a definition with --workflow", () => {
+    assert.equal(QUICK_WORKFLOW_ARGUMENT, "--workflow");
   });
 
   test("no new task or config field name reads as a key field (S-6)", () => {

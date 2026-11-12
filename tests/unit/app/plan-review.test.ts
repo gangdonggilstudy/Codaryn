@@ -117,7 +117,7 @@ describe("review", () => {
 
 describe("arguments", () => {
   test("plan and review take the task form and --json; an empty note is no note", () => {
-    const settings = { input: { kind: "task" as const, taskPath: "T" }, configPath: null, varsFile: "V", profile: null };
+    const settings = { input: { kind: "task" as const, taskPath: "T" }, configPath: null, varsFile: "V", profile: null, workflowRef: null };
     assert.deepEqual(planArguments({ settings, runId: "latest" }), ["plan", "--task", "T", "--vars-file", "V", "--run", "latest", "--json"]);
     const review = reviewArguments({ settings, runId: "R", decision: "reject", note: "" });
     assert.deepEqual(review.ok ? review.argv : null, ["review", "--task", "T", "--vars-file", "V", "--run", "R", "--reject", "--json"]);

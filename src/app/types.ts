@@ -376,6 +376,12 @@ export interface TaskForm {
   readonly configPath: string | null;
   readonly varsFile: string | null;
   readonly profile: string | null;
+  /**
+   * R-14 L-3: `--workflow` (G-F, GT-D1): the workflow the workspace form resolves to, so a plan made
+   * with `startRun`'s `workflowRef` is shown, applied and reviewed on the same form without a
+   * profile. Null: the profile's or the config's. A task file names its own; the CLI refuses both.
+   */
+  readonly workflowRef: string | null;
 }
 
 export type ChangedFileUnavailable =

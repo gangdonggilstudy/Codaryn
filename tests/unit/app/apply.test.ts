@@ -131,8 +131,11 @@ describe("applyPlan", () => {
   });
 
   test("the arguments: the task form, the plan run, the digest, quiet; never a consent argument", () => {
-    const argv = applyArguments({ settings: { input: { kind: "workspace", workspace: "W" }, configPath: "C", varsFile: null, profile: "p" }, planRunId: "R", digest: "D", cancelFile: "F" });
+    const settings = { input: { kind: "workspace" as const, workspace: "W" }, configPath: "C", varsFile: null, profile: "p", workflowRef: null };
+    const argv = applyArguments({ settings, planRunId: "R", digest: "D", cancelFile: "F" });
     assert.deepEqual(argv, ["apply", "--workspace", "W", "--config", "C", "--profile", "p", "--run", "R", "--digest", "D", "--quiet", "--cancel-file", "F"]);
+    const withWorkflow = applyArguments({ settings: { ...settings, profile: null, workflowRef: "organize" }, planRunId: "R", digest: "D", cancelFile: null });
+    assert.deepEqual(withWorkflow.slice(0, 6), ["apply", "--workspace", "W", "--config", "C", "--workflow"], "R-14 L-3: the workflow travels as --workflow");
     assert.equal(argv.includes("--allow-unsafe-move"), false);
   });
 });

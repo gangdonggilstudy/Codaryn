@@ -171,7 +171,7 @@ export function runRequestOf(settings: TaskForm): StartRunRequest {
     configPath: settings.configPath,
     varsFile: settings.varsFile,
     profile: settings.profile,
-    workflowRef: null,
+    workflowRef: settings.workflowRef,
     cancelFile: null,
   };
 }

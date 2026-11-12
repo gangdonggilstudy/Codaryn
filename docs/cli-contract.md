@@ -710,7 +710,8 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - **`runs` 오류(N-22)**: `invalid_run_record`(`.codaryn`이나 `runs`가 링크이거나 나열할 수 없음)를 더했다. `--run latest`의 목록 실패도 같다. `parseRunsArgs`와 `RUNS_USAGE`는 `src/cli/runs.ts`에 있다. 실행 목록 확인은 `report`만큼 엄격하다(`RunListEntry` 주석).
 - **`doctor` 안내(N-22)**: `DOCTOR_HINT_ERROR_CODES`(`invalid_config`, `invalid_task`, `key_in_file`, `secret_env_missing`, `workspace_is_install_dir`, `provider_not_configured`, `model_list_failed`)의 오류에만 `error.doctor_hint`를 붙인다.
 - **요약의 notices(N-22)**: 실행 끝 요약은 `notices`를 보이지 않는다. 모델 404 안내는 진행 줄(`progress.model_not_found`)이 맡고, notices는 JSON과 보고서에 남는다.
-- **거부 안내의 정책 위치(N-23)**: `RunSummaryContext.policySource`(`task`, `config`)를 더했다. task 파일 실행이면 `summary.denied_hint_task`(task의 `policy.commands`), 간편 형식과 한 줄 실행이면 `summary.denied_hint`(설정 파일이나 프로필)를 쓴다.
+- **거부 안내의 정책 위치(N-23)**: `RunSummaryContext.policySource`(`task`, `config`)와 `deniedCommandCalls`(권한이 `command`인 거부 수)를 더했다. 안내는 `deniedCommandCalls`가 1 이상일 때만 낸다. task 파일 실행이면 `summary.denied_hint_task`(task의 `policy.commands`), 간편 형식과 한 줄 실행이면 `summary.denied_hint`(설정 파일이나 프로필)를 쓴다.
+- **`--run latest`가 고른 실행(N-23)**: `revert`와 `report`는 `latest`를 풀면 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 먼저 쓴다(`HumanOutput.latestChosen`, 문구 `latest.chosen`, 시각은 확인된 `startedAt`을 지역 시간으로). `--quiet`이면 쓰지 않는다.
 
 ### 17.7 오류 코드 추가
 

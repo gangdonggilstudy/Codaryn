@@ -22,7 +22,7 @@
 
 import { REVERT_SKIP_REASONS } from "./changes.js";
 import type { RevertSkipReason } from "./changes.js";
-import type { RunsOutput } from "./commands.js";
+import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { DefaultConfigDisplay } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
@@ -335,6 +335,10 @@ export const FIXED_MESSAGES = {
   "outcome.fail": {},
   "outcome.inconclusive": {},
 
+  // `--run latest` (N-23): which run was chosen, before anything is done. The start time follows
+  // as an item in local time, from the checked `startedAt`.
+  "latest.chosen": { runId: "runId" },
+
   // Revert (N-7).
   "revert.dry_run_title": { count: "count" },
   "revert.done_title": { count: "count" },
@@ -577,6 +581,8 @@ export type DoctorText = {
  * - profileApplied (N-8): whether `--profile` was used. The name is not shown.
  * - deniedToolCalls (N-17): `tool_decision` records with `allowed: false` in this run, the same
  *   count as ReportJournalSummary.deniedToolCalls.
+ * - deniedCommandCalls (N-23): the denied calls whose permission is `command`. The hint to allow a
+ *   command is shown only when it is above 0.
  * - policySource (N-23): where the run's policy came from, so the denied-call hint points there:
  *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
  *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
@@ -586,6 +592,7 @@ export interface RunSummaryContext {
   readonly configDefault: DefaultConfigDisplay | null;
   readonly profileApplied: boolean;
   readonly deniedToolCalls: number;
+  readonly deniedCommandCalls: number;
   readonly policySource: "task" | "config";
 }
 
@@ -625,6 +632,11 @@ export interface HumanOutput {
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;
+  /**
+   * N-23: stderr before `revert --run latest` and `report --run latest` act: the chosen run id
+   * (`latest.chosen`) and its start time in local time.
+   */
+  latestChosen(entry: Extract<RunListEntry, { readonly state: "checked" }>): string;
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

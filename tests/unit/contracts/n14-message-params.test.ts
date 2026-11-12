@@ -145,9 +145,16 @@ test("N-16 (M2): a run list entry is either checked or damaged; a damaged one ca
 });
 
 test("N-17 (M3): the end-of-run summary receives the denied call count", () => {
-  const context: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 1, policySource: "config" };
+  const context: RunSummaryContext = {
+    workspaceForm: "given",
+    configDefault: null,
+    profileApplied: false,
+    deniedToolCalls: 1,
+    deniedCommandCalls: 1,
+    policySource: "config",
+  };
   // @ts-expect-error the count is required
-  const missing: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, policySource: "config" };
+  const missing: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedCommandCalls: 0, policySource: "config" };
   // @ts-expect-error the typed workspace path is never passed to the renderer
   const typed: RunSummaryContext = { ...context, workspace: SYNTHETIC };
   assert.ok(missing && typed);

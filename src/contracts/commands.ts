@@ -313,7 +313,12 @@ export const INIT_EXIT_CODES: { readonly [S in InitStatus]: number } = { created
 export interface InitOutput {
   readonly schemaVersion: 1;
   readonly kind: "init";
-  /** SP-6 (DR-31): the provider the written config uses; `keySet` is about its key variable. Optional until the CLI sets it. */
+  /**
+   * SP-6 (DR-31): the provider the written config uses; `keySet` is about its key variable.
+   * U-26: present only when `init` asked (at a terminal): the provider chosen, INIT_DEFAULT_PROVIDER
+   * for an empty, unknown or ended answer. Absent when it did not ask (not a terminal, `--json`):
+   * the file is written for INIT_DEFAULT_PROVIDER and the output is as before.
+   */
   readonly provider?: ApiProviderName;
   readonly status: InitStatus;
   readonly exitCode: number;

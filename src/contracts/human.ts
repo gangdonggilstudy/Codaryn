@@ -630,6 +630,12 @@ export const FIXED_MESSAGES = {
   "init.confirm_create": {},
   "init.declined": {},
   "init.not_terminal": {},
+  // U-26: after init.confirm_create, the provider question. `{provider}` is INIT_DEFAULT_PROVIDER,
+  // which Enter gives; the CLI lists API_PROVIDER_NAMES numbered above it (names are codes, shown as
+  // they are, as the model list). Then init.provider_chosen says which one the file is written for,
+  // so an unknown answer that fell back to the default is seen before the model question.
+  "init.provider_pick": { provider: "provider" },
+  "init.provider_chosen": { provider: "provider" },
   "init.model_no_key": {},
   "init.model_pick": {},
   "init.model_list_failed": { kind: "modelError" },

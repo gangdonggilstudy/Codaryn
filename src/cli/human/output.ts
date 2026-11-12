@@ -506,7 +506,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
         out.push(catalog.format("summary.next_revert_unsafe", { runId: revertedRun }));
       }
-      if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
+      // U-57 (UXM-21): only when the preview lists a file to revert. A dry run makes the real revert's
+      // decisions and only skips files, so with none listed a real revert would do nothing either.
+      if (output.dryRun === true && reverted.length > 0) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);
     },
 

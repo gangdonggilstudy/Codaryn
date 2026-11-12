@@ -228,6 +228,16 @@ describe("plan, review and apply output with the real catalogs", () => {
       assert.equal(texts.includes(SECRET), false);
     });
 
+    test(`${language}: the workflow tools are named in progress lines (review R-9b I-2)`, () => {
+      const catalog = createMessageCatalog(language);
+      const human: HumanOutput = createHumanOutput(catalog);
+      for (const tool of ["inspect_files", "propose_plan"] as const) {
+        const line = human.progressLine({ type: "tool_decision", callId: "c", tool, stage: "policy_effective", allowed: true, permission: null, code: null }) ?? "";
+        assert.equal(line, `${catalog.format("progress.tool_allowed", { tool: catalog.format(`tool.${tool}`) })} (${tool})`);
+        assert.equal(line.includes(catalog.format("progress.unknown_tool")), false, line);
+      }
+    });
+
     test(`${language}: DR-21 and DR-25 lines use the catalog's own texts`, () => {
       const catalog = createMessageCatalog(language);
       const human: HumanOutput = createHumanOutput(catalog);

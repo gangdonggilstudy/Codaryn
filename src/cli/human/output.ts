@@ -26,8 +26,8 @@ import {
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
   TERMINAL_RUN_STATUSES,
+  ALL_TOOL_NAMES,
   TOOL_ERROR_CODES,
-  TOOL_NAMES,
   isReasonOfStatus,
   toRunId,
   toSchemaFieldPath,
@@ -53,7 +53,7 @@ import type {
   RunsOutput,
   SchemaFieldPath,
   TerminalRunStatus,
-  ToolName,
+  AnyToolName,
 } from "../../contracts/index.js";
 import { isRunTimestamp } from "../../store/index.js";
 import { displayWidth, finalLine, formatLocalTime, padEnd, shownPath, token } from "./format.js";
@@ -119,8 +119,9 @@ function lines(out: readonly string[]): string {
 export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): HumanOutput => {
   const verifierNumbers = new Map<string, number>();
 
+  // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
-    isOneOf<ToolName>(name, TOOL_NAMES) ? catalog.format(`tool.${name}`) : catalog.format("progress.unknown_tool");
+    isOneOf<AnyToolName>(name, ALL_TOOL_NAMES) ? catalog.format(`tool.${name}`) : catalog.format("progress.unknown_tool");
 
   function diagnosticText(diagnostic: InputDiagnostic): string | null {
     const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
@@ -280,7 +281,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           break;
         case "tool_decision": {
           const tool = toolText(event.tool);
-          const name = isOneOf<ToolName>(event.tool, TOOL_NAMES) ? event.tool : "?";
+          const name = isOneOf<AnyToolName>(event.tool, ALL_TOOL_NAMES) ? event.tool : "?";
           if (event.allowed) {
             line = `${catalog.format("progress.tool_allowed", { tool })} (${name})`;
           } else if (isOneOf(event.permission, PERMISSION_KINDS) && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {

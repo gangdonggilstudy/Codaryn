@@ -10,8 +10,10 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
+import { runtimeLocale } from "../i18n/index.js";
 import { findInstall } from "../cli/install.js";
 import type { AppEnvironment } from "./types.js";
 
@@ -109,10 +111,19 @@ async function isFile(file: string): Promise<boolean> {
   }
 }
 
+/** As the CLI finds it: os.homedir() can throw when no home directory is known (no default location then). */
+function homeDirectory(): string | null {
+  try {
+    return homedir();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The environment of the current Node process: a snapshot of `process.env`, the working
- * directory, and the install directory found from this module (the nearest package root named
- * "codaryn", as the CLI finds its own).
+ * directory, the install directory found from this module (the nearest package root named
+ * "codaryn", as the CLI finds its own), the home directory and the locale.
  */
 export async function createNodeAppEnvironment(): Promise<AppEnvironment> {
   const readText = (file: string): Promise<string> => readFile(file, "utf8");
@@ -131,6 +142,8 @@ export async function createNodeAppEnvironment(): Promise<AppEnvironment> {
     isDirectory,
     isFile,
     readVarsFile: readVarsFileSync,
+    homeDir: homeDirectory(),
+    osLocale: runtimeLocale(),
     clock: { now: () => Date.now() },
     randomBytes: (size) => randomBytes(size),
   };

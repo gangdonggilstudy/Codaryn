@@ -1,0 +1,58 @@
+/**
+ * The window's entry (GU-2): the language from the engine host, the frame, the workspace screen
+ * with the recent list, the checks screen and the read-only file tree. The page talks to
+ * `window.codaryn` (the preload) and to nothing else.
+ */
+
+import { asInfo, asOpen, asWorkspace } from "./api.js";
+import type { Workspace } from "./api.js";
+import { checksScreen } from "./checks/checks.js";
+import { textsFor } from "./i18n/catalog.js";
+import { Shell } from "./shell/shell.js";
+import { homeScreen } from "./workspace/home.js";
+import { TreeView } from "./workspace/tree-view.js";
+
+async function start(): Promise<void> {
+  const root = document.getElementById("app");
+  if (root === null) return;
+  const api = window.codaryn;
+  const info = asInfo(await api.info());
+  document.documentElement.lang = info.language;
+  const texts = textsFor(info.language);
+
+  let current: Workspace | null = null;
+  let shell: Shell | null = null;
+  let tree: TreeView | null = null;
+
+  const setWorkspace = (workspace: Workspace): void => {
+    current = workspace;
+    shell?.setWorkspace(workspace.name);
+    tree?.setWorkspace(workspace);
+    shell?.refresh();
+    shell?.announce(texts.format("home.current", { name: workspace.name }));
+  };
+
+  const openWorkspace = (): void => {
+    void (async () => {
+      const chosen = asWorkspace(await api.openFolder());
+      if (chosen !== null) setWorkspace(chosen);
+    })();
+  };
+
+  shell = new Shell(texts, { openWorkspace });
+  shell.mount(root);
+  tree = new TreeView(texts, api, shell.filePanel);
+  shell.add(homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace }));
+  shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
+  shell.setEngine(info.engine);
+  shell.setWorkspace(null);
+  shell.show("home");
+
+  api.onWorkspaceOpened((payload) => {
+    const opened = asOpen({ ok: true, ...(typeof payload === "object" && payload !== null ? payload : {}) });
+    if (opened.ok) setWorkspace({ handle: opened.handle, name: opened.name });
+  });
+  if (info.initialWorkspace !== null) setWorkspace(info.initialWorkspace);
+}
+
+void start();

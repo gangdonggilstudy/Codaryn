@@ -14,6 +14,8 @@ import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolRunner } from "./tool.js";
 import type { VerifierResult, VerifierRunner } from "./verify.js";
+import type { ApplyResult, PlanOutput } from "./plan.js";
+import type { ReviewOutput } from "./workflow.js";
 
 export const RUN_STATUSES = [
   "created",
@@ -59,12 +61,32 @@ export interface RunReasonByStatus {
    * verifier_failed: a verifier failed and no repair is left (`maxRepairAttempts` used up, or 0).
    * repeated_failure: the same failure signature occurred `maxSameFailures` times in a row (R-3).
    */
-  readonly failed: "verifier_failed" | "model_error" | "repeated_failure";
+  /**
+   * G-A, apply runs only (plan.ts):
+   * plan_stale: the plan cannot be applied to the workspace as it is now: the preflight found an
+   * action that no longer fits or that the policy denies, the workspace is beyond the inventory
+   * limit (DR-6), or the plan was already applied; nothing was moved. apply_incomplete: an action
+   * failed while applying; the earlier ones stay done and `codaryn revert` undoes them.
+   */
+  readonly failed: "verifier_failed" | "model_error" | "repeated_failure" | "plan_stale" | "apply_incomplete";
   /**
    * protected_changed (U-2): an integrity check found protected material changed, or could not
    * show it unchanged (`unchecked` entries). The run is not repaired; see `EngineDeps.integrity`.
+   * G-A: plan_pending: `propose_plan` stored a plan; nothing changed in the workspace. It waits for
+   * a person's approval and `codaryn apply` (EngineResult.plan). awaiting_review: the workflow's
+   * completion is `human_review` and its verifiers all passed (or there is none); a person records
+   * a verdict with `codaryn review` (EngineResult.review). Neither is ever `done`.
+   * consent_required (DR-21, apply runs only): the preflight found moves that could only be made
+   * unsafely and the person gave no consent for this apply; nothing was moved.
    */
-  readonly "needs-input": "verifier_inconclusive" | "no_verifier" | "unknown_tool_outcome" | "protected_changed";
+  readonly "needs-input":
+    | "verifier_inconclusive"
+    | "no_verifier"
+    | "unknown_tool_outcome"
+    | "protected_changed"
+    | "plan_pending"
+    | "awaiting_review"
+    | "consent_required";
   readonly cancelled: "cancelled";
   readonly "budget-exhausted":
     | "max_model_turns"
@@ -91,11 +113,50 @@ export const RUN_REASONS = [
   "max_total_tokens",
   "max_duration",
   "usage_unknown",
+  "plan_stale",
+  "apply_incomplete",
+  "plan_pending",
+  "awaiting_review",
+  "consent_required",
 ] as const satisfies readonly RunReason[];
 /** Compile-time check that RUN_REASONS misses none. */
 export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
 const runReasonsComplete: [MissingRunReason] extends [never] ? true : false = true;
 void runReasonsComplete;
+
+/**
+ * DR-16 (R-4 M-1): the reasons each end status may have, the one table every reader of result.json
+ * and journals uses to check a recorded status and reason (report, the run list, human output).
+ * Readers must not keep their own lists: a reason added here is then accepted everywhere at once.
+ * It covers runs and apply runs (ApplyResult uses the same reasons).
+ */
+export const RUN_REASONS_BY_STATUS = {
+  done: ["verified"],
+  failed: ["verifier_failed", "model_error", "repeated_failure", "plan_stale", "apply_incomplete"],
+  "needs-input": [
+    "verifier_inconclusive",
+    "no_verifier",
+    "unknown_tool_outcome",
+    "protected_changed",
+    "plan_pending",
+    "awaiting_review",
+    "consent_required",
+  ],
+  cancelled: ["cancelled"],
+  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
+} as const satisfies { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] };
+
+/** Compile-time check that RUN_REASONS_BY_STATUS lists every reason of every status. */
+export type MissingReasonByStatus = {
+  [S in TerminalRunStatus]: Exclude<RunReasonByStatus[S], (typeof RUN_REASONS_BY_STATUS)[S][number]>;
+}[TerminalRunStatus];
+const reasonsByStatusComplete: [MissingReasonByStatus] extends [never] ? true : false = true;
+void reasonsByStatusComplete;
+
+/** Whether `reason` is one of `status`'s reasons (RUN_REASONS_BY_STATUS). Pure. */
+export function isReasonOfStatus(status: TerminalRunStatus, reason: string): reason is RunReason {
+  return (RUN_REASONS_BY_STATUS[status] as readonly string[]).includes(reason);
+}
 
 /** Process exit code for each terminal status. */
 export const RUN_EXIT_CODES: { readonly [S in TerminalRunStatus]: number } = {
@@ -125,6 +186,10 @@ export const CLI_ERROR_EXIT_CODES = {
    * holds the entry file), lies inside it or contains it. Checked before the lock; nothing is written.
    */
   workspace_is_install_dir: 2,
+  /**
+   * Another run (or revert) holds `<workspace>/.codaryn/lock.json`. N-25 (a): the human-readable
+   * error adds `lock.remove_hint`: when no Codaryn is running in that workspace, remove the file.
+   */
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
@@ -138,6 +203,38 @@ export const CLI_ERROR_EXIT_CODES = {
   run_not_found: 2,
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
+  /**
+   * G-A (R-9c C-1), `codaryn revert --run <apply runId>`: the plan run that apply used
+   * (`apply_started.planRunId`) has no directory or no plan.json any more. The real paths of the
+   * apply's files are known only from that plan (DR-24 f), so nothing was changed. A plan run must
+   * be kept while its apply may be reverted. `codaryn plan`, `codaryn apply` (LoadPlanOutcome): the
+   * plan run ended as `plan_pending` but its plan.json is gone; nothing was shown or changed.
+   */
+  plan_run_missing: 2,
+  /**
+   * G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as
+   * `plan_pending`), or the task given to `apply` does not resolve to `plan: "apply"`. Nothing was
+   * changed.
+   */
+  run_not_plan: 2,
+  /**
+   * G-A, `codaryn apply`: no approval. `--digest` is missing (without a terminal), shorter than
+   * MIN_PLAN_DIGEST_PREFIX, or not a prefix of the stored plan's digest, or the terminal answer was
+   * no. Nothing was changed.
+   */
+  plan_not_approved: 2,
+  /** G-A, `codaryn apply`: the plan was already applied (applied.json exists). Nothing was changed. */
+  plan_already_applied: 2,
+  /**
+   * DR-28 (R-11 M-1), `codaryn plan`, `codaryn apply` and the app layer: the secrets registered now
+   * mask the plan's paths differently from the plan run (planActionShownMatches is false for an
+   * action), or the plan was stored without its masked form. Checked right after the plan is
+   * loaded: nothing was shown, asked, recorded or moved. Use the same task form, and so the same
+   * secrets, as the plan run, or make the plan again.
+   */
+  plan_secrets_differ: 2,
+  /** G-A, `codaryn review`: the run did not end as `needs-input`/`awaiting_review`. Nothing was written. */
+  run_not_awaiting_review: 2,
   internal_error: 70,
 } as const;
 export type CliErrorCode = keyof typeof CLI_ERROR_EXIT_CODES;
@@ -199,6 +296,14 @@ export interface EngineResult {
    * Absent when the run had no integrity checker (nothing was protected).
    */
   readonly protectedChanged?: readonly MaskedText[];
+  /**
+   * G-A: present with reason `plan_pending` only. The stored plan's digest, the one value both
+   * `codaryn apply --digest` and the app layer's `applyPlan(runId, digest)` take (DR-1), and its
+   * number of actions.
+   */
+  readonly plan?: { readonly digest: ContentHash; readonly actions: number };
+  /** G-A: present with reason `awaiting_review` only. The workflow's checklist, masked. */
+  readonly review?: { readonly checklist: readonly MaskedText[] };
 }
 
 /** Printed on stdout as one JSON line when the CLI stops before a run starts. */
@@ -241,7 +346,10 @@ export interface InputDiagnostic {
 
 export type CliOutput = EngineResult | CliErrorOutput;
 
-/** `complete`: every changed file was reverted (or nothing had changed). `partial`: some were skipped. */
+/**
+ * `complete`: every changed file was reverted or was already as before the run (`already_reverted`),
+ * or nothing had changed. `partial`: some file was skipped for any other reason (N-22).
+ */
 export const REVERT_EXIT_CODES = { complete: 0, partial: 3 } as const;
 export type RevertStatus = keyof typeof REVERT_EXIT_CODES;
 
@@ -263,6 +371,8 @@ export interface RevertOutput {
   readonly skipped: RevertOutcome["skipped"];
   /** N-7: present and true for `--dry-run` only. */
   readonly dryRun?: true;
+  /** DR-25: RevertOutcome.moveSafetyUnchecked, passed on (a dry run that lists a file to move back). */
+  readonly moveSafetyUnchecked?: true;
   /**
    * N-7: the run's revert record from before this command, when it had one: the run was already
    * reverted at `at` with that status. A second revert of the same run normally skips every file
@@ -277,8 +387,20 @@ export interface RevertOutput {
  * RevertOutput or CliErrorOutput, and `report --json`, `doctor --json`, `models --json`,
  * `init --json` and `runs --json` print ReportOutput, DoctorOutput, ModelsOutput, InitOutput and
  * RunsOutput (their default output is text, see commands.ts) or CliErrorOutput.
+ * G-A: `apply` prints ApplyResult or CliErrorOutput; `plan --json` and `review --json` print
+ * PlanOutput and ReviewOutput (their default output is text) or CliErrorOutput.
  */
-export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput | ModelsOutput | InitOutput | RunsOutput;
+export type CommandOutput =
+  | CliOutput
+  | RevertOutput
+  | ReportOutput
+  | DoctorOutput
+  | ModelsOutput
+  | InitOutput
+  | RunsOutput
+  | ApplyResult
+  | PlanOutput
+  | ReviewOutput;
 
 /** Injected time source in milliseconds. */
 export interface Clock {

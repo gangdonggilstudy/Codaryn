@@ -12,6 +12,8 @@
  * directory; nothing removes them automatically. Delete it once the run is no longer needed.
  */
 
+import type { CliErrorCode } from "./engine.js";
+import type { ApprovalChannel } from "./plan.js";
 import type { RawText } from "./text.js";
 import type { ResolvedPath } from "./workspace.js";
 
@@ -48,10 +50,26 @@ export interface ChangeRecorderOptions {
 /** Signature of `createChangeRecorder`, exported by `src/store/index.ts`. */
 export type CreateChangeRecorder = (options: ChangeRecorderOptions) => ChangeRecorder;
 
+/**
+ * DR-25: the person's consent to move files back unsafely (`unsafe_move`: no hard links on that
+ * volume) in one revert of an apply run. Like UnsafeMoveConsent (DR-21) it comes only from a
+ * person: the CLI's own argument on `codaryn revert` (UNSAFE_MOVE_CONSENT_ARGUMENT, `cli-flag`), a
+ * terminal answer (`cli-tty`), or an adapter after the person agreed on screen (`adapter`). No task,
+ * config, profile, record or model can give it. It names the run being reverted and holds for this
+ * one revert only: a later revert needs it again.
+ */
+export interface RevertUnsafeMoveConsent {
+  readonly channel: ApprovalChannel;
+  /** Must equal RevertRequest.runId; a consent for another run counts as none. */
+  readonly runId: string;
+}
+
 export interface RevertRequest {
   /** Real absolute path of the workspace root. */
   readonly workspaceRoot: string;
   readonly runId: string;
+  /** DR-25: the person's consent for this revert, or absent/null for none (unsafe moves are skipped). */
+  readonly unsafeMoveConsent?: RevertUnsafeMoveConsent | null;
   /**
    * N-7: decide every file exactly as a revert would, and change nothing: no file is written,
    * deleted or created, and no lock or record is taken or written. The outcome lists what would be
@@ -72,15 +90,40 @@ export interface RevertRecord {
   readonly schemaVersion: 1;
   readonly kind: "revert_record";
   readonly runId: string;
-  /** When the revert finished, ISO 8601 UTC. */
+  /** When the revert finished, ISO 8601 UTC (RUN_TIMESTAMP_PATTERN_SOURCE). */
   readonly at: string;
   readonly status: "complete" | "partial";
   /** Number of files reverted and skipped. */
   readonly reverted: number;
   readonly skipped: number;
+  /**
+   * DR-25: how the person consented to unsafe moves for this revert, or null for no consent.
+   * Absent in records written before DR-25 (no consent).
+   */
+  readonly unsafeMoveConsent?: ApprovalChannel | null;
+  /** DR-25: number of files moved back unsafely, with that consent. Absent: 0. */
+  readonly unsafeMoves?: number;
 }
 
-export type RevertAction = "restored" | "deleted";
+/**
+ * N-22: signatures of `readRevertRecord` and `writeRevertRecord`, exported by `src/store/index.ts`.
+ * - read: the run's checked record, or null when it has none. Rejects when one exists but cannot
+ *   be read or fails the checks (same run id, timestamp pattern, known status); `revert` then
+ *   leaves `revertedBefore` out.
+ * - write: replaces the record atomically (temporary file and rename). The run directory must
+ *   exist; it is not created. Rejects on failure; `revert` treats the record as best effort.
+ */
+export type ReadRevertRecord = (workspaceRoot: string, runId: string) => Promise<RevertRecord | null>;
+export type WriteRevertRecord = (workspaceRoot: string, record: RevertRecord) => Promise<void>;
+
+/**
+ * restored, deleted: a `file_changed` path (phase 2). G-A, for an apply run:
+ * - moved_back: a `file_moved` file was renamed from `to` back to `from`
+ * - restored_from_discard: a `file_discarded` file was renamed from `.codaryn/discarded/<runId>/`
+ *   (DR-9) back to its path
+ */
+export const REVERT_ACTIONS = ["restored", "deleted", "moved_back", "restored_from_discard"] as const;
+export type RevertAction = (typeof REVERT_ACTIONS)[number];
 
 /**
  * changed_since_run: the file's current state is not what the run left (a later edit, or the
@@ -88,8 +131,24 @@ export type RevertAction = "restored" | "deleted";
  * writing this file failed. missing_record: an original was kept for this path but the journal
  * has no `file_changed` for it (the run stopped between the snapshot and the record), so the
  * state the run left is unknown and the file is not touched (T-10).
+ * already_reverted (N-22): the file is already as it was before the run (its current hash equals
+ * the first `previousHash` recorded for it, or it is absent when the run created it). Nothing is
+ * left to do for it, so it does not make the outcome partial.
+ * original_path_taken (G-A): a moved or discarded file cannot go back because something now
+ * exists at its original path; nothing is replaced.
+ * unsafe_move (DR-24 b, DR-25): the file could go back only by a rename that does not refuse an
+ * existing destination (no hard links on that volume), and the request has no consent for this
+ * revert (RevertRequest.unsafeMoveConsent); it is not moved. Reverting again with consent moves it.
  */
-export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record"] as const;
+export const REVERT_SKIP_REASONS = [
+  "changed_since_run",
+  "missing_snapshot",
+  "io_error",
+  "missing_record",
+  "already_reverted",
+  "original_path_taken",
+  "unsafe_move",
+] as const;
 export type RevertSkipReason = (typeof REVERT_SKIP_REASONS)[number];
 
 /**
@@ -100,6 +159,13 @@ export interface RevertedFile {
   readonly path: string;
   /** `deleted`: the run created the file (its original is `null`). */
   readonly action: RevertAction;
+  /**
+   * G-A: for `moved_back`, the masked path the file was moved back from (the record's `to`). For a
+   * moved or discarded file `path` is the place it returned to. Absent for the other actions.
+   */
+  readonly from?: string;
+  /** DR-25: present and true when the file was moved back unsafely, with consent. Never in a dry run. */
+  readonly unsafe?: true;
 }
 
 export interface SkippedFile {
@@ -115,7 +181,26 @@ export interface SkippedFile {
 export interface RevertOutcome {
   readonly reverted: readonly RevertedFile[];
   readonly skipped: readonly SkippedFile[];
+  /**
+   * DR-25, dry run only: present and true when `reverted` lists a file that would be moved back
+   * (`moved_back`, `restored_from_discard`). A dry run does not check whether this drive can move
+   * files back without risk of replacing one (it creates nothing, N-7); the real revert checks it
+   * before each move and, without the person's consent, skips the files it cannot move safely as
+   * `unsafe_move`. So such a file may still be skipped by the real revert.
+   */
+  readonly moveSafetyUnchecked?: true;
 }
+
+/**
+ * The codes `revertRun` rejects with (an error carrying one of them as `code`), always before it
+ * changes anything, also with `dryRun`. The CLI prints each as CliErrorOutput with that code:
+ * - run_not_found: the workspace has no journal for that run
+ * - invalid_run_record: the run's records cannot be read or parsed, or fail a check
+ * - plan_run_missing (R-9c C-1): an apply run whose plan run (`apply_started.planRunId`) has no
+ *   directory or no plan.json any more, so its files' real paths are not known
+ */
+export const REVERT_ERROR_CODES = ["run_not_found", "invalid_run_record", "plan_run_missing"] as const satisfies readonly CliErrorCode[];
+export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
 
 /**
  * Signature of `revertRun`, exported by `src/store/index.ts`.
@@ -133,10 +218,52 @@ export interface RevertOutcome {
  *   token therefore shows up twice: masked as `missing_snapshot`, unmasked as `missing_record`.
  * - A last journal line that was cut off (no final LF, not parseable) is ignored (T-10).
  * - A failure on one file is reported for that file and the others continue. It rejects only
- *   when the journal cannot be read or another line cannot be parsed, and then nothing was
- *   changed.
+ *   when the journal cannot be read or another line cannot be parsed, or (an apply run) its plan
+ *   cannot be used, and then nothing was changed. The codes are REVERT_ERROR_CODES.
  * - The caller holds the workspace lock while it runs. Nothing is written to the run's journal.
  * - With `dryRun` (N-7) the same decisions are made and reported, and nothing is changed; the
  *   caller takes no lock. Errors are the same.
+ * - G-A, an apply run (its journal starts with `apply_started`, ApplyJournalEvent): its
+ *   `file_moved` and `file_discarded` records are handled in reverse order. A moved file goes back
+ *   from `to` to `from` when the file at `to` has the recorded SHA-256 and nothing exists at
+ *   `from`; a discarded file goes back from `.codaryn/discarded/<runId>/` (DR-9) the same way.
+ *   Otherwise it is skipped (`changed_since_run`, `original_path_taken`). Renames only: nothing is
+ *   copied or replaced. Directories the apply created are left in place.
+ *   - DR-24 (f): the records' paths are masked, so the real paths come from the plan run's
+ *     plan.json (StoredPlan.actions, by `index`). Before any of it is used, the SHA-256 of
+ *     plan.json's bytes must equal the apply journal's `apply_started.digest`, and the plan must
+ *     name `apply_started.planRunId`; otherwise the revert rejects as `invalid_run_record` and
+ *     changes nothing (also with `dryRun`). R-9c C-1: when the plan run's directory or its
+ *     plan.json does not exist at all, it rejects as `plan_run_missing` instead, so the person
+ *     learns the cause (a deleted plan run), not "damaged records". Each record's `sha256` must equal the plan action's.
+ *   - DR-24 (a): a discarded file is read only at `.codaryn/discarded/<runId>/<stored>`, where the
+ *     discarded directory and the run's directory in it are plain directories (not links) and
+ *     `stored` is one segment matching DISCARDED_STORED_NAME_PATTERN_SOURCE and equal to the
+ *     record's `index` (plan.ts). A record whose `stored` is anything else is `invalid_run_record`;
+ *     a file there that is a link is skipped (`changed_since_run`).
+ *   - DR-24 (b): a move back is made like an apply's move (refusing an existing destination). When
+ *     that cannot be done on the volume, the file is skipped as `unsafe_move`; nothing falls back
+ *     to "check, then rename" on its own.
+ *   - DR-25: with the person's consent for this revert (`unsafeMoveConsent` naming this `runId`),
+ *     such a file goes back by a plain rename made right after checking that its original path is
+ *     still free, and is reported `unsafe: true`. A consent for another run counts as none. Files
+ *     that can go back safely are moved safely either way. The CLI writes the consent channel and
+ *     the number of unsafe moves into revert.json (RevertRecord).
+ *   - With `dryRun` nothing is created, not even a probe (N-7), so whether the volume has hard links
+ *     is not judged: a file that could go back is listed in `reverted` without `unsafe`, no file is
+ *     skipped as `unsafe_move`, and the consent is not used. The outcome says so with
+ *     `moveSafetyUnchecked` whenever it lists such a file. The real revert checks it.
+ *   - R-9 I-4: an action with a `plan_item_started` record (PlanItemStartedEvent) but neither a
+ *     `file_moved`/`file_discarded` nor a `plan_item_failed` for its index may or may not have
+ *     been done (the process ended in between). It is handled in the same reverse order, with the
+ *     real paths from the plan as above and the masked paths of the start record:
+ *     - done: the file with the action's SHA-256 is at `to` (a move) or at
+ *       `.codaryn/discarded/<runId>/<discardedStoredName(index)>` (a discard), and nothing exists
+ *       at the original path. It goes back as a recorded one would (`moved_back`,
+ *       `restored_from_discard`).
+ *     - not done: the file with that SHA-256 is still at its original path and nothing is at the
+ *       destination. Nothing is to be reverted and it is not listed.
+ *     - anything else: skipped as `changed_since_run`; nothing is touched.
+ *   - An action with a `plan_item_failed` record was not done and is not listed.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

@@ -9,10 +9,11 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
+import { CALL_ID_PATTERN_SOURCE, REPLACED_CALL_ID_PREFIX } from "../../../src/contracts/index.js";
 import type { EngineResult } from "../../../src/contracts/index.js";
 import { UNKNOWN_TOOL_NAME, createCodarynApp } from "../../../src/app/index.js";
 import type { ChangesOutput, RunEvent, RunHandle, RunOutcome, StartOutcome } from "../../../src/app/index.js";
-import { FAKE_SECRET, SECRET_ENV, WRITE_NOTES, appEnvironment, exists, readJournal, runDir, setupRun, taskRequest } from "./support.js";
+import { FAKE_SECRET, SECRET_ENV, WRITE_NOTES, appEnvironment, exists, readJournal, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
 function handleOf(started: StartOutcome): RunHandle {
   assert.equal(started.ok, true, JSON.stringify(started));
@@ -67,7 +68,10 @@ describe("DR-4: the run environment", () => {
     // LANG is on the child allowlist; a value shorter than 8 characters is not registered as a secret (S-4).
     const varsFile = path.join(base, "vars.env");
     await writeFile(varsFile, "LANG=xx_YY\n", "utf8");
-    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== "LANG"));
+    // Without LANG, and without the variables that name a default config location (N-1), so this
+    // machine's own config file is never read by the test.
+    const dropped = new Set(["LANG", "APPDATA", "XDG_CONFIG_HOME"]);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !dropped.has(name.toUpperCase())));
     const app = createCodarynApp(await appEnvironment(base, { env: { ...env, [SECRET_ENV]: FAKE_SECRET } }));
     const handle = handleOf(await app.startRun(taskRequest(base, { varsFile })));
     finished(await handle.done);
@@ -95,7 +99,10 @@ describe("events after R-1 L-1", () => {
     const decision = events.find((event) => event.kind === "record" && event.record.type === "tool_decision");
     assert.ok(decision !== undefined && decision.kind === "record" && decision.record.type === "tool_decision");
     assert.equal(decision.record.tool, UNKNOWN_TOOL_NAME);
-    assert.equal(decision.record.callId.startsWith("call-"), true, "the id is masked, not dropped");
+    // AC-D15: the model's id held a registered secret, so the engine records a replacement,
+    // REPLACED_CALL_ID_PREFIX and a number, which passes CALL_ID_PATTERN_SOURCE.
+    assert.match(decision.record.callId, new RegExp(CALL_ID_PATTERN_SOURCE), "the engine's safe call id");
+    assert.equal(decision.record.callId.startsWith(REPLACED_CALL_ID_PREFIX), true, "an id with a secret is replaced, not kept");
     const records = events.flatMap((event) => (event.kind === "record" ? [event.record.seq] : []));
     const journal = await readJournal(base, handle.runId);
     assert.deepEqual(records, journal.map((record) => record.seq), "every stored record is still delivered");
@@ -135,7 +142,7 @@ describe("DR-7: changes", () => {
 
   test("lists each changed file with its state; no text while the run keeps no record of its masking (R-11)", async () => {
     const { base, runId, app } = await changedRun();
-    const view = output(await app.changes({ run: taskRequest(base), runId }));
+    const view = output(await app.changes({ settings: taskForm(base), runId }));
     assert.deepEqual([view.kind, view.runId, view.masking], ["changes", runId, "current_secrets"]);
     assert.equal(JSON.stringify(view).includes(FAKE_SECRET), false, "only masked text leaves the app layer");
 
@@ -151,7 +158,7 @@ describe("DR-7: changes", () => {
     await rm(path.join(base, "work", "README.md"));
     const runs = await readdir(path.join(base, "work", ".codaryn", "runs"));
 
-    const view = output(await app.changes({ run: taskRequest(base), runId }));
+    const view = output(await app.changes({ settings: taskForm(base), runId }));
     const [readme, notes] = view.files;
     assert.deepEqual([readme?.state, readme?.before, readme?.after, readme?.unavailable], ["missing", null, null, "masking_unverified"]);
     assert.deepEqual([notes?.state, notes?.after, notes?.unavailable], ["changed_since_run", null, "masking_unverified"]);
@@ -163,11 +170,11 @@ describe("DR-7: changes", () => {
   test("needs the settings to resolve now; otherwise it is the run's error and nothing is shown", async () => {
     const { base, runId } = await changedRun();
     const unset = createCodarynApp(await appEnvironment(base, { env: {} }));
-    const refused = await unset.changes({ run: taskRequest(base), runId });
+    const refused = await unset.changes({ settings: taskForm(base), runId });
     assert.deepEqual(refused.ok ? null : refused.error.code, "secret_env_missing");
 
     const { app } = await changedRun();
-    const unknown = await app.changes({ run: taskRequest(base), runId: "20261112T000000Z-00000000" });
+    const unknown = await app.changes({ settings: taskForm(base), runId: "20261112T000000Z-00000000" });
     assert.deepEqual(unknown.ok ? null : unknown.error.code, "run_not_found");
   });
 });

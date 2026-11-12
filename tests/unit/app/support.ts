@@ -9,9 +9,10 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after } from "node:test";
-import type { JournalRecord } from "../../../src/contracts/index.js";
-import { readVarsFileSync } from "../../../src/app/index.js";
-import type { AppEnvironment, StartRunRequest } from "../../../src/app/index.js";
+import assert from "node:assert/strict";
+import type { EngineResult, JournalRecord } from "../../../src/contracts/index.js";
+import { createCodarynApp, readVarsFileSync } from "../../../src/app/index.js";
+import type { AppEnvironment, CodarynApp, StartRunRequest, TaskForm } from "../../../src/app/index.js";
 
 /** Registered as a secret through SECRET_ENV. Not key-shaped. */
 export const FAKE_SECRET = "fake-secret-APP-VALUE-0031";
@@ -126,6 +127,11 @@ export function taskRequest(base: string, overrides: Partial<StartRunRequest> = 
   };
 }
 
+/** DR-17: the task form of the same task file (plan, apply, review, changes). */
+export function taskForm(base: string, overrides: Partial<TaskForm> = {}): TaskForm {
+  return { input: { kind: "task", taskPath: path.join(base, "task.json") }, configPath: null, varsFile: null, profile: null, ...overrides };
+}
+
 export function runDir(base: string, runId: string): string {
   return path.join(base, "work", ".codaryn", "runs", runId);
 }
@@ -137,4 +143,32 @@ export async function readJournal(base: string, runId: string): Promise<JournalR
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as JournalRecord);
+}
+
+/** G-A: a task on the built-in organize workflow (plan "apply") whose script proposes one move. */
+export const PLAN_TASK = {
+  workflowRef: "organize",
+  policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move"] },
+  verifiers: [],
+};
+
+export function planSteps(from = "a.txt", to = "sorted/a.txt"): unknown[] {
+  return [{ toolCalls: [{ name: "propose_plan", args: { summary: "sort", actions: [{ kind: "move", from, to }] } }] }];
+}
+
+/** A plan run through the app layer that ended as plan_pending, with its digest. */
+export async function plannedRun(
+  files: Readonly<Record<string, string>> = { "a.txt": "alpha\n" },
+  steps: readonly unknown[] = planSteps(),
+): Promise<{ base: string; app: CodarynApp; plan: EngineResult; digest: string }> {
+  const base = await setupRun(files, PLAN_TASK, steps);
+  const app = createCodarynApp(await appEnvironment(base));
+  const started = await app.startRun(taskRequest(base));
+  assert.ok(started.ok, JSON.stringify(started));
+  const ended = await started.handle.done;
+  assert.ok(ended.ok, JSON.stringify(ended));
+  assert.deepEqual([ended.result.status, ended.result.reason], ["needs-input", "plan_pending"]);
+  const digest = ended.result.plan?.digest ?? "";
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  return { base, app, plan: ended.result, digest };
 }

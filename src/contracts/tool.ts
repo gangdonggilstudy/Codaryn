@@ -3,6 +3,8 @@
  * Requirements are fixed here in code. A model, a task or a project file cannot lower them.
  */
 
+import { MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS } from "./plan.js";
+import type { PlanActionKind, ProposePlanArgs, ProposePlanPayload } from "./plan.js";
 import { CONTENT_HASH_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, JsonObject, MaskedText, RawText } from "./text.js";
 
@@ -113,7 +115,27 @@ export interface ToolPayloadByName {
 
 export type ToolPayload = ToolPayloadByName[ToolName];
 
-/** A call as the model requested it. Names and args are unvalidated and may contain tokens. */
+/**
+ * AC-D15 (DR-13): what the engine records, returns and sends back in place of a tool name that is
+ * in no tool list (ALL_TOOL_NAMES). A valid tool-name token, so a provider can send it back as a
+ * tool_use name; never offered, so a call to it is `unknown_tool`. People see "(unknown tool)".
+ */
+export const UNKNOWN_TOOL_RECORD_NAME = "unknown_tool";
+
+/**
+ * AC-D15: a call id the engine keeps as the model gave it: 1 to 64 of `A-Z a-z 0-9 _ -`, holding no
+ * registered secret, and not already standing for another id. The engine replaces any other id with
+ * REPLACED_CALL_ID_PREFIX and a number (the same one for every use of that id in the run) before it
+ * records the call, answers it or sends it back, so the pair of a call and its result still match.
+ */
+export const CALL_ID_PATTERN_SOURCE = "^[A-Za-z0-9_-]{1,64}$";
+export const REPLACED_CALL_ID_PREFIX = "codaryn-call-";
+
+/**
+ * A call as the model requested it. Names and args are unvalidated and may contain tokens.
+ * AC-D15: the engine records it only with a known name (else UNKNOWN_TOOL_RECORD_NAME) and an id
+ * that passes CALL_ID_PATTERN_SOURCE and masking (else a replacement).
+ */
 export interface ToolCall {
   readonly id: string;
   readonly name: string;
@@ -149,6 +171,8 @@ export const TOOL_ERROR_CODES = [
   "spawn_failed",
   "cancelled",
   "io_error",
+  /** G-A: `propose_plan` refused the plan (PLAN_PROBLEMS). The message names the action index and the code. */
+  "invalid_plan",
 ] as const;
 export type ToolErrorCode = (typeof TOOL_ERROR_CODES)[number];
 
@@ -178,6 +202,12 @@ export interface ToolRequirements {
   readonly command: boolean;
   readonly network: boolean;
   readonly destructive: boolean;
+  /**
+   * G-A: a plan action (PLAN_ACTION_DESCRIPTORS only). The gate denies it unless
+   * `PolicyConfig.planActions` lists the kind: permission `destructive`, code
+   * `plan_action_not_allowed`. Absent on every tool.
+   */
+  readonly planAction?: PlanActionKind;
 }
 
 export interface ToolDescriptor {
@@ -188,6 +218,11 @@ export interface ToolDescriptor {
   readonly restoreFields: readonly string[];
   /** Fields that stay masked and are handled by `PrivacyGateway.rebuildDocument`. */
   readonly documentFields: readonly string[];
+  /**
+   * G-A (E5): "plan" marks the tool whose success ends the run as `needs-input`/`plan_pending`
+   * (`propose_plan`). The engine acts on this property, never on a tool name.
+   */
+  readonly endsRun?: "plan";
 }
 
 export const BUILTIN_TOOLS: { readonly [N in ToolName]: ToolDescriptor & { readonly name: N } } = {
@@ -347,13 +382,209 @@ export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
 };
 
 /**
+ * G-A: tools only a workflow offers (design general-tasks.md 5.3 and 6). They are not in
+ * TOOL_NAMES, so a task without workflow settings never sees them and everything keyed by
+ * ToolName (the engine's dispatch, TOOL_DEFINITIONS, `ModelRequest.tools`) is unchanged.
+ * A task lists them in `tools` (WorkflowSettings); the engine offers them through
+ * `ModelRequest.workflowTools` and runs them with `ToolRunner.executeWorkflowTool`.
+ */
+export const WORKFLOW_TOOL_NAMES = ["inspect_files", "propose_plan"] as const;
+export type WorkflowToolName = (typeof WORKFLOW_TOOL_NAMES)[number];
+
+/** Every tool name a task's `tools` may list: the built-in ones first, in TOOL_NAMES order. */
+export const ALL_TOOL_NAMES = [...TOOL_NAMES, ...WORKFLOW_TOOL_NAMES] as const;
+export type AnyToolName = ToolName | WorkflowToolName;
+
+/** Most entries one `inspect_files` call returns. More continue with `after`. */
+export const MAX_INSPECT_ENTRIES = 500;
+/** Most bytes one `inspect_files` call hashes with `hash: true`. Files beyond it get no `sha256`. */
+export const MAX_INSPECT_HASH_BYTES = 64 * 1024 * 1024;
+
+/** Lists a directory's tree with sizes and times. Reads no file content except to hash it. */
+export interface InspectFilesArgs {
+  /** Directory relative to the workspace root. "." for the root. */
+  readonly path: string;
+  /** The `next` value of the previous call: entries after this path, in code unit order. */
+  readonly after?: string;
+  /** Adds each file's SHA-256 (for finding duplicates), within MAX_INSPECT_HASH_BYTES per call. */
+  readonly hash?: boolean;
+}
+
+export interface InspectEntry {
+  /** Relative to the workspace root, `/` separated. */
+  readonly path: string;
+  readonly kind: "file" | "dir";
+  /** Bytes; null for a directory. */
+  readonly size: number | null;
+  /** Last modification, ISO 8601 UTC; null when unknown. */
+  readonly modifiedAt: string | null;
+  /** Only with `hash: true`, for files hashed within the call's byte budget. */
+  readonly sha256?: ContentHash;
+}
+
+export interface InspectFilesPayload {
+  /** Sorted by path in code unit order, at most MAX_INSPECT_ENTRIES. The state directory is never listed. */
+  readonly entries: readonly InspectEntry[];
+  /** Pass as `after` to continue; null when the listing is complete. */
+  readonly next: string | null;
+  /** True when `hash` was asked and some files were left without `sha256` (byte budget). */
+  readonly hashesIncomplete: boolean;
+}
+
+export interface WorkflowToolArgsByName {
+  readonly inspect_files: InspectFilesArgs;
+  readonly propose_plan: ProposePlanArgs;
+}
+
+export interface WorkflowToolPayloadByName {
+  readonly inspect_files: InspectFilesPayload;
+  readonly propose_plan: ProposePlanPayload;
+}
+
+export type WorkflowToolPayload = WorkflowToolPayloadByName[WorkflowToolName];
+
+/** A workflow tool call after the same checks as EffectiveToolCall. */
+export type EffectiveWorkflowToolCall = {
+  readonly [N in WorkflowToolName]: {
+    readonly id: string;
+    readonly name: N;
+    readonly args: WorkflowToolArgsByName[N];
+  };
+}[WorkflowToolName];
+
+export type RawWorkflowToolOutcome =
+  | { readonly ok: true; readonly payload: WorkflowToolPayload }
+  | { readonly ok: false; readonly code: ToolErrorCode; readonly message: RawText };
+
+/**
+ * Requirements of the workflow tools. `propose_plan` declares no path itself: each action is
+ * judged with PLAN_ACTION_DESCRIPTORS (plan.ts). It writes plan.json, so its display class is not
+ * "read" and a call whose outcome is unknown is not retried.
+ */
+export const WORKFLOW_TOOLS: { readonly [N in WorkflowToolName]: ToolDescriptor & { readonly name: N } } = {
+  inspect_files: {
+    name: "inspect_files",
+    displayClass: "read",
+    requires: {
+      paths: [{ field: "path", access: "read" }],
+      command: false,
+      network: false,
+      destructive: false,
+    },
+    restoreFields: ["path"],
+    documentFields: [],
+  },
+  propose_plan: {
+    name: "propose_plan",
+    displayClass: "write-local",
+    requires: {
+      paths: [],
+      command: false,
+      network: false,
+      destructive: false,
+    },
+    restoreFields: [],
+    documentFields: [],
+    endsRun: "plan",
+  },
+};
+
+/** Every descriptor by name, built-in and workflow tools. */
+export const ALL_TOOL_DESCRIPTORS: { readonly [N in AnyToolName]: ToolDescriptor & { readonly name: N } } = {
+  ...BUILTIN_TOOLS,
+  ...WORKFLOW_TOOLS,
+};
+
+const PLAN_PATH_PROPERTY: JsonObject = {
+  type: "string",
+  minLength: 1,
+  description: "File path relative to the workspace root.",
+};
+
+/** What a provider tells the model about the workflow tools. Fixed text, as TOOL_DEFINITIONS. */
+export const WORKFLOW_TOOL_DEFINITIONS: { readonly [N in WorkflowToolName]: ToolDefinition } = {
+  inspect_files: {
+    description:
+      "List files and directories under a workspace directory, recursively, with size and " +
+      "modification time. Set hash to true to also get each file's SHA-256, for example to find " +
+      "duplicates. When next is not null, call again with after set to it to continue.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          description: 'Directory relative to the workspace root. Use "." for the root.',
+        },
+        after: { type: "string", minLength: 1 },
+        hash: { type: "boolean" },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  propose_plan: {
+    description:
+      "Propose the complete plan of file moves and discards, once. Nothing is changed now: a " +
+      "person reviews the plan and applies it later. move renames a file to a path that must not " +
+      "exist yet. discard sets a file aside so it can be restored. Only regular files can be moved " +
+      "or discarded. After this call the run ends.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: MAX_PLAN_SUMMARY_CHARS },
+        actions: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_PLAN_ACTIONS,
+          items: {
+            anyOf: [
+              {
+                type: "object",
+                properties: { kind: { const: "move" }, from: PLAN_PATH_PROPERTY, to: PLAN_PATH_PROPERTY },
+                required: ["kind", "from", "to"],
+                additionalProperties: false,
+              },
+              {
+                type: "object",
+                properties: { kind: { const: "discard" }, path: PLAN_PATH_PROPERTY },
+                required: ["kind", "path"],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+      },
+      required: ["summary", "actions"],
+      additionalProperties: false,
+    },
+  },
+};
+
+/** Every definition by name, built-in and workflow tools. */
+export const ALL_TOOL_DEFINITIONS: { readonly [N in AnyToolName]: ToolDefinition } = {
+  ...TOOL_DEFINITIONS,
+  ...WORKFLOW_TOOL_DEFINITIONS,
+};
+
+/**
  * Created by `createToolRunner` (src/tools). Besides the workspace and the privacy gateway it
  * takes an optional `changeRecorder` (`ChangeRecorder`, see changes.ts). When one is given,
  * `write_file` hands it the file's original before writing, and does not write when that fails.
+ * G-A: it also takes an optional `planRecorder` (`PlanRecorder`, plan.ts), which `propose_plan`
+ * needs; without one `propose_plan` fails with `io_error` and stores nothing. DR-28: `propose_plan`
+ * hands every action to it with `shown`, built with the runner's own `privacy` gateway
+ * (PlanRecorder.savePlan).
  */
 export interface ToolRunner {
   /** Executes one call that already passed every check. Never throws for tool-level failures. */
   execute(call: EffectiveToolCall, signal: AbortSignal): Promise<RawToolOutcome>;
+  /**
+   * G-A: executes one workflow tool call that already passed every check (for `propose_plan`, the
+   * policy check of every action). Never throws for tool-level failures. A runner without it
+   * cannot run workflow tools: the engine then answers such a call `unknown_tool`.
+   */
+  executeWorkflowTool?(call: EffectiveWorkflowToolCall, signal: AbortSignal): Promise<RawWorkflowToolOutcome>;
 }
 
 export const MAX_READ_BYTES = 262_144;

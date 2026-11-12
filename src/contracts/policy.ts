@@ -4,7 +4,8 @@
  */
 
 import type { PolicyConfig } from "./task.js";
-import type { EffectiveToolCall, ToolCall, ToolDescriptor } from "./tool.js";
+import type { JsonObject } from "./text.js";
+import type { EffectiveToolCall, EffectiveWorkflowToolCall, ToolCall, ToolDescriptor } from "./tool.js";
 import type { Workspace } from "./workspace.js";
 
 export const PERMISSION_KINDS = ["path", "command", "network", "destructive", "restore"] as const;
@@ -21,10 +22,17 @@ export const POLICY_DENIAL_CODES = [
   "restore_denied",
   /** A write under `PolicyConfig.protectedPaths` (R-5). Permission `path`. */
   "protected_path",
+  /** G-A: a plan action whose kind `PolicyConfig.planActions` does not list. Permission `destructive`. */
+  "plan_action_not_allowed",
 ] as const;
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 
-/** Phase 1a is non-interactive: a decision is allow or deny, never "ask". */
+/**
+ * Phase 1a is non-interactive: a decision is allow or deny, never "ask".
+ * G-A: unchanged in stage 4. Plan approval happens between runs (plan.ts, DR-1), not here. The
+ * in-run permission question (N-11) is decided as DR-3 and comes at the start of stage 5; its
+ * decision value and `EngineDeps.confirm` are named here only and not part of this contract yet.
+ */
 export type PolicyDecision =
   | { readonly allowed: true }
   | { readonly allowed: false; readonly permission: PermissionKind; readonly code: PolicyDenialCode };
@@ -43,8 +51,20 @@ export interface PolicyGate {
   /**
    * Second check on the effective arguments after restoration: real paths after resolving
    * links, and the actual command and args. Only an allowed result may be executed.
+   * G-A: besides built-in tool calls it judges workflow tool calls and single plan actions
+   * (PlanActionCall); like the first check it reads the descriptor's fields from `args`.
    */
-  checkEffective(call: EffectiveToolCall, descriptor: ToolDescriptor): Promise<PolicyDecision>;
+  checkEffective(call: EffectiveToolCall | EffectiveWorkflowToolCall | PlanActionCall, descriptor: ToolDescriptor): Promise<PolicyDecision>;
+}
+
+/**
+ * G-A: one plan action as the policy gate judges it, with a name from PLAN_ACTION_DESCRIPTORS and
+ * the action's path fields only (`from` and `to`, or `path`), effective after restoration.
+ */
+export interface PlanActionCall {
+  readonly id: string;
+  readonly name: string;
+  readonly args: JsonObject;
 }
 
 export interface PolicyGateOptions {

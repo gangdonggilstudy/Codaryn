@@ -1,0 +1,22 @@
+{
+  "name": "codaryn-gui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codaryn standalone GUI (Electron). Development package; the CLI and engine keep zero runtime dependencies.",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "type": "module",
+  "main": "build/src/main/main.js",
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "scripts": {
+    "build": "node scripts/build/build.mjs",
+    "check:lock": "node scripts/build/check-lock.mjs",
+    "test": "node scripts/build/build.mjs && node scripts/build/check-lock.mjs && node --test \"build/tests/unit/**/*.test.js\"",
+    "test:smoke": "node scripts/build/smoke.mjs",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "45.3.1"
+  }
+}

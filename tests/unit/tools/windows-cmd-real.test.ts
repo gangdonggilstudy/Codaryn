@@ -162,13 +162,43 @@ test("G1 real: .exe by name still starts without a shell; an unknown name is ENO
   assert.deepEqual(missing, { spawnFailed: true, message: "could not start process (ENOENT)" });
 });
 
-/** tree.cmd starts node, which writes its pid and then waits forever. */
+/**
+ * How long the node under tree.cmd lives when nothing ends it. N-28: the test has no handle to it
+ * and never ends it by its pid (a freed pid may belong to another test's process by then), so it
+ * ends by itself. The tests check it is gone well before this, so its own end cannot pass for the
+ * runner's.
+ */
+const TREE_SLEEPER_MS = 15_000;
+
+/**
+ * A sleeper leaves the sandbox as its working directory first: Windows does not remove a directory
+ * that a running process works in, and the sandbox is removed while a sleeper may still run.
+ */
+const LEAVE_SANDBOX = "import os from 'node:os'; process.chdir(os.tmpdir()); ";
+
+/** tree.cmd starts node, which writes its pid and start time, then waits TREE_SLEEPER_MS. */
 function writeTree(bin: string, pidFile: string): void {
   fs.writeFileSync(
     path.join(bin, "sleeper.mjs"),
-    "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);\n",
+    LEAVE_SANDBOX +
+      "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], JSON.stringify({ pid: process.pid, startedAt: Date.now() })); " +
+      `setTimeout(() => {}, ${TREE_SLEEPER_MS});\n`,
   );
   writeScript(path.join(bin, "tree.cmd"), `"${process.execPath}" "%~dp0sleeper.mjs" "${pidFile}"`);
+}
+
+/** The pid and start time the sleeper wrote, or null before it wrote them. */
+function readSleeper(pidFile: string): { readonly pid: number; readonly startedAt: number } | null {
+  if (!fs.existsSync(pidFile)) return null;
+  const text = fs.readFileSync(pidFile, "utf8");
+  return text.length === 0 ? null : (JSON.parse(text) as { pid: number; startedAt: number });
+}
+
+/** The sleeper is gone, and the time shows the runner ended it, not its own end. */
+async function assertTreeEnded(sleeper: { readonly pid: number; readonly startedAt: number }): Promise<void> {
+  assert.ok(await waitFor(() => !alive(sleeper.pid), 5_000), "the grandchild node process is gone");
+  const age = Date.now() - sleeper.startedAt;
+  assert.ok(age < TREE_SLEEPER_MS - 3_000, `gone ${age} ms after it started, well before its own end`);
 }
 
 test("G1 real: cancelling a .cmd run also ends the process started under cmd.exe", { skip: !IS_WINDOWS }, async (t) => {
@@ -178,17 +208,14 @@ test("G1 real: cancelling a .cmd run also ends the process started under cmd.exe
   writeTree(box.bin, pidFile);
   const controller = new AbortController();
   const running = box.runner.run(box.request("tree", []), controller.signal);
-  assert.ok(await waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").length > 0, 15_000));
-  const pid = Number(fs.readFileSync(pidFile, "utf8"));
+  assert.ok(await waitFor(() => readSleeper(pidFile) !== null, 15_000));
+  const sleeper = readSleeper(pidFile);
+  assert.ok(sleeper !== null);
   controller.abort();
   const result = await running;
-  try {
-    assert.ok(!("spawnFailed" in result));
-    assert.equal(result.exitCode, null);
-    assert.ok(await waitFor(() => !alive(pid), 5_000), "the grandchild node process is gone");
-  } finally {
-    if (alive(pid)) process.kill(pid);
-  }
+  assert.ok(!("spawnFailed" in result));
+  assert.equal(result.exitCode, null);
+  await assertTreeEnded(sleeper);
 });
 
 test("G1 real: a timeout on a .cmd run also ends the process started under cmd.exe", { skip: !IS_WINDOWS }, async (t) => {
@@ -197,25 +224,24 @@ test("G1 real: a timeout on a .cmd run also ends the process started under cmd.e
   const pidFile = path.join(box.bin, "pid.txt");
   writeTree(box.bin, pidFile);
   const result = await box.runner.run(box.request("tree", [], 3_000), live());
-  const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8") : "0");
-  try {
-    assert.ok(!("spawnFailed" in result));
-    assert.equal(result.timedOut, true);
-    assert.equal(result.exitCode, null);
-    assert.ok(pid > 0, "the grandchild started before the timeout");
-    assert.ok(await waitFor(() => !alive(pid), 5_000), "the grandchild node process is gone");
-  } finally {
-    if (pid > 0 && alive(pid)) process.kill(pid);
-  }
+  const sleeper = readSleeper(pidFile);
+  assert.ok(!("spawnFailed" in result));
+  assert.equal(result.timedOut, true);
+  assert.equal(result.exitCode, null);
+  assert.ok(sleeper !== null, "the grandchild started before the timeout");
+  await assertTreeEnded(sleeper);
 });
 
 test("T-2 real: a .cmd that starts a background process with start /b and exits is not a timeout (review F6-3)", { skip: !IS_WINDOWS }, async (t) => {
   const box = sandbox(t);
   if (box === null) return;
   const pidFile = path.join(box.bin, "bg-pid.txt");
+  // N-28: the background process ends by itself after 4 s; the test has no handle to it and never
+  // ends it by its pid. 4 s outlasts the 2000 ms limit, so it holds the pipes past the time the
+  // run must settle by.
   fs.writeFileSync(
     path.join(box.bin, "sleeper.mjs"),
-    "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 20000);\n",
+    LEAVE_SANDBOX + "import fs from 'node:fs'; fs.writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 4000);\n",
   );
   writeScript(path.join(box.bin, "bgstart.cmd"), `start "" /b "${process.execPath}" "%~dp0sleeper.mjs" "${pidFile}"\r\nexit /b 0`);
   const started = Date.now();
@@ -223,15 +249,11 @@ test("T-2 real: a .cmd that starts a background process with start /b and exits 
   const elapsed = Date.now() - started;
   await waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").length > 0, 5_000);
   const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8") : "0");
-  try {
-    assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.timedOut, false);
-    assert.ok(elapsed < 1_900, `settled after ${elapsed} ms, before the 2000 ms limit`);
-  } finally {
-    // Known limit: the background process outlives the command; end it here.
-    if (pid > 0 && alive(pid)) process.kill(pid);
-  }
+  assert.ok(!("spawnFailed" in result), JSON.stringify(result));
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.timedOut, false);
+  assert.ok(pid > 0, "the background process started");
+  assert.ok(elapsed < 1_900, `settled after ${elapsed} ms, before the 2000 ms limit`);
 });
 
 test("T-4 real: an .exe inside the workspace is not started, by path or through PATH", { skip: !IS_WINDOWS }, async (t) => {

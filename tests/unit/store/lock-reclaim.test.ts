@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { acquireLock } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 const clock = { now: () => Date.UTC(2026, 10, 12, 6, 0, 0) };
 
@@ -47,7 +48,7 @@ test("W-4: the injected liveness check decides, so a pid given to another live p
     await leaveDeadLock(root, reused);
     const ids = ["run-a", "run-b", "run-c"];
     const outcomes = await Promise.all(
-      ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, isProcessAlive: (pid) => pid !== reused })),
+      ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive: (pid) => pid !== reused })),
     );
     const winners = ids.filter((_, index) => outcomes[index]?.ok === true);
     assert.equal(winners.length, 1, `winners ${JSON.stringify(winners)}`);
@@ -63,7 +64,7 @@ test("T-9: contenders reclaiming one dead lock in the same process end with exac
       await leaveDeadLock(root, dead);
       const ids = ["run-a", "run-b", "run-c"];
       const outcomes = await Promise.all(
-        ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, isProcessAlive: crashedIsDead })),
+        ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive: crashedIsDead })),
       );
       const winners = ids.filter((_, index) => outcomes[index]?.ok === true);
       assert.equal(winners.length, 1, `round ${round}: winners ${JSON.stringify(winners)}`);
@@ -90,7 +91,7 @@ test("T-9: separate processes reclaiming one dead lock at the same moment end wi
       const script = [
         `const { acquireLock } = await import(${JSON.stringify(storeUrl)});`,
         `while (Date.now() < ${startAt}) {}`,
-        `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 }, isProcessAlive: (pid) => pid !== ${dead} });`,
+        `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 }, retryForMs: ${ACQUIRE_BUDGET_MS}, isProcessAlive: (pid) => pid !== ${dead} });`,
         "process.stdout.write(JSON.stringify({ ok: outcome.ok, code: outcome.code ?? null }));",
         `await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${startAt + 900} - Date.now())));`,
       ].join("\n");

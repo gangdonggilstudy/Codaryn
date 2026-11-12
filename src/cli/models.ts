@@ -23,6 +23,7 @@ import {
   MODELS_EXIT_CODES,
 } from "../contracts/index.js";
 import type {
+  DefaultConfigLocation,
   AnthropicProviderDeps,
   CodarynConfig,
   ListAnthropicModels,
@@ -31,10 +32,12 @@ import type {
 } from "../contracts/index.js";
 import { parseModelsArgs } from "./args.js";
 import { parseConfig } from "./config.js";
+import { chooseConfigFile } from "./config-file.js";
+import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { cliError } from "./run.js";
+import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey, selectEnvFileSecrets } from "./security/index.js";
-import { envValue, resolveListSettings } from "./settings.js";
+import { envValue, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys } from "./text-safety.js";
@@ -76,6 +79,8 @@ export interface ModelsEnvironment {
   /** Writes the config file (`writeConfigAtomic` when absent). Rejects on failure; the file is unchanged then. */
   readonly writeConfig?: (file: string, text: string, options: ConfigWriteOptions) => Promise<void>;
   readonly signal?: AbortSignal;
+  /** N-1: the default config location, used when neither --config nor CODARYN_CONFIG is given. */
+  readonly defaultConfig?: DefaultConfigLocation | null;
 }
 
 /** A model id that may be written into a config file: printable ASCII of the shapes model ids use. */
@@ -240,23 +245,26 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
   }
 
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
-  const configFromEnv = args.configPath === null ? envValue(io.env, CODARYN_CONFIG_ENV) : null;
-  if (configFromEnv !== null) {
-    const problem = localPathProblem(configFromEnv, io.cwd);
-    if (problem !== null) return cliError("invalid_config", `the path given by ${CODARYN_CONFIG_ENV} ${problem}`);
-  }
-  const configSource = args.configPath ?? configFromEnv;
+  // N-1: --config, CODARYN_CONFIG, then the default location (optional: a missing file means none).
+  const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
+  if (!chosen.ok) return cliError("invalid_config", chosen.message);
+  const candidate = chosen.candidate;
 
   // The config file: same order of checks as `run` (C-1, S-6). Missing is allowed only with --use.
   let config: CodarynConfig | null = null;
   let configText: string | null = null;
   let configPath: string | null = null;
-  if (configSource !== null) {
-    configPath = path.resolve(io.cwd, configSource);
+  if (candidate !== null) {
+    configPath = candidate.path;
     try {
       configText = await io.readFile(configPath);
     } catch (error) {
-      if (!(isMissing(error) && args.use !== null)) return cliError("invalid_config", "the config file cannot be read as JSON");
+      if (candidate.optional && isMissing(error)) {
+        // No file at the default location: no config. `--use` does not create one there.
+        configPath = null;
+      } else if (!(isMissing(error) && args.use !== null)) {
+        return cliError("invalid_config", "the config file cannot be read as JSON");
+      }
     }
     if (configText !== null) {
       const body = configText.startsWith(BOM) ? configText.slice(1) : configText;
@@ -267,7 +275,8 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       try {
         value = JSON.parse(body);
       } catch {
-        return cliError("invalid_config", "the config file cannot be read as JSON");
+        const syntax = jsonSyntaxError("config file", "config", body);
+        return cliError("invalid_config", syntax.message, syntax.diagnostic);
       }
       const found = findKeyInJson(value, currentKey);
       if (found.kind === "key") {
@@ -275,12 +284,15 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       }
       if (found.kind === "too_deep") return cliError("invalid_config", `the config file is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`);
       const outcome = parseConfig(value);
-      if (!outcome.ok) return cliError("invalid_config", outcome.message);
+      if (!outcome.ok) return cliError("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
       config = outcome.config;
     }
   }
   if (args.use !== null && configPath === null) {
-    return cliError("invalid_arguments", `--use writes the config file's model, so it needs --config or ${CODARYN_CONFIG_ENV}; nothing was sent`);
+    return cliError(
+      "invalid_arguments",
+      `--use writes the config file's model, so it needs --config, ${CODARYN_CONFIG_ENV} or a config file at the default location (\`codaryn init\` creates one); nothing was sent`,
+    );
   }
 
   const resolved = resolveListSettings(io.env, config);
@@ -359,13 +371,17 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     current: currentModel(modelFromEnv, writtenModel, models),
     selected,
   };
-  const printed = args.json ? `${JSON.stringify(output)}${LF}` : renderModels(output, !prompted);
+  const printed = args.json ? jsonLine(output) : renderModels(output, !prompted);
   return { text: hideKeys(scrub(printed, secrets), currentKey), exitCode: output.exitCode };
 }
 
-/** The model a run without a task `model.model` would use: CODARYN_MODEL, else the config file's. */
+/**
+ * The model a run without a task `model.model` would use: CODARYN_MODEL, else the config file's.
+ * N-3: a placeholder (blank or `<...>`) counts as not set.
+ */
 function currentModel(fromEnv: string | null, fromConfig: string | null, models: readonly ModelsListEntry[]): ModelsOutput["current"] {
-  const id = fromEnv ?? fromConfig;
+  const env = realModel(fromEnv);
+  const id = env ?? realModel(fromConfig);
   if (id === null) return null;
-  return { id, source: fromEnv !== null ? "CODARYN_MODEL" : "config", listed: models.some((model) => model.id === id) };
+  return { id, source: env !== null ? "CODARYN_MODEL" : "config", listed: models.some((model) => model.id === id) };
 }

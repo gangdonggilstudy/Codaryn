@@ -145,7 +145,10 @@ async function originalOf(change: ChangedPath, index: Map<string, IndexEntry> | 
   let bytes: Buffer;
   try {
     const file = path.join(dir, entry.file);
-    if ((await lstat(file)).size > MAX_READ_BYTES) return { unavailable: "too_large" };
+    const info = await lstat(file);
+    // R-4 L-3: a link (or anything but a regular file) in the snapshots is never followed.
+    if (!info.isFile()) return { unavailable: "snapshot_missing" };
+    if (info.size > MAX_READ_BYTES) return { unavailable: "too_large" };
     bytes = await readFile(file);
   } catch {
     return { unavailable: "snapshot_missing" };
@@ -267,5 +270,5 @@ export async function readChanges(
     }
     files.push({ path: shownPath, created, state, before, after, unavailable });
   }
-  return { ok: true, output: { kind: "changes", runId, masking: "current_secrets", files } };
+  return { ok: true, output: { schemaVersion: 1, kind: "changes", runId, exitCode: 0, masking: "current_secrets", files } };
 }

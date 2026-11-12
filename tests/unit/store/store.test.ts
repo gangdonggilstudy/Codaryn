@@ -19,6 +19,7 @@ import {
   releaseLock,
   writeResult,
 } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 /** Stand-in for `PrivacyGateway.mask` (PM decision P-5). The store itself never produces MaskedText. */
 function masked(text: string): MaskedText {
@@ -255,16 +256,19 @@ function exitedPid(): number {
 }
 
 test("lock: acquire writes pid, runId and startedAt; a second run is refused; release frees it", async () => {
+  // N-25(b): the lock also records when this process started.
+  const PROCESS_STARTED_AT = new Date(performance.timeOrigin).toISOString();
   await withTempDir(async (root) => {
     const first = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock() });
     assert.deepEqual(first, {
       ok: true,
-      lock: { pid: process.pid, runId: RUN_ID, startedAt: "2026-11-12T03:04:05.000Z" },
+      lock: { pid: process.pid, runId: RUN_ID, startedAt: "2026-11-12T03:04:05.000Z", processStartedAt: PROCESS_STARTED_AT },
     });
     assert.deepEqual(JSON.parse(await readFile(lockFile(root), "utf8")), {
       pid: process.pid,
       runId: RUN_ID,
       startedAt: "2026-11-12T03:04:05.000Z",
+      processStartedAt: PROCESS_STARTED_AT,
     });
 
     const before = await readFile(lockFile(root));
@@ -272,7 +276,7 @@ test("lock: acquire writes pid, runId and startedAt; a second run is refused; re
     assert.deepEqual(second, {
       ok: false,
       code: "workspace_locked",
-      holder: { pid: process.pid, runId: RUN_ID, startedAt: "2026-11-12T03:04:05.000Z" },
+      holder: { pid: process.pid, runId: RUN_ID, startedAt: "2026-11-12T03:04:05.000Z", processStartedAt: PROCESS_STARTED_AT },
     });
     assert.ok((await readFile(lockFile(root))).equals(before));
 
@@ -311,7 +315,7 @@ test("lock: a lock left by a dead process is reclaimed", async () => {
       const stale = { pid: exitedPid(), runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" };
       await writeFile(lockFile(root), `${JSON.stringify(stale)}\n`, "utf8");
 
-      const outcome = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock() });
+      const outcome = await acquireLock({ workspaceRoot: root, runId: RUN_ID, clock: steppingClock(), retryForMs: ACQUIRE_BUDGET_MS });
       reused = !outcome.ok && outcome.holder?.pid === stale.pid && alive(stale.pid) && attempt < 5;
       if (reused) return;
       assert.equal(outcome.ok, true);
@@ -319,6 +323,7 @@ test("lock: a lock left by a dead process is reclaimed", async () => {
         pid: process.pid,
         runId: RUN_ID,
         startedAt: "2026-11-12T03:04:05.000Z",
+        processStartedAt: new Date(performance.timeOrigin).toISOString(),
       });
     });
   }

@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 import { acquireLock, nodeLockFileSystem } from "../../../src/store/index.js";
 import type { LockFileSystem } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 const clock = { now: () => Date.UTC(2026, 10, 12, 6, 0, 0) };
 
@@ -57,9 +58,19 @@ function failing(operation: keyof LockFileSystem, code: string, times = Number.P
 }
 
 for (const code of ["EPERM", "EBUSY"]) {
-  test(`T-9: ${code} while linking a free lock ends as workspace_locked`, async () => {
+  test(`T-9: ${code} while creating a free lock (by link and by exclusive create) ends as workspace_locked`, async () => {
     await withRoot(async (root) => {
-      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-x", clock, fileSystem: failing("link", code), retryForMs: 150 });
+      // DR-27 (b): EPERM from link alone may mean "no hard links", and the lock is then created
+      // exclusively (lock-no-link.test.ts). A name being deleted fails every create the same way.
+      const base = failing("link", code);
+      const fileSystem: LockFileSystem = {
+        ...base,
+        writeNew: async (path, text) => {
+          if (path.endsWith("lock.json")) throw Object.assign(new Error(`${code}: injected`), { code });
+          return base.writeNew(path, text);
+        },
+      };
+      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-x", clock, fileSystem, retryForMs: 150 });
       assert.deepEqual(outcome, { ok: false, code: "workspace_locked", holder: null });
       assert.deepEqual(await readdir(join(root, ".codaryn")), [".gitignore"], "no lock and no leftovers");
     });
@@ -88,7 +99,7 @@ for (const code of ["EPERM", "EBUSY"]) {
 
   test(`T-9: ${code} that clears after two tries still takes the lock`, async () => {
     await withRoot(async (root) => {
-      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-y", clock, fileSystem: failing("link", code, 2) });
+      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-y", clock, fileSystem: failing("link", code, 2), retryForMs: ACQUIRE_BUDGET_MS });
       assert.equal(outcome.ok, true);
       assert.equal((JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string }).runId, "run-y");
     });
@@ -102,7 +113,7 @@ test("T-9: a reclaim file left by a dead reclaimer does not block reclaiming for
       join(root, ".codaryn", "lock.json.reclaim"),
       `${JSON.stringify({ pid: CRASHED_RECLAIMER_PID, runId: "crashed-reclaimer", startedAt: "2026-11-11T00:00:00.000Z" })}\n`,
     );
-    const outcome = await acquireLock({ workspaceRoot: root, runId: "run-z", clock, isProcessAlive });
+    const outcome = await acquireLock({ workspaceRoot: root, runId: "run-z", clock, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive });
     assert.equal(outcome.ok, true);
     assert.deepEqual((await readdir(join(root, ".codaryn"))).sort(), [".gitignore", "lock.json"]);
   });
@@ -149,7 +160,7 @@ test("W-4: a reclaim file this process left behind (its removal failed) does not
         return nodeLockFileSystem.remove(path);
       },
     };
-    const outcome = await acquireLock({ workspaceRoot: root, runId: "run-v", clock, fileSystem, retryForMs: 1_000, isProcessAlive });
+    const outcome = await acquireLock({ workspaceRoot: root, runId: "run-v", clock, fileSystem, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive });
     assert.equal(renameFailures + reclaimRemoveFailures, 0, "test assumption: both injected failures happened");
     assert.equal(outcome.ok, true, "the left-over reclaim file of a finished attempt is cleared");
     assert.equal((JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string }).runId, "run-v");
@@ -178,9 +189,11 @@ test("W-4: a reclaim held by an attempt still at work in this process keeps othe
         return nodeLockFileSystem.readText(path);
       },
     };
-    const first = acquireLock({ workspaceRoot: root, runId: "run-s", clock, fileSystem: slow, isProcessAlive });
+    // Z-1: the first attempt's budget also covers the time the test holds it stalled.
+    const first = acquireLock({ workspaceRoot: root, runId: "run-s", clock, fileSystem: slow, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive });
     // Wait until the reclaim file exists, then a second attempt in this process must wait for it.
-    for (let i = 0; i < 200 && !(await readdir(join(root, ".codaryn"))).includes("lock.json.reclaim"); i += 1) {
+    const waitUntil = Date.now() + ACQUIRE_BUDGET_MS;
+    while (Date.now() < waitUntil && !(await readdir(join(root, ".codaryn"))).includes("lock.json.reclaim")) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     assert.ok((await readdir(join(root, ".codaryn"))).includes("lock.json.reclaim"), "test assumption: the reclaim is held");
@@ -190,5 +203,41 @@ test("W-4: a reclaim held by an attempt still at work in this process keeps othe
     release();
     assert.equal((await first).ok, true);
     assert.equal((JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string }).runId, "run-s");
+  });
+});
+
+test("Z-1: with every file operation slow (40 ms), the W-4 reclaim still ends with this run as the only holder", async () => {
+  // Under load a 1 s budget ran out here without any fault; the outcome depends on the budget only.
+  await withRoot(async (root) => {
+    await leaveDeadLock(root);
+    let renameFailures = 1;
+    let reclaimRemoveFailures = 1;
+    const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 40));
+    const fileSystem: LockFileSystem = {
+      writeNew: async (path, text) => (await pause(), nodeLockFileSystem.writeNew(path, text)),
+      link: async (existing, created) => (await pause(), nodeLockFileSystem.link(existing, created)),
+      readText: async (path) => (await pause(), nodeLockFileSystem.readText(path)),
+      rename: async (from, to) => {
+        await pause();
+        if (renameFailures > 0 && from.endsWith("lock.json")) {
+          renameFailures -= 1;
+          throw Object.assign(new Error("EPERM: injected"), { code: "EPERM" });
+        }
+        return nodeLockFileSystem.rename(from, to);
+      },
+      remove: async (path) => {
+        await pause();
+        if (reclaimRemoveFailures > 0 && path.endsWith("lock.json.reclaim")) {
+          reclaimRemoveFailures -= 1;
+          throw Object.assign(new Error("EPERM: injected"), { code: "EPERM" });
+        }
+        return nodeLockFileSystem.remove(path);
+      },
+    };
+    const outcome = await acquireLock({ workspaceRoot: root, runId: "run-slow", clock, fileSystem, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive });
+    assert.equal(renameFailures + reclaimRemoveFailures, 0, "test assumption: both injected failures happened");
+    assert.equal(outcome.ok, true);
+    assert.equal((JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string }).runId, "run-slow");
+    assert.deepEqual((await readdir(join(root, ".codaryn"))).sort(), [".gitignore", "lock.json"], "no leftovers");
   });
 });

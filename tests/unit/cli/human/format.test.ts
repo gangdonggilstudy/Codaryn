@@ -23,6 +23,15 @@ describe("format", () => {
     assert.equal(finalLine(`a\u001b[2Jb\rc ${KEY_SHAPED}`), "a?[2Jb?c [key]");
   });
 
+  test("N-23(h): key shapes are hidden before control characters are replaced, even when one splits the key", () => {
+    const split = `sk-ant-AB\u0007CDEFGHIJKLMNOPQRSTUVWXYZ012345`;
+    assert.equal(finalLine(split), "[key]");
+    assert.equal(finalLine(`a\u0007b ${split} c\u001b`), "a?b [key] c?");
+    assert.equal(shownPath(`docs/${split}.md`), "docs/[key].md");
+    assert.equal(finalLine(`sk-‏ant-${"F".repeat(12)}`), "[key]", "a bidirectional control inside the prefix");
+    assert.equal(finalLine("sk-ant-AB\u0007"), "sk-ant-AB?", "too short to be a key: only the control character changes");
+  });
+
   test("shownPath cuts long paths", () => {
     assert.equal(shownPath("a".repeat(250)), `${"a".repeat(200)}...`);
     assert.equal(shownPath("x\u202ey"), "x?y");

@@ -13,48 +13,94 @@
  */
 
 import { existsSync } from "node:fs";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
 import type {
   AnthropicProviderDeps,
+  ApplyPlan,
+  ApplyResult,
+  PlanOutput,
+  ReviewOutput,
   CreateAnthropicProvider,
+  DefaultConfigLocation,
   DoctorOutput,
+  InitOutput,
+  ListAnthropicModels,
+  ModelsOutput,
   PrivacyGateway,
   ReportOutput,
   RevertOutput,
   RunTask,
+  RunsOutput,
 } from "../contracts/index.js";
-import { runTask as engineRunTask } from "../engine/index.js";
+import { applyPlan as engineApplyPlan, runTask as engineRunTask } from "../engine/index.js";
+import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { revertRun } from "../store/index.js";
+import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "../cli/assemble.js";
 import { createCancelSource } from "../cli/cancel.js";
+import { defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
+import { runInit } from "../cli/init.js";
+import { runModels } from "../cli/models.js";
+import { runApply, runPlan, runReview } from "../cli/plan-commands.js";
+import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
+import type { ModelsEnvironment } from "../cli/models.js";
+import { anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
 import { runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
+import { applyArguments, applyJournalWithEvents } from "./apply.js";
+import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
+import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
+import { modelsArguments } from "./models.js";
+import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
+import { readSettingsIn } from "./settings.js";
+import { initArguments, suggestionsFor } from "./init.js";
+import { applySettingsChangeIn, proposeSettingsChangeIn } from "./settings-change.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
   AppError,
+  ApplyHandle,
+  ApplyObserver,
+  ApplyPlanRequest,
   ChangesOutput,
+  PlanRequest,
+  ReviewRequest,
   ChangesRequest,
   CodarynApp,
   DoctorRequest,
+  ListModelsRequest,
+  ListRunsRequest,
+  ApplySettingsChangeRequest,
+  CreateSettingsRequest,
+  ReadSettingsRequest,
   ReportRequest,
+  SelectModelRequest,
+  SettingsChangeProposal,
+  SettingsChangeRequest,
+  SettingsSuggestions,
+  SettingsSuggestionsRequest,
+  SettingsView,
+  SettingsWritten,
+  ResolvedRun,
+  ResolveRunRequest,
   RevertRequest,
   RunHandle,
   RunObserver,
   RunOutcome,
   StartOutcome,
   StartRunRequest,
+  TaskForm,
 } from "./types.js";
 
 /**
@@ -65,6 +111,12 @@ export interface AppHooks {
   readonly createAnthropicProvider?: CreateAnthropicProvider;
   readonly anthropicDeps?: AnthropicProviderDeps;
   readonly runTask?: RunTask;
+  /** The apply engine (`applyPlan` of src/engine when absent). Tests give a stand-in to see what it was given. */
+  readonly applyPlan?: ApplyPlan;
+  /** The model listing (`listAnthropicModels` when absent). Tests give a fake so nothing is sent. */
+  readonly listModels?: ListAnthropicModels;
+  /** The config writer of `selectModel` (`writeConfigAtomic` when absent). */
+  readonly writeConfig?: ModelsEnvironment["writeConfig"];
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -80,10 +132,14 @@ export function runArguments(request: StartRunRequest): string[] {
   return argv;
 }
 
-/** A command printed with `--json`: its text is one JSON object of `kind`, or its output is an error. */
+/**
+ * A command run with `--json`: either its output object (some commands, such as `init`, return it
+ * as an object) or its text, one JSON object of `kind`; an error output is the CLI's error.
+ */
 function jsonOutcome<T extends { readonly kind: string }>(outcome: CommandOutcome, kind: T["kind"]): AppCallOutcome<T> {
   if ("output" in outcome) {
-    return outcome.output.kind === "error" ? { ok: false, error: fromCliError(outcome.output) } : { ok: false, error: INTERNAL_ERROR };
+    if (outcome.output.kind === "error") return { ok: false, error: fromCliError(outcome.output) };
+    return outcome.output.kind === kind ? { ok: true, output: outcome.output as unknown as T } : { ok: false, error: INTERNAL_ERROR };
   }
   try {
     const value = JSON.parse(outcome.text) as { kind?: unknown };
@@ -98,6 +154,27 @@ const nextMacrotask = (): Promise<void> => new Promise((resolve) => setImmediate
 
 /** Stands for "stop here" in the secrets probe; never shown, the probe reports its own outcome. */
 const PROBE_STOP = "the settings were resolved; nothing was run";
+
+/**
+ * The goal the secrets probe gives `runCli` for the workspace form. The probe never runs anything
+ * and no goal decides a secret; the CLI's quick form only needs one to parse (S-8 finds no key in it).
+ */
+export const PROBE_GOAL = "codaryn: resolve the settings only";
+
+/** DR-17: the run settings that register the same secrets as a task form. */
+export function runRequestOf(settings: TaskForm): StartRunRequest {
+  return {
+    input:
+      settings.input.kind === "task"
+        ? { kind: "task", taskPath: settings.input.taskPath }
+        : { kind: "quick", workspace: settings.input.workspace, goal: PROBE_GOAL },
+    configPath: settings.configPath,
+    varsFile: settings.varsFile,
+    profile: settings.profile,
+    workflowRef: null,
+    cancelFile: null,
+  };
+}
 
 export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = {}): CodarynApp {
   const platform = environment.platform ?? process.platform;
@@ -125,10 +202,17 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       clock: environment.clock,
       randomBytes: environment.randomBytes,
       installDir: environment.installDir,
+      // N-1: the same default config location the CLI reads (main.ts).
+      defaultConfig: defaultConfigOf(),
       createAnthropicProvider: hooks.createAnthropicProvider,
       anthropicDeps: hooks.anthropicDeps,
       ...parts,
     }).catch(() => null);
+  }
+
+  /** N-1: where the CLI would look for the user's config file now, from this environment. */
+  function defaultConfigOf(): DefaultConfigLocation | null {
+    return findDefaultConfigLocation(platform, environment.env, environment.homeDir ?? null);
   }
 
   async function startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome> {
@@ -245,9 +329,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>> {
     try {
-      const probe = await probeSecrets(request.run);
+      const probe = await probeSecrets(runRequestOf(request.settings));
       if (!probe.ok) return probe;
-      return await readChanges(probe.workspaceRoot, request.runId, createPrivacyGateway({ secrets: probe.secrets }), platform);
+      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!root.ok) return root;
+      const runId = await runIdOf(root.value, request.runId);
+      if (!runId.ok) return runId;
+      return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }), platform);
     } catch {
       return { ok: false, error: appError("internal_error", "the changes could not be read") };
     }
@@ -255,11 +343,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>> {
     try {
+      // N-7: the CLI's report resolves "latest" with the store's rules (N-18, N-23, N-26).
       const outcome = await runReport({
         argv: ["report", "--workspace", request.workspace, "--run", request.runId, "--json"],
         cwd: environment.cwd,
         env: copyEnvironment(environment.env, platform),
         platform,
+        listRuns: storeListRuns,
       });
       return jsonOutcome<ReportOutput>(outcome, "report");
     } catch {
@@ -268,16 +358,45 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   async function revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
+    // DR-25: only the consent the person gave on screen for this run, as the adapter's consent.
+    const consent = revertConsentOf(request);
+    if (!consent.ok) return consent;
     try {
+      // The CLI's revert with the options main.ts gives it (N-7, N-16, N-26, N-27 a): dry run,
+      // "latest", the store's judgement of one run, and the revert record written under the lock.
+      // As an adapter (AdapterRevert): no terminal question, the consent only from the request.
       const { output } = await runRevert({
-        argv: ["revert", "--workspace", request.workspace, "--run", request.runId],
+        argv: ["revert", "--workspace", request.workspace, "--run", request.runId, ...(request.dryRun === true ? ["--dry-run"] : [])],
         cwd: environment.cwd,
         isDirectory: environment.isDirectory,
         clock: environment.clock,
         randomBytes: environment.randomBytes,
-        revert: createRevertCommand(revertRun),
+        revert: createRevertCommand(revertRun, {
+          dryRun: revertRun,
+          listRuns: storeListRuns,
+          readRecord: readRevertRecord,
+          writeRecord: writeRevertRecord,
+          inspect: inspectRun,
+        }),
+        adapter: { unsafeMoveConsent: consent.consent },
       });
       return output.kind === "revert" ? { ok: true, output } : { ok: false, error: fromCliError(output) };
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>> {
+    try {
+      return await listRunsIn(environment, request);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>> {
+    try {
+      return await resolveRunIn(environment, request);
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }
@@ -303,6 +422,12 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         locateInWorkspace: locate,
         relatePaths: relate,
         platform,
+        // As main.ts: the default config location (N-1), whether it is refused, and where the
+        // language comes from (N-20). The messages stay English: the app returns codes and fields.
+        defaultConfig: defaultConfigOf(),
+        defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
+        osLocale: environment.osLocale ?? null,
+        explainLanguage: explainMessageLanguage,
       });
       return jsonOutcome<DoctorOutput>(outcome, "doctor");
     } catch {
@@ -310,6 +435,241 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
-  // plan, applyPlan and review (DR-1, DR-2) are left out until the general task commands exist.
-  return { startRun, report, revert, doctor, changes };
+  // plan, applyPlan and review (DR-1, DR-2, DR-17) are left out until the general task commands exist.
+  /** `codaryn models` as main.ts calls it, with this environment and no terminal question. */
+  async function models(request: ListModelsRequest | SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>> {
+    const args = modelsArguments(request);
+    if (!args.ok) return args;
+    const env = copyEnvironment(environment.env, platform);
+    try {
+      const outcome = await runModels({
+        argv: args.argv,
+        env,
+        cwd: environment.cwd,
+        readFile: environment.readFile,
+        loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
+        listModels: hooks.listModels ?? anthropicModelLister,
+        anthropicDeps: hooks.anthropicDeps,
+        defaultConfig: defaultConfigOf(),
+        ...(hooks.writeConfig === undefined ? {} : { writeConfig: hooks.writeConfig }),
+      });
+      return jsonOutcome<ModelsOutput>(outcome, "models");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  const listModels = (request: ListModelsRequest) => models(request);
+  const selectModel = (request: SelectModelRequest) => models(request);
+
+  async function readSettings(request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>> {
+    try {
+      return await readSettingsIn(
+        { env: copyEnvironment(environment.env, platform), cwd: environment.cwd, readFile: environment.readFile, defaultConfig: defaultConfigOf() },
+        request,
+      );
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /** `codaryn init --json` as main.ts calls it, without questions (no `ask`). */
+  async function createSettings(request: CreateSettingsRequest): Promise<AppCallOutcome<InitOutput>> {
+    try {
+      const outcome = await runInit({
+        argv: initArguments(request),
+        env: copyEnvironment(environment.env, platform),
+        cwd: environment.cwd,
+        platform,
+        defaultConfig: defaultConfigOf(),
+        defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
+        // --json prints no text; the catalog is only what runInit needs to exist.
+        messages: createMessageCatalog("en"),
+        readFile: environment.readFile,
+        isDirectory: environment.isDirectory,
+        exists: async (target) => {
+          try {
+            await lstat(target);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        locateInWorkspace: locate,
+        makeDirectory: async (dir) => {
+          await mkdir(dir, { recursive: true });
+        },
+        writeNewFile: (file, text) => writeFile(file, text, { encoding: "utf8", flag: "wx" }),
+      });
+      return jsonOutcome<InitOutput>(outcome, "init");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function settingsSuggestions(request: SettingsSuggestionsRequest): Promise<AppCallOutcome<SettingsSuggestions>> {
+    try {
+      const root = await workspaceRootOf(request.workspace, environment.cwd);
+      if (!root.ok) return root;
+      return { ok: true, output: await suggestionsFor(root.value) };
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  const settingsIo = () => ({
+    env: copyEnvironment(environment.env, platform),
+    cwd: environment.cwd,
+    readFile: environment.readFile,
+    defaultConfig: defaultConfigOf(),
+  });
+
+  async function proposeSettingsChange(request: SettingsChangeRequest): Promise<AppCallOutcome<SettingsChangeProposal>> {
+    try {
+      return await proposeSettingsChangeIn(settingsIo(), request);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function applySettingsChange(request: ApplySettingsChangeRequest): Promise<AppCallOutcome<SettingsWritten>> {
+    try {
+      return await applySettingsChangeIn(settingsIo(), request, hooks.writeConfig);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /**
+   * The task form's environment for `plan`, `apply` and `review` (G-F), as main.ts builds it, with
+   * this call's own environment copy: the variables file is loaded into it, never into the
+   * caller's object or `process.env`.
+   */
+  function planCommandEnvironment(argv: readonly string[]): PlanCommandEnvironment & { readonly env: Record<string, string | undefined> } {
+    const env = copyEnvironment(environment.env, platform);
+    return {
+      argv,
+      env,
+      cwd: environment.cwd,
+      readFile: environment.readFile,
+      isDirectory: environment.isDirectory,
+      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
+      locateInWorkspace: locate,
+      relatePaths: relate,
+      installDir: environment.installDir,
+      defaultConfig: defaultConfigOf(),
+      clock: environment.clock,
+      randomBytes: environment.randomBytes,
+      listRuns: storeListRuns,
+    };
+  }
+
+  /** DR-5, DR-17: `codaryn plan --json`: the stored plan masked again with this task form's secrets. Reads only. */
+  async function plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>> {
+    try {
+      return jsonOutcome<PlanOutput>(await runPlan(planCommandEnvironment(planArguments(request))), "plan");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /** GT-D6, R-4 L-4: `codaryn review --json`: the person's verdict, the note masked before it is stored. */
+  async function review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>> {
+    const args = reviewArguments(request);
+    if (!args.ok) return args;
+    try {
+      return jsonOutcome<ReviewOutput>(await runReview(planCommandEnvironment(args.argv)), "review");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /**
+   * DR-1, DR-2, DR-21: the CLI's `apply` as an adapter (AdapterApply): the approval is recorded as
+   * `adapter` and the consent comes only from the request. The engine is the same `applyPlan`; only
+   * its journal is wrapped so the apply's events reach `observer` (start records left out). The
+   * handle comes before the first event, as for a run.
+   */
+  async function applyPlan(
+    request: ApplyPlanRequest,
+    observer?: ApplyObserver,
+  ): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }> {
+    const consent = unsafeMoveConsentOf(request);
+    if (!consent.ok) return consent;
+    const cancelHandlers = new Set<() => void>();
+    let reportStart: (runId: string) => void = () => {};
+    const started = new Promise<string>((resolve) => {
+      reportStart = resolve;
+    });
+    let openGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    const wrapped: ApplyPlan = async (deps) => {
+      const journal = applyJournalWithEvents(deps.journal, deps.runId, observer, deps.privacy, deps.clock);
+      reportStart(deps.runId);
+      await gate;
+      await nextMacrotask();
+      return (hooks.applyPlan ?? engineApplyPlan)({ ...deps, journal });
+    };
+    const running = runApply({
+      ...planCommandEnvironment(applyArguments(request)),
+      applyPlan: wrapped,
+      adapter: { unsafeMoveConsent: consent.consent },
+      cancelSignal: (cancelFile) =>
+        createCancelSource({
+          cancelFile,
+          fileExists: (file) => existsSync(file),
+          onSignal: (_name, handler) => {
+            cancelHandlers.add(handler);
+            return () => {
+              cancelHandlers.delete(handler);
+            };
+          },
+        }),
+    }).catch(() => null);
+
+    const first = await Promise.race([
+      started.then((runId) => ({ kind: "started" as const, runId })),
+      running.then((outcome) => ({ kind: "ended" as const, outcome })),
+    ]);
+    if (first.kind === "ended") {
+      const output = first.outcome !== null && "output" in first.outcome ? first.outcome.output : undefined;
+      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+    }
+    const done: Promise<AppCallOutcome<ApplyResult>> = running.then((outcome) => {
+      const output = outcome !== null && "output" in outcome ? outcome.output : undefined;
+      if (output?.kind === "apply") return { ok: true, output: output as ApplyResult };
+      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+    });
+    const handle: ApplyHandle = {
+      runId: first.runId,
+      cancel() {
+        for (const handler of [...cancelHandlers]) handler();
+      },
+      done,
+    };
+    openGate();
+    return { ok: true, handle };
+  }
+
+  return {
+    startRun,
+    report,
+    revert,
+    listRuns,
+    resolveRun,
+    doctor,
+    changes,
+    listModels,
+    selectModel,
+    readSettings,
+    createSettings,
+    settingsSuggestions,
+    proposeSettingsChange,
+    applySettingsChange,
+    plan,
+    applyPlan,
+    review,
+  };
 }

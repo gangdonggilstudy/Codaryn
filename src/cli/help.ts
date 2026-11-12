@@ -1,90 +1,120 @@
 /**
  * `codaryn --help`, `codaryn help [command]`, `codaryn <command> --help` and `codaryn --version`
- * (U-7). Plain text on stdout, exit code 0. Nothing is read except package.json for the version.
+ * (U-7, N-21). Plain text on stdout, exit code 0. Nothing is read except package.json for the
+ * version. The usage lines (command syntax) stay English; every description comes from the
+ * message catalog in the chosen language.
  */
 
-import { DOCTOR_USAGE, MODELS_USAGE, REPORT_USAGE, REVERT_USAGE, RUN_USAGE } from "./args.js";
+import { HELP_COMMANDS } from "../contracts/index.js";
+import type { HelpCommand, HelpOption, MessageCatalog, MessageId } from "../contracts/index.js";
+import { createMessageCatalog } from "../i18n/index.js";
+import { APPLY_USAGE, DOCTOR_USAGE, INIT_USAGE, MODELS_USAGE, PLAN_USAGE, REPORT_USAGE, REVERT_USAGE, REVIEW_USAGE, RUNS_USAGE, RUN_USAGE } from "./args.js";
+import { CHANGES_USAGE } from "./changes.js";
 
-export const COMMANDS = ["run", "revert", "report", "doctor", "models"] as const;
-export type CommandName = (typeof COMMANDS)[number];
+export const COMMANDS = HELP_COMMANDS;
 
-export function isCommandName(value: string | undefined): value is CommandName {
-  return (COMMANDS as readonly (string | undefined)[]).includes(value);
+/**
+ * G-F commands whose help texts are not in the contract yet (HELP_COMMANDS and the `help.*` ids,
+ * w3:p9). Until they are, their help is the usage line and one fixed English sentence.
+ */
+const USAGE_ONLY = {
+  plan: { usage: PLAN_USAGE, about: "Shows a plan run's stored plan, masked again, with its digest and whether it was applied." },
+  apply: {
+    usage: APPLY_USAGE,
+    about: "Applies a plan run's plan after the person approves its digest; `codaryn revert --run <apply run id>` undoes it.",
+  },
+  review: { usage: REVIEW_USAGE, about: "Records a person's verdict on a run that waits for review (review.json); the run's result is not changed." },
+  changes: { usage: CHANGES_USAGE, about: "Shows a run's changed files and changed lines, masked with the current secrets. Reads only." },
+} as const;
+type UsageOnlyCommand = keyof typeof USAGE_ONLY;
+
+export type CommandName = HelpCommand | UsageOnlyCommand;
+
+function isUsageOnly(value: CommandName): value is UsageOnlyCommand {
+  return Object.hasOwn(USAGE_ONLY, value);
 }
 
-const GENERAL_HELP = [
-  "codaryn: a local task agent. One run works inside one workspace directory, under a policy,",
-  "and ends when its verifiers decide. Records go to <workspace>/.codaryn/.",
-  "",
-  "Commands:",
-  `  ${RUN_USAGE}`,
-  `  ${REVERT_USAGE}`,
-  `  ${REPORT_USAGE}`,
-  `  ${DOCTOR_USAGE}`,
-  `  ${MODELS_USAGE}`,
-  "  codaryn --help | codaryn help <command> | codaryn <command> --help",
-  "  codaryn --version",
-  "",
-  "run prints one JSON line on stdout and progress lines on stderr (--quiet turns them off).",
-  "The API key is read only from the ANTHROPIC_API_KEY environment variable, never from a file",
-  "given with --task or --config. See docs/cli-contract.md for the full contract.",
-];
+export function isCommandName(value: string | undefined): value is CommandName {
+  return (COMMANDS as readonly (string | undefined)[]).includes(value) || (value !== undefined && Object.hasOwn(USAGE_ONLY, value));
+}
 
-const COMMAND_HELP: { readonly [C in CommandName]: readonly string[] } = {
-  run: [
-    `usage: ${RUN_USAGE}`,
-    "",
-    "Runs one task. --task names a task file; the quick form takes --workspace and --goal and",
-    "uses the config file for the model, limits, policy and verifiers.",
-    "  --config <file>       settings (CODARYN_CONFIG names it when absent); never holds a key",
-    "  --vars-file <file>    variables to load, outside the workspace. Never use Node's --env-file or",
-    "                        --env-file-if-exists: Node opens that file itself before codaryn starts",
-    "  --cancel-file <file>  the run is cancelled when this file appears; outside the workspace",
-    "  --quiet               no progress lines on stderr",
-    "Exit codes: done 0, failed 1, input errors 2, needs-input 3, budget-exhausted 4, cancelled 5,",
-    "workspace locked 6, provider not configured 7, internal error 70.",
-  ],
-  revert: [
-    `usage: ${REVERT_USAGE}`,
-    "",
-    "Puts back the files a run changed with its file tools, except files changed again since.",
-    "Exit codes: complete 0, partial 3, errors 2 or 6.",
-  ],
-  report: [
-    `usage: ${REPORT_USAGE}`,
-    "",
-    "Prints a Markdown summary of one run from its result.json and journal (masked records only):",
-    "status, verifier results, protected material, changes, usage and what was not checked.",
-    "  --json   print the report object as one JSON line instead",
-    "Exit codes: complete 0, incomplete (no result.json) 3, errors 2. Nothing is changed.",
-  ],
-  doctor: [
-    `usage: ${DOCTOR_USAGE}`,
-    "",
-    "Checks what a run would need without running one: Node.js version, config, variables and",
-    "task files, whether the key is set (never its value), model and limits, file locations,",
-    "whether allowed commands are found, the workspace and the install directory.",
-    "No network access is made and nothing is changed, so it does not check that the model",
-    "exists: `codaryn models` lists the models the key can use.",
-    "  --json   print the result object as one JSON line instead",
-    "Exit codes: ok 0, fail 1, warn 3, argument errors 2.",
-  ],
-  models: [
-    `usage: ${MODELS_USAGE}`,
-    "",
-    "Lists the models the key can use, numbered, with input and output token limits, and marks the",
-    "current model (CODARYN_MODEL, else the config file's model). This sends a request to the API:",
-    "the key comes from ANTHROPIC_API_KEY (or --vars-file) and goes into the request header only.",
-    "  --use <number|id>  write that model into the config file's model (--config or CODARYN_CONFIG);",
-    "                     other fields are kept; a missing config file is created",
-    "  --json             print the result object as one JSON line instead",
-    "At a terminal without --use and --json, it asks for a number. No workspace is needed.",
-    "Exit codes: 0, argument and config errors 2, no key 7, API request failed 8.",
-  ],
+const USAGES: { readonly [C in HelpCommand]: string } = {
+  run: RUN_USAGE,
+  revert: REVERT_USAGE,
+  report: REPORT_USAGE,
+  doctor: DOCTOR_USAGE,
+  models: MODELS_USAGE,
+  init: INIT_USAGE,
+  runs: RUNS_USAGE,
 };
 
-export function helpText(command: CommandName | null): string {
-  return `${(command === null ? GENERAL_HELP : COMMAND_HELP[command]).join("\n")}\n`;
+/** How each option is written on the command line. */
+const OPTION_SYNTAX: { readonly [O in HelpOption]: string } = {
+  task: "--task <task.json>",
+  workspace: "--workspace <dir>",
+  goal: "--goal <text>",
+  config: "--config <file>",
+  vars_file: "--vars-file <file>",
+  cancel_file: "--cancel-file <file>",
+  quiet: "--quiet",
+  profile: "--profile <name>",
+  run: "--run <runId|latest>",
+  dry_run: "--dry-run",
+  allow_unsafe_move: "--allow-unsafe-move",
+  json: "--json",
+  use: "--use <number|id>",
+  limit: "--limit <n>",
+};
+
+/** The options each command's help describes, in order. */
+export const COMMAND_OPTIONS: { readonly [C in HelpCommand]: readonly HelpOption[] } = {
+  run: ["task", "workspace", "goal", "config", "vars_file", "cancel_file", "quiet", "profile"],
+  revert: ["workspace", "run", "dry_run", "allow_unsafe_move", "quiet"],
+  report: ["workspace", "run", "json"],
+  doctor: ["config", "vars_file", "task", "workspace", "profile", "json"],
+  models: ["config", "vars_file", "use", "json"],
+  init: ["config", "workspace", "json"],
+  runs: ["workspace", "limit", "json"],
+};
+
+/**
+ * A message, or the English one when the catalog has no text for it, or the id when neither has:
+ * help must never fail because a text is missing.
+ */
+function line(messages: MessageCatalog, id: MessageId): string {
+  for (const catalog of [messages, createMessageCatalog("en")]) {
+    try {
+      return (catalog.format as (id: MessageId) => string)(id);
+    } catch {
+      // Try the next one.
+    }
+  }
+  return id;
+}
+
+/** The help text. Without a catalog, English. */
+export function helpText(command: CommandName | null, catalog: MessageCatalog = createMessageCatalog("en")): string {
+  const messages = { format: (id: MessageId) => line(catalog, id) };
+  const lines: string[] = [];
+  if (command === null) {
+    lines.push(messages.format("help.intro"), "", messages.format("help.commands_heading"));
+    for (const name of COMMANDS) lines.push(`  ${USAGES[name]}`);
+    for (const entry of Object.values(USAGE_ONLY)) lines.push(`  ${entry.usage}`);
+    lines.push("  codaryn --help | codaryn help <command> | codaryn <command> --help", "  codaryn --version", "");
+    lines.push(messages.format("help.output"), messages.format("help.key"), messages.format("help.contract"));
+  } else if (isUsageOnly(command)) {
+    lines.push(`usage: ${USAGE_ONLY[command].usage}`, "", USAGE_ONLY[command].about);
+  } else {
+    lines.push(`usage: ${USAGES[command]}`, "", messages.format(`help.command.${command}`), "", messages.format("help.options_heading"));
+    const width = Math.max(...COMMAND_OPTIONS[command].map((option) => OPTION_SYNTAX[option].length));
+    for (const option of COMMAND_OPTIONS[command]) {
+      // N-D 4.1: a text that already starts with the option's syntax is printed as it is.
+      const described = messages.format(`help.option.${option}`);
+      lines.push(described.startsWith("--") ? `  ${described}` : `  ${OPTION_SYNTAX[option].padEnd(width)}  ${described}`);
+    }
+    lines.push("", `${messages.format("help.exit_heading")} ${messages.format(`help.exit.${command}`)}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 export function versionText(version: string | null): string {

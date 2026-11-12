@@ -107,8 +107,12 @@ export interface DoctorEnvironment {
   readonly inspectLock?: (workspaceRoot: string) => Promise<LockState>;
 }
 
-/** N-25 (a): none, held by a live process, left by an ended one, or unreadable. */
-export type LockState = "none" | "held" | "stale" | "unreadable";
+/**
+ * N-25 (a): none, held by a live process, left by an ended one, or unreadable. DR-27 (b):
+ * `reclaim_left` when `lock.json.reclaim` is in a state the store never clears, so no lock is
+ * reclaimed while it stays.
+ */
+export type LockState = "none" | "held" | "stale" | "unreadable" | "reclaim_left";
 
 /** Why a JSON input could not be used, for the typed doctor texts (N-21). */
 type LoadFailure = "unreadable" | "key" | "json_syntax" | "too_deep";
@@ -366,6 +370,12 @@ function fieldOf(position: InputErrorPosition | undefined, message?: string): Sc
  * PROCESS_START_TOLERANCE_MS) is stale too, since the pid was given to another process; an unknown
  * start time counts as held; a lock without it (written before N-25 b) is judged by its pid alone.
  * A start time that is not a timestamp is not understood: "unreadable", as the store never reclaims it.
+ *
+ * DR-27 (b): `lock.json.reclaim` is read first, as the store's reclaimer reads it. One whose owner
+ * has ended is cleared by the next run, so `lock.json` decides. Any other one stays: text still
+ * being written (no final newline and not yet whole JSON; an exclusive create on a volume without
+ * hard links leaves it so when the attempt ends in between), text that is not understood, or a
+ * live owner. Then no lock is reclaimed while it stays: `reclaim_left`.
  */
 export async function inspectLockFile(
   workspaceRoot: string,
@@ -373,12 +383,40 @@ export async function inspectLockFile(
   isAlive: (pid: number) => boolean = processAlive,
   startTimeOf: (pid: number) => Promise<number | null> = processStartTime,
 ): Promise<LockState> {
+  let reclaim: string | null;
+  try {
+    reclaim = await readText(path.join(workspaceRoot, STATE_DIR_NAME, `${LOCK_FILE_NAME}.reclaim`));
+  } catch (failure) {
+    if (!isMissingFile(failure)) return "reclaim_left";
+    reclaim = null;
+  }
+  if (reclaim !== null && (stillWritten(reclaim) || (await judgeLockText(reclaim, isAlive, startTimeOf)) !== "stale")) return "reclaim_left";
   let text: string;
   try {
     text = await readText(path.join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME));
   } catch (failure) {
     return isMissingFile(failure) ? "none" : "unreadable";
   }
+  return judgeLockText(text, isAlive, startTimeOf);
+}
+
+/** As the store: text with no final newline that is not yet whole JSON may still be growing. */
+function stillWritten(text: string): boolean {
+  if (text.endsWith("\n")) return false;
+  try {
+    JSON.parse(text);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** A complete lock-shaped text's holder, judged as the store's `acquireLock` judges it. */
+async function judgeLockText(
+  text: string,
+  isAlive: (pid: number) => boolean,
+  startTimeOf: (pid: number) => Promise<number | null>,
+): Promise<"held" | "stale" | "unreadable"> {
   let pid: unknown;
   let processStartedAt: unknown;
   try {
@@ -707,7 +745,25 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" });
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
-    set("commands", checked.status, checked.message, checked.text);
+    // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
+    // actions. Codaryn does not check a command's arguments, so such a command can change files
+    // outside an approved plan. Problems found above keep their text; the warning joins the message.
+    const extraArgs = (policy?.commands ?? []).filter((rule) => rule.allowExtraArgs).length;
+    if (extraArgs > 0 && (policy?.planActions ?? []).length > 0) {
+      const warning =
+        `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
+        "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
+      if (checked.status === "ok") {
+        // No typed text yet: the contract base (claude/general-tasks b89ee16) does not have
+        // `doctor.commands.extra_args_with_plan` (e6a4289 came after it). Without a text the
+        // renderer prints this English message.
+        results.set("commands", { id: "commands", status: "warn", message: warning });
+      } else {
+        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
+      }
+    } else {
+      set("commands", checked.status, checked.message, checked.text);
+    }
   }
 
   // install_dir (U-3)
@@ -783,6 +839,10 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       held: ["warn", `a process holds ${STATE_DIR_NAME}/${LOCK_FILE_NAME}; if no Codaryn is running in this workspace, remove that file`],
       stale: ["ok", "the lock was left by a process that has ended; the next run reclaims it"],
       unreadable: ["warn", `${STATE_DIR_NAME}/${LOCK_FILE_NAME} cannot be read; if no Codaryn is running in this workspace, remove that file`],
+      reclaim_left: [
+        "warn",
+        `${STATE_DIR_NAME}/${LOCK_FILE_NAME}.reclaim was left by an attempt to reclaim the lock; while it stays, a lock left by an ended process is not reclaimed. If no Codaryn is running in this workspace, remove ${STATE_DIR_NAME}/${LOCK_FILE_NAME}.reclaim (and ${STATE_DIR_NAME}/${LOCK_FILE_NAME} if it is there)`,
+      ],
     };
     const [status, message] = lockMessages[state];
     set("lock", status, message, { id: `doctor.lock.${state}` });

@@ -23,6 +23,7 @@ import {
   MAX_REPORT_FILE_BYTES,
   PLAN_APPLIED_FILE_NAME,
   PLAN_FILE_NAME,
+  PRIVACY_TOKEN_PATTERN_SOURCE,
   RESULT_FILE_NAME,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
@@ -33,15 +34,20 @@ import type {
   CreatePlanRecorder,
   LoadPlan,
   LoadPlanOutcome,
+  MaskedParts,
   PlanAppliedRecord,
-  ResolvedPlanAction,
   StoredPlan,
+  StoredPlanAction,
 } from "../contracts/index.js";
 import { assertRunId, createExclusive, ensureRunDir, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sha256Hex } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
 import { isStateDirName, isValidPathInput } from "../workspace/lexical.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
+const PRIVACY_TOKEN = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE);
+/** DR-28: bounds for one path's visible parts (a stored path has at most 4096 characters). */
+const MAX_SHOWN_PARTS = 4097;
+const MAX_SHOWN_TEXT = 8192;
 
 type Obj = Record<string, unknown>;
 
@@ -68,27 +74,66 @@ export function isWorkspaceRelativePath(value: unknown): value is string {
   return isValidPathInput(value) && !isStateDirName(segments[0] as string);
 }
 
-/** One action in canonical form (fixed key order), or null when it is not a resolved action. */
-function canonicalAction(value: unknown): ResolvedPlanAction | null {
+/**
+ * DR-28: one path as the plan run masked it, as visible parts (MaskedParts): at least one string,
+ * none holding a privacy token (the text was split at the tokens). Null for anything else.
+ */
+function maskedPartsOf(value: unknown): MaskedParts | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SHOWN_PARTS) return null;
+  let total = 0;
+  for (const part of value) {
+    if (typeof part !== "string" || PRIVACY_TOKEN.test(part)) return null;
+    total += part.length;
+    if (total > MAX_SHOWN_TEXT) return null;
+  }
+  return [...(value as string[])];
+}
+
+/** The keys of an action, without or (DR-28) with its masked form `shown`. */
+function hasActionKeys(value: Obj, keys: readonly string[]): boolean {
+  return hasExactKeys(value, keys) || hasExactKeys(value, [...keys, "shown"]);
+}
+
+/**
+ * One action in canonical form (fixed key order), or null when it is not a resolved action. DR-28:
+ * `shown`, when present, has exactly the action's path keys, each as visible parts.
+ */
+function canonicalAction(value: unknown): StoredPlanAction | null {
   if (!isObj(value)) return null;
   const sha256 = value["sha256"];
   if (typeof sha256 !== "string" || !CONTENT_HASH.test(sha256)) return null;
   const hash = sha256 as ContentHash;
-  if (value["kind"] === "move" && hasExactKeys(value, ["kind", "from", "to", "sha256"])) {
+  const shown = value["shown"];
+  const hasShown = Object.hasOwn(value, "shown");
+  if (hasShown && !isObj(shown)) return null;
+  if (value["kind"] === "move" && hasActionKeys(value, ["kind", "from", "to", "sha256"])) {
     const { from, to } = value;
-    return isWorkspaceRelativePath(from) && isWorkspaceRelativePath(to) ? { kind: "move", from, to, sha256: hash } : null;
+    if (!isWorkspaceRelativePath(from) || !isWorkspaceRelativePath(to)) return null;
+    if (!hasShown) return { kind: "move", from, to, sha256: hash };
+    const parts = shown as Obj;
+    const shownFrom = hasExactKeys(parts, ["from", "to"]) ? maskedPartsOf(parts["from"]) : null;
+    const shownTo = hasExactKeys(parts, ["from", "to"]) ? maskedPartsOf(parts["to"]) : null;
+    return shownFrom !== null && shownTo !== null ? { kind: "move", from, to, sha256: hash, shown: { from: shownFrom, to: shownTo } } : null;
   }
-  if (value["kind"] === "discard" && hasExactKeys(value, ["kind", "path", "sha256"])) {
+  if (value["kind"] === "discard" && hasActionKeys(value, ["kind", "path", "sha256"])) {
     const { path } = value;
-    return isWorkspaceRelativePath(path) ? { kind: "discard", path, sha256: hash } : null;
+    if (!isWorkspaceRelativePath(path)) return null;
+    if (!hasShown) return { kind: "discard", path, sha256: hash };
+    const parts = shown as Obj;
+    const shownPath = hasExactKeys(parts, ["path"]) ? maskedPartsOf(parts["path"]) : null;
+    return shownPath !== null ? { kind: "discard", path, sha256: hash, shown: { path: shownPath } } : null;
   }
   return null;
 }
 
-/** The actions in canonical form, or null when any is not a resolved action or the count is out of range. */
-export function canonicalActions(value: unknown): ResolvedPlanAction[] | null {
+/**
+ * The actions in canonical form, or null when any is not a resolved action or the count is out of
+ * range. DR-28: each keeps its masked form (`shown`) when it has one; a plan written before DR-28
+ * has none.
+ */
+export function canonicalActions(value: unknown): StoredPlanAction[] | null {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PLAN_ACTIONS) return null;
-  const actions: ResolvedPlanAction[] = [];
+  const actions: StoredPlanAction[] = [];
   for (const item of value) {
     const action = canonicalAction(item);
     if (action === null) return null;
@@ -98,7 +143,7 @@ export function canonicalActions(value: unknown): ResolvedPlanAction[] | null {
 }
 
 /** plan.json's content for these actions: one line of JSON and a line feed. */
-function planText(runId: string, actions: readonly ResolvedPlanAction[]): string {
+function planText(runId: string, actions: readonly StoredPlanAction[]): string {
   const stored: StoredPlan = { schemaVersion: 1, kind: "plan", runId, actions };
   return `${JSON.stringify(stored)}\n`;
 }

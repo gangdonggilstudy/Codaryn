@@ -4,6 +4,8 @@
  * cleaned of control characters, so neither a secret nor a model-written name reaches the
  * terminal as is. Tool names outside the built-in set are not shown. A failing write is ignored:
  * progress never changes the run. stdout keeps its single JSON line.
+ * DR-43 (b), review R-31 L-1: a record may give several lines; the run's start names, one line
+ * each, what the workflow's rules left out of the given policy (run_started.policyNarrowings).
  */
 
 import { TOOL_NAMES } from "../contracts/index.js";
@@ -26,6 +28,35 @@ function shownPath(text: string): string {
 
 function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * DR-43 (b): what the workflow's own rules left out of the given policy, in the words of the
+ * catalog's English (progress.workflow_policy.*); kinds and counts only, no rule or path.
+ */
+export function narrowingLines(event: JournalEvent): string[] {
+  if (event.type !== "run_started") return [];
+  return (event.policyNarrowings ?? []).flatMap((narrowing): string[] => {
+    const shown = Number.isSafeInteger(narrowing.count) && narrowing.count > 0 ? narrowing.count : null;
+    switch (narrowing.kind) {
+      case "commands_dropped":
+        return shown === null ? [] : [`the workflow's own rules leave out command rules of the configured policy: ${shown}`];
+      case "commands_narrowed":
+        return shown === null ? [] : [`the workflow's own rules narrow command rules of the configured policy: ${shown}`];
+      case "plan_actions_dropped":
+        return shown === null ? [] : [`the workflow's own rules leave out plan actions of the configured policy: ${shown}`];
+      case "restore_path_tokens_off":
+        return ["the workflow's own rules turn off restoring path tokens, which the configured policy allows"];
+      default:
+        return [];
+    }
+  });
+}
+
+/** The lines for one record, without the prefix: progressLine's, then the narrowings at the start. */
+export function progressLines(event: JournalEvent): string[] {
+  const line = progressLine(event);
+  return [...(line === null ? [] : [line]), ...narrowingLines(event)];
 }
 
 /** The line for one record, without the prefix, or null for records that are not shown. */
@@ -71,25 +102,30 @@ export function withProgress(
   journal: Journal,
   privacy: PrivacyGateway,
   write: (line: string) => void,
-  /** N-5: the human renderer's `progressLine` in the chosen language; the English lines above otherwise. */
-  render: (event: JournalEvent) => string | null = progressLine,
+  /**
+   * N-5: the human renderer's `progressLine` in the chosen language; the English lines above
+   * otherwise. DR-43 (b): it may give several lines for one record, each written on its own.
+   */
+  render: (event: JournalEvent) => string | readonly string[] | null = progressLines,
 ): Journal {
   return {
     async append(event) {
       await journal.append(event);
-      let line: string | null;
+      let lines: readonly string[];
       try {
-        line = render(event);
+        const drawn = render(event);
+        lines = drawn === null ? [] : typeof drawn === "string" ? [drawn] : drawn;
       } catch {
-        line = null;
+        lines = [];
       }
-      if (line === null) return;
-      const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
-      if (!masked.ok) return;
-      try {
-        write(`${cleanText(masked.text)}\n`);
-      } catch {
-        // Progress is best effort.
+      for (const line of lines) {
+        const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
+        if (!masked.ok) continue;
+        try {
+          write(`${cleanText(masked.text)}\n`);
+        } catch {
+          // Progress is best effort.
+        }
       }
     },
     close: () => journal.close(),

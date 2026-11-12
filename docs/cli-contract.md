@@ -587,6 +587,9 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
 - 줄은 기록(가림본)에서만 만들고, 실행의 개인정보 게이트로 다시 가린 뒤 제어 문자를 바꾼다. 내장 도구가 아닌 도구 이름은 `(unknown tool)`, 형식에 맞지 않는 id는 `?`로 쓴다.
+- DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(`withProgress`는 렌더러가 준 줄마다 따로 가리고 쓴다).
+  - 실행 시작(`run_started`)에 `policyNarrowings`가 있으면 시작 줄 아래에 하나씩 쓴다(종류와 수만, `progress.workflow_policy.*`).
+  - 영어 줄(`progressLines`, 렌더러가 없을 때)은 카탈로그의 영어 글과 같다. 사람용 렌더러(`HumanOutput.progressLine`, N-C)의 줄은 그쪽 변경을 기다린다.
 - 실행 전 오류에는 진행 표시가 없다. `--quiet`이면 쓰지 않는다. stderr 쓰기 실패는 실행에 영향을 주지 않는다. stdout은 그대로 JSON 한 줄이다.
 
 ## 16. 모델 목록 조회와 선택 (Y-1~Y-4)

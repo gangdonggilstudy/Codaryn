@@ -10,11 +10,17 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { describe, test } from "node:test";
 
-import { ANTHROPIC_KEY_PATTERN_SOURCE, PRIVACY_TOKEN_PREFIX, toRunId } from "../../../src/contracts/index.js";
+import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, API_PROVIDERS, PRIVACY_TOKEN_PREFIX, toRunId } from "../../../src/contracts/index.js";
 import { createMessageCatalog, MESSAGE_TEXTS } from "../../../src/i18n/index.js";
-import { CONTROL, IDS, KEY_SHAPED, LANGS, loose, paramsFor, specOf } from "./support.js";
+import { CONTROL, IDS, KEY_SHAPED, KEY_SHAPES, LANGS, loose, OPENAI_KEY_SHAPED, OPENAI_LOOSE_SHAPED, paramsFor, specOf } from "./support.js";
 
-const KEY_PATTERN = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE);
+/** Every provider's key, model and address variable (DR-34), and every key variable. */
+const PROVIDER_VARIABLES: readonly string[] = [
+  ...new Set([...API_KEY_ENVS, ...Object.values(API_PROVIDERS).flatMap((provider) => [provider.keyEnv, provider.modelEnv, provider.baseUrlEnv])]),
+];
+
+/** Every output key shape of the contract (DR-32 (a)): Anthropic's and OpenAI's narrow and loose ones. */
+const KEY_PATTERN = new RegExp(API_KEY_MASK_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|"));
 
 /** Values a caller might wrongly pass straight from a file or the environment. */
 const PROBES: readonly unknown[] = [
@@ -27,6 +33,8 @@ const PROBES: readonly unknown[] = [
   "probe_env_value",
   "probe",
   `${KEY_SHAPED}probe`,
+  `${OPENAI_KEY_SHAPED} probe`,
+  `${OPENAI_LOOSE_SHAPED} probe`,
   "\u001b[31mprobe-ansi",
   "probe-line\nsecond-line",
   "probe\u202eevil",
@@ -90,7 +98,7 @@ describe("i18n P0: no file or environment value in a message", () => {
   test("a run id shown as such is still one clean line", () => {
     for (const language of LANGS) {
       const format = loose(createMessageCatalog(language));
-      for (const value of [`${KEY_SHAPED}`, "a..b", "-x", "x".repeat(129), "a/b", "a b"]) {
+      for (const value of [...KEY_SHAPES, "a..b", "-x", "x".repeat(129), "a/b", "a b"]) {
         const line = format("summary.run_id", { runId: value });
         assert.doesNotMatch(line, KEY_PATTERN, value);
         assert.ok(!CONTROL.test(line), value);
@@ -127,6 +135,9 @@ describe("i18n P0: no file or environment value in a message", () => {
         assert.doesNotMatch(text, KEY_PATTERN, `${language} ${id}`);
         assert.ok(!text.includes(PRIVACY_TOKEN_PREFIX), `${language} ${id}`);
         assert.doesNotMatch(text, /\b(ANTHROPIC_API_KEY|OPENAI_API_KEY)\s*[=:]/, `${language} ${id}`);
+        // SP-D12, DR-34: a provider's variable (key, model, address) differs per provider, so no
+        // fixed text names one; a key variable reaches a text only through the closed {keyEnv}.
+        for (const name of PROVIDER_VARIABLES) assert.ok(!text.includes(name), `${language} ${id} names ${name}`);
         assert.doesNotMatch(text, /[A-Za-z]:\\Users\\|\/home\/|\/Users\//, `${language} ${id}`);
       }
     }

@@ -6,7 +6,8 @@
  */
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
-import type { MessageLanguage } from "./human.js";
+import type { DefaultConfigDisplay } from "./config.js";
+import type { MessageLanguage, RunId } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
 import type { Limits, ModelProviderName } from "./task.js";
@@ -73,11 +74,12 @@ export interface ReportOutput {
 
 /**
  * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--json]`
+ * (`--profile <name>` is added by N-8.)
  * checks what a run would need without running one: no network access, no model request, no
  * write. One check per id, in this order. A check that has nothing to look at is `skipped`.
  *
  * `--task` and `--workspace` cannot be combined (`invalid_arguments`, W-5): a task file names its
- * own workspace (`workspaceRoot`). The workspace checks (`workspace`, `file_locations`,
+ * own workspace (`workspaceRoot`). `--profile` (N-8) checks the config with that profile applied. The workspace checks (`workspace`, `file_locations`,
  * `install_dir`, and the position part of `integrity_paths`) use the task's `workspaceRoot` or
  * `--workspace`; with neither they are `skipped`.
  */
@@ -212,7 +214,7 @@ export interface InitOutput {
    * Where the file is (or would have been) written. `display` is DEFAULT_CONFIG_DISPLAY's value
    * for the default location, or "--config" when the path came from the command line.
    */
-  readonly config: { readonly source: "argument" | "default"; readonly display: string };
+  readonly config: { readonly source: "argument" | "default"; readonly display: DefaultConfigDisplay | "--config" };
   /** Whether questions were asked. */
   readonly interactive: boolean;
   /** "selected": a listed model was written. "placeholder": MODEL_PLACEHOLDER was written. */
@@ -240,26 +242,55 @@ export const RUNS_MAX_LIMIT = 1000;
 export const RUNS_EXIT_CODES = { listed: 0 } as const;
 
 /**
- * N-7: `--run latest` in `report` and `revert` stands for the first run `listRuns` returns.
- * No runs: `run_not_found`. A run directory literally named "latest" cannot be named this way.
+ * N-7: `--run latest` in `report` and `revert` stands for the first `checked` run `listRuns`
+ * returns. Damaged runs are never chosen. No checked run: `run_not_found`.
+ * N-18: when `<root>/.codaryn/runs/latest` exists (a run directory literally named so), the
+ * alias is not used: the command stops with `invalid_arguments` and changes nothing, because it
+ * cannot tell which run was meant.
  */
 export const LATEST_RUN_ALIAS = "latest";
 
-/** One run as `listRuns` reads it. Text is masked as recorded. */
-export interface RunListEntry {
-  readonly runId: string;
-  /** `at` of the journal's first record (`run_started`), ISO 8601 UTC; null when it cannot be read. */
-  readonly startedAt: string | null;
-  /** From `run_started`; null when it cannot be read. */
-  readonly taskId: string | null;
-  /** From result.json; null when the run has none (still running, or stopped without one). */
-  readonly status: TerminalRunStatus | null;
-  readonly reason: RunReason | null;
-  /** Number of `changes` in result.json; null without one. */
-  readonly changes: number | null;
-  /** The last revert of this run, from its revert record (REVERT_RECORD_FILE_NAME); null when never reverted. */
-  readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
-}
+/**
+ * The fixed shape of a timestamp the run list accepts: ISO 8601 UTC with `Z`, optional
+ * milliseconds, and a date `Date.parse` accepts. Anything else makes the entry damaged.
+ */
+export const RUN_TIMESTAMP_PATTERN_SOURCE = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z$";
+
+/**
+ * One run as `listRuns` reads it (N-16). A run is `checked` only when its records pass the same
+ * kind of checks `report` makes; otherwise it is `damaged` and carries nothing but its id.
+ *
+ * Checks for `checked`:
+ * - the run directory is a directory, not a link (junctions included), and its name is a run id;
+ * - journal.jsonl's first record is `run_started` with `seq` 1, `runId` equal to the directory
+ *   name, a `taskId` matching TASK_ID_PATTERN_SOURCE and an `at` matching RUN_TIMESTAMP_PATTERN_SOURCE;
+ * - result.json, when present, has `kind` "run", the same `runId`, a terminal `status`, a
+ *   `reason` allowed for that status (RunReasonByStatus), `exitCode` equal to RUN_EXIT_CODES[status]
+ *   and `changes` as an array;
+ * - revert.json, when present, has `kind` "revert_record", the same `runId`, `at` matching
+ *   RUN_TIMESTAMP_PATTERN_SOURCE, `status` "complete" or "partial";
+ * - each file is read at most MAX_REPORT_FILE_BYTES; a missing result.json or revert.json is not
+ *   damage (the fields are null), but one that cannot be read, parsed or checked is.
+ * Strings put into an entry are only those checked against these patterns, so no control
+ * character or key shape can be in them.
+ */
+export type RunListEntry =
+  | {
+      readonly state: "checked";
+      readonly runId: RunId;
+      /** `at` of `run_started`. */
+      readonly startedAt: string;
+      /** `taskId` of `run_started`. JSON only: the human table does not show it (N-14). */
+      readonly taskId: string;
+      /** From result.json; null when there is none (still running, or stopped without one). */
+      readonly status: TerminalRunStatus | null;
+      readonly reason: RunReason | null;
+      /** Number of `changes` in result.json; null without one. */
+      readonly changes: number | null;
+      /** The last revert of this run, from its revert record; null when never reverted. */
+      readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
+    }
+  | { readonly state: "damaged"; readonly runId: RunId };
 
 export interface ListRunsRequest {
   /** Real absolute path of the workspace root. */
@@ -267,20 +298,18 @@ export interface ListRunsRequest {
 }
 
 /**
- * `runs`: newest first, by `startedAt` and then by run id, both descending; entries without
- * `startedAt` come last. `unreadable`: run directories skipped because they are links, are not
- * directories, have no journal, or their files cannot be read or parsed (each file at most
- * MAX_REPORT_FILE_BYTES). Directory names that are not run ids are ignored.
+ * `runs`: checked runs first, newest first by `startedAt` and then by run id, both descending;
+ * damaged runs after them by run id, descending. Directory entries whose names are not run ids
+ * are ignored.
  */
 export interface RunListing {
   readonly runs: readonly RunListEntry[];
-  readonly unreadable: number;
 }
 
 /**
  * Signature of `listRuns`, exported by `src/store/index.ts` (N-C). Reads only the state
- * directory: per run its result.json, the first journal record and the revert record. Changes
- * nothing. Rejects only when the runs directory exists but cannot be listed.
+ * directory: per run its result.json, the journal's first record and the revert record. Changes
+ * nothing and creates nothing. Rejects only when the runs directory exists but cannot be listed.
  */
 export type ListRuns = (request: ListRunsRequest) => Promise<RunListing>;
 
@@ -290,9 +319,8 @@ export interface RunsOutput {
   readonly kind: "runs";
   readonly status: keyof typeof RUNS_EXIT_CODES;
   readonly exitCode: number;
-  /** At most `--limit` entries, newest first. */
+  /** At most `--limit` entries, in RunListing order. */
   readonly runs: readonly RunListEntry[];
   /** How many more runs there are beyond `--limit`. */
   readonly omitted: number;
-  readonly unreadable: number;
 }

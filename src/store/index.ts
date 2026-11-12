@@ -15,6 +15,7 @@ import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 
 export { RevertRunError, createChangeRecorder, revertRun, snapshotsRelativePath } from "./changes.js";
 export type { RevertRunErrorCode } from "./changes.js";
+export { RunListError, isStoredRunId, latestRunId, listRuns, readRevertRecord, writeRevertRecord } from "./runs.js";
 export { acquireLock, nodeLockFileSystem, releaseLock } from "./lock.js";
 export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ReleaseLockOptions } from "./lock.js";
 

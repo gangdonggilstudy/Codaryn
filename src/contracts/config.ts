@@ -290,11 +290,27 @@ export const KEY_FIELD_NAMES = [
 ] as const;
 
 /**
- * Shape of an Anthropic API key. A string value of this shape in a task or config file (in the
- * raw text and in the parsed value) or in `--goal` is rejected as `key_in_file`, as is the
- * current ANTHROPIC_API_KEY value when it has at least 16 characters.
+ * The loose shape of an Anthropic API key, for hiding key-like text in output (the Anthropic
+ * adapter's messages, human output, message parameters): `sk-ant-` and 8 or more of
+ * `A-Z a-z 0-9 _ -`. Unchanged. DR-36 (c): it no longer refuses anything; refusing uses
+ * ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE.
  */
 export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
+
+/**
+ * DR-36 (c): the Anthropic key shape for refusing a key in a task or config file (raw text and
+ * parsed value) or in `--goal` as `key_in_file` (S-6, S-8): `sk-ant-` at a word start, then 32 or
+ * more of `A-Z a-z 0-9 _ -` with a digit among them. Like the OpenAI shapes (DR-33) it is a second
+ * check: the main defence is the registered key values (S-2: the current ANTHROPIC_API_KEY value
+ * from 16 characters on, other providers' from MIN_OTHER_PROVIDER_KEY_LENGTH).
+ * - No longer refused (R-20 F): short names after `sk-ant-` (`sk-ant-design-system`), long ones
+ *   without a digit, and `sk-ant-` inside a word (`risk-ant-...`).
+ * - Still refused although not a key (false positives left): a name of 32 or more characters after
+ *   `sk-ant-` holding a digit (`sk-ant-` and a long versioned name).
+ * - Not refused by shape (misses left; the registered value still finds them): a key text of fewer
+ *   than 32 characters after `sk-ant-` or without a digit, or glued to a letter, digit or `_` before.
+ */
+export const ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE = "\\bsk-ant-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{32,}";
 
 // ---------------------------------------------------------------------------------------------
 // SP-1 (docs/design/second-provider.md 4.1, DR-22, DR-31): one table of the API providers.
@@ -435,7 +451,7 @@ export const API_PROVIDERS = {
     keyEnv: ANTHROPIC_API_KEY_ENV,
     modelEnv: CODARYN_MODEL_ENV,
     baseUrlEnv: CODARYN_API_BASE_URL_ENV,
-    keyPatternSources: [ANTHROPIC_KEY_PATTERN_SOURCE],
+    keyPatternSources: [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE],
     defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
     baseUrlPath: "without_version",
     maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
@@ -465,12 +481,18 @@ export type ApiKeyEnv = (typeof API_KEY_ENVS)[number];
 /**
  * Every key shape Codaryn knows (regular expression sources) for refusing keys in files and
  * arguments (S-6, S-8), after the match against registered key values. Each API_PROVIDERS entry's
- * shapes are among them. DR-32 (a): narrow shapes only.
+ * shapes are among them. DR-32 (a), DR-33, DR-36 (c): narrow shapes only.
  */
-export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
+export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
 
 /**
- * DR-32 (a): the key shapes for hiding key-like text in output (human output, message parameters,
- * provider error messages): the refusal shapes and the loose OpenAI shape. Never used to refuse.
+ * DR-32 (a), DR-36 (c): the key shapes for hiding key-like text in output (human output, message
+ * parameters, provider error messages): the loose Anthropic shape (as before), the refusal shapes,
+ * and the loose OpenAI shape. Never used to refuse.
  */
-export const API_KEY_MASK_PATTERN_SOURCES = [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE, OPENAI_KEY_LOOSE_PATTERN_SOURCE] as const;
+export const API_KEY_MASK_PATTERN_SOURCES = [
+  ANTHROPIC_KEY_PATTERN_SOURCE,
+  ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
+  OPENAI_KEY_PATTERN_SOURCE,
+  OPENAI_KEY_LOOSE_PATTERN_SOURCE,
+] as const;

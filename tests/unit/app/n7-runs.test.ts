@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { REVERT_SKIP_REASONS } from "../../../src/contracts/index.js";
 import type { EngineResult, RevertOutput, RunsOutput } from "../../../src/contracts/index.js";
 import { latestRunId } from "../../../src/store/index.js";
 import { PROBE_GOAL, createCodarynApp, runRequestOf } from "../../../src/app/index.js";
@@ -118,9 +117,8 @@ describe("revert with dry run and the revert record (N-7)", () => {
 
     const again = ok<RevertOutput>(await app.revert({ workspace, runId, dryRun: true }));
     assert.equal(again.revertedBefore?.status, "complete", "the earlier revert is reported");
-    // The CLI's revert names an already reverted file as such once the contract has that reason.
-    const repeated = (REVERT_SKIP_REASONS as readonly string[]).includes("already_reverted") ? "already_reverted" : "changed_since_run";
-    assert.deepEqual(again.skipped.map((file) => file.reason), [repeated]);
+    // N-22: the CLI's revert names an already reverted file as such.
+    assert.deepEqual(again.skipped.map((file) => file.reason), ["already_reverted"]);
     assert.equal(await exists(path.join(workspace, ".codaryn", "lock.json")), false);
   });
 

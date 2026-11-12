@@ -58,6 +58,11 @@ function limitToolNames(record: JournalRecord): JournalRecord {
  * gateway. Null when any string cannot be masked.
  */
 export function sanitizeRecord(record: JournalRecord, privacy: PrivacyGateway): JournalRecord | null {
+  return maskStrings(limitToolNames(record), privacy);
+}
+
+/** `value` with every string masked with `privacy` (idempotent for its own tokens). Null when any string cannot be masked. */
+export function maskStrings<T>(value: T, privacy: PrivacyGateway): T | null {
   let failed = false;
   const walk = (item: unknown): unknown => {
     if (failed) return null;
@@ -75,8 +80,8 @@ export function sanitizeRecord(record: JournalRecord, privacy: PrivacyGateway): 
     if (typeof item === "object" && item !== null) return Object.fromEntries(Object.entries(item).map(([key, value]) => [key, walk(value)]));
     return item;
   };
-  const shown = walk(limitToolNames(record));
-  return failed ? null : (shown as JournalRecord);
+  const shown = walk(value);
+  return failed ? null : (shown as T);
 }
 
 /**

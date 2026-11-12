@@ -708,13 +708,13 @@ export async function prepareTask(
       );
     }
   }
-  // U-37: the last element, whether the error gets input_inside_workspace. R-69 L1 (PM): not the
-  // cancel file, which the hint (task, config or variables file) does not name.
+  // U-37: the last element, whether the error gets input_inside_workspace. R-69 L1, R-69b L1 (PM):
+  // not the script file and the cancel file, which the hint (task, config or variables file) does not name.
   const located: [string | null, CliErrorCode, string, boolean][] = [
     [envPath, "invalid_config", "the file given by --vars-file", true],
     [configFile?.path ?? null, "invalid_config", "the config file", true],
     [taskFile?.path ?? null, "invalid_task", "the task file", true],
-    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file", true],
+    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file", false],
     // T-12: a cancel file inside the workspace could be created by the run itself.
     [args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile), "invalid_arguments", "the file given by --cancel-file", false],
   ];

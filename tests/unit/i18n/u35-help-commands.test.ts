@@ -85,8 +85,9 @@ describe("U-35: the help of the five plan and state commands", () => {
     const { en, ko } = MESSAGE_TEXTS;
     // changes: a file's lines are shown when the current secrets mask it as the run did (DR-29), not
     // never (g-changes-wire: "help says when the text is shown, not that it never is").
-    assert.match(en["help.command.changes"], /changed files and their state.*changed lines only when the current secrets mask it as the run did/);
-    assert.match(ko["help.command.changes"], /바꾼 파일과 그 상태.*바뀐 줄은 지금의 가릴 값이 실행 때와 같게 가릴 때만 보입니다/);
+    // U-53 (R-64 L3) names the other two conditions too (u53-help-followups.test.ts).
+    assert.match(en["help.command.changes"], /changed files and their state.*changed lines only when .*the current secrets mask it as the run did/);
+    assert.match(ko["help.command.changes"], /바꾼 파일과 그 상태.*바뀐 줄은 .*지금의 가릴 값이 실행 때와 같게 가릴 때만 보입니다/);
     for (const text of [en["help.command.changes"], ko["help.command.changes"]]) assert.ok(!/not shown yet|not shown for now|아직 보이지 않/.test(text), text);
     // apply: at a terminal the result's JSON line only with --json (or --quiet, DR-49 as U-23 has it).
     for (const text of [en["help.command.apply"], ko["help.command.apply"]]) {

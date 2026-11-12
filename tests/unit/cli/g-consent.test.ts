@@ -312,3 +312,33 @@ describe("DR-25: the real store records the revert consent", () => {
     assert.deepEqual([record["unsafeMoveConsent"], record["unsafeMoves"]], ["cli-flag", 0]);
   });
 });
+
+describe("R-9 I-4: the apply progress wrapper and the start records", () => {
+  test("plan_item_started is stored but never handed to the renderer; the other records are", async () => {
+    const { base, planned, digest } = await planRun();
+    const shown: string[] = [];
+    const lines: string[] = [];
+    const outcome = await runApply({
+      ...io(base, ["apply", "--task", "task.json", "--run", planned.runId, "--digest", digest.slice(0, 12)]),
+      writeProgress: (line) => lines.push(line),
+      human: {
+        // Records every record it is given, before any check could throw.
+        applyProgressLine: (event: { type: string }) => {
+          shown.push(event.type);
+          return event.type;
+        },
+        applySummary: () => "summary\n",
+      } as never,
+    });
+    assert.ok("output" in outcome && outcome.output.kind === "apply", JSON.stringify(outcome));
+    const result = outcome.output as ApplyResult;
+    const stored = (await readFile(path.join(base, "ws", result.journalPath), "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => (JSON.parse(line) as { type: string }).type);
+    assert.ok(stored.includes("plan_item_started"), stored.join(","));
+    assert.equal(shown.includes("plan_item_started"), false);
+    assert.deepEqual(shown, stored.filter((type) => type !== "plan_item_started"));
+    assert.equal(lines.filter((line) => line.includes("file_moved")).length, 1);
+  });
+});

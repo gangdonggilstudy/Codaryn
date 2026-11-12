@@ -28,6 +28,7 @@ import {
 } from "../contracts/index.js";
 import type {
   ApplyJournal,
+  ApplyJournalEntry,
   ApplyJournalEvent,
   ApplyPlan,
   ApplyResult,
@@ -446,7 +447,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
 
 /**
  * Writes an apply record's progress line after storing it (G-A applyProgressLine, best effort) and
- * tells `observe` of every stored record.
+ * tells `observe` of every stored shown record. Start records (`plan_item_started`) are stored only.
  */
 function observeApply(
   journal: ApplyJournal,
@@ -457,8 +458,11 @@ function observeApply(
 ): ApplyJournal {
   const render = write === undefined || human?.applyProgressLine === undefined ? undefined : human.applyProgressLine.bind(human);
   return {
-    async append(event: ApplyJournalEvent) {
+    async append(event: ApplyJournalEntry) {
       await journal.append(event);
+      // R-9 I-4: a start record is stored for the revert only. It is not a shown record
+      // (ApplyJournalEvent): neither the observer nor the renderer gets it.
+      if (event.type === "plan_item_started") return;
       observe(event);
       if (render === undefined || write === undefined) return;
       try {

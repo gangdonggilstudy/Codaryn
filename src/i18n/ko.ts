@@ -178,7 +178,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "help.intro": "codaryn: 로컬 작업 에이전트입니다. 실행 하나는 작업 공간 폴더 하나 안에서 권한 규칙에 따라 일하고, 검증 결과로 끝납니다. 기록은 <workspace>/.codaryn/에 남습니다.",
   "help.commands_heading": "명령:",
-  "help.output": "run은 stdout에 JSON 한 줄을, stderr에 진행 줄과 끝 요약을 냅니다(--quiet면 생략).",
+  "help.output": "터미널에서는 stderr의 사람용 줄(진행 줄, 요약, 오류 설명)만 보입니다. run·revert·apply의 결과와 오류는 --json을 주거나 출력이 터미널이 아닐 때(파이프, 파일) stdout에 JSON 한 줄로도 냅니다. --quiet면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다.",
   "help.key": "API 키는 제공자의 환경 변수(또는 --vars-file)에서만 읽고, --task나 --config 파일에서는 읽지 않습니다. 변수 이름은 codaryn doctor가 알려 줍니다.",
   "help.contract": "전체 계약은 docs/cli-contract.md를 보세요.",
   "help.options_heading": "옵션:",
@@ -444,6 +444,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.kept.used_by_kept_apply": "남긴 적용 실행이 쓰는 계획 실행. 지우면 그 적용을 되돌릴 수 없음",
   "cleanup.kept.partly_removed": "옮겨 두었지만 다 지우지 못함. 남은 것은 다음 정리에 보이는 폴더에 있음",
   "apply.notice.plan_records_unchecked": "상태 디렉터리가 너무 커서 다 확인하지 못해, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하고, codaryn cleanup으로 상태 디렉터리를 확인할 수 있는 크기로 줄이세요.",
+  "apply.notice.plan_records_unchecked.run_since_plan": "계획 실행이나 그 뒤의 실행 가운데 상태 디렉터리를 다 확인하지 못했거나 중간에 멈춘 실행이 있어, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하세요.",
   "apply.notice.plan_task_differs": "계획은 이 적용에 준 것과 다른 작업으로 만들었습니다(예: 계획은 task 파일, 적용은 간편 형식). 쓰인 검증과 규칙은 계획의 작업이 아니라 이 적용의 것입니다. 이 때문에 적용을 멈추지는 않았습니다. 계획 실행과 같은 작업 지정 방식으로 적용하면 그 작업의 검증과 규칙이 쓰입니다.",
 
   "diagnostic.file.config": "설정 파일",

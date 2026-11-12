@@ -72,7 +72,7 @@ export interface PolicyGate {
   /**
    * Second check on the effective arguments after restoration: real paths after resolving
    * links, and the actual command and args. Only an allowed result may be executed.
-   * G-A: besides built-in tool calls it judges workflow tool calls and single plan actions
+   * G-A: besides built-in tool calls it judges task type tool calls and single plan actions
    * (PlanActionCall); like the first check it reads the descriptor's fields from `args`.
    */
   checkEffective(call: EffectiveToolCall | EffectiveWorkflowToolCall | PlanActionCall, descriptor: ToolDescriptor): Promise<PolicyDecision>;

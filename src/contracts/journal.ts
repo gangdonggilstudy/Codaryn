@@ -45,8 +45,8 @@ export type JournalEvent =
       /** The resolved limits. Phase 2 records all six fields; earlier journals have four. */
       readonly limits: Limits;
       /**
-       * G-A: present only when the task has workflow settings (a `workflowRef` or any of its
-       * workflow fields): the definition used (or null) and the resolved settings, `instructions`
+       * G-A: present only when the task has task type settings (a `workflowRef` or any of its
+       * task type fields): the definition used (or null) and the resolved settings, `instructions`
        * excepted (the first `model_request.system` holds them). Absent: the legacy settings.
        */
       readonly workflowRef?: string | null;

@@ -242,7 +242,7 @@ export interface RunObserver {
 - 사람 확인은 두 번 호출이다: `dryRun: true` → 사람 확인 → `dryRun: false`. 미리보기는 잠금도 기록도 만들지 않는다. 두 호출 사이에 파일이 바뀌면 두 번째 호출이 해시 비교로 건너뛴다. 미리보기는 약속이 아니다.
 - 적용 실행의 되돌리기(이동 되돌림, 보관함 복원)는 같은 함수가 적용 runId로 한다(GT 6.4절 7, DR-9).
 
-### 5.6 계획 확인·적용·사람 확인 [적용 구현 `ec1914d`, 계획 보기·사람 확인은 남음] (DR-1, DR-2)
+### 5.6 계획 확인·적용·사람 확인 [구현: 적용 `ec1914d`, 계획 보기·사람 확인 `64ecaee`] (DR-1, DR-2)
 
 계획 승인은 실행 사이의 확인 하나다(GT-D4, DR-1). 실행 중 질문(5.9)으로 묻지 않는다.
 
@@ -294,7 +294,13 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
      - `plan_item_started`(R-9 I-4)는 저장되지만 이벤트로 보내지 않는다. 그 번호는 비어 있다.
 6. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
 
-- `applyPlan`은 있다. `plan`과 `review`는 아직 없다. CLI의 `runPlan`·`runReview`를 같은 방식으로 감싸면 된다.
+- `plan`·`review`(`64ecaee`): CLI의 `runPlan`·`runReview`를 task 형식과 `--json`으로 부른다.
+  - 계획은 그 task 형식이 등록하는 비밀로 다시 가려 보인다.
+  - 사람 확인의 메모는 저장 전에 가린다(R-4 L-4).
+  - 메모가 `--`로 시작하면 CLI 인자로 읽힐 수 없어 앱 계층이 따로 거부한다. 빈 메모는 메모 없음이다.
+- DR-28(R-11 M-1, 계약 `bed4d81`, 이 브랜치 `470bdab`): 계획 보기·적용은 지금 등록된 비밀로 다시 가린 결과가 계획 실행 때의 가린 표기와 같을 때만 진행한다. 다르면 `plan_secrets_differ`다.
+  - 비교는 CLI·store가 한다. 앱 계층은 그 오류를 그대로 넘긴다.
+  - 앱 경유 재현 시험(`c85fd8c`)은 CLI·store 구현 전까지 todo다. 지금은 계획 실행의 비밀이 평문으로 보인다.
 - 남은 차이(CLI 담당): `runApply`가 검증기 명령 실행기를 `parentEnv` 없이 만든다. 그래서 앱 계층의 적용에서는 DR-4(부모 환경 = 실행의 환경 사본)가 지켜지지 않는다. 실행(`startRun`)은 앱 계층의 조립으로 지킨다.
 - (DR-20으로 추진하지 않음) VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 만들어 두었다(`vscode/src/core/args.ts`, 참고용).
 
@@ -312,10 +318,15 @@ interface ChangedFileView {
   state: "as_run_left" | "changed_since_run" | "missing" | "unknown";
   before: MaskedText | null;           // 원본, 다시 가림
   after: MaskedText | null;            // 지금 내용, 다시 가림
-  unavailable: null | "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable" | "mask_failed";
+  unavailable: null | "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable" | "mask_failed" | "masking_unverified";
 }
 ```
 
+- **R-11, DR-28 원칙(`8639d50`)**: 파일 글은 지금 등록된 비밀로 다시 가린 결과가 실행 때 가린 것과 같을 때만 보인다. 다르면 글 없이 경로와 상태만 준다(AC-D13).
+  - 재현: 실행 때 비밀을 등록하고, `changes`는 그 `secretEnv`가 없는 다른 task 파일로 불렀다. 원본과 지금 파일에서 비밀 값이 평문으로 나왔다.
+  - 실행 기록은 바뀐 파일의 **경로**를 어떻게 가렸는지(`file_changed.path`)만 남긴다. **글**을 어떻게 가렸는지는 남기지 않는다(스냅샷 색인에도 내용 없음).
+  - 그래서 비교할 수 없고, 지금은 어느 task 형식으로 불러도 글을 내지 않는다(`masking_unverified`). 경로·생성 여부·상태는 그대로 준다.
+  - 글을 다시 보이려면 실행이 바뀐 파일마다 그때의 가린 표기(예: DR-28의 `MaskedParts`나 그 다이제스트)를 기록해야 한다. 계약·store 일이다(A-4 보고서 제안).
 - **무엇으로 가리나.** 같은 설정으로 실행하면 지금 등록될 비밀이다(GUI-D6 (a)).
   - 등록되는 것: task·설정의 `secretEnv`, 지금의 키, 변수 파일이 설정한 값.
   - 실행의 대응표는 실행이 끝나면 없다. 그래서 토큰 모양은 실행 때와 다를 수 있다.

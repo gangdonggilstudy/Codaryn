@@ -63,7 +63,7 @@ import type {
   AnyToolName,
 } from "../../contracts/index.js";
 import { isRunTimestamp } from "../../store/index.js";
-import { displayWidth, finalLine, formatLocalTime, padEnd, shownPath, token } from "./format.js";
+import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "./format.js";
 
 /** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
 export const HUMAN_PREFIX = "codaryn: ";
@@ -107,12 +107,8 @@ function localTime(at: unknown): string | null {
   return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
 }
 
-/** DR-47: lines of the agent's last message shown in a run summary. The rest are counted. */
+/** DR-47: rows of the agent's last message shown in a run summary (quoteModelText). The rest are counted. */
 export const FINAL_MESSAGE_MAX_LINES = 20;
-/** Every line break a terminal may honour: CR LF, LF, CR, NEL, VT, FF, and the line and paragraph separators. */
-const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
-/** Before each line of the agent's message, so none of them can pass for a line of the summary. */
-const QUOTED = "  | ";
 
 /** "(+3)" after a cut list. */
 function moreLine(count: number): string {
@@ -268,11 +264,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const final: unknown = result.finalMessage;
       if (pair?.reason !== "plan_pending" && typeof final === "object" && final !== null) {
         const { text, truncated } = final as { text?: unknown; truncated?: unknown };
-        const shown = typeof text === "string" && typeof truncated === "boolean" ? text.split(LINE_BREAK).filter((line) => line.trim().length > 0) : [];
+        // R-49 R49-L2: the one way text a model wrote is drawn (quoted rows, single spaces, folded here).
+        const shown = typeof text === "string" && typeof truncated === "boolean" ? quoteModelText(text, FINAL_MESSAGE_MAX_LINES) : [];
         if (shown.length > 0) {
           out.push(`${catalog.format("summary.final_message")}:`);
-          for (const line of shown.slice(0, FINAL_MESSAGE_MAX_LINES)) out.push(`${QUOTED}${line.trimEnd()}`);
-          if (shown.length > FINAL_MESSAGE_MAX_LINES) out.push(moreLine(shown.length - FINAL_MESSAGE_MAX_LINES));
+          out.push(...shown);
           if (truncated === true) out.push(`  ${catalog.format("summary.final_message_truncated", { count: MAX_FINAL_MESSAGE_CHARS })}`);
         }
       }

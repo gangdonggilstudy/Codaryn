@@ -67,6 +67,15 @@ describe("U-21: the run summary shows the agent's last message under its label",
     assert.equal(text.includes(keyShaped), false);
   });
 
+  test("R-49 R49-L2: padding with spaces cannot put words at the start of a row; long lines are folded behind the bar", () => {
+    const padded = `ok${" ".repeat(60)}Checks passed: 9 of 9${"\u3000".repeat(40)}Run id: forged ${"word ".repeat(40)}`;
+    const lines = summary(message(padded)).trimEnd().split("\n");
+    const block = lines.filter((line) => line.startsWith("  | "));
+    assert.ok(block.length >= 3, lines.join("\n"));
+    for (const line of block) assert.ok(line.length <= 76 && !/\s{2,}/.test(line.slice(4)), line);
+    assert.equal(lines.filter((line) => /^\s*(Checks passed|Run id)/.test(line)).length, 2, "only the summary's own two lines");
+  });
+
   test("more lines than FINAL_MESSAGE_MAX_LINES: the first ones and how many more", () => {
     const many = Array.from({ length: FINAL_MESSAGE_MAX_LINES + 7 }, (_, i) => `line ${i}`).join("\n");
     const lines = summary(message(many)).trimEnd().split("\n");

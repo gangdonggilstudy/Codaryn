@@ -105,3 +105,36 @@ describe("U-38: the typed workspace in the next-command hints", () => {
     assert.equal(takesContext, 2);
   });
 });
+
+/**
+ * Review R-70 M-1 (PM): PowerShell reads the curly double quotes (U+201C, U+201D, U+201E) as double
+ * quotes, so a folder named `x”;cmd;#` closed the hint's string and ran a command. Adding characters
+ * to refuse one by one is dropped for an allow list: every character a letter, digit or combining
+ * mark of any script (\p{L}, \p{N}, \p{M}), the space U+0020, or one of `\ / : . _ - ( ) , + = @`.
+ * Anything else gives the placeholder. The trailing backslash and the length rules stay.
+ */
+describe("R-70: only an allow list of characters is shown", () => {
+  test("the curly quotes, the small ones, and the x”;cmd;# shape give the placeholder", () => {
+    for (const typed of ["ws\\x\u201d;u70marker;#", "a\u201cb", "a\u201db", "a\u201eb", "a\u201fb", "a\u2018b", "a\u2019b", "a\u201ab", "a\u201bb", "x\u201d;cmd;\u201dy"]) {
+      assert.equal(shown(typed), null, JSON.stringify(typed));
+    }
+  });
+
+  test("every other character outside the list gives the placeholder", () => {
+    for (const typed of ["it's", "a#b", "a&b", "a;b", "a|b", "a<b", "a>b", "a*b", "a?b", "a[b]", "a{b}", "a~b", "a^b", "a\uff02b", "a\u2013b", "a\u2014b", "a\u00a0b", "a\u3000b", "a\u00b7b", "a\u00a7b"]) {
+      assert.equal(shown(typed), null, JSON.stringify(typed));
+    }
+  });
+
+  test("letters, digits and marks of any script, the space and the twelve signs are shown", () => {
+    for (const typed of ["x+y=z@host,(1)", "C:/a b/c.d_e-f", "e\u0301te\u0301", "\u6570\u636e\\\u0663", "\ud55c\uae00 \ud3f4\ub354", "\u0928\u092e\u0938\u094d\u0924\u0947"]) {
+      assert.equal(shown(typed), `"${typed}"`, JSON.stringify(typed));
+    }
+  });
+
+  test("the rules that stay: a trailing backslash, the length, key shapes", () => {
+    assert.equal(shown("C:\\dir\\"), null);
+    assert.equal(shown("a".repeat(81)), null);
+    assert.equal(shown(`D:\${KEY_SHAPED}`), null);
+  });
+});

@@ -125,29 +125,33 @@ export type ShownWorkspace = string & { readonly [shownWorkspaceBrand]: "shownWo
 export const MAX_SHOWN_WORKSPACE_CHARS = 80;
 
 /**
- * Characters that end, expand or escape inside double quotes in PowerShell, cmd or a POSIX shell
- * (`"`, `$`, the backtick, `%`, `!`), and every control, format, surrogate, private-use or
- * unassigned character and line or paragraph separator (Unicode C, Zl, Zp).
+ * Review R-70 M-1 (PM): the characters a shown path may hold, an allow list, not characters refused
+ * one by one (PowerShell also reads the curly quotes U+201C, U+201D and U+201E as double quotes,
+ * which a deny list had missed). A letter, digit or combining mark of any script (\p{L}, \p{N},
+ * \p{M}), the space U+0020, or one of `\ / : . _ - ( ) , + = @`. None of these ends, expands or
+ * escapes a double-quoted string in PowerShell, cmd or a POSIX shell (a trailing backslash aside,
+ * which toShownWorkspace refuses).
  */
-const UNSHOWABLE_IN_QUOTES = /["$`%!]|\p{C}|\p{Zl}|\p{Zp}/u;
+const SHOWABLE_IN_QUOTES = /^[\p{L}\p{N}\p{M} \\/:._\-(),+=@]+$/u;
 const PRIVACY_TOKEN_FRAGMENT = /codaryn_secret/i;
 
 /**
  * DR-51 (U-38, PM): the hint form of a typed workspace path, or null, when the hint keeps saying
- * `<workspace>` as before. `masked` is the path after the command's own masking: the run's privacy
- * gateway (registered values and key shapes) for `run` and `apply`, key shapes only for `revert`,
- * which knows no registered values; null when masking failed. Null when:
+ * `<workspace>` as before. `masked` is the path after the command's own masking, the run's privacy
+ * gateway (registered values and key shapes), for `run` and `apply`; null when masking failed.
+ * `revert` knows no registered values, so its hint always says `<workspace>` (R-70 L-1, PM). Null
+ * when:
  * - masking failed or changed the path (a registered value or a key shape was in it);
  * - it is empty or blank, or longer than MAX_SHOWN_WORKSPACE_CHARS;
- * - it holds a character that cannot stand in double quotes (UNSHOWABLE_IN_QUOTES), or ends with a
- *   backslash (which would escape the closing quote);
+ * - it holds a character outside SHOWABLE_IN_QUOTES (R-70 M-1), or ends with a backslash (which
+ *   would escape the closing quote);
  * - it holds a key shape (API_KEY_MASK_PATTERN_SOURCES) or a privacy-token fragment, whoever masked.
  * Otherwise the path in double quotes, as typed: one form for every shell, nothing escaped.
  */
 export function toShownWorkspace(typed: string, masked: string | null): ShownWorkspace | null {
   if (masked !== typed) return null;
   if (typed.trim().length === 0 || Array.from(typed).length > MAX_SHOWN_WORKSPACE_CHARS) return null;
-  if (UNSHOWABLE_IN_QUOTES.test(typed) || typed.endsWith("\\")) return null;
+  if (!SHOWABLE_IN_QUOTES.test(typed) || typed.endsWith("\\")) return null;
   if (PRIVACY_TOKEN_FRAGMENT.test(typed)) return null;
   if (API_KEY_MASK_PATTERN_SOURCES.some((source) => new RegExp(source).test(typed))) return null;
   return `"${typed}"` as ShownWorkspace;
@@ -419,8 +423,8 @@ export const FIXED_MESSAGES = {
   "summary.next_revert_here": { runId: "runId" },
   // DR-51 (U-38): the same hints with the workspace path the person typed (`{workspace}`, a
   // ShownWorkspace, in place of `<workspace>`), when the summary's context has `workspaceShown`.
-  // Without it, the hints above, as before. End summaries only (run, apply, revert): not the report,
-  // the plan view, cleanup, runs or the errors.
+  // Without it, the hints above, as before. End summaries only (run and apply; revert passes none,
+  // R-70 L-1): not the report, the plan view, cleanup, runs or the errors.
   "summary.next_report_typed": { runId: "runId", workspace: "workspace" },
   "summary.next_revert_typed": { runId: "runId", workspace: "workspace" },
   "summary.config_default": { location: "location" },
@@ -553,7 +557,8 @@ export const FIXED_MESSAGES = {
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
-  // DR-51 (U-38): the same with the workspace `revert` was given (RevertSummaryContext).
+  // DR-51 (U-38): the same with a typed workspace (RevertSummaryContext). R-70 L-1 (PM): revert
+  // knows no registered values and passes none, so its hint says `<workspace>`; the id stays unused.
   "summary.next_revert_unsafe_typed": { runId: "runId", workspace: "workspace" },
 
   // `codaryn runs` (N-7, N-16).
@@ -991,7 +996,7 @@ export interface HumanOutput {
    * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present. R-16 L-1:
    * `revert.parked` when skipped files carry `parkedAt`. DR-51 (U-38): with
    * `context.workspaceShown`, `summary.next_revert_unsafe_typed` in place of
-   * `summary.next_revert_unsafe`.
+   * `summary.next_revert_unsafe`; R-70 L-1 (PM): `revert` passes none, so it never does.
    */
   revertSummary(output: RevertOutput, context?: RevertSummaryContext): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
@@ -1031,9 +1036,9 @@ export interface ApplySummaryContext {
 }
 
 /**
- * DR-51 (U-38): what a revert summary needs besides the output: the `--workspace` path revert was
- * given, as `toShownWorkspace` gives it with key shapes masked (revert knows no registered values);
- * absent when it gives null, and the hint says `<workspace>` as before.
+ * DR-51 (U-38): what a revert summary needs besides the output. R-70 L-1 (PM): `revert` knows no
+ * registered values, so it cannot tell whether the typed path holds one; it passes no
+ * workspaceShown and its hint always says `<workspace>`. The field stays for the renderer's type.
  */
 export interface RevertSummaryContext {
   readonly workspaceShown?: ShownWorkspace;

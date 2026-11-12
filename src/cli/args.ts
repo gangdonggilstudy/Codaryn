@@ -16,7 +16,14 @@
  * Each may appear once. Only `run` takes a positional argument (the goal), at most one.
  */
 
-import { LATEST_RUN_ALIAS, MAX_REVIEW_NOTE_CHARS, MIN_PLAN_DIGEST_PREFIX, PROFILE_NAME_PATTERN_SOURCE, WORKFLOW_ID_PATTERN_SOURCE } from "../contracts/index.js";
+import {
+  LATEST_RUN_ALIAS,
+  MAX_REVIEW_NOTE_CHARS,
+  MIN_PLAN_DIGEST_PREFIX,
+  PROFILE_NAME_PATTERN_SOURCE,
+  UNSAFE_MOVE_CONSENT_ARGUMENT,
+  WORKFLOW_ID_PATTERN_SOURCE,
+} from "../contracts/index.js";
 
 /**
  * Where the task comes from: a task file, or the quick form built from the config file.
@@ -362,7 +369,7 @@ export interface TaskFormArgs {
 const TASK_FORM_OPTIONS = ["--task", "--workspace", "--config", "--vars-file", "--profile", "--workflow"] as const;
 export const TASK_FORM_USAGE = "(--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <config.json>] [--vars-file <path>]";
 export const PLAN_USAGE = `codaryn plan ${TASK_FORM_USAGE} --run <runId|latest> [--json]`;
-export const APPLY_USAGE = `codaryn apply ${TASK_FORM_USAGE} --run <runId> --digest <first 12+ hex> [--cancel-file <path>] [--quiet]`;
+export const APPLY_USAGE = `codaryn apply ${TASK_FORM_USAGE} --run <runId> --digest <first 12+ hex> [${UNSAFE_MOVE_CONSENT_ARGUMENT}] [--cancel-file <path>] [--quiet]`;
 export const REVIEW_USAGE = `codaryn review ${TASK_FORM_USAGE} --run <runId|latest> (--accept | --reject) [--note <text>] [--json]`;
 
 function taskFormOf(values: ReadonlyMap<string, string>, usage: string): { ok: true; form: TaskFormArgs } | { ok: false; message: string } {
@@ -412,6 +419,11 @@ export interface ApplyArgs {
   readonly runId: string;
   /** The approved digest's first characters (MIN_PLAN_DIGEST_PREFIX or more lowercase hex), or null at a terminal. */
   readonly digest: string | null;
+  /**
+   * DR-21: the person consents, for this apply only, to moves that can only be made without the
+   * guarantee that nothing at the destination is replaced (UNSAFE_MOVE_CONSENT_ARGUMENT).
+   */
+  readonly allowUnsafeMove: boolean;
   readonly cancelFile: string | null;
   readonly quiet: boolean;
 }
@@ -424,7 +436,10 @@ export function parseApplyArgs(argv: readonly string[]): { readonly ok: true; re
   if (command !== "apply") return { ok: false, message: USAGE };
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const options = [...TASK_FORM_OPTIONS, "--run", "--digest", "--cancel-file"] as const;
-  const read = readOptions<(typeof options)[number], "--quiet">(rest, options, `usage: ${APPLY_USAGE}`, ["--quiet"]);
+  const read = readOptions<(typeof options)[number], "--quiet" | typeof UNSAFE_MOVE_CONSENT_ARGUMENT>(rest, options, `usage: ${APPLY_USAGE}`, [
+    "--quiet",
+    UNSAFE_MOVE_CONSENT_ARGUMENT,
+  ]);
   if (!read.ok) return read;
   const form = taskFormOf(read.values, APPLY_USAGE);
   if (!form.ok) return form;
@@ -438,7 +453,15 @@ export function parseApplyArgs(argv: readonly string[]): { readonly ok: true; re
   }
   return {
     ok: true,
-    args: { command: "apply", form: form.form, runId, digest, cancelFile: read.values.get("--cancel-file") ?? null, quiet: read.switches.has("--quiet") },
+    args: {
+      command: "apply",
+      form: form.form,
+      runId,
+      digest,
+      allowUnsafeMove: read.switches.has(UNSAFE_MOVE_CONSENT_ARGUMENT),
+      cancelFile: read.values.get("--cancel-file") ?? null,
+      quiet: read.switches.has("--quiet"),
+    },
   };
 }
 

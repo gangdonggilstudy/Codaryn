@@ -31,6 +31,7 @@ import type {
   ApplyPlan,
   ApplyResult,
   ApprovalChannel,
+  UnsafeMoveConsent,
   Clock,
   ContentHash,
   EngineResult,
@@ -307,77 +308,122 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     return cliError("plan_not_approved", "an apply needs --digest with the plan's digest (codaryn plan shows it); nothing was moved");
   }
 
-  const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
-  const lock = await acquireLock({ workspaceRoot, runId, clock: io.clock });
-  if (!lock.ok) return cliError("workspace_locked", "another run or revert holds the workspace; nothing was moved");
-  const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
-  let result: ApplyResult | null = null;
-  try {
-    const workspace = await createWorkspace({ root: workspaceRoot });
-    const privacy = shown.privacy;
-    const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
-    const protectedPaths = task.policy.protectedPaths ?? [];
-    const integrity =
-      protectedPaths.length > 0 || prepared.integrityPaths.length > 0
-        ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
-        : undefined;
-    const journal = withApplyProgress(createApplyJournal({ workspaceRoot, runId, clock: io.clock }), privacy, args.quiet ? undefined : io.writeProgress, io.human);
-    result = await (io.applyPlan ?? engineApplyPlan)({
-      plan: shown.plan,
-      planRunId,
-      digest: shown.digest,
-      approval,
-      runId,
-      taskId: task.id,
-      maxDurationMs: task.limits.maxDurationMs,
-      verifierConfigs: task.verifiers,
-      executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
-      policy: createPolicyGate({ config: task.policy, workspace }),
-      planActions: task.policy.planActions ?? [],
-      // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
-      discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
-      privacy,
-      verifiers: createVerifierRunner({ workspace, commandRunner }),
-      inventory: createInventoryChecker({ workspaceRoot }),
-      journal,
-      clock: io.clock,
-      signal: cancel.signal,
-      ...(integrity === undefined ? {} : { integrity }),
-      markApplied: () => markPlanApplied({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(io.clock.now()).toISOString() }),
-    });
-    // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
-    await writeResult(workspaceRoot, result as unknown as EngineResult);
-  } catch {
-    return cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done");
-  } finally {
-    await releaseLock({ workspaceRoot, runId });
-    cancel.dispose();
-  }
-  if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
+  /** One apply run: lock, engine, result.json, end summary. `unsafeMoves` is from its preflight record. */
+  const applyOnce = async (consent: UnsafeMoveConsent | null): Promise<{ ok: true; result: ApplyResult; unsafeMoves: number } | { ok: false; outcome: CommandOutcome }> => {
+    const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
+    const lock = await acquireLock({ workspaceRoot, runId, clock: io.clock });
+    if (!lock.ok) return { ok: false, outcome: cliError("workspace_locked", "another run or revert holds the workspace; nothing was moved") };
+    const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
+    let result: ApplyResult;
+    let unsafeMoves = 0;
     try {
-      const form = args.form.input.kind === "task" ? "task" : "given";
-      const summary = io.human.applySummary(result, { workspaceForm: form });
-      const masked = shown.privacy.mask(summary);
-      if (masked.ok) io.writeProgress(cleanText(masked.text, true));
+      const workspace = await createWorkspace({ root: workspaceRoot });
+      const privacy = shown.privacy;
+      const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
+      const protectedPaths = task.policy.protectedPaths ?? [];
+      const integrity =
+        protectedPaths.length > 0 || prepared.integrityPaths.length > 0
+          ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
+          : undefined;
+      const journal = observeApply(
+        createApplyJournal({ workspaceRoot, runId, clock: io.clock }),
+        privacy,
+        args.quiet ? undefined : io.writeProgress,
+        io.human,
+        (event) => {
+          if (event.type === "plan_checked") unsafeMoves = event.unsafeMoves?.length ?? 0;
+        },
+      );
+      result = await (io.applyPlan ?? engineApplyPlan)({
+        plan: shown.plan,
+        planRunId,
+        digest: shown.digest,
+        approval,
+        // DR-21: absent consent is none; the engine counts it only for this plan's digest.
+        unsafeMoveConsent: consent,
+        runId,
+        taskId: task.id,
+        maxDurationMs: task.limits.maxDurationMs,
+        verifierConfigs: task.verifiers,
+        executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
+        policy: createPolicyGate({ config: task.policy, workspace }),
+        planActions: task.policy.planActions ?? [],
+        // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
+        discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
+        privacy,
+        verifiers: createVerifierRunner({ workspace, commandRunner }),
+        inventory: createInventoryChecker({ workspaceRoot }),
+        journal,
+        clock: io.clock,
+        signal: cancel.signal,
+        ...(integrity === undefined ? {} : { integrity }),
+        markApplied: () => markPlanApplied({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(io.clock.now()).toISOString() }),
+      });
+      // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
+      await writeResult(workspaceRoot, result as unknown as EngineResult);
     } catch {
-      // Human output is best effort.
+      return {
+        ok: false,
+        outcome: cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done"),
+      };
+    } finally {
+      await releaseLock({ workspaceRoot, runId });
+      cancel.dispose();
+    }
+    if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
+      try {
+        const form = args.form.input.kind === "task" ? "task" : "given";
+        const summary = io.human.applySummary(result, { workspaceForm: form });
+        const masked = shown.privacy.mask(summary);
+        if (masked.ok) io.writeProgress(cleanText(masked.text, true));
+      } catch {
+        // Human output is best effort.
+      }
+    }
+    return { ok: true, result, unsafeMoves };
+  };
+
+  // DR-21: the person's consent to unsafe moves holds for one apply and comes only from the person:
+  // the CLI's own argument, or, at a terminal, the answer after an apply stopped as
+  // consent_required (nothing was moved, so the plan is not applied yet and a second apply run
+  // makes the moves). No task, config, profile, plan or model gives it.
+  const flagConsent: UnsafeMoveConsent | null = args.allowUnsafeMove ? { channel: "cli-flag", digest: shown.digest } : null;
+  const first = await applyOnce(flagConsent);
+  if (!first.ok) return first.outcome;
+  let final = first;
+  if (first.result.reason === "consent_required" && flagConsent === null && io.ask !== undefined) {
+    const count = first.unsafeMoves;
+    const question =
+      `${count} move${count === 1 ? "" : "s"} of this plan can only be made without the guarantee that nothing at the ` +
+      `destination is replaced (the drive has no hard links). Nothing was moved. Apply again and make ` +
+      `${count === 1 ? "it" : "them"} anyway, for this apply only? [y/N] `;
+    const answer = (await io.ask(question))?.trim().toLowerCase() ?? "";
+    if (YES.has(answer)) {
+      const second = await applyOnce({ channel: "cli-tty", digest: shown.digest });
+      if (!second.ok) return second.outcome;
+      final = second;
     }
   }
-  return { output: result, exitCode: result.exitCode };
+  return { output: final.result, exitCode: final.result.exitCode };
 }
 
-/** Writes an apply record's progress line after storing it; best effort (G-A applyProgressLine). */
-function withApplyProgress(
+/**
+ * Writes an apply record's progress line after storing it (G-A applyProgressLine, best effort) and
+ * tells `observe` of every stored record.
+ */
+function observeApply(
   journal: ApplyJournal,
   privacy: PrivacyGateway,
   write: ((line: string) => void) | undefined,
   human: HumanOutput | undefined,
+  observe: (event: ApplyJournalEvent) => void,
 ): ApplyJournal {
-  if (write === undefined || human?.applyProgressLine === undefined) return journal;
-  const render = human.applyProgressLine.bind(human);
+  const render = write === undefined || human?.applyProgressLine === undefined ? undefined : human.applyProgressLine.bind(human);
   return {
     async append(event: ApplyJournalEvent) {
       await journal.append(event);
+      observe(event);
+      if (render === undefined || write === undefined) return;
       try {
         const line = render(event);
         if (line === null) return;

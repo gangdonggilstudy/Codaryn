@@ -55,6 +55,8 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
       ];
       if (view.run !== null) parts.push(el("p", t.format("report.workflow", { workflow: view.run.workflow, provider: view.run.provider ?? "-" })));
       if (view.status === "incomplete") parts.push(el("p", t.format("report.incomplete"), { class: "notice" }));
+      // UXM-14, DR-38: as the CLI's report warns.
+      if (view.recordsChanged === true) parts.push(el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" }));
       return parts;
     },
   });

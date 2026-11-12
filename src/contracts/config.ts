@@ -224,6 +224,12 @@ export const INIT_DEFAULT_LIMITS = {
   maxDurationMs: 600_000,
 } as const;
 export const INIT_DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+/**
+ * U-26: the provider `codaryn init` writes the config for when it does not ask (not a terminal,
+ * `--json`) and when the answer is empty, unknown or the input ends: the file is then as before
+ * (top-level `model` and `maxOutputTokens`). One value for the CLI, the GUI and the documents.
+ */
+export const INIT_DEFAULT_PROVIDER: ApiProviderName = "anthropic";
 
 /**
  * U-1: material outside the workspace that a run must not change, such as baseline tests or

@@ -41,6 +41,23 @@ function recordedMasking(runId: string): unknown {
     return null;
   }
 }
+/**
+ * U-54 (R-65 L-1): what the run's journal recorded of its call codaryn-call-1 (the engine's first
+ * replaced id): whether its decision allowed it and whether its result was ok; null when unread.
+ */
+function replacedCall(runId: string): { decision: boolean | null; result: boolean | null } | null {
+  try {
+    const records = readFileSync(join(SECOND, ".codaryn", "runs", runId, "journal.jsonl"), "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as { type?: string; callId?: string; allowed?: boolean; result?: { callId?: string; ok?: boolean } });
+    const decision = records.find((record) => record.type === "tool_decision" && record.callId === "codaryn-call-1");
+    const result = records.find((record) => record.type === "tool_result" && record.result?.callId === "codaryn-call-1");
+    return { decision: decision?.allowed ?? null, result: result?.result?.ok ?? null };
+  } catch {
+    return null;
+  }
+}
 /** Waits until the fake API has received more model requests than `before`; false after `ms`. */
 async function requestArrived(before: number, ms = 60_000): Promise<boolean> {
   for (let waited = 0; waited < ms; waited += 50) {
@@ -338,6 +355,11 @@ startGui({
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), runId: document.getElementById('run-result-id')?.textContent ?? null }; })()",
       );
       results["runLog"] = await js("[...document.querySelectorAll('#run-log li')].map((li) => li.getAttribute('data-kind'))");
+      // U-54 (R-65 L-1): this run's denial, of the call the engine recorded as codaryn-call-1.
+      results["firstRunDenied"] = {
+        denied: await js("document.querySelectorAll('#run-log li[data-kind=\"tool_denied\"]').length"),
+        call: replacedCall((results["runResult"] as { runId?: string } | null)?.runId ?? ""),
+      };
       results["runCounts"] = await js("document.getElementById('run-counts')?.textContent ?? null");
       // U-21 (DR-47): the run ended with the reply "done": the agent's last message under its label.
       results["runFinalMessage"] = await js(
@@ -467,6 +489,12 @@ startGui({
       const beforeReview = await resultId();
       await taskWith("analyze", "a.txt를 분석한다");
       const analyzeRunId = (await newResult(beforeReview)) as string;
+      // U-54 (R-65 L-1): this run's codaryn-call-1 failed after the first run's codaryn-call-1 was
+      // denied, in the same window (one engine host): its line is in this run's progress list.
+      results["failedAfterDenial"] = {
+        call: replacedCall(analyzeRunId),
+        failed: await js("[...document.querySelectorAll('#run-log li[data-kind=\"tool_result\"] .text')].map((s) => s.textContent).filter((text) => text.includes('not_found'))"),
+      };
       results["reviewRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       if ((await js("document.getElementById('review-accept') !== null")) === true) {
         await js("document.getElementById('review-accept').click(); true");

@@ -4,8 +4,8 @@
  * that folder's removal is confirmed too: it is skipped, the rest is removed, and the outcome says
  * why item by item (kept: discarded_left). Until U-13 the records went with a warning only, and the
  * discarded file stayed under a numbered name with nothing left to say what it was.
- * Reproduced first, todo until the contract and the store follow it; the app layer passes the
- * store's outcome on as it is. UXM-1's steps: a plan applied and never reverted, then
+ * Reproduced first (2c8753d, todo); the contract (96c6ca9) and the store (f3ec04b, 3837677) follow it
+ * now, and the app layer passes the store's outcome on as it is. UXM-1's steps: a plan applied and never reverted, then
  * `cleanup --older-than 0 --discarded-older-than 0 --confirm <digest> --include-not-reverted`
  * without `--delete-discarded`, here the app's selection and confirmation of the same.
  * Real runs through the app (scripted model), the real store. Fake values only.
@@ -19,8 +19,6 @@ import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp } from "../../../src/app/index.js";
 import { appEnvironment, exists, setupRun, taskForm, taskRequest } from "./support.js";
-
-const TODO = { todo: "U-13: wait for the contract and the store (kept: discarded_left)" };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -86,7 +84,7 @@ async function stillRevertable(run: Applied): Promise<void> {
 }
 
 describe("U-13 (UXM-1): an apply run's records stay while its discarded files stay", () => {
-  test("UXM-1's steps: both folders selected, runs not reverted confirmed, the discarded folders not: the apply run is skipped, the rest removed", TODO, async () => {
+  test("UXM-1's steps: both folders selected, runs not reverted confirmed, the discarded folders not: the apply run is skipped, the rest removed", async () => {
     const run = await appliedNotReverted(true);
     const applied = await cleanup(run, { runs: { olderThanDays: 0 }, discarded: { olderThanDays: 0 } }, false);
     assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
@@ -108,7 +106,7 @@ describe("U-13 (UXM-1): an apply run's records stay while its discarded files st
     await stillRevertable(run);
   });
 
-  test("runs only selected (the discarded folder cannot be confirmed): the apply run is skipped as discarded_left", TODO, async () => {
+  test("runs only selected (the discarded folder cannot be confirmed): the apply run is skipped as discarded_left", async () => {
     const run = await appliedNotReverted(false);
     const applied = await cleanup(run, { runs: { olderThanDays: 0 } }, true);
     assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));

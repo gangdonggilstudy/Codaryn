@@ -263,7 +263,18 @@ export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
  *       `restored_from_discard`).
  *     - not done: the file with that SHA-256 is still at its original path and nothing is at the
  *       destination. Nothing is to be reverted and it is not listed.
+ *     - cut between the link and the removal of the source (R-15 L-1): see below.
  *     - anything else: skipped as `changed_since_run`; nothing is touched.
+ *   - R-15 L-1: a move is a hard link and then the removal of the source, so a process that ends
+ *     between the two leaves one file under two names. When the original path and the name the
+ *     action added (the destination of a move, or the discarded copy of a discard) both hold the
+ *     action's SHA-256 and are one file (the same device and file id), the added name is removed and
+ *     the file stays at its original path (`moved_back`, `restored_from_discard`). This holds for a
+ *     started action and for a recorded one (a revert's own move back cut at the same point). The
+ *     added name is first moved to a new name inside the state directory and removed only while it
+ *     is still that file there; otherwise it is put back without replacing anything and is not
+ *     removed. Two names that hold the same content but are different files are not this case:
+ *     a started action is then `changed_since_run`, a recorded one `original_path_taken`.
  *   - An action with a `plan_item_failed` record was not done and is not listed.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

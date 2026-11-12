@@ -40,7 +40,7 @@ import type {
 import { parseInitArgs } from "./args.js";
 import { chooseConfigFile } from "./config-file.js";
 import type { CommandOutcome } from "./guard.js";
-import { cliError } from "./run.js";
+import { argumentsError, cliError } from "./run.js";
 import type { WorkspaceLocation } from "./security/index.js";
 import { envValue, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
@@ -169,7 +169,7 @@ export function renderInit(output: InitOutput, messages: MessageCatalog, platfor
 
 export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
   const parsed = parseInitArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
   const platform = io.platform ?? process.platform;
   const messages = io.messages;

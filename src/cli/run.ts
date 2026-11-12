@@ -20,6 +20,7 @@
 import path from "node:path";
 import {
   CLI_ERROR_EXIT_CODES,
+  CLI_ERROR_HINT_DETAIL,
   LEGACY_WORKFLOW_SETTINGS,
   RESULT_SCHEMA_VERSION,
   mergeWorkflowPolicy,
@@ -33,6 +34,8 @@ import type {
   ApiProviderDeps,
   ApiProviderName,
   CliErrorCode,
+  CliErrorHint,
+  CliErrorHintDetail,
   CliErrorOutput,
   CliOutput,
   Clock,
@@ -41,6 +44,7 @@ import type {
   CreateApiProvider,
   DefaultConfigDisplay,
   DefaultConfigLocation,
+  DetailedCliErrorHint,
   EngineResult,
   InputDiagnostic,
   InputDiagnosticFile,
@@ -86,8 +90,8 @@ import {
   selectEnvFileSecrets,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
-import type { SettingsEnvironment } from "./settings.js";
+import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
+import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 
@@ -216,6 +220,37 @@ function headDiagnostic(file: InputDiagnosticFile, message: string): InputDiagno
 
 /** One CliErrorOutput and its exit code. The message must not contain secrets or file contents. */
 export const cliError = error;
+
+type ErrorOutcome = { output: CliErrorOutput; exitCode: number };
+
+/**
+ * U-37 (UXM-2, DR-57): the error with the hint that names its reason, for the human error; the
+ * JSON line gains only `hint`. A detailed hint's values go under CLI_ERROR_HINT_DETAIL, a symbol
+ * key the JSON line leaves out. `message` is not changed.
+ */
+export function withHint(outcome: ErrorOutcome, hint: CliErrorHint | DetailedCliErrorHint, detail?: CliErrorHintDetail): ErrorOutcome {
+  return { ...outcome, output: { ...outcome.output, hint, ...(detail === undefined ? {} : { [CLI_ERROR_HINT_DETAIL]: detail }) } };
+}
+
+/** U-37: an argument error from a parse failure, with its hint and unknown_option's place when it has them. */
+export function argumentsError(failure: {
+  readonly message: string;
+  readonly hint?: CliErrorHint | DetailedCliErrorHint;
+  readonly position?: number;
+}): ErrorOutcome {
+  const outcome = error("invalid_arguments", failure.message);
+  if (failure.hint === undefined) return outcome;
+  return withHint(outcome, failure.hint, failure.hint === "unknown_option" && failure.position !== undefined ? { position: failure.position } : undefined);
+}
+
+/** U-37: a settings failure; provider_not_configured names the missing settings (provider_settings_missing). */
+export function settingsError(failure: SettingsFailure): ErrorOutcome {
+  const outcome = error(failure.code, failure.message);
+  const missing = failure[SETTINGS_MISSING];
+  return failure.code === "provider_not_configured" && missing !== undefined && missing.length > 0
+    ? withHint(outcome, "provider_settings_missing", { missing })
+    : outcome;
+}
 
 /**
  * Y-4: added to the result's notices (and, with progress on, to stderr) when the run ended with a
@@ -360,7 +395,7 @@ interface InputFile {
 
 export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const parsed = parseArgs(io.argv);
-  if (!parsed.ok) return error("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
   const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
   const outcome = await runParsed(io, args, notes);
@@ -485,7 +520,7 @@ export async function prepareTask(
   const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   if (!chosen.ok) return error("invalid_config", chosen.message);
   if (args.input.kind === "quick" && goalHoldsKey(args.input.goal, currentKey)) {
-    return error("key_in_file", `the goal contains a key value; ${keyHintFor(keyOwnerIn(args.input.goal, knownKeyEntries(io.env)))}`);
+    return withHint(error("key_in_file", `the goal contains a key value; ${keyHintFor(keyOwnerIn(args.input.goal, knownKeyEntries(io.env)))}`), "key_in_goal");
   }
 
   // 4. Read both files, then look for a key in each before anything else is judged (C-1, S-6).
@@ -509,7 +544,7 @@ export async function prepareTask(
     }
     if (text !== null) {
       // DR-40 (b): a file over the cap is refused before any check reads it.
-      if (inputFileTooLarge(text)) return error("invalid_config", inputFileTooLargeMessage("config file"));
+      if (inputFileTooLarge(text)) return withHint(error("invalid_config", inputFileTooLargeMessage("config file")), "input_too_large");
       files.push({ label: "config file", path: candidate.path, code: "invalid_config", text });
       if (candidate.source === "default") defaultDisplay = io.defaultConfig?.display ?? null;
     }
@@ -517,13 +552,17 @@ export async function prepareTask(
   if (args.input.kind === "task") {
     const taskPath = path.resolve(io.cwd, args.input.taskPath);
     const text = await readText(io, taskPath);
-    if (text === null) return error("invalid_task", "the task file cannot be read as JSON");
-    if (inputFileTooLarge(text)) return error("invalid_task", inputFileTooLargeMessage("task file"));
+    // U-37: the message stays as it was (DR-48), though the file was not read rather than not JSON.
+    if (text === null) return withHint(error("invalid_task", "the task file cannot be read as JSON"), "task_file_unreadable");
+    if (inputFileTooLarge(text)) return withHint(error("invalid_task", inputFileTooLargeMessage("task file")), "input_too_large");
     files.push({ label: "task file", path: taskPath, code: "invalid_task", text });
   }
   for (const file of files) {
     if (rawTextHoldsKey(file.text, currentKey)) {
-      return error("key_in_file", `the ${file.label} contains a key value; ${keyHintFor(keyOwnerIn(file.text, knownKeyEntries(io.env)))}`);
+      return withHint(
+        error("key_in_file", `the ${file.label} contains a key value; ${keyHintFor(keyOwnerIn(file.text, knownKeyEntries(io.env)))}`),
+        file.code === "invalid_config" ? "key_in_config" : "key_in_task",
+      );
     }
   }
   const fileKind = (code: "invalid_config" | "invalid_task"): InputDiagnosticFile => (code === "invalid_config" ? "config" : "task");
@@ -539,7 +578,13 @@ export async function prepareTask(
     const found = findKeyInJson(file.value, currentKey);
     if (found.kind === "key") {
       // A key field belongs to no provider; a key value found there names its owner.
-      return error("key_in_file", `the ${file.label} has a key field or key value at ${found.location}; ${keyHintFor(keyOwnerIn(file.text, knownKeyEntries(io.env)))}`);
+      const keyError = error("key_in_file", `the ${file.label} has a key field or key value at ${found.location}; ${keyHintFor(keyOwnerIn(file.text, knownKeyEntries(io.env)))}`);
+      // U-37: the place when it is a schema field path; otherwise only which file.
+      const field = toSchemaFieldPath(found.location);
+      const inConfig = file.code === "invalid_config";
+      return field === null
+        ? withHint(keyError, inConfig ? "key_in_config" : "key_in_task")
+        : withHint(keyError, inConfig ? "key_field_in_config" : "key_field_in_task", { field });
     }
     if (found.kind === "too_deep") {
       return error(file.code, `the ${file.label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`, {
@@ -567,7 +612,7 @@ export async function prepareTask(
   if (args.profile !== null) {
     profileWorkflowRef = (config?.profiles ?? {})[args.profile]?.workflowRef ?? null;
     const selected = selectProfile(config, args.profile);
-    if (!selected.ok) return error("invalid_config", selected.message);
+    if (!selected.ok) return withHint(error("invalid_config", selected.message), selected.hint);
     config = selected.config;
   }
 
@@ -618,7 +663,13 @@ export async function prepareTask(
   if (!resolved.ok) {
     const fromConfig = taskFile === null || resolved.field.startsWith("profiles") || resolved.field.startsWith("workflows");
     const file: InputDiagnosticFile = fromConfig ? "config" : "task";
-    return error(fromConfig ? "invalid_config" : "invalid_task", `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`, positionDiagnostic(file, { code: "invalid_value", field: resolved.field }));
+    const workflowError = error(
+      fromConfig ? "invalid_config" : "invalid_task",
+      `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`,
+      positionDiagnostic(file, { code: "invalid_value", field: resolved.field }),
+    );
+    // U-37: a task type neither built in nor in the config's workflows.
+    return resolved.problem === "unknown_workflow" ? withHint(workflowError, "task_type_not_found") : workflowError;
   }
   // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
   // own policy is merged with them here (resolveWorkflow above counted its own command rules first,
@@ -669,7 +720,7 @@ export async function prepareTask(
     if (file === null) continue;
     const where = await io.locateInWorkspace(file, task.workspaceRoot);
     if (where !== "outside") {
-      return error(code, `${label} is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it`);
+      return withHint(error(code, `${label} is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it`), "input_inside_workspace");
     }
   }
   // U-1: protected material outside the workspace must exist and stay apart from it.
@@ -719,7 +770,7 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     // SP-4, DR-34 (c): every API provider's settings are resolved first, its address variable
     // checked with its own rule, before any provider is made.
     const resolved = resolveApiSettings(task.model, io.env, config);
-    if (!resolved.ok) return error(resolved.code, resolved.message);
+    if (!resolved.ok) return settingsError(resolved);
     // Already registered above (S-2); kept so the key sent is always a registered secret.
     addSecret(resolved.settings.apiKey);
     // SP-6: the factory of the task's provider (API_PROVIDER_FACTORIES), given only its own settings.

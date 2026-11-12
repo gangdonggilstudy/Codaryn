@@ -100,7 +100,6 @@ describe("doctor names where the config file came from", () => {
     for (const source of ["--config", "CODARYN_CONFIG"] as const) {
       test(
         `${language}: a config given by ${source} is not called the default location`,
-        { todo: "N-B: the text of doctor.config_file.valid_given (claude/security-core b88114c); the CLI picks the id (0d38bfa)" },
         async () => {
           const line = await configLine(source, language);
           assert.equal(line.includes(DEFAULT_WORDS[language]), false, line);

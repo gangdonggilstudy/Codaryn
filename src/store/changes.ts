@@ -45,7 +45,9 @@ import type {
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { ApplyRecordError, PlanRunMissingError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
-import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
+import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir, sha256Hex } from "./common.js";
+import { recordsChangedMarkIn } from "./marks.js";
+import type { RunWriteNotes } from "./run-writes.js";
 
 const INDEX_FILE_NAME = "index.json";
 /**
@@ -166,13 +168,25 @@ function nextContentFile(entries: readonly IndexEntry[]): string {
  * An existing index of the same run (an earlier recorder) is continued, never rewritten from scratch,
  * so its originals stay the first ones. An index that cannot be understood makes every call reject.
  */
-export const createChangeRecorder: CreateChangeRecorder = (options) => {
+export const createChangeRecorder: CreateChangeRecorder = (options) => changeRecorderWith(options);
+
+/**
+ * DR-38: createChangeRecorder that notes each file and directory it writes (createRunRecorders), so
+ * the state guard does not count them as changes.
+ */
+export function changeRecorderWith(options: Parameters<CreateChangeRecorder>[0], notes?: RunWriteNotes): ReturnType<CreateChangeRecorder> {
   const { workspaceRoot, runId } = options;
   assertRunId(runId);
   const dir = snapshotsDir(workspaceRoot, runId);
 
   let entries: readonly IndexEntry[] | null = null;
   let queue: Promise<void> = Promise.resolve();
+
+  /** writeAtomically, and DR-38: the content noted for the state guard. */
+  async function written(target: string, data: string | Uint8Array): Promise<void> {
+    await writeAtomically(target, data);
+    if (notes !== undefined) await notes.file(target, { sha256: sha256Hex(data), size: typeof data === "string" ? Buffer.byteLength(data, "utf8") : data.byteLength });
+  }
 
   async function load(): Promise<readonly IndexEntry[]> {
     if (entries !== null) return entries;
@@ -200,21 +214,22 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
 
     await ensureStateDir(workspaceRoot);
     await mkdir(dir, { recursive: true });
+    if (notes !== undefined) await notes.dir(dir);
     let entry: IndexEntry;
     if (original === null) {
       entry = { path: relative, existed: false };
     } else {
       const file = nextContentFile(current);
-      await writeAtomically(join(dir, file), Buffer.from(original, "utf8"));
+      await written(join(dir, file), Buffer.from(original, "utf8"));
       entry = { path: relative, existed: true, file };
     }
     const next = [...current, entry];
-    await writeAtomically(join(dir, INDEX_FILE_NAME), `${JSON.stringify({ schemaVersion: 1, entries: next })}\n`);
+    await written(join(dir, INDEX_FILE_NAME), `${JSON.stringify({ schemaVersion: 1, entries: next })}\n`);
     entries = next;
     // DR-29: after the index, so a form never exists for a path the index does not name.
     if (shownOriginal !== undefined) {
       const record: ShownRecord = { schemaVersion: SHOWN_SCHEMA_VERSION, path: relative, original: shownOriginal, next: null };
-      await writeAtomically(join(dir, shownFileName(current.length)), `${JSON.stringify(record)}\n`);
+      await written(join(dir, shownFileName(current.length)), `${JSON.stringify(record)}\n`);
     }
   }
 
@@ -231,7 +246,7 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
     // Without the original's digest (a tool that could not mask it) no view can show the text.
     if (existing === null) return;
     const record: ShownRecord = { schemaVersion: SHOWN_SCHEMA_VERSION, path: relative, original: existing.original, next: { sha256, partsDigest } };
-    await writeAtomically(join(dir, shownFileName(position)), `${JSON.stringify(record)}\n`);
+    await written(join(dir, shownFileName(position)), `${JSON.stringify(record)}\n`);
   }
 
   return {
@@ -246,7 +261,7 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
       return run;
     },
   };
-};
+}
 
 /** DR-29, DR-32 (c): a shown file as stored. */
 interface ShownRecord extends ChangeShown {
@@ -633,13 +648,15 @@ export async function readRunOriginals(request: { readonly workspaceRoot: string
   if (isApplyJournal(text, runId)) return [];
   const changes = changedPaths(text, runId);
   const snapshots = await loadSnapshots(join(dir, SNAPSHOTS_DIR_NAME));
+  // DR-38 (P-3): a run whose records were changed by something else shows no text (no shown).
+  const marked = await recordsChangedMarkIn(dir);
   const originals: RunOriginal[] = [];
   for (const change of changes) {
     const created = change.before === null;
     const original = created ? null : TOKEN_FRAGMENT.test(change.path) ? { unavailable: "masked_path" as const } : await originalText(change, snapshots);
     // DR-29: how the run masked this path, when it was recorded and passes the checks.
     const entry = snapshots.kind === "found" ? snapshots.byPath.get(change.path) : undefined;
-    const shown = entry === undefined || snapshots.kind !== "found" ? null : await readShown(snapshots.dir, entry, entry.position);
+    const shown = marked || entry === undefined || snapshots.kind !== "found" ? null : await readShown(snapshots.dir, entry, entry.position);
     originals.push({ path: change.path, created, before: change.before, after: change.after, original, ...(shown === null ? {} : { shown }) });
   }
   return originals;

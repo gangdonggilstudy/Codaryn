@@ -19,7 +19,7 @@
 
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createChangeRecorder, createJournal, createPlanRecorder, releaseLock, writeResult } from "../store/index.js";
+import { acquireLock, createRunRecorders, releaseLock, writeResult } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
@@ -65,12 +65,12 @@ export function createAppAssemble(
         parentEnv: parentEnv as NodeJS.ProcessEnv,
         platform,
       });
-      const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
-      // G-A, G-F as in the CLI: propose_plan stores plan.json for this run; the other tools never use it.
-      const planRecorder = createPlanRecorder({ workspaceRoot, runId });
+      // DR-38 as in the CLI (b8c9c1d): the journal, change recorder and plan recorder come with the
+      // state guard that knows what they write, so the engine's checks of the state directory count
+      // only what the run did not write. G-A, G-F: propose_plan stores plan.json for this run.
+      const { journal, changeRecorder, planRecorder, stateGuard } = createRunRecorders({ workspaceRoot, runId, clock });
       const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
       const verifiers = createVerifierRunner({ workspace, commandRunner });
-      const journal = createJournal({ workspaceRoot, runId, clock });
       const protectedPaths = task.policy.protectedPaths ?? [];
       const externalPaths = input.integrityPaths ?? [];
       const integrity =
@@ -89,6 +89,7 @@ export function createAppAssemble(
         journal,
         clock,
         signal,
+        stateGuard,
         ...(integrity === undefined ? {} : { integrity }),
       };
       onAssembled({ privacy, workspaceRoot });

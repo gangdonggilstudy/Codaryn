@@ -97,6 +97,8 @@ const transportOf = (response: { readonly ok: boolean; readonly value?: unknown;
 const dialogs: string[] = [];
 /** GU-6: answer the next widening dialog with "do not write". */
 let refuseWidening = false;
+/** DR-44: answer the next "also remove the records of runs not reverted?" dialog with "keep them". */
+let keepNotReverted = false;
 
 startGui({
   // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
@@ -106,6 +108,10 @@ startGui({
   stateFile: STATE,
   answerDialog: async (id) => {
     dialogs.push(id);
+    if (id === "cleanup.notReverted.message" && keepNotReverted) {
+      keepNotReverted = false;
+      return 1;
+    }
     if (id === "widen.message" && refuseWidening) {
       refuseWidening = false;
       return 1;
@@ -189,6 +195,103 @@ startGui({
       results["modelChosen"] = await waitFor("document.getElementById('settings-model-outcome')?.getAttribute('data-selected') ?? null");
       results["modelForgedEntry"] = await js(`window.codaryn.selectModel(${JSON.stringify("0".repeat(32))})`);
       results["modelIdAsEntry"] = await js("window.codaryn.selectModel('fake-model-a')");
+
+      // 5b2. GU-6 (3.10, 6.6): settings changes, one edit at a time; "Write" sends the main process's token only.
+      // Before the runs (DR-41): the config's policy is merged with each task kind's own, so the
+      // organize plan runs below still move and discard after this step gives the config a policy.
+      const proposal = (): Promise<unknown> =>
+        waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p && p !== 'asking' ? p : null; })()");
+      const written = (list: string): Promise<unknown> =>
+        waitFor(
+          `(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? [...document.querySelectorAll('#${list} li > span:first-child')].map((s) => s.textContent) : null; })()`,
+        );
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["settingsPolicyMerge"] = await js("document.getElementById('settings-policy-merge') !== null");
+      const asked = dialogs.length;
+      // Narrowing: a protected path. No dialog.
+      await js("(() => { document.getElementById('settings-protected-path').value = 'notes/private.md'; document.getElementById('settings-protected-add').click(); return true; })()");
+      results["settingsNarrow"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsNarrowWritten"] = await written("settings-protected");
+      results["settingsNarrowDialogs"] = dialogs.length - asked;
+      // Widening: a command. The first answer is "do not write" (nothing is written), the second "write".
+      const addCommand = "(() => { document.getElementById('settings-command-exe').value = 'node'; document.getElementById('settings-command-args').value = '--version'; document.getElementById('settings-command-add').click(); return true; })()";
+      await js(addCommand);
+      results["settingsWiden"] = await proposal();
+      results["settingsWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal .widening [data-kind]')].map((li) => li.getAttribute('data-kind'))");
+      // DR-41: organize allows no command, so its runs leave the new rule out; the proposal says so.
+      results["settingsWidenNarrowings"] = await js("[...document.querySelectorAll('#settings-proposal-narrowings li')].map((li) => [li.getAttribute('data-workflow'), li.getAttribute('data-kind')])");
+      refuseWidening = true;
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsWidenRefused"] = await waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p === 'not_confirmed' ? p : null; })()");
+      results["settingsAfterRefusal"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { policy?: { commands?: unknown[] } };
+          return config.policy?.commands?.length ?? 0;
+        } catch {
+          return "unreadable";
+        }
+      })();
+      await js(addCommand);
+      await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsWidenWritten"] = await written("settings-commands");
+      results["settingsWidenDialogs"] = dialogs.filter((id) => id === "widen.message").length;
+      // The page cannot send a config, reuse a token or make one up.
+      results["settingsWholeConfig"] = await js("window.codaryn.proposeSettings({ op: 'replace', next: { schemaVersion: 1 } })");
+      results["settingsForgedToken"] = await js(`window.codaryn.applySettings(${JSON.stringify("0".repeat(32))})`);
+      results["settingsTokenOnce"] = await js(
+        "(async () => { const p = await window.codaryn.proposeSettings({ op: 'addSecretEnv', name: 'SMOKE_SECRET_NAME' }); if (!p.ok) return p; const a = await window.codaryn.applySettings(p.token); const b = await window.codaryn.applySettings(p.token); return [a.ok && a.written, b.code]; })()",
+      );
+      // Removing a secret name widens: asked first (6.6).
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      const widenAsked = dialogs.filter((id) => id === "widen.message").length;
+      await js("[...document.querySelectorAll('#settings-secret-names li')].find((li) => li.textContent.includes('SMOKE_SECRET_NAME'))?.querySelector('[data-remove]')?.click(); true");
+      results["settingsSecretRemoval"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsSecretRemoved"] = await waitFor(
+        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); return ready === 'ok' && document.getElementById('settings-proposal')?.getAttribute('data-proposal') === 'written' ? document.getElementById('settings-secrets')?.textContent.includes('SMOKE_SECRET_NAME') === false : null; })()",
+      );
+      results["settingsSecretDialogs"] = dialogs.filter((id) => id === "widen.message").length - widenAsked;
+      results["settingsOnDisk"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { model?: string; policy?: { commands?: unknown[]; protectedPaths?: unknown[] }; secretEnv?: unknown[] };
+          return { model: config.model, commands: config.policy?.commands, protectedPaths: config.policy?.protectedPaths, secretEnv: config.secretEnv ?? [] };
+        } catch {
+          return "unreadable";
+        }
+      })();
+      results["settingsChangeText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+
+      // 5b3. PM task (2): the provider choice. The providers come from the contract's table; a key shows
+      // set or not by its variable's name. Switched to openai and back (later runs use anthropic).
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["providerRows"] = await js("[...document.querySelectorAll('#settings-provider li[data-provider]')].map((li) => [li.getAttribute('data-provider'), li.getAttribute('data-key')])");
+      results["providerInUse"] = await js("document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null");
+      const inUse =
+        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? { inUse: document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null, lists: document.querySelectorAll('[data-list-models]').length, noList: document.getElementById('settings-model-no-list') !== null } : null; })()";
+      const choose = (name: string): string =>
+        `(() => { const c = document.getElementById('settings-provider-choice'); c.value = ${JSON.stringify(name)}; document.getElementById('settings-provider-change').click(); return true; })()`;
+      await js(choose("openai"));
+      results["providerProposal"] = await proposal();
+      results["providerWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal .widening [data-kind]')].map((li) => li.getAttribute('data-kind'))");
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["providerOpenai"] = await waitFor(inUse);
+      results["providerText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+      await js(choose("anthropic"));
+      await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["providerBack"] = await waitFor(inUse);
+      results["providerOnDisk"] = (() => {
+        try {
+          return (JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { provider?: string }).provider ?? null;
+        } catch {
+          return "unreadable";
+        }
+      })();
 
       // 5c. GU-3: a run from the new task screen (the fake API asks to read a.txt, then ends).
       const startTask = async (goal: string): Promise<void> => {
@@ -314,7 +417,7 @@ startGui({
       // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
       const beforeReview = await resultId();
       await taskWith("analyze", "a.txt를 분석한다");
-      await newResult(beforeReview);
+      const analyzeRunId = (await newResult(beforeReview)) as string;
       results["reviewRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       if ((await js("document.getElementById('review-accept') !== null")) === true) {
         await js("document.getElementById('review-accept').click(); true");
@@ -359,99 +462,42 @@ startGui({
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
 
-      // 5j. GU-6 (3.10, 6.6): settings changes, one edit at a time; "Write" sends the main process's token only.
-      // After the runs: once the config has a policy, quick runs use it instead of a task kind's own (src/cli/run.ts).
-      const proposal = (): Promise<unknown> =>
-        waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p && p !== 'asking' ? p : null; })()");
-      const written = (list: string): Promise<unknown> =>
-        waitFor(
-          `(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? [...document.querySelectorAll('#${list} li > span:first-child')].map((s) => s.textContent) : null; })()`,
-        );
-      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
-      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
-      results["settingsPolicyFirst"] = await js("document.getElementById('settings-policy-first') !== null");
-      const asked = dialogs.length;
-      // Narrowing: a protected path. No dialog.
-      await js("(() => { document.getElementById('settings-protected-path').value = 'notes/private.md'; document.getElementById('settings-protected-add').click(); return true; })()");
-      results["settingsNarrow"] = await proposal();
-      await js("document.getElementById('settings-write')?.click(); true");
-      results["settingsNarrowWritten"] = await written("settings-protected");
-      results["settingsNarrowDialogs"] = dialogs.length - asked;
-      // Widening: a command. The first answer is "do not write" (nothing is written), the second "write".
-      const addCommand = "(() => { document.getElementById('settings-command-exe').value = 'node'; document.getElementById('settings-command-args').value = '--version'; document.getElementById('settings-command-add').click(); return true; })()";
-      await js(addCommand);
-      results["settingsWiden"] = await proposal();
-      results["settingsWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal [data-kind]')].map((li) => li.getAttribute('data-kind'))");
-      refuseWidening = true;
-      await js("document.getElementById('settings-write')?.click(); true");
-      results["settingsWidenRefused"] = await waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p === 'not_confirmed' ? p : null; })()");
-      results["settingsAfterRefusal"] = (() => {
-        try {
-          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { policy?: { commands?: unknown[] } };
-          return config.policy?.commands?.length ?? 0;
-        } catch {
-          return "unreadable";
-        }
-      })();
-      await js(addCommand);
-      await proposal();
-      await js("document.getElementById('settings-write')?.click(); true");
-      results["settingsWidenWritten"] = await written("settings-commands");
-      results["settingsWidenDialogs"] = dialogs.filter((id) => id === "widen.message").length;
-      // The page cannot send a config, reuse a token or make one up.
-      results["settingsWholeConfig"] = await js("window.codaryn.proposeSettings({ op: 'replace', next: { schemaVersion: 1 } })");
-      results["settingsForgedToken"] = await js(`window.codaryn.applySettings(${JSON.stringify("0".repeat(32))})`);
-      results["settingsTokenOnce"] = await js(
-        "(async () => { const p = await window.codaryn.proposeSettings({ op: 'addSecretEnv', name: 'SMOKE_SECRET_NAME' }); if (!p.ok) return p; const a = await window.codaryn.applySettings(p.token); const b = await window.codaryn.applySettings(p.token); return [a.ok && a.written, b.code]; })()",
-      );
-      // Removing a secret name widens: asked first (6.6).
-      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
-      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
-      const widenAsked = dialogs.filter((id) => id === "widen.message").length;
-      await js("[...document.querySelectorAll('#settings-secret-names li')].find((li) => li.textContent.includes('SMOKE_SECRET_NAME'))?.querySelector('[data-remove]')?.click(); true");
-      results["settingsSecretRemoval"] = await proposal();
-      await js("document.getElementById('settings-write')?.click(); true");
-      results["settingsSecretRemoved"] = await waitFor(
-        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); return ready === 'ok' && document.getElementById('settings-proposal')?.getAttribute('data-proposal') === 'written' ? document.getElementById('settings-secrets')?.textContent.includes('SMOKE_SECRET_NAME') === false : null; })()",
-      );
-      results["settingsSecretDialogs"] = dialogs.filter((id) => id === "widen.message").length - widenAsked;
-      results["settingsOnDisk"] = (() => {
-        try {
-          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { model?: string; policy?: { commands?: unknown[]; protectedPaths?: unknown[] }; secretEnv?: unknown[] };
-          return { model: config.model, commands: config.policy?.commands, protectedPaths: config.policy?.protectedPaths, secretEnv: config.secretEnv ?? [] };
-        } catch {
-          return "unreadable";
-        }
-      })();
-      results["settingsChangeText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+      // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
+      // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),
+      // and they stay (not_reverted_not_confirmed); nothing is removed.
+      await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+      await js(`(() => { const box = document.querySelector('[data-run-select="${analyzeRunId}"]'); if (box === null) return false; box.checked = true; document.getElementById('cleanup-preview').click(); return true; })()`);
+      results["cleanupKeepPlan"] = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+      results["cleanupKeepNotice"] = await js("document.getElementById('cleanup-plan-not-reverted') !== null");
+      const askedBeforeKeep = dialogs.length;
+      keepNotReverted = true;
+      await js("document.getElementById('cleanup-apply')?.click(); true");
+      results["cleanupKeepResult"] = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+      results["cleanupKeepRemoved"] = await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null");
+      results["cleanupKeepReasons"] = await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => li.getAttribute('data-reason'))");
+      results["cleanupKeepDialogs"] = dialogs.slice(askedBeforeKeep);
+      results["cleanupKeepStays"] = existsSync(join(SECOND, ".codaryn", "runs", analyzeRunId));
 
-      // 5k. PM task (2): the provider choice. The providers come from the contract's table; a key shows
-      // set or not by its variable's name. Switched to openai and back (later runs use anthropic).
-      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
-      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
-      results["providerRows"] = await js("[...document.querySelectorAll('#settings-provider li[data-provider]')].map((li) => [li.getAttribute('data-provider'), li.getAttribute('data-key')])");
-      results["providerInUse"] = await js("document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null");
-      const inUse =
-        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? { inUse: document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null, lists: document.querySelectorAll('[data-list-models]').length, noList: document.getElementById('settings-model-no-list') !== null } : null; })()";
-      const choose = (name: string): string =>
-        `(() => { const c = document.getElementById('settings-provider-choice'); c.value = ${JSON.stringify(name)}; document.getElementById('settings-provider-change').click(); return true; })()`;
-      await js(choose("openai"));
-      results["providerProposal"] = await proposal();
-      results["providerWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal [data-kind]')].map((li) => li.getAttribute('data-kind'))");
-      await js("document.getElementById('settings-write')?.click(); true");
-      results["providerOpenai"] = await waitFor(inUse);
-      results["providerText"] = await js("document.getElementById('settings')?.textContent ?? ''");
-      await js(choose("anthropic"));
-      await proposal();
-      await js("document.getElementById('settings-write')?.click(); true");
-      results["providerBack"] = await waitFor(inUse);
-      results["providerOnDisk"] = (() => {
-        try {
-          return (JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { provider?: string }).provider ?? null;
-        } catch {
-          return "unreadable";
-        }
-      })();
+      // 5j. GU-4 (3.8), DR-39, DR-44: the state summary; a cleanup plan of the fully reverted runs (the
+      // first run, reverted in 5e); the cleanup the main process asked about (the plan only: no run
+      // left unreverted, no discard box in it); the record gone; a made-up token refused.
+      await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+      results["cleanupReady"] = await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+      const runsBefore = Number(await js("document.querySelector('#cleanup-summary [data-runs]')?.getAttribute('data-runs') ?? '-1'"));
+      results["cleanupRunsBefore"] = runsBefore;
+      await js("(() => { document.getElementById('cleanup-runs-reverted').checked = true; document.getElementById('cleanup-preview').click(); return true; })()");
+      results["cleanupPlan"] = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+      results["cleanupPlanItems"] = await js(`[...document.querySelectorAll('#cleanup-items li')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-id') === ${JSON.stringify(String(firstRun))} ? 'first run' : li.getAttribute('data-id')])`);
+      const askedBeforeCleanup = dialogs.length;
+      await js("document.getElementById('cleanup-apply')?.click(); true");
+      results["cleanupResult"] = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+      results["cleanupRemoved"] = await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null");
+      results["cleanupDialogs"] = dialogs.slice(askedBeforeCleanup);
+      results["cleanupRunsAfter"] = await waitFor(`(() => { const n = Number(document.querySelector('#cleanup-summary [data-runs]')?.getAttribute('data-runs') ?? '-1'); return n >= 0 && n !== ${runsBefore} ? n : null; })()`, 20_000);
+      results["cleanupFirstRunGone"] = !existsSync(join(SECOND, ".codaryn", "runs", String(firstRun)));
+      results["cleanupForged"] = await js(`window.codaryn.applyCleanup(${JSON.stringify("0".repeat(32))})`);
+      results["cleanupText"] = await js("document.getElementById('cleanup')?.textContent ?? ''");
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

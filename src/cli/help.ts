@@ -10,6 +10,7 @@ import type { HelpCommand, HelpOption, MessageCatalog, MessageId } from "../cont
 import { createMessageCatalog } from "../i18n/index.js";
 import { APPLY_USAGE, DOCTOR_USAGE, INIT_USAGE, MODELS_USAGE, PLAN_USAGE, REPORT_USAGE, REVERT_USAGE, REVIEW_USAGE, RUNS_USAGE, RUN_USAGE } from "./args.js";
 import { CHANGES_USAGE } from "./changes.js";
+import { CLEANUP_USAGE } from "./cleanup.js";
 
 export const COMMANDS = HELP_COMMANDS;
 
@@ -27,6 +28,10 @@ const USAGE_ONLY = {
   changes: {
     usage: CHANGES_USAGE,
     about: "Shows a run's changed files and their state, masked with the current secrets; a file's changed lines only when the current secrets mask it as the run did (DR-29). Reads only.",
+  },
+  cleanup: {
+    usage: CLEANUP_USAGE,
+    about: "Shows how much the state directory holds and what a selection would remove; removes run records only with --confirm <digest>, the records of runs not reverted only with --include-not-reverted besides, and people's discarded files only with --delete-discarded besides. Parked files, the lock and what a revert still needs are never removed (DR-39).",
   },
 } as const;
 type UsageOnlyCommand = keyof typeof USAGE_ONLY;

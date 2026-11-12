@@ -587,6 +587,9 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
 - 줄은 기록(가림본)에서만 만들고, 실행의 개인정보 게이트로 다시 가린 뒤 제어 문자를 바꾼다. 내장 도구가 아닌 도구 이름은 `(unknown tool)`, 형식에 맞지 않는 id는 `?`로 쓴다.
+- DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(`withProgress`는 렌더러가 준 줄마다 따로 가리고 쓴다).
+  - 실행 시작(`run_started`)에 `policyNarrowings`가 있으면 시작 줄 아래에 하나씩 쓴다(종류와 수만, `progress.workflow_policy.*`).
+  - 영어 줄(`progressLines`, 렌더러가 없을 때)은 카탈로그의 영어 글과 같다. 사람용 렌더러(`HumanOutput.progressLine`, N-C)의 줄은 그쪽 변경을 기다린다.
 - 실행 전 오류에는 진행 표시가 없다. `--quiet`이면 쓰지 않는다. stderr 쓰기 실패는 실행에 영향을 주지 않는다. stdout은 그대로 JSON 한 줄이다.
 
 ## 16. 모델 목록 조회와 선택 (Y-1~Y-4)
@@ -852,7 +855,11 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - 보호 경로는 합집합이다. 명령은 양쪽이 모두 허용한 명령 줄만 남는다. 계획 동작은 주어진 정책이 말하면 양쪽이 모두 가진 것만 남고, 말하지 않으면 정의의 것 그대로다. `restorePathTokens`는 둘 다 허용할 때만 참이다.
   - 정의가 명령을 허용하지 않을 때(`organize`): task 파일 자신의 명령 규칙은 먼저 `invalid_task`로 거부한다(GT-D10, 합치기 전에 센다). 프로필·설정의 규칙은 빠진다.
   - 정의가 없는 task 파일은 자기 정책을 그대로 쓴다.
-- 합치기에서 빠진 것(`workflowPolicyNarrowings`: 종류와 수만)은 실행할 task의 `policyNarrowings`에 싣는다. 엔진이 `run_started`에 기록한다.
+- 검증기도 같다(DR-43 (a), R-31 L-2). 주어진 검증기는 정의의 검증기를 대체하지 않고 더해진다(`mergeWorkflowVerifiers`).
+  - 정의의 검증기가 먼저이고, 그다음 id가 정의의 것과 겹치지 않는 주어진 검증기다. 주어진 목록이 비어도 정의의 검사는 남는다.
+  - 정의의 id를 쓰면서 검사가 다른 주어진 검증기는 빠지고 알린다(`verifiers_dropped`). 같은 검사(키 순서만 다른 것 포함)는 세지 않는다.
+  - 정의가 없는 task 파일은 자기 검증기를 그대로 쓴다.
+- 합치기에서 빠진 것(`workflowPolicyNarrowings`, `workflowVerifierNarrowings`: 종류와 수만)은 실행할 task의 `policyNarrowings`에 싣는다. 엔진이 `run_started`에 기록한다.
 - doctor의 `commands` 점검은 합친 정책을 보고, 빠진 것을 notes(`doctor.workflow_policy.*`)로 적는다.
 
 ### 18.2 task 형식 (DR-17)
@@ -1112,3 +1119,30 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - `doctor`의 `lock` 점검(`listParkedFiles`)
     - 잠금이 ok이면 점검이 `warn`이 되고 글은 `doctor.lock.parked_left {count}`다.
     - 잠금이 다른 상태(`held`, `unreadable`, `reclaim_left`)이면 그 상태의 글은 그대로 두고, `doctor.lock.parked_left {count}`를 그 점검의 `notes`에 싣는다. 사람용 출력은 잠금 줄 아래에 한 줄로 보인다(DR-37 (c), 검토 R-24 L-2). 전에는 JSON `message`에만 있었다.
+
+
+### 18.12 실행 기록이 바뀐 실행 (DR-38)
+
+- 실행의 기록(journal·snapshots·plan 등)은 `createRunRecorders`(store)가 만든다. 같이 나오는 `stateGuard`를 엔진에 `EngineDeps.stateGuard`로 넘긴다. 엔진의 점검은 실행이 쓴 것 말고 바뀐 것만 변화로 센다(엔진 92e0812). 바뀌면 실행은 `failed`/`state_changed`로 끝나고 결과의 `stateChanged`에 경로(가림본)가 남는다. `report`는 그 목록을 그대로 보인다. `stateChanged`는 바뀐 것이 있을 때만 싣는다(PM, bf04750 뒤): 엔진이 준 빈 목록은 `run`·`apply`의 출력과 `result.json`에서 빼고, `report`도 읽을 때 뺀다. 그래서 기록이 바뀌지 않은 실행의 출력은 DR-38 전과 바이트가 같다.
+- 적용 실행(`codaryn apply`)의 저널, 계획의 적용 표시, 폐기 보관함 폴더는 `createApplyRecorders`(store)가 만들고, 그 `stateGuard`를 `ApplyDeps.stateGuard`로 넘긴다. 적용 중 기록이 바뀌면 적용은 `failed`/`state_changed`로 끝나고, 이미 한 이동은 되돌리기를 위해 남는다.
+- 표시(`runs/<runId>/records-changed.json`이 있는 실행. 읽을 수 없는 표시도 표시로 본다):
+  - `report`: 보고서는 그대로 보이고 JSON의 `recordsChanged: true`, 사람용 보고서에 한 줄(`report.records_changed`의 영어 글)을 더한다. 적용 실행의 보고서(`ApplyReportOutput`)는 계약에 자리가 없어 아직 말하지 않는다.
+  - `revert`: 막지 않는다(스냅샷·다이제스트 확인은 그대로). 결과에 `recordsChanged: true`(미리보기 포함). 사람용 줄은 렌더러(N-C) 몫이다.
+  - 표시가 없으면 두 필드 모두 없다.
+
+
+### 18.13 상태 디렉터리 정리 `codaryn cleanup` (DR-39)
+
+- 모양: `codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] [--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <digest 12자 이상> [--delete-discarded]] [--json]`
+- 기본은 미리보기다. `summarizeState`의 요약과 `planCleanup`의 계획(항목·경고·막힌 것·합계·`parked`·digest)을 보이고 아무것도 지우지 않는다.
+- 확인은 둘이다(DR-39 P-4).
+  - `--confirm <digest>`: 지금 만든 계획의 digest와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `plan_changed`(종료 3)다. store가 잠금 아래에서 계획을 다시 만들어 digest가 같을 때만 지운다.
+  - `--delete-discarded`: `--confirm`과 함께일 때만. 사람의 파일인 폐기 보관함 폴더는 이것이 있을 때만 지운다. 없으면 `not_confirmed`로 남는다.
+  - `--include-not-reverted`(DR-44 (가)): `--confirm`과 함께일 때만. 되돌리지 않은 실행과 일부만 되돌린 실행(`not_reverted`)의 기록은 이것이 있어야 지운다. 막지는 않는다. 미리보기의 확인 머리줄에 그런 실행의 수를 적는다. 이것 없이 확인하면 store가 그 기록을 `not_reverted_not_confirmed`로, 남는 적용이 쓰는 계획 실행을 `used_by_kept_apply`로 남기고 나머지를 지운다(사람의 선택이라 종료 0). 남은 `cleanup-…` 폴더(DR-44 (라))는 모든 계획에 `leftover` 항목으로 들어가 요약·미리보기·완료 줄에 보이고, 확인하면 지운다. 옮긴 뒤 다 지우지 못하면 `partly_removed`(종료 1)이고 지웠다고 보고·기록하지 않는다.
+  - 끝 줄은 확인할 것을 말한다(R-34 I-3): 지울 실행 기록이 없고 보관함만 있으면 `--confirm <digest> --delete-discarded`를 말한다.
+  - 권하는 명령에는 `--include-not-reverted`를 넣지 않는다(R-34b P-3). 되돌리지 않은 실행이 있으면, 사람이 그 인자를 스스로 붙여야 그 기록을 지우고 지우면 그 실행을 되돌릴 수 없게 된다는 것을 따로 한 줄로 알린다.
+- 지우지 않는 것(store가 막음): `parked`, 잠금, `.gitignore`, 진행 중인 실행(`lock_held`), 결과가 없는 실행(`no_result`), 선택되지 않은 적용 실행이 쓰는 계획 실행(`plan_used_by_apply`: 그 적용의 되돌리기에 필요하다). 변경 표시가 있는 실행은 막지 않고 경고한다(P-5).
+- 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).
+- 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). `applied`는 문제로 남긴 것(`partly_removed` 포함)이 있으면 종료 1이고, 사람의 선택으로 남긴 것(`not_confirmed`, `not_reverted_not_confirmed`, `used_by_kept_apply`)은 0이다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
+- 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
+- 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.

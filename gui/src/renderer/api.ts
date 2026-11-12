@@ -32,11 +32,13 @@ import type {
   SettingsReply,
   SettingsProposalReply,
   SettingsRules,
+  PolicyNarrowingView,
   ApiProviderView,
   SettingsWrittenReply,
   TreeEntryView,
   TreeReply,
 } from "../shared/ipc.js";
+import type { CleanupPlanView, CleanupResultView, StateSummaryView } from "../shared/cleanup.js";
 
 export interface CodarynApi {
   info(): Promise<unknown>;
@@ -52,6 +54,9 @@ export interface CodarynApi {
   selectModel(entry: string): Promise<unknown>;
   proposeSettings(edit: Readonly<Record<string, unknown>>): Promise<unknown>;
   applySettings(token: string): Promise<unknown>;
+  stateSummary(workspace: string): Promise<unknown>;
+  previewCleanup(workspace: string, selection: Readonly<Record<string, unknown>>): Promise<unknown>;
+  applyCleanup(token: string): Promise<unknown>;
   startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
@@ -191,6 +196,7 @@ export function asSettings(value: unknown): SettingsReply {
       providers: strList(view["providers"]) ? view["providers"] : [],
       env: { model: env["model"] === true, language: env["language"] === true },
       rules: asRules(view["rules"]),
+      policyNarrowings: asNarrowings(view["policyNarrowings"]),
       provider: str(view["provider"]) ? view["provider"] : null,
       defaultProvider: str(view["defaultProvider"]) ? view["defaultProvider"] : null,
       apiProviders: Array.isArray(view["apiProviders"]) ? view["apiProviders"].flatMap(asApiProvider) : [],
@@ -216,14 +222,14 @@ function asApiProvider(value: unknown): ApiProviderView[] {
 }
 
 function asRules(value: unknown): SettingsRules {
-  if (!isObj(value)) return { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+  if (!isObj(value)) return { limits: [], commands: [], protectedPaths: [], secretEnv: [] };
   const limits = Array.isArray(value["limits"])
     ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
     : [];
   const secretEnv = Array.isArray(value["secretEnv"])
     ? value["secretEnv"].flatMap((item) => (isObj(item) && str(item["name"]) && typeof item["set"] === "boolean" ? [{ name: item["name"], set: item["set"] }] : []))
     : [];
-  return { policySet: value["policySet"] === true, limits, commands: strList(value["commands"]) ? value["commands"] : [], protectedPaths: strList(value["protectedPaths"]) ? value["protectedPaths"] : [], secretEnv };
+  return { limits, commands: strList(value["commands"]) ? value["commands"] : [], protectedPaths: strList(value["protectedPaths"]) ? value["protectedPaths"] : [], secretEnv };
 }
 
 type FieldChange = { readonly field: string; readonly change: string };
@@ -244,11 +250,22 @@ function fields(value: unknown): { changes: FieldChange[]; widening: Widening[] 
   return { changes, widening };
 }
 
-/** GU-6: a settings change proposal (a token from the main process, the changed fields, the widening kinds). */
+/** DR-41: task kinds' narrowings of the config's policy; entries that do not fit are left out. */
+function asNarrowings(value: unknown): PolicyNarrowingView[] {
+  return Array.isArray(value)
+    ? value.flatMap((item) =>
+        isObj(item) && str(item["workflow"]) && str(item["kind"]) && typeof item["count"] === "number" && Number.isSafeInteger(item["count"]) && item["count"] >= 1
+          ? [{ workflow: item["workflow"], kind: item["kind"], count: item["count"] }]
+          : [],
+      )
+    : [];
+}
+
+/** GU-6: a settings change proposal (a token from the main process, the changed fields, the widening kinds, DR-41's narrowings). */
 export function asProposal(value: unknown): SettingsProposalReply {
   if (!isObj(value) || value["ok"] !== true || !str(value["token"]) || !HEX.test(value["token"])) return failed(value);
   const found = fields(value);
-  return found === null ? { ok: false, code: "host_error" } : { ok: true, token: value["token"], ...found };
+  return found === null ? { ok: false, code: "host_error" } : { ok: true, token: value["token"], ...found, policyNarrowings: asNarrowings(value["policyNarrowings"]) };
 }
 
 /** GU-6: a written settings change. */
@@ -395,4 +412,29 @@ export function asReport(value: unknown): ReportReply {
     view: view as unknown as ReportView,
     labels: isObj(labels) && str(labels["status"]) && str(labels["reason"]) ? { status: labels["status"], reason: labels["reason"] } : null,
   };
+}
+
+/** GU-4: the state summary (the main process checked it). */
+export function asStateSummary(value: unknown): { readonly ok: true; readonly summary: StateSummaryView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["summary"])) return failed(value);
+  const summary = value["summary"];
+  if (!Array.isArray(summary["entries"]) || !isObj(summary["runs"]) || !isObj(summary["discarded"]) || !isObj(summary["parked"]) || !isObj(summary["leftovers"])) return failed(value);
+  return { ok: true, summary: summary as unknown as StateSummaryView };
+}
+
+/** GU-4: a cleanup preview: the main process's token and the plan to show. */
+export function asCleanupPreview(value: unknown): { readonly ok: true; readonly token: string; readonly plan: CleanupPlanView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !str(value["token"]) || !HEX.test(value["token"]) || !isObj(value["plan"])) return failed(value);
+  const plan = value["plan"];
+  if (!Array.isArray(plan["items"]) || !Array.isArray(plan["blocked"]) || !isObj(plan["totals"]) || !isObj(plan["parked"]) || !str(plan["digest"])) return failed(value);
+  return { ok: true, token: value["token"], plan: plan as unknown as CleanupPlanView };
+}
+
+/** GU-4: a cleanup's result, or why the main process did not clean (not_confirmed, unknown_preview, ...). */
+export function asCleanupResult(value: unknown): { readonly ok: true; readonly result: CleanupResultView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["result"])) return failed(value);
+  const result = value["result"];
+  if (result["ok"] === false) return { ok: true, result: { ok: false, code: str(result["code"]) ? result["code"] : "host_error" } };
+  if (result["ok"] !== true || !Array.isArray(result["removed"]) || !Array.isArray(result["kept"]) || !isObj(result["totals"])) return failed(value);
+  return { ok: true, result: result as unknown as CleanupResultView };
 }

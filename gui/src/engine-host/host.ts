@@ -15,6 +15,9 @@ import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } f
 import { modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
 import type { ApiProviderEntry } from "./settings.js";
 import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
+import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js";
+import type { CleanupSelectionArg } from "../shared/cleanup.js";
+import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import type { Shown } from "./settings.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
@@ -53,6 +56,15 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** GU-4 (3.8), DR-39, DR-44: the state directory summed up, a cleanup preview, and a confirmed cleanup. */
+  stateSummary(request: { readonly workspace: string }): Promise<unknown>;
+  previewCleanup(request: { readonly workspace: string; readonly selection: CleanupSelectionArg }): Promise<unknown>;
+  applyCleanup(request: {
+    readonly workspace: string;
+    readonly selection: CleanupSelectionArg;
+    readonly now: string;
+    readonly confirmation: { readonly digest: string; readonly discarded: boolean; readonly includeNotReverted: boolean };
+  }): Promise<unknown>;
   /** GU-6 (3.10): a settings change, proposed (the app layer judges what widens) and written. */
   proposeSettingsChange(request: { readonly configPath: null; readonly next: unknown }): Promise<unknown>;
   applySettingsChange(request: { readonly configPath: null; readonly next: unknown; readonly baseDigest: string; readonly confirmWidening: boolean }): Promise<unknown>;
@@ -325,6 +337,27 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { next, baseDigest, confirmWidening } = args;
         if (!isObj(next) || typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest) || typeof confirmWidening !== "boolean") throw new ArgsError();
         return writtenValue(await deps.app.applySettingsChange({ configPath: null, next, baseDigest, confirmWidening }), deps.shown);
+      }
+      case "stateSummary": {
+        if (!isObj(args)) throw new ArgsError();
+        return summaryValue(await deps.app.stateSummary({ workspace: workspaceArg(args, ["workspace"]) }));
+      }
+      case "previewCleanup": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "selection"]);
+        const selection = parseCleanupSelection(args["selection"]);
+        if (selection === null) throw new ArgsError();
+        return previewValue(await deps.app.previewCleanup({ workspace, selection }));
+      }
+      case "applyCleanup": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "selection", "now", "confirmation"]);
+        const selection = parseCleanupSelection(args["selection"]);
+        const { now, confirmation } = args;
+        if (selection === null || !isCleanupTimestamp(now) || !isObj(confirmation) || !onlyKeys(confirmation, ["digest", "discarded", "includeNotReverted"])) throw new ArgsError();
+        const { digest, discarded, includeNotReverted } = confirmation;
+        if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest) || typeof discarded !== "boolean" || typeof includeNotReverted !== "boolean") throw new ArgsError();
+        return appliedValue(await deps.app.applyCleanup({ workspace, selection, now, confirmation: { digest, discarded, includeNotReverted } }));
       }
       case "report": {
         if (!isObj(args)) throw new ArgsError();

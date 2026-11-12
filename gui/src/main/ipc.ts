@@ -50,6 +50,10 @@ import type { RunManager } from "./runs.js";
 import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
 import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply, SettingsProposalReply, SettingsWrittenReply } from "../shared/ipc.js";
 import { parseSettingsEdit } from "../shared/settings-edit.js";
+import { cleanupQuestions } from "../shared/cleanup.js";
+import { parseCleanupPreviewArgs, toCleanupResultReply, toHostCleanupPreview, toStateSummaryReply } from "../shared/ipc.js";
+import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from "../shared/ipc.js";
+import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
@@ -92,6 +96,14 @@ export interface IpcDeps {
   readonly history: RunHistory;
   /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
   readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
+  /** GU-4 (3.8), DR-39, DR-44: the cleanup previews shown, and the main process's questions before cleaning. */
+  readonly cleanupPreviews: CleanupPreviews;
+  /** The plan as shown (counts, sizes, the digest's start); "do not clean" is the default. */
+  readonly confirmCleanup: (record: CleanupPreviewRecord) => Promise<boolean>;
+  /** DR-44 (a): apart, the records of runs not (or only partly) reverted; "keep them" is the default. */
+  readonly confirmCleanupNotReverted: (record: CleanupPreviewRecord) => Promise<boolean>;
+  /** DR-9: apart, the discarded-files folders (people's files, deleted for good); "keep them" is the default. */
+  readonly confirmCleanupDiscarded: (record: CleanupPreviewRecord) => Promise<boolean>;
   /** GU-6: the settings change proposals shown. */
   readonly settingsProposals: SettingsProposals;
   /** GU-6 (6.6): asks the person (an OS dialog) whether to write a change that widens what runs may do. */
@@ -246,6 +258,54 @@ export function registerIpc(deps: IpcDeps): void {
     return toSettingsView(response.value, deps.envFacts());
   });
 
+  // GU-4 (3.8), DR-39, DR-44: the state summary; a cleanup preview (the plan stays here, the window gets
+  // a token); cleaning by token only, after the main process's questions.
+  handle(IPC_CHANNELS.stateSummary, async (args): Promise<StateSummaryReply> => {
+    const parsed = args.length === 1 ? parseWorkspaceArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("stateSummary", { workspace: root }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toStateSummaryReply(response.value);
+  });
+
+  handle(IPC_CHANNELS.previewCleanup, async (args): Promise<CleanupPreviewReply> => {
+    const parsed = args.length === 1 ? parseCleanupPreviewArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("previewCleanup", { workspace: root, selection: parsed.selection }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const preview = toHostCleanupPreview(response.value);
+    if (!preview.ok) return preview;
+    const token = deps.cleanupPreviews.issue({ workspace: parsed.workspace, root, selection: parsed.selection, now: preview.now, plan: preview.plan });
+    return { ok: true, token, plan: preview.plan };
+  });
+
+  handle(IPC_CHANNELS.applyCleanup, async (args): Promise<CleanupResultReply> => {
+    const parsed = args.length === 1 ? parseTokenArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const record = deps.cleanupPreviews.take(parsed.token);
+    if (record === null) return { ok: false, code: "unknown_preview" };
+    const questions = cleanupQuestions(record.plan);
+    if (!questions.hasItems) return { ok: false, code: "nothing_to_clean" };
+    if (!(await deps.confirmCleanup(record))) return { ok: false, code: "not_confirmed" };
+    // Asked apart, each only when the plan has such items; each answer holds for this cleanup only.
+    const includeNotReverted = questions.notReverted > 0 ? await deps.confirmCleanupNotReverted(record) : false;
+    const discarded = questions.discarded.count > 0 ? await deps.confirmCleanupDiscarded(record) : false;
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const confirmation = { digest: record.plan.digest, discarded, includeNotReverted };
+    const response = await state.host.call("applyCleanup", { workspace: record.root, selection: record.selection, now: record.now, confirmation }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toCleanupResultReply(response.value);
+  });
+
   // GU-6 (3.10): one edit → a proposal (the new config stays here) → applied by token, asked first when it widens.
   handle(IPC_CHANNELS.proposeSettings, async (args): Promise<SettingsProposalReply> => {
     const edit = args.length === 1 && typeof args[0] === "object" && args[0] !== null ? parseSettingsEdit((args[0] as Record<string, unknown>)["edit"]) : null;
@@ -257,7 +317,7 @@ export function registerIpc(deps: IpcDeps): void {
     const proposal = toHostProposal(response.value);
     if (!proposal.ok) return proposal;
     const token = deps.settingsProposals.issue({ next: proposal.next, baseDigest: proposal.baseDigest, changes: proposal.changes, widening: proposal.widening });
-    return { ok: true, token, changes: proposal.changes, widening: proposal.widening };
+    return { ok: true, token, changes: proposal.changes, widening: proposal.widening, policyNarrowings: proposal.policyNarrowings };
   });
 
   handle(IPC_CHANNELS.applySettings, async (args): Promise<SettingsWrittenReply> => {

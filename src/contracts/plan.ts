@@ -37,6 +37,7 @@
 
 import type { Clock, RunReason, RunReasonByStatus, RunUsage, TerminalRunStatus } from "./engine.js";
 import type { IntegrityChecker } from "./integrity.js";
+import type { StateGuard } from "./state.js";
 import type { JournalEvent } from "./journal.js";
 import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
@@ -545,7 +546,7 @@ export type ApplyJournalEvent =
       readonly index: number;
       readonly problem: PlanItemProblem;
     }
-  | Extract<JournalEvent, { readonly type: "verifier_result" | "integrity_checked" | "run_finished" }>;
+  | Extract<JournalEvent, { readonly type: "verifier_result" | "integrity_checked" | "state_checked" | "run_finished" }>;
 
 export type ApplyJournalEventType = ApplyJournalEvent["type"];
 
@@ -659,6 +660,24 @@ export interface ApplyDeps {
   readonly clock: Clock;
   readonly signal: AbortSignal;
   readonly integrity?: IntegrityChecker;
+  /**
+   * DR-38: changes to Codaryn's records during the apply (state.ts), from CreateApplyRecorders.
+   * Absent: no check and no `state_checked` record. An apply runs no command; the outside code it
+   * runs is the verification round. When present the engine:
+   * - run_start: after `apply_started`: `base = capture("state")`; records `state_checked` with
+   *   `limited`.
+   * - before_verify: after the actions: tier "run" is taken afresh as the round's base (the
+   *   executor's moves into the run's discarded-files folder are the run's own, and no outside code
+   *   ran before this point); tier "state" is compared with `base` (the guard knows markApplied's
+   *   write). Recorded only when something changed or `limited` is true.
+   * - after_verify: tier "run" against the round's base (the guard knows the journal's verifier
+   *   records), tier "state" against `base`. Recorded likewise.
+   * - run_end: both again, tier "run" against after_verify's, always recorded, before `run_finished`.
+   * A non-empty `changed` is passed to `markRecordsChanged` and ends the apply as
+   * `failed`/`state_changed` (at run_end it replaces the status); the moves made stay, and
+   * `codaryn revert` can undo them as for any apply run.
+   */
+  readonly stateGuard?: StateGuard;
   /** Writes PLAN_APPLIED_FILE_NAME exclusively. "already_applied" when it exists. */
   markApplied(): Promise<"marked" | "already_applied">;
 }
@@ -678,7 +697,7 @@ export interface AppliedActionRecord {
  */
 export const APPLY_REASONS_BY_STATUS = {
   done: ["verified"],
-  failed: ["verifier_failed", "plan_stale", "apply_incomplete"],
+  failed: ["verifier_failed", "plan_stale", "apply_incomplete", "state_changed"],
   "needs-input": ["verifier_inconclusive", "protected_changed", "consent_required"],
   cancelled: ["cancelled"],
   "budget-exhausted": ["max_duration"],
@@ -709,6 +728,8 @@ export interface ApplyResult {
   readonly journalPath: string;
   readonly notices: readonly MaskedText[];
   readonly protectedChanged?: readonly MaskedText[];
+  /** DR-38: as EngineResult.stateChanged, for the apply run's state checks. */
+  readonly stateChanged?: readonly MaskedText[];
 }
 
 /** Signature of `applyPlan`, exported by `src/engine/index.ts` (G-B). */

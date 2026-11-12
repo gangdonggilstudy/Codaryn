@@ -28,7 +28,7 @@ test("new task: the notice names the provider in use and follows the chosen prof
       keyAvailable: true,
       providers: ["anthropic"],
       env: { model: false, language: false },
-      rules: { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] },
+      rules: { limits: [], commands: [], protectedPaths: [], secretEnv: [] },
       provider: null,
       defaultProvider: "anthropic",
       apiProviders: [

@@ -55,13 +55,12 @@ import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
-  createApplyJournal,
+  createApplyRecorders,
+  prepareDiscardedRoot,
   inspectRun as storeInspectRun,
   latestRun,
   listRuns as storeListRuns,
   loadPlan as storeLoadPlan,
-  markPlanApplied,
-  prepareDiscardedRoot,
   readReviewRecord,
   releaseLock,
   writeResult,
@@ -85,6 +84,7 @@ import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
 import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
+import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 /** The goal the task form carries for commands that never run a model. */
@@ -430,8 +430,13 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         protectedPaths.length > 0 || prepared.integrityPaths.length > 0
           ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
           : undefined;
+      // DR-38: the apply's journal and the plan run's applied mark come with the state guard that
+      // knows them (the store's createApplyRecorders, the contract's CreateApplyRecorders), passed as
+      // ApplyDeps.stateGuard. `runId` is this apply run; `planRunId` the plan run it carries out,
+      // whose directory gets the applied mark. The journal notes each discarded file as its own.
+      const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock, planRunId });
       const journal = observeApply(
-        createApplyJournal({ workspaceRoot, runId, clock: io.clock }),
+        recorders.journal,
         privacy,
         args.quiet ? undefined : io.writeProgress,
         io.human,
@@ -463,9 +468,13 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         clock: io.clock,
         signal: cancel.signal,
         ...(integrity === undefined ? {} : { integrity }),
-        markApplied: () => markPlanApplied({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(io.clock.now()).toISOString() }),
+        // At the apply clock's time (the store's markApplied uses the clock it was given).
+        markApplied: () => recorders.markApplied(),
+        stateGuard: recorders.stateGuard,
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
+      // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
+      result = withoutEmptyStateChanged(result);
       await writeResult(workspaceRoot, result as unknown as EngineResult);
     } catch {
       return {

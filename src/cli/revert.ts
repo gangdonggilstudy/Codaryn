@@ -140,6 +140,8 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
       // DR-25: a dry run does not judge whether files can go back safely; the summary says so.
       ...(result.outcome.moveSafetyUnchecked === true ? { moveSafetyUnchecked: true as const } : {}),
       ...(result.revertedBefore === null ? {} : { revertedBefore: result.revertedBefore }),
+      // DR-38: the run has a records-changed mark; the revert still checked every file.
+      ...(result.recordsChanged === true ? { recordsChanged: true as const } : {}),
     },
     exitCode,
     quiet,

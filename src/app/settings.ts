@@ -16,7 +16,7 @@
  * call one function instead (A-4 report).
  */
 
-import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, workflowPolicyNarrowings } from "../contracts/index.js";
+import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, workflowPolicyNarrowings, workflowVerifierNarrowings } from "../contracts/index.js";
 import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
@@ -113,14 +113,19 @@ export async function loadSettingsFile(
 }
 
 /**
- * DR-41: for each workflow with its own policy (built-in, then the config's), what its rules leave
- * out of the config's policy in its quick runs (workflowPolicyNarrowings). Kinds and counts only.
- * Pure. A profile's own policy is not looked at here.
+ * DR-41, DR-43 (a): for each workflow (built-in, then the config's), what its own rules leave out of
+ * the config's policy and verifiers in its quick runs (workflowPolicyNarrowings, then
+ * workflowVerifierNarrowings: a config verifier whose id is one of the workflow's). Kinds and
+ * counts only. Pure. A profile's own policy and verifiers are not looked at here.
  */
 export function policyNarrowingsOf(config: CodarynConfig | null): WorkflowPolicyNarrowing[] {
-  if (config?.policy === undefined) return [];
+  if (config === null) return [];
   return Object.entries(workflowDefinitions(config.workflows)).flatMap(([workflow, definition]) =>
-    workflowPolicyNarrowings(definition.policy, config.policy).map((narrowing) => ({ workflow, kind: narrowing.kind, count: narrowing.count })),
+    [...workflowPolicyNarrowings(definition.policy, config.policy), ...workflowVerifierNarrowings(definition.verifiers, config.verifiers)].map((narrowing) => ({
+      workflow,
+      kind: narrowing.kind,
+      count: narrowing.count,
+    })),
   );
 }
 

@@ -126,6 +126,9 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
       kind: "apply",
       planRunId: PLAN_RUN,
       startedAt: "2026-01-02T03:05:00.120Z",
+      // DR-37 (d): an apply run names no profile or workflow definition (its plan run does).
+      profile: null,
+      workflowRef: null,
       taskId: "organize-task",
       status: "done",
       reason: "verified",

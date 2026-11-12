@@ -257,6 +257,9 @@ describe("listRuns (N-7, N-16)", () => {
       changes: 0,
       reverted: null,
       revertRecordDamaged: false,
+      // DR-37 (d), store f1d5125: the run list names the profile and the workflow definition.
+      profile: null,
+      workflowRef: null,
     });
   });
 
@@ -277,6 +280,8 @@ describe("listRuns (N-7, N-16)", () => {
         changes: null,
         reverted: null,
         revertRecordDamaged: false,
+        profile: null,
+        workflowRef: null,
       },
       { state: "damaged", runId: "20260102T030406Z-bbbbbbbb" },
     ]);

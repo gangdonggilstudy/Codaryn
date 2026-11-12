@@ -27,6 +27,7 @@ import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } 
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runChanges } from "./changes.js";
+import { runCleanup } from "./cleanup.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
 import { runDoctor } from "./doctor.js";
 import { renderOutcome, runGuardedCommand } from "./guard.js";
@@ -197,6 +198,9 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
     case "changes":
       // DR-7, DR-14: the app layer's `changes` with this process's environment; it reads only.
       return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()) }));
+    case "cleanup":
+      // DR-39: a preview unless --confirm names the plan digest; people's discarded files need --delete-discarded too.
+      return plain(await runCleanup({ argv, cwd: process.cwd(), env: process.env, clock, messages: human.messages }));
     case "plan":
     case "apply":
     case "review": {

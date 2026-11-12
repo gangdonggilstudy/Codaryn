@@ -20,12 +20,15 @@ import { createMessageCatalog } from "../../../src/i18n/index.js";
 
 const FIVE = { plan: PLAN_USAGE, apply: APPLY_USAGE, review: REVIEW_USAGE, changes: CHANGES_USAGE, cleanup: CLEANUP_USAGE } as const;
 
-/** The options each help lists, in the order its usage line has them (apply takes --json too, U-23). */
+/**
+ * The options each help lists, in the order its usage line has them (apply takes --json too, U-23).
+ * U-53: --workflow, and the texts that fit (run_task, workspace_or_current, json_line).
+ */
 const OPTIONS = {
-  plan: ["task", "workspace", "profile", "config", "vars_file", "run", "json"],
-  apply: ["task", "workspace", "profile", "config", "vars_file", "plan_run", "digest", "allow_unsafe_move", "cancel_file", "quiet", "json"],
-  review: ["task", "workspace", "profile", "config", "vars_file", "run", "accept", "reject", "note", "json"],
-  changes: ["task", "workspace", "profile", "config", "vars_file", "run", "json"],
+  plan: ["run_task", "workspace_or_current", "profile", "workflow", "config", "vars_file", "run", "json"],
+  apply: ["run_task", "workspace", "profile", "workflow", "config", "vars_file", "plan_run", "digest", "allow_unsafe_move", "cancel_file", "quiet", "json_line"],
+  review: ["run_task", "workspace", "profile", "workflow", "config", "vars_file", "run", "accept", "reject", "note", "json"],
+  changes: ["run_task", "workspace_or_current", "profile", "config", "vars_file", "run", "json"],
   cleanup: ["workspace", "older_than", "run_ids", "reverted", "discarded_older_than", "discarded_run", "confirm", "delete_discarded", "include_not_reverted", "json"],
 } as const;
 

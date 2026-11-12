@@ -157,6 +157,8 @@ export const EN_MESSAGES: MessageTexts = {
   "help.option.json": "--json: print the result as one JSON line",
   "help.option.use": "--use <number|id>: write that model into the config file's model",
   "help.option.limit": "--limit <n>: how many runs to show (default 20, at most 1000)",
+  "help.option.allow_unsafe_move":
+    "--allow-unsafe-move: consent, for this apply or revert only, to moves that could replace a file",
   "help.exit.run": "done 0, failed 1, input errors 2, needs-input 3, budget-exhausted 4, cancelled 5, workspace locked 6, provider not configured 7, internal error 70",
   "help.exit.revert": "complete 0, partial 3, errors 2 or 6",
   "help.exit.report": "complete 0, incomplete (no result.json) 3, errors 2",

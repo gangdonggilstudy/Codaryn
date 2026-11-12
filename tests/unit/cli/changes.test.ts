@@ -138,7 +138,7 @@ describe("runChanges", () => {
     assert.deepEqual([bad.code, fake.seen.length], ["invalid_arguments", 1]);
   });
 
-  test("with the real app layer: a scripted run's change, masked, with no secret printed", async () => {
+  test("with the real app layer: a scripted run's changes by path and state, with no secret printed (R-11: no text yet)", async () => {
     const original = `# Title\nkey ${FAKE_SECRET}\n`;
     const hash = createHash("sha256").update(Buffer.from(original, "utf8")).digest("hex");
     const base = await setupRun({ "README.md": original }, {}, [
@@ -153,8 +153,8 @@ describe("runChanges", () => {
     assert.equal((outcome as { result: EngineResult }).result.status, "done");
 
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", "latest"], env: {}, app }));
-    assert.match(shown, /== README\.md: changed by the run; as the run left it\n@@ -2,0 \+2,2 @@\n\+ \n\+ added/);
-    assert.match(shown, /== NOTES\.md: created by the run; as the run left it/);
+    assert.match(shown, /== README\.md: changed by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)/);
+    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)/);
     assert.equal(shown.includes(FAKE_SECRET), false);
   });
 });

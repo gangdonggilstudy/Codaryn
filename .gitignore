@@ -5,6 +5,9 @@
 node_modules/
 dist/
 coverage/
+# GUI build and package output (gui/node_modules is covered by node_modules/ above)
+gui/build/
+gui/out/
 .codaryn/
 *.log
 

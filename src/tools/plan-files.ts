@@ -47,8 +47,8 @@ export interface PlanFileOps {
   lstat(target: string): Promise<BigIntStats>;
   link(existing: string, created: string): Promise<void>;
   /**
-   * Not used by any move (DR-18 b: `rename` can replace a file). It stays in the interface so a
-   * test can replace it and show that it is never called.
+   * Used only by `renameIfAbsent`, the unsafe move a person consented to (DR-21): `rename` can
+   * replace a file (DR-18 b). Tests replace it to show when it is and is not called.
    */
   rename(from: string, to: string): Promise<void>;
   unlink(target: string): Promise<void>;
@@ -288,12 +288,13 @@ export async function createParents(
 }
 
 /**
- * DR-18 (b): the item problem for a move that stops because hard links cannot be used, so the
+ * DR-18 (b), DR-21: the item problem for a move that stops because the file system offers no move
+ * that refuses an existing destination (no hard links, or a source that cannot be unlinked), so the
  * file could only be moved by a rename that might replace one created in the meantime. The
- * contract's own code for it is to be added by the contract owner (w3:p9); until then it is
- * reported as `io_error`, and only this constant changes when the code exists.
+ * contract's code is `unsafe_move` (plan.ts PLAN_ITEM_PROBLEMS). The preflight lists such moves and
+ * the apply waits for a person's consent; only with it are they made (`renameIfAbsent`).
  */
-export const HARD_LINK_UNAVAILABLE_PROBLEM: PlanItemProblem = "io_error";
+export const HARD_LINK_UNAVAILABLE_PROBLEM: PlanItemProblem = "unsafe_move";
 
 /**
  * Codes from `link` that mean "no hard links here" (FAT and exFAT volumes, some network shares,
@@ -304,15 +305,22 @@ const LINK_UNSUPPORTED = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "E
 
 export type MoveOutcome = "moved" | "destination_exists" | "cross_device" | "no_hard_link" | "io_error";
 
+/** True when `link` failed because hard links cannot be used here (not for any other reason). */
+export function isLinkUnsupported(error: unknown): boolean {
+  const code = errorCode(error);
+  return code !== undefined && LINK_UNSUPPORTED.has(code);
+}
+
 /**
  * Moves a file without ever replacing an existing one and without copying: `link(from, to)`,
  * which fails when anything exists at `to`, then `unlink(from)`.
  *
- * DR-18 (b), R-5 L-1: there is no other way. Node's `rename` replaces an existing file on every
- * platform, so "check that nothing is there, then rename" would replace a file created between
- * the two steps. Where hard links cannot be used the move stops as `no_hard_link` and nothing
+ * DR-18 (b), R-5 L-1: there is no other safe way. Node's `rename` replaces an existing file on
+ * every platform, so "check that nothing is there, then rename" would replace a file created
+ * between the two steps; that is `renameIfAbsent`, used only with a person's consent (DR-21). Where hard links cannot be used the move stops as `no_hard_link` and nothing
  * changes. Where the source cannot be unlinked after the link (a read-only file on Windows), the
- * second name is taken back and the move stops as `io_error`.
+ * second name is taken back and the move also stops as `no_hard_link` (the contract's
+ * `unsafe_move`); if the second name cannot be taken back, both names stay and it is `io_error`.
  *
  * Hard links are also why a file inside the workspace that shares its content with a file
  * outside (an existing hard link, R-5 I-1) can be moved: only the workspace name changes; the
@@ -325,7 +333,7 @@ export async function moveNoReplace(from: string, to: string, ops: PlanFileOps):
     const code = errorCode(error);
     if (code === "EEXIST") return "destination_exists";
     if (code === "EXDEV") return "cross_device";
-    if (code !== undefined && LINK_UNSUPPORTED.has(code)) return "no_hard_link";
+    if (isLinkUnsupported(error)) return "no_hard_link";
     return "io_error";
   }
   try {
@@ -336,8 +344,59 @@ export async function moveNoReplace(from: string, to: string, ops: PlanFileOps):
       await ops.unlink(to);
     } catch {
       // Both names now point at the file. Nothing was lost; report it.
+      return "io_error";
     }
+    return "no_hard_link";
+  }
+}
+
+/**
+ * DR-21: the unsafe move, only after a person's consent for this apply (UnsafeMoveConsent) and
+ * only where `moveNoReplace` reported `no_hard_link`. It looks once more that nothing is at `to`
+ * and then renames. A file created between that look and the rename can still be replaced: that
+ * window is the risk the person consented to. Nothing is copied: another volume is `cross_device`.
+ */
+export async function renameIfAbsent(from: string, to: string, ops: PlanFileOps): Promise<Exclude<MoveOutcome, "no_hard_link">> {
+  try {
+    await ops.lstat(to);
+    return "destination_exists";
+  } catch (error) {
+    if (!isMissing(error)) return "io_error";
+  }
+  try {
+    await ops.rename(from, to);
+    return "moved";
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "EXDEV") return "cross_device";
+    if (code === "EEXIST" || code === "ENOTEMPTY") return "destination_exists";
     return "io_error";
+  }
+}
+
+/** Name of a hard link probe. Starts with the state directory's name so nobody mistakes it for a file of theirs. */
+function probeName(): string {
+  return `.codaryn-link-probe-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * PQ-6: can `source` get a second name in `dir` (on the same volume)? Makes the link and takes it
+ * back at once. "unsupported" only for the codes that mean "no hard links here"; any other failure
+ * is "unknown" and the apply decides on the move itself. A probe that cannot be taken back stays
+ * as a second name of the same file; it is reported as "unknown".
+ */
+export async function probeHardLink(source: string, dir: string, ops: PlanFileOps): Promise<"supported" | "unsupported" | "unknown"> {
+  const probe = path.join(dir, probeName());
+  try {
+    await ops.link(source, probe);
+  } catch (error) {
+    return isLinkUnsupported(error) ? "unsupported" : "unknown";
+  }
+  try {
+    await ops.unlink(probe);
+    return "supported";
+  } catch {
+    return "unknown";
   }
 }
 

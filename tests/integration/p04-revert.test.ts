@@ -176,16 +176,32 @@ test("F5-q 두 번째 되돌리기는 아무것도 바꾸지 않는다", { timeo
   assert.equal(bytesOf(sb, PRICE_PATH).toString("utf8"), PRICE_BUG);
   assert.equal(absent(sb, NEW_PATH), true);
 
+  // N-22: files already as before the run are `already_reverted`, which is nothing left to do,
+  // so the second revert is `complete` (exit 0) and says the run was reverted before.
   const before = workspaceBytes(sb.workspace);
   const second = await runRevert(sb.workspace, runId, { cwd: sb.base });
   const secondOut = expectRevertOutput(second, runId);
-  assert.equal(secondOut.status, "partial");
-  assert.equal(second.exitCode, REVERT_EXIT_CODES.partial);
+  assert.equal(secondOut.status, "complete");
+  assert.equal(second.exitCode, REVERT_EXIT_CODES.complete);
   assert.deepEqual(revertSummary(secondOut), {
     reverted: [],
-    skipped: [`${NEW_PATH}:changed_since_run`, `${PRICE_PATH}:changed_since_run`].sort(),
+    skipped: [`${NEW_PATH}:already_reverted`, `${PRICE_PATH}:already_reverted`].sort(),
   });
+  assert.equal(secondOut.revertedBefore?.status, "complete");
   assert.deepEqual(workspaceBytes(sb.workspace), before);
+
+  // A file changed again after the revert is still `changed_since_run`, and that makes it partial.
+  writeFileSync(join(sb.workspace, ...PRICE_PATH.split("/")), `${PRICE_BUG}// 사용자가 다시 고침\n`);
+  const userBytes = workspaceBytes(sb.workspace);
+  const third = await runRevert(sb.workspace, runId, { cwd: sb.base });
+  const thirdOut = expectRevertOutput(third, runId);
+  assert.equal(thirdOut.status, "partial");
+  assert.equal(third.exitCode, REVERT_EXIT_CODES.partial);
+  assert.deepEqual(revertSummary(thirdOut), {
+    reverted: [],
+    skipped: [`${NEW_PATH}:already_reverted`, `${PRICE_PATH}:changed_since_run`].sort(),
+  });
+  assert.deepEqual(workspaceBytes(sb.workspace), userBytes, "the user's change stays");
 });
 
 test("F5-q2 아무것도 바꾸지 않은 실행의 되돌리기는 complete", { timeout: 120_000 }, async (t) => {

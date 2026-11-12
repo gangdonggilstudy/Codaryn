@@ -5,7 +5,8 @@
  *
  * Both return raw local text, like the built-in tools: the engine masks every result before it is
  * recorded or sent. Neither changes a workspace file. `propose_plan` writes only plan.json, through
- * the PlanRecorder, and only when every check passed.
+ * the PlanRecorder, and only when every check passed. DR-28: each stored action carries its paths
+ * as the run's own gateway masked them (`shown`, planActionShown).
  */
 
 import type { Dirent } from "node:fs";
@@ -21,10 +22,12 @@ import {
   MAX_PLAN_SOURCE_BYTES,
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
+  planActionShown,
 } from "../contracts/index.js";
 import type {
   InspectEntry,
   InspectFilesArgs,
+  MaskedPlanAction,
   PlanActionArgs,
   PlanProblem,
   PlanRecorder,
@@ -33,6 +36,7 @@ import type {
   RawWorkflowToolOutcome,
   ResolvedPath,
   ResolvedPlanAction,
+  StoredPlanAction,
   ToolErrorCode,
   Workspace,
 } from "../contracts/index.js";
@@ -334,6 +338,21 @@ async function checkPlan(
   return checked;
 }
 
+/** An action's paths masked by `privacy`, or null when one cannot be masked. */
+function maskPlanAction(action: ResolvedPlanAction, privacy: PrivacyGateway): MaskedPlanAction | null {
+  const mask = (text: string) => {
+    const masked = privacy.mask(text);
+    return masked.ok ? masked.text : null;
+  };
+  if (action.kind === "move") {
+    const from = mask(action.from);
+    const to = mask(action.to);
+    return from === null || to === null ? null : { kind: "move", from, to, sha256: action.sha256 };
+  }
+  const where = mask(action.path);
+  return where === null ? null : { kind: "discard", path: where, sha256: action.sha256 };
+}
+
 export async function proposePlan(
   deps: WorkflowToolDeps,
   args: ProposePlanArgs,
@@ -363,9 +382,22 @@ export async function proposePlan(
 
   if (signal.aborted) return fail("cancelled", "propose_plan cancelled");
   if (deps.planRecorder === undefined) return fail("io_error", "no plan store is available; nothing was stored");
+
+  // DR-28 (R-11 M-1): each stored action keeps its paths as this run's own gateway masks them, so a
+  // later plan view or apply can tell whether the secrets registered then mask them the same way.
+  // A path that cannot be masked stores nothing.
+  const stored: StoredPlanAction[] = [];
+  for (const action of actions) {
+    const masked = maskPlanAction(action, deps.privacy);
+    if (masked === null) return fail("io_error", "masking a plan path failed; nothing was stored");
+    const shown = planActionShown(masked);
+    if (action.kind === "move" && "from" in shown) stored.push({ ...action, shown });
+    else if (action.kind === "discard" && "path" in shown) stored.push({ ...action, shown });
+    else return fail("io_error", "masking a plan path failed; nothing was stored");
+  }
   let digest: string;
   try {
-    digest = await deps.planRecorder.savePlan(actions);
+    digest = await deps.planRecorder.savePlan(stored);
   } catch {
     // No detail: it could carry raw paths.
     return fail("io_error", "storing the plan failed; no plan exists");

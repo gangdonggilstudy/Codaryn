@@ -26,6 +26,7 @@ export function taskFormArguments(settings: TaskForm): string[] {
   if (settings.configPath !== null) argv.push("--config", settings.configPath);
   if (settings.varsFile !== null) argv.push("--vars-file", settings.varsFile);
   if (settings.profile !== null) argv.push("--profile", settings.profile);
+  if (settings.workflowRef !== null) argv.push("--workflow", settings.workflowRef);
   return argv;
 }
 

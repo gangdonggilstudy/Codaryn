@@ -129,7 +129,7 @@ export function taskRequest(base: string, overrides: Partial<StartRunRequest> = 
 
 /** DR-17: the task form of the same task file (plan, apply, review, changes). */
 export function taskForm(base: string, overrides: Partial<TaskForm> = {}): TaskForm {
-  return { input: { kind: "task", taskPath: path.join(base, "task.json") }, configPath: null, varsFile: null, profile: null, ...overrides };
+  return { input: { kind: "task", taskPath: path.join(base, "task.json") }, configPath: null, varsFile: null, profile: null, workflowRef: null, ...overrides };
 }
 
 export function runDir(base: string, runId: string): string {

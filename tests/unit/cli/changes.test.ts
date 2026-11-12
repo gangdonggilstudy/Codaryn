@@ -61,7 +61,7 @@ describe("parseChangesArgs", () => {
       ok: true,
       args: {
         command: "changes",
-        settings: { input: { kind: "task", taskPath: "t.json" }, configPath: "c.json", varsFile: "v.env", profile: null },
+        settings: { input: { kind: "task", taskPath: "t.json" }, configPath: "c.json", varsFile: "v.env", profile: null, workflowRef: null },
         runId: "latest",
         json: true,
       },
@@ -124,7 +124,7 @@ describe("runChanges", () => {
     assert.equal(printed.endsWith("\n") && printed.split("\n").length, 2, "one JSON line");
     assert.equal(printed.includes(FAKE_KEY), false);
     assert.equal((JSON.parse(printed) as ChangesOutput).kind, "changes");
-    assert.deepEqual(fake.seen[0], { settings: { input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, profile: null }, runId: "latest" });
+    assert.deepEqual(fake.seen[0], { settings: { input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, profile: null, workflowRef: null }, runId: "latest" });
 
     const human = text(await runChanges({ argv: ["changes", "--task", "t.json", "--run", "latest"], env, app: fake.app }));
     assert.equal(human.includes(FAKE_KEY), false);

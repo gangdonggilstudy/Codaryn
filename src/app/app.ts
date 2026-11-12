@@ -171,7 +171,7 @@ export function runRequestOf(settings: TaskForm): StartRunRequest {
     configPath: settings.configPath,
     varsFile: settings.varsFile,
     profile: settings.profile,
-    workflowRef: null,
+    workflowRef: settings.workflowRef,
     cancelFile: null,
   };
 }
@@ -435,7 +435,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
-  // plan, applyPlan and review (DR-1, DR-2, DR-17) are left out until the general task commands exist.
   /** `codaryn models` as main.ts calls it, with this environment and no terminal question. */
   async function models(request: ListModelsRequest | SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>> {
     const args = modelsArguments(request);

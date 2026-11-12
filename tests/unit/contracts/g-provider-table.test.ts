@@ -14,7 +14,12 @@ import {
   API_KEY_PATTERN_SOURCES,
   API_PROVIDERS,
   API_PROVIDER_NAMES,
+  CODARYN_API_BASE_URL_ENV,
+  CODARYN_MODEL_ENV,
+  CODARYN_OPENAI_API_BASE_URL_ENV,
+  CODARYN_OPENAI_MODEL_ENV,
   DEFAULT_ANTHROPIC_API_BASE_URL,
+  MIN_OTHER_PROVIDER_KEY_LENGTH,
   DEFAULT_OPENAI_API_BASE_URL,
   MAX_OUTPUT_TOKENS_LIMIT,
   MODEL_ERROR_KINDS,
@@ -77,6 +82,8 @@ describe("SP-1: the provider table", () => {
   test("the anthropic entry holds the values the CLI used before", () => {
     assert.deepEqual(API_PROVIDERS.anthropic, {
       keyEnv: ANTHROPIC_API_KEY_ENV,
+      modelEnv: CODARYN_MODEL_ENV,
+      baseUrlEnv: CODARYN_API_BASE_URL_ENV,
       keyPatternSources: [ANTHROPIC_KEY_PATTERN_SOURCE],
       defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
       baseUrlPath: "without_version",
@@ -180,6 +187,8 @@ describe("SP-1: the provider table", () => {
   test("the openai entry holds the confirmed facts (DR-31)", () => {
     assert.deepEqual(API_PROVIDERS.openai, {
       keyEnv: OPENAI_API_KEY_ENV,
+      modelEnv: CODARYN_OPENAI_MODEL_ENV,
+      baseUrlEnv: CODARYN_OPENAI_API_BASE_URL_ENV,
       keyPatternSources: [OPENAI_KEY_PATTERN_SOURCE],
       defaultApiBaseUrl: DEFAULT_OPENAI_API_BASE_URL,
       baseUrlPath: "with_version",
@@ -187,6 +196,18 @@ describe("SP-1: the provider table", () => {
       minOutputTokens: 16,
     });
     assert.equal(DEFAULT_OPENAI_API_BASE_URL, "https://api.openai.com/v1");
+  });
+
+  test("DR-34: each provider has its own model and address variables; Anthropic keeps the earlier names", () => {
+    assert.deepEqual([CODARYN_MODEL_ENV, CODARYN_API_BASE_URL_ENV], ["CODARYN_MODEL", "CODARYN_API_BASE_URL"]);
+    assert.deepEqual([CODARYN_OPENAI_MODEL_ENV, CODARYN_OPENAI_API_BASE_URL_ENV], ["CODARYN_OPENAI_MODEL", "CODARYN_OPENAI_API_BASE_URL"]);
+    const variables = API_PROVIDER_NAMES.flatMap((name) => [API_PROVIDERS[name].keyEnv, API_PROVIDERS[name].modelEnv, API_PROVIDERS[name].baseUrlEnv]);
+    assert.equal(new Set(variables).size, variables.length, "no variable is shared by two providers or two uses");
+  });
+
+  test("DR-34 (b): another provider's key value is a secret only from 20 characters on", () => {
+    assert.equal(MIN_OTHER_PROVIDER_KEY_LENGTH, 20);
+    for (const placeholder of ["EMPTY", "ollama", "x"]) assert.ok(placeholder.length < MIN_OTHER_PROVIDER_KEY_LENGTH, placeholder);
   });
 
   test("the bundle's message and help additions", () => {

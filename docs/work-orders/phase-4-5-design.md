@@ -85,6 +85,10 @@ w3:p7이 네 설계 문서를 읽기 전용으로 교차 검토했다(높음 1, 
 | DR-8 | 단일 프로세스 원칙의 조건은 "듣는 소켓 없음, 어댑터보다 오래 사는 프로세스 없음"이다. 프로세스 밖 어댑터는 실행마다 CLI 자식 하나를 쓴다. 앱 수명 동안만 사는 엔진 전용 프로세스(GUI 권고안)는 이 조건 안의 후보로 적고, 채택 여부는 GUI 형태 확정 때 정한다 | M-7, AC-D11 | architecture 1절(D3) |
 | DR-9 | 폐기 보관함은 실행 디렉터리 밖 `.codaryn/discarded/<runId>/`에 둔다. 실행 기록 정리는 보관함을 지우지 않고, 보관함 정리는 파일 수와 크기를 보여 주고 따로 확인한다 | M-8, GT-D5 | 범용 작업 5절, GUI 설계 |
 
+| DR-10 | 어댑터가 물을 수 없어 거부할 때는 앱 계층이 `by: "default"`로 기록한다. 어댑터의 답 형식으로 사람의 답과 구분되게 한다(확인 통로를 주지 않은 실행은 앱 계층이 스스로 거부를 기록) | D3 PQ-1, DR-3 | 어댑터 계약 5.7절, A-1 |
+| DR-11 | 허용된 명령이 띄운 분리된 자손이 CLI보다 오래 살 수 있는 것(T-2)은 DR-8 원칙의 위반이 아니라 알려진 한계다. 범용 작업의 엔진 변경은 GT-E1~GT-E5로 부른다 | D3 PQ-2, PQ-3 | architecture 1절(반영됨) |
+| DR-12 | G-A 보고의 가정을 승인한다: 상한 값은 구현 뒤 측정해 조정, `apply`도 task(또는 간편 형식과 프로필)를 받음, 적용 실행의 첫 기록은 `apply_started`이고 기록을 읽는 코드(report, runs, revert, 진행 줄)가 두 종류를 구분함(G-E, G-F). 새 코드의 두 언어 문구는 N-B(w3:p5)가 G-A 계약을 받아 더한다. G-A는 그 문구와 같은 묶음으로 main에 병합한다 | G-A 보고 1~4 | |
+
 낮음·정보 항목은 각 설계 문서의 소유자가 보고서를 읽고 문서에 반영한다. 반영하지 않는 것은 이유를 보고서에 적는다.
 
 ## 구현 배정 (1차)
@@ -97,4 +101,18 @@ w3:p7이 네 설계 문서를 읽기 전용으로 교차 검토했다(높음 1, 
 | R-1 설계 교차 검토(읽기 전용) | w3:p7 | `claude-store` | 없음(보고서만) | 없음. 세 설계 문서 사이의 어긋남과 현재 코드와 맞지 않는 서술을 찾는다 |
 
 - G-B~G-H(엔진, 도구·적용기, 검증기, 저장, CLI 연결, 통합, 문서)는 G-A 계약 커밋과 N-A·N-C 병합 뒤 배정한다.
+
+## 구현 배정 (2차, 범용 작업)
+
+G-A 계약 커밋 `f53fb16`(`claude/general-tasks`)을 각자 병합해 그 위에서 구현한다. 소유 파일은 [범용 작업 설계](../design/general-tasks.md) 11절과 같다.
+
+| 작업 | pane | worktree / 브랜치 | 소유 파일 |
+| --- | --- | --- | --- |
+| G-B 엔진 | w3:p9 | `claude-general` / `claude/general-tasks` | `src/engine/**`, `tests/unit/engine/g-*.test.ts`(신규) |
+| G-C 도구와 적용기 | w3:pB | `claude-gui` / `claude/gui-design` | `src/tools/**`, `tests/unit/tools/g-*.test.ts`(신규) |
+| G-D 검증기와 표 해석 | w3:p7 | `claude-store` / `claude/revert-store` | `src/verify/**`, `src/tabular/**`(신규), `tests/unit/verify/g-*.test.ts`, `tests/unit/tabular/**` (R-4 검토를 마친 뒤) |
+| 새 코드의 두 언어 문구 | w3:p5 | `claude-quality` / `claude/security-core` | `src/i18n/**`, `tests/unit/i18n/**` |
+| G-E 저장·되돌리기 | w3:p6 | `claude-tools` / `claude/core-tools` | `src/store/**`의 계획·검토 파일과 이동·폐기 되돌리기 (N-23 수정을 마친 뒤) |
+| G-F CLI 연결과 내장 정의 | w3:p2 | `claude-workspace` / `claude/workspace-policy` | `src/cli/**`, `src/workflows/**`(신규) (사용성 연결을 마친 뒤) |
+| G-G 통합 시험 | w3:p4 | `claude-operations` / `claude/cli-verification` | `tests/integration/**`, `tests/support/**`, `tests/fixtures/**` (G-F 뒤) |
 - 계약 소유: N-A(w3:p2)의 사용성 계약은 `9735b5f`로 끝났다. 이후 `src/contracts`의 범용 작업 추가분은 w3:p9가 맡는다. 두 담당이 같은 계약 파일의 다른 부분을 바꿀 수 있으므로 PM이 병합 때 합친 트리로 확인한다.

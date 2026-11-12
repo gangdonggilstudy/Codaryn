@@ -7,7 +7,6 @@
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -47,6 +46,7 @@ import {
   runTask,
   startCli,
   toolResultFor,
+  UNASSIGNABLE_PID,
 } from "../support/cli.js";
 import type { CliRun } from "../support/cli.js";
 import { MOCK_LABEL, replyText, runGuarded, sentMaxTokens, startFakeAnthropic } from "../support/fake-anthropic.js";
@@ -100,10 +100,9 @@ test("T-9 죽은 잠금을 여러 프로세스가 동시에 회수해도 하나�
     { text: "잠금을 쥐고 기다린다", delayMs: 4_000 },
     finalStep("끝"),
   ]);
-  const dead = spawn(NODE, ["-e", ""], { stdio: "ignore" });
-  const deadPid = dead.pid;
-  await new Promise<void>((resolve) => dead.once("exit", () => resolve()));
-  assert.ok(deadPid !== undefined && !isProcessAlive(deadPid), "test assumption: the lock holder is dead");
+  // Not the pid of an exited process: one the system may hand out again during the run (Z-2).
+  const deadPid = UNASSIGNABLE_PID;
+  assert.ok(!isProcessAlive(deadPid), "test assumption: the lock holder is dead");
   mkdirSync(join(sb.workspace, STATE_DIR_NAME), { recursive: true });
   writeFileSync(
     lockPath(sb.workspace),

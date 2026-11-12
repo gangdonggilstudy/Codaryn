@@ -156,11 +156,13 @@
 - `CODARYN_IT_PID_LOG=<작업 디렉터리 밖 파일>`이면 CLI 시작과 `killQuietly`마다 한 줄(`spawn|kill <pid> <ms> ...`)을 덧붙인다. 다른 시험의 CLI pid를 죽이는지 찾는 용도이며 기본은 꺼짐이다.
 - pid로 프로세스를 죽이는 정리는 그 시험이 멈춘 것을 확인하지 못한 pid에만 한다. Windows는 놓인 pid를 몇 초 안에 다른 프로세스에 준다(`a08`, `g01` T-2).
 - `t.after`는 등록한 순서로 실행된다. 샌드박스 삭제보다 먼저 해야 할 정리는 `createSandbox`보다 먼저 등록한다.
+- 주인이 죽은 잠금(`a08`, `t01` T-9)에는 끝난 프로세스의 pid가 아니라 `UNASSIGNABLE_PID`를 쓴다(Z-2). 잠금의 생존 판정은 pid만 보므로(`src/store/lock.ts`, architecture A-6), 부하 중 그 pid가 다른 프로세스에 다시 주어지면 죽은 잠금이 살아 보인다.
 
 ## 격리
 
 - 사례마다 `<tmp>/codaryn-it-*/`를 만들고 끝나면 지운다. task와 대본은 작업 공간 밖(base)에 둔다.
 - CLI 환경은 `CHILD_ENV_ALLOWLIST`만 상속한다. 개발자 환경의 API 키나 모델 설정은 넘어가지 않고, 테스트 코드가 `extra`로 키 변수를 넣으면 예외가 난다. 모의 API 테스트만 `fakeApiKey`로 가짜 키를 넣는다.
+- 기계와 무관한 결과를 위해 `DETERMINISTIC_ENV`를 늘 더한다(`extra`가 우선). `CODARYN_LANG=en`으로 사람용 글을 영어로 고정하고, POSIX에서는 `XDG_CONFIG_HOME`을 만들지 않는 폴더로 두어 개발자의 기본 설정 파일을 읽지 않게 한다. Windows는 `APPDATA`를 상속하지 않으므로 기본 설정 위치가 없다(N-1, N-4).
 - 바이트가 중요한 fixture는 실행 중 생성한다. 가짜 비밀은 `tests/fixtures/secrets.ts`에만 있다.
 
 ## 입증하지 않는 것

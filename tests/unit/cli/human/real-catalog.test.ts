@@ -111,7 +111,7 @@ function renderAll(language: MessageLanguage): string {
   const out = human(language);
   return [
     out.error(ERROR),
-    out.runSummary(result(), { workspaceForm: "given", configDefault: "%APPDATA%\\Codaryn\\config.json", profileApplied: true, deniedToolCalls: 2, deniedCommandCalls: 1, policySource: "config" }),
+    out.runSummary(result(), { workspaceForm: "given", configDefault: "%APPDATA%\\Codaryn\\config.json", profileApplied: true, deniedToolCalls: 2, deniedCommandCalls: 1, failedToolCalls: 0, policySource: "config" }),
     ...EVENTS.map((event) => `${out.progressLine(event) ?? ""}\n`),
     out.revertSummary(revert({ skipped: [{ path: "notes.txt", reason: "changed_since_run" }] })),
     out.revertSummary(revert({ dryRun: true, status: "complete", exitCode: 0, skipped: [], revertedBefore: { at: STARTED, status: "complete" } })),
@@ -137,7 +137,7 @@ describe("createHumanOutput with the real catalogs (N-B)", () => {
       for (let turn = 1; turn <= 2000; turn += 1) out.progressLine({ type: "model_request", turn, system: null, newMessages: [] });
       const finished = out.progressLine(EVENTS[EVENTS.length - 1] as JournalEvent) ?? "";
       assert.equal(finished.includes("?"), false, finished);
-      const summary = out.runSummary(result(), { workspaceForm: "current", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "config" });
+      const summary = out.runSummary(result(), { workspaceForm: "current", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0, policySource: "config" });
       assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(summary), false, summary);
     });
   }
@@ -181,7 +181,7 @@ describe("createHumanOutput with the real catalogs (N-B)", () => {
   }
 
   test("ko: the run summary gives each labelled fact its own line, paths under the change count", () => {
-    const text = human("ko").runSummary(result(), { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 2, deniedCommandCalls: 2, policySource: "config" });
+    const text = human("ko").runSummary(result(), { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 2, deniedCommandCalls: 2, failedToolCalls: 0, policySource: "config" });
     assert.equal(
       text,
       [

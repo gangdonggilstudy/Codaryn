@@ -7,16 +7,16 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CALL_ID_PATTERN_SOURCE, CODARYN_OPENAI_API_BASE_URL_ENV, REPLACED_CALL_ID_PREFIX } from "../../src/contracts/index.js";
 import type { JournalRecord } from "../../src/contracts/index.js";
-import { createSandbox, writeWorkspaceFile } from "../fixtures/builders.js";
+import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import { createFileArgs } from "../fixtures/general-tasks.js";
 import { CALL_ID_LONG, CALL_ID_ODD, FAKE_ENCRYPTED_CONTENT, FAKE_OPENAI_MODEL_TASK, writeOpenAITask } from "../fixtures/openai.js";
 import { FAKE_OPENAI_KEY } from "../fixtures/secrets.js";
-import { cliEnv, expectRunResult, readRunFiles } from "../support/cli.js";
+import { cliEnv, expectCliError, expectRunResult, readRunFiles } from "../support/cli.js";
 import { MOCK_LABEL, cliOutputSources, runGuarded } from "../support/fake-anthropic.js";
 import {
   assertContinuation,
@@ -36,6 +36,7 @@ import {
 } from "../support/fake-openai.js";
 import type { FakeOpenAI } from "../support/fake-openai.js";
 import { findLeaks } from "../support/leak.js";
+import { callStep, finalStep } from "../support/repair-script.js";
 
 const NOTE = "summary.md";
 const NOTE_RULE = { id: "note", kind: "file_rules" as const, rules: [{ type: "contains" as const, path: NOTE, text: "alpha" }] };
@@ -161,4 +162,41 @@ test(`${MOCK_LABEL} OI-03 OpenAI 실행도 runs·report·changes·revert가 읽�
   const revert = await runGuarded(sb, ["revert", "--workspace", sb.workspace, "--run", result.runId], env);
   assert.equal(revert.exitCode, 0, revert.stdout.slice(0, 300));
   assert.equal(existsSync(join(sb.workspace, NOTE)), false, "the file the OpenAI run created is removed again");
+});
+
+test(`OI-03b 제공자 이름 검사는 남아 있다: 기록의 제공자를 계약 안의 다른 이름으로 바꾸면 그대로 읽히고, 계약 밖의 이름이면 손상이며 되돌리지 않는다`, { timeout: 90_000 }, async (t) => {
+  for (const [label, provider, readable] of [
+    ["계약 안의 이름(대조군)", "anthropic", true],
+    ["계약 밖의 이름", "cdy-unknown-provider", false],
+  ] as const) {
+    const sb = createSandbox(t);
+    const steps = [callStep("c-write", "write_file", createFileArgs(NOTE, "alpha note\n")), finalStep("done")];
+    const taskPath = writeTask(sb, { id: "o01-provider-check", verifiers: [NOTE_RULE] }, steps);
+    const result = expectRunResult(await runGuarded(sb, ["run", "--task", taskPath], cliEnv()));
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    // Rewrite the provider in the journal's first record (run_started) and in result.json.
+    const runDir = join(sb.workspace, ".codaryn", "runs", result.runId);
+    const journalPath = join(runDir, "journal.jsonl");
+    const lines = readFileSync(journalPath, "utf8").split("\n");
+    const first = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+    assert.equal(first["type"], "run_started");
+    assert.equal(first["provider"], "scripted", "test assumption: the first record names the provider");
+    lines[0] = JSON.stringify({ ...first, provider });
+    writeFileSync(journalPath, lines.join("\n"));
+    const resultPath = join(runDir, "result.json");
+    writeFileSync(resultPath, JSON.stringify({ ...(JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>), provider }));
+
+    const runs = await runGuarded(sb, ["runs", "--workspace", sb.workspace, "--json"], cliEnv());
+    const state = (JSON.parse(runs.stdout.trim()) as { runs: { runId: string; state: string }[] }).runs.find((entry) => entry.runId === result.runId)?.state;
+    const revert = await runGuarded(sb, ["revert", "--workspace", sb.workspace, "--run", result.runId], cliEnv());
+    if (readable) {
+      assert.notEqual(state, "damaged", `${label}: a contract provider's run stays readable after the rewrite`);
+      assert.equal(revert.exitCode, 0, `${label}: ${revert.stdout.slice(0, 300)}`);
+      assert.equal(existsSync(join(sb.workspace, NOTE)), false, `${label}: reverted`);
+    } else {
+      assert.equal(state, "damaged", `${label}: a provider outside the contract is still damaged`);
+      expectCliError(revert, "invalid_run_record");
+      assert.equal(readFileSync(join(sb.workspace, NOTE), "utf8"), "alpha note\n", `${label}: nothing reverted`);
+    }
+  }
 });

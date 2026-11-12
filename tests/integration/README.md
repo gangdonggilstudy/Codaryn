@@ -207,7 +207,8 @@
 | --- | --- | --- |
 | OI-01 도구 호출 왕복 | `o01` | 읽기 → 쓰기 → 최종 답이 `done`/`verified`. 모든 요청이 `store: false`, `strict: false`의 평평한 도구, 대화 사슬, `call_id`로 답함. 사용량은 캐시·추론 토큰을 더하지 않은 합. 키는 Bearer에만 |
 | OI-02 추론 항목 | `o01` | 같은 JSON으로 되돌림(2개, 3개), 기록 `model_response.reasoningItems`는 [2, 1, 없음]. 규칙 밖 `call_id`는 기록에 `codaryn-call-1·2`, 요청에는 원래 값. 출력·기록에 추론 내용·원래 id·키 없음 |
-| OI-03 실행 기록 읽기 | `o01` | 끝난 OpenAI 실행이 `runs`에서 손상이 아니고 `report`·`changes`·`revert --dry-run`·`revert`가 동작한다. **main에서 실패**: `src/store/runs.ts:50`의 제공자 목록에 `openai`가 없다(빌드 산출물에서 그 목록만 고치면 통과) |
+| OI-03 실행 기록 읽기 | `o01` | 끝난 OpenAI 실행이 `runs`에서 손상이 아니고 `report`·`changes`·`revert --dry-run`·`revert`가 동작한다. store의 손 목록 결함(`src/store/runs.ts:50`)을 잡았고 `9871716`에서 계약 상수로 고쳐졌다 |
+| OI-03b 제공자 검사 대조 | `o01` | 끝난 대본 실행의 기록·결과에서 제공자를 계약 안의 `anthropic`으로 바꾸면 그대로 읽히고 되돌려진다(대조군), 계약 밖 이름이면 손상·`invalid_run_record`·무변경. store가 아무 이름이나 받게 하면 실패함을 확인했다 |
 | 제공자별 변수 | `o02` | 모델: task > `CODARYN_OPENAI_MODEL` > `providers.openai.model`. 주소: `CODARYN_OPENAI_API_BASE_URL` > `providers.openai.apiBaseUrl`. `CODARYN_MODEL`·`CODARYN_API_BASE_URL`은 OpenAI 실행에 쓰이지 않음 |
 | R-20 D2와 반대 | `o02` | 두 키·두 주소 변수가 있어도 `models`(설정 `provider: openai`)와 `--provider anthropic`이 각자 주소로만, 각자 키로만 |
 | SP-I03 | `o02` | 두 키가 있으면 어느 제공자로 실행해도 작업 파일 속 다른 제공자의 키(20자 이상)가 토큰으로 가려짐 |

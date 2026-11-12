@@ -177,7 +177,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "help.intro": "codaryn: 로컬 작업 에이전트입니다. 실행 하나는 작업 공간 폴더 하나 안에서 권한 규칙에 따라 일하고, 검증 결과로 끝납니다. 기록은 <workspace>/.codaryn/에 남습니다.",
   "help.commands_heading": "명령:",
-  "help.output": "run은 stdout에 JSON 한 줄을, stderr에 진행 줄과 끝 요약을 냅니다(--quiet면 생략).",
+  "help.output": "터미널에서는 stderr의 사람용 줄(진행 줄, 요약, 오류 설명)만 보입니다. run·revert·apply의 결과와 오류는 --json을 주거나 출력이 터미널이 아닐 때(파이프, 파일) stdout에 JSON 한 줄로도 냅니다. --quiet면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다.",
   "help.key": "API 키는 제공자의 환경 변수(또는 --vars-file)에서만 읽고, --task나 --config 파일에서는 읽지 않습니다. 변수 이름은 codaryn doctor가 알려 줍니다.",
   "help.contract": "전체 계약은 docs/cli-contract.md를 보세요.",
   "help.options_heading": "옵션:",

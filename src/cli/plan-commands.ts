@@ -55,13 +55,11 @@ import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
-  createApplyJournal,
+  createApplyRecorders,
   inspectRun as storeInspectRun,
   latestRun,
   listRuns as storeListRuns,
   loadPlan as storeLoadPlan,
-  markPlanApplied,
-  prepareDiscardedRoot,
   readReviewRecord,
   releaseLock,
   writeResult,
@@ -430,8 +428,11 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         protectedPaths.length > 0 || prepared.integrityPaths.length > 0
           ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
           : undefined;
+      // DR-38: the apply's journal, its plan mark and its discarded-files folder come with the state
+      // guard that knows them (the store's createApplyRecorders), passed as ApplyDeps.stateGuard.
+      const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock });
       const journal = observeApply(
-        createApplyJournal({ workspaceRoot, runId, clock: io.clock }),
+        recorders.journal,
         privacy,
         args.quiet ? undefined : io.writeProgress,
         io.human,
@@ -454,7 +455,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         policy: createPolicyGate({ config: task.policy, workspace }),
         planActions: task.policy.planActions ?? [],
         // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
-        discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
+        discardedRoot: await recorders.prepareDiscardedRoot(),
         privacy,
         verifiers: createVerifierRunner({ workspace, commandRunner }),
         // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
@@ -463,7 +464,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         clock: io.clock,
         signal: cancel.signal,
         ...(integrity === undefined ? {} : { integrity }),
-        markApplied: () => markPlanApplied({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(io.clock.now()).toISOString() }),
+        markApplied: () => recorders.markPlanApplied({ planRunId, at: new Date(io.clock.now()).toISOString() }),
+        stateGuard: recorders.stateGuard,
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
       await writeResult(workspaceRoot, result as unknown as EngineResult);

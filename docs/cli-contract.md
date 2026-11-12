@@ -1123,8 +1123,8 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 
 ### 18.12 실행 기록이 바뀐 실행 (DR-38)
 
-- 실행의 기록(journal·snapshots·plan 등)은 `createRunRecorders`(store)가 만든다. 같이 나오는 `stateGuard`를 엔진에 `EngineDeps.stateGuard`로 넘긴다. 엔진의 점검은 실행이 쓴 것 말고 바뀐 것만 변화로 센다(엔진이 아직 쓰지 않으면 아무 것도 바뀌지 않는다).
-- 적용 실행(`codaryn apply`)의 감시기(`createApplyRecorders`)는 `ApplyDeps.stateGuard` 형이 계약에 올라오면 연결한다.
+- 실행의 기록(journal·snapshots·plan 등)은 `createRunRecorders`(store)가 만든다. 같이 나오는 `stateGuard`를 엔진에 `EngineDeps.stateGuard`로 넘긴다. 엔진의 점검은 실행이 쓴 것 말고 바뀐 것만 변화로 센다(엔진 92e0812). 바뀌면 실행은 `failed`/`state_changed`로 끝나고 결과의 `stateChanged`에 경로(가림본)가 남는다. `report`는 그 목록을 그대로 보인다.
+- 적용 실행(`codaryn apply`)의 저널, 계획의 적용 표시, 폐기 보관함 폴더는 `createApplyRecorders`(store)가 만들고, 그 `stateGuard`를 `ApplyDeps.stateGuard`로 넘긴다. 적용 중 기록이 바뀌면 적용은 `failed`/`state_changed`로 끝나고, 이미 한 이동은 되돌리기를 위해 남는다.
 - 표시(`runs/<runId>/records-changed.json`이 있는 실행. 읽을 수 없는 표시도 표시로 본다):
   - `report`: 보고서는 그대로 보이고 JSON의 `recordsChanged: true`, 사람용 보고서에 한 줄(`report.records_changed`의 영어 글)을 더한다. 적용 실행의 보고서(`ApplyReportOutput`)는 계약에 자리가 없어 아직 말하지 않는다.
   - `revert`: 막지 않는다(스냅샷·다이제스트 확인은 그대로). 결과에 `recordsChanged: true`(미리보기 포함). 사람용 줄은 렌더러(N-C) 몫이다.

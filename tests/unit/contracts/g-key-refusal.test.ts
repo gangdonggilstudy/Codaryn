@@ -11,7 +11,9 @@ import {
   ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
   API_KEY_PATTERN_SOURCES,
   anthropicRefusalShapeIn,
+  compactKeyText,
   createKeyRefusalCheck,
+  createKeyValueCheck,
   holdsRefusedKeyShape,
 } from "../../../src/contracts/index.js";
 
@@ -115,5 +117,63 @@ describe("DR-40 (b), R-25 L-1: a real-format key glued to what comes before it i
     assert.equal(format.test(p(PREFIX, "api3-", "a".repeat(40))), false, "one digit");
     for (const name of R20_ORDINARY) assert.equal(format.test(name), false, name);
     assert.ok((API_KEY_PATTERN_SOURCES as readonly string[]).includes(ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE));
+  });
+});
+
+describe("DR-40 (a), R-25 M-1: a key split by a line break or an invisible character is still refused", () => {
+  /** The reviewer's split: one character after the 25th (18 characters after the prefix). */
+  const split = (key: string, mark: string) => key.slice(0, 25) + mark + key.slice(25);
+  const ZWSP = String.fromCharCode(0x200b);
+  const SOFT_HYPHEN = String.fromCharCode(0xad);
+  const LF = String.fromCharCode(10);
+
+  test("A2, A3, A16: registered, split by a zero-width space, a line feed, a soft hyphen", () => {
+    const check = createKeyRefusalCheck([KEY]);
+    for (const [name, mark] of [["A2", ZWSP], ["A3", "\n"], ["A16", SOFT_HYPHEN]] as const) {
+      assert.ok(check(`use ${split(KEY, mark)} now`), name);
+    }
+  });
+
+  test("A10: not registered (an openai run), split by a zero-width space: the shapes see the compact text", () => {
+    assert.ok(createKeyRefusalCheck([])(`use ${split(KEY, ZWSP)} now`));
+    assert.ok(holdsRefusedKeyShape(`use ${split(KEY, ZWSP)} now`));
+  });
+
+  test("the separators: white space, controls and format characters (Cf), soft hyphen included", () => {
+    const marks = [" ", "\t", "\r\n", String.fromCharCode(0xa0), ZWSP, String.fromCharCode(0x200c), String.fromCharCode(0x200d), String.fromCharCode(0x2060), String.fromCharCode(0xfeff), SOFT_HYPHEN, String.fromCharCode(0x200e), String.fromCharCode(0x202e), String.fromCharCode(0x7f)];
+    for (const mark of marks) {
+      assert.equal(compactKeyText(`a${mark}b`), "ab", mark.charCodeAt(0).toString(16));
+      assert.ok(createKeyRefusalCheck([OTHER])(split(OTHER, mark)), mark.charCodeAt(0).toString(16));
+    }
+    assert.equal(compactKeyText("plain-name_1"), "plain-name_1");
+  });
+
+  test("R-20's ordinary names are still not refused, one per line or each alone", () => {
+    const check = createKeyRefusalCheck([]);
+    for (const name of R20_ORDINARY) assert.equal(check(name), false, name);
+    assert.equal(check(R20_ORDINARY.join(" ")), false, "the names in a row");
+    assert.equal(check(R20_ORDINARY.join(LF)), false, "one name per line");
+  });
+
+  test("the false positive it adds, pinned: a key-prefixed name joined with the words after it", () => {
+    const name = p(PREFIX, "design-system");
+    const tail = "components-and-layout-helpers-v2-2026";
+    assert.equal(holdsRefusedKeyShape(name), false, "the name alone");
+    assert.equal(holdsRefusedKeyShape(`- ${name}. ${tail}`), false, "a full stop ends the run");
+    assert.equal(holdsRefusedKeyShape(`see ${name} ${tail}`), false, "after a word: no word start once joined");
+    assert.ok(holdsRefusedKeyShape(`- ${name}${LF}${tail}`), "after a non-word character, wrapped onto the next line");
+    assert.ok(holdsRefusedKeyShape(`- ${name} ${tail}`), "after a non-word character, followed by a space and the words");
+  });
+
+  test("the registered values alone, both views", () => {
+    const values = createKeyValueCheck([OTHER]);
+    assert.ok(values(split(OTHER, LF)));
+    assert.equal(values(split(KEY, LF)), false, "another key");
+  });
+
+  test("256 KiB of split prefixes: still linear", () => {
+    const attack = (PREFIX + ZWSP).repeat(Math.ceil((256 * 1024) / (PREFIX.length + 1)));
+    const { ms } = timed(() => createKeyRefusalCheck([KEY])(attack));
+    assert.ok(ms < 500, `${ms.toFixed(0)} ms`);
   });
 });

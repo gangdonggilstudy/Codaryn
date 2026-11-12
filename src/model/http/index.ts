@@ -14,7 +14,7 @@
  *   No text of a transport error is copied into a message, only fixed phrases and allowlisted codes.
  */
 
-import { MAX_RETRIES_LIMIT } from "../../contracts/index.js";
+import { KEY_SEPARATOR_PATTERN_SOURCE, MAX_RETRIES_LIMIT } from "../../contracts/index.js";
 import type { ListModelsSettings, ModelErrorKind } from "../../contracts/index.js";
 
 /** Longest message an outcome carries. */
@@ -29,9 +29,13 @@ const MAX_ERROR_SOURCE_CHARS = 4096;
 export const KEY_FRAGMENT_CHARS = 8;
 const REDACTED = "[redacted]";
 
-/** One character that separates nothing in a key: control characters, white space, invisible marks. */
-const SEPARATOR = /[\s\u0000-\u001f\u007f-\u009f​-‍⁠﻿]/;
-export const SEPARATOR_RUN = /[\s\u0000-\u001f\u007f-\u009f​-‍⁠﻿]+/g;
+/**
+ * One character that separates nothing in a key: white space, control characters and invisible
+ * format characters. DR-40 (a): the contract's set (KEY_SEPARATOR_PATTERN_SOURCE), so the soft hyphen
+ * and the other format characters (Cf) count too.
+ */
+const SEPARATOR = new RegExp(KEY_SEPARATOR_PATTERN_SOURCE, "u");
+export const SEPARATOR_RUN = new RegExp(`${KEY_SEPARATOR_PATTERN_SOURCE}+`, "gu");
 
 /** A key may hold printable ASCII only (0x21-0x7E): no space, no control or non-ASCII character. */
 const USABLE_KEY = /^[\x21-\x7e]+$/;

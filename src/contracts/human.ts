@@ -505,10 +505,30 @@ export const FIXED_MESSAGES = {
   "runs.revert_record_damaged": {},
   // DR-38: a run whose records were changed by something other than the run (state.ts).
   "runs.records_changed": {},
+  // U-16 (UXM-5): a plan run whose plan was applied (RunListEntry.appliedBy), in place of the
+  // needs-input words: applied by `{runId}`.
+  "runs.plan_applied": { runId: "runId" },
+  // R-55 M-1: the plan run's line by its apply run (planApplyStateOf): not finished (with the apply
+  // run's reason), still applying, applied and reverted since, the apply run's records gone.
+  "runs.plan_apply_unfinished": { runId: "runId", reason: "reason" },
+  "runs.plan_applying": { runId: "runId" },
+  "runs.plan_apply_reverted": { runId: "runId" },
+  "runs.plan_apply_missing": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},
+  // U-16 (UXM-4): `changes` of an apply run (ChangesApplyRun) in place of "no file changed": it
+  // applied the plan of run `{runId}`, `{count}` actions, which its report lists.
+  "changes.apply_run": { count: "count", runId: "runId" },
   "revert.records_changed": {},
+  // U-16, R-55 L-1: `revert` of a plan run: it only made a plan and changed no file (nothing put
+  // back, not marked as reverted); then by its apply run (PLAN_APPLY_STATES_TO_REVERT): revert that
+  // run to undo its changes, or it is still applying, was reverted already, or its records are gone.
+  "revert.plan_only": {},
+  "revert.plan_revert_apply": { runId: "runId" },
+  "revert.plan_applying": { runId: "runId" },
+  "revert.plan_apply_reverted": { runId: "runId" },
+  "revert.plan_apply_missing": { runId: "runId" },
   // DR-38: progress lines of the state checks: `{count}` paths changed (the run stops), and a part
   // of the state directory that was too large to check (the run goes on).
   "progress.state_changed": { count: "count" },

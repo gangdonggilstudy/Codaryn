@@ -403,6 +403,15 @@ export type RunListEntry =
       readonly kind?: "run" | "apply";
       /** G-A: for an apply run, the plan run it applied (`apply_started.planRunId`). Absent for a run. */
       readonly planRunId?: RunId;
+      /**
+       * U-16 (UXM-5): for a plan run whose plan was applied, the apply run and when it claimed the
+       * plan (its PLAN_APPLIED_FILE_NAME: `applyRunId`, `at`), so the list does not leave it as
+       * needing input. Absent otherwise: not a plan run, a plan not applied, an applied.json that
+       * cannot be read (the plan view still says), or a list built before U-16. R-55 M-1: applied.json
+       * is written just before the moves start, so this says only that an apply claimed the plan;
+       * how it ended is the apply run's own entry (planApplyStateOf), which the views show.
+       */
+      readonly appliedBy?: { readonly runId: RunId; readonly at: string };
       /** `at` of `run_started` (an apply run: of `apply_started`). */
       readonly startedAt: string;
       /** `taskId` of `run_started` (an apply run: of `apply_started`). JSON only: the human table does not show it (N-14). */
@@ -448,6 +457,57 @@ export type RunListEntry =
       readonly recordsChanged?: boolean;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
+
+/**
+ * U-16 (UXM-4): what `changes` says of an apply run, whose moves and discards are its plan's
+ * actions, not file writes of its own (it has no write records, so `files` is empty): the plan run
+ * it applied and how many actions it applied (ApplyResult.applied). The app layer's ChangesOutput
+ * carries it as `applyRun`, present for an apply run only; the text is `changes.apply_run`.
+ */
+export interface ChangesApplyRun {
+  readonly planRunId: RunId;
+  readonly actions: number;
+}
+
+/**
+ * U-16 (R-55 M-1, L-1): what became of a plan run's apply, read from the run list (the apply run is
+ * newer, so a list that holds the plan run holds its apply run too, unless that was removed):
+ * - applied: the apply run is done (`runs.plan_applied`)
+ * - unfinished: it ended otherwise (failed, cancelled, budget-exhausted, needs-input), with its
+ *   reason (`runs.plan_apply_unfinished`)
+ * - applying: it has no result yet, running or stopped without one (`runs.plan_applying`)
+ * - reverted: its last revert was complete (`runs.plan_apply_reverted`); after a partial revert some
+ *   changes are left, so it is judged by how it ended
+ * - record_missing: the list has no checked entry for it (removed, or damaged)
+ *   (`runs.plan_apply_missing`)
+ */
+export const PLAN_APPLY_STATES = ["applied", "unfinished", "applying", "reverted", "record_missing"] as const;
+export type PlanApplyState = (typeof PLAN_APPLY_STATES)[number];
+
+/**
+ * R-55 L-1: the states for which `revert` of the plan run tells the person to revert the apply run
+ * (`revert.plan_revert_apply`): its changes are there to undo. Otherwise it says what is so
+ * (`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`).
+ */
+export const PLAN_APPLY_STATES_TO_REVERT = ["applied", "unfinished"] as const satisfies readonly PlanApplyState[];
+
+/**
+ * R-55: the one rule for the runs table, the GUI and revert's guidance. `entry` is a plan run's
+ * entry; null when it names no apply run (RunListEntry.appliedBy absent).
+ */
+export function planApplyStateOf(
+  entry: Extract<RunListEntry, { readonly state: "checked" }>,
+  entries: readonly RunListEntry[],
+): { readonly state: PlanApplyState; readonly applyRunId: RunId; readonly reason?: RunReason } | null {
+  const applyRunId = entry.appliedBy?.runId;
+  if (applyRunId === undefined) return null;
+  const apply = entries.find((other): other is Extract<RunListEntry, { readonly state: "checked" }> => other.state === "checked" && other.runId === applyRunId);
+  if (apply === undefined) return { state: "record_missing", applyRunId };
+  if (apply.reverted?.status === "complete") return { state: "reverted", applyRunId };
+  if (apply.status === null) return { state: "applying", applyRunId };
+  if (apply.status === "done") return { state: "applied", applyRunId };
+  return apply.reason === null ? { state: "unfinished", applyRunId } : { state: "unfinished", applyRunId, reason: apply.reason };
+}
 
 export interface ListRunsRequest {
   /** Real absolute path of the workspace root. */

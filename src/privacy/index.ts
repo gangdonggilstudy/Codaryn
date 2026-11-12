@@ -114,6 +114,35 @@ export function skeletonView(text: string, from: number, to: number): { skeleton
   return { skeleton, at };
 }
 
+/**
+ * R-28b L-1: the most UTF-16 units between two neighbouring characters of a split match (in the
+ * separator or the letters-and-digits pass) that stay inside one token. Where the gap is longer the
+ * span is cut there and each piece is masked on its own: every character of the value is still in a
+ * token, and the text between stays visible (5,000 Hangul characters between two halves of a key
+ * were all hidden). Short splits (a variation selector, `" + "`, an emoji sequence, a line break)
+ * stay one token. Counted in units: a character outside the Basic Multilingual Plane counts two;
+ * the cut falls only between kept characters, so no surrogate pair is cut.
+ */
+export const MAX_MATCH_GAP = 8;
+
+/**
+ * Adds the original span of one match in a view (`at`: the text index of each kept unit, `hit` and
+ * `length` in the view), cut where two neighbouring kept units are more than MAX_MATCH_GAP apart.
+ */
+function pushMatchSpans(found: Interval[], at: readonly number[], hit: number, length: number): void {
+  let start = at[hit] as number;
+  let last = start;
+  for (let unit = hit + 1; unit < hit + length; unit += 1) {
+    const index = at[unit] as number;
+    if (index - last - 1 > MAX_MATCH_GAP) {
+      found.push({ start, end: last + 1 });
+      start = index;
+    }
+    last = index;
+  }
+  found.push({ start, end: last + 1 });
+}
+
 const ID_BYTES = PRIVACY_TOKEN_ID_LENGTH / 2;
 const MAX_ID_ATTEMPTS = 8;
 
@@ -233,7 +262,7 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
       if (view.compact.length < to - from) {
         for (const form of splitForms) {
           for (let hit = view.compact.indexOf(form); hit !== -1; hit = view.compact.indexOf(form, hit + 1)) {
-            found.push({ start: view.at[hit] as number, end: (view.at[hit + form.length - 1] as number) + 1 });
+            pushMatchSpans(found, view.at, hit, form.length);
           }
         }
       }
@@ -244,7 +273,7 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
       if (view.skeleton.length < to - from) {
         for (const form of skeletonForms) {
           for (let hit = view.skeleton.indexOf(form); hit !== -1; hit = view.skeleton.indexOf(form, hit + 1)) {
-            found.push({ start: view.at[hit] as number, end: (view.at[hit + form.length - 1] as number) + 1 });
+            pushMatchSpans(found, view.at, hit, form.length);
           }
         }
       }

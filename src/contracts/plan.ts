@@ -680,7 +680,9 @@ export interface ApplyDeps {
    * - run_end: both again, tier "run" against after_verify's, always recorded, before `run_finished`.
    * A non-empty `changed` is passed to `markRecordsChanged` and ends the apply as
    * `failed`/`state_changed` (at run_end it replaces the status); the moves made stay, and
-   * `codaryn revert` can undo them as for any apply run.
+   * `codaryn revert` can undo them as for any apply run. U-8: a check whose tier state is `limited`,
+   * at any phase, adds the notice kind `plan_records_unchecked` (ApplyResult.noticeKinds); the apply
+   * goes on.
    */
   readonly stateGuard?: StateGuard;
   /**
@@ -741,7 +743,25 @@ export interface ApplyResult {
   readonly protectedChanged?: readonly MaskedText[];
   /** DR-38: as EngineResult.stateChanged, for the apply run's state checks. */
   readonly stateChanged?: readonly MaskedText[];
+  /**
+   * U-8: what the apply tells a person besides its status (APPLY_NOTICE_KINDS), each kind once, in
+   * that list's order. Absent when there is none: an apply whose state checks were complete adds
+   * nothing.
+   */
+  readonly noticeKinds?: readonly ApplyNoticeKind[];
 }
+
+/**
+ * U-8 (R-39 L-1): what an apply tells a person besides its status. Each kind comes with one fixed
+ * notice in ApplyResult.notices (for the JSON and the report) and the text `apply.notice.<kind>` for
+ * the human output; neither changes the status.
+ * - plan_records_unchecked: a state check of the apply was limited (StateComparison.limited: the
+ *   state directory is larger than MAX_STATE_ENTRIES or MAX_STATE_HASH_BYTES), so the plan run's
+ *   records may have been changed without a records-changed mark, and U-1 could not refuse the plan.
+ *   The apply is not refused. A cleanup that makes the state directory smaller lets them be checked.
+ */
+export const APPLY_NOTICE_KINDS = ["plan_records_unchecked"] as const;
+export type ApplyNoticeKind = (typeof APPLY_NOTICE_KINDS)[number];
 
 /** Signature of `applyPlan`, exported by `src/engine/index.ts` (G-B). */
 export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;

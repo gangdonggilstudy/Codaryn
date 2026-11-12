@@ -1207,8 +1207,8 @@ The records of 1 run(s) not reverted, only partly reverted, or whose records can
 
   - 그 다이제스트로 `--confirm`만 주면 `Removed: run records 1, discarded-files folders 0, 15174 bytes`이고, 되돌리지 않은 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
   - 새 미리보기의 다이제스트로 `--include-not-reverted`를 더하면 그 실행도 지워진다.
-  - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was`가 붙는다. 폐기 보관함 줄은 `a discarded-files folder: people's own files are deleted`이다. 끝에는 `People's discarded files are deleted only with --delete-discarded besides.`와 `The records of 1 apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.`가 나온다(main `266c46d`의 실제 출력).
-  - 그 미리보기의 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 0이다(stdout, main `266c46d`):
+  - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was`가 붙는다. 폐기 보관함 줄은 `a discarded-files folder: people's own files are deleted`이다. 끝에는 `People's discarded files are deleted only with --delete-discarded besides.`와 `The records of 1 apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.`가 나온다(main `531c8b8`의 실제 출력).
+  - 그 미리보기의 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 0이다(stdout, main `531c8b8`):
 
     ```
     Removed: run records 0, discarded-files folders 0, 0 bytes
@@ -1218,7 +1218,7 @@ The records of 1 run(s) not reverted, only partly reverted, or whose records can
     - run 20261112T161800Z-72e76eb6: a plan run whose apply run is kept; without it that apply could not be reverted
     ```
 
-  - `--delete-discarded`까지 더하면 `Removed: run records 2, discarded-files folders 1, 13630 bytes`이고 종료 0이다.
+  - `--delete-discarded`까지 더하면 `Removed: run records 2, discarded-files folders 1, 13630 bytes`이고 종료 0이다. 바이트 수는 기록에 든 시각과 걸린 시간에 따라 실행마다 몇 바이트씩 다르다.
   - 실행 기록만 고른 경우(`--discarded-older-than` 없음)와 기록을 확인할 수 없는 적용 실행도 같은 이유로 남는다. 적용을 먼저 되돌리면(`complete`) 그 실행의 폐기 보관함 폴더는 비고, `--older-than 0`의 확인으로 두 실행의 기록이 지워진다. 빈 폴더는 남는다.
 - **지우지 않는 것**: `.codaryn\parked\`(되돌리기가 제자리에 두지 못한 파일), 잠금, `.gitignore`, 돌고 있는 실행(`lock_held`, 적용 중이면 `workspace_locked`), 결과가 없는 실행(`no_result`), 고르지 않은 적용이 쓰는 계획 실행. 상태 디렉터리 안의 링크를 따라 밖을 지우지 않는다.
 - **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`이고 종료 1이다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).

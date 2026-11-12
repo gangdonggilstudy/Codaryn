@@ -321,6 +321,17 @@ export interface EngineResult {
    * number of actions.
    */
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
+  /**
+   * DR-52 (AXM-17): whether masking worked, in counts only (never a value, a place or a length).
+   * `registeredValues`: PrivacyGateway.registeredValues. `maskedPlaces`: the protected tokens
+   * (countPrivacyTokens) in the texts the engine sent to the model (the system text, the task's
+   * message, tool results and repair messages), each text counted once when it is first sent; tokens
+   * the model sent back are not counted. Present only when at least one value was registered (absent
+   * also for a gateway that does not say, and in results written before DR-52). The end summary shows
+   * it with `summary.masking`. Merged only after the security reviewer confirms the counts are no
+   * clue to a secret (DR-52).
+   */
+  readonly masking?: { readonly registeredValues: number; readonly maskedPlaces: number };
   /** G-A: present with reason `awaiting_review` only. The workflow's checklist, masked. */
   readonly review?: { readonly checklist: readonly MaskedText[] };
 }

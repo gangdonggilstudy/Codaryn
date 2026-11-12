@@ -34,6 +34,7 @@ import {
   ALL_TOOL_NAMES,
   TOOL_ERROR_CODES,
   isReasonOfStatus,
+  planApplyStateOf,
   toRunId,
   toSchemaFieldPath,
   MODEL_PROVIDER_NAMES,
@@ -53,7 +54,9 @@ import type {
   JournalEvent,
   MessageCatalog,
   ModelProviderName,
+  PlanApplyState,
   RevertOutput,
+  RunId,
   RunListEntry,
   RunReason,
   RunSummaryContext,
@@ -133,6 +136,16 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
   // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
     isOneOf<AnyToolName>(name, ALL_TOOL_NAMES) ? catalog.format(`tool.${name}`) : catalog.format("progress.unknown_tool");
+
+  // U-16, R-55b M-1b: a plan run's words in the run list by what became of its apply (planApplyStateOf).
+  // An unfinished apply names its reason; without one (the list pairs them, so not expected) it is `?`.
+  const planApplyWords = (applyRunId: RunId, reason: RunReason | undefined): { readonly [S in PlanApplyState]: () => CatalogText } => ({
+    applied: () => catalog.format("runs.plan_applied", { runId: applyRunId }),
+    unfinished: () => catalog.format("runs.plan_apply_unfinished", { runId: applyRunId, reason: reason ?? ("?" as RunReason) }),
+    applying: () => catalog.format("runs.plan_applying", { runId: applyRunId }),
+    reverted: () => catalog.format("runs.plan_apply_reverted", { runId: applyRunId }),
+    record_missing: () => catalog.format("runs.plan_apply_missing", { runId: applyRunId }),
+  });
 
   function diagnosticText(diagnostic: InputDiagnostic): string | null {
     const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
@@ -456,8 +469,6 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           catalog.format("runs.column.status"),
         ],
       ];
-      // R-55 M-1: the list's own entry of each run, so a plan run's row can see how its apply ended.
-      const listed = new Map(runs.map((entry) => [String(entry.runId), entry] as const));
       for (const entry of runs) {
         const runId = toRunId(String(entry.runId)) ?? "?";
         if (entry.state !== "checked") {
@@ -465,25 +476,21 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           continue;
         }
         const pair = validStatusReason(entry.status, entry.reason);
-        // U-16 (UXM-5): a plan run whose plan was applied is not left as needing input; it names the apply run.
+        // U-16 (UXM-5): a plan run whose plan an apply run claimed (appliedBy) is not left as needing
+        // input; it names the apply run. R-55b M-1b: and says what became of that apply, by the
+        // contract's one rule over this list (planApplyStateOf, as revert's guidance judges it):
+        // applied, not finished (with the apply run's reason), still applying or stopped without a
+        // result, applied and reverted since, or the apply run's records gone. The code stays.
         const appliedBy: unknown = entry.appliedBy;
         const appliedRunId: unknown = typeof appliedBy === "object" && appliedBy !== null ? (appliedBy as { runId?: unknown }).runId : undefined;
         const claimedBy = pair?.reason === "plan_pending" && typeof appliedRunId === "string" ? toRunId(appliedRunId) : null;
-        // R-55 M-1: applied.json is written before the first move, so it says the apply began, not that it
-        // ended well. "Applied" only when that apply run is in this list, applied this plan run, ended
-        // done and has no revert (nor a revert record that cannot be read). Otherwise the row keeps the
-        // plan run's own words; the apply run's row says how it ended.
-        const apply = claimedBy === null ? undefined : listed.get(claimedBy);
-        const applyDone =
-          apply !== undefined &&
-          apply.state === "checked" &&
-          apply.kind === "apply" &&
-          apply.planRunId === entry.runId &&
-          apply.status === "done" &&
-          apply.reverted === null &&
-          apply.revertRecordDamaged !== true;
-        const applyRunId = applyDone ? claimedBy : null;
-        const words = pair === null ? null : applyRunId !== null ? catalog.format("runs.plan_applied", { runId: applyRunId }) : catalog.format(`status.${pair.status}`);
+        const judged = claimedBy === null ? null : planApplyStateOf({ ...entry, appliedBy: { runId: claimedBy, at: "" } }, runs);
+        const words =
+          pair === null
+            ? null
+            : judged !== null
+              ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
+              : catalog.format(`status.${pair.status}`);
         let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
         if (entry.reverted !== null && isOneOf(entry.reverted.status, ["complete", "partial"] as const)) {
           status += ` · ${catalog.format("runs.reverted")} (${entry.reverted.status})`;

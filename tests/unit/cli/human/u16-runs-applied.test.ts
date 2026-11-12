@@ -2,7 +2,8 @@
  * U-16 (UXM-5, UXM-15), the human renderer's part:
  * - runsText: a plan run whose plan was applied (RunListEntry.appliedBy) says it was applied, and
  *   by which run (`runs.plan_applied`), in place of the needs-input words; its code stays.
- *   R-55 M-1: only when that apply run is in the list, ended done and was not reverted.
+ *   R-55b M-1b: by what became of that apply, the contract's planApplyStateOf over the list (as
+ *   revert's guidance): applied, not finished (its reason), applying, reverted, records missing.
  * - applySummary: the notice kind plan_task_differs is drawn as `apply.notice.plan_task_differs`.
  * With the real catalog (the texts of unit/U-16-nb-i18n 9085b29).
  * Fake values only.
@@ -10,8 +11,8 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { toRunId } from "../../../../src/contracts/index.js";
-import type { ApplyResult, RunId, RunListEntry, RunsOutput } from "../../../../src/contracts/index.js";
+import { PLAN_APPLY_STATES, planApplyStateOf, toRunId } from "../../../../src/contracts/index.js";
+import type { ApplyResult, MessageLanguage, PlanApplyState, RunId, RunListEntry, RunsOutput } from "../../../../src/contracts/index.js";
 import { createHumanOutput } from "../../../../src/cli/human/index.js";
 import { createMessageCatalog } from "../../../../src/i18n/index.js";
 
@@ -61,29 +62,92 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
   });
 });
 
-describe("R-55 M-1: 'applied' only when the apply run ended done and was not reverted", () => {
-  const out = createHumanOutput(real);
-  const needsInput = `${real.format("status.needs-input")} (needs-input/plan_pending)`;
-  const cases: [string, RunListEntry[]][] = [
-    ["failed part way (apply_incomplete, 1 of 3 moved)", [applyEntry({ status: "failed", reason: "apply_incomplete" })]],
-    ["cancelled while checking", [applyEntry({ status: "cancelled", reason: "cancelled" })]],
-    ["still going (no result yet)", [applyEntry({ status: null, reason: null, changes: null })]],
-    ["reverted", [applyEntry({ reverted: { at: "2026-11-12T04:00:00.000Z", status: "complete" } })]],
-    ["partly reverted", [applyEntry({ reverted: { at: "2026-11-12T04:00:00.000Z", status: "partial" } })]],
-    ["its records removed (not in the list)", []],
-    ["its records cannot be checked (damaged)", [{ state: "damaged", runId: APPLY } as unknown as RunListEntry]],
-    ["an entry of that id that names another plan run", [applyEntry({ planRunId: "20261112T020000Z-00000000" })]],
-    ["an entry of that id that is not an apply run", [applyEntry({ kind: "run", planRunId: undefined })]],
+describe("R-55b M-1b: the plan row says what became of its apply, in both languages", () => {
+  const REVERTED = { at: "2026-11-12T04:00:00.000Z", status: "complete" };
+  // [case, the list's other entries, the state, the reason the words name]
+  const cases: [string, RunListEntry[], PlanApplyState, string?][] = [
+    ["done", [applyEntry()], "applied"],
+    ["done, then partly reverted (some changes are left: by how it ended)", [applyEntry({ reverted: { ...REVERTED, status: "partial" } })], "applied"],
+    ["failed part way (apply_incomplete, 1 of 3 moved)", [applyEntry({ status: "failed", reason: "apply_incomplete" })], "unfinished", "apply_incomplete"],
+    ["cancelled while checking", [applyEntry({ status: "cancelled", reason: "cancelled" })], "unfinished", "cancelled"],
+    ["out of time while checking", [applyEntry({ status: "budget-exhausted", reason: "max_duration" })], "unfinished", "max_duration"],
+    ["still going, or stopped without a result", [applyEntry({ status: null, reason: null, changes: null })], "applying"],
+    ["reverted", [applyEntry({ reverted: REVERTED })], "reverted"],
+    ["failed part way, then reverted", [applyEntry({ status: "failed", reason: "apply_incomplete", reverted: REVERTED })], "reverted"],
+    ["its records removed (not in the list)", [], "record_missing"],
+    ["its records cannot be checked (damaged)", [{ state: "damaged", runId: APPLY } as unknown as RunListEntry], "record_missing"],
   ];
-  for (const [name, others] of cases) {
-    test(`${name}: the plan row does not say applied`, () => {
-      const status = statusOf(out.runsText(listing(...others, planEntry(APPLIED))));
-      assert.equal(status, needsInput, status);
-    });
+  const wordsOf = (catalog: ReturnType<typeof createMessageCatalog>, state: PlanApplyState, reason?: string): string => {
+    switch (state) {
+      case "applied":
+        return catalog.format("runs.plan_applied", { runId: APPLY });
+      case "unfinished":
+        return catalog.format("runs.plan_apply_unfinished", { runId: APPLY, reason: reason as never });
+      case "applying":
+        return catalog.format("runs.plan_applying", { runId: APPLY });
+      case "reverted":
+        return catalog.format("runs.plan_apply_reverted", { runId: APPLY });
+      case "record_missing":
+        return catalog.format("runs.plan_apply_missing", { runId: APPLY });
+    }
+  };
+
+  test("the table has all five states", () => {
+    assert.deepEqual([...new Set(cases.map(([, , state]) => state))].sort(), [...PLAN_APPLY_STATES].sort());
+  });
+
+  for (const language of ["en", "ko"] as const satisfies readonly MessageLanguage[]) {
+    const catalog = createMessageCatalog(language);
+    const out = createHumanOutput(catalog);
+    for (const [name, others, state, reason] of cases) {
+      test(`${language}, ${name}: ${state}; the code stays; the apply run's own row is as before`, () => {
+        const text = out.runsText(listing(...others, planEntry(APPLIED)));
+        const status = statusOf(text);
+        assert.equal(status, `${wordsOf(catalog, state, reason)} (needs-input/plan_pending)`, status);
+        assert.ok(status.includes(APPLY), status);
+        if (reason !== undefined) assert.ok(status.includes(reason), status);
+        assert.equal(status.includes(catalog.format("status.needs-input")), false, status);
+        // The apply run's row does not depend on the plan run's.
+        const applyRow = (rows: string): string => (rows.split(String.fromCharCode(10)).find((row) => row.startsWith(APPLY)) ?? "").replace(/\s+/g, " ");
+        if (others.length > 0) assert.equal(applyRow(text), applyRow(out.runsText(listing(...others))));
+      });
+    }
   }
 
-  test("done and not reverted: applied, as before", () => {
-    assert.equal(statusOf(out.runsText(listing(applyEntry(), planEntry(APPLIED)))), `${real.format("runs.plan_applied", { runId: APPLY })} (needs-input/plan_pending)`);
+  test("the two languages say it in their own words", () => {
+    const en = createHumanOutput(createMessageCatalog("en"));
+    const ko = createHumanOutput(createMessageCatalog("ko"));
+    for (const [name, others] of cases) {
+      const words = [en, ko].map((out) => statusOf(out.runsText(listing(...others, planEntry(APPLIED)))));
+      assert.notEqual(words[0], words[1], name);
+      assert.match(words[1] ?? "", /\p{Script=Hangul}/u, name);
+    }
+  });
+
+  test("the same rule as revert's guidance: the row follows planApplyStateOf, whatever the list holds", () => {
+    const out = createHumanOutput(real);
+    const extra: RunListEntry[][] = [
+      [applyEntry({ planRunId: "20261112T020000Z-00000000" })],
+      [applyEntry({ kind: "run", planRunId: undefined })],
+      [applyEntry({ revertRecordDamaged: true })],
+      [applyEntry({ status: "needs-input", reason: "consent_required" })],
+    ];
+    for (const others of [...cases.map(([, list]) => list), ...extra]) {
+      const plan = planEntry(APPLIED) as Extract<RunListEntry, { readonly state: "checked" }>;
+      const judged = planApplyStateOf(plan, [...others, plan]);
+      assert.notEqual(judged, null);
+      const expected = `${wordsOf(real, judged?.state ?? "applied", judged?.reason)} (needs-input/plan_pending)`;
+      assert.equal(statusOf(out.runsText(listing(...others, plan))), expected, JSON.stringify(others));
+    }
+  });
+
+  test("a run that is not a plan run, and a plan run no apply claimed: as before", () => {
+    const out = createHumanOutput(real);
+    for (const others of cases.map(([, list]) => list)) {
+      assert.equal(statusOf(out.runsText(listing(...others, planEntry({})))), `${real.format("status.needs-input")} (needs-input/plan_pending)`);
+      const done = planEntry({ status: "done", reason: "verified", changes: 2, ...APPLIED });
+      assert.equal(statusOf(out.runsText(listing(...others, done))), `${real.format("status.done")} (done/verified)`);
+    }
   });
 });
 

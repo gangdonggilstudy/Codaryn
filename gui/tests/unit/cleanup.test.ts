@@ -224,7 +224,7 @@ test("cleanup (DR-44): the screen asks apart about not reverted runs and discard
     assert.deepEqual(calls.find(([name]) => name === "previewCleanup")?.[1], ["1".repeat(32), { runs: { olderThanDays: 0, runIds: [RUN_C] }, discarded: { runIds: [APPLY_B] } }]);
     assert.ok(byId("cleanup-plan-not-reverted")?.textContent.includes("2 of them are runs that were not reverted, only partly, or whose records cannot be checked"), "DR-44 (a): asked apart");
     assert.ok(byId("cleanup-plan-discarded")?.textContent.includes("deleted for good"));
-    assert.ok(byId("cleanup-plan-discarded-left")?.textContent.includes("If their discard boxes stay, a revert can no longer put those files back"), "DR-44 (c)");
+    assert.ok(byId("cleanup-plan-discarded-left")?.textContent.includes("Their records are kept unless those discarded files are deleted in this cleanup too"), "DR-44 (c), U-13");
     assert.ok(byId("cleanup-plan-leftovers") !== undefined);
     assert.equal(root.findAll((e) => e.getAttribute("data-target") === "leftover").length, 1);
 

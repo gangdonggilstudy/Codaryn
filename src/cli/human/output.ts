@@ -202,12 +202,18 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           ? catalog.format("summary.no_verifiers")
           : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
       );
-      out.push(catalog.format("summary.changes", { count: changes.length }));
-      for (const change of changes.slice(0, SUMMARY_MAX_PATHS)) {
-        const word = catalog.format(change.created ? "progress.file_created" : "progress.file_changed");
-        out.push(`  ${shownPath(String(change.path))} (${word})`);
+      // N-23(d): files, not change records. A path's first record says whether the run created it.
+      const files = new Map<string, boolean>();
+      for (const change of changes) {
+        const key = String(change.path);
+        if (!files.has(key)) files.set(key, change.created === true);
       }
-      if (changes.length > SUMMARY_MAX_PATHS) out.push(moreLine(changes.length - SUMMARY_MAX_PATHS));
+      out.push(catalog.format("summary.changes", { count: files.size }));
+      for (const [file, created] of [...files].slice(0, SUMMARY_MAX_PATHS)) {
+        const word = catalog.format(created ? "progress.file_created" : "progress.file_changed");
+        out.push(`  ${shownPath(file)} (${word})`);
+      }
+      if (files.size > SUMMARY_MAX_PATHS) out.push(moreLine(files.size - SUMMARY_MAX_PATHS));
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) {

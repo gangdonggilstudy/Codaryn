@@ -203,6 +203,18 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
     assert.equal(none.includes("summary.denied"), false);
   });
 
+  test("N-23(d): changed files are counted by distinct path, one line per path, as the first record says", () => {
+    const changes = [
+      { path: masked("summary.md"), previousHash: null, newHash: "c".repeat(64), created: true },
+      { path: masked("summary.md"), previousHash: "c".repeat(64), newHash: "d".repeat(64), created: false },
+      { path: masked("README.md"), previousHash: "a".repeat(64), newHash: "b".repeat(64), created: false },
+      { path: masked("summary.md"), previousHash: "d".repeat(64), newHash: "e".repeat(64), created: false },
+    ];
+    const text = createHumanOutput(strictCatalog()).runSummary(result({ changes }), CONTEXT);
+    assert.ok(text.includes("[summary.changes count=2]\n  summary.md ([progress.file_created])\n  README.md ([progress.file_changed])\n"), text);
+    assert.equal(text.split("summary.md").length, 2, "one line for summary.md");
+  });
+
   test("paths are cleaned and cut, long lists are counted, and a bad run id shows no command", () => {
     const changes = Array.from({ length: 7 }, (_, index) => ({
       path: masked(index === 0 ? `a\u001b[2J${KEY_SHAPED}` : `f${index}.md`),

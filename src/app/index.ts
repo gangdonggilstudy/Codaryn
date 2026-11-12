@@ -2,18 +2,33 @@
  * Public surface of the app layer (docs/design/adapter-contract.md). Adapters import from here.
  */
 
-export { createCodarynApp, runArguments } from "./app.js";
+export { PROBE_GOAL, createCodarynApp, runArguments, runRequestOf } from "./app.js";
 export type { AppHooks } from "./app.js";
 export { copyEnvironment, createNodeAppEnvironment, loadVarsInto, lookupEnv, readVarsFileSync } from "./environment.js";
 export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } from "./errors.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {
+  AppliedActionRecord,
+  ApplyJournalEvent,
+  ApplyJournalRecord,
+  ApplyReason,
+  ApplyResult,
+  ApprovalChannel,
+  MaskedPlanAction,
+  PlanItemProblem,
+  PlanOutput,
+  PlanStatus,
+  ReviewOutput,
+  ReviewVerdict,
+} from "./general-tasks.js";
+export type {
   AppCallOutcome,
   AppEnvironment,
   AppError,
+  ApplyEvent,
   ApplyHandle,
+  ApplyObserver,
   ApplyPlanRequest,
-  ApplyResultView,
   ChangedFileUnavailable,
   ChangedFileView,
   ChangesOutput,
@@ -22,10 +37,11 @@ export type {
   ConfirmAnswer,
   ConfirmRequest,
   DoctorRequest,
-  PlanActionView,
-  PlanView,
+  ListRunsRequest,
+  PlanRequest,
   ReportRequest,
-  ReviewOutputView,
+  ResolvedRun,
+  ResolveRunRequest,
   ReviewRequest,
   RevertRequest,
   RunEvent,
@@ -34,4 +50,5 @@ export type {
   RunOutcome,
   StartOutcome,
   StartRunRequest,
+  TaskForm,
 } from "./types.js";

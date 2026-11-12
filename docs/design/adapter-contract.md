@@ -447,7 +447,9 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
 - **고르기와 검사.** `run.ts`와 같은 순서로 CLI 함수를 부른다. 앱 계층이 값을 따로 판정하지 않는다. CLI에 공용 "설정 파일 읽기" 함수가 생기면 그것 하나로 바꾼다.
   1. `chooseConfigFile`: `--config` → `CODARYN_CONFIG` → N-1 기본 위치(S-5).
   2. 읽기: 없는 파일은 기본 위치일 때만 "설정 없음"이다.
-  3. 원문 키 검사(C-1, S-6).
+  3. 원문 키 검사(C-1, S-6). 그 앞에 CLI와 같은 크기 상한을 둔다(DR-42 (d), DR-40 (b)).
+     - BOM을 뺀 글이 `MAX_INPUT_FILE_BYTES`(1 MiB, UTF-8 바이트)를 넘으면 CLI의 고정 문구로 `invalid_config`다. 다른 검사는 그 글을 읽지 않는다.
+     - 설정 변경 제안·적용도 쓸 글에 같은 상한을 둔다. CLI가 거부할 파일을 쓰지 않는다.
   4. JSON 해석. 문법 오류면 줄과 열을 준다.
   5. 값 키 검사(깊이 64).
   6. `parseConfig`. 필드 위치를 준다(N-6).
@@ -468,6 +470,11 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 경로 토큰 복원, 계획 동작 허용
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
+      - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).
+        - 기본 주소를 적기만 한 변경이나, 최상위 주소를 같은 값 그대로 `providers.anthropic`으로 옮긴 변경은 넓히기가 아니다.
+        - `providers.anthropic`이 있으면 실행이 최상위 주소를 읽지 않으므로 그것만 바꾼 변경도 아니다.
+        - 환경 변수의 주소는 설정 파일 밖이다(R-27 I3).
+      - 프로필의 제공자(SP-D10)가 그 프로필의 간편 실행을 다른 제공자로 보내면 `provider_changed`(`profiles.<이름>.provider`)도 준다(R-27 I4).
     - 작업 종류 자기 규칙의 대체(GUI F-5)
       - 간편 형식에서 작업 종류의 `policy`·`verifiers`는 설정에 그것이 없을 때만 쓰인다(CLI `underDefinition`).
       - 그래서 설정의 `policy`나 `verifiers`가 처음 생기거나 없어지면, 자기 규칙을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)의 규칙을 그 실행이 보는 대로 전과 후로 비교한다.

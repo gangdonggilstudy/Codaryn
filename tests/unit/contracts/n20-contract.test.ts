@@ -99,3 +99,10 @@ test("N-22: rejected calls, already reverted files and the doctor hint list", ()
     "model_list_failed",
   ]);
 });
+
+test("N-21: a doctor text never takes catalog text, so the JSON holds codes and numbers only", () => {
+  for (const id of MESSAGE_IDS) {
+    if (!id.startsWith("doctor.") || id === "doctor.footer") continue;
+    for (const kind of Object.values(messageParams(id))) assert.notEqual(kind, "text", id);
+  }
+});

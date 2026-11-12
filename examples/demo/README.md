@@ -17,6 +17,8 @@ API 키와 네트워크 없이 Codaryn의 한 실행을 처음부터 끝까지 �
 5. '## 할 일' 절을 더한다.
 6. 완료를 알린다 → 검증기가 통과한다 → `done`.
 
-실행 방법과 결과 읽는 법은 [사용 안내 3절](../../docs/usage.md#3-키-없이-체험하기)에 있다. 이 폴더를 그대로 실행하지 말고 저장소 밖으로 복사해서 실행한다. 저장소 안에서는 `workspace_is_install_dir`로 거부된다.
+실행 방법과 결과 읽는 법은 [사용 안내 3절](../../docs/usage.md#3-키-없이-체험하기)에 있다. 순서는 `doctor` → `run` → `runs` → `report --run latest` → `revert --run latest --dry-run` → `revert --run latest`다. 이 폴더를 그대로 실행하지 말고 저장소 밖으로 복사해서 실행한다. 저장소 안에서는 `workspace_is_install_dir`로 거부된다.
+
+키도 설정 파일도 필요 없다. `init`으로 기본 설정을 만든 뒤에 실행해도 결과는 같고, 진행 줄과 끝 요약에 기본 설정을 썼다는 줄이 하나씩 더 나온다. 사용 안내의 출력 예시는 `CODARYN_LANG=en`으로 실행한 것이다.
 
 `script.json`의 두 번째 `write_file`에 적힌 `expectedHash`는 세 번째 단계가 만든 `summary.md` 내용의 SHA-256이다. 대본의 문자열을 고치면 이 값도 다시 계산해야 한다.

@@ -175,6 +175,21 @@ describe("applySummary (G-A)", () => {
   });
 });
 
+describe("records a renderer does not show", () => {
+  test("R-9 I-4: a plan_item_started record (not an ApplyJournalEvent) gets no line and no exception", () => {
+    const human = createHumanOutput(stand_in());
+    const started = { type: "plan_item_started", index: 0, action: { kind: "discard", path: masked("old.log"), sha256: HASH } } as unknown as ApplyJournalEvent;
+    assert.equal(human.applyProgressLine?.(started), null);
+  });
+
+  test("a record type the renderer does not know gets null from either renderer, never an exception", () => {
+    const human = createHumanOutput(stand_in());
+    const unknown = { type: "a_later_record", value: SECRET };
+    assert.equal(human.applyProgressLine?.(unknown as unknown as ApplyJournalEvent), null);
+    assert.equal(human.progressLine(unknown as unknown as Parameters<HumanOutput["progressLine"]>[0]), null);
+  });
+});
+
 describe("DR-21 unsafe moves and the plan total (renderer state)", () => {
   const started = (extra: Record<string, unknown> = {}): ApplyJournalEvent =>
     ({ type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "t", digest: DIGEST, approval: "cli-flag", actions: 5, maxDurationMs: 1000, ...extra }) as ApplyJournalEvent;

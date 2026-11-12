@@ -335,6 +335,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         case "tool_result":
           line = null;
           break;
+        default:
+          // A record this renderer does not know (a later record type) gets no line, never an exception.
+          line = null;
       }
       return line === null ? null : finalLine(line);
     },
@@ -484,6 +487,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         case "integrity_checked":
         case "run_finished":
           return output.progressLine(event);
+        default:
+          // R-9 I-4: plan_item_started is a recovery record, not progress, and any record this
+          // renderer does not know gets no line, never an exception.
+          line = null;
       }
       return line === null ? null : finalLine(line);
     },

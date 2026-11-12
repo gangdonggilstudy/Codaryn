@@ -329,10 +329,12 @@ export interface EngineResult {
    * reply (`stop: "final"`, no tool calls). Absent when the model was asked again after it or the
    * run ended without a reply (a limit, a model error, a cancel). It is the model's own words, not a
    * verified fact; every view shows it after a label that says so (`summary.final_message`,
-   * `report.final_message`). Its text is the recorded `model_response.text` (registered values
-   * masked), with line breaks as LF and tabs kept, every other control and invisible character
-   * (KEY_INVISIBLE_PATTERN_SOURCE) left out, and key shapes (API_KEY_MASK_PATTERN_SOURCES) shown as
-   * `[key]`; then cut, never inside a protected token or a `[key]`, to at most
+   * `report.final_message`). Its text is the recorded `model_response.text` made safe by
+   * safeModelText (R-52): line breaks as LF and tabs kept and every other control and invisible
+   * character (KEY_INVISIBLE_PATTERN_SOURCE) left out first, then masked again by the run's gateway
+   * (a registered value those characters split is found whole), then key shapes
+   * (API_KEY_MASK_PATTERN_SOURCES) shown as `[key]`, also across LF and TAB; none when masking
+   * fails. Then cut, never inside a protected token or a `[key]`, to at most
    * MAX_FINAL_MESSAGE_CHARS characters (code points), `truncated` true then. Absent also when that
    * text is empty or only white space, and for a plan run (reason `plan_pending`: its place is the
    * plan's summary, PlanOutput.summary). Results written before DR-47 do not have it.

@@ -5,7 +5,13 @@
  * functions give the same answers in time linear in the text's length.
  */
 
-import { ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE, OPENAI_LEGACY_KEY_PATTERN_SOURCE, OPENAI_PREFIXED_KEY_PATTERN_SOURCE } from "./config.js";
+import {
+  ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE,
+  API_KEY_MASK_PATTERN_SOURCES,
+  OPENAI_LEGACY_KEY_PATTERN_SOURCE,
+  OPENAI_PREFIXED_KEY_PATTERN_SOURCE,
+} from "./config.js";
+import type { MaskOutcome } from "./privacy.js";
 
 /**
  * The run ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE needs: the prefix at a word start and 32 or more key
@@ -140,4 +146,66 @@ export function createKeyValueCheck(values: readonly string[]): (text: string) =
 export function createKeyRefusalCheck(values: readonly string[]): (text: string) => boolean {
   const holdsValue = createKeyValueCheck(values);
   return (text: string): boolean => holdsValue(text) || holdsRefusedKeyShape(text);
+}
+
+/** What a hidden key shape becomes in model text shown to people (as the CLI's hideKeys writes it). */
+export const HIDDEN_KEY_MARKER = "[key]";
+
+const KEY_MASK_SHAPES = API_KEY_MASK_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
+/** One control or invisible character (KEY_INVISIBLE_PATTERN_SOURCE), for a single code point. */
+const INVISIBLE_ONE = new RegExp(`^${KEY_INVISIBLE_PATTERN_SOURCE}$`, "u");
+
+/**
+ * Key shapes (API_KEY_MASK_PATTERN_SOURCES) as HIDDEN_KEY_MARKER, found also across LF and TAB:
+ * they are looked for in the text with every control and invisible character skipped, as the CLI's
+ * hideKeys does, and the span hidden covers the skipped characters too. Visible white space is not
+ * skipped: a key glued to the next word would hide that word as well. A word right after a key
+ * across a LF or a TAB is hidden with it, since it cannot be told from the key's rest (more is
+ * hidden, never less).
+ */
+function hideKeyShapes(text: string): string {
+  const kept: number[] = [];
+  let stripped = "";
+  let index = 0;
+  for (const char of text) {
+    if (!INVISIBLE_ONE.test(char)) {
+      stripped += char;
+      for (let unit = 0; unit < char.length; unit += 1) kept.push(index + unit);
+    }
+    index += char.length;
+  }
+  const spans: [number, number][] = [];
+  for (const match of stripped.matchAll(new RegExp(KEY_MASK_SHAPES, "g"))) {
+    const from = kept[match.index];
+    const to = kept[match.index + match[0].length - 1];
+    if (from !== undefined && to !== undefined) spans.push([from, to + 1]);
+  }
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of spans) {
+    if (end <= cursor) continue;
+    if (start >= cursor) out += `${text.slice(cursor, start)}${HIDDEN_KEY_MARKER}`;
+    cursor = end;
+  }
+  return out + text.slice(cursor);
+}
+
+/**
+ * R-52 (U-21, R52-M1, R52-M2): model text made safe to show people, in this order:
+ * 1. line breaks as LF (CR LF and a lone CR), TAB kept, every other control and invisible character
+ *    (KEY_INVISIBLE_PATTERN_SOURCE) left out, first, so nothing left out afterwards can join a value;
+ * 2. masked by the run's gateway (`mask`): a registered value those characters split is whole now
+ *    and found as the gateway finds any (exactly, and split by key separators from
+ *    MIN_SPLIT_MATCH_LENGTH code points, compactKeyText's rule); tokens already there stay;
+ * 3. key shapes hidden, also across LF and TAB (hideKeyShapes).
+ * Null when masking fails (fail closed: show nothing). EngineResult.finalMessage is made with it.
+ */
+export function safeModelText(text: string, mask: (text: string) => MaskOutcome): string | null {
+  let seen = "";
+  for (const char of text.replace(/\r\n?/g, "\n")) {
+    if (char === "\n" || char === "\t" || !INVISIBLE_ONE.test(char)) seen += char;
+  }
+  const masked = mask(seen);
+  if (!masked.ok) return null;
+  return hideKeyShapes(masked.text);
 }

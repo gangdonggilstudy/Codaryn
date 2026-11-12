@@ -9,13 +9,12 @@
  * (app.ts), with the options main.ts gives it.
  */
 
-import { lstat } from "node:fs/promises";
 import { LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT } from "../contracts/index.js";
 import type { RunListing, RunsOutput } from "../contracts/index.js";
 import { listRuns as storeListRuns } from "../store/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { resolveWorkspaceRoot } from "../cli/runs.js";
-import { resolveRunReference } from "../cli/run-ref.js";
+import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "../cli/run-ref.js";
 import { knownKeyValues } from "../cli/settings.js";
 import { hideKeys } from "../cli/text-safety.js";
 import type { KnownKeys } from "../cli/security/index.js";
@@ -37,16 +36,6 @@ export async function workspaceRootOf(workspace: string, cwd: string): Promise<R
   return { ok: true, value: root.value };
 }
 
-/** True when anything (file, directory, link) is at the path. Never throws. */
-async function exists(target: string): Promise<boolean> {
-  try {
-    await lstat(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * A run id as given, or the id `latest` names, by the CLI's one rule (resolveRunReference: N-7,
  * N-18, N-23, and DR-48 (b) `run_in_progress` while the newest run is going). A given id is used as
@@ -56,7 +45,8 @@ export async function runIdOf(workspaceRoot: string, run: string): Promise<Resol
   if (run !== LATEST_RUN_ALIAS && (!RUN_ID_PATTERN.test(run) || run.includes(".."))) {
     return { ok: false, error: appError("invalid_arguments", RUN_ID_MESSAGE) };
   }
-  const resolved = await resolveRunReference(workspaceRoot, run, { exists, listRuns: storeListRuns });
+  // The CLI's shared deps (U-22, R-51 M-2): the store's functions, no inspect (a given id is used as it is).
+  const resolved = await resolveRunReference(workspaceRoot, run, STORE_RUN_REFERENCE_DEPS);
   if (!resolved.ok) return { ok: false, error: appError(resolved.code, resolved.message) };
   return { ok: true, value: resolved.runId };
 }

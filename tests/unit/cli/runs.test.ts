@@ -540,6 +540,7 @@ function stubHuman(seen: RunsOutput[]): HumanOutput {
     runSummary: unused,
     progressLine: unused,
     revertSummary: unused,
+    latestChosen: unused,
     runsText(output) {
       seen.push(output);
       return `runs ${output.runs.length} ${KEY_SHAPED}\n`;

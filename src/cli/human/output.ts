@@ -20,6 +20,7 @@ import {
   MODEL_ERROR_KINDS,
   PERMISSION_KINDS,
   POLICY_DENIAL_CODES,
+  REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
   RUN_REASONS,
   TERMINAL_RUN_STATUSES,
@@ -215,13 +216,17 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (files.size > SUMMARY_MAX_PATHS) out.push(moreLine(files.size - SUMMARY_MAX_PATHS));
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
-      if (denied > 0) {
-        out.push(catalog.format("summary.denied", { count: denied }));
-        out.push(catalog.format("summary.denied_hint"));
+      if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
+      // it points where the run's policy came from.
+      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
+        out.push(catalog.format(context.policySource === "task" ? "summary.denied_hint_task" : "summary.denied_hint"));
       }
       const usage = result.usage;
       if (isCount(usage?.modelTurns) && isCount(usage.toolCalls) && isCount(usage.durationMs)) {
-        out.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, durationMs: usage.durationMs }));
+        // N-20: seconds with one decimal, rounded from the recorded milliseconds.
+        const seconds = Math.round(usage.durationMs / 100) / 10;
+        out.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, seconds }));
       }
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
@@ -259,6 +264,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             line = `${catalog.format("progress.tool_allowed", { tool })} (${name})`;
           } else if (isOneOf(event.permission, PERMISSION_KINDS) && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {
             line = catalog.format("progress.tool_denied", { tool, permission: event.permission, code: event.code });
+          } else if (event.permission === null && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {
+            // N-22: stopped by a check of the call itself (validate, restore), not by a permission.
+            line = catalog.format("progress.tool_rejected", { tool, code: event.code });
           } else {
             line = `${tool} (${token(event.permission ?? "check")}/${token(event.code ?? "none")})`;
           }
@@ -317,7 +325,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const out = [`${HUMAN_PREFIX}${withCode(catalog.format(title, { count: reverted.length }), token(output.status))}`];
       for (const file of reverted.slice(0, REVERT_MAX_LISTED)) {
         const action: unknown = file.action;
-        const word = isOneOf(action, ["restored", "deleted"] as const) ? catalog.format(`revert.action.${action}`) : "?";
+        const word = isOneOf(action, REVERT_ACTIONS) ? catalog.format(`revert.action.${action}`) : "?";
         out.push(`  ${shownPath(String(file.path))} — ${word}`);
       }
       if (reverted.length > REVERT_MAX_LISTED) out.push(moreLine(reverted.length - REVERT_MAX_LISTED));
@@ -339,6 +347,14 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);
+    },
+
+    latestChosen(entry: Extract<RunListEntry, { readonly state: "checked" }>): string {
+      const runId = toRunId(String(entry.runId));
+      if (runId === null) return lines([`${HUMAN_PREFIX}?`]);
+      const time = localTime(entry.startedAt);
+      const chosen = catalog.format("latest.chosen", { runId });
+      return lines([`${HUMAN_PREFIX}${chosen}${time === null ? "" : ` (${catalog.format("runs.column.started")} ${time})`}`]);
     },
 
     runsText(output: RunsOutput): string {

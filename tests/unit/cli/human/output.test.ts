@@ -57,6 +57,8 @@ const KIND_CHECKS: Record<string, (value: unknown, produced: Set<string>) => boo
   runId: (value) => typeof value === "string" && toRunId(value) !== null,
   text: (value, produced) => typeof value === "string" && produced.has(value),
   location: (value) => [...Object.values(DEFAULT_CONFIG_DISPLAY), "--config", "CODARYN_CONFIG"].includes(value as string),
+  seconds: (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && Math.abs(value * 10 - Math.round(value * 10)) < 1e-6,
+  language: (value) => value === "ko" || value === "en",
 };
 
 /** A catalog that checks every call against the contract and renders `[id k=v]`. `words` overrides some ids. */
@@ -113,7 +115,7 @@ function result(extra: Partial<EngineResult> = {}): EngineResult {
   };
 }
 
-const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0 };
+const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "config" };
 
 describe("HumanOutput.error (N-5, N-15)", () => {
   test("what, the diagnostic, how to fix and the code; the English message is not shown", () => {
@@ -186,7 +188,7 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
         "[summary.changes count=2]",
         "  README.md ([progress.file_changed])",
         "  docs/new.md ([progress.file_created])",
-        "[summary.usage turns=4 toolCalls=2 durationMs=78]",
+        "[summary.usage turns=4 toolCalls=2 seconds=0.1]",
         "[advice.verified]",
         `[summary.run_id runId=${RUN}]`,
         `[summary.next_report runId=${RUN}]`,
@@ -203,6 +205,8 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
       configDefault: "%APPDATA%\\Codaryn\\config.json",
       profileApplied: true,
       deniedToolCalls: 3,
+      deniedCommandCalls: 1,
+      policySource: "config",
     });
     assert.ok(text.includes("[summary.no_verifiers]\n[summary.changes count=0]\n[summary.denied count=3]\n[summary.denied_hint]\n[summary.usage "));
     assert.equal(text.split("[summary.denied_hint]").length, 2, "the hint once");
@@ -224,6 +228,29 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
     const text = createHumanOutput(strictCatalog()).runSummary(result({ changes }), CONTEXT);
     assert.ok(text.includes("[summary.changes count=2]\n  summary.md ([progress.file_created])\n  README.md ([progress.file_changed])\n"), text);
     assert.equal(text.split("summary.md").length, 2, "one line for summary.md");
+  });
+
+  test("N-23(e): the hint to allow a command comes only with command denials, and points at the task file for a task run", () => {
+    const human = createHumanOutput(strictCatalog());
+    const pathOnly = human.runSummary(result(), { ...CONTEXT, deniedToolCalls: 2, deniedCommandCalls: 0 });
+    assert.ok(pathOnly.includes("[summary.denied count=2]\n"));
+    assert.equal(pathOnly.includes("denied_hint"), false, "no command was denied");
+    const task = human.runSummary(result(), { ...CONTEXT, workspaceForm: "task", policySource: "task", deniedToolCalls: 2, deniedCommandCalls: 1 });
+    assert.ok(task.includes("[summary.denied count=2]\n[summary.denied_hint_task]\n"), task);
+    assert.equal(task.includes("[summary.denied_hint]"), false);
+    const config = human.runSummary(result(), { ...CONTEXT, deniedToolCalls: 1, deniedCommandCalls: 1 });
+    assert.ok(config.includes("[summary.denied count=1]\n[summary.denied_hint]\n"));
+  });
+
+  test("N-20: usage is given in seconds with one decimal, rounded from milliseconds", () => {
+    const human = createHumanOutput(strictCatalog());
+    const usage = (durationMs: number): string =>
+      human.runSummary(result({ usage: { modelTurns: 1, toolCalls: 0, inputTokens: null, outputTokens: null, durationMs } }), CONTEXT).split("\n").find((line) => line.startsWith("[summary.usage")) ?? "";
+    assert.equal(usage(0), "[summary.usage turns=1 toolCalls=0 seconds=0]");
+    assert.equal(usage(4210), "[summary.usage turns=1 toolCalls=0 seconds=4.2]");
+    assert.equal(usage(4250), "[summary.usage turns=1 toolCalls=0 seconds=4.3]");
+    assert.equal(usage(700), "[summary.usage turns=1 toolCalls=0 seconds=0.7]");
+    assert.equal(usage(123456), "[summary.usage turns=1 toolCalls=0 seconds=123.5]");
   });
 
   test("paths are cleaned and cut, long lists are counted, and a bad run id shows no command", () => {
@@ -257,7 +284,9 @@ describe("HumanOutput.progressLine (N-5, N-14)", () => {
         { type: "tool_decision", callId: "c", tool: "run_command", stage: "policy_effective", allowed: false, permission: "command", code: "command_not_allowed" },
         "[progress.tool_denied tool=[tool.run_command] permission=command code=command_not_allowed]",
       ],
-      [{ type: "tool_decision", callId: "c", tool: SECRET, stage: "validate", allowed: false, permission: null, code: "unknown_tool" }, "[progress.unknown_tool] (check/unknown_tool)"],
+      [{ type: "tool_decision", callId: "c", tool: SECRET, stage: "validate", allowed: false, permission: null, code: "unknown_tool" }, "[progress.tool_rejected tool=[progress.unknown_tool] code=unknown_tool]"],
+      [{ type: "tool_decision", callId: "c", tool: "write_file", stage: "validate", allowed: false, permission: null, code: "invalid_args" }, "[progress.tool_rejected tool=[tool.write_file] code=invalid_args]"],
+      [{ type: "tool_decision", callId: "c", tool: "write_file", stage: "validate", allowed: false, permission: null, code: null }, "[tool.write_file] (check/none)"],
       [{ type: "file_changed", callId: "c", path: masked("notes.txt"), previousHash: null, newHash: "c".repeat(64), created: true }, "[progress.file_created] notes.txt"],
       [verifier(`v-${SECRET}`, "fail"), "[progress.verifier number=1 outcome=[outcome.fail]] (fail)"],
       [verifier("other", "pass"), "[progress.verifier number=2 outcome=[outcome.pass]] (pass)"],
@@ -358,10 +387,41 @@ describe("HumanOutput.revertSummary (N-7)", () => {
     assert.ok(runs.split("\n")[1]?.includes("  ?  "), runs);
   });
 
+  test("G-A: moves and discards put back are named; original_path_taken and already_reverted are skip reasons", () => {
+    const text = createHumanOutput(strictCatalog()).revertSummary(
+      output({
+        reverted: [
+          { path: "a.md", action: "moved_back" },
+          { path: "b.md", action: "restored_from_discard" },
+        ],
+        skipped: [
+          { path: "c.md", reason: "original_path_taken" },
+          { path: "d.md", reason: "already_reverted" },
+        ],
+      }),
+    );
+    assert.ok(text.includes("  a.md — [revert.action.moved_back]\n  b.md — [revert.action.restored_from_discard]\n"), text);
+    assert.ok(text.includes("  c.md — [revert.skip.original_path_taken] (original_path_taken)\n  d.md — [revert.skip.already_reverted] (already_reverted)\n"), text);
+  });
+
   test("an earlier revert with a time of another shape shows no time", () => {
     const text = createHumanOutput(strictCatalog()).revertSummary(output({ revertedBefore: { at: `${SECRET}`, status: "partial" } }));
     assert.ok(text.includes("[revert.reverted_before] (partial)\n"));
     assert.equal(text.includes(SECRET), false);
+  });
+});
+
+describe("HumanOutput.latestChosen (N-23 b)", () => {
+  test("names the chosen run and its start time in local time", () => {
+    const startedAt = "2026-11-12T03:04:05.000Z";
+    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt, taskId: `t-${SECRET}`.slice(0, 40), status: "done", reason: "verified", changes: 1, reverted: null });
+    assert.equal(text, `codaryn: [latest.chosen runId=${RUN}] ([runs.column.started] ${formatLocalTime(Date.parse(startedAt))})\n`);
+    assert.equal(text.includes(SECRET), false);
+  });
+
+  test("an impossible start time is left out", () => {
+    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null });
+    assert.equal(text, `codaryn: [latest.chosen runId=${RUN}]\n`);
   });
 });
 

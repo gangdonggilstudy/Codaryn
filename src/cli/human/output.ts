@@ -24,6 +24,7 @@ import {
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
   PLAN_ITEM_PROBLEMS,
+  PLAN_RECORDS_UNCHECKED_CAUSES,
   PERMISSION_KINDS,
   POLICY_NARROWING_KINDS,
   POLICY_DENIAL_CODES,
@@ -603,9 +604,14 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
       // U-8: what the apply tells besides its status (ApplyResult.noticeKinds), each kind once.
+      // U-33 (R-56 Q-1 (a)): plan_records_unchecked by its cause. With a cause of the contract (every
+      // own check complete, a run since the plan could not check), that cause's line, which advises
+      // no cleanup; without one (this apply's own check was limited), U-8's, as before.
       const kinds: readonly unknown[] = Array.isArray(result.noticeKinds) ? result.noticeKinds : [];
+      const cause = isOneOf(result.planRecordsUncheckedCause, PLAN_RECORDS_UNCHECKED_CAUSES) ? result.planRecordsUncheckedCause : null;
       for (const kind of APPLY_NOTICE_KINDS) {
-        if (kinds.includes(kind)) out.push(catalog.format(`apply.notice.${kind}`));
+        if (!kinds.includes(kind)) continue;
+        out.push(kind === "plan_records_unchecked" && cause !== null ? catalog.format(`apply.notice.plan_records_unchecked.${cause}`) : catalog.format(`apply.notice.${kind}`));
       }
       out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0));
       // DR-21: stopped for the person's consent to unsafe moves; how to give it for one apply.

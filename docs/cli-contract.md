@@ -151,6 +151,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
+  - DR-47(U-21, AXM-1): 선택 `finalMessage`(`{text, truncated}`): 에이전트의 마지막 답. 실행의 마지막 모델 응답이 도구 호출 없는 마지막 답(`stop: "final"`)일 때만 있고, 맨 끝 필드다. 등록된 가릴 값은 가려지고 키 모양은 `[key]`, 줄 바꿈은 LF, 탭 말고 제어·보이지 않는 문자는 빠진다. `MAX_FINAL_MESSAGE_CHARS`(2000자)를 넘으면 잘리고 `truncated`가 true다. 계획 실행(`plan_pending`)과 답 없이 끝난 실행, DR-47 전에 쓴 결과에는 없다. 모델의 말이지 검증된 사실이 아니며, 사람용 끝 요약은 `summary.final_message` 머리말 뒤에 인용 줄로 보인다. 필드를 더하기만 한다(DR-48).
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
   - 선택 필드
@@ -536,6 +537,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 상태(`REPORT_EXIT_CODES`): `complete`(0)는 둘 다 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. `incomplete`는 기록만으로 만들고, 줄바꿈 없는 마지막 줄은 아직 쓰는 중으로 보고 무시한다.
 - 오류(`CliErrorOutput`): `invalid_arguments`, `workspace_not_found`, `run_not_found`(그 실행의 기록이 없음), `invalid_run_record`(읽기·해석 실패, `MAX_REPORT_FILE_BYTES`(256 MiB) 초과, 다른 실행의 파일).
 - `ReportOutput`: `schemaVersion`, `kind:"report"`, `runId`, `status`, `exitCode`, `result`(`EngineResult` 또는 null), `journal`(`ReportJournalSummary`: 작업 id, 작업 종류, 제공자, 한도, 기록 수, 모델 요청 수, 거부된 도구 호출 수, 재수정 수, 마지막 검증 회차, 변경 목록, 무결성 확인, 종료 기록).
+  - DR-47(U-21): `result`는 `result.json`의 `finalMessage`를 그대로 담는다(계획 실행에 있으면 `invalid_run_record`). 본문에는 그 답이 있으면 `## The agent's last message` 절이 `## Changes` 뒤에 붙는다: 머리말(`report.final_message`의 영어), 끝 요약과 같은 인용 줄(출력 담당의 `quoteModelText`, 최대 `FINAL_MESSAGE_MAX_LINES`줄)을 담은 코드 블록, 잘렸으면 잘린 줄.
 - 한계: 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로 실행 중 허용된 명령이 바꿀 수 있다.
 
 ### doctor (U-6)

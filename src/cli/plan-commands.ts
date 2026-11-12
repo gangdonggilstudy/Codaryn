@@ -19,6 +19,8 @@ import {
   JOURNAL_FILE_NAME,
   MAX_PLAN_SUMMARY_CHARS,
   MAX_REPORT_FILE_BYTES,
+  MIN_PLAN_DIGEST_PREFIX,
+  PLAN_ACTION_KINDS,
   PLAN_EXIT_CODES,
   RESULT_FILE_NAME,
   RESULT_SCHEMA_VERSION,
@@ -27,6 +29,7 @@ import {
   STATE_DIR_NAME,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
   planActionShownMatches,
+  toRunId,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -51,6 +54,7 @@ import type {
   PrivacyGateway,
   ResolvedPlanAction,
   ReviewOutput,
+  RunId,
   StateUncheckedSince,
   StoredPlan,
 } from "../contracts/index.js";
@@ -64,6 +68,7 @@ import {
   stateUncheckedSince as storeStateUncheckedSince,
   prepareDiscardedRoot,
   inspectRun as storeInspectRun,
+  isRunTimestamp,
   latestRun,
   listRuns as storeListRuns,
   loadPlan as storeLoadPlan,
@@ -92,7 +97,7 @@ import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
-import { FINAL_MESSAGE_MAX_LINES, quoteModelText } from "./human/index.js";
+import { FINAL_MESSAGE_MAX_LINES, displayWidth, formatLocalTime, quoteModelText } from "./human/index.js";
 
 /** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
 const PLAN_SUMMARY_MAX_ROWS = FINAL_MESSAGE_MAX_LINES;
@@ -187,7 +192,7 @@ function runArgsOf(form: TaskFormArgs, cancelFile: string | null, quiet: boolean
 }
 
 function notes(): RunNotes {
-  return { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+  return { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
 }
 
 async function exists(target: string): Promise<boolean> {
@@ -214,13 +219,52 @@ function maskAction(action: ResolvedPlanAction, privacy: PrivacyGateway): Masked
   return where === null ? null : { kind: "discard", path: where, sha256: action.sha256 };
 }
 
-/** One printable line per action, cleaned, keys hidden. */
-function actionLines(actions: readonly MaskedPlanAction[], currentKey: KnownKeys): string[] {
+/**
+ * U-36: a line from the catalog; main's English (`english`) while the catalog does not have its text
+ * yet (N-B), as planViewText, and without a catalog. Never throws.
+ */
+function catalogLine(messages: MessageCatalog | undefined, line: (catalog: MessageCatalog) => string, english: () => string): string {
+  if (messages === undefined) return english();
+  try {
+    return line(messages);
+  } catch {
+    return english();
+  }
+}
+
+/** A run id for a message; not one throws, so catalogLine gives the English. */
+function messageRunId(value: string): RunId {
+  const runId = toRunId(value);
+  if (runId === null) throw new Error("not a run id");
+  return runId;
+}
+
+/** U-36: an action's kind as words (plan.action.<kind>) and what a discard says (plan.discard_kept). */
+type ActionWords = { readonly [K in (typeof PLAN_ACTION_KINDS)[number]]: string } & { readonly kept: string };
+const ENGLISH_ACTION_WORDS: ActionWords = { move: "move", discard: "discard", kept: "kept in .codaryn/discarded/ until removed" };
+
+function actionWords(messages: MessageCatalog | undefined): ActionWords {
+  if (messages === undefined) return ENGLISH_ACTION_WORDS;
+  try {
+    return { move: messages.format("plan.action.move"), discard: messages.format("plan.action.discard"), kept: messages.format("plan.discard_kept") };
+  } catch {
+    return ENGLISH_ACTION_WORDS;
+  }
+}
+
+/**
+ * One printable line per action, cleaned, keys hidden. U-36: the kind's words are padded to the
+ * widest kind's, in terminal columns, and two more (English as before: `move     `, `discard  `).
+ */
+function actionLines(actions: readonly MaskedPlanAction[], currentKey: KnownKeys, messages?: MessageCatalog): string[] {
   const shown = (text: string): string => cleanText(hideKeys(text, currentKey));
+  const words = actionWords(messages);
+  const width = Math.max(...PLAN_ACTION_KINDS.map((kind) => displayWidth(words[kind]))) + 2;
+  const kind = (name: (typeof PLAN_ACTION_KINDS)[number]): string => words[name] + " ".repeat(width - displayWidth(words[name]));
   return actions.map((action, index) =>
     action.kind === "move"
-      ? `  ${index + 1}. move     ${shown(action.from)}  ->  ${shown(action.to)}`
-      : `  ${index + 1}. discard  ${shown(action.path)}  (kept in .codaryn/discarded/ until removed)`,
+      ? `  ${index + 1}. ${kind("move")}${shown(action.from)}  ->  ${shown(action.to)}`
+      : `  ${index + 1}. ${kind("discard")}${shown(action.path)}  (${words.kept})`,
   );
 }
 
@@ -365,25 +409,60 @@ function planViewText(messages: MessageCatalog | undefined, id: keyof typeof PLA
  * U-14 (UXM-6, AXM-2, AXM-15): a marked plan run has the warning first and, while pending, that it
  * cannot be applied in place of the command to apply it; the model's summary is the agent's
  * description under its label; the last line says what the digest guarantees.
+ * U-36 (UXM-7): every line from the catalog (plan.heading, plan.status.<status>, plan.digest_label,
+ * the action words, plan.inventory_limit, plan.applied_by with the apply's local time,
+ * plan.next_apply with the digest's first characters); English as before.
  */
 export function renderPlan(output: PlanOutput, currentKey: KnownKeys, messages?: MessageCatalog): string {
   const marked = output.recordsChanged === true;
   const lines = [
     ...(marked ? [planViewText(messages, "plan.records_changed")] : []),
-    `Plan of run ${output.runId}: ${output.actions.length} action(s), ${output.status}`,
-    `Digest: ${output.digest}`,
-    ...actionLines(output.actions, currentKey),
+    catalogLine(
+      messages,
+      (catalog) => catalog.format("plan.heading", { runId: messageRunId(output.runId), count: output.actions.length, status: catalog.format(`plan.status.${output.status}`) }),
+      () => `Plan of run ${output.runId}: ${output.actions.length} action(s), ${output.status}`,
+    ),
+    // The digest is an item after its label (G-A: no message takes a digest).
+    catalogLine(messages, (catalog) => `${catalog.format("plan.digest_label")}: ${output.digest}`, () => `Digest: ${output.digest}`),
+    ...actionLines(output.actions, currentKey, messages),
   ];
   // U-21 (R-49 R49-L2, R-52 R52-L1): the model's words as the run summary draws them: the label on
   // its own line, then quoteModelText's rows (quote mark, single spaces, folded to the terminal).
   const summaryRows = output.summary === undefined ? [] : quoteModelText(hideKeys(output.summary, currentKey), PLAN_SUMMARY_MAX_ROWS);
   if (summaryRows.length > 0) lines.push(`${planViewText(messages, "plan.summary_label")}:`, ...summaryRows);
   if (output.inventoryLimitReached) {
-    lines.push("The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.");
+    lines.push(
+      catalogLine(
+        messages,
+        (catalog) => catalog.format("plan.inventory_limit"),
+        () => "The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.",
+      ),
+    );
   }
-  if (output.appliedBy !== null) lines.push(`Applied by run ${output.appliedBy.runId} at ${output.appliedBy.at}.`);
-  else if (marked) lines.push(planViewText(messages, "plan.cannot_apply"));
-  else lines.push(`To apply it: codaryn apply <the same task form> --run ${output.runId} --digest ${output.digest.slice(0, 12)}`);
+  const appliedBy = output.appliedBy;
+  const prefix = output.digest.slice(0, MIN_PLAN_DIGEST_PREFIX);
+  if (appliedBy !== null) {
+    // UXM-23: the apply's time in local wall time, as `runs` shows times; left out when it is not a
+    // run timestamp (N-24 (c)). No message takes a time.
+    const time = isRunTimestamp(appliedBy.at) ? formatLocalTime(Date.parse(appliedBy.at)) : null;
+    lines.push(
+      catalogLine(
+        messages,
+        (catalog) => `${catalog.format("plan.applied_by", { runId: messageRunId(appliedBy.runId) })}${time === null ? "" : ` (${time})`}`,
+        () => `Applied by run ${appliedBy.runId} at ${appliedBy.at}.`,
+      ),
+    );
+  } else if (marked) lines.push(planViewText(messages, "plan.cannot_apply"));
+  else {
+    // The digest's first characters after the command (G-A: no message takes a digest).
+    lines.push(
+      catalogLine(
+        messages,
+        (catalog) => `${catalog.format("plan.next_apply", { runId: messageRunId(output.runId) })} ${prefix}`,
+        () => `To apply it: codaryn apply <the same task form> --run ${output.runId} --digest ${prefix}`,
+      ),
+    );
+  }
   lines.push(planViewText(messages, "plan.digest_guarantee"));
   return `${lines.join("\n")}\n`;
 }
@@ -483,6 +562,26 @@ export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcom
 
 const YES = new Set(["y", "yes", "예", "네"]);
 
+/** U-36: apply's question after the plan view at a terminal (apply.question, then the [y/N] text). */
+export function applyQuestion(messages?: MessageCatalog): string {
+  return catalogLine(messages, (catalog) => `${catalog.format("apply.question")} ${catalog.format("prompt.yes_no_default_no")} `, () => "Apply this plan? [y/N] ");
+}
+
+/**
+ * U-36: the question after an apply stopped as consent_required at a terminal (DR-21):
+ * apply.unsafe_move_question, then the [y/N] text. One text for every count.
+ */
+export function unsafeMoveQuestion(count: number, messages?: MessageCatalog): string {
+  return catalogLine(
+    messages,
+    (catalog) => `${catalog.format("apply.unsafe_move_question", { count })} ${catalog.format("prompt.yes_no_default_no")} `,
+    () =>
+      `${count} move${count === 1 ? "" : "s"} of this plan can only be made without the guarantee that nothing at the ` +
+      `destination is replaced (the drive has no hard links). Nothing was moved. Apply again and make ` +
+      `${count === 1 ? "it" : "them"} anyway, for this apply only? [y/N] `,
+  );
+}
+
 /** `codaryn apply ... --run <planRunId> --digest <prefix> [--cancel-file <path>] [--quiet]` (6.2, 6.4). */
 export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutcome> {
   const parsed = parseApplyArgs(io.argv);
@@ -550,7 +649,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     const currentKey = knownKeyValues(io.env);
     // U-14 (AXM-15): the approval question shows the agent's description too (not part of the digest).
     const summary = await planSummary(io, workspaceRoot, planRunId, shown.digest, shown.privacy);
-    const question = [renderPlan({ ...shown.output, inventoryLimitReached, ...(summary === null ? {} : { summary }) }, currentKey, io.messages).trimEnd(), "Apply this plan? [y/N] "].join("\n");
+    const question = [renderPlan({ ...shown.output, inventoryLimitReached, ...(summary === null ? {} : { summary }) }, currentKey, io.messages).trimEnd(), applyQuestion(io.messages)].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
     approval = "cli-tty";
@@ -670,12 +769,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   if (!first.ok) return first.outcome;
   let final = first;
   if (first.result.reason === "consent_required" && givenConsent === null && ask !== undefined) {
-    const count = first.unsafeMoves;
-    const question =
-      `${count} move${count === 1 ? "" : "s"} of this plan can only be made without the guarantee that nothing at the ` +
-      `destination is replaced (the drive has no hard links). Nothing was moved. Apply again and make ` +
-      `${count === 1 ? "it" : "them"} anyway, for this apply only? [y/N] `;
-    const answer = (await ask(question))?.trim().toLowerCase() ?? "";
+    const answer = (await ask(unsafeMoveQuestion(first.unsafeMoves, io.messages)))?.trim().toLowerCase() ?? "";
     if (YES.has(answer)) {
       const second = await applyOnce({ channel: "cli-tty", digest: shown.digest });
       if (!second.ok) return second.outcome;
@@ -769,6 +863,28 @@ async function awaitingReview(
   return { ok: true, checklist: checklist as MaskedText[] };
 }
 
+/**
+ * U-36: review's text without --json: the recorded line (review.recorded, or review.recorded_replaced
+ * when an earlier review was replaced, with the verdict's words), the checklist as items, and
+ * review.unchanged. English as before.
+ */
+export function renderReview(output: ReviewOutput, currentKey: KnownKeys, messages?: MessageCatalog): string {
+  const lines = [
+    catalogLine(
+      messages,
+      (catalog) =>
+        catalog.format(output.replaced ? "review.recorded_replaced" : "review.recorded", {
+          runId: messageRunId(output.runId),
+          verdict: catalog.format(`review.verdict.${output.verdict}`),
+        }),
+      () => `Review of run ${output.runId}: ${output.verdict}${output.replaced ? " (an earlier review was replaced)" : ""}.`,
+    ),
+    ...output.checklist.map((item, index) => `  ${index + 1}. ${cleanText(hideKeys(item, currentKey))}`),
+    catalogLine(messages, (catalog) => catalog.format("review.unchanged"), () => "The run's result and records are unchanged; `codaryn report` shows the verdict."),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
 /** `codaryn review ... --run <runId|latest> (--accept | --reject) [--note <text>] [--json]` (GT-D6). */
 export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutcome> {
   const parsed = parseReviewArgs(io.argv);
@@ -822,12 +938,7 @@ export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutc
     replaced,
   };
   if (args.json) return { output, exitCode: output.exitCode };
-  const lines = [
-    `Review of run ${runId}: ${args.verdict}${replaced ? " (an earlier review was replaced)" : ""}.`,
-    ...review.checklist.map((item, index) => `  ${index + 1}. ${cleanText(hideKeys(item, currentKey))}`),
-    "The run's result and records are unchanged; `codaryn report` shows the verdict.",
-  ];
-  return { text: `${lines.join("\n")}\n`, exitCode: output.exitCode };
+  return { text: renderReview(output, currentKey, io.messages), exitCode: output.exitCode };
 }
 
 /** Exposed for tests: the latest run rule the commands share with the store (N-23 b). */

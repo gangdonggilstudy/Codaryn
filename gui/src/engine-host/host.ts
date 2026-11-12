@@ -98,8 +98,8 @@ export interface HostDeps {
    */
   readonly shownText?: Shown;
   /**
-   * U-32: a model's text (a plan's summary) as rows for people, by the engine's quoteModelText
-   * (model-text.ts). Absent (an engine without it, tests): no model text is shown.
+   * U-32: a model's text (a plan's summary) as rows for people, by the app layer's modelTextRows
+   * (U-48, model-text.ts). Absent (an engine without it, tests): no model text is shown.
    */
   readonly modelText?: ModelText;
   /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */

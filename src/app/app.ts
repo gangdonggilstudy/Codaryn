@@ -351,7 +351,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       // N-1: the same default config location the CLI reads (main.ts).
       defaultConfig: defaultConfigOf(),
     };
-    const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+    const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
     const ready = await prepareTask(io, args, notes, { readOnly: true });
     if (!("prepared" in ready)) return { ok: false, error: ready.output.kind === "error" ? fromCliError(ready.output) : INTERNAL_ERROR };
     return { ok: true, secrets: ready.prepared.secrets, workspaceRoot: ready.prepared.task.workspaceRoot };

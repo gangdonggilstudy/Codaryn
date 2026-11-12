@@ -44,7 +44,7 @@ function stand_in(): MessageCatalog {
   } as MessageCatalog;
 }
 
-const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "task" };
+const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0, policySource: "task" };
 
 function engineResult(extra: Partial<EngineResult>): EngineResult {
   return {

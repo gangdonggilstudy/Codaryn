@@ -197,8 +197,12 @@ export function selectedAsReverted(lastRevert: LastRevert): boolean {
   return lastRevert === "complete";
 }
 
-/** What a cleanup item is: a run's records, a run's discarded-files folder, or a leftover folder. */
-export type CleanupTarget = "run" | "discarded" | "leftover";
+/**
+ * What a cleanup item is: a run's records, a run's discarded-files folder, or a leftover folder.
+ * U-34: a person reads each by its name, `cleanup.target.<target>` (src/contracts/human.ts).
+ */
+export const CLEANUP_TARGETS = ["run", "discarded", "leftover"] as const;
+export type CleanupTarget = (typeof CLEANUP_TARGETS)[number];
 
 /** Which item: by run id, or for a leftover by the 16 hex digits of its folder name. */
 export type CleanupItemRef =

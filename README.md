@@ -49,7 +49,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run latest --dry-ru
 
 ## 문서
 
-- [사용 안내](docs/usage.md): 설치, 키 없는 체험, `init`과 키·모델, 두 번째 제공자(OpenAI), 설정과 프로필, 점검(`doctor`), 실행(한 줄 실행, 사람용 출력, 언어), 재수정 반복, 결과(`runs`, `report`, `--run latest`), 되돌리기(`--dry-run`), 기록 정리(`cleanup`), 가릴 값, 정책, 점검표, 한계, 문제 해결, 범용 작업(작업 종류, `plan`·`apply`·`review`, 하드 링크 없는 드라이브의 동의, 기록 폴더와 폐기 보관함 정리)
+- [사용 안내](docs/usage.md): 설치, 키 없는 체험, `init`과 키·모델, 두 번째 제공자(OpenAI), 설정과 프로필, 점검(`doctor`), 실행(한 줄 실행, 사람용 출력, 언어), 재수정 반복, 결과(`runs`, `report`, `--run latest`, 에이전트의 마지막 답), 되돌리기(`--dry-run`), 기록 정리(`cleanup`), 가릴 값, 정책, 점검표, 한계, 문제 해결(멈춘 실행의 잠금이 남아 막힐 때 포함), 범용 작업(작업 종류, `plan`·`apply`·`review`, 하드 링크 없는 드라이브의 동의, 기록 폴더와 폐기 보관함 정리)
 - [CLI·공통 계약](docs/cli-contract.md)
 - [문서 안내](docs/README.md)
 - [공통 개발 지침](AGENTS.md), [Claude 작업 지침](CLAUDE.md)

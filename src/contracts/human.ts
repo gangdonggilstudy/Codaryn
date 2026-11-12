@@ -21,8 +21,8 @@
  */
 
 import { REVERT_SKIP_REASONS } from "./changes.js";
-import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES } from "./cleanup.js";
-import type { CleanupBlockCode, CleanupKeptReason, CleanupWarningCode } from "./cleanup.js";
+import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_TARGETS, CLEANUP_WARNING_CODES } from "./cleanup.js";
+import type { CleanupBlockCode, CleanupKeptReason, CleanupTarget, CleanupWarningCode } from "./cleanup.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { ApiBaseUrlEnv, ApiKeyEnv, ApiModelEnv, DefaultConfigDisplay } from "./config.js";
@@ -254,8 +254,12 @@ export const INIT_QUESTION_DEFAULTS = {
   protected_suggest: "yes",
 } as const;
 
-/** N-21: commands with a help text. */
-export const HELP_COMMANDS = ["run", "revert", "report", "doctor", "models", "init", "runs"] as const;
+/**
+ * N-21: commands with a help text. U-35 (UXM-7): plan, apply, review, changes and cleanup join, so
+ * their help says what they do, their options and their exit codes in the chosen language, as the
+ * others do (they were a usage line and one fixed English sentence before).
+ */
+export const HELP_COMMANDS = ["run", "revert", "report", "doctor", "models", "init", "runs", "plan", "apply", "review", "changes", "cleanup"] as const;
 export type HelpCommand = (typeof HELP_COMMANDS)[number];
 
 /** N-21: options described in the help texts (`--dry-run` is `dry_run`). */
@@ -277,6 +281,31 @@ export const HELP_OPTIONS = [
   "provider",
   // DR-21, DR-25: `--allow-unsafe-move` of `apply` and `revert` (UNSAFE_MOVE_CONSENT_ARGUMENT).
   "allow_unsafe_move",
+  // U-35 (UXM-7): the options of plan, apply, review, changes and cleanup that no help described.
+  // The others they take (`--task`, `--workspace`, `--profile`, `--config`, `--vars-file`,
+  // `--run`, `--json`, `--cancel-file`, `--quiet`, `--allow-unsafe-move`) keep their ids.
+  // `apply --digest <first 12+ hex>`: the digest the person approved (MIN_PLAN_DIGEST_PREFIX).
+  "digest",
+  // `apply --run <runId>`: the plan run whose plan is applied. Not `run`, whose text offers
+  // `latest`: apply never takes it.
+  "plan_run",
+  // `review --accept`, `review --reject` (one of the two), `review --note <text>`.
+  "accept",
+  "reject",
+  "note",
+  // cleanup's selection (DR-39, DR-44): `--older-than <days>`, `--run <id>[,<id>...]` (run ids
+  // only, never `latest`: not `run`), `--reverted`, `--discarded-older-than <days>`,
+  // `--discarded-run <id>[,<id>...]`.
+  "older_than",
+  "run_ids",
+  "reverted",
+  "discarded_older_than",
+  "discarded_run",
+  // cleanup's confirmations: `--confirm <first 12+ hex of the digest>`, and besides it
+  // `--include-not-reverted` and `--delete-discarded`, which each ask for their own consent.
+  "confirm",
+  "include_not_reverted",
+  "delete_discarded",
 ] as const;
 export type HelpOption = (typeof HELP_OPTIONS)[number];
 
@@ -296,7 +325,8 @@ export const DOCTOR_HINT_ERROR_CODES = [
 
 /**
  * The kinds of parameters and the type each one has:
- * - count: number (non-negative integer: counts, turns, attempts, line, column, durations)
+ * - count: number (non-negative integer: counts, turns, attempts, line, column, durations, and a
+ *   command's exit code, U-18)
  * - status, reason, permission, denial, modelError, phase, provider: closed code unions
  * - field: SchemaFieldPath. runId: RunId. text: CatalogText (another message of the same catalog)
  * - location: ConfigLocationDisplay
@@ -360,6 +390,9 @@ export const FIXED_MESSAGES = {
   "summary.no_verifiers": {},
   "summary.changes": { count: "count" },
   "summary.denied": { count: "count" },
+  // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
+  // hint lines come after both).
+  "summary.failed": { count: "count" },
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
@@ -449,6 +482,17 @@ export const FIXED_MESSAGES = {
   "progress.tool_denied": { tool: "text", permission: "permission", code: "denial" },
   // N-22: a call stopped by a check before the policy (validate or restore stage), with no permission.
   "progress.tool_rejected": { tool: "text", code: "denial" },
+  // U-18 (AXM-4, PM Q-1 (a), Q-2 (a)): what became of an allowed call (the failed-call rule at
+  // RunSummaryContext.failedToolCalls). A result that succeeded has no line.
+  // - progress.tool_failed: a failed call, `{code}` its ToolResult.errorCode (a tool error code, which
+  //   the `denial` kind takes, as for progress.tool_rejected).
+  // - progress.command_exited, progress.command_timed_out: a `run_command` result with `ok: true`
+  //   whose content (the masked JSON of RunCommandPayload) has `timedOut: true`, or else an
+  //   `exitCode` that is an integer other than 0. Not failed calls. Content that does not parse, or
+  //   a null exit code without a timeout (a stopped command), gives no line.
+  "progress.tool_failed": { tool: "text", code: "denial" },
+  "progress.command_exited": { exitCode: "count" },
+  "progress.command_timed_out": {},
   "progress.file_created": {},
   "progress.file_changed": {},
   "progress.verifier": { number: "count", outcome: "text" },
@@ -529,6 +573,30 @@ export const FIXED_MESSAGES = {
   // R-34b P-2: folders in the state directory named like a leftover but without a cleanup's mark
   // (StateSummary.unknownFolders): shown when there are any; Codaryn does not remove them.
   "cleanup.summary.unknown_folders": { count: "count", bytes: "count" },
+  // U-34 (UXM-7, AXM-22): the lines that were fixed English.
+  // - cleanup.size: an item's size after its name in a plan (CleanupItem.size).
+  // - cleanup.nothing_removed: first line of a confirmed cleanup that removed nothing
+  //   (CleanupStatus nothing_removed); what was kept follows, as after cleanup.done.
+  // - cleanup.next.*: after a preview's items when the plan has any, what to type to confirm.
+  //   confirm_runs when the plan has run records, else confirm_discarded when it has
+  //   discarded-files folders, else confirm_leftovers. G-A (0a9f9ec): no message takes a digest;
+  //   the renderer puts the options after the text on the same line, one space apart, so they can
+  //   be copied: `--confirm <the plan digest's first MIN_PLAN_DIGEST_PREFIX characters>`, and
+  //   ` --delete-discarded` after it for confirm_discarded. The text says nothing was removed and
+  //   ends leading into them. After confirm_runs, as they apply: not_reverted ({count}: run
+  //   records that go only with `--include-not-reverted`, which the person adds themselves; once
+  //   removed, those runs can no longer be reverted), discarded (people's discarded files are
+  //   deleted only with `--delete-discarded` besides), discarded_left ({count}: apply runs whose
+  //   records stay while their discarded files do, unless those are deleted in the same cleanup or
+  //   the apply is reverted first). Option names are fixed text in the templates.
+  "cleanup.size": { files: "count", bytes: "count" },
+  "cleanup.nothing_removed": {},
+  "cleanup.next.confirm_runs": {},
+  "cleanup.next.not_reverted": { count: "count" },
+  "cleanup.next.discarded": {},
+  "cleanup.next.discarded_left": { count: "count" },
+  "cleanup.next.confirm_discarded": {},
+  "cleanup.next.confirm_leftovers": {},
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -793,6 +861,8 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
  *   is not removed, what a person is told before confirming, why a confirmed item was kept.
+ * - `cleanup.target.<target>` (U-34): the kind of an item named in a cleanup's lines (a run's
+ *   records, a discarded-files folder, a leftover folder), before its run id or folder name.
  * - `apply.notice.<kind>` (U-8): one line of the apply summary per ApplyResult.noticeKinds entry.
  *   U-33: `apply.notice.plan_records_unchecked.<cause>` takes the place of
  *   `apply.notice.plan_records_unchecked` when ApplyResult.planRecordsUncheckedCause is that cause.
@@ -826,6 +896,7 @@ export type ListedMessageId =
   | `error.hint.${CliErrorHint}`
   | `cleanup.blocked.${CleanupBlockCode}`
   | `cleanup.warning.${CleanupWarningCode}`
+  | `cleanup.target.${CleanupTarget}`
   | `cleanup.kept.${CleanupKeptReason}`
   | `apply.notice.${ApplyNoticeKind}`
   | `apply.notice.plan_records_unchecked.${PlanRecordsUncheckedCause}`;
@@ -882,6 +953,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...CLEANUP_BLOCK_CODES.map((code) => `cleanup.blocked.${code}` as const),
   ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),
   ...CLEANUP_KEPT_REASONS.map((reason) => `cleanup.kept.${reason}` as const),
+  ...CLEANUP_TARGETS.map((target) => `cleanup.target.${target}` as const),
   ...APPLY_NOTICE_KINDS.map((kind) => `apply.notice.${kind}` as const),
   ...PLAN_RECORDS_UNCHECKED_CAUSES.map((cause) => `apply.notice.plan_records_unchecked.${cause}` as const),
 ];
@@ -937,6 +1009,14 @@ export type DoctorText = {
  * - policySource (N-23): where the run's policy came from, so the denied-call hint points there:
  *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
  *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
+ * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
+ *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
+ *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the
+ *   report's text: a `tool_result` record with `ok: false` whose `callId` has no `tool_decision`
+ *   with `allowed: false` in the run. A call the policy denied or a check rejected is a denied call
+ *   only (its decision is its line), never counted twice. A command that ran and exited with a code
+ *   other than 0, or timed out, is not a failed call: its result is `ok` (PM Q-2 (a)); it has its
+ *   progress line. `report --json` does not carry the count (PM Q-3).
  */
 export interface RunSummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
@@ -944,6 +1024,7 @@ export interface RunSummaryContext {
   readonly profileApplied: boolean;
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
+  readonly failedToolCalls?: number;
   readonly policySource: "task" | "config";
 }
 
@@ -972,8 +1053,8 @@ export interface HumanOutput {
   error(output: CliErrorOutput): string;
   /**
    * N-5: stderr at the end of `run`: status and reason as words, verifier result, number of
-   * changed files, denied calls (with the hint once, N-17), usage (seconds, N-20), run id, next
-   * commands. The result's `notices` are not shown (N-22): the model-not-found hint is a progress
+   * changed files, denied calls (with the hint once, N-17), failed calls (U-18), usage (seconds,
+   * N-20), run id, next commands. The result's `notices` are not shown (N-22): the model-not-found hint is a progress
    * line (`progress.model_not_found`), and every notice stays in the JSON and the report.
    */
   runSummary(result: EngineResult, context: RunSummaryContext): string;
@@ -983,7 +1064,10 @@ export interface HumanOutput {
    * (1-based), the order in which its id first appeared in this run's `verifier_result` records,
    * which the renderer counts itself; the id is never shown. DR-38, U-8: a `state_checked` record is
    * shown when something changed (`progress.state_changed` with the count) or when it is `limited`
-   * (`progress.state_unchecked`), and not otherwise.
+   * (`progress.state_unchecked`), and not otherwise. U-18: a `tool_result` record is shown only as
+   * `progress.tool_failed` (a failed call, by the rule at RunSummaryContext: the renderer remembers
+   * the calls whose decision was not allowed) or `progress.command_exited` /
+   * `progress.command_timed_out`; a result that succeeded is not shown.
    */
   progressLine(event: JournalEvent): string | null;
   /**

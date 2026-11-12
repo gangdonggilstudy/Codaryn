@@ -115,7 +115,7 @@ function result(extra: Partial<EngineResult> = {}): EngineResult {
   };
 }
 
-const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "config" };
+const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0, policySource: "config" };
 
 describe("HumanOutput.error (N-5, N-15)", () => {
   test("what, the diagnostic, how to fix and the code; the English message is not shown", () => {
@@ -206,6 +206,7 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
       profileApplied: true,
       deniedToolCalls: 3,
       deniedCommandCalls: 1,
+      failedToolCalls: 0,
       policySource: "config",
     });
     assert.ok(text.includes("[summary.no_verifiers]\n[summary.changes count=0]\n[summary.denied count=3]\n[summary.denied_hint]\n[summary.usage "));

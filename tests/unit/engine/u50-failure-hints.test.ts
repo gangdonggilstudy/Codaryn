@@ -7,8 +7,8 @@
  *
  * Now the engine adds one fixed sentence per code (TOOL_FAILURE_HINTS) to such a result. Codes whose
  * messages already say what to do (conflict, no_match, ambiguous_match, the tool's own invalid_args,
- * invalid_plan with its action and problem) and those with nothing to add (cancelled, io_error,
- * unknown_tool, unresolved_token) get none. No value is repeated: the sentence is fixed text, and
+ * invalid_plan with its action and problem, spawn_failed with its reason: review R-68 M-1) and those
+ * with nothing to add (cancelled, io_error, unknown_tool, unresolved_token) get none. No value is repeated: the sentence is fixed text, and
  * the tool's message stays as it was.
  */
 
@@ -28,7 +28,6 @@ const HINTED: readonly ToolErrorCode[] = [
   "too_large",
   "protected_span_violation",
   "invalid_token",
-  "spawn_failed",
   "masking_failed",
 ];
 

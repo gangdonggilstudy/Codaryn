@@ -191,17 +191,20 @@ export function failedToolContent(code: ToolErrorCode, message: string): string 
  * A refusal before the call runs has its own hint (REFUSAL_HINTS); these are for the outcomes of
  * a tool runner (RawToolOutcome, RawWorkflowToolOutcome). No hint where the tool's message already
  * says what to do (conflict, no_match, ambiguous_match, its own invalid_args; invalid_plan names
- * the action and the problem, and its end is what the organize test reads) or there is nothing to
- * add (cancelled, io_error; unknown_tool and unresolved_token come before a call runs).
+ * the action and the problem, and its end is what the organize test reads; spawn_failed names its
+ * reason, which is not only a missing program: on Windows a .cmd inside the workspace, an argument
+ * cmd.exe cannot take or a file type that cannot be started, review R-68 M-1) or there is nothing
+ * to add (cancelled, io_error; unknown_tool and unresolved_token come before a call runs).
+ * R-68 L-1, L-2: not_found also comes from search_files given a file, and not_text from a
+ * directory given to read_file or write_file; their hints are true for those too.
  */
 export const TOOL_FAILURE_HINTS: { readonly [C in ToolErrorCode]?: string } = {
   policy_denied: "The path must stay inside the workspace, also after links are followed, and outside Codaryn's records folder.",
-  not_found: "Nothing is at this path; check the path before you try again.",
-  not_text: "The file is not UTF-8 text, so these tools cannot read or change it.",
+  not_found: "No entry of the kind this tool needs is at this path: it is missing, or it is a file where a directory is needed. Check the path before you try again.",
+  not_text: "The path is not a UTF-8 text file: it is a directory, or the file holds binary data or another encoding. These tools cannot read or change it.",
   too_large: "It is larger than this tool can handle; use a smaller file or directory.",
   protected_span_violation: "A line that holds a protected placeholder must stay exactly as it is; change other lines only.",
   invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
-  spawn_failed: "The command could not be started; check that the executable's name is right and that it is installed.",
   masking_failed: "The result could not be masked, so none of it is shown.",
 };
 

@@ -223,6 +223,10 @@ export interface RunObserver {
 
 - 실행 결과는 `EngineResult` 그대로다(`engine.ts:151-177`). 적용 결과는 범용 작업의 `ApplyResult`다(5.6). 어댑터마다 다른 결과 형식은 만들지 않는다.
 - `report({ workspace, runId })` → `ReportOutput`(`commands.ts:62-71`). 작업 공간의 기록만 읽고 잠금을 잡지 않는다. 실행 중이면 `incomplete`(종료 3)다.
+- `reportMarkdown({ workspace, runId })` → `{ kind: "report_markdown", markdown, exitCode }`(GU-3 보고서 저장).
+  - `codaryn report`를 `--json` 없이 부른 글 그대로다. Markdown이고 모든 API 제공자의 키 값을 가린다.
+  - 메인이 사람이 고른 파일에 쓰는 데만 쓴다. 창은 구조화된 `report`를 그린다. 이 글을 HTML로 그리지 않는다.
+  - `-`로 시작하는 작업 공간이나 run id는 아무것도 읽기 전에 `invalid_arguments`다(깃발로 읽히지 않게).
 - Markdown 글은 어댑터의 표시 몫이다. CLI의 `renderReport`는 기록에서 온 글을 모두 인라인 코드나 코드 블록에 넣는다(`report.ts:350-437`).
   - 그래서 Markdown으로 열어도 원격 이미지 같은 주입이 없다(R-1 I-6).
   - 어댑터(GUI)가 보고서를 Markdown으로 그려도 되는 근거이므로, 이 성질을 바꾸지 않는다.

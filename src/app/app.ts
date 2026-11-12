@@ -86,6 +86,7 @@ import type {
   ApplySettingsChangeRequest,
   CreateSettingsRequest,
   ReadSettingsRequest,
+  ReportMarkdown,
   ReportRequest,
   SelectModelRequest,
   SettingsChangeProposal,
@@ -361,6 +362,27 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         listRuns: storeListRuns,
       });
       return jsonOutcome<ReportOutput>(outcome, "report");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /** GU-3: `codaryn report` without `--json`, as main.ts prints it. */
+  async function reportMarkdown(request: ReportRequest): Promise<AppCallOutcome<ReportMarkdown>> {
+    // The values go after their flags; one that starts with "-" could be read as a flag instead.
+    if (request.workspace.startsWith("-") || request.runId.startsWith("-")) {
+      return { ok: false, error: appError("invalid_arguments", "the workspace and the run id cannot start with '-'") };
+    }
+    try {
+      const outcome = await runReport({
+        argv: ["report", "--workspace", request.workspace, "--run", request.runId],
+        cwd: environment.cwd,
+        env: copyEnvironment(environment.env, platform),
+        platform,
+        listRuns: storeListRuns,
+      });
+      if ("output" in outcome) return { ok: false, error: outcome.output.kind === "error" ? fromCliError(outcome.output) : INTERNAL_ERROR };
+      return { ok: true, output: { kind: "report_markdown", markdown: outcome.text, exitCode: outcome.exitCode } };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }
@@ -667,6 +689,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   return {
     startRun,
     report,
+    reportMarkdown,
     revert,
     listRuns,
     resolveRun,

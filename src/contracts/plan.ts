@@ -444,6 +444,14 @@ export interface ApplyDeps {
   readonly executor: PlanExecutor;
   /** Created from the apply task's policy (DR-5). */
   readonly policy: PolicyGate;
+  /**
+   * The apply task's `policy.planActions` (absent: empty). The engine checks every action's kind
+   * against it as well as through the gate, as a plan run does, so an apply fails closed even where
+   * a gate does not judge `requires.planAction`.
+   */
+  readonly planActions: readonly PlanActionKind[];
+  /** Real absolute path of `.codaryn/discarded/<runId>/` for this apply run (InventoryCheckInput). */
+  readonly discardedRoot: string;
   readonly privacy: PrivacyGateway;
   readonly verifiers: VerifierRunner;
   readonly inventory: InventoryChecker;

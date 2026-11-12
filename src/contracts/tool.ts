@@ -115,7 +115,27 @@ export interface ToolPayloadByName {
 
 export type ToolPayload = ToolPayloadByName[ToolName];
 
-/** A call as the model requested it. Names and args are unvalidated and may contain tokens. */
+/**
+ * AC-D15 (DR-13): what the engine records, returns and sends back in place of a tool name that is
+ * in no tool list (ALL_TOOL_NAMES). A valid tool-name token, so a provider can send it back as a
+ * tool_use name; never offered, so a call to it is `unknown_tool`. People see "(unknown tool)".
+ */
+export const UNKNOWN_TOOL_RECORD_NAME = "unknown_tool";
+
+/**
+ * AC-D15: a call id the engine keeps as the model gave it: 1 to 64 of `A-Z a-z 0-9 _ -`, holding no
+ * registered secret, and not already standing for another id. The engine replaces any other id with
+ * REPLACED_CALL_ID_PREFIX and a number (the same one for every use of that id in the run) before it
+ * records the call, answers it or sends it back, so the pair of a call and its result still match.
+ */
+export const CALL_ID_PATTERN_SOURCE = "^[A-Za-z0-9_-]{1,64}$";
+export const REPLACED_CALL_ID_PREFIX = "codaryn-call-";
+
+/**
+ * A call as the model requested it. Names and args are unvalidated and may contain tokens.
+ * AC-D15: the engine records it only with a known name (else UNKNOWN_TOOL_RECORD_NAME) and an id
+ * that passes CALL_ID_PATTERN_SOURCE and masking (else a replacement).
+ */
 export interface ToolCall {
   readonly id: string;
   readonly name: string;

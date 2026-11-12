@@ -82,6 +82,9 @@ const STATE_FAILED_NOTICE = "the run records could not be checked, so they are n
 /** U-8 (R-39 L-1): a state check was limited (ApplyNoticeKind plan_records_unchecked). */
 const PLAN_RECORDS_UNCHECKED_NOTICE =
   "the plan run's records could not be checked for changes, because the state directory is too large to check entirely (plan_records_unchecked); a cleanup that makes it smaller lets them be checked";
+/** U-29 (R-44 R44-L1): a run before this apply could not check them (ApplyDeps.planRecordsUnchecked). */
+const PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE =
+  "a run since the plan was made could not check the state directory entirely, so the plan run's records may have changed without a mark (plan_records_unchecked)";
 
 /** Every fixed text the apply run records. Tests mask these with the real gateway. */
 export const APPLY_FIXED_TEXTS: readonly string[] = [
@@ -103,6 +106,7 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   UNSAFE_DONE_NOTICE,
   STATE_NOTICE_LEAD,
   STATE_FAILED_NOTICE,
+  PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE,
   PLAN_RECORDS_UNCHECKED_NOTICE,
 ];
 
@@ -369,6 +373,20 @@ export const applyPlan: ApplyPlan = async (deps) => {
       }
     }
     if (consent !== null && !consented) notice(CONSENT_OTHER_PLAN_NOTICE);
+    // U-29 (R-44 R44-L1): what a run before this apply could not check is told as the apply's own
+    // limited check is, once. A question that cannot be answered counts as unchecked.
+    if (deps.planRecordsUnchecked !== undefined) {
+      let earlier: boolean;
+      try {
+        earlier = await deps.planRecordsUnchecked();
+      } catch {
+        earlier = true;
+      }
+      if (earlier && !planUnchecked) {
+        planUnchecked = true;
+        notice(PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE);
+      }
+    }
     if ((await inspect("run_start")) === "changed") return PROTECTED_CHANGED;
     const stateStart = await checkState("run_start", "skip");
     if (stateStart !== null) return stateStart;

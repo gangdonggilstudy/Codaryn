@@ -16,9 +16,10 @@
  *   (ChangesEnvironment.messages: the contract's `changes.*` ids); without one, the English below.
  *   That English is the text before U-36 line for line, with one line more: a run with a
  *   records-changed mark (ChangesOutput.recordsChanged, U-43) says so after the heading, with or
- *   without a catalog (`changes.records_changed`, which the PM accepted). The English catalog gives
- *   the same lines but those of `changes.apply_run` and `changes.unavailable.<reason>` (the PM
- *   accepted those too). The JSON is not touched.
+ *   without a catalog (`changes.records_changed`, which the PM accepted). The English catalog (main.ts
+ *   gives it) has the same lines but those of `changes.apply_run`, `changes.unavailable.<reason>`
+ *   and `changes.no_text_note` (without "(DR-29)", review R-66); the PM accepted those too. The JSON
+ *   is not touched.
  * Reads only: nothing is created, changed or locked, and no request is made.
  *
  * The parser lives here until N-A moves it into args.ts; main.ts, help and the contract are N-A's

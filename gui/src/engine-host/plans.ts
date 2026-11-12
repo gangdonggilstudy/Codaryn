@@ -7,8 +7,9 @@
  */
 
 import { failureOf } from "./settings.js";
-import { MAX_CHANGE_TEXT_CHARS } from "../shared/ipc.js";
+import { MAX_CHANGE_TEXT_CHARS, MAX_PLAN_SUMMARY_ROWS } from "../shared/ipc.js";
 import type { HostFailure, Shown } from "./settings.js";
+import type { ModelText } from "./model-text.js";
 
 type Obj = Record<string, unknown>;
 const isObj = (value: unknown): value is Obj => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -21,10 +22,31 @@ function outputOf(outcome: unknown): Obj | null {
   return outcome["output"];
 }
 
-/** `plan` → `{ok, runId, status, digest, actions, inventoryLimitReached, appliedBy}` or a failure. */
-export function planValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+/**
+ * U-32 (U-14 AXM-15): the plan's summary (PlanOutput.summary, masked by the app layer) as rows, by
+ * the engine's quoteModelText (`modelText`), each row through `shown` as well. Null when there is
+ * none, it is not text, it leaves no row, or there is no `modelText` (the model's words are not shown
+ * without the CLI's own handling).
+ */
+function summaryRows(value: unknown, shown: Shown, modelText: ModelText | undefined): string[] | null {
+  if (modelText === undefined || typeof value !== "string") return null;
+  const rows = modelText(value)
+    .slice(0, MAX_PLAN_SUMMARY_ROWS)
+    .map((row) => shown(row))
+    .filter((row) => row.length > 0);
+  return rows.length === 0 ? null : rows;
+}
+
+/**
+ * `plan` → `{ok, runId, status, digest, actions, inventoryLimitReached, appliedBy, recordsChanged?,
+ * summary?}` or a failure. U-32: `recordsChanged` (U-14 AXM-2) as the app layer gives it; a marked
+ * plan run has no summary (its journal may have been changed too), as in the CLI.
+ */
+export function planValue(outcome: unknown, shown: Shown, modelText?: ModelText): Obj | HostFailure {
   const output = outputOf(outcome);
   if (output === null) return failureOf(outcome);
+  const marked = output["recordsChanged"] === true;
+  const summary = marked ? null : summaryRows(output["summary"], shown, modelText);
   const digest = output["digest"];
   if (typeof digest !== "string" || !DIGEST.test(digest)) return { ok: false, code: "host_error" };
   const actions: Obj[] = [];
@@ -42,6 +64,8 @@ export function planValue(outcome: unknown, shown: Shown): Obj | HostFailure {
     actions,
     inventoryLimitReached: output["inventoryLimitReached"] === true,
     appliedBy: isObj(applied) && typeof applied["runId"] === "string" && RUN_ID.test(applied["runId"]) && typeof applied["at"] === "string" ? { runId: applied["runId"], at: applied["at"] } : null,
+    ...(marked ? { recordsChanged: true } : {}),
+    ...(summary === null ? {} : { summary }),
   };
 }
 

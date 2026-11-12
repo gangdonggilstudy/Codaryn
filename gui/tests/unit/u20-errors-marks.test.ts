@@ -90,7 +90,9 @@ test("UXM-14: the run list marks the run, its plan is shown without an apply but
     await settle();
     const byId = (root: FakeElement, id: string) => root.findAll((e) => e.getAttribute("id") === id)[0];
     assert.equal(byId(planRoot, "plan-apply"), undefined, "no apply button");
-    assert.ok(byId(planRoot, "plan-records-changed")?.textContent.includes("Run the task again"));
+    // U-32: the warning first, and what to do in place of the apply button.
+    assert.ok(byId(planRoot, "plan-records-changed")?.textContent.includes("may not be the one the run made"));
+    assert.ok(byId(planRoot, "plan-cannot-apply")?.textContent.includes("Run the task again"));
 
     const reportApi = new Proxy({} as CodarynApi, {
       get: (_t, name: string) => async () =>

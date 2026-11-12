@@ -21,6 +21,9 @@ import type { HostApp, HostMessages } from "./host.js";
 import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
 import type { TreeEngine } from "./tree.js";
+import { modelTextOf } from "./model-text.js";
+import type { ModelText, QuoteModelText } from "./model-text.js";
+import { MAX_PLAN_SUMMARY_ROWS } from "../shared/ipc.js";
 
 const channelWrite = process.stdout.write.bind(process.stdout);
 const toStderr = ((chunk: unknown, ...rest: unknown[]): boolean =>
@@ -66,6 +69,14 @@ interface EngineHumanModule {
     progressLine(event: unknown): string | null;
     applyProgressLine?(event: unknown): string | null;
   };
+  /** U-32: the rows of a model's text the CLI shows (DR-47); its plan view uses the same number. */
+  readonly FINAL_MESSAGE_MAX_LINES?: unknown;
+}
+
+/** U-32: the CLI's drawing of a model's text for people (src/cli/human/format.ts), model-text.ts. */
+interface EngineQuoteModule {
+  quoteModelText: QuoteModelText;
+  readonly MODEL_TEXT_PREFIX?: unknown;
 }
 
 const RECORD_TYPE = /^[a-z][a-z_]{0,39}$/;
@@ -210,6 +221,14 @@ async function main(): Promise<number> {
   const providers = Array.isArray(appModule.CONNECTED_MODEL_PROVIDERS)
     ? appModule.CONNECTED_MODEL_PROVIDERS.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name))
     : [];
+  // U-32 (U-14 AXM-15): a plan's summary as the CLI's plan draws it, every key value now set hidden
+  // first; at most the CLI's rows, and never more than the main process takes (its "… (+N)" row
+  // included). An engine without it shows no model text.
+  const quoting = await load<EngineQuoteModule>(join(engineDir, "cli", "human", "format.js"), ["quoteModelText"]);
+  const lines = humanModule.FINAL_MESSAGE_MAX_LINES;
+  const maxRows = Math.min(MAX_PLAN_SUMMARY_ROWS - 1, typeof lines === "number" && Number.isSafeInteger(lines) && lines > 0 ? lines : MAX_PLAN_SUMMARY_ROWS - 1);
+  const modelText: ModelText | undefined =
+    quoting === null || typeof quoting.MODEL_TEXT_PREFIX !== "string" ? undefined : modelTextOf((text, rows, columns) => quoting.quoteModelText(text, rows, columns), quoting.MODEL_TEXT_PREFIX, maxRows, hideAllKeys);
   const shown = (text: string): string => hideAllKeys(textSafety.cleanText(text));
   // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
   const shownText = (text: string): string => hideAllKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true));
@@ -225,7 +244,7 @@ async function main(): Promise<number> {
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
   const envSet = (name: string): boolean => (process.env[name] ?? "").length > 0;
-  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, apiProviders, transport, providers, itemsIn, token, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, shown, shownText, ...(modelText === undefined ? {} : { modelText }), envSet, apiProviders, transport, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

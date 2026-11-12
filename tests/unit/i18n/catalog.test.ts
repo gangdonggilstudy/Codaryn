@@ -220,6 +220,30 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("the cleanup headings state what a confirmation removes; they do not ask (R-34 I-2)", () => {
+    // The CLI prints them in a preview that asks nothing (the person confirms with --confirm), and
+    // the GUI shows them above its own buttons: a question would wait for an answer that never comes.
+    for (const id of ["cleanup.confirm.runs", "cleanup.confirm.discarded", "cleanup.confirm.not_reverted", "cleanup.confirm.leftovers"] as const) {
+      assert.ok(!MESSAGE_TEXTS.en[id].includes("?"), `en ${id}`);
+      assert.ok(!/까요|습니까|\?/.test(MESSAGE_TEXTS.ko[id]), `ko ${id}`);
+    }
+  });
+
+  test("DR-44: the cleanup texts say what is lost, and name no option the GUI does not have", () => {
+    for (const language of LANGS) {
+      const t = MESSAGE_TEXTS[language];
+      // Shown by the CLI and the GUI alike: the CLI's own option is not in it.
+      assert.ok(!t["cleanup.confirm.not_reverted"].includes("--"), language);
+      // A run not reverted, or only partly reverted, can no longer be reverted without its records.
+      for (const id of ["cleanup.confirm.not_reverted", "cleanup.warning.not_reverted", "cleanup.warning.partly_reverted"] as const) {
+        assert.ok(language === "en" ? /can no longer be reverted/.test(t[id]) : /더는 되돌릴 수 없/.test(t[id]), `${language} ${id}`);
+      }
+    }
+    // discarded_left is conditional (DR-44 (c)): the files may stay or go.
+    assert.match(MESSAGE_TEXTS.en["cleanup.warning.discarded_left"], /\bif\b/);
+    assert.match(MESSAGE_TEXTS.ko["cleanup.warning.discarded_left"], /남으면/);
+  });
+
   test("the revert preview's next line says to revert, not to apply (catalog review, docs/usage.md bf4cb53)", () => {
     // `apply` is a command of its own; the English line matches docs/usage.md, which n01 compares.
     assert.equal(MESSAGE_TEXTS.en["revert.dry_run_next"], "Run again without --dry-run to revert.");

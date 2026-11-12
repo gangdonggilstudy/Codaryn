@@ -218,7 +218,7 @@ Next: codaryn doctor
 - 작업 공간 밖의 변수 파일에 적고 `--vars-file <경로>`로 읽을 수도 있다. 변수 파일은 이 옵션을 줄 때만 읽고 자동으로 찾지 않으며, 이미 설정된 환경 변수가 파일 값보다 우선한다.
 - **`--env-file`은 쓰지 않는다.** Node 26이 그 이름을 스스로 먼저 읽는다. 파일이 없으면 CLI가 시작되기 전에 Node 오류(종료 코드 9)로 끝나고, 있으면 Node가 읽은 뒤 CLI가 `invalid_arguments`로 거부한다.
 - 변수 파일 만들기: `New-Item -ItemType Directory -Force D:\codaryn-settings`와 `Copy-Item .env.example D:\codaryn-settings\.env`로 만들고 편집기에서 값을 채운다. BOM 없는 UTF-8로 저장한다(BOM이 있으면 `invalid_config`). 메모장의 "UTF-8"은 BOM이 없고, PowerShell 5.1의 `Set-Content -Encoding utf8`은 BOM을 붙인다.
-- **변수 파일이 새로 설정한 값은 가릴 값으로 등록되어** 파일 내용, 명령 출력, 기록에 나타나면 가려진다. 예외는 이미 설정돼 있던 변수(Windows는 이름의 대소문자 무시), `CODARYN_CONFIG`와 제공자별 모델·주소 변수(`CODARYN_MODEL`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`), 8자 미만 값이다. 비밀로 등록된 값은 실행하는 명령의 환경에도 넘어가지 않는다(12절).
+- **변수 파일이 새로 설정한 값은 가릴 값으로 등록되어** 파일 내용, 명령 출력, 기록에 나타나면 가려진다. 예외는 이미 설정돼 있던 변수(Windows는 이름의 대소문자 무시), `CODARYN_CONFIG`와 제공자별 모델·주소 변수(`CODARYN_MODEL`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`), 8자 미만 값이다. 가릴 값으로 등록된 값은 실행하는 명령의 환경에도 넘어가지 않는다(12절).
 - 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일, 간편 형식의 `--goal`, 한 줄 실행의 목표에 다음이 있으면 `key_in_file`(종료 2)로 바로 멈추고 아무것도 보내지 않는다.
   - 키 이름의 필드(`apiKey`, `token`, `password` 등)
   - 지금 설정된 키 변수(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)의 값. 16자 이상인 값만 찾는다. 줄바꿈, 공백, 영폭 공백 같은 보이지 않는 문자로 끊겨 있어도 찾는다. 값이 '키 같은 값'(영문자와 숫자가 16자 이상이고 숫자와 대문자·소문자가 다 있거나, 32자 이상이고 숫자와 글자가 있는 값)이면 그 사이에 어떤 문자가 끼어 있어도(이체 선택자, 한글 채움 문자, `.`, `\` 등) 찾는다. 키 같지 않은 값(낱말을 이은 자리표시자 등)은 이 비교를 하지 않으므로 같은 낱말을 띄어 쓴 평범한 목표를 멈추지 않는다.
@@ -451,12 +451,12 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 - 종료: 가장 나쁜 항목이 `ok`(또는 `skipped`)면 0, `fail`이면 1, `warn`이면 3이다. 인자 오류는 `invalid_arguments`(종료 2)다. `--task`와 `--workspace`를 함께 주면 이 오류다.
 - 키는 있음·없음만 적고 값은 내지 않는다. 파일이나 환경에서 읽은 값도 내지 않는다. 키가 있으면 그 키를 보낼 주소와, 그 주소를 정한 곳(제공자의 주소 변수, 설정 필드, 기본값)을 함께 적는다. 예: `OPENAI_API_KEY is set; openai requests send it to https://api.openai.com, the default address`.
 - 설정 파일 항목은 그 파일을 어디서 받았는지 적는다. 기본 위치면 위 예처럼, `--config`로 주면 `the config file given by --config is valid`다.
-- 프로필이나 task 파일이 작업 종류를 고르면, 그 작업 종류의 규칙이 설정의 정책에서 빼는 것을 허용 명령 항목 아래에 알린다(18.1절 "정책 합치기"). 설정 정책에 명령 규칙 하나(`node --test`)와 `restorePathTokens: true`가 있고 프로필 `tidy`가 `workflowRef: "organize"`일 때 `doctor --workspace … --profile tidy`의 실제 출력 일부(main `23daf6b`):
+- 프로필이나 task 파일이 작업 종류를 고르면, 그 작업 종류의 규칙이 설정의 정책에서 빼는 것을 허용 명령 항목 아래에 알린다(18.1절 "정책 합치기"). 설정 정책에 명령 규칙 하나(`node --test`)와 `restorePathTokens: true`가 있고 프로필 `tidy`가 `workflowRef: "organize"`일 때 `doctor --workspace … --profile tidy`의 실제 출력 일부(U-24 문구 브랜치 `f2ed116`(main `266c46d` 위)):
 
 ```
 [skipped] allowed commands          no command is allowed and no command check is configured
-                                    a run of this workflow leaves out command rules of the configured policy: 1
-                                    a run of this workflow does not restore path tokens, although the configured policy allows it
+                                    a run of this task type leaves out command rules of the configured policy: 1
+                                    a run of this task type does not restore path tokens, although the configured policy allows it
 ```
 
   같은 설정에서 `workflowRef: "code"`인 프로필은 빼는 것이 없어 `executables found and allowed by the run's rules: 1`만 나온다.
@@ -557,7 +557,7 @@ codaryn: 오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 �
 
 `run`의 stdout에는 JSON 한 줄만 나온다. 비 ASCII 문자는 `\uXXXX`로 나오므로 어느 코드 페이지에서도 JSON으로 읽힌다.
 
-- **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 경로가 있으면 `protectedChanged`(바뀐 보호 경로 목록)도 있다.
+- **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다.
 - **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절). 메시지에는 값 대신 필드 이름만 적힌다.
 - `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다.
 
@@ -587,7 +587,7 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 ```
 
 - 그 실행의 `result.json`과 `journal.jsonl`(가림본)만 읽어 Markdown 요약을 낸다. 아무것도 바꾸지 않고 잠금도 잡지 않는다.
-- 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차와 통과하지 않은 검증기의 근거. 검증기는 순번), 보호 경로, 변경, 사용량(한도 대비, 거부된 도구 호출 수), 검사하지 않은 범위.
+- 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차와 통과하지 않은 검증기의 근거. 검증기는 순번), 보호 대상, 변경, 사용량(한도 대비, 거부된 도구 호출 수), 검사하지 않은 범위.
 - 종료: `complete`(0)는 두 파일을 모두 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. 이때는 기록만으로 만들고 "Result: none"과 기록의 종료 기록을 적는다.
 - 오류(종료 2): 그 runId의 기록이 없으면 `run_not_found`, 기록을 읽거나 해석할 수 없으면 `invalid_run_record`, 작업 공간이 없으면 `workspace_not_found`다.
 - 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로, 실행 중 허용된 명령이 기록을 바꿀 수 있다.
@@ -644,7 +644,7 @@ changes of run 20261112T081531Z-dfd155bd, masked with the secrets registered now
 + - 개발 담당: 오류 문구 목록 정리
 ```
 
-- 글은 **지금 등록된 가릴 값으로 가린 것**이다. 쓰기 도구가 실행 때 가린 표기의 다이제스트를 기록해 두고, 지금 다시 가린 글이 그것과 같을 때만 글을 보인다. 비밀 자리는 토큰으로 보인다. 예: 비밀로 등록한 값이 든 줄은 `+ - [[CODARYN_SECRET:f44831dde79cb2f6]] 개편은 다음 주에 시작한다.`처럼 나온다.
+- 글은 **지금 등록된 가릴 값으로 가린 것**이다. 쓰기 도구가 실행 때 가린 표기의 다이제스트를 기록해 두고, 지금 다시 가린 글이 그것과 같을 때만 글을 보인다. 가릴 값 자리는 토큰으로 보인다. 예: 가릴 값이 든 줄은 `+ - [[CODARYN_SECRET:f44831dde79cb2f6]] 개편은 다음 주에 시작한다.`처럼 나온다.
 - 다음 경우에는 그 파일의 경로와 상태만 보이고(JSON의 `unavailable`은 `masking_unverified`), 머리에 그 사실을 한 줄로 알린다.
   - 실행 뒤에 파일이 바뀌었을 때(상태 `changed_since_run`). 예: 위 실행 뒤 `summary.md`에 한 줄을 더하면
     ```
@@ -694,7 +694,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 다른 제공자의 키 변수 값 중 20자 이상인 것. 예: openai 실행에서 `ANTHROPIC_API_KEY` 값이 작업 공간 파일에 있으면 모델에 가려져 간다. 20자 미만이면 등록하지 않는다(`x` 같은 자리표시자가 흔한 글자를 가리지 않게)
   - 변수 파일이 새로 설정한 값(4절)
 - **가리는 범위:** 모델에 보내는 내용과 실행 기록 전체. 목표, 파일 내용, 경로, 명령 출력, 검증 근거, 오류 문구가 모두 해당한다.
-- **가리는 형태:** 원문, Base64(패딩 유무, URL 문자 집합), URL 인코딩(대·소문자), JSON 이스케이프, 16진(대·소문자), 여러 줄인 가릴 값의 LF와 CRLF 표기. 가려진 자리는 토큰으로 보이고, 대응표는 실행 중 메모리에만 있다. 공백, 줄바꿈, 영폭 공백 같은 보이지 않는 문자로 끊긴 비밀도 가린다. 키 같은 값(4절 "키")이면 `.`이나 이체 선택자 같은 다른 문자로 끊긴 것도 가린다. 키 같지 않은 값이 그런 문자로 끊긴 것은 가리지 않는다(16절 "키 거부와 가림의 빈틈").
+- **가리는 형태:** 원문, Base64(패딩 유무, URL 문자 집합), URL 인코딩(대·소문자), JSON 이스케이프, 16진(대·소문자), 여러 줄로 된 가릴 값의 LF와 CRLF 표기. 가려진 자리는 토큰으로 보이고, 대응표는 실행 중 메모리에만 있다. 공백, 줄바꿈, 영폭 공백 같은 보이지 않는 문자로 끊긴 가릴 값도 가린다. 키 같은 값(4절 "키")이면 `.`이나 이체 선택자 같은 다른 문자로 끊긴 것도 가린다. 키 같지 않은 값이 그런 문자로 끊긴 것은 가리지 않는다(16절 "키 거부와 가림의 빈틈").
 - 가릴 값이 든 줄을 모델이 고치거나 옮기는 변경은 전체가 거부된다(`protected_span_violation`). 다른 줄은 고칠 수 있다.
 - 실행하는 명령의 환경에는 `PATH`, `PATHEXT`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `TEMP`, `TMP`, `TMPDIR`, `HOME`, `USERPROFILE`, `LANG`만 넘어간다. 키는 넘어가지 않고, 값에 등록된 가릴 값이 든 변수도 넘기지 않는다. 그래서 변수 파일로 설정한 8자 이상의 값(예: 긴 `PATH`)은 명령에 전달되지 않는다.
 
@@ -782,7 +782,7 @@ node --test dist/tests/live/anthropic-live.js
     - 피하는 법: 가릴 값이 짧거나 한 가지 대소문자뿐이면, 그 값이 이상한 문자로 끊겨 들어 있을 수 있는 파일은 작업 공간에 두지 않는다.
   - **찾지 못하는 끊김:** 등록되지 않은 키가 보이는 공백으로 끊긴 경우(`sk-proj-` 키를 공백으로 가른 목표가 통과했다, main `23daf6b`), 등록된 키가 `&#8203;` 같은 문자 참조로 끊긴 경우.
   - 키 변수에 낱말을 이은 자리표시자(예: `not-needed-for-local-server`)를 두어도 같은 낱말을 띄어 쓴 평범한 목표는 이제 멈추지 않는다(키 같은 값만 영문자·숫자로 비교한다).
-- **정책에서 빠진 것의 알림이 한 줄에 길게 이어진다(DR-43 (b), 검토 R-37 낮음):** 작업 종류의 규칙이 설정·task의 정책과 검증기에서 뺀 것은 실행 시작 줄 하나에 ` · `로 이어 붙는다(18.1절 "정책 합치기"의 예). 둘만 빠져도 영어 줄이 227자라 좁은 터미널에서는 여러 줄로 접혀 묻히기 쉽다. 끝 요약과 `report`에는 나오지 않는다. 실행 전에 `doctor`를 같은 옵션으로 돌려 보면 한 항목씩 나뉘어 나온다(7절). `run --workflow <id>`는 `doctor`에 같은 옵션이 없어 미리 볼 수 없다. 프로필이나 task 파일로 고르면 볼 수 있다.
+- **정책에서 빠진 것의 알림이 한 줄에 길게 이어진다(DR-43 (b), 검토 R-37 낮음):** 작업 종류의 규칙이 설정·task의 정책과 검증기에서 뺀 것은 실행 시작 줄 하나에 ` · `로 이어 붙는다(18.1절 "정책 합치기"의 예). 둘만 빠져도 영어 줄이 229자라 좁은 터미널에서는 여러 줄로 접혀 묻히기 쉽다. 끝 요약과 `report`에는 나오지 않는다. 실행 전에 `doctor`를 같은 옵션으로 돌려 보면 한 항목씩 나뉘어 나온다(7절). `run --workflow <id>`는 `doctor`에 같은 옵션이 없어 미리 볼 수 없다. 프로필이나 task 파일로 고르면 볼 수 있다.
 - **OpenAI 제공자:** 실제 OpenAI API로는 점검하지 않았다. 추론 항목은 암호문이라 가림이 볼 수 없고, 다음 요청에 받은 그대로 다시 간다([민감정보 처리](privacy.md) "OpenAI 제공자").
 - **변경 보기의 글:** `changes`는 지금 등록된 가릴 값으로 가린 글이 실행 때와 같을 때만 글을 보인다. 실행 뒤 바뀐 파일, 가릴 값이 바뀐 경우, 쓰기 도구가 기록을 남기기 전의 실행은 경로와 상태만 보인다(10절 "변경 보기").
 - **폐기 보관함:** 폐기한 파일은 `.codaryn\discarded\`에 쌓인다. `cleanup --discarded-older-than <일> --confirm … --delete-discarded`로만 지운다(18.8절).
@@ -902,14 +902,14 @@ node --test dist/tests/live/anthropic-live.js
   - 계획 동작(`planActions`): 설정 정책이 적었을 때만 양쪽에 다 있는 것으로 줄인다. 적지 않았으면 작업 종류의 것을 그대로 쓴다.
   - 경로 토큰 되살리기(`restorePathTokens`): 양쪽이 모두 허용할 때만 켜진다.
   - 빠진 것은 `doctor`가 알리고(7절의 예), 실행 시작 줄에 이어 붙으며, 실행 기록의 `run_started`에 종류와 개수만 남는다. 확인(main `23daf6b`): 위 7절의 설정으로 `run --workspace … --workflow organize`를 하면 기록에 `commands_dropped` 1과 `restore_path_tokens_off` 1이 남았다.
-  - 실행 시작 줄의 실제 출력(main `bded611`). task 파일이 `workflowRef`로 고른 설정의 작업 종류가 경로 토큰 되살리기를 끄고 같은 id의 검증기 하나를 뺀 경우다:
+  - 실행 시작 줄의 실제 출력(U-24 문구 브랜치 `f2ed116`(main `266c46d` 위)). task 파일이 `workflowRef`로 고른 설정의 작업 종류가 경로 토큰 되살리기를 끄고 같은 id의 검증기 하나를 뺀 경우다:
 
     ```
-    codaryn: run started — provider scripted · the workflow's own rules turn off restoring path tokens, which the configured policy allows · the workflow's own checks leave out checks given in the config or task with the same id: 1
+    codaryn: run started — provider scripted · the task type's own rules turn off restoring path tokens, which the configured policy allows · the task type's own checks leave out checks given in the config or task with the same id: 1
     ```
 
-    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류(workflow) 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다 · 작업 종류(workflow) 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
-  - 검증기(결정 DR-43 (a)): 작업 종류 정의의 검증기는 늘 실행된다. 설정·프로필·task의 검증기는 그 뒤에 더해지고, 정의의 검증기와 id가 같은 것만 빠진다(정의의 것이 판정한다). 빈 목록(`[]`)도 정의의 검증기를 지우지 않는다. id가 같은데 내용이 다른 검증기가 빠지면 `doctor`가 `a run of this workflow leaves out checks given in the config or task with the same id as its own: 1`처럼 알리고, `run_started`에 `verifiers_dropped`가 남는다.
+    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다 · 작업 종류 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
+  - 검증기(결정 DR-43 (a)): 작업 종류 정의의 검증기는 늘 실행된다. 설정·프로필·task의 검증기는 그 뒤에 더해지고, 정의의 검증기와 id가 같은 것만 빠진다(정의의 것이 판정한다). 빈 목록(`[]`)도 정의의 검증기를 지우지 않는다. id가 같은데 내용이 다른 검증기가 빠지면 `doctor`가 `a run of this task type leaves out checks given in the config or task with the same id as its own: 1`처럼 알리고, `run_started`에 `verifiers_dropped`가 남는다.
     - 확인(main `6df2eae`): 설정의 작업 종류 `notes`에 검증기 `has-summary`(`summary.md`가 있다)를 두고, task 파일이 `workflowRef: "notes"`로 같은 id를 더 느슨하게(`a.txt`가 있다) 적고 `a-kept`를 더하면, `has-summary`(정의의 것)와 `a-kept`가 실행됐다. `doctor --task`가 위 줄을 냈다.
 - **한도:** 작업 종류 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
 - **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절). 한도가 없는 설정 파일로 `plan --workspace …`를 하면 오류 설명 끝에 그 안내가 한 줄 더 나온다(main `bded611`의 실제 출력, stderr):
@@ -1025,7 +1025,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T055810Z-56c6d7c5
 - action 3: discard `inbox/old-draft.tmp` (kept as `.codaryn/discarded/20261112T055919Z-fa06002b/2`)
 ```
 
-  이어서 검증(`inventory`와 task 검증기의 확인 항목), 보호 경로, 사용량, 되돌리기 명령(`Undo`), 확인하지 않은 범위가 나온다. 이 보고서는 다른 실행에서 만든 것이라 위의 id와 다르다.
+  이어서 검증(`inventory`와 task 검증기의 확인 항목), 보호 대상, 사용량, 되돌리기 명령(`Undo`), 확인하지 않은 범위가 나온다. 이 보고서는 다른 실행에서 만든 것이라 위의 id와 다르다.
 
 **되돌리기:** `revert --dry-run`은 아무것도 바꾸지 않고 판정만 보인다(실제 출력, stderr).
 
@@ -1188,7 +1188,7 @@ node dist/src/cli/main.js cleanup --workspace D:\work\notes --older-than 30 --co
   - `--confirm <digest>`: 미리보기가 보인 계획 그대로일 때만 지운다. 미리보기 뒤에 새 실행이나 되돌리기로 상태가 바뀌면 `plan_changed`(종료 3)이고 아무것도 지우지 않는다. 다시 미리 본다.
   - `--include-not-reverted`: 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록을 지운다. 없으면 그 기록은 남고(`not_reverted_not_confirmed`) 나머지만 지워진다(종료 0). 남은 적용 실행이 쓰는 계획 실행도 함께 남는다. 지운 실행은 더는 되돌릴 수 없다.
   - `--delete-discarded`: 고른 폐기 보관함(사람의 파일)을 지운다. 없으면 폐기 보관함은 남는다. 적용 실행의 기록만 지우고 폐기 보관함을 남기면 그 파일은 되돌리기로 제자리에 돌아가지 않는다. 미리보기가 그 적용 실행 줄에 이것을 알린다.
-- 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, main `6df2eae`):
+- 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, U-24 문구 브랜치 `f2ed116`(main `266c46d` 위). 실행 id와 다이제스트는 실행마다 다르다):
 
 ```
 Run records: 2 (30151 bytes)
@@ -1201,7 +1201,7 @@ Run records to remove: 2 (30151 bytes)
 - 20261112T132239Z-af1ad371: 5 file(s), 15174 bytes
 
 Nothing was removed. To remove the run records, run the same command with --confirm 3c7ebbb02bcc.
-The records of 1 run(s) not reverted, or only partly, are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.
+The records of 1 run(s) not reverted, only partly reverted, or whose records cannot be checked are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.
 ```
 
   - 그 다이제스트로 `--confirm`만 주면 `Removed: run records 1, discarded-files folders 0, 15174 bytes`이고, 되돌리지 않은 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
@@ -1213,5 +1213,5 @@ The records of 1 run(s) not reverted, or only partly, are kept unless you add --
 - 지운 것은 `.codaryn\cleanup.jsonl`에 개수와 바이트만 남는다(이름과 경로는 없다).
 - `--json`이면 `kind:"cleanup"` JSON 한 줄이다(`mode` `preview`, `applied`, `plan_changed`). 터미널 질문은 없다. 지우는 길은 다이제스트 확인뿐이다.
 - 한국어 출력에서도 크기 조각(`N file(s), N bytes`)과 끝의 안내 줄은 아직 영어다.
-- 확인 범위: 위 출력과 `--confirm`·`--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
+- 확인 범위: 위 출력과 `--confirm`만 준 결과는 `f2ed116`, `--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
 - **계획 실행의 기록**은 그 계획의 적용 실행을 되돌리는 데 필요하다. 손으로 지우면 그 적용은 되돌릴 수 없다(`revert`는 `plan_run_missing`, 종료 2). 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.

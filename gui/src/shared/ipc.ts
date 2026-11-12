@@ -16,6 +16,9 @@ export const IPC_CHANNELS = {
   tree: "codaryn:workspace:tree",
   reveal: "codaryn:workspace:reveal",
   doctor: "codaryn:doctor:run",
+  settings: "codaryn:settings:read",
+  listModels: "codaryn:models:list",
+  selectModel: "codaryn:models:select",
 } as const;
 
 /** Main → renderer: a workspace was opened from outside the window (the command line of a second start). */
@@ -185,3 +188,183 @@ export interface TreeEntryView {
 export type TreeReply =
   | { readonly ok: true; readonly entries: readonly TreeEntryView[]; readonly total: number; readonly offset: number; readonly nextOffset: number | null }
   | { readonly ok: false; readonly code: string };
+
+/** A model provider name as the app layer gives it (DR-22). */
+export const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+const MAX_TEXT = 1000;
+const MAX_ITEMS = 500;
+const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+const shortText = (value: unknown): value is string => typeof value === "string" && value.length <= MAX_TEXT;
+const textList = (value: unknown): value is string[] => Array.isArray(value) && value.length <= MAX_ITEMS && value.every(shortText);
+const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** The code of an engine host value that is not ok, or "host_error". */
+export function hostCodeOf(value: unknown): string {
+  const code = isObj(value) ? value["code"] : undefined;
+  return typeof code === "string" && ERROR_CODE.test(code) ? code : "host_error";
+}
+
+/** `listModels` arguments: `{provider}`. */
+export function parseProviderArgs(value: unknown): { readonly provider: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["provider"])) return null;
+  const provider = value["provider"];
+  return typeof provider === "string" && PROVIDER_PATTERN.test(provider) ? { provider } : null;
+}
+
+/** `selectModel` arguments: `{entry}`, an id the last model list gave out. */
+export function parseEntryArgs(value: unknown): { readonly entry: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["entry"])) return null;
+  return isHandle(value["entry"]) ? { entry: value["entry"] } : null;
+}
+
+export const SETTINGS_FILE_SOURCES = ["argument", "environment", "default"] as const;
+
+/** One profile (N-8) as the settings screen shows it: what it changes, never a value to edit. */
+export interface ProfileView {
+  readonly name: string;
+  readonly workflowRef: string | null;
+  /** Limit name and value (null: no limit), as the profile sets them. */
+  readonly limits: readonly (readonly [string, number | null])[];
+  /** Executables the profile allows to run. */
+  readonly commands: readonly string[];
+  readonly verifiers: number;
+  readonly protectedPaths: number;
+}
+
+/**
+ * GU-6 (3.10): what the settings screen shows. No full path of the config file (only its display
+ * form), no key value (only whether one is available), no secret value.
+ */
+export interface SettingsView {
+  readonly file: { readonly display: string; readonly source: (typeof SETTINGS_FILE_SOURCES)[number]; readonly exists: boolean } | null;
+  readonly model: string | null;
+  readonly language: "ko" | "en" | null;
+  readonly profiles: readonly ProfileView[];
+  readonly workflows: { readonly builtin: readonly string[]; readonly config: readonly string[] };
+  readonly keyAvailable: boolean;
+  readonly providers: readonly string[];
+  /** Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). */
+  readonly env: { readonly model: boolean; readonly language: boolean };
+}
+
+export type SettingsReply = { readonly ok: true; readonly view: SettingsView } | { readonly ok: false; readonly code: string };
+
+function toProfileView(value: unknown): ProfileView | null {
+  if (!isObj(value)) return null;
+  const { name, workflowRef, limits, commands, verifiers, protectedPaths } = value;
+  if (!shortText(name) || !(workflowRef === null || shortText(workflowRef)) || !textList(commands) || !count(verifiers) || !count(protectedPaths)) return null;
+  if (!Array.isArray(limits) || limits.length > 32) return null;
+  const pairs: (readonly [string, number | null])[] = [];
+  for (const pair of limits) {
+    if (!Array.isArray(pair) || pair.length !== 2) return null;
+    const [key, limit] = pair as unknown[];
+    if (typeof key !== "string" || !/^[A-Za-z]{1,40}$/.test(key)) return null;
+    if (!(limit === null || (typeof limit === "number" && Number.isFinite(limit)))) return null;
+    pairs.push([key, limit as number | null]);
+  }
+  return { name, workflowRef: workflowRef as string | null, limits: pairs, commands, verifiers, protectedPaths };
+}
+
+/** The engine host's settings value, checked field by field. `env` is added by the main process. */
+export function toSettingsView(value: unknown, env: SettingsView["env"]): SettingsReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail: SettingsReply = { ok: false, code: "host_error" };
+  const view = value["view"];
+  if (!isObj(view)) return fail;
+  const { file, model, language, profiles, workflows, keyAvailable, providers } = view;
+  let fileView: SettingsView["file"] = null;
+  if (file !== null) {
+    if (!isObj(file) || !shortText(file["display"]) || typeof file["exists"] !== "boolean") return fail;
+    const source = file["source"];
+    if (typeof source !== "string" || !(SETTINGS_FILE_SOURCES as readonly string[]).includes(source)) return fail;
+    fileView = { display: file["display"], source: source as (typeof SETTINGS_FILE_SOURCES)[number], exists: file["exists"] };
+  }
+  if (!(model === null || shortText(model)) || !(language === null || language === "ko" || language === "en")) return fail;
+  if (!Array.isArray(profiles) || profiles.length > MAX_ITEMS || !isObj(workflows) || !textList(workflows["builtin"]) || !textList(workflows["config"])) return fail;
+  if (typeof keyAvailable !== "boolean" || !textList(providers) || !providers.every((name) => PROVIDER_PATTERN.test(name))) return fail;
+  const profileViews: ProfileView[] = [];
+  for (const profile of profiles) {
+    const checked = toProfileView(profile);
+    if (checked === null) return fail;
+    profileViews.push(checked);
+  }
+  return {
+    ok: true,
+    view: {
+      file: fileView,
+      model: model as string | null,
+      language: language as "ko" | "en" | null,
+      profiles: profileViews,
+      workflows: { builtin: workflows["builtin"], config: workflows["config"] },
+      keyAvailable,
+      providers,
+      env,
+    },
+  };
+}
+
+/** One listed model as the engine host gives it: `id` exactly as listed (kept by the main process), `shown` for the window. */
+export interface HostModelEntry {
+  readonly number: number;
+  readonly id: string;
+  readonly shown: string;
+  readonly name: string;
+}
+
+export interface ModelCurrentView {
+  readonly id: string;
+  readonly source: "CODARYN_MODEL" | "config";
+  readonly listed: boolean;
+}
+
+export type HostModelList =
+  | { readonly ok: true; readonly provider: string; readonly models: readonly HostModelEntry[]; readonly current: ModelCurrentView | null }
+  | { readonly ok: false; readonly code: string };
+
+/** The engine host's model list, checked field by field. */
+export function toHostModelList(value: unknown): HostModelList {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail: HostModelList = { ok: false, code: "host_error" };
+  const { provider, models, current } = value;
+  if (typeof provider !== "string" || !PROVIDER_PATTERN.test(provider) || !Array.isArray(models) || models.length > MAX_ITEMS) return fail;
+  const entries: HostModelEntry[] = [];
+  for (const entry of models) {
+    if (!isObj(entry)) return fail;
+    const { number, id, shown, name } = entry;
+    if (!count(number) || typeof id !== "string" || !/^[!-~]{1,200}$/.test(id) || !shortText(shown) || !shortText(name)) return fail;
+    entries.push({ number, id, shown, name });
+  }
+  let currentView: ModelCurrentView | null = null;
+  if (current !== null) {
+    if (!isObj(current) || !shortText(current["id"]) || (current["source"] !== "CODARYN_MODEL" && current["source"] !== "config") || typeof current["listed"] !== "boolean") {
+      return fail;
+    }
+    currentView = { id: current["id"], source: current["source"], listed: current["listed"] };
+  }
+  return { ok: true, provider, models: entries, current: currentView };
+}
+
+/** One listed model as the window sees it: an entry id to choose it by, never the id that is sent. */
+export interface ModelEntryView {
+  readonly entry: string;
+  readonly number: number;
+  readonly id: string;
+  readonly name: string;
+}
+
+export type ModelsReply =
+  | { readonly ok: true; readonly provider: string; readonly models: readonly ModelEntryView[]; readonly current: ModelCurrentView | null }
+  | { readonly ok: false; readonly code: string };
+
+export type SelectModelReply =
+  | { readonly ok: true; readonly selected: { readonly id: string; readonly created: boolean; readonly overridden: boolean } }
+  | { readonly ok: false; readonly code: string };
+
+/** The engine host's answer to `selectModel`, checked. */
+export function toSelectModelReply(value: unknown): SelectModelReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const selected = value["selected"];
+  if (!isObj(selected) || !shortText(selected["id"]) || typeof selected["created"] !== "boolean" || typeof selected["overridden"] !== "boolean") return { ok: false, code: "host_error" };
+  return { ok: true, selected: { id: selected["id"], created: selected["created"], overridden: selected["overridden"] } };
+}

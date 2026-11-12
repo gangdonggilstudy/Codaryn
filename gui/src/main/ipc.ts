@@ -8,15 +8,33 @@
 import { isAbsolute, join, relative } from "node:path";
 import { dialog, ipcMain, shell } from "electron";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
-import { IPC_CHANNELS, doctorMessageIds, isNoArgs, parseDoctorArgs, parseIdArg, parseRevealArgs, parseTreeArgs, toDoctorView } from "../shared/ipc.js";
-import type { DoctorReply, InfoView, OpenFolderReply, OpenReply, RecentView, TreeReply } from "../shared/ipc.js";
+import {
+  IPC_CHANNELS,
+  doctorMessageIds,
+  isNoArgs,
+  parseDoctorArgs,
+  parseEntryArgs,
+  parseIdArg,
+  parseProviderArgs,
+  parseRevealArgs,
+  parseTreeArgs,
+  toDoctorView,
+  toHostModelList,
+  toSelectModelReply,
+  toSettingsView,
+} from "../shared/ipc.js";
+import type { DoctorReply, InfoView, ModelsReply, OpenFolderReply, OpenReply, RecentView, SelectModelReply, SettingsReply, SettingsView, TreeReply } from "../shared/ipc.js";
 import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
+import type { ModelEntries } from "./model-entries.js";
 import type { Workspaces } from "./workspaces.js";
 
 const DOCTOR_TIMEOUT_MS = 60_000;
 const MESSAGES_TIMEOUT_MS = 10_000;
 const TREE_TIMEOUT_MS = 30_000;
+const SETTINGS_TIMEOUT_MS = 30_000;
+/** Listing and choosing a model ask the provider's API (Y-2): the request time limit and retries fit in this. */
+const MODELS_TIMEOUT_MS = 120_000;
 
 export interface IpcDeps {
   readonly window: () => BrowserWindow | null;
@@ -26,6 +44,10 @@ export interface IpcDeps {
   readonly osLocale: () => string;
   /** A workspace named on the command line of this start, already opened. */
   readonly initialWorkspace: () => { readonly handle: string; readonly name: string } | null;
+  /** GU-6: the models of the last list, by entry id. */
+  readonly modelEntries: ModelEntries;
+  /** Whether CODARYN_MODEL and CODARYN_LANG are set in the app's environment (never their values). */
+  readonly envFacts: () => SettingsView["env"];
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -153,5 +175,40 @@ export function registerIpc(deps: IpcDeps): void {
     const labels = await texts(state.host, deps.osLocale(), doctorMessageIds(view));
     const name = workspace === null ? null : (workspace.split(/[\\/]/).filter((part) => part.length > 0).pop() ?? workspace);
     return { ok: true, view, labels: labels?.texts ?? {}, workspaceName: name };
+  });
+
+  // GU-6 (3.10): settings, models. The config file is read and written by the app layer only.
+  handle(IPC_CHANNELS.settings, async (args): Promise<SettingsReply> => {
+    if (!isNoArgs(args)) return { ok: false, code: "invalid_args" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("settings", {}, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toSettingsView(response.value, deps.envFacts());
+  });
+
+  handle(IPC_CHANNELS.listModels, async (args): Promise<ModelsReply> => {
+    const parsed = args.length === 1 ? parseProviderArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    deps.modelEntries.clear();
+    const response = await state.host.call("listModels", { provider: parsed.provider }, MODELS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const list = toHostModelList(response.value);
+    if (!list.ok) return list;
+    return { ok: true, provider: list.provider, models: deps.modelEntries.issue(list.provider, list.models), current: list.current };
+  });
+
+  handle(IPC_CHANNELS.selectModel, async (args): Promise<SelectModelReply> => {
+    const parsed = args.length === 1 ? parseEntryArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const chosen = deps.modelEntries.resolve(parsed.entry);
+    if (chosen === null) return { ok: false, code: "unknown_entry" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("selectModel", { provider: chosen.provider, model: chosen.id }, MODELS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toSelectModelReply(response.value);
   });
 }

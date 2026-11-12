@@ -1,5 +1,6 @@
 // Runs the GU-1/GU-2 smoke test (tests/smoke/smoke.ts) in the real Electron and checks what it saw.
-// The app gets a clean environment (no API key, a config file that does not exist, this Node 26+
+// The app gets a clean environment (the fixtures' fake API key, a config file pointing at a loopback
+// fake API that this script runs, this Node 26+
 // as the engine host's Node, DR-26), a fresh Chromium profile and a fresh gui-state.json. Two
 // workspaces are made in the temporary folder and removed afterwards. Needs `npm run build` here
 // and in the repository root.
@@ -8,7 +9,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const gui = fileURLToPath(new URL("../../", import.meta.url));
 const electron = join(gui, "node_modules", "electron", "dist", process.platform === "win32" ? "electron.exe" : "electron");
@@ -23,6 +24,35 @@ if (!existsSync(electron)) {
 
 // A name with the shape of an API key, built here so no source file holds one. Fake value.
 const KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
+
+// GU-6 onward: a fake Anthropic API on a loopback port (the root build's test fake; never the real
+// API), the fixtures' fake key, and a config file that points the app at the fake.
+const rootDist = join(gui, "..", "dist");
+const fromRoot = (...parts) => import(pathToFileURL(join(rootDist, ...parts)).href);
+const fakeApi = await fromRoot("tests", "support", "fake-anthropic.js");
+const fakeModels = await fromRoot("tests", "support", "fake-models.js");
+const { FAKE_API_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
+const { ANTHROPIC_API_KEY_ENV } = await fromRoot("src", "contracts", "index.js");
+const closeFake = [];
+const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, [], {
+  models: { models: [fakeModels.fakeModel("fake-model-a"), fakeModels.fakeModel("fake-model-b")] },
+});
+const configDir = join(gui, "build", "smoke-config");
+rmSync(configDir, { recursive: true, force: true });
+mkdirSync(configDir, { recursive: true });
+const configFile = join(configDir, "config.json");
+writeFileSync(
+  configFile,
+  JSON.stringify({
+    schemaVersion: 1,
+    model: "fake-model-a",
+    maxOutputTokens: 1024,
+    apiBaseUrl: api.url,
+    requestTimeoutMs: 20000,
+    maxRetries: 0,
+    profiles: { doc: { limits: { maxModelTurns: 5 } } },
+  }),
+);
 
 const first = mkdtempSync(join(tmpdir(), "codaryn-smoke-one-"));
 writeFileSync(join(first, "first.txt"), "one");
@@ -46,7 +76,9 @@ for (const [name, value] of Object.entries(process.env)) {
   if (/^(ANTHROPIC_API_KEY|CODARYN_CONFIG|CODARYN_LANG|CODARYN_MODEL|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|npm_node_execpath)$/i.test(name)) continue;
   env[name] = value;
 }
-env.CODARYN_CONFIG = join(gui, "build", "smoke-no-config.json");
+env.CODARYN_CONFIG = configFile;
+// The fixtures' fake key, as the root tests set it (tests/support/cli.ts).
+env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
 
@@ -64,7 +96,27 @@ try {
 }
 
 for (const target of [result, profile, stateDir]) rmSync(target, { recursive: true, force: true });
-const run = spawnSync(electron, [join(gui, "build", "tests", "smoke", "smoke.js"), first], { cwd: gui, env, stdio: "inherit", timeout: 180_000 });
+// Started without blocking: the fake API in this process must answer while the app runs.
+const run = await new Promise((resolve) => {
+  const child = spawn(electron, [join(gui, "build", "tests", "smoke", "smoke.js"), first], { cwd: gui, env, stdio: "inherit" });
+  const timer = setTimeout(() => child.kill(), 240_000);
+  child.on("error", (error) => {
+    clearTimeout(timer);
+    resolve({ status: null, error });
+  });
+  child.on("exit", (status) => {
+    clearTimeout(timer);
+    resolve({ status, error: undefined });
+  });
+});
+const apiRequests = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
+for (const close of closeFake) await close();
+let configModel = null;
+try {
+  configModel = JSON.parse(readFileSync(configFile, "utf8")).model ?? null;
+} catch {
+  configModel = "unreadable";
+}
 for (const dir of [first, second]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 // The link itself is removed, not what it points to; then the folder it pointed to.
 try {
@@ -80,7 +132,9 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "doctor,forgetRecent,info,onWorkspaceOpened,openFolder,openRecent,recent,reveal,tree";
+const API = "doctor,forgetRecent,info,listModels,onWorkspaceOpened,openFolder,openRecent,recent,reveal,selectModel,settings,tree";
+seen.apiRequests = apiRequests;
+seen.configModel = configModel;
 
 const expected = [
   ["initialTree", (v) => v === "ok"],
@@ -125,6 +179,20 @@ const expected = [
   ["windowOpen", (v) => v === "blocked"],
   ["urlAfterNavigation", (v) => v === "app://codaryn/index.html"],
   ["hostNode", (v) => typeof v === "string" && Number(v.split(".")[0]) >= 26],
+  // GU-6: the settings screen, the model list (asked for, from the fake API) and a model choice.
+  ["settingsReady", (v) => v === "ok"],
+  // N-14: a file the environment names is shown by the variable name, not its path.
+  ["settingsFile", (v) => v.source === "environment" && typeof v.text === "string" && v.text.includes("CODARYN_CONFIG") && !v.text.includes("smoke-config")],
+  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc"])],
+  ["settingsKey", (v) => v === "available"],
+  ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(api.url)],
+  ["modelsBeforeAsking", (v) => v === 0],
+  ["modelsListed", (v) => v === "2"],
+  ["modelChosen", (v) => v === "fake-model-b"],
+  ["modelForgedEntry", (v) => v.ok === false && v.code === "unknown_entry"],
+  ["modelIdAsEntry", (v) => v.ok === false && v.code === "invalid_args"],
+  ["configModel", (v) => v === "fake-model-b"],
+  ["apiRequests", (v) => rows(v).length >= 2 && rows(v).every((r) => r.path.startsWith("/v1/models") && r.method === "GET" && r.key === true)],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

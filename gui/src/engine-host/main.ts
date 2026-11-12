@@ -38,6 +38,8 @@ function writeLine(line: string): void {
 interface EngineAppModule {
   createNodeAppEnvironment(): Promise<unknown>;
   createCodarynApp(environment: unknown): HostApp;
+  /** DR-22: the providers the app layer connects (an array of names). */
+  readonly CONNECTED_MODEL_PROVIDERS?: unknown;
 }
 
 interface EngineWorkspaceModule {
@@ -107,6 +109,10 @@ async function main(): Promise<number> {
       return { language, texts };
     },
   };
+  const providers = Array.isArray(appModule.CONNECTED_MODEL_PROVIDERS)
+    ? appModule.CONNECTED_MODEL_PROVIDERS.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name))
+    : [];
+  const shown = (text: string): string => textSafety.hideKeys(textSafety.cleanText(text), process.env["ANTHROPIC_API_KEY"] ?? null);
   const tree = createTreeLister({
     createWorkspace: (options) => workspaceModule.createWorkspace(options),
     cleanText: (text) => textSafety.cleanText(text),
@@ -116,7 +122,7 @@ async function main(): Promise<number> {
   });
   writeLine(encodeLine({ v: 1, type: "ready", node }));
   process.stdin.setEncoding("utf8");
-  await serve(process.stdin, { app, messages, tree, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, shown, providers, write: writeLine, log });
   return 0;
 }
 

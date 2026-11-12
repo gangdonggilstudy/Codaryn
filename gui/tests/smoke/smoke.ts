@@ -137,6 +137,23 @@ startGui({
       results["lang"] = await js("document.documentElement.lang");
       results["url"] = contents.getURL();
 
+      // 5b. GU-6: the settings screen; the model list only when asked for; choosing a model.
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      results["settingsReady"] = await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["settingsFile"] = await js(
+        "(() => { const p = document.getElementById('settings-file'); return { source: p?.getAttribute('data-source') ?? null, text: p?.textContent ?? null }; })()",
+      );
+      results["settingsProfiles"] = await js("[...document.querySelectorAll('#settings-profiles [data-profile]')].map((li) => li.getAttribute('data-profile'))");
+      results["settingsKey"] = await js("document.querySelector('#settings-key [data-key]')?.getAttribute('data-key') ?? null");
+      results["settingsText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+      results["modelsBeforeAsking"] = await js("document.querySelectorAll('.models[data-models-ready]').length");
+      await js("document.querySelector('[data-list-models]')?.click(); true");
+      results["modelsListed"] = await waitFor("document.querySelector('.models')?.getAttribute('data-models-ready') ?? null");
+      await js("[...document.querySelectorAll('.models li[data-model]')].find((li) => li.getAttribute('data-model') === 'fake-model-b')?.querySelector('button')?.click(); true");
+      results["modelChosen"] = await waitFor("document.getElementById('settings-model-outcome')?.getAttribute('data-selected') ?? null");
+      results["modelForgedEntry"] = await js(`window.codaryn.selectModel(${JSON.stringify("0".repeat(32))})`);
+      results["modelIdAsEntry"] = await js("window.codaryn.selectModel('fake-model-a')");
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",

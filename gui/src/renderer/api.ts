@@ -5,7 +5,7 @@
  * directory.
  */
 
-import type { DoctorReply, InfoView, OpenReply, RecentView, TreeEntryView, TreeReply } from "../shared/ipc.js";
+import type { DoctorReply, InfoView, ModelsReply, OpenReply, ProfileView, RecentView, SelectModelReply, SettingsReply, TreeEntryView, TreeReply } from "../shared/ipc.js";
 
 export interface CodarynApi {
   info(): Promise<unknown>;
@@ -16,6 +16,9 @@ export interface CodarynApi {
   tree(workspace: string, node: string | null, offset: number): Promise<unknown>;
   reveal(workspace: string, node: string): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
+  settings(): Promise<unknown>;
+  listModels(provider: string): Promise<unknown>;
+  selectModel(entry: string): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -88,4 +91,68 @@ export function asDoctor(value: unknown): DoctorReply {
   if (!isObj(value)) return { ok: false, code: "host_error" };
   if (value["ok"] !== true) return { ok: false, code: str(value["code"]) ? value["code"] : "host_error" };
   return value as unknown as DoctorReply;
+}
+
+const failed = (value: unknown): { readonly ok: false; readonly code: string } => ({ ok: false, code: isObj(value) && str(value["code"]) ? value["code"] : "host_error" });
+const strList = (value: unknown): value is string[] => Array.isArray(value) && value.every(str);
+
+function asProfile(value: unknown): ProfileView | null {
+  if (!isObj(value) || !str(value["name"]) || !(value["workflowRef"] === null || str(value["workflowRef"])) || !strList(value["commands"])) return null;
+  const limits = Array.isArray(value["limits"])
+    ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
+    : [];
+  const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  return { name: value["name"], workflowRef: value["workflowRef"] as string | null, limits, commands: value["commands"], verifiers: n(value["verifiers"]), protectedPaths: n(value["protectedPaths"]) };
+}
+
+/** GU-6: the settings view, checked again on this side. */
+export function asSettings(value: unknown): SettingsReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  const file = view["file"];
+  const workflows = isObj(view["workflows"]) ? view["workflows"] : {};
+  const env = isObj(view["env"]) ? view["env"] : {};
+  const sources = ["argument", "environment", "default"];
+  return {
+    ok: true,
+    view: {
+      file:
+        isObj(file) && str(file["display"]) && str(file["source"]) && sources.includes(file["source"])
+          ? { display: file["display"], source: file["source"] as "argument" | "environment" | "default", exists: file["exists"] === true }
+          : null,
+      model: str(view["model"]) ? view["model"] : null,
+      language: view["language"] === "ko" || view["language"] === "en" ? view["language"] : null,
+      profiles: Array.isArray(view["profiles"]) ? view["profiles"].map(asProfile).filter((p): p is ProfileView => p !== null) : [],
+      workflows: { builtin: strList(workflows["builtin"]) ? workflows["builtin"] : [], config: strList(workflows["config"]) ? workflows["config"] : [] },
+      keyAvailable: view["keyAvailable"] === true,
+      providers: strList(view["providers"]) ? view["providers"] : [],
+      env: { model: env["model"] === true, language: env["language"] === true },
+    },
+  };
+}
+
+/** GU-6: a model list. Entries without a valid entry id are left out. */
+export function asModels(value: unknown): ModelsReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["provider"]) || !Array.isArray(value["models"])) return failed(value);
+  const models = value["models"].flatMap((m: unknown) =>
+    isObj(m) && str(m["entry"]) && HEX.test(m["entry"]) && typeof m["number"] === "number" && str(m["id"]) && str(m["name"])
+      ? [{ entry: m["entry"], number: m["number"], id: m["id"], name: m["name"] }]
+      : [],
+  );
+  const current = value["current"];
+  return {
+    ok: true,
+    provider: value["provider"],
+    models,
+    current:
+      isObj(current) && str(current["id"])
+        ? { id: current["id"], source: current["source"] === "CODARYN_MODEL" ? "CODARYN_MODEL" : "config", listed: current["listed"] === true }
+        : null,
+  };
+}
+
+export function asSelectModel(value: unknown): SelectModelReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["selected"]) || !str(value["selected"]["id"])) return failed(value);
+  const selected = value["selected"];
+  return { ok: true, selected: { id: selected["id"] as string, created: selected["created"] === true, overridden: selected["overridden"] === true } };
 }

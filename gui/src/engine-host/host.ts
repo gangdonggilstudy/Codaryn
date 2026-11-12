@@ -7,6 +7,8 @@
 import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
+import { modelsValue, selectedValue, settingsValue } from "./settings.js";
+import type { Shown } from "./settings.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
 export interface HostDoctorRequest {
@@ -16,9 +18,20 @@ export interface HostDoctorRequest {
   readonly workspace: string | null;
 }
 
+/** `ListModelsRequest` (src/app/types.ts). The GUI uses the settings a run would use (no --config, no vars file). */
+export interface HostModelsRequest {
+  readonly provider: string;
+  readonly configPath: null;
+  readonly varsFile: null;
+}
+
 /** The part of `CodarynApp` (src/app/types.ts) this host calls. */
 export interface HostApp {
   doctor(request: HostDoctorRequest): Promise<unknown>;
+  readSettings(request: { readonly configPath: null }): Promise<unknown>;
+  /** A real API request (Y-2): only when the person asked for the list. */
+  listModels(request: HostModelsRequest): Promise<unknown>;
+  selectModel(request: HostModelsRequest & { readonly model: string }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -33,6 +46,10 @@ export interface HostDeps {
   readonly app: HostApp;
   readonly messages: HostMessages;
   readonly tree: HostTree;
+  /** Text from a file or the API as the window may show it (control characters and key shapes hidden). */
+  readonly shown: Shown;
+  /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
+  readonly providers: readonly string[];
   /** Writes one complete line to the channel. */
   readonly write: (line: string) => void;
   /** Diagnostics for stderr. Never the content of a request or a response. */
@@ -82,6 +99,21 @@ function treeArgs(args: unknown): { workspace: string; dir: string; offset: numb
   return { workspace, dir, offset };
 }
 
+/** A call that takes no arguments: `{}`. */
+function noArgs(args: unknown): void {
+  if (!isObj(args) || Object.keys(args).length > 0) throw new ArgsError();
+}
+
+/** A model id as the API gives it: printable ASCII without spaces. */
+const MODEL_ID = /^[!-~]{1,200}$/;
+
+function providerArg(args: unknown, providers: readonly string[], keys: readonly string[]): Obj & { provider: string } {
+  if (!isObj(args) || !onlyKeys(args, keys)) throw new ArgsError();
+  const provider = args["provider"];
+  if (typeof provider !== "string" || !providers.includes(provider)) throw new ArgsError();
+  return args as Obj & { provider: string };
+}
+
 function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] } {
   if (!isObj(args) || !onlyKeys(args, ["osLocale", "ids"])) throw new ArgsError();
   const osLocale = args["osLocale"] ?? null;
@@ -110,6 +142,18 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       }
       case "tree":
         return deps.tree(treeArgs(args));
+      case "settings":
+        noArgs(args);
+        return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers);
+      case "listModels": {
+        const { provider } = providerArg(args, deps.providers, ["provider"]);
+        return modelsValue(provider, await deps.app.listModels({ provider, configPath: null, varsFile: null }), deps.shown);
+      }
+      case "selectModel": {
+        const { provider, model } = providerArg(args, deps.providers, ["provider", "model"]);
+        if (typeof model !== "string" || !MODEL_ID.test(model)) throw new ArgsError();
+        return selectedValue(await deps.app.selectModel({ provider, configPath: null, varsFile: null, model }), deps.shown);
+      }
     }
   }
 

@@ -22,8 +22,14 @@ function harness(app: Partial<HostApp> = {}, messages?: HostMessages) {
         requests.push(request);
         return DOCTOR_OUTPUT;
       },
+      readSettings: async () => ({ ok: false, error: { code: "invalid_config", message: "not used" } }),
+      listModels: async () => ({ ok: false, error: { code: "missing_api_key", message: "not used" } }),
+      selectModel: async () => ({ ok: false, error: { code: "missing_api_key", message: "not used" } }),
       ...app,
     },
+    // Marks every text that passed the host's cleaning, so a test sees which ones did.
+    shown: (text) => `<${text.replace(/[\u0000-\u001f]/g, "?")}>`,
+    providers: ["anthropic"],
     messages: messages ?? { texts: (_locale, ids) => ({ language: "en", texts: Object.fromEntries(ids.map((id) => [id, `T:${id}`])) }) },
     tree: async (request) => ({ ok: true, entries: [], total: 0, offset: request.offset, nextOffset: null, dir: request.dir }),
     write: (line) => {

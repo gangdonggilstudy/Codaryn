@@ -20,7 +20,8 @@ import type { EngineHost, StartOutcome } from "./engine-client.js";
 import { hostEnvironment } from "./environment.js";
 import { GUI_STATE_FILE_NAME, settingsDir } from "./gui-state.js";
 import { registerIpc } from "./ipc.js";
-import { findDevelopmentNode } from "./node-path.js";
+import { ModelEntries } from "./model-entries.js";
+import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
 import { guardContents, secureSession } from "./security.js";
 import { SESSION_PARTITION, debuggingRequested, secureWebPreferences } from "./security-policy.js";
@@ -182,6 +183,11 @@ export function startGui(options: GuiOptions): void {
       workspaces,
       osLocale: () => app.getLocale(),
       initialWorkspace: () => initialWorkspace,
+      modelEntries: new ModelEntries((size) => randomBytes(size)),
+      envFacts: () => ({
+        model: (envValue(process.env, "CODARYN_MODEL", process.platform) ?? "").trim().length > 0,
+        language: (envValue(process.env, "CODARYN_LANG", process.platform) ?? "").trim().length > 0,
+      }),
     });
 
     const devTools = !app.isPackaged && process.env["CODARYN_GUI_DEVTOOLS"] === "1";

@@ -18,6 +18,9 @@ const CHANNELS = {
   tree: "codaryn:workspace:tree",
   reveal: "codaryn:workspace:reveal",
   doctor: "codaryn:doctor:run",
+  settings: "codaryn:settings:read",
+  listModels: "codaryn:models:list",
+  selectModel: "codaryn:models:select",
 } as const;
 
 const EVENTS = {
@@ -44,6 +47,9 @@ const api = Object.freeze({
     ipcRenderer.invoke(CHANNELS.tree, { workspace: text(workspace), node: text(node), offset: count(offset) }),
   reveal: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.reveal, { workspace: text(workspace), node: text(node) }),
   doctor: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.doctor, { workspace: text(workspace) }),
+  settings: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.settings),
+  listModels: (provider: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listModels, { provider: text(provider) }),
+  selectModel: (entry: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.selectModel, { entry: text(entry) }),
   /** One listener at a time; a new one replaces the old. */
   onWorkspaceOpened: (listener: unknown): void => {
     workspaceListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;

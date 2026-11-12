@@ -90,13 +90,13 @@ async function digestOf(base: string): Promise<string> {
   return shown.output.plan.digest.slice(0, 12);
 }
 const runsOf = async (work: string): Promise<string[]> => (await readdir(path.join(work, STATE_DIR_NAME, RUNS_DIR_NAME))).sort();
-const TODO = { todo: "contract and store (U-13): keep an apply run whose discarded files stay (kept: discarded_left)" };
 
 describe("U-13 (UXM-1): an apply's records are not removed while its discarded files stay", () => {
-  test("--confirm --include-not-reverted without --delete-discarded: the apply and its plan run stay, the rest goes, each kept item says why", TODO, async () => {
+  test("--confirm --include-not-reverted without --delete-discarded: the apply and its plan run stay, the rest goes, each kept item says why", async () => {
     const { base, work, planRunId, applyRunId, otherRunId } = await appliedNotReverted();
     const done = await cleanup(base, [...SELECT, "--confirm", await digestOf(base), "--include-not-reverted"]);
     assert.ok(done.output?.mode === "applied", JSON.stringify(done));
+    assert.equal(done.exitCode, 0, "kept by the person's choice");
     assert.deepEqual(await runsOf(work), [planRunId, applyRunId].sort(), "the apply run and the plan run it uses stay");
     assert.deepEqual(done.output.outcome.removed.map((item) => itemName(item)), [otherRunId]);
     const reasons = Object.fromEntries(done.output.outcome.kept.map((item) => [`${item.target}:${itemName(item)}`, item.reason]));
@@ -106,7 +106,7 @@ describe("U-13 (UXM-1): an apply's records are not removed while its discarded f
     assert.ok(await exists(path.join(work, STATE_DIR_NAME, DISCARDED_DIR_NAME, applyRunId)), "the discarded file stays");
   });
 
-  test("after it the apply can still be reverted: the person's file is back under its own name", TODO, async () => {
+  test("after it the apply can still be reverted: the person's file is back under its own name", async () => {
     const { base, work, applyRunId } = await appliedNotReverted();
     await cleanup(base, [...SELECT, "--confirm", await digestOf(base), "--include-not-reverted"]);
     const reverted = await runRevert({
@@ -117,7 +117,7 @@ describe("U-13 (UXM-1): an apply's records are not removed while its discarded f
     assert.equal(await readFile(path.join(work, "inbox", "old-draft.tmp"), "utf8"), "a person's draft\n");
   });
 
-  test("the person's outcome names the kept apply run and why", TODO, async () => {
+  test("the person's outcome names the kept apply run and why", async () => {
     const { base, applyRunId } = await appliedNotReverted();
     const text = (await cleanup(base, [...SELECT, "--confirm", await digestOf(base), "--include-not-reverted"], false)).text;
     const line = text.split("\n").find((entry) => entry.includes(`run ${applyRunId}`));

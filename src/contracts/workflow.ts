@@ -130,7 +130,7 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
  *   Under a definition that allows no command (`allowCommands: false`, organize) every given rule
  *   is dropped. A task file's own rules there are still refused first (`commands_not_allowed`,
  *   GT-D10: ResolveWorkflowInput.commandRules counts the task's rules before the merge); the
- *   profile's or config's are dropped.
+ *   profile's or config's are dropped and the person is told (workflowPolicyNarrowings).
  * - planActions: the configured policy narrows the definition's when it states planActions (only
  *   kinds both list stay); when it does not state them it leaves the definition's as they are, so a
  *   general policy that only adds a protected path does not take organize's move and discard away.
@@ -163,6 +163,58 @@ export function mergeWorkflowPolicy(definition: PolicyConfig | undefined, config
     ...(protectedPaths.length > 0 ? { protectedPaths } : {}),
     ...(planActions.length > 0 ? { planActions } : {}),
   };
+}
+
+/**
+ * DR-41 (PM after 27afb01): what mergeWorkflowPolicy left out of the given policy, so doctor and the
+ * run's start can tell the person. Kinds and counts only, never a rule, a command or a path:
+ * - commands_dropped: given command rules that share no command line with the definition's
+ * - commands_narrowed: given command rules kept only in part (no single definition rule allows all
+ *   of their lines)
+ * - plan_actions_dropped: plan action kinds the given policy states that the definition does not list
+ * - restore_path_tokens_off: the given policy allows restoring path tokens, the definition does not
+ */
+export const POLICY_NARROWING_KINDS = ["commands_dropped", "commands_narrowed", "plan_actions_dropped", "restore_path_tokens_off"] as const;
+export type PolicyNarrowingKind = (typeof POLICY_NARROWING_KINDS)[number];
+
+export interface PolicyNarrowing {
+  readonly kind: PolicyNarrowingKind;
+  /** At least 1. */
+  readonly count: number;
+}
+
+function sameCommandRule(a: CommandRule, b: CommandRule): boolean {
+  return (
+    a.executable === b.executable &&
+    a.allowExtraArgs === b.allowExtraArgs &&
+    a.argsPrefix.length === b.argsPrefix.length &&
+    a.argsPrefix.every((arg, index) => b.argsPrefix[index] === arg)
+  );
+}
+
+/**
+ * DR-41: the narrowings of `configured` by `definition` under mergeWorkflowPolicy, in
+ * POLICY_NARROWING_KINDS order, each with a count of at least 1. Empty when either is absent or
+ * nothing was left out. Pure.
+ */
+export function workflowPolicyNarrowings(definition: PolicyConfig | undefined, configured: PolicyConfig | undefined): readonly PolicyNarrowing[] {
+  if (definition === undefined || configured === undefined) return [];
+  let dropped = 0;
+  let narrowed = 0;
+  for (const given of configured.commands) {
+    const kept = definition.commands.map((own) => commandRuleIntersection(own, given)).filter((rule): rule is CommandRule => rule !== null);
+    if (kept.length === 0) dropped += 1;
+    else if (!kept.some((rule) => sameCommandRule(rule, given))) narrowed += 1;
+  }
+  const own = definition.planActions ?? [];
+  const planDropped = configured.planActions === undefined ? 0 : [...new Set(configured.planActions)].filter((kind) => !own.includes(kind)).length;
+  const counts: { readonly [K in PolicyNarrowingKind]: number } = {
+    commands_dropped: dropped,
+    commands_narrowed: narrowed,
+    plan_actions_dropped: planDropped,
+    restore_path_tokens_off: configured.restorePathTokens && !definition.restorePathTokens ? 1 : 0,
+  };
+  return POLICY_NARROWING_KINDS.filter((kind) => counts[kind] > 0).map((kind) => ({ kind, count: counts[kind] }));
 }
 
 /**

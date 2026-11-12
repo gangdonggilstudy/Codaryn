@@ -9,8 +9,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { mergeWorkflowPolicy } from "../../../src/contracts/index.js";
-import type { CommandRule, PolicyConfig } from "../../../src/contracts/index.js";
+import { FIXED_MESSAGES, POLICY_NARROWING_KINDS, mergeWorkflowPolicy, workflowPolicyNarrowings } from "../../../src/contracts/index.js";
+import type { CommandRule, DoctorCheck, JournalEvent, PolicyConfig, ResolvedTaskSpec } from "../../../src/contracts/index.js";
 
 const base = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false } as const;
 const ORGANIZE: PolicyConfig = { ...base, planActions: ["move", "discard"] };
@@ -73,5 +73,49 @@ describe("DR-41: a configured policy never loosens a workflow definition's own r
     const configured: PolicyConfig = { ...base, protectedPaths: ["x"] };
     assert.equal(mergeWorkflowPolicy(undefined, configured), configured, "a definition without a policy (general, code, document, analyze)");
     assert.equal(mergeWorkflowPolicy(ORGANIZE, undefined), ORGANIZE);
+  });
+});
+
+describe("DR-41: what the merge left out is told, as kinds and counts only", () => {
+  test("configured command rules under organize: dropped, counted", () => {
+    const configured: PolicyConfig = { ...base, commands: [rule("npm", ["test"], true), rule("git", ["status"], false)] };
+    assert.deepEqual(workflowPolicyNarrowings(ORGANIZE, configured), [{ kind: "commands_dropped", count: 2 }]);
+  });
+
+  test("a rule kept in part is narrowed; one kept whole is not counted", () => {
+    const own: PolicyConfig = { ...base, commands: [rule("npm", ["test"], true), rule("git", ["status"], true)] };
+    const configured: PolicyConfig = { ...base, commands: [rule("npm", [], true), rule("git", ["status"], false), rule("make", [], true)] };
+    assert.deepEqual(workflowPolicyNarrowings(own, configured), [
+      { kind: "commands_dropped", count: 1 },
+      { kind: "commands_narrowed", count: 1 },
+    ]);
+  });
+
+  test("plan actions the definition does not list, and token restoring turned off", () => {
+    const configured: PolicyConfig = { ...base, restorePathTokens: true, planActions: ["move", "discard", "move"] };
+    assert.deepEqual(workflowPolicyNarrowings({ ...base, planActions: ["move"] }, configured), [
+      { kind: "plan_actions_dropped", count: 1 },
+      { kind: "restore_path_tokens_off", count: 1 },
+    ]);
+  });
+
+  test("nothing left out, or either side absent: none", () => {
+    assert.deepEqual(workflowPolicyNarrowings(ORGANIZE, { ...base, protectedPaths: ["secrets"] }), []);
+    assert.deepEqual(workflowPolicyNarrowings(undefined, { ...base, commands: [rule("npm", [], true)] }), []);
+    assert.deepEqual(workflowPolicyNarrowings(ORGANIZE, undefined), []);
+  });
+
+  test("the slots: the resolved task, run_started, doctor's notes and the run's start lines", () => {
+    const narrowings = workflowPolicyNarrowings(ORGANIZE, { ...base, commands: [rule("npm", ["test"], true)] });
+    const task: Pick<ResolvedTaskSpec, "policyNarrowings"> = { policyNarrowings: narrowings };
+    const started: Extract<JournalEvent, { type: "run_started" }>["policyNarrowings"] = task.policyNarrowings;
+    const check: Pick<DoctorCheck, "notes"> = { notes: [{ id: "doctor.workflow_policy.commands_dropped", params: { count: 1 } }] };
+    assert.ok(started && check.notes?.length === 1);
+    for (const kind of POLICY_NARROWING_KINDS) {
+      for (const prefix of ["doctor", "progress"]) {
+        const id = `${prefix}.workflow_policy.${kind}` as keyof typeof FIXED_MESSAGES;
+        assert.deepEqual(FIXED_MESSAGES[id], kind === "restore_path_tokens_off" ? {} : { count: "count" }, id);
+      }
+    }
   });
 });

@@ -18,7 +18,7 @@ import type { VerifierResult } from "./verify.js";
 import type { RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
 import type { PlanMode } from "./plan.js";
 import type { AnyToolName } from "./tool.js";
-import type { CompletionMode } from "./workflow.js";
+import type { CompletionMode, PolicyNarrowing } from "./workflow.js";
 
 /** State directory inside the workspace root. No tool may read, list, write or run in it. */
 export const STATE_DIR_NAME = ".codaryn";
@@ -55,6 +55,8 @@ export type JournalEvent =
        * PROFILE_NAME_PATTERN_SOURCE. Absent: none (and every journal written before DR-37).
        */
       readonly profile?: string;
+      /** DR-41: ResolvedTaskSpec.policyNarrowings, when something was left out. Kinds and counts only. */
+      readonly policyNarrowings?: readonly PolicyNarrowing[];
       readonly tools?: readonly AnyToolName[];
       readonly plan?: PlanMode;
       readonly completion?: CompletionMode;

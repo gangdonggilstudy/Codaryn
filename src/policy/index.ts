@@ -63,6 +63,8 @@ function requirementsOf(descriptor: ToolDescriptor): ToolRequirements {
     command: fixed.command || given.command,
     network: fixed.network || given.network,
     destructive: fixed.destructive || given.destructive,
+    // No built-in tool is a plan action. A descriptor that claims one is still judged as one.
+    ...(given.planAction === undefined ? {} : { planAction: given.planAction }),
   };
 }
 
@@ -128,6 +130,11 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
     }
     if (requires.destructive) {
       denials.push(deny("destructive", "destructive_denied"));
+    }
+    // G-A: a plan action (PLAN_ACTION_DESCRIPTORS) runs only when the policy lists its kind.
+    // Absent or empty `planActions` lists none. Only the task or config file sets it.
+    if (requires.planAction !== undefined && !(config.planActions ?? []).includes(requires.planAction)) {
+      denials.push(deny("destructive", "plan_action_not_allowed"));
     }
     return denials;
   }

@@ -17,6 +17,7 @@ export * from "./journal.js";
 export * from "./changes.js";
 export * from "./integrity.js";
 export * from "./state.js";
+export * from "./cleanup.js";
 export * from "./engine.js";
 export * from "./commands.js";
 export * from "./human.js";

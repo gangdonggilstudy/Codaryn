@@ -21,6 +21,8 @@
  */
 
 import { REVERT_SKIP_REASONS } from "./changes.js";
+import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES } from "./cleanup.js";
+import type { CleanupBlockCode, CleanupKeptReason, CleanupWarningCode } from "./cleanup.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { ApiBaseUrlEnv, ApiKeyEnv, ApiModelEnv, DefaultConfigDisplay } from "./config.js";
@@ -441,6 +443,16 @@ export const FIXED_MESSAGES = {
   // R-16 L-1: `{count}` files the revert moved aside could not be put back and were left in
   // `.codaryn/parked/` (fixed text; SkippedFile.parkedAt). Shown after the skipped list when above 0.
   "revert.parked": { count: "count" },
+  // DR-39 (cleanup.ts): the preview, the two confirmations (run records; then people's discarded
+  // files), and the outcome. Sizes are byte counts. Parked files are never cleaned.
+  "cleanup.summary.runs": { count: "count", bytes: "count" },
+  "cleanup.summary.discarded": { files: "count", bytes: "count" },
+  "cleanup.summary.parked": { files: "count", bytes: "count" },
+  "cleanup.nothing": {},
+  "cleanup.confirm.runs": { count: "count", bytes: "count" },
+  "cleanup.confirm.discarded": { files: "count", bytes: "count" },
+  "cleanup.done": { runs: "count", folders: "count", bytes: "count" },
+  "cleanup.plan_changed": {},
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -650,6 +662,8 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
  * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
  * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
+ * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
+ *   is not removed, what a person is told before confirming, why a confirmed item was kept.
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -672,7 +686,10 @@ export type ListedMessageId =
   | `doctor.status.${DoctorCheckStatus}`
   | `approval.${ApprovalChannel}`
   | `plan.problem.${PlanItemProblem}`
-  | `error.hint.${CliErrorHint}`;
+  | `error.hint.${CliErrorHint}`
+  | `cleanup.blocked.${CleanupBlockCode}`
+  | `cleanup.warning.${CleanupWarningCode}`
+  | `cleanup.kept.${CleanupKeptReason}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -718,6 +735,9 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
   ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
   ...CLI_ERROR_HINTS.map((hint) => `error.hint.${hint}` as const),
+  ...CLEANUP_BLOCK_CODES.map((code) => `cleanup.blocked.${code}` as const),
+  ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),
+  ...CLEANUP_KEPT_REASONS.map((reason) => `cleanup.kept.${reason}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */

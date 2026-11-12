@@ -38,7 +38,6 @@ import type { PermissionKind, PolicyDenialCode } from "./policy.js";
 import { APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
 import type { ApplyJournalEvent, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
-import type { ContentHash } from "./text.js";
 import { TOOL_ERROR_CODES, TOOL_NAMES } from "./tool.js";
 import type { ToolErrorCode, ToolName } from "./tool.js";
 
@@ -259,7 +258,6 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - seconds (N-20): a non-negative number of seconds with at most one decimal place (the
  *   renderer rounds milliseconds to tenths); the catalog writes it in decimal digits
  * - language (N-20): a MessageLanguage code
- * - digest (G-A): a plan digest, ContentHash (64 lowercase hex characters, a closed shape)
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -278,7 +276,6 @@ export interface MessageParamTypeByKind {
   readonly suggestedPath: InitSuggestedProtectedPath;
   readonly seconds: number;
   readonly language: MessageLanguage;
-  readonly digest: ContentHash;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 

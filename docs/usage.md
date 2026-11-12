@@ -595,9 +595,9 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 | 종료 코드 | 뜻 |
 | --- | --- |
 | 0 | `done`: 모든 검증기 통과. 되돌리기 `complete`, 보고서 `complete`, 점검 `ok`, 모델 목록 `listed`·`selected`, `init` `created`, `runs` `listed`, `plan` 보기, `review` 판정 |
-| 1 | `failed`: `verifier_failed`, `repeated_failure`, `model_error`, 적용의 `plan_stale`·`apply_incomplete`(18.3절). 점검 `fail` |
-| 2 | 입력 오류: `invalid_arguments`, `invalid_task`, `invalid_config`, `invalid_script`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `workspace_is_install_dir`, `run_not_found`, `invalid_run_record`, `config_write_failed`, `config_exists`, `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `plan_secrets_differ`, `plan_run_missing`, `run_not_awaiting_review` |
-| 3 | `needs-input`: `no_verifier`, `verifier_inconclusive`, `unknown_tool_outcome`, `protected_changed`, `plan_pending`, `awaiting_review`, `consent_required`(18절). 되돌리기 `partial`, 보고서 `incomplete`, 점검 `warn`, `init` `declined` |
+| 1 | `failed`: `verifier_failed`, `repeated_failure`, `model_error`, `state_changed`(16절 "실행 기록 변조"), 적용의 `plan_stale`·`apply_incomplete`(18.3절). 점검 `fail`. 정리에서 지우지 못하고 남긴 항목(`partly_removed` 등, 18.8절) |
+| 2 | 입력 오류: `invalid_arguments`, `invalid_task`, `invalid_config`, `invalid_script`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `workspace_is_install_dir`, `run_not_found`, `invalid_run_record`, `config_write_failed`, `config_exists`, `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `plan_secrets_differ`, `plan_records_changed`, `plan_run_missing`, `run_not_awaiting_review` |
+| 3 | `needs-input`: `no_verifier`, `verifier_inconclusive`, `unknown_tool_outcome`, `protected_changed`, `plan_pending`, `awaiting_review`, `consent_required`(18절). 되돌리기 `partial`, 보고서 `incomplete`, 점검 `warn`, `init` `declined`, 정리의 `plan_changed`(미리보기 뒤 상태가 바뀜, 18.8절) |
 | 4 | `budget-exhausted`: `max_model_turns`, `max_tool_calls`, `max_total_tokens`, `max_duration`, `usage_unknown` |
 | 5 | `cancelled` |
 | 6 | `workspace_locked`: 같은 작업 공간에서 다른 실행이나 되돌리기가 진행 중 |
@@ -772,7 +772,7 @@ node --test dist/tests/live/anthropic-live.js
 - **OS 격리 없음:** 허용한 명령과 검증기 명령은 사용자 권한으로 실행된다. 작업 공간 밖 파일 접근과 네트워크 사용을 OS 수준에서 막지 않는다.
 - **비밀이 든 줄:** 수정, 이동, 삭제할 수 없다. 사람이 직접 고친다. 그 줄 앞뒤의 다른 줄을 바꿔 여러 줄에 걸친 식의 의미가 달라지는 것은 막지 못한다.
 - **남는 자손 프로세스:** 명령이 끝난 뒤에도 분리되어 떠 있는 자손 프로세스(예: 백그라운드로 띄운 서버)는 남을 수 있다.
-- **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 직접 지운다(지워도 되는 폴더는 11절).
+- **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 `cleanup`으로 미리 본 뒤 지운다(18.8절). 손으로 지우면 계획 실행을 잃어 그 적용을 되돌릴 수 없게 될 수 있다.
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 비밀 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
 - **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
 - **키 거부와 가림의 빈틈(사용자 결정 DR-45):** 키가 든 입력의 거부(4절 "키")와 실행 중 가림(12절)에 남은 것이다. main `6df2eae`의 실제 CLI(대본 모델)로 확인했다.
@@ -810,6 +810,7 @@ node --test dist/tests/live/anthropic-live.js
     ```
 
     한국어로는 `실패 (failed/state_changed) · 기록 변경됨(실행이 아닌 것이 실행 기록을 바꿈)`이다. 표시가 붙은 줄은 영어로 155자라 80칸 터미널에서는 접힌다.
+  - 표시가 있는 계획 실행은 `apply`가 거부한다(`plan_records_changed`, 18.3절).
   - 실행 자신의 `journal.jsonl`에 엉뚱한 줄이 들어가면 `report`와 `changes`가 그 실행을 `invalid_run_record`로 읽지 않는다.
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).
   - 실행이 끝난 뒤 변경 기록 파일의 다이제스트를 지금 값으로 바꿔 넣으면, `changes`를 다른 비밀로 볼 때 실행 때 가렸던 값이 그대로 보인다(DR-37 (b)). 드러나는 값은 작업 공간 파일에 이미 있는 값이다.
@@ -849,6 +850,10 @@ node --test dist/tests/live/anthropic-live.js
 | `plan_not_approved` | `--digest`가 없거나 그 계획의 다이제스트와 맞지 않는다. `plan`으로 다이제스트를 보고 앞 12자 이상을 준다 |
 | `plan_already_applied` | 그 계획은 이미 적용됐다. 결과는 `report --run <적용 실행 id>`로 보고, 되돌리려면 `revert --run <적용 실행 id>`를 쓴다 |
 | `run_not_awaiting_review` | `review`에 준 실행이 `awaiting_review`로 끝나지 않았다 |
+| `plan_records_changed` | 그 계획 실행에 기록 변경 표시가 있다(`runs`의 결과 칸 끝에 `records changed`). 실행이 아닌 것이 그 기록을 바꿔 계획이 읽은 것과 다를 수 있어 아무것도 묻거나 옮기지 않았다. 계획을 새로 만들어 적용한다(18.3절) |
+| `failed`/`state_changed` | 실행 중에 그 실행이 아닌 것(허용한 명령, 명령형 검증기, 다른 프로그램)이 `.codaryn\`을 바꿨다. 실행을 멈췄고 표시를 남겼다. `report`를 읽고, 허용한 명령과 검증기가 `.codaryn\`에 쓰지 않는지 본 뒤 다시 실행한다(16절 "실행 기록 변조") |
+| `cleanup`의 `plan_changed`(종료 3) | 미리보기 뒤에 새 실행, 되돌리기, 남은 폴더 등으로 상태 디렉터리가 바뀌었다. 아무것도 지우지 않았다. 다시 미리 보고 새 digest로 확인한다(18.8절) |
+| `cleanup`의 `partly_removed`(종료 1) | 권한이나 다른 프로그램 때문에 다 지우지 못했다. 원인을 없앤 뒤 다시 미리 보면 남은 것이 `Leftover folders to remove`로 나온다(18.8절) |
 | `needs-input`/`plan_pending` | 계획을 제안하고 멈췄다. 정상이다. `plan`으로 보고 승인하면 `apply`한다(18.3절) |
 | `needs-input`/`awaiting_review` | 검증을 통과했고 사람의 판정을 기다린다. 결과를 보고 `review --accept` 또는 `--reject`를 한다(18.6절) |
 | `needs-input`/`consent_required` | 하드 링크가 없는 드라이브라 이동을 하지 않았다. 계획은 그대로다. 위험을 받아들이면 `--allow-unsafe-move`로 다시 적용한다(18.5절) |
@@ -1059,6 +1064,16 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
     ```
 
   - 계획 실행에 쓴 task 파일(같은 `privacy.secretEnv`)로 `plan`과 `apply`를 한다. 경로에 든 값을 계획 실행 뒤에 새로 비밀로 등록했다면, 그 계획은 보거나 적용할 수 없으니 계획을 새로 만든다.
+- **기록이 바뀐 계획은 적용하지 않는다(U-1):** 그 계획 실행에 기록 변경 표시가 있으면(16절 "실행 기록 변조") `apply`는 묻기 전에 `plan_records_changed`(종료 2)로 거부한다. 아무것도 묻거나 기록하거나 옮기지 않고, 적용 실행도 만들지 않는다. 그 계획이 사람이 읽은 것과 다를 수 있기 때문이다.
+  - `plan`은 표시가 있는 계획도 그대로 보이고 표시를 말하지 않는다. `runs`의 결과 칸 끝의 `records changed`로 알 수 있다.
+  - 확인(main `a7f3a2f`, 파일 정리 체험): 계획 실행 뒤 다른 실행의 허용한 명령이 그 계획 실행의 `result.json`을 고치자 계획 실행에 표시가 붙었다. 그 계획의 `apply --digest`는 아래와 같이 끝났고 파일은 그대로였다. 같은 task로 계획을 새로 만들어 적용하자 `done`/`verified`였다.
+
+    ```
+    codaryn: error — the plan run has a records-changed mark: something other than the run changed its records, so its plan may not be the one you read; nothing was asked or changed (plan_records_changed)
+      To fix: Make the plan again with codaryn plan, read the new plan, and apply that one. The marked run stays as evidence of what happened.
+    ```
+
+  - 표시가 있는 실행은 무슨 일이 있었는지의 증거로 남긴다. `cleanup` 미리보기는 그 기록에 `the run has a records-changed mark; its records are evidence of what happened`를 붙인다(경고만 하고 따로 확인을 받지는 않는다).
 - **`--run`은 계획 실행 id로 꼭 준다.** `--run latest`는 받지 않는다(`invalid_arguments`). 승인이 계획 하나를 가리켜야 하기 때문이다.
 - **적용 때의 정책:** 정책, 검증기, 비밀은 계획을 만들 때가 아니라 **적용할 때**의 task와 설정에서 읽는다.
   - 행동마다 지금 정책(`policy.planActions`, 보호 경로)으로 다시 판정한다.

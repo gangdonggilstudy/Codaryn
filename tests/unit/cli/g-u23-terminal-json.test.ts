@@ -5,10 +5,13 @@
  *   exactly what it did before. `run`, `revert` and `apply` take `--json` for that.
  * - `codaryn` with no arguments at a terminal shows the help (as `--help`, exit 0) instead of
  *   invalid_arguments; through a pipe or into a file it stays invalid_arguments (PM answer, DR-48).
+ * - U-45 (review R-58 R58-L1, PM Q-1): the JSON line is left out only when stdout and stderr are both
+ *   a terminal. With stderr sent to a file (`2> log.txt`) the screen showed nothing; now stdout
+ *   carries the JSON line there, as through a pipe.
  * The real CLI under the net guard, scripted model, nothing is sent. "At a terminal" is made by a
- * preload that marks the child's stdout as a terminal (process.stdout.isTTY); the product reads no
- * switch of its own for it. The decision itself (guard.ts stdoutText) is tested with the terminal
- * state injected. Fake values only.
+ * preload that marks the child's stdout and stderr as terminals (isTTY); "stdout only" marks stdout
+ * alone. The product reads no switch of its own for it. The decision itself (guard.ts stdoutText)
+ * is tested with the terminal state injected. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -35,8 +38,13 @@ after(async () => {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const main = path.resolve(here, "..", "..", "..", "src", "cli", "main.js");
 const guard = pathToFileURL(path.resolve(here, "..", "..", "support", "net-guard.js")).href;
-/** Marks the child's stdout as a terminal before main.js runs. */
-const TERMINAL = `data:text/javascript,${encodeURIComponent("Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });")}`;
+/** Marks the child's streams as terminals before main.js runs. */
+const marked = (streams: readonly string[]): string =>
+  `data:text/javascript,${encodeURIComponent(streams.map((stream) => `Object.defineProperty(process.${stream}, 'isTTY', { value: true, configurable: true });`).join(""))}`;
+const TERMINAL = marked(["stdout", "stderr"]);
+const STDOUT_ONLY = marked(["stdout"]);
+/** true: stdout and stderr are terminals; "stdout only": stderr goes to a file; false: a pipe. */
+type Terminal = boolean | "stdout only";
 
 const RULE = { id: "readme", kind: "file_rules", rules: [{ type: "contains", path: "README.md", text: "# Title" }] };
 const LIMITS = { maxModelTurns: 4, maxToolCalls: 8, maxTotalTokens: null, maxDurationMs: 60_000 };
@@ -44,8 +52,8 @@ const POLICY = { commands: [], network: "deny", destructive: "deny", restorePath
 
 interface Workspace {
   readonly base: string;
-  /** The CLI in `base`; `terminal`: stdout is marked as a terminal. */
-  cli(args: readonly string[], terminal: boolean): { status: number | null; stdout: string; stderr: string };
+  /** The CLI in `base`; `terminal`: which streams are marked as terminals. */
+  cli(args: readonly string[], terminal: Terminal): { status: number | null; stdout: string; stderr: string };
 }
 
 async function workspace(): Promise<Workspace> {
@@ -65,7 +73,8 @@ async function workspace(): Promise<Workspace> {
   return {
     base,
     cli: (args, terminal) => {
-      const run = spawnSync(process.execPath, ["--import", guard, ...(terminal ? ["--import", TERMINAL] : []), main, ...args], { cwd: base, env, encoding: "utf8" });
+      const preload = terminal === false ? [] : ["--import", terminal === true ? TERMINAL : STDOUT_ONLY];
+      const run = spawnSync(process.execPath, ["--import", guard, ...preload, main, ...args], { cwd: base, env, encoding: "utf8" });
       return { status: run.status, stdout: run.stdout, stderr: run.stderr };
     },
   };
@@ -202,6 +211,19 @@ describe("U-23 (DR-49): at a terminal the JSON line after the human text is left
     }
   });
 
+  test("U-45 (R58-L1, Q-1): stdout at a terminal but stderr into a file: the JSON line is printed, so the screen is not empty", async () => {
+    const ws = await workspace();
+    await runTask(ws);
+    const run = ws.cli(["run", "--task", "task.json"], "stdout only");
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    const result = oneJsonLine<EngineResult>(run.stdout);
+    assert.deepEqual(result, await stored(ws, result.runId));
+    assert.ok(run.stderr.includes("Run id:"), "the summary still goes to stderr (the file)");
+    const error = ws.cli(["report", "--workspace", "ws", "--run", "20990101T000000Z-0000abcd"], "stdout only");
+    const output = oneJsonLine<CliErrorOutput>(error.stdout);
+    assert.deepEqual([error.status, output.kind, output.code], [2, "error", "run_not_found"]);
+  });
+
   test("a text output (help, report) is printed at a terminal as before", async () => {
     const ws = await workspace();
     for (const terminal of [true, false]) {
@@ -215,7 +237,7 @@ describe("U-23 (DR-49): at a terminal the JSON line after the human text is left
 describe("U-23 (DR-49): stdoutText decides by the injected terminal state", () => {
   const json: CommandOutcome = cliError("run_not_found", "x");
   const text: CommandOutcome = { text: "a text", exitCode: 0 };
-  const at = (argv: readonly string[], stdoutIsTerminal: boolean) => ({ argv, stdoutIsTerminal });
+  const at = (argv: readonly string[], stdoutIsTerminal: boolean, stderrIsTerminal = stdoutIsTerminal) => ({ argv, stdoutIsTerminal, stderrIsTerminal });
 
   test("a JSON outcome at a terminal is left out; with --json, --quiet or no terminal it is renderOutcome's bytes", () => {
     assert.equal(stdoutText(json, at(["report", "--run", "x"], true)), "");
@@ -224,6 +246,14 @@ describe("U-23 (DR-49): stdoutText decides by the injected terminal state", () =
       assert.equal(stdoutText(json, context), renderOutcome(json), JSON.stringify(context));
       assert.equal(jsonLineLeftOut(json, context), false);
     }
+  });
+
+  test("U-45 (Q-1): left out only when stdout and stderr are both a terminal", () => {
+    for (const context of [at(["run"], true, false), at(["run"], false, true)]) {
+      assert.equal(stdoutText(json, context), renderOutcome(json), JSON.stringify(context));
+      assert.equal(jsonLineLeftOut(json, context), false, JSON.stringify(context));
+    }
+    assert.equal(jsonLineLeftOut(json, at(["run"], true, true)), true);
   });
 
   test("--json and --quiet count wherever they are, even when the arguments cannot be parsed", () => {
@@ -264,6 +294,12 @@ describe("U-23 (DR-49): run, revert and apply take --json and nothing else chang
   test("the help of run and revert names --json; apply's help says what it does at a terminal", () => {
     for (const command of ["run", "revert"] as const) assert.ok(helpText(command).includes("--json: "), command);
     assert.ok(helpText("apply").includes("--json"));
+  });
+
+  test("U-45 (R58-L2): apply's help says --json or --quiet, and no decision number", () => {
+    const help = helpText("apply");
+    assert.ok(help.includes("only with --json or --quiet"), help);
+    assert.doesNotMatch(help, /\((DR|UXM|AXM)-\d+\)/, help);
   });
 });
 

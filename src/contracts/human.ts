@@ -531,7 +531,10 @@ export const FIXED_MESSAGES = {
   "doctor.config_file.none": {},
   "doctor.config_file.default_refused": {},
   "doctor.config_file.default_missing": { location: "location" },
+  // `valid_at`: the config file at its default location. N-A 32.3: one given by `--config` or
+  // CODARYN_CONFIG is `valid_given`, so it is not called the default location.
   "doctor.config_file.valid_at": { location: "location" },
+  "doctor.config_file.valid_given": { location: "location" },
   "doctor.config_file.profile_missing": {},
   "doctor.task_file.skipped": {},
   "doctor.api_key.scripted": {},
@@ -547,9 +550,12 @@ export const FIXED_MESSAGES = {
   "doctor.api_key.address_invalid": { keyEnv: "keyEnv", variable: "settingEnv" },
   "doctor.model.scripted_ok": {},
   "doctor.model.ok": {},
-  "doctor.model.missing": {},
+  // N-A 33.3: the chosen provider's model variable and the config place to set (`model`, or
+  // `providers.<name>.model`), and the place of its output cap (`maxOutputTokens`, or
+  // `providers.<name>.maxOutputTokens`).
+  "doctor.model.missing": { variable: "settingEnv", field: "field" },
   "doctor.model.placeholder": {},
-  "doctor.model.output_cap_missing": {},
+  "doctor.model.output_cap_missing": { field: "field" },
   "doctor.model.base_url_invalid": {},
   // DR-36 (b), R-19 I-4: a note of the model check (DoctorCheck.notes): `{variable}` is set but is
   // `{owner}`'s model or address variable, so a `{provider}` run does not read it.

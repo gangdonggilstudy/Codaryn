@@ -138,12 +138,13 @@ describe("revertRun (WS-06)", () => {
       });
       for (const [relative, bytes] of Object.entries(originals)) assert.deepEqual(await bytesOf(root, relative), bytes, relative);
 
-      // A second revert finds the originals, not the run's results, and leaves them alone.
+      // A second revert finds the originals, not the run's results, and leaves them alone. N-22:
+      // they are already as before the run, which is told apart from a later change.
       const again = await revertRun({ workspaceRoot: root, runId: RUN_ID });
       assert.deepEqual(again.reverted, []);
       assert.deepEqual(
         again.skipped.map((file) => file.reason),
-        ["changed_since_run", "changed_since_run", "changed_since_run"],
+        ["already_reverted", "already_reverted", "already_reverted"],
       );
       for (const [relative, bytes] of Object.entries(originals)) assert.deepEqual(await bytesOf(root, relative), bytes, relative);
     });

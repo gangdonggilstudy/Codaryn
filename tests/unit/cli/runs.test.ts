@@ -157,7 +157,8 @@ describe("revertRun dryRun (N-7)", () => {
     assert.deepEqual(again.reverted, []);
     assert.deepEqual(
       again.skipped.map((file) => file.reason),
-      ["changed_since_run", "changed_since_run"],
+      ["already_reverted", "already_reverted"],
+      "N-22: after the revert both files are as before the run",
     );
     assert.deepEqual(await tree(work), after);
   });

@@ -375,7 +375,12 @@ export type ChangedFileUnavailable =
   | "too_large"
   | "unreadable"
   /** Masking failed; no text is given. */
-  | "mask_failed";
+  | "mask_failed"
+  /**
+   * R-11, DR-28 principle: the text is shown only when the secrets registered now mask it as the
+   * run did, and the run keeps no record to compare with yet. The path and the state are given.
+   */
+  | "masking_unverified";
 
 export interface ChangedFileView {
   /** As the journal recorded it (masked). */

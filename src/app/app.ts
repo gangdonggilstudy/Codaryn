@@ -51,6 +51,7 @@ import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
 import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
+import { readSettingsIn } from "./settings.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -61,8 +62,10 @@ import type {
   DoctorRequest,
   ListModelsRequest,
   ListRunsRequest,
+  ReadSettingsRequest,
   ReportRequest,
   SelectModelRequest,
+  SettingsView,
   ResolvedRun,
   ResolveRunRequest,
   RevertRequest,
@@ -422,5 +425,16 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const listModels = (request: ListModelsRequest) => models(request);
   const selectModel = (request: SelectModelRequest) => models(request);
 
-  return { startRun, report, revert, listRuns, resolveRun, doctor, changes, listModels, selectModel };
+  async function readSettings(request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>> {
+    try {
+      return await readSettingsIn(
+        { env: copyEnvironment(environment.env, platform), cwd: environment.cwd, readFile: environment.readFile, defaultConfig: defaultConfigOf() },
+        request,
+      );
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  return { startRun, report, revert, listRuns, resolveRun, doctor, changes, listModels, selectModel, readSettings };
 }

@@ -10,6 +10,8 @@
 import type {
   CliErrorCode,
   Clock,
+  CodarynConfig,
+  InputDiagnostic,
   DoctorOutput,
   EngineResult,
   JournalRecord,
@@ -64,6 +66,37 @@ export interface AppError {
   readonly code: CliErrorCode;
   /** Fixed text, field positions and counts only. Never a value read from a file or the environment. */
   readonly message: string;
+  /** N-6: where in the config or task file the problem is (field path, line and column), when it can be said safely. */
+  readonly diagnostic?: InputDiagnostic;
+}
+
+/** The config file a run would read, and what it holds (standalone-gui 3.2, 3.6). */
+export interface ReadSettingsRequest {
+  /** `--config`. Null: CODARYN_CONFIG, then the default location (N-1). */
+  readonly configPath: string | null;
+}
+
+export interface SettingsView {
+  readonly kind: "settings";
+  /**
+   * The file chosen, or null when none is (no --config, no CODARYN_CONFIG, no default location).
+   * `path` is for reading and writing it; show `display` (N-14). `exists` false only for the
+   * default location, where a missing file means "no config yet" (the wizard creates one).
+   */
+  readonly file: {
+    readonly source: "argument" | "environment" | "default";
+    readonly path: string;
+    readonly display: string;
+    readonly exists: boolean;
+  } | null;
+  /** The parsed config, or null when there is no file. A file that fails a check is an AppError instead. */
+  readonly config: CodarynConfig | null;
+  /** N-8: profile names in the file's order, for the new task screen. */
+  readonly profiles: readonly string[];
+  /** G-A: workflow ids the config file defines. Built-in ids come with the workflow module (G-B). */
+  readonly workflows: readonly string[];
+  /** Whether ANTHROPIC_API_KEY is set. Never its value (C-1). */
+  readonly keyAvailable: boolean;
 }
 
 /** The settings of one run, as `codaryn run` takes them. */
@@ -341,6 +374,8 @@ export interface CodarynApp {
   resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>>;
   /** `codaryn doctor --json`: no network access, no write. */
   doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>>;
+  /** The config file a run would read and what it holds; profile and workflow names. Reads only. */
+  readSettings(request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>>;
   /** `codaryn models --json`: a real API request; only when a person asked. Writes nothing. */
   listModels(request: ListModelsRequest): Promise<AppCallOutcome<ModelsOutput>>;
   /** `codaryn models --json --use <id>`: writes the config file's `model` atomically, nothing else. */

@@ -45,6 +45,9 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.next_review": "Record a verdict: codaryn review {form} --run {runId} --accept or --reject",
   "summary.apply_actions": "Actions applied: {applied} of {total}",
   "summary.apply_plan_run": "Plan run: {runId}",
+  "summary.unsafe_moves": "Not applied: moves that could replace a file: {count}. Nothing was moved.",
+  "summary.next_apply_unsafe": "Consent for this apply only: codaryn apply {form} --run {runId} --digest <digest> --allow-unsafe-move",
+  "summary.next_revert_unsafe": "Consent for this revert only: codaryn revert --workspace <workspace> --run {runId} --allow-unsafe-move",
 
   "progress.run_started": "run started — provider {provider}",
   "progress.config_default": "using the config file in the default location: {location}",
@@ -64,6 +67,8 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.unknown_tool": "(unknown tool)",
   "progress.apply_started": "apply started — actions: {actions}, {approval}",
   "progress.plan_checked": "preflight — problems: {count}",
+  "progress.unsafe_moves": "moves that could replace a file: {count} (made only with consent)",
+  "progress.unsafe_move_consent": "consent to moves that could replace a file — {approval}",
   "progress.plan_item_problem": "action #{number} — {problem}",
   "progress.inventory_limit": "the workspace has more files than the inventory limit (100,000), so the apply could not be checked; nothing was moved",
   "progress.file_moved": "action #{number} — moved",
@@ -84,6 +89,8 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.action.restored_from_discard": "restored from the discarded files folder",
   "revert.dry_run_next": "Run again without --dry-run to apply.",
   "revert.reverted_before": "This run was already reverted before, so its files may show as changed since the run.",
+  "revert.unsafe_moved": "Files moved back with your consent in a way that could replace a file: {count}",
+  "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
   "runs.column.run_id": "run id",
   "runs.column.started": "started",
@@ -304,6 +311,7 @@ export const EN_MESSAGES: MessageTexts = {
   "reason.apply_incomplete": "an action failed while applying; the earlier ones stay applied",
   "reason.plan_pending": "a plan was proposed and waits for approval",
   "reason.awaiting_review": "waiting for a person's review",
+  "reason.consent_required": "some moves could replace a file, so they wait for a person's consent; nothing was moved",
 
   "advice.verified": "Read the report, and revert if needed.",
   "advice.verifier_failed": "Read the evidence in the report, adjust the goal or the checks, and run again.",
@@ -323,6 +331,7 @@ export const EN_MESSAGES: MessageTexts = {
   "advice.apply_incomplete": "Find the failed action in the report. codaryn revert undoes the applied ones.",
   "advice.plan_pending": "Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.",
   "advice.awaiting_review": "Look at the result and record a verdict with codaryn review.",
+  "advice.consent_required": "Read the preflight result. To consent for this apply only, apply again with --allow-unsafe-move. Without consent nothing changes.",
 
   "tool.read_file": "read file",
   "tool.search_files": "search files",
@@ -335,6 +344,7 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.skip.missing_record": "record missing",
   "revert.skip.already_reverted": "already as it was before the run",
   "revert.skip.original_path_taken": "something else is at its original path",
+  "revert.skip.unsafe_move": "this drive cannot move it back without risking replacing a file",
 
   "diagnostic.file.config": "config file",
   "diagnostic.file.task": "task file",
@@ -414,7 +424,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.status.skipped": "skipped",
 
   "approval.cli-tty": "approved at the terminal",
-  "approval.cli-flag": "approved with --digest",
+  "approval.cli-flag": "approved by a command-line argument",
   "approval.adapter": "approved in an adapter (VS Code or GUI)",
 
   "plan.problem.source_missing": "the source is gone",

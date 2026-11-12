@@ -1,6 +1,6 @@
 /** Shared samples for the i18n tests. All values are fake. */
 
-import { API_KEY_ENVS, DEFAULT_CONFIG_DISPLAY, MESSAGE_IDS, messageParams } from "../../../src/contracts/index.js";
+import { API_BASE_URL_ENVS, API_KEY_ENVS, API_MODEL_ENVS, DEFAULT_CONFIG_DISPLAY, MESSAGE_IDS, messageParams } from "../../../src/contracts/index.js";
 import type { MessageCatalog, MessageId, MessageLanguage, MessageParamKind } from "../../../src/contracts/index.js";
 
 export const LANGS: readonly MessageLanguage[] = ["ko", "en"];
@@ -52,6 +52,10 @@ export function samples(kind: MessageParamKind, catalog: MessageCatalog): readon
       return ["tests", "package.json"];
     case "keyEnv":
       return [API_KEY_ENVS[0], API_KEY_ENVS[1]];
+    case "settingEnv":
+      return [API_MODEL_ENVS[1], API_BASE_URL_ENVS[0]];
+    case "apiOrigin":
+      return ["https://api.example.test", "http://127.0.0.1:8080"];
     default:
       // A kind the contract added after these samples: the tests that use it fail here, by name,
       // instead of the whole build stopping on a switch that is no longer exhaustive.

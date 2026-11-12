@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  API_BASE_URL_ENVS,
   API_KEY_ENVS,
+  API_MODEL_ENVS,
   DEFAULT_CONFIG_DISPLAY,
   INIT_SUGGESTED_COMMANDS,
   INIT_SUGGESTED_PROTECTED_PATHS,
@@ -72,6 +74,7 @@ describe("i18n params: closed codes and fixed strings", () => {
       ["suggestedPath", INIT_SUGGESTED_PROTECTED_PATHS],
       ["language", ["ko", "en"]],
       ["keyEnv", API_KEY_ENVS],
+      ["settingEnv", [...API_MODEL_ENVS, ...API_BASE_URL_ENVS]],
     ];
     assert.ok(MODEL_PROVIDER_NAMES.includes("openai"), "the second provider's name is shown as itself");
     for (const [kind, values] of expected) {
@@ -147,6 +150,25 @@ describe("i18n params: cleanLine", () => {
     // Too short for the loose shape, or not at a word start: shown as it is.
     assert.equal(cleanLine("sk-short-name"), "sk-short-name");
     assert.equal(cleanLine(`task${OPENAI_LOOSE_SHAPED}`), `task${OPENAI_LOOSE_SHAPED}`);
+  });
+
+  test("an API origin is shown only as the contract's origin form (apiOrigin, DR-36 (b))", () => {
+    for (const origin of ["https://api.anthropic.com", "https://api.openai.com", "https://proxy.example.test:8443", "http://localhost:9000", "http://127.0.0.1:8080", "http://[::1]:7000"]) {
+      assert.equal(show("apiOrigin", origin), origin, origin);
+    }
+    const refused: unknown[] = [
+      "https://api.example.test/v1", // a path
+      "https://api.example.test/", // not the origin form
+      "https://user:secret@api.example.test", // user info
+      "http://api.example.test", // http only on loopback
+      "HTTPS://API.EXAMPLE.TEST", // not as toApiOrigin writes it
+      "https://api.example.test?x=1",
+      "ftp://api.example.test",
+      KEY_SHAPED,
+      "",
+      42,
+    ];
+    for (const value of refused) assert.equal(show("apiOrigin", value), REPLACEMENT, String(value));
   });
 
   test("a key variable is shown only as one of the contract's names (keyEnv, SP-D12)", () => {

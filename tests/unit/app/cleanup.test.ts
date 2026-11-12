@@ -74,7 +74,9 @@ describe("DR-39: the app layer's state summary and cleanup", () => {
     const applied = ok<CleanupApplied>(
       await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }),
     );
-    assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
+    // DR-48 (U-22): nothing removed, so the cleanup says so and its outcome is not ok.
+    assert.equal(applied.status, "nothing_removed", JSON.stringify(applied));
+    assert.equal(applied.outcome.ok, false);
     // U-13 (UXM-1): the apply run's records stay while its discarded files stay, and so does its plan run.
     assert.deepEqual(applied.outcome.removed, []);
     assert.deepEqual(
@@ -101,20 +103,21 @@ describe("DR-39: the app layer's state summary and cleanup", () => {
     const removed = ok<CleanupApplied>(
       await app.applyCleanup({ workspace, selection: { discarded: { runIds: [applyRunId] } }, now: again.now, confirmation: { digest: again.plan.digest, discarded: true, includeNotReverted: false } }),
     );
-    assert.ok(removed.outcome.ok && removed.outcome.removed.length === 1, JSON.stringify(removed.outcome));
+    assert.ok(removed.status === "removed" && removed.outcome.ok && removed.outcome.removed.length === 1, JSON.stringify(removed));
     assert.equal(await exists(discardedOf(workspace, applyRunId)), false);
   });
 
-  test("a digest the person did not see, or a plan that changed after the preview, removes nothing", async () => {
+  test("a digest the person did not see, or a plan that changed after the preview, removes nothing: the error cleanup_plan_changed", async () => {
     const { workspace, app, planRunId } = await appliedDiscard();
     const selection = { runs: { olderThanDays: 0 } };
     const preview = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection }));
-    const forged = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: "0".repeat(64), discarded: true, includeNotReverted: true } }));
-    assert.deepEqual(forged.outcome, { ok: false, code: "plan_changed" });
+    // DR-48 (U-22): a call error, not a cleanup outcome.
+    const forged = await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: "0".repeat(64), discarded: true, includeNotReverted: true } });
+    assert.equal(code(forged), "cleanup_plan_changed", JSON.stringify(forged));
     // A file appears in a selected run after the preview: its fingerprint changes.
     await writeFile(path.join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME, planRunId, "late.txt"), "x", "utf8");
-    const stale = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }));
-    assert.deepEqual(stale.outcome, { ok: false, code: "plan_changed" });
+    const stale = await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } });
+    assert.equal(code(stale), "cleanup_plan_changed", JSON.stringify(stale));
     assert.equal((await runsIn(workspace)).length, 2, "nothing was removed");
   });
 

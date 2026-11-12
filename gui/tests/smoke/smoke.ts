@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -528,6 +528,8 @@ startGui({
       keepNotReverted = true;
       await js("document.getElementById('cleanup-apply')?.click(); true");
       results["cleanupKeepResult"] = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+      // U-22 (DR-48): nothing was removed; the window says so as a result, not an error.
+      results["cleanupKeepStatus"] = { status: await js("document.getElementById('cleanup-result')?.getAttribute('data-status') ?? null"), notice: await js("document.getElementById('cleanup-status')?.getAttribute('data-status') ?? null") };
       results["cleanupKeepRemoved"] = await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null");
       results["cleanupKeepReasons"] = await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => li.getAttribute('data-reason'))");
       results["cleanupKeepDialogs"] = dialogs.slice(askedBeforeKeep);
@@ -546,6 +548,7 @@ startGui({
       const askedBeforeCleanup = dialogs.length;
       await js("document.getElementById('cleanup-apply')?.click(); true");
       results["cleanupResult"] = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+      results["cleanupStatus"] = await js("document.getElementById('cleanup-result')?.getAttribute('data-status') ?? null");
       results["cleanupRemoved"] = await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null");
       results["cleanupDialogs"] = dialogs.slice(askedBeforeCleanup);
       results["cleanupRunsAfter"] = await waitFor(`(() => { const n = Number(document.querySelector('#cleanup-summary [data-runs]')?.getAttribute('data-runs') ?? '-1'); return n >= 0 && n !== ${runsBefore} ? n : null; })()`, 20_000);
@@ -591,6 +594,7 @@ startGui({
           kept: await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-reason')])"),
           keptText: await js("document.querySelector('#cleanup-kept [data-reason=\"discarded_left\"]')?.textContent ?? null"),
           keptNotice: await js("document.getElementById('cleanup-kept-discarded-left') !== null"),
+          status: await js("document.getElementById('cleanup-result')?.getAttribute('data-status') ?? null"),
           dialogs: dialogs.slice(asked),
           left: { records: existsSync(discardRecords), box: existsSync(discardBox) },
         };
@@ -598,6 +602,37 @@ startGui({
       results["discardLeftKept"] = await cleanupOf(false);
       results["discardLeftKeepBox"] = await cleanupOf(true, true);
       results["discardLeftBoth"] = await cleanupOf(true);
+
+      // 5j3. U-22 (DR-48, R51-M-1): a cleanup that fails in part is shown as what it did. On Windows a file
+      // of the analyze run's records held open stops the folder's move aside: kept as io_error, the
+      // cleanup partly_failed, nothing of the run removed. The file is closed after (this test opened it).
+      if (process.platform === "win32") {
+        const records = join(SECOND, ".codaryn", "runs", analyzeRunId);
+        const held = openSync(join(records, readdirSync(records).find((name) => name.endsWith(".jsonl")) ?? "journal.jsonl"), "r");
+        try {
+          const asked = dialogs.length;
+          await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+          await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+          const chosen = await js(`(() => { const box = document.querySelector('[data-run-select="${analyzeRunId}"]'); if (box === null) return false; box.checked = true; document.getElementById('cleanup-preview').click(); return true; })()`);
+          await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+          await js("document.getElementById('cleanup-apply')?.click(); true");
+          results["partlyFailed"] = {
+            chosen,
+            result: await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null"),
+            status: await js("document.getElementById('cleanup-result')?.getAttribute('data-status') ?? null"),
+            notice: await js("document.getElementById('cleanup-status')?.getAttribute('data-status') ?? null"),
+            errors: await js("document.querySelectorAll('#cleanup-result [data-error]').length"),
+            removed: await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null"),
+            kept: await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-reason')])"),
+            dialogs: dialogs.slice(asked),
+            stays: existsSync(records),
+          };
+        } finally {
+          closeSync(held);
+        }
+      } else {
+        results["partlyFailed"] = "not measured on this platform";
+      }
 
       // 5k. U-11 (3.11): the first-run guide on this workspace. The config file exists (used as it is), the
       // key is set (by its variable's name), init's suggestions for a package.json with a test script

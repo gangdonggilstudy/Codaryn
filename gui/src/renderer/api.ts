@@ -441,6 +441,8 @@ export function asCleanupResult(value: unknown): { readonly ok: true; readonly r
   const result = value["result"];
   if (result["ok"] === false) return { ok: true, result: { ok: false, code: str(result["code"]) ? result["code"] : "host_error" } };
   if (result["ok"] !== true || !Array.isArray(result["removed"]) || !Array.isArray(result["kept"]) || !isObj(result["totals"])) return failed(value);
+  // DR-48: CLEANUP_RESULT_STATUSES of src/shared/cleanup.ts (the page loads nothing from there).
+  if (!["removed", "nothing_removed", "partly_failed"].includes(result["status"] as string)) return failed(value);
   return { ok: true, result: result as unknown as CleanupResultView };
 }
 

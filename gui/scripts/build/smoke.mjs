@@ -199,8 +199,11 @@ const U13_DIALOGS = [
   ...["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"],
   ...["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"],
 ];
+/** U-22 (5j3, Windows only): the cleanup of the analyze run's records while one of its files is held open. */
+const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
+seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
 seen.configModel = configModel;
 
@@ -400,12 +403,15 @@ const expected = [
   ["cleanupKeepReasons", (v) => JSON.stringify(v) === JSON.stringify(["not_reverted_not_confirmed"])],
   ["cleanupKeepDialogs", (v) => JSON.stringify(v) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message"])],
   ["cleanupKeepStays", (v) => v === true],
+  // U-22 (DR-48, R51-M-1): a cleanup that removed nothing is a result that says so, not host_error.
+  ["cleanupKeepStatus", (v) => JSON.stringify(v) === JSON.stringify({ status: "nothing_removed", notice: "nothing_removed" })],
   ["cleanupReady", (v) => v === "ok"],
   ["cleanupRunsBefore", (v) => typeof v === "number" && v >= 2],
   ["cleanupPlan", (v) => v === "1"],
   ["cleanupPlanItems", (v) => JSON.stringify(v) === JSON.stringify([["run", "first run"]])],
   ["cleanupResult", (v) => v === "done"],
   ["cleanupRemoved", (v) => v === "1"],
+  ["cleanupStatus", (v) => v === "removed"],
   ["cleanupDialogs", (v) => JSON.stringify(v) === JSON.stringify(["cleanup.message"])],
   ["cleanupRunsAfter", (v) => typeof v === "number" && v >= 1],
   ["cleanupFirstRunGone", (v) => v === true],
@@ -445,6 +451,27 @@ const expected = [
       v.keptNotice === true &&
       JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"]) &&
       JSON.stringify(v.left) === JSON.stringify({ records: true, box: true }),
+  ],
+  // U-22 (DR-48): the three cleanups of 5j2 removed nothing, nothing, both.
+  ["discardLeftStatuses", (v) => JSON.stringify(v) === JSON.stringify(["nothing_removed", "nothing_removed", "removed"])],
+  // U-22 (DR-48, R51-M-1): a cleanup that failed in part (Windows: a file held open) is shown as such:
+  // nothing of the run removed, kept as io_error, no error box; the records stay.
+  [
+    "partlyFailed",
+    (v) =>
+      process.platform !== "win32"
+        ? v === "not measured on this platform"
+        : v !== null &&
+          typeof v === "object" &&
+          v.chosen === true &&
+          v.result === "done" &&
+          v.status === "partly_failed" &&
+          v.notice === "partly_failed" &&
+          v.errors === 0 &&
+          v.removed === "0" &&
+          JSON.stringify(v.kept) === JSON.stringify([["run", "io_error"]]) &&
+          JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message"]) &&
+          v.stays === true,
   ],
   // Its discarded files chosen too and their deletion agreed to: both go, nothing kept.
   [
@@ -497,7 +524,7 @@ const expected = [
   ["setupCheckItems", (v) => typeof v === "number" && v >= 5],
   ["setupOnDisk", (v) => v.npmTest === true && v.packageJson === true],
   ["setupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

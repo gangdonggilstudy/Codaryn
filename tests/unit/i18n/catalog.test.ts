@@ -413,6 +413,24 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.ko["reason.verified"], /지정한 검증/);
   });
 
+  test("U-22 (DR-48): a wrong cleanup digest and a latest run still going are errors that say nothing changed", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // The wrong digest is an error now; the fixed line it had is gone.
+    assert.ok(!(MESSAGE_IDS as readonly string[]).includes("cleanup.plan_changed"));
+    assert.match(en["error.cleanup_plan_changed.what"], /changed after the preview, or the digest is of another preview; nothing was removed/);
+    assert.match(ko["error.cleanup_plan_changed.what"], /바뀌었거나 다른 미리보기의 다이제스트입니다\. 아무것도 지우지 않았습니다/);
+    assert.match(en["error.cleanup_plan_changed.fix"], /preview again/);
+    assert.match(ko["error.cleanup_plan_changed.fix"], /미리보기를 다시/);
+    // Still going is not "no such run": it says so, and that nothing was changed.
+    assert.match(en["error.run_in_progress.what"], /still going.*nothing was changed/);
+    assert.match(ko["error.run_in_progress.what"], /아직 도는 중.*아무것도 바꾸지 않았습니다/);
+    assert.ok(!/no record/.test(en["error.run_in_progress.what"]) && !/기록이 없/.test(ko["error.run_in_progress.what"]));
+    // Shown by the CLI and the GUI alike: the cleanup texts name no CLI option.
+    for (const id of ["error.cleanup_plan_changed.what", "error.cleanup_plan_changed.fix"] as const) {
+      assert.ok(!en[id].includes("--") && !ko[id].includes("--"), id);
+    }
+  });
+
   test("U-21 (DR-47): the agent's last message is always labelled as its own words, not a verified fact", () => {
     const { en, ko } = MESSAGE_TEXTS;
     for (const id of ["summary.final_message", "report.final_message"] as const) {

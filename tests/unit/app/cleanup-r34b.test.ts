@@ -52,7 +52,9 @@ describe("R-34b: the cleanup's last round through the app layer", () => {
     assert.ok(item.warnings.includes("records_unreadable"), "the contract's warning for damaged records");
     assert.equal(preview.plan.totals.runs.notReverted, 1);
     const kept = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: false } }));
-    assert.ok(kept.outcome.ok, JSON.stringify(kept.outcome));
+    // DR-48 (U-22): nothing removed, so the cleanup says so and its outcome is not ok.
+    assert.equal(kept.status, "nothing_removed", JSON.stringify(kept));
+    assert.equal(kept.outcome.ok, false);
     assert.deepEqual(kept.outcome.kept, [{ target: "run", runId, reason: "not_reverted_not_confirmed" }]);
     assert.equal(await exists(runDirOf(workspace, runId)), true, "its snapshot, the last copy of the originals, stays");
   });
@@ -68,7 +70,7 @@ describe("R-34b: the cleanup's last round through the app layer", () => {
     const applied = ok<CleanupApplied>(
       await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: true, includeNotReverted: true } }),
     );
-    assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
+    assert.ok(applied.status === "removed" && applied.outcome.ok, JSON.stringify(applied));
     assert.deepEqual(await readdir(stranger), ["person.txt"], "the unknown folder stays, whatever was confirmed");
     const summary = ok<StateSummaryView>(await app.stateSummary({ workspace }));
     assert.deepEqual([summary.summary.unknownFolders?.count, summary.summary.unknownFolders?.files], [1, 1], "shown as an unknown folder");

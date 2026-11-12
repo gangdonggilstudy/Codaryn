@@ -198,6 +198,12 @@ export const CLI_ERROR_EXIT_CODES = {
    * error adds `lock.remove_hint`: when no Codaryn is running in that workspace, remove the file.
    */
   workspace_locked: 6,
+  /**
+   * DR-48 (AXM-8), `--run latest` (`report`, `changes`, `revert`): the latest run has no result yet
+   * and holds the workspace lock with a live holder, so it is still going. Try again when it ends.
+   * Nothing was changed. `run_not_found` stays for a workspace with no run that could be chosen.
+   */
+  run_in_progress: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
   /** `codaryn models` (Y-1): the Models API request failed. The message names the ModelErrorKind. */
@@ -240,6 +246,13 @@ export const CLI_ERROR_EXIT_CODES = {
    * secrets, as the plan run, or make the plan again.
    */
   plan_secrets_differ: 2,
+  /**
+   * DR-48 (AXM-3), `codaryn cleanup --confirm` and the app layer: the plan made again under the lock
+   * has another digest than the confirmed one (the state directory changed since the preview, or
+   * another preview's digest was given). Nothing was removed. Preview again and confirm its digest.
+   * It was a CleanupOutput (`mode: "plan_changed"`, exit 3) before DR-48.
+   */
+  cleanup_plan_changed: 2,
   /**
    * U-1 (R-33 R33-L3), `codaryn apply` and the app layer: the plan run has a records-changed mark
    * (DR-38, RECORDS_CHANGED_FILE_NAME; one that cannot be read counts too), so its plan may differ

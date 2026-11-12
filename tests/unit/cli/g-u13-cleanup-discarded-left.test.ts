@@ -86,7 +86,7 @@ async function cleanup(base: string, args: readonly string[], json = true): Prom
 const SELECT = ["--older-than", "0", "--discarded-older-than", "0"];
 async function digestOf(base: string): Promise<string> {
   const shown = await cleanup(base, SELECT);
-  assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+  assert.ok(shown.output?.status === "preview", JSON.stringify(shown));
   return shown.output.plan.digest.slice(0, 12);
 }
 const runsOf = async (work: string): Promise<string[]> => (await readdir(path.join(work, STATE_DIR_NAME, RUNS_DIR_NAME))).sort();
@@ -95,7 +95,7 @@ describe("U-13 (UXM-1): an apply's records are not removed while its discarded f
   test("--confirm --include-not-reverted without --delete-discarded: the apply and its plan run stay, the rest goes, each kept item says why", async () => {
     const { base, work, planRunId, applyRunId, otherRunId } = await appliedNotReverted();
     const done = await cleanup(base, [...SELECT, "--confirm", await digestOf(base), "--include-not-reverted"]);
-    assert.ok(done.output?.mode === "applied", JSON.stringify(done));
+    assert.ok(done.output !== null && done.output.status !== "preview", JSON.stringify(done));
     assert.equal(done.exitCode, 0, "kept by the person's choice");
     assert.deepEqual(await runsOf(work), [planRunId, applyRunId].sort(), "the apply run and the plan run it uses stay");
     assert.deepEqual(done.output.outcome.removed.map((item) => itemName(item)), [otherRunId]);
@@ -135,7 +135,7 @@ describe("U-13 (UXM-1): an apply's records are not removed while its discarded f
   test("the preview warns that the apply's discarded files would be left (holds before U-13)", async () => {
     const { base, applyRunId } = await appliedNotReverted();
     const shown = await cleanup(base, SELECT);
-    assert.ok(shown.output?.mode === "preview");
+    assert.ok(shown.output?.status === "preview");
     const item = shown.output.plan.items.find((entry) => entry.target === "run" && itemName(entry) === applyRunId);
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(shown.output.plan.items));
   });
@@ -178,7 +178,7 @@ describe("U-13 (UXM-1), the CLI over the contract's answer", () => {
     const done = await confirmed(true);
     assert.equal(done.exitCode, 0, done.text);
     const output = JSON.parse(done.text) as CleanupOutput;
-    assert.ok(output.mode === "applied");
+    assert.ok(output.status !== "preview");
     assert.deepEqual(output.outcome.kept.map((item) => item.reason), ["discarded_left", "used_by_kept_apply", "not_confirmed"]);
   });
 

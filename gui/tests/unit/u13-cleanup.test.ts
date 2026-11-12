@@ -39,7 +39,7 @@ test("U-13: a result's apply run kept as discarded_left says why and how it can 
       get: (_t, name: string) => async () => {
         if (name === "stateSummary") return { ok: true, summary };
         if (name === "previewCleanup") return { ok: true, token: "e".repeat(32), plan };
-        if (name === "applyCleanup") return { ok: true, result: { ok: true, removed: [], kept: [{ target: "run", id: APPLY, reason: "discarded_left" }], totals: plan.totals } };
+        if (name === "applyCleanup") return { ok: true, result: { ok: true, status: "nothing_removed", removed: [], kept: [{ target: "run", id: APPLY, reason: "discarded_left" }], totals: plan.totals } };
         return null;
       },
     });

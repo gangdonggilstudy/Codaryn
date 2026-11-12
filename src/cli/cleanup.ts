@@ -26,20 +26,30 @@
  *   is selected when it matches every criterion of its part; a part with none selects nothing.
  *   Run ids are exact (no `latest`).
  *
- * The output (CleanupOutput) is the CLI's until the contract owner takes it into the contract; it
- * holds the contract's StateSummary, CleanupPlan and CleanupOutcome as the store gives them.
+ * The output is the contract's CleanupOutput (U-22, DR-48): `status` says what happened (preview,
+ * removed, nothing_removed, partly_failed) and the exit code follows it (CLEANUP_EXIT_CODES);
+ * `outcome.ok` is true only when something was removed and nothing was kept for a problem. A
+ * confirmed digest that is not the plan's is the error cleanup_plan_changed (exit 2).
  */
 
 import { realpath as realpathCallback } from "node:fs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES, MIN_PLAN_DIGEST_PREFIX, needsNotRevertedConfirmation } from "../contracts/index.js";
+import {
+  CLEANUP_BLOCK_CODES,
+  CLEANUP_EXIT_CODES,
+  CLEANUP_KEPT_REASONS,
+  CLEANUP_WARNING_CODES,
+  MIN_PLAN_DIGEST_PREFIX,
+  cleanupStatusOf,
+  needsNotRevertedConfirmation,
+} from "../contracts/index.js";
 import type {
   ApplyCleanup,
   CleanupItemRef,
   CleanupKeptReason,
-  CleanupOutcome,
+  CleanupOutput,
   CleanupPlan,
   CleanupSelection,
   Clock,
@@ -66,35 +76,12 @@ export const CLEANUP_USAGE =
   "codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] " +
   "[--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <first 12+ hex of the digest> [--delete-discarded] [--include-not-reverted]] [--json]";
 
-/**
- * What `codaryn cleanup` prints (one JSON line with `--json`). Exit codes: 0, 1 (an item kept for a
- * problem, partly_removed among them), 3 (plan changed, or a confirmation missing).
- */
-export type CleanupOutput =
-  | {
-      readonly schemaVersion: 1;
-      readonly kind: "cleanup";
-      /** Nothing was removed. */
-      readonly mode: "preview";
-      readonly exitCode: 0;
-      readonly summary: StateSummary;
-      readonly plan: CleanupPlan;
-    }
-  | {
-      readonly schemaVersion: 1;
-      readonly kind: "cleanup";
-      readonly mode: "applied";
-      /** 1 when an item was kept for a reason other than `not_confirmed`. */
-      readonly exitCode: 0 | 1;
-      readonly outcome: Extract<CleanupOutcome, { readonly ok: true }>;
-    }
-  | {
-      readonly schemaVersion: 1;
-      readonly kind: "cleanup";
-      /** The confirmed digest is not the plan's (it changed, or another plan was shown); nothing was removed. */
-      readonly mode: "plan_changed";
-      readonly exitCode: 3;
-    };
+/** U-22: the contract's type, under the name the CLI's tests and the app layer used. */
+export type { CleanupOutput } from "../contracts/index.js";
+
+/** U-22 (DR-48): the confirmed digest is not the plan's; an error, not a cleanup's output. */
+const PLAN_CHANGED_MESSAGE =
+  "the confirmed digest is not the cleanup plan's: the state directory changed since the preview, or another preview's digest was given. Nothing was removed. Preview again and confirm its digest";
 
 export interface CleanupEnvironment {
   readonly argv: readonly string[];
@@ -235,9 +222,9 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   try {
     const shown = await plan({ workspaceRoot, selection, now: now() });
     if (confirm === null) {
-      output = { schemaVersion: 1, kind: "cleanup", mode: "preview", exitCode: 0, summary: await summarize({ workspaceRoot }), plan: shown };
+      output = { schemaVersion: 1, kind: "cleanup", status: "preview", exitCode: CLEANUP_EXIT_CODES.preview, summary: await summarize({ workspaceRoot }), plan: shown };
     } else if (!shown.digest.startsWith(confirm)) {
-      output = { schemaVersion: 1, kind: "cleanup", mode: "plan_changed", exitCode: 3 };
+      return cliError("cleanup_plan_changed", PLAN_CHANGED_MESSAGE);
     } else {
       const outcome = await apply({
         workspaceRoot,
@@ -249,10 +236,12 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
         if (outcome.code === "workspace_locked") {
           return cliError("workspace_locked", "another Codaryn process holds the workspace lock; nothing was removed");
         }
-        output = { schemaVersion: 1, kind: "cleanup", mode: "plan_changed", exitCode: 3 };
+        return cliError("cleanup_plan_changed", PLAN_CHANGED_MESSAGE);
       } else {
-        const problem = outcome.kept.some((item) => !PERSON_CHOICES.has(item.reason));
-        output = { schemaVersion: 1, kind: "cleanup", mode: "applied", exitCode: problem ? 1 : 0, outcome };
+        // U-22 (DR-48, AXM-3): the contract's one rule; ok only when something was removed and
+        // nothing was kept for a problem.
+        const status = cleanupStatusOf(outcome);
+        output = { schemaVersion: 1, kind: "cleanup", status, exitCode: CLEANUP_EXIT_CODES[status], outcome: { ...outcome, ok: status === "removed" } };
       }
     }
   } catch {
@@ -263,14 +252,6 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   const text = json ? jsonLine(output) : renderCleanup(output, io.messages ?? createMessageCatalog("en"));
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }
-
-/**
- * Items kept by the person's own choice (a confirmation not given, or what such a choice keeps):
- * they do not make the command fail. Every other reason does (DR-44 (d): partly_removed among them).
- * U-13: discarded_left is one of them: the apply's discarded files were not chosen or their removal
- * was not confirmed. When their removal failed, the folder's own item (partly_removed) ends it 1.
- */
-const PERSON_CHOICES: ReadonlySet<CleanupKeptReason> = new Set<CleanupKeptReason>(["not_confirmed", "not_reverted_not_confirmed", "discarded_left", "used_by_kept_apply"]);
 
 const sizeText = (size: StateSize): string => `${size.files} file(s), ${size.bytes} bytes`;
 
@@ -306,18 +287,16 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
   const out: string[] = [];
   const keptText = (reason: CleanupKeptReason): string =>
     (CLEANUP_KEPT_REASONS as readonly string[]).includes(reason) ? textOr(() => messages.format(`cleanup.kept.${reason}`), reason) : reason;
-  if (output.mode === "plan_changed") {
-    out.push(messages.format("cleanup.plan_changed"));
-    return `${out.join("\n")}\n`;
-  }
-  if (output.mode === "applied") {
+  if (output.status !== "preview") {
     const { removed, kept } = output.outcome;
+    // U-22: a confirmed cleanup that removed nothing says so first (fixed English: no catalog text yet).
+    if (output.status === "nothing_removed") out.push("Nothing was removed.");
     const runs = removed.filter((item) => item.target === "run");
     const folders = removed.filter((item) => item.target === "discarded");
     const leftovers = removed.filter((item) => item.target === "leftover");
     const bytes = [...runs, ...folders].reduce((sum, item) => sum + item.size.bytes, 0);
     // DR-44 (d): only what was removed entirely is counted.
-    out.push(messages.format("cleanup.done", { runs: runs.length, folders: folders.length, bytes }));
+    if (output.status !== "nothing_removed") out.push(messages.format("cleanup.done", { runs: runs.length, folders: folders.length, bytes }));
     if (leftovers.length > 0) {
       const leftoverBytes = leftovers.reduce((sum, item) => sum + item.size.bytes, 0);
       out.push(textOr(() => messages.format("cleanup.done_leftovers", { count: leftovers.length, bytes: leftoverBytes }), `Removed what earlier cleanups left: ${leftovers.length} folder(s), ${leftoverBytes} bytes`));

@@ -469,7 +469,6 @@ export const FIXED_MESSAGES = {
   "cleanup.confirm.runs": { count: "count", bytes: "count" },
   "cleanup.confirm.discarded": { files: "count", bytes: "count" },
   "cleanup.done": { runs: "count", folders: "count", bytes: "count" },
-  "cleanup.plan_changed": {},
   // DR-44 (R-34): shown after cleanup.confirm.runs when above 0: how many of those run records are of
   // runs not reverted or only partly reverted, or whose records cannot be checked (R-34b P-1)
   // (CleanupPlan.totals.runs.notReverted), which go only with

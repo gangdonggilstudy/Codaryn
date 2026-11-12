@@ -5,7 +5,8 @@
  *   the workspace's runs, newest first. Text for people on stdout by default
  *   (`HumanOutput.runsText`), RunsOutput as one JSON line with `--json`. `--workspace` defaults to
  *   the current directory. Reads only: nothing is created, changed or locked.
- * - `resolveRunRef`: `--run latest` for `report` and `revert` (LATEST_RUN_ALIAS).
+ * - `resolveRunRef`: `--run latest` for the app layer (`changes`, `resolveRun`): U-22 (R-51 M-2), the
+ *   CLI's one rule (resolveRunReference with the store's functions), as every command has it.
  *
  * The argument parser lives here until N-A moves it into args.ts; main.ts connects the command.
  */
@@ -16,16 +17,14 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
-  LATEST_RUN_ALIAS,
   RUNS_DEFAULT_LIMIT,
-  RUNS_DIR_NAME,
   RUNS_EXIT_CODES,
   RUNS_MAX_LIMIT,
-  STATE_DIR_NAME,
 } from "../contracts/index.js";
 import type { HumanOutput, RunListing, RunsOutput } from "../contracts/index.js";
-import { latestRunId, listRuns } from "../store/index.js";
+import { listRuns } from "../store/index.js";
 import type { CommandOutcome, JsonOutcome } from "./guard.js";
+import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "./run-ref.js";
 import { cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
@@ -95,37 +94,17 @@ export async function resolveWorkspaceRoot(workspace: string, cwd: string): Prom
   }
 }
 
-async function exists(file: string): Promise<boolean> {
-  try {
-    await lstat(file);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The run id a `--run` value names. Any value but LATEST_RUN_ALIAS is returned as it is (args.ts
- * has already checked its form). `latest` is the first run `listRuns` returns; damaged runs are
- * never chosen. When a run directory is literally named "latest", the alias is ambiguous and the
- * command stops (N-18). `workspaceRoot` is the real path.
+ * has already checked its form). `latest` follows the CLI's one rule, resolveRunReference with
+ * the store's functions (STORE_RUN_REFERENCE_DEPS): the first checked run with a result, damaged
+ * runs never chosen; a run directory literally named "latest" makes the alias ambiguous (N-18);
+ * U-22 (DR-48, R-51 M-2): a newer run still going (no result, a live holder of the lock) is
+ * `run_in_progress`, not the run before it. `workspaceRoot` is the real path.
  */
 export async function resolveRunRef(workspaceRoot: string, ref: string): Promise<Resolved<string>> {
-  if (ref !== LATEST_RUN_ALIAS) return { ok: true, value: ref };
-  if (await exists(path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, LATEST_RUN_ALIAS))) {
-    return {
-      ok: false,
-      error: cliError("invalid_arguments", "a run directory is named latest, so --run latest is ambiguous; give the run id instead"),
-    };
-  }
-  let newest: string | null;
-  try {
-    newest = await latestRunId(workspaceRoot);
-  } catch {
-    return { ok: false, error: cliError("invalid_run_record", "the run records cannot be listed") };
-  }
-  if (newest === null) return { ok: false, error: cliError("run_not_found", "the workspace has no runs yet, so --run latest names none") };
-  return { ok: true, value: newest };
+  const resolved = await resolveRunReference(workspaceRoot, ref, STORE_RUN_REFERENCE_DEPS);
+  return resolved.ok ? { ok: true, value: resolved.runId } : { ok: false, error: cliError(resolved.code, resolved.message) };
 }
 
 export interface RunsEnvironment {

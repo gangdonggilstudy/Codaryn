@@ -16,6 +16,7 @@ import { parseRunsArgs, resolveRunRef, runRuns } from "../../../src/cli/runs.js"
 import {
   RevertRunError,
   RunListError,
+  acquireLock,
   inspectRun,
   latestRunId,
   loadPlan,
@@ -23,6 +24,7 @@ import {
   readRunOriginals,
   listRuns,
   readRevertRecord,
+  releaseLock,
   revertRun,
   writeRevertRecord,
 } from "../../../src/store/index.js";
@@ -711,6 +713,25 @@ describe("--run latest (N-7, N-18)", () => {
 
     await writeRun(work, "20260102T030401Z-00000001", { at: "2026-01-02T03:04:01.000Z" });
     await writeRun(work, "20260102T030402Z-00000002", { at: "2026-01-02T03:04:02.000Z", resultText: "{" });
+    assert.deepEqual(await resolveRunRef(work, LATEST_RUN_ALIAS), { ok: true, value: "20260102T030401Z-00000001" });
+  });
+
+  test("U-22 (DR-48, R-51 M-2): a newer run still going (it holds the lock) is run_in_progress, as in every command; once it lets go, the finished run", async () => {
+    const work = await tempDir();
+    await writeRun(work, "20260102T030401Z-00000001", { at: "2026-01-02T03:04:01.000Z" });
+    const going = "20260102T030402Z-00000002";
+    await writeRun(work, going, { at: "2026-01-02T03:04:02.000Z", result: null });
+    const lock = await acquireLock({ workspaceRoot: work, runId: going, clock: { now: () => Date.now() } });
+    assert.ok(lock.ok);
+    try {
+      const outcome = await resolveRunRef(work, LATEST_RUN_ALIAS);
+      assert.equal(!outcome.ok && outcome.error.output.kind === "error" ? outcome.error.output.code : "", "run_in_progress");
+      // A run id given as it is names that run.
+      assert.deepEqual(await resolveRunRef(work, "20260102T030401Z-00000001"), { ok: true, value: "20260102T030401Z-00000001" });
+    } finally {
+      await releaseLock({ workspaceRoot: work, runId: going });
+    }
+    // No live lock: a run without a result is passed over, as before.
     assert.deepEqual(await resolveRunRef(work, LATEST_RUN_ALIAS), { ok: true, value: "20260102T030401Z-00000001" });
   });
 

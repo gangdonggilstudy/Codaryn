@@ -12,7 +12,7 @@ import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { ReportView } from "../../shared/ipc.js";
-import { clock, localDateTime } from "../run/run-model.js";
+import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
 
 export interface ReportDeps {
   readonly texts: Texts;
@@ -57,6 +57,13 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
       if (view.status === "incomplete") parts.push(el("p", t.format("report.incomplete"), { class: "notice" }));
       // UXM-14, DR-38: as the CLI's report warns.
       if (view.recordsChanged === true) parts.push(el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" }));
+      // U-21 (DR-47, AXM-1): the agent's last message under the report's label (its own words, not a verified fact).
+      if (view.finalMessage !== undefined && view.finalMessage !== null) {
+        const words = el("div", undefined, { id: "report-final-message" });
+        words.append(el("p", t.format("report.finalMessage"), { class: "notice" }), el("div", view.finalMessage.text, { class: "agent-words", id: "report-final-message-text" }));
+        if (view.finalMessage.truncated) words.append(el("p", t.format("run.finalMessageTruncated", { count: String(FINAL_MESSAGE_LIMIT) }), { class: "notice" }));
+        parts.push(words);
+      }
       return parts;
     },
   });

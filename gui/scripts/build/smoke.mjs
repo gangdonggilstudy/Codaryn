@@ -311,6 +311,8 @@ const expected = [
   ["runResult", (v) => v !== null && ["done", "needs-input"].includes(v.status) && /^\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(v.runId)],
   ["runLog", (v) => rows(v).length >= 2 && rows(v).includes("tool_decision")],
   ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
+  // U-21 (DR-47): the agent's last message, under the label that says it is its own words.
+  ["runFinalMessage", (v) => JSON.stringify(v) === JSON.stringify({ label: "에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님)", text: "done", cut: false })],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
   ["cancelReady", (v) => v === "ready"],

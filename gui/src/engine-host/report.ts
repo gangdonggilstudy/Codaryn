@@ -6,6 +6,7 @@
  * or the journal goes on.
  */
 
+import { finalMessageValue } from "./runs.js";
 import { failureOf } from "./settings.js";
 import type { HostFailure, Shown } from "./settings.js";
 
@@ -70,6 +71,8 @@ export function reportValue(outcome: unknown, shown: Shown, shownText: Shown): O
     runId,
     // UXM-14, DR-38: the run's records are not to be trusted (absent: false).
     recordsChanged: output["recordsChanged"] === true,
+    // U-21 (DR-47): the agent's last message, from the run's result (absent before DR-47).
+    finalMessage: finalMessageValue(isObj(output["result"]) ? output["result"]["finalMessage"] : undefined, shownText),
     status: output["status"] === "incomplete" ? "incomplete" : "complete",
     finished: finished(journal["finished"]),
     usage: usage(output["result"]),

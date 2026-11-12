@@ -6,10 +6,10 @@
  *   back as an ok outcome.
  * - A confirmed digest that is not the plan's is the error `cleanup_plan_changed`, and a held lock is
  *   `workspace_locked`; neither is a cleanup outcome. Before, both came back as outcomes.
- * - `--run latest` while the only run is still going is `run_in_progress`, not `run_not_found`; with
- *   a finished run before it, that run is chosen as before (AXM-8). The CLI resolves it; the app
- *   passes the code on.
- * Reproduced first (584a31c, todo); the app layer (c59256c) and the CLI (80fec27) follow the
+ * - `--run latest` while the newest run is still going is `run_in_progress`, not `run_not_found`,
+ *   even after a finished run (PM decision; a run named by its id is shown). The CLI resolves
+ *   it; the app passes the code on.
+ * Reproduced first (584a31c, todo); the app layer (c59256c) and the CLI (80fec27, 1de5b8a) follow the
  * contract now. `partly_failed` needs a removal the OS refuses; the contract's tests show the rule and
  * the app uses the same function. Real runs through the app (scripted model), the real store.
  * Fake values only.
@@ -112,15 +112,20 @@ describe("U-22 (DR-48): the app says what a cleanup did", () => {
     assert.equal(ok(await lone.app.report({ workspace: lone.workspace, runId: "latest" })).runId, handle.runId);
   });
 
-  test("report --run latest with a finished run before the one still going: the finished one, as before (AXM-8)", async () => {
+  test("report --run latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", async () => {
+    // PM decision (U-22): latest is the newest run, so a run still going answers run_in_progress
+    // even when a finished run came before it; the finished run is shown when named by its id.
     const run = await finishedRun();
     const handle = await busyOn(run);
     try {
-      assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: "latest" })).runId, run.runId);
+      assert.equal(codeOf(await run.app.report({ workspace: run.workspace, runId: "latest" })), "run_in_progress");
+      assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: run.runId })).runId, run.runId);
     } finally {
       handle.cancel();
       await handle.done;
     }
+    // Once the newest run has ended, latest names it.
+    assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: "latest" })).runId, handle.runId);
   });
 });
 

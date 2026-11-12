@@ -57,7 +57,7 @@ export type ParseArgsOutcome =
 export const RUN_USAGE =
   'codaryn run ("<goal>" | --task <task.json> | --workspace <dir> --goal <text>) ' +
   "[--config <config.json>] [--vars-file <path>] [--cancel-file <path>] [--quiet] [--profile <name>] [--workflow <id>]";
-export const REVERT_USAGE = "codaryn revert --workspace <dir> --run <runId|latest> [--dry-run] [--quiet]";
+export const REVERT_USAGE = `codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | ${UNSAFE_MOVE_CONSENT_ARGUMENT}] [--quiet]`;
 export const REPORT_USAGE = "codaryn report --workspace <dir> --run <runId|latest> [--json]";
 export const DOCTOR_USAGE =
   "codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--profile <name>] [--json]";
@@ -90,7 +90,7 @@ const NODE_ENV_FILE_FLAG = /^--env-file(-if-exists)?(=|$)/;
 
 const REVERT_OPTIONS = ["--workspace", "--run"] as const;
 type RevertOption = (typeof REVERT_OPTIONS)[number];
-const REVERT_SWITCHES = ["--dry-run", "--quiet"] as const;
+const REVERT_SWITCHES = ["--dry-run", "--quiet", UNSAFE_MOVE_CONSENT_ARGUMENT] as const;
 type RevertSwitch = (typeof REVERT_SWITCHES)[number];
 
 const REPORT_OPTIONS = ["--workspace", "--run"] as const;
@@ -186,6 +186,11 @@ export interface RevertArgs {
   readonly runId: string;
   /** `--dry-run` (N-7): decide and report, change nothing. */
   readonly dryRun: boolean;
+  /**
+   * DR-25: the person consents, for this revert only, to moving files back without the guarantee
+   * that nothing at the original path is replaced (UNSAFE_MOVE_CONSENT_ARGUMENT). Not with `--dry-run`.
+   */
+  readonly allowUnsafeMove: boolean;
   /** `--quiet` (N-5): no human-readable output on stderr. */
   readonly quiet: boolean;
 }
@@ -207,9 +212,14 @@ export function parseRevertArgs(argv: readonly string[]): ParseRevertArgsOutcome
     return { ok: false, message: `--workspace and --run are required. usage: ${REVERT_USAGE}` };
   }
   if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
+  const dryRun = read.switches.has("--dry-run");
+  const allowUnsafeMove = read.switches.has(UNSAFE_MOVE_CONSENT_ARGUMENT);
+  if (dryRun && allowUnsafeMove) {
+    return { ok: false, message: `--dry-run moves nothing, so it takes no ${UNSAFE_MOVE_CONSENT_ARGUMENT}. usage: ${REVERT_USAGE}` };
+  }
   return {
     ok: true,
-    args: { command: "revert", workspace, runId, dryRun: read.switches.has("--dry-run"), quiet: read.switches.has("--quiet") },
+    args: { command: "revert", workspace, runId, dryRun, allowUnsafeMove, quiet: read.switches.has("--quiet") },
   };
 }
 

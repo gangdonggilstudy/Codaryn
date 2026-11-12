@@ -11,8 +11,10 @@ import type { DoctorText, MessageLanguage, RunId } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
 import type { Limits, ModelProviderName } from "./task.js";
-import type { MaskedText } from "./text.js";
+import type { ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
+import type { ContentHash, MaskedText } from "./text.js";
 import type { VerifierResult } from "./verify.js";
+import type { ReviewRecord } from "./workflow.js";
 
 /**
  * `codaryn report --workspace <dir> --run <runId> [--json]` reads
@@ -28,6 +30,12 @@ import type { VerifierResult } from "./verify.js";
  * `invalid_run_record` (a file cannot be read or parsed, is larger than MAX_REPORT_FILE_BYTES, or
  * names another run). The report is only as reliable as these files: commands allowed during the
  * run could have changed them, since the state directory is closed to the file tools only.
+ *
+ * G-G (DR-12): an apply run (its journal starts with `apply_started`) is reported as
+ * ApplyReportOutput (`runKind: "apply"`) from its result.json (ApplyResult) and its journal
+ * (ApplyReportJournalSummary). A run that ended as `needs-input`/`awaiting_review` also carries the
+ * person's verdict (RunReportOutput.verdict). The app layer and the GUI use the same forms
+ * (AnyReportOutput).
  */
 export const REPORT_EXIT_CODES = { complete: 0, incomplete: 3 } as const;
 export type ReportStatus = keyof typeof REPORT_EXIT_CODES;
@@ -75,6 +83,70 @@ export interface ReportOutput {
   readonly result: EngineResult | null;
   readonly journal: ReportJournalSummary;
 }
+
+/**
+ * N-D (5th round): a run's report with the person's review verdict. `verdict` is present only for
+ * a run that ended as `needs-input`/`awaiting_review`: its review.json (ReviewRecord), or null
+ * before a verdict, or when the record cannot be read (which never stops the report). Moved from
+ * the CLI (`src/cli/report.ts`) as it was.
+ */
+export interface RunReportOutput extends ReportOutput {
+  readonly verdict?: ReviewRecord | null;
+}
+
+/**
+ * DR-12 (G-G): what the report takes from an apply run's journal, which starts with
+ * `apply_started` (ApplyJournalEvent). Text fields are masked as recorded. Moved from the CLI
+ * (`src/cli/report.ts`) as it was.
+ */
+export interface ApplyReportJournalSummary {
+  readonly planRunId: string;
+  readonly taskId: string;
+  readonly digest: ContentHash;
+  readonly approval: ApprovalChannel;
+  /** DR-21: the channel of the person's consent to unsafe moves, or null for none. */
+  readonly unsafeMoveConsent: ApprovalChannel | null;
+  /** Number of actions in the plan (`apply_started.actions`). */
+  readonly actions: number;
+  readonly maxDurationMs: number;
+  /** Number of records read. */
+  readonly records: number;
+  /** The preflight (`plan_checked`), or null when the journal has none. */
+  readonly checked: { readonly problems: number; readonly inventoryLimitReached: boolean; readonly unsafeMoves: number } | null;
+  /** R-9 I-4: `plan_item_started` records. */
+  readonly started: number;
+  readonly moved: readonly { readonly index: number; readonly from: MaskedText; readonly to: MaskedText; readonly unsafe: boolean }[];
+  readonly discarded: readonly { readonly index: number; readonly path: MaskedText; readonly stored: string }[];
+  readonly failed: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
+  /** `verifier_result` records: the inventory check first, then the task's verifiers. */
+  readonly lastRound: readonly VerifierResult[];
+  readonly integrityChecks: readonly { readonly phase: IntegrityPhase; readonly changed: readonly MaskedText[] }[];
+  /** From `run_finished`, or null when the journal has none. */
+  readonly finished: { readonly status: TerminalRunStatus; readonly reason: RunReason } | null;
+}
+
+/**
+ * DR-12: printed by `codaryn report --json` for an apply run; without `--json` as Markdown. Moved
+ * from the CLI (`src/cli/report.ts`) as it was.
+ */
+export interface ApplyReportOutput {
+  readonly schemaVersion: 1;
+  readonly kind: "report";
+  /** Tells an apply run's report from a run's (ReportOutput has no such field). */
+  readonly runKind: "apply";
+  readonly runId: string;
+  readonly status: ReportStatus;
+  readonly exitCode: number;
+  /** The apply run's result.json, or null when it has none (`incomplete`). */
+  readonly result: ApplyResult | null;
+  readonly journal: ApplyReportJournalSummary;
+}
+
+/**
+ * What `codaryn report --json` prints, and what the app layer and the GUI read: a run's report, or
+ * an apply run's (told apart by `runKind: "apply"`, which a run's report does not have).
+ */
+export type AnyReportOutput = RunReportOutput | ApplyReportOutput;
 
 /**
  * `codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--profile <name>] [--json]`

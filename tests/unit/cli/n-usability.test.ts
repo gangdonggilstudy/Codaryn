@@ -641,7 +641,18 @@ describe("N-7, N-18 --run latest and revert --dry-run", () => {
     assert.ok(first.output.kind === "revert" && first.output.revertedBefore === undefined);
     assert.equal(first.quiet, true);
     const record = JSON.parse(await readFile(path.join(dir, ".codaryn", "runs", RUN, "revert.json"), "utf8")) as Record<string, unknown>;
-    assert.deepEqual(record, { schemaVersion: 1, kind: "revert_record", runId: RUN, at: "2026-11-12T03:15:00.000Z", status: "complete", reverted: 1, skipped: 0 });
+    // DR-25: the record also says how the person consented to unsafe moves (none here) and how many went back so.
+    assert.deepEqual(record, {
+      schemaVersion: 1,
+      kind: "revert_record",
+      runId: RUN,
+      at: "2026-11-12T03:15:00.000Z",
+      status: "complete",
+      reverted: 1,
+      skipped: 0,
+      unsafeMoveConsent: null,
+      unsafeMoves: 0,
+    });
     const second = await runRevert(revertEnv(dir, ["revert", "--workspace", dir, "--run", RUN], command));
     assert.ok(second.output.kind === "revert");
     assert.deepEqual(second.output.revertedBefore, { at: "2026-11-12T03:15:00.000Z", status: "complete" });

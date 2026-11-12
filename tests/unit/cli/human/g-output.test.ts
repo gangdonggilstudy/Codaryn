@@ -17,6 +17,7 @@ import type {
   MaskedText,
   MessageCatalog,
   MessageId,
+  RevertOutput,
   RunId,
   RunSummaryContext,
 } from "../../../../src/contracts/index.js";
@@ -225,6 +226,42 @@ describe("plan, review and apply output with the real catalogs", () => {
       ].join("");
       assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(texts), false, texts);
       assert.equal(texts.includes(SECRET), false);
+    });
+
+    test(`${language}: DR-21 and DR-25 lines use the catalog's own texts`, () => {
+      const catalog = createMessageCatalog(language);
+      const human: HumanOutput = createHumanOutput(catalog);
+      const started = { type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "t", digest: DIGEST, approval: "cli-flag", actions: 4, maxDurationMs: 1000, unsafeMoveConsent: "cli-flag" } as ApplyJournalEvent;
+      const checked = { type: "plan_checked", problems: [], inventoryLimitReached: false, unsafeMoves: [0, 2] } as ApplyJournalEvent;
+      const progress = `${human.applyProgressLine?.(started) ?? ""}\n${human.applyProgressLine?.(checked) ?? ""}\n`;
+      const approval = catalog.format("approval.cli-flag");
+      assert.ok(progress.includes(catalog.format("progress.unsafe_move_consent", { approval })), progress);
+      assert.ok(progress.includes(catalog.format("progress.unsafe_moves", { count: 2 })), progress);
+
+      const stopped = human.applySummary?.(applyResult({ status: "needs-input", reason: "consent_required", exitCode: 3, applied: [], verifiers: [] }), { workspaceForm: "given" }) ?? "";
+      const form = catalog.format("summary.form.given");
+      for (const expected of [
+        catalog.format("reason.consent_required"),
+        catalog.format("advice.consent_required"),
+        catalog.format("summary.unsafe_moves", { count: 2 }),
+        catalog.format("summary.next_apply_unsafe", { form, runId: PLAN_RUN }),
+        `  ${DIGEST}`,
+        catalog.format("summary.apply_actions", { applied: 0, total: 4 }),
+      ]) {
+        assert.ok(stopped.includes(expected), `${expected}\n---\n${stopped}`);
+      }
+
+      const revert = (extra: Partial<RevertOutput>): string =>
+        human.revertSummary({ schemaVersion: 1, kind: "revert", runId: RUN, status: "complete", exitCode: 0, reverted: [], skipped: [], ...extra } as RevertOutput);
+      const moved = revert({ reverted: [{ path: "inbox/a.txt", action: "moved_back", from: "docs/a.txt", unsafe: true }] });
+      assert.ok(moved.includes(catalog.format("revert.unsafe_moved", { count: 1 })), moved);
+      const skipped = revert({ status: "partial", exitCode: 3, skipped: [{ path: "inbox/a.txt", reason: "unsafe_move" }] });
+      assert.ok(skipped.includes(catalog.format("revert.skip.unsafe_move")), skipped);
+      assert.ok(skipped.includes(catalog.format("summary.next_revert_unsafe", { runId: RUN })), skipped);
+      const preview = revert({ dryRun: true, moveSafetyUnchecked: true, reverted: [{ path: "inbox/a.txt", action: "moved_back", from: "docs/a.txt" }] });
+      assert.ok(preview.includes(catalog.format("revert.dry_run_move_unchecked")), preview);
+      const all = [progress, stopped, moved, skipped, preview].join("");
+      assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(all), false, all);
     });
   }
 });

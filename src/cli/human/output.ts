@@ -350,6 +350,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`  ${shownPath(String(file.path))} — ${word}`);
       }
       if (reverted.length > REVERT_MAX_LISTED) out.push(moreLine(reverted.length - REVERT_MAX_LISTED));
+      // DR-25: files moved back unsafely with the person's consent; never in a dry run.
+      const unsafeMoved = reverted.filter((file) => file.unsafe === true).length;
+      if (output.dryRun !== true && unsafeMoved > 0) out.push(catalog.format("revert.unsafe_moved", { count: unsafeMoved }));
       if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
       for (const file of skipped.slice(0, REVERT_MAX_LISTED)) {
         const reason: unknown = file.reason;
@@ -359,12 +362,19 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`  ${shown} — ${word} (${token(reason)})`);
       }
       if (skipped.length > REVERT_MAX_LISTED) out.push(moreLine(skipped.length - REVERT_MAX_LISTED));
+      // DR-25: the preview did not check whether this drive can move the listed files back safely.
+      if (output.dryRun === true && output.moveSafetyUnchecked === true) out.push(catalog.format("revert.dry_run_move_unchecked"));
 
       const before = output.revertedBefore;
       if (before !== undefined) {
         const time = localTime(before.at);
         const status = isOneOf(before.status, ["complete", "partial"] as const) ? before.status : null;
         if (status !== null) out.push(`${catalog.format("revert.reverted_before")} (${status}${time === null ? "" : `, ${time}`})`);
+      }
+      // DR-25: files skipped as unsafe_move go back on a revert with the person's consent.
+      const revertedRun = toRunId(String(output.runId));
+      if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
+        out.push(catalog.format("summary.next_revert_unsafe", { runId: revertedRun }));
       }
       if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);

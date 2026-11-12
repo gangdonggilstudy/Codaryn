@@ -382,6 +382,60 @@ describe("HumanOutput.revertSummary (N-7)", () => {
     );
   });
 
+  test("DR-25: files moved back unsafely with consent are counted after the reverted list", () => {
+    const text = createHumanOutput(strictCatalog()).revertSummary(
+      output({
+        status: "complete",
+        exitCode: 0,
+        skipped: [],
+        reverted: [
+          { path: "inbox/a.txt", action: "moved_back", from: "docs/a.txt", unsafe: true },
+          { path: "inbox/b.log", action: "restored_from_discard", unsafe: true },
+          { path: "inbox/c.txt", action: "moved_back", from: "docs/c.txt" },
+        ],
+      }),
+    );
+    assert.equal(
+      text,
+      [
+        "codaryn: [revert.done_title count=3] (complete)",
+        "  inbox/a.txt — [revert.action.moved_back]",
+        "  inbox/b.log — [revert.action.restored_from_discard]",
+        "  inbox/c.txt — [revert.action.moved_back]",
+        "[revert.unsafe_moved count=2]",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("DR-25: files skipped as unsafe_move end with the command that reverts again with consent", () => {
+    const text = createHumanOutput(strictCatalog()).revertSummary(output({ reverted: [], skipped: [{ path: "inbox/a.txt", reason: "unsafe_move" }] }));
+    assert.equal(
+      text,
+      [
+        "codaryn: [revert.done_title count=0] (partial)",
+        "[revert.skipped_title count=1]",
+        "  inbox/a.txt — [revert.skip.unsafe_move] (unsafe_move)",
+        `[summary.next_revert_unsafe runId=${RUN}]`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("DR-25: a dry run that lists moves says it did not check the drive, and never counts unsafe moves", () => {
+    const listed = [{ path: "inbox/a.txt", action: "moved_back" as const, from: "docs/a.txt", unsafe: true as const }];
+    const human = createHumanOutput(strictCatalog());
+    assert.equal(
+      human.revertSummary(output({ dryRun: true, status: "complete", exitCode: 0, skipped: [], moveSafetyUnchecked: true, reverted: listed })),
+      ["codaryn: [revert.dry_run_title count=1] (complete)", "  inbox/a.txt — [revert.action.moved_back]", "[revert.dry_run_move_unchecked]", "[revert.dry_run_next]", ""].join("\n"),
+    );
+    assert.equal(
+      human.revertSummary(output({ dryRun: true, status: "complete", exitCode: 0, skipped: [] })).includes("dry_run_move_unchecked"),
+      false,
+      "only when the output says so",
+    );
+  });
+
   test("N-24(c): an impossible date such as 2026-02-30 shows no time", () => {
     const human = createHumanOutput(strictCatalog());
     const revertText = human.revertSummary(output({ revertedBefore: { at: "2026-02-30T00:00:00Z", status: "complete" } }));

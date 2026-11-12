@@ -19,6 +19,7 @@ import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 
 import {
+  APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   MAX_READ_BYTES,
@@ -421,7 +422,11 @@ export const revertRun: RevertRun = async (request) => {
   // G-A, DR-12: an apply run (its journal starts with apply_started) puts moves and discards back.
   if (isApplyJournal(text, runId)) {
     try {
-      return await revertApplyRun(workspaceRoot, runId, text, dryRun);
+      // DR-25: a consent counts only for this run and only from a person's channel.
+      const consent = request.unsafeMoveConsent;
+      const consented =
+        consent !== undefined && consent !== null && consent.runId === runId && (APPROVAL_CHANNELS as readonly string[]).includes(consent.channel);
+      return await revertApplyRun(workspaceRoot, runId, text, dryRun, consented);
     } catch (error) {
       if (error instanceof ApplyRecordError) throw new RevertRunError("invalid_run_record", error.message);
       throw error;

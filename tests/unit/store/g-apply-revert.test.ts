@@ -96,6 +96,8 @@ describe("revertRun on an apply run (G-E)", () => {
         { path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" },
       ],
       skipped: [],
+      // DR-25: a dry run does not judge whether this volume can move the files back safely.
+      moveSafetyUnchecked: true,
     });
     assert.deepEqual(await tree(root), before);
   });
@@ -299,5 +301,75 @@ describe("revertRun on an apply run (G-E)", () => {
     await writeFile(file, `${[JSON.stringify(started), ...lines.map((line, index) => JSON.stringify({ ...JSON.parse(line), seq: index + 2 }))].join("\n")}\n`, "utf8");
     const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true });
     assert.deepEqual(outcome, { reverted: [], skipped: [] }, "a model run without file_changed records has nothing to revert");
+  });
+});
+
+describe("R-9b N-1 (DR-27 a): an action done but not recorded, as the engine's journal leaves it", () => {
+  /**
+   * The engine writes plan_item_started before each action and file_moved/file_discarded after it
+   * (565ac15). The apply stops (no result.json) right after doing action `doneUpTo`, before its record.
+   */
+  async function stoppedApply(doneUpTo: 0 | 1): Promise<Applied> {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-stop-")));
+    roots.push(root);
+    await mkdir(join(root, "inbox"));
+    await writeFile(join(root, "inbox", "report.txt"), REPORT, "utf8");
+    await writeFile(join(root, "inbox", "old.log"), LOG, "utf8");
+    const actions: ResolvedPlanAction[] = [
+      { kind: "move", from: "inbox/report.txt", to: "docs/report.txt", sha256: sha(REPORT) },
+      { kind: "discard", path: "inbox/old.log", sha256: sha(LOG) },
+    ];
+    const digest = await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(actions);
+    const discarded = await prepareDiscardedRoot(root, APPLY_RUN);
+    const journal = createApplyJournal({ workspaceRoot: root, runId: APPLY_RUN, clock });
+    await journal.append({ type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "organize-task", digest, approval: "cli-flag", actions: 2, maxDurationMs: 60_000 });
+    await journal.append({ type: "plan_checked", problems: [], inventoryLimitReached: false });
+    await journal.append({ type: "plan_item_started", index: 0, action: { kind: "move", from: "inbox/report.txt" as MaskedText, to: "docs/report.txt" as MaskedText, sha256: sha(REPORT) } });
+    await mkdir(join(root, "docs"));
+    await rename(join(root, "inbox", "report.txt"), join(root, "docs", "report.txt"));
+    if (doneUpTo === 1) {
+      await journal.append({ type: "file_moved", index: 0, from: "inbox/report.txt" as MaskedText, to: "docs/report.txt" as MaskedText, sha256: sha(REPORT) });
+      await journal.append({ type: "plan_item_started", index: 1, action: { kind: "discard", path: "inbox/old.log" as MaskedText, sha256: sha(LOG) } });
+      await rename(join(root, "inbox", "old.log"), join(discarded, "1"));
+    }
+    await journal.close();
+    return { root, discarded };
+  }
+
+  test("review reproduction 1: a discard done before its record is put back, not left out of a complete revert", async () => {
+    const { root, discarded } = await stoppedApply(1);
+    const preview = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true });
+    assert.deepEqual(preview.reverted.map((file) => [file.path, file.action]), [
+      ["inbox/old.log", "restored_from_discard"],
+      ["inbox/report.txt", "moved_back"],
+    ]);
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted.map((file) => [file.path, file.action]), [
+      ["inbox/old.log", "restored_from_discard"],
+      ["inbox/report.txt", "moved_back"],
+    ]);
+    assert.deepEqual(outcome.skipped, []);
+    assert.equal(await readFile(join(root, "inbox", "old.log"), "utf8"), LOG);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
+    assert.deepEqual(await readdir(discarded), [], "nothing is left in the discarded directory");
+  });
+
+  test("review reproduction 2 (R10b): a move done before its record is moved back, not an empty outcome", async () => {
+    const { root } = await stoppedApply(0);
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted, [{ path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" }]);
+    assert.deepEqual(outcome.skipped, []);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
+    assert.equal(await exists(join(root, "docs", "report.txt")), false);
+  });
+
+  test("a started move whose files are in neither recorded state is skipped as changed_since_run, so the revert is not complete", async () => {
+    const { root } = await stoppedApply(0);
+    await writeFile(join(root, "inbox", "report.txt"), "a new file at the original path\n", "utf8");
+    const before = await tree(root);
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted, []);
+    assert.deepEqual(outcome.skipped, [{ path: "inbox/report.txt", reason: "changed_since_run" }]);
+    assert.deepEqual(await tree(root), before, "nothing is touched");
   });
 });

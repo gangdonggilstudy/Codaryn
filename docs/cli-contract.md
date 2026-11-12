@@ -867,9 +867,26 @@ codaryn changes <task 형식> --run <runId|latest> [--json]
 
 - 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
 - 영어 고정 글
-  - `plan`·`review`의 글 출력과 적용 질문 두 개(`Apply this plan?`, 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
-  - 적용 끝 요약의 `summary.unsafe_moves`에는 위험한 이동 수가 필요하다. 그런데 `ApplySummaryContext`에 그 필드가 없다(w3:p9).
+  - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
 - `report`는 적용 실행과 검토 판정(`review.json`)을 아직 보여 주지 않는다. `ReportOutput`에 필드가 필요하다(w3:p9).
-- DR-25(하드 링크 없는 드라이브의 되돌리기도 동의가 있을 때만 옮김)
-  - 계약(w3:p9)이 나오면 `revert`의 동의 입력을 `apply`와 같은 방식으로 연결한다: 인자, 그리고 터미널 질문.
-  - 지금 되돌리기는 그런 파일을 `unsafe_move`로 건너뛴다(DR-24 (b)).
+
+### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
+
+```
+codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsafe-move] [--quiet]
+```
+
+- 하드 링크가 없는 드라이브에서는 적용 실행이 옮긴 파일을, 원래 자리에 생긴 파일을 덮지 않는다는 보장 없이만 되돌릴 수 있다. 기본은 옮기지 않고 `unsafe_move`로 건너뛴다(DR-24 (b)). 안전하게 되돌릴 수 있는 파일은 언제나 안전하게 되돌린다.
+- 동의는 apply(18.4)와 같이 사람의 입력으로만 받는다.
+  - `--allow-unsafe-move`(`cli-flag`)
+    - 그 명령이 되돌리는 실행(`--run latest`이면 고른 실행)에 대한 동의다.
+    - `--dry-run`과 함께 줄 수 없다. 드라이 런은 아무것도 옮기지 않고 볼륨을 판정하지도 않는다.
+  - 터미널에서 되돌리기가 `unsafe_move`로 건너뛴 파일이 있으면 그 수를 넣어 `[y/N]`을 한 번 묻는다(`cli-tty`).
+    - 예이면 그 실행만 동의를 붙여 다시 되돌린다.
+    - 이미 되돌린 파일은 `already_reverted`로 건드리지 않는다.
+  - 앱 계층: `RevertEnvironment.adapter`(`AdapterRevert`, `src/cli/revert.ts`)
+    - 호출자가 사람의 화면 입력으로 그 되돌리기 한 번에 받은 동의만 넘긴다. 경로는 `adapter`, `runId`는 되돌리는 실행이어야 한다. 아니면 실행 전에 `invalid_arguments`다.
+    - 터미널 질문은 하지 않고, `--allow-unsafe-move`는 거부한다.
+- store에는 `RevertRequest.unsafeMoveConsent { channel, runId }`로 넘긴다. 그렇게 옮긴 파일은 `reverted`에 `unsafe: true`로 나온다.
+- `revert.json`(RevertRecord)에는 동의 경로(`unsafeMoveConsent`, 없으면 null)와, `reverted` 중 `unsafe`인 항목 수(`unsafeMoves`)를 쓴다.
+- 드라이 런이 옮길 파일을 나열하면 출력에 `moveSafetyUnchecked: true`가 붙는다. 사람용 요약은 `revert.dry_run_move_unchecked`로 그 사실을 알린다.

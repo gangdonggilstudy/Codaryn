@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  APPROVAL_CHANNELS,
   JOURNAL_FILE_NAME,
   MAX_REPORT_FILE_BYTES,
   RESULT_FILE_NAME,
@@ -266,7 +267,22 @@ function parseRevertRecord(record: Obj, runId: string): RevertRecord {
   const at = timestamp(record["at"]);
   const status = record["status"];
   if (at === null || (status !== "complete" && status !== "partial")) unreadable();
-  return { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted: count(record["reverted"]), skipped: count(record["skipped"]) };
+  const reverted = count(record["reverted"]);
+  const parsed: RevertRecord = { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted, skipped: count(record["skipped"]) };
+  // DR-25: the consent to unsafe moves for that revert and how many files were moved back unsafely.
+  // Absent in records written before DR-25. Unsafe moves need a consent and are reverted files.
+  const consent = record["unsafeMoveConsent"];
+  const unsafeMoves = record["unsafeMoves"];
+  if (consent !== undefined && consent !== null && !(APPROVAL_CHANNELS as readonly unknown[]).includes(consent)) unreadable();
+  if (unsafeMoves !== undefined) {
+    const moved = count(unsafeMoves);
+    if (moved > reverted || (moved > 0 && (consent === undefined || consent === null))) unreadable();
+  }
+  return {
+    ...parsed,
+    ...(consent === undefined ? {} : { unsafeMoveConsent: consent as RevertRecord["unsafeMoveConsent"] }),
+    ...(unsafeMoves === undefined ? {} : { unsafeMoves: unsafeMoves as number }),
+  };
 }
 
 async function revertRecordAt(file: string, runId: string): Promise<RevertRecord | null> {

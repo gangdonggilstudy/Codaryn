@@ -275,6 +275,32 @@ test("G-C+G-B: the apply-time policy decides (DR-5): an unlisted kind or a prote
   }
 });
 
+test("G-C+G-B (PQ-6, Q-8 pending): a volume without hard links stops the apply at the preflight with unsafe_move", async () => {
+  const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
+  try {
+    const plan = await proposeReal(fx, [
+      { kind: "move", from: "a.txt", to: "x/a.txt" },
+      { kind: "discard", path: "b.txt" },
+    ]);
+    const fileOps: Partial<PlanFileOps> = {
+      link: () => Promise.reject(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" })),
+    };
+    const { result, journal, marks } = await apply(fx, plan, { fileOps });
+    assert.equal(result.status, "failed");
+    assert.equal(result.reason, "plan_stale");
+    assert.equal(marks, 0, "the plan is not claimed");
+    const checked = journal.events.find((event) => event.type === "plan_checked");
+    assert.deepEqual(checked !== undefined && "problems" in checked ? checked.problems : null, [
+      { index: 0, problem: "unsafe_move" },
+      { index: 1, problem: "unsafe_move" },
+    ]);
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), "bravo");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("G-C+G-B: a cancel during an action finishes that action and ends the apply as cancelled", async () => {
   const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
   try {
@@ -285,7 +311,8 @@ test("G-C+G-B: a cancel during an action finishes that action and ends the apply
     const controller = new AbortController();
     const fileOps: Partial<PlanFileOps> = {
       async link(existing, created) {
-        controller.abort(); // the person cancels while the first move is under way
+        // The preflight's hard link probe (PQ-6) is not a move; cancel during the first real move.
+        if (!path.basename(created).startsWith(".codaryn-link-probe-")) controller.abort();
         await fs.link(existing, created);
       },
     };

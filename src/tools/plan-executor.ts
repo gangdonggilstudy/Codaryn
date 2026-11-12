@@ -42,6 +42,7 @@ import {
   isMissing,
   moveNoReplace,
   nodePlanFileOps,
+  probeHardLink,
   sameIdentity,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
@@ -84,6 +85,31 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
   /** What `check` hashed, by action (kind, source, planned hash). Lets `apply` skip a second hash. */
   const verified = new Map<string, { readonly identity: FileIdentity; readonly sha256: string }>();
   const verifiedKey = (action: ResolvedPlanAction): string => `${action.kind}\u0000${sourceOf(action)}\u0000${action.sha256}`;
+
+  /** PQ-6: hard link support, probed once per volume (device id) of the sources. */
+  const linkSupport = new Map<bigint, "supported" | "unsupported">();
+
+  /**
+   * PQ-6, DR-18 (b): tells the preflight before any action whether moves are possible on the
+   * source's volume. The probe goes into the state directory when it is on the same volume (no
+   * name appears among the person's files), else next to the source, and is taken back at once.
+   * A definite answer is kept for the volume; "unknown" is not, so the apply decides per move.
+   */
+  async function hardLinkProblem(sourceAbsolute: string, identity: FileIdentity): Promise<PlanItemProblem | null> {
+    const known = linkSupport.get(identity.dev);
+    if (known !== undefined) return known === "unsupported" ? HARD_LINK_UNAVAILABLE_PROBLEM : null;
+    let dir = path.dirname(sourceAbsolute);
+    try {
+      const state = await ops.lstat(path.join(root, STATE_DIR_NAME));
+      if (state.isDirectory() && !state.isSymbolicLink() && state.dev === identity.dev) dir = path.join(root, STATE_DIR_NAME);
+    } catch {
+      // No state directory: probe next to the source.
+    }
+    const probed = await probeHardLink(sourceAbsolute, dir, ops);
+    if (probed === "unknown") return null;
+    linkSupport.set(identity.dev, probed);
+    return probed === "unsupported" ? HARD_LINK_UNAVAILABLE_PROBLEM : null;
+  }
 
   /** Checks the source as it is now. On success, its identity matches the plan's hash. */
   async function checkSource(
@@ -139,7 +165,8 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
           const destination = await inspectDestination(workspace, action.to, ops);
           if (!destination.ok) return destination.problem;
         }
-        return null;
+        // Q-8 (user decision pending): for now a volume without hard links stops the apply here.
+        return await hardLinkProblem(source.absolute, source.identity);
       } catch {
         return "io_error";
       }

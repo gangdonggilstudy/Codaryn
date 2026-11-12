@@ -3,7 +3,7 @@
  * moves and discards are its plan's actions, not file writes of its own, so its `files` is empty and
  * the view read "no file changed". The app's ChangesOutput now carries `applyRun` (the contract's
  * ChangesApplyRun: the plan run it applied and how many actions it applied), for an apply run only,
- * judged as the run list judges it. Reproduced first, todo until the app layer follows the contract.
+ * judged as the run list judges it. Reproduced first (be5848f, todo); the app follows the contract now.
  * Real runs through the app (scripted model), the real store. Fake values only.
  */
 
@@ -12,11 +12,6 @@ import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, ChangesOutput, CodarynApp } from "../../../src/app/index.js";
 import { WRITE_NOTES, appEnvironment, setupRun, taskForm, taskRequest } from "./support.js";
-
-const TODO = { todo: "U-16: wait for the app's ChangesOutput to carry applyRun" };
-
-/** ChangesOutput before U-16 has no applyRun; read it loosely until it does. */
-const applyRunOf = (output: ChangesOutput): unknown => (output as { applyRun?: unknown }).applyRun;
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -50,17 +45,17 @@ async function appliedPlan(): Promise<{ base: string; app: CodarynApp; planRunId
 }
 
 describe("U-16 (UXM-4): changes of an apply run says it is one", () => {
-  test("an apply run: applyRun names its plan run and the actions applied; no file writes of its own", TODO, async () => {
+  test("an apply run: applyRun names its plan run and the actions applied; no file writes of its own", async () => {
     const run = await appliedPlan();
     const output = ok<ChangesOutput>(await run.app.changes({ settings: taskForm(run.base), runId: run.applyRunId }));
     assert.deepEqual(output.files, []);
-    assert.deepEqual(applyRunOf(output), { planRunId: run.planRunId, actions: 2 });
+    assert.deepEqual(output.applyRun, { planRunId: run.planRunId, actions: 2 });
   });
 
   test("the plan run it applied has no applyRun", async () => {
     const run = await appliedPlan();
     const output = ok<ChangesOutput>(await run.app.changes({ settings: taskForm(run.base), runId: run.planRunId }));
-    assert.equal(applyRunOf(output), undefined);
+    assert.equal(output.applyRun, undefined);
   });
 
   test("a model run has no applyRun and lists its file writes", async () => {
@@ -70,7 +65,7 @@ describe("U-16 (UXM-4): changes of an apply run says it is one", () => {
     assert.ok(started.ok, JSON.stringify(started));
     await started.handle.done;
     const output = ok<ChangesOutput>(await app.changes({ settings: taskForm(base), runId: started.handle.runId }));
-    assert.equal(applyRunOf(output), undefined);
+    assert.equal(output.applyRun, undefined);
     assert.deepEqual(output.files.map((file) => file.path), ["NOTES.md"]);
   });
 });

@@ -44,6 +44,7 @@ import type {
   TerminalRunStatus,
 } from "../contracts/index.js";
 import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
+import { recordsChangedMarkIn } from "./marks.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -341,6 +342,8 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
     changes,
     reverted: record === null ? null : { at: record.at, status: record.status },
     revertRecordDamaged,
+    // DR-38: a records-changed mark (or one that cannot be read). Left out when there is none.
+    ...((await recordsChangedMarkIn(dir)) ? { recordsChanged: true } : {}),
   };
 }
 

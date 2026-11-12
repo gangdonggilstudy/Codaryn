@@ -5,13 +5,14 @@
  * whose free text fields are MaskedText. A raw string cannot be passed to them.
  */
 
-import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
-import type { FileHandle } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JOURNAL_FILE_NAME, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { ApplyJournal, ApplyJournalEntry, Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
-import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
+import type { ApplyJournal, ApplyJournalEntry, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
+import { assertRunId, ensureStateDir, runDir } from "./common.js";
+import { appendOnlyJournal } from "./journal.js";
+import type { JournalOptions } from "./journal.js";
 
 export { RevertRunError, createChangeRecorder, readRunOriginals, revertRun, snapshotsRelativePath } from "./changes.js";
 export type { OriginalUnavailable, RevertRunErrorCode, RunOriginal } from "./changes.js";
@@ -24,12 +25,7 @@ export { readReviewRecord, writeReviewRecord } from "./review.js";
 export { discardedRootPath, prepareDiscardedRoot } from "./discarded.js";
 export type { AcquireLockOptions, AcquireLockOutcome, InspectLockOptions, LockFileSystem, LockInfo, LockInspection, LockLivenessOptions, ProcessIdentity, ReleaseLockOptions } from "./lock.js";
 
-export interface JournalOptions {
-  /** Real absolute path of the workspace root. */
-  readonly workspaceRoot: string;
-  readonly runId: string;
-  readonly clock: Clock;
-}
+export type { JournalOptions } from "./journal.js";
 
 /** Value for `EngineResult.journalPath`: relative to the workspace root, `/` separated. */
 export function journalRelativePath(runId: string): string {
@@ -55,67 +51,6 @@ export function createApplyJournal(options: JournalOptions): ApplyJournal {
   return appendOnlyJournal<ApplyJournalEntry>(options);
 }
 
-function appendOnlyJournal<E extends { readonly type: string }>(options: JournalOptions): { append(event: E): Promise<void>; close(): Promise<void> } {
-  const { workspaceRoot, runId, clock } = options;
-  assertRunId(runId);
-  const dir = runDir(workspaceRoot, runId);
-  const file = join(dir, JOURNAL_FILE_NAME);
-
-  let handle: FileHandle | null = null;
-  let seq = 0;
-  let closed = false;
-  let queue: Promise<void> = Promise.resolve();
-
-  async function openForAppend(): Promise<FileHandle> {
-    await ensureStateDir(workspaceRoot);
-    await mkdir(dir, { recursive: true });
-    let existing = "";
-    try {
-      existing = await readFile(file, "utf8");
-    } catch (error) {
-      if (errorCode(error) !== "ENOENT") throw error;
-    }
-    if (existing.length > 0 && !existing.endsWith("\n")) {
-      throw new Error("journal ends with an incomplete line; refusing to append to it");
-    }
-    seq = existing.length === 0 ? 0 : existing.split("\n").length - 1;
-    return open(file, "a");
-  }
-
-  function enqueue(task: () => Promise<void>): Promise<void> {
-    const next = queue.then(task);
-    queue = next.catch(() => undefined);
-    return next;
-  }
-
-  return {
-    append(event: E): Promise<void> {
-      return enqueue(async () => {
-        if (closed) throw new Error("journal is closed");
-        handle ??= await openForAppend();
-        const record = {
-          seq: seq + 1,
-          at: new Date(clock.now()).toISOString(),
-          runId,
-          ...event,
-        };
-        await handle.appendFile(`${JSON.stringify(record)}\n`, "utf8");
-        seq += 1;
-      });
-    },
-    close(): Promise<void> {
-      return enqueue(async () => {
-        closed = true;
-        if (handle !== null) {
-          const current = handle;
-          handle = null;
-          await current.close();
-        }
-      });
-    },
-  };
-}
-
 /** Writes `<root>/.codaryn/runs/<result.runId>/result.json`: the object the CLI prints, plus LF. */
 export async function writeResult(workspaceRoot: string, result: EngineResult): Promise<void> {
   assertRunId(result.runId);
@@ -128,3 +63,6 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
   await rename(temporary, target);
 }
 export { listParkedFiles } from "./apply-revert.js";
+export { createRunRecorders } from "./state-guard.js";
+export type { RunRecorders, RunRecordersOptions, StateGuardLimits } from "./state-guard.js";
+export { hasRecordsChangedMark } from "./marks.js";

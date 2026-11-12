@@ -35,6 +35,7 @@ import { runInit } from "./init.js";
 import { findInstall } from "./install.js";
 import type { InstallInfo } from "./install.js";
 import { runModels } from "./models.js";
+import { runApply, runPlan, runReview } from "./plan-commands.js";
 import { anthropicModelLister } from "./provider.js";
 import { runReport } from "./report.js";
 import { runRevert } from "./revert.js";
@@ -187,6 +188,47 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       return plain(await runReport({ argv, cwd: process.cwd(), env: process.env, listRuns, announceLatest }));
     case "runs":
       return plain(await runRuns({ argv, cwd: process.cwd(), env: process.env, human: human.output }));
+    case "plan":
+    case "apply":
+    case "review": {
+      // G-F (DR-17): the task form of `run`, steps 1 to 7 included; no model is involved.
+      const shared = {
+        argv,
+        env: process.env,
+        cwd: process.cwd(),
+        readFile: readText,
+        isDirectory,
+        loadEnvFile: (file: string) => process.loadEnvFile(file),
+        locateInWorkspace: (file: string, workspaceRoot: string) => locateInWorkspace(file, workspaceRoot),
+        relatePaths: (target: string, base: string) => relateRealPaths(target, base),
+        installDir,
+        defaultConfig,
+        clock,
+        randomBytes: random,
+        listRuns,
+        announceLatest,
+      };
+      if (argv[0] === "plan") return plain(await runPlan(shared));
+      if (argv[0] === "review") return plain(await runReview(shared));
+      return plain(
+        await runApply({
+          ...shared,
+          human: human.output,
+          writeProgress: (line) => writeHuman(line),
+          // 6.4 1: at a terminal without --digest the plan is shown and a [y/N] question asked on stderr.
+          ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
+          cancelSignal: (cancelFile) =>
+            createCancelSource({
+              cancelFile,
+              fileExists: (file) => existsSync(file),
+              onSignal: (name, handler) => {
+                process.on(name, handler);
+                return () => process.off(name, handler);
+              },
+            }),
+        }),
+      );
+    }
     case "init":
       return plain(
         await runInit({

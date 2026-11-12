@@ -12,6 +12,7 @@ import {
   RevertRunError,
   acquireLock,
   createChangeRecorder,
+  createPlanRecorder,
   createJournal,
   releaseLock,
   writeResult,
@@ -273,7 +274,9 @@ export const assembleRun: Assemble = async (input) => {
     const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
     // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
     const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
-    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });
+    // G-A, G-F: propose_plan stores plan.json for this run (runs/<runId>/plan.json); the other tools never use it.
+    const planRecorder = createPlanRecorder({ workspaceRoot, runId });
+    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     const journal = createJournal({ workspaceRoot, runId, clock });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep

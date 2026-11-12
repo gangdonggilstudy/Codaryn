@@ -170,7 +170,7 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
 - 성공은 잠금을 잡은 뒤에 돌려준다. 엔진은 핸들을 돌려준 뒤(다음 매크로태스크)에 시작한다.
   - 시험이 엔진 시작 시점을 직접 확인한다.
   - 관문이 없어도 처음 시험은 journal I/O 순서 때문에 통과했다. 그래서 시점 시험을 따로 두었다.
-- `workflowRef`는 간편 형식의 `--workflow`로 넘긴다. task 파일은 자기 `workflowRef`를 쓴다. CLI가 범용 작업 명령을 연결하기 전에는 값이 있으면 `invalid_arguments`다.
+- `workflowRef`는 간편 형식의 `--workflow`로 넘긴다. task 파일은 자기 `workflowRef`를 쓰고, 둘을 함께 주면 CLI가 거부한다(R-14 I-4로 고침: 묶음 병합 뒤 CLI가 `--workflow`를 받는다).
 - 한 작업 공간에 실행 하나(잠금, P-4)는 그대로다. 한 프로세스가 서로 다른 작업 공간의 실행 여럿을 가질 수 있다(시험함).
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
@@ -251,6 +251,7 @@ export interface RunObserver {
 interface TaskForm {
   input: { kind: "task"; taskPath: string } | { kind: "workspace"; workspace: string };
   configPath: string | null; varsFile: string | null; profile: string | null;
+  workflowRef: string | null;   // R-14 L-3 (52400ab): 간편 형식의 --workflow. task 파일과 함께 주면 CLI가 거부한다
 }
 // CodarynApp의 선택 함수. 범용 작업 명령이 생기면 채운다. 어댑터는 있는지 보고 화면을 연다.
 plan?(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
@@ -331,6 +332,7 @@ interface ChangedFileView {
   - 등록되는 것: task·설정의 `secretEnv`, 지금의 키, 변수 파일이 설정한 값.
   - 실행의 대응표는 실행이 끝나면 없다. 그래서 토큰 모양은 실행 때와 다를 수 있다.
   - 지금 등록하지 않은 값은 가려지지 않는다. 어댑터는 화면에 "현재 등록한 가릴 값 기준"이라고 쓴다.
+- **실행 판정(R-14 L-1, `0363b69`).** 먼저 store의 `inspectRun`으로 실행 목록·`report`·`revert`와 같이 판정한다. 정확히 그 이름의 항목이 없으면 `run_not_found`(N-27 (a)), 손상이면 `invalid_run_record`(N-26)이고 아무것도 보이지 않는다.
 - **비밀을 정하는 곳.** 앱 계층이 따로 정하지 않는다. CLI의 실행 전 단계 1~8을 그대로 돌리고, 조립 대신 멈춘다. 그래서 잠금·기록·파일을 만들지 않고 아무것도 보내지 않는다(시험함).
   - 설정이 지금 풀리지 않으면 그 오류(예: `secret_env_missing`)를 돌려주고 내용은 보이지 않는다.
   - 어댑터는 그때 결과의 `changes` 목록(경로만)으로 내려간다(GUI-D6 (b)).
@@ -436,6 +438,7 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 명령 추가, 추가 인자 허용
     - 한도 올림·없앰
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거
+    - 명령 검증기 추가·변경(R-14 L-2, `b30bbce`): 실행마다 사람의 권한으로 돈다. 파일 규칙 검증기 추가는 넓히기가 아니다
     - 경로 토큰 복원, 계획 동작 허용
     - API 주소 변경, 프로필·워크플로 정의 변경
   - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.

@@ -448,4 +448,55 @@ describe("i18n catalog: language and wording", () => {
     assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");
     assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
   });
+
+  test("U-16 (UXM-4, 5, 15): plan and apply runs are told as what they are", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // UXM-5: an applied plan run is not left as needing input; it names its apply run.
+    assert.match(en["runs.plan_applied"], /plan applied by run \{runId\}/);
+    assert.match(ko["runs.plan_applied"], /계획 적용됨\(적용 실행 \{runId\}\)/);
+    for (const text of [en["runs.plan_applied"], ko["runs.plan_applied"]]) assert.ok(!/needs input|확인 필요/.test(text));
+    // UXM-4: changes of an apply run says it applied a plan, how many actions, and where they are,
+    // not "no file changed".
+    assert.match(en["changes.apply_run"], /applied the plan of run \{runId\}; actions applied: \{count\}.*not files this run wrote.*report lists them/);
+    assert.match(ko["changes.apply_run"], /실행 \{runId\}의 계획을 적용했습니다\. 적용한 동작: \{count\}개.*이 실행이 쓴 파일이 아니어서.*보고서에 동작 목록/);
+    for (const text of [en["changes.apply_run"], ko["changes.apply_run"]]) assert.ok(!/changed no file|바꾼 파일 없음/.test(text));
+    // UXM-15: another task than the plan's: whose checks and rules were used, and not refused.
+    const differsEn = en["apply.notice.plan_task_differs"];
+    const differsKo = ko["apply.notice.plan_task_differs"];
+    assert.match(differsEn, /another task.*checks and rules used are this apply's, not those of the plan's task.*was not stopped/);
+    assert.match(differsKo, /다른 작업으로 만들었습니다.*계획의 작업이 아니라 이 적용의 것.*멈추지는 않았습니다/);
+    // The plan is applied by now: the text does not tell to apply it again.
+    for (const text of [differsEn, differsKo]) assert.ok(!/--digest|apply it again|다시 적용/.test(text));
+  });
+
+  test("U-16 after R-55 (M-1, L-1): a plan run's line and its revert guidance follow its apply run as it is", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // M-1: only a done apply is "applied"; the other states say what they are.
+    assert.match(en["runs.plan_apply_unfinished"], /not finished \(apply run \{runId\}, \{reason\}\)/);
+    assert.match(ko["runs.plan_apply_unfinished"], /끝나지 않음\(적용 실행 \{runId\}, \{reason\}\)/);
+    assert.match(en["runs.plan_applying"], /being applied, or its apply stopped/);
+    assert.match(ko["runs.plan_applying"], /적용 중이거나 적용이 멈춤/);
+    assert.match(en["runs.plan_apply_reverted"], /applied, then reverted/);
+    assert.match(ko["runs.plan_apply_reverted"], /적용했다가 되돌림/);
+    // The entry may be gone or damaged (planApplyStateOf: record_missing): both are said.
+    assert.match(en["runs.plan_apply_missing"], /no readable records of the apply run \{runId\} \(removed, or cannot be checked\)/);
+    assert.match(ko["runs.plan_apply_missing"], /적용 실행 \{runId\}의 기록 없음\(지웠거나 확인할 수 없음\)/);
+    for (const id of ["runs.plan_apply_unfinished", "runs.plan_applying", "runs.plan_apply_reverted", "runs.plan_apply_missing"] as const) {
+      assert.ok(!/^plan applied by run/.test(en[id]) && !/^계획 적용됨/.test(ko[id]), id);
+    }
+    // L-1: "revert that run" only where its changes are there to undo; the others say what is so.
+    assert.match(en["revert.plan_only"], /only made a plan and changed no file itself/);
+    assert.match(ko["revert.plan_only"], /계획만 만들었고 파일을 직접 바꾸지 않아/);
+    assert.match(en["revert.plan_revert_apply"], /revert the run that applied it \(--run \{runId\}\)/);
+    assert.match(ko["revert.plan_revert_apply"], /그 계획을 적용한 실행을 되돌리세요\(--run \{runId\}\)/);
+    for (const id of ["revert.plan_applying", "revert.plan_apply_reverted", "revert.plan_apply_missing"] as const) {
+      assert.ok(!en[id].includes("--run") && !ko[id].includes("--run"), `${id}: no command to follow`);
+    }
+    assert.match(en["revert.plan_applying"], /no result yet: it is still going, or it stopped/);
+    assert.match(ko["revert.plan_applying"], /아직 결과가 없습니다\. 도는 중이거나 멈췄습니다/);
+    assert.match(en["revert.plan_apply_reverted"], /already been reverted: nothing of it is left to undo/);
+    assert.match(ko["revert.plan_apply_reverted"], /이미 되돌렸습니다\. 되돌릴 것이 남아 있지 않습니다/);
+    assert.match(en["revert.plan_apply_missing"], /no readable records in this workspace any more, so Codaryn cannot revert it/);
+    assert.match(ko["revert.plan_apply_missing"], /더는 없거나 확인할 수 없어, Codaryn으로 되돌릴 수 없습니다/);
+  });
 });

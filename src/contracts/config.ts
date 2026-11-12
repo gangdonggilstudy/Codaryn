@@ -49,7 +49,7 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * - language (N-4): CODARYN_LANG → `language` → the operating system's display language.
  * - profiles (N-8): `--profile <name>` overlays one entry on `policy`, `verifiers` and `limits`
  *   (see `ConfigProfile`). Without `--profile` the top-level fields are used as before.
- * - workflows (G-A): a workflow definition's `policy`, `verifiers` and `limits` lie under the
+ * - `workflows` (G-A): a task type definition's `policy`, `verifiers` and `limits` lie under the
  *   profile's and the top level's for the quick form; its settings resolve as `ResolveWorkflow`
  *   says. No `workflowRef` anywhere: nothing changes.
  * - workflowRef (G-A, DR-2): the task file's `workflowRef`; in the quick form `--workflow <id>`;
@@ -106,7 +106,7 @@ export interface CodarynConfig {
    */
   readonly profiles?: { readonly [name: string]: ConfigProfile };
   /**
-   * G-A (GT-D1): workflow definitions by id (WORKFLOW_ID_PATTERN_SOURCE, at most MAX_WORKFLOWS, none
+   * G-A (GT-D1): task type definitions by id (WORKFLOW_ID_PATTERN_SOURCE, at most MAX_WORKFLOWS, none
    * equal to a BUILTIN_WORKFLOW_IDS entry). Definitions exist only here and as built-ins: a task
    * file cannot hold one, only name one with `workflowRef`.
    */
@@ -143,7 +143,7 @@ export interface ConfigProfile {
   readonly policy?: PolicyConfig;
   readonly verifiers?: readonly VerifierConfig[];
   readonly limits?: Partial<Limits>;
-  /** G-A: the workflow definition this profile uses when the task names none (`ResolveWorkflow`). */
+  /** G-A: the task type definition this profile uses when the task names none (`ResolveWorkflow`). */
   readonly workflowRef?: string;
 }
 
@@ -261,13 +261,13 @@ export const DENY_ALL_POLICY: PolicyConfig = {
 };
 
 /**
- * Task id and workflow label given to a quick form run. G-A: with `--workflow <id>` the label is
+ * Task id and `workflow` label given to a quick form run. G-A: with `--workflow <id>` the label is
  * that id and the task's `workflowRef` is the id; without it the label stays QUICK_TASK_WORKFLOW
  * and the run has no definition (legacy settings), as before.
  */
 export const QUICK_TASK_ID = "quick";
 export const QUICK_TASK_WORKFLOW = "general";
-/** G-A (DR-2): the quick form's argument that names a workflow definition (TaskSpec.workflowRef). */
+/** G-A (DR-2): the quick form's argument that names a task type definition (TaskSpec.workflowRef). */
 export const QUICK_WORKFLOW_ARGUMENT = "--workflow";
 
 /**

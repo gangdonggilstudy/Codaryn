@@ -29,8 +29,8 @@ export interface ModelRequest {
   /** Tools offered in this request. A provider describes each one with `TOOL_DEFINITIONS`. */
   readonly tools: readonly ToolName[];
   /**
-   * G-A: workflow tools offered in this request, after `tools`. A provider describes each one with
-   * `WORKFLOW_TOOL_DEFINITIONS`. Absent or empty for a task without workflow tools, so its requests
+   * G-A: task type tools offered in this request, after `tools`. A provider describes each one with
+   * `WORKFLOW_TOOL_DEFINITIONS`. Absent or empty for a task without task type tools, so its requests
    * stay as before stage 4.
    */
   readonly workflowTools?: readonly WorkflowToolName[];

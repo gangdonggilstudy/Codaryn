@@ -1,14 +1,18 @@
 /**
- * General task workflows (stage 4, G-A). Design: docs/design/general-tasks.md sections 4 and 8,
+ * General tasks: task types (stage 4, G-A). Design: docs/design/general-tasks.md sections 4 and 8,
  * decisions GT-D1 to GT-D3, GT-D6, GT-D7, GT-D10, GT-D12 (docs/work-orders/phase-4-5-design.md).
  *
- * A workflow definition is a named set of task defaults and ceilings. The CLI expands the one that
+ * DR-50 (U-28): people read this as the task type (작업 종류), and these comments use that word.
+ * The names in code keep `workflow`, as option names and JSON field names do: `workflowRef`,
+ * `--workflow`, the config file's `workflows`, WorkflowDefinition, WorkflowSettings, the text ids.
+ *
+ * A task type definition is a named set of task defaults and ceilings. The CLI expands the one that
  * `workflowRef` names (task file, profile or `--workflow`) into the explicit fields of
  * WorkflowSettings on the resolved task. The engine never sees a definition and never branches on
- * a workflow id; it reads `workflowSettingsOf(task)`. The free label `TaskSpec.workflow` keeps its
+ * a task type id; it reads `workflowSettingsOf(task)`. The free label `TaskSpec.workflow` keeps its
  * meaning (GT-D2).
  *
- * A task without `workflowRef` and without the workflow fields is interpreted exactly as before
+ * A task without `workflowRef` and without the task type fields is interpreted exactly as before
  * stage 4: LEGACY_WORKFLOW_SETTINGS (the four built-in tools, no instructions, no plan, verifiers
  * decide).
  *
@@ -23,7 +27,7 @@ import type { AnyToolName } from "./tool.js";
 import type { MaskedText } from "./text.js";
 import type { VerifierConfig } from "./verify.js";
 
-/** Workflow ids: as profile names. Letters, digits, `.`, `_`, `-`; starts with a letter or digit; 1-64. */
+/** Task type ids: as profile names. Letters, digits, `.`, `_`, `-`; starts with a letter or digit; 1-64. */
 export const WORKFLOW_ID_PATTERN_SOURCE = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 /** Largest number of entries in the config file's `workflows`. More is `invalid_config`. */
 export const MAX_WORKFLOWS = 32;
@@ -67,9 +71,9 @@ export interface HumanReviewConfig {
 }
 
 /**
- * What a workflow changes in a run, fully resolved. The engine reads it with `workflowSettingsOf`.
+ * What a task type changes in a run, fully resolved. The engine reads it with `workflowSettingsOf`.
  * - tools: offered to the model and the only tools it may call; a call to another tool is
- *   `unknown_tool`. Built-in names (TOOL_NAMES) and workflow tools (WORKFLOW_TOOL_NAMES).
+ *   `unknown_tool`. Built-in names (TOOL_NAMES) and task type tools (WORKFLOW_TOOL_NAMES).
  * - instructions: appended after the fixed system prompt, masked, so the first `model_request`
  *   records it (GT-D3). User config text: it must not spell the privacy token marker.
  * - plan: see plan.ts. With "apply" the run offers only read tools and `propose_plan`.
@@ -83,7 +87,7 @@ export interface WorkflowSettings {
   readonly humanReview: HumanReviewConfig | null;
 }
 
-/** A task with no workflow: the behaviour before stage 4. */
+/** A task with no task type: the behaviour before stage 4. */
 export const LEGACY_WORKFLOW_SETTINGS: WorkflowSettings = Object.freeze({
   tools: TOOL_NAMES,
   instructions: null,
@@ -93,7 +97,7 @@ export const LEGACY_WORKFLOW_SETTINGS: WorkflowSettings = Object.freeze({
 });
 
 /**
- * The workflow settings of a resolved task. Each field the task leaves out takes its value from
+ * The task type settings of a resolved task. Each field the task leaves out takes its value from
  * LEGACY_WORKFLOW_SETTINGS, so a task without them runs as before stage 4. Pure.
  */
 export function workflowSettingsOf(task: ResolvedTaskSpec): WorkflowSettings {
@@ -119,10 +123,10 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
 }
 
 /**
- * DR-41 (A-8, F-5): the effective policy wherever a workflow definition applies and another policy
- * is given: in the quick form the profile's, else the config's; in a task file that names a workflow
+ * DR-41 (A-8, F-5): the effective policy wherever a task type definition applies and another policy
+ * is given: in the quick form the profile's, else the config's; in a task file that names a task type
  * (`workflowRef`), the task's own policy (PM, after 27afb01). A definition's rules are its safety
- * rules, so no policy, however given, loosens them. A task naming no workflow keeps its policy as
+ * rules, so no policy, however given, loosens them. A task naming no task type keeps its policy as
  * it is. Pure.
  * - Either absent: the other, as before.
  * - protectedPaths: both lists (union), the definition's first, each entry once.
@@ -238,9 +242,9 @@ function canonicalJson(value: unknown): string {
 }
 
 /**
- * DR-43 (a), R-31 L-2: the verifiers a run uses where a workflow definition's own checks meet a
+ * DR-43 (a), R-31 L-2: the verifiers a run uses where a task type definition's own checks meet a
  * given list (the profile's or the config's in the quick form, a task file's own when it names a
- * workflow). The definition's checks always run: its verifiers first, then each given verifier whose
+ * task type). The definition's checks always run: its verifiers first, then each given verifier whose
  * id is not one of the definition's. An empty given list removes none of them. Either absent (or the
  * definition's empty): the other, as before. Pure.
  */
@@ -297,7 +301,7 @@ export interface WorkflowDefinition {
 }
 
 /**
- * Why a workflow cannot be resolved (`invalid_task` or `invalid_config`; the message names the
+ * Why a task type cannot be resolved (`invalid_task` or `invalid_config`; the message names the
  * field position, never a value).
  * - unknown_workflow: `workflowRef` names no built-in and no config entry
  * - tool_not_allowed: a task lists a tool its definition does not list (tools only narrow)
@@ -318,7 +322,7 @@ export const WORKFLOW_PROBLEMS = [
 ] as const;
 export type WorkflowProblem = (typeof WORKFLOW_PROBLEMS)[number];
 
-/** The task's own workflow fields (TaskSpec), as `ResolveWorkflow` takes them. */
+/** The task's own task type fields (TaskSpec), as `ResolveWorkflow` takes them. */
 export interface TaskWorkflowFields {
   readonly workflowRef?: string;
   readonly tools?: readonly AnyToolName[];

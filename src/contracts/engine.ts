@@ -79,7 +79,7 @@ export interface RunReasonByStatus {
    * protected_changed (U-2): an integrity check found protected material changed, or could not
    * show it unchanged (`unchecked` entries). The run is not repaired; see `EngineDeps.integrity`.
    * G-A: plan_pending: `propose_plan` stored a plan; nothing changed in the workspace. It waits for
-   * a person's approval and `codaryn apply` (EngineResult.plan). awaiting_review: the workflow's
+   * a person's approval and `codaryn apply` (EngineResult.plan). awaiting_review: the task type's
    * completion is `human_review` and its verifiers all passed (or there is none); a person records
    * a verdict with `codaryn review` (EngineResult.review). Neither is ever `done`.
    * consent_required (DR-21, apply runs only): the preflight found moves that could only be made
@@ -335,7 +335,7 @@ export interface EngineResult {
    * number of actions.
    */
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
-  /** G-A: present with reason `awaiting_review` only. The workflow's checklist, masked. */
+  /** G-A: present with reason `awaiting_review` only. The task type's checklist, masked. */
   readonly review?: { readonly checklist: readonly MaskedText[] };
   /**
    * DR-47 (AXM-1): the agent's last message: the run's last model response, when it is a final

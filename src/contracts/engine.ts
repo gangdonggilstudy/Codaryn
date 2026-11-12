@@ -204,6 +204,13 @@ export const CLI_ERROR_EXIT_CODES = {
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
   /**
+   * G-A (R-9c C-1), `codaryn revert --run <apply runId>`: the plan run that apply used
+   * (`apply_started.planRunId`) has no directory or no plan.json any more. The real paths of the
+   * apply's files are known only from that plan (DR-24 f), so nothing was changed. A plan run must
+   * be kept while its apply may be reverted.
+   */
+  plan_run_missing: 2,
+  /**
    * G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as
    * `plan_pending`), or the task given to `apply` does not resolve to `plan: "apply"`. Nothing was
    * changed.

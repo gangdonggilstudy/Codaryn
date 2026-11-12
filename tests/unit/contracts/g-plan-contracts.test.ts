@@ -53,6 +53,7 @@ import {
   RUN_REASONS_BY_STATUS,
   APPLY_REASONS_BY_STATUS,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
+  REVERT_ERROR_CODES,
   DISCARDED_STORED_NAME_PATTERN_SOURCE,
   discardedStoredName,
   isReasonOfStatus,
@@ -67,6 +68,7 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  DoctorMessageId,
   RevertOutcome,
   RevertOutput,
   RevertRecord,
@@ -393,6 +395,21 @@ describe("G-A plan contract", () => {
   test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
     assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
     assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
+  });
+
+  test("R-9c C-1: a revert whose plan run is gone says so with its own error code", () => {
+    assert.deepEqual([...REVERT_ERROR_CODES], ["run_not_found", "invalid_run_record", "plan_run_missing"]);
+    for (const code of REVERT_ERROR_CODES) {
+      assert.equal(CLI_ERROR_EXIT_CODES[code], 2, code);
+      assert.ok((MESSAGE_IDS as readonly string[]).includes(`error.${code}.what`), code);
+      assert.ok((MESSAGE_IDS as readonly string[]).includes(`error.${code}.fix`), code);
+    }
+  });
+
+  test("G-F Q5: doctor warns when commands take extra arguments while plans may move files", () => {
+    assert.deepEqual(FIXED_MESSAGES["doctor.commands.extra_args_with_plan"], { count: "count" });
+    const id: DoctorMessageId = "doctor.commands.extra_args_with_plan";
+    assert.ok((MESSAGE_IDS as readonly string[]).includes(id));
   });
 
   test("DR-25: a revert has the same consent path; its messages say what was moved unsafely and how to consent", () => {

@@ -10,7 +10,8 @@
  *    with the policy gate (PLAN_ACTION_DESCRIPTORS), the tool checks the plan against the workspace,
  *    hashes every source file and stores the actions as `plan.json` (PlanRecorder). The run ends as
  *    `needs-input`/`plan_pending` with `EngineResult.plan`. No workspace file changes.
- * 2. The apply run. `codaryn apply` (with the same task form as `run`, `--run <plan run id>` and
+ * 2. The apply run. `codaryn apply` (with the same task form as `run`: `--task <task.json>`, or
+ *    `--workspace <dir> [--profile <name>] [--workflow <id>]`; with `--run <plan run id>` and
  *    `--digest <hex>`), or an adapter's `applyPlan(runId, digest)` after a person approved the
  *    shown plan, applies exactly the stored actions under the workspace lock. Policy, verifiers,
  *    limits and secrets come from the user's config and the task as they are at apply time
@@ -34,6 +35,7 @@ import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolDescriptor } from "./tool.js";
+import type { Workspace } from "./workspace.js";
 import type { InventoryChecker, VerifierConfig, VerifierResult, VerifierRunner } from "./verify.js";
 
 /** How a task treats a plan. `none`: no plan step, as before stage 4. P1 adds "run". */
@@ -317,11 +319,19 @@ export interface PlanExecutor {
 }
 
 export interface PlanExecutorOptions {
+  /** The workspace every path is resolved through. */
+  readonly workspace: Workspace;
   /** Real absolute path of the workspace root. */
   readonly workspaceRoot: string;
   /** The apply run. `.codaryn/discarded/<runId>/` receives discarded files. */
   readonly runId: string;
 }
+
+/**
+ * Signature of `createPlanExecutor`, exported by `src/tools/index.ts` (G-C). The CLI (or the app
+ * layer) creates one per apply run and hands it to `applyPlan` as `ApplyDeps.executor`.
+ */
+export type CreatePlanExecutor = (options: PlanExecutorOptions) => PlanExecutor;
 
 /**
  * Records of an apply run's journal (`<root>/.codaryn/runs/<apply runId>/journal.jsonl`). An apply
@@ -396,7 +406,8 @@ export interface ApplyJournal {
 /**
  * The apply run (`applyPlan`, `src/engine`, G-B). The CLI (or the app layer) has already loaded
  * the plan, checked the digest and that the plan is not applied, resolved the task given to the
- * apply (its workflow settings must say `plan: "apply"`), registered the secrets as `run` does and
+ * apply (its workflow settings must say `plan: "apply"`; otherwise `run_not_plan`), registered the
+ * secrets as `run` does and
  * taken the lock. Order:
  * 1. `apply_started`; the integrity baseline when `integrity` is given.
  * 2. Preflight: `inventory.capture()`; every action judged by `policy` (PLAN_ACTION_DESCRIPTORS)
@@ -406,6 +417,10 @@ export interface ApplyJournal {
  * 4. Each action in order: `file_moved` or `file_discarded`, or `plan_item_failed` and the apply
  *    ends as `failed`/`apply_incomplete`. A cancel or the duration limit is honoured between
  *    actions and ends the apply as `cancelled`/`cancelled` or `budget-exhausted`/`max_duration`.
+ *    PLAN_ITEM_PROBLEMS has no "cancelled": an executor that saw the signal abort may report
+ *    `io_error`. The engine therefore looks at the signal itself before each action and after a
+ *    failed one; when it is aborted (or the duration is over) the apply ends as cancelled (or
+ *    budget-exhausted), not as `apply_incomplete`, and that action is recorded as not done.
  *    In every case what was done stays, is listed in `ApplyResult.applied`, and `codaryn revert
  *    --run <apply runId>` undoes it.
  * 5. Verification: the inventory check (VF-05, always first), then the task's verifiers, each
@@ -481,11 +496,16 @@ export interface ApplyResult {
 export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;
 
 /**
- * `codaryn plan --workspace <dir> --run <runId|latest> [--json]`: shows a stored plan. It reads
- * plan.json and masks it again with the secrets it registers as `run` does (S-2 to S-4); it does
- * not show the journal's copy (DR-5). It also counts the workspace's files, so the inventory limit
- * is reported before an apply (DR-6). Changes nothing, takes no lock. Errors (CliErrorOutput):
- * `invalid_arguments`, `workspace_not_found`, `run_not_found`, `run_not_plan`, `invalid_run_record`.
+ * `codaryn plan (--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <file>]
+ * [--vars-file <file>] --run <runId|latest> [--json]` (DR-17): shows a stored plan. It takes the
+ * same task form as `run` and `apply`, so it registers the same secrets (S-2 to S-4: the task's and
+ * the config's `secretEnv`, the key, the variable file's values) and masks plan.json again with
+ * them; it does not show the journal's copy (DR-5). The workspace is the task's `workspaceRoot` or
+ * `--workspace`. It also counts the workspace's files, so the inventory limit is reported before an
+ * apply (DR-6). It needs no model and makes no request: a missing key or model does not stop it.
+ * Changes nothing, takes no lock. Errors (CliErrorOutput): `invalid_arguments`, `invalid_task`,
+ * `invalid_config`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `run_not_found`,
+ * `run_not_plan`, `invalid_run_record`.
  */
 export const PLAN_STATUSES = ["pending", "applied"] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];

@@ -488,8 +488,14 @@ export const FIXED_MESSAGES = {
   "runs.revert_record_damaged": {},
   // DR-38: a run whose records were changed by something other than the run (state.ts).
   "runs.records_changed": {},
+  // U-16 (UXM-5): a plan run whose plan was applied (RunListEntry.appliedBy), in place of the
+  // needs-input words: applied by `{runId}`.
+  "runs.plan_applied": { runId: "runId" },
   "report.records_changed": {},
   "changes.records_changed": {},
+  // U-16 (UXM-4): `changes` of an apply run (ChangesApplyRun) in place of "no file changed": it
+  // applied the plan of run `{runId}`, `{count}` actions, which its report lists.
+  "changes.apply_run": { count: "count", runId: "runId" },
   "revert.records_changed": {},
   // DR-38: progress lines of the state checks: `{count}` paths changed (the run stops), and a part
   // of the state directory that was too large to check (the run goes on).

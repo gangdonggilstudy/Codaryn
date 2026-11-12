@@ -166,6 +166,13 @@ describe("U-18 (AXM-4): the end summary counts the failed calls", () => {
     assert.ok(lines[at + 1]?.startsWith(real.format("summary.usage", { turns: 8, toolCalls: 6, seconds: 0.1 }).split(":")[0] ?? "?"), lines.join("\n"));
   });
 
+  test("a context without failedToolCalls (optional; absent is 0): no line, the summary as with 0", () => {
+    const without: Record<string, unknown> = { ...context({}) };
+    delete without["failedToolCalls"];
+    assert.equal(Object.hasOwn(without, "failedToolCalls"), false);
+    assert.deepEqual(createHumanOutput(standIn).runSummary(engine, without as unknown as RunSummaryContext).trimEnd().split("\n"), summary({ failedToolCalls: 0 }));
+  });
+
   test("none failed, or a value that is not a count: no line", () => {
     for (const failedToolCalls of [0, undefined, -1, 1.5, "4", null]) {
       assert.equal(summary({ failedToolCalls }).some((line) => line.startsWith("<summary.failed")), false, String(failedToolCalls));

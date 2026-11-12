@@ -289,6 +289,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
+      // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
       if (failed > 0) out.push(catalog.format("summary.failed", { count: failed }));
       // N-23(e): the hint is about allowing a command, so it comes only with command denials, and

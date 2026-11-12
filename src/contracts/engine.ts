@@ -224,6 +224,14 @@ export const CLI_ERROR_EXIT_CODES = {
   plan_not_approved: 2,
   /** G-A, `codaryn apply`: the plan was already applied (applied.json exists). Nothing was changed. */
   plan_already_applied: 2,
+  /**
+   * DR-28 (R-11 M-1), `codaryn plan`, `codaryn apply` and the app layer: the secrets registered now
+   * mask the plan's paths differently from the plan run (planActionShownMatches is false for an
+   * action), or the plan was stored without its masked form. Checked right after the plan is
+   * loaded: nothing was shown, asked, recorded or moved. Use the same task form, and so the same
+   * secrets, as the plan run, or make the plan again.
+   */
+  plan_secrets_differ: 2,
   /** G-A, `codaryn review`: the run did not end as `needs-input`/`awaiting_review`. Nothing was written. */
   run_not_awaiting_review: 2,
   internal_error: 70,

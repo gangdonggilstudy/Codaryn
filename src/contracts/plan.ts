@@ -19,7 +19,10 @@
  *    `--digest <hex>`), or an adapter's `applyPlan(runId, digest)` after a person approved the
  *    shown plan, applies exactly the stored actions under the workspace lock. Policy, verifiers,
  *    limits and secrets come from the user's config and the task as they are at apply time
- *    (DR-5); `plan.json` holds actions and source hashes only. Each action is recorded, then the
+ *    (DR-5); `plan.json` holds actions and source hashes only, plus (DR-28) how the plan run masked
+ *    each action's paths. Showing or applying a plan whose paths the secrets registered now mask
+ *    differently stops before anything is shown or moved (`plan_secrets_differ`). Each action is
+ *    recorded, then the
  *    inventory check and the task's verifiers run, and the apply writes its own result
  *    (ApplyResult, a new run id that names the plan run). No model takes part.
  *
@@ -37,6 +40,7 @@ import type { IntegrityChecker } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
+import { PRIVACY_TOKEN_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolDescriptor } from "./tool.js";
 import type { Workspace } from "./workspace.js";
@@ -196,16 +200,70 @@ export const PLAN_ACTION_DESCRIPTORS: { readonly [K in PlanActionKind]: ToolDesc
 };
 
 /**
- * plan.json: the actions and their source hashes, nothing else (DR-5). No policy, verifier, limit
- * or secret name is stored, so this file inside the workspace cannot decide how the apply runs.
- * Raw local text, like the snapshots (R-8): never sent to a model; shown only masked.
+ * DR-28 (R-11 M-1): a masked text's visible parts, the text split at every privacy token
+ * (PRIVACY_TOKEN_PATTERN_SOURCE) with the tokens left out: `[[CODARYN_SECRET:…]]/a.jpg` gives
+ * `["", "/a.jpg"]`, two tokens in a row give an empty part between them, and a text without a
+ * token gives `[text]`. Token ids are random in every run, the parts are not: two maskings of the
+ * same path have the same parts exactly when they leave the same text visible. It holds no secret
+ * value and no hash of one.
+ */
+export type MaskedParts = readonly string[];
+
+/** DR-28: an action's paths as the plan run masked them, as visible parts. */
+export type PlanActionShown =
+  | { readonly from: MaskedParts; readonly to: MaskedParts }
+  | { readonly path: MaskedParts };
+
+/** DR-28: `masked` split into its visible parts (MaskedParts). */
+export function maskedParts(masked: string): MaskedParts {
+  return masked.split(new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE));
+}
+
+/** DR-28: the shown form of an action masked by the plan run's gateway, stored with the action. */
+export function planActionShown(masked: MaskedPlanAction): PlanActionShown {
+  return masked.kind === "move"
+    ? { from: maskedParts(masked.from), to: maskedParts(masked.to) }
+    : { path: maskedParts(masked.path) };
+}
+
+/**
+ * DR-28: true when `masked`, the stored action masked with the secrets registered now, leaves
+ * exactly the text visible that the plan run left visible (`action.shown`). False when the kinds
+ * differ, a part differs, or the action has no `shown` (a plan written before DR-28): such a plan
+ * is not shown or applied (`plan_secrets_differ`).
+ */
+export function planActionShownMatches(action: StoredPlanAction, masked: MaskedPlanAction): boolean {
+  const shown = action.shown;
+  if (shown === undefined || action.kind !== masked.kind) return false;
+  const now = planActionShown(masked);
+  const same = (a: MaskedParts, b: MaskedParts): boolean => a.length === b.length && a.every((part, i) => part === b[i]);
+  if ("path" in shown) return "path" in now && same(shown.path, now.path);
+  return "from" in now && same(shown.from, now.from) && same(shown.to, now.to);
+}
+
+/**
+ * A stored action: the resolved action and (DR-28) its paths as the plan run masked them. `shown`
+ * is written for every action from DR-28 on; it is optional only so that values built before it
+ * still type-check. A plan whose action has none is treated as masked differently.
+ */
+export type StoredPlanAction =
+  | (Extract<ResolvedPlanAction, { readonly kind: "move" }> & {
+      readonly shown?: { readonly from: MaskedParts; readonly to: MaskedParts };
+    })
+  | (Extract<ResolvedPlanAction, { readonly kind: "discard" }> & { readonly shown?: { readonly path: MaskedParts } });
+
+/**
+ * plan.json: the actions and their source hashes, nothing else (DR-5), plus (DR-28) each action's
+ * masked form as visible parts. No policy, verifier, limit, secret name, secret value or hash of
+ * one is stored, so this file inside the workspace cannot decide how the apply runs. Raw local
+ * text, like the snapshots (R-8): never sent to a model; shown only masked.
  */
 export interface StoredPlan {
   readonly schemaVersion: 1;
   readonly kind: "plan";
   /** The plan run. A file naming another run is `invalid_run_record`. */
   readonly runId: string;
-  readonly actions: readonly ResolvedPlanAction[];
+  readonly actions: readonly StoredPlanAction[];
 }
 
 export interface PlanRecorderOptions {
@@ -224,9 +282,11 @@ export interface PlanRecorder {
    * SHA-256 of the bytes written after they were handed to the operating system. Rejects when the
    * file exists or cannot be written; the tool then reports `io_error` and no plan exists. It does
    * not depend on hard links (DR-24 c). A reader that sees the file half written finds its digest
-   * wrong and reports `invalid_run_record`.
+   * wrong and reports `invalid_run_record`. DR-28: every action carries `shown`, which the engine
+   * builds with planActionShown from the action masked by the plan run's gateway; the recorder
+   * writes it as given. `loadPlan` accepts an action with or without `shown` (exact keys either way).
    */
-  savePlan(actions: readonly ResolvedPlanAction[]): Promise<ContentHash>;
+  savePlan(actions: readonly StoredPlanAction[]): Promise<ContentHash>;
 }
 
 /** Signature of `createPlanRecorder`, exported by `src/store/index.ts` (G-E). */
@@ -513,10 +573,17 @@ export interface ApplyJournal {
  * The apply run (`applyPlan`, `src/engine`, G-B). The CLI (or the app layer) has already loaded
  * the plan, checked the digest and that the plan is not applied, resolved the task given to the
  * apply (its workflow settings must say `plan: "apply"`; otherwise `run_not_plan`), registered the
- * secrets as `run` does and
+ * secrets as `run` does, checked (DR-28) that every action masked with those secrets matches its
+ * `shown` (planActionShownMatches; otherwise `plan_secrets_differ` before anything is shown, asked
+ * or started) and
  * taken the lock. Order:
  * 1. `apply_started`; the integrity baseline when `integrity` is given.
- * 2. Preflight: `inventory.capture()`; every action judged by `policy` (PLAN_ACTION_DESCRIPTORS)
+ * 2. Preflight. First (DR-28, the same check as the caller's, kept as a second defence): every
+ *    action is masked with `privacy` and compared with its `shown` (planActionShownMatches). When one
+ *    differs or cannot be masked, the apply ends as `failed`/`plan_stale` with a fixed notice
+ *    naming `plan_secrets_differ`, before the inventory is taken: nothing is checked, claimed or
+ *    moved, and no path is recorded. The masked actions are the ones recorded later. Then:
+ *    `inventory.capture()`; every action judged by `policy` (PLAN_ACTION_DESCRIPTORS)
  *    and by `executor.check`. `plan_checked` records the outcome. A problem, or the inventory limit
  *    reached, ends the apply as `failed`/`plan_stale` with nothing moved. DR-21: moves the check
  *    finds unsafe are listed apart (`unsafeMoves`); without a consent for this plan's digest the
@@ -637,7 +704,8 @@ export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;
  * apply (DR-6). It needs no model and makes no request: a missing key or model does not stop it.
  * Changes nothing, takes no lock. Errors (CliErrorOutput): `invalid_arguments`, `invalid_task`,
  * `invalid_config`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `run_not_found`,
- * `run_not_plan`, `invalid_run_record`.
+ * `run_not_plan`, `invalid_run_record`, `plan_secrets_differ` (DR-28: checked before anything is
+ * shown).
  */
 export const PLAN_STATUSES = ["pending", "applied"] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];

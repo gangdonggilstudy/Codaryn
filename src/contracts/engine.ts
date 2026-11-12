@@ -6,6 +6,7 @@ import type { RevertOutcome } from "./changes.js";
 import type { DoctorOutput, InitOutput, ModelsOutput, ReportOutput, RunsOutput } from "./commands.js";
 import type { InputDiagnosticFile, SchemaFieldPath } from "./human.js";
 import type { IntegrityChecker } from "./integrity.js";
+import type { StateGuard } from "./state.js";
 import type { Journal } from "./journal.js";
 import type { ModelProvider } from "./model.js";
 import type { PolicyGate } from "./policy.js";
@@ -68,7 +69,12 @@ export interface RunReasonByStatus {
    * limit (DR-6), or the plan was already applied; nothing was moved. apply_incomplete: an action
    * failed while applying; the earlier ones stay done and `codaryn revert` undoes them.
    */
-  readonly failed: "verifier_failed" | "model_error" | "repeated_failure" | "plan_stale" | "apply_incomplete";
+  /**
+   * state_changed (DR-38): the run's records or the rest of the state directory changed during the
+   * run other than by the run itself (a command, a command verifier or their child), or the run's
+   * own records could not be checked. The run ends at once; see EngineDeps.stateGuard.
+   */
+  readonly failed: "verifier_failed" | "model_error" | "repeated_failure" | "plan_stale" | "apply_incomplete" | "state_changed";
   /**
    * protected_changed (U-2): an integrity check found protected material changed, or could not
    * show it unchanged (`unchecked` entries). The run is not repaired; see `EngineDeps.integrity`.
@@ -118,6 +124,7 @@ export const RUN_REASONS = [
   "plan_pending",
   "awaiting_review",
   "consent_required",
+  "state_changed",
 ] as const satisfies readonly RunReason[];
 /** Compile-time check that RUN_REASONS misses none. */
 export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
@@ -132,7 +139,7 @@ void runReasonsComplete;
  */
 export const RUN_REASONS_BY_STATUS = {
   done: ["verified"],
-  failed: ["verifier_failed", "model_error", "repeated_failure", "plan_stale", "apply_incomplete"],
+  failed: ["verifier_failed", "model_error", "repeated_failure", "plan_stale", "apply_incomplete", "state_changed"],
   "needs-input": [
     "verifier_inconclusive",
     "no_verifier",
@@ -297,6 +304,11 @@ export interface EngineResult {
    */
   readonly protectedChanged?: readonly MaskedText[];
   /**
+   * DR-38: present when the run recorded at least one `state_checked`; the `changed` list of the
+   * last one. Non-empty only with reason `state_changed`. Absent when the run had no state guard.
+   */
+  readonly stateChanged?: readonly MaskedText[];
+  /**
    * G-A: present with reason `plan_pending` only. The stored plan's digest, the one value both
    * `codaryn apply --digest` and the app layer's `applyPlan(runId, digest)` take (DR-1), and its
    * number of actions.
@@ -381,6 +393,8 @@ export interface RevertOutput {
   readonly runId: string;
   readonly status: RevertStatus;
   readonly exitCode: number;
+  /** DR-38: the run has a records-changed mark (state.ts); the revert still ran its checks. Absent: false. */
+  readonly recordsChanged?: boolean;
   /** Paths as the run's journal recorded them (masked). See `RevertRun`. */
   readonly reverted: RevertOutcome["reverted"];
   readonly skipped: RevertOutcome["skipped"];
@@ -448,6 +462,23 @@ export interface EngineDeps {
    * whatever the verifiers said. The comparison is always against the run_start baseline.
    */
   readonly integrity?: IntegrityChecker;
+  /**
+   * DR-38: changes to Codaryn's own records during the run (state.ts). The CLI and the app pass it;
+   * absent: no check and no `state_checked` record, as before. When present the engine:
+   * - run_start: after `run_started`, before the first model request: `run = capture("run")`,
+   *   `base = capture("state")`; records `state_checked` with `limited` from compare(base, base).
+   * - before_command, after_command: around each `run_command` it executes (the decision is recorded
+   *   before, the result after): `now = capture("run")`, `changed = compare(last, now).changed`,
+   *   `last = now`. Recorded only when `changed` is not empty.
+   * - before_verify, after_verify: around each verification round: tier "run" as above, and tier
+   *   "state" against `base`. Recorded only when something changed or `limited` is true.
+   * - run_end: both tiers, always recorded, after the last step and before `run_finished`.
+   * A non-empty `changed` (either tier) is recorded masked, passed to `markRecordsChanged`, and ends
+   * the run at once as `failed`/`state_changed`: no further model request, command or verifier, and
+   * at run_end it replaces the status the run would have ended with. `limited` (tier "state") is
+   * recorded and the run goes on. Integrity checks and state checks at the same moment both run.
+   */
+  readonly stateGuard?: StateGuard;
 }
 
 /** Signature of `runTask`, exported by `src/engine/index.ts`. */

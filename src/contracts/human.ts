@@ -456,6 +456,15 @@ export const FIXED_MESSAGES = {
   "runs.reverted": {},
   // N-23 (g): the run's own records are fine, only its revert record failed the checks.
   "runs.revert_record_damaged": {},
+  // DR-38: a run whose records were changed by something other than the run (state.ts).
+  "runs.records_changed": {},
+  "report.records_changed": {},
+  "changes.records_changed": {},
+  "revert.records_changed": {},
+  // DR-38: progress lines of the state checks: `{count}` paths changed (the run stops), and a part
+  // of the state directory that was too large to check (the run goes on).
+  "progress.state_changed": { count: "count" },
+  "progress.state_unchecked": {},
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.

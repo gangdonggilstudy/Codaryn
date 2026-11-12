@@ -16,13 +16,16 @@ import {
   ALL_TOOL_DESCRIPTORS,
   ALL_TOOL_NAMES,
   BUILTIN_TOOLS,
+  FIXED_MESSAGES,
   MAX_PLAN_ACTIONS,
+  MESSAGE_IDS,
   MAX_PLAN_SUMMARY_CHARS,
   PLAN_ACTION_DESCRIPTORS,
   PLAN_ACTION_KINDS,
   PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE,
   TOOL_DEFINITIONS,
   TOOL_NAMES,
+  UNKNOWN_TOOL_RECORD_NAME,
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_DEFINITIONS,
   WORKFLOW_TOOL_NAMES,
@@ -73,6 +76,19 @@ describe("G-A tool names", () => {
       assert.strictEqual(ALL_TOOL_DEFINITIONS[name], WORKFLOW_TOOL_DEFINITIONS[name]);
       assert.strictEqual(ALL_TOOL_DESCRIPTORS[name], WORKFLOW_TOOLS[name]);
     }
+  });
+
+  test("every tool, built-in or workflow, has a name for people; only an unknown one has none", () => {
+    const ids = MESSAGE_IDS as readonly string[];
+    for (const name of ALL_TOOL_NAMES) assert.ok(ids.includes(`tool.${name}`), name);
+    assert.ok(ids.includes("tool.inspect_files"));
+    assert.ok(ids.includes("tool.propose_plan"));
+    assert.equal(ids.includes(`tool.${UNKNOWN_TOOL_RECORD_NAME}`), false);
+    assert.deepEqual(
+      ids.filter((id) => id.startsWith("tool.")).sort(),
+      ALL_TOOL_NAMES.map((name) => `tool.${name}`).sort(),
+    );
+    assert.deepEqual(FIXED_MESSAGES["progress.unknown_tool"], {});
   });
 });
 

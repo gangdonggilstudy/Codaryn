@@ -745,7 +745,22 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" });
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
-    set("commands", checked.status, checked.message, checked.text);
+    // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
+    // actions. Codaryn does not check a command's arguments, so such a command can change files
+    // outside an approved plan. Problems found above keep their text; the warning joins the message.
+    const extraArgs = (policy?.commands ?? []).filter((rule) => rule.allowExtraArgs).length;
+    if (extraArgs > 0 && (policy?.planActions ?? []).length > 0) {
+      const warning =
+        `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
+        "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
+      if (checked.status === "ok") {
+        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } });
+      } else {
+        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
+      }
+    } else {
+      set("commands", checked.status, checked.message, checked.text);
+    }
   }
 
   // install_dir (U-3)

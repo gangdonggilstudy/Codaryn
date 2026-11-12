@@ -130,8 +130,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
     if (file === null) return null;
     const fileText = catalog.format(`diagnostic.file.${file}`);
-    const field: SchemaFieldPath | null =
-      (typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null) ?? toSchemaFieldPath(file);
+    const ownField = typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null;
+    const field: SchemaFieldPath | null = ownField ?? toSchemaFieldPath(file);
     let text: CatalogText | null = null;
     switch (diagnostic.code) {
       case "json_syntax":
@@ -140,7 +140,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         }
         break;
       case "unknown_field": {
-        const suggestion = typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
+        // N-23(f): a suggestion belongs to the position it was made for; at the file root it misleads.
+        const suggestion = ownField !== null && typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
         if (field !== null) {
           text =
             suggestion === null

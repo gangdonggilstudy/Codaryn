@@ -156,6 +156,17 @@ describe("HumanOutput.error (N-5, N-15)", () => {
     assert.equal(noLine.includes("diagnostic"), false);
   });
 
+  test("N-23(f): a position that falls back to the file root drops the suggestion made for the original position", () => {
+    const text = createHumanOutput(strictCatalog()).error(
+      error("invalid_config", {
+        diagnostic: { code: "unknown_field", file: "config", field: "profiles.hunter2" as SchemaFieldPath, line: null, column: null, suggestion: field("limits") },
+      }),
+    );
+    assert.ok(text.includes("  [diagnostic.file.config] — [diagnostic.unknown_field field=config]\n"), text);
+    assert.equal(text.includes("suggestion"), false);
+    assert.equal(text.includes("hunter2"), false);
+  });
+
   test("doctor is suggested only where it can check the cause; an unknown code shows only the label", () => {
     const human = createHumanOutput(strictCatalog());
     assert.equal(human.error(error("run_not_found")).includes("error.doctor_hint"), false);

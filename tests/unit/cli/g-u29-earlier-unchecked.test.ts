@@ -7,6 +7,9 @@
  * and one notice that names the earlier run's check. A run before the plan run does not count.
  * The real CLI under the net guard; scripted model; nothing is sent. The state directory is made too
  * large with one top-level file above the store's per-file hashing limit, as in g-u8.
+ * Run ids start with their second; the store orders runs by id, so two runs started in the same
+ * second are ordered by their random part. The cases wait for the next second between the runs so
+ * "before" and "after" are what the ids say (the same-second case is the store's, reported apart).
  */
 
 import assert from "node:assert/strict";
@@ -67,6 +70,11 @@ async function applied(when: "after_plan" | "before_plan"): Promise<ApplyResult>
   await writeFile(path.join(base, "other.task.json"), JSON.stringify(OTHER_TASK), "utf8");
   const cli = (args: readonly string[]) => spawnSync(process.execPath, ["--import", guard, main, ...args], { cwd: base, env, encoding: "utf8" });
   const large = path.join(ws, STATE_DIR_NAME, "large.bin");
+  /** Waits until the clock is in a later second than when it was called (run ids name their second). */
+  const nextSecond = async (): Promise<void> => {
+    const second = Math.floor(Date.now() / 1000);
+    while (Math.floor(Date.now() / 1000) === second) await new Promise((resolve) => setTimeout(resolve, 50));
+  };
   const otherRun = async (): Promise<void> => {
     // Above the store's per-file hashing limit for the rest of the state directory (1 MiB): the run's state checks are limited.
     await writeFile(large, Buffer.alloc(1024 * 1024 + 1, 0x61));
@@ -75,10 +83,16 @@ async function applied(when: "after_plan" | "before_plan"): Promise<ApplyResult>
     await rm(large);
   };
 
-  if (when === "before_plan") await otherRun();
+  if (when === "before_plan") {
+    await otherRun();
+    await nextSecond();
+  }
   const planned = JSON.parse(cli(["run", "--task", "plan.task.json", "--quiet"]).stdout) as EngineResult;
   assert.equal(planned.reason, "plan_pending", JSON.stringify(planned));
-  if (when === "after_plan") await otherRun();
+  if (when === "after_plan") {
+    await nextSecond();
+    await otherRun();
+  }
 
   // The apply's own checks are complete: the large file is gone again.
   const run = cli(["apply", "--task", "plan.task.json", "--run", planned.runId, "--digest", (planned.plan?.digest ?? "").slice(0, 12), "--quiet"]);

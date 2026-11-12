@@ -56,6 +56,39 @@ async function configLine(source: Source, language: MessageLanguage): Promise<st
   return line;
 }
 
+/** The config_file check's catalog text for a valid config file named by `source`. */
+async function configText(source: Source): Promise<unknown> {
+  const base = await mkdtemp(path.join(tmpdir(), "codaryn-g-doctor-config-source-"));
+  temporaryDirs.push(base);
+  const file = path.join(base, "config.json");
+  await writeFile(file, JSON.stringify({ schemaVersion: 1 }), "utf8");
+  const outcome = await runDoctor({
+    argv: ["doctor", ...(source === "--config" ? ["--config", file] : []), "--json"],
+    env: source === "CODARYN_CONFIG" ? { [CODARYN_CONFIG_ENV]: file } : {},
+    cwd: base,
+    nodeVersion: "26.0.0",
+    readFile: (name) => readFile(name, "utf8"),
+    isDirectory: async (dir) => (await stat(dir).catch(() => null))?.isDirectory() ?? false,
+    isFile: async (name) => (await stat(name).catch(() => null))?.isFile() ?? false,
+    locateInWorkspace: lexicalLocate,
+    relatePaths: async () => "separate",
+    defaultConfig: source === "default" ? { path: file, display: DEFAULT_CONFIG_DISPLAY.windows } : null,
+  });
+  assert.ok("text" in outcome);
+  return (JSON.parse(outcome.text) as DoctorOutput).checks.find((check) => check.id === "config_file")?.text;
+}
+
+describe("N-A 32.3 (0d38bfa): doctor picks the config file's text by its source", () => {
+  test("the default location: valid_at with its display", async () => {
+    assert.deepEqual(await configText("default"), { id: "doctor.config_file.valid_at", params: { location: DEFAULT_CONFIG_DISPLAY.windows } });
+  });
+  for (const source of ["--config", "CODARYN_CONFIG"] as const) {
+    test(`${source}: valid_given with the option or the variable`, async () => {
+      assert.deepEqual(await configText(source), { id: "doctor.config_file.valid_given", params: { location: source } });
+    });
+  }
+});
+
 const DEFAULT_WORDS: { readonly [L in MessageLanguage]: string } = { en: "default location", ko: "기본 위치" };
 
 describe("doctor names where the config file came from", () => {
@@ -67,7 +100,7 @@ describe("doctor names where the config file came from", () => {
     for (const source of ["--config", "CODARYN_CONFIG"] as const) {
       test(
         `${language}: a config given by ${source} is not called the default location`,
-        { todo: "contract: a message id for a config file given by --config or CODARYN_CONFIG (requested; after the third bundle)" },
+        { todo: "N-B: the text of doctor.config_file.valid_given (claude/security-core b88114c); the CLI picks the id (0d38bfa)" },
         async () => {
           const line = await configLine(source, language);
           assert.equal(line.includes(DEFAULT_WORDS[language]), false, line);

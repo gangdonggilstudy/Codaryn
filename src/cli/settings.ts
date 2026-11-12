@@ -59,6 +59,14 @@ export function runKeySecrets(env: SettingsEnvironment, provider: ModelProviderN
   });
 }
 
+/** For the key_in_file message: every key variable that is set, with its value (as knownKeyValues reads it). */
+export function knownKeyEntries(env: SettingsEnvironment): { readonly keyEnv: (typeof API_KEY_ENVS)[number]; readonly value: string }[] {
+  return API_KEY_ENVS.flatMap((keyEnv) => {
+    const value = envValue(env, keyEnv);
+    return value === null ? [] : [{ keyEnv, value }];
+  });
+}
+
 /** The trimmed value, or `null` when unset or blank. */
 export function envValue(env: SettingsEnvironment, name: string): string | null {
   const value = env[name]?.trim();

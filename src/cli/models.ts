@@ -309,9 +309,10 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       }
     }
     if (configText !== null) {
-      // DR-40 (b): a file over the cap is refused before any check reads it.
-      if (inputFileTooLarge(configText)) return cliError("invalid_config", inputFileTooLargeMessage("config file"));
       const body = configText.startsWith(BOM) ? configText.slice(1) : configText;
+      // DR-40 (b): a file over the cap is refused before any check reads it; measured without the
+      // byte order mark, as run and doctor do (review R-30 L-1).
+      if (inputFileTooLarge(body)) return cliError("invalid_config", inputFileTooLargeMessage("config file"));
       if (rawTextHoldsKey(body, currentKey)) {
         return cliError("key_in_file", `the config file contains a key value; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);
       }

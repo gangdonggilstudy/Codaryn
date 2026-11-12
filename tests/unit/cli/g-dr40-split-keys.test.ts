@@ -260,3 +260,40 @@ describe("DR-40 (b): a real-format key glued to what comes before it is refused 
     refused(run, api.requests.length);
   });
 });
+
+describe("DR-42 (a): the CLI's output hiding finds a registered value split by any other character", () => {
+  const REGISTERED = ["fake", "registered", "value", "not", "shaped", "0001"].join("-");
+  const OTHERS: readonly (readonly [string, string])[] = [
+    ["variation selector", char(0xfe0f)],
+    ["combining grapheme joiner", char(0x034f)],
+    ["Hangul filler", char(0x3164)],
+    ["middle dot", char(0x00b7)],
+    ["a literal backslash-n", "\n"],
+  ];
+  for (const [name, splitter] of OTHERS) {
+    test(`${name}: nothing of the value is left`, async () => {
+      const { hideKeys } = await import("../../../src/cli/text-safety.js");
+      const hidden = hideKeys(`a ${REGISTERED.slice(0, 10)}${splitter}${REGISTERED.slice(10)} b`, [REGISTERED]);
+      assert.equal(hidden.includes(REGISTERED.slice(10)), false, JSON.stringify(hidden));
+      assert.ok(hidden.startsWith("a ") && hidden.endsWith(" b"), JSON.stringify(hidden));
+    });
+  }
+});
+
+describe("review R-30 L-1: models measures the config file without its byte order mark, as run and doctor do", () => {
+  test("a config of exactly the cap with a BOM is read by models (not refused as too large)", async () => {
+    const { runModels } = await import("../../../src/cli/models.js");
+    const { MAX_INPUT_FILE_BYTES } = await import("../../../src/cli/security/index.js");
+    const { dir } = await base();
+    const head = '{"schemaVersion":1,"model":"';
+    const tail = '"}';
+    const body = head + "a".repeat(MAX_INPUT_FILE_BYTES - Buffer.byteLength(head + tail)) + tail;
+    assert.equal(Buffer.byteLength(body), MAX_INPUT_FILE_BYTES);
+    const file = path.join(dir, "config.json");
+    await writeFile(file, `${char(0xfeff)}${body}`, "utf8");
+    const outcome = await runModels({ argv: ["models", "--config", file, "--json"], env: {}, cwd: dir, readFile: (name) => readFile(name, "utf8"), loadEnvFile: () => {} });
+    const output = JSON.parse("text" in outcome ? outcome.text : JSON.stringify(outcome.output)) as { code?: string; message?: string };
+    // No key is set: models reads the file and stops at the key, as run and doctor read it.
+    assert.equal(output.code, "provider_not_configured", output.message ?? "");
+  });
+});

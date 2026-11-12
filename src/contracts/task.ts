@@ -34,11 +34,11 @@ export interface TaskSpec {
   /** May be empty. An empty list ends the run as `needs-input` with reason `no_verifier`. */
   readonly verifiers: readonly VerifierConfig[];
   /**
-   * G-A (GT-D2): id of a workflow definition (workflow.ts): a built-in or an entry of the config
+   * G-A (GT-D2): id of a task type definition (workflow.ts): a built-in or an entry of the config
    * file's `workflows`. The CLI expands it into the fields below on the resolved task. Absent, and
    * none of the fields below set: the task runs as before stage 4 (LEGACY_WORKFLOW_SETTINGS).
    * `workflow` stays a free label either way. In the quick form it comes from `--workflow <id>`
-   * (QUICK_WORKFLOW_ARGUMENT, DR-2); the other workflow fields have no quick form argument.
+   * (QUICK_WORKFLOW_ARGUMENT, DR-2); the other task type fields have no quick form argument.
    */
   readonly workflowRef?: string;
   /** G-A: narrows the definition's tools (never widens them). See WorkflowSettings. */
@@ -54,7 +54,7 @@ export interface TaskSpec {
 /**
  * The task as the CLI hands it to the engine: paths are absolute and every limit is set.
  * `EngineDeps.task` has this type. A task file may leave the repair limits out (defaults below).
- * G-A: when a workflow applies, the CLI sets every WorkflowSettings field (`tools`, `instructions`,
+ * G-A: when a task type applies, the CLI sets every WorkflowSettings field (`tools`, `instructions`,
  * `plan`, `completion`, `humanReview`) to its resolved value. A field left out means the legacy
  * value; the engine reads them through `workflowSettingsOf`.
  */
@@ -63,7 +63,7 @@ export interface ResolvedTaskSpec extends TaskSpec {
   /** G-A: the definition's instructions (a task file cannot set them), or null. */
   readonly instructions?: string | null;
   /**
-   * DR-41: what merging the given policy with the workflow definition's left out
+   * DR-41: what merging the given policy with the task type definition's left out
    * (workflowPolicyNarrowings), set by the CLI or the app. Absent: nothing was left out. The engine
    * records it in `run_started` so the run's start can tell the person.
    */

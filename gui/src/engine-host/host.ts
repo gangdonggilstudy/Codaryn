@@ -21,6 +21,7 @@ import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import { reportMarkdownValue } from "./report.js";
 import { initValue, suggestionsValue } from "./setup.js";
 import type { Shown } from "./settings.js";
+import type { ModelText } from "./model-text.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
 export interface HostDoctorRequest {
@@ -96,6 +97,11 @@ export interface HostDeps {
    * characters and key shapes hidden. Absent in tests: each line then passes `shown`.
    */
   readonly shownText?: Shown;
+  /**
+   * U-32: a model's text (a plan's summary) as rows for people, by the engine's quoteModelText
+   * (model-text.ts). Absent (an engine without it, tests): no model text is shown.
+   */
+  readonly modelText?: ModelText;
   /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
   readonly providers: readonly string[];
   /** GU-6: whether an environment variable is set now (never its value); absent: none is. */
@@ -302,7 +308,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const workflowRef = nameArg(args["workflowRef"]);
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
-        return planValue(await deps.app.plan({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown);
+        return planValue(await deps.app.plan({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, deps.modelText);
       }
       case "applyPlan": {
         if (!isObj(args)) throw new ArgsError();

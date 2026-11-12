@@ -385,7 +385,8 @@ describe("arguments of the new switches and commands", () => {
     assert.ok(parsed.ok);
     assert.equal(parsed.args.quiet, true);
     assert.equal(parseArgs(["run", "--task", "t.json", "--quiet", "--quiet"]).ok, false);
-    assert.equal(parseArgs(["run", "--task", "t.json", "--json"]).ok, false);
+    // DR-49 (U-23): run takes --json (its JSON line at a terminal); g-u23-terminal-json tests it.
+    assert.equal(parseArgs(["run", "--task", "t.json", "--json"]).ok, true);
   });
 
   test("report", () => {

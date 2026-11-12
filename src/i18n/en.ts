@@ -179,7 +179,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "help.intro": "codaryn: a local task agent. One run works inside one workspace directory, under a policy, and ends when its checks decide. Records go to <workspace>/.codaryn/.",
   "help.commands_heading": "Commands:",
-  "help.output": "run prints one JSON line on stdout, and progress lines and an end summary on stderr (--quiet turns them off).",
+  "help.output": "At a terminal only the human lines on stderr show (progress, summary, explained error). The result of run, revert and apply, and any error, is also printed as one JSON line on stdout with --json, or when stdout is not a terminal (a pipe or a file). --quiet leaves the human lines out and prints the JSON line, at a terminal too.",
   "help.key": "The API key is read only from the provider's environment variable (or --vars-file), never from a file given with --task or --config; codaryn doctor names the variable.",
   "help.contract": "See docs/cli-contract.md for the full contract.",
   "help.options_heading": "Options:",

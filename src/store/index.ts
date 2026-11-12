@@ -18,6 +18,8 @@ export type { RevertRunErrorCode } from "./changes.js";
 export { RUN_START_TOLERANCE_MS, RunListError, inspectRun, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
 export type { RunInspection } from "./runs.js";
 export { PROCESS_START_TOLERANCE_MS, acquireLock, nodeLockFileSystem, processStartTime, releaseLock } from "./lock.js";
+export { canonicalActions, createPlanRecorder, isWorkspaceRelativePath, loadPlan, markPlanApplied } from "./plan.js";
+export type { MarkPlanAppliedRequest } from "./plan.js";
 export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ReleaseLockOptions } from "./lock.js";
 
 export interface JournalOptions {

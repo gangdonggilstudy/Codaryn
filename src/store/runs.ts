@@ -40,7 +40,7 @@ import type {
   RunId,
   TerminalRunStatus,
 } from "../contracts/index.js";
-import { assertRunId, errorCode, runDir } from "./common.js";
+import { assertRunId, errorCode, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -101,9 +101,6 @@ function timestamp(value: unknown): string | null {
   return isRunTimestamp(value) ? value : null;
 }
 
-function sameFsPath(a: string, b: string): boolean {
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-}
 
 /** A regular file no larger than `max` bytes; "missing" when there is none. Anything else is unreadable. */
 async function checkedFile(file: string, max: number): Promise<"file" | "missing"> {
@@ -414,15 +411,6 @@ export async function readRevertRecord(workspaceRoot: string, runId: string): Pr
  * The directory exists and is the workspace's own: not a link or junction (as `listRuns` sees run
  * directories), so a record is never read from or written to another place.
  */
-async function isPlainDirectory(dir: string): Promise<boolean> {
-  try {
-    const info = await lstat(dir);
-    if (!info.isDirectory() || info.isSymbolicLink()) return false;
-    return sameFsPath(await realpathNative(dir), dir);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Writes `<root>/.codaryn/runs/<runId>/revert.json` atomically, replacing an earlier record.

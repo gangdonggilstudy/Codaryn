@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
+import { TOOL_FAILURE_HINTS } from "../../../src/contracts/index.js";
 import type { ModelRequest, ToolCall, ToolResult } from "../../../src/contracts/index.js";
 import { SYSTEM_PROMPT, runTask } from "../../../src/engine/index.js";
 import { FakePolicy, FakeTools, finalAnswer, harness, response } from "./fakes.js";
@@ -40,7 +41,8 @@ describe("U-15: one form for a failed result, which both providers get as it is"
   test("AXM-7: an executed failure is error (<code>): <message>, recorded and sent alike", async () => {
     const tools = new FakeTools(() => ({ ok: false, code: "not_found", message: "the file does not exist" as never }));
     const { recorded, sent } = await oneCall({ id: "r1", name: "read_file", args: { path: "missing.txt" } }, { tools });
-    assert.equal(recorded[0]?.content, "error (not_found): the file does not exist");
+    // U-50 (AXM-6): a runner's failure ends with its code's hint (u50-failure-hints).
+    assert.equal(recorded[0]?.content, `error (not_found): the file does not exist. ${TOOL_FAILURE_HINTS.not_found}`);
     assert.deepEqual(sent, recorded, "the model gets the recorded result");
   });
 

@@ -306,6 +306,24 @@ async function moveBack(away: string, back: string, action: RevertAction, consen
   }
 }
 
+/**
+ * The run's discarded directory as a revert may read it (DR-24 a): plain directories all the way, or
+ * absent (R-9c C-2: an apply that stopped before its first discard never made it, or a person removed
+ * it), or anything else (a link, a file, unreadable), which is never read.
+ */
+async function discardedState(discardedRoot: string): Promise<"plain" | "absent" | "other"> {
+  for (const dir of [dirname(discardedRoot), discardedRoot]) {
+    try {
+      await lstat(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      return code === "ENOENT" || code === "ENOTDIR" ? "absent" : "other";
+    }
+    if (!(await isPlainDirectory(dir))) return "other";
+  }
+  return "plain";
+}
+
 /** A workspace path to write through, or null when it cannot be resolved as it was given. */
 async function resolved(workspace: Workspace, path: string): Promise<string | null> {
   const outcome = await workspace.resolve(path, "write");
@@ -317,14 +335,15 @@ async function resolved(workspace: Workspace, path: string): Promise<string | nu
  * discarded directory), `back` its original path. `recorded` false: only a start record exists.
  */
 async function revertItem(
-  away: string,
+  away: string | null,
   back: string,
   sha256: ContentHash,
   recorded: boolean,
   action: RevertAction,
   mode: { readonly dryRun: boolean; readonly consent: boolean },
 ): Promise<Outcome> {
-  const there = await stateOf(away);
+  // `away` null: the place it would have gone is known not to exist (R-9c C-2); nothing is read there.
+  const there: FileState = away === null ? { kind: "absent" } : await stateOf(away);
   const original = await stateOf(back);
   if (there.kind === "error" || original.kind === "error") return { reason: "io_error" };
   const isDone = there.kind === "file" && there.sha256 === sha256;
@@ -339,6 +358,7 @@ async function revertItem(
   }
   if (original.kind !== "absent") return { reason: "original_path_taken" };
   if (mode.dryRun) return { action };
+  if (away === null) return { reason: "changed_since_run" };
   return moveBack(away, back, action, mode.consent);
 }
 
@@ -366,7 +386,7 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
     workspace = null;
   }
   const discardedRoot = discardedRootPath(workspaceRoot, runId);
-  const discarded = (await isPlainDirectory(dirname(discardedRoot))) && (await isPlainDirectory(discardedRoot)) ? discardedRoot : null;
+  const discarded = await discardedState(discardedRoot);
 
   for (const item of [...items].reverse()) {
     const planned = plan[item.index] as ResolvedPlanAction;
@@ -383,9 +403,16 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
         outcome =
           back === null
             ? { reason: "changed_since_run" }
-            : discarded === null
+            : discarded === "other"
               ? { reason: "io_error" }
-              : await revertItem(join(discarded, discardedStoredName(item.index)), back, item.sha256, item.recorded, "restored_from_discard", mode);
+              : await revertItem(
+                  discarded === "plain" ? join(discardedRoot, discardedStoredName(item.index)) : null,
+                  back,
+                  item.sha256,
+                  item.recorded,
+                  "restored_from_discard",
+                  mode,
+                );
       }
     } catch {
       outcome = { reason: "io_error" };

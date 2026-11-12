@@ -236,9 +236,8 @@ export interface StartRunRequest {
   /** `--profile` (N-8). */
   readonly profile: string | null;
   /**
-   * DR-2: the workflow definition to use (`--workflow`, GT 4.2). Assumption (G-A): the CLI takes
-   * it once the general task commands are connected; until then a value is `invalid_arguments`.
-   * A task file names its own `workflowRef`.
+   * DR-2: the workflow definition to use (`--workflow`, GT 4.2), passed to the CLI's quick form. A
+   * task file names its own `workflowRef`; giving both is the CLI's `invalid_arguments` (R-14 I-4).
    */
   readonly workflowRef: string | null;
   /** `--cancel-file` (P-2). Must lie outside the workspace (T-12). */

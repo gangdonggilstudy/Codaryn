@@ -46,6 +46,8 @@ export function runsValue(outcome: unknown, shown: Shown): Obj | HostFailure {
       changes: count(entry["changes"]),
       reverted: isObj(reverted) && typeof reverted["at"] === "string" ? { at: reverted["at"], status: reverted["status"] === "partial" ? "partial" : "complete" } : null,
       revertRecordDamaged: entry["revertRecordDamaged"] === true,
+      // UXM-14, DR-38: a records-changed mark (absent: false).
+      recordsChanged: entry["recordsChanged"] === true,
     });
   }
   return { ok: true, runs, omitted: count(output["omitted"]) ?? 0 };

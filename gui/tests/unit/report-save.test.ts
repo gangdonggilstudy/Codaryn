@@ -92,10 +92,10 @@ test("end notification (3.6): none while the window is active; else the fixed te
   assert.ok((endNotice("en", false, "x".repeat(300))?.body.length ?? 0) < 80, "a status word only");
 });
 
-test("R33b-I1: the discard boxes' dialog says what keeping them means for the apply runs whose records go", () => {
-  assert.doesNotMatch(cleanupDiscardedDetail("en", 0), /can no longer be put back/);
-  assert.match(cleanupDiscardedDetail("en", 2), /If you keep them, the files in the discard boxes of the 2 apply runs whose records go can no longer be put back by a revert\./);
-  assert.match(cleanupDiscardedDetail("ko", 1), /보관함을 남기면, 기록이 지워지는 적용 실행 1개의 보관함 파일은 되돌리기로 제자리에 되살릴 수 없게 됩니다\./);
+test("R33b-I1, U-13: the discard boxes' dialog says what keeping them means for the apply runs they belong to", () => {
+  assert.doesNotMatch(cleanupDiscardedDetail("en", 0), /apply runs/);
+  assert.match(cleanupDiscardedDetail("en", 2), /If you keep them, the records of the 2 apply runs they belong to are kept too/);
+  assert.match(cleanupDiscardedDetail("ko", 1), /폐기 보관함을 남기면, 그 폐기 보관함이 딸린 적용 실행 1개의 기록은 남깁니다\./);
   assert.match(cleanupDiscardedDetail("en", 1), /^The discard boxes hold people's files/, "what deleting means comes first");
 });
 

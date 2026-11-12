@@ -167,14 +167,15 @@ describe("DR-44 (라), second half: what a failed removal left is shown by the n
 
   test("an apply run whose removal fails keeps its plan run (apply runs first, then their plans)", async () => {
     const root = await workspace();
-    const selection = { runs: { runIds: [PLAN, APPLY] } };
+    // U-13: the apply's discarded files go first in the same cleanup; then its records are tried.
+    const selection = { runs: { runIds: [PLAN, APPLY] }, discarded: { runIds: [APPLY] } };
     const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
     const failingForApply = async (path: string): Promise<void> => {
       if (path.endsWith("result.json") && (await readFile(path, "utf8")).includes(`"kind":"apply"`)) throw busy();
       await rm(path, { recursive: true, force: true });
     };
-    const outcome = await applyCleanupWith({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } }, { remove: failingForApply, retryDelayMs: 1 });
-    assert.deepEqual(outcome.ok ? [outcome.removed, outcome.kept] : null, [[], [
+    const outcome = await applyCleanupWith({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: true, includeNotReverted: true } }, { remove: failingForApply, retryDelayMs: 1 });
+    assert.deepEqual(outcome.ok ? [outcome.removed.map((item) => [item.target, idOf(item)]), outcome.kept] : null, [[["discarded", APPLY]], [
       { target: "run", runId: APPLY, reason: "partly_removed" },
       { target: "run", runId: PLAN, reason: "used_by_kept_apply" },
     ]]);

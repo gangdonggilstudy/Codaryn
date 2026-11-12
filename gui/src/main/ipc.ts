@@ -57,6 +57,8 @@ import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.j
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
+import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
+import type { CreateSettingsReply, SuggestionsReply } from "../shared/ipc.js";
 import { basename } from "node:path";
 import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
@@ -262,6 +264,32 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("settings", {}, SETTINGS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return toSettingsView(response.value, deps.envFacts());
+  });
+
+  // U-11 (3.11): the first-run guide: the config file with the defaults (never over an existing one),
+  // and init's fixed suggestions for the open workspace (applied through settings proposals).
+  handle(IPC_CHANNELS.createSettings, async (args): Promise<CreateSettingsReply> => {
+    const parsed = args.length === 1 ? parseCreateSettingsArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = parsed.workspace === null ? null : workspaces.path(parsed.workspace);
+    if (parsed.workspace !== null && root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("createSettings", { workspace: root }, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toCreateSettingsReply(response.value);
+  });
+
+  handle(IPC_CHANNELS.settingsSuggestions, async (args): Promise<SuggestionsReply> => {
+    const parsed = args.length === 1 ? parseWorkspaceArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("settingsSuggestions", { workspace: root }, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toSuggestionsReply(response.value);
   });
 
   // GU-3 (3.7): a report saved as Markdown to the file the person chose in the OS save dialog.

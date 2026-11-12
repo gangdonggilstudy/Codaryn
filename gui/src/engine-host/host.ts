@@ -19,6 +19,7 @@ import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js"
 import type { CleanupSelectionArg } from "../shared/cleanup.js";
 import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import { reportMarkdownValue } from "./report.js";
+import { initValue, suggestionsValue } from "./setup.js";
 import type { Shown } from "./settings.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
@@ -57,6 +58,9 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** U-11 (3.11): the config file with the defaults (init without questions), and init's fixed suggestions for a workspace. */
+  createSettings(request: { readonly configPath: null; readonly workspace: string | null }): Promise<unknown>;
+  settingsSuggestions(request: { readonly workspace: string }): Promise<unknown>;
   /** GU-3 (3.7): the report as `codaryn report` prints it (Markdown), for saving. */
   reportMarkdown(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
   /** GU-4 (3.8), DR-39, DR-44: the state directory summed up, a cleanup preview, and a confirmed cleanup. */
@@ -340,6 +344,15 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { next, baseDigest, confirmWidening } = args;
         if (!isObj(next) || typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest) || typeof confirmWidening !== "boolean") throw new ArgsError();
         return writtenValue(await deps.app.applySettingsChange({ configPath: null, next, baseDigest, confirmWidening }), deps.shown);
+      }
+      case "createSettings": {
+        if (!isObj(args) || !onlyKeys(args, ["workspace"])) throw new ArgsError();
+        const workspace = args["workspace"] === null ? null : workspaceArg(args, ["workspace"]);
+        return initValue(await deps.app.createSettings({ configPath: null, workspace }));
+      }
+      case "settingsSuggestions": {
+        if (!isObj(args)) throw new ArgsError();
+        return suggestionsValue(await deps.app.settingsSuggestions({ workspace: workspaceArg(args, ["workspace"]) }), deps.shown);
       }
       case "reportMarkdown": {
         if (!isObj(args)) throw new ArgsError();

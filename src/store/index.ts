@@ -13,8 +13,8 @@ import { JOURNAL_FILE_NAME, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } fr
 import type { ApplyJournal, ApplyJournalEvent, Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
 import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 
-export { RevertRunError, createChangeRecorder, revertRun, snapshotsRelativePath } from "./changes.js";
-export type { RevertRunErrorCode } from "./changes.js";
+export { RevertRunError, createChangeRecorder, readRunOriginals, revertRun, snapshotsRelativePath } from "./changes.js";
+export type { OriginalUnavailable, RevertRunErrorCode, RunOriginal } from "./changes.js";
 export { RUN_START_TOLERANCE_MS, RunListError, inspectRun, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
 export type { RunInspection } from "./runs.js";
 export { PROCESS_START_TOLERANCE_MS, acquireLock, nodeLockFileSystem, processStartTime, releaseLock } from "./lock.js";

@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { MESSAGE_LANGUAGES, toRunId } from "../../../../src/contracts/index.js";
+import { CLI_ERROR_EXIT_CODES, DOCTOR_HINT_ERROR_CODES, MESSAGE_LANGUAGES, toRunId } from "../../../../src/contracts/index.js";
 import type {
   CliErrorOutput,
   EngineResult,
@@ -156,15 +156,27 @@ describe("createHumanOutput with the real catalogs (N-B)", () => {
   });
 
   for (const language of MESSAGE_LANGUAGES) {
-    test(`${language}: codaryn doctor is named once per error, by the fix text or by the hint`, () => {
+    test(`${language}: N-D 4: the doctor hint (DOCTOR_HINT_ERROR_CODES) and the lock hint are the renderer's own indented lines, once each`, () => {
       const out = human(language);
-      for (const code of ["invalid_config", "invalid_task", "key_in_file", "secret_env_missing", "workspace_is_install_dir", "provider_not_configured", "model_list_failed"] as const) {
-        const lines = out.error({ ...ERROR, code, diagnostic: undefined }).split("\n");
-        const naming = lines.filter((line) => line.includes("codaryn doctor"));
-        assert.equal(naming.length, 1, `${language} ${code}:\n${lines.join("\n")}`);
+      const catalog = createMessageCatalog(language);
+      const doctor = catalog.format("error.doctor_hint");
+      const lock = catalog.format("lock.remove_hint");
+      for (const code of DOCTOR_HINT_ERROR_CODES) {
+        const lines = out.error({ ...ERROR, code, diagnostic: undefined }).trimEnd().split("\n");
+        assert.equal(lines.filter((line) => line === `  ${doctor}`).length, 1, `${language} ${code}:\n${lines.join("\n")}`);
       }
-      const hint = createMessageCatalog(language).format("error.doctor_hint");
-      assert.equal(out.error({ ...ERROR, code: "run_not_found", diagnostic: undefined }).includes(hint), false);
+      const locked = out.error({ ...ERROR, code: "workspace_locked", diagnostic: undefined }).trimEnd().split("\n");
+      assert.equal(locked.filter((line) => line === `  ${lock}`).length, 1, locked.join("\n"));
+      assert.equal(out.error({ ...ERROR, code: "run_not_found", diagnostic: undefined }).includes(doctor), false);
+    });
+
+    test(`${language}: N-D 4: every line after an error's first is indented, for every error code`, () => {
+      const out = human(language);
+      for (const code of Object.keys(CLI_ERROR_EXIT_CODES) as CliErrorOutput["code"][]) {
+        const lines = out.error({ ...ERROR, code }).trimEnd().split("\n");
+        assert.ok(lines[0]?.startsWith("codaryn: "), code);
+        for (const line of lines.slice(1)) assert.ok(line.startsWith("  "), `${language} ${code}: "${line}"`);
+      }
     });
   }
 

@@ -337,6 +337,8 @@ export const EN_MESSAGES: MessageTexts = {
   "tool.search_files": "search files",
   "tool.write_file": "write file",
   "tool.run_command": "run command",
+  "tool.inspect_files": "inspect files",
+  "tool.propose_plan": "propose a plan",
 
   "revert.skip.changed_since_run": "changed again after the run",
   "revert.skip.missing_snapshot": "snapshot missing",

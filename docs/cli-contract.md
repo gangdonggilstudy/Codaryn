@@ -618,23 +618,25 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### 터미널의 JSON 줄과 인자 없는 실행 (U-23, DR-49, UXM-17, UXM-9)
 
-- 8절의 stdout 규칙(N-5)에 더한다. stdout이 터미널이면 그 뒤의 JSON 한 줄을 내지 않는다. 사람용 글(끝 요약, 설명한 오류)이 stderr에 나오기 때문이다.
+- 8절의 stdout 규칙(N-5)에 더한다. stdout과 stderr가 둘 다 터미널이면 그 뒤의 JSON 한 줄을 내지 않는다. 사람용 글(끝 요약, 설명한 오류)이 stderr로 화면에 나오기 때문이다(U-45, 검토 R-58 Q-1: 예전에는 stdout만 보았다).
   - 대상은 JSON을 내는 출력 모두다. `run`·`revert`·`apply`의 결과와 모든 명령의 `CliErrorOutput`이다.
   - 글 출력(도움말, 버전, `report` 등의 기본 글)은 그대로 낸다.
 - 다음 경우에는 지금과 바이트까지 똑같이 낸다.
   - `--json`을 주었을 때. `run`·`revert`·`apply`도 `--json`을 받는다. 받기만 하고 다른 것은 바꾸지 않으며, 한 번만 줄 수 있다.
   - stdout이 터미널이 아닐 때(파이프, 파일).
+  - stderr가 터미널이 아닐 때(U-45). 예: 화면에서 `codaryn run ... 2> log.txt`. 사람용 글이 화면에 없으므로 JSON 줄을 낸다.
   - `--quiet`일 때. 사람용 글이 없으므로 JSON 줄을 낸다.
 - `--json`과 `--quiet`는 인자 어디에 있어도 센다. 인자를 해석하지 못한 경우도 같다(`--quiet`의 규칙과 같음).
-- 터미널인지는 `process.stdout.isTTY`로 본다. 판정은 `src/cli/guard.ts`의 `stdoutText`가 하고, 시험은 그 상태를 주입한다.
+- 터미널인지는 `process.stdout.isTTY`와 `process.stderr.isTTY`로 본다. 판정은 `src/cli/guard.ts`의 `stdoutText`가 하고, 시험은 그 상태를 주입한다.
 - 종료 코드와 기록(`result.json`)은 바뀌지 않는다.
 - 사용법 줄은 바꾸지 않았다. 사용법 줄이 `invalid_arguments` 메시지에 들어 있어서다. `--json`은 `run`·`revert` 도움말의 옵션 목록과 `apply` 도움말의 문장에 적었다.
-- stdout은 터미널인데 stderr만 파일로 돌리면 터미널에는 아무것도 나오지 않는다. 이때는 `--json`을 준다.
+- stdout은 터미널인데 stderr만 파일로 돌리면 JSON 한 줄을 stdout에 낸다(U-45, R58-L1). U-23 판에서는 이때 화면에 아무것도 나오지 않았다.
 - 인자 없이 `codaryn`만 치는 경우(PM 답)
   - stdout이 터미널이면 `codaryn --help`와 같은 글을 stdout에 내고 종료 0이다(위 "도움말, 버전, 설치"와 같음). stderr에는 아무것도 내지 않는다.
   - 터미널이 아니면(파이프, 파일) 예전 그대로 `invalid_arguments`(종료 2)다. stdout의 글자도 같다. 기계가 받는 출력은 바꾸지 않는다(DR-48).
   - 판정은 `src/cli/help.ts`의 `helpRequest`가 터미널 여부를 받아서 하고, 시험은 그 값을 주입한다.
-- 문구 `help.output`은 아직 예전 규칙을 말한다. 고치는 것은 문구 담당의 몫이다.
+  - 도움말은 stdout에 내므로 stdout만 본다. stderr는 보지 않는다(U-45에서도 그대로).
+- 문구 `help.output`은 문구 담당이 이 규칙에 맞춰 고쳤다(검토 R-58 I1). 그 첫 문장을 `run`·`revert`·`apply`와 오류로 좁히고 stderr 조건(U-45)을 더하는 것은 문구 담당의 몫이다.
 
 ### 진행 표시 (U-8)
 

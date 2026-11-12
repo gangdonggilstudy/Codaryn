@@ -413,6 +413,7 @@ export const KO = {
   "cleanup.kept.partly_removed": "다 지우지 못함",
   "cleanup.announce": "{count}개 항목을 정리했습니다.",
   "error.nothing_to_clean": "정리할 것이 없습니다.",
+  "error.plan_records_changed": "계획 실행의 기록이 그 실행이 아닌 것에 의해 바뀐 표시가 있어, 그 계획을 적용하지 않았습니다(아무것도 바꾸지 않음). 같은 작업 종류로 새 계획을 만들고 확인한 뒤 그것을 적용하세요. 표시가 있는 실행은 증거로 남습니다.",
   "error.plan_changed": "미리보기 뒤에 상태가 바뀌어 아무것도 지우지 않았습니다. 정리 계획을 다시 보세요.",
   "nav.report": "보고서",
   "run.viewReport": "보고서 보기",

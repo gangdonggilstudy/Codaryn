@@ -28,6 +28,7 @@ import { RunHistory } from "./history.js";
 import { PlanApprovals } from "./plans.js";
 import { SettingsProposals } from "./settings-proposals.js";
 import { CleanupPreviews } from "./cleanup-previews.js";
+import { saveDialogOptions } from "./save-file.js";
 import { cleanupQuestions } from "../shared/cleanup.js";
 import { WIDENING_KINDS, applyFormText, cleanupDiscardedDetail, endNotice, formatBytes, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
@@ -287,7 +288,7 @@ export function startGui(options: GuiOptions): void {
       // GU-3 (3.7): the OS save dialog chooses where a report goes; the window never names a path.
       chooseSavePath: async (name) => {
         if (options.answerSaveDialog !== undefined) return options.answerSaveDialog(name);
-        const box = { defaultPath: join(app.getPath("documents"), name), filters: [{ name: "Markdown", extensions: ["md"] }] };
+        const box = saveDialogOptions(join(app.getPath("documents"), name));
         const chosen = window !== null && !window.isDestroyed() ? await dialog.showSaveDialog(window, box) : await dialog.showSaveDialog(box);
         return chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0 ? null : chosen.filePath;
       },

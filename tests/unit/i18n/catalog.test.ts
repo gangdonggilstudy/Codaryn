@@ -466,4 +466,21 @@ describe("i18n catalog: language and wording", () => {
     assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");
     assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
   });
+
+  test("U-19 (UXM-2): the general fix texts of argument and task file errors do not send the person to the wrong place", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // invalid_arguments also answers an unknown command, which has no help of its own: the fix names the command list too.
+    assert.match(en["error.invalid_arguments.fix"], /codaryn help <command> for a command's usage, and codaryn --help for the list of commands/);
+    assert.match(ko["error.invalid_arguments.fix"], /codaryn help <명령>으로 그 명령의 사용법을, codaryn --help로 명령 목록을/);
+    // invalid_task also answers a missing file and a task file inside the workspace, which name no field:
+    // the fix checks the file and its place first, and fixes a field only when one is named.
+    assert.match(en["error.invalid_task.fix"], /the file given with --task exists and is outside the workspace\. If a field is named, fix that field\./);
+    assert.match(ko["error.invalid_task.fix"], /--task에 준 파일이 있는지, 작업 공간 밖에 있는지 확인하세요\. 필드를 알려 주었으면 그 필드를 고치세요\./);
+    for (const language of LANGS) {
+      const texts = MESSAGE_TEXTS[language];
+      assert.match(texts["error.invalid_task.fix"], /codaryn doctor --task </, language);
+      assert.ok(!/^Fix the named field|^task 파일에서 알려 준 필드/.test(texts["error.invalid_task.fix"]), language);
+      for (const id of ["error.invalid_arguments.fix", "error.invalid_task.fix"] as const) assert.deepEqual(placeholders(texts[id]), [], `${language} ${id}`);
+    }
+  });
 });

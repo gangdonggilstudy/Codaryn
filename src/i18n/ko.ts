@@ -49,7 +49,7 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.records_changed": "경고: 이 계획 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 계획이 실행이 만든 계획과 다를 수 있습니다.",
   "plan.cannot_apply": "이 계획은 적용할 수 없습니다. 새 실행(codaryn run)으로 계획을 다시 만들고, 새 계획을 확인한 뒤 그것을 적용하세요.",
   "plan.summary_label": "에이전트의 설명(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상이 아님)",
-  "plan.digest_guarantee": "다이제스트는 바로 이 동작들과, 계획을 만들 때의 파일 내용을 가리킵니다. 그 뒤로 계획이나 파일, 실행 기록이 바뀌었으면 적용을 거부합니다.",
+  "plan.digest_guarantee": "다이제스트는 바로 이 동작들과, 계획을 만들 때 계획에 든 파일의 내용을 가리킵니다. 그 뒤로 계획이나 계획에 든 파일이 바뀌었으면 적용을 거부하고, 계획 실행에 기록 변경 표시가 있어도 거부합니다. 실행의 다른 기록은 다이제스트에 들지 않습니다.",
   "summary.unsafe_moves": "덮어쓸 위험이 있는 이동 {count}개 때문에 적용하지 않았습니다. 아무것도 옮기지 않았습니다.",
   "summary.next_apply_unsafe": "이 적용에 한해 동의: codaryn apply {form} --run {runId} --digest <digest> --allow-unsafe-move",
   "summary.next_revert_unsafe": "이 되돌리기에 한해 동의: codaryn revert --workspace <workspace> --run {runId} --allow-unsafe-move",

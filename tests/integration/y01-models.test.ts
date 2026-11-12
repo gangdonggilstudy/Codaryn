@@ -23,7 +23,10 @@ import type { CodarynConfig, CliErrorCode } from "../../src/contracts/index.js";
 import {
   ANTHROPIC_LIMITS,
   FAKE_MODEL_CATALOG,
+  KEY_RUN_CHARS,
+  LISTED_MODEL_PREFIX,
   fakeApiConfig,
+  sharesKeyRun,
   writeAnthropicTask,
   writeEnvFile,
 } from "../fixtures/anthropic.js";
@@ -292,16 +295,39 @@ test(`${MOCK_LABEL} Y-2 목록 요청 실패와 형식 오류는 model_list_fail
     assert.deepEqual(findLeaks(outputs(run), [FAKE_API_KEY], { extended: true }), []);
   });
   await t.test("문자열 id가 없는 항목 → malformed_response", async (st) => {
-    const broken = { ...fakeModel("cdy-fake-model-x", "Fake X", 1000, 100), id: 42 } as unknown as FakeModel;
+    // Control: the same list without the broken entry is listed, so the refusal comes from it.
+    const control = await setup(st, { catalog: { models: FAKE_MODEL_CATALOG.slice(0, 2) } });
+    assert.equal(expectModelsOutput(await models(control, { config: control.configPath, json: true })).models.length, 2);
+
+    const broken = { ...fakeModel(`${LISTED_MODEL_PREFIX}x`, "Fake X", 1000, 100), id: 42 } as unknown as FakeModel;
     const s = await setup(st, { catalog: { models: [...FAKE_MODEL_CATALOG.slice(0, 2), broken] } });
     const run = await models(s, { config: s.configPath, json: true });
     assert.ok(expectCliError(run, "model_list_failed").message.includes("malformed_response"));
+  });
+  await t.test("키 조각이 든 항목 → malformed_response, 그 조각은 출력과 설정 파일에 없음", async (st) => {
+    // Control: no listed id shares a run with the key (otherwise every listing above would fail).
+    for (const id of IDS) assert.equal(sharesKeyRun(id, FAKE_API_KEY), false, `${id} shares a run with the fake key`);
+
+    const fragment = FAKE_API_KEY.slice(-KEY_RUN_CHARS);
+    const variants = [
+      fakeModel(`${LISTED_MODEL_PREFIX}${fragment}`, "Fake Leaky Id", 1000, 100),
+      fakeModel(`${LISTED_MODEL_PREFIX}zeta`, `Fake ${fragment}`, 1000, 100),
+      fakeModel(`${LISTED_MODEL_PREFIX}eta`, "Fake Leaky Date", 1000, 100, { createdAt: `2026-01-01T${fragment}` }),
+    ];
+    for (const leaky of variants) {
+      const s = await setup(st, { catalog: { models: [...FAKE_MODEL_CATALOG.slice(0, 2), leaky] }, config: { model: ALPHA, maxRetries: 0 } });
+      const before = fileBytes(s.configPath);
+      const run = await models(s, { config: s.configPath, use: "3", json: true });
+      assertRefused(run, "model_list_failed", s, before);
+      assert.ok(expectCliError(run, "model_list_failed").message.includes("malformed_response"), leaky.display_name);
+      assert.deepEqual(findLeaks(outputs(run), [FAKE_API_KEY, fragment], { extended: true }), [], leaky.display_name);
+    }
   });
 });
 
 test(`${MOCK_LABEL} Y-1 쪽 수 상한: ${MAX_MODEL_LIST_PAGES}쪽은 읽고, 넘으면 api_error`, { timeout: 90_000 }, async (t) => {
   const many = (count: number): FakeModel[] =>
-    Array.from({ length: count }, (_, index) => fakeModel(`cdy-fake-model-p${String(index + 1).padStart(2, "0")}`, `Fake P${index + 1}`, 1000, 100));
+    Array.from({ length: count }, (_, index) => fakeModel(`${LISTED_MODEL_PREFIX}p${String(index + 1).padStart(2, "0")}`, `Fake P${index + 1}`, 1000, 100));
   await t.test(`${MAX_MODEL_LIST_PAGES}쪽`, async (st) => {
     const s = await setup(st, { catalog: { models: many(MAX_MODEL_LIST_PAGES), pageSize: 1 } });
     const output = expectModelsOutput(await models(s, { config: s.configPath, json: true }));
@@ -352,8 +378,17 @@ test(`${MOCK_LABEL} Y-4 실행 중 모델이 없다는 404면 오류 문구가 c
   const taskPath = writeAnthropicTask(s.sb, { id: "y-404", verifiers: [{ id: "r", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] }] });
   const run = await runGuarded(s.sb, ["run", "--task", taskPath, "--config", s.configPath], envFor(s));
   const result = expectRunResult(run, "anthropic");
+  // readRunFiles also checks that result.json equals this stdout object, notices included.
   const { records } = readRunFiles(s.sb.workspace, result);
   assert.equal(result.reason, "model_error");
-  const errors = records.flatMap((record) => (record.type === "model_error" ? [record.message] : []));
-  assert.ok(errors.some((message) => message.includes("codaryn models")), `model_error message: ${errors.join(" | ")}`);
+  // cli-contract 16 (Y-4): the hint is one line in the result's notices; the error stays the provider's.
+  assert.ok(
+    result.notices.some((notice) => notice.includes("codaryn models")),
+    `notices: ${JSON.stringify(result.notices)}`,
+  );
+  const errors = records.flatMap((record) => (record.type === "model_error" ? [record] : []));
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.kind, "api_error", "the provider's error kind is not changed");
+  assert.ok(errors[0]?.message.startsWith("HTTP 404"), "the provider's message is kept as it was");
+  assert.equal(messagesRequests(s.api).length, 1, "maxRetries 0: one Messages request, no retry");
 });

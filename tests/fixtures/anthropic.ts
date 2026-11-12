@@ -20,15 +20,37 @@ import type { Sandbox } from "./builders.js";
 export const ANTHROPIC_LIMITS: Limits = { ...DEFAULT_LIMITS, maxTotalTokens: 200_000 };
 
 /**
+ * Run length the model listing compares with the key: `listAnthropicModels` refuses a list entry
+ * whose id, display name or created_at holds this many consecutive characters of the key
+ * (`KEY_FRAGMENT_CHARS` in src/model/anthropic/index.ts, not exported; docs/cli-contract.md 16 does
+ * not state it yet). Kept here so fixtures can stay clear of it.
+ */
+export const KEY_RUN_CHARS = 8;
+
+/** True when `text` and `key` share KEY_RUN_CHARS consecutive characters. */
+export function sharesKeyRun(text: string, key: string): boolean {
+  for (let index = 0; index + KEY_RUN_CHARS <= key.length; index += 1) {
+    if (text.includes(key.slice(index, index + KEY_RUN_CHARS))) return true;
+  }
+  return false;
+}
+
+/**
+ * Prefix of every id the fake server lists. Every fake key starts with "cdy-fake" (eight
+ * characters), so a listed id must not: the listing would refuse it as key material.
+ */
+export const LISTED_MODEL_PREFIX = "cdy-listed-model-";
+
+/**
  * Models the fake server lists for `codaryn models` (Y-1). With the fake's page size of 2 they
  * span three pages. The last one has no `type` or `created_at` (both unconfirmed fields).
  */
 export const FAKE_MODEL_CATALOG: readonly FakeModel[] = [
-  fakeModel("cdy-fake-model-alpha", "Fake Model Alpha", 1_000_000, 128_000, { createdAt: "2026-05-01T00:00:00Z" }),
-  fakeModel("cdy-fake-model-beta", "Fake Model Beta", 1_000_000, 64_000, { createdAt: "2026-04-01T00:00:00Z" }),
-  fakeModel("cdy-fake-model-gamma", "Fake Model Gamma", 200_000, 64_000, { createdAt: "2026-03-01T00:00:00Z" }),
-  fakeModel("cdy-fake-model-delta", "Fake Model Delta", 200_000, 8_192, { createdAt: "2026-02-01T00:00:00Z" }),
-  fakeModel("cdy-fake-model-epsilon", "Fake Model Epsilon", 100_000, 4_096, { omitUnconfirmed: true }),
+  fakeModel(`${LISTED_MODEL_PREFIX}alpha`, "Fake Model Alpha", 1_000_000, 128_000, { createdAt: "2026-05-01T00:00:00Z" }),
+  fakeModel(`${LISTED_MODEL_PREFIX}beta`, "Fake Model Beta", 1_000_000, 64_000, { createdAt: "2026-04-01T00:00:00Z" }),
+  fakeModel(`${LISTED_MODEL_PREFIX}gamma`, "Fake Model Gamma", 200_000, 64_000, { createdAt: "2026-03-01T00:00:00Z" }),
+  fakeModel(`${LISTED_MODEL_PREFIX}delta`, "Fake Model Delta", 200_000, 8_192, { createdAt: "2026-02-01T00:00:00Z" }),
+  fakeModel(`${LISTED_MODEL_PREFIX}epsilon`, "Fake Model Epsilon", 100_000, 4_096, { omitUnconfirmed: true }),
 ];
 
 export const FAKE_MODEL_TASK = "cdy-fake-model-task";

@@ -595,9 +595,14 @@ export interface ApplyJournal {
  * apply (its workflow settings must say `plan: "apply"`; otherwise `run_not_plan`), registered the
  * secrets as `run` does, checked (DR-28) that every action masked with those secrets matches its
  * `shown` (planActionShownMatches; otherwise `plan_secrets_differ` before anything is shown, asked
- * or started) and
+ * or started), checked (U-1) that the plan run has no records-changed mark (otherwise
+ * `plan_records_changed` before anything is asked) and
  * taken the lock. Order:
- * 1. `apply_started`; the integrity baseline when `integrity` is given.
+ * 1. `apply_started`. U-1: then `planRecordsChanged` when given, the same check again under the lock
+ *    (a mark may have been written since the caller's); a mark, or a check that throws, ends the
+ *    apply as `failed`/`plan_stale` with a fixed notice naming `plan_records_changed`, before
+ *    anything else: nothing is checked, claimed or moved. Then the integrity baseline when
+ *    `integrity` is given.
  * 2. Preflight. First (DR-28, the same check as the caller's, kept as a second defence): every
  *    action is masked with `privacy` and compared with its `shown` (planActionShownMatches). When one
  *    differs, the apply ends as `failed`/`plan_stale` with a fixed notice naming
@@ -678,6 +683,12 @@ export interface ApplyDeps {
    * `codaryn revert` can undo them as for any apply run.
    */
   readonly stateGuard?: StateGuard;
+  /**
+   * U-1 (R-33 R33-L3): whether the plan run (`planRunId`) has a records-changed mark, as the store's
+   * `hasRecordsChangedMark` says (fail closed). The CLI passes it, and the app layer through the
+   * CLI; without it the apply does not check (as before). Called once, right after `apply_started`.
+   */
+  readonly planRecordsChanged?: () => Promise<boolean>;
   /** Writes PLAN_APPLIED_FILE_NAME exclusively. "already_applied" when it exists. */
   markApplied(): Promise<"marked" | "already_applied">;
 }

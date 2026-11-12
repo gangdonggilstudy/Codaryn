@@ -240,6 +240,13 @@ export const CLI_ERROR_EXIT_CODES = {
    * secrets, as the plan run, or make the plan again.
    */
   plan_secrets_differ: 2,
+  /**
+   * U-1 (R-33 R33-L3), `codaryn apply` and the app layer: the plan run has a records-changed mark
+   * (DR-38, RECORDS_CHANGED_FILE_NAME; one that cannot be read counts too), so its plan may differ
+   * from what a person saw. Checked right after the plan is loaded, before anything is asked:
+   * nothing was asked, recorded or moved, and no apply run was made. Make the plan again.
+   */
+  plan_records_changed: 2,
   /** G-A, `codaryn review`: the run did not end as `needs-input`/`awaiting_review`. Nothing was written. */
   run_not_awaiting_review: 2,
   internal_error: 70,

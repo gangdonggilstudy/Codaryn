@@ -121,7 +121,7 @@ run id                     started              changes  result
 codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
 ```
 
-stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 경로 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다.
+stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다.
 
 **revert --dry-run:** 아무것도 바꾸지 않고 무엇을 되돌릴지 보인다. stdout은 `"dryRun":true`가 붙은 결과 JSON 한 줄이고 종료 코드는 실제 되돌리기와 같다(0). stderr:
 
@@ -446,7 +446,7 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 ```
 
 - 옵션: `--config`, `--vars-file`, `--task` 또는 `--workspace`, `--profile`, `--json`.
-- 항목은 Node.js 버전, 설정 파일, 변수 파일, task 파일, API 키, 모델, 한도, 파일 위치, 허용 명령(실행 때와 같은 규칙으로 찾고 판정), 작업 공간, 설치 위치, 보호 경로, 메시지 언어, 작업 공간 잠금이다. 줄마다 상태(`[ok]`, `[warning]`, `[failed]`, `[skipped]`)와 이유가 나온다. `--json`의 점검 id와 상태 값(`ok`, `warn`, `fail`, `skipped`)은 영어로 고정이다.
+- 항목은 Node.js 버전, 설정 파일, 변수 파일, task 파일, API 키, 모델, 한도, 파일 위치, 허용 명령(실행 때와 같은 규칙으로 찾고 판정), 작업 공간, 설치 위치, 보호 대상 경로, 메시지 언어, 작업 공간 잠금이다. 줄마다 상태(`[ok]`, `[warning]`, `[failed]`, `[skipped]`)와 이유가 나온다. `--json`의 점검 id와 상태 값(`ok`, `warn`, `fail`, `skipped`)은 영어로 고정이다.
 - 종료: 가장 나쁜 항목이 `ok`(또는 `skipped`)면 0, `fail`이면 1, `warn`이면 3이다. 인자 오류는 `invalid_arguments`(종료 2)다. `--task`와 `--workspace`를 함께 주면 이 오류다.
 - 키는 있음·없음만 적고 값은 내지 않는다. 파일이나 환경에서 읽은 값도 내지 않는다. 키가 있으면 그 키를 보낼 주소와, 그 주소를 정한 곳(제공자의 주소 변수, 설정 필드, 기본값)을 함께 적는다. 예: `OPENAI_API_KEY is set; openai requests send it to https://api.openai.com, the default address`.
 - 설정 파일 항목은 그 파일을 어디서 받았는지 적는다. 기본 위치면 위 예처럼, `--config`로 주면 `the config file given by --config is valid`다.
@@ -508,7 +508,7 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 
 **사람용 출력(stderr):** stdout은 늘 JSON 한 줄이고, 사람이 읽는 글은 stderr에 나온다.
 
-- 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 경로 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
+- 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
 - 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
 - 오류 설명: 무엇이 잘못됐는지, 위치(6절 "오류 위치"), 고치는 법, 코드. 실행 전 오류에도 나온다. 오류 JSON의 영어 `message`는 stdout에만 있다. 예:
 
@@ -839,7 +839,7 @@ node --test dist/tests/live/anthropic-live.js
 | `failed`/`model_error` | 기록의 `model_error.kind`를 본다. `auth_failed`는 키 확인, `rate_limited`·`overloaded`는 잠시 뒤 재시도, `timeout`은 `requestTimeoutMs` 확인. 모델 ID가 틀렸으면 진행 줄의 안내대로 `models`로 고른다 |
 | `failed`/`repeated_failure` | 같은 실패가 반복됐다. 근거를 보고 목표나 검증기를 고친다 |
 | `needs-input`/`no_verifier` | 검증기를 추가한다 |
-| `needs-input`/`protected_changed` | 보호 경로나 `integrity.paths`의 파일이 실행 중 바뀌었다. 결과의 `protectedChanged`와 `report`의 보호 경로 절을 보고, 허용 명령과 검증기를 확인한다 |
+| `needs-input`/`protected_changed` | 보호 경로나 `integrity.paths`의 파일이 실행 중 바뀌었다. 결과의 `protectedChanged`와 `report`의 보호 대상 절을 보고, 허용 명령과 검증기를 확인한다 |
 | `budget-exhausted` | `reason`의 한도를 올리거나(설정 상한 이내) 목표를 작게 나눈다 |
 | `budget-exhausted`/`usage_unknown` | 제공자가 토큰 사용량을 알려 주지 않았다. scripted 대본이면 단계마다 `usage`를 적는다(3절) |
 | `run_not_found` | 그 작업 공간에 그 runId의 기록이 없거나, `--run latest`로 고를 실행이 없다. `runs`로 실행 목록을 본다 |

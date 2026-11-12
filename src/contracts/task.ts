@@ -11,7 +11,7 @@ import type { ApiProviderName, MODEL_PROVIDER_NAMES } from "./config.js";
 import type { PlanActionKind, PlanMode } from "./plan.js";
 import type { AnyToolName } from "./tool.js";
 import type { VerifierConfig } from "./verify.js";
-import type { CompletionMode, HumanReviewConfig } from "./workflow.js";
+import type { CompletionMode, HumanReviewConfig, PolicyNarrowing } from "./workflow.js";
 
 export const TASK_SCHEMA_VERSION = 1;
 
@@ -62,6 +62,12 @@ export interface ResolvedTaskSpec extends TaskSpec {
   readonly limits: ResolvedLimits;
   /** G-A: the definition's instructions (a task file cannot set them), or null. */
   readonly instructions?: string | null;
+  /**
+   * DR-41: what merging the given policy with the workflow definition's left out
+   * (workflowPolicyNarrowings), set by the CLI or the app. Absent: nothing was left out. The engine
+   * records it in `run_started` so the run's start can tell the person.
+   */
+  readonly policyNarrowings?: readonly PolicyNarrowing[];
   /**
    * DR-37 (d): the name of the config profile (N-8) the CLI or the app applied to build this task
    * (`--profile`, or the profile the GUI chose), of PROFILE_NAME_PATTERN_SOURCE. Absent: none was

@@ -21,6 +21,8 @@
  */
 
 import { REVERT_SKIP_REASONS } from "./changes.js";
+import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES } from "./cleanup.js";
+import type { CleanupBlockCode, CleanupKeptReason, CleanupWarningCode } from "./cleanup.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { ApiBaseUrlEnv, ApiKeyEnv, ApiModelEnv, DefaultConfigDisplay } from "./config.js";
@@ -441,6 +443,16 @@ export const FIXED_MESSAGES = {
   // R-16 L-1: `{count}` files the revert moved aside could not be put back and were left in
   // `.codaryn/parked/` (fixed text; SkippedFile.parkedAt). Shown after the skipped list when above 0.
   "revert.parked": { count: "count" },
+  // DR-39 (cleanup.ts): the preview, the two confirmations (run records; then people's discarded
+  // files), and the outcome. Sizes are byte counts. Parked files are never cleaned.
+  "cleanup.summary.runs": { count: "count", bytes: "count" },
+  "cleanup.summary.discarded": { files: "count", bytes: "count" },
+  "cleanup.summary.parked": { files: "count", bytes: "count" },
+  "cleanup.nothing": {},
+  "cleanup.confirm.runs": { count: "count", bytes: "count" },
+  "cleanup.confirm.discarded": { files: "count", bytes: "count" },
+  "cleanup.done": { runs: "count", folders: "count", bytes: "count" },
+  "cleanup.plan_changed": {},
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -456,6 +468,20 @@ export const FIXED_MESSAGES = {
   "runs.reverted": {},
   // N-23 (g): the run's own records are fine, only its revert record failed the checks.
   "runs.revert_record_damaged": {},
+  // DR-38: a run whose records were changed by something other than the run (state.ts).
+  "runs.records_changed": {},
+  "report.records_changed": {},
+  "changes.records_changed": {},
+  "revert.records_changed": {},
+  // DR-38: progress lines of the state checks: `{count}` paths changed (the run stops), and a part
+  // of the state directory that was too large to check (the run goes on).
+  "progress.state_changed": { count: "count" },
+  "progress.state_unchecked": {},
+  // DR-41: lines at the run's start from run_started.policyNarrowings. Counts only.
+  "progress.workflow_policy.commands_dropped": { count: "count" },
+  "progress.workflow_policy.commands_narrowed": { count: "count" },
+  "progress.workflow_policy.plan_actions_dropped": { count: "count" },
+  "progress.workflow_policy.restore_path_tokens_off": {},
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
@@ -531,7 +557,10 @@ export const FIXED_MESSAGES = {
   "doctor.config_file.none": {},
   "doctor.config_file.default_refused": {},
   "doctor.config_file.default_missing": { location: "location" },
+  // `valid_at`: the config file at its default location. N-A 32.3: one given by `--config` or
+  // CODARYN_CONFIG is `valid_given`, so it is not called the default location.
   "doctor.config_file.valid_at": { location: "location" },
+  "doctor.config_file.valid_given": { location: "location" },
   "doctor.config_file.profile_missing": {},
   "doctor.task_file.skipped": {},
   "doctor.api_key.scripted": {},
@@ -547,9 +576,12 @@ export const FIXED_MESSAGES = {
   "doctor.api_key.address_invalid": { keyEnv: "keyEnv", variable: "settingEnv" },
   "doctor.model.scripted_ok": {},
   "doctor.model.ok": {},
-  "doctor.model.missing": {},
+  // N-A 33.3: the chosen provider's model variable and the config place to set (`model`, or
+  // `providers.<name>.model`), and the place of its output cap (`maxOutputTokens`, or
+  // `providers.<name>.maxOutputTokens`).
+  "doctor.model.missing": { variable: "settingEnv", field: "field" },
   "doctor.model.placeholder": {},
-  "doctor.model.output_cap_missing": {},
+  "doctor.model.output_cap_missing": { field: "field" },
   "doctor.model.base_url_invalid": {},
   // DR-36 (b), R-19 I-4: a note of the model check (DoctorCheck.notes): `{variable}` is set but is
   // `{owner}`'s model or address variable, so a `{provider}` run does not read it.
@@ -573,6 +605,12 @@ export const FIXED_MESSAGES = {
   // does not check those arguments, so such a command can change files outside an approved plan.
   // A warning in the `commands` check (no new check id).
   "doctor.commands.extra_args_with_plan": { count: "count" },
+  // DR-41: notes of the `commands` check (DoctorCheck.notes): what the workflow's own rules left out
+  // of the configured policy (workflowPolicyNarrowings). Counts only.
+  "doctor.workflow_policy.commands_dropped": { count: "count" },
+  "doctor.workflow_policy.commands_narrowed": { count: "count" },
+  "doctor.workflow_policy.plan_actions_dropped": { count: "count" },
+  "doctor.workflow_policy.restore_path_tokens_off": {},
   "doctor.install_dir.unknown_env": {},
   "doctor.install_dir.not_found": {},
   "doctor.install_dir.ok": {},
@@ -635,6 +673,8 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
  * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
  * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
+ * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
+ *   is not removed, what a person is told before confirming, why a confirmed item was kept.
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -657,7 +697,10 @@ export type ListedMessageId =
   | `doctor.status.${DoctorCheckStatus}`
   | `approval.${ApprovalChannel}`
   | `plan.problem.${PlanItemProblem}`
-  | `error.hint.${CliErrorHint}`;
+  | `error.hint.${CliErrorHint}`
+  | `cleanup.blocked.${CleanupBlockCode}`
+  | `cleanup.warning.${CleanupWarningCode}`
+  | `cleanup.kept.${CleanupKeptReason}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -703,6 +746,9 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
   ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
   ...CLI_ERROR_HINTS.map((hint) => `error.hint.${hint}` as const),
+  ...CLEANUP_BLOCK_CODES.map((code) => `cleanup.blocked.${code}` as const),
+  ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),
+  ...CLEANUP_KEPT_REASONS.map((reason) => `cleanup.kept.${reason}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */

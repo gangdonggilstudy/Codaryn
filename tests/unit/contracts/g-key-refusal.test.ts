@@ -19,6 +19,7 @@ import {
 
 const p = (...parts: string[]) => parts.join("");
 const PREFIX = p("sk", "-ant-");
+const LF = String.fromCharCode(10);
 /** Real length: a type and version, then a 93-character body ending in AA (106 characters in all). */
 const body = (seed: string) => seed.repeat(10).slice(0, 91) + "AA";
 const KEY = p(PREFIX, "api03-", body("Ab3dE_f9-hIjK1"));
@@ -125,7 +126,6 @@ describe("DR-40 (a), R-25 M-1: a key split by a line break or an invisible chara
   const split = (key: string, mark: string) => key.slice(0, 25) + mark + key.slice(25);
   const ZWSP = String.fromCharCode(0x200b);
   const SOFT_HYPHEN = String.fromCharCode(0xad);
-  const LF = String.fromCharCode(10);
 
   test("A2, A3, A16: registered, split by a zero-width space, a line feed, a soft hyphen", () => {
     const check = createKeyRefusalCheck([KEY]);
@@ -162,7 +162,8 @@ describe("DR-40 (a), R-25 M-1: a key split by a line break or an invisible chara
     assert.equal(holdsRefusedKeyShape(`- ${name}. ${tail}`), false, "a full stop ends the run");
     assert.equal(holdsRefusedKeyShape(`see ${name} ${tail}`), false, "after a word: no word start once joined");
     assert.ok(holdsRefusedKeyShape(`- ${name}${LF}${tail}`), "after a non-word character, wrapped onto the next line");
-    assert.ok(holdsRefusedKeyShape(`- ${name} ${tail}`), "after a non-word character, followed by a space and the words");
+    // DR-42 (b): visible spaces stay when the shapes are checked again, so this one passes now.
+    assert.equal(holdsRefusedKeyShape(`- ${name} ${tail}`), false, "after a non-word character, followed by a space and the words");
   });
 
   test("the registered values alone, both views", () => {
@@ -175,5 +176,81 @@ describe("DR-40 (a), R-25 M-1: a key split by a line break or an invisible chara
     const attack = (PREFIX + ZWSP).repeat(Math.ceil((256 * 1024) / (PREFIX.length + 1)));
     const { ms } = timed(() => createKeyRefusalCheck([KEY])(attack));
     assert.ok(ms < 500, `${ms.toFixed(0)} ms`);
+  });
+});
+
+describe("DR-42 (a), R-25b L-1: a registered key split by any non-alphanumeric character is refused", () => {
+  const cp = (code: number) => String.fromCodePoint(code);
+  const at = (mark: string) => `use ${KEY.slice(0, 25)}${mark}${KEY.slice(25)} here`;
+  const MARKS: Record<string, string> = {
+    "S1 variation selector U+FE0F": cp(0xfe0f),
+    "S2 variation selector U+E0100": cp(0xe0100),
+    "S4 combining grapheme joiner": cp(0x34f),
+    "S5 Hangul filler": cp(0x3164),
+    "S6 Braille blank": cp(0x2800),
+    "S12 backslash and line feed": String.fromCharCode(92, 10),
+    "S13 middle dot": cp(0xb7),
+    "T2 lone surrogate": String.fromCharCode(0xd800),
+    "a visible space": " ",
+    "a no-break space": cp(0xa0),
+  };
+
+  test("registered: refused whatever the character", () => {
+    const check = createKeyRefusalCheck([KEY]);
+    for (const [name, mark] of Object.entries(MARKS)) assert.ok(check(at(mark)), name);
+  });
+
+  test("the miss left, pinned: S14, a character reference written out (its digits break the run)", () => {
+    assert.equal(createKeyRefusalCheck([KEY])(at("&#8203;")), false);
+  });
+
+  test("a value whose letters and digits are fewer than 16 is compared as written only", () => {
+    const short = "abcd-efgh-ijkl-mn";
+    assert.equal(createKeyValueCheck([short])(`x abcd-efgh-${LF}ijkl-mn y`), true, "the separator view still finds it");
+    assert.equal(createKeyValueCheck([short])(`x abcd-efgh-${String.fromCharCode(0xb7)}ijkl-mn y`), false, "14 letters and digits: no letters-and-digits view");
+  });
+});
+
+describe("DR-42 (b), R-25b L-2: the shapes are checked again without invisible characters and line breaks only", () => {
+  const sk = p("s", "k");
+  const cp = (code: number) => String.fromCodePoint(code);
+  const ORDINARY: Record<string, string> = {
+    "F1 Slovak locale at the start": p(sk, "-SK translations for the onboarding flow in the 2026 release"),
+    "F2 locale after a colon and a line break": p("Locales:", LF, sk, "-SK translate the settings page and the 2026 onboarding flow"),
+    "F3 an sk-admin name after a colon": p("Rename the package: ", sk, "-admin-dashboard needs a new login page"),
+    "an sk-proj name at the start": p(sk, "-proj-template is the starter repo for the 2026 services"),
+    "release notes": p("Release notes: ", sk, "-Tools v2 adds a new CLI for 2026 releases and more."),
+    "F4 an Anthropic-prefixed name after a colon": p("Package: ", PREFIX, "design-system for the 2026 redesign project"),
+    "R-20 as a bullet list": R20_ORDINARY.map((name) => `- ${name}`).join(LF),
+    "an Anthropic-prefixed name, a space and words": p("- ", PREFIX, "design-system components-and-layout-helpers-v2-2026"),
+  };
+
+  test("ordinary text that the earlier compact check refused passes", () => {
+    for (const [name, text] of Object.entries(ORDINARY)) assert.equal(holdsRefusedKeyShape(text), false, name);
+  });
+
+  test("pinned: the R-20 numbered list stays refused (a name runs into the next line's number, as on main)", () => {
+    assert.ok(holdsRefusedKeyShape(R20_ORDINARY.map((name, index) => `${index + 1}. ${name}`).join(LF)));
+  });
+
+  test("an unregistered key split by an invisible character or a line break is still refused", () => {
+    const split = (position: number, mark: string) => `use ${KEY.slice(0, position)}${mark}${KEY.slice(position)} here`;
+    for (const [name, text] of Object.entries({
+      "line feed": split(25, LF),
+      "zero-width space": split(25, cp(0x200b)),
+      "soft hyphen": split(25, cp(0xad)),
+      "tag letter U+E0041": split(25, cp(0xe0041)),
+      "inside the prefix": split(3, cp(0x200b)),
+      "line feed inside api03": split(12, LF),
+      "line separator U+2028": split(25, String.fromCharCode(0x2028)),
+    })) {
+      assert.ok(holdsRefusedKeyShape(text), name);
+    }
+  });
+
+  test("the miss left, pinned: an unregistered key split by a visible space (a registered one is still refused)", () => {
+    const spaced = `use ${KEY.slice(0, 25)} ${KEY.slice(25)} here`;
+    assert.equal(holdsRefusedKeyShape(spaced), false);
+    assert.ok(createKeyRefusalCheck([KEY])(spaced));
   });
 });

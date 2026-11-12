@@ -219,6 +219,11 @@ export function maskedParts(masked: string): MaskedParts {
   return masked.split(new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE));
 }
 
+/** DR-28, DR-29: true when two visible-part lists are the same, part by part. */
+export function sameMaskedParts(a: MaskedParts, b: MaskedParts): boolean {
+  return a.length === b.length && a.every((part, i) => part === b[i]);
+}
+
 /** DR-28: the shown form of an action masked by the plan run's gateway, stored with the action. */
 export function planActionShown(masked: MaskedPlanAction): PlanActionShown {
   return masked.kind === "move"
@@ -236,9 +241,8 @@ export function planActionShownMatches(action: StoredPlanAction, masked: MaskedP
   const shown = action.shown;
   if (shown === undefined || action.kind !== masked.kind) return false;
   const now = planActionShown(masked);
-  const same = (a: MaskedParts, b: MaskedParts): boolean => a.length === b.length && a.every((part, i) => part === b[i]);
-  if ("path" in shown) return "path" in now && same(shown.path, now.path);
-  return "from" in now && same(shown.from, now.from) && same(shown.to, now.to);
+  if ("path" in shown) return "path" in now && sameMaskedParts(shown.path, now.path);
+  return "from" in now && sameMaskedParts(shown.from, now.from) && sameMaskedParts(shown.to, now.to);
 }
 
 /**

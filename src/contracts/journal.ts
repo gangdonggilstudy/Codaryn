@@ -8,6 +8,7 @@
  */
 
 import type { IntegrityPhase } from "./integrity.js";
+import type { StateCheckPhase } from "./state.js";
 import type { Limits, ModelProviderName } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ModelMessage, ModelStop, ModelUsage, MaskedToolCall } from "./model.js";
@@ -120,6 +121,17 @@ export type JournalEvent =
       readonly phase: IntegrityPhase;
       /** `IntegrityChecker.compare` for this check, masked, in its order. Empty: nothing changed. */
       readonly changed: readonly MaskedText[];
+    }
+  | {
+      /** DR-38: one check of the state directory, see EngineDeps.stateGuard. */
+      readonly type: "state_checked";
+      readonly phase: StateCheckPhase;
+      /** before_command, after_command: the recorded id of the `run_command` call checked around. */
+      readonly callId?: string;
+      /** StateGuard.compare for this check (both tiers), masked, sorted. Empty: nothing changed. */
+      readonly changed: readonly MaskedText[];
+      /** Part of tier "state" could not be fingerprinted; not a change (StateComparison.limited). */
+      readonly limited: boolean;
     }
   | {
       readonly type: "run_finished";

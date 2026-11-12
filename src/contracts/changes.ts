@@ -286,8 +286,9 @@ export interface RunOriginal {
   readonly original: { readonly text: RawText } | { readonly unavailable: OriginalUnavailable } | null;
   /**
    * DR-29: how the run masked the original and the text it left, when the run recorded it (runs
-   * from DR-29 on) and the record passed the store's checks. Absent otherwise. A view shows the
-   * text only when changeShownMatches holds for it.
+   * from DR-29 on) and the record passed the store's checks. Absent otherwise, and DR-38: absent for
+   * a run with a records-changed mark (state.ts). A view shows the text only when
+   * changeShownMatches holds for it.
    */
   readonly shown?: ChangeShown;
 }

@@ -233,6 +233,15 @@ export interface RunObserver {
 - Markdown 글은 어댑터의 표시 몫이다. CLI의 `renderReport`는 기록에서 온 글을 모두 인라인 코드나 코드 블록에 넣는다(`report.ts:350-437`).
   - 그래서 Markdown으로 열어도 원격 이미지 같은 주입이 없다(R-1 I-6).
   - 어댑터(GUI)가 보고서를 Markdown으로 그려도 되는 근거이므로, 이 성질을 바꾸지 않는다.
+- 모델이 쓴 글의 표시(U-42, R-59 I-1): `modelTextRows(text, { maxRows?, keys? })`와 `MODEL_TEXT_MAX_ROWS`(`src/app/model-text.ts`, 공개 표면 `src/app/index.ts`).
+  - CLI `plan` 화면이 같은 글(계획의 `summary`)에 그리는 줄 그대로다(`renderPlan`). 순서는 이렇다.
+    - 먼저 `keys`로 받은 키 값을 가린다. CLI가 지금 설정된 키 값을 가리듯이다.
+    - 그다음 `quoteModelText`를 터미널이 아닐 때의 폭(`MODEL_TEXT_COLUMNS`)으로 부른다. 이 함수는 키 모양 가림, 공백 한 칸, 보이지 않는 글자 `?`, 제어 문자 바꿈, 공백에서 접기를 한다.
+  - CLI의 따옴표 머리(`MODEL_TEXT_PREFIX`)는 뺀다. 창이 "에이전트의 말" 머리말 아래에 자기 모양으로 그린다.
+  - 글 줄은 `maxRows`(기본 `MODEL_TEXT_MAX_ROWS` = CLI의 `FINAL_MESSAGE_MAX_LINES`, 20)까지이고, 나머지는 마지막 `… (+N)` 줄 하나로 센다. 그래서 많아야 `maxRows + 1`줄이다. 보일 것이 없으면 줄이 없다.
+  - 그리기만 하고 등록 값은 가리지 않는다. 받는 글은 이미 가린 것(`PlanOutput.summary`처럼)이어야 한다.
+  - 시험(`tests/unit/app/u42-model-text-rows.test.ts`)이 앱 계층으로 만든 실제 계획의 요약과 긴 글·키 값에서 CLI `renderPlan`의 줄과 같음을 고정한다.
+  - GUI의 엔진 호스트는 CLI 모듈(`cli/human/format.js`)을 경로로 읽는 대신 이것을 쓸 수 있다. 그 전환은 GUI 담당의 몫이다.
 - `report`와 `revert`의 run id 자리에 `"latest"`를 쓸 수 있다(N-7). 보고서는 CLI의 `runReport`가 store의 `listRuns`로 고른다.
 - `listRuns({ workspace, limit? })` → `RunsOutput`, `resolveRun({ workspace, run })` → `{ runId, latest, startedAt, damaged }` [구현 DR-14].
   - 어떤 실행이 손상인지, `latest`가 어느 실행인지는 store와 CLI(`listRuns`, `latestRunId`, `resolveRunRef`)가 정한다(N-18, N-23, N-26). 앱 계층은 고르지 않는다.

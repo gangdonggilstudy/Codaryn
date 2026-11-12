@@ -222,6 +222,10 @@ export const EN_MESSAGES: MessageTexts = {
   "help.option.use": "--use <number|id>: write that model into the config file's model",
   "help.option.limit": "--limit <n>: how many runs to show (default 20, at most 1000)",
   "help.option.provider": "--provider <name>: the provider whose models codaryn models lists or chooses; without it, the config's",
+  "help.option.workflow": "--workflow <id>: the task type of the quick form (built in, or defined in the config file); not with --task, whose file names its own",
+  "help.option.json_line": "--json: print the result's JSON line at a terminal too (stdout and stderr both); through a pipe or a file, or with stderr redirected, it is printed without it",
+  "help.option.run_task": "--task <file>: the task file the run was made with (outside the workspace); its settings, checks and secrets are used, and the task is not run again",
+  "help.option.workspace_or_current": "--workspace <dir>: the workspace directory; when it is left out (and no --task is given), the current directory",
   "help.option.allow_unsafe_move":
     "--allow-unsafe-move: consent, for this apply or revert only, to moves that could replace a file",
   "help.option.digest": "--digest <first 12+ hex>: the digest of the plan you approve, at least its first 12 characters (codaryn plan shows it). Without it, a terminal shows the plan and asks",

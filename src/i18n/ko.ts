@@ -221,6 +221,10 @@ export const KO_MESSAGES: MessageTexts = {
   "help.option.use": "--use <번호|id>: 그 모델을 설정 파일의 model에 씁니다",
   "help.option.limit": "--limit <n>: 보여 줄 실행 수(기본 20, 최대 1000)",
   "help.option.provider": "--provider <이름>: codaryn models가 모델을 보여 주거나 고를 제공자. 없으면 설정의 제공자",
+  "help.option.workflow": "--workflow <id>: 간편 형식의 작업 종류(기본으로 있는 것이나 설정 파일에 정의한 것). task 파일은 자기 작업 종류를 정하므로 --task 옵션과 함께는 쓰지 않습니다",
+  "help.option.json_line": "--json: 터미널(stdout과 stderr 모두)에서도 결과의 JSON 한 줄을 냅니다. 파이프나 파일로 내거나 stderr를 돌리면 이것 없이도 냅니다",
+  "help.option.run_task": "--task <파일>: 그 실행에 쓴 task 파일(작업 공간 밖). 그 설정, 검증, 가릴 값을 쓰며, task를 다시 실행하지는 않습니다",
+  "help.option.workspace_or_current": "--workspace <폴더>: 작업 공간 폴더. 빼면(--task도 주지 않으면) 현재 폴더를 씁니다",
   "help.option.allow_unsafe_move":
     "--allow-unsafe-move: 이번 적용이나 되돌리기에 한해, 파일을 덮어쓸 수 있는 이동에 동의합니다",
   "help.option.digest": "--digest <다이제스트 앞 12자 이상>: 승인하는 계획의 다이제스트. 앞 12자 이상이면 되고, codaryn plan이 보여 줍니다. 없으면 터미널에서 계획을 보이고 묻습니다",

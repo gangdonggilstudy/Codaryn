@@ -19,6 +19,7 @@ import type {
   CodarynConfig,
   ListModelsSettings,
   ModelConfig,
+  ModelProviderName,
   ProviderSettings,
   ResolvedApiSettings,
 } from "../contracts/index.js";
@@ -39,6 +40,26 @@ export type ResolveSettingsOutcome =
  */
 export function knownKeyValues(env: SettingsEnvironment): string[] {
   return API_KEY_ENVS.map((name) => envValue(env, name)).filter((value): value is string => value !== null);
+}
+
+/**
+ * DR-34 (b) (review R-20 M-2): a key variable the run does not use is a secret only from this many
+ * characters. A placeholder such as EMPTY, ollama or x, left for a local OpenAI-compatible server,
+ * would otherwise mask ordinary words and break an unrelated run; real keys are much longer.
+ */
+export const MIN_OTHER_KEY_SECRET_LENGTH = 20;
+
+/**
+ * S-2, SP-2, DR-34 (b): the key values a run registers as secrets. The run's own provider's key as
+ * it is set (any length, as before); every other known key (API_KEY_ENVS) only from
+ * MIN_OTHER_KEY_SECRET_LENGTH characters. A scripted run uses no key, so every key is another's.
+ */
+export function runKeySecrets(env: SettingsEnvironment, provider: ModelProviderName): string[] {
+  const own = provider === "scripted" ? null : API_PROVIDERS[provider].keyEnv;
+  return API_KEY_ENVS.flatMap((name) => {
+    const value = envValue(env, name);
+    return value !== null && (name === own || value.length >= MIN_OTHER_KEY_SECRET_LENGTH) ? [value] : [];
+  });
 }
 
 /** The trimmed value, or `null` when unset or blank. */

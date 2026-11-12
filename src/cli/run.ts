@@ -68,7 +68,7 @@ import {
   selectEnvFileSecrets,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, knownKeyValues, resolveAnthropicSettings } from "./settings.js";
+import { envValue, knownKeyValues, resolveAnthropicSettings, runKeySecrets } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
@@ -637,9 +637,10 @@ export async function prepareTask(
     }
     addSecret(value);
   }
-  // S-2, SP-2: every known key is masked in every run, whatever the provider. A scripted task can
-  // still read a workspace file that holds one.
-  currentKey.forEach(addSecret);
+  // S-2, SP-2, DR-34 (b): the run's own key, and every other known key from 20 characters, are
+  // masked whatever the provider (a scripted task can still read a file that holds one). A short
+  // placeholder in a key variable the run does not use is left alone (review R-20 M-2).
+  runKeySecrets(io.env, task.model.provider).forEach(addSecret);
   // S-4: what the env file set, so a value read back from a file or an output is masked too.
   envSecrets.forEach(addSecret);
 

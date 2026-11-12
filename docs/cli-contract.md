@@ -330,7 +330,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | 요청 시간 제한, 재시도 | 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`(600000), `DEFAULT_MAX_RETRIES`(2) | 기본값 |
 | 한도 | 필드마다 task `limits` → 설정 `limits`. 설정 값은 상한이다(아래) | task 형식은 `invalid_task`, 간편 형식은 `invalid_config`(C-6). 재수정 한도 둘은 0과 2 |
 
-해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. `ANTHROPIC_API_KEY`가 설정되어 있으면(앞뒤 공백을 뗀 값) 제공자와 관계없이 scripted 실행에서도 비밀로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2). `CODARYN_API_BASE_URL`에도 설정 파일의 `apiBaseUrl`과 같은 엄격한 규칙을 적용한다(S-9).
+해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. 알려진 키 변수(`API_KEY_ENVS`)의 값(앞뒤 공백을 뗀 값)은 scripted 실행에서도 비밀로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2, SP-2). 실행의 제공자 자신의 키는 길이와 상관없이, 그 밖의 키는 20자 이상일 때만 등록한다(DR-34 (b)). `EMPTY`, `ollama`, `x` 같은 자리표시자가 관계없는 실행을 깨뜨리지 않게 하기 위해서다. `CODARYN_API_BASE_URL`에도 설정 파일의 `apiBaseUrl`과 같은 엄격한 규칙을 적용한다(S-9).
 
 ### 한도 (S-7)
 

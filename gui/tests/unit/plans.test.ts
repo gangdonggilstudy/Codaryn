@@ -227,7 +227,7 @@ test("plans (GU-5, DR-21): an approval may ask for the consent only after its ap
 });
 
 test("plans (R29-I2): the apply dialog names the form the plan is applied with", () => {
-  assert.equal(applyFormText("en", "tidy", null), "Applied with: profile tidy · task kind (the config's default)");
+  assert.equal(applyFormText("en", "tidy", null), "Applied with: profile tidy · task type (the config's default)");
   assert.equal(applyFormText("ko", null, "organize"), "적용할 형식: 프로필 (설정의 기본) · 작업 종류 organize");
   assert.equal(applyFormText("en", "a\u0007b", "c".repeat(300)).includes("\u0007"), false, "control characters replaced");
   assert.ok(applyFormText("en", null, "c".repeat(300)).length < 300, "cut to 200 characters");

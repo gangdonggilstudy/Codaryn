@@ -12,7 +12,8 @@ import { changesValue, planValue, reviewValue } from "./plans.js";
 import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
-import { modelsValue, selectedValue, settingsValue } from "./settings.js";
+import { modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
+import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
 import type { Shown } from "./settings.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
@@ -51,6 +52,9 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** GU-6 (3.10): a settings change, proposed (the app layer judges what widens) and written. */
+  proposeSettingsChange(request: { readonly configPath: null; readonly next: unknown }): Promise<unknown>;
+  applySettingsChange(request: { readonly configPath: null; readonly next: unknown; readonly baseDigest: string; readonly confirmWidening: boolean }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -74,6 +78,8 @@ export interface HostDeps {
   readonly shownText?: Shown;
   /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
   readonly providers: readonly string[];
+  /** GU-6: whether an environment variable is set now (never its value); absent: none is. */
+  readonly envSet?: (name: string) => boolean;
   /** GU-3: how a run's events become progress items, in the window's language. */
   readonly itemsIn: (language: "ko" | "en") => RunItemOf;
   /** GU-3: a new run token (128 random bits as hex). */
@@ -233,7 +239,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         return deps.tree(treeArgs(args));
       case "settings":
         noArgs(args);
-        return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers);
+        return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers, deps.envSet);
       case "listModels": {
         const { provider } = providerArg(args, deps.providers, ["provider"]);
         return modelsValue(provider, await deps.app.listModels({ provider, configPath: null, varsFile: null }), deps.shown);
@@ -292,6 +298,23 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
         return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
+      }
+      case "proposeSettings": {
+        if (!isObj(args) || !onlyKeys(args, ["edit"])) throw new ArgsError();
+        const edit = parseSettingsEdit(args["edit"]);
+        if (edit === null) throw new ArgsError();
+        const read = await deps.app.readSettings({ configPath: null });
+        const output = isObj(read) && read["ok"] === true && isObj(read["output"]) ? read["output"] : null;
+        if (output === null) return { ok: false, code: "settings_unreadable" };
+        const applied = applySettingsEdit(output["config"], edit, deps.shown);
+        if (!applied.ok) return applied;
+        return proposalValue(await deps.app.proposeSettingsChange({ configPath: null, next: applied.next }), applied.next, deps.shown);
+      }
+      case "applySettings": {
+        if (!isObj(args) || !onlyKeys(args, ["next", "baseDigest", "confirmWidening"])) throw new ArgsError();
+        const { next, baseDigest, confirmWidening } = args;
+        if (!isObj(next) || typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest) || typeof confirmWidening !== "boolean") throw new ArgsError();
+        return writtenValue(await deps.app.applySettingsChange({ configPath: null, next, baseDigest, confirmWidening }), deps.shown);
       }
       case "report": {
         if (!isObj(args)) throw new ArgsError();

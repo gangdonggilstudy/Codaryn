@@ -9,6 +9,8 @@
  * - App errors go on as their code only. Messages can hold paths or values and are not passed on.
  */
 
+import { commandText } from "../shared/settings-edit.js";
+
 /** Text as the window may show it: cleaned of control characters and key shapes. */
 export type Shown = (text: string) => string;
 
@@ -67,8 +69,34 @@ function profileView(name: string, profile: unknown, workflowRef: string | null,
   };
 }
 
+/**
+ * GU-6: the config file's own rules as the window shows them (3.10 permission rules, secret
+ * names): limits, command rules as text, protected paths, secret variable names and whether each is
+ * set now (never its value).
+ */
+function rulesView(config: Obj | null, shown: Shown, envSet: (name: string) => boolean): Obj {
+  const policy = own(config, "policy");
+  const limits: [string, number | null][] = [];
+  const given = own(config, "limits");
+  if (isObj(given)) {
+    for (const [key, value] of Object.entries(given)) {
+      if (LIMIT_KEY.test(key) && (value === null || (typeof value === "number" && Number.isFinite(value)))) limits.push([key, value]);
+    }
+  }
+  const commands = own(policy, "commands");
+  const paths = own(policy, "protectedPaths");
+  const names = own(config, "secretEnv");
+  return {
+    policySet: isObj(policy),
+    limits,
+    commands: Array.isArray(commands) ? commands.slice(0, MAX_LIST).map((rule) => commandText(rule, shown)) : [],
+    protectedPaths: Array.isArray(paths) ? paths.slice(0, MAX_LIST).map((item) => (typeof item === "string" ? shown(item) : "?")) : [],
+    secretEnv: Array.isArray(names) ? names.slice(0, MAX_LIST).flatMap((name) => (typeof name === "string" ? [{ name: shown(name), set: envSet(name) }] : [])) : [],
+  };
+}
+
 /** `readSettings` → `{ok, view}` (see SettingsView in src/shared/ipc.ts) or a failure. */
-export function settingsValue(outcome: unknown, shown: Shown, providers: readonly string[]): Obj | HostFailure {
+export function settingsValue(outcome: unknown, shown: Shown, providers: readonly string[], envSet: (name: string) => boolean = () => false): Obj | HostFailure {
   const view = outputOf(outcome);
   if (view === null) return failureOf(outcome);
   const file = view["file"];
@@ -96,8 +124,42 @@ export function settingsValue(outcome: unknown, shown: Shown, providers: readonl
       workflows: { builtin: strings(view["builtinWorkflows"]).map(shown), config: strings(view["workflows"]).map(shown) },
       keyAvailable: view["keyAvailable"] === true,
       providers: [...providers],
+      rules: rulesView(config, shown, envSet),
     },
   };
+}
+
+const CHANGE = ["added", "removed", "changed"];
+
+/**
+ * GU-6: a settings change proposal → `{ok, next, baseDigest, changes, widening}`. `next` (the whole
+ * new config) goes to the main process only, which keeps it for the apply; the window gets the
+ * changed fields and the widening kinds (never values).
+ */
+export function proposalValue(outcome: unknown, next: Obj, shown: Shown): Obj | HostFailure {
+  const output = outputOf(outcome);
+  if (output === null) return failureOf(outcome);
+  const baseDigest = output["baseDigest"];
+  if (typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest)) return { ok: false, code: "host_error" };
+  return { ok: true, next, baseDigest, ...fieldsOf(output, shown) };
+}
+
+function fieldsOf(output: Obj, shown: Shown): Obj {
+  return {
+    changes: (Array.isArray(output["changes"]) ? output["changes"].slice(0, MAX_LIST) : []).flatMap((item) =>
+      isObj(item) && typeof item["field"] === "string" && typeof item["change"] === "string" && CHANGE.includes(item["change"]) ? [{ field: shown(item["field"]), change: item["change"] }] : [],
+    ),
+    widening: (Array.isArray(output["widening"]) ? output["widening"].slice(0, MAX_LIST) : []).flatMap((item) =>
+      isObj(item) && typeof item["kind"] === "string" && /^[a-z][a-z_]{0,39}$/.test(item["kind"]) && typeof item["field"] === "string" ? [{ kind: item["kind"], field: shown(item["field"]) }] : [],
+    ),
+  };
+}
+
+/** GU-6: a written settings change → `{ok, written, changes, widening}`. */
+export function writtenValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+  const output = outputOf(outcome);
+  if (output === null) return failureOf(outcome);
+  return { ok: true, written: output["written"] === true, ...fieldsOf(output, shown) };
 }
 
 /** `listModels` → `{ok, provider, models: [{number, id, shown, name}], current}` or a failure. */

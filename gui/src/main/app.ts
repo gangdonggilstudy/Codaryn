@@ -26,6 +26,8 @@ import { cancelActiveRun, registerIpc, texts } from "./ipc.js";
 import { RunManager } from "./runs.js";
 import { RunHistory } from "./history.js";
 import { PlanApprovals } from "./plans.js";
+import { SettingsProposals } from "./settings-proposals.js";
+import { WIDENING_KINDS, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -252,6 +254,14 @@ export function startGui(options: GuiOptions): void {
         const values = { runId: preview.runId, reverted: preview.reverted, skipped: preview.skipped };
         const buttons = [dialogText(language, "revert.confirm"), dialogText(language, "revert.keep")];
         const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
+      settingsProposals: new SettingsProposals((size) => randomBytes(size), () => Date.now()),
+      // 6.6: "do not write" is the default; the dialog names each widening by kind and field, never a value.
+      confirmWidening: async (proposal) => {
+        const items = proposal.widening.map((item) => widenText(language, (WIDENING_KINDS as readonly string[]).includes(item.kind) ? item.kind : "other", item.field));
+        const buttons = [dialogText(language, "widen.confirm"), dialogText(language, "widen.keep")];
+        const answer = await ask("widen.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: items.join("\n"), buttons, defaultId: 1, cancelId: 1, noLink: true });
         return answer === 0;
       },
       // DR-25: a separate dialog; "do not agree" is the default. It holds for this one revert.

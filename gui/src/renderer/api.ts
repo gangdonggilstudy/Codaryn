@@ -29,6 +29,9 @@ import type {
   RunResultView,
   SelectModelReply,
   SettingsReply,
+  SettingsProposalReply,
+  SettingsRules,
+  SettingsWrittenReply,
   TreeEntryView,
   TreeReply,
 } from "../shared/ipc.js";
@@ -45,6 +48,8 @@ export interface CodarynApi {
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;
   selectModel(entry: string): Promise<unknown>;
+  proposeSettings(edit: Readonly<Record<string, unknown>>): Promise<unknown>;
+  applySettings(token: string): Promise<unknown>;
   startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
@@ -166,8 +171,52 @@ export function asSettings(value: unknown): SettingsReply {
       keyAvailable: view["keyAvailable"] === true,
       providers: strList(view["providers"]) ? view["providers"] : [],
       env: { model: env["model"] === true, language: env["language"] === true },
+      rules: asRules(view["rules"]),
     },
   };
+}
+
+function asRules(value: unknown): SettingsRules {
+  if (!isObj(value)) return { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+  const limits = Array.isArray(value["limits"])
+    ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
+    : [];
+  const secretEnv = Array.isArray(value["secretEnv"])
+    ? value["secretEnv"].flatMap((item) => (isObj(item) && str(item["name"]) && typeof item["set"] === "boolean" ? [{ name: item["name"], set: item["set"] }] : []))
+    : [];
+  return { policySet: value["policySet"] === true, limits, commands: strList(value["commands"]) ? value["commands"] : [], protectedPaths: strList(value["protectedPaths"]) ? value["protectedPaths"] : [], secretEnv };
+}
+
+type FieldChange = { readonly field: string; readonly change: string };
+type Widening = { readonly kind: string; readonly field: string };
+
+function fields(value: unknown): { changes: FieldChange[]; widening: Widening[] } | null {
+  if (!isObj(value) || !Array.isArray(value["changes"]) || !Array.isArray(value["widening"])) return null;
+  const changes: FieldChange[] = [];
+  for (const item of value["changes"]) {
+    if (!isObj(item) || !str(item["field"]) || !str(item["change"])) return null;
+    changes.push({ field: item["field"], change: item["change"] });
+  }
+  const widening: Widening[] = [];
+  for (const item of value["widening"]) {
+    if (!isObj(item) || !str(item["field"]) || !str(item["kind"])) return null;
+    widening.push({ field: item["field"], kind: item["kind"] });
+  }
+  return { changes, widening };
+}
+
+/** GU-6: a settings change proposal (a token from the main process, the changed fields, the widening kinds). */
+export function asProposal(value: unknown): SettingsProposalReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["token"]) || !HEX.test(value["token"])) return failed(value);
+  const found = fields(value);
+  return found === null ? { ok: false, code: "host_error" } : { ok: true, token: value["token"], ...found };
+}
+
+/** GU-6: a written settings change. */
+export function asWritten(value: unknown): SettingsWrittenReply {
+  if (!isObj(value) || value["ok"] !== true || typeof value["written"] !== "boolean") return failed(value);
+  const found = fields(value);
+  return found === null ? { ok: false, code: "host_error" } : { ok: true, written: value["written"], ...found };
 }
 
 /** GU-6: a model list. Entries without a valid entry id are left out. */

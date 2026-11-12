@@ -145,7 +145,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyPlan,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
+const API = "applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -205,6 +205,32 @@ const expected = [
   ["modelChosen", (v) => v === "fake-model-b"],
   ["modelForgedEntry", (v) => v.ok === false && v.code === "unknown_entry"],
   ["modelIdAsEntry", (v) => v.ok === false && v.code === "invalid_args"],
+  // GU-6 (3.10, 6.6): settings changes by the main process's token; widening asked first.
+  ["settingsPolicyFirst", (v) => v === true],
+  ["settingsNarrow", (v) => v === "ready"],
+  ["settingsNarrowWritten", (v) => JSON.stringify(v) === JSON.stringify(["notes/private.md"])],
+  ["settingsNarrowDialogs", (v) => v === 0],
+  ["settingsWiden", (v) => v === "widens"],
+  ["settingsWidenKinds", (v) => JSON.stringify(v) === JSON.stringify(["command_added"])],
+  ["settingsWidenRefused", (v) => v === "not_confirmed"],
+  ["settingsAfterRefusal", (v) => v === 0],
+  ["settingsWidenWritten", (v) => JSON.stringify(v) === JSON.stringify(["node --version"])],
+  ["settingsWidenDialogs", (v) => v === 2],
+  ["settingsWholeConfig", (v) => v.ok === false && v.code === "invalid_args"],
+  ["settingsForgedToken", (v) => v.ok === false && v.code === "unknown_proposal"],
+  ["settingsTokenOnce", (v) => JSON.stringify(v) === JSON.stringify([true, "unknown_proposal"])],
+  ["settingsSecretRemoval", (v) => v === "widens"],
+  ["settingsSecretRemoved", (v) => v === true],
+  ["settingsSecretDialogs", (v) => v === 1],
+  [
+    "settingsOnDisk",
+    (v) =>
+      v.model === "fake-model-b" &&
+      JSON.stringify(v.commands) === JSON.stringify([{ executable: "node", argsPrefix: ["--version"], allowExtraArgs: false }]) &&
+      JSON.stringify(v.protectedPaths) === JSON.stringify(["notes/private.md"]) &&
+      JSON.stringify(v.secretEnv) === "[]",
+  ],
+  ["settingsChangeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes("smoke-config")],
   ["configModel", (v) => v === "fake-model-b"],
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [
@@ -269,7 +295,7 @@ const expected = [
   ["reportVerdict", (v) => v === "accepted"],
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

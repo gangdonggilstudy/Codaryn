@@ -30,6 +30,8 @@ export const IPC_CHANNELS = {
   review: "codaryn:review:record",
   changes: "codaryn:changes:read",
   report: "codaryn:report:read",
+  proposeSettings: "codaryn:settings:propose",
+  applySettings: "codaryn:settings:apply",
 } as const;
 
 /**
@@ -266,6 +268,40 @@ export interface SettingsView {
   readonly providers: readonly string[];
   /** Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). */
   readonly env: { readonly model: boolean; readonly language: boolean };
+  /** GU-6: the config file's own rules (3.10): limits, command rules as text, protected paths, secret names. */
+  readonly rules: SettingsRules;
+}
+
+export interface SettingsRules {
+  /**
+   * Whether the config file has its own `policy`. Until it has, a quick run uses its task kind's
+   * policy; once it has, the config's replaces it (src/cli/run.ts, underDefinition).
+   */
+  readonly policySet: boolean;
+  readonly limits: readonly (readonly [string, number | null])[];
+  readonly commands: readonly string[];
+  readonly protectedPaths: readonly string[];
+  /** Names only, and whether each is set now; never a value (S-3). */
+  readonly secretEnv: readonly { readonly name: string; readonly set: boolean }[];
+}
+
+const EMPTY_RULES: SettingsRules = { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+
+function toRules(value: unknown): SettingsRules | null {
+  if (value === undefined) return EMPTY_RULES;
+  if (!isObj(value) || !Array.isArray(value["limits"]) || value["limits"].length > 32 || !textList(value["commands"]) || !textList(value["protectedPaths"]) || !Array.isArray(value["secretEnv"])) return null;
+  const limits: (readonly [string, number | null])[] = [];
+  for (const pair of value["limits"]) {
+    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== "string" || !/^[A-Za-z]{1,40}$/.test(pair[0]) || !(pair[1] === null || (typeof pair[1] === "number" && Number.isFinite(pair[1])))) return null;
+    limits.push([pair[0], pair[1] as number | null]);
+  }
+  const secretEnv: { name: string; set: boolean }[] = [];
+  for (const item of value["secretEnv"]) {
+    if (!isObj(item) || !shortText(item["name"]) || typeof item["set"] !== "boolean") return null;
+    secretEnv.push({ name: item["name"], set: item["set"] });
+  }
+  if (value["policySet"] !== undefined && typeof value["policySet"] !== "boolean") return null;
+  return { policySet: value["policySet"] === true, limits, commands: value["commands"], protectedPaths: value["protectedPaths"], secretEnv };
 }
 
 export type SettingsReply = { readonly ok: true; readonly view: SettingsView } | { readonly ok: false; readonly code: string };
@@ -293,6 +329,8 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
   const view = value["view"];
   if (!isObj(view)) return fail;
   const { file, model, language, profiles, workflows, keyAvailable, providers } = view;
+  const rules = toRules(view["rules"]);
+  if (rules === null) return fail;
   let fileView: SettingsView["file"] = null;
   if (file !== null) {
     if (!isObj(file) || !shortText(file["display"]) || typeof file["exists"] !== "boolean") return fail;
@@ -320,8 +358,58 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
       keyAvailable,
       providers,
       env,
+      rules,
     },
   };
+}
+
+/** GU-6: a settings change proposal as the window sees it: a token, the changed fields, the widening kinds. */
+export type SettingsProposalReply =
+  | {
+      readonly ok: true;
+      readonly token: string;
+      readonly changes: readonly { readonly field: string; readonly change: string }[];
+      readonly widening: readonly { readonly kind: string; readonly field: string }[];
+    }
+  | { readonly ok: false; readonly code: string };
+
+export type SettingsWrittenReply =
+  | { readonly ok: true; readonly written: boolean; readonly changes: readonly { readonly field: string; readonly change: string }[]; readonly widening: readonly { readonly kind: string; readonly field: string }[] }
+  | { readonly ok: false; readonly code: string };
+
+function fieldList(value: unknown, key: "change" | "kind"): { field: string; change: string }[] | { kind: string; field: string }[] | null {
+  if (!Array.isArray(value) || value.length > MAX_ITEMS) return null;
+  const out: Record<string, string>[] = [];
+  for (const item of value) {
+    if (!isObj(item) || !shortText(item["field"]) || typeof item[key] !== "string" || !WORD.test(item[key] as string)) return null;
+    out.push({ field: item["field"], [key]: item[key] as string });
+  }
+  return out as never;
+}
+
+/** The engine host's proposal, checked; the new config is kept by the main process only. */
+export function toHostProposal(value: unknown): { readonly ok: true; readonly next: Record<string, unknown>; readonly baseDigest: string; readonly changes: { field: string; change: string }[]; readonly widening: { kind: string; field: string }[] } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const { next, baseDigest } = value;
+  const changes = fieldList(value["changes"], "change") as { field: string; change: string }[] | null;
+  const widening = fieldList(value["widening"], "kind") as { kind: string; field: string }[] | null;
+  if (!isObj(next) || typeof baseDigest !== "string" || !DIGEST.test(baseDigest) || changes === null || widening === null) return { ok: false, code: "host_error" };
+  return { ok: true, next, baseDigest, changes, widening };
+}
+
+/** The engine host's written change, checked. */
+export function toWrittenReply(value: unknown): SettingsWrittenReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const changes = fieldList(value["changes"], "change") as { field: string; change: string }[] | null;
+  const widening = fieldList(value["widening"], "kind") as { kind: string; field: string }[] | null;
+  if (typeof value["written"] !== "boolean" || changes === null || widening === null) return { ok: false, code: "host_error" };
+  return { ok: true, written: value["written"], changes, widening };
+}
+
+/** GU-6: `applySettings` arguments: `{token}`, a proposal the main process made. */
+export function parseTokenArgs(value: unknown): { readonly token: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["token"])) return null;
+  return isHandle(value["token"]) ? { token: value["token"] } : null;
 }
 
 /** One listed model as the engine host gives it: `id` exactly as listed (kept by the main process), `shown` for the window. */

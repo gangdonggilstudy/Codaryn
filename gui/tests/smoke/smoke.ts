@@ -75,6 +75,8 @@ function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: 
 const results: Record<string, unknown> = {};
 /** The main process's OS dialogs this test answered, by id. */
 const dialogs: string[] = [];
+/** GU-6: answer the next widening dialog with "do not write". */
+let refuseWidening = false;
 
 startGui({
   // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
@@ -84,6 +86,10 @@ startGui({
   stateFile: STATE,
   answerDialog: async (id) => {
     dialogs.push(id);
+    if (id === "widen.message" && refuseWidening) {
+      refuseWidening = false;
+      return 1;
+    }
     return 0;
   },
   async afterLoad({ window, host, openFromOutside }) {
@@ -304,6 +310,72 @@ startGui({
       results["listReport"] = await waitFor(
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
+
+      // 5j. GU-6 (3.10, 6.6): settings changes, one edit at a time; "Write" sends the main process's token only.
+      // After the runs: once the config has a policy, quick runs use it instead of a task kind's own (src/cli/run.ts).
+      const proposal = (): Promise<unknown> =>
+        waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p && p !== 'asking' ? p : null; })()");
+      const written = (list: string): Promise<unknown> =>
+        waitFor(
+          `(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? [...document.querySelectorAll('#${list} li > span:first-child')].map((s) => s.textContent) : null; })()`,
+        );
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["settingsPolicyFirst"] = await js("document.getElementById('settings-policy-first') !== null");
+      const asked = dialogs.length;
+      // Narrowing: a protected path. No dialog.
+      await js("(() => { document.getElementById('settings-protected-path').value = 'notes/private.md'; document.getElementById('settings-protected-add').click(); return true; })()");
+      results["settingsNarrow"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsNarrowWritten"] = await written("settings-protected");
+      results["settingsNarrowDialogs"] = dialogs.length - asked;
+      // Widening: a command. The first answer is "do not write" (nothing is written), the second "write".
+      const addCommand = "(() => { document.getElementById('settings-command-exe').value = 'node'; document.getElementById('settings-command-args').value = '--version'; document.getElementById('settings-command-add').click(); return true; })()";
+      await js(addCommand);
+      results["settingsWiden"] = await proposal();
+      results["settingsWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal [data-kind]')].map((li) => li.getAttribute('data-kind'))");
+      refuseWidening = true;
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsWidenRefused"] = await waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p === 'not_confirmed' ? p : null; })()");
+      results["settingsAfterRefusal"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { policy?: { commands?: unknown[] } };
+          return config.policy?.commands?.length ?? 0;
+        } catch {
+          return "unreadable";
+        }
+      })();
+      await js(addCommand);
+      await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsWidenWritten"] = await written("settings-commands");
+      results["settingsWidenDialogs"] = dialogs.filter((id) => id === "widen.message").length;
+      // The page cannot send a config, reuse a token or make one up.
+      results["settingsWholeConfig"] = await js("window.codaryn.proposeSettings({ op: 'replace', next: { schemaVersion: 1 } })");
+      results["settingsForgedToken"] = await js(`window.codaryn.applySettings(${JSON.stringify("0".repeat(32))})`);
+      results["settingsTokenOnce"] = await js(
+        "(async () => { const p = await window.codaryn.proposeSettings({ op: 'addSecretEnv', name: 'SMOKE_SECRET_NAME' }); if (!p.ok) return p; const a = await window.codaryn.applySettings(p.token); const b = await window.codaryn.applySettings(p.token); return [a.ok && a.written, b.code]; })()",
+      );
+      // Removing a secret name widens: asked first (6.6).
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      const widenAsked = dialogs.filter((id) => id === "widen.message").length;
+      await js("[...document.querySelectorAll('#settings-secret-names li')].find((li) => li.textContent.includes('SMOKE_SECRET_NAME'))?.querySelector('[data-remove]')?.click(); true");
+      results["settingsSecretRemoval"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["settingsSecretRemoved"] = await waitFor(
+        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); return ready === 'ok' && document.getElementById('settings-proposal')?.getAttribute('data-proposal') === 'written' ? document.getElementById('settings-secrets')?.textContent.includes('SMOKE_SECRET_NAME') === false : null; })()",
+      );
+      results["settingsSecretDialogs"] = dialogs.filter((id) => id === "widen.message").length - widenAsked;
+      results["settingsOnDisk"] = (() => {
+        try {
+          const config = JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { model?: string; policy?: { commands?: unknown[]; protectedPaths?: unknown[] }; secretEnv?: unknown[] };
+          return { model: config.model, commands: config.policy?.commands, protectedPaths: config.policy?.protectedPaths, secretEnv: config.secretEnv ?? [] };
+        } catch {
+          return "unreadable";
+        }
+      })();
+      results["settingsChangeText"] = await js("document.getElementById('settings')?.textContent ?? ''");
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

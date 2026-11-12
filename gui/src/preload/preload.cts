@@ -32,6 +32,8 @@ const CHANNELS = {
   review: "codaryn:review:record",
   changes: "codaryn:changes:read",
   report: "codaryn:report:read",
+  proposeSettings: "codaryn:settings:propose",
+  applySettings: "codaryn:settings:apply",
 } as const;
 
 const EVENTS = {
@@ -84,6 +86,9 @@ const api = Object.freeze({
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
   revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
   /** DR-25: the retry token a revert's result gave; never a consent: the main process asks the person. */
+  /** One edit as plain data (copied here); never a config file or a path to one. */
+  proposeSettings: (edit: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.proposeSettings, { edit: plain(edit) }),
+  applySettings: (token: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.applySettings, { token: text(token) }),
   report: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.report, { workspace: text(workspace), runId: text(runId) }),
   revertConsent: (retry: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revertConsent, { retry: text(retry) }),
   plan: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>

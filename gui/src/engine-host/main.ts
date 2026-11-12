@@ -198,7 +198,8 @@ async function main(): Promise<number> {
   process.stdin.setEncoding("utf8");
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
-  await serve(process.stdin, { app, messages, tree, shown, shownText, providers, itemsIn, token, write: writeLine, log });
+  const envSet = (name: string): boolean => (process.env[name] ?? "").length > 0;
+  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

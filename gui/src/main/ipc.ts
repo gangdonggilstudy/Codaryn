@@ -27,6 +27,9 @@ import {
   toReviewReply,
   toChangesReply,
   toReportReply,
+  toHostProposal,
+  toWrittenReply,
+  parseTokenArgs,
   parseRunArgs,
   parseWorkspaceArgs,
   toRevertView,
@@ -45,7 +48,9 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
-import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
+import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply, SettingsProposalReply, SettingsWrittenReply } from "../shared/ipc.js";
+import { parseSettingsEdit } from "../shared/settings-edit.js";
+import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
 
@@ -87,6 +92,10 @@ export interface IpcDeps {
   readonly history: RunHistory;
   /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
   readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
+  /** GU-6: the settings change proposals shown. */
+  readonly settingsProposals: SettingsProposals;
+  /** GU-6 (6.6): asks the person (an OS dialog) whether to write a change that widens what runs may do. */
+  readonly confirmWidening: (proposal: SettingsProposal) => Promise<boolean>;
   /** DR-25: asks the person (a separate OS dialog) for the consent to move this run's files back unsafely. */
   readonly confirmRevertConsent: (retry: ConsentRetry) => Promise<boolean>;
   /** GU-5: the plans shown and their approval tokens. */
@@ -235,6 +244,34 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("settings", {}, SETTINGS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return toSettingsView(response.value, deps.envFacts());
+  });
+
+  // GU-6 (3.10): one edit → a proposal (the new config stays here) → applied by token, asked first when it widens.
+  handle(IPC_CHANNELS.proposeSettings, async (args): Promise<SettingsProposalReply> => {
+    const edit = args.length === 1 && typeof args[0] === "object" && args[0] !== null ? parseSettingsEdit((args[0] as Record<string, unknown>)["edit"]) : null;
+    if (edit === null || Object.keys(args[0] as object).some((key) => key !== "edit")) return { ok: false, code: "invalid_args" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("proposeSettings", { edit }, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const proposal = toHostProposal(response.value);
+    if (!proposal.ok) return proposal;
+    const token = deps.settingsProposals.issue({ next: proposal.next, baseDigest: proposal.baseDigest, changes: proposal.changes, widening: proposal.widening });
+    return { ok: true, token, changes: proposal.changes, widening: proposal.widening };
+  });
+
+  handle(IPC_CHANNELS.applySettings, async (args): Promise<SettingsWrittenReply> => {
+    const parsed = args.length === 1 ? parseTokenArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const proposal = deps.settingsProposals.take(parsed.token);
+    if (proposal === null) return { ok: false, code: "unknown_proposal" };
+    const widens = proposal.widening.length > 0;
+    if (widens && !(await deps.confirmWidening(proposal))) return { ok: false, code: "not_confirmed" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("applySettings", { next: proposal.next, baseDigest: proposal.baseDigest, confirmWidening: widens }, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toWrittenReply(response.value);
   });
 
   handle(IPC_CHANNELS.listModels, async (args): Promise<ModelsReply> => {

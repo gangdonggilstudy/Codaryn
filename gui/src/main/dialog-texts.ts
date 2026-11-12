@@ -31,6 +31,9 @@ const KO = {
   "revertConsent.detail": "되돌리는 도중 원래 자리에 같은 이름의 파일이 새로 생기면 그 파일을 덮어쓸 수 있습니다. 동의하지 않으면 아무것도 바뀌지 않습니다. 동의는 되돌리기 기록에 남습니다.",
   "revertConsent.agree": "이번 되돌리기에 동의",
   "revertConsent.keep": "동의하지 않음",
+  "widen.message": "이 설정 변경은 실행이 할 수 있는 일을 넓힙니다. 설정 파일에 쓸까요?",
+  "widen.confirm": "쓰기",
+  "widen.keep": "쓰지 않음",
 } as const;
 
 const EN: { readonly [K in keyof typeof KO]: string } = {
@@ -57,6 +60,9 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "revertConsent.detail": "If a file with the same name appears at the original place meanwhile, it could be replaced. Without your agreement nothing changes. The agreement is kept in the revert's record.",
   "revertConsent.agree": "Agree for this revert",
   "revertConsent.keep": "Do not agree",
+  "widen.message": "This settings change lets runs do more. Write it to the config file?",
+  "widen.confirm": "Write",
+  "widen.keep": "Do not write",
 };
 
 export type DialogTextId = keyof typeof KO;
@@ -69,3 +75,62 @@ export function dialogText(language: DialogLanguage, id: DialogTextId, values: R
 
 export const DIALOG_TEXT_IDS = Object.keys(KO) as DialogTextId[];
 export const DIALOG_TEXTS = { ko: KO, en: EN } as const;
+
+/** GU-6: the app layer's widening kinds (SettingsWidening), named in the widening dialog. */
+export const WIDENING_KINDS = [
+  "command_added",
+  "extra_args_allowed",
+  "limit_raised",
+  "protected_path_removed",
+  "integrity_path_removed",
+  "secret_env_removed",
+  "verifier_removed",
+  "verifier_command_added",
+  "restore_path_tokens_enabled",
+  "plan_action_allowed",
+  "api_base_url_changed",
+  "profile_changed",
+  "workflow_changed",
+  "other",
+] as const;
+
+const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
+  command_added: "허용 명령 추가",
+  extra_args_allowed: "명령 인자를 더 붙이도록 허용",
+  limit_raised: "한도 올림",
+  protected_path_removed: "보호 경로 뺌",
+  integrity_path_removed: "무결성 확인 경로 뺌",
+  secret_env_removed: "가릴 값 이름 뺌",
+  verifier_removed: "검증 뺌",
+  verifier_command_added: "명령 검증 추가",
+  restore_path_tokens_enabled: "경로의 가린 값 되살리기 켬",
+  plan_action_allowed: "계획 동작 허용",
+  api_base_url_changed: "API 주소 바꿈",
+  profile_changed: "프로필 바꿈",
+  workflow_changed: "작업 종류 정의 바꿈",
+  other: "그 밖의 넓히기",
+};
+
+const WIDEN_EN: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
+  command_added: "a command allowed",
+  extra_args_allowed: "more command arguments allowed",
+  limit_raised: "a limit raised",
+  protected_path_removed: "a protected path removed",
+  integrity_path_removed: "an integrity path removed",
+  secret_env_removed: "a secret name removed",
+  verifier_removed: "a check removed",
+  verifier_command_added: "a command check added",
+  restore_path_tokens_enabled: "path tokens restored",
+  plan_action_allowed: "a plan action allowed",
+  api_base_url_changed: "the API address changed",
+  profile_changed: "a profile changed",
+  workflow_changed: "a task kind definition changed",
+  other: "another widening",
+};
+
+/** One widening as the dialog lists it: its kind in words and the field path (never a value). */
+export function widenText(language: DialogLanguage, kind: string, field: string): string {
+  const table = language === "ko" ? WIDEN_KO : WIDEN_EN;
+  const words = Object.hasOwn(table, kind) ? table[kind as keyof typeof table] : table.other;
+  return `- ${words} (${field.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, 200)})`;
+}

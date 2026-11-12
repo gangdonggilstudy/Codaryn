@@ -128,4 +128,3 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
   await rename(temporary, target);
 }
 export { listParkedFiles } from "./apply-revert.js";
-export type { ParkedFile } from "./apply-revert.js";

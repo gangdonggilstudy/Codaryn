@@ -156,11 +156,12 @@ describe("parseArgs (phase 1b options)", () => {
       ok: true,
       args: {
         command: "run",
-        input: { kind: "quick", workspace: "w", goal: "fix it" },
+        input: { kind: "quick", workspace: "w", goal: "fix it", oneLine: false },
         configPath: "c.json",
         varsFile: ".env",
         cancelFile: null,
         quiet: false,
+        profile: null,
       },
     });
   });

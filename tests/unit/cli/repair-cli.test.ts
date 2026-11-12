@@ -210,7 +210,7 @@ describe("R-7 codaryn revert arguments", () => {
   test("--workspace and --run are both required and nothing else is accepted", () => {
     assert.deepEqual(parseRevertArgs(["revert", "--workspace", "w", "--run", RUN]), {
       ok: true,
-      args: { command: "revert", workspace: "w", runId: RUN },
+      args: { command: "revert", workspace: "w", runId: RUN, dryRun: false, quiet: false },
     });
     assert.deepEqual(parseRevertArgs(["revert", "--run", RUN, "--workspace", "w"]).ok, true);
     const bad = [
@@ -261,7 +261,7 @@ describe("R-7 runRevert output", () => {
   const complete: RevertOutcome = { reverted: [{ path: "a.txt", action: "restored" }, { path: "new.txt", action: "deleted" }], skipped: [] };
 
   test("everything reverted: kind revert, status complete, exit 0", async () => {
-    const { io, calls } = env(async () => ({ ok: true, outcome: complete }));
+    const { io, calls } = env(async () => ({ ok: true, outcome: complete, runId: RUN, revertedBefore: null }));
     const outcome = await runRevert(io);
     assert.equal(outcome.exitCode, REVERT_EXIT_CODES.complete);
     assert.deepEqual(outcome.output, {
@@ -282,7 +282,7 @@ describe("R-7 runRevert output", () => {
 
   test("a skipped file makes it partial with exit 3", async () => {
     const outcome = await runRevert(
-      env(async () => ({ ok: true, outcome: { reverted: [], skipped: [{ path: "a.txt", reason: "changed_since_run" }] } })).io,
+      env(async () => ({ ok: true, outcome: { reverted: [], skipped: [{ path: "a.txt", reason: "changed_since_run" }] }, runId: RUN, revertedBefore: null })).io,
     );
     assert.equal(outcome.exitCode, 3);
     assert.equal(outcome.output.kind === "revert" ? outcome.output.status : "", "partial");
@@ -291,8 +291,8 @@ describe("R-7 runRevert output", () => {
 
   test("errors stop before anything changes and use CliErrorOutput", async () => {
     const cases: [ReturnType<typeof env>, string][] = [
-      [env(async () => ({ ok: true, outcome: complete }), ["revert", "--workspace", "work"]), "invalid_arguments"],
-      [env(async () => ({ ok: true, outcome: complete }), ["revert", "--workspace", "gone", "--run", RUN]), "workspace_not_found"],
+      [env(async () => ({ ok: true, outcome: complete, runId: RUN, revertedBefore: null }), ["revert", "--workspace", "work"]), "invalid_arguments"],
+      [env(async () => ({ ok: true, outcome: complete, runId: RUN, revertedBefore: null }), ["revert", "--workspace", "gone", "--run", RUN]), "workspace_not_found"],
       [env(async () => ({ ok: false, code: "run_not_found", message: "no journal" })), "run_not_found"],
       [env(async () => ({ ok: false, code: "workspace_locked", message: "locked" })), "workspace_locked"],
       [
@@ -366,7 +366,12 @@ describe("R-7 createRevertCommand around the store's revertRun", () => {
       return { reverted: [{ path: "a.txt", action: "restored" }], skipped: [] };
     });
     const outcome = await createRevertCommand(fake.revertRun)({ workspace: dir, runId: RUN, lockId: LOCK_ID, clock });
-    assert.deepEqual(outcome, { ok: true, outcome: { reverted: [{ path: "a.txt", action: "restored" }], skipped: [] } });
+    assert.deepEqual(outcome, {
+      ok: true,
+      outcome: { reverted: [{ path: "a.txt", action: "restored" }], skipped: [] },
+      runId: RUN,
+      revertedBefore: null,
+    });
     assert.deepEqual(fake.requests, [{ workspaceRoot: root, runId: RUN }]);
     assert.equal((JSON.parse(lockDuringRevert) as { runId: string }).runId, LOCK_ID);
     assert.equal(await exists(path.join(root, ".codaryn", "lock.json")), false);

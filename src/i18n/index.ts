@@ -14,5 +14,12 @@
 
 export { createMessageCatalog, MESSAGE_TEXTS, MessageFormatError, OWN_TEXT_MEMORY, PLACEHOLDER } from "./catalog.js";
 export type { MessageTexts } from "./catalog.js";
-export { DEFAULT_MESSAGE_LANGUAGE, localeLanguage, parseMessageLanguage, runtimeLocale, selectMessageLanguage } from "./language.js";
+export {
+  DEFAULT_MESSAGE_LANGUAGE,
+  explainMessageLanguage,
+  localeLanguage,
+  parseMessageLanguage,
+  runtimeLocale,
+  selectMessageLanguage,
+} from "./language.js";
 export { cleanLine, CLOSED_KIND_VALUES, formatParam, HIDDEN_KEY, REPLACEMENT } from "./params.js";

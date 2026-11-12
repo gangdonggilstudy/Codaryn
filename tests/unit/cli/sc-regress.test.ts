@@ -169,6 +169,8 @@ describe("S-6 the top level turns any exception into one internal_error object",
       code: "invalid_task",
       exitCode: 2,
       message: "the task file is nested more than 64 levels deep",
+      // N-15: a structured diagnostic, with no field and no position.
+      diagnostic: { code: "too_deep", file: "task", field: null, line: null, column: null },
     });
     assert.equal(await stat(path.join(base, "work", ".codaryn")).then(() => true, () => false), false);
   });

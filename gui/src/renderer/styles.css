@@ -1,0 +1,99 @@
+/* GU-1 window. Words carry the state; colour only supports it (docs/design/standalone-gui.md 10). */
+
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  padding: 1rem 1.5rem;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 0.75rem;
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+h2 {
+  font-size: 1.1rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.35rem 0.9rem;
+}
+
+button:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 2px;
+}
+
+#workspace {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.checks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.checks li {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(10rem, 1fr);
+  gap: 0.15rem 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.checks .status {
+  font-weight: 600;
+}
+
+.checks .detail {
+  grid-column: 2;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+[data-status="fail"] > .status,
+.overall[data-status="fail"] {
+  text-decoration: underline;
+}
+
+.error {
+  border: 2px solid currentColor;
+  padding: 0.5rem 1rem;
+}
+
+.code {
+  font-family: ui-monospace, monospace;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

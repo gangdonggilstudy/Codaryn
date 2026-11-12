@@ -261,10 +261,71 @@ test("G-C executor (DR-18 b): a source that cannot be unlinked is taken back to 
       },
     };
     const outcome = await executor(fx, fileOps).apply(move("a.txt", "b.txt", "alpha"), 0, never);
-    assert.deepEqual(outcome, { ok: false, problem: "io_error" });
+    // Contract: a read-only source on Windows is `unsafe_move` too (plan.ts PLAN_ITEM_PROBLEMS).
+    assert.deepEqual(outcome, { ok: false, problem: "unsafe_move" });
     assert.equal(renames, 0);
     assert.equal(await read(fx.root, "a.txt"), "alpha");
     assert.equal(await read(fx.root, "b.txt"), null, "the second name was taken back");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C executor (PQ-6): check reports a volume without hard links before any action, and changes nothing", async () => {
+  const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
+  try {
+    const before = await fs.readdir(path.join(fx.root, ".codaryn"));
+    const fileOps: Partial<PlanFileOps> = { link: () => Promise.reject(errno("EPERM")) };
+    const exec = executor(fx, fileOps);
+    assert.equal(HARD_LINK_UNAVAILABLE_PROBLEM, "unsafe_move");
+    assert.equal(await exec.check(move("a.txt", "x/a.txt", "alpha")), "unsafe_move");
+    assert.equal(await exec.check(discard("b.txt", "bravo")), "unsafe_move");
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), "bravo");
+    assert.deepEqual(await fs.readdir(path.join(fx.root, ".codaryn")), before);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C executor (PQ-6): the probe runs once per volume, in the state directory, and leaves nothing", async () => {
+  const fx = await fixture({ "a.txt": "alpha", "sub/b.txt": "bravo", "sub/c.txt": "charlie" });
+  try {
+    const probes: string[] = [];
+    const fileOps: Partial<PlanFileOps> = {
+      async link(existing, created) {
+        probes.push(created);
+        await fs.link(existing, created);
+      },
+    };
+    const exec = executor(fx, fileOps);
+    assert.equal(await exec.check(move("a.txt", "x/a.txt", "alpha")), null);
+    assert.equal(await exec.check(move("sub/b.txt", "x/b.txt", "bravo")), null);
+    assert.equal(await exec.check(discard("sub/c.txt", "charlie")), null);
+    assert.equal(probes.length, 1, "one probe for the one volume");
+    assert.equal(path.dirname(probes[0] ?? ""), path.join(fx.root, ".codaryn"));
+    assert.ok(path.basename(probes[0] ?? "").startsWith(".codaryn-link-probe-"));
+    assert.deepEqual(await fs.readdir(path.join(fx.root, ".codaryn")), ["runs"], "the probe was taken back");
+    assert.deepEqual((await fs.readdir(path.join(fx.root, "sub"))).sort(), ["b.txt", "c.txt"]);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C executor (PQ-6): a probe that fails for another reason does not decide; the next check probes again", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    let links = 0;
+    const fileOps: Partial<PlanFileOps> = {
+      async link() {
+        links += 1;
+        throw errno("EACCES");
+      },
+    };
+    const exec = executor(fx, fileOps);
+    assert.equal(await exec.check(discard("a.txt", "alpha")), null);
+    assert.equal(await exec.check(discard("a.txt", "alpha")), null);
+    assert.equal(links, 2);
   } finally {
     await fx.cleanup();
   }

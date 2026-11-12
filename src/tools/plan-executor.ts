@@ -5,14 +5,17 @@
  * It carries out stored plan actions in the workspace and judges no policy (the engine does).
  * - Every workspace path goes through `Workspace.resolve`. The only place written outside it is
  *   the apply run's own `.codaryn/discarded/<runId>/` (DR-9).
- * - A move never replaces an existing file and never copies (`moveNoReplace`).
- * - A discard renames the file into the discarded directory under a name built from the action
- *   index only, never from the file name.
+ * - A move never replaces an existing file and never copies (`moveNoReplace`). Where hard links
+ *   cannot be used it does not move at all (DR-18 b, HARD_LINK_UNAVAILABLE_PROBLEM).
+ * - A discard moves the file the same way into the discarded directory, under a name built from
+ *   the action index only, never from the file name.
  * - The source must still be the file the plan hashed: `check` hashes it, and `apply` hashes it
  *   again unless the file's identity (device, inode, size, modification time) is still what
  *   `check` hashed.
  * - Cancelling is the engine's job between actions. `apply` does not stop an item half way: a
- *   signal that is already aborted, or aborts during a hash, ends the item before anything changed.
+ *   signal that is already aborted, or aborts during a hash, ends the item before anything changed,
+ *   as `io_error` because PLAN_ITEM_PROBLEMS has no cancel. The engine looks at the signal before
+ *   each action and after a failed one and ends the apply as cancelled (PQ-2, DR-18 d, R-5 L-3).
  */
 
 import path from "node:path";
@@ -28,10 +31,12 @@ import type {
 } from "../contracts/index.js";
 
 import {
+  HARD_LINK_UNAVAILABLE_PROBLEM,
   createParents,
   errorCode,
   hashFile,
   hashProblem,
+  identityOf,
   inspectDestination,
   inspectSource,
   isMissing,
@@ -162,11 +167,13 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
           target = path.join(discarded.dir, stored);
         }
 
-        // Last look before the rename: the source must still be the checked file.
+        // Last look before the move: the source must still be the checked file, with the size and
+        // modification time it had when it was hashed (R-5 I-5). An edit in place between this
+        // look and the link is not seen here; the inventory check compares the hash afterwards.
         try {
           const now = await ops.lstat(source.absolute);
           if (now.isSymbolicLink() || !now.isFile()) return itemFailure("source_changed");
-          if (now.dev !== source.identity.dev || now.ino !== source.identity.ino) return itemFailure("source_changed");
+          if (!sameIdentity(identityOf(now), source.identity)) return itemFailure("source_changed");
         } catch (error) {
           return itemFailure(isMissing(error) ? "source_missing" : "io_error");
         }
@@ -175,6 +182,8 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
         if (moved !== "moved") {
           // A discard target is new and named by index only: "exists" there is not the plan's fault.
           if (moved === "destination_exists" && action.kind === "discard") return itemFailure("io_error");
+          // DR-18 (b): no hard links here, so no move that could replace a file.
+          if (moved === "no_hard_link") return itemFailure(HARD_LINK_UNAVAILABLE_PROBLEM);
           return itemFailure(moved);
         }
         return { ok: true, applied: { index, action, stored } };

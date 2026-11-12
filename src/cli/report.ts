@@ -52,7 +52,8 @@ import { cliError } from "./run.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
-import { cleanText, hideKeys } from "./text-safety.js";
+import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
+import { inspectRun } from "../store/index.js";
 
 export interface ReportEnvironment {
   readonly argv: readonly string[];
@@ -64,6 +65,11 @@ export interface ReportEnvironment {
   readonly listRuns?: ListRuns;
   /** N-23: told which run `--run latest` chose, before anything is read. */
   readonly announceLatest?: (entry: CheckedRun) => void;
+  /**
+   * N-27 (b): whether the run list judges the run damaged (the store's `inspectRun` when absent).
+   * A damaged run is refused as revert refuses it (N-26).
+   */
+  readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
 
 async function pathExists(target: string): Promise<boolean> {
@@ -522,6 +528,17 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   });
   if (!reference.ok) return cliError(reference.code, reference.message);
   const runId = reference.runId;
+  // N-27 (b), review R-7 I-2: the run list's judgment (record ownership, schema, times, and the
+  // id's exact form, N-27 a) applies to the report too; its records are not shown as a report.
+  let damaged: boolean;
+  try {
+    damaged = await (io.isDamaged ?? (async (workspaceRoot: string, id: string) => (await inspectRun(workspaceRoot, id)) === "damaged"))(root, runId);
+  } catch {
+    damaged = true;
+  }
+  if (damaged) {
+    return cliError("invalid_run_record", "the run's records do not pass the checks (`codaryn runs` shows it as damaged); no report is shown");
+  }
   if (reference.latest !== null) {
     try {
       io.announceLatest?.(reference.latest);
@@ -567,7 +584,8 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
   let text: string;
   try {
-    text = json ? jsonLine(report) : renderReport(report, currentKey);
+    // N-27 (c): keys are hidden in the strings before the JSON is written, as in the text.
+    text = json ? jsonLine(hideKeysInStrings(report, currentKey)) : renderReport(report, currentKey);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

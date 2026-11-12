@@ -17,6 +17,7 @@ import {
   MAX_INSPECT_HASH_BYTES,
   MAX_INVENTORY_FILES,
   MAX_PLAN_ACTIONS,
+  CONTENT_HASH_PATTERN_SOURCE,
   MAX_PLAN_SOURCE_BYTES,
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
@@ -128,6 +129,7 @@ async function walk(root: string, dir: string, signal: AbortSignal): Promise<Wal
 }
 
 const TOKEN_TEST = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE);
+const DIGEST_PATTERN = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
 /**
  * Where the page after `after` starts. The model sees masked paths, so a path holding a registered
@@ -367,6 +369,11 @@ export async function proposePlan(
   } catch {
     // No detail: it could carry raw paths.
     return fail("io_error", "storing the plan failed; no plan exists");
+  }
+  // R-5 I-4: the digest is what a person approves later. A store that returns anything but a
+  // SHA-256 in the contract's form is not trusted; the run then ends without a pending plan.
+  if (typeof digest !== "string" || !DIGEST_PATTERN.test(digest)) {
+    return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
   }
   return { ok: true, payload: { digest, actions } };
 }

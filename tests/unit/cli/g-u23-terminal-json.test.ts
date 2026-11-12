@@ -295,6 +295,12 @@ describe("U-23 (DR-49): run, revert and apply take --json and nothing else chang
     for (const command of ["run", "revert"] as const) assert.ok(helpText(command).includes("--json: "), command);
     assert.ok(helpText("apply").includes("--json"));
   });
+
+  test("U-45 (R58-L2): apply's help says --json or --quiet, and no decision number", () => {
+    const help = helpText("apply");
+    assert.ok(help.includes("only with --json or --quiet"), help);
+    assert.doesNotMatch(help, /\((DR|UXM|AXM)-\d+\)/, help);
+  });
 });
 
 // PM answer to U-23 (b): the help only at a terminal; through a pipe or into a file it stays

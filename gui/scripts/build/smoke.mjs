@@ -47,6 +47,8 @@ const steps = [
     fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
   ]),
   fakeApi.replyText("analysis written"),
+  // U-13: a plan run that discards a file; its apply's discarded files stay through a cleanup.
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_c", "propose_plan", { summary: "discard sub/deeper/c.txt", actions: [{ kind: "discard", path: "sub/deeper/c.txt" }] })]),
   { kind: "hang" },
 ];
 const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
@@ -176,6 +178,8 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
+/** U-13 (5j2): the plan's apply, then two cleanups of its apply run (records only; records and discarded files). */
+const U13_DIALOGS = ["apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"];
 const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
@@ -279,7 +283,8 @@ const expected = [
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [
     "apiRequests",
-    (v) => v.models >= 2 && v.messages === 8 && v.other.length === 0 && v.allFakeKey === true,
+    // U-13's plan run (5j2) asks once more: 8 before it.
+    (v) => v.models >= 2 && v.messages === 9 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -384,6 +389,40 @@ const expected = [
   ["cleanupFirstRunGone", (v) => v === true],
   ["cleanupForged", (v) => v.ok === false && v.code === "unknown_preview"],
   ["cleanupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second)],
+  // U-13 (DR-53): the applied discard leaves its file in the apply's discarded files.
+  ["discardApplied", (v) => JSON.stringify(v) === JSON.stringify({ fileGone: true, box: true })],
+  // Its records only: kept as discarded_left (asked about as not reverted, answered "remove"), with
+  // the plan's and the result's notices; the records and the discarded files stay.
+  [
+    "discardLeftKept",
+    (v) =>
+      v.chosen === true &&
+      v.plan === "1" &&
+      typeof v.warnings === "string" &&
+      v.warnings.split(" ").includes("discarded_left") &&
+      v.planNotice === true &&
+      v.result === "done" &&
+      v.removed === "0" &&
+      JSON.stringify(v.kept) === JSON.stringify([["run", "discarded_left"]]) &&
+      typeof v.keptText === "string" &&
+      !v.keptText.includes("discarded_left") &&
+      v.keptNotice === true &&
+      JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message"]) &&
+      JSON.stringify(v.left) === JSON.stringify({ records: true, box: true }),
+  ],
+  // Its discarded files chosen too and their deletion agreed to: both go, nothing kept.
+  [
+    "discardLeftBoth",
+    (v) =>
+      v.chosen === true &&
+      v.plan === "2" &&
+      v.result === "done" &&
+      v.removed === "2" &&
+      JSON.stringify(v.kept) === "[]" &&
+      v.keptNotice === false &&
+      JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"]) &&
+      JSON.stringify(v.left) === JSON.stringify({ records: false, box: false }),
+  ],
   // U-5 (3.6): the run that ended while the window was not active: one OS notification, fixed text and status word.
   ["endNotice", (v) => v !== null && v.title === "Codaryn" && v.body === "Codaryn 실행이 끝났습니다: 확인 필요"],
   ["endNotices", (v) => Array.isArray(v) && v.length >= 1 && v.every((body) => /^Codaryn 실행이 끝났습니다(: [^\n]{1,40}|\. 결과는 실행 목록에서 확인하세요\.)$/.test(body))],
@@ -400,7 +439,7 @@ const expected = [
       !v.text.includes(FAKE_API_KEY) &&
       !v.text.includes(FAKE_OPENAI_KEY),
   ],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

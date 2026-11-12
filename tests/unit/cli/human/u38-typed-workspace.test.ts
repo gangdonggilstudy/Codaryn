@@ -9,9 +9,11 @@
  *   revert knows no registered values, so a typed path there is never checked against them.
  * - Absent, or a value that is not exactly what toShownWorkspace makes, or one the line's own
  *   cleaning would change: `<workspace>` as before (fail closed).
- * Paths: spaces, Hangul and a Windows path are shown; a quote, a control character, `$`, `%`, a path
- * longer than MAX_SHOWN_WORKSPACE_CHARS, a trailing backslash and a key shape give no ShownWorkspace,
- * so the hint keeps `<workspace>`. The texts are the catalog owner's; a stand-in shows which ids
+ * Paths: spaces, Hangul, a Windows path, combining marks and the signs of the allow list (R-70 M-1,
+ * contract ac2d25f: ( ) , + = @ _ - . : / and the backslash) are shown; any other character (a
+ * quote, the curly and small curly quotes PowerShell also reads as quotes, `x”;cmd;#`, a control
+ * character, `$`, `%`, `;`, `#` and the rest), a path longer than MAX_SHOWN_WORKSPACE_CHARS, a
+ * trailing backslash and a key shape give no ShownWorkspace, so the hint keeps `<workspace>`. The texts are the catalog owner's; a stand-in shows which ids
  * and values the renderer asks for, and the real lines in both languages are checked once the
  * catalog has them. Nothing is sent; fake values only.
  */
@@ -56,7 +58,7 @@ const shown = (typed: string): ShownWorkspace => {
   assert.ok(value !== null, typed);
   return value;
 };
-const SHOWN = ["my work", "작업 공간/보고서", "C:\\Users\\me\\My Work", "./ws", "/home/me/일/a b"];
+const SHOWN = ["my work", "작업 공간/보고서", "C:\\Users\\me\\My Work", "./ws", "/home/me/일/a b", "My Work (2)", "a+b=c@d,e", "프로젝트_1-2", "cafe\u0301"];
 const NOT_SHOWN = [
   'my"work',
   "a\u0007b",
@@ -71,6 +73,13 @@ const NOT_SHOWN = [
   `ws/${TYPED}`,
   "ws/codaryn_secret_1",
   "   ",
+  // R-70 M-1: the curly and small curly quotes, and the shape that closed PowerShell's string.
+  "x\u201D;cmd;#",
+  "\u201Cws\u201D",
+  "ws\u201E",
+  "\u2018ws\u2019",
+  // Other characters outside the allow list.
+  "a;b", "a#b", "a&b", "a|b", "a<b", "a>b", "a'b", "a*b", "a?b", "a[b]", "a{b}", "a~b", "a^b", "a\u20ACb", "a\u3000b",
 ];
 
 const context = (extra: Record<string, unknown> = {}): RunSummaryContext =>
@@ -136,7 +145,7 @@ describe("U-38: the end summaries' hints with the typed workspace", () => {
 
   test("a value that is not exactly a ShownWorkspace: <workspace> as before (fail closed)", () => {
     const before = out.runSummary(run(PLAN_PENDING), context());
-    for (const value of ["my work", '"my"work"', '"a\u0007b"', `"ws/${TYPED}"`, `"${"x".repeat(MAX_SHOWN_WORKSPACE_CHARS + 1)}"`, '""', '"C:\\ws\\"', 7, null, ["\"a\""]]) {
+    for (const value of ["my work", '"my"work"', '"a\u0007b"', '"x\u201D;cmd;#"', '"\u201Cws\u201D"', `"ws/${TYPED}"`, `"${"x".repeat(MAX_SHOWN_WORKSPACE_CHARS + 1)}"`, '""', '"C:\\ws\\"', 7, null, ["\"a\""]]) {
       assert.equal(out.runSummary(run(PLAN_PENDING), context({ workspaceShown: value })), before, JSON.stringify(value));
       assert.equal(out.runSummary(run(), context({ workspaceShown: value })), out.runSummary(run(), context()), JSON.stringify(value));
     }

@@ -282,7 +282,8 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
      - 경로는 언제나 `adapter`다. GUI가 다른 경로(`cli-tty`, `cli-flag`)를 댈 수 없다.
      - 다이제스트가 64자리 소문자 16진수가 아니거나, 적용하는 계획(`digest`, 12자 이상 앞부분)과 다르면 실행 전에 `invalid_arguments`로 거부한다. 엔진도 다른 계획의 동의를 없는 것으로 본다.
    - task·설정·프로필·계획·모델은 동의를 줄 수 없다. 요청의 이 필드 말고 다른 통로는 없다.
-   - G-F의 `runApply`는 아직 승인 경로를 `cli-flag`·`cli-tty`로만 정하고 동의 인자를 받지 않는다. 앱 계층이 CLI 함수를 부르는 방식(AC-D16)으로 붙이려면 CLI가 `adapter` 승인과 동의를 주입받는 자리가 필요하다(A-4 보고서).
+   - G-F의 `runApply`는 아직 승인 경로를 `cli-flag`·`cli-tty`로만 정하고 동의 인자를 받지 않는다.
+   - PM 결정(A-4 질문 1): CLI의 적용 함수에 `adapter` 승인 경로와 DR-21 동의를 주입받는 자리를 둔다(CLI 담당). 앱 계층은 지금처럼 그 CLI 함수를 부른다. 보안 검사는 한 벌로 유지한다(AC-D16). 범용 작업 묶음이 main에 들어온 뒤 붙인다.
 6. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
 
 - 앱 계층에는 이 세 함수가 아직 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-F)이 범용 작업 묶음과 함께 main에 들어온 뒤 붙인다(G-F는 `claude/workspace-policy`에 있다). 타입은 G-A의 것을 쓴다.

@@ -546,6 +546,16 @@ startGui({
       await js(`document.querySelector('[data-preview="${analyzeRunId}"]')?.click(); true`);
       await waitFor("(() => { const r = document.getElementById('revert-panel')?.getAttribute('data-preview'); return r && r !== 'loading' ? r : null; })()");
       results["revertRecordsChanged"] = await js("document.getElementById('revert-records-changed') !== null");
+      // U-48 (U-43): the marked run's changes have the warning first; its files come without text (5h showed it before the mark).
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-changes="${analyzeRunId}"]')?.click(); true`);
+      results["changesRecordsChanged"] = {
+        ready: await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()"),
+        ...((await js(
+          "(() => { const body = document.getElementById('changes'); return { first: body?.firstElementChild?.id ?? null, files: body?.querySelectorAll('.changed-file').length ?? 0, hidden: body?.querySelectorAll('[data-text=\"hidden\"]').length ?? 0, diffs: body?.querySelectorAll('.diff').length ?? 0 }; })()",
+        )) as Record<string, unknown>),
+      };
 
       // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
       // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),

@@ -386,7 +386,7 @@ export function asReview(value: unknown): ReviewReply {
   return { ok: true, verdict: value["verdict"], replaced: value["replaced"] === true };
 }
 
-/** DR-29: a run's changed files, by path and state. Rows that do not fit are left out. */
+/** DR-29: a run's changed files, by path and state. Rows that do not fit are left out. U-48: the run's records-changed mark. */
 export function asChanges(value: unknown): ChangesReply {
   if (!isObj(value) || value["ok"] !== true || !str(value["runId"]) || !Array.isArray(value["files"])) return failed(value);
   const files: ChangedFileItem[] = value["files"].flatMap((file: unknown): ChangedFileItem[] =>
@@ -403,7 +403,7 @@ export function asChanges(value: unknown): ChangesReply {
         ]
       : [],
   );
-  return { ok: true, runId: value["runId"], files };
+  return { ok: true, runId: value["runId"], recordsChanged: value["recordsChanged"] === true, files };
 }
 
 /** GU-3: a run's report (the main process checked it already). */

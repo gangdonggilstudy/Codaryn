@@ -137,6 +137,7 @@ export function createRedactor(apiKey: string, keyShapeSources: readonly string[
     fragments.add(apiKey.slice(index, index + KEY_FRAGMENT_CHARS));
   }
   const keyShapes = keyShapeSources.map((source) => new RegExp(source, "g"));
+  const keyShapesAtStart = keyShapeSources.map((source) => new RegExp(source, "y"));
 
   return (input: string): string => {
     const text = input.length > MAX_ERROR_SOURCE_CHARS ? input.slice(0, MAX_ERROR_SOURCE_CHARS) : input;
@@ -165,6 +166,20 @@ export function createRedactor(apiKey: string, keyShapeSources: readonly string[
     }
     for (const keyShape of keyShapes) {
       for (const match of compact.matchAll(keyShape)) cover(match.index, match[0].length);
+      // SP-5: also on the text as it is, for a key whose end runs into the next word in the compact view.
+      for (const match of text.matchAll(keyShape)) covered.fill(1, match.index, match.index + match[0].length);
+    }
+    // SP-5: a shape that needs a word start (``, the OpenAI ones) finds none in the compact view
+    // where a separator was left out: the key is glued to the word before it. So each such place is
+    // also tried as a start, which keeps a key split by separators findable there too.
+    for (let index = 1; index < compact.length; index += 1) {
+      if ((positions[index] as number) - (positions[index - 1] as number) === 1) continue;
+      const rest = compact.slice(index);
+      for (const keyShape of keyShapesAtStart) {
+        keyShape.lastIndex = 0;
+        const match = keyShape.exec(rest);
+        if (match !== null) cover(index, match[0].length);
+      }
     }
 
     let out = "";
@@ -316,8 +331,11 @@ export interface Transport {
    * MAX_RETRY_AFTER_MS ends the retries instead of retrying early.
    */
   readonly retryAfter?: "cap" | "minimum";
-  /** The provider's description of an error response (what of its body may be quoted). */
-  readonly describeError: (status: number, body: LimitedBody) => string;
+  /**
+   * The provider's description of an error response (what of its body may be quoted). SP-5: it also
+   * gets the response headers, for a provider whose request id is a header (OpenAI `x-request-id`).
+   */
+  readonly describeError: (status: number, body: LimitedBody, headers: Headers) => string;
 }
 
 export interface HttpRequest {
@@ -429,7 +447,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
     return {
       type: "failed",
       kind,
-      message: transport.describeError(status, read),
+      message: transport.describeError(status, read, response.headers),
       retryable,
       ...(after === undefined ? {} : { retryAfterMs: after }),
       status,
@@ -485,12 +503,23 @@ export function createKeyMaterialCheck(apiKey: string, keyShapeSources: readonly
     fragments.add(apiKey.slice(index, index + KEY_FRAGMENT_CHARS));
   }
   const keyShapes = keyShapeSources.map((source) => new RegExp(source));
+  const keyShapesAtStart = keyShapeSources.map((source) => new RegExp(source, "y"));
   return (text: string): boolean => {
     const compact = text.replace(SEPARATOR_RUN, "");
     if (apiKey.length > 0 && compact.includes(apiKey)) return true;
     for (let index = 0; fragments.size > 0 && index + KEY_FRAGMENT_CHARS <= compact.length; index += 1) {
       if (fragments.has(compact.slice(index, index + KEY_FRAGMENT_CHARS))) return true;
     }
-    return keyShapes.some((keyShape) => keyShape.test(compact));
+    // SP-5: the text as it is, and each place a separator run was left out as a start (see createRedactor).
+    if (keyShapes.some((keyShape) => keyShape.test(compact) || keyShape.test(text))) return true;
+    const pieces = text.split(SEPARATOR_RUN);
+    for (let index = 1; index < pieces.length; index += 1) {
+      const rest = pieces.slice(index).join("");
+      for (const keyShape of keyShapesAtStart) {
+        keyShape.lastIndex = 0;
+        if (keyShape.test(rest)) return true;
+      }
+    }
+    return false;
   };
 }

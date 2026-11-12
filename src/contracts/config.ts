@@ -13,13 +13,18 @@ import type { WorkflowDefinition } from "./workflow.js";
 
 /** API key. Read from the process environment only, kept in memory, never written or printed. */
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
-/** Model id. Used when the task does not name one. SP-D5: it applies to the chosen provider only. */
+/**
+ * Model id. Used when the task does not name one. DR-34: the Anthropic provider's only, as before
+ * there was a second provider (API_PROVIDERS.anthropic.modelEnv); OpenAI has its own variable.
+ */
 export const CODARYN_MODEL_ENV = "CODARYN_MODEL";
 /** Path of the config file. Used when `--config` is not given. */
 export const CODARYN_CONFIG_ENV = "CODARYN_CONFIG";
 /**
- * API base URL. Overrides the config file's address of the chosen provider (SP-D5: that provider
- * only). A task file cannot change it.
+ * API base URL. DR-34: the Anthropic provider's only, as before there was a second provider
+ * (API_PROVIDERS.anthropic.baseUrlEnv): it overrides the config file's Anthropic address and never
+ * sets another provider's, so a key goes only to its own provider's address (R-20 M-1). A task file
+ * cannot change it.
  */
 export const CODARYN_API_BASE_URL_ENV = "CODARYN_API_BASE_URL";
 
@@ -297,6 +302,23 @@ export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
  */
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
+/** DR-34: the OpenAI model id when the task does not name one (API_PROVIDERS.openai.modelEnv). */
+export const CODARYN_OPENAI_MODEL_ENV = "CODARYN_OPENAI_MODEL";
+
+/**
+ * DR-34: the OpenAI API address, with its version (API_PROVIDERS.openai.baseUrlEnv). It overrides
+ * the config file's OpenAI address only. A task file cannot change it.
+ */
+export const CODARYN_OPENAI_API_BASE_URL_ENV = "CODARYN_OPENAI_API_BASE_URL";
+
+/**
+ * DR-34 (b), R-20 M-2: S-2 registers the key value of the provider a run uses as a secret whatever
+ * its length, as before. The value of every other API_KEY_ENVS variable is registered only when it
+ * has at least this many characters, so a short placeholder kept there for another tool (`EMPTY`,
+ * `ollama`, `x`) does not turn ordinary words into secrets. A real key is far longer.
+ */
+export const MIN_OTHER_PROVIDER_KEY_LENGTH = 20;
+
 /**
  * DR-33 (1): an OpenAI key with a distinct prefix: `sk-proj-`, `sk-svcacct-` or `sk-admin-` at a word
  * start, then 20 or more of `A-Z a-z 0-9 _ -`.
@@ -358,6 +380,17 @@ export const MODEL_PROVIDER_NAMES = ["scripted", ...API_PROVIDER_NAMES] as const
 export interface ApiProviderSpec {
   /** The environment variable the key is read from (the only place a key comes from). */
   readonly keyEnv: string;
+  /**
+   * DR-34: the environment variable that names this provider's model when the task does not. It
+   * applies to this provider only.
+   */
+  readonly modelEnv: string;
+  /**
+   * DR-34: the environment variable that overrides this provider's address (over its config value).
+   * It applies to this provider only: no variable sends one provider's key to an address set for
+   * another. The address rule of `baseUrlPath` applies to it too.
+   */
+  readonly baseUrlEnv: string;
   /** Key shapes to find in files, arguments and output (regular expression sources). */
   readonly keyPatternSources: readonly string[];
   /** Used when neither CODARYN_API_BASE_URL nor the config gives an address. */
@@ -377,7 +410,8 @@ export interface ApiProviderSpec {
 export const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 
 /**
- * The provider table. The Anthropic entry holds exactly the values the CLI used before it.
+ * The provider table. The Anthropic entry holds exactly the values the CLI used before it (its
+ * model and address variables included, DR-34).
  * OpenAI (DR-31): key OPENAI_API_KEY, the refusal key shapes (DR-33), the address with `/v1`, at least 16
  * output tokens (facts C-10). Its largest output cap is not documented (facts); Codaryn's own bound
  * MAX_OUTPUT_TOKENS_LIMIT applies, as for Anthropic, until the PM sets another.
@@ -385,6 +419,8 @@ export const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 export const API_PROVIDERS = {
   anthropic: {
     keyEnv: ANTHROPIC_API_KEY_ENV,
+    modelEnv: CODARYN_MODEL_ENV,
+    baseUrlEnv: CODARYN_API_BASE_URL_ENV,
     keyPatternSources: [ANTHROPIC_KEY_PATTERN_SOURCE],
     defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
     baseUrlPath: "without_version",
@@ -393,6 +429,8 @@ export const API_PROVIDERS = {
   },
   openai: {
     keyEnv: OPENAI_API_KEY_ENV,
+    modelEnv: CODARYN_OPENAI_MODEL_ENV,
+    baseUrlEnv: CODARYN_OPENAI_API_BASE_URL_ENV,
     keyPatternSources: [OPENAI_KEY_PATTERN_SOURCE],
     defaultApiBaseUrl: DEFAULT_OPENAI_API_BASE_URL,
     baseUrlPath: "with_version",

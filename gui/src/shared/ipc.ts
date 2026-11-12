@@ -10,7 +10,17 @@
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",
   openFolder: "codaryn:workspace:open",
+  recent: "codaryn:workspace:recent",
+  openRecent: "codaryn:workspace:openrecent",
+  forgetRecent: "codaryn:workspace:forgetrecent",
+  tree: "codaryn:workspace:tree",
+  reveal: "codaryn:workspace:reveal",
   doctor: "codaryn:doctor:run",
+} as const;
+
+/** Main → renderer: a workspace was opened from outside the window (the command line of a second start). */
+export const IPC_EVENTS = {
+  workspaceOpened: "codaryn:event:workspaceopened",
 } as const;
 
 /** A workspace handle the main process issued: 128 random bits as lowercase hex. */
@@ -36,6 +46,32 @@ export function parseDoctorArgs(value: unknown): { readonly workspace: string | 
   const workspace = value["workspace"];
   if (workspace === null || workspace === undefined) return { workspace: null };
   return isHandle(workspace) ? { workspace } : null;
+}
+
+/** `openRecent`, `forgetRecent`: one id the recent list gave out. */
+export function parseIdArg(args: readonly unknown[]): string | null {
+  return args.length === 1 && isHandle(args[0]) ? args[0] : null;
+}
+
+/** Largest offset a tree page may start at (MAX_TREE_ENTRIES in the engine host). */
+export const MAX_TREE_OFFSET = 100_000;
+
+/** `tree` arguments: `{workspace, node, offset}`; `node` null is the workspace root. */
+export function parseTreeArgs(value: unknown): { readonly workspace: string; readonly node: string | null; readonly offset: number } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "node", "offset"])) return null;
+  const { workspace, node, offset } = value;
+  if (!isHandle(workspace)) return null;
+  if (node !== null && node !== undefined && !isHandle(node)) return null;
+  const start = offset ?? 0;
+  if (typeof start !== "number" || !Number.isSafeInteger(start) || start < 0 || start > MAX_TREE_OFFSET) return null;
+  return { workspace, node: (node ?? null) as string | null, offset: start };
+}
+
+/** `reveal` arguments: `{workspace, node}`. */
+export function parseRevealArgs(value: unknown): { readonly workspace: string; readonly node: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "node"])) return null;
+  const { workspace, node } = value;
+  return isHandle(workspace) && isHandle(node) ? { workspace, node } : null;
 }
 
 /** A call that takes no arguments gets `undefined` from `ipcRenderer.invoke(channel)`. */
@@ -102,6 +138,8 @@ export interface InfoView {
   readonly language: "ko" | "en";
   /** "ready", or the code of why the engine host is not available. */
   readonly engine: string;
+  /** A workspace named on the command line, already opened by the main process. */
+  readonly initialWorkspace: { readonly handle: string; readonly name: string } | null;
 }
 
 /** What `doctor` answers. Errors carry a code only; the window turns it into its own text. */
@@ -111,3 +149,35 @@ export type DoctorReply =
 
 /** What `openFolder` answers: a handle and the folder's own name, or null when nothing was chosen. */
 export type OpenFolderReply = { readonly handle: string; readonly name: string } | null;
+
+/** One remembered workspace. `path` is the folder the person chose; it is shown in the recent list only. */
+export interface RecentView {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly exists: boolean;
+}
+
+/** What opening a remembered or command-line workspace answers. */
+export type OpenReply = { readonly ok: true; readonly handle: string; readonly name: string } | { readonly ok: false; readonly code: string };
+
+/**
+ * dir, file: a plain directory or file. link: a link or junction, never followed. state: the
+ * workspace's own `.codaryn`. other: anything else. A masked entry's name hid something (a key
+ * shape or control characters); it has no id and cannot be opened.
+ */
+export const TREE_KINDS = ["dir", "file", "link", "state", "other"] as const;
+export type TreeKind = (typeof TREE_KINDS)[number];
+
+export interface TreeEntryView {
+  /** Present for directories that can be expanded and files that can be shown in the file manager. */
+  readonly id: string | null;
+  /** The name as shown: control characters replaced and key shapes hidden. */
+  readonly name: string;
+  readonly kind: TreeKind;
+  readonly masked: boolean;
+}
+
+export type TreeReply =
+  | { readonly ok: true; readonly entries: readonly TreeEntryView[]; readonly total: number; readonly offset: number; readonly nextOffset: number | null }
+  | { readonly ok: false; readonly code: string };

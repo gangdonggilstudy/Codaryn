@@ -5,25 +5,34 @@
  */
 
 import { randomBytes } from "node:crypto";
+import inspector from "node:inspector";
 import { existsSync, statSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { BrowserWindow, Menu, app, session } from "electron";
+import { IPC_EVENTS } from "../shared/ipc.js";
+import type { OpenReply } from "../shared/ipc.js";
 import { APP_INDEX_URL } from "./app-url.js";
+import { folderArgument } from "./cli-args.js";
 import { startEngineHost } from "./engine-client.js";
 import type { EngineHost, StartOutcome } from "./engine-client.js";
 import { hostEnvironment } from "./environment.js";
-import { WorkspaceHandles } from "./handles.js";
+import { GUI_STATE_FILE_NAME, settingsDir } from "./gui-state.js";
 import { registerIpc } from "./ipc.js";
 import { findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
 import { guardContents, secureSession } from "./security.js";
-import { SESSION_PARTITION, FORBIDDEN_SWITCHES, forbiddenSwitch, secureWebPreferences } from "./security-policy.js";
+import { SESSION_PARTITION, debuggingRequested, secureWebPreferences } from "./security-policy.js";
+import { Workspaces } from "./workspaces.js";
 
 export interface GuiOptions {
   /** The `gui` package directory. */
   readonly guiRoot: string;
   /** Chromium's profile directory. Default: outside the settings directory (6.3). */
   readonly userDataDir?: string;
+  /** gui-state.json. Default: the settings directory of N-1. Null: keep nothing between starts. */
+  readonly stateFile?: string | null;
   /** Pass the engine host's stderr through. */
   readonly showHostStderr?: boolean;
   /** Called once the window has loaded (smoke tests only; `main.ts` never sets it). */
@@ -33,14 +42,30 @@ export interface GuiOptions {
 export interface GuiContext {
   readonly window: BrowserWindow;
   readonly host: () => Promise<{ readonly host: EngineHost } | { readonly failure: string }>;
-  /** Issues a workspace handle as the folder dialog would (the dialog cannot be driven by a test). */
-  readonly issueWorkspace: (folder: string) => string;
+  /**
+   * Opens a folder as a second start of the app with that folder on its command line does, and
+   * tells the window (the dialog cannot be driven by a test, the command line can).
+   */
+  readonly openFromOutside: (folder: string) => Promise<OpenReply>;
 }
 
 function defaultUserDataDir(): string {
   const local = process.platform === "win32" ? process.env["LOCALAPPDATA"] : undefined;
   if (local !== undefined && isAbsolute(local)) return join(local, "Codaryn", "gui-profile");
   return join(app.getPath("appData"), "Codaryn GUI Profile");
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function defaultStateFile(): string | null {
+  const dir = settingsDir(process.platform, process.env, homedir() || null);
+  return dir === null ? null : join(dir, GUI_STATE_FILE_NAME);
 }
 
 function isFile(file: string): boolean {
@@ -68,9 +93,17 @@ async function startHost(options: GuiOptions): Promise<StartOutcome | { readonly
 }
 
 export function startGui(options: GuiOptions): void {
-  const forbidden =
-    forbiddenSwitch(process.argv.slice(1)) ?? FORBIDDEN_SWITCHES.find((name) => app.commandLine.hasSwitch(name)) ?? null;
-  if (forbidden !== null) {
+  // 6.7, R-10 L-1: a debugging switch, NODE_OPTIONS asking for the inspector, or an inspector that is
+  // already open ends the app here. The inspector is closed first. `--inspect-brk` never reaches this
+  // line; only the fuses (GU-9) refuse it.
+  const debugging = debuggingRequested({
+    argv: process.argv.slice(1),
+    nodeOptions: process.env["NODE_OPTIONS"],
+    inspectorUrl: inspector.url(),
+    hasSwitch: (name) => app.commandLine.hasSwitch(name),
+  });
+  if (debugging !== null) {
+    inspector.close();
     app.exit(2);
     return;
   }
@@ -87,12 +120,30 @@ export function startGui(options: GuiOptions): void {
   let window: BrowserWindow | null = null;
   let hostState: Promise<{ readonly host: EngineHost } | { readonly failure: string }> = Promise.resolve({ failure: "host_starting" });
   let currentHost: EngineHost | null = null;
-  const handles = new WorkspaceHandles((size) => randomBytes(size));
+  const workspaces = new Workspaces({
+    stateFile: options.stateFile === undefined ? defaultStateFile() : options.stateFile,
+    platform: process.platform,
+    randomBytes: (size) => randomBytes(size),
+    now: () => new Date(),
+    isDirectory,
+  });
+  let initialWorkspace: { readonly handle: string; readonly name: string } | null = null;
 
-  app.on("second-instance", () => {
+  /** A folder from a command line (this start's, or a second start's): opened, then shown in the window. */
+  async function openFromOutside(folder: string): Promise<OpenReply> {
+    const opened = await workspaces.open(folder);
+    if (opened.ok && window !== null && !window.isDestroyed()) {
+      window.webContents.send(IPC_EVENTS.workspaceOpened, { handle: opened.handle, name: opened.name });
+    }
+    return opened;
+  }
+
+  app.on("second-instance", (_event, argv, workingDirectory) => {
     if (window === null) return;
     if (window.isMinimized()) window.restore();
     window.focus();
+    const folder = folderArgument(argv, app.isPackaged, workingDirectory, process.platform);
+    if (folder !== null) void openFromOutside(folder);
   });
   app.on("window-all-closed", () => app.quit());
   let closingHost = false;
@@ -120,7 +171,18 @@ export function startGui(options: GuiOptions): void {
       });
       return state;
     });
-    registerIpc({ window: () => window, host: () => hostState, handles, osLocale: () => app.getLocale() });
+    const startFolder = folderArgument(process.argv, app.isPackaged, process.cwd(), process.platform);
+    if (startFolder !== null) {
+      const opened = await workspaces.open(startFolder);
+      if (opened.ok) initialWorkspace = { handle: opened.handle, name: opened.name };
+    }
+    registerIpc({
+      window: () => window,
+      host: () => hostState,
+      workspaces,
+      osLocale: () => app.getLocale(),
+      initialWorkspace: () => initialWorkspace,
+    });
 
     const devTools = !app.isPackaged && process.env["CODARYN_GUI_DEVTOOLS"] === "1";
     window = new BrowserWindow({
@@ -133,12 +195,12 @@ export function startGui(options: GuiOptions): void {
     window.once("ready-to-show", () => window?.show());
     window.on("closed", () => {
       window = null;
-      handles.clear();
+      workspaces.clear();
     });
     await window.loadURL(APP_INDEX_URL);
     if (devTools) window.webContents.openDevTools({ mode: "detach" });
     if (options.afterLoad !== undefined) {
-      await options.afterLoad({ window, host: () => hostState, issueWorkspace: (folder) => handles.issue(folder) });
+      await options.afterLoad({ window, host: () => hostState, openFromOutside });
     }
   });
 }

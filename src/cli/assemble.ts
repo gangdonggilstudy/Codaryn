@@ -5,7 +5,7 @@
 
 import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
-import { JOURNAL_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
@@ -23,6 +23,7 @@ import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js
 import { createWorkspace } from "../workspace/index.js";
 import type {
   ApprovalChannel,
+  RevertErrorCode,
   CliErrorCode,
   Clock,
   EngineDeps,
@@ -166,15 +167,20 @@ async function isFile(file: string): Promise<boolean> {
  * workspace. The workspace lock is held while files are put back, so no run can start meanwhile,
  * and a running task makes the revert stop with `workspace_locked` before anything changes.
  */
+/** The CLI's fixed text for each code revertRun rejects with (REVERT_ERROR_CODES). */
+const REVERT_ERROR_MESSAGES: { readonly [C in RevertErrorCode]: string } = {
+  run_not_found: "the workspace has no journal for that run id; nothing was changed",
+  invalid_run_record: "the run's journal cannot be read; nothing was changed",
+  // R-9c C-1: the apply's files' real paths are known only from its plan run's plan.json.
+  plan_run_missing: "the plan run this apply used, or its plan.json, is gone, so the files' real paths are not known; nothing was changed. Keep a plan run while its apply may be reverted",
+};
+
 export function createRevertCommand(revertRun: RevertRun, options: RevertCommandOptions = {}): RevertCommand {
   const failed = (error: unknown): RevertCommandOutcome => {
-    // revertRun rejects only before it changes anything. Its text is not passed on.
-    const code = error instanceof RevertRunError && error.code === "run_not_found" ? "run_not_found" : "invalid_run_record";
-    const message =
-      code === "run_not_found"
-        ? "the workspace has no journal for that run id; nothing was changed"
-        : "the run's journal cannot be read; nothing was changed";
-    return { ok: false, code, message };
+    // revertRun rejects only before it changes anything, with one of REVERT_ERROR_CODES. Its text
+    // is not passed on; anything else is invalid_run_record.
+    const code: RevertErrorCode = error instanceof RevertRunError && REVERT_ERROR_CODES.includes(error.code) ? error.code : "invalid_run_record";
+    return { ok: false, code, message: REVERT_ERROR_MESSAGES[code] };
   };
   return async ({ workspace, runId: requested, lockId, clock, dryRun = false, consent = null }) => {
     if (dryRun && consent !== null) {

@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { asRawText } from "../../../src/contracts/index.js";
+import { PLAN_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME, asRawText } from "../../../src/contracts/index.js";
 import type {
   ApplyDeps,
   ApplyJournalEvent,
@@ -32,6 +32,7 @@ import type {
 import { applyPlan } from "../../../src/engine/index.js";
 import { createPolicyGate } from "../../../src/policy/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
+import { canonicalActions, createPlanRecorder } from "../../../src/store/index.js";
 import { createPlanExecutor, createToolRunner, discardedRootOf } from "../../../src/tools/index.js";
 import type { PlanFileOps } from "../../../src/tools/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
@@ -148,6 +149,8 @@ async function apply(
     onMark?: () => Promise<void>;
     /** DR-21: no consent, a person's consent for this plan's digest, or one given for another plan. */
     consent?: "none" | "this_plan" | "other_plan";
+    /** DR-28: the secrets registered when applying. Default: the plan run's (FAKE_SECRET). */
+    secrets?: readonly string[];
   } = {},
 ): Promise<Run> {
   const planActions = options.planActions ?? ["move", "discard"];
@@ -185,7 +188,7 @@ async function apply(
     policy: createPolicyGate({ config, workspace: fx.workspace }),
     planActions,
     discardedRoot: discardedRootOf(fx.workspace.root, APPLY_RUN),
-    privacy: createPrivacyGateway({ secrets: [FAKE_SECRET] }),
+    privacy: createPrivacyGateway({ secrets: [...(options.secrets ?? [FAKE_SECRET])] }),
     verifiers: NO_VERIFIERS,
     inventory,
     journal,
@@ -433,5 +436,59 @@ test("G-C+G-B: a destination taken after the preflight ends the apply as apply_i
     assert.equal(await read(fx.root, "x/b.txt"), "theirs", "the other file is not replaced");
   } finally {
     await fx.cleanup();
+  }
+});
+
+test("G-C+G-B+store (DR-28): a plan stored by the real store is applied with the plan run's secrets and refused with other secrets", async () => {
+  const secretName = `photos/${FAKE_SECRET}.jpg`;
+  for (const [label, secrets, applies] of [
+    ["same secrets", [FAKE_SECRET], true],
+    ["another secret", ["fake-other-secret-gc02"], false],
+    ["no secret", [], false],
+  ] as const) {
+    const fx = await fixture({ [secretName]: "SSS", "a.txt": "alpha" });
+    try {
+      // The plan run: the real tool with the real store's recorder writes plan.json.
+      const runner = createToolRunner({
+        workspace: fx.workspace,
+        privacy: createPrivacyGateway({ secrets: [FAKE_SECRET] }),
+        planRecorder: createPlanRecorder({ workspaceRoot: fx.root, runId: PLAN_RUN }),
+      });
+      assert.ok(runner.executeWorkflowTool !== undefined);
+      const proposed = await runner.executeWorkflowTool(
+        {
+          id: "p1",
+          name: "propose_plan",
+          args: { summary: "tidy", actions: [{ kind: "move", from: secretName, to: "2026/s.jpg" }, { kind: "discard", path: "a.txt" }] },
+        },
+        new AbortController().signal,
+      );
+      assert.equal(proposed.ok, true, JSON.stringify(proposed));
+      const text = await fs.readFile(path.join(fx.root, STATE_DIR_NAME, RUNS_DIR_NAME, PLAN_RUN, PLAN_FILE_NAME), "utf8");
+      const actions = canonicalActions((JSON.parse(text) as { actions: unknown }).actions);
+      assert.ok(actions !== null && actions.every((action) => action.shown !== undefined), "every stored action has its masked form");
+      assert.doesNotMatch(JSON.stringify(actions.map((action) => action.shown)), new RegExp(FAKE_SECRET), "the masked form holds no secret");
+      const plan: StoredPlan = { schemaVersion: 1, kind: "plan", runId: PLAN_RUN, actions };
+
+      // The apply, with the secrets registered now.
+      const { result, journal, marks } = await apply(fx, plan, { secrets });
+      if (applies) {
+        assert.equal(result.status, "done", `${label}: ${JSON.stringify(result)}`);
+        assert.equal(marks, 1);
+        assert.equal(await read(fx.root, "2026/s.jpg"), "SSS");
+        assert.equal(await read(fx.root, "a.txt"), null);
+      } else {
+        assert.equal(result.status, "failed", label);
+        assert.equal(result.reason, "plan_stale", label);
+        assert.equal(marks, 0, `${label}: the plan is not claimed`);
+        assert.ok(result.notices.some((notice) => notice.includes("plan_secrets_differ")), `${label}: ${JSON.stringify(result.notices)}`);
+        assert.equal(journal.events.some((event) => event.type === "plan_checked" || event.type === "file_moved"), false, `${label}: nothing checked or moved`);
+        assert.equal(await read(fx.root, secretName), "SSS");
+        assert.equal(await read(fx.root, "a.txt"), "alpha");
+        assert.doesNotMatch(JSON.stringify({ result, events: journal.events }), new RegExp(FAKE_SECRET), `${label}: no plain secret in the result or the record`);
+      }
+    } finally {
+      await fx.cleanup();
+    }
   }
 });

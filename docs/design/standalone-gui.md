@@ -138,6 +138,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 ### 3.3 파일 트리
 
 - 내용은 앱 계층의 작업 공간 목록 함수가 내준다(5절 "작업 공간 목록", 계약 추가 필요). GUI가 디렉터리를 직접 읽지 않는다. 함수가 지킬 것[가정]
+  - [GU-2 임시] 그 함수가 생기기 전에는 엔진 호스트가 엔진의 `Workspace.resolve`와 `cleanText`·`hideKeys`로 한 단계씩 읽는다(`gui/src/engine-host/tree.ts`). 설정에 등록한 가릴 값(`secretEnv`)은 이 임시 목록에서 가리지 않는다. 앱 계층 함수가 들어오면 그것으로 바꾼다.
   - 작업 공간 규칙(`src/workspace`)으로 경로를 해석한다. 링크와 정션은 따라가지 않고 "링크"로 표시만 한다.
   - 루트의 `.codaryn`은 펼치지 않는다. "Codaryn 기록(열지 않음)"으로 보인다.
   - 이름은 표시용으로 가린다: 제어 문자 정리, 키 모양 가림, 현재 등록한 가릴 값 가림(DR-7과 같은 "현재 등록한 값" 기준, AC-D14). 가린 이름의 항목은 펼치거나 고를 수 없다(경로를 되찾을 수 없다).
@@ -399,7 +400,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 
 ### 4.2 메시지 통로
 
-- 전송: 엔진 호스트의 stdin(메인 → 호스트)과 stdout(호스트 → 메인)뿐이다. stderr는 진단용이고 제품 빌드에서 버린다. 다른 파이프, 소켓, 이름 있는 파이프는 없다.
+- 전송: 엔진 호스트의 stdin(메인 → 호스트)과 stdout(호스트 → 메인)뿐이다. stderr는 진단용이고 제품 빌드에서 버린다. 앱 코드가 여는 다른 파이프나 소켓은 없다. Windows에서 libuv가 표준 입출력에 쓰는 이름 있는 파이프(`uv…`)는 6.1의 규칙에서 뺀 내부 파이프다.
 - 형식(판 1)[설계, GU-1 구현]
   - UTF-8, 한 줄에 JSON 객체 하나, 줄 끝 LF(앞의 CR은 버린다). 모든 메시지에 `"v": 1`.
   - 한 줄의 상한은 8 MiB다. 넘는 줄은 끝까지 건너뛰고 일부도 전달하지 않는다.
@@ -510,7 +511,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 
 | 규칙 | 출처 | GUI에서의 적용 |
 | --- | --- | --- |
-| 로컬 웹 서버 금지, 듣는 소켓 없음 | N-13, DR-8 | TCP·UDP·다른 프로세스가 열 수 있는 이름 있는 파이프를 열지 않는다. 원격 디버깅 포트를 끈다. 개발할 때도 개발 서버 없이 빌드한 파일을 연다 |
+| 로컬 웹 서버 금지, 듣는 소켓 없음 | N-13, DR-8 | 앱 코드는 다른 프로세스가 연결하도록 듣는 TCP·UDP 소켓과 이름 있는 파이프를 열지 않는다. Electron(Chromium 내부 IPC의 `mojo` 파이프)과 libuv(엔진 호스트 표준 입출력의 `uv` 파이프)가 내부에서 만드는 파이프는 이 규칙에서 뺀다(PM 결정, R-10 L-6). 그 파이프의 접근 제한(ACL)은 확인하지 않았다(E-9와 함께 볼 것). 원격 디버깅 포트를 끈다. 개발할 때도 개발 서버 없이 빌드한 파일을 연다 |
 | 키는 환경 변수로만 | C-1, C-2, N-10, S-2, S-11, S-12 | 키 입력란·표시란·키 파일 없음. 있음·없음만 보인다. 클립보드·로그에 키가 없다 |
 | 설정 위치와 작업 공간 밖 규칙 | N-1, S-1, S-5 | CLI와 같은 해석 함수(앱 계층) |
 | 권한은 사용자 설정과 인자로만 | M-9 | GUI 입력은 "사용자 설정"이다. 모델 출력은 설정을 바꾸지 못한다 |
@@ -526,6 +527,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
   - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `nodeIntegrationInSubFrames: false`
   - `webviewTag: false`, `webSecurity: true`, `allowRunningInsecureContent: false`, `experimentalFeatures: false`
   - `spellcheck: false`. 세션에서도 맞춤법 검사기를 끄고 사전 주소를 열 수 없는 주소로 둔다. 창이 쓰지 않는 기본 세션에도 같은 설정을 한다. 켜 두면 Electron 45.3.1은 창 하나만 있어도 사전을 바깥에서 내려받는다(E-11, 실행으로 확인)
+  - [결정] PM(GU-1 검수): **맞춤법 검사기는 끈다.** 연기 시험이 바깥 요청 0건을 확인한다. 새 Chromium 프로필에 내려받은 파일이 없고(GS-17), 앱의 모든 프로세스에 바깥 TCP 연결·TCP 대기 소켓·UDP 끝점이 0개다(GS-1, GS-11). 이 확인은 시험이 끝날 때의 상태를 본 것이다. 시험 중 잠깐 열렸다 닫힌 연결까지 보는 것은 아니다.
   - `devTools`: 제품 빌드에서 `false`
   - `preload`: 6.4의 한 파일
   - `partition`: 저장하지 않는 세션(`persist:` 없음). 화면 저장소(localStorage, IndexedDB, 캐시)가 디스크에 남지 않는다. 화면은 상태를 메인에 맡긴다
@@ -588,7 +590,8 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 패키지할 때 `@electron/fuses`로 정한다.
   - 끔: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, `GrantFileProtocolExtraPrivileges`
   - 켬: `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`
-- 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자를 보면 바로 끝낸다[설계]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
+- 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자, 그 인자를 담은 `NODE_OPTIONS`, 이미 열린 검사기(`inspector.url()`)를 보면 검사기를 닫고 바로 끝낸다[설계, R-10 L-1]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
+  - 한계(실행으로 확인): Node가 앱 코드보다 먼저 검사기 포트를 열므로 `--inspect`와 `NODE_OPTIONS`의 포트는 잠깐 열렸다 닫힌다. `--inspect-brk`는 앱 코드 전에 Node가 멈춰 이 검사가 돌지 않는다. 둘 다 fuses(`EnableNodeCliInspectArguments`, `EnableNodeOptionsEnvironmentVariable` 끔, GU-9)만 막는다. 연기 시험이 세 형태의 종료를 확인하고 `--inspect-brk`는 알림으로 보인다.
 - 제품 빌드에 시험용 스위치나 숨은 개발 메뉴를 넣지 않는다. 시험은 8.3의 별도 진입점으로 한다.
 - 충돌 보고(`crashReporter`), 자동 업데이트, 원격 측정을 켜지 않는다(GUI-D9).
 
@@ -619,7 +622,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 | GS-8 | 가짜 비밀이 든 파일을 바꾸는 대본으로 실행한 뒤 변경 비교와 파일 트리를 연다 | 화면과 IPC 메시지에 가짜 비밀 원문이 없다(DR-7) |
 | GS-9 | 대본 모델이 이름에 가짜 비밀과 제어 문자가 든 모르는 도구를 부른다 | `(unknown tool)`로 보이고 원문과 제어 문자가 없다 |
 | GS-10 | 실행 기록 정리를 한다 | 폐기 보관함은 그대로다(DR-9) |
-| GS-11 | 대본 실행 동안 앱 프로세스 트리의 바깥 연결을 본다 | 0개(대본 제공자는 접속하지 않는다) |
+| GS-11 | 대본 실행 동안 앱 프로세스 트리의 바깥 연결을 본다 | 0개(대본 제공자는 접속하지 않는다). GU-2 연기 시험이 앱 프로세스의 바깥 TCP 연결 수를 본다 |
 | GS-12 | 화면에서 `process`, `require`, `ipcRenderer`를 찾는다 | 없다 |
 | GS-13 | `applyPlan`·`revert`·`cleanup`을 토큰 없이, 남의 토큰으로, 같은 토큰 두 번으로 부른다 | 거부. 메인 확인을 지나지 않으면 파일이 그대로다 |
 | GS-14 | 화면 인자로 DR-21 동의 값을 넣어 적용을 부른다 | 동의로 쓰이지 않는다. 동의는 메인 대화상자 결과로만 생긴다 |

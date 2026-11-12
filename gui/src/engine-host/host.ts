@@ -26,14 +26,26 @@ export interface HostMessages {
   texts(osLocale: string | null, ids: readonly string[]): { readonly language: string; readonly texts: Readonly<Record<string, string>> };
 }
 
+/** GU-2: one directory of a workspace (tree.ts). */
+export type HostTree = (request: { readonly workspace: string; readonly dir: string; readonly offset: number }) => Promise<unknown>;
+
 export interface HostDeps {
   readonly app: HostApp;
   readonly messages: HostMessages;
+  readonly tree: HostTree;
   /** Writes one complete line to the channel. */
   readonly write: (line: string) => void;
   /** Diagnostics for stderr. Never the content of a request or a response. */
   readonly log: (text: string) => void;
+  /**
+   * R-10 L-2: called once when the input ends, which means the main process is gone or closing.
+   * Whatever is still running is to stop now (GU-3 cancels its runs here).
+   */
+  readonly onInputEnd?: () => void;
 }
+
+/** How long `serve` waits for running calls after the input ended (R-10 L-2). */
+export const INPUT_END_GRACE_MS = 1_000;
 
 const MAX_PATH_CHARS = 4096;
 const MAX_MESSAGE_IDS = 200;
@@ -59,6 +71,15 @@ function doctorArgs(args: unknown): HostDoctorRequest {
     throw new ArgsError();
   }
   return { configPath: null, varsFile: null, taskPath: null, workspace };
+}
+
+function treeArgs(args: unknown): { workspace: string; dir: string; offset: number } {
+  if (!isObj(args) || !onlyKeys(args, ["workspace", "dir", "offset"])) throw new ArgsError();
+  const { workspace, dir, offset } = args;
+  if (typeof workspace !== "string" || workspace.length > MAX_PATH_CHARS || !isAbsolute(workspace) || workspace.includes("\0")) throw new ArgsError();
+  if (typeof dir !== "string" || dir.length > MAX_PATH_CHARS || dir.includes("\0")) throw new ArgsError();
+  if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) throw new ArgsError();
+  return { workspace, dir, offset };
 }
 
 function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] } {
@@ -87,6 +108,8 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { osLocale, ids } = messagesArgs(args);
         return deps.messages.texts(osLocale, ids);
       }
+      case "tree":
+        return deps.tree(treeArgs(args));
     }
   }
 
@@ -122,10 +145,16 @@ export function createHostHandler(deps: HostDeps): HostHandler {
 }
 
 /**
- * Reads request lines from `input` until it ends and answers each. Requests run concurrently;
- * the returned promise resolves when the input has ended and every answer is written.
+ * Reads request lines from `input` until it ends and answers each. Requests run concurrently.
+ * When the input ends (the main process is gone or closing, DR-8) it tells `onInputEnd` and waits
+ * for running calls at most `graceMs`; their answers have nobody to read them, so the host does not
+ * stay for them (R-10 L-2).
  */
-export async function serve(input: AsyncIterable<string | Uint8Array>, deps: HostDeps): Promise<void> {
+export async function serve(
+  input: AsyncIterable<string | Uint8Array>,
+  deps: HostDeps,
+  options: { readonly graceMs?: number } = {},
+): Promise<void> {
   const handler = createHostHandler(deps);
   const running = new Set<Promise<void>>();
   const decoder = new LineDecoder(
@@ -140,5 +169,11 @@ export async function serve(input: AsyncIterable<string | Uint8Array>, deps: Hos
     decoder.push(typeof chunk === "string" ? chunk : text.decode(chunk, { stream: true }));
   }
   decoder.end();
-  await Promise.all(running);
+  deps.onInputEnd?.();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const grace = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, options.graceMs ?? INPUT_END_GRACE_MS);
+  });
+  await Promise.race([Promise.all(running), grace]);
+  clearTimeout(timer);
 }

@@ -157,6 +157,8 @@ export const EN_MESSAGES: MessageTexts = {
   "help.option.json": "--json: print the result as one JSON line",
   "help.option.use": "--use <number|id>: write that model into the config file's model",
   "help.option.limit": "--limit <n>: how many runs to show (default 20, at most 1000)",
+  "help.option.allow_unsafe_move":
+    "--allow-unsafe-move: consent, for this apply or revert only, to moves that could replace a file",
   "help.exit.run": "done 0, failed 1, input errors 2, needs-input 3, budget-exhausted 4, cancelled 5, workspace locked 6, provider not configured 7, internal error 70",
   "help.exit.revert": "complete 0, partial 3, errors 2 or 6",
   "help.exit.report": "complete 0, incomplete (no result.json) 3, errors 2",
@@ -220,6 +222,8 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.file_locations.inside": "input files inside the workspace or not confirmable: {count}; a run refuses them",
   "doctor.file_locations.ok": "input files outside the workspace: {count}",
   "doctor.commands.none": "no command is allowed and no command check is configured",
+  "doctor.commands.extra_args_with_plan":
+    "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
   "doctor.commands.ok": "executables found and allowed by the run's rules: {count}",
   "doctor.commands.ok_unchecked": "executables found: {count}; the run's rules need a workspace and were not checked",
   "doctor.commands.problems":
@@ -284,6 +288,10 @@ export const EN_MESSAGES: MessageTexts = {
   "error.plan_not_approved.fix": "Read the plan with codaryn plan; to approve it, give codaryn apply --digest <at least the first 12 characters of the plan digest>.",
   "error.plan_already_applied.what": "this plan was already applied, so nothing was changed",
   "error.plan_already_applied.fix": "Read the result with codaryn report, and undo it with codaryn revert if needed.",
+  "error.plan_secrets_differ.what": "the secrets registered now hide the plan's paths differently from the plan run, so nothing was shown or changed",
+  "error.plan_secrets_differ.fix": "Use the same task form as the plan run, and so the same secrets, or make the plan again.",
+  "error.plan_run_missing.what": "the plan run this apply used has no record (plan.json) any more, so nothing was changed",
+  "error.plan_run_missing.fix": "An apply can be reverted only while its plan run is kept. Restore that run's folder if you removed it.",
   "error.run_not_awaiting_review.what": "that run is not waiting for a person's review, so nothing was written",
   "error.run_not_awaiting_review.fix": "Give the id of a run that ended waiting for review (awaiting_review). codaryn runs lists them.",
   "error.internal_error.what": "an unexpected internal error occurred",

@@ -28,6 +28,7 @@ import {
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
   asRawText,
+  planActionShownMatches,
 } from "../contracts/index.js";
 import type {
   AppliedActionRecord,
@@ -58,6 +59,8 @@ const INVENTORY_LIMIT_NOTICE =
 const INVENTORY_FAILED_NOTICE = "the workspace inventory could not be taken; nothing was moved";
 const ALREADY_APPLIED_NOTICE = "the plan was already applied; nothing was moved";
 const UNMASKABLE_NOTICE = "the plan's paths could not be masked for the record; nothing was moved";
+const PLAN_SECRETS_DIFFER_NOTICE =
+  "the secrets registered now mask the plan's paths differently from the plan run (plan_secrets_differ); nothing was checked or moved. Apply with the same task form as the plan run, or make the plan again";
 const APPLY_INCOMPLETE_NOTICE = "an action failed; the actions done before it stay, and codaryn revert can undo them";
 const INTERRUPTED_NOTICE = "the apply stopped between actions; the actions done stay, and codaryn revert can undo them";
 const INTEGRITY_NOTICE = "protected material changed or could not be checked during the apply; the result is not trusted";
@@ -76,6 +79,7 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   INVENTORY_FAILED_NOTICE,
   ALREADY_APPLIED_NOTICE,
   UNMASKABLE_NOTICE,
+  PLAN_SECRETS_DIFFER_NOTICE,
   APPLY_INCOMPLETE_NOTICE,
   INTERRUPTED_NOTICE,
   INTEGRITY_NOTICE,
@@ -277,6 +281,23 @@ export const applyPlan: ApplyPlan = async (deps) => {
     // 2. Preflight: nothing is moved unless every action can be applied.
     const early = interrupted();
     if (early !== null) return early;
+    // DR-28 (R-11 M-1): every path must be masked now as the plan run masked it, or a value the
+    // plan run hid would be checked, recorded and shown in plain text. The caller compared already
+    // (plan_secrets_differ); this is the second defence, before anything else is done. The masked
+    // actions are the ones recorded later, so every action is recordable before the first is done.
+    const masked: MaskedPlanAction[] = [];
+    for (const action of plan.actions) {
+      const one = maskAction(action);
+      if (one === null) {
+        notice(UNMASKABLE_NOTICE);
+        return PLAN_STALE;
+      }
+      if (!planActionShownMatches(action, one)) {
+        notice(PLAN_SECRETS_DIFFER_NOTICE);
+        return PLAN_STALE;
+      }
+      masked.push(one);
+    }
     let before: InventoryManifest;
     try {
       before = await inventory.capture();
@@ -319,16 +340,6 @@ export const applyPlan: ApplyPlan = async (deps) => {
     if (unsafeMoves.length > 0 && !consented) {
       notice(CONSENT_REQUIRED_NOTICE);
       return CONSENT_REQUIRED;
-    }
-    // Every action must be recordable before the first one is done.
-    const masked: MaskedPlanAction[] = [];
-    for (const action of plan.actions) {
-      const one = maskAction(action);
-      if (one === null) {
-        notice(UNMASKABLE_NOTICE);
-        return PLAN_STALE;
-      }
-      masked.push(one);
     }
 
     // 3. Claim the plan.

@@ -25,6 +25,7 @@ function harness(app: Partial<HostApp> = {}, messages?: HostMessages) {
       ...app,
     },
     messages: messages ?? { texts: (_locale, ids) => ({ language: "en", texts: Object.fromEntries(ids.map((id) => [id, `T:${id}`])) }) },
+    tree: async (request) => ({ ok: true, entries: [], total: 0, offset: request.offset, nextOffset: null, dir: request.dir }),
     write: (line) => {
       assert.ok(line.endsWith("\n"));
       const message = parseHostMessage(line.trimEnd());
@@ -142,4 +143,19 @@ test("host: a request line longer than the limit is skipped and logged", async (
   await serve(input(), deps);
   assert.equal(written.length, 1);
   assert.match(logs.join("\n"), /longer than the limit/);
+});
+
+test("host (R-10 L-2): when the input ends, serve waits at most the grace time for running calls and says so once", async () => {
+  let ended = 0;
+  const { deps } = harness({
+    doctor: () => new Promise((resolve) => setTimeout(() => resolve({ ok: true, output: "late" }), 3_000)),
+  });
+  async function* input(): AsyncGenerator<string> {
+    yield encodeLine({ v: 1, id: 1, call: "doctor", args: { workspace: null } });
+  }
+  const begin = Date.now();
+  await serve(input(), { ...deps, onInputEnd: () => (ended += 1) }, { graceMs: 200 });
+  const took = Date.now() - begin;
+  assert.ok(took < 1_500, `serve ended after ${took} ms, not after the 3 s call`);
+  assert.equal(ended, 1);
 });

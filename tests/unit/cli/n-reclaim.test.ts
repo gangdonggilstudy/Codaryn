@@ -40,9 +40,13 @@ describe("doctor's lock check and the reclaim file", () => {
     }
   });
 
-  test("a reclaim file the store never clears is reported: not understood, or its owner still runs", async () => {
-    for (const reclaim of ["not json\n", `${JSON.stringify({ pid: "x" })}\n`, lockText(ALIVE)]) {
-      assert.equal(await inspectLockFile("/w", files({ [RECLAIM]: reclaim, [LOCK]: lockText(DEAD) }), isAlive, noStart), "reclaim_left", reclaim);
+  test("a reclaim file whose owner still runs is reported", async () => {
+    assert.equal(await inspectLockFile("/w", files({ [RECLAIM]: lockText(ALIVE), [LOCK]: lockText(DEAD) }), isAlive, noStart), "reclaim_left");
+  });
+
+  test("a whole reclaim file that is not understood is cleared by the next run (the store's rule): lock.json decides", async () => {
+    for (const reclaim of ["not json\n", `${JSON.stringify({ pid: "x" })}\n`]) {
+      assert.equal(await inspectLockFile("/w", files({ [RECLAIM]: reclaim, [LOCK]: lockText(DEAD) }), isAlive, noStart), "stale", reclaim);
     }
   });
 

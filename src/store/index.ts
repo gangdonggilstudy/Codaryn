@@ -17,12 +17,12 @@ export { RevertRunError, createChangeRecorder, readRunOriginals, revertRun, snap
 export type { OriginalUnavailable, RevertRunErrorCode, RunOriginal } from "./changes.js";
 export { RUN_START_TOLERANCE_MS, RunListError, inspectRun, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
 export type { RunInspection } from "./runs.js";
-export { PROCESS_START_TOLERANCE_MS, acquireLock, linuxProcessIdentity, nodeLockFileSystem, parseProcStartTicks, processStartTime, releaseLock } from "./lock.js";
+export { PROCESS_START_TOLERANCE_MS, acquireLock, inspectLock, linuxProcessIdentity, lockHolderAlive, nodeLockFileSystem, parseProcStartTicks, processStartTime, releaseLock } from "./lock.js";
 export { canonicalActions, createPlanRecorder, isWorkspaceRelativePath, loadPlan, markPlanApplied } from "./plan.js";
 export type { MarkPlanAppliedRequest } from "./plan.js";
 export { readReviewRecord, writeReviewRecord } from "./review.js";
 export { discardedRootPath, prepareDiscardedRoot } from "./discarded.js";
-export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ProcessIdentity, ReleaseLockOptions } from "./lock.js";
+export type { AcquireLockOptions, AcquireLockOutcome, InspectLockOptions, LockFileSystem, LockInfo, LockInspection, LockLivenessOptions, ProcessIdentity, ReleaseLockOptions } from "./lock.js";
 
 export interface JournalOptions {
   /** Real absolute path of the workspace root. */

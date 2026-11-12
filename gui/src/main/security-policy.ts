@@ -68,3 +68,25 @@ export function forbiddenSwitch(argv: readonly string[]): string | null {
   }
   return null;
 }
+
+/**
+ * R-10 L-1: whether debugging was asked for, by a switch on the command line, by NODE_OPTIONS
+ * (which Electron's Node reads before any app code), or already happened (the inspector is open).
+ * The app ends at its start check when this is not null. Limits: Node opens the inspector port
+ * before the check can run, so the port exists for a moment; `--inspect-brk` stops Node before any
+ * app code, so only the fuses (6.7, GU-9) refuse it.
+ */
+export function debuggingRequested(input: {
+  readonly argv: readonly string[];
+  readonly nodeOptions: string | undefined;
+  readonly inspectorUrl: string | undefined;
+  readonly hasSwitch: (name: string) => boolean;
+}): string | null {
+  return (
+    forbiddenSwitch(input.argv) ??
+    forbiddenSwitch((input.nodeOptions ?? "").split(/\s+/).filter((part) => part.length > 0)) ??
+    (input.inspectorUrl !== undefined ? "inspector" : null) ??
+    FORBIDDEN_SWITCHES.find((name) => input.hasSwitch(name)) ??
+    null
+  );
+}

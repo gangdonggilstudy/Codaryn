@@ -123,7 +123,9 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
       endStart({ ok: true, host });
       return;
     }
-    if (nodeVersion === null || !pending.settle(message)) violation();
+    // R-10 M-1: a late answer to a timed-out request is dropped; only an id nobody waits for and
+    // that never timed out (never issued, or answered already) breaks the channel.
+    if (nodeVersion === null || pending.settle(message) === "unknown") violation();
   }, violation);
 
   child.stdout.setEncoding("utf8");

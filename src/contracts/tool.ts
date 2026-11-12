@@ -572,7 +572,9 @@ export const ALL_TOOL_DEFINITIONS: { readonly [N in AnyToolName]: ToolDefinition
  * takes an optional `changeRecorder` (`ChangeRecorder`, see changes.ts). When one is given,
  * `write_file` hands it the file's original before writing, and does not write when that fails.
  * G-A: it also takes an optional `planRecorder` (`PlanRecorder`, plan.ts), which `propose_plan`
- * needs; without one `propose_plan` fails with `io_error` and stores nothing.
+ * needs; without one `propose_plan` fails with `io_error` and stores nothing. DR-28: `propose_plan`
+ * hands every action to it with `shown`, built with the runner's own `privacy` gateway
+ * (PlanRecorder.savePlan).
  */
 export interface ToolRunner {
   /** Executes one call that already passed every check. Never throws for tool-level failures. */

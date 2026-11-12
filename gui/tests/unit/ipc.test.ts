@@ -9,7 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { IPC_CHANNELS, doctorMessageIds, isNoArgs, parseDoctorArgs, toDoctorView } from "../../src/shared/ipc.js";
+import { IPC_CHANNELS, IPC_EVENTS, doctorMessageIds, isNoArgs, parseDoctorArgs, toDoctorView } from "../../src/shared/ipc.js";
 
 const GUI = fileURLToPath(new URL("../../../", import.meta.url));
 const HANDLE = "0123456789abcdef0123456789abcdef";
@@ -70,14 +70,14 @@ test("ipc: the doctor view keeps the checked fields only and refuses other shape
 test("ipc: the preload repeats exactly the shared channel names", () => {
   const source = readFileSync(path.join(GUI, "src", "preload", "preload.cts"), "utf8");
   const named = [...source.matchAll(/"(codaryn:[a-z]+:[a-z]+)"/g)].map((match) => match[1]).sort();
-  assert.deepEqual(named, Object.values(IPC_CHANNELS).sort());
+  assert.deepEqual(named, [...Object.values(IPC_CHANNELS), ...Object.values(IPC_EVENTS)].sort());
   assert.doesNotMatch(source, /exposeInMainWorld\([^)]*ipcRenderer\s*\)/, "ipcRenderer itself is not exposed");
 });
 
 test("ipc: renderer sources put no value in as HTML", () => {
   const dir = path.join(GUI, "src", "renderer");
-  const files = readdirSync(dir).filter((name) => name.endsWith(".ts"));
-  assert.ok(files.length > 0);
+  const files = (readdirSync(dir, { recursive: true }) as string[]).filter((name) => name.endsWith(".ts"));
+  assert.ok(files.length >= 5);
   for (const name of files) {
     const text = readFileSync(path.join(dir, name), "utf8");
     assert.doesNotMatch(text, /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|document\.write|\beval\s*\(|new\s+Function\s*\(/, name);

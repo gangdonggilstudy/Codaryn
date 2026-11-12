@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, asRawText } from "../../../src/contracts/index.js";
+import { PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, asRawText, planActionShown } from "../../../src/contracts/index.js";
 import type {
   AppliedPlanAction,
   ApplyDeps,
@@ -18,11 +18,15 @@ import type {
   InventoryCheckInput,
   InventoryChecker,
   InventoryManifest,
+  MaskedPlanAction,
+  MaskedText,
   PlanExecutor,
   PlanItemOutcome,
   PlanItemProblem,
   RawVerifierResult,
+  PrivacyGateway,
   ResolvedPlanAction,
+  StoredPlanAction,
   VerifierOutcome,
 } from "../../../src/contracts/index.js";
 import { APPLY_FIXED_TEXTS, applyPlan } from "../../../src/engine/index.js";
@@ -31,6 +35,25 @@ import { FAKE_SECRET, FAKE_TOKEN, FakeClock, FakePolicy, FakeVerifiers, HASH_A, 
 
 const MOVE: ResolvedPlanAction = { kind: "move", from: "a.jpg", to: "2026/a.jpg", sha256: HASH_A };
 const DISCARD: ResolvedPlanAction = { kind: "discard", path: "b.tmp", sha256: HASH_B };
+
+/** DR-28: an action as a plan run stores it, `shown` made with that run's gateway. */
+function stored(action: ResolvedPlanAction, privacy: PrivacyGateway = fakePrivacy()): StoredPlanAction {
+  const mask = (text: string): MaskedText => {
+    const masked = privacy.mask(text);
+    if (!masked.ok) throw new Error("fixture cannot be masked");
+    return masked.text;
+  };
+  const masked: MaskedPlanAction =
+    action.kind === "move"
+      ? { kind: "move", from: mask(action.from), to: mask(action.to), sha256: action.sha256 }
+      : { kind: "discard", path: mask(action.path), sha256: action.sha256 };
+  return { ...action, shown: planActionShown(masked) } as StoredPlanAction;
+}
+
+/** DR-28: a gateway with no secrets registered, as a task form without the plan run's secrets. */
+function plainPrivacy(): PrivacyGateway {
+  return { ...fakePrivacy(), mask: (text) => ({ ok: true, text: text as MaskedText }) };
+}
 
 class FakeApplyJournal {
   readonly events: ApplyJournalEntry[] = [];
@@ -143,7 +166,7 @@ function setup(parts: Partial<Omit<ApplyDeps, "journal" | "executor" | "inventor
   const controller = new AbortController();
   const marks: string[] = [];
   const deps: ApplyDeps = {
-    plan: { schemaVersion: 1, kind: "plan", runId: "20261112T000000Z-0000aaaa", actions: [MOVE, DISCARD] },
+    plan: { schemaVersion: 1, kind: "plan", runId: "20261112T000000Z-0000aaaa", actions: [stored(MOVE), stored(DISCARD)] },
     planRunId: "20261112T000000Z-0000aaaa",
     digest: "d".repeat(64),
     approval: "cli-flag",
@@ -209,7 +232,7 @@ describe("applyPlan: a plan that fits", () => {
         schemaVersion: 1,
         kind: "plan",
         runId: "20261112T000000Z-0000aaaa",
-        actions: [{ kind: "move", from: `${FAKE_SECRET}.jpg`, to: "x.jpg", sha256: HASH_A }],
+        actions: [stored({ kind: "move", from: `${FAKE_SECRET}.jpg`, to: "x.jpg", sha256: HASH_A })],
       },
     });
     const result = await applyPlan(run.deps);
@@ -226,6 +249,60 @@ describe("applyPlan: a plan that fits", () => {
       const masked = privacy.mask(text);
       assert.ok(masked.ok && masked.text === text, text);
     }
+  });
+});
+
+describe("applyPlan: the plan's paths must be masked now as the plan run masked them (DR-28, R-11 M-1)", () => {
+  const SECRET_MOVE: ResolvedPlanAction = { kind: "move", from: `${FAKE_SECRET}/c.jpg`, to: `2026/${FAKE_SECRET}/c.jpg`, sha256: HASH_A };
+  const SECRET_DISCARD: ResolvedPlanAction = { kind: "discard", path: `${FAKE_SECRET}.tmp`, sha256: HASH_B };
+  const planOf = (actions: StoredPlanAction[]) => ({ schemaVersion: 1, kind: "plan", runId: "20261112T000000Z-0000aaaa", actions }) as const;
+
+  /** Nothing ran: no check, no inventory, no claim, no move, and the value appears nowhere. */
+  function assertStoppedBeforeAnything(run: Setup, result: Awaited<ReturnType<typeof applyPlan>>): void {
+    assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
+    assert.ok(result.notices.some((notice) => notice.includes("plan_secrets_differ")), "the notice names the error");
+    assert.deepEqual(run.executor.checked, [], "no action was checked");
+    assert.deepEqual(run.executor.applied, [], "nothing was moved");
+    assert.equal(run.inventory.captures, 0, "the inventory was not taken");
+    assert.deepEqual(run.marks, [], "the plan was not claimed");
+    assert.deepEqual(result.applied, []);
+    assert.deepEqual(run.journal.types(), ["apply_started", "run_finished"]);
+    assert.doesNotMatch(JSON.stringify(run.journal.events), new RegExp(FAKE_SECRET), "no plain value in the record");
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(FAKE_SECRET), "no plain value in the result");
+  }
+
+  test("R-11 M-1 reproduction: a plan made with a secret, applied without it, stops before anything", async () => {
+    const run = setup({ plan: planOf([stored(SECRET_MOVE), stored(SECRET_DISCARD)]), privacy: plainPrivacy() });
+    assertStoppedBeforeAnything(run, await applyPlan(run.deps));
+  });
+
+  test("a plan without shown (stored before DR-28) is treated as masked differently", async () => {
+    const run = setup({ plan: planOf([MOVE, DISCARD] as StoredPlanAction[]) });
+    assertStoppedBeforeAnything(run, await applyPlan(run.deps));
+  });
+
+  test("masking more than the plan run did is a difference too", async () => {
+    const run = setup({ plan: planOf([stored(MOVE, plainPrivacy()), stored(DISCARD, plainPrivacy())]), privacy: fakePrivacy() });
+    const withSecretPath = setup({
+      plan: planOf([stored({ kind: "move", from: `${FAKE_SECRET}/c.jpg`, to: "d.jpg", sha256: HASH_A }, plainPrivacy())]),
+    });
+    assertStoppedBeforeAnything(withSecretPath, await applyPlan(withSecretPath.deps));
+    assert.equal((await applyPlan(run.deps)).reason, "verified", "no secret in these paths: the same parts");
+  });
+
+  test("a shown form of the other kind never matches", async () => {
+    const wrong = { ...MOVE, shown: { path: ["a.jpg"] } } as unknown as StoredPlanAction;
+    const run = setup({ plan: planOf([wrong, stored(DISCARD)]) });
+    assertStoppedBeforeAnything(run, await applyPlan(run.deps));
+  });
+
+  test("the same secrets as the plan run: the apply goes on, and the records stay masked", async () => {
+    const run = setup({ plan: planOf([stored(SECRET_MOVE), stored(SECRET_DISCARD)]) });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(run.executor.applied, [0, 1]);
+    assert.doesNotMatch(JSON.stringify(run.journal.events), new RegExp(FAKE_SECRET));
+    assert.match(JSON.stringify(run.journal.ofType("file_moved")), new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE));
   });
 });
 

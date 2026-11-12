@@ -290,6 +290,18 @@ export interface RevertRequest {
   readonly runId: string;
   /** N-7: decide and report every file the same way, change nothing, take no lock, write no revert record. */
   readonly dryRun?: boolean;
+  /**
+   * DR-25: the person's consent, given on the GUI's screen for this one revert, to move this run's
+   * files back unsafely (no hard links on that drive). Absent or null: none, and such files are
+   * skipped as `unsafe_move`. The app layer passes it to the CLI as the adapter's consent
+   * (`AdapterRevert`); it must name the run reverted (not "latest") and cannot go with a dry run.
+   */
+  readonly unsafeMoveConsent?: RevertConsentRequest | null;
+}
+
+/** DR-25: the GUI's consent to unsafe moves for one revert: the run id the person agreed for. */
+export interface RevertConsentRequest {
+  readonly runId: string;
 }
 
 /** N-7: `codaryn runs --json`. */
@@ -419,7 +431,6 @@ export interface PlanRequest {
   readonly runId: string;
 }
 
-/** DR-1, DR-2, DR-12: the apply takes the task form; its policy and verifiers come from it at apply time (DR-5). */
 /**
  * DR-21: the person's consent, given on the GUI's screen, to the moves of one apply that can only be
  * made unsafely (no hard links on that drive, so a file created at the destination meanwhile could
@@ -434,6 +445,7 @@ export interface UnsafeMoveConsentRequest {
   readonly digest: string;
 }
 
+/** DR-1, DR-2, DR-12: the apply takes the task form; its policy and verifiers come from it at apply time (DR-5). */
 export interface ApplyPlanRequest {
   readonly settings: TaskForm;
   readonly planRunId: string;

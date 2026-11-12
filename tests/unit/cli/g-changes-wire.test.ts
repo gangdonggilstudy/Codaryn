@@ -53,3 +53,30 @@ describe("changes in help", () => {
     assert.ok(helpText(null).includes("codaryn changes"));
   });
 });
+
+describe("DR-29: changes shows paths and states only while runs do not record how they masked the text", () => {
+  const unverified: ChangesOutput = {
+    ...VIEW,
+    files: [
+      { path: "notes.md" as never, created: false, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" },
+      { path: "added.md" as never, created: true, state: "changed_since_run", before: null, after: null, unavailable: "masking_unverified" },
+      { path: "[[CODARYN_SECRET:0123456789abcdef]]/x.md" as never, created: false, state: "unknown", before: null, after: null, unavailable: "masked_path" },
+    ],
+  };
+
+  test("the text says once why no text is shown, and gives each file its path and state", async () => {
+    const outcome = await runChanges({ argv: ["changes", "--workspace", ".", "--run", "latest"], env: {}, app: { changes: async () => ({ ok: true, output: unverified }) } });
+    assert.ok("text" in outcome);
+    const lines = outcome.text.split("\n");
+    assert.equal(lines.filter((line) => line.includes("DR-29")).length, 1, outcome.text);
+    assert.equal(outcome.text.includes("(masking_unverified)"), false, "no per-file code for the DR-29 case");
+    assert.ok(lines.some((line) => line.startsWith("== notes.md: changed by the run; as the run left it")));
+    assert.ok(lines.some((line) => line.startsWith("== added.md: created by the run; changed since the run")) || outcome.text.includes("added.md"));
+    assert.ok(outcome.text.includes("(masked_path)"), "other reasons are still named per file");
+  });
+
+  test("help says what changes shows now", () => {
+    const text = helpText("changes");
+    assert.ok(text.includes("state") && !text.includes("changed lines"), text);
+  });
+});

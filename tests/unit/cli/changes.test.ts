@@ -61,7 +61,7 @@ describe("parseChangesArgs", () => {
       ok: true,
       args: {
         command: "changes",
-        settings: { input: { kind: "task", taskPath: "t.json" }, configPath: "c.json", varsFile: "v.env", profile: null },
+        settings: { input: { kind: "task", taskPath: "t.json" }, configPath: "c.json", varsFile: "v.env", profile: null, workflowRef: null },
         runId: "latest",
         json: true,
       },
@@ -124,7 +124,7 @@ describe("runChanges", () => {
     assert.equal(printed.endsWith("\n") && printed.split("\n").length, 2, "one JSON line");
     assert.equal(printed.includes(FAKE_KEY), false);
     assert.equal((JSON.parse(printed) as ChangesOutput).kind, "changes");
-    assert.deepEqual(fake.seen[0], { settings: { input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, profile: null }, runId: "latest" });
+    assert.deepEqual(fake.seen[0], { settings: { input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, profile: null, workflowRef: null }, runId: "latest" });
 
     const human = text(await runChanges({ argv: ["changes", "--task", "t.json", "--run", "latest"], env, app: fake.app }));
     assert.equal(human.includes(FAKE_KEY), false);
@@ -153,8 +153,11 @@ describe("runChanges", () => {
     assert.equal((outcome as { result: EngineResult }).result.status, "done");
 
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", "latest"], env: {}, app }));
-    assert.match(shown, /== README\.md: changed by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)/);
-    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)/);
+    // DR-29: the reason is given once; each file has its path and state only.
+    assert.match(shown, /paths and states only: .*\(DR-29\)\n/);
+    assert.match(shown, /== README\.md: changed by the run; as the run left it\n/);
+    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n/);
+    assert.equal(shown.includes("(masking_unverified)"), false);
     assert.equal(shown.includes(FAKE_SECRET), false);
   });
 });

@@ -15,10 +15,12 @@
  */
 
 import {
+  APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
   DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
+  PLAN_ITEM_PROBLEMS,
   PERMISSION_KINDS,
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
@@ -31,6 +33,9 @@ import {
   toSchemaFieldPath,
 } from "../../contracts/index.js";
 import type {
+  ApplyJournalEvent,
+  ApplyResult,
+  ApplySummaryContext,
   CatalogText,
   CliErrorCode,
   CliErrorOutput,
@@ -66,6 +71,13 @@ export const HIDDEN_PATH = "?";
 const DOCTOR_CODES: ReadonlySet<string> = new Set<string>(DOCTOR_HINT_ERROR_CODES);
 
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
+const WORKSPACE_FORMS = ["current", "given", "task"] as const;
+/** EngineResult.plan.digest in its only valid form. */
+const DIGEST = /^[0-9a-f]{64}$/;
+/** Plan problems shown in one preflight line. The rest are counted. */
+const PLAN_PROBLEMS_SHOWN = 5;
+/** Apply reasons after which every action was applied (verification only runs then). */
+const APPLIED_ALL_REASONS: ReadonlySet<string> = new Set(["verified", "verifier_failed", "verifier_inconclusive", "protected_changed"]);
 const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
 
 function isOneOf<T extends string>(value: unknown, list: readonly T[]): value is T {
@@ -148,7 +160,23 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     return text === null ? null : `${fileText} — ${text}`;
   }
 
-  return {
+  /** "── <status and reason in words> (status/reason) ──". */
+  function heading(pair: { status: TerminalRunStatus; reason: RunReason } | null, status: unknown, reason: unknown): string {
+    if (pair === null) return `── ? (${token(status)}/${token(reason)}) ──`;
+    const words = catalog.format("summary.result", { status: catalog.format(`status.${pair.status}`), reason: catalog.format(`reason.${pair.reason}`) });
+    return `── ${words} (${pair.status}/${pair.reason}) ──`;
+  }
+
+  /** The run id, and the report and revert commands for it. */
+  function nextCommands(id: unknown, here: boolean, revertable: boolean): string[] {
+    const runId = toRunId(String(id));
+    if (runId === null) return [];
+    const out = [catalog.format("summary.run_id", { runId }), catalog.format(here ? "summary.next_report_here" : "summary.next_report", { runId })];
+    if (revertable) out.push(catalog.format(here ? "summary.next_revert_here" : "summary.next_revert", { runId }));
+    return out;
+  }
+
+  const output: HumanOutput = {
     error(output: CliErrorOutput): string {
       const label = catalog.format("error.label");
       const code = output.code;
@@ -167,17 +195,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
     runSummary(result: EngineResult, context: RunSummaryContext): string {
       const pair = validStatusReason(result.status, result.reason);
-      const out: string[] = [];
-      if (pair !== null) {
-        const heading = catalog.format("summary.result", {
-          status: catalog.format(`status.${pair.status}`),
-          reason: catalog.format(`reason.${pair.reason}`),
-        });
-        out.push(`── ${heading} (${pair.status}/${pair.reason}) ──`);
-      } else {
-        out.push(`── ? (${token(result.status)}/${token(result.reason)}) ──`);
-      }
-
+      const out: string[] = [heading(pair, result.status, result.reason)];
+      // G-A: a plan waiting for approval says so first.
+      const planReady = pair?.reason === "plan_pending" && result.plan !== undefined && isCount(result.plan.actions);
+      if (planReady && result.plan !== undefined) out.push(catalog.format("summary.plan_ready", { actions: result.plan.actions }));
       // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
@@ -217,12 +238,22 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
 
-      const runId = toRunId(result.runId);
-      if (runId !== null) {
-        const here = context.workspaceForm === "current";
-        out.push(catalog.format("summary.run_id", { runId }));
-        out.push(catalog.format(here ? "summary.next_report_here" : "summary.next_report", { runId }));
-        if (changes.length > 0) out.push(catalog.format(here ? "summary.next_revert_here" : "summary.next_revert", { runId }));
+      const here = context.workspaceForm === "current";
+      out.push(...nextCommands(result.runId, here, changes.length > 0));
+      // G-A: a plan waiting for approval, or a run waiting for a person's review.
+      const runId = toRunId(String(result.runId));
+      const form = catalog.format(`summary.form.${isOneOf(context.workspaceForm, WORKSPACE_FORMS) ? context.workspaceForm : "given"}`);
+      if (runId !== null && planReady && result.plan !== undefined) {
+        out.push(catalog.format("summary.next_plan", { form, runId }));
+        out.push(catalog.format("summary.next_apply", { form, runId }));
+        // Printed only in its closed form, so it can be copied into --digest.
+        if (typeof result.plan.digest === "string" && DIGEST.test(result.plan.digest)) out.push(`  ${result.plan.digest}`);
+      }
+      if (runId !== null && pair?.reason === "awaiting_review" && result.review !== undefined && Array.isArray(result.review.checklist)) {
+        const checklist = result.review.checklist;
+        out.push(catalog.format("summary.review_checklist", { count: checklist.length }));
+        for (const entry of checklist.slice(0, REVERT_MAX_LISTED)) out.push(`  - ${shownPath(String(entry))}`);
+        out.push(catalog.format("summary.next_review", { form, runId }));
       }
       return lines(out);
     },
@@ -380,5 +411,86 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (omitted > 0) out.push(catalog.format("runs.omitted", { count: omitted }));
       return lines(out);
     },
+
+    applyProgressLine(event: ApplyJournalEvent): string | null {
+      let line: string | null;
+      switch (event.type) {
+        case "apply_started": {
+          const approval: unknown = event.approval;
+          line =
+            isCount(event.actions, 1) && isOneOf(approval, APPROVAL_CHANNELS)
+              ? catalog.format("progress.apply_started", { actions: event.actions, approval: catalog.format(`approval.${approval}`) })
+              : null;
+          break;
+        }
+        case "plan_checked": {
+          const problems = Array.isArray(event.problems) ? event.problems : [];
+          const parts: string[] = [catalog.format("progress.plan_checked", { count: problems.length })];
+          for (const item of problems.slice(0, PLAN_PROBLEMS_SHOWN)) {
+            const problem: unknown = item.problem;
+            if (!isCount(item.index) || !isOneOf(problem, PLAN_ITEM_PROBLEMS)) continue;
+            parts.push(`${catalog.format("progress.plan_item_problem", { number: item.index + 1, problem: catalog.format(`plan.problem.${problem}`) })} (${problem})`);
+          }
+          if (problems.length > PLAN_PROBLEMS_SHOWN) parts.push(`(+${problems.length - PLAN_PROBLEMS_SHOWN})`);
+          if (event.inventoryLimitReached === true) parts.push(catalog.format("progress.inventory_limit"));
+          line = parts.join(" · ");
+          break;
+        }
+        case "file_moved":
+          line = isCount(event.index)
+            ? `${catalog.format("progress.file_moved", { number: event.index + 1 })} ${shownPath(String(event.from))} → ${shownPath(String(event.to))}`
+            : null;
+          break;
+        case "file_discarded":
+          line = isCount(event.index) ? `${catalog.format("progress.file_discarded", { number: event.index + 1 })} ${shownPath(String(event.path))}` : null;
+          break;
+        case "plan_item_failed": {
+          const problem: unknown = event.problem;
+          line =
+            isCount(event.index) && isOneOf(problem, PLAN_ITEM_PROBLEMS)
+              ? `${catalog.format("progress.plan_item_failed", { number: event.index + 1, problem: catalog.format(`plan.problem.${problem}`) })} (${problem})`
+              : null;
+          break;
+        }
+        // Records shared with model runs render as in progressLine.
+        case "verifier_result":
+        case "integrity_checked":
+        case "run_finished":
+          return output.progressLine(event);
+      }
+      return line === null ? null : finalLine(line);
+    },
+
+    applySummary(result: ApplyResult, context: ApplySummaryContext): string {
+      const pair = validStatusReason(result.status, result.reason);
+      const out: string[] = [heading(pair, result.status, result.reason)];
+      const applied = Array.isArray(result.applied) ? result.applied : [];
+      // ApplyResult has no plan total (reported): only when verification ran was every action
+      // applied, so only then is "applied of total" known.
+      if (pair !== null && APPLIED_ALL_REASONS.has(pair.reason)) {
+        out.push(catalog.format("summary.apply_actions", { applied: applied.length, total: applied.length }));
+      }
+      for (const item of applied.slice(0, REVERT_MAX_LISTED)) {
+        if (!isCount(item.index)) continue;
+        const action = item.action;
+        // The same words as the progress lines, so a move and a discard read apart.
+        out.push(
+          action.kind === "move"
+            ? `  ${catalog.format("progress.file_moved", { number: item.index + 1 })} ${shownPath(String(action.from))} → ${shownPath(String(action.to))}`
+            : `  ${catalog.format("progress.file_discarded", { number: item.index + 1 })} ${shownPath(String(action.path))}`,
+        );
+      }
+      if (applied.length > REVERT_MAX_LISTED) out.push(moreLine(applied.length - REVERT_MAX_LISTED));
+      const planRunId = toRunId(String(result.planRunId));
+      if (planRunId !== null) out.push(catalog.format("summary.apply_plan_run", { runId: planRunId }));
+      const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
+      if (verifiers.length > 0) {
+        out.push(catalog.format("summary.verifiers", { passed: verifiers.filter((verifier) => verifier.outcome === "pass").length, total: verifiers.length }));
+      }
+      if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
+      out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0));
+      return lines(out);
+    },
   };
+  return output;
 };

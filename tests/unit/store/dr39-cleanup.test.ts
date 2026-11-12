@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import { CLEANUP_LOG_FILE_NAME, RECORDS_CHANGED_FILE_NAME } from "../../../src/contracts/index.js";
-import type { ApplyJournalEvent, CleanupPlan, ContentHash, EngineResult, JournalEvent, MaskedText } from "../../../src/contracts/index.js";
+import type { ApplyJournalEvent, CleanupItemRef, CleanupPlan, ContentHash, EngineResult, JournalEvent, MaskedText } from "../../../src/contracts/index.js";
 import {
   acquireLock,
   applyCleanup,
@@ -91,6 +91,8 @@ async function workspace(): Promise<string> {
   return root;
 }
 
+/** An item's id: its run id, or a leftover folder's hex digits (DR-44 (d)). */
+const idOf = (item: CleanupItemRef): string => (item.target === "leftover" ? item.leftoverId : item.runId);
 const plan = (root: string, selection: Parameters<typeof planCleanup>[0]["selection"]): Promise<CleanupPlan> => planCleanup({ workspaceRoot: root, selection, now: NOW });
 
 describe("DR-39 summarizeState", () => {
@@ -102,6 +104,8 @@ describe("DR-39 summarizeState", () => {
     const byId = Object.fromEntries(summary.entries.map((entry) => [entry.runId, entry]));
     assert.deepEqual([byId[APPLY]?.kind, byId[APPLY]?.status, byId[APPLY]?.discarded?.files], ["apply", "done", 2]);
     assert.deepEqual([byId[REVERTED]?.reverted, byId[OLD]?.reverted, byId[RUNNING]?.status, byId[OLD]?.discarded], [true, false, null, null]);
+    assert.deepEqual([byId[REVERTED]?.partlyReverted, byId[OLD]?.partlyReverted], [false, false]);
+    assert.deepEqual(summary.leftovers, { count: 0, files: 0, bytes: 0 });
     assert.ok((byId[OLD]?.records.files ?? 0) >= 2 && (byId[OLD]?.records.bytes ?? 0) > 0);
     assert.equal(summary.runs.bytes, summary.entries.reduce((sum, entry) => sum + entry.records.bytes, 0));
     assert.deepEqual([summary.runs.oldest, summary.runs.newest], ["2026-01-01T01:00:01.000Z", "2026-01-02T05:00:01.000Z"]);
@@ -116,8 +120,8 @@ describe("DR-39 planCleanup", () => {
     const root = await workspace();
     assert.deepEqual((await plan(root, {})).items, []);
     assert.deepEqual((await plan(root, { runs: {} })).items, []);
-    assert.deepEqual((await plan(root, { runs: { reverted: true } })).items.map((item) => item.runId), [REVERTED]);
-    assert.deepEqual((await plan(root, { runs: { olderThanDays: 58, runIds: [OLD, RUNNING] } })).items.map((item) => item.runId), [OLD]);
+    assert.deepEqual((await plan(root, { runs: { reverted: true } })).items.map((item) => idOf(item)), [REVERTED]);
+    assert.deepEqual((await plan(root, { runs: { olderThanDays: 58, runIds: [OLD, RUNNING] } })).items.map((item) => idOf(item)), [OLD]);
   });
 
   test("blocks the running run, a run with no result and a plan that an unselected apply uses; warns otherwise", async () => {
@@ -126,17 +130,17 @@ describe("DR-39 planCleanup", () => {
     assert.ok(lock.ok);
     try {
       const shown = await plan(root, { runs: { runIds: [OLD, PLAN, RUNNING, REVERTED] } });
-      assert.deepEqual(shown.items.map((item) => [item.target, item.runId, item.warnings]), [["run", REVERTED, []], ["run", OLD, ["not_reverted"]]]);
+      assert.deepEqual(shown.items.map((item) => [item.target, idOf(item), item.warnings]), [["run", REVERTED, []], ["run", OLD, ["not_reverted"]]]);
       assert.deepEqual(shown.blocked, [{ target: "run", runId: RUNNING, code: "lock_held" }, { target: "run", runId: PLAN, code: "plan_used_by_apply" }]);
     } finally {
       await releaseLock({ workspaceRoot: root, runId: RUNNING });
     }
     assert.deepEqual((await plan(root, { runs: { runIds: [RUNNING] } })).blocked, [{ target: "run", runId: RUNNING, code: "no_result" }]);
     const both = await plan(root, { runs: { runIds: [PLAN, APPLY] } });
-    assert.deepEqual(both.items.map((item) => [item.runId, item.warnings]), [[APPLY, ["not_reverted", "discarded_left"]], [PLAN, []]]);
+    assert.deepEqual(both.items.map((item) => [idOf(item), item.warnings]), [[APPLY, ["not_reverted", "discarded_left"]], [PLAN, []]]);
     assert.deepEqual(both.blocked, []);
     const people = await plan(root, { discarded: { runIds: [APPLY] } });
-    assert.deepEqual(people.items.map((item) => [item.target, item.runId, item.warnings, item.size.files]), [["discarded", APPLY, ["people_files"], 2]]);
+    assert.deepEqual(people.items.map((item) => [item.target, idOf(item), item.warnings, item.size.files]), [["discarded", APPLY, ["people_files"], 2]]);
     assert.deepEqual(people.totals.discarded, { count: 1, files: 2, bytes: "a person's discarded file\n".length + "another\n".length });
   });
 
@@ -161,9 +165,9 @@ describe("DR-39 applyCleanup", () => {
     const root = await workspace();
     const selection = { runs: { runIds: [PLAN, APPLY, OLD] }, discarded: { runIds: [APPLY] } };
     const shown = await plan(root, selection);
-    const outcome = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false } });
+    const outcome = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } });
     assert.ok(outcome.ok);
-    assert.deepEqual(outcome.removed.map((item) => [item.target, item.runId]), [["run", APPLY], ["run", PLAN], ["run", OLD]]);
+    assert.deepEqual(outcome.removed.map((item) => [item.target, idOf(item)]), [["run", APPLY], ["run", PLAN], ["run", OLD]]);
     assert.deepEqual(outcome.kept, [{ target: "discarded", runId: APPLY, reason: "not_confirmed" }]);
     assert.deepEqual((await listRuns({ workspaceRoot: root })).runs.map((entry) => entry.runId), [RUNNING, REVERTED]);
     assert.equal(await exists(state(root, "discarded", APPLY, "1")), true);
@@ -176,9 +180,9 @@ describe("DR-39 applyCleanup", () => {
     assert.equal(JSON.stringify(log).includes("2026010"), false, "no run id in the log");
 
     const people = await plan(root, { discarded: { runIds: [APPLY] } });
-    const second = await applyCleanup({ workspaceRoot: root, selection: { discarded: { runIds: [APPLY] } }, now: NOW, confirmation: { digest: people.digest, discarded: true } });
+    const second = await applyCleanup({ workspaceRoot: root, selection: { discarded: { runIds: [APPLY] } }, now: NOW, confirmation: { digest: people.digest, discarded: true, includeNotReverted: false } });
     assert.ok(second.ok);
-    assert.deepEqual(second.removed.map((item) => [item.target, item.runId, item.size.files]), [["discarded", APPLY, 2]]);
+    assert.deepEqual(second.removed.map((item) => [item.target, idOf(item), item.size.files]), [["discarded", APPLY, 2]]);
     assert.equal(await exists(state(root, "discarded", APPLY)), false);
   });
 
@@ -187,12 +191,12 @@ describe("DR-39 applyCleanup", () => {
     const selection = { runs: { runIds: [OLD] } };
     const shown = await plan(root, selection);
     await writeFile(state(root, "runs", OLD, "review.json"), "{}\n", "utf8");
-    assert.deepEqual(await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false } }), { ok: false, code: "plan_changed" });
+    assert.deepEqual(await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } }), { ok: false, code: "plan_changed" });
     const lock = await acquireLock({ workspaceRoot: root, runId: RUNNING, clock: { now: () => Date.parse(NOW) } });
     assert.ok(lock.ok);
     try {
       const again = await plan(root, selection);
-      assert.deepEqual(await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: again.digest, discarded: false } }), { ok: false, code: "workspace_locked" });
+      assert.deepEqual(await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: again.digest, discarded: false, includeNotReverted: true } }), { ok: false, code: "workspace_locked" });
     } finally {
       await releaseLock({ workspaceRoot: root, runId: RUNNING });
     }

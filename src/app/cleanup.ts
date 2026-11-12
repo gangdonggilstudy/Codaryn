@@ -26,7 +26,8 @@
 
 import { RUN_TIMESTAMP_PATTERN_SOURCE, cleanupStatusOf } from "../contracts/index.js";
 import type { CleanupConfirmation, CleanupFailureCode, CleanupSelection } from "../contracts/index.js";
-import { applyCleanup, isStoredRunId, planCleanup, summarizeState } from "../store/index.js";
+import { applyCleanupWith, isStoredRunId, planCleanup, summarizeState } from "../store/index.js";
+import type { CleanupOperations } from "../store/index.js";
 import { INTERNAL_ERROR, appError } from "./errors.js";
 import { workspaceRootOf } from "./runs.js";
 import type {
@@ -139,7 +140,7 @@ function cleanupFailure(code: CleanupFailureCode): AppError {
   }
 }
 
-export async function applyCleanupIn(environment: AppEnvironment, request: ApplyCleanupRequest): Promise<AppCallOutcome<CleanupApplied>> {
+export async function applyCleanupIn(environment: AppEnvironment, request: ApplyCleanupRequest, operations: CleanupOperations = {}): Promise<AppCallOutcome<CleanupApplied>> {
   const selection = cleanupSelectionOf(request.selection);
   if (!selection.ok) return selection;
   if (typeof request.now !== "string" || !RUN_TIMESTAMP.test(request.now)) return invalid("now must be the preview's moment");
@@ -148,7 +149,7 @@ export async function applyCleanupIn(environment: AppEnvironment, request: Apply
   const root = await workspaceRootOf(request.workspace, environment.cwd);
   if (!root.ok) return root;
   try {
-    const outcome = await applyCleanup({ workspaceRoot: root.value, selection: selection.value, now: request.now, confirmation: confirmation.value });
+    const outcome = await applyCleanupWith({ workspaceRoot: root.value, selection: selection.value, now: request.now, confirmation: confirmation.value }, operations);
     if (!outcome.ok) return { ok: false, error: cleanupFailure(outcome.code) };
     const status = cleanupStatusOf(outcome);
     return { ok: true, output: { kind: "cleanup_applied", status, outcome: { ...outcome, ok: status === "removed" } } };

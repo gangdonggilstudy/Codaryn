@@ -11,6 +11,8 @@
  *   command stops with `invalid_arguments` and changes nothing, since it cannot tell which run
  *   was meant.
  * - N-23: the caller shows the chosen run (id and start time) before it acts.
+ * - U-22 (R-51 M-2): this is the one rule for `latest`. Every command and the app layer resolve it
+ *   here (STORE_RUN_REFERENCE_DEPS gives the store's functions), not with a rule of their own.
  * - U-22 (DR-48, AXM-8): `latest` is the newest run. When a checked run without a result that is
  *   newer than the finished run `latestRun` would choose (or there is none) holds the workspace lock
  *   with a live holder, the answer is `run_in_progress` (try again when it ends), not that older
@@ -18,10 +20,11 @@
  *   lock) is passed over as before. A run id given as it is shows that run.
  */
 
+import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { LATEST_RUN_ALIAS, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { CliErrorCode, ListRuns, RunListEntry } from "../contracts/index.js";
-import { inspectLock, latestRun } from "../store/index.js";
+import { inspectLock, latestRun, listRuns } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 
 export type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
@@ -39,6 +42,23 @@ export interface RunReferenceDeps {
    */
   readonly runInProgress?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
+
+/** True when anything (file, directory, link) exists at the path. Never throws. */
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * U-22 (R-51 M-2): the store's functions for resolveRunReference, for a caller that has no others
+ * (the app layer, the run list). `inspect` is left out: an explicit id is used as it is, as before;
+ * a caller that checks the id's exact form (N-27 a) adds the store's `inspectRun`.
+ */
+export const STORE_RUN_REFERENCE_DEPS: RunReferenceDeps = { exists: pathExists, listRuns };
 
 async function holdsLock(workspaceRoot: string, runId: string): Promise<boolean> {
   const lock = await inspectLock(workspaceRoot);

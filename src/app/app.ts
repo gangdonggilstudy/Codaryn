@@ -38,6 +38,7 @@ import { applyPlan as engineApplyPlan, runTask as engineRunTask } from "../engin
 import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
+import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "../cli/assemble.js";
 import { createCancelSource } from "../cli/cancel.js";
@@ -130,6 +131,8 @@ export interface AppHooks {
   readonly listModels?: ListAnthropicModels;
   /** The config writer of `selectModel` (`writeConfigAtomic` when absent). */
   readonly writeConfig?: ModelsEnvironment["writeConfig"];
+  /** The store's cleanup operations (its removal, its mark writer). Tests give a removal that refuses. */
+  readonly cleanupOperations?: CleanupOperations;
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -432,7 +435,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   // DR-39: the store's summary, plan and cleanup with the app layer's checks (cleanup.ts).
   const stateSummary = (request: StateSummaryRequest) => stateSummaryIn(environment, request);
   const previewCleanup = (request: CleanupPreviewRequest) => previewCleanupIn(environment, request);
-  const applyCleanup = (request: ApplyCleanupRequest) => applyCleanupIn(environment, request);
+  const applyCleanup = (request: ApplyCleanupRequest) => applyCleanupIn(environment, request, hooks.cleanupOperations);
 
   async function resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>> {
     try {

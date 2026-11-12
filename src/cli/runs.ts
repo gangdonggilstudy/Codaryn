@@ -25,7 +25,7 @@ import type { HumanOutput, RunListing, RunsOutput } from "../contracts/index.js"
 import { listRuns } from "../store/index.js";
 import type { CommandOutcome, JsonOutcome } from "./guard.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "./run-ref.js";
-import { cliError } from "./run.js";
+import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
@@ -44,7 +44,13 @@ export interface RunsArgs {
   readonly json: boolean;
 }
 
-export type ParseRunsArgsOutcome = { readonly ok: true; readonly args: RunsArgs } | { readonly ok: false; readonly message: string };
+/**
+ * U-37 (R-69 L2): an unknown or repeated option has the hint unknown_option and its `position` (the
+ * argument's place after the command word, counted from 1), as the other commands' parsers (args.ts).
+ */
+export type ParseRunsArgsOutcome =
+  | { readonly ok: true; readonly args: RunsArgs }
+  | { readonly ok: false; readonly message: string; readonly hint?: "unknown_option"; readonly position?: number };
 
 /** `codaryn runs [--workspace <dir>] [--limit <n>] [--json]`, each at most once. */
 export function parseRunsArgs(argv: readonly string[]): ParseRunsArgsOutcome {
@@ -56,12 +62,12 @@ export function parseRunsArgs(argv: readonly string[]): ParseRunsArgsOutcome {
   for (let index = 0; index < rest.length; index += 1) {
     const flag = rest[index] as string;
     if (flag === "--json") {
-      if (json) return { ok: false, message: `unknown or repeated option. ${RUNS_USAGE}` };
+      if (json) return { ok: false, message: `unknown or repeated option. ${RUNS_USAGE}`, hint: "unknown_option", position: index + 1 };
       json = true;
       continue;
     }
     const repeated = flag === "--workspace" ? workspace !== null : flag === "--limit" ? limit !== null : true;
-    if (repeated) return { ok: false, message: `unknown or repeated option. ${RUNS_USAGE}` };
+    if (repeated) return { ok: false, message: `unknown or repeated option. ${RUNS_USAGE}`, hint: "unknown_option", position: index + 1 };
     const value = rest[index + 1];
     if (value === undefined || value.length === 0 || value.startsWith("--")) {
       return { ok: false, message: `${flag} needs a value. ${RUNS_USAGE}` };
@@ -119,7 +125,7 @@ export interface RunsEnvironment {
 /** `codaryn runs`. Text on stdout, or RunsOutput as one JSON line with `--json`. */
 export async function runRuns(io: RunsEnvironment): Promise<CommandOutcome> {
   const parsed = parseRunsArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const { limit, json } = parsed.args;
 
   const root = await resolveWorkspaceRoot(parsed.args.workspace ?? ".", io.cwd);

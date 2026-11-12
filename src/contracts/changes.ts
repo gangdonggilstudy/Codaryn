@@ -250,6 +250,25 @@ export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
 export type OriginalUnavailable = "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable";
 
 /**
+ * U-36: the view of `codaryn changes` (the app's ChangedFileView, src/app/types.ts): a changed
+ * file's state now, and why its text is not shown although it has one. A person reads each as words
+ * (`changes.state.<state>`, `changes.unavailable.<reason>`, src/contracts/human.ts); the JSON keeps
+ * the codes.
+ */
+export const CHANGED_FILE_STATES = ["as_run_left", "changed_since_run", "missing", "unknown"] as const;
+export type ChangedFileState = (typeof CHANGED_FILE_STATES)[number];
+export const CHANGED_FILE_UNAVAILABLE_REASONS = [
+  "masked_path",
+  "snapshot_missing",
+  "not_text",
+  "too_large",
+  "unreadable",
+  "mask_failed",
+  "masking_unverified",
+] as const;
+export type ChangedFileUnavailableReason = (typeof CHANGED_FILE_UNAVAILABLE_REASONS)[number];
+
+/**
  * DR-29, DR-32 (c): how the run masked one changed path, as recorded by ChangeRecorder
  * (`saveOriginal`'s `shownOriginal` and the last `saveNext`): digests of the visible-part lists, not
  * the parts themselves, so the record holds no copy of the file's text.

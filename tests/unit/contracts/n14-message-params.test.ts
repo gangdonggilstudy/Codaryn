@@ -151,6 +151,8 @@ test("N-17 (M3): the end-of-run summary receives the denied call count", () => {
     profileApplied: false,
     deniedToolCalls: 1,
     deniedCommandCalls: 1,
+    // U-18: the failed calls are counted beside the denied ones.
+    failedToolCalls: 0,
     policySource: "config",
   };
   // @ts-expect-error the count is required

@@ -11,7 +11,7 @@ import type { CliErrorOutput, Clock, MessageCatalog, PlanApplyState, RevertOutpu
 import { parseRevertArgs } from "./args.js";
 import { revertStatus } from "./assemble.js";
 import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
-import { cliError } from "./run.js";
+import { argumentsError, cliError } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { localPathProblem } from "./task.js";
 
@@ -108,7 +108,7 @@ const YES = new Set(["y", "yes", "예", "네"]);
 
 export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome> {
   const parsed = parseRevertArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const { runId: requested, dryRun, quiet } = parsed.args;
 
   // T-12 (S-5): a network or device path is refused before the file system is touched.

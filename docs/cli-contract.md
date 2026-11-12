@@ -629,7 +629,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `--json`과 `--quiet`는 인자 어디에 있어도 센다. 인자를 해석하지 못한 경우도 같다(`--quiet`의 규칙과 같음).
 - 터미널인지는 `process.stdout.isTTY`와 `process.stderr.isTTY`로 본다. 판정은 `src/cli/guard.ts`의 `stdoutText`가 하고, 시험은 그 상태를 주입한다.
 - 종료 코드와 기록(`result.json`)은 바뀌지 않는다.
-- 사용법 줄은 바꾸지 않았다. 사용법 줄이 `invalid_arguments` 메시지에 들어 있어서다. `--json`은 `run`·`revert` 도움말의 옵션 목록과 `apply` 도움말의 문장에 적었다.
+- 사용법 줄은 바꾸지 않았다. 사용법 줄이 `invalid_arguments` 메시지에 들어 있어서다. `--json`은 `run`·`revert`·`apply` 도움말의 옵션 목록에 적었다(U-35 전에는 `apply` 도움말의 문장).
 - stdout은 터미널인데 stderr만 파일로 돌리면 JSON 한 줄을 stdout에 낸다(U-45, R58-L1). U-23 판에서는 이때 화면에 아무것도 나오지 않았다.
 - 인자 없이 `codaryn`만 치는 경우(PM 답)
   - stdout이 터미널이면 `codaryn --help`와 같은 글을 stdout에 내고 종료 0이다(위 "도움말, 버전, 설치"와 같음). stderr에는 아무것도 내지 않는다.
@@ -637,6 +637,13 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 판정은 `src/cli/help.ts`의 `helpRequest`가 터미널 여부를 받아서 하고, 시험은 그 값을 주입한다.
   - 도움말은 stdout에 내므로 stdout만 본다. stderr는 보지 않는다(U-45에서도 그대로).
 - 문구 `help.output`은 문구 담당이 이 규칙에 맞춰 고쳤다(검토 R-58 I1). 그 첫 문장을 `run`·`revert`·`apply`와 오류로 좁히고 stderr 조건(U-45)을 더하는 것은 문구 담당의 몫이다.
+
+### 다섯 명령의 도움말 (U-35, UXM-7)
+
+- `plan`, `apply`, `review`, `changes`, `cleanup`도 `HELP_COMMANDS`에 든다. 그래서 다른 명령처럼 사용법 줄, 설명(`help.command.<명령>`), 옵션(`help.option.<옵션>`), 종료 코드(`help.exit.<명령>`)를 고른 언어로 보인다. 전에는 사용법 줄과 영어 한 문장이었다.
+- 옵션은 사용법 줄의 순서로 적는다. `apply`의 `--run`은 계획 실행의 정확한 id만 받으므로 `plan_run`이고, `cleanup`의 `--run`은 `run_ids`다. 둘 다 `latest`를 받지 않는다. `apply`는 `--json`도 적는다(U-23).
+- 도움말에는 결정 번호를 적지 않는다.
+- 사용법 줄은 바꾸지 않았다(`invalid_arguments` 메시지에 들어 있다). `codaryn --help`의 사용법 목록도 순서와 글자가 같다.
 
 ### 진행 표시 (U-8)
 
@@ -1058,7 +1065,6 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 ### 18.9 아직 없는 것
 
 - 간편 형식 `plan`·`apply`·`review`의 설정 안내(R-11 L-2)는 JSON `message`에만 있다. 사람용 stderr에는 일반 고치는 법만 나온다(검토 R-12 L-2). 안내 문구 id(계약 담당)와 두 언어 글(N-B)이 생기면 stderr에도 붙인다. 재현은 `tests/unit/cli/g-r12.test.ts`에 `todo`로 있다.
-- 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
 

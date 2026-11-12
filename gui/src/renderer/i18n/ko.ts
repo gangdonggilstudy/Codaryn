@@ -530,6 +530,8 @@ export const KO = {
   "changes.of": "실행 {runId}이(가) 바꾼 파일 {count}개",
   "changes.masking": "경로는 실행 때의 대응표가 아니라 지금 등록한 가릴 값으로 다시 가렸습니다.",
   "changes.textRule": "글은 지금 등록한 가릴 값이 실행 때와 같게 가리고, 파일이 실행이 남긴 그대로일 때만 보입니다. 아니면 경로와 상태만 보입니다.",
+  "changes.recordsChanged": "이 실행의 기록이 실행 밖에서 바뀌어 파일 글을 보이지 않습니다. 경로와 상태만 보입니다.",
+  "changes.unverifiedMarked": "이 파일의 글은 보이지 않습니다. 이 실행의 기록이 실행 밖에서 바뀌었습니다.",
   "changes.unverified": "이 파일의 글은 보이지 않습니다. 지금 등록한 가릴 값이 실행 때와 다르게 가리거나, 실행 뒤에 파일이 바뀌었거나, 실행이 가린 표기를 기록하지 않았습니다.",
   "changes.keys": "F7 다음 변경 · Shift+F7 이전 변경 · Alt+F7 다음 파일 · Alt+Shift+F7 이전 파일",
   "changes.diffOf": "{path}의 줄 비교",

@@ -1,7 +1,7 @@
 /**
  * U-32 (GUI follow-up of U-14; UXM-14, UXM-24 of docs/design/ux-midpoint-review.md):
  * (1) the plan screen shows the plan's summary as the CLI's `plan` does: under a label that says
- *     it is the agent's words, through the engine's quoteModelText (keys hidden, invisible
+ *     it is the agent's words, drawn as the CLI draws it (keys hidden, invisible
  *     characters as "?", folded). A plan run with a records-changed mark has its warning first,
  *     no summary, and no apply: the main process gives no approval token for it.
  * (2) UXM-14: the mark where the CLI says it: the revert preview and result of a marked run, and
@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHostHandler } from "../../src/engine-host/host.js";
 import type { HostDeps } from "../../src/engine-host/host.js";
 import { modelTextOf } from "../../src/engine-host/model-text.js";
-import type { QuoteModelText } from "../../src/engine-host/model-text.js";
+import type { ModelTextRows } from "../../src/engine-host/model-text.js";
 import type { CodarynApi } from "../../src/renderer/api.js";
 import { textsFor } from "../../src/renderer/i18n/catalog.js";
 import { EN } from "../../src/renderer/i18n/en.js";
@@ -103,11 +103,13 @@ test("U-32 (1): the plan's summary reaches the window as the agent's words in ro
   assert.equal(toPlanView({ ...base, summary: Array.from({ length: MAX_PLAN_SUMMARY_ROWS }, () => "x") }).ok, true);
 });
 
-test("U-32 (1): the summary passes the engine's quoteModelText, as the CLI's plan draws it", { skip: !ENGINE_BUILT && "the engine is not built (npm run build in the root)" }, async () => {
-  const format = (await import(pathToFileURL(path.join(ENGINE_DIR, "cli", "human", "format.js")).href)) as { quoteModelText: QuoteModelText; MODEL_TEXT_PREFIX: string; MODEL_TEXT_COLUMNS: number };
+// U-48: drawn by the app layer's modelTextRows (U-42) since U-48; U-32's checks stay.
+test("U-32 (1): the summary is drawn as the CLI's plan draws it", { skip: !ENGINE_BUILT && "the engine is not built (npm run build in the root)" }, async () => {
+  const format = (await import(pathToFileURL(path.join(ENGINE_DIR, "cli", "human", "format.js")).href)) as { MODEL_TEXT_PREFIX: string; MODEL_TEXT_COLUMNS: number };
+  const app = (await import(pathToFileURL(path.join(ENGINE_DIR, "app", "index.js")).href)) as { modelTextRows: ModelTextRows };
   const safety = (await import(pathToFileURL(path.join(ENGINE_DIR, "cli", "text-safety.js")).href)) as { hideKeys(text: string, key: string | null): string };
   const current = "CURRENTVALUE1234567890";
-  const rows = modelTextOf(format.quoteModelText, format.MODEL_TEXT_PREFIX, 20, (text) => safety.hideKeys(safety.hideKeys(text, null), current))(
+  const rows = modelTextOf(app.modelTextRows, 20, (text) => safety.hideKeys(safety.hideKeys(text, null), current))(
     `Moves​files.   Key ${KEY_SHAPED}\nand ${current} ${"word ".repeat(40)}`,
   );
   const all = rows.join("\n");
@@ -115,9 +117,9 @@ test("U-32 (1): the summary passes the engine's quoteModelText, as the CLI's pla
   assert.ok(!all.includes(KEY_SHAPED) && !all.includes(current), "key shapes and the current key value hidden");
   assert.ok(rows[0]?.startsWith("Moves?files. Key"), `invisible characters shown, runs of spaces as one: ${rows[0]}`);
   assert.ok(rows.every((row) => !row.startsWith(format.MODEL_TEXT_PREFIX) && row.length <= format.MODEL_TEXT_COLUMNS), "the CLI's quote mark left off; the window draws its own");
-  const capped = modelTextOf(format.quoteModelText, format.MODEL_TEXT_PREFIX, 2, (text) => text)("a\nb\nc\nd");
+  const capped = modelTextOf(app.modelTextRows, 2, (text) => text)("a\nb\nc\nd");
   assert.deepEqual(capped, ["a", "b", "… (+2)"]);
-  assert.deepEqual(modelTextOf(() => { throw new Error("x"); }, "| ", 2, (text) => text)("a"), [], "a quoting that throws shows nothing");
+  assert.deepEqual(modelTextOf(() => { throw new Error("x"); }, 2, (text) => text)("a"), [], "a drawing that throws shows nothing");
 });
 
 function planApi(view: Record<string, unknown>, approval: string | null): CodarynApi {

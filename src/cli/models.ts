@@ -29,6 +29,7 @@ import {
   CODARYN_CONFIG_ENV,
   CODARYN_MODEL_ENV,
   MODELS_EXIT_CODES,
+  toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
   DefaultConfigLocation,
@@ -47,7 +48,7 @@ import { parseConfig } from "./config.js";
 import { chooseConfigFile } from "./config-file.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
+import { argumentsError, cliError, jsonSyntaxError, positionDiagnostic, settingsError, withHint } from "./run.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   findKeyInJson,
@@ -251,7 +252,7 @@ export function renderModels(output: ModelsOutput, withTable: boolean, places: M
 
 export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> {
   const parsed = parseModelsArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
 
   // S-5: nothing given on the command line may reach another machine or a device.
@@ -312,9 +313,9 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       const body = configText.startsWith(BOM) ? configText.slice(1) : configText;
       // DR-40 (b): a file over the cap is refused before any check reads it; measured without the
       // byte order mark, as run and doctor do (review R-30 L-1).
-      if (inputFileTooLarge(body)) return cliError("invalid_config", inputFileTooLargeMessage("config file"));
+      if (inputFileTooLarge(body)) return withHint(cliError("invalid_config", inputFileTooLargeMessage("config file")), "input_too_large");
       if (rawTextHoldsKey(body, currentKey)) {
-        return cliError("key_in_file", `the config file contains a key value; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);
+        return withHint(cliError("key_in_file", `the config file contains a key value; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`), "key_in_config");
       }
       let value: unknown;
       try {
@@ -325,7 +326,10 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       }
       const found = findKeyInJson(value, currentKey);
       if (found.kind === "key") {
-        return cliError("key_in_file", `the config file has a key field or key value at ${found.location}; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);
+        const keyError = cliError("key_in_file", `the config file has a key field or key value at ${found.location}; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);
+        // U-37: the place when it is a schema field path.
+        const field = toSchemaFieldPath(found.location);
+        return field === null ? withHint(keyError, "key_in_config") : withHint(keyError, "key_field_in_config", { field });
       }
       if (found.kind === "too_deep") return cliError("invalid_config", `the config file is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`);
       const outcome = parseConfig(value);
@@ -347,7 +351,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
   else if (isApiProviderName(args.provider)) provider = args.provider;
   else return cliError("invalid_arguments", `--provider must be ${quotedChoices(API_PROVIDER_NAMES)}; nothing was sent`);
   const resolved = resolveListSettings(io.env, config, provider);
-  if (!resolved.ok) return cliError(resolved.code, resolved.message);
+  if (!resolved.ok) return settingsError(resolved);
   const secrets = [resolved.settings.apiKey, ...envSecrets];
   const lister: ListModels | undefined = provider === "anthropic" ? (io.listModels ?? io.listers?.anthropic) : io.listers?.[provider];
   if (lister === undefined) {

@@ -184,6 +184,42 @@ export function failedToolContent(code: ToolErrorCode, message: string): string 
   return `error (${code}): ${message}`;
 }
 
+/**
+ * U-50 (AXM-6, review R-53 I-2): what to do next after a tool that ran failed, one fixed sentence
+ * per code, which the engine adds to the tool's message (toolFailureMessage) before
+ * failedToolContent. Model-bound fixed texts (FIXED_MODEL_TEXTS); no value of the call in them.
+ * A refusal before the call runs has its own hint (REFUSAL_HINTS); these are for the outcomes of
+ * a tool runner (RawToolOutcome, RawWorkflowToolOutcome). No hint where the tool's message already
+ * says what to do (conflict, no_match, ambiguous_match, its own invalid_args; invalid_plan names
+ * the action and the problem, and its end is what the organize test reads; spawn_failed names its
+ * reason, which is not only a missing program: on Windows a .cmd inside the workspace, an argument
+ * cmd.exe cannot take or a file type that cannot be started, review R-68 M-1) or there is nothing
+ * to add (cancelled, io_error; unknown_tool and unresolved_token come before a call runs).
+ * R-68 L-1, L-2: not_found also comes from search_files given a file, and not_text from a
+ * directory given to read_file or write_file; their hints are true for those too.
+ */
+export const TOOL_FAILURE_HINTS: { readonly [C in ToolErrorCode]?: string } = {
+  policy_denied: "The path must stay inside the workspace, also after links are followed, and outside Codaryn's records folder.",
+  not_found: "No entry of the kind this tool needs is at this path: it is missing, or it is a file where a directory is needed. Check the path before you try again.",
+  not_text: "The path is not a UTF-8 text file: it is a directory, or the file holds binary data or another encoding. These tools cannot read or change it.",
+  too_large: "It is larger than this tool can handle; use a smaller file or directory.",
+  protected_span_violation: "A line that holds a protected placeholder must stay exactly as it is; change other lines only.",
+  invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
+  masking_failed: "The result could not be masked, so none of it is shown.",
+};
+
+/**
+ * U-50: a tool runner's failure message with its code's hint after it (`<message>. <hint>`, the
+ * period left out when the message ends with one), or the message alone when the code has no hint
+ * or the message already ends with it.
+ */
+export function toolFailureMessage(code: ToolErrorCode, message: string): string {
+  const hint = TOOL_FAILURE_HINTS[code];
+  if (hint === undefined || message.endsWith(hint)) return message;
+  if (message.length === 0) return hint;
+  return `${message}${message.endsWith(".") ? "" : "."} ${hint}`;
+}
+
 /** What a tool runner returns. Local only: it must be masked before it is recorded or sent. */
 export type RawToolOutcome =
   | { readonly ok: true; readonly payload: ToolPayload }

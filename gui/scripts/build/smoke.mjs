@@ -6,7 +6,7 @@
 // and in the repository root.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -51,8 +51,16 @@ const maskingShown = (v) =>
 const closeFake = [];
 // Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
 // window); a run that hangs (cancelled by closing the window).
+// U-54 (R-65 L-1): an id the engine cannot keep ("bad id", a space) is replaced in each run, from
+// codaryn-call-1 again. The first run's call with it is denied (a path outside the workspace); the
+// analyze run's call with it, later in the same window, fails (not_found) and must still get its line.
+// No model request is added: the two calls ride in replies the runs already had.
+const U54_ID = "bad id";
 const steps = [
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } })]),
+  fakeApi.replyTools([
+    fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } }),
+    fakeApi.toolUse(U54_ID, "read_file", { path: "../outside-u54.txt" }),
+  ]),
   fakeApi.replyText("done"),
   { kind: "hang" },
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
@@ -60,6 +68,7 @@ const steps = [
   fakeApi.replyTools([
     fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } }),
     fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
+    fakeApi.toolUse(U54_ID, "read_file", { path: "missing-u54.txt" }),
   ]),
   fakeApi.replyText("analysis written"),
   // U-13: a plan run that discards a file; its apply's discarded files stay through a cleanup.
@@ -132,15 +141,26 @@ env.XDG_CONFIG_HOME = sandboxAppData;
 // R29-L1: how many model requests the fake API has received, for the app's steps that cancel or close
 // a run: they wait until that run's request arrived (a file on this machine, rewritten every 50 ms).
 const apiCountFile = join(gui, "build", "smoke-api-count.json");
+// U-51: each count is written whole to a temporary file and renamed over the count file, so a read
+// never meets a file half written (written in place, the file is emptied first: the app read -1 and
+// its 5d step waited for a request that had arrived). Renaming over the file while the app has it
+// open fails on Windows (EPERM): the count file then keeps the last whole count, and the next write,
+// 50 ms later, tries again. A count can be a tick late, never wrong or unreadable.
+const apiCountTemp = `${apiCountFile}.tmp`;
+const apiCountWrites = { replaced: 0, retried: 0 };
+const apiMessages = () => api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
 const writeApiCount = () => {
-  const messages = api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
   try {
-    writeFileSync(apiCountFile, JSON.stringify({ messages }));
+    writeFileSync(apiCountTemp, JSON.stringify({ messages: apiMessages() }));
+    renameSync(apiCountTemp, apiCountFile);
+    apiCountWrites.replaced += 1;
   } catch {
-    // The app reads it again on its next try.
+    apiCountWrites.retried += 1;
   }
 };
-writeApiCount();
+// The first count, before the app starts: nothing reads it yet, so it is written in place.
+rmSync(apiCountTemp, { force: true });
+writeFileSync(apiCountFile, JSON.stringify({ messages: apiMessages() }));
 env.CODARYN_SMOKE_API_COUNT = apiCountFile;
 
 // R-10 L-4: a link inside the built renderer to a folder outside it (the temporary folder, on
@@ -173,6 +193,7 @@ const run = await new Promise((resolve) => {
 });
 clearInterval(apiCountTimer);
 rmSync(apiCountFile, { force: true });
+rmSync(apiCountTemp, { force: true });
 const realDefaultAfter = realDefaultConfig !== null && existsSync(realDefaultConfig) ? statSync(realDefaultConfig).mtimeMs : null;
 const sandboxMade = existsSync(join(sandboxAppData, "Codaryn", "config.json"));
 const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
@@ -328,6 +349,8 @@ const expected = [
   ["runDone", (v) => v === "done"],
   ["runResult", (v) => v !== null && ["done", "needs-input"].includes(v.status) && /^\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(v.runId)],
   ["runLog", (v) => rows(v).length >= 2 && rows(v).includes("tool_decision")],
+  // U-54 (R-65 L-1): the first run denied a call the engine recorded as codaryn-call-1, and its log says so.
+  ["firstRunDenied", (v) => v !== null && v.denied >= 1 && JSON.stringify(v.call) === JSON.stringify({ decision: false, result: false })],
   ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
   // U-21 (DR-47): the agent's last message, under the label that says it is its own words.
   ["runFinalMessage", (v) => JSON.stringify(v) === JSON.stringify({ label: "에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님)", text: "done", cut: false })],
@@ -404,6 +427,15 @@ const expected = [
   ["reportReady", (v) => v === "run"],
   ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
   ["reportSummary", (v) => v === "awaiting_review"],
+  // U-54 (R-65 L-1): in the same window, the analyze run's codaryn-call-1 (allowed, then not_found) has
+  // its failed line, the CLI's words, in its progress list.
+  [
+    "failedAfterDenial",
+    (v) =>
+      v !== null &&
+      JSON.stringify(v.call) === JSON.stringify({ decision: true, result: false }) &&
+      JSON.stringify(v.failed) === JSON.stringify([KO_MESSAGES["progress.tool_failed"].replace("{tool}", KO_MESSAGES["tool.read_file"]).replace("{code}", "not_found")]),
+  ],
   ["reportMasking", maskingShown],
   ["reportVerdict", (v) => v === "accepted"],
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
@@ -535,6 +567,8 @@ const expected = [
   // U-32: the report's warning above its tabs; the marked run's revert preview says so, as the CLI's revert.
   ["reportRecordsChangedFirst", (v) => v === "report-records-changed"],
   ["revertRecordsChanged", (v) => v === true],
+  // U-48 (U-43): the marked run's changes: the warning first, every file without text, no comparison.
+  ["changesRecordsChanged", (v) => v !== null && v.first === "changes-records-changed" && v.files >= 1 && v.ready === String(v.files) && v.hidden === v.files && v.diffs === 0],
   // U-11 (3.11): the first-run guide.
   ["setupSandbox", (v) => v.made === true && v.realUntouched === true],
   ["setupFolder", (v) => v === "folder"],
@@ -674,5 +708,8 @@ rmSync(sandboxAppData, { recursive: true, force: true });
 rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
 const total = expected.length + 1 + switchChecks + lifeChecks;
+// U-51: how the request count reached the app (not a check): whole replacements, and the writes a read
+// in progress refused (EPERM on Windows), left to the next one.
+process.stdout.write(`api count file: ${apiCountWrites.replaced} replaced whole, ${apiCountWrites.retried} left to the next write\n`);
 process.stdout.write(`gui smoke: ${total - Math.min(failed, total)} of ${total} checks passed, app exit ${run.status}\n`);
 process.exit(failed === 0 ? 0 : 1);

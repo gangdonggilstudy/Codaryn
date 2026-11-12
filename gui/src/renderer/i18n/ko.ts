@@ -400,6 +400,7 @@ export const KO = {
   "diffkind.added": "더함",
   "changes.empty": "바뀐 파일이 없습니다.",
   "changes.created": "이 실행이 만든 파일",
+  "plan.formUnknown": "이 계획을 만든 실행({runId})의 작업 종류와 프로필을 이 앱이 모릅니다(앱 밖에서 시작한 실행). 계획은 볼 수 있지만 여기서 적용할 수는 없습니다. 적용은 시작한 방식 그대로 CLI에서 하세요: codaryn apply {runId}",
   "changes.currentOnly": "원본 사본이 없어 지금 내용만 보입니다. 비교는 하지 않습니다.",
   "changes.originalOnly": "지금 내용을 보일 수 없어 원본만 보입니다. 비교는 하지 않습니다.",
   "changes.currentOf": "{path}의 지금 내용",

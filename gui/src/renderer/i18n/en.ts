@@ -398,6 +398,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "diffkind.added": "added",
   "changes.empty": "No file was changed.",
   "changes.created": "made by this run",
+  "plan.formUnknown": "This app does not know the task kind and profile of the run that made this plan ({runId}; it was started outside this app). The plan can be looked at but not applied here. Apply it with the CLI, the way the run was started: codaryn apply {runId}",
   "changes.currentOnly": "There is no copy of the original, so only the current content is shown, without a comparison.",
   "changes.originalOnly": "The current content cannot be shown, so only the original is shown, without a comparison.",
   "changes.currentOf": "Current content of {path}",

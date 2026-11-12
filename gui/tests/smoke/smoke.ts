@@ -255,8 +255,13 @@ startGui({
       await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'sub/b.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
       const planRunId = (await newResult(beforePlan)) as string;
       results["planRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
-      await js("document.getElementById('run-view-plan')?.click(); true");
+      // R21b-L-1: B's plan is opened from the run list, with the form the main process remembered
+      // when B started (profile tidy), and applied from there.
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      await js(`document.querySelector('[data-plan="${planRunId}"]')?.click(); true`);
       results["planShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      results["planFromList"] = await js("({ apply: document.getElementById('plan-apply') !== null, unknown: document.getElementById('plan-form-unknown') !== null })");
       results["planActions"] = await js("[...document.querySelectorAll('#plan-actions li')].map((li) => li.getAttribute('data-kind'))");
       results["planForged"] = await js(`window.codaryn.applyPlan(${JSON.stringify("0".repeat(32))}, false)`);
       // A fresh approval of the same plan, asking for a consent its apply never needed: refused before any dialog.
@@ -269,6 +274,18 @@ startGui({
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
       results["applyMoved"] = { from: existsSync(join(SECOND, "sub", "b.txt")), to: existsSync(join(SECOND, "moved", "b.txt")) };
+      // The forms are in gui-state.json, which the next start reads (newest first; applies are not remembered).
+      results["stateForms"] = (() => {
+        try {
+          const saved = JSON.parse(readFileSync(STATE, "utf8")) as { workspaceMemory?: { path: string; runs: { runId: string; profile: string | null; workflow: string | null }[] }[] };
+          const name = SECOND.split(/[\\/]/).pop();
+          const entry = (saved.workspaceMemory ?? []).find((item) => item.path.split(/[\\/]/).pop() === name);
+          if (entry === undefined) return null;
+          return entry.runs.filter((run) => run.runId === planRunId || run.runId === directRunId).map((run) => [run.runId === planRunId ? "B" : "A", run.profile, run.workflow]);
+        } catch {
+          return "unreadable";
+        }
+      })();
 
       // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
       const beforeReview = await resultId();

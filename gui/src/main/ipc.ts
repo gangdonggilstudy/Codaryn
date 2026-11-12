@@ -326,6 +326,8 @@ export function registerIpc(deps: IpcDeps): void {
       const runId = value["runId"];
       if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
       deps.runs.begin(token, runId);
+      // R21b-L-1: the run's form, so its plan, changes and report open with it later (also after a restart).
+      await workspaces.rememberRun(parsed.workspace, runId, { profile: parsed.profile, workflow: parsed.workflow });
       return { ok: true, runId };
     } finally {
       starting = false;
@@ -343,8 +345,10 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("listRuns", { workspace: root }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toRunsReply(response.value);
-    if (reply.ok) deps.history.listedRuns(parsed.workspace, reply.runs.map((run) => run.runId));
-    return reply;
+    if (!reply.ok) return reply;
+    deps.history.listedRuns(parsed.workspace, reply.runs.map((run) => run.runId));
+    const forms = await workspaces.runForms(parsed.workspace);
+    return { ...reply, runs: reply.runs.map((run) => (run.state === "checked" ? { ...run, form: forms.get(run.runId) ?? null } : run)) };
   });
 
   handle(IPC_CHANNELS.previewRevert, async (args): Promise<RevertReply> => {

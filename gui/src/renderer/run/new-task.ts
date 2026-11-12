@@ -27,6 +27,8 @@ export interface NewTaskDeps {
   readonly open: () => void;
   /** Goes to the run screen once the run has started. */
   readonly showRun: () => void;
+  /** R21b-L-1: the form of a run that started, as the workspace's last one. */
+  readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
 }
 
 function select(id: string, label: string, options: readonly (readonly [string, string])[], chosen: string): { field: HTMLElement; input: HTMLSelectElement } {
@@ -62,8 +64,11 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         for (const id of view?.workflows.config ?? []) workflows.push([id, t.format("settings.workflowConfig", { workflow: id })]);
         const profiles: [string, string][] = [["", t.format("task.profileNone")]];
         for (const profile of view?.profiles ?? []) profiles.push([profile.name, profile.name]);
-        const workflow = select("task-workflow", t.format("task.workflow"), workflows, run.last?.workflow ?? "");
-        const profile = select("task-profile", t.format("task.profile"), profiles, run.last?.profile ?? "");
+        // The workspace's last form (remembered across restarts), else this session's last request.
+        const last = workspace.lastForm ?? run.last;
+        const known = (value: string | null | undefined, options: readonly (readonly [string, string])[]): string => (value != null && options.some(([id]) => id === value) ? value : "");
+        const workflow = select("task-workflow", t.format("task.workflow"), workflows, known(last?.workflow, workflows));
+        const profile = select("task-profile", t.format("task.profile"), profiles, known(last?.profile, profiles));
 
         const goalField = el("p", undefined, { class: "field" });
         const goal = el("textarea", undefined, { id: "task-goal", rows: "4", maxlength: String(GOAL_LIMIT), "aria-describedby": "task-notice" });
@@ -106,6 +111,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
             const started = asStartRun(await api.startRun(workspace.handle, request.goal, request.profile, request.workflow));
             if (started.ok) {
               run.started(started.runId, Date.now());
+              deps.rememberForm?.({ profile: request.profile, workflow: request.workflow });
               deps.showRun();
             } else {
               run.failedToStart(started.code);

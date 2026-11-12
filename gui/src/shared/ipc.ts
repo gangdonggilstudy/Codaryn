@@ -188,7 +188,16 @@ export interface RecentView {
 }
 
 /** What opening a remembered or command-line workspace answers. */
-export type OpenReply = { readonly ok: true; readonly handle: string; readonly name: string } | { readonly ok: false; readonly code: string };
+/** A run's task form as the GUI started it (profile and task kind names; null: the config's). */
+export interface RunFormView {
+  readonly profile: string | null;
+  readonly workflow: string | null;
+}
+
+/** `lastForm`: the form of the last run started in this workspace from this app (R21b-L-1), or null. */
+export type OpenReply =
+  | { readonly ok: true; readonly handle: string; readonly name: string; readonly lastForm?: RunFormView | null }
+  | { readonly ok: false; readonly code: string };
 
 /**
  * dir, file: a plain directory or file. link: a link or junction, never followed. state: the
@@ -965,6 +974,11 @@ export type RunListItem =
       readonly changes: number | null;
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
       readonly revertRecordDamaged: boolean;
+      /**
+       * R21b-L-1: the task form the run was started with, when this app started it (the main process
+       * remembers it). Null: unknown (started elsewhere), so a plan of it is shown but not applied here.
+       */
+      readonly form?: RunFormView | null;
     }
   | { readonly state: "damaged"; readonly runId: string };
 

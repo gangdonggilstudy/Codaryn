@@ -15,6 +15,7 @@ import type {
   ChangesReply,
   PlanReply,
   ReportReply,
+  RunFormView,
   ReportView,
   PlanView,
   RecentView,
@@ -82,11 +83,20 @@ const KINDS = ["dir", "file", "link", "state", "other"];
 export interface Workspace {
   readonly handle: string;
   readonly name: string;
+  /** R21b-L-1: the form of the last run started here from this app, or null. */
+  readonly lastForm?: RunFormView | null;
+}
+
+/** A remembered task form, or null when it does not fit. */
+export function asForm(value: unknown): RunFormView | null {
+  if (!isObj(value)) return null;
+  const name = (v: unknown): v is string | null => v === null || (str(v) && v.length > 0 && v.length <= 200);
+  return name(value["profile"]) && name(value["workflow"]) ? { profile: value["profile"], workflow: value["workflow"] } : null;
 }
 
 export function asWorkspace(value: unknown): Workspace | null {
   if (!isObj(value) || !str(value["handle"]) || !HEX.test(value["handle"]) || !str(value["name"])) return null;
-  return { handle: value["handle"], name: value["name"] };
+  return { handle: value["handle"], name: value["name"], lastForm: asForm(value["lastForm"]) };
 }
 
 export function asInfo(value: unknown): InfoView {
@@ -320,6 +330,7 @@ export function asRuns(value: unknown): RunsReply {
         changes: typeof run["changes"] === "number" ? run["changes"] : null,
         reverted,
         revertRecordDamaged: run["revertRecordDamaged"] === true,
+        form: asForm(run["form"]),
       },
     ];
   });

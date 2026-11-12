@@ -25,11 +25,11 @@ export interface RunsDeps {
   readonly open: () => void;
   readonly announce: (text: string) => void;
   /** GU-5: the plan screen for a run that waits for its plan to be approved. */
-  readonly openPlan: (runId: string, profile: string | null, workflow: string | null) => void;
+  readonly openPlan: (runId: string, profile: string | null, workflow: string | null, formKnown?: boolean) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
-  /** GU-3 (3.7): the run's report. */
-  readonly openReport: (runId: string) => void;
+  /** GU-3 (3.7): the run's report, with the run's form when this app started it. */
+  readonly openReport: (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null) => void;
 }
 
 function errorBox(t: Texts, code: string): HTMLElement {
@@ -170,7 +170,15 @@ export function runsScreen(deps: RunsDeps): Screen {
           panel.replaceChildren(errorBox(t, reply.code));
           return;
         }
-        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => deps.openPlan(id, null, null), (id) => deps.openChanges(id, null, null), (id) => deps.openReport(id)))));
+        // R21b-L-1: a row opens with the run's own form when this app started it; else its plan is only shown.
+        const forms = new Map(reply.runs.flatMap((run) => (run.state === "checked" ? [[run.runId, run.form ?? null] as const] : [])));
+        const openWithForm = (id: string, what: "plan" | "changes" | "report"): void => {
+          const form = forms.get(id) ?? null;
+          if (what === "plan") deps.openPlan(id, form?.profile ?? null, form?.workflow ?? null, form !== null);
+          else if (what === "changes") deps.openChanges(id, form?.profile ?? null, form?.workflow ?? null);
+          else deps.openReport(id, form);
+        };
+        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report")))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
       };

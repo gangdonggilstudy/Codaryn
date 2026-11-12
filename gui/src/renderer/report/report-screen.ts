@@ -18,12 +18,15 @@ export interface ReportDeps {
   readonly texts: Texts;
   readonly api: CodarynApi;
   readonly current: () => Workspace | null;
-  /** The changes screen for a run (DR-29). */
-  readonly openChanges: (runId: string) => void;
+  /** The changes screen for a run (DR-29), with the run's form when known. */
+  readonly openChanges: (runId: string, form: RunForm | null) => void;
 }
 
+type RunForm = { readonly profile: string | null; readonly workflow: string | null };
+
 export interface ReportScreen extends Screen {
-  choose(runId: string): void;
+  /** The run to show, and its form (R21b-L-1: the run's own, never another run's). */
+  choose(runId: string, form?: RunForm | null): void;
 }
 
 function word(t: Texts, prefix: string, value: string): string {
@@ -39,7 +42,7 @@ function list(items: readonly string[], attrs: Readonly<Record<string, string>> 
 
 type Tab = { readonly id: string; readonly label: string; readonly build: () => HTMLElement[] };
 
-function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly status: string; readonly reason: string } | null): Tab[] {
+function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly status: string; readonly reason: string } | null, form: RunForm | null): Tab[] {
   const tabs: Tab[] = [];
   tabs.push({
     id: "summary",
@@ -80,7 +83,7 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
         const parts: HTMLElement[] = [el("p", t.format("run.changes", { count: String(run.changes.length) }))];
         if (run.changes.length > 0) {
           parts.push(list(run.changes.map((change) => (change.created ? t.format("run.created", { path: change.path }) : change.path)), { id: "report-changes" }));
-          parts.push(button(t.format("run.viewChanges"), () => deps.openChanges(view.runId), { id: "report-view-changes" }));
+          parts.push(button(t.format("run.viewChanges"), () => deps.openChanges(view.runId, form), { id: "report-view-changes" }));
         }
         return parts;
       },
@@ -170,11 +173,13 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
 export function reportScreen(deps: ReportDeps): ReportScreen {
   const { texts: t, api } = deps;
   let chosen: string | null = null;
+  let chosenForm: RunForm | null = null;
   return {
     id: "report",
     title: "nav.report",
-    choose(runId) {
+    choose(runId, form = null) {
       chosen = runId;
+      chosenForm = form;
     },
     show(root) {
       const workspace = deps.current();
@@ -186,6 +191,7 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
         return;
       }
       const runId = chosen;
+      const form = chosenForm;
       void (async () => {
         body.replaceChildren(el("p", t.format("runs.loading")));
         const reply = asReport(await api.report(workspace.handle, runId));
@@ -194,7 +200,7 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
           body.setAttribute("data-report-ready", "error");
           return;
         }
-        const tabs = tabsOf(t, deps, reply.view, reply.labels ?? null);
+        const tabs = tabsOf(t, deps, reply.view, reply.labels ?? null, form);
         const bar = el("div", undefined, { role: "tablist", "aria-label": t.format("report.title") });
         const panel = el("section", undefined, { role: "tabpanel", id: "report-panel", tabindex: "0" });
         const buttons: HTMLButtonElement[] = [];

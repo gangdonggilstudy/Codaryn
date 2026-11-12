@@ -293,6 +293,17 @@ const expected = [
   ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
   ["planRun", (v) => v === "plan_pending"],
   ["planShown", (v) => v === "pending"],
+  // R21b-L-1: opened from the run list with the remembered form, so it can be applied there.
+  ["planFromList", (v) => v.apply === true && v.unknown === false],
+  [
+    "stateForms",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify([
+        ["B", "tidy", null],
+        ["A", null, "organize"],
+      ]),
+  ],
   ["planActions", (v) => JSON.stringify(v) === JSON.stringify(["move"])],
   ["planForged", (v) => v.ok === false && v.code === "unknown_plan"],
   ["consentUnasked", (v) => v.ok === false && v.code === "consent_not_asked"],

@@ -30,8 +30,8 @@ export interface RunScreenDeps {
   readonly openPlan: (runId: string, profile: string | null, workflow: string | null) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
-  /** GU-3 (3.7): the run's report. */
-  readonly openReport: (runId: string) => void;
+  /** GU-3 (3.7): the run's report, with the run's form. */
+  readonly openReport: (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null) => void;
 }
 
 const MAX_NOTE = 500;
@@ -39,7 +39,7 @@ const MAX_NOTE = 500;
 /** GU-5: what follows a result: the plan, the DR-21 consent question, the applied actions, a review. */
 function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
   const { api, run } = deps;
-  const out: HTMLElement[] = [button(t.format("run.viewReport"), () => deps.openReport(result.runId), { id: "run-view-report" })];
+  const out: HTMLElement[] = [button(t.format("run.viewReport"), () => deps.openReport(result.runId, run.last === null ? null : { profile: run.last.profile, workflow: run.last.workflow }), { id: "run-view-report" })];
   if (result.kind === "run" && result.changes.length > 0) {
     out.push(button(t.format("run.viewChanges"), () => deps.openChanges(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-changes" }));
   }

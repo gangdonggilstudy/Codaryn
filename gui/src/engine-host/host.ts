@@ -7,6 +7,8 @@
 import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
+import { createRunRegistry } from "./runs.js";
+import type { HostStartRunRequest, RunItemOf } from "./runs.js";
 import { modelsValue, selectedValue, settingsValue } from "./settings.js";
 import type { Shown } from "./settings.js";
 
@@ -32,6 +34,8 @@ export interface HostApp {
   /** A real API request (Y-2): only when the person asked for the list. */
   listModels(request: HostModelsRequest): Promise<unknown>;
   selectModel(request: HostModelsRequest & { readonly model: string }): Promise<unknown>;
+  /** GU-3: `startRun` with the quick form; the observer gets the run's events (RunEvent). */
+  startRun(request: HostStartRunRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -50,6 +54,10 @@ export interface HostDeps {
   readonly shown: Shown;
   /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
   readonly providers: readonly string[];
+  /** GU-3: how a run's events become progress items, in the window's language. */
+  readonly itemsIn: (language: "ko" | "en") => RunItemOf;
+  /** GU-3: a new run token (128 random bits as hex). */
+  readonly token: () => string;
   /** Writes one complete line to the channel. */
   readonly write: (line: string) => void;
   /** Diagnostics for stderr. Never the content of a request or a response. */
@@ -114,6 +122,24 @@ function providerArg(args: unknown, providers: readonly string[], keys: readonly
   return args as Obj & { provider: string };
 }
 
+/** The longest goal the window may send (the CLI's own checks still run in startRun). */
+const MAX_GOAL_CHARS = 20_000;
+/** A profile or task kind name: one short line without control characters. */
+const NAME = /^[^\u0000-\u001f\u007f]{1,200}$/;
+
+function startRunArgs(args: unknown): { workspace: string; goal: string; profile: string | null; workflowRef: string | null; language: "ko" | "en" } {
+  if (!isObj(args) || !onlyKeys(args, ["workspace", "goal", "profile", "workflowRef", "language"])) throw new ArgsError();
+  const { workspace, goal, language } = args;
+  const profile = args["profile"] ?? null;
+  const workflowRef = args["workflowRef"] ?? null;
+  if (typeof workspace !== "string" || workspace.length > MAX_PATH_CHARS || !isAbsolute(workspace) || workspace.includes("\0")) throw new ArgsError();
+  if (typeof goal !== "string" || goal.trim().length === 0 || goal.length > MAX_GOAL_CHARS || goal.includes("\0")) throw new ArgsError();
+  if (profile !== null && (typeof profile !== "string" || !NAME.test(profile))) throw new ArgsError();
+  if (workflowRef !== null && (typeof workflowRef !== "string" || !NAME.test(workflowRef))) throw new ArgsError();
+  if (language !== "ko" && language !== "en") throw new ArgsError();
+  return { workspace, goal, profile, workflowRef, language };
+}
+
 function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] } {
   if (!isObj(args) || !onlyKeys(args, ["osLocale", "ids"])) throw new ArgsError();
   const osLocale = args["osLocale"] ?? null;
@@ -126,11 +152,30 @@ function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] }
 export interface HostHandler {
   /** Handles one request line. Resolves after its response line is written. */
   handleLine(line: string): Promise<void>;
+  /** Cancels every run this handler started (the main process is gone, R-10 L-2). */
+  cancelAll(): void;
 }
 
 export function createHostHandler(deps: HostDeps): HostHandler {
   const respond = (response: HostResponse): void => deps.write(encodeLine(response));
   const fail = (id: number, error: HostError): void => respond({ v: 1, id, ok: false, error });
+  const items = new Map<"ko" | "en", RunItemOf>();
+  let language: "ko" | "en" = "en";
+  const runs = createRunRegistry({
+    startRun: (request, observer) => deps.app.startRun(request, observer),
+    itemOf: (event) => {
+      let of = items.get(language);
+      if (of === undefined) {
+        of = deps.itemsIn(language);
+        items.set(language, of);
+      }
+      return of(event);
+    },
+    shown: deps.shown,
+    token: deps.token,
+    write: deps.write,
+    log: deps.log,
+  });
 
   async function run(call: HostCall, args: unknown): Promise<unknown> {
     switch (call) {
@@ -154,10 +199,20 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         if (typeof model !== "string" || !MODEL_ID.test(model)) throw new ArgsError();
         return selectedValue(await deps.app.selectModel({ provider, configPath: null, varsFile: null, model }), deps.shown);
       }
+      case "startRun": {
+        const { language: chosen, ...rest } = startRunArgs(args);
+        language = chosen;
+        return runs.start(rest);
+      }
+      case "cancelRun": {
+        if (!isObj(args) || !onlyKeys(args, ["run"]) || typeof args["run"] !== "string" || !/^[0-9a-f]{32}$/.test(args["run"])) throw new ArgsError();
+        return { ok: runs.cancel(args["run"]) };
+      }
     }
   }
 
   return {
+    cancelAll: () => runs.cancelAll(),
     async handleLine(line: string): Promise<void> {
       const parsed = parseRequest(line);
       if (!parsed.ok) {
@@ -213,6 +268,7 @@ export async function serve(
     decoder.push(typeof chunk === "string" ? chunk : text.decode(chunk, { stream: true }));
   }
   decoder.end();
+  handler.cancelAll();
   deps.onInputEnd?.();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const grace = new Promise<void>((resolve) => {

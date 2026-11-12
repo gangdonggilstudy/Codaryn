@@ -157,7 +157,9 @@ test("tree: the host checks the call's arguments before listing", async () => {
   const requests: unknown[] = [];
   const written: unknown[] = [];
   const handler = createHostHandler({
-    app: { doctor: async () => null, readSettings: async () => null, listModels: async () => null, selectModel: async () => null },
+    app: { doctor: async () => null, readSettings: async () => null, listModels: async () => null, selectModel: async () => null, startRun: async () => null },
+    itemsIn: () => () => null,
+    token: () => "0".repeat(32),
     messages: { texts: () => ({ language: "en", texts: {} }) },
     shown: (text) => text,
     providers: [],

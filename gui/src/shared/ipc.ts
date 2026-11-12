@@ -19,11 +19,18 @@ export const IPC_CHANNELS = {
   settings: "codaryn:settings:read",
   listModels: "codaryn:models:list",
   selectModel: "codaryn:models:select",
+  startRun: "codaryn:run:start",
+  cancelRun: "codaryn:run:cancel",
 } as const;
 
-/** Main → renderer: a workspace was opened from outside the window (the command line of a second start). */
+/**
+ * Main → renderer: a workspace was opened from outside the window (the command line of a second
+ * start); GU-3: a run's progress items, and its end.
+ */
 export const IPC_EVENTS = {
   workspaceOpened: "codaryn:event:workspaceopened",
+  runEvents: "codaryn:event:runevents",
+  runDone: "codaryn:event:rundone",
 } as const;
 
 /** A workspace handle the main process issued: 128 random bits as lowercase hex. */
@@ -360,6 +367,128 @@ export type ModelsReply =
 export type SelectModelReply =
   | { readonly ok: true; readonly selected: { readonly id: string; readonly created: boolean; readonly overridden: boolean } }
   | { readonly ok: false; readonly code: string };
+
+/** GU-3: the longest goal the window sends (the CLI's own checks still run in startRun). */
+export const MAX_GOAL_CHARS = 20_000;
+const NAME = /^[^\u0000-\u001f\u007f]{1,200}$/;
+
+/** `startRun` arguments: the workspace handle, the goal, and the profile and task kind chosen, or null. */
+export function parseStartRunArgs(value: unknown): { readonly workspace: string; readonly goal: string; readonly profile: string | null; readonly workflow: string | null } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "goal", "profile", "workflow"])) return null;
+  const { workspace, goal } = value;
+  const profile = value["profile"] ?? null;
+  const workflow = value["workflow"] ?? null;
+  if (!isHandle(workspace) || typeof goal !== "string" || goal.trim().length === 0 || goal.length > MAX_GOAL_CHARS || goal.includes("\u0000")) return null;
+  if (profile !== null && (typeof profile !== "string" || !NAME.test(profile))) return null;
+  if (workflow !== null && (typeof workflow !== "string" || !NAME.test(workflow))) return null;
+  return { workspace, goal, profile: profile as string | null, workflow: workflow as string | null };
+}
+
+export const RUN_STATUSES = ["done", "failed", "needs-input", "cancelled", "budget-exhausted"] as const;
+const REASON = /^[a-z][a-z_]{0,39}$/;
+const DIGEST = /^[0-9a-f]{64}$/;
+const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
+
+export function isRunId(value: unknown): value is string {
+  return typeof value === "string" && RUN_ID.test(value);
+}
+
+export interface RunItemView {
+  /** ISO time of the record, or null. */
+  readonly at: string | null;
+  /** The record type, "notice", or "gap" (items went missing: the report has them all). */
+  readonly kind: string;
+  readonly text: string;
+}
+
+export interface RunEventsPayload {
+  readonly runId: string;
+  readonly items: readonly RunItemView[];
+  readonly counts: { readonly turns: number; readonly tools: number };
+}
+
+/** GU-3 (3.7 summary): what the window shows of a finished run. Texts are masked and cleaned. */
+export interface RunResultView {
+  readonly runId: string;
+  readonly status: (typeof RUN_STATUSES)[number];
+  readonly reason: string;
+  readonly exitCode: number | null;
+  readonly changes: readonly { readonly path: string; readonly created: boolean }[];
+  readonly verifiers: readonly { readonly number: number; readonly outcome: string }[];
+  readonly usage: {
+    readonly turns: number | null;
+    readonly tools: number | null;
+    readonly inputTokens: number | null;
+    readonly outputTokens: number | null;
+    readonly durationMs: number | null;
+  };
+  readonly notices: readonly string[];
+  readonly plan: { readonly digest: string; readonly actions: number | null } | null;
+  readonly review: { readonly checklist: readonly string[] } | null;
+  readonly protectedChanged: number | null;
+}
+
+export type RunDonePayload =
+  | { readonly runId: string; readonly ok: true; readonly result: RunResultView; readonly labels: { readonly status: string; readonly reason: string } }
+  | { readonly runId: string; readonly ok: false; readonly code: string };
+
+const numOrNull = (value: unknown): value is number | null => value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+
+/** The engine host's `done` outcome, checked field by field. */
+export function toRunResultView(value: unknown): { readonly ok: true; readonly result: RunResultView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const result = value["result"];
+  if (!isObj(result)) return fail;
+  const { runId, status, reason, exitCode, changes, verifiers, usage, notices, plan, review, protectedChanged } = result;
+  if (!isRunId(runId) || typeof status !== "string" || !(RUN_STATUSES as readonly string[]).includes(status) || typeof reason !== "string" || !REASON.test(reason)) return fail;
+  if (!numOrNull(exitCode) || !numOrNull(protectedChanged) || !textList(notices)) return fail;
+  if (!Array.isArray(changes) || changes.length > MAX_ITEMS || !Array.isArray(verifiers) || verifiers.length > MAX_ITEMS || !isObj(usage)) return fail;
+  const changeViews: { path: string; created: boolean }[] = [];
+  for (const change of changes) {
+    if (!isObj(change) || !shortText(change["path"]) || typeof change["created"] !== "boolean") return fail;
+    changeViews.push({ path: change["path"], created: change["created"] });
+  }
+  const verifierViews: { number: number; outcome: string }[] = [];
+  for (const verifier of verifiers) {
+    if (!isObj(verifier) || !count(verifier["number"]) || typeof verifier["outcome"] !== "string" || !REASON.test(verifier["outcome"])) return fail;
+    verifierViews.push({ number: verifier["number"], outcome: verifier["outcome"] });
+  }
+  const { turns, tools, inputTokens, outputTokens, durationMs } = usage;
+  if (![turns, tools, inputTokens, outputTokens, durationMs].every(numOrNull)) return fail;
+  let planView: RunResultView["plan"] = null;
+  if (plan !== null) {
+    if (!isObj(plan) || typeof plan["digest"] !== "string" || !DIGEST.test(plan["digest"]) || !numOrNull(plan["actions"])) return fail;
+    planView = { digest: plan["digest"], actions: plan["actions"] as number | null };
+  }
+  let reviewView: RunResultView["review"] = null;
+  if (review !== null) {
+    if (!isObj(review) || !textList(review["checklist"])) return fail;
+    reviewView = { checklist: review["checklist"] };
+  }
+  return {
+    ok: true,
+    result: {
+      runId,
+      status: status as RunResultView["status"],
+      reason,
+      exitCode: exitCode as number | null,
+      changes: changeViews,
+      verifiers: verifierViews,
+      usage: {
+        turns: turns as number | null,
+        tools: tools as number | null,
+        inputTokens: inputTokens as number | null,
+        outputTokens: outputTokens as number | null,
+        durationMs: durationMs as number | null,
+      },
+      notices,
+      plan: planView,
+      review: reviewView,
+      protectedChanged: protectedChanged as number | null,
+    },
+  };
+}
 
 /** The engine host's answer to `selectModel`, checked. */
 export function toSelectModelReply(value: unknown): SelectModelReply {

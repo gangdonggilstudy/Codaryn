@@ -33,7 +33,7 @@ test("protocol: requests that are not version 1, have no id or name an unknown c
   const noId = parseRequest(JSON.stringify({ v: 1, id: 0, call: "doctor" }));
   assert.equal(noId.ok, false);
   assert.equal(!noId.ok && noId.id, null);
-  const unknown = parseRequest(JSON.stringify({ v: 1, id: 4, call: "startRun" }));
+  const unknown = parseRequest(JSON.stringify({ v: 1, id: 4, call: "eraseEverything" }));
   assert.deepEqual(unknown, { ok: false, id: 4, error: { code: CHANNEL_ERRORS.unknownCall, message: "unknown call" } });
   assert.equal(parseRequest(JSON.stringify({ v: 1, id: 4, call: "__proto__" })).ok, false);
 });

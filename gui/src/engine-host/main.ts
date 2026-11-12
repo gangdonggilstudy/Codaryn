@@ -9,12 +9,14 @@
  * - The host ends when stdin ends, so it never outlives the main process (DR-8).
  */
 
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
+import { MAX_RUN_ITEM_CHARS, MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
 import type { HostApp, HostMessages } from "./host.js";
+import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
 import type { TreeEngine } from "./tree.js";
 
@@ -56,10 +58,51 @@ interface EngineI18nModule {
   createMessageCatalog(language: string): { format(id: string): string };
 }
 
+/** N-C: the CLI's renderer for people (src/cli/human/output.ts); progress lines come from it (3.6). */
+interface EngineHumanModule {
+  createHumanOutput(catalog: unknown): {
+    progressLine(event: unknown): string | null;
+    applyProgressLine?(event: unknown): string | null;
+  };
+}
+
+const RECORD_TYPE = /^[a-z][a-z_]{0,39}$/;
+const RECORD_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
+
+/** GU-3: a run's events as progress items in `language`: the CLI's sentences, on one line, cleaned. */
+function runItems(human: ReturnType<EngineHumanModule["createHumanOutput"]>, shown: (text: string) => string): RunItemOf {
+  const oneLine = (text: string): string => shown(text.replace(/\r?\n+$/, "").replace(/\r?\n/g, " ")).slice(0, MAX_RUN_ITEM_CHARS);
+  return (event) => {
+    if (typeof event !== "object" || event === null) return null;
+    const { kind, text, record } = event as Record<string, unknown>;
+    if (kind === "notice") return typeof text === "string" ? { at: null, kind: "notice", text: oneLine(text) } : null;
+    if (kind !== "record" || typeof record !== "object" || record === null) return null;
+    const { type, at } = record as Record<string, unknown>;
+    if (typeof type !== "string" || !RECORD_TYPE.test(type)) return null;
+    let line: string | null = null;
+    try {
+      line = human.progressLine(record);
+    } catch {
+      line = null;
+    }
+    if (line === null && human.applyProgressLine !== undefined) {
+      try {
+        line = human.applyProgressLine(record);
+      } catch {
+        line = null;
+      }
+    }
+    if (line === null) return null;
+    // A denied tool call is its own kind, so the window can show denials only (3.6 filter).
+    const itemKind = type === "tool_decision" && (record as Record<string, unknown>)["allowed"] === false ? "tool_denied" : type;
+    return { at: typeof at === "string" && RECORD_TIME.test(at) ? at : null, kind: itemKind, text: oneLine(line) };
+  };
+}
+
 function engineDirFromArgs(argv: readonly string[]): string | null {
   if (argv.length !== 2 || argv[0] !== "--engine-dir") return null;
   const dir = argv[1] as string;
-  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"]];
+  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"], ["cli", "human", "output.js"]];
   return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? dir : null;
 }
 
@@ -89,7 +132,8 @@ async function main(): Promise<number> {
   const i18n = await load<EngineI18nModule>(join(engineDir, "i18n", "index.js"), ["selectMessageLanguage", "createMessageCatalog"]);
   const workspaceModule = await load<EngineWorkspaceModule>(join(engineDir, "workspace", "index.js"), ["createWorkspace"]);
   const textSafety = await load<EngineTextSafetyModule>(join(engineDir, "cli", "text-safety.js"), ["cleanText", "hideKeys"]);
-  if (appModule === null || i18n === null || workspaceModule === null || textSafety === null) {
+  const humanModule = await load<EngineHumanModule>(join(engineDir, "cli", "human", "output.js"), ["createHumanOutput"]);
+  if (appModule === null || i18n === null || workspaceModule === null || textSafety === null || humanModule === null) {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
@@ -122,7 +166,9 @@ async function main(): Promise<number> {
   });
   writeLine(encodeLine({ v: 1, type: "ready", node }));
   process.stdin.setEncoding("utf8");
-  await serve(process.stdin, { app, messages, tree, shown, providers, write: writeLine, log });
+  const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
+  const token = (): string => randomBytes(16).toString("hex");
+  await serve(process.stdin, { app, messages, tree, shown, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

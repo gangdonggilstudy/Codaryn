@@ -79,6 +79,12 @@ export function createMessageCatalog(language) { return { format(id) { if (id ==
 export function hideKeys(text) { return text; }
 `,
   );
+  await fs.mkdir(path.join(engine, "cli", "human"), { recursive: true });
+  await fs.writeFile(
+    path.join(engine, "cli", "human", "output.js"),
+    `export function createHumanOutput() { return { progressLine() { return null; } }; }
+`,
+  );
   return engine;
 }
 

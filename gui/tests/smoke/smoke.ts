@@ -73,11 +73,17 @@ function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: 
 }
 
 const results: Record<string, unknown> = {};
+/** The main process's OS dialogs this test answered, by id. */
+const dialogs: string[] = [];
 
 startGui({
   guiRoot: GUI,
   userDataDir: join(GUI, "build", "smoke-profile"),
   stateFile: STATE,
+  answerDialog: async (id) => {
+    dialogs.push(id);
+    return 0;
+  },
   async afterLoad({ window, host, openFromOutside }) {
     try {
       const contents = window.webContents;
@@ -154,6 +160,31 @@ startGui({
       results["modelForgedEntry"] = await js(`window.codaryn.selectModel(${JSON.stringify("0".repeat(32))})`);
       results["modelIdAsEntry"] = await js("window.codaryn.selectModel('fake-model-a')");
 
+      // 5c. GU-3: a run from the new task screen (the fake API asks to read a.txt, then ends).
+      const startTask = async (goal: string): Promise<void> => {
+        await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+        await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+        await js(`(() => { const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
+      };
+      await startTask("a.txt를 읽고 요약한다");
+      results["runDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 90_000);
+      results["runResult"] = await js(
+        "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), runId: document.getElementById('run-result-id')?.textContent ?? null }; })()",
+      );
+      results["runLog"] = await js("[...document.querySelectorAll('#run-log li')].map((li) => li.getAttribute('data-kind'))");
+      results["runCounts"] = await js("document.getElementById('run-counts')?.textContent ?? null");
+      results["runText"] = await js("document.getElementById('work')?.textContent ?? ''");
+      results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
+
+      // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
+      await startTask("멈추는 작업");
+      results["cancelReady"] = await waitFor("document.getElementById('run-cancel')?.hasAttribute('disabled') === false ? 'ready' : null", 60_000);
+      results["secondStartRefused"] = await js(`window.codaryn.startRun(${JSON.stringify(second.ok ? second.handle : "")}, 'again', null, null)`);
+      await js("document.getElementById('run-cancel').click(); true");
+      results["cancelAsked"] = await js("document.getElementById('run-confirm')?.hasAttribute('hidden') === false && document.activeElement?.id === 'run-keep'");
+      await js("document.getElementById('run-cancel-sure').click(); true");
+      results["cancelDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? document.getElementById('run-result')?.getAttribute('data-status') ?? 'no result' : null", 60_000);
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",
@@ -187,6 +218,18 @@ startGui({
         }),
       );
       results["sockets"] = sockets([...pids]);
+
+      // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
+      // cancels, waits for the end and closes. Last, because the window is gone afterwards.
+      await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+      await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+      await js("(() => { const g = document.getElementById('task-goal'); g.value = 'close while running'; document.getElementById('task-run').click(); return true; })()");
+      await waitFor("document.getElementById('run-cancel')?.hasAttribute('disabled') === false ? 'ready' : null", 60_000);
+      const closed = new Promise<void>((resolve) => window.once("closed", () => resolve()));
+      const begin = Date.now();
+      window.close();
+      await Promise.race([closed, sleep(30_000)]);
+      results["closeGuard"] = { dialogs: [...dialogs], closed: window.isDestroyed(), ms: Date.now() - begin };
     } catch (error) {
       results["error"] = error instanceof Error ? error.message : String(error);
     } finally {

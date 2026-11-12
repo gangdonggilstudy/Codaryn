@@ -59,8 +59,11 @@ function host(app: Partial<HostApp>) {
         calls.push(request);
         return { ok: true, output: { selected: { id: request.model, created: false, overriddenBy: "CODARYN_MODEL" } } };
       },
+      startRun: async () => null,
       ...app,
     },
+    itemsIn: () => () => null,
+    token: () => "0".repeat(32),
     messages: { texts: () => ({ language: "en", texts: {} }) },
     tree: async () => null,
     shown: (text) => `<${text.replace(/[\u0000-\u001f]/g, "?")}>`,

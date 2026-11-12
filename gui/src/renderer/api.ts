@@ -5,7 +5,22 @@
  * directory.
  */
 
-import type { DoctorReply, InfoView, ModelsReply, OpenReply, ProfileView, RecentView, SelectModelReply, SettingsReply, TreeEntryView, TreeReply } from "../shared/ipc.js";
+import type {
+  DoctorReply,
+  InfoView,
+  ModelsReply,
+  OpenReply,
+  ProfileView,
+  RecentView,
+  RunDonePayload,
+  RunEventsPayload,
+  RunItemView,
+  RunResultView,
+  SelectModelReply,
+  SettingsReply,
+  TreeEntryView,
+  TreeReply,
+} from "../shared/ipc.js";
 
 export interface CodarynApi {
   info(): Promise<unknown>;
@@ -19,6 +34,10 @@ export interface CodarynApi {
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;
   selectModel(entry: string): Promise<unknown>;
+  startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
+  cancelRun(): Promise<unknown>;
+  onRunEvents(listener: (payload: unknown) => void): void;
+  onRunDone(listener: (payload: unknown) => void): void;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -155,4 +174,32 @@ export function asSelectModel(value: unknown): SelectModelReply {
   if (!isObj(value) || value["ok"] !== true || !isObj(value["selected"]) || !str(value["selected"]["id"])) return failed(value);
   const selected = value["selected"];
   return { ok: true, selected: { id: selected["id"] as string, created: selected["created"] === true, overridden: selected["overridden"] === true } };
+}
+
+const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
+
+/** GU-3: the answer to startRun. */
+export function asStartRun(value: unknown): { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string } {
+  if (isObj(value) && value["ok"] === true && str(value["runId"]) && RUN_ID.test(value["runId"])) return { ok: true, runId: value["runId"] };
+  return failed(value);
+}
+
+/** GU-3: a batch of progress items; null when it does not fit. */
+export function asRunEvents(value: unknown): RunEventsPayload | null {
+  if (!isObj(value) || !str(value["runId"]) || !Array.isArray(value["items"]) || !isObj(value["counts"])) return null;
+  const items: RunItemView[] = value["items"].flatMap((item: unknown) =>
+    isObj(item) && str(item["kind"]) && str(item["text"]) && (item["at"] === null || str(item["at"])) ? [{ at: item["at"] as string | null, kind: item["kind"], text: item["text"] }] : [],
+  );
+  const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  return { runId: value["runId"], items, counts: { turns: n(value["counts"]["turns"]), tools: n(value["counts"]["tools"]) } };
+}
+
+/** GU-3: a run's end; null when it does not fit. The main process checked the result already. */
+export function asRunDone(value: unknown): RunDonePayload | null {
+  if (!isObj(value) || !str(value["runId"])) return null;
+  if (value["ok"] !== true) return { runId: value["runId"], ok: false, code: str(value["code"]) ? value["code"] : "host_error" };
+  const result = value["result"];
+  const labels = value["labels"];
+  if (!isObj(result) || !str(result["status"]) || !str(result["reason"]) || !isObj(labels) || !str(labels["status"]) || !str(labels["reason"])) return null;
+  return { runId: value["runId"], ok: true, result: result as unknown as RunResultView, labels: { status: labels["status"], reason: labels["reason"] } };
 }

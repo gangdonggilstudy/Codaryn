@@ -17,16 +17,20 @@ import {
   parseIdArg,
   parseProviderArgs,
   parseRevealArgs,
+  parseStartRunArgs,
   parseTreeArgs,
+  isRunId,
   toDoctorView,
   toHostModelList,
   toSelectModelReply,
   toSettingsView,
+  hostCodeOf,
 } from "../shared/ipc.js";
 import type { DoctorReply, InfoView, ModelsReply, OpenFolderReply, OpenReply, RecentView, SelectModelReply, SettingsReply, SettingsView, TreeReply } from "../shared/ipc.js";
 import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries } from "./model-entries.js";
+import type { RunManager } from "./runs.js";
 import type { Workspaces } from "./workspaces.js";
 
 const DOCTOR_TIMEOUT_MS = 60_000;
@@ -35,6 +39,12 @@ const TREE_TIMEOUT_MS = 30_000;
 const SETTINGS_TIMEOUT_MS = 30_000;
 /** Listing and choosing a model ask the provider's API (Y-2): the request time limit and retries fit in this. */
 const MODELS_TIMEOUT_MS = 120_000;
+/** startRun answers after its checks (the CLI's order), before the engine works; the run itself has no time limit here. */
+const START_TIMEOUT_MS = 120_000;
+const CANCEL_TIMEOUT_MS = 10_000;
+
+/** What `startRun` answers the window. */
+export type StartRunReply = { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string };
 
 export interface IpcDeps {
   readonly window: () => BrowserWindow | null;
@@ -48,6 +58,10 @@ export interface IpcDeps {
   readonly modelEntries: ModelEntries;
   /** Whether CODARYN_MODEL and CODARYN_LANG are set in the app's environment (never their values). */
   readonly envFacts: () => SettingsView["env"];
+  /** GU-3: the one run at a time. */
+  readonly runs: RunManager;
+  /** The window's language once the engine host chose it (for the main process's own dialogs). */
+  readonly onLanguage: (language: "ko" | "en") => void;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -68,7 +82,7 @@ function safeLocale(locale: string): string | null {
 }
 
 /** The language the engine host chooses and the shared catalog's texts for `ids` in it. */
-async function texts(host: EngineHost, osLocale: string, ids: readonly string[]): Promise<{ language: "ko" | "en"; texts: Record<string, string> } | null> {
+export async function texts(host: EngineHost, osLocale: string, ids: readonly string[]): Promise<{ language: "ko" | "en"; texts: Record<string, string> } | null> {
   const response = await host.call("messages", { osLocale: safeLocale(osLocale), ids }, MESSAGES_TIMEOUT_MS);
   if (!response.ok || typeof response.value !== "object" || response.value === null) return null;
   const { language: lang, texts: table } = response.value as Record<string, unknown>;
@@ -83,6 +97,8 @@ async function texts(host: EngineHost, osLocale: string, ids: readonly string[])
 
 export function registerIpc(deps: IpcDeps): void {
   const { workspaces } = deps;
+  let language: "ko" | "en" = "en";
+  let starting = false;
   const handle = <R>(channel: string, handler: (args: unknown[]) => Promise<R>): void => {
     ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<R | null> => {
       if (!fromAppWindow(event, deps.window())) return null;
@@ -96,9 +112,10 @@ export function registerIpc(deps: IpcDeps): void {
     const state = await deps.host();
     if (!("host" in state)) return { language: "en", engine: state.failure, initialWorkspace };
     const chosen = await texts(state.host, deps.osLocale(), []);
-    return chosen === null
-      ? { language: "en", engine: "host_error", initialWorkspace }
-      : { language: chosen.language, engine: "ready", initialWorkspace };
+    if (chosen === null) return { language: "en", engine: "host_error", initialWorkspace };
+    language = chosen.language;
+    deps.onLanguage(language);
+    return { language: chosen.language, engine: "ready", initialWorkspace };
   });
 
   handle(IPC_CHANNELS.openFolder, async (args): Promise<OpenFolderReply> => {
@@ -211,4 +228,45 @@ export function registerIpc(deps: IpcDeps): void {
     if (!response.ok) return { ok: false, code: response.error.code };
     return toSelectModelReply(response.value);
   });
+
+  // GU-3 (3.5, 3.6): one run at a time (GUI-D12). The workspace is a handle; the run token stays here.
+  handle(IPC_CHANNELS.startRun, async (args): Promise<StartRunReply> => {
+    const parsed = args.length === 1 ? parseStartRunArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    starting = true;
+    try {
+      const request = { workspace: root, goal: parsed.goal, profile: parsed.profile, workflowRef: parsed.workflow, language };
+      const response = await state.host.call("startRun", request, START_TIMEOUT_MS);
+      if (!response.ok) return { ok: false, code: response.error.code };
+      const value = response.value as Record<string, unknown> | null;
+      if (typeof value !== "object" || value === null || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+      const token = value["run"];
+      const runId = value["runId"];
+      if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
+      deps.runs.begin(token, runId);
+      return { ok: true, runId };
+    } finally {
+      starting = false;
+    }
+  });
+
+  handle(IPC_CHANNELS.cancelRun, async (args): Promise<boolean> => {
+    if (!isNoArgs(args)) return false;
+    return cancelActiveRun(deps);
+  });
+}
+
+/** Cancels the run that goes on (the handle's cancel in the engine host). False when there is none. */
+export async function cancelActiveRun(deps: Pick<IpcDeps, "host" | "runs">): Promise<boolean> {
+  const token = deps.runs.token;
+  if (token === null) return false;
+  const state = await deps.host();
+  if (!("host" in state)) return false;
+  const response = await state.host.call("cancelRun", { run: token }, CANCEL_TIMEOUT_MS);
+  return response.ok && typeof response.value === "object" && response.value !== null && (response.value as Record<string, unknown>)["ok"] === true;
 }

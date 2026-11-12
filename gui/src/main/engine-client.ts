@@ -7,7 +7,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process";
 import { CHANNEL_ERRORS, LineDecoder, MIN_NODE_MAJOR, PendingCalls, encodeLine, nodeMajor, parseHostMessage } from "../shared/protocol.js";
-import type { HostCall, HostResponse } from "../shared/protocol.js";
+import type { HostCall, HostResponse, HostRunMessage } from "../shared/protocol.js";
 
 export interface EngineHostOptions {
   /** Absolute path of a Node 26+ executable (node-path.ts). */
@@ -41,6 +41,8 @@ export interface EngineHost {
   close(): Promise<void>;
   /** Called once when the host has exited. */
   onExit(listener: () => void): void;
+  /** GU-3: a run's progress items and its end, as the host sends them (checked by the listener). */
+  onRunMessage(listener: (message: HostRunMessage) => void): void;
 }
 
 export type StartOutcome =
@@ -64,6 +66,7 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
 
   const pending = new PendingCalls();
   const exitListeners: (() => void)[] = [];
+  const runListeners: ((message: HostRunMessage) => void)[] = [];
   let exited = false;
   let nodeVersion: string | null = null;
   let settleStart: ((outcome: StartOutcome) => void) | null = null;
@@ -106,6 +109,21 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
     const message = parseHostMessage(line);
     if (message === null) {
       violation();
+      return;
+    }
+    if ("type" in message && message.type !== "ready") {
+      // GU-3: run messages come only after ready; a listener's exception never breaks the channel.
+      if (nodeVersion === null) {
+        violation();
+        return;
+      }
+      for (const listener of runListeners) {
+        try {
+          listener(message);
+        } catch {
+          // ignored
+        }
+      }
       return;
     }
     if ("type" in message) {
@@ -186,6 +204,9 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
       onExit(listener) {
         if (exited) listener();
         else exitListeners.push(listener);
+      },
+      onRunMessage(listener) {
+        runListeners.push(listener);
       },
     };
   }

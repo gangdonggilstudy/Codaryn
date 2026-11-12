@@ -25,8 +25,11 @@ function harness(app: Partial<HostApp> = {}, messages?: HostMessages) {
       readSettings: async () => ({ ok: false, error: { code: "invalid_config", message: "not used" } }),
       listModels: async () => ({ ok: false, error: { code: "missing_api_key", message: "not used" } }),
       selectModel: async () => ({ ok: false, error: { code: "missing_api_key", message: "not used" } }),
+      startRun: async () => ({ ok: false, error: { code: "invalid_task", message: "not used" } }),
       ...app,
     },
+    itemsIn: () => () => null,
+    token: () => "0".repeat(32),
     // Marks every text that passed the host's cleaning, so a test sees which ones did.
     shown: (text) => `<${text.replace(/[\u0000-\u001f]/g, "?")}>`,
     providers: ["anthropic"],
@@ -79,7 +82,7 @@ test("host: arguments that do not fit are refused before the app is called", asy
 
 test("host: an unknown call is answered with its id; a line without an id is only logged", async () => {
   const { handler, written, logs } = harness();
-  await handler.handleLine(line(9, "startRun", {}));
+  await handler.handleLine(line(9, "eraseEverything", {}));
   await handler.handleLine("not json at all");
   assert.deepEqual(written, [{ v: 1, id: 9, ok: false, error: { code: "unknown_call", message: "unknown call" } }]);
   assert.equal(logs.length, 1);

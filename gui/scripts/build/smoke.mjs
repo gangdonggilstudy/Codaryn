@@ -34,7 +34,15 @@ const fakeModels = await fromRoot("tests", "support", "fake-models.js");
 const { FAKE_API_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
 const { ANTHROPIC_API_KEY_ENV } = await fromRoot("src", "contracts", "index.js");
 const closeFake = [];
-const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, [], {
+// Model answers in order: a run that reads a file and ends; a run that hangs (cancelled from the
+// window); a run that hangs (cancelled by closing the window).
+const steps = [
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "read_file", { path: "a.txt" })]),
+  fakeApi.replyText("done"),
+  { kind: "hang" },
+  { kind: "hang" },
+];
+const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
   models: { models: [fakeModels.fakeModel("fake-model-a"), fakeModels.fakeModel("fake-model-b")] },
 });
 const configDir = join(gui, "build", "smoke-config");
@@ -50,6 +58,7 @@ writeFileSync(
     apiBaseUrl: api.url,
     requestTimeoutMs: 20000,
     maxRetries: 0,
+    limits: { maxModelTurns: 6, maxToolCalls: 10, maxTotalTokens: 100000, maxDurationMs: 120000 },
     profiles: { doc: { limits: { maxModelTurns: 5 } } },
   }),
 );
@@ -132,7 +141,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "doctor,forgetRecent,info,listModels,onWorkspaceOpened,openFolder,openRecent,recent,reveal,selectModel,settings,tree";
+const API = "cancelRun,doctor,forgetRecent,info,listModels,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,recent,reveal,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -192,7 +201,26 @@ const expected = [
   ["modelForgedEntry", (v) => v.ok === false && v.code === "unknown_entry"],
   ["modelIdAsEntry", (v) => v.ok === false && v.code === "invalid_args"],
   ["configModel", (v) => v === "fake-model-b"],
-  ["apiRequests", (v) => rows(v).length >= 2 && rows(v).every((r) => r.path.startsWith("/v1/models") && r.method === "GET" && r.key === true)],
+  // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
+  [
+    "apiRequests",
+    (v) =>
+      rows(v).filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length >= 2 &&
+      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 4 &&
+      rows(v).every((r) => r.key === true && ((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
+  ],
+  // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
+  ["runDone", (v) => v === "done"],
+  ["runResult", (v) => v !== null && ["done", "needs-input"].includes(v.status) && /^\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(v.runId)],
+  ["runLog", (v) => rows(v).length >= 2 && rows(v).includes("tool_decision")],
+  ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
+  ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes(api.url)],
+  ["runAgainWhileIdle", (v) => v === false],
+  ["cancelReady", (v) => v === "ready"],
+  ["secondStartRefused", (v) => v.ok === false && v.code === "run_active"],
+  ["cancelAsked", (v) => v === true],
+  ["cancelDone", (v) => v === "cancelled"],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

@@ -4,11 +4,14 @@
  * `window.codaryn` (the preload) and to nothing else.
  */
 
-import { asInfo, asOpen } from "./api.js";
+import { asInfo, asOpen, asRunDone, asRunEvents } from "./api.js";
 import type { Workspace } from "./api.js";
 import { checksScreen } from "./checks/checks.js";
 import { textsFor } from "./i18n/catalog.js";
 import { Shell } from "./shell/shell.js";
+import { newTaskScreen } from "./run/new-task.js";
+import { RunModel, clock } from "./run/run-model.js";
+import { runScreen } from "./run/run-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
@@ -59,11 +62,34 @@ async function start(): Promise<void> {
   shell.mount(root);
   tree = new TreeView(texts, api, shell.filePanel);
   shell.add(homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError }));
+  const run = new RunModel();
+  shell.add(newTaskScreen({ texts, api, run, current: () => current, open: openWorkspace, showRun: () => shell?.show("run") }));
+  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text) }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.setEngine(info.engine);
   shell.setWorkspace(null);
   shell.show("home");
+
+  // GU-3: progress and the end of the run come from the main process; the status bar follows them.
+  api.onRunEvents((payload) => {
+    const events = asRunEvents(payload);
+    if (events !== null) run.events(events);
+  });
+  api.onRunDone((payload) => {
+    const done = asRunDone(payload);
+    if (done === null) return;
+    run.finished(done);
+    shell?.announce(done.ok ? texts.format("run.ended", { status: done.labels.status }) : texts.format("run.endedError", { code: done.code }));
+  });
+  run.subscribe(() => {
+    if (run.phase === "idle" || run.phase === "done") {
+      shell?.setRun(null);
+      return;
+    }
+    const seconds = run.elapsed(Date.now());
+    shell?.setRun(texts.format("run.statusBar", { state: texts.format(`run.phase.${run.phase}`), time: seconds === null ? "-" : clock(seconds), turns: String(run.counts.turns), tools: String(run.counts.tools) }));
+  });
 
   api.onWorkspaceOpened((payload) => {
     const opened = asOpen({ ok: true, ...(typeof payload === "object" && payload !== null ? payload : {}) });

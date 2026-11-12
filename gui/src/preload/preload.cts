@@ -21,10 +21,14 @@ const CHANNELS = {
   settings: "codaryn:settings:read",
   listModels: "codaryn:models:list",
   selectModel: "codaryn:models:select",
+  startRun: "codaryn:run:start",
+  cancelRun: "codaryn:run:cancel",
 } as const;
 
 const EVENTS = {
   workspaceOpened: "codaryn:event:workspaceopened",
+  runEvents: "codaryn:event:runevents",
+  runDone: "codaryn:event:rundone",
 } as const;
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
@@ -36,6 +40,20 @@ ipcRenderer.on(EVENTS.workspaceOpened, (_event, payload: unknown) => {
   const value = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
   workspaceListener?.({ handle: text(value["handle"]), name: text(value["name"]) });
 });
+
+/** A plain data copy of a payload: no prototype, function or event object reaches the page. */
+function plain(value: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+let runEventsListener: ((payload: unknown) => void) | null = null;
+let runDoneListener: ((payload: unknown) => void) | null = null;
+ipcRenderer.on(EVENTS.runEvents, (_event, payload: unknown) => runEventsListener?.(plain(payload)));
+ipcRenderer.on(EVENTS.runDone, (_event, payload: unknown) => runDoneListener?.(plain(payload)));
 
 const api = Object.freeze({
   info: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.info),
@@ -50,6 +68,16 @@ const api = Object.freeze({
   settings: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.settings),
   listModels: (provider: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listModels, { provider: text(provider) }),
   selectModel: (entry: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.selectModel, { entry: text(entry) }),
+  startRun: (workspace: unknown, goal: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(CHANNELS.startRun, { workspace: text(workspace), goal: text(goal), profile: text(profile), workflow: text(workflow) }),
+  cancelRun: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.cancelRun),
+  /** One listener at a time for each; a new one replaces the old. */
+  onRunEvents: (listener: unknown): void => {
+    runEventsListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;
+  },
+  onRunDone: (listener: unknown): void => {
+    runDoneListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;
+  },
   /** One listener at a time; a new one replaces the old. */
   onWorkspaceOpened: (listener: unknown): void => {
     workspaceListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;

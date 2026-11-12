@@ -444,6 +444,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.kept.used_by_kept_apply": "남긴 적용 실행이 쓰는 계획 실행. 지우면 그 적용을 되돌릴 수 없음",
   "cleanup.kept.partly_removed": "옮겨 두었지만 다 지우지 못함. 남은 것은 다음 정리에 보이는 폴더에 있음",
   "apply.notice.plan_records_unchecked": "상태 디렉터리가 너무 커서 다 확인하지 못해, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하고, codaryn cleanup으로 상태 디렉터리를 확인할 수 있는 크기로 줄이세요.",
+  "apply.notice.plan_records_unchecked.run_since_plan": "계획 실행이나 그 뒤의 실행 가운데 상태 디렉터리를 다 확인하지 못했거나 중간에 멈춘 실행이 있어, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하세요.",
   "apply.notice.plan_task_differs": "계획은 이 적용에 준 것과 다른 작업으로 만들었습니다(예: 계획은 task 파일, 적용은 간편 형식). 쓰인 검증과 규칙은 계획의 작업이 아니라 이 적용의 것입니다. 이 때문에 적용을 멈추지는 않았습니다. 계획 실행과 같은 작업 지정 방식으로 적용하면 그 작업의 검증과 규칙이 쓰입니다.",
 
   "diagnostic.file.config": "설정 파일",

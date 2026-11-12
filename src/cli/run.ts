@@ -18,7 +18,14 @@
  */
 
 import path from "node:path";
-import { CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
+import {
+  CLI_ERROR_EXIT_CODES,
+  LEGACY_WORKFLOW_SETTINGS,
+  RESULT_SCHEMA_VERSION,
+  mergeWorkflowPolicy,
+  toSchemaFieldPath,
+  workflowPolicyNarrowings,
+} from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   ApiProviderDeps,
@@ -253,8 +260,9 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
 
 /**
  * G-A: the config as a task sees it when a workflow definition applies: the definition's limits
- * under the config's (and so under the profile's); in the quick form its policy and verifiers
- * under the config's too.
+ * under the config's (and so under the profile's); in the quick form its verifiers under the
+ * config's too, and DR-41: its policy merged with the profile's or the config's
+ * (mergeWorkflowPolicy), never replaced by it.
  */
 function underDefinition(config: CodarynConfig | null, definition: WorkflowDefinition, quick: boolean): CodarynConfig {
   const base: CodarynConfig = config ?? { schemaVersion: 1 };
@@ -262,7 +270,7 @@ function underDefinition(config: CodarynConfig | null, definition: WorkflowDefin
   // the quick form the config's limits are the run's, with the definition's filling the gaps; a task
   // file gets them through parseTask's workflowLimits, and only the config bounds it (S-7).
   const limits = !quick || definition.limits === undefined ? base.limits : { ...definition.limits, ...(base.limits ?? {}) };
-  const policy = quick ? (base.policy ?? definition.policy) : base.policy;
+  const policy = quick ? mergeWorkflowPolicy(definition.policy, base.policy) : base.policy;
   const verifiers = quick ? (base.verifiers ?? definition.verifiers) : base.verifiers;
   return {
     ...base,
@@ -601,7 +609,19 @@ export async function prepareTask(
     const file: InputDiagnosticFile = fromConfig ? "config" : "task";
     return error(fromConfig ? "invalid_config" : "invalid_task", `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`, positionDiagnostic(file, { code: "invalid_value", field: resolved.field }));
   }
-  const task = withConfigSecrets(withWorkflow(parsed, resolved.workflowRef, resolved.settings), config);
+  // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
+  // own policy is merged with them here (resolveWorkflow above counted its own command rules first,
+  // GT-D10); the quick form's was merged in underDefinition. What the merge left out is recorded.
+  const givenPolicy = taskFile !== null ? parsed.policy : config?.policy;
+  const policyNarrowings = definition === undefined ? [] : workflowPolicyNarrowings(definition.policy, givenPolicy);
+  const mergedPolicy = taskFile !== null && definition !== undefined ? (mergeWorkflowPolicy(definition.policy, parsed.policy) ?? parsed.policy) : parsed.policy;
+  const task = withConfigSecrets(
+    {
+      ...withWorkflow({ ...parsed, policy: mergedPolicy }, resolved.workflowRef, resolved.settings),
+      ...(policyNarrowings.length === 0 ? {} : { policyNarrowings }),
+    },
+    config,
+  );
 
   // 6. The workspace, and S-1: no file that shapes this or a later run may lie inside it.
   if (!(await io.isDirectory(task.workspaceRoot))) {

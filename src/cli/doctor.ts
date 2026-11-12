@@ -22,7 +22,9 @@ import {
   LOCK_FILE_NAME,
   PARKED_DIR_NAME,
   STATE_DIR_NAME,
+  mergeWorkflowPolicy,
   toApiOrigin,
+  workflowPolicyNarrowings,
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
@@ -48,6 +50,7 @@ import { parseScript } from "../model/index.js";
 import { buildChildEnv, planWindowsLaunch } from "../tools/index.js";
 import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
+import { workflowDefinitions } from "../workflows/index.js";
 import { parseDoctorArgs } from "./args.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
@@ -774,7 +777,21 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   }
 
   // commands
-  const policy = task?.policy ?? (args.taskPath === null ? config?.policy : undefined);
+  // DR-41: where a workflow definition applies (the task's workflowRef, else the profile's), the
+  // policy a run uses is the given one merged with the definition's (mergeWorkflowPolicy), and what
+  // the merge left out is a note of the commands check. The quick form's given policy is the
+  // profile's or the config's; a task file's is its own.
+  const givenPolicy = task?.policy ?? (args.taskPath === null ? config?.policy : undefined);
+  const profileRef = args.profile === null ? null : (config?.profiles?.[args.profile]?.workflowRef ?? null);
+  const workflowRef = (task === null ? undefined : task.workflowRef) ?? profileRef;
+  const definitions = workflowDefinitions(config?.workflows);
+  const definition = workflowRef !== null && Object.hasOwn(definitions, workflowRef) ? definitions[workflowRef] : undefined;
+  const policy = definition === undefined ? givenPolicy : (mergeWorkflowPolicy(definition.policy, givenPolicy) ?? givenPolicy);
+  const policyNotes: DoctorText[] = (definition === undefined ? [] : workflowPolicyNarrowings(definition.policy, givenPolicy)).map((narrowing) =>
+    narrowing.kind === "restore_path_tokens_off"
+      ? { id: "doctor.workflow_policy.restore_path_tokens_off" }
+      : { id: `doctor.workflow_policy.${narrowing.kind}`, params: { count: narrowing.count } },
+  );
   const verifiers = task?.verifiers ?? (args.taskPath === null ? config?.verifiers : undefined) ?? [];
   const commandEntries: CommandEntry[] = [];
   (policy?.commands ?? []).forEach((rule, index) =>
@@ -788,7 +805,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   if (taskUnusable) {
     set("commands", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (commandEntries.length === 0) {
-    set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" });
+    set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" }, policyNotes);
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
     // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
@@ -800,12 +817,12 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
         "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
       if (checked.status === "ok") {
-        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } });
+        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } }, policyNotes);
       } else {
-        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
+        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text, policyNotes);
       }
     } else {
-      set("commands", checked.status, checked.message, checked.text);
+      set("commands", checked.status, checked.message, checked.text, policyNotes);
     }
   }
 

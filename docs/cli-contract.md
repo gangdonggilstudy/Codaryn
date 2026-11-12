@@ -845,6 +845,16 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
 - `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 워크플로, 비밀 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
 
+#### 18.1.1 정책 합치기 (DR-41)
+
+- 작업 종류 정의가 적용되면(간편 형식의 `--workflow`나 프로필의 `workflowRef`, task 파일의 `workflowRef`) 주어진 정책을 정의의 정책과 합친다(`mergeWorkflowPolicy`). 정의의 규칙은 그 작업 종류의 안전 규칙이라, 어떤 정책도 그것을 풀지 못한다.
+  - 주어진 정책: 간편 형식은 프로필의 정책, 없으면 설정의 정책. task 파일은 그 자신의 정책.
+  - 보호 경로는 합집합이다. 명령은 양쪽이 모두 허용한 명령 줄만 남는다. 계획 동작은 주어진 정책이 말하면 양쪽이 모두 가진 것만 남고, 말하지 않으면 정의의 것 그대로다. `restorePathTokens`는 둘 다 허용할 때만 참이다.
+  - 정의가 명령을 허용하지 않을 때(`organize`): task 파일 자신의 명령 규칙은 먼저 `invalid_task`로 거부한다(GT-D10, 합치기 전에 센다). 프로필·설정의 규칙은 빠진다.
+  - 정의가 없는 task 파일은 자기 정책을 그대로 쓴다.
+- 합치기에서 빠진 것(`workflowPolicyNarrowings`: 종류와 수만)은 실행할 task의 `policyNarrowings`에 싣는다. 엔진이 `run_started`에 기록한다.
+- doctor의 `commands` 점검은 합친 정책을 보고, 빠진 것을 notes(`doctor.workflow_policy.*`)로 적는다.
+
 ### 18.2 task 형식 (DR-17)
 
 `plan`, `apply`, `review`는 `run`과 같은 형식을 받는다. `changes`도 같지만 `--workflow`는 받지 않는다(앱 계층의 `TaskForm`과 같은 인자 해석, `src/cli/changes.ts`).

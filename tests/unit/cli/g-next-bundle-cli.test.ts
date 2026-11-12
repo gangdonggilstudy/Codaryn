@@ -83,17 +83,25 @@ describe("R-26 L-1: doctor names no key destination when the config file fails i
   });
 });
 
-describe("DR-41: a config's policy does not loosen a workflow definition's in the quick form", () => {
+describe("DR-41: no policy loosens a workflow definition's, in the quick form and in a task file", () => {
   const NODE_A = { executable: "node", argsPrefix: ["a.js"], allowExtraArgs: false };
   const NODE_B = { executable: "node", argsPrefix: ["b.js"], allowExtraArgs: false };
   const DEFINITION_POLICY = { commands: [NODE_A], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move"], protectedPaths: ["keep"] };
   const CONFIG_POLICY = { commands: [NODE_A, NODE_B], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move", "discard"], protectedPaths: ["other"] };
 
-  async function effectivePolicy(config: Record<string, unknown>): Promise<PolicyConfig> {
+  /** The task the run would start with: the quick form with --workflow, or a task file (`task`). */
+  async function startedTask(config: Record<string, unknown>, task: Record<string, unknown> | null = null, workflow = "tidy"): Promise<{ task: ResolvedTaskSpec | null; output: unknown }> {
     const { dir, ws, configPath } = await base({ model: "claude-x", maxOutputTokens: 100, limits: LIMITS, ...config });
     let captured: ResolvedTaskSpec | null = null;
+    if (task !== null) {
+      const spec = { schemaVersion: 1, id: "dr41", goal: "tidy up", workflow: "label", workspaceRoot: "./ws", model: { provider: "anthropic" }, privacy: { secretEnv: [] }, limits: LIMITS, verifiers: [], ...task };
+      await writeFile(path.join(dir, "task.json"), JSON.stringify(spec), "utf8");
+    }
     const outcome = await runCli({
-      argv: ["run", "--workspace", ws, "--goal", "tidy up", "--workflow", "tidy", "--config", configPath, "--quiet"],
+      argv:
+        task === null
+          ? ["run", "--workspace", ws, "--goal", "tidy up", "--workflow", workflow, "--config", configPath, "--quiet"]
+          : ["run", "--task", path.join(dir, "task.json"), "--config", configPath, "--quiet"],
       env: { [ANTHROPIC_API_KEY_ENV]: ANTHROPIC_VALUE },
       cwd: dir,
       readFile: (file) => readFile(file, "utf8"),
@@ -110,8 +118,13 @@ describe("DR-41: a config's policy does not loosen a workflow definition's in th
       },
       cancelSignal: () => ({ signal: new AbortController().signal, dispose: () => {} }),
     });
-    assert.ok(captured !== null, JSON.stringify(outcome.output));
-    return (captured as ResolvedTaskSpec).policy;
+    return { task: captured, output: outcome.output };
+  }
+
+  async function effectivePolicy(config: Record<string, unknown>, task: Record<string, unknown> | null = null, workflow = "tidy"): Promise<PolicyConfig> {
+    const started = await startedTask(config, task, workflow);
+    assert.ok(started.task !== null, JSON.stringify(started.output));
+    return started.task.policy;
   }
 
   const workflows = { tidy: { tools: ["read_file", "search_files", "propose_plan", "run_command"], plan: "apply", policy: DEFINITION_POLICY } };
@@ -123,16 +136,109 @@ describe("DR-41: a config's policy does not loosen a workflow definition's in th
     assert.deepEqual(policy.commands.map(rule), ["node a.js"]);
   });
 
-  const todo = { todo: "contract and CLI: DR-41's merge (union of protected paths; commands and plan actions both allow)" };
-
-  test("plan actions and commands: only what both allow", todo, async () => {
+  test("quick form: plan actions and commands only what both allow", async () => {
     const policy = await effectivePolicy({ workflows, policy: CONFIG_POLICY });
     assert.deepEqual(policy.planActions, ["move"]);
     assert.deepEqual(policy.commands.map(rule), ["node a.js"]);
   });
 
-  test("protected paths: the union", todo, async () => {
+  test("quick form: protected paths the union", async () => {
     const policy = await effectivePolicy({ workflows, policy: CONFIG_POLICY });
     assert.deepEqual([...(policy.protectedPaths ?? [])].sort(), ["keep", "other"]);
+  });
+  test("quick form: what the merge left out is on the task (policyNarrowings)", async () => {
+    const started = await startedTask({ workflows, policy: CONFIG_POLICY });
+    assert.deepEqual(started.task?.policyNarrowings, [
+      { kind: "commands_dropped", count: 1 },
+      { kind: "plan_actions_dropped", count: 1 },
+    ]);
+    const plain = await startedTask({ workflows });
+    assert.equal(plain.task?.policyNarrowings, undefined);
+  });
+
+  test("A-8: a policy that only adds a protected path keeps organize's plan actions", async () => {
+    const policy = await effectivePolicy({ policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, protectedPaths: ["notes"] } }, null, "organize");
+    assert.deepEqual(policy.planActions, ["move", "discard"]);
+    assert.deepEqual(policy.protectedPaths, ["notes"]);
+  });
+
+  test("a task file naming a workflow: its own policy is merged with the definition's", async () => {
+    const started = await startedTask({ workflows }, { workflowRef: "tidy", policy: CONFIG_POLICY });
+    assert.ok(started.task !== null, JSON.stringify(started.output));
+    assert.deepEqual(started.task.policy.planActions, ["move"]);
+    assert.deepEqual(started.task.policy.commands.map(rule), ["node a.js"]);
+    assert.deepEqual([...(started.task.policy.protectedPaths ?? [])].sort(), ["keep", "other"]);
+    assert.deepEqual(started.task.policyNarrowings, [
+      { kind: "commands_dropped", count: 1 },
+      { kind: "plan_actions_dropped", count: 1 },
+    ]);
+  });
+
+  test("a task file naming organize with its own command rules is still refused first (GT-D10)", async () => {
+    const started = await startedTask({}, { workflowRef: "organize", policy: CONFIG_POLICY });
+    assert.equal(started.task, null);
+    const output = started.output as { kind: string; code?: string; message?: string };
+    assert.deepEqual([output.kind, output.code], ["error", "invalid_task"]);
+    assert.ok(output.message?.startsWith("policy.commands"), output.message ?? "");
+  });
+
+  test("a task file naming no workflow keeps its own policy as it is", async () => {
+    const policy = await effectivePolicy({ workflows }, { policy: CONFIG_POLICY });
+    assert.deepEqual(policy.planActions, ["move", "discard"]);
+    assert.deepEqual(policy.commands.map(rule), ["node a.js", "node b.js"]);
+  });
+});
+
+describe("DR-41: doctor checks the merged policy and notes what the merge left out", () => {
+  const NODE_A = { executable: "node", argsPrefix: ["a.js"], allowExtraArgs: false };
+  const NODE_B = { executable: "node", argsPrefix: ["b.js"], allowExtraArgs: false };
+  const DEFINITION_POLICY = { commands: [NODE_A], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move"], protectedPaths: ["keep"] };
+  const GIVEN_POLICY = { commands: [NODE_A, NODE_B], network: "deny", destructive: "deny", restorePathTokens: true, planActions: ["move", "discard"] };
+  const workflows = { tidy: { tools: ["read_file", "propose_plan", "run_command"], plan: "apply", policy: DEFINITION_POLICY } };
+
+  async function commandsCheck(config: Record<string, unknown>, argv: readonly string[], task: Record<string, unknown> | null = null): Promise<{ notes: unknown; message: string }> {
+    const { dir, ws, configPath } = await base({ model: "claude-x", maxOutputTokens: 100, limits: LIMITS, ...config });
+    const extra: string[] = [];
+    if (task !== null) {
+      const spec = { schemaVersion: 1, id: "dr41d", goal: "g", workflow: "label", workspaceRoot: "./ws", model: { provider: "anthropic" }, privacy: { secretEnv: [] }, limits: LIMITS, verifiers: [], ...task };
+      await writeFile(path.join(dir, "task.json"), JSON.stringify(spec), "utf8");
+      extra.push("--task", path.join(dir, "task.json"));
+    }
+    const outcome = await runDoctor({
+      argv: ["doctor", "--config", configPath, ...(task === null ? ["--workspace", ws] : extra), ...argv, "--json"],
+      env: { [ANTHROPIC_API_KEY_ENV]: ANTHROPIC_VALUE },
+      cwd: dir,
+      nodeVersion: "26.0.0",
+      readFile: (file) => readFile(file, "utf8"),
+      isDirectory: async (folder) => (await stat(folder).catch(() => null))?.isDirectory() ?? false,
+      isFile: async (file) => (await stat(file).catch(() => null))?.isFile() ?? false,
+      locateInWorkspace: (file, root) => locateInWorkspace(file, root),
+      relatePaths: (target, root) => relateRealPaths(target, root),
+    });
+    assert.ok("text" in outcome, JSON.stringify(outcome));
+    const check = (JSON.parse(outcome.text) as DoctorOutput).checks.find((entry) => entry.id === "commands");
+    return { notes: check?.notes, message: check?.message ?? "" };
+  }
+
+  const NOTES = [
+    { id: "doctor.workflow_policy.commands_dropped", params: { count: 1 } },
+    { id: "doctor.workflow_policy.plan_actions_dropped", params: { count: 1 } },
+    { id: "doctor.workflow_policy.restore_path_tokens_off" },
+  ];
+
+  test("quick form with a profile naming the workflow: the profile's policy is merged, the notes say what went", async () => {
+    const check = await commandsCheck({ workflows, profiles: { p: { workflowRef: "tidy", policy: GIVEN_POLICY } } }, ["--profile", "p"]);
+    assert.deepEqual(check.notes, NOTES);
+    assert.equal(check.message.includes("b.js"), false, check.message);
+  });
+
+  test("a task file naming the workflow: its own policy is merged, the notes say what went", async () => {
+    const check = await commandsCheck({ workflows }, [], { workflowRef: "tidy", policy: GIVEN_POLICY });
+    assert.deepEqual(check.notes, NOTES);
+  });
+
+  test("no workflow: no notes, the given policy as it is", async () => {
+    const check = await commandsCheck({ workflows, policy: GIVEN_POLICY }, []);
+    assert.equal(check.notes, undefined);
   });
 });

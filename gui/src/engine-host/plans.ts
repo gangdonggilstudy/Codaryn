@@ -24,7 +24,7 @@ function outputOf(outcome: unknown): Obj | null {
 
 /**
  * U-32 (U-14 AXM-15): the plan's summary (PlanOutput.summary, masked by the app layer) as rows, by
- * the engine's quoteModelText (`modelText`), each row through `shown` as well. Null when there is
+ * the app layer's modelTextRows (`modelText`, U-48), each row through `shown` as well. Null when there is
  * none, it is not text, it leaves no row, or there is no `modelText` (the model's words are not shown
  * without the CLI's own handling).
  */
@@ -81,6 +81,8 @@ export const MAX_CHANGES_TEXT_CHARS = 3_000_000;
  * registered now mask them as the run did (`changeShownMatches`); otherwise they are null with
  * `masking_unverified`. Texts given pass `shownText` (line breaks kept, other control characters and
  * key shapes hidden). Past MAX_CHANGES_TEXT_CHARS the remaining files go without text (`too_large`).
+ * U-48 (U-43, DR-38): `recordsChanged: true` when the app layer says the run has a records-changed
+ * mark (its files then come without text); absent otherwise.
  */
 export function changesValue(outcome: unknown, shown: Shown, shownText: Shown): Obj | HostFailure {
   const output = outputOf(outcome);
@@ -111,6 +113,7 @@ export function changesValue(outcome: unknown, shown: Shown, shownText: Shown): 
     runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
     masking: output["masking"] === "current_secrets" ? "current_secrets" : null,
     files,
+    ...(output["recordsChanged"] === true ? { recordsChanged: true } : {}),
   };
 }
 

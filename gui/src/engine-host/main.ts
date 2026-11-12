@@ -62,7 +62,7 @@ interface EngineTextSafetyModule {
 }
 
 interface EngineI18nModule {
-  selectMessageLanguage(input: { env: string | null; config: null; osLocale: string | null }): string;
+  selectMessageLanguage(input: { env: string | null; config: "ko" | "en" | null; osLocale: string | null }): string;
   createMessageCatalog(language: string): { format(id: string): string };
 }
 
@@ -199,8 +199,9 @@ async function main(): Promise<number> {
     return out;
   };
   const messages: HostMessages = {
-    texts(osLocale, ids) {
-      const language = i18n.selectMessageLanguage({ env: process.env["CODARYN_LANG"] ?? null, config: null, osLocale });
+    texts(osLocale, ids, configLanguage = null) {
+      // N-4 (U-78): CODARYN_LANG, then the config file's language, then the OS display language.
+      const language = i18n.selectMessageLanguage({ env: process.env["CODARYN_LANG"] ?? null, config: configLanguage, osLocale });
       const catalog = i18n.createMessageCatalog(language);
       const texts: Record<string, string> = {};
       for (const id of ids) {

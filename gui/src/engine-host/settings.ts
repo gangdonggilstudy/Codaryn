@@ -137,6 +137,15 @@ function apiProvidersView(config: Obj | null, table: readonly ApiProviderEntry[]
 }
 
 /** `readSettings` → `{ok, view}` (see SettingsView in src/shared/ipc.ts) or a failure. */
+/**
+ * U-78 (N-4): the config file's `language` from the app layer's readSettings outcome; null when it has
+ * none, or the config cannot be read (the OS display language then decides, as for the CLI).
+ */
+export function configLanguageOf(outcome: unknown): "ko" | "en" | null {
+  const language = own(own(outputOf(outcome), "config"), "language");
+  return language === "ko" || language === "en" ? language : null;
+}
+
 export function settingsValue(
   outcome: unknown,
   shown: Shown,

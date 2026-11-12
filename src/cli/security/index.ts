@@ -6,8 +6,18 @@
 
 export { checkLocalPathSyntax, locateInWorkspace, relateRealPaths } from "./paths.js";
 export type { PathRelation, PathSyntaxOutcome, RealpathFs, WorkspaceLocation } from "./paths.js";
-export { KNOWN_FIELD_NAMES, MAX_KEY_SCAN_DEPTH, MIN_CURRENT_KEY_LENGTH, findKeyInJson, goalHoldsKey, isKeyFieldName, rawTextHoldsKey } from "./keys.js";
-export type { KeyScanOutcome } from "./keys.js";
+export {
+  KNOWN_FIELD_NAMES,
+  KNOWN_KEY_SHAPE_SOURCE,
+  MAX_KEY_SCAN_DEPTH,
+  MIN_CURRENT_KEY_LENGTH,
+  findKeyInJson,
+  goalHoldsKey,
+  isKeyFieldName,
+  keyValuesOf,
+  rawTextHoldsKey,
+} from "./keys.js";
+export type { KeyScanOutcome, KnownKeys } from "./keys.js";
 export {
   ENV_FILE_NON_SECRETS,
   ENV_NAME_PATTERN,

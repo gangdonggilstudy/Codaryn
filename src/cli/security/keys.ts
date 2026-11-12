@@ -4,13 +4,29 @@
  * A reported location holds known schema field names and indexes only, never other text.
  */
 
-import { ANTHROPIC_API_KEY_ENV, ANTHROPIC_KEY_PATTERN_SOURCE, KEY_FIELD_NAMES } from "../../contracts/index.js";
+import { API_KEY_ENVS, API_KEY_PATTERN_SOURCES, KEY_FIELD_NAMES } from "../../contracts/index.js";
 
 /** Containers (objects and arrays) deeper than this are rejected as invalid input. */
 export const MAX_KEY_SCAN_DEPTH = 64;
 
 /** A current key shorter than this is not searched for, to avoid matching ordinary text. */
 export const MIN_CURRENT_KEY_LENGTH = 16;
+
+/**
+ * SP-2 (design 4.2, 4.3): the key values a check or a cleaner looks for. One key (the first form,
+ * the Anthropic key), several (every key variable Codaryn knows that is set, `knownKeyValues`), or
+ * none.
+ */
+export type KnownKeys = string | null | readonly string[];
+
+/** The given key values long enough to look for (MIN_CURRENT_KEY_LENGTH), each once. */
+export function keyValuesOf(keys: KnownKeys): string[] {
+  const list = keys === null ? [] : typeof keys === "string" ? [keys] : [...keys];
+  return [...new Set(list.filter((key) => key.length >= MIN_CURRENT_KEY_LENGTH))];
+}
+
+/** SP-2: every key shape Codaryn knows (API_KEY_PATTERN_SOURCES), as one regular expression source. */
+export const KNOWN_KEY_SHAPE_SOURCE = API_KEY_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|");
 
 /** Field names of the task and config file schemas. Only these appear in a location as written. */
 export const KNOWN_FIELD_NAMES: ReadonlySet<string> = new Set([
@@ -45,15 +61,16 @@ export function isKeyFieldName(name: string): boolean {
  * "apikeyHunter2" is not, because the extra part may be key material (T-14).
  */
 function isPrintableKeyFieldName(name: string): boolean {
-  // The key's environment variable name is a fixed constant, not key material.
-  if (name === ANTHROPIC_API_KEY_ENV) return true;
+  // A key's environment variable name is a fixed constant, not key material (SP-2: every known one).
+  if ((API_KEY_ENVS as readonly string[]).includes(name)) return true;
   return PRINTABLE_KEY_FIELD.test(name) && KEY_NAMES.has(normalizedFieldName(name));
 }
 
-function keyMatcher(currentKey: string | null): (text: string) => boolean {
-  const shape = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE);
-  const current = currentKey !== null && currentKey.length >= MIN_CURRENT_KEY_LENGTH ? currentKey : null;
-  return (text) => shape.test(text) || (current !== null && text.includes(current));
+/** SP-2: every known key shape, and every given key value. */
+function keyMatcher(currentKey: KnownKeys): (text: string) => boolean {
+  const shape = new RegExp(KNOWN_KEY_SHAPE_SOURCE);
+  const values = keyValuesOf(currentKey);
+  return (text) => shape.test(text) || values.some((value) => text.includes(value));
 }
 
 export type KeyScanOutcome =
@@ -66,7 +83,7 @@ export type KeyScanOutcome =
  * values with a key shape or the current key, and key-shaped field names all count.
  * Nesting deeper than MAX_KEY_SCAN_DEPTH containers is `too_deep`.
  */
-export function findKeyInJson(value: unknown, currentKey: string | null): KeyScanOutcome {
+export function findKeyInJson(value: unknown, currentKey: KnownKeys): KeyScanOutcome {
   const holdsKey = keyMatcher(currentKey);
   const segment = (name: string): string =>
     (KNOWN_FIELD_NAMES.has(name) || isPrintableKeyFieldName(name)) && !holdsKey(name)
@@ -111,12 +128,12 @@ function decodeJsonEscapes(text: string): string {
  * such as the first of two duplicate fields, also when that value is written with `\u` escapes
  * (T-14). It reports no location.
  */
-export function rawTextHoldsKey(text: string, currentKey: string | null): boolean {
+export function rawTextHoldsKey(text: string, currentKey: KnownKeys): boolean {
   const holdsKey = keyMatcher(currentKey);
   return holdsKey(text) || holdsKey(decodeJsonEscapes(text));
 }
 
 /** S-8: `--goal` is sent and recorded as written, so it must not hold a key either. */
-export function goalHoldsKey(goal: string, currentKey: string | null): boolean {
+export function goalHoldsKey(goal: string, currentKey: KnownKeys): boolean {
   return keyMatcher(currentKey)(goal);
 }

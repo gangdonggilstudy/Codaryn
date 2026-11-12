@@ -3,7 +3,7 @@
  * arguments that can be copied, and the width of text in a terminal.
  */
 
-import { ANTHROPIC_KEY_PATTERN_SOURCE } from "../../contracts/index.js";
+import { KNOWN_KEY_SHAPE_SOURCE } from "../security/index.js";
 import { REPLACEMENT, cleanText, hideKeys, safeToken } from "../text-safety.js";
 
 /** Longest path shown in a human line, in characters (as progress.ts). */
@@ -18,7 +18,8 @@ export function shownPath(text: string): string {
 /** A code or id as recorded (status, reason, permission, run id), or "?" when it holds anything else. */
 export const token = safeToken;
 
-const KEY_SHAPE = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g");
+// SP-2: every key shape Codaryn knows.
+const KEY_SHAPE = new RegExp(KNOWN_KEY_SHAPE_SOURCE, "g");
 const HIDDEN_KEY = "[key]";
 
 /** A character that `cleanText` replaces (controls, line and paragraph separators, bidi controls). */

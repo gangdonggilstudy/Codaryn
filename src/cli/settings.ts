@@ -5,6 +5,7 @@
 
 import {
   ANTHROPIC_API_KEY_ENV,
+  API_KEY_ENVS,
   CODARYN_API_BASE_URL_ENV,
   CODARYN_MODEL_ENV,
   DEFAULT_ANTHROPIC_API_BASE_URL,
@@ -30,6 +31,15 @@ export type ResolveSettingsOutcome =
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
 /** The trimmed value, or `null` when unset or blank. */
+/**
+ * SP-2 (design 4.2): the values of every key variable Codaryn knows (API_KEY_ENVS) that are set, as
+ * envValue reads them. They are secrets in every run and hidden in every output, whatever provider
+ * runs.
+ */
+export function knownKeyValues(env: SettingsEnvironment): string[] {
+  return API_KEY_ENVS.map((name) => envValue(env, name)).filter((value): value is string => value !== null);
+}
+
 export function envValue(env: SettingsEnvironment, name: string): string | null {
   const value = env[name]?.trim();
   return value === undefined || value.length === 0 ? null : value;

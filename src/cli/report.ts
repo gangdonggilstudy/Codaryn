@@ -63,7 +63,8 @@ import type { CommandOutcome } from "./guard.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
 import { cliError } from "./run.js";
-import { envValue } from "./settings.js";
+import { knownKeyValues } from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
@@ -370,7 +371,7 @@ function longestBacktickRun(text: string): number {
  * replaced, so a control character cannot break a key into pieces the check misses. Set by
  * `renderReport` for the duration of one (synchronous) rendering.
  */
-let renderingKey: string | null = null;
+let renderingKey: KnownKeys = null;
 
 function safe(text: string, keepLineBreaks = false): string {
   return cleanText(hideKeys(text, renderingKey), keepLineBreaks);
@@ -410,7 +411,7 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
 ];
 
-export function renderReport(report: RunReportOutput, currentKey: string | null = null): string {
+export function renderReport(report: RunReportOutput, currentKey: KnownKeys = null): string {
   renderingKey = currentKey;
   try {
     return renderReportText(report);
@@ -686,7 +687,7 @@ export const APPLY_REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the apply run's own records. Commands allowed in other runs could have changed them.",
 ];
 
-export function renderApplyReport(report: ApplyReportOutput, currentKey: string | null = null): string {
+export function renderApplyReport(report: ApplyReportOutput, currentKey: KnownKeys = null): string {
   renderingKey = currentKey;
   try {
     return renderApplyReportText(report);
@@ -935,7 +936,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     return cliError("invalid_run_record", "the run's records cannot be read");
   }
 
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(io.env);
   let text: string;
   try {
     // N-27 (c): keys are hidden in the strings before the JSON is written, as in the text.

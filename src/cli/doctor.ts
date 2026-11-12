@@ -14,6 +14,7 @@ import path from "node:path";
 import { parseEnv } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
+  API_PROVIDERS,
   CODARYN_API_BASE_URL_ENV,
   CODARYN_CONFIG_ENV,
   CODARYN_MODEL_ENV,
@@ -63,7 +64,8 @@ import {
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
+import { envValue, knownKeyValues, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
@@ -133,7 +135,7 @@ type Loaded =
     };
 
 /** Read, key check on the raw text, parse, key check on the parsed value: the order `run` uses (S-6). */
-async function loadJson(io: DoctorEnvironment, file: string, label: string, currentKey: string | null): Promise<Loaded> {
+async function loadJson(io: DoctorEnvironment, file: string, label: string, currentKey: KnownKeys): Promise<Loaded> {
   let text: string;
   try {
     text = await io.readFile(file);
@@ -498,7 +500,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       set("vars_file", "ok", `the file given by --vars-file defines ${count} variable(s)`, { id: "doctor.vars_file.ok", params: { count } });
     }
   }
-  const currentKey = envValue(env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(env);
 
   // config_file: --config, CODARYN_CONFIG, then the default location (N-1).
   let config: CodarynConfig | null = null;
@@ -582,7 +584,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("api_key", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (provider === "scripted") {
     set("api_key", "skipped", "the task uses the scripted model; no key is needed", { id: "doctor.api_key.scripted" });
-  } else if (currentKey !== null) {
+  } else if (envValue(env, API_PROVIDERS[provider].keyEnv) !== null) {
+    // The chosen provider's own key (API_PROVIDERS); the other known keys do not count (SP-2 only
+    // hides them).
     set("api_key", "ok", `${ANTHROPIC_API_KEY_ENV} is set`, { id: "doctor.api_key.ok" });
   } else {
     set("api_key", "fail", `${ANTHROPIC_API_KEY_ENV} is not set; an anthropic run stops with provider_not_configured`, { id: "doctor.api_key.missing" });

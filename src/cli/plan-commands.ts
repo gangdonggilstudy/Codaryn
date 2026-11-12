@@ -81,7 +81,8 @@ import { cliError, prepareTask } from "./run.js";
 import type { PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
-import { envValue } from "./settings.js";
+import { envValue, knownKeyValues } from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 /** The goal the task form carries for commands that never run a model. */
@@ -183,7 +184,7 @@ function maskAction(action: ResolvedPlanAction, privacy: PrivacyGateway): Masked
 }
 
 /** One printable line per action, cleaned, keys hidden. */
-function actionLines(actions: readonly MaskedPlanAction[], currentKey: string | null): string[] {
+function actionLines(actions: readonly MaskedPlanAction[], currentKey: KnownKeys): string[] {
   const shown = (text: string): string => cleanText(hideKeys(text, currentKey));
   return actions.map((action, index) =>
     action.kind === "move"
@@ -301,7 +302,7 @@ async function loadShown(
 }
 
 /** The text of `codaryn plan` without `--json`. */
-export function renderPlan(output: PlanOutput, currentKey: string | null): string {
+export function renderPlan(output: PlanOutput, currentKey: KnownKeys): string {
   const lines = [
     `Plan of run ${output.runId}: ${output.actions.length} action(s), ${output.status}`,
     `Digest: ${output.digest}`,
@@ -323,7 +324,7 @@ export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcom
   if (!ready.ok) return ready.outcome;
   const shown = await loadShown(io, ready.value);
   if (!shown.ok) return shown.outcome;
-  const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+  const currentKey = knownKeyValues(io.env);
   if (parsed.args.json) return { output: shown.output, exitCode: shown.output.exitCode };
   return { text: renderPlan(shown.output, currentKey), exitCode: shown.output.exitCode };
 }
@@ -371,7 +372,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     }
     approval = adapter === undefined ? "cli-flag" : "adapter";
   } else if (ask !== undefined) {
-    const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+    const currentKey = knownKeyValues(io.env);
     const question = [renderPlan(shown.output, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
@@ -562,7 +563,7 @@ export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutc
   const parsed = parseReviewArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
   const args = parsed.args;
-  const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+  const currentKey = knownKeyValues(io.env);
   // S-8: a note is written to review.json and shown by report; a key never goes there.
   if (args.note !== null && goalHoldsKey(args.note, currentKey)) {
     return cliError("key_in_file", "the note contains a key value; nothing was written");

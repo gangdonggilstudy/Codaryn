@@ -37,7 +37,7 @@ import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey, selectEnvFileSecrets } from "./security/index.js";
-import { envValue, realModel, resolveListSettings } from "./settings.js";
+import { envValue, knownKeyValues, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys } from "./text-safety.js";
@@ -244,7 +244,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     envSecrets = selectEnvFileSecrets(before, { ...io.env });
   }
 
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(io.env);
   // N-1: --config, CODARYN_CONFIG, then the default location (optional: a missing file means none).
   const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   if (!chosen.ok) return cliError("invalid_config", chosen.message);

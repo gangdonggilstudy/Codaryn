@@ -68,7 +68,7 @@ import {
   selectEnvFileSecrets,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, resolveAnthropicSettings } from "./settings.js";
+import { envValue, knownKeyValues, resolveAnthropicSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
@@ -438,7 +438,8 @@ export async function prepareTask(
   }
 
   // 3. The current key, the config file (N-1: --config, CODARYN_CONFIG, the default location), the goal (S-5, S-8).
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  // SP-2: every key variable Codaryn knows, whatever provider runs.
+  const currentKey = knownKeyValues(io.env);
   const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   if (!chosen.ok) return error("invalid_config", chosen.message);
   if (args.input.kind === "quick" && goalHoldsKey(args.input.goal, currentKey)) {
@@ -626,9 +627,9 @@ export async function prepareTask(
     }
     addSecret(value);
   }
-  // S-2: the key is masked in every run, whatever the provider. A scripted task can still read
-  // a workspace file that holds it.
-  if (currentKey !== null) addSecret(currentKey);
+  // S-2, SP-2: every known key is masked in every run, whatever the provider. A scripted task can
+  // still read a workspace file that holds one.
+  currentKey.forEach(addSecret);
   // S-4: what the env file set, so a value read back from a file or an output is masked too.
   envSecrets.forEach(addSecret);
 

@@ -44,7 +44,7 @@ import { runRevert } from "./revert.js";
 import { runCli } from "./run.js";
 import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
-import { envValue } from "./settings.js";
+import { envValue, knownKeyValues } from "./settings.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 // N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).
 import { explainedErrorText } from "./error-text.js";
@@ -77,7 +77,8 @@ const exists = async (target: string): Promise<boolean> => {
 const clock = { now: () => Date.now() };
 const random = (size: number): Uint8Array => randomBytes(size);
 const readText = (file: string): Promise<string> => readFile(file, "utf8");
-const currentKey = (): string | null => envValue(process.env, "ANTHROPIC_API_KEY");
+// SP-2: every key variable Codaryn knows.
+const currentKey = (): string[] => knownKeyValues(process.env);
 
 /** One line typed at the terminal, or null when the input ends first. `output` shows the question. */
 async function askLine(question: string, output: NodeJS.WritableStream = process.stdout): Promise<string | null> {

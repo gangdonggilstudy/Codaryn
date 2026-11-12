@@ -13,6 +13,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseEnv } from "node:util";
 import {
+  API_PROVIDER_NAMES,
   API_PROVIDERS,
   CODARYN_CONFIG_ENV,
   DOCTOR_CHECK_IDS,
@@ -643,9 +644,17 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);
     const missingText: DoctorText =
       modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
-    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}`, missingText);
-    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", baseUrlProblem.message, { id: "doctor.model.base_url_invalid" });
-    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}`, { id: "doctor.model.ok" });
+    // SP-6, review R-19 I-4: another provider's model or address variable is not read by this run;
+    // say so, so a value left for one provider is not silently ignored (names only, never values).
+    const unread = API_PROVIDER_NAMES.filter((other) => other !== provider).flatMap((other) =>
+      [API_PROVIDERS[other].modelEnv, API_PROVIDERS[other].baseUrlEnv]
+        .filter((name) => envValue(env, name) !== null)
+        .map((name) => `${name} is set but is ${other}'s; an ${provider} run does not read it`),
+    );
+    const note = unread.length === 0 ? "" : `; ${unread.join("; ")}`;
+    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}${note}`, missingText);
+    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", `${baseUrlProblem.message}${note}`, { id: "doctor.model.base_url_invalid" });
+    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}${note}`, { id: "doctor.model.ok" });
   }
 
   // limits

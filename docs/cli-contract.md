@@ -1064,6 +1064,8 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - 키가 있으면 `api_key`의 `message`가 그 키가 가는 주소의 origin(스킴·호스트·포트)과 그 주소의 출처(주소 변수, 설정 필드, 기본 주소)를 적는다(DR-34 (a)). 경로는 적지 않는다. 경로에 주소 말고 다른 것이 들어 있을 수 있어서다.
     - 예: `ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)`
     - 사람용 글(카탈로그 `doctor.api_key.ok`)에 주소를 싣는 매개변수는 아직 계약에 없다.
+  - 다른 제공자의 모델·주소 변수가 설정돼 있으면 `model`의 `message`가 그 변수 이름을 들어, 이 실행이 읽지 않는다고 적는다(SP-6, R-19 I-4). 값은 적지 않는다.
+    - 예: `CODARYN_MODEL is set but is anthropic's; an openai run does not read it`
 - `models [--provider <name>]`(SP-6): 제공자는 `--provider`, 없으면 설정의 `provider`, 없으면 anthropic이다. `--provider`의 값은 `API_PROVIDER_NAMES` 중 하나여야 하고, 아니면 아무것도 보내지 않고 `invalid_arguments`다.
   - 그 제공자의 키 변수, 주소(주소 변수 → 제공자 설정 → 기본 주소), 목록 함수(`API_MODEL_LISTERS`)만 쓴다. 다른 제공자의 키나 주소는 쓰지 않는다(DR-34 (a), R-20 D2).
   - 목록 함수는 `main.ts`가 넘길 때만 연결된다(`listModels`, `listers`). 넘기지 않으면 아무것도 보내지 않고 `provider_not_implemented`다.

@@ -2,11 +2,13 @@
  * DR-39 for the GUI (standalone-gui 3.8, GU-4): the app layer gives the store's summary, cleanup
  * plan and cleanup. What would be removed comes first (a preview, nothing removed); only a plan the
  * person confirmed (its digest) is removed, and the discarded-files folders (people's own files)
- * only with their own yes, and (DR-44 (a)) the records of runs not reverted only with theirs. Real runs through the app (scripted model), the real store. Fake values only.
+ * only with their own yes, and (DR-44 (a)) the records of runs not reverted only with theirs.
+ * U-13 (UXM-1): an apply run's records stay while its discarded files stay.
+ * Real runs through the app (scripted model), the real store. Fake values only.
  */
 
 import assert from "node:assert/strict";
-import { readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
@@ -73,10 +75,27 @@ describe("DR-39: the app layer's state summary and cleanup", () => {
       await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }),
     );
     assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
-    assert.deepEqual(applied.outcome.removed.map(refOf).sort(), [`run ${applyRunId}`, `run ${planRunId}`].sort());
-    assert.deepEqual(applied.outcome.kept, [{ target: "discarded", runId: applyRunId, reason: "not_confirmed" }]);
-    assert.deepEqual(await runsIn(workspace), []);
+    // U-13 (UXM-1): the apply run's records stay while its discarded files stay, and so does its plan run.
+    assert.deepEqual(applied.outcome.removed, []);
+    assert.deepEqual(
+      applied.outcome.kept.map((item) => `${refOf(item)} ${item.reason}`).sort(),
+      [`discarded ${applyRunId} not_confirmed`, `run ${applyRunId} discarded_left`, `run ${planRunId} used_by_kept_apply`].sort(),
+    );
+    assert.deepEqual(await runsIn(workspace), [planRunId, applyRunId].sort());
     assert.equal(await exists(discardedOf(workspace, applyRunId)), true, "people's files stay without their own yes");
+    // The discarded file stays with what names it: its content in the folder, and the records that say
+    // it was c.log, so a revert still moves it back there (a dry run, nothing changed).
+    const held = await readdir(discardedOf(workspace, applyRunId));
+    assert.equal(held.length, 1, JSON.stringify(held));
+    assert.equal(await readFile(path.join(discardedOf(workspace, applyRunId), held[0] ?? ""), "utf8"), "old log\n");
+    const wouldRevert = await app.revert({ workspace, runId: applyRunId, dryRun: true });
+    assert.ok(wouldRevert.ok, JSON.stringify(wouldRevert));
+    assert.deepEqual(
+      wouldRevert.output.reverted.map((file) => [file.path, file.action]),
+      [["c.log", "restored_from_discard"]],
+      "the records still name the file and where it belongs",
+    );
+    assert.equal(await exists(path.join(workspace, "c.log")), false, "the dry run changed nothing");
 
     const again = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection: { discarded: { runIds: [applyRunId] } } }));
     const removed = ok<CleanupApplied>(

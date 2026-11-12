@@ -11,9 +11,9 @@
  *   own files) may go and (DR-44 (a)) whether the records of runs not reverted or only partly
  *   reverted may go. The store makes the plan again under the workspace lock and removes nothing
  *   unless its digest is the confirmed one. The GUI's main process asks the person each question.
- * - DR-44: the store's warnings (partly_reverted, discarded_left, leftover), leftover folders and
- *   kept reasons (partly_removed, not_reverted_not_confirmed, used_by_kept_apply) are passed on as
- *   they are.
+ * - DR-44 and U-13: the store's warnings (partly_reverted, discarded_left, leftover), leftover
+ *   folders and kept reasons (partly_removed, not_reverted_not_confirmed, used_by_kept_apply,
+ *   discarded_left) are passed on as they are.
  * - Arguments are checked before anything is read: exact run directory names (isStoredRunId), whole
  *   non-negative day counts, `reverted: true` only, no unknown field, a timestamp of the contract's
  *   form, a 64-hex digest, a boolean for the discarded files.

@@ -125,6 +125,8 @@ export interface SettingsWidening {
     | "integrity_path_removed"
     | "secret_env_removed"
     | "verifier_removed"
+    /** R-14 L-2: a command verifier added or changed; it runs with the person's rights on every run. */
+    | "verifier_command_added"
     | "restore_path_tokens_enabled"
     | "plan_action_allowed"
     | "api_base_url_changed"

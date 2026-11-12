@@ -114,6 +114,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.summary.unknown_folders": "알 수 없는 폴더(.codaryn/cleanup-…, 정리가 남긴 폴더의 이름이지만 그 표지가 없음, 지우지 않음): {count}개({bytes}바이트)",
   "cleanup.confirm.leftovers": "지울 남은 폴더: {count}개({bytes}바이트)",
   "cleanup.done_leftovers": "함께 지운 남은 폴더: {count}개, {bytes}바이트",
+  "cleanup.done_discarded_left": "남겼습니다: 폐기 보관함에 파일이 남은 적용 실행의 기록 {count}개. 그 파일의 원래 이름과 자리는 이 기록에만 적혀 있습니다. 그 적용을 먼저 되돌리거나, 같은 정리에서 그 폐기 보관함의 파일도 함께 지우면 기록도 지워집니다.",
   "revert.dry_run_move_unchecked": "미리보기는 이 드라이브가 덮어쓰지 않고 되돌려 옮길 수 있는지 확인하지 않았습니다. 실제 되돌리기가 확인하고, 동의가 없으면 그런 파일은 건너뜁니다.",
 
   "runs.column.run_id": "실행 id",
@@ -408,7 +409,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.warning.not_reverted": "되돌리지 않은 실행: 기록을 지우면 더는 되돌릴 수 없음",
   "cleanup.warning.partly_reverted": "일부만 되돌린 실행: 기록을 지우면 나머지는 더는 되돌릴 수 없음",
   "cleanup.warning.records_unreadable": "기록을 확인할 수 없는 실행: 파일을 바꿨는지, 되돌렸는지 알 수 없으며, 기록을 지우면 그 파일의 마지막 사본도 지워질 수 있음",
-  "cleanup.warning.discarded_left": "적용 실행의 기록은 지워짐: 폐기 보관함이 남으면(고르지 않았거나 삭제를 확인하지 않으면) 그 파일은 되돌리기로 제자리에 돌려놓을 수 없음",
+  "cleanup.warning.discarded_left": "폐기 보관함에 파일이 있는 적용 실행: 그 파일을 같은 정리에서 함께 지우지 않으면 기록을 남김. 파일의 원래 이름과 자리는 이 기록에만 있음",
   "cleanup.warning.people_files": "폐기 보관함: 사람의 파일을 지움",
   "cleanup.warning.records_changed": "기록 변경 표시가 있는 실행: 그 기록은 무슨 일이 있었는지의 증거임",
   "cleanup.warning.leftover": "앞선 정리가 다 지우지 못하고 남긴 것",
@@ -417,6 +418,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.kept.not_plain_directory": "더는 일반 폴더가 아님(링크 등)",
   "cleanup.kept.io_error": "옮기거나 지울 수 없음(입출력 오류)",
   "cleanup.kept.not_reverted_not_confirmed": "되돌리지 않았거나 일부만 되돌린 실행이고, 따로 확인하지 않음",
+  "cleanup.kept.discarded_left": "폐기 보관함에 파일이 남아 있음. 그 파일의 원래 이름과 자리는 이 기록에만 있음",
   "cleanup.kept.used_by_kept_apply": "남긴 적용 실행이 쓰는 계획 실행. 지우면 그 적용을 되돌릴 수 없음",
   "cleanup.kept.partly_removed": "옮겨 두었지만 다 지우지 못함. 남은 것은 다음 정리에 보이는 폴더에 있음",
 

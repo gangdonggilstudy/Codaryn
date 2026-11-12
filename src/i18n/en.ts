@@ -115,6 +115,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.summary.unknown_folders": "Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): {count} ({bytes} bytes)",
   "cleanup.confirm.leftovers": "Leftover folders to remove: {count} ({bytes} bytes)",
   "cleanup.done_leftovers": "Also removed: leftover folders {count}, {bytes} bytes",
+  "cleanup.done_discarded_left": "Kept: the records of apply runs whose discarded files stay: {count}. The records are the only note of what each of those files was called and where it was. They go once those applies are reverted, or when their discarded files are deleted in the same cleanup.",
   "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
   "runs.column.run_id": "run id",
@@ -409,7 +410,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.warning.not_reverted": "not reverted: without its records it can no longer be reverted",
   "cleanup.warning.partly_reverted": "partly reverted: without its records the rest can no longer be reverted",
   "cleanup.warning.records_unreadable": "records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files",
-  "cleanup.warning.discarded_left": "the apply run's records go; if its discarded files stay (their folder not selected, or its deletion not confirmed), a revert can no longer put them back",
+  "cleanup.warning.discarded_left": "an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was",
   "cleanup.warning.people_files": "a discarded-files folder: people's own files are deleted",
   "cleanup.warning.records_changed": "the run has a records-changed mark; its records are evidence of what happened",
   "cleanup.warning.leftover": "left over by an earlier cleanup that could not remove it entirely",
@@ -418,6 +419,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.kept.not_plain_directory": "no longer a plain folder (a link or something else)",
   "cleanup.kept.io_error": "it could not be moved aside or removed (input/output error)",
   "cleanup.kept.not_reverted_not_confirmed": "not reverted or only partly reverted, and removing it was not confirmed apart",
+  "cleanup.kept.discarded_left": "its discarded files stay, and only its records say what each file was called and where it was",
   "cleanup.kept.used_by_kept_apply": "a plan run whose apply run is kept; without it that apply could not be reverted",
   "cleanup.kept.partly_removed": "moved aside but not all of it could be removed; the rest is in a folder the next cleanup shows",
 

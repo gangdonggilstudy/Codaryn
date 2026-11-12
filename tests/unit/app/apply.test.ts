@@ -10,10 +10,10 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import type { ApplyDeps, ApplyResult, EngineResult, RevertOutput } from "../../../src/contracts/index.js";
+import type { ApplyDeps, ApplyResult, RevertOutput } from "../../../src/contracts/index.js";
 import { applyArguments, createCodarynApp, revertConsentOf } from "../../../src/app/index.js";
-import type { AppCallOutcome, ApplyEvent, ApplyPlanRequest, CodarynApp } from "../../../src/app/index.js";
-import { WRITE_NOTES, appEnvironment, exists, runDir, setupRun, taskForm, taskRequest } from "./support.js";
+import type { AppCallOutcome, ApplyEvent, ApplyPlanRequest } from "../../../src/app/index.js";
+import { WRITE_NOTES, appEnvironment, exists, plannedRun as planned, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -22,27 +22,6 @@ function ok<T>(outcome: AppCallOutcome<T>): T {
 
 function code<T>(outcome: AppCallOutcome<T> | { readonly ok: boolean; readonly error?: { readonly code: string } }): string | null {
   return outcome.ok ? null : ((outcome as { error: { code: string } }).error.code ?? null);
-}
-
-const PLAN_STEPS = [{ toolCalls: [{ name: "propose_plan", args: { summary: "sort", actions: [{ kind: "move", from: "a.txt", to: "sorted/a.txt" }] } }] }];
-const PLAN_TASK = {
-  workflowRef: "organize",
-  policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move"] },
-  verifiers: [],
-};
-
-/** A plan run that ended as plan_pending, with its digest. */
-async function planned(): Promise<{ base: string; app: CodarynApp; plan: EngineResult; digest: string }> {
-  const base = await setupRun({ "a.txt": "alpha\n" }, PLAN_TASK, PLAN_STEPS);
-  const app = createCodarynApp(await appEnvironment(base));
-  const started = await app.startRun(taskRequest(base));
-  assert.ok(started.ok, JSON.stringify(started));
-  const ended = await started.handle.done;
-  assert.ok(ended.ok, JSON.stringify(ended));
-  assert.deepEqual([ended.result.status, ended.result.reason], ["needs-input", "plan_pending"]);
-  const digest = ended.result.plan?.digest ?? "";
-  assert.match(digest, /^[0-9a-f]{64}$/);
-  return { base, app, plan: ended.result, digest };
 }
 
 function request(base: string, planRunId: string, digest: string, consent: string | null = null): ApplyPlanRequest {

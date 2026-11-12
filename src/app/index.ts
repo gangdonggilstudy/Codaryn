@@ -11,6 +11,7 @@ export { initArguments, suggestionsFor } from "./init.js";
 export { changesOf, digestOf, wideningOf } from "./settings-change.js";
 export { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 export { applyArguments, applyJournalWithEvents, taskFormArguments } from "./apply.js";
+export { planArguments, reviewArguments } from "./plans.js";
 export { profileWorkflowsOf } from "./settings.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {

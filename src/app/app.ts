@@ -18,6 +18,8 @@ import type {
   AnthropicProviderDeps,
   ApplyPlan,
   ApplyResult,
+  PlanOutput,
+  ReviewOutput,
   CreateAnthropicProvider,
   DefaultConfigLocation,
   DoctorOutput,
@@ -42,7 +44,8 @@ import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
 import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
-import { runApply } from "../cli/plan-commands.js";
+import { runApply, runPlan, runReview } from "../cli/plan-commands.js";
+import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
@@ -51,6 +54,7 @@ import { runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
+import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
@@ -70,6 +74,8 @@ import type {
   ApplyObserver,
   ApplyPlanRequest,
   ChangesOutput,
+  PlanRequest,
+  ReviewRequest,
   ChangesRequest,
   CodarynApp,
   DoctorRequest,
@@ -535,6 +541,50 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   /**
+   * The task form's environment for `plan`, `apply` and `review` (G-F), as main.ts builds it, with
+   * this call's own environment copy: the variables file is loaded into it, never into the
+   * caller's object or `process.env`.
+   */
+  function planCommandEnvironment(argv: readonly string[]): PlanCommandEnvironment & { readonly env: Record<string, string | undefined> } {
+    const env = copyEnvironment(environment.env, platform);
+    return {
+      argv,
+      env,
+      cwd: environment.cwd,
+      readFile: environment.readFile,
+      isDirectory: environment.isDirectory,
+      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
+      locateInWorkspace: locate,
+      relatePaths: relate,
+      installDir: environment.installDir,
+      defaultConfig: defaultConfigOf(),
+      clock: environment.clock,
+      randomBytes: environment.randomBytes,
+      listRuns: storeListRuns,
+    };
+  }
+
+  /** DR-5, DR-17: `codaryn plan --json`: the stored plan masked again with this task form's secrets. Reads only. */
+  async function plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>> {
+    try {
+      return jsonOutcome<PlanOutput>(await runPlan(planCommandEnvironment(planArguments(request))), "plan");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /** GT-D6, R-4 L-4: `codaryn review --json`: the person's verdict, the note masked before it is stored. */
+  async function review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>> {
+    const args = reviewArguments(request);
+    if (!args.ok) return args;
+    try {
+      return jsonOutcome<ReviewOutput>(await runReview(planCommandEnvironment(args.argv)), "review");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  /**
    * DR-1, DR-2, DR-21: the CLI's `apply` as an adapter (AdapterApply): the approval is recorded as
    * `adapter` and the consent comes only from the request. The engine is the same `applyPlan`; only
    * its journal is wrapped so the apply's events reach `observer` (start records left out). The
@@ -546,7 +596,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   ): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }> {
     const consent = unsafeMoveConsentOf(request);
     if (!consent.ok) return consent;
-    const env = copyEnvironment(environment.env, platform);
     const cancelHandlers = new Set<() => void>();
     let reportStart: (runId: string) => void = () => {};
     const started = new Promise<string>((resolve) => {
@@ -564,19 +613,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return (hooks.applyPlan ?? engineApplyPlan)({ ...deps, journal });
     };
     const running = runApply({
-      argv: applyArguments(request),
-      env,
-      cwd: environment.cwd,
-      readFile: environment.readFile,
-      isDirectory: environment.isDirectory,
-      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
-      locateInWorkspace: locate,
-      relatePaths: relate,
-      installDir: environment.installDir,
-      defaultConfig: defaultConfigOf(),
-      clock: environment.clock,
-      randomBytes: environment.randomBytes,
-      listRuns: storeListRuns,
+      ...planCommandEnvironment(applyArguments(request)),
       applyPlan: wrapped,
       adapter: { unsafeMoveConsent: consent.consent },
       cancelSignal: (cancelFile) =>
@@ -631,6 +668,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     settingsSuggestions,
     proposeSettingsChange,
     applySettingsChange,
+    plan,
     applyPlan,
+    review,
   };
 }

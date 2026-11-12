@@ -3,13 +3,12 @@
  * two questions of `apply` at a terminal and `review`'s lines were fixed English, also in a Korean
  * session. They come from the catalog now.
  * - English stays as on main, letter for letter, with the English texts the catalog is to have
- *   (ENGLISH below, nb-i18n's), except three lines (reported):
+ *   (ENGLISH below, nb-i18n's), except two lines (reported):
  *   - plan.applied_by: the apply's time in local wall time in parentheses (UXM-23), in place of
  *     " at <ISO time>.";
  *   - apply.unsafe_move_question: one text for every count, so "move"/"moves" and "it"/"them" become
  *     "move(s)" and "them"; and the catalog's words (nb-i18n 2794d22: no text may promise a
  *     guarantee), "could replace a file at the destination, since the drive has no hard links";
- *   - review.unchanged: without the backticks around codaryn report (nb-i18n 2794d22).
  * - The layout is the CLI's, not the texts' (PM after 0229b40): plan.digest_label has no colon (the
  *   CLI puts ": " and the digest after it), plan.discard_kept no parentheses (the CLI puts them).
  * - While the catalog does not have a text yet (N-B), the line is main's English, as the U-14 lines.
@@ -68,7 +67,7 @@ const ENGLISH: { readonly [id: string]: string } = {
   "review.recorded_replaced": "Review of run {runId}: {verdict} (an earlier review was replaced).",
   "review.verdict.accepted": "accepted",
   "review.verdict.rejected": "rejected",
-  "review.unchanged": "The run's result and records are unchanged; codaryn report shows the verdict.",
+  "review.unchanged": "The run's result and records are unchanged; `codaryn report` shows the verdict.",
 };
 
 const en = createMessageCatalog("en");
@@ -126,8 +125,6 @@ const MAIN = {
   reviewReplaced: `Review of run ${RUN}: rejected (an earlier review was replaced).`,
 };
 const text = (lines: readonly string[]): string => `${lines.join("\n")}\n`;
-/** review's text with the catalog's English: main's, but its last line is review.unchanged's. */
-const REVIEW_NOW = [...MAIN.review.slice(0, -1), ENGLISH["review.unchanged"] ?? "?"];
 const PENDING = plan({ summary: "sort the notes" as MaskedText });
 /** The new form of the applied line (UXM-23): local wall time in parentheses. */
 const appliedLine = (catalog: MessageCatalog): string => `${asReal(catalog)("plan.applied_by", { runId: APPLY_RUN })} (${formatLocalTime(Date.parse(AT))})`;
@@ -197,9 +194,9 @@ describe("U-36: English stays as on main", () => {
     assert.equal(appliedLine(english), `Applied by run ${APPLY_RUN} (${formatLocalTime(Date.parse(AT))})`);
   });
 
-  test("with those texts: apply's question and review's first line as on main; review's last line and the unsafe-move question as the catalog says them", () => {
+  test("with those texts: apply's question and review as on main; the unsafe-move question as the catalog says it", () => {
     assert.equal(applyQuestion(english), MAIN.question);
-    assert.equal(renderReview(REVIEW(false), NO_KEYS, english), text(REVIEW_NOW));
+    assert.equal(renderReview(REVIEW(false), NO_KEYS, english), text(MAIN.review));
     assert.equal(renderReview(REVIEW(true, "rejected"), NO_KEYS, english).split("\n")[0], MAIN.reviewReplaced);
     assert.equal(
       unsafeMoveQuestion(1, english),
@@ -229,7 +226,7 @@ describe("U-36 with the real catalog", () => {
     assert.equal(renderPlan(PENDING, NO_KEYS, en), text(MAIN.pending));
     assert.equal(renderPlan(MARKED, NO_KEYS, en), text(MAIN.marked));
     assert.equal(applyQuestion(en), MAIN.question);
-    assert.equal(renderReview(REVIEW(false), NO_KEYS, en), text(REVIEW_NOW));
+    assert.equal(renderReview(REVIEW(false), NO_KEYS, en), text(MAIN.review));
   });
 
   test("Korean: none of main's fixed English is left, and the lines differ from English", { skip }, () => {

@@ -413,7 +413,7 @@ run id                     started              changes  result
 
 - 예산 한도 넷은 재수정을 포함한 실행 전체에 적용한다: `maxModelTurns`, `maxToolCalls`, `maxTotalTokens`(모든 요청의 입력과 출력 토큰 합), `maxDurationMs`. 처음에는 낮게 두고 결과의 `usage`를 보며 올린다.
 - 재수정 한도 둘(9절): `maxRepairAttempts`(0 이상, 기본 0)와 `maxSameFailures`(1 이상, 기본 2). 두 파일 모두에서 생략할 수 있다.
-- **설정 파일의 한도는 상한이다.** task는 필드마다 그 값 이하만 정할 수 있고, 넘으면 `invalid_task`다. 설정이 숫자인데 task가 `maxTotalTokens: null`을 주어도 `invalid_task`다. 예산 한도가 어디에도 없으면 task 형식은 `invalid_task`, 간편 형식은 `invalid_config`다.
+- **설정 파일의 한도는 상한이다.** task는 필드마다 그 값 이하만 정할 수 있고, 넘으면 `invalid_task`다. 설정이 숫자인데 task가 `maxTotalTokens: null`을 주어도 `invalid_task`다. 예산 한도가 어디에도 없으면 task 형식은 `invalid_task`, 간편 형식은 `invalid_config`다. 모델과 검증기를 돌리지 않는 `plan`·`review`·`changes`의 간편 형식은 한도를 요구하지 않는다(18.1절 "간편 형식").
 - **anthropic에서는 총 토큰 한도가 필수다.** `maxTotalTokens: null`은 task에 있으면 `invalid_task`, 설정에 있으면 `invalid_config`다.
 - **절대 상한(코드):** 턴 1000, 도구 호출 5000, 총 토큰 50,000,000, 실행 시간 86,400,000ms(24시간), `maxRepairAttempts` 20, `maxSameFailures` 10. 넘으면 그 값을 적은 파일의 오류다.
 - 다른 시간 값(`requestTimeoutMs`, 검증기 `timeoutMs`)은 2,147,483,647ms 이하다. 모델이 `run_command`에 주는 `timeoutMs`는 600000ms 이하이며, 넘으면 그 호출이 `invalid_args`로 거부된다.
@@ -570,6 +570,13 @@ codaryn: 오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 �
 - **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다. 에이전트의 마지막 답이 있으면 `finalMessage`(`text`, `truncated`)도 있다(8절). `text`는 끝 요약과 같은 처리를 거친 글이고, 줄바꿈은 LF, 탭은 그대로다. 실행 폴더의 `result.json`에도 같은 필드가 있다. DR-47 전의 판이 쓴 `result.json`에는 없다.
 - **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절). 메시지에는 값 대신 필드 이름만 적힌다.
 - `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다.
+- **`--workspace` 생략(U-17):** 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 작업 공간으로 쓴다. `runs`는 원래 그렇다. 한 줄 실행으로 시작해 그 폴더에 있으면 `codaryn report --run latest`로 된다.
+  - 키, 모델, 한도가 없어도 된다(18.1절 "간편 형식"). `plan`·`changes`는 가릴 값을 설정 파일에서 읽으므로, 설정 파일이 깨졌으면 `invalid_config`다(간편 형식은 이번에 쟀고, 생략한 형식은 검토 R-54가 쟀다). `report`와 `runs`는 설정 파일을 읽지 않는다.
+  - 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 생략하면 `invalid_arguments`(종료 2)로 아무것도 하지 않는다. 현재 폴더라면 `--workspace .`를 준다.
+  - 그 안내(`If you mean the current directory, give --workspace .`)는 stdout JSON의 `message`에만 있다. stderr는 `codaryn help <command>`를 보라는 일반 안내뿐이다.
+  - `apply`와 `review`의 `message`는 둘 다 주지 않았는데도 `give --task or --workspace, not both`로 시작한다.
+  - **작업 공간의 하위 폴더에서** 생략하면 그 하위 폴더를 작업 공간으로 읽는다. 실행 기록은 한 단계 위에 있으므로 `run_not_found`("this workspace has no record of that run")다. 작업 공간 폴더로 옮겨 가거나 `--workspace`를 준다.
+  - 확인(main `0ad28bc`의 실제 CLI, 작업 공간 폴더 안, 설정 없음과 한도 있는 설정): `report --run latest`, `plan --run <id>`, `changes --run latest`, `runs`는 종료 0이었다. `revert --run latest --dry-run`, `cleanup --older-than 0`, `apply --run … --digest …`, `review --run … --accept`는 `invalid_arguments`였다.
 
 ### 실행 목록 (`runs`)
 
@@ -640,6 +647,8 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 
 ```powershell
 node dist/src/cli/main.js changes --task <task.json> --run <runId|latest> [--json]
+node dist/src/cli/main.js changes --workspace <작업 공간> --run <runId|latest> [--json]   # 간편 형식: 가릴 값은 설정 파일에서
+node dist/src/cli/main.js changes --run latest                                            # 작업 공간 폴더 안에서(현재 폴더)
 ```
 
 실행이 파일 도구로 바꾼 파일과 그 상태, 그리고 가린 글의 줄 단위 비교를 보여 준다. 읽기만 하고 잠금도 잡지 않는다. 3절 체험 실행의 실제 출력(stdout, main `3e36b1b`. 빈 줄을 나타내는 `+` 뒤의 공백 하나는 이 문서에서 뺐다):
@@ -672,6 +681,7 @@ changes of run 20261112T081531Z-dfd155bd, masked with the secrets registered now
   - 지금 등록된 가릴 값이 실행 때와 달라 가린 결과가 다를 때. 상태는 `as_run_left` 그대로다.
   - 이 기록이 없는 실행(쓰기 도구가 다이제스트를 남기기 전의 실행).
 - `--json`이면 `kind:"changes"` JSON 한 줄이고, 파일마다 `before`·`after`(가린 글 또는 `null`)와 `unavailable`(글이 없는 이유 또는 `null`)이 있다.
+- **간편 형식과 생략(U-17):** 키, 모델, 한도가 없어도 된다(18.1절 "간편 형식"). 이때 지금 등록된 가릴 값은 설정 파일(과 프로필)의 `secretEnv`로 정해진다. 실행이 task의 `privacy.secretEnv`로 등록한 값이 설정에 없으면 가린 결과가 실행 때와 달라서, 그 파일은 경로와 상태만 보인다(`masking_unverified`, 검토 R-54). 글을 보려면 실행에 쓴 task를 `--task`로 준다.
 - 실행이 끝난 뒤에 기록 파일을 고치면 이 확인을 속일 수 있다(16절 "실행 기록 변조").
 
 ## 11. 되돌리기
@@ -818,6 +828,11 @@ node --test dist/tests/live/anthropic-live.js
 - **파일 해시 노출:** 파일 해시가 모델과 기록에 남는다. 짧은 비밀이 든 파일은 추측 검증이 가능하다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
 - **점검:** `doctor`는 모델이 실제로 있는지 확인하지 않는다.
+- **도움말과 사용법의 빠진 곳(UXM-20):** main `0ad28bc`의 실제 CLI로 확인했다. 아래는 아직 고쳐지지 않았다.
+  - `help run`의 옵션 목록에 `--workflow`가 없다. 사용법 줄에는 `[--workflow <id>]`가 있다(18.1절).
+  - 명령이 없거나 모르는 명령일 때, 그리고 `run`의 옵션 오류일 때, 오류 JSON의 `message`는 여러 명령의 사용법을 이어 붙인 묶음이다. 그 묶음은 `codaryn plan|apply|review ... | codaryn --help | codaryn --version`으로 끝나고 `changes`와 `cleanup`이 없다. 두 명령의 사용법은 `codaryn help changes`, `codaryn help cleanup`으로 본다. 다른 명령의 옵션 오류는 그 명령의 사용법만 보인다.
+  - `plan`과 `changes`의 사용법 줄은 `(--task <task.json> | --workspace <dir> …)`이라 둘 중 하나가 꼭 있어야 하는 것처럼 보인다. 실제로는 둘 다 없으면 현재 폴더를 쓴다(10절 "`--workspace` 생략").
+  - 한국어 `doctor` 표는 열이 맞지 않는다(`[정상]      Node.js 버전  Node.js 26: …`, `[건너뜀]     변수 파일       …`). 영어 표는 맞는다.
 - **실행 기록 변조(결정 DR-38, DR-37 (b)):** `report`, `changes`, `revert`는 `.codaryn\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
   - **실행 중의 변경은 알아챈다.** 실행의 시작과 끝, 그리고 명령을 돌린 뒤마다 `.codaryn\`을 살피고, 그 실행이 쓴 것 말고 바뀐 것이 있는지 본다. 다른 것이 바뀌었으면 실행을 `failed`/`state_changed`(종료 1)로 끝내고 그 실행에 "기록이 바뀜" 표시를 남긴다. 확인(main `6df2eae`, 허용한 `node` 명령이 고침): 그 실행 자신의 기록, 이미 끝난 다른 실행의 `result.json`, `.codaryn\`에 새 파일 하나 모두 이렇게 끝났다. 끝 요약은 `the state directory was changed by something other than the run, or could not be checked (failed/state_changed)`와 "허용한 명령과 검사를 살펴보라"는 안내를 낸다.
   - 표시가 붙는 것은 그때 돌던 실행이다. 기록이 고쳐진 다른 실행에는 표시가 없다.
@@ -843,7 +858,7 @@ node --test dist/tests/live/anthropic-live.js
 
 | 코드 | 뜻과 조치 |
 | --- | --- |
-| `invalid_arguments` | 옵션 오류. 같은 옵션 반복, 모르는 옵션, `--env-file`, `--workspace`·`--goal` 한쪽만, 한 줄 실행 목표와 `--task` 등을 함께 씀, 작업 공간 안의 취소 파일, `doctor`의 `--task`와 `--workspace` 함께, 프로필 이름 형식, 목록에 없는 `models --use` 번호, 이름이 `latest`인 실행 디렉터리가 있는데 `--run latest`, `apply`의 `--run latest`나 형식이 틀린 `--digest`, task 파일과 `--workflow`를 함께 줌, `revert`의 `--dry-run`과 `--allow-unsafe-move`를 함께 줌 |
+| `invalid_arguments` | 옵션 오류. 같은 옵션 반복, 모르는 옵션, `--env-file`, `--workspace`·`--goal` 한쪽만, 한 줄 실행 목표와 `--task` 등을 함께 씀, 작업 공간 안의 취소 파일, `doctor`의 `--task`와 `--workspace` 함께, 프로필 이름 형식, 목록에 없는 `models --use` 번호, 이름이 `latest`인 실행 디렉터리가 있는데 `--run latest`, `apply`의 `--run latest`나 형식이 틀린 `--digest`, task 파일과 `--workflow`를 함께 줌, `revert`의 `--dry-run`과 `--allow-unsafe-move`를 함께 줌, 바꾸는 명령(`revert`, `cleanup`, `apply`, `review`)에 `--workspace`를 주지 않음(현재 폴더라면 `--workspace .`, 10절 "`--workspace` 생략") |
 | Node 오류, 종료 9 | `--env-file`의 파일이 없다. `--vars-file`로 바꾼다 |
 | `invalid_task`, `invalid_config` | stderr의 오류 설명이 파일과 필드(또는 줄·열)를 알려 준다(6절). 설정 상한보다 큰 task 한도, 설정 최상위보다 큰 프로필 한도, 없는 프로필, anthropic의 `maxTotalTokens: null`, 작업 공간 안의 파일, 변수 파일의 BOM, 1 MiB보다 큰 task·설정 파일(4절 "키")도 여기다 |
 | `config_exists` | `init`의 대상 위치에 파일이 이미 있다. 그 파일을 고치거나, `--config`로 다른 위치를 준다 |
@@ -932,15 +947,36 @@ node --test dist/tests/live/anthropic-live.js
   - 검증기(결정 DR-43 (a)): 작업 종류 정의의 검증기는 늘 실행된다. 설정·프로필·task의 검증기는 그 뒤에 더해지고, 정의의 검증기와 id가 같은 것만 빠진다(정의의 것이 판정한다). 빈 목록(`[]`)도 정의의 검증기를 지우지 않는다. id가 같은데 내용이 다른 검증기가 빠지면 `doctor`가 `a run of this task type leaves out checks given in the config or task with the same id as its own: 1`처럼 알리고, `run_started`에 `verifiers_dropped`가 남는다.
     - 확인(main `6df2eae`): 설정의 작업 종류 `notes`에 검증기 `has-summary`(`summary.md`가 있다)를 두고, task 파일이 `workflowRef: "notes"`로 같은 id를 더 느슨하게(`a.txt`가 있다) 적고 `a-kept`를 더하면, `has-summary`(정의의 것)와 `a-kept`가 실행됐다. `doctor --task`가 위 줄을 냈다.
 - **한도:** 작업 종류 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
-- **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절). 한도가 없는 설정 파일로 `plan --workspace …`를 하면 오류 설명 끝에 그 안내가 한 줄 더 나온다(main `bded611`의 실제 출력, stderr):
+- **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. 모델을 부르지 않는 명령의 간편 형식은 명령마다 다르다(U-17). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절).
+  - **`apply`:** 모델은 부르지 않지만 검증기를 그 설정으로 돌리므로, 설정 파일에 한도가 모두 있어야 한다. 한도가 빠졌거나 설정 파일이 없으면 `invalid_config`다.
+  - **`plan`, `review`, `changes`:** 실행 한도를 요구하지 않는다. 설정 파일에서는 가릴 값과 작업 종류만 읽고, 키와 모델도 필요 없다. 설정 파일이 없어도 된다. 설정 파일이 JSON으로 읽히지 않으면 `invalid_config`다. 가릴 값을 거기서 읽기 때문이다.
+  - 한도가 하나라도 빠진 설정에서는 준 한도의 상한을 검사하지 않는다. 그 한도로 실행되는 것은 없다(검토 R-54 R54-I3). 예: `maxDurationMs: 999999999999` 하나만 둔 설정으로도 `plan`은 종료 0이었다.
+  - 확인(main `0ad28bc`의 실제 CLI, 18.2절 예시의 계획 실행, 설정 파일은 기본 위치):
 
-  ```
-  codaryn: error — the config file cannot be read or has an invalid value (invalid_config)
-    config file — limits.maxModelTurns has an invalid value (values are not shown)
-    To fix: Fix the named field in the config file. Without a config file, codaryn init creates one.
-    Check: codaryn doctor
-    The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.
-  ```
+    | 명령 | 설정 없음 | 한도 없음 | 한도 하나 | 한도 모두 | 깨진 JSON |
+    | --- | --- | --- | --- | --- | --- |
+    | `plan --workspace … --run <id>` | 0 | 0 | 0 | 0 | 2 `invalid_config` |
+    | `changes --workspace … --run latest` | 0 | 0 | 0 | 0 | 2 `invalid_config` |
+    | `review --workspace … --run <id> --accept` | 2 `run_not_awaiting_review` | 같음 | 같음 | 같음 | 2 `invalid_config` |
+    | `apply --workspace … --workflow organize` | 2 `invalid_config` | 2 `invalid_config` | 2 `invalid_config` | 0 | 2 `invalid_config` |
+    | `report`, `runs` | 0 | 0 | 0 | 0 | 0 |
+
+    - `review`에 준 것은 사람 확인을 기다리는 실행이 아니다. 그래서 한도 검사를 지나 실행을 고르는 데까지 갔다는 뜻으로만 읽는다.
+    - `report`와 `runs`는 설정 파일을 읽지 않는다.
+  - 한도가 없는 설정(또는 설정 파일 없음)으로 `apply --workspace … --workflow organize`를 하면, 오류 설명 끝에 task를 주라는 안내가 한 줄 더 나온다(main `0ad28bc`의 실제 출력, stderr):
+
+    ```
+    codaryn: error — the config file cannot be read or has an invalid value (invalid_config)
+      config file — limits.maxTotalTokens has an invalid value (values are not shown)
+      To fix: Fix the named field in the config file. Without a config file, codaryn init creates one.
+      Check: codaryn doctor
+      The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.
+    ```
+
+    - `organize`의 정의가 턴과 도구 호출의 한도를 채우므로, 처음 빠진 한도로 `limits.maxTotalTokens`가 나온다. 값이 틀린 것이 아니라 없는 것이다.
+    - 마지막 줄은 U-17 전의 문구라 아직 `plan`과 `review`도 한도를 읽는다고 말한다. 위 표처럼 두 명령은 한도 없이 된다.
+    - 한국어 마지막 줄은 `plan, apply, review의 간편 형식(--workspace)은 한도를 포함한 실행 설정을 설정 파일에서 읽습니다. 대신 계획 실행의 task를 --task로 주세요. task는 자기 설정과 가릴 값을 함께 가져옵니다.`이다.
+    - 깨진 JSON이면 이 줄 없이 `config file — JSON syntax error at line 1, column 2`가 나온다.
 
 ### 18.2 키 없이 체험하기: 파일 정리
 

@@ -239,7 +239,7 @@ test("settings change (GU-6): the screen proposes one edit, shows what widens, a
     const byId = (id: string) => root.findAll((e) => e.getAttribute("id") === id)[0];
     assert.equal(byId("settings")?.getAttribute("data-settings-ready"), "ok");
     assert.ok(byId("settings-secrets")?.textContent.includes("not set now"));
-    assert.ok(byId("settings-policy-merge")?.textContent.includes("merged with each task kind's own rules"), "DR-41: says the rules are merged");
+    assert.ok(byId("settings-policy-merge")?.textContent.includes("merged with each task type's own rules"), "DR-41: says the rules are merged");
     assert.equal(root.findAll((e) => e.getAttribute("type") === "password").length, 0, "no value field");
 
     // A limit that is not a whole number is refused here; nothing is asked.

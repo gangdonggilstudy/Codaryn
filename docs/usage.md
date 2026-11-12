@@ -781,7 +781,7 @@ node --test dist/tests/live/anthropic-live.js
     - 피하는 법: 비밀로 등록할 값이 짧거나 한 가지 대소문자뿐이면, 그 값이 이상한 문자로 끊겨 들어 있을 수 있는 파일은 작업 공간에 두지 않는다.
   - **찾지 못하는 끊김:** 등록되지 않은 키가 보이는 공백으로 끊긴 경우(`sk-proj-` 키를 공백으로 가른 목표가 통과했다, main `23daf6b`), 등록된 키가 `&#8203;` 같은 문자 참조로 끊긴 경우.
   - 키 변수에 낱말을 이은 자리표시자(예: `not-needed-for-local-server`)를 두어도 같은 낱말을 띄어 쓴 평범한 목표는 이제 멈추지 않는다(키 같은 값만 영문자·숫자로 비교한다).
-- **정책에서 빠진 것의 알림(DR-43 (b)):** 워크플로의 규칙이 설정·task의 정책과 검증기에서 뺀 것은 `doctor`가 알리고 실행 기록의 `run_started`에 남지만, 실행의 진행 줄과 끝 요약은 아직 알리지 않는다. `report`에도 나오지 않는다. 실행 전에 `doctor`를 같은 옵션으로 돌려 본다(7절). `run --workflow <id>`는 `doctor`에 같은 옵션이 없어 미리 볼 수 없다. 프로필이나 task 파일로 고르면 볼 수 있다.
+- **정책에서 빠진 것의 알림이 한 줄에 길게 이어진다(DR-43 (b), 검토 R-37 낮음):** 워크플로의 규칙이 설정·task의 정책과 검증기에서 뺀 것은 실행 시작 줄 하나에 ` · `로 이어 붙는다(18.1절 "정책 합치기"의 예). 둘만 빠져도 영어 줄이 227자라 좁은 터미널에서는 여러 줄로 접혀 묻히기 쉽다. 끝 요약과 `report`에는 나오지 않는다. 실행 전에 `doctor`를 같은 옵션으로 돌려 보면 한 항목씩 나뉘어 나온다(7절). `run --workflow <id>`는 `doctor`에 같은 옵션이 없어 미리 볼 수 없다. 프로필이나 task 파일로 고르면 볼 수 있다.
 - **OpenAI 제공자:** 실제 OpenAI API로는 점검하지 않았다. 추론 항목은 암호문이라 가림이 볼 수 없고, 다음 요청에 받은 그대로 다시 간다([민감정보 처리](privacy.md) "OpenAI 제공자").
 - **변경 보기의 글:** `changes`는 지금 등록된 비밀로 가린 글이 실행 때와 같을 때만 글을 보인다. 실행 뒤 바뀐 파일, 비밀의 값이 바뀐 경우, 쓰기 도구가 기록을 남기기 전의 실행은 경로와 상태만 보인다(10절 "변경 보기").
 - **보관함:** 폐기한 파일은 `.codaryn\discarded\`에 쌓인다. `cleanup --discarded-older-than <일> --confirm … --delete-discarded`로만 지운다(18.8절).
@@ -802,7 +802,14 @@ node --test dist/tests/live/anthropic-live.js
 - **실행 기록 변조(결정 DR-38, DR-37 (b)):** `report`, `changes`, `revert`는 `.codaryn\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
   - **실행 중의 변경은 알아챈다.** 실행의 시작과 끝, 그리고 명령을 돌린 뒤마다 `.codaryn\`을 살피고, 그 실행이 쓴 것 말고 바뀐 것이 있는지 본다. 다른 것이 바뀌었으면 실행을 `failed`/`state_changed`(종료 1)로 끝내고 그 실행에 "기록이 바뀜" 표시를 남긴다. 확인(main `6df2eae`, 허용한 `node` 명령이 고침): 그 실행 자신의 기록, 이미 끝난 다른 실행의 `result.json`, `.codaryn\`에 새 파일 하나 모두 이렇게 끝났다. 끝 요약은 `the state directory was changed by something other than the run, or could not be checked (failed/state_changed)`와 "허용한 명령과 검사를 살펴보라"는 안내를 낸다.
   - 표시가 붙는 것은 그때 돌던 실행이다. 기록이 고쳐진 다른 실행에는 표시가 없다.
-  - 표시가 있는 실행: `report`가 `This run has a records-changed mark: … this report may not match what happened.`를 낸다. `changes`는 파일 글을 보이지 않는다(이유는 `masking_unverified`로만 나오고 표시는 따로 말하지 않는다). `revert`는 막지 않고 파일마다 스냅숏과 다이제스트를 확인하며 JSON에 `recordsChanged: true`를 싣는다. `runs`는 `--json`의 `recordsChanged`로만 알린다(사람용 표에는 아직 없다).
+  - 표시가 있는 실행: `report`가 `This run has a records-changed mark: … this report may not match what happened.`를 낸다. `changes`는 파일 글을 보이지 않는다(이유는 `masking_unverified`로만 나오고 표시는 따로 말하지 않는다). `revert`는 막지 않고 파일마다 스냅숏과 다이제스트를 확인하며 JSON에 `recordsChanged: true`를 싣는다(사람용 글에는 아직 표시가 없다). `runs`는 결과 칸 끝에 표시를 붙이고, `--json`에는 `recordsChanged: true`가 있다. 실제 출력(main `bded611`):
+
+    ```
+    run id                     started              changes  result
+    20261112T133827Z-be2edb3c  2026-11-12 22:38:27  0        failed (failed/state_changed) · records changed (something other than the run changed its records)
+    ```
+
+    한국어로는 `실패 (failed/state_changed) · 기록 변경됨(실행이 아닌 것이 실행 기록을 바꿈)`이다. 표시가 붙은 줄은 영어로 155자라 80칸 터미널에서는 접힌다.
   - 실행 자신의 `journal.jsonl`에 엉뚱한 줄이 들어가면 `report`와 `changes`가 그 실행을 `invalid_run_record`로 읽지 않는다.
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).
   - 실행이 끝난 뒤 변경 기록 파일의 다이제스트를 지금 값으로 바꿔 넣으면, `changes`를 다른 비밀로 볼 때 실행 때 가렸던 값이 그대로 보인다(DR-37 (b)). 드러나는 값은 작업 공간 파일에 이미 있는 값이다.
@@ -888,11 +895,26 @@ node --test dist/tests/live/anthropic-live.js
   - 명령 규칙: 양쪽이 모두 허용하는 명령만 남는다. `organize`처럼 명령을 허용하지 않는 워크플로에서는 설정·프로필의 명령 규칙이 모두 빠진다(task 파일 자신의 명령 규칙은 위처럼 `invalid_task`다).
   - 계획 행동(`planActions`): 설정 정책이 적었을 때만 양쪽에 다 있는 것으로 줄인다. 적지 않았으면 워크플로의 것을 그대로 쓴다.
   - 경로 토큰 되살리기(`restorePathTokens`): 양쪽이 모두 허용할 때만 켜진다.
-  - 빠진 것은 `doctor`가 알리고(7절의 예), 실행 기록의 `run_started`에 종류와 개수만 남는다. 확인(main `23daf6b`): 위 7절의 설정으로 `run --workspace … --workflow organize`를 하면 기록에 `commands_dropped` 1과 `restore_path_tokens_off` 1이 남았다. 실행의 진행 줄은 아직 알리지 않는다(16절).
+  - 빠진 것은 `doctor`가 알리고(7절의 예), 실행 시작 줄에 이어 붙으며, 실행 기록의 `run_started`에 종류와 개수만 남는다. 확인(main `23daf6b`): 위 7절의 설정으로 `run --workspace … --workflow organize`를 하면 기록에 `commands_dropped` 1과 `restore_path_tokens_off` 1이 남았다.
+  - 실행 시작 줄의 실제 출력(main `bded611`). task 파일이 `workflowRef`로 고른 설정의 워크플로가 경로 토큰 되살리기를 끄고 같은 id의 검증기 하나를 뺀 경우다:
+
+    ```
+    codaryn: run started — provider scripted · the workflow's own rules turn off restoring path tokens, which the configured policy allows · the workflow's own checks leave out checks given in the config or task with the same id: 1
+    ```
+
+    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류(workflow) 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다 · 작업 종류(workflow) 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
   - 검증기(결정 DR-43 (a)): 워크플로 정의의 검증기는 늘 실행된다. 설정·프로필·task의 검증기는 그 뒤에 더해지고, 정의의 검증기와 id가 같은 것만 빠진다(정의의 것이 판정한다). 빈 목록(`[]`)도 정의의 검증기를 지우지 않는다. id가 같은데 내용이 다른 검증기가 빠지면 `doctor`가 `a run of this workflow leaves out checks given in the config or task with the same id as its own: 1`처럼 알리고, `run_started`에 `verifiers_dropped`가 남는다.
     - 확인(main `6df2eae`): 설정의 워크플로 `notes`에 검증기 `has-summary`(`summary.md`가 있다)를 두고, task 파일이 `workflowRef: "notes"`로 같은 id를 더 느슨하게(`a.txt`가 있다) 적고 `a-kept`를 더하면, `has-summary`(정의의 것)와 `a-kept`가 실행됐다. `doctor --task`가 위 줄을 냈다.
 - **한도:** 워크플로 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
-- **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절).
+- **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절). 한도가 없는 설정 파일로 `plan --workspace …`를 하면 오류 설명 끝에 그 안내가 한 줄 더 나온다(main `bded611`의 실제 출력, stderr):
+
+  ```
+  codaryn: error — the config file cannot be read or has an invalid value (invalid_config)
+    config file — limits.maxModelTurns has an invalid value (values are not shown)
+    To fix: Fix the named field in the config file. Without a config file, codaryn init creates one.
+    Check: codaryn doctor
+    The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.
+  ```
 
 ### 18.2 키 없이 체험하기: 파일 정리
 

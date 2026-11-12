@@ -66,6 +66,6 @@ export const KEY_SHAPED = ["sk", "ant", "Q".repeat(24)].join("-");
 
 /**
  * C0, C1, line and paragraph separators, bidirectional controls. Built from a string: the
- * compiler writes ` ` in a regular expression literal as the raw character, which ends the line.
+ * compiler writes U+2028 (written as an escape) in a regular expression literal as the raw character, which ends the line.
  */
 export const CONTROL = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]", "u");

@@ -96,7 +96,7 @@ test("R33b-I1, U-13: the discard boxes' dialog says what keeping them means for 
   assert.doesNotMatch(cleanupDiscardedDetail("en", 0), /apply runs/);
   assert.match(cleanupDiscardedDetail("en", 2), /If you keep them, the records of the 2 apply runs they belong to are kept too/);
   assert.match(cleanupDiscardedDetail("ko", 1), /폐기 보관함을 남기면, 그 폐기 보관함이 딸린 적용 실행 1개의 기록은 남깁니다\./);
-  assert.match(cleanupDiscardedDetail("en", 1), /^The discard boxes hold people's files/, "what deleting means comes first");
+  assert.match(cleanupDiscardedDetail("en", 1), /^The discarded files are people's files/, "what deleting means comes first");
 });
 
 test("report save (3.7): the button asks the main process to save and names the file it was saved as", async () => {

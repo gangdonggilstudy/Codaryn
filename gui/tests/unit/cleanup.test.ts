@@ -233,7 +233,7 @@ test("cleanup (DR-44): the screen asks apart about not reverted runs and discard
     await settle();
     assert.deepEqual(calls.find(([name]) => name === "applyCleanup")?.[1], ["e".repeat(32)], "the token only");
     assert.equal(byId("cleanup-removed")?.getAttribute("data-removed"), "1", "partly_removed is not counted as removed");
-    assert.ok(byId("cleanup-removed")?.textContent.includes("1 run records, 0 discard boxes, 0 leftover folders"));
+    assert.ok(byId("cleanup-removed")?.textContent.includes("1 run records, 0 discarded-files folders, 0 leftover folders"));
     assert.deepEqual(
       root.findAll((e) => e.hasAttribute("data-reason")).map((e) => e.getAttribute("data-reason")),
       ["not_reverted_not_confirmed", "partly_removed"],

@@ -231,8 +231,9 @@ $ codaryn plan --workspace D:\work\photos --run latest
 | revert | 되돌리기 | revert | 건너뛴 파일과 이유를 반드시 보여 준다 |
 | run, workspace, journal | 실행, 작업 공간, 실행 기록 | run, workspace, run record | 실행 id는 복사할 수 있게 한 줄에 둔다 |
 | workflow, workflowRef | 작업 종류 | task type | 내장 이름(`document` 등)은 표시 이름으로 바꿔 보인다 |
+| plan action | 동작(이동·폐기) | action | 계획의 한 항목이다. "행동"이라 쓰지 않는다 |
 | plan, apply, digest | 계획, 적용, 다이제스트 | plan, apply, digest | 다이제스트는 앞 12자를 보인다. "계획을 본 뒤 적용"이 한 문장에 함께 나오게 한다 |
-| discard | 폐기(보관함으로 옮김) | discard (moved to the run archive) | "삭제"라고만 쓰지 않는다. 되살릴 수 있다는 것과 보관함 위치를 함께 말한다 |
+| discard | 폐기(폐기 보관함으로 옮김) | discard (moved to discarded files) | "삭제"라고만 쓰지 않는다. 되살릴 수 있다는 것과 폐기 보관함 위치를 함께 말한다 |
 | awaiting_review, review | 사람 확인 대기, 사람 확인 | awaiting review, human review | 승인해도 "완료(검증 통과)"와 다른 표시를 쓴다 |
 | confirm, allow_once | 확인, 이번 한 번 허용 | confirm, allow once | "항상 허용"은 없다 |
 
@@ -264,7 +265,7 @@ $ codaryn plan --workspace D:\work\photos --run latest
 | 되돌리기 | [설계: N-7] CLI: `--dry-run` 미리보기(명시 명령이므로 묻지 않음). GUI·VS Code: 미리보기와 확인. 기본은 "되돌리지 않음" |
 | 계획 적용(이동·폐기) | [설계: GT-D4] 비대화형은 `--digest` 필수, 터미널은 `[y/N]`, GUI·VS Code는 계획 화면의 확인. 기본은 "적용 안 함" |
 | 실행 중 권한 확인의 답 | [설계: AC-D5, DR-3] 기본 거부, 이번 한 번만. 답할 수 없으면 거부(`by: "default"`) |
-| 실행 기록과 폐기 보관함 정리(`cleanup`) | [구현: DR-39, DR-44] 명령 하나가 둘을 다룬다(DR-9의 "따로 한다"는 확인을 따로 받는 것으로 바뀌었다). 기본은 미리보기다: 고른 실행 기록과 폐기 보관함을 항목마다 파일 수, 크기, 경고와 함께 보이고 아무것도 지우지 않는다. 지우려면 미리보기의 다이제스트를 `--confirm`으로 준다. 되돌리지 않은 실행의 기록은 `--include-not-reverted`, 폐기 보관함(사람의 파일, 되살릴 수 없음)은 `--delete-discarded`를 더해야 지운다. 확인은 인자로만 받는다. 미리보기 뒤에 상태가 바뀌었으면 아무것도 지우지 않는다(`plan_changed`). [결정: DR-53] 폐기 보관함에 파일이 남는 적용 실행의 기록은 보관함을 함께 지우기로 확인하지 않으면 남긴다(단위 U-13, main `a9a98fd`에는 아직 없다) |
+| 실행 기록과 폐기 보관함 정리(`cleanup`) | [구현: DR-39, DR-44] 명령 하나가 둘을 다룬다(DR-9의 "따로 한다"는 확인을 따로 받는 것으로 바뀌었다). 기본은 미리보기다: 고른 실행 기록과 폐기 보관함을 항목마다 파일 수, 크기, 경고와 함께 보이고 아무것도 지우지 않는다. 지우려면 미리보기의 다이제스트를 `--confirm`으로 준다. 되돌리지 않은 실행의 기록은 `--include-not-reverted`, 폐기 보관함(사람의 파일, 되살릴 수 없음)은 `--delete-discarded`를 더해야 지운다. 확인은 인자로만 받는다. 미리보기 뒤에 상태가 바뀌었으면 아무것도 지우지 않는다(`plan_changed`). [구현: DR-53, 단위 U-13] 폐기 보관함에 파일이 남는 적용 실행의 기록(과 그 계획 실행의 기록)은 그 폐기 보관함을 같은 정리에서 함께 지우기로 확인하거나 그 적용을 먼저 되돌리지 않으면 남긴다. 미리보기와 결과가 왜 남았는지와 지우는 법을 알린다(main `531c8b8`) |
 | 강제 종료(VS Code 확장) | [설계: VX-D12] 취소 뒤 응답이 없을 때 결과를 알 수 없게 된다는 점을 보이고 확인받은 뒤에만 |
 | 허용 명령 추가, `allowExtraArgs: true`, 한도 올리기 | 결과("이 명령은 어떤 인자든 실행합니다")를 보여 주고 확인한다. 비대화형은 명시 플래그 없이는 바꾸지 않는다 |
 | 보호 경로·`integrity.paths` 비우기 | 경고와 확인 |

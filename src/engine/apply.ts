@@ -79,6 +79,9 @@ const UNSAFE_DONE_NOTICE = "some moves were made without the guarantee against r
 /** DR-38: a change to the run records found during the apply (paths follow), or a check not made. */
 const STATE_NOTICE_LEAD = "Codaryn's run records changed outside the apply, so they are not trusted: ";
 const STATE_FAILED_NOTICE = "the run records could not be checked, so they are not trusted";
+/** U-8 (R-39 L-1): a state check was limited (ApplyNoticeKind plan_records_unchecked). */
+const PLAN_RECORDS_UNCHECKED_NOTICE =
+  "the plan run's records could not be checked for changes, because the state directory is too large to check entirely (plan_records_unchecked); a cleanup that makes it smaller lets them be checked";
 
 /** Every fixed text the apply run records. Tests mask these with the real gateway. */
 export const APPLY_FIXED_TEXTS: readonly string[] = [
@@ -100,6 +103,7 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   UNSAFE_DONE_NOTICE,
   STATE_NOTICE_LEAD,
   STATE_FAILED_NOTICE,
+  PLAN_RECORDS_UNCHECKED_NOTICE,
 ];
 
 const MAX_TIMER_MS = 2_147_483_647;
@@ -161,6 +165,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
   let stateBase: StateFingerprint | null = null;
   let lastRunPrint: StateFingerprint | null = null;
   let stateChanged: readonly MaskedText[] | undefined;
+  // U-8: a limited state check at any phase; told once (notice and ApplyResult.noticeKinds).
+  let planUnchecked = false;
   let baseline: IntegrityManifest | null = null;
   /** Whether actions or verifiers ran since the last integrity check (W-1 for apply runs). */
   let sinceCheck = false;
@@ -306,6 +312,10 @@ export const applyPlan: ApplyPlan = async (deps) => {
     } catch {
       notice(STATE_FAILED_NOTICE);
       return STATE_CHANGED;
+    }
+    if (limited && !planUnchecked) {
+      planUnchecked = true;
+      notice(PLAN_RECORDS_UNCHECKED_NOTICE);
     }
     const sorted = [...new Set(changedRaw)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const changed: MaskedText[] = [];
@@ -548,6 +558,7 @@ export const applyPlan: ApplyPlan = async (deps) => {
       notices,
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
       ...(stateChanged !== undefined ? { stateChanged } : {}),
+      ...(planUnchecked ? { noticeKinds: ["plan_records_unchecked"] as const } : {}),
     };
     return result;
   } finally {

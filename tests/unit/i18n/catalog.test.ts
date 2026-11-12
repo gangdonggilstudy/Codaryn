@@ -244,6 +244,17 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.ko["cleanup.warning.discarded_left"], /남으면/);
   });
 
+  test("U-8: the unchecked-plan notice says what was not checked and what to do, and fits any apply status", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    const id = "apply.notice.plan_records_unchecked";
+    assert.match(en[id], /plan run's records could not be checked.*too large.*codaryn cleanup/);
+    assert.match(ko[id], /너무 커서.*계획 실행의 기록이 바뀌었는지 확인하지 못했습니다.*codaryn cleanup/);
+    // Shown whatever the status (a failed apply too): it does not claim the plan was applied.
+    assert.ok(!/was applied|were applied/.test(en[id]) && !/적용했습니다/.test(ko[id]));
+    // Not a refusal and not the records-changed mark: nothing was found changed.
+    assert.ok(!en[id].includes("records-changed mark") && !ko[id].includes("기록 변경 표시"));
+  });
+
   test("U-1: a plan run with a records-changed mark is refused before anything is asked, and the fix makes the plan again", () => {
     const { en, ko } = MESSAGE_TEXTS;
     // The same words as the other records-changed texts (report.records_changed, runs.records_changed).

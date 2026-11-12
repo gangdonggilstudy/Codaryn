@@ -477,6 +477,11 @@ export const FIXED_MESSAGES = {
   // of the state directory that was too large to check (the run goes on).
   "progress.state_changed": { count: "count" },
   "progress.state_unchecked": {},
+  // DR-41: lines at the run's start from run_started.policyNarrowings. Counts only.
+  "progress.workflow_policy.commands_dropped": { count: "count" },
+  "progress.workflow_policy.commands_narrowed": { count: "count" },
+  "progress.workflow_policy.plan_actions_dropped": { count: "count" },
+  "progress.workflow_policy.restore_path_tokens_off": {},
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
@@ -600,6 +605,12 @@ export const FIXED_MESSAGES = {
   // does not check those arguments, so such a command can change files outside an approved plan.
   // A warning in the `commands` check (no new check id).
   "doctor.commands.extra_args_with_plan": { count: "count" },
+  // DR-41: notes of the `commands` check (DoctorCheck.notes): what the workflow's own rules left out
+  // of the configured policy (workflowPolicyNarrowings). Counts only.
+  "doctor.workflow_policy.commands_dropped": { count: "count" },
+  "doctor.workflow_policy.commands_narrowed": { count: "count" },
+  "doctor.workflow_policy.plan_actions_dropped": { count: "count" },
+  "doctor.workflow_policy.restore_path_tokens_off": {},
   "doctor.install_dir.unknown_env": {},
   "doctor.install_dir.not_found": {},
   "doctor.install_dir.ok": {},

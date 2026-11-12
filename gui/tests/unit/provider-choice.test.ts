@@ -19,8 +19,8 @@ import { fakeApp } from "./fake-app.js";
 import { FakeElement, installFakeDom, settle } from "./fake-dom.js";
 
 const TABLE = [
-  { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", modelEnv: "CODARYN_MODEL" },
-  { name: "openai", keyEnv: "OPENAI_API_KEY", modelEnv: "CODARYN_OPENAI_MODEL" },
+  { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", modelEnv: "CODARYN_MODEL", baseUrlEnv: "CODARYN_API_BASE_URL" },
+  { name: "openai", keyEnv: "OPENAI_API_KEY", modelEnv: "CODARYN_OPENAI_MODEL", baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL" },
 ];
 const CONFIG = { schemaVersion: 1, provider: "openai", model: "claude-x", providers: { openai: { model: "gpt-x" } } };
 const DIGEST = "b".repeat(64);
@@ -72,16 +72,17 @@ test("provider choice: the host shows each provider of the table with its key va
   const proposed: unknown[] = [];
   const call = host((name) => {
     asked.push(name);
-    return name === "OPENAI_API_KEY";
+    return name === "OPENAI_API_KEY" || name === "CODARYN_OPENAI_API_BASE_URL";
   }, proposed);
   const value = (await call(1, "settings", {})) as { view: Record<string, unknown> };
   assert.equal(value.view["provider"], "openai");
   assert.equal(value.view["defaultProvider"], "anthropic");
   assert.deepEqual(value.view["apiProviders"], [
-    { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", keySet: false, modelEnv: "CODARYN_MODEL", modelEnvSet: false, model: "claude-x", listable: true },
-    { name: "openai", keyEnv: "OPENAI_API_KEY", keySet: true, modelEnv: "CODARYN_OPENAI_MODEL", modelEnvSet: false, model: "gpt-x", listable: false },
+    { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", keySet: false, modelEnv: "CODARYN_MODEL", modelEnvSet: false, model: "claude-x", baseUrlEnv: "CODARYN_API_BASE_URL", baseUrlEnvSet: false, listable: true },
+    { name: "openai", keyEnv: "OPENAI_API_KEY", keySet: true, modelEnv: "CODARYN_OPENAI_MODEL", modelEnvSet: false, model: "gpt-x", baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL", baseUrlEnvSet: true, listable: false },
   ]);
   assert.ok(asked.includes("OPENAI_API_KEY"), "asked whether it is set, by name");
+  assert.ok(asked.includes("CODARYN_OPENAI_API_BASE_URL"), "R27-I3: the address variable too, by name");
   const checked = toSettingsView(value, { model: false, language: false });
   assert.equal(checked.ok && checked.view.apiProviders.length, 2);
 
@@ -109,6 +110,8 @@ test("provider choice: the main process refuses a provider view with values or o
   assert.equal(toSettingsView({ ok: true, view: { ...base, apiProviders: [entry] } }, env).ok, true);
   assert.equal(toSettingsView({ ok: true, view: { ...base, apiProviders: [{ ...entry, keyValue: "x" }] } }, env).ok, false, "no other field");
   assert.equal(toSettingsView({ ok: true, view: { ...base, apiProviders: [{ ...entry, keyEnv: "A=B" }] } }, env).ok, false);
+  assert.equal(toSettingsView({ ok: true, view: { ...base, apiProviders: [{ ...entry, baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL", baseUrlEnvSet: true }] } }, env).ok, true);
+  assert.equal(toSettingsView({ ok: true, view: { ...base, apiProviders: [{ ...entry, baseUrlEnv: "https://x", baseUrlEnvSet: true }] } }, env).ok, false, "a name, never an address");
   assert.equal(toSettingsView({ ok: true, view: { ...base, provider: "Open AI", apiProviders: [entry] } }, env).ok, false);
 });
 
@@ -131,7 +134,7 @@ test("provider choice: the screen shows the providers, a model list for each lis
       defaultProvider: "anthropic",
       apiProviders: [
         { name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", keySet: true, modelEnv: "CODARYN_MODEL", modelEnvSet: false, model: "claude-x", listable: true },
-        { name: "openai", keyEnv: "OPENAI_API_KEY", keySet: false, modelEnv: "CODARYN_OPENAI_MODEL", modelEnvSet: true, model: null, listable: false },
+        { name: "openai", keyEnv: "OPENAI_API_KEY", keySet: false, modelEnv: "CODARYN_OPENAI_MODEL", modelEnvSet: true, model: null, baseUrlEnv: "CODARYN_OPENAI_API_BASE_URL", baseUrlEnvSet: true, listable: false },
       ],
     });
     const api = new Proxy({} as CodarynApi, {
@@ -161,6 +164,8 @@ test("provider choice: the screen shows the providers, a model list for each lis
       ],
     );
     assert.ok(rows[1]?.textContent.includes("CODARYN_OPENAI_MODEL overrides"));
+    assert.equal(rows[1]?.findAll((e) => e.getAttribute("data-base-url-env") === "CODARYN_OPENAI_API_BASE_URL").length, 1, "R27-I3: the address variable is named");
+    assert.equal(rows[0]?.findAll((e) => e.hasAttribute("data-base-url-env")).length, 0, "not when it is not set");
     assert.equal(byId("settings-provider-current")?.getAttribute("data-provider"), "anthropic");
     assert.deepEqual(
       root.findAll((e) => e.hasAttribute("data-list-models")).map((e) => e.getAttribute("data-list-models")),

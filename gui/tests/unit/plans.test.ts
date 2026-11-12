@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { applyFormText } from "../../src/main/dialog-texts.js";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { test } from "node:test";
@@ -223,4 +224,11 @@ test("plans (GU-5, DR-21): an approval may ask for the consent only after its ap
   const closed = approvals.issue({ workspace: HANDLE, profile: null, workflowRef: null, planRunId: PLAN_RUN, digest: DIGEST, moves: 0, discards: 0 });
   approvals.forget(HANDLE);
   assert.equal(approvals.get(closed), null);
+});
+
+test("plans (R29-I2): the apply dialog names the form the plan is applied with", () => {
+  assert.equal(applyFormText("en", "tidy", null), "Applied with: profile tidy · task kind (the config's default)");
+  assert.equal(applyFormText("ko", null, "organize"), "적용할 형식: 프로필 (설정의 기본) · 작업 종류 organize");
+  assert.equal(applyFormText("en", "a\u0007b", "c".repeat(300)).includes("\u0007"), false, "control characters replaced");
+  assert.ok(applyFormText("en", null, "c".repeat(300)).length < 300, "cut to 200 characters");
 });

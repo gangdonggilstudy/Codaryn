@@ -44,6 +44,7 @@ import {
   CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
+  POLICY_NARROWING_KINDS,
   PROFILE_NAME_PATTERN_SOURCE,
   REPLACED_CALL_ID_PREFIX,
   RESULT_SCHEMA_VERSION,
@@ -73,6 +74,8 @@ import type {
   MaskedToolCall,
   ModelMessage,
   PolicyDecision,
+  PolicyNarrowing,
+  PolicyNarrowingKind,
   ProposePlanArgs,
   RawText,
   RawToolOutcome,
@@ -186,6 +189,23 @@ const MAX_TIMER_MS = 2_147_483_647;
 /** AC-D15: the call ids the engine keeps as given. */
 const CALL_ID_PATTERN = new RegExp(CALL_ID_PATTERN_SOURCE);
 const PROFILE_NAME_PATTERN = new RegExp(PROFILE_NAME_PATTERN_SOURCE);
+
+/**
+ * DR-41: the policy narrowings a run records: listed kinds with a positive whole count, the first
+ * such entry of each kind, in POLICY_NARROWING_KINDS order. Kinds and counts only.
+ */
+function recordableNarrowings(given: unknown): PolicyNarrowing[] {
+  if (!Array.isArray(given)) return [];
+  const counts = new Map<PolicyNarrowingKind, number>();
+  for (const entry of given as readonly unknown[]) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { kind, count } = entry as { kind?: unknown; count?: unknown };
+    if (typeof kind !== "string" || !(POLICY_NARROWING_KINDS as readonly string[]).includes(kind)) continue;
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) continue;
+    if (!counts.has(kind as PolicyNarrowingKind)) counts.set(kind as PolicyNarrowingKind, count);
+  }
+  return POLICY_NARROWING_KINDS.filter((kind) => counts.has(kind)).map((kind) => ({ kind, count: counts.get(kind) as number }));
+}
 
 /** Most changed paths one integrity notice names (U-2). The record and the result keep them all. */
 export const INTEGRITY_NOTICE_PATHS = 10;
@@ -886,6 +906,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     // name holding a registered secret is left out rather than recorded as a token).
     const profile =
       typeof task.profile === "string" && PROFILE_NAME_PATTERN.test(task.profile) && mask(task.profile) === task.profile ? task.profile : null;
+    // DR-41: what the workflow's rules left out of the given policy, for the run's start lines.
+    const policyNarrowings = recordableNarrowings(task.policyNarrowings);
     await record({
       type: "run_started",
       schemaVersion: 1,
@@ -895,6 +917,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       limits,
       ...workflowFields,
       ...(profile === null ? {} : { profile }),
+      ...(policyNarrowings.length === 0 ? {} : { policyNarrowings }),
     });
     state.transition("running");
     messages.push({ role: "user", content: goal });

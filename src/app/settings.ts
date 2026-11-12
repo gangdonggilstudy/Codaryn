@@ -16,7 +16,7 @@
  * call one function instead (A-4 report).
  */
 
-import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS } from "../contracts/index.js";
+import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, workflowPolicyNarrowings } from "../contracts/index.js";
 import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
@@ -26,7 +26,8 @@ import type { KnownKeys } from "../cli/security/index.js";
 import { envValue, knownKeyValues } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
 import { appError } from "./errors.js";
-import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsView } from "./types.js";
+import { workflowDefinitions } from "../workflows/index.js";
+import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsView, WorkflowPolicyNarrowing } from "./types.js";
 
 /** SP-2: every API provider's key, as the CLI's `models` says it. */
 const KEY_HINT = `keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`;
@@ -111,6 +112,18 @@ export async function loadSettingsFile(
   return { ok: true, currentKey, file, raw, config: checked.config };
 }
 
+/**
+ * DR-41: for each workflow with its own policy (built-in, then the config's), what its rules leave
+ * out of the config's policy in its quick runs (workflowPolicyNarrowings). Kinds and counts only.
+ * Pure. A profile's own policy is not looked at here.
+ */
+export function policyNarrowingsOf(config: CodarynConfig | null): WorkflowPolicyNarrowing[] {
+  if (config?.policy === undefined) return [];
+  return Object.entries(workflowDefinitions(config.workflows)).flatMap(([workflow, definition]) =>
+    workflowPolicyNarrowings(definition.policy, config.policy).map((narrowing) => ({ workflow, kind: narrowing.kind, count: narrowing.count })),
+  );
+}
+
 /** Each profile with the workflow it uses when the task names none, in the file's order. Pure. */
 export function profileWorkflowsOf(config: CodarynConfig | null): { readonly profile: string; readonly workflowRef: string | null }[] {
   return Object.entries(config?.profiles ?? {}).map(([profile, entry]) => ({ profile, workflowRef: entry.workflowRef ?? null }));
@@ -132,6 +145,7 @@ export async function readSettingsIn(io: SettingsIo, request: ReadSettingsReques
       profileWorkflows: profileWorkflowsOf(config),
       // SP-6: the key of the provider a quick run would use (the config's `provider`, else anthropic).
       keyAvailable: envValue(io.env, API_PROVIDERS[quickProvider(config)].keyEnv) !== null,
+      policyNarrowings: policyNarrowingsOf(config),
     },
   };
 }

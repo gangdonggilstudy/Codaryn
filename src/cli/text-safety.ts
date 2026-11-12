@@ -4,7 +4,7 @@
  * or reorder a line are replaced before printing, and key-shaped text is hidden.
  */
 
-import { KEY_SEPARATOR_PATTERN_SOURCE, compactKeyText } from "../contracts/index.js";
+import { KEY_SEPARATOR_PATTERN_SOURCE, MIN_KEY_SKELETON_LENGTH, compactKeyText, keyLettersAndDigits } from "../contracts/index.js";
 import { KEY_MASK_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
 import type { KnownKeys } from "./security/index.js";
 
@@ -101,9 +101,17 @@ export function hideKeys(text: string, currentKey: KnownKeys): string {
   // skipped as well (DR-40 (a): a registered value split by a line break or a space is still found).
   const forValues = strippedOf(text, (cp, char) => isUnsafeCodePoint(cp, false) || SPLITTER_CHAR.test(char));
   const addValue = adder(forValues.kept);
+  // DR-42 (a): and with every character but ASCII letters and digits skipped, for a value with at
+  // least MIN_KEY_SKELETON_LENGTH of them (a value split by a variation selector, a combining
+  // grapheme joiner, a Hangul filler, a middle dot...), as the refusal check compares them.
+  const forSkeletons = strippedOf(text, (cp) => !(cp < 0x80 && /[A-Za-z0-9]/.test(String.fromCharCode(cp))));
+  const addSkeleton = adder(forSkeletons.kept);
   for (const key of keyValuesOf(currentKey)) {
     const joined = compactKeyText(key);
     for (let at = forValues.stripped.indexOf(joined); at !== -1; at = forValues.stripped.indexOf(joined, at + joined.length)) addValue(at, joined.length);
+    const skeleton = keyLettersAndDigits(key);
+    if (skeleton.length < MIN_KEY_SKELETON_LENGTH) continue;
+    for (let at = forSkeletons.stripped.indexOf(skeleton); at !== -1; at = forSkeletons.stripped.indexOf(skeleton, at + skeleton.length)) addSkeleton(at, skeleton.length);
   }
   if (spans.length === 0) return text;
   spans.sort((a, b) => a[0] - b[0]);

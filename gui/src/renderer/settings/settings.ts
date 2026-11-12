@@ -212,6 +212,8 @@ function providerSection(t: Texts, view: SettingsView, propose: Propose | null):
       el("li", provider.model === null ? t.format("settings.providerNoModel") : t.format("settings.providerModel", { model: provider.model })),
     );
     if (provider.modelEnvSet) facts.append(el("li", t.format("settings.providerModelEnv", { env: provider.modelEnv })));
+    // R27-I3: the address variable wins over the config file's address (the value is not shown).
+    if (provider.baseUrlEnvSet && provider.baseUrlEnv !== null) facts.append(el("li", t.format("settings.providerBaseUrlEnv", { env: provider.baseUrlEnv }), { "data-base-url-env": provider.baseUrlEnv }));
     if (!provider.listable) facts.append(el("li", t.format("settings.providerNoList", { provider: provider.name }), { "data-no-list": provider.name }));
     row.append(facts);
     list.append(row);

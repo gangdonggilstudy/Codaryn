@@ -22,7 +22,9 @@ import {
   LOCK_FILE_NAME,
   PARKED_DIR_NAME,
   STATE_DIR_NAME,
+  mergeWorkflowPolicy,
   toApiOrigin,
+  workflowPolicyNarrowings,
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
@@ -48,6 +50,7 @@ import { parseScript } from "../model/index.js";
 import { buildChildEnv, planWindowsLaunch } from "../tools/index.js";
 import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
+import { workflowDefinitions } from "../workflows/index.js";
 import { parseDoctorArgs } from "./args.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
@@ -568,7 +571,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       if (outcome.ok) {
         config = outcome.config;
         configPath = loaded.path;
-        set("config_file", "ok", `the config file${where} is valid`, { id: "doctor.config_file.valid_at", params: { location: candidate.display } });
+        // N-A 32.3 (0d38bfa): valid_at names the default location; a file given by --config or
+        // CODARYN_CONFIG is valid_given (valid_at called every source "the default location").
+        const validText: DoctorText =
+          candidate.source === "default"
+            ? { id: "doctor.config_file.valid_at", params: { location: candidate.display } }
+            : { id: "doctor.config_file.valid_given", params: { location: candidate.display } };
+        set("config_file", "ok", `the config file${where} is valid`, validText);
       } else {
         const field = fieldOf(outcome.position);
         set(
@@ -632,7 +641,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       const origin = destination.kind === "invalid" ? null : toApiOrigin(destination.address);
       let where: string;
       let keyText: DoctorText = { id: "doctor.api_key.ok", params: { keyEnv } };
-      if (destination.kind === "invalid") {
+      // Review R-26 L-1: the config file gives the address (and the quick form's provider); when it
+      // failed its checks it was set aside, so only an address variable still decides. Without one,
+      // no destination is named (it was the default address, which may not be where runs go).
+      const configSetAside = results.get("config_file")?.status === "fail";
+      if (configSetAside && destination.kind !== "env" && destination.kind !== "invalid") {
+        where = "where it is sent is not known until the config file passes its checks";
+      } else if (destination.kind === "invalid") {
         where = `its address in ${destination.variable} is not valid (see the model check), so nothing is sent`;
         keyText = { id: "doctor.api_key.address_invalid", params: { keyEnv, variable: destination.variable } };
       } else if (origin === null) {
@@ -686,8 +701,14 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     const baseUrl = envValue(env, baseUrlEnv);
     const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, baseUrlEnv, API_PROVIDERS[provider].baseUrlPath);
     const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);
+    // N-A 33.3 (0d38bfa): the provider's model variable and the config places in the person's text.
+    const placeOf = (field: "model" | "maxOutputTokens") => toSchemaFieldPath(configFieldOf(config, provider, field)) ?? (toSchemaFieldPath(field) as SchemaFieldPath);
     const missingText: DoctorText =
-      modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
+      modelId === null
+        ? placeholder
+          ? { id: "doctor.model.placeholder" }
+          : { id: "doctor.model.missing", params: { variable: API_PROVIDERS[provider].modelEnv, field: placeOf("model") } }
+        : { id: "doctor.model.output_cap_missing", params: { field: placeOf("maxOutputTokens") } };
     // SP-6, review R-19 I-4: another provider's model or address variable is not read by this run;
     // say so, so a value left for one provider is not silently ignored (names only, never values).
     // DR-36 (b): the same as notes, one catalog text per variable.
@@ -756,7 +777,21 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   }
 
   // commands
-  const policy = task?.policy ?? (args.taskPath === null ? config?.policy : undefined);
+  // DR-41: where a workflow definition applies (the task's workflowRef, else the profile's), the
+  // policy a run uses is the given one merged with the definition's (mergeWorkflowPolicy), and what
+  // the merge left out is a note of the commands check. The quick form's given policy is the
+  // profile's or the config's; a task file's is its own.
+  const givenPolicy = task?.policy ?? (args.taskPath === null ? config?.policy : undefined);
+  const profileRef = args.profile === null ? null : (config?.profiles?.[args.profile]?.workflowRef ?? null);
+  const workflowRef = (task === null ? undefined : task.workflowRef) ?? profileRef;
+  const definitions = workflowDefinitions(config?.workflows);
+  const definition = workflowRef !== null && Object.hasOwn(definitions, workflowRef) ? definitions[workflowRef] : undefined;
+  const policy = definition === undefined ? givenPolicy : (mergeWorkflowPolicy(definition.policy, givenPolicy) ?? givenPolicy);
+  const policyNotes: DoctorText[] = (definition === undefined ? [] : workflowPolicyNarrowings(definition.policy, givenPolicy)).map((narrowing) =>
+    narrowing.kind === "restore_path_tokens_off"
+      ? { id: "doctor.workflow_policy.restore_path_tokens_off" }
+      : { id: `doctor.workflow_policy.${narrowing.kind}`, params: { count: narrowing.count } },
+  );
   const verifiers = task?.verifiers ?? (args.taskPath === null ? config?.verifiers : undefined) ?? [];
   const commandEntries: CommandEntry[] = [];
   (policy?.commands ?? []).forEach((rule, index) =>
@@ -770,7 +805,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   if (taskUnusable) {
     set("commands", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (commandEntries.length === 0) {
-    set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" });
+    set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" }, policyNotes);
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
     // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
@@ -782,12 +817,12 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
         "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
       if (checked.status === "ok") {
-        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } });
+        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } }, policyNotes);
       } else {
-        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
+        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text, policyNotes);
       }
     } else {
-      set("commands", checked.status, checked.message, checked.text);
+      set("commands", checked.status, checked.message, checked.text, policyNotes);
     }
   }
 

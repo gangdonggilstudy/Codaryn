@@ -27,7 +27,7 @@ import { RunManager } from "./runs.js";
 import { RunHistory } from "./history.js";
 import { PlanApprovals } from "./plans.js";
 import { SettingsProposals } from "./settings-proposals.js";
-import { WIDENING_KINDS, widenText } from "./dialog-texts.js";
+import { WIDENING_KINDS, applyFormText, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -276,7 +276,9 @@ export function startGui(options: GuiOptions): void {
       confirmApply: async (approval) => {
         const values = { moves: approval.moves, discards: approval.discards, digest: approval.digest.slice(0, 12) };
         const buttons = [dialogText(language, "apply.confirm"), dialogText(language, "apply.keep")];
-        const answer = await ask("apply.message", { type: "question", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "apply.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        // R29-I2: the dialog names the form the plan is applied with (from the token), then the rules.
+        const detail = `${applyFormText(language, approval.profile, approval.workflowRef)}\n${dialogText(language, "apply.detail")}`;
+        const answer = await ask("apply.message", { type: "question", title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
         return answer === 0;
       },
       // DR-21: a separate dialog; "do not agree" is the default. Agreeing holds for the next apply only.

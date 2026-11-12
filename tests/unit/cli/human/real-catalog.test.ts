@@ -241,7 +241,7 @@ describe("createHumanOutput with the real catalogs (N-B)", () => {
         "codaryn: 되돌릴 파일 1개(미리보기, 아무것도 바꾸지 않음) (complete):",
         "  README.md — 실행 전 내용으로 되돌림",
         `이 실행은 이미 되돌린 적이 있습니다. 그래서 파일이 실행 뒤에 바뀐 것으로 보일 수 있습니다. (complete, ${time})`,
-        "실행하려면 --dry-run 없이 다시 실행하세요.",
+        "되돌리려면 --dry-run 없이 다시 실행하세요.",
         "",
       ].join("\n"),
     );

@@ -13,6 +13,7 @@ import { after, describe, test } from "node:test";
 
 import type { Clock } from "../../../src/contracts/index.js";
 import { PROCESS_START_TOLERANCE_MS, acquireLock, linuxProcessIdentity, parseProcStartTicks } from "../../../src/store/index.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 const clock: Clock = { now: () => Date.UTC(2026, 0, 2, 3, 4, 5) };
 const roots: string[] = [];
@@ -83,6 +84,7 @@ describe("lock holder identity on Linux (N-27 d)", () => {
         workspaceRoot: root,
         runId: "run-b",
         clock,
+        retryForMs: ACQUIRE_BUDGET_MS,
         isProcessAlive: (pid) => pid === HOLDER,
         processStartTime: async () => HOLDER_START,
         processIdentity: async () => identity,

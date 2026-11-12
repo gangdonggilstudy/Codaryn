@@ -160,7 +160,8 @@ function isTransient(error: unknown): boolean {
  * after the process was created; `ps` reports whole seconds.
  */
 export const PROCESS_START_TOLERANCE_MS = 5_000;
-const START_QUERY_TIMEOUT_MS = 5_000;
+/** How long a start-time query may take before its answer counts as unknown (null). */
+export const START_QUERY_TIMEOUT_MS = 5_000;
 
 function windowsPowerShell(): string {
   const systemRoot = process.env["SystemRoot"] ?? process.env["SYSTEMROOT"] ?? "C:\\Windows";
@@ -168,13 +169,13 @@ function windowsPowerShell(): string {
 }
 
 /** Runs a fixed system tool by its absolute path and returns its stdout, or null on any failure. */
-function systemQuery(file: string, args: readonly string[], cwd: string): Promise<string | null> {
+function systemQuery(file: string, args: readonly string[], cwd: string, timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       execFile(
         file,
         [...args],
-        { timeout: START_QUERY_TIMEOUT_MS, windowsHide: true, cwd, env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 },
+        { timeout: timeoutMs, windowsHide: true, cwd, env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 },
         (error, stdout) => resolve(error === null ? String(stdout) : null),
       );
     } catch {
@@ -196,20 +197,24 @@ function parseElapsed(text: string): number | null {
  * is no such process or its start time cannot be learned. This process: `performance.timeOrigin`.
  * Others: Windows PowerShell's Get-Process, or `ps -o etime=` elsewhere, run by absolute path with
  * a fixed command line that holds nothing but the pid number.
+ * `timeoutMs` (default START_QUERY_TIMEOUT_MS): a query that takes longer answers null, which a lock
+ * judgment treats as "unknown, so held" (the safe side). Z-1: on a heavily loaded machine Windows
+ * PowerShell alone can take longer than the default; tests that need the real answer wait longer.
  */
-export async function processStartTime(pid: number): Promise<number | null> {
+export async function processStartTime(pid: number, options: { readonly timeoutMs?: number } = {}): Promise<number | null> {
+  const timeoutMs = options.timeoutMs ?? START_QUERY_TIMEOUT_MS;
   if (pid === process.pid) return performance.timeOrigin;
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   if (process.platform === "win32") {
     const powershell = windowsPowerShell();
     const script = `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p -and $p.StartTime) { [DateTimeOffset]::new($p.StartTime).ToUnixTimeMilliseconds() }`;
-    const out = await systemQuery(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], join(powershell, ".."));
+    const out = await systemQuery(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], join(powershell, ".."), timeoutMs);
     const value = out === null ? Number.NaN : Number(out.trim());
     return out !== null && out.trim().length > 0 && Number.isSafeInteger(value) && value > 0 ? value : null;
   }
   for (const ps of ["/bin/ps", "/usr/bin/ps"]) {
     const asked = Date.now();
-    const out = await systemQuery(ps, ["-o", "etime=", "-p", String(pid)], "/");
+    const out = await systemQuery(ps, ["-o", "etime=", "-p", String(pid)], "/", timeoutMs);
     if (out === null) continue;
     const elapsed = parseElapsed(out);
     return elapsed === null ? null : asked - elapsed * 1000;

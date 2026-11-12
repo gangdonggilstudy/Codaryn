@@ -124,7 +124,7 @@ describe("HumanOutput.error (N-5, N-15)", () => {
       text,
       [
         "codaryn: [error.label] — [error.invalid_config.what] (invalid_config)",
-        "  [diagnostic.file.config]: [diagnostic.json_syntax line=3 column=14]",
+        "  [diagnostic.file.config] — [diagnostic.json_syntax line=3 column=14]",
         "  [error.fix_label]: [error.invalid_config.fix]",
         "  [error.doctor_hint]",
         "",
@@ -138,7 +138,7 @@ describe("HumanOutput.error (N-5, N-15)", () => {
     const suggest = human.error(
       error("invalid_task", { diagnostic: { code: "unknown_field", file: "task", field: field("limits"), line: null, column: null, suggestion: field("maxModelTurns") } }),
     );
-    assert.ok(suggest.includes("  [diagnostic.file.task]: [diagnostic.unknown_field_suggest field=limits suggestion=maxModelTurns]\n"));
+    assert.ok(suggest.includes("  [diagnostic.file.task] — [diagnostic.unknown_field_suggest field=limits suggestion=maxModelTurns]\n"));
     const plain = human.error(error("invalid_task", { diagnostic: { code: "missing_field", file: "task", field: field("policy.commands[2].executable"), line: null, column: null } }));
     assert.ok(plain.includes("[diagnostic.missing_field field=policy.commands[2].executable]"));
   });
@@ -171,9 +171,11 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
       text,
       [
         "── [summary.result status=[status.done] reason=[reason.verified]] (done/verified) ──",
-        "[summary.verifiers passed=2 total=2] · [summary.changes count=2] · [summary.usage turns=4 toolCalls=2 durationMs=78]",
+        "[summary.verifiers passed=2 total=2]",
+        "[summary.changes count=2]",
         "  README.md ([progress.file_changed])",
         "  docs/new.md ([progress.file_created])",
+        "[summary.usage turns=4 toolCalls=2 durationMs=78]",
         "[advice.verified]",
         `[summary.run_id runId=${RUN}]`,
         `[summary.next_report runId=${RUN}]`,
@@ -191,7 +193,7 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
       profileApplied: true,
       deniedToolCalls: 3,
     });
-    assert.ok(text.includes("[summary.no_verifiers] · [summary.changes count=0] · [summary.denied count=3] · "));
+    assert.ok(text.includes("[summary.no_verifiers]\n[summary.changes count=0]\n[summary.denied count=3]\n[summary.denied_hint]\n[summary.usage "));
     assert.equal(text.split("[summary.denied_hint]").length, 2, "the hint once");
     assert.ok(text.includes("[summary.config_default location=%APPDATA%\\Codaryn\\config.json]"));
     assert.ok(text.includes("[summary.profile_applied]"));
@@ -279,8 +281,8 @@ describe("HumanOutput.revertSummary (N-7)", () => {
       text,
       [
         "codaryn: [revert.done_title count=1] (partial)",
-        "[revert.skipped_title count=2]",
         "  README.md — [revert.action.restored]",
+        "[revert.skipped_title count=2]",
         "  notes.txt — [revert.skip.changed_since_run] (changed_since_run)",
         "  ? — [revert.skip.missing_record] (missing_record)",
         "",

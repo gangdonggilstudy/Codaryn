@@ -60,7 +60,9 @@ export const REVERT_MAX_LISTED = 20;
 /** Shown in place of a path that may not be printed (a `missing_record` path is unmasked). */
 export const HIDDEN_PATH = "?";
 
-/** Errors whose cause `codaryn doctor` can check. */
+const DOCTOR_COMMAND = "codaryn doctor";
+
+/** Errors whose cause `codaryn doctor` can check (N-22). */
 const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
   "invalid_config",
   "invalid_task",
@@ -106,6 +108,14 @@ function moreLine(count: number): string {
   return `  … (+${count})`;
 }
 
+/**
+ * The code in parentheses after a title. A title that introduces a list ends with a colon in some
+ * languages; the code then goes before the colon, so the colon still leads into the list.
+ */
+function withCode(title: string, code: string): string {
+  return title.endsWith(":") ? `${title.slice(0, -1)} (${code}):` : `${title} (${code})`;
+}
+
 function lines(out: readonly string[]): string {
   return `${out.map(finalLine).join("\n")}\n`;
 }
@@ -149,7 +159,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         text = catalog.format("diagnostic.too_deep");
         break;
     }
-    return text === null ? null : `${fileText}: ${text}`;
+    // A dash, not a colon: the diagnostic text often has a colon of its own.
+    return text === null ? null : `${fileText} — ${text}`;
   }
 
   return {
@@ -162,8 +173,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const out = [`${HUMAN_PREFIX}${label} — ${catalog.format(`error.${code}.what`)} (${code})`];
       const diagnostic = output.diagnostic === undefined ? null : diagnosticText(output.diagnostic);
       if (diagnostic !== null) out.push(`  ${diagnostic}`);
-      out.push(`  ${catalog.format("error.fix_label")}: ${catalog.format(`error.${code}.fix`)}`);
-      if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
+      const fix = catalog.format(`error.${code}.fix`);
+      out.push(`  ${catalog.format("error.fix_label")}: ${fix}`);
+      // Command names are English in every catalog, so a fix that already names doctor is enough.
+      if (DOCTOR_CODES.has(code) && !fix.includes(DOCTOR_COMMAND)) out.push(`  ${catalog.format("error.doctor_hint")}`);
       return lines(out);
     },
 
@@ -180,30 +193,31 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`── ? (${token(result.status)}/${token(result.reason)}) ──`);
       }
 
+      // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
       const passed = verifiers.filter((verifier) => verifier.outcome === "pass").length;
-      const facts: string[] = [
+      out.push(
         verifiers.length === 0
           ? catalog.format("summary.no_verifiers")
           : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
-        catalog.format("summary.changes", { count: changes.length }),
-      ];
-      const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
-      if (denied > 0) facts.push(catalog.format("summary.denied", { count: denied }));
-      const usage = result.usage;
-      if (isCount(usage?.modelTurns) && isCount(usage.toolCalls) && isCount(usage.durationMs)) {
-        facts.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, durationMs: usage.durationMs }));
-      }
-      out.push(facts.join(" · "));
-
+      );
+      out.push(catalog.format("summary.changes", { count: changes.length }));
       for (const change of changes.slice(0, SUMMARY_MAX_PATHS)) {
         const word = catalog.format(change.created ? "progress.file_created" : "progress.file_changed");
         out.push(`  ${shownPath(String(change.path))} (${word})`);
       }
       if (changes.length > SUMMARY_MAX_PATHS) out.push(moreLine(changes.length - SUMMARY_MAX_PATHS));
 
-      if (denied > 0) out.push(catalog.format("summary.denied_hint"));
+      const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
+      if (denied > 0) {
+        out.push(catalog.format("summary.denied", { count: denied }));
+        out.push(catalog.format("summary.denied_hint"));
+      }
+      const usage = result.usage;
+      if (isCount(usage?.modelTurns) && isCount(usage.toolCalls) && isCount(usage.durationMs)) {
+        out.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, durationMs: usage.durationMs }));
+      }
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
@@ -294,15 +308,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
       const title = output.dryRun === true ? "revert.dry_run_title" : "revert.done_title";
-      const out = [`${HUMAN_PREFIX}${catalog.format(title, { count: reverted.length })} (${token(output.status)})`];
-      if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
-
+      // Each title is followed by its own list: reverted files, then skipped files.
+      const out = [`${HUMAN_PREFIX}${withCode(catalog.format(title, { count: reverted.length }), token(output.status))}`];
       for (const file of reverted.slice(0, REVERT_MAX_LISTED)) {
         const action: unknown = file.action;
         const word = isOneOf(action, ["restored", "deleted"] as const) ? catalog.format(`revert.action.${action}`) : "?";
         out.push(`  ${shownPath(String(file.path))} — ${word}`);
       }
       if (reverted.length > REVERT_MAX_LISTED) out.push(moreLine(reverted.length - REVERT_MAX_LISTED));
+      if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
       for (const file of skipped.slice(0, REVERT_MAX_LISTED)) {
         const reason: unknown = file.reason;
         const word = isOneOf(reason, REVERT_SKIP_REASONS) ? catalog.format(`revert.skip.${reason}`) : "?";

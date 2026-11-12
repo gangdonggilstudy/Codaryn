@@ -27,6 +27,7 @@ import {
   STATE_DIR_NAME,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
   planActionShownMatches,
+  toShownWorkspace,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -649,7 +650,12 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
       try {
         const form = args.form.input.kind === "task" ? "task" : "given";
-        const summary = io.human.applySummary(result, { workspaceForm: form });
+        // DR-51 (U-38): the typed --workspace of the quick form, after the apply's own masking.
+        const input = args.form.input;
+        const typed = input.kind === "quick" ? input.workspace : null;
+        const typedMasked = typed === null ? null : shown.privacy.mask(typed);
+        const workspaceShown = typed === null || typedMasked === null ? null : toShownWorkspace(typed, typedMasked.ok ? typedMasked.text : null);
+        const summary = io.human.applySummary(result, { workspaceForm: form, ...(workspaceShown === null ? {} : { workspaceShown }) });
         const masked = shown.privacy.mask(summary);
         if (masked.ok) io.writeProgress(cleanText(masked.text, true));
       } catch {

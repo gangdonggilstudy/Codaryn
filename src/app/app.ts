@@ -52,8 +52,9 @@ import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
-import { runCli } from "../cli/run.js";
-import type { CliEnvironment, CliRunOutcome } from "../cli/run.js";
+import { prepareTask, runCli } from "../cli/run.js";
+import type { CliEnvironment, CliRunOutcome, PrepareEnvironment, RunNotes } from "../cli/run.js";
+import type { RunArgs } from "../cli/args.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
@@ -165,12 +166,10 @@ function jsonOutcome<T extends { readonly kind: string }>(outcome: CommandOutcom
 
 const nextMacrotask = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-/** Stands for "stop here" in the secrets probe; never shown, the probe reports its own outcome. */
-const PROBE_STOP = "the settings were resolved; nothing was run";
-
 /**
- * The goal the secrets probe gives `runCli` for the workspace form. The probe never runs anything
- * and no goal decides a secret; the CLI's quick form only needs one to parse (S-8 finds no key in it).
+ * The goal the reading commands' settings give the CLI's steps for the workspace form. Nothing is
+ * run and no goal decides a secret; the CLI's quick form only needs one to parse (S-8 finds no key
+ * in it).
  */
 export const PROBE_GOAL = "codaryn: resolve the settings only";
 
@@ -317,33 +316,47 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   /**
-   * The secrets and the workspace a run with these settings would have, from the CLI's own pre-run
-   * steps 1 to 8. The assembly is replaced by a stop, so no lock, journal or file is made and
-   * nothing is sent. Used by `changes` (DR-7).
+   * The secrets and the workspace of these settings for a reading command (DR-7, DR-17): the CLI's
+   * own steps 1 to 7 (prepareTask), the ones `run`, `plan`, `apply` and `review` share, so the
+   * secrets are the ones a run with these settings registers now. U-17 (DR-46): as a command that
+   * runs nothing (`readOnly`), so the quick form needs no key, model or run limits. No lock,
+   * journal or file is made and nothing is sent. Used by `changes`.
    */
-  async function probeSecrets(
-    request: StartRunRequest,
+  async function readingSecrets(
+    settings: TaskForm,
   ): Promise<{ readonly ok: true; readonly secrets: readonly string[]; readonly workspaceRoot: string } | { readonly ok: false; readonly error: AppError }> {
     const env = copyEnvironment(environment.env, platform);
-    const seen: { secrets?: readonly string[]; workspaceRoot?: string } = {};
-    const outcome = await cliRun({ ...request, cancelFile: null }, env, {
-      assemble: async (input) => {
-        seen.secrets = input.secrets;
-        seen.workspaceRoot = input.task.workspaceRoot;
-        return { ok: false, code: "internal_error", message: PROBE_STOP };
-      },
-      cancelSignal: () => ({ signal: new AbortController().signal, dispose() {} }),
-    });
-    if (seen.secrets !== undefined && seen.workspaceRoot !== undefined) {
-      return { ok: true, secrets: seen.secrets, workspaceRoot: seen.workspaceRoot };
-    }
-    const output = outcome?.output;
-    return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+    const args: RunArgs = {
+      command: "run",
+      input: settings.input.kind === "task" ? { kind: "task", taskPath: settings.input.taskPath } : { kind: "quick", workspace: settings.input.workspace, goal: PROBE_GOAL, oneLine: false },
+      configPath: settings.configPath,
+      varsFile: settings.varsFile,
+      cancelFile: null,
+      quiet: true,
+      profile: settings.profile,
+      workflow: settings.workflowRef,
+    };
+    const io: PrepareEnvironment = {
+      env,
+      cwd: environment.cwd,
+      readFile: environment.readFile,
+      isDirectory: environment.isDirectory,
+      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
+      locateInWorkspace: locate,
+      relatePaths: relate,
+      installDir: environment.installDir,
+      // N-1: the same default config location the CLI reads (main.ts).
+      defaultConfig: defaultConfigOf(),
+    };
+    const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+    const ready = await prepareTask(io, args, notes, { readOnly: true });
+    if (!("prepared" in ready)) return { ok: false, error: ready.output.kind === "error" ? fromCliError(ready.output) : INTERNAL_ERROR };
+    return { ok: true, secrets: ready.prepared.secrets, workspaceRoot: ready.prepared.task.workspaceRoot };
   }
 
   async function changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>> {
     try {
-      const probe = await probeSecrets(runRequestOf(request.settings));
+      const probe = await readingSecrets(request.settings);
       if (!probe.ok) return probe;
       const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
       if (!root.ok) return root;

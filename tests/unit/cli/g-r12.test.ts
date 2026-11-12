@@ -39,8 +39,18 @@ async function quickPlan(command: "plan" | "apply" | "review"): Promise<{ stdout
 }
 
 describe("R-12 L-2: the quick form's config need", () => {
+  // U-17 (UXM-3, AXM-14): plan and review run nothing, so their quick form no longer needs the
+  // config's limits; they go on to the run (here: none of that id). apply still needs them.
+  test("plan and review are not stopped by the config's missing limits (U-17)", async () => {
+    for (const command of ["plan", "review"] as const) {
+      const { stdout, status } = await quickPlan(command);
+      const output = JSON.parse(stdout) as { code: string };
+      assert.deepEqual([output.code, status], ["run_not_found", 2], command);
+    }
+  });
+
   test("the JSON message names the quick form and --task (R-11 L-2)", async () => {
-    for (const command of ["plan", "apply", "review"] as const) {
+    for (const command of ["apply"] as const) {
       const { stdout, status } = await quickPlan(command);
       const output = JSON.parse(stdout) as { code: string; message: string; hint?: string };
       assert.deepEqual([output.code, status], ["invalid_config", 2], command);
@@ -51,7 +61,7 @@ describe("R-12 L-2: the quick form's config need", () => {
   });
 
   test("the person's stderr says it too", async () => {
-    for (const command of ["plan", "apply", "review"] as const) {
+    for (const command of ["apply"] as const) {
       const { stderr } = await quickPlan(command);
       assert.ok(stderr.includes("--task"), `${command}: ${stderr}`);
     }

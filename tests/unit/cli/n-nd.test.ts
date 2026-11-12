@@ -16,7 +16,8 @@ describe("N-D 4.1: help names each option once", () => {
   test("an option text that already starts with its syntax is not prefixed again", () => {
     const catalog = {
       language: "en",
-      format: (id: string) => (id === "help.option.workspace" ? "--workspace <dir>: the workspace directory" : `<${id}>`) as CatalogText,
+      // U-53: the runs help takes the reading commands' --workspace text.
+      format: (id: string) => (id === "help.option.workspace_or_current" ? "--workspace <dir>: the workspace directory" : `<${id}>`) as CatalogText,
     } as unknown as MessageCatalog;
     const text = helpText("runs", catalog);
     const line = text.split("\n").find((item) => item.includes("the workspace directory")) ?? "";

@@ -528,6 +528,8 @@ export const EN: { readonly [K in TextId]: string } = {
   "changes.of": "{count} files changed by run {runId}",
   "changes.masking": "Paths are masked again with the secrets registered now, not with the run's own table.",
   "changes.textRule": "Texts are shown only when the secrets registered now mask them as the run did and the file is still what the run left. Otherwise only paths and states are shown.",
+  "changes.recordsChanged": "This run's records were changed outside the run, so no file text is shown; only paths and states.",
+  "changes.unverifiedMarked": "This file's text is not shown: this run's records were changed outside the run.",
   "changes.unverified": "This file's text is not shown: the secrets registered now mask it differently from the run, the file changed after the run, or the run did not record how it masked it.",
   "changes.keys": "F7 next change · Shift+F7 previous change · Alt+F7 next file · Alt+Shift+F7 previous file",
   "changes.diffOf": "Line comparison of {path}",

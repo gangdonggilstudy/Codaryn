@@ -579,12 +579,13 @@ describe("i18n catalog: language and wording", () => {
     // Not the old rule (run always printed its JSON line on stdout).
     assert.ok(!/^run prints one JSON line on stdout/.test(en["help.output"]), en["help.output"]);
     assert.ok(!/^run은 stdout에 JSON 한 줄을/.test(ko["help.output"]), ko["help.output"]);
-    // At a terminal: the human lines on stderr only.
-    assert.match(en["help.output"], /^At a terminal only the human lines on stderr show/);
-    assert.match(ko["help.output"], /^터미널에서는 stderr의 사람용 줄\(진행 줄, 요약, 오류 설명\)만 보입니다\./);
-    // The JSON line: the result of run, revert and apply, and any error; with --json or when stdout is not a terminal.
-    assert.match(en["help.output"], /result of run, revert and apply, and any error, is also printed as one JSON line on stdout with --json, or when stdout is not a terminal \(a pipe or a file\)/);
-    assert.match(ko["help.output"], /run·revert·apply의 결과와 오류는 --json을 주거나 출력이 터미널이 아닐 때\(파이프, 파일\) stdout에 JSON 한 줄로도 냅니다/);
+    // At a terminal (stdout and stderr both, U-45): the human lines on stderr only. U-53 (R-58 L2):
+    // said of the result of run, revert and apply and of the errors, not of every output.
+    assert.match(en["help.output"], /^At a terminal \(stdout and stderr both\), the result of run, revert and apply, and any command's error, show only as human lines on stderr/);
+    assert.match(ko["help.output"], /^터미널\(stdout과 stderr 모두\)에서는 run·revert·apply의 결과와 모든 명령의 오류가 stderr의 사람용 줄\(진행 줄, 요약, 오류 설명\)로만 보입니다\./);
+    // The JSON line: with --json, or when stdout or stderr is not a terminal (U-45: 2> log.txt).
+    assert.match(en["help.output"], /They are also printed as one JSON line on stdout with --json, or when stdout or stderr is not a terminal \(a pipe or a file, such as 2> log\.txt\)/);
+    assert.match(ko["help.output"], /그 결과와 오류는 --json을 주거나 stdout이나 stderr가 터미널이 아닐 때\(파이프, 파일, 예: 2> log\.txt\) stdout에 JSON 한 줄로도 냅니다/);
     // --quiet: no human lines, so the JSON line stays at a terminal too.
     assert.match(en["help.output"], /--quiet leaves the human lines out and prints the JSON line, at a terminal too\.$/);
     assert.match(ko["help.output"], /--quiet면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다\.$/);

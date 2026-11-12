@@ -207,7 +207,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       return plain(await runRuns({ argv, cwd: process.cwd(), env: process.env, human: human.output }));
     case "changes":
       // DR-7, DR-14: the app layer's `changes` with this process's environment; it reads only.
-      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()) }));
+      // U-36 (R66-M1): the text in the person's language, as plan and apply have it.
+      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()), messages: human.messages }));
     case "cleanup":
       // DR-39: a preview unless --confirm names the plan digest; people's discarded files need --delete-discarded too.
       return plain(await runCleanup({ argv, cwd: process.cwd(), env: process.env, clock, messages: human.messages }));
@@ -232,7 +233,7 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         announceLatest,
       };
       if (argv[0] === "plan") return plain(await runPlan({ ...shared, messages: human.messages }));
-      if (argv[0] === "review") return plain(await runReview(shared));
+      if (argv[0] === "review") return plain(await runReview({ ...shared, messages: human.messages }));
       return plain(
         await runApply({
           ...shared,

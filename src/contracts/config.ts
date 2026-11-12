@@ -34,9 +34,11 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * Config file shape. Every field except `schemaVersion` is optional. Unknown fields are rejected.
  *
  * Precedence:
- * - model: task `model.model` → CODARYN_MODEL → `model`. None of them → nothing is sent.
+ * - model: task `model.model` → the provider's model variable (DR-34: CODARYN_MODEL for anthropic,
+ *   CODARYN_OPENAI_MODEL for openai) → `model`. None of them → nothing is sent.
  * - maxOutputTokens: task `model.maxOutputTokens` → `maxOutputTokens`. None → nothing is sent.
- * - apiBaseUrl: CODARYN_API_BASE_URL → `apiBaseUrl` → DEFAULT_ANTHROPIC_API_BASE_URL.
+ * - apiBaseUrl: the provider's address variable (DR-34: CODARYN_API_BASE_URL for anthropic,
+ *   CODARYN_OPENAI_API_BASE_URL for openai) → `apiBaseUrl` → the provider's default address.
  * - requestTimeoutMs, maxRetries: this file → the DEFAULT_ constants.
  * - limits: each field from the task's `limits`, else from this file. A field set in neither is an error.
  *   This file's values are upper bounds: a task may lower them, never raise them or lift a token
@@ -58,8 +60,9 @@ export const CONFIG_SCHEMA_VERSION = 1;
  *   (`model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`) come from
  *   `providers.<name>`; for "anthropic" the top-level fields are read as before (backward
  *   compatible). Giving top-level provider settings and `providers.anthropic` together is
- *   `invalid_config`. The environment variables CODARYN_MODEL and CODARYN_API_BASE_URL apply to the
- *   chosen provider only. The key comes from the provider's own variable (API_PROVIDERS).
+ *   `invalid_config`. Each provider has its own model and address variables (DR-34, API_PROVIDERS
+ *   `modelEnv`, `baseUrlEnv`); one never sets another provider's. The key comes from the provider's
+ *   own variable.
  */
 export interface CodarynConfig {
   readonly schemaVersion: 1;
@@ -153,7 +156,7 @@ export const MAX_PROFILES = 32;
  * N-3: a model value that only holds a place. After trimming, an empty string or one that starts
  * with `<` and ends with `>` and has no other `<` or `>`. Example files and `codaryn init`
  * (without a key) write MODEL_PLACEHOLDER. A placeholder in the task (`model.model`), in
- * CODARYN_MODEL or in the config's `model` counts as not set at that level, so the next level in
+ * the provider's model variable or in the config's `model` counts as not set at that level, so the next level in
  * the model order is used; when none is left, `run` stops as `provider_not_configured` and
  * `doctor`'s `model` check fails. Nothing is sent.
  */
@@ -320,6 +323,17 @@ export const CODARYN_OPENAI_API_BASE_URL_ENV = "CODARYN_OPENAI_API_BASE_URL";
 export const MIN_OTHER_PROVIDER_KEY_LENGTH = 20;
 
 /**
+ * DR-36 (a): every provider's model variable (API_PROVIDERS `modelEnv`), for outputs that name where
+ * a model id came from. Fixed names, never values.
+ */
+export const API_MODEL_ENVS = [CODARYN_MODEL_ENV, CODARYN_OPENAI_MODEL_ENV] as const;
+export type ApiModelEnv = (typeof API_MODEL_ENVS)[number];
+
+/** DR-36: every provider's address variable (API_PROVIDERS `baseUrlEnv`). Fixed names, never values. */
+export const API_BASE_URL_ENVS = [CODARYN_API_BASE_URL_ENV, CODARYN_OPENAI_API_BASE_URL_ENV] as const;
+export type ApiBaseUrlEnv = (typeof API_BASE_URL_ENVS)[number];
+
+/**
  * DR-33 (1): an OpenAI key with a distinct prefix: `sk-proj-`, `sk-svcacct-` or `sk-admin-` at a word
  * start, then 20 or more of `A-Z a-z 0-9 _ -`.
  */
@@ -384,13 +398,13 @@ export interface ApiProviderSpec {
    * DR-34: the environment variable that names this provider's model when the task does not. It
    * applies to this provider only.
    */
-  readonly modelEnv: string;
+  readonly modelEnv: ApiModelEnv;
   /**
    * DR-34: the environment variable that overrides this provider's address (over its config value).
    * It applies to this provider only: no variable sends one provider's key to an address set for
    * another. The address rule of `baseUrlPath` applies to it too.
    */
-  readonly baseUrlEnv: string;
+  readonly baseUrlEnv: ApiBaseUrlEnv;
   /** Key shapes to find in files, arguments and output (regular expression sources). */
   readonly keyPatternSources: readonly string[];
   /** Used when neither CODARYN_API_BASE_URL nor the config gives an address. */

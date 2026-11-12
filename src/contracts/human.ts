@@ -23,7 +23,7 @@
 import { REVERT_SKIP_REASONS } from "./changes.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
-import type { ApiKeyEnv, DefaultConfigDisplay } from "./config.js";
+import type { ApiBaseUrlEnv, ApiKeyEnv, ApiModelEnv, DefaultConfigDisplay } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
 import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
@@ -85,6 +85,7 @@ export type ExplainMessageLanguage = (input: MessageLanguageInput) => MessageLan
 declare const schemaFieldPathBrand: unique symbol;
 declare const runIdBrand: unique symbol;
 declare const catalogTextBrand: unique symbol;
+declare const apiOriginBrand: unique symbol;
 
 /** A field position made of schema field names and indices only. Obtain it from `toSchemaFieldPath`. */
 export type SchemaFieldPath = string & { readonly [schemaFieldPathBrand]: "field" };
@@ -92,6 +93,33 @@ export type SchemaFieldPath = string & { readonly [schemaFieldPathBrand]: "field
 export type RunId = string & { readonly [runIdBrand]: "runId" };
 /** Text a MessageCatalog produced. Only `MessageCatalog.format` makes it. */
 export type CatalogText = string & { readonly [catalogTextBrand]: "catalog" };
+/** DR-36 (b): where an API key is sent, as an origin only. Obtain it from `toApiOrigin`. */
+export type ApiOrigin = string & { readonly [apiOriginBrand]: "apiOrigin" };
+
+/**
+ * DR-36 (b): the shape of an ApiOrigin: `https://` and a host of ASCII letters, digits, dots and
+ * hyphens (an international name in its ASCII form) or a bracketed IPv6 address, or `http://` with a
+ * loopback host (S-9); then an optional port. No user info, path, query or fragment.
+ */
+export const API_ORIGIN_PATTERN_SOURCE =
+  "^(?:https://(?:[A-Za-z0-9.-]{1,253}|\\[[0-9A-Fa-f:.]{2,45}\\])|http://(?:localhost|127\\.0\\.0\\.1|\\[::1\\]))(?::[0-9]{1,5})?$";
+
+/**
+ * DR-36 (b): the origin of an API address for `doctor` (which provider's key goes where, DR-34 (a)):
+ * the scheme, host and port the requests go to, nothing of the path. Null when the address does not
+ * parse, carries user info, or its origin is not of API_ORIGIN_PATTERN_SOURCE. It is the person's own
+ * setting (their environment or config file), shown back to them; never a key.
+ */
+export function toApiOrigin(address: string): ApiOrigin | null {
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  return new RegExp(API_ORIGIN_PATTERN_SOURCE).test(url.origin) ? (url.origin as ApiOrigin) : null;
+}
 
 /**
  * Every field name of the task file, the config file and the scripted model file, plus the roots
@@ -145,8 +173,11 @@ export const SCHEMA_FIELD_NAMES = [
   "paths",
   "language",
   "profiles",
-  // SP-D3: the config's providers map (`provider` is listed above).
+  // SP-D3: the config's providers map (`provider` is listed above), and its keys (DR-36 (b):
+  // `providers.openai.apiBaseUrl` is a field position). Every API_PROVIDER_NAMES entry.
   "providers",
+  "anthropic",
+  "openai",
   "steps",
   "toolCalls",
   "name",
@@ -266,6 +297,9 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - language (N-20): a MessageLanguage code
  * - keyEnv (SP-D12, DR-31): the name of an API key variable, one of API_KEY_ENVS (a fixed constant,
  *   never key material); the catalog writes it as it is
+ * - settingEnv (DR-36 (b)): the name of a provider's model or address variable, one of
+ *   API_MODEL_ENVS or API_BASE_URL_ENVS (a fixed constant, never its value); written as it is
+ * - apiOrigin (DR-36 (b)): ApiOrigin, where a provider's requests (and its key) go; written as it is
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -285,6 +319,8 @@ export interface MessageParamTypeByKind {
   readonly seconds: number;
   readonly language: MessageLanguage;
   readonly keyEnv: ApiKeyEnv;
+  readonly settingEnv: ApiModelEnv | ApiBaseUrlEnv;
+  readonly apiOrigin: ApiOrigin;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -502,12 +538,22 @@ export const FIXED_MESSAGES = {
   // SP-D12: the chosen provider and its key variable.
   "doctor.api_key.ok": { keyEnv: "keyEnv" },
   "doctor.api_key.missing": { keyEnv: "keyEnv", provider: "provider" },
+  // DR-36 (b), DR-34 (a): the key is set and where `{provider}` requests send it: `{origin}`, set by
+  // the provider's address variable `{variable}`, by the config field `{field}`, or the default.
+  "doctor.api_key.sends_to_env": { keyEnv: "keyEnv", provider: "provider", origin: "apiOrigin", variable: "settingEnv" },
+  "doctor.api_key.sends_to_config": { keyEnv: "keyEnv", provider: "provider", origin: "apiOrigin", field: "field" },
+  "doctor.api_key.sends_to_default": { keyEnv: "keyEnv", provider: "provider", origin: "apiOrigin" },
+  // DR-36 (b): the key is set, but the address in `{variable}` breaks the address rule, so nothing is sent.
+  "doctor.api_key.address_invalid": { keyEnv: "keyEnv", variable: "settingEnv" },
   "doctor.model.scripted_ok": {},
   "doctor.model.ok": {},
   "doctor.model.missing": {},
   "doctor.model.placeholder": {},
   "doctor.model.output_cap_missing": {},
   "doctor.model.base_url_invalid": {},
+  // DR-36 (b), R-19 I-4: a note of the model check (DoctorCheck.notes): `{variable}` is set but is
+  // `{owner}`'s model or address variable, so a `{provider}` run does not read it.
+  "doctor.model.other_provider_variable": { variable: "settingEnv", owner: "provider", provider: "provider" },
   "doctor.limits.ok": {},
   "doctor.limits.ok_quick": {},
   "doctor.limits.invalid": { field: "field" },

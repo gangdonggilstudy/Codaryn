@@ -145,7 +145,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 - 명령별 stdout(17절, 18절까지 반영)
   - JSON 한 줄만: `run`(`CliOutput`), `revert`(`RevertOutput`), `apply`(`ApplyResult`)
-  - 기본은 글이고 `--json`이면 JSON 한 줄: `report`(`ReportOutput`), `doctor`(`DoctorOutput`), `models`(`ModelsOutput`), `init`(`InitOutput`), `runs`(`RunsOutput`), `plan`(`PlanOutput`), `review`(`ReviewOutput`), `changes`(`ChangesOutput`)
+  - 기본은 글이고 `--json`이면 JSON 한 줄: `report`(`AnyReportOutput`: 실행은 `RunReportOutput`, 적용 실행은 `ApplyReportOutput`), `doctor`(`DoctorOutput`), `models`(`ModelsOutput`), `init`(`InitOutput`), `runs`(`RunsOutput`), `plan`(`PlanOutput`), `review`(`ReviewOutput`), `changes`(`ChangesOutput`)
   - 사람용 글(오류 설명, 진행 줄, 끝 요약, 터미널 질문)은 stderr다(17.4). `run`, `revert`, `apply`는 `--quiet`로 끈다.
 
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
@@ -169,7 +169,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`(모두 2)가 더해졌다.
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`, `plan_secrets_differ`(DR-28), `plan_run_missing`(R-9c C-1)(모두 2)가 더해졌다.
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 상태별 이유 목록은 `RUN_REASONS_BY_STATUS` 하나이고(`isReasonOfStatus`, DR-16), 읽는 쪽이 자기 목록을 두지 않는다(18.7). G-A가 `failed`에 `plan_stale`·`apply_incomplete`를, `needs-input`에 `plan_pending`·`awaiting_review`·`consent_required`를 더했다. 적용 실행은 그 부분집합 `APPLY_REASONS_BY_STATUS`를 쓴다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
@@ -460,6 +460,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 옮긴 파일은 제자리로(`moved_back`), 폐기한 파일은 보관함에서(`restored_from_discard`) 되돌린다.
   - 원래 자리에 무언가 있으면 `original_path_taken`이다.
   - 시작 기록만 있는 행동(R-9 I-4, `plan_item_started`)도 같은 순서로 다룬다.
+- 계획 실행이나 그 `plan.json`이 사라진 적용 실행의 되돌리기는 `plan_run_missing`(종료 2)이고 아무것도 바꾸지 않는다. 적용한 파일의 실경로는 그 계획에만 있기 때문이다(R-9c C-1, DR-24 f).
 - 하드 링크 없는 볼륨의 되돌리기(DR-24 (b), DR-25)
   - 기본은 `unsafe_move`로 건너뛴다.
   - 그 되돌리기에 대한 사람의 동의가 있으면 옮긴다: 18.10
@@ -773,16 +774,16 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - 결과: 없음(`ok`), 살아 있는 프로세스가 쥠(`warn`, 안내 포함), 끝난 프로세스가 남김(`ok`, 다음 실행이 회수), 읽을 수 없음(`warn`). 작업 공간이 없으면 `skipped`다.
   - pid가 다른 프로세스에 다시 주어질 수 있어 "쥠" 판정은 틀릴 수 있다(architecture A-6).
   - N-25 (b), 검토 R-6 L-1: store와 같이 프로세스 시작 시각으로 판정한다. 같은 pid라도 시작 시각이 `PROCESS_START_TOLERANCE_MS`보다 다르면 끝난 것이다.
-  - **알려진 차이**: Linux에서 store는 부팅 뒤 틱(`processStartTicks`, `bootId`, N-27 d)으로 판정하지만 doctor는 아직 시작 시각만 본다. 벽시계를 크게 바꾼 뒤에는 둘의 판정이 다를 수 있다.
+  - doctor는 store의 `inspectLock`으로 판정한다. 실행과 같은 규칙이다: Linux의 부팅 뒤 틱(`processStartTicks`, `bootId`, N-27 d), 시작 시각, pid 순서.
   - reclaim 파일(DR-27 b)
     - `.codaryn/lock.json.reclaim`이 store가 지우지 않는 상태면 `reclaim_left`(`warn`)다.
       - 쓰는 중으로 보이는 글(끝 줄바꿈이 없고 온전한 JSON이 아님)
-      - 이해할 수 없는 글
+      - 읽을 수 없음
       - 주인이 살아 있음
     - 그동안은 끝난 잠금도 회수되지 않는다. 안내는 Codaryn이 돌지 않으면 그 파일(그리고 `lock.json`)을 지우라고 한다.
-    - 주인이 끝난 reclaim 파일은 다음 실행이 지우므로 `lock.json`의 판정을 따른다.
+    - 주인이 끝난 reclaim 파일과, 온전하지만 이해할 수 없는 reclaim 파일은 다음 실행이 지우므로 `lock.json`의 판정을 따른다(store 규칙).
     - `lock.remove_hint` 문구도 reclaim 파일을 가리킨다(N-B 문구).
-- **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 계약 기준에 문구 id가 아직 없어 영어 글로 나온다(18.9).
+- **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 문구는 `doctor.commands.extra_args_with_plan`이다.
 
 ### 17.7 오류 코드 추가
 
@@ -945,7 +946,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
       - 검증 결과(인벤토리 먼저), 무결성 점검, 끝 기록
     - `result.json`이 기록과 다른 계획·task·다이제스트를 가리키면 `invalid_run_record`다.
     - Markdown은 행동마다 무엇을 했는지와 되돌리는 명령을 보여 준다.
-  - `runKind`, `verdict`, `ApplyReportOutput`은 CLI 쪽 형(`src/cli/report.ts`)이다. 계약(`ReportOutput`)에 들어가면 그 형을 따른다.
+  - 형은 계약의 것이다: `RunReportOutput`(`verdict`), `ApplyReportOutput`(`runKind: "apply"`), `ApplyReportJournalSummary`, 둘을 합친 `AnyReportOutput`(`src/contracts/commands.ts`).
   - `--json`은 문자열마다 키를 가린 뒤에 만든다(N-27 (c)).
 - 기록의 도구 이름과 호출 id(AC-D15)
   - 목록 밖의 도구 이름은 `unknown_tool`로 기록한다.
@@ -955,16 +956,16 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
 
 - 모두 종료 2이고, 아무것도 바꾸지 않는다.
 - `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
+- `plan_secrets_differ`(DR-28, 18.3): 지금 비밀이 계획 실행과 다르게 가린다. 계획을 읽은 직후에 확인한다.
+- `plan_run_missing`(R-9c C-1): 계획 실행이 `plan_pending`으로 끝났는데 `plan.json`이 없다(`plan`, `apply`). 적용 실행의 되돌리기에서는 그 계획 실행이나 계획이 사라졌다(14절).
 - 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
 
 ### 18.9 아직 없는 것
 
+- 간편 형식 `plan`·`apply`·`review`의 설정 안내(R-11 L-2)는 JSON `message`에만 있다. 사람용 stderr에는 일반 고치는 법만 나온다(검토 R-12 L-2). 안내 문구 id(계약 담당)와 두 언어 글(N-B)이 생기면 stderr에도 붙인다. 재현은 `tests/unit/cli/g-r12.test.ts`에 `todo`로 있다.
 - 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
-- `report`의 적용 실행 형태와 `verdict` 필드는 계약에 아직 없다(18.7, 계약 담당에 제안).
-- doctor의 Q5 경고는 계약 기준(`b89ee16`)에 `doctor.commands.extra_args_with_plan`이 없어 영어 글로만 나온다. 계약 소유자가 그 id를 더하면 두 언어로 바꾼다.
-- 도움말의 옵션 설명에 `--allow-unsafe-move`(`HelpOption`)가 없다. 사용법 줄에만 나온다.
 
 ### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
 

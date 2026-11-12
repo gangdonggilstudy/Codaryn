@@ -19,6 +19,8 @@ import type { AppCallOutcome, CodarynApp } from "../../../src/app/index.js";
 import { FAKE_SECRET, WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
 
 const TODO = { todo: "U-25: wait for createPrivacyGateway to set registeredValues" };
+/** The report's reader (src/cli/report.ts readResult) keeps only the result.json fields it knows (seen with U-21's finalMessage). */
+const REPORT_TODO = { todo: "U-25: wait for the gateway's registeredValues and the CLI's report to keep masking" };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -40,11 +42,16 @@ async function run(notes: string, task: Readonly<Record<string, unknown>> = {}):
 
 describe("U-25 (DR-52): the masking counts reach the GUI with the result", () => {
   test("a registered value the model's input held: one value registered, one place masked, counts only", TODO, async () => {
-    const { app, workspace, runId, result } = await run(`the token is ${FAKE_SECRET}\n`);
+    const { result } = await run(`the token is ${FAKE_SECRET}\n`);
     assert.deepEqual(result.masking, { registeredValues: 1, maskedPlaces: 1 });
     assert.equal(JSON.stringify(result).includes(FAKE_SECRET), false);
+  });
+
+  test("the report's result (the run's result.json) says the same", REPORT_TODO, async () => {
+    const { app, workspace, runId, result } = await run(`the token is ${FAKE_SECRET}\n`);
+    assert.ok(result.masking !== undefined);
     const report = ok(await app.report({ workspace, runId }));
-    assert.deepEqual(report.result?.masking, result.masking, "the report's result says the same");
+    assert.deepEqual(report.result?.masking, result.masking);
   });
 
   test("a registered value nothing held: registered, nothing to mask", TODO, async () => {

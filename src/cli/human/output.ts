@@ -16,6 +16,7 @@
 
 import {
   CLI_ERROR_EXIT_CODES,
+  DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
   PERMISSION_KINDS,
@@ -61,18 +62,8 @@ export const REVERT_MAX_LISTED = 20;
 /** Shown in place of a path that may not be printed (a `missing_record` path is unmasked). */
 export const HIDDEN_PATH = "?";
 
-const DOCTOR_COMMAND = "codaryn doctor";
-
-/** Errors whose cause `codaryn doctor` can check (N-22). */
-const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
-  "invalid_config",
-  "invalid_task",
-  "key_in_file",
-  "secret_env_missing",
-  "workspace_is_install_dir",
-  "provider_not_configured",
-  "model_list_failed",
-]);
+/** N-22: the errors after which the error text adds `error.doctor_hint` (the contract's list). */
+const DOCTOR_CODES: ReadonlySet<string> = new Set<string>(DOCTOR_HINT_ERROR_CODES);
 
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
 const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
@@ -167,10 +158,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const out = [`${HUMAN_PREFIX}${label} — ${catalog.format(`error.${code}.what`)} (${code})`];
       const diagnostic = output.diagnostic === undefined ? null : diagnosticText(output.diagnostic);
       if (diagnostic !== null) out.push(`  ${diagnostic}`);
-      const fix = catalog.format(`error.${code}.fix`);
-      out.push(`  ${catalog.format("error.fix_label")}: ${fix}`);
-      // Command names are English in every catalog, so a fix that already names doctor is enough.
-      if (DOCTOR_CODES.has(code) && !fix.includes(DOCTOR_COMMAND)) out.push(`  ${catalog.format("error.doctor_hint")}`);
+      out.push(`  ${catalog.format("error.fix_label")}: ${catalog.format(`error.${code}.fix`)}`);
+      // N-D 4: the hints are the renderer's own indented lines, so the CLI finds them and adds none.
+      if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
+      if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
       return lines(out);
     },
 

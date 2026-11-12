@@ -198,6 +198,12 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("the revert preview's next line says to revert, not to apply (catalog review, docs/usage.md bf4cb53)", () => {
+    // `apply` is a command of its own; the English line matches docs/usage.md, which n01 compares.
+    assert.equal(MESSAGE_TEXTS.en["revert.dry_run_next"], "Run again without --dry-run to revert.");
+    for (const language of LANGS) assert.ok(MESSAGE_TEXTS[language]["revert.dry_run_next"].includes("--dry-run"), language);
+  });
+
   test("no text names VS Code: the app is the standalone GUI only (DR-20)", () => {
     for (const language of LANGS) {
       for (const id of IDS) assert.ok(!MESSAGE_TEXTS[language][id].includes("VS Code"), `${language} ${id}`);

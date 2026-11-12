@@ -89,7 +89,7 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.action.deleted": "deleted (created by this run)",
   "revert.action.moved_back": "moved back to where it was",
   "revert.action.restored_from_discard": "restored from the discarded files folder",
-  "revert.dry_run_next": "Run again without --dry-run to apply.",
+  "revert.dry_run_next": "Run again without --dry-run to revert.",
   "revert.reverted_before": "This run was already reverted before, so its files may show as changed since the run.",
   "revert.unsafe_moved": "Files moved back with your consent in a way that could replace a file: {count}",
   "revert.parked":

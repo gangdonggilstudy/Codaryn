@@ -121,6 +121,21 @@ describe("runSummary for plan runs and human review (G-A)", () => {
     assert.equal(text.includes(SECRET), false);
   });
 
+  test("N-D 5th round: a plan run does not say 'Checks: none configured'; its checks run when the plan is applied (DR-5)", () => {
+    const human = createHumanOutput(stand_in());
+    const plan = human.runSummary(engineResult({ plan: { digest: DIGEST, actions: 3 }, verifiers: [] }), CONTEXT);
+    assert.equal(plan.includes("summary.no_verifiers"), false, plan);
+    assert.equal(plan.includes("summary.verifiers"), false, plan);
+    // A run that ended otherwise without checks still says so.
+    const done = human.runSummary(engineResult({ status: "needs-input", reason: "no_verifier", exitCode: 3, plan: undefined, verifiers: [] }), CONTEXT);
+    assert.ok(done.includes("[summary.no_verifiers]"), done);
+    for (const language of MESSAGE_LANGUAGES) {
+      const catalog = createMessageCatalog(language);
+      const real = createHumanOutput(catalog).runSummary(engineResult({ plan: { digest: DIGEST, actions: 3 }, verifiers: [] }), CONTEXT);
+      assert.equal(real.includes(catalog.format("summary.no_verifiers")), false, real);
+    }
+  });
+
   test("a run awaiting review lists the checklist as items and says how to record a verdict", () => {
     const checklist = [masked("The summary names every source"), masked(`no \u001b control ${"sk-ant-"}FAKEfake0000FAKEfake0000`)];
     const text = createHumanOutput(stand_in()).runSummary(engineResult({ reason: "awaiting_review", review: { checklist } }), { ...CONTEXT, workspaceForm: "current" });

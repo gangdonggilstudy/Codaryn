@@ -209,11 +209,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
       const passed = verifiers.filter((verifier) => verifier.outcome === "pass").length;
-      out.push(
-        verifiers.length === 0
-          ? catalog.format("summary.no_verifiers")
-          : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
-      );
+      // DR-5: a plan run runs no checks; the task's checks run when the plan is applied. So it says
+      // nothing about checks rather than "none configured" (N-D 5th round).
+      if (pair?.reason !== "plan_pending") {
+        out.push(
+          verifiers.length === 0
+            ? catalog.format("summary.no_verifiers")
+            : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
+        );
+      }
       // N-23(d): files, not change records. A path's first record says whether the run created it.
       const files = new Map<string, boolean>();
       for (const change of changes) {

@@ -298,20 +298,48 @@ export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
 /**
- * DR-31 (g), DR-32 (a): the shape of an OpenAI key for refusing it in files and arguments (S-6, S-8).
- * Their prefixes, length and characters are not documented (facts C-3), so a key is never checked by
- * length or characters; refusal rests mainly on matching the registered key values (S-2 registers
- * every API_KEY_ENVS value). This shape is the narrow second check: `sk-` at a word start, then 32 or
- * more of `A-Z a-z 0-9 _ -` among which there are both a digit and an upper-case letter. Random key
- * text nearly always has both; ordinary names (kebab folders, branches, CSS classes, UUID ids,
- * anchors) nearly never do (R-19 L-1).
+ * DR-33 (1): an OpenAI key with a distinct prefix: `sk-proj-`, `sk-svcacct-` or `sk-admin-` at a word
+ * start, then 20 or more of `A-Z a-z 0-9 _ -`.
  */
-export const OPENAI_KEY_PATTERN_SOURCE = "\\bsk-(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]*[A-Z])[A-Za-z0-9_-]{32,}";
+export const OPENAI_PREFIXED_KEY_PATTERN_SOURCE = "\\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}";
+
+/**
+ * DR-33 (2): the older OpenAI key without such a prefix: `sk-` at a word start, then a run of 40 or
+ * more letters and digits only (no `-`, no `_`) holding a digit, an upper-case and a lower-case
+ * letter, and ending there (not followed by a letter, digit, `-` or `_`). A name with a hyphen or an
+ * underscore after `sk-` is never this shape.
+ */
+export const OPENAI_LEGACY_KEY_PATTERN_SOURCE =
+  "\\bsk-(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])[A-Za-z0-9]{40,}(?![A-Za-z0-9_-])";
+
+/**
+ * DR-31 (g), DR-32 (a), DR-33: the OpenAI key shapes for refusing a key in files and arguments (S-6,
+ * S-8): OPENAI_PREFIXED_KEY_PATTERN_SOURCE or OPENAI_LEGACY_KEY_PATTERN_SOURCE, nothing else.
+ *
+ * - Not a key check. OpenAI documents no key prefix, length or character set (facts C-3); these
+ *   prefixes and lengths are observed practice. They are never used to accept or reject a key, only
+ *   as a second check when refusing. The main defence is matching the key values registered from the
+ *   environment (S-2 registers every API_KEY_ENVS value), which finds a key whatever its shape.
+ * - Still refused although not a key (false positives left): a name starting `sk-proj-`,
+ *   `sk-svcacct-` or `sk-admin-` with 20 or more characters after it (`sk-proj-` and a long kebab
+ *   name); a single unbroken run of 40 or more letters and digits after `sk-` mixing digits, upper
+ *   and lower case (a mixed-case hash or id written as one word).
+ * - Not refused by shape (misses left; the registered value still finds them): a key with any other
+ *   prefix; an older key shorter than 40, holding `-` or `_`, lacking one of the three character
+ *   kinds, or directly followed by `-` or `_`; a prefixed key with fewer than 20 characters after the
+ *   prefix; any key glued to a letter, digit or `_` before `sk` (no word start).
+ * - Word start: in these JavaScript patterns only `A-Z a-z 0-9 _` are word characters, so `sk` right
+ *   after Hangul or other non-ASCII text starts a word and is checked.
+ * - Not refused any more (Codex review, R-19): ordinary names with upper case and digits such as
+ *   branches, an id with an upper-case UUID, folders with a version, because each holds a hyphen.
+ */
+export const OPENAI_KEY_PATTERN_SOURCE = `(?:${OPENAI_PREFIXED_KEY_PATTERN_SOURCE})|(?:${OPENAI_LEGACY_KEY_PATTERN_SOURCE})` as const;
 
 /**
  * DR-32 (a): the loose OpenAI key shape, for hiding key-like text in output only (never for
  * refusing): `sk-` at a word start and 32 or more of `A-Z a-z 0-9 _ -`. It also hides some ordinary
- * names; that costs readability, not a refused run.
+ * names; that costs readability, not a refused run. With the refusal shapes (API_KEY_MASK_PATTERN_SOURCES)
+ * it also hides the key-like text the refusal shapes leave out because of a hyphen or an underscore.
  */
 export const OPENAI_KEY_LOOSE_PATTERN_SOURCE = "\\bsk-[A-Za-z0-9_-]{32,}";
 
@@ -350,7 +378,7 @@ export const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 
 /**
  * The provider table. The Anthropic entry holds exactly the values the CLI used before it.
- * OpenAI (DR-31): key OPENAI_API_KEY, the loose key shape, the address with `/v1`, at least 16
+ * OpenAI (DR-31): key OPENAI_API_KEY, the refusal key shapes (DR-33), the address with `/v1`, at least 16
  * output tokens (facts C-10). Its largest output cap is not documented (facts); Codaryn's own bound
  * MAX_OUTPUT_TOKENS_LIMIT applies, as for Anthropic, until the PM sets another.
  */

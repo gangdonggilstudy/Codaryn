@@ -16,6 +16,7 @@ import { parseRunsArgs, resolveRunRef, runRuns } from "../../../src/cli/runs.js"
 import {
   RevertRunError,
   RunListError,
+  inspectRun,
   latestRunId,
   listRuns,
   readRevertRecord,
@@ -441,6 +442,52 @@ describe("listRuns (N-7, N-16)", () => {
     await mkdir(path.join(other, ".codaryn"));
     await symlink(runsDir(elsewhere), runsDir(other), "junction");
     await assert.rejects(listRuns({ workspaceRoot: other }), RunListError);
+  });
+});
+
+describe("inspectRun (N-26)", () => {
+  test("a forged run dated 2099 named by its id is damaged, so revert can refuse it before touching user files", async () => {
+    const { work, result } = await changingRun();
+    const notes = path.join(work, "notes.txt");
+    const notesText = await readFile(notes, "utf8");
+    const forged = "20991231T235959Z-deadbeef";
+    const dir = path.join(runsDir(work), forged);
+    await mkdir(path.join(dir, "snapshots"), { recursive: true });
+    const records = [
+      { seq: 1, at: "2099-12-31T23:59:59.000Z", runId: forged, type: "run_started", schemaVersion: 1, taskId: "forged", workflow: "x", provider: "scripted", limits: { maxModelTurns: 1, maxToolCalls: 1, maxTotalTokens: null, maxDurationMs: 1 } },
+      { seq: 2, at: "2099-12-31T23:59:59.100Z", runId: forged, type: "file_changed", callId: "c", path: "notes.txt", previousHash: null, newHash: sha(notesText), created: true },
+    ];
+    await writeFile(path.join(dir, "journal.jsonl"), records.map((record) => `${JSON.stringify(record)}\n`).join(""), "utf8");
+    await writeFile(path.join(dir, "snapshots", "index.json"), JSON.stringify({ schemaVersion: 1, entries: [{ path: "notes.txt", existed: false }] }), "utf8");
+
+    assert.equal(await inspectRun(work, forged), "damaged");
+    assert.equal(await inspectRun(work, result.runId), "checked");
+    // What the check prevents: revertRun alone would delete the user's file for the forged run.
+    const unchecked = await revertRun({ workspaceRoot: work, runId: forged, dryRun: true });
+    assert.deepEqual(unchecked.reverted, [{ path: "notes.txt", action: "deleted" }]);
+    assert.equal(await readFile(notes, "utf8"), notesText, "the dry run changed nothing");
+  });
+
+  test("agrees with the run list: a damaged revert record alone is checked; a missing run is missing; a linked run directory is damaged", async () => {
+    const work = await tempDir();
+    await writeRun(work, "20260102T030401Z-00000001", { at: "2026-01-02T03:04:01.000Z" });
+    await writeFile(path.join(runsDir(work), "20260102T030401Z-00000001", "revert.json"), "{not json", "utf8");
+    await writeRun(work, "20260102T030402Z-00000002", { at: "2026-01-02T03:04:02.000Z", resultText: "[]" });
+    await mkdir(path.join(runsDir(work), "20260102T030403Z-00000003"));
+    assert.equal(await inspectRun(work, "20260102T030401Z-00000001"), "checked");
+    assert.equal(await inspectRun(work, "20260102T030402Z-00000002"), "damaged");
+    assert.equal(await inspectRun(work, "20260102T030403Z-00000003"), "damaged", "a run directory without a journal");
+    assert.equal(await inspectRun(work, "20260102T030404Z-00000004"), "missing");
+    assert.equal(await inspectRun(work, "../escape"), "damaged", "not a run id");
+
+    const elsewhere = await tempDir();
+    await writeRun(elsewhere, "20260102T030405Z-00000005", { at: "2026-01-02T03:04:05.000Z" });
+    await symlink(path.join(runsDir(elsewhere), "20260102T030405Z-00000005"), path.join(runsDir(work), "20260102T030405Z-00000005"), "junction");
+    assert.equal(await inspectRun(work, "20260102T030405Z-00000005"), "damaged");
+
+    const listing = await listRuns({ workspaceRoot: work });
+    for (const run of listing.runs) assert.equal(await inspectRun(work, run.runId), run.state, run.runId);
+    assert.equal(await inspectRun(await tempDir(), "20260102T030401Z-00000001"), "missing", "no state directory at all");
   });
 });
 

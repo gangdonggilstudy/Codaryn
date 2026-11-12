@@ -342,6 +342,45 @@ export async function listRunsAt(request: { readonly workspaceRoot: string }, no
   return listing;
 }
 
+/** N-26: how one run's records stand, as the run list would judge them. */
+export type RunInspection = "checked" | "damaged" | "missing";
+
+/**
+ * N-26: the run list's judgement for one run, for `revert` with an explicit id (and anything else
+ * that acts on a run named by the user). "damaged" is exactly what `listRuns` lists as damaged:
+ * not a run id, a link or junction in place of `.codaryn/runs` or the run directory, no journal,
+ * or records that fail the checks (forged or future start time included). A damaged revert record
+ * alone does not count (N-23(g)). "missing": the workspace has no directory for that run.
+ * Reads only; `now` is the current time in milliseconds.
+ */
+export async function inspectRun(workspaceRoot: string, runId: string, now: number = Date.now()): Promise<RunInspection> {
+  const id = toRunId(runId);
+  if (id === null) return "damaged";
+  const runsDir = join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
+  try {
+    const real = await realpathNative(runsDir);
+    if (!sameFsPath(real, runsDir) || !(await lstat(runsDir)).isDirectory()) return "damaged";
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
+  }
+  const dir = join(runsDir, id);
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return "damaged";
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
+  }
+  if (!(await isPlainDirectory(dir))) return "damaged";
+  try {
+    await readEntry(dir, id, now);
+    return "checked";
+  } catch {
+    return "damaged";
+  }
+}
+
 /** The id `--run latest` stands for (see `latestRun`), or null when there is none. */
 export async function latestRunId(workspaceRoot: string): Promise<RunId | null> {
   return latestRun((await listRuns({ workspaceRoot })).runs)?.runId ?? null;

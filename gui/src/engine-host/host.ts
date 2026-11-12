@@ -18,6 +18,7 @@ import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js
 import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js";
 import type { CleanupSelectionArg } from "../shared/cleanup.js";
 import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
+import { reportMarkdownValue } from "./report.js";
 import type { Shown } from "./settings.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
@@ -56,6 +57,8 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** GU-3 (3.7): the report as `codaryn report` prints it (Markdown), for saving. */
+  reportMarkdown(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
   /** GU-4 (3.8), DR-39, DR-44: the state directory summed up, a cleanup preview, and a confirmed cleanup. */
   stateSummary(request: { readonly workspace: string }): Promise<unknown>;
   previewCleanup(request: { readonly workspace: string; readonly selection: CleanupSelectionArg }): Promise<unknown>;
@@ -337,6 +340,13 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { next, baseDigest, confirmWidening } = args;
         if (!isObj(next) || typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest) || typeof confirmWidening !== "boolean") throw new ArgsError();
         return writtenValue(await deps.app.applySettingsChange({ configPath: null, next, baseDigest, confirmWidening }), deps.shown);
+      }
+      case "reportMarkdown": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "runId"]);
+        const runId = args["runId"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
+        return reportMarkdownValue(await deps.app.reportMarkdown({ workspace, runId }), shownText);
       }
       case "stateSummary": {
         if (!isObj(args)) throw new ArgsError();

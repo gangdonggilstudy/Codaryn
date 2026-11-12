@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -91,6 +91,11 @@ function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: 
 }
 
 const results: Record<string, unknown> = {};
+/** U-5: the reports saved and the end notifications sent, as the main process gave them. */
+const SAVED_REPORTS = join(GUI, "build", "smoke-report");
+const savedReports: string[] = [];
+const notices: { readonly title: string; readonly body: string }[] = [];
+let pretendInactive = false;
 /** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
 const transportOf = (response: { readonly ok: boolean; readonly value?: unknown; readonly error?: { readonly code: string } }): unknown => (response.ok ? response.value : response.error?.code);
 /** The main process's OS dialogs this test answered, by id. */
@@ -106,6 +111,18 @@ startGui({
   guiRoot: GUI,
   userDataDir: join(GUI, "build", "smoke-profile"),
   stateFile: STATE,
+  // U-5 (3.7): a report is "saved" under build/smoke-report instead of the OS save dialog.
+  answerSaveDialog: async (name) => {
+    mkdirSync(SAVED_REPORTS, { recursive: true });
+    savedReports.push(name);
+    return join(SAVED_REPORTS, name);
+  },
+  // U-5 (3.6): the OS end notifications, kept instead of shown.
+  notify: (notice) => {
+    notices.push(notice);
+  },
+  // The window counts as not active only while the first run ends (window.blur() is not reliable on Windows).
+  windowActive: () => !pretendInactive,
   answerDialog: async (id) => {
     dialogs.push(id);
     if (id === "cleanup.notReverted.message" && keepNotReverted) {
@@ -299,6 +316,8 @@ startGui({
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
         await js(`(() => { const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
       };
+      // U-5 (3.6): the window is not active while this run ends, so its end is one OS notification.
+      pretendInactive = true;
       await startTask("a.txt를 읽고 요약한다");
       results["runDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 90_000);
       results["runResult"] = await js(
@@ -308,6 +327,8 @@ startGui({
       results["runCounts"] = await js("document.getElementById('run-counts')?.textContent ?? null");
       results["runText"] = await js("document.getElementById('work')?.textContent ?? ''");
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
+      results["endNotice"] = notices[0] ?? null;
+      pretendInactive = false;
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
       // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging
@@ -454,6 +475,19 @@ startGui({
       await js("document.querySelector('#report [role=tab][data-tab=\"review\"]')?.click(); true");
       results["reportVerdict"] = await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null");
       results["reportText"] = await js("document.getElementById('report')?.textContent ?? ''");
+      // U-5 (3.7): the analyze run's report saved as Markdown; the window learns the file's name only.
+      await js("document.getElementById('report-save')?.click(); true");
+      results["reportSaved"] = await waitFor("document.getElementById('report-save-status')?.getAttribute('data-saved') ?? null");
+      results["reportSaveText"] = await js("document.getElementById('report-save-status')?.textContent ?? ''");
+      results["reportFile"] = (() => {
+        const name = savedReports[0];
+        if (name === undefined) return null;
+        try {
+          return { name, runId: analyzeRunId, text: readFileSync(join(SAVED_REPORTS, name), "utf8") };
+        } catch {
+          return { name, runId: analyzeRunId, text: null };
+        }
+      })();
       // From the run list: the first run's report (it created made.txt, since reverted).
       await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
       await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
@@ -549,6 +583,8 @@ startGui({
       window.close();
       await Promise.race([closed, sleep(30_000)]);
       results["closeGuard"] = { dialogs: [...dialogs], closed: window.isDestroyed(), ms: Date.now() - begin };
+      // 6.9: every end notification is the fixed text with a status word, nothing of a goal or a path.
+      results["endNotices"] = notices.map((notice) => notice.body);
       // And none in step 8 either, while the host still runs.
       const after = await host();
       results["transportRefusedEnd"] = "host" in after && !after.host.exited ? transportOf(await after.host.call("transport", {}, 10_000)) : "host ended";

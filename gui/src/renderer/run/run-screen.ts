@@ -17,6 +17,7 @@ import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
 import { clock, localTime } from "./run-model.js";
+import { saveReportButton } from "../report/report-screen.js";
 import type { RunFilter, RunModel } from "./run-model.js";
 
 export interface RunScreenDeps {
@@ -40,6 +41,9 @@ const MAX_NOTE = 500;
 function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
   const { api, run } = deps;
   const out: HTMLElement[] = [button(t.format("run.viewReport"), () => deps.openReport(result.runId, run.last === null ? null : { profile: run.last.profile, workflow: run.last.workflow }), { id: "run-view-report" })];
+  // 3.12: saving the report is one of the next steps of an ended run.
+  const workspace = deps.current();
+  if (workspace !== null) out.push(...saveReportButton(t, api, workspace, result.runId, "run-save-report"));
   if (result.kind === "run" && result.changes.length > 0) {
     out.push(button(t.format("run.viewChanges"), () => deps.openChanges(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-changes" }));
   }
@@ -71,7 +75,6 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
       out.push(el("p", t.format("run.consentNeeded", { count: String(result.unsafeMoves ?? 0) }), { id: "run-consent-text", class: "notice" }), agree, message);
     }
   }
-  const workspace = deps.current();
   if (result.review !== null && workspace !== null) {
     const panel = el("section", undefined, { id: "run-review-panel", "aria-labelledby": "run-review-title" });
     const note = el("textarea", undefined, { id: "review-note", rows: "3", maxlength: String(MAX_NOTE) });

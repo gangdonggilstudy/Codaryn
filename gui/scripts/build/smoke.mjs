@@ -130,7 +130,7 @@ try {
   outsideLinked = false;
 }
 
-for (const target of [result, profile, stateDir]) rmSync(target, { recursive: true, force: true });
+for (const target of [result, profile, stateDir, join(gui, "build", "smoke-report")]) rmSync(target, { recursive: true, force: true });
 // Started without blocking: the fake API in this process must answer while the app runs.
 const apiCountTimer = setInterval(writeApiCount, 50);
 const run = await new Promise((resolve) => {
@@ -176,7 +176,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,selectModel,settings,startRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -384,6 +384,22 @@ const expected = [
   ["cleanupFirstRunGone", (v) => v === true],
   ["cleanupForged", (v) => v.ok === false && v.code === "unknown_preview"],
   ["cleanupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second)],
+  // U-5 (3.6): the run that ended while the window was not active: one OS notification, fixed text and status word.
+  ["endNotice", (v) => v !== null && v.title === "Codaryn" && v.body === "Codaryn 실행이 끝났습니다: 확인 필요"],
+  ["endNotices", (v) => Array.isArray(v) && v.length >= 1 && v.every((body) => /^Codaryn 실행이 끝났습니다(: [^\n]{1,40}|\. 결과는 실행 목록에서 확인하세요\.)$/.test(body))],
+  // U-5 (3.7): the report saved as the masked Markdown, to the file the save dialog gave; the window names the file only.
+  ["reportSaved", (v) => v === "ok"],
+  ["reportSaveText", (v) => typeof v === "string" && v.includes("codaryn-report-") && !v.includes("smoke-report") && !v.includes(gui)],
+  [
+    "reportFile",
+    (v) =>
+      v !== null &&
+      v.name === `codaryn-report-${v.runId}.md` &&
+      typeof v.text === "string" &&
+      v.text.includes(v.runId) &&
+      !v.text.includes(FAKE_API_KEY) &&
+      !v.text.includes(FAKE_OPENAI_KEY),
+  ],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's

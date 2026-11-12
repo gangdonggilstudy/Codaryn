@@ -32,6 +32,7 @@ import { dirname, join } from "node:path";
 import {
   CONTENT_HASH_PATTERN_SOURCE,
   DISCARDED_STORED_NAME_PATTERN_SOURCE,
+  MAX_PLAN_ACTIONS,
   MAX_REPORT_FILE_BYTES,
   PLAN_FILE_NAME,
   RUNS_DIR_NAME,
@@ -74,7 +75,7 @@ function isObj(value: unknown): value is Obj {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function index(value: unknown): number {
+function indexValue(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : bad();
 }
 
@@ -137,6 +138,13 @@ function applyRecords(journal: string, runId: string): { readonly planRunId: str
   const planRunId = first["planRunId"];
   if (typeof planRunId !== "string" || toRunId(planRunId) === null) bad();
   const digest = hash(first["digest"]);
+  // R-9b N-5: every record names one of the plan's actions (`apply_started.actions`, at most MAX_PLAN_ACTIONS).
+  const total = first["actions"];
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 1 || total > MAX_PLAN_ACTIONS) bad();
+  const index = (value: unknown): number => {
+    const at = indexValue(value);
+    return at < (total as number) ? at : bad();
+  };
 
   const done = new Map<number, Item>();
   const started = new Map<number, Item>();

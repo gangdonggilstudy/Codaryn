@@ -41,7 +41,7 @@ export const DATA_CHECKS_LIMITS: readonly string[] = [
   "only the listed table shapes and aggregates are checked; the method, the interpretation and any number written in prose are not",
   "tables are read as CSV (an RFC 4180 subset), TSV or JSON Lines of at most 16 MiB; numbers are plain decimals (-?digits[.digits][e±digits]) computed as doubles",
   "group values are compared as exact text, and rows whose group cell is empty are left out of the groups",
-  "sum, min, max and mean cannot be checked (inconclusive) when the column, or any one group of a grouped rule, has only empty cells, or when the sum goes beyond a double's range",
+  "sum, min, max and mean cannot be checked (inconclusive) when the column, or any one group of a grouped rule, has only empty cells; sum and mean cannot be checked when a running sum goes beyond a double's range, which depends on the row order (the same values in another order may be checked)",
 ];
 
 type Role = "source" | "target";

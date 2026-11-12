@@ -3,15 +3,21 @@
  * Messages name a position, never a variable name or a value.
  */
 
-import { CODARYN_API_BASE_URL_ENV, CODARYN_CONFIG_ENV, CODARYN_MODEL_ENV } from "../../contracts/index.js";
+import { API_PROVIDERS, API_PROVIDER_NAMES, CODARYN_CONFIG_ENV } from "../../contracts/index.js";
 
 export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Values shorter than this are not registered: they would mask ordinary text everywhere. */
 export const MIN_ENV_SECRET_LENGTH = 8;
 
-/** Settings the env file may carry that are not secrets. */
-export const ENV_FILE_NON_SECRETS: readonly string[] = [CODARYN_MODEL_ENV, CODARYN_CONFIG_ENV, CODARYN_API_BASE_URL_ENV];
+/**
+ * Settings the env file may carry that are not secrets: the config location and every API
+ * provider's model and address variables (DR-34 (a): API_PROVIDERS modelEnv and baseUrlEnv).
+ */
+export const ENV_FILE_NON_SECRETS: readonly string[] = [
+  CODARYN_CONFIG_ENV,
+  ...API_PROVIDER_NAMES.flatMap((name) => [API_PROVIDERS[name].modelEnv, API_PROVIDERS[name].baseUrlEnv]),
+];
 
 export type SecretEnvNamesOutcome =
   | { readonly ok: true; readonly names: readonly string[] }

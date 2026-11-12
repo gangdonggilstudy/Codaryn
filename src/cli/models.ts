@@ -1,15 +1,21 @@
 /**
- * `codaryn models [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]`
- * (Y-1 to Y-3): lists the models the key can use and can write one into the config file's `model`.
+ * `codaryn models [--provider <name>] [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]`
+ * (Y-1 to Y-3, SP-6): lists the models the chosen provider's key can use and can write one where the
+ * config file keeps that provider's model.
  *
+ * - SP-6: the provider is `--provider`, else the config's `provider`, else anthropic. Its key, its
+ *   address, its lister and its model variable are used, never another provider's.
  * - The key, the API address, the time limit and retries come from the same functions `run` uses
  *   (`resolveListSettings` → `resolveConnection` in settings.ts). The variables file and the config
  *   file go through the same checks as in `run` (S-5 paths, BOM, key check before parsing).
- * - The list comes from `listAnthropicModels` (src/model/anthropic, p5), injected as `listModels`.
- *   The key reaches it in `settings` only, and the printed text never holds it.
- * - `--use` (or the answer at a terminal prompt) writes the config file's `model` and nothing else
- *   (see `withModel` for what is kept), atomically: a temporary file next to the target, then a
- *   rename. A missing config file is created with `schemaVersion` and `model` only.
+ * - The list comes from the provider's lister, injected: `listModels` (anthropic's) or `listers`
+ *   (main.ts passes API_MODEL_LISTERS). Without one nothing is sent. The key reaches it in
+ *   `settings` only, and the printed text never holds it.
+ * - `--use` (or the answer at a terminal prompt) writes that provider's model and nothing else (see
+ *   `withModel` for what is kept): anthropic's top-level `model`, or `providers.<name>.model` for
+ *   another provider and for anthropic when the file keeps `providers.anthropic`. Atomically: a
+ *   temporary file next to the target, then a rename. A missing config file is created with
+ *   `schemaVersion` and that model only.
  * No workspace is needed and nothing else is written.
  */
 
@@ -17,7 +23,9 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  ANTHROPIC_API_KEY_ENV,
+  API_KEY_ENVS,
+  API_PROVIDERS,
+  API_PROVIDER_NAMES,
   CODARYN_CONFIG_ENV,
   CODARYN_MODEL_ENV,
   MODELS_EXIT_CODES,
@@ -25,8 +33,11 @@ import {
 import type {
   DefaultConfigLocation,
   AnthropicProviderDeps,
+  ApiProviderDeps,
+  ApiProviderName,
   CodarynConfig,
   ListAnthropicModels,
+  ListModels,
   ModelsListEntry,
   ModelsOutput,
 } from "../contracts/index.js";
@@ -37,9 +48,9 @@ import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey, selectEnvFileSecrets } from "./security/index.js";
-import { envValue, realModel, resolveListSettings } from "./settings.js";
+import { configFieldOf, envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { localPathProblem } from "./task.js";
+import { isApiProviderName, localPathProblem, quickProvider, quotedChoices } from "./task.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 const LF = String.fromCharCode(10);
@@ -71,6 +82,10 @@ export interface ModelsEnvironment {
   readonly listModels?: ListAnthropicModels;
   /** Passed to `listModels`. Tests inject `fetch` here. */
   readonly anthropicDeps?: AnthropicProviderDeps;
+  /** SP-6: the other providers' listers (main.ts passes API_MODEL_LISTERS). Absent: not connected, nothing is sent. */
+  readonly listers?: { readonly [P in ApiProviderName]?: ListModels };
+  /** SP-6: injection points per API provider; anthropic falls back to `anthropicDeps`. */
+  readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
   /**
    * Shows `question` and returns the line typed, or null. Present only when stdin and stdout are
    * both terminals: the prompt is never shown otherwise (Y-3).
@@ -96,6 +111,10 @@ function scrub(text: string, secrets: readonly string[]): string {
   return secrets.reduce((current, secret) => (secret.length >= 8 ? current.split(secret).join("[secret]") : current), text);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /** The leading spaces or tabs of the first indented line, or two spaces. */
 function detectIndent(text: string): string {
   for (const line of text.split(LF).slice(1)) {
@@ -113,13 +132,19 @@ function detectIndent(text: string): string {
  * What is written anew: the layout of whitespace, number spelling (`1e3` becomes `1000`), string
  * escapes, and duplicate fields (the last value stays).
  */
-export function withModel(text: string, id: string): string {
+export function withModel(text: string, id: string, place: ApiProviderName | null = null): string {
   const bom = text.startsWith(BOM) ? BOM : "";
   const body = bom === "" ? text : text.slice(1);
   const eol = body.includes(`${CR}${LF}`) ? `${CR}${LF}` : LF;
   const value = JSON.parse(body) as Record<string, unknown>;
   let next: Record<string, unknown>;
-  if (Object.hasOwn(value, "model")) {
+  if (place !== null) {
+    // SP-6: providers.<place>.model; the entry and `providers` keep their fields and order, and are
+    // added at the end when missing.
+    const providers = isRecord(value["providers"]) ? value["providers"] : {};
+    const entry = isRecord(providers[place]) ? providers[place] : {};
+    next = { ...value, providers: { ...providers, [place]: { ...entry, model: id } } };
+  } else if (Object.hasOwn(value, "model")) {
     next = { ...value, model: id };
   } else {
     next = {};
@@ -181,7 +206,17 @@ function table(models: readonly ModelsListEntry[], currentId: string | null): st
   return [format(header), ...rows.map(format)];
 }
 
-export function renderModels(output: ModelsOutput, withTable: boolean): string {
+/** SP-6: how the text names the provider's model variable and where `--use` writes. */
+export interface ModelsTextPlaces {
+  readonly modelEnv: string;
+  readonly field: string;
+  /** The provider's model variable is set but `current` cannot name it (the contract's source names CODARYN_MODEL only). */
+  readonly hiddenEnvModel: boolean;
+}
+
+const ANTHROPIC_PLACES: ModelsTextPlaces = { modelEnv: CODARYN_MODEL_ENV, field: "model", hiddenEnvModel: false };
+
+export function renderModels(output: ModelsOutput, withTable: boolean, places: ModelsTextPlaces = ANTHROPIC_PLACES): string {
   const lines: string[] = [];
   if (withTable) {
     if (output.models.length === 0) {
@@ -191,17 +226,20 @@ export function renderModels(output: ModelsOutput, withTable: boolean): string {
     }
   }
   const current = output.current;
-  if (current === null) {
-    lines.push("No current model: none is set in CODARYN_MODEL or the config file. Choose one with --use <number|id> --config <config.json>.");
+  if (places.hiddenEnvModel) {
+    lines.push(`* current model: the one ${places.modelEnv} names (it is used instead of the config file's ${places.field}).`);
+  } else if (current === null) {
+    lines.push(`No current model: none is set in ${places.modelEnv} or the config file. Choose one with --use <number|id> --config <config.json>.`);
   } else {
     const from = current.source === "config" ? "the config file" : "CODARYN_MODEL";
     lines.push(`* current model (from ${from}): ${cleanText(current.id)}${current.listed ? "" : " (not in this list)"}`);
   }
   const selected = output.selected;
   if (selected !== null) {
-    lines.push(`Written: ${cleanText(selected.id)} is now the config file's model${selected.created ? " (the file was created)" : ""}.`);
-    if (selected.overriddenBy !== null) {
-      lines.push(`Note: ${selected.overriddenBy} is set and is used instead of the config file's model until it is unset.`);
+    lines.push(`Written: ${cleanText(selected.id)} is now the config file's ${places.field}${selected.created ? " (the file was created)" : ""}.`);
+    const overriddenBy = selected.overriddenBy ?? (places.hiddenEnvModel ? places.modelEnv : null);
+    if (overriddenBy !== null) {
+      lines.push(`Note: ${overriddenBy} is set and is used instead of the config file's ${places.field} until it is unset.`);
     }
   }
   return `${lines.join(LF)}${LF}`;
@@ -244,7 +282,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     envSecrets = selectEnvFileSecrets(before, { ...io.env });
   }
 
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(io.env);
   // N-1: --config, CODARYN_CONFIG, then the default location (optional: a missing file means none).
   const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   if (!chosen.ok) return cliError("invalid_config", chosen.message);
@@ -269,7 +307,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     if (configText !== null) {
       const body = configText.startsWith(BOM) ? configText.slice(1) : configText;
       if (rawTextHoldsKey(body, currentKey)) {
-        return cliError("key_in_file", `the config file contains a key value; keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`);
+        return cliError("key_in_file", `the config file contains a key value; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);
       }
       let value: unknown;
       try {
@@ -280,7 +318,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       }
       const found = findKeyInJson(value, currentKey);
       if (found.kind === "key") {
-        return cliError("key_in_file", `the config file has a key field or key value at ${found.location}; keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`);
+        return cliError("key_in_file", `the config file has a key field or key value at ${found.location}; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);
       }
       if (found.kind === "too_deep") return cliError("invalid_config", `the config file is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`);
       const outcome = parseConfig(value);
@@ -295,21 +333,28 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     );
   }
 
-  const resolved = resolveListSettings(io.env, config);
+  // SP-6 (DR-34 (a)): the chosen provider's key, address and lister only, so a key never goes to an
+  // address set for another provider.
+  let provider: ApiProviderName;
+  if (args.provider === null) provider = quickProvider(config);
+  else if (isApiProviderName(args.provider)) provider = args.provider;
+  else return cliError("invalid_arguments", `--provider must be ${quotedChoices(API_PROVIDER_NAMES)}; nothing was sent`);
+  const resolved = resolveListSettings(io.env, config, provider);
   if (!resolved.ok) return cliError(resolved.code, resolved.message);
   const secrets = [resolved.settings.apiKey, ...envSecrets];
-  if (io.listModels === undefined) {
+  const lister: ListModels | undefined = provider === "anthropic" ? (io.listModels ?? io.listers?.anthropic) : io.listers?.[provider];
+  if (lister === undefined) {
     return cliError("provider_not_implemented", "listing models is not connected in this build; nothing was sent");
   }
 
   let listed: Awaited<ReturnType<ListAnthropicModels>>;
   try {
-    listed = await io.listModels(resolved.settings, io.anthropicDeps, io.signal);
+    listed = await lister(resolved.settings, io.providerDeps?.[provider] ?? (provider === "anthropic" ? io.anthropicDeps : undefined), io.signal);
   } catch {
     return cliError("model_list_failed", "the model list request failed (api_error); nothing was written");
   }
   if (!listed.ok) {
-    const hint = listed.kind === "auth_failed" ? `; check ${ANTHROPIC_API_KEY_ENV}` : "";
+    const hint = listed.kind === "auth_failed" ? `; check ${API_PROVIDERS[provider].keyEnv}` : "";
     const message = scrub(cleanText(listed.message), secrets);
     return cliError("model_list_failed", `the model list request failed (${listed.kind}): ${message}${hint}; nothing was written`);
   }
@@ -318,7 +363,18 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
   // The choice: --use, or the answer at a terminal (never with --json).
   let choice = args.use;
   let prompted = false;
-  const modelFromEnv = envValue(io.env, CODARYN_MODEL_ENV);
+  // SP-6: the provider's own model variable and config place.
+  const modelEnv = API_PROVIDERS[provider].modelEnv;
+  const modelFromEnv = envValue(io.env, modelEnv);
+  // The contract's `current.source` and `selected.overriddenBy` name CODARYN_MODEL only; another
+  // provider's variable is shown in the text and left out of those fields until the contract can
+  // name it (asked of the contract owner).
+  const hiddenEnvModel = provider !== "anthropic" && realModel(modelFromEnv) !== null;
+  const ownEnvModel = provider === "anthropic" ? modelFromEnv : null;
+  const writePlace: ApiProviderName | null = provider === "anthropic" && config?.providers?.anthropic === undefined ? null : provider;
+  const field = writePlace === null ? "model" : `providers.${writePlace}.model`;
+  const places: ModelsTextPlaces = { modelEnv, field, hiddenEnvModel };
+  const configModel = providerSettingsOf(config, provider).model ?? null;
   if (choice === null && !args.json && io.ask !== undefined && configPath !== null && models.length > 0) {
     prompted = true;
     const before: ModelsOutput = {
@@ -327,16 +383,17 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       status: "listed",
       exitCode: MODELS_EXIT_CODES.listed,
       models,
-      current: currentModel(modelFromEnv, config?.model ?? null, models),
+      current: hiddenEnvModel ? null : currentModel(ownEnvModel, configModel, models),
       selected: null,
+      ...(provider === "anthropic" ? {} : { provider }),
     };
-    const shown = hideKeys(scrub(renderModels(before, true), secrets), currentKey);
-    const answer = await io.ask(`${shown}Number or id to write into the config file's model (Enter to skip): `);
+    const shown = hideKeys(scrub(renderModels(before, true, places), secrets), currentKey);
+    const answer = await io.ask(`${shown}Number or id to write into the config file's ${field} (Enter to skip): `);
     choice = answer === null || answer.trim() === "" ? null : answer.trim();
   }
 
   let selected: ModelsOutput["selected"] = null;
-  let writtenModel = config?.model ?? null;
+  let writtenModel = configModel;
   if (choice !== null && configPath !== null) {
     const asNumber = /^[1-9][0-9]*$/.test(choice) ? Number(choice) : null;
     const picked = asNumber !== null ? models[asNumber - 1] : models.find((model) => model.id === choice);
@@ -347,7 +404,8 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       return cliError("config_write_failed", "the chosen model id is not a plain model id; the config file was left as it was");
     }
     const created = configText === null;
-    const text = created ? `${JSON.stringify({ schemaVersion: 1, model: picked.id }, null, 2)}${LF}` : withModel(configText as string, picked.id);
+    const fresh = writePlace === null ? { schemaVersion: 1, model: picked.id } : { schemaVersion: 1, providers: { [writePlace]: { model: picked.id } } };
+    const text = created ? `${JSON.stringify(fresh, null, 2)}${LF}` : withModel(configText as string, picked.id, writePlace);
     const check = parseConfig(JSON.parse(text.startsWith(BOM) ? text.slice(1) : text));
     if (!check.ok || rawTextHoldsKey(text, currentKey)) {
       return cliError("config_write_failed", "the config file would not be valid with that model; it was left as it was");
@@ -357,7 +415,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     } catch {
       return cliError("config_write_failed", "the config file could not be written, or it changed while models ran; it was left as it was");
     }
-    selected = { id: picked.id, created, overriddenBy: modelFromEnv !== null ? "CODARYN_MODEL" : null };
+    selected = { id: picked.id, created, overriddenBy: realModel(ownEnvModel) !== null ? "CODARYN_MODEL" : null };
     writtenModel = picked.id;
   }
 
@@ -368,10 +426,12 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     status,
     exitCode: MODELS_EXIT_CODES[status],
     models,
-    current: currentModel(modelFromEnv, writtenModel, models),
+    current: hiddenEnvModel ? null : currentModel(ownEnvModel, writtenModel, models),
     selected,
+    // SP-6: the listed provider; for anthropic it waits for the PM's approval of the SP-0 pin change.
+    ...(provider === "anthropic" ? {} : { provider }),
   };
-  const printed = args.json ? jsonLine(output) : renderModels(output, !prompted);
+  const printed = args.json ? jsonLine(output) : renderModels(output, !prompted, places);
   return { text: hideKeys(scrub(printed, secrets), currentKey), exitCode: output.exitCode };
 }
 

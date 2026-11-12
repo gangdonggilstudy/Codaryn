@@ -13,18 +13,19 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseEnv } from "node:util";
 import {
-  ANTHROPIC_API_KEY_ENV,
-  CODARYN_API_BASE_URL_ENV,
+  API_PROVIDER_NAMES,
+  API_PROVIDERS,
   CODARYN_CONFIG_ENV,
-  CODARYN_MODEL_ENV,
   DOCTOR_CHECK_IDS,
   DOCTOR_EXIT_CODES,
   CODARYN_LANG_ENV,
   LOCK_FILE_NAME,
+  PARKED_DIR_NAME,
   STATE_DIR_NAME,
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
+  ListParkedFiles,
   CatalogText,
   CodarynConfig,
   ConfigLocationDisplay,
@@ -61,10 +62,21 @@ import {
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
+import {
+  configFieldOf,
+  envValue,
+  keyDestination,
+  knownKeyValues,
+  missingModelText,
+  missingOutputCapText,
+  modelPlaceholderSeen,
+  providerSettingsOf,
+  resolveModelId,
+} from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { inspectLock, nodeLockFileSystem } from "../store/index.js";
-import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
+import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
+import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
 
@@ -105,6 +117,8 @@ export interface DoctorEnvironment {
   readonly osLocale?: string | null;
   /** N-25 (a): the state of `<workspace>/.codaryn/lock.json`, read without changing it. Absent: `skipped`. */
   readonly inspectLock?: (workspaceRoot: string) => Promise<LockState>;
+  /** R-16 L-1: the store's `listParkedFiles` (the default); tests inject it. */
+  readonly listParkedFiles?: ListParkedFiles;
 }
 
 /**
@@ -129,7 +143,7 @@ type Loaded =
     };
 
 /** Read, key check on the raw text, parse, key check on the parsed value: the order `run` uses (S-6). */
-async function loadJson(io: DoctorEnvironment, file: string, label: string, currentKey: string | null): Promise<Loaded> {
+async function loadJson(io: DoctorEnvironment, file: string, label: string, currentKey: KnownKeys): Promise<Loaded> {
   let text: string;
   try {
     text = await io.readFile(file);
@@ -494,7 +508,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       set("vars_file", "ok", `the file given by --vars-file defines ${count} variable(s)`, { id: "doctor.vars_file.ok", params: { count } });
     }
   }
-  const currentKey = envValue(env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(env);
 
   // config_file: --config, CODARYN_CONFIG, then the default location (N-1).
   let config: CodarynConfig | null = null;
@@ -571,17 +585,30 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     }
   }
   const taskUnusable = args.taskPath !== null && task === null;
-  const provider = task?.model.provider ?? "anthropic";
+  // SP-D3, SP-D10: the task's provider, else the quick form's (the profile's, else the file's, else
+  // anthropic; the profile was laid over above).
+  const provider = task?.model.provider ?? quickProvider(config);
 
   // api_key: present or not, nothing else.
   if (taskUnusable) {
     set("api_key", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (provider === "scripted") {
     set("api_key", "skipped", "the task uses the scripted model; no key is needed", { id: "doctor.api_key.scripted" });
-  } else if (currentKey !== null) {
-    set("api_key", "ok", `${ANTHROPIC_API_KEY_ENV} is set`, { id: "doctor.api_key.ok" });
   } else {
-    set("api_key", "fail", `${ANTHROPIC_API_KEY_ENV} is not set; an anthropic run stops with provider_not_configured`, { id: "doctor.api_key.missing" });
+    // The chosen provider's own key variable (API_PROVIDERS, SP-D12); the other known keys do not
+    // count (SP-2 only hides them).
+    const keyEnv = API_PROVIDERS[provider].keyEnv;
+    if (envValue(env, keyEnv) !== null) {
+      // DR-34 (a): say which address the key goes to (its origin) and where that address is set.
+      const destination = keyDestination(env, config, provider);
+      const where =
+        destination === null
+          ? `its address in ${API_PROVIDERS[provider].baseUrlEnv} is not valid (see the model check), so nothing is sent`
+          : `${provider} requests send it only to ${destination.origin} (${destination.source})`;
+      set("api_key", "ok", `${keyEnv} is set; ${where}`, { id: "doctor.api_key.ok", params: { keyEnv } });
+    } else {
+      set("api_key", "fail", `${keyEnv} is not set; an ${provider} run stops with provider_not_configured`, { id: "doctor.api_key.missing", params: { keyEnv, provider } });
+    }
   }
 
   // model
@@ -596,22 +623,38 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       const field = fieldOf(undefined, script.message);
       set("model", "fail", script.message, field === null ? { id: "doctor.model.script_invalid_unlocated" } : { id: "doctor.model.script_invalid", params: { field } });
     } else set("model", "ok", "the scripted model file is valid", { id: "doctor.model.scripted_ok" });
-  } else {
-    const fromTask = task !== null && task.model.provider === "anthropic" ? task.model : null;
+  } else if (provider !== "scripted") {
+    // SP-4: the chosen API provider's model, cap and address (its config entry and path rule).
+    // With a task, `provider` is its model.provider, so the task's model settings are this provider's.
+    const fromTask = task !== null && task.model.provider !== "scripted" ? task.model : null;
     // N-3: a placeholder (blank or <...>) counts as not set at every level.
-    const modelId = resolveModelId(fromTask?.model, env, config);
-    const maxOutputTokens = fromTask?.maxOutputTokens ?? config?.maxOutputTokens ?? null;
+    const modelId = resolveModelId(fromTask?.model, env, config, provider);
+    const maxOutputTokens = fromTask?.maxOutputTokens ?? providerSettingsOf(config, provider).maxOutputTokens ?? null;
     const missing: string[] = [];
-    if (modelId === null) missing.push(missingModelText(modelPlaceholderSeen(fromTask?.model, env, config)));
-    if (maxOutputTokens === null) missing.push("maxOutputTokens (task model.maxOutputTokens or config maxOutputTokens)");
-    const baseUrl = envValue(env, CODARYN_API_BASE_URL_ENV);
-    const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV);
-    const placeholder = modelPlaceholderSeen(fromTask?.model, env, config);
+    if (modelId === null) {
+      missing.push(
+        missingModelText(modelPlaceholderSeen(fromTask?.model, env, config, provider), configFieldOf(config, provider, "model"), API_PROVIDERS[provider].modelEnv),
+      );
+    }
+    if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
+    // DR-34 (a): the provider's own address variable.
+    const baseUrlEnv = API_PROVIDERS[provider].baseUrlEnv;
+    const baseUrl = envValue(env, baseUrlEnv);
+    const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, baseUrlEnv, API_PROVIDERS[provider].baseUrlPath);
+    const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);
     const missingText: DoctorText =
       modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
-    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}`, missingText);
-    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", baseUrlProblem.message, { id: "doctor.model.base_url_invalid" });
-    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}`, { id: "doctor.model.ok" });
+    // SP-6, review R-19 I-4: another provider's model or address variable is not read by this run;
+    // say so, so a value left for one provider is not silently ignored (names only, never values).
+    const unread = API_PROVIDER_NAMES.filter((other) => other !== provider).flatMap((other) =>
+      [API_PROVIDERS[other].modelEnv, API_PROVIDERS[other].baseUrlEnv]
+        .filter((name) => envValue(env, name) !== null)
+        .map((name) => `${name} is set but is ${other}'s; an ${provider} run does not read it`),
+    );
+    const note = unread.length === 0 ? "" : `; ${unread.join("; ")}`;
+    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}${note}`, missingText);
+    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", `${baseUrlProblem.message}${note}`, { id: "doctor.model.base_url_invalid" });
+    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}${note}`, { id: "doctor.model.ok" });
   }
 
   // limits
@@ -781,7 +824,20 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       ],
     };
     const [status, message] = lockMessages[state];
-    set("lock", status, message, { id: `doctor.lock.${state}` });
+    // R-16 L-1: files a revert moved aside and could not put back stay in .codaryn/parked/ until the
+    // person moves them back or deletes them. A lock problem keeps its text; the warning joins it.
+    let parked: number;
+    try {
+      parked = (await (io.listParkedFiles ?? listParkedFiles)(workspaceRoot)).length;
+    } catch {
+      parked = 0;
+    }
+    const parkedWarning = `${parked} file(s) a revert could not put back are in ${STATE_DIR_NAME}/${PARKED_DIR_NAME}/; move them back or delete them`;
+    if (parked > 0 && status === "ok") {
+      set("lock", "warn", parkedWarning, { id: "doctor.lock.parked_left", params: { count: parked } });
+    } else {
+      set("lock", status, parked > 0 ? `${message}; ${parkedWarning}` : message, { id: `doctor.lock.${state}` });
+    }
   }
 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);

@@ -268,6 +268,23 @@ describe("plan, review and apply output with the real catalogs", () => {
       }
     });
 
+    test(`${language}: R-16 L-1: files a revert left parked use the catalog's own text, and the place is not printed`, () => {
+      const catalog = createMessageCatalog(language);
+      const parkedAt = `.codaryn/parked/${RUN}/0-0123456789abcdef`;
+      const text = createHumanOutput(catalog).revertSummary({
+        schemaVersion: 1,
+        kind: "revert",
+        runId: RUN,
+        status: "partial",
+        exitCode: 3,
+        reverted: [],
+        skipped: [{ path: "inbox/a.txt", reason: "io_error", parkedAt }],
+      } as RevertOutput);
+      assert.ok(text.includes(catalog.format("revert.parked", { count: 1 })), text);
+      assert.equal(text.includes(parkedAt), false, "the place stays in the JSON");
+      assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(text), false, text);
+    });
+
     test(`${language}: DR-21 and DR-25 lines use the catalog's own texts`, () => {
       const catalog = createMessageCatalog(language);
       const human: HumanOutput = createHumanOutput(catalog);

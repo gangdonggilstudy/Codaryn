@@ -27,7 +27,8 @@ import type { HumanOutput, RunListing, RunsOutput } from "../contracts/index.js"
 import { latestRunId, listRuns } from "../store/index.js";
 import type { CommandOutcome, JsonOutcome } from "./guard.js";
 import { cliError } from "./run.js";
-import { envValue } from "./settings.js";
+import { knownKeyValues } from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { hideKeys } from "./text-safety.js";
@@ -159,7 +160,7 @@ export async function runRuns(io: RunsEnvironment): Promise<CommandOutcome> {
     runs: listing.runs.slice(0, limit),
     omitted: Math.max(0, listing.runs.length - limit),
   };
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(io.env);
   // N-23(a): the JSON hides key shapes and the current key too, as `report` does. Run ids and
   // task ids are names a command allowed during a run could have chosen.
   if (json) return { output: hideKeysInStrings(output, currentKey), exitCode: output.exitCode };
@@ -167,7 +168,7 @@ export async function runRuns(io: RunsEnvironment): Promise<CommandOutcome> {
 }
 
 /** Every string in `value` with key-shaped text and the current key hidden. */
-function hideKeysInStrings<T>(value: T, currentKey: string | null): T {
+function hideKeysInStrings<T>(value: T, currentKey: KnownKeys): T {
   const walk = (item: unknown): unknown => {
     if (typeof item === "string") return hideKeys(item, currentKey);
     if (Array.isArray(item)) return item.map(walk);

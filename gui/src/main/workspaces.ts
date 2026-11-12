@@ -4,12 +4,13 @@
  * the dialog and the shell stay in ipc.ts, so this is tested under Node.
  */
 
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { isHandle } from "../shared/ipc.js";
 import type { OpenReply, RecentView, TreeEntryView, TreeKind, TreeReply } from "../shared/ipc.js";
 import { EMPTY_STATE, readGuiState, withOpened, withoutPath, writeGuiState } from "./gui-state.js";
 import type { GuiState } from "./gui-state.js";
 import { WorkspaceHandles } from "./handles.js";
+import { isLocalPathSyntax } from "./node-path.js";
 import { TreeIds, childPath } from "./tree-ids.js";
 
 export interface WorkspacesDeps {
@@ -24,6 +25,12 @@ export interface WorkspacesDeps {
 /** What the window shows for a folder: its own name, or the whole path for a drive root. */
 export function folderName(path: string): string {
   return basename(path) || path;
+}
+
+/** R21-I-1: the name of the folder `path` is in, "" when `path` is a drive root. */
+export function parentName(path: string): string {
+  const parent = dirname(path);
+  return parent === path ? "" : folderName(parent);
 }
 
 const KINDS: readonly TreeKind[] = ["dir", "file", "link", "state", "other"];
@@ -54,8 +61,14 @@ export class Workspaces {
     return this.writing;
   }
 
-  /** Opens a folder the person chose (dialog, recent list, command line): a handle, and first place in the recent list. */
+  /**
+   * Opens a folder the person chose (dialog, recent list, command line): a handle, and first place
+   * in the recent list. R10b-L-2: a network, pipe or device path is refused before anything looks
+   * at it (no SMB connection, no pipe client), as the CLI refuses it (S-5); the CLI and the engine
+   * could not use it either.
+   */
   async open(path: string): Promise<OpenReply> {
+    if (!isLocalPathSyntax(path, this.deps.platform)) return { ok: false, code: "workspace_not_local" };
     if (!(await this.deps.isDirectory(path))) return { ok: false, code: "workspace_missing" };
     const handle = this.handles.issue(path);
     await this.save(withOpened(await this.load(), path, this.deps.now(), this.deps.platform));
@@ -69,7 +82,8 @@ export class Workspaces {
     for (const item of (await this.load()).recentWorkspaces) {
       const id = Array.from(this.deps.randomBytes(16), (byte) => byte.toString(16).padStart(2, "0")).join("");
       this.recentIds.set(id, item.path);
-      views.push({ id, name: folderName(item.path), path: item.path, exists: await this.deps.isDirectory(item.path) });
+      const exists = isLocalPathSyntax(item.path, this.deps.platform) && (await this.deps.isDirectory(item.path));
+      views.push({ id, name: folderName(item.path), where: parentName(item.path), exists });
     }
     return views;
   }

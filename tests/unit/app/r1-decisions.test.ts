@@ -140,7 +140,7 @@ describe("DR-7: changes", () => {
     return (outcome as { output: ChangesOutput }).output;
   }
 
-  test("lists each changed file with its state; no text while the run keeps no record of its masking (R-11)", async () => {
+  test("lists each changed file with its state and, as the run recorded its masking (R-11, DR-29), the masked texts", async () => {
     const { base, runId, app } = await changedRun();
     const view = output(await app.changes({ settings: taskForm(base), runId }));
     assert.deepEqual([view.kind, view.runId, view.masking], ["changes", runId, "current_secrets"]);
@@ -148,8 +148,10 @@ describe("DR-7: changes", () => {
 
     const [readme, notes] = view.files;
     assert.equal(view.files.length, 2);
-    assert.deepEqual(readme, { path: "README.md", created: false, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" });
-    assert.deepEqual(notes, { path: "NOTES.md", created: true, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" });
+    assert.deepEqual([readme?.path, readme?.created, readme?.state, readme?.unavailable], ["README.md", false, "as_run_left", null]);
+    assert.match(readme?.before ?? "", /^# Title\nkey \[\[CODARYN_SECRET:[0-9a-f]+\]\]\n$/);
+    assert.match(readme?.after ?? "", /^# Title\n\nadded line\nkey \[\[CODARYN_SECRET:[0-9a-f]+\]\]\n$/);
+    assert.deepEqual(notes, { path: "NOTES.md", created: true, state: "as_run_left", before: null, after: "# Notes\n", unavailable: null });
   });
 
   test("reports later edits and removals, and reads only: no run, no lock", async () => {

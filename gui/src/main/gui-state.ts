@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, win32 } from "node:path";
+import { isLocalPathSyntax } from "./node-path.js";
 
 export const GUI_STATE_FILE_NAME = "gui-state.json";
 export const MAX_RECENT = 20;
@@ -47,6 +48,7 @@ export function settingsDir(platform: NodeJS.Platform, env: Readonly<Record<stri
   return home !== null && home.startsWith("/") ? posix.join(home, ".config", "codaryn") : null;
 }
 
+/** A recent entry: an absolute local path (R10b-L-2: no network, pipe or device path) and a time. */
 function isRecent(value: unknown, platform: NodeJS.Platform): value is RecentWorkspace {
   if (typeof value !== "object" || value === null) return false;
   const { path, openedAt } = value as Record<string, unknown>;
@@ -56,6 +58,7 @@ function isRecent(value: unknown, platform: NodeJS.Platform): value is RecentWor
     path.length <= MAX_PATH_CHARS &&
     !path.includes("\0") &&
     pathModule(platform).isAbsolute(path) &&
+    isLocalPathSyntax(path, platform) &&
     typeof openedAt === "string" &&
     !Number.isNaN(Date.parse(openedAt))
   );

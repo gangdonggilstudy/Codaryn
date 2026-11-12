@@ -223,3 +223,48 @@ button:focus-visible,
     animation: none !important;
   }
 }
+
+/* DR-29 (3.4): the line comparison. The +/- mark and the line numbers carry the meaning; colour only helps. */
+.changed-file {
+  margin: 1rem 0;
+}
+.diff {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  border: 1px solid #c8c8c8;
+  overflow-x: auto;
+}
+.diff li {
+  display: grid;
+  grid-template-columns: 3.5rem 3.5rem 1.5rem 1fr;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff .no {
+  color: #555;
+  text-align: right;
+  padding-right: 0.5rem;
+  user-select: none;
+}
+.diff .mark {
+  user-select: none;
+}
+.diff-added {
+  background: #e6f4ea;
+}
+.diff-removed {
+  background: #fdecea;
+}
+.diff li:focus {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+@media (forced-colors: active) {
+  .diff-added,
+  .diff-removed {
+    background: none;
+  }
+}

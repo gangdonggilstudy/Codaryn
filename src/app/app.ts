@@ -335,7 +335,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (!root.ok) return root;
       const runId = await runIdOf(root.value, request.runId);
       if (!runId.ok) return runId;
-      return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }), platform);
+      return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }));
     } catch {
       return { ok: false, error: appError("internal_error", "the changes could not be read") };
     }

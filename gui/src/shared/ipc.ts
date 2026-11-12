@@ -281,6 +281,8 @@ export interface SettingsView {
   readonly env: { readonly model: boolean; readonly language: boolean };
   /** GU-6: the config file's own rules (3.10): limits, command rules as text, protected paths, secret names. */
   readonly rules: SettingsRules;
+  /** DR-41: what each task kind's own rules leave out of these rules. */
+  readonly policyNarrowings: readonly PolicyNarrowingView[];
   /** SP-D3: the provider the config names (null: none, so `defaultProvider` is used). */
   readonly provider: string | null;
   readonly defaultProvider: string | null;
@@ -326,11 +328,6 @@ function toApiProviders(value: unknown): ApiProviderView[] | null {
 }
 
 export interface SettingsRules {
-  /**
-   * Whether the config file has its own `policy`. Until it has, a quick run uses its task kind's
-   * policy; once it has, the config's replaces it (src/cli/run.ts, underDefinition).
-   */
-  readonly policySet: boolean;
   readonly limits: readonly (readonly [string, number | null])[];
   readonly commands: readonly string[];
   readonly protectedPaths: readonly string[];
@@ -338,7 +335,7 @@ export interface SettingsRules {
   readonly secretEnv: readonly { readonly name: string; readonly set: boolean }[];
 }
 
-const EMPTY_RULES: SettingsRules = { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+const EMPTY_RULES: SettingsRules = { limits: [], commands: [], protectedPaths: [], secretEnv: [] };
 
 function toRules(value: unknown): SettingsRules | null {
   if (value === undefined) return EMPTY_RULES;
@@ -353,8 +350,26 @@ function toRules(value: unknown): SettingsRules | null {
     if (!isObj(item) || !shortText(item["name"]) || typeof item["set"] !== "boolean") return null;
     secretEnv.push({ name: item["name"], set: item["set"] });
   }
-  if (value["policySet"] !== undefined && typeof value["policySet"] !== "boolean") return null;
-  return { policySet: value["policySet"] === true, limits, commands: value["commands"], protectedPaths: value["protectedPaths"], secretEnv };
+  return { limits, commands: value["commands"], protectedPaths: value["protectedPaths"], secretEnv };
+}
+
+/** DR-41: what a task kind's own rules leave out of the config's policy (kinds and counts only). */
+export interface PolicyNarrowingView {
+  readonly workflow: string;
+  readonly kind: string;
+  readonly count: number;
+}
+
+/** The host's narrowings, checked; undefined (an older host) is none. */
+export function toNarrowings(value: unknown): PolicyNarrowingView[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_ITEMS) return null;
+  const out: PolicyNarrowingView[] = [];
+  for (const item of value) {
+    if (!isObj(item) || !hasOnlyKeys(item, ["workflow", "kind", "count"]) || !shortText(item["workflow"]) || typeof item["kind"] !== "string" || !WORD.test(item["kind"]) || !count(item["count"]) || item["count"] < 1) return null;
+    out.push({ workflow: item["workflow"], kind: item["kind"], count: item["count"] });
+  }
+  return out;
 }
 
 export type SettingsReply = { readonly ok: true; readonly view: SettingsView } | { readonly ok: false; readonly code: string };
@@ -387,6 +402,8 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
   const rules = toRules(view["rules"]);
   if (rules === null) return fail;
   const apiProviders = toApiProviders(view["apiProviders"]);
+  const policyNarrowings = toNarrowings(view["policyNarrowings"]);
+  if (policyNarrowings === null) return fail;
   const provider = view["provider"] ?? null;
   const defaultProvider = view["defaultProvider"] ?? null;
   if (apiProviders === null || !(provider === null || (typeof provider === "string" && PROVIDER_NAME.test(provider))) || !(defaultProvider === null || (typeof defaultProvider === "string" && PROVIDER_NAME.test(defaultProvider)))) return fail;
@@ -418,6 +435,7 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
       providers,
       env,
       rules,
+      policyNarrowings,
       provider: provider as string | null,
       defaultProvider: defaultProvider as string | null,
       apiProviders,
@@ -432,6 +450,8 @@ export type SettingsProposalReply =
       readonly token: string;
       readonly changes: readonly { readonly field: string; readonly change: string }[];
       readonly widening: readonly { readonly kind: string; readonly field: string }[];
+      /** DR-41: what each task kind's own rules would leave out of the new policy. */
+      readonly policyNarrowings: readonly PolicyNarrowingView[];
     }
   | { readonly ok: false; readonly code: string };
 
@@ -450,13 +470,18 @@ function fieldList(value: unknown, key: "change" | "kind"): { field: string; cha
 }
 
 /** The engine host's proposal, checked; the new config is kept by the main process only. */
-export function toHostProposal(value: unknown): { readonly ok: true; readonly next: Record<string, unknown>; readonly baseDigest: string; readonly changes: { field: string; change: string }[]; readonly widening: { kind: string; field: string }[] } | { readonly ok: false; readonly code: string } {
+export function toHostProposal(
+  value: unknown,
+):
+  | { readonly ok: true; readonly next: Record<string, unknown>; readonly baseDigest: string; readonly changes: { field: string; change: string }[]; readonly widening: { kind: string; field: string }[]; readonly policyNarrowings: PolicyNarrowingView[] }
+  | { readonly ok: false; readonly code: string } {
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const { next, baseDigest } = value;
   const changes = fieldList(value["changes"], "change") as { field: string; change: string }[] | null;
   const widening = fieldList(value["widening"], "kind") as { kind: string; field: string }[] | null;
-  if (!isObj(next) || typeof baseDigest !== "string" || !DIGEST.test(baseDigest) || changes === null || widening === null) return { ok: false, code: "host_error" };
-  return { ok: true, next, baseDigest, changes, widening };
+  const policyNarrowings = toNarrowings(value["policyNarrowings"]);
+  if (!isObj(next) || typeof baseDigest !== "string" || !DIGEST.test(baseDigest) || changes === null || widening === null || policyNarrowings === null) return { ok: false, code: "host_error" };
+  return { ok: true, next, baseDigest, changes, widening, policyNarrowings };
 }
 
 /** The engine host's written change, checked. */

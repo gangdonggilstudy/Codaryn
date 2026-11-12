@@ -257,7 +257,7 @@ export function registerIpc(deps: IpcDeps): void {
     const proposal = toHostProposal(response.value);
     if (!proposal.ok) return proposal;
     const token = deps.settingsProposals.issue({ next: proposal.next, baseDigest: proposal.baseDigest, changes: proposal.changes, widening: proposal.widening });
-    return { ok: true, token, changes: proposal.changes, widening: proposal.widening };
+    return { ok: true, token, changes: proposal.changes, widening: proposal.widening, policyNarrowings: proposal.policyNarrowings };
   });
 
   handle(IPC_CHANNELS.applySettings, async (args): Promise<SettingsWrittenReply> => {

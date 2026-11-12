@@ -32,6 +32,7 @@ import type {
   SettingsReply,
   SettingsProposalReply,
   SettingsRules,
+  PolicyNarrowingView,
   ApiProviderView,
   SettingsWrittenReply,
   TreeEntryView,
@@ -191,6 +192,7 @@ export function asSettings(value: unknown): SettingsReply {
       providers: strList(view["providers"]) ? view["providers"] : [],
       env: { model: env["model"] === true, language: env["language"] === true },
       rules: asRules(view["rules"]),
+      policyNarrowings: asNarrowings(view["policyNarrowings"]),
       provider: str(view["provider"]) ? view["provider"] : null,
       defaultProvider: str(view["defaultProvider"]) ? view["defaultProvider"] : null,
       apiProviders: Array.isArray(view["apiProviders"]) ? view["apiProviders"].flatMap(asApiProvider) : [],
@@ -216,14 +218,14 @@ function asApiProvider(value: unknown): ApiProviderView[] {
 }
 
 function asRules(value: unknown): SettingsRules {
-  if (!isObj(value)) return { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+  if (!isObj(value)) return { limits: [], commands: [], protectedPaths: [], secretEnv: [] };
   const limits = Array.isArray(value["limits"])
     ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
     : [];
   const secretEnv = Array.isArray(value["secretEnv"])
     ? value["secretEnv"].flatMap((item) => (isObj(item) && str(item["name"]) && typeof item["set"] === "boolean" ? [{ name: item["name"], set: item["set"] }] : []))
     : [];
-  return { policySet: value["policySet"] === true, limits, commands: strList(value["commands"]) ? value["commands"] : [], protectedPaths: strList(value["protectedPaths"]) ? value["protectedPaths"] : [], secretEnv };
+  return { limits, commands: strList(value["commands"]) ? value["commands"] : [], protectedPaths: strList(value["protectedPaths"]) ? value["protectedPaths"] : [], secretEnv };
 }
 
 type FieldChange = { readonly field: string; readonly change: string };
@@ -244,11 +246,22 @@ function fields(value: unknown): { changes: FieldChange[]; widening: Widening[] 
   return { changes, widening };
 }
 
-/** GU-6: a settings change proposal (a token from the main process, the changed fields, the widening kinds). */
+/** DR-41: task kinds' narrowings of the config's policy; entries that do not fit are left out. */
+function asNarrowings(value: unknown): PolicyNarrowingView[] {
+  return Array.isArray(value)
+    ? value.flatMap((item) =>
+        isObj(item) && str(item["workflow"]) && str(item["kind"]) && typeof item["count"] === "number" && Number.isSafeInteger(item["count"]) && item["count"] >= 1
+          ? [{ workflow: item["workflow"], kind: item["kind"], count: item["count"] }]
+          : [],
+      )
+    : [];
+}
+
+/** GU-6: a settings change proposal (a token from the main process, the changed fields, the widening kinds, DR-41's narrowings). */
 export function asProposal(value: unknown): SettingsProposalReply {
   if (!isObj(value) || value["ok"] !== true || !str(value["token"]) || !HEX.test(value["token"])) return failed(value);
   const found = fields(value);
-  return found === null ? { ok: false, code: "host_error" } : { ok: true, token: value["token"], ...found };
+  return found === null ? { ok: false, code: "host_error" } : { ok: true, token: value["token"], ...found, policyNarrowings: asNarrowings(value["policyNarrowings"]) };
 }
 
 /** GU-6: a written settings change. */

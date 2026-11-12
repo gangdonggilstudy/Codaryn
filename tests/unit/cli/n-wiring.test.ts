@@ -221,8 +221,8 @@ describe("N-23 --run latest names the chosen run before it acts", () => {
     }
     const listRuns: ListRuns = async () => ({
       runs: [
-        { state: "checked", runId: running, startedAt: "2026-11-12T04:00:00.000Z", taskId: "t", status: null, reason: null, changes: null, reverted: null },
-        { state: "checked", runId: finished, startedAt: "2026-11-12T03:00:00.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null },
+        { state: "checked", runId: running, startedAt: "2026-11-12T04:00:00.000Z", taskId: "t", status: null, reason: null, changes: null, reverted: null, revertRecordDamaged: false },
+        { state: "checked", runId: finished, startedAt: "2026-11-12T03:00:00.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false },
       ],
     });
     const order: string[] = [];

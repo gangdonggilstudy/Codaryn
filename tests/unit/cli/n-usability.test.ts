@@ -569,7 +569,7 @@ describe("N-7, N-18 --run latest and revert --dry-run", () => {
     randomBytes: (size: number) => new Uint8Array(size).fill(0xab),
     revert,
   });
-  const listRuns: ListRuns = async () => ({ runs: [{ state: "damaged", runId: toRunId("20261112T090000Z-ffffffff") ?? runId }, { state: "checked", runId, startedAt: "2026-11-12T02:00:00.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null }] });
+  const listRuns: ListRuns = async () => ({ runs: [{ state: "damaged", runId: toRunId("20261112T090000Z-ffffffff") ?? runId }, { state: "checked", runId, startedAt: "2026-11-12T02:00:00.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false }] });
 
   test("N-18: a run directory named latest makes the alias an error and nothing changes", async () => {
     const dir = await workspace(["latest"]);

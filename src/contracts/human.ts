@@ -363,6 +363,8 @@ export const FIXED_MESSAGES = {
   "runs.incomplete": {},
   "runs.damaged": {},
   "runs.reverted": {},
+  // N-23 (g): the run's own records are fine, only its revert record failed the checks.
+  "runs.revert_record_damaged": {},
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.

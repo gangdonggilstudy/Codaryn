@@ -289,7 +289,11 @@ export const RUN_TIMESTAMP_PATTERN_SOURCE = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2
  * - revert.json, when present, has `kind` "revert_record", the same `runId`, `at` matching
  *   RUN_TIMESTAMP_PATTERN_SOURCE, `status` "complete" or "partial";
  * - each file is read at most MAX_REPORT_FILE_BYTES; a missing result.json or revert.json is not
- *   damage (the fields are null), but one that cannot be read, parsed or checked is.
+ *   damage (the fields are null), but a result.json that cannot be read, parsed or checked is.
+ * - N-23 (g): a revert.json that cannot be read, parsed or checked does not make the run damaged:
+ *   the entry stays `checked` with `reverted: null` and `revertRecordDamaged: true`, and
+ *   `revert` goes on without the record. N-26: a `damaged` run is refused by `revert`
+ *   (`invalid_run_record`) even when named by its id.
  * - N-22: the checks are at least as strict as `report`'s: `run_started` also has
  *   `schemaVersion` 1 and a known provider; result.json also has `schemaVersion` 1, a known
  *   provider, the journal's `taskId`, and `changes` entries of the FileChangeRecord shape.
@@ -312,6 +316,8 @@ export type RunListEntry =
       readonly changes: number | null;
       /** The last revert of this run, from its revert record; null when never reverted. */
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
+      /** N-23 (g): the run has a revert record that failed the checks; it is shown apart and ignored. */
+      readonly revertRecordDamaged: boolean;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
 

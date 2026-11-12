@@ -40,7 +40,7 @@ import type {
   RunId,
   TerminalRunStatus,
 } from "../contracts/index.js";
-import { assertRunId, errorCode, isPlainDirectory, runDir, sameFsPath } from "./common.js";
+import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -416,6 +416,8 @@ export async function inspectRun(workspaceRoot: string, runId: string, now: numb
     const code = errorCode(error);
     return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
   }
+  // N-27 (a): only the entry of exactly this name; a case variant names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, id))) return "missing";
   const dir = join(runsDir, id);
   try {
     const info = await lstat(dir);
@@ -456,7 +458,7 @@ export function latestRun(runs: readonly RunListEntry[]): CheckedRun | null {
 export async function readRevertRecord(workspaceRoot: string, runId: string): Promise<RevertRecord | null> {
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
-  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
+  if (!(await isOwnRunDir(workspaceRoot, runId))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
   try {
     return await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
   } catch {
@@ -484,7 +486,7 @@ export async function writeRevertRecord(workspaceRoot: string, record: RevertRec
     throw new TypeError("writeRevertRecord needs a valid RevertRecord");
   }
   const dir = runDir(workspaceRoot, record.runId);
-  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; no revert record was written");
+  if (!(await isOwnRunDir(workspaceRoot, record.runId))) throw new RunListError("the run directory is missing or a link; no revert record was written");
   const target = join(dir, REVERT_RECORD_FILE_NAME);
   const temporary = `${target}.${randomBytes(8).toString("hex")}.tmp`;
   try {

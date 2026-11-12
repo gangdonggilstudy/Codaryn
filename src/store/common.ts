@@ -2,7 +2,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { realpath as realpathCallback } from "node:fs";
-import { link, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -115,6 +115,25 @@ export async function replaceAtomically(target: string, data: string | Uint8Arra
     await rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * N-27 (a): whether `.codaryn/runs` has an entry named exactly `runId`. On volumes that ignore
+ * case (NTFS, APFS by default) a run id that differs only in case would open another run's
+ * directory; every reader and writer that takes a run id from outside checks this first.
+ */
+export async function hasExactRunEntry(workspaceRoot: string, runId: string): Promise<boolean> {
+  try {
+    const names = await readdir(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME));
+    return names.includes(runId);
+  } catch {
+    return false;
+  }
+}
+
+/** The run's own directory: an entry of exactly this name, a plain directory (no link). */
+export async function isOwnRunDir(workspaceRoot: string, runId: string): Promise<boolean> {
+  return (await hasExactRunEntry(workspaceRoot, runId)) && (await isPlainDirectory(runDir(workspaceRoot, runId)));
 }
 
 /** Creates the state directory and `runs/<runId>/` when missing; the run directory must then be plain. */

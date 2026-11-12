@@ -222,7 +222,7 @@ test("cleanup (DR-44): the screen asks apart about not reverted runs and discard
     byId("cleanup-preview")?.click();
     await settle();
     assert.deepEqual(calls.find(([name]) => name === "previewCleanup")?.[1], ["1".repeat(32), { runs: { olderThanDays: 0, runIds: [RUN_C] }, discarded: { runIds: [APPLY_B] } }]);
-    assert.ok(byId("cleanup-plan-not-reverted")?.textContent.includes("2 of them are runs that were not reverted, or only partly"), "DR-44 (a): asked apart");
+    assert.ok(byId("cleanup-plan-not-reverted")?.textContent.includes("2 of them are runs that were not reverted, only partly, or whose records cannot be checked"), "DR-44 (a): asked apart");
     assert.ok(byId("cleanup-plan-discarded")?.textContent.includes("deleted for good"));
     assert.ok(byId("cleanup-plan-discarded-left")?.textContent.includes("If their discard boxes stay, a revert can no longer put those files back"), "DR-44 (c)");
     assert.ok(byId("cleanup-plan-leftovers") !== undefined);
@@ -244,4 +244,19 @@ test("cleanup (DR-44): the screen asks apart about not reverted runs and discard
   } finally {
     restore();
   }
+});
+
+test("cleanup (R-34b P-1): a run whose records cannot be checked is asked about apart, by the store's own count", () => {
+  // The contract decides which warnings need includeNotReverted (NOT_REVERTED_WARNINGS) and the store
+  // counts them (totals.runs.notReverted). A damaged run may carry a code the window does not know.
+  const plan = {
+    items: [{ target: "run" as const, id: RUN_C, files: 2, bytes: 200, warnings: ["records_unverifiable"] }],
+    blocked: [],
+    totals: { runs: { count: 1, notReverted: 1, files: 2, bytes: 200 }, discarded: { count: 0, files: 0, bytes: 0 }, leftovers: { count: 0, files: 0, bytes: 0 } },
+    parked: size(0, 0),
+    digest: DIGEST,
+  };
+  assert.equal(cleanupQuestions(plan).notReverted, 1, "asked apart: the main process follows the store's count");
+  const known = { ...plan, items: [{ ...plan.items[0]!, warnings: ["not_reverted"] }], totals: { ...plan.totals, runs: { ...plan.totals.runs, notReverted: 0 } } };
+  assert.equal(cleanupQuestions(known).notReverted, 1, "a known code still counts when a total is missing or lower");
 });

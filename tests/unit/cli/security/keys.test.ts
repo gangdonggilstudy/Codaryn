@@ -4,7 +4,8 @@ import { describe, test } from "node:test";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey } from "../../../../src/cli/security/index.js";
 
 /** Fake values only. The shape is built at run time so no key-shaped literal sits in the source. */
-const FAKE_SHAPED = ["sk", "ant", "fakefakefake0000"].join("-");
+// DR-36 (c): the refusal shape needs 32 or more characters with a digit after sk-ant-.
+const FAKE_SHAPED = ["sk", "ant", "fakefakefake0000fakefakefake0000"].join("-");
 const CURRENT = "fake-current-key-0123456789-abcdefXYZ";
 
 function nest(depth: number): unknown {

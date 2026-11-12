@@ -148,7 +148,8 @@ export function changedRegion(before: string | null, after: string | null): stri
 export function renderChanges(output: ChangesOutput): string {
   const out = [`changes of run ${output.runId}, masked with the secrets registered now (not the run's own masking)`];
   // DR-29: a file's text is shown only when the secrets registered now mask it as the run did, by
-  // the run's record. Otherwise the file has its path and state only; this is said once, not per file.
+  // the run's record. Why is said once; which files have no text is said per file, since one result
+  // can hold both (the app layer's finding).
   if (output.files.some((file) => file.unavailable === "masking_unverified")) {
     out.push("no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)");
   }
@@ -156,7 +157,6 @@ export function renderChanges(output: ChangesOutput): string {
   for (const file of output.files) {
     const what = file.created ? "created by the run" : "changed by the run";
     out.push(`== ${cleanText(file.path)}: ${what}; ${STATE_TEXT[file.state]}`);
-    if (file.unavailable === "masking_unverified") continue;
     if (file.unavailable !== null) {
       out.push(`   the text is not shown (${file.unavailable})`);
       continue;

@@ -172,10 +172,10 @@ describe("runChanges", () => {
     await writeFile(path.join(base, "other.json"), JSON.stringify({ ...task, privacy: { secretEnv: [] } }), "utf8");
     const app = createCodarynApp(await appEnvironment(base, { env: {} }));
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "other.json"), "--run", "latest"], env: {}, app }));
-    // The reason is given once; the file without text has its path and state only.
+    // The reason is given once; the file without text has its path, its state and its own mark
+    // (the app layer's finding: one result can hold files with and without text).
     assert.equal(shown.split("(DR-29)\n").length, 2, shown);
-    assert.match(shown, /== README\.md: changed by the run; as the run left it\n== NOTES\.md/);
-    assert.equal(shown.includes("(masking_unverified)"), false);
+    assert.match(shown, /== README\.md: changed by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)\n== NOTES\.md/);
     // NOTES.md holds no secret: either set of secrets leaves the same text visible.
     assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n@@ -1,0 \+1,1 @@\n\+ # Notes\n/);
     assert.equal(shown.includes(FAKE_SECRET), false);

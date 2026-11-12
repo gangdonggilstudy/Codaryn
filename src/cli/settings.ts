@@ -14,6 +14,7 @@ import {
   MODEL_PLACEHOLDER_PATTERN_SOURCE,
 } from "../contracts/index.js";
 import type {
+  ApiBaseUrlEnv,
   ApiModelConfig,
   ApiProviderName,
   CliErrorCode,
@@ -230,25 +231,28 @@ export function resolveConnection(
 }
 
 /**
- * DR-34 (a): where `provider`'s key is sent, for doctor: the origin of its address and the setting
- * the address came from. Only the origin: a path may hold more than an address. Null when the
- * provider's address variable is set but not valid (a run stops then, nothing is sent).
+ * DR-34 (a), DR-36 (b): where `provider`'s key is sent, for doctor: the address it goes to and the
+ * setting it came from (the provider's address variable, its config field, or the default).
+ * `invalid`: the address variable is set but breaks the address rule (a run stops, nothing is
+ * sent). Doctor shows only the origin of the address (toApiOrigin).
  */
-export function keyDestination(
-  env: SettingsEnvironment,
-  config: CodarynConfig | null,
-  provider: ApiProviderName,
-): { readonly origin: string; readonly source: string } | null {
+export type KeyDestination =
+  | { readonly kind: "env"; readonly address: string; readonly variable: ApiBaseUrlEnv }
+  | { readonly kind: "config"; readonly address: string; readonly field: string }
+  | { readonly kind: "default"; readonly address: string }
+  | { readonly kind: "invalid"; readonly variable: ApiBaseUrlEnv };
+
+export function keyDestination(env: SettingsEnvironment, config: CodarynConfig | null, provider: ApiProviderName): KeyDestination {
   const spec = API_PROVIDERS[provider];
-  const variable = API_PROVIDERS[provider].baseUrlEnv;
+  const variable = spec.baseUrlEnv;
   const fromEnv = envValue(env, variable);
   if (fromEnv !== null) {
     const normalized = normalizeApiBaseUrlStrict(fromEnv, variable, spec.baseUrlPath);
-    return normalized.ok ? { origin: new URL(normalized.url).origin, source: variable } : null;
+    return normalized.ok ? { kind: "env", address: normalized.url, variable } : { kind: "invalid", variable };
   }
   const own = providerSettingsOf(config, provider).apiBaseUrl;
-  if (own !== undefined) return { origin: new URL(own).origin, source: `config ${configFieldOf(config, provider, "apiBaseUrl")}` };
-  return { origin: new URL(spec.defaultApiBaseUrl).origin, source: "the default address" };
+  if (own !== undefined) return { kind: "config", address: own, field: configFieldOf(config, provider, "apiBaseUrl") };
+  return { kind: "default", address: spec.defaultApiBaseUrl };
 }
 
 /** Y-2: the key and connection for listing `provider`'s models (default anthropic). No model or output cap is needed. */

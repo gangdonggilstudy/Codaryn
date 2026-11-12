@@ -35,7 +35,8 @@ const BASE = path.resolve("/tmp/codaryn-config-unit");
 /** Not a real key format. */
 const FAKE_KEY = "fake-api-key-not-real-0001";
 /** Has the shape of an Anthropic key. Built at run time so the file never holds such a literal. */
-const KEY_SHAPED = ["sk", "ant", "FAKEfake0000FAKEfake0000"].join("-");
+// DR-36 (c): the refusal shape needs 32 or more characters with a digit after sk-ant-.
+const KEY_SHAPED = ["sk", "ant", "FAKEfake0000FAKEfake0000FAKEfake00"].join("-");
 const FAKE_SECRET = "fake-secret-VALUE-0003";
 
 /** S-7: anthropic tasks must have a token limit. */

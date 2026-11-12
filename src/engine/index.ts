@@ -56,6 +56,7 @@ import {
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_NAMES,
   asRawText,
+  countPrivacyTokens,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -321,6 +322,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   let baseline: IntegrityManifest | null = null;
   /** `changed` of the latest recorded `integrity_checked`; undefined while none was recorded. */
   let protectedChanged: readonly MaskedText[] | undefined;
+  // DR-52 (U-25): the protected tokens in what the engine sent to the model (EngineResult.masking).
+  let maskedPlaces = 0;
   // DR-38: the state guard, the last tier-run fingerprint (each window chains from it) and the
   // tier-state base of the run's start; the last recorded list goes into the result.
   const stateGuard = deps.stateGuard;
@@ -1023,6 +1026,12 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         system: turn === 1 ? system : null,
         newMessages: messages.slice(sent),
       });
+      // DR-52: each text counted once, when first sent; the model's own messages are not counted.
+      if (turn === 1) maskedPlaces += countPrivacyTokens(system);
+      for (const message of messages.slice(sent)) {
+        if (message.role === "user") maskedPlaces += countPrivacyTokens(message.content);
+        else if (message.role === "tool") for (const sentResult of message.results) maskedPlaces += countPrivacyTokens(sentResult.content);
+      }
       sent = messages.length;
 
       // W-1: this turn and its tool calls may change protected material.
@@ -1325,6 +1334,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
       // DR-38: only when at least one state_checked was recorded; the last one's list.
       ...(stateChanged !== undefined ? { stateChanged } : {}),
+      // DR-52: counts only, and only when the gateway says it holds at least one value.
+      ...(privacy.registeredValues !== undefined && privacy.registeredValues > 0
+        ? { masking: { registeredValues: privacy.registeredValues, maskedPlaces } }
+        : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),

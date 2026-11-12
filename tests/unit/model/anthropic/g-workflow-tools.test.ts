@@ -24,7 +24,7 @@ import type {
   ResolvedTaskSpec,
   WorkflowToolName,
 } from "../../../../src/contracts/index.js";
-import { runTask } from "../../../../src/engine/index.js";
+import { SYSTEM_PROMPT, runTask } from "../../../../src/engine/index.js";
 import { createAnthropicProvider } from "../../../../src/model/anthropic/index.js";
 import { createPrivacyGateway } from "../../../../src/privacy/index.js";
 
@@ -162,6 +162,24 @@ describe("requests without workflow tools keep their bytes", () => {
     assert.equal(result.status, "done");
     assert.deepEqual(
       run.bodies.map((body) => [Buffer.byteLength(body), sha(body)]),
+      [
+        [3601, "a5119910af99535d47b3ff34a0ad1cadbf8d8a8456f77da7da52b1b61cb473dc"],
+        [3991, "c17b5a2170d722e25f543f02724436459de9814758d0f0e692e537cd7fbc9f4f"],
+      ],
+    );
+    // U-15 (AXM-16, approved): only the system text changed. With the prompt before U-15 put back,
+    // the bodies are the ones pinned before, byte for byte (tool definitions, messages and the rest).
+    const lines = SYSTEM_PROMPT.split("\n");
+    const previous = lines
+      .filter((line) => line !== "Only the tools offered in this run exist." && !line.startsWith("You cannot ask the person anything during the run."))
+      .map((line) => (line.startsWith("When the work is finished, reply without tool calls:") ? "When the work is finished, reply without tool calls. Verifiers decide whether the task succeeded." : line))
+      .join("\n");
+    assert.equal(lines.length - previous.split("\n").length, 2, "two lines added, one replaced");
+    assert.deepEqual(
+      run.bodies.map((body) => {
+        const before = body.replace(JSON.stringify(SYSTEM_PROMPT), JSON.stringify(previous));
+        return [Buffer.byteLength(before), sha(before)];
+      }),
       [
         [3328, "e4da25050289e3c867a69f1573abacb99e2009ba4a95742add7b9266145f04a0"],
         [3718, "141ca5a0fffc0d4a762d81f5844e06b1e499e598acd7a08595550d4cfcecd582"],

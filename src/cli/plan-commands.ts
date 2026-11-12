@@ -16,6 +16,8 @@
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  JOURNAL_FILE_NAME,
+  MAX_PLAN_SUMMARY_CHARS,
   MAX_REPORT_FILE_BYTES,
   PLAN_EXIT_CODES,
   RESULT_FILE_NAME,
@@ -44,6 +46,7 @@ import type {
   LoadPlan,
   MaskedPlanAction,
   MaskedText,
+  MessageCatalog,
   PlanOutput,
   PrivacyGateway,
   ResolvedPlanAction,
@@ -105,6 +108,17 @@ export interface PlanCommandEnvironment extends PrepareEnvironment {
   readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
   /** N-23: told which run `--run latest` chose, before anything is read. */
   readonly announceLatest?: (entry: CheckedRun) => void;
+  /**
+   * U-1, U-14: the store's `hasRecordsChangedMark` (the default); injected by tests. `plan` shows a
+   * marked plan run with a warning and without the command to apply it; `apply` asks for the plan
+   * run before anything is asked of the person, and passes it to the engine for its check under the
+   * lock. A rejection counts as a mark.
+   */
+  readonly hasRecordsChangedMark?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+  /** U-14 (AXM-15): the plan run's journal text, for the model's summary only; the file otherwise. */
+  readonly readJournal?: (workspaceRoot: string, runId: string) => Promise<string>;
+  /** U-14: the catalog of the plan view's lines (plan.*); English when absent. */
+  readonly messages?: MessageCatalog;
 }
 
 /**
@@ -126,11 +140,6 @@ export interface AdapterApply {
 
 export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
   readonly applyPlan?: ApplyPlan;
-  /**
-   * U-1: the store's `hasRecordsChangedMark` (the default); injected by tests. Asked for the plan run
-   * before anything is asked of the person, and passed to the engine for its check under the lock.
-   */
-  readonly hasRecordsChangedMark?: (workspaceRoot: string, runId: string) => Promise<boolean>;
   /**
    * U-29 (R-44 R44-L1): the store's `stateUncheckedSince` (the default); injected by tests. Passed to
    * the engine as ApplyDeps.planRecordsUnchecked, which asks it once after the U-1 check.
@@ -326,19 +335,125 @@ async function loadShown(
   return { ok: true, plan: loaded.plan, digest: loaded.digest, output, privacy };
 }
 
-/** The text of `codaryn plan` without `--json`. */
-export function renderPlan(output: PlanOutput, currentKey: KnownKeys): string {
+/** U-14: the plan view's lines the catalog has (plan.*), and their English while it does not (N-B). */
+const PLAN_VIEW_TEXTS = {
+  "plan.records_changed":
+    "Warning: this run's records were changed by something other than the run (a records-changed mark), so this plan may not be the one the run made.",
+  "plan.cannot_apply": "This plan cannot be applied. Make the plan again with a new codaryn run, read the new plan, and apply that one.",
+  "plan.summary_label": "The agent's description (not part of what you approve)",
+  "plan.digest_guarantee":
+    "The digest names exactly these actions and the files' contents when the plan was made; apply refuses if the plan, a file or the run's records changed since.",
+} as const;
+
+function planViewText(messages: MessageCatalog | undefined, id: keyof typeof PLAN_VIEW_TEXTS): string {
+  if (messages === undefined) return PLAN_VIEW_TEXTS[id];
+  try {
+    return (messages.format as (id: string) => string)(id);
+  } catch {
+    return PLAN_VIEW_TEXTS[id];
+  }
+}
+
+/**
+ * The text of `codaryn plan` without `--json`, and what apply's terminal question shows.
+ * U-14 (UXM-6, AXM-2, AXM-15): a marked plan run has the warning first and, while pending, that it
+ * cannot be applied in place of the command to apply it; the model's summary is the agent's
+ * description under its label; the last line says what the digest guarantees.
+ */
+export function renderPlan(output: PlanOutput, currentKey: KnownKeys, messages?: MessageCatalog): string {
+  const marked = output.recordsChanged === true;
   const lines = [
+    ...(marked ? [planViewText(messages, "plan.records_changed")] : []),
     `Plan of run ${output.runId}: ${output.actions.length} action(s), ${output.status}`,
     `Digest: ${output.digest}`,
     ...actionLines(output.actions, currentKey),
   ];
+  if (output.summary !== undefined) {
+    lines.push(`${planViewText(messages, "plan.summary_label")}: ${cleanText(hideKeys(output.summary, currentKey))}`);
+  }
   if (output.inventoryLimitReached) {
     lines.push("The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.");
   }
   if (output.appliedBy !== null) lines.push(`Applied by run ${output.appliedBy.runId} at ${output.appliedBy.at}.`);
+  else if (marked) lines.push(planViewText(messages, "plan.cannot_apply"));
   else lines.push(`To apply it: codaryn apply <the same task form> --run ${output.runId} --digest ${output.digest.slice(0, 12)}`);
+  lines.push(planViewText(messages, "plan.digest_guarantee"));
   return `${lines.join("\n")}\n`;
+}
+
+/** U-1, U-14: whether the plan run has a records-changed mark; one that cannot be read counts (fail closed). */
+async function planRunMarked(io: PlanCommandEnvironment, workspaceRoot: string, runId: string): Promise<boolean> {
+  try {
+    return await (io.hasRecordsChangedMark ?? storeHasRecordsChangedMark)(workspaceRoot, runId);
+  } catch {
+    return true;
+  }
+}
+
+async function readPlanJournal(workspaceRoot: string, runId: string): Promise<string> {
+  const file = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId, JOURNAL_FILE_NAME);
+  const info = await lstat(file);
+  if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) throw new Error("the journal cannot be read");
+  return await readFile(file, "utf8");
+}
+
+const PROPOSE_PLAN_TOOL = "propose_plan";
+const field = (value: unknown, name: string): unknown =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>)[name] : undefined;
+
+/**
+ * U-14 (AXM-15, PlanOutput.summary): the summary the model wrote for this plan. The one thing the
+ * view reads from the plan run's journal: the masked args of the propose_plan call whose ok result
+ * names this plan's digest, masked again with the current secrets. null when it cannot be found,
+ * read or masked; the plan is shown without it.
+ */
+async function planSummary(io: PlanCommandEnvironment, workspaceRoot: string, runId: string, digest: ContentHash, privacy: PrivacyGateway): Promise<MaskedText | null> {
+  try {
+    const text = await (io.readJournal ?? readPlanJournal)(workspaceRoot, runId);
+    const calls = new Map<string, string>();
+    let callId: string | null = null;
+    for (const line of text.split("\n")) {
+      if (line.length === 0) continue;
+      const record: unknown = JSON.parse(line);
+      if (field(record, "runId") !== runId) return null;
+      const type = field(record, "type");
+      if (type === "model_response") {
+        const toolCalls = field(record, "toolCalls");
+        for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
+          const id = field(call, "id");
+          const argsJson = field(call, "argsJson");
+          if (field(call, "name") === PROPOSE_PLAN_TOOL && typeof id === "string" && typeof argsJson === "string") calls.set(id, argsJson);
+        }
+      } else if (type === "tool_result") {
+        const result = field(record, "result");
+        const content = field(result, "content");
+        const id = field(result, "callId");
+        if (field(result, "tool") !== PROPOSE_PLAN_TOOL || field(result, "ok") !== true || typeof content !== "string" || typeof id !== "string") continue;
+        let payload: unknown;
+        try {
+          payload = JSON.parse(content);
+        } catch {
+          continue;
+        }
+        if (field(payload, "digest") === digest) callId = id;
+      }
+    }
+    const argsJson = callId === null ? undefined : calls.get(callId);
+    if (argsJson === undefined) return null;
+    const summary = field(JSON.parse(argsJson), "summary");
+    if (typeof summary !== "string") return null;
+    const masked = privacy.mask(summary);
+    if (!masked.ok) return null;
+    // R-49 R49-M1: the same hiding as the person's text, here, so every output that carries the
+    // summary (--json, the app layer, apply's question) has it: registered secrets (above), the
+    // current key and key-shaped text, control characters.
+    const shown = cleanText(hideKeys(masked.text, knownKeyValues(io.env))).trim();
+    // Masking may lengthen it (tokens); far beyond the tool's limit it is not the tool's record.
+    if (shown.length === 0 || shown.length > MAX_PLAN_SUMMARY_CHARS * 4) return null;
+    return shown as MaskedText;
+  } catch {
+    return null;
+  }
 }
 
 /** `codaryn plan ... --run <runId|latest> [--json]` (DR-5, DR-17). */
@@ -349,9 +464,14 @@ export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcom
   if (!ready.ok) return ready.outcome;
   const shown = await loadShown(io, ready.value, true);
   if (!shown.ok) return shown.outcome;
+  // U-14 (AXM-2): a marked plan run is still shown, as one that cannot be applied; its journal may
+  // have been changed too, so the summary is left out.
+  const marked = await planRunMarked(io, ready.value.workspaceRoot, ready.value.runId);
+  const summary = marked ? null : await planSummary(io, ready.value.workspaceRoot, ready.value.runId, shown.digest, shown.privacy);
+  const output: PlanOutput = { ...shown.output, ...(summary === null ? {} : { summary }), ...(marked ? { recordsChanged: true as const } : {}) };
   const currentKey = knownKeyValues(io.env);
-  if (parsed.args.json) return { output: shown.output, exitCode: shown.output.exitCode };
-  return { text: renderPlan(shown.output, currentKey), exitCode: shown.output.exitCode };
+  if (parsed.args.json) return { output, exitCode: output.exitCode };
+  return { text: renderPlan(output, currentKey, io.messages), exitCode: output.exitCode };
 }
 
 const YES = new Set(["y", "yes", "예", "네"]);
@@ -376,18 +496,11 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   // U-1 (R-33 R33-L3): a plan run whose records were changed by something else may hold another plan
   // than the one the person saw. It is refused before anything is asked; a mark that cannot be read
   // counts (fail closed). The engine checks again under the lock (ApplyDeps.planRecordsChanged).
-  const hasMark = io.hasRecordsChangedMark ?? storeHasRecordsChangedMark;
-  const planRecordsChanged = async (): Promise<boolean> => {
-    try {
-      return await hasMark(workspaceRoot, planRunId);
-    } catch {
-      return true;
-    }
-  };
+  const planRecordsChanged = (): Promise<boolean> => planRunMarked(io, workspaceRoot, planRunId);
   if (await planRecordsChanged()) {
     return cliError(
       "plan_records_changed",
-      "the plan run's records were changed by something other than the run (a records-changed mark), so its plan may not be the one shown; nothing was asked, recorded or moved. Make the plan again with a new run",
+      "the plan run's records were changed by something other than the run (a records-changed mark), so its plan may not be the one shown; nothing was asked, recorded or moved. Make the plan again with a new codaryn run (codaryn plan only shows a plan, it does not make one)",
     );
   }
 
@@ -428,7 +541,9 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
       cancel.dispose();
     }
     const currentKey = knownKeyValues(io.env);
-    const question = [renderPlan({ ...shown.output, inventoryLimitReached }, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
+    // U-14 (AXM-15): the approval question shows the agent's description too (not part of the digest).
+    const summary = await planSummary(io, workspaceRoot, planRunId, shown.digest, shown.privacy);
+    const question = [renderPlan({ ...shown.output, inventoryLimitReached, ...(summary === null ? {} : { summary }) }, currentKey, io.messages).trimEnd(), "Apply this plan? [y/N] "].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
     approval = "cli-tty";

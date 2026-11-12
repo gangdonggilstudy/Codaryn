@@ -16,7 +16,7 @@ import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 export { RevertRunError, createChangeRecorder, revertRun, snapshotsRelativePath } from "./changes.js";
 export type { RevertRunErrorCode } from "./changes.js";
 export { RUN_START_TOLERANCE_MS, RunListError, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
-export { acquireLock, nodeLockFileSystem, releaseLock } from "./lock.js";
+export { PROCESS_START_TOLERANCE_MS, acquireLock, nodeLockFileSystem, processStartTime, releaseLock } from "./lock.js";
 export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ReleaseLockOptions } from "./lock.js";
 
 export interface JournalOptions {

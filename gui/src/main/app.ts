@@ -10,7 +10,8 @@ import { existsSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { BrowserWindow, Menu, app, session } from "electron";
+import { BrowserWindow, Menu, app, dialog, session } from "electron";
+import type { MessageBoxOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
 import { APP_INDEX_URL } from "./app-url.js";
@@ -19,8 +20,14 @@ import { startEngineHost } from "./engine-client.js";
 import type { EngineHost, StartOutcome } from "./engine-client.js";
 import { hostEnvironment } from "./environment.js";
 import { GUI_STATE_FILE_NAME, settingsDir } from "./gui-state.js";
-import { registerIpc } from "./ipc.js";
-import { findDevelopmentNode } from "./node-path.js";
+import { dialogText } from "./dialog-texts.js";
+import type { DialogLanguage, DialogTextId } from "./dialog-texts.js";
+import { cancelActiveRun, registerIpc, texts } from "./ipc.js";
+import { RunManager } from "./runs.js";
+import { RunHistory } from "./history.js";
+import { PlanApprovals } from "./plans.js";
+import { ModelEntries } from "./model-entries.js";
+import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
 import { guardContents, secureSession } from "./security.js";
 import { SESSION_PARTITION, debuggingRequested, secureWebPreferences } from "./security-policy.js";
@@ -37,6 +44,11 @@ export interface GuiOptions {
   readonly showHostStderr?: boolean;
   /** Called once the window has loaded (smoke tests only; `main.ts` never sets it). */
   readonly afterLoad?: (context: GuiContext) => Promise<void>;
+  /**
+   * Answers the main process's OS dialogs instead of a person: gets the dialog's id and returns the
+   * index of the button chosen (smoke tests only; `main.ts` never sets it).
+   */
+  readonly answerDialog?: (id: DialogTextId) => Promise<number>;
 }
 
 export interface GuiContext {
@@ -128,6 +140,33 @@ export function startGui(options: GuiOptions): void {
     isDirectory,
   });
   let initialWorkspace: { readonly handle: string; readonly name: string } | null = null;
+  let language: DialogLanguage = "en";
+  const history = new RunHistory((size) => randomBytes(size), () => Date.now());
+  const approvals = new PlanApprovals((size) => randomBytes(size), () => Date.now());
+  const runs = new RunManager({
+    send: (channel, payload) => {
+      if (window !== null && !window.isDestroyed()) window.webContents.send(channel, payload);
+    },
+    labels: async (status, reason) => {
+      const state = await hostState;
+      const ids = [`status.${status}`, `reason.${reason}`];
+      const found = "host" in state ? await texts(state.host, app.getLocale(), ids) : null;
+      return { status: found?.texts[ids[0] as string] ?? status, reason: found?.texts[ids[1] as string] ?? reason };
+    },
+    // 3.6: the taskbar shows that a run goes on, without a number or the goal.
+    onEnded: (runId, reason) => approvals.ended(runId, reason),
+    onChange: (running) => {
+      if (window !== null && !window.isDestroyed()) window.setProgressBar(running ? 2 : -1, { mode: running ? "indeterminate" : "none" });
+    },
+  });
+
+  /** One of the main process's own OS dialogs; resolves to the index of the button chosen. */
+  async function ask(id: DialogTextId, box: Omit<MessageBoxOptions, "message">, values: Readonly<Record<string, string | number>> = {}): Promise<number> {
+    if (options.answerDialog !== undefined) return options.answerDialog(id);
+    const message = dialogText(language, id, values);
+    const shown = window !== null && !window.isDestroyed() ? await dialog.showMessageBox(window, { ...box, message }) : await dialog.showMessageBox({ ...box, message });
+    return shown.response;
+  }
 
   /** A folder from a command line (this start's, or a second start's): opened, then shown in the window. */
   async function openFromOutside(folder: string): Promise<OpenReply> {
@@ -147,7 +186,14 @@ export function startGui(options: GuiOptions): void {
   });
   app.on("window-all-closed", () => app.quit());
   let closingHost = false;
+  let closeAfterRun = false;
   app.on("before-quit", (event) => {
+    // 3.6: quitting while a run goes on asks first, through the window's close.
+    if (runs.running && !closeAfterRun && window !== null && !window.isDestroyed()) {
+      event.preventDefault();
+      window.close();
+      return;
+    }
     if (closingHost || currentHost === null || currentHost.exited) return;
     // DR-8: the engine host ends with the app. Close its stdin, wait, then quit.
     event.preventDefault();
@@ -165,9 +211,11 @@ export function startGui(options: GuiOptions): void {
       if (!outcome.ok) return { failure: outcome.failure };
       currentHost = outcome.host;
       let state: { readonly host: EngineHost } | { readonly failure: string } = { host: outcome.host };
+      outcome.host.onRunMessage((message) => void runs.receive(message));
       outcome.host.onExit(() => {
         state = { failure: "adapter_host_exited" };
         hostState = Promise.resolve(state);
+        runs.hostExited();
       });
       return state;
     });
@@ -182,6 +230,38 @@ export function startGui(options: GuiOptions): void {
       workspaces,
       osLocale: () => app.getLocale(),
       initialWorkspace: () => initialWorkspace,
+      modelEntries: new ModelEntries((size) => randomBytes(size)),
+      envFacts: () => ({
+        model: (envValue(process.env, "CODARYN_MODEL", process.platform) ?? "").trim().length > 0,
+        language: (envValue(process.env, "CODARYN_LANG", process.platform) ?? "").trim().length > 0,
+      }),
+      runs,
+      onLanguage: (chosen) => {
+        language = chosen;
+      },
+      history,
+      // 3.8, 6.6: the main process's own question; "do not revert" is the default.
+      confirmRevert: async (preview) => {
+        const values = { runId: preview.runId, reverted: preview.reverted, skipped: preview.skipped };
+        const buttons = [dialogText(language, "revert.confirm"), dialogText(language, "revert.keep")];
+        const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
+      approvals,
+      // 3.9: "do not apply" is the default; the digest's first 12 characters and the counts are shown.
+      confirmApply: async (approval) => {
+        const values = { moves: approval.moves, discards: approval.discards, digest: approval.digest.slice(0, 12) };
+        const buttons = [dialogText(language, "apply.confirm"), dialogText(language, "apply.keep")];
+        const answer = await ask("apply.message", { type: "question", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "apply.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
+      // DR-21: a separate dialog; "do not agree" is the default. Agreeing holds for the next apply only.
+      confirmConsent: async (approval) => {
+        const values = { digest: approval.digest.slice(0, 12) };
+        const buttons = [dialogText(language, "consent.agree"), dialogText(language, "consent.keep")];
+        const answer = await ask("consent.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "consent.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
     });
 
     const devTools = !app.isPackaged && process.env["CODARYN_GUI_DEVTOOLS"] === "1";
@@ -193,9 +273,28 @@ export function startGui(options: GuiOptions): void {
       webPreferences: secureWebPreferences(join(options.guiRoot, "build", "src", "preload", "preload.cjs"), devTools),
     });
     window.once("ready-to-show", () => window?.show());
+    // 3.6: closing while a run goes on asks first (default: keep running); then cancel, and wait
+    // for the end (result.json written, lock released) at most 10 seconds.
+    window.on("close", (event) => {
+      if (closeAfterRun || !runs.running) return;
+      event.preventDefault();
+      void (async () => {
+        const buttons = [dialogText(language, "closeRun.cancelAndClose"), dialogText(language, "closeRun.keep")];
+        const answer = await ask("closeRun.message", { type: "question", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "closeRun.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true });
+        if (answer !== 0 || !runs.running) return;
+        await cancelActiveRun({ host: () => hostState, runs });
+        if (!(await runs.waitDone(10_000))) {
+          await ask("closeRun.unknown", { type: "warning", title: dialogText(language, "closeRun.title"), buttons: [dialogText(language, "ok")], defaultId: 0, noLink: true });
+        }
+        closeAfterRun = true;
+        if (window !== null && !window.isDestroyed()) window.close();
+      })();
+    });
     window.on("closed", () => {
       window = null;
       workspaces.clear();
+      history.clear();
+      approvals.clear();
     });
     await window.loadURL(APP_INDEX_URL);
     if (devTools) window.webContents.openDevTools({ mode: "detach" });

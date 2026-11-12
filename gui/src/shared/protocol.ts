@@ -14,7 +14,7 @@ export const MAX_LINE_CHARS = 8 * 1024 * 1024;
 export const MIN_NODE_MAJOR = 26;
 
 /** Calls the engine host answers. Each later unit adds the app layer functions it needs. */
-export const HOST_CALLS = ["doctor", "messages", "tree"] as const;
+export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes"] as const;
 export type HostCall = (typeof HOST_CALLS)[number];
 
 export interface HostRequest {
@@ -40,7 +40,60 @@ export interface HostReady {
   readonly node: string;
 }
 
-export type HostMessage = HostReady | HostResponse;
+/** GU-3: a run token the engine host issued for one run (128 random bits, lowercase hex). */
+export const RUN_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
+/** Most items in one events message, and the longest item text. */
+export const MAX_RUN_ITEMS = 2000;
+export const MAX_RUN_ITEM_CHARS = 4000;
+const RUN_ITEM_KIND = /^[a-z][a-z_]{0,39}$/;
+const RECORD_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
+
+/**
+ * One line of a run's progress, made by the engine host from a record or a notice (3.6): the
+ * shared catalog's sentence, masked and cleaned. `kind` is the record type ("notice" for a note,
+ * "gap" when records went missing).
+ */
+export interface HostRunItem {
+  readonly at: string | null;
+  readonly kind: string;
+  readonly text: string;
+}
+
+/** Host → main, about every 100 ms while a run goes on (4.2). */
+export interface HostRunEvents {
+  readonly v: 1;
+  readonly type: "events";
+  readonly run: string;
+  readonly items: readonly HostRunItem[];
+  /** Model turns and tool calls so far. */
+  readonly counts: { readonly turns: number; readonly tools: number };
+}
+
+/** Host → main, once, after the run's last events: how it ended (checked by the main process). */
+export interface HostRunDone {
+  readonly v: 1;
+  readonly type: "done";
+  readonly run: string;
+  readonly outcome: unknown;
+}
+
+export type HostRunMessage = HostRunEvents | HostRunDone;
+export type HostMessage = HostReady | HostResponse | HostRunMessage;
+
+const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+function parseRunItems(value: unknown): HostRunItem[] | null {
+  if (!Array.isArray(value) || value.length > MAX_RUN_ITEMS) return null;
+  const items: HostRunItem[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return null;
+    const { at, kind, text } = item as Record<string, unknown>;
+    if (!(at === null || (typeof at === "string" && RECORD_TIME.test(at)))) return null;
+    if (typeof kind !== "string" || !RUN_ITEM_KIND.test(kind) || typeof text !== "string" || text.length > MAX_RUN_ITEM_CHARS) return null;
+    items.push({ at: at as string | null, kind, text });
+  }
+  return items;
+}
 
 /** Error codes of the channel itself (the app layer's own errors travel inside `value`). */
 export const CHANNEL_ERRORS = {
@@ -104,6 +157,17 @@ export function parseHostMessage(line: string): HostMessage | null {
     const node = value["node"];
     return typeof node === "string" && node.length > 0 && node.length <= 64 ? { v: 1, type: "ready", node } : null;
   }
+  if (value["type"] === "events" || value["type"] === "done") {
+    const run = value["run"];
+    if (typeof run !== "string" || !RUN_TOKEN_PATTERN.test(run)) return null;
+    if (value["type"] === "done") return { v: 1, type: "done", run, outcome: value["outcome"] };
+    const items = parseRunItems(value["items"]);
+    const counts = value["counts"];
+    if (items === null || typeof counts !== "object" || counts === null) return null;
+    const { turns, tools } = counts as Record<string, unknown>;
+    return isCount(turns) && isCount(tools) ? { v: 1, type: "events", run, items, counts: { turns, tools } } : null;
+  }
+  if (value["type"] !== undefined) return null;
   const id = value["id"];
   if (!isId(id)) return null;
   if (value["ok"] === true) return { v: 1, id, ok: true, value: value["value"] };
@@ -174,15 +238,13 @@ export class LineDecoder {
   }
 }
 
-/** How many timed-out ids are remembered so that their late answers can be dropped quietly. */
-export const MAX_LATE_IDS = 1000;
-
 /**
  * What became of a response:
  * - delivered: a request was waiting for it.
- * - late: its request had timed out; the answer is dropped and the host is fine (R-10 M-1).
- * - unknown: no request with that id is waiting or late (never issued, or answered already).
- *   Only this breaks the channel.
+ * - late: its id was issued, but its request is settled already (the time ran out, or an answer
+ *   came before). The answer is dropped and the host is fine (R-10 M-1). Ids are issued in order
+ *   from 1, so this needs no memory of past ids and holds for any number of them (R10b-L-1).
+ * - unknown: an id this side never issued. Only this breaks the channel.
  */
 export type SettleOutcome = "delivered" | "late" | "unknown";
 
@@ -190,8 +252,6 @@ export type SettleOutcome = "delivered" | "late" | "unknown";
 export class PendingCalls {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (response: HostResponse) => void; timer: ReturnType<typeof setTimeout> }>();
-  /** Ids whose time ran out, oldest first, at most MAX_LATE_IDS. */
-  private readonly late = new Set<number>();
 
   /** A new request id. */
   next(): number {
@@ -204,16 +264,16 @@ export class PendingCalls {
     return this.pending.size;
   }
 
+  /** Whether this side has issued `id` (1 up to the last one). */
+  private issued(id: number): boolean {
+    return Number.isSafeInteger(id) && id >= 1 && id < this.nextId;
+  }
+
   /** Waits for the response with this id; after `timeoutMs` it resolves with an `adapter_timeout` error. */
   wait(id: number, timeoutMs: number): Promise<HostResponse> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        this.late.add(id);
-        if (this.late.size > MAX_LATE_IDS) {
-          const oldest = this.late.values().next().value;
-          if (oldest !== undefined) this.late.delete(oldest);
-        }
         resolve({ v: 1, id, ok: false, error: { code: CHANNEL_ERRORS.timeout, message: "the engine host did not answer in time" } });
       }, timeoutMs);
       this.pending.set(id, { resolve, timer });
@@ -223,7 +283,7 @@ export class PendingCalls {
   /** Delivers a response to the request waiting for it, or says why it cannot (SettleOutcome). */
   settle(response: HostResponse): SettleOutcome {
     const entry = this.pending.get(response.id);
-    if (entry === undefined) return this.late.delete(response.id) ? "late" : "unknown";
+    if (entry === undefined) return this.issued(response.id) ? "late" : "unknown";
     clearTimeout(entry.timer);
     this.pending.delete(response.id);
     entry.resolve(response);

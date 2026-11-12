@@ -14,7 +14,7 @@
 
 import type { CliErrorCode } from "./engine.js";
 import type { ApprovalChannel } from "./plan.js";
-import type { RawText } from "./text.js";
+import type { ContentHash, RawText } from "./text.js";
 import type { ResolvedPath } from "./workspace.js";
 
 /** `<root>/.codaryn/runs/<runId>/snapshots/`. The file layout inside it belongs to `src/store`. */
@@ -37,8 +37,24 @@ export interface ChangeRecorder {
    * resolve without changing anything, so the snapshot holds the text from before the run.
    * Resolves after the snapshot was handed to the operating system. When it rejects, the tool
    * must not write and reports `io_error`.
+   *
+   * DR-29, DR-32 (c): `shownOriginal` is the digest of `original` masked by this run's gateway: the
+   * SHA-256 of maskedPartsEncoding(maskedParts(masked text)) (plan.ts), or null when `original` is
+   * null. The tool computes it with the gateway it was created with; the store keeps it with the
+   * snapshot and never sees the gateway. Absent when the tool could not mask the text (or a caller
+   * from before DR-29): the comparison view then shows no text for this path. Kept with the first
+   * call only, like the snapshot.
    */
-  saveOriginal(path: ResolvedPath, original: RawText | null): Promise<void>;
+  saveOriginal(path: ResolvedPath, original: RawText | null, shownOriginal?: ContentHash | null): Promise<void>;
+  /**
+   * DR-29, DR-32 (c): called by a writing tool after its write succeeded, with the SHA-256 of the
+   * bytes it wrote (the `newHash` of its `file_changed` record) and the digest of that text masked
+   * by this run's gateway (as for `shownOriginal`). The last call for a `path.relative` replaces the
+   * earlier one. When it rejects, the write has already happened and the tool's outcome stays as it
+   * is; the comparison view then finds the record stale or missing and shows no text. Optional only
+   * so recorders from before DR-29 still type-check; the store implements it.
+   */
+  saveNext?(path: ResolvedPath, sha256: ContentHash, partsDigest: ContentHash): Promise<void>;
 }
 
 export interface ChangeRecorderOptions {
@@ -176,7 +192,35 @@ export interface SkippedFile {
    */
   readonly path: string;
   readonly reason: RevertSkipReason;
+  /**
+   * R-16 L-1: the revert moved this file aside (to remove a second name, R-15 L-1) and could not
+   * put it back, so it was left at this place: `.codaryn/parked/<revert runId>/<index>-<random>`,
+   * relative to the workspace root, `/` separated. It names no file of the person's (only the run
+   * id, the action index and random hex). The reason stays `io_error`. Absent otherwise.
+   */
+  readonly parkedAt?: string;
 }
+
+/**
+ * R-16 L-1: `<root>/.codaryn/parked/`, where a revert leaves a file it moved aside and could not
+ * put back (SkippedFile.parkedAt). One directory per revert run id; nothing removes them on its own.
+ */
+export const PARKED_DIR_NAME = "parked";
+
+/** R-16 L-1: one file left in PARKED_DIR_NAME. */
+export interface ParkedFile {
+  /** `.codaryn/parked/<runId>/<name>`, relative to the workspace root, `/` separated. */
+  readonly path: string;
+  /** The revert run that left it. */
+  readonly runId: string;
+}
+
+/**
+ * Signature of `listParkedFiles`, exported by `src/store/index.ts` (R-16 L-1), for `doctor` and
+ * people. Lists the plain files in run-id-named plain directories under PARKED_DIR_NAME; follows no
+ * link, skips other names, never rejects (an unreadable directory lists nothing).
+ */
+export type ListParkedFiles = (workspaceRoot: string) => Promise<ParkedFile[]>;
 
 export interface RevertOutcome {
   readonly reverted: readonly RevertedFile[];
@@ -201,6 +245,84 @@ export interface RevertOutcome {
  */
 export const REVERT_ERROR_CODES = ["run_not_found", "invalid_run_record", "plan_run_missing"] as const satisfies readonly CliErrorCode[];
 export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
+
+/** DR-14: why a run's original of a path is not given. Moved from the store as it was. */
+export type OriginalUnavailable = "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable";
+
+/**
+ * DR-29, DR-32 (c): how the run masked one changed path, as recorded by ChangeRecorder
+ * (`saveOriginal`'s `shownOriginal` and the last `saveNext`): digests of the visible-part lists, not
+ * the parts themselves, so the record holds no copy of the file's text.
+ *
+ * What it holds, plainly: no secret value and no token. It does hold `next.sha256`, the SHA-256 of
+ * the whole text the run left, secrets included; that hash is already the journal's `newHash`.
+ * Someone who has the file's visible text from elsewhere can test a guessed secret against such a
+ * hash; the record does not add the visible text that this would need (R-19 L-3).
+ */
+export interface ChangeShown {
+  /** Digest of the original masked by the run's gateway; null when the run created the file. */
+  readonly original: ContentHash | null;
+  /** The last text the run wrote: its SHA-256 (the path's last `newHash`) and the digest of its visible parts. Null when none was recorded. */
+  readonly next: { readonly sha256: ContentHash; readonly partsDigest: ContentHash } | null;
+}
+
+/**
+ * DR-14: one changed path of a run and its original, for a comparison view. Moved from the store
+ * (`src/store/changes.ts`) as it was, with DR-29's `shown`.
+ */
+export interface RunOriginal {
+  /** As the journal recorded it (masked). */
+  readonly path: string;
+  /** The run created the file: there is no original. */
+  readonly created: boolean;
+  /** The path's first `previousHash` (the state before the run), null when the run created it. */
+  readonly before: ContentHash | null;
+  /** The path's last `newHash` (the state the run left). */
+  readonly after: ContentHash;
+  /**
+   * The original as UTF-8 text (raw local text, R-8: mask it before it leaves the process), why it
+   * is not given, or null for a created file.
+   */
+  readonly original: { readonly text: RawText } | { readonly unavailable: OriginalUnavailable } | null;
+  /**
+   * DR-29: how the run masked the original and the text it left, when the run recorded it (runs
+   * from DR-29 on) and the record passed the store's checks. Absent otherwise. A view shows the
+   * text only when changeShownMatches holds for it.
+   */
+  readonly shown?: ChangeShown;
+}
+
+/**
+ * Signature of `readRunOriginals`, exported by `src/store/index.ts` (DR-14, DR-29). Reads only.
+ * Rejects like `revertRun`: `run_not_found`, `invalid_run_record`.
+ */
+export type ReadRunOriginals = (request: { readonly workspaceRoot: string; readonly runId: string }) => Promise<RunOriginal[]>;
+
+/**
+ * DR-29, DR-32 (c): what a comparison view has now for one changed path, as digests computed like
+ * the recorded ones (SHA-256 of maskedPartsEncoding(maskedParts(text masked now))): the run's
+ * original masked with the secrets registered now (null when the run created the file), and the
+ * file as it is now, its SHA-256 and the digest of its text masked now (null when it cannot be read
+ * as text).
+ */
+export interface ChangeNow {
+  readonly original: ContentHash | null;
+  readonly current: { readonly sha256: ContentHash; readonly partsDigest: ContentHash } | null;
+}
+
+/**
+ * DR-29, DR-32 (c): true when a view may show the masked texts of a changed path: the run recorded
+ * how it masked them (`shown` with `next`), the file is still the text the run left (same SHA-256),
+ * and the secrets registered now leave exactly the same text visible in both the original and the
+ * current file (same digests), as DR-28 does for plans. Otherwise the view shows the path and its
+ * state only. A created file needs `shown.original` null and `now.original` null.
+ */
+export function changeShownMatches(shown: ChangeShown | undefined, now: ChangeNow): boolean {
+  if (shown === undefined || shown.next === null || now.current === null) return false;
+  if (now.current.sha256 !== shown.next.sha256) return false;
+  if (now.current.partsDigest !== shown.next.partsDigest) return false;
+  return shown.original === now.original;
+}
 
 /**
  * Signature of `revertRun`, exported by `src/store/index.ts`.
@@ -263,7 +385,23 @@ export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
  *       `restored_from_discard`).
  *     - not done: the file with that SHA-256 is still at its original path and nothing is at the
  *       destination. Nothing is to be reverted and it is not listed.
+ *     - cut between the link and the removal of the source (R-15 L-1): see below.
  *     - anything else: skipped as `changed_since_run`; nothing is touched.
+ *   - R-15 L-1: a move is a hard link and then the removal of the source, so a process that ends
+ *     between the two leaves one file under two names. When the original path and the name the
+ *     action added (the destination of a move, or the discarded copy of a discard) both hold the
+ *     action's SHA-256 and are one file (the same device and file id), the added name is removed and
+ *     the file stays at its original path (`moved_back`, `restored_from_discard`). This holds for a
+ *     started action and for a recorded one (a revert's own move back cut at the same point). The
+ *     added name is first moved to a new name inside the state directory and removed only while it
+ *     is still that file there; otherwise it is put back without replacing anything and is not
+ *     removed. Two names that hold the same content but are different files are not this case:
+ *     a started action is then `changed_since_run`, a recorded one `original_path_taken`.
+ *     R-16 L-1: the added name is parked in `.codaryn/parked/<revert runId>/<index>-<random>`
+ *     (PARKED_DIR_NAME, each level made one at a time and checked to be a plain directory). When it
+ *     cannot be put back to its name because something now takes that name, it stays parked: the file
+ *     is skipped as `io_error` with `parkedAt`, and `listParkedFiles` finds it. Nothing is removed
+ *     that is not the action's file.
  *   - An action with a `plan_item_failed` record was not done and is not listed.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

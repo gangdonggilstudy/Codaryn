@@ -319,7 +319,22 @@ export interface CliErrorOutput {
    * `invalid_task` and `invalid_script` when it can be said safely. Absent otherwise.
    */
   readonly diagnostic?: InputDiagnostic;
+  /**
+   * R-12 L-2: advice the CLI can give beyond the code, because it knows the cause. The human error
+   * adds it as its own line (`error.hint.<hint>`); `message` says the same for JSON readers.
+   * Absent otherwise.
+   */
+  readonly hint?: CliErrorHint;
 }
+
+/**
+ * R-12 L-2: the error hints (CliErrorOutput.hint).
+ * - quick_form_needs_task: `plan`, `apply` or `review` in the quick form (`--workspace`) failed on
+ *   the config file's run settings (limits included, `invalid_config`); the plan run's task given
+ *   with `--task` brings its own settings, and its secrets (DR-28).
+ */
+export const CLI_ERROR_HINTS = ["quick_form_needs_task"] as const;
+export type CliErrorHint = (typeof CLI_ERROR_HINTS)[number];
 
 /**
  * N-15 (review M1): a structured input diagnostic. It holds a fixed code, a schema field position

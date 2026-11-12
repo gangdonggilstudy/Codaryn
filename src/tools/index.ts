@@ -38,7 +38,7 @@ import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
 import { inspectFiles, proposePlan } from "./workflow-tools.js";
 
-export { createPlanExecutor } from "./plan-executor.js";
+export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { PlanExecutorDeps } from "./plan-executor.js";
 export { MAX_INSPECT_WALK_ENTRIES } from "./workflow-tools.js";
 export type { PlanFileOps } from "./plan-files.js";

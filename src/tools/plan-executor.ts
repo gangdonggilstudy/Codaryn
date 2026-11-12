@@ -19,12 +19,12 @@ import path from "node:path";
 
 import { DISCARDED_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type {
+  CreatePlanExecutor,
   PlanExecutor,
   PlanExecutorOptions,
   PlanItemOutcome,
   PlanItemProblem,
   ResolvedPlanAction,
-  Workspace,
 } from "../contracts/index.js";
 
 import {
@@ -44,11 +44,17 @@ import type { FileIdentity, PlanFileOps } from "./plan-files.js";
 /** Same rule as the CLI's run ids: starts with a letter or digit, at most 128 characters, no "..". */
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+/**
+ * The contract's options (`workspace`, `workspaceRoot`, `runId`; `workspaceRoot` must equal
+ * `workspace.root`) and, for tests only, replacements for parts of the file system.
+ */
 export interface PlanExecutorDeps extends PlanExecutorOptions {
-  /** The apply run's workspace. Its `root` must equal `workspaceRoot`. */
-  readonly workspace: Workspace;
-  /** For tests: replaces parts of the file system to simulate failures. */
   readonly fileOps?: Partial<PlanFileOps>;
+}
+
+/** The real absolute path of an apply run's discarded files (DR-9), as ApplyDeps.discardedRoot names it. */
+export function discardedRootOf(workspaceRoot: string, runId: string): string {
+  return path.join(workspaceRoot, STATE_DIR_NAME, DISCARDED_DIR_NAME, runId);
 }
 
 function sourceOf(action: ResolvedPlanAction): string {
@@ -103,6 +109,7 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
     let current = root;
     for (const segment of [STATE_DIR_NAME, DISCARDED_DIR_NAME, runId]) {
       current = path.join(current, segment);
+      // Same path as discardedRootOf(root, runId) once the loop ends.
       try {
         await ops.mkdir(current);
       } catch (error) {
@@ -177,3 +184,6 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
     },
   };
 }
+
+// The function takes the contract's options (plus test-only `fileOps`), so it is a CreatePlanExecutor.
+createPlanExecutor satisfies CreatePlanExecutor;

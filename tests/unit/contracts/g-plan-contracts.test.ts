@@ -54,6 +54,9 @@ import {
   APPLY_REASONS_BY_STATUS,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
   REVERT_ERROR_CODES,
+  maskedParts,
+  planActionShown,
+  planActionShownMatches,
   DISCARDED_STORED_NAME_PATTERN_SOURCE,
   discardedStoredName,
   isReasonOfStatus,
@@ -69,6 +72,9 @@ import {
 } from "../../../src/contracts/index.js";
 import type {
   DoctorMessageId,
+  MaskedPlanAction,
+  PrivacyGateway,
+  StoredPlanAction,
   RevertOutcome,
   RevertOutput,
   RevertRecord,
@@ -98,6 +104,7 @@ import type {
   VerifierConfig,
 } from "../../../src/contracts/index.js";
 import { isKeyFieldName } from "../../../src/cli/security/keys.js";
+import { createPrivacyGateway } from "../../../src/privacy/index.js";
 
 // Compile-time checks. A failing one breaks the build, so each line documents a rule.
 /** DR-5: plan.json holds actions and source hashes only. */
@@ -351,6 +358,65 @@ describe("G-A codes and the message catalog", () => {
     }
     assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("original_path_taken"));
     assert.ok(unique(REVERT_SKIP_REASONS));
+  });
+});
+
+describe("DR-28: a plan is shown or applied only when the secrets now mask its paths as the plan run did", () => {
+  const T1 = "[[CODARYN_SECRET:0123456789abcdef]]";
+  const T2 = "[[CODARYN_SECRET:fedcba9876543210]]";
+  const SECRET = "zz-r11-fake-client-zz";
+  const MOVE = { kind: "move", from: `${SECRET}/a.jpg`, to: `2026/${SECRET}/a.jpg`, sha256: "a".repeat(64) } as const;
+  const DISCARD = { kind: "discard", path: `${SECRET}.tmp`, sha256: "b".repeat(64) } as const;
+
+  function maskWith(privacy: PrivacyGateway, action: typeof MOVE | typeof DISCARD): MaskedPlanAction {
+    const one = (text: string) => {
+      const masked = privacy.mask(text);
+      assert.ok(masked.ok);
+      return masked.text;
+    };
+    return action.kind === "move"
+      ? ({ kind: "move", from: one(action.from), to: one(action.to), sha256: action.sha256 } as MaskedPlanAction)
+      : ({ kind: "discard", path: one(action.path), sha256: action.sha256 } as MaskedPlanAction);
+  }
+
+  test("visible parts: the text split at tokens, tokens left out", () => {
+    assert.deepEqual(maskedParts(`${T1}/a.jpg`), ["", "/a.jpg"]);
+    assert.deepEqual(maskedParts(`2026/${T1}/a.jpg`), ["2026/", "/a.jpg"]);
+    assert.deepEqual(maskedParts(`${T1}${T2}x`), ["", "", "x"]);
+    assert.deepEqual(maskedParts(`${T1}x`), ["", "x"]);
+    assert.deepEqual(maskedParts("plain/a.jpg"), ["plain/a.jpg"]);
+    assert.deepEqual(maskedParts(`${T1}/a.jpg`), maskedParts(`${T2}/a.jpg`), "token ids do not matter");
+  });
+
+  test("R-11 M-1 reproduction: the plan run's secrets hide the path; viewing without them would show it, so it does not match", () => {
+    const planRun = createPrivacyGateway({ secrets: [SECRET] });
+    const stored: StoredPlanAction[] = [MOVE, DISCARD].map((action) => ({ ...action, shown: planActionShown(maskWith(planRun, action)) }) as StoredPlanAction);
+    assert.doesNotMatch(JSON.stringify(stored.map((action) => action.shown)), new RegExp(SECRET), "the shown form holds no secret value");
+
+    const sameSecrets = createPrivacyGateway({ secrets: [SECRET] });
+    assert.ok(stored.every((action, i) => planActionShownMatches(action, maskWith(sameSecrets, [MOVE, DISCARD][i] as typeof MOVE))));
+
+    const noSecrets = createPrivacyGateway({ secrets: [] });
+    const shownPlainly = maskWith(noSecrets, MOVE);
+    assert.match(JSON.stringify(shownPlainly), new RegExp(SECRET), "without the check the value would be shown and recorded");
+    assert.equal(planActionShownMatches(stored[0] as StoredPlanAction, shownPlainly), false);
+    assert.equal(planActionShownMatches(stored[1] as StoredPlanAction, maskWith(noSecrets, DISCARD)), false);
+
+    const moreSecrets = createPrivacyGateway({ secrets: [SECRET, "a.jpg"] });
+    assert.equal(planActionShownMatches(stored[0] as StoredPlanAction, maskWith(moreSecrets, MOVE)), false, "masking more is a difference too");
+  });
+
+  test("an action without shown (written before DR-28) or of another kind never matches", () => {
+    const masked: MaskedPlanAction = { kind: "move", from: "a" as never, to: "b" as never, sha256: "a".repeat(64) as never };
+    assert.equal(planActionShownMatches({ kind: "move", from: "a", to: "b", sha256: "a".repeat(64) } as StoredPlanAction, masked), false);
+    const discardShown = { kind: "discard", path: "a", sha256: "a".repeat(64), shown: { path: ["a"] } } as StoredPlanAction;
+    assert.equal(planActionShownMatches(discardShown, masked), false);
+  });
+
+  test("the error code and its message ids", () => {
+    assert.equal(CLI_ERROR_EXIT_CODES.plan_secrets_differ, 2);
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("error.plan_secrets_differ.what"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("error.plan_secrets_differ.fix"));
   });
 });
 

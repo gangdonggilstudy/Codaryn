@@ -12,6 +12,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   MIN_OTHER_PROVIDER_KEY_LENGTH,
   MODEL_PLACEHOLDER_PATTERN_SOURCE,
+  toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
   ApiBaseUrlEnv,
@@ -22,6 +23,7 @@ import type {
   ListModelsSettings,
   ModelConfig,
   ModelProviderName,
+  ProviderSettingMissing,
   ProviderSettings,
   ResolvedApiSettings,
 } from "../contracts/index.js";
@@ -31,9 +33,25 @@ export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
 
 export type AnthropicModelConfig = Extract<ModelConfig, { readonly provider: "anthropic" }>;
 
-export type ResolveSettingsOutcome =
-  | { readonly ok: true; readonly settings: ResolvedApiSettings }
-  | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
+/**
+ * U-37: the key of a settings failure's missing settings. A symbol, so the outcome reads as before
+ * wherever it is written out (the pinned outcomes of SP-0 P-7 among them).
+ */
+export const SETTINGS_MISSING: unique symbol = Symbol("codaryn.settingsMissing");
+
+/**
+ * A failure to resolve settings. U-37: with provider_not_configured, [SETTINGS_MISSING] names each
+ * setting not set, in PROVIDER_SETTINGS order (names and field positions only), for the hint
+ * provider_settings_missing; absent when a field position is not a schema path.
+ */
+export type SettingsFailure = {
+  readonly ok: false;
+  readonly code: CliErrorCode;
+  readonly message: string;
+  readonly [SETTINGS_MISSING]?: readonly ProviderSettingMissing[];
+};
+
+export type ResolveSettingsOutcome = { readonly ok: true; readonly settings: ResolvedApiSettings } | SettingsFailure;
 
 /**
  * SP-2 (design 4.2): the values of every key variable Codaryn knows (API_KEY_ENVS) that are set, as
@@ -172,15 +190,36 @@ export function resolveApiSettings(model: ApiModelConfig, env: SettingsEnvironme
   const maxOutputTokens = model.maxOutputTokens ?? providerSettingsOf(config, provider).maxOutputTokens ?? null;
 
   const missing: string[] = [];
-  if (apiKey === null) missing.push(keyEnv);
-  if (modelId === null) {
-    missing.push(
-      missingModelText(modelPlaceholderSeen(model.model, env, config, provider), configFieldOf(config, provider, "model"), API_PROVIDERS[provider].modelEnv),
-    );
+  // U-37: the same settings as items (PROVIDER_SETTINGS order), for the human error's lines.
+  const items: ProviderSettingMissing[] = [];
+  let positioned = true;
+  if (apiKey === null) {
+    missing.push(keyEnv);
+    items.push({ setting: "key", keyEnv });
   }
-  if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
+  if (modelId === null) {
+    const placeholder = modelPlaceholderSeen(model.model, env, config, provider);
+    const field = configFieldOf(config, provider, "model");
+    const { modelEnv } = API_PROVIDERS[provider];
+    missing.push(missingModelText(placeholder, field, modelEnv));
+    const path = toSchemaFieldPath(field);
+    if (path === null) positioned = false;
+    else items.push({ setting: "model", modelEnv, field: path, placeholder });
+  }
+  if (maxOutputTokens === null) {
+    const field = configFieldOf(config, provider, "maxOutputTokens");
+    missing.push(missingOutputCapText(field));
+    const path = toSchemaFieldPath(field);
+    if (path === null) positioned = false;
+    else items.push({ setting: "output_limit", field: path });
+  }
   if (apiKey === null || modelId === null || maxOutputTokens === null) {
-    return { ok: false, code: "provider_not_configured", message: `not set: ${missing.join("; ")}. Nothing was sent` };
+    return {
+      ok: false,
+      code: "provider_not_configured",
+      message: `not set: ${missing.join("; ")}. Nothing was sent`,
+      ...(positioned ? { [SETTINGS_MISSING]: items } : {}),
+    };
   }
 
   const connection = resolveConnection(apiKey, env, config, provider);
@@ -197,9 +236,7 @@ export function resolveAnthropicSettings(
   return resolveApiSettings(model, env, config);
 }
 
-export type ResolveConnectionOutcome =
-  | { readonly ok: true; readonly settings: ListModelsSettings }
-  | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
+export type ResolveConnectionOutcome = { readonly ok: true; readonly settings: ListModelsSettings } | SettingsFailure;
 
 /**
  * The key, API address, request time limit and retries: the part of the settings `run` and
@@ -272,7 +309,7 @@ export function resolveListSettings(
   const { keyEnv } = API_PROVIDERS[provider];
   const apiKey = envValue(env, keyEnv);
   if (apiKey === null) {
-    return { ok: false, code: "provider_not_configured", message: `not set: ${keyEnv}. Nothing was sent` };
+    return { ok: false, code: "provider_not_configured", message: `not set: ${keyEnv}. Nothing was sent`, [SETTINGS_MISSING]: [{ setting: "key", keyEnv }] };
   }
   return resolveConnection(apiKey, env, config, provider);
 }

@@ -31,9 +31,10 @@ import type { MessageCatalog, RunId } from "../contracts/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
+import type { ArgsFailure } from "./args.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { cliError } from "./run.js";
+import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
@@ -49,7 +50,7 @@ export interface ChangesArgs {
   readonly json: boolean;
 }
 
-export type ParseChangesArgsOutcome = { readonly ok: true; readonly args: ChangesArgs } | { readonly ok: false; readonly message: string };
+export type ParseChangesArgsOutcome = { readonly ok: true; readonly args: ChangesArgs } | ArgsFailure;
 
 const OPTIONS = ["--task", "--workspace", "--profile", "--config", "--vars-file", "--run"] as const;
 type Option = (typeof OPTIONS)[number];
@@ -59,19 +60,20 @@ const NODE_ENV_FILE_FLAG = /^--env-file(-if-exists)?(=|$)/;
 /** Each option at most once with a value that is not empty and does not start with "--". */
 export function parseChangesArgs(argv: readonly string[]): ParseChangesArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "changes") return { ok: false, message: CHANGES_USAGE };
+  if (command !== "changes") return { ok: false, message: CHANGES_USAGE, hint: "unknown_command" };
   if (rest.some((item) => NODE_ENV_FILE_FLAG.test(item))) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const values = new Map<Option, string>();
   let json = false;
   for (let index = 0; index < rest.length; index += 1) {
     const flag = rest[index] as string;
     if (flag === "--json") {
-      if (json) return { ok: false, message: `unknown or repeated option. ${CHANGES_USAGE}` };
+      // U-37: told by its place after the command word, never its name.
+      if (json) return { ok: false, message: `unknown or repeated option. ${CHANGES_USAGE}`, hint: "unknown_option", position: index + 1 };
       json = true;
       continue;
     }
     if (!(OPTIONS as readonly string[]).includes(flag) || values.has(flag as Option)) {
-      return { ok: false, message: `unknown or repeated option. ${CHANGES_USAGE}` };
+      return { ok: false, message: `unknown or repeated option. ${CHANGES_USAGE}`, hint: "unknown_option", position: index + 1 };
     }
     const value = rest[index + 1];
     if (value === undefined || value.length === 0 || value.startsWith("--")) {
@@ -94,7 +96,7 @@ export function parseChangesArgs(argv: readonly string[]): ParseChangesArgsOutco
   const runId = values.get("--run");
   if (runId === undefined) return { ok: false, message: `--run is required. ${CHANGES_USAGE}` };
   if (runId !== LATEST_RUN_ALIAS && (!RUN_ID_PATTERN.test(runId) || runId.includes(".."))) {
-    return { ok: false, message: "--run must be a run id: 1-128 characters of letters, digits, '.', '_' and '-', or latest" };
+    return { ok: false, message: "--run must be a run id: 1-128 characters of letters, digits, '.', '_' and '-', or latest", hint: "run_id_form" };
   }
   return {
     ok: true,
@@ -265,7 +267,7 @@ export interface ChangesEnvironment {
 /** `codaryn changes`. Text on stdout, or ChangesOutput as one JSON line with `--json`. Errors are CliErrorOutput. */
 export async function runChanges(io: ChangesEnvironment): Promise<CommandOutcome> {
   const parsed = parseChangesArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const outcome = await io.app.changes({ settings: parsed.args.settings, runId: parsed.args.runId });
   if (!outcome.ok) {
     const output = toCliError(outcome.error);

@@ -67,7 +67,8 @@ import { applyCleanup as storeApplyCleanup, planCleanup as storePlanCleanup, sum
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { RUN_ID_PATTERN } from "./args.js";
-import { cliError } from "./run.js";
+import type { ArgsFailure } from "./args.js";
+import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
@@ -117,8 +118,9 @@ type CleanupSwitch = (typeof SWITCHES)[number];
 const DIGEST_PREFIX = /^[0-9a-f]+$/;
 const DAYS = /^(0|[1-9][0-9]{0,5})$/;
 
-function usage(message: string): { ok: false; message: string } {
-  return { ok: false, message: `${message}. usage: ${CLEANUP_USAGE}` };
+/** A parse failure with the usage line; U-37: with the reason's hint (and unknown_option's place). */
+function usage(message: string, reason: Pick<ArgsFailure, "hint" | "position"> = {}): ArgsFailure {
+  return { ok: false, message: `${message}. usage: ${CLEANUP_USAGE}`, ...reason };
 }
 
 function runIdsOf(value: string, flag: string): readonly string[] | { message: string } {
@@ -128,19 +130,21 @@ function runIdsOf(value: string, flag: string): readonly string[] | { message: s
   return [...new Set(ids)];
 }
 
-export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: CleanupArgs } | { ok: false; message: string } {
+export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: CleanupArgs } | ArgsFailure {
   const [command, ...rest] = argv;
-  if (command !== "cleanup") return usage("not the cleanup command");
+  if (command !== "cleanup") return usage("not the cleanup command", { hint: "unknown_command" });
   const values = new Map<ValueOption, string>();
   const switches = new Set<CleanupSwitch>();
   for (let index = 0; index < rest.length; index += 1) {
     const flag = rest[index] as string;
     if ((SWITCHES as readonly string[]).includes(flag)) {
-      if (switches.has(flag as CleanupSwitch)) return usage(`${flag} is repeated`);
+      if (switches.has(flag as CleanupSwitch)) return usage(`${flag} is repeated`, { hint: "unknown_option", position: index + 1 });
       switches.add(flag as CleanupSwitch);
       continue;
     }
-    if (!(VALUE_OPTIONS as readonly string[]).includes(flag) || values.has(flag as ValueOption)) return usage("unknown or repeated option");
+    if (!(VALUE_OPTIONS as readonly string[]).includes(flag) || values.has(flag as ValueOption)) {
+      return usage("unknown or repeated option", { hint: "unknown_option", position: index + 1 });
+    }
     const value = rest[index + 1];
     if (value === undefined || value.length === 0 || value.startsWith("--")) return usage(`${flag} needs a value`);
     values.set(flag as ValueOption, value);
@@ -163,7 +167,11 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
   const discardedOlderThan = days("--discarded-older-than");
   const discardedRunIds = ids("--discarded-run");
   for (const part of [olderThan, runIds, discardedOlderThan, discardedRunIds]) {
-    if (typeof part === "object" && part !== null && "message" in part) return usage(part.message);
+    if (typeof part === "object" && part !== null && "message" in part) {
+      // U-37 (R-69 L2, PM): the --run form error is run_id_form, as other commands' --run is. Not
+      // --discarded-run: the hint names --run.
+      return usage(part.message, part === runIds ? { hint: "run_id_form" } : {});
+    }
   }
   const runs = {
     ...(typeof olderThan === "number" ? { olderThanDays: olderThan } : {}),
@@ -177,7 +185,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
 
   const confirm = values.get("--confirm") ?? null;
   if (confirm !== null && (!DIGEST_PREFIX.test(confirm) || confirm.length < MIN_PLAN_DIGEST_PREFIX || confirm.length > 64)) {
-    return usage(`--confirm must be ${MIN_PLAN_DIGEST_PREFIX} to 64 lowercase hexadecimal characters of the plan's digest`);
+    return usage(`--confirm must be ${MIN_PLAN_DIGEST_PREFIX} to 64 lowercase hexadecimal characters of the plan's digest`, { hint: "digest_form" });
   }
   const deleteDiscarded = switches.has("--delete-discarded");
   if (deleteDiscarded && confirm === null) return usage("--delete-discarded is a second confirmation and needs --confirm");
@@ -202,7 +210,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
 /** `codaryn cleanup`. Text or one JSON line on stdout; errors are CliErrorOutput. */
 export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome> {
   const parsed = parseCleanupArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const { selection, confirm, deleteDiscarded, includeNotReverted, json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.

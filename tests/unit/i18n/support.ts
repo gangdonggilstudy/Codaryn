@@ -1,6 +1,6 @@
 /** Shared samples for the i18n tests. All values are fake. */
 
-import { DEFAULT_CONFIG_DISPLAY, MESSAGE_IDS, messageParams } from "../../../src/contracts/index.js";
+import { API_KEY_ENVS, DEFAULT_CONFIG_DISPLAY, MESSAGE_IDS, messageParams } from "../../../src/contracts/index.js";
 import type { MessageCatalog, MessageId, MessageLanguage, MessageParamKind } from "../../../src/contracts/index.js";
 
 export const LANGS: readonly MessageLanguage[] = ["ko", "en"];
@@ -50,6 +50,8 @@ export function samples(kind: MessageParamKind, catalog: MessageCatalog): readon
       return ["npm test", "npm run build"];
     case "suggestedPath":
       return ["tests", "package.json"];
+    case "keyEnv":
+      return [API_KEY_ENVS[0], API_KEY_ENVS[1]];
     default:
       // A kind the contract added after these samples: the tests that use it fail here, by name,
       // instead of the whole build stopping on a switch that is no longer exhaustive.
@@ -71,6 +73,11 @@ export function paramsFor(
 
 /** A fake value with the shape of an Anthropic key, built at run time so no source line has that shape. */
 export const KEY_SHAPED = ["sk", "ant", "Q".repeat(24)].join("-");
+/** Fake OpenAI key shapes (DR-32 (a)), built the same way: the narrow one (a digit and an upper-case letter) and one only the loose shape takes. */
+export const OPENAI_KEY_SHAPED = ["sk", "Q7".repeat(18)].join("-");
+export const OPENAI_LOOSE_SHAPED = ["sk", "q".repeat(36)].join("-");
+/** Every fake key shape above. */
+export const KEY_SHAPES: readonly string[] = [KEY_SHAPED, OPENAI_KEY_SHAPED, OPENAI_LOOSE_SHAPED];
 
 /**
  * C0, C1, line and paragraph separators, bidirectional controls. Built from a string: the

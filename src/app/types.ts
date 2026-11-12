@@ -129,7 +129,10 @@ export interface SettingsWidening {
     | "verifier_command_added"
     | "restore_path_tokens_enabled"
     | "plan_action_allowed"
+    /** A provider's API address: top-level `apiBaseUrl`, or `providers.<name>.apiBaseUrl` (GUI F-3). */
     | "api_base_url_changed"
+    /** GUI F-3: quick runs use another provider (`provider`), so the workspace's text goes to another API. */
+    | "provider_changed"
     | "profile_changed"
     | "workflow_changed";
   /** Where: a field path such as "policy.commands[2]". Never a value. */

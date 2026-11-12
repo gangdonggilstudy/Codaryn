@@ -17,7 +17,7 @@ import { describe, test } from "node:test";
 import { PLAN_APPLIED_FILE_NAME, PLAN_FILE_NAME, asRawText } from "../../../src/contracts/index.js";
 import type {
   ApplyDeps,
-  ApplyJournalEvent,
+  ApplyJournalEntry,
   ContentHash,
   EngineDeps,
   InventoryChecker,
@@ -161,7 +161,7 @@ const inventory: InventoryChecker = {
 
 async function applyRun(s: Space, plan: StoredPlan, digest: ContentHash, options: { gate?: PolicyConfig; planActions?: readonly PlanActionKind[] } = {}) {
   const privacy = createPrivacyGateway({ secrets: [FAKE_SECRET] });
-  const journal: ApplyJournalEvent[] = [];
+  const journal: ApplyJournalEntry[] = [];
   const deps: ApplyDeps = {
     plan,
     planRunId: PLAN_RUN,

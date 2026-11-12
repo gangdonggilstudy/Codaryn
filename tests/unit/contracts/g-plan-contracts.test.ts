@@ -67,7 +67,15 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  RevertOutcome,
+  RevertOutput,
+  RevertRecord,
+  RevertRequest,
+  RevertedFile,
+  ApplyJournalEntry,
   ApplyJournalEvent,
+  ContentHash,
+  MaskedText,
   ApplyResult,
   ApplySummaryContext,
   CodarynConfig,
@@ -154,7 +162,53 @@ const legacyEntry: RunListEntry = {
   changes: 1,
   reverted: null,
 };
-void [noConsentInFiles, applyEntry, legacyEntry];
+/** R-9 I-4: the start record is an apply journal entry, not a shown record (progress stays as it is). */
+type StartIsShown = Extract<ApplyJournalEvent, { type: "plan_item_started" }> extends never ? false : true;
+const startNotShown: StartIsShown = false;
+const startEntry: ApplyJournalEntry = {
+  type: "plan_item_started",
+  index: 0,
+  action: { kind: "discard", path: "b.tmp" as MaskedText, sha256: "a".repeat(64) as ContentHash },
+};
+/** DR-25: a revert request carries the person's consent for that run; the outcome and record say what was unsafe. */
+const revertWithConsent: RevertRequest = {
+  workspaceRoot: "/work",
+  runId: "20261112T120500Z-0000bbbb",
+  unsafeMoveConsent: { channel: "cli-flag", runId: "20261112T120500Z-0000bbbb" },
+};
+const revertWithout: RevertRequest = { workspaceRoot: "/work", runId: "20261112T120500Z-0000bbbb" };
+const unsafeBack: RevertedFile = { path: "a.jpg", action: "moved_back", from: "2026/a.jpg", unsafe: true };
+/** DR-25: a dry run judges no drive and says so; its outcome and output carry the notice. */
+const dryRunOutcome: RevertOutcome = {
+  reverted: [{ path: "a.jpg", action: "moved_back", from: "2026/a.jpg" }],
+  skipped: [],
+  moveSafetyUnchecked: true,
+};
+const dryRunOutput: Pick<RevertOutput, "dryRun" | "moveSafetyUnchecked"> = { dryRun: true, moveSafetyUnchecked: true };
+const revertRecord: RevertRecord = {
+  schemaVersion: 1,
+  kind: "revert_record",
+  runId: "20261112T120500Z-0000bbbb",
+  at: "2026-11-12T12:10:00Z",
+  status: "complete",
+  reverted: 1,
+  skipped: 0,
+  unsafeMoveConsent: "cli-flag",
+  unsafeMoves: 1,
+};
+void [
+  noConsentInFiles,
+  applyEntry,
+  legacyEntry,
+  startNotShown,
+  startEntry,
+  revertWithConsent,
+  revertWithout,
+  unsafeBack,
+  revertRecord,
+  dryRunOutcome,
+  dryRunOutput,
+];
 /** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
 // @ts-expect-error a raw note cannot be stored
 const rawNote: ReviewRecord["note"] = "typed by a person" as string;
@@ -331,6 +385,15 @@ describe("G-A plan contract", () => {
   test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
     assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
     assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
+  });
+
+  test("DR-25: a revert has the same consent path; its messages say what was moved unsafely and how to consent", () => {
+    assert.deepEqual(FIXED_MESSAGES["revert.unsafe_moved"], { count: "count" });
+    assert.deepEqual(FIXED_MESSAGES["summary.next_revert_unsafe"], { runId: "runId" });
+    assert.deepEqual(FIXED_MESSAGES["revert.dry_run_move_unchecked"], {});
+    for (const id of ["revert.unsafe_moved", "summary.next_revert_unsafe", "revert.skip.unsafe_move", "revert.dry_run_move_unchecked"]) {
+      assert.ok((MESSAGE_IDS as readonly string[]).includes(id), id);
+    }
   });
 
   test("DR-18 (b): a move the file system cannot make without risk of replacing a file has its own problem code", () => {

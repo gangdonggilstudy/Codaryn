@@ -66,3 +66,4 @@ export { listParkedFiles } from "./apply-revert.js";
 export { createRunRecorders } from "./state-guard.js";
 export type { RunRecorders, RunRecordersOptions, StateGuardLimits } from "./state-guard.js";
 export { hasRecordsChangedMark } from "./marks.js";
+export { applyCleanup, planCleanup, summarizeState } from "./cleanup.js";

@@ -92,6 +92,8 @@ export function parseChangesArgs(argv: readonly string[]): ParseChangesArgsOutco
         configPath: values.get("--config") ?? null,
         varsFile: values.get("--vars-file") ?? null,
         profile,
+        // The workflow decides no secret, so `changes` takes no --workflow.
+        workflowRef: null,
       },
       runId,
       json,

@@ -137,6 +137,9 @@ export type CreateApplyRecorders = (options: ApplyRecordersOptions) => ApplyReco
  * - `runs` (listRuns), `report`: a mark on the entry (`recordsChanged`).
  * - `revert`: not refused (its snapshot and digest checks still apply); the output says so.
  * - cleanup: not blocked; a warning (`records_changed`).
+ * - `apply` (U-1, R-33 R33-L3): a marked plan run is not applied; its plan may differ from what a
+ *   person saw. The caller refuses it as `plan_records_changed` before asking; the engine checks
+ *   again under the lock (ApplyDeps.planRecordsChanged) and ends as `failed`/`plan_stale`.
  * - A mark file that cannot be read or checked counts as a mark (fail closed).
  */
 export const RECORDS_CHANGED_FILE_NAME = "records-changed.json";

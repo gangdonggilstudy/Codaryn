@@ -23,7 +23,7 @@ import { runCli } from "../../../src/cli/run.js";
 import { findKeyInJson, relateRealPaths } from "../../../src/cli/security/index.js";
 import type { RealpathFs } from "../../../src/cli/security/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
-import type { Journal, JournalEvent, MaskedText } from "../../../src/contracts/index.js";
+import type { Journal, JournalEvent, MaskedText, MessageCatalog } from "../../../src/contracts/index.js";
 import { FAKE_SECRET, IS_WINDOWS, cliIo, exists, setupRun, tempDir } from "./k-support.js";
 
 const SEP = String.fromCharCode(92);
@@ -322,6 +322,9 @@ describe("U-8 progress lines", () => {
   });
 });
 
+/** N-21: a catalog stand-in that shows the message id, so the help's structure can be checked without N-B's texts. */
+const idMessages = { language: "en", format: (id: string) => `<${id}>` } as unknown as MessageCatalog;
+
 describe("U-7 help, version and the package entry", () => {
   test("help and version requests", () => {
     assert.deepEqual(helpRequest(["--help"]), { kind: "help", command: null });
@@ -338,11 +341,16 @@ describe("U-7 help, version and the package entry", () => {
   });
 
   test("texts", () => {
-    const general = helpText(null);
-    for (const command of ["codaryn run", "codaryn revert", "codaryn report", "codaryn doctor", "--quiet", "ANTHROPIC_API_KEY"]) {
-      assert.ok(general.includes(command), command);
+    // N-21: usage lines stay English; every description is a catalog message.
+    const general = helpText(null, idMessages);
+    for (const part of ["codaryn run", "codaryn revert", "codaryn report", "codaryn doctor", "codaryn init", "codaryn runs", "<help.intro>", "<help.key>"]) {
+      assert.ok(general.includes(part), part);
     }
-    assert.ok(helpText("doctor").includes("No network access"));
+    const doctor = helpText("doctor", idMessages);
+    for (const part of ["usage: codaryn doctor", "<help.command.doctor>", "--profile <name>", "<help.option.profile>", "<help.exit.doctor>"]) {
+      assert.ok(doctor.includes(part), part);
+    }
+    assert.ok(helpText("revert", idMessages).includes("--dry-run"));
     assert.equal(versionText("0.1.0"), "codaryn 0.1.0\n");
     assert.equal(versionText(null), "codaryn (version unknown)\n");
   });

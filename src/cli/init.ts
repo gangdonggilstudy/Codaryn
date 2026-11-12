@@ -16,6 +16,7 @@ import {
   INIT_DEFAULT_LIMITS,
   INIT_DEFAULT_MAX_OUTPUT_TOKENS,
   INIT_EXIT_CODES,
+  INIT_QUESTION_DEFAULTS,
   INIT_SUGGESTED_PROTECTED_PATHS,
   MESSAGE_LANGUAGES,
   MODEL_PLACEHOLDER,
@@ -251,11 +252,16 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
       // stderr is best effort.
     }
   };
-  const yesNoHint = messages.format("init.yes_no");
+  // N-20: each question shows its own default (INIT_QUESTION_DEFAULTS); widening ones default to no.
+  const hint = (question: keyof typeof INIT_QUESTION_DEFAULTS): string =>
+    messages.format(INIT_QUESTION_DEFAULTS[question] === "yes" ? "prompt.yes_no_default_yes" : "prompt.yes_no_default_no");
+  const fallback = (question: keyof typeof INIT_QUESTION_DEFAULTS): boolean => INIT_QUESTION_DEFAULTS[question] === "yes";
 
   if (ask !== undefined) {
-    const confirmed = await question(`${messages.format("init.location", { location: target.display })}\n${messages.format("init.confirm_create")} ${yesNoHint}`);
-    if (!yesNo(confirmed, true)) return finish("declined");
+    const confirmed = await question(
+      `${messages.format("init.location", { location: target.display })}\n${messages.format("init.confirm_create")} ${hint("confirm_create")}`,
+    );
+    if (!yesNo(confirmed, fallback("confirm_create"))) return finish("declined");
 
     // Model: listed only with a key, through `codaryn models`' listing (a real API request).
     if (!keySet || io.listModels === undefined) {
@@ -280,14 +286,16 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
     if (workspace !== null) {
       // Allowing a command widens the policy: the default answer is no.
       for (const entry of await suggestedScripts(io, workspace)) {
-        if (yesNo(await question(`${messages.format("init.commands_suggest", { command: entry.shown })} ${yesNoHint}`), false)) {
+        const answer = await question(`${messages.format("init.commands_suggest", { command: entry.shown })} ${hint("commands_suggest")}`);
+        if (yesNo(answer, fallback("commands_suggest"))) {
           commands.push(entry.rule);
         }
       }
       // Protecting a path narrows it: the default answer is yes.
       for (const name of SUGGESTED_PROTECTED_PATHS) {
         if (!(await io.exists(path.join(workspace, name)))) continue;
-        if (yesNo(await question(`${messages.format("init.protected_suggest", { path: name })} ${yesNoHint}`), true)) {
+        const answer = await question(`${messages.format("init.protected_suggest", { path: name })} ${hint("protected_suggest")}`);
+        if (yesNo(answer, fallback("protected_suggest"))) {
           protectedPaths.push(name);
         }
       }

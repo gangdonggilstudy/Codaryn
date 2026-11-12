@@ -125,7 +125,7 @@ run id                     started              changes  result
 codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
 ```
 
-stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다.
+stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다. 변경과 사용량 사이에는 `## The agent's last message` 절이 있다. 머리말 `The agent's last message. These are the agent's own words, not a verified fact.` 아래에 끝 요약과 같은 `|` 줄이 코드 블록으로 나온다(8절 "에이전트의 마지막 답").
 
 **revert --dry-run:** 아무것도 바꾸지 않고 무엇을 되돌릴지 보인다. stdout은 `"dryRun":true`가 붙은 결과 JSON 한 줄이고 종료 코드는 실제 되돌리기와 같다(0). stderr:
 
@@ -209,7 +209,7 @@ Next: codaryn doctor
 ```
 
 - `--json`이면 `kind:"init"` JSON 한 줄이다(`status` `created`, `model` `placeholder`, `keySet` 등).
-- 출력과 문구에는 펼친 경로 대신 `%APPDATA%\Codaryn\config.json` 같은 고정 표기만 나온다.
+- 출력과 문구에는 펼친 경로 대신 `%APPDATA%\Codaryn\config.json` 같은 고정 표기만 나온다(값을 문구에 넣지 않기 때문이다). 그 표기는 그대로 쓸 수 있다: 명령 프롬프트(cmd)는 `%APPDATA%`를 풀고, PowerShell에서는 `$env:APPDATA\Codaryn\config.json`으로 쓴다(예: `notepad "$env:APPDATA\Codaryn\config.json"`). 두 셸에서 `init`이 만든 파일이 그 경로에 있는 것을 확인했다. 탐색기 주소창에 붙여도 열릴 것으로 보지만 화면으로는 확인하지 않았다(UXM-20).
 
 ### 설정 파일을 찾는 순서
 
@@ -519,8 +519,10 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
   - 글은 줄마다 `  | `로 시작한다. 탭과 이어진 공백은 공백 하나로 보이고, 긴 줄은 접힌다.
   - 글은 가린 기록에서 만든다. 가릴 값은 토큰(`[[CODARYN_SECRET:…]]`)으로, 키 모양은 `[key]`로 보인다. 제어 문자와 보이지 않는 문자(양방향 제어, 영폭 공백 등)는 빠진다(개인정보 문서 5절).
   - 2,000자(코드 포인트)까지다. 넘으면 앞 2,000자만 보이고 그 아래에 `(cut: only the first 2000 characters are shown)`(한국어 `(잘림: 앞 2000자만 보입니다)`)가 붙는다.
-  - 없는 경우: 계획 실행(`plan_pending`, 그 자리는 계획의 요약이다), 한도에 걸리는 등 모델의 답 없이 끝난 실행, 답이 비었거나 공백뿐인 실행.
-  - 확인(U-21 통합 판 `be5e089`의 실제 CLI): 3절 체험, `analyze` 실행(답 `done`), 가릴 값·키 모양·탭·CRLF·제어 문자·이어진 공백·2,100자를 넣은 대본(영어·한국어), 계획 실행, `max_model_turns`로 끝난 실행, 공백뿐인 답(셋 다 없음).
+  - 없는 경우: 계획 실행(`plan_pending`, 그 자리는 계획의 요약이다. 18.3절 "계획 보기"), 한도에 걸리는 등 모델의 답 없이 끝난 실행, 답이 비었거나 공백뿐인 실행.
+  - 같은 글이 나오는 곳: stdout JSON과 `result.json`의 `finalMessage`(10절), `report`의 `## The agent's last message` 절(머리말 `The agent's last message. These are the agent's own words, not a verified fact.`, 3절), `report --json`의 `result.finalMessage`, GUI의 실행 결과 화면과 보고서 화면(같은 뜻의 머리말. GUI는 코드로만 확인했고 화면은 띄우지 않았다).
+  - **journal에는 모델이 보낸 글이 그대로 남는다.** `journal.jsonl`의 `model_response` 기록마다 `text`에 그 턴의 모델 글이 있다. 등록한 가릴 값만 토큰으로 바뀌어 있고(가림본), 위의 처리(키 모양을 `[key]`로, 제어 문자와 보이지 않는 문자 빼기, 2,000자 자르기)는 거치지 않는다. 마지막이 아닌 답도 남는다. 3절 체험의 journal에는 4턴의 `요약을 만들었다.`와 6턴의 `빠진 '## 할 일' 절을 더했다.`가 둘 다 있고, 끝 요약에는 6턴의 것만 나온다. journal을 열어 보거나 남에게 줄 때는 이 점을 생각한다([민감정보 처리](privacy.md) 5절).
+  - 확인(U-21 통합 판 `be5e089`의 실제 CLI): 3절 체험, `analyze` 실행(답 `done`), 가릴 값·키 모양·탭·CRLF·제어 문자·이어진 공백·2,100자를 넣은 대본(영어·한국어), 계획 실행, `max_model_turns`로 끝난 실행, 공백뿐인 답(셋 다 없음). main `a191a50`에서 3절 체험의 끝 요약, `report`, `report --json`, journal을 다시 봤다.
 - 오류 설명: 무엇이 잘못됐는지, 위치(6절 "오류 위치"), 고치는 법, 코드. 실행 전 오류에도 나온다. 오류 JSON의 영어 `message`는 stdout에만 있다. 예:
 
 ```
@@ -584,11 +586,12 @@ node dist/src/cli/main.js runs --workspace D:\work\notes --limit 5 --json
 
 ### `--run latest`
 
-`report`와 `revert`의 `--run`에 `latest`를 주면 실행 목록의 맨 위(확인을 통과한 가장 최근 실행)를 쓴다. 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 쓴다(3절). `--quiet`이면 쓰지 않는다.
+`report`, `revert`, `changes`, `plan`, `review`의 `--run`에 `latest`를 주면 실행 목록의 맨 위(확인을 통과하고 결과가 있는 가장 최근 실행)를 쓴다. `apply`는 `latest`를 받지 않는다(18.3절). 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 쓴다(3절). `--quiet`이면 쓰지 않는다.
 
 - 그런 실행이 없으면 `run_not_found`(종료 2)다.
 - **가장 새 실행이 아직 도는 중이면** 앞에 끝난 실행이 있어도 그것을 고르지 않고 `run_in_progress`(종료 6)로 끝난다. 아무것도 바꾸지 않는다(DR-48). 앞선 실행을 보려면 그 실행 id를 준다. 도는 실행의 id를 주면 `report`는 지금까지의 기록을 `incomplete`(종료 3)로 보인다. 실행이 끝나면 `latest`는 그 실행이다.
-  - 확인(U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)의 실제 CLI): 끝난 실행 뒤에 명령 하나를 기다리는 실행을 띄워 두고 `report`, `revert --dry-run`, `plan`, `review`의 `--run latest`가 모두 아래 오류였다. 한국어는 `가장 최근 실행이 아직 도는 중이어서 결과가 없습니다. 아무것도 바꾸지 않았습니다`로 시작한다.
+  - "도는 중"은 결과가 없는 그 실행이 작업 공간 잠금(`.codaryn\lock.json`)을 쥐고 있고, 잠금 규칙이 그 프로세스를 살아 있다고 볼 때다. 결과 없이 멈춘 실행(강제로 끝낸 실행 등)은 잠금이 남아 있어도 그 프로세스가 끝났으면 건너뛰고 앞선 실행을 고른다. 멈춘 실행의 잠금 때문에 이 오류가 계속되면 17절 "멈춘 실행의 잠금이 남아 막힐 때"를 본다.
+  - 확인(U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)과 main `a191a50`의 실제 CLI): 끝난 실행 뒤에 명령 검사 하나를 기다리는 실행을 띄워 두고 `report`, `changes`, `revert --dry-run`, `plan`, `review`의 `--run latest`가 모두 아래 오류였다(`changes`는 main `a191a50`에서 확인). 같은 때 끝난 실행의 id를 준 `report`와 `changes`는 그 실행을 보였다. 한국어는 `가장 최근 실행이 아직 도는 중이어서 결과가 없습니다. 아무것도 바꾸지 않았습니다`로 시작한다.
 
     ```
     codaryn: error — the latest run is still going and has no result yet; nothing was changed (run_in_progress)
@@ -604,7 +607,8 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 ```
 
 - 그 실행의 `result.json`과 `journal.jsonl`(가림본)만 읽어 Markdown 요약을 낸다. 아무것도 바꾸지 않고 잠금도 잡지 않는다.
-- 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차와 통과하지 않은 검증기의 근거. 검증기는 순번), 보호 대상, 변경, 사용량(한도 대비, 거부된 도구 호출 수), 검사하지 않은 범위.
+- 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차와 통과하지 않은 검증기의 근거. 검증기는 순번), 보호 대상, 변경, 에이전트의 마지막 답(있을 때. 검증된 사실이 아니라는 머리말과 함께, 8절), 사용량(한도 대비, 거부된 도구 호출 수), 검사하지 않은 범위.
+- `--json`은 `kind:"report"` 한 줄이다. `result`는 그 실행의 `result.json`(마지막 답은 `result.finalMessage`. 없으면 `null`이고 `incomplete`다), `journal`은 기록에서 읽은 요약이다.
 - 종료: `complete`(0)는 두 파일을 모두 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. 이때는 기록만으로 만들고 "Result: none"과 기록의 종료 기록을 적는다.
 - 오류(종료 2): 그 runId의 기록이 없으면 `run_not_found`, 기록을 읽거나 해석할 수 없으면 `invalid_run_record`, 작업 공간이 없으면 `workspace_not_found`다.
 - 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로, 실행 중 허용된 명령이 기록을 바꿀 수 있다.
@@ -618,7 +622,7 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 | 3 | `needs-input`: `no_verifier`, `verifier_inconclusive`, `unknown_tool_outcome`, `protected_changed`, `plan_pending`, `awaiting_review`, `consent_required`(18절). 되돌리기 `partial`, 보고서 `incomplete`, 점검 `warn`, `init` `declined`, 정리의 `nothing_removed`(확인했지만 지운 것이 없음, 18.8절) |
 | 4 | `budget-exhausted`: `max_model_turns`, `max_tool_calls`, `max_total_tokens`, `max_duration`, `usage_unknown` |
 | 5 | `cancelled` |
-| 6 | `workspace_locked`: 같은 작업 공간에서 다른 실행이나 되돌리기가 진행 중. `run_in_progress`: `--run latest`가 고를 가장 새 실행이 아직 도는 중(9절) |
+| 6 | `workspace_locked`: 같은 작업 공간에서 다른 실행이나 되돌리기가 진행 중. `run_in_progress`: `--run latest`가 고를 가장 새 실행이 아직 도는 중(이 절의 "`--run latest`") |
 | 7 | `provider_not_configured`: 키·모델·출력 상한 미설정(자리표시자 모델 포함). 전송 없음 |
 | 8 | `model_list_failed`: `models`의 API 요청 실패 |
 | 70 | `internal_error` |
@@ -834,9 +838,9 @@ node --test dist/tests/live/anthropic-live.js
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).
   - 실행이 끝난 뒤 변경 기록 파일의 다이제스트를 지금 값으로 바꿔 넣으면, `changes`를 다른 가릴 값으로 볼 때 실행 때 가렸던 값이 그대로 보인다(DR-37 (b)). 드러나는 값은 작업 공간 파일에 이미 있는 값이다.
   - `report`는 실행 기록만큼만 믿을 수 있다.
-- **출력 언어:** `report`의 Markdown과 `models`의 표는 `CODARYN_LANG`과 관계없이 영어다. 오류 JSON의 `message`, `--json` 출력도 영어다. `plan`·`apply`·`review`·`changes`의 도움말과 적용·동의를 묻는 터미널 질문도 아직 영어다.
+- **출력 언어:** `report`의 Markdown과 `models`의 표는 `CODARYN_LANG`과 관계없이 영어다. 오류 JSON의 `message`, `--json` 출력도 영어다. `plan`·`apply`·`review`·`changes`의 도움말과 적용·동의를 묻는 터미널 질문도 아직 영어다. `plan`의 본문은 섞여 있다: 머리 줄(`Plan of run …`), `Digest:` 줄, 동작 줄, 적용 명령 줄(`To apply it: …`), `Applied by run …` 줄은 영어이고, 기록 변경 경고, 에이전트의 설명 머리말, 적용할 수 없다는 줄, 다이제스트가 묶는 것을 말하는 끝 문장은 한국어 설정에서 한국어다(main `a191a50`, 18.3절).
 - **OS 언어 판단:** `CODARYN_LANG`과 설정의 `language`가 없으면 Node의 `Intl` 기본 로캘로 언어를 고른다. Windows에서는 이것이 표시 언어가 아니라 지역 형식을 따를 수 있다. 원하는 언어가 아니면 `CODARYN_LANG`이나 설정의 `language`로 고정한다(8절). Linux·macOS에서는 확인하지 않았다.
-- **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다. 끝난 실행의 잠금은 다음 실행이 회수한다.
+- **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다(5초 안으로 맞으면 같은 프로세스로 본다). 끝난 실행의 잠금은 다음 실행이 회수한다. 시작 시각이 없는 잠금(이 확인이 생기기 전의 판이 쓴 것)은 프로세스 id만으로 판정하므로, 그 id를 다른 프로그램이 다시 쓰면 그 프로그램이 끝날 때까지 쥔 것으로 보인다(17절 "멈춘 실행의 잠금이 남아 막힐 때").
 - **심한 부하에서의 잠금:** 시작 시각 조회(Windows PowerShell)가 5초 안에 답하지 않으면 그 잠금을 "쥐고 있음"으로 본다. 그래서 컴퓨터가 몹시 바쁠 때는 이미 끝난 실행의 잠금인데도 `workspace_locked`(종료 6)로 끝날 수 있다. 두 실행이 함께 작업 공간을 쓰지 않게 하려고 안전한 쪽으로 끝내는 것이다. 잠시 뒤 다시 실행하고, 계속되면 `doctor`의 작업 공간 잠금 항목을 본다(17절).
 
 ## 17. 문제 해결
@@ -851,7 +855,7 @@ node --test dist/tests/live/anthropic-live.js
 | `secret_env_missing` | `secretEnv`에 적은 환경 변수가 없다 |
 | `workspace_not_found` | `workspaceRoot`나 `--workspace`가 있는 디렉터리가 아니다 |
 | `workspace_is_install_dir` | 작업 공간(한 줄 실행이면 현재 디렉터리)이 CLI 설치 위치(이 저장소)와 겹친다. 저장소 밖으로 복사해 실행한다(3절, 5절) |
-| `workspace_locked` | 다른 실행이나 되돌리기가 끝나기를 기다린다. 컴퓨터가 몹시 바쁠 때는 끝난 실행의 잠금도 이렇게 끝날 수 있으니 잠시 뒤 다시 실행한다(16절). 이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지운다(오류 설명과 `doctor`의 작업 공간 잠금 항목이 같은 안내를 한다) |
+| `workspace_locked` | 다른 실행이나 되돌리기가 끝나기를 기다린다. 컴퓨터가 몹시 바쁠 때는 끝난 실행의 잠금도 이렇게 끝날 수 있으니 잠시 뒤 다시 실행한다(16절). 이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지운다(오류 설명과 `doctor`의 작업 공간 잠금 항목이 같은 안내를 한다). 어떤 흔적에서 이렇게 되는지는 이 절 아래 "멈춘 실행의 잠금이 남아 막힐 때" |
 | `provider_not_configured` | `doctor`로 무엇이 빠졌는지 본다. 키는 사용자 환경 변수, 모델은 `models --use`(자리표시자는 설정되지 않은 것), `maxOutputTokens`는 설정 파일 |
 | `model_list_failed` | `models`의 API 요청이 실패했다. 메시지의 종류를 본다(`auth_failed`는 키 확인). 아무것도 쓰지 않았다 |
 | `config_write_failed` | `models --use`나 `init`이 설정 파일을 쓰지 못했다. 파일은 그대로다 |
@@ -862,7 +866,7 @@ node --test dist/tests/live/anthropic-live.js
 | `budget-exhausted` | `reason`의 한도를 올리거나(설정 상한 이내) 목표를 작게 나눈다 |
 | `budget-exhausted`/`usage_unknown` | 제공자가 토큰 사용량을 알려 주지 않았다. scripted 대본이면 단계마다 `usage`를 적는다(3절) |
 | `run_not_found` | 그 작업 공간에 그 runId의 기록이 없거나, `--run latest`로 고를 실행이 없다. `runs`로 실행 목록을 본다 |
-| `run_in_progress`(종료 6) | `--run latest`가 고를 가장 새 실행이 아직 돈다. 끝난 뒤 다시 하거나, 앞선 실행의 id를 준다(9절) |
+| `run_in_progress`(종료 6) | `--run latest`가 고를 가장 새 실행이 아직 돈다. 끝난 뒤 다시 하거나, 앞선 실행의 id를 준다(10절 "`--run latest`"). 도는 실행이 없는데도 계속되면 이 절 아래 "멈춘 실행의 잠금이 남아 막힐 때" |
 | `invalid_run_record` | 기록을 읽을 수 없다. `runs`에서는 `.codaryn`이나 `runs`가 링크이거나 나열할 수 없을 때다. 파일 정리의 적용 실행을 되돌릴 때는 계획 실행의 `plan.json`이 승인한 다이제스트와 다르게 바뀐 경우도 여기다(18.4절) |
 | `plan_run_missing` | 되돌리려는 적용 실행의 계획 실행 폴더나 `plan.json`이 없다. 그 폴더를 지웠다면 되살린다. 없으면 그 적용은 되돌릴 수 없다(18.4절, 18.8절) |
 | `plan_secrets_differ` | 지금 등록한 가릴 값이 계획 실행 때와 다르게 계획의 경로를 가린다. 아무것도 보이거나 옮기지 않았다. 계획 실행에 쓴 task로 다시 하거나, 계획을 새로 만든다(18.3절) |
@@ -870,7 +874,7 @@ node --test dist/tests/live/anthropic-live.js
 | `plan_not_approved` | `--digest`가 없거나 그 계획의 다이제스트와 맞지 않는다. `plan`으로 다이제스트를 보고 앞 12자 이상을 준다 |
 | `plan_already_applied` | 그 계획은 이미 적용됐다. 결과는 `report --run <적용 실행 id>`로 보고, 되돌리려면 `revert --run <적용 실행 id>`를 쓴다 |
 | `run_not_awaiting_review` | `review`에 준 실행이 `awaiting_review`로 끝나지 않았다 |
-| `plan_records_changed` | 그 계획 실행에 기록 변경 표시가 있다(`runs`의 결과 칸 끝에 `records changed`). 실행이 아닌 것이 그 기록을 바꿔 계획이 읽은 것과 다를 수 있어 아무것도 묻거나 옮기지 않았다. 계획을 새로 만들어 적용한다(18.3절) |
+| `plan_records_changed` | 그 계획 실행에 기록 변경 표시가 있다(`runs`의 결과 칸 끝에 `records changed`). 실행이 아닌 것이 그 기록을 바꿔 계획이 읽은 것과 다를 수 있어 아무것도 묻거나 옮기지 않았다. `codaryn run`으로 계획을 새로 만들어(`codaryn plan`은 계획을 보여 주기만 한다) 새 계획을 읽고 적용한다. `plan`은 그 계획을 경고와 함께 보이지만 적용 명령은 보이지 않는다(18.3절) |
 | `failed`/`state_changed` | 실행 중에 그 실행이 아닌 것(허용한 명령, 명령형 검증기, 다른 프로그램)이 `.codaryn\`을 바꿨다. 실행을 멈췄고 표시를 남겼다. `report`를 읽고, 허용한 명령과 검증기가 `.codaryn\`에 쓰지 않는지 본 뒤 다시 실행한다(16절 "실행 기록 변조") |
 | `cleanup_plan_changed`(종료 2) | 준 다이제스트가 지금의 정리 미리보기의 것과 다르다. 미리보기 뒤에 새 실행, 되돌리기, 남은 폴더 등으로 상태 디렉터리가 바뀌었거나 다른 미리보기의 다이제스트다. 아무것도 지우지 않았다. 다시 미리 보고 새 다이제스트로 확인한다(18.8절) |
 | `cleanup`의 `nothing_removed`(종료 3) | 확인했지만 지운 것이 없다. 줄마다 남긴 이유가 나온다(되돌리지 않은 실행, 폐기 보관함이 남은 적용 등). 지우려면 그 이유가 말하는 확인(`--include-not-reverted`, `--delete-discarded`)을 더해 다시 미리 본다(18.8절) |
@@ -890,6 +894,34 @@ node --test dist/tests/live/anthropic-live.js
 | 사람용 글이 원하는 언어가 아님 | `$env:CODARYN_LANG = "ko"` 또는 `"en"`, 또는 설정 파일의 `language`. `doctor`의 메시지 언어 항목이 출처를 알려 준다(8절) |
 | PowerShell에서 `2>`로 stderr를 돌릴 때 `NativeCommandError` | PowerShell 5.1이 네이티브 명령의 stderr 줄을 오류 레코드로 감싸 보여 주는 것이다. 종료 코드(`$LASTEXITCODE`)와 stdout JSON은 영향받지 않는다 |
 
+### 멈춘 실행의 잠금이 남아 막힐 때 (`run_in_progress`, `workspace_locked`)
+
+실행이나 적용, 되돌리기는 도는 동안 `.codaryn\lock.json`을 쥔다. 이 파일에는 그 실행의 `runId`, 프로세스 번호 `pid`, 시작 시각(`startedAt`, `processStartedAt`)이 있다. 정상으로 끝나면 지우고, 강제로 끝나면(작업 관리자로 끝냄, 전원이 꺼짐 등) 남는다. 다음 명령은 그 `pid`의 프로세스가 살아 있고 시작 시각이 5초 안으로 맞을 때만 "아직 쥐고 있음"으로 본다(16절 "잠금 판정").
+
+남은 흔적마다 실제로 어떻게 되는지는 아래와 같다. 확인(main `a191a50`의 실제 CLI, 3절 체험 사본): 끝난 실행 A 뒤에, 명령 검사에서 기다리는 실행 B를 띄우고 B를 프로세스째 강제로 끝냈다(결과 없음, 잠금 남음). 그다음 잠금 파일을 각 경우의 모양으로 바꿨다. "다른 프로그램"은 Codaryn이 아닌 `node` 프로세스 하나다.
+
+| 남은 흔적 | `--run latest`(`report` 등) | 새 실행, `revert`, `cleanup --confirm` | `doctor`의 `workspace lock` 항목 | 빠져나오는 법 |
+| --- | --- | --- | --- | --- |
+| 강제로 끝낸 실행의 잠금. 그 `pid`의 프로세스가 없음 | A를 고른다 | 새 실행이 잠금을 회수하고 진행한다(`done`) | `[ok]` `a lock left by a process that has ended; the next run reclaims it` | 할 일 없음 |
+| 그 `pid`를 다른 프로그램이 다시 씀. 잠금에 시작 시각이 있음(지금 판이 쓰는 잠금) | A를 고른다(시작 시각이 달라 끝난 것으로 본다) | 새 실행이 회수하고 진행한다(`done`) | `[ok]` (위와 같은 줄) | 할 일 없음 |
+| 그 `pid`를 다른 프로그램이 다시 씀. 잠금에 시작 시각이 없음(옛 판이 쓴 잠금) | `run_in_progress`(종료 6). 그 프로그램이 끝날 때까지 계속되고, 끝나면 A를 고른다 | `workspace_locked`(종료 6). 정리는 아무것도 지우지 않는다 | `[warning]` `a running process holds the workspace lock; if no Codaryn is running, delete .codaryn/lock.json (a reused process id can make this wrong)` | `lock.json`을 지운다. 그 뒤 `latest`는 A이고 새 실행은 `done`이었다 |
+| `lock.json`을 읽을 수 없음(깨진 내용) | A를 고른다 | `workspace_locked`(종료 6). 이런 잠금은 회수하지 않는다 | `[warning]` `the workspace lock file (.codaryn/lock.json) cannot be read` | `lock.json`을 지운다. 그 뒤 새 실행은 `done`이었다 |
+| 끝난 실행의 잠금 옆에 회수 파일 `lock.json.reclaim`이 남음(그 안의 `pid`가 살아 있는 다른 프로그램) | A를 고른다 | `workspace_locked`(종료 6). 회수 파일이 있는 동안 잠금을 회수하지 않는다 | `[warning]` `a lock reclaim file (.codaryn/lock.json.reclaim) is left, so a lock left by an ended process is not reclaimed; if no Codaryn is running in this workspace, remove that file` | `lock.json.reclaim`을 지운다. 그 뒤 새 실행이 남은 잠금을 회수하고 `done`이었다 |
+
+- 막힌 동안에도 실행 id를 직접 주면 그 실행을 볼 수 있다. 위 모든 경우에 `report --run <A의 id>`는 종료 0이었다. `run_in_progress`의 고치는 법 줄(`To see an earlier run, give its id; codaryn runs lists the runs of the workspace.`)이 이것이다.
+- 멈춘 실행 B는 `runs`에 `no result (running or stopped)`(한국어 `결과 없음(진행 중이거나 중단됨)`)로 남는다. 정리 미리보기는 B를 고르지 않고, 잠금이 쥔 것으로 보이면 `running (it holds the workspace lock)`, 아니면 `no result yet (it may still be running)`이라고 적는다.
+- `workspace_locked`의 사람용 오류는 이렇게 끝난다(실제 출력, 한국어는 `이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.`).
+
+  ```
+  codaryn: error — another run is using this workspace (workspace_locked)
+    To fix: Run again after the other run finishes.
+    If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.
+  ```
+
+- **지우기 전에 정말 도는 Codaryn이 없는지 사람이 확인한다.** 그 작업 공간에서 Codaryn을 돌리는 터미널이나 GUI 창이 없는지 본다. `lock.json`의 `pid`로 `Get-Process -Id <pid>`를 볼 수는 있지만, `node`라고 나와도 Codaryn이라는 뜻은 아니다(위 확인의 다른 프로그램도 `node`였다). 도는 실행의 잠금을 지우면 두 실행이 같은 작업 공간을 함께 쓰게 된다.
+- `run_in_progress`의 고치는 법 줄은 "끝난 뒤 다시"와 "실행 id를 주라"만 말하고, 잠금이나 `doctor`는 말하지 않는다. 도는 실행이 없는데도 계속되면 `doctor --task <task.json>`(또는 `--workspace`)의 `workspace lock` 항목을 본다. 설정 없이 `--workspace`만 주면 키·모델·한도 항목이 실패해 `doctor`가 종료 1이 되지만, 잠금 항목은 그대로 읽을 수 있다.
+- 확인하지 못한 것: GUI가 이 경우들을 어떻게 보이는지, Linux·macOS의 판정(프로세스 시작을 다른 방법으로 읽는다), 하드 링크가 없는 드라이브에서 쓰는 도중의 잠금, 시작 시각 조회가 실제로 5초를 넘긴 경우(16절 "심한 부하에서의 잠금"은 코드로만 안다).
+
 ## 18. 범용 작업: 작업 종류, 계획 확인, 사람 확인
 
 작업 종류는 실행에 쓸 도구, 고정 지시, 계획 확인 여부, 끝나는 방식을 묶은 것이다. 작업 종류를 고르지 않은 task는 지금까지와 같이 실행된다(도구 넷 `read_file`, `search_files`, `write_file`, `run_command`, 계획 없음, 검증기로 완료).
@@ -907,6 +939,7 @@ node --test dist/tests/live/anthropic-live.js
 | `organize` | `read_file`, `search_files`, `inspect_files`, `propose_plan` | 계획을 제안하고 멈춤. 사람이 승인하면 적용(18.3) | 파일 이동·폐기. 명령 금지 |
 
 - **고르는 곳**(앞의 것이 우선): task 파일의 `workflowRef` → 간편 형식의 `--workflow <id>` → 프로필의 `workflowRef`. task 파일과 `--workflow`를 함께 주면 `invalid_arguments`다.
+  - `codaryn help run`의 사용법 줄에는 `[--workflow <id>]`가 있지만 그 아래 옵션 목록에는 아직 없다(main `a191a50`, UXM-20). 뜻은 이 절의 것이다.
 - task의 `workflow`는 표시용 이름표일 뿐이다. `"workflow": "organize"`만 쓰고 `workflowRef`가 없으면 예전 방식으로 실행되고 계획 도구가 없다.
 - **사용자 정의 작업 종류:** 설정 파일의 `workflows`에 `"<id>": { 정의 }`로 둔다. 내장 id는 다시 정의할 수 없다.
   - 필드: `label`, `tools`, `instructions`, `plan`(`none`·`apply`), `completion`(`verifiers`·`human_review`), `humanReview`(`checklist`), `allowCommands`, `policy`, `verifiers`, `limits`
@@ -969,13 +1002,13 @@ codaryn: finished — needs input (plan_pending)
 ── Result: needs input — a plan was proposed and waits for approval (needs-input/plan_pending) ──
 A plan is ready: actions 3. Nothing was changed; it waits for approval.
 Files changed: 0
-Usage: model turns 2 · tool calls 2 · 0.1 s
+Usage: model turns 2 · tool calls 2 · 0 s
 Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.
-Run id: 20261112T055810Z-6916ecde
-Report: codaryn report --workspace <workspace> --run 20261112T055810Z-6916ecde
-Plan: codaryn plan --task <task.json> --run 20261112T055810Z-6916ecde
-Apply after approval: codaryn apply --task <task.json> --run 20261112T055810Z-6916ecde --digest <digest>
-  e6abc377e2b93985f86db63918ed90f73076e316f56f5d7917de5befb58cc887
+Run id: 20261112T200120Z-c27683db
+Report: codaryn report --workspace <workspace> --run 20261112T200120Z-c27683db
+Plan: codaryn plan --task <task.json> --run 20261112T200120Z-c27683db
+Apply after approval: codaryn apply --task <task.json> --run 20261112T200120Z-c27683db --digest <digest>
+  1eff19809df98cd22c5117163c09128e658fe5ea0e0afceaa3a371251e9693cd
 ```
 
 - 계획 실행은 검증기를 돌리지 않는다. task의 검증기는 적용 때 돈다.
@@ -984,13 +1017,20 @@ Apply after approval: codaryn apply --task <task.json> --run 20261112T055810Z-69
 **계획 보기(`plan`):** 실제 출력(stdout).
 
 ```
-Plan of run 20261112T055810Z-6916ecde: 3 action(s), pending
-Digest: e6abc377e2b93985f86db63918ed90f73076e316f56f5d7917de5befb58cc887
+Plan of run 20261112T200120Z-c27683db: 3 action(s), pending
+Digest: 1eff19809df98cd22c5117163c09128e658fe5ea0e0afceaa3a371251e9693cd
   1. move     inbox/beach-2025.jpg  ->  photos/2025/beach-2025.jpg
   2. move     inbox/receipt-2026.pdf  ->  documents/2026/receipt-2026.pdf
   3. discard  inbox/old-draft.tmp  (kept in .codaryn/discarded/ until removed)
-To apply it: codaryn apply <the same task form> --run 20261112T055810Z-6916ecde --digest e6abc377e2b9
+The agent's description (the model's own words, not checked, and not what you approve):
+  | 사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다
+To apply it: codaryn apply <the same task form> --run 20261112T200120Z-c27683db --digest 1eff19809df9
+The digest names exactly these actions and the contents the plan's files had when the plan was made. The apply refuses if the plan or one of its files changed since, and when the plan run has a records-changed mark. The digest does not cover the run's other records.
 ```
+
+- `The agent's description (…)` 아래의 `|` 줄은 모델이 계획을 제안하며 쓴 요약이다(U-14). 모델의 말이며 검증되지 않았고, **승인하는 대상이 아니다.** 요약은 `plan.json`과 다이제스트에 들지 않는다. 승인은 그 위의 동작 목록과 다이제스트로 한다. 이 체험의 요약이 한국어인 것은 대본이 그렇게 썼기 때문이다.
+- 끝 문장은 다이제스트가 묶는 것을 말한다: 이 동작들과, 계획을 만들 때 계획에 든 파일의 내용. 그 뒤 계획이나 그 파일이 바뀌었거나 계획 실행에 기록 변경 표시가 있으면 적용을 거부한다. 실행의 다른 기록(journal 등)은 다이제스트에 들지 않는다.
+- 한국어 설정에서는 설명의 머리말(`에이전트의 설명(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상이 아님):`)과 끝 문장이 한국어이고, 나머지 줄은 영어다(16절 "출력 언어").
 
 **적용(`apply`):** 실제 출력(stderr). 종료 0이다.
 
@@ -1008,12 +1048,12 @@ Actions applied: 3 of 3
   action #1 — moved inbox/beach-2025.jpg → photos/2025/beach-2025.jpg
   action #2 — moved inbox/receipt-2026.pdf → documents/2026/receipt-2026.pdf
   action #3 — moved to the discarded files inbox/old-draft.tmp
-Plan run: 20261112T055810Z-6916ecde
+Plan run: 20261112T200120Z-c27683db
 Checks passed: 2 of 2 (within the configured checks)
 Read the report, and revert if needed.
-Run id: 20261112T055810Z-56c6d7c5
-Report: codaryn report --workspace <workspace> --run 20261112T055810Z-56c6d7c5
-Revert: codaryn revert --workspace <workspace> --run 20261112T055810Z-56c6d7c5
+Run id: 20261112T200121Z-da084c3e
+Report: codaryn report --workspace <workspace> --run 20261112T200121Z-da084c3e
+Revert: codaryn revert --workspace <workspace> --run 20261112T200121Z-da084c3e
 ```
 
 - 검증 1번은 적용이 늘 돌리는 파일 목록 확인(`inventory`)이다. 계획에 있던 이동·폐기만 일어났는지 본다. 2번은 task의 `file_rules`다.
@@ -1025,8 +1065,8 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T055810Z-56c6d7c5
 ```
 # Codaryn apply run report
 
-- Run: `20261112T055919Z-fa06002b` (an apply run: no model takes part)
-- Plan run: `20261112T055919Z-fc288980`, digest `9e2cf832027da6e15743b8d1694d5b966384be4addfd6278fcce805c669b86da`
+- Run: `20261112T200121Z-da084c3e` (an apply run: no model takes part)
+- Plan run: `20261112T200120Z-c27683db`, digest `1eff19809df98cd22c5117163c09128e658fe5ea0e0afceaa3a371251e9693cd`
 - Task: `organize-demo`
 - Approval: `cli-flag`; consent to unsafe moves: none
 - Result: `done` / `verified`, exit code 0
@@ -1042,16 +1082,16 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T055810Z-56c6d7c5
 
 - action 1: move `inbox/beach-2025.jpg` -> `photos/2025/beach-2025.jpg`
 - action 2: move `inbox/receipt-2026.pdf` -> `documents/2026/receipt-2026.pdf`
-- action 3: discard `inbox/old-draft.tmp` (kept as `.codaryn/discarded/20261112T055919Z-fa06002b/2`)
+- action 3: discard `inbox/old-draft.tmp` (kept as `.codaryn/discarded/20261112T200121Z-da084c3e/2`)
 ```
 
-  이어서 검증(`inventory`와 task 검증기의 확인 항목), 보호 대상, 사용량, 되돌리기 명령(`Undo`), 확인하지 않은 범위가 나온다. 이 보고서는 다른 실행에서 만든 것이라 위의 id와 다르다.
+  이어서 검증(`inventory`와 task 검증기의 확인 항목), 보호 대상, 사용량, 되돌리기 명령(`Undo`), 확인하지 않은 범위가 나온다. 이 절의 블록은 모두 main `a191a50`에서 한 번에 만든 같은 실행들의 출력이다.
 
 **되돌리기:** `revert --dry-run`은 아무것도 바꾸지 않고 판정만 보인다(실제 출력, stderr).
 
 ```
 codaryn: Files to revert: 3 (preview, nothing changed) (complete)
-  inbox/old-draft.tmp — restored from the discarded files folder
+  inbox/old-draft.tmp — restored from the discarded-files folder
   inbox/receipt-2026.pdf — moved back to where it was
   inbox/beach-2025.jpg — moved back to where it was
 The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.
@@ -1071,7 +1111,12 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
   - 계획은 `.codaryn\runs\<계획 실행 id>\plan.json`에 동작(이동·폐기)과 원본 파일의 해시만 담는다.
   - 다이제스트는 그 파일의 SHA-256이다. 승인은 이 다이제스트로 한다.
   - 한 계획은 동작 1,000개, 원본 크기 합계 4 GiB까지다.
-- **계획 보기(`plan`):** `plan.json`을 지금 명령의 가릴 값으로 다시 가려 보여 준다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--run latest`를 받는다. 가릴 값이 든 경로는 `documents/[[CODARYN_SECRET:7a30010719392743]]/receipt-2026.pdf`처럼 토큰으로 보인다.
+- **계획 보기(`plan`):** `plan.json`을 지금 명령의 가릴 값으로 다시 가려 보여 준다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--run latest`를 받는다. 가릴 값이 든 경로는 `documents/[[CODARYN_SECRET:7a30010719392743]]/receipt-2026.pdf`처럼 토큰으로 보인다. 보이는 것(U-14, 18.2절의 예):
+  - 머리 줄(동작 수와 `pending`·`applied`), 다이제스트, 동작 목록.
+  - **에이전트의 설명:** 모델이 `propose_plan`에 쓴 요약(500자까지)을 `The agent's description (the model's own words, not checked, and not what you approve):` 아래 `|` 줄로 보인다. 계획 실행의 journal에서 읽어 지금 가릴 값으로 다시 가리고, 키 모양과 지금 키는 숨기고, 제어 문자는 뺀다. 요약은 다이제스트에 들지 않으므로 승인하는 대상이 아니다. 찾거나 읽거나 가리지 못하면 이 줄 없이 보인다.
+  - 적용하지 않은 계획이면 적용 명령(`To apply it: …`), 적용한 계획이면 `Applied by run <적용 실행 id> at <UTC 시각>.`.
+  - 끝 문장: 다이제스트가 이 동작들과 계획을 만들 때의 파일 내용을 묶는다는 것, 그 뒤 계획이나 파일이 바뀌었거나 기록 변경 표시가 있으면 적용을 거부한다는 것, 실행의 다른 기록은 다이제스트에 들지 않는다는 것.
+  - `--json`은 `kind:"plan"` 한 줄이다(`digest`, `actions`, `appliedBy`, `inventoryLimitReached`, 요약이 있으면 `summary`, 표시가 있으면 `recordsChanged: true`).
 - **승인**(둘 다 없으면 `plan_not_approved`, 종료 2, 아무것도 옮기지 않음):
   - `--digest`에 다이제스트 앞 12~64자(소문자 16진수)를 준다. 그 계획의 다이제스트와 맞아야 한다.
   - stdin과 stderr가 모두 터미널이고 `--digest`가 없으면, 계획을 보이고 `Apply this plan? [y/N]`을 묻는다. 기본은 아니오다.
@@ -1086,13 +1131,30 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
 
   - 계획 실행에 쓴 task 파일(같은 `privacy.secretEnv`)로 `plan`과 `apply`를 한다. 경로에 든 값을 계획 실행 뒤에 새로 가릴 값으로 등록했다면, 그 계획은 보거나 적용할 수 없으니 계획을 새로 만든다.
 - **기록이 바뀐 계획은 적용하지 않는다(U-1):** 그 계획 실행에 기록 변경 표시가 있으면(16절 "실행 기록 변조") `apply`는 묻기 전에 `plan_records_changed`(종료 2)로 거부한다. 아무것도 묻거나 기록하거나 옮기지 않고, 적용 실행도 만들지 않는다. 그 계획이 사람이 읽은 것과 다를 수 있기 때문이다.
-  - `plan`은 표시가 있는 계획도 그대로 보이고 표시를 말하지 않는다. `runs`의 결과 칸 끝의 `records changed`로 알 수 있다.
-  - 확인(main `a7f3a2f`, 파일 정리 체험): 계획 실행 뒤 다른 실행의 허용한 명령이 그 계획 실행의 `result.json`을 고치자 계획 실행에 표시가 붙었다. 그 계획의 `apply --digest`는 아래와 같이 끝났고 파일은 그대로였다. 같은 task로 계획을 새로 만들어 적용하자 `done`/`verified`였다.
+  - `plan`은 표시가 있는 계획도 보인다(종료 0). 맨 앞에 경고가 붙고, 적용 명령 대신 적용할 수 없다는 줄이 나오며, 에이전트의 설명은 빠진다(그 journal도 바뀌었을 수 있어서). `--json`에는 `recordsChanged: true`가 있고 `summary`는 없다. `runs`의 결과 칸 끝에도 `records changed`가 붙는다. 실제 출력(stdout, main `a191a50`):
+
+    ```
+    Warning: this plan run has a records-changed mark: something other than the run changed its records, so this plan may not be the one the run made.
+    Plan of run 20261112T200122Z-4f73c4b0: 3 action(s), pending
+    Digest: f660f1db888b62a3a7862e3d91f67478b0d3a644d88e60c4442f20a8c830b1a1
+      1. move     inbox/beach-2025.jpg  ->  photos/2025/beach-2025.jpg
+      2. move     inbox/receipt-2026.pdf  ->  documents/2026/receipt-2026.pdf
+      3. discard  inbox/old-draft.tmp  (kept in .codaryn/discarded/ until removed)
+    This plan cannot be applied. Make the plan again with a new run (codaryn run), read the new plan, and apply that one.
+    The digest names exactly these actions and the contents the plan's files had when the plan was made. The apply refuses if the plan or one of its files changed since, and when the plan run has a records-changed mark. The digest does not cover the run's other records.
+    ```
+
+    한국어 설정에서 경고는 `경고: 이 계획 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 계획이 실행이 만든 계획과 다를 수 있습니다.`, 적용할 수 없다는 줄은 `이 계획은 적용할 수 없습니다. 새 실행(codaryn run)으로 계획을 다시 만들고, 새 계획을 확인한 뒤 그것을 적용하세요.`다.
+  - 그 계획의 `apply --digest`는 아래와 같이 끝나고 파일은 그대로다(실제 출력, stderr, main `a191a50`). 고치는 법은 `codaryn run`으로 계획을 새로 만들라고 한다. `codaryn plan`은 계획을 보여 주기만 한다.
 
     ```
     codaryn: error — the plan run has a records-changed mark: something other than the run changed its records, so its plan may not be the one you read; nothing was asked or changed (plan_records_changed)
-      To fix: Make the plan again with codaryn plan, read the new plan, and apply that one. The marked run stays as evidence of what happened.
+      To fix: Make the plan again with a new codaryn run (codaryn plan only shows a plan), read the new plan, and apply that one. The marked run stays as evidence of what happened.
     ```
+
+  - 확인
+    - main `a7f3a2f`, 파일 정리 체험: 계획 실행 뒤 다른 실행의 허용한 명령이 그 계획 실행의 `result.json`을 고치자 계획 실행에 표시가 붙었다. 그 계획의 `apply --digest`는 `plan_records_changed`로 끝났고 파일은 그대로였다. 같은 task로 계획을 새로 만들어 적용하자 `done`/`verified`였다.
+    - main `a191a50`: 위의 두 블록은 계획 실행 폴더에 기록 변경 표시 파일(`records-changed.json`)을 직접 두고 본 것이다(두 언어). 표시를 붙이는 감지 자체는 다시 돌리지 않았다.
 
   - 표시가 있는 실행은 무슨 일이 있었는지의 증거로 남긴다. `cleanup` 미리보기는 그 기록에 `the run has a records-changed mark; its records are evidence of what happened`를 붙인다(경고만 하고 따로 확인을 받지는 않는다).
 - **`--run`은 계획 실행 id로 꼭 준다.** `--run latest`는 받지 않는다(`invalid_arguments`). 승인이 계획 하나를 가리켜야 하기 때문이다.

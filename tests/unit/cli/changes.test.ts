@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { ANTHROPIC_API_KEY_ENV } from "../../../src/contracts/index.js";
@@ -138,7 +139,8 @@ describe("runChanges", () => {
     assert.deepEqual([bad.code, fake.seen.length], ["invalid_arguments", 1]);
   });
 
-  test("with the real app layer: a scripted run's changes by path and state, with no secret printed (R-11: no text yet)", async () => {
+  /** A scripted run through the real app layer that registered FAKE_SECRET, changed README.md (which holds it) and created NOTES.md. */
+  async function realRun(): Promise<string> {
     const original = `# Title\nkey ${FAKE_SECRET}\n`;
     const hash = createHash("sha256").update(Buffer.from(original, "utf8")).digest("hex");
     const base = await setupRun({ "README.md": original }, {}, [
@@ -151,13 +153,31 @@ describe("runChanges", () => {
     assert.equal(started.ok, true);
     const outcome = await (started as { handle: RunHandle }).handle.done;
     assert.equal((outcome as { result: EngineResult }).result.status, "done");
+    return base;
+  }
 
+  test("with the real app layer and the run's own secrets: each file's changed region, masked, with no secret printed (DR-29)", async () => {
+    const base = await realRun();
+    const app = createCodarynApp(await appEnvironment(base));
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", "latest"], env: {}, app }));
-    // DR-29: the reason is given once; each file has its path and state only.
-    assert.match(shown, /paths and states only: .*\(DR-29\)\n/);
-    assert.match(shown, /== README\.md: changed by the run; as the run left it\n/);
-    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n/);
+    assert.match(shown, /== README\.md: changed by the run; as the run left it\n@@ -2,0 \+2,2 @@\n\+ \n\+ added\n/);
+    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n@@ -1,0 \+1,1 @@\n\+ # Notes\n/);
+    assert.equal(shown.includes("masking_unverified"), false);
+    assert.equal(shown.includes(FAKE_SECRET), false);
+  });
+
+  test("with the real app layer and other secrets than the run's: no text for the file that holds the secret (R-11, DR-29)", async () => {
+    const base = await realRun();
+    const task = JSON.parse(await readFile(path.join(base, "task.json"), "utf8")) as Record<string, unknown>;
+    await writeFile(path.join(base, "other.json"), JSON.stringify({ ...task, privacy: { secretEnv: [] } }), "utf8");
+    const app = createCodarynApp(await appEnvironment(base, { env: {} }));
+    const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "other.json"), "--run", "latest"], env: {}, app }));
+    // The reason is given once; the file without text has its path and state only.
+    assert.equal(shown.split("(DR-29)\n").length, 2, shown);
+    assert.match(shown, /== README\.md: changed by the run; as the run left it\n== NOTES\.md/);
     assert.equal(shown.includes("(masking_unverified)"), false);
+    // NOTES.md holds no secret: either set of secrets leaves the same text visible.
+    assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n@@ -1,0 \+1,1 @@\n\+ # Notes\n/);
     assert.equal(shown.includes(FAKE_SECRET), false);
   });
 });

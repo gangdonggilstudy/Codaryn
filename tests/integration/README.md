@@ -16,7 +16,7 @@
 | `y01` | 모델 목록 |
 | `n01`~`n05` | 사용성 |
 | `n06`~`n09` | 범용 작업 |
-| `o00`, `o05`(`o01`~`o04`는 CLI 연결 뒤) | OpenAI 모의 API |
+| `o00`~`o05` | OpenAI 모의 API |
 
 ## 수용 기준 대응
 
@@ -115,6 +115,7 @@
 | S-8 | `--goal`의 키 모양 값과 현재 키 값 → `key_in_file`, 요청 0건 |
 | S-10 | 끝없는 성공 본문 → `malformed_response`, 끝없는 오류 본문 → `api_error`. 요청 시간 한도(60초)가 아니라 본문 상한으로 빨리 끝나고 클라이언트가 먼저 끊는다 |
 | S-11 | 가운데 공백, ASCII 밖 문자가 든 키 → 요청 0건 |
+| DR-36 (c) | Anthropic 거부 모양(`sk-ant-` 뒤 32자 이상, 숫자 포함)의 값은 `key_in_file`·요청 0건. 짧은 이름, 숫자 없는 긴 이름, 단어에 붙은 `sk-ant-`는 거부되지 않고 모델까지 감. 키 모양 자료는 `fixtures/anthropic.ts`의 조립식 `ANTHROPIC_REFUSED_SHAPE` 하나를 쓴다 |
 
 ## 단계 2 교차 검토 수정 회귀 (수정 묶음 T)
 
@@ -198,9 +199,26 @@
 - task 파일은 `policy`와 `verifiers`를 반드시 적으므로 정의의 정책·검증기 기본값은 간편 형식에만 쓰인다. 그래서 organize task는 `planActions`를 직접 적는다(`writeOrganizeTask`).
 - 하드 링크가 없는 볼륨에서의 동의 없는 이동 중단(DR-21, `consent_required`)은 이 기계(NTFS)에서 재현할 수 없어 통합 사례로 두지 않는다. 읽기 전용 원본도 정상 이동됨을 확인했다. 도구·store 유닛이 맡는다.
 
-## OpenAI 모의 API (`o00`, `o05`, 두 번째 제공자 SP-5)
+## OpenAI 모의 API (`o00`~`o05`, 두 번째 제공자 SP-5·SP-6)
 
-[두 번째 제공자 설계](../../docs/design/second-provider.md)와 [사실 확인](../../docs/design/second-provider-facts.md)(C-1~C-15)을 따른 가짜 Responses API(`tests/support/fake-openai.ts`)와 값(`tests/fixtures/openai.ts`)이다. **모의 API 검증이며 실제 API 검증이 아니다.** CLI 연결(SP-6)이 올라오면 `o01`~`o04`(실행·설정·오류·모델 목록, 사례 목록은 PM이 받은 설계 OI-01~OI-51)를 붙인다.
+[두 번째 제공자 설계](../../docs/design/second-provider.md)와 [사실 확인](../../docs/design/second-provider-facts.md)(C-1~C-15)을 따른 가짜 Responses API(`tests/support/fake-openai.ts`)와 값(`tests/fixtures/openai.ts`)이다. **모의 API 검증이며 실제 API 검증이 아니다.** `o01`~`o04`는 main의 CLI(SP-6)로 실행하고, 주소는 `CODARYN_OPENAI_API_BASE_URL`이나 `providers.openai.apiBaseUrl`의 가짜 서버(127.0.0.1)뿐이다.
+
+| 사례 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| OI-01 도구 호출 왕복 | `o01` | 읽기 → 쓰기 → 최종 답이 `done`/`verified`. 모든 요청이 `store: false`, `strict: false`의 평평한 도구, 대화 사슬, `call_id`로 답함. 사용량은 캐시·추론 토큰을 더하지 않은 합. 키는 Bearer에만 |
+| OI-02 추론 항목 | `o01` | 같은 JSON으로 되돌림(2개, 3개), 기록 `model_response.reasoningItems`는 [2, 1, 없음]. 규칙 밖 `call_id`는 기록에 `codaryn-call-1·2`, 요청에는 원래 값. 출력·기록에 추론 내용·원래 id·키 없음 |
+| OI-03 실행 기록 읽기 | `o01` | 끝난 OpenAI 실행이 `runs`에서 손상이 아니고 `report`·`changes`·`revert --dry-run`·`revert`가 동작한다. **main에서 실패**: `src/store/runs.ts:50`의 제공자 목록에 `openai`가 없다(빌드 산출물에서 그 목록만 고치면 통과) |
+| 제공자별 변수 | `o02` | 모델: task > `CODARYN_OPENAI_MODEL` > `providers.openai.model`. 주소: `CODARYN_OPENAI_API_BASE_URL` > `providers.openai.apiBaseUrl`. `CODARYN_MODEL`·`CODARYN_API_BASE_URL`은 OpenAI 실행에 쓰이지 않음 |
+| R-20 D2와 반대 | `o02` | 두 키·두 주소 변수가 있어도 `models`(설정 `provider: openai`)와 `--provider anthropic`이 각자 주소로만, 각자 키로만 |
+| SP-I03 | `o02` | 두 키가 있으면 어느 제공자로 실행해도 작업 파일 속 다른 제공자의 키(20자 이상)가 토큰으로 가려짐 |
+| R-20 E | `o02` | `OPENAI_API_KEY`가 `EMPTY`·`ollama`·`x`여도 대본 실행이 그 단어 옆 줄을 고치고 명령을 돌림. 기록에 토큰 없음 |
+| 키 없음 | `o02` | `provider_not_configured`, 다른 제공자 키를 쓰지 않고 요청 0건 |
+| 할당량·빈도·잘림·거부 | `o03` | 할당량 6가지 `quota_exhausted`(1건), 429 반복 `rate_limited`(같은 바이트 3건), `Retry-After: 2`의 서버 쪽 간격 2초 이상, 503 회복, `max_output_tokens` 잘림은 `malformed_response`(stop=length), 거부·내용 필터는 고정 문구(거부 글 없음) |
+| OI-40·41 모델 목록 | `o04` | `models --provider openai`(설정이 anthropic이어도): GET 한 번, API 순서, `displayName` = id, 한도 null, 현재 모델 출처 `config`·`CODARYN_OPENAI_MODEL`, `listed`. 글 출력의 현재 모델 줄이 변수 이름을 가리킴 |
+| 목록 실패 | `o04` | 키 없음 `provider_not_configured`, 401·형식 오류 `model_list_failed`, 설정 무변경 |
+| OI-44 doctor | `o04` | 키 점검이 `doctor.api_key.sends_to_config`·`sends_to_env`(키 변수, 제공자, origin, 필드·변수)로 키가 갈 주소를 알림(DR-36 (b)), 요청 0건 |
+
+빌드 산출물에 회귀를 넣으면 실패함을 확인했다: 다른 제공자 키 길이 기준 0(R-20 E), OpenAI 주소 변수를 `CODARYN_API_BASE_URL`로(R-20 D2), 어댑터 `store: true`.
 
 `o05`는 CLI 없이 어댑터(`src/model/openai`)를 가짜 서버에 직접 붙인다. 어댑터는 Node의 `fetch`로 보내고, 재시도 대기만 기록용으로 주입한다(한 사례는 실제로 기다리고 서버 쪽 간격을 잰다). 엔진처럼 `complete`를 부른다: 호출을 엔진의 id로 되읽고(AC-D15가 바꾼 id), 도구 결과로 답한다.
 

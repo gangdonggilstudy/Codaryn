@@ -76,11 +76,54 @@ function isPrintableKeyFieldName(name: string): boolean {
   return PRINTABLE_KEY_FIELD.test(name) && KEY_NAMES.has(normalizedFieldName(name));
 }
 
-/** S-6, S-8: every given key value (SP-2: every known key variable that is set), and the refusal shapes. */
+/**
+ * DR-40 (a) (review R-25 M-1): characters that can split a key inside text without showing:
+ * whitespace (line breaks, tabs, no-break space), control characters and Unicode format characters
+ * (`\p{Cf}`: zero-width space and joiners, word joiner, soft hyphen, byte order mark).
+ */
+export const KEY_SPLITTER_SOURCE = "[\\s\\p{Cc}\\p{Cf}]+";
+const KEY_SPLITTERS = new RegExp(KEY_SPLITTER_SOURCE, "gu");
+
+/** DR-40 (a): `text` with every key-splitting character removed (KEY_SPLITTER_SOURCE). */
+export function withoutKeySplitters(text: string): string {
+  return text.replace(KEY_SPLITTERS, "");
+}
+
+/**
+ * S-6, S-8: every given key value (SP-2: every known key variable that is set), and the refusal
+ * shapes. DR-40 (a): the registered values, the main check, are also compared on the text without
+ * key-splitting characters, so a registered key split by a line break or an invisible character is
+ * found as a whole. The shapes on that joined text come with the contract's shared function and
+ * linear shapes (DR-40 (a)(c)): joining also glues a key to the word before it, which a shape's
+ * word start would then miss, and doubles the shapes' time on large files.
+ */
 function keyMatcher(currentKey: KnownKeys): (text: string) => boolean {
   const shape = new RegExp(KEY_REFUSAL_SHAPE_SOURCE);
   const values = keyValuesOf(currentKey);
-  return (text) => values.some((value) => text.includes(value)) || shape.test(text);
+  const joinedValues = values.map(withoutKeySplitters).filter((value) => value.length >= MIN_CURRENT_KEY_LENGTH);
+  return (text) => {
+    if (values.some((value) => text.includes(value)) || shape.test(text)) return true;
+    if (joinedValues.length === 0) return false;
+    const joined = withoutKeySplitters(text);
+    return joined !== text && joinedValues.some((value) => joined.includes(value));
+  };
+}
+
+/**
+ * DR-40 (b) (review R-25 L-2): the largest task or config file the CLI reads, in UTF-8 bytes. A
+ * larger one is refused before any check reads it (no legitimate file comes near it; the key
+ * checks' time stays bounded). The contract's constant replaces it when one is issued.
+ */
+export const MAX_INPUT_FILE_BYTES = 1024 * 1024;
+
+/** DR-40 (b): whether a task or config file's text is over MAX_INPUT_FILE_BYTES. */
+export function inputFileTooLarge(text: string): boolean {
+  return text.length > MAX_INPUT_FILE_BYTES || Buffer.byteLength(text, "utf8") > MAX_INPUT_FILE_BYTES;
+}
+
+/** DR-40 (b): the fixed message for such a file; nothing from the file is in it. */
+export function inputFileTooLargeMessage(label: string): string {
+  return `the ${label} is larger than ${MAX_INPUT_FILE_BYTES} bytes (1 MiB); nothing in it was used`;
 }
 
 export type KeyScanOutcome =

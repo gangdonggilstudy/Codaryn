@@ -48,7 +48,15 @@ import { chooseConfigFile } from "./config-file.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
-import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey, selectEnvFileSecrets } from "./security/index.js";
+import {
+  MAX_KEY_SCAN_DEPTH,
+  findKeyInJson,
+  goalHoldsKey,
+  inputFileTooLarge,
+  inputFileTooLargeMessage,
+  rawTextHoldsKey,
+  selectEnvFileSecrets,
+} from "./security/index.js";
 import { configFieldOf, envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { isApiProviderName, localPathProblem, quickProvider, quotedChoices } from "./task.js";
@@ -301,6 +309,8 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       }
     }
     if (configText !== null) {
+      // DR-40 (b): a file over the cap is refused before any check reads it.
+      if (inputFileTooLarge(configText)) return cliError("invalid_config", inputFileTooLargeMessage("config file"));
       const body = configText.startsWith(BOM) ? configText.slice(1) : configText;
       if (rawTextHoldsKey(body, currentKey)) {
         return cliError("key_in_file", `the config file contains a key value; keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`);

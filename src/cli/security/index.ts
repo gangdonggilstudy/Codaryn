@@ -9,7 +9,12 @@ export type { PathRelation, PathSyntaxOutcome, RealpathFs, WorkspaceLocation } f
 export {
   KEY_MASK_SHAPE_SOURCE,
   KEY_REFUSAL_SHAPE_SOURCE,
+  KEY_SPLITTER_SOURCE,
   KNOWN_FIELD_NAMES,
+  MAX_INPUT_FILE_BYTES,
+  inputFileTooLarge,
+  inputFileTooLargeMessage,
+  withoutKeySplitters,
   MAX_KEY_SCAN_DEPTH,
   MIN_CURRENT_KEY_LENGTH,
   findKeyInJson,

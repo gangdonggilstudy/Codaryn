@@ -4,7 +4,7 @@
  * or reorder a line are replaced before printing, and key-shaped text is hidden.
  */
 
-import { KEY_MASK_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
+import { KEY_MASK_SHAPE_SOURCE, KEY_SPLITTER_SOURCE, keyValuesOf, withoutKeySplitters } from "./security/index.js";
 import type { KnownKeys } from "./security/index.js";
 
 /** Shown in place of a replaced character. */
@@ -57,31 +57,52 @@ export function hideKeysInStrings<T>(value: T, currentKey: KnownKeys): T {
   return walk(value) as T;
 }
 
-export function hideKeys(text: string, currentKey: KnownKeys): string {
-  // N-23 (review R-2 L-5): look for key shapes with control characters skipped, so a key broken
-  // by one (`sk-ant-AB<BEL>CDEF...`) is still found. The span covers the skipped characters too.
+/** `text` without the code points `skip` names, and for each kept UTF-16 unit its index in `text`. */
+function strippedOf(text: string, skip: (cp: number, char: string) => boolean): { readonly stripped: string; readonly kept: readonly number[] } {
   const kept: number[] = [];
   let stripped = "";
   for (let index = 0; index < text.length; ) {
     const cp = text.codePointAt(index) as number;
     const size = cp > 0xffff ? 2 : 1;
-    if (!isUnsafeCodePoint(cp, false)) {
+    const char = text.slice(index, index + size);
+    if (!skip(cp, char)) {
       for (let k = 0; k < size; k += 1) kept.push(index + k);
-      stripped += text.slice(index, index + size);
+      stripped += char;
     }
     index += size;
   }
+  return { stripped, kept };
+}
+
+/** DR-40 (a): Unicode format characters (zero-width space and joiners, soft hyphen, BOM): invisible. */
+const FORMAT_CHAR = /^\p{Cf}$/u;
+/** DR-40 (a): every character that can split a key (KEY_SPLITTER_SOURCE: whitespace, controls, format characters). */
+const SPLITTER_CHAR = new RegExp(`^${KEY_SPLITTER_SOURCE}$`, "u");
+
+export function hideKeys(text: string, currentKey: KnownKeys): string {
   const spans: [number, number][] = [];
-  const add = (start: number, length: number): void => {
-    const from = kept[start];
-    const to = kept[start + length - 1];
-    if (from !== undefined && to !== undefined) spans.push([from, to + 1]);
-  };
-  // SP-2, DR-32 (a): every hiding shape (the loose one too) and every given key value (every key
-  // variable that is set).
-  for (const match of stripped.matchAll(new RegExp(KEY_MASK_SHAPE_SOURCE, "g"))) add(match.index, match[0].length);
+  const adder =
+    (kept: readonly number[]) =>
+    (start: number, length: number): void => {
+      const from = kept[start];
+      const to = kept[start + length - 1];
+      if (from !== undefined && to !== undefined) spans.push([from, to + 1]);
+    };
+  // N-23 (review R-2 L-5), DR-40 (a): key shapes with control and format characters skipped, so a
+  // key broken by one (`sk-ant-AB<BEL>CDEF...`, a zero-width space, a soft hyphen) is still found.
+  // Visible whitespace stays: removing it would glue a key to the word before it and lose the
+  // shape's word start. The span covers the skipped characters too.
+  const forShapes = strippedOf(text, (cp, char) => isUnsafeCodePoint(cp, false) || FORMAT_CHAR.test(char));
+  const addShape = adder(forShapes.kept);
+  // SP-2, DR-32 (a): every hiding shape (the loose one too).
+  for (const match of forShapes.stripped.matchAll(new RegExp(KEY_MASK_SHAPE_SOURCE, "g"))) addShape(match.index, match[0].length);
+  // Every given key value (every key variable that is set), with every key-splitting character
+  // skipped as well (DR-40 (a): a registered value split by a line break or a space is still found).
+  const forValues = strippedOf(text, (cp, char) => isUnsafeCodePoint(cp, false) || SPLITTER_CHAR.test(char));
+  const addValue = adder(forValues.kept);
   for (const key of keyValuesOf(currentKey)) {
-    for (let at = stripped.indexOf(key); at !== -1; at = stripped.indexOf(key, at + key.length)) add(at, key.length);
+    const joined = withoutKeySplitters(key);
+    for (let at = forValues.stripped.indexOf(joined); at !== -1; at = forValues.stripped.indexOf(joined, at + joined.length)) addValue(at, joined.length);
   }
   if (spans.length === 0) return text;
   spans.sort((a, b) => a[0] - b[0]);

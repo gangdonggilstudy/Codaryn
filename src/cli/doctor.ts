@@ -60,6 +60,8 @@ import {
   checkLocalPathSyntax,
   findKeyInJson,
   normalizeApiBaseUrlStrict,
+  inputFileTooLarge,
+  inputFileTooLargeMessage,
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
@@ -152,6 +154,8 @@ async function loadJson(io: DoctorEnvironment, file: string, label: string, curr
     return { ok: false, message: `the ${label} cannot be read`, missing: isMissingFile(failure), failure: "unreadable" };
   }
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  // DR-40 (b): a file over the cap is not read further (shown as unreadable, with the reason in the message).
+  if (inputFileTooLarge(text)) return { ok: false, message: inputFileTooLargeMessage(label), failure: "unreadable" };
   if (rawTextHoldsKey(text, currentKey)) return { ok: false, message: `the ${label} contains a key value`, failure: "key" };
   let value: unknown;
   try {

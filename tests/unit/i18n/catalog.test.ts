@@ -407,4 +407,14 @@ describe("i18n catalog: language and wording", () => {
     assert.equal(MESSAGE_TEXTS.ko["denial.protected_path"], "보호 경로");
     assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
   });
+
+  test("U-25 (DR-52): the masking line gives two counts and says what each counts", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    assert.match(en["summary.masking"], /values registered \{registered\}.*places masked in what the model was sent \{masked\}/);
+    assert.match(ko["summary.masking"], /등록된 가릴 값 \{registered\}개.*모델에 보낸 글에서 가린 곳 \{masked\}개/);
+    // Counts only: no other parameter, and the words of DR-50 (가릴 값).
+    for (const text of [en["summary.masking"], ko["summary.masking"]]) {
+      assert.deepEqual(text.match(/\{[a-zA-Z]+\}/g), ["{registered}", "{masked}"]);
+    }
+  });
 });

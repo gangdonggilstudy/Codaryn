@@ -30,6 +30,7 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.usage": "사용: 모델 {turns}턴 · 도구 호출 {toolCalls}회 · {seconds}초",
   "summary.run_id": "실행 id: {runId}",
+  "summary.masking": "가림: 등록된 가릴 값 {registered}개 · 모델에 보낸 글에서 가린 곳 {masked}개",
   "summary.next_report": "보고서: codaryn report --workspace <workspace> --run {runId}",
   "summary.next_report_here": "보고서: codaryn report --workspace . --run {runId}",
   "summary.next_revert": "되돌리기: codaryn revert --workspace <workspace> --run {runId}",

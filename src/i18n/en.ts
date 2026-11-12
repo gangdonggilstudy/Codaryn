@@ -31,6 +31,7 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.usage": "Usage: model turns {turns} · tool calls {toolCalls} · {seconds} s",
   "summary.run_id": "Run id: {runId}",
+  "summary.masking": "Masking: values registered {registered} · places masked in what the model was sent {masked}",
   "summary.next_report": "Report: codaryn report --workspace <workspace> --run {runId}",
   "summary.next_report_here": "Report: codaryn report --workspace . --run {runId}",
   "summary.next_revert": "Revert: codaryn revert --workspace <workspace> --run {runId}",

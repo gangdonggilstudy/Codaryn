@@ -63,6 +63,7 @@ import {
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
+import { PROCESS_START_TOLERANCE_MS, isRunTimestamp, processStartTime } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
@@ -358,11 +359,19 @@ function fieldOf(position: InputErrorPosition | undefined, message?: string): Sc
   return message === undefined ? null : toSchemaFieldPath(message.split(" ", 1)[0] ?? "");
 }
 
-/** N-25 (a): reads the lock file without changing it. A live pid means held; an ended one, stale. */
+/**
+ * N-25 (a, b), review R-6 low 1: reads the lock file without changing it and judges its holder as
+ * the store's `acquireLock` does: a pid that does not run is stale; a lock with
+ * `processStartedAt` whose pid now runs a process started at another time (beyond
+ * PROCESS_START_TOLERANCE_MS) is stale too, since the pid was given to another process; an unknown
+ * start time counts as held; a lock without it (written before N-25 b) is judged by its pid alone.
+ * A start time that is not a timestamp is not understood: "unreadable", as the store never reclaims it.
+ */
 export async function inspectLockFile(
   workspaceRoot: string,
   readText: (file: string) => Promise<string>,
   isAlive: (pid: number) => boolean = processAlive,
+  startTimeOf: (pid: number) => Promise<number | null> = processStartTime,
 ): Promise<LockState> {
   let text: string;
   try {
@@ -370,13 +379,25 @@ export async function inspectLockFile(
   } catch (failure) {
     return isMissingFile(failure) ? "none" : "unreadable";
   }
+  let pid: unknown;
+  let processStartedAt: unknown;
   try {
-    const pid = (JSON.parse(text) as { pid?: unknown } | null)?.pid;
-    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return "unreadable";
-    return isAlive(pid) ? "held" : "stale";
+    ({ pid, processStartedAt } = (JSON.parse(text) ?? {}) as { pid?: unknown; processStartedAt?: unknown });
   } catch {
     return "unreadable";
   }
+  if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return "unreadable";
+  if (processStartedAt !== undefined && (typeof processStartedAt !== "string" || !isRunTimestamp(processStartedAt))) return "unreadable";
+  if (!isAlive(pid)) return "stale";
+  if (processStartedAt === undefined) return "held";
+  let actual: number | null;
+  try {
+    actual = await startTimeOf(pid);
+  } catch {
+    actual = null;
+  }
+  if (actual === null) return "held";
+  return Math.abs(actual - Date.parse(processStartedAt)) <= PROCESS_START_TOLERANCE_MS ? "held" : "stale";
 }
 
 function processAlive(pid: number): boolean {

@@ -395,6 +395,31 @@ describe("listRuns (N-7, N-16)", () => {
     );
   });
 
+  test("DR-16: every reason the contract gives a status is accepted, the G-A ones included; others stay damaged", async () => {
+    const work = await tempDir();
+    const cases: [string, string, string, number][] = [
+      ["20260102T030401Z-00000001", "needs-input", "plan_pending", 3],
+      ["20260102T030402Z-00000002", "needs-input", "awaiting_review", 3],
+      ["20260102T030403Z-00000003", "failed", "plan_stale", 1],
+      ["20260102T030404Z-00000004", "failed", "apply_incomplete", 1],
+      ["20260102T030405Z-00000005", "done", "plan_pending", 0],
+    ];
+    for (const [runId, status, reason, exitCode] of cases) {
+      await writeRun(work, runId, { at: `2026-01-02T03:04:0${runId.slice(-1)}.000Z`, result: { status, reason, exitCode } as never });
+    }
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.deepEqual(
+      listing.runs.map((run) => [run.runId, run.state]),
+      [
+        ["20260102T030404Z-00000004", "checked"],
+        ["20260102T030403Z-00000003", "checked"],
+        ["20260102T030402Z-00000002", "checked"],
+        ["20260102T030401Z-00000001", "checked"],
+        ["20260102T030405Z-00000005", "damaged"],
+      ],
+    );
+  });
+
   test("records that fail a check are listed as damaged with their id only and never chosen as latest", async () => {
     const work = await tempDir();
     const at = (second: number): string => `2026-01-02T03:04:${String(second).padStart(2, "0")}.000Z`;

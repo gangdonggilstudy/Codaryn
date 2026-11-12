@@ -39,6 +39,7 @@ import type {
   Workspace,
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
+import { ApplyRecordError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
 import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
@@ -402,6 +403,15 @@ export const revertRun: RevertRun = async (request) => {
       throw new RevertRunError("run_not_found", "the workspace has no journal for this run; nothing was changed");
     }
     throw new RevertRunError("invalid_run_record", "the run's journal cannot be read; nothing was changed");
+  }
+  // G-A, DR-12: an apply run (its journal starts with apply_started) puts moves and discards back.
+  if (isApplyJournal(text, runId)) {
+    try {
+      return await revertApplyRun(workspaceRoot, runId, text, dryRun);
+    } catch (error) {
+      if (error instanceof ApplyRecordError) throw new RevertRunError("invalid_run_record", error.message);
+      throw error;
+    }
   }
   const changes = changedPaths(text, runId);
 

@@ -162,6 +162,7 @@ describe("parseArgs (phase 1b options)", () => {
         cancelFile: null,
         quiet: false,
         profile: null,
+        workflow: null,
       },
     });
   });

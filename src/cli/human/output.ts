@@ -22,10 +22,10 @@ import {
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
-  RUN_REASONS,
   TERMINAL_RUN_STATUSES,
   TOOL_ERROR_CODES,
   TOOL_NAMES,
+  isReasonOfStatus,
   toRunId,
   toSchemaFieldPath,
 } from "../../contracts/index.js";
@@ -76,13 +76,6 @@ const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
 
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
 const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
-const REASONS_BY_STATUS: { readonly [S in TerminalRunStatus]: readonly RunReason[] } = {
-  done: ["verified"],
-  failed: ["verifier_failed", "model_error", "repeated_failure"],
-  "needs-input": ["verifier_inconclusive", "no_verifier", "unknown_tool_outcome", "protected_changed"],
-  cancelled: ["cancelled"],
-  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
-};
 
 function isOneOf<T extends string>(value: unknown, list: readonly T[]): value is T {
   return typeof value === "string" && (list as readonly string[]).includes(value);
@@ -93,8 +86,9 @@ function isCount(value: unknown, min = 0): value is number {
 }
 
 function validStatusReason(status: unknown, reason: unknown): { status: TerminalRunStatus; reason: RunReason } | null {
-  if (!isOneOf(status, TERMINAL_RUN_STATUSES) || !isOneOf(reason, RUN_REASONS)) return null;
-  return REASONS_BY_STATUS[status].includes(reason) ? { status, reason } : null;
+  if (!isOneOf(status, TERMINAL_RUN_STATUSES) || typeof reason !== "string") return null;
+  // DR-16: the contract's one table of reasons per status (G-A reasons included).
+  return isReasonOfStatus(status, reason) ? { status, reason } : null;
 }
 
 /** A recorded time in local wall time, or null when it is not a real timestamp (N-24(c)). */

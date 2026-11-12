@@ -316,6 +316,17 @@ describe("HumanOutput.progressLine (N-5, N-14)", () => {
     assert.equal(line, "[progress.file_created] [key].md");
   });
 
+  test("DR-16: a G-A reason is rendered by the contract's table of reasons per status", () => {
+    const human = createHumanOutput(strictCatalog());
+    assert.equal(
+      human.progressLine({ type: "run_finished", status: "needs-input", reason: "plan_pending", usage: { modelTurns: 1, toolCalls: 0, inputTokens: null, outputTokens: null, durationMs: 1 } }),
+      "[progress.finished status=[status.needs-input] reason=plan_pending]",
+    );
+    const summary = human.runSummary(result({ status: "failed", reason: "apply_incomplete", exitCode: 1 }), CONTEXT);
+    assert.ok(summary.startsWith("── [summary.result status=[status.failed] reason=[reason.apply_incomplete]] (failed/apply_incomplete) ──\n"), summary);
+    assert.ok(summary.includes("[advice.apply_incomplete]"));
+  });
+
   test("records with values outside their lists give no line instead of passing them on", () => {
     const human = createHumanOutput(strictCatalog());
     assert.equal(human.progressLine({ type: "model_error", turn: 1, kind: SECRET, message: masked("") }), null);

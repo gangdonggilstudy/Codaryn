@@ -18,7 +18,7 @@
  */
 
 import path from "node:path";
-import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   CliErrorCode,
@@ -34,13 +34,18 @@ import type {
   InputDiagnosticFile,
   Journal,
   MessageLanguage,
+  ResolvedTaskSpec,
   ModelProvider,
   PrivacyGateway,
   HumanOutput,
   MessageCatalog,
   RunSummaryContext,
   RunTask,
+  WorkflowDefinition,
+  WorkflowProblem,
+  WorkflowSettings,
 } from "../contracts/index.js";
+import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { cleanText } from "./text-safety.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
@@ -130,7 +135,7 @@ export interface RunOutcomeInfo {
 }
 
 /** Filled while a run is prepared and while it runs. */
-interface RunNotes {
+export interface RunNotes {
   configLanguage: MessageLanguage | null;
   configDefault: DefaultConfigDisplay | null;
   /** N-17: `tool_decision` records with `allowed: false`, as ReportJournalSummary counts them. */
@@ -210,6 +215,54 @@ function withModelHint(
   return { ...result, notices: [...result.notices, masked.text] };
 }
 
+/** G-A: what each workflow problem means, after the field position (never a value). */
+const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
+  unknown_workflow: "names no built-in workflow and no workflows entry of the config file",
+  tool_not_allowed: "names a tool the workflow definition does not offer (tools only narrow)",
+  plan_weakened: 'cannot be "none" under a workflow with plan "apply"',
+  commands_not_allowed: "must be empty: the workflow allows no command",
+  review_without_checklist: 'is required with completion "human_review"',
+  checklist_without_review: 'is only allowed with completion "human_review"',
+  instructions_too_long: "is longer than the limit",
+  checklist_too_long: "must have 1 to the maximum number of non-blank lines within the length limit",
+};
+
+/**
+ * G-A: the config as a task sees it when a workflow definition applies: the definition's limits
+ * under the config's (and so under the profile's); in the quick form its policy and verifiers
+ * under the config's too.
+ */
+function underDefinition(config: CodarynConfig | null, definition: WorkflowDefinition, quick: boolean): CodarynConfig {
+  const base: CodarynConfig = config ?? { schemaVersion: 1 };
+  const limits = definition.limits === undefined ? base.limits : { ...definition.limits, ...(base.limits ?? {}) };
+  const policy = quick ? (base.policy ?? definition.policy) : base.policy;
+  const verifiers = quick ? (base.verifiers ?? definition.verifiers) : base.verifiers;
+  return {
+    ...base,
+    ...(limits === undefined ? {} : { limits }),
+    ...(policy === undefined ? {} : { policy }),
+    ...(verifiers === undefined ? {} : { verifiers }),
+  };
+}
+
+/**
+ * G-A: the resolved task carries every workflow field when a workflow applies; a task with no
+ * workflow keeps none of them, so it runs exactly as before stage 4 (GT-U14).
+ */
+function withWorkflow(task: ResolvedTaskSpec, workflowRef: string | null, settings: WorkflowSettings): ResolvedTaskSpec {
+  if (workflowRef === null && settings === LEGACY_WORKFLOW_SETTINGS) return task;
+  const { humanReview: _drop, ...rest } = task;
+  return {
+    ...rest,
+    ...(workflowRef === null ? {} : { workflowRef }),
+    tools: settings.tools,
+    instructions: settings.instructions,
+    plan: settings.plan,
+    completion: settings.completion,
+    ...(settings.humanReview === null ? {} : { humanReview: settings.humanReview }),
+  };
+}
+
 /** Writes one masked progress line; best effort. */
 function writeMasked(write: (line: string) => void, privacy: PrivacyGateway, text: string): void {
   const masked = privacy.mask(`${PROGRESS_PREFIX}${text}`);
@@ -228,7 +281,7 @@ function withNotice(result: EngineResult, privacy: PrivacyGateway, text: string)
 }
 
 /** Task, config and script files may start with a UTF-8 byte order mark (common on Windows). */
-async function readText(io: CliEnvironment, file: string): Promise<string | null> {
+async function readText(io: Pick<CliEnvironment, "readFile">, file: string): Promise<string | null> {
   try {
     return (await io.readFile(file)).replace(/^﻿/, "");
   } catch {
@@ -298,7 +351,32 @@ function writeHuman(write: (line: string) => void, privacy: PrivacyGateway, text
   }
 }
 
-async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Promise<CliRunOutcome> {
+/** What `prepareTask` reads besides the arguments: the parts of CliEnvironment steps 1 to 7 use. */
+export type PrepareEnvironment = Pick<
+  CliEnvironment,
+  "env" | "cwd" | "readFile" | "isDirectory" | "loadEnvFile" | "locateInWorkspace" | "relatePaths" | "installDir" | "defaultConfig"
+>;
+
+/** A task ready to run, plan, apply or review: steps 1 to 7 passed. */
+export interface PreparedTask {
+  readonly task: ResolvedTaskSpec;
+  readonly config: CodarynConfig | null;
+  /** Every registered secret value (S-2 to S-4). */
+  readonly secrets: readonly string[];
+  readonly integrityPaths: readonly string[];
+  readonly defaultDisplay: DefaultConfigDisplay | null;
+}
+
+/**
+ * Steps 1 to 7 (arguments, variable file, key, config and task files, validation, workspace,
+ * secrets), shared by `run`, `plan`, `apply` and `review` (DR-17): each registers the same
+ * secrets and resolves the same task. An error outcome, or the prepared task.
+ */
+export async function prepareTask(
+  io: PrepareEnvironment,
+  args: RunArgs,
+  notes: RunNotes,
+): Promise<CliRunOutcome | { readonly prepared: PreparedTask }> {
   // 1. S-5: nothing given on the command line may reach another machine or a device.
   const argumentPaths: [string | null, CliErrorCode, string][] = [
     [args.input.kind === "task" ? args.input.taskPath : null, "invalid_task", "--task"],
@@ -311,6 +389,20 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     if (given === null) continue;
     const problem = localPathProblem(given, io.cwd);
     if (problem !== null) return error(code, `the path given by ${option} ${problem}`);
+  }
+
+  // U-3, review R-6 low 2: the quick form names its workspace on the command line, so the install
+  // directory is refused before any file is read; otherwise a missing config would be reported
+  // first. A workspace that cannot be resolved here is judged with the task later.
+  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
+  if (args.input.kind === "quick" && io.installDir !== undefined && io.installDir !== null) {
+    const relation = await relate(path.resolve(io.cwd, args.input.workspace), io.installDir);
+    if (relation === "same" || relation === "inside" || relation === "contains") {
+      return error(
+        "workspace_is_install_dir",
+        "the workspace is the CLI's install directory, lies inside it or contains it; use a separate candidate directory",
+      );
+    }
   }
 
   // 2. The env file. S-4: values it newly sets are registered as secrets later.
@@ -414,17 +506,27 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     notes.configLanguage = config.language ?? null;
     notes.configDefault = defaultDisplay;
   }
+  let profileWorkflowRef: string | null = null;
   if (args.profile !== null) {
+    profileWorkflowRef = (config?.profiles ?? {})[args.profile]?.workflowRef ?? null;
     const selected = selectProfile(config, args.profile);
     if (!selected.ok) return error("invalid_config", selected.message);
     config = selected.config;
   }
 
+  // G-A (GT-D1): the workflow definition named by the task's workflowRef, --workflow or the
+  // profile. Its limits lie under the config's; in the quick form its policy and verifiers too.
+  const definitions = workflowDefinitions(config?.workflows);
+  const rawTaskRef = taskFile === null ? undefined : (taskFile.value as { workflowRef?: unknown } | null)?.workflowRef;
+  const requestedRef = (typeof rawTaskRef === "string" ? rawTaskRef : null) ?? args.workflow ?? profileWorkflowRef;
+  const definition = requestedRef !== null && Object.hasOwn(definitions, requestedRef) ? definitions[requestedRef] : undefined;
+  const taskConfig = definition === undefined ? config : underDefinition(config, definition, taskFile === null);
+
   const taskOutcome =
     taskFile !== null
-      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: config?.limits })
+      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: taskConfig?.limits })
       : args.input.kind === "quick"
-        ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config })
+        ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config: taskConfig, workflowRef: args.workflow })
         : null;
   if (taskOutcome === null) return error("internal_error", "no task input");
   if (!taskOutcome.ok) {
@@ -442,13 +544,31 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
       if (!secretSources.some((source) => source.name === name)) secretSources.push({ name, field: "secretEnv", index });
     });
   }
-  const task = withConfigSecrets(taskOutcome.task, config);
+  // G-A: resolve the workflow settings under the definition's ceilings (resolveWorkflow).
+  const parsed = taskOutcome.task;
+  const resolved = resolveWorkflow({
+    definitions,
+    task: {
+      ...(parsed.workflowRef === undefined ? {} : { workflowRef: parsed.workflowRef }),
+      ...(parsed.tools === undefined ? {} : { tools: parsed.tools }),
+      ...(parsed.plan === undefined ? {} : { plan: parsed.plan }),
+      ...(parsed.completion === undefined ? {} : { completion: parsed.completion }),
+      ...(parsed.humanReview === undefined ? {} : { humanReview: parsed.humanReview }),
+    },
+    profileWorkflowRef,
+    commandRules: parsed.policy.commands.length,
+  });
+  if (!resolved.ok) {
+    const fromConfig = taskFile === null || resolved.field.startsWith("profiles") || resolved.field.startsWith("workflows");
+    const file: InputDiagnosticFile = fromConfig ? "config" : "task";
+    return error(fromConfig ? "invalid_config" : "invalid_task", `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`, positionDiagnostic(file, { code: "invalid_value", field: resolved.field }));
+  }
+  const task = withConfigSecrets(withWorkflow(parsed, resolved.workflowRef, resolved.settings), config);
 
   // 6. The workspace, and S-1: no file that shapes this or a later run may lie inside it.
   if (!(await io.isDirectory(task.workspaceRoot))) {
     return error("workspace_not_found", "workspaceRoot is not an existing directory");
   }
-  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
   // U-3: the running CLI must not work on its own installation, by real paths.
   if (io.installDir !== undefined) {
     const relation = io.installDir === null ? "unknown" : await relate(task.workspaceRoot, io.installDir);
@@ -503,6 +623,18 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
   if (currentKey !== null) addSecret(currentKey);
   // S-4: what the env file set, so a value read back from a file or an output is masked too.
   envSecrets.forEach(addSecret);
+
+  return { prepared: { task, config, secrets, integrityPaths, defaultDisplay } };
+}
+
+async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Promise<CliRunOutcome> {
+  const ready = await prepareTask(io, args, notes);
+  if (!("prepared" in ready)) return ready;
+  const { task, config, integrityPaths, defaultDisplay } = ready.prepared;
+  const secrets = [...ready.prepared.secrets];
+  const addSecret = (value: string): void => {
+    if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
+  };
 
   // 8. The model.
   let model: ModelProvider;

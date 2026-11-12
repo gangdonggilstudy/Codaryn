@@ -20,6 +20,7 @@ import {
   REVERT_SKIP_REASONS,
   TOOL_ERROR_CODES,
   messageParams,
+  toSchemaFieldPath,
 } from "../../../src/contracts/index.js";
 import type { CatalogText, DoctorText, MessageCatalog, MessageLanguageChoice } from "../../../src/contracts/index.js";
 
@@ -63,7 +64,7 @@ test("N-21: help and doctor texts are catalog ids; doctor checks carry a typed t
   const ids = new Set<string>(MESSAGE_IDS);
   for (const command of HELP_COMMANDS) assert.ok(ids.has(`help.command.${command}`) && ids.has(`help.exit.${command}`), command);
   for (const id of DOCTOR_CHECK_IDS) assert.ok(ids.has(`doctor.check.${id}`), id);
-  assert.equal(DOCTOR_CHECK_IDS[DOCTOR_CHECK_IDS.length - 1], "language");
+  assert.deepEqual(DOCTOR_CHECK_IDS.slice(-2), ["language", "lock"]);
   const ok: DoctorText = { id: "doctor.vars_file.ok", params: { count: 2 } };
   const plain: DoctorText = { id: "doctor.api_key.ok" };
   // @ts-expect-error a doctor text cannot carry a file value
@@ -71,6 +72,16 @@ test("N-21: help and doctor texts are catalog ids; doctor checks carry a typed t
   // @ts-expect-error only doctor ids
   const other: DoctorText = { id: "summary.changes", params: { count: 1 } };
   assert.ok(ok && plain && leaky && other);
+});
+
+test("N-24, N-25: script usage fields are schema positions; the lock has a doctor check and a removal hint", () => {
+  // Review R-3 R3-4 input.
+  assert.equal(toSchemaFieldPath("steps[0].usage.inputTokens"), "steps[0].usage.inputTokens");
+  assert.equal(toSchemaFieldPath("steps[0].usage.outputTokens"), "steps[0].usage.outputTokens");
+  const ids = new Set<string>(MESSAGE_IDS);
+  for (const id of ["doctor.check.lock", "doctor.lock.none", "doctor.lock.held", "doctor.lock.stale", "doctor.lock.unreadable", "lock.remove_hint"]) {
+    assert.ok(ids.has(id), id);
+  }
 });
 
 test("N-22: rejected calls, already reverted files and the doctor hint list", () => {

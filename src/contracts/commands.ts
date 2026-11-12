@@ -60,7 +60,11 @@ export interface ReportJournalSummary {
   readonly finished: { readonly status: TerminalRunStatus; readonly reason: RunReason } | null;
 }
 
-/** Printed by `codaryn report --json`. Without `--json` the same content is printed as Markdown. */
+/**
+ * Printed by `codaryn report --json`. Without `--json` the same content is printed as Markdown.
+ * N-24 (a): the Markdown shows each verifier by its number (1-based, in the order of the run's
+ * verifier list), never by its id; the id stays in this JSON only. Key shapes are hidden in both.
+ */
 export interface ReportOutput {
   readonly schemaVersion: 1;
   readonly kind: "report";
@@ -80,7 +84,12 @@ export interface ReportOutput {
  * `--task` and `--workspace` cannot be combined (`invalid_arguments`, W-5): a task file names its
  * own workspace (`workspaceRoot`). `--profile` (N-8) checks the config with that profile applied.
  * `language` (N-20) says which language the human output uses and where that came from; it warns
- * when CODARYN_LANG is set to something other than `ko` or `en`. The workspace checks (`workspace`, `file_locations`,
+ * when CODARYN_LANG is set to something other than `ko` or `en`. `lock` (N-25 a) reads
+ * `<workspace>/.codaryn/lock.json` without changing it: none, held by a live process (`warn`, with
+ * the hint to remove the file when no Codaryn is running), left by a process that has ended
+ * (`ok`: the next run reclaims it), or unreadable (`warn`); `skipped` without a workspace. Because
+ * a process id can be given to another process later, "held" can be wrong (architecture A-6). The
+ * workspace checks (`workspace`, `file_locations`,
  * `install_dir`, and the position part of `integrity_paths`) use the task's `workspaceRoot` or
  * `--workspace`; with neither they are `skipped`.
  */
@@ -98,6 +107,7 @@ export const DOCTOR_CHECK_IDS = [
   "install_dir",
   "integrity_paths",
   "language",
+  "lock",
 ] as const;
 export type DoctorCheckId = (typeof DOCTOR_CHECK_IDS)[number];
 
@@ -284,7 +294,8 @@ export const RUN_TIMESTAMP_PATTERN_SOURCE = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2
  *   `schemaVersion` 1 and a known provider; result.json also has `schemaVersion` 1, a known
  *   provider, the journal's `taskId`, and `changes` entries of the FileChangeRecord shape.
  * Strings put into an entry are only those checked against these patterns, so no control
- * character or key shape can be in them.
+ * character can be in them. The patterns allow a key-shaped run id or task id, so every output
+ * (the JSON line and the table) hides key shapes, as `report` does (N-24 b, review R-3 R3-2).
  */
 export type RunListEntry =
   | {

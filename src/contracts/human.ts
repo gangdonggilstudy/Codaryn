@@ -149,6 +149,9 @@ export const SCHEMA_FIELD_NAMES = [
   "stop",
   "usage",
   "delayMs",
+  // N-24 (review R-3 R3-4): the scripted model's usage fields.
+  "inputTokens",
+  "outputTokens",
 ] as const;
 
 const SCHEMA_FIELD_SEGMENT = /^(?:[A-Za-z]+|\[(?:0|[1-9][0-9]{0,5})\])/;
@@ -453,6 +456,12 @@ export const FIXED_MESSAGES = {
   "doctor.integrity_paths.ok": { count: "count" },
   "doctor.language.ok": { text: "text" },
   "doctor.language.env_ignored": { text: "text" },
+  // N-25 (a): the workspace lock. When a lock is held but no Codaryn runs, the user removes it.
+  "doctor.lock.none": {},
+  "doctor.lock.held": {},
+  "doctor.lock.stale": {},
+  "doctor.lock.unreadable": {},
+  "lock.remove_hint": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;
@@ -553,6 +562,14 @@ export function messageParams(id: MessageId): { readonly [param: string]: Messag
  * in decimal digits, anything else as given); the types above limit what can be given. It never
  * reads a file or the environment. A missing or extra parameter at run time is a programming
  * error and throws.
+ *
+ * N-24 (review R-3 GAP-1 to GAP-6): the types can be bypassed (casts, `any`, JSON), so `format`
+ * checks every value's kind again at run time: a count is a non-negative safe integer, seconds a
+ * non-negative number with at most one decimal place, a code one of its contract list, a field a
+ * `toSchemaFieldPath` result, a run id a `toRunId` result, a location or suggestion one of the
+ * fixed strings, text one this catalog produced. A value that fails is not shown (a fixed
+ * replacement such as "?" stands in its place). Run ids and task ids are shown with key shapes
+ * hidden, as every printed text is.
  */
 export interface MessageCatalog {
   readonly language: MessageLanguage;

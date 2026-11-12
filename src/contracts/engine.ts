@@ -125,6 +125,10 @@ export const CLI_ERROR_EXIT_CODES = {
    * holds the entry file), lies inside it or contains it. Checked before the lock; nothing is written.
    */
   workspace_is_install_dir: 2,
+  /**
+   * Another run (or revert) holds `<workspace>/.codaryn/lock.json`. N-25 (a): the human-readable
+   * error adds `lock.remove_hint`: when no Codaryn is running in that workspace, remove the file.
+   */
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,

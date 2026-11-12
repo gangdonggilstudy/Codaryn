@@ -237,12 +237,14 @@ const expected = [
   ["modelForgedEntry", (v) => v.ok === false && v.code === "unknown_entry"],
   ["modelIdAsEntry", (v) => v.ok === false && v.code === "invalid_args"],
   // GU-6 (3.10, 6.6): settings changes by the main process's token; widening asked first.
-  ["settingsPolicyFirst", (v) => v === true],
+  // DR-41: the screen says the config's rules are merged with each task kind's own.
+  ["settingsPolicyMerge", (v) => v === true],
   ["settingsNarrow", (v) => v === "ready"],
   ["settingsNarrowWritten", (v) => JSON.stringify(v) === JSON.stringify(["notes/private.md"])],
   ["settingsNarrowDialogs", (v) => v === 0],
   ["settingsWiden", (v) => v === "widens"],
   ["settingsWidenKinds", (v) => JSON.stringify(v) === JSON.stringify(["command_added"])],
+  ["settingsWidenNarrowings", (v) => JSON.stringify(v) === JSON.stringify([["organize", "commands_dropped"]])],
   ["settingsWidenRefused", (v) => v === "not_confirmed"],
   ["settingsAfterRefusal", (v) => v === 0],
   ["settingsWidenWritten", (v) => JSON.stringify(v) === JSON.stringify(["node --version"])],
@@ -362,7 +364,7 @@ const expected = [
   // R29-L1: the run cancelled in the window and the run closed with it had sent their request first.
   ["cancelRequestArrived", (v) => v === true],
   ["closeRequestArrived", (v) => v === true],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

@@ -24,7 +24,7 @@ import { asModels, asProposal, asSelectModel, asSettings, asWritten } from "../a
 import type { CodarynApi } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
-import type { ProfileView, SettingsRules, SettingsView } from "../../shared/ipc.js";
+import type { PolicyNarrowingView, ProfileView, SettingsRules, SettingsView } from "../../shared/ipc.js";
 
 export interface SettingsDeps {
   readonly texts: Texts;
@@ -106,10 +106,25 @@ function removable(t: Texts, items: readonly string[], op: string, propose: Prop
   return out;
 }
 
-function rulesSection(t: Texts, rules: SettingsRules, propose: Propose, warn: (code: string) => void): HTMLElement {
+/** DR-41: one line per task kind and narrowing ("organize: 1 allowed command left out"); null when none. */
+function narrowingList(t: Texts, narrowings: readonly PolicyNarrowingView[], id: string): HTMLElement | null {
+  if (narrowings.length === 0) return null;
+  const list = el("ul", undefined, { class: "narrowings", id });
+  for (const item of narrowings) {
+    const textId = `settings.narrowing.${item.kind}`;
+    const what = t.has(textId) ? t.format(textId, { count: String(item.count) }) : item.kind;
+    list.append(el("li", `${item.workflow}: ${what}`, { "data-workflow": item.workflow, "data-kind": item.kind }));
+  }
+  return list;
+}
+
+function rulesSection(t: Texts, rules: SettingsRules, narrowings: readonly PolicyNarrowingView[], propose: Propose, warn: (code: string) => void): HTMLElement {
   const box = section("settings-rules", t.format("settings.rules"));
   box.append(el("p", t.format("settings.rulesNote"), { class: "notice" }));
-  if (!rules.policySet) box.append(el("p", t.format("settings.policyFirst"), { class: "notice", id: "settings-policy-first" }));
+  // DR-41: the config's rules are merged with each task kind's own, never put in their place.
+  box.append(el("p", t.format("settings.policyMerge"), { class: "notice", id: "settings-policy-merge" }));
+  const list = narrowingList(t, narrowings, "settings-narrowings");
+  if (list !== null) box.append(el("h4", t.format("settings.narrowings")), list);
 
   box.append(el("h4", t.format("settings.limits")));
   const set = new Map(rules.limits);
@@ -303,6 +318,8 @@ export function settingsScreen(deps: SettingsDeps): Screen {
             changes.append(el("li", t.has(id) ? t.format(id, { field: change.field }) : change.field));
           }
           parts.push(changes);
+          const narrowed = narrowingList(t, reply.policyNarrowings, "settings-proposal-narrowings");
+          if (narrowed !== null) parts.push(el("p", t.format("settings.proposalNarrowings"), { class: "notice" }), narrowed);
           if (reply.widening.length > 0) {
             parts.push(el("p", t.format("settings.widens"), { class: "notice", "data-widens": String(reply.widening.length) }));
             const widening = el("ul", undefined, { class: "widening" });
@@ -430,7 +447,7 @@ export function settingsScreen(deps: SettingsDeps): Screen {
 
         const editable = view.file !== null && view.file.exists;
         const sections = [general(t, view, deps.language, propose), providerSection(t, view, editable ? propose : null), model, profiles, workflows];
-        if (editable) sections.push(rulesSection(t, view.rules, propose, warn), secretsSection(t, view.rules, propose, warn));
+        if (editable) sections.push(rulesSection(t, view.rules, view.policyNarrowings, propose, warn), secretsSection(t, view.rules, propose, warn));
         else sections.push(el("p", t.format("settings.createFirst"), { class: "notice", id: "settings-create-first" }));
         body.replaceChildren(proposal, ...sections, key);
         body.setAttribute("data-settings-ready", "ok");

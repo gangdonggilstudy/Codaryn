@@ -90,7 +90,6 @@ function rulesView(config: Obj | null, shown: Shown, envSet: (name: string) => b
   const paths = own(policy, "protectedPaths");
   const names = own(config, "secretEnv");
   return {
-    policySet: isObj(policy),
     limits,
     commands: Array.isArray(commands) ? commands.slice(0, MAX_LIST).map((rule) => commandText(rule, shown)) : [],
     protectedPaths: Array.isArray(paths) ? paths.slice(0, MAX_LIST).map((item) => (typeof item === "string" ? shown(item) : "?")) : [],
@@ -173,6 +172,7 @@ export function settingsValue(
       keyAvailable: view["keyAvailable"] === true,
       providers: [...providers],
       rules: rulesView(config, shown, envSet),
+      policyNarrowings: narrowingsOf(view["policyNarrowings"], shown),
       // SP-D3: the config's provider when it names one of the table; null: none (the CLI then uses anthropic).
       provider: typeof own(config, "provider") === "string" && table.some((entry) => entry.name === own(config, "provider")) ? (own(config, "provider") as string) : null,
       defaultProvider: table.some((entry) => entry.name === "anthropic") ? "anthropic" : (table[0]?.name ?? null),
@@ -193,7 +193,19 @@ export function proposalValue(outcome: unknown, next: Obj, shown: Shown): Obj | 
   if (output === null) return failureOf(outcome);
   const baseDigest = output["baseDigest"];
   if (typeof baseDigest !== "string" || !/^[0-9a-f]{64}$/.test(baseDigest)) return { ok: false, code: "host_error" };
-  return { ok: true, next, baseDigest, ...fieldsOf(output, shown) };
+  return { ok: true, next, baseDigest, ...fieldsOf(output, shown), policyNarrowings: narrowingsOf(output["policyNarrowings"], shown) };
+}
+
+/**
+ * DR-41: what a task kind's own rules leave out of the config's policy (the app layer's
+ * policyNarrowings): the task kind, the kind of narrowing and a count. Never a rule or a path.
+ */
+function narrowingsOf(value: unknown, shown: Shown): Obj[] {
+  return (Array.isArray(value) ? value.slice(0, MAX_LIST) : []).flatMap((item) => {
+    if (!isObj(item) || typeof item["workflow"] !== "string" || typeof item["kind"] !== "string" || !/^[a-z][a-z_]{0,39}$/.test(item["kind"])) return [];
+    const count = item["count"];
+    return typeof count === "number" && Number.isSafeInteger(count) && count >= 1 ? [{ workflow: shown(item["workflow"]), kind: item["kind"], count }] : [];
+  });
 }
 
 function fieldsOf(output: Obj, shown: Shown): Obj {

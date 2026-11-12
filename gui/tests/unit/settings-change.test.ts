@@ -142,7 +142,7 @@ test("settings change (GU-6): the engine host applies the edit to the config rea
     },
   });
   const settings = (await call(1, "settings", {})) as { view: { rules: unknown } };
-  assert.deepEqual(settings.view.rules, { policySet: true, limits: [["maxModelTurns", 6]], commands: ["npm test"], protectedPaths: ["a.env"], secretEnv: [{ name: "MY_TOKEN", set: true }] });
+  assert.deepEqual(settings.view.rules, { limits: [["maxModelTurns", 6]], commands: ["npm test"], protectedPaths: ["a.env"], secretEnv: [{ name: "MY_TOKEN", set: true }] });
   assert.equal(JSON.stringify(settings).includes("C:\\\\cfg"), false, "no full path");
 
   assert.equal(await call(2, "proposeSettings", { edit: { op: "replace", next: {} } }), "invalid_args");
@@ -217,7 +217,7 @@ test("settings change (GU-6): the screen proposes one edit, shows what widens, a
       keyAvailable: true,
       providers: [],
       env: { model: false, language: false },
-      rules: { policySet: false, limits: [["maxModelTurns", 6]], commands: ["npm test"], protectedPaths: ["a.env"], secretEnv: [{ name: "MY_TOKEN", set: false }] },
+      rules: { limits: [["maxModelTurns", 6]], commands: ["npm test"], protectedPaths: ["a.env"], secretEnv: [{ name: "MY_TOKEN", set: false }] },
     };
     const replies: Record<string, (arg: unknown) => unknown> = {
       settings: () => ({ ok: true, view: settingsView }),
@@ -239,7 +239,7 @@ test("settings change (GU-6): the screen proposes one edit, shows what widens, a
     const byId = (id: string) => root.findAll((e) => e.getAttribute("id") === id)[0];
     assert.equal(byId("settings")?.getAttribute("data-settings-ready"), "ok");
     assert.ok(byId("settings-secrets")?.textContent.includes("not set now"));
-    assert.ok(byId("settings-policy-first")?.textContent.includes("replace every task kind's rules"), "says a first policy replaces the task kinds' own");
+    assert.ok(byId("settings-policy-merge")?.textContent.includes("merged with each task kind's own rules"), "DR-41: says the rules are merged");
     assert.equal(root.findAll((e) => e.getAttribute("type") === "password").length, 0, "no value field");
 
     // A limit that is not a whole number is refused here; nothing is asked.
@@ -272,6 +272,55 @@ test("settings change (GU-6): the screen proposes one edit, shows what widens, a
     byId("settings-keep")?.click();
     assert.equal(byId("settings-proposal")?.getAttribute("data-proposal"), "kept");
     assert.equal(calls.length, 3, "keeping it asks nothing");
+  } finally {
+    restore();
+  }
+});
+
+test("settings change (DR-41): what task kinds' own rules leave out of the policy is shown, for the file and for a proposal", async () => {
+  const narrowing = { workflow: "organize", kind: "commands_dropped", count: 1 };
+  const call = host({
+    readSettings: async () => ({ ...READ, output: { ...READ.output, policyNarrowings: [narrowing, { workflow: "bad", kind: "commands_dropped", count: 0 }] } }),
+    proposeSettingsChange: async () => ({
+      ok: true,
+      output: { kind: "settings_change", baseDigest: DIGEST, digest: DIGEST, changes: [{ field: "policy.commands", change: "changed" }], widening: [], policyNarrowings: [{ ...narrowing, count: 2 }], file: READ.output.file, config: {} },
+    }),
+  });
+  const settings = (await call(1, "settings", {})) as { view: { policyNarrowings: unknown } };
+  assert.deepEqual(settings.view.policyNarrowings, [narrowing], "a count below 1 is left out");
+  const value = (await call(2, "proposeSettings", { edit: { op: "addCommand", executable: "node", argsPrefix: [], allowExtraArgs: false } })) as Record<string, unknown>;
+  const proposal = toHostProposal(value);
+  assert.deepEqual(proposal.ok && proposal.policyNarrowings, [{ ...narrowing, count: 2 }]);
+  assert.equal(toHostProposal({ ...value, policyNarrowings: [{ ...narrowing, rule: "node" }] }).ok, false, "kinds and counts only");
+
+  const restore = installFakeDom();
+  try {
+    const view = {
+      file: { display: "~/cfg/config.json", source: "environment", exists: true },
+      model: null,
+      language: null,
+      profiles: [],
+      workflows: { builtin: [], config: [] },
+      keyAvailable: false,
+      providers: [],
+      env: { model: false, language: false },
+      rules: { limits: [], commands: ["node"], protectedPaths: [], secretEnv: [] },
+      policyNarrowings: [narrowing],
+    };
+    const api = new Proxy({} as CodarynApi, {
+      get: (_t, name: string) => async () =>
+        name === "settings" ? { ok: true, view } : name === "proposeSettings" ? { ok: true, token: "e".repeat(32), changes: [{ field: "policy.commands", change: "changed" }], widening: [], policyNarrowings: [{ ...narrowing, count: 2 }] } : null,
+    });
+    const screen = settingsScreen({ texts: textsFor("en"), api, language: "en", announce: () => undefined });
+    const root = new FakeElement("main");
+    screen.show(root as unknown as HTMLElement);
+    await settle();
+    const byId = (id: string) => root.findAll((e) => e.getAttribute("id") === id)[0];
+    assert.equal(byId("settings-narrowings")?.textContent, "organize: 1 allowed commands of the config are left out");
+    (byId("settings-protected-path") as FakeElement).value = "x.txt";
+    byId("settings-protected-add")?.click();
+    await settle();
+    assert.equal(byId("settings-proposal-narrowings")?.textContent, "organize: 2 allowed commands of the config are left out");
   } finally {
     restore();
   }

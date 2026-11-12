@@ -101,7 +101,7 @@ test("provider choice: the main process refuses a provider view with values or o
     workflows: { builtin: [], config: [] },
     keyAvailable: false,
     providers: [],
-    rules: { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] },
+    rules: { limits: [], commands: [], protectedPaths: [], secretEnv: [] },
     provider: null,
     defaultProvider: "anthropic",
   };
@@ -129,7 +129,7 @@ test("provider choice: the screen shows the providers, a model list for each lis
       keyAvailable: true,
       providers: ["anthropic"],
       env: { model: false, language: false },
-      rules: { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] },
+      rules: { limits: [], commands: [], protectedPaths: [], secretEnv: [] },
       provider,
       defaultProvider: "anthropic",
       apiProviders: [

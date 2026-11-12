@@ -68,6 +68,7 @@ import {
 import type { FakeAnthropic, FakeReply } from "../support/fake-anthropic.js";
 import { decodedSource, findLeaks, stateRecordTexts } from "../support/leak.js";
 import type { TextSource } from "../support/leak.js";
+import { assertHumanError, assertQuiet } from "../support/progress.js";
 import { finalStep, readStep } from "../support/repair-script.js";
 
 const IS_WINDOWS = process.platform === "win32";
@@ -353,7 +354,11 @@ test("--vars-file 경로를 CLI가 판정한다: 없는 파일 → invalid_confi
   const run = await runCli(sb, ["run", "--task", taskPath, "--vars-file", join(sb.base, "missing.env")]);
   t.diagnostic(`exit ${String(run.exitCode)}, stderr ${JSON.stringify(run.stderr.slice(0, 200))}`);
   assertPreRun(run, "invalid_config", sb);
-  assert.equal(run.stderr, "");
+  // N-5: stderr explains the error for people; with --quiet it stays empty.
+  assertHumanError(run, "invalid_config", [sb.base]);
+  const quiet = await runCli(sb, ["run", "--task", taskPath, "--vars-file", join(sb.base, "missing.env"), "--quiet"]);
+  assertPreRun(quiet, "invalid_config", sb);
+  assertQuiet(quiet);
 });
 
 test("T-15 --env-file은 받지 않는다: 있는 파일을 줘도 invalid_arguments, 값은 읽히지 않음", { timeout: 60_000 }, async (t) => {
@@ -374,7 +379,10 @@ test("S-6 깊게 중첩된 JSON은 JSON 한 줄 오류로 끝난다(스택 없�
     writeFileSync(taskPath, `${text.slice(0, -1)},"deep":${deep(20_000)}}`);
     const run = await runTask(taskPath, { cwd: sb.base });
     assertPreRun(run, "invalid_task", sb);
-    assert.equal(run.stderr, "", "no stack trace");
+    assertHumanError(run, "invalid_task", [sb.base]);
+    const quiet = await runCli(sb, ["run", "--task", taskPath, "--quiet"]);
+    assertPreRun(quiet, "invalid_task", sb);
+    assertQuiet(quiet);
   });
   await t.test("설정 파일 → invalid_config", async (st) => {
     const sb = createSandbox(st);
@@ -383,7 +391,10 @@ test("S-6 깊게 중첩된 JSON은 JSON 한 줄 오류로 끝난다(스택 없�
     writeFileSync(config, `{"schemaVersion":1,"deep":${deep(20_000)}}`);
     const run = await runCli(sb, ["run", "--task", taskPath, "--config", config]);
     assertPreRun(run, "invalid_config", sb);
-    assert.equal(run.stderr, "");
+    assertHumanError(run, "invalid_config", [sb.base]);
+    const quiet = await runCli(sb, ["run", "--task", taskPath, "--config", config, "--quiet"]);
+    assertPreRun(quiet, "invalid_config", sb);
+    assertQuiet(quiet);
   });
 });
 

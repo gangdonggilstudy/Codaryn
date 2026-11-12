@@ -146,7 +146,7 @@
 
 | 사례 | 파일 | 판정 근거 |
 | --- | --- | --- |
-| 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → report → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄 전체, 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. 키 없음, 네트워크 울타리 |
+| 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → report → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄(`codaryn: ` 접두사 줄) 전체, 그 뒤의 끝 요약(실행 id, `codaryn report`·`codaryn revert`, N-5), 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증기를 id가 아닌 순번으로 보임(N-24 (a), `--json`에는 id), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. 키 없음, 네트워크 울타리 |
 
 - `init`, `runs`, `--run latest`, `revert --dry-run`(N-2, N-7)은 N-A 연결이 main에 들어온 뒤 더한다.
 

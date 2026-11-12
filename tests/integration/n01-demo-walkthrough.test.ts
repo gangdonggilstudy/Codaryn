@@ -24,6 +24,8 @@ import { runGuarded } from "../support/fake-anthropic.js";
 import { progressLines } from "../support/progress.js";
 import { expectRevertOutput, workspaceBytes } from "../support/repair-check.js";
 
+/** What every progress line starts with (src/cli/progress.ts). The end summary has no prefix. */
+const PROGRESS_PREFIX = "codaryn: ";
 const DEMO_SOURCE = join(REPO_ROOT, "examples", "demo");
 const USAGE = join(REPO_ROOT, "docs", "usage.md");
 const SECTION_HEADING = "## 3. 키 없이 체험하기";
@@ -120,12 +122,22 @@ test("N-E 체험 예시: 사본에서 doctor → run → report → revert가 �
     assert.equal(apiKey.message, documented("the task uses the scripted model; no key is needed"));
   });
 
-  await t.test("run: 진행 줄이 문서에 적힌 실제 출력과 같고 결과는 done/verified", async () => {
+  await t.test("run: 진행 줄이 문서에 적힌 실제 출력과 같고, 그 뒤에 끝 요약이 있고, 결과는 done/verified", async () => {
     const run = await demo.cli(["run", "--task", demo.task]);
     const result = expectRunResult(run, "scripted");
     runId = result.runId;
     readRunFiles(demo.workspace, result);
-    assert.deepEqual(progressLines(run), documentedProgress(), "stderr is the progress shown in section 3");
+    // N-5: stderr holds the progress lines (PROGRESS_PREFIX) and then the end summary (no prefix).
+    const lines = progressLines(run);
+    const progress = lines.filter((line) => line.startsWith(PROGRESS_PREFIX));
+    const summary = lines.filter((line) => !line.startsWith(PROGRESS_PREFIX));
+    assert.deepEqual(progress, documentedProgress(), "the progress lines are the ones section 3 shows");
+    assert.ok(summary.length > 0, "the run ends with a summary on stderr (N-5)");
+    assert.ok(lines.indexOf(summary[0] ?? "") > lines.lastIndexOf(progress.at(-1) ?? ""), "the summary comes after the progress");
+    assert.ok(summary.some((line) => line.includes(result.runId)), `the summary names the run id: ${JSON.stringify(summary)}`);
+    for (const command of ["codaryn report", "codaryn revert"]) {
+      assert.ok(summary.some((line) => line.includes(command)), `the summary offers ${command}`);
+    }
 
     documented("stdout의 JSON(`$r`)은 `status` `done`, `reason` `verified`, `exitCode` 0이다");
     assert.equal(result.status, "done");
@@ -141,8 +153,8 @@ test("N-E 체험 예시: 사본에서 doctor → run → report → revert가 �
     );
     assert.equal(result.usage.repairAttempts, 1);
 
-    const summary = readFileSync(summaryPath, "utf8");
-    assert.ok(summary.includes("## 결정 사항") && summary.includes("## 할 일"));
+    const written = readFileSync(summaryPath, "utf8");
+    assert.ok(written.includes("## 결정 사항") && written.includes("## 할 일"));
     assert.deepEqual(readFileSync(join(demo.workspace, "notes.md")), demo.original.get("notes.md"), "notes.md is protected and unchanged");
   });
 
@@ -156,8 +168,10 @@ test("N-E 체험 예시: 사본에서 doctor → run → report → revert가 �
     for (const quoted of ["Provider: scripted (scripted model; no API was called)", "Repairs started: 1", "Tool calls: 3 of 8 (denied: 1)"]) {
       assert.ok(rendered.includes(documented(quoted)), `the report lacks ${JSON.stringify(quoted)}`);
     }
+    // N-24 (a): the Markdown names a verifier by its number, never by its id; `--json` keeps the id.
+    assert.ok(rendered.includes(documented("verifier 1 (file_rules): **pass**")), "the report shows the verifier by number");
+    assert.ok(!/^- summary \(file_rules\)/m.test(rendered), "the report does not print the verifier id");
     const output = expectReportOutput(await demo.cli(["report", "--workspace", demo.workspace, "--run", runId, "--json"]), runId);
-    documented("검증기 `summary` **pass**");
     assert.deepEqual(
       output.journal.lastRound.map((verifier) => [verifier.id, verifier.outcome]),
       [["summary", "pass"]],

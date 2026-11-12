@@ -54,6 +54,8 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | --- | --- | --- | --- |
 | Q-1 | PM | 비밀 검사 커밋 전 훅 설치가 자동 권한 판단에서 막혔다. 사용자가 직접 설치하거나 허용할지 | 훅이 생길 때까지 모든 커밋 전에 `node scripts/check-secrets.mjs --staged`를 직접 실행한다 |
 
+| Q-2 | PM | `git push origin main`이 거부됐다(이 PC의 SSH 키는 GitHub 계정 gangdonggil로 인증되는데 원격 `gangdonggilstudy/Codaryn`에 쓰기 권한이 없다). 저장소에 그 계정을 협업자로 추가할지, gangdonggilstudy용 키를 등록할지 | **해결(2026-11-12).** 사용자가 권한을 줬고 `b386166` push가 성공했다 |
+
 ### 지침 후보
 
 | 번호 | 출처 | 내용 | 상태 |

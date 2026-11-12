@@ -758,6 +758,12 @@ export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;
  * `invalid_config`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `run_not_found`,
  * `run_not_plan`, `plan_run_missing`, `invalid_run_record`, `plan_secrets_differ` (DR-28: checked
  * before anything is shown).
+ * U-14 (UXM-6, AXM-2, AXM-15): the view is what a person approves from. A plan run with a
+ * records-changed mark is still shown (exit code as before), with `plan.records_changed` first and
+ * `plan.cannot_apply` instead of the command to apply it. The model's summary, when there is one, is
+ * shown under `plan.summary_label` as the agent's description, not as what is approved. The text
+ * ends with `plan.digest_guarantee`. A plan run without a mark is shown as before, plus the summary
+ * and that line.
  */
 export const PLAN_STATUSES = ["pending", "applied"] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];
@@ -776,4 +782,19 @@ export interface PlanOutput {
   readonly inventoryLimitReached: boolean;
   /** The apply that used this plan, from applied.json; null while pending. */
   readonly appliedBy: { readonly runId: string; readonly at: string } | null;
+  /**
+   * U-14 (AXM-15): the summary the model wrote for this plan (ProposePlanArgs.summary). It is not in
+   * plan.json or the digest, so it is not what a person approves; it is shown as the agent's
+   * description. The one thing the view reads from the plan run's journal (DR-5 otherwise): the
+   * masked `argsJson` of the `propose_plan` call whose ok result names this plan's digest, masked
+   * again with the current secrets. Absent when it cannot be found, read or masked, and when the plan
+   * run has a records-changed mark (its journal may have been changed too).
+   */
+  readonly summary?: MaskedText;
+  /**
+   * U-14 (AXM-2, UXM-6): present and true when the plan run has a records-changed mark (fail closed,
+   * as the store's `hasRecordsChangedMark`). `codaryn apply` refuses such a plan
+   * (`plan_records_changed`). Absent otherwise, as for the other commands.
+   */
+  readonly recordsChanged?: true;
 }

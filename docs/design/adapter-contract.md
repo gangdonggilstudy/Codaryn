@@ -335,7 +335,9 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```ts
 changes(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
 
-interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[] }
+interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[]; applyRun?: ChangesApplyRun }
+// U-16 (UXM-4): 적용 실행일 때만. 그 실행이 적용한 계획 실행과 적용한 동작 수(실행 목록의 판정). 이동·폐기는 계획의 동작이라 files는 비어 있다. 결과가 아직 없으면 없다.
+interface ChangesApplyRun { planRunId: RunId; actions: number }
 interface ChangedFileView {
   path: MaskedText;                    // 기록의 경로
   created: boolean;                    // 실행이 만든 파일(원본 없음)

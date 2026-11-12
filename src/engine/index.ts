@@ -84,6 +84,8 @@ import type {
   ResolvedPlanAction,
   RunReason,
   RunTask,
+  StateCheckPhase,
+  StateFingerprint,
   TerminalRunStatus,
   ToolCall,
   ToolDescriptor,
@@ -161,6 +163,10 @@ const INTEGRITY_END_UNMASKABLE =
   "protected material changed by the end of the run, but the changed paths could not be masked and are not recorded";
 const INTEGRITY_END_LABEL = "run end";
 
+/** DR-38: the notice of a change to the run records, then the changed paths; and of a check not made. */
+const STATE_NOTICE_LEAD = "Codaryn's run records changed outside the run, so they are not trusted: ";
+const STATE_FAILED_NOTICE = "the run records could not be checked, so they are not trusted";
+
 /** Every fixed text the engine sends to a model or records. Tests mask these with the real gateway. */
 export const FIXED_MODEL_TEXTS: readonly string[] = [
   SYSTEM_PROMPT,
@@ -184,6 +190,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   INTEGRITY_END_LEAD,
   INTEGRITY_END_UNMASKABLE,
   INTEGRITY_END_LABEL,
+  STATE_NOTICE_LEAD,
+  STATE_FAILED_NOTICE,
 ];
 const MAX_TIMER_MS = 2_147_483_647;
 /** AC-D15: the call ids the engine keeps as given. */
@@ -219,6 +227,9 @@ const MASKING_FAILED: End = { status: "failed", reason: "model_error" };
 const CANCELLED: End = { status: "cancelled", reason: "cancelled" };
 const UNKNOWN_OUTCOME: End = { status: "needs-input", reason: "unknown_tool_outcome" };
 const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_changed" };
+/** DR-38: the run's records changed other than by the run, or could not be checked. */
+const STATE_CHANGED: End = { status: "failed", reason: "state_changed" };
+const codeUnitOrder = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const PLAN_PENDING: End = { status: "needs-input", reason: "plan_pending" };
 const AWAITING_REVIEW: End = { status: "needs-input", reason: "awaiting_review" };
 const NO_PLAN: End = { status: "failed", reason: "model_error" };
@@ -310,6 +321,12 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   let baseline: IntegrityManifest | null = null;
   /** `changed` of the latest recorded `integrity_checked`; undefined while none was recorded. */
   let protectedChanged: readonly MaskedText[] | undefined;
+  // DR-38: the state guard, the last tier-run fingerprint (each window chains from it) and the
+  // tier-state base of the run's start; the last recorded list goes into the result.
+  const stateGuard = deps.stateGuard;
+  let lastRunPrint: StateFingerprint | null = null;
+  let stateBase: StateFingerprint | null = null;
+  let stateChanged: readonly MaskedText[] | undefined;
   /**
    * W-1: what ran since the last integrity check was made: nothing, a model turn (with its tool
    * calls), or verifiers. Anything but "nothing" at the end of the run calls for one more check.
@@ -472,6 +489,64 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       if (notice !== null) notices.push(notice);
     }
     return end.status === "done" ? PROTECTED_CHANGED : end;
+  };
+
+  /**
+   * DR-38: one check of the state directory (EngineDeps.stateGuard). Tier "run" is compared with the
+   * last tier-run fingerprint, so a change between two windows is found too (the guard discounts
+   * the run's own writes); tier "state", when `both`, with the run's start. Recorded at run_start and
+   * run_end always, otherwise only when something changed or tier "state" was limited. A change, or
+   * a capture that cannot be made (fail closed), marks the runs and ends the run as
+   * failed/state_changed; a changed path that cannot be masked ends it as masking_failed.
+   */
+  const checkState = async (phase: StateCheckPhase, both: boolean, callId?: string): Promise<End | null> => {
+    if (stateGuard === undefined) return null;
+    let changedRaw: RawText[];
+    let limited = false;
+    try {
+      const nowRun = await stateGuard.capture("run");
+      changedRaw = [...stateGuard.compare(lastRunPrint ?? nowRun, nowRun).changed];
+      lastRunPrint = nowRun;
+      if (both) {
+        const nowState = await stateGuard.capture("state");
+        if (stateBase === null) stateBase = nowState;
+        const comparison = stateGuard.compare(stateBase, nowState);
+        changedRaw.push(...comparison.changed);
+        limited = comparison.limited;
+      }
+    } catch {
+      const notice = mask(STATE_FAILED_NOTICE);
+      if (notice !== null) notices.push(notice);
+      return STATE_CHANGED;
+    }
+    const sorted = [...new Set(changedRaw)].sort(codeUnitOrder);
+    const changed: MaskedText[] = [];
+    for (const path of sorted) {
+      const masked = mask(path);
+      if (masked === null) return MASKING_FAILED;
+      changed.push(masked);
+    }
+    if (phase === "run_start" || phase === "run_end" || changed.length > 0 || limited) {
+      await record({ type: "state_checked", phase, ...(callId === undefined ? {} : { callId }), changed, limited });
+      stateChanged = changed;
+    }
+    if (changed.length === 0) return null;
+    try {
+      await stateGuard.markRecordsChanged(changed);
+    } catch {
+      // The run still ends as state_changed; the record above names the paths.
+    }
+    const hidden = sorted.length - INTEGRITY_NOTICE_PATHS;
+    const more = hidden > 0 ? `${INTEGRITY_MORE_PATHS[0]}${hidden}${INTEGRITY_MORE_PATHS[1]}` : "";
+    const notice = mask(`${STATE_NOTICE_LEAD}${sorted.slice(0, INTEGRITY_NOTICE_PATHS).join(", ")}${more}`);
+    if (notice !== null) notices.push(notice);
+    return STATE_CHANGED;
+  };
+
+  /** DR-38: the run_end check; a change replaces the end the run would have had. */
+  const checkStateAtEnd = async (end: End): Promise<End> => {
+    if (stateGuard === undefined || end.reason === "state_changed") return end;
+    return (await checkState("run_end", true)) ?? end;
   };
 
   /** A check point: an interruption already in effect comes first and skips the check. */
@@ -817,7 +892,18 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     });
 
     toolCalls += 1;
+    // DR-38: a command's window. The decision is recorded before it and the result after it, so
+    // nothing the run writes falls inside; whatever changed the records there came from outside.
+    const command = name === "run_command";
+    if (command) {
+      const before = await checkState("before_command", false, call.id);
+      if (before !== null) return before;
+    }
     const outcome = await execute(effective, descriptor);
+    if (command) {
+      const after = await checkState("after_command", false, call.id);
+      if (after !== null) return after;
+    }
     if (isEnd(outcome)) return outcome;
 
     // Mask before anything is recorded or returned to the model.
@@ -1069,6 +1155,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     // EngineResult.verifiers then keeps the previous round, as when a limit ends the run here.
     const before = await checkPoint("before_verify");
     if (before !== null) return before;
+    const stateBefore = await checkState("before_verify", true);
+    if (stateBefore !== null) return stateBefore;
     verifierResults.length = 0;
     /** Whether each recorded evidence of this round was cut (T-6), by verifier id. */
     const evidenceCut = new Map<string, boolean>();
@@ -1120,6 +1208,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     // round untrusted, whatever the verifiers said, and is not repaired.
     const after = await checkPoint("after_verify");
     if (after !== null) return after;
+    const stateAfter = await checkState("after_verify", true);
+    if (stateAfter !== null) return stateAfter;
     if (integrity !== undefined) {
       // The capture itself may have outlasted the duration limit or met a cancel.
       const late = interrupted();
@@ -1178,6 +1268,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     // U-1: the baseline, after run_started and before the first model request.
     const unchecked = await checkPoint("run_start");
     if (unchecked !== null) return unchecked;
+    // DR-38: the state directory's fingerprints at the start.
+    const stateStart = await checkState("run_start", true);
+    if (stateStart !== null) return stateStart;
     for (;;) {
       const conversed = await converse(system);
       if (conversed !== null) return conversed;
@@ -1200,7 +1293,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
   try {
     // W-1: whatever ended the run, activity after the last integrity check is checked once more.
-    const end = await checkAtEnd(await runLoop());
+    // DR-38: then the run records, after everything else and before run_finished.
+    const end = await checkStateAtEnd(await checkAtEnd(await runLoop()));
     if (state.status === "created" && end.status !== "cancelled") state.transition("running");
     state.transition(end.status);
 
@@ -1229,6 +1323,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       notices,
       // U-2: only when at least one integrity_checked was recorded; the last one's list.
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
+      // DR-38: only when at least one state_checked was recorded; the last one's list.
+      ...(stateChanged !== undefined ? { stateChanged } : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),

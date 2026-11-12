@@ -6,7 +6,8 @@
  * `listRuns` reads only the state directory: per run the first journal record, result.json and
  * the revert record. It creates, writes and locks nothing, and never opens snapshots. Links are
  * not followed: a link in place of `.codaryn`, `runs` or a run directory could lead the list to
- * records of another place.
+ * records of another place. A run whose records fail a check is listed as `damaged` with its id
+ * only (N-16), and is never `latest`.
  */
 
 import { realpath as realpathCallback } from "node:fs";
@@ -22,10 +23,12 @@ import {
   REVERT_RECORD_FILE_NAME,
   CONTENT_HASH_PATTERN_SOURCE,
   RUN_EXIT_CODES,
+  RUN_TIMESTAMP_PATTERN_SOURCE,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   TASK_ID_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
+  toRunId,
 } from "../contracts/index.js";
 import type {
   ListRuns,
@@ -34,19 +37,17 @@ import type {
   RunListing,
   RunReason,
   RunReasonByStatus,
+  RunId,
   TerminalRunStatus,
 } from "../contracts/index.js";
 import { assertRunId, errorCode, runDir } from "./common.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
-/** Same rule as the store's run ids (common.ts). */
-const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TASK_ID = new RegExp(TASK_ID_PATTERN_SOURCE);
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 const PROVIDERS: readonly string[] = ["scripted", "anthropic"];
-/** ISO 8601 UTC as `Date.prototype.toISOString` writes it (the journal's `at`, the record's `at`). */
-const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
 /** The first journal record is read up to this many bytes. A longer first line is unreadable. */
 const FIRST_RECORD_MAX_BYTES = 64 * 1024;
 /** Largest revert record read. It holds a few short fields. */
@@ -69,7 +70,7 @@ export class RunListError extends Error {
   }
 }
 
-/** A record failed a check: the run is counted as unreadable. */
+/** A record failed a check: the run is listed as damaged. */
 class Unreadable extends Error {}
 
 function unreadable(): never {
@@ -82,14 +83,15 @@ function isObj(value: unknown): value is Obj {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** A run directory name (the contract's RunId rule). */
 export function isStoredRunId(name: string): boolean {
-  return RUN_ID_PATTERN.test(name) && !name.includes("..");
+  return toRunId(name) !== null;
 }
 
-function isoTime(value: unknown): string | null {
-  if (typeof value !== "string" || !ISO_UTC.test(value)) return null;
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+/** A timestamp as recorded, when it matches RUN_TIMESTAMP_PATTERN_SOURCE and Date.parse accepts it. */
+function timestamp(value: unknown): string | null {
+  if (typeof value !== "string" || !RUN_TIMESTAMP.test(value)) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
 }
 
 function sameFsPath(a: string, b: string): boolean {
@@ -132,18 +134,16 @@ function parseObject(text: string): Obj {
 }
 
 /**
- * The journal's first record: `startedAt` and `taskId`. Both are null while that record is still
- * being written (no line feed yet in a file that short). A complete first line that is not this
- * run's `run_started` makes the run unreadable.
+ * The journal's first record: `startedAt` and `taskId`. A first line that is not complete (still
+ * being written) or is not this run's `run_started` makes the run damaged.
  */
-async function firstRecord(file: string, runId: string): Promise<{ startedAt: string | null; taskId: string | null }> {
+async function firstRecord(file: string, runId: string): Promise<{ startedAt: string; taskId: string }> {
   if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") unreadable();
   const handle = await open(file, "r").catch(() => unreadable());
   let text: string;
-  let bytesRead: number;
   try {
     const buffer = Buffer.alloc(FIRST_RECORD_MAX_BYTES);
-    ({ bytesRead } = await handle.read(buffer, 0, buffer.length, 0));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     text = buffer.subarray(0, bytesRead).toString("utf8");
   } catch {
     return unreadable();
@@ -151,30 +151,27 @@ async function firstRecord(file: string, runId: string): Promise<{ startedAt: st
     await handle.close().catch(() => undefined);
   }
   const end = text.indexOf("\n");
-  if (end < 0) {
-    if (bytesRead < FIRST_RECORD_MAX_BYTES) return { startedAt: null, taskId: null };
-    return unreadable();
-  }
+  if (end < 0) unreadable();
   const record = parseObject(text.slice(0, end));
   if (record["runId"] !== runId || record["seq"] !== 1 || record["type"] !== "run_started" || record["schemaVersion"] !== 1) unreadable();
   if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
   const taskId = record["taskId"];
   if (typeof taskId !== "string" || !TASK_ID.test(taskId)) unreadable();
-  const startedAt = isoTime(record["at"]);
+  const startedAt = timestamp(record["at"]);
   if (startedAt === null) unreadable();
-  return { startedAt, taskId };
+  return { startedAt, taskId: taskId as string };
 }
 
 /** Status, reason and change count from result.json, or nulls when the run has none. */
 async function resultOf(
   file: string,
   runId: string,
-  taskId: string | null,
+  taskId: string,
 ): Promise<{ status: TerminalRunStatus | null; reason: RunReason | null; changes: number | null }> {
   if ((await checkedFile(file, MAX_REPORT_FILE_BYTES)) === "missing") return { status: null, reason: null, changes: null };
   const result = parseObject(await readText(file, MAX_REPORT_FILE_BYTES));
   if (result["schemaVersion"] !== 1 || result["kind"] !== "run" || result["runId"] !== runId) unreadable();
-  if (taskId !== null && result["taskId"] !== taskId) unreadable();
+  if (result["taskId"] !== taskId) unreadable();
   const status = result["status"];
   if (typeof status !== "string" || !(TERMINAL_RUN_STATUSES as readonly string[]).includes(status)) unreadable();
   const reason = result["reason"];
@@ -204,7 +201,7 @@ function parseRevertRecord(record: Obj, runId: string): RevertRecord {
   const count = (value: unknown): number =>
     typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : unreadable();
   if (record["schemaVersion"] !== 1 || record["kind"] !== "revert_record" || record["runId"] !== runId) unreadable();
-  const at = isoTime(record["at"]);
+  const at = timestamp(record["at"]);
   const status = record["status"];
   if (at === null || (status !== "complete" && status !== "partial")) unreadable();
   return { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted: count(record["reverted"]), skipped: count(record["skipped"]) };
@@ -215,43 +212,45 @@ async function revertRecordAt(file: string, runId: string): Promise<RevertRecord
   return parseRevertRecord(parseObject(await readText(file, REVERT_RECORD_MAX_BYTES)), runId);
 }
 
-async function readEntry(dir: string, runId: string): Promise<RunListEntry> {
+type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
+
+async function readEntry(dir: string, runId: RunId): Promise<CheckedRun> {
   const { startedAt, taskId } = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
   const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, taskId);
   const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
-  return { runId, startedAt, taskId, status, reason, changes, reverted: record === null ? null : { at: record.at, status: record.status } };
+  return {
+    state: "checked",
+    runId,
+    startedAt,
+    taskId,
+    status,
+    reason,
+    changes,
+    reverted: record === null ? null : { at: record.at, status: record.status },
+  };
 }
 
-/** Newest first: `startedAt` then run id, both descending; entries without `startedAt` last. */
-function newestFirst(a: RunListEntry, b: RunListEntry): number {
-  if (a.startedAt !== b.startedAt) {
-    if (a.startedAt === null) return 1;
-    if (b.startedAt === null) return -1;
-    return a.startedAt < b.startedAt ? 1 : -1;
-  }
+/** Newest first by start time, then by run id, both descending. */
+function newestFirst(a: CheckedRun, b: CheckedRun): number {
+  const difference = Date.parse(b.startedAt) - Date.parse(a.startedAt);
+  if (difference !== 0) return difference;
   return a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0;
 }
 
-/** Runs whose records passed every check, newest first, and the ids of those that did not (N-16). */
-export interface RunInspection {
-  readonly runs: readonly RunListEntry[];
-  /** Run directories (by valid run id name) that are links, not directories, or fail a record check. Sorted. */
-  readonly damaged: readonly string[];
-}
-
 /**
- * Every run of the workspace. `workspaceRoot` is the real absolute path of the root. A workspace
- * without `.codaryn/runs` has no runs. Rejects with RunListError when that directory exists but
- * cannot be listed, or when it (or `.codaryn`) is a link.
+ * See ListRuns: checked runs newest first, then damaged runs by run id, descending.
+ * `workspaceRoot` is the real absolute path of the root. A workspace without `.codaryn/runs` has
+ * no runs. Rejects with RunListError when that directory exists but cannot be listed, or when it
+ * (or `.codaryn`) is a link.
  */
-export async function inspectRuns(workspaceRoot: string): Promise<RunInspection> {
-  const runsDir = join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
+export const listRuns: ListRuns = async (request) => {
+  const runsDir = join(request.workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
   let real: string;
   try {
     real = await realpathNative(runsDir);
   } catch (error) {
     const code = errorCode(error);
-    if (code === "ENOENT" || code === "ENOTDIR") return { runs: [], damaged: [] };
+    if (code === "ENOENT" || code === "ENOTDIR") return { runs: [] };
     throw new RunListError("the run records directory cannot be read");
   }
   if (!sameFsPath(real, runsDir)) {
@@ -265,34 +264,32 @@ export async function inspectRuns(workspaceRoot: string): Promise<RunInspection>
     throw new RunListError("the run records directory cannot be read");
   }
 
-  const runs: RunListEntry[] = [];
-  const damaged: string[] = [];
+  const checked: CheckedRun[] = [];
+  const damaged: RunId[] = [];
   for (const entry of entries) {
-    if (!isStoredRunId(entry.name)) continue;
+    const runId = toRunId(entry.name);
+    if (runId === null) continue;
     if (!entry.isDirectory()) {
-      damaged.push(entry.name);
+      damaged.push(runId);
       continue;
     }
     try {
-      runs.push(await readEntry(join(runsDir, entry.name), entry.name));
+      checked.push(await readEntry(join(runsDir, entry.name), runId));
     } catch {
-      damaged.push(entry.name);
+      damaged.push(runId);
     }
   }
-  return { runs: runs.sort(newestFirst), damaged: damaged.sort().reverse() };
-}
-
-/** See ListRuns: the checked runs, and the damaged ones counted as `unreadable`. */
-export const listRuns: ListRuns = async (request) => {
-  const inspection = await inspectRuns(request.workspaceRoot);
-  const listing: RunListing = { runs: inspection.runs, unreadable: inspection.damaged.length };
+  damaged.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  const listing: RunListing = {
+    runs: [...checked.sort(newestFirst), ...damaged.map((runId) => ({ state: "damaged" as const, runId }))],
+  };
   return listing;
 };
 
-/** The id `--run latest` stands for: the first run `listRuns` returns, or null when there is none. */
-export async function latestRunId(workspaceRoot: string): Promise<string | null> {
+/** The id `--run latest` stands for: the first checked run `listRuns` returns, or null when there is none. */
+export async function latestRunId(workspaceRoot: string): Promise<RunId | null> {
   const listing = await listRuns({ workspaceRoot });
-  return listing.runs[0]?.runId ?? null;
+  return listing.runs.find((run) => run.state === "checked")?.runId ?? null;
 }
 
 /**

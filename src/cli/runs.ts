@@ -158,7 +158,6 @@ export async function runRuns(io: RunsEnvironment): Promise<CommandOutcome> {
     exitCode: RUNS_EXIT_CODES.listed,
     runs: listing.runs.slice(0, limit),
     omitted: Math.max(0, listing.runs.length - limit),
-    unreadable: listing.unreadable,
   };
   if (json) return { output, exitCode: output.exitCode };
   return { text: hideKeys(io.human.runsText(output), envValue(io.env, ANTHROPIC_API_KEY_ENV)), exitCode: output.exitCode };

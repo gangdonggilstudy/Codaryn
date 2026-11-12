@@ -9,14 +9,13 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import type { EngineResult, HumanOutput, RunsOutput } from "../../../src/contracts/index.js";
+import type { EngineResult, HumanOutput, RunListEntry, RunsOutput } from "../../../src/contracts/index.js";
 import { LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_MAX_LIMIT } from "../../../src/contracts/index.js";
 import { runCli } from "../../../src/cli/run.js";
 import { parseRunsArgs, resolveRunRef, runRuns } from "../../../src/cli/runs.js";
 import {
   RevertRunError,
   RunListError,
-  inspectRuns,
   latestRunId,
   listRuns,
   readRevertRecord,
@@ -74,6 +73,13 @@ async function tree(dir: string): Promise<Record<string, string>> {
 }
 
 const runsDir = (work: string): string => path.join(work, ".codaryn", "runs");
+
+type Checked = Extract<RunListEntry, { state: "checked" }>;
+
+function checked(entry: RunListEntry | undefined): Checked {
+  assert.ok(entry !== undefined && entry.state === "checked", "a checked run");
+  return entry;
+}
 
 /** Hand-written records of one run: the journal's first line and, unless `result` is null, result.json. */
 async function writeRun(
@@ -180,7 +186,7 @@ describe("revertRun dryRun (N-7)", () => {
 describe("listRuns (N-7, N-16)", () => {
   test("a workspace without records has no runs, and nothing is created", async () => {
     const work = await tempDir();
-    assert.deepEqual(await listRuns({ workspaceRoot: work }), { runs: [], unreadable: 0 });
+    assert.deepEqual(await listRuns({ workspaceRoot: work }), { runs: [] });
     assert.equal(await latestRunId(work), null);
     assert.equal(await exists(path.join(work, ".codaryn")), false);
   });
@@ -192,19 +198,20 @@ describe("listRuns (N-7, N-16)", () => {
     const secondId = (second.output as EngineResult).runId;
 
     const listing = await listRuns({ workspaceRoot: work });
-    assert.equal(listing.unreadable, 0);
     assert.deepEqual(
-      listing.runs.map((run) => run.runId),
-      [secondId, first.runId],
+      listing.runs.map((run) => [run.state, run.runId]),
+      [
+        ["checked", secondId],
+        ["checked", first.runId],
+      ],
     );
-    const older = listing.runs[1];
-    assert.ok(older !== undefined);
+    const older = checked(listing.runs[1]);
     assert.equal(older.taskId, "k1-task");
     assert.equal(older.status, "done");
     assert.equal(older.reason, "verified");
     assert.equal(older.changes, 2);
     assert.equal(older.reverted, null);
-    assert.match(older.startedAt ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.match(older.startedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     assert.equal(await latestRunId(work), secondId);
 
     await writeRevertRecord(work, {
@@ -217,36 +224,57 @@ describe("listRuns (N-7, N-16)", () => {
       skipped: 0,
     });
     const marked = await listRuns({ workspaceRoot: work });
-    assert.deepEqual(marked.runs[1]?.reverted, { at: "2026-11-12T05:06:07.000Z", status: "complete" });
+    assert.deepEqual(checked(marked.runs[1]).reverted, { at: "2026-11-12T05:06:07.000Z", status: "complete" });
   });
 
-  test("runs of the same second keep the order of their start time; a run still writing its first record comes last", async () => {
+  test("runs of the same second keep the order of their start time, milliseconds or not", async () => {
     const work = await tempDir();
     await writeRun(work, "20261112T030405Z-aaaaaaaa", { at: "2026-11-12T03:04:05.900Z" });
     await writeRun(work, "20261112T030405Z-bbbbbbbb", { at: "2026-11-12T03:04:05.100Z" });
-    await writeRun(work, "20261112T030406Z-cccccccc", { firstLine: '{"seq":1,"at":"2026-11-12T03:04', result: null });
+    await writeRun(work, "20261112T030405Z-cccccccc", { at: "2026-11-12T03:04:05Z" });
     const listing = await listRuns({ workspaceRoot: work });
     assert.deepEqual(
-      listing.runs.map((run) => [run.runId, run.startedAt]),
+      listing.runs.map((run) => [run.runId, checked(run).startedAt]),
       [
         ["20261112T030405Z-aaaaaaaa", "2026-11-12T03:04:05.900Z"],
         ["20261112T030405Z-bbbbbbbb", "2026-11-12T03:04:05.100Z"],
-        ["20261112T030406Z-cccccccc", null],
+        ["20261112T030405Z-cccccccc", "2026-11-12T03:04:05Z"],
       ],
     );
-    const incomplete = listing.runs[2];
-    assert.deepEqual(incomplete, {
-      runId: "20261112T030406Z-cccccccc",
-      startedAt: null,
-      taskId: null,
-      status: null,
-      reason: null,
-      changes: null,
+    assert.deepEqual(checked(listing.runs[0]), {
+      state: "checked",
+      runId: "20261112T030405Z-aaaaaaaa",
+      startedAt: "2026-11-12T03:04:05.900Z",
+      taskId: "hand-task",
+      status: "done",
+      reason: "verified",
+      changes: 0,
       reverted: null,
     });
   });
 
-  test("records that fail a check are damaged: counted, not listed, never chosen as latest", async () => {
+  test("a run without result.json is checked with null status; one still writing its first record is damaged", async () => {
+    const work = await tempDir();
+    await writeRun(work, "20261112T030405Z-aaaaaaaa", { result: null });
+    await writeRun(work, "20261112T030406Z-bbbbbbbb", { firstLine: '{"seq":1,"at":"2026-11-12T03:04', result: null });
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.deepEqual(listing.runs, [
+      {
+        state: "checked",
+        runId: "20261112T030405Z-aaaaaaaa",
+        startedAt: "2026-11-12T03:04:05.000Z",
+        taskId: "hand-task",
+        status: null,
+        reason: null,
+        changes: null,
+        reverted: null,
+      },
+      { state: "damaged", runId: "20261112T030406Z-bbbbbbbb" },
+    ]);
+    assert.equal(await latestRunId(work), "20261112T030405Z-aaaaaaaa");
+  });
+
+  test("records that fail a check are listed as damaged with their id only and never chosen as latest", async () => {
     const work = await tempDir();
     const at = (second: number): string => `2026-11-12T03:04:${String(second).padStart(2, "0")}.000Z`;
     await writeRun(work, "20261112T030400Z-00000000", { at: at(0) });
@@ -270,13 +298,20 @@ describe("listRuns (N-7, N-16)", () => {
     await mkdir(path.join(runsDir(work), "not a run"));
     await writeFile(path.join(runsDir(work), ".gitkeep"), "", "utf8");
 
-    const inspection = await inspectRuns(work);
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.deepEqual(listing.runs[0], checked(listing.runs[0]));
+    assert.equal(listing.runs[0]?.runId, "20261112T030400Z-00000000");
+    const damaged = listing.runs.slice(1);
     assert.deepEqual(
-      inspection.runs.map((run) => run.runId),
-      ["20261112T030400Z-00000000"],
+      damaged.map((run) => run.state),
+      new Array(10).fill("damaged"),
     );
-    assert.equal(inspection.damaged.length, 10);
-    assert.deepEqual(await listRuns({ workspaceRoot: work }), { runs: inspection.runs, unreadable: 10 });
+    assert.deepEqual(
+      damaged.map((run) => run.runId),
+      [...damaged.map((run) => run.runId)].sort().reverse(),
+      "damaged runs come after the checked ones, by run id descending",
+    );
+    for (const run of damaged) assert.deepEqual(Object.keys(run).sort(), ["runId", "state"], "a damaged run carries its id only");
     assert.equal(await latestRunId(work), "20261112T030400Z-00000000");
   });
 
@@ -286,7 +321,7 @@ describe("listRuns (N-7, N-16)", () => {
     await writeRun(elsewhere, "20261112T030405Z-0a1b2c3d");
     await mkdir(runsDir(work), { recursive: true });
     await symlink(path.join(runsDir(elsewhere), "20261112T030405Z-0a1b2c3d"), path.join(runsDir(work), "20261112T030405Z-0a1b2c3d"), "junction");
-    assert.deepEqual(await listRuns({ workspaceRoot: work }), { runs: [], unreadable: 1 });
+    assert.deepEqual(await listRuns({ workspaceRoot: work }), { runs: [{ state: "damaged", runId: "20261112T030405Z-0a1b2c3d" }] });
 
     const other = await tempDir();
     await mkdir(path.join(other, ".codaryn"));
@@ -360,7 +395,7 @@ describe("codaryn runs (N-7)", () => {
     }
   });
 
-  test("--json prints RunsOutput with the newest runs, the omitted and damaged counts; the workspace defaults to cwd", async () => {
+  test("--json prints RunsOutput in list order with the omitted count; the workspace defaults to cwd", async () => {
     const work = await tempDir();
     await writeRun(work, "20261112T030401Z-00000001", { at: "2026-11-12T03:04:01.000Z" });
     await writeRun(work, "20261112T030402Z-00000002", { at: "2026-11-12T03:04:02.000Z" });
@@ -372,11 +407,10 @@ describe("codaryn runs (N-7)", () => {
     assert.equal(output.kind, "runs");
     assert.equal(output.status, "listed");
     assert.deepEqual(
-      output.runs.map((run) => run.runId),
-      ["20261112T030402Z-00000002"],
+      output.runs.map((run) => [run.state, run.runId]),
+      [["checked", "20261112T030402Z-00000002"]],
     );
-    assert.equal(output.omitted, 1);
-    assert.equal(output.unreadable, 1);
+    assert.equal(output.omitted, 2, "one checked and one damaged run are beyond --limit");
   });
 
   test("the text comes from HumanOutput.runsText with key-shaped text hidden; nothing is created", async () => {
@@ -385,7 +419,7 @@ describe("codaryn runs (N-7)", () => {
     const outcome = await runRuns({ argv: ["runs", "--workspace", work], cwd: path.dirname(work), env: {}, human: stubHuman(seen) });
     assert.ok("text" in outcome);
     assert.equal(outcome.text, "runs 0 [key]\n");
-    assert.deepEqual(seen[0], { schemaVersion: 1, kind: "runs", status: "listed", exitCode: 0, runs: [], omitted: 0, unreadable: 0 });
+    assert.deepEqual(seen[0], { schemaVersion: 1, kind: "runs", status: "listed", exitCode: 0, runs: [], omitted: 0 });
     assert.equal(await exists(path.join(work, ".codaryn")), false);
   });
 

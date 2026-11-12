@@ -20,6 +20,7 @@ import {
   JOURNAL_FILE_NAME,
   MAX_EVIDENCE_BYTES,
   MAX_REPORT_FILE_BYTES,
+  MODEL_PROVIDER_NAMES,
   PLAN_ITEM_PROBLEMS,
   REPORT_EXIT_CODES,
   RESULT_FILE_NAME,
@@ -106,13 +107,13 @@ const realpathNative = promisify(realpathCallback.native);
 // isReasonOfStatus); the report keeps no list of its own.
 
 // G-G (integration case n07), as DR-16: the report keeps no list of its own where the contract has
-// one. Verifier kinds are the contract's VERIFIER_KINDS (data_checks and inventory included). The
-// contract has types only for providers and outcomes, so these two lists are checked against
-// those types at compile time: a value added to the type breaks the build here.
-const PROVIDERS = ["scripted", "anthropic"] as const satisfies readonly ModelProviderName[];
+// one. Verifier kinds are the contract's VERIFIER_KINDS (data_checks and inventory included) and
+// providers its MODEL_PROVIDER_NAMES (SP-1). The contract has a type only for outcomes, so that list
+// is checked against it at compile time: a value added to the type breaks the build here.
+const PROVIDERS = MODEL_PROVIDER_NAMES;
 const VERIFIER_OUTCOMES = ["pass", "fail", "inconclusive"] as const satisfies readonly VerifierOutcome[];
 type Missing<All, Listed> = [Exclude<All, Listed>] extends [never] ? true : false;
-const listsComplete: [Missing<ModelProviderName, (typeof PROVIDERS)[number]>, Missing<VerifierOutcome, (typeof VERIFIER_OUTCOMES)[number]>] = [true, true];
+const listsComplete: [Missing<VerifierOutcome, (typeof VERIFIER_OUTCOMES)[number]>] = [true];
 void listsComplete;
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 

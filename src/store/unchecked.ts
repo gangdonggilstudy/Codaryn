@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { StateUncheckedSince } from "../contracts/index.js";
 import { assertRunId } from "./common.js";
-import { isStoredRunId } from "./runs.js";
+import { isStoredRunId, runIdSecond } from "./runs.js";
 
 /**
  * Whether the journal at `file` cannot be read (missing, not a plain file, too large, empty, a line
@@ -42,10 +42,22 @@ async function uncheckedIn(file: string): Promise<boolean> {
 }
 
 /**
+ * U-33 (R-56 R56-L1, PM Q-2): whether the run `name` counts as one since the plan run. A run id names
+ * the second its run started (runIdSecond), and within a second its random part says nothing of
+ * the order, so every run of the plan run's second or later counts, before it or after it. A run id
+ * that names no second counts, and every run does when the plan run's id names none (fail closed).
+ */
+function since(name: string, planSecond: number | null): boolean {
+  if (!isStoredRunId(name)) return false;
+  const second = runIdSecond(name);
+  return planSecond === null || second === null || second >= planSecond;
+}
+
+/**
  * See StateUncheckedSince. The runs counted are the plan run and every entry of the runs folder
- * named as a run id that sorts after it (later runs and apply runs, the apply asking among them);
- * other names are not runs. An entry that is not a plain directory, and a missing plan run, count
- * as unchecked (fail closed). Reads only.
+ * named as a run id of the plan run's second or later (later runs and apply runs, the apply asking
+ * among them; see `since`); other names are not runs. An entry that is not a plain directory, and a
+ * missing plan run, count as unchecked (fail closed). Reads only.
  */
 export const stateUncheckedSince: StateUncheckedSince = async ({ workspaceRoot, planRunId }) => {
   assertRunId(planRunId);
@@ -57,8 +69,8 @@ export const stateUncheckedSince: StateUncheckedSince = async ({ workspaceRoot, 
     return true;
   }
   if (!names.includes(planRunId)) return true;
-  const since = names.filter((name) => isStoredRunId(name) && name >= planRunId).sort();
-  for (const name of since) {
+  const planSecond = runIdSecond(planRunId);
+  for (const name of names.filter((entry) => since(entry, planSecond)).sort()) {
     const dir = join(runsDir, name);
     try {
       if (!(await lstat(dir)).isDirectory()) return true;

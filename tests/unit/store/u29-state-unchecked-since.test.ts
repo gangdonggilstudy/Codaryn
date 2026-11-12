@@ -3,6 +3,8 @@
  * apply run whose id sorts after it, recorded a limited state check (`state_checked` with
  * `limited: true`) or has a journal that cannot be read (fail closed). Runs before the plan run do
  * not count. Reads only. Fake values only.
+ * U-33 (R-56 R56-L1, PM Q-2): "since" is by the second a run id names; every run of the plan run's
+ * second counts, whatever its random part (fail closed), and so does a run id that names no second.
  */
 
 import assert from "node:assert/strict";
@@ -77,7 +79,7 @@ describe("U-29: whether a run since the plan run could not check the state direc
     assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false, "a damaged run before the plan run");
   });
 
-  test("names in the runs folder that are not run ids (toRunId) are not runs; any run id that sorts after counts", async () => {
+  test("names in the runs folder that are not run ids (toRunId) are not runs; any run id that names no second counts", async () => {
     const root = await workspace();
     await mkdir(state(root, "runs", ".notes"));
     await writeFile(state(root, "runs", "x..y"), "x", "utf8");
@@ -85,6 +87,10 @@ describe("U-29: whether a run since the plan run could not check the state direc
     // As listRuns has it, a folder named like a run id is a run (a damaged one here) and sorts by its name.
     await mkdir(state(root, "runs", "notes"));
     assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true);
+    // U-33: one that sorts before the plan run counts too: when it started cannot be told (fail closed).
+    const before = await workspace();
+    await mkdir(state(before, "runs", "0notes"));
+    assert.equal(await ask({ workspaceRoot: before, planRunId: PLAN }), true);
   });
 
   test("the plan run missing, or no runs folder: true (fail closed)", async () => {
@@ -112,5 +118,55 @@ describe("U-29: whether a run since the plan run could not check the state direc
 
   test("a plan run id that is not a run id is refused (the apply counts a refusal as unchecked)", async () => {
     await assert.rejects(ask({ workspaceRoot: await workspace(), planRunId: "../x" }));
+  });
+});
+
+describe("U-33 (R-56 R56-L1, PM Q-2): every run of the plan run's second counts, whatever its random part", () => {
+  /** A run with complete checks, or a limited last one, started in `second` of 2026-01-01T03:00. */
+  async function addRun(root: string, runId: string, limited: boolean): Promise<void> {
+    const journal = createJournal({ workspaceRoot: root, runId, clock: { now: () => at(PLAN) } });
+    await journal.append(STARTED);
+    await journal.append(checked(false, "run_start"));
+    await journal.append(checked(limited));
+    await journal.close();
+  }
+
+  test("a limited run of the same second whose id sorts before the plan run's: true", async () => {
+    const root = await workspace();
+    await addRun(root, "20260101T030000Z-00000000", true);
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true);
+  });
+
+  test("a limited run of the same second whose id sorts after it: true, as before", async () => {
+    const root = await workspace();
+    await addRun(root, "20260101T030000Z-ffffffff", true);
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true);
+  });
+
+  test("a limited run of the second before: false, as before; a damaged one of that second: false", async () => {
+    const root = await workspace();
+    await addRun(root, "20260101T025959Z-ffffffff", true);
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false);
+    await mkdir(state(root, "runs", "20260101T025959Z-fffffffe"));
+    assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), false);
+  });
+
+  test("a damaged run of the same second (no journal), whatever its random part: true", async () => {
+    for (const runId of ["20260101T030000Z-00000000", "20260101T030000Z-ffffffff"]) {
+      const root = await workspace();
+      await mkdir(state(root, "runs", runId));
+      assert.equal(await ask({ workspaceRoot: root, planRunId: PLAN }), true, runId);
+    }
+  });
+
+  test("a plan run id that names no second: every run counts (fail closed)", async () => {
+    const root = await workspace(BEFORE);
+    const plan = "plan-of-hand";
+    const journal = createJournal({ workspaceRoot: root, runId: plan, clock: { now: () => at(PLAN) } });
+    await journal.append(STARTED);
+    await journal.append(checked(false));
+    await journal.close();
+    assert.equal(await ask({ workspaceRoot: root, planRunId: plan }), true);
+    assert.equal(await ask({ workspaceRoot: await workspace(BEFORE), planRunId: PLAN }), false, "with a run id that names one, the run before does not count");
   });
 });

@@ -526,6 +526,13 @@ export const FIXED_MESSAGES = {
   "doctor.lock.held": {},
   "doctor.lock.stale": {},
   "doctor.lock.unreadable": {},
+  // DR-27 (b), PM notice: `.codaryn/lock.json.reclaim` is left in a state the store never clears
+  // (still being written, as an exclusive create on a volume without hard links leaves it when the
+  // attempt ends in between; not understood; or its owner still runs). While it stays, a lock left
+  // by an ended process is not reclaimed; the text says to remove it when no Codaryn runs here.
+  "doctor.lock.reclaim_left": {},
+  // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
+  // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 

@@ -12,7 +12,7 @@ import { describe, test } from "node:test";
 import type { EngineResult } from "../../../src/contracts/index.js";
 import { UNKNOWN_TOOL_NAME, createCodarynApp } from "../../../src/app/index.js";
 import type { ChangesOutput, RunEvent, RunHandle, RunOutcome, StartOutcome } from "../../../src/app/index.js";
-import { FAKE_SECRET, SECRET_ENV, WRITE_NOTES, appEnvironment, exists, readJournal, runDir, setupRun, taskRequest } from "./support.js";
+import { FAKE_SECRET, SECRET_ENV, WRITE_NOTES, appEnvironment, exists, readJournal, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
 function handleOf(started: StartOutcome): RunHandle {
   assert.equal(started.ok, true, JSON.stringify(started));
@@ -135,7 +135,7 @@ describe("DR-7: changes", () => {
 
   test("gives the original and the current text of each changed file, masked with the current secrets", async () => {
     const { base, runId, app } = await changedRun();
-    const view = output(await app.changes({ run: taskRequest(base), runId }));
+    const view = output(await app.changes({ settings: taskForm(base), runId }));
     assert.deepEqual([view.kind, view.runId, view.masking], ["changes", runId, "current_secrets"]);
     assert.equal(JSON.stringify(view).includes(FAKE_SECRET), false, "only masked text leaves the app layer");
 
@@ -153,7 +153,7 @@ describe("DR-7: changes", () => {
     await rm(path.join(base, "work", "README.md"));
     const runs = await readdir(path.join(base, "work", ".codaryn", "runs"));
 
-    const view = output(await app.changes({ run: taskRequest(base), runId }));
+    const view = output(await app.changes({ settings: taskForm(base), runId }));
     const [readme, notes] = view.files;
     assert.deepEqual([readme?.state, readme?.after, readme?.before === null], ["missing", null, false]);
     assert.deepEqual([notes?.state, notes?.after], ["changed_since_run", "# Notes\nedited later\n"]);
@@ -165,11 +165,11 @@ describe("DR-7: changes", () => {
   test("needs the settings to resolve now; otherwise it is the run's error and nothing is shown", async () => {
     const { base, runId } = await changedRun();
     const unset = createCodarynApp(await appEnvironment(base, { env: {} }));
-    const refused = await unset.changes({ run: taskRequest(base), runId });
+    const refused = await unset.changes({ settings: taskForm(base), runId });
     assert.deepEqual(refused.ok ? null : refused.error.code, "secret_env_missing");
 
     const { app } = await changedRun();
-    const unknown = await app.changes({ run: taskRequest(base), runId: "20261112T000000Z-00000000" });
+    const unknown = await app.changes({ settings: taskForm(base), runId: "20261112T000000Z-00000000" });
     assert.deepEqual(unknown.ok ? null : unknown.error.code, "run_not_found");
   });
 });

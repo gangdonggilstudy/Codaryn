@@ -18,6 +18,9 @@ import {
   RunListError,
   inspectRun,
   latestRunId,
+  loadPlan,
+  markPlanApplied,
+  readRunOriginals,
   listRuns,
   readRevertRecord,
   revertRun,
@@ -246,12 +249,14 @@ describe("listRuns (N-7, N-16)", () => {
     assert.deepEqual(checked(listing.runs[0]), {
       state: "checked",
       runId: "20260102T030405Z-aaaaaaaa",
+      kind: "run",
       startedAt: "2026-01-02T03:04:05.900Z",
       taskId: "hand-task",
       status: "done",
       reason: "verified",
       changes: 0,
       reverted: null,
+      revertRecordDamaged: false,
     });
   });
 
@@ -264,12 +269,14 @@ describe("listRuns (N-7, N-16)", () => {
       {
         state: "checked",
         runId: "20260102T030405Z-aaaaaaaa",
+        kind: "run",
         startedAt: "2026-01-02T03:04:05.000Z",
         taskId: "hand-task",
         status: null,
         reason: null,
         changes: null,
         reverted: null,
+        revertRecordDamaged: false,
       },
       { state: "damaged", runId: "20260102T030406Z-bbbbbbbb" },
     ]);
@@ -358,6 +365,8 @@ describe("listRuns (N-7, N-16)", () => {
       ],
     );
     assert.equal(checked(listing.runs[0]).reverted, null);
+    assert.equal(checked(listing.runs[0]).revertRecordDamaged, true, "shown apart (bacf1a0)");
+    assert.equal(checked(listing.runs[1]).revertRecordDamaged, false);
     assert.equal(checked(listing.runs[0]).status, "done");
     assert.equal(await latestRunId(work), "20260102T030402Z-00000002");
     // N-22 contract: read rejects, and revert goes on without revertedBefore (N-A's revert).
@@ -389,6 +398,42 @@ describe("listRuns (N-7, N-16)", () => {
       writeRevertRecord(work, { schemaVersion: 1, kind: "revert_record", runId: "20260102T030401Z-00000001", at: "2026-02-30T00:00:00Z", status: "complete", reverted: 0, skipped: 0 }),
       TypeError,
     );
+  });
+
+  test("DR-16: every reason the contract gives a status is accepted, the G-A ones included; others stay damaged", async () => {
+    const work = await tempDir();
+    const cases: [string, string, string, number][] = [
+      ["20260102T030401Z-00000001", "needs-input", "plan_pending", 3],
+      ["20260102T030402Z-00000002", "needs-input", "awaiting_review", 3],
+      ["20260102T030403Z-00000003", "failed", "plan_stale", 1],
+      ["20260102T030404Z-00000004", "failed", "apply_incomplete", 1],
+      ["20260102T030405Z-00000005", "done", "plan_pending", 0],
+    ];
+    for (const [runId, status, reason, exitCode] of cases) {
+      await writeRun(work, runId, { at: `2026-01-02T03:04:0${runId.slice(-1)}.000Z`, result: { status, reason, exitCode } as never });
+    }
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.deepEqual(
+      listing.runs.map((run) => [run.runId, run.state]),
+      [
+        ["20260102T030404Z-00000004", "checked"],
+        ["20260102T030403Z-00000003", "checked"],
+        ["20260102T030402Z-00000002", "checked"],
+        ["20260102T030401Z-00000001", "checked"],
+        ["20260102T030405Z-00000005", "damaged"],
+      ],
+    );
+  });
+
+  test("N-D 5: a run's change count is its distinct changed paths, as the end-of-run summary counts them", async () => {
+    const work = await tempDir();
+    const change = (path: string, created: boolean, from: string | null, to: string): Record<string, unknown> => ({ path, created, previousHash: from, newHash: to });
+    await writeRun(work, "20260102T030401Z-00000001", {
+      at: "2026-01-02T03:04:01.000Z",
+      result: { changes: [change("summary.md", true, null, "a".repeat(64)), change("summary.md", false, "a".repeat(64), "b".repeat(64)), change("notes.md", false, "c".repeat(64), "d".repeat(64))] } as never,
+    });
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.equal(checked(listing.runs[0]).changes, 2);
   });
 
   test("records that fail a check are listed as damaged with their id only and never chosen as latest", async () => {
@@ -489,6 +534,36 @@ describe("inspectRun (N-26)", () => {
     const listing = await listRuns({ workspaceRoot: work });
     for (const run of listing.runs) assert.equal(await inspectRun(work, run.runId), run.state, run.runId);
     assert.equal(await inspectRun(await tempDir(), "20260102T030401Z-00000001"), "missing", "no state directory at all");
+  });
+});
+
+describe("run ids are matched by exact name (N-27 a)", () => {
+  test("a run id that differs from the directory name only in case names no run: no revert, no originals, no plan", async () => {
+    const { work } = await changingRun();
+    const notes = path.join(work, "notes.txt");
+    const notesText = await readFile(notes, "utf8");
+    // R-7's input: a damaged run directory whose records name the lower-case id.
+    const upper = "20991231T235957Z-0c0ffee0";
+    const lower = upper.toLowerCase();
+    const dir = path.join(runsDir(work), upper);
+    await mkdir(path.join(dir, "snapshots"), { recursive: true });
+    const records = [
+      { seq: 1, at: "2099-12-31T23:59:57.000Z", runId: lower, type: "run_started", schemaVersion: 1, taskId: "forged", workflow: "x", provider: "scripted", limits: { maxModelTurns: 1, maxToolCalls: 1, maxTotalTokens: null, maxDurationMs: 1 } },
+      { seq: 2, at: "2099-12-31T23:59:57.100Z", runId: lower, type: "file_changed", callId: "c", path: "notes.txt", previousHash: null, newHash: sha(notesText), created: true },
+    ];
+    await writeFile(path.join(dir, "journal.jsonl"), records.map((record) => `${JSON.stringify(record)}\n`).join(""), "utf8");
+    await writeFile(path.join(dir, "snapshots", "index.json"), JSON.stringify({ schemaVersion: 1, entries: [{ path: "notes.txt", existed: false }] }), "utf8");
+
+    assert.equal(await inspectRun(work, upper), "damaged");
+    assert.equal(await inspectRun(work, lower), "missing", "the lower-case id names no directory");
+    for (const dryRun of [true, false]) {
+      await assert.rejects(revertRun({ workspaceRoot: work, runId: lower, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "run_not_found");
+    }
+    assert.equal(await readFile(notes, "utf8"), notesText, "the user's file is not deleted");
+    await assert.rejects(readRunOriginals({ workspaceRoot: work, runId: lower }), (error: unknown) => error instanceof RevertRunError && error.code === "run_not_found");
+    assert.deepEqual(await loadPlan({ workspaceRoot: work, runId: lower }), { ok: false, code: "run_not_found" });
+    await assert.rejects(readRevertRecord(work, lower));
+    await assert.rejects(markPlanApplied({ workspaceRoot: work, planRunId: lower, applyRunId: "20260102T030500Z-11111111", at: "2026-01-02T03:05:00Z" }));
   });
 });
 

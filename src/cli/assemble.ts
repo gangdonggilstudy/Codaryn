@@ -12,15 +12,17 @@ import {
   RevertRunError,
   acquireLock,
   createChangeRecorder,
+  createPlanRecorder,
   createJournal,
   releaseLock,
   writeResult,
 } from "../store/index.js";
-import type { LockInfo } from "../store/index.js";
+import type { LockInfo, RunInspection } from "../store/index.js";
 import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
+  ApprovalChannel,
   CliErrorCode,
   Clock,
   EngineDeps,
@@ -79,6 +81,13 @@ export interface RevertCommandInput {
   readonly clock: Clock;
   /** N-7: decide and report, change nothing; no lock and no revert record. */
   readonly dryRun?: boolean;
+  /**
+   * DR-25: the person's consent to move files back unsafely in this revert, or absent/null for
+   * none. It comes only from a person: the CLI's argument or terminal answer (`runId` null: the run
+   * this command resolves to), or the app layer's adapter path after the person agreed on screen
+   * (`runId`: the run the person saw, which must be the one resolved). Not with `dryRun`.
+   */
+  readonly consent?: { readonly channel: ApprovalChannel; readonly runId: string | null } | null;
 }
 
 export type RevertCommandOutcome =
@@ -114,6 +123,11 @@ export interface RevertCommandOptions {
    * nothing is refused.
    */
   readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+  /**
+   * N-27 (a): the store's `inspectRun`. An explicit id with no entry of exactly that name is
+   * run_not_found, and without `isDamaged` it judges damage too.
+   */
+  readonly inspect?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
 }
 
 /** N-26: `listRuns` as the damage check, until the store's own function is passed. */
@@ -162,7 +176,10 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
         : "the run's journal cannot be read; nothing was changed";
     return { ok: false, code, message };
   };
-  return async ({ workspace, runId: requested, lockId, clock, dryRun = false }) => {
+  return async ({ workspace, runId: requested, lockId, clock, dryRun = false, consent = null }) => {
+    if (dryRun && consent !== null) {
+      return { ok: false, code: "invalid_arguments", message: "a dry run moves nothing and takes no consent to unsafe moves; nothing was read or changed" };
+    }
     if (dryRun && options.dryRun === undefined) {
       return { ok: false, code: "internal_error", message: "--dry-run is not connected in this build; nothing was read or changed" };
     }
@@ -173,9 +190,17 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       return { ok: false, code: "workspace_not_found", message: "the workspace is not an existing directory" };
     }
     // N-7, N-18: `latest` is resolved first; an ambiguous one stops here.
-    const resolved = await resolveRunReference(workspaceRoot, requested, { exists, ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }) });
+    const resolved = await resolveRunReference(workspaceRoot, requested, {
+      exists,
+      ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }),
+      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    });
     if (!resolved.ok) return resolved;
     const runId = resolved.runId;
+    // DR-25: a consent that names another run counts as none; it is refused before anything changes.
+    if (consent !== null && consent.runId !== null && consent.runId !== runId) {
+      return { ok: false, code: "invalid_arguments", message: "the consent to unsafe moves names another run than the one reverted; nothing was changed" };
+    }
     if (resolved.latest !== null) {
       try {
         options.announceLatest?.(resolved.latest);
@@ -188,8 +213,10 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       return { ok: false, code: "run_not_found", message: "the workspace has no journal for that run id; nothing was changed" };
     }
     // N-26: the records of a damaged run are not trusted to decide what to put back.
+    const inspect = options.inspect;
     const damageCheck =
       options.isDamaged ??
+      (inspect === undefined ? undefined : async (root: string, id: string) => (await inspect(root, id)) === "damaged") ??
       (options.listRuns === undefined ? undefined : (root: string, id: string) => damagedByListing(options.listRuns as ListRuns, root, id));
     if (damageCheck !== undefined) {
       let damaged: boolean;
@@ -227,7 +254,11 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
     try {
-      const outcome = await revertRun({ workspaceRoot, runId });
+      const outcome = await revertRun({
+        workspaceRoot,
+        runId,
+        ...(consent === null ? {} : { unsafeMoveConsent: { channel: consent.channel, runId } }),
+      });
       // N-7, N-22: the revert record, written while the lock is held; best effort.
       try {
         await options.writeRecord?.(workspaceRoot, {
@@ -238,6 +269,9 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
           status: revertStatus(outcome),
           reverted: outcome.reverted.length,
           skipped: outcome.skipped.length,
+          // DR-25: how the person consented, and how many files went back unsafely under it.
+          unsafeMoveConsent: consent === null ? null : consent.channel,
+          unsafeMoves: outcome.reverted.filter((file) => file.unsafe === true).length,
         });
       } catch {
         // The record never changes the outcome.
@@ -273,7 +307,9 @@ export const assembleRun: Assemble = async (input) => {
     const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
     // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
     const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
-    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });
+    // G-A, G-F: propose_plan stores plan.json for this run (runs/<runId>/plan.json); the other tools never use it.
+    const planRecorder = createPlanRecorder({ workspaceRoot, runId });
+    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     const journal = createJournal({ workspaceRoot, runId, clock });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep

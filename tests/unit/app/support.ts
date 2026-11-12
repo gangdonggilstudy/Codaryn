@@ -11,7 +11,7 @@ import path from "node:path";
 import { after } from "node:test";
 import type { JournalRecord } from "../../../src/contracts/index.js";
 import { readVarsFileSync } from "../../../src/app/index.js";
-import type { AppEnvironment, StartRunRequest } from "../../../src/app/index.js";
+import type { AppEnvironment, StartRunRequest, TaskForm } from "../../../src/app/index.js";
 
 /** Registered as a secret through SECRET_ENV. Not key-shaped. */
 export const FAKE_SECRET = "fake-secret-APP-VALUE-0031";
@@ -124,6 +124,11 @@ export function taskRequest(base: string, overrides: Partial<StartRunRequest> = 
     cancelFile: null,
     ...overrides,
   };
+}
+
+/** DR-17: the task form of the same task file (plan, apply, review, changes). */
+export function taskForm(base: string, overrides: Partial<TaskForm> = {}): TaskForm {
+  return { input: { kind: "task", taskPath: path.join(base, "task.json") }, configPath: null, varsFile: null, profile: null, ...overrides };
 }
 
 export function runDir(base: string, runId: string): string {

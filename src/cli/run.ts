@@ -313,6 +313,20 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     if (problem !== null) return error(code, `the path given by ${option} ${problem}`);
   }
 
+  // U-3, review R-6 low 2: the quick form names its workspace on the command line, so the install
+  // directory is refused before any file is read; otherwise a missing config would be reported
+  // first. A workspace that cannot be resolved here is judged with the task later.
+  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
+  if (args.input.kind === "quick" && io.installDir !== undefined && io.installDir !== null) {
+    const relation = await relate(path.resolve(io.cwd, args.input.workspace), io.installDir);
+    if (relation === "same" || relation === "inside" || relation === "contains") {
+      return error(
+        "workspace_is_install_dir",
+        "the workspace is the CLI's install directory, lies inside it or contains it; use a separate candidate directory",
+      );
+    }
+  }
+
   // 2. The env file. S-4: values it newly sets are registered as secrets later.
   let envPath: string | null = null;
   let envSecrets: readonly string[] = [];
@@ -448,7 +462,6 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
   if (!(await io.isDirectory(task.workspaceRoot))) {
     return error("workspace_not_found", "workspaceRoot is not an existing directory");
   }
-  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
   // U-3: the running CLI must not work on its own installation, by real paths.
   if (io.installDir !== undefined) {
     const relation = io.installDir === null ? "unknown" : await relate(task.workspaceRoot, io.installDir);

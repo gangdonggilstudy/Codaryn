@@ -210,3 +210,80 @@ describe("DR-21: the real engine records the consent", () => {
     if (result.reason === "verified") assert.equal(result.applied.some((item) => item.unsafe === true), false);
   });
 });
+
+describe("DR-1, DR-21: the app layer's adapter path (PM decision on A-4 question 1)", () => {
+  test("the approval is recorded as adapter, never cli-flag, and no terminal question is asked", async () => {
+    const { base, planned, digest } = await planRun();
+    let asked = 0;
+    const outcome = await runApply({
+      ...io(base, ["apply", "--task", "task.json", "--run", planned.runId, "--digest", digest.slice(0, 12), "--quiet"]),
+      adapter: { unsafeMoveConsent: null },
+      ask: async () => {
+        asked += 1;
+        return "y";
+      },
+    });
+    assert.ok("output" in outcome && outcome.output.kind === "apply", JSON.stringify(outcome));
+    const result = outcome.output as ApplyResult;
+    const first = JSON.parse((await readFile(path.join(base, "ws", result.journalPath), "utf8")).split("\n")[0] ?? "{}") as Record<string, unknown>;
+    assert.deepEqual([first["approval"], first["unsafeMoveConsent"]], ["adapter", null]);
+    assert.equal(asked, 0);
+  });
+
+  test("the adapter still names the plan by --digest; without it nothing is applied and nobody is asked", async () => {
+    const { base, planned } = await planRun();
+    const engine = standIn();
+    let asked = 0;
+    const outcome = await runApply({
+      ...io(base, ["apply", "--task", "task.json", "--run", planned.runId, "--quiet"]),
+      adapter: { unsafeMoveConsent: null },
+      applyPlan: engine.applyPlan,
+      ask: async () => {
+        asked += 1;
+        return "y";
+      },
+    });
+    assert.ok("output" in outcome && outcome.output.kind === "error" && outcome.output.code === "plan_not_approved", JSON.stringify(outcome));
+    assert.deepEqual([engine.calls.length, asked], [0, 0]);
+  });
+
+  test("the person's consent from the screen reaches the engine as given; consent_required is not asked about again", async () => {
+    const { base, planned, digest } = await planRun();
+    const argv = ["apply", "--task", "task.json", "--run", planned.runId, "--digest", digest.slice(0, 12), "--quiet"];
+    const consented = standIn();
+    const ok = await runApply({ ...io(base, argv), adapter: { unsafeMoveConsent: { channel: "adapter", digest } }, applyPlan: consented.applyPlan });
+    assert.ok("output" in ok && ok.output.kind === "apply" && ok.exitCode === 0, JSON.stringify(ok));
+    assert.deepEqual(consented.calls[0]?.approval, "adapter");
+    assert.deepEqual(consented.calls[0]?.unsafeMoveConsent, { channel: "adapter", digest });
+    const without = standIn();
+    let asked = 0;
+    const stopped = await runApply({
+      ...io(base, argv),
+      adapter: { unsafeMoveConsent: null },
+      applyPlan: without.applyPlan,
+      ask: async () => {
+        asked += 1;
+        return "y";
+      },
+    });
+    assert.ok("output" in stopped && (stopped.output as ApplyResult).reason === "consent_required");
+    assert.deepEqual([without.calls.length, asked], [1, 0]);
+  });
+
+  test("a consent for another plan, of another channel, or with --allow-unsafe-move is refused before anything runs", async () => {
+    const { base, planned, digest } = await planRun();
+    const argv = ["apply", "--task", "task.json", "--run", planned.runId, "--digest", digest.slice(0, 12), "--quiet"];
+    const other = `${digest.startsWith("0") ? "1" : "0"}${digest.slice(1)}`;
+    const cases = [
+      { argv, consent: { channel: "adapter" as const, digest: other } },
+      { argv, consent: { channel: "cli-flag" as const, digest } },
+      { argv: [...argv, UNSAFE_MOVE_CONSENT_ARGUMENT], consent: null },
+    ];
+    for (const item of cases) {
+      const engine = standIn();
+      const outcome = await runApply({ ...io(base, item.argv), adapter: { unsafeMoveConsent: item.consent as never }, applyPlan: engine.applyPlan });
+      assert.ok("output" in outcome && outcome.output.kind === "error" && outcome.output.code === "invalid_arguments", JSON.stringify(outcome));
+      assert.equal(engine.calls.length, 0);
+    }
+  });
+});

@@ -23,6 +23,7 @@ import {
   REVIEW_EXIT_CODES,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
+  UNSAFE_MOVE_CONSENT_ARGUMENT,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -96,8 +97,27 @@ export interface PlanCommandEnvironment extends PrepareEnvironment {
   readonly announceLatest?: (entry: CheckedRun) => void;
 }
 
+/**
+ * DR-1, DR-21 (PM decision on the app layer's question A-4 1): how the app layer applies for an
+ * adapter (the GUI) after a person approved the plan on its screen. Only the app layer sets it;
+ * the CLI's own process never does.
+ * - The approval is recorded as `adapter`, never `cli-flag`. `--digest` must still be given and
+ *   match: the approval names one plan.
+ * - `unsafeMoveConsent` is the person's consent to this apply's unsafe moves, or null. The caller
+ *   passes only what the person gave as input on screen for this one apply; never a value from a
+ *   task, config, profile, plan, model or an earlier apply. Its channel must be `adapter` and its
+ *   digest the full digest of the plan applied; anything else is refused before anything runs.
+ * - No terminal question is asked and `--allow-unsafe-move` is refused: the person's input comes
+ *   through the adapter only.
+ */
+export interface AdapterApply {
+  readonly unsafeMoveConsent: (UnsafeMoveConsent & { readonly channel: "adapter" }) | null;
+}
+
 export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
   readonly applyPlan?: ApplyPlan;
+  /** Set by the app layer only (AdapterApply). Absent: the CLI's channels (`--digest`, terminal). */
+  readonly adapter?: AdapterApply;
   /**
    * Shows the question on stderr and returns the line typed, or null. Present only when stdin and
    * stderr are terminals; without it an apply needs `--digest`.
@@ -291,17 +311,32 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
   }
 
-  // Approval (6.4 1): the digest's first characters, or a [y/N] question at a terminal.
+  // DR-1, DR-21: an adapter's apply (AdapterApply) has the adapter's channel only: no terminal
+  // question, no consent argument, and a consent only from the person's input on its screen.
+  const adapter = io.adapter;
+  const ask = adapter === undefined ? io.ask : undefined;
+  if (adapter !== undefined) {
+    if (args.allowUnsafeMove) {
+      return cliError("invalid_arguments", `an adapter's apply takes the person's consent in its request, not ${UNSAFE_MOVE_CONSENT_ARGUMENT}; nothing was moved`);
+    }
+    const consent = adapter.unsafeMoveConsent;
+    if (consent !== null && (consent.channel !== "adapter" || consent.digest !== shown.digest)) {
+      return cliError("invalid_arguments", "the consent to unsafe moves is not the adapter's consent for this plan's digest; nothing was moved");
+    }
+  }
+
+  // Approval (6.4 1): the digest's first characters (cli-flag, or adapter for the app layer), or a
+  // [y/N] question at a terminal.
   let approval: ApprovalChannel;
   if (args.digest !== null) {
     if (!shown.digest.startsWith(args.digest)) {
       return cliError("plan_not_approved", "--digest does not match the plan's digest; nothing was moved. `codaryn plan` shows it");
     }
-    approval = "cli-flag";
-  } else if (io.ask !== undefined) {
+    approval = adapter === undefined ? "cli-flag" : "adapter";
+  } else if (ask !== undefined) {
     const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
     const question = [renderPlan(shown.output, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
-    const answer = (await io.ask(question))?.trim().toLowerCase() ?? "";
+    const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
     approval = "cli-tty";
   } else {
@@ -386,18 +421,20 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   // DR-21: the person's consent to unsafe moves holds for one apply and comes only from the person:
   // the CLI's own argument, or, at a terminal, the answer after an apply stopped as
   // consent_required (nothing was moved, so the plan is not applied yet and a second apply run
-  // makes the moves). No task, config, profile, plan or model gives it.
-  const flagConsent: UnsafeMoveConsent | null = args.allowUnsafeMove ? { channel: "cli-flag", digest: shown.digest } : null;
-  const first = await applyOnce(flagConsent);
+  // makes the moves), or the adapter's request (AdapterApply). No task, config, profile, plan or
+  // model gives it.
+  const givenConsent: UnsafeMoveConsent | null =
+    adapter !== undefined ? adapter.unsafeMoveConsent : args.allowUnsafeMove ? { channel: "cli-flag", digest: shown.digest } : null;
+  const first = await applyOnce(givenConsent);
   if (!first.ok) return first.outcome;
   let final = first;
-  if (first.result.reason === "consent_required" && flagConsent === null && io.ask !== undefined) {
+  if (first.result.reason === "consent_required" && givenConsent === null && ask !== undefined) {
     const count = first.unsafeMoves;
     const question =
       `${count} move${count === 1 ? "" : "s"} of this plan can only be made without the guarantee that nothing at the ` +
       `destination is replaced (the drive has no hard links). Nothing was moved. Apply again and make ` +
       `${count === 1 ? "it" : "them"} anyway, for this apply only? [y/N] `;
-    const answer = (await io.ask(question))?.trim().toLowerCase() ?? "";
+    const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (YES.has(answer)) {
       const second = await applyOnce({ channel: "cli-tty", digest: shown.digest });
       if (!second.ok) return second.outcome;

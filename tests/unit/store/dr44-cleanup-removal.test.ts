@@ -86,10 +86,10 @@ describe("DR-44 (라), R-34 L-3: a removal that fails after the move aside", () 
     const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
     let calls = 0;
     const outcome = await applyCleanupWith({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } }, {
-      remove: async (dir: string) => {
+      remove: async (path: string) => {
         calls += 1;
-        if ((await readdir(dir)).includes("result.json") && (await readFile(join(dir, "result.json"), "utf8")).includes(FULL)) throw busy();
-        await rm(dir, { recursive: true, force: true });
+        if (path.endsWith("result.json") && (await readFile(path, "utf8")).includes(FULL)) throw busy();
+        await rm(path, { recursive: true, force: true });
       },
       retryDelayMs: 1,
     });
@@ -125,9 +125,9 @@ describe("DR-44 (라), R-34 L-3: a removal that fails after the move aside", () 
 describe("DR-44 (라), second half: what a failed removal left is shown by the next plan and can be removed", () => {
   const busy = (): Error => Object.assign(new Error("resource busy"), { code: "EBUSY" });
   /** A removal that always fails for the folder holding FULL's records. */
-  const failingForFull = async (dir: string): Promise<void> => {
-    if ((await readdir(dir)).includes("result.json") && (await readFile(join(dir, "result.json"), "utf8")).includes(FULL)) throw busy();
-    await rm(dir, { recursive: true, force: true });
+  const failingForFull = async (path: string): Promise<void> => {
+    if (path.endsWith("result.json") && (await readFile(path, "utf8")).includes(FULL)) throw busy();
+    await rm(path, { recursive: true, force: true });
   };
   const leaveFullBehind = async (root: string): Promise<void> => {
     const selection = { runs: { runIds: [FULL] } };
@@ -169,9 +169,9 @@ describe("DR-44 (라), second half: what a failed removal left is shown by the n
     const root = await workspace();
     const selection = { runs: { runIds: [PLAN, APPLY] } };
     const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
-    const failingForApply = async (dir: string): Promise<void> => {
-      if ((await readdir(dir)).includes("result.json") && (await readFile(join(dir, "result.json"), "utf8")).includes(`"kind":"apply"`)) throw busy();
-      await rm(dir, { recursive: true, force: true });
+    const failingForApply = async (path: string): Promise<void> => {
+      if (path.endsWith("result.json") && (await readFile(path, "utf8")).includes(`"kind":"apply"`)) throw busy();
+      await rm(path, { recursive: true, force: true });
     };
     const outcome = await applyCleanupWith({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } }, { remove: failingForApply, retryDelayMs: 1 });
     assert.deepEqual(outcome.ok ? [outcome.removed, outcome.kept] : null, [[], [

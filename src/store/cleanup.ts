@@ -15,7 +15,7 @@
 
 import { randomBytes } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { appendFile, lstat, readdir, rename, rm } from "node:fs/promises";
+import { appendFile, lstat, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -58,6 +58,21 @@ import { isStoredRunId, listRuns, runIdSecond } from "./runs.js";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LEFTOVER = new RegExp(CLEANUP_LEFTOVER_PATTERN_SOURCE);
 const LEFTOVER_PREFIX = "cleanup-";
+/**
+ * DR-44 P-2 (R-34b L-2): the file applyCleanup writes into a folder it moves aside. Only a folder of
+ * the leftover name that holds it is a leftover; it is removed last, so what a failed removal leaves
+ * still has it.
+ */
+const LEFTOVER_MARKER = ".codaryn-cleanup";
+
+/** Whether `dir` holds the leftover marker as a regular file. */
+async function hasMarker(dir: string): Promise<boolean> {
+  try {
+    return (await lstat(join(dir, LEFTOVER_MARKER))).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /** A plain directory's files and bytes and the metadata fingerprint of everything below it. */
 interface Tree {
@@ -199,6 +214,8 @@ async function scan(workspaceRoot: string): Promise<Scan> {
     stateNames = [];
   }
   for (const name of stateNames.filter((entry) => LEFTOVER.test(entry)).sort()) {
+    // P-2: a folder of that name without cleanup's marker is not cleanup's; it is never an item.
+    if (!(await hasMarker(join(stateDir, name)))) continue;
     const tree = await measure(join(stateDir, name));
     if (tree !== null) leftovers.push({ leftoverId: name.slice(LEFTOVER_PREFIX.length), tree });
   }
@@ -300,14 +317,18 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
       blocked.push({ target: "run", runId: id, code });
       continue;
     }
-    // DR-44 (a)-(c): the contract's one rule for a run's records.
-    const warnings = cleanupRecordWarnings({
-      kind: run.summary.kind,
-      changes: run.changes,
-      lastRevert: run.lastRevert,
-      hasDiscarded: run.discardedTree !== null,
-      recordsChanged: run.summary.recordsChanged,
-    });
+    // DR-44 (a)-(c): the contract's one rule for a run's records. P-1 (R-34b L-1): records that cannot
+    // be checked (damaged) may hold changes that were never reverted, so they are treated as not reverted.
+    const warnings =
+      run.summary.kind === null
+        ? ordered(["not_reverted", ...(run.summary.recordsChanged ? (["records_changed"] as const) : [])])
+        : cleanupRecordWarnings({
+            kind: run.summary.kind,
+            changes: run.changes,
+            lastRevert: run.lastRevert,
+            hasDiscarded: run.discardedTree !== null,
+            recordsChanged: run.summary.recordsChanged,
+          });
     items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings });
     prints.push((run.records as Tree).print);
     facts.push({ kind: run.summary.kind, planRunId: run.planRunId });
@@ -378,17 +399,35 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
   const { workspaceRoot, selection, now, confirmation } = request;
   const remove = operations.remove ?? ((dir: string) => rm(dir, { recursive: true, force: true }));
   const retryDelayMs = operations.retryDelayMs ?? 100;
-  /** True when `dir` is gone in the end. */
-  const removeAside = async (dir: string): Promise<boolean> => {
+  /** True when `path` is gone in the end (REMOVE_ATTEMPTS tries). */
+  const removeTried = async (path: string): Promise<boolean> => {
     for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt += 1) {
       try {
-        await remove(dir);
+        await remove(path);
         return true;
       } catch {
         if (attempt < REMOVE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       }
     }
     return false;
+  };
+  /**
+   * True when the folder `dir` moved aside is gone in the end. Its contents go first, the marker
+   * after them and the folder last, so what is left of a failed removal still has the marker.
+   */
+  const removeAside = async (dir: string): Promise<boolean> => {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return false;
+    }
+    let whole = true;
+    for (const name of names) {
+      if (name !== LEFTOVER_MARKER && !(await removeTried(join(dir, name)))) whole = false;
+    }
+    if (!whole) return false;
+    return (await removeTried(join(dir, LEFTOVER_MARKER))) && (await removeTried(dir));
   };
   const stateDir = await ensureStateDir(workspaceRoot);
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
@@ -435,7 +474,7 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       if (item.target === "leftover") {
         const name = `${LEFTOVER_PREFIX}${item.leftoverId}`;
         dir = join(stateDir, name);
-        exact = LEFTOVER.test(name) && (await hasExactEntry(stateDir, name));
+        exact = LEFTOVER.test(name) && (await hasExactEntry(stateDir, name)) && (await hasMarker(dir));
       } else {
         const parent = join(stateDir, item.target === "run" ? RUNS_DIR_NAME : DISCARDED_DIR_NAME);
         dir = join(parent, item.runId);
@@ -457,6 +496,14 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
         try {
           await rename(dir, aside);
         } catch {
+          keepApply("io_error");
+          continue;
+        }
+        // P-2: mark it as cleanup's before anything of it is removed; without the mark it goes back.
+        try {
+          await writeFile(join(aside, LEFTOVER_MARKER), `${JSON.stringify({ schemaVersion: 1, kind: "cleanup_leftover", target: item.target, at: new Date().toISOString() })}\n`, { encoding: "utf8", flag: "wx" });
+        } catch {
+          await rename(aside, dir).catch(() => undefined);
           keepApply("io_error");
           continue;
         }

@@ -3,10 +3,16 @@
  * `assembleRun` (src/cli/assemble.ts:126-188), with one difference (DR-4): the command runner
  * takes its parent environment from the run's environment copy, not from `process.env`.
  *
- * Why: the CLI loads `--vars-file` into `process.env`, so allowed variables (PATH, TEMP, ...) set by
- * that file reach the child commands. The app layer loads the file into a copy instead, so it must
- * hand that copy to the runner to keep the same result; in a process shared with other code it also
- * keeps the host's own variables out of the children.
+ * Why: the CLI loads `--vars-file` into `process.env`, and the runner passes the variables on its
+ * allowlist (CHILD_ENV_ALLOWLIST) from there to the child commands. The app layer loads the file
+ * into a copy instead, so it hands that copy to the runner to keep the same result; in a process
+ * shared with other code it also keeps the host's own variables out of the children.
+ *
+ * What actually reaches a child from the variables file (R-4 I-1): only an allowlisted variable
+ * whose value is shorter than 8 characters. A value of 8 or more characters that the file newly
+ * sets is registered as a secret (S-4), and the runner leaves out every variable whose value holds
+ * a registered secret (T-1, `envValueFreeOfSecrets`). So a long PATH or TEMP from the file does not
+ * reach the child, in the CLI and in the app layer alike.
  *
  * Interim: migration step 2 moves `assembleRun` here and removes the CLI's copy.
  */

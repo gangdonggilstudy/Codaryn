@@ -300,10 +300,14 @@ describe("listRuns (N-7, N-16)", () => {
     assert.equal(await readFile(notes, "utf8"), notesText, "nothing was reverted or deleted");
   });
 
-  test("N-23(b): the run id's time and the first record's time must be the same second; other id forms are damaged", async () => {
+  test("N-23(b): the first record's time may not be before the run id's second nor later than the tolerance after it; other id forms are damaged", async () => {
     const work = await tempDir();
     await writeRun(work, "20260102T030405Z-aaaaaaaa", { at: "2026-01-02T03:04:05.999Z" });
-    await writeRun(work, "20260102T030405Z-bbbbbbbb", { at: "2026-01-02T03:04:06.000Z" });
+    // The id and the first record are two clock readings with the lock and workspace setup in
+    // between, so a real run can cross into the next second (seen in a loaded full test run).
+    await writeRun(work, "20260102T030405Z-bbbbbbbb", { at: "2026-01-02T03:04:06.020Z" });
+    await writeRun(work, "20260102T030405Z-eeeeeeee", { at: "2026-01-02T03:14:04.999Z" });
+    await writeRun(work, "20260102T030405Z-ffffffff", { at: "2026-01-02T03:14:05.000Z" });
     await writeRun(work, "20260102T030405Z-cccccccc", { at: "2026-01-02T03:04:04.999Z" });
     await writeRun(work, "hand-made-run", { at: "2026-01-02T03:04:05.000Z" });
     await writeRun(work, "20261340T030405Z-dddddddd", { at: "2026-01-02T03:04:05.000Z" });
@@ -311,11 +315,13 @@ describe("listRuns (N-7, N-16)", () => {
     assert.deepEqual(
       listing.runs.map((run) => [run.runId, run.state]),
       [
+        ["20260102T030405Z-eeeeeeee", "checked"],
+        ["20260102T030405Z-bbbbbbbb", "checked"],
         ["20260102T030405Z-aaaaaaaa", "checked"],
         ["hand-made-run", "damaged"],
         ["20261340T030405Z-dddddddd", "damaged"],
+        ["20260102T030405Z-ffffffff", "damaged"],
         ["20260102T030405Z-cccccccc", "damaged"],
-        ["20260102T030405Z-bbbbbbbb", "damaged"],
       ],
     );
   });

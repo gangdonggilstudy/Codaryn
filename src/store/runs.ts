@@ -247,14 +247,21 @@ export function runIdSecond(runId: string): number | null {
 }
 
 /**
- * N-23(b): the start time must agree with the run id, which the CLI makes from the same clock
- * reading (same second), and must not lie in the future. A run that fails either was written by
- * something else than a run, so it is damaged and never `latest`.
+ * How long after the run id's second the first record may be written. The CLI reads the clock for
+ * the run id, then sets up the workspace, the lock and the model before the engine writes
+ * `run_started` with a second reading, so the two can fall into different seconds.
+ */
+export const RUN_START_TOLERANCE_MS = 10 * 60 * 1000;
+
+/**
+ * N-23(b): the start time must agree with the run id (not before its second, at most
+ * RUN_START_TOLERANCE_MS after it) and must not lie in the future. A run that fails either was
+ * not written by a run as recorded, so it is damaged and never `latest`.
  */
 function checkStartTime(runId: string, startedAt: string, now: number): void {
   const second = runIdSecond(runId);
   const started = Date.parse(startedAt);
-  if (second === null || Math.floor(started / 1000) * 1000 !== second || started > now) unreadable();
+  if (second === null || started < second || started >= second + RUN_START_TOLERANCE_MS || started > now) unreadable();
 }
 
 async function readEntry(dir: string, runId: RunId, now: number): Promise<CheckedRun> {

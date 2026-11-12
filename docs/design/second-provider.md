@@ -255,7 +255,9 @@ export type ModelOutcome =
 - 호출 id(DR-31 (e))
   - OpenAI의 도구 호출은 `output`의 `{ "type": "function_call", "id", "call_id", "name", "arguments" }` 항목이다. 결과는 다음 요청 `input`에 `{ "type": "function_call_output", "call_id", "output" }`로 보낸다. 짝은 `id`가 아니라 `call_id`로 맞춘다 [확인].
   - `call_id`의 형식·길이는 [미확인]이다. 불투명한 문자열로 다룬다.
-  - 어댑터는 `call_id`를 `ToolCall.id`로 넘긴다. 엔진이 기록할 때 AC-D15 규칙(`CALL_ID_PATTERN_SOURCE`, 64자)에 맞지 않으면 안전한 id로 바꾼다. 어댑터는 **실행 중 메모리**에 "기록 id → 원래 `call_id`" 대응을 두고, 다음 요청의 `function_call_output`에는 원래 `call_id`를 싣는다. 대응은 기록하지 않는다.
+  - 어댑터는 `call_id`를 `ToolCall.id`로 넘긴다.
+  - AC-D15 규칙(`CALL_ID_PATTERN_SOURCE`, 64자, 비밀 없음, 다른 id가 쓰지 않음)을 통과한 `call_id`는 Anthropic의 tool_use id처럼 **그대로 기록한다**(DR-35 (c), R-22 L-3). 비밀이 아니며 기록과 요청을 맞춰 보는 데 쓴다.
+  - 통과하지 못하면 엔진이 안전한 id(`codaryn-call-<n>`)로 바꿔 기록한다. 어댑터는 **실행 중 메모리**에 "기록 id → 원래 `call_id`" 대응을 두고, 다음 요청의 `function_call_output`에는 원래 `call_id`를 싣는다. 이 대응은 기록하지 않는다.
   - 한 응답에 여러 호출이 올 수 있다(`parallel_tool_calls` 기본 true) [확인]. 엔진은 한 응답의 여러 호출을 이미 처리하므로 기본값을 그대로 둔다.
 
 ### 4.10 대화 형식, 멈춤, 추론 항목(어댑터 안)
@@ -396,7 +398,7 @@ export type ModelOutcome =
 | SP-U08 | openai 요청 | `POST …/v1/responses`, `Authorization: Bearer`, `instructions`·`input` 항목, 평평한 도구 정의와 `strict: false`, 도구 결과의 `function_call_output`(원래 `call_id`), `max_output_tokens`, `store: false`, 직전 응답의 `output` 항목(추론 항목 포함)을 그대로 다시 보냄 |
 | SP-U09 | openai 응답 | `completed`와 `function_call` 유무로 `final`·`tool_calls`, `incomplete`의 `max_output_tokens`는 `length`, `content_filter`와 `refusal`은 거절, `failed`, 사용량(상세를 더하지 않음), 할당량 소진(type 하나와 code 넷, 예전 code), 429의 `rate_limited`, `Retry-After` 최소 대기 |
 | SP-U10 | 도구 정의 부분 집합 | 모든 도구의 `inputSchema`가 계약의 공통 부분 집합 안이고, 이름이 `^[a-zA-Z0-9_-]{1,64}$` 안이다 |
-| SP-U11 | 호출 id | 규칙 밖 `call_id`는 기록에 대체 id, 다음 요청에는 원래 `call_id`. 대응과 추론 항목은 기록·결과에 없다(기록에는 추론 항목 개수만) |
+| SP-U11 | 호출 id | 규칙을 통과한 `call_id`는 그대로 기록(DR-35 (c)). 규칙 밖 `call_id`는 기록에 대체 id, 다음 요청에는 원래 `call_id`. 대응과 추론 항목은 기록·결과에 없다(기록에는 추론 항목 개수만) |
 
 통합(가짜 서버, "[모의 API·실제 API 아님]")
 | ID | 사례 | 기대 |
@@ -447,7 +449,7 @@ PM이 공식 문서로 확인했다. 기준은 [사실 확인 문서](second-pro
 | SP-D12 | 문구의 키 변수 이름은 닫힌 매개변수 `keyEnv` | 채택(DR-31 (i)) |
 | SP-D13 | `init`의 제공자 질문은 UX 담당 | 채택(DR-31 (i)) |
 | (DR-31 (b)) | 특정 모델(Codex 계열 등)을 전제로 삼지 않는다. 모델의 코드 기본값 없음(C-3) | 채택 |
-| (DR-31 (e)) | 호출 짝은 `call_id`. 기록은 AC-D15의 안전한 id, 원래 `call_id`는 실행 중 메모리 대응 | 채택 |
+| (DR-31 (e)) | 호출 짝은 `call_id`. AC-D15를 통과한 원래 `call_id`는 Anthropic과 같이 그대로 기록하고, 통과하지 못한 것만 엔진의 대체 id로 기록하며 원래 값은 실행 중 메모리 대응으로 둔다 | 채택, 문구 맞춤(DR-35 (c)) |
 | (DR-31 (g)) | 키는 `OPENAI_API_KEY`로만 받고 길이·문자로 검증하지 않음 | 채택 |
 | (DR-31 (h)) | 정상 끝·도구 호출 끝은 `function_call` 유무, `incomplete` 이유와 거부를 중립 결과로 | 채택 |
 

@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { REPLACED_CALL_ID_PREFIX, TOOL_DEFINITIONS, WORKFLOW_TOOL_DEFINITIONS } from "../../../../src/contracts/index.js";
-import type { MaskedText, ModelOutcome, ModelRequest, ResolvedApiSettings, ToolName, WorkflowToolName } from "../../../../src/contracts/index.js";
+import type { MaskedText, ModelMessage, ModelOutcome, ModelRequest, ResolvedApiSettings, ToolName, WorkflowToolName } from "../../../../src/contracts/index.js";
 import { runTask } from "../../../../src/engine/index.js";
-import { OPENAI_QUOTA_ERROR_CODES, createOpenAIProvider, listOpenAIModels } from "../../../../src/model/openai/index.js";
+import { MAX_KEPT_OUTPUT_BYTES, OPENAI_QUOTA_ERROR_CODES, createOpenAIProvider, listOpenAIModels } from "../../../../src/model/openai/index.js";
 import { FakeVerifiers, harness } from "../../engine/fakes.js";
 
 const FAKE_KEY = "codaryn-fake-openai-key-0123456789-not-a-credential";
@@ -410,5 +410,101 @@ describe("SP-U10 (names): every tool name fits the safe function name pattern", 
     for (const name of [...Object.keys(TOOL_DEFINITIONS), ...Object.keys(WORKFLOW_TOOL_DEFINITIONS)]) {
       assert.match(name, /^[a-zA-Z0-9_-]{1,64}$/, name);
     }
+  });
+});
+
+describe("R-22 L-1, DR-35 (a): 401 and 403 quote nothing of the provider's message", () => {
+  // The reviewer's reproduction: a partial echo of the key (its start, stars, its last 4 characters).
+  const echo = `Incorrect API key provided: ${FAKE_KEY.slice(0, 12)}${"*".repeat(30)}${FAKE_KEY.slice(-4)}.`;
+
+  test("a request: a fixed phrase and the request id only", async () => {
+    for (const status of [401, 403]) {
+      const { outcome } = await once([apiError(status, { type: "invalid_request_error", code: "invalid_api_key", message: echo }, { "x-request-id": "req_401a" })]);
+      const text = failure(outcome).message;
+      assert.equal(text, `HTTP ${status}: the key or its access was refused; the provider's message is not shown (request req_401a)`);
+      assert.equal(text.includes(FAKE_KEY.slice(-4)), false, "no end of the key");
+      assert.deepEqual([failure(outcome).kind, failure(outcome).httpStatus], ["auth_failed", status]);
+    }
+  });
+
+  test("the model listing too", async () => {
+    const outcome = await listOpenAIModels(SETTINGS, fake([apiError(401, { message: echo })]).deps);
+    assert.deepEqual(outcome.ok ? null : [outcome.kind, outcome.message], ["auth_failed", "HTTP 401: the key or its access was refused; the provider's message is not shown"]);
+  });
+});
+
+describe("R-22 L-2, DR-35 (b): a quota 429 with a long body is still told apart", () => {
+  const long = (bytes: number) => "quota detail ".repeat(Math.ceil(bytes / 13)).slice(0, bytes);
+
+  test("a body over 4096 bytes and within 64 KiB: quota_exhausted, not retried", async () => {
+    for (const error of [{ type: "insufficient_quota" }, { type: "invalid_request_error", code: "project_spend_limit_exceeded" }]) {
+      const { outcome, sent, delays } = await once([apiError(429, { ...error, message: long(20_000) }), completed([message("ok")])]);
+      assert.deepEqual([failure(outcome).kind, failure(outcome).httpStatus, sent.length, delays.length], ["quota_exhausted", 429, 1, 0], JSON.stringify(error));
+      assert.ok(failure(outcome).message.length <= 300, "the message is still cut");
+    }
+  });
+
+  test("a body over 64 KiB is not read whole: a rate limit, retried", async () => {
+    const { outcome, sent } = await once([apiError(429, { type: "insufficient_quota", message: long(70_000) })]);
+    assert.deepEqual([failure(outcome).kind, sent.length], ["rate_limited", 3]);
+    assert.match(failure(outcome).message, /longer than 65536 bytes/);
+  });
+});
+
+describe("R-22 L-3, DR-35 (c): a call_id that passes AC-D15 is recorded as given, as for Anthropic", () => {
+  test("recorded, answered and sent back under the provider's own id", async () => {
+    const callId = "call_Ab12Cd34Ef56";
+    const first = [reasoning(1), functionCall(callId, "read_file", { path: "a.txt" })];
+    const transport = fake([completed(first), completed([message("done")])]);
+    const run = harness({ steps: [] });
+    const result = await runTask({ ...run.deps, model: createOpenAIProvider(SETTINGS, transport.deps) });
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.equal(run.journal.ofType("model_response")[0]?.toolCalls[0]?.id, callId);
+    assert.equal(run.journal.ofType("tool_result")[0]?.result.callId, callId);
+    const second = (transport.sent[1] as SentRequest).body.input;
+    assert.deepEqual(second.filter((item: { type: string }) => item.type === "function_call_output").map((item: { call_id: string }) => item.call_id), [callId]);
+    assert.equal(JSON.stringify(run.journal.events).includes("opaque-reasoning"), false, "the reasoning content still is not recorded");
+  });
+});
+
+describe("R-22 L-4, DR-35 (d): the output items sent back have a size limit", () => {
+  const SIX_MIB = 6 * 1024 * 1024;
+  const big = (n: number) => ({ type: "reasoning", id: `rs_big${n}`, summary: [], encrypted_content: "e".repeat(SIX_MIB) });
+
+  /** Answers each call as the engine would, so every kept response is sent back. */
+  async function converse(provider: ReturnType<typeof createOpenAIProvider>, turns: number) {
+    const messages: ModelMessage[] = [{ role: "user", content: masked("hello") }];
+    const outcomes: ModelOutcome[] = [];
+    for (let n = 1; n <= turns; n += 1) {
+      const outcome = await provider.complete({ system: masked(""), messages, tools: ["read_file"] }, signal());
+      outcomes.push(outcome);
+      if (!outcome.ok) break;
+      for (const call of outcome.response.toolCalls) {
+        messages.push({ role: "assistant", text: masked(""), toolCalls: [{ id: call.id, name: call.name, argsJson: masked(JSON.stringify(call.args)) }] });
+        messages.push({ role: "tool", results: [{ callId: call.id, tool: call.name, ok: true, content: masked("{}"), errorCode: null }] });
+      }
+    }
+    return outcomes;
+  }
+
+  test("past the limit the next request is not sent and ends with a clear error; within it, all goes back", async () => {
+    const transport = fake([1, 2, 3, 4].map((n) => completed([big(n), functionCall(`call_${n}`, "read_file", { path: "a.txt" })])));
+    const outcomes = await converse(createOpenAIProvider(SETTINGS, transport.deps), 4);
+    assert.deepEqual(outcomes.slice(0, 3).map((outcome) => outcome.ok), [true, true, true], "12 MiB to send back at the third request: within the limit");
+    assert.equal((transport.sent[2] as SentRequest).body.input.filter((item: { type: string }) => item.type === "reasoning").length, 2);
+    assert.equal(transport.sent.length, 3, "the fourth request (18 MiB to send back) is not sent");
+    const last = failure(outcomes[3] as ModelOutcome);
+    assert.equal(last.kind, "api_error");
+    assert.match(last.message, /^request not sent: the output items to send back come to more than 16777216 bytes/);
+    assert.equal(MAX_KEPT_OUTPUT_BYTES, 16 * 1024 * 1024);
+  });
+
+  test("the response that passes the limit is still returned; the request after it fails, unsent", async () => {
+    const transport = fake([1, 2, 3].map((n) => completed([big(n), message(`answer ${n}`)])));
+    const provider = createOpenAIProvider(SETTINGS, transport.deps);
+    const ask = () => provider.complete({ system: masked(""), messages: [{ role: "user", content: masked("hello") }], tools: [] }, signal());
+    assert.deepEqual([(await ask()).ok, (await ask()).ok, (await ask()).ok], [true, true, true], "the third answer brings the kept items to 18 MiB");
+    assert.equal(failure(await ask()).kind, "api_error");
+    assert.equal(transport.sent.length, 3);
   });
 });

@@ -332,6 +332,12 @@ export interface Transport {
    */
   readonly retryAfter?: "cap" | "minimum";
   /**
+   * DR-35 (b): how many bytes of an error body are read for classifyStatus and describeError
+   * (absent: MAX_ERROR_BODY_BYTES, as before). OpenAI reads more, so that a quota error with a long
+   * message is still told apart from a rate limit.
+   */
+  readonly errorBodyLimit?: number;
+  /**
    * The provider's description of an error response (what of its body may be quoted). SP-5: it also
    * gets the response headers, for a provider whose request id is a header (OpenAI `x-request-id`).
    */
@@ -430,7 +436,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
 
     let read: LimitedBody;
     try {
-      read = await readLimited(response, success ? MAX_SUCCESS_BODY_BYTES : MAX_ERROR_BODY_BYTES);
+      read = await readLimited(response, success ? MAX_SUCCESS_BODY_BYTES : (transport.errorBodyLimit ?? MAX_ERROR_BODY_BYTES));
     } catch (error) {
       return transportFailure(error, "read");
     }
@@ -493,9 +499,17 @@ export const UNUSABLE_KEY_MESSAGE =
 
 
 /**
+ * DR-36 (d), R-22 I-3: the longest text createKeyMaterialCheck reads. A longer one counts as holding
+ * key material, unread, so the check's time stays bounded (it grows with the square of the length).
+ * The callers check shorter limits first (model ids and cursors: 256 characters).
+ */
+export const MAX_KEY_MATERIAL_CHECK_CHARS = 4096;
+
+/**
  * True when `text` holds the key, a run of KEY_FRAGMENT_CHARS characters of it, or a key-shaped
  * string, ignoring separators as the redactor does. Used to refuse values from a response that
- * would carry key material out of this module.
+ * would carry key material out of this module. A text longer than MAX_KEY_MATERIAL_CHECK_CHARS is
+ * refused (true) without being read.
  */
 export function createKeyMaterialCheck(apiKey: string, keyShapeSources: readonly string[]): (text: string) => boolean {
   const fragments = new Set<string>();
@@ -505,6 +519,7 @@ export function createKeyMaterialCheck(apiKey: string, keyShapeSources: readonly
   const keyShapes = keyShapeSources.map((source) => new RegExp(source));
   const keyShapesAtStart = keyShapeSources.map((source) => new RegExp(source, "y"));
   return (text: string): boolean => {
+    if (text.length > MAX_KEY_MATERIAL_CHECK_CHARS) return true;
     const compact = text.replace(SEPARATOR_RUN, "");
     if (apiKey.length > 0 && compact.includes(apiKey)) return true;
     for (let index = 0; fragments.size > 0 && index + KEY_FRAGMENT_CHARS <= compact.length; index += 1) {

@@ -7,12 +7,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { ANTHROPIC_KEY_PATTERN_SOURCE, API_KEY_MASK_PATTERN_SOURCES } from "../../../../src/contracts/index.js";
-import { MAX_RETRY_AFTER_MS, createKeyMaterialCheck, createRedactor, sendWithRetries } from "../../../../src/model/http/index.js";
+import { MAX_KEY_MATERIAL_CHECK_CHARS, MAX_RETRY_AFTER_MS, createKeyMaterialCheck, createRedactor, sendWithRetries } from "../../../../src/model/http/index.js";
 import type { LimitedBody, Transport } from "../../../../src/model/http/index.js";
 
 type Reply = { status: number; body?: string; headers?: Record<string, string> };
 
-function transport(replies: readonly Reply[], options: Partial<Pick<Transport, "retryAfter" | "maxRetries">> = {}) {
+function transport(replies: readonly Reply[], options: Partial<Pick<Transport, "retryAfter" | "maxRetries" | "errorBodyLimit">> = {}) {
   const delays: number[] = [];
   const seenBodies: string[] = [];
   let calls = 0;
@@ -34,6 +34,7 @@ function transport(replies: readonly Reply[], options: Partial<Pick<Transport, "
     },
     describeError: (status: number) => `HTTP ${status}`,
     ...(options.retryAfter === undefined ? {} : { retryAfter: options.retryAfter }),
+    ...(options.errorBodyLimit === undefined ? {} : { errorBodyLimit: options.errorBodyLimit }),
   };
   return { t, delays, seenBodies, calls: () => calls };
 }
@@ -96,6 +97,27 @@ ${shaped.slice(12)})`), "([redacted])", "after a bracket and split, as before");
     assert.equal(redact(`key${shaped}end`), "key[redacted]");
     assert.equal(redact(`key ${shaped.slice(0, 9)}
 ${shaped.slice(9)} . end`), "key [redacted] . end");
+  });
+
+  test("DR-35 (b): the error body read limit is the provider's; absent, 4096 bytes as before", async () => {
+    const big: Reply = { status: 400, body: "x".repeat(5000) };
+    const plain = transport([big]);
+    await send(plain.t);
+    assert.equal(plain.seenBodies[0]?.length, 4096);
+    const wide = transport([big], { errorBodyLimit: 65_536 });
+    await send(wide.t);
+    assert.equal(wide.seenBodies[0]?.length, 5000);
+  });
+
+  test("DR-36 (d), R-22 I-3: the key-material check reads a bounded text; a longer one counts as key material", () => {
+    const holds = createKeyMaterialCheck("codaryn-fake-key-not-a-credential", API_KEY_MASK_PATTERN_SOURCES);
+    assert.equal(holds("a ".repeat(2048)), false, "4096 characters: read");
+    const started = performance.now();
+    assert.equal(holds("a ".repeat(32_768)), true, "65,536 characters with separators: refused unread");
+    assert.ok(performance.now() - started < 200, "and at once");
+    assert.equal(MAX_KEY_MATERIAL_CHECK_CHARS, 4096);
+    assert.equal(holds(`${"a".repeat(4096)}`), false, "the limit itself is read");
+    assert.equal(holds(`${"a".repeat(4097)}`), true, "one more is not");
   });
 
   test("the provider's status reading gets the error body", async () => {

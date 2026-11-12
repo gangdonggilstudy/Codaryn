@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,6 +17,7 @@ import { after, describe, test } from "node:test";
 import { RECORDS_CHANGED_FILE_NAME, asRawText, maskedParts, maskedPartsEncoding } from "../../../src/contracts/index.js";
 import type { ContentHash, EngineResult, JournalEvent, MaskedText, RecordsChangedMark } from "../../../src/contracts/index.js";
 import {
+  acquireLock,
   createChangeRecorder,
   createJournal,
   createRunRecorders,
@@ -23,6 +25,7 @@ import {
   journalRelativePath,
   listRuns,
   readRunOriginals,
+  releaseLock,
   writeResult,
 } from "../../../src/store/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
@@ -233,5 +236,101 @@ describe("DR-38: records-changed marks and how the views treat a marked run", ()
     const entry = (await listRuns({ workspaceRoot: root })).runs.find((item) => item.runId === OTHER);
     assert.equal(entry?.state === "checked" ? entry.recordsChanged : null, true);
     assert.equal((await readRunOriginals({ workspaceRoot: root, runId: OTHER }))[0]?.shown, undefined);
+  });
+});
+
+describe("DR-38: another Codaryn process that only tries the lock is no change", () => {
+  test("the temporary files of a lock attempt and of the store's own writes are not changes", async () => {
+    const root = await workspace();
+    await earlierRun(root);
+    const { guard, run, base } = await currentRun(root);
+    const temporaries = [
+      state(root, `lock.json.20260102T050000Z-0000ffff.${process.pid}.0123456789ab.tmp`),
+      state(root, `lock.json.reclaim.20260102T050000Z-0000ffff.${process.pid}.0123456789ab.tmp`),
+      state(root, "runs", OTHER, ".0123456789abcdef.tmp"),
+      state(root, "runs", OTHER, "snapshots", "index.json.0123456789abcdef.tmp"),
+      state(root, "runs", OTHER, `result.json.${process.pid}.tmp`),
+      state(root, "runs", RUN, `.fedcba9876543210.tmp`),
+    ];
+    for (const file of temporaries) await writeFile(file, "x", "utf8");
+    assert.deepEqual(guard.compare(base, await guard.capture("state")), { changed: [], limited: false });
+    assert.deepEqual(guard.compare(run, await guard.capture("run")), { changed: [], limited: false });
+    await writeFile(state(root, "runs", OTHER, "result.json.bak"), "x", "utf8");
+    assert.deepEqual(guard.compare(base, await guard.capture("state")).changed, [`runs/${OTHER}/result.json.bak`], "other names still count");
+  });
+
+  test("a second process that keeps trying the lock while the run holds it is never seen as a change", { timeout: 60_000 }, async () => {
+    const root = await workspace();
+    const lock = await acquireLock({ workspaceRoot: root, runId: RUN, clock });
+    assert.ok(lock.ok);
+    try {
+      const { guard, base } = await currentRun(root);
+      const storeUrl = new URL("../../../src/store/index.js", import.meta.url).href;
+      const script = `const s = await import(${JSON.stringify(storeUrl)}); const until = Date.now() + 1500; let n = 0;
+        while (Date.now() < until) { const o = await s.acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: "20260102T050000Z-0000ffff", clock: { now: () => Date.now() }, retryForMs: 0 }); if (o.ok) process.exit(3); n += 1; }
+        process.stdout.write(String(n));`;
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+      let attempts = "";
+      child.stdout.on("data", (chunk: Buffer) => (attempts += chunk.toString()));
+      const exited = new Promise<number | null>((resolve) => child.on("close", resolve));
+      let running = true;
+      void exited.then(() => (running = false));
+      const seen = new Set<string>();
+      let captures = 0;
+      while (running) {
+        for (const path of guard.compare(base, await guard.capture("state")).changed) seen.add(path);
+        captures += 1;
+      }
+      assert.equal(await exited, 0, "the second process never got the lock");
+      assert.ok(Number(attempts) > 0 && captures > 0, "test assumption: it tried while the run looked");
+      assert.deepEqual([...seen], []);
+    } finally {
+      await releaseLock({ workspaceRoot: root, runId: RUN });
+    }
+  });
+});
+
+describe("DR-38: the command windows with real processes", () => {
+  const runNode = (script: string, detached = false): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ["-e", script], { stdio: "ignore", detached });
+      child.on("error", reject);
+      if (detached) {
+        child.unref();
+        resolve();
+      } else child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    });
+
+  test("a command that writes the workspace only is no change; one that rewrites a shown record is", async () => {
+    const root = await workspace();
+    const { records, guard } = await currentRun(root);
+    await writeLikeATool(root, records.changeRecorder);
+    let last = await guard.capture("run");
+    await runNode(`require("fs").writeFileSync(${JSON.stringify(join(root, "out.txt"))}, "built")`);
+    let now = await guard.capture("run");
+    assert.deepEqual(guard.compare(last, now).changed, [], "after_command: the workspace is not the state directory");
+    last = now;
+    await records.journal.append(step(3));
+    const shown = state(root, "runs", RUN, "snapshots", "shown-0.json");
+    await runNode(`const fs = require("fs"); const f = ${JSON.stringify(shown)}; const v = JSON.parse(fs.readFileSync(f, "utf8")); v.next.partsDigest = "f".repeat(64); fs.writeFileSync(f, JSON.stringify(v))`);
+    now = await guard.capture("run");
+    assert.deepEqual(guard.compare(last, now).changed, [`runs/${RUN}/snapshots/shown-0.json`]);
+  });
+
+  test("a child a command left running that writes after the command ended is found at the next check", async () => {
+    const root = await workspace();
+    const { records, guard } = await currentRun(root);
+    const before = await guard.capture("run");
+    const marker = join(root, "child-done.txt");
+    const journal = state(root, "runs", RUN, "journal.jsonl");
+    await runNode(`setTimeout(() => { const fs = require("fs"); fs.appendFileSync(${JSON.stringify(journal)}, ${JSON.stringify(`${JSON.stringify({ seq: 9, type: "file_changed" })}\n`)}); fs.writeFileSync(${JSON.stringify(marker)}, "x"); }, 300)`, true);
+    const after = await guard.capture("run");
+    assert.deepEqual(guard.compare(before, after).changed, [], "after_command: the child has not written yet");
+    for (let waited = 0; waited < 10_000; waited += 50) {
+      if (await readFile(marker, "utf8").then(() => true, () => false)) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await records.journal.append(step(4));
+    assert.deepEqual(guard.compare(after, await guard.capture("run")).changed, [`runs/${RUN}/journal.jsonl`], "before_command of the next command");
   });
 });

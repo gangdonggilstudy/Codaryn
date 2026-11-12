@@ -57,6 +57,8 @@ import { isStoredRunId } from "./runs.js";
 
 /** A record file of another run larger than this keeps a metadata fingerprint (tier "state"). */
 const MAX_STATE_FILE_HASH_BYTES = 1024 * 1024;
+/** How many record files a fingerprint reads at once. */
+const READ_CONCURRENCY = 32;
 /** A records-changed mark larger than this is not joined; a new one replaces it. */
 const MAX_MARK_BYTES = 8 * 1024 * 1024;
 
@@ -91,6 +93,16 @@ function sameEntry(a: Entry | undefined, b: Entry | undefined): boolean {
   if (a.kind === "file" && b.kind === "file" && a.sha256 !== null && b.sha256 !== null) return a.size === b.size && a.sha256 === b.sha256;
   return a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs && a.ino === b.ino;
 }
+
+/**
+ * The temporary names the store's own writers use and remove again: `.<16 hex>.tmp` (createExclusive,
+ * replaceAtomically), `<name>.<16 hex>.tmp` (the snapshot and revert writers), `<name>.<pid>.tmp`
+ * (writeResult), a lock attempt's `lock.json[.reclaim].<runId>.<pid>.<12 hex>.tmp` and a reclaimed
+ * lock moved aside, `lock.json.<pid>.<12 hex>.stale`. Another Codaryn process that only tries the lock
+ * (a second `codaryn run`) leaves such a file for the length of its attempt, so a fingerprint does not
+ * list them. No view reads a file of these names; a record renamed to one is still missing.
+ */
+const TRANSIENT_NAME = /\.(?:[0-9a-f]{16}|[0-9]+|[0-9]+\.[0-9a-f]{12})\.tmp$|^lock\.json\.[0-9]+\.[0-9a-f]{12}\.stale$/;
 
 /** Depth-first walk order: segment by segment in code unit order, a directory before what it holds. */
 function walkOrder(a: string, b: string): number {
@@ -207,6 +219,20 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
     let hashed = 0;
     let stopped = false;
     let last: string | null = null;
+    // Which files are hashed is decided in walk order (the budget); their reads run READ_CONCURRENCY at a time.
+    const reads: Promise<void>[] = [];
+    let active = 0;
+    const waiting: (() => void)[] = [];
+    const limited = async (task: () => Promise<void>): Promise<void> => {
+      if (active >= READ_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve));
+      active += 1;
+      try {
+        await task();
+      } finally {
+        active -= 1;
+        waiting.shift()?.();
+      }
+    };
     const limit = (): void => {
       if (tier === "state") print.limited = true;
     };
@@ -245,7 +271,7 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
         }
         for (const name of names) {
           const child = `${path}/${name}`;
-          if (tier === "state" && inRunTier(child)) continue;
+          if (TRANSIENT_NAME.test(name) || (tier === "state" && inRunTier(child))) continue;
           await visit(join(absolute, name), child);
           if (stopped) return;
         }
@@ -258,16 +284,20 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
           add(path, entryOf(info, null));
           return;
         }
-        let data: Buffer;
-        try {
-          data = await readFile(absolute);
-        } catch {
-          add(path, { kind: "unreadable" });
-          limit();
-          return;
-        }
-        hashed += data.byteLength;
-        add(path, entryOf(info, sha256Hex(data), BigInt(data.byteLength)));
+        // A metadata entry until the read is done (walk order and the entry limit are decided here).
+        if (!add(path, entryOf(info, null))) return;
+        hashed += size;
+        reads.push(
+          limited(async () => {
+            try {
+              const data = await readFile(absolute);
+              print.entries.set(path, entryOf(info, sha256Hex(data), BigInt(data.byteLength)));
+            } catch {
+              print.entries.set(path, { kind: "unreadable" });
+              limit();
+            }
+          }),
+        );
         return;
       }
       add(path, entryOf(info, null));
@@ -285,7 +315,7 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
           if (!(code === "ENOENT" || code === "ENOTDIR")) limit();
         }
         for (const name of names) {
-          if (inRunTier(name)) continue;
+          if (TRANSIENT_NAME.test(name) || inRunTier(name)) continue;
           await visit(join(stateDir, name), name);
           if (stopped) break;
         }
@@ -295,6 +325,7 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
       if (tier === "run") print.entries.set(runPrefix, { kind: "unreadable" });
       else print.limited = true;
     }
+    await Promise.all(reads);
     return print;
   }
 

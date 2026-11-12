@@ -10,6 +10,14 @@
  * inside it included, so restoring or rebuilding gives back the exact bytes. Separators before or
  * after the value stay outside the token.
  *
+ * DR-42 (a), R-28 I-3: a key-like registered value (keyLikeSkeleton: at least MIN_KEY_SKELETON_LENGTH
+ * letters and digits, with a digit and both cases, or 32 or more with a digit and a letter) is also
+ * found in the text's letters and digits alone (keyLettersAndDigits), so a split by a character
+ * that is not a separator (a variation selector, the combining grapheme joiner, a Hangul filler, a
+ * braille blank, a lone surrogate, or visible punctuation as in `'…' + '…'`) is masked too, the
+ * characters between included. A value made of words (R-28 I-1) is not key-like, so this adds no
+ * masking of ordinary text for it.
+ *
  * The table lives in memory for one gateway instance. Its unit is a pair of
  * "matched string" and "token": the raw secret, each listed variant, each merged run of
  * overlapping or touching matches, and each pre-existing `CODARYN_SECRET` fragment are
@@ -44,7 +52,7 @@ import {
   PRIVACY_TOKEN_SUFFIX,
 } from "../contracts/text.js";
 import type { JsonObject, JsonValue, MaskedText } from "../contracts/text.js";
-import { compactKeyText, KEY_SEPARATOR_PATTERN_SOURCE } from "../contracts/keys.js";
+import { compactKeyText, KEY_SEPARATOR_PATTERN_SOURCE, keyLettersAndDigits, MIN_KEY_SKELETON_LENGTH } from "../contracts/keys.js";
 
 /**
  * DR-40 (a): the shortest registered value (or listed variant), in code points without separators,
@@ -76,6 +84,34 @@ export function compactView(text: string, from: number, to: number): { compact: 
     index += char.length;
   }
   return { compact, at };
+}
+
+/**
+ * DR-42 (a): whether a value's letters and digits (keyLettersAndDigits) look like a key rather
+ * than words: at least MIN_KEY_SKELETON_LENGTH of them with a digit, an upper-case and a lower-case
+ * letter, or at least 32 with a digit and a letter (a long hex or single-case token). R-28 I-1's
+ * values (`summer2026winter`, `My Awesome Application`, `notapassword1234`, digit groups) are not.
+ */
+export function keyLikeSkeleton(skeleton: string): boolean {
+  if (skeleton.length < MIN_KEY_SKELETON_LENGTH || !/[0-9]/.test(skeleton) || !/[A-Za-z]/.test(skeleton)) return false;
+  return (/[A-Z]/.test(skeleton) && /[a-z]/.test(skeleton)) || skeleton.length >= 32;
+}
+
+/**
+ * The letters and digits of `text` from `from` to `to` (keyLettersAndDigits of that slice), with the
+ * index in `text` of each, so a match maps back to its original span. All are ASCII, one unit each.
+ */
+export function skeletonView(text: string, from: number, to: number): { skeleton: string; at: number[] } {
+  let skeleton = "";
+  const at: number[] = [];
+  for (let index = from; index < to; index += 1) {
+    const unit = text.charCodeAt(index);
+    if ((unit >= 0x30 && unit <= 0x39) || (unit >= 0x41 && unit <= 0x5a) || (unit >= 0x61 && unit <= 0x7a)) {
+      skeleton += text[index] as string;
+      at.push(index);
+    }
+  }
+  return { skeleton, at };
 }
 
 const ID_BYTES = PRIVACY_TOKEN_ID_LENGTH / 2;
@@ -149,6 +185,8 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
   const splitForms = [...new Set(forms.map((form) => compactKeyText(form)))].filter(
     (form) => [...form].length >= MIN_SPLIT_MATCH_LENGTH,
   );
+  /** DR-42 (a): each key-like form's letters and digits, looked for in the text's. */
+  const skeletonForms = [...new Set(forms.map((form) => keyLettersAndDigits(form)))].filter((form) => keyLikeSkeleton(form));
 
   // Tokens are issued on first match, so a random-source failure surfaces inside `mask`.
   const tokenByForm = new Map<string, string>();
@@ -195,6 +233,17 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
       if (view.compact.length < to - from) {
         for (const form of splitForms) {
           for (let hit = view.compact.indexOf(form); hit !== -1; hit = view.compact.indexOf(form, hit + 1)) {
+            found.push({ start: view.at[hit] as number, end: (view.at[hit + form.length - 1] as number) + 1 });
+          }
+        }
+      }
+    }
+    if (skeletonForms.length > 0) {
+      const view = skeletonView(text, from, to);
+      // Without another character in the range, every such occurrence is an exact one, found above.
+      if (view.skeleton.length < to - from) {
+        for (const form of skeletonForms) {
+          for (let hit = view.skeleton.indexOf(form); hit !== -1; hit = view.skeleton.indexOf(form, hit + 1)) {
             found.push({ start: view.at[hit] as number, end: (view.at[hit + form.length - 1] as number) + 1 });
           }
         }

@@ -170,7 +170,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`, `plan_secrets_differ`(DR-28), `plan_run_missing`(R-9c C-1)(모두 2)가 더해졌다.
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`, `plan_secrets_differ`(DR-28), `plan_run_missing`(R-9c C-1)(모두 2)가 더해졌다. 그 뒤 `run_in_progress` 6(U-22, DR-48, 17.3의 `--run latest`), `plan_records_changed` 2(U-1, 18.4의 `apply`), `cleanup_plan_changed` 2(U-22, DR-48, 18.13)가 더해졌다(main `1e54ca9`의 실제 CLI로 세 종료 코드를 확인했다).
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 상태별 이유 목록은 `RUN_REASONS_BY_STATUS` 하나이고(`isReasonOfStatus`, DR-16), 읽는 쪽이 자기 목록을 두지 않는다(18.7). G-A가 `failed`에 `plan_stale`·`apply_incomplete`를, `needs-input`에 `plan_pending`·`awaiting_review`·`consent_required`를 더했다. 적용 실행은 그 부분집합 `APPLY_REASONS_BY_STATUS`를 쓴다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
@@ -564,7 +564,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### report (U-5)
 
-- `codaryn report --workspace <디렉터리> --run <runId> [--json]`은 `.codaryn/runs/<runId>/`의 `result.json`과 `journal.jsonl`만 읽어(가림본) 사람이 읽는 Markdown 요약을 stdout에 낸다. `--json`이면 `ReportOutput` 한 줄이다. 아무것도 바꾸지 않고 잠금도 잡지 않는다.
+- `codaryn report [--workspace <디렉터리>] --run <runId> [--json]`은 `.codaryn/runs/<runId>/`의 `result.json`과 `journal.jsonl`만 읽어(가림본) 사람이 읽는 Markdown 요약을 stdout에 낸다. `--json`이면 `ReportOutput` 한 줄이다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--workspace`가 없으면 현재 폴더를 쓴다(18.14, main `1e54ca9`의 실제 CLI로 확인).
 - 상태(`REPORT_EXIT_CODES`): `complete`(0)는 둘 다 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. `incomplete`는 기록만으로 만들고, 줄바꿈 없는 마지막 줄은 아직 쓰는 중으로 보고 무시한다.
 - 오류(`CliErrorOutput`): `invalid_arguments`, `workspace_not_found`, `run_not_found`(그 실행의 기록이 없음), `invalid_run_record`(읽기·해석 실패, `MAX_REPORT_FILE_BYTES`(256 MiB) 초과, 다른 실행의 파일).
 - `ReportOutput`: `schemaVersion`, `kind:"report"`, `runId`, `status`, `exitCode`, `result`(`EngineResult` 또는 null), `journal`(`ReportJournalSummary`: 작업 id, 작업 종류, 제공자, 한도, 기록 수, 모델 요청 수, 거부된 도구 호출 수, 재수정 수, 마지막 검증 회차, 변경 목록, 무결성 확인, 종료 기록).
@@ -762,7 +762,7 @@ codaryn run (--task <task.json> | --workspace <디렉터리> --goal <문장>) [�
 codaryn init [--config <파일>] [--workspace <디렉터리>] [--json]
 codaryn runs [--workspace <디렉터리>] [--limit <n>] [--json]
 codaryn revert --workspace <디렉터리> --run <runId|latest> [--dry-run | --allow-unsafe-move] [--quiet]
-codaryn report --workspace <디렉터리> --run <runId|latest> [--json]
+codaryn report [--workspace <디렉터리>] --run <runId|latest> [--json]
 codaryn doctor [...기존] [--profile <이름>]
 ```
 
@@ -785,7 +785,7 @@ codaryn doctor [...기존] [--profile <이름>]
   - result.json이나 revert.json이 없는 것은 손상이 아니다(해당 필드가 null). 있는데 읽기·해석·확인에 실패하면 손상이다.
   - 항목에 들어가는 문자열은 위 형식을 통과한 것뿐이라 제어 문자나 키 모양이 들어갈 수 없다. 사람용 표에는 `taskId`를 쓰지 않는다(N-14).
 - **`--run latest`(N-7, N-18)**: `report`, `revert`, 그리고 18절의 `plan`, `review`, `changes`에서 `listRuns`의 첫 `checked` 실행을 뜻한다. `apply`는 받지 않는다(승인이 계획 하나를 가리켜야 한다). 그런 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리(`.codaryn/runs/latest`)가 실제로 있으면 별칭으로 해석하지 않고 `invalid_arguments`로 끝나며 아무것도 바꾸지 않는다(검토 L1).
-  - U-22(DR-48, AXM-8, PM 결정): `latest`는 가장 새 실행이다. 결과가 아직 없는 `checked` 실행이 고를 끝난 실행보다 새것이고(또는 끝난 실행이 없고) 살아 있는 프로세스로 작업공간 잠금을 쥐고 있으면, 앞의 끝난 실행을 고르지 않고 `run_not_found`도 아닌 `run_in_progress`(종료 6, 끝난 뒤 다시 시도하거나 실행 id를 준다)다. 아무것도 바꾸지 않는다. 결과 없이 멈춘(잠금이 살아 있지 않은) 더 새 실행은 지금처럼 건너뛴다. 실행 id를 직접 주면 그 실행을 그대로 보인다. 이 규칙은 `latest`를 받는 모든 명령과 앱 계층에 하나다(R-51 M-2): 공용 함수 `resolveRunReference`(`src/cli/run-ref.ts`), 다른 함수가 없는 호출자는 store의 함수를 담은 `STORE_RUN_REFERENCE_DEPS`와 함께 쓴다. `report`, `revert`, `plan`, `review`가 쓰고, `apply`는 실행 id만 받는다. `changes`와 앱 계층의 `resolveRun`은 앱 계층의 `runIdOf`(`src/app/runs.ts`)와 실행 목록의 `resolveRunRef`(`src/cli/runs.ts`)가 이 함수로 바뀌면 같은 규칙이 된다.
+  - U-22(DR-48, AXM-8, PM 결정): `latest`는 가장 새 실행이다. 결과가 아직 없는 `checked` 실행이 고를 끝난 실행보다 새것이고(또는 끝난 실행이 없고) 살아 있는 프로세스로 작업공간 잠금을 쥐고 있으면, 앞의 끝난 실행을 고르지 않고 `run_not_found`도 아닌 `run_in_progress`(종료 6, 끝난 뒤 다시 시도하거나 실행 id를 준다)다. 아무것도 바꾸지 않는다. 결과 없이 멈춘(잠금이 살아 있지 않은) 더 새 실행은 지금처럼 건너뛴다. 실행 id를 직접 주면 그 실행을 그대로 보인다. 이 규칙은 `latest`를 받는 모든 명령과 앱 계층에 하나다(R-51 M-2): 공용 함수 `resolveRunReference`(`src/cli/run-ref.ts`), 다른 함수가 없는 호출자는 store의 함수를 담은 `STORE_RUN_REFERENCE_DEPS`와 함께 쓴다. `report`, `revert`, `plan`, `review`, `changes`가 쓰고, `apply`는 실행 id만 받는다. `changes`와 앱 계층의 `resolveRun`은 앱 계층의 `runIdOf`(`src/app/runs.ts`)를 거쳐 이 함수를 쓰고, 실행 목록의 `resolveRunRef`(`src/cli/runs.ts`)도 이 함수를 쓴다(코드로 확인). 확인(main `1e54ca9`의 실제 CLI): 가장 새 실행이 도는 동안 `report`, `changes`(`--task`와 `--workspace` 생략), `revert --dry-run`, `plan`, `review`의 `--run latest`가 모두 `run_in_progress`(종료 6)였고, 앞선 실행의 id를 준 `changes`는 종료 0이었다.
 - **`revert --dry-run`(N-7)**: `RevertRequest.dryRun`. 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 출력은 `dryRun: true`인 `RevertOutput`이고 상태·종료 코드는 실제 되돌리기와 같다(`complete` 0, `partial` 3).
 - **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 N-16의 확인을 통과하면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
 - **`--quiet`**: `run`, `revert`, `apply`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
@@ -937,7 +937,7 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
   - `PlanOutput`: 동작 목록(지금 가릴 값으로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
-  - U-14(UXM-6, AXM-2, AXM-15): 계획 실행에 기록 변경 표시가 있으면(읽을 수 없는 표시도) 그래도 보이되(종료 0) `recordsChanged: true`를 넣고, 글은 경고 줄(`plan.records_changed`)로 시작하며 적용 명령 대신 적용할 수 없다는 줄(`plan.cannot_apply`: 새 `codaryn run`으로 계획을 다시 만든다)을 적는다. 모델이 쓴 요약(`summary`)은 계획 실행 journal의 `propose_plan` 호출(결과가 이 다이제스트를 가리키는 것)에서 읽어 넣고, 글에서는 `plan.summary_label` 뒤에 에이전트의 설명으로 보인다(승인 대상이 아님). 찾지 못하거나 읽지 못하면, 그리고 표시가 있으면 뺀다. 글의 마지막 줄은 다이제스트가 보장하는 것(`plan.digest_guarantee`)이다. `apply`의 터미널 질문도 같은 글을 쓴다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다.
+  - U-14(UXM-6, AXM-2, AXM-15): 계획 실행에 기록 변경 표시가 있으면(읽을 수 없는 표시도) 그래도 보이되(종료 0) `recordsChanged: true`를 넣고, 글은 경고 줄(`plan.records_changed`)로 시작하며 적용 명령 대신 적용할 수 없다는 줄(`plan.cannot_apply`: 새 `codaryn run`으로 계획을 다시 만든다)을 적는다. 모델이 쓴 요약(`summary`)은 계획 실행 journal의 `propose_plan` 호출(결과가 이 다이제스트를 가리키는 것)에서 읽어 넣고, 글에서는 `plan.summary_label` 뒤에 에이전트의 설명으로 보인다(승인 대상이 아님). 찾지 못하거나 읽지 못하면, 그리고 표시가 있으면 뺀다. 글의 마지막 줄은 다이제스트가 보장하는 것(`plan.digest_guarantee`)이다. `apply`의 터미널 질문도 같은 글을 쓴다. 네 문구 id는 카탈로그에 있어 한국어로도 나온다(main `1e54ca9`의 실제 CLI, `CODARYN_LANG=ko`). 계획의 머리 줄, 다이제스트 줄, 동작 줄, 적용 명령 줄은 아직 영어다(DR-57의 U-36).
   - R-49 R49-M1: 요약은 읽는 자리에서 지금의 가릴 값, 현재 키와 키 모양, 제어 문자를 차례로 거친다. 그래서 글과 `--json`, 앱 계층, `apply`의 질문이 같은 글을 싣는다. 동작의 경로는 기계가 쓰는 자료라 키 모양 가림을 걸지 않는다(PM 답, DR-48이 깨는 변경을 두 곳으로 한정함).
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
@@ -1000,10 +1000,10 @@ codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note 
 ### 18.6 `codaryn changes` (DR-7, DR-14, DR-29)
 
 ```
-codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--config <config.json>] [--vars-file <path>] --run <runId|latest> [--json]
+codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--config <config.json>] [--vars-file <path>] --run <runId|latest> [--json]
 ```
 
-- 인자: `--workflow`는 받지 않는다(앱 계층 `TaskForm`과 같다, 18.2).
+- 인자: `--workflow`는 받지 않는다(앱 계층 `TaskForm`과 같다, 18.2). `--task`와 `--workspace`가 모두 없으면 현재 폴더를 쓴다(18.14, main `1e54ca9`의 실제 CLI로 확인). CLI의 사용법 줄(`codaryn help changes`)은 아직 `(--task <task.json> | --workspace <dir> [--profile <name>])` 꼴이다.
 - 실행이 바꾼 파일마다 아래를 보인다.
   - 경로: 실행의 기록에 남은 가린 경로를 지금 가릴 값으로 한 번 더 가린 것(`masking: "current_secrets"`)
   - 실행이 만든 파일인지
@@ -1201,7 +1201,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 모양: `codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] [--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <digest 12자 이상> [--delete-discarded]] [--json]`
 - 기본은 미리보기다. `summarizeState`의 요약과 `planCleanup`의 계획(항목·경고·막힌 것·합계·`parked`·다이제스트)을 보이고 아무것도 지우지 않는다.
 - 확인은 둘이다(DR-39 P-4).
-  - `--confirm <digest>`: 지금 만든 계획의 다이제스트와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `plan_changed`(종료 3)다. store가 잠금 아래에서 계획을 다시 만들어 다이제스트가 같을 때만 지운다.
+  - `--confirm <digest>`: 지금 만든 계획의 다이제스트와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `cleanup_plan_changed`(종료 2)다. store가 잠금 아래에서 계획을 다시 만들어 다이제스트가 같을 때만 지운다.
   - `--delete-discarded`: `--confirm`과 함께일 때만. 사람의 파일인 폐기 보관함 폴더는 이것이 있을 때만 지운다. 없으면 `not_confirmed`로 남는다.
   - `--include-not-reverted`(DR-44 (가)): `--confirm`과 함께일 때만. 되돌리지 않은 실행과 일부만 되돌린 실행(`not_reverted`)의 기록은 이것이 있어야 지운다. 막지는 않는다. 미리보기의 확인 머리줄에 그런 실행의 수를 적는다. 이것 없이 확인하면 store가 그 기록을 `not_reverted_not_confirmed`로, 남는 적용이 쓰는 계획 실행을 `used_by_kept_apply`로 남기고 나머지를 지운다(사람의 선택이라 종료 0). 남은 `cleanup-…` 폴더(DR-44 (라))는 모든 계획에 `leftover` 항목으로 들어가 요약·미리보기·완료 줄에 보이고, 확인하면 지운다. 옮긴 뒤 다 지우지 못하면 `partly_removed`(종료 1)이고 지웠다고 보고·기록하지 않는다.
   - 끝 줄은 확인할 것을 말한다(R-34 I-3): 지울 실행 기록이 없고 폐기 보관함만 있으면 `--confirm <digest> --delete-discarded`를 말한다.
@@ -1223,4 +1223,4 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 ### 18.15 적용된 계획 실행의 되돌리기 (U-16, UXM-5, R-55 L-1)
 
 - 계획 실행은 스스로 파일을 바꾸지 않는다. 그 계획을 적용한 실행이 있고 이번 되돌리기가 되돌린 것도 건너뛴 것도 없으면 되돌리기 기록을 쓰지 않는다(목록에 "되돌림"이 붙지 않음). JSON 줄은 그대로다.
-- stderr의 안내는 `revert.plan_only` 한 줄과, 그 적용 실행을 계약의 규칙 `planApplyStateOf`(실행 목록)로 판정한 상태의 줄이다. `PLAN_APPLY_STATES_TO_REVERT`(`applied`, `unfinished`)일 때만 그 실행을 되돌리라고 한다(`revert.plan_revert_apply`, `--run <적용 실행>`). `applying`(결과가 아직 없음), `reverted`(마지막 되돌리기가 complete), `record_missing`(목록에 없거나 손상)은 그렇다고만 말한다(`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`). 목록을 읽지 못하면 그렇다고 말한다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다. `--dry-run`도 같다.
+- stderr의 안내는 `revert.plan_only` 한 줄과, 그 적용 실행을 계약의 규칙 `planApplyStateOf`(실행 목록)로 판정한 상태의 줄이다. `PLAN_APPLY_STATES_TO_REVERT`(`applied`, `unfinished`)일 때만 그 실행을 되돌리라고 한다(`revert.plan_revert_apply`, `--run <적용 실행>`). `applying`(결과가 아직 없음), `reverted`(마지막 되돌리기가 complete), `record_missing`(목록에 없거나 손상)은 그렇다고만 말한다(`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`). 목록을 읽지 못하면 그렇다고 말한다. 다섯 문구 id는 카탈로그에 있다. main `1e54ca9`의 실제 CLI(`CODARYN_LANG=ko`)로 `revert.plan_only`, `revert.plan_revert_apply`, `revert.plan_apply_reverted`가 한국어로 나오는 것을 확인했다. `revert.plan_applying`, `revert.plan_apply_missing`은 카탈로그에서만 확인했다. `--dry-run`도 같다.

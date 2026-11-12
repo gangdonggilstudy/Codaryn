@@ -1,6 +1,9 @@
 /**
  * Shape validation of tool arguments. It checks structure only.
  * Whether a call is permitted is decided by the policy gate.
+ * U-15 (AXM-5): the first problem is named as the schema field and a fixed rule, so the model knows
+ * what to fix. A field is a schema name (dotted, `[i]` for a list item); a value the model gave,
+ * an unknown key among them, is never put in the text.
  */
 
 import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS, MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS } from "../contracts/index.js";
@@ -15,74 +18,106 @@ import type {
 
 const HASH_PATTERN = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
+/** The first problem of a call's arguments. `field` is "" for the arguments as a whole. */
+export interface ArgsProblem {
+  readonly field: string;
+  readonly rule: string;
+}
+
+/** Fixed rule texts (model-bound, FIXED_MODEL_TEXTS). */
+export const ARGS_RULES = {
+  unknownField: "unknown field; allowed: ",
+  nonEmpty: "required: a non-empty string",
+  optionalString: "must be a string",
+  optionalNonEmpty: "must be a non-empty string",
+  hash: "required: 64 lowercase hex characters, or null for a new file",
+  change: 'required: an object with kind "replace_all" or "replace_text"',
+  changeKind: 'must be "replace_all" or "replace_text"',
+  text: "required: a string",
+  stringList: "required: a list of strings",
+  timeout: `must be a whole number of milliseconds from 1 to ${MAX_COMMAND_TIMEOUT_MS}`,
+  boolean: "must be true or false",
+  summary: `required: a non-empty string of at most ${MAX_PLAN_SUMMARY_CHARS} characters`,
+  actions: `required: a list of 1 to ${MAX_PLAN_ACTIONS} actions`,
+  action: 'required: an object with kind "move" or "discard"',
+  actionKind: 'must be "move" or "discard"',
+} as const;
+
+/** The lead of the message an argument problem gives the model. */
+export const INVALID_ARGS_LEAD = "invalid arguments: ";
+
+/** `invalid arguments: <field>: <rule>`, or without the field for the arguments as a whole. */
+export function argsProblemText(problem: ArgsProblem): string {
+  return `${INVALID_ARGS_LEAD}${problem.field === "" ? "" : `${problem.field}: `}${problem.rule}`;
+}
+
 function isObject(value: JsonValue | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasOnlyKeys(value: JsonObject, allowed: readonly string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key));
+/** An unknown key, named by the keys that are allowed (never by the key given). */
+function unknownKeys(value: JsonObject, allowed: readonly string[], field: string): ArgsProblem | null {
+  return Object.keys(value).every((key) => allowed.includes(key)) ? null : { field, rule: `${ARGS_RULES.unknownField}${allowed.join(", ")}` };
 }
 
 function isNonEmptyString(value: JsonValue | undefined): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-function isOptionalString(value: JsonValue | undefined): boolean {
-  return value === undefined || typeof value === "string";
+const at = (parent: string, name: string): string => (parent === "" ? name : `${parent}.${name}`);
+
+function nonEmpty(args: JsonObject, name: string, parent = ""): ArgsProblem | null {
+  return isNonEmptyString(args[name]) ? null : { field: at(parent, name), rule: ARGS_RULES.nonEmpty };
 }
 
-function isValidChange(change: JsonValue | undefined): boolean {
-  if (!isObject(change)) return false;
+function optionalString(args: JsonObject, name: string): ArgsProblem | null {
+  const value = args[name];
+  return value === undefined || typeof value === "string" ? null : { field: name, rule: ARGS_RULES.optionalString };
+}
+
+function changeProblem(change: JsonValue | undefined): ArgsProblem | null {
+  if (!isObject(change)) return { field: "change", rule: ARGS_RULES.change };
   if (change["kind"] === "replace_all") {
-    return hasOnlyKeys(change, ["kind", "content"]) && typeof change["content"] === "string";
+    return unknownKeys(change, ["kind", "content"], "change") ?? (typeof change["content"] === "string" ? null : { field: "change.content", rule: ARGS_RULES.text });
   }
   if (change["kind"] === "replace_text") {
     return (
-      hasOnlyKeys(change, ["kind", "oldText", "newText"]) &&
-      isNonEmptyString(change["oldText"]) &&
-      typeof change["newText"] === "string"
+      unknownKeys(change, ["kind", "oldText", "newText"], "change") ??
+      nonEmpty(change, "oldText", "change") ??
+      (typeof change["newText"] === "string" ? null : { field: "change.newText", rule: ARGS_RULES.text })
     );
   }
-  return false;
+  return { field: "change.kind", rule: ARGS_RULES.changeKind };
 }
 
-function isValid(name: ToolName, args: JsonObject): boolean {
+/** U-15 (AXM-5): the first problem of a built-in tool's arguments, or null when they fit. */
+export function toolArgsProblem(name: ToolName, args: JsonObject): ArgsProblem | null {
   switch (name) {
     case "read_file":
-      return hasOnlyKeys(args, ["path"]) && isNonEmptyString(args["path"]);
+      return unknownKeys(args, ["path"], "") ?? nonEmpty(args, "path");
     case "search_files":
-      return (
-        hasOnlyKeys(args, ["path", "nameContains", "text"]) &&
-        isNonEmptyString(args["path"]) &&
-        isOptionalString(args["nameContains"]) &&
-        isOptionalString(args["text"])
-      );
+      return unknownKeys(args, ["path", "nameContains", "text"], "") ?? nonEmpty(args, "path") ?? optionalString(args, "nameContains") ?? optionalString(args, "text");
     case "write_file": {
-      if (!hasOnlyKeys(args, ["path", "expectedHash", "change"])) return false;
-      if (!isNonEmptyString(args["path"])) return false;
+      const problem = unknownKeys(args, ["path", "expectedHash", "change"], "") ?? nonEmpty(args, "path");
+      if (problem !== null) return problem;
       // expectedHash is required: a hash, or an explicit null for a file that must not exist.
-      if (!Object.hasOwn(args, "expectedHash")) return false;
       const expected = args["expectedHash"];
-      if (expected !== null && !(typeof expected === "string" && HASH_PATTERN.test(expected))) {
-        return false;
+      if (!Object.hasOwn(args, "expectedHash") || (expected !== null && !(typeof expected === "string" && HASH_PATTERN.test(expected)))) {
+        return { field: "expectedHash", rule: ARGS_RULES.hash };
       }
-      return isValidChange(args["change"]);
+      return changeProblem(args["change"]);
     }
     case "run_command": {
-      if (!hasOnlyKeys(args, ["executable", "args", "cwd", "timeoutMs"])) return false;
-      if (!isNonEmptyString(args["executable"])) return false;
+      const problem = unknownKeys(args, ["executable", "args", "cwd", "timeoutMs"], "") ?? nonEmpty(args, "executable");
+      if (problem !== null) return problem;
       const list = args["args"];
-      if (!Array.isArray(list) || !list.every((item) => typeof item === "string")) return false;
-      if (!isOptionalString(args["cwd"])) return false;
+      if (!Array.isArray(list) || !list.every((item) => typeof item === "string")) return { field: "args", rule: ARGS_RULES.stringList };
+      const cwd = optionalString(args, "cwd");
+      if (cwd !== null) return cwd;
       const timeout = args["timeoutMs"];
       // T-3: a model may not ask for a longer command time limit than MAX_COMMAND_TIMEOUT_MS.
-      return (
-        timeout === undefined ||
-        (typeof timeout === "number" &&
-          Number.isInteger(timeout) &&
-          timeout > 0 &&
-          timeout <= MAX_COMMAND_TIMEOUT_MS)
-      );
+      const fits = timeout === undefined || (typeof timeout === "number" && Number.isInteger(timeout) && timeout > 0 && timeout <= MAX_COMMAND_TIMEOUT_MS);
+      return fits ? null : { field: "timeoutMs", rule: ARGS_RULES.timeout };
     }
   }
 }
@@ -92,41 +127,44 @@ export function validateToolArgs<N extends ToolName>(
   name: N,
   args: JsonObject,
 ): ToolArgsByName[N] | null {
-  return isValid(name, args) ? (args as unknown as ToolArgsByName[N]) : null;
+  return toolArgsProblem(name, args) === null ? (args as unknown as ToolArgsByName[N]) : null;
 }
 
-function isPlanAction(action: JsonValue | undefined): boolean {
-  if (!isObject(action)) return false;
+function planActionProblem(action: JsonValue | undefined, field: string): ArgsProblem | null {
+  if (!isObject(action)) return { field, rule: ARGS_RULES.action };
   if (action["kind"] === "move") {
-    return hasOnlyKeys(action, ["kind", "from", "to"]) && isNonEmptyString(action["from"]) && isNonEmptyString(action["to"]);
+    return unknownKeys(action, ["kind", "from", "to"], field) ?? nonEmpty(action, "from", field) ?? nonEmpty(action, "to", field);
   }
   if (action["kind"] === "discard") {
-    return hasOnlyKeys(action, ["kind", "path"]) && isNonEmptyString(action["path"]);
+    return unknownKeys(action, ["kind", "path"], field) ?? nonEmpty(action, "path", field);
   }
-  return false;
+  return { field: `${field}.kind`, rule: ARGS_RULES.actionKind };
 }
 
-/** G-B: the shapes WORKFLOW_TOOL_DEFINITIONS describe. Structure only, as for the built-in tools. */
-function isValidWorkflow(name: WorkflowToolName, args: JsonObject): boolean {
+/**
+ * G-B: the shapes WORKFLOW_TOOL_DEFINITIONS describe. Structure only, as for the built-in tools.
+ * U-15 (AXM-5): the first problem, or null when they fit.
+ */
+export function workflowToolArgsProblem(name: WorkflowToolName, args: JsonObject): ArgsProblem | null {
   switch (name) {
-    case "inspect_files":
-      return (
-        hasOnlyKeys(args, ["path", "after", "hash"]) &&
-        isNonEmptyString(args["path"]) &&
-        (args["after"] === undefined || isNonEmptyString(args["after"])) &&
-        (args["hash"] === undefined || typeof args["hash"] === "boolean")
-      );
+    case "inspect_files": {
+      const problem = unknownKeys(args, ["path", "after", "hash"], "") ?? nonEmpty(args, "path");
+      if (problem !== null) return problem;
+      if (args["after"] !== undefined && !isNonEmptyString(args["after"])) return { field: "after", rule: ARGS_RULES.optionalNonEmpty };
+      return args["hash"] === undefined || typeof args["hash"] === "boolean" ? null : { field: "hash", rule: ARGS_RULES.boolean };
+    }
     case "propose_plan": {
-      if (!hasOnlyKeys(args, ["summary", "actions"])) return false;
+      const problem = unknownKeys(args, ["summary", "actions"], "");
+      if (problem !== null) return problem;
       const summary = args["summary"];
-      if (!isNonEmptyString(summary) || summary.length > MAX_PLAN_SUMMARY_CHARS) return false;
+      if (!isNonEmptyString(summary) || summary.length > MAX_PLAN_SUMMARY_CHARS) return { field: "summary", rule: ARGS_RULES.summary };
       const actions = args["actions"];
-      return (
-        Array.isArray(actions) &&
-        actions.length >= 1 &&
-        actions.length <= MAX_PLAN_ACTIONS &&
-        actions.every((action) => isPlanAction(action))
-      );
+      if (!Array.isArray(actions) || actions.length < 1 || actions.length > MAX_PLAN_ACTIONS) return { field: "actions", rule: ARGS_RULES.actions };
+      for (const [index, action] of actions.entries()) {
+        const found = planActionProblem(action, `actions[${index}]`);
+        if (found !== null) return found;
+      }
+      return null;
     }
   }
 }
@@ -136,5 +174,5 @@ export function validateWorkflowToolArgs<N extends WorkflowToolName>(
   name: N,
   args: JsonObject,
 ): WorkflowToolArgsByName[N] | null {
-  return isValidWorkflow(name, args) ? (args as unknown as WorkflowToolArgsByName[N]) : null;
+  return workflowToolArgsProblem(name, args) === null ? (args as unknown as WorkflowToolArgsByName[N]) : null;
 }

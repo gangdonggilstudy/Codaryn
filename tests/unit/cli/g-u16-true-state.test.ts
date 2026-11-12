@@ -157,18 +157,15 @@ describe("U-16 (UXM-5): the run list says a plan run was applied, and by which r
 });
 
 describe("U-16 (UXM-4): changes of an apply run does not say the run changed no file", () => {
-  test(
-    "the text names the apply's actions or where they are",
-    { todo: "app layer and contract (U-16): ChangesOutput says the run is an apply (or lists its actions); then the CLI's text (src/cli/changes.ts) follows" },
-    async () => {
-      const { base, planned, digest } = await planRun();
-      const applied = await applyWithTask(base, planned, digest);
-      assert.equal(applied.applied.length, 1);
-      const outcome = await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", applied.runId], env: {}, app: createCodarynApp(await createNodeAppEnvironment()) });
-      assert.ok("text" in outcome, JSON.stringify(outcome));
-      assert.equal(outcome.text.includes("the run changed no file"), false, outcome.text);
-    },
-  );
+  test("the text names the apply's actions and its plan run, through the real app layer", async () => {
+    const { base, planned, digest } = await planRun();
+    const applied = await applyWithTask(base, planned, digest);
+    assert.equal(applied.applied.length, 1);
+    const outcome = await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", applied.runId], env: {}, app: createCodarynApp(await createNodeAppEnvironment()) });
+    assert.ok("text" in outcome, JSON.stringify(outcome));
+    assert.equal(outcome.text.includes("the run changed no file"), false, outcome.text);
+    assert.ok(outcome.text.includes(`it applied 1 action(s) of the plan of run ${planned.runId}`), outcome.text);
+  });
 });
 
 describe("U-16 (UXM-4): the CLI's text over the app layer's applyRun (contract ChangesApplyRun)", () => {

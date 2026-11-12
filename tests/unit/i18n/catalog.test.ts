@@ -544,4 +544,33 @@ describe("i18n catalog: language and wording", () => {
     assert.match(en["revert.plan_apply_missing"], /no readable records in this workspace any more, so Codaryn cannot revert it/);
     assert.match(ko["revert.plan_apply_missing"], /더는 없거나 확인할 수 없어, Codaryn으로 되돌릴 수 없습니다/);
   });
+
+  test("U-33 (R-56 R56-L3, Q-1): an earlier run's unchecked state has its own words and no cleanup advice; the apply's own limited check keeps U-8's words", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    const own = "apply.notice.plan_records_unchecked";
+    const since = "apply.notice.plan_records_unchecked.run_since_plan";
+    // The apply's own check was limited: U-8's words, the same as main a191a50 to the letter (PM Q-1).
+    assert.equal(
+      en[own],
+      "The plan run's records could not be checked for changes, because the state directory is too large to check entirely; the apply was not stopped for this. Read the result, and run codaryn cleanup to make the state directory small enough to check.",
+    );
+    assert.equal(
+      ko[own],
+      "상태 디렉터리가 너무 커서 다 확인하지 못해, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하고, codaryn cleanup으로 상태 디렉터리를 확인할 수 있는 크기로 줄이세요.",
+    );
+    // The apply's own check was whole: the cause is the plan run or a run after it, which could not
+    // check the state directory entirely or stopped part way (Q-3). The state directory is not said
+    // to be too large now, and no cleanup is advised: it would not make this notice go away.
+    assert.match(en[since], /plan run's records could not be checked for changes, because the plan run or a run after it could not check the state directory entirely or stopped part way/);
+    assert.match(ko[since], /계획 실행이나 그 뒤의 실행 가운데 상태 디렉터리를 다 확인하지 못했거나 중간에 멈춘 실행이 있어, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다/);
+    assert.ok(!/cleanup|too large/.test(en[since]), en[since]);
+    assert.ok(!/cleanup|너무 커|줄이세요/.test(ko[since]), ko[since]);
+    for (const [language, t] of [["en", en[since]], ["ko", ko[since]]] as const) {
+      // Like U-8's: shown whatever the apply's status, not a refusal, nothing found changed.
+      assert.ok(language === "en" ? /the apply was not stopped for this\. Read the result\.$/.test(t) : /이 때문에 적용을 멈추지는 않았습니다\. 결과를 확인하세요\.$/.test(t), language);
+      assert.ok(!/was applied|were applied|적용했습니다|records-changed mark|기록 변경 표시/.test(t), language);
+      assert.deepEqual(placeholders(t), [], language);
+      assert.notEqual(t, MESSAGE_TEXTS[language][own], language);
+    }
+  });
 });

@@ -160,6 +160,8 @@ const APPLY_REASONS: readonly string[] = [
   "apply_incomplete",
   "cancelled",
   "max_duration",
+  // DR-21: unsafe moves without the person's consent; nothing was moved.
+  "consent_required",
 ];
 
 /**
@@ -325,6 +327,9 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
   return {
     state: "checked",
     runId,
+    // G-A: a model run or an apply run (DR-12), and the plan run an apply applied.
+    kind: first.kind,
+    ...(first.kind === "apply" ? { planRunId: first.planRunId as RunId } : {}),
     startedAt,
     taskId,
     status,

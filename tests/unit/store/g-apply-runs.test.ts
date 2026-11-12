@@ -123,6 +123,8 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
     assert.deepEqual(entry, {
       state: "checked",
       runId: APPLY_RUN,
+      kind: "apply",
+      planRunId: PLAN_RUN,
       startedAt: "2026-01-02T03:05:00.120Z",
       taskId: "organize-task",
       status: "done",
@@ -133,6 +135,25 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
     });
     assert.equal(await inspectRun(root, APPLY_RUN), "checked");
     assert.equal(await latestRunId(root), APPLY_RUN);
+  });
+
+  test("DR-21: an apply that stopped for consent (needs-input/consent_required) is checked, with nothing applied", async () => {
+    const root = await workspace();
+    await applyRun(root, applyResult({ status: "needs-input", reason: "consent_required", exitCode: 3, applied: [] }));
+    const entry = (await listRuns({ workspaceRoot: root })).runs[0] as Extract<RunListEntry, { state: "checked" }>;
+    assert.equal(entry.state, "checked");
+    assert.equal(entry.reason, "consent_required");
+    assert.equal(entry.changes, 0);
+  });
+
+  test("R-9 I-4: the apply journal takes a start record before each action", async () => {
+    const root = await workspace();
+    const journal = createApplyJournal({ workspaceRoot: root, runId: APPLY_RUN, clock });
+    await journal.append(STARTED);
+    await journal.append({ type: "plan_item_started", index: 0, action: { kind: "move", from: "a.txt" as MaskedText, to: "b/a.txt" as MaskedText, sha256: HASH_A } });
+    await journal.close();
+    const lines = (await readFile(join(root, ".codaryn", "runs", APPLY_RUN, "journal.jsonl"), "utf8")).trimEnd().split("\n");
+    assert.equal(JSON.parse(lines[1] as string).type, "plan_item_started");
   });
 
   test("an apply run still in progress is listed without a status and is not latest", async () => {

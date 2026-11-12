@@ -84,7 +84,9 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
    ▼
 앱 계층 (src/app)
    ├ 입력 해석과 실행 전 보안 검사 (지금은 CLI의 runCli를 부른다. 이행 2에서 옮겨 온다)
-   ├ 조립 (A-1부터 앱 계층의 것. 명령의 부모 환경은 실행의 환경 사본, DR-4)
+   ├ 조립 (A-1부터 앱 계층의 것. 명령의 부모 환경은 실행의 환경 사본, DR-4.
+   │       DR-38: journal·변경 기록기·계획 기록기는 store의 createRunRecorders로 만들고 그 stateGuard를 엔진에 넘긴다.
+   │       적용 실행은 CLI의 runApply가 조립한다)
    ├ 수명: 이벤트 전달(다시 가림), 취소, 질문 중계, 결과 저장, 잠금 해제, 실행 단위 안내(Y-4)
    └ 읽기: 보고서, 변경 비교(다시 가림), 계획 보기
    │  EngineDeps
@@ -235,6 +237,14 @@ export interface RunObserver {
   - 어떤 실행이 손상인지, `latest`가 어느 실행인지는 store와 CLI(`listRuns`, `latestRunId`, `resolveRunRef`)가 정한다(N-18, N-23, N-26). 앱 계층은 고르지 않는다.
   - `resolveRun`은 `--run latest`가 고른 실행과 시작 시각을 행동 전에 보이게 한다(N-23 b).
   - `runs --json`처럼 키 모양과 지금 키를 가린다(N-23 a).
+- 상태 디렉터리 보기와 정리(DR-39, GU-4) [구현]. store의 `summarizeState`·`planCleanup`·`applyCleanup`을 앱 계층의 검사와 함께 낸다(`src/app/cleanup.ts`).
+  - `stateSummary({ workspace })` → `{ kind: "state_summary", summary }`: 실행 id·종류·상태·시작 시각과 크기, 폐기 보관함과 parked 파일의 수와 크기. 사람의 파일 이름은 없다.
+  - `previewCleanup({ workspace, selection })` → `{ kind: "cleanup_preview", now, plan }`: 무엇을 지울지(항목과 경고, 막힌 항목, 합계, 정리하지 않는 parked, 다이제스트). 아무것도 지우지 않는다. `now`는 `olderThanDays`를 센 때이고, 적용에 그대로 돌려준다.
+  - `applyCleanup({ workspace, selection, now, confirmation: { digest, discarded } })` → `{ kind: "cleanup_applied", outcome }`
+    - store가 잠금 아래에서 계획을 다시 만들고, 다이제스트가 확인한 것과 같을 때만 지운다. 아니면 `plan_changed`다.
+    - 폐기 보관함(사람의 파일)은 `discarded: true`일 때만 지운다. 아니면 `not_confirmed`로 남는다.
+    - 사람에게 묻는 것은 GUI 메인 프로세스다.
+  - 인자는 읽기 전에 검사한다. 실행 디렉터리 이름 그대로(`isStoredRunId`), 0 이상의 정수 일수, `reverted: true`만, 모르는 필드 없음, 계약의 시각 꼴, 64자리 16진수 다이제스트, 참·거짓인 `discarded`. 아니면 `invalid_arguments`다.
 
 ### 5.5 되돌리기 [구현 A-1]
 
@@ -479,11 +489,11 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - DR-41부터 작업 종류의 `policy`는 설정의 것과 합쳐진다(계약 `mergeWorkflowPolicy`: 보호 경로는 합집합, 명령과 계획 동작은 양쪽이 모두 허용한 것만). 그래서 자기 정책을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)마다, 무엇이 바뀌었든, 합친 정책을 전과 후로 비교한다.
       - 설정의 첫 정책이 보호 경로만 더하면 작업 종류의 보호 경로는 남으므로 넓히기가 아니다. 설정이 `planActions`를 적지 않게 되거나 정책을 지우면, `organize`가 좁혀졌던 계획 동작을 되찾으므로 넓히기다.
       - 필드는 `workflows.<id>.policy.planActions`처럼 작업 종류를 이름에 담는다. 설정 쪽 항목과 같은 종류·같은 필드(작업 종류 앞부분과 목록 번호를 뺀 것)를 되풀이하는 항목은 빼고, 작업 종류의 실행이 다르게 넓어질 때만 준다.
-      - `verifiers`는 합치지 않는다(설정의 것, 없으면 작업 종류의 것). 그래서 설정의 `verifiers`가 처음 생기거나 없어질 때 비교한다.
+      - `verifiers`도 DR-43 (a)부터 합친다(계약 `mergeWorkflowVerifiers`). 작업 종류의 검증기가 먼저 늘 돌고, 설정의 것은 id가 겹치지 않으면 더해진다. 빈 목록은 아무것도 지우지 못한다. 그래서 자기 검증기를 가진 작업 종류마다 합친 목록을 전과 후로 비교한다. 설정의 첫 검증기는 작업 종류의 검사를 대체하지 않으므로 넓히기가 아니다.
       - 좁히기는 확인 대상이 아니다. 대신 무엇이 빠지는지 알린다(아래 `policyNarrowings`).
-    - `policyNarrowings`(DR-41, 계약 `workflowPolicyNarrowings`)
-      - `readSettings`의 보기와 변경 제안에 있다. 작업 종류마다, 자기 규칙이 설정의 정책에서 빼는 것을 `{ workflow, kind, count }`로 준다.
-      - 종류는 `commands_dropped`, `commands_narrowed`, `plan_actions_dropped`, `restore_path_tokens_off`이다. 규칙·명령·경로는 담지 않는다.
+    - `policyNarrowings`(DR-41, DR-43 (a), 계약 `workflowPolicyNarrowings`·`workflowVerifierNarrowings`)
+      - `readSettings`의 보기와 변경 제안에 있다. 작업 종류마다, 자기 규칙이 설정의 정책과 검증기에서 빼는 것을 `{ workflow, kind, count }`로 준다.
+      - 종류는 `commands_dropped`, `commands_narrowed`, `plan_actions_dropped`, `restore_path_tokens_off`, `verifiers_dropped`(작업 종류의 것과 id가 겹치는 다른 검사)이다. 규칙·명령·경로·검사 내용은 담지 않는다.
       - 예: 설정에 명령을 더하면 `organize`는 그것을 빼므로 `{ workflow: "organize", kind: "commands_dropped", count: 1 }`이다.
       - 프로필의 정책은 여기서 보지 않는다.
   - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.

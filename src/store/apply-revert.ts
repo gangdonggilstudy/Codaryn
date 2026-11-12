@@ -25,7 +25,8 @@
  *   `changed_since_run`, nothing touched. A failed action was not done and is not listed.
  * - A record that does not belong to the run, a stored name other than the action's
  *   (DISCARDED_STORED_NAME_PATTERN_SOURCE), or a plan that cannot be trusted rejects with
- *   ApplyRecordError (`invalid_run_record`) before anything is changed.
+ *   ApplyRecordError (`invalid_run_record`) before anything is changed. A plan run that is gone
+ *   (no directory or no plan.json) rejects with PlanRunMissingError (`plan_run_missing`, R-9c C-1).
  */
 
 import { createReadStream } from "node:fs";
@@ -46,7 +47,7 @@ import {
 } from "../contracts/index.js";
 import type { ContentHash, RevertAction, RevertOutcome, RevertSkipReason, RevertedFile, ResolvedPlanAction, SkippedFile, Workspace } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { errorCode, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
+import { errorCode, hasExactRunEntry, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
 import { discardedRootPath } from "./discarded.js";
 import { canonicalActions } from "./plan.js";
 
@@ -68,6 +69,16 @@ interface Item {
 
 /** The journal's records failed a check. Thrown as RevertRunError("invalid_run_record") by the caller. */
 export class ApplyRecordError extends Error {}
+
+/**
+ * R-9c C-1: the plan run the apply used has no directory or no plan.json any more, so the real paths
+ * are not known. Thrown as RevertRunError("plan_run_missing") by the caller; nothing was changed.
+ */
+export class PlanRunMissingError extends Error {}
+
+function planRunMissing(): never {
+  throw new PlanRunMissingError("the plan run this apply used is gone; it is needed to revert the apply; nothing was changed");
+}
 
 function bad(): never {
   throw new ApplyRecordError("the apply run's journal or its plan cannot be used; nothing was changed");
@@ -208,14 +219,19 @@ function applyRecords(journal: string, runId: string): { readonly planRunId: str
  */
 async function trustedPlan(workspaceRoot: string, planRunId: string, digest: ContentHash): Promise<readonly ResolvedPlanAction[]> {
   const dir = runDir(workspaceRoot, planRunId);
-  if (!(await isPlainDirectory(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME))) || !(await isPlainDirectory(dir))) return bad();
+  if (!(await isPlainDirectory(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME)))) return bad();
+  // R-9c C-1: no entry of exactly that name (N-27 a), or no plan.json in it: the plan run is gone.
+  // One that exists but is a link, or a plan.json that differs, is invalid_run_record.
+  if (!(await hasExactRunEntry(workspaceRoot, planRunId))) planRunMissing();
+  if (!(await isPlainDirectory(dir))) return bad();
+  const file = join(dir, PLAN_FILE_NAME);
   let bytes: Buffer;
   try {
-    const file = join(dir, PLAN_FILE_NAME);
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) return bad();
     bytes = await readFile(file);
-  } catch {
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") planRunMissing();
     return bad();
   }
   if (createHash("sha256").update(bytes).digest("hex") !== digest) bad();

@@ -37,7 +37,9 @@ async function tree(dir: string): Promise<Record<string, string>> {
   const walk = async (current: string, prefix: string): Promise<void> => {
     for (const entry of await readdir(current, { withFileTypes: true })) {
       const key = `${prefix}${entry.name}`;
-      if (entry.isDirectory()) {
+      if (entry.isSymbolicLink()) {
+        out[key] = "link";
+      } else if (entry.isDirectory()) {
         out[`${key}/`] = "dir";
         await walk(join(current, entry.name), `${key}/`);
       } else {
@@ -149,7 +151,7 @@ describe("revertRun on an apply run (G-E)", () => {
     assert.equal(await readFile(join(root, "inbox", "old.log"), "utf8"), LOG);
   });
 
-  test("a path recorded with a privacy token goes back through the stored plan; without a plan the revert rejects (DR-24 f)", async () => {
+  test("a path recorded with a privacy token goes back through the stored plan; without a plan run the revert rejects (DR-24 f, R-9c C-1)", async () => {
     const masked = `inbox/${TOKEN}.txt`;
     const withPlan = await appliedWorkspace({ recordedFrom: masked });
     const outcome = await revertRun({ workspaceRoot: withPlan.root, runId: APPLY_RUN });
@@ -158,7 +160,7 @@ describe("revertRun on an apply run (G-E)", () => {
 
     const noPlan = await appliedWorkspace({ recordedFrom: masked, withPlan: false });
     for (const dryRun of [true, false]) {
-      await assert.rejects(revertRun({ workspaceRoot: noPlan.root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "invalid_run_record");
+      await assert.rejects(revertRun({ workspaceRoot: noPlan.root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === "plan_run_missing");
     }
     assert.equal(await readFile(join(noPlan.root, "docs", "report.txt"), "utf8"), REPORT, "not touched");
   });
@@ -420,5 +422,41 @@ describe("R-9c C-2: a discard whose directory was never made, or is gone", () =>
     const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
     assert.deepEqual(outcome.skipped, [{ path: "inbox/old.log", reason: "io_error" }]);
     assert.equal(await readFile(join(elsewhere, "1"), "utf8"), LOG, "the file behind the link stays");
+  });
+});
+
+describe("R-9c C-1: an apply whose plan run is gone", () => {
+  const rejectsWith = async (root: string, code: string): Promise<void> => {
+    const before = await tree(root);
+    for (const dryRun of [true, false]) {
+      await assert.rejects(revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun }), (error: unknown) => error instanceof RevertRunError && error.code === code, `dryRun ${dryRun}`);
+    }
+    assert.deepEqual(await tree(root), before, "nothing changes");
+  };
+
+  test("review reproduction F5: the plan run's directory was deleted: plan_run_missing, not invalid_run_record", async () => {
+    const { root } = await appliedWorkspace();
+    await rm(join(root, ".codaryn", "runs", PLAN_RUN), { recursive: true });
+    await rejectsWith(root, "plan_run_missing");
+  });
+
+  test("the plan run's directory stays but its plan.json was deleted: plan_run_missing", async () => {
+    const { root } = await appliedWorkspace();
+    await rm(join(root, ".codaryn", "runs", PLAN_RUN, "plan.json"));
+    await rejectsWith(root, "plan_run_missing");
+  });
+
+  test("a plan.json that exists but differs, or a plan run directory that is a link, stays invalid_run_record", async () => {
+    const changed = await appliedWorkspace();
+    await writeFile(join(changed.root, ".codaryn", "runs", PLAN_RUN, "plan.json"), "{}\n", "utf8");
+    await rejectsWith(changed.root, "invalid_run_record");
+
+    const linked = await appliedWorkspace();
+    const elsewhere = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-planrun-")));
+    roots.push(elsewhere);
+    const planDir = join(linked.root, ".codaryn", "runs", PLAN_RUN);
+    await rename(planDir, join(elsewhere, PLAN_RUN));
+    await symlink(join(elsewhere, PLAN_RUN), planDir, "junction");
+    await rejectsWith(linked.root, "invalid_run_record");
   });
 });

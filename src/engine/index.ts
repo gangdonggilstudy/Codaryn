@@ -98,6 +98,7 @@ import type {
   VerifierResult,
   WorkflowToolName,
 } from "../contracts/index.js";
+import { countPrivacyTokens } from "../contracts/index.js";
 import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
 import type { FailedForFeedback } from "./feedback.js";
 import { FINAL_MESSAGE_KEY_MARKER, finalMessageOf } from "./final-message.js";
@@ -342,6 +343,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   /** The run_start manifest (U-1). Every later check compares with it. Local only, never recorded. */
   let baseline: IntegrityManifest | null = null;
   /** `changed` of the latest recorded `integrity_checked`; undefined while none was recorded. */
+  // DR-52 (U-25): the protected tokens in what the engine sent to the model (EngineResult.masking).
+  let maskedPlaces = 0;
   let protectedChanged: readonly MaskedText[] | undefined;
   // DR-47 (U-21): the masked text of the last model response when it was a final reply; reset when
   // the model is asked again, so a run that ended without a reply has none.
@@ -1051,6 +1054,12 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         system: turn === 1 ? system : null,
         newMessages: messages.slice(sent),
       });
+      // DR-52: each text counted once, when first sent; the model's own messages are not counted.
+      if (turn === 1) maskedPlaces += countPrivacyTokens(system);
+      for (const message of messages.slice(sent)) {
+        if (message.role === "user") maskedPlaces += countPrivacyTokens(message.content);
+        else if (message.role === "tool") for (const sentResult of message.results) maskedPlaces += countPrivacyTokens(sentResult.content);
+      }
       sent = messages.length;
 
       // W-1: this turn and its tool calls may change protected material.
@@ -1354,6 +1363,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       notices,
       // U-2: only when at least one integrity_checked was recorded; the last one's list.
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
+      // DR-52: counts only, and only when the gateway says it holds at least one value.
+      ...(privacy.registeredValues !== undefined && privacy.registeredValues > 0
+        ? { masking: { registeredValues: privacy.registeredValues, maskedPlaces } }
+        : {}),
       // DR-38: only when at least one state_checked was recorded; the last one's list.
       ...(stateChanged !== undefined ? { stateChanged } : {}),
       // DR-47: the agent's last message, only when the run's last model response was a final reply

@@ -46,6 +46,14 @@ export const PRIVACY_TOKEN_ID_LENGTH = 16;
 export const PRIVACY_TOKEN_PATTERN_SOURCE = "\\[\\[CODARYN_SECRET:[0-9a-f]{16}\\]\\]";
 
 /**
+ * DR-52 (AXM-17): how many well-formed tokens a masked text holds (EngineResult.masking.maskedPlaces
+ * counts them). Never a position or a length.
+ */
+export function countPrivacyTokens(text: string): number {
+  return text.match(new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE, "g"))?.length ?? 0;
+}
+
+/**
  * Regular expression source for token-like fragments (case-insensitive use intended).
  * A fragment that matches this but is not an issued, well-formed token is an invalid token.
  */

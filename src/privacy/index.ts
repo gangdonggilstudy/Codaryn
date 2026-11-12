@@ -199,6 +199,11 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
     }
     for (const form of listedForms(secret)) knownForms.add(form);
   }
+  /**
+   * DR-52 (U-25): how many distinct values were registered. A value written with other line endings
+   * is the same value (lineEndingForms); its other forms are never counted. A count only.
+   */
+  const registeredValues = new Set(options.secrets.map((secret) => secret.replace(/\r\n/g, "\n"))).size;
   const forms = [...knownForms];
   /** DR-40 (a): each form without separators, when long enough to look for split. */
   const splitForms = [...new Set(forms.map((form) => compactKeyText(form)))].filter(
@@ -430,5 +435,7 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
   }
 
   const gateway: PrivacyGateway = { mask, resolveToolArgs, rebuildDocument };
+  // DR-52 (U-25): a count only, fixed once the gateway is made.
+  Object.defineProperty(gateway, "registeredValues", { value: registeredValues, enumerable: true, writable: false, configurable: false });
   return gateway;
 };

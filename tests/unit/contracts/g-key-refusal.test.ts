@@ -15,6 +15,8 @@ import {
   createKeyRefusalCheck,
   createKeyValueCheck,
   holdsRefusedKeyShape,
+  keyLettersAndDigits,
+  keyLikeSkeleton,
 } from "../../../src/contracts/index.js";
 
 const p = (...parts: string[]) => parts.join("");
@@ -252,5 +254,28 @@ describe("DR-42 (b), R-25b L-2: the shapes are checked again without invisible c
     const spaced = `use ${KEY.slice(0, 25)} ${KEY.slice(25)} here`;
     assert.equal(holdsRefusedKeyShape(spaced), false);
     assert.ok(createKeyRefusalCheck([KEY])(spaced));
+  });
+});
+
+describe("DR-43 (c), R-32 L-1: letters and digits are compared only for a key-like registered value", () => {
+  test("R-32: a phrase kept in a key variable does not refuse an ordinary sentence with its words", () => {
+    const cases: [string, string][] = [
+      ["your-api-key-goes-here", "Add a line to the README: your api key goes here, in the .env file."],
+      ["no-key-needed-for-local-llm", "Document that no key needed for local llm servers in the guide."],
+      ["placeholder_for_local_server", "Fix the docs: placeholder (for) local, server."],
+    ];
+    for (const [value, text] of cases) assert.equal(createKeyRefusalCheck([value])(text), false, value);
+    assert.ok(createKeyRefusalCheck(["your-api-key-goes-here"])("keep your-api-key-goes-here out"), "the value as written is still found");
+  });
+
+  test("a real key split by a variation selector is still refused (DR-42 (a) stays for key-like values)", () => {
+    assert.ok(createKeyRefusalCheck([KEY])(`use ${KEY.slice(0, 25)}${String.fromCodePoint(0xfe0f)}${KEY.slice(25)} here`));
+  });
+
+  test("the condition, shared with the privacy gateway and the CLI", () => {
+    const yes = [keyLettersAndDigits(KEY), "Ab3dE9fGh1JkLm2N", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"];
+    const no = ["summer2026winter", "MyAwesomeApplication", "notapassword1234", "1234567890123456", "yourapikeygoeshere", "Ab3dE9fGh1JkLm2", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d"];
+    for (const value of yes) assert.ok(keyLikeSkeleton(value), value);
+    for (const value of no) assert.equal(keyLikeSkeleton(value), false, value);
   });
 });

@@ -46,6 +46,8 @@ import type {
   RawVerifierResult,
   ResolvedPlanAction,
   RunReason,
+  StateCheckPhase,
+  StateFingerprint,
   TerminalRunStatus,
   VerifierOutcome,
   VerifierResult,
@@ -71,6 +73,9 @@ const CONSENT_REQUIRED_NOTICE =
   "some moves could replace a file that appears meanwhile, because this drive has no hard links; nothing was moved. A person can consent for one apply to move them anyway";
 const CONSENT_OTHER_PLAN_NOTICE = "the consent to unsafe moves was given for another plan and was not used";
 const UNSAFE_DONE_NOTICE = "some moves were made without the guarantee against replacing a file, with the person's consent";
+/** DR-38: a change to the run records found during the apply (paths follow), or a check not made. */
+const STATE_NOTICE_LEAD = "Codaryn's run records changed outside the apply, so they are not trusted: ";
+const STATE_FAILED_NOTICE = "the run records could not be checked, so they are not trusted";
 
 /** Every fixed text the apply run records. Tests mask these with the real gateway. */
 export const APPLY_FIXED_TEXTS: readonly string[] = [
@@ -89,6 +94,8 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   CONSENT_REQUIRED_NOTICE,
   CONSENT_OTHER_PLAN_NOTICE,
   UNSAFE_DONE_NOTICE,
+  STATE_NOTICE_LEAD,
+  STATE_FAILED_NOTICE,
 ];
 
 const MAX_TIMER_MS = 2_147_483_647;
@@ -103,6 +110,8 @@ const APPLY_INCOMPLETE: End = { status: "failed", reason: "apply_incomplete" };
 const CANCELLED: End = { status: "cancelled", reason: "cancelled" };
 const MAX_DURATION: End = { status: "budget-exhausted", reason: "max_duration" };
 const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_changed" };
+/** DR-38: the records changed other than by the apply, or could not be checked. */
+const STATE_CHANGED: End = { status: "failed", reason: "state_changed" };
 const CONSENT_REQUIRED: End = { status: "needs-input", reason: "consent_required" };
 
 function pathArgs(action: ResolvedPlanAction): JsonObject {
@@ -142,6 +151,12 @@ export const applyPlan: ApplyPlan = async (deps) => {
   const appliedRaw: AppliedPlanAction[] = [];
   const verifierResults: VerifierResult[] = [];
   let protectedChanged: readonly MaskedText[] | undefined;
+  // DR-38 (ApplyDeps.stateGuard): tier state's base from the start, tier run's last fingerprint
+  // (taken afresh after the actions), the last recorded list.
+  const stateGuard = deps.stateGuard;
+  let stateBase: StateFingerprint | null = null;
+  let lastRunPrint: StateFingerprint | null = null;
+  let stateChanged: readonly MaskedText[] | undefined;
   let baseline: IntegrityManifest | null = null;
   /** Whether actions or verifiers ran since the last integrity check (W-1 for apply runs). */
   let sinceCheck = false;
@@ -262,6 +277,56 @@ export const applyPlan: ApplyPlan = async (deps) => {
     limits: [],
   });
 
+  /**
+   * DR-38: one check of the state directory. `run`: "skip" (run_start), "fresh" (before_verify: a new
+   * base after the actions, compared with itself) or "chain" (against the last fingerprint). Tier
+   * state against the start's base. Recorded at run_start and run_end always, otherwise only on a
+   * change or when tier state is limited. A change, or a capture that cannot be made, marks the runs
+   * and ends the apply as failed/state_changed.
+   */
+  const checkState = async (phase: StateCheckPhase, run: "skip" | "fresh" | "chain"): Promise<End | null> => {
+    if (stateGuard === undefined) return null;
+    const changedRaw: string[] = [];
+    let limited = false;
+    try {
+      if (run !== "skip") {
+        const nowRun = await stateGuard.capture("run");
+        changedRaw.push(...stateGuard.compare(run === "chain" && lastRunPrint !== null ? lastRunPrint : nowRun, nowRun).changed);
+        lastRunPrint = nowRun;
+      }
+      const nowState = await stateGuard.capture("state");
+      if (stateBase === null) stateBase = nowState;
+      const comparison = stateGuard.compare(stateBase, nowState);
+      changedRaw.push(...comparison.changed);
+      limited = comparison.limited;
+    } catch {
+      notice(STATE_FAILED_NOTICE);
+      return STATE_CHANGED;
+    }
+    const sorted = [...new Set(changedRaw)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const changed: MaskedText[] = [];
+    for (const path of sorted) {
+      const masked = mask(path);
+      if (masked === null) {
+        notice(UNMASKABLE_NOTICE);
+        return STATE_CHANGED;
+      }
+      changed.push(masked);
+    }
+    if (phase === "run_start" || phase === "run_end" || changed.length > 0 || limited) {
+      await journal.append({ type: "state_checked", phase, changed, limited });
+      stateChanged = changed;
+    }
+    if (changed.length === 0) return null;
+    try {
+      await stateGuard.markRecordsChanged(changed);
+    } catch {
+      // The apply still ends as state_changed; the record above names the paths.
+    }
+    notice(`${STATE_NOTICE_LEAD}${sorted.join(", ")}`);
+    return STATE_CHANGED;
+  };
+
   const run = async (): Promise<End> => {
     await journal.append({
       type: "apply_started",
@@ -277,6 +342,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
     state.transition("running");
     if (consent !== null && !consented) notice(CONSENT_OTHER_PLAN_NOTICE);
     if ((await inspect("run_start")) === "changed") return PROTECTED_CHANGED;
+    const stateStart = await checkState("run_start", "skip");
+    if (stateStart !== null) return stateStart;
 
     // 2. Preflight: nothing is moved unless every action can be applied.
     const early = interrupted();
@@ -399,6 +466,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
     const stopped = interrupted();
     if (stopped !== null) return stopped;
     if ((await inspect("before_verify")) === "changed") return PROTECTED_CHANGED;
+    const stateBefore = await checkState("before_verify", "fresh");
+    if (stateBefore !== null) return stateBefore;
     const outcomes: VerifierOutcome[] = [];
     sinceCheck = true;
     let inventoryRaw: RawVerifierResult;
@@ -423,13 +492,17 @@ export const applyPlan: ApplyPlan = async (deps) => {
     const late = interrupted();
     if (late !== null) return late;
     if ((await inspect("after_verify")) === "changed") return PROTECTED_CHANGED;
+    const stateAfter = await checkState("after_verify", "chain");
+    if (stateAfter !== null) return stateAfter;
     if (outcomes.includes("fail")) return { status: "failed", reason: "verifier_failed" };
     if (outcomes.includes("inconclusive")) return { status: "needs-input", reason: "verifier_inconclusive" };
     return { status: "done", reason: "verified" };
   };
 
   try {
-    const end = await run();
+    const ended = await run();
+    // DR-38: the run records at the end; a change replaces the end.
+    const end = stateGuard === undefined || ended.reason === "state_changed" ? ended : ((await checkState("run_end", "chain")) ?? ended);
     // W-1 for apply runs: actions or verifiers that no check followed are checked once more. The
     // end keeps its status (done always follows an after_verify check).
     if (sinceCheck && baseline !== null && end.status !== "done") {
@@ -456,6 +529,7 @@ export const applyPlan: ApplyPlan = async (deps) => {
       journalPath: `${STATE_DIR_NAME}/${RUNS_DIR_NAME}/${runId}/${JOURNAL_FILE_NAME}`,
       notices,
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
+      ...(stateChanged !== undefined ? { stateChanged } : {}),
     };
     return result;
   } finally {

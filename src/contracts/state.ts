@@ -129,13 +129,23 @@ export interface ApplyRecorders {
 export type CreateApplyRecorders = (options: ApplyRecordersOptions) => ApplyRecorders;
 
 /**
- * U-29 (R-44 R44-L1): signature of `stateUncheckedSince`, exported by `src/store/index.ts`. Whether
- * the plan run, or a run or apply run whose id sorts after it, recorded a state check that was
- * limited (`state_checked` with `limited: true`) in its journal, or has a journal that cannot be read
- * (fail closed): such a run may have changed the plan run's records without a records-changed mark.
- * Reads only. The CLI passes it as ApplyDeps.planRecordsUnchecked.
+ * U-29 (R-44 R44-L1), U-33 (R-56): signature of `stateUncheckedSince`, exported by
+ * `src/store/index.ts`. Whether a run since the plan may have changed the plan run's records without
+ * a records-changed mark. The runs it looks at: the plan run, and every run or apply run that started
+ * in the plan run's second or later. Q-2: the second is the run id's first 16 characters
+ * (`YYYYMMDDTHHMMSSZ`), so every run of the plan run's second counts, whatever the random part of
+ * its id (fail closed). True when one of them
+ * - recorded a limited state check (`state_checked` with `limited: true`),
+ * - has a journal that cannot be read (fail closed), or
+ * - Q-3: has a journal without `run_finished`, so it ended before its last check (killed, power
+ *   lost). `applyRunId`, the apply that asks, is left out: its journal is still being written.
+ * Reads only. The CLI passes it as ApplyDeps.planRecordsUnchecked, with the apply's own run id.
  */
-export type StateUncheckedSince = (request: { readonly workspaceRoot: string; readonly planRunId: string }) => Promise<boolean>;
+export type StateUncheckedSince = (request: {
+  readonly workspaceRoot: string;
+  readonly planRunId: string;
+  readonly applyRunId: string;
+}) => Promise<boolean>;
 
 /**
  * `runs/<runId>/records-changed.json`: the run's records were changed by something other than the

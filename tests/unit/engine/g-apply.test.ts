@@ -804,6 +804,71 @@ describe("U-29 (R-44 R44-L1): an apply tells what a run before it could not chec
   });
 });
 
+describe("U-33 (R-56 Q-1 (a)): one notice kind, the text by its cause; the apply's own limited check comes first", () => {
+  const UNCHECKED = "(plan_records_unchecked)";
+  const OWN = "the state directory is too large to check entirely";
+  const EARLIER = "a run since the plan was made could not check the state directory entirely";
+  const told = (notices: readonly string[]) => notices.filter((notice) => notice.includes(UNCHECKED));
+
+  test("R56-L2: an own check limited at any phase, a run since the plan too: the apply's result and records are U-8's (as on main a191a50)", async () => {
+    // A done apply checks tier state four times: run_start, before_verify, after_verify, run_end.
+    for (const limitedFrom of [1, 2, 3, 4]) {
+      const asked = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard({ limitedFrom }) });
+      const before = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom }) });
+      const result = await applyPlan(asked.deps);
+      const u8 = await applyPlan(before.deps);
+      assert.deepEqual(result, u8, `limited from check ${limitedFrom}`);
+      assert.deepEqual(asked.journal.events, before.journal.events, `limited from check ${limitedFrom}`);
+      assert.deepEqual(told(result.notices).map((notice) => notice.includes(OWN)), [true], `limited from check ${limitedFrom}`);
+      assert.equal(Object.hasOwn(result, "planRecordsUncheckedCause"), false);
+    }
+  });
+
+  test("every own check complete, a run since the plan was not: the new text once, after the apply's checks, with the cause", async () => {
+    const run = setup({ planRecordsUnchecked: async () => true, stateGuard: new FakeApplyStateGuard({ limitedFrom: 5 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.noticeKinds], ["done", "verified", ["plan_records_unchecked"]]);
+    assert.equal(result.planRecordsUncheckedCause, "run_since_plan");
+    const [only, ...more] = told(result.notices);
+    assert.deepEqual(more, []);
+    assert.ok(only !== undefined && only.includes(EARLIER) && !only.includes(OWN) && !only.includes("cleanup"), JSON.stringify(result.notices));
+    assert.equal(result.notices.at(-1), only, "told when the apply's own checks are known to be complete");
+  });
+
+  test("no state guard, or a question that cannot be answered: the cause is the run since the plan (fail closed)", async () => {
+    const runs = [
+      setup({ planRecordsUnchecked: async () => true }),
+      setup({
+        planRecordsUnchecked: async () => {
+          throw new Error("journal unreadable");
+        },
+        stateGuard: new FakeApplyStateGuard(),
+      }),
+    ];
+    for (const run of runs) {
+      const result = await applyPlan(run.deps);
+      assert.deepEqual([result.noticeKinds, result.planRecordsUncheckedCause], [["plan_records_unchecked"], "run_since_plan"]);
+      assert.equal(told(result.notices).length, 1);
+    }
+  });
+
+  test("an apply that stops early still tells it: plan_stale before the moves", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "discard" ? "source_missing" : null) });
+    const run = setup({ planRecordsUnchecked: async () => true, executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.planRecordsUncheckedCause], ["failed", "plan_stale", "run_since_plan"]);
+    assert.equal(told(result.notices).length, 1);
+  });
+
+  test("nothing told: no cause", async () => {
+    for (const run of [setup({ planRecordsUnchecked: async () => false, stateGuard: new FakeApplyStateGuard() }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "planRecordsUncheckedCause"), false);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+});
+
 describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refused but says so", () => {
   const UNCHECKED = "plan_records_unchecked";
 

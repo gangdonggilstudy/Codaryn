@@ -6,6 +6,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -22,11 +23,13 @@ import type { RunListEntry } from "../../src/contracts/index.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { FORGED_FUTURE_AT, FORGED_FUTURE_RUN_ID, FORGED_MISMATCH_RUN_ID } from "../fixtures/review-inputs.js";
-import { REPO_ROOT, cliEnv, expectCliError, expectRunResult, lockPath, startCli, waitFor } from "../support/cli.js";
+import { NODE, REPO_ROOT, cliEnv, expectCliError, expectRunResult, lockPath, startCli, waitFor } from "../support/cli.js";
 import type { CliRun } from "../support/cli.js";
 import { expectReportOutput } from "../support/commands.js";
 import { runGuarded } from "../support/fake-anthropic.js";
 import { forgeRun } from "../support/forged-run.js";
+import { decodedSource } from "../support/leak.js";
+import { assertHumanError } from "../support/progress.js";
 import { expectRevertOutput, treeBytes, workspaceBytes } from "../support/repair-check.js";
 import { expectRunsOutput } from "../support/usability.js";
 
@@ -200,5 +203,94 @@ test("N-E E-6 실행 목록의 경계: 기록 없음, latest 없음, latest라�
     assert.equal(checked(output.runs[0]).status, null, "no result yet");
     assert.ok(existsSync(lockPath(sb.workspace)), "runs takes no lock and leaves the run's lock alone");
     expectRunResult(await live.done);
+  });
+});
+
+/** Whether the volume holding `dir` ignores case in names (NTFS, APFS by default). */
+function caseInsensitive(dir: string): boolean {
+  return existsSync(join(dir, STATE_DIR_NAME.toUpperCase()));
+}
+
+const REFUSED_REVERT_CODES = ["invalid_run_record", "run_not_found"];
+
+test("R-7 M-1 실행 id의 대소문자만 바꿔도 손상 실행을 되돌리지 않는다(N-27 (a))", { timeout: 120_000 }, async (t) => {
+  const d = await demoRun(t);
+  const notes = join(d.workspace, "notes.md");
+  const notesBytes = readFileSync(notes);
+  // The directories carry the canonical ids; the forged records carry their lower-case form.
+  const future = "20991231T235957Z-0c0ffee0";
+  const past = "20261111T000000Z-0c0ffee1";
+  forgeRun(d.workspace, { templateRunId: d.runId, runId: future, recordRunId: future.toLowerCase(), at: "2099-12-31T23:59:57.000Z", claimsCreated: "notes.md" });
+  forgeRun(d.workspace, { templateRunId: d.runId, runId: past, recordRunId: past.toLowerCase(), at: "2026-11-11T00:00:00.000Z", claimsCreated: "notes.md" });
+  t.diagnostic(`case-insensitive volume: ${String(caseInsensitive(d.workspace))}`);
+
+  // The genuine run asked for by its lower-case id must not be reverted either.
+  for (const runId of [future, future.toLowerCase(), past, past.toLowerCase(), d.runId.toLowerCase()]) {
+    for (const extra of [["--dry-run"], []]) {
+      const before = treeBytes(d.workspace);
+      const run = await cli(d.sb, ["revert", "--workspace", d.workspace, "--run", runId, ...extra]);
+      const output = JSON.parse(run.stdout.trim()) as { kind: string; code?: string };
+      assert.equal(output.kind, "error", `${runId} ${extra.join(" ")}: refused, got ${run.stdout.slice(0, 200)}`);
+      assert.ok(REFUSED_REVERT_CODES.includes(output.code ?? ""), `${runId}: ${String(output.code)}`);
+      assert.equal(run.exitCode, 2);
+      assert.deepEqual(treeBytes(d.workspace), before, `${runId} ${extra.join(" ")}: nothing changed, not even a revert record`);
+    }
+  }
+  assert.deepEqual(readFileSync(notes), notesBytes, "the user's notes.md survives");
+  assert.deepEqual(workspaceBytes(d.workspace), d.afterRun, "the genuine run's summary.md is still there");
+});
+
+test("R-7 L-2 report --json도 제어 문자로 끊긴 키 모양을 가린다(N-27 (c))", { timeout: 120_000 }, async (t) => {
+  const d = await demoRun(t);
+  const tail = "CDEFGHIJKLMNOPQRSTUVWXYZ012345";
+  // A fake key shape cut by BEL, built at run time; only its tail is looked for in the outputs.
+  const shaped = ["sk", "ant", `AB\u0007${tail}`].join("-");
+  const journal = join(d.workspace, STATE_DIR_NAME, RUNS_DIR_NAME, d.runId, "journal.jsonl");
+  const lines = readFileSync(journal, "utf8").split("\n");
+  const index = lines.findIndex((line) => line.includes('"type":"file_changed"'));
+  assert.ok(index > 0, "the demo run recorded a file change");
+  lines[index] = JSON.stringify({ ...(JSON.parse(lines[index] ?? "") as object), path: shaped });
+  writeFileSync(journal, lines.join("\n"));
+
+  // The Markdown lists the changes of result.json, so this record's path does not reach it; the
+  // check below only guards against the shape appearing there some other way.
+  const text = await cli(d.sb, ["report", "--workspace", d.workspace, "--run", d.runId]);
+  assert.equal(text.exitCode, 0);
+  assert.ok(!text.stdout.includes(tail), "the Markdown report does not show the key shape");
+  // The JSON carries the journal's changes: the record reaches it, masked as a whole.
+  const json = await cli(d.sb, ["report", "--workspace", d.workspace, "--run", d.runId, "--json"]);
+  const output = expectReportOutput(json, d.runId);
+  assert.equal(output.journal.changes[0]?.path, "[key]", "the forged path reaches the JSON masked");
+  assert.ok(!json.stdout.includes(tail), "the JSON line hides the key shape");
+  assert.ok(!decodedSource("stdout", json.stdout, true).text.includes(tail), "also once its strings are decoded");
+});
+
+test("R-7 L-3 손상된 되돌리기 기록이 있어도 runs 글 출력은 종료 0, 살아 있는 잠금의 거부는 stderr에 안내(N-23 (g), N-25 (a))", { timeout: 120_000 }, async (t) => {
+  await t.test("runs(글): 종료 0, 그 실행 줄에 되돌리기 기록 손상을 표시", async (st) => {
+    const d = await demoRun(st);
+    expectRevertOutput(await cli(d.sb, ["revert", "--workspace", d.workspace, "--run", d.runId]), d.runId);
+    writeFileSync(join(d.workspace, STATE_DIR_NAME, RUNS_DIR_NAME, d.runId, REVERT_RECORD_FILE_NAME), "{not json");
+    const run = await cli(d.sb, ["runs", "--workspace", d.workspace]);
+    assert.equal(run.exitCode, 0, `runs: ${run.stdout.slice(0, 300)}`);
+    const row = run.stdout.split(/\r?\n/).find((line) => line.startsWith(d.runId)) ?? "";
+    assert.ok(row.includes("revert record damaged"), `the row marks the revert record: ${JSON.stringify(row)}`);
+  });
+
+  await t.test("살아 있는 프로세스의 잠금: workspace_locked, stderr에 사람용 오류와 lock.json 안내, 잠금 그대로", async (st) => {
+    const holder = spawn(NODE, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+    // Added before the sandbox: the holder is this test's own process, ended through its handle.
+    st.after(() => {
+      holder.kill();
+    });
+    const d = await demoRun(st);
+    const lock = lockPath(d.workspace);
+    writeFileSync(lock, JSON.stringify({ pid: holder.pid, runId: "20261112T000000Z-0a0a0a0a", startedAt: "2026-11-12T00:00:00.000Z" }));
+    const lockBytes = readFileSync(lock);
+    const run = await cli(d.sb, ["run", "--task", d.task]);
+    expectCliError(run, "workspace_locked");
+    assert.equal(run.exitCode, CLI_ERROR_EXIT_CODES.workspace_locked);
+    assertHumanError(run, "workspace_locked", [d.sb.base]);
+    assert.ok(run.stderr.includes(".codaryn/lock.json"), "stderr says which file to delete when no Codaryn runs (N-25 a)");
+    assert.deepEqual(readFileSync(lock), lockBytes, "the lock is left as it was");
   });
 });

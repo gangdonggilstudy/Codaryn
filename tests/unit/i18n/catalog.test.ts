@@ -7,10 +7,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { CLI_ERROR_EXIT_CODES, MESSAGE_IDS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "../../../src/contracts/index.js";
-import type { MessageCatalog, MessageId, MessageLanguage, MessageParams } from "../../../src/contracts/index.js";
+import { CLI_ERROR_EXIT_CODES, INPUT_DIAGNOSTIC_FILES, MESSAGE_IDS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "../../../src/contracts/index.js";
+import type { MessageId, MessageLanguage } from "../../../src/contracts/index.js";
 import { createMessageCatalog, MESSAGE_TEXTS, MessageFormatError, PLACEHOLDER, REPLACEMENT } from "../../../src/i18n/index.js";
-import { CONTROL, IDS, LANGS, paramsFor, samples, specOf } from "./support.js";
+import { CONTROL, IDS, LANGS, loose, paramsFor, samples, specOf } from "./support.js";
 
 const HANGUL = /[가-힣]/u;
 
@@ -20,10 +20,6 @@ function sorted(values: Iterable<string>): string[] {
 
 function placeholders(template: string): string[] {
   return [...template.matchAll(PLACEHOLDER)].map((match) => match[1] as string);
-}
-
-function format(catalog: MessageCatalog, id: MessageId, params: Record<string, unknown>): string {
-  return catalog.format(id, params as MessageParams);
 }
 
 describe("i18n catalog: completeness", () => {
@@ -38,21 +34,19 @@ describe("i18n catalog: completeness", () => {
     for (const language of LANGS) {
       for (const id of IDS) {
         const template = MESSAGE_TEXTS[language][id];
-        const used = placeholders(template);
-        assert.deepEqual(sorted(used), sorted(Object.keys(specOf(id))), `${language} ${id}`);
+        assert.deepEqual(sorted(placeholders(template)), sorted(Object.keys(specOf(id))), `${language} ${id}`);
         assert.ok(!/[{}]/.test(template.replace(PLACEHOLDER, "")), `${language} ${id}: stray brace`);
         assert.ok(template.trim().length > 0, `${language} ${id}: empty`);
       }
     }
   });
 
-  test("listed ids cover every error code, status, reason and advice", () => {
+  test("listed ids cover every error code, status, reason, advice and diagnostic file", () => {
     const ids = new Set<string>(MESSAGE_IDS);
-    for (const code of Object.keys(CLI_ERROR_EXIT_CODES)) {
-      assert.ok(ids.has(`error.${code}.what`) && ids.has(`error.${code}.fix`), code);
-    }
+    for (const code of Object.keys(CLI_ERROR_EXIT_CODES)) assert.ok(ids.has(`error.${code}.what`) && ids.has(`error.${code}.fix`), code);
     for (const status of TERMINAL_RUN_STATUSES) assert.ok(ids.has(`status.${status}`), status);
     for (const reason of RUN_REASONS) assert.ok(ids.has(`reason.${reason}`) && ids.has(`advice.${reason}`), reason);
+    for (const file of INPUT_DIAGNOSTIC_FILES) assert.ok(ids.has(`diagnostic.file.${file}`), file);
   });
 });
 
@@ -60,8 +54,9 @@ describe("i18n catalog: format", () => {
   test("renders every message in both languages as one non-empty clean line", () => {
     for (const language of LANGS) {
       const catalog = createMessageCatalog(language);
+      const format = loose(catalog);
       for (const id of IDS) {
-        const line = format(catalog, id, paramsFor(catalog, id));
+        const line = format(id, paramsFor(catalog, id));
         assert.ok(line.trim().length > 0, `${language} ${id}`);
         assert.ok(!CONTROL.test(line), `${language} ${id}: control character`);
         for (const leftover of ["undefined", "NaN", "[object", "{", "}"]) assert.ok(!line.includes(leftover), `${language} ${id}: ${line}`);
@@ -72,11 +67,12 @@ describe("i18n catalog: format", () => {
   test("accepts the sample of every kind and uses every parameter", () => {
     for (const language of LANGS) {
       const catalog = createMessageCatalog(language);
+      const format = loose(catalog);
       for (const id of IDS) {
-        const base = format(catalog, id, paramsFor(catalog, id));
+        const base = format(id, paramsFor(catalog, id));
         for (const [name, kind] of Object.entries(specOf(id))) {
-          const rejected = format(catalog, id, paramsFor(catalog, id, { name, value: {} }));
-          const other = format(catalog, id, paramsFor(catalog, id, { name, value: samples(kind, catalog)[1] }));
+          const rejected = format(id, paramsFor(catalog, id, { name, value: {} }));
+          const other = format(id, paramsFor(catalog, id, { name, value: samples(kind, catalog)[1] }));
           assert.notEqual(base, rejected, `${language} ${id}: sample for ${name} (${kind}) was rejected`);
           assert.notEqual(base, other, `${language} ${id}: parameter ${name} is not used`);
         }
@@ -86,13 +82,14 @@ describe("i18n catalog: format", () => {
 
   test("throws for an unknown id, a missing parameter and an extra parameter, without the values", () => {
     const catalog = createMessageCatalog("en");
+    const format = loose(catalog);
     const cases: [() => string, RegExp][] = [
-      [() => format(catalog, "probe.unknown" as MessageId, {}), /^unknown message id$/],
-      [() => format(catalog, "__proto__" as MessageId, {}), /^unknown message id$/],
-      [() => format(catalog, "summary.changes", {}), /^message summary\.changes: missing parameter count$/],
-      [() => catalog.format("summary.changes"), /^message summary\.changes: missing parameter count$/],
-      [() => format(catalog, "summary.changes", { count: 1, probeExtra: "probe-value" }), /^message summary\.changes: unexpected parameter$/],
-      [() => format(catalog, "status.done", { probeExtra: "probe-value" }), /^message status\.done: unexpected parameter$/],
+      [() => format("probe.unknown" as MessageId, {}), /^unknown message id$/],
+      [() => format("__proto__" as MessageId, {}), /^unknown message id$/],
+      [() => format("summary.changes", {}), /^message summary\.changes: missing parameter count$/],
+      [() => format("summary.changes"), /^message summary\.changes: missing parameter count$/],
+      [() => format("summary.changes", { count: 1, probeExtra: "probe-value" }), /^message summary\.changes: unexpected parameter$/],
+      [() => format("status.done", { probeExtra: "probe-value" }), /^message status\.done: unexpected parameter$/],
     ];
     for (const [call, message] of cases) {
       assert.throws(call, (error: unknown) => {
@@ -104,7 +101,7 @@ describe("i18n catalog: format", () => {
     }
   });
 
-  test("examples in both languages", () => {
+  test("examples in both languages, through the typed format", () => {
     const ko = createMessageCatalog("ko");
     const en = createMessageCatalog("en");
     assert.equal(ko.language, "ko");
@@ -115,9 +112,18 @@ describe("i18n catalog: format", () => {
       ko.format("progress.tool_denied", { tool: ko.format("tool.run_command"), permission: "command", code: "command_not_allowed" }),
       "명령 실행 — 거부 (command/command_not_allowed)",
     );
-    const status = ko.format("status.done");
-    assert.equal(ko.format("progress.finished", { status, reason: "verified" }), "끝 — 완료 (verified)");
-    assert.equal(en.format("init.saved", { path: "%APPDATA%\\Codaryn\\config.json" }), "Saved: %APPDATA%\\Codaryn\\config.json");
+    assert.equal(ko.format("progress.finished", { status: ko.format("status.done"), reason: "verified" }), "끝 — 완료 (verified)");
+    assert.equal(
+      ko.format("summary.result", { status: ko.format("status.done"), reason: ko.format("reason.verified") }),
+      "결과: 완료 — 지정한 검증 모두 통과",
+    );
+    assert.equal(en.format("init.saved", { location: "%APPDATA%\\Codaryn\\config.json" }), "Saved: %APPDATA%\\Codaryn\\config.json");
+    assert.equal(ko.format("progress.verifier", { number: 2, outcome: ko.format("outcome.pass") }), "검증 2번 — 통과");
+    assert.equal(
+      en.format("summary.next_revert", { runId: "20261112T010203Z-0123abcd" as never }),
+      "Revert: codaryn revert --workspace <workspace> --run 20261112T010203Z-0123abcd",
+    );
+    assert.equal(ko.format("diagnostic.json_syntax", { line: 3, column: 14 }), "JSON 문법 오류: 3줄 14열");
   });
 
   test("an unknown language falls back to en", () => {
@@ -126,15 +132,12 @@ describe("i18n catalog: format", () => {
     assert.equal(catalog.format("status.done"), "done");
   });
 
-  test("text and detail take only what this catalog produced", () => {
+  test("text takes only what this catalog produced", () => {
     const ko = createMessageCatalog("ko");
     const en = createMessageCatalog("en");
-    const fromEn = en.format("status.done");
-    assert.equal(ko.format("summary.result", { text: fromEn }), `결과: ${REPLACEMENT}`);
-    assert.equal(ko.format("summary.result", { text: "완료" }), `결과: ${REPLACEMENT}`);
-    const own = ko.format("status.done");
-    assert.equal(ko.format("summary.result", { text: own }), "결과: 완료");
-    assert.equal(ko.format("error.detail", { detail: ko.format("error.invalid_task.what") }), "자세히: task 파일을 읽을 수 없거나 값이 올바르지 않습니다");
+    const format = loose(ko);
+    assert.equal(format("summary.result", { status: en.format("status.done"), reason: ko.format("reason.verified") }), `결과: ${REPLACEMENT} — 지정한 검증 모두 통과`);
+    assert.equal(format("summary.result", { status: "완료", reason: "probe" }), `결과: ${REPLACEMENT} — ${REPLACEMENT}`);
   });
 });
 
@@ -146,10 +149,17 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
-  test("codes stay English: the status and reason codes pass through unchanged", () => {
+  test("codes stay English", () => {
     const ko = createMessageCatalog("ko");
     assert.equal(ko.format("progress.model_error", { turn: 3, kind: "auth_failed" }), "3턴 — 모델 호출 오류 (auth_failed)");
     assert.equal(ko.format("progress.integrity_unchanged", { phase: "before_verify" }), "보호 대상 확인 — 바뀌지 않음 (before_verify)");
+  });
+
+  test("command hints never repeat a typed path", () => {
+    for (const language of LANGS) {
+      for (const id of ["summary.next_report", "summary.next_revert"] as const) assert.match(MESSAGE_TEXTS[language][id], /--workspace <workspace> --run \{runId\}$/);
+      for (const id of ["summary.next_report_here", "summary.next_revert_here"] as const) assert.match(MESSAGE_TEXTS[language][id], /--workspace \. --run \{runId\}$/);
+    }
   });
 
   test("no text claims protection Codaryn does not give (UX 1.4, M-8)", () => {

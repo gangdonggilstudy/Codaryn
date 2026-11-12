@@ -6,7 +6,7 @@
  */
 
 import { messageParams } from "../contracts/index.js";
-import type { CreateMessageCatalog, MessageCatalog, MessageId, MessageLanguage, MessageParams } from "../contracts/index.js";
+import type { CatalogText, CreateMessageCatalog, MessageCatalog, MessageFormatArgs, MessageId, MessageLanguage } from "../contracts/index.js";
 import { EN_MESSAGES } from "./en.js";
 import { KO_MESSAGES } from "./ko.js";
 import { DEFAULT_MESSAGE_LANGUAGE, parseMessageLanguage } from "./language.js";
@@ -20,7 +20,7 @@ export const MESSAGE_TEXTS: { readonly [L in MessageLanguage]: MessageTexts } = 
 /** `{name}` in a template. */
 export const PLACEHOLDER = /\{([A-Za-z][A-Za-z0-9]*)\}/g;
 
-/** How many of its own recent outputs a catalog remembers for `text` and `detail` parameters. */
+/** How many of its own recent outputs a catalog remembers for `text` parameters (CatalogText). */
 export const OWN_TEXT_MEMORY = 512;
 
 export class MessageFormatError extends Error {
@@ -38,23 +38,22 @@ export const createMessageCatalog: CreateMessageCatalog = (language: MessageLang
     if (produced.size > OWN_TEXT_MEMORY) produced.delete(produced.values().next().value as string);
   };
 
-  return {
-    language: lang,
-    format(id: MessageId, params?: MessageParams): string {
-      if (typeof id !== "string" || !Object.hasOwn(texts, id)) throw new MessageFormatError("unknown message id");
-      const spec = messageParams(id);
-      const given: Readonly<Record<string, unknown>> = params ?? {};
-      for (const name of Object.keys(given)) {
-        if (!Object.hasOwn(spec, name)) throw new MessageFormatError(`message ${id}: unexpected parameter`);
-      }
-      const values: Record<string, string> = {};
-      for (const [name, kind] of Object.entries(spec)) {
-        if (!Object.hasOwn(given, name)) throw new MessageFormatError(`message ${id}: missing parameter ${name}`);
-        values[name] = formatParam(kind, given[name], lang, ownText);
-      }
-      const line = cleanLine(texts[id].replace(PLACEHOLDER, (_whole, name: string) => values[name] ?? REPLACEMENT));
-      remember(line);
-      return line;
-    },
-  };
+  function format<I extends MessageId>(id: I, ...args: MessageFormatArgs<I>): CatalogText {
+    if (typeof id !== "string" || !Object.hasOwn(texts, id)) throw new MessageFormatError("unknown message id");
+    const spec = messageParams(id);
+    const given: Readonly<Record<string, unknown>> = (args[0] as Readonly<Record<string, unknown>> | undefined) ?? {};
+    for (const name of Object.keys(given)) {
+      if (!Object.hasOwn(spec, name)) throw new MessageFormatError(`message ${id}: unexpected parameter`);
+    }
+    const values: Record<string, string> = {};
+    for (const [name, kind] of Object.entries(spec)) {
+      if (!Object.hasOwn(given, name)) throw new MessageFormatError(`message ${id}: missing parameter ${name}`);
+      values[name] = formatParam(kind, given[name], ownText);
+    }
+    const line = cleanLine(texts[id].replace(PLACEHOLDER, (_whole, name: string) => values[name] ?? REPLACEMENT));
+    remember(line);
+    return line as CatalogText;
+  }
+
+  return { language: lang, format };
 };

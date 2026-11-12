@@ -1,18 +1,25 @@
 /**
  * 한국어 문구. 고정 문구만 두고, 매개변수는 `{이름}`으로 쓴다(종류는 src/contracts/human.ts).
  * 용어는 docs/design/ux-design.md 5절, 상태 표현은 6절을 따른다. 확인한 범위만 말하고, 하지 않는
- * 보호를 주장하지 않는다. 오류 코드·상태·이유 코드는 영어 그대로 둔다(배치는 렌더러가 한다).
+ * 보호를 주장하지 않는다. 코드(상태, 이유, 권한, 거부 코드 등)는 영어 그대로 둔다.
+ * 명령 안내는 고정 문구로 쓰고, 입력한 경로 대신 `<workspace>`를 쓴다(N-14).
  */
 
 import type { MessageTexts } from "./catalog.js";
 
 export const KO_MESSAGES: MessageTexts = {
   "error.label": "오류",
-  "error.detail": "자세히: {detail}",
   "error.fix_label": "고치는 법",
-  "error.doctor_hint": "점검: {command}",
+  "error.doctor_hint": "점검: codaryn doctor",
 
-  "summary.result": "결과: {text}",
+  "diagnostic.json_syntax": "JSON 문법 오류: {line}줄 {column}열",
+  "diagnostic.unknown_field": "{field}에 모르는 필드가 있습니다(이름은 표시하지 않습니다)",
+  "diagnostic.unknown_field_suggest": "{field}에 모르는 필드가 있습니다. 가까운 이름: {suggestion}",
+  "diagnostic.invalid_value": "{field} 값이 올바르지 않습니다(값은 표시하지 않습니다)",
+  "diagnostic.missing_field": "{field} 필드가 없습니다",
+  "diagnostic.too_deep": "JSON이 너무 깊게 중첩되어 있습니다",
+
+  "summary.result": "결과: {status} — {reason}",
   "summary.verifiers": "검증: {total}개 중 {passed}개 통과(지정한 검증 범위에서)",
   "summary.no_verifiers": "검증: 지정한 검증 없음",
   "summary.changes": "바뀐 파일: {count}개",
@@ -20,19 +27,22 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.usage": "사용: 모델 {turns}턴 · 도구 호출 {toolCalls}회 · {durationMs} ms",
   "summary.run_id": "실행 id: {runId}",
-  "summary.next_report": "보고서: {command}",
-  "summary.next_revert": "되돌리기: {command}",
-  "summary.config_default": "기본 위치의 설정 파일을 썼습니다: {path}",
-  "summary.profile": "프로필: {name}",
+  "summary.next_report": "보고서: codaryn report --workspace <workspace> --run {runId}",
+  "summary.next_report_here": "보고서: codaryn report --workspace . --run {runId}",
+  "summary.next_revert": "되돌리기: codaryn revert --workspace <workspace> --run {runId}",
+  "summary.next_revert_here": "되돌리기: codaryn revert --workspace . --run {runId}",
+  "summary.config_default": "기본 위치의 설정 파일을 썼습니다: {location}",
+  "summary.profile_applied": "프로필을 적용했습니다(--profile).",
 
-  "progress.run_started": "실행 시작 — 작업 {task}, 모델 제공자 {provider}",
+  "progress.run_started": "실행 시작 — 모델 제공자 {provider}",
+  "progress.config_default": "기본 위치의 설정 파일을 씁니다: {location}",
   "progress.turn": "{turn}턴",
   "progress.model_error": "{turn}턴 — 모델 호출 오류 ({kind})",
   "progress.tool_allowed": "{tool} — 허용",
   "progress.tool_denied": "{tool} — 거부 ({permission}/{code})",
-  "progress.file_created": "파일 만듦 {path}",
-  "progress.file_changed": "파일 바꿈 {path}",
-  "progress.verifier": "검증 {id} — {outcome}",
+  "progress.file_created": "파일 만듦",
+  "progress.file_changed": "파일 바꿈",
+  "progress.verifier": "검증 {number}번 — {outcome}",
   "progress.repair": "재수정 {attempt}회차 — 검증 {count}개 미통과",
   "progress.integrity_unchanged": "보호 대상 확인 — 바뀌지 않음 ({phase})",
   "progress.integrity_changed": "보호 대상 확인 — {count}개가 바뀌었거나 확인할 수 없음 ({phase})",
@@ -55,21 +65,20 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.column.started": "시작",
   "runs.column.status": "결과",
   "runs.column.changes": "변경",
-  "runs.column.task": "작업",
   "runs.empty": "이 작업 공간에는 실행 기록이 없습니다.",
   "runs.incomplete": "결과 없음(진행 중이거나 중단됨)",
+  "runs.damaged": "손상(기록을 확인할 수 없음)",
   "runs.reverted": "되돌림",
-  "runs.unreadable": "읽을 수 없는 실행 기록 {count}개는 건너뛰었습니다.",
-  "runs.truncated": "표시하지 않은 실행 {count}개가 더 있습니다. 보려면 --limit을 늘리세요.",
+  "runs.omitted": "표시하지 않은 실행 {count}개가 더 있습니다. 보려면 --limit을 늘리세요.",
 
-  "init.location": "설정 파일 위치: {path}",
+  "init.location": "설정 파일 위치: {location}",
   "init.confirm_create": "이 위치에 설정 파일을 만들까요?",
   "init.declined": "아무것도 만들지 않았습니다.",
   "init.not_terminal": "터미널이 아니어서 묻지 않고 기본값만 썼습니다.",
-  "init.model_no_key": "모델: 키가 없어 목록을 가져올 수 없습니다. 키를 등록한 뒤 {command}로 고르세요.",
+  "init.model_no_key": "모델: 키가 없어 목록을 가져올 수 없습니다. 키를 등록한 뒤 codaryn models --use로 고르세요.",
   "init.model_pick": "모델 번호를 고르세요(Enter면 나중에 고릅니다).",
-  "init.model_list_failed": "모델 목록을 가져오지 못했습니다({kind}). 자리표시자를 남겼으니 나중에 {command}로 고르세요.",
-  "init.model_placeholder": "모델은 자리표시자로 남겼습니다. {command}로 고르세요.",
+  "init.model_list_failed": "모델 목록을 가져오지 못했습니다({kind}). 자리표시자를 남겼으니 나중에 codaryn models --use로 고르세요.",
+  "init.model_placeholder": "모델은 자리표시자로 남겼습니다. codaryn models --use로 고르세요.",
   "init.limits_default": "한도(기본값): 턴 {turns} · 도구 호출 {toolCalls} · 토큰 {tokens} · {minutes}분",
   "init.commands_suggest": "이 명령을 허용할까요? {command} (인자는 보이는 대로 고정됩니다)",
   "init.protected_suggest": "보호 경로로 둘까요? {path} (파일 도구로 쓸 수 없게 됩니다)",
@@ -79,8 +88,8 @@ export const KO_MESSAGES: MessageTexts = {
   "init.key_hint_windows":
     "Windows: rundll32 sysdm.cpl,EditEnvironmentVariables 로 환경 변수 창을 열어 사용자 변수 ANTHROPIC_API_KEY를 더하고 새 터미널을 여세요.",
   "init.key_hint_posix": "macOS·Linux: 편집기로 셸 시작 파일(~/.profile 등)에 export ANTHROPIC_API_KEY 줄을 더하고 새 터미널을 여세요.",
-  "init.saved": "저장했습니다: {path}",
-  "init.next": "다음: {command}",
+  "init.saved": "저장했습니다: {location}",
+  "init.next": "다음: codaryn doctor",
   "init.overridden_by_env": "CODARYN_CONFIG가 설정되어 있어 실행은 그 파일을 읽습니다. 이 파일을 쓰려면 CODARYN_CONFIG를 지우세요.",
   "init.yes_no": "(예: y, 아니오: n)",
 
@@ -165,4 +174,8 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.skip.missing_snapshot": "스냅샷 없음",
   "revert.skip.io_error": "입출력 오류",
   "revert.skip.missing_record": "기록 없음",
+
+  "diagnostic.file.config": "설정 파일",
+  "diagnostic.file.task": "task 파일",
+  "diagnostic.file.script": "대본 파일",
 };

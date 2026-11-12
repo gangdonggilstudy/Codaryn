@@ -1,19 +1,26 @@
 /**
  * English texts. Fixed text only; a parameter is written `{name}` (kinds in src/contracts/human.ts).
  * Wording follows docs/design/ux-design.md sections 5 and 6: say what was checked, and do not
- * claim protection Codaryn does not give. Codes stay as they are; the renderer places them.
- * Counts are written as "label: {count}" so no plural form is needed.
+ * claim protection Codaryn does not give. Codes stay as they are. Command hints are fixed text and
+ * say `<workspace>` instead of a typed path (N-14). Counts are written as "label: {count}" so no
+ * plural form is needed.
  */
 
 import type { MessageTexts } from "./catalog.js";
 
 export const EN_MESSAGES: MessageTexts = {
   "error.label": "error",
-  "error.detail": "Details: {detail}",
   "error.fix_label": "To fix",
-  "error.doctor_hint": "Check: {command}",
+  "error.doctor_hint": "Check: codaryn doctor",
 
-  "summary.result": "Result: {text}",
+  "diagnostic.json_syntax": "JSON syntax error at line {line}, column {column}",
+  "diagnostic.unknown_field": "{field} has an unknown field (its name is not shown)",
+  "diagnostic.unknown_field_suggest": "{field} has an unknown field. Did you mean {suggestion}?",
+  "diagnostic.invalid_value": "{field} has an invalid value (values are not shown)",
+  "diagnostic.missing_field": "{field} is missing",
+  "diagnostic.too_deep": "the JSON is nested too deeply",
+
+  "summary.result": "Result: {status} — {reason}",
   "summary.verifiers": "Checks passed: {passed} of {total} (within the configured checks)",
   "summary.no_verifiers": "Checks: none configured",
   "summary.changes": "Files changed: {count}",
@@ -21,19 +28,22 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.usage": "Usage: model turns {turns} · tool calls {toolCalls} · {durationMs} ms",
   "summary.run_id": "Run id: {runId}",
-  "summary.next_report": "Report: {command}",
-  "summary.next_revert": "Revert: {command}",
-  "summary.config_default": "Used the config file in the default location: {path}",
-  "summary.profile": "Profile: {name}",
+  "summary.next_report": "Report: codaryn report --workspace <workspace> --run {runId}",
+  "summary.next_report_here": "Report: codaryn report --workspace . --run {runId}",
+  "summary.next_revert": "Revert: codaryn revert --workspace <workspace> --run {runId}",
+  "summary.next_revert_here": "Revert: codaryn revert --workspace . --run {runId}",
+  "summary.config_default": "Used the config file in the default location: {location}",
+  "summary.profile_applied": "A profile was applied (--profile).",
 
-  "progress.run_started": "run started — task {task}, provider {provider}",
+  "progress.run_started": "run started — provider {provider}",
+  "progress.config_default": "using the config file in the default location: {location}",
   "progress.turn": "turn {turn}",
   "progress.model_error": "turn {turn} — model request failed ({kind})",
   "progress.tool_allowed": "{tool} — allowed",
   "progress.tool_denied": "{tool} — denied ({permission}/{code})",
-  "progress.file_created": "created {path}",
-  "progress.file_changed": "changed {path}",
-  "progress.verifier": "check {id} — {outcome}",
+  "progress.file_created": "created",
+  "progress.file_changed": "changed",
+  "progress.verifier": "check #{number} — {outcome}",
   "progress.repair": "repair {attempt} — checks not passed: {count}",
   "progress.integrity_unchanged": "protected material check — unchanged ({phase})",
   "progress.integrity_changed": "protected material check — changed or not checkable: {count} ({phase})",
@@ -56,21 +66,20 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.column.started": "started",
   "runs.column.status": "result",
   "runs.column.changes": "changes",
-  "runs.column.task": "task",
   "runs.empty": "This workspace has no runs.",
   "runs.incomplete": "no result (running or stopped)",
+  "runs.damaged": "damaged (the record could not be checked)",
   "runs.reverted": "reverted",
-  "runs.unreadable": "Unreadable run records skipped: {count}",
-  "runs.truncated": "More runs not shown: {count}. Raise --limit to see them.",
+  "runs.omitted": "More runs not shown: {count}. Raise --limit to see them.",
 
-  "init.location": "Config file location: {path}",
+  "init.location": "Config file location: {location}",
   "init.confirm_create": "Create the config file there?",
   "init.declined": "Nothing was created.",
   "init.not_terminal": "Not a terminal: nothing was asked and only the defaults were written.",
-  "init.model_no_key": "Model: without a key the list cannot be fetched. After registering the key, choose one with {command}.",
+  "init.model_no_key": "Model: without a key the list cannot be fetched. After registering the key, choose one with codaryn models --use.",
   "init.model_pick": "Choose a model number (Enter to choose later).",
-  "init.model_list_failed": "The model list could not be fetched ({kind}). A placeholder was left; choose a model later with {command}.",
-  "init.model_placeholder": "The model was left as a placeholder. Choose one with {command}.",
+  "init.model_list_failed": "The model list could not be fetched ({kind}). A placeholder was left; choose a model later with codaryn models --use.",
+  "init.model_placeholder": "The model was left as a placeholder. Choose one with codaryn models --use.",
   "init.limits_default": "Limits (defaults): turns {turns} · tool calls {toolCalls} · tokens {tokens} · {minutes} min",
   "init.commands_suggest": "Allow this command? {command} (its arguments stay fixed as shown)",
   "init.protected_suggest": "Make this a protected path? {path} (file tools will not write it)",
@@ -80,8 +89,8 @@ export const EN_MESSAGES: MessageTexts = {
   "init.key_hint_windows":
     "Windows: run rundll32 sysdm.cpl,EditEnvironmentVariables, add the user variable ANTHROPIC_API_KEY, then open a new terminal.",
   "init.key_hint_posix": "macOS and Linux: add an export ANTHROPIC_API_KEY line to your shell start file (such as ~/.profile) in an editor, then open a new terminal.",
-  "init.saved": "Saved: {path}",
-  "init.next": "Next: {command}",
+  "init.saved": "Saved: {location}",
+  "init.next": "Next: codaryn doctor",
   "init.overridden_by_env": "CODARYN_CONFIG is set, so runs read that file instead. Unset it to use this one.",
   "init.yes_no": "(y/n)",
 
@@ -166,4 +175,8 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.skip.missing_snapshot": "snapshot missing",
   "revert.skip.io_error": "input/output error",
   "revert.skip.missing_record": "record missing",
+
+  "diagnostic.file.config": "config file",
+  "diagnostic.file.task": "task file",
+  "diagnostic.file.script": "script file",
 };

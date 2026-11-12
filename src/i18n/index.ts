@@ -7,20 +7,12 @@
  *   messages.format("summary.changes", { count: 2 });
  *
  * Error codes, JSON fields, exit codes and command names stay English. A message never holds a
- * value read from a file or the environment: params.ts turns every parameter into a number, a
- * fixed code, a schema field position or a fixed display string, or "?".
+ * value read from a file or the environment (N-14): params.ts lets a parameter show only a
+ * number, a contract code, a SchemaFieldPath, a RunId, a fixed display string or text this
+ * catalog produced, and "?" for anything else.
  */
 
 export { createMessageCatalog, MESSAGE_TEXTS, MessageFormatError, OWN_TEXT_MEMORY, PLACEHOLDER } from "./catalog.js";
 export type { MessageTexts } from "./catalog.js";
 export { DEFAULT_MESSAGE_LANGUAGE, localeLanguage, parseMessageLanguage, runtimeLocale, selectMessageLanguage } from "./language.js";
-export {
-  cleanLine,
-  DISPLAY_LOCATIONS,
-  formatParam,
-  GENERATED_RUN_ID,
-  HIDDEN_KEY,
-  KNOWN_FIELD_NAMES,
-  MESSAGE_CODES,
-  REPLACEMENT,
-} from "./params.js";
+export { cleanLine, CLOSED_KIND_VALUES, formatParam, HIDDEN_KEY, REPLACEMENT } from "./params.js";

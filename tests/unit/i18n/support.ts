@@ -10,29 +10,42 @@ export function specOf(id: MessageId): Readonly<Record<string, MessageParamKind>
   return messageParams(id);
 }
 
-/**
- * Two different valid values of a kind; the first is the default sample. `text` and `detail`
- * take only text the same catalog produced, so they are made with it.
- */
-export function samples(kind: MessageParamKind, catalog: MessageCatalog): readonly [string | number, string | number] {
+/** `format` without the per-id types, for tests that pass wrong values on purpose. */
+export function loose(catalog: MessageCatalog): (id: MessageId, params?: Readonly<Record<string, unknown>>) => string {
+  return catalog.format as unknown as (id: MessageId, params?: Readonly<Record<string, unknown>>) => string;
+}
+
+/** Two different valid values of a kind; the first is the default sample. `text` is made with the same catalog. */
+export function samples(kind: MessageParamKind, catalog: MessageCatalog): readonly [unknown, unknown] {
   switch (kind) {
     case "count":
       return [11, 12];
-    case "code":
-      return ["done", "command_not_allowed"];
+    case "status":
+      return ["done", "failed"];
+    case "reason":
+      return ["verified", "model_error"];
+    case "permission":
+      return ["command", "path"];
+    case "denial":
+      return ["command_not_allowed", "protected_path"];
+    case "modelError":
+      return ["auth_failed", "timeout"];
+    case "phase":
+      return ["run_start", "after_verify"];
+    case "provider":
+      return ["scripted", "anthropic"];
     case "field":
       return ["policy.commands[2]", "limits.maxModelTurns"];
     case "runId":
       return ["20261112T010203Z-0123abcd", "20261112T010204Z-89abcdef"];
-    case "path":
-      return [DEFAULT_CONFIG_DISPLAY.windows, DEFAULT_CONFIG_DISPLAY.home];
-    case "name":
-      return ["read_file", "run_command"];
-    case "command":
-      return ["codaryn doctor", "codaryn revert --workspace <workspace> --run 20261112T010203Z-0123abcd"];
     case "text":
-    case "detail":
       return [catalog.format("status.done"), catalog.format("status.failed")];
+    case "location":
+      return [DEFAULT_CONFIG_DISPLAY.windows, "--config"];
+    case "suggestedCommand":
+      return ["npm test", "npm run build"];
+    case "suggestedPath":
+      return ["tests", "package.json"];
   }
 }
 
@@ -41,11 +54,11 @@ export function paramsFor(
   catalog: MessageCatalog,
   id: MessageId,
   replace?: { readonly name: string; readonly value: unknown },
-): Record<string, string | number> {
+): Record<string, unknown> {
   const params: Record<string, unknown> = {};
   for (const [name, kind] of Object.entries(specOf(id))) params[name] = samples(kind, catalog)[0];
   if (replace !== undefined) params[replace.name] = replace.value;
-  return params as Record<string, string | number>;
+  return params;
 }
 
 /** A fake value with the shape of an Anthropic key, built at run time so no source line has that shape. */

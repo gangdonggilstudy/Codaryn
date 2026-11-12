@@ -54,6 +54,7 @@ describe("DR-39: cleaning up run records and discarded files", () => {
     assert.deepEqual([...CLEANUP_KEPT_REASONS], [
       "not_confirmed",
       "not_reverted_not_confirmed",
+      "discarded_left",
       "used_by_kept_apply",
       "changed",
       "not_plain_directory",
@@ -207,5 +208,35 @@ describe("R-34b: damaged records, folders a cleanup did not leave", () => {
     const none: Pick<StateSummary, "leftovers" | "unknownFolders"> = { leftovers: { count: 0, files: 0, bytes: 0 } };
     assert.ok(summary.unknownFolders?.count === 1 && none.unknownFolders === undefined, "absent when there is none");
     assert.deepEqual(FIXED_MESSAGES["cleanup.summary.unknown_folders"], { count: "count", bytes: "count" });
+  });
+});
+
+describe("U-13 (UXM-1): an apply run's records stay while its discarded files stay", () => {
+  test("UXM-1: --confirm and --include-not-reverted without --delete-discarded keep the apply, its plan run and the folder", () => {
+    // The UXM-1 procedure: an apply that discarded inbox/old-draft.tmp (stored as 2), not reverted;
+    // cleanup --older-than 0 --discarded-older-than 0 --confirm <digest> --include-not-reverted.
+    const apply = toRunId("20261112T135834Z-86b30b72") as RunId;
+    const planRun = toRunId("20261112T135800Z-0000aaaa") as RunId;
+    const confirmation: CleanupConfirmation = { digest, discarded: false, includeNotReverted: true };
+    const outcome: CleanupOutcome = {
+      ok: true,
+      removed: [],
+      kept: [
+        { target: "run", runId: apply, reason: "discarded_left" },
+        { target: "run", runId: planRun, reason: "used_by_kept_apply" },
+        { target: "discarded", runId: apply, reason: "not_confirmed" },
+      ],
+      totals: emptyTotals,
+    };
+    assert.ok(confirmation && outcome.ok);
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("cleanup.kept.discarded_left"));
+    // The result summary says how many apply runs were kept so, after cleanup.done.
+    assert.deepEqual(FIXED_MESSAGES["cleanup.done_discarded_left"], { count: "count" });
+  });
+
+  test("the warning is the one the preview shows for such an apply; an empty folder (a complete revert leaves it) holds nothing", () => {
+    const apply = (hasDiscarded: boolean) => cleanupRecordWarnings({ kind: "apply", changes: 1, lastRevert: "complete", hasDiscarded, recordsChanged: false });
+    assert.deepEqual(apply(true), ["discarded_left"]);
+    assert.deepEqual(apply(false), []);
   });
 });

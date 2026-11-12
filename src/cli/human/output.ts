@@ -136,6 +136,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
   // U-18 (AXM-4): the calls of this run with a decision that was not allowed. Such a call is a denied
   // call only (its decision is its line); its failed result is not told again.
   const deniedCalls = new Set<string>();
+  /**
+   * U-52 (R-65 L-1, I-1): one renderer may draw several runs and applies (the GUI engine host keeps
+   * one per language). What it remembers of one (the verifier numbers, the denied calls) starts
+   * again at the next one's start record: call ids are unique within a run only.
+   */
+  const startAgain = (): void => {
+    verifierNumbers.clear();
+    deniedCalls.clear();
+  };
 
   // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
@@ -352,6 +361,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     },
 
     progressLine(event: JournalEvent): string | null {
+      // U-52: a run's or an apply's start begins a new one, well formed or not (the GUI host gives
+      // every record to progressLine first, an apply's too).
+      const type: unknown = (event as { readonly type?: unknown }).type;
+      if (type === "run_started" || type === "apply_started") startAgain();
       let line: string | null;
       switch (event.type) {
         case "run_started": {
@@ -564,6 +577,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       let line: string | null;
       switch (event.type) {
         case "apply_started": {
+          // U-52: the CLI's apply draws with applyProgressLine only.
+          startAgain();
           const approval: unknown = event.approval;
           if (!isCount(event.actions, 1) || !isOneOf(approval, APPROVAL_CHANNELS)) {
             line = null;

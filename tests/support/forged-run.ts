@@ -26,10 +26,16 @@ export interface ForgeRunOptions {
   readonly claimsCreated: string;
   /** Also write a result.json copied from the template run (with the forged run id). Default false. */
   readonly withResult?: boolean;
+  /**
+   * The run id written inside the records (and result.json), when it must differ from the
+   * directory name. R-7 M-1: the directory has the canonical id, the records its lower-case form.
+   */
+  readonly recordRunId?: string;
 }
 
 /** Writes the forged run directory and returns it. Changes no workspace file. */
 export function forgeRun(workspace: string, options: ForgeRunOptions): string {
+  const recordRunId = options.recordRunId ?? options.runId;
   const runs = join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME);
   const templateLines = readFileSync(join(runs, options.templateRunId, JOURNAL_FILE_NAME), "utf8").split("\n");
   const first = JSON.parse(templateLines[0] ?? "") as JournalRecord;
@@ -37,7 +43,7 @@ export function forgeRun(workspace: string, options: ForgeRunOptions): string {
 
   const fileBytes = readFileSync(join(workspace, ...options.claimsCreated.split("/")));
   const records = [
-    { ...first, seq: 1, at: options.at, runId: options.runId },
+    { ...first, seq: 1, at: options.at, runId: recordRunId },
     {
       type: "file_changed",
       callId: "call_1_1",
@@ -47,7 +53,7 @@ export function forgeRun(workspace: string, options: ForgeRunOptions): string {
       created: true,
       seq: 2,
       at: options.at,
-      runId: options.runId,
+      runId: recordRunId,
     },
   ];
   const dir = join(runs, options.runId);
@@ -61,7 +67,7 @@ export function forgeRun(workspace: string, options: ForgeRunOptions): string {
   );
   if (options.withResult === true) {
     const result = JSON.parse(readFileSync(join(runs, options.templateRunId, RESULT_FILE_NAME), "utf8")) as Record<string, unknown>;
-    writeFileSync(join(dir, RESULT_FILE_NAME), JSON.stringify({ ...result, runId: options.runId }));
+    writeFileSync(join(dir, RESULT_FILE_NAME), JSON.stringify({ ...result, runId: recordRunId }));
   }
   return dir;
 }

@@ -4,7 +4,7 @@
 // workspaces are made in the temporary folder and removed afterwards. Needs `npm run build` here
 // and in the repository root.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -127,7 +127,9 @@ const expected = [
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)
-  ["sockets", (v) => typeof v === "string" || (v.tcp === 0 && v.udp === 0 && v.outside === 0)],
+  // R-10 L-5: only "not measured on this platform" off Windows may pass as text; on Windows any
+  // text means the measurement failed, which is a failure.
+  ["sockets", (v) => (typeof v === "string" ? process.platform !== "win32" && v === "not measured on this platform" : v.tcp === 0 && v.udp === 0 && v.outside === 0)],
 ];
 
 let failed = 0;
@@ -186,6 +188,59 @@ for (const [label, args, extra, judged] of switchRuns) {
 rmSync(started, { force: true });
 rmSync(join(gui, "build", "switch-profile"), { recursive: true, force: true });
 
-const total = expected.length + 1 + switchChecks;
+// R-10 L-5 (DR-8): the engine host ends with the app, when it quits and when its main process is
+// killed (its stdin closes). Waits at most five seconds for the host to go.
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function goneWithin(pid, ms) {
+  for (let waited = 0; waited <= ms; waited += 100) {
+    if (!alive(pid)) return true;
+    await sleep(100);
+  }
+  return false;
+}
+let lifeChecks = 0;
+const lifeCheck = (label, ok, detail) => {
+  lifeChecks += 1;
+  if (!ok) failed += 1;
+  process.stdout.write(`${ok ? "ok" : "FAIL"} ${label}: ${detail}\n`);
+};
+const hostPid = typeof seen.hostPid === "number" ? seen.hostPid : null;
+lifeCheck("hostEndsWithQuit", hostPid !== null && (await goneWithin(hostPid, 5_000)), `host ${hostPid} after the smoke app quit`);
+
+const lifeFile = join(gui, "build", "life.json");
+rmSync(lifeFile, { force: true });
+const held = spawn(electron, [join(gui, "build", "tests", "smoke", "life-entry.js")], { cwd: gui, env: { ...env, CODARYN_SMOKE_LIFE: "hold" }, stdio: "ignore" });
+let life = null;
+for (let waited = 0; waited < 60_000 && life === null; waited += 200) {
+  await sleep(200);
+  try {
+    life = JSON.parse(readFileSync(lifeFile, "utf8"));
+  } catch {
+    life = null;
+  }
+}
+if (life === null || typeof life.hostPid !== "number") {
+  lifeCheck("hostEndsWhenMainKilled", false, "the app did not start");
+  held.kill();
+} else {
+  // Kills the main process only (TerminateProcess on Windows), not its children.
+  process.kill(life.mainPid);
+  const gone = await goneWithin(life.hostPid, 5_000);
+  lifeCheck("hostEndsWhenMainKilled", gone, `host ${life.hostPid} after main ${life.mainPid} was killed`);
+  if (!gone) process.kill(life.hostPid);
+}
+await sleep(1_000);
+rmSync(lifeFile, { force: true });
+rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+
+const total = expected.length + 1 + switchChecks + lifeChecks;
 process.stdout.write(`gui smoke: ${total - Math.min(failed, total)} of ${total} checks passed, app exit ${run.status}\n`);
 process.exit(failed === 0 ? 0 : 1);

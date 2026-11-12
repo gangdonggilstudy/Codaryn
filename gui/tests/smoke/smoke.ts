@@ -37,17 +37,31 @@ interface Endpoint {
  */
 function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: number; endpoints: Endpoint[] } | string {
   if (process.platform !== "win32") return "not measured on this platform";
-  const powershell = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  // R-10 L-5: a failed measurement is a failure, never zero sockets. The cmdlets stop on any error,
+  // and the whole system must show some TCP and UDP endpoints, or the reading is not trusted.
+  const powershell =
+    process.env["CODARYN_SMOKE_POWERSHELL"] ?? join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   const script = [
+    "$ErrorActionPreference = 'Stop'",
     `$p = @(${pids.join(",")})`,
     "$local = @('127.0.0.1', '::1', '0.0.0.0', '::')",
-    "$t = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $p -contains $_.OwningProcess } | ForEach-Object { 'tcp ' + $_.LocalAddress + ' ' + $_.LocalPort + ' ' + $_.OwningProcess })",
-    "$u = @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object { $p -contains $_.OwningProcess } | ForEach-Object { 'udp ' + $_.LocalAddress + ' ' + $_.LocalPort + ' ' + $_.OwningProcess })",
-    "$o = @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { ($p -contains $_.OwningProcess) -and ($_.State -ne 'Listen') -and -not ($local -contains $_.RemoteAddress) } | ForEach-Object { 'out ' + $_.RemoteAddress + ' ' + $_.RemotePort + ' ' + $_.OwningProcess })",
+    "try { $allTcp = @(Get-NetTCPConnection); $allUdp = @(Get-NetUDPEndpoint) } catch { Write-Output 'measurement-failed'; exit 0 }",
+    "if ($allTcp.Count -eq 0 -or $allUdp.Count -eq 0) { Write-Output 'measurement-failed'; exit 0 }",
+    "$t = @($allTcp | Where-Object { ($_.State -eq 'Listen') -and ($p -contains $_.OwningProcess) } | ForEach-Object { 'tcp ' + $_.LocalAddress + ' ' + $_.LocalPort + ' ' + $_.OwningProcess })",
+    "$u = @($allUdp | Where-Object { $p -contains $_.OwningProcess } | ForEach-Object { 'udp ' + $_.LocalAddress + ' ' + $_.LocalPort + ' ' + $_.OwningProcess })",
+    "$o = @($allTcp | Where-Object { ($p -contains $_.OwningProcess) -and ($_.State -ne 'Listen') -and -not ($local -contains $_.RemoteAddress) } | ForEach-Object { 'out ' + $_.RemoteAddress + ' ' + $_.RemotePort + ' ' + $_.OwningProcess })",
+    "Write-Output 'measured'",
     "($t + $u + $o) -join \"`n\"",
   ].join("; ");
-  const out = execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+  let out: string;
+  try {
+    out = execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true }).trim();
+  } catch {
+    return "measurement failed";
+  }
+  if (!out.startsWith("measured")) return "measurement failed";
   const endpoints = out
+    .replace(/^measured/, "")
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0)
     .map((line) => {
@@ -143,6 +157,7 @@ startGui({
       // 7. Processes, sockets and outside connections.
       const state = await host();
       results["hostNode"] = "host" in state ? state.host.nodeVersion : state.failure;
+      results["hostPid"] = "host" in state ? (state.host.pid ?? null) : null;
       const metrics = app.getAppMetrics();
       const pids = new Set(metrics.map((metric) => metric.pid));
       if ("host" in state && state.host.pid !== undefined) pids.add(state.host.pid);

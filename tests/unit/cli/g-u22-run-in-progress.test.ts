@@ -3,7 +3,9 @@
  * Before, `report --run latest` answered run_not_found ("no finished run"), the same as for a
  * workspace with nothing in it, so a caller could not tell "wait" from "there is none". Now a run
  * without a result that holds the workspace lock with a live holder is run_in_progress (exit 6, the
- * try-again family). With no such run it stays run_not_found, and a finished run is chosen as before.
+ * try-again family). With no such run it stays run_not_found.
+ * PM decision (DR-48): `latest` is the newest run. When it is still going the answer is
+ * run_in_progress even if a finished run comes before it; a run id given as it is shows that run.
  * Real engine and store; the lock is held by this process; scripted model; nothing is sent.
  */
 
@@ -129,10 +131,19 @@ describe("U-22 (AXM-8): --run latest while the run is still going", () => {
     assert.deepEqual(codeOf(await report(base)), ["error", "run_not_found", 2]);
   });
 
-  test("an earlier finished run is still chosen as before while a newer one is going", async () => {
+  test("a finished run before the one still going: latest is the newest run, so run_in_progress (PM, DR-48)", async () => {
+    const { base, release } = await workspace({ earlier: true, going: true });
+    try {
+      assert.deepEqual(codeOf(await report(base)), ["error", "run_in_progress", 6]);
+    } finally {
+      await release();
+    }
+  });
+
+  test("the finished run's id given as it is shows that run while the newer one is going", async () => {
     const { base, earlier, release } = await workspace({ earlier: true, going: true });
     try {
-      const outcome = await report(base);
+      const outcome = await runReport({ argv: ["report", "--workspace", "work", "--run", earlier as string, "--json"], cwd: base, env: {}, listRuns });
       assert.equal(outcome.exitCode, 0, JSON.stringify(outcome));
       const output = ("text" in outcome ? JSON.parse(outcome.text) : outcome.output) as { runId: string };
       assert.equal(output.runId, earlier);
@@ -141,12 +152,22 @@ describe("U-22 (AXM-8): --run latest while the run is still going", () => {
     }
   });
 
-  test("the lock is asked only when no finished run can be chosen; another run holding it is not this run going", async () => {
+  test("a finished run before a newer one that stopped without a result (not going): the finished one, as before", async () => {
+    const { base, earlier } = await workspace({ earlier: true, going: false });
+    const outcome = await report(base);
+    assert.equal(outcome.exitCode, 0, JSON.stringify(outcome));
+    const output = ("text" in outcome ? JSON.parse(outcome.text) : outcome.output) as { runId: string };
+    assert.equal(output.runId, earlier);
+  });
+
+  test("the lock is asked for runs without a result newer than the latest finished one only; another run holding it is not this run going", async () => {
     const runId = "20260102T030405Z-0a0b0c0d";
     const entry = { state: "checked", runId, status: null } as unknown as RunListEntry;
+    const finished = { state: "checked", runId: "20260102T030400Z-0a0b0c0c", status: "done" } as unknown as RunListEntry;
+    const older = { state: "checked", runId: "20260102T030300Z-0a0b0c0b", status: null } as unknown as RunListEntry;
     const deps = (holder: string, asked: string[]) => ({
       exists: async () => false,
-      listRuns: (async () => ({ runs: [entry] })) as never,
+      listRuns: (async () => ({ runs: [entry, finished, older] })) as never,
       runInProgress: async (root: string, id: string) => {
         asked.push(`${root}:${id}`);
         return holder === id;
@@ -155,7 +176,8 @@ describe("U-22 (AXM-8): --run latest while the run is still going", () => {
     const asked: string[] = [];
     const going = await resolveRunReference("root", "latest", deps(runId, asked));
     assert.deepEqual([going.ok, going.ok ? null : going.code, asked], [false, "run_in_progress", [`root:${runId}`]]);
-    const other = await resolveRunReference("root", "latest", deps("20260102T030405Z-ffffffff", []));
-    assert.deepEqual([other.ok, other.ok ? null : other.code], [false, "run_not_found"]);
+    const askedOther: string[] = [];
+    const other = await resolveRunReference("root", "latest", deps("20260102T030405Z-ffffffff", askedOther));
+    assert.deepEqual([other.ok, other.ok ? other.runId : null, askedOther], [true, "20260102T030400Z-0a0b0c0c", [`root:${runId}`]]);
   });
 });

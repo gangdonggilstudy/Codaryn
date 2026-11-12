@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "organize-demo",
+  "workflow": "organize",
+  "workflowRef": "organize",
+  "goal": "inbox의 사진은 photos/2025로, 영수증은 documents/2026으로 옮기고, 임시 파일(.tmp)은 폐기한다.",
+  "workspaceRoot": "workspace",
+  "model": { "provider": "scripted", "scriptPath": "script.json" },
+  "policy": {
+    "commands": [],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false,
+    "planActions": ["move", "discard"]
+  },
+  "privacy": { "secretEnv": [] },
+  "limits": {
+    "maxModelTurns": 4,
+    "maxToolCalls": 4,
+    "maxTotalTokens": 1000,
+    "maxDurationMs": 60000,
+    "maxRepairAttempts": 0,
+    "maxSameFailures": 2
+  },
+  "verifiers": [
+    {
+      "id": "sorted",
+      "kind": "file_rules",
+      "rules": [
+        { "type": "exists", "path": "photos/2025/beach-2025.jpg" },
+        { "type": "exists", "path": "documents/2026/receipt-2026.pdf" },
+        { "type": "absent", "path": "inbox/old-draft.tmp" }
+      ]
+    }
+  ]
+}

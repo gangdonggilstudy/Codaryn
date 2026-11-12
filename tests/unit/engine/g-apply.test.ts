@@ -769,34 +769,6 @@ describe("U-1 (R-33 R33-L3): a plan run whose records were changed is not applie
   });
 });
 
-describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refused but says so", () => {
-  const UNCHECKED = "plan_records_unchecked";
-
-  test("too large to check at the start: done, with the notice kind and its notice", async () => {
-    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
-    const result = await applyPlan(run.deps);
-    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
-    assert.deepEqual(result.noticeKinds, [UNCHECKED]);
-    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1, "one notice naming the kind");
-    assert.deepEqual(run.journal.ofType("state_checked")[0], { type: "state_checked", phase: "run_start", changed: [], limited: true });
-  });
-
-  test("limited only later in the apply: told the same way, once", async () => {
-    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 3 }) });
-    const result = await applyPlan(run.deps);
-    assert.deepEqual([result.status, result.noticeKinds], ["done", [UNCHECKED]]);
-    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
-  });
-
-  test("checked entirely, or no guard: nothing is added", async () => {
-    for (const run of [setup({ stateGuard: new FakeApplyStateGuard() }), setup()]) {
-      const result = await applyPlan(run.deps);
-      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
-      assert.equal(result.notices.some((notice) => notice.includes(UNCHECKED)), false);
-    }
-  });
-});
-
 describe("U-29 (R-44 R44-L1): an apply tells what a run before it could not check", () => {
   const UNCHECKED = "plan_records_unchecked";
 
@@ -828,6 +800,34 @@ describe("U-29 (R-44 R44-L1): an apply tells what a run before it could not chec
     for (const run of [setup({ planRecordsUnchecked: async () => false }), setup()]) {
       const result = await applyPlan(run.deps);
       assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+});
+
+describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refused but says so", () => {
+  const UNCHECKED = "plan_records_unchecked";
+
+  test("too large to check at the start: done, with the notice kind and its notice", async () => {
+    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(result.noticeKinds, [UNCHECKED]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1, "one notice naming the kind");
+    assert.deepEqual(run.journal.ofType("state_checked")[0], { type: "state_checked", phase: "run_start", changed: [], limited: true });
+  });
+
+  test("limited only later in the apply: told the same way, once", async () => {
+    const run = setup({ stateGuard: new FakeApplyStateGuard({ limitedFrom: 3 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.noticeKinds], ["done", [UNCHECKED]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(UNCHECKED)).length, 1);
+  });
+
+  test("checked entirely, or no guard: nothing is added", async () => {
+    for (const run of [setup({ stateGuard: new FakeApplyStateGuard() }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+      assert.equal(result.notices.some((notice) => notice.includes(UNCHECKED)), false);
     }
   });
 });

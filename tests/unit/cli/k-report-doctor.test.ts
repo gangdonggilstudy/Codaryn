@@ -296,7 +296,8 @@ describe("U-6 doctor", () => {
     const plain = text(await runDoctor(fromEnv));
     const json = await doctorJson(fromEnv);
     assert.equal(json.status["api_key"], "ok");
-    assert.equal(json.message["api_key"], "ANTHROPIC_API_KEY is set");
+    // DR-34 (a): the message also says where the key goes (the origin and where it is set).
+    assert.equal(json.message["api_key"], "ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)");
     for (const printed of [plain, json.raw]) {
       assert.equal(printed.includes(FAKE_DOCTOR_KEY), false);
       assert.equal(printed.includes(FAKE_DOCTOR_KEY.slice(0, 8)), false);

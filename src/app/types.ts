@@ -397,8 +397,10 @@ export type ChangedFileUnavailable =
   /** Masking failed; no text is given. */
   | "mask_failed"
   /**
-   * R-11, DR-28 principle: the text is shown only when the secrets registered now mask it as the
-   * run did, and the run keeps no record to compare with yet. The path and the state are given.
+   * R-11, DR-28 principle, DR-29: the text is shown only when the secrets registered now mask it as
+   * the run did, by the run's record (changeShownMatches). Not so here: other secrets, a file
+   * changed after the run, a run without a record, or a record that does not match. The path and
+   * the state are given.
    */
   | "masking_unverified";
 

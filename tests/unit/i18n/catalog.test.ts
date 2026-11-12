@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  API_KEY_ENVS,
   CLI_ERROR_EXIT_CODES,
   INPUT_DIAGNOSTIC_FILES,
   MESSAGE_IDS,
@@ -194,6 +195,30 @@ describe("i18n catalog: language and wording", () => {
         assert.ok(MESSAGE_TEXTS[language][id].includes(".codaryn/lock.json.reclaim"), `${language} ${id}`);
       }
       assert.match(MESSAGE_TEXTS[language]["lock.remove_hint"], /\.codaryn\/lock\.json(?!\.)/, language);
+    }
+  });
+
+  test("the Korean particle after {keyEnv} fits every key variable name (SP-D12)", () => {
+    // ko writes "{keyEnv}가" and "{keyEnv}를", which fit a name read with a final vowel: every name
+    // ends in KEY ("키"). A new name that does not would need these texts reworded.
+    for (const name of API_KEY_ENVS) assert.ok(name.endsWith("_KEY"), name);
+    for (const id of IDS.filter((id) => Object.values(specOf(id)).includes("keyEnv"))) {
+      assert.match(MESSAGE_TEXTS.ko[id], /\{keyEnv\}(가|를| )/, id);
+    }
+  });
+
+  test("the quick form hint names the quick form and the --task form (R-12 L-2)", () => {
+    for (const language of LANGS) {
+      const text = MESSAGE_TEXTS[language]["error.hint.quick_form_needs_task"];
+      assert.ok(text.includes("--workspace") && text.includes("--task"), language);
+    }
+  });
+
+  test("the parked files texts name the folder they are left in (R-16 L-1)", () => {
+    for (const language of LANGS) {
+      for (const id of ["revert.parked", "doctor.lock.parked_left"] as const) {
+        assert.ok(MESSAGE_TEXTS[language][id].includes(".codaryn/parked/"), `${language} ${id}`);
+      }
     }
   });
 

@@ -164,10 +164,13 @@ export function selectProfile(config: CodarynConfig | null, name: string): Selec
   const limits = profile.limits === undefined ? config.limits : { ...(config.limits ?? {}), ...profile.limits };
   const policy = profile.policy ?? config.policy;
   const verifiers = profile.verifiers ?? config.verifiers;
+  // SP-D10: the profile's provider wins over the file's for the quick form.
+  const provider = profile.provider ?? config.provider;
   return {
     ok: true,
     config: {
       ...config,
+      ...(provider === undefined ? {} : { provider }),
       ...(limits === undefined ? {} : { limits }),
       ...(policy === undefined ? {} : { policy }),
       ...(verifiers === undefined ? {} : { verifiers }),

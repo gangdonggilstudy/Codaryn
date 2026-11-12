@@ -17,6 +17,8 @@ export interface HomeDeps {
   readonly current: () => Workspace | null;
   readonly open: () => void;
   readonly opened: (workspace: Workspace) => void;
+  /** Why the folder chosen in the dialog was refused, once, or null. */
+  readonly takeOpenError: () => string | null;
 }
 
 export function homeScreen(deps: HomeDeps): Screen {
@@ -42,6 +44,8 @@ export function homeScreen(deps: HomeDeps): Screen {
         message.textContent = `${errorText(t, code)} ${t.format("error.code", { code })}`;
         message.removeAttribute("hidden");
       };
+      const refused = deps.takeOpenError();
+      if (refused !== null) showError(refused);
 
       const load = async (): Promise<void> => {
         const items = asRecent(await api.recent());
@@ -54,7 +58,8 @@ export function homeScreen(deps: HomeDeps): Screen {
           ...items.map((item) => {
             const row = el("li", undefined, { "data-recent": item.exists ? "exists" : "missing" });
             const text = el("div", undefined, { class: "recent-text" });
-            text.append(el("span", item.name, { class: "recent-name" }), el("span", item.path, { class: "recent-path" }));
+            text.append(el("span", item.name, { class: "recent-name" }));
+            if (item.where !== "") text.append(el("span", t.format("home.recentIn", { folder: item.where }), { class: "recent-path" }));
             if (!item.exists) text.append(el("span", t.format("home.recentMissing"), { class: "recent-missing" }));
             const open = button(t.format("home.recentOpen"), () => {
               void (async () => {

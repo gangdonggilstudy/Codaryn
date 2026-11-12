@@ -7,7 +7,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process";
 import { CHANNEL_ERRORS, LineDecoder, MIN_NODE_MAJOR, PendingCalls, encodeLine, nodeMajor, parseHostMessage } from "../shared/protocol.js";
-import type { HostCall, HostResponse } from "../shared/protocol.js";
+import type { HostCall, HostResponse, HostRunMessage } from "../shared/protocol.js";
 
 export interface EngineHostOptions {
   /** Absolute path of a Node 26+ executable (node-path.ts). */
@@ -25,6 +25,8 @@ export interface EngineHostOptions {
   readonly closeTimeoutMs?: number;
   /** Pass the host's stderr through (development). Default: discarded. */
   readonly showStderr?: boolean;
+  /** R21-I-3: tests only. The host reaches this machine only; any other request is refused unsent. */
+  readonly transport?: "loopback-only";
 }
 
 export type EngineHostFailure = "host_not_started" | "node_too_old" | "ready_timeout" | "protocol_violation" | "host_exited";
@@ -41,6 +43,8 @@ export interface EngineHost {
   close(): Promise<void>;
   /** Called once when the host has exited. */
   onExit(listener: () => void): void;
+  /** GU-3: a run's progress items and its end, as the host sends them (checked by the listener). */
+  onRunMessage(listener: (message: HostRunMessage) => void): void;
 }
 
 export type StartOutcome =
@@ -57,13 +61,15 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
   };
   let child: ChildProcessWithoutNullStreams;
   try {
-    child = spawn(options.nodePath, [options.hostScript, "--engine-dir", options.engineDir], spawnOptions) as ChildProcessWithoutNullStreams;
+    const transport = options.transport === "loopback-only" ? ["--transport", "loopback-only"] : [];
+    child = spawn(options.nodePath, [options.hostScript, "--engine-dir", options.engineDir, ...transport], spawnOptions) as ChildProcessWithoutNullStreams;
   } catch {
     return { ok: false, failure: "host_not_started", nodeVersion: null };
   }
 
   const pending = new PendingCalls();
   const exitListeners: (() => void)[] = [];
+  const runListeners: ((message: HostRunMessage) => void)[] = [];
   let exited = false;
   let nodeVersion: string | null = null;
   let settleStart: ((outcome: StartOutcome) => void) | null = null;
@@ -108,6 +114,21 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
       violation();
       return;
     }
+    if ("type" in message && message.type !== "ready") {
+      // GU-3: run messages come only after ready; a listener's exception never breaks the channel.
+      if (nodeVersion === null) {
+        violation();
+        return;
+      }
+      for (const listener of runListeners) {
+        try {
+          listener(message);
+        } catch {
+          // ignored
+        }
+      }
+      return;
+    }
     if ("type" in message) {
       if (nodeVersion !== null) {
         violation();
@@ -123,8 +144,8 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
       endStart({ ok: true, host });
       return;
     }
-    // R-10 M-1: a late answer to a timed-out request is dropped; only an id nobody waits for and
-    // that never timed out (never issued, or answered already) breaks the channel.
+    // R-10 M-1, R10b-L-1: an answer to a request settled already (timed out, or answered) is
+    // dropped, however many there were; only an id this side never issued breaks the channel.
     if (nodeVersion === null || pending.settle(message) === "unknown") violation();
   }, violation);
 
@@ -186,6 +207,9 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
       onExit(listener) {
         if (exited) listener();
         else exitListeners.push(listener);
+      },
+      onRunMessage(listener) {
+        runListeners.push(listener);
       },
     };
   }

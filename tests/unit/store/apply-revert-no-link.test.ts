@@ -7,14 +7,14 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import type { ContentHash, MaskedText, ResolvedPlanAction } from "../../../src/contracts/index.js";
-import { RevertRunError, createApplyJournal, createPlanRecorder, prepareDiscardedRoot, revertRun } from "../../../src/store/index.js";
+import { RevertRunError, createApplyJournal, createPlanRecorder, listParkedFiles, prepareDiscardedRoot, revertRun } from "../../../src/store/index.js";
 
 const fsPromises = createRequire(import.meta.url)("node:fs/promises") as { link: (existing: string, created: string) => Promise<void> };
 
@@ -181,5 +181,39 @@ describe("DR-25: the person's consent to move files back unsafely, for one rever
       });
     }
     assert.deepEqual(await tree(root), before);
+  });
+});
+
+describe("R-16 L-1: the revert's result says where a file it could not put back was left", () => {
+  test("review reproduction: put-back finds the name taken; the item is io_error with parkedAt, and listParkedFiles finds it", async () => {
+    // A revert's own move back was cut: inbox/report.txt and docs/report.txt are one file.
+    const root = await appliedWorkspace();
+    await link(join(root, "docs", "report.txt"), join(root, "inbox", "report.txt"));
+    // Right after the added name is parked, another program changes the file there and takes the
+    // name back, so the parked file is not the original any more and cannot be put back.
+    const promises = fsPromises as unknown as { rename: (from: string, to: string) => Promise<void> };
+    const realRename = promises.rename;
+    promises.rename = async (from, to) => {
+      await realRename(from, to);
+      if (to.includes(`${join(".codaryn", "parked")}`)) {
+        await rm(to);
+        await writeFile(to, "changed meanwhile\n", "utf8");
+        await writeFile(from, "another program's file\n", "utf8");
+      }
+    };
+    syncBuiltinESMExports();
+    let outcome;
+    try {
+      outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    } finally {
+      promises.rename = realRename;
+      syncBuiltinESMExports();
+    }
+    const item = outcome.skipped.find((file) => file.path === "inbox/report.txt");
+    assert.equal(item?.reason, "io_error");
+    assert.match(item?.parkedAt ?? "", new RegExp(`^\.codaryn/parked/${APPLY_RUN}/0-[0-9a-f]{16}$`));
+    assert.deepEqual(await listParkedFiles(root), [{ path: item?.parkedAt, runId: APPLY_RUN }]);
+    assert.equal(await readFile(join(root, ...(item?.parkedAt ?? "").split("/")), "utf8"), "changed meanwhile\n", "the file is kept");
+    assert.equal(await readFile(join(root, "docs", "report.txt"), "utf8"), "another program's file\n", "the other program's file is not replaced");
   });
 });

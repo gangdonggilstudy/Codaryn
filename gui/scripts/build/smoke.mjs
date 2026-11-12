@@ -1,5 +1,6 @@
 // Runs the GU-1/GU-2 smoke test (tests/smoke/smoke.ts) in the real Electron and checks what it saw.
-// The app gets a clean environment (no API key, a config file that does not exist, this Node 26+
+// The app gets a clean environment (the fixtures' fake API key, a config file pointing at a loopback
+// fake API that this script runs, this Node 26+
 // as the engine host's Node, DR-26), a fresh Chromium profile and a fresh gui-state.json. Two
 // workspaces are made in the temporary folder and removed afterwards. Needs `npm run build` here
 // and in the repository root.
@@ -8,7 +9,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const gui = fileURLToPath(new URL("../../", import.meta.url));
 const electron = join(gui, "node_modules", "electron", "dist", process.platform === "win32" ? "electron.exe" : "electron");
@@ -23,6 +24,48 @@ if (!existsSync(electron)) {
 
 // A name with the shape of an API key, built here so no source file holds one. Fake value.
 const KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
+
+// GU-6 onward: a fake Anthropic API on a loopback port (the root build's test fake; never the real
+// API), the fixtures' fake key, and a config file that points the app at the fake.
+const rootDist = join(gui, "..", "dist");
+const fromRoot = (...parts) => import(pathToFileURL(join(rootDist, ...parts)).href);
+const fakeApi = await fromRoot("tests", "support", "fake-anthropic.js");
+const fakeModels = await fromRoot("tests", "support", "fake-models.js");
+const { FAKE_API_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
+const { ANTHROPIC_API_KEY_ENV } = await fromRoot("src", "contracts", "index.js");
+const closeFake = [];
+// Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
+// window); a run that hangs (cancelled by closing the window).
+const steps = [
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } })]),
+  fakeApi.replyText("done"),
+  { kind: "hang" },
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "sub/b.txt to moved", actions: [{ kind: "move", from: "sub/b.txt", to: "moved/b.txt" }] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } })]),
+  fakeApi.replyText("analysis written"),
+  { kind: "hang" },
+];
+const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
+  models: { models: [fakeModels.fakeModel("fake-model-a"), fakeModels.fakeModel("fake-model-b")] },
+});
+const configDir = join(gui, "build", "smoke-config");
+rmSync(configDir, { recursive: true, force: true });
+mkdirSync(configDir, { recursive: true });
+const configFile = join(configDir, "config.json");
+writeFileSync(
+  configFile,
+  JSON.stringify({
+    schemaVersion: 1,
+    model: "fake-model-a",
+    maxOutputTokens: 1024,
+    apiBaseUrl: api.url,
+    requestTimeoutMs: 20000,
+    maxRetries: 0,
+    limits: { maxModelTurns: 6, maxToolCalls: 10, maxTotalTokens: 100000, maxDurationMs: 120000 },
+    profiles: { doc: { limits: { maxModelTurns: 5 } }, tidy: { workflowRef: "organize" } },
+  }),
+);
 
 const first = mkdtempSync(join(tmpdir(), "codaryn-smoke-one-"));
 writeFileSync(join(first, "first.txt"), "one");
@@ -46,7 +89,9 @@ for (const [name, value] of Object.entries(process.env)) {
   if (/^(ANTHROPIC_API_KEY|CODARYN_CONFIG|CODARYN_LANG|CODARYN_MODEL|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|npm_node_execpath)$/i.test(name)) continue;
   env[name] = value;
 }
-env.CODARYN_CONFIG = join(gui, "build", "smoke-no-config.json");
+env.CODARYN_CONFIG = configFile;
+// The fixtures' fake key, as the root tests set it (tests/support/cli.ts).
+env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
 
@@ -64,7 +109,27 @@ try {
 }
 
 for (const target of [result, profile, stateDir]) rmSync(target, { recursive: true, force: true });
-const run = spawnSync(electron, [join(gui, "build", "tests", "smoke", "smoke.js"), first], { cwd: gui, env, stdio: "inherit", timeout: 180_000 });
+// Started without blocking: the fake API in this process must answer while the app runs.
+const run = await new Promise((resolve) => {
+  const child = spawn(electron, [join(gui, "build", "tests", "smoke", "smoke.js"), first], { cwd: gui, env, stdio: "inherit" });
+  const timer = setTimeout(() => child.kill(), 240_000);
+  child.on("error", (error) => {
+    clearTimeout(timer);
+    resolve({ status: null, error });
+  });
+  child.on("exit", (status) => {
+    clearTimeout(timer);
+    resolve({ status, error: undefined });
+  });
+});
+const apiRequests = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
+for (const close of closeFake) await close();
+let configModel = null;
+try {
+  configModel = JSON.parse(readFileSync(configFile, "utf8")).model ?? null;
+} catch {
+  configModel = "unreadable";
+}
 for (const dir of [first, second]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 // The link itself is removed, not what it points to; then the folder it pointed to.
 try {
@@ -80,7 +145,9 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "doctor,forgetRecent,info,onWorkspaceOpened,openFolder,openRecent,recent,reveal,tree";
+const API = "applyPlan,cancelRun,changes,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,reveal,revert,revertConsent,review,selectModel,settings,startRun,tree";
+seen.apiRequests = apiRequests;
+seen.configModel = configModel;
 
 const expected = [
   ["initialTree", (v) => v === "ok"],
@@ -88,6 +155,7 @@ const expected = [
   ["initialRows", (v) => rows(v).length === 1 && rows(v)[0].text.includes("first.txt")],
   ["secondOpened", (v) => v === true],
   ["secondTree", (v) => v === "ok"],
+  ["networkFolder", (v) => JSON.stringify(v) === JSON.stringify({ ok: false, code: "workspace_not_local" })],
   [
     "secondRows",
     (v) => {
@@ -109,6 +177,7 @@ const expected = [
   ["treeText", (v) => typeof v === "string" && !v.includes("FAKEFAKE") && !v.includes(second)],
   ["recentShown", (v) => v === "2"],
   ["recentNames", (v) => JSON.stringify(v) === JSON.stringify([secondName, firstName])],
+  ["recentText", (v) => typeof v === "string" && v.length > 0 && !v.includes(first) && !v.includes(second) && !v.includes(tmpdir())],
   ["stateFile", (v) => JSON.stringify(v) === JSON.stringify([secondName, firstName])],
   ["checks", (v) => v === "ok"],
   ["checksShown", (v) => typeof v === "number" && v >= 5],
@@ -124,6 +193,76 @@ const expected = [
   ["windowOpen", (v) => v === "blocked"],
   ["urlAfterNavigation", (v) => v === "app://codaryn/index.html"],
   ["hostNode", (v) => typeof v === "string" && Number(v.split(".")[0]) >= 26],
+  // GU-6: the settings screen, the model list (asked for, from the fake API) and a model choice.
+  ["settingsReady", (v) => v === "ok"],
+  // N-14: a file the environment names is shown by the variable name, not its path.
+  ["settingsFile", (v) => v.source === "environment" && typeof v.text === "string" && v.text.includes("CODARYN_CONFIG") && !v.text.includes("smoke-config")],
+  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy"])],
+  ["settingsKey", (v) => v === "available"],
+  ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(api.url)],
+  ["modelsBeforeAsking", (v) => v === 0],
+  ["modelsListed", (v) => v === "2"],
+  ["modelChosen", (v) => v === "fake-model-b"],
+  ["modelForgedEntry", (v) => v.ok === false && v.code === "unknown_entry"],
+  ["modelIdAsEntry", (v) => v.ok === false && v.code === "invalid_args"],
+  ["configModel", (v) => v === "fake-model-b"],
+  // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
+  [
+    "apiRequests",
+    (v) =>
+      rows(v).filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length >= 2 &&
+      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 8 &&
+      rows(v).every((r) => r.key === true && ((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
+  ],
+  // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
+  ["runDone", (v) => v === "done"],
+  ["runResult", (v) => v !== null && ["done", "needs-input"].includes(v.status) && /^\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(v.runId)],
+  ["runLog", (v) => rows(v).length >= 2 && rows(v).includes("tool_decision")],
+  ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
+  ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes(api.url)],
+  ["runAgainWhileIdle", (v) => v === false],
+  ["cancelReady", (v) => v === "ready"],
+  ["secondStartRefused", (v) => v.ok === false && v.code === "run_active"],
+  ["cancelAsked", (v) => v === true],
+  ["cancelDone", (v) => v === "cancelled"],
+  // GU-4: the run list, a revert preview, refused requests, and the revert the main process asked about.
+  ["runsListed", (v) => v === "2"],
+  ["runsRows", (v) => rows(v).length === 2 && rows(v).every((r) => r.state === "checked")],
+  ["revertPreview", (v) => v === "1"],
+  ["revertPreviewActions", (v) => JSON.stringify(v) === JSON.stringify(["deleted"])],
+  ["madeBeforeRevert", (v) => v === true],
+  ["revertForged", (v) => v.ok === false && v.code === "unknown_preview"],
+  ["previewLatest", (v) => v.ok === false && v.code === "invalid_args"],
+  ["previewUnlisted", (v) => v.ok === false && v.code === "unknown_run"],
+  ["revertDone", (v) => v === "complete"],
+  ["madeAfterRevert", (v) => v === false],
+  ["revertNoConsentOffer", (v) => v === true],
+  ["revertConsentForged", (v) => v.ok === false && v.code === "unknown_retry"],
+  // DR-29: paths and states only; the file's content never shows.
+  ["changesShown", (v) => v === "1"],
+  ["changesRows", (v) => rows(v).length === 1 && rows(v)[0].state === "missing" && rows(v)[0].created === "true" && rows(v)[0].text === "none" && rows(v)[0].path === "made.txt"],
+  ["changesText", (v) => typeof v === "string" && !v.includes("made by the smoke run")],
+  ["changesLatest", (v) => v.ok === false && v.code === "invalid_args"],
+  // GU-5: a plan run, the plan screen, refused requests, an apply the main process asked about, a review.
+  // R-14 L-3, R21-M-1: a plan whose task kind was chosen directly is shown and applied through the task form's workflowRef.
+  ["directPlanShown", (v) => v === "pending"],
+  ["applyByWorkflow", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
+  ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
+  ["planRun", (v) => v === "plan_pending"],
+  ["planShown", (v) => v === "pending"],
+  ["planActions", (v) => JSON.stringify(v) === JSON.stringify(["move"])],
+  ["planForged", (v) => v.ok === false && v.code === "unknown_plan"],
+  ["consentUnasked", (v) => v.ok === false && v.code === "consent_not_asked"],
+  ["applyDone", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
+  ["applyMoved", (v) => v.from === false && v.to === true],
+  ["reviewRun", (v) => v === "awaiting_review"],
+  ["reviewAsked", (v) => v === true],
+  ["reviewRecorded", (v) => v === "accepted"],
+  // DR-29, DR-32 (c): the write recorded its digests, the same secrets mask it now: the text is compared.
+  ["reportChanges", (v) => v === "1"],
+  ["reportDiff", (v) => v !== null && v.text === "shown" && JSON.stringify(v.kinds) === JSON.stringify(["added", "added"]) && JSON.stringify(v.lines) === JSON.stringify(["결과 표", "해석"])],
+  ["reportF7", (v) => v === true],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

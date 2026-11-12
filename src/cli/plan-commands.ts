@@ -29,6 +29,7 @@ import {
 } from "../contracts/index.js";
 import type {
   ApplyJournal,
+  InventoryChecker,
   ApplyJournalEntry,
   ApplyJournalEvent,
   ApplyPlan,
@@ -69,6 +70,7 @@ import {
 import type { RunInspection } from "../store/index.js";
 import { createCommandRunner, createPlanExecutor, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } from "../verify/index.js";
+import type { InventoryCheckerOptions } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { parseApplyArgs, parsePlanArgs, parseReviewArgs } from "./args.js";
 import type { RunArgs, TaskFormArgs } from "./args.js";
@@ -81,7 +83,8 @@ import { cliError, prepareTask } from "./run.js";
 import type { PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
-import { envValue } from "./settings.js";
+import { envValue, knownKeyValues } from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 /** The goal the task form carries for commands that never run a model. */
@@ -94,6 +97,8 @@ export interface PlanCommandEnvironment extends PrepareEnvironment {
   /** Overrides for tests; the store's functions otherwise. */
   readonly listRuns?: ListRuns;
   readonly loadPlan?: LoadPlan;
+  /** The workspace listing (verify's `createInventoryChecker` when absent). Tests count its listings. */
+  readonly createInventoryChecker?: (options: InventoryCheckerOptions) => InventoryChecker;
   readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
   /** N-23: told which run `--run latest` chose, before anything is read. */
   readonly announceLatest?: (entry: CheckedRun) => void;
@@ -183,7 +188,7 @@ function maskAction(action: ResolvedPlanAction, privacy: PrivacyGateway): Masked
 }
 
 /** One printable line per action, cleaned, keys hidden. */
-function actionLines(actions: readonly MaskedPlanAction[], currentKey: string | null): string[] {
+function actionLines(actions: readonly MaskedPlanAction[], currentKey: KnownKeys): string[] {
   const shown = (text: string): string => cleanText(hideKeys(text, currentKey));
   return actions.map((action, index) =>
     action.kind === "move"
@@ -204,7 +209,8 @@ function withQuickFormHint(outcome: CommandOutcome, form: TaskFormArgs): Command
   const output = outcome.output;
   if (output.code !== "invalid_config" || !output.message.includes("is not set")) return outcome;
   const message = `${output.message}. The quick form of plan, apply and review reads the run settings, limits included, from the config file; give the plan run's task with --task instead`;
-  return { ...outcome, output: { ...output, message } };
+  // R-12 L-2: the hint makes the human renderer add the advice as its own stderr line.
+  return { ...outcome, output: { ...output, message, hint: "quick_form_needs_task" } };
 }
 
 /** Steps 1 to 7, the workspace's real path and the run `--run` names. */
@@ -259,6 +265,11 @@ const LOAD_MESSAGES = {
 async function loadShown(
   io: PlanCommandEnvironment,
   value: Prepared,
+  /**
+   * R-18 L1: whether to list the workspace for `inventoryLimitReached` (DR-6). `plan` does; `apply`
+   * does not (false here), and lists it with the apply's cancel signal only when it asks a person.
+   */
+  listInventory: boolean,
 ): Promise<
   | { ok: true; plan: StoredPlan; digest: ContentHash; output: PlanOutput; privacy: PrivacyGateway }
   | { ok: false; outcome: CommandOutcome }
@@ -284,7 +295,9 @@ async function loadShown(
     }
     actions.push(masked);
   }
-  const manifest = await createInventoryChecker({ workspaceRoot: value.workspaceRoot }).capture();
+  const inventoryLimitReached = listInventory
+    ? (await (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot: value.workspaceRoot }).capture()).limitReached
+    : false;
   const status = loaded.applied === null ? "pending" : "applied";
   const output: PlanOutput = {
     schemaVersion: RESULT_SCHEMA_VERSION,
@@ -294,14 +307,14 @@ async function loadShown(
     exitCode: PLAN_EXIT_CODES[status],
     digest: loaded.digest,
     actions,
-    inventoryLimitReached: manifest.limitReached,
+    inventoryLimitReached,
     appliedBy: loaded.applied === null ? null : { runId: loaded.applied.applyRunId, at: loaded.applied.at },
   };
   return { ok: true, plan: loaded.plan, digest: loaded.digest, output, privacy };
 }
 
 /** The text of `codaryn plan` without `--json`. */
-export function renderPlan(output: PlanOutput, currentKey: string | null): string {
+export function renderPlan(output: PlanOutput, currentKey: KnownKeys): string {
   const lines = [
     `Plan of run ${output.runId}: ${output.actions.length} action(s), ${output.status}`,
     `Digest: ${output.digest}`,
@@ -321,9 +334,9 @@ export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcom
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
   const ready = await prepareFor(io, parsed.args.form, parsed.args.runId, null, false);
   if (!ready.ok) return ready.outcome;
-  const shown = await loadShown(io, ready.value);
+  const shown = await loadShown(io, ready.value, true);
   if (!shown.ok) return shown.outcome;
-  const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+  const currentKey = knownKeyValues(io.env);
   if (parsed.args.json) return { output: shown.output, exitCode: shown.output.exitCode };
   return { text: renderPlan(shown.output, currentKey), exitCode: shown.output.exitCode };
 }
@@ -342,7 +355,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   if (workflowSettingsOf(task).plan !== "apply") {
     return cliError("run_not_plan", 'the task given to apply does not resolve to a workflow with plan "apply"; nothing was moved');
   }
-  const shown = await loadShown(io, ready.value);
+  const shown = await loadShown(io, ready.value, false);
   if (!shown.ok) return shown.outcome;
   if (shown.output.appliedBy !== null) {
     return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
@@ -371,8 +384,21 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     }
     approval = adapter === undefined ? "cli-flag" : "adapter";
   } else if (ask !== undefined) {
-    const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
-    const question = [renderPlan(shown.output, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
+    // R-18 L1: the plan view lists the workspace (the inventory limit, DR-6) only here, and the
+    // apply's cancel stops that listing too. A cancel during it ends with nothing moved.
+    const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
+    let inventoryLimitReached: boolean;
+    try {
+      inventoryLimitReached = (await (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }).capture()).limitReached;
+    } catch {
+      if (cancel.signal.aborted) return cliError("plan_not_approved", "the apply was cancelled before the plan was shown; nothing was moved");
+      // Any other failure: the plan is shown without the limit line; the engine's own listing checks it.
+      inventoryLimitReached = false;
+    } finally {
+      cancel.dispose();
+    }
+    const currentKey = knownKeyValues(io.env);
+    const question = [renderPlan({ ...shown.output, inventoryLimitReached }, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
     approval = "cli-tty";
@@ -431,7 +457,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
         privacy,
         verifiers: createVerifierRunner({ workspace, commandRunner }),
-        inventory: createInventoryChecker({ workspaceRoot }),
+        // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
+        inventory: (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }),
         journal,
         clock: io.clock,
         signal: cancel.signal,
@@ -561,7 +588,7 @@ export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutc
   const parsed = parseReviewArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
   const args = parsed.args;
-  const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+  const currentKey = knownKeyValues(io.env);
   // S-8: a note is written to review.json and shown by report; a key never goes there.
   if (args.note !== null && goalHoldsKey(args.note, currentKey)) {
     return cliError("key_in_file", "the note contains a key value; nothing was written");

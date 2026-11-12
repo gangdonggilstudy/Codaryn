@@ -4,8 +4,8 @@
  * or reorder a line are replaced before printing, and key-shaped text is hidden.
  */
 
-import { ANTHROPIC_KEY_PATTERN_SOURCE } from "../contracts/index.js";
-import { MIN_CURRENT_KEY_LENGTH } from "./security/index.js";
+import { KEY_MASK_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
+import type { KnownKeys } from "./security/index.js";
 
 /** Shown in place of a replaced character. */
 export const REPLACEMENT = "?";
@@ -45,7 +45,7 @@ export function safeToken(value: unknown): string {
  * JSON. In JSON text a control character becomes `\uXXXX`, so the check must see the strings
  * themselves, not the JSON.
  */
-export function hideKeysInStrings<T>(value: T, currentKey: string | null): T {
+export function hideKeysInStrings<T>(value: T, currentKey: KnownKeys): T {
   const walk = (item: unknown): unknown => {
     if (typeof item === "string") return hideKeys(item, currentKey);
     if (Array.isArray(item)) return item.map(walk);
@@ -57,7 +57,7 @@ export function hideKeysInStrings<T>(value: T, currentKey: string | null): T {
   return walk(value) as T;
 }
 
-export function hideKeys(text: string, currentKey: string | null): string {
+export function hideKeys(text: string, currentKey: KnownKeys): string {
   // N-23 (review R-2 L-5): look for key shapes with control characters skipped, so a key broken
   // by one (`sk-ant-AB<BEL>CDEF...`) is still found. The span covers the skipped characters too.
   const kept: number[] = [];
@@ -77,11 +77,11 @@ export function hideKeys(text: string, currentKey: string | null): string {
     const to = kept[start + length - 1];
     if (from !== undefined && to !== undefined) spans.push([from, to + 1]);
   };
-  for (const match of stripped.matchAll(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g"))) add(match.index, match[0].length);
-  if (currentKey !== null && currentKey.length >= MIN_CURRENT_KEY_LENGTH) {
-    for (let at = stripped.indexOf(currentKey); at !== -1; at = stripped.indexOf(currentKey, at + currentKey.length)) {
-      add(at, currentKey.length);
-    }
+  // SP-2, DR-32 (a): every hiding shape (the loose one too) and every given key value (every key
+  // variable that is set).
+  for (const match of stripped.matchAll(new RegExp(KEY_MASK_SHAPE_SOURCE, "g"))) add(match.index, match[0].length);
+  for (const key of keyValuesOf(currentKey)) {
+    for (let at = stripped.indexOf(key); at !== -1; at = stripped.indexOf(key, at + key.length)) add(at, key.length);
   }
   if (spans.length === 0) return text;
   spans.sort((a, b) => a[0] - b[0]);

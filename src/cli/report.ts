@@ -20,6 +20,7 @@ import {
   JOURNAL_FILE_NAME,
   MAX_EVIDENCE_BYTES,
   MAX_REPORT_FILE_BYTES,
+  MODEL_PROVIDER_NAMES,
   PLAN_ITEM_PROBLEMS,
   REPORT_EXIT_CODES,
   RESULT_FILE_NAME,
@@ -63,7 +64,8 @@ import type { CommandOutcome } from "./guard.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
 import { cliError } from "./run.js";
-import { envValue } from "./settings.js";
+import { knownKeyValues } from "./settings.js";
+import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
@@ -105,13 +107,13 @@ const realpathNative = promisify(realpathCallback.native);
 // isReasonOfStatus); the report keeps no list of its own.
 
 // G-G (integration case n07), as DR-16: the report keeps no list of its own where the contract has
-// one. Verifier kinds are the contract's VERIFIER_KINDS (data_checks and inventory included). The
-// contract has types only for providers and outcomes, so these two lists are checked against
-// those types at compile time: a value added to the type breaks the build here.
-const PROVIDERS = ["scripted", "anthropic"] as const satisfies readonly ModelProviderName[];
+// one. Verifier kinds are the contract's VERIFIER_KINDS (data_checks and inventory included) and
+// providers its MODEL_PROVIDER_NAMES (SP-1). The contract has a type only for outcomes, so that list
+// is checked against it at compile time: a value added to the type breaks the build here.
+const PROVIDERS = MODEL_PROVIDER_NAMES;
 const VERIFIER_OUTCOMES = ["pass", "fail", "inconclusive"] as const satisfies readonly VerifierOutcome[];
 type Missing<All, Listed> = [Exclude<All, Listed>] extends [never] ? true : false;
-const listsComplete: [Missing<ModelProviderName, (typeof PROVIDERS)[number]>, Missing<VerifierOutcome, (typeof VERIFIER_OUTCOMES)[number]>] = [true, true];
+const listsComplete: [Missing<VerifierOutcome, (typeof VERIFIER_OUTCOMES)[number]>] = [true];
 void listsComplete;
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
@@ -370,7 +372,7 @@ function longestBacktickRun(text: string): number {
  * replaced, so a control character cannot break a key into pieces the check misses. Set by
  * `renderReport` for the duration of one (synchronous) rendering.
  */
-let renderingKey: string | null = null;
+let renderingKey: KnownKeys = null;
 
 function safe(text: string, keepLineBreaks = false): string {
   return cleanText(hideKeys(text, renderingKey), keepLineBreaks);
@@ -410,7 +412,7 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
 ];
 
-export function renderReport(report: RunReportOutput, currentKey: string | null = null): string {
+export function renderReport(report: RunReportOutput, currentKey: KnownKeys = null): string {
   renderingKey = currentKey;
   try {
     return renderReportText(report);
@@ -686,7 +688,7 @@ export const APPLY_REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the apply run's own records. Commands allowed in other runs could have changed them.",
 ];
 
-export function renderApplyReport(report: ApplyReportOutput, currentKey: string | null = null): string {
+export function renderApplyReport(report: ApplyReportOutput, currentKey: KnownKeys = null): string {
   renderingKey = currentKey;
   try {
     return renderApplyReportText(report);
@@ -935,7 +937,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     return cliError("invalid_run_record", "the run's records cannot be read");
   }
 
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(io.env);
   let text: string;
   try {
     // N-27 (c): keys are hidden in the strings before the JSON is written, as in the text.

@@ -8,44 +8,54 @@
  * - seconds: a non-negative number with at most one decimal place, in decimal digits ("12", "4.2").
  * - status, reason, permission, denial, modelError, phase, provider, language: one of the
  *   contracts' codes.
+ * - keyEnv: one of the providers' key variable names (API_KEY_ENVS, SP-D12). A key variable's
+ *   name reaches a text only this way, never its value.
+ * - settingEnv: one of the providers' model or address variable names (API_MODEL_ENVS,
+ *   API_BASE_URL_ENVS, DR-36). Names only, never values.
+ * - apiOrigin: an origin exactly as the contract's `toApiOrigin` gives it (DR-36 (b)): scheme, host
+ *   and port of the person's own API address, nothing of its path, user info or query.
  * - field: a SchemaFieldPath (`toSchemaFieldPath`). runId: a RunId (`toRunId`).
  * - text: text the same catalog produced (`ownText`).
  * - location, suggestedCommand, suggestedPath: one of the fixed display strings.
+ *
+ * Key-shaped text in the finished line is hidden with every output key shape of the contract
+ * (API_KEY_MASK_PATTERN_SOURCES, DR-32 (a)): Anthropic's, and OpenAI's narrow and loose ones.
  */
 
 import {
-  ANTHROPIC_KEY_PATTERN_SOURCE,
+  API_BASE_URL_ENVS,
+  API_KEY_ENVS,
+  API_KEY_MASK_PATTERN_SOURCES,
+  API_MODEL_ENVS,
   DEFAULT_CONFIG_DISPLAY,
   INIT_SUGGESTED_COMMANDS,
   INIT_SUGGESTED_PROTECTED_PATHS,
   INTEGRITY_PHASES,
   MESSAGE_LANGUAGES,
   MODEL_ERROR_KINDS,
+  MODEL_PROVIDER_NAMES,
   PERMISSION_KINDS,
   POLICY_DENIAL_CODES,
   RUN_REASONS,
   TERMINAL_RUN_STATUSES,
   TOOL_ERROR_CODES,
+  toApiOrigin,
   toRunId,
   toSchemaFieldPath,
 } from "../contracts/index.js";
-import type { ConfigLocationDisplay, MessageParamKind, ModelProviderName } from "../contracts/index.js";
+import type { ConfigLocationDisplay, MessageParamKind } from "../contracts/index.js";
 
 /** Shown in place of a value that does not fit its kind, and of a replaced character. */
 export const REPLACEMENT = "?";
 /** Shown in place of key-shaped text. */
 export const HIDDEN_KEY = "[key]";
 
-const KEY_PATTERN = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g");
-
-const PROVIDERS = ["scripted", "anthropic"] as const satisfies readonly ModelProviderName[];
-type MissingProvider = Exclude<ModelProviderName, (typeof PROVIDERS)[number]>;
-const providersComplete: [MissingProvider] extends [never] ? true : false = true;
-void providersComplete;
+/** Every output key shape, as one pattern; at a position the first shape that matches is taken. */
+const KEY_PATTERN = new RegExp(API_KEY_MASK_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|"), "g");
 
 const LOCATIONS = [...Object.values(DEFAULT_CONFIG_DISPLAY), "--config", "CODARYN_CONFIG"] as const satisfies readonly ConfigLocationDisplay[];
 
-type ClosedKind = Exclude<MessageParamKind, "count" | "seconds" | "field" | "runId" | "text">;
+type ClosedKind = Exclude<MessageParamKind, "count" | "seconds" | "field" | "runId" | "text" | "apiOrigin">;
 
 /** Largest number of seconds shown (about 31 years); larger values are not plausible durations. */
 const MAX_SECONDS = 1_000_000_000;
@@ -58,11 +68,13 @@ export const CLOSED_KIND_VALUES: { readonly [K in ClosedKind]: ReadonlySet<strin
   denial: new Set([...POLICY_DENIAL_CODES, ...TOOL_ERROR_CODES]),
   modelError: new Set(MODEL_ERROR_KINDS),
   phase: new Set(INTEGRITY_PHASES),
-  provider: new Set(PROVIDERS),
+  provider: new Set(MODEL_PROVIDER_NAMES),
   location: new Set(LOCATIONS),
   suggestedCommand: new Set(INIT_SUGGESTED_COMMANDS),
   suggestedPath: new Set(INIT_SUGGESTED_PROTECTED_PATHS),
   language: new Set(MESSAGE_LANGUAGES),
+  keyEnv: new Set(API_KEY_ENVS),
+  settingEnv: new Set([...API_MODEL_ENVS, ...API_BASE_URL_ENVS]),
 };
 
 /** C0 and C1 controls, line and paragraph separators, and bidirectional controls. */
@@ -132,6 +144,9 @@ export function formatParam(kind: MessageParamKind, value: unknown, ownText: (te
       return typeof value === "string" && toRunId(value) !== null ? value : REPLACEMENT;
     case "text":
       return typeof value === "string" && ownText(value) ? value : REPLACEMENT;
+    case "apiOrigin":
+      // Only an origin the contract would make from an address, in that exact form.
+      return typeof value === "string" && toApiOrigin(value) === value ? value : REPLACEMENT;
     default:
       return typeof value === "string" && CLOSED_KIND_VALUES[kind].has(value) ? value : REPLACEMENT;
   }

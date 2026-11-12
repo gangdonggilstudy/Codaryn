@@ -7,14 +7,18 @@
 
 import path from "node:path";
 import {
+  API_PROVIDERS,
+  API_PROVIDER_NAMES,
   DENY_ALL_POLICY,
-  MAX_OUTPUT_TOKENS_LIMIT,
+  MODEL_PROVIDER_NAMES,
   QUICK_TASK_ID,
   QUICK_TASK_WORKFLOW,
   TASK_ID_PATTERN_SOURCE,
   TASK_SCHEMA_VERSION,
 } from "../contracts/index.js";
 import type {
+  ApiModelConfig,
+  ApiProviderName,
   CodarynConfig,
   CommandRule,
   FileRule,
@@ -178,12 +182,33 @@ export function optionalPositive(value: unknown, field: string): number | undefi
 }
 
 /** T-14: an output token cap per request, at most MAX_OUTPUT_TOKENS_LIMIT. */
-export function optionalOutputTokens(value: unknown, field: string): number | undefined {
+/**
+ * An output token cap within the provider's bounds (API_PROVIDERS: minOutputTokens and
+ * maxOutputTokensLimit). The default provider is anthropic, whose rule and message are the ones
+ * before SP-4.
+ */
+export function optionalOutputTokens(value: unknown, field: string, provider: ApiProviderName = "anthropic"): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > MAX_OUTPUT_TOKENS_LIMIT) {
-    fail(`${field} must be a positive integer of at most ${MAX_OUTPUT_TOKENS_LIMIT}`);
+  const { minOutputTokens, maxOutputTokensLimit } = API_PROVIDERS[provider];
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minOutputTokens || value > maxOutputTokensLimit) {
+    fail(
+      minOutputTokens <= 1
+        ? `${field} must be a positive integer of at most ${maxOutputTokensLimit}`
+        : `${field} must be an integer from ${minOutputTokens} to ${maxOutputTokensLimit} for the ${provider} provider`,
+    );
   }
   return value;
+}
+
+/** `"a"`, `"a" or "b"`, `"a", "b" or "c"`: a closed list of names in a message. */
+export function quotedChoices(names: readonly string[]): string {
+  const quoted = names.map((name) => `"${name}"`);
+  return quoted.length <= 1 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} or ${quoted[quoted.length - 1]}`;
+}
+
+/** SP-1: whether a value names an API provider (API_PROVIDER_NAMES). */
+export function isApiProviderName(value: unknown): value is ApiProviderName {
+  return typeof value === "string" && (API_PROVIDER_NAMES as readonly string[]).includes(value);
 }
 
 export function optionalText(value: unknown, field: string): string | undefined {
@@ -233,22 +258,25 @@ function parseModel(value: unknown, baseDir: string): ModelConfig {
   const rec = record(value, "model", ["provider", "scriptPath", "model", "maxOutputTokens"]);
   if (rec["provider"] === "scripted") {
     if (rec["model"] !== undefined || rec["maxOutputTokens"] !== undefined) {
-      fail("model.model and model.maxOutputTokens are only for the anthropic provider");
+      fail(`model.model and model.maxOutputTokens are only for an API provider (${API_PROVIDER_NAMES.join(", ")})`);
     }
     return { provider: "scripted", scriptPath: resolveLocal(baseDir, text(rec["scriptPath"], "model.scriptPath"), "model.scriptPath") };
   }
-  if (rec["provider"] === "anthropic") {
+  // SP-4: any API provider (API_PROVIDER_NAMES), its output cap within its own bounds.
+  const provider = rec["provider"];
+  if (isApiProviderName(provider)) {
     if (rec["scriptPath"] !== undefined) fail("model.scriptPath is only for the scripted provider");
     // N-3: a placeholder (blank or `<...>`) is accepted here and counts as not set.
     const model = rec["model"] === undefined ? undefined : typeof rec["model"] === "string" ? rec["model"] : fail("model.model must be a string");
-    const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], "model.maxOutputTokens");
-    return {
-      provider: "anthropic",
+    const maxOutputTokens = optionalOutputTokens(rec["maxOutputTokens"], "model.maxOutputTokens", provider);
+    const config = {
+      provider,
       ...(model === undefined ? {} : { model }),
       ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
-    };
+    } as ApiModelConfig;
+    return config;
   }
-  return fail('model.provider must be "scripted" or "anthropic"');
+  return fail(`model.provider must be ${quotedChoices(MODEL_PROVIDER_NAMES)}`);
 }
 
 const PROTECTED_PATH_MESSAGES: { readonly [R in ProtectedPathProblemReason]: string } = {
@@ -688,8 +716,10 @@ export interface QuickTaskInput {
 }
 
 /**
- * The quick form (`--workspace`, `--goal`): an anthropic task whose policy, limits, verifiers and
- * secret names come from the config file. Limits must be set there, with a token limit (S-7).
+ * The quick form (`--workspace`, `--goal`): a task for the config's API provider (SP-D3, SP-D10:
+ * the chosen profile's `provider`, already laid over by selectProfile, else the file's, else
+ * anthropic) whose policy, limits, verifiers and secret names come from the config file. Limits
+ * must be set there, with a token limit (S-7).
  * The caller checks `--workspace` with `localPathProblem` first (S-5). Failures are `invalid_config`.
  */
 export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
@@ -700,12 +730,20 @@ export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
     workflow: input.workflowRef ?? QUICK_TASK_WORKFLOW,
     ...(input.workflowRef === undefined || input.workflowRef === null ? {} : { workflowRef: input.workflowRef }),
     workspaceRoot: path.resolve(input.cwd, text(input.workspace, "--workspace")),
-    model: { provider: "anthropic" },
+    model: { provider: quickProvider(input.config) },
     policy: input.config?.policy ?? DENY_ALL_POLICY,
     privacy: { secretEnv: [...(input.config?.secretEnv ?? [])] },
-    limits: boundedLimits("quick", "anthropic", undefined, input.config?.limits),
+    limits: boundedLimits("quick", quickProvider(input.config), undefined, input.config?.limits),
     verifiers: [...(input.config?.verifiers ?? [])],
   }));
+}
+
+/**
+ * SP-D3, SP-D10: the API provider of the quick form. `config` is the effective one: with
+ * `--profile` it already holds the profile's `provider` (selectProfile).
+ */
+export function quickProvider(config: CodarynConfig | null): ApiProviderName {
+  return config?.provider ?? "anthropic";
 }
 
 /** Adds the config file's secret names to the task's, without duplicates. */

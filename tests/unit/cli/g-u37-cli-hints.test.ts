@@ -79,6 +79,8 @@ describe("U-37: argument errors name their reason with a hint", () => {
       [["apply", "--task", "t.json", "--run", "latest", "--digest", DIGEST], parseApplyArgs, "apply_needs_run_id"],
       [["apply", "--task", "t.json", "--run", RUN_ID, "--digest", "XYZ"], parseApplyArgs, "digest_form"],
       [["cleanup", "--workspace", "w", "--confirm", "abc"], parseCleanupArgs, "digest_form"],
+      // R-69 L2 (PM): cleanup's --run takes run ids only; its form error is run_id_form too.
+      [["cleanup", "--workspace", "w", "--run", "!"], parseCleanupArgs, "run_id_form"],
       [["review", "--task", "t.json", "--run", RUN_ID], parseReviewArgs, "review_needs_verdict"],
       [["revert", "--workspace", "w", "--run", "../x"], parseRevertArgs, "run_id_form"],
       [["changes", "--run", "a/b"], parseChangesArgs, "run_id_form"],
@@ -164,6 +166,22 @@ describe("U-37: input and setting errors of a run name their reason with a hint"
     await writeFile(path.join(box.base, "ws", "task.json"), JSON.stringify({ ...TASK, workspaceRoot: "." }), "utf8");
     await writeFile(path.join(box.base, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "done" }] }), "utf8");
     hinted(await box.run(["run", "--task", "ws/task.json"]), "invalid_task", "input_inside_workspace");
+  });
+
+  // R-69 L1 (PM): the hint names the task, config and variables files; a cancel file is none of them.
+  test("a cancel file inside the workspace: no hint; the message as before", async () => {
+    const box = await sandbox();
+    await writeFile(path.join(box.base, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "done" }] }), "utf8");
+    await writeFile(path.join(box.base, "task.json"), JSON.stringify(TASK), "utf8");
+    const output = await box.run(["run", "--task", "task.json", "--cancel-file", "ws/cancel.txt"]);
+    assert.equal(output.code, "invalid_arguments", JSON.stringify(output));
+    assert.equal(output.message, "the file given by --cancel-file is inside the workspace or its location cannot be confirmed; keep it outside so a run cannot change it");
+    assert.equal(Object.hasOwn(output, "hint"), false, JSON.stringify(output));
+  });
+
+  test("cleanup's --discarded-run form error keeps no hint (run_id_form names --run)", () => {
+    const parsed = failure(parseCleanupArgs(["cleanup", "--workspace", "w", "--discarded-run", "!"]));
+    assert.deepEqual([parsed.ok, parsed.hint], [false, undefined]);
   });
 
   test("--profile without a config file: profile_needs_config; a profile the file lacks: profile_not_found", async () => {

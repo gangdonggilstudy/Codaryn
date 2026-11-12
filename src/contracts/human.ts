@@ -345,6 +345,9 @@ export const FIXED_MESSAGES = {
   "revert.skipped_title": { count: "count" },
   "revert.action.restored": {},
   "revert.action.deleted": {},
+  // G-A: one per RevertAction of an apply run.
+  "revert.action.moved_back": {},
+  "revert.action.restored_from_discard": {},
   "revert.dry_run_next": {},
   "revert.reverted_before": {},
 

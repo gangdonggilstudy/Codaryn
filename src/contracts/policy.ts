@@ -21,10 +21,17 @@ export const POLICY_DENIAL_CODES = [
   "restore_denied",
   /** A write under `PolicyConfig.protectedPaths` (R-5). Permission `path`. */
   "protected_path",
+  /** G-A: a plan action whose kind `PolicyConfig.planActions` does not list. Permission `destructive`. */
+  "plan_action_not_allowed",
 ] as const;
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 
-/** Phase 1a is non-interactive: a decision is allow or deny, never "ask". */
+/**
+ * Phase 1a is non-interactive: a decision is allow or deny, never "ask".
+ * G-A: unchanged in stage 4. Plan approval happens between runs (plan.ts, DR-1), not here. The
+ * in-run permission question (N-11) is decided as DR-3 and comes at the start of stage 5; its
+ * decision value and `EngineDeps.confirm` are named here only and not part of this contract yet.
+ */
 export type PolicyDecision =
   | { readonly allowed: true }
   | { readonly allowed: false; readonly permission: PermissionKind; readonly code: PolicyDenialCode };

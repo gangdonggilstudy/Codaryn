@@ -92,7 +92,13 @@ export const MAX_BACKOFF_MS = 8_000;
 export const MAX_RETRY_AFTER_MS = 60_000;
 
 
-export type Failure = { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string };
+export type Failure = {
+  readonly ok: false;
+  readonly kind: ModelErrorKind;
+  readonly message: string;
+  /** SP-3: the HTTP status of a failure that is an HTTP response (ModelOutcome.httpStatus). */
+  readonly httpStatus?: number;
+};
 
 /**
  * One HTTP attempt. `body`: a 2xx body read within MAX_SUCCESS_BODY_BYTES, for the caller to parse.
@@ -108,6 +114,8 @@ type Attempt =
       readonly message: string;
       readonly retryable: boolean;
       readonly retryAfterMs?: number;
+      /** SP-3: the status of the HTTP response this failure is, absent for a transport failure. */
+      readonly status?: number;
     };
 
 
@@ -309,7 +317,9 @@ export interface HttpRequest {
 }
 
 /** A request that ended: the 2xx body, or a failure whose message is not yet redacted. */
-export type Sent = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string };
+export type Sent =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number };
 
 /**
  * One attempt: the request time limit, no redirects (the key is not sent elsewhere), the body read
@@ -385,6 +395,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
         kind: "api_error",
         message: `HTTP ${status}: redirects are not followed, so the key is not sent elsewhere`,
         retryable: false,
+        ...(status > 0 ? { status } : {}),
       };
     }
 
@@ -410,6 +421,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
       message: transport.describeError(status, read),
       retryable,
       ...(after === undefined ? {} : { retryAfterMs: after }),
+      status,
     };
   } finally {
     clearTimeout(timer);
@@ -427,7 +439,7 @@ export async function sendWithRetries(transport: Transport, request: HttpRequest
     if (result.type === "final") return { ok: false, kind: result.kind, message: result.message };
     if (!result.retryable || attempt >= attempts) {
       const suffix = attempt > 1 ? ` (after ${attempt} attempts)` : "";
-      return { ok: false, kind: result.kind, message: `${result.message}${suffix}` };
+      return { ok: false, kind: result.kind, message: `${result.message}${suffix}`, ...(result.status === undefined ? {} : { httpStatus: result.status }) };
     }
     const delay =
       result.retryAfterMs !== undefined

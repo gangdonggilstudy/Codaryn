@@ -335,7 +335,12 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
   };
   const redact = createRedactor(settings.apiKey, ANTHROPIC_KEY_SHAPES);
 
-  const fail = (kind: ModelErrorKind, message: string): Failure => ({ ok: false, kind, message: redact(message) });
+  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number): Failure => ({
+    ok: false,
+    kind,
+    message: redact(message),
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+  });
   const aborted = (when: string): Failure => fail("aborted", `cancelled ${when}`);
 
   async function complete(request: ModelRequest, signal: AbortSignal): Promise<ModelOutcome> {
@@ -348,7 +353,7 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
     if (typeof built === "string") return fail("api_error", `request not sent: ${built}`);
 
     const sent = await sendWithRetries(transport, { method: "POST", url, body: built.body }, signal);
-    if (!sent.ok) return fail(sent.kind, sent.message);
+    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus);
     const outcome = parseMessageBody(sent.text);
     return outcome.ok ? outcome : fail(outcome.kind, outcome.message);
   }
@@ -448,7 +453,12 @@ export const listAnthropicModels: ListAnthropicModels = async (
 ): Promise<ListModelsOutcome> => {
   const apiKey = typeof settings?.apiKey === "string" ? settings.apiKey : "";
   const redact = createRedactor(apiKey, ANTHROPIC_KEY_SHAPES);
-  const fail = (kind: ModelErrorKind, message: string): ListModelsOutcome => ({ ok: false, kind, message: redact(message) });
+  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number): ListModelsOutcome => ({
+    ok: false,
+    kind,
+    message: redact(message),
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+  });
 
   try {
     let base: string;
@@ -480,7 +490,7 @@ export const listAnthropicModels: ListAnthropicModels = async (
       const where = pageNumber > 1 ? ` (page ${pageNumber})` : "";
       const query = `?limit=${MODEL_LIST_PAGE_SIZE}${cursor === null ? "" : `&after_id=${encodeURIComponent(cursor)}`}`;
       const sent = await sendWithRetries(transport, { method: "GET", url: `${base}${ANTHROPIC_MODELS_PATH}${query}` }, signal);
-      if (!sent.ok) return fail(sent.kind, `${sent.message}${where}`);
+      if (!sent.ok) return fail(sent.kind, `${sent.message}${where}`, sent.httpStatus);
 
       const parsed = parseModelPage(sent.text, holdsKeyMaterial);
       if (!parsed.ok) return fail("malformed_response", `malformed response: ${parsed.message}${where}`);

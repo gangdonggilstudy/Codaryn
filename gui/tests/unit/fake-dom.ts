@@ -80,6 +80,17 @@ export class FakeElement {
     }
     return found;
   }
+
+  /** The first element below this one with that tag name (the only selector the screens use here). */
+  querySelector(selector: string): FakeElement | null {
+    if (!/^[a-z][a-z0-9]*$/.test(selector)) throw new Error(`fake DOM: only a tag name selector, not ${selector}`);
+    return this.findAll((element) => element.tagName === selector)[0] ?? null;
+  }
+
+  /** Whether `node` is this element or below it. */
+  contains(node: FakeElement): boolean {
+    return node === this || this.findAll((element) => element === node).length > 0;
+  }
 }
 
 const fakeDocument = {

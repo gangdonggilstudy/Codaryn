@@ -6,7 +6,7 @@
  */
 
 import { HELP_COMMANDS } from "../contracts/index.js";
-import type { HelpCommand, HelpOption, MessageCatalog } from "../contracts/index.js";
+import type { HelpCommand, HelpOption, MessageCatalog, MessageId } from "../contracts/index.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { DOCTOR_USAGE, INIT_USAGE, MODELS_USAGE, REPORT_USAGE, REVERT_USAGE, RUNS_USAGE, RUN_USAGE } from "./args.js";
 
@@ -55,8 +55,24 @@ export const COMMAND_OPTIONS: { readonly [C in CommandName]: readonly HelpOption
   runs: ["workspace", "limit", "json"],
 };
 
+/**
+ * A message, or the English one when the catalog has no text for it, or the id when neither has:
+ * help must never fail because a text is missing.
+ */
+function line(messages: MessageCatalog, id: MessageId): string {
+  for (const catalog of [messages, createMessageCatalog("en")]) {
+    try {
+      return (catalog.format as (id: MessageId) => string)(id);
+    } catch {
+      // Try the next one.
+    }
+  }
+  return id;
+}
+
 /** The help text. Without a catalog, English. */
-export function helpText(command: CommandName | null, messages: MessageCatalog = createMessageCatalog("en")): string {
+export function helpText(command: CommandName | null, catalog: MessageCatalog = createMessageCatalog("en")): string {
+  const messages = { format: (id: MessageId) => line(catalog, id) };
   const lines: string[] = [];
   if (command === null) {
     lines.push(messages.format("help.intro"), "", messages.format("help.commands_heading"));

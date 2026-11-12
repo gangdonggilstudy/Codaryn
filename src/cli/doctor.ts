@@ -397,15 +397,31 @@ function worst(checks: readonly DoctorCheck[]): DoctorStatus {
 /** N-21: the text output in the catalog's language. Without a catalog (or a text), the English lines. */
 export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog): string {
   if (messages === undefined) return renderDoctorEnglish(output);
-  const format = messages.format as (id: MessageId, params?: object) => CatalogText;
-  const status = (value: DoctorCheckStatus): string => `[${format(`doctor.status.${value}`)}]`;
-  const labels = output.checks.map((check) => format(`doctor.check.${check.id}`));
+  const raw = messages.format as (id: MessageId, params?: object) => CatalogText;
+  // A catalog without a text for an id (an older catalog) must not stop doctor: the English stays.
+  const format = (id: MessageId, fallback: string, params?: object): string => {
+    try {
+      return raw(id, params);
+    } catch {
+      return fallback;
+    }
+  };
+  const status = (value: DoctorCheckStatus): string => `[${format(`doctor.status.${value}`, value)}]`;
+  const labels = output.checks.map((check) => format(`doctor.check.${check.id}`, check.id));
   const width = Math.max(...labels.map((label) => label.length));
   const lines = output.checks.map((check, index) => {
-    const body = check.text === undefined ? check.message : format(check.text.id, "params" in check.text ? check.text.params : undefined);
+    const body =
+      check.text === undefined ? check.message : format(check.text.id, check.message, "params" in check.text ? check.text.params : undefined);
     return `${status(check.status).padEnd(10)}${(labels[index] ?? check.id).padEnd(width)}  ${body}`;
   });
-  lines.push("", format("doctor.footer", { status: format(`doctor.status.${output.status}`), exitCode: output.exitCode }));
+  const english = `doctor: ${output.status} (exit code ${output.exitCode}). No network access was made and nothing was changed.`;
+  let footer: string;
+  try {
+    footer = raw("doctor.footer", { status: raw(`doctor.status.${output.status}`), exitCode: output.exitCode });
+  } catch {
+    footer = english;
+  }
+  lines.push("", footer);
   return `${lines.join("\n")}\n`;
 }
 

@@ -115,8 +115,11 @@ function explainError(output: CliErrorOutput, human: { readonly output: HumanOut
   let text = "";
   try {
     text = human.output.error(output);
-    if ((DOCTOR_HINT_ERROR_CODES as readonly string[]).includes(output.code)) text += `${human.messages.format("error.doctor_hint")}\n`;
-    if (output.code === "workspace_locked") text += `${human.messages.format("lock.remove_hint")}\n`;
+    // The renderer may already add these hints; each is written once.
+    const hints: string[] = [];
+    if ((DOCTOR_HINT_ERROR_CODES as readonly string[]).includes(output.code)) hints.push(human.messages.format("error.doctor_hint"));
+    if (output.code === "workspace_locked") hints.push(human.messages.format("lock.remove_hint"));
+    for (const hint of hints) if (!text.includes(hint)) text += `${hint}\n`;
   } catch {
     text = "";
   }

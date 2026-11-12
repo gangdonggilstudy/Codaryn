@@ -293,3 +293,40 @@ describe("N-26 a damaged run is refused even by its id", () => {
     assert.equal(await lstat(path.join(dir, ".codaryn", "lock.json")).then(() => true, () => false), false);
   });
 });
+
+describe("a catalog without some texts never stops a command (integration found doctor ending as internal_error)", () => {
+  /** Knows no doctor or help id at all, as an older catalog would. */
+  const partial = {
+    language: "en",
+    format: (id: string) => {
+      if (id.startsWith("doctor.") || id.startsWith("help.")) throw new Error("unknown message id");
+      return id as CatalogText;
+    },
+  } as unknown as MessageCatalog;
+
+  test("doctor falls back to the English lines", async () => {
+    const outcome = await runDoctor({
+      argv: ["doctor"],
+      env: {},
+      cwd: "/",
+      nodeVersion: "26.0.0",
+      readFile: async () => Promise.reject(new Error("x")),
+      isDirectory: async () => false,
+      isFile: async () => false,
+      locateInWorkspace: lexicalLocate,
+      relatePaths: async () => "separate",
+      messages: partial,
+    });
+    assert.ok("text" in outcome, "text, not an internal_error object");
+    assert.notEqual(outcome.exitCode, 70);
+    assert.ok(outcome.text.includes("meets the requirement"));
+    assert.ok(outcome.text.includes("No network access was made"));
+  });
+
+  test("help falls back to English, then to the id", async () => {
+    const { helpText } = await import("../../../src/cli/help.js");
+    const text = helpText("doctor", partial);
+    assert.ok(text.startsWith("usage: codaryn doctor"));
+    assert.ok(text.length > 40);
+  });
+});

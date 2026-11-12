@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 import { MAX_REVIEW_NOTE_CHARS, REVIEW_FILE_NAME, REVIEW_VERDICTS } from "../contracts/index.js";
 import type { MaskedText, ReviewRecord, ReviewVerdict } from "../contracts/index.js";
-import { assertRunId, errorCode, isPlainDirectory, replaceAtomically, runDir } from "./common.js";
+import { assertRunId, errorCode, isOwnRunDir, replaceAtomically, runDir } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
 
 /** Largest review.json read: the note is at most MAX_REVIEW_NOTE_CHARS. */
@@ -46,7 +46,7 @@ function checkedReview(value: unknown, runId: string): ReviewRecord | null {
 export async function readReviewRecord(workspaceRoot: string, runId: string): Promise<ReviewRecord | null> {
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
-  if (!(await isPlainDirectory(dir))) throw new Error("the run directory is missing or a link; its review record is not read");
+  if (!(await isOwnRunDir(workspaceRoot, runId))) throw new Error("the run directory is missing or a link; its review record is not read");
   const file = join(dir, REVIEW_FILE_NAME);
   try {
     const info = await lstat(file);
@@ -77,6 +77,6 @@ export async function writeReviewRecord(workspaceRoot: string, record: ReviewRec
   const checked = checkedReview(record, record.runId);
   if (checked === null) throw new TypeError("writeReviewRecord needs a valid ReviewRecord");
   const dir = runDir(workspaceRoot, record.runId);
-  if (!(await isPlainDirectory(dir))) throw new Error("the run directory is missing or a link; no review record was written");
+  if (!(await isOwnRunDir(workspaceRoot, record.runId))) throw new Error("the run directory is missing or a link; no review record was written");
   await replaceAtomically(join(dir, REVIEW_FILE_NAME), `${JSON.stringify(checked)}\n`);
 }

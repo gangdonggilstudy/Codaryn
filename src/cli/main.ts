@@ -21,10 +21,12 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { CODARYN_LANG_ENV } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
+import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
 import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
+import { runChanges } from "./changes.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
 import { runDoctor } from "./doctor.js";
 import { renderOutcome, runGuardedCommand } from "./guard.js";
@@ -177,9 +179,12 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           readRecord: readRevertRecord,
           writeRecord: writeRevertRecord,
           announceLatest,
-          // N-26: the store judges one run as the run list does.
-          isDamaged: async (workspaceRoot, runId) => (await inspectRun(workspaceRoot, runId)) === "damaged",
+          // N-26, N-27 (a): the store judges one run as the run list does: an id with no entry of
+          // exactly that name is run_not_found, a damaged run is refused.
+          inspect: inspectRun,
         }),
+        // DR-25: at a terminal, files skipped as unsafe_move may go back after a [y/N] question on stderr.
+        ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
       });
       if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));
       return plain(outcome);
@@ -188,6 +193,9 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       return plain(await runReport({ argv, cwd: process.cwd(), env: process.env, listRuns, announceLatest }));
     case "runs":
       return plain(await runRuns({ argv, cwd: process.cwd(), env: process.env, human: human.output }));
+    case "changes":
+      // DR-7, DR-14: the app layer's `changes` with this process's environment; it reads only.
+      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()) }));
     case "plan":
     case "apply":
     case "review": {

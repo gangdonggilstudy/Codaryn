@@ -17,6 +17,7 @@ import type {
   MaskedText,
   MessageCatalog,
   MessageId,
+  RevertOutput,
   RunId,
   RunSummaryContext,
 } from "../../../../src/contracts/index.js";
@@ -174,6 +175,44 @@ describe("applySummary (G-A)", () => {
   });
 });
 
+describe("DR-21 unsafe moves and the plan total (renderer state)", () => {
+  const started = (extra: Record<string, unknown> = {}): ApplyJournalEvent =>
+    ({ type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "t", digest: DIGEST, approval: "cli-flag", actions: 5, maxDurationMs: 1000, ...extra }) as ApplyJournalEvent;
+
+  test("the consent and the unsafe moves are their own parts of the start and preflight lines", () => {
+    const human = createHumanOutput(stand_in());
+    assert.equal(
+      human.applyProgressLine?.(started({ unsafeMoveConsent: "cli-flag" })),
+      "[progress.apply_started actions=5 approval=[approval.cli-flag]] · [progress.unsafe_move_consent approval=[approval.cli-flag]]",
+    );
+    assert.equal(human.applyProgressLine?.(started({ unsafeMoveConsent: null })), "[progress.apply_started actions=5 approval=[approval.cli-flag]]");
+    assert.equal(
+      human.applyProgressLine?.({ type: "plan_checked", problems: [], inventoryLimitReached: false, unsafeMoves: [0, 3] } as ApplyJournalEvent),
+      "[progress.plan_checked count=0] · [progress.unsafe_moves count=2]",
+    );
+  });
+
+  test("an apply that stopped for consent says how many moves are unsafe and how to consent, with the digest", () => {
+    const human = createHumanOutput(stand_in());
+    human.applyProgressLine?.(started());
+    human.applyProgressLine?.({ type: "plan_checked", problems: [], inventoryLimitReached: false, unsafeMoves: [0, 3] } as ApplyJournalEvent);
+    const text = human.applySummary?.(applyResult({ status: "needs-input", reason: "consent_required", exitCode: 3, applied: [], verifiers: [] }), { workspaceForm: "task" }) ?? "";
+    const lines = text.trimEnd().split("\n");
+    assert.ok(lines.includes("[summary.unsafe_moves count=2]"), text);
+    const next = lines.indexOf(`[summary.next_apply_unsafe form=[summary.form.task] runId=${PLAN_RUN}]`);
+    assert.ok(next > 0, text);
+    assert.equal(lines[next + 1], `  ${DIGEST}`);
+    assert.equal(text.includes("next_revert"), false, "nothing was moved");
+  });
+
+  test("the plan total comes from apply_started when this renderer saw it, also for a partial apply", () => {
+    const human = createHumanOutput(stand_in());
+    human.applyProgressLine?.(started());
+    const text = human.applySummary?.(applyResult({ status: "failed", reason: "apply_incomplete", exitCode: 1, verifiers: [] }), { workspaceForm: "given" }) ?? "";
+    assert.ok(text.includes("[summary.apply_actions applied=2 total=5]\n"), text);
+  });
+});
+
 describe("plan, review and apply output with the real catalogs", () => {
   for (const language of MESSAGE_LANGUAGES) {
     test(`${language}: every new text is accepted, so no ? stands in for a value`, () => {
@@ -187,6 +226,42 @@ describe("plan, review and apply output with the real catalogs", () => {
       ].join("");
       assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(texts), false, texts);
       assert.equal(texts.includes(SECRET), false);
+    });
+
+    test(`${language}: DR-21 and DR-25 lines use the catalog's own texts`, () => {
+      const catalog = createMessageCatalog(language);
+      const human: HumanOutput = createHumanOutput(catalog);
+      const started = { type: "apply_started", schemaVersion: 1, planRunId: PLAN_RUN, taskId: "t", digest: DIGEST, approval: "cli-flag", actions: 4, maxDurationMs: 1000, unsafeMoveConsent: "cli-flag" } as ApplyJournalEvent;
+      const checked = { type: "plan_checked", problems: [], inventoryLimitReached: false, unsafeMoves: [0, 2] } as ApplyJournalEvent;
+      const progress = `${human.applyProgressLine?.(started) ?? ""}\n${human.applyProgressLine?.(checked) ?? ""}\n`;
+      const approval = catalog.format("approval.cli-flag");
+      assert.ok(progress.includes(catalog.format("progress.unsafe_move_consent", { approval })), progress);
+      assert.ok(progress.includes(catalog.format("progress.unsafe_moves", { count: 2 })), progress);
+
+      const stopped = human.applySummary?.(applyResult({ status: "needs-input", reason: "consent_required", exitCode: 3, applied: [], verifiers: [] }), { workspaceForm: "given" }) ?? "";
+      const form = catalog.format("summary.form.given");
+      for (const expected of [
+        catalog.format("reason.consent_required"),
+        catalog.format("advice.consent_required"),
+        catalog.format("summary.unsafe_moves", { count: 2 }),
+        catalog.format("summary.next_apply_unsafe", { form, runId: PLAN_RUN }),
+        `  ${DIGEST}`,
+        catalog.format("summary.apply_actions", { applied: 0, total: 4 }),
+      ]) {
+        assert.ok(stopped.includes(expected), `${expected}\n---\n${stopped}`);
+      }
+
+      const revert = (extra: Partial<RevertOutput>): string =>
+        human.revertSummary({ schemaVersion: 1, kind: "revert", runId: RUN, status: "complete", exitCode: 0, reverted: [], skipped: [], ...extra } as RevertOutput);
+      const moved = revert({ reverted: [{ path: "inbox/a.txt", action: "moved_back", from: "docs/a.txt", unsafe: true }] });
+      assert.ok(moved.includes(catalog.format("revert.unsafe_moved", { count: 1 })), moved);
+      const skipped = revert({ status: "partial", exitCode: 3, skipped: [{ path: "inbox/a.txt", reason: "unsafe_move" }] });
+      assert.ok(skipped.includes(catalog.format("revert.skip.unsafe_move")), skipped);
+      assert.ok(skipped.includes(catalog.format("summary.next_revert_unsafe", { runId: RUN })), skipped);
+      const preview = revert({ dryRun: true, moveSafetyUnchecked: true, reverted: [{ path: "inbox/a.txt", action: "moved_back", from: "docs/a.txt" }] });
+      assert.ok(preview.includes(catalog.format("revert.dry_run_move_unchecked")), preview);
+      const all = [progress, stopped, moved, skipped, preview].join("");
+      assert.equal(/(^|[\s(—:])\?([\s)—:,]|$)/m.test(all), false, all);
     });
   }
 });

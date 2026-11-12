@@ -44,6 +44,9 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.next_review": "판정 기록: codaryn review {form} --run {runId} --accept 또는 --reject",
   "summary.apply_actions": "적용한 동작: {total}개 중 {applied}개",
   "summary.apply_plan_run": "계획 실행: {runId}",
+  "summary.unsafe_moves": "덮어쓸 위험이 있는 이동 {count}개 때문에 적용하지 않았습니다. 아무것도 옮기지 않았습니다.",
+  "summary.next_apply_unsafe": "이 적용에 한해 동의: codaryn apply {form} --run {runId} --digest <digest> --allow-unsafe-move",
+  "summary.next_revert_unsafe": "이 되돌리기에 한해 동의: codaryn revert --workspace <workspace> --run {runId} --allow-unsafe-move",
 
   "progress.run_started": "실행 시작 — 모델 제공자 {provider}",
   "progress.config_default": "기본 위치의 설정 파일을 씁니다: {location}",
@@ -63,6 +66,8 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.unknown_tool": "(모르는 도구)",
   "progress.apply_started": "적용 시작 — 동작 {actions}개, {approval}",
   "progress.plan_checked": "적용 전 점검 — 문제 {count}개",
+  "progress.unsafe_moves": "덮어쓸 위험이 있는 이동 {count}개(동의가 있어야 옮깁니다)",
+  "progress.unsafe_move_consent": "덮어쓸 위험이 있는 이동에 동의함 — {approval}",
   "progress.plan_item_problem": "동작 {number}번 — {problem}",
   "progress.inventory_limit": "작업 공간의 파일이 인벤토리 상한(10만 개)을 넘어 적용을 확인할 수 없습니다. 아무것도 옮기지 않았습니다",
   "progress.file_moved": "동작 {number}번 — 옮김",
@@ -83,6 +88,8 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.action.restored_from_discard": "버린 파일 보관 폴더에서 되살림",
   "revert.dry_run_next": "실행하려면 --dry-run 없이 다시 실행하세요.",
   "revert.reverted_before": "이 실행은 이미 되돌린 적이 있습니다. 그래서 파일이 실행 뒤에 바뀐 것으로 보일 수 있습니다.",
+  "revert.unsafe_moved": "동의를 받아, 덮어쓸 위험이 있는 방식으로 되돌려 옮긴 파일: {count}개",
+  "revert.dry_run_move_unchecked": "미리보기는 이 드라이브가 덮어쓰지 않고 되돌려 옮길 수 있는지 확인하지 않았습니다. 실제 되돌리기가 확인하고, 동의가 없으면 그런 파일은 건너뜁니다.",
 
   "runs.column.run_id": "실행 id",
   "runs.column.started": "시작",
@@ -303,6 +310,7 @@ export const KO_MESSAGES: MessageTexts = {
   "reason.apply_incomplete": "적용 중 한 동작이 실패함(앞의 동작은 적용된 채 남음)",
   "reason.plan_pending": "계획을 만들었고 승인을 기다림",
   "reason.awaiting_review": "사람의 검토를 기다림",
+  "reason.consent_required": "덮어쓸 위험이 있는 이동이 있어 사람의 동의를 기다림(아무것도 옮기지 않음)",
 
   "advice.verified": "보고서를 확인하고, 필요하면 되돌리세요.",
   "advice.verifier_failed": "보고서의 근거를 확인하고, 목표나 검증을 고쳐 다시 실행하세요.",
@@ -322,6 +330,7 @@ export const KO_MESSAGES: MessageTexts = {
   "advice.apply_incomplete": "보고서에서 실패한 동작을 확인하세요. codaryn revert로 적용된 동작을 되돌릴 수 있습니다.",
   "advice.plan_pending": "codaryn plan으로 계획을 확인하고, 승인하면 codaryn apply로 적용하세요.",
   "advice.awaiting_review": "결과를 확인하고 codaryn review로 판정을 기록하세요.",
+  "advice.consent_required": "적용 전 점검 결과를 확인하세요. 이 적용에 한해 동의하려면 --allow-unsafe-move를 붙여 다시 적용하세요. 동의하지 않으면 아무것도 바뀌지 않습니다.",
 
   "tool.read_file": "파일 읽기",
   "tool.search_files": "파일 검색",
@@ -334,6 +343,7 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.skip.missing_record": "기록 없음",
   "revert.skip.already_reverted": "이미 실행 전 상태임",
   "revert.skip.original_path_taken": "원래 위치에 다른 것이 있음",
+  "revert.skip.unsafe_move": "이 드라이브는 덮어쓰지 않고 되돌려 옮길 수 없음",
 
   "diagnostic.file.config": "설정 파일",
   "diagnostic.file.task": "task 파일",
@@ -413,7 +423,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.status.skipped": "건너뜀",
 
   "approval.cli-tty": "터미널에서 승인",
-  "approval.cli-flag": "--digest로 승인",
+  "approval.cli-flag": "명령 인수로 승인",
   "approval.adapter": "화면(VS Code·GUI)에서 승인",
 
   "plan.problem.source_missing": "원본이 없음",

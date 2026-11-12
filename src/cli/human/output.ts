@@ -160,6 +160,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     return text === null ? null : `${fileText} — ${text}`;
   }
 
+  // G-A, DR-21: what this renderer learned from an apply's progress records, for its summary
+  // (one renderer per command). ApplyResult carries neither the plan total nor the unsafe moves.
+  let planTotal: number | null = null;
+  let unsafeMoveCount: number | null = null;
+
   /** "── <status and reason in words> (status/reason) ──". */
   function heading(pair: { status: TerminalRunStatus; reason: RunReason } | null, status: unknown, reason: unknown): string {
     if (pair === null) return `── ? (${token(status)}/${token(reason)}) ──`;
@@ -345,6 +350,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`  ${shownPath(String(file.path))} — ${word}`);
       }
       if (reverted.length > REVERT_MAX_LISTED) out.push(moreLine(reverted.length - REVERT_MAX_LISTED));
+      // DR-25: files moved back unsafely with the person's consent; never in a dry run.
+      const unsafeMoved = reverted.filter((file) => file.unsafe === true).length;
+      if (output.dryRun !== true && unsafeMoved > 0) out.push(catalog.format("revert.unsafe_moved", { count: unsafeMoved }));
       if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
       for (const file of skipped.slice(0, REVERT_MAX_LISTED)) {
         const reason: unknown = file.reason;
@@ -354,12 +362,19 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`  ${shown} — ${word} (${token(reason)})`);
       }
       if (skipped.length > REVERT_MAX_LISTED) out.push(moreLine(skipped.length - REVERT_MAX_LISTED));
+      // DR-25: the preview did not check whether this drive can move the listed files back safely.
+      if (output.dryRun === true && output.moveSafetyUnchecked === true) out.push(catalog.format("revert.dry_run_move_unchecked"));
 
       const before = output.revertedBefore;
       if (before !== undefined) {
         const time = localTime(before.at);
         const status = isOneOf(before.status, ["complete", "partial"] as const) ? before.status : null;
         if (status !== null) out.push(`${catalog.format("revert.reverted_before")} (${status}${time === null ? "" : `, ${time}`})`);
+      }
+      // DR-25: files skipped as unsafe_move go back on a revert with the person's consent.
+      const revertedRun = toRunId(String(output.runId));
+      if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
+        out.push(catalog.format("summary.next_revert_unsafe", { runId: revertedRun }));
       }
       if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);
@@ -417,10 +432,17 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       switch (event.type) {
         case "apply_started": {
           const approval: unknown = event.approval;
-          line =
-            isCount(event.actions, 1) && isOneOf(approval, APPROVAL_CHANNELS)
-              ? catalog.format("progress.apply_started", { actions: event.actions, approval: catalog.format(`approval.${approval}`) })
-              : null;
+          if (!isCount(event.actions, 1) || !isOneOf(approval, APPROVAL_CHANNELS)) {
+            line = null;
+            break;
+          }
+          planTotal = event.actions;
+          line = catalog.format("progress.apply_started", { actions: event.actions, approval: catalog.format(`approval.${approval}`) });
+          // DR-21: the person consented to unsafe moves for this apply.
+          const consent: unknown = event.unsafeMoveConsent;
+          if (isOneOf(consent, APPROVAL_CHANNELS)) {
+            line += ` · ${catalog.format("progress.unsafe_move_consent", { approval: catalog.format(`approval.${consent}`) })}`;
+          }
           break;
         }
         case "plan_checked": {
@@ -432,6 +454,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             parts.push(`${catalog.format("progress.plan_item_problem", { number: item.index + 1, problem: catalog.format(`plan.problem.${problem}`) })} (${problem})`);
           }
           if (problems.length > PLAN_PROBLEMS_SHOWN) parts.push(`(+${problems.length - PLAN_PROBLEMS_SHOWN})`);
+          // DR-21: moves that could only be made unsafely (not problems; they have their own part).
+          const unsafe = Array.isArray(event.unsafeMoves) ? event.unsafeMoves.filter((at) => isCount(at)).length : 0;
+          unsafeMoveCount = unsafe;
+          if (unsafe > 0) parts.push(catalog.format("progress.unsafe_moves", { count: unsafe }));
           if (event.inventoryLimitReached === true) parts.push(catalog.format("progress.inventory_limit"));
           line = parts.join(" · ");
           break;
@@ -465,11 +491,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const pair = validStatusReason(result.status, result.reason);
       const out: string[] = [heading(pair, result.status, result.reason)];
       const applied = Array.isArray(result.applied) ? result.applied : [];
-      // ApplyResult has no plan total (reported): only when verification ran was every action
-      // applied, so only then is "applied of total" known.
-      if (pair !== null && APPLIED_ALL_REASONS.has(pair.reason)) {
-        out.push(catalog.format("summary.apply_actions", { applied: applied.length, total: applied.length }));
-      }
+      // The plan total from apply_started when this renderer saw it; otherwise only when
+      // verification ran (every action was applied) is "applied of total" known.
+      const total = planTotal ?? (pair !== null && APPLIED_ALL_REASONS.has(pair.reason) ? applied.length : null);
+      if (total !== null) out.push(catalog.format("summary.apply_actions", { applied: applied.length, total }));
       for (const item of applied.slice(0, REVERT_MAX_LISTED)) {
         if (!isCount(item.index)) continue;
         const action = item.action;
@@ -489,6 +514,13 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
       out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0));
+      // DR-21: stopped for the person's consent to unsafe moves; how to give it for one apply.
+      if (pair?.reason === "consent_required" && planRunId !== null) {
+        if (unsafeMoveCount !== null && unsafeMoveCount > 0) out.push(catalog.format("summary.unsafe_moves", { count: unsafeMoveCount }));
+        const form = catalog.format(`summary.form.${isOneOf(context.workspaceForm, WORKSPACE_FORMS) ? context.workspaceForm : "given"}`);
+        out.push(catalog.format("summary.next_apply_unsafe", { form, runId: planRunId }));
+        if (typeof result.digest === "string" && DIGEST.test(result.digest)) out.push(`  ${result.digest}`);
+      }
       return lines(out);
     },
   };

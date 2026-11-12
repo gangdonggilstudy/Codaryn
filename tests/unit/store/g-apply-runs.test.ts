@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import type { ApplyJournalEvent, ContentHash, MaskedText, RunListEntry } from "../../../src/contracts/index.js";
-import { createApplyJournal, discardedRootPath, inspectRun, latestRunId, listRuns, prepareDiscardedRoot } from "../../../src/store/index.js";
+import { RunListError, createApplyJournal, discardedRootPath, inspectRun, latestRunId, listRuns, prepareDiscardedRoot, readRevertRecord, writeRevertRecord } from "../../../src/store/index.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -123,6 +123,8 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
     assert.deepEqual(entry, {
       state: "checked",
       runId: APPLY_RUN,
+      kind: "apply",
+      planRunId: PLAN_RUN,
       startedAt: "2026-01-02T03:05:00.120Z",
       taskId: "organize-task",
       status: "done",
@@ -133,6 +135,25 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
     });
     assert.equal(await inspectRun(root, APPLY_RUN), "checked");
     assert.equal(await latestRunId(root), APPLY_RUN);
+  });
+
+  test("DR-21: an apply that stopped for consent (needs-input/consent_required) is checked, with nothing applied", async () => {
+    const root = await workspace();
+    await applyRun(root, applyResult({ status: "needs-input", reason: "consent_required", exitCode: 3, applied: [] }));
+    const entry = (await listRuns({ workspaceRoot: root })).runs[0] as Extract<RunListEntry, { state: "checked" }>;
+    assert.equal(entry.state, "checked");
+    assert.equal(entry.reason, "consent_required");
+    assert.equal(entry.changes, 0);
+  });
+
+  test("R-9 I-4: the apply journal takes a start record before each action", async () => {
+    const root = await workspace();
+    const journal = createApplyJournal({ workspaceRoot: root, runId: APPLY_RUN, clock });
+    await journal.append(STARTED);
+    await journal.append({ type: "plan_item_started", index: 0, action: { kind: "move", from: "a.txt" as MaskedText, to: "b/a.txt" as MaskedText, sha256: HASH_A } });
+    await journal.close();
+    const lines = (await readFile(join(root, ".codaryn", "runs", APPLY_RUN, "journal.jsonl"), "utf8")).trimEnd().split("\n");
+    assert.equal(JSON.parse(lines[1] as string).type, "plan_item_started");
   });
 
   test("an apply run still in progress is listed without a status and is not latest", async () => {
@@ -157,6 +178,38 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
       const root = await workspace();
       await applyRun(root, applyResult(extra));
       assert.deepEqual((await listRuns({ workspaceRoot: root })).runs, [{ state: "damaged", runId: APPLY_RUN }], JSON.stringify(extra));
+    }
+  });
+});
+
+describe("DR-25 fields of the revert record", () => {
+  const record = { schemaVersion: 1, kind: "revert_record", runId: APPLY_RUN, at: "2026-01-02T04:00:00.000Z", status: "complete", reverted: 2, skipped: 0 } as const;
+
+  test("the consent channel and the number of unsafe moves are kept, and records without them read as before", async () => {
+    const root = await workspace();
+    await applyRun(root);
+    await writeRevertRecord(root, { ...record, unsafeMoveConsent: "cli-flag", unsafeMoves: 2 });
+    assert.deepEqual(await readRevertRecord(root, APPLY_RUN), { ...record, unsafeMoveConsent: "cli-flag", unsafeMoves: 2 });
+    await writeRevertRecord(root, { ...record, unsafeMoveConsent: null, unsafeMoves: 0 });
+    assert.deepEqual(await readRevertRecord(root, APPLY_RUN), { ...record, unsafeMoveConsent: null, unsafeMoves: 0 });
+    await writeRevertRecord(root, record);
+    assert.deepEqual(await readRevertRecord(root, APPLY_RUN), record);
+  });
+
+  test("an unknown channel, unsafe moves without a consent or more than were reverted make the record damaged", async () => {
+    for (const bad of [
+      { unsafeMoveConsent: "model" },
+      { unsafeMoveConsent: null, unsafeMoves: 1 },
+      { unsafeMoveConsent: "cli-flag", unsafeMoves: 3 },
+      { unsafeMoveConsent: "cli-flag", unsafeMoves: -1 },
+    ]) {
+      const root = await workspace();
+      await applyRun(root);
+      await assert.rejects(writeRevertRecord(root, { ...record, ...bad } as never), TypeError, JSON.stringify(bad));
+      await writeFile(join(root, ".codaryn", "runs", APPLY_RUN, "revert.json"), `${JSON.stringify({ ...record, ...bad })}\n`, "utf8");
+      await assert.rejects(readRevertRecord(root, APPLY_RUN), RunListError, JSON.stringify(bad));
+      const entry = (await listRuns({ workspaceRoot: root })).runs[0] as Extract<RunListEntry, { state: "checked" }>;
+      assert.equal(entry.revertRecordDamaged, true, JSON.stringify(bad));
     }
   });
 });

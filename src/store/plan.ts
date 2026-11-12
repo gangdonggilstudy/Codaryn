@@ -37,8 +37,9 @@ import type {
   ResolvedPlanAction,
   StoredPlan,
 } from "../contracts/index.js";
-import { assertRunId, createExclusive, ensureRunDir, errorCode, isPlainDirectory, runDir, sha256Hex } from "./common.js";
+import { assertRunId, createExclusive, ensureRunDir, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sha256Hex } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
+import { isStateDirName, isValidPathInput } from "../workspace/lexical.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
@@ -62,7 +63,9 @@ export function isWorkspaceRelativePath(value: unknown): value is string {
   if (value.includes("\\") || value.includes("\u0000") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) return false;
   const segments = value.split("/");
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return false;
-  return (segments[0] as string).toLowerCase() !== STATE_DIR_NAME;
+  // DR-24 (d): the workspace's own rules too (device names, streams, trailing dots and spaces on
+  // Windows), so a stored path is one Workspace.resolve would accept.
+  return isValidPathInput(value) && !isStateDirName(segments[0] as string);
 }
 
 /** One action in canonical form (fixed key order), or null when it is not a resolved action. */
@@ -179,6 +182,7 @@ export const loadPlan: LoadPlan = async (request): Promise<LoadPlanOutcome> => {
   } catch {
     return { ok: false, code: "run_not_found" };
   }
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) return { ok: false, code: "run_not_found" };
   if (!(await isPlainDirectory(runsDir)) || !(await isPlainDirectory(dir))) return { ok: false, code: "invalid_run_record" };
 
   try {
@@ -231,7 +235,7 @@ export async function markPlanApplied(request: MarkPlanAppliedRequest): Promise<
   assertRunId(applyRunId);
   if (!isRunTimestamp(at)) throw new TypeError("markPlanApplied needs an ISO 8601 UTC time");
   const dir = runDir(workspaceRoot, planRunId);
-  if (!(await isPlainDirectory(dir))) throw new Error("the plan run has no directory of its own; nothing was written");
+  if (!(await isOwnRunDir(workspaceRoot, planRunId))) throw new Error("the plan run has no directory of its own; nothing was written");
   const record: PlanAppliedRecord = { schemaVersion: 1, kind: "plan_applied", planRunId, applyRunId, at };
   return (await createExclusive(join(dir, PLAN_APPLIED_FILE_NAME), `${JSON.stringify(record)}\n`)) ? "marked" : "already_applied";
 }

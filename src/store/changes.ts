@@ -19,6 +19,7 @@ import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 
 import {
+  APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   MAX_READ_BYTES,
@@ -41,7 +42,7 @@ import type {
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { ApplyRecordError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
-import { assertRunId, ensureStateDir, errorCode, isPlainDirectory, runDir } from "./common.js";
+import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
 const CONTENT_FILE_PATTERN = /^([1-9][0-9]{0,8})\.orig$/;
@@ -281,6 +282,15 @@ type Snapshots =
 
 async function loadSnapshots(dir: string): Promise<Snapshots> {
   try {
+    // DR-24 (e): a link in place of the snapshots directory is never read through.
+    try {
+      await lstat(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "ENOENT" || code === "ENOTDIR") return { kind: "missing" };
+      return { kind: "unreadable" };
+    }
+    if (!(await isPlainDirectory(dir))) return { kind: "unreadable" };
     const found = await readIndex(dir);
     if (found === "missing") return { kind: "missing" };
     if (found === "invalid") return { kind: "unreadable" };
@@ -393,6 +403,10 @@ export const revertRun: RevertRun = async (request) => {
   const { workspaceRoot, runId } = request;
   const dryRun = request.dryRun === true;
   assertRunId(runId);
+  // N-27 (a): a run id that differs from the directory's name only in case names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) {
+    throw new RevertRunError("run_not_found", "the workspace has no journal for this run; nothing was changed");
+  }
   const dir = runDir(workspaceRoot, runId);
 
   let text: string;
@@ -408,7 +422,11 @@ export const revertRun: RevertRun = async (request) => {
   // G-A, DR-12: an apply run (its journal starts with apply_started) puts moves and discards back.
   if (isApplyJournal(text, runId)) {
     try {
-      return await revertApplyRun(workspaceRoot, runId, text, dryRun);
+      // DR-25: a consent counts only for this run and only from a person's channel.
+      const consent = request.unsafeMoveConsent;
+      const consented =
+        consent !== undefined && consent !== null && consent.runId === runId && (APPROVAL_CHANNELS as readonly string[]).includes(consent.channel);
+      return await revertApplyRun(workspaceRoot, runId, text, dryRun, consented);
     } catch (error) {
       if (error instanceof ApplyRecordError) throw new RevertRunError("invalid_run_record", error.message);
       throw error;
@@ -521,6 +539,7 @@ export async function readRunOriginals(request: { readonly workspaceRoot: string
   } catch {
     throw new RevertRunError("run_not_found", "the workspace has no records for this run");
   }
+  if (!(await hasExactRunEntry(workspaceRoot, runId))) throw new RevertRunError("run_not_found", "the workspace has no records for this run");
   if (!(await isPlainDirectory(dir))) throw new RevertRunError("invalid_run_record", "the run directory is a link; it is not read");
   let text: string;
   try {

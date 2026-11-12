@@ -55,6 +55,7 @@ import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
 import { inspectRun } from "../store/index.js";
+import type { RunInspection } from "../store/index.js";
 
 export interface ReportEnvironment {
   readonly argv: readonly string[];
@@ -71,6 +72,8 @@ export interface ReportEnvironment {
    * A damaged run is refused as revert refuses it (N-26).
    */
   readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+  /** N-27 (a): the store's `inspectRun` (the default); injected by tests. */
+  readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
 }
 
 async function pathExists(target: string): Promise<boolean> {
@@ -548,6 +551,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   const reference = await resolveRunReference(root, parsed.args.runId, {
     exists: pathExists,
     ...(io.listRuns === undefined ? {} : { listRuns: io.listRuns }),
+    inspect: io.inspectRun ?? inspectRun,
   });
   if (!reference.ok) return cliError(reference.code, reference.message);
   const runId = reference.runId;
@@ -555,7 +559,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   // id's exact form, N-27 a) applies to the report too; its records are not shown as a report.
   let damaged: boolean;
   try {
-    damaged = await (io.isDamaged ?? (async (workspaceRoot: string, id: string) => (await inspectRun(workspaceRoot, id)) === "damaged"))(root, runId);
+    damaged = await (io.isDamaged ?? (async (workspaceRoot: string, id: string) => (await (io.inspectRun ?? inspectRun)(workspaceRoot, id)) === "damaged"))(root, runId);
   } catch {
     damaged = true;
   }

@@ -79,10 +79,8 @@ describe("N-27 (a), R-7 M-1: a case variant of a run id is refused before anythi
       calls.push(request.runId);
       return { reverted: [], skipped: [] };
     };
-    const command = createRevertCommand(reverting, {
-      dryRun: reverting,
-      isDamaged: async (root, id) => (await inspectRun(root, id)) === "damaged",
-    });
+    // As main.ts connects it (N-27 a): the store's judgment of the id.
+    const command = createRevertCommand(reverting, { dryRun: reverting, inspect: inspectRun });
     for (const extra of [[], ["--dry-run"]]) {
       const outcome = await runRevert({
         argv: ["revert", "--workspace", base, "--run", runId.toLowerCase(), ...extra],
@@ -92,8 +90,8 @@ describe("N-27 (a), R-7 M-1: a case variant of a run id is refused before anythi
         randomBytes: (size) => new Uint8Array(size).fill(3),
         revert: command,
       });
-      // A case-insensitive volume finds the directory and the store judges the id damaged; a
-      // case-sensitive one has no such run. Either way nothing is reverted.
+      // The store finds no entry of exactly that name (run_not_found), or judges the id damaged.
+      // Either way nothing is reverted, on volumes that ignore case and on those that do not.
       assert.ok(outcome.output.kind === "error" && ["invalid_run_record", "run_not_found"].includes(outcome.output.code), JSON.stringify(outcome.output));
     }
     assert.deepEqual(calls, []);

@@ -53,6 +53,8 @@ import {
   RUN_REASONS_BY_STATUS,
   APPLY_REASONS_BY_STATUS,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
+  DISCARDED_STORED_NAME_PATTERN_SOURCE,
+  discardedStoredName,
   isReasonOfStatus,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
@@ -65,7 +67,15 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  RevertOutcome,
+  RevertOutput,
+  RevertRecord,
+  RevertRequest,
+  RevertedFile,
+  ApplyJournalEntry,
   ApplyJournalEvent,
+  ContentHash,
+  MaskedText,
   ApplyResult,
   ApplySummaryContext,
   CodarynConfig,
@@ -129,8 +139,16 @@ const noConsentInFiles: [
   HasConsentField<PolicyConfig>,
   HasConsentField<StoredPlan>,
 ] = [false, false, false, false, false, false];
-/** The run list tells apply runs apart; an entry written before G-A (no kind) still type-checks. */
-const applyEntry: RunListEntry = {
+/**
+ * The run list tells apply runs apart; an entry written before G-A (no kind) still type-checks.
+ * Only the fields this check is about are picked, so fields other owners add to the entry (for
+ * example N-23 g) do not make it fail.
+ */
+type ListEntryFields = Pick<
+  Extract<RunListEntry, { state: "checked" }>,
+  "state" | "runId" | "kind" | "planRunId" | "startedAt" | "taskId" | "status" | "reason" | "changes" | "reverted"
+>;
+const applyEntry: ListEntryFields = {
   state: "checked",
   runId: "20261112T120500Z-0000bbbb" as RunId,
   kind: "apply",
@@ -142,7 +160,7 @@ const applyEntry: RunListEntry = {
   changes: 0,
   reverted: null,
 };
-const legacyEntry: RunListEntry = {
+const legacyEntry: ListEntryFields = {
   state: "checked",
   runId: "20261112T120000Z-0000aaaa" as RunId,
   startedAt: "2026-11-12T12:00:00Z",
@@ -152,7 +170,53 @@ const legacyEntry: RunListEntry = {
   changes: 1,
   reverted: null,
 };
-void [noConsentInFiles, applyEntry, legacyEntry];
+/** R-9 I-4: the start record is an apply journal entry, not a shown record (progress stays as it is). */
+type StartIsShown = Extract<ApplyJournalEvent, { type: "plan_item_started" }> extends never ? false : true;
+const startNotShown: StartIsShown = false;
+const startEntry: ApplyJournalEntry = {
+  type: "plan_item_started",
+  index: 0,
+  action: { kind: "discard", path: "b.tmp" as MaskedText, sha256: "a".repeat(64) as ContentHash },
+};
+/** DR-25: a revert request carries the person's consent for that run; the outcome and record say what was unsafe. */
+const revertWithConsent: RevertRequest = {
+  workspaceRoot: "/work",
+  runId: "20261112T120500Z-0000bbbb",
+  unsafeMoveConsent: { channel: "cli-flag", runId: "20261112T120500Z-0000bbbb" },
+};
+const revertWithout: RevertRequest = { workspaceRoot: "/work", runId: "20261112T120500Z-0000bbbb" };
+const unsafeBack: RevertedFile = { path: "a.jpg", action: "moved_back", from: "2026/a.jpg", unsafe: true };
+/** DR-25: a dry run judges no drive and says so; its outcome and output carry the notice. */
+const dryRunOutcome: RevertOutcome = {
+  reverted: [{ path: "a.jpg", action: "moved_back", from: "2026/a.jpg" }],
+  skipped: [],
+  moveSafetyUnchecked: true,
+};
+const dryRunOutput: Pick<RevertOutput, "dryRun" | "moveSafetyUnchecked"> = { dryRun: true, moveSafetyUnchecked: true };
+const revertRecord: RevertRecord = {
+  schemaVersion: 1,
+  kind: "revert_record",
+  runId: "20261112T120500Z-0000bbbb",
+  at: "2026-11-12T12:10:00Z",
+  status: "complete",
+  reverted: 1,
+  skipped: 0,
+  unsafeMoveConsent: "cli-flag",
+  unsafeMoves: 1,
+};
+void [
+  noConsentInFiles,
+  applyEntry,
+  legacyEntry,
+  startNotShown,
+  startEntry,
+  revertWithConsent,
+  revertWithout,
+  unsafeBack,
+  revertRecord,
+  dryRunOutcome,
+  dryRunOutput,
+];
 /** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
 // @ts-expect-error a raw note cannot be stored
 const rawNote: ReviewRecord["note"] = "typed by a person" as string;
@@ -312,6 +376,31 @@ describe("G-A plan contract", () => {
     };
     for (const [id, expected] of Object.entries(params)) {
       assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], expected, id);
+    }
+  });
+
+  test("DR-24 (a): a discarded file's stored name is its action index in decimal, one segment", () => {
+    const pattern = new RegExp(DISCARDED_STORED_NAME_PATTERN_SOURCE);
+    for (const index of [0, 1, 9, 10, 999]) {
+      assert.equal(discardedStoredName(index), String(index));
+      assert.ok(pattern.test(discardedStoredName(index)), String(index));
+    }
+    for (const bad of ["", "0001", "01", "-1", "1.5", "sub/1", "1/2", "..", "a", " 1", "1\\2"]) {
+      assert.equal(pattern.test(bad), false, JSON.stringify(bad));
+    }
+  });
+
+  test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
+    assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
+  });
+
+  test("DR-25: a revert has the same consent path; its messages say what was moved unsafely and how to consent", () => {
+    assert.deepEqual(FIXED_MESSAGES["revert.unsafe_moved"], { count: "count" });
+    assert.deepEqual(FIXED_MESSAGES["summary.next_revert_unsafe"], { runId: "runId" });
+    assert.deepEqual(FIXED_MESSAGES["revert.dry_run_move_unchecked"], {});
+    for (const id of ["revert.unsafe_moved", "summary.next_revert_unsafe", "revert.skip.unsafe_move", "revert.dry_run_move_unchecked"]) {
+      assert.ok((MESSAGE_IDS as readonly string[]).includes(id), id);
     }
   });
 

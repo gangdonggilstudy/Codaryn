@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  APPROVAL_CHANNELS,
   JOURNAL_FILE_NAME,
   MAX_REPORT_FILE_BYTES,
   RESULT_FILE_NAME,
@@ -40,7 +41,7 @@ import type {
   RunId,
   TerminalRunStatus,
 } from "../contracts/index.js";
-import { assertRunId, errorCode, isPlainDirectory, runDir, sameFsPath } from "./common.js";
+import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -160,6 +161,8 @@ const APPLY_REASONS: readonly string[] = [
   "apply_incomplete",
   "cancelled",
   "max_duration",
+  // DR-21: unsafe moves without the person's consent; nothing was moved.
+  "consent_required",
 ];
 
 /**
@@ -264,7 +267,22 @@ function parseRevertRecord(record: Obj, runId: string): RevertRecord {
   const at = timestamp(record["at"]);
   const status = record["status"];
   if (at === null || (status !== "complete" && status !== "partial")) unreadable();
-  return { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted: count(record["reverted"]), skipped: count(record["skipped"]) };
+  const reverted = count(record["reverted"]);
+  const parsed: RevertRecord = { schemaVersion: 1, kind: "revert_record", runId, at, status, reverted, skipped: count(record["skipped"]) };
+  // DR-25: the consent to unsafe moves for that revert and how many files were moved back unsafely.
+  // Absent in records written before DR-25. Unsafe moves need a consent and are reverted files.
+  const consent = record["unsafeMoveConsent"];
+  const unsafeMoves = record["unsafeMoves"];
+  if (consent !== undefined && consent !== null && !(APPROVAL_CHANNELS as readonly unknown[]).includes(consent)) unreadable();
+  if (unsafeMoves !== undefined) {
+    const moved = count(unsafeMoves);
+    if (moved > reverted || (moved > 0 && (consent === undefined || consent === null))) unreadable();
+  }
+  return {
+    ...parsed,
+    ...(consent === undefined ? {} : { unsafeMoveConsent: consent as RevertRecord["unsafeMoveConsent"] }),
+    ...(unsafeMoves === undefined ? {} : { unsafeMoves: unsafeMoves as number }),
+  };
 }
 
 async function revertRecordAt(file: string, runId: string): Promise<RevertRecord | null> {
@@ -325,6 +343,9 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
   return {
     state: "checked",
     runId,
+    // G-A: a model run or an apply run (DR-12), and the plan run an apply applied.
+    kind: first.kind,
+    ...(first.kind === "apply" ? { planRunId: first.planRunId as RunId } : {}),
     startedAt,
     taskId,
     status,
@@ -416,6 +437,8 @@ export async function inspectRun(workspaceRoot: string, runId: string, now: numb
     const code = errorCode(error);
     return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
   }
+  // N-27 (a): only the entry of exactly this name; a case variant names no run.
+  if (!(await hasExactRunEntry(workspaceRoot, id))) return "missing";
   const dir = join(runsDir, id);
   try {
     const info = await lstat(dir);
@@ -456,7 +479,7 @@ export function latestRun(runs: readonly RunListEntry[]): CheckedRun | null {
 export async function readRevertRecord(workspaceRoot: string, runId: string): Promise<RevertRecord | null> {
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
-  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
+  if (!(await isOwnRunDir(workspaceRoot, runId))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
   try {
     return await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
   } catch {
@@ -484,7 +507,7 @@ export async function writeRevertRecord(workspaceRoot: string, record: RevertRec
     throw new TypeError("writeRevertRecord needs a valid RevertRecord");
   }
   const dir = runDir(workspaceRoot, record.runId);
-  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; no revert record was written");
+  if (!(await isOwnRunDir(workspaceRoot, record.runId))) throw new RunListError("the run directory is missing or a link; no revert record was written");
   const target = join(dir, REVERT_RECORD_FILE_NAME);
   const temporary = `${target}.${randomBytes(8).toString("hex")}.tmp`;
   try {

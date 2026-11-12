@@ -210,7 +210,7 @@ describe("R-7 codaryn revert arguments", () => {
   test("--workspace and --run are both required and nothing else is accepted", () => {
     assert.deepEqual(parseRevertArgs(["revert", "--workspace", "w", "--run", RUN]), {
       ok: true,
-      args: { command: "revert", workspace: "w", runId: RUN, dryRun: false, quiet: false },
+      args: { command: "revert", workspace: "w", runId: RUN, dryRun: false, allowUnsafeMove: false, quiet: false },
     });
     assert.deepEqual(parseRevertArgs(["revert", "--run", RUN, "--workspace", "w"]).ok, true);
     const bad = [

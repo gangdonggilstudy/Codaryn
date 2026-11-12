@@ -38,9 +38,8 @@ import type { PermissionKind, PolicyDenialCode } from "./policy.js";
 import { APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
 import type { ApplyJournalEvent, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
-import type { ContentHash } from "./text.js";
-import { TOOL_ERROR_CODES, TOOL_NAMES } from "./tool.js";
-import type { ToolErrorCode, ToolName } from "./tool.js";
+import { ALL_TOOL_NAMES, TOOL_ERROR_CODES } from "./tool.js";
+import type { AnyToolName, ToolErrorCode } from "./tool.js";
 
 export const MESSAGE_LANGUAGES = ["ko", "en"] as const;
 export type MessageLanguage = (typeof MESSAGE_LANGUAGES)[number];
@@ -259,7 +258,6 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - seconds (N-20): a non-negative number of seconds with at most one decimal place (the
  *   renderer rounds milliseconds to tenths); the catalog writes it in decimal digits
  * - language (N-20): a MessageLanguage code
- * - digest (G-A): a plan digest, ContentHash (64 lowercase hex characters, a closed shape)
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -278,7 +276,6 @@ export interface MessageParamTypeByKind {
   readonly suggestedPath: InitSuggestedProtectedPath;
   readonly seconds: number;
   readonly language: MessageLanguage;
-  readonly digest: ContentHash;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -390,6 +387,15 @@ export const FIXED_MESSAGES = {
   "revert.action.restored_from_discard": {},
   "revert.dry_run_next": {},
   "revert.reverted_before": {},
+  // DR-25: `{count}` files were moved back unsafely, with the person's consent (RevertedFile.unsafe).
+  // Shown after the reverted list when the count is above 0 (never in a dry run).
+  "revert.unsafe_moved": { count: "count" },
+  // DR-25: a dry run did not check whether this drive can move the listed files back safely; the
+  // real revert checks it and, without consent, skips the ones it cannot (RevertOutput.moveSafetyUnchecked).
+  "revert.dry_run_move_unchecked": {},
+  // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
+  // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
+  "summary.next_revert_unsafe": { runId: "runId" },
 
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
@@ -520,6 +526,13 @@ export const FIXED_MESSAGES = {
   "doctor.lock.held": {},
   "doctor.lock.stale": {},
   "doctor.lock.unreadable": {},
+  // DR-27 (b), PM notice: `.codaryn/lock.json.reclaim` is left in a state the store never clears
+  // (still being written, as an exclusive create on a volume without hard links leaves it when the
+  // attempt ends in between; not understood; or its owner still runs). While it stays, a lock left
+  // by an ended process is not reclaimed; the text says to remove it when no Codaryn runs here.
+  "doctor.lock.reclaim_left": {},
+  // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
+  // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
@@ -538,7 +551,10 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `status.<status>`: the status word (완료, 실패, 확인 필요, 한도 도달, 취소됨 in Korean).
  * - `reason.<reason>`: the reason as words, e.g. "지정한 검증 모두 통과".
  * - `advice.<reason>`: what the user can do next (UX design section 6).
- * - `tool.<name>`: a tool as words, e.g. "파일 읽기".
+ * - `tool.<name>`: a tool as words, e.g. "파일 읽기". G-A: for every name in ALL_TOOL_NAMES, the
+ *   built-in tools and the workflow tools (`inspect_files`, `propose_plan`), so a workflow tool's
+ *   progress line names it. Only a recorded UNKNOWN_TOOL_RECORD_NAME (AC-D15), a name in no tool
+ *   list, is shown as `progress.unknown_tool`.
  * - `revert.skip.<reason>`: why a file was or would be skipped.
  * - `diagnostic.file.<file>`: the file a diagnostic points into.
  * - `denial.<code>` (N-20): a policy denial or tool error code as words ("허용 목록에 없음").
@@ -556,7 +572,7 @@ export type ListedMessageId =
   | `status.${TerminalRunStatus}`
   | `reason.${RunReason}`
   | `advice.${RunReason}`
-  | `tool.${ToolName}`
+  | `tool.${AnyToolName}`
   | `revert.skip.${RevertSkipReason}`
   | `diagnostic.file.${InputDiagnosticFile}`
   | `denial.${PolicyDenialCode | ToolErrorCode}`
@@ -598,7 +614,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...TERMINAL_RUN_STATUSES.map((status) => `status.${status}` as const),
   ...RUN_REASONS.map((reason) => `reason.${reason}` as const),
   ...RUN_REASONS.map((reason) => `advice.${reason}` as const),
-  ...TOOL_NAMES.map((name) => `tool.${name}` as const),
+  ...ALL_TOOL_NAMES.map((name) => `tool.${name}` as const),
   ...REVERT_SKIP_REASONS.map((reason) => `revert.skip.${reason}` as const),
   ...INPUT_DIAGNOSTIC_FILES.map((file) => `diagnostic.file.${file}` as const),
   ...[...POLICY_DENIAL_CODES, ...TOOL_ERROR_CODES]
@@ -715,7 +731,11 @@ export interface HumanOutput {
    * which the renderer counts itself; the id is never shown.
    */
   progressLine(event: JournalEvent): string | null;
-  /** N-7: stderr after `revert` and `revert --dry-run`. */
+  /**
+   * N-7: stderr after `revert` and `revert --dry-run`. DR-25: `revert.unsafe_moved` when files were
+   * moved back unsafely, `summary.next_revert_unsafe` when files were skipped as `unsafe_move`, and
+   * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present.
+   */
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;

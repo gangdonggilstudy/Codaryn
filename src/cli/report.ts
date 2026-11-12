@@ -64,6 +64,7 @@ import type {
   VerifierResult,
 } from "../contracts/index.js";
 import { parseReportArgs } from "./args.js";
+import { createFailedCalls } from "./failed-calls.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { resolveRunReference } from "./run-ref.js";
@@ -227,6 +228,24 @@ function usageOf(value: unknown): RunUsage {
  * first must be `run_started`. A last line without its line feed is ignored when the run has no
  * result.json (still being written) and is an error otherwise.
  */
+/**
+ * U-18 (AXM-4): the calls allowed and then failed in a run's journal (failed-calls.ts), for the
+ * report's text only: ReportJournalSummary and `report --json` do not carry them (PM Q-3).
+ * summarizeJournal has judged the lines already; one that does not parse is not counted.
+ */
+export function failedCallsIn(journalText: string): number {
+  const failed = createFailedCalls();
+  for (const line of journalText.split("\n")) {
+    if (line.length === 0) continue;
+    try {
+      failed.observe(JSON.parse(line));
+    } catch {
+      // Not a record; summarizeJournal decides about it.
+    }
+  }
+  return failed.count;
+}
+
 export function summarizeJournal(text: string, runId: string, hasResult: boolean): ReportJournalSummary {
   const lines = text.split("\n");
   const tail = lines.pop();
@@ -470,16 +489,17 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
 ];
 
-export function renderReport(report: RunReportOutput, currentKey: KnownKeys = null): string {
+/** `failedToolCalls` (U-18): the journal's failed calls (failedCallsIn), told in the text only. */
+export function renderReport(report: RunReportOutput, currentKey: KnownKeys = null, failedToolCalls = 0): string {
   renderingKey = currentKey;
   try {
-    return renderReportText(report);
+    return renderReportText(report, failedToolCalls);
   } finally {
     renderingKey = null;
   }
 }
 
-function renderReportText(report: RunReportOutput): string {
+function renderReportText(report: RunReportOutput, failedToolCalls: number): string {
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
@@ -552,7 +572,9 @@ function renderReportText(report: RunReportOutput): string {
   if (result !== null) {
     const usage = result.usage;
     out.push(`- Model turns: ${usage.modelTurns} of ${limits.maxModelTurns}`);
-    out.push(`- Tool calls: ${usage.toolCalls} of ${limits.maxToolCalls} (denied: ${journal.deniedToolCalls})`);
+    // U-18: the failed calls only when there are any, so a report without them reads as before.
+    const failed = failedToolCalls > 0 ? `, failed: ${failedToolCalls}` : "";
+    out.push(`- Tool calls: ${usage.toolCalls} of ${limits.maxToolCalls} (denied: ${journal.deniedToolCalls}${failed})`);
     const tokens =
       usage.inputTokens === null || usage.outputTokens === null
         ? "not reported by every response"
@@ -562,6 +584,7 @@ function renderReportText(report: RunReportOutput): string {
   } else {
     out.push(`- Model requests recorded: ${journal.modelRequests} (limit ${limits.maxModelTurns})`);
     out.push(`- Denied tool calls: ${journal.deniedToolCalls}`);
+    if (failedToolCalls > 0) out.push(`- Failed tool calls: ${failedToolCalls}`);
   }
   out.push(`- Repairs: ${journal.repairs}${limits.maxRepairAttempts === undefined ? "" : ` of ${limits.maxRepairAttempts}`}`);
 
@@ -987,6 +1010,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   }
 
   let report: RunReportOutput | ApplyReportOutput;
+  let failedToolCalls = 0;
   try {
     const hasResult = resultState === "file";
     const journalText = await readRecordFile(journalFile);
@@ -998,6 +1022,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
       report = { schemaVersion: 1, kind: "report", runKind: "apply", runId, status, exitCode: REPORT_EXIT_CODES[status], result, journal };
     } else {
       const journal = summarizeJournal(journalText, runId, hasResult);
+      failedToolCalls = failedCallsIn(journalText);
       const result = hasResult ? readResult(await readRecordFile(resultFile), runId, journal.taskId) : null;
       const status: ReportStatus = result === null ? "incomplete" : "complete";
       // N-D 5th round: a run waiting for review shows the person's verdict (review.json) when there is one.
@@ -1034,7 +1059,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
       ? jsonLine(hideKeysInStrings(report, currentKey))
       : "runKind" in report
         ? renderApplyReport(report, currentKey)
-        : renderReport(report, currentKey);
+        : renderReport(report, currentKey, failedToolCalls);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

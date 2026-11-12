@@ -39,7 +39,7 @@ import { cliError, jsonSyntaxError, positionDiagnostic } from "./run.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, goalHoldsKey, rawTextHoldsKey, selectEnvFileSecrets } from "./security/index.js";
 import { envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { localPathProblem } from "./task.js";
+import { localPathProblem, quickProvider } from "./task.js";
 import { cleanText, hideKeys } from "./text-safety.js";
 
 const LF = String.fromCharCode(10);
@@ -295,6 +295,16 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     );
   }
 
+  // DR-34 (a) (review R-20 M-1): models lists anthropic's models only until another provider is
+  // connected (SP-6). A config that chooses another provider is refused before anything is sent,
+  // so the Anthropic key never goes to an address meant for that provider.
+  const provider = quickProvider(config);
+  if (provider !== "anthropic") {
+    return cliError(
+      "provider_not_implemented",
+      `the config file chooses the ${provider} provider, and codaryn models lists anthropic models only until that provider is connected; nothing was sent`,
+    );
+  }
   const resolved = resolveListSettings(io.env, config);
   if (!resolved.ok) return cliError(resolved.code, resolved.message);
   const secrets = [resolved.settings.apiKey, ...envSecrets];

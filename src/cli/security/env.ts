@@ -4,14 +4,32 @@
  */
 
 import { CODARYN_API_BASE_URL_ENV, CODARYN_CONFIG_ENV, CODARYN_MODEL_ENV } from "../../contracts/index.js";
+import type { ApiProviderName } from "../../contracts/index.js";
 
 export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Values shorter than this are not registered: they would mask ordinary text everywhere. */
 export const MIN_ENV_SECRET_LENGTH = 8;
 
-/** Settings the env file may carry that are not secrets. */
-export const ENV_FILE_NON_SECRETS: readonly string[] = [CODARYN_MODEL_ENV, CODARYN_CONFIG_ENV, CODARYN_API_BASE_URL_ENV];
+/**
+ * DR-34 (a) (review R-20 M-1): each API provider's model and address variables, so a key goes only
+ * to an address set for its own provider. CODARYN_MODEL and CODARYN_API_BASE_URL stay anthropic's,
+ * as before SP-4. The OpenAI names are written here until the contract owner issues them as
+ * constants.
+ */
+export const PROVIDER_SETTING_ENVS = {
+  anthropic: { model: CODARYN_MODEL_ENV, apiBaseUrl: CODARYN_API_BASE_URL_ENV },
+  openai: { model: "CODARYN_OPENAI_MODEL", apiBaseUrl: "CODARYN_OPENAI_API_BASE_URL" },
+} as const satisfies { readonly [P in ApiProviderName]: { readonly model: string; readonly apiBaseUrl: string } };
+
+/** Settings the env file may carry that are not secrets: the config location and every provider's model and address. */
+export const ENV_FILE_NON_SECRETS: readonly string[] = [
+  CODARYN_MODEL_ENV,
+  CODARYN_CONFIG_ENV,
+  CODARYN_API_BASE_URL_ENV,
+  PROVIDER_SETTING_ENVS.openai.model,
+  PROVIDER_SETTING_ENVS.openai.apiBaseUrl,
+];
 
 export type SecretEnvNamesOutcome =
   | { readonly ok: true; readonly names: readonly string[] }

@@ -7,7 +7,6 @@
 import {
   API_KEY_ENVS,
   API_PROVIDERS,
-  CODARYN_API_BASE_URL_ENV,
   CODARYN_MODEL_ENV,
   DEFAULT_MAX_RETRIES,
   DEFAULT_REQUEST_TIMEOUT_MS,
@@ -23,7 +22,7 @@ import type {
   ProviderSettings,
   ResolvedApiSettings,
 } from "../contracts/index.js";
-import { normalizeApiBaseUrlStrict } from "./security/index.js";
+import { PROVIDER_SETTING_ENVS, normalizeApiBaseUrlStrict } from "./security/index.js";
 
 export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -86,9 +85,10 @@ export function configFieldOf(config: CodarynConfig | null, provider: ApiProvide
 }
 
 /**
- * N-3: the model a run uses: task `model.model` → CODARYN_MODEL → the chosen provider's config
- * `model` (SP-D5: the variable applies to the chosen provider only), each skipped when it is
- * absent or a placeholder. Null when none is left. The default provider is anthropic.
+ * N-3: the model a run uses: task `model.model` → the provider's model variable (DR-34 (a):
+ * CODARYN_MODEL for anthropic, CODARYN_OPENAI_MODEL for openai) → the provider's config `model`,
+ * each skipped when it is absent or a placeholder. Null when none is left. The default provider is
+ * anthropic.
  */
 export function resolveModelId(
   taskModel: string | undefined,
@@ -96,7 +96,7 @@ export function resolveModelId(
   config: CodarynConfig | null,
   provider: ApiProviderName = "anthropic",
 ): string | null {
-  return realModel(taskModel) ?? realModel(envValue(env, CODARYN_MODEL_ENV)) ?? realModel(providerSettingsOf(config, provider).model);
+  return realModel(taskModel) ?? realModel(envValue(env, PROVIDER_SETTING_ENVS[provider].model)) ?? realModel(providerSettingsOf(config, provider).model);
 }
 
 /** N-3: whether some level holds a placeholder (for the message when no model is left). */
@@ -106,7 +106,7 @@ export function modelPlaceholderSeen(
   config: CodarynConfig | null,
   provider: ApiProviderName = "anthropic",
 ): boolean {
-  const fromEnv = env[CODARYN_MODEL_ENV];
+  const fromEnv = env[PROVIDER_SETTING_ENVS[provider].model];
   return [taskModel, fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv, providerSettingsOf(config, provider).model].some(
     (value) => value !== undefined && isModelPlaceholder(value),
   );
@@ -114,10 +114,11 @@ export function modelPlaceholderSeen(
 
 /**
  * Message part for a missing model; mentions a placeholder when one was found (N-3). `configField`
- * is where the config holds it (configFieldOf; `model` for anthropic's top-level field).
+ * is where the config holds it (configFieldOf; `model` for anthropic's top-level field), `modelEnv`
+ * the provider's model variable (PROVIDER_SETTING_ENVS).
  */
-export function missingModelText(placeholder: boolean, configField = "model"): string {
-  const base = `the model (task model.model, ${CODARYN_MODEL_ENV} or config ${configField})`;
+export function missingModelText(placeholder: boolean, configField = "model", modelEnv: string = CODARYN_MODEL_ENV): string {
+  const base = `the model (task model.model, ${modelEnv} or config ${configField})`;
   return placeholder ? `${base}: only a placeholder such as <model id> was found` : base;
 }
 
@@ -127,11 +128,12 @@ export function missingOutputCapText(configField = "maxOutputTokens"): string {
 }
 
 /**
- * Precedence (C-4 to C-6, SP-4), all for the task's provider (`model.provider`):
+ * Precedence (C-4 to C-6, SP-4, DR-34 (a)), all for the task's provider (`model.provider`):
  * - key: the provider's own variable (API_PROVIDERS keyEnv) only
- * - model: task `model.model` → CODARYN_MODEL → the provider's config `model`
+ * - model: task `model.model` → the provider's model variable → the provider's config `model`
  * - maxOutputTokens: task `model.maxOutputTokens` → the provider's config `maxOutputTokens`
- * - apiBaseUrl: CODARYN_API_BASE_URL → the provider's config `apiBaseUrl` → its default address
+ * - apiBaseUrl: the provider's address variable → the provider's config `apiBaseUrl` → its default
+ *   address (PROVIDER_SETTING_ENVS: CODARYN_API_BASE_URL is anthropic's only)
  * - requestTimeoutMs, maxRetries: the provider's config → defaults
  * The provider's config is `providers.<name>`, for anthropic also the top-level fields
  * (providerSettingsOf). A missing key, model or output cap is `provider_not_configured`.
@@ -146,7 +148,9 @@ export function resolveApiSettings(model: ApiModelConfig, env: SettingsEnvironme
   const missing: string[] = [];
   if (apiKey === null) missing.push(keyEnv);
   if (modelId === null) {
-    missing.push(missingModelText(modelPlaceholderSeen(model.model, env, config, provider), configFieldOf(config, provider, "model")));
+    missing.push(
+      missingModelText(modelPlaceholderSeen(model.model, env, config, provider), configFieldOf(config, provider, "model"), PROVIDER_SETTING_ENVS[provider].model),
+    );
   }
   if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
   if (apiKey === null || modelId === null || maxOutputTokens === null) {
@@ -173,9 +177,9 @@ export type ResolveConnectionOutcome =
 
 /**
  * The key, API address, request time limit and retries: the part of the settings `run` and
- * `codaryn models` (Y-2) share, for `provider` (default anthropic). apiBaseUrl:
- * CODARYN_API_BASE_URL (S-9 strict rule with the provider's path rule; SP-D5: it applies to the
- * chosen provider only) → the provider's config `apiBaseUrl` → its default address.
+ * `codaryn models` (Y-2) share, for `provider` (default anthropic). apiBaseUrl: the provider's own
+ * address variable (DR-34 (a), PROVIDER_SETTING_ENVS; S-9 strict rule with the provider's path rule)
+ * → the provider's config `apiBaseUrl` → its default address.
  * requestTimeoutMs, maxRetries: the provider's config → defaults.
  */
 export function resolveConnection(
@@ -186,11 +190,12 @@ export function resolveConnection(
 ): ResolveConnectionOutcome {
   const spec = API_PROVIDERS[provider];
   const own = providerSettingsOf(config, provider);
-  const fromEnv = envValue(env, CODARYN_API_BASE_URL_ENV);
+  const variable = PROVIDER_SETTING_ENVS[provider].apiBaseUrl;
+  const fromEnv = envValue(env, variable);
   let apiBaseUrl: string;
   if (fromEnv !== null) {
     // S-9: the same strict rule as the config file's address for this provider.
-    const normalized = normalizeApiBaseUrlStrict(fromEnv, CODARYN_API_BASE_URL_ENV, spec.baseUrlPath);
+    const normalized = normalizeApiBaseUrlStrict(fromEnv, variable, spec.baseUrlPath);
     if (!normalized.ok) return { ok: false, code: "invalid_config", message: normalized.message };
     apiBaseUrl = normalized.url;
   } else {
@@ -205,6 +210,28 @@ export function resolveConnection(
       maxRetries: own.maxRetries ?? DEFAULT_MAX_RETRIES,
     },
   };
+}
+
+/**
+ * DR-34 (a): where `provider`'s key is sent, for doctor: the origin of its address and the setting
+ * the address came from. Only the origin: a path may hold more than an address. Null when the
+ * provider's address variable is set but not valid (a run stops then, nothing is sent).
+ */
+export function keyDestination(
+  env: SettingsEnvironment,
+  config: CodarynConfig | null,
+  provider: ApiProviderName,
+): { readonly origin: string; readonly source: string } | null {
+  const spec = API_PROVIDERS[provider];
+  const variable = PROVIDER_SETTING_ENVS[provider].apiBaseUrl;
+  const fromEnv = envValue(env, variable);
+  if (fromEnv !== null) {
+    const normalized = normalizeApiBaseUrlStrict(fromEnv, variable, spec.baseUrlPath);
+    return normalized.ok ? { origin: new URL(normalized.url).origin, source: variable } : null;
+  }
+  const own = providerSettingsOf(config, provider).apiBaseUrl;
+  if (own !== undefined) return { origin: new URL(own).origin, source: `config ${configFieldOf(config, provider, "apiBaseUrl")}` };
+  return { origin: new URL(spec.defaultApiBaseUrl).origin, source: "the default address" };
 }
 
 /** Y-2: the key and connection for listing `provider`'s models (default anthropic). No model or output cap is needed. */

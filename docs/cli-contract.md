@@ -304,13 +304,17 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `CODARYN_MODEL` | 모델 ID |
 | `CODARYN_CONFIG` | 설정 파일 경로. `--config`가 없을 때 쓴다 |
 | `CODARYN_API_BASE_URL` | API 주소. 설정 파일의 `apiBaseUrl`보다 우선한다 |
+| `OPENAI_API_KEY` | OpenAI API 키(19절). 이 환경 변수로만 받는다 |
+| `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL` | OpenAI의 모델 ID와 주소(19.3, DR-34 (a)) |
+
+- `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 anthropic 전용이다(DR-34 (a)). 다른 제공자의 실행에는 쓰이지 않는다.
 
 - 비어 있거나 공백뿐인 값은 설정되지 않은 것으로 본다.
 - `--vars-file <경로>`를 줄 때만 그 파일을 `process.loadEnvFile`로 읽는다(C-2, T-15). `.env`를 자동으로 찾지 않는다. 이미 설정된 환경 변수가 파일 값보다 우선한다. 형식은 env 파일과 같다.
 - BOM이 있는 변수 파일은 첫 변수를 조용히 놓치므로 `invalid_config`로 거부한다.
 - 변수 파일이 새로 설정한 변수의 값은 비밀로 등록된다(S-4). 그래서 파일 내용이나 명령 출력에 나타나면 가려진다. 다음은 등록하지 않는다.
   - 이미 설정돼 있던 변수. Windows에서는 대소문자를 무시해 비교한다.
-  - `CODARYN_MODEL`, `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`
+  - `CODARYN_MODEL`, `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`
   - 8자 미만 값
   - 앞뒤 공백을 떼면 값이 달라지는 경우에는 두 형태를 모두 등록한다.
 - 변수 파일은 작업 공간 밖에 둔다(S-1). `.env.example`을 작업 공간 밖의 폴더(예: `D:\codaryn\.env`)로 복사해 값을 채우고 `--vars-file`로 그 경로를 준다. 이 저장소의 `.env`는 Git이 무시한다.
@@ -1035,20 +1039,33 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 | 값 | 순서 |
 | --- | --- |
 | 키 | `API_PROVIDERS[<이름>].keyEnv`만(anthropic `ANTHROPIC_API_KEY`, openai `OPENAI_API_KEY`). 다른 제공자의 키는 대신하지 않는다 |
-| 모델 | task `model.model` → `CODARYN_MODEL` → 제공자 설정 `model` |
+| 모델 | task `model.model` → 제공자의 모델 변수 → 제공자 설정 `model` |
 | 출력 토큰 | task `model.maxOutputTokens` → 제공자 설정 `maxOutputTokens` |
-| API 주소 | `CODARYN_API_BASE_URL`(그 제공자의 경로 규칙으로 검사) → 제공자 설정 `apiBaseUrl` → `defaultApiBaseUrl` |
+| API 주소 | 제공자의 주소 변수(그 제공자의 경로 규칙으로 검사) → 제공자 설정 `apiBaseUrl` → `defaultApiBaseUrl` |
 | 요청 시간 한도, 재시도 | 제공자 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`, `DEFAULT_MAX_RETRIES` |
 
-- `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 고른 제공자에만 적용한다(SP-D5). 한 제공자용 값을 둔 채 제공자를 바꾸면 그 값이 새 제공자로 간다(검토 R-19 I-4). `doctor`가 이를 알리는 것은 제공자 연결 단계(SP-6)에서 한다.
+- 모델과 주소의 환경 변수는 제공자마다 따로다(DR-34 (a), 검토 R-20 M-1). 키는 언제나 그 제공자의 주소로만 간다.
+
+  | 제공자 | 모델 변수 | 주소 변수 |
+  | --- | --- | --- |
+  | anthropic | `CODARYN_MODEL` | `CODARYN_API_BASE_URL` |
+  | openai | `CODARYN_OPENAI_MODEL` | `CODARYN_OPENAI_API_BASE_URL` |
+
+  - `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 SP-4 전과 같이 anthropic 전용이다. SP-4에서 "고른 제공자에 적용"이라 했던 규칙은 이것으로 바뀌었다. 그래서 한 제공자용 값이 다른 제공자로 가지 않는다(R-19 I-4도 해소).
+  - OpenAI 변수 이름은 계약 담당이 상수로 낼 때까지 CLI(`PROVIDER_SETTING_ENVS`, `src/cli/security/env.ts`)에 적어 둔다.
+  - 변수 파일이 새로 설정한 이 네 변수의 값은 비밀로 등록하지 않는다(설정 값이다).
 - 빠진 키·모델·출력 토큰은 `provider_not_configured`이고, 글은 그 제공자의 키 변수와 설정 위치(`providers.openai.model` 등)를 적는다.
 - `resolveAnthropicSettings`, `resolveListSettings`, `resolveConnection`은 예전 이름과 인자로 남는다. 제공자를 주지 않으면 anthropic이고, 결과는 SP-4 전과 같다(고정 시험 SP-0 P-7).
 
 ### 19.4 명령
 
 - `run`: openai를 고르면 아직 `provider_not_implemented`로 끝나고 아무것도 보내지 않는다. 어댑터 연결은 SP-6이다.
-- `doctor`: `api_key`, `model` 점검은 고른 제공자의 키 변수(`doctor.api_key.ok {keyEnv}`, `doctor.api_key.missing {keyEnv, provider}`), 설정, 주소 규칙으로 한다.
+- `doctor`: `api_key`, `model` 점검은 고른 제공자의 키 변수(`doctor.api_key.ok {keyEnv}`, `doctor.api_key.missing {keyEnv, provider}`), 모델·주소 변수, 설정, 주소 규칙으로 한다.
+  - 키가 있으면 `api_key`의 `message`가 그 키가 가는 주소의 origin(스킴·호스트·포트)과 그 주소의 출처(주소 변수, 설정 필드, 기본 주소)를 적는다(DR-34 (a)). 경로는 적지 않는다. 경로에 주소 말고 다른 것이 들어 있을 수 있어서다.
+    - 예: `ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)`
+    - 사람용 글(카탈로그 `doctor.api_key.ok`)에 주소를 싣는 매개변수는 아직 계약에 없다.
 - `models`: 아직 anthropic 목록만 보이고, 현재 모델은 anthropic 설정(최상위 또는 `providers.anthropic`)에서 읽는다.
+  - 설정의 `provider`가 anthropic이 아니면 요청 없이 `provider_not_implemented`로 끝난다(DR-34 (a), R-20 D2). 그 제공자의 연결(SP-6) 뒤에는 그 제공자를 따른다.
   - `--use`는 최상위 `model`에 쓴다. 설정이 `providers.anthropic`을 쓰면 쓴 결과가 위 모호성 규칙에 걸리므로, 파일을 바꾸지 않고 `config_write_failed`로 끝난다.
   - `--provider <name>`과 제공자 자리에 쓰기는 SP-6이다. 도움말의 `--provider` 줄도 그때 `models`에 붙는다.
 - `init`: 지금처럼 anthropic 설정을 쓴다. 키 안내 글은 `{keyEnv}`를 받는다.

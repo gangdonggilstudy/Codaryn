@@ -138,13 +138,15 @@ describe("SP-4: the settings resolve for the chosen provider", () => {
     assert.ok(resolved.message.includes("providers.openai.model") && resolved.message.includes("providers.openai.maxOutputTokens"), resolved.message);
   });
 
-  test("CODARYN_MODEL and CODARYN_API_BASE_URL apply to the chosen provider, with its address rule", () => {
-    const withEnv = { ...env, [CODARYN_MODEL_ENV]: "env-model", [CODARYN_API_BASE_URL_ENV]: "https://proxy.example/v1" };
+  test("each provider has its own model and address variables, checked with its address rule (DR-34 (a))", () => {
+    // DR-34 (a) replaced SP-4's "the variables apply to the chosen provider": CODARYN_MODEL and
+    // CODARYN_API_BASE_URL are anthropic's, OpenAI has CODARYN_OPENAI_MODEL and CODARYN_OPENAI_API_BASE_URL.
+    const withEnv = { ...env, CODARYN_OPENAI_MODEL: "env-model", CODARYN_OPENAI_API_BASE_URL: "https://proxy.example/v1" };
     const openai = resolveApiSettings({ provider: "openai" }, withEnv, both);
     assert.ok(openai.ok, openai.ok ? "" : openai.message);
     assert.deepEqual([openai.settings.model, openai.settings.apiBaseUrl], ["env-model", "https://proxy.example/v1"]);
-    // The same address is refused for anthropic, whose adapter adds /v1/messages.
-    const anthropic = resolveApiSettings({ provider: "anthropic" }, withEnv, both);
+    // The same address in anthropic's variable is refused, its adapter adds /v1/messages.
+    const anthropic = resolveApiSettings({ provider: "anthropic" }, { ...env, [CODARYN_MODEL_ENV]: "env-model", [CODARYN_API_BASE_URL_ENV]: "https://proxy.example/v1" }, both);
     assert.ok(!anthropic.ok && anthropic.code === "invalid_config" && anthropic.message.startsWith(CODARYN_API_BASE_URL_ENV), anthropic.ok ? "" : anthropic.message);
   });
 

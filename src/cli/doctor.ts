@@ -14,9 +14,7 @@ import path from "node:path";
 import { parseEnv } from "node:util";
 import {
   API_PROVIDERS,
-  CODARYN_API_BASE_URL_ENV,
   CODARYN_CONFIG_ENV,
-  CODARYN_MODEL_ENV,
   DOCTOR_CHECK_IDS,
   DOCTOR_EXIT_CODES,
   CODARYN_LANG_ENV,
@@ -60,12 +58,14 @@ import {
   checkLocalPathSyntax,
   findKeyInJson,
   normalizeApiBaseUrlStrict,
+  PROVIDER_SETTING_ENVS,
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import {
   configFieldOf,
   envValue,
+  keyDestination,
   knownKeyValues,
   missingModelText,
   missingOutputCapText,
@@ -599,7 +599,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     // count (SP-2 only hides them).
     const keyEnv = API_PROVIDERS[provider].keyEnv;
     if (envValue(env, keyEnv) !== null) {
-      set("api_key", "ok", `${keyEnv} is set`, { id: "doctor.api_key.ok", params: { keyEnv } });
+      // DR-34 (a): say which address the key goes to (its origin) and where that address is set.
+      const destination = keyDestination(env, config, provider);
+      const where =
+        destination === null
+          ? `its address in ${PROVIDER_SETTING_ENVS[provider].apiBaseUrl} is not valid (see the model check), so nothing is sent`
+          : `${provider} requests send it only to ${destination.origin} (${destination.source})`;
+      set("api_key", "ok", `${keyEnv} is set; ${where}`, { id: "doctor.api_key.ok", params: { keyEnv } });
     } else {
       set("api_key", "fail", `${keyEnv} is not set; an ${provider} run stops with provider_not_configured`, { id: "doctor.api_key.missing", params: { keyEnv, provider } });
     }
@@ -626,11 +632,15 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     const maxOutputTokens = fromTask?.maxOutputTokens ?? providerSettingsOf(config, provider).maxOutputTokens ?? null;
     const missing: string[] = [];
     if (modelId === null) {
-      missing.push(missingModelText(modelPlaceholderSeen(fromTask?.model, env, config, provider), configFieldOf(config, provider, "model")));
+      missing.push(
+        missingModelText(modelPlaceholderSeen(fromTask?.model, env, config, provider), configFieldOf(config, provider, "model"), PROVIDER_SETTING_ENVS[provider].model),
+      );
     }
     if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
-    const baseUrl = envValue(env, CODARYN_API_BASE_URL_ENV);
-    const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV, API_PROVIDERS[provider].baseUrlPath);
+    // DR-34 (a): the provider's own address variable.
+    const baseUrlEnv = PROVIDER_SETTING_ENVS[provider].apiBaseUrl;
+    const baseUrl = envValue(env, baseUrlEnv);
+    const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, baseUrlEnv, API_PROVIDERS[provider].baseUrlPath);
     const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);
     const missingText: DoctorText =
       modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };

@@ -21,6 +21,7 @@ export {
 export type { KeyScanOutcome, KnownKeys } from "./keys.js";
 export {
   ENV_FILE_NON_SECRETS,
+  PROVIDER_SETTING_ENVS,
   ENV_NAME_PATTERN,
   MIN_ENV_SECRET_LENGTH,
   secretEnvNotSetMessage,

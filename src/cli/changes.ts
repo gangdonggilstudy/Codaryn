@@ -21,6 +21,7 @@
 import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS } from "../contracts/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
+import type { ChangesApplyRun } from "../contracts/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
@@ -153,7 +154,14 @@ export function renderChanges(output: ChangesOutput): string {
   if (output.files.some((file) => file.unavailable === "masking_unverified")) {
     out.push("no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)");
   }
-  if (output.files.length === 0) out.push("the run changed no file");
+  // U-16 (UXM-4): an apply run's changes are its plan's actions, not file writes of its own; the
+  // app layer gives them as `applyRun` (contract ChangesApplyRun). Fixed English, as the rest here.
+  const applyRun = (output as ChangesOutput & { readonly applyRun?: ChangesApplyRun }).applyRun;
+  if (applyRun !== undefined) {
+    out.push(
+      `the run is an apply run: it applied ${applyRun.actions} action(s) of the plan of run ${cleanText(applyRun.planRunId)} (moves and discards, not file writes); codaryn report lists them`,
+    );
+  } else if (output.files.length === 0) out.push("the run changed no file");
   for (const file of output.files) {
     const what = file.created ? "created by the run" : "changed by the run";
     out.push(`== ${cleanText(file.path)}: ${what}; ${STATE_TEXT[file.state]}`);

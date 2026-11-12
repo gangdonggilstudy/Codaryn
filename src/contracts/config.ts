@@ -292,11 +292,25 @@ export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
 // SP-1 (docs/design/second-provider.md 4.1, DR-22, DR-31): one table of the API providers.
 
 /**
- * The API providers, in the order help and lists show them. Anthropic only for now: the second
- * one (`openai`, DR-31) is added with its adapter (SP-5). Readers take provider facts from
- * API_PROVIDERS, never from a list of their own.
+ * DR-31 (g), facts C-3: the OpenAI key variable. Its provider joins API_PROVIDERS with its adapter
+ * (SP-5); the key is known now so that S-2 and every key check cover it whatever provider runs.
  */
-export const API_PROVIDER_NAMES = ["anthropic"] as const;
+export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
+
+/**
+ * DR-31 (g): a loose shape for OpenAI keys. Their prefixes, length and characters are not documented
+ * (facts C-3), so keys are never checked by length or characters; this shape only finds key-like
+ * text to hide and to refuse in files: `sk-` at a word start and 32 or more of `A-Z a-z 0-9 _ -`.
+ * Short words such as `sk-learn` and `sk-` inside a word (`task-...`) are not matched.
+ */
+export const OPENAI_KEY_PATTERN_SOURCE = "\\bsk-[A-Za-z0-9_-]{32,}";
+
+/**
+ * The API providers, in the order help and lists show them: Anthropic first (the first provider),
+ * then OpenAI (DR-22, DR-31, SP-5). Readers take provider facts from API_PROVIDERS, never from a list
+ * of their own.
+ */
+export const API_PROVIDER_NAMES = ["anthropic", "openai"] as const;
 export type ApiProviderName = (typeof API_PROVIDER_NAMES)[number];
 
 /** Every model provider a task may name: the scripted one (tests, offline runs) and the API providers. */
@@ -317,9 +331,19 @@ export interface ApiProviderSpec {
   readonly baseUrlPath: "without_version" | "with_version";
   /** Largest `maxOutputTokens` accepted. */
   readonly maxOutputTokensLimit: number;
+  /** Smallest `maxOutputTokens` accepted (openai: 16, facts C-10). */
+  readonly minOutputTokens: number;
 }
 
-/** The provider table. The Anthropic entry holds exactly the values the CLI used before it. */
+/** DR-31, facts C-4: the OpenAI API address; it includes the version (`/v1`). */
+export const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+
+/**
+ * The provider table. The Anthropic entry holds exactly the values the CLI used before it.
+ * OpenAI (DR-31): key OPENAI_API_KEY, the loose key shape, the address with `/v1`, at least 16
+ * output tokens (facts C-10). Its largest output cap is not documented (facts); Codaryn's own bound
+ * MAX_OUTPUT_TOKENS_LIMIT applies, as for Anthropic, until the PM sets another.
+ */
 export const API_PROVIDERS = {
   anthropic: {
     keyEnv: ANTHROPIC_API_KEY_ENV,
@@ -327,22 +351,18 @@ export const API_PROVIDERS = {
     defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
     baseUrlPath: "without_version",
     maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+    minOutputTokens: 1,
+  },
+  openai: {
+    keyEnv: OPENAI_API_KEY_ENV,
+    keyPatternSources: [OPENAI_KEY_PATTERN_SOURCE],
+    defaultApiBaseUrl: DEFAULT_OPENAI_API_BASE_URL,
+    baseUrlPath: "with_version",
+    maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+    minOutputTokens: 16,
   },
 } as const satisfies { readonly [P in ApiProviderName]: ApiProviderSpec };
 
-/**
- * DR-31 (g), facts C-3: the OpenAI key variable. Its provider joins API_PROVIDERS with its adapter
- * (SP-5); the key is known now so that S-2 and every key check cover it whatever provider runs.
- */
-export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
-
-/**
- * DR-31 (g): a loose shape for OpenAI keys. Their prefixes, length and characters are not documented
- * (facts C-3), so keys are never checked by length or characters; this shape only finds key-like
- * text to hide and to refuse in files: `sk-` at a word start and 32 or more of `A-Z a-z 0-9 _ -`.
- * Short words such as `sk-learn` and `sk-` inside a word (`task-...`) are not matched.
- */
-export const OPENAI_KEY_PATTERN_SOURCE = "\\bsk-[A-Za-z0-9_-]{32,}";
 
 /**
  * Every API key variable Codaryn knows, the providers still being added included. S-2 (SP-2)

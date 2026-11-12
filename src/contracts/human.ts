@@ -23,14 +23,14 @@
 import { REVERT_SKIP_REASONS } from "./changes.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
-import type { DefaultConfigDisplay } from "./config.js";
+import type { ApiKeyEnv, DefaultConfigDisplay } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
-import { CLI_ERROR_EXIT_CODES, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
+import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
 import { INTEGRITY_PHASES } from "./integrity.js";
 import { MODEL_ERROR_KINDS } from "./model.js";
 import { PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
-import type { CliErrorCode, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
+import type { CliErrorCode, CliErrorHint, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
@@ -233,6 +233,8 @@ export const HELP_OPTIONS = [
   "json",
   "use",
   "limit",
+  // SP-6 (DR-31): `--provider <name>` of `codaryn models`.
+  "provider",
   // DR-21, DR-25: `--allow-unsafe-move` of `apply` and `revert` (UNSAFE_MOVE_CONSENT_ARGUMENT).
   "allow_unsafe_move",
 ] as const;
@@ -262,6 +264,8 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - seconds (N-20): a non-negative number of seconds with at most one decimal place (the
  *   renderer rounds milliseconds to tenths); the catalog writes it in decimal digits
  * - language (N-20): a MessageLanguage code
+ * - keyEnv (SP-D12, DR-31): the name of an API key variable, one of API_KEY_ENVS (a fixed constant,
+ *   never key material); the catalog writes it as it is
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -280,6 +284,7 @@ export interface MessageParamTypeByKind {
   readonly suggestedPath: InitSuggestedProtectedPath;
   readonly seconds: number;
   readonly language: MessageLanguage;
+  readonly keyEnv: ApiKeyEnv;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -430,10 +435,11 @@ export const FIXED_MESSAGES = {
   "init.commands_suggest": { command: "suggestedCommand" },
   "init.protected_suggest": { path: "suggestedPath" },
   "init.language_pick": {},
-  "init.key_set": {},
-  "init.key_missing": {},
-  "init.key_hint_windows": {},
-  "init.key_hint_posix": {},
+  // SP-D12: `{keyEnv}` is the chosen provider's key variable (API_KEY_ENVS).
+  "init.key_set": { keyEnv: "keyEnv" },
+  "init.key_missing": { keyEnv: "keyEnv" },
+  "init.key_hint_windows": { keyEnv: "keyEnv" },
+  "init.key_hint_posix": { keyEnv: "keyEnv" },
   "init.saved": { location: "location" },
   "init.next": {},
   "init.overridden_by_env": {},
@@ -493,8 +499,9 @@ export const FIXED_MESSAGES = {
   "doctor.config_file.profile_missing": {},
   "doctor.task_file.skipped": {},
   "doctor.api_key.scripted": {},
-  "doctor.api_key.ok": {},
-  "doctor.api_key.missing": {},
+  // SP-D12: the chosen provider and its key variable.
+  "doctor.api_key.ok": { keyEnv: "keyEnv" },
+  "doctor.api_key.missing": { keyEnv: "keyEnv", provider: "provider" },
   "doctor.model.scripted_ok": {},
   "doctor.model.ok": {},
   "doctor.model.missing": {},
@@ -581,6 +588,7 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  *   The check ids and statuses stay English in the JSON.
  * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
  * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
+ * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -602,7 +610,8 @@ export type ListedMessageId =
   | `doctor.check.${DoctorCheckId}`
   | `doctor.status.${DoctorCheckStatus}`
   | `approval.${ApprovalChannel}`
-  | `plan.problem.${PlanItemProblem}`;
+  | `plan.problem.${PlanItemProblem}`
+  | `error.hint.${CliErrorHint}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -647,6 +656,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...DOCTOR_CHECK_STATUSES.map((status) => `doctor.status.${status}` as const),
   ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
   ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
+  ...CLI_ERROR_HINTS.map((hint) => `error.hint.${hint}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */

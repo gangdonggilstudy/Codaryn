@@ -167,16 +167,21 @@ describe("DR-39 applyCleanup", () => {
     const shown = await plan(root, selection);
     const outcome = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } });
     assert.ok(outcome.ok);
-    assert.deepEqual(outcome.removed.map((item) => [item.target, idOf(item)]), [["run", APPLY], ["run", PLAN], ["run", OLD]]);
-    assert.deepEqual(outcome.kept, [{ target: "discarded", runId: APPLY, reason: "not_confirmed" }]);
-    assert.deepEqual((await listRuns({ workspaceRoot: root })).runs.map((entry) => entry.runId), [RUNNING, REVERTED]);
+    // U-13: the apply's records stay while its discarded files stay, and its plan run with them.
+    assert.deepEqual(outcome.removed.map((item) => [item.target, idOf(item)]), [["run", OLD]]);
+    assert.deepEqual(outcome.kept, [
+      { target: "discarded", runId: APPLY, reason: "not_confirmed" },
+      { target: "run", runId: APPLY, reason: "discarded_left" },
+      { target: "run", runId: PLAN, reason: "used_by_kept_apply" },
+    ]);
+    assert.deepEqual((await listRuns({ workspaceRoot: root })).runs.map((entry) => entry.runId), [RUNNING, APPLY, PLAN, REVERTED]);
     assert.equal(await exists(state(root, "discarded", APPLY, "1")), true);
     assert.equal(await exists(state(root, "parked", OLD, "0-abc")), true);
     assert.deepEqual((await readdir(state(root))).filter((name) => name.startsWith("cleanup-")), [], "nothing half removed is left");
     const log = (await readFile(state(root, CLEANUP_LOG_FILE_NAME), "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     assert.equal(log.length, 1);
     assert.deepEqual(Object.keys(log[0] ?? {}).sort(), ["at", "discarded", "runs", "schemaVersion"]);
-    assert.deepEqual([(log[0]?.["runs"] as { count: number }).count, (log[0]?.["discarded"] as { count: number }).count], [3, 0]);
+    assert.deepEqual([(log[0]?.["runs"] as { count: number }).count, (log[0]?.["discarded"] as { count: number }).count], [1, 0]);
     assert.equal(JSON.stringify(log).includes("2026010"), false, "no run id in the log");
 
     const people = await plan(root, { discarded: { runIds: [APPLY] } });

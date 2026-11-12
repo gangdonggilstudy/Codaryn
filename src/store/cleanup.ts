@@ -336,7 +336,8 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
       kind: run.summary.kind,
       changes: run.changes,
       lastRevert: run.lastRevert,
-      hasDiscarded: run.discardedTree !== null,
+      // U-13: a folder that holds at least one file; an empty one holds nothing to lose.
+      hasDiscarded: run.discardedTree !== null && run.discardedTree.size.files > 0,
       recordsChanged: run.summary.recordsChanged,
     });
     items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings });
@@ -453,13 +454,32 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     const keep = (item: CleanupItem, reason: CleanupKeptReason): void => {
       kept.push({ ...refOf(item), reason });
     };
-    // DR-44 (a): apply runs first, then the other runs (their plan runs among them), then folders.
+    // U-13: discarded-files folders first, so an apply's records go only after its folder went.
+    // DR-44 (a): then apply runs, then the other runs (their plan runs among them), then leftovers.
     const order = plan.items.map((item, index) => ({ item, index }));
     const rank = ({ item, index }: { item: CleanupItem; index: number }): number =>
-      item.target === "run" ? (facts[index]?.kind === "apply" ? 0 : 1) : item.target === "discarded" ? 2 : 3;
+      item.target === "discarded" ? 0 : item.target === "run" ? (facts[index]?.kind === "apply" ? 1 : 2) : 3;
     order.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
     /** Plan runs an apply run uses that was selected and stays. */
     const plansOfKeptApplies = new Set<string>();
+    /** U-13: runs whose discarded-files folder this cleanup moved aside and could not remove entirely. */
+    const discardedPartlyLeft = new Set<string>();
+    /**
+     * U-13 (UXM-1): whether a discarded file of the apply run `runId` is left: its folder holds a file
+     * now (looked at again right before its records go), cannot be looked at, or was not removed
+     * entirely just before. Without the records nothing says what those files were.
+     */
+    const discardedLeft = async (runId: string): Promise<boolean> => {
+      if (discardedPartlyLeft.has(runId)) return true;
+      const dir = join(stateDir, DISCARDED_DIR_NAME, runId);
+      try {
+        await lstat(dir);
+      } catch (error) {
+        return errorCode(error) !== "ENOENT";
+      }
+      const tree = await measure(dir);
+      return tree === null || tree.size.files > 0;
+    };
 
     for (const { item, index } of order) {
       const itemFacts = facts[index] ?? null;
@@ -469,6 +489,10 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       };
       if (item.target === "run" && needsNotRevertedConfirmation(item.warnings) && !confirmation.includeNotReverted) {
         keepApply("not_reverted_not_confirmed");
+        continue;
+      }
+      if (item.target === "run" && itemFacts?.kind === "apply" && (await discardedLeft(item.runId))) {
+        keepApply("discarded_left");
         continue;
       }
       if (item.target === "run" && plansOfKeptApplies.has(item.runId)) {
@@ -517,6 +541,7 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       }
       // DR-44 (d): what is left aside is a leftover the next plan shows; not reported or logged as removed.
       if (!(await removeAside(aside))) {
+        if (item.target === "discarded") discardedPartlyLeft.add(item.runId);
         keepApply("partly_removed");
         continue;
       }

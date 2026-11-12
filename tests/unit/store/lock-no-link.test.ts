@@ -166,13 +166,26 @@ test("a reclaim file still being written (created, no final newline yet) is not 
 test("a lock file still being written is never reclaimed; the attempt waits and ends as workspace_locked", async () => {
   await withRoot(async (root) => {
     await mkdir(join(root, ".codaryn"), { recursive: true });
-    for (const partial of ["", `{"pid":${CRASHED_PID},"runId":"crashed-run","startedAt":"2026-11-11T00:00:00.000Z"}`]) {
+    for (const partial of ["", `{"pid":${CRASHED_PID},"runId":"crashed-run","startedAt":"2026-11-11T00:0`]) {
       await writeFile(lockFile(root), partial);
       const outcome = await acquireLock({ workspaceRoot: root, runId: "run-w", clock, retryForMs: 120, isProcessAlive: crashedIsDead });
       assert.deepEqual(outcome, { ok: false, code: "workspace_locked", holder: null }, JSON.stringify(partial));
       assert.equal(await readFile(lockFile(root), "utf8"), partial);
     }
   });
+});
+
+test("a complete lock written without a final newline (by hand, other tools, the integration tests) is still judged: a dead one is reclaimed", async () => {
+  // A cut-off JSON object never parses, so text that parses is complete even without the newline.
+  for (const fileSystem of [nodeLockFileSystem, noLinks("EPERM")]) {
+    await withRoot(async (root) => {
+      await mkdir(join(root, ".codaryn"), { recursive: true });
+      await writeFile(lockFile(root), JSON.stringify({ pid: CRASHED_PID, runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" }));
+      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-n", clock, fileSystem, isProcessAlive: crashedIsDead });
+      assert.equal(outcome.ok, true, JSON.stringify(outcome));
+      assert.equal((JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string }).runId, "run-n");
+    });
+  }
 });
 
 test("one rule for 'no hard links': createExclusive and a revert's move know EISDIR too", async () => {

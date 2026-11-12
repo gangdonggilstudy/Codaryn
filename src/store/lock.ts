@@ -7,8 +7,10 @@
  *   reader never sees a half-written lock.
  * - DR-27 (b): on a volume without hard links (isLinkUnsupported) the same file is made by an
  *   exclusive create (`wx`) instead; it still fails when the name exists. A reader may then see the
- *   file before its content is complete. Every lock and reclaim text ends with a newline, so a file
- *   without one is still being written: the attempt waits for it and never reclaims or clears it.
+ *   file before its content is complete. Text without the final newline that every lock and
+ *   reclaim text ends with, and that is not a whole JSON value yet, is still being written: the
+ *   attempt waits for it and never reclaims or clears it. A whole lock without the newline (written
+ *   by hand or by other tools) is judged as before.
  * - Reclaiming a lock whose pid is dead (T-9): only one process at a time may reclaim. It holds
  *   `lock.json.reclaim` (taken the same way), reads `lock.json` again, moves it to a unique name,
  *   checks that the moved content is the dead lock it read, and deletes it. Then it competes for
@@ -320,12 +322,27 @@ async function guarded<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Reads a lock-shaped file whose writer has finished. One without its final newline is still being
- * written on a volume without hard links (DR-27 b); it is waited for (TransientLockError), never judged.
+ * Whether a lock-shaped text may still be growing: no final newline and not yet a whole JSON value.
+ * A cut-off JSON object never parses, so text that parses is complete; a lock written without the
+ * newline (by hand or by other tools) is therefore judged as before.
+ */
+function stillWritten(text: string): boolean {
+  if (text.endsWith("\n")) return false;
+  try {
+    JSON.parse(text);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Reads a lock-shaped file whose writer has finished. One still being written (on a volume without
+ * hard links, DR-27 b) is waited for (TransientLockError), never judged or cleared.
  */
 async function readSettled(fs: LockFileSystem, file: string): Promise<Read> {
   const read = await readState(fs, file);
-  if (read !== "missing" && !read.text.endsWith("\n")) throw new TransientLockError();
+  if (read !== "missing" && stillWritten(read.text)) throw new TransientLockError();
   return read;
 }
 

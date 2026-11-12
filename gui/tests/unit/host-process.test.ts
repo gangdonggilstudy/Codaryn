@@ -276,3 +276,20 @@ test("host process (R-10 M-1): an answer that comes after its time limit is drop
     await cleanup();
   }
 });
+
+test("host process (R-10 L-2): a host whose stdin closes during a slow call ends without waiting for it", async () => {
+  const { dir, cleanup } = await tempDir();
+  const engine = await fakeEngine(dir, "await new Promise((resolve) => setTimeout(resolve, 6000)); return { ok: true, output: 'slow' };");
+  const host = await started(options(dir, { engineDir: engine, closeTimeoutMs: 15_000 }));
+  try {
+    void host.call("doctor", { workspace: null }, 20_000);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const begin = Date.now();
+    await host.close();
+    const took = Date.now() - begin;
+    assert.equal(host.exited, true);
+    assert.ok(took < 3_000, `the host ended ${took} ms after its stdin closed, not after the 6 s call`);
+  } finally {
+    await cleanup();
+  }
+});

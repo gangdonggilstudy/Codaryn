@@ -130,3 +130,61 @@ export function displayWidth(text: string): number {
 export function padEnd(text: string, width: number): string {
   return text + " ".repeat(Math.max(0, width - displayWidth(text)));
 }
+
+/** U-14 (R-49 R49-L2): before every row of text a model wrote, so no row of it can pass for the tool's own line. */
+export const MODEL_TEXT_PREFIX = "  | ";
+/** The widest row of quoted model text, prefix included, in terminal columns (folded here, not by the terminal). */
+export const MODEL_TEXT_COLUMNS = 76;
+
+/** Every line break a terminal may honour: CR LF, LF, CR, VT, FF, NEL, and the line and paragraph separators. */
+const MODEL_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
+/** Characters that show nothing: zero-width spaces and joiners, the soft hyphen, the word joiner, the BOM, the Mongolian vowel separator. */
+const INVISIBLE = /[\u00ad\u180e\u200b-\u200d\u2060\ufeff]/g;
+/** A run of white space of any kind (Unicode spaces, tabs). */
+const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
+
+/**
+ * U-14 (R-49 R49-L2), DR-47: text a model wrote (a plan's summary, the agent's last message) as rows
+ * for people. It is the model's own words, so every row starts with MODEL_TEXT_PREFIX. Runs of
+ * white space become one space and invisible characters go, so padding cannot place words at the
+ * start of a terminal row; the text is folded here at MODEL_TEXT_COLUMNS (at a space when there is
+ * one), so the terminal does not fold it. Key shapes and control characters are replaced as in
+ * every line for people. At most `maxRows` rows; the rest are counted in a last "(+N)" row.
+ * No rows when nothing is left to show.
+ */
+export function quoteModelText(text: string, maxRows: number): string[] {
+  const room = MODEL_TEXT_COLUMNS - displayWidth(MODEL_TEXT_PREFIX);
+  const rows: string[] = [];
+  for (const raw of text.split(MODEL_LINE_BREAK)) {
+    // White space first (a tab is a space here, not a control character to mark), then the last step of every line.
+    const line = finalLine(raw.replace(INVISIBLE, "").replace(WHITE_SPACE, " ")).trim();
+    if (line.length === 0) continue;
+    let row = "";
+    let width = 0;
+    for (const word of line.split(" ")) {
+      const wordWidth = displayWidth(word);
+      if (row.length > 0 && width + 1 + wordWidth <= room) {
+        row += ` ${word}`;
+        width += 1 + wordWidth;
+        continue;
+      }
+      if (row.length > 0) rows.push(row);
+      row = "";
+      width = 0;
+      // A word wider than a row is cut into rows.
+      for (const char of word) {
+        const charWidth = displayWidth(char);
+        if (width + charWidth > room) {
+          rows.push(row);
+          row = "";
+          width = 0;
+        }
+        row += char;
+        width += charWidth;
+      }
+    }
+    if (row.length > 0) rows.push(row);
+  }
+  const shown = rows.slice(0, Math.max(0, maxRows)).map((row) => `${MODEL_TEXT_PREFIX}${row}`);
+  return rows.length > shown.length ? [...shown, `  … (+${rows.length - shown.length})`] : shown;
+}

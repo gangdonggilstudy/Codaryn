@@ -10,4 +10,4 @@ export { jsonSyntaxErrorOffset, jsonSyntaxErrorPosition, positionOf } from "./js
 export type { JsonPosition } from "./json-position.js";
 export { createHumanWriter } from "./writer.js";
 export type { HumanWriter, HumanWriterOptions } from "./writer.js";
-export { displayWidth, formatLocalTime, shellArg } from "./format.js";
+export { MODEL_TEXT_COLUMNS, MODEL_TEXT_PREFIX, displayWidth, formatLocalTime, quoteModelText, shellArg } from "./format.js";

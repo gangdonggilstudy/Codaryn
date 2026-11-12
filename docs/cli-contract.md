@@ -881,6 +881,7 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
   - `PlanOutput`: 행동 목록(지금 비밀로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
+  - U-14(UXM-6, AXM-2, AXM-15): 계획 실행에 기록 변경 표시가 있으면(읽을 수 없는 표시도) 그래도 보이되(종료 0) `recordsChanged: true`를 넣고, 글은 경고 줄(`plan.records_changed`)로 시작하며 적용 명령 대신 적용할 수 없다는 줄(`plan.cannot_apply`: 새 `codaryn run`으로 계획을 다시 만든다)을 적는다. 모델이 쓴 요약(`summary`)은 계획 실행 journal의 `propose_plan` 호출(결과가 이 다이제스트를 가리키는 것)에서 읽어 지금 비밀로 다시 가려 넣고, 글에서는 `plan.summary_label` 뒤에 에이전트의 설명으로 보인다(승인 대상이 아님). 찾지 못하거나 읽지 못하면, 그리고 표시가 있으면 뺀다. 글의 마지막 줄은 다이제스트가 보장하는 것(`plan.digest_guarantee`)이다. `apply`의 터미널 질문도 같은 글을 쓴다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다.
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).

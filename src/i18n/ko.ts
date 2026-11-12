@@ -57,7 +57,7 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.digest_label": "다이제스트",
   "plan.discard_kept": "지울 때까지 폐기 보관함 .codaryn/discarded/에 남음",
   "plan.inventory_limit": "작업 공간의 파일이 인벤토리 검사가 셀 수 있는 것보다 많습니다. 적용하면 plan_stale로 멈추고 아무것도 옮기지 않습니다.",
-  "plan.applied_by": "적용됨(적용 실행 {runId})",
+  "plan.applied_by": "적용 실행 {runId}에서 적용함",
   "plan.next_apply": "적용하려면: codaryn apply <같은 task 형식> --run {runId} --digest",
   "apply.question": "이 계획을 적용할까요?",
   "apply.unsafe_move_question": "이 계획의 이동 {count}개는 이 드라이브에 하드 링크가 없어 대상 자리의 파일을 덮어쓸 수 있습니다. 아무것도 옮기지 않았습니다. 이번 적용에서만 그래도 옮기도록 다시 적용할까요?",
@@ -189,7 +189,7 @@ export const KO_MESSAGES: MessageTexts = {
   "init.overridden_by_env": "CODARYN_CONFIG가 설정되어 있어 실행은 그 파일을 읽습니다. 이 파일을 쓰려면 CODARYN_CONFIG를 지우세요.",
 
   "prompt.yes_no_default_yes": "[Y/n] (Enter: 예)",
-  "prompt.yes_no_default_no": "[y/N] (Enter: 아니오)",
+  "prompt.yes_no_default_no": "[y/N] (y·예·네: 예, Enter: 아니오)",
 
   "language.chosen": "메시지 언어 {language}, 정한 곳: {source}",
   "language.env_ignored": "CODARYN_LANG 값이 ko나 en이 아니어서 무시했습니다.",

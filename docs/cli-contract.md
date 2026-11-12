@@ -1135,6 +1135,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - `revert`: 막지 않는다(스냅샷·다이제스트 확인은 그대로). 결과에 `recordsChanged: true`(미리보기 포함). 사람용 줄은 렌더러(N-C) 몫이다.
   - 표시가 없으면 두 필드 모두 없다.
   - `apply`(U-1, R-33 R33-L3): 표시가 있는 계획 실행(읽을 수 없는 표시도)은 적용하지 않는다. 계획을 불러온 직후, 아무것도 묻기 전에 `plan_records_changed`(종료 2)로 거부한다. 묻거나 기록하거나 옮긴 것이 없고 적용 실행도 만들지 않는다. 계획을 새 실행으로 다시 만든다. 엔진에는 같은 확인(`ApplyDeps.planRecordsChanged`, store의 `hasRecordsChangedMark`)을 넘겨 잠금 아래에서 다시 본다.
+  - U-29(R-44 R44-L1): `apply`는 store의 `stateUncheckedSince`를 `ApplyDeps.planRecordsUnchecked`로 엔진에 넘긴다. 계획 실행이나 그 뒤의 실행이 상태 디렉터리를 다 확인하지 못했으면(또는 그 기록을 읽을 수 없으면) 적용은 계속하고 `noticeKinds: ["plan_records_unchecked"]`와 알림 하나를 더한다. 계획 실행보다 앞선 실행은 세지 않는다.
   - `apply`(U-8, R-39 L-1): 상태 디렉터리가 너무 커서 다 확인하지 못한 적용은 거부하지 않고 알린다. 결과의 `noticeKinds`에 `plan_records_unchecked`가 있고 `notices`에 고정 알림 한 줄이 있다. `report`는 둘을 그대로 싣는다. 확인이 다 된 적용은 `noticeKinds`가 없고 출력이 전과 같다.
 
 

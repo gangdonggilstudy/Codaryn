@@ -358,6 +358,9 @@ export const FIXED_MESSAGES = {
   "summary.denied_hint_task": {},
   "summary.usage": { turns: "count", toolCalls: "count", seconds: "seconds" },
   "summary.run_id": { runId: "runId" },
+  // DR-52 (AXM-17): EngineResult.masking, counts only: `{registered}` values registered for masking,
+  // `{masked}` places masked in what was sent to the model. Shown when the result has it.
+  "summary.masking": { registered: "count", masked: "count" },
   "summary.next_report": { runId: "runId" },
   "summary.next_report_here": { runId: "runId" },
   "summary.next_revert": { runId: "runId" },

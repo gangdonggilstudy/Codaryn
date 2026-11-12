@@ -197,9 +197,19 @@ export const cliError = error;
 export const MODEL_NOT_FOUND_HINT =
   "the API answered HTTP 404, which usually means the model id is unknown: run `codaryn models` to list the models this key can use";
 
-/** The provider describes an HTTP failure as "HTTP <status>..." (src/model/anthropic). */
-function isModelNotFound(message: string): boolean {
-  return message.startsWith("HTTP 404");
+/**
+ * Y-4 with SP-3: `model` with every outcome watched; `onNotFound` is called when a request was
+ * answered with HTTP 404 (ModelOutcome.httpStatus, not the message's first characters).
+ */
+function watchingNotFound(model: ModelProvider, onNotFound: () => void): ModelProvider {
+  return {
+    name: model.name,
+    async complete(request, signal) {
+      const outcome = await model.complete(request, signal);
+      if (!outcome.ok && outcome.httpStatus === 404) onNotFound();
+      return outcome;
+    },
+  };
 }
 
 function withModelHint(
@@ -675,18 +685,20 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     model = createScriptedProvider(script.script);
   }
 
+  // Y-4: a model request answered with HTTP 404 (usually an unknown model id).
+  let modelNotFound = false;
+  const watchedModel = watchingNotFound(model, () => {
+    modelNotFound = true;
+  });
   const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
   const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
   try {
-    const assembled = await io.assemble({ task, runId, model, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
+    const assembled = await io.assemble({ task, runId, model: watchedModel, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
-    // Y-4: watch for a model request answered with HTTP 404 (usually an unknown model id).
     const recorded = assembled.deps.journal;
-    let modelNotFound = false;
     const watched: Journal = {
       async append(event) {
         await recorded.append(event);
-        if (event.type === "model_error" && isModelNotFound(event.message)) modelNotFound = true;
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;

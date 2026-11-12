@@ -205,7 +205,8 @@ function withQuickFormHint(outcome: CommandOutcome, form: TaskFormArgs): Command
   const output = outcome.output;
   if (output.code !== "invalid_config" || !output.message.includes("is not set")) return outcome;
   const message = `${output.message}. The quick form of plan, apply and review reads the run settings, limits included, from the config file; give the plan run's task with --task instead`;
-  return { ...outcome, output: { ...output, message } };
+  // R-12 L-2: the hint makes the human renderer add the advice as its own stderr line.
+  return { ...outcome, output: { ...output, message, hint: "quick_form_needs_task" } };
 }
 
 /** Steps 1 to 7, the workspace's real path and the run `--run` names. */

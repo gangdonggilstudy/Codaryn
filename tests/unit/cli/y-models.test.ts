@@ -262,7 +262,7 @@ describe("Y-3 --use writes the config file's model", () => {
 });
 
 describe("Y-4 hints", () => {
-  async function anthropicRun(message: string): Promise<{ result: EngineResult; lines: string[] }> {
+  async function anthropicRun(message: string, httpStatus?: number): Promise<{ result: EngineResult; lines: string[] }> {
     const base = await setupRun(
       { "README.md": "# Title\n" },
       {
@@ -271,7 +271,8 @@ describe("Y-4 hints", () => {
       },
       [],
     );
-    const provider: ModelProvider = { name: "anthropic", complete: async () => ({ ok: false, kind: "api_error", message }) };
+    // SP-3: the adapter fills httpStatus for an HTTP answer; the Y-4 hint follows it, not the message.
+    const provider: ModelProvider = { name: "anthropic", complete: async () => ({ ok: false, kind: "api_error", message, ...(httpStatus === undefined ? {} : { httpStatus }) }) };
     const lines: string[] = [];
     const outcome = await runCli(
       cliIo(base, {
@@ -290,7 +291,7 @@ describe("Y-4 hints", () => {
   }
 
   test("a model error answered with HTTP 404 gets the codaryn models hint", async () => {
-    const { result, lines } = await anthropicRun("HTTP 404 not_found_error: model: fake-model-gone");
+    const { result, lines } = await anthropicRun("HTTP 404 not_found_error: model: fake-model-gone", 404);
     assert.deepEqual([result.status, result.reason], ["failed", "model_error"]);
     assert.ok(result.notices.includes(MODEL_NOT_FOUND_HINT as never), JSON.stringify(result.notices));
     assert.ok(lines.some((line) => line.includes("codaryn models")));

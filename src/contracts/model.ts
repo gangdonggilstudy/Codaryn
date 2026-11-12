@@ -67,6 +67,13 @@ export const MODEL_ERROR_KINDS = [
   "auth_failed",
   /** HTTP 429 after the allowed retries. */
   "rate_limited",
+  /**
+   * DR-31 (f): the account's quota or spending limit is used up, so retrying does not help (openai:
+   * HTTP 429 with error type `insufficient_quota`, or code `credit_balance_exhausted`,
+   * `organization_spend_limit_exceeded`, `project_spend_limit_exceeded`,
+   * `organization_usage_limit_exceeded`, or the older code `insufficient_quota`). Not retried.
+   */
+  "quota_exhausted",
   /** The provider said it is overloaded (anthropic: HTTP 529 or 503), after the allowed retries. */
   "overloaded",
   /** A request did not finish within `requestTimeoutMs`, after the allowed retries. */

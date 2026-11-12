@@ -23,7 +23,7 @@
 import { REVERT_SKIP_REASONS } from "./changes.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
-import type { DefaultConfigDisplay } from "./config.js";
+import type { ApiKeyEnv, DefaultConfigDisplay } from "./config.js";
 import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
 import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
 import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
@@ -233,6 +233,8 @@ export const HELP_OPTIONS = [
   "json",
   "use",
   "limit",
+  // SP-6 (DR-31): `--provider <name>` of `codaryn models`.
+  "provider",
   // DR-21, DR-25: `--allow-unsafe-move` of `apply` and `revert` (UNSAFE_MOVE_CONSENT_ARGUMENT).
   "allow_unsafe_move",
 ] as const;
@@ -262,6 +264,8 @@ export const DOCTOR_HINT_ERROR_CODES = [
  * - seconds (N-20): a non-negative number of seconds with at most one decimal place (the
  *   renderer rounds milliseconds to tenths); the catalog writes it in decimal digits
  * - language (N-20): a MessageLanguage code
+ * - keyEnv (SP-D12, DR-31): the name of an API key variable, one of API_KEY_ENVS (a fixed constant,
+ *   never key material); the catalog writes it as it is
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -280,6 +284,7 @@ export interface MessageParamTypeByKind {
   readonly suggestedPath: InitSuggestedProtectedPath;
   readonly seconds: number;
   readonly language: MessageLanguage;
+  readonly keyEnv: ApiKeyEnv;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -430,10 +435,11 @@ export const FIXED_MESSAGES = {
   "init.commands_suggest": { command: "suggestedCommand" },
   "init.protected_suggest": { path: "suggestedPath" },
   "init.language_pick": {},
-  "init.key_set": {},
-  "init.key_missing": {},
-  "init.key_hint_windows": {},
-  "init.key_hint_posix": {},
+  // SP-D12: `{keyEnv}` is the chosen provider's key variable (API_KEY_ENVS).
+  "init.key_set": { keyEnv: "keyEnv" },
+  "init.key_missing": { keyEnv: "keyEnv" },
+  "init.key_hint_windows": { keyEnv: "keyEnv" },
+  "init.key_hint_posix": { keyEnv: "keyEnv" },
   "init.saved": { location: "location" },
   "init.next": {},
   "init.overridden_by_env": {},
@@ -493,8 +499,9 @@ export const FIXED_MESSAGES = {
   "doctor.config_file.profile_missing": {},
   "doctor.task_file.skipped": {},
   "doctor.api_key.scripted": {},
-  "doctor.api_key.ok": {},
-  "doctor.api_key.missing": {},
+  // SP-D12: the chosen provider and its key variable.
+  "doctor.api_key.ok": { keyEnv: "keyEnv" },
+  "doctor.api_key.missing": { keyEnv: "keyEnv", provider: "provider" },
   "doctor.model.scripted_ok": {},
   "doctor.model.ok": {},
   "doctor.model.missing": {},

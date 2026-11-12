@@ -15,7 +15,12 @@ import {
   API_PROVIDERS,
   API_PROVIDER_NAMES,
   DEFAULT_ANTHROPIC_API_BASE_URL,
+  DEFAULT_OPENAI_API_BASE_URL,
   MAX_OUTPUT_TOKENS_LIMIT,
+  MODEL_ERROR_KINDS,
+  HELP_OPTIONS,
+  MESSAGE_IDS,
+  FIXED_MESSAGES,
   MODEL_PROVIDER_NAMES,
   OPENAI_API_KEY_ENV,
   OPENAI_KEY_PATTERN_SOURCE,
@@ -41,13 +46,16 @@ import type {
 
 /** True only when A and B are the same type. */
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-const sameNames: Same<ModelProviderName, "scripted" | "anthropic"> = true;
-const sameApiNames: Same<ApiProviderName, "anthropic"> = true;
+const sameNames: Same<ModelProviderName, "scripted" | "anthropic" | "openai"> = true;
+const sameApiNames: Same<ApiProviderName, "anthropic" | "openai"> = true;
 const sameSettings: Same<ResolvedAnthropicSettings, ResolvedApiSettings> = true;
 const sameFactory: Same<CreateAnthropicProvider, CreateApiProvider> = true;
 const sameList: Same<ListAnthropicModels, ListModels> = true;
 const sameListSettings: Same<AnthropicListSettings, ListModelsSettings> = true;
 const apiModel: ModelConfig = { provider: "anthropic", model: "m", maxOutputTokens: 1024 };
+const openaiModel: ModelConfig = { provider: "openai", model: "a-model-the-user-picked", maxOutputTokens: 2048 };
+/** The per-provider union keeps Extract working, as the CLI's settings code uses it. */
+const anthropicOnly: Extract<ModelConfig, { provider: "anthropic" }> = { provider: "anthropic" };
 const withStatus: ModelOutcome = { ok: false, kind: "api_error", message: "HTTP 404", httpStatus: 404 };
 const withoutStatus: ModelOutcome = { ok: false, kind: "timeout", message: "late" };
 /** SP-D3, SP-D10: the config's provider choice and per-provider settings, and a profile's provider. */
@@ -59,7 +67,7 @@ const config: CodarynConfig = {
 };
 const models: Pick<ModelsOutput, "provider"> = { provider: "anthropic" };
 const init: Pick<InitOutput, "provider"> = {};
-void [sameNames, sameApiNames, sameSettings, sameFactory, sameList, sameListSettings, apiModel, withStatus, withoutStatus, config, models, init];
+void [sameNames, sameApiNames, sameSettings, sameFactory, sameList, sameListSettings, apiModel, openaiModel, anthropicOnly, withStatus, withoutStatus, config, models, init];
 
 describe("SP-1: the provider table", () => {
   test("the anthropic entry holds the values the CLI used before", () => {
@@ -69,6 +77,7 @@ describe("SP-1: the provider table", () => {
       defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
       baseUrlPath: "without_version",
       maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+      minOutputTokens: 1,
     });
     assert.equal(ANTHROPIC_API_KEY_ENV, "ANTHROPIC_API_KEY");
     assert.equal(DEFAULT_ANTHROPIC_API_BASE_URL, "https://api.anthropic.com");
@@ -77,7 +86,7 @@ describe("SP-1: the provider table", () => {
 
   test("the name lists and the derived lists come from the table", () => {
     assert.deepEqual([...API_PROVIDER_NAMES], Object.keys(API_PROVIDERS));
-    assert.deepEqual([...MODEL_PROVIDER_NAMES], ["scripted", "anthropic"]);
+    assert.deepEqual([...MODEL_PROVIDER_NAMES], ["scripted", "anthropic", "openai"]);
     assert.equal(new Set(MODEL_PROVIDER_NAMES).size, MODEL_PROVIDER_NAMES.length);
   });
 
@@ -99,6 +108,28 @@ describe("SP-1: the provider table", () => {
     assert.equal(shape.test(long(["sk", ""].join("-"), 31)), false, "31 characters: too short");
     assert.equal(shape.test(["sk", "learn"].join("-")), false, "a short word");
     assert.equal(shape.test(long(["task", ""].join("-"), 40)), false, "sk- inside a word");
+  });
+
+  test("the openai entry holds the confirmed facts (DR-31)", () => {
+    assert.deepEqual(API_PROVIDERS.openai, {
+      keyEnv: OPENAI_API_KEY_ENV,
+      keyPatternSources: [OPENAI_KEY_PATTERN_SOURCE],
+      defaultApiBaseUrl: DEFAULT_OPENAI_API_BASE_URL,
+      baseUrlPath: "with_version",
+      maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+      minOutputTokens: 16,
+    });
+    assert.equal(DEFAULT_OPENAI_API_BASE_URL, "https://api.openai.com/v1");
+  });
+
+  test("the bundle's message and help additions", () => {
+    assert.ok((MODEL_ERROR_KINDS as readonly string[]).includes("quota_exhausted"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("modelError.quota_exhausted"));
+    assert.ok((HELP_OPTIONS as readonly string[]).includes("provider"));
+    for (const id of ["init.key_set", "init.key_missing", "init.key_hint_windows", "init.key_hint_posix", "doctor.api_key.ok"] as const) {
+      assert.deepEqual(FIXED_MESSAGES[id], { keyEnv: "keyEnv" }, id);
+    }
+    assert.deepEqual(FIXED_MESSAGES["doctor.api_key.missing"], { keyEnv: "keyEnv", provider: "provider" });
   });
 
   test("the config's providers map is a schema field name", () => {

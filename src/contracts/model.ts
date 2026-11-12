@@ -55,6 +55,13 @@ export interface ModelResponse {
   readonly toolCalls: readonly ToolCall[];
   /** `null` means unknown. It is never treated as zero. */
   readonly usage: ModelUsage | null;
+  /**
+   * SP-5, DR-31 (c): how many reasoning items the provider returned with this response. The adapter
+   * keeps them (opaque, encrypted by the provider) in memory for the rest of the run and sends them
+   * back with the next requests; their content never reaches the engine. The engine records the
+   * count only. Absent: none, or a provider without such items.
+   */
+  readonly reasoningItems?: number;
 }
 
 export const MODEL_ERROR_KINDS = [
@@ -133,16 +140,21 @@ export interface ApiProviderDeps {
 /** SP-1: the same injection points under their first name. */
 export type AnthropicProviderDeps = ApiProviderDeps;
 
-/** SP-1: what every API provider's factory looks like. */
+/**
+ * SP-1: what every API provider's factory looks like: `createAnthropicProvider`
+ * (`src/model/anthropic/index.ts`) and, from SP-5, `createOpenAIProvider` (`src/model/openai/index.ts`).
+ */
 export type CreateApiProvider = (settings: ResolvedApiSettings, deps?: ApiProviderDeps) => ModelProvider;
 
 /** Signature of `createAnthropicProvider`, exported by `src/model/anthropic/index.ts`. */
 export type CreateAnthropicProvider = CreateApiProvider;
 
 /**
- * One model of the Anthropic Models API (Y-1): `GET /v1/models` and `GET /v1/models/{id}`, sent
- * with the same `x-api-key` and `anthropic-version` headers as Messages requests. Only these fields
- * are kept; `capabilities` and anything else in the API object are dropped.
+ * One model of a provider's model list. Each adapter fills what its list gives; the rest is null.
+ * - Anthropic Models API (Y-1): `GET /v1/models`, sent with the same `x-api-key` and
+ *   `anthropic-version` headers as Messages requests. `capabilities` and anything else is dropped.
+ * - OpenAI (SP-5, facts C-12): `GET /models` gives only `id` and `created`: `displayName` is the id,
+ *   `createdAt` is `created` written as RFC 3339, and both token fields are null.
  */
 export interface ModelInfo {
   /** `id`: the value for `model` in a task or config file. */
@@ -167,7 +179,10 @@ export type ListModelsOutcome =
   /** Same kinds as a model request (`auth_failed`, `rate_limited`, `timeout`, `aborted`, ...). */
   | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number };
 
-/** SP-1: what every API provider's model listing looks like (the Anthropic one is below). */
+/**
+ * SP-1: what every API provider's model listing looks like (the Anthropic one is below). SP-5:
+ * `listOpenAIModels` (`src/model/openai/index.ts`) reads the one page the API documents.
+ */
 export type ListModels = (settings: ListModelsSettings, deps?: ApiProviderDeps, signal?: AbortSignal) => Promise<ListModelsOutcome>;
 
 /** Most pages one listing reads. More is `api_error` (a bound on requests, not an expected size). */

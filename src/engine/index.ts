@@ -947,6 +947,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         text,
         toolCalls: echoed,
         usage: response.usage,
+        // DR-31 (c): the count only, and only a plausible one (model output is untrusted).
+        ...(Number.isSafeInteger(response.reasoningItems) && (response.reasoningItems as number) >= 0
+          ? { reasoningItems: response.reasoningItems as number }
+          : {}),
       });
 
       if (response.usage === null) {

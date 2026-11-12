@@ -464,6 +464,10 @@ export const FIXED_MESSAGES = {
   "cleanup.summary.leftovers": { count: "count", bytes: "count" },
   "cleanup.confirm.leftovers": { count: "count", bytes: "count" },
   "cleanup.done_leftovers": { count: "count", bytes: "count" },
+  // U-13 (UXM-1): after cleanup.done when above 0: how many apply runs' records were kept because
+  // their discarded files stay (CleanupOutcome.kept with reason discarded_left); they go once those
+  // applies are reverted or their discarded files are deleted too.
+  "cleanup.done_discarded_left": { count: "count" },
   // R-34b P-2: folders in the state directory named like a leftover but without a cleanup's mark
   // (StateSummary.unknownFolders): shown when there are any; Codaryn does not remove them.
   "cleanup.summary.unknown_folders": { count: "count", bytes: "count" },

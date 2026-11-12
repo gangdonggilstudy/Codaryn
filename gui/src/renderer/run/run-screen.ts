@@ -18,6 +18,7 @@ import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localTime } from "./run-model.js";
 import { maskingLine, saveReportButton } from "../report/report-screen.js";
+import { copyControl } from "../shell/copy.js";
 import type { RunFilter, RunModel } from "./run-model.js";
 
 export interface RunScreenDeps {
@@ -144,12 +145,12 @@ function itemRow(item: RunItemView): HTMLElement {
   return row;
 }
 
-function resultView(t: Texts, result: RunResultView, labels: { status: string; reason: string }): HTMLElement {
+function resultView(t: Texts, api: CodarynApi, result: RunResultView, labels: { status: string; reason: string }): HTMLElement {
   const box = el("section", undefined, { id: "run-result", "aria-labelledby": "run-result-title", "data-status": result.status, "data-reason": result.reason });
   box.append(el("h3", t.format("run.result"), { id: "run-result-title" }));
   box.append(el("p", t.format("run.statusLine", { status: labels.status, reason: labels.reason }), { class: "status-line" }));
   const id = el("p", undefined, { class: "run-id" });
-  id.append(el("span", t.format("run.runId")), el("code", result.runId, { id: "run-result-id", lang: "en" }));
+  id.append(el("span", t.format("run.runId")), el("code", result.runId, { id: "run-result-id", lang: "en" }), copyControl(t, t.format("copy.runId"), () => api.copyText(result.runId), { id: "run-copy-id" }));
   box.append(id);
 
   const changes = el("div", undefined, { id: "run-changes" });
@@ -308,7 +309,7 @@ export function runScreen(deps: RunScreenDeps): Screen {
         }
         if (phase === "idle" && run.startError === null && run.done === null) end.append(el("p", t.format("run.none")));
         if (phase === "done" && run.done !== null) {
-          if (run.done.ok) end.append(resultView(t, run.done.result, run.done.labels), ...nextSteps(t, deps, run.done.result));
+          if (run.done.ok) end.append(resultView(t, api, run.done.result, run.done.labels), ...nextSteps(t, deps, run.done.result));
           else end.append(el("div", `${errorText(t, run.done.code)} ${t.format("error.code", { code: run.done.code })}`, { role: "alert", class: "error", "data-error": run.done.code }));
         }
         if (phase === "idle" || phase === "done") end.append(button(t.format("run.again"), deps.newTask, { id: "run-again" }));

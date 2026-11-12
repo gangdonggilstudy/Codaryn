@@ -14,7 +14,7 @@ export const MAX_LINE_CHARS = 8 * 1024 * 1024;
 export const MIN_NODE_MAJOR = 26;
 
 /** Calls the engine host answers. Each later unit adds the app layer functions it needs. */
-export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes", "report", "proposeSettings", "applySettings", "transport", "stateSummary", "previewCleanup", "applyCleanup", "reportMarkdown", "createSettings", "settingsSuggestions"] as const;
+export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes", "report", "proposeSettings", "applySettings", "transport", "stateSummary", "previewCleanup", "applyCleanup", "reportMarkdown", "createSettings", "settingsSuggestions", "copyCheck"] as const;
 export type HostCall = (typeof HOST_CALLS)[number];
 
 export interface HostRequest {

@@ -16,6 +16,7 @@ import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } f
 import { modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
 import type { ApiProviderEntry } from "./settings.js";
 import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
+import { copyableText } from "../shared/ipc.js";
 import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js";
 import type { CleanupSelectionArg } from "../shared/cleanup.js";
 import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
@@ -332,6 +333,14 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
         return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
+      }
+      case "copyCheck": {
+        // U-62 (6.4): whether this host's own hiding (control characters, key shapes, every key value
+        // now set) leaves the text as it is; only then does the main process copy it. Nothing is kept.
+        if (!isObj(args) || Object.keys(args).length !== 1) throw new ArgsError();
+        const text = copyableText(args["text"]);
+        if (text === null) throw new ArgsError();
+        return { ok: true, clean: deps.shown(text) === text };
       }
       case "transport":
         // PM (a): the test transport's mode and how many requests to another machine it refused.

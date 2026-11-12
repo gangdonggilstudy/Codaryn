@@ -57,6 +57,8 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
+import { copyableText, parseCopyArgs, toCopyCheck } from "../shared/ipc.js";
+import type { CopyReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
 import type { CreateSettingsReply, SuggestionsReply } from "../shared/ipc.js";
@@ -68,6 +70,7 @@ import type { Workspaces } from "./workspaces.js";
 const DOCTOR_TIMEOUT_MS = 60_000;
 const MESSAGES_TIMEOUT_MS = 10_000;
 const TREE_TIMEOUT_MS = 30_000;
+const COPY_TIMEOUT_MS = 10_000;
 const SETTINGS_TIMEOUT_MS = 30_000;
 /** Listing and choosing a model ask the provider's API (Y-2): the request time limit and retries fit in this. */
 const MODELS_TIMEOUT_MS = 120_000;
@@ -125,6 +128,8 @@ export interface IpcDeps {
   readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
   /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
   readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
+  /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
+  readonly writeClipboard: (text: string) => void;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -229,6 +234,37 @@ export function registerIpc(deps: IpcDeps): void {
     // Shows the entry selected in the file manager. Nothing is opened or run.
     shell.showItemInFolder(target);
     return true;
+  });
+
+  /**
+   * U-62 (6.4): copies text only after this process's own check (copyableText: one line, length, no
+   * control or invisible character) and the engine host's (its hiding leaves it as it is: no key
+   * shape, no key value now set). Nothing else reaches the clipboard; the page cannot read it.
+   */
+  const copyChecked = async (text: string): Promise<CopyReply> => {
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("copyCheck", { text }, COPY_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    if (!toCopyCheck(response.value)) return { ok: false, code: "not_copyable" };
+    deps.writeClipboard(text);
+    return { ok: true };
+  };
+
+  handle(IPC_CHANNELS.copyText, async (args): Promise<CopyReply> => {
+    const text = args.length === 1 ? parseCopyArgs(args[0]) : null;
+    return text === null ? { ok: false, code: "invalid_args" } : copyChecked(text);
+  });
+
+  // U-62 (3.3): a tree entry's path relative to the workspace, by its id (the page never names a path).
+  handle(IPC_CHANNELS.copyPath, async (args): Promise<CopyReply> => {
+    const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    if (workspaces.path(parsed.workspace) === null) return { ok: false, code: "unknown_workspace" };
+    const rel = workspaces.treeIds.resolve(parsed.workspace, parsed.node);
+    if (rel === null) return { ok: false, code: "unknown_entry" };
+    const text = copyableText(rel);
+    return text === null ? { ok: false, code: "not_copyable" } : copyChecked(text);
   });
 
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {

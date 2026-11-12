@@ -9,6 +9,8 @@
 
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",
+  copyText: "codaryn:app:copy",
+  copyPath: "codaryn:workspace:copypath",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -100,6 +102,32 @@ export function parseRevealArgs(value: unknown): { readonly workspace: string; r
   const { workspace, node } = value;
   return isHandle(workspace) && isHandle(node) ? { workspace, node } : null;
 }
+
+/**
+ * U-62 (6.4, 2 principle 4): copying puts only text the window shows, masked, on the clipboard. The
+ * main process checks it here (one line of at most MAX_COPY_CHARS characters, no control, line,
+ * format, direction or invisible character), then asks the engine host whether its own hiding
+ * (key shapes, every key value now set) would change it; only text it would not change is copied.
+ */
+export const MAX_COPY_CHARS = 1000;
+const NOT_COPYABLE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/;
+
+/** The text to copy, or null when it is not one line the window may copy. */
+export function copyableText(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_COPY_CHARS && !NOT_COPYABLE.test(value) ? value : null;
+}
+
+/** `copyText` arguments: `{text}` only. */
+export function parseCopyArgs(value: unknown): string | null {
+  return isObj(value) && hasOnlyKeys(value, ["text"]) ? copyableText(value["text"]) : null;
+}
+
+/** The engine host's answer to `copyCheck`: true only when its hiding leaves the text as it is. */
+export function toCopyCheck(value: unknown): boolean {
+  return isObj(value) && value["ok"] === true && value["clean"] === true;
+}
+
+export type CopyReply = { readonly ok: true } | { readonly ok: false; readonly code: string };
 
 /** A call that takes no arguments gets `undefined` from `ipcRenderer.invoke(channel)`. */
 export function isNoArgs(args: readonly unknown[]): boolean {

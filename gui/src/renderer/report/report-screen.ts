@@ -10,6 +10,7 @@ import { errorText } from "../i18n/catalog.js";
 import { asReport, asSaveReport } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { copyControl } from "../shell/copy.js";
 import type { Screen } from "../shell/shell.js";
 import type { MaskingView, ReportView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
@@ -64,6 +65,7 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
       const parts = [
         el("p", view.finished === null ? t.format("report.notFinished") : t.format("run.statusLine", { status: labels?.status ?? word(t, "runstatus", view.finished.status), reason: labels?.reason ?? view.finished.reason }), { id: "report-status", "data-status": view.finished?.status ?? "none", "data-reason": view.finished?.reason ?? "none" }),
         el("p", t.format("report.runId", { runId: view.runId }), { lang: "en" }),
+        copyControl(t, t.format("copy.runId"), () => deps.api.copyText(view.runId), { id: "report-copy-id" }),
         el("p", t.format("report.task", { task: view.taskId })),
       ];
       if (view.run !== null) parts.push(el("p", t.format("report.workflow", { workflow: view.run.workflow, provider: view.run.provider ?? "-" })));

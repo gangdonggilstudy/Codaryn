@@ -14,6 +14,7 @@ import { errorText } from "../i18n/catalog.js";
 import { asRevert, asRuns } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { copyControl } from "../shell/copy.js";
 import type { Screen } from "../shell/shell.js";
 import type { RevertView, RunListItem } from "../../shared/ipc.js";
 import { localDateTime } from "../run/run-model.js";
@@ -65,7 +66,7 @@ function revertList(t: Texts, view: RevertView): HTMLElement[] {
   return out;
 }
 
-function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openPlan: (runId: string) => void, openChanges: (runId: string) => void, openReport: (runId: string) => void): HTMLElement {
+function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openPlan: (runId: string) => void, openChanges: (runId: string) => void, openReport: (runId: string) => void, copy: (runId: string) => Promise<unknown>): HTMLElement {
   const item = el("li", undefined, { "data-run": run.runId, "data-state": run.state });
   if (run.state === "damaged") {
     item.append(el("span", run.runId, { class: "run-id", lang: "en" }), el("span", t.format("runs.damaged"), { class: "damaged" }));
@@ -78,7 +79,7 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
     run.changes === null ? t.format("runs.changesUnknown") : t.format("runs.changes", { count: String(run.changes) }),
   ];
   item.setAttribute("data-status", run.status ?? "none");
-  item.append(el("span", facts.filter((fact) => fact !== "").join(" · "), { class: "run-facts" }), el("span", run.taskId, { class: "task-id" }), el("code", run.runId, { class: "run-id", lang: "en" }));
+  item.append(el("span", facts.filter((fact) => fact !== "").join(" · "), { class: "run-facts" }), el("span", run.taskId, { class: "task-id" }), el("code", run.runId, { class: "run-id", lang: "en" }), copyControl(t, t.format("copy.runId"), () => copy(run.runId), { "data-copy": run.runId }));
   if (run.reverted !== null) item.append(el("span", t.format(run.reverted.status === "partial" ? "runs.revertedPartial" : "runs.reverted", { time: localDateTime(run.reverted.at) }), { class: "reverted" }));
   if (run.revertRecordDamaged) item.append(el("span", t.format("runs.revertDamaged"), { class: "damaged" }));
   // UXM-14, DR-38: as the CLI's runs says it.
@@ -197,7 +198,7 @@ export function runsScreen(deps: RunsDeps): RunsScreen {
           else if (what === "changes") deps.openChanges(id, form?.profile ?? null, form?.workflow ?? null);
           else deps.openReport(id, form);
         };
-        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report")))));
+        list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report"), (id) => api.copyText(id)))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
         // U-61: a preview asked from a result, once the list (which the main process checks it against) is in.

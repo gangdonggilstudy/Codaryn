@@ -120,6 +120,7 @@ export function taskRequest(base: string, overrides: Partial<StartRunRequest> = 
     configPath: null,
     varsFile: null,
     profile: null,
+    workflowRef: null,
     cancelFile: null,
     ...overrides,
   };

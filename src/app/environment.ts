@@ -59,6 +59,23 @@ export function copyEnvironment(
   );
 }
 
+/**
+ * DR-4: one variable's value, looked up as the platform does: without case on Windows, with case
+ * elsewhere. Works on any environment object, not only on a `copyEnvironment` copy.
+ */
+export function lookupEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  name: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== "win32") return env[name];
+  const direct = env[name];
+  if (direct !== undefined) return direct;
+  const folded = name.toUpperCase();
+  const key = Object.keys(env).find((item) => item.toUpperCase() === folded && env[item] !== undefined);
+  return key === undefined ? undefined : env[key];
+}
+
 /** Default `readVarsFile`: the file's variables, parsed without touching `process.env`. */
 export function readVarsFileSync(file: string): Readonly<Record<string, string>> {
   const parsed = parseEnv(readFileSync(file, "utf8"));

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { copyEnvironment, createNodeAppEnvironment, loadVarsInto, readVarsFileSync } from "../../../src/app/index.js";
+import { copyEnvironment, createNodeAppEnvironment, loadVarsInto, lookupEnv, readVarsFileSync } from "../../../src/app/index.js";
 import { tempDir } from "./support.js";
 
 describe("copyEnvironment", () => {
@@ -32,6 +32,18 @@ describe("copyEnvironment", () => {
     const env = copyEnvironment({ Path: "/bin", HOME: undefined }, "linux");
     assert.equal(env["PATH"], undefined);
     assert.deepEqual({ ...env }, { Path: "/bin" });
+  });
+});
+
+describe("lookupEnv (DR-4)", () => {
+  test("finds a name without case on Windows, with case elsewhere, on any environment object", () => {
+    const env = { Path: "C:\\bin", Empty: undefined, EMPTY: "set" };
+    assert.equal(lookupEnv(env, "PATH", "win32"), "C:\\bin");
+    assert.equal(lookupEnv(env, "path", "win32"), "C:\\bin");
+    assert.equal(lookupEnv(env, "empty", "win32"), "set", "an undefined entry does not hide a defined one");
+    assert.equal(lookupEnv(env, "ABSENT", "win32"), undefined);
+    assert.equal(lookupEnv(env, "PATH", "linux"), undefined);
+    assert.equal(lookupEnv(env, "Path", "linux"), "C:\\bin");
   });
 });
 

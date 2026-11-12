@@ -332,7 +332,7 @@ describe("errors and arguments", () => {
 
   test("runArguments builds the codaryn run arguments of a request", () => {
     assert.deepEqual(
-      runArguments({ input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, profile: null, cancelFile: null }),
+      runArguments({ input: { kind: "task", taskPath: "t.json" }, configPath: null, varsFile: null, profile: null, workflowRef: null, cancelFile: null }),
       ["run", "--task", "t.json"],
     );
     assert.deepEqual(
@@ -341,9 +341,26 @@ describe("errors and arguments", () => {
         configPath: "c.json",
         varsFile: "v.env",
         profile: "doc",
+        workflowRef: "organize",
         cancelFile: "x.flag",
       }),
-      ["run", "--workspace", "w", "--goal", "a goal; with $(shell) text", "--config", "c.json", "--vars-file", "v.env", "--profile", "doc", "--cancel-file", "x.flag"],
+      [
+        "run",
+        "--workspace",
+        "w",
+        "--goal",
+        "a goal; with $(shell) text",
+        "--config",
+        "c.json",
+        "--vars-file",
+        "v.env",
+        "--profile",
+        "doc",
+        "--workflow",
+        "organize",
+        "--cancel-file",
+        "x.flag",
+      ],
     );
   });
 });

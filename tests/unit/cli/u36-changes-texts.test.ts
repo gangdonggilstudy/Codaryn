@@ -8,8 +8,8 @@
  * - With a catalog every piece of text is the catalog's: no fixed English word is left.
  * - A run with a records-changed mark (ChangesOutput.recordsChanged, U-43) says so with the catalog's
  *   `changes.records_changed`, which nothing used before.
- * Reproduced first (todo until the renderer takes the catalog, and until unit/U-36-nb-i18n gives the
- * texts). Fake values only.
+ * Reproduced first (e4865d6, todo); the renderer takes the catalog now. The English and Korean
+ * catalog cases wait for unit/U-36-nb-i18n's texts (todo). Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,6 @@ import { renderChanges, runChanges } from "../../../src/cli/changes.js";
 import type { ChangesEnvironment } from "../../../src/cli/changes.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
 
-const TODO = { todo: "U-36: renderChanges does not take the message catalog yet" };
 const TEXTS_TODO = { todo: "U-36: wait for unit/U-36-nb-i18n's texts of the changes ids" };
 
 const RUN = "20261113T010203Z-0123abcd";
@@ -104,7 +103,7 @@ const NAMING = {
 const render = (output: ChangesOutput, messages?: MessageCatalog): string => (renderChanges as (output: ChangesOutput, messages?: MessageCatalog) => string)(output, messages);
 
 describe("U-36: changes' English text is as before", () => {
-  test("without a catalog: as before, the no-text line without (DR-29)", TODO, () => {
+  test("without a catalog: as before, the no-text line without (DR-29)", () => {
     assert.equal(render(ALL), ALL_EN);
   });
 
@@ -113,8 +112,10 @@ describe("U-36: changes' English text is as before", () => {
     assert.equal(render(APPLY), APPLY_EN);
   });
 
-  test("with the English catalog: the same text as without one", { ...TODO, ...TEXTS_TODO }, () => {
+  test("with the English catalog: the same text as without one", TEXTS_TODO, () => {
     const en = createMessageCatalog("en");
+    // Not vacuous: the renderer falls back to English when the catalog refuses an id.
+    for (const id of ["changes.none", "changes.no_text_note", "changes.state.missing", "changes.unavailable.unreadable"] as const) assert.doesNotThrow(() => en.format(id), id);
     assert.equal(render(ALL, en), ALL_EN);
     assert.equal(render(NONE, en), NONE_EN);
     assert.equal(render(APPLY, en), APPLY_EN);
@@ -132,7 +133,7 @@ describe("U-36: changes' English text is as before", () => {
 });
 
 describe("U-36: with a catalog every piece of changes' text is the catalog's", () => {
-  test("each line: the catalog's ids, the masked paths, the region, the reason codes", TODO, () => {
+  test("each line: the catalog's ids, the masked paths, the region, the reason codes", () => {
     const shown = render(ALL, NAMING);
     for (const word of ENGLISH) assert.equal(shown.includes(word), false, `fixed English left: ${word}`);
     const lines = shown.split("\n");
@@ -147,7 +148,7 @@ describe("U-36: with a catalog every piece of changes' text is the catalog's", (
     assert.equal(render(APPLY, NAMING).split("\n")[1], '‹changes.apply_run {"count":2,"runId":"20261113T000000Z-89abcdef"}›');
   });
 
-  test("runChanges gives the text its catalog", TODO, async () => {
+  test("runChanges gives the text its catalog", async () => {
     const outcome = await runChanges({
       argv: ["changes", "--task", "t.json", "--run", RUN],
       env: {},
@@ -158,14 +159,14 @@ describe("U-36: with a catalog every piece of changes' text is the catalog's", (
     assert.equal(outcome.text, `‹changes.heading {"runId":"${RUN}"}›\n‹changes.none›\n`);
   });
 
-  test("with the Korean catalog: no fixed English word", { ...TODO, ...TEXTS_TODO }, () => {
+  test("with the Korean catalog: no fixed English word", TEXTS_TODO, () => {
     const shown = [ALL, NONE, APPLY, MARKED].map((output) => render(output, createMessageCatalog("ko"))).join("\n");
     for (const word of ENGLISH) assert.equal(shown.includes(word), false, `English left: ${word}`);
   });
 });
 
 describe("U-36: a run with a records-changed mark says so (changes.records_changed)", () => {
-  test("after the heading, before the no-text line; only for a marked run", TODO, () => {
+  test("after the heading, before the no-text line; only for a marked run", () => {
     const lines = render(MARKED, NAMING).split("\n");
     assert.deepEqual(lines.slice(0, 3), [`‹changes.heading {"runId":"${RUN}"}›`, "‹changes.records_changed›", "‹changes.no_text_note›"]);
     assert.equal(render(ALL, NAMING).includes("changes.records_changed"), false);

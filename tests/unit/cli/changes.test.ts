@@ -183,8 +183,10 @@ describe("runChanges", () => {
     const app = createCodarynApp(await appEnvironment(base, { env: {} }));
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "other.json"), "--run", "latest"], env: {}, app }));
     // The reason is given once; the file without text has its path, its state and its own mark
-    // (the app layer's finding: one result can hold files with and without text).
-    assert.equal(shown.split("(DR-29)\n").length, 2, shown);
+    // (the app layer's finding: one result can hold files with and without text). U-36: the line no
+    // longer ends with "(DR-29)" (the PM's exception to the unchanged English text).
+    assert.equal(shown.split("the others have their path and state only\n").length, 2, shown);
+    assert.equal(shown.includes("(DR-29)"), false);
     assert.match(shown, /== README\.md: changed by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)\n== NOTES\.md/);
     // NOTES.md holds no secret: either set of secrets leaves the same text visible.
     assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n@@ -1,0 \+1,1 @@\n\+ # Notes\n/);

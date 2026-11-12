@@ -198,6 +198,8 @@ describe("N-5, N-17, N-23 human output of run", () => {
       profileApplied: false,
       deniedToolCalls: 2,
       deniedCommandCalls: 1,
+      // U-18: the denied calls' failed results are not failed calls.
+      failedToolCalls: 0,
       policySource: "config",
     });
   });

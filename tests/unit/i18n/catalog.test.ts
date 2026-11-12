@@ -278,12 +278,40 @@ describe("i18n catalog: language and wording", () => {
     // The same words as the other records-changed texts (report.records_changed, runs.records_changed).
     assert.match(en["error.plan_records_changed.what"], /records-changed mark.*nothing was asked or changed/);
     assert.match(ko["error.plan_records_changed.what"], /기록 변경 표시.*아무것도 묻거나 바꾸지 않았습니다/);
-    // Not "approve it anyway": a new plan, read again, is what may be applied.
-    assert.match(en["error.plan_records_changed.fix"], /Make the plan again with codaryn plan/);
-    assert.match(ko["error.plan_records_changed.fix"], /codaryn plan으로 계획을 새로 만들고/);
+    // Not "approve it anyway": a new plan, read again, is what may be applied. U-14 (UXM-6): the
+    // plan is made by a new codaryn run; codaryn plan only shows one.
+    assert.match(en["error.plan_records_changed.fix"], /Make the plan again with a new codaryn run \(codaryn plan only shows a plan\)/);
+    assert.match(ko["error.plan_records_changed.fix"], /codaryn run을 새로 실행해 계획을 다시 만들고\(codaryn plan은 계획을 보여 주기만 합니다\)/);
     for (const text of [en["error.plan_records_changed.fix"], ko["error.plan_records_changed.fix"]]) {
       assert.ok(!text.includes("--digest"), "the marked plan's digest is not offered");
     }
+  });
+
+  test("U-14: the plan view warns of a changed plan, labels the model's summary, and says what the digest guarantees", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // The same words as the other records-changed texts, and what it means for this plan.
+    assert.match(en["plan.records_changed"], /records-changed mark.*may not be the one the run made/);
+    assert.match(ko["plan.records_changed"], /기록 변경 표시.*실행이 만든 계획과 다를 수 있습니다/);
+    // In place of the command to apply it: no digest is offered, and the plan is made by a new run.
+    assert.match(en["plan.cannot_apply"], /cannot be applied.*new run \(codaryn run\)/);
+    assert.match(ko["plan.cannot_apply"], /적용할 수 없습니다.*새 실행\(codaryn run\)/);
+    for (const text of [en["plan.cannot_apply"], ko["plan.cannot_apply"]]) {
+      assert.ok(!text.includes("--digest") && !/codaryn plan|codaryn apply/.test(text));
+    }
+    // The summary is the agent's description: not checked, and not what is approved.
+    assert.match(en["plan.summary_label"], /agent's description.*not checked.*not what you approve/);
+    assert.match(ko["plan.summary_label"], /에이전트의 설명.*검증되지 않았고.*승인하는 대상이 아님/);
+    // The digest: exactly these actions and the contents of the plan's own files then.
+    assert.match(en["plan.digest_guarantee"], /exactly these actions.*contents the plan's files had when the plan was made/);
+    assert.match(ko["plan.digest_guarantee"], /바로 이 동작들.*계획을 만들 때 계획에 든 파일의 내용/);
+    // R-49 R49-L1: it says no more than apply does. Apply refuses a changed plan or a changed file
+    // of the plan, and a plan run with a records-changed mark; records changed without a mark pass.
+    assert.match(en["plan.digest_guarantee"], /refuses if the plan or one of its files changed since, and when the plan run has a records-changed mark/);
+    assert.match(ko["plan.digest_guarantee"], /계획이나 계획에 든 파일이 바뀌었으면 적용을 거부하고, 계획 실행에 기록 변경 표시가 있어도 거부/);
+    assert.ok(!/a file or the run's records changed/.test(en["plan.digest_guarantee"]), "not any file, not any change of the records");
+    assert.ok(!/파일, 실행 기록이 바뀌었으면/.test(ko["plan.digest_guarantee"]));
+    assert.match(en["plan.digest_guarantee"], /does not cover the run's other records/);
+    assert.match(ko["plan.digest_guarantee"], /실행의 다른 기록은 다이제스트에 들지 않습니다/);
   });
 
   test("R-34b: a damaged run's warning and the separate confirmation name it; an unknown folder is never removed", () => {
@@ -401,6 +429,19 @@ describe("i18n catalog: language and wording", () => {
     for (const id of ["error.cleanup_plan_changed.what", "error.cleanup_plan_changed.fix"] as const) {
       assert.ok(!en[id].includes("--") && !ko[id].includes("--"), id);
     }
+  });
+
+  test("U-21 (DR-47): the agent's last message is always labelled as its own words, not a verified fact", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    for (const id of ["summary.final_message", "report.final_message"] as const) {
+      assert.match(en[id], /agent's last message.*agent's own words, not a verified fact/, id);
+      assert.match(ko[id], /에이전트의 마지막 답.*에이전트의 말이며 검증된 사실이 아/, id);
+      // It never reads as a result of the run: no "passed" or "done".
+      assert.ok(!/통과|완료/.test(ko[id]) && !/passed|done/.test(en[id]), id);
+    }
+    // A cut text says so and how much is shown.
+    assert.match(en["summary.final_message_truncated"], /cut.*first \{count\} characters/);
+    assert.match(ko["summary.final_message_truncated"], /잘림.*앞 \{count\}자/);
   });
 
   test("U-24 (DR-50): one word for one thing in what people read", () => {

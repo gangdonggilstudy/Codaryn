@@ -56,6 +56,7 @@ import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
   createApplyRecorders,
+  prepareDiscardedRoot,
   inspectRun as storeInspectRun,
   latestRun,
   listRuns as storeListRuns,
@@ -428,9 +429,11 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         protectedPaths.length > 0 || prepared.integrityPaths.length > 0
           ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
           : undefined;
-      // DR-38: the apply's journal, its plan mark and its discarded-files folder come with the state
-      // guard that knows them (the store's createApplyRecorders), passed as ApplyDeps.stateGuard.
-      const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock });
+      // DR-38: the apply's journal and the plan run's applied mark come with the state guard that
+      // knows them (the store's createApplyRecorders, the contract's CreateApplyRecorders), passed as
+      // ApplyDeps.stateGuard. `runId` is this apply run; `planRunId` the plan run it carries out,
+      // whose directory gets the applied mark. The journal notes each discarded file as its own.
+      const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock, planRunId });
       const journal = observeApply(
         recorders.journal,
         privacy,
@@ -455,7 +458,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         policy: createPolicyGate({ config: task.policy, workspace }),
         planActions: task.policy.planActions ?? [],
         // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
-        discardedRoot: await recorders.prepareDiscardedRoot(),
+        discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
         privacy,
         verifiers: createVerifierRunner({ workspace, commandRunner }),
         // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
@@ -464,7 +467,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         clock: io.clock,
         signal: cancel.signal,
         ...(integrity === undefined ? {} : { integrity }),
-        markApplied: () => recorders.markPlanApplied({ planRunId, at: new Date(io.clock.now()).toISOString() }),
+        // At the apply clock's time (the store's markApplied uses the clock it was given).
+        markApplied: () => recorders.markApplied(),
         stateGuard: recorders.stateGuard,
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.

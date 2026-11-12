@@ -7,6 +7,7 @@ export type { AppHooks } from "./app.js";
 export { copyEnvironment, createNodeAppEnvironment, loadVarsInto, lookupEnv, readVarsFileSync } from "./environment.js";
 export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } from "./errors.js";
 export { CONNECTED_MODEL_PROVIDERS, modelsArguments } from "./models.js";
+export { initArguments, suggestionsFor } from "./init.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {
   AppliedActionRecord,
@@ -37,6 +38,7 @@ export type {
   CodarynApp,
   ConfirmAnswer,
   ConfirmRequest,
+  CreateSettingsRequest,
   DoctorRequest,
   ListModelsRequest,
   ListRunsRequest,
@@ -52,6 +54,8 @@ export type {
   RunObserver,
   RunOutcome,
   SelectModelRequest,
+  SettingsSuggestions,
+  SettingsSuggestionsRequest,
   SettingsView,
   StartOutcome,
   StartRunRequest,

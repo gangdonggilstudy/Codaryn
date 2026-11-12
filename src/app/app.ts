@@ -13,11 +13,13 @@
  */
 
 import { existsSync } from "node:fs";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
 import type {
   AnthropicProviderDeps,
   CreateAnthropicProvider,
   DefaultConfigLocation,
   DoctorOutput,
+  InitOutput,
   ListAnthropicModels,
   ModelsOutput,
   PrivacyGateway,
@@ -27,7 +29,7 @@ import type {
   RunsOutput,
 } from "../contracts/index.js";
 import { runTask as engineRunTask } from "../engine/index.js";
-import { explainMessageLanguage } from "../i18n/index.js";
+import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
@@ -36,6 +38,7 @@ import { createCancelSource } from "../cli/cancel.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
+import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { anthropicModelLister } from "../cli/provider.js";
@@ -52,6 +55,7 @@ import { deliver, journalWithEvents } from "./events.js";
 import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
 import { readSettingsIn } from "./settings.js";
+import { initArguments, suggestionsFor } from "./init.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -62,9 +66,12 @@ import type {
   DoctorRequest,
   ListModelsRequest,
   ListRunsRequest,
+  CreateSettingsRequest,
   ReadSettingsRequest,
   ReportRequest,
   SelectModelRequest,
+  SettingsSuggestions,
+  SettingsSuggestionsRequest,
   SettingsView,
   ResolvedRun,
   ResolveRunRequest,
@@ -104,10 +111,14 @@ export function runArguments(request: StartRunRequest): string[] {
   return argv;
 }
 
-/** A command printed with `--json`: its text is one JSON object of `kind`, or its output is an error. */
+/**
+ * A command run with `--json`: either its output object (some commands, such as `init`, return it
+ * as an object) or its text, one JSON object of `kind`; an error output is the CLI's error.
+ */
 function jsonOutcome<T extends { readonly kind: string }>(outcome: CommandOutcome, kind: T["kind"]): AppCallOutcome<T> {
   if ("output" in outcome) {
-    return outcome.output.kind === "error" ? { ok: false, error: fromCliError(outcome.output) } : { ok: false, error: INTERNAL_ERROR };
+    if (outcome.output.kind === "error") return { ok: false, error: fromCliError(outcome.output) };
+    return outcome.output.kind === kind ? { ok: true, output: outcome.output as unknown as T } : { ok: false, error: INTERNAL_ERROR };
   }
   try {
     const value = JSON.parse(outcome.text) as { kind?: unknown };
@@ -436,5 +447,62 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
-  return { startRun, report, revert, listRuns, resolveRun, doctor, changes, listModels, selectModel, readSettings };
+  /** `codaryn init --json` as main.ts calls it, without questions (no `ask`). */
+  async function createSettings(request: CreateSettingsRequest): Promise<AppCallOutcome<InitOutput>> {
+    try {
+      const outcome = await runInit({
+        argv: initArguments(request),
+        env: copyEnvironment(environment.env, platform),
+        cwd: environment.cwd,
+        platform,
+        defaultConfig: defaultConfigOf(),
+        defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
+        // --json prints no text; the catalog is only what runInit needs to exist.
+        messages: createMessageCatalog("en"),
+        readFile: environment.readFile,
+        isDirectory: environment.isDirectory,
+        exists: async (target) => {
+          try {
+            await lstat(target);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        locateInWorkspace: locate,
+        makeDirectory: async (dir) => {
+          await mkdir(dir, { recursive: true });
+        },
+        writeNewFile: (file, text) => writeFile(file, text, { encoding: "utf8", flag: "wx" }),
+      });
+      return jsonOutcome<InitOutput>(outcome, "init");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function settingsSuggestions(request: SettingsSuggestionsRequest): Promise<AppCallOutcome<SettingsSuggestions>> {
+    try {
+      const root = await workspaceRootOf(request.workspace, environment.cwd);
+      if (!root.ok) return root;
+      return { ok: true, output: await suggestionsFor(root.value) };
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  return {
+    startRun,
+    report,
+    revert,
+    listRuns,
+    resolveRun,
+    doctor,
+    changes,
+    listModels,
+    selectModel,
+    readSettings,
+    createSettings,
+    settingsSuggestions,
+  };
 }

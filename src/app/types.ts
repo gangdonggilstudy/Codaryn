@@ -11,6 +11,10 @@ import type {
   CliErrorCode,
   Clock,
   CodarynConfig,
+  CommandRule,
+  InitOutput,
+  InitSuggestedCommand,
+  InitSuggestedProtectedPath,
   InputDiagnostic,
   DoctorOutput,
   EngineResult,
@@ -68,6 +72,27 @@ export interface AppError {
   readonly message: string;
   /** N-6: where in the config or task file the problem is (field path, line and column), when it can be said safely. */
   readonly diagnostic?: InputDiagnostic;
+}
+
+/** N-2: create the config file with the defaults (`init --json`, no questions). */
+export interface CreateSettingsRequest {
+  /** Where to write. Null: the default location (N-1). CODARYN_CONFIG names a file to read, not this one. */
+  readonly configPath: string | null;
+  /** The workspace the file must lie outside of (S-1). Null: not checked against one. */
+  readonly workspace: string | null;
+}
+
+/** The fixed candidates init would ask about for a workspace (N-2, N-14). */
+export interface SettingsSuggestionsRequest {
+  readonly workspace: string;
+}
+
+export interface SettingsSuggestions {
+  readonly kind: "settings_suggestions";
+  /** package.json scripts on init's fixed list, with the rule each becomes (arguments fixed). Allowing one widens the policy. */
+  readonly commands: readonly { readonly shown: InitSuggestedCommand; readonly rule: CommandRule }[];
+  /** Fixed protected path names that exist in the workspace. Protecting one narrows the policy. */
+  readonly protectedPaths: readonly InitSuggestedProtectedPath[];
 }
 
 /** The config file a run would read, and what it holds (standalone-gui 3.2, 3.6). */
@@ -376,6 +401,10 @@ export interface CodarynApp {
   doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>>;
   /** The config file a run would read and what it holds; profile and workflow names. Reads only. */
   readSettings(request: ReadSettingsRequest): Promise<AppCallOutcome<SettingsView>>;
+  /** N-2: `init --json` without questions: the config file with the defaults. Never overwrites, never a key. */
+  createSettings(request: CreateSettingsRequest): Promise<AppCallOutcome<InitOutput>>;
+  /** The fixed suggestions init would ask about for a workspace. Reads only. */
+  settingsSuggestions(request: SettingsSuggestionsRequest): Promise<AppCallOutcome<SettingsSuggestions>>;
   /** `codaryn models --json`: a real API request; only when a person asked. Writes nothing. */
   listModels(request: ListModelsRequest): Promise<AppCallOutcome<ModelsOutput>>;
   /** `codaryn models --json --use <id>`: writes the config file's `model` atomically, nothing else. */

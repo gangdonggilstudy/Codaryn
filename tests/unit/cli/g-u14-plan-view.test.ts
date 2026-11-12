@@ -140,7 +140,9 @@ describe("U-14 (AXM-15): the model's summary is shown as the agent's description
     const lines = text.trimEnd().split("\n");
     const at = lines.findIndex((line) => line.includes(SUMMARY));
     assert.ok(at > lines.findIndex((line) => line.includes("sorted/a.txt")), text);
-    assert.ok(/agent|model/i.test(lines[at] ?? "") && /not/i.test(lines[at] ?? ""), text);
+    // U-21 (R-49 R49-L2): the label on its own line, the summary as a quoted row under it.
+    assert.ok(/agent|model/i.test(lines[at - 1] ?? "") && /not/i.test(lines[at - 1] ?? ""), text);
+    assert.equal(lines[at], `  | ${SUMMARY}`, text);
     assert.equal((await planJson(base, planned.runId, false)).summary, SUMMARY);
   });
 
@@ -160,7 +162,8 @@ describe("U-14 (AXM-15): the model's summary is shown as the agent's description
     assert.equal(output.summary, "sort with [key] now");
     const { text } = await planText(base, planned.runId, false);
     assert.equal(text.includes(KEY_SHAPED), false, text);
-    assert.ok(text.includes(": sort with [key] now"), text);
+    // U-21 (R-49 R49-L2): under its label, as a quoted row.
+    assert.ok(text.includes("\n  | sort with [key] now"), text);
   });
 
   test("R-49: the summary in --json has no control character and is one line", async () => {

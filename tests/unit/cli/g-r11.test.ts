@@ -205,11 +205,14 @@ async function findJournal(result: EngineResult): Promise<string> {
 }
 
 describe("R-11 L-2: the quick form of plan, apply and review explains its config need", () => {
-  test("without the config's limits the error says the quick form reads the run settings from the config", async () => {
+  // U-17 (UXM-3, AXM-14): plan runs nothing, so its quick form no longer needs the config's limits
+  // (g-u17-read-commands). apply still does, and its error still says where they are read from.
+  test("without the config's limits apply's error says the quick form reads the run settings from the config", async () => {
     const { base, ws, planned } = await planRun();
     await writeFile(path.join(base, "empty.json"), JSON.stringify({ schemaVersion: 1 }), "utf8");
-    const argv = ["plan", "--workspace", ws, "--config", "empty.json", "--workflow", "organize", "--run", planned.runId];
-    const shown = await runPlan(io(base, argv));
+    const digest = (planned.plan?.digest ?? "").slice(0, 12);
+    const argv = ["apply", "--workspace", ws, "--config", "empty.json", "--workflow", "organize", "--run", planned.runId, "--digest", digest, "--quiet"];
+    const shown = await runApply(io(base, argv));
     assert.ok("output" in shown && shown.output.kind === "error" && shown.output.code === "invalid_config", shows(shown));
     assert.ok(shown.output.message.includes("quick form") && shown.output.message.includes("--task"), shown.output.message);
   });

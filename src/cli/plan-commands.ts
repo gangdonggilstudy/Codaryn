@@ -90,6 +90,10 @@ import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
+import { FINAL_MESSAGE_MAX_LINES, quoteModelText } from "./human/index.js";
+
+/** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
+const PLAN_SUMMARY_MAX_ROWS = FINAL_MESSAGE_MAX_LINES;
 
 /** The goal the task form carries for commands that never run a model. */
 export const NO_GOAL = "(no goal: plan, apply and review do not run a model)";
@@ -237,7 +241,8 @@ async function prepareFor(
   quiet: boolean,
   secrets = true,
 ): Promise<{ ok: true; value: Prepared } | { ok: false; outcome: CommandOutcome }> {
-  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets });
+  // U-17: plan and review run nothing, so their quick form needs no run limits (TaskFormArgs.readOnly).
+  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets, ...(form.readOnly === true ? { readOnly: true } : {}) });
   if (!("prepared" in ready)) return { ok: false, outcome: withQuickFormHint(ready, form) };
   let workspaceRoot: string;
   try {
@@ -361,9 +366,10 @@ export function renderPlan(output: PlanOutput, currentKey: KnownKeys, messages?:
     `Digest: ${output.digest}`,
     ...actionLines(output.actions, currentKey),
   ];
-  if (output.summary !== undefined) {
-    lines.push(`${planViewText(messages, "plan.summary_label")}: ${cleanText(hideKeys(output.summary, currentKey))}`);
-  }
+  // U-21 (R-49 R49-L2, R-52 R52-L1): the model's words as the run summary draws them: the label on
+  // its own line, then quoteModelText's rows (quote mark, single spaces, folded to the terminal).
+  const summaryRows = output.summary === undefined ? [] : quoteModelText(hideKeys(output.summary, currentKey), PLAN_SUMMARY_MAX_ROWS);
+  if (summaryRows.length > 0) lines.push(`${planViewText(messages, "plan.summary_label")}:`, ...summaryRows);
   if (output.inventoryLimitReached) {
     lines.push("The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.");
   }

@@ -330,6 +330,8 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 
 두 어댑터 모두 **다시 가린 비교만** 보여 준다. 비교 내용은 앱 함수(그리고 CLI 명령, 9절)가 내준다. 어댑터는 스냅샷을 직접 읽지 않는다.
 
+- **가릴 값과 작업 공간(U-17, DR-46)**: `settings`로 실행을 시작했다면 지금 등록될 가릴 값으로 다시 가린다(DR-17). 앱은 그 값을 CLI의 1~7단계(`prepareTask`)를 읽기 명령으로(`readOnly`) 돌려 얻는다. 그래서 간편 형식(`workspace`)은 키·모델·실행 한도를 요구하지 않는다(설정 파일이 없어도 된다). 잠금, 기록, 파일을 만들지 않고 아무것도 보내지 않는다. task 파일 형식은 지금처럼 그 파일을 검사한다.
+
 ```ts
 changes(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
 

@@ -331,6 +331,10 @@ startGui({
       );
       results["runLog"] = await js("[...document.querySelectorAll('#run-log li')].map((li) => li.getAttribute('data-kind'))");
       results["runCounts"] = await js("document.getElementById('run-counts')?.textContent ?? null");
+      // U-21 (DR-47): the run ended with the reply "done": the agent's last message under its label.
+      results["runFinalMessage"] = await js(
+        "(() => { const box = document.getElementById('run-final-message'); return box === null ? null : { label: box.querySelector('h4')?.textContent ?? null, text: document.getElementById('run-final-message-text')?.textContent ?? null, cut: box.querySelector('p.notice') !== null }; })()",
+      );
       results["runText"] = await js("document.getElementById('work')?.textContent ?? ''");
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;

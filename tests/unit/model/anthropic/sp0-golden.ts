@@ -5,6 +5,9 @@
  *
  * SP-3 (b) added `httpStatus` to the failures that are HTTP responses (ModelOutcome.httpStatus,
  * SP-1). Nothing else changed: without that field the values equal the ones computed on b05da45.
+ *
+ * DR-32 (b) (R-19 L-2) added the scenarios the first pins did not cover; their values were computed
+ * on d086e04 and are the same on b05da45 without `httpStatus` (checked).
  */
 
 export const SP0_GOLDEN: Record<string, unknown> = {
@@ -335,6 +338,134 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "message": "HTTP 429 rate_limit_error: slow down (request req_011CAbCdEf)",
         "httpStatus": 429
       }
+    },
+    "badGatewayThenOk": {
+      "attempts": 2,
+      "delays": [
+        500
+      ],
+      "outcome": {
+        "ok": true,
+        "response": {
+          "stop": "final",
+          "text": "done",
+          "toolCalls": [],
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 2
+          }
+        }
+      }
+    },
+    "gatewayTimeoutThenOk": {
+      "attempts": 2,
+      "delays": [
+        500
+      ],
+      "outcome": {
+        "ok": true,
+        "response": {
+          "stop": "final",
+          "text": "done",
+          "toolCalls": [],
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 2
+          }
+        }
+      }
+    },
+    "payloadTooLarge": {
+      "attempts": 1,
+      "delays": [],
+      "outcome": {
+        "ok": false,
+        "kind": "api_error",
+        "message": "HTTP 413 request_too_large: too big (request req_011CAbCdEf)",
+        "httpStatus": 413
+      }
+    },
+    "unprocessable": {
+      "attempts": 1,
+      "delays": [],
+      "outcome": {
+        "ok": false,
+        "kind": "api_error",
+        "message": "HTTP 422 invalid_request_error: cannot process (request req_011CAbCdEf)",
+        "httpStatus": 422
+      }
+    },
+    "retryAfterPastDate": {
+      "attempts": 2,
+      "delays": [
+        0
+      ],
+      "outcome": {
+        "ok": true,
+        "response": {
+          "stop": "final",
+          "text": "done",
+          "toolCalls": [],
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 2
+          }
+        }
+      }
+    },
+    "retryAfterFarFutureDate": {
+      "attempts": 2,
+      "delays": [
+        60000
+      ],
+      "outcome": {
+        "ok": true,
+        "response": {
+          "stop": "final",
+          "text": "done",
+          "toolCalls": [],
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 2
+          }
+        }
+      }
+    },
+    "retryAfterFraction": {
+      "attempts": 2,
+      "delays": [
+        1500
+      ],
+      "outcome": {
+        "ok": true,
+        "response": {
+          "stop": "final",
+          "text": "done",
+          "toolCalls": [],
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 2
+          }
+        }
+      }
+    },
+    "backoffReachesCap": {
+      "attempts": 8,
+      "delays": [
+        500,
+        1000,
+        2000,
+        4000,
+        8000,
+        8000,
+        8000
+      ],
+      "outcome": {
+        "ok": false,
+        "kind": "api_error",
+        "message": "HTTP 500 api_error: boom (request req_011CAbCdEf) (after 8 attempts)",
+        "httpStatus": 500
+      }
     }
   },
   "p4Errors": {
@@ -406,6 +537,23 @@ export const SP0_GOLDEN: Record<string, unknown> = {
         "ok": false,
         "kind": "malformed_response",
         "message": "malformed response: unexpected stop_reason undefined"
+      }
+    },
+    "keyFragmentAndSpacedKey": {
+      "attempts": 1,
+      "outcome": {
+        "ok": false,
+        "kind": "api_error",
+        "message": "HTTP 400 invalid_request_error: piec[redacted] and spaced [redacted] end (request req_011CAbCdEf)",
+        "httpStatus": 400
+      }
+    },
+    "successOverLimit": {
+      "attempts": 1,
+      "outcome": {
+        "ok": false,
+        "kind": "malformed_response",
+        "message": "malformed response: the response body is larger than 8388608 bytes"
       }
     }
   },

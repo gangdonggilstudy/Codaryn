@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 
 import { TOOL_NAMES } from "../../../../src/contracts/index.js";
 import type { MaskedText, ModelOutcome, ModelRequest, ResolvedAnthropicSettings } from "../../../../src/contracts/index.js";
-import { createAnthropicProvider, listAnthropicModels } from "../../../../src/model/anthropic/index.js";
+import { MAX_SUCCESS_BODY_BYTES, createAnthropicProvider, listAnthropicModels } from "../../../../src/model/anthropic/index.js";
 
 export const FAKE_KEY = "codaryn-fake-key-0123456789abcdef-not-a-credential";
 /** Key-shaped text (the Anthropic key pattern), built so that this file holds no such line. */
@@ -236,6 +236,15 @@ const RETRIES: Record<string, { replies: Reply[]; settings?: Partial<ResolvedAnt
   timeoutAlways: { replies: [{ hang: true }], settings: { requestTimeoutMs: 30, maxRetries: 1 } },
   redirect: { replies: [{ status: 302, body: "", headers: { location: "https://elsewhere.test/" } }] },
   noRetriesAllowed: { replies: [json(429, apiError("rate_limit_error", "slow down"))], settings: { maxRetries: 0 } },
+  // R-19 L-2 (DR-32 (b)): statuses, retry-after forms and the backoff cap the first pins did not cover.
+  badGatewayThenOk: { replies: [json(502, apiError("api_error", "bad gateway")), { status: 200, body: OK }] },
+  gatewayTimeoutThenOk: { replies: [json(504, apiError("api_error", "gateway timeout")), { status: 200, body: OK }] },
+  payloadTooLarge: { replies: [json(413, apiError("request_too_large", "too big"))] },
+  unprocessable: { replies: [json(422, apiError("invalid_request_error", "cannot process"))] },
+  retryAfterPastDate: { replies: [json(429, apiError("rate_limit_error", "slow down"), { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" }), { status: 200, body: OK }] },
+  retryAfterFarFutureDate: { replies: [json(429, apiError("rate_limit_error", "slow down"), { "retry-after": "Fri, 31 Dec 9999 23:59:59 GMT" }), { status: 200, body: OK }] },
+  retryAfterFraction: { replies: [json(429, apiError("rate_limit_error", "slow down"), { "retry-after": "1.5" }), { status: 200, body: OK }] },
+  backoffReachesCap: { replies: [json(500, apiError("api_error", "boom"))], settings: { maxRetries: 7 } },
 };
 
 export async function p3Retries(): Promise<unknown> {
@@ -259,6 +268,13 @@ const ERRORS: Record<string, Reply> = {
   hugeBody: { status: 400, body: JSON.stringify(apiError("invalid_request_error", "y".repeat(2_000_000))) },
   successNotJson: { status: 200, body: "not json" },
   successWrongShape: { status: 200, body: JSON.stringify({ type: "message", content: "not a list" }) },
+  // R-19 L-2 (DR-32 (b)): an 8-character piece of the key, the key with spaces between its first
+  // characters, and a success body one byte over its limit.
+  keyFragmentAndSpacedKey: json(
+    400,
+    apiError("invalid_request_error", `piece ${FAKE_KEY.slice(12, 20)} and spaced ${FAKE_KEY.slice(0, 20).split("").join(" ")}${FAKE_KEY.slice(20)} end`),
+  ),
+  successOverLimit: { status: 200, body: "x".repeat(MAX_SUCCESS_BODY_BYTES + 1) },
 };
 
 export async function p4Errors(): Promise<unknown> {

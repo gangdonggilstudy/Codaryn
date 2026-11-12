@@ -6,7 +6,7 @@
  */
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
-import type { DefaultConfigDisplay } from "./config.js";
+import type { ApiProviderName, DefaultConfigDisplay } from "./config.js";
 import type { DoctorText, MessageLanguage, RunId } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
@@ -246,6 +246,8 @@ export interface ModelsListEntry extends ModelInfo {
 export interface ModelsOutput {
   readonly schemaVersion: 1;
   readonly kind: "models";
+  /** SP-6 (DR-31): the provider listed (`--provider`, else the config's). Optional until the CLI sets it. */
+  readonly provider?: ApiProviderName;
   readonly status: ModelsStatus;
   readonly exitCode: number;
   /** In the API's order. */
@@ -297,6 +299,8 @@ export const INIT_EXIT_CODES: { readonly [S in InitStatus]: number } = { created
 export interface InitOutput {
   readonly schemaVersion: 1;
   readonly kind: "init";
+  /** SP-6 (DR-31): the provider the written config uses; `keySet` is about its key variable. Optional until the CLI sets it. */
+  readonly provider?: ApiProviderName;
   readonly status: InitStatus;
   readonly exitCode: number;
   /**

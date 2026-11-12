@@ -282,9 +282,12 @@ export interface PlanRecorder {
    * SHA-256 of the bytes written after they were handed to the operating system. Rejects when the
    * file exists or cannot be written; the tool then reports `io_error` and no plan exists. It does
    * not depend on hard links (DR-24 c). A reader that sees the file half written finds its digest
-   * wrong and reports `invalid_run_record`. DR-28: every action carries `shown`, which the engine
-   * builds with planActionShown from the action masked by the plan run's gateway; the recorder
-   * writes it as given. `loadPlan` accepts an action with or without `shown` (exact keys either way).
+   * wrong and reports `invalid_run_record`. DR-28: every action carries `shown`, which the
+   * `propose_plan` tool (ToolRunner, src/tools, G-C) builds with planActionShown from the action
+   * masked by the run's own gateway (the one it was created with); a path that cannot be masked
+   * fails the call with `io_error` and stores nothing. The recorder writes `shown` as given, as part
+   * of the bytes the digest covers. `loadPlan` accepts an action with or without `shown` (exact
+   * keys either way; the parts must be arrays of strings).
    */
   savePlan(actions: readonly StoredPlanAction[]): Promise<ContentHash>;
 }
@@ -580,9 +583,10 @@ export interface ApplyJournal {
  * 1. `apply_started`; the integrity baseline when `integrity` is given.
  * 2. Preflight. First (DR-28, the same check as the caller's, kept as a second defence): every
  *    action is masked with `privacy` and compared with its `shown` (planActionShownMatches). When one
- *    differs or cannot be masked, the apply ends as `failed`/`plan_stale` with a fixed notice
- *    naming `plan_secrets_differ`, before the inventory is taken: nothing is checked, claimed or
- *    moved, and no path is recorded. The masked actions are the ones recorded later. Then:
+ *    differs, the apply ends as `failed`/`plan_stale` with a fixed notice naming
+ *    `plan_secrets_differ`; when one cannot be masked, the same with the notice that the paths could
+ *    not be masked. Either way before the inventory is taken: nothing is checked, claimed or moved,
+ *    and no path is recorded. The masked actions are the ones recorded later. Then:
  *    `inventory.capture()`; every action judged by `policy` (PLAN_ACTION_DESCRIPTORS)
  *    and by `executor.check`. `plan_checked` records the outcome. A problem, or the inventory limit
  *    reached, ends the apply as `failed`/`plan_stale` with nothing moved. DR-21: moves the check

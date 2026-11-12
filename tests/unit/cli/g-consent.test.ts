@@ -14,8 +14,10 @@ import { after, describe, test } from "node:test";
 import { UNSAFE_MOVE_CONSENT_ARGUMENT } from "../../../src/contracts/index.js";
 import type { ApplyDeps, ApplyResult, EngineResult } from "../../../src/contracts/index.js";
 import { parseApplyArgs } from "../../../src/cli/args.js";
-import { assembleRun } from "../../../src/cli/assemble.js";
+import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
+import { runRevert } from "../../../src/cli/revert.js";
+import { inspectRun, readRevertRecord, revertRun, writeRevertRecord } from "../../../src/store/index.js";
 import { runCli } from "../../../src/cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
 
@@ -285,5 +287,28 @@ describe("DR-1, DR-21: the app layer's adapter path (PM decision on A-4 question
       assert.ok("output" in outcome && outcome.output.kind === "error" && outcome.output.code === "invalid_arguments", JSON.stringify(outcome));
       assert.equal(engine.calls.length, 0);
     }
+  });
+});
+
+describe("DR-25: the real store records the revert consent", () => {
+  test("revert --allow-unsafe-move of a real apply writes cli-flag and the unsafe count into revert.json", async () => {
+    const { base, planned, digest } = await planRun();
+    const applied = await runApply(io(base, ["apply", "--task", "task.json", "--run", planned.runId, "--digest", digest.slice(0, 12), "--quiet"]));
+    assert.ok("output" in applied && applied.output.kind === "apply", JSON.stringify(applied));
+    const applyRunId = (applied.output as ApplyResult).runId;
+    const ws = path.join(base, "ws");
+    const reverted = await runRevert({
+      argv: ["revert", "--workspace", ws, "--run", applyRunId, UNSAFE_MOVE_CONSENT_ARGUMENT, "--quiet"],
+      cwd: base,
+      isDirectory: async () => true,
+      clock,
+      randomBytes,
+      revert: createRevertCommand(revertRun, { readRecord: readRevertRecord, writeRecord: writeRevertRecord, inspect: inspectRun }),
+    });
+    assert.ok(reverted.output.kind === "revert" && reverted.output.status === "complete", JSON.stringify(reverted.output));
+    assert.equal(await readFile(path.join(ws, "a.txt"), "utf8"), "alpha\n");
+    const record = JSON.parse(await readFile(path.join(ws, ".codaryn", "runs", applyRunId, "revert.json"), "utf8")) as Record<string, unknown>;
+    // This volume has hard links, so the move back is safe: the consent is recorded, no move used it.
+    assert.deepEqual([record["unsafeMoveConsent"], record["unsafeMoves"]], ["cli-flag", 0]);
   });
 });

@@ -22,6 +22,7 @@ import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "..
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
+  ApprovalChannel,
   CliErrorCode,
   Clock,
   EngineDeps,
@@ -80,6 +81,13 @@ export interface RevertCommandInput {
   readonly clock: Clock;
   /** N-7: decide and report, change nothing; no lock and no revert record. */
   readonly dryRun?: boolean;
+  /**
+   * DR-25: the person's consent to move files back unsafely in this revert, or absent/null for
+   * none. It comes only from a person: the CLI's argument or terminal answer (`runId` null: the run
+   * this command resolves to), or the app layer's adapter path after the person agreed on screen
+   * (`runId`: the run the person saw, which must be the one resolved). Not with `dryRun`.
+   */
+  readonly consent?: { readonly channel: ApprovalChannel; readonly runId: string | null } | null;
 }
 
 export type RevertCommandOutcome =
@@ -168,7 +176,10 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
         : "the run's journal cannot be read; nothing was changed";
     return { ok: false, code, message };
   };
-  return async ({ workspace, runId: requested, lockId, clock, dryRun = false }) => {
+  return async ({ workspace, runId: requested, lockId, clock, dryRun = false, consent = null }) => {
+    if (dryRun && consent !== null) {
+      return { ok: false, code: "invalid_arguments", message: "a dry run moves nothing and takes no consent to unsafe moves; nothing was read or changed" };
+    }
     if (dryRun && options.dryRun === undefined) {
       return { ok: false, code: "internal_error", message: "--dry-run is not connected in this build; nothing was read or changed" };
     }
@@ -186,6 +197,10 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     });
     if (!resolved.ok) return resolved;
     const runId = resolved.runId;
+    // DR-25: a consent that names another run counts as none; it is refused before anything changes.
+    if (consent !== null && consent.runId !== null && consent.runId !== runId) {
+      return { ok: false, code: "invalid_arguments", message: "the consent to unsafe moves names another run than the one reverted; nothing was changed" };
+    }
     if (resolved.latest !== null) {
       try {
         options.announceLatest?.(resolved.latest);
@@ -239,7 +254,11 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
     try {
-      const outcome = await revertRun({ workspaceRoot, runId });
+      const outcome = await revertRun({
+        workspaceRoot,
+        runId,
+        ...(consent === null ? {} : { unsafeMoveConsent: { channel: consent.channel, runId } }),
+      });
       // N-7, N-22: the revert record, written while the lock is held; best effort.
       try {
         await options.writeRecord?.(workspaceRoot, {
@@ -250,6 +269,9 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
           status: revertStatus(outcome),
           reverted: outcome.reverted.length,
           skipped: outcome.skipped.length,
+          // DR-25: how the person consented, and how many files went back unsafely under it.
+          unsafeMoveConsent: consent === null ? null : consent.channel,
+          unsafeMoves: outcome.reverted.filter((file) => file.unsafe === true).length,
         });
       } catch {
         // The record never changes the outcome.

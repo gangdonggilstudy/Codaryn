@@ -183,6 +183,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           // exactly that name is run_not_found, a damaged run is refused.
           inspect: inspectRun,
         }),
+        // DR-25: at a terminal, files skipped as unsafe_move may go back after a [y/N] question on stderr.
+        ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
       });
       if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));
       return plain(outcome);

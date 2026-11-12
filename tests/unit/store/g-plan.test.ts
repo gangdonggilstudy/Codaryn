@@ -146,7 +146,7 @@ describe("loadPlan (G-E)", () => {
     assert.deepEqual(outcome, { ok: true, plan: { schemaVersion: 1, kind: "plan", runId: PLAN_RUN, actions: ACTIONS }, digest, applied: null });
   });
 
-  test("run_not_found, run_not_plan and invalid_run_record as the contract says", async () => {
+  test("run_not_found, run_not_plan, plan_run_missing and invalid_run_record as the contract says", async () => {
     const code = async (root: string): Promise<string> => {
       const outcome = await loadPlan({ workspaceRoot: root, runId: PLAN_RUN });
       return outcome.ok ? "ok" : outcome.code;
@@ -163,9 +163,10 @@ describe("loadPlan (G-E)", () => {
     await rm(join(runDir(noResult), "result.json"));
     assert.equal(await code(noResult), "run_not_plan");
 
+    // R-9c C-1: the run ended as plan_pending but its plan.json is gone (deleted).
     const noPlan = await workspace();
     await planRun(noPlan, HASH_A);
-    assert.equal(await code(noPlan), "run_not_plan");
+    assert.equal(await code(noPlan), "plan_run_missing");
 
     const otherDigest = await workspace();
     await createPlanRecorder({ workspaceRoot: otherDigest, runId: PLAN_RUN }).savePlan(ACTIONS);

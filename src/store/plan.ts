@@ -242,7 +242,8 @@ export const loadPlan: LoadPlan = async (request): Promise<LoadPlanOutcome> => {
     if (!isObj(planInfo) || typeof planInfo["digest"] !== "string" || !CONTENT_HASH.test(planInfo["digest"])) invalid();
 
     const planBytes = await readRecordBytes(join(dir, PLAN_FILE_NAME));
-    if (planBytes === "missing") return { ok: false, code: "run_not_plan" };
+    // R-9c C-1: a plan run (plan_pending) whose plan.json is gone was deleted, not "not a plan".
+    if (planBytes === "missing") return { ok: false, code: "plan_run_missing" };
     const digest = sha256Hex(planBytes);
     if (digest !== planInfo["digest"]) invalid();
     const stored = parseObject(planBytes);

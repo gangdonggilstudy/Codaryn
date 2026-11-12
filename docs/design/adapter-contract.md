@@ -366,8 +366,12 @@ interface ChangedFileView {
 - `doctor({ configPath, varsFile, taskPath, workspace })` → `DoctorOutput` [구현 A-1]. 네트워크 없음.
 - `listModels({ provider, configPath, varsFile })`, `selectModel({ …, model })` → `ModelsOutput` [구현 `4f7c0a7`]. CLI의 `runModels`(`--json`, `--use`)를 `main.ts`와 같은 규칙(설정 파일 출처, 키, 원자적 쓰기)으로 부른다. 터미널 질문은 하지 않는다.
   - 목록은 실제 API에 접속한다(Y-2). 사람이 고를 때만 부른다. 앱이 켜질 때나 실행 전에 부르지 않는다.
-  - 요청에 제공자 이름을 둔다(DR-22). 지금 연결된 것은 `anthropic` 하나이고, 다른 이름은 `invalid_arguments`다.
-  - 고르기는 목록에 있는 id만 설정 파일의 `model`에 쓰고 다른 필드는 바꾸지 않는다.
+  - 요청에 제공자 이름을 둔다(DR-22).
+    - API 제공자(`API_PROVIDER_NAMES`: `anthropic`, `openai`)만 받는다. 다른 이름은 아무것도 읽기 전에 `invalid_arguments`다.
+    - 앱 계층은 그 이름을 `--provider`로 넘긴다(SP-6). 설정 파일의 `provider`와 관계없이 그 제공자의 키·주소·목록 함수를 쓴다.
+    - `CONNECTED_MODEL_PROVIDERS`는 이 목록과 같다. GUI 엔진 호스트가 이것으로 고를 수 있는 제공자를 정한다.
+  - 고르기는 목록에 있는 id만 그 제공자의 모델 자리에 쓰고 다른 필드는 바꾸지 않는다. anthropic은 최상위 `model`(설정에 `providers.anthropic`이 있으면 그곳), 다른 제공자는 `providers.<이름>.model`이다.
+  - 실행은 요청에 제공자를 두지 않는다. CLI `run`과 같이 task의 `model.provider`, 아니면 설정의 `provider`를 따른다(시험: `tests/unit/app/provider.test.ts`).
 
 ### 5.9 권한 확인 질문 [제안, 단계 5 시작에 구현] (DR-1, DR-3)
 

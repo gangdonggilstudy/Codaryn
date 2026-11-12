@@ -64,6 +64,10 @@ const INTEGRITY_NOTICE = "protected material changed or could not be checked dur
 const VERIFIER_NOT_RUN_EVIDENCE = "the verifier could not be run";
 const VERIFIER_NOT_RUN_CHECKED = "nothing: the verifier did not complete";
 const UNMASKABLE_EVIDENCE = "the verifier's result could not be masked, so it is not shown";
+const CONSENT_REQUIRED_NOTICE =
+  "some moves could replace a file that appears meanwhile, because this drive has no hard links; nothing was moved. A person can consent for one apply to move them anyway";
+const CONSENT_OTHER_PLAN_NOTICE = "the consent to unsafe moves was given for another plan and was not used";
+const UNSAFE_DONE_NOTICE = "some moves were made without the guarantee against replacing a file, with the person's consent";
 
 /** Every fixed text the apply run records. Tests mask these with the real gateway. */
 export const APPLY_FIXED_TEXTS: readonly string[] = [
@@ -78,6 +82,9 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   VERIFIER_NOT_RUN_EVIDENCE,
   VERIFIER_NOT_RUN_CHECKED,
   UNMASKABLE_EVIDENCE,
+  CONSENT_REQUIRED_NOTICE,
+  CONSENT_OTHER_PLAN_NOTICE,
+  UNSAFE_DONE_NOTICE,
 ];
 
 const MAX_TIMER_MS = 2_147_483_647;
@@ -92,6 +99,7 @@ const APPLY_INCOMPLETE: End = { status: "failed", reason: "apply_incomplete" };
 const CANCELLED: End = { status: "cancelled", reason: "cancelled" };
 const MAX_DURATION: End = { status: "budget-exhausted", reason: "max_duration" };
 const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_changed" };
+const CONSENT_REQUIRED: End = { status: "needs-input", reason: "consent_required" };
 
 function pathArgs(action: ResolvedPlanAction): JsonObject {
   return action.kind === "move" ? { from: action.from, to: action.to } : { path: action.path };
@@ -119,6 +127,10 @@ export const applyPlan: ApplyPlan = async (deps) => {
     signal,
     integrity,
   } = deps;
+  // DR-21: a consent counts only for this plan's digest. It comes from the caller (a person's
+  // input); nothing in the plan or the task can give it.
+  const consent = deps.unsafeMoveConsent ?? null;
+  const consented = consent !== null && consent.digest === digest;
   const startedAt = clock.now();
   const state = new RunState();
   const notices: MaskedText[] = [];
@@ -256,8 +268,10 @@ export const applyPlan: ApplyPlan = async (deps) => {
       approval,
       actions: plan.actions.length,
       maxDurationMs,
+      unsafeMoveConsent: consented ? consent.channel : null,
     });
     state.transition("running");
+    if (consent !== null && !consented) notice(CONSENT_OTHER_PLAN_NOTICE);
     if ((await inspect("run_start")) === "changed") return PROTECTED_CHANGED;
 
     // 2. Preflight: nothing is moved unless every action can be applied.
@@ -271,6 +285,11 @@ export const applyPlan: ApplyPlan = async (deps) => {
       return PLAN_STALE;
     }
     const problems: { index: number; problem: PlanItemProblem }[] = [];
+    /**
+     * DR-21: actions the check found possible only unsafely (a discard moves the file too). They
+     * are not problems; they need consent.
+     */
+    const unsafeMoves: number[] = [];
     for (const [index, action] of plan.actions.entries()) {
       const stop = interrupted();
       if (stop !== null) return stop;
@@ -284,9 +303,10 @@ export const applyPlan: ApplyPlan = async (deps) => {
       } catch {
         problem = "io_error";
       }
-      if (problem !== null) problems.push({ index, problem });
+      if (problem === "unsafe_move") unsafeMoves.push(index);
+      else if (problem !== null) problems.push({ index, problem });
     }
-    await journal.append({ type: "plan_checked", problems, inventoryLimitReached: before.limitReached });
+    await journal.append({ type: "plan_checked", problems, inventoryLimitReached: before.limitReached, unsafeMoves });
     if (problems.length > 0) {
       notice(PLAN_STALE_NOTICE);
       return PLAN_STALE;
@@ -294,6 +314,11 @@ export const applyPlan: ApplyPlan = async (deps) => {
     if (before.limitReached) {
       notice(INVENTORY_LIMIT_NOTICE);
       return PLAN_STALE;
+    }
+    // DR-21: blocked by default; only a person's consent for this plan lets the unsafe moves run.
+    if (unsafeMoves.length > 0 && !consented) {
+      notice(CONSENT_REQUIRED_NOTICE);
+      return CONSENT_REQUIRED;
     }
     // Every action must be recordable before the first one is done.
     const masked: MaskedPlanAction[] = [];
@@ -321,8 +346,10 @@ export const applyPlan: ApplyPlan = async (deps) => {
       }
       sinceCheck = true;
       let outcome: PlanItemOutcome;
+      // Only the moves the preflight reported, and only with consent, may be made unsafely.
+      const allowUnsafeMove = consented && unsafeMoves.includes(index);
       try {
-        outcome = await executor.apply(action, index, runSignal);
+        outcome = await executor.apply(action, index, runSignal, { allowUnsafeMove });
       } catch {
         outcome = { ok: false, problem: "io_error" };
       }
@@ -339,12 +366,14 @@ export const applyPlan: ApplyPlan = async (deps) => {
       }
       const shown = masked[index] as MaskedPlanAction;
       const stored = outcome.applied.stored;
+      const unsafe = outcome.applied.unsafe === true ? ({ unsafe: true } as const) : {};
       if (shown.kind === "move") {
-        await journal.append({ type: "file_moved", index, from: shown.from, to: shown.to, sha256: shown.sha256 });
+        await journal.append({ type: "file_moved", index, from: shown.from, to: shown.to, sha256: shown.sha256, ...unsafe });
       } else {
-        await journal.append({ type: "file_discarded", index, path: shown.path, stored: stored ?? "", sha256: shown.sha256 });
+        await journal.append({ type: "file_discarded", index, path: shown.path, stored: stored ?? "", sha256: shown.sha256, ...unsafe });
       }
-      applied.push({ index, action: shown, stored });
+      if (outcome.applied.unsafe === true && !applied.some((record) => record.unsafe === true)) notice(UNSAFE_DONE_NOTICE);
+      applied.push({ index, action: shown, stored, ...unsafe });
       appliedRaw.push(outcome.applied);
     }
 

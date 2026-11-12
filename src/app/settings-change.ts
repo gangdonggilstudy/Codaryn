@@ -13,13 +13,17 @@
  * Widening (UX 7, M-9): a command allowed that was not, any command allowed with extra arguments, a
  * limit raised or removed, a protected path or an integrity path removed, a secret variable no
  * longer masked, a verifier removed, a command verifier added or changed (R-14 L-2), path tokens restored, plan actions allowed, a different API
- * address, a profile or workflow definition changed. Narrowing changes need no confirmation.
+ * address (top-level or a provider's, GUI F-3), another provider for quick runs (F-3), a profile or
+ * workflow definition changed. Narrowing changes need no confirmation.
  * The new text is the config as formatted JSON; the file's own formatting is not kept.
  */
 
 import { createHash } from "node:crypto";
+import { API_PROVIDER_NAMES } from "../contracts/index.js";
 import type { CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
+import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
+import { quickProvider } from "../cli/task.js";
 import { appError } from "./errors.js";
 import { checkConfigText, loadSettingsFile } from "./settings.js";
 import type { ChosenFile, SettingsIo } from "./settings.js";
@@ -98,6 +102,16 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     if (!oldActions.has(action)) found.push({ kind: "plan_action_allowed", field: "policy.planActions" });
   }
   if (!same(before.apiBaseUrl, after.apiBaseUrl)) found.push({ kind: "api_base_url_changed", field: "apiBaseUrl" });
+  // GUI F-3: where the workspace's text and a provider's key go. Each API provider's address as a
+  // run reads it (top-level apiBaseUrl, or providers.<name>.apiBaseUrl), and the provider a quick
+  // run uses (the config's `provider`, else anthropic), with the CLI's own rules.
+  for (const provider of API_PROVIDER_NAMES) {
+    if (!same(providerSettingsOf(before, provider).apiBaseUrl, providerSettingsOf(after, provider).apiBaseUrl)) {
+      const holder = providerSettingsOf(after, provider).apiBaseUrl !== undefined ? after : before;
+      found.push({ kind: "api_base_url_changed", field: configFieldOf(holder, provider, "apiBaseUrl") });
+    }
+  }
+  if (quickProvider(before) !== quickProvider(after)) found.push({ kind: "provider_changed", field: "provider" });
   if (!same(before.profiles, after.profiles)) found.push({ kind: "profile_changed", field: "profiles" });
   if (!same(before.workflows, after.workflows)) found.push({ kind: "workflow_changed", field: "workflows" });
   // One entry per kind and field.

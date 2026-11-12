@@ -463,6 +463,7 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 명령 검증기 추가·변경(R-14 L-2, `b30bbce`): 실행마다 사람의 권한으로 돈다. 파일 규칙 검증기 추가는 넓히기가 아니다
     - 경로 토큰 복원, 계획 동작 허용
     - API 주소 변경, 프로필·워크플로 정의 변경
+    - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
   - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.
   - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
   - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.

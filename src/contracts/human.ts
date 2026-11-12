@@ -37,8 +37,8 @@ import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
 import type { PermissionKind, PolicyDenialCode } from "./policy.js";
-import { APPLY_NOTICE_KINDS, APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
-import type { ApplyJournalEvent, ApplyNoticeKind, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
+import { APPLY_NOTICE_KINDS, APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS, PLAN_RECORDS_UNCHECKED_CAUSES } from "./plan.js";
+import type { ApplyJournalEvent, ApplyNoticeKind, ApplyResult, ApprovalChannel, PlanItemProblem, PlanRecordsUncheckedCause } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
 import { ALL_TOOL_NAMES, TOOL_ERROR_CODES } from "./tool.js";
 import type { AnyToolName, ToolErrorCode } from "./tool.js";
@@ -504,10 +504,30 @@ export const FIXED_MESSAGES = {
   "runs.revert_record_damaged": {},
   // DR-38: a run whose records were changed by something other than the run (state.ts).
   "runs.records_changed": {},
+  // U-16 (UXM-5): a plan run whose plan was applied (RunListEntry.appliedBy), in place of the
+  // needs-input words: applied by `{runId}`.
+  "runs.plan_applied": { runId: "runId" },
+  // R-55 M-1: the plan run's line by its apply run (planApplyStateOf): not finished (with the apply
+  // run's reason), still applying, applied and reverted since, the apply run's records gone.
+  "runs.plan_apply_unfinished": { runId: "runId", reason: "reason" },
+  "runs.plan_applying": { runId: "runId" },
+  "runs.plan_apply_reverted": { runId: "runId" },
+  "runs.plan_apply_missing": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},
+  // U-16 (UXM-4): `changes` of an apply run (ChangesApplyRun) in place of "no file changed": it
+  // applied the plan of run `{runId}`, `{count}` actions, which its report lists.
+  "changes.apply_run": { count: "count", runId: "runId" },
   "revert.records_changed": {},
+  // U-16, R-55 L-1: `revert` of a plan run: it only made a plan and changed no file (nothing put
+  // back, not marked as reverted); then by its apply run (PLAN_APPLY_STATES_TO_REVERT): revert that
+  // run to undo its changes, or it is still applying, was reverted already, or its records are gone.
+  "revert.plan_only": {},
+  "revert.plan_revert_apply": { runId: "runId" },
+  "revert.plan_applying": { runId: "runId" },
+  "revert.plan_apply_reverted": { runId: "runId" },
+  "revert.plan_apply_missing": { runId: "runId" },
   // DR-38: progress lines of the state checks: `{count}` paths changed (the run stops), and a part
   // of the state directory that was too large to check (the run goes on).
   "progress.state_changed": { count: "count" },
@@ -713,6 +733,8 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
  *   is not removed, what a person is told before confirming, why a confirmed item was kept.
  * - `apply.notice.<kind>` (U-8): one line of the apply summary per ApplyResult.noticeKinds entry.
+ *   U-33: `apply.notice.plan_records_unchecked.<cause>` takes the place of
+ *   `apply.notice.plan_records_unchecked` when ApplyResult.planRecordsUncheckedCause is that cause.
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -739,7 +761,8 @@ export type ListedMessageId =
   | `cleanup.blocked.${CleanupBlockCode}`
   | `cleanup.warning.${CleanupWarningCode}`
   | `cleanup.kept.${CleanupKeptReason}`
-  | `apply.notice.${ApplyNoticeKind}`;
+  | `apply.notice.${ApplyNoticeKind}`
+  | `apply.notice.plan_records_unchecked.${PlanRecordsUncheckedCause}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -789,6 +812,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),
   ...CLEANUP_KEPT_REASONS.map((reason) => `cleanup.kept.${reason}` as const),
   ...APPLY_NOTICE_KINDS.map((kind) => `apply.notice.${kind}` as const),
+  ...PLAN_RECORDS_UNCHECKED_CAUSES.map((cause) => `apply.notice.plan_records_unchecked.${cause}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */
@@ -916,7 +940,8 @@ export interface HumanOutput {
    * total (`summary.apply_actions`), the plan run (`summary.apply_plan_run`), verifier result, run id,
    * and the next commands (report, revert). For `consent_required` (DR-21): `summary.unsafe_moves`
    * and `summary.next_apply_unsafe` with the digest as an item. U-8: `apply.notice.<kind>` for each
-   * of `noticeKinds`, whatever the status. Optional only until the renderer (N-C) has it.
+   * of `noticeKinds`, whatever the status; U-33: for `plan_records_unchecked` with a
+   * `planRecordsUncheckedCause`, `apply.notice.plan_records_unchecked.<cause>` instead. Optional only until the renderer (N-C) has it.
    * `runSummary` covers the plan run (`plan_pending`: `summary.plan_ready`, `summary.next_plan`,
    * `summary.next_apply` with the digest as an item) and human review (`awaiting_review`:
    * `summary.review_checklist` with the checklist entries as items, `summary.next_review`).

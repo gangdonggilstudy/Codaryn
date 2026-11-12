@@ -687,10 +687,14 @@ export interface ApplyDeps {
   readonly stateGuard?: StateGuard;
   /**
    * U-29 (R-44 R44-L1): whether a run before this apply could not check the plan run's records (the
-   * store's StateUncheckedSince for `planRunId`). True, or a question that cannot be answered, adds
-   * the notice kind `plan_records_unchecked` as the apply's own limited check does, once; the apply
-   * goes on. Asked once, after the U-1 check. The CLI passes it; without it only the apply's own
-   * checks count (as before).
+   * store's StateUncheckedSince for `planRunId` and this apply's `runId`). True, or a question that
+   * cannot be answered, adds the notice kind `plan_records_unchecked`, once; the apply goes on. Asked
+   * once, after the U-1 check. The CLI passes it; without it only the apply's own checks count (as
+   * before). U-33 (R-56 Q-1 (a)): the apply's own limited check comes first. When one of its state
+   * checks was limited (any phase), the notice and the result are U-8's, as if it were not asked
+   * (main a191a50, nothing added). Only when every own check was complete (or there was none) is the
+   * answer told: after the apply's last check (run_end), with its own notice and
+   * ApplyResult.planRecordsUncheckedCause "run_since_plan".
    */
   readonly planRecordsUnchecked?: () => Promise<boolean>;
   /**
@@ -699,6 +703,12 @@ export interface ApplyDeps {
    * CLI; without it the apply does not check (as before). Called once, right after `apply_started`.
    */
   readonly planRecordsChanged?: () => Promise<boolean>;
+  /**
+   * U-16 (UXM-15): the task id the plan run ran with (its `run_started.taskId`, as its run list entry
+   * gives it). When given and not `taskId`, the apply adds the notice kind `plan_task_differs`. The
+   * CLI passes it; without it nothing is compared (as before).
+   */
+  readonly planTaskId?: string;
   /** Writes PLAN_APPLIED_FILE_NAME exclusively. "already_applied" when it exists. */
   markApplied(): Promise<"marked" | "already_applied">;
 }
@@ -757,6 +767,15 @@ export interface ApplyResult {
    * nothing.
    */
   readonly noticeKinds?: readonly ApplyNoticeKind[];
+  /**
+   * U-33 (R-56 Q-1 (a)): why `plan_records_unchecked` is told, when it is not the apply's own check
+   * (PLAN_RECORDS_UNCHECKED_CAUSES). Absent with that kind: a state check of this apply was limited
+   * (U-8; it comes first when both are so), and its texts are U-8's. "run_since_plan": every check of
+   * this apply was complete, but a run since the plan could not check the state directory
+   * (ApplyDeps.planRecordsUnchecked); the human line is
+   * `apply.notice.plan_records_unchecked.run_since_plan`, not U-8's. Absent without that kind.
+   */
+  readonly planRecordsUncheckedCause?: PlanRecordsUncheckedCause;
 }
 
 /**
@@ -767,9 +786,24 @@ export interface ApplyResult {
  *   state directory is larger than MAX_STATE_ENTRIES or MAX_STATE_HASH_BYTES), so the plan run's
  *   records may have been changed without a records-changed mark, and U-1 could not refuse the plan.
  *   The apply is not refused. A cleanup that makes the state directory smaller lets them be checked.
+ *   U-29, U-33: also when every own check was complete but a run since the plan could not check
+ *   (ApplyResult.planRecordsUncheckedCause "run_since_plan"); then the notice and the human line say
+ *   so, and do not advise a cleanup (the state directory may be small now; the record stays).
+ * - plan_task_differs (U-16, UXM-15): the plan run ran with another task than the one given to the
+ *   apply (ApplyDeps.planTaskId is not ApplyDeps.taskId), for example a plan made with a task file
+ *   and applied with the quick form: that task's verifiers and rules are not the ones used. Not
+ *   refused.
  */
-export const APPLY_NOTICE_KINDS = ["plan_records_unchecked"] as const;
+export const APPLY_NOTICE_KINDS = ["plan_records_unchecked", "plan_task_differs"] as const;
 export type ApplyNoticeKind = (typeof APPLY_NOTICE_KINDS)[number];
+
+/**
+ * U-33 (R-56 Q-1 (a)): the causes of `plan_records_unchecked` other than the apply's own limited
+ * check (which has no value: ApplyResult.planRecordsUncheckedCause absent). Each has the human line
+ * `apply.notice.plan_records_unchecked.<cause>`.
+ */
+export const PLAN_RECORDS_UNCHECKED_CAUSES = ["run_since_plan"] as const;
+export type PlanRecordsUncheckedCause = (typeof PLAN_RECORDS_UNCHECKED_CAUSES)[number];
 
 /** Signature of `applyPlan`, exported by `src/engine/index.ts` (G-B). */
 export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;

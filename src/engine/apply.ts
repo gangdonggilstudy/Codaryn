@@ -21,6 +21,7 @@
  */
 
 import {
+  APPLY_NOTICE_KINDS,
   INVENTORY_VERIFIER_ID,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
@@ -33,6 +34,7 @@ import {
 import type {
   AppliedActionRecord,
   AppliedPlanAction,
+  ApplyNoticeKind,
   ApplyPlan,
   ApplyResult,
   IntegrityManifest,
@@ -43,6 +45,7 @@ import type {
   MaskedText,
   PlanItemOutcome,
   PlanItemProblem,
+  PlanRecordsUncheckedCause,
   RawVerifierResult,
   ResolvedPlanAction,
   RunReason,
@@ -79,10 +82,16 @@ const UNSAFE_DONE_NOTICE = "some moves were made without the guarantee against r
 /** DR-38: a change to the run records found during the apply (paths follow), or a check not made. */
 const STATE_NOTICE_LEAD = "Codaryn's run records changed outside the apply, so they are not trusted: ";
 const STATE_FAILED_NOTICE = "the run records could not be checked, so they are not trusted";
+/** U-16 (UXM-15): the plan run ran with another task (ApplyNoticeKind plan_task_differs). */
+const PLAN_TASK_DIFFERS_NOTICE =
+  "the plan was made by another task than the one given to this apply (plan_task_differs): that task's verifiers and rules are not the ones used here";
 /** U-8 (R-39 L-1): a state check was limited (ApplyNoticeKind plan_records_unchecked). */
 const PLAN_RECORDS_UNCHECKED_NOTICE =
   "the plan run's records could not be checked for changes, because the state directory is too large to check entirely (plan_records_unchecked); a cleanup that makes it smaller lets them be checked";
-/** U-29 (R-44 R44-L1): a run before this apply could not check them (ApplyDeps.planRecordsUnchecked). */
+/**
+ * U-29 (R-44 R44-L1): a run before this apply could not check them (ApplyDeps.planRecordsUnchecked).
+ * U-33: told only when every check of this apply was complete (cause "run_since_plan").
+ */
 const PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE =
   "a run since the plan was made could not check the state directory entirely, so the plan run's records may have changed without a mark (plan_records_unchecked)";
 
@@ -108,6 +117,7 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   STATE_FAILED_NOTICE,
   PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE,
   PLAN_RECORDS_UNCHECKED_NOTICE,
+  PLAN_TASK_DIFFERS_NOTICE,
 ];
 
 const MAX_TIMER_MS = 2_147_483_647;
@@ -171,6 +181,11 @@ export const applyPlan: ApplyPlan = async (deps) => {
   let stateChanged: readonly MaskedText[] | undefined;
   // U-8: a limited state check at any phase; told once (notice and ApplyResult.noticeKinds).
   let planUnchecked = false;
+  // U-29, U-33: a run since the plan could not check (ApplyDeps.planRecordsUnchecked); told at the
+  // end, and only when no check of this apply was limited.
+  let sincePlanUnchecked = false;
+  // U-16: the plan run ran with another task than this apply's.
+  let taskDiffers = false;
   let baseline: IntegrityManifest | null = null;
   /** Whether actions or verifiers ran since the last integrity check (W-1 for apply runs). */
   let sinceCheck = false;
@@ -372,19 +387,20 @@ export const applyPlan: ApplyPlan = async (deps) => {
         return PLAN_STALE;
       }
     }
+    // U-16 (UXM-15): told, not refused.
+    if (deps.planTaskId !== undefined && deps.planTaskId !== taskId) {
+      taskDiffers = true;
+      notice(PLAN_TASK_DIFFERS_NOTICE);
+    }
     if (consent !== null && !consented) notice(CONSENT_OTHER_PLAN_NOTICE);
-    // U-29 (R-44 R44-L1): what a run before this apply could not check is told as the apply's own
-    // limited check is, once. A question that cannot be answered counts as unchecked.
+    // U-29 (R-44 R44-L1): whether a run before this apply could not check; asked here, under the
+    // lock and before anything is moved. A question that cannot be answered counts as unchecked.
+    // U-33 (R-56 R56-L2): the answer is told at the end, once the apply's own checks are known.
     if (deps.planRecordsUnchecked !== undefined) {
-      let earlier: boolean;
       try {
-        earlier = await deps.planRecordsUnchecked();
+        sincePlanUnchecked = await deps.planRecordsUnchecked();
       } catch {
-        earlier = true;
-      }
-      if (earlier && !planUnchecked) {
-        planUnchecked = true;
-        notice(PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE);
+        sincePlanUnchecked = true;
       }
     }
     if ((await inspect("run_start")) === "changed") return PROTECTED_CHANGED;
@@ -554,11 +570,17 @@ export const applyPlan: ApplyPlan = async (deps) => {
     if (sinceCheck && baseline !== null && end.status !== "done") {
       await inspect("before_verify");
     }
+    // U-33 (R-56 Q-1 (a)): the apply's own limited check comes first; it was told with U-8's notice,
+    // and the result is U-8's. Only when every own check was complete is a run since the plan told.
+    const cause: PlanRecordsUncheckedCause | null = sincePlanUnchecked && !planUnchecked ? "run_since_plan" : null;
+    if (cause !== null) notice(PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE);
     if (state.status === "created" && end.status !== "cancelled") state.transition("running");
     if (state.status !== end.status) state.transition(end.status);
     const durationMs = clock.now() - startedAt;
     const usage = { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs, repairAttempts: 0 };
     await journal.append({ type: "run_finished", status: end.status, reason: end.reason, usage });
+    const told: { readonly [K in ApplyNoticeKind]: boolean } = { plan_records_unchecked: planUnchecked || cause !== null, plan_task_differs: taskDiffers };
+    const noticeKinds = APPLY_NOTICE_KINDS.filter((kind) => told[kind]);
     const result: ApplyResult = {
       schemaVersion: 1,
       kind: "apply",
@@ -576,7 +598,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
       notices,
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
       ...(stateChanged !== undefined ? { stateChanged } : {}),
-      ...(planUnchecked ? { noticeKinds: ["plan_records_unchecked"] as const } : {}),
+      ...(noticeKinds.length > 0 ? { noticeKinds } : {}),
+      ...(cause !== null ? { planRecordsUncheckedCause: cause } : {}),
     };
     return result;
   } finally {

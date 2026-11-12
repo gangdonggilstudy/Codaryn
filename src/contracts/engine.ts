@@ -336,6 +336,16 @@ export interface EngineResult {
    */
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
   /**
+   * U-59 (AXM-15): with `plan`, the agent's description of that plan: the `summary` of the
+   * propose_plan call that stored it (ProposePlanArgs.summary), masked by the run's gateway and made
+   * safe as finalMessage is (safeModelText: invisible characters left out, key shapes as `[key]`).
+   * The model's own words, not checked; not in plan.json or the digest, so not what a person
+   * approves (PlanOutput.summary is the same text read back for the plan view). Apart from `plan`,
+   * whose two fields stay. Absent without `plan`, when it is empty after that, and in results
+   * written before U-59.
+   */
+  readonly planSummary?: MaskedText;
+  /**
    * DR-52 (AXM-17): whether masking worked, in counts only (never a value, a place or a length).
    * `registeredValues`: PrivacyGateway.registeredValues. `maskedPlaces`: the protected tokens
    * (countPrivacyTokens) in the texts the engine sent to the model (the system text, the task's

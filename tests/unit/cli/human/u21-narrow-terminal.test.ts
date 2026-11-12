@@ -114,14 +114,13 @@ describe("R52-L1 where the function is used", () => {
 
   test(
     "the plan view's summary, in a 40-column terminal",
-    { todo: "CLI (src/cli/plan-commands.ts, renderPlan): draw PlanOutput.summary with quoteModelText under its label, as R-49 R49-L2 asked; it is still on the label's line" },
     () => {
       terminal({ isTTY: true, columns: 40 }, { isTTY: true, columns: 40 });
       const output = {
         schemaVersion: 1, kind: "plan", runId: "20261112T030405Z-0a1b2c3d", status: "pending", exitCode: 0, digest: "d".repeat(64), actions: [],
         appliedBy: null, inventoryLimitReached: false, summary: D4 as MaskedText,
       } as unknown as PlanOutput;
-      const text = renderPlan(output, { values: [] } as never);
+      const text = renderPlan(output, []);
       const lines = text.trimEnd().split("\n");
       const at = lines.findIndex((line) => line.startsWith(MODEL_TEXT_PREFIX));
       assert.ok(at > 0, text);

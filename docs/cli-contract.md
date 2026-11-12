@@ -645,6 +645,18 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 도움말에는 결정 번호를 적지 않는다.
 - 사용법 줄은 바꾸지 않았다(`invalid_arguments` 메시지에 들어 있다). `codaryn --help`의 사용법 목록도 순서와 글자가 같다.
 
+### init이 제공자를 묻는다 (U-26, UXM-11, DR-46)
+
+- 터미널에서(질문을 할 때만) 위치를 확인한 바로 뒤에 제공자를 묻는다. 목록은 `API_PROVIDER_NAMES` 순서로 `  1  anthropic`, `  2  openai`이고, 질문은 `init.provider_pick`(`{provider}`는 기본값 `INIT_DEFAULT_PROVIDER`)이다.
+  - 답: 번호나 이름(대소문자 무시). Enter, 목록에 없는 답, 입력 끝이면 기본값(anthropic)이다. 고른 결과를 `init.provider_chosen`으로 알린다.
+- 고른 제공자로 나머지를 한다.
+  - 키: 그 제공자의 키 변수(`API_PROVIDERS[provider].keyEnv`)가 있는지(`keySet`), 끝 글의 키 줄도 그 변수다.
+  - 모델 목록: 그 제공자의 키가 있고 목록 함수가 있을 때만 그 제공자의 목록 함수(`API_MODEL_LISTERS`)로 묻는다(실제 API 요청). 없으면 지금처럼 `init.model_no_key`다.
+  - 파일: anthropic이면 지금과 바이트까지 같다(최상위 `model`, `maxOutputTokens`). openai면 `schemaVersion` 다음에 `"provider": "openai"`, 그리고 `providers.openai.{model, maxOutputTokens}`이다. 나머지(`limits`, `policy`, `language`)는 같다. `codaryn models --use`는 설정의 `provider`를 따르므로 그대로 쓴다.
+  - `InitOutput.provider`: 물었을 때만 있다(고른 것).
+- 터미널이 아니거나 `--json`이면 묻지 않는다. 출력과 파일은 U-26 전과 글자까지 같다(`provider`가 없고 anthropic 꼴). 앱 계층의 `createSettings`(`init --json`)도 그대로다.
+- `run --provider`는 두지 않는다(DR-46). `models --provider openai --use`가 설정의 `provider`도 바꿀지 안내하는 것은 이 단위에 없다.
+
 ### 진행 표시 (U-8)
 
 - `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.

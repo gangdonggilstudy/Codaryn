@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -56,9 +57,24 @@ export interface EnvOptions {
 }
 
 /**
+ * Set for every CLI run unless `extra` overrides them, so results do not depend on the machine
+ * (PM decision for N-E):
+ * - CODARYN_LANG=en: human-readable text in English. N-4 otherwise follows the OS display language.
+ * - POSIX: XDG_CONFIG_HOME names a folder that is never created, so N-1's default config location
+ *   is never the developer's `~/.config/codaryn/config.json` (HOME is inherited). Windows needs
+ *   nothing: APPDATA is not inherited, and without it there is no default location.
+ * Cases that test those defaults set their own values (a sandbox folder, another language).
+ */
+export const DETERMINISTIC_ENV: Readonly<Record<string, string>> = {
+  CODARYN_LANG: "en",
+  ...(process.platform === "win32" ? {} : { XDG_CONFIG_HOME: join(tmpdir(), "codaryn-it-no-user-config") }),
+};
+
+/**
  * Minimal environment for the CLI process. Only CHILD_ENV_ALLOWLIST names are inherited, so a
- * developer's ANTHROPIC_API_KEY or CODARYN_MODEL never reaches the CLI. An API key can never be
- * added through `extra`; mock API tests set one of the fake keys with `fakeApiKey`.
+ * developer's ANTHROPIC_API_KEY or CODARYN_MODEL never reaches the CLI. DETERMINISTIC_ENV is added,
+ * then `extra`. An API key can never be added through `extra`; mock API tests set one of the fake
+ * keys with `fakeApiKey`.
  */
 export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
   const allow = new Set<string>(CHILD_ENV_ALLOWLIST);
@@ -70,6 +86,7 @@ export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
     if (options.omitPath === true && (upper === "PATH" || upper === "PATHEXT")) continue;
     env[name] = value;
   }
+  Object.assign(env, DETERMINISTIC_ENV);
   for (const [name, value] of Object.entries(options.extra ?? {})) {
     if (name.toUpperCase() === ANTHROPIC_API_KEY_ENV) {
       throw new Error("Integration tests never set an API key variable.");

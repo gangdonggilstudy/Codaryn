@@ -162,6 +162,7 @@
 
 - 사례마다 `<tmp>/codaryn-it-*/`를 만들고 끝나면 지운다. task와 대본은 작업 공간 밖(base)에 둔다.
 - CLI 환경은 `CHILD_ENV_ALLOWLIST`만 상속한다. 개발자 환경의 API 키나 모델 설정은 넘어가지 않고, 테스트 코드가 `extra`로 키 변수를 넣으면 예외가 난다. 모의 API 테스트만 `fakeApiKey`로 가짜 키를 넣는다.
+- 기계와 무관한 결과를 위해 `DETERMINISTIC_ENV`를 늘 더한다(`extra`가 우선). `CODARYN_LANG=en`으로 사람용 글을 영어로 고정하고, POSIX에서는 `XDG_CONFIG_HOME`을 만들지 않는 폴더로 두어 개발자의 기본 설정 파일을 읽지 않게 한다. Windows는 `APPDATA`를 상속하지 않으므로 기본 설정 위치가 없다(N-1, N-4).
 - 바이트가 중요한 fixture는 실행 중 생성한다. 가짜 비밀은 `tests/fixtures/secrets.ts`에만 있다.
 
 ## 입증하지 않는 것

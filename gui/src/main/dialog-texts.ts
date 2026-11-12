@@ -25,7 +25,7 @@ const KO = {
   "apply.formDefault": "(설정의 기본)",
   "cleanup.message": "정리할까요? 실행 기록 {runs}개({runSize}), 보관함 {discarded}개, 남은 폴더 {leftovers}개 (다이제스트 {digest})",
   "cleanup.detail": "미리보기에서 본 것만 지웁니다. 그사이 바뀐 항목은 남깁니다. 되돌리기가 제자리에 두지 못한 파일은 지우지 않습니다.",
-  "cleanup.discardedLeft": "적용 실행 {count}개의 기록을 지웁니다. 그 실행의 보관함이 남으면, 그 파일은 되돌리기로 제자리에 되살릴 수 없게 됩니다.",
+  "cleanup.discardedLeft": "적용 실행 {count}개는 폐기 보관함에 파일이 있습니다. 같은 정리에서 그 파일도 함께 지우지 않으면 그 실행의 기록은 남깁니다. 파일의 원래 이름과 자리는 이 기록에만 있습니다.",
   "cleanup.confirm": "정리",
   "cleanup.keep": "정리하지 않음",
   "cleanup.notReverted.message": "되돌리지 않았거나, 일부만 되돌렸거나, 기록을 확인할 수 없는 실행 {count}개의 기록도 지울까요?",
@@ -34,7 +34,7 @@ const KO = {
   "cleanup.notReverted.keep": "그 기록은 남김",
   "cleanup.discarded.message": "보관함 {count}개(파일 {files}개, {size})도 지울까요?",
   "cleanup.discarded.detail": "보관함에는 계획 적용이 치워 둔 사람의 파일이 있습니다. 지우면 영구히 사라지고 되돌릴 수 없습니다.",
-  "cleanup.discarded.left": "보관함을 남기면, 기록이 지워지는 적용 실행 {count}개의 보관함 파일은 되돌리기로 제자리에 되살릴 수 없게 됩니다.",
+  "cleanup.discarded.left": "폐기 보관함을 남기면, 그 폐기 보관함이 딸린 적용 실행 {count}개의 기록은 남깁니다. 파일의 원래 이름과 자리는 그 기록에만 있습니다.",
   "notify.title": "Codaryn",
   "notify.done": "Codaryn 실행이 끝났습니다: {status}",
   "notify.unknown": "Codaryn 실행이 끝났습니다. 결과는 실행 목록에서 확인하세요.",
@@ -73,7 +73,7 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "apply.formDefault": "(the config's default)",
   "cleanup.message": "Clean up? {runs} run records ({runSize}), {discarded} discard boxes, {leftovers} leftover folders (digest {digest})",
   "cleanup.detail": "Only what the preview showed is removed; anything that changed since is kept. Files a revert could not put back are never removed.",
-  "cleanup.discardedLeft": "The records of {count} apply runs are removed. If their discard boxes stay, a revert can no longer put those files back.",
+  "cleanup.discardedLeft": "{count} apply runs have discarded files. Their records are kept unless those discarded files are deleted in this cleanup too: only the records say what each file was called and where it was.",
   "cleanup.confirm": "Clean up",
   "cleanup.keep": "Do not clean up",
   "cleanup.notReverted.message": "Also remove the records of {count} runs that were not reverted, only partly, or whose records cannot be checked?",
@@ -82,7 +82,7 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "cleanup.notReverted.keep": "Keep those records",
   "cleanup.discarded.message": "Also delete {count} discard boxes ({files} files, {size})?",
   "cleanup.discarded.detail": "The discard boxes hold people's files that a plan's apply set aside. Deleted, they are gone for good and cannot be reverted.",
-  "cleanup.discarded.left": "If you keep them, the files in the discard boxes of the {count} apply runs whose records go can no longer be put back by a revert.",
+  "cleanup.discarded.left": "If you keep them, the records of the {count} apply runs they belong to are kept too, since only those records say what each file was called and where it was.",
   "notify.title": "Codaryn",
   "notify.done": "A Codaryn run ended: {status}",
   "notify.unknown": "A Codaryn run ended. See the run list for its result.",
@@ -198,8 +198,9 @@ export function formatBytes(language: DialogLanguage, bytes: number): string {
 }
 
 /**
- * R33b-I1: the third cleanup dialog (the discard boxes): what deleting means, and, when apply runs'
- * records go in this cleanup, what keeping the boxes (the default) means for them.
+ * R33b-I1: the third cleanup dialog (the discard boxes): what deleting means, and, when the plan has
+ * apply runs with discarded files (U-13, DR-53), that keeping them (the default) keeps those runs'
+ * records too.
  */
 export function cleanupDiscardedDetail(language: DialogLanguage, discardedLeft: number): string {
   const lines = [dialogText(language, "cleanup.discarded.detail")];

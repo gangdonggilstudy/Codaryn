@@ -9,6 +9,7 @@
 import type { MessageLanguage } from "./human.js";
 import type { Limits, PolicyConfig } from "./task.js";
 import type { VerifierConfig } from "./verify.js";
+import type { WorkflowDefinition } from "./workflow.js";
 
 /** API key. Read from the process environment only, kept in memory, never written or printed. */
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
@@ -38,6 +39,9 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * - language (N-4): CODARYN_LANG → `language` → the operating system's display language.
  * - profiles (N-8): `--profile <name>` overlays one entry on `policy`, `verifiers` and `limits`
  *   (see `ConfigProfile`). Without `--profile` the top-level fields are used as before.
+ * - workflows (G-A): a workflow definition's `policy`, `verifiers` and `limits` lie under the
+ *   profile's and the top level's for the quick form; its settings resolve as `ResolveWorkflow`
+ *   says. No `workflowRef` anywhere: nothing changes.
  */
 export interface CodarynConfig {
   readonly schemaVersion: 1;
@@ -72,6 +76,12 @@ export interface CodarynConfig {
    * a task file cannot hold or select one.
    */
   readonly profiles?: { readonly [name: string]: ConfigProfile };
+  /**
+   * G-A (GT-D1): workflow definitions by id (WORKFLOW_ID_PATTERN_SOURCE, at most MAX_WORKFLOWS, none
+   * equal to a BUILTIN_WORKFLOW_IDS entry). Definitions exist only here and as built-ins: a task
+   * file cannot hold one, only name one with `workflowRef`.
+   */
+  readonly workflows?: { readonly [id: string]: WorkflowDefinition };
 }
 
 /**
@@ -91,6 +101,8 @@ export interface ConfigProfile {
   readonly policy?: PolicyConfig;
   readonly verifiers?: readonly VerifierConfig[];
   readonly limits?: Partial<Limits>;
+  /** G-A: the workflow definition this profile uses when the task names none (`ResolveWorkflow`). */
+  readonly workflowRef?: string;
 }
 
 /** N-8: profile names. Letters, digits, `.`, `_`, `-`; starts with a letter or digit; 1-64 characters. */

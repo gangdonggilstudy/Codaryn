@@ -227,3 +227,148 @@ export function writeSalesSource(sandbox: Sandbox, text = SALES_CSV, path = "dat
   writeFileSync(full, text, "utf8");
   return full;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Scripts and definitions for the cases (report-G-G-design.md section 3)
+
+/** `write_file` arguments that create a new file. */
+export function createFileArgs(path: string, content: string): JsonObject {
+  return { path, expectedHash: null, change: { kind: "replace_all", content } };
+}
+
+/** `write_file` arguments that replace one piece of an existing file whose bytes are `current`. */
+export function replaceTextArgs(path: string, current: string, oldText: string, newText: string): JsonObject {
+  return { path, expectedHash: sha256Of(current), change: { kind: "replace_text", oldText, newText } };
+}
+
+/** The last step of every plan script. A plan run ends at `propose_plan`, so it must never be requested. */
+export const UNREQUESTED_STEP = textStep("이 단계는 요청되면 안 된다");
+
+/** GG-A01, GG-F02: a document definition that exists only in the user's config file. */
+export const MEMO_INSTRUCTIONS = "Write the memo in Korean. Keep lines you were not asked to change.";
+export const MEMO_PATH = "notes/memo.md";
+export const MEMO_TEXT = "# 메모\n\n- 등록한 정의로 만든 메모\n";
+export const MEMO_WORKFLOW: JsonObject = {
+  label: "메모",
+  tools: ["read_file", "write_file"],
+  instructions: MEMO_INSTRUCTIONS,
+  verifiers: [
+    {
+      id: "memo",
+      kind: "file_rules",
+      rules: [
+        { type: "exists", path: MEMO_PATH },
+        { type: "contains", path: MEMO_PATH, text: "# 메모" },
+      ],
+    },
+  ],
+};
+
+/** GG-A01: read the workspace's README, then create the memo. */
+export function memoScript(): ScriptStep[] {
+  return [toolStep("read_file", { path: "README.md" }), toolStep("write_file", createFileArgs(MEMO_PATH, MEMO_TEXT)), textStep("메모를 만들었다")];
+}
+
+/** GG-C01, GG-C02, GG-C03: list with hashes, then propose `actions`. */
+export function organizeScript(actions: readonly OrganizeAction[] = ORGANIZE_ACTIONS): ScriptStep[] {
+  return [toolStep("inspect_files", { path: ".", hash: true }), toolStep("propose_plan", proposePlanArgs(actions)), UNREQUESTED_STEP];
+}
+
+/** GG-C04: a write and a command before the plan; both are outside the organize tools. */
+export function organizeWriteAttemptScript(): ScriptStep[] {
+  return [
+    toolStep("write_file", createFileArgs("inbox/new.txt", "x\n")),
+    toolStep("run_command", { executable: "node", args: ["--version"] }),
+    toolStep("propose_plan", proposePlanArgs(ORGANIZE_ACTIONS)),
+    UNREQUESTED_STEP,
+  ];
+}
+
+/** GG-C05: one refused plan, then the valid one. */
+export function refusedThenValidPlanScript(refused: JsonObject): ScriptStep[] {
+  return [toolStep("propose_plan", refused), toolStep("propose_plan", proposePlanArgs(ORGANIZE_ACTIONS)), UNREQUESTED_STEP];
+}
+
+export interface RefusedPlanCase {
+  readonly name: string;
+  readonly args: JsonObject;
+  /** `invalid_plan` with this PLAN_PROBLEMS code, or a policy denial code. */
+  readonly expect: { readonly toolError: "invalid_plan"; readonly problem: string } | { readonly denial: string };
+  /** Task policy fields the case needs (protected paths, plan actions). */
+  readonly policy?: JsonObject;
+}
+
+const plan = (actions: readonly JsonObject[]): JsonObject => ({ summary: "거부될 계획", actions: [...actions] });
+const move = (from: string, to: string): JsonObject => ({ kind: "move", from, to });
+
+/**
+ * GG-C05: plans the tool or the policy must refuse, each against ORGANIZE_FILES. Where two codes
+ * could apply (`destination_is_source` also has an existing destination; `too_many` names paths
+ * that do not exist) the case expects the more specific one; the implementation's check order
+ * decides and the case follows it once seen.
+ */
+export const REFUSED_PLAN_CASES: readonly RefusedPlanCase[] = [
+  { name: "empty", args: plan([]), expect: { toolError: "invalid_plan", problem: "empty" } },
+  { name: "same_path", args: plan([move("inbox/budget.csv", "inbox/budget.csv")]), expect: { toolError: "invalid_plan", problem: "same_path" } },
+  {
+    name: "duplicate_source",
+    args: plan([move("inbox/budget.csv", "a/budget.csv"), move("inbox/budget.csv", "b/budget.csv")]),
+    expect: { toolError: "invalid_plan", problem: "duplicate_source" },
+  },
+  {
+    name: "duplicate_destination",
+    args: plan([move("inbox/budget.csv", "data/x.csv"), move("inbox/old.tmp", "data/x.csv")]),
+    expect: { toolError: "invalid_plan", problem: "duplicate_destination" },
+  },
+  {
+    name: "destination_is_source",
+    args: plan([move("inbox/budget.csv", "inbox/old.tmp"), move("inbox/old.tmp", "data/old.tmp")]),
+    expect: { toolError: "invalid_plan", problem: "destination_is_source" },
+  },
+  { name: "source_missing", args: plan([move("inbox/nope.txt", "data/nope.txt")]), expect: { toolError: "invalid_plan", problem: "source_missing" } },
+  { name: "source_not_file", args: plan([move("inbox", "archive/inbox")]), expect: { toolError: "invalid_plan", problem: "source_not_file" } },
+  { name: "destination_exists", args: plan([move("inbox/budget.csv", "keep/readme.txt")]), expect: { toolError: "invalid_plan", problem: "destination_exists" } },
+  {
+    name: "destination_parent_not_dir",
+    args: plan([move("inbox/budget.csv", "keep/readme.txt/budget.csv")]),
+    expect: { toolError: "invalid_plan", problem: "destination_parent_not_dir" },
+  },
+  {
+    name: "too_many",
+    args: plan(Array.from({ length: 1001 }, (_, index) => ({ kind: "discard", path: `inbox/many-${index}.tmp` }))),
+    expect: { toolError: "invalid_plan", problem: "too_many" },
+  },
+  { name: "outside_root", args: plan([move("inbox/budget.csv", "../escape.csv")]), expect: { denial: "outside_root" } },
+  { name: "state_dir", args: plan([move("inbox/budget.csv", ".codaryn/budget.csv")]), expect: { denial: "state_dir" } },
+  {
+    name: "protected_path",
+    args: plan([move("keep/readme.txt", "docs/readme.txt")]),
+    expect: { denial: "protected_path" },
+    policy: { protectedPaths: ["keep"] },
+  },
+  {
+    name: "plan_action_not_allowed",
+    args: plan([{ kind: "discard", path: "inbox/old.tmp" }]),
+    expect: { denial: "plan_action_not_allowed" },
+    policy: { planActions: ["move"] },
+  },
+];
+
+/** GG-D01: read the source, write the summary and the report, finish. */
+export function analyzeScript(summary = SALES_SUMMARY_CSV): ScriptStep[] {
+  return [
+    toolStep("read_file", { path: "data/sales.csv" }),
+    toolStep("write_file", createFileArgs("out/summary.csv", summary)),
+    toolStep("write_file", createFileArgs("out/report.md", SALES_REPORT_MD)),
+    textStep("분석을 마쳤다"),
+  ];
+}
+
+/** GG-D02: the summary with north's total off by 0.5, then the fix after the failed check. */
+export function analyzeRepairScript(): ScriptStep[] {
+  return [
+    ...analyzeScript(SALES_SUMMARY_WRONG_CSV),
+    toolStep("write_file", replaceTextArgs("out/summary.csv", SALES_SUMMARY_WRONG_CSV, "north,150,2", "north,150.5,2")),
+    textStep("합계를 고쳤다"),
+  ];
+}

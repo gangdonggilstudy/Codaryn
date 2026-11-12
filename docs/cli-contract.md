@@ -143,22 +143,50 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 - N-19: stdout의 JSON 한 줄(모든 명령의 JSON 출력과 `--json`)은 U+007F보다 큰 문자를 모두 `\uXXXX`로 쓴다(BMP 밖 문자는 서로게이트 쌍). JSON으로 읽으면 값은 같다. Windows PowerShell 5.1의 기본 코드 페이지에서도 깨지지 않게 하기 위해서다. `report`·`doctor`·`models`의 기본 글 출력은 그대로다.
 
+- 명령별 stdout(17절, 18절까지 반영)
+  - JSON 한 줄만: `run`(`CliOutput`), `revert`(`RevertOutput`), `apply`(`ApplyResult`)
+  - 기본은 글이고 `--json`이면 JSON 한 줄: `report`(`ReportOutput`), `doctor`(`DoctorOutput`), `models`(`ModelsOutput`), `init`(`InitOutput`), `runs`(`RunsOutput`), `plan`(`PlanOutput`), `review`(`ReviewOutput`), `changes`(`ChangesOutput`)
+  - 사람용 글(오류 설명, 진행 줄, 끝 요약, 터미널 질문)은 stderr다(17.4). `run`, `revert`, `apply`는 `--quiet`로 끈다.
+
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
+  - 선택 필드
+    - `protectedChanged`: 바뀐 보호 대상(15절 U-1)
+    - `plan`: `plan_pending`일 때만, `{ digest, actions }`(G-A, 18.3)
+    - `review`: `awaiting_review`일 때만, `{ checklist }`(G-A, 18.5)
 - 되돌리기 결과 `RevertOutput`: `schemaVersion`, `kind:"revert"`, `runId`, `status`(`complete`/`partial`), `exitCode`, `reverted[{path, action}]`, `skipped[{path, reason}]`(14절).
+  - `reverted`의 `action`: `restored`, `deleted`, 적용 실행의 `moved_back`·`restored_from_discard`(G-A)
+    - `from`: 옮겨진 자리. 적용 실행만 있다.
+    - `unsafe: true`: 동의를 받아 안전 보장 없이 옮긴 경우(DR-25)
+  - `skipped`의 `reason`(`REVERT_SKIP_REASONS`): `changed_since_run`, `missing_snapshot`, `io_error`, `missing_record`, `already_reverted`(N-22, `partial`로 세지 않음), `original_path_taken`(G-A), `unsafe_move`(DR-24 b)
+  - 선택 필드
+    - `dryRun: true`(N-7)
+    - `moveSafetyUnchecked: true`: 드라이 런이 옮길 파일을 나열할 때(DR-25)
+    - `revertedBefore`: 이전 되돌리기 기록의 시각과 상태(N-7)
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다.
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`(모두 2)가 더해졌다.
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
-- 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
+- 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 상태별 이유 목록은 `RUN_REASONS_BY_STATUS` 하나이고(`isReasonOfStatus`, DR-16), 읽는 쪽이 자기 목록을 두지 않는다(18.7). G-A가 `failed`에 `plan_stale`·`apply_incomplete`를, `needs-input`에 `plan_pending`·`awaiting_review`·`consent_required`를 더했다. 적용 실행은 그 부분집합 `APPLY_REASONS_BY_STATUS`를 쓴다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
   - `runs/<runId>/journal.jsonl`: 한 줄에 `JournalRecord` 하나(`seq`, `at`, `runId`와 이벤트). 가림본만 담는다. `runs/<runId>/result.json`은 stdout과 같은 객체다.
   - `runs/<runId>/snapshots/`(`SNAPSHOTS_DIR_NAME`): 실행이 바꾼 파일의 변경 전 원문(14절). 원문이므로 가림본이 아니다.
-  - `lock.json`: 실행 중인 작업 공간 잠금이며 내용은 `{pid, runId, startedAt}`이다. 기록된 pid가 살아 있으면 `workspace_locked`, 살아 있지 않으면 회수한다(P-4). `revert`도 되돌리는 동안 자기 id로 잡는다.
+  - `runs/<runId>/revert.json`(`REVERT_RECORD_FILE_NAME`, N-7): 마지막 되돌리기의 기록. DR-25부터 동의 경로(`unsafeMoveConsent`)와 위험하게 옮긴 수(`unsafeMoves`)도 담는다.
+  - G-A
+    - `runs/<runId>/plan.json`(`PLAN_FILE_NAME`): 계획 실행의 계획
+    - `runs/<runId>/applied.json`(`PLAN_APPLIED_FILE_NAME`): 그 계획을 적용한 실행
+    - `runs/<runId>/review.json`(`REVIEW_FILE_NAME`): 사람의 검토 판정
+    - `discarded/<적용 runId>/`(`DISCARDED_DIR_NAME`): 폐기한 파일을 행동 번호 이름으로 보관
+  - `lock.json`: 작업 공간 잠금.
+    - 내용은 `{pid, runId, startedAt}`에, N-25 (b)의 `processStartedAt`과 Linux의 N-27 (d) `processStartTicks`·`bootId`가 더해진다.
+    - 주인이 살아 있으면 `workspace_locked`, 끝났으면 회수한다(P-4, T-9). 같은 pid라도 시작 시각이 다르면 끝난 것으로 본다.
+    - 회수는 `lock.json.reclaim`을 쥔 한 프로세스만 한다.
+    - 하드 링크가 없는 볼륨에서는 두 파일을 배타 생성으로 만든다(DR-27 b). 그래서 도중에 끝난 시도가 빈 파일을 남길 수 있고, 그 파일은 자동으로 지워지지 않는다. `doctor`의 `lock` 점검이 알린다(17.6).
+    - `revert`, `apply`, `review`도 자기 id로 잡는다.
 - `runId`는 `<UTC yyyymmddThhmmssZ>-<8자리 16진 난수>`다(P-3). 예: `20261112T031500Z-9f2c41ab`.
 - 치환 대응표는 실행 중 메모리에만 둔다. 영구 금고와 재개는 없다. 되돌리기용 원문은 14절의 스냅샷으로 디스크에 남는다.
 
@@ -207,7 +235,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 명령이 바꾼 파일은 `file_changed`와 스냅샷에 남지 않으므로 되돌리기 대상이 아니다.
 - 실패 근거에 실행 시간이나 임시 경로처럼 매번 바뀌는 내용이 있으면 서명이 달라져 같은 실패로 판정되지 않는다. 그때는 `maxRepairAttempts`와 예산 한도만 반복을 멈춘다.
 - 경로에 등록된 비밀이 든 파일은 기록에 토큰으로 남아 스냅샷과 맞출 수 없다. 되돌리기에서 `missing_snapshot`으로 건너뛴다.
-- 같은 실행을 두 번 되돌리면 두 번째에는 현재 해시가 실행이 남긴 해시와 달라 `changed_since_run`으로 보고된다.
+- 같은 실행을 두 번 되돌리면 두 번째에는 이미 원래대로인 파일이 `already_reverted`로 건너뛰어지고, `partial`로 세지 않는다(N-22). 실행 뒤 다시 바뀐 파일만 `changed_since_run`이다.
 - 실행 중 다른 프로세스가 같은 파일을 바꾸면 스냅샷(그 실행이 처음 쓰기 직전에 읽은 원문)과 실제 실행 전 상태가 다를 수 있다.
 
 알려진 한계(교차 검토 수정 S-1~S-9):
@@ -420,6 +448,22 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 출력의 `path`는 journal에 기록된 경로(가림본)다. 스냅샷의 원문 경로나 내용은 출력하지 않는다.
 - 되돌리기는 journal에 기록을 더하지 않는다.
 
+### 이후에 바뀐 점 (위 단계에 더해짐)
+
+- `--run latest`, `--dry-run`, 되돌리기 기록 `revert.json`(N-7): 17.3
+- 실행 id 판정(N-26, N-27): 18.7
+  - 그 이름 그대로인 실행 디렉터리가 없으면 `run_not_found`다. 대소문자만 다른 id도 여기에 걸린다.
+  - 실행 목록이 손상으로 보는 실행은 id로 불러도 `invalid_run_record`로 거부한다.
+- `already_reverted`(N-22): 이미 원래대로인 파일은 건너뛰되 `partial`로 세지 않는다.
+- `missing_record`(T-10): 원문은 있는데 기록이 없는 파일은 건드리지 않는다.
+- 적용 실행(첫 기록 `apply_started`, G-A·DR-24)
+  - 옮긴 파일은 제자리로(`moved_back`), 폐기한 파일은 보관함에서(`restored_from_discard`) 되돌린다.
+  - 원래 자리에 무언가 있으면 `original_path_taken`이다.
+  - 시작 기록만 있는 행동(R-9 I-4, `plan_item_started`)도 같은 순서로 다룬다.
+- 하드 링크 없는 볼륨의 되돌리기(DR-24 (b), DR-25)
+  - 기본은 `unsafe_move`로 건너뛴다.
+  - 그 되돌리기에 대한 사람의 동의가 있으면 옮긴다: 18.10
+
 ### 연결 상태 (연결 완료)
 
 - 엔진의 재수정 반복과 CLI의 새 한도·보호 경로 전달은 연결되어 있다.
@@ -600,7 +644,7 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
 
 ## 17. 사용성 계약 (N-1~N-9, N-14~N-18)
 
-결정은 `docs/work-orders/phase-4-usability.md`의 N-1~N-13과, 계약 검토(`docs/reviews/2026-11-12-n-review-usability-contract.md`) 뒤의 N-14~N-19다. 이 절은 역할 1(N-A)의 계약 추가분이며, 계약 커밋(`9735b5f`, N-14~N-18 수정 커밋) 시점에는 **계약만 있고 구현은 없다**. 구현과 연결의 진행은 각 항목의 "담당"과 보고서에 따른다.
+결정은 `docs/work-orders/phase-4-usability.md`의 N-1~N-13과, 계약 검토(`docs/reviews/2026-11-12-n-review-usability-contract.md`) 뒤의 N-14~N-19다. 이 절은 역할 1(N-A)의 계약 추가분이다. 계약 커밋(`9735b5f`, N-14~N-18 수정 커밋) 시점에는 계약만 있었다. 지금은 표의 담당이 모두 구현해 연결했다(N-A 연결은 `.codaryn/report-N-A.md` 1~19절). 아래 각 항목은 현재 동작이다.
 
 | 영역 | 계약 위치 | 구현 담당 |
 | --- | --- | --- |
@@ -640,10 +684,12 @@ codaryn run "<목표>" [--config <파일>] [--vars-file <경로>] [--cancel-file
 codaryn run (--task <task.json> | --workspace <디렉터리> --goal <문장>) [위 옵션]
 codaryn init [--config <파일>] [--workspace <디렉터리>] [--json]
 codaryn runs [--workspace <디렉터리>] [--limit <n>] [--json]
-codaryn revert --workspace <디렉터리> --run <runId|latest> [--dry-run] [--quiet]
+codaryn revert --workspace <디렉터리> --run <runId|latest> [--dry-run | --allow-unsafe-move] [--quiet]
 codaryn report --workspace <디렉터리> --run <runId|latest> [--json]
 codaryn doctor [...기존] [--profile <이름>]
 ```
+
+`run`의 `--workflow <id>`와 `plan`, `apply`, `review`, `changes`는 18절에 있다.
 
 - **한 줄 실행(N-9)**: 위치 인자 하나가 목표다. 현재 디렉터리를 작업 공간으로 쓰는 간편 형식과 같다(`--workspace <cwd> --goal <목표>`). 출력은 `run`과 같은 `CliOutput`이다.
   - 위치 인자는 하나만 받는다. `--task`, `--workspace`, `--goal`과 함께 쓰면 `invalid_arguments`다. `--`로 시작하는 목표는 옵션으로 읽힌다.
@@ -661,10 +707,10 @@ codaryn doctor [...기존] [--profile <이름>]
   - 통과한 실행은 `state: "checked"`다. 하나라도 실패하면 `state: "damaged"`이고 실행 id만 가진다. 손상된 실행은 목록 뒤쪽에 "손상"으로만 표시하고 `latest`로 고르지 않는다.
   - result.json이나 revert.json이 없는 것은 손상이 아니다(해당 필드가 null). 있는데 읽기·해석·확인에 실패하면 손상이다.
   - 항목에 들어가는 문자열은 위 형식을 통과한 것뿐이라 제어 문자나 키 모양이 들어갈 수 없다. 사람용 표에는 `taskId`를 쓰지 않는다(N-14).
-- **`--run latest`(N-7, N-18)**: `report`, `revert`에서 `listRuns`의 첫 `checked` 실행을 뜻한다. 그런 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리(`.codaryn/runs/latest`)가 실제로 있으면 별칭으로 해석하지 않고 `invalid_arguments`로 끝나며 아무것도 바꾸지 않는다(검토 L1).
+- **`--run latest`(N-7, N-18)**: `report`, `revert`, 그리고 18절의 `plan`, `review`, `changes`에서 `listRuns`의 첫 `checked` 실행을 뜻한다. `apply`는 받지 않는다(승인이 계획 하나를 가리켜야 한다). 그런 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리(`.codaryn/runs/latest`)가 실제로 있으면 별칭으로 해석하지 않고 `invalid_arguments`로 끝나며 아무것도 바꾸지 않는다(검토 L1).
 - **`revert --dry-run`(N-7)**: `RevertRequest.dryRun`. 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 출력은 `dryRun: true`인 `RevertOutput`이고 상태·종료 코드는 실제 되돌리기와 같다(`complete` 0, `partial` 3).
 - **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 N-16의 확인을 통과하면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
-- **`--quiet`**: `run`과 `revert`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
+- **`--quiet`**: `run`, `revert`, `apply`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
 
 ### 17.4 사람용 출력과 문구 (N-4, N-5)
 
@@ -673,6 +719,9 @@ codaryn doctor [...기존] [--profile <이름>]
   - `run` 끝 요약: `HumanOutput.runSummary`
   - 진행 줄: `PROGRESS_PREFIX` 뒤에 `HumanOutput.progressLine`. 사람 표현을 먼저 쓰고 내부 코드는 괄호에 둔다.
   - `revert` 요약: `HumanOutput.revertSummary`
+  - `apply`(G-A): 진행 줄 `HumanOutput.applyProgressLine`, 끝 요약 `HumanOutput.applySummary`
+    - 시작 기록(`plan_item_started`, R-9 I-4)은 저장만 하고 진행 줄로 넘기지 않는다.
+  - 터미널 질문(`[y/N]`, 기본 아니오): `init`, `apply`의 승인, `apply`·`revert`의 위험한 이동 동의(18.4, 18.10)
 - 언어는 `SelectMessageLanguage`로 정한다. 오류 코드, JSON 필드, 종료 코드, 명령 이름은 영어로 고정한다.
 - 문구는 `MESSAGE_IDS`의 id로만 만든다. 두 카탈로그는 모든 id를 가지고, 템플릿은 `FIXED_MESSAGES`가 정한 매개변수를 모두 쓰고 다른 것은 쓰지 않는다.
 - **매개변수 타입(N-14, 검토 H1)**: `MessageCatalog.format(id, params)`의 `params`는 id마다 타입이 정해진다(`MessageParamsOf`). 종류(`MessageParamTypeByKind`)와 타입:
@@ -723,6 +772,17 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - `doctor`에 `lock` 점검을 마지막 항목으로 더했다. `.codaryn/lock.json`을 바꾸지 않고 읽는다.
   - 결과: 없음(`ok`), 살아 있는 프로세스가 쥠(`warn`, 안내 포함), 끝난 프로세스가 남김(`ok`, 다음 실행이 회수), 읽을 수 없음(`warn`). 작업 공간이 없으면 `skipped`다.
   - pid가 다른 프로세스에 다시 주어질 수 있어 "쥠" 판정은 틀릴 수 있다(architecture A-6).
+  - N-25 (b), 검토 R-6 L-1: store와 같이 프로세스 시작 시각으로 판정한다. 같은 pid라도 시작 시각이 `PROCESS_START_TOLERANCE_MS`보다 다르면 끝난 것이다.
+  - **알려진 차이**: Linux에서 store는 부팅 뒤 틱(`processStartTicks`, `bootId`, N-27 d)으로 판정하지만 doctor는 아직 시작 시각만 본다. 벽시계를 크게 바꾼 뒤에는 둘의 판정이 다를 수 있다.
+  - reclaim 파일(DR-27 b)
+    - `.codaryn/lock.json.reclaim`이 store가 지우지 않는 상태면 `reclaim_left`(`warn`)다.
+      - 쓰는 중으로 보이는 글(끝 줄바꿈이 없고 온전한 JSON이 아님)
+      - 이해할 수 없는 글
+      - 주인이 살아 있음
+    - 그동안은 끝난 잠금도 회수되지 않는다. 안내는 Codaryn이 돌지 않으면 그 파일(그리고 `lock.json`)을 지우라고 한다.
+    - 주인이 끝난 reclaim 파일은 다음 실행이 지우므로 `lock.json`의 판정을 따른다.
+    - `lock.remove_hint` 문구도 reclaim 파일을 가리킨다(N-B 문구).
+- **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 계약 기준에 문구 id가 아직 없어 영어 글로 나온다(18.9).
 
 ### 17.7 오류 코드 추가
 
@@ -762,7 +822,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 
 ### 18.2 task 형식 (DR-17)
 
-`plan`, `apply`, `review`, `changes`는 `run`과 같은 형식을 받는다.
+`plan`, `apply`, `review`는 `run`과 같은 형식을 받는다. `changes`도 같지만 `--workflow`는 받지 않는다(앱 계층의 `TaskForm`과 같은 인자 해석, `src/cli/changes.ts`).
 
 ```
 (--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <config.json>] [--vars-file <path>]
@@ -869,6 +929,8 @@ codaryn changes <task 형식> --run <runId|latest> [--json]
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
 - `report`는 적용 실행과 검토 판정(`review.json`)을 아직 보여 주지 않는다. `ReportOutput`에 필드가 필요하다(w3:p9).
+- doctor의 Q5 경고는 계약 기준(`b89ee16`)에 `doctor.commands.extra_args_with_plan`이 없어 영어 글로만 나온다. 계약 소유자가 그 id를 더하면 두 언어로 바꾼다.
+- 도움말의 옵션 설명에 `--allow-unsafe-move`(`HelpOption`)가 없다. 사용법 줄에만 나온다.
 
 ### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
 

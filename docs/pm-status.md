@@ -38,6 +38,16 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-18, 2026-11-12, main `3bd0646`)
+
+- **다섯 번째 묶음을 main에 병합했다**(`3bd0646`). 고정 판 `pm/bundle-5`(`ab31417`)와 트리 해시가 같다.
+- 고정 판에서 PM이 실행한 검증(루트만): 타입 검사 통과, 유닛 1879건 중 1865 통과·실패 0·건너뜀 3·todo 11, 통합 559건 통과, `check-secrets --tracked` 발견 없음. GUI 시험은 검토자(w3:p4)가 같은 판에서 돌렸다: GUI 유닛 134/134, 연기 시험 131/131을 두 번.
+- 들어간 것: DR-41(설정·프로필·task 파일의 정책을 작업 종류의 규칙과 합침, 빠진 것 알림), DR-42 (a)(b) 키 거부, `doctor`와 키 안내 문구 수정, 되돌리기 미리보기 한국어, DR-38·DR-39의 계약(구현은 다음), GUI 후속(연기 시험 경합 수정 등).
+- 고정 시험 값: 바뀐 곳은 승인한 세 곳뿐임을 검토자(R-32)가 main과 직접 비교해 확인했다.
+- 가림 모듈의 끊긴 등록 값 가림은 R-28, R-28b를 거쳤고 낮음 1(토큰 범위 상한)을 고친 뒤 다음 묶음에 넣는다. 그때까지 main의 실행 중 가림은 끊긴 값을 가리지 못한다.
+- 다음 묶음: DR-43 (a)~(d), 가림 변경, DR-38·DR-39 구현(store, 엔진, CLI), GUI 남은 화면.
+- 확인하지 않은 범위: 실제 Anthropic·OpenAI API 호출, FAT·exFAT 실제 볼륨, Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
 ## 진행 요약 (CP-17, 2026-11-12, main `aedbb9d`)
 
 - **네 번째 묶음을 main에 병합했다**(`aedbb9d`). 고정 판 `pm/bundle-4`(`700fa35`)와 트리 해시가 같다.

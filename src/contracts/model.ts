@@ -55,6 +55,13 @@ export interface ModelResponse {
   readonly toolCalls: readonly ToolCall[];
   /** `null` means unknown. It is never treated as zero. */
   readonly usage: ModelUsage | null;
+  /**
+   * SP-5, DR-31 (c): how many reasoning items the provider returned with this response. The adapter
+   * keeps them (opaque, encrypted by the provider) in memory for the rest of the run and sends them
+   * back with the next requests; their content never reaches the engine. The engine records the
+   * count only. Absent: none, or a provider without such items.
+   */
+  readonly reasoningItems?: number;
 }
 
 export const MODEL_ERROR_KINDS = [

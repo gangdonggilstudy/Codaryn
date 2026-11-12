@@ -303,8 +303,19 @@ export interface Transport {
   readonly headers: { readonly [name: string]: string };
   readonly timeoutMs: number;
   readonly maxRetries: number;
-  /** The provider's reading of an HTTP status: error kind and whether it is retried. */
-  readonly classifyStatus: (status: number) => { kind: ModelErrorKind; retryable: boolean };
+  /**
+   * The provider's reading of an error response: error kind and whether it is retried. It gets the
+   * error body as read (within MAX_ERROR_BODY_BYTES) for providers that tell causes apart by it
+   * (SP-5: OpenAI's quota errors are 429 like rate limits).
+   */
+  readonly classifyStatus: (status: number, body: LimitedBody) => { kind: ModelErrorKind; retryable: boolean };
+  /**
+   * How a `retry-after` header sets the wait (absent: "cap"). "cap": the header's wait replaces
+   * the backoff, up to MAX_RETRY_AFTER_MS (Anthropic, as before). "minimum" (SP-5, DR-31 (f)): the
+   * wait is the larger of the header's and the backoff, and a header asking for more than
+   * MAX_RETRY_AFTER_MS ends the retries instead of retrying early.
+   */
+  readonly retryAfter?: "cap" | "minimum";
   /** The provider's description of an error response (what of its body may be quoted). */
   readonly describeError: (status: number, body: LimitedBody) => string;
 }
@@ -413,7 +424,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
       }
       return { type: "body", text: decoder.decode(read.bytes) };
     }
-    const { kind, retryable } = transport.classifyStatus(status);
+    const { kind, retryable } = transport.classifyStatus(status, read);
     const after = retryable ? retryAfterMs(response.headers.get("retry-after"), Date.now()) : undefined;
     return {
       type: "failed",
@@ -437,14 +448,18 @@ export async function sendWithRetries(transport: Transport, request: HttpRequest
     if (result.type === "aborted") return { ok: false, kind: "aborted", message: "cancelled while the request was in flight" };
     if (result.type === "body") return { ok: true, text: result.text };
     if (result.type === "final") return { ok: false, kind: result.kind, message: result.message };
-    if (!result.retryable || attempt >= attempts) {
+    const minimum = transport.retryAfter === "minimum";
+    const tooLong = minimum && result.retryAfterMs !== undefined && result.retryAfterMs > MAX_RETRY_AFTER_MS;
+    if (!result.retryable || attempt >= attempts || tooLong) {
       const suffix = attempt > 1 ? ` (after ${attempt} attempts)` : "";
       return { ok: false, kind: result.kind, message: `${result.message}${suffix}`, ...(result.status === undefined ? {} : { httpStatus: result.status }) };
     }
-    const delay =
-      result.retryAfterMs !== undefined
+    const backoff = Math.min(BASE_BACKOFF_MS * 2 ** (attempt - 1), MAX_BACKOFF_MS);
+    const delay = minimum
+      ? Math.max(result.retryAfterMs ?? 0, backoff)
+      : result.retryAfterMs !== undefined
         ? Math.min(result.retryAfterMs, MAX_RETRY_AFTER_MS)
-        : Math.min(BASE_BACKOFF_MS * 2 ** (attempt - 1), MAX_BACKOFF_MS);
+        : backoff;
     try {
       await transport.sleep(delay, signal);
     } catch {

@@ -219,6 +219,16 @@ export function maskedParts(masked: string): MaskedParts {
   return masked.split(new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE));
 }
 
+/**
+ * DR-32 (c): the exact text whose SHA-256 is the digest of a visible-part list: the list as JSON
+ * (`JSON.stringify`), hashed as UTF-8 bytes, written as 64 lowercase hex characters. Each side that
+ * needs a digest computes it with its own SHA-256 from this text, so all of them agree; the
+ * contracts hash nothing themselves (they hold no platform module).
+ */
+export function maskedPartsEncoding(parts: MaskedParts): string {
+  return JSON.stringify(parts);
+}
+
 /** DR-28, DR-29: true when two visible-part lists are the same, part by part. */
 export function sameMaskedParts(a: MaskedParts, b: MaskedParts): boolean {
   return a.length === b.length && a.every((part, i) => part === b[i]);

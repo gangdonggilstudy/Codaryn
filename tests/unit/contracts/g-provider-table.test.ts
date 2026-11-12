@@ -24,6 +24,8 @@ import {
   MODEL_PROVIDER_NAMES,
   OPENAI_API_KEY_ENV,
   OPENAI_KEY_PATTERN_SOURCE,
+  OPENAI_KEY_LOOSE_PATTERN_SOURCE,
+  API_KEY_MASK_PATTERN_SOURCES,
   SCHEMA_FIELD_NAMES,
 } from "../../../src/contracts/index.js";
 import type {
@@ -100,14 +102,45 @@ describe("SP-1: the provider table", () => {
     }
   });
 
-  test("the loose OpenAI key shape finds long sk- text at a word start only (built at run time: no key shape in this file)", () => {
-    const shape = new RegExp(OPENAI_KEY_PATTERN_SOURCE);
-    const long = (prefix: string, length: number) => prefix + "Ab3_-".repeat(Math.ceil(length / 5)).slice(0, length);
-    assert.ok(shape.test(long(["sk", "proj", ""].join("-"), 40)), "a project-style key");
-    assert.ok(shape.test(`key=${long(["sk", ""].join("-"), 32)}`), "32 characters after the prefix");
-    assert.equal(shape.test(long(["sk", ""].join("-"), 31)), false, "31 characters: too short");
-    assert.equal(shape.test(["sk", "learn"].join("-")), false, "a short word");
-    assert.equal(shape.test(long(["task", ""].join("-"), 40)), false, "sk- inside a word");
+  /** R-19 L-1: the reviewer's ordinary texts and key-like texts (key-shape.mjs), built at run time. */
+  const p = (...parts: string[]) => parts.join("");
+  const ORDINARY: Record<string, string> = {
+    "python package": "pip install sk-learn",
+    "inside a word (task-)": "run task-runner-for-long-names-and-more-words-here",
+    "inside a word (risk-)": "see risk-assessment-for-the-quarter-and-the-next-one",
+    "Slovak locale": "locales/sk-SK/messages.json",
+    "kebab slug folder": p("rename the folder ", "sk", "-mobile-app-redesign-final-draft-v2"),
+    "git branch": p("checkout ", "sk", "-1234-implement-provider-table-and-key-list"),
+    "CSS class": p('<div class="', "sk", '-circle-fade-in-animation-delay-long">'),
+    "after a slash": p("docs/", "sk", "-onboarding-guide-for-new-team-members.md"),
+    "UUID with prefix": p("id ", "sk", "-550e8400-e29b-41d4-a716-446655440000"),
+    "markdown anchor": p("[link](#", "sk", "-installation-and-configuration-guide)"),
+    "Korean before": p("\uD3F4\uB354", "sk", "-mobile-app-redesign-final-draft-v2-ko"),
+    "underscore key (Stripe style)": p("sk", "_live_", "a".repeat(40)),
+  };
+  const KEY_LIKE: Record<string, string> = {
+    "legacy style": p("sk", "-", "Aa1".repeat(16)),
+    "project style": p("sk", "-proj-", "Ab3_Cd4-".repeat(20)),
+  };
+
+  test("DR-32 (a): the refusal shape matches no ordinary text of the reviewer's set, and both key styles", () => {
+    const refuse = new RegExp(OPENAI_KEY_PATTERN_SOURCE);
+    for (const [name, text] of Object.entries(ORDINARY)) assert.equal(refuse.test(text), false, name);
+    for (const [name, text] of Object.entries(KEY_LIKE)) assert.ok(refuse.test(text), name);
+    const long = (prefix: string, tail: string) => prefix + tail;
+    assert.equal(refuse.test(long(p("sk", "-"), "a1".repeat(16))), false, "digits but no upper-case letter");
+    assert.equal(refuse.test(long(p("sk", "-"), "aB".repeat(16))), false, "upper-case but no digit");
+    assert.ok(refuse.test(long(p("sk", "-"), "aB1".repeat(11))), "33 characters with both");
+    assert.equal(refuse.test(long(p("sk", "-"), "aB1".repeat(10))), false, "30 characters: too short");
+  });
+
+  test("DR-32 (a): the loose shape is for hiding only; the refusal list does not hold it", () => {
+    const loose = new RegExp(OPENAI_KEY_LOOSE_PATTERN_SOURCE);
+    for (const [name, text] of Object.entries(KEY_LIKE)) assert.ok(loose.test(text), name);
+    assert.ok(loose.test(ORDINARY["kebab slug folder"] as string), "it hides some ordinary names (accepted for output only)");
+    assert.equal((API_KEY_PATTERN_SOURCES as readonly string[]).includes(OPENAI_KEY_LOOSE_PATTERN_SOURCE), false);
+    assert.ok((API_KEY_MASK_PATTERN_SOURCES as readonly string[]).includes(OPENAI_KEY_LOOSE_PATTERN_SOURCE));
+    for (const source of API_KEY_PATTERN_SOURCES) assert.ok((API_KEY_MASK_PATTERN_SOURCES as readonly string[]).includes(source), source);
   });
 
   test("the openai entry holds the confirmed facts (DR-31)", () => {

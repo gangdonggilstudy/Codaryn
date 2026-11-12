@@ -1,20 +1,29 @@
 /**
- * DR-29: a comparison view shows a changed file's texts only when the secrets registered now mask
- * them exactly as the run did (changeShownMatches), with the real privacy gateway. The R-11/A-4
- * reproduction: a run that hid a value, viewed without that secret, would show it in plain text.
+ * DR-29, DR-32 (c): a comparison view shows a changed file's texts only when the secrets registered
+ * now mask them exactly as the run did (changeShownMatches), with the real privacy gateway. The
+ * record holds digests of the visible parts, not the parts (R-19 L-3).
  */
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, test } from "node:test";
 
-import { CLI_ERROR_HINTS, FIXED_MESSAGES, MESSAGE_IDS, PARKED_DIR_NAME, changeShownMatches, maskedParts, sameMaskedParts } from "../../../src/contracts/index.js";
-import type { ChangeShown, CliErrorOutput, ContentHash, ListParkedFiles, ParkedFile, PrivacyGateway, SkippedFile } from "../../../src/contracts/index.js";
+import {
+  CLI_ERROR_HINTS,
+  FIXED_MESSAGES,
+  MESSAGE_IDS,
+  PARKED_DIR_NAME,
+  changeShownMatches,
+  maskedParts,
+  maskedPartsEncoding,
+  sameMaskedParts,
+} from "../../../src/contracts/index.js";
+import type { ChangeNow, ChangeShown, CliErrorOutput, ContentHash, ListParkedFiles, ParkedFile, PrivacyGateway, SkippedFile } from "../../../src/contracts/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 
 const SECRET = "zz-dr29-fake-client-zz";
-const ORIGINAL = `client: ${SECRET}\nline two\n`;
-const NEXT = `client: ${SECRET}\nline two\nline three\n`;
+const ORIGINAL = `deploy:\n  token: ${SECRET}\n  region: eu\n`;
+const NEXT = `deploy:\n  token: ${SECRET}\n  region: eu\n  zone: b\n`;
 const sha = (text: string) => createHash("sha256").update(text, "utf8").digest("hex") as ContentHash;
 
 function mask(gateway: PrivacyGateway, text: string): string {
@@ -23,11 +32,22 @@ function mask(gateway: PrivacyGateway, text: string): string {
   return masked.text;
 }
 
+/** DR-32 (c): the digest every side computes: SHA-256 of maskedPartsEncoding(maskedParts(masked text)). */
+const digestOf = (gateway: PrivacyGateway, text: string) => sha(maskedPartsEncoding(maskedParts(mask(gateway, text))));
+
 /** What the run records with its own gateway (ChangeRecorder.saveOriginal and saveNext). */
 function recorded(gateway: PrivacyGateway, original: string | null, next: string): ChangeShown {
   return {
-    original: original === null ? null : maskedParts(mask(gateway, original)),
-    next: { sha256: sha(next), parts: maskedParts(mask(gateway, next)) },
+    original: original === null ? null : digestOf(gateway, original),
+    next: { sha256: sha(next), partsDigest: digestOf(gateway, next) },
+  };
+}
+
+/** What a view has now, computed the same way with the gateway of now. */
+function nowWith(gateway: PrivacyGateway, original: string | null, current: string | null, sha256: ContentHash = sha(NEXT)): ChangeNow {
+  return {
+    original: original === null ? null : digestOf(gateway, original),
+    current: current === null ? null : { sha256, partsDigest: digestOf(gateway, current) },
   };
 }
 
@@ -35,50 +55,47 @@ describe("DR-29: changed files are shown only when masked as the run masked them
   const runGateway = createPrivacyGateway({ secrets: [SECRET] });
   const shown = recorded(runGateway, ORIGINAL, NEXT);
 
-  test("the recorded parts hold no secret value", () => {
-    assert.doesNotMatch(JSON.stringify(shown), new RegExp(SECRET));
+  test("DR-32 (c): the record holds neither the secret nor the visible text, only digests", () => {
+    const text = JSON.stringify(shown);
+    assert.doesNotMatch(text, new RegExp(SECRET));
+    for (const visible of ["deploy", "token", "region", "zone"]) assert.equal(text.includes(visible), false, visible);
+    assert.match(shown.original ?? "", /^[0-9a-f]{64}$/);
+    assert.match(shown.next?.partsDigest ?? "", /^[0-9a-f]{64}$/);
+  });
+
+  test("the digest is of the JSON of the parts list", () => {
+    assert.equal(maskedPartsEncoding(["a", "", "b"]), '["a","","b"]');
+    assert.notEqual(sha(maskedPartsEncoding(["ab"])), sha(maskedPartsEncoding(["a", "b"])), "a token between parts counts");
   });
 
   test("the same secrets now: shown", () => {
-    const now = createPrivacyGateway({ secrets: [SECRET] });
-    assert.equal(
-      changeShownMatches(shown, { original: mask(now, ORIGINAL), current: { sha256: sha(NEXT), masked: mask(now, NEXT) } }),
-      true,
-    );
+    assert.equal(changeShownMatches(shown, nowWith(createPrivacyGateway({ secrets: [SECRET] }), ORIGINAL, NEXT)), true);
   });
 
   test("reproduction: without the run's secret the value would be shown, so nothing is shown", () => {
     const none = createPrivacyGateway({ secrets: [] });
-    const original = mask(none, ORIGINAL);
-    assert.match(original, new RegExp(SECRET), "masked with no secrets, the value stays visible");
-    assert.equal(changeShownMatches(shown, { original, current: { sha256: sha(NEXT), masked: mask(none, NEXT) } }), false);
+    assert.match(mask(none, ORIGINAL), new RegExp(SECRET), "masked with no secrets, the value stays visible");
+    assert.equal(changeShownMatches(shown, nowWith(none, ORIGINAL, NEXT)), false);
   });
 
   test("masking more now is a difference too", () => {
-    const more = createPrivacyGateway({ secrets: [SECRET, "line two"] });
-    assert.equal(
-      changeShownMatches(shown, { original: mask(more, ORIGINAL), current: { sha256: sha(NEXT), masked: mask(more, NEXT) } }),
-      false,
-    );
+    assert.equal(changeShownMatches(shown, nowWith(createPrivacyGateway({ secrets: [SECRET, "region: eu"] }), ORIGINAL, NEXT)), false);
   });
 
   test("the file changed since the run, no record, no next, or no current text: nothing is shown", () => {
     const now = createPrivacyGateway({ secrets: [SECRET] });
-    const original = mask(now, ORIGINAL);
-    const current = { sha256: sha(NEXT), masked: mask(now, NEXT) };
-    assert.equal(changeShownMatches(shown, { original, current: { ...current, sha256: sha("edited later") } }), false);
-    assert.equal(changeShownMatches(undefined, { original, current }), false);
-    assert.equal(changeShownMatches({ ...shown, next: null }, { original, current }), false);
-    assert.equal(changeShownMatches(shown, { original, current: null }), false);
+    assert.equal(changeShownMatches(shown, nowWith(now, ORIGINAL, NEXT, sha("edited later"))), false);
+    assert.equal(changeShownMatches(undefined, nowWith(now, ORIGINAL, NEXT)), false);
+    assert.equal(changeShownMatches({ ...shown, next: null }, nowWith(now, ORIGINAL, NEXT)), false);
+    assert.equal(changeShownMatches(shown, nowWith(now, ORIGINAL, null)), false);
   });
 
   test("a created file: shown when both sides have no original, not when only one does", () => {
     const now = createPrivacyGateway({ secrets: [SECRET] });
     const created = recorded(runGateway, null, NEXT);
-    const current = { sha256: sha(NEXT), masked: mask(now, NEXT) };
-    assert.equal(changeShownMatches(created, { original: null, current }), true);
-    assert.equal(changeShownMatches(created, { original: mask(now, ORIGINAL), current }), false);
-    assert.equal(changeShownMatches(shown, { original: null, current }), false);
+    assert.equal(changeShownMatches(created, nowWith(now, null, NEXT)), true);
+    assert.equal(changeShownMatches(created, nowWith(now, ORIGINAL, NEXT)), false);
+    assert.equal(changeShownMatches(shown, nowWith(now, null, NEXT)), false);
   });
 
   test("sameMaskedParts compares part by part", () => {

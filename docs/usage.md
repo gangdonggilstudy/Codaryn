@@ -331,11 +331,15 @@ codaryn: finished — needs input (no_verifier)
 - 키가 거부되면(401·403) 제공자의 문구를 옮기지 않고 고정 문구와 요청 id만 남긴다. 예: `HTTP 401: the key or its access was refused; the provider's message is not shown (request req_fake_1)`.
 - 할당량 소진(429 중 `insufficient_quota`나 과금 코드)은 다시 시도하지 않는다.
 
-**지금의 결함: OpenAI 실행의 기록을 읽지 못한다(main `3e36b1b`).** OpenAI로 한 실행은 끝까지 돌고 기록도 남지만, 기록을 읽는 쪽이 제공자 이름 `openai`를 받지 않는다.
-- `runs`는 그 실행을 `damaged (the record could not be checked)`로 보인다.
-- `report`, `changes`, `revert`는 그 실행 id에 `invalid_run_record`(종료 2)로 거부한다.
-- `--run latest`는 그 실행을 고르지 못한다(`run_not_found`).
-- 그래서 **OpenAI 실행이 바꾼 파일을 Codaryn으로 되돌릴 수 없다.** OpenAI로 실행하기 전에 작업 공간을 Git 커밋이나 사본으로 보존한다. 고쳐지면 이 단락을 지운다.
+**결과 읽기와 되돌리기:** OpenAI로 한 실행도 Anthropic 실행과 같이 `runs`, `report`, `changes`, `revert`로 다룬다(10절, 11절). main `e75726e`에서 위 실행을 다룬 실제 출력:
+
+```
+run id                     started              changes  result
+20261112T083533Z-dcf48f22  2026-11-12 17:35:33  1        needs input (needs-input/no_verifier)
+```
+
+- `report --run latest`의 머리에 ``- Provider: `openai` ``가 나온다.
+- `revert --run <실행 id>`는 `codaryn: Files reverted: 1 (complete)`, `summary.md — deleted (created by this run)`로 실행이 만든 파일을 지웠다. 그 뒤 `runs`의 결과 칸에 `· reverted (complete)`가 붙는다.
 
 ## 5. 파일 위치 규칙
 
@@ -754,7 +758,9 @@ node --test dist/tests/live/anthropic-live.js
 - **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 직접 지운다(지워도 되는 폴더는 11절).
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 비밀 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
 - **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
-- **OpenAI 실행의 기록(지금의 결함):** main `3e36b1b`에서 OpenAI로 한 실행은 `runs`에 `damaged`로 나오고, `report`·`changes`·`revert`가 `invalid_run_record`로 거부하며, `--run latest`가 고르지 못한다. 그 실행이 바꾼 파일은 Codaryn으로 되돌릴 수 없다. 작업 공간을 Git이나 사본으로 보존한다(4절 "두 번째 제공자: OpenAI").
+- **OpenAI 설정을 가리키는 문구의 어긋남(고쳐질 때까지):** 두 곳의 문구가 OpenAI 설정을 잘못 가리킨다. 동작(멈추는 것)은 맞다.
+  - 제공자가 openai이고 `providers.openai.maxOutputTokens`가 없으면, `doctor`의 모델 항목은 최상위 `maxOutputTokens`가 있어도 `maxOutputTokens is not set (task model.maxOutputTokens or config maxOutputTokens)`라고 적는다. 채울 곳은 `providers.openai.maxOutputTokens`다(4절 "두 번째 제공자: OpenAI").
+  - 설정·task 파일에 OpenAI 키 모양의 값이 있으면 `key_in_file`의 메시지가 `keys are read only from the ANTHROPIC_API_KEY environment variable`이라고 적는다. OpenAI 키는 `OPENAI_API_KEY`에서 읽는다.
 - **OpenAI 제공자:** 실제 OpenAI API로는 점검하지 않았다. 추론 항목은 암호문이라 가림이 볼 수 없고, 다음 요청에 받은 그대로 다시 간다([민감정보 처리](privacy.md) "OpenAI 제공자").
 - **변경 보기의 글:** `changes`는 지금 등록된 비밀로 가린 글이 실행 때와 같을 때만 글을 보인다. 실행 뒤 바뀐 파일, 비밀의 값이 바뀐 경우, 쓰기 도구가 기록을 남기기 전의 실행은 경로와 상태만 보인다(10절 "변경 보기").
 - **보관함:** 폐기한 파일은 `.codaryn\discarded\`에 쌓이고 비우는 명령이 없다(18.8절).

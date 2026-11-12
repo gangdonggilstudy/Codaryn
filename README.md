@@ -6,7 +6,7 @@ Codaryn은 로컬에서 실행하는 범용 작업 에이전트 CLI다. 코딩�
 
 **아직 없는 것:**
 - 독립 데스크톱 GUI(`gui/`)는 만드는 중이다. 설정, 새 작업과 진행, 결과, 실행 목록과 되돌리기, 계획 승인, 변경 보기 화면이 있지만 설치 패키지가 없어 개발 환경에서만 띄울 수 있다. 이 문서는 CLI 사용만 다룬다. VS Code 확장은 만들지 않는다.
-- OpenAI 제공자는 실제 API로 점검하지 않았다. 또 지금은 OpenAI로 한 실행을 `runs`·`report`·`changes`·`revert`가 읽지 못해 되돌릴 수 없다. OpenAI로 실행할 작업 공간은 Git이나 사본으로 보존한다([4절](docs/usage.md#두-번째-제공자-openai)).
+- OpenAI 제공자는 실제 API로 점검하지 않았다(가짜 서버로만 확인). OpenAI 실행도 `runs`·`report`·`changes`·`revert`로 다룬다([4절](docs/usage.md#두-번째-제공자-openai)).
 - `init`은 Anthropic 설정만 만든다. OpenAI 설정은 설정 파일에 직접 더한다.
 - 개인정보가 든 자료는 다루지 않는다. 원자료 대신 집계만 모델에 보내는 도구가 아직 없다([18.7절](docs/usage.md#187-개인정보가-든-자료는-다루지-않는다)).
 

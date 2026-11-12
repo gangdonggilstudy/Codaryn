@@ -8,6 +8,7 @@
  */
 
 import type { IntegrityPhase } from "./integrity.js";
+import type { StateCheckPhase } from "./state.js";
 import type { Limits, ModelProviderName } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ModelMessage, ModelStop, ModelUsage, MaskedToolCall } from "./model.js";
@@ -17,7 +18,7 @@ import type { VerifierResult } from "./verify.js";
 import type { RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
 import type { PlanMode } from "./plan.js";
 import type { AnyToolName } from "./tool.js";
-import type { CompletionMode } from "./workflow.js";
+import type { CompletionMode, PolicyNarrowing } from "./workflow.js";
 
 /** State directory inside the workspace root. No tool may read, list, write or run in it. */
 export const STATE_DIR_NAME = ".codaryn";
@@ -54,6 +55,8 @@ export type JournalEvent =
        * PROFILE_NAME_PATTERN_SOURCE. Absent: none (and every journal written before DR-37).
        */
       readonly profile?: string;
+      /** DR-41: ResolvedTaskSpec.policyNarrowings, when something was left out. Kinds and counts only. */
+      readonly policyNarrowings?: readonly PolicyNarrowing[];
       readonly tools?: readonly AnyToolName[];
       readonly plan?: PlanMode;
       readonly completion?: CompletionMode;
@@ -120,6 +123,17 @@ export type JournalEvent =
       readonly phase: IntegrityPhase;
       /** `IntegrityChecker.compare` for this check, masked, in its order. Empty: nothing changed. */
       readonly changed: readonly MaskedText[];
+    }
+  | {
+      /** DR-38: one check of the state directory, see EngineDeps.stateGuard. */
+      readonly type: "state_checked";
+      readonly phase: StateCheckPhase;
+      /** before_command, after_command: the recorded id of the `run_command` call checked around. */
+      readonly callId?: string;
+      /** StateGuard.compare for this check (both tiers), masked, sorted. Empty: nothing changed. */
+      readonly changed: readonly MaskedText[];
+      /** Part of tier "state" could not be fingerprinted; not a change (StateComparison.limited). */
+      readonly limited: boolean;
     }
   | {
       readonly type: "run_finished";

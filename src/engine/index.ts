@@ -21,33 +21,63 @@
  * - A capture that rejects (not a file-level problem; those are `unchecked` entries) fails
  *   closed: `protected_changed` with a notice, and no `integrity_checked` record, since there is no
  *   list of paths to record.
+ *
+ * General tasks (stage 4, GT-E1 to GT-E5, design general-tasks.md 4.3). The engine reads the task's
+ * workflow settings (`workflowSettingsOf`) and never a workflow id. A task without them gets the
+ * legacy settings, and its requests, records and result are as before.
+ * - GT-E1: only the settings' tools are offered (built-in ones in `tools`, workflow tools in
+ *   `workflowTools`) and may be called; any other name is `unknown_tool`. Workflow tools take the
+ *   same checks and run through `ToolRunner.executeWorkflowTool`.
+ * - GT-E2: `instructions` follow the fixed prompt under INSTRUCTIONS_LABEL, masked with it.
+ * - GT-E3, GT-E5: with `plan: "apply"` only read tools and the tool whose descriptor says
+ *   `endsRun: "plan"` are offered. Each plan action is judged on its own (the task's `planActions`,
+ *   the gate before and after restoration). A stored plan ends the run as needs-input/plan_pending
+ *   with `EngineResult.plan` and no verification; ending without one is failed/model_error.
+ * - GT-E4: with `completion: "human_review"`, checks that are done (all pass, or no verifier) end
+ *   the run as needs-input/awaiting_review with `EngineResult.review`, never as done.
  */
 
 import {
+  ALL_TOOL_DESCRIPTORS,
+  ALL_TOOL_NAMES,
   BUILTIN_TOOLS,
+  CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
+  PLAN_ACTION_DESCRIPTORS,
+  REPLACED_CALL_ID_PREFIX,
   RESULT_SCHEMA_VERSION,
   RUNS_DIR_NAME,
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
   TOOL_NAMES,
+  UNKNOWN_TOOL_RECORD_NAME,
+  WORKFLOW_TOOLS,
+  WORKFLOW_TOOL_NAMES,
   asRawText,
+  workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
+  AnyToolName,
+  ContentHash,
   EffectiveToolCall,
+  EffectiveWorkflowToolCall,
   EngineDeps,
   EngineResult,
   FileChangeRecord,
   IntegrityManifest,
   IntegrityPhase,
   JournalEvent,
+  JsonObject,
   MaskedText,
   MaskedToolCall,
   ModelMessage,
   PolicyDecision,
+  ProposePlanArgs,
   RawText,
   RawToolOutcome,
   RawVerifierResult,
+  RawWorkflowToolOutcome,
+  ResolvedPlanAction,
   RunReason,
   RunTask,
   TerminalRunStatus,
@@ -58,14 +88,16 @@ import type {
   ToolResult,
   VerifierOutcome,
   VerifierResult,
+  WorkflowToolName,
 } from "../contracts/index.js";
 import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
 import type { FailedForFeedback } from "./feedback.js";
 import { RunState } from "./state.js";
-import { validateToolArgs } from "./validate-args.js";
+import { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
-export { validateToolArgs } from "./validate-args.js";
+export { APPLY_FIXED_TEXTS, applyPlan } from "./apply.js";
+export { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 export {
   EVIDENCE_CAPTURE_NOTE,
   EVIDENCE_SLACK_BYTES,
@@ -93,6 +125,17 @@ export const SYSTEM_PROMPT = [
   "When the work is finished, reply without tool calls. Verifiers decide whether the task succeeded.",
 ].join("\n");
 
+/**
+ * GT-E2: the label between the fixed system prompt and a workflow's instructions. The whole system
+ * text is masked before it is sent or recorded.
+ */
+export const INSTRUCTIONS_LABEL = "Workflow instructions:";
+/** GT-E3: a plan run whose model ended without a stored plan. */
+const NO_PLAN_MESSAGE = "the run ended without a plan: propose_plan did not succeed";
+/** GT-E3: the lead of a denial or restore failure that concerns one plan action. */
+const PLAN_ACTION_LEAD = "action ";
+/** GT-E4: notice of a run that waits for a person's review. */
+const REVIEW_NOTICE = "awaiting human review: the configured checks are done; a person records the verdict";
 const NO_VERIFIER_NOTICE = "no automatic verification: no verifier is configured for this task";
 const UNKNOWN_TOOL_MESSAGE = "unknown tool";
 const INVALID_ARGS_MESSAGE = "invalid arguments for this tool";
@@ -117,6 +160,10 @@ const INTEGRITY_END_LABEL = "run end";
 /** Every fixed text the engine sends to a model or records. Tests mask these with the real gateway. */
 export const FIXED_MODEL_TEXTS: readonly string[] = [
   SYSTEM_PROMPT,
+  INSTRUCTIONS_LABEL,
+  NO_PLAN_MESSAGE,
+  PLAN_ACTION_LEAD,
+  REVIEW_NOTICE,
   NO_VERIFIER_NOTICE,
   UNKNOWN_TOOL_MESSAGE,
   INVALID_ARGS_MESSAGE,
@@ -135,6 +182,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   INTEGRITY_END_LABEL,
 ];
 const MAX_TIMER_MS = 2_147_483_647;
+/** AC-D15: the call ids the engine keeps as given. */
+const CALL_ID_PATTERN = new RegExp(CALL_ID_PATTERN_SOURCE);
 
 /** Most changed paths one integrity notice names (U-2). The record and the result keep them all. */
 export const INTEGRITY_NOTICE_PATHS = 10;
@@ -148,6 +197,9 @@ const MASKING_FAILED: End = { status: "failed", reason: "model_error" };
 const CANCELLED: End = { status: "cancelled", reason: "cancelled" };
 const UNKNOWN_OUTCOME: End = { status: "needs-input", reason: "unknown_tool_outcome" };
 const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_changed" };
+const PLAN_PENDING: End = { status: "needs-input", reason: "plan_pending" };
+const AWAITING_REVIEW: End = { status: "needs-input", reason: "awaiting_review" };
+const NO_PLAN: End = { status: "failed", reason: "model_error" };
 
 /** A verification that failed in a way a repair may fix. */
 interface RepairNeeded {
@@ -162,9 +214,52 @@ function isToolName(name: string): name is ToolName {
   return (TOOL_NAMES as readonly string[]).includes(name);
 }
 
+function isWorkflowToolName(name: string): name is WorkflowToolName {
+  return (WORKFLOW_TOOL_NAMES as readonly string[]).includes(name);
+}
+
+/**
+ * GT-E1, GT-E3: the tools a run offers, from the task's settings, in their order and once each.
+ * A plan run (`plan: "apply"`) offers read tools and the plan tool only; any other run offers every
+ * listed tool except the plan tool. A legacy task lists TOOL_NAMES and gets exactly those.
+ */
+export function offeredTools(tools: readonly AnyToolName[], plan: "none" | "apply"): readonly AnyToolName[] {
+  const offered: AnyToolName[] = [];
+  for (const name of tools) {
+    if (offered.includes(name) || !Object.hasOwn(ALL_TOOL_DESCRIPTORS, name)) continue;
+    const descriptor = ALL_TOOL_DESCRIPTORS[name];
+    const endsPlan = descriptor.endsRun === "plan";
+    const allowed = plan === "apply" ? descriptor.displayClass === "read" || endsPlan : !endsPlan;
+    if (allowed) offered.push(name);
+  }
+  return offered;
+}
+
+/** A stored plan's digest and size, as `EngineResult.plan` holds it. */
+interface ProposedPlan {
+  readonly digest: ContentHash;
+  readonly actions: number;
+}
+
+function isProposedPlan(payload: unknown): payload is { readonly digest: ContentHash; readonly actions: readonly ResolvedPlanAction[] } {
+  if (typeof payload !== "object" || payload === null) return false;
+  const value = payload as { digest?: unknown; actions?: unknown };
+  return typeof value.digest === "string" && Array.isArray(value.actions);
+}
+
 export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> => {
   const { task, runId, model, privacy, policy, tools, verifiers, journal, clock, signal, integrity } = deps;
   const limits = task.limits;
+  // GT-E1 to GT-E4: everything a workflow changes comes from the task's explicit settings.
+  // A task without them gets the legacy settings, so its requests, records and result stay as before.
+  const settings = workflowSettingsOf(task);
+  const offered = offeredTools(settings.tools, settings.plan);
+  const offeredBuiltin = offered.filter(isToolName);
+  const offeredWorkflow = offered.filter(isWorkflowToolName);
+  /** GT-E3: set when `propose_plan` stored a plan; the run then ends as plan_pending. */
+  let proposedPlan: ProposedPlan | null = null;
+  /** GT-E4: the masked checklist of a run that ends as awaiting_review. */
+  let reviewChecklist: readonly MaskedText[] | null = null;
   const state = new RunState();
   const startedAt = clock.now();
 
@@ -177,6 +272,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const notices: MaskedText[] = [];
   /** Results by call id. A call id that was already answered is never executed again. */
   const answered = new Map<string, ToolResult>();
+  /** AC-D15: the recorded id of every model-given call id seen in this run, and the ids in use. */
+  const recordedIds = new Map<string, string>();
+  const usedIds = new Set<string>();
+  let replacedIds = 0;
   /** The model-bound conversation. It keeps growing across repairs. */
   const messages: ModelMessage[] = [];
   /** How many messages earlier `model_request` records already hold. */
@@ -233,6 +332,40 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     };
     const masked = walk(value);
     return failed ? null : mask(JSON.stringify(masked));
+  };
+
+  /**
+   * AC-D15 (DR-13, R-1 L-1): the calls of one model response as the engine records, answers and
+   * sends them back. A name in no tool list becomes UNKNOWN_TOOL_RECORD_NAME (so it is unknown_tool).
+   * An id is kept when it passes CALL_ID_PATTERN_SOURCE, masking leaves it unchanged and no other id
+   * stands for it; otherwise it gets REPLACED_CALL_ID_PREFIX and a number not in use. The same id
+   * keeps its recorded id for the whole run, so a call and its result stay paired and a repeated
+   * call is still answered once. Ids that can be kept are placed first, so a replacement never
+   * takes the place of a valid id given in the same response.
+   */
+  const recordableCalls = (given: readonly ToolCall[]): ToolCall[] => {
+    const keepable = (id: string): boolean => {
+      if (!CALL_ID_PATTERN.test(id) || usedIds.has(id)) return false;
+      return mask(id) === id;
+    };
+    for (const call of given) {
+      if (recordedIds.has(call.id) || !keepable(call.id)) continue;
+      recordedIds.set(call.id, call.id);
+      usedIds.add(call.id);
+    }
+    return given.map((call) => {
+      let id = recordedIds.get(call.id);
+      if (id === undefined) {
+        do {
+          replacedIds += 1;
+          id = `${REPLACED_CALL_ID_PREFIX}${replacedIds}`;
+        } while (usedIds.has(id));
+        recordedIds.set(call.id, id);
+        usedIds.add(id);
+      }
+      const name = (ALL_TOOL_NAMES as readonly string[]).includes(call.name) ? call.name : UNKNOWN_TOOL_RECORD_NAME;
+      return { id, name, args: call.args };
+    });
   };
 
   const interrupted = (): End | null => {
@@ -398,20 +531,216 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     }
   };
 
-  /** Order: validate, checkRequested, restore permitted fields, checkEffective, execute, mask, record. */
-  const handleCall = async (call: ToolCall): Promise<ToolResult | End> => {
-    if (!isToolName(call.name)) {
+  const unknownTool = async (call: ToolCall): Promise<ToolResult | End> => {
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: call.name,
+      stage: "validate",
+      allowed: false,
+      permission: null,
+      code: "unknown_tool",
+    });
+    return errorResult(call, "unknown_tool", UNKNOWN_TOOL_MESSAGE);
+  };
+
+  const invalidArgsOf = async (call: ToolCall): Promise<ToolResult | End> => {
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: call.name,
+      stage: "validate",
+      allowed: false,
+      permission: null,
+      code: "invalid_args",
+    });
+    return errorResult(call, "invalid_args", INVALID_ARGS_MESSAGE);
+  };
+
+  /**
+   * Runs a checked workflow tool call. Like `execute`: when the runner throws, a read is retried
+   * once and anything else (the plan tool writes plan.json) is an unknown outcome.
+   */
+  const executeWorkflow = async (
+    call: EffectiveWorkflowToolCall,
+    descriptor: ToolDescriptor,
+  ): Promise<RawWorkflowToolOutcome | End> => {
+    const run = tools.executeWorkflowTool;
+    if (run === undefined) return UNKNOWN_OUTCOME;
+    try {
+      return await run.call(tools, call, runSignal);
+    } catch {
+      const stop = interrupted();
+      if (stop !== null) return stop;
+      if (descriptor.displayClass !== "read") return UNKNOWN_OUTCOME;
+      try {
+        return await run.call(tools, call, runSignal);
+      } catch {
+        return UNKNOWN_OUTCOME;
+      }
+    }
+  };
+
+  /** Masks, records and returns the outcome of an executed workflow tool call. */
+  const finishWorkflowCall = async (
+    call: ToolCall,
+    name: WorkflowToolName,
+    outcome: RawWorkflowToolOutcome,
+  ): Promise<ToolResult | End> => {
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(outcome.message);
+    if (content === null) return MASKING_FAILED;
+    const result: ToolResult = {
+      callId: call.id,
+      tool: name,
+      ok: outcome.ok,
+      content,
+      errorCode: outcome.ok ? null : outcome.code,
+    };
+    await record({ type: "tool_result", result });
+    return result;
+  };
+
+  /**
+   * GT-E3: `propose_plan` (the tool whose descriptor says `endsRun: "plan"`). Every action is judged
+   * on its own with PLAN_ACTION_DESCRIPTORS: the task's `planActions`, then the policy gate before
+   * restoration, permitted restoration of its path fields, and the gate on the effective paths. One
+   * denied action denies the call; the model gets the reason and may propose again. When the tool
+   * stored the plan, the run ends as plan_pending after this call.
+   */
+  const handlePlanCall = async (call: ToolCall, args: ProposePlanArgs, descriptor: ToolDescriptor): Promise<ToolResult | End> => {
+    const allowedKinds = task.policy.planActions ?? [];
+    const effectiveActions: JsonObject[] = [];
+    for (const [index, action] of args.actions.entries()) {
+      const actionDescriptor = PLAN_ACTION_DESCRIPTORS[action.kind];
+      const actionArgs: JsonObject = action.kind === "move" ? { from: action.from, to: action.to } : { path: action.path };
+      const denyAction = async (
+        stage: "policy_requested" | "policy_effective",
+        decision: Extract<PolicyDecision, { allowed: false }>,
+      ): Promise<ToolResult | End> => {
+        await record({
+          type: "tool_decision",
+          callId: call.id,
+          tool: call.name,
+          stage,
+          allowed: false,
+          permission: decision.permission,
+          code: decision.code,
+        });
+        return errorResult(
+          call,
+          "policy_denied",
+          `denied by policy: ${PLAN_ACTION_LEAD}${index}: ${decision.permission}/${decision.code}`,
+        );
+      };
+      // The task's planActions are checked here as well as by the gate (fail closed).
+      if (!allowedKinds.includes(action.kind)) {
+        return denyAction("policy_requested", { allowed: false, permission: "destructive", code: "plan_action_not_allowed" });
+      }
+      const synthetic: ToolCall = { id: call.id, name: actionDescriptor.name, args: actionArgs };
+      const requested = policy.checkRequested(synthetic, actionDescriptor);
+      if (!requested.allowed) return denyAction("policy_requested", requested);
+      const resolved = privacy.resolveToolArgs({
+        args: actionArgs,
+        restoreFields: policy.restorableFields(actionDescriptor),
+        documentFields: [],
+      });
+      if (!resolved.ok) {
+        await record({
+          type: "tool_decision",
+          callId: call.id,
+          tool: call.name,
+          stage: "restore",
+          allowed: false,
+          permission: "restore",
+          code: resolved.code,
+        });
+        return errorResult(call, resolved.code, `token not usable in field: ${PLAN_ACTION_LEAD}${index}: ${resolved.field}`);
+      }
+      const checked = await policy.checkEffective({ id: call.id, name: actionDescriptor.name, args: resolved.args }, actionDescriptor);
+      if (!checked.allowed) return denyAction("policy_effective", checked);
+      effectiveActions.push({ kind: action.kind, ...resolved.args });
+    }
+    const effectiveArgs = validateWorkflowToolArgs("propose_plan", { summary: args.summary, actions: effectiveActions });
+    if (effectiveArgs === null) return invalidArgsOf(call);
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: call.name,
+      stage: "policy_effective",
+      allowed: true,
+      permission: null,
+      code: null,
+    });
+    toolCalls += 1;
+    const outcome = await executeWorkflow({ id: call.id, name: "propose_plan", args: effectiveArgs }, descriptor);
+    if (isEnd(outcome)) return outcome;
+    const result = await finishWorkflowCall(call, "propose_plan", outcome);
+    if (isEnd(result) || !outcome.ok) return result;
+    if (!isProposedPlan(outcome.payload)) return UNKNOWN_OUTCOME;
+    proposedPlan = { digest: outcome.payload.digest, actions: outcome.payload.actions.length };
+    return result;
+  };
+
+  /** GT-E1: a workflow tool call. Same order as a built-in call: validate, check, restore, check, run. */
+  const handleWorkflowCall = async (call: ToolCall, name: WorkflowToolName): Promise<ToolResult | End> => {
+    // A runner that cannot run workflow tools answers them as unknown (contract ToolRunner).
+    if (tools.executeWorkflowTool === undefined) return unknownTool(call);
+    const descriptor = WORKFLOW_TOOLS[name];
+    if (descriptor.endsRun === "plan") {
+      const args = validateWorkflowToolArgs("propose_plan", call.args);
+      if (args === null) return invalidArgsOf(call);
+      return handlePlanCall(call, args, descriptor);
+    }
+    if (validateWorkflowToolArgs(name, call.args) === null) return invalidArgsOf(call);
+
+    const requested = policy.checkRequested(call, descriptor);
+    if (!requested.allowed) return denied(call, "policy_requested", requested);
+
+    const resolved = privacy.resolveToolArgs({
+      args: call.args,
+      restoreFields: policy.restorableFields(descriptor),
+      documentFields: descriptor.documentFields,
+    });
+    if (!resolved.ok) {
       await record({
         type: "tool_decision",
         callId: call.id,
-        tool: call.name,
-        stage: "validate",
+        tool: name,
+        stage: "restore",
         allowed: false,
-        permission: null,
-        code: "unknown_tool",
+        permission: "restore",
+        code: resolved.code,
       });
-      return errorResult(call, "unknown_tool", UNKNOWN_TOOL_MESSAGE);
+      return errorResult(call, resolved.code, `token not usable in field: ${resolved.field}`);
     }
+    const effectiveArgs = validateWorkflowToolArgs(name, resolved.args);
+    if (effectiveArgs === null) return invalidArgsOf(call);
+    const effective = { id: call.id, name, args: effectiveArgs } as EffectiveWorkflowToolCall;
+
+    const checked = await policy.checkEffective(effective, descriptor);
+    if (!checked.allowed) return denied(call, "policy_effective", checked);
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: name,
+      stage: "policy_effective",
+      allowed: true,
+      permission: null,
+      code: null,
+    });
+
+    toolCalls += 1;
+    const outcome = await executeWorkflow(effective, descriptor);
+    if (isEnd(outcome)) return outcome;
+    return finishWorkflowCall(call, name, outcome);
+  };
+
+  /** Order: validate, checkRequested, restore permitted fields, checkEffective, execute, mask, record. */
+  const handleCall = async (call: ToolCall): Promise<ToolResult | End> => {
+    // GT-E1: only the tools this run offers may be called. For a legacy task that is TOOL_NAMES.
+    if (!(offered as readonly string[]).includes(call.name)) return unknownTool(call);
+    if (isWorkflowToolName(call.name)) return handleWorkflowCall(call, call.name);
+    if (!isToolName(call.name)) return unknownTool(call);
     const name = call.name;
     const descriptor = BUILTIN_TOOLS[name];
     const invalidArgs = async (): Promise<ToolResult | End> => {
@@ -516,10 +845,40 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
   /** Masks the fixed instructions and the goal, records run_started and opens the conversation. */
   const start = async (): Promise<MaskedText | End> => {
-    const system = mask(SYSTEM_PROMPT);
+    // GT-E2: a workflow's instructions follow the fixed prompt under a fixed label, masked as one text.
+    const instructions = settings.instructions;
+    const systemText =
+      instructions === null || instructions.trim().length === 0
+        ? SYSTEM_PROMPT
+        : `${SYSTEM_PROMPT}\n\n${INSTRUCTIONS_LABEL}\n${instructions}`;
+    const system = mask(systemText);
     const goal = mask(task.goal);
     const workflow = mask(task.workflow);
     if (system === null || goal === null || workflow === null) return MASKING_FAILED;
+
+    // run_started carries the workflow settings only when the task has any, so a legacy run's
+    // record is unchanged.
+    const hasWorkflow =
+      task.workflowRef !== undefined ||
+      task.tools !== undefined ||
+      task.instructions !== undefined ||
+      task.plan !== undefined ||
+      task.completion !== undefined ||
+      task.humanReview !== undefined;
+    let workflowFields = {};
+    if (hasWorkflow) {
+      let workflowRef: MaskedText | null = null;
+      if (task.workflowRef !== undefined) {
+        workflowRef = mask(task.workflowRef);
+        if (workflowRef === null) return MASKING_FAILED;
+      }
+      workflowFields = {
+        workflowRef,
+        tools: [...settings.tools],
+        plan: settings.plan,
+        completion: settings.completion,
+      };
+    }
 
     await record({
       type: "run_started",
@@ -528,6 +887,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       workflow,
       provider: model.name,
       limits,
+      ...workflowFields,
     });
     state.transition("running");
     messages.push({ role: "user", content: goal });
@@ -551,7 +911,13 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
       // W-1: this turn and its tool calls may change protected material.
       sinceCheck = "model";
-      const outcome = await model.complete({ system, messages, tools: TOOL_NAMES }, runSignal);
+      // GT-E1: the offered tools. A legacy task offers TOOL_NAMES and no workflow tool, so its
+      // request has the same shape as before (no workflowTools field).
+      const request =
+        offeredWorkflow.length > 0
+          ? { system, messages, tools: offeredBuiltin, workflowTools: offeredWorkflow }
+          : { system, messages, tools: offeredBuiltin };
+      const outcome = await model.complete(request, runSignal);
       modelTurns = turn;
       if (!outcome.ok) {
         const interruption = interrupted();
@@ -566,8 +932,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       const response = outcome.response;
       const text = mask(response.text);
       if (text === null) return MASKING_FAILED;
+      // AC-D15: from here on the calls carry only names and ids the engine may record and send back.
+      const calls = recordableCalls(response.toolCalls);
       const echoed: MaskedToolCall[] = [];
-      for (const call of response.toolCalls) {
+      for (const call of calls) {
         const argsJson = maskJson(call.args);
         if (argsJson === null) return MASKING_FAILED;
         echoed.push({ id: call.id, name: call.name, argsJson });
@@ -609,7 +977,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
 
       messages.push({ role: "assistant", text, toolCalls: echoed });
       const results: ToolResult[] = [];
-      for (const call of response.toolCalls) {
+      for (const call of calls) {
         const interruption = interrupted();
         if (interruption !== null) return interruption;
 
@@ -625,6 +993,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         if (isEnd(handled)) return handled;
         answered.set(call.id, handled);
         results.push(handled);
+        // GT-E3: a stored plan ends the run. Later calls of this turn are not run.
+        if (proposedPlan !== null) return PLAN_PENDING;
       }
       messages.push({ role: "tool", results });
     }
@@ -634,11 +1004,29 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
    * Runs every verifier once (one round). `EngineResult.verifiers` holds the latest round.
    * Returns the end of the run, or the failed results when a repair may follow.
    */
+  /**
+   * GT-E4: with `completion: "human_review"`, a run whose checks are done waits for a person: it
+   * ends as needs-input/awaiting_review with the masked checklist. It never becomes done.
+   */
+  const awaitReview = (): End => {
+    const checklist: MaskedText[] = [];
+    for (const item of settings.humanReview?.checklist ?? []) {
+      const masked = mask(item);
+      if (masked === null) return MASKING_FAILED;
+      checklist.push(masked);
+    }
+    reviewChecklist = checklist;
+    const notice = mask(REVIEW_NOTICE);
+    if (notice !== null) notices.push(notice);
+    return AWAITING_REVIEW;
+  };
+
   const verify = async (): Promise<End | RepairNeeded> => {
     state.transition("verifying");
     if (task.verifiers.length === 0) {
       const notice = mask(NO_VERIFIER_NOTICE);
       if (notice !== null) notices.push(notice);
+      if (settings.completion === "human_review") return awaitReview();
       return { status: "needs-input", reason: "no_verifier" };
     }
     // U-1: when protected material changed since run start, this round's verifiers are not run.
@@ -702,9 +1090,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       if (late !== null) return late;
     }
     if (!outcomes.includes("fail")) {
-      return outcomes.includes("inconclusive")
-        ? { status: "needs-input", reason: "verifier_inconclusive" }
-        : { status: "done", reason: "verified" };
+      if (outcomes.includes("inconclusive")) return { status: "needs-input", reason: "verifier_inconclusive" };
+      if (settings.completion === "human_review") return awaitReview();
+      return { status: "done", reason: "verified" };
     }
     // R-1: a verifier that could not decide is not something the model can fix, so no repair.
     if (outcomes.includes("inconclusive")) return { status: "failed", reason: "verifier_failed" };
@@ -757,6 +1145,16 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     for (;;) {
       const conversed = await converse(system);
       if (conversed !== null) return conversed;
+      // GT-E3: a plan run is verified only after its plan is applied (an apply run). A model that
+      // ends without a stored plan has not done what a plan run asks for.
+      if (settings.plan === "apply") {
+        const message = mask(NO_PLAN_MESSAGE);
+        if (message !== null) {
+          notices.push(message);
+          await record({ type: "model_error", turn: modelTurns, kind: "malformed_response", message });
+        }
+        return NO_PLAN;
+      }
       const verdict = await verify();
       if (isEnd(verdict)) return verdict;
       const repaired = await repair(verdict);
@@ -795,6 +1193,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       notices,
       // U-2: only when at least one integrity_checked was recorded; the last one's list.
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
+      // GT-E3, GT-E4: only with the reasons that carry them.
+      ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
+      ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),
     };
   } finally {
     clearTimeout(timer);

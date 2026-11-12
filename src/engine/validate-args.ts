@@ -3,8 +3,15 @@
  * Whether a call is permitted is decided by the policy gate.
  */
 
-import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS } from "../contracts/index.js";
-import type { JsonObject, JsonValue, ToolArgsByName, ToolName } from "../contracts/index.js";
+import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS, MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS } from "../contracts/index.js";
+import type {
+  JsonObject,
+  JsonValue,
+  ToolArgsByName,
+  ToolName,
+  WorkflowToolArgsByName,
+  WorkflowToolName,
+} from "../contracts/index.js";
 
 const HASH_PATTERN = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
@@ -86,4 +93,48 @@ export function validateToolArgs<N extends ToolName>(
   args: JsonObject,
 ): ToolArgsByName[N] | null {
   return isValid(name, args) ? (args as unknown as ToolArgsByName[N]) : null;
+}
+
+function isPlanAction(action: JsonValue | undefined): boolean {
+  if (!isObject(action)) return false;
+  if (action["kind"] === "move") {
+    return hasOnlyKeys(action, ["kind", "from", "to"]) && isNonEmptyString(action["from"]) && isNonEmptyString(action["to"]);
+  }
+  if (action["kind"] === "discard") {
+    return hasOnlyKeys(action, ["kind", "path"]) && isNonEmptyString(action["path"]);
+  }
+  return false;
+}
+
+/** G-B: the shapes WORKFLOW_TOOL_DEFINITIONS describe. Structure only, as for the built-in tools. */
+function isValidWorkflow(name: WorkflowToolName, args: JsonObject): boolean {
+  switch (name) {
+    case "inspect_files":
+      return (
+        hasOnlyKeys(args, ["path", "after", "hash"]) &&
+        isNonEmptyString(args["path"]) &&
+        (args["after"] === undefined || isNonEmptyString(args["after"])) &&
+        (args["hash"] === undefined || typeof args["hash"] === "boolean")
+      );
+    case "propose_plan": {
+      if (!hasOnlyKeys(args, ["summary", "actions"])) return false;
+      const summary = args["summary"];
+      if (!isNonEmptyString(summary) || summary.length > MAX_PLAN_SUMMARY_CHARS) return false;
+      const actions = args["actions"];
+      return (
+        Array.isArray(actions) &&
+        actions.length >= 1 &&
+        actions.length <= MAX_PLAN_ACTIONS &&
+        actions.every((action) => isPlanAction(action))
+      );
+    }
+  }
+}
+
+/** Returns the arguments typed for the workflow tool, or `null` when the shape is invalid. */
+export function validateWorkflowToolArgs<N extends WorkflowToolName>(
+  name: N,
+  args: JsonObject,
+): WorkflowToolArgsByName[N] | null {
+  return isValidWorkflow(name, args) ? (args as unknown as WorkflowToolArgsByName[N]) : null;
 }

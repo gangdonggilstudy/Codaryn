@@ -15,6 +15,7 @@ import {
 import type {
   ChangeRecorder,
   PathAccess,
+  PlanRecorder,
   PrivacyGateway,
   RawText,
   RawToolOutcome,
@@ -33,6 +34,14 @@ import type {
 
 import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
+import { nodePlanFileOps } from "./plan-files.js";
+import type { PlanFileOps } from "./plan-files.js";
+import { inspectFiles, proposePlan } from "./workflow-tools.js";
+
+export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
+export type { PlanExecutorDeps } from "./plan-executor.js";
+export { MAX_INSPECT_WALK_ENTRIES } from "./workflow-tools.js";
+export type { PlanFileOps } from "./plan-files.js";
 
 export {
   COMMAND_CAPTURE_SLACK_BYTES,
@@ -73,6 +82,15 @@ export interface ToolRunnerOptions {
    * not write when that fails. Without it, files are written as before and nothing is kept.
    */
   readonly changeRecorder?: ChangeRecorder;
+  /**
+   * G-A: stores the plan `propose_plan` built (plan.json). Without it `propose_plan` fails with
+   * `io_error` and stores nothing. The four built-in tools never use it.
+   */
+  readonly planRecorder?: PlanRecorder;
+  /** For tests: replaces parts of the file system the workflow tools use. */
+  readonly fileOps?: Partial<PlanFileOps>;
+  /** For tests. Defaults to `process.platform`. Decides whether plan paths compare without case. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
@@ -409,6 +427,14 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     return { ok: true, payload };
   }
 
+  const workflowDeps = {
+    workspace,
+    privacy,
+    ...(options.planRecorder === undefined ? {} : { planRecorder: options.planRecorder }),
+    fileOps: { ...nodePlanFileOps, ...options.fileOps },
+    platform: options.platform ?? process.platform,
+  };
+
   return {
     async execute(call, signal) {
       try {
@@ -422,6 +448,21 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
             return await writeFile(call.args);
           case "run_command":
             return await runCommand(call.args, signal);
+        }
+      } catch {
+        // No error detail: it could carry raw file text or paths.
+        return fail("io_error", "unexpected tool failure");
+      }
+    },
+
+    async executeWorkflowTool(call, signal) {
+      try {
+        if (signal.aborted) return fail("cancelled", "cancelled before start");
+        switch (call.name) {
+          case "inspect_files":
+            return await inspectFiles(workflowDeps, call.args, signal);
+          case "propose_plan":
+            return await proposePlan(workflowDeps, call.args, signal);
         }
       } catch {
         // No error detail: it could carry raw file text or paths.

@@ -165,7 +165,7 @@ codaryn: 끝 — 완료: 지정한 검증 1개 통과 (done/verified)
 ```
 $ codaryn revert --workspace D:\work\notes --run latest --dry-run
 되돌릴 파일 1개: INSTALL.md — 삭제 (이 실행이 만든 파일)
-건너뛸 파일 0개.  실행하려면 --dry-run 없이 다시 실행하세요.
+건너뛸 파일 0개.  되돌리려면 --dry-run 없이 다시 실행하세요.
 ```
 
 - 어댑터의 미리보기는 `--dry-run`(또는 `revert({dryRun: true})`) 뒤 확인을 받고 다시 부르는 두 번의 호출이다. 사이에 바뀐 파일은 두 번째 호출이 건너뛴다. 미리보기는 약속이 아니라고 확인 창에 쓴다(AC 5.5).

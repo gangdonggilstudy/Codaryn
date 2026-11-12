@@ -881,6 +881,7 @@ export type DoctorText = {
  *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
  *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
  * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
+ *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
  *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the
  *   report's text: a `tool_result` record with `ok: false` whose `callId` has no `tool_decision`
  *   with `allowed: false` in the run. A call the policy denied or a check rejected is a denied call
@@ -894,7 +895,7 @@ export interface RunSummaryContext {
   readonly profileApplied: boolean;
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
-  readonly failedToolCalls: number;
+  readonly failedToolCalls?: number;
   readonly policySource: "task" | "config";
 }
 

@@ -387,8 +387,14 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
     // No catalog text for these: fixed English, as other command hints.
     // R-34 I-3: name what there is to confirm.
     if (runs) {
-      const extra = notReverted > 0 ? " --include-not-reverted" : "";
-      out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}${extra}.`);
+      // R-34b P-3: the offered command never carries --include-not-reverted; that confirmation is
+      // the person's own, told apart with what it loses.
+      out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}.`);
+      if (notReverted > 0) {
+        out.push(
+          `The records of ${notReverted} run(s) not reverted, or only partly, are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.`,
+        );
+      }
       if (discarded) out.push("People's discarded files are deleted only with --delete-discarded besides.");
     } else if (discarded) {
       out.push(`Nothing was removed. To delete the discarded files, run the same command with --confirm ${digest} --delete-discarded.`);

@@ -22,9 +22,10 @@ import type {
   MaskedText,
   ModelsOutput,
   CleanupConfirmation,
-  CleanupOutcome,
+  CleanupOutput,
   CleanupPlan,
   CleanupSelection,
+  CleanupStatus,
   PermissionKind,
   PolicyNarrowingKind,
   StateSummary,
@@ -389,13 +390,23 @@ export interface ApplyCleanupRequest {
   readonly confirmation: CleanupConfirmation;
 }
 
+/** DR-48: the outcome of a cleanup that was carried out, as the CLI's JSON (CleanupOutput) gives it. */
+export type CleanupDoneOutcome = Extract<CleanupOutput, { readonly status: Exclude<CleanupStatus, "preview"> }>["outcome"];
+
 export interface CleanupApplied {
   readonly kind: "cleanup_applied";
   /**
-   * The store's outcome: what was removed entirely and what was kept and why (DR-44: partly_removed is
-   * never reported as removed), or why nothing was (plan_changed, workspace_locked).
+   * DR-48 (AXM-3): what the cleanup did, by the contract's one rule (cleanupStatusOf): removed,
+   * nothing_removed, or partly_failed (something kept for a problem, CLEANUP_PROBLEM_KEPT_REASONS).
    */
-  readonly outcome: CleanupOutcome;
+  readonly status: Exclude<CleanupStatus, "preview">;
+  /**
+   * The store's outcome: what was removed entirely and what was kept and why (DR-44: partly_removed is
+   * never reported as removed). `ok` is true for `removed` only, as in the CLI's JSON. A digest that
+   * is not the plan's (cleanup_plan_changed) and a held lock (workspace_locked) are call errors, not
+   * outcomes.
+   */
+  readonly outcome: CleanupDoneOutcome;
 }
 
 export interface ListRunsRequest {

@@ -95,7 +95,7 @@ async function cleanup(base: string, args: readonly string[], json = true): Prom
 
 async function digestOf(base: string, args: readonly string[]): Promise<string> {
   const shown = await cleanup(base, args);
-  assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+  assert.ok(shown.output?.status === "preview", JSON.stringify(shown));
   return shown.output.plan.digest.slice(0, 12);
 }
 
@@ -134,7 +134,7 @@ describe("R-34b P-1: a run whose records cannot be checked needs the not-reverte
   test("it is warned about as records_unreadable, which needs --include-not-reverted; the person's line says so", async () => {
     const { base, runId } = await damaged();
     const shown = await cleanup(base, ["--older-than", "0"]);
-    assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+    assert.ok(shown.output?.status === "preview", JSON.stringify(shown));
     const item = shown.output.plan.items.find((entry) => entry.target === "run" && entry.runId === runId);
     assert.ok(item !== undefined && needsNotRevertedConfirmation(item.warnings), JSON.stringify(shown.output.plan));
     // U-3 (R-34c L-1): the contract's code, not "not reverted" (whether it was is not known).
@@ -161,7 +161,7 @@ describe("R-34b P-2: leftovers are told by the cleanup's mark, not by their name
     await mkdir(lookalike);
     await writeFile(path.join(lookalike, "person.txt"), "a person's note\n", "utf8");
     const shown = await cleanup(base, ["--run", runId]);
-    assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+    assert.ok(shown.output?.status === "preview", JSON.stringify(shown));
     assert.equal(shown.output.plan.items.some((item) => item.target === "leftover"), false, JSON.stringify(shown.output.plan.items));
     assert.deepEqual(shown.output.summary.unknownFolders, { count: 1, files: 1, bytes: 16 });
     const text = (await cleanup(base, ["--run", runId], false)).text;

@@ -11,12 +11,17 @@
  *   command stops with `invalid_arguments` and changes nothing, since it cannot tell which run
  *   was meant.
  * - N-23: the caller shows the chosen run (id and start time) before it acts.
+ * - U-22 (DR-48, AXM-8): `latest` is the newest run. When a checked run without a result that is
+ *   newer than the finished run `latestRun` would choose (or there is none) holds the workspace lock
+ *   with a live holder, the answer is `run_in_progress` (try again when it ends), not that older
+ *   run and not `run_not_found` (PM decision). A newer run that stopped without a result (no live
+ *   lock) is passed over as before. A run id given as it is shows that run.
  */
 
 import path from "node:path";
 import { LATEST_RUN_ALIAS, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { CliErrorCode, ListRuns, RunListEntry } from "../contracts/index.js";
-import { latestRun } from "../store/index.js";
+import { inspectLock, latestRun } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 
 export type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
@@ -28,6 +33,16 @@ export interface RunReferenceDeps {
   readonly listRuns?: ListRuns;
   /** N-27 (a): the store's `inspectRun`. Absent: an explicit id is used as it is. */
   readonly inspect?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
+  /**
+   * U-22: whether that run holds the workspace lock with a live holder. Absent: the store's
+   * `inspectLock` (reads only). Asked only for runs without a result newer than the latest finished one.
+   */
+  readonly runInProgress?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+}
+
+async function holdsLock(workspaceRoot: string, runId: string): Promise<boolean> {
+  const lock = await inspectLock(workspaceRoot);
+  return lock.state === "held" && lock.holder.runId === runId;
 }
 
 export type RunReferenceOutcome =
@@ -67,6 +82,26 @@ export async function resolveRunReference(workspaceRoot: string, runId: string, 
     return { ok: false, code: "invalid_run_record", message: "the workspace's run records cannot be listed; nothing was changed" };
   }
   const latest = latestRun(listing.runs);
+  // U-22 (AXM-8, PM): a run still going that is newer than `latest` (listRuns: newest first) is the
+  // newest run; it is not passed over for an older one, and it is not "no run".
+  const inProgress = deps.runInProgress ?? holdsLock;
+  for (const run of listing.runs) {
+    if (latest !== null && run.runId === latest.runId) break;
+    if (run.state !== "checked" || run.status !== null) continue;
+    let going: boolean;
+    try {
+      going = await inProgress(workspaceRoot, run.runId);
+    } catch {
+      going = false;
+    }
+    if (going) {
+      return {
+        ok: false,
+        code: "run_in_progress",
+        message: `the latest run (${run.runId}) is still going and has no result yet; nothing was changed. Try again when it ends, or give a run id`,
+      };
+    }
+  }
   if (latest === null) {
     return { ok: false, code: "run_not_found", message: "the workspace has no finished run whose records could be checked; nothing was changed" };
   }

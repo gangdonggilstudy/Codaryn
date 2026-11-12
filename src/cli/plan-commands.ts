@@ -431,7 +431,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
         privacy,
         verifiers: createVerifierRunner({ workspace, commandRunner }),
-        inventory: createInventoryChecker({ workspaceRoot }),
+        // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
+        inventory: createInventoryChecker({ workspaceRoot, signal: cancel.signal }),
         journal,
         clock: io.clock,
         signal: cancel.signal,

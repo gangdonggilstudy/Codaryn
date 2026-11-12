@@ -156,6 +156,8 @@ export const KO_MESSAGES: MessageTexts = {
   "help.option.json": "--json: 결과를 JSON 한 줄로 냅니다",
   "help.option.use": "--use <번호|id>: 그 모델을 설정 파일의 model에 씁니다",
   "help.option.limit": "--limit <n>: 보여 줄 실행 수(기본 20, 최대 1000)",
+  "help.option.allow_unsafe_move":
+    "--allow-unsafe-move: 이번 적용이나 되돌리기에 한해, 파일을 덮어쓸 수 있는 이동에 동의합니다",
   "help.exit.run": "done 0, failed 1, 입력 오류 2, needs-input 3, budget-exhausted 4, cancelled 5, 작업 공간 잠김 6, 제공자 설정 안 됨 7, 내부 오류 70",
   "help.exit.revert": "complete 0, partial 3, 오류 2 또는 6",
   "help.exit.report": "complete 0, incomplete(result.json 없음) 3, 오류 2",

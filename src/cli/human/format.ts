@@ -135,6 +135,31 @@ export function padEnd(text: string, width: number): string {
 export const MODEL_TEXT_PREFIX = "  | ";
 /** The widest row of quoted model text, prefix included, in terminal columns (folded here, not by the terminal). */
 export const MODEL_TEXT_COLUMNS = 76;
+/** R-52 R52-L1: the width taken for a terminal that does not tell its width. */
+export const MODEL_TEXT_FALLBACK_COLUMNS = 40;
+/** The narrowest row folded for: the prefix and a few characters (a narrower terminal folds anyway). */
+const MODEL_TEXT_MIN_COLUMNS = 8;
+
+/**
+ * R-52 R52-L1: the narrowest terminal the person's output goes to (stdout or stderr, whichever is a
+ * terminal), MODEL_TEXT_FALLBACK_COLUMNS for a terminal that does not tell its width, or null when
+ * neither is a terminal (a file or a pipe: nothing folds it here).
+ */
+export function terminalColumns(): number | null {
+  const widths: number[] = [];
+  for (const stream of [process.stdout, process.stderr]) {
+    if (stream?.isTTY !== true) continue;
+    const columns: unknown = stream.columns;
+    widths.push(typeof columns === "number" && Number.isSafeInteger(columns) && columns > 0 ? columns : MODEL_TEXT_FALLBACK_COLUMNS);
+  }
+  return widths.length === 0 ? null : Math.min(...widths);
+}
+
+/** The widest row for a terminal `columns` wide: one column less (a row that fills the last column may fold), at most MODEL_TEXT_COLUMNS. */
+function modelTextWidth(columns: number | null): number {
+  if (columns === null || !Number.isFinite(columns)) return MODEL_TEXT_COLUMNS;
+  return Math.max(MODEL_TEXT_MIN_COLUMNS, Math.min(MODEL_TEXT_COLUMNS, Math.floor(columns) - 1));
+}
 
 /** Every line break a terminal may honour: CR LF, LF, CR, VT, FF, NEL, and the line and paragraph separators. */
 const MODEL_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
@@ -147,13 +172,15 @@ const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
  * U-14 (R-49 R49-L2), DR-47: text a model wrote (a plan's summary, the agent's last message) as rows
  * for people. It is the model's own words, so every row starts with MODEL_TEXT_PREFIX. Runs of
  * white space become one space and invisible characters go, so padding cannot place words at the
- * start of a terminal row; the text is folded here at MODEL_TEXT_COLUMNS (at a space when there is
- * one), so the terminal does not fold it. Key shapes and control characters are replaced as in
- * every line for people. At most `maxRows` rows; the rest are counted in a last "(+N)" row.
- * No rows when nothing is left to show.
+ * start of a terminal row; the text is folded here (at a space when there is one), so the terminal
+ * does not fold it: R-52 R52-L1, for a terminal `columns` wide (by default the terminal's,
+ * terminalColumns) one column narrower, at most MODEL_TEXT_COLUMNS, and MODEL_TEXT_COLUMNS when the
+ * output is not a terminal. Key shapes and control characters are replaced as in every line for
+ * people. At most `maxRows` rows; the rest are counted in a last "(+N)" row. No rows when nothing is
+ * left to show.
  */
-export function quoteModelText(text: string, maxRows: number): string[] {
-  const room = MODEL_TEXT_COLUMNS - displayWidth(MODEL_TEXT_PREFIX);
+export function quoteModelText(text: string, maxRows: number, columns: number | null = terminalColumns()): string[] {
+  const room = modelTextWidth(columns) - displayWidth(MODEL_TEXT_PREFIX);
   const rows: string[] = [];
   for (const raw of text.split(MODEL_LINE_BREAK)) {
     // White space first (a tab is a space here, not a control character to mark), then the last step of every line.

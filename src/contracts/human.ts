@@ -21,8 +21,8 @@
  */
 
 import { REVERT_SKIP_REASONS } from "./changes.js";
-import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES } from "./cleanup.js";
-import type { CleanupBlockCode, CleanupKeptReason, CleanupWarningCode } from "./cleanup.js";
+import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_TARGETS, CLEANUP_WARNING_CODES } from "./cleanup.js";
+import type { CleanupBlockCode, CleanupKeptReason, CleanupTarget, CleanupWarningCode } from "./cleanup.js";
 import type { RevertSkipReason } from "./changes.js";
 import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { ApiBaseUrlEnv, ApiKeyEnv, ApiModelEnv, DefaultConfigDisplay } from "./config.js";
@@ -490,6 +490,30 @@ export const FIXED_MESSAGES = {
   // R-34b P-2: folders in the state directory named like a leftover but without a cleanup's mark
   // (StateSummary.unknownFolders): shown when there are any; Codaryn does not remove them.
   "cleanup.summary.unknown_folders": { count: "count", bytes: "count" },
+  // U-34 (UXM-7, AXM-22): the lines that were fixed English.
+  // - cleanup.size: an item's size after its name in a plan (CleanupItem.size).
+  // - cleanup.nothing_removed: first line of a confirmed cleanup that removed nothing
+  //   (CleanupStatus nothing_removed); what was kept follows, as after cleanup.done.
+  // - cleanup.next.*: after a preview's items when the plan has any, what to type to confirm.
+  //   confirm_runs when the plan has run records, else confirm_discarded when it has
+  //   discarded-files folders, else confirm_leftovers. G-A (0a9f9ec): no message takes a digest;
+  //   the renderer puts the options after the text on the same line, one space apart, so they can
+  //   be copied: `--confirm <the plan digest's first MIN_PLAN_DIGEST_PREFIX characters>`, and
+  //   ` --delete-discarded` after it for confirm_discarded. The text says nothing was removed and
+  //   ends leading into them. After confirm_runs, as they apply: not_reverted ({count}: run
+  //   records that go only with `--include-not-reverted`, which the person adds themselves; once
+  //   removed, those runs can no longer be reverted), discarded (people's discarded files are
+  //   deleted only with `--delete-discarded` besides), discarded_left ({count}: apply runs whose
+  //   records stay while their discarded files do, unless those are deleted in the same cleanup or
+  //   the apply is reverted first). Option names are fixed text in the templates.
+  "cleanup.size": { files: "count", bytes: "count" },
+  "cleanup.nothing_removed": {},
+  "cleanup.next.confirm_runs": {},
+  "cleanup.next.not_reverted": { count: "count" },
+  "cleanup.next.discarded": {},
+  "cleanup.next.discarded_left": { count: "count" },
+  "cleanup.next.confirm_discarded": {},
+  "cleanup.next.confirm_leftovers": {},
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },
@@ -735,6 +759,8 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
  *   is not removed, what a person is told before confirming, why a confirmed item was kept.
+ * - `cleanup.target.<target>` (U-34): the kind of an item named in a cleanup's lines (a run's
+ *   records, a discarded-files folder, a leftover folder), before its run id or folder name.
  * - `apply.notice.<kind>` (U-8): one line of the apply summary per ApplyResult.noticeKinds entry.
  *   U-33: `apply.notice.plan_records_unchecked.<cause>` takes the place of
  *   `apply.notice.plan_records_unchecked` when ApplyResult.planRecordsUncheckedCause is that cause.
@@ -763,6 +789,7 @@ export type ListedMessageId =
   | `error.hint.${CliErrorHint}`
   | `cleanup.blocked.${CleanupBlockCode}`
   | `cleanup.warning.${CleanupWarningCode}`
+  | `cleanup.target.${CleanupTarget}`
   | `cleanup.kept.${CleanupKeptReason}`
   | `apply.notice.${ApplyNoticeKind}`
   | `apply.notice.plan_records_unchecked.${PlanRecordsUncheckedCause}`;
@@ -814,6 +841,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...CLEANUP_BLOCK_CODES.map((code) => `cleanup.blocked.${code}` as const),
   ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),
   ...CLEANUP_KEPT_REASONS.map((reason) => `cleanup.kept.${reason}` as const),
+  ...CLEANUP_TARGETS.map((target) => `cleanup.target.${target}` as const),
   ...APPLY_NOTICE_KINDS.map((kind) => `apply.notice.${kind}` as const),
   ...PLAN_RECORDS_UNCHECKED_CAUSES.map((cause) => `apply.notice.plan_records_unchecked.${cause}` as const),
 ];

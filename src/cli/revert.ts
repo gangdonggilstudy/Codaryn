@@ -53,6 +53,20 @@ export interface RevertCliOutcome {
   readonly exitCode: number;
   /** `--quiet` (N-5): no human-readable output on stderr. False when the arguments were not parsed. */
   readonly quiet?: boolean;
+  /**
+   * U-16 (UXM-5): a line for the person (stderr), when the run reverted is a plan run whose plan an
+   * apply run used: nothing of it was put back, and the apply run is the one to revert. Fixed
+   * English; the JSON line is as before.
+   */
+  readonly hint?: string;
+}
+
+/** U-16 (UXM-5): what reverting an applied plan run tells the person. */
+export function appliedPlanHint(planRunId: string, applyRunId: string, dryRun: boolean): string {
+  return (
+    `Run ${planRunId} only made a plan and changed no file itself, so there ${dryRun ? "is" : "was"} nothing to put back and it is not marked as reverted. ` +
+    `Its plan was applied by run ${applyRunId}: to undo those changes, revert that run (--run ${applyRunId}).`
+  );
 }
 
 const YES = new Set(["y", "yes", "예", "네"]);
@@ -145,5 +159,6 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
     },
     exitCode,
     quiet,
+    ...(result.planAppliedBy === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planAppliedBy, dryRun) }),
   };
 }

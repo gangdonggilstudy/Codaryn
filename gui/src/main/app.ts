@@ -62,6 +62,8 @@ export interface GuiOptions {
   readonly answerSaveDialog?: (name: string) => Promise<string | null>;
   /** Smoke tests only: receives the OS end notification instead of the OS (3.6). */
   readonly notify?: (notice: { readonly title: string; readonly body: string }) => void;
+  /** Smoke tests only: whether the window counts as active (focus cannot be taken away reliably in a test). */
+  readonly windowActive?: () => boolean;
 }
 
 export interface GuiContext {
@@ -171,7 +173,8 @@ export function startGui(options: GuiOptions): void {
     onEnded: (runId, reason, status) => {
       approvals.ended(runId, reason);
       // 3.6: an OS notification only while the window is not active; fixed text and the status word.
-      const notice = endNotice(language, window !== null && !window.isDestroyed() && window.isFocused(), status);
+      const active = options.windowActive !== undefined ? options.windowActive() : window !== null && !window.isDestroyed() && window.isFocused();
+      const notice = endNotice(language, active, status);
       if (notice === null) return;
       if (options.notify !== undefined) {
         options.notify(notice);

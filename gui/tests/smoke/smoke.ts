@@ -95,6 +95,7 @@ const results: Record<string, unknown> = {};
 const SAVED_REPORTS = join(GUI, "build", "smoke-report");
 const savedReports: string[] = [];
 const notices: { readonly title: string; readonly body: string }[] = [];
+let pretendInactive = false;
 /** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
 const transportOf = (response: { readonly ok: boolean; readonly value?: unknown; readonly error?: { readonly code: string } }): unknown => (response.ok ? response.value : response.error?.code);
 /** The main process's OS dialogs this test answered, by id. */
@@ -120,6 +121,8 @@ startGui({
   notify: (notice) => {
     notices.push(notice);
   },
+  // The window counts as not active only while the first run ends (window.blur() is not reliable on Windows).
+  windowActive: () => !pretendInactive,
   answerDialog: async (id) => {
     dialogs.push(id);
     if (id === "cleanup.notReverted.message" && keepNotReverted) {
@@ -314,7 +317,7 @@ startGui({
         await js(`(() => { const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
       };
       // U-5 (3.6): the window is not active while this run ends, so its end is one OS notification.
-      window.blur();
+      pretendInactive = true;
       await startTask("a.txt를 읽고 요약한다");
       results["runDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 90_000);
       results["runResult"] = await js(
@@ -325,7 +328,7 @@ startGui({
       results["runText"] = await js("document.getElementById('work')?.textContent ?? ''");
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;
-      window.focus();
+      pretendInactive = false;
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
       // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging

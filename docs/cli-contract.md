@@ -848,6 +848,11 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
+- 같은 비밀인지 확인(DR-28, 검토 R-11 M-1)
+  - `plan.json`의 각 행동은 계획 실행이 가린 표기의 보이는 조각(`shown`)을 함께 담는다. 비밀 값이나 그 해시는 담지 않는다.
+  - `plan`과 `apply`는 지금 형식이 등록한 비밀로 다시 가린 결과를 `planActionShownMatches`로 그 조각과 비교한다.
+  - 하나라도 다르거나 `shown`이 없는 계획(DR-28 전)이면, 계획을 읽은 직후 `plan_secrets_differ`(종료 2)로 끝난다. 아무것도 보이거나 묻거나 기록하거나 옮기지 않고, 적용 실행도 만들지 않는다.
+  - 계획 실행과 같은 task 형식(`--task`)으로 다시 하거나 계획을 새로 만든다. 엔진의 같은 검사는 두 번째 방어로 남는다.
 
 ### 18.4 `codaryn apply`
 
@@ -944,7 +949,6 @@ codaryn changes <task 형식> --run <runId|latest> [--json]
 
 ### 18.9 아직 없는 것
 
-- **DR-28(검토 R-11 M-1)**: 계획 실행과 다른 비밀로 `plan`·`apply`를 하면 계획 실행이 가렸던 값이 보이고 적용 기록에 남는다. 계획 파일에 계획 실행 때의 가린 표기를 두는 계약(w3:p9)과 store(w3:p6)가 오면, CLI는 지금 비밀로 다시 가린 결과가 그 표기와 같을 때만 보여 주고 적용한다. 그 전까지는 계획 실행과 같은 task 형식(`--task`)으로 `plan`·`apply`한다. 재현 시험은 `tests/unit/cli/g-r11.test.ts`에 `todo`로 있다.
 - 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.

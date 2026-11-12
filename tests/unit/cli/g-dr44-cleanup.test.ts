@@ -22,9 +22,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
-import type { ApplyCleanup, ApplyResult, EngineResult } from "../../../src/contracts/index.js";
+import type { ApplyCleanup, ApplyResult, CleanupConfirmation, CleanupPlan, EngineResult, StateSummary } from "../../../src/contracts/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
-import { runCleanup } from "../../../src/cli/cleanup.js";
+import { itemName, notRevertedHeadLine, runCleanup } from "../../../src/cli/cleanup.js";
 import type { CleanupOutput } from "../../../src/cli/cleanup.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
 import { runRevert } from "../../../src/cli/revert.js";
@@ -124,10 +124,10 @@ describe("DR-44 (가): the records of a run not reverted go only with --include-
   test("the preview's head line says how many selected runs were not reverted", async () => {
     const { base, notReverted, reverted } = await twoRuns();
     const plan = (await preview(base, ["--older-than", "0"])).plan;
-    assert.ok(plan.items.find((item) => item.runId === notReverted)?.warnings.includes("not_reverted"), JSON.stringify(plan.items));
-    assert.deepEqual(plan.items.find((item) => item.runId === reverted)?.warnings, []);
+    assert.ok(plan.items.find((item) => itemName(item) === notReverted)?.warnings.includes("not_reverted"), JSON.stringify(plan.items));
+    assert.deepEqual(plan.items.find((item) => itemName(item) === reverted)?.warnings, []);
     const text = (await cleanup(base, ["--older-than", "0"], false)).text;
-    assert.ok(text.includes("1 of them not reverted"), text);
+    assert.ok(text.includes(notRevertedHeadLine(createMessageCatalog("en"), 1)), text);
     assert.ok(text.includes("--include-not-reverted"), text);
   });
 
@@ -201,13 +201,13 @@ describe("DR-44 (다), R-34 L-2: an apply's records without its discarded files 
 
   test("records selected without the folder: discarded_left (holds before DR-44)", async () => {
     const { base, applyRunId } = await discardingApply();
-    const item = (await preview(base, ["--older-than", "0"])).plan.items.find((entry) => entry.target === "run" && entry.runId === applyRunId);
+    const item = (await preview(base, ["--older-than", "0"])).plan.items.find((entry) => entry.target === "run" && itemName(entry) === applyRunId);
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(item));
   });
 
   test("records and folder selected: discarded_left too, as its deletion may not be confirmed", STORE_TODO, async () => {
     const { base, applyRunId } = await discardingApply();
-    const item = (await preview(base, ["--older-than", "0", "--discarded-older-than", "0"])).plan.items.find((entry) => entry.target === "run" && entry.runId === applyRunId);
+    const item = (await preview(base, ["--older-than", "0", "--discarded-older-than", "0"])).plan.items.find((entry) => entry.target === "run" && itemName(entry) === applyRunId);
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(item));
   });
 });
@@ -255,5 +255,78 @@ describe("DR-44 (라), R-34 L-3: a removal that fails is not reported as removed
     await writeFile(path.join(work, STATE_DIR_NAME, "cleanup-0123456789abcdef", "snapshots", "x.orig"), "left\n", "utf8");
     const text = (await cleanup(base, [], false)).text;
     assert.ok(text.includes("cleanup-0123456789abcdef") || /left by a failed cleanup/i.test(text), text);
+  });
+});
+
+describe("DR-44 (contract 73ec895): what the CLI does with the store's new answers", () => {
+  const SIZE = { files: 2, bytes: 300 };
+  const TOTALS = { runs: { count: 0, notReverted: 0, files: 0, bytes: 0 }, discarded: { count: 0, files: 0, bytes: 0 }, leftovers: { count: 1, files: 2, bytes: 300 } };
+  const LEFTOVER_PLAN = {
+    items: [{ target: "leftover", leftoverId: "0123456789abcdef", size: SIZE, warnings: ["leftover"] }],
+    blocked: [],
+    totals: TOTALS,
+    parked: { files: 0, bytes: 0 },
+    digest: "a".repeat(64),
+  } as unknown as CleanupPlan;
+  const SUMMARY = {
+    runs: { count: 0, bytes: 0, oldest: null, newest: null },
+    entries: [],
+    discarded: { runs: 0, files: 0, bytes: 0 },
+    parked: { files: 0, bytes: 0 },
+    leftovers: { count: 1, files: 2, bytes: 300 },
+  } as unknown as StateSummary;
+
+  async function withStore(args: readonly string[], applied: (confirmation: CleanupConfirmation) => unknown, json = false): Promise<{ text: string; exitCode: number }> {
+    const { base } = await workspace({});
+    const outcome = await runCleanup({
+      argv: ["cleanup", "--workspace", "work", ...args, ...(json ? ["--json"] : [])],
+      cwd: base,
+      env: {},
+      clock,
+      messages: createMessageCatalog("en"),
+      summarizeState: async () => SUMMARY,
+      planCleanup: async () => LEFTOVER_PLAN,
+      applyCleanup: (async (request: { confirmation: CleanupConfirmation }) => applied(request.confirmation)) as unknown as ApplyCleanup,
+    });
+    assert.ok("text" in outcome, JSON.stringify(outcome));
+    return { text: outcome.text, exitCode: outcome.exitCode };
+  }
+  const done = (kept: readonly unknown[], removed: readonly unknown[] = []) => ({ ok: true, removed, kept, totals: TOTALS });
+
+  test("the store gets includeNotReverted as given, apart from discarded", async () => {
+    const seen: CleanupConfirmation[] = [];
+    await withStore(["--confirm", "a".repeat(12), "--include-not-reverted"], (confirmation) => (seen.push(confirmation), done([])));
+    await withStore(["--confirm", "a".repeat(12), "--delete-discarded"], (confirmation) => (seen.push(confirmation), done([])));
+    assert.deepEqual(seen, [
+      { digest: "a".repeat(64), discarded: false, includeNotReverted: true },
+      { digest: "a".repeat(64), discarded: true, includeNotReverted: false },
+    ]);
+  });
+
+  test("partly_removed ends the command with 1 and is not counted as removed", async () => {
+    const result = await withStore(["--confirm", "a".repeat(12)], () => done([{ target: "run", runId: "20260102T030405Z-0a0b0c0d", reason: "partly_removed" }]));
+    assert.equal(result.exitCode, 1, result.text);
+    assert.ok(result.text.includes(createMessageCatalog("en").format("cleanup.done", { runs: 0, folders: 0, bytes: 0 })), result.text);
+    assert.ok(result.text.includes("20260102T030405Z-0a0b0c0d"), result.text);
+  });
+
+  test("records kept by the person's choice do not fail the command", async () => {
+    const kept = [
+      { target: "run", runId: "20260102T030405Z-0a0b0c0d", reason: "not_reverted_not_confirmed" },
+      { target: "run", runId: "20260102T030405Z-0a0b0c0e", reason: "used_by_kept_apply" },
+      { target: "discarded", runId: "20260102T030405Z-0a0b0c0f", reason: "not_confirmed" },
+    ];
+    const result = await withStore(["--confirm", "a".repeat(12)], () => done(kept));
+    assert.equal(result.exitCode, 0, result.text);
+  });
+
+  test("leftover folders: the summary line, their items in the preview, and the done line", async () => {
+    const preview = await withStore([], () => done([]));
+    assert.ok(preview.text.includes("cleanup-0123456789abcdef"), preview.text);
+    assert.ok(/Folders an earlier cleanup|cleanup could not remove|cleanup/i.test(preview.text), preview.text);
+    assert.ok(preview.text.includes(`--confirm ${"a".repeat(12)}`), preview.text);
+    const removed = await withStore(["--confirm", "a".repeat(12)], () => done([], [{ target: "leftover", leftoverId: "0123456789abcdef", size: SIZE }]));
+    assert.equal(removed.exitCode, 0, removed.text);
+    assert.ok(removed.text.includes("300 bytes") || removed.text.includes("300"), removed.text);
   });
 });

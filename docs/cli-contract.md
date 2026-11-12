@@ -1,4 +1,4 @@
-# CLI·공통 계약 (1a, 1b 설정, 2 재수정 반복, 3 준비, 모델 목록)
+# CLI·공통 계약 (1a, 1b 설정, 2 재수정 반복, 3 준비, 모델 목록, 사용성)
 
 `src/contracts/**`에 있는 타입과 상수를 설명한다. 코드와 다르면 코드가 기준이다. 1a 오프라인 CLI는 구현되어 있다. 1b의 설정 계약과 CLI 처리(11절)는 E1에서 추가했다. Anthropic 제공자(E2)는 CLI에 연결되어 있어, 키·모델·출력 상한·한도가 모두 정해지면 실제로 전송한다. 실제 API로는 아직 검증하지 않았다(10절 "실제 API 미검증"). 단계 2(F1)의 재수정 반복, 새 한도, 보호 경로, 스냅샷과 되돌리기는 12~14절이며 모두 조립에 연결되어 있다. 교차 검토(H1·H2) 결함 수정 S-1~S-9의 CLI 처리는 8·11절이다.
 
@@ -17,6 +17,9 @@
 | `src/store/index.ts` (F3) | `createChangeRecorder`, `revertRun` | `CreateChangeRecorder` = `({ workspaceRoot, runId }) => ChangeRecorder`, `RevertRun` = `(request: RevertRequest) => Promise<RevertOutcome>` |
 | `src/tools/index.ts` (F4) | `createToolRunner`의 선택 인자 `changeRecorder` | `ChangeRecorder`(14절) |
 | `src/verify/index.ts` (K2) | `createIntegrityChecker` | `CreateIntegrityChecker` = `({ workspace, protectedPaths, externalPaths }) => IntegrityChecker`(15절) |
+| `src/store/index.ts` (N-C) | `listRuns` | `ListRuns` = `(request: ListRunsRequest) => Promise<RunListing>`(17절) |
+| `src/i18n/index.ts` (N-B) | `selectMessageLanguage`, `createMessageCatalog` | `SelectMessageLanguage`, `CreateMessageCatalog` → `MessageCatalog`(17.4절) |
+| `src/cli/human/index.ts` (N-C) | `createHumanOutput` | `CreateHumanOutput` = `(messages: MessageCatalog) => HumanOutput`(17.4절) |
 | `src/cli/main.ts` | CLI 진입 파일 | `package.json`의 `bin.codaryn`이 `dist/src/cli/main.js`를 가리킨다 |
 
 - CLI가 Anthropic 제공자를 가져오는 곳은 `src/cli/provider.ts`의 `anthropicProviderFactory` 하나이며, `createAnthropicProvider`에 연결되어 있다. CLI는 설정을 모두 해석한 뒤에만 이를 호출한다. 1a 자리표시자 `src/model/anthropic.ts`는 제거했다. `provider_not_implemented`는 계약에 남아 있지만 실제 CLI에서는 더 이상 나오지 않는다.
@@ -40,6 +43,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 ```
 
 - `revert`는 14절이다. `--workspace`와 `--run` 둘 다 필요하고 다른 옵션은 받지 않는다. runId는 영숫자로 시작하는 1~128자의 영숫자·`.`·`_`·`-`이며 `..`를 포함할 수 없다. 어기면 `invalid_arguments`다. `--workspace`가 UNC나 장치 경로이면 파일 시스템에 닿기 전에 `invalid_arguments`다(T-12).
+- 한 줄 실행 `run "<목표>"`, `init`, `runs`, `--profile`, `--run latest`, `revert --dry-run`·`--quiet`은 17절이다(사용성, 계약 추가분).
 - `report`, `doctor`, 도움말, 버전, `--quiet`은 15절이다. `npm run build` 뒤 `npm link`를 하면 `node dist/src/cli/main.js` 대신 `codaryn`으로 실행할 수 있다.
 
 - task 파일 형식은 1a와 같다. scripted 모델은 키 없이 실행된다.
@@ -143,7 +147,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다.
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다.
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
@@ -213,7 +217,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 ### 설정 파일 (`CodarynConfig`)
 
-`--config <경로>` 또는 환경 변수 `CODARYN_CONFIG`로 지정한 파일만 읽는다. 둘 다 있으면 `--config`가 우선한다. 작업 공간 안에서 자동으로 찾지 않는다(C-3). 상대 경로는 현재 디렉터리 기준이다.
+`--config <경로>` 또는 환경 변수 `CODARYN_CONFIG`로 지정한 파일, 둘 다 없으면 기본 위치의 파일(N-1, 17.1절)을 읽는다. 순서는 `--config` → `CODARYN_CONFIG` → 기본 위치다. 작업 공간 안에서 자동으로 찾지 않는다(C-3, N-1로 개정). 상대 경로는 현재 디렉터리 기준이다. `language`, `profiles` 필드와 모델 자리표시자는 17.2절이다.
 
 ```json
 {
@@ -588,3 +592,83 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
 
 - 실행이 모델 오류로 끝났고, 그 모델 요청이 HTTP 404로 응답받았으면(제공자 문구가 `HTTP 404`로 시작) CLI가 결과의 `notices`에 안내 한 줄을 더한다: `codaryn models`로 목록을 보라는 내용이다. `result.json`에도 같은 안내가 들어가고, 진행 표시가 켜져 있으면 stderr에도 한 줄을 쓴다. 오류 종류(`api_error`)와 분류는 제공자(p5)의 것이며 바꾸지 않는다.
 - `doctor`는 네트워크에 접속하지 않으므로 모델이 있는지 확인하지 않는다. `model` 항목의 메시지에 그 사실과 `codaryn models` 안내를 적는다. 모델이 설정되지 않았을 때의 `fail` 메시지에도 같은 안내를 붙인다.
+
+## 17. 사용성 계약 (N-1~N-9)
+
+결정은 `docs/work-orders/phase-4-usability.md`의 N-1~N-13이다. 이 절은 역할 1(N-A)의 계약 추가분이며, 이 커밋 시점에는 **계약만 있고 구현은 없다**. 구현과 연결의 진행은 각 항목의 "담당"과 보고서에 따른다.
+
+| 영역 | 계약 위치 | 구현 담당 |
+| --- | --- | --- |
+| 기본 설정 위치(N-1), 자리표시자(N-3), 프로필(N-8), `language` 필드 | `config.ts` | N-A(`src/cli/**`) |
+| `codaryn init`(N-2) | `commands.ts`의 `InitOutput` | N-A(`src/cli/init.ts`) |
+| 한 줄 실행(N-9), `--profile`, `--run latest`, `revert --dry-run`·`--quiet`의 인자와 연결 | 이 절 | N-A |
+| 언어 선택과 문구 카탈로그(N-4) | `human.ts`의 `SelectMessageLanguage`, `CreateMessageCatalog`, `MESSAGE_IDS` | N-B(`src/i18n/**`) |
+| 사람용 출력(N-5), 실행 목록(N-7) | `human.ts`의 `HumanOutput`, `commands.ts`의 `RunsOutput`·`ListRuns`, `changes.ts`의 `RevertRequest.dryRun` | N-C(`src/cli/human/**`, `src/cli/runs.ts`, `src/store/**`의 목록 조회와 dry run) |
+
+### 17.1 설정 파일 위치 (N-1, C-3 개정)
+
+- 읽는 설정 파일은 하나다. 순서: `--config` → `CODARYN_CONFIG` → 기본 위치. 앞의 것이 있으면 뒤의 것은 보지 않는다(`ConfigSource`: `argument`, `environment`, `default`).
+- C-3 개정: "명시한 것과 작업 공간 밖 고정 위치 한 곳만 읽는다". 작업 공간 안을 찾아보는 일은 여전히 없다.
+- 기본 위치(`DefaultConfigLocation`, `FindDefaultConfigLocation`):
+  - Windows: `%APPDATA%\Codaryn\config.json`. `APPDATA`가 없거나 공백이거나 완전한 절대 경로가 아니면 기본 위치가 없다.
+  - 그 밖: `XDG_CONFIG_HOME`이 절대 경로이면 `$XDG_CONFIG_HOME/codaryn/config.json`, 아니면 `<홈>/.config/codaryn/config.json`. 상대 `XDG_CONFIG_HOME`은 무시한다(XDG 규격). 홈을 모르면 없다.
+- 기본 위치에 파일이 없으면(ENOENT) 설정 파일이 없는 것과 같다(N-1 이전과 같은 동작). 그 밖의 읽기 실패는 `invalid_config`다.
+- 기본 위치도 S-5 검사를 한다. 네트워크·장치 경로면 쓰지 않고(없는 것과 같다) `doctor`가 `warn`으로 알린다.
+- 기본 위치의 파일도 S-1을 따른다. 실경로가 그 실행의 작업 공간 안이면 `invalid_config`다.
+- 문구와 출력에는 펼친 경로를 쓰지 않고 `DEFAULT_CONFIG_DISPLAY`의 기호 표기(`%APPDATA%\Codaryn\config.json` 등)만 쓴다. 환경 값이 문구에 들어가지 않게 하기 위해서다.
+- 기본 위치를 쓴 실행은 진행 줄과 결과의 `notices`에 그 사실을 한 줄 남긴다(D-1 권고).
+
+### 17.2 설정 필드 추가 (N-3, N-4, N-8)
+
+- `model`의 자리표시자(N-3): 앞뒤 공백을 뗀 값이 빈 문자열이거나 `MODEL_PLACEHOLDER_PATTERN_SOURCE`(`<...>` 모양)이면 그 단계에서 설정되지 않은 것으로 본다. task `model.model`, `CODARYN_MODEL`, 설정 `model` 모두 같다. 다음 단계로 넘어가고, 남은 것이 없으면 `run`은 `provider_not_configured`(전송 없음), `doctor`의 `model`은 `fail`이다. `init`은 키가 없으면 `MODEL_PLACEHOLDER`(`<model id>`)를 쓴다.
+- `language`(N-4): `"ko"` 또는 `"en"`. 그 밖은 `invalid_config`. 선택 순서는 `CODARYN_LANG`(ko·en만, 대소문자 무시, 그 밖의 값은 무시) → 설정 `language` → OS 표시 언어(주 태그가 `ko`면 ko) → en.
+- `profiles`(N-8): 이름 → `ConfigProfile`(`policy`, `verifiers`, `limits`, 모두 선택). 이름은 `PROFILE_NAME_PATTERN_SOURCE`, 최대 `MAX_PROFILES`(32)개. 모르는 필드는 `invalid_config`다.
+  - `--profile <이름>`(run의 모든 형식과 doctor): 프로필의 `policy`·`verifiers`가 있으면 설정의 것을 대신한다(간편 형식과 한 줄 실행에서만 쓰인다). `limits`는 설정 `limits` 위에 필드별로 덮는다.
+  - 한도 상한(S-7) 그대로: 프로필의 한도 필드는 설정 최상위의 같은 필드보다 클 수 없고, 최상위가 숫자인데 `null`일 수 없다. 파일을 읽을 때 모든 프로필을 검사해 `invalid_config`로 거부한다. 합친 한도는 task의 상한이 되고 절대 상한과 anthropic의 토큰 규칙도 그대로 적용한다.
+  - task 파일 실행에 `--profile`을 주면 프로필의 한도만(상한으로) 쓴다. task는 자기 정책과 검증기를 적는다.
+  - 오류: 이름 형식이 틀리면 `invalid_arguments`, 설정 파일이 없거나 그 이름의 프로필이 없으면 `invalid_config`. 프로필은 사용자 설정 파일에만 있고 task 파일은 프로필을 가질 수 없다.
+
+### 17.3 명령 추가와 변경
+
+```
+codaryn run "<목표>" [--config <파일>] [--vars-file <경로>] [--cancel-file <경로>] [--quiet] [--profile <이름>]
+codaryn run (--task <task.json> | --workspace <디렉터리> --goal <문장>) [위 옵션]
+codaryn init [--config <파일>] [--workspace <디렉터리>] [--json]
+codaryn runs [--workspace <디렉터리>] [--limit <n>] [--json]
+codaryn revert --workspace <디렉터리> --run <runId|latest> [--dry-run] [--quiet]
+codaryn report --workspace <디렉터리> --run <runId|latest> [--json]
+codaryn doctor [...기존] [--profile <이름>]
+```
+
+- **한 줄 실행(N-9)**: 위치 인자 하나가 목표다. 현재 디렉터리를 작업 공간으로 쓰는 간편 형식과 같다(`--workspace <cwd> --goal <목표>`). 출력은 `run`과 같은 `CliOutput`이다.
+  - 위치 인자는 하나만 받는다. `--task`, `--workspace`, `--goal`과 함께 쓰면 `invalid_arguments`다. `--`로 시작하는 목표는 옵션으로 읽힌다.
+  - 현재 디렉터리가 설치 위치와 겹치면 `workspace_is_install_dir`(U-3), 목표에 키가 있으면 `key_in_file`(S-8)다.
+- **`init`(N-2, N-10)**: `InitOutput`(`commands.ts`)의 주석이 기준이다. 요점:
+  - 기본 위치(또는 `--config`)에 배타 생성한다. 이미 있으면 `config_exists`(종료 2)로 아무것도 쓰지 않는다.
+  - stdin과 stderr가 모두 터미널일 때만 묻는다. 질문은 stderr로 낸다. 터미널이 아니면 묻지 않고 기본값(`INIT_DEFAULT_LIMITS`, `INIT_DEFAULT_MAX_OUTPUT_TOKENS`, `DENY_ALL_POLICY`, 자리표시자 모델)만 쓴다.
+  - 키를 묻거나 읽거나 쓰지 않는다. 키가 설정됐는지와 사용자 환경 변수 등록 방법만 알린다.
+  - 명령·보호 경로 제안은 `--workspace`가 있을 때만, 고정된 이름 목록과 비교해 만든다. 파일 내용은 출력하지 않는다. 제안은 하나씩 승인하고 명령 규칙은 `allowExtraArgs: false`다.
+  - 키가 있고 묻는 중이면 모델 목록을 요청한다(실제 API 요청). 실패하면 자리표시자를 남긴다.
+  - 종료: `created` 0, `declined` 3(터미널에서 거절).
+- **`runs`(N-7)**: `RunsOutput`. `--workspace`가 없으면 현재 디렉터리다. `--limit`은 1~`RUNS_MAX_LIMIT`(1000), 기본 `RUNS_DEFAULT_LIMIT`(20). 상태 디렉터리를 만들지 않고 잠금도 잡지 않는다. 기록이 없으면 빈 목록(종료 0)이다. 정렬과 읽는 범위는 `ListRuns`·`RunListing` 주석.
+- **`--run latest`(N-7)**: `report`, `revert`에서 `listRuns`의 첫 실행을 뜻한다. 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리는 이름으로 고를 수 없다.
+- **`revert --dry-run`(N-7)**: `RevertRequest.dryRun`. 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 출력은 `dryRun: true`인 `RevertOutput`이고 상태·종료 코드는 실제 되돌리기와 같다(`complete` 0, `partial` 3).
+- **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 있으면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
+- **`--quiet`**: `run`과 `revert`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
+
+### 17.4 사람용 출력과 문구 (N-4, N-5)
+
+- stdout 계약은 그대로다. 사람용 글은 stderr에 쓴다.
+  - 오류: 모든 명령이 `CliErrorOutput`을 낼 때 `HumanOutput.error`의 글(무엇이, 자세히, 고치는 법, 코드)
+  - `run` 끝 요약: `HumanOutput.runSummary`
+  - 진행 줄: `PROGRESS_PREFIX` 뒤에 `HumanOutput.progressLine`. 사람 표현을 먼저 쓰고 내부 코드는 괄호에 둔다.
+  - `revert` 요약: `HumanOutput.revertSummary`
+- 언어는 `SelectMessageLanguage`로 정한다. 오류 코드, JSON 필드, 종료 코드, 명령 이름은 영어로 고정한다.
+- 문구는 `MESSAGE_IDS`의 id로만 만든다. 고정 id의 매개변수는 `FIXED_MESSAGES`가 정하고, 종류(`MessageParamKind`)는 개수, 코드, 필드 위치, 실행 id, CLI가 만든 명령 줄, 기록의 가림 경로나 기호 위치, 검증기 id·프로필 이름·도구 이름, `CliErrorOutput.message`, 다른 문구다. 파일이나 환경에서 읽은 값은 넣지 않는다. 두 카탈로그는 모든 id를 가지고, 템플릿은 정해진 매개변수를 모두 쓰고 다른 것은 쓰지 않는다.
+- CLI는 렌더링된 글을 실행의 개인정보 게이트로 가리고(있을 때) 제어 문자를 바꾼 뒤 쓴다. stderr 쓰기 실패는 결과에 영향을 주지 않는다.
+- 모듈 경계: `src/i18n/index.ts`가 `selectMessageLanguage`, `createMessageCatalog`를, `src/cli/human/index.ts`가 `createHumanOutput`을 export한다. CLI는 진입 파일에서 이것들을 만들어 각 명령에 넘긴다. `init`의 글은 `src/cli/init.ts`가 카탈로그로 직접 만든다.
+
+### 17.5 오류 코드 추가
+
+- `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.
+- `config_write_failed`(종료 2)는 `init`에서도 쓴다.

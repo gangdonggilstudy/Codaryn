@@ -1,11 +1,12 @@
 /**
- * Output objects of `codaryn report` (U-5), `codaryn doctor` (U-6) and `codaryn models` (Y-1).
- * All print human-readable text on stdout by default and these objects as one JSON line with
+ * Output objects of `codaryn report` (U-5), `codaryn doctor` (U-6), `codaryn models` (Y-1),
+ * `codaryn init` (N-2) and `codaryn runs` (N-7). All print human-readable text on stdout by default and these objects as one JSON line with
  * `--json`. Errors that stop any of them print CliErrorOutput as one JSON line, as `run` and
  * `revert` do.
  */
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
+import type { MessageLanguage } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
 import type { Limits, ModelProviderName } from "./task.js";
@@ -169,4 +170,129 @@ export interface ModelsOutput {
    * `overriddenBy`: CODARYN_MODEL is set, so runs keep using it until it is unset.
    */
   readonly selected: { readonly id: string; readonly created: boolean; readonly overriddenBy: "CODARYN_MODEL" | null } | null;
+}
+
+/**
+ * `codaryn init [--config <file>] [--workspace <dir>] [--json]` (N-2, N-10). Creates a config
+ * file at the default location (N-1), or at `--config` when given. It never overwrites: a file
+ * already there stops it as `config_exists` with nothing written.
+ *
+ * - Questions are asked only when stdin and stderr are terminals, and go to stderr so stdout keeps
+ *   one output. Otherwise nothing is asked and only the defaults are written (`interactive: false`).
+ * - Written: `schemaVersion`, `model` (a model chosen from `codaryn models`' list, else
+ *   MODEL_PLACEHOLDER), `maxOutputTokens` (INIT_DEFAULT_MAX_OUTPUT_TOKENS), `limits`
+ *   (INIT_DEFAULT_LIMITS), `policy` (DENY_ALL_POLICY plus the command rules and protected paths the
+ *   user accepted one by one, every rule with `allowExtraArgs: false`), and `language` when one was
+ *   chosen.
+ * - Suggestions come from `--workspace` only: command rules for a fixed set of package.json
+ *   script names, and protected paths for a fixed set of names that exist there. Only those fixed
+ *   names are shown; script bodies and other file content are never printed. When `--workspace` is
+ *   given, a target inside it is refused (S-1, `invalid_config`).
+ * - The key is never asked for, read from a file or written (C-1, N-10). The output says only
+ *   whether ANTHROPIC_API_KEY is set and how to register it as a user environment variable.
+ * - The model list is requested only when the key is set and the questions are asked; that is a
+ *   real API request, as with `codaryn models`. Its failure leaves the placeholder.
+ * - The directory is created when missing; the file is created exclusively (it must not exist).
+ *
+ * Errors (CliErrorOutput): `invalid_arguments`; `invalid_config` (no default location, a network
+ * or device path, inside `--workspace`); `config_exists`; `config_write_failed`.
+ */
+export const INIT_STATUSES = ["created", "declined"] as const;
+/** created: the file was written. declined: the user answered no at the terminal; nothing was written. */
+export type InitStatus = (typeof INIT_STATUSES)[number];
+export const INIT_EXIT_CODES: { readonly [S in InitStatus]: number } = { created: 0, declined: 3 };
+
+/** Printed by `codaryn init --json`. Without `--json` the same content as text. */
+export interface InitOutput {
+  readonly schemaVersion: 1;
+  readonly kind: "init";
+  readonly status: InitStatus;
+  readonly exitCode: number;
+  /**
+   * Where the file is (or would have been) written. `display` is DEFAULT_CONFIG_DISPLAY's value
+   * for the default location, or "--config" when the path came from the command line.
+   */
+  readonly config: { readonly source: "argument" | "default"; readonly display: string };
+  /** Whether questions were asked. */
+  readonly interactive: boolean;
+  /** "selected": a listed model was written. "placeholder": MODEL_PLACEHOLDER was written. */
+  readonly model: "selected" | "placeholder";
+  /** The language written, or null (the file has no `language`). */
+  readonly language: MessageLanguage | null;
+  /** Number of command rules and protected paths written. */
+  readonly commands: number;
+  readonly protectedPaths: number;
+  /** Whether ANTHROPIC_API_KEY is set. Never its value. */
+  readonly keySet: boolean;
+  /** "CODARYN_CONFIG": that variable is set, so runs read its file instead of the one written. */
+  readonly overriddenBy: "CODARYN_CONFIG" | null;
+}
+
+/**
+ * `codaryn runs [--workspace <dir>] [--limit <n>] [--json]` (N-7). Lists the runs recorded in
+ * `<workspace>/.codaryn/runs/`, newest first. `--workspace` defaults to the current directory,
+ * `--limit` to RUNS_DEFAULT_LIMIT (1 to RUNS_MAX_LIMIT). It changes nothing, takes no lock and
+ * does not create the state directory: a workspace without one has no runs (exit 0).
+ * Errors (CliErrorOutput): `invalid_arguments`, `workspace_not_found`.
+ */
+export const RUNS_DEFAULT_LIMIT = 20;
+export const RUNS_MAX_LIMIT = 1000;
+export const RUNS_EXIT_CODES = { listed: 0 } as const;
+
+/**
+ * N-7: `--run latest` in `report` and `revert` stands for the first run `listRuns` returns.
+ * No runs: `run_not_found`. A run directory literally named "latest" cannot be named this way.
+ */
+export const LATEST_RUN_ALIAS = "latest";
+
+/** One run as `listRuns` reads it. Text is masked as recorded. */
+export interface RunListEntry {
+  readonly runId: string;
+  /** `at` of the journal's first record (`run_started`), ISO 8601 UTC; null when it cannot be read. */
+  readonly startedAt: string | null;
+  /** From `run_started`; null when it cannot be read. */
+  readonly taskId: string | null;
+  /** From result.json; null when the run has none (still running, or stopped without one). */
+  readonly status: TerminalRunStatus | null;
+  readonly reason: RunReason | null;
+  /** Number of `changes` in result.json; null without one. */
+  readonly changes: number | null;
+  /** The last revert of this run, from its revert record (REVERT_RECORD_FILE_NAME); null when never reverted. */
+  readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;
+}
+
+export interface ListRunsRequest {
+  /** Real absolute path of the workspace root. */
+  readonly workspaceRoot: string;
+}
+
+/**
+ * `runs`: newest first, by `startedAt` and then by run id, both descending; entries without
+ * `startedAt` come last. `unreadable`: run directories skipped because they are links, are not
+ * directories, have no journal, or their files cannot be read or parsed (each file at most
+ * MAX_REPORT_FILE_BYTES). Directory names that are not run ids are ignored.
+ */
+export interface RunListing {
+  readonly runs: readonly RunListEntry[];
+  readonly unreadable: number;
+}
+
+/**
+ * Signature of `listRuns`, exported by `src/store/index.ts` (N-C). Reads only the state
+ * directory: per run its result.json, the first journal record and the revert record. Changes
+ * nothing. Rejects only when the runs directory exists but cannot be listed.
+ */
+export type ListRuns = (request: ListRunsRequest) => Promise<RunListing>;
+
+/** Printed by `codaryn runs --json`. Without `--json` a table (HumanOutput.runsText). */
+export interface RunsOutput {
+  readonly schemaVersion: 1;
+  readonly kind: "runs";
+  readonly status: keyof typeof RUNS_EXIT_CODES;
+  readonly exitCode: number;
+  /** At most `--limit` entries, newest first. */
+  readonly runs: readonly RunListEntry[];
+  /** How many more runs there are beyond `--limit`. */
+  readonly omitted: number;
+  readonly unreadable: number;
 }

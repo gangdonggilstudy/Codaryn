@@ -70,15 +70,41 @@ const MAX_MARK_BYTES = 4096;
  * move aside and removes it last, so what a failed removal leaves still has it.
  */
 async function hasOwnMark(dir: string, leftoverId: string): Promise<boolean> {
-  const file = join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME);
-  try {
+  const read = async (name: string): Promise<unknown> => {
+    const file = join(dir, name);
     const info = await lstat(file);
-    if (!info.isFile() || info.size > MAX_MARK_BYTES) return false;
-    return isCleanupLeftoverMark(JSON.parse(await readFile(file, "utf8")) as unknown, leftoverId);
+    if (!info.isFile() || info.size > MAX_MARK_BYTES) throw new Error("not a mark file");
+    return JSON.parse(await readFile(file, "utf8")) as unknown;
+  };
+  try {
+    if (isCleanupLeftoverMark(await read(CLEANUP_LEFTOVER_MARK_FILE_NAME), leftoverId)) return true;
+  } catch {
+    // No mark of this build; the earlier one may be there.
+  }
+  try {
+    return isEarlierMark(await read(EARLIER_MARK_FILE_NAME));
   } catch {
     return false;
   }
 }
+
+/**
+ * U-7 (R-40 L-1): the mark the build of 6f85b65 wrote into a folder it moved aside (never released,
+ * but development workspaces may hold one): `.codaryn-cleanup` with exactly
+ * {schemaVersion: 1, kind: "cleanup_leftover", target: "run" | "discarded", at: <string>}. A folder
+ * with it is a leftover too; this build writes only CLEANUP_LEFTOVER_MARK_FILE_NAME.
+ */
+const EARLIER_MARK_FILE_NAME = ".codaryn-cleanup";
+
+function isEarlierMark(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (Object.keys(value).sort().join(",") !== "at,kind,schemaVersion,target") return false;
+  const mark = value as Record<string, unknown>;
+  return mark["schemaVersion"] === 1 && mark["kind"] === "cleanup_leftover" && (mark["target"] === "run" || mark["target"] === "discarded") && typeof mark["at"] === "string";
+}
+
+/** The mark files of a leftover: removed after everything else in it. */
+const MARK_FILE_NAMES: readonly string[] = [CLEANUP_LEFTOVER_MARK_FILE_NAME, EARLIER_MARK_FILE_NAME];
 
 /** A plain directory's files and bytes and the metadata fingerprint of everything below it. */
 interface Tree {
@@ -336,7 +362,8 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
       kind: run.summary.kind,
       changes: run.changes,
       lastRevert: run.lastRevert,
-      hasDiscarded: run.discardedTree !== null,
+      // U-13: a folder that holds at least one file; an empty one holds nothing to lose.
+      hasDiscarded: run.discardedTree !== null && run.discardedTree.size.files > 0,
       recordsChanged: run.summary.recordsChanged,
     });
     items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings });
@@ -395,6 +422,8 @@ async function hasExactEntry(parent: string, name: string): Promise<boolean> {
 /** How applyCleanup removes a directory it moved aside; for tests. */
 export interface CleanupOperations {
   readonly remove?: (dir: string) => Promise<void>;
+  /** Writes the mark file (exclusive create). */
+  readonly writeMark?: (file: string, text: string) => Promise<void>;
   /** Wait between the REMOVE_ATTEMPTS attempts. */
   readonly retryDelayMs?: number;
 }
@@ -409,6 +438,30 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
   const { workspaceRoot, selection, now, confirmation } = request;
   const remove = operations.remove ?? ((dir: string) => rm(dir, { recursive: true, force: true }));
   const retryDelayMs = operations.retryDelayMs ?? 100;
+  const writeMark = operations.writeMark ?? ((file: string, text: string) => writeFile(file, text, { encoding: "utf8", flag: "wx" }));
+  /**
+   * Writes the folder's mark. A plain file already at the mark's name (inside records the person
+   * confirmed for removal) is replaced; anything else there, or any other failure, is false.
+   */
+  const marked = async (dir: string, leftoverId: string): Promise<boolean> => {
+    const file = join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME);
+    const mark: CleanupLeftoverMark = { schemaVersion: 1, kind: "cleanup_leftover", leftoverId };
+    const text = `${JSON.stringify(mark)}\n`;
+    try {
+      await writeMark(file, text);
+      return true;
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") return false;
+    }
+    try {
+      if (!(await lstat(file)).isFile()) return false;
+      await rm(file);
+      await writeMark(file, text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   /** True when `path` is gone in the end (REMOVE_ATTEMPTS tries). */
   const removeTried = async (path: string): Promise<boolean> => {
     for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt += 1) {
@@ -434,10 +487,13 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     }
     let whole = true;
     for (const name of names) {
-      if (name !== CLEANUP_LEFTOVER_MARK_FILE_NAME && !(await removeTried(join(dir, name)))) whole = false;
+      if (!MARK_FILE_NAMES.includes(name) && !(await removeTried(join(dir, name)))) whole = false;
     }
     if (!whole) return false;
-    return (await removeTried(join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME))) && (await removeTried(dir));
+    for (const name of MARK_FILE_NAMES) {
+      if (names.includes(name) && !(await removeTried(join(dir, name)))) return false;
+    }
+    return removeTried(dir);
   };
   const stateDir = await ensureStateDir(workspaceRoot);
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
@@ -453,13 +509,32 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     const keep = (item: CleanupItem, reason: CleanupKeptReason): void => {
       kept.push({ ...refOf(item), reason });
     };
-    // DR-44 (a): apply runs first, then the other runs (their plan runs among them), then folders.
+    // U-13: discarded-files folders first, so an apply's records go only after its folder went.
+    // DR-44 (a): then apply runs, then the other runs (their plan runs among them), then leftovers.
     const order = plan.items.map((item, index) => ({ item, index }));
     const rank = ({ item, index }: { item: CleanupItem; index: number }): number =>
-      item.target === "run" ? (facts[index]?.kind === "apply" ? 0 : 1) : item.target === "discarded" ? 2 : 3;
+      item.target === "discarded" ? 0 : item.target === "run" ? (facts[index]?.kind === "apply" ? 1 : 2) : 3;
     order.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
     /** Plan runs an apply run uses that was selected and stays. */
     const plansOfKeptApplies = new Set<string>();
+    /** U-13: runs whose discarded-files folder this cleanup moved aside and could not remove entirely. */
+    const discardedPartlyLeft = new Set<string>();
+    /**
+     * U-13 (UXM-1): whether a discarded file of the apply run `runId` is left: its folder holds a file
+     * now (looked at again right before its records go), cannot be looked at, or was not removed
+     * entirely just before. Without the records nothing says what those files were.
+     */
+    const discardedLeft = async (runId: string): Promise<boolean> => {
+      if (discardedPartlyLeft.has(runId)) return true;
+      const dir = join(stateDir, DISCARDED_DIR_NAME, runId);
+      try {
+        await lstat(dir);
+      } catch (error) {
+        return errorCode(error) !== "ENOENT";
+      }
+      const tree = await measure(dir);
+      return tree === null || tree.size.files > 0;
+    };
 
     for (const { item, index } of order) {
       const itemFacts = facts[index] ?? null;
@@ -469,6 +544,10 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       };
       if (item.target === "run" && needsNotRevertedConfirmation(item.warnings) && !confirmation.includeNotReverted) {
         keepApply("not_reverted_not_confirmed");
+        continue;
+      }
+      if (item.target === "run" && itemFacts?.kind === "apply" && (await discardedLeft(item.runId))) {
+        keepApply("discarded_left");
         continue;
       }
       if (item.target === "run" && plansOfKeptApplies.has(item.runId)) {
@@ -510,13 +589,25 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
           keepApply("io_error");
           continue;
         }
-        // R-34b P-2: its mark, right after the move (exclusive create). One that cannot be written does
-        // not stop the removal; what a failed removal then leaves is an unknown folder.
-        const mark: CleanupLeftoverMark = { schemaVersion: 1, kind: "cleanup_leftover", leftoverId };
-        await writeFile(join(aside, CLEANUP_LEFTOVER_MARK_FILE_NAME), `${JSON.stringify(mark)}\n`, { encoding: "utf8", flag: "wx" }).catch(() => undefined);
+        // R-34b P-2: its mark, right after the move. U-7 (R-40 L-2): without the mark nothing of it is
+        // removed; the folder goes back to its place (io_error), so it can be selected again. Only when
+        // it cannot go back either does it stay aside, as a folder not removed entirely.
+        if (!(await marked(aside, leftoverId))) {
+          let back = true;
+          try {
+            await rename(aside, dir);
+          } catch {
+            back = false;
+          }
+          // U-13: a discarded-files folder that stays aside still holds the run's discarded files.
+          if (!back && item.target === "discarded") discardedPartlyLeft.add(item.runId);
+          keepApply(back ? "io_error" : "partly_removed");
+          continue;
+        }
       }
       // DR-44 (d): what is left aside is a leftover the next plan shows; not reported or logged as removed.
       if (!(await removeAside(aside))) {
+        if (item.target === "discarded") discardedPartlyLeft.add(item.runId);
         keepApply("partly_removed");
         continue;
       }

@@ -37,8 +37,8 @@ import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
 import type { PermissionKind, PolicyDenialCode } from "./policy.js";
-import { APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
-import type { ApplyJournalEvent, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
+import { APPLY_NOTICE_KINDS, APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
+import type { ApplyJournalEvent, ApplyNoticeKind, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
 import { ALL_TOOL_NAMES, TOOL_ERROR_CODES } from "./tool.js";
 import type { AnyToolName, ToolErrorCode } from "./tool.js";
@@ -464,6 +464,10 @@ export const FIXED_MESSAGES = {
   "cleanup.summary.leftovers": { count: "count", bytes: "count" },
   "cleanup.confirm.leftovers": { count: "count", bytes: "count" },
   "cleanup.done_leftovers": { count: "count", bytes: "count" },
+  // U-13 (UXM-1): after cleanup.done when above 0: how many apply runs' records were kept because
+  // their discarded files stay (CleanupOutcome.kept with reason discarded_left); they go once those
+  // applies are reverted or their discarded files are deleted too.
+  "cleanup.done_discarded_left": { count: "count" },
   // R-34b P-2: folders in the state directory named like a leftover but without a cleanup's mark
   // (StateSummary.unknownFolders): shown when there are any; Codaryn does not remove them.
   "cleanup.summary.unknown_folders": { count: "count", bytes: "count" },
@@ -691,6 +695,7 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
  *   is not removed, what a person is told before confirming, why a confirmed item was kept.
+ * - `apply.notice.<kind>` (U-8): one line of the apply summary per ApplyResult.noticeKinds entry.
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -716,7 +721,8 @@ export type ListedMessageId =
   | `error.hint.${CliErrorHint}`
   | `cleanup.blocked.${CleanupBlockCode}`
   | `cleanup.warning.${CleanupWarningCode}`
-  | `cleanup.kept.${CleanupKeptReason}`;
+  | `cleanup.kept.${CleanupKeptReason}`
+  | `apply.notice.${ApplyNoticeKind}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -765,6 +771,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...CLEANUP_BLOCK_CODES.map((code) => `cleanup.blocked.${code}` as const),
   ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),
   ...CLEANUP_KEPT_REASONS.map((reason) => `cleanup.kept.${reason}` as const),
+  ...APPLY_NOTICE_KINDS.map((kind) => `apply.notice.${kind}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */
@@ -862,7 +869,9 @@ export interface HumanOutput {
    * N-5: one progress line body for a journal record, without PROGRESS_PREFIX, or null for records
    * that are not shown. Codes go in parentheses after the words. A verifier is shown by its number
    * (1-based), the order in which its id first appeared in this run's `verifier_result` records,
-   * which the renderer counts itself; the id is never shown.
+   * which the renderer counts itself; the id is never shown. DR-38, U-8: a `state_checked` record is
+   * shown when something changed (`progress.state_changed` with the count) or when it is `limited`
+   * (`progress.state_unchecked`), and not otherwise.
    */
   progressLine(event: JournalEvent): string | null;
   /**
@@ -889,8 +898,8 @@ export interface HumanOutput {
    * G-A: stderr at the end of `apply`: status and reason as words, actions applied of the plan's
    * total (`summary.apply_actions`), the plan run (`summary.apply_plan_run`), verifier result, run id,
    * and the next commands (report, revert). For `consent_required` (DR-21): `summary.unsafe_moves`
-   * and `summary.next_apply_unsafe` with the digest as an item. Optional only until the renderer
-   * (N-C) has it.
+   * and `summary.next_apply_unsafe` with the digest as an item. U-8: `apply.notice.<kind>` for each
+   * of `noticeKinds`, whatever the status. Optional only until the renderer (N-C) has it.
    * `runSummary` covers the plan run (`plan_pending`: `summary.plan_ready`, `summary.next_plan`,
    * `summary.next_apply` with the digest as an item) and human review (`awaiting_review`:
    * `summary.review_checklist` with the checklist entries as items, `summary.next_review`).

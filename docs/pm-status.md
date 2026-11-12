@@ -5,8 +5,8 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 ## 위임
 
 - 위임 ID: pm-20261112-01. 기준 파일은 main의 `docs/pm-control.json`이다.
-- 임시 PM: w1:p3 (session 9e1f6ad3-ed8e-4c37-9a0d-ff5f98137423), 페르소나는 개발 PM 겸 수석 소프트웨어 아키텍트.
-- 인수: 2026-11-12 완료(`789733f`). 범위는 단계 1a다.
+- 임시 PM: w3:p1 (session 35d190ab-f250-4f81-bf71-df394b34110a), 페르소나는 개발 PM 겸 수석 소프트웨어 아키텍트. Herdr 사용자 화면에서는 "오케스트레이터"라고 부른다.
+- 인수: 2026-11-12 완료(`789733f`, 당시 w1:p3). 같은 날 사용자가 새 Herdr 세션(w3)의 w3:p1에 오케스트레이터를 맡겼다(CP-12). 위임 ID와 범위는 그대로다.
 - 작업 배분, 변경 묶음, 커밋, 병합, 푸시 전에 status와 ID를 확인한다. active가 아니거나 ID가 다르면 새 배분과 변경을 멈추고 이 문서의 마지막 체크포인트를 보고한다.
 - 실제 API 호출, 키 파일 조회, 모델 변경, force push, 기존 이력 재작성은 하지 않는다.
 
@@ -25,6 +25,7 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-9 | 단계 2 구현과 검토 | 재수정 반복 엔진, 보호 경로, 스냅샷·되돌리기, `.cmd` 실행, 제공자 수정, CLI 보안 모듈, 사용 문서를 main에 병합(`5989d79`까지). 교차 검토 H1·H2·F6와 결정 S-1~S-12, T-1~T-15를 기록(`1037593`). p1의 연결 커밋 `3f3756d`는 통합 8건 실패가 남아 main 미병합. p1이 주간 사용 한도로 멈춰 PM이 p1의 계약 변경을 검증 후 `f45959a`로 커밋하고 나머지를 p5~p8에 재배정 | `1037593`과 이 문서를 담은 커밋 | 완료 |
 | CP-10 | 단계 2 병합 | 수정 묶음 T(p5 `b807001`, p6 `a51002c`, p7 `c3d9865`, p8 `2f014a4` `c748821` `1677b1c`, 계약 `f45959a`)와 p4의 통합 테스트 `52a634d` `2410686`를 합친 뒤 PM이 병합 전에 전체를 실행해 통과를 확인하고 main `4074d5c`로 병합 | `4074d5c`와 이 문서를 담은 커밋 | 완료 |
 | CP-11 | 일시 정지 | 사용자 지시로 전체 작업을 멈췄다. 단계 3 구현(무결성 확인, 설치 위치 거부, report, doctor, 후보 스크립트), 수정 V·W·X, `models` 명령, 사용성·UX 설계, 문서화 누락 보완을 main `39219c8`까지 병합. 작업 브랜치를 원격에 올림 | `39219c8`과 이 문서를 담은 커밋 | 완료 |
+| CP-12 | 재개 | 새 Herdr 세션 w3에서 w3:p1이 오케스트레이터를 맡았다. 새로 받은 저장소에 worktree 8개를 원격 브랜치와 main에서 다시 만들고 저장소 작성자를 설정했다. main `34393bd` 기준 검증 통과. 사용성 개선(N-A~N-E)과 단계 4·5 설계(P4-G, P5-A, P5-U)를 배정 | 이 문서를 담은 커밋 | 완료 |
 
 ## 사용자 상시 지시 (2026-11-12)
 
@@ -37,19 +38,43 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
-## 현재 상태 (CP-11, 일시 정지)
+## 사용자 지시 (CP-12, 2026-11-12)
 
-**사용자가 2026-11-12에 "지금까지 작업된 부분들 커밋 푸시하고 작업 재개할 수 있도록 정리 후 일시 정지"라고 지시했다. 모든 작업자를 멈췄고 재개 지시를 기다린다.**
+- 개발 목표는 최종 설계까지 모두 구현하는 것이다. 사용성 개선, 단계 4 범용 작업, 단계 5 어댑터 계약·VS Code 확장·독립 GUI를 설계에서 구현까지 이어 간다.
+- 작업자는 작업 지침 교육(개발 절차 5절)을 받고 시작한다.
+- 작업 중 필요해진 새 지침은 PM이 바로 추가하지 않는다. 아래 "지침 후보"에 모아 두고 사용자가 확인한 뒤 추가한다. 사용자가 수시로 필요한 지침이 있는지 묻는다.
+- 사용자 판단이 필요한 질문은 PM이 먼저 받아 아래 "사용자 확인 대기"에 모은다. 사용자가 질문을 알려 달라고 하면 하나씩 정리한다. 이미 쌓인 결정이나 문서에 근거가 있으면 PM이 직접 답하고 근거를 작업 지시서에 남긴다.
+- Codex는 사용 한도가 적어 검증 작업만 맡긴다. 한도로 멈추면 5시간 주기로 초기화되므로 그때 확인해 다시 배정한다.
+- 커밋과 push는 적절한 단위로 하고, 작성자는 `gangdonggil <gangdonggilstudy@gmail.com>`이다.
+- 필요하면 각 작업 탭에서 Claude 한 세션을 보조 관리자로 지정해도 된다(Codex 제외). 지금은 PM이 모두 직접 배정한다. 사용성 개선의 순서 조율이 PM의 병목이 되면 그때 WORKING 탭에 보조 관리자를 둔다.
 
-- main `39219c8`(원격과 같음)에 다음이 들어 있다: 단계 1a, 설정과 Anthropic 제공자, 단계 2(재수정 반복, 보호 경로, 스냅샷과 `revert`, `.cmd` 실행), 단계 3 오프라인 기구(무결성 확인, 설치 위치 거부, `report`, `doctor`, 후보 준비 스크립트), `codaryn models`, 교차 검토 결함 수정(S, T, V, W, X), 사용성·UX 설계 문서, 구현에 맞춘 설계 문서.
-- 실행한 검증(병합 직전의 합친 트리, PM 실행): `npx tsc --noEmit` 통과, `npm run test:unit` 726건 중 725 통과·실패 0·건너뜀 1(대소문자를 구분하는 파일 시스템 전용 사례), `npm run test:integration` 343건 통과·실패 0, `node scripts/check-secrets.mjs --tracked` 발견 없음.
-- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** `tests/live` 점검, 실제 `npm test` 실행, Windows 외 OS, OS 수준 격리, 실제 모델로 하는 자기 개발은 모두 미수행이다. `codaryn models`의 실제 목록 조회도 가짜 서버로만 확인했다.
+### 사용자 확인 대기
+
+| 번호 | 출처 | 질문 | PM 가정(진행 중) |
+| --- | --- | --- | --- |
+| Q-1 | PM | 비밀 검사 커밋 전 훅 설치가 자동 권한 판단에서 막혔다. 사용자가 직접 설치하거나 허용할지 | 훅이 생길 때까지 모든 커밋 전에 `node scripts/check-secrets.mjs --staged`를 직접 실행한다 |
+
+### 지침 후보
+
+| 번호 | 출처 | 내용 | 상태 |
+| --- | --- | --- | --- |
+| G-1 | PM | 비밀 검사 훅이 없을 때는 커밋 전에 같은 검사를 직접 실행하고 보고서에 결과를 적는다 | 작업 지시서에 임시로 적용. 지침 추가는 사용자 확인 대기 |
+
+## 현재 상태 (CP-12, 재개)
+
+**사용자가 2026-11-12에 새 Herdr 세션 w3의 w3:p1에 오케스트레이터를 맡기고 작업을 재개시켰다.**
+
+- 저장소를 새로 받은 상태였다. worktree, `node_modules`, 공용 훅, 정지 전 `.codaryn/` 메모가 없었다.
+  - worktree 5개를 원격 작업 브랜치에서 다시 만들었다.
+  - 설계 작업용 worktree 3개(`claude-general`, `claude-adapter`, `claude-gui`)를 main에서 새로 만들었다.
+  - 저장소 로컬 설정의 작성자를 `gangdonggil <gangdonggilstudy@gmail.com>`으로 맞췄다. 전역 설정의 메일이 달랐다.
+  - 공용 훅 설치는 권한 판단에서 막혀 Q-1로 대기한다.
+- main `34393bd` 기준 검증(PM 실행): `npm ci` 성공, 타입 검사 통과, 유닛 726건 중 725 통과·실패 0·건너뜀 1, 통합 343건 통과·실패 0, `check-secrets --tracked` 발견 없음.
+- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** `tests/live` 점검, Windows 외 OS, OS 수준 격리, 실제 모델로 하는 자기 개발은 모두 미수행이다.
 - 미해결 문제:
-  - 통합 전체 4회 중 1회, V-2 사례에서 CLI가 빈 stdout으로 끝났다(약 235ms). p4가 진단을 보강하고 10회 재실행했으나 재현되지 않았다. 원인 미확정이다. 진단 보강 커밋 `688a918`(wip)은 `claude/cli-verification`에 있고 main에는 없다.
-  - `models` 명령의 통합 사례(`dd638a3`, `832168d`)는 `claude/cli-verification`에 있고 main에는 없다. `models` 연결(`b380410`)이 병합됐으므로 재개하면 먼저 실행해 통과를 확인한 뒤 병합한다.
-  - w1:p1은 주간 사용 한도로 멈춰 있다(11월 15일 오전 3시 초기화). 화면의 선택 창에 PM은 답하지 않았다. 선택 표시는 2번에 가 있다.
-- 진행 중이던 작업(코드 변경 없이 멈춤): 사용성 개선 N-A(p7, 계약 준비 단계), N-B(p5, 고정 문구 조사), N-C(p6, 설계). 세 작업 모두 소유 파일을 아직 만들지 않았다. 조사·설계 메모는 각 worktree의 `.codaryn/`에 있다(Git 무시, 로컬에만 있음).
-- 모든 worktree는 깨끗하다(미커밋 변경 없음). 공용 Git 훅(`.git/hooks/pre-commit`)은 그대로 있다.
+  - 간헐 실패 Z-1: 통합 전체 4회 중 1회, V-2 사례에서 CLI가 빈 stdout으로 끝났다. 원인 미확정. 진단 보강 `688a918`은 `claude/cli-verification`에만 있다. w3:p8(Codex)이 반복 재현을 맡는다.
+  - `models` 통합 사례(`dd638a3`, `832168d`)는 `claude/cli-verification`에만 있다. w3:p4가 main을 병합해 실행한 뒤 PM이 병합한다.
+- 배정: 사용성 개선은 [사용성 개선 지시](work-orders/phase-4-usability.md)의 "재개 배정", 단계 4·5 설계는 [단계 4·5 설계 지시](work-orders/phase-4-5-design.md)를 따른다.
 
 ### PM 결정 (CP-4, CP-5)
 
@@ -66,20 +91,23 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 1a 자리표시자 `src/model/anthropic.ts`와 그 유닛 2건은 실제 제공자로 대체되어 삭제했다. 같은 동작은 `tests/unit/cli/anthropic-wire.test.ts`와 통합 m02가 확인한다.
 - 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
 
-## 세션 (CP-11, 모두 정지)
+## 세션 (CP-12)
 
-| pane | tab | 마지막 작업 | worktree | 브랜치 | 상태 | 정지 보고 |
-| --- | --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | (역할 1) | `claude-design` | `claude/core-engine` | 주간 사용 한도로 정지, 선택 창 대기 | 없음 |
-| w1:p4 | main | 간헐 실패 조사 Z-1, `models` 통합 사례 | `claude-operations` | `claude/cli-verification` | 정지. main보다 앞선 커밋 있음(미병합) | `.codaryn/report-pause.md` |
-| w1:p5 | optional | N-B 문구 카탈로그(조사 단계) | `claude-quality` | `claude/security-core` | 정지. main과 같음 | `.codaryn/report-pause.md` |
-| w1:p6 | optional | N-C 사람용 출력·실행 목록(설계 단계) | `claude-tools` | `claude/core-tools` | 정지. main과 같음 | `.codaryn/report-pause.md` |
-| w1:p7 | optional | N-A 계약과 CLI 핵심(준비 단계). 역할 1 | `claude-workspace` | `claude/workspace-policy` | 정지. 병합됨 | `.codaryn/report-pause.md` |
-| w1:p8 | optional | D2 문서화 보완(완료). 다음은 N-D | `claude-store` | `claude/revert-store` | 정지. 병합됨 | `.codaryn/report-pause.md` |
-| w1:p3 | main | PM·통합 | main | `main` | 정지 | 이 문서 |
-| w1:p2 | main | Codex | — | — | 대기(회수 권한 보유) | — |
+| pane | tab | 작업 | worktree | 브랜치 | 상태 |
+| --- | --- | --- | --- | --- | --- |
+| w3:p1 | MAIN | 오케스트레이터(PM·통합) | main | `main` | 진행 |
+| w3:p2 | WORKING | N-A 계약과 CLI 핵심(역할 1) | `claude-workspace` | `claude/workspace-policy` | 배정 |
+| w3:p4 | WORKING | `models` 통합 사례 정리, 이어서 N-E 통합 | `claude-operations` | `claude/cli-verification` | 배정 |
+| w3:p5 | WORKING | N-B 문구 카탈로그와 언어 선택 | `claude-quality` | `claude/security-core` | 배정 |
+| w3:p6 | WORKING | N-C 사람용 출력과 실행 목록 | `claude-tools` | `claude/core-tools` | 배정 |
+| w3:p7 | WORKING-sub | N-D 체험 예시와 사용 문서 | `claude-store` | `claude/revert-store` | 배정 |
+| w3:p9 | WORKING-sub | P4-G 범용 작업 워크플로 설계 | `claude-general` | `claude/general-tasks` | 배정 |
+| w3:pA | WORKING-sub | P5-A 어댑터 계약과 VS Code 확장 설계 | `claude-adapter` | `claude/adapter-contract` | 배정 |
+| w3:pB | WORKING-sub | P5-U 독립 GUI 설계 | `claude-gui` | `claude/gui-design` | 배정 |
+| w3:p3 | OPTIONAL | Codex 검증: N-A 계약 검토, 병합 전 합친 트리 재실행 | 읽기 전용 | — | 대상 대기 |
+| w3:p8 | OPTIONAL-sub | Codex 검증: Z-1 반복 재현 | `codex-verify`(분리 HEAD) | — | 배정 |
 
-세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 보존된 이전 브랜치: `claude/cli-foundation`(기반, 병합됨), `claude/quality`, `claude/quality-ready` 등 초안 브랜치는 삭제하지 않았다.
+세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 원격에 남은 이전 브랜치 `claude/core-engine`(정지 전 w1:p1)은 worktree 없이 보존한다. 이전 초안 브랜치도 삭제하지 않는다.
 
 ## 재개 방법
 

@@ -36,6 +36,27 @@
 - 유닛 P0: 기본 설정 위치의 우선순위와 작업 공간 안 거부, `init`이 기존 파일을 덮어쓰지 않음과 키를 받지 않음, 자리표시자 모델 거부, 프로필의 한도 상한, 한 줄 실행의 설치 위치 거부, 문구에 값이 들어가지 않음(두 언어 모두), `--quiet`, `revert --dry-run`이 아무것도 바꾸지 않음.
 - 커밋 작성자, trailer 금지, 병합 전 검토, 비밀 검사 훅은 이전과 같다. 실제 API는 호출하지 않는다.
 
+## 재개 배정 (CP-12)
+
+사용자가 2026-11-12에 새 Herdr 세션(w3)의 Claude(w3:p1)에게 오케스트레이터를 맡겼다. 저장소를 새로 받은 상태여서 worktree를 원격 브랜치에서 다시 만들었다. 정지 전 `.codaryn/` 조사·설계 메모는 남아 있지 않으므로 위 결정 표와 설계 문서([사용성 검토](../design/usability-review.md), [UX 설계](../design/ux-design.md))에서 다시 시작한다. 작업 1개당 pane 1개를 쓰고 소유 파일은 위 표와 같다.
+
+| 작업 | pane | worktree / 브랜치 | 페르소나 | 시작 조건 |
+| --- | --- | --- | --- | --- |
+| N-A 계약과 CLI 핵심(역할 1) | w3:p2 | `claude-workspace` / `claude/workspace-policy` | CLI 개발자(주), 수석 아키텍트(보조) | 즉시. 계약 추가분을 **먼저 따로** 커밋하고 PM에게 해시를 알린다 |
+| N-B 문구 카탈로그와 언어 선택 | w3:p5 | `claude-quality` / `claude/security-core` | CLI 개발자(주), 보안·개인정보 검토자(보조) | 즉시. 자기 모듈과 유닛을 먼저 만들고, N-A 계약 커밋이 오면 병합한다 |
+| N-C 사람용 출력과 실행 목록 | w3:p6 | `claude-tools` / `claude/core-tools` | CLI 개발자(주), 수석 아키텍트(UX, 보조) | N-B와 같다 |
+| Z-1·`models` 통합 사례 정리, 이어서 N-E | w3:p4 | `claude-operations` / `claude/cli-verification` | 검증 엔지니어 | 즉시. main을 병합하고 통합 전체를 실행해 `models` 사례와 진단 보강의 통과를 보고한다. N-E는 N-A 연결 뒤 |
+| N-D 체험 예시와 사용 문서 | w3:p7 | `claude-store` / `claude/revert-store` | 문서·데이터 작업 전문가 | 즉시. 키 없는 체험 예시(`examples/demo/`)와 현재 명령의 문서부터 쓴다. `init`, `runs`, `--quiet`, `--profile`, 한 줄 실행 절은 해당 기능이 main에 병합된 뒤 추가한다 |
+| 검증(Codex) | w3:p3 | 읽기 전용 | 검증 엔지니어 | N-A 계약 커밋 검토, 병합 전 합친 트리 재실행 |
+| 검증(Codex) | w3:p8 | `codex-verify`(분리 HEAD, 읽기 전용) | 검증 엔지니어 | Z-1 반복 재현 실행 |
+
+- 모든 작업자는 [개발 절차](../development-workflow.md) 5절의 사전 교육을 먼저 마치고, 보고서 첫머리에 이해 확인(페르소나, 소유 파일, 금지 행위, 완료 기준)을 적은 뒤 바로 작업한다.
+- 시작할 때 자기 worktree에서 `git merge main`을 하고 `npm ci`로 의존성을 받는다.
+- 비밀 검사 훅은 재설치 승인 대기다. 그동안 커밋 전에 `node scripts/check-secrets.mjs --staged`를 직접 실행하고 결과를 보고서에 적는다. `--no-verify`는 여전히 금지다.
+- 사용자 판단이 필요한 질문은 사용자에게 직접 묻지 않고 PM에게 보고한다. 기다리지 않고 가정을 명시해 진행할 수 있으면 진행한다. PM이 모아 사용자에게 한 번에 확인한다.
+- Codex는 사용 한도가 적어 검증만 맡긴다. 한도로 멈추면 5시간 주기 초기화 뒤 다시 배정한다.
+- 보고는 [개발 절차](../development-workflow.md) 11절 형식으로 한다. 긴 내용은 자기 worktree의 `.codaryn/report-<작업>.md`에 쓴다.
+
 ## 완료 기준
 
 1. 키 없이 타입 검사, 유닛, 통합 전체가 통과한다.

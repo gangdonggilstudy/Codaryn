@@ -1,6 +1,6 @@
 # 개발 진행 현황
 
-**2026-11-12 일시 정지.** 사용자 지시로 모든 작업을 멈췄다. 현재 상태와 재개 방법은 [임시 PM 상태](pm-status.md)에 있다.
+**2026-11-12 재개(CP-12).** 일시 정지 뒤 사용자가 새 Herdr 세션 w3에서 작업을 재개시켰다. 목표는 최종 설계까지 모두 구현하는 것이다. 현재 배치와 상태는 [임시 PM 상태](pm-status.md)에 있다.
 
 단계 1a(오프라인 최소 CLI), 설정과 Anthropic 제공자(1b 구현분), 단계 2 재수정 반복, 단계 3의 오프라인 기구, `codaryn models`, 사용성·UX 설계까지 main `39219c8`에 있다. 모두 오프라인 검증과 모의 API 검증까지이며, 실제 Anthropic API는 한 번도 호출하지 않았다. 사용성 개선 구현(N-1~N-13), 단계 4, 단계 5는 시작 전이거나 준비 단계다.
 
@@ -57,6 +57,7 @@ PM 체크포인트는 [임시 PM 상태](pm-status.md), 배분과 PM 결정은 [
 | 수정 묶음 T 뒤 | 합친 트리(PM 실행) → main `4074d5c` | `npx tsc --noEmit`, `npm run test:unit`, `npm run test:integration`, `node scripts/check-secrets.mjs --tracked` | 타입 검사 통과, 유닛 472건 중 471 통과·실패 0·건너뜀 1, 통합 273건 통과·실패 0·건너뜀 0, 비밀 발견 없음 |
 | 단계 3과 후속 수정 | 합친 트리(PM 실행) → main `a021812`, `349726a` | 타입 검사, 유닛, 통합 | 단계 3 통합 사례 포함 통합 343건 통과. 유닛 684건 중 683 통과·1 건너뜀 |
 | 일시 정지 직전 | 합친 트리(PM 실행) → main `39219c8` | `npx tsc --noEmit`, `npm run test:unit`, `npm run test:integration`, `node scripts/check-secrets.mjs --tracked` | 타입 검사 통과, 유닛 726건 중 725 통과·실패 0·건너뜀 1, 통합 343건 통과, 비밀 발견 없음 |
+| 재개(CP-12) | 새로 받은 저장소의 main `34393bd`(PM 실행) | `npm ci`, `npm run typecheck`, `npm run test:unit`, `npm run test:integration`, `node scripts/check-secrets.mjs --tracked` | 모두 성공. 유닛 726건 중 725 통과·실패 0·건너뜀 1, 통합 343건 통과, 비밀 발견 없음 |
 | 간헐 실패 | main `c8c0d9b` 부근 | 통합 전체 반복 실행 | PM 4회 중 1회 V-2 사례 실패(CLI가 빈 stdout으로 종료). p4의 10회 재실행에서는 재현되지 않음. 원인 미확정 |
 | 실제 API | — | `node --test dist/tests/live/anthropic-live.js` | **미실행.** 사용자가 키와 모델을 설정하고 직접 실행한다 |
 

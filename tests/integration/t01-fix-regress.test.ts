@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFil
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  ANTHROPIC_KEY_PATTERN_SOURCE,
+  ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
   MAX_COMMAND_TIMEOUT_MS,
   MAX_OUTPUT_TOKENS_LIMIT,
   REVERT_EXIT_CODES,
@@ -19,7 +19,7 @@ import {
   STATE_DIR_NAME,
 } from "../../src/contracts/index.js";
 import type { CliErrorCode, VerifierConfig } from "../../src/contracts/index.js";
-import { FAKE_MODEL_CONFIG, fakeApiConfig, writeAnthropicTask, writeConfigFile } from "../fixtures/anthropic.js";
+import { ANTHROPIC_REFUSED_SHAPE, FAKE_MODEL_CONFIG, fakeApiConfig, writeAnthropicTask, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { writeProgram } from "../fixtures/programs.js";
@@ -273,8 +273,8 @@ test("T-13 protectedPaths 항목이 링크면 실경로도 보호하고, 밖을 
 test("T-14 키 검사: 이스케이프한 키의 중복 필드, 위치에 모르는 필드 이름 없음, 대체 데이터 스트림", { timeout: 60_000 }, async (t) => {
   const escapeAll = (value: string): string =>
     [...value].map((char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`).join("");
-  const keyShaped = ["sk", "ant", "codaryn0test0shape0only"].join("-");
-  assert.ok(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(keyShaped), "test assumption: the value has the key shape");
+  const keyShaped = ANTHROPIC_REFUSED_SHAPE;
+  assert.ok(new RegExp(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE).test(keyShaped), "test assumption: the value has the key shape");
 
   for (const [label, value] of [
     ["키 모양 값", keyShaped],

@@ -12,7 +12,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import {
   ANTHROPIC_API_KEY_ENV,
-  ANTHROPIC_KEY_PATTERN_SOURCE,
+  ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE,
   CLI_ERROR_EXIT_CODES,
   CODARYN_CONFIG_ENV,
   PRIVACY_TOKEN_PREFIX,
@@ -22,6 +22,8 @@ import {
 import type { CliErrorCode, CliErrorOutput, ReadFilePayload, VerifierConfig } from "../../src/contracts/index.js";
 import {
   ANTHROPIC_LIMITS,
+  ANTHROPIC_NAMES_NOT_REFUSED,
+  ANTHROPIC_REFUSED_SHAPE,
   FAKE_MODEL_CONFIG,
   fakeApiConfig,
   writeAnthropicTask,
@@ -469,8 +471,8 @@ test(`${MOCK_LABEL} S-7 설정 파일의 한도·시간 값 위반은 요청 0�
 
 test(`${MOCK_LABEL} S-8 --goal의 키 모양 값과 현재 키는 거부, 요청 0건`, { timeout: 60_000 }, async (t) => {
   // Built at run time: a key-shaped literal would be refused by the commit hook, as intended.
-  const keyShaped = ["sk", "ant", "codaryn0test0shape0only"].join("-");
-  assert.ok(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(keyShaped), "test assumption: the value has the key shape");
+  const keyShaped = ANTHROPIC_REFUSED_SHAPE;
+  assert.ok(new RegExp(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE).test(keyShaped), "test assumption: the value has the key shape");
   for (const [label, value] of [
     ["키 모양", keyShaped],
     ["현재 키 값", FAKE_API_KEY],
@@ -484,6 +486,35 @@ test(`${MOCK_LABEL} S-8 --goal의 키 모양 값과 현재 키는 거부, 요청
       );
       assertPreRun(run, "key_in_file", sb, [value, FAKE_API_KEY]);
       assert.equal(api.requests.length, 0);
+    });
+  }
+});
+
+test(`${MOCK_LABEL} DR-36 (c) Anthropic 거부 모양: sk-ant- 뒤 32자 이상이고 숫자가 있으면 key_in_file, 짧거나 숫자가 없거나 단어에 붙은 이름은 거부되지 않는다`, { timeout: 90_000 }, async (t) => {
+  const refusal = new RegExp(ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE);
+  assert.ok(refusal.test(ANTHROPIC_REFUSED_SHAPE), "test assumption: the value has the refusal shape");
+  await t.test("좁혀진 모양 → key_in_file, 요청 0건", async (st) => {
+    const { sb, api, configPath } = await anthropicSetup(st, [replyText("끝")], { limits: ANTHROPIC_LIMITS });
+    const run = await runGuarded(
+      sb,
+      ["run", "--workspace", sb.workspace, "--goal", `이 이름을 쓴다 ${ANTHROPIC_REFUSED_SHAPE}`, "--config", configPath],
+      cliEnv({ fakeApiKey: FAKE_API_KEY }),
+    );
+    assertPreRun(run, "key_in_file", sb, [ANTHROPIC_REFUSED_SHAPE, FAKE_API_KEY]);
+    assert.equal(api.requests.length, 0);
+  });
+  for (const name of ANTHROPIC_NAMES_NOT_REFUSED) {
+    await t.test(`${name.label} → 거부되지 않고 모델까지 간다`, async (st) => {
+      assert.equal(refusal.test(name.value), false, "test assumption: outside the refusal shape");
+      const { sb, api, configPath } = await anthropicSetup(st, [replyText("끝")], { limits: ANTHROPIC_LIMITS });
+      const run = await runGuarded(
+        sb,
+        ["run", "--workspace", sb.workspace, "--goal", `이 이름을 쓴다 ${name.value}`, "--config", configPath],
+        cliEnv({ fakeApiKey: FAKE_API_KEY }),
+      );
+      const output = JSON.parse(run.stdout.trim()) as { kind: string };
+      assert.equal(output.kind, "run", `not refused: ${run.stdout.slice(0, 300)}`);
+      assert.equal(api.requests.length, 1, "the run reached the model");
     });
   }
 });

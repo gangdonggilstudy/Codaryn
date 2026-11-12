@@ -189,8 +189,16 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-/** U-13 (5j2): the plan's apply, then two cleanups of its apply run (records only; records and discarded files). */
-const U13_DIALOGS = ["apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"];
+/**
+ * U-13 (5j2): the plan's apply, then three cleanups of its apply run: its records only; its records
+ * and discarded files with "keep them" in the third dialog (R47-I4); both, deleted.
+ */
+const U13_DIALOGS = [
+  "apply.message",
+  ...["cleanup.message", "cleanup.notReverted.message"],
+  ...["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"],
+  ...["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"],
+];
 const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -420,6 +428,20 @@ const expected = [
       !v.keptText.includes("discarded_left") &&
       v.keptNotice === true &&
       JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message"]) &&
+      JSON.stringify(v.left) === JSON.stringify({ records: true, box: true }),
+  ],
+  // R47-I4: its discarded files chosen too, "keep them" in the third dialog (the default): both stay,
+  // the discarded files as not_confirmed and the records as discarded_left.
+  [
+    "discardLeftKeepBox",
+    (v) =>
+      v.chosen === true &&
+      v.plan === "2" &&
+      v.result === "done" &&
+      v.removed === "0" &&
+      JSON.stringify([...v.kept].sort()) === JSON.stringify([["discarded", "not_confirmed"], ["run", "discarded_left"]]) &&
+      v.keptNotice === true &&
+      JSON.stringify(v.dialogs) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message", "cleanup.discarded.message"]) &&
       JSON.stringify(v.left) === JSON.stringify({ records: true, box: true }),
   ],
   // Its discarded files chosen too and their deletion agreed to: both go, nothing kept.

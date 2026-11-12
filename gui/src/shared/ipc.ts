@@ -630,6 +630,28 @@ function toFinalMessage(value: unknown): FinalMessageView | null | "bad" {
   return { text, truncated: value["truncated"] };
 }
 
+/**
+ * U-40 (DR-52, AXM-17): whether masking worked, in counts only (EngineResult.masking): the values
+ * registered for masking, and the places masked in what was sent to the model. Never a value, a
+ * place or a length. The screens show it as the CLI's end summary does (`summary.masking`).
+ */
+export interface MaskingView {
+  readonly registeredValues: number;
+  readonly maskedPlaces: number;
+}
+
+/**
+ * The two counts rebuilt from `value`, or null: when there is none (nothing registered, a result
+ * written before DR-52), and when either is not a count (a whole number from 0), as the CLI's end
+ * summary shows no line then. Nothing else the field holds is carried. The engine host and the
+ * main process both use it.
+ */
+export function maskingOf(value: unknown): MaskingView | null {
+  if (!isObj(value)) return null;
+  const { registeredValues, maskedPlaces } = value;
+  return count(registeredValues) && count(maskedPlaces) ? { registeredValues, maskedPlaces } : null;
+}
+
 /** GU-3 (3.7 summary): what the window shows of a finished run. Texts are masked and cleaned. */
 export interface RunResultView {
   readonly runId: string;
@@ -656,6 +678,8 @@ export interface RunResultView {
   readonly applied: readonly PlanActionView[];
   /** U-21 (DR-47): the agent's last message; null when there is none (a plan or apply run, an older result). */
   readonly finalMessage?: FinalMessageView | null;
+  /** U-40 (DR-52): the masking counts; null when there are none or they are not counts. */
+  readonly masking?: MaskingView | null;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -748,6 +772,8 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       unsafeMoves: unsafeMoves as number | null,
       applied,
       finalMessage,
+      // U-40: counts only; anything else is not shown (no line), the rest of the result stays.
+      masking: maskingOf(result["masking"]),
     },
   };
 }
@@ -929,6 +955,8 @@ export interface ReportView {
   readonly recordsChanged?: boolean;
   /** U-21 (DR-47): the agent's last message from the run's result; null when there is none. */
   readonly finalMessage?: FinalMessageView | null;
+  /** U-40 (DR-52): the masking counts from the run's result; null when there are none or they are not counts. */
+  readonly masking?: MaskingView | null;
   readonly kind: "run" | "apply";
   readonly status: "complete" | "incomplete";
   readonly finished: { readonly status: string; readonly reason: string } | null;
@@ -1055,7 +1083,8 @@ export function toReportReply(value: unknown): ReportReply {
       failed,
     };
   }
-  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
+  const masking = maskingOf(value["masking"]);
+  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, masking, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
 }
 
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };

@@ -2,7 +2,7 @@
  * GU-3: the result screen of a run or an apply (docs/design/standalone-gui.md 3.7), from the app
  * layer's structured `report` (never Markdown turned into HTML). Tabs: summary, checks (by number,
  * with their evidence), changes (a run) or actions (an apply), protected items ("found after the
- * fact"), usage and records, and the person's verdict. Every text came masked and cleaned.
+ * fact"), usage, the masking counts (U-40) and records, and the person's verdict. Every text came masked and cleaned.
  */
 
 import type { Texts } from "../i18n/catalog.js";
@@ -11,8 +11,21 @@ import { asReport, asSaveReport } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
-import type { ReportView } from "../../shared/ipc.js";
+import type { MaskingView, ReportView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
+
+/**
+ * U-40 (DR-52, AXM-17): the masking line of the run's end and of the report, the same words as the
+ * CLI's `summary.masking`: two counts, never a value, a place or a length. Null (no line) when the
+ * result has none, or when either is not a count (the main process dropped such a field already).
+ */
+export function maskingLine(t: Texts, masking: MaskingView | null | undefined): string | null {
+  if (masking === undefined || masking === null) return null;
+  const { registeredValues, maskedPlaces } = masking;
+  const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  if (!isCount(registeredValues) || !isCount(maskedPlaces)) return null;
+  return t.format("run.masking", { registered: String(registeredValues), masked: String(maskedPlaces) });
+}
 
 export interface ReportDeps {
   readonly texts: Texts;
@@ -153,6 +166,9 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
         ),
         el("p", t.format("report.records", { count: String(view.records ?? "-") })),
       ];
+      // U-40 (DR-52): the run's masking counts after its usage, as the run's end shows them.
+      const masking = maskingLine(t, view.masking);
+      if (masking !== null) parts.splice(1, 0, el("p", masking, { id: "report-masking" }));
       if (view.run !== null) {
         parts.push(el("p", t.format("report.runCounts", { requests: String(view.run.modelRequests ?? "-"), denied: String(view.run.deniedToolCalls ?? "-"), repairs: String(view.run.repairs ?? "-") })));
       }

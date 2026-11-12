@@ -261,6 +261,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "run.noChecks": "No checks",
   "run.check": "Check {number}: {outcome}",
   "run.usage": "Model turns {turns} · tool calls {tools} · tokens {tokens} · time {time}",
+  "run.masking": "Masking: values registered {registered} · places masked in what the model was sent {masked}",
   "run.plan": "A plan was made: {actions} actions, digest {digest}",
   "run.review": "Checklist for a person",
   "run.notices": "Notes",

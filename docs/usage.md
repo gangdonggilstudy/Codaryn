@@ -220,9 +220,9 @@ Next: codaryn doctor
 - **변수 파일이 새로 설정한 값은 비밀로 등록되어** 파일 내용, 명령 출력, 기록에 나타나면 가려진다. 예외는 이미 설정돼 있던 변수(Windows는 이름의 대소문자 무시), `CODARYN_CONFIG`와 제공자별 모델·주소 변수(`CODARYN_MODEL`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`), 8자 미만 값이다. 비밀로 등록된 값은 실행하는 명령의 환경에도 넘어가지 않는다(12절).
 - 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일, 간편 형식의 `--goal`, 한 줄 실행의 목표에 다음이 있으면 `key_in_file`(종료 2)로 바로 멈추고 아무것도 보내지 않는다.
   - 키 이름의 필드(`apiKey`, `token`, `password` 등)
-  - 지금 설정된 키 변수(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)의 값. 16자 이상인 값만 찾는다. 줄바꿈, 공백, 영폭 공백 같은 보이지 않는 문자로 끊겨 있어도 찾는다.
-  - 키 모양의 값: Anthropic 키 모양(실제 키 형식이면 앞에 다른 글자가 붙어 있거나 줄바꿈으로 끊겨 있어도), OpenAI 키 모양 두 가지(`sk-proj-` 같은 접두사가 붙은 것, 대소문자와 숫자가 섞인 긴 예전 형식).
-  - `sk-learn` 같은 짧은 이름만으로는 멈추지 않는다. 다만 그 뒤에 영어 단어와 숫자가 이어지면 멈출 수 있고, 끊긴 키 가운데 놓치는 것도 있다(16절 "키 거부의 빈틈과 오탐").
+  - 지금 설정된 키 변수(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)의 값. 16자 이상인 값만 찾는다. 줄바꿈, 공백, 영폭 공백 같은 보이지 않는 문자로 끊겨 있어도 찾는다. 값의 영문자와 숫자가 16자 이상이면 그 사이에 어떤 문자가 끼어 있어도(이체 선택자, 한글 채움 문자, `.`, `\` 등) 찾는다.
+  - 키 모양의 값: Anthropic 키 모양(실제 키 형식이면 앞에 다른 글자가 붙어 있거나 줄바꿈으로 끊겨 있어도), OpenAI 키 모양 두 가지(`sk-proj-` 같은 접두사가 붙은 것, 대소문자와 숫자가 섞인 긴 예전 형식). 줄바꿈이나 보이지 않는 문자로 끊긴 것도 찾는다. 보이는 공백은 빼지 않으므로 `sk-learn`, `sk-SK` 같은 이름 뒤에 단어가 이어지는 평범한 문장은 멈추지 않는다.
+  - 남은 빈틈과 오탐(구절 모양의 키 값이 평범한 목표를 멈추게 하는 것 등)은 16절 "키 거부의 빈틈과 오탐".
 - task·설정 파일이 1 MiB(1,048,576바이트)보다 크면 내용을 쓰지 않고 `invalid_task`·`invalid_config`(종료 2)로 멈춘다. 메시지는 `the config file is larger than 1048576 bytes (1 MiB); nothing in it was used`이다(task 파일도 같은 꼴).
 
 | 환경 변수 | 뜻 |
@@ -277,7 +277,7 @@ node dist/src/cli/main.js models --use 2
 {"schemaVersion":1,"kind":"error","code":"provider_not_configured","exitCode":7,"message":"not set: maxOutputTokens (task model.maxOutputTokens or config providers.openai.maxOutputTokens). Nothing was sent"}
 ```
 
-- 이때 `doctor`의 모델 항목은 `maxOutputTokens is not set (task model.maxOutputTokens or config maxOutputTokens)`라고 적는다. OpenAI가 읽는 곳은 `providers.openai.maxOutputTokens`다.
+- 이때 `doctor`의 모델 항목도 `maxOutputTokens is not set (task model.maxOutputTokens or config providers.openai.maxOutputTokens)`로 채울 곳을 알린다(main `23daf6b`). 모델이 없으면 `no model is set (task model.model, CODARYN_OPENAI_MODEL or config providers.openai.model); codaryn models lists the models`다.
 - `init`은 지금처럼 Anthropic 설정만 만들고 Anthropic 키만 안내한다. OpenAI 설정은 직접 더한다.
 
 **모델:** 코드에 기본 모델이 없다. 현행 Codex 계열 모델 id는 API에 없으므로(결정 DR-31) 특정 모델을 전제로 하지 않는다. `models --provider openai`로 키가 쓸 수 있는 목록을 보고 고른다.
@@ -449,6 +449,16 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 - 항목은 Node.js 버전, 설정 파일, 변수 파일, task 파일, API 키, 모델, 한도, 파일 위치, 허용 명령(실행 때와 같은 규칙으로 찾고 판정), 작업 공간, 설치 위치, 보호 자료 경로, 메시지 언어, 작업 공간 잠금이다. 줄마다 상태(`[ok]`, `[warning]`, `[failed]`, `[skipped]`)와 이유가 나온다. `--json`의 점검 id와 상태 값(`ok`, `warn`, `fail`, `skipped`)은 영어로 고정이다.
 - 종료: 가장 나쁜 항목이 `ok`(또는 `skipped`)면 0, `fail`이면 1, `warn`이면 3이다. 인자 오류는 `invalid_arguments`(종료 2)다. `--task`와 `--workspace`를 함께 주면 이 오류다.
 - 키는 있음·없음만 적고 값은 내지 않는다. 파일이나 환경에서 읽은 값도 내지 않는다. 키가 있으면 그 키를 보낼 주소와, 그 주소를 정한 곳(제공자의 주소 변수, 설정 필드, 기본값)을 함께 적는다. 예: `OPENAI_API_KEY is set; openai requests send it to https://api.openai.com, the default address`.
+- 설정 파일 항목은 그 파일을 어디서 받았는지 적는다. 기본 위치면 위 예처럼, `--config`로 주면 `the config file given by --config is valid`다.
+- 프로필이나 task 파일이 워크플로를 고르면, 그 워크플로의 규칙이 설정의 정책에서 빼는 것을 허용 명령 항목 아래에 알린다(18.1절 "정책 합치기"). 설정 정책에 명령 규칙 하나(`node --test`)와 `restorePathTokens: true`가 있고 프로필 `tidy`가 `workflowRef: "organize"`일 때 `doctor --workspace … --profile tidy`의 실제 출력 일부(main `23daf6b`):
+
+```
+[skipped] allowed commands          no command is allowed and no command check is configured
+                                    a run of this workflow leaves out command rules of the configured policy: 1
+                                    a run of this workflow does not restore path tokens, although the configured policy allows it
+```
+
+  같은 설정에서 `workflowRef: "code"`인 프로필은 빼는 것이 없어 `executables found and allowed by the run's rules: 1`만 나온다.
 - **모델이 실제로 있는지는 확인하지 않는다**(네트워크 없음). 자리표시자 모델은 `failed`다. 목록은 `models`(4절)로 본다.
 
 `init`만 한 상태(키 없음, 자리표시자 모델)에서 작업 공간을 점검한 실제 출력이다.
@@ -764,16 +774,12 @@ node --test dist/tests/live/anthropic-live.js
 - **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 직접 지운다(지워도 되는 폴더는 11절).
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 비밀 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
 - **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
-- **키 거부의 빈틈과 오탐(결정 DR-42, 다음 묶음에서 고친다):** 키가 든 입력의 거부(4절 "키")와 실행 중 가림에 남은 것이다. main `5701ebe`의 실제 CLI로 확인했다.
-  - 등록된 키 값이 이체 선택자(U+FE0F), 결합 자소 연결자(U+034F), 한글 채움 문자(U+3164)나 보이는 문자(예: `.`)로 끊기면 거부되지 않는다. 줄바꿈, 공백, 영폭 공백(U+200B), soft hyphen(U+00AD), word joiner(U+2060)로 끊긴 값은 거부한다(DR-42 (a)). 등록되지 않은 OpenAI 키가 단어 뒤에서 영폭 공백으로 끊긴 경우도 거부되지 않았다.
-  - 목표에 `sk-`로 시작하는 패키지 이름이나 로캘 코드가 있고 그 뒤에 영어 단어와 숫자가 이어지면, 키가 없어도 `key_in_file`로 멈출 수 있다. 검사가 공백까지 뺀 글에서 키 모양을 다시 찾기 때문이다(DR-42 (b)). 확인한 예:
-    - 멈춤: `README에 sk-learn installation guide for Windows users 2026 추가`, `README 언어 목록에 sk-SK Slovak translations for Settings and About pages 2026 추가`, `README에 sk-ant-design-system components guide 2026 추가`
-    - 통과: 같은 문장에서 이름을 백틱으로 감싼 것(`` `sk-learn` ``), 이름 바로 뒤에 쉼표를 둔 것(`sk-learn,`), 이름 뒤에 한글이 바로 오는 것(`sk-learn 설치 안내를 README에 추가`)
-    - 피하는 법: 이름을 백틱으로 감싸거나 이름 바로 뒤에 쉼표를 둔다.
-  - 실행 중 가림은 끊긴 등록 값을 아직 가리지 못한다(DR-42 (c)). 작업 공간 파일에 등록한 비밀이 영폭 공백이나 줄바꿈으로 끊겨 있으면 그 글이 그대로 모델과 기록에 간다. 같은 파일 안의 끊기지 않은 값은 토큰으로 가려졌다(대본 모델로 확인).
-- **OpenAI 설정을 가리키는 문구의 어긋남(고쳐질 때까지):** 두 곳의 문구가 OpenAI 설정을 잘못 가리킨다. 동작(멈추는 것)은 맞다.
-  - 제공자가 openai이고 `providers.openai.maxOutputTokens`가 없으면, `doctor`의 모델 항목은 최상위 `maxOutputTokens`가 있어도 `maxOutputTokens is not set (task model.maxOutputTokens or config maxOutputTokens)`라고 적는다. 채울 곳은 `providers.openai.maxOutputTokens`다(4절 "두 번째 제공자: OpenAI").
-  - 설정·task 파일에 OpenAI 키 모양의 값이 있으면 `key_in_file`의 메시지가 `keys are read only from the ANTHROPIC_API_KEY environment variable`이라고 적는다. OpenAI 키는 `OPENAI_API_KEY`에서 읽는다.
+- **키 거부의 빈틈과 오탐(결정 DR-43, 다음 묶음에서 고친다):** 키가 든 입력의 거부(4절 "키")와 실행 중 가림에 남은 것이다. main `23daf6b`의 실제 CLI로 확인했다.
+  - **구절 모양의 키 값(DR-43 (c)):** 키 변수에 낱말을 이은 값(예: 로컬 서버용 자리표시자 `not-needed-for-local-server`)을 두면, 같은 낱말을 띄어 쓴 평범한 목표도 `key_in_file`로 멈춘다. 값의 영문자와 숫자만 이어 비교하기 때문이다. 확인한 예: `OPENAI_API_KEY`에 위 자리표시자를 두면 anthropic 실행의 목표 `README에 not needed for local server 설정 안내 추가`가 멈췄고, 그 변수를 지우면 통과했다. 같은 값은 `changes`·`doctor`의 출력에서도 가려진다: 그 낱말로 이름 지은 파일이 `changes`에 `[key].md`로 나왔다. 피하는 법: 쓰지 않는 제공자의 키 변수는 지우거나, 자리표시자를 낱말이 아닌 짧은 값으로 둔다(16자보다 짧은 키 값은 이 비교에 쓰지 않는다. 예: `x`).
+  - **찾지 못하는 끊김:** 등록되지 않은 키가 보이는 공백으로 끊긴 경우(`sk-proj-` 키를 공백으로 가른 목표가 통과했다), 등록된 키가 `&#8203;` 같은 문자 참조로 끊긴 경우. 등록된 키는 그 밖의 모든 끊김(줄바꿈, 공백, 영폭 공백, 이체 선택자, 결합 자소 연결자, 한글 채움 문자, `.`, 역슬래시, 줄바꿈 없는 공백)에서 거부됐다.
+  - **실행 중 가림:** 끊긴 등록 값을 아직 가리지 못한다. 작업 공간 파일에 등록한 비밀이 영폭 공백, 줄바꿈, `.`으로 끊겨 있으면 그 글이 그대로 모델과 기록에 간다. 같은 파일 안의 끊기지 않은 값은 토큰으로 가려졌다(대본 모델로 확인).
+- **워크플로의 검증기(DR-43 (a)):** 정책은 워크플로의 규칙과 합쳐지지만(18.1절 "정책 합치기") 검증기는 아직 합쳐지지 않는다. 설정의 검증기가 워크플로 정의 자신의 검증기를 대체한다. 확인(main `23daf6b`): 설정 파일의 워크플로 `notes`에 검증기 `from-workflow`를, 최상위에 `from-config`를 두고 `run --workflow notes`를 하면 `from-config`만 실행됐다. 워크플로의 검사가 꼭 필요하면 같은 검증기를 설정의 검증기에도 적는다.
+- **정책에서 빠진 것의 알림(DR-43 (b)):** 워크플로의 규칙이 설정 정책에서 뺀 것은 `doctor`가 알리고 실행 기록의 `run_started`에 남지만, 실행의 진행 줄과 끝 요약은 아직 알리지 않는다. `report`에도 나오지 않는다. 실행 전에 `doctor`를 같은 옵션으로 돌려 본다(7절).
 - **OpenAI 제공자:** 실제 OpenAI API로는 점검하지 않았다. 추론 항목은 암호문이라 가림이 볼 수 없고, 다음 요청에 받은 그대로 다시 간다([민감정보 처리](privacy.md) "OpenAI 제공자").
 - **변경 보기의 글:** `changes`는 지금 등록된 비밀로 가린 글이 실행 때와 같을 때만 글을 보인다. 실행 뒤 바뀐 파일, 비밀의 값이 바뀐 경우, 쓰기 도구가 기록을 남기기 전의 실행은 경로와 상태만 보인다(10절 "변경 보기").
 - **보관함:** 폐기한 파일은 `.codaryn\discarded\`에 쌓이고 비우는 명령이 없다(18.8절).
@@ -807,7 +813,7 @@ node --test dist/tests/live/anthropic-live.js
 | Node 오류, 종료 9 | `--env-file`의 파일이 없다. `--vars-file`로 바꾼다 |
 | `invalid_task`, `invalid_config` | stderr의 오류 설명이 파일과 필드(또는 줄·열)를 알려 준다(6절). 설정 상한보다 큰 task 한도, 설정 최상위보다 큰 프로필 한도, 없는 프로필, anthropic의 `maxTotalTokens: null`, 작업 공간 안의 파일, 변수 파일의 BOM, 1 MiB보다 큰 task·설정 파일(4절 "키")도 여기다 |
 | `config_exists` | `init`의 대상 위치에 파일이 이미 있다. 그 파일을 고치거나, `--config`로 다른 위치를 준다 |
-| `key_in_file` | task·설정 파일이나 `--goal`, 한 줄 실행 목표에서 키 필드나 키 값을 지우고 환경 변수로 옮긴다. 키가 없는데 목표에 `sk-`로 시작하는 이름(패키지, 로캘)이 있어 멈췄다면, 그 이름을 백틱으로 감싸거나 바로 뒤에 쉼표를 둔다(16절 "키 거부의 빈틈과 오탐") |
+| `key_in_file` | task·설정 파일이나 `--goal`, 한 줄 실행 목표에서 키 필드나 키 값을 지우고 환경 변수로 옮긴다. 키를 적지 않았는데 멈췄다면, 설정된 키 변수의 값(로컬 서버용 자리표시자 같은 낱말 이은 값)과 같은 낱말이 목표에 있는지 본다(16절 "키 거부의 빈틈과 오탐"). 메시지가 어느 키 변수인지 알린다 |
 | `secret_env_missing` | `secretEnv`에 적은 환경 변수가 없다 |
 | `workspace_not_found` | `workspaceRoot`나 `--workspace`가 있는 디렉터리가 아니다 |
 | `workspace_is_install_dir` | 작업 공간(한 줄 실행이면 현재 디렉터리)이 CLI 설치 위치(이 저장소)와 겹친다. 저장소 밖으로 복사해 실행한다(3절, 5절) |
@@ -870,6 +876,13 @@ node --test dist/tests/live/anthropic-live.js
   - `plan: "apply"` 워크플로에서 `plan: "none"`으로 바꿀 수 없다.
   - `organize`처럼 `allowCommands: false`인 워크플로에서는 `policy.commands`가 비어 있어야 한다. `run_command`도 도구에서 빠진다. 이 금지는 모델이 부를 수 있는 명령에 대한 것이다. task나 설정에 사람이 둔 `command` 검증기는 적용 뒤에 실행된다.
   - 없는 `workflowRef`는 `invalid_task`다.
+- **정책 합치기(결정 DR-41):** 워크플로가 적용되면 그 정의의 정책은 설정·프로필의 정책(간편 형식)이나 task 파일의 자기 정책으로 대체되지 않고 합쳐진다. 워크플로의 규칙을 느슨하게 하는 정책은 없다.
+  - 보호 경로(`protectedPaths`): 양쪽을 모두 쓴다.
+  - 명령 규칙: 양쪽이 모두 허용하는 명령만 남는다. `organize`처럼 명령을 허용하지 않는 워크플로에서는 설정·프로필의 명령 규칙이 모두 빠진다(task 파일 자신의 명령 규칙은 위처럼 `invalid_task`다).
+  - 계획 행동(`planActions`): 설정 정책이 적었을 때만 양쪽에 다 있는 것으로 줄인다. 적지 않았으면 워크플로의 것을 그대로 쓴다.
+  - 경로 토큰 되살리기(`restorePathTokens`): 양쪽이 모두 허용할 때만 켜진다.
+  - 빠진 것은 `doctor`가 알리고(7절의 예), 실행 기록의 `run_started`에 종류와 개수만 남는다. 확인(main `23daf6b`): 위 7절의 설정으로 `run --workspace … --workflow organize`를 하면 기록에 `commands_dropped` 1과 `restore_path_tokens_off` 1이 남았다. 실행의 진행 줄은 아직 알리지 않는다(16절).
+  - 검증기는 아직 합쳐지지 않는다(16절).
 - **한도:** 워크플로 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
 - **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절).
 

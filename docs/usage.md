@@ -12,6 +12,7 @@ Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동
 
 - Node.js 26 이상(`package.json`의 `engines`). 검증은 Windows에서 했고 다른 OS는 확인하지 않았다.
 - 실제 호출에는 Anthropic API 키와 모델 ID가 필요하다. 3절의 체험에는 둘 다 필요 없다.
+- 지금은 CLI만 있다. 화면(GUI)과 Anthropic 밖의 모델 제공자는 아직 없다.
 
 ## 2. 설치와 빌드
 
@@ -392,7 +393,7 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 - **한 줄 실행** `run "<목표>"`은 `--workspace <현재 디렉터리> --goal <목표>`와 같다. 위치 인자는 하나만 받고, `--task`·`--workspace`·`--goal`과 함께 쓰면 `invalid_arguments`다. `--`로 시작하는 목표는 옵션으로 읽힌다. `npm link`했으면 `codaryn run "<목표>"`다.
   - 현재 디렉터리가 설치 위치(이 저장소)와 겹치면 `workspace_is_install_dir`(종료 2)다.
   - 확인 범위: 이 문서 작성 때 한 줄 실행은 키 없음·자리표시자 모델의 `provider_not_configured`(종료 7, 전송 없음)와 설치 위치 거부까지 실제로 확인했다. 실제 모델로 끝까지 실행하지는 않았다(실제 API 미검증).
-- 간편 형식과 한 줄 실행의 제공자는 항상 anthropic이다.
+- 지금 제공자는 anthropic 하나다(키 없는 시험용 `scripted` 제외). 간편 형식과 한 줄 실행은 늘 anthropic을 쓴다.
 - 예시를 직접 돌릴 때는 `examples` 폴더를 저장소 밖에 복사한 뒤 그 사본의 task를 실행한다. 모델이 예시 파일을 실제로 고치고, 작업 공간에 `.codaryn/`가 생긴다.
 - 옵션은 `--config`, `--vars-file`, `--cancel-file`, `--profile`, `--quiet`이다.
 - 취소는 Ctrl+C로 하거나, `--cancel-file`로 지정한 파일(작업 공간 밖)을 만들어서 한다. 상태는 `cancelled`(5)가 되고 이미 적용한 변경은 남는다.

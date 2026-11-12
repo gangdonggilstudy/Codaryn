@@ -100,7 +100,6 @@ describe("(1) doctor names where the missing output cap is read", () => {
   for (const language of ["en", "ko"] as const) {
     test(
       `${language}: the person's line names providers.openai.maxOutputTokens for an openai config`,
-      { todo: "N-B: the texts of doctor.model.output_cap_missing {field} (claude/security-core b88114c); the CLI passes the place (0d38bfa)" },
       async () => {
         const { line } = await modelLine(OPENAI_NO_CAP, language);
         assert.ok(line.includes("providers.openai.maxOutputTokens"), line);

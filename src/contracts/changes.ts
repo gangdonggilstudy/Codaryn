@@ -13,8 +13,9 @@
  */
 
 import type { CliErrorCode } from "./engine.js";
-import type { ApprovalChannel } from "./plan.js";
-import type { RawText } from "./text.js";
+import { maskedParts, sameMaskedParts } from "./plan.js";
+import type { ApprovalChannel, MaskedParts } from "./plan.js";
+import type { ContentHash, RawText } from "./text.js";
 import type { ResolvedPath } from "./workspace.js";
 
 /** `<root>/.codaryn/runs/<runId>/snapshots/`. The file layout inside it belongs to `src/store`. */
@@ -37,8 +38,24 @@ export interface ChangeRecorder {
    * resolve without changing anything, so the snapshot holds the text from before the run.
    * Resolves after the snapshot was handed to the operating system. When it rejects, the tool
    * must not write and reports `io_error`.
+   *
+   * DR-29: `shownOriginal` is `original` masked by this run's gateway, as visible parts
+   * (MaskedParts, the DR-28 form), or null when `original` is null. The tool builds it with the
+   * gateway it was created with; the store keeps it with the snapshot and never sees the gateway.
+   * Absent when the tool could not mask the text (or a caller from before DR-29): the comparison
+   * view then shows no text for this path. Kept with the first call only, like the snapshot.
    */
-  saveOriginal(path: ResolvedPath, original: RawText | null): Promise<void>;
+  saveOriginal(path: ResolvedPath, original: RawText | null, shownOriginal?: MaskedParts | null): Promise<void>;
+  /**
+   * DR-29: called by a writing tool after its write succeeded, with the SHA-256 of the bytes it
+   * wrote (the `newHash` of its `file_changed` record) and that text masked by this run's gateway,
+   * as visible parts. The last call for a `path.relative` replaces the earlier one. It keeps no
+   * secret value and no hash of one: the parts are the visible text between tokens, and the hash is
+   * already in the record. When it rejects, the write has already happened and the tool's outcome
+   * stays as it is; the comparison view then finds the record stale or missing and shows no text.
+   * Optional only so recorders from before DR-29 still type-check; the store implements it.
+   */
+  saveNext?(path: ResolvedPath, sha256: ContentHash, shown: MaskedParts): Promise<void>;
 }
 
 export interface ChangeRecorderOptions {
@@ -201,6 +218,78 @@ export interface RevertOutcome {
  */
 export const REVERT_ERROR_CODES = ["run_not_found", "invalid_run_record", "plan_run_missing"] as const satisfies readonly CliErrorCode[];
 export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
+
+/** DR-14: why a run's original of a path is not given. Moved from the store as it was. */
+export type OriginalUnavailable = "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable";
+
+/**
+ * DR-29: how the run masked one changed path, as recorded by ChangeRecorder (`saveOriginal`'s
+ * `shownOriginal` and the last `saveNext`). Visible parts only (MaskedParts): no secret value, no
+ * token, no hash of a secret.
+ */
+export interface ChangeShown {
+  /** The original masked by the run's gateway; null when the run created the file. */
+  readonly original: MaskedParts | null;
+  /** The last text the run wrote: its SHA-256 (the path's last `newHash`) and its visible parts. Null when none was recorded. */
+  readonly next: { readonly sha256: ContentHash; readonly parts: MaskedParts } | null;
+}
+
+/**
+ * DR-14: one changed path of a run and its original, for a comparison view. Moved from the store
+ * (`src/store/changes.ts`) as it was, with DR-29's `shown`.
+ */
+export interface RunOriginal {
+  /** As the journal recorded it (masked). */
+  readonly path: string;
+  /** The run created the file: there is no original. */
+  readonly created: boolean;
+  /** The path's first `previousHash` (the state before the run), null when the run created it. */
+  readonly before: ContentHash | null;
+  /** The path's last `newHash` (the state the run left). */
+  readonly after: ContentHash;
+  /**
+   * The original as UTF-8 text (raw local text, R-8: mask it before it leaves the process), why it
+   * is not given, or null for a created file.
+   */
+  readonly original: { readonly text: RawText } | { readonly unavailable: OriginalUnavailable } | null;
+  /**
+   * DR-29: how the run masked the original and the text it left, when the run recorded it (runs
+   * from DR-29 on) and the record passed the store's checks. Absent otherwise. A view shows the
+   * text only when changeShownMatches holds for it.
+   */
+  readonly shown?: ChangeShown;
+}
+
+/**
+ * Signature of `readRunOriginals`, exported by `src/store/index.ts` (DR-14, DR-29). Reads only.
+ * Rejects like `revertRun`: `run_not_found`, `invalid_run_record`.
+ */
+export type ReadRunOriginals = (request: { readonly workspaceRoot: string; readonly runId: string }) => Promise<RunOriginal[]>;
+
+/**
+ * DR-29: what a comparison view has now for one changed path: the run's original masked with the
+ * secrets registered now (null when the run created the file), and the file as it is now, its
+ * SHA-256 and its text masked now (null when it cannot be read as text).
+ */
+export interface ChangeNow {
+  readonly original: string | null;
+  readonly current: { readonly sha256: ContentHash; readonly masked: string } | null;
+}
+
+/**
+ * DR-29: true when a view may show the masked texts of a changed path: the run recorded how it
+ * masked them (`shown` with `next`), the file is still the text the run left (same SHA-256), and
+ * the secrets registered now leave exactly the same text visible in both, the original and the
+ * current file (sameMaskedParts), as DR-28 does for plans. Otherwise the view shows the path and
+ * its state only. A created file needs `shown.original` null and `now.original` null.
+ */
+export function changeShownMatches(shown: ChangeShown | undefined, now: ChangeNow): boolean {
+  if (shown === undefined || shown.next === null || now.current === null) return false;
+  if (now.current.sha256 !== shown.next.sha256) return false;
+  if (!sameMaskedParts(maskedParts(now.current.masked), shown.next.parts)) return false;
+  if (shown.original === null || now.original === null) return shown.original === null && now.original === null;
+  return sameMaskedParts(maskedParts(now.original), shown.original);
+}
 
 /**
  * Signature of `revertRun`, exported by `src/store/index.ts`.

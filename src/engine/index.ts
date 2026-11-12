@@ -98,6 +98,7 @@ import type {
 } from "../contracts/index.js";
 import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
 import type { FailedForFeedback } from "./feedback.js";
+import { FINAL_MESSAGE_KEY_MARKER, finalMessageOf } from "./final-message.js";
 import { RunState } from "./state.js";
 import { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 
@@ -188,6 +189,7 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   ...INTEGRITY_MORE_PATHS,
   ...INTEGRITY_FAILED_NOTICE,
   INTEGRITY_END_LEAD,
+  FINAL_MESSAGE_KEY_MARKER,
   INTEGRITY_END_UNMASKABLE,
   INTEGRITY_END_LABEL,
   STATE_NOTICE_LEAD,
@@ -321,6 +323,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   let baseline: IntegrityManifest | null = null;
   /** `changed` of the latest recorded `integrity_checked`; undefined while none was recorded. */
   let protectedChanged: readonly MaskedText[] | undefined;
+  // DR-47 (U-21): the masked text of the last model response when it was a final reply; reset when
+  // the model is asked again, so a run that ended without a reply has none.
+  let lastFinal: MaskedText | null = null;
   // DR-38: the state guard, the last tier-run fingerprint (each window chains from it) and the
   // tier-state base of the run's start; the last recorded list goes into the result.
   const stateGuard = deps.stateGuard;
@@ -1033,6 +1038,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         offeredWorkflow.length > 0
           ? { system, messages, tools: offeredBuiltin, workflowTools: offeredWorkflow }
           : { system, messages, tools: offeredBuiltin };
+      lastFinal = null;
       const outcome = await model.complete(request, runSignal);
       modelTurns = turn;
       if (!outcome.ok) {
@@ -1084,6 +1090,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       const wantsTools = response.toolCalls.length > 0;
       if (response.stop === "final" && !wantsTools) {
         // Kept so that a repair message follows the model's own reply.
+        lastFinal = text;
         messages.push({ role: "assistant", text, toolCalls: [] });
         return null;
       }
@@ -1307,6 +1314,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       repairAttempts,
     };
     await record({ type: "run_finished", status: end.status, reason: end.reason, usage });
+    const finalMessage = lastFinal !== null && end.reason !== "plan_pending" ? finalMessageOf(lastFinal) : null;
     return {
       schemaVersion: RESULT_SCHEMA_VERSION,
       kind: "run",
@@ -1325,6 +1333,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
       // DR-38: only when at least one state_checked was recorded; the last one's list.
       ...(stateChanged !== undefined ? { stateChanged } : {}),
+      // DR-47: the agent's last message, only when the run's last model response was a final reply
+      // and the run is not a plan run (its place is the plan's summary).
+      ...(finalMessage !== null ? { finalMessage } : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),

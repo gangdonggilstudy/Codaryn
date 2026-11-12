@@ -6,7 +6,8 @@
  * - `codaryn` with no arguments shows the help (as `--help`, exit 0) instead of invalid_arguments.
  * The real CLI under the net guard, scripted model, nothing is sent. "At a terminal" is made by a
  * preload that marks the child's stdout as a terminal (process.stdout.isTTY); the product reads no
- * switch of its own for it. Fake values only.
+ * switch of its own for it. The decision itself (guard.ts stdoutText) is tested with the terminal
+ * state injected. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -19,7 +20,11 @@ import { after, describe, test } from "node:test";
 
 import { RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { ApplyResult, CliErrorOutput, EngineResult, RevertOutput } from "../../../src/contracts/index.js";
-import { helpRequest } from "../../../src/cli/help.js";
+import { APPLY_USAGE, REVERT_USAGE, RUN_USAGE, parseApplyArgs, parseArgs, parseRevertArgs } from "../../../src/cli/args.js";
+import { jsonLineLeftOut, renderOutcome, stdoutText } from "../../../src/cli/guard.js";
+import type { CommandOutcome } from "../../../src/cli/guard.js";
+import { helpRequest, helpText } from "../../../src/cli/help.js";
+import { cliError } from "../../../src/cli/run.js";
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -203,6 +208,61 @@ describe("U-23 (DR-49): at a terminal the JSON line after the human text is left
       assert.equal(help.status, 0);
       assert.ok(help.stdout.startsWith("codaryn: "), help.stdout);
     }
+  });
+});
+
+describe("U-23 (DR-49): stdoutText decides by the injected terminal state", () => {
+  const json: CommandOutcome = cliError("run_not_found", "x");
+  const text: CommandOutcome = { text: "a text", exitCode: 0 };
+  const at = (argv: readonly string[], stdoutIsTerminal: boolean) => ({ argv, stdoutIsTerminal });
+
+  test("a JSON outcome at a terminal is left out; with --json, --quiet or no terminal it is renderOutcome's bytes", () => {
+    assert.equal(stdoutText(json, at(["report", "--run", "x"], true)), "");
+    assert.equal(jsonLineLeftOut(json, at([], true)), true);
+    for (const context of [at(["report", "--json"], true), at(["run", "--quiet"], true), at(["report"], false), at([], false)]) {
+      assert.equal(stdoutText(json, context), renderOutcome(json), JSON.stringify(context));
+      assert.equal(jsonLineLeftOut(json, context), false);
+    }
+  });
+
+  test("--json and --quiet count wherever they are, even when the arguments cannot be parsed", () => {
+    for (const argv of [["run", "--json", "--task", "t.json"], ["nosuch", "--json"], ["--json"], ["run", "--bogus", "--quiet"]]) {
+      assert.equal(stdoutText(json, at(argv, true)), renderOutcome(json), argv.join(" "));
+    }
+  });
+
+  test("a text outcome is always written", () => {
+    for (const terminal of [true, false]) assert.equal(stdoutText(text, at([], terminal)), "a text\n");
+  });
+});
+
+describe("U-23 (DR-49): run, revert and apply take --json and nothing else changes", () => {
+  const RUN_ID = "20261113T000000Z-0000abcd";
+  const cases: readonly [readonly string[], (argv: readonly string[]) => unknown][] = [
+    [["run", "--task", "t.json"], parseArgs],
+    [["run", "a goal"], parseArgs],
+    [["revert", "--workspace", "ws", "--run", RUN_ID, "--dry-run"], parseRevertArgs],
+    [["apply", "--task", "t.json", "--run", RUN_ID, "--digest", "0123456789ab"], parseApplyArgs],
+  ];
+
+  test("with --json the parsed arguments are the ones without it; twice is refused like any repeated switch", () => {
+    for (const [argv, parse] of cases) {
+      const plain = parse(argv) as { ok: boolean };
+      assert.equal(plain.ok, true, JSON.stringify(plain));
+      assert.deepEqual(parse([...argv, "--json"]), plain, argv.join(" "));
+      const twice = parse([...argv, "--json", "--json"]) as { ok: boolean; message?: string };
+      assert.equal(twice.ok, false);
+      assert.match(twice.message ?? "", /^unknown or repeated option\. /);
+    }
+  });
+
+  test("the usage lines (inside invalid_arguments messages) stay as they were: they do not gain --json", () => {
+    for (const usage of [RUN_USAGE, REVERT_USAGE, APPLY_USAGE]) assert.equal(usage.includes("--json"), false, usage);
+  });
+
+  test("the help of run and revert names --json; apply's help says what it does at a terminal", () => {
+    for (const command of ["run", "revert"] as const) assert.ok(helpText(command).includes("--json: "), command);
+    assert.ok(helpText("apply").includes("--json"));
   });
 });
 

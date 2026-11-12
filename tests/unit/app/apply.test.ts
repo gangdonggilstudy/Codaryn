@@ -76,7 +76,7 @@ describe("applyPlan", () => {
   test("applies the approved plan as the adapter; the handle comes first; start records stay out of the events", async () => {
     const { base, app, plan, digest } = await planned();
     const events: ApplyEvent[] = [];
-    const started = await app.applyPlan?.(request(base, plan.runId, digest.slice(0, 12)), { onEvent: (event) => events.push(event) });
+    const started = await app.applyPlan(request(base, plan.runId, digest.slice(0, 12)), { onEvent: (event) => events.push(event) });
     assert.ok(started?.ok, JSON.stringify(started));
     assert.equal(events.length, 0, "no event before the handle");
     const result = ok<ApplyResult>(await started.handle.done);
@@ -102,13 +102,13 @@ describe("applyPlan", () => {
     const engine = standIn();
     const app = createCodarynApp(await appEnvironment(base), { applyPlan: engine.applyPlan });
 
-    const without = await app.applyPlan?.(request(base, plan.runId, digest.slice(0, 12)));
+    const without = await app.applyPlan(request(base, plan.runId, digest.slice(0, 12)));
     assert.ok(without?.ok);
     const stopped = ok<ApplyResult>(await without.handle.done);
     assert.deepEqual([stopped.status, stopped.reason], ["needs-input", "consent_required"]);
     assert.deepEqual([engine.calls[0]?.approval, engine.calls[0]?.unsafeMoveConsent ?? null], ["adapter", null]);
 
-    const withConsent = await app.applyPlan?.(request(base, plan.runId, digest.slice(0, 12), digest));
+    const withConsent = await app.applyPlan(request(base, plan.runId, digest.slice(0, 12), digest));
     assert.ok(withConsent?.ok);
     assert.equal(ok<ApplyResult>(await withConsent.handle.done).reason, "verified");
     assert.deepEqual(engine.calls[1]?.unsafeMoveConsent, { channel: "adapter", digest });
@@ -120,11 +120,11 @@ describe("applyPlan", () => {
     const app = createCodarynApp(await appEnvironment(base), { applyPlan: engine.applyPlan });
     const runsBefore = (await readdir(path.join(base, "work", ".codaryn", "runs"))).length;
 
-    assert.equal(code(await app.applyPlan!(request(base, plan.runId, digest.slice(0, 12), "b".repeat(64)))), "invalid_arguments");
-    assert.equal(code(await app.applyPlan!(request(base, plan.runId, digest.slice(0, 11), digest))), "invalid_arguments");
+    assert.equal(code(await app.applyPlan(request(base, plan.runId, digest.slice(0, 12), "b".repeat(64)))), "invalid_arguments");
+    assert.equal(code(await app.applyPlan(request(base, plan.runId, digest.slice(0, 11), digest))), "invalid_arguments");
     const other = digest.startsWith("0") ? "1".repeat(12) : "0".repeat(12);
-    assert.equal(code(await app.applyPlan!(request(base, plan.runId, other))), "plan_not_approved");
-    assert.equal(code(await app.applyPlan!(request(base, "20200101T000000Z-00000000", digest.slice(0, 12)))), "run_not_found");
+    assert.equal(code(await app.applyPlan(request(base, plan.runId, other))), "plan_not_approved");
+    assert.equal(code(await app.applyPlan(request(base, "20200101T000000Z-00000000", digest.slice(0, 12)))), "run_not_found");
     assert.equal(engine.calls.length, 0, "the engine was never called");
     assert.equal((await readdir(path.join(base, "work", ".codaryn", "runs"))).length, runsBefore, "no apply run was made");
     assert.equal(await exists(path.join(base, "work", "a.txt")), true);

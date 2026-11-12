@@ -525,10 +525,11 @@ export interface CodarynApp {
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
   /**
-   * DR-1, DR-17: present once the general task commands exist (G-B to G-F). An adapter opens the
-   * plan screen after a `needs-input`/`plan_pending` result and checks for these before offering them.
+   * DR-1, DR-17: the plan screen after a `needs-input`/`plan_pending` result, the apply with the
+   * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.
+   * Required since the general task commands are in main (PM decision on A-5 question 1).
    */
-  plan?(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
-  applyPlan?(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
-  review?(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
+  plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
+  applyPlan(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
+  review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
 }

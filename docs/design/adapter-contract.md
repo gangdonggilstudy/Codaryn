@@ -253,12 +253,12 @@ interface TaskForm {
   configPath: string | null; varsFile: string | null; profile: string | null;
   workflowRef: string | null;   // R-14 L-3 (52400ab): 간편 형식의 --workflow. task 파일과 함께 주면 CLI가 거부한다
 }
-// CodarynApp의 선택 함수. 범용 작업 명령이 생기면 채운다. 어댑터는 있는지 보고 화면을 연다.
-plan?(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
-applyPlan?(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null;
-                      unsafeMoveConsent: { digest: string } | null },   // DR-21, 59dc39a
-           observer?: ApplyObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
-review?(request: { settings: TaskForm; runId: string; decision: "accept" | "reject"; note: string | null }): Promise<AppCallOutcome<ReviewOutput>>;
+// CodarynApp의 필수 함수(PM 결정, A-5 질문 1). 범용 작업 명령이 main에 들어온 뒤 언제나 있다.
+plan(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
+applyPlan(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null;
+                     unsafeMoveConsent: { digest: string } | null },   // DR-21, 59dc39a
+          observer?: ApplyObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
+review(request: { settings: TaskForm; runId: string; decision: "accept" | "reject"; note: string | null }): Promise<AppCallOutcome<ReviewOutput>>;
 
 // PlanOutput, ApplyResult, ApplyJournalRecord, ReviewOutput은 G-A 계약의 타입 그대로다(DR-17)
 type ApplyEvent = { kind: "record"; record: ApplyJournalRecord } | { kind: "notice"; text: MaskedText };

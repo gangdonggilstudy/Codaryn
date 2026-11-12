@@ -35,7 +35,7 @@ describe("R-14 L-3: the task form names a workflow", () => {
       "utf8",
     );
     const settings = { input: { kind: "workspace", workspace: path.join(base, "work") }, configPath: config, varsFile: null, profile: null, workflowRef: "organize" } as TaskForm;
-    const started = await app.applyPlan!({ settings, planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
+    const started = await app.applyPlan({ settings, planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));
     const result = ok<ApplyResult>(await started.handle.done);
     assert.equal(result.kind, "apply");

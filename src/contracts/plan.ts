@@ -32,7 +32,7 @@
  * whose writes are limited to the approved paths).
  */
 
-import type { Clock, RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
+import type { Clock, RunReason, RunReasonByStatus, RunUsage, TerminalRunStatus } from "./engine.js";
 import type { IntegrityChecker } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { PolicyGate } from "./policy.js";
@@ -274,14 +274,36 @@ export const APPROVAL_CHANNELS = ["cli-tty", "cli-flag", "adapter"] as const;
 export type ApprovalChannel = (typeof APPROVAL_CHANNELS)[number];
 
 /**
+ * DR-21: the person's consent to unsafe moves (`unsafe_move`) for one apply. It comes only from a
+ * person: the CLI's own argument (UNSAFE_MOVE_CONSENT_ARGUMENT, `cli-flag`) or terminal answer
+ * (`cli-tty`) for this one `apply`, or an adapter after the person agreed on screen (`adapter`).
+ * No task file, config file, profile, plan or model can give it; there is no such field anywhere
+ * and none may be added. It names the digest of the plan it is for and holds for that apply only:
+ * a later apply needs it again. It is recorded in `apply_started.unsafeMoveConsent`, and every move
+ * made under it is marked `unsafe` in `file_moved` and in the result.
+ */
+export interface UnsafeMoveConsent {
+  readonly channel: ApprovalChannel;
+  /** Must equal ApplyDeps.digest; a consent for another plan counts as none. */
+  readonly digest: ContentHash;
+}
+
+/** DR-21: the CLI argument by which a person consents to unsafe moves for this apply. */
+export const UNSAFE_MOVE_CONSENT_ARGUMENT = "--allow-unsafe-move";
+
+/**
  * Why the apply's preflight or an action cannot go on.
  * - source_missing, source_changed: the source is gone, or its SHA-256 differs from the plan's
  * - source_not_file, destination_exists, destination_parent_not_dir: as in PLAN_PROBLEMS, now
  * - denied: the policy at apply time refuses the action (DR-5)
  * - cross_device: the rename would cross a volume; nothing is copied
- * - unsafe_move (DR-18 b): the file system offers no move that refuses an existing destination
- *   (no hard links, as on FAT or exFAT, or a read-only source on Windows), so a file created at
- *   `to` meanwhile could be replaced; the action is not done, keeping "never replace a file"
+ * - unsafe_move (DR-21, replacing DR-18 b): the move can only be made by a rename that does not
+ *   refuse an existing destination (no hard links on that volume, as on FAT or exFAT, or a
+ *   read-only source on Windows), so a file created at `to` meanwhile could be replaced. Blocked by
+ *   default: the preflight lists such actions (`plan_checked.unsafeMoves`, not `problems`) and the
+ *   apply stops as `needs-input`/`consent_required` with nothing moved, unless the person consented
+ *   for this apply (UnsafeMoveConsent). While applying, an executor without that consent reports
+ *   it as the action's problem and does not move.
  * - io_error: any other file system failure
  */
 export const PLAN_ITEM_PROBLEMS = [
@@ -304,6 +326,8 @@ export interface AppliedPlanAction {
   readonly action: ResolvedPlanAction;
   /** For `discard`: the file's place inside the apply run's discarded directory, `/` separated. Null for `move`. */
   readonly stored: string | null;
+  /** DR-21: present and true for a move made without the exclusive guarantee, after consent. */
+  readonly unsafe?: true;
 }
 
 export type PlanItemOutcome =
@@ -316,14 +340,26 @@ export type PlanItemOutcome =
  * the apply run's own `.codaryn/discarded/<runId>/`. It does not judge policy (the engine does).
  */
 export interface PlanExecutor {
-  /** Checks one action against the workspace as it is now (hashing the source). Changes nothing. Null: it can be applied. */
+  /**
+   * Checks one action against the workspace as it is now (hashing the source). Null: it can be
+   * applied safely. DR-21: `unsafe_move` when the move could only be made unsafely; the check finds
+   * this ahead of the apply and leaves nothing behind (a probe it makes is removed). Changes nothing.
+   */
   check(action: ResolvedPlanAction): Promise<PlanItemProblem | null>;
   /**
    * Applies one action. A move creates missing parent directories and renames; it never replaces
    * an existing file and never copies. A discard renames the file into the run's discarded
    * directory under a name built from `index` only. Never rejects for an item-level failure.
+   * DR-21: without `options.allowUnsafeMove` a move that could only be made unsafely is not done
+   * (`unsafe_move`). With it, the executor may make that move by a plain rename right after
+   * checking that the destination is still absent, and marks the outcome `unsafe: true`.
    */
-  apply(action: ResolvedPlanAction, index: number, signal: AbortSignal): Promise<PlanItemOutcome>;
+  apply(
+    action: ResolvedPlanAction,
+    index: number,
+    signal: AbortSignal,
+    options?: { readonly allowUnsafeMove: boolean },
+  ): Promise<PlanItemOutcome>;
 }
 
 export interface PlanExecutorOptions {
@@ -360,16 +396,29 @@ export type ApplyJournalEvent =
       /** Number of actions in the plan. */
       readonly actions: number;
       readonly maxDurationMs: number;
+      /**
+       * DR-21: how the person consented to unsafe moves for this apply, or null for no consent.
+       * Absent in journals written before DR-21 (no consent).
+       */
+      readonly unsafeMoveConsent?: ApprovalChannel | null;
     }
   | {
       /**
-       * The preflight. Empty `problems` and `inventoryLimitReached` false: every action can be
-       * applied. Otherwise the apply ends as `failed`/`plan_stale` with nothing moved.
+       * The preflight. Empty `problems`, `inventoryLimitReached` false and no `unsafeMoves` (or
+       * consent for them): every action can be applied. Problems or the limit end the apply as
+       * `failed`/`plan_stale`; unsafe moves without consent end it as `needs-input`/`consent_required`.
+       * Either way nothing is moved.
        */
       readonly type: "plan_checked";
+      /** Actions that cannot be applied. Unsafe moves are not listed here. */
       readonly problems: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
       /** DR-6: the workspace has more than MAX_INVENTORY_FILES files, so the apply could not be verified. */
       readonly inventoryLimitReached: boolean;
+      /**
+       * DR-21: 0-based indexes of the moves that could only be made unsafely (`unsafe_move` from the
+       * check), in plan order. Absent in journals written before DR-21 (none).
+       */
+      readonly unsafeMoves?: readonly number[];
     }
   | {
       /** A `move` done. `from` and `to` are masked. */
@@ -378,6 +427,8 @@ export type ApplyJournalEvent =
       readonly from: MaskedText;
       readonly to: MaskedText;
       readonly sha256: ContentHash;
+      /** DR-21: present and true when the move was made unsafely, with the person's consent. */
+      readonly unsafe?: true;
     }
   | {
       /** A `discard` done: the file now lies at `.codaryn/discarded/<runId>/<stored>`. */
@@ -420,7 +471,10 @@ export interface ApplyJournal {
  * 1. `apply_started`; the integrity baseline when `integrity` is given.
  * 2. Preflight: `inventory.capture()`; every action judged by `policy` (PLAN_ACTION_DESCRIPTORS)
  *    and by `executor.check`. `plan_checked` records the outcome. A problem, or the inventory limit
- *    reached, ends the apply as `failed`/`plan_stale` with nothing moved.
+ *    reached, ends the apply as `failed`/`plan_stale` with nothing moved. DR-21: moves the check
+ *    finds unsafe are listed apart (`unsafeMoves`); without a consent for this plan's digest the
+ *    apply ends as `needs-input`/`consent_required` with nothing moved; with it those moves are made
+ *    with `allowUnsafeMove` and recorded as unsafe.
  * 3. `markApplied()`; "already_applied" ends the apply as `failed`/`plan_stale` with nothing moved.
  * 4. Each action in order: `file_moved` or `file_discarded`, or `plan_item_failed` and the apply
  *    ends as `failed`/`apply_incomplete`. A cancel or the duration limit is honoured between
@@ -442,6 +496,8 @@ export interface ApplyDeps {
   /** The digest the person approved, equal to LoadPlanOutcome's `digest`. */
   readonly digest: ContentHash;
   readonly approval: ApprovalChannel;
+  /** DR-21: the person's consent to unsafe moves for this apply, or absent/null for none (blocked). */
+  readonly unsafeMoveConsent?: UnsafeMoveConsent | null;
   /** The apply run's own id. */
   readonly runId: string;
   /** The task given to the apply: its id and duration limit. */
@@ -476,7 +532,21 @@ export interface AppliedActionRecord {
   readonly index: number;
   readonly action: MaskedPlanAction;
   readonly stored: string | null;
+  /** DR-21: present and true for a move made unsafely, with consent. */
+  readonly unsafe?: true;
 }
+
+/**
+ * The reasons an apply run can end with, by status: the subset of RUN_REASONS_BY_STATUS that
+ * ApplyResult and an apply run's `run_finished` use (for the run list, report and human output).
+ */
+export const APPLY_REASONS_BY_STATUS = {
+  done: ["verified"],
+  failed: ["verifier_failed", "plan_stale", "apply_incomplete"],
+  "needs-input": ["verifier_inconclusive", "protected_changed", "consent_required"],
+  cancelled: ["cancelled"],
+  "budget-exhausted": ["max_duration"],
+} as const satisfies { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] };
 
 /**
  * Result of an apply run. Printed on stdout as one JSON line by `codaryn apply` and stored as the
@@ -490,10 +560,7 @@ export interface ApplyResult {
   readonly taskId: string;
   readonly digest: ContentHash;
   readonly status: TerminalRunStatus;
-  /**
-   * One of: verified, verifier_failed, verifier_inconclusive, protected_changed, plan_stale,
-   * apply_incomplete, cancelled, max_duration.
-   */
+  /** One of APPLY_REASONS_BY_STATUS[status]. */
   readonly reason: RunReason;
   readonly exitCode: number;
   /** In plan order, as far as the apply went. Kept when the apply fails or is cancelled. */

@@ -51,6 +51,8 @@ import {
   RUN_EXIT_CODES,
   RUN_REASONS,
   RUN_REASONS_BY_STATUS,
+  APPLY_REASONS_BY_STATUS,
+  UNSAFE_MOVE_CONSENT_ARGUMENT,
   isReasonOfStatus,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
@@ -66,8 +68,15 @@ import type {
   ApplyJournalEvent,
   ApplyResult,
   ApplySummaryContext,
+  CodarynConfig,
+  ConfigProfile,
   CreatePlanExecutor,
   HumanOutput,
+  PolicyConfig,
+  RunId,
+  RunListEntry,
+  TaskSpec,
+  WorkflowDefinition,
   EngineResult,
   JournalEvent,
   ModelRequest,
@@ -110,6 +119,40 @@ const makeExecutor: CreatePlanExecutor = ({ workspace, workspaceRoot, runId }) =
   return { check: async () => null, apply: async () => ({ ok: false, problem: "io_error" }) };
 };
 void makeExecutor;
+/** DR-21: consent comes only from a person; no file or definition can carry it. */
+type HasConsentField<T> = "unsafeMoveConsent" extends keyof T ? true : "allowUnsafeMove" extends keyof T ? true : false;
+const noConsentInFiles: [
+  HasConsentField<TaskSpec>,
+  HasConsentField<CodarynConfig>,
+  HasConsentField<ConfigProfile>,
+  HasConsentField<WorkflowDefinition>,
+  HasConsentField<PolicyConfig>,
+  HasConsentField<StoredPlan>,
+] = [false, false, false, false, false, false];
+/** The run list tells apply runs apart; an entry written before G-A (no kind) still type-checks. */
+const applyEntry: RunListEntry = {
+  state: "checked",
+  runId: "20261112T120500Z-0000bbbb" as RunId,
+  kind: "apply",
+  planRunId: "20261112T120000Z-0000aaaa" as RunId,
+  startedAt: "2026-11-12T12:05:00Z",
+  taskId: "tidy",
+  status: "needs-input",
+  reason: "consent_required",
+  changes: 0,
+  reverted: null,
+};
+const legacyEntry: RunListEntry = {
+  state: "checked",
+  runId: "20261112T120000Z-0000aaaa" as RunId,
+  startedAt: "2026-11-12T12:00:00Z",
+  taskId: "t",
+  status: "done",
+  reason: "verified",
+  changes: 1,
+  reverted: null,
+};
+void [noConsentInFiles, applyEntry, legacyEntry];
 /** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
 // @ts-expect-error a raw note cannot be stored
 const rawNote: ReviewRecord["note"] = "typed by a person" as string;
@@ -249,6 +292,27 @@ describe("G-A plan contract", () => {
   test("plan modes are P0 only; P1's run mode is not part of the contract", () => {
     assert.deepEqual([...PLAN_MODES], ["none", "apply"]);
     assert.deepEqual([...PLAN_ACTION_KINDS], ["move", "discard"]);
+  });
+
+  test("DR-21: unsafe moves need consent; the apply reasons are a subset of the run reasons", () => {
+    assert.ok((RUN_REASONS as readonly string[]).includes("consent_required"));
+    assert.ok((RUN_REASONS_BY_STATUS["needs-input"] as readonly string[]).includes("consent_required"));
+    for (const [status, reasons] of Object.entries(APPLY_REASONS_BY_STATUS)) {
+      const all = RUN_REASONS_BY_STATUS[status as keyof typeof RUN_REASONS_BY_STATUS] as readonly string[];
+      for (const reason of reasons) assert.ok(all.includes(reason), `${status}/${reason}`);
+    }
+    assert.deepEqual(Object.keys(APPLY_REASONS_BY_STATUS).sort(), Object.keys(RUN_REASONS_BY_STATUS).sort());
+    assert.equal(UNSAFE_MOVE_CONSENT_ARGUMENT, "--allow-unsafe-move");
+    const params: Record<string, Record<string, string>> = {
+      "progress.unsafe_moves": { count: "count" },
+      "progress.unsafe_move_consent": { approval: "text" },
+      "summary.unsafe_moves": { count: "count" },
+      "summary.next_apply_unsafe": { form: "text", runId: "runId" },
+      "progress.plan_checked": { count: "count" },
+    };
+    for (const [id, expected] of Object.entries(params)) {
+      assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], expected, id);
+    }
   });
 
   test("DR-18 (b): a move the file system cannot make without risk of replacing a file has its own problem code", () => {

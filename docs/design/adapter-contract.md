@@ -1,6 +1,8 @@
 # 어댑터 계약 (엔진 쪽)
 
-CLI, VS Code 확장, 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 것은 다음과 같다.
+CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 것은 다음과 같다.
+
+> **DR-20(사용자 결정, 2026-11-12): VS Code 확장은 개발하지 않는다.** 독립 GUI 하나만 만들고(Electron, Windows 11 64비트 먼저), 플러그인과 같은 편의성을 그 GUI가 갖는다. GUI는 Electron의 **엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 형태**가 기준이다(standalone-gui 5.1). 그래서 이 문서의 VS Code 확장과 프로세스 밖 줄 프로토콜(6절, AC-D7~D9) 서술은 **추진하지 않는다**. 내용은 참고용으로 남긴다. 이미 커밋된 `src/cli/protocol/`(`3c09b58`)와 `vscode/src/core`(`11d5676`)는 지우지 않았고, 처리는 PM이 GUI 묶음 때 정한다.
 - 실행 시작, 진행 이벤트 구독, 취소, 결과, 보고서, 되돌리기
 - 계획 확인·적용·사람 확인, 변경 비교
 - 권한 확인 질문, 오류 모델
@@ -24,11 +26,11 @@ CLI, VS Code 확장, 독립 GUI가 엔진을 부르는 공통 계약을 설계�
   - 두 어댑터가 CLI와 같은 엔진·정책·기록을 쓴다.
   - 어댑터에 작업 논리가 없다.
   - 확인 질문과 취소가 CLI와 같은 의미로 동작한다.
-- [선택] GUI 전에 엔진 쪽 어댑터 계약을 정하고 CLI도 그 계약으로 옮긴다. VS Code 확장을 먼저 만든다. 로컬 웹 서버는 쓰지 않는다(N-13, UX-D1, UX-D2).
+- [선택] GUI 전에 엔진 쪽 어댑터 계약을 정하고 CLI도 그 계약으로 옮긴다. ~~VS Code 확장을 먼저 만든다~~(DR-20으로 추진하지 않음: 독립 GUI 하나). 로컬 웹 서버는 쓰지 않는다(N-13, UX-D1, UX-D2).
 - [선택] 단일 프로세스 원칙의 조건은 두 가지다(DR-8).
   - 듣는 소켓이 없다.
   - 어댑터보다 오래 사는 프로세스가 없다.
-  - 프로세스 밖 어댑터는 실행마다 CLI 자식 하나를 쓴다.
+  - 프로세스 밖 어댑터는 실행마다 CLI 자식 하나를 쓴다(DR-20으로 추진하지 않음. GUI의 엔진 전용 프로세스는 앱 계층 함수를 직접 부른다).
 - 계약의 원칙
   1. **어댑터는 입력과 표시만 한다.** 입력 해석, 보안 검사, 조립, 실행 수명, 결과 저장은 어댑터 아래의 공통 계층(이하 "앱 계층")이 한다.
   2. **CLI의 외부 계약은 그대로다.** stdout의 출력 하나(JSON 한 줄 또는 글), 오류 코드, 종료 코드, 실행 전 검사 순서를 바꾸지 않는다.
@@ -77,7 +79,7 @@ CLI, VS Code 확장, 독립 GUI가 엔진을 부르는 공통 계약을 설계�
 ## 3. 계층 구조
 
 ```
-어댑터: CLI (src/cli) | VS Code 확장 | 독립 GUI
+어댑터: CLI (src/cli) | 독립 GUI(Electron 엔진 전용 프로세스, DR-20)   [VS Code 확장: DR-20으로 추진하지 않음]
    │  startRun · RunObserver · cancel() · report · revert · changes · plan · applyPlan · review · doctor
    ▼
 앱 계층 (src/app)
@@ -213,7 +215,7 @@ export interface RunObserver {
   - 적용된 변경은 남는다. 되돌리기는 `revert`로 한다.
 - 끝난 뒤의 `cancel()`은 아무 일도 하지 않는다.
 - **시작 전 취소(R-1 L-2).** `startRun`이 응답하기 전(실행 전 검사 중)에는 취소 대상이 없다.
-  - 모든 어댑터는 시작을 알기 전에는 취소를 받지 않는다. GUI와 VS Code는 취소 단추를 그때까지 끈다.
+  - 모든 어댑터는 시작을 알기 전에는 취소를 받지 않는다. GUI는 취소 단추를 그때까지 끈다.
   - 프로세스 밖 어댑터는 `started` 줄(6절)을 받은 뒤에만 취소 파일을 만든다. 취소 파일 감시는 시작할 때 한 번 즉시 확인하므로(`cancel.ts:30-33`), 미리 만들어 두면 시작하자마자 `cancelled` 실행이 생긴다.
   - CLI의 실행 전 Ctrl+C는 AC-D12(한계)로 남는다.
 
@@ -223,7 +225,7 @@ export interface RunObserver {
 - `report({ workspace, runId })` → `ReportOutput`(`commands.ts:62-71`). 작업 공간의 기록만 읽고 잠금을 잡지 않는다. 실행 중이면 `incomplete`(종료 3)다.
 - Markdown 글은 어댑터의 표시 몫이다. CLI의 `renderReport`는 기록에서 온 글을 모두 인라인 코드나 코드 블록에 넣는다(`report.ts:350-437`).
   - 그래서 Markdown으로 열어도 원격 이미지 같은 주입이 없다(R-1 I-6).
-  - VS Code가 보고서를 Markdown 문서로 여는 근거이므로, 이 성질을 바꾸지 않는다.
+  - 어댑터(GUI)가 보고서를 Markdown으로 그려도 되는 근거이므로, 이 성질을 바꾸지 않는다.
 - `report`와 `revert`의 run id 자리에 `"latest"`를 쓸 수 있다(N-7). 보고서는 CLI의 `runReport`가 store의 `listRuns`로 고른다.
 - `listRuns({ workspace, limit? })` → `RunsOutput`, `resolveRun({ workspace, run })` → `{ runId, latest, startedAt, damaged }` [구현 DR-14].
   - 어떤 실행이 손상인지, `latest`가 어느 실행인지는 store와 CLI(`listRuns`, `latestRunId`, `resolveRunRef`)가 정한다(N-18, N-23, N-26). 앱 계층은 고르지 않는다.
@@ -275,7 +277,7 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 5. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
 
 - 앱 계층에는 이 세 함수가 아직 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-F)이 없기 때문이다. 타입은 G-A의 것을 쓴다.
-- VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 이미 만든다(`vscode/src/core/args.ts`).
+- (DR-20으로 추진하지 않음) VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 만들어 두었다(`vscode/src/core/args.ts`, 참고용).
 
 ### 5.7 변경 비교 [구현 A-1] (DR-7)
 
@@ -315,7 +317,10 @@ interface ChangedFileView {
 ### 5.8 점검과 모델 목록
 
 - `doctor({ configPath, varsFile, taskPath, workspace })` → `DoctorOutput` [구현 A-1]. 네트워크 없음.
-- `models`는 실제 API에 접속한다(Y-2). 사람이 고를 때만 부른다. 앱 계층에는 아직 없다(이행 5).
+- `listModels({ provider, configPath, varsFile })`, `selectModel({ …, model })` → `ModelsOutput` [구현 `4f7c0a7`]. CLI의 `runModels`(`--json`, `--use`)를 `main.ts`와 같은 규칙(설정 파일 출처, 키, 원자적 쓰기)으로 부른다. 터미널 질문은 하지 않는다.
+  - 목록은 실제 API에 접속한다(Y-2). 사람이 고를 때만 부른다. 앱이 켜질 때나 실행 전에 부르지 않는다.
+  - 요청에 제공자 이름을 둔다(DR-22). 지금 연결된 것은 `anthropic` 하나이고, 다른 이름은 `invalid_arguments`다.
+  - 고르기는 목록에 있는 id만 설정 파일의 `model`에 쓰고 다른 필드는 바꾸지 않는다.
 
 ### 5.9 권한 확인 질문 [제안, 단계 5 시작에 구현] (DR-1, DR-3)
 
@@ -369,7 +374,9 @@ export type ConfirmAnswer =
 - `message`는 고정 문구, 필드 위치, 개수만 쓴다(S-3, S-6, N-6). 사람용 문장은 어댑터가 코드로 N-4 카탈로그에서 찾는다(N-5).
 - 앱 계층이 새 실행 전 오류를 만들면 `CliErrorCode`에 더하는 계약 변경이다(역할 1).
 
-## 6. 프로세스 밖 어댑터용 줄 프로토콜 [제안]
+## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
+
+> 사용자 결정 DR-20으로 이 절은 추진하지 않는다. GUI는 같은 프로세스 어댑터(엔진 전용 프로세스)로 5절 함수를 직접 부른다. 아래는 결정 전의 설계와 구현 기록으로 남긴다.
 
 VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴다. 같은 프로세스 어댑터는 5절 함수를 직접 쓴다.
 
@@ -431,7 +438,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 앱 계층 쪽은 됨(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않음 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 앱 함수: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI `changes` 명령은 `src/cli/changes.ts`(연결은 N-A). store의 스냅샷 읽기는 N-C 몫 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | `doctor` 감싸기만 있다 |
-| 6 줄 프로토콜 | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | CLI 쪽 모듈과 VS Code 코어 왕복 시험은 됨(`3c09b58`). `main.ts`·`run.ts` 연결은 CLI 담당 |
+| 6 줄 프로토콜 (DR-20으로 추진하지 않음) | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | CLI 쪽 모듈과 VS Code 코어 왕복 시험은 됨(`3c09b58`). `main.ts`·`run.ts` 연결은 CLI 담당 |
 | 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 타입은 G-A의 것(`src/app/general-tasks.ts`가 되풀이, DR-17). 함수는 G-B~G-F 뒤 |
 | 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 단계 5 시작(DR-3) |
 
@@ -475,7 +482,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 - [독립 GUI](standalone-gui.md)(P5-U):
   - 끝은 `run_finished`가 아니라 `done`으로 안다(R-1 L-3, 5.2 보장 3).
   - 비교는 `changes`, 계획은 5.6, 시작 전 취소 비활성(5.3), 창 닫기는 취소 뒤 EOF(6절).
-- [VS Code 확장](vscode-extension.md): 이 판과 같은 날 함께 고쳤다(DR-1, DR-2, DR-7, L-2, L-4).
+- [VS Code 확장](vscode-extension.md): DR-20으로 추진하지 않는다(그 문서 머리에 표시). 참고용으로 남는다.
 - [privacy.md](../privacy.md):
   - 이벤트는 기록을 다시 가린 것이다(5.2 보장 5).
   - 비교는 "지금 등록한 비밀"로 다시 가린다. 실행 뒤에 등록하지 않은 값은 가려지지 않는다는 한계가 있다(5.7).
@@ -495,9 +502,9 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | AC-D4 | 확인 질문 타입을 먼저 정함 | DR-1로 바뀜: 권한 질문만. 계획은 5.6 |
 | AC-D5 | 권한 질문은 사용자 설정이 둔 것만, 한 번만, 저장 없음 | DR-3로 구체화: task 파일 제외, 답 뒤 재판정, 새 사건 둘, 단계 5 시작 |
 | AC-D6 | 대기 시간은 실행 시간 한도에 듦 | 채택 |
-| AC-D7 | 프로세스 밖 이벤트는 `--events jsonl`로 stderr | 채택. DR-2로 `apply`에도 |
-| AC-D8 | 프로세스 밖 질문 답은 `--confirm stdio`, EOF면 거부 | 채택. R-1 L-2로 `dismissed`와 EOF 때의 취소 확인을 더함(6절) |
-| AC-D9 | 프로세스 밖 취소는 기존 `--cancel-file` | 채택. DR-2로 `apply`에도 |
+| AC-D7 | 프로세스 밖 이벤트는 `--events jsonl`로 stderr | DR-20으로 추진하지 않음(채택했던 것) |
+| AC-D8 | 프로세스 밖 질문 답은 `--confirm stdio`, EOF면 거부 | DR-20으로 추진하지 않음(채택했던 것). `dismissed`와 EOF 때의 취소 확인(R-1 L-2)의 의미는 GUI 질문에도 그대로 쓴다 |
+| AC-D9 | 프로세스 밖 취소는 기존 `--cancel-file` | DR-20으로 추진하지 않음. GUI는 `handle.cancel()` |
 | AC-D10 | CLI 터미널 질문은 stderr에 묻고 stdin에서 읽음 | 채택(이행 8) |
 | AC-D11 | 실행마다 CLI 자식 하나는 단일 프로세스 원칙 안 | DR-8로 문장 변경: 듣는 소켓 없음, 어댑터보다 오래 사는 프로세스 없음 |
 | AC-D12 | CLI 실행 전 Ctrl+C는 한계로 기록 | 채택. 다른 어댑터는 시작 전 취소를 받지 않음(5.3) |

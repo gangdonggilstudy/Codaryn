@@ -278,12 +278,32 @@ describe("i18n catalog: language and wording", () => {
     // The same words as the other records-changed texts (report.records_changed, runs.records_changed).
     assert.match(en["error.plan_records_changed.what"], /records-changed mark.*nothing was asked or changed/);
     assert.match(ko["error.plan_records_changed.what"], /기록 변경 표시.*아무것도 묻거나 바꾸지 않았습니다/);
-    // Not "approve it anyway": a new plan, read again, is what may be applied.
-    assert.match(en["error.plan_records_changed.fix"], /Make the plan again with codaryn plan/);
-    assert.match(ko["error.plan_records_changed.fix"], /codaryn plan으로 계획을 새로 만들고/);
+    // Not "approve it anyway": a new plan, read again, is what may be applied. U-14 (UXM-6): the
+    // plan is made by a new codaryn run; codaryn plan only shows one.
+    assert.match(en["error.plan_records_changed.fix"], /Make the plan again with a new codaryn run \(codaryn plan only shows a plan\)/);
+    assert.match(ko["error.plan_records_changed.fix"], /codaryn run을 새로 실행해 계획을 다시 만들고\(codaryn plan은 계획을 보여 주기만 합니다\)/);
     for (const text of [en["error.plan_records_changed.fix"], ko["error.plan_records_changed.fix"]]) {
       assert.ok(!text.includes("--digest"), "the marked plan's digest is not offered");
     }
+  });
+
+  test("U-14: the plan view warns of a changed plan, labels the model's summary, and says what the digest guarantees", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // The same words as the other records-changed texts, and what it means for this plan.
+    assert.match(en["plan.records_changed"], /records-changed mark.*may not be the one the run made/);
+    assert.match(ko["plan.records_changed"], /기록 변경 표시.*실행이 만든 계획과 다를 수 있습니다/);
+    // In place of the command to apply it: no digest is offered, and the plan is made by a new run.
+    assert.match(en["plan.cannot_apply"], /cannot be applied.*new run \(codaryn run\)/);
+    assert.match(ko["plan.cannot_apply"], /적용할 수 없습니다.*새 실행\(codaryn run\)/);
+    for (const text of [en["plan.cannot_apply"], ko["plan.cannot_apply"]]) {
+      assert.ok(!text.includes("--digest") && !/codaryn plan|codaryn apply/.test(text));
+    }
+    // The summary is the agent's description: not checked, and not what is approved.
+    assert.match(en["plan.summary_label"], /agent's description.*not checked.*not what you approve/);
+    assert.match(ko["plan.summary_label"], /에이전트의 설명.*검증되지 않았고.*승인하는 대상이 아님/);
+    // The digest: exactly these actions and the files' contents then; apply refuses a later change.
+    assert.match(en["plan.digest_guarantee"], /exactly these actions.*when the plan was made.*refuses if the plan, a file or the run's records changed/);
+    assert.match(ko["plan.digest_guarantee"], /바로 이 동작들.*계획을 만들 때의 파일 내용.*계획이나 파일, 실행 기록이 바뀌었으면 적용을 거부/);
   });
 
   test("R-34b: a damaged run's warning and the separate confirmation name it; an unknown folder is never removed", () => {

@@ -82,7 +82,7 @@ export type ModelConfig =
 export type ApiModelConfig = {
   readonly [P in ApiProviderName]: {
     readonly provider: P;
-    /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
+    /** Model id. First in the model order: task, then the provider's model variable (DR-34), then the config file. */
     readonly model?: string;
     /** Output token cap per request, within the provider's limits (API_PROVIDERS). Overrides the config file's value. */
     readonly maxOutputTokens?: number;

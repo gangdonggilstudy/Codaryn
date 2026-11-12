@@ -118,6 +118,11 @@ test("T-9 죽은 잠금을 여러 프로세스가 동시에 회수해도 하나�
   const winners = outputs.filter((output) => output.kind === "run");
   const losers = outputs.flatMap((output) => (output.kind === "error" ? [output.code] : []));
   t.diagnostic(`outcomes: ${outputs.map((output) => (output.kind === "run" ? output.status : output.code)).join(", ")}`);
+  t.diagnostic(
+    `dead holder pid ${deadPid}, alive after the runs ${String(isProcessAlive(deadPid))}; ` +
+      `contender pids ${runs.map((run) => String(run.pid)).join(", ")}; ` +
+      `messages ${outputs.map((output) => (output.kind === "error" ? output.message : output.status)).join(" | ")}`,
+  );
   assert.equal(winners.length, 1, "exactly one process may take over the dead lock");
   assert.deepEqual(losers, Array.from({ length: contenders - 1 }, () => "workspace_locked"));
   assert.equal(readdirSync(join(sb.workspace, STATE_DIR_NAME, RUNS_DIR_NAME)).length, 1, "only one run directory");

@@ -27,6 +27,8 @@ import type { ToolName } from "../../src/contracts/index.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { startCli } from "./cli.js";
 import type { CliRun } from "./cli.js";
+import { answerModels, isModelsPath, modelsViolations } from "./fake-models.js";
+import type { FakeModelsCatalog, ModelsAnswer } from "./fake-models.js";
 import { decodedSource, stateRecordTexts } from "./leak.js";
 import type { TextSource } from "./leak.js";
 
@@ -443,7 +445,20 @@ function answer(response: ServerResponse, reply: FakeReply, context: AnswerConte
  * Starts the fake server. Step N answers the Nth request that passes the protocol checks.
  * The server is closed after the test (hanging answers are dropped).
  */
-export async function startFakeAnthropic(t: TestContext, steps: readonly FakeReply[]): Promise<FakeAnthropic> {
+export interface FakeAnthropicOptions {
+  /**
+   * Answers `GET /v1/models` (paged) and `GET /v1/models/{id}` from this catalog (Y-1). Models
+   * requests are recorded like any other and never use a Messages script step. Without a
+   * catalog they are answered 404 and recorded as `exhausted`.
+   */
+  readonly models?: FakeModelsCatalog;
+}
+
+export async function startFakeAnthropic(
+  t: TestContext,
+  steps: readonly FakeReply[],
+  options: FakeAnthropicOptions = {},
+): Promise<FakeAnthropic> {
   const requests: RecordedRequest[] = [];
   const hanging = new Set<ServerResponse>();
   let nextStep = 0;
@@ -457,6 +472,21 @@ export async function startFakeAnthropic(t: TestContext, steps: readonly FakeRep
       const headers = headerMap(request);
       const method = request.method ?? "";
       const path = request.url ?? "";
+      if (isModelsPath(path)) {
+        const violations = modelsViolations(method, path, headers, bodyText);
+        const catalog = options.models;
+        const outcome: RequestOutcome = violations.length > 0 ? "violation" : catalog === undefined ? "exhausted" : "scripted";
+        requests.push({ index: requests.length + 1, method, path, headers, bodyText, body, streamed: false, outcome, violations });
+        const answer: ModelsAnswer =
+          outcome === "violation"
+            ? { status: 400, body: { type: "error", error: { type: "invalid_request_error", message: `fake server: ${violations.join("; ")}` } } }
+            : catalog === undefined
+              ? { status: 404, body: { type: "error", error: { type: "not_found_error", message: "fake server: no models catalog" } } }
+              : answerModels(path, catalog);
+        response.writeHead(answer.status, { "content-type": "application/json", "request-id": `req_fake_${requests.length}` });
+        response.end(JSON.stringify(answer.body));
+        return;
+      }
       const violations = protocolViolations(method, path, headers, body);
       const streamed = isRecord(body) && body["stream"] === true;
       const index = requests.length + 1;
@@ -516,9 +546,10 @@ export async function runGuarded(
   args: readonly string[],
   env: NodeJS.ProcessEnv,
   timeoutMs = 60_000,
+  stdin?: "ignore" | "pipe",
 ): Promise<GuardedRun> {
   const log = join(sandbox.base, "net-guard.log");
-  const run = await startCli(args, { cwd: sandbox.base, env, timeoutMs, netGuardLog: log }).done;
+  const run = await startCli(args, { cwd: sandbox.base, env, timeoutMs, netGuardLog: log, ...(stdin === undefined ? {} : { stdin }) }).done;
   const blockedOrigins = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line !== "") : [];
   assert.deepEqual(blockedOrigins, [], "the CLI tried to reach a host other than the local fake server");
   return { ...run, blockedOrigins };
@@ -619,10 +650,20 @@ export function cliOutputSources(workspace: string, run: CliRun): TextSource[] {
   ];
 }
 
+/** Requests to `/v1/models` (list and retrieve), in arrival order. */
+export function modelsRequests(api: FakeAnthropic): RecordedRequest[] {
+  return api.requests.filter((request) => isModelsPath(request.path));
+}
+
+/** Requests to `/v1/messages`, in arrival order. */
+export function messagesRequests(api: FakeAnthropic): RecordedRequest[] {
+  return api.requests.filter((request) => !isModelsPath(request.path));
+}
+
 export function sentModels(api: FakeAnthropic): unknown[] {
-  return api.requests.map((request) => bodyOf(request)["model"]);
+  return messagesRequests(api).map((request) => bodyOf(request)["model"]);
 }
 
 export function sentMaxTokens(api: FakeAnthropic): unknown[] {
-  return api.requests.map((request) => bodyOf(request)["max_tokens"]);
+  return messagesRequests(api).map((request) => bodyOf(request)["max_tokens"]);
 }

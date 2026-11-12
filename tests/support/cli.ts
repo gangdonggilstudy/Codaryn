@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -93,6 +93,33 @@ export interface CliRun {
   readonly stderr: string;
   readonly timedOut: boolean;
   readonly durationMs: number;
+  /** Process id of the CLI, for diagnostics. */
+  readonly pid?: number;
+}
+
+/**
+ * When this variable names a file, every CLI start and every killQuietly call appends one line
+ * (`spawn|kill <pid> <ms since epoch> ...`) to it. Used to find a test that kills a process by a
+ * pid the system has meanwhile given to another test's CLI. Off unless set.
+ */
+export const PID_LOG_ENV = "CODARYN_IT_PID_LOG";
+
+function pidLog(line: string): void {
+  const file = process.env[PID_LOG_ENV];
+  if (file === undefined || file === "") return;
+  try {
+    appendFileSync(file, `${line}\n`);
+  } catch {
+    // diagnostics only
+  }
+}
+
+/** Exit code, signal, time, pid and stderr of a run, for assertion messages. */
+export function describeRun(run: CliRun): string {
+  return (
+    `exit ${String(run.exitCode)}, signal ${String(run.signal)}, ${run.durationMs} ms, pid ${String(run.pid)}, ` +
+    `stdout ${JSON.stringify(run.stdout.slice(0, 1000))}, stderr ${JSON.stringify(run.stderr.slice(0, 2000))}`
+  );
 }
 
 export interface StartedCli {
@@ -113,6 +140,11 @@ export interface StartOptions {
   readonly netGuardLog?: string;
   /** Another build of the CLI to run (for example a copy, see installCopy). Defaults to CLI_PATH. */
   readonly cliPath?: string;
+  /**
+   * The CLI's standard input. "ignore" (default) is the null device. "pipe" is a pipe the test
+   * keeps open and never writes to: not a terminal, and a read on it would wait (Y-3 prompts).
+   */
+  readonly stdin?: "ignore" | "pipe";
 }
 
 /** Compiled next to this file as `dist/tests/support/net-guard.js`. */
@@ -129,9 +161,10 @@ export function startCli(args: readonly string[], options: StartOptions): Starte
   const child = spawn(NODE, nodeArgs, {
     cwd: options.cwd,
     env: guard === undefined ? baseEnv : { ...baseEnv, [NET_GUARD_LOG_ENV]: guard },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options.stdin ?? "ignore", "pipe", "pipe"],
     windowsHide: true,
   });
+  pidLog(`spawn ${String(child.pid)} ${started} ${args.slice(0, 3).join(" ")}`);
   const out: Buffer[] = [];
   const err: Buffer[] = [];
   child.stdout?.on("data", (chunk: Buffer) => out.push(chunk));
@@ -155,6 +188,7 @@ export function startCli(args: readonly string[], options: StartOptions): Starte
         stderr: Buffer.concat(err).toString("utf8"),
         timedOut,
         durationMs: Date.now() - started,
+        ...(child.pid === undefined ? {} : { pid: child.pid }),
       });
     });
   });
@@ -174,9 +208,9 @@ export function runTask(taskPath: string, options: StartOptions): Promise<CliRun
 
 /** stdout must be exactly one JSON line whose exitCode equals the process exit code. */
 export function parseCliOutput(run: CliRun): CliOutput {
-  assert.equal(run.timedOut, false, `CLI did not finish in time. stderr: ${run.stderr.slice(0, 2000)}`);
+  assert.equal(run.timedOut, false, `CLI did not finish in time. ${describeRun(run)}`);
   const lines = run.stdout.split(/\r?\n/).filter((line) => line.trim() !== "");
-  assert.equal(lines.length, 1, `stdout must be one JSON line, got: ${JSON.stringify(run.stdout.slice(0, 2000))}`);
+  assert.equal(lines.length, 1, `stdout must be one JSON line, got ${lines.length}; ${describeRun(run)}`);
   const parsed = JSON.parse(lines[0] ?? "") as CliOutput;
   assert.equal(parsed.schemaVersion, 1);
   assert.equal(parsed.exitCode, run.exitCode, "exitCode in stdout must equal the process exit code");
@@ -331,6 +365,7 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 export function killQuietly(pid: number): void {
+  pidLog(`kill ${pid} ${Date.now()} alive=${String(isProcessAlive(pid))}`);
   try {
     process.kill(pid);
   } catch {

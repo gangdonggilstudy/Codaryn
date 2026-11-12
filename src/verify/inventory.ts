@@ -6,6 +6,10 @@
  *   size is the length of its stored target in UTF-8 bytes). No content is read. A path that cannot
  *   be listed or measured becomes `unchecked`. The listing stops at `maxFiles` entries
  *   (MAX_INVENTORY_FILES) with `limitReached`, independent of the integrity limits.
+ *   Review R-13 L-3: a directory's entries are measured INVENTORY_LSTAT_CONCURRENCY at a time and
+ *   added in listing order, so the result (the limit included) is what a one-by-one listing gives.
+ *   An aborted `signal` (options) stops the listing between batches: `capture` rejects with an
+ *   AbortError and returns no partial listing.
  * - check: the expected listing is `before` with the applied actions done (a move takes the
  *   source's size to the destination, a discard removes the path). `after` must equal it path by
  *   path in kind and size. Only the plan targets are hashed: each moved file at its new path, each
@@ -82,6 +86,15 @@ export interface InventoryCheckerOptions {
   readonly workspaceRoot: string;
   /** Defaults to `process.platform`. Windows compares paths without case. */
   readonly platform?: NodeJS.Platform;
+  /** When aborted, `capture` stops between batches and rejects with an AbortError (R-13 L-3). */
+  readonly signal?: AbortSignal;
+}
+
+/** Entries of one directory measured at the same time (R-13 L-3). */
+export const INVENTORY_LSTAT_CONCURRENCY = 32;
+
+function cancelled(): Error {
+  return new DOMException("the inventory listing was cancelled", "AbortError");
 }
 
 /** Paths listed per difference in the evidence; the rest are counted. */
@@ -140,6 +153,29 @@ export function buildInventoryChecker(
     };
     const unchecked = (display: string): InventoryEntry => ({ path: asRawText(display), kind: "unchecked" });
 
+    /** One directory entry measured: a directory to list next, or an entry for the listing. */
+    const measure = async (child: string, childDisplay: string): Promise<{ readonly dir: string } | { readonly entry: InventoryEntry }> => {
+      let info: InventoryStat;
+      try {
+        info = await files.lstat(child);
+      } catch {
+        return { entry: unchecked(childDisplay) };
+      }
+      if (info.isDirectory() && !info.isSymbolicLink()) return { dir: child };
+      if (info.isSymbolicLink()) {
+        try {
+          return { entry: { path: asRawText(childDisplay), kind: "link", size: Buffer.byteLength(await files.readlink(child), "utf8") } };
+        } catch {
+          return { entry: unchecked(childDisplay) };
+        }
+      }
+      if (info.isFile()) return { entry: { path: asRawText(childDisplay), kind: "file", size: info.size } };
+      return { entry: unchecked(childDisplay) };
+    };
+
+    // A function, not a narrowed property: the signal may be aborted while a batch is measured.
+    const aborted = (): boolean => options.signal?.aborted === true;
+    if (aborted()) throw cancelled();
     /** Directories still to list: absolute path and display path ("" for the root). */
     const queue: [string, string][] = [[root, ""]];
     outer: while (queue.length > 0) {
@@ -151,34 +187,22 @@ export function buildInventoryChecker(
         if (!add(unchecked(display === "" ? "." : display))) break;
         continue;
       }
-      for (const name of names) {
-        if (display === "" && fold(name) === stateName) continue;
-        const child = path.join(dir, name);
-        const childDisplay = display === "" ? name : `${display}/${name}`;
-        let info: InventoryStat;
-        try {
-          info = await files.lstat(child);
-        } catch {
-          if (!add(unchecked(childDisplay))) break outer;
-          continue;
-        }
-        if (info.isDirectory() && !info.isSymbolicLink()) {
-          queue.push([child, childDisplay]);
-          continue;
-        }
-        let entry: InventoryEntry;
-        if (info.isSymbolicLink()) {
-          try {
-            entry = { path: asRawText(childDisplay), kind: "link", size: Buffer.byteLength(await files.readlink(child), "utf8") };
-          } catch {
-            entry = unchecked(childDisplay);
+      if (aborted()) throw cancelled();
+      const children = names
+        .filter((name) => !(display === "" && fold(name) === stateName))
+        .map((name) => [path.join(dir, name), display === "" ? name : `${display}/${name}`] as const);
+      for (let start = 0; start < children.length; start += INVENTORY_LSTAT_CONCURRENCY) {
+        const batch = children.slice(start, start + INVENTORY_LSTAT_CONCURRENCY);
+        const measured = await Promise.all(batch.map(([child, childDisplay]) => measure(child, childDisplay)));
+        if (aborted()) throw cancelled();
+        // In listing order, so the entries kept at the limit are those a one-by-one listing keeps.
+        for (const [index, item] of measured.entries()) {
+          if ("dir" in item) {
+            queue.push([item.dir, (batch[index] as readonly [string, string])[1]]);
+            continue;
           }
-        } else if (info.isFile()) {
-          entry = { path: asRawText(childDisplay), kind: "file", size: info.size };
-        } else {
-          entry = unchecked(childDisplay);
+          if (!add(item.entry)) break outer;
         }
-        if (!add(entry)) break outer;
       }
     }
     entries.sort((a, b) => compareCodeUnits(a.path, b.path));

@@ -390,6 +390,15 @@ export const FIXED_MESSAGES = {
   "revert.action.restored_from_discard": {},
   "revert.dry_run_next": {},
   "revert.reverted_before": {},
+  // DR-25: `{count}` files were moved back unsafely, with the person's consent (RevertedFile.unsafe).
+  // Shown after the reverted list when the count is above 0 (never in a dry run).
+  "revert.unsafe_moved": { count: "count" },
+  // DR-25: a dry run did not check whether this drive can move the listed files back safely; the
+  // real revert checks it and, without consent, skips the ones it cannot (RevertOutput.moveSafetyUnchecked).
+  "revert.dry_run_move_unchecked": {},
+  // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
+  // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
+  "summary.next_revert_unsafe": { runId: "runId" },
 
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
@@ -715,7 +724,11 @@ export interface HumanOutput {
    * which the renderer counts itself; the id is never shown.
    */
   progressLine(event: JournalEvent): string | null;
-  /** N-7: stderr after `revert` and `revert --dry-run`. */
+  /**
+   * N-7: stderr after `revert` and `revert --dry-run`. DR-25: `revert.unsafe_moved` when files were
+   * moved back unsafely, `summary.next_revert_unsafe` when files were skipped as `unsafe_move`, and
+   * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present.
+   */
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;

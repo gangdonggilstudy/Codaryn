@@ -54,6 +54,10 @@ import { cleanupQuestions } from "../shared/cleanup.js";
 import { parseCleanupPreviewArgs, toCleanupResultReply, toHostCleanupPreview, toStateSummaryReply } from "../shared/ipc.js";
 import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from "../shared/ipc.js";
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
+import { reportFileName, writeTextFile } from "./save-file.js";
+import { toHostReportMarkdown } from "../shared/ipc.js";
+import type { SaveReportReply } from "../shared/ipc.js";
+import { basename } from "node:path";
 import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
@@ -96,6 +100,8 @@ export interface IpcDeps {
   readonly history: RunHistory;
   /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
   readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
+  /** GU-3 (3.7): the OS save dialog: where a report goes (null: cancelled). */
+  readonly chooseSavePath: (name: string) => Promise<string | null>;
   /** GU-4 (3.8), DR-39, DR-44: the cleanup previews shown, and the main process's questions before cleaning. */
   readonly cleanupPreviews: CleanupPreviews;
   /** The plan as shown (counts, sizes, the digest's start); "do not clean" is the default. */
@@ -256,6 +262,28 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("settings", {}, SETTINGS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return toSettingsView(response.value, deps.envFacts());
+  });
+
+  // GU-3 (3.7): a report saved as Markdown to the file the person chose in the OS save dialog.
+  handle(IPC_CHANNELS.saveReport, async (args): Promise<SaveReportReply> => {
+    const parsed = args.length === 1 ? parseRunArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("reportMarkdown", { workspace: root, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const report = toHostReportMarkdown(response.value);
+    if (!report.ok) return report;
+    const path = await deps.chooseSavePath(reportFileName(parsed.runId));
+    if (path === null) return { ok: false, code: "not_saved" };
+    try {
+      await writeTextFile(path, report.text);
+    } catch {
+      return { ok: false, code: "save_failed" };
+    }
+    return { ok: true, name: basename(path) };
   });
 
   // GU-4 (3.8), DR-39, DR-44: the state summary; a cleanup preview (the plan stays here, the window gets

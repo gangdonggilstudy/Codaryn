@@ -7,7 +7,7 @@
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
-import { asReport } from "../api.js";
+import { asReport, asSaveReport } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
@@ -227,10 +227,33 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
           buttons.push(b);
           bar.append(b);
         });
-        body.replaceChildren(bar, panel);
+        body.replaceChildren(bar, panel, ...saveReportButton(t, api, workspace, runId, "report-save"));
         select(0);
         body.setAttribute("data-report-ready", reply.view.kind);
       })();
     },
   };
+}
+
+/**
+ * GU-3 (3.7): "Save the report": the main process asks the report as Markdown (the same masked
+ * report) and the OS save dialog chooses the file. The status line names the file, never a folder.
+ */
+export function saveReportButton(t: Texts, api: CodarynApi, workspace: Workspace, runId: string, id: string): HTMLElement[] {
+  const status = el("p", undefined, { id: `${id}-status`, role: "status" });
+  const save = button(
+    t.format("report.save"),
+    () => {
+      save.setAttribute("disabled", "");
+      void (async () => {
+        const reply = asSaveReport(await api.saveReport(workspace.handle, runId));
+        save.removeAttribute("disabled");
+        if (reply.ok) status.textContent = t.format("report.saved", { name: reply.name });
+        else status.textContent = reply.code === "not_saved" ? t.format("report.notSaved") : `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`;
+        status.setAttribute("data-saved", reply.ok ? "ok" : reply.code);
+      })();
+    },
+    { id },
+  );
+  return [save, status];
 }

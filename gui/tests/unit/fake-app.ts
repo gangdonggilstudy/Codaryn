@@ -21,6 +21,7 @@ export function fakeApp(overrides: Partial<HostApp> = {}): HostApp {
     review: unused,
     changes: unused,
     report: unused,
+    reportMarkdown: unused,
     stateSummary: unused,
     previewCleanup: unused,
     applyCleanup: unused,

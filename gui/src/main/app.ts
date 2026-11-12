@@ -10,7 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { BrowserWindow, Menu, app, dialog, session } from "electron";
+import { BrowserWindow, Menu, Notification, app, dialog, session } from "electron";
 import type { MessageBoxOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
@@ -29,7 +29,7 @@ import { PlanApprovals } from "./plans.js";
 import { SettingsProposals } from "./settings-proposals.js";
 import { CleanupPreviews } from "./cleanup-previews.js";
 import { cleanupQuestions } from "../shared/cleanup.js";
-import { WIDENING_KINDS, applyFormText, formatBytes, widenText } from "./dialog-texts.js";
+import { WIDENING_KINDS, applyFormText, cleanupDiscardedDetail, endNotice, formatBytes, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -58,6 +58,10 @@ export interface GuiOptions {
    * index of the button chosen (smoke tests only; `main.ts` never sets it).
    */
   readonly answerDialog?: (id: DialogTextId) => Promise<number>;
+  /** Smoke tests only: chooses the file a report is saved to instead of the OS save dialog (null: cancelled). */
+  readonly answerSaveDialog?: (name: string) => Promise<string | null>;
+  /** Smoke tests only: receives the OS end notification instead of the OS (3.6). */
+  readonly notify?: (notice: { readonly title: string; readonly body: string }) => void;
 }
 
 export interface GuiContext {
@@ -164,7 +168,25 @@ export function startGui(options: GuiOptions): void {
       return { status: found?.texts[ids[0] as string] ?? status, reason: found?.texts[ids[1] as string] ?? reason };
     },
     // 3.6: the taskbar shows that a run goes on, without a number or the goal.
-    onEnded: (runId, reason) => approvals.ended(runId, reason),
+    onEnded: (runId, reason, status) => {
+      approvals.ended(runId, reason);
+      // 3.6: an OS notification only while the window is not active; fixed text and the status word.
+      const notice = endNotice(language, window !== null && !window.isDestroyed() && window.isFocused(), status);
+      if (notice === null) return;
+      if (options.notify !== undefined) {
+        options.notify(notice);
+        return;
+      }
+      if (!Notification.isSupported()) return;
+      const shown = new Notification({ title: notice.title, body: notice.body });
+      shown.on("click", () => {
+        if (window !== null && !window.isDestroyed()) {
+          window.show();
+          window.focus();
+        }
+      });
+      shown.show();
+    },
     onChange: (running) => {
       if (window !== null && !window.isDestroyed()) window.setProgressBar(running ? 2 : -1, { mode: running ? "indeterminate" : "none" });
     },
@@ -259,6 +281,13 @@ export function startGui(options: GuiOptions): void {
         return answer === 0;
       },
       // GU-4 (3.8), DR-39, DR-44: each question apart; "keep" is every default.
+      // GU-3 (3.7): the OS save dialog chooses where a report goes; the window never names a path.
+      chooseSavePath: async (name) => {
+        if (options.answerSaveDialog !== undefined) return options.answerSaveDialog(name);
+        const box = { defaultPath: join(app.getPath("documents"), name), filters: [{ name: "Markdown", extensions: ["md"] }] };
+        const chosen = window !== null && !window.isDestroyed() ? await dialog.showSaveDialog(window, box) : await dialog.showSaveDialog(box);
+        return chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0 ? null : chosen.filePath;
+      },
       cleanupPreviews: new CleanupPreviews((size) => randomBytes(size), () => Date.now()),
       confirmCleanup: async (record) => {
         const questions = cleanupQuestions(record.plan);
@@ -284,7 +313,9 @@ export function startGui(options: GuiOptions): void {
         const discarded = cleanupQuestions(record.plan).discarded;
         const values = { count: discarded.count, files: discarded.files, size: formatBytes(language, discarded.bytes) };
         const buttons = [dialogText(language, "cleanup.discarded.confirm"), dialogText(language, "cleanup.discarded.keep")];
-        const box = { type: "warning" as const, title: dialogText(language, "closeRun.title"), detail: dialogText(language, "cleanup.discarded.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true };
+        // R33b-I1: keeping the boxes (the default) is what leaves apply runs' files unrevertable; said here too.
+        const detail = cleanupDiscardedDetail(language, cleanupQuestions(record.plan).discardedLeft);
+        const box = { type: "warning" as const, title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true };
         return (await ask("cleanup.discarded.message", box, values)) === 0;
       },
       settingsProposals: new SettingsProposals((size) => randomBytes(size), () => Date.now()),

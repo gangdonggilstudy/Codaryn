@@ -66,6 +66,7 @@ export interface CodarynApi {
   revert(preview: string): Promise<unknown>;
   revertConsent(retry: string): Promise<unknown>;
   report(workspace: string, runId: string): Promise<unknown>;
+  saveReport(workspace: string, runId: string): Promise<unknown>;
   plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
@@ -437,4 +438,10 @@ export function asCleanupResult(value: unknown): { readonly ok: true; readonly r
   if (result["ok"] === false) return { ok: true, result: { ok: false, code: str(result["code"]) ? result["code"] : "host_error" } };
   if (result["ok"] !== true || !Array.isArray(result["removed"]) || !Array.isArray(result["kept"]) || !isObj(result["totals"])) return failed(value);
   return { ok: true, result: result as unknown as CleanupResultView };
+}
+
+/** GU-3: a saved report: the chosen file's name, or why it was not saved (not_saved: the dialog was cancelled). */
+export function asSaveReport(value: unknown): { readonly ok: true; readonly name: string } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return failed(value);
+  return str(value["name"]) && value["name"].length <= 260 ? { ok: true, name: value["name"] } : failed(value);
 }

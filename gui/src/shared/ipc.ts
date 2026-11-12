@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   stateSummary: "codaryn:state:summary",
   previewCleanup: "codaryn:cleanup:preview",
   applyCleanup: "codaryn:cleanup:apply",
+  saveReport: "codaryn:report:save",
 } as const;
 
 /**
@@ -1140,4 +1141,13 @@ export function parseCleanupPreviewArgs(value: unknown): { readonly workspace: s
   if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "selection"]) || !isHandle(value["workspace"])) return null;
   const selection = parseCleanupSelection(value["selection"]);
   return selection === null ? null : { workspace: value["workspace"], selection };
+}
+
+/** GU-3 (3.7): a saved report: the name of the file the person chose (never its folder), or why not (not_saved, ...). */
+export type SaveReportReply = { readonly ok: true; readonly name: string } | { readonly ok: false; readonly code: string };
+
+/** The engine host's Markdown value, checked. */
+export function toHostReportMarkdown(value: unknown): { readonly ok: true; readonly text: string } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  return typeof value["text"] === "string" && value["text"].length <= 5_000_000 ? { ok: true, text: value["text"] } : { ok: false, code: "host_error" };
 }

@@ -115,3 +115,23 @@ export function reportValue(outcome: unknown, shown: Shown, shownText: Shown): O
     },
   };
 }
+
+/** A saved report's longest text (characters); longer ones are refused, not cut. */
+export const MAX_REPORT_MARKDOWN_CHARS = 5_000_000;
+
+/**
+ * GU-3 (3.7): `reportMarkdown` → `{ok, text}`. The app layer gives the report as `codaryn report`
+ * prints it, every provider's key value hidden; each line passes `shownText` here too (control
+ * characters replaced, key shapes and values hidden), as every text the GUI hands on does.
+ */
+export function reportMarkdownValue(outcome: unknown, shownText: Shown): Obj | HostFailure {
+  if (!isObj(outcome) || outcome["ok"] !== true) return failureOf(outcome);
+  const output = outcome["output"];
+  if (!isObj(output) || output["kind"] !== "report_markdown" || typeof output["markdown"] !== "string") return { ok: false, code: "host_error" };
+  const text = output["markdown"]
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => shownText(line))
+    .join("\n");
+  return text.length > MAX_REPORT_MARKDOWN_CHARS ? { ok: false, code: "too_large" } : { ok: true, text };
+}

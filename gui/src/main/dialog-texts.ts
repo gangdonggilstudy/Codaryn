@@ -34,6 +34,10 @@ const KO = {
   "cleanup.notReverted.keep": "그 기록은 남김",
   "cleanup.discarded.message": "보관함 {count}개(파일 {files}개, {size})도 지울까요?",
   "cleanup.discarded.detail": "보관함에는 계획 적용이 치워 둔 사람의 파일이 있습니다. 지우면 영구히 사라지고 되돌릴 수 없습니다.",
+  "cleanup.discarded.left": "보관함을 남기면, 기록이 지워지는 적용 실행 {count}개의 보관함 파일은 되돌리기로 제자리에 되살릴 수 없게 됩니다.",
+  "notify.title": "Codaryn",
+  "notify.done": "Codaryn 실행이 끝났습니다: {status}",
+  "notify.unknown": "Codaryn 실행이 끝났습니다. 결과는 실행 목록에서 확인하세요.",
   "cleanup.discarded.confirm": "보관함도 지움",
   "cleanup.discarded.keep": "보관함은 남김",
   "apply.confirm": "이 계획 적용",
@@ -78,6 +82,10 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "cleanup.notReverted.keep": "Keep those records",
   "cleanup.discarded.message": "Also delete {count} discard boxes ({files} files, {size})?",
   "cleanup.discarded.detail": "The discard boxes hold people's files that a plan's apply set aside. Deleted, they are gone for good and cannot be reverted.",
+  "cleanup.discarded.left": "If you keep them, the files in the discard boxes of the {count} apply runs whose records go can no longer be put back by a revert.",
+  "notify.title": "Codaryn",
+  "notify.done": "A Codaryn run ended: {status}",
+  "notify.unknown": "A Codaryn run ended. See the run list for its result.",
   "cleanup.discarded.confirm": "Delete the discard boxes too",
   "cleanup.discarded.keep": "Keep the discard boxes",
   "apply.confirm": "Apply this plan",
@@ -187,4 +195,25 @@ export function formatBytes(language: DialogLanguage, bytes: number): string {
     unit += 1;
   }
   return unit === 0 ? `${bytes} ${units[0]}` : `${value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * R33b-I1: the third cleanup dialog (the discard boxes): what deleting means, and, when apply runs'
+ * records go in this cleanup, what keeping the boxes (the default) means for them.
+ */
+export function cleanupDiscardedDetail(language: DialogLanguage, discardedLeft: number): string {
+  const lines = [dialogText(language, "cleanup.discarded.detail")];
+  if (discardedLeft > 0) lines.push(dialogText(language, "cleanup.discarded.left", { count: discardedLeft }));
+  return lines.join("\n");
+}
+
+/**
+ * 3.6: the end of a run as the OS is told: nothing while the window is active (the window announces
+ * it), else one notification with the fixed text and the status word only (6.9: no goal, path or
+ * file name). `status` is the shared catalog's word, or null when the end is not known.
+ */
+export function endNotice(language: DialogLanguage, active: boolean, status: string | null): { readonly title: string; readonly body: string } | null {
+  if (active) return null;
+  const word = status === null ? null : status.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, 40);
+  return { title: dialogText(language, "notify.title"), body: word === null ? dialogText(language, "notify.unknown") : dialogText(language, "notify.done", { status: word }) };
 }

@@ -335,13 +335,21 @@ export interface ResolvedRun {
  * asked for the list. `configPath` null: CODARYN_CONFIG, then the default location (N-1).
  */
 export interface ListModelsRequest {
-  /** Only "anthropic" is connected (DR-22 adds a second provider later). */
+  /**
+   * DR-22, SP-6: one of the API providers (API_PROVIDER_NAMES, CONNECTED_MODEL_PROVIDERS). It decides
+   * the key, the address, the lister and where a choice is written, whatever the config file's
+   * `provider` is. Another name is `invalid_arguments` before anything is read.
+   */
   readonly provider: string;
   readonly configPath: string | null;
   readonly varsFile: string | null;
 }
 
-/** Y-3: lists again and writes this id into the config file's `model`, only when the list holds it. */
+/**
+ * Y-3, SP-6: lists again and writes this id as that provider's model in the config file, only when
+ * the list holds it (as the CLI's `models --use`: anthropic's top-level `model`, or
+ * `providers.<name>.model`).
+ */
 export interface SelectModelRequest extends ListModelsRequest {
   readonly model: string;
 }

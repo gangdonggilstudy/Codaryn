@@ -123,7 +123,11 @@ function resultSection(t: Texts, result: CleanupResultView): HTMLElement[] {
   const runs = removed("run");
   const discarded = removed("discarded");
   const leftovers = removed("leftover");
-  const parts: HTMLElement[] = [
+  const parts: HTMLElement[] = [];
+  // DR-48, U-22 (R51-M-1): a cleanup that removed nothing, or not everything, says so first; what was
+  // kept and why follows.
+  if (result.status !== "removed") parts.push(el("p", t.format(`cleanup.result.status.${result.status}`), { class: "notice", id: "cleanup-status", "data-status": result.status }));
+  parts.push(
     el(
       "p",
       t.format("cleanup.result.removed", {
@@ -134,7 +138,7 @@ function resultSection(t: Texts, result: CleanupResultView): HTMLElement[] {
       }),
       { id: "cleanup-removed", "data-removed": String(result.removed.length) },
     ),
-  ];
+  );
   if (result.kept.length > 0) {
     parts.push(el("h4", t.format("cleanup.result.kept", { count: String(result.kept.length) })));
     const list = el("ul", undefined, { id: "cleanup-kept" });
@@ -237,6 +241,7 @@ export function cleanupScreen(deps: CleanupDeps): Screen {
                   const done = asCleanupResult(await api.applyCleanup(reply.token));
                   resultBox.replaceChildren(...(done.ok ? resultSection(t, done.result) : [errorBox(t, done.code)]));
                   resultBox.setAttribute("data-result", done.ok ? (done.result.ok ? "done" : done.result.code) : done.code);
+                  resultBox.setAttribute("data-status", done.ok && done.result.ok ? done.result.status : "none");
                   if (done.ok && done.result.ok) {
                     deps.announce(t.format("cleanup.announce", { count: String(done.result.removed.length) }));
                     const summary = await loadSummary();

@@ -191,6 +191,18 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - `runId`는 `<UTC yyyymmddThhmmssZ>-<8자리 16진 난수>`다(P-3). 예: `20261112T031500Z-9f2c41ab`.
 - 치환 대응표는 실행 중 메모리에만 둔다. 영구 금고와 재개는 없다. 되돌리기용 원문은 14절의 스냅샷으로 디스크에 남는다.
 
+### 8.1 가림 개수 (U-25, DR-52, AXM-17)
+
+- `EngineResult`의 선택 필드 `masking`(`{registeredValues, maskedPlaces}`)은 가림이 일했는지를 개수로만 말한다. 가릴 값, 그 값이 있던 곳, 길이는 담지 않는다.
+  - `registeredValues`: 실행이 등록한 서로 다른 가릴 값의 수다. 키를 등록했으면 키도 하나로 센다. 같은 값을 다른 줄 바꿈으로 쓴 변형은 따로 세지 않는다.
+  - `maskedPlaces`: 엔진이 모델에 보낸 글(시스템 글, 작업 메시지, 도구 결과, 재수정 메시지)에서 가린 곳의 수다. 글마다 처음 보낼 때 한 번 센다. 모델이 돌려준 글은 세지 않는다.
+  - 등록된 가릴 값이 없으면 필드가 없다. DR-52 전에 쓴 결과와 개수를 말하지 않는 가림(시험용 가짜)에도 없다. 등록했지만 가린 곳이 없으면 `maskedPlaces`가 0이어서, 필드가 없는 경우와 구별된다.
+  - `run`의 stdout과 `result.json`이 같은 객체를 담는다. 필드를 더하기만 한다(DR-48).
+- `report --json`의 `result`는 `result.json`의 `masking`을 기록된 대로 담는다. 두 개수만 다시 짓고, 그 필드의 다른 내용은 옮기지 않는다. 개수가 아니면(객체가 아님, 정수가 아님, `registeredValues`가 1보다 작음, `maskedPlaces`가 음수) 다른 손상된 필드처럼 `invalid_run_record`다. 보고서의 글 본문은 바뀌지 않는다.
+- 사람용 끝 요약은 문구 `summary.masking`으로 두 개수를 보인다(출력 담당의 몫).
+- SP-0: `run --json` 고정 값에 `"masking":{"registeredValues":1,"maskedPlaces":0}`이 더해졌다(PM 승인, 더하기만).
+- 계약에 따라, 보안 검토자가 이 개수가 비밀의 단서가 되지 않는다고 확인한 뒤에 합친다(DR-52).
+
 ## 9. 계약 변경 절차
 
 변경이 필요하면 담당자가 사유와 원하는 형태를 PM에 요청한다 → PM이 승인한다 → 역할 1(기반 담당)만 `src/contracts/**`와 이 문서를 수정한다. 다른 담당자는 계약을 직접 고치거나 로컬 사본을 만들지 않는다.
@@ -732,6 +744,7 @@ codaryn doctor [...기존] [--profile <이름>]
   - result.json이나 revert.json이 없는 것은 손상이 아니다(해당 필드가 null). 있는데 읽기·해석·확인에 실패하면 손상이다.
   - 항목에 들어가는 문자열은 위 형식을 통과한 것뿐이라 제어 문자나 키 모양이 들어갈 수 없다. 사람용 표에는 `taskId`를 쓰지 않는다(N-14).
 - **`--run latest`(N-7, N-18)**: `report`, `revert`, 그리고 18절의 `plan`, `review`, `changes`에서 `listRuns`의 첫 `checked` 실행을 뜻한다. `apply`는 받지 않는다(승인이 계획 하나를 가리켜야 한다). 그런 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리(`.codaryn/runs/latest`)가 실제로 있으면 별칭으로 해석하지 않고 `invalid_arguments`로 끝나며 아무것도 바꾸지 않는다(검토 L1).
+  - U-22(DR-48, AXM-8, PM 결정): `latest`는 가장 새 실행이다. 결과가 아직 없는 `checked` 실행이 고를 끝난 실행보다 새것이고(또는 끝난 실행이 없고) 살아 있는 프로세스로 작업공간 잠금을 쥐고 있으면, 앞의 끝난 실행을 고르지 않고 `run_not_found`도 아닌 `run_in_progress`(종료 6, 끝난 뒤 다시 시도하거나 실행 id를 준다)다. 아무것도 바꾸지 않는다. 결과 없이 멈춘(잠금이 살아 있지 않은) 더 새 실행은 지금처럼 건너뛴다. 실행 id를 직접 주면 그 실행을 그대로 보인다. 이 규칙은 `latest`를 받는 모든 명령과 앱 계층에 하나다(R-51 M-2): 공용 함수 `resolveRunReference`(`src/cli/run-ref.ts`), 다른 함수가 없는 호출자는 store의 함수를 담은 `STORE_RUN_REFERENCE_DEPS`와 함께 쓴다. `report`, `revert`, `plan`, `review`가 쓰고, `apply`는 실행 id만 받는다. `changes`와 앱 계층의 `resolveRun`은 앱 계층의 `runIdOf`(`src/app/runs.ts`)와 실행 목록의 `resolveRunRef`(`src/cli/runs.ts`)가 이 함수로 바뀌면 같은 규칙이 된다.
 - **`revert --dry-run`(N-7)**: `RevertRequest.dryRun`. 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 출력은 `dryRun: true`인 `RevertOutput`이고 상태·종료 코드는 실제 되돌리기와 같다(`complete` 0, `partial` 3).
 - **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 N-16의 확인을 통과하면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
 - **`--quiet`**: `run`, `revert`, `apply`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
@@ -1151,7 +1164,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - U-3: 남은 폴더 이름 꼴이지만 정리의 표지가 없는 폴더는 `StateSummary.unknownFolders`가 있을 때 요약에 `cleanup.summary.unknown_folders` 한 줄로 보이기만 한다. 항목이 아니고, 어떤 확인으로도 지우지 않는다.
 - 지우지 않는 것(store가 막음): `parked`, 잠금, `.gitignore`, 진행 중인 실행(`lock_held`), 결과가 없는 실행(`no_result`), 선택되지 않은 적용 실행이 쓰는 계획 실행(`plan_used_by_apply`: 그 적용의 되돌리기에 필요하다). 변경 표시가 있는 실행은 막지 않고 경고한다(P-5).
 - 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 폐기 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).
-- 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). `applied`는 문제로 남긴 것(`partly_removed` 포함)이 있으면 종료 1이고, 사람의 선택으로 남긴 것(`not_confirmed`, `not_reverted_not_confirmed`, `discarded_left`, `used_by_kept_apply`)은 0이다. U-13(UXM-1): 폐기 보관함에 파일이 남는 적용 실행의 기록은 그 폐기 보관함을 같은 정리에서 지우지 않으면(`--delete-discarded`와 폐기 보관함 선택) 남긴다(`discarded_left`, 그 적용이 쓰는 계획 실행은 `used_by_kept_apply`). 미리보기는 그런 적용의 수를 안내 줄로, 완료 출력은 `cleanup.done_discarded_left` 줄과 항목별 이유로 알린다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
+- 출력(계약의 `CleanupOutput`, U-22·DR-48·AXM-3): `status`가 일어난 일을 말하고 종료 코드는 `CLEANUP_EXIT_CODES`를 따른다. `preview`(종료 0, `summary`·`plan`), `removed`(0: 지운 것이 있고 문제로 남긴 것이 없음), `nothing_removed`(3: 지운 것이 없고 문제로 남긴 것도 없음. 확인을 주지 않았거나 규칙으로 남긴 것뿐), `partly_failed`(1: `CLEANUP_PROBLEM_KEPT_REASONS`의 이유로 남긴 것이 있음). 뒤의 셋은 `outcome`을 담고 `outcome.ok`는 `removed`일 때만 true다. 예전의 `mode` 필드는 없다. 확인한 다이제스트가 계획의 것이 아니면 `CleanupOutput`이 아니라 오류 `cleanup_plan_changed`(종료 2)이고 아무것도 지우지 않는다. 지운 것이 없으면 글은 "Nothing was removed."로 시작한다. U-13(UXM-1): 폐기 보관함에 파일이 남는 적용 실행의 기록은 그 폐기 보관함을 같은 정리에서 지우지 않으면(`--delete-discarded`와 폐기 보관함 선택) 남긴다(`discarded_left`, 그 적용이 쓰는 계획 실행은 `used_by_kept_apply`). 미리보기는 그런 적용의 수를 안내 줄로, 완료 출력은 `cleanup.done_discarded_left` 줄과 항목별 이유로 알린다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.
 

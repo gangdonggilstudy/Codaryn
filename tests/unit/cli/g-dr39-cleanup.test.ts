@@ -97,7 +97,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     const preview = await cleanup(base, ["--run", target]);
     assert.equal(preview.exitCode, 0, JSON.stringify(preview));
     const output = preview.output;
-    assert.ok(output !== null && output.mode === "preview", JSON.stringify(output));
+    assert.ok(output !== null && output.status === "preview", JSON.stringify(output));
     assert.deepEqual(output.plan.items.map((item) => [item.target, itemName(item)]), [["run", target]]);
     assert.deepEqual(output.plan.items[0]?.warnings, [], "a run that changed nothing has nothing to revert");
     assert.equal(output.summary.runs.count, 2);
@@ -109,11 +109,11 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     const { base, work, runIds } = await workspaceWithRuns(2);
     const [target, other] = runIds as [string, string];
     const preview = await cleanup(base, ["--run", target]);
-    assert.ok(preview.output?.mode === "preview");
+    assert.ok(preview.output?.status === "preview");
     const digest = preview.output.plan.digest.slice(0, 12);
     const done = await cleanup(base, ["--run", target, "--confirm", digest]);
     assert.equal(done.exitCode, 0, JSON.stringify(done));
-    assert.ok(done.output?.mode === "applied", JSON.stringify(done.output));
+    assert.ok(done.output !== null && done.output.status !== "preview", JSON.stringify(done.output));
     assert.deepEqual(done.output.outcome.removed.map((item) => itemName(item)), [target]);
     assert.equal(await exists(runDir(work, target)), false);
     assert.ok(await exists(runDir(work, other)), "a run not selected stays");
@@ -121,14 +121,8 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     assert.equal(log.includes(target), false, "the cleanup log holds counts and sizes only");
   });
 
-  test("a digest that is not the plan's removes nothing (the plan changed or another was shown)", async () => {
-    const { base, work, runIds } = await workspaceWithRuns(1);
-    const target = runIds[0] as string;
-    const result = await cleanup(base, ["--run", target, "--confirm", "0123456789ab"]);
-    assert.equal(result.exitCode, 3, JSON.stringify(result));
-    assert.ok(result.output?.mode === "plan_changed", JSON.stringify(result.output));
-    assert.ok(await exists(runDir(work, target)));
-  });
+  // U-22 (DR-48): a digest that is not the plan's is now the error cleanup_plan_changed (exit 2);
+  // the case is in g-u22-cleanup-output.test.ts.
 
   test("people's discarded files need --delete-discarded besides --confirm", async () => {
     const { base, work, runIds } = await workspaceWithRuns(1);
@@ -137,18 +131,18 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     await mkdir(folder, { recursive: true });
     await writeFile(path.join(folder, "0"), "a person's file\n", "utf8");
     const preview = await cleanup(base, ["--discarded-run", target]);
-    assert.ok(preview.output?.mode === "preview", JSON.stringify(preview));
+    assert.ok(preview.output?.status === "preview", JSON.stringify(preview));
     assert.deepEqual(preview.output.plan.items.map((item) => [item.target, itemName(item)]), [["discarded", target]]);
     assert.ok(preview.output.plan.items[0]?.warnings.includes("people_files"));
     const digest = preview.output.plan.digest.slice(0, 12);
 
     const runsOnly = await cleanup(base, ["--discarded-run", target, "--confirm", digest]);
-    assert.ok(runsOnly.output?.mode === "applied", JSON.stringify(runsOnly.output));
+    assert.ok(runsOnly.output !== null && runsOnly.output.status !== "preview", JSON.stringify(runsOnly.output));
     assert.deepEqual(runsOnly.output.outcome.kept, [{ target: "discarded", runId: target, reason: "not_confirmed" }]);
     assert.ok(await exists(path.join(folder, "0")), "not confirmed: the files stay");
 
     const both = await cleanup(base, ["--discarded-run", target, "--confirm", digest, "--delete-discarded"]);
-    assert.ok(both.output?.mode === "applied", JSON.stringify(both.output));
+    assert.ok(both.output !== null && both.output.status !== "preview", JSON.stringify(both.output));
     assert.deepEqual(both.output.outcome.removed.map((item) => [item.target, itemName(item)]), [["discarded", target]]);
     assert.equal(await exists(folder), false);
   });
@@ -159,11 +153,11 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     await mkdir(parked, { recursive: true });
     await writeFile(path.join(parked, "kept.txt"), "x", "utf8");
     const preview = await cleanup(base, ["--older-than", "0"]);
-    assert.ok(preview.output?.mode === "preview", JSON.stringify(preview));
+    assert.ok(preview.output?.status === "preview", JSON.stringify(preview));
     assert.equal(preview.output.summary.parked.files, 1);
     assert.ok(preview.output.plan.items.every((item) => item.target === "run" || item.target === "discarded"));
     const done = await cleanup(base, ["--older-than", "0", "--confirm", preview.output.plan.digest.slice(0, 12)]);
-    assert.ok(done.output?.mode === "applied", JSON.stringify(done.output));
+    assert.ok(done.output !== null && done.output.status !== "preview", JSON.stringify(done.output));
     assert.ok(await exists(path.join(parked, "kept.txt")), "parked files stay");
   });
 
@@ -171,7 +165,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     const { base, work, runIds } = await workspaceWithRuns(1);
     const target = runIds[0] as string;
     const shown = await cleanup(base, ["--run", target]);
-    assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+    assert.ok(shown.output?.status === "preview", JSON.stringify(shown));
     const { summary, plan } = shown.output;
     const preview = await cleanup(base, ["--run", target], false);
     assert.equal(preview.exitCode, 0);
@@ -254,11 +248,11 @@ describe("DR-39: cleanup keeps what a revert needs", () => {
     const applyRunId = (applied.output as unknown as ApplyResult).runId;
 
     const preview = await cleanupAt(base, ["--run", planned.runId]);
-    assert.ok(preview.mode === "preview", JSON.stringify(preview));
+    assert.ok(preview.status === "preview", JSON.stringify(preview));
     assert.deepEqual(preview.plan.items, []);
     assert.deepEqual(preview.plan.blocked, [{ target: "run", runId: planned.runId, code: "plan_used_by_apply" }]);
     const done = await cleanupAt(base, ["--run", planned.runId, "--confirm", preview.plan.digest.slice(0, 12)]);
-    assert.ok(done.mode === "applied", JSON.stringify(done));
+    assert.ok(done.status !== "preview", JSON.stringify(done));
     assert.deepEqual(done.outcome.removed, []);
     assert.ok(await exists(runDir(path.join(base, "work"), planned.runId)), "the plan run stays");
 
@@ -280,7 +274,7 @@ describe("DR-39: cleanup keeps what a revert needs", () => {
     assert.ok("output" in applied);
     const applyRunId = (applied.output as unknown as ApplyResult).runId;
     const preview = await cleanupAt(base, ["--run", `${planned.runId},${applyRunId}`]);
-    assert.ok(preview.mode === "preview", JSON.stringify(preview));
+    assert.ok(preview.status === "preview", JSON.stringify(preview));
     const applyItem = preview.plan.items.find((item) => itemName(item) === applyRunId);
     assert.ok(applyItem?.warnings.includes("not_reverted"), JSON.stringify(preview.plan.items));
   });

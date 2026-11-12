@@ -297,6 +297,58 @@ export type CleanupOutcome =
   | { readonly ok: false; readonly code: CleanupFailureCode };
 
 /**
+ * DR-48 (AXM-3): the kept reasons that are problems, not a confirmation left out or a rule. An item
+ * kept for one of them makes a cleanup `partly_failed`.
+ */
+export const CLEANUP_PROBLEM_KEPT_REASONS = ["changed", "not_plain_directory", "io_error", "partly_removed"] as const satisfies readonly CleanupKeptReason[];
+
+/**
+ * DR-48 (AXM-3): what a cleanup did, as `codaryn cleanup` and the app say it:
+ * - preview: no confirmation was given; nothing was removed
+ * - removed: something was removed and nothing was kept for a problem (the rest, if any, kept for a
+ *   confirmation not given or by a rule)
+ * - nothing_removed: nothing was removed and nothing was kept for a problem (every item kept for a
+ *   confirmation not given or by a rule, or nothing to remove)
+ * - partly_failed: something was kept for a problem (CLEANUP_PROBLEM_KEPT_REASONS), whatever else
+ *   was removed
+ */
+export const CLEANUP_STATUSES = ["preview", "removed", "nothing_removed", "partly_failed"] as const;
+export type CleanupStatus = (typeof CLEANUP_STATUSES)[number];
+export const CLEANUP_EXIT_CODES: { readonly [S in CleanupStatus]: number } = { preview: 0, removed: 0, nothing_removed: 3, partly_failed: 1 };
+
+/** DR-48: the status of a cleanup that was carried out, the one rule the CLI and the app share. */
+export function cleanupStatusOf(outcome: Extract<CleanupOutcome, { readonly ok: true }>): Exclude<CleanupStatus, "preview"> {
+  if (outcome.kept.some((item) => (CLEANUP_PROBLEM_KEPT_REASONS as readonly string[]).includes(item.reason))) return "partly_failed";
+  return outcome.removed.length > 0 ? "removed" : "nothing_removed";
+}
+
+/**
+ * DR-48 (AXM-3): what `codaryn cleanup` prints, one JSON line with `--json` (moved here from
+ * src/cli/cleanup.ts). `exitCode` is CLEANUP_EXIT_CODES[status]. `outcome.ok` is true for `removed`
+ * only: a cleanup that removed nothing, or kept something for a problem, is not ok. A confirmed
+ * digest that is not the plan's is the error `cleanup_plan_changed` and a held lock is
+ * `workspace_locked` (CliErrorOutput); neither is a CleanupOutput. The old `mode` field is gone
+ * (DR-48 allows breaking this JSON).
+ */
+export type CleanupOutput =
+  | {
+      readonly schemaVersion: 1;
+      readonly kind: "cleanup";
+      readonly status: "preview";
+      readonly exitCode: number;
+      readonly summary: StateSummary;
+      readonly plan: CleanupPlan;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly kind: "cleanup";
+      readonly status: Exclude<CleanupStatus, "preview">;
+      readonly exitCode: number;
+      /** The store's outcome, with `ok` true only for `removed`. */
+      readonly outcome: Omit<Extract<CleanupOutcome, { readonly ok: true }>, "ok"> & { readonly ok: boolean };
+    };
+
+/**
  * Signature of `applyCleanup`, exported by `src/store/index.ts`. Under the workspace lock it makes
  * the plan again from `selection` and `now` and goes on only when its digest equals the
  * confirmation's. Each item is checked again (exact name, plain directory, not a link, same

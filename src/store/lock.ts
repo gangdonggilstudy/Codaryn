@@ -22,6 +22,9 @@
  *   PROCESS_START_TOLERANCE_MS apart), the system gave the pid to a new process (Z-2) and the lock
  *   is dead. When that start time cannot be learned, the pid alone decides, as before. A lock in
  *   the old format (no `processStartedAt`) is judged by its pid alone.
+ * - N-27 (d), Linux: `ps` counts elapsed time from boot, so the start it gives moves when the wall
+ *   clock is stepped. The lock therefore also records the start in ticks since boot and the boot id
+ *   (`/proc`), which decide exactly when both the lock and the system have them.
  *   Tests inject `isProcessAlive` and `processStartTime` so that they do not depend on pid reuse.
  * - EPERM and EBUSY (Windows reports them for files that are being deleted or are in use) are
  *   retried a few times and then end as `workspace_locked`, never as an exception.
@@ -48,6 +51,18 @@ export interface LockInfo {
    * N-25(b); those are judged by their pid alone.
    */
   readonly processStartedAt?: string;
+  /**
+   * N-27 (d), Linux: the holder's start in clock ticks since boot (`/proc/<pid>/stat` field 22) and
+   * the boot id. Unlike `processStartedAt` they do not move with the wall clock. Present together.
+   */
+  readonly processStartTicks?: string;
+  readonly bootId?: string;
+}
+
+/** A process's start as Linux counts it: ticks since boot and the boot it belongs to. */
+export interface ProcessIdentity {
+  readonly startTicks: string;
+  readonly bootId: string;
 }
 
 /** File operations the lock uses. Tests replace single operations to inject errors. */
@@ -92,6 +107,12 @@ export interface AcquireLockOptions {
    * records its start time.
    */
   readonly processStartTime?: (pid: number) => Promise<number | null>;
+  /**
+   * N-27 (d): the identity of the process using this pid (Linux), or null where it cannot be read.
+   * Defaults to `linuxProcessIdentity`. When both the lock and this answer have one, they decide
+   * exactly, before any wall-clock comparison.
+   */
+  readonly processIdentity?: (pid: number) => Promise<ProcessIdentity | null>;
 }
 
 export type AcquireLockOutcome =
@@ -186,6 +207,41 @@ export async function processStartTime(pid: number): Promise<number | null> {
   return null;
 }
 
+const START_TICKS = /^[0-9]{1,20}$/;
+const BOOT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Field 22 (starttime) of a `/proc/<pid>/stat` line, or null. The command name (field 2) is in
+ * parentheses and may hold spaces and parentheses itself, so fields are counted after the last ")".
+ */
+export function parseProcStartTicks(stat: string): string | null {
+  const close = stat.lastIndexOf(")");
+  if (close < 0) return null;
+  const fields = stat.slice(close + 1).trim().split(/\s+/);
+  // fields[0] is field 3 (state), so field 22 is fields[19].
+  const ticks = fields[19];
+  return ticks !== undefined && START_TICKS.test(ticks) ? ticks : null;
+}
+
+/**
+ * N-27 (d): a process's identity on Linux, read from /proc; null on other platforms, for a pid with
+ * no process, or when /proc cannot be read. `options` are for tests.
+ */
+export async function linuxProcessIdentity(
+  pid: number,
+  options: { readonly platform?: NodeJS.Platform; readonly read?: (file: string) => Promise<string> } = {},
+): Promise<ProcessIdentity | null> {
+  if ((options.platform ?? process.platform) !== "linux" || !Number.isSafeInteger(pid) || pid <= 0) return null;
+  const read = options.read ?? ((file: string) => readFile(file, "utf8"));
+  try {
+    const startTicks = parseProcStartTicks(await read(`/proc/${pid}/stat`));
+    const bootId = (await read("/proc/sys/kernel/random/boot_id")).trim().toLowerCase();
+    return startTicks !== null && BOOT_ID.test(bootId) ? { startTicks, bootId } : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseLock(text: string): LockInfo | null {
   let value: unknown;
   try {
@@ -197,10 +253,16 @@ function parseLock(text: string): LockInfo | null {
   const { pid, runId, startedAt, processStartedAt } = value as Record<string, unknown>;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
   if (typeof runId !== "string" || typeof startedAt !== "string") return null;
-  if (processStartedAt === undefined) return { pid, runId, startedAt };
+  const { processStartTicks, bootId } = value as Record<string, unknown>;
+  // An identity of the wrong shape, or only half of one: the lock is not understood.
+  if ((processStartTicks === undefined) !== (bootId === undefined)) return null;
+  if (processStartTicks !== undefined && (typeof processStartTicks !== "string" || !START_TICKS.test(processStartTicks))) return null;
+  if (bootId !== undefined && (typeof bootId !== "string" || !BOOT_ID.test(bootId))) return null;
+  const identity = processStartTicks === undefined ? {} : { processStartTicks: processStartTicks as string, bootId: bootId as string };
+  if (processStartedAt === undefined) return { pid, runId, startedAt, ...identity };
   // A start time that is not a real timestamp: the lock is not understood and never reclaimed.
   if (!isRunTimestamp(processStartedAt)) return null;
-  return { pid, runId, startedAt, processStartedAt };
+  return { pid, runId, startedAt, processStartedAt, ...identity };
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -302,6 +364,7 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   const fs = options.fileSystem ?? nodeLockFileSystem;
   const alive = options.isProcessAlive ?? isProcessAlive;
   const startTimeOf = options.processStartTime ?? processStartTime;
+  const identityOf = options.processIdentity ?? ((pid: number) => linuxProcessIdentity(pid));
   /** One answer per pid for this attempt. */
   const startTimes = new Map<number, Promise<number | null>>();
   assertRunId(runId);
@@ -309,6 +372,12 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   /** Whether the lock's holder (or a reclaim file's owner) still runs (N-25(b)). */
   async function holderAlive(holder: LockInfo): Promise<boolean> {
     if (!alive(holder.pid)) return false;
+    // N-27 (d): the Linux identity does not move with the wall clock; when both sides have one it
+    // decides exactly.
+    if (holder.processStartTicks !== undefined && holder.bootId !== undefined) {
+      const now = await identityOf(holder.pid).catch(() => null);
+      if (now !== null) return now.bootId === holder.bootId && now.startTicks === holder.processStartTicks;
+    }
     if (holder.processStartedAt === undefined) return true;
     let asked = startTimes.get(holder.pid);
     if (asked === undefined) {
@@ -330,11 +399,13 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   }
   const lockFile = join(stateDir, LOCK_FILE_NAME);
   const reclaimFile = join(stateDir, RECLAIM_FILE_NAME);
+  const ownIdentity = await identityOf(process.pid).catch(() => null);
   const lock: LockInfo = {
     pid: process.pid,
     runId,
     startedAt: new Date(clock.now()).toISOString(),
     processStartedAt: new Date(performance.timeOrigin).toISOString(),
+    ...(ownIdentity === null ? {} : { processStartTicks: ownIdentity.startTicks, bootId: ownIdentity.bootId }),
   };
   const lockText = `${JSON.stringify(lock)}\n`;
   // Unique per attempt, so this process can tell its own held reclaim from a left-over one (W-4).

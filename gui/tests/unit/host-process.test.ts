@@ -236,3 +236,43 @@ test("host process: a host that does not end after stdin closes is killed by clo
     await cleanup();
   }
 });
+
+test("host process (R-10 M-1): an answer that comes after its time limit is dropped and the host stays", async () => {
+  const { dir, cleanup } = await tempDir();
+  try {
+    // Answers request 1 after 300 ms and request 2 after 400 ms, every later one at once.
+    const slow = await fakeHost(
+      dir,
+      "slow",
+      [
+        'process.stdout.write(JSON.stringify({ v: 1, type: "ready", node: "26.0.0" }) + "\\n");',
+        'let buffer = "";',
+        'process.stdin.setEncoding("utf8");',
+        'process.stdin.on("data", (chunk) => {',
+        '  buffer += chunk;',
+        '  let end;',
+        '  while ((end = buffer.indexOf("\\n")) >= 0) {',
+        '    const request = JSON.parse(buffer.slice(0, end));',
+        '    buffer = buffer.slice(end + 1);',
+        '    const delay = request.id === 1 ? 300 : request.id === 2 ? 400 : 0;',
+        '    setTimeout(() => process.stdout.write(JSON.stringify({ v: 1, id: request.id, ok: true, value: request.id }) + "\\n"), delay);',
+        '  }',
+        '});',
+      ].join("\n"),
+    );
+    const host = await started(options(dir, { hostScript: slow }));
+    try {
+      const first = host.call("doctor", { workspace: null }, 100);
+      const second = host.call("doctor", { workspace: null }, 5_000);
+      const timedOut = await first;
+      assert.equal(!timedOut.ok && timedOut.error.code, "adapter_timeout");
+      assert.deepEqual(await second, { v: 1, id: 2, ok: true, value: 2 }, "the other call still gets its answer");
+      assert.deepEqual(await host.call("doctor", { workspace: null }, 5_000), { v: 1, id: 3, ok: true, value: 3 });
+      assert.equal(host.exited, false, "the late answer did not end the host");
+    } finally {
+      await host.close();
+    }
+  } finally {
+    await cleanup();
+  }
+});

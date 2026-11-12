@@ -90,8 +90,8 @@ test("protocol: pending calls settle by id, time out, and all fail together", as
   assert.notEqual(first, second);
   const a = pending.wait(first, 5_000);
   const b = pending.wait(second, 5_000);
-  assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 1 }), true);
-  assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 2 }), false, "a second answer is not delivered");
+  assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 1 }), "delivered");
+  assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 2 }), "unknown", "a second answer is not delivered");
   assert.deepEqual(await a, { v: 1, id: first, ok: true, value: 1 });
   pending.failAll({ code: CHANNEL_ERRORS.hostExited, message: "gone" });
   assert.deepEqual(await b, { v: 1, id: second, ok: false, error: { code: CHANNEL_ERRORS.hostExited, message: "gone" } });
@@ -106,4 +106,18 @@ test("protocol: node major versions", () => {
   assert.equal(nodeMajor("v24.22.2"), 24);
   assert.equal(nodeMajor("26"), null);
   assert.equal(nodeMajor("abc"), null);
+});
+
+test("protocol (R-10 M-1): an answer after the time limit is late, not unknown, and is not delivered", async () => {
+  const pending = new PendingCalls();
+  const id = pending.next();
+  const timed = await pending.wait(id, 5);
+  assert.equal(!timed.ok && timed.error.code, CHANNEL_ERRORS.timeout);
+  assert.equal(pending.settle({ v: 1, id, ok: true, value: "late" }), "late");
+  assert.equal(pending.settle({ v: 1, id, ok: true, value: "again" }), "unknown", "only one late answer is expected");
+  assert.equal(pending.settle({ v: 1, id: 999, ok: true, value: 1 }), "unknown", "an id never issued");
+  const next = pending.next();
+  const answer = pending.wait(next, 5_000);
+  assert.equal(pending.settle({ v: 1, id: next, ok: true, value: 2 }), "delivered");
+  assert.deepEqual(await answer, { v: 1, id: next, ok: true, value: 2 });
 });

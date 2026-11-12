@@ -174,10 +174,24 @@ export class LineDecoder {
   }
 }
 
+/** How many timed-out ids are remembered so that their late answers can be dropped quietly. */
+export const MAX_LATE_IDS = 1000;
+
+/**
+ * What became of a response:
+ * - delivered: a request was waiting for it.
+ * - late: its request had timed out; the answer is dropped and the host is fine (R-10 M-1).
+ * - unknown: no request with that id is waiting or late (never issued, or answered already).
+ *   Only this breaks the channel.
+ */
+export type SettleOutcome = "delivered" | "late" | "unknown";
+
 /** Requests waiting for their response, each with a time limit. */
 export class PendingCalls {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (response: HostResponse) => void; timer: ReturnType<typeof setTimeout> }>();
+  /** Ids whose time ran out, oldest first, at most MAX_LATE_IDS. */
+  private readonly late = new Set<number>();
 
   /** A new request id. */
   next(): number {
@@ -195,20 +209,25 @@ export class PendingCalls {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.late.add(id);
+        if (this.late.size > MAX_LATE_IDS) {
+          const oldest = this.late.values().next().value;
+          if (oldest !== undefined) this.late.delete(oldest);
+        }
         resolve({ v: 1, id, ok: false, error: { code: CHANNEL_ERRORS.timeout, message: "the engine host did not answer in time" } });
       }, timeoutMs);
       this.pending.set(id, { resolve, timer });
     });
   }
 
-  /** Delivers a response. False when nobody waits for that id (late or unknown). */
-  settle(response: HostResponse): boolean {
+  /** Delivers a response to the request waiting for it, or says why it cannot (SettleOutcome). */
+  settle(response: HostResponse): SettleOutcome {
     const entry = this.pending.get(response.id);
-    if (entry === undefined) return false;
+    if (entry === undefined) return this.late.delete(response.id) ? "late" : "unknown";
     clearTimeout(entry.timer);
     this.pending.delete(response.id);
     entry.resolve(response);
-    return true;
+    return "delivered";
   }
 
   /** Ends every waiting request with this error (the host exited or broke the protocol). */

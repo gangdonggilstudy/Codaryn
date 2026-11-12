@@ -6,7 +6,7 @@
 // and in the repository root.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -132,15 +132,26 @@ env.XDG_CONFIG_HOME = sandboxAppData;
 // R29-L1: how many model requests the fake API has received, for the app's steps that cancel or close
 // a run: they wait until that run's request arrived (a file on this machine, rewritten every 50 ms).
 const apiCountFile = join(gui, "build", "smoke-api-count.json");
+// U-51: each count is written whole to a temporary file and renamed over the count file, so a read
+// never meets a file half written (written in place, the file is emptied first: the app read -1 and
+// its 5d step waited for a request that had arrived). Renaming over the file while the app has it
+// open fails on Windows (EPERM): the count file then keeps the last whole count, and the next write,
+// 50 ms later, tries again. A count can be a tick late, never wrong or unreadable.
+const apiCountTemp = `${apiCountFile}.tmp`;
+const apiCountWrites = { replaced: 0, retried: 0 };
+const apiMessages = () => api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
 const writeApiCount = () => {
-  const messages = api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
   try {
-    writeFileSync(apiCountFile, JSON.stringify({ messages }));
+    writeFileSync(apiCountTemp, JSON.stringify({ messages: apiMessages() }));
+    renameSync(apiCountTemp, apiCountFile);
+    apiCountWrites.replaced += 1;
   } catch {
-    // The app reads it again on its next try.
+    apiCountWrites.retried += 1;
   }
 };
-writeApiCount();
+// The first count, before the app starts: nothing reads it yet, so it is written in place.
+rmSync(apiCountTemp, { force: true });
+writeFileSync(apiCountFile, JSON.stringify({ messages: apiMessages() }));
 env.CODARYN_SMOKE_API_COUNT = apiCountFile;
 
 // R-10 L-4: a link inside the built renderer to a folder outside it (the temporary folder, on
@@ -173,6 +184,7 @@ const run = await new Promise((resolve) => {
 });
 clearInterval(apiCountTimer);
 rmSync(apiCountFile, { force: true });
+rmSync(apiCountTemp, { force: true });
 const realDefaultAfter = realDefaultConfig !== null && existsSync(realDefaultConfig) ? statSync(realDefaultConfig).mtimeMs : null;
 const sandboxMade = existsSync(join(sandboxAppData, "Codaryn", "config.json"));
 const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
@@ -674,5 +686,8 @@ rmSync(sandboxAppData, { recursive: true, force: true });
 rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
 const total = expected.length + 1 + switchChecks + lifeChecks;
+// U-51: how the request count reached the app (not a check): whole replacements, and the writes a read
+// in progress refused (EPERM on Windows), left to the next one.
+process.stdout.write(`api count file: ${apiCountWrites.replaced} replaced whole, ${apiCountWrites.retried} left to the next write\n`);
 process.stdout.write(`gui smoke: ${total - Math.min(failed, total)} of ${total} checks passed, app exit ${run.status}\n`);
 process.exit(failed === 0 ? 0 : 1);

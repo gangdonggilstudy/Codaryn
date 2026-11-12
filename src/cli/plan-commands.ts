@@ -56,6 +56,7 @@ import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
   createApplyRecorders,
+  hasRecordsChangedMark as storeHasRecordsChangedMark,
   prepareDiscardedRoot,
   inspectRun as storeInspectRun,
   latestRun,
@@ -123,6 +124,11 @@ export interface AdapterApply {
 
 export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
   readonly applyPlan?: ApplyPlan;
+  /**
+   * U-1: the store's `hasRecordsChangedMark` (the default); injected by tests. Asked for the plan run
+   * before anything is asked of the person, and passed to the engine for its check under the lock.
+   */
+  readonly hasRecordsChangedMark?: (workspaceRoot: string, runId: string) => Promise<boolean>;
   /** Set by the app layer only (AdapterApply). Absent: the CLI's channels (`--digest`, terminal). */
   readonly adapter?: AdapterApply;
   /**
@@ -360,6 +366,23 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   if (shown.output.appliedBy !== null) {
     return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
   }
+  // U-1 (R-33 R33-L3): a plan run whose records were changed by something else may hold another plan
+  // than the one the person saw. It is refused before anything is asked; a mark that cannot be read
+  // counts (fail closed). The engine checks again under the lock (ApplyDeps.planRecordsChanged).
+  const hasMark = io.hasRecordsChangedMark ?? storeHasRecordsChangedMark;
+  const planRecordsChanged = async (): Promise<boolean> => {
+    try {
+      return await hasMark(workspaceRoot, planRunId);
+    } catch {
+      return true;
+    }
+  };
+  if (await planRecordsChanged()) {
+    return cliError(
+      "plan_records_changed",
+      "the plan run's records were changed by something other than the run (a records-changed mark), so its plan may not be the one shown; nothing was asked, recorded or moved. Make the plan again with a new run",
+    );
+  }
 
   // DR-1, DR-21: an adapter's apply (AdapterApply) has the adapter's channel only: no terminal
   // question, no consent argument, and a consent only from the person's input on its screen.
@@ -471,6 +494,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         // At the apply clock's time (the store's markApplied uses the clock it was given).
         markApplied: () => recorders.markApplied(),
         stateGuard: recorders.stateGuard,
+        // U-1: the same check under the lock, right after apply_started (a mark written since).
+        planRecordsChanged,
       });
       // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.

@@ -84,7 +84,7 @@ import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
-import { cliError, prepareTask } from "./run.js";
+import { argumentsError, cliError, prepareTask } from "./run.js";
 import type { PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
@@ -466,7 +466,7 @@ async function planSummary(io: PlanCommandEnvironment, workspaceRoot: string, ru
 /** `codaryn plan ... --run <runId|latest> [--json]` (DR-5, DR-17). */
 export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcome> {
   const parsed = parsePlanArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const ready = await prepareFor(io, parsed.args.form, parsed.args.runId, null, false);
   if (!ready.ok) return ready.outcome;
   const shown = await loadShown(io, ready.value, true);
@@ -486,7 +486,7 @@ const YES = new Set(["y", "yes", "예", "네"]);
 /** `codaryn apply ... --run <planRunId> --digest <prefix> [--cancel-file <path>] [--quiet]` (6.2, 6.4). */
 export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutcome> {
   const parsed = parseApplyArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
   const ready = await prepareFor(io, args.form, args.runId, args.cancelFile, args.quiet);
   if (!ready.ok) return ready.outcome;
@@ -772,7 +772,7 @@ async function awaitingReview(
 /** `codaryn review ... --run <runId|latest> (--accept | --reject) [--note <text>] [--json]` (GT-D6). */
 export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutcome> {
   const parsed = parseReviewArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
   const currentKey = knownKeyValues(io.env);
   // S-8: a note is written to review.json and shown by report; a key never goes there.

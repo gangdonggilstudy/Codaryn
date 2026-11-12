@@ -190,16 +190,19 @@ describe("U-37: input and setting errors of a run name their reason with a hint"
     hinted(await box.run(["run", "--workspace", "ws", "--goal", "g", "--config", "config.json"], env), "key_in_file", "key_in_config");
   });
 
-  test("a key field in the task or config file: key_field_in_task / key_field_in_config with its place", async () => {
+  // A key field's name (apiKey, token, ...) is never a schema field name, so toSchemaFieldPath does not
+  // take its place: the contract's plain key_in_task / key_in_config, without a field (no detail).
+  // key_field_in_* is for a key value found at a schema field path by the JSON scan.
+  test("a key field in the task or config file: key_in_task / key_in_config, since its place is no schema field path", async () => {
     const box = await sandbox();
     await writeFile(path.join(box.base, "task.json"), JSON.stringify({ ...TASK, model: { ...TASK.model, apiKey: "x" } }), "utf8");
     const task = await box.run(["run", "--task", "task.json"]);
-    hinted(task, "key_in_file", "key_field_in_task");
-    assert.deepEqual(detailOf(task), { field: "model.apiKey" });
+    hinted(task, "key_in_file", "key_in_task");
+    assert.equal(detailOf(task), undefined);
     await writeFile(path.join(box.base, "config.json"), JSON.stringify({ ...CONFIG, apiKey: "x" }), "utf8");
     const config = await box.run(["run", "--workspace", "ws", "--goal", "g", "--config", "config.json"]);
-    hinted(config, "key_in_file", "key_field_in_config");
-    assert.deepEqual(detailOf(config), { field: "apiKey" });
+    hinted(config, "key_in_file", "key_in_config");
+    assert.equal(detailOf(config), undefined);
   });
 
   test("settings not set: provider_settings_missing with each missing setting, in order; the message as before", async () => {

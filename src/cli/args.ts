@@ -24,6 +24,19 @@ import {
   UNSAFE_MOVE_CONSENT_ARGUMENT,
   WORKFLOW_ID_PATTERN_SOURCE,
 } from "../contracts/index.js";
+import type { CliErrorHint, DetailedCliErrorHint } from "../contracts/index.js";
+
+/**
+ * A parse failure. U-37 (UXM-2, DR-57): `hint` names its reason for the human error (CliErrorOutput.hint);
+ * `position` is unknown_option's: the argument's place after the command word, counted from 1, never
+ * its name. `message` is the English line as before.
+ */
+export interface ArgsFailure {
+  readonly ok: false;
+  readonly message: string;
+  readonly hint?: CliErrorHint | DetailedCliErrorHint;
+  readonly position?: number;
+}
 
 /**
  * Where the task comes from: a task file, or the quick form built from the config file.
@@ -52,7 +65,7 @@ export interface RunArgs {
 
 export type ParseArgsOutcome =
   | { readonly ok: true; readonly args: RunArgs }
-  | { readonly ok: false; readonly message: string };
+  | ArgsFailure;
 
 export const RUN_USAGE =
   'codaryn run ("<goal>" | --task <task.json> | --workspace <dir> --goal <text>) ' +
@@ -111,6 +124,12 @@ type JsonSwitch = (typeof JSON_SWITCH)[number];
 export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 const RUN_ID_MESSAGE = `--run must be a run id (1-128 characters of letters, digits, '.', '_' and '-') or "${LATEST_RUN_ALIAS}"`;
+/** U-37: a `--run` that is neither a run id nor `latest`. */
+const RUN_ID_FAILURE: ArgsFailure = { ok: false, message: RUN_ID_MESSAGE, hint: "run_id_form" };
+/** U-37: no command word, or a word that is no command (also after `help`). */
+const UNKNOWN_COMMAND: ArgsFailure = { ok: false, message: USAGE, hint: "unknown_command" };
+/** U-37: `--version` (`-v`, `version`) with another argument. */
+const VERSION_WORDS: ReadonlySet<string | undefined> = new Set(["--version", "-v", "version"]);
 
 const PROFILE_NAME = new RegExp(PROFILE_NAME_PATTERN_SOURCE);
 const WORKFLOW_ID = new RegExp(WORKFLOW_ID_PATTERN_SOURCE);
@@ -119,7 +138,7 @@ const WORKFLOW_ID = new RegExp(WORKFLOW_ID_PATTERN_SOURCE);
 export function workflowOf(
   values: ReadonlyMap<string, string>,
   input: RunInput,
-): { ok: true; workflow: string | null } | { ok: false; message: string } {
+): { ok: true; workflow: string | null } | ArgsFailure {
   const workflow = values.get("--workflow") ?? null;
   if (workflow === null) return { ok: true, workflow };
   if (!WORKFLOW_ID.test(workflow)) {
@@ -136,7 +155,7 @@ function isRunId(value: string): boolean {
 
 type ReadOutcome<O extends string, S extends string> =
   | { ok: true; values: Map<O, string>; switches: Set<S>; positionals: string[] }
-  | { ok: false; message: string };
+  | ArgsFailure;
 
 /**
  * Reads `--option value` pairs and bare switches. Each at most once, every value non-empty and not
@@ -162,14 +181,14 @@ function readOptions<O extends string, S extends string = never>(
       continue;
     }
     if ((switches as readonly string[]).includes(flag)) {
-      if (seen.has(flag as S)) return { ok: false, message: `unknown or repeated option. ${usage}` };
+      if (seen.has(flag as S)) return { ok: false, message: `unknown or repeated option. ${usage}`, hint: "unknown_option", position: index + 1 };
       seen.add(flag as S);
       index += 1;
       continue;
     }
     const value = rest[index + 1];
     if (!(allowed as readonly string[]).includes(flag) || values.has(flag as O)) {
-      return { ok: false, message: `unknown or repeated option. ${usage}` };
+      return { ok: false, message: `unknown or repeated option. ${usage}`, hint: "unknown_option", position: index + 1 };
     }
     if (value === undefined || value.length === 0 || value.startsWith("--")) {
       return { ok: false, message: `${flag} needs a value. ${usage}` };
@@ -180,7 +199,7 @@ function readOptions<O extends string, S extends string = never>(
   return { ok: true, values, switches: seen, positionals };
 }
 
-function profileOf(values: ReadonlyMap<string, string>): { ok: true; profile: string | null } | { ok: false; message: string } {
+function profileOf(values: ReadonlyMap<string, string>): { ok: true; profile: string | null } | ArgsFailure {
   const profile = values.get("--profile") ?? null;
   if (profile !== null && !PROFILE_NAME.test(profile)) return { ok: false, message: PROFILE_MESSAGE };
   return { ok: true, profile };
@@ -204,12 +223,12 @@ export interface RevertArgs {
 
 export type ParseRevertArgsOutcome =
   | { readonly ok: true; readonly args: RevertArgs }
-  | { readonly ok: false; readonly message: string };
+  | ArgsFailure;
 
 /** `codaryn revert --workspace <dir> --run <runId|latest> [--dry-run] [--quiet]`. Both options are required. */
 export function parseRevertArgs(argv: readonly string[]): ParseRevertArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "revert") return { ok: false, message: USAGE };
+  if (command !== "revert") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<RevertOption, RevertSwitch>(rest, REVERT_OPTIONS, USAGE, REVERT_SWITCHES);
   if (!read.ok) return read;
@@ -219,7 +238,7 @@ export function parseRevertArgs(argv: readonly string[]): ParseRevertArgsOutcome
     // U-17 (UXM-19): a command that changes files names its workspace; the message says how.
     return { ok: false, message: `--workspace and --run are required. ${workspace === undefined ? `${CURRENT_DIRECTORY_HINT} ` : ""}usage: ${REVERT_USAGE}` };
   }
-  if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
+  if (!isRunId(runId)) return RUN_ID_FAILURE;
   const dryRun = read.switches.has("--dry-run");
   const allowUnsafeMove = read.switches.has(UNSAFE_MOVE_CONSENT_ARGUMENT);
   if (dryRun && allowUnsafeMove) {
@@ -241,12 +260,12 @@ export interface ReportArgs {
 
 export type ParseReportArgsOutcome =
   | { readonly ok: true; readonly args: ReportArgs }
-  | { readonly ok: false; readonly message: string };
+  | ArgsFailure;
 
 /** `codaryn report --workspace <dir> --run <runId> [--json]` (U-5). */
 export function parseReportArgs(argv: readonly string[]): ParseReportArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "report") return { ok: false, message: USAGE };
+  if (command !== "report") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<ReportOption, JsonSwitch>(rest, REPORT_OPTIONS, `usage: ${REPORT_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
@@ -256,7 +275,7 @@ export function parseReportArgs(argv: readonly string[]): ParseReportArgsOutcome
   if (runId === undefined) {
     return { ok: false, message: `--run is required. usage: ${REPORT_USAGE}` };
   }
-  if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
+  if (!isRunId(runId)) return RUN_ID_FAILURE;
   return { ok: true, args: { command: "report", workspace, runId, json: read.switches.has("--json") } };
 }
 
@@ -273,12 +292,12 @@ export interface DoctorArgs {
 
 export type ParseDoctorArgsOutcome =
   | { readonly ok: true; readonly args: DoctorArgs }
-  | { readonly ok: false; readonly message: string };
+  | ArgsFailure;
 
 /** `codaryn doctor [...]` (U-6). Every option is optional; `--task` and `--workspace` exclude each other. */
 export function parseDoctorArgs(argv: readonly string[]): ParseDoctorArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "doctor") return { ok: false, message: USAGE };
+  if (command !== "doctor") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<DoctorOption, JsonSwitch>(rest, DOCTOR_OPTIONS, `usage: ${DOCTOR_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
@@ -319,12 +338,12 @@ export interface ModelsArgs {
 
 export type ParseModelsArgsOutcome =
   | { readonly ok: true; readonly args: ModelsArgs }
-  | { readonly ok: false; readonly message: string };
+  | ArgsFailure;
 
 /** `codaryn models [--config <file>] [--vars-file <path>] [--json] [--use <number|id>]` (Y-1). */
 export function parseModelsArgs(argv: readonly string[]): ParseModelsArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "models") return { ok: false, message: USAGE };
+  if (command !== "models") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<ModelsOption, JsonSwitch>(rest, MODELS_OPTIONS, `usage: ${MODELS_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
@@ -355,12 +374,12 @@ export interface InitArgs {
 
 export type ParseInitArgsOutcome =
   | { readonly ok: true; readonly args: InitArgs }
-  | { readonly ok: false; readonly message: string };
+  | ArgsFailure;
 
 /** `codaryn init [--config <file>] [--workspace <dir>] [--json]` (N-2). */
 export function parseInitArgs(argv: readonly string[]): ParseInitArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "init") return { ok: false, message: USAGE };
+  if (command !== "init") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<InitOption, JsonSwitch>(rest, INIT_OPTIONS, `usage: ${INIT_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
@@ -408,7 +427,7 @@ function taskFormOf(
   usage: string,
   /** U-17: `reads`: neither --task nor --workspace means the current directory; `light`: TaskFormArgs.readOnly. */
   options: { readonly reads?: boolean; readonly light?: boolean } = {},
-): { ok: true; form: TaskFormArgs } | { ok: false; message: string } {
+): { ok: true; form: TaskFormArgs } | ArgsFailure {
   const taskPath = values.get("--task");
   let workspace = values.get("--workspace");
   if (taskPath === undefined && workspace === undefined && options.reads === true) workspace = CURRENT_DIRECTORY;
@@ -443,9 +462,9 @@ export interface PlanArgs {
 }
 
 /** `codaryn plan ...` (DR-17). */
-export function parsePlanArgs(argv: readonly string[]): { readonly ok: true; readonly args: PlanArgs } | { readonly ok: false; readonly message: string } {
+export function parsePlanArgs(argv: readonly string[]): { readonly ok: true; readonly args: PlanArgs } | ArgsFailure {
   const [command, ...rest] = argv;
-  if (command !== "plan") return { ok: false, message: USAGE };
+  if (command !== "plan") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<(typeof TASK_FORM_OPTIONS)[number] | "--run", JsonSwitch>(rest, [...TASK_FORM_OPTIONS, "--run"], `usage: ${PLAN_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
@@ -453,7 +472,7 @@ export function parsePlanArgs(argv: readonly string[]): { readonly ok: true; rea
   if (!form.ok) return form;
   const runId = read.values.get("--run");
   if (runId === undefined) return { ok: false, message: `--run is required. usage: ${PLAN_USAGE}` };
-  if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
+  if (!isRunId(runId)) return RUN_ID_FAILURE;
   return { ok: true, args: { command: "plan", form: form.form, runId, json: read.switches.has("--json") } };
 }
 
@@ -476,9 +495,9 @@ export interface ApplyArgs {
 const DIGEST_PREFIX = /^[0-9a-f]+$/;
 
 /** `codaryn apply ...` (6.2, DR-2, DR-5). */
-export function parseApplyArgs(argv: readonly string[]): { readonly ok: true; readonly args: ApplyArgs } | { readonly ok: false; readonly message: string } {
+export function parseApplyArgs(argv: readonly string[]): { readonly ok: true; readonly args: ApplyArgs } | ArgsFailure {
   const [command, ...rest] = argv;
-  if (command !== "apply") return { ok: false, message: USAGE };
+  if (command !== "apply") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const options = [...TASK_FORM_OPTIONS, "--run", "--digest", "--cancel-file"] as const;
   // DR-49 (U-23): `--json` as for `run` (SWITCHES).
@@ -492,11 +511,13 @@ export function parseApplyArgs(argv: readonly string[]): { readonly ok: true; re
   if (!form.ok) return form;
   const runId = read.values.get("--run");
   if (runId === undefined) return { ok: false, message: `--run is required. usage: ${APPLY_USAGE}` };
-  if (runId === LATEST_RUN_ALIAS) return { ok: false, message: "apply needs the plan run's id; latest is not accepted, so the approval names one plan" };
-  if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
+  if (runId === LATEST_RUN_ALIAS) {
+    return { ok: false, message: "apply needs the plan run's id; latest is not accepted, so the approval names one plan", hint: "apply_needs_run_id" };
+  }
+  if (!isRunId(runId)) return RUN_ID_FAILURE;
   const digest = read.values.get("--digest") ?? null;
   if (digest !== null && (!DIGEST_PREFIX.test(digest) || digest.length < MIN_PLAN_DIGEST_PREFIX || digest.length > 64)) {
-    return { ok: false, message: `--digest must be ${MIN_PLAN_DIGEST_PREFIX} to 64 lowercase hexadecimal characters of the plan's digest` };
+    return { ok: false, message: `--digest must be ${MIN_PLAN_DIGEST_PREFIX} to 64 lowercase hexadecimal characters of the plan's digest`, hint: "digest_form" };
   }
   return {
     ok: true,
@@ -522,9 +543,9 @@ export interface ReviewArgs {
 }
 
 /** `codaryn review ...` (8, GT-D6, R-4 L-4). */
-export function parseReviewArgs(argv: readonly string[]): { readonly ok: true; readonly args: ReviewArgs } | { readonly ok: false; readonly message: string } {
+export function parseReviewArgs(argv: readonly string[]): { readonly ok: true; readonly args: ReviewArgs } | ArgsFailure {
   const [command, ...rest] = argv;
-  if (command !== "review") return { ok: false, message: USAGE };
+  if (command !== "review") return UNKNOWN_COMMAND;
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const options = [...TASK_FORM_OPTIONS, "--run", "--note"] as const;
   const read = readOptions<(typeof options)[number], "--accept" | "--reject" | "--json">(rest, options, `usage: ${REVIEW_USAGE}`, [
@@ -537,9 +558,9 @@ export function parseReviewArgs(argv: readonly string[]): { readonly ok: true; r
   if (!form.ok) return form;
   const runId = read.values.get("--run");
   if (runId === undefined) return { ok: false, message: `--run is required. usage: ${REVIEW_USAGE}` };
-  if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
+  if (!isRunId(runId)) return RUN_ID_FAILURE;
   const accept = read.switches.has("--accept");
-  if (accept === read.switches.has("--reject")) return { ok: false, message: `give --accept or --reject. usage: ${REVIEW_USAGE}` };
+  if (accept === read.switches.has("--reject")) return { ok: false, message: `give --accept or --reject. usage: ${REVIEW_USAGE}`, hint: "review_needs_verdict" };
   const note = read.values.get("--note") ?? null;
   if (note !== null && [...note].length > MAX_REVIEW_NOTE_CHARS) return { ok: false, message: `--note must be at most ${MAX_REVIEW_NOTE_CHARS} characters` };
   return { ok: true, args: { command: "review", form: form.form, runId, verdict: accept ? "accepted" : "rejected", note, json: read.switches.has("--json") } };
@@ -551,7 +572,8 @@ function isEnvFileFlag(item: string): boolean {
 
 export function parseArgs(argv: readonly string[]): ParseArgsOutcome {
   const [command, ...rest] = argv;
-  if (command !== "run") return { ok: false, message: USAGE };
+  // Every command word but run's is dispatched before; what reaches here is no command (U-37).
+  if (command !== "run") return VERSION_WORDS.has(command) ? { ok: false, message: USAGE, hint: "version_no_json" } : UNKNOWN_COMMAND;
   // Checked by name before anything else, so the hint is not lost in the generic usage message.
   // No value can start with "--", so the name is a flag wherever it appears.
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
@@ -581,7 +603,7 @@ export function parseArgs(argv: readonly string[]): ParseArgsOutcome {
   } else if (workspace !== undefined && goal !== undefined) {
     input = { kind: "quick", workspace, goal, oneLine: false };
   } else if (workspace !== undefined || goal !== undefined) {
-    return { ok: false, message: `--workspace and --goal must be given together. ${USAGE}` };
+    return { ok: false, message: `--workspace and --goal must be given together. ${USAGE}`, hint: "workspace_goal_together" };
   } else {
     return { ok: false, message: `a goal, --task, or --workspace with --goal, is required. ${USAGE}` };
   }

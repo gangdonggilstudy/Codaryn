@@ -1207,9 +1207,10 @@ The records of 1 run(s) not reverted, or only partly, are kept unless you add --
   - 새 미리보기의 digest로 `--include-not-reverted`를 더하면 그 실행도 지워진다.
   - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `the apply run's records go; if its discarded files stay (their folder not selected, or its deletion not confirmed), a revert can no longer put them back`이 붙는다. 보관함 줄은 `a discarded-files folder: people's own files are deleted`이고, 끝에 `People's discarded files are deleted only with --delete-discarded besides.`가 나온다.
 - **지우지 않는 것**: `.codaryn\parked\`(되돌리기가 제자리에 두지 못한 파일), 잠금, `.gitignore`, 돌고 있는 실행(`lock_held`, 적용 중이면 `workspace_locked`), 결과가 없는 실행(`no_result`), 고르지 않은 적용이 쓰는 계획 실행. 상태 디렉터리 안의 링크를 따라 밖을 지우지 않는다.
-- **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`이고 종료 1이다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않는다(지금은 요약에도 나오지 않는다).
+- **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`이고 종료 1이다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).
+- **기록을 확인할 수 없는 실행**(결과 기록이 깨진 실행 등)의 줄에는 `records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files`가 붙고, `--include-not-reverted`를 따로 줘야 지워진다.
 - 지운 것은 `.codaryn\cleanup.jsonl`에 개수와 바이트만 남는다(이름과 경로는 없다).
 - `--json`이면 `kind:"cleanup"` JSON 한 줄이다(`mode` `preview`, `applied`, `plan_changed`). 터미널 질문은 없다. 지우는 길은 digest 확인뿐이다.
 - 한국어 출력에서도 크기 조각(`N file(s), N bytes`)과 끝의 안내 줄은 아직 영어다.
-- 확인 범위: 위 출력과 `--confirm`·`--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것, 다 지우지 못한 경우, 표지 없는 폴더는 정리 코드가 main과 같은 판 `39df2ba`에서 실제 CLI로 확인했다(검토 R-34·R-34b·R-34c).
+- 확인 범위: 위 출력과 `--confirm`·`--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
 - **계획 실행의 기록**은 그 계획의 적용 실행을 되돌리는 데 필요하다. 손으로 지우면 그 적용은 되돌릴 수 없다(`revert`는 `plan_run_missing`, 종료 2). 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.

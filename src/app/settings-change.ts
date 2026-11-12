@@ -12,7 +12,7 @@
  *
  * Widening (UX 7, M-9): a command allowed that was not, any command allowed with extra arguments, a
  * limit raised or removed, a protected path or an integrity path removed, a secret variable no
- * longer masked, a verifier removed, path tokens restored, plan actions allowed, a different API
+ * longer masked, a verifier removed, a command verifier added or changed (R-14 L-2), path tokens restored, plan actions allowed, a different API
  * address, a profile or workflow definition changed. Narrowing changes need no confirmation.
  * The new text is the config as formatted JSON; the file's own formatting is not kept.
  */
@@ -81,6 +81,14 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   const newVerifiers = new Set((after.verifiers ?? []).map((verifier) => JSON.stringify(verifier)));
   for (const verifier of before.verifiers ?? []) {
     if (!newVerifiers.has(JSON.stringify(verifier))) found.push({ kind: "verifier_removed", field: "verifiers" });
+  }
+  // R-14 L-2: a command verifier runs with the person's rights on every run, so one that is new or
+  // changed widens what a run does. A file rule verifier only checks more.
+  const oldVerifiers = new Set((before.verifiers ?? []).map((verifier) => JSON.stringify(verifier)));
+  for (const [index, verifier] of (after.verifiers ?? []).entries()) {
+    if (verifier.kind === "command" && !oldVerifiers.has(JSON.stringify(verifier))) {
+      found.push({ kind: "verifier_command_added", field: `verifiers[${index}]` });
+    }
   }
   if (before.policy?.restorePathTokens !== true && after.policy?.restorePathTokens === true) {
     found.push({ kind: "restore_path_tokens_enabled", field: "policy.restorePathTokens" });

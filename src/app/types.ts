@@ -125,6 +125,8 @@ export interface SettingsWidening {
     | "integrity_path_removed"
     | "secret_env_removed"
     | "verifier_removed"
+    /** R-14 L-2: a command verifier added or changed; it runs with the person's rights on every run. */
+    | "verifier_command_added"
     | "restore_path_tokens_enabled"
     | "plan_action_allowed"
     | "api_base_url_changed"
@@ -374,6 +376,12 @@ export interface TaskForm {
   readonly configPath: string | null;
   readonly varsFile: string | null;
   readonly profile: string | null;
+  /**
+   * R-14 L-3: `--workflow` (G-F, GT-D1): the workflow the workspace form resolves to, so a plan made
+   * with `startRun`'s `workflowRef` is shown, applied and reviewed on the same form without a
+   * profile. Null: the profile's or the config's. A task file names its own; the CLI refuses both.
+   */
+  readonly workflowRef: string | null;
 }
 
 export type ChangedFileUnavailable =
@@ -517,10 +525,11 @@ export interface CodarynApp {
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
   /**
-   * DR-1, DR-17: present once the general task commands exist (G-B to G-F). An adapter opens the
-   * plan screen after a `needs-input`/`plan_pending` result and checks for these before offering them.
+   * DR-1, DR-17: the plan screen after a `needs-input`/`plan_pending` result, the apply with the
+   * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.
+   * Required since the general task commands are in main (PM decision on A-5 question 1).
    */
-  plan?(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
-  applyPlan?(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
-  review?(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
+  plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
+  applyPlan(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
+  review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
 }

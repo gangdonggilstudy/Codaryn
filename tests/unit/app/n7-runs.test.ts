@@ -155,7 +155,7 @@ describe("DR-17: the task form", () => {
       workflowRef: null,
       cancelFile: null,
     });
-    assert.deepEqual(runRequestOf({ input: { kind: "workspace", workspace: "w" }, configPath: null, varsFile: null, profile: "doc" }).input, {
+    assert.deepEqual(runRequestOf({ input: { kind: "workspace", workspace: "w" }, configPath: null, varsFile: null, profile: "doc", workflowRef: null }).input, {
       kind: "quick",
       workspace: "w",
       goal: PROBE_GOAL,

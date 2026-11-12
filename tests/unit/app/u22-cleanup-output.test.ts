@@ -6,10 +6,10 @@
  *   back as an ok outcome.
  * - A confirmed digest that is not the plan's is the error `cleanup_plan_changed`, and a held lock is
  *   `workspace_locked`; neither is a cleanup outcome. Before, both came back as outcomes.
- * - `--run latest` while the only run is still going is `run_in_progress`, not `run_not_found`; with
- *   a finished run before it, that run is chosen as before (AXM-8). The CLI resolves it; the app
- *   passes the code on.
- * Reproduced first (584a31c, todo); the app layer (c59256c) and the CLI (80fec27) follow the
+ * - `--run latest` while the newest run is still going is `run_in_progress`, not `run_not_found`,
+ *   even after a finished run (PM decision; a run named by its id is shown). The CLI resolves
+ *   it; the app passes the code on.
+ * Reproduced first (584a31c, todo); the app layer (c59256c) and the CLI (80fec27, 1de5b8a) follow the
  * contract now. `partly_failed` needs a removal the OS refuses; the contract's tests show the rule and
  * the app uses the same function. Real runs through the app (scripted model), the real store.
  * Fake values only.
@@ -112,15 +112,20 @@ describe("U-22 (DR-48): the app says what a cleanup did", () => {
     assert.equal(ok(await lone.app.report({ workspace: lone.workspace, runId: "latest" })).runId, handle.runId);
   });
 
-  test("report --run latest with a finished run before the one still going: the finished one, as before (AXM-8)", async () => {
+  test("report --run latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", async () => {
+    // PM decision (U-22): latest is the newest run, so a run still going answers run_in_progress
+    // even when a finished run came before it; the finished run is shown when named by its id.
     const run = await finishedRun();
     const handle = await busyOn(run);
     try {
-      assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: "latest" })).runId, run.runId);
+      assert.equal(codeOf(await run.app.report({ workspace: run.workspace, runId: "latest" })), "run_in_progress");
+      assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: run.runId })).runId, run.runId);
     } finally {
       handle.cancel();
       await handle.done;
     }
+    // Once the newest run has ended, latest names it.
+    assert.equal(ok(await run.app.report({ workspace: run.workspace, runId: "latest" })).runId, handle.runId);
   });
 });
 
@@ -143,3 +148,71 @@ async function busyOn(run: { base: string; workspace: string; app: CodarynApp })
   }
   assert.fail("the waiting run did not show in the run list");
 }
+
+/**
+ * Review R-51 of U-22, the app layer's part (reproduced first, todo until the app follows):
+ * - M-2: DR-48 (b) holds for every command and app call that takes `latest`. The app's `changes`
+ *   (and the CLI's `changes`, which calls it) and `resolveRun` still chose the run before the
+ *   newest one while that one was going.
+ * - M-1: a cleanup that removed nothing, or failed in part, is a result for the GUI, not an error:
+ *   the call is ok, with `status` and what was removed and kept and why.
+ */
+const TODO_R51_M2 = { todo: "R-51 M-2: wait for the app's latest to follow the CLI's rule" };
+const TODO_R51_M1 = { todo: "R-51 M-1: wait for the app to take the store's cleanup operations from its hooks" };
+
+describe("R-51: latest in the app's other calls, and the new cleanup results as results", () => {
+  test("changes --run latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", TODO_R51_M2, async () => {
+    const run = await finishedRun();
+    const handle = await busyOn(run);
+    const settings = { input: { kind: "task" as const, taskPath: path.join(run.base, "task.json") }, configPath: null, varsFile: null, profile: null, workflowRef: null };
+    try {
+      assert.equal(codeOf(await run.app.changes({ settings, runId: "latest" })), "run_in_progress");
+      assert.equal(ok(await run.app.changes({ settings, runId: run.runId })).runId, run.runId);
+    } finally {
+      handle.cancel();
+      await handle.done;
+    }
+  });
+
+  test("resolveRun latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", TODO_R51_M2, async () => {
+    const run = await finishedRun();
+    const handle = await busyOn(run);
+    try {
+      assert.equal(codeOf(await run.app.resolveRun({ workspace: run.workspace, run: "latest" })), "run_in_progress");
+      assert.equal(ok(await run.app.resolveRun({ workspace: run.workspace, run: run.runId })).runId, run.runId);
+    } finally {
+      handle.cancel();
+      await handle.done;
+    }
+    assert.equal(ok(await run.app.resolveRun({ workspace: run.workspace, run: "latest" })).runId, handle.runId, "once it has ended, latest names it");
+  });
+
+  test("a cleanup that removed nothing is an ok call with its result, not an error", async () => {
+    const run = await finishedRun();
+    const outcome = await apply(run, { runs: { runIds: [run.runId] } }, false);
+    assert.equal(outcome.ok, true, JSON.stringify(outcome));
+    const carried = ok<CleanupApplied>(outcome);
+    assert.equal(carried.status, "nothing_removed");
+    assert.deepEqual(carried.outcome.kept.map((item) => [item.target, item.reason]), [["run", "not_reverted_not_confirmed"]]);
+  });
+
+  test("a cleanup that failed in part is an ok call with its result: partly_failed, the outcome not ok, the folder kept as partly_removed", TODO_R51_M1, async () => {
+    const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
+    const busy = (): Error => Object.assign(new Error("the file is in use"), { code: "EBUSY" });
+    // The store's removal refused, as a file another process holds open would make it (the hook is
+    // the app's test seam; nothing else changes).
+    const hooks = { cleanupOperations: { remove: async () => { throw busy(); }, retryDelayMs: 1 } } as never;
+    const app = createCodarynApp(await appEnvironment(base), hooks);
+    const started = await app.startRun(taskRequest(base));
+    assert.ok(started.ok, JSON.stringify(started));
+    await started.handle.done;
+    const run = { workspace: path.join(base, "work"), app };
+    const outcome = await apply(run, { runs: { runIds: [started.handle.runId] } }, true);
+    assert.equal(outcome.ok, true, JSON.stringify(outcome));
+    const carried = ok<CleanupApplied>(outcome);
+    assert.equal(carried.status, "partly_failed");
+    assert.equal(carried.outcome.ok, false);
+    assert.deepEqual(carried.outcome.removed, []);
+    assert.deepEqual(carried.outcome.kept.map((item) => item.reason), ["partly_removed"]);
+  });
+});

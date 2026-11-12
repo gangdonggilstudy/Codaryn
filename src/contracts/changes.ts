@@ -13,8 +13,7 @@
  */
 
 import type { CliErrorCode } from "./engine.js";
-import { maskedParts, sameMaskedParts } from "./plan.js";
-import type { ApprovalChannel, MaskedParts } from "./plan.js";
+import type { ApprovalChannel } from "./plan.js";
 import type { ContentHash, RawText } from "./text.js";
 import type { ResolvedPath } from "./workspace.js";
 
@@ -39,23 +38,23 @@ export interface ChangeRecorder {
    * Resolves after the snapshot was handed to the operating system. When it rejects, the tool
    * must not write and reports `io_error`.
    *
-   * DR-29: `shownOriginal` is `original` masked by this run's gateway, as visible parts
-   * (MaskedParts, the DR-28 form), or null when `original` is null. The tool builds it with the
-   * gateway it was created with; the store keeps it with the snapshot and never sees the gateway.
-   * Absent when the tool could not mask the text (or a caller from before DR-29): the comparison
-   * view then shows no text for this path. Kept with the first call only, like the snapshot.
+   * DR-29, DR-32 (c): `shownOriginal` is the digest of `original` masked by this run's gateway: the
+   * SHA-256 of maskedPartsEncoding(maskedParts(masked text)) (plan.ts), or null when `original` is
+   * null. The tool computes it with the gateway it was created with; the store keeps it with the
+   * snapshot and never sees the gateway. Absent when the tool could not mask the text (or a caller
+   * from before DR-29): the comparison view then shows no text for this path. Kept with the first
+   * call only, like the snapshot.
    */
-  saveOriginal(path: ResolvedPath, original: RawText | null, shownOriginal?: MaskedParts | null): Promise<void>;
+  saveOriginal(path: ResolvedPath, original: RawText | null, shownOriginal?: ContentHash | null): Promise<void>;
   /**
-   * DR-29: called by a writing tool after its write succeeded, with the SHA-256 of the bytes it
-   * wrote (the `newHash` of its `file_changed` record) and that text masked by this run's gateway,
-   * as visible parts. The last call for a `path.relative` replaces the earlier one. It keeps no
-   * secret value and no hash of one: the parts are the visible text between tokens, and the hash is
-   * already in the record. When it rejects, the write has already happened and the tool's outcome
-   * stays as it is; the comparison view then finds the record stale or missing and shows no text.
-   * Optional only so recorders from before DR-29 still type-check; the store implements it.
+   * DR-29, DR-32 (c): called by a writing tool after its write succeeded, with the SHA-256 of the
+   * bytes it wrote (the `newHash` of its `file_changed` record) and the digest of that text masked
+   * by this run's gateway (as for `shownOriginal`). The last call for a `path.relative` replaces the
+   * earlier one. When it rejects, the write has already happened and the tool's outcome stays as it
+   * is; the comparison view then finds the record stale or missing and shows no text. Optional only
+   * so recorders from before DR-29 still type-check; the store implements it.
    */
-  saveNext?(path: ResolvedPath, sha256: ContentHash, shown: MaskedParts): Promise<void>;
+  saveNext?(path: ResolvedPath, sha256: ContentHash, partsDigest: ContentHash): Promise<void>;
 }
 
 export interface ChangeRecorderOptions {
@@ -251,15 +250,20 @@ export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
 export type OriginalUnavailable = "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable";
 
 /**
- * DR-29: how the run masked one changed path, as recorded by ChangeRecorder (`saveOriginal`'s
- * `shownOriginal` and the last `saveNext`). Visible parts only (MaskedParts): no secret value, no
- * token, no hash of a secret.
+ * DR-29, DR-32 (c): how the run masked one changed path, as recorded by ChangeRecorder
+ * (`saveOriginal`'s `shownOriginal` and the last `saveNext`): digests of the visible-part lists, not
+ * the parts themselves, so the record holds no copy of the file's text.
+ *
+ * What it holds, plainly: no secret value and no token. It does hold `next.sha256`, the SHA-256 of
+ * the whole text the run left, secrets included; that hash is already the journal's `newHash`.
+ * Someone who has the file's visible text from elsewhere can test a guessed secret against such a
+ * hash; the record does not add the visible text that this would need (R-19 L-3).
  */
 export interface ChangeShown {
-  /** The original masked by the run's gateway; null when the run created the file. */
-  readonly original: MaskedParts | null;
-  /** The last text the run wrote: its SHA-256 (the path's last `newHash`) and its visible parts. Null when none was recorded. */
-  readonly next: { readonly sha256: ContentHash; readonly parts: MaskedParts } | null;
+  /** Digest of the original masked by the run's gateway; null when the run created the file. */
+  readonly original: ContentHash | null;
+  /** The last text the run wrote: its SHA-256 (the path's last `newHash`) and the digest of its visible parts. Null when none was recorded. */
+  readonly next: { readonly sha256: ContentHash; readonly partsDigest: ContentHash } | null;
 }
 
 /**
@@ -295,28 +299,29 @@ export interface RunOriginal {
 export type ReadRunOriginals = (request: { readonly workspaceRoot: string; readonly runId: string }) => Promise<RunOriginal[]>;
 
 /**
- * DR-29: what a comparison view has now for one changed path: the run's original masked with the
- * secrets registered now (null when the run created the file), and the file as it is now, its
- * SHA-256 and its text masked now (null when it cannot be read as text).
+ * DR-29, DR-32 (c): what a comparison view has now for one changed path, as digests computed like
+ * the recorded ones (SHA-256 of maskedPartsEncoding(maskedParts(text masked now))): the run's
+ * original masked with the secrets registered now (null when the run created the file), and the
+ * file as it is now, its SHA-256 and the digest of its text masked now (null when it cannot be read
+ * as text).
  */
 export interface ChangeNow {
-  readonly original: string | null;
-  readonly current: { readonly sha256: ContentHash; readonly masked: string } | null;
+  readonly original: ContentHash | null;
+  readonly current: { readonly sha256: ContentHash; readonly partsDigest: ContentHash } | null;
 }
 
 /**
- * DR-29: true when a view may show the masked texts of a changed path: the run recorded how it
- * masked them (`shown` with `next`), the file is still the text the run left (same SHA-256), and
- * the secrets registered now leave exactly the same text visible in both, the original and the
- * current file (sameMaskedParts), as DR-28 does for plans. Otherwise the view shows the path and
- * its state only. A created file needs `shown.original` null and `now.original` null.
+ * DR-29, DR-32 (c): true when a view may show the masked texts of a changed path: the run recorded
+ * how it masked them (`shown` with `next`), the file is still the text the run left (same SHA-256),
+ * and the secrets registered now leave exactly the same text visible in both the original and the
+ * current file (same digests), as DR-28 does for plans. Otherwise the view shows the path and its
+ * state only. A created file needs `shown.original` null and `now.original` null.
  */
 export function changeShownMatches(shown: ChangeShown | undefined, now: ChangeNow): boolean {
   if (shown === undefined || shown.next === null || now.current === null) return false;
   if (now.current.sha256 !== shown.next.sha256) return false;
-  if (!sameMaskedParts(maskedParts(now.current.masked), shown.next.parts)) return false;
-  if (shown.original === null || now.original === null) return shown.original === null && now.original === null;
-  return sameMaskedParts(maskedParts(now.original), shown.original);
+  if (now.current.partsDigest !== shown.next.partsDigest) return false;
+  return shown.original === now.original;
 }
 
 /**

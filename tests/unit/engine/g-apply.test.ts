@@ -121,10 +121,20 @@ class FakeInventory implements InventoryChecker {
   captures = 0;
   readonly inputs: InventoryCheckInput[] = [];
   constructor(
-    private readonly options: { limitReached?: boolean; outcome?: VerifierOutcome; captureThrows?: boolean } = {},
+    private readonly options: {
+      limitReached?: boolean;
+      outcome?: VerifierOutcome;
+      captureThrows?: boolean;
+      /** R18-M1: runs during a capture, then the capture throws an AbortError (as a listing given the cancel signal does). */
+      abortDuring?: () => void;
+    } = {},
   ) {}
   async capture(): Promise<InventoryManifest> {
     this.captures += 1;
+    if (this.options.abortDuring !== undefined) {
+      this.options.abortDuring();
+      throw new DOMException("This operation was aborted", "AbortError");
+    }
     if (this.options.captureThrows === true) throw new Error("cannot list");
     return { entries: [], limitReached: this.options.limitReached === true };
   }
@@ -351,6 +361,27 @@ describe("applyPlan: preflight stops before anything moves", () => {
     assert.equal(run.journal.ofType("plan_checked")[0]?.inventoryLimitReached, true);
     assert.deepEqual(run.executor.applied, []);
     assert.ok(result.notices.some((notice) => notice.includes("inventory")));
+  });
+
+  test("R18-M1: the engine ends a cancel during the listing as cancelled; nothing is claimed or moved", async () => {
+    let controller: AbortController | undefined;
+    const run = setup({ inventory: new FakeInventory({ abortDuring: () => controller?.abort() }) });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.exitCode], ["cancelled", "cancelled", 5]);
+    assert.ok(!result.notices.some((notice) => notice.includes("inventory")), "not reported as a failed listing");
+    assert.deepEqual(run.executor.checked, []);
+    assert.deepEqual(run.executor.applied, []);
+    assert.deepEqual(run.marks, [], "the plan is not claimed: it can be applied again");
+  });
+
+  test("R18-M1: the duration limit reached during the listing ends as budget-exhausted, not plan_stale", async () => {
+    let clock: FakeClock | undefined;
+    const run = setup({ inventory: new FakeInventory({ abortDuring: () => { if (clock !== undefined) clock.t += 120_000; } }), maxDurationMs: 60_000 });
+    clock = run.clock;
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["budget-exhausted", "max_duration"]);
+    assert.deepEqual(run.marks, []);
   });
 
   test("an inventory that cannot be taken stops the apply too", async () => {

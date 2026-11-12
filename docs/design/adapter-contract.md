@@ -373,6 +373,43 @@ export type ConfirmAnswer =
   - `toCliError`/`fromCliError`로 양방향 변환한다. 코드 이름과 종료 코드 대응은 바꾸지 않는다(모든 코드를 시험함).
 - `message`는 고정 문구, 필드 위치, 개수만 쓴다(S-3, S-6, N-6). 사람용 문장은 어댑터가 코드로 N-4 카탈로그에서 찾는다(N-5).
 - 앱 계층이 새 실행 전 오류를 만들면 `CliErrorCode`에 더하는 계약 변경이다(역할 1).
+- `AppError`에는 선택 필드 `diagnostic`(N-6: 설정·task 파일의 필드 위치, 줄과 열)이 있다. 값은 넣지 않는다.
+
+### 5.11 설정: 읽기, 만들기, 제안, 바꾸기 [구현 A-4] (standalone-gui 3.2, 3.6, 5.2)
+
+GUI의 첫 실행 마법사와 설정 화면이 쓴다. 파일을 고르는 규칙과 검사는 CLI의 것을 그대로 쓴다.
+
+```ts
+readSettings({ configPath }) → SettingsView               // a86cd12
+  // file: 출처(argument·environment·default), 경로, 표시 이름, 있는지 / config / profiles / workflows / keyAvailable
+createSettings({ configPath, workspace }) → InitOutput     // b015c9f, `init --json` 그대로(질문 없음)
+settingsSuggestions({ workspace }) → { commands: { shown, rule }[], protectedPaths }   // b015c9f
+proposeSettingsChange({ configPath, next }) → { baseDigest, digest, changes, widening, config }   // c1957d8
+applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { written, digest, changes, widening }
+```
+
+- **고르기와 검사.** `run.ts`와 같은 순서로 CLI 함수를 부른다. 앱 계층이 값을 따로 판정하지 않는다. CLI에 공용 "설정 파일 읽기" 함수가 생기면 그것 하나로 바꾼다.
+  1. `chooseConfigFile`: `--config` → `CODARYN_CONFIG` → N-1 기본 위치(S-5).
+  2. 읽기: 없는 파일은 기본 위치일 때만 "설정 없음"이다.
+  3. 원문 키 검사(C-1, S-6).
+  4. JSON 해석. 문법 오류면 줄과 열을 준다.
+  5. 값 키 검사(깊이 64).
+  6. `parseConfig`. 필드 위치를 준다(N-6).
+- **만들기.**
+  - CLI `init`을 `--json`, 질문 없이 부른다. 그래서 기본값만 쓴다: 모델 자리표시자, 기본 한도, 모두 거부하는 정책.
+  - 이미 있으면 `config_exists`이고 덮어쓰지 않는다. 작업 공간 안이면 거부한다(S-1). 키는 받지도 쓰지도 않는다(C-1).
+  - 사람이 고른 값은 이어서 `selectModel`과 설정 바꾸기로 쓴다.
+- **제안.** `init`이 물을 고정 후보만 이름으로 준다: 목록에 있는 `package.json` 스크립트, 있는 보호 경로. 파일의 다른 내용은 가져오지 않는다.
+- **바꾸기.** GUI가 만든 새 설정 전체를 받는다.
+  - 제안은 쓰지 않는다. 같은 검사를 거친 뒤 바뀌는 필드와 **권한을 넓히는 변경**을 준다(UX 7, M-9).
+    - 명령 추가, 추가 인자 허용
+    - 한도 올림·없앰
+    - 보호 경로·무결성 경로·가릴 변수·검증기 제거
+    - 경로 토큰 복원, 계획 동작 허용
+    - API 주소 변경, 프로필·워크플로 정의 변경
+  - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.
+  - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
+  - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.
 
 ## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
 

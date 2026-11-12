@@ -64,7 +64,10 @@ import {
 } from "../../../src/contracts/index.js";
 import type {
   ApplyJournalEvent,
+  ApplyResult,
+  ApplySummaryContext,
   CreatePlanExecutor,
+  HumanOutput,
   EngineResult,
   JournalEvent,
   ModelRequest,
@@ -94,6 +97,13 @@ type ConfiguredInventory = Extract<VerifierConfig["kind"], "inventory">;
 const inventoryNotConfigurable: [ConfiguredInventory] extends [never] ? true : false = true;
 /** A model request without workflow tools is still a valid request (legacy shape). */
 const legacyRequest: ModelRequest = { system: "" as ModelRequest["system"], messages: [], tools: ["read_file"] };
+/** The renderer's apply methods take the apply records and result; optional until N-C adds them. */
+const renderer: Pick<HumanOutput, "applyProgressLine" | "applySummary"> = {
+  applyProgressLine: (event: ApplyJournalEvent) => (event.type === "file_moved" ? "moved\n" : null),
+  applySummary: (_result: ApplyResult, context: ApplySummaryContext) => `${context.workspaceForm}\n`,
+};
+const noRenderer: Pick<HumanOutput, "applyProgressLine" | "applySummary"> = {};
+void [renderer, noRenderer];
 /** G-C's factory shape: an executor is made from the workspace, its real root and the apply run id. */
 const makeExecutor: CreatePlanExecutor = ({ workspace, workspaceRoot, runId }) => {
   void [workspace, workspaceRoot, runId];
@@ -192,6 +202,35 @@ describe("G-A codes and the message catalog", () => {
     }
     assert.ok(ids.has("revert.skip.original_path_taken"));
     assert.ok(unique(MESSAGE_IDS));
+  });
+
+  test("apply runs, plan runs and review have their messages; approval channels and item problems are listed ids", () => {
+    const ids = new Set<string>(MESSAGE_IDS);
+    for (const channel of APPROVAL_CHANNELS) assert.ok(ids.has(`approval.${channel}`), channel);
+    for (const problem of PLAN_ITEM_PROBLEMS) assert.ok(ids.has(`plan.problem.${problem}`), problem);
+    const expected: Record<string, Record<string, string>> = {
+      "summary.form.task": {},
+      "summary.form.given": {},
+      "summary.form.current": {},
+      "summary.plan_ready": { actions: "count" },
+      "summary.next_plan": { form: "text", runId: "runId" },
+      "summary.next_apply": { form: "text", runId: "runId", digest: "digest" },
+      "summary.review_checklist": { count: "count" },
+      "summary.next_review": { form: "text", runId: "runId" },
+      "summary.apply_actions": { applied: "count", total: "count" },
+      "summary.apply_plan_run": { runId: "runId" },
+      "progress.apply_started": { actions: "count", approval: "text" },
+      "progress.plan_checked": { count: "count" },
+      "progress.plan_item_problem": { number: "count", problem: "text" },
+      "progress.inventory_limit": {},
+      "progress.file_moved": { number: "count" },
+      "progress.file_discarded": { number: "count" },
+      "progress.plan_item_failed": { number: "count", problem: "text" },
+    };
+    for (const [id, params] of Object.entries(expected)) {
+      assert.ok(ids.has(id), id);
+      assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], params, id);
+    }
   });
 
   test("every revert action has its fixed message without parameters", () => {

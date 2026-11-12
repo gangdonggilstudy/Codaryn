@@ -470,6 +470,11 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 경로 토큰 복원, 계획 동작 허용
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
+      - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).
+        - 기본 주소를 적기만 한 변경이나, 최상위 주소를 같은 값 그대로 `providers.anthropic`으로 옮긴 변경은 넓히기가 아니다.
+        - `providers.anthropic`이 있으면 실행이 최상위 주소를 읽지 않으므로 그것만 바꾼 변경도 아니다.
+        - 환경 변수의 주소는 설정 파일 밖이다(R-27 I3).
+      - 프로필의 제공자(SP-D10)가 그 프로필의 간편 실행을 다른 제공자로 보내면 `provider_changed`(`profiles.<이름>.provider`)도 준다(R-27 I4).
     - 작업 종류 자기 규칙의 대체(GUI F-5)
       - 간편 형식에서 작업 종류의 `policy`·`verifiers`는 설정에 그것이 없을 때만 쓰인다(CLI `underDefinition`).
       - 그래서 설정의 `policy`나 `verifiers`가 처음 생기거나 없어지면, 자기 규칙을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)의 규칙을 그 실행이 보는 대로 전과 후로 비교한다.

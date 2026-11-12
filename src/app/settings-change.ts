@@ -19,8 +19,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { API_PROVIDER_NAMES } from "../contracts/index.js";
-import type { CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
+import { API_PROVIDERS, API_PROVIDER_NAMES } from "../contracts/index.js";
+import type { ApiProviderName, CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
 import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
@@ -56,6 +56,11 @@ function raised(before: number | null | undefined, after: number | null | undefi
   if (after === undefined) return true;
   if (before === null) return false;
   return after === null || after > before;
+}
+
+/** The address a run of `provider` sends to with this config (environment variables aside). */
+function addressOf(config: CodarynConfig, provider: ApiProviderName): string {
+  return providerSettingsOf(config, provider).apiBaseUrl ?? API_PROVIDERS[provider].defaultApiBaseUrl;
 }
 
 type PolicyRules = CodarynConfig["policy"];
@@ -161,18 +166,29 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   for (const action of after.policy?.planActions ?? []) {
     if (!oldActions.has(action)) found.push({ kind: "plan_action_allowed", field: "policy.planActions" });
   }
-  if (!same(before.apiBaseUrl, after.apiBaseUrl)) found.push({ kind: "api_base_url_changed", field: "apiBaseUrl" });
-  // GUI F-3: where the workspace's text and a provider's key go. Each API provider's address as a
-  // run reads it (top-level apiBaseUrl, or providers.<name>.apiBaseUrl), and the provider a quick
-  // run uses (the config's `provider`, else anthropic), with the CLI's own rules.
+  // GUI F-3, review R-27 I1: where the workspace's text and a provider's key go, as a run reads it
+  // (src/cli/settings.ts resolveConnection): each API provider's address in the config (top-level
+  // apiBaseUrl, or providers.<name>.apiBaseUrl when that entry is there), else its default. The
+  // same address written another way is not a widening. Addresses from environment variables are
+  // not in the config file (R-27 I3). Then the provider a quick run uses (the config's `provider`,
+  // else anthropic), with the CLI's own rules.
   for (const provider of API_PROVIDER_NAMES) {
-    if (!same(providerSettingsOf(before, provider).apiBaseUrl, providerSettingsOf(after, provider).apiBaseUrl)) {
+    if (addressOf(before, provider) !== addressOf(after, provider)) {
       const holder = providerSettingsOf(after, provider).apiBaseUrl !== undefined ? after : before;
       found.push({ kind: "api_base_url_changed", field: configFieldOf(holder, provider, "apiBaseUrl") });
     }
   }
   if (quickProvider(before) !== quickProvider(after)) found.push({ kind: "provider_changed", field: "provider" });
   if (!same(before.profiles, after.profiles)) found.push({ kind: "profile_changed", field: "profiles" });
+  // Review R-27 I4: a profile's own provider wins for its quick runs (SP-D10), so a profile that now
+  // sends them to another provider says so, besides profile_changed.
+  for (const [name, profile] of Object.entries(after.profiles ?? {})) {
+    const old = before.profiles?.[name];
+    if (profile.provider === undefined && old?.provider === undefined) continue;
+    const was = old?.provider ?? quickProvider(before);
+    const is = profile.provider ?? quickProvider(after);
+    if (was !== is) found.push({ kind: "provider_changed", field: `profiles.${name}.provider` });
+  }
   if (!same(before.workflows, after.workflows)) found.push({ kind: "workflow_changed", field: "workflows" });
   found.push(...workflowRulesWidening(before, after));
   // One entry per kind and field.

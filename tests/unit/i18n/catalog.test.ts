@@ -220,6 +220,15 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("the cleanup headings state what a confirmation removes; they do not ask (R-34 I-2)", () => {
+    // The CLI prints them in a preview that asks nothing (the person confirms with --confirm), and
+    // the GUI shows them above its own buttons: a question would wait for an answer that never comes.
+    for (const id of ["cleanup.confirm.runs", "cleanup.confirm.discarded"] as const) {
+      assert.ok(!MESSAGE_TEXTS.en[id].includes("?"), `en ${id}`);
+      assert.ok(!/까요|습니까|\?/.test(MESSAGE_TEXTS.ko[id]), `ko ${id}`);
+    }
+  });
+
   test("the revert preview's next line says to revert, not to apply (catalog review, docs/usage.md bf4cb53)", () => {
     // `apply` is a command of its own; the English line matches docs/usage.md, which n01 compares.
     assert.equal(MESSAGE_TEXTS.en["revert.dry_run_next"], "Run again without --dry-run to revert.");

@@ -550,6 +550,13 @@ export interface ChangesOutput {
    * the apply has no result yet (the number of actions is not known then).
    */
   readonly applyRun?: ChangesApplyRun;
+  /**
+   * U-43 (DR-38): the run has a records-changed mark (contracts/state.ts), judged by the store's
+   * hasRecordsChangedMark as `report` and `revert` judge it; a mark that cannot be checked counts.
+   * Such a run has no text of its files (the store gives no `shown` record), only paths and states.
+   * Absent: no mark.
+   */
+  readonly recordsChanged?: true;
 }
 
 /** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */

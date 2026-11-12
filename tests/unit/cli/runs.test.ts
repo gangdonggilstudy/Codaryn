@@ -249,6 +249,7 @@ describe("listRuns (N-7, N-16)", () => {
     assert.deepEqual(checked(listing.runs[0]), {
       state: "checked",
       runId: "20260102T030405Z-aaaaaaaa",
+      kind: "run",
       startedAt: "2026-01-02T03:04:05.900Z",
       taskId: "hand-task",
       status: "done",
@@ -268,6 +269,7 @@ describe("listRuns (N-7, N-16)", () => {
       {
         state: "checked",
         runId: "20260102T030405Z-aaaaaaaa",
+        kind: "run",
         startedAt: "2026-01-02T03:04:05.000Z",
         taskId: "hand-task",
         status: null,

@@ -10,7 +10,7 @@ import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JOURNAL_FILE_NAME, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { ApplyJournal, ApplyJournalEvent, Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
+import type { ApplyJournal, ApplyJournalEntry, Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
 import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 
 export { RevertRunError, createChangeRecorder, readRunOriginals, revertRun, snapshotsRelativePath } from "./changes.js";
@@ -52,7 +52,7 @@ export function createJournal(options: JournalOptions): Journal {
  * `apply_started`, which is how readers tell an apply run from a model run.
  */
 export function createApplyJournal(options: JournalOptions): ApplyJournal {
-  return appendOnlyJournal<ApplyJournalEvent>(options);
+  return appendOnlyJournal<ApplyJournalEntry>(options);
 }
 
 function appendOnlyJournal<E extends { readonly type: string }>(options: JournalOptions): { append(event: E): Promise<void>; close(): Promise<void> } {

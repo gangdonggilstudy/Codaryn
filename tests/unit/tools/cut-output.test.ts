@@ -33,21 +33,9 @@ const REST = SECRET.slice(10);
 const MULTI = "fakeML-first-part\nfakeML-second-part";
 
 const dirs: string[] = [];
-const pidFiles: string[] = [];
+// No process is ended here by its pid (N-28): the background writers end by themselves, and a pid
+// freed by then may belong to another test's process, even one in another worktree.
 after(() => {
-  for (const file of pidFiles) {
-    if (!fs.existsSync(file)) continue;
-    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-      const pid = Number(line.trim());
-      if (Number.isInteger(pid) && pid > 0) {
-        try {
-          process.kill(pid);
-        } catch {
-          // Already gone.
-        }
-      }
-    }
-  }
   for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -86,11 +74,14 @@ async function waitFor(file: string): Promise<void> {
  * Review repro 1 (T-2 grace): the command prints a whole line and exits. A detached background
  * process that inherited stdout writes `bg log: token=<first half>`, and the rest 1.4 s later,
  * after the grace. The command waits until the first half is in the pipe before it exits.
+ *
+ * N-28: the command starts the writer only once its own line is written (the write's callback), so
+ * the writer's half line always comes after it. Before, a stall between starting the writer and
+ * that write (40 ms was enough) put the half line first and made one line of both. The writer ends
+ * by itself 3 s after it starts; nothing ends it by its pid.
  */
 function writeSplitWriter(ws: string): string {
   const marker = path.join(ws, "half-written");
-  const pids = path.join(ws, "bg.pids");
-  pidFiles.push(pids);
   const body = [
     `process.stdout.write(${JSON.stringify(`bg log: token=${HALF}`)}, () => require("node:fs").writeFileSync(${JSON.stringify(marker)}, ""));`,
     `setTimeout(() => process.stdout.write(${JSON.stringify(`${REST}\n`)}), 1400);`,
@@ -102,14 +93,14 @@ function writeSplitWriter(ws: string): string {
     [
       'const { spawn } = require("node:child_process");',
       'const fs = require("node:fs");',
-      `const child = spawn(process.execPath, ["-e", ${JSON.stringify(body)}], { detached: true, stdio: ["ignore", "inherit", "ignore"], cwd: require("node:os").tmpdir() });`,
-      `fs.appendFileSync(${JSON.stringify(pids)}, String(child.pid) + "\\n");`,
-      "child.unref();",
-      'process.stdout.write("started background writer\\n");',
       'process.stderr.write("parent-stderr\\n");',
-      "const deadline = Date.now() + 10000;",
-      `while (!fs.existsSync(${JSON.stringify(marker)}) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);`,
-      "process.exit(0);",
+      'process.stdout.write("started background writer\\n", () => {',
+      `  const child = spawn(process.execPath, ["-e", ${JSON.stringify(body)}], { detached: true, stdio: ["ignore", "inherit", "ignore"], cwd: require("node:os").tmpdir() });`,
+      "  child.unref();",
+      "  const deadline = Date.now() + 10000;",
+      `  while (!fs.existsSync(${JSON.stringify(marker)}) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);`,
+      "  process.exit(0);",
+      "});",
     ].join("\n"),
   );
   return script;

@@ -33,42 +33,30 @@ const parentEnv = (extra: Record<string, string> = {}) => ({
 });
 const live = () => new AbortController().signal;
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function cleanup(pid: number | null): void {
-  if (pid !== null && alive(pid)) process.kill(pid);
-}
-
 /**
- * Node starts a detached background node that inherits the output pipes, prints its pid and
- * exits with 3 right away. The background process writes "early;" after 100 ms and "late;"
- * after 1500 ms, then waits 20 s. Every write is a whole line: a stream that is not read to its
- * end loses its unfinished last line (V-2).
+ * Node prints "started;" and, once that line is written, starts a detached background node that
+ * inherits the output pipes, then exits with 3 right away. The background process writes "early;"
+ * after 100 ms and "late;" after 1500 ms, and ends by itself after 4 s. Every write is a whole
+ * line: a stream that is not read to its end loses its unfinished last line (V-2).
+ *
+ * N-28: the test ends no process by its pid. The background process has no handle here, so it is
+ * short-lived instead: 4 s still outlasts every time limit below (at most 2 s) and the 500 ms grace,
+ * so it holds the pipes for as long as each test needs. Starting it only after the command's own
+ * line is written keeps "started;" first under any load.
  */
 function backgroundRequest(cwdAbsolute: string, timeoutMs: number, exitMarker?: string): CommandRunRequest {
-  const body = "setTimeout(() => process.stdout.write('early;\\n'), 100); setTimeout(() => process.stdout.write('late;\\n'), 1500); setTimeout(() => {}, 20000);";
+  const body = "setTimeout(() => process.stdout.write('early;\\n'), 100); setTimeout(() => process.stdout.write('late;\\n'), 1500); setTimeout(() => {}, 4000);";
   const script = [
     "const { spawn } = require('node:child_process');",
-    `const c = spawn(process.execPath, ['-e', ${JSON.stringify(body)}], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });`,
-    "c.unref();",
-    "process.stdout.write('bg ' + c.pid + ';\\n');",
+    "process.stdout.write('started;\\n', () => {",
+    // Its working directory is outside the workspace, which the after hook removes while it may still run.
+    `  spawn(process.execPath, ['-e', ${JSON.stringify(body)}], { stdio: ['ignore', 'inherit', 'inherit'], detached: true, cwd: require('node:os').tmpdir() }).unref();`,
     // Optional: tells the test that the command is about to exit.
-    ...(exitMarker === undefined ? [] : [`require('node:fs').writeFileSync(${JSON.stringify(exitMarker)}, '');`]),
-    "process.exit(3);",
+    ...(exitMarker === undefined ? [] : [`  require('node:fs').writeFileSync(${JSON.stringify(exitMarker)}, '');`]),
+    "  process.exit(3);",
+    "});",
   ].join("\n");
   return { executable: process.execPath, args: ["-e", script], cwdAbsolute, timeoutMs };
-}
-
-function backgroundPid(stdout: string): number | null {
-  const match = /bg (\d+);/.exec(stdout);
-  return match === null ? null : Number(match[1]);
 }
 
 test("T-2: a command that exits while a background descendant holds the pipes is settled at its exit, not as a timeout", async () => {
@@ -78,14 +66,11 @@ test("T-2: a command that exits while a background descendant holds the pipes is
   const result = await runner.run(backgroundRequest(ws, 2_000), live());
   const elapsed = Date.now() - started;
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-  const pid = backgroundPid(result.stdout);
-  try {
-    assert.equal(result.exitCode, 3);
-    assert.equal(result.timedOut, false);
-    assert.ok(elapsed < 1_900, `settled after ${elapsed} ms, before the 2000 ms limit`);
-  } finally {
-    cleanup(pid);
-  }
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.timedOut, false);
+  // The background process lives 4 s from a start after this run's start, so it still held the
+  // pipes when the run settled.
+  assert.ok(elapsed < 1_900, `settled after ${elapsed} ms, before the 2000 ms limit`);
 });
 
 test("T-2: output in flight right after the exit is kept for a short grace; later output is not waited for", async () => {
@@ -93,13 +78,8 @@ test("T-2: output in flight right after the exit is kept for a short grace; late
   const runner = createCommandRunner({ parentEnv: parentEnv(), workspaceRoot: ws });
   const result = await runner.run(backgroundRequest(ws, 10_000), live());
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-  const pid = backgroundPid(result.stdout);
-  try {
-    assert.match(result.stdout, /^bg \d+;\nearly;\n$/);
-    assert.equal(result.exitCode, 3);
-  } finally {
-    cleanup(pid);
-  }
+  assert.equal(result.stdout, "started;\nearly;\n");
+  assert.equal(result.exitCode, 3);
 });
 
 test("T-2: a command still running at its time limit is ended and reported as timed out", async () => {
@@ -135,18 +115,13 @@ test("T-2: cancelling after the command exited returns at once with its exit cod
   controller.abort();
   const result = await running;
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-  const pid = backgroundPid(result.stdout);
-  try {
-    assert.ok(Date.now() - abortedAt < 400, "no kill and no close wait after the exit");
-    assert.equal(result.exitCode, 3, "the exit code stays final: nothing was stopped");
-    assert.equal(result.timedOut, false);
-    // V-2 (revised): closing the pipes early drops only an unfinished last line; whole lines stay
-    // and `truncated` keeps meaning the capture cap.
-    assert.equal(result.truncated, false);
-    assert.match(result.stdout, /^bg \d+;\n/);
-  } finally {
-    cleanup(pid);
-  }
+  assert.ok(Date.now() - abortedAt < 400, "no kill and no close wait after the exit");
+  assert.equal(result.exitCode, 3, "the exit code stays final: nothing was stopped");
+  assert.equal(result.timedOut, false);
+  // V-2 (revised): closing the pipes early drops only an unfinished last line; whole lines stay
+  // and `truncated` keeps meaning the capture cap.
+  assert.equal(result.truncated, false);
+  assert.match(result.stdout, /^started;\n/);
 });
 
 test("T-2: a time limit that falls in the grace after the exit does not turn the run into a timeout", async () => {
@@ -155,13 +130,8 @@ test("T-2: a time limit that falls in the grace after the exit does not turn the
   // The command exits within about 100 ms; the limit comes during the 500 ms grace that follows.
   const result = await runner.run(backgroundRequest(ws, 450), live());
   assert.ok(!("spawnFailed" in result), JSON.stringify(result));
-  const pid = backgroundPid(result.stdout);
-  try {
-    assert.equal(result.timedOut, false);
-    assert.equal(result.exitCode, 3);
-  } finally {
-    cleanup(pid);
-  }
+  assert.equal(result.timedOut, false);
+  assert.equal(result.exitCode, 3);
 });
 
 // ---- The exported way to build the runner for a run (used by the CLI assembly, T-1) ----

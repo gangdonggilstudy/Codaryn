@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
-import type { ApplyResult, EngineResult } from "../../../src/contracts/index.js";
+import type { ApplyCleanup, ApplyResult, EngineResult } from "../../../src/contracts/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { itemName, runCleanup } from "../../../src/cli/cleanup.js";
 import type { CleanupOutput } from "../../../src/cli/cleanup.js";
@@ -138,5 +138,67 @@ describe("U-13 (UXM-1): an apply's records are not removed while its discarded f
     assert.ok(shown.output?.mode === "preview");
     const item = shown.output.plan.items.find((entry) => entry.target === "run" && itemName(entry) === applyRunId);
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(shown.output.plan.items));
+  });
+});
+
+/**
+ * The CLI's part, over the store's answer as the contract (96c6ca9) gives it for UXM-1's procedure:
+ * the kept apply is the person's choice (the folder's removal was not confirmed), so the command
+ * ends 0; the outcome counts the kept applies and each kept item says why; the preview tells
+ * beforehand that such an apply's records stay without --delete-discarded.
+ */
+describe("U-13 (UXM-1), the CLI over the contract's answer", () => {
+  const TOTALS = { runs: { count: 1, files: 1, bytes: 10 }, discarded: { count: 0, files: 0, bytes: 0 } };
+  async function confirmed(json: boolean): Promise<{ text: string; exitCode: number; ids: { planRunId: string; applyRunId: string; otherRunId: string } }> {
+    const { base, planRunId, applyRunId, otherRunId } = await appliedNotReverted();
+    const digest = await digestOf(base);
+    const applyCleanup = (async () => ({
+      ok: true,
+      removed: [{ target: "run", runId: otherRunId, size: { files: 1, bytes: 10 } }],
+      kept: [
+        { target: "run", runId: applyRunId, reason: "discarded_left" },
+        { target: "run", runId: planRunId, reason: "used_by_kept_apply" },
+        { target: "discarded", runId: applyRunId, reason: "not_confirmed" },
+      ],
+      totals: TOTALS,
+    })) as unknown as ApplyCleanup;
+    const outcome = await runCleanup({
+      argv: ["cleanup", "--workspace", "work", ...SELECT, "--confirm", digest, "--include-not-reverted", ...(json ? ["--json"] : [])],
+      cwd: base,
+      env: {},
+      clock,
+      messages: createMessageCatalog("en"),
+      applyCleanup,
+    });
+    assert.ok("text" in outcome, JSON.stringify(outcome));
+    return { text: outcome.text, exitCode: outcome.exitCode, ids: { planRunId, applyRunId, otherRunId } };
+  }
+
+  test("an apply kept as discarded_left is the person's choice: exit 0, the reasons as the store gave them", async () => {
+    const done = await confirmed(true);
+    assert.equal(done.exitCode, 0, done.text);
+    const output = JSON.parse(done.text) as CleanupOutput;
+    assert.ok(output.mode === "applied");
+    assert.deepEqual(output.outcome.kept.map((item) => item.reason), ["discarded_left", "used_by_kept_apply", "not_confirmed"]);
+  });
+
+  test("the person's outcome counts the applies kept for their discarded files and names the run", async () => {
+    const done = await confirmed(false);
+    const lines = done.text.split("\n");
+    assert.ok(lines[0]?.startsWith("Removed: run records 1"), done.text);
+    assert.ok(/1/.test(lines[1] ?? "") && /discarded/i.test(lines[1] ?? "") && !(lines[1] ?? "").startsWith("- "), done.text);
+    assert.ok(lines.some((line) => line.startsWith(`- run ${done.ids.applyRunId}: `)), done.text);
+  });
+
+  test("the preview says beforehand that the apply's records stay without --delete-discarded", async () => {
+    const { base } = await appliedNotReverted();
+    const text = (await cleanup(base, SELECT, false)).text;
+    assert.ok(text.includes("The records of 1 apply run(s) whose discarded files are still kept stay unless"), text);
+  });
+
+  test("a plan without such an apply has no such line (the preview is as before)", async () => {
+    const { base, otherRunId } = await appliedNotReverted();
+    const text = (await cleanup(base, ["--run", otherRunId], false)).text;
+    assert.equal(text.includes("apply run(s)"), false, text);
   });
 });

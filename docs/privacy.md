@@ -129,8 +129,12 @@
 - 가림에는 시간 제한이 없다. 동기 계산이다.
 
 가림 개수(DR-52, U-25). **구현**
-- 실행의 결과(`run`의 stdout JSON과 `result.json`)에 `masking: {registeredValues, maskedPlaces}`가 실린다. 둘 다 정수다. `report --json`의 `result`에도 같은 값이 있고, 사람용 끝 요약에 한 줄로 나온다(사용 안내 8절 "가림 개수"). 값, 위치, 길이, 해시는 싣지 않는다.
-- 없는 곳: journal(`run_finished` 포함), `report`의 Markdown 본문, 진행 줄. 모델은 개수를 볼 수 없다. 개수는 실행 끝에 결과를 지을 때만 넣는다(`src/engine/index.ts`). GUI 화면도 이 개수를 보이지 않는다(코드 확인. GUI는 띄우지 않았다).
+- 실행의 결과(`run`의 stdout JSON과 `result.json`)에 `masking: {registeredValues, maskedPlaces}`가 실린다. stdout JSON 줄은 콘솔(stdout과 stderr가 둘 다 터미널)에서는 `--json`이나 `--quiet`일 때만 나온다(사용 안내 10절 "터미널에서"). 둘 다 정수다. `report --json`의 `result`에도 같은 값이 있고, 사람용 끝 요약에 한 줄로 나온다(사용 안내 8절 "가림 개수"). 값, 위치, 길이, 해시는 싣지 않는다.
+- 없는 곳: journal(`run_finished` 포함), `report`의 Markdown 본문, 진행 줄. 모델은 개수를 볼 수 없다. 개수는 실행 끝에 결과를 지을 때만 넣는다(`src/engine/index.ts`).
+- GUI(U-40): 실행 끝 화면과 보고서의 사용량 탭에, 사용량 다음에 두 개수를 한 줄로 보인다. 등록 값이 없으면 줄이 없다.
+  - 글(`run.masking`)은 CLI 끝 요약의 `summary.masking`과 두 언어 모두 같다.
+  - 엔진 호스트와 주 프로세스가 결과에서 두 개수만 다시 짓는다(`gui/src/shared/ipc.ts`의 `maskingOf`). 덧붙은 필드나 개수가 아닌 값은 넘어가지 않는다.
+  - 근거: 코드(`gui/src/renderer/run/run-screen.ts`, `gui/src/renderer/report/report-screen.ts`)와 검토 R-63. R-63은 실제 앱의 연기 시험과 주입 실험을 했다. 이 문서 작성자는 GUI를 띄우지 않았다.
 - `registeredValues`: 3절로 모은 서로 다른 값의 수다. 가림 게이트가 줄바꿈의 CRLF를 LF로 바꾸어 같은 값을 하나로 센다. 3절이 이미 같은 값을 하나로 치므로 출처가 달라도 하나다. 변수 파일 값의 공백을 뺀 형태는 3절에서 따로 등록되므로 따로 센다. 등록한 값이 없으면 필드가 없다.
 - `maskedPlaces`: 엔진이 모델에 보낸 글(시스템 글, 작업 메시지, 도구 결과, 재수정 메시지)에 든 토큰의 수다(`countPrivacyTokens`).
   - 글마다 처음 보낼 때 한 번 센다. 모델이 보낸 글은 세지 않는다.
@@ -139,7 +143,7 @@
 - 알리는 것과 한계: 13절(사용자 결정 DR-54, 보안 검토 R-57 L-1~L-3).
 - 확인(main `0ad28bc`의 실제 CLI, 대본 모델, 임시 폴더, 합성 값):
   - 설정: `secretEnv`에 4자 값 하나를 등록하고, 모델이 작업 공간 파일을 읽은 뒤 끝냈다.
-  - 어느 경우든 stdout JSON, `result.json`, `report --json`의 `result`가 같은 두 개수였다.
+  - 어느 경우든 stdout JSON(파이프로 받음), `result.json`, `report --json`의 `result`가 같은 두 개수였다.
   - 끝 요약 줄은 영어·한국어로 그 개수를 보였다(`--quiet`와 등록 값이 없는 경우는 줄이 없다).
   - 4자 값은 stdout, stderr, 보고서 본문 어디에도 없었고, 그 값을 등록한 실행의 journal에도 없었다. journal과 보고서 본문에는 가림 개수가 없었다.
 

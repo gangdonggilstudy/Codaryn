@@ -12,6 +12,7 @@ import { after, describe, test } from "node:test";
 
 import type { ContentHash, ResolvedPlanAction } from "../../../src/contracts/index.js";
 import { createPlanRecorder, loadPlan, markPlanApplied } from "../../../src/store/index.js";
+import { createExclusive } from "../../../src/store/common.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -97,6 +98,40 @@ describe("createPlanRecorder (G-E, DR-5)", () => {
       const root = await workspace();
       await assert.rejects(createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(actions as ResolvedPlanAction[]), TypeError, JSON.stringify(actions));
       assert.equal(await exists(join(runDir(root), "plan.json")), false);
+    }
+  });
+});
+
+describe("exclusive creation without hard links (DR-24 c)", () => {
+  test("falls back to an exclusive create where links are not supported, and still creates once", async () => {
+    const root = await workspace();
+    const target = join(root, "applied.json");
+    for (const code of ["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]) {
+      await rm(target, { force: true });
+      const unsupported = {
+        link: async () => {
+          throw Object.assign(new Error(code), { code });
+        },
+      };
+      assert.equal(await createExclusive(target, "first\n", unsupported), true, code);
+      assert.equal(await createExclusive(target, "second\n", unsupported), false, `${code}: exists`);
+      assert.equal(await readFile(target, "utf8"), "first\n");
+    }
+    assert.deepEqual((await readdir(root)).sort(), ["applied.json"], "no temporary file is left");
+  });
+});
+
+describe("stored paths follow the workspace's path rules (DR-24 d)", () => {
+  test("names Windows would open as something else are refused when stored and when loaded", { skip: process.platform !== "win32" }, async () => {
+    for (const path of [".codaryn./x", ".codaryn /x", "a.txt:hidden", "NUL", "dir/con.txt"]) {
+      const root = await workspace();
+      const actions = [{ kind: "discard", path, sha256: HASH_A }] as ResolvedPlanAction[];
+      await assert.rejects(createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(actions), TypeError, path);
+      const text = `${JSON.stringify({ schemaVersion: 1, kind: "plan", runId: PLAN_RUN, actions })}\n`;
+      await planRun(root, sha(text));
+      await writeFile(join(runDir(root), "plan.json"), text, "utf8");
+      const outcome = await loadPlan({ workspaceRoot: root, runId: PLAN_RUN });
+      assert.deepEqual(outcome, { ok: false, code: "invalid_run_record" }, path);
     }
   });
 });

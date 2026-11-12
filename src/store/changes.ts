@@ -281,6 +281,15 @@ type Snapshots =
 
 async function loadSnapshots(dir: string): Promise<Snapshots> {
   try {
+    // DR-24 (e): a link in place of the snapshots directory is never read through.
+    try {
+      await lstat(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "ENOENT" || code === "ENOTDIR") return { kind: "missing" };
+      return { kind: "unreadable" };
+    }
+    if (!(await isPlainDirectory(dir))) return { kind: "unreadable" };
     const found = await readIndex(dir);
     if (found === "missing") return { kind: "missing" };
     if (found === "invalid") return { kind: "unreadable" };

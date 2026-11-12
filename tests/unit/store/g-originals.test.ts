@@ -101,6 +101,21 @@ describe("readRunOriginals (DR-14)", () => {
     );
   });
 
+  test("DR-24 (e): a snapshots directory that is a link is not read through", async () => {
+    const root = await workspace();
+    await startedRun(root);
+    const outside = await workspace();
+    await writeFile(join(outside, "1.orig"), "OUTSIDE FILE CONTENT", "utf8");
+    await writeFile(join(outside, "index.json"), JSON.stringify({ schemaVersion: 1, entries: [{ path: "doc.txt", existed: true, file: "1.orig" }] }), "utf8");
+    await symlink(outside, join(root, ".codaryn", "runs", RUN, "snapshots"), "junction");
+    const journal = createJournal({ workspaceRoot: root, runId: RUN, clock });
+    await journal.append({ type: "file_changed", callId: "c", path: "doc.txt" as MaskedText, previousHash: sha("OUTSIDE FILE CONTENT"), newHash: sha("now\n"), created: false });
+    await journal.close();
+    const originals = await readRunOriginals({ workspaceRoot: root, runId: RUN });
+    assert.deepEqual(originals.map((entry) => entry.original), [{ unavailable: "unreadable" }]);
+    assert.equal(JSON.stringify(originals).includes("OUTSIDE"), false);
+  });
+
   test("a missing run, a broken journal and a linked run directory reject like revertRun; an apply run has no originals", async () => {
     await assert.rejects(readRunOriginals({ workspaceRoot: await workspace(), runId: RUN }), (error: unknown) => error instanceof RevertRunError && error.code === "run_not_found");
 

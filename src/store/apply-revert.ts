@@ -11,15 +11,18 @@
  *   a privacy token with no stored plan to find the file by (`missing_snapshot`), a read or write
  *   failure (`io_error`).
  * - Real paths: the records hold masked paths. The plan run's plan.json holds the resolved ones, so
- *   an action's paths are taken from it by index when its kind and hash match the record; otherwise
- *   the record's own path is used when it holds no token.
+ *   an action's paths are taken from it by index when its bytes have the approved digest
+ *   (apply_started) and the action's kind and hash match the record (DR-24 f); otherwise the
+ *   record's own path is used when it holds no token.
+ * - A move is a hard link and the source's removal; where links cannot be made the item is skipped
+ *   as io_error, never renamed (DR-24 b).
  * - A record that does not belong to the run, or names a stored file outside the run's discarded
  *   directory, rejects with RevertRunError before anything is changed.
  */
 
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
-import { link, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -39,8 +42,8 @@ import { canonicalActions, isWorkspaceRelativePath } from "./plan.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 const TOKEN_FRAGMENT = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
-/** A stored name inside the discarded directory: plain segments only (the executor builds it from the index). */
-const STORED_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** A stored name inside the discarded directory: the action index in decimal digits. */
+const STORED_INDEX = /^(0|[1-9][0-9]{0,8})$/;
 
 type Item =
   | { readonly kind: "move"; readonly index: number; readonly from: string; readonly to: string; readonly sha256: ContentHash }
@@ -71,10 +74,14 @@ function text(value: unknown): string {
   return typeof value === "string" && value.length > 0 ? value : bad();
 }
 
-function stored(value: unknown): string {
+/**
+ * DR-24 (a): a discarded file's stored name is its action index (`PlanExecutor.apply` builds it so),
+ * one segment directly in the run's discarded directory. Anything else, a path through a link
+ * included, makes the record invalid.
+ */
+function stored(value: unknown, actionIndex: number): string {
   const name = text(value);
-  const segments = name.split("/");
-  return segments.length <= 8 && segments.every((segment) => STORED_SEGMENT.test(segment) && segment !== "..") ? name : bad();
+  return STORED_INDEX.test(name) && name === String(actionIndex) ? name : bad();
 }
 
 /** Whether the journal's first complete record is this run's `apply_started` (DR-12). */
@@ -90,7 +97,7 @@ export function isApplyJournal(journal: string, runId: string): boolean {
 }
 
 /** The plan run's id and the done actions, in journal order. A cut-off last line is ignored (T-10). */
-function applyRecords(journal: string, runId: string): { readonly planRunId: string; readonly items: Item[] } {
+function applyRecords(journal: string, runId: string): { readonly planRunId: string; readonly digest: ContentHash; readonly items: Item[] } {
   const lines = journal.split("\n");
   const last = lines.pop() ?? "";
   const records: Obj[] = [];
@@ -121,21 +128,27 @@ function applyRecords(journal: string, runId: string): { readonly planRunId: str
     if (record["type"] === "file_moved") {
       items.push({ kind: "move", index: index(record["index"]), from: text(record["from"]), to: text(record["to"]), sha256: hash(record["sha256"]) });
     } else if (record["type"] === "file_discarded") {
-      items.push({ kind: "discard", index: index(record["index"]), path: text(record["path"]), stored: stored(record["stored"]), sha256: hash(record["sha256"]) });
+      const at = index(record["index"]);
+      items.push({ kind: "discard", index: at, path: text(record["path"]), stored: stored(record["stored"], at), sha256: hash(record["sha256"]) });
     }
   }
-  return { planRunId: planRunId as string, items };
+  return { planRunId: planRunId as string, digest: hash(first["digest"]), items };
 }
 
-/** The plan run's resolved actions, or null when its plan.json cannot be read or is not a plan of that run. */
-async function planActions(workspaceRoot: string, planRunId: string): Promise<readonly ResolvedPlanAction[] | null> {
+/**
+ * The plan run's resolved actions, or null when its plan.json cannot be read, is not a plan of that
+ * run, or its bytes do not have the digest the apply recorded as approved (DR-24 f).
+ */
+async function planActions(workspaceRoot: string, planRunId: string, digest: ContentHash): Promise<readonly ResolvedPlanAction[] | null> {
   const dir = runDir(workspaceRoot, planRunId);
   if (!(await isPlainDirectory(join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME))) || !(await isPlainDirectory(dir))) return null;
   try {
     const file = join(dir, PLAN_FILE_NAME);
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) return null;
-    const value: unknown = JSON.parse(await readFile(file, "utf8"));
+    const bytes = await readFile(file);
+    if (createHash("sha256").update(bytes).digest("hex") !== digest) return null;
+    const value: unknown = JSON.parse(bytes.toString("utf8"));
     if (!isObj(value) || value["kind"] !== "plan" || value["runId"] !== planRunId) return null;
     return canonicalActions(value["actions"]);
   } catch {
@@ -182,25 +195,24 @@ async function stateOf(file: string): Promise<FileState> {
  * fails when `target` exists) and then the source's removal. Where links are not supported it
  * checks `target` again right before a rename.
  */
-async function moveWithoutReplacing(source: string, target: string): Promise<"moved" | "taken" | "failed"> {
+/** The file operations a move uses; tests replace single ones to inject failures. */
+export interface MoveOperations {
+  readonly link?: (existing: string, created: string) => Promise<void>;
+}
+
+export async function moveWithoutReplacing(source: string, target: string, operations: MoveOperations = {}): Promise<"moved" | "taken" | "failed"> {
+  const linkFile = operations.link ?? link;
   try {
     await mkdir(dirname(target), { recursive: true });
   } catch {
     return "failed";
   }
   try {
-    await link(source, target);
+    await linkFile(source, target);
   } catch (error) {
-    const code = errorCode(error);
-    if (code === "EEXIST") return "taken";
-    if (code !== "EPERM" && code !== "EXDEV" && code !== "ENOTSUP" && code !== "EOPNOTSUPP" && code !== "ENOSYS" && code !== "EMLINK") return "failed";
-    if ((await stateOf(target)).kind !== "absent") return "taken";
-    try {
-      await rename(source, target);
-      return "moved";
-    } catch {
-      return "failed";
-    }
+    // DR-24 (b), DR-18 (b), DR-21: without a hard link there is no move that cannot replace
+    // something, so the move stops (io_error) instead of checking and renaming.
+    return errorCode(error) === "EEXIST" ? "taken" : "failed";
   }
   try {
     await rm(source);
@@ -267,12 +279,12 @@ async function revertDiscard(
  * Rejects with ApplyRecordError before anything is changed when a record fails its checks.
  */
 export async function revertApplyRun(workspaceRoot: string, runId: string, journal: string, dryRun: boolean): Promise<RevertOutcome> {
-  const { planRunId, items } = applyRecords(journal, runId);
+  const { planRunId, digest, items } = applyRecords(journal, runId);
   const reverted: RevertedFile[] = [];
   const skipped: SkippedFile[] = [];
   if (items.length === 0) return { reverted, skipped };
 
-  const plan = await planActions(workspaceRoot, planRunId);
+  const plan = await planActions(workspaceRoot, planRunId, digest);
   let workspace: Workspace | null;
   try {
     workspace = await createWorkspace({ root: workspaceRoot });

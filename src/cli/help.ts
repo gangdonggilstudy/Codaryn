@@ -1,6 +1,6 @@
 /**
  * `codaryn --help`, `codaryn help [command]`, `codaryn <command> --help` and `codaryn --version`
- * (U-7, N-21). Plain text on stdout, exit code 0. Nothing is read except package.json for the
+ * (U-7, N-21), and `codaryn` with no arguments at a terminal (DR-49). Plain text on stdout, exit code 0. Nothing is read except package.json for the
  * version. The usage lines (command syntax) stay English; every description comes from the
  * message catalog in the chosen language.
  */
@@ -22,7 +22,9 @@ const USAGE_ONLY = {
   plan: { usage: PLAN_USAGE, about: "Shows a plan run's stored plan, masked again, with its digest and whether it was applied." },
   apply: {
     usage: APPLY_USAGE,
-    about: "Applies a plan run's plan after the person approves its digest; `codaryn revert --run <apply run id>` undoes it.",
+    about:
+      "Applies a plan run's plan after the person approves its digest; `codaryn revert --run <apply run id>` undoes it. " +
+      "At a terminal the result's JSON line is printed only with --json (DR-49).",
   },
   review: { usage: REVIEW_USAGE, about: "Records a person's verdict on a run that waits for review (review.json); the run's result is not changed." },
   changes: {
@@ -76,10 +78,13 @@ const OPTION_SYNTAX: { readonly [O in HelpOption]: string } = {
   provider: "--provider <name>",
 };
 
-/** The options each command's help describes, in order. */
+/**
+ * The options each command's help describes, in order. DR-49 (U-23): `run` and `revert` list
+ * `--json` (their JSON line at a terminal), which their usage lines leave out (args.ts SWITCHES).
+ */
 export const COMMAND_OPTIONS: { readonly [C in HelpCommand]: readonly HelpOption[] } = {
-  run: ["task", "workspace", "goal", "config", "vars_file", "cancel_file", "quiet", "profile"],
-  revert: ["workspace", "run", "dry_run", "allow_unsafe_move", "quiet"],
+  run: ["task", "workspace", "goal", "config", "vars_file", "cancel_file", "quiet", "profile", "json"],
+  revert: ["workspace", "run", "dry_run", "allow_unsafe_move", "quiet", "json"],
   report: ["workspace", "run", "json"],
   doctor: ["config", "vars_file", "task", "workspace", "profile", "json"],
   models: ["provider", "config", "vars_file", "use", "json"],
@@ -131,8 +136,17 @@ export function versionText(version: string | null): string {
   return version === null ? "codaryn (version unknown)\n" : `codaryn ${version}\n`;
 }
 
-/** What the arguments ask for when it is help or the version; null for a normal command. */
-export function helpRequest(argv: readonly string[]): { kind: "help"; command: CommandName | null } | { kind: "version" } | null {
+/**
+ * What the arguments ask for when it is help or the version; null for a normal command.
+ * DR-49 (U-23, UXM-9, PM answer): `codaryn` alone at a terminal (`stdoutIsTerminal`) shows the help,
+ * as `--help` does. Otherwise (a pipe or a file, or no context given) it stays invalid_arguments as
+ * before: what a script reads is not changed (DR-48).
+ */
+export function helpRequest(
+  argv: readonly string[],
+  context: { readonly stdoutIsTerminal: boolean } = { stdoutIsTerminal: false },
+): { kind: "help"; command: CommandName | null } | { kind: "version" } | null {
+  if (argv.length === 0) return context.stdoutIsTerminal ? { kind: "help", command: null } : null;
   const [first, ...rest] = argv;
   if (first === "--version" || first === "-v" || first === "version") return rest.length === 0 ? { kind: "version" } : null;
   if (first === "--help" || first === "-h" || first === "help") {

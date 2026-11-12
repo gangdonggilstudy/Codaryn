@@ -18,7 +18,7 @@
  */
 
 import path from "node:path";
-import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
+import { CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   ApiProviderDeps,
@@ -67,13 +67,15 @@ import {
   goalHoldsKey,
   inputFileTooLarge,
   inputFileTooLargeMessage,
+  keyHintFor,
+  keyOwnerIn,
   rawTextHoldsKey,
   relateRealPaths,
   secretEnvNotSetMessage,
   selectEnvFileSecrets,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
+import { envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
@@ -327,7 +329,6 @@ function scrub(message: string, secrets: readonly string[]): string {
   return secrets.reduce((text, secret) => text.split(secret).join("[secret]"), message);
 }
 
-const KEY_HINT = `keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`;
 
 /** N-1: shown in the progress lines and the result's notices when the default location was used. */
 export function defaultConfigNotice(display: string): string {
@@ -465,7 +466,7 @@ export async function prepareTask(
   const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   if (!chosen.ok) return error("invalid_config", chosen.message);
   if (args.input.kind === "quick" && goalHoldsKey(args.input.goal, currentKey)) {
-    return error("key_in_file", `the goal contains a key value; ${KEY_HINT}`);
+    return error("key_in_file", `the goal contains a key value; ${keyHintFor(keyOwnerIn(args.input.goal, knownKeyEntries(io.env)))}`);
   }
 
   // 4. Read both files, then look for a key in each before anything else is judged (C-1, S-6).
@@ -502,7 +503,9 @@ export async function prepareTask(
     files.push({ label: "task file", path: taskPath, code: "invalid_task", text });
   }
   for (const file of files) {
-    if (rawTextHoldsKey(file.text, currentKey)) return error("key_in_file", `the ${file.label} contains a key value; ${KEY_HINT}`);
+    if (rawTextHoldsKey(file.text, currentKey)) {
+      return error("key_in_file", `the ${file.label} contains a key value; ${keyHintFor(keyOwnerIn(file.text, knownKeyEntries(io.env)))}`);
+    }
   }
   const fileKind = (code: "invalid_config" | "invalid_task"): InputDiagnosticFile => (code === "invalid_config" ? "config" : "task");
   for (const file of files) {
@@ -516,7 +519,8 @@ export async function prepareTask(
   for (const file of files) {
     const found = findKeyInJson(file.value, currentKey);
     if (found.kind === "key") {
-      return error("key_in_file", `the ${file.label} has a key field or key value at ${found.location}; ${KEY_HINT}`);
+      // A key field belongs to no provider; a key value found there names its owner.
+      return error("key_in_file", `the ${file.label} has a key field or key value at ${found.location}; ${keyHintFor(keyOwnerIn(file.text, knownKeyEntries(io.env)))}`);
     }
     if (found.kind === "too_deep") {
       return error(file.code, `the ${file.label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`, {

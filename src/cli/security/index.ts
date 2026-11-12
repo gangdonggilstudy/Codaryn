@@ -12,6 +12,8 @@ export {
   MAX_INPUT_FILE_BYTES,
   inputFileTooLarge,
   inputFileTooLargeMessage,
+  keyHintFor,
+  keyOwnerIn,
   MAX_KEY_SCAN_DEPTH,
   MIN_CURRENT_KEY_LENGTH,
   findKeyInJson,

@@ -4,7 +4,20 @@
  * A reported location holds known schema field names and indexes only, never other text.
  */
 
-import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, KEY_FIELD_NAMES, createKeyRefusalCheck } from "../../contracts/index.js";
+import {
+  ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE,
+  API_KEY_ENVS,
+  API_KEY_MASK_PATTERN_SOURCES,
+  KEY_FIELD_NAMES,
+  OPENAI_API_KEY_ENV,
+  anthropicRefusalShapeIn,
+  createKeyRefusalCheck,
+  createKeyValueCheck,
+  holdsRefusedKeyShape,
+  withoutInvisibleCharacters,
+} from "../../contracts/index.js";
+import type { ApiKeyEnv } from "../../contracts/index.js";
 
 /** Containers (objects and arrays) deeper than this are rejected as invalid input. */
 export const MAX_KEY_SCAN_DEPTH = 64;
@@ -79,6 +92,38 @@ function isPrintableKeyFieldName(name: string): boolean {
  */
 function keyMatcher(currentKey: KnownKeys): (text: string) => boolean {
   return createKeyRefusalCheck(keyValuesOf(currentKey));
+}
+
+const ANTHROPIC_FORMAT = new RegExp(ANTHROPIC_KEY_FORMAT_PATTERN_SOURCE);
+
+/** A key value set now, with the variable it came from (for the key_in_file message). */
+export interface KnownKeyEntry {
+  readonly keyEnv: ApiKeyEnv;
+  readonly value: string;
+}
+
+/**
+ * For the key_in_file message (the documentation owner's finding): the key variable of the
+ * provider whose key was found in `text`. A registered value names its own variable (the
+ * contract's value check: as written or split); otherwise a refusal shape: Anthropic's (its
+ * refusal run and the glued real format, as written and without invisible characters, in linear
+ * time) or else OpenAI's, the only other refusal shapes (API_KEY_PATTERN_SOURCES). Null when
+ * neither is found, as for a key field. Called only after a refusal.
+ */
+export function keyOwnerIn(text: string, keys: readonly KnownKeyEntry[]): ApiKeyEnv | null {
+  for (const key of keys) {
+    if (key.value.length >= MIN_CURRENT_KEY_LENGTH && createKeyValueCheck([key.value])(text)) return key.keyEnv;
+  }
+  const views = [text, withoutInvisibleCharacters(text)];
+  if (views.some((view) => anthropicRefusalShapeIn(view) || ANTHROPIC_FORMAT.test(view))) return ANTHROPIC_API_KEY_ENV;
+  return holdsRefusedKeyShape(text) ? OPENAI_API_KEY_ENV : null;
+}
+
+/** The key_in_file hint: the owner's key variable, or every key variable when none is known. */
+export function keyHintFor(owner: ApiKeyEnv | null): string {
+  return owner === null
+    ? `keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`
+    : `keys are read only from the ${owner} environment variable`;
 }
 
 /**

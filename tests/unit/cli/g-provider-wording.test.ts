@@ -137,25 +137,24 @@ describe("(2) key_in_file names the key variable of the provider whose key was f
     assert.ok(message.includes(ANTHROPIC_API_KEY_ENV), message);
   });
 
-  const todo = { todo: "CLI: the key hint names the matched provider's key variable (no contract change; with the third-bundle follow-up)" };
 
-  test("an OpenAI-shaped key in the config names OPENAI_API_KEY", todo, async () => {
+  test("an OpenAI-shaped key in the config names OPENAI_API_KEY", async () => {
     const message = await refusal({ model: OPENAI_SHAPED }, "g");
     assert.ok(message.includes(OPENAI_API_KEY_ENV) && !message.includes(ANTHROPIC_API_KEY_ENV), message);
   });
 
-  test("an OpenAI-shaped key in the goal names OPENAI_API_KEY", todo, async () => {
+  test("an OpenAI-shaped key in the goal names OPENAI_API_KEY", async () => {
     const message = await refusal({}, `use ${OPENAI_SHAPED}`);
     assert.ok(message.includes(OPENAI_API_KEY_ENV) && !message.includes(ANTHROPIC_API_KEY_ENV), message);
   });
 
-  test("the OpenAI key's registered value in the goal names OPENAI_API_KEY", todo, async () => {
+  test("the OpenAI key's registered value in the goal names OPENAI_API_KEY", async () => {
     const message = await refusal({}, `use ${OPENAI_VALUE}`, { [OPENAI_API_KEY_ENV]: OPENAI_VALUE });
     assert.ok(message.includes(OPENAI_API_KEY_ENV) && !message.includes(ANTHROPIC_API_KEY_ENV), message);
     assert.equal(message.includes(OPENAI_VALUE), false);
   });
 
-  test("a key field, which belongs to no provider, names every key variable", todo, async () => {
+  test("a key field, which belongs to no provider, names every key variable", async () => {
     const message = await refusal({ apiKey: "x" }, "g");
     assert.ok(message.includes(ANTHROPIC_API_KEY_ENV) && message.includes(OPENAI_API_KEY_ENV), message);
   });

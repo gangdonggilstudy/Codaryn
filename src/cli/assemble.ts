@@ -5,7 +5,8 @@
 
 import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
-import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME, planApplyStateOf } from "../contracts/index.js";
+import type { PlanApplyState, RunId, RunListEntry, RunReason } from "../contracts/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
@@ -13,6 +14,7 @@ import {
   acquireLock,
   createRunRecorders,
   hasRecordsChangedMark,
+  listRuns as storeListRuns,
   releaseLock,
   writeResult,
 } from "../store/index.js";
@@ -28,6 +30,7 @@ import type {
   EngineDeps,
   EngineResult,
   ListRuns,
+  LoadPlan,
   ModelProvider,
   ResolvedTaskSpec,
   ReadRevertRecord,
@@ -100,10 +103,29 @@ export type RevertCommandOutcome =
       readonly revertedBefore: { readonly at: string; readonly status: RevertStatus } | null;
       /** DR-38: the run has a records-changed mark (or one that cannot be read). The revert still ran its checks. */
       readonly recordsChanged?: boolean;
+      /**
+       * U-16 (UXM-5): the run is a plan run whose plan an apply run used, and this revert found
+       * nothing of its own to put back: the changes are the apply run's. No revert record is written
+       * for it (the run list would show it as reverted while the apply's changes stay).
+       * R-55 L-1: with where that apply run stands in the run list, so the hint advises reverting it
+       * only while it is there and not reverted.
+       */
+      readonly planApply?: PlanApply;
     }
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
 export type RevertCommand = (input: RevertCommandInput) => Promise<RevertCommandOutcome>;
+
+/**
+ * U-16, R-55 L-1: the apply run that used a plan run's plan, judged by the contract's one rule
+ * (planApplyStateOf over the run list), or `unknown` when the run list could not be read.
+ */
+export interface PlanApply {
+  readonly runId: string;
+  readonly state: PlanApplyState | "unknown";
+  /** The apply run's reason, for `unfinished`. */
+  readonly reason?: RunReason;
+}
 
 export interface RevertCommandOptions {
   /**
@@ -117,6 +139,8 @@ export interface RevertCommandOptions {
   /** N-22: the store's revert record functions. Absent: no record is read or written. */
   readonly readRecord?: ReadRevertRecord;
   readonly writeRecord?: WriteRevertRecord;
+  /** U-16 (UXM-5): the store's `loadPlan`, to tell a plan run an apply used. Absent: not told. */
+  readonly loadPlan?: LoadPlan;
   /** N-23: told which run `--run latest` chose, before anything is read or changed. */
   readonly announceLatest?: (entry: CheckedRun) => void;
   /**
@@ -259,11 +283,38 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     }
     // Absent means false, as in RevertOutput.
     const marked = recordsChanged ? { recordsChanged: true as const } : {};
+    // U-16 (UXM-5): a plan run changes no file; when its plan was applied, the changes are the apply
+    // run's. Told only when this revert had nothing to put back or skip. Reads only; best effort.
+    // R-55 L-1: and where the apply run stands in the run list (the store's, or the one given).
+    const appliedPlanOf = async (outcome: RevertOutcome): Promise<{ planApply?: PlanApply }> => {
+      if (options.loadPlan === undefined || outcome.reverted.length > 0 || outcome.skipped.length > 0) return {};
+      let applyRunId: string;
+      try {
+        const loaded = await options.loadPlan({ workspaceRoot, runId });
+        if (!loaded.ok || loaded.applied === null) return {};
+        applyRunId = loaded.applied.applyRunId;
+      } catch {
+        return {};
+      }
+      try {
+        const entries = (await (options.listRuns ?? storeListRuns)({ workspaceRoot })).runs;
+        // The plan run's own entry, naming the apply run applied.json names (the store's list gives
+        // appliedBy from the same file; this keeps the one the revert just read).
+        type Checked = Extract<RunListEntry, { readonly state: "checked" }>;
+        const own = entries.find((run): run is Checked => run.state === "checked" && run.runId === runId);
+        const judged = planApplyStateOf({ ...(own ?? ({} as Checked)), appliedBy: { runId: applyRunId as RunId, at: "" } }, entries);
+        if (judged === null) return {};
+        return { planApply: { runId: applyRunId, state: judged.state, ...(judged.reason === undefined ? {} : { reason: judged.reason }) } };
+      } catch {
+        return { planApply: { runId: applyRunId, state: "unknown" } };
+      }
+    };
 
     if (dryRun && options.dryRun !== undefined) {
       // N-7: no lock, no record, nothing written.
       try {
-        return { ok: true, outcome: await options.dryRun({ workspaceRoot, runId, dryRun: true }), runId, revertedBefore, ...marked };
+        const outcome = await options.dryRun({ workspaceRoot, runId, dryRun: true });
+        return { ok: true, outcome, runId, revertedBefore, ...marked, ...(await appliedPlanOf(outcome)) };
       } catch (error) {
         return failed(error);
       }
@@ -277,6 +328,9 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
         runId,
         ...(consent === null ? {} : { unsafeMoveConsent: { channel: consent.channel, runId } }),
       });
+      // U-16 (UXM-5): nothing of an applied plan run was reverted, so no record says it was.
+      const appliedPlan = await appliedPlanOf(outcome);
+      if (appliedPlan.planApply !== undefined) return { ok: true, outcome, runId, revertedBefore, ...marked, ...appliedPlan };
       // N-7, N-22: the revert record, written while the lock is held; best effort.
       try {
         await options.writeRecord?.(workspaceRoot, {

@@ -699,6 +699,12 @@ export interface ApplyDeps {
    * CLI; without it the apply does not check (as before). Called once, right after `apply_started`.
    */
   readonly planRecordsChanged?: () => Promise<boolean>;
+  /**
+   * U-16 (UXM-15): the task id the plan run ran with (its `run_started.taskId`, as its run list entry
+   * gives it). When given and not `taskId`, the apply adds the notice kind `plan_task_differs`. The
+   * CLI passes it; without it nothing is compared (as before).
+   */
+  readonly planTaskId?: string;
   /** Writes PLAN_APPLIED_FILE_NAME exclusively. "already_applied" when it exists. */
   markApplied(): Promise<"marked" | "already_applied">;
 }
@@ -767,8 +773,12 @@ export interface ApplyResult {
  *   state directory is larger than MAX_STATE_ENTRIES or MAX_STATE_HASH_BYTES), so the plan run's
  *   records may have been changed without a records-changed mark, and U-1 could not refuse the plan.
  *   The apply is not refused. A cleanup that makes the state directory smaller lets them be checked.
+ * - plan_task_differs (U-16, UXM-15): the plan run ran with another task than the one given to the
+ *   apply (ApplyDeps.planTaskId is not ApplyDeps.taskId), for example a plan made with a task file
+ *   and applied with the quick form: that task's verifiers and rules are not the ones used. Not
+ *   refused.
  */
-export const APPLY_NOTICE_KINDS = ["plan_records_unchecked"] as const;
+export const APPLY_NOTICE_KINDS = ["plan_records_unchecked", "plan_task_differs"] as const;
 export type ApplyNoticeKind = (typeof APPLY_NOTICE_KINDS)[number];
 
 /** Signature of `applyPlan`, exported by `src/engine/index.ts` (G-B). */

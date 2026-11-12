@@ -21,6 +21,7 @@
  */
 
 import {
+  APPLY_NOTICE_KINDS,
   INVENTORY_VERIFIER_ID,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
@@ -33,6 +34,7 @@ import {
 import type {
   AppliedActionRecord,
   AppliedPlanAction,
+  ApplyNoticeKind,
   ApplyPlan,
   ApplyResult,
   IntegrityManifest,
@@ -79,6 +81,9 @@ const UNSAFE_DONE_NOTICE = "some moves were made without the guarantee against r
 /** DR-38: a change to the run records found during the apply (paths follow), or a check not made. */
 const STATE_NOTICE_LEAD = "Codaryn's run records changed outside the apply, so they are not trusted: ";
 const STATE_FAILED_NOTICE = "the run records could not be checked, so they are not trusted";
+/** U-16 (UXM-15): the plan run ran with another task (ApplyNoticeKind plan_task_differs). */
+const PLAN_TASK_DIFFERS_NOTICE =
+  "the plan was made by another task than the one given to this apply (plan_task_differs): that task's verifiers and rules are not the ones used here";
 /** U-8 (R-39 L-1): a state check was limited (ApplyNoticeKind plan_records_unchecked). */
 const PLAN_RECORDS_UNCHECKED_NOTICE =
   "the plan run's records could not be checked for changes, because the state directory is too large to check entirely (plan_records_unchecked); a cleanup that makes it smaller lets them be checked";
@@ -108,6 +113,7 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   STATE_FAILED_NOTICE,
   PLAN_RECORDS_UNCHECKED_EARLIER_NOTICE,
   PLAN_RECORDS_UNCHECKED_NOTICE,
+  PLAN_TASK_DIFFERS_NOTICE,
 ];
 
 const MAX_TIMER_MS = 2_147_483_647;
@@ -171,6 +177,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
   let stateChanged: readonly MaskedText[] | undefined;
   // U-8: a limited state check at any phase; told once (notice and ApplyResult.noticeKinds).
   let planUnchecked = false;
+  // U-16: the plan run ran with another task than this apply's.
+  let taskDiffers = false;
   let baseline: IntegrityManifest | null = null;
   /** Whether actions or verifiers ran since the last integrity check (W-1 for apply runs). */
   let sinceCheck = false;
@@ -372,6 +380,11 @@ export const applyPlan: ApplyPlan = async (deps) => {
         return PLAN_STALE;
       }
     }
+    // U-16 (UXM-15): told, not refused.
+    if (deps.planTaskId !== undefined && deps.planTaskId !== taskId) {
+      taskDiffers = true;
+      notice(PLAN_TASK_DIFFERS_NOTICE);
+    }
     if (consent !== null && !consented) notice(CONSENT_OTHER_PLAN_NOTICE);
     // U-29 (R-44 R44-L1): what a run before this apply could not check is told as the apply's own
     // limited check is, once. A question that cannot be answered counts as unchecked.
@@ -559,6 +572,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
     const durationMs = clock.now() - startedAt;
     const usage = { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs, repairAttempts: 0 };
     await journal.append({ type: "run_finished", status: end.status, reason: end.reason, usage });
+    const told: { readonly [K in ApplyNoticeKind]: boolean } = { plan_records_unchecked: planUnchecked, plan_task_differs: taskDiffers };
+    const noticeKinds = APPLY_NOTICE_KINDS.filter((kind) => told[kind]);
     const result: ApplyResult = {
       schemaVersion: 1,
       kind: "apply",
@@ -576,7 +591,7 @@ export const applyPlan: ApplyPlan = async (deps) => {
       notices,
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
       ...(stateChanged !== undefined ? { stateChanged } : {}),
-      ...(planUnchecked ? { noticeKinds: ["plan_records_unchecked"] as const } : {}),
+      ...(noticeKinds.length > 0 ? { noticeKinds } : {}),
     };
     return result;
   } finally {

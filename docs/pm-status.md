@@ -24,6 +24,7 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 | CP-8 | 단계 2 착수 | 사용자 직접 지시("단계 2 재수정 반복도 이어서 진행해", "세션들 최대한 활용해서 진행해줘 투입 가능하게")에 따라 작업 지시서 `docs/work-orders/phase-2-repair-loop.md` 작성. F1(p1), F5 준비(p4), G1(p6), G2(p5), H1(p7), H2(p8) 배정. 작업자 브랜치를 main `0164b10`에 맞춤 | `0164b10`과 이 문서를 담은 커밋 | 완료 |
 | CP-9 | 단계 2 구현과 검토 | 재수정 반복 엔진, 보호 경로, 스냅샷·되돌리기, `.cmd` 실행, 제공자 수정, CLI 보안 모듈, 사용 문서를 main에 병합(`5989d79`까지). 교차 검토 H1·H2·F6와 결정 S-1~S-12, T-1~T-15를 기록(`1037593`). p1의 연결 커밋 `3f3756d`는 통합 8건 실패가 남아 main 미병합. p1이 주간 사용 한도로 멈춰 PM이 p1의 계약 변경을 검증 후 `f45959a`로 커밋하고 나머지를 p5~p8에 재배정 | `1037593`과 이 문서를 담은 커밋 | 완료 |
 | CP-10 | 단계 2 병합 | 수정 묶음 T(p5 `b807001`, p6 `a51002c`, p7 `c3d9865`, p8 `2f014a4` `c748821` `1677b1c`, 계약 `f45959a`)와 p4의 통합 테스트 `52a634d` `2410686`를 합친 뒤 PM이 병합 전에 전체를 실행해 통과를 확인하고 main `4074d5c`로 병합 | `4074d5c`와 이 문서를 담은 커밋 | 완료 |
+| CP-11 | 일시 정지 | 사용자 지시로 전체 작업을 멈췄다. 단계 3 구현(무결성 확인, 설치 위치 거부, report, doctor, 후보 스크립트), 수정 V·W·X, `models` 명령, 사용성·UX 설계, 문서화 누락 보완을 main `39219c8`까지 병합. 작업 브랜치를 원격에 올림 | `39219c8`과 이 문서를 담은 커밋 | 완료 |
 
 ## 사용자 상시 지시 (2026-11-12)
 
@@ -36,16 +37,19 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
-## 현재 상태 (CP-10)
+## 현재 상태 (CP-11, 일시 정지)
 
-- 사용자 직접 지시로 단계 2와 투입 준비를 진행했다. `docs/pm-control.json`의 범위는 PM이 바꾸지 않았다.
-- main `4074d5c`에 단계 2 전체가 있다: 재수정 반복, 보호 경로, 스냅샷과 `codaryn revert`, Windows `.cmd`/`.bat` 실행, 설정과 Anthropic 제공자, CLI 보안 검사 S-1~S-9, 수정 묶음 T-1~T-15.
-- 실행한 검증(병합 직전의 합친 트리, PM 실행): `npx tsc --noEmit` 통과, `npm run test:unit` 472건 중 471 통과·실패 0·건너뜀 1(대소문자를 구분하는 파일 시스템 전용 사례), `npm run test:integration` 273건 통과·실패 0·건너뜀 0, `node scripts/check-secrets.mjs --tracked` 발견 없음.
-- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** 통합의 anthropic 사례는 로컬 가짜 서버를 쓰는 모의 API 검증이다. Windows 외 OS, OS 수준 격리와 네트워크 차단, 강제 종료 시 파일 원자성도 검증하지 않았다.
-- 교차 검토 결과(H1, H2, F6 다섯 건)와 결정 S-1~S-12, T-1~T-15는 `docs/reviews/`와 `docs/work-orders/phase-2-repair-loop.md`에 있다. 고치지 않고 한계로 둔 것은 그 문서와 `docs/cli-contract.md` 10절에 적었다.
-- **차단 요인: w1:p1이 주간 사용 한도에 걸려 멈춰 있다(11월 15일 오전 3시 초기화).** 화면의 선택 창(멈춤 / 기다렸다 자동 계속 / 사용 크레딧 전환)에 PM은 답하지 않았다. 선택 표시는 PM의 Down 키 입력으로 2번에 가 있다. 다른 세션은 아직 한도에 걸리지 않았다.
-- p1의 worktree `claude-design`(브랜치 `claude/core-engine`, `f45959a`)은 깨끗하며 그 내용은 모두 main에 들어갔다. p1이 다시 움직이면 먼저 지시를 갱신해야 한다(2단계 CLI 작업은 p7이 이미 끝냈다).
-- 진행 중: p5가 사용 문서(`README.md`, `docs/usage.md`, `examples/`)를 현재 동작에 맞게 갱신한다. 나머지 세션(p4, p6, p7, p8)은 대기다.
+**사용자가 2026-11-12에 "지금까지 작업된 부분들 커밋 푸시하고 작업 재개할 수 있도록 정리 후 일시 정지"라고 지시했다. 모든 작업자를 멈췄고 재개 지시를 기다린다.**
+
+- main `39219c8`(원격과 같음)에 다음이 들어 있다: 단계 1a, 설정과 Anthropic 제공자, 단계 2(재수정 반복, 보호 경로, 스냅샷과 `revert`, `.cmd` 실행), 단계 3 오프라인 기구(무결성 확인, 설치 위치 거부, `report`, `doctor`, 후보 준비 스크립트), `codaryn models`, 교차 검토 결함 수정(S, T, V, W, X), 사용성·UX 설계 문서, 구현에 맞춘 설계 문서.
+- 실행한 검증(병합 직전의 합친 트리, PM 실행): `npx tsc --noEmit` 통과, `npm run test:unit` 726건 중 725 통과·실패 0·건너뜀 1(대소문자를 구분하는 파일 시스템 전용 사례), `npm run test:integration` 343건 통과·실패 0, `node scripts/check-secrets.mjs --tracked` 발견 없음.
+- 실행하지 않은 검증: **실제 Anthropic API 호출은 한 번도 하지 않았다.** `tests/live` 점검, 실제 `npm test` 실행, Windows 외 OS, OS 수준 격리, 실제 모델로 하는 자기 개발은 모두 미수행이다. `codaryn models`의 실제 목록 조회도 가짜 서버로만 확인했다.
+- 미해결 문제:
+  - 통합 전체 4회 중 1회, V-2 사례에서 CLI가 빈 stdout으로 끝났다(약 235ms). p4가 진단을 보강하고 10회 재실행했으나 재현되지 않았다. 원인 미확정이다. 진단 보강 커밋 `688a918`(wip)은 `claude/cli-verification`에 있고 main에는 없다.
+  - `models` 명령의 통합 사례(`dd638a3`, `832168d`)는 `claude/cli-verification`에 있고 main에는 없다. `models` 연결(`b380410`)이 병합됐으므로 재개하면 먼저 실행해 통과를 확인한 뒤 병합한다.
+  - w1:p1은 주간 사용 한도로 멈춰 있다(11월 15일 오전 3시 초기화). 화면의 선택 창에 PM은 답하지 않았다. 선택 표시는 2번에 가 있다.
+- 진행 중이던 작업(코드 변경 없이 멈춤): 사용성 개선 N-A(p7, 계약 준비 단계), N-B(p5, 고정 문구 조사), N-C(p6, 설계). 세 작업 모두 소유 파일을 아직 만들지 않았다. 조사·설계 메모는 각 worktree의 `.codaryn/`에 있다(Git 무시, 로컬에만 있음).
+- 모든 worktree는 깨끗하다(미커밋 변경 없음). 공용 Git 훅(`.git/hooks/pre-commit`)은 그대로 있다.
 
 ### PM 결정 (CP-4, CP-5)
 
@@ -62,28 +66,32 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 1a 자리표시자 `src/model/anthropic.ts`와 그 유닛 2건은 실제 제공자로 대체되어 삭제했다. 같은 동작은 `tests/unit/cli/anthropic-wire.test.ts`와 통합 m02가 확인한다.
 - 알려진 한계로 기록: 파일 해시가 모델과 기록에 노출됨, `CODARYN_SECRET` 리터럴이 든 파일은 수정할 수 없음(자기 개발 단계 전에 완화 여부를 정해야 한다), Windows에서 `.cmd`/`.bat`은 셸 없이 실행되지 않음.
 
-## 세션 (CP-10)
+## 세션 (CP-11, 모두 정지)
 
-| pane | tab | 현재 작업 | worktree | 브랜치 | 상태 |
-| --- | --- | --- | --- | --- | --- |
-| w1:p1 | main | (역할 1) | `claude-design` | `claude/core-engine` | **주간 사용 한도로 정지. 선택 창 대기** |
-| w1:p4 | main | 통합 검증 | `claude-operations` | `claude/cli-verification` | 병합됨. 대기 |
-| w1:p5 | optional | 사용 문서 갱신 | `claude-quality` | `claude/security-core` | 진행 |
-| w1:p6 | optional | 도구 | `claude-tools` | `claude/core-tools` | 병합됨. 대기 |
-| w1:p7 | optional | 정책·보안·CLI | `claude-workspace` | `claude/workspace-policy` | 병합됨. 대기 |
-| w1:p8 | optional | 검증기·저장소 | `claude-store` | `claude/revert-store` | 병합됨. 대기 |
-| w1:p3 | main | PM·통합 | main | `main` | 진행 |
-| w1:p2 | main | Codex | — | — | 대기(회수 권한 보유) |
+| pane | tab | 마지막 작업 | worktree | 브랜치 | 상태 | 정지 보고 |
+| --- | --- | --- | --- | --- | --- | --- |
+| w1:p1 | main | (역할 1) | `claude-design` | `claude/core-engine` | 주간 사용 한도로 정지, 선택 창 대기 | 없음 |
+| w1:p4 | main | 간헐 실패 조사 Z-1, `models` 통합 사례 | `claude-operations` | `claude/cli-verification` | 정지. main보다 앞선 커밋 있음(미병합) | `.codaryn/report-pause.md` |
+| w1:p5 | optional | N-B 문구 카탈로그(조사 단계) | `claude-quality` | `claude/security-core` | 정지. main과 같음 | `.codaryn/report-pause.md` |
+| w1:p6 | optional | N-C 사람용 출력·실행 목록(설계 단계) | `claude-tools` | `claude/core-tools` | 정지. main과 같음 | `.codaryn/report-pause.md` |
+| w1:p7 | optional | N-A 계약과 CLI 핵심(준비 단계). 역할 1 | `claude-workspace` | `claude/workspace-policy` | 정지. 병합됨 | `.codaryn/report-pause.md` |
+| w1:p8 | optional | D2 문서화 보완(완료). 다음은 N-D | `claude-store` | `claude/revert-store` | 정지. 병합됨 | `.codaryn/report-pause.md` |
+| w1:p3 | main | PM·통합 | main | `main` | 정지 | 이 문서 |
+| w1:p2 | main | Codex | — | — | 대기(회수 권한 보유) | — |
 
 세션 ID는 바뀔 수 있으므로 `herdr agent list`로 실제 상태를 확인한다. 보존된 이전 브랜치: `claude/cli-foundation`(기반, 병합됨), `claude/quality`, `claude/quality-ready` 등 초안 브랜치는 삭제하지 않았다.
 
-## 다음 행동
+## 재개 방법
 
-1. p5의 사용 문서 갱신을 검토·병합한다.
-2. 투입 조건 중 남은 것은 사용자가 직접 실행하는 실제 호출 점검(`tests/live/README.md`)이다. 결과로 "실제 API 미검증" 항목(503 분류, `retry-after` 형식, 빈 `tool_result`, thinking 블록 없는 도구 반복)을 확정한다.
-3. 실제 호출이 통과하면 중요하지 않은 저장소에서 `node --test` 또는 `npm test` 검증기와 보호 경로를 두고 시험 투입한다.
-4. Codex 판단이 필요한 것: architecture.md와 decisions.md의 "공식 SDK" 서술(구현은 내장 `fetch`), 작업 브랜치와 worktree 정리, 단계 3(자기 소스 후보 개발) 착수 여부.
-5. p1의 사용 한도 선택은 사용자가 정한다.
+재개 지시가 오면 다음 순서로 한다. 누가 재개하든(임시 PM, Codex) 같다.
+
+1. `docs/pm-control.json`의 status와 위임 ID를 확인한다.
+2. `git -C D:\project\Codaryn status -sb`와 `git worktree list`로 main이 원격과 같고 worktree가 깨끗한지 확인한다. `herdr agent list`로 세션 상태를 확인한다(세션이 닫혔으면 새 세션에 아래 문서를 읽혀 배정한다).
+3. main에서 `npm ci`, `npm run typecheck`, `npm run test:unit`, `npm run test:integration`을 돌려 기준 상태를 확인한다.
+4. `claude/cli-verification`을 main과 합쳐 `models` 통합 사례와 진단 보강을 실행하고, 통과하면 병합한다. 간헐 실패(Z-1)는 진단이 보강된 상태로 다시 나타나면 종료 코드와 stderr로 원인을 찾는다.
+5. 사용성 개선을 이어 간다(`work-orders/phase-4-usability.md`): p7이 계약을 먼저 커밋 → p5(N-B), p6(N-C) 병렬 → p7 연결 → p8(N-D 체험 예시와 사용 문서) → p4 통합 → 교차 검토.
+6. 그다음 순서: 단계 4 범용 작업 확장 설계와 구현, 어댑터 계약 정의, VS Code 확장(결정 N-13), 독립 GUI 설계 문서. 사용자의 상시 지시(추가 지시가 없으면 끝까지 연속 진행)는 재개 뒤에도 유효하다.
+7. 사용자가 직접 해야 하는 것: 실제 호출 점검(`tests/live/README.md`), p1 세션의 사용 한도 선택.
 
 ## 회수 시 인계 방법
 

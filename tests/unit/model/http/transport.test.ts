@@ -120,6 +120,15 @@ ${shaped.slice(9)} . end`), "key [redacted] . end");
     assert.equal(holds(`${"a".repeat(4097)}`), true, "one more is not");
   });
 
+  test("DR-40 (a): a key split by a soft hyphen or another format character is redacted", () => {
+    const key = "codaryn-fake-key-not-a-credential";
+    const redact = createRedactor(key, []);
+    for (const code of [0xad, 0x200e, 0x2060]) {
+      const mark = String.fromCharCode(code);
+      assert.equal(redact(`piece ${key.slice(0, 10)}${mark}${key.slice(10)} end`), "piece [redacted] end", code.toString(16));
+    }
+  });
+
   test("the provider's status reading gets the error body", async () => {
     const a = transport([limited(), ok]);
     await send(a.t);

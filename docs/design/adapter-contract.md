@@ -447,7 +447,9 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
 - **고르기와 검사.** `run.ts`와 같은 순서로 CLI 함수를 부른다. 앱 계층이 값을 따로 판정하지 않는다. CLI에 공용 "설정 파일 읽기" 함수가 생기면 그것 하나로 바꾼다.
   1. `chooseConfigFile`: `--config` → `CODARYN_CONFIG` → N-1 기본 위치(S-5).
   2. 읽기: 없는 파일은 기본 위치일 때만 "설정 없음"이다.
-  3. 원문 키 검사(C-1, S-6).
+  3. 원문 키 검사(C-1, S-6). 그 앞에 CLI와 같은 크기 상한을 둔다(DR-42 (d), DR-40 (b)).
+     - BOM을 뺀 글이 `MAX_INPUT_FILE_BYTES`(1 MiB, UTF-8 바이트)를 넘으면 CLI의 고정 문구로 `invalid_config`다. 다른 검사는 그 글을 읽지 않는다.
+     - 설정 변경 제안·적용도 쓸 글에 같은 상한을 둔다. CLI가 거부할 파일을 쓰지 않는다.
   4. JSON 해석. 문법 오류면 줄과 열을 준다.
   5. 값 키 검사(깊이 64).
   6. `parseConfig`. 필드 위치를 준다(N-6).

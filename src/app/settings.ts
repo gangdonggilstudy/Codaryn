@@ -21,7 +21,7 @@ import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../c
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
 import { jsonSyntaxError, positionDiagnostic } from "../cli/run.js";
-import { MAX_KEY_SCAN_DEPTH, findKeyInJson, rawTextHoldsKey } from "../cli/security/index.js";
+import { MAX_KEY_SCAN_DEPTH, findKeyInJson, inputFileTooLarge, inputFileTooLargeMessage, rawTextHoldsKey } from "../cli/security/index.js";
 import type { KnownKeys } from "../cli/security/index.js";
 import { envValue, knownKeyValues } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
@@ -51,6 +51,9 @@ export type ChosenFile = { readonly source: "argument" | "environment" | "defaul
  * SP-2: `currentKey` is every API provider's key value set now (knownKeyValues), as the CLI checks.
  */
 export function checkConfigText(text: string, currentKey: KnownKeys): { readonly ok: true; readonly config: CodarynConfig } | Failure {
+  // DR-42 (d), DR-40 (b): the CLI's cap, before any check reads the text (run.ts does the same after
+  // dropping the BOM). Here it also keeps a settings change from writing a file the CLI refuses.
+  if (inputFileTooLarge(text)) return failure("invalid_config", inputFileTooLargeMessage("config file"));
   if (rawTextHoldsKey(text, currentKey)) return failure("key_in_file", `the config file contains a key value; ${KEY_HINT}`);
   let value: unknown;
   try {

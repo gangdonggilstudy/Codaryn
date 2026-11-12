@@ -451,6 +451,10 @@ const expected = [
       !v.text.includes(FAKE_API_KEY) &&
       !v.text.includes(FAKE_OPENAI_KEY),
   ],
+  // UXM-14: the marked run in the run list (only it) and its report.
+  ["runsRecordsChanged", (v) => v === true],
+  ["runsUnmarked", (v) => v === 1],
+  ["reportRecordsChanged", (v) => v === true],
   // U-11 (3.11): the first-run guide.
   ["setupSandbox", (v) => v.made === true && v.realUntouched === true],
   ["setupFolder", (v) => v === "folder"],

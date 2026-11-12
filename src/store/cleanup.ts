@@ -20,6 +20,7 @@ import { join } from "node:path";
 
 import {
   CLEANUP_LEFTOVER_MARK_FILE_NAME,
+  PLAN_APPLIED_FILE_NAME,
   CLEANUP_LEFTOVER_PATTERN_SOURCE,
   CLEANUP_LOG_FILE_NAME,
   CLEANUP_WARNING_CODES,
@@ -105,6 +106,24 @@ function isEarlierMark(value: unknown): boolean {
 
 /** The mark files of a leftover: removed after everything else in it. */
 const MARK_FILE_NAMES: readonly string[] = [CLEANUP_LEFTOVER_MARK_FILE_NAME, EARLIER_MARK_FILE_NAME];
+
+/** U-13: whether a discarded-files folder holds at least one file (an empty one holds nothing to lose). */
+const holdsFiles = (tree: Tree | null): boolean => tree !== null && tree.size.files > 0;
+
+/** The apply run a plan run's PLAN_APPLIED_FILE_NAME names, or null when there is no such readable record. */
+async function appliedBy(planRunDir: string, planRunId: string): Promise<string | null> {
+  const file = join(planRunDir, PLAN_APPLIED_FILE_NAME);
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > MAX_MARK_BYTES) return null;
+    const record = JSON.parse(await readFile(file, "utf8")) as unknown;
+    if (typeof record !== "object" || record === null || Array.isArray(record)) return null;
+    const { kind, planRunId: named, applyRunId } = record as Record<string, unknown>;
+    return kind === "plan_applied" && named === planRunId && typeof applyRunId === "string" ? applyRunId : null;
+  } catch {
+    return null;
+  }
+}
 
 /** A plain directory's files and bytes and the metadata fingerprint of everything below it. */
 interface Tree {
@@ -233,6 +252,19 @@ async function scan(workspaceRoot: string): Promise<Scan> {
       lastRevert,
     });
   }
+  // R-47 R47-M1: a run whose records cannot be checked and whose discarded-files folder holds files is
+  // treated as an apply run that left them. Its own records do not say which plan it used; the plan
+  // run's record of the apply that claimed it (PLAN_APPLIED_FILE_NAME) does.
+  const unreadableWithFiles = runs.filter((run) => run.summary.kind === null && holdsFiles(run.discardedTree));
+  if (unreadableWithFiles.length > 0) {
+    const claimedBy = new Map<string, string>();
+    for (const run of runs) {
+      if (run.summary.kind !== "run") continue;
+      const applyRunId = await appliedBy(join(runsDir, run.summary.runId), run.summary.runId);
+      if (applyRunId !== null) claimedBy.set(applyRunId, run.summary.runId);
+    }
+    for (const run of unreadableWithFiles) (run as { planRunId: string | null }).planRunId = claimedBy.get(run.summary.runId) ?? null;
+  }
   const known = new Set(entries.map((entry) => entry.runId as string));
   const orphanDiscarded: { runId: RunId; tree: Tree }[] = [];
   for (const name of [...discardedNames].sort().reverse()) {
@@ -339,7 +371,7 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
     return null;
   };
   // Apply runs that will go: selected and not blocked. A plan run one of the others uses stays.
-  const goingApplies = new Set(selectedRuns.filter((run) => run.summary.kind === "apply" && blockOf(run) === null).map((run) => run.summary.runId as string));
+  const goingApplies = new Set(selectedRuns.filter((run) => (run.summary.kind === "apply" || run.planRunId !== null) && blockOf(run) === null).map((run) => run.summary.runId as string));
   const discardedCandidates = [
     ...found.runs.filter((run) => run.discardedTree !== null).map((run) => ({ runId: run.summary.runId, tree: run.discardedTree as Tree, run: run as RunFacts | null })),
     ...found.orphanDiscarded.map((item) => ({ runId: item.runId, tree: item.tree, run: null as RunFacts | null })),
@@ -358,14 +390,16 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
     }
     // DR-44 (a)-(c): the contract's one rule for a run's records; R-34b P-1: records that cannot be
     // checked (kind null) get records_unreadable and are confirmed apart like a run not reverted.
-    const warnings = cleanupRecordWarnings({
+    const recordWarnings = cleanupRecordWarnings({
       kind: run.summary.kind,
       changes: run.changes,
       lastRevert: run.lastRevert,
       // U-13: a folder that holds at least one file; an empty one holds nothing to lose.
-      hasDiscarded: run.discardedTree !== null && run.discardedTree.size.files > 0,
+      hasDiscarded: holdsFiles(run.discardedTree),
       recordsChanged: run.summary.recordsChanged,
     });
+    // R-47 R47-M1: records that cannot be checked beside discarded files: the same warning as an apply's.
+    const warnings = run.summary.kind === null && holdsFiles(run.discardedTree) ? ordered([...recordWarnings, "discarded_left"]) : recordWarnings;
     items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings });
     prints.push((run.records as Tree).print);
     facts.push({ kind: run.summary.kind, planRunId: run.planRunId });
@@ -513,7 +547,7 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     // DR-44 (a): then apply runs, then the other runs (their plan runs among them), then leftovers.
     const order = plan.items.map((item, index) => ({ item, index }));
     const rank = ({ item, index }: { item: CleanupItem; index: number }): number =>
-      item.target === "discarded" ? 0 : item.target === "run" ? (facts[index]?.kind === "apply" ? 1 : 2) : 3;
+      item.target === "discarded" ? 0 : item.target === "run" ? (facts[index]?.kind === "apply" || (facts[index]?.planRunId ?? null) !== null ? 1 : 2) : 3;
     order.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
     /** Plan runs an apply run uses that was selected and stays. */
     const plansOfKeptApplies = new Set<string>();
@@ -540,13 +574,14 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       const itemFacts = facts[index] ?? null;
       const keepApply = (reason: CleanupKeptReason): void => {
         keep(item, reason);
-        if (itemFacts?.kind === "apply" && itemFacts.planRunId !== null) plansOfKeptApplies.add(itemFacts.planRunId);
+        if (itemFacts !== null && itemFacts.planRunId !== null) plansOfKeptApplies.add(itemFacts.planRunId);
       };
       if (item.target === "run" && needsNotRevertedConfirmation(item.warnings) && !confirmation.includeNotReverted) {
         keepApply("not_reverted_not_confirmed");
         continue;
       }
-      if (item.target === "run" && itemFacts?.kind === "apply" && (await discardedLeft(item.runId))) {
+      // R-47 R47-M1: also a run whose records cannot be checked (not known to be a plain run).
+      if (item.target === "run" && itemFacts?.kind !== "run" && (await discardedLeft(item.runId))) {
         keepApply("discarded_left");
         continue;
       }

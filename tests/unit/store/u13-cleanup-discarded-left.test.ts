@@ -196,3 +196,65 @@ describe("U-13: the folder changes between the preview and the removal", () => {
     assert.equal((await readdir(state(root, "runs"))).includes(APPLY), true);
   });
 });
+
+describe("U-13 (R-47 R47-M1): an apply run whose records cannot be checked is kept the same way", () => {
+  /** R-47's B10: the apply run's journal no longer reads (its first line is not JSON). */
+  const damage = async (root: string): Promise<void> => {
+    await writeFile(state(root, "runs", APPLY, "journal.jsonl"), "not a record\n", "utf8");
+  };
+  /** The plan run's own record of which apply claimed it, as an apply writes it. */
+  const claim = async (root: string): Promise<void> => {
+    await writeFile(state(root, "runs", PLAN, "applied.json"), `${JSON.stringify({ schemaVersion: 1, kind: "plan_applied", planRunId: PLAN, applyRunId: APPLY, at: "2026-01-01T04:00:01.000Z" })}\n`, "utf8");
+  };
+
+  test("B10 (--include-not-reverted without --delete-discarded): the damaged apply and the plan run that names it stay; the preview warns", async () => {
+    const root = await workspace();
+    await claim(root);
+    await damage(root);
+    const shown = await planCleanup({ workspaceRoot: root, selection: ALL, now: NOW });
+    assert.deepEqual(shown.items.find((item) => item.target === "run" && idOf(item) === APPLY)?.warnings, ["records_unreadable", "discarded_left"]);
+    const outcome = await applyCleanup({ workspaceRoot: root, selection: ALL, now: NOW, confirmation: confirm(shown.digest, false) });
+    assert.deepEqual(keptOf(outcome), [["discarded", APPLY, "not_confirmed"], ["run", APPLY, "discarded_left"], ["run", PLAN, "used_by_kept_apply"]]);
+    assert.deepEqual(removedOf(outcome), [["run", PART], ["run", FULL]]);
+    assert.deepEqual((await readdir(state(root, "runs"))).sort(), [PLAN, APPLY]);
+    assert.deepEqual(await readdir(state(root, "discarded", APPLY)), ["2"]);
+  });
+
+  test("the folder confirmed too: everything goes", async () => {
+    const root = await workspace();
+    await claim(root);
+    await damage(root);
+    const shown = await planCleanup({ workspaceRoot: root, selection: ALL, now: NOW });
+    const outcome = await applyCleanup({ workspaceRoot: root, selection: ALL, now: NOW, confirmation: confirm(shown.digest, true) });
+    assert.deepEqual(keptOf(outcome), []);
+    assert.deepEqual(await readdir(state(root, "runs")), []);
+  });
+
+  test("the plan run alone is not removed while the damaged apply that used it stays with its discarded files", async () => {
+    const root = await workspace();
+    await claim(root);
+    await damage(root);
+    const shown = await planCleanup({ workspaceRoot: root, selection: { runs: { runIds: [PLAN] } }, now: NOW });
+    assert.deepEqual([shown.items, shown.blocked], [[], [{ target: "run", runId: PLAN, code: "plan_used_by_apply" }]]);
+  });
+
+  test("no record of which plan it used: the damaged apply still stays (its plan run cannot be told)", async () => {
+    const root = await workspace();
+    await damage(root);
+    const selection = { runs: { runIds: [APPLY] } };
+    const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+    const outcome = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: confirm(shown.digest, false) });
+    assert.deepEqual(keptOf(outcome), [["run", APPLY, "discarded_left"]]);
+  });
+
+  test("a damaged run without discarded files is as before: records_unreadable only, removed with includeNotReverted", async () => {
+    const root = await workspace();
+    await damage(root);
+    await rm(state(root, "discarded", APPLY, "2"));
+    const selection = { runs: { runIds: [APPLY] } };
+    const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+    assert.deepEqual(shown.items.map((item) => item.warnings), [["records_unreadable"]]);
+    const outcome = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: confirm(shown.digest, false) });
+    assert.deepEqual([removedOf(outcome), keptOf(outcome)], [[["run", APPLY]], []]);
+  });
+});

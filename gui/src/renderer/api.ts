@@ -353,6 +353,7 @@ export function asRuns(value: unknown): RunsReply {
         changes: typeof run["changes"] === "number" ? run["changes"] : null,
         reverted,
         revertRecordDamaged: run["revertRecordDamaged"] === true,
+        recordsChanged: run["recordsChanged"] === true,
         form: asForm(run["form"]),
       },
     ];

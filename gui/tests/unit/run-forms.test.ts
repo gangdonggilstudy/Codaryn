@@ -120,7 +120,9 @@ test("run forms (R21b-L-1): a plan whose form is unknown is shown with a notice 
     assert.equal(byId(known, "plan-form-unknown"), undefined);
     const unknown = await planShown(false);
     assert.equal(byId(unknown, "plan-apply"), undefined, "no apply button");
-    assert.ok(byId(unknown, "plan-form-unknown")?.textContent.includes(`codaryn apply ${RUN(1)}`));
+    // UXM-24: the CLI command that tells the apply command, not one that cannot run.
+    assert.ok(byId(unknown, "plan-form-unknown")?.textContent.includes("codaryn plan"));
+    assert.ok(byId(unknown, "plan-form-unknown")?.textContent.includes(RUN(1)));
     assert.ok(byId(unknown, "plan-actions") !== undefined, "the plan is still shown");
   } finally {
     restore();
@@ -149,8 +151,8 @@ test("run forms (R21b-L-1): the run list opens a plan with the run's remembered 
     await settle();
     for (const n of [1, 2]) root.findAll((e) => e.getAttribute("data-plan") === RUN(n))[0]?.click();
     assert.deepEqual(opened, [
-      [RUN(1), null, "organize", true],
-      [RUN(2), null, null, false],
+      [RUN(1), null, "organize", true, false],
+      [RUN(2), null, null, false, false],
     ]);
     root.findAll((e) => e.getAttribute("data-report") === RUN(1))[0]?.click();
     assert.deepEqual(reports, [[RUN(1), ORGANIZE]], "the report keeps the run's own form for its changes view");

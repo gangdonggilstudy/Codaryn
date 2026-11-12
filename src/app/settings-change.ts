@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { API_PROVIDERS, API_PROVIDER_NAMES, mergeWorkflowPolicy } from "../contracts/index.js";
+import { API_PROVIDERS, API_PROVIDER_NAMES, mergeWorkflowPolicy, mergeWorkflowVerifiers } from "../contracts/index.js";
 import type { ApiProviderName, CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
 import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
@@ -103,11 +103,11 @@ function verifierWidening(before: VerifierRules, after: VerifierRules, prefix: s
  *   (mergeWorkflowPolicy: protected paths joined, command lines and plan actions only where both
  *   allow), so the merged policies are compared whatever changed. A configured command rule a
  *   workflow's own rules allow widens that workflow's runs; one organize drops does not.
- * - Verifiers are still laid under (`config.verifiers ?? definition.verifiers`), so they are
- *   compared when the config's appear or go (F-5).
+ * - Verifiers, DR-43 (a) (R-31 L-2): a workflow's own verifiers always run and the config's are
+ *   added unless their id is one of the workflow's (mergeWorkflowVerifiers), so the merged lists
+ *   are compared whatever changed. An empty config list removes none of the workflow's.
  */
 function workflowRulesWidening(before: CodarynConfig, after: CodarynConfig): SettingsWidening[] {
-  const verifiersMove = (before.verifiers === undefined) !== (after.verifiers === undefined);
   const found: SettingsWidening[] = [];
   const definitionsAfter = workflowDefinitions(after.workflows);
   for (const [id, was] of Object.entries(workflowDefinitions(before.workflows))) {
@@ -117,8 +117,8 @@ function workflowRulesWidening(before: CodarynConfig, after: CodarynConfig): Set
     if (was.policy !== undefined || is.policy !== undefined) {
       found.push(...policyWidening(mergeWorkflowPolicy(was.policy, before.policy), mergeWorkflowPolicy(is.policy, after.policy), prefix));
     }
-    if (verifiersMove && (was.verifiers !== undefined || is.verifiers !== undefined)) {
-      found.push(...verifierWidening(before.verifiers ?? was.verifiers, after.verifiers ?? is.verifiers, prefix));
+    if ((was.verifiers?.length ?? 0) > 0 || (is.verifiers?.length ?? 0) > 0) {
+      found.push(...verifierWidening(mergeWorkflowVerifiers(was.verifiers, before.verifiers), mergeWorkflowVerifiers(is.verifiers, after.verifiers), prefix));
     }
   }
   return found;

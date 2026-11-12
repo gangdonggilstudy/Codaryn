@@ -2,7 +2,8 @@
  * DR-15 (review R-4 H-1): events are made from the records the engine handed to the journal, in
  * memory, never read back from the journal file. A command allowed during a run can append lines
  * to that file; such a line, holding a registered secret in clear, must not reach an observer.
- * Scripted model, fake values only, no network.
+ * Since DR-38 the app passes the state guard to the engine, which also ends such a run as
+ * failed/state_changed. Scripted model, fake values only, no network.
  */
 
 import assert from "node:assert/strict";
@@ -61,7 +62,8 @@ async function forgedRun(): Promise<{ base: string; runId: string; events: RunEv
 describe("DR-15: events come from the engine's records, not from the journal file", () => {
   test("a line a command appended to the journal never becomes an event, and no event holds the secret", async () => {
     const { base, runId, events, result } = await forgedRun();
-    assert.equal(result.status, "done");
+    // DR-38: the command changed the run's records, so the engine's state guard ends the run.
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"]);
 
     const journal = await readJournal(base, runId);
     assert.ok(

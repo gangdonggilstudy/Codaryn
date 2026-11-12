@@ -51,6 +51,7 @@ import {
   sha256Hex,
 } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
+import type { RunWriteNotes } from "./run-writes.js";
 import { isStateDirName, isValidPathInput } from "../workspace/lexical.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
@@ -155,7 +156,10 @@ function planText(runId: string, actions: readonly StoredPlanAction[]): string {
  * SHA-256 of exactly the bytes written. Actions that are not resolved workspace paths with hashes
  * reject with TypeError before anything is written.
  */
-export const createPlanRecorder: CreatePlanRecorder = (options) => {
+export const createPlanRecorder: CreatePlanRecorder = (options) => planRecorderWith(options);
+
+/** DR-38: createPlanRecorder that notes the plan file and run directory it writes (createRunRecorders). */
+export function planRecorderWith(options: Parameters<CreatePlanRecorder>[0], notes?: RunWriteNotes): ReturnType<CreatePlanRecorder> {
   const { workspaceRoot, runId } = options;
   assertRunId(runId);
   return {
@@ -164,13 +168,16 @@ export const createPlanRecorder: CreatePlanRecorder = (options) => {
       if (canonical === null) throw new TypeError("savePlan needs 1 to MAX_PLAN_ACTIONS resolved actions with source hashes");
       const text = planText(runId, canonical);
       const dir = await ensureRunDir(workspaceRoot, runId);
-      if (!(await createExclusive(join(dir, PLAN_FILE_NAME), text))) {
+      if (notes !== undefined) await notes.dir(dir);
+      const file = join(dir, PLAN_FILE_NAME);
+      if (!(await createExclusive(file, text))) {
         throw new Error("the run already has a plan.json; it was left as it is");
       }
+      if (notes !== undefined) await notes.file(file, { sha256: sha256Hex(text), size: Buffer.byteLength(text, "utf8") });
       return sha256Hex(text);
     },
   };
-};
+}
 
 /** A record failed a check. */
 class Invalid extends Error {}
@@ -278,6 +285,11 @@ export interface MarkPlanAppliedRequest {
  * must exist and be plain; otherwise it rejects and nothing is created.
  */
 export async function markPlanApplied(request: MarkPlanAppliedRequest): Promise<"marked" | "already_applied"> {
+  return markPlanAppliedWith(request);
+}
+
+/** DR-38: markPlanApplied that notes the applied.json it creates (createApplyRecorders). */
+export async function markPlanAppliedWith(request: MarkPlanAppliedRequest, notes?: RunWriteNotes): Promise<"marked" | "already_applied"> {
   const { workspaceRoot, planRunId, applyRunId, at } = request;
   assertRunId(planRunId);
   assertRunId(applyRunId);
@@ -285,5 +297,9 @@ export async function markPlanApplied(request: MarkPlanAppliedRequest): Promise<
   const dir = runDir(workspaceRoot, planRunId);
   if (!(await isOwnRunDir(workspaceRoot, planRunId))) throw new Error("the plan run has no directory of its own; nothing was written");
   const record: PlanAppliedRecord = { schemaVersion: 1, kind: "plan_applied", planRunId, applyRunId, at };
-  return (await createExclusive(join(dir, PLAN_APPLIED_FILE_NAME), `${JSON.stringify(record)}\n`)) ? "marked" : "already_applied";
+  const text = `${JSON.stringify(record)}\n`;
+  const file = join(dir, PLAN_APPLIED_FILE_NAME);
+  if (!(await createExclusive(file, text))) return "already_applied";
+  if (notes !== undefined) await notes.file(file, { sha256: sha256Hex(text), size: Buffer.byteLength(text, "utf8") });
+  return "marked";
 }

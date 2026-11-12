@@ -65,6 +65,7 @@ import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
 import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
+import { applyCleanupIn, previewCleanupIn, stateSummaryIn } from "./cleanup.js";
 import { readSettingsIn } from "./settings.js";
 import { initArguments, suggestionsFor } from "./init.js";
 import { applySettingsChangeIn, proposeSettingsChangeIn } from "./settings-change.js";
@@ -82,7 +83,10 @@ import type {
   CodarynApp,
   DoctorRequest,
   ListModelsRequest,
+  ApplyCleanupRequest,
+  CleanupPreviewRequest,
   ListRunsRequest,
+  StateSummaryRequest,
   ApplySettingsChangeRequest,
   CreateSettingsRequest,
   ReadSettingsRequest,
@@ -425,6 +429,11 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
+  // DR-39: the store's summary, plan and cleanup with the app layer's checks (cleanup.ts).
+  const stateSummary = (request: StateSummaryRequest) => stateSummaryIn(environment, request);
+  const previewCleanup = (request: CleanupPreviewRequest) => previewCleanupIn(environment, request);
+  const applyCleanup = (request: ApplyCleanupRequest) => applyCleanupIn(environment, request);
+
   async function resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>> {
     try {
       return await resolveRunIn(environment, request);
@@ -693,6 +702,9 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     revert,
     listRuns,
     resolveRun,
+    stateSummary,
+    previewCleanup,
+    applyCleanup,
     doctor,
     changes,
     listModels,

@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import { DISCARDED_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import { assertRunId, ensureStateDir, isPlainDirectory } from "./common.js";
+import type { RunWriteNotes } from "./run-writes.js";
 
 /** The directory's absolute path (whether or not it exists). */
 export function discardedRootPath(workspaceRoot: string, runId: string): string {
@@ -24,6 +25,11 @@ export function discardedRootPath(workspaceRoot: string, runId: string): string 
  * a link or not a directory, so a discarded file never lands outside the workspace's own state.
  */
 export async function prepareDiscardedRoot(workspaceRoot: string, runId: string): Promise<string> {
+  return prepareDiscardedRootWith(workspaceRoot, runId);
+}
+
+/** DR-38: prepareDiscardedRoot that notes the directories it makes (createApplyRecorders). */
+export async function prepareDiscardedRootWith(workspaceRoot: string, runId: string, notes?: RunWriteNotes): Promise<string> {
   const dir = discardedRootPath(workspaceRoot, runId);
   const parent = join(workspaceRoot, STATE_DIR_NAME, DISCARDED_DIR_NAME);
   await ensureStateDir(workspaceRoot);
@@ -31,5 +37,6 @@ export async function prepareDiscardedRoot(workspaceRoot: string, runId: string)
   if (!(await isPlainDirectory(parent))) throw new Error("the discarded directory is a link or not a directory; nothing was created");
   await mkdir(dir, { recursive: true });
   if (!(await isPlainDirectory(dir))) throw new Error("the run's discarded directory is a link or not a directory");
+  if (notes !== undefined) await notes.dir(dir);
   return dir;
 }

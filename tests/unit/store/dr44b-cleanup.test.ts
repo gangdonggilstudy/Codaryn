@@ -170,14 +170,67 @@ describe("R-34b P-2 with the contract's mark (eacd18e)", () => {
     assert.deepEqual((await readdir(state(root))).filter((name) => name.startsWith("cleanup-")).sort(), ["cleanup-00000000000000aa", "cleanup-00000000000000cc"], "unknown folders stay");
   });
 
-  test("a mark that cannot be written does not stop the removal", async () => {
+  test("U-7 (R-40 L-2): a mark that cannot be written puts the folder back (io_error); the run stays and can be removed later", async () => {
     const root = await workspace();
-    // A file of the mark's name already in the run's records: the exclusive create of the mark fails.
+    const selection = { runs: { runIds: [FULL] } };
+    const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+    const denied = (): Error => Object.assign(new Error("denied"), { code: "EPERM" });
+    // The mark cannot be written and nothing can be removed: both failures together.
+    const first = await applyCleanupWith(
+      { workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } },
+      { writeMark: async () => { throw denied(); }, remove: async () => { throw denied(); }, retryDelayMs: 1 },
+    );
+    assert.deepEqual(first.ok ? [first.removed, first.kept] : null, [[], [{ target: "run", runId: FULL, reason: "io_error" }]]);
+    assert.deepEqual((await readdir(state(root))).filter((name) => name.startsWith("cleanup-")), [], "nothing is left aside");
+    assert.equal((await readdir(state(root, "runs", FULL))).includes("result.json"), true, "the run's records are back in place");
+    assert.equal(Object.hasOwn(await summarizeState({ workspaceRoot: root }), "unknownFolders"), false);
+    // Once the cause is gone the same run can be selected and removed.
+    const again = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+    const second = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: again.digest, discarded: false, includeNotReverted: false } });
+    assert.deepEqual(second.ok ? [second.removed.map(idOf), second.kept] : null, [[FULL], []]);
+  });
+
+  test("a plain file already at the mark's name inside the records is replaced by the mark; the run is removed", async () => {
+    const root = await workspace();
     await writeFile(state(root, "runs", FULL, CLEANUP_LEFTOVER_MARK_FILE_NAME), "not a mark", "utf8");
     const selection = { runs: { runIds: [FULL] } };
     const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
     const outcome = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } });
     assert.deepEqual(outcome.ok ? [outcome.removed.map(idOf), outcome.kept] : null, [[FULL], []]);
     assert.deepEqual((await readdir(state(root))).filter((name) => name.startsWith("cleanup-")), []);
+  });
+
+  test("U-7 (R-40 L-1): a folder with the earlier build's mark (.codaryn-cleanup) is a leftover and can be removed", async () => {
+    const root = await workspace();
+    const old = state(root, "cleanup-00000000000000ee");
+    await mkdir(join(old, "snapshots"), { recursive: true });
+    await writeFile(join(old, "snapshots", "1.orig"), "an original\n", "utf8");
+    await writeFile(join(old, ".codaryn-cleanup"), `${JSON.stringify({ schemaVersion: 1, kind: "cleanup_leftover", target: "run", at: "2026-11-12T00:00:00.000Z" })}\n`, "utf8");
+    // The earlier mark's name with other content is not a mark.
+    const other = state(root, "cleanup-00000000000000ff");
+    await mkdir(other, { recursive: true });
+    await writeFile(join(other, ".codaryn-cleanup"), "{}", "utf8");
+    const summary = await summarizeState({ workspaceRoot: root });
+    assert.deepEqual([summary.leftovers.count, summary.unknownFolders?.count], [1, 1]);
+    const shown = await planCleanup({ workspaceRoot: root, selection: {}, now: NOW });
+    assert.deepEqual(shown.items.map((item) => [item.target, idOf(item), item.warnings]), [["leftover", "00000000000000ee", ["leftover"]]]);
+    const outcome = await applyCleanup({ workspaceRoot: root, selection: {}, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } });
+    assert.deepEqual(outcome.ok ? [outcome.removed.map(idOf), outcome.kept] : null, [["00000000000000ee"], []]);
+    assert.deepEqual((await readdir(state(root))).filter((name) => name.startsWith("cleanup-")), ["cleanup-00000000000000ff"]);
+  });
+
+  test("U-7: a failed removal of a folder with the earlier mark keeps that mark, so it stays a leftover", async () => {
+    const root = await workspace();
+    const old = state(root, "cleanup-00000000000000ee");
+    await mkdir(old, { recursive: true });
+    await writeFile(join(old, "held.txt"), "x", "utf8");
+    await writeFile(join(old, ".codaryn-cleanup"), JSON.stringify({ schemaVersion: 1, kind: "cleanup_leftover", target: "discarded", at: "2026-11-12T00:00:00.000Z" }), "utf8");
+    const shown = await planCleanup({ workspaceRoot: root, selection: {}, now: NOW });
+    const outcome = await applyCleanupWith(
+      { workspaceRoot: root, selection: {}, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } },
+      { remove: async (path: string) => { if (path.endsWith("held.txt")) throw Object.assign(new Error("busy"), { code: "EBUSY" }); await rm(path, { recursive: true, force: true }); }, retryDelayMs: 1 },
+    );
+    assert.deepEqual(outcome.ok ? outcome.kept.map((item) => item.reason) : null, ["partly_removed"]);
+    assert.equal((await summarizeState({ workspaceRoot: root })).leftovers.count, 1);
   });
 });

@@ -6,7 +6,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { MAX_RETRY_AFTER_MS, sendWithRetries } from "../../../../src/model/http/index.js";
+import { ANTHROPIC_KEY_PATTERN_SOURCE, API_KEY_MASK_PATTERN_SOURCES } from "../../../../src/contracts/index.js";
+import { MAX_RETRY_AFTER_MS, createKeyMaterialCheck, createRedactor, sendWithRetries } from "../../../../src/model/http/index.js";
 import type { LimitedBody, Transport } from "../../../../src/model/http/index.js";
 
 type Reply = { status: number; body?: string; headers?: Record<string, string> };
@@ -67,6 +68,34 @@ describe("SP-5: the shared transport's retry-after modes", () => {
     assert.equal(long.calls(), 1);
     assert.deepEqual(long.delays, []);
     assert.deepEqual(sent.ok ? null : [sent.kind, sent.httpStatus], ["rate_limited", 429]);
+  });
+
+  test("SP-5: a key shape that needs a word start is found after a space too; a split key still is", () => {
+    const key = "codaryn-fake-key-not-a-credential";
+    const shaped = ["sk", "proj", "Ab3_Cd4-".repeat(4)].join("-");
+    const redact = createRedactor(key, API_KEY_MASK_PATTERN_SOURCES);
+    // Like the Anthropic shape, a match in the compact view runs on into the next word.
+    assert.equal(redact(`no model; and ${shaped} here`), "no model; and [redacted]");
+    assert.equal(redact(`no model; and ${shaped}. Next`), "no model; and [redacted]. Next");
+    assert.equal(redact(`split ${shaped.slice(0, 12)}
+${shaped.slice(12)} . end`), "split [redacted] . end", "after a word and split");
+    assert.equal(redact(`(${shaped.slice(0, 12)}
+${shaped.slice(12)})`), "([redacted])", "after a bracket and split, as before");
+    assert.equal(redact("run task-runner-for-long-names-and-more-words-here"), "run task-runner-for-long-names-and-more-words-here", "sk- inside a word stays");
+    const holds = createKeyMaterialCheck(key, API_KEY_MASK_PATTERN_SOURCES);
+    assert.equal(holds(`model and ${shaped}`), true);
+    assert.equal(holds(`model ${shaped.slice(0, 12)} ${shaped.slice(12)}`), true);
+    assert.equal(holds("model-one"), false);
+  });
+
+  test("SP-5: the Anthropic shape (no word start) redacts as before, the word after it included", () => {
+    // The compact view runs the match on into the next word; that over-redaction is the pinned behaviour.
+    const shaped = ["sk", "ant", "Zz9Yy8Xx7Ww6"].join("-");
+    const redact = createRedactor("codaryn-fake-key-not-a-credential", [ANTHROPIC_KEY_PATTERN_SOURCE]);
+    assert.equal(redact(`key ${shaped} end`), "key [redacted]");
+    assert.equal(redact(`key${shaped}end`), "key[redacted]");
+    assert.equal(redact(`key ${shaped.slice(0, 9)}
+${shaped.slice(9)} . end`), "key [redacted] . end");
   });
 
   test("the provider's status reading gets the error body", async () => {

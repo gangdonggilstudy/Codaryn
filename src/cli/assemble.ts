@@ -12,11 +12,12 @@ import {
   RevertRunError,
   acquireLock,
   createChangeRecorder,
+  createPlanRecorder,
   createJournal,
   releaseLock,
   writeResult,
 } from "../store/index.js";
-import type { LockInfo } from "../store/index.js";
+import type { LockInfo, RunInspection } from "../store/index.js";
 import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -114,6 +115,11 @@ export interface RevertCommandOptions {
    * nothing is refused.
    */
   readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+  /**
+   * N-27 (a): the store's `inspectRun`. An explicit id with no entry of exactly that name is
+   * run_not_found, and without `isDamaged` it judges damage too.
+   */
+  readonly inspect?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
 }
 
 /** N-26: `listRuns` as the damage check, until the store's own function is passed. */
@@ -173,7 +179,11 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       return { ok: false, code: "workspace_not_found", message: "the workspace is not an existing directory" };
     }
     // N-7, N-18: `latest` is resolved first; an ambiguous one stops here.
-    const resolved = await resolveRunReference(workspaceRoot, requested, { exists, ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }) });
+    const resolved = await resolveRunReference(workspaceRoot, requested, {
+      exists,
+      ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }),
+      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    });
     if (!resolved.ok) return resolved;
     const runId = resolved.runId;
     if (resolved.latest !== null) {
@@ -188,8 +198,10 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       return { ok: false, code: "run_not_found", message: "the workspace has no journal for that run id; nothing was changed" };
     }
     // N-26: the records of a damaged run are not trusted to decide what to put back.
+    const inspect = options.inspect;
     const damageCheck =
       options.isDamaged ??
+      (inspect === undefined ? undefined : async (root: string, id: string) => (await inspect(root, id)) === "damaged") ??
       (options.listRuns === undefined ? undefined : (root: string, id: string) => damagedByListing(options.listRuns as ListRuns, root, id));
     if (damageCheck !== undefined) {
       let damaged: boolean;
@@ -273,7 +285,9 @@ export const assembleRun: Assemble = async (input) => {
     const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
     // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
     const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
-    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });
+    // G-A, G-F: propose_plan stores plan.json for this run (runs/<runId>/plan.json); the other tools never use it.
+    const planRecorder = createPlanRecorder({ workspaceRoot, runId });
+    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     const journal = createJournal({ workspaceRoot, runId, clock });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep

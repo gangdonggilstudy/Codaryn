@@ -40,6 +40,23 @@ export function safeToken(value: unknown): string {
  * Defence in depth: the records are masked, but commands allowed during a run could have
  * written into them.
  */
+/**
+ * N-27 (c), review R-7 L-2: `hideKeys` applied to every string of a value before it is written as
+ * JSON. In JSON text a control character becomes `\uXXXX`, so the check must see the strings
+ * themselves, not the JSON.
+ */
+export function hideKeysInStrings<T>(value: T, currentKey: string | null): T {
+  const walk = (item: unknown): unknown => {
+    if (typeof item === "string") return hideKeys(item, currentKey);
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item === "object" && item !== null) {
+      return Object.fromEntries(Object.entries(item).map(([name, child]) => [name, walk(child)]));
+    }
+    return item;
+  };
+  return walk(value) as T;
+}
+
 export function hideKeys(text: string, currentKey: string | null): string {
   // N-23 (review R-2 L-5): look for key shapes with control characters skipped, so a key broken
   // by one (`sk-ant-AB<BEL>CDEF...`) is still found. The span covers the skipped characters too.

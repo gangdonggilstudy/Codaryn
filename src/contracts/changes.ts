@@ -111,8 +111,18 @@ export type RevertAction = (typeof REVERT_ACTIONS)[number];
  * left to do for it, so it does not make the outcome partial.
  * original_path_taken (G-A): a moved or discarded file cannot go back because something now
  * exists at its original path; nothing is replaced.
+ * unsafe_move (DR-24 b, DR-21): the file could go back only by a rename that does not refuse an
+ * existing destination (no hard links on that volume); it is not moved. A revert has no consent path.
  */
-export const REVERT_SKIP_REASONS = ["changed_since_run", "missing_snapshot", "io_error", "missing_record", "already_reverted", "original_path_taken"] as const;
+export const REVERT_SKIP_REASONS = [
+  "changed_since_run",
+  "missing_snapshot",
+  "io_error",
+  "missing_record",
+  "already_reverted",
+  "original_path_taken",
+  "unsafe_move",
+] as const;
 export type RevertSkipReason = (typeof REVERT_SKIP_REASONS)[number];
 
 /**
@@ -172,5 +182,18 @@ export interface RevertOutcome {
  *   `from`; a discarded file goes back from `.codaryn/discarded/<runId>/` (DR-9) the same way.
  *   Otherwise it is skipped (`changed_since_run`, `original_path_taken`). Renames only: nothing is
  *   copied or replaced. Directories the apply created are left in place.
+ *   - DR-24 (f): the records' paths are masked, so the real paths come from the plan run's
+ *     plan.json (StoredPlan.actions, by `index`). Before any of it is used, the SHA-256 of
+ *     plan.json's bytes must equal the apply journal's `apply_started.digest`, and the plan must
+ *     name `apply_started.planRunId`; otherwise the revert rejects as `invalid_run_record` and
+ *     changes nothing (also with `dryRun`). Each record's `sha256` must equal the plan action's.
+ *   - DR-24 (a): a discarded file is read only at `.codaryn/discarded/<runId>/<stored>`, where the
+ *     discarded directory and the run's directory in it are plain directories (not links) and
+ *     `stored` is one segment matching DISCARDED_STORED_NAME_PATTERN_SOURCE and equal to the
+ *     record's `index` (plan.ts). A record whose `stored` is anything else is `invalid_run_record`;
+ *     a file there that is a link is skipped (`changed_since_run`).
+ *   - DR-24 (b): a move back is made like an apply's move (refusing an existing destination). When
+ *     that cannot be done on the volume, the file is skipped as `unsafe_move`; nothing falls back
+ *     to "check, then rename".
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

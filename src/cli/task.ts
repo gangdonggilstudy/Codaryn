@@ -27,6 +27,30 @@ import type {
   VerifierConfig,
 } from "../contracts/index.js";
 import { toSchemaFieldPath } from "../contracts/index.js";
+import {
+  AGGREGATE_OPS,
+  ALL_TOOL_NAMES,
+  COMPLETION_MODES,
+  CONFIGURABLE_VERIFIER_KINDS,
+  MAX_REVIEW_CHECKLIST_ITEMS,
+  MAX_REVIEW_CHECKLIST_ITEM_CHARS,
+  PLAN_ACTION_KINDS,
+  PLAN_MODES,
+  TABLE_FORMATS,
+  WORKFLOW_ID_PATTERN_SOURCE,
+} from "../contracts/index.js";
+import type {
+  AggregateOp,
+  AnyToolName,
+  CompletionMode,
+  DataRule,
+  HumanReviewConfig,
+  PlanActionKind,
+  PlanMode,
+  RowCountRule,
+  TableFormat,
+  TableRef,
+} from "../contracts/index.js";
 import { checkProtectedPaths } from "../policy/index.js";
 import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "./security/index.js";
 
@@ -252,7 +276,7 @@ function parseProtectedPaths(value: unknown): string[] {
 }
 
 export function parsePolicy(value: unknown): PolicyConfig {
-  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths"]);
+  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions"]);
   if (!Array.isArray(rec["commands"])) fail("policy.commands must be an array");
   const commands = (rec["commands"] as unknown[]).map((item, index): CommandRule => {
     const field = `policy.commands[${index}]`;
@@ -268,13 +292,67 @@ export function parsePolicy(value: unknown): PolicyConfig {
   if (rec["destructive"] !== "deny") fail('policy.destructive must be "deny"');
   if (typeof rec["restorePathTokens"] !== "boolean") fail("policy.restorePathTokens must be a boolean");
   const protectedPaths = rec["protectedPaths"] === undefined ? undefined : parseProtectedPaths(rec["protectedPaths"]);
+  const planActions = rec["planActions"] === undefined ? undefined : parsePlanActions(rec["planActions"]);
   return {
     commands,
     network: "deny",
     destructive: "deny",
     restorePathTokens: rec["restorePathTokens"],
     ...(protectedPaths === undefined ? {} : { protectedPaths }),
+    ...(planActions === undefined ? {} : { planActions }),
   };
+}
+
+/** G-A: `policy.planActions`, the plan action kinds an applied plan may carry. Unique entries. */
+function parsePlanActions(value: unknown): PlanActionKind[] {
+  if (!Array.isArray(value)) fail("policy.planActions must be an array");
+  const kinds = value as unknown[];
+  kinds.forEach((kind, index) => {
+    if (!(PLAN_ACTION_KINDS as readonly unknown[]).includes(kind)) fail(`policy.planActions[${index}] must be one of ${PLAN_ACTION_KINDS.join(", ")}`);
+    if (kinds.indexOf(kind) !== index) fail(`policy.planActions[${index}] is listed twice`);
+  });
+  return kinds as PlanActionKind[];
+}
+
+/** G-A: the workflow fields a task file and a definition share (`tools`, `plan`, `completion`, `humanReview`). */
+export function parseToolList(value: unknown, field: string): AnyToolName[] {
+  if (!Array.isArray(value) || value.length === 0) fail(`${field} must be a non-empty array of tool names`);
+  (value as unknown[]).forEach((tool, index) => {
+    if (!(ALL_TOOL_NAMES as readonly unknown[]).includes(tool)) fail(`${field}[${index}] must be one of ${ALL_TOOL_NAMES.join(", ")}`);
+  });
+  return value as AnyToolName[];
+}
+
+export function parsePlanMode(value: unknown, field: string): PlanMode {
+  if (!(PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${PLAN_MODES.join(", ")}`);
+  return value as PlanMode;
+}
+
+export function parseCompletion(value: unknown, field: string): CompletionMode {
+  if (!(COMPLETION_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${COMPLETION_MODES.join(", ")}`);
+  return value as CompletionMode;
+}
+
+export function parseHumanReview(value: unknown, field: string): HumanReviewConfig {
+  const rec = record(value, field, ["checklist"]);
+  const list = rec["checklist"];
+  if (!Array.isArray(list) || list.length === 0 || list.length > MAX_REVIEW_CHECKLIST_ITEMS) {
+    fail(`${field}.checklist must be an array of 1 to ${MAX_REVIEW_CHECKLIST_ITEMS} lines`);
+  }
+  (list as unknown[]).forEach((item, index) => {
+    if (typeof item !== "string" || item.trim().length === 0 || [...item].length > MAX_REVIEW_CHECKLIST_ITEM_CHARS) {
+      fail(`${field}.checklist[${index}] must be a non-blank line of at most ${MAX_REVIEW_CHECKLIST_ITEM_CHARS} characters`);
+    }
+  });
+  return { checklist: [...(list as string[])] };
+}
+
+/** A workflow definition id (WORKFLOW_ID_PATTERN_SOURCE). */
+export function parseWorkflowRef(value: unknown, field: string): string {
+  if (typeof value !== "string" || !new RegExp(WORKFLOW_ID_PATTERN_SOURCE).test(value)) {
+    fail(`${field} must be a workflow id: 1-64 letters, digits, '.', '_' and '-'`);
+  }
+  return value;
 }
 
 const LIMIT_FIELDS = [
@@ -361,6 +439,87 @@ function parseRule(value: unknown, field: string): FileRule {
   return fail(`${field}.type must be one of ${RULE_TYPES.join(", ")}`);
 }
 
+function parseTableRef(value: unknown, field: string): TableRef {
+  const rec = record(value, field, ["path", "format"]);
+  const format = rec["format"];
+  if (!(TABLE_FORMATS as readonly unknown[]).includes(format)) fail(`${field}.format must be one of ${TABLE_FORMATS.join(", ")}`);
+  return { path: text(rec["path"], `${field}.path`), format: format as TableFormat };
+}
+
+function count(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) fail(`${field} must be an integer of 0 or more`);
+  return value;
+}
+
+function parseRowCount(value: unknown, field: string): RowCountRule {
+  const rec = record(value, field, ["equals", "min", "max", "sameAs"]);
+  const given = ["equals", "min", "max", "sameAs"].filter((key) => rec[key] !== undefined);
+  if (rec["equals"] !== undefined) {
+    if (given.length !== 1) fail(`${field} takes equals alone`);
+    return { equals: count(rec["equals"], `${field}.equals`) };
+  }
+  if (rec["sameAs"] !== undefined) {
+    if (given.length !== 1) fail(`${field} takes sameAs alone`);
+    return { sameAs: parseTableRef(rec["sameAs"], `${field}.sameAs`) };
+  }
+  if (given.length === 0) fail(`${field} needs equals, min, max or sameAs`);
+  const min = rec["min"] === undefined ? undefined : count(rec["min"], `${field}.min`);
+  const max = rec["max"] === undefined ? undefined : count(rec["max"], `${field}.max`);
+  if (min !== undefined && max !== undefined && min > max) fail(`${field}.min must not exceed ${field}.max`);
+  return { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
+}
+
+function tolerance(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) fail(`${field} must be a number of 0 or more`);
+  return value;
+}
+
+/** G-A (VF-04): one data rule. Values are checked for shape only; the verifier reads the tables. */
+function parseDataRule(value: unknown, field: string): DataRule {
+  const type = (value as Rec | null)?.["type"];
+  if (type === "table_shape") {
+    const rec = record(value, field, ["type", "table", "columns", "columnsMatch", "rows"]);
+    const match = rec["columnsMatch"];
+    if (match !== undefined && match !== "exact" && match !== "includes") fail(`${field}.columnsMatch must be "exact" or "includes"`);
+    if (rec["columns"] === undefined && rec["rows"] === undefined) fail(`${field} needs columns or rows`);
+    return {
+      type,
+      table: parseTableRef(rec["table"], `${field}.table`),
+      ...(rec["columns"] === undefined ? {} : { columns: strings(rec["columns"], `${field}.columns`) }),
+      ...(match === undefined ? {} : { columnsMatch: match as "exact" | "includes" }),
+      ...(rec["rows"] === undefined ? {} : { rows: parseRowCount(rec["rows"], `${field}.rows`) }),
+    };
+  }
+  if (type === "aggregate_match") {
+    const rec = record(value, field, ["type", "source", "column", "op", "groupBy", "target", "targetColumn", "targetKeyColumn", "tolerance"]);
+    const op = rec["op"];
+    if (!(AGGREGATE_OPS as readonly unknown[]).includes(op)) fail(`${field}.op must be one of ${AGGREGATE_OPS.join(", ")}`);
+    const groupBy = rec["groupBy"] === undefined ? undefined : text(rec["groupBy"], `${field}.groupBy`);
+    const keyColumn = rec["targetKeyColumn"] === undefined ? undefined : text(rec["targetKeyColumn"], `${field}.targetKeyColumn`);
+    if ((groupBy === undefined) !== (keyColumn === undefined)) fail(`${field}.targetKeyColumn goes with groupBy, and only with it`);
+    let limits: { absolute?: number; relative?: number } | undefined;
+    if (rec["tolerance"] !== undefined) {
+      const tol = record(rec["tolerance"], `${field}.tolerance`, ["absolute", "relative"]);
+      limits = {
+        ...(tol["absolute"] === undefined ? {} : { absolute: tolerance(tol["absolute"], `${field}.tolerance.absolute`) }),
+        ...(tol["relative"] === undefined ? {} : { relative: tolerance(tol["relative"], `${field}.tolerance.relative`) }),
+      };
+    }
+    return {
+      type,
+      source: parseTableRef(rec["source"], `${field}.source`),
+      column: text(rec["column"], `${field}.column`),
+      op: op as AggregateOp,
+      ...(groupBy === undefined ? {} : { groupBy }),
+      target: parseTableRef(rec["target"], `${field}.target`),
+      targetColumn: text(rec["targetColumn"], `${field}.targetColumn`),
+      ...(keyColumn === undefined ? {} : { targetKeyColumn: keyColumn }),
+      ...(limits === undefined ? {} : { tolerance: limits }),
+    };
+  }
+  return fail(`${field}.type must be "table_shape" or "aggregate_match"`);
+}
+
 function parseVerifier(value: unknown, index: number): VerifierConfig {
   const field = `verifiers[${index}]`;
   const kind = (value as Rec | null)?.["kind"];
@@ -392,7 +551,18 @@ function parseVerifier(value: unknown, index: number): VerifierConfig {
       rules: rules.map((rule, ruleIndex) => parseRule(rule, `${field}.rules[${ruleIndex}]`)),
     };
   }
-  return fail(`${field}.kind must be "command" or "file_rules"`);
+  if (kind === "data_checks") {
+    // G-A (VF-04): literal table checks for data analysis.
+    const rec = record(value, field, ["id", "kind", "rules"]);
+    const rules = rec["rules"];
+    if (!Array.isArray(rules) || rules.length === 0) fail(`${field}.rules must be a non-empty array`);
+    return {
+      id: text(rec["id"], `${field}.id`),
+      kind: "data_checks",
+      rules: (rules as unknown[]).map((rule, ruleIndex) => parseDataRule(rule, `${field}.rules[${ruleIndex}]`)),
+    };
+  }
+  return fail(`${field}.kind must be one of ${CONFIGURABLE_VERIFIER_KINDS.join(", ")}`);
 }
 
 /** Values from the config file that bound or complete a task file. */
@@ -436,6 +606,11 @@ export function parseTask(value: unknown, taskDir: string, defaults: TaskDefault
       "privacy",
       "limits",
       "verifiers",
+      "workflowRef",
+      "tools",
+      "plan",
+      "completion",
+      "humanReview",
     ]);
     if (rec["schemaVersion"] !== TASK_SCHEMA_VERSION) fail("schemaVersion must be 1");
     const id = text(rec["id"], "id");
@@ -449,6 +624,12 @@ export function parseTask(value: unknown, taskDir: string, defaults: TaskDefault
     const workspaceRoot = resolveLocal(taskDir, text(rec["workspaceRoot"], "workspaceRoot"), "workspaceRoot");
     const model = parseModel(rec["model"], taskDir);
     const policy = parsePolicy(rec["policy"]);
+    // G-A: the task's own workflow fields; resolved against the definition afterwards (resolveWorkflow).
+    const workflowRef = rec["workflowRef"] === undefined ? undefined : parseWorkflowRef(rec["workflowRef"], "workflowRef");
+    const tools = rec["tools"] === undefined ? undefined : parseToolList(rec["tools"], "tools");
+    const plan = rec["plan"] === undefined ? undefined : parsePlanMode(rec["plan"], "plan");
+    const completion = rec["completion"] === undefined ? undefined : parseCompletion(rec["completion"], "completion");
+    const humanReview = rec["humanReview"] === undefined ? undefined : parseHumanReview(rec["humanReview"], "humanReview");
 
     return {
       schemaVersion: 1,
@@ -461,6 +642,11 @@ export function parseTask(value: unknown, taskDir: string, defaults: TaskDefault
       privacy: { secretEnv },
       limits: boundedLimits("task", model.provider, ownLimits, defaults.limits),
       verifiers,
+      ...(workflowRef === undefined ? {} : { workflowRef }),
+      ...(tools === undefined ? {} : { tools }),
+      ...(plan === undefined ? {} : { plan }),
+      ...(completion === undefined ? {} : { completion }),
+      ...(humanReview === undefined ? {} : { humanReview }),
     };
   });
 }
@@ -471,6 +657,8 @@ export interface QuickTaskInput {
   readonly goal: string;
   readonly cwd: string;
   readonly config: CodarynConfig | null;
+  /** G-A (DR-2): `--workflow <id>`; it becomes the label and the task's `workflowRef`. */
+  readonly workflowRef?: string | null;
 }
 
 /**
@@ -483,7 +671,8 @@ export function buildQuickTask(input: QuickTaskInput): ParseTaskOutcome {
     schemaVersion: 1,
     id: QUICK_TASK_ID,
     goal: text(input.goal, "--goal"),
-    workflow: QUICK_TASK_WORKFLOW,
+    workflow: input.workflowRef ?? QUICK_TASK_WORKFLOW,
+    ...(input.workflowRef === undefined || input.workflowRef === null ? {} : { workflowRef: input.workflowRef }),
     workspaceRoot: path.resolve(input.cwd, text(input.workspace, "--workspace")),
     model: { provider: "anthropic" },
     policy: input.config?.policy ?? DENY_ALL_POLICY,

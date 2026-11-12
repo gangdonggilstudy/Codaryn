@@ -23,6 +23,19 @@ const KO = {
   "apply.detail": "폐기하는 파일은 .codaryn/discarded/<적용 실행 id>/ 보관함으로 옮깁니다. 실행 기록을 정리해도 보관함은 지워지지 않습니다. 계획 뒤에 파일이 바뀌었으면 아무것도 옮기지 않습니다.",
   "apply.form": "적용할 형식: 프로필 {profile} · 작업 종류 {workflow}",
   "apply.formDefault": "(설정의 기본)",
+  "cleanup.message": "정리할까요? 실행 기록 {runs}개({runSize}), 보관함 {discarded}개, 남은 폴더 {leftovers}개 (다이제스트 {digest})",
+  "cleanup.detail": "미리보기에서 본 것만 지웁니다. 그사이 바뀐 항목은 남깁니다. 되돌리기가 제자리에 두지 못한 파일은 지우지 않습니다.",
+  "cleanup.discardedLeft": "적용 실행 {count}개의 기록을 지웁니다. 그 실행의 보관함이 남으면, 그 파일은 되돌리기로 제자리에 되살릴 수 없게 됩니다.",
+  "cleanup.confirm": "정리",
+  "cleanup.keep": "정리하지 않음",
+  "cleanup.notReverted.message": "되돌리지 않았거나 일부만 되돌린 실행 {count}개의 기록도 지울까요?",
+  "cleanup.notReverted.detail": "이 기록을 지우면 그 실행이 바꾼 파일을 더는 되돌릴 수 없습니다. 남기면 나머지만 정리합니다.",
+  "cleanup.notReverted.confirm": "그 기록도 지움",
+  "cleanup.notReverted.keep": "그 기록은 남김",
+  "cleanup.discarded.message": "보관함 {count}개(파일 {files}개, {size})도 지울까요?",
+  "cleanup.discarded.detail": "보관함에는 계획 적용이 치워 둔 사람의 파일이 있습니다. 지우면 영구히 사라지고 되돌릴 수 없습니다.",
+  "cleanup.discarded.confirm": "보관함도 지움",
+  "cleanup.discarded.keep": "보관함은 남김",
   "apply.confirm": "이 계획 적용",
   "apply.keep": "적용 안 함",
   "consent.message": "이 드라이브는 하드 링크를 쓸 수 없습니다. 이번 적용 한 번에만 동의할까요? (다이제스트 {digest})",
@@ -54,6 +67,19 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "apply.detail": "Discarded files are moved to the discard box .codaryn/discarded/<apply run id>/. Cleaning up the run records does not remove the discard box. If files changed after the plan, nothing is moved.",
   "apply.form": "Applied with: profile {profile} · task kind {workflow}",
   "apply.formDefault": "(the config's default)",
+  "cleanup.message": "Clean up? {runs} run records ({runSize}), {discarded} discard boxes, {leftovers} leftover folders (digest {digest})",
+  "cleanup.detail": "Only what the preview showed is removed; anything that changed since is kept. Files a revert could not put back are never removed.",
+  "cleanup.discardedLeft": "The records of {count} apply runs are removed. If their discard boxes stay, a revert can no longer put those files back.",
+  "cleanup.confirm": "Clean up",
+  "cleanup.keep": "Do not clean up",
+  "cleanup.notReverted.message": "Also remove the records of {count} runs that were not reverted, or only partly?",
+  "cleanup.notReverted.detail": "Without these records the files those runs changed can no longer be reverted. If you keep them, only the rest is cleaned up.",
+  "cleanup.notReverted.confirm": "Remove those records too",
+  "cleanup.notReverted.keep": "Keep those records",
+  "cleanup.discarded.message": "Also delete {count} discard boxes ({files} files, {size})?",
+  "cleanup.discarded.detail": "The discard boxes hold people's files that a plan's apply set aside. Deleted, they are gone for good and cannot be reverted.",
+  "cleanup.discarded.confirm": "Delete the discard boxes too",
+  "cleanup.discarded.keep": "Keep the discard boxes",
   "apply.confirm": "Apply this plan",
   "apply.keep": "Do not apply",
   "consent.message": "This drive cannot use hard links. Agree for this one apply only? (digest {digest})",
@@ -149,4 +175,16 @@ export function widenText(language: DialogLanguage, kind: string, field: string)
 export function applyFormText(language: DialogLanguage, profile: string | null, workflow: string | null): string {
   const name = (value: string | null): string => (value === null ? dialogText(language, "apply.formDefault") : value.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, 200));
   return dialogText(language, "apply.form", { profile: name(profile), workflow: name(workflow) });
+}
+
+/** A size for a dialog: bytes, KB, MB or GB (1024), one decimal above bytes. */
+export function formatBytes(language: DialogLanguage, bytes: number): string {
+  const units = language === "ko" ? ["바이트", "KB", "MB", "GB"] : ["bytes", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return unit === 0 ? `${bytes} ${units[0]}` : `${value.toFixed(1)} ${units[unit]}`;
 }

@@ -27,7 +27,9 @@ import { RunManager } from "./runs.js";
 import { RunHistory } from "./history.js";
 import { PlanApprovals } from "./plans.js";
 import { SettingsProposals } from "./settings-proposals.js";
-import { WIDENING_KINDS, applyFormText, widenText } from "./dialog-texts.js";
+import { CleanupPreviews } from "./cleanup-previews.js";
+import { cleanupQuestions } from "../shared/cleanup.js";
+import { WIDENING_KINDS, applyFormText, formatBytes, widenText } from "./dialog-texts.js";
 import { ModelEntries, ModelListLimit } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -255,6 +257,35 @@ export function startGui(options: GuiOptions): void {
         const buttons = [dialogText(language, "revert.confirm"), dialogText(language, "revert.keep")];
         const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
         return answer === 0;
+      },
+      // GU-4 (3.8), DR-39, DR-44: each question apart; "keep" is every default.
+      cleanupPreviews: new CleanupPreviews((size) => randomBytes(size), () => Date.now()),
+      confirmCleanup: async (record) => {
+        const questions = cleanupQuestions(record.plan);
+        const values = {
+          runs: questions.records.count,
+          runSize: formatBytes(language, questions.records.bytes),
+          discarded: questions.discarded.count,
+          leftovers: questions.leftovers,
+          digest: record.plan.digest.slice(0, 12),
+        };
+        // DR-44 (c): apply runs whose records go while their discard boxes may stay.
+        const detail = [...(questions.discardedLeft > 0 ? [dialogText(language, "cleanup.discardedLeft", { count: questions.discardedLeft })] : []), dialogText(language, "cleanup.detail")].join("\n");
+        const buttons = [dialogText(language, "cleanup.confirm"), dialogText(language, "cleanup.keep")];
+        return (await ask("cleanup.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true }, values)) === 0;
+      },
+      confirmCleanupNotReverted: async (record) => {
+        const values = { count: cleanupQuestions(record.plan).notReverted };
+        const buttons = [dialogText(language, "cleanup.notReverted.confirm"), dialogText(language, "cleanup.notReverted.keep")];
+        const box = { type: "warning" as const, title: dialogText(language, "closeRun.title"), detail: dialogText(language, "cleanup.notReverted.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true };
+        return (await ask("cleanup.notReverted.message", box, values)) === 0;
+      },
+      confirmCleanupDiscarded: async (record) => {
+        const discarded = cleanupQuestions(record.plan).discarded;
+        const values = { count: discarded.count, files: discarded.files, size: formatBytes(language, discarded.bytes) };
+        const buttons = [dialogText(language, "cleanup.discarded.confirm"), dialogText(language, "cleanup.discarded.keep")];
+        const box = { type: "warning" as const, title: dialogText(language, "closeRun.title"), detail: dialogText(language, "cleanup.discarded.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true };
+        return (await ask("cleanup.discarded.message", box, values)) === 0;
       },
       settingsProposals: new SettingsProposals((size) => randomBytes(size), () => Date.now()),
       // 6.6: "do not write" is the default; the dialog names each widening by kind and field, never a value.

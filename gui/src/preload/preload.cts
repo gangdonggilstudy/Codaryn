@@ -34,6 +34,9 @@ const CHANNELS = {
   report: "codaryn:report:read",
   proposeSettings: "codaryn:settings:propose",
   applySettings: "codaryn:settings:apply",
+  stateSummary: "codaryn:state:summary",
+  previewCleanup: "codaryn:cleanup:preview",
+  applyCleanup: "codaryn:cleanup:apply",
 } as const;
 
 const EVENTS = {
@@ -86,6 +89,10 @@ const api = Object.freeze({
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
   revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
   /** DR-25: the retry token a revert's result gave; never a consent: the main process asks the person. */
+  /** GU-4: the state summary; a cleanup preview of a selection (plain data); cleaning by the preview's token only. */
+  stateSummary: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.stateSummary, { workspace: text(workspace) }),
+  previewCleanup: (workspace: unknown, selection: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewCleanup, { workspace: text(workspace), selection: plain(selection) }),
+  applyCleanup: (token: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.applyCleanup, { token: text(token) }),
   /** One edit as plain data (copied here); never a config file or a path to one. */
   proposeSettings: (edit: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.proposeSettings, { edit: plain(edit) }),
   applySettings: (token: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.applySettings, { token: text(token) }),

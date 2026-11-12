@@ -48,6 +48,23 @@ describe("R-55 M-1: the plan line follows the apply run", () => {
     assert.deepEqual(stateIn([partly, plan]), { state: "applied", applyRunId: APPLY });
   });
 
+  test("a revert record that cannot be read is ignored (revertRecordDamaged): judged by how the apply ended", () => {
+    const unreadable = applyRun("done", "verified", { reverted: null, revertRecordDamaged: true });
+    assert.deepEqual(stateIn([unreadable, plan]), { state: "applied", applyRunId: APPLY });
+  });
+
+  test("an entry of that id that is not an apply run, or an apply run of another plan: not this plan's apply records", () => {
+    const OTHER_PLAN = toRunId("20261112T135700Z-0a1b2c3d") as RunId;
+    const cases: [string, Checked][] = [
+      ["a run (kind absent)", entry(APPLY, "done", "verified")],
+      ["a run (kind run)", entry(APPLY, "done", "verified", { kind: "run" })],
+      ["an apply run of another plan", applyRun("done", "verified", { planRunId: OTHER_PLAN })],
+      ["an apply run naming no plan", entry(APPLY, "done", "verified", { kind: "apply" })],
+      ["a reverted apply run of another plan", applyRun("done", "verified", { planRunId: OTHER_PLAN, reverted: { at: "2026-11-12T14:00:00.000Z", status: "complete" } })],
+    ];
+    for (const [name, other] of cases) assert.deepEqual(stateIn([other, plan]), { state: "record_missing", applyRunId: APPLY }, name);
+  });
+
   test("not an applied plan run: no state", () => {
     assert.equal(planApplyStateOf(entry(PLAN, "needs-input", "plan_pending"), []), null);
     assert.equal(planApplyStateOf(applyRun("done", "verified"), []), null);

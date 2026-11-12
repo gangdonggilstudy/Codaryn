@@ -299,6 +299,20 @@ export const HELP_OPTIONS = [
   "confirm",
   "include_not_reverted",
   "delete_discarded",
+  // U-53 (review R-64 L1, I1 to I3; R-58 L2):
+  // `--workflow <id>` of run, plan, apply and review (the task type of the quick form; a task file
+  // names its own with workflowRef; changes takes none).
+  "workflow",
+  // `--json` of run, revert and apply: the result's JSON line on stdout at a terminal too (stdout and
+  // stderr both); through a pipe or into a file, or with stderr redirected, it is printed without it.
+  // `json` stays for the commands whose `--json` prints JSON in place of text.
+  "json_line",
+  // `--task <file>` of plan, apply, review and changes: the task file the run was made with, whose
+  // settings, checks and secrets are read; nothing is run. `task` stays for run and doctor.
+  "run_task",
+  // `--workspace <dir>` of the reading commands report, runs, plan and changes: left out (with no
+  // `--task`), the current directory (U-17). `workspace` stays for the commands that need it.
+  "workspace_or_current",
 ] as const;
 export type HelpOption = (typeof HELP_OPTIONS)[number];
 

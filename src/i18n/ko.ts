@@ -336,6 +336,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.search_files": "파일 검색",
   "tool.write_file": "파일 쓰기",
   "tool.run_command": "명령 실행",
+  "tool.inspect_files": "파일 목록 보기",
+  "tool.propose_plan": "계획 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

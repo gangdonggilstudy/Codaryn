@@ -131,6 +131,40 @@ if (seen.error !== undefined) {
   failed += 1;
   process.stdout.write(`FAIL error: ${JSON.stringify(seen.error)}\n`);
 }
-const total = expected.length + 1;
+
+// R-10 L-1, L-5 (GS-15): started with a debugging switch or NODE_OPTIONS, the app ends at its start
+// check (exit 2) and never loads the window. Loopback port 0 only. --inspect-brk stops Node before
+// any app code runs, so only the fuses can refuse it (GU-9); it is reported, not judged.
+const started = join(gui, "build", "switch-started.txt");
+const switchRuns = [
+  ["--remote-debugging-port", ["--remote-debugging-port=0"], {}, true],
+  ["--inspect", ["--inspect=127.0.0.1:0"], {}, true],
+  ["NODE_OPTIONS=--inspect", [], { NODE_OPTIONS: "--inspect=127.0.0.1:0" }, true],
+  ["--inspect-brk", ["--inspect-brk=127.0.0.1:0"], {}, false],
+];
+let switchChecks = 0;
+for (const [label, args, extra, judged] of switchRuns) {
+  rmSync(started, { force: true });
+  const runOne = spawnSync(electron, [...args, join(gui, "build", "tests", "smoke", "switch-entry.js")], {
+    cwd: gui,
+    env: { ...env, ...extra },
+    stdio: "ignore",
+    timeout: judged ? 60_000 : 8_000,
+    killSignal: "SIGKILL",
+  });
+  const loaded = existsSync(started);
+  const ended = runOne.status === 2 && !loaded;
+  if (!judged) {
+    process.stdout.write(`NOTE ${label}: ${ended ? "ended at the check" : `not ended by the start check (exit ${runOne.status}, stopped by the test); needs the fuses (GU-9)`}\n`);
+    continue;
+  }
+  switchChecks += 1;
+  if (!ended) failed += 1;
+  process.stdout.write(`${ended ? "ok" : "FAIL"} switch ${label}: exit ${runOne.status}, window loaded ${loaded}\n`);
+}
+rmSync(started, { force: true });
+rmSync(join(gui, "build", "switch-profile"), { recursive: true, force: true });
+
+const total = expected.length + 1 + switchChecks;
 process.stdout.write(`gui smoke: ${total - Math.min(failed, total)} of ${total} checks passed, app exit ${run.status}\n`);
 process.exit(failed === 0 ? 0 : 1);

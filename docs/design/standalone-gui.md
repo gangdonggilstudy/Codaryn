@@ -590,7 +590,8 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 패키지할 때 `@electron/fuses`로 정한다.
   - 끔: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, `GrantFileProtocolExtraPrivileges`
   - 켬: `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`
-- 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자를 보면 바로 끝낸다[설계]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
+- 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자, 그 인자를 담은 `NODE_OPTIONS`, 이미 열린 검사기(`inspector.url()`)를 보면 검사기를 닫고 바로 끝낸다[설계, R-10 L-1]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
+  - 한계(실행으로 확인): Node가 앱 코드보다 먼저 검사기 포트를 열므로 `--inspect`와 `NODE_OPTIONS`의 포트는 잠깐 열렸다 닫힌다. `--inspect-brk`는 앱 코드 전에 Node가 멈춰 이 검사가 돌지 않는다. 둘 다 fuses(`EnableNodeCliInspectArguments`, `EnableNodeOptionsEnvironmentVariable` 끔, GU-9)만 막는다. 연기 시험이 세 형태의 종료를 확인하고 `--inspect-brk`는 알림으로 보인다.
 - 제품 빌드에 시험용 스위치나 숨은 개발 메뉴를 넣지 않는다. 시험은 8.3의 별도 진입점으로 한다.
 - 충돌 보고(`crashReporter`), 자동 업데이트, 원격 측정을 켜지 않는다(GUI-D9).
 

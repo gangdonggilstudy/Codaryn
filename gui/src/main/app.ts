@@ -5,6 +5,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import inspector from "node:inspector";
 import { existsSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -22,7 +23,7 @@ import { registerIpc } from "./ipc.js";
 import { findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
 import { guardContents, secureSession } from "./security.js";
-import { SESSION_PARTITION, FORBIDDEN_SWITCHES, forbiddenSwitch, secureWebPreferences } from "./security-policy.js";
+import { SESSION_PARTITION, debuggingRequested, secureWebPreferences } from "./security-policy.js";
 import { Workspaces } from "./workspaces.js";
 
 export interface GuiOptions {
@@ -92,9 +93,17 @@ async function startHost(options: GuiOptions): Promise<StartOutcome | { readonly
 }
 
 export function startGui(options: GuiOptions): void {
-  const forbidden =
-    forbiddenSwitch(process.argv.slice(1)) ?? FORBIDDEN_SWITCHES.find((name) => app.commandLine.hasSwitch(name)) ?? null;
-  if (forbidden !== null) {
+  // 6.7, R-10 L-1: a debugging switch, NODE_OPTIONS asking for the inspector, or an inspector that is
+  // already open ends the app here. The inspector is closed first. `--inspect-brk` never reaches this
+  // line; only the fuses (GU-9) refuse it.
+  const debugging = debuggingRequested({
+    argv: process.argv.slice(1),
+    nodeOptions: process.env["NODE_OPTIONS"],
+    inspectorUrl: inspector.url(),
+    hasSwitch: (name) => app.commandLine.hasSwitch(name),
+  });
+  if (debugging !== null) {
+    inspector.close();
     app.exit(2);
     return;
   }

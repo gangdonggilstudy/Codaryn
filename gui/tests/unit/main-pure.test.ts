@@ -11,7 +11,7 @@ import { APP_INDEX_URL, isAppUrl, resolveAppUrl } from "../../src/main/app-url.j
 import { REMOVED_HOST_VARIABLES, hostEnvironment } from "../../src/main/environment.js";
 import { WorkspaceHandles } from "../../src/main/handles.js";
 import { envValue, findDevelopmentNode } from "../../src/main/node-path.js";
-import { CONTENT_SECURITY_POLICY, SESSION_PARTITION, forbiddenSwitch, secureWebPreferences } from "../../src/main/security-policy.js";
+import { CONTENT_SECURITY_POLICY, SESSION_PARTITION, debuggingRequested, forbiddenSwitch, secureWebPreferences } from "../../src/main/security-policy.js";
 import { HANDLE_PATTERN } from "../../src/shared/ipc.js";
 
 test("main: the host environment drops the code-loading variables in any case and keeps the rest", () => {
@@ -128,4 +128,15 @@ test("main: debugging and inspector switches are found in any form", () => {
   assert.equal(forbiddenSwitch(["--inspect-brk=0.0.0.0:9229"]), "inspect-brk");
   assert.equal(forbiddenSwitch(["-inspect"]), "inspect");
   assert.equal(forbiddenSwitch(["D:\\work\\notes", "--lang=ko"]), null);
+});
+
+test("main (R-10 L-1): debugging asked for by argument, by NODE_OPTIONS or by an open inspector is found", () => {
+  const none = { argv: ["D:\work"], nodeOptions: undefined, inspectorUrl: undefined, hasSwitch: () => false };
+  assert.equal(debuggingRequested(none), null);
+  assert.equal(debuggingRequested({ ...none, argv: ["--inspect=127.0.0.1:0"] }), "inspect");
+  assert.equal(debuggingRequested({ ...none, nodeOptions: "--max-old-space-size=4096 --inspect=127.0.0.1:0" }), "inspect");
+  assert.equal(debuggingRequested({ ...none, nodeOptions: "--inspect-brk" }), "inspect-brk");
+  assert.equal(debuggingRequested({ ...none, nodeOptions: "--max-old-space-size=4096" }), null);
+  assert.equal(debuggingRequested({ ...none, inspectorUrl: "ws://127.0.0.1:9229/x" }), "inspector");
+  assert.equal(debuggingRequested({ ...none, hasSwitch: (name) => name === "remote-debugging-port" }), "remote-debugging-port");
 });

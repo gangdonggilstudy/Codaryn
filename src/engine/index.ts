@@ -56,7 +56,6 @@ import {
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_NAMES,
   asRawText,
-  countPrivacyTokens,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -97,6 +96,7 @@ import type {
   VerifierResult,
   WorkflowToolName,
 } from "../contracts/index.js";
+import { countPrivacyTokens } from "../contracts/index.js";
 import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
 import type { FailedForFeedback } from "./feedback.js";
 import { RunState } from "./state.js";
@@ -321,9 +321,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   /** The run_start manifest (U-1). Every later check compares with it. Local only, never recorded. */
   let baseline: IntegrityManifest | null = null;
   /** `changed` of the latest recorded `integrity_checked`; undefined while none was recorded. */
-  let protectedChanged: readonly MaskedText[] | undefined;
   // DR-52 (U-25): the protected tokens in what the engine sent to the model (EngineResult.masking).
   let maskedPlaces = 0;
+  let protectedChanged: readonly MaskedText[] | undefined;
   // DR-38: the state guard, the last tier-run fingerprint (each window chains from it) and the
   // tier-state base of the run's start; the last recorded list goes into the result.
   const stateGuard = deps.stateGuard;
@@ -1332,12 +1332,12 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       notices,
       // U-2: only when at least one integrity_checked was recorded; the last one's list.
       ...(protectedChanged !== undefined ? { protectedChanged } : {}),
-      // DR-38: only when at least one state_checked was recorded; the last one's list.
-      ...(stateChanged !== undefined ? { stateChanged } : {}),
       // DR-52: counts only, and only when the gateway says it holds at least one value.
       ...(privacy.registeredValues !== undefined && privacy.registeredValues > 0
         ? { masking: { registeredValues: privacy.registeredValues, maskedPlaces } }
         : {}),
+      // DR-38: only when at least one state_checked was recorded; the last one's list.
+      ...(stateChanged !== undefined ? { stateChanged } : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),

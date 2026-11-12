@@ -16,7 +16,7 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 
 | 문서 | 내용 |
 | --- | --- |
-| [사용 안내](usage.md) | 설치, 키 없는 체험, 설정, 실행, 재수정 반복, 결과, 되돌리기, 비밀, 정책, 점검표, 한계, 문제 해결 |
+| [사용 안내](usage.md) | 설치, 키 없는 체험, 설정, 실행, 재수정 반복, 결과, 되돌리기, 가릴 값, 정책, 점검표, 한계, 문제 해결 |
 | [아키텍처](architecture.md) | 요구사항, 모듈 경계, 실행 흐름, Anthropic 연결, 자기 개발 구조. 구현·결정만·설계만을 구분한다 |
 | [단계별 계획](roadmap.md) | 단계별 범위와 완료 기준, 현재 상태 |
 | [설계 결정](decisions.md) | 확정 사항, 선택 근거, 작업 지시서와 설계 문서 결정의 요약, 미정과 사용자 확인 대기 |
@@ -35,7 +35,7 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [구현 위치표](design/implementation-map.md) | 기능별 구현 파일, 결정 번호, 시험 |
 | [어댑터 계약](design/adapter-contract.md) | 어댑터 공통 앱 계층, 이벤트·취소·확인 질문, 줄 프로토콜, CLI 이행 |
 | [VS Code 확장](design/vscode-extension.md) | 실행마다 CLI 자식을 부르는 확장의 화면, 명령, 설정, 시험 |
-| [범용 작업 워크플로](design/general-tasks.md) | 문서 작성·자료 분석·파일 정리, 계획 확인과 적용, 사람 확인 |
+| [범용 작업과 작업 종류](design/general-tasks.md) | 문서 작성·자료 분석·파일 정리, 계획 확인과 적용, 사람 확인 |
 | [독립 GUI](design/standalone-gui.md) | 비개발자용 GUI의 화면 흐름, 형태 후보와 권고, 보안 경계 |
 | [두 번째 제공자](design/second-provider.md) | OpenAI(Codex 계열)를 두 번째 API 제공자로 더한 설계: 제공자 중립화, 설정에서 제공자 고르기, Responses API 연결, 시험과 보안 점검 |
 | [두 번째 제공자 사실 확인](design/second-provider-facts.md) | OpenAI(Responses API)에 대해 공식 문서로 확인한 사실과 미확인 항목. 두 번째 제공자 결정(DR-31)의 사실 기준 |

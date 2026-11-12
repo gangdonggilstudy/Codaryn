@@ -250,7 +250,8 @@ interface TaskForm {
 }
 // CodarynApp의 선택 함수. 범용 작업 명령이 생기면 채운다. 어댑터는 있는지 보고 화면을 연다.
 plan?(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
-applyPlan?(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null },
+applyPlan?(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null;
+                      unsafeMoveConsent: { digest: string } | null },   // DR-21, 59dc39a
            observer?: ApplyObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
 review?(request: { settings: TaskForm; runId: string; decision: "accept" | "reject"; note: string | null }): Promise<AppCallOutcome<ReviewOutput>>;
 
@@ -260,7 +261,7 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```
 
 - 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
-- G-A 타입은 G-A가 main에 들어오기 전까지 `src/app/general-tasks.ts`가 같은 이름과 모양으로 되풀이한다(`f53fb16`, `720aa5a` 기준). 들어오면 그 파일만 계약의 re-export로 바꾼다.
+- G-A 타입은 G-A가 main에 들어오기 전까지 `src/app/general-tasks.ts`가 같은 이름과 모양으로 되풀이한다(`f53fb16`, `720aa5a`, DR-21의 `d32aae2` 기준). 들어오면 그 파일만 계약의 re-export로 바꾼다.
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 
 흐름
@@ -274,9 +275,17 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
    - 적용 실행의 첫 기록은 `apply_started`다(DR-12). 어댑터는 이벤트의 첫 레코드 종류로 실행과 적용을 가르지 않는다. 자기가 부른 함수로 안다.
 4. 적용은 새 실행이다. 실행과 같은 이벤트와 취소 통로를 갖는다(DR-2): 핸들의 `cancel()`과 관찰자의 이벤트. 프로세스 밖 어댑터는 `apply`에 `--events jsonl`, `--cancel-file`을 쓴다(6절).
    - 적용 취소의 끝 상태(`cancelled`와 그때까지 옮긴 목록, `revert` 안내)는 G-A가 정한다(R-1 L-7).
-5. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
+5. 하드 링크가 없는 드라이브(DR-21). 적용 전 점검이 안전하게 옮길 수 없는 항목을 찾으면(`plan_checked.unsafeMoves`) 적용은 아무것도 옮기지 않고 `needs-input`/`consent_required`로 끝난다.
+   - GUI는 그 항목과 위험(옮기는 사이에 생긴 같은 이름의 파일을 덮을 수 있음)을 보여 주고 따로 동의를 받는다.
+   - 동의하면 같은 계획으로 `applyPlan`을 다시 부르고 `unsafeMoveConsent: { digest }`에 그 계획의 전체 다이제스트를 넣는다. 그 적용 한 번에만 유효하다.
+   - 앱 계층이 이것을 G-A의 `UnsafeMoveConsent`로 바꾼다(`unsafeMoveConsentOf`, `src/app/consent.ts`).
+     - 경로는 언제나 `adapter`다. GUI가 다른 경로(`cli-tty`, `cli-flag`)를 댈 수 없다.
+     - 다이제스트가 64자리 소문자 16진수가 아니거나, 적용하는 계획(`digest`, 12자 이상 앞부분)과 다르면 실행 전에 `invalid_arguments`로 거부한다. 엔진도 다른 계획의 동의를 없는 것으로 본다.
+   - task·설정·프로필·계획·모델은 동의를 줄 수 없다. 요청의 이 필드 말고 다른 통로는 없다.
+   - G-F의 `runApply`는 아직 승인 경로를 `cli-flag`·`cli-tty`로만 정하고 동의 인자를 받지 않는다. 앱 계층이 CLI 함수를 부르는 방식(AC-D16)으로 붙이려면 CLI가 `adapter` 승인과 동의를 주입받는 자리가 필요하다(A-4 보고서).
+6. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
 
-- 앱 계층에는 이 세 함수가 아직 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-F)이 없기 때문이다. 타입은 G-A의 것을 쓴다.
+- 앱 계층에는 이 세 함수가 아직 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-F)이 범용 작업 묶음과 함께 main에 들어온 뒤 붙인다(G-F는 `claude/workspace-policy`에 있다). 타입은 G-A의 것을 쓴다.
 - (DR-20으로 추진하지 않음) VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 만들어 두었다(`vscode/src/core/args.ts`, 참고용).
 
 ### 5.7 변경 비교 [구현 A-1] (DR-7)
@@ -382,6 +391,7 @@ GUI의 첫 실행 마법사와 설정 화면이 쓴다. 파일을 고르는 규�
 ```ts
 readSettings({ configPath }) → SettingsView               // a86cd12
   // file: 출처(argument·environment·default), 경로, 표시 이름, 있는지 / config / profiles / workflows / keyAvailable
+  // builtinWorkflows: G-A BUILTIN_WORKFLOW_IDS (설정 파일 없이도) / profileWorkflows: 프로필마다 { profile, workflowRef | null }   // 59dc39a
 createSettings({ configPath, workspace }) → InitOutput     // b015c9f, `init --json` 그대로(질문 없음)
 settingsSuggestions({ workspace }) → { commands: { shown, rule }[], protectedPaths }   // b015c9f
 proposeSettingsChange({ configPath, next }) → { baseDigest, digest, changes, widening, config }   // c1957d8

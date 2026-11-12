@@ -17,6 +17,7 @@ import { acquireLock, nodeLockFileSystem } from "../../../src/store/index.js";
 import type { LockFileSystem } from "../../../src/store/index.js";
 import { moveWithoutReplacing } from "../../../src/store/apply-revert.js";
 import { createExclusive } from "../../../src/store/common.js";
+import { ACQUIRE_BUDGET_MS } from "./lock-budget.js";
 
 const clock = { now: () => Date.UTC(2026, 10, 12, 6, 0, 0) };
 const CRASHED_PID = 4_000_001;
@@ -93,7 +94,7 @@ test("without hard links, contenders reclaiming one dead lock in the same proces
         await leaveDeadLock(root);
         const ids = ["run-a", "run-b", "run-c"];
         const outcomes = await Promise.all(
-          ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, fileSystem: noLinks(code), isProcessAlive: crashedIsDead })),
+          ids.map((runId) => acquireLock({ workspaceRoot: root, runId, clock, fileSystem: noLinks(code), retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive: crashedIsDead })),
         );
         const winners = ids.filter((_, index) => outcomes[index]?.ok === true);
         assert.equal(winners.length, 1, `${code} round ${round}: winners ${JSON.stringify(winners)}`);
@@ -116,7 +117,7 @@ test("without hard links, separate processes reclaiming one dead lock at the sam
         `const { acquireLock, nodeLockFileSystem } = await import(${JSON.stringify(storeUrl)});`,
         `const fileSystem = { ...nodeLockFileSystem, link: async () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); } };`,
         `while (Date.now() < ${startAt}) {}`,
-        `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 }, fileSystem, isProcessAlive: (pid) => pid !== ${CRASHED_PID} });`,
+        `const outcome = await acquireLock({ workspaceRoot: ${JSON.stringify(root)}, runId: process.argv[1], clock: { now: () => 0 }, fileSystem, retryForMs: ${ACQUIRE_BUDGET_MS}, isProcessAlive: (pid) => pid !== ${CRASHED_PID} });`,
         "process.stdout.write(JSON.stringify({ ok: outcome.ok, code: outcome.code ?? null }));",
         `await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${startAt + 900} - Date.now())));`,
       ].join("\n");
@@ -181,7 +182,7 @@ test("a complete lock written without a final newline (by hand, other tools, the
     await withRoot(async (root) => {
       await mkdir(join(root, ".codaryn"), { recursive: true });
       await writeFile(lockFile(root), JSON.stringify({ pid: CRASHED_PID, runId: "crashed-run", startedAt: "2026-11-11T00:00:00.000Z" }));
-      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-n", clock, fileSystem, isProcessAlive: crashedIsDead });
+      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-n", clock, fileSystem, retryForMs: ACQUIRE_BUDGET_MS, isProcessAlive: crashedIsDead });
       assert.equal(outcome.ok, true, JSON.stringify(outcome));
       assert.equal((JSON.parse(await readFile(lockFile(root), "utf8")) as { runId: string }).runId, "run-n");
     });

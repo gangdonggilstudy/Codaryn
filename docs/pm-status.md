@@ -38,6 +38,22 @@ Codex가 PM을 다시 인계받을 때 읽는 체크포인트다. 임시 PM이 �
 - 추가 지시(같은 날): 편의성을 확보하게 설계한다. 설계 전문가를 다시 붙여 사용성 개선을 협의하고 추가 설계한다. UX 설계도 진행하고 모두 문서화한다. 문서화 없이 진행된 부분은 다 문서화한다. 모델명을 외워 치지 않도록 모델 목록을 불러와 고를 수 있게 한다(결정 Y-1~Y-5, `work-orders/phase-3-self-development.md`).
 - 적용: p6이 사용성 검토와 UX 설계 문서(`docs/design/usability-review.md`, `docs/design/ux-design.md`)를, p8이 문서화 누락 점검과 설계 문서 보완(`architecture.md`, `decisions.md`, `privacy.md`, `testing.md`, `unit-test-plan.md`, `development-workflow.md`, `personas.md`, `docs/design/implementation-map.md`)을 맡았다. 선택지는 각 문서의 "결정 필요"에 권고안과 함께 올라오고 PM이 정해 작업 지시서에 기록한다.
 
+## 진행 요약 (CP-14, 2026-11-12, main `d7f8381`)
+
+- **사용성 개선과 범용 작업 묶음을 main에 병합했다**(`d7f8381`). 작업 브랜치 10개를 PM 통합 worktree(`pm/integration` `4ebc945`)에서 합쳐 검증한 판과 한 파일도 다르지 않다.
+- 병합 뒤 main에서 PM이 실행한 검증: `npm ci` 성공, 타입 검사 통과, 유닛 1508건 중 1503 통과·실패 0·건너뜀 3·todo 2, 통합 519건 통과·실패 0, `check-secrets --tracked` 발견 없음. 실제 API 미실행.
+- 들어간 것: 사용성 CLI 연결(N-1~N-27: 기본 설정 위치, `init`, 프로필, 한 줄 실행, 두 언어, 사람용 출력, `runs`, `--run latest`, `revert --dry-run`, 진단, 잠금 안내), 범용 작업(계약 G-A, 엔진 G-B, 도구·적용기·정책 G-C, 검증기·표 해석 G-D, 저장·되돌리기 G-E, CLI `plan`·`apply`·`review` G-F, 통합 사례 G-G), 앱 계층 추가분(실행 목록, 설정 만들기, 계획·적용·사람 확인, 동의 전달), 독립 GUI 뼈대(`gui/`, GU-1·GU-2), 사용 문서.
+- 병합 전 검토(모두 구현자가 아닌 세션, 원문은 `docs/reviews/2026-11-12-`): r5, r6, r7·r7b, r9·r9b·r9c, r10·r10b, r11, r12, r13, r14, r15. 병합 시점에 열린 높음·중간 지적은 없다. R-14·R-15의 중간(계획 보기의 가림 비교)은 CLI 연결 `2f6d5c8`로 닫혔고 PM이 통합 판에서 앱 계층 시험으로 확인했다.
+- CP-13에 적은 main의 알려진 결함 세 건(위조 실행 기록의 되돌리기, 검증기 id 출력, pid만 보는 잠금)은 이 병합으로 고쳐졌다.
+- 남은 것(후속 배정):
+  - 검토의 낮음 지적: R-10b 2건, R-12 4건, R-13 3건, R-14 3건, R-15 1건(링크와 원본 지우기 사이에서 끊긴 적용).
+  - todo로 표시된 시험 2건(`tests/unit/app/plan-review.test.ts`, `tests/unit/engine/g-real-combination.test.ts`)의 표시 제거.
+  - N-28 시험 수정(pid로 죽이는 유닛 시험, 간헐 실패 Z-1의 유력한 원인)은 w3:p5가 main 기준 커밋을 준비 중이다.
+  - DR-29 후속: 실행이 변경 파일의 가린 표기를 기록해 `changes`가 다시 글을 보여 줄 수 있게 한다. 폐기 보관함·실행 기록 정리의 계약과 함수.
+  - 두 번째 제공자(Codex, DR-22): 묶음이 병합됐으므로 착수한다.
+  - 독립 GUI의 화면 단위(GU-3 이후).
+- 확인하지 않은 범위: 실제 Anthropic API, FAT·exFAT 실제 볼륨(동의 경로는 링크 실패를 주입한 유닛으로만 확인), Linux·macOS, GUI 패키지 빌드와 코드 서명.
+
 ## 진행 요약 (CP-13, 2026-11-12, main `143d161`)
 
 - main에 병합된 것(재개 뒤): 체험 예시와 사용 문서(N-D), 단계 4·5 설계 문서 넷과 맞춤(D3), `models` 통합 사례와 Z-1 진단, 사용성 계약(N-14~N-18 수정 포함), 두 언어 문구 카탈로그(N-B), 사람용 출력·실행 목록·`revert --dry-run` 모듈(N-C), 앱 계층 `src/app`(A-1, DR-15 수정 포함), 시험의 죽은 잠금 pid 수정(Z-2).

@@ -32,6 +32,7 @@ import type {
   ContentHash,
   CreateChangeRecorder,
   RawText,
+  RevertErrorCode,
   ResolvedPath,
   RevertAction,
   RevertRun,
@@ -41,7 +42,7 @@ import type {
   Workspace,
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { ApplyRecordError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
+import { ApplyRecordError, PlanRunMissingError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
 import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
@@ -200,7 +201,8 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
   };
 };
 
-export type RevertRunErrorCode = "run_not_found" | "invalid_run_record";
+/** The contract's REVERT_ERROR_CODES (R-9c C-1 adds plan_run_missing). */
+export type RevertRunErrorCode = RevertErrorCode;
 
 /**
  * Why `revertRun` rejected. Nothing was changed. The message names no path and no content.
@@ -428,6 +430,7 @@ export const revertRun: RevertRun = async (request) => {
         consent !== undefined && consent !== null && consent.runId === runId && (APPROVAL_CHANNELS as readonly string[]).includes(consent.channel);
       return await revertApplyRun(workspaceRoot, runId, text, dryRun, consented);
     } catch (error) {
+      if (error instanceof PlanRunMissingError) throw new RevertRunError("plan_run_missing", error.message);
       if (error instanceof ApplyRecordError) throw new RevertRunError("invalid_run_record", error.message);
       throw error;
     }

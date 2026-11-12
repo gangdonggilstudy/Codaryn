@@ -3,14 +3,15 @@
 - 작업
   - 처음 작성: P5-U([단계 4·5 설계 지시](../work-orders/phase-4-5-design.md)), main `b386166`. R-1 뒤 결정(DR-1~DR-9) 반영은 main `f39593f`.
   - 이번 개정: DR-20(사용자 확정) 반영, main `86c5f64`(2026-11-12) 기준. VS Code 확장을 만들지 않으므로 그 편의성을 이 GUI가 갖는다.
+  - DR-26 반영(4·7·8·13·14절과 이에 맞춘 줄): main `65a872c` 기준. 엔진 호스트는 Node 26 이상의 별도 프로세스이고 표준 입출력으로만 통신한다. GU-1 구현에서 확인한 사실을 함께 적었다.
 - 입력
   - 결정: [단계 4·5 설계 지시](../work-orders/phase-4-5-design.md) DR-1~DR-24(특히 DR-20~DR-23), [사용성 개선 지시](../work-orders/phase-4-usability.md) N-1~N-27, [결정 기록](../decisions.md)(M-1, M-2, M-9, M-21, C, S).
   - 설계: [UX 설계](ux-design.md), [어댑터 계약](adapter-contract.md)("AC 5.1"처럼 적는다), [범용 작업](general-tasks.md)(GT), [VS Code 확장](vscode-extension.md)(DR-20으로 중단. 명령과 화면 목록을 편의성 요구의 출처로 쓴다).
   - 코드: main의 앱 계층 `src/app`(`CodarynApp`, `src/app/types.ts`), 루트 `package.json`, `tsconfig.json`.
 - 상태
   - 형태(Electron), 대상 OS(Windows 11 x64 먼저), 엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 구조는 정해졌다(DR-20, 이 개정 지시).
-  - 구현: 없다. GUI 코드, 시험, 의존성이 없다. 새 개발 의존성은 7절의 목록을 PM이 승인해 추가한다.
-- 외부 제품(Electron과 그 도구)에 관한 서술은 네트워크를 쓰지 않아 공식 문서로 확인하지 않았다. 모두 **[추정]**이다. 구현 첫 단위에서 13.2절 확인 목록(E-1~E-11)을 먼저 확인한다.
+  - 구현: GU-1(골격, 14.3)이 `claude/gui-design`에 있다. 개발 의존성은 `electron` 45.3.1 하나다(7절).
+- 외부 제품(Electron과 그 도구)에 관한 서술 중 DR-26이 확인한 사실과 GU-1 실행으로 확인한 것(13.2절에 표시) 말고는 공식 문서로 확인하지 않았다. 그런 것은 **[추정]**이다.
 
 표기:
 - 성격
@@ -30,6 +31,7 @@
   - CLI·엔진의 실행 의존성은 0개로 유지한다. GUI의 개발 의존성은 PM이 근거를 기록하고 버전을 고정해 추가한다.
   - N-13의 "VS Code 확장 먼저", VX-D 계열, AC-D7~D9의 프로세스 밖 줄 프로토콜 구현은 중단한다.
 - [결정] 이 개정 지시: 엔진 전용 프로세스가 앱 계층(`src/app`) 함수를 직접 부른다. GUI-D3 (b)가 확정됐다.
+- [결정] DR-26: 그 프로세스는 Electron 내장 Node(45.3.1은 24.22.2)가 아니라 Node 26 이상의 별도 프로세스이고, Electron 메인과 표준 입출력으로만 통신한다. 듣는 소켓이 없고 앱이 끝나면 함께 끝난다.
 - [결정] 엔진은 하나이고 CLI와 GUI는 어댑터다(M-2). 단계 5 완료 기준(roadmap)
   - 어댑터가 CLI와 같은 엔진·정책·기록을 쓴다.
   - 어댑터에 작업 논리가 없다.
@@ -136,6 +138,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 ### 3.3 파일 트리
 
 - 내용은 앱 계층의 작업 공간 목록 함수가 내준다(5절 "작업 공간 목록", 계약 추가 필요). GUI가 디렉터리를 직접 읽지 않는다. 함수가 지킬 것[가정]
+  - [GU-2 임시] 그 함수가 생기기 전에는 엔진 호스트가 엔진의 `Workspace.resolve`와 `cleanText`·`hideKeys`로 한 단계씩 읽는다(`gui/src/engine-host/tree.ts`). 설정에 등록한 가릴 값(`secretEnv`)은 이 임시 목록에서 가리지 않는다. 앱 계층 함수가 들어오면 그것으로 바꾼다.
   - 작업 공간 규칙(`src/workspace`)으로 경로를 해석한다. 링크와 정션은 따라가지 않고 "링크"로 표시만 한다.
   - 루트의 `.codaryn`은 펼치지 않는다. "Codaryn 기록(열지 않음)"으로 보인다.
   - 이름은 표시용으로 가린다: 제어 문자 정리, 키 모양 가림, 현재 등록한 가릴 값 가림(DR-7과 같은 "현재 등록한 값" 기준, AC-D14). 가린 이름의 항목은 펼치거나 고를 수 없다(경로를 되찾을 수 없다).
@@ -368,65 +371,102 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 │ app://codaryn/ 의 HTML·CSS·JS       │  글은 textContent로만 넣는다
 │ preload: window.codaryn (좁은 통로)  │
 └───────────────┬───────────────────┘
-                │ IPC 요청·응답(invoke)과 이벤트 하나 (네트워크 포트 없음)
+                │ IPC 요청·응답(invoke) (네트워크 포트 없음)
 ┌───────────────▼───────────────────┐
-│ 메인(Electron 주 프로세스)           │  창, 보안 설정, app 프로토콜, OS 대화상자,
+│ 메인(Electron 주 프로세스, Node 24)  │  창, 보안 설정, app 프로토콜, OS 대화상자,
 │                                    │  IPC 검사, 핸들, 메인 확인, gui-state.json
 └───────────────┬───────────────────┘
-                │ 메시지 포트(utilityProcess) [추정 E-2]
+                │ 표준 입출력: 한 줄에 JSON 하나 (stdin 요청, stdout 준비·응답)
 ┌───────────────▼───────────────────┐
-│ 엔진 호스트(utilityProcess, Node)    │  createCodarynApp(AppEnvironment)로 만든
-│ = 앱 계층 src/app + 엔진             │  CodarynApp의 함수를 직접 부른다.
+│ 엔진 호스트(별도 Node 26+ 프로세스)   │  createCodarynApp(createNodeAppEnvironment())로
+│ = 앱 계층 src/app + 엔진             │  만든 CodarynApp의 함수를 직접 부른다.
 │ = CLI와 같은 엔진·정책·기록          │  명령은 기존 명령 실행기의 자식 프로세스
 └───────────────────────────────────┘
 ```
 
-- 엔진 호스트는 어댑터 계약의 "같은 프로세스 어댑터"다(AC 3절, 5절). 앱 계층 함수를 직접 부르고 줄 프로토콜(AC 6절)은 쓰지 않는다.
+- [결정] DR-26: 엔진 호스트는 Electron의 내장 Node가 아니라 **Node 26 이상의 별도 프로세스**다.
+  - 확인한 사실(DR-26, 2026-11-12): 안정판 Electron 45.3.1의 내장 Node는 24.22.2다. GU-1에서 `ELECTRON_RUN_AS_NODE`로 같은 판을 확인했다.
+  - 엔진은 Node 26 이상에서만 검증했다(M-21).
+- 엔진 호스트는 앱 계층 함수를 직접 부른다(AC 3절, 5절). CLI 자식과 줄 프로토콜(AC 6절)은 쓰지 않는다. 메인과의 통로(4.2)는 GUI 내부 형식이고 어댑터 계약이 아니다.
 - 메인을 거치는 이유: 화면과 엔진 사이에 경로 해석, 인자 검사, 메인 확인을 둔다. 화면은 엔진 호스트와 직접 통하지 않는다.
-- 엔진 호스트를 메인과 나누는 이유
+- 엔진 호스트를 따로 두는 이유
+  - 엔진이 Node 26 이상에서 돈다(DR-26).
   - 엔진의 긴 동기 작업(가림, 해시)이 창 처리를 멈추지 않는다.
   - 엔진이 비정상 종료해도 창이 남아 안내한다.
   - 엔진 코드와 키 변수(지금은 `ANTHROPIC_API_KEY`)를 쓰는 곳이 한 프로세스에 모인다. 메인도 OS 환경을 물려받지만 키를 읽지 않는다(4.3).
   - Electron 실행 파일을 Node로 쓰는 기능(RunAsNode)을 켜지 않아도 된다(6.7).
-- [결정] DR-8의 조건 "듣는 소켓 없음, 어댑터보다 오래 사는 프로세스 없음"을 지킨다. 엔진 호스트는 앱이 켜질 때 하나 만들고 앱과 함께 끝난다. 허용된 명령이 띄운 분리된 자손은 알려진 한계다(DR-11, T-2).
+- [결정] DR-8: 듣는 소켓이 없고, 앱이 끝나면 엔진 호스트도 끝난다(4.4). 허용된 명령이 띄운 분리된 자손은 알려진 한계다(DR-11, T-2).
+- Electron이 Node 26 이상을 내장한 안정판을 내면 내장 방식으로 바꿀지 다시 본다(DR-26). 통로의 메시지 형식(`gui/src/shared/protocol.ts`)은 전송과 나눠 두어 그때도 쓸 수 있다.
 
-### 4.2 메시지 흐름
+### 4.2 메시지 통로
+
+- 전송: 엔진 호스트의 stdin(메인 → 호스트)과 stdout(호스트 → 메인)뿐이다. stderr는 진단용이고 제품 빌드에서 버린다. 앱 코드가 여는 다른 파이프나 소켓은 없다. Windows에서 libuv가 표준 입출력에 쓰는 이름 있는 파이프(`uv…`)는 6.1의 규칙에서 뺀 내부 파이프다.
+- 형식(판 1)[설계, GU-1 구현]
+  - UTF-8, 한 줄에 JSON 객체 하나, 줄 끝 LF(앞의 CR은 버린다). 모든 메시지에 `"v": 1`.
+  - 한 줄의 상한은 8 MiB다. 넘는 줄은 끝까지 건너뛰고 일부도 전달하지 않는다.
+  - 호스트는 형식이 틀린 요청에 id가 있으면 오류로 답하고, 없으면 stderr에 한 줄 남기고 버린다. 요청 내용은 남기지 않는다.
+  - 메인은 호스트가 보낸 잘못된 줄, 두 번째 준비 메시지, 기다리는 요청이 없는 응답을 프로토콜 위반으로 본다. 그때 호스트를 끝내고 기다리던 요청을 모두 실패시킨다.
+
+| 종류 | 방향 | 모양 |
+| --- | --- | --- |
+| 준비 | 호스트 → 메인, 처음 한 번 | `{v, type: "ready", node: "<process.versions.node>"}` |
+| 요청 | 메인 → 호스트 | `{v, id, call, args}`. `id`는 메인이 정하는 양의 정수, `call`은 정해진 이름 |
+| 응답 | 호스트 → 메인 | `{v, id, ok: true, value}` 또는 `{v, id, ok: false, error: {code, message}}`. `value`는 앱 계층의 `AppCallOutcome` 그대로 |
+| 이벤트 | 호스트 → 메인 | `{v, type: "events", runToken, events: [...]}`(100 ms 묶음, GU-3에서 더함) |
+| 실행 끝 | 호스트 → 메인 | `{v, type: "done", runToken, outcome}`(GU-3에서 더함) |
+
+- 호출 이름: GU-1은 `doctor`(앱 계층 `doctor`)와 `messages`(공용 문구 카탈로그, 11절) 둘이다. 그 뒤 단위가 5절의 함수를 하나씩 더한다. 모르는 이름은 `unknown_call`이다.
+- 통로 오류 코드: `invalid_message`, `unknown_call`, `invalid_args`, `host_error`(앱 함수의 예외. 예외 글은 넘기지 않는다), `adapter_host_exited`, `adapter_timeout`. 앱 계층 자신의 오류는 `value` 안의 `AppError`로 온다.
+- 호스트의 stdout은 통로 전용이다. 호스트는 시작할 때 `console.log·info·debug`와 `process.stdout.write`를 stderr로 돌린다. 엔진 코드가 stdout에 써도 통로가 깨지지 않는다(유닛 시험으로 확인).
+- 준비 메시지의 Node가 26 미만이면 메인은 호스트를 끝내고 `node_too_old` 오류 카드를 보인다. 호스트도 26 미만에서는 준비 메시지만 보내고 엔진을 불러오지 않은 채 끝난다.
+- 메인과 화면 사이(IPC)
 
 | 흐름 | 방향 | 형식 |
 | --- | --- | --- |
 | 요청 | 화면 → preload → 메인 | `ipcRenderer.invoke("codaryn:<영역>:<함수>", 인자)`. 채널은 6.4의 목록뿐이다 |
 | 해석·검사 | 메인 | 보낸 쪽 확인, 인자 검사, 핸들 → 절대 경로, 필요하면 메인 확인 |
-| 호출 | 메인 → 엔진 호스트 | `{id, call, args}`. 계약 요청 타입 그대로(함수 필드 없음) |
-| 응답 | 엔진 호스트 → 메인 → 화면 | `{id, ok, value | error}`. `AppCallOutcome`·`AppError` 그대로 |
-| 실행 이벤트 | 엔진 호스트 → 메인 → 화면 | `{runToken, events[]}` 100 ms 묶음. 화면에는 `webContents.send("codaryn:events", …)` 하나 |
-| 취소 | 화면 → 메인 → 엔진 호스트 | `{call: "cancel", runToken}` → `handle.cancel()` |
-| 끝 | 엔진 호스트 → 메인 → 화면 | `handle.done`의 `RunOutcome` |
+| 호출 | 메인 → 엔진 호스트 | stdin에 요청 한 줄. 계약 요청 타입 그대로(함수 필드 없음) |
+| 응답 | 엔진 호스트 → 메인 → 화면 | 메인이 화면에 필요한 필드만 골라 검사한 보기(예: `toDoctorView`)와 코드 |
+| 실행 이벤트, 취소, 끝 | 양쪽 | 실행 토큰으로 짝짓는다(GU-3) |
 
-- `RunHandle`의 `cancel()`·`done`과 `RunObserver`의 콜백은 메시지로 바꾼다. 짝은 메인이 발급한 실행 토큰으로 맞춘다. 그래서 계약 타입은 함수 필드를 빼면 구조적 복제로 옮길 수 있어야 한다(15절).
-- 응답의 경로는 앱 계층이 이미 가린 표시용 글뿐이다. 메인은 엔진 호스트가 준 절대 경로를 화면에 넘기지 않는다. 화면이 보는 작업 공간 경로는 사용자가 고른 폴더의 표시 이름과 그 대화상자에서 받은 경로뿐이다.
+- `RunHandle`의 `cancel()`·`done`과 `RunObserver`의 콜백은 메시지로 바꾼다. 그래서 계약 타입은 함수 필드를 빼면 JSON으로 옮길 수 있어야 한다(15절).
+- 화면이 받는 경로는 앱 계층이 가린 표시용 글과, 사용자가 고른 폴더의 이름뿐이다. 메인은 엔진 호스트에 넘긴 절대 경로를 화면에 돌려주지 않는다.
 
-### 4.3 엔진 호스트의 환경 (`AppEnvironment`, AC 4절)
+### 4.3 엔진 호스트의 실행과 환경
 
-| 필드 | GUI에서 넣는 값 |
+- Node 실행 파일(DR-26)
+  - 개발: 설치된 Node 26 이상. 메인은 `npm start`가 넘기는 `npm_node_execpath`(절대 경로이고 파일이 있을 때)를 먼저 쓰고, 없으면 `PATH`의 절대 경로 항목에서 `node`를 찾는다. 판은 준비 메시지로 확인한다.
+  - 배포: Node 실행 파일을 함께 묶는 방법은 배포 전에 정한다(DR-26, GUI-D9). 그 전의 패키지 빌드는 Node를 찾지 않고 `node_not_found` 오류 카드를 보인다.
+- 실행: `node <gui>/build/src/engine-host/main.js --engine-dir <엔진 디렉터리>`. 셸을 거치지 않고(`shell: false`) 창 없이(`windowsHide`) 띄운다.
+  - 엔진 디렉터리는 개발 중에는 루트 빌드 산출 `dist/src`다. 호스트는 그 안의 `app/index.js`와 `i18n/index.js`가 있고 필요한 함수를 내보낼 때만 시작한다.
+  - 작업 디렉터리는 사용자 홈이다.
+- 환경: 메인이 자기 환경을 복사해 넘긴다. `NODE_OPTIONS`, `NODE_PATH`, `ELECTRON_RUN_AS_NODE`를 대소문자를 가리지 않고 뺀다(Windows 환경 이름은 대소문자를 가리지 않는다). VX-D13 (a)의 기준에 Electron 변수를 더한 것이다.
+- `AppEnvironment`(AC 4절): 호스트가 앱 계층의 `createNodeAppEnvironment()`로 만든다. CLI와 같은 규칙이다.
+
+| 필드 | 값 |
 | --- | --- |
-| `env` | 메인이 자기 환경을 복사해 넘긴다. `NODE_OPTIONS`, `NODE_PATH`(VX-D13 (a)와 같은 기준), `ELECTRON_RUN_AS_NODE`를 뺀다. 이름 조회는 앱 계층의 대소문자 무시 조회를 쓰고, 명령 실행기의 부모 환경도 이 값에서 넘긴다(DR-4) |
-| `cwd` | 사용자 홈 디렉터리. GUI는 작업 공간과 파일을 절대 경로로 넘기므로 이 값에 기대는 입력이 없다 |
-| `installDir` | 설치된 실행 파일이 있는 디렉터리(엔진 사본을 담은 `resources`의 부모). 찾지 못하면 null이고 모든 실행이 거부된다(U-3) |
-| `nodeVersion` | 엔진 호스트의 `process.versions.node`(Electron 내장 Node, E-1) |
-| `readFile`, `isDirectory`, `isFile`, `clock`, `randomBytes`, `platform` | Node 기본 구현. CLI와 같은 함수를 공용으로 쓴다 |
-| `readVarsFile` | GUI-D8에 따른다 |
+| `env` | 호스트 프로세스 환경(위에서 걸러낸 사본). 대소문자 무시 조회와 명령 실행기의 부모 환경은 앱 계층이 한다(DR-4) |
+| `cwd` | 사용자 홈. GUI는 절대 경로만 넘긴다 |
+| `installDir` | 엔진 코드에서 찾은 `codaryn` 패키지 루트(CLI와 같은 방법). 개발 중에는 저장소 루트다. 찾지 못하면 null이고 모든 실행이 거부된다(U-3) |
+| `nodeVersion` | 호스트의 Node(26 이상) |
+| 나머지 | Node 기본 구현(CLI와 공용) |
 
-- 키는 OS가 앱에 준 환경 변수로만 들어온다. 메인과 화면은 키를 읽지도 넘기지도 않는다. 화면에는 `process`가 없다(6.2).
-- 엔진 호스트의 표준 출력·오류는 제품 빌드에서 버린다. 기록 파일을 따로 만들지 않는다(6.9).
+- 배포 때 `installDir`이 GUI 설치 디렉터리 전체를 가리키게 하는 방법은 패키징 단위(GU-9)에서 정한다.
+- 키는 OS가 앱에 준 환경 변수로만 들어온다. 메인은 환경을 복사해 넘길 뿐 값을 보지 않고, 화면에는 `process`가 없다(6.2, 연기 시험으로 확인).
 
 ### 4.4 수명과 비정상 종료
 
-- 앱 시작: 메인이 보안 설정(6절)을 먼저 하고, 창을 만들고, 엔진 호스트를 띄운다.
-- 엔진 호스트가 끝나면(비정상 종료)
-  - 진행 중이던 호출은 어댑터 쪽 오류(`adapter_host_exited` 계열, AC 5.8 이름에 맞춤)로 끝난다. 실행 중이었으면 "실행 결과를 알 수 없습니다"와 실행 목록 안내.
-  - 자동으로 다시 띄우지 않는다. 오류 카드의 "엔진 다시 시작" 단추로만 띄운다[설계]. 같은 실패의 반복을 사람이 본다.
+- 앱 시작: 메인이 보안 설정(6절)을 먼저 하고, 엔진 호스트를 띄우고, 창을 만든다. 화면의 요청은 호스트가 준비될 때까지 기다린다. 준비 메시지가 15초 안에 오지 않으면 호스트를 끝내고 `ready_timeout` 오류 카드를 보인다.
+- 시작이 실패하면(`node_too_old`, `ready_timeout`, 프로토콜 위반) 메인은 호스트를 끝내고, 그 프로세스가 끝난 뒤에(최대 3초) 실패를 알린다. 남는 프로세스가 없다.
+- 함께 끝나기(DR-8)
+  - 호스트는 stdin이 닫히면 끝난다. 엔진이 열어 둔 핸들이 있어도 0.5초 뒤에는 끝난다. 메인이 비정상 종료해도 파이프가 닫혀 호스트가 끝난다.
+  - 앱 종료 때 메인이 stdin을 닫고, 3초 안에 끝나지 않으면 강제로 끝낸다.
+  - 실행 중이면 3.6의 순서(취소 → `done` 대기)를 먼저 한다(GU-3).
+- 호스트가 끝나면(비정상 종료, 프로토콜 위반)
+  - 진행 중 호출과 그 뒤 호출은 `adapter_host_exited`로 끝난다(AC 5.8의 어댑터 쪽 오류).
+  - 자동으로 다시 띄우지 않는다. 오류 카드의 "엔진 다시 시작" 단추로만 띄운다(GU-1에는 아직 없다. 앱을 다시 시작하라고 안내한다).
   - 잠금은 다음 실행이 회수한다(P-4, N-25 (b)).
-- 앱 종료: 실행 중이면 3.6의 순서. 끝나면 엔진 호스트를 끝낸다.
+- 호출마다 시간 상한을 둔다: 점검 60초, 문구 10초. 넘으면 그 호출만 `adapter_timeout`으로 끝나고 호스트는 그대로 둔다. 실행(`startRun`)은 시간 상한 대신 실행 한도와 취소를 쓴다(GU-3).
 
 ### 4.5 GUI 전용 상태
 
@@ -471,7 +511,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 
 | 규칙 | 출처 | GUI에서의 적용 |
 | --- | --- | --- |
-| 로컬 웹 서버 금지, 듣는 소켓 없음 | N-13, DR-8 | TCP·UDP·다른 프로세스가 열 수 있는 이름 있는 파이프를 열지 않는다. 원격 디버깅 포트를 끈다. 개발할 때도 개발 서버 없이 빌드한 파일을 연다 |
+| 로컬 웹 서버 금지, 듣는 소켓 없음 | N-13, DR-8 | 앱 코드는 다른 프로세스가 연결하도록 듣는 TCP·UDP 소켓과 이름 있는 파이프를 열지 않는다. Electron(Chromium 내부 IPC의 `mojo` 파이프)과 libuv(엔진 호스트 표준 입출력의 `uv` 파이프)가 내부에서 만드는 파이프는 이 규칙에서 뺀다(PM 결정, R-10 L-6). 그 파이프의 접근 제한(ACL)은 확인하지 않았다(E-9와 함께 볼 것). 원격 디버깅 포트를 끈다. 개발할 때도 개발 서버 없이 빌드한 파일을 연다 |
 | 키는 환경 변수로만 | C-1, C-2, N-10, S-2, S-11, S-12 | 키 입력란·표시란·키 파일 없음. 있음·없음만 보인다. 클립보드·로그에 키가 없다 |
 | 설정 위치와 작업 공간 밖 규칙 | N-1, S-1, S-5 | CLI와 같은 해석 함수(앱 계층) |
 | 권한은 사용자 설정과 인자로만 | M-9 | GUI 입력은 "사용자 설정"이다. 모델 출력은 설정을 바꾸지 못한다 |
@@ -486,7 +526,8 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 창(`BrowserWindow`의 `webPreferences`)
   - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `nodeIntegrationInSubFrames: false`
   - `webviewTag: false`, `webSecurity: true`, `allowRunningInsecureContent: false`, `experimentalFeatures: false`
-  - `spellcheck: false`: 사전 내려받기 같은 외부 접속을 피한다
+  - `spellcheck: false`. 세션에서도 맞춤법 검사기를 끄고 사전 주소를 열 수 없는 주소로 둔다. 창이 쓰지 않는 기본 세션에도 같은 설정을 한다. 켜 두면 Electron 45.3.1은 창 하나만 있어도 사전을 바깥에서 내려받는다(E-11, 실행으로 확인)
+  - [결정] PM(GU-1 검수): **맞춤법 검사기는 끈다.** 연기 시험이 바깥 요청 0건을 확인한다. 새 Chromium 프로필에 내려받은 파일이 없고(GS-17), 앱의 모든 프로세스에 바깥 TCP 연결·TCP 대기 소켓·UDP 끝점이 0개다(GS-1, GS-11). 이 확인은 시험이 끝날 때의 상태를 본 것이다. 시험 중 잠깐 열렸다 닫힌 연결까지 보는 것은 아니다.
   - `devTools`: 제품 빌드에서 `false`
   - `preload`: 6.4의 한 파일
   - `partition`: 저장하지 않는 세션(`persist:` 없음). 화면 저장소(localStorage, IndexedDB, 캐시)가 디스크에 남지 않는다. 화면은 상태를 메인에 맡긴다
@@ -549,7 +590,8 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 패키지할 때 `@electron/fuses`로 정한다.
   - 끔: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, `GrantFileProtocolExtraPrivileges`
   - 켬: `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`
-- 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자를 보면 바로 끝낸다[설계]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
+- 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자, 그 인자를 담은 `NODE_OPTIONS`, 이미 열린 검사기(`inspector.url()`)를 보면 검사기를 닫고 바로 끝낸다[설계, R-10 L-1]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
+  - 한계(실행으로 확인): Node가 앱 코드보다 먼저 검사기 포트를 열므로 `--inspect`와 `NODE_OPTIONS`의 포트는 잠깐 열렸다 닫힌다. `--inspect-brk`는 앱 코드 전에 Node가 멈춰 이 검사가 돌지 않는다. 둘 다 fuses(`EnableNodeCliInspectArguments`, `EnableNodeOptionsEnvironmentVariable` 끔, GU-9)만 막는다. 연기 시험이 세 형태의 종료를 확인하고 `--inspect-brk`는 알림으로 보인다.
 - 제품 빌드에 시험용 스위치나 숨은 개발 메뉴를 넣지 않는다. 시험은 8.3의 별도 진입점으로 한다.
 - 충돌 보고(`crashReporter`), 자동 업데이트, 원격 측정을 켜지 않는다(GUI-D9).
 
@@ -580,38 +622,52 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 | GS-8 | 가짜 비밀이 든 파일을 바꾸는 대본으로 실행한 뒤 변경 비교와 파일 트리를 연다 | 화면과 IPC 메시지에 가짜 비밀 원문이 없다(DR-7) |
 | GS-9 | 대본 모델이 이름에 가짜 비밀과 제어 문자가 든 모르는 도구를 부른다 | `(unknown tool)`로 보이고 원문과 제어 문자가 없다 |
 | GS-10 | 실행 기록 정리를 한다 | 폐기 보관함은 그대로다(DR-9) |
-| GS-11 | 대본 실행 동안 앱 프로세스 트리의 바깥 연결을 본다 | 0개(대본 제공자는 접속하지 않는다) |
+| GS-11 | 대본 실행 동안 앱 프로세스 트리의 바깥 연결을 본다 | 0개(대본 제공자는 접속하지 않는다). GU-2 연기 시험이 앱 프로세스의 바깥 TCP 연결 수를 본다 |
 | GS-12 | 화면에서 `process`, `require`, `ipcRenderer`를 찾는다 | 없다 |
 | GS-13 | `applyPlan`·`revert`·`cleanup`을 토큰 없이, 남의 토큰으로, 같은 토큰 두 번으로 부른다 | 거부. 메인 확인을 지나지 않으면 파일이 그대로다 |
 | GS-14 | 화면 인자로 DR-21 동의 값을 넣어 적용을 부른다 | 동의로 쓰이지 않는다. 동의는 메인 대화상자 결과로만 생긴다 |
 | GS-15 | 원격 디버깅·inspect 스위치로 제품 빌드를 실행한다 | 바로 끝난다. 듣는 소켓이 없다 |
 | GS-16 | 작업 공간 목록에 링크, 정션, 키 모양 이름, 제어 문자 이름을 둔다 | 링크는 따라가지 않고, 이름은 가려지고, 가린 항목은 펼칠 수 없다 |
+| GS-17 | 새 Chromium 프로필로 앱을 띄우고 창을 연 뒤 프로필을 본다 | 맞춤법 사전 같은 내려받은 파일이 없다(E-11). GU-1 연기 시험에 있다 |
 
 이 시험이 통과해도 "그 시험이 확인한 범위에서 통과"만 뜻한다(M-16).
 
 ## 7. 개발 의존성
 
-- [결정] DR-20: GUI의 개발 의존성은 PM이 근거를 기록하고 버전을 고정해 추가한다. CLI·엔진의 실행 의존성은 0개다.
+- [결정] DR-20, DR-26
+  - `gui/package.json`에 `electron` 45.3.1을 개발 의존성으로 고정한다.
+  - 루트 패키지의 실행 의존성은 0개 그대로다.
+  - Electron 설치 때의 실행 파일 내려받기는 PM이 승인한 설치 단계다.
 - [설계] 원칙
-  - `gui/package.json`의 `dependencies`는 비운다. 모두 `devDependencies`다. 패키저가 Electron 런타임을 실행 파일에 넣는다[추정].
-  - 판은 정확히 적는다(`^`, `~` 없음). `gui/package-lock.json`을 커밋하고 `npm ci`로만 설치한다.
-  - `gui/.npmrc`에 `ignore-scripts=true`를 둔다. Electron 바이너리 내려받기는 그 패키지의 설치 스크립트를 명시적으로 한 번 실행해 받는다[추정 E-7]. 다른 패키지의 설치 스크립트는 돌지 않는다.
-  - 루트의 `typescript`(7.0.2)를 그대로 쓴다. `gui/`에 다시 넣지 않는다. 판이 둘로 갈리지 않는다.
-- 판 표기: 이 문서를 쓸 때 레지스트리를 볼 수 없었다. 아래 판은 모두 [추정]이고, PM이 추가할 때 레지스트리에서 확인해 정확한 판으로 바꾼다. 고르는 규칙을 함께 적는다.
+  - `gui/package.json`의 `dependencies`는 없다. 모두 `devDependencies`다. 패키저가 Electron 런타임을 실행 파일에 넣는다[추정].
+  - 판은 정확히 적는다(`^`, `~` 없음). `gui/package-lock.json`을 커밋하고 그 뒤로는 `npm ci`로 설치한다.
+  - 루트의 `typescript`(7.0.2)를 그대로 쓴다. `gui/`에 다시 넣지 않는다. GUI 빌드 스크립트가 루트의 `tsc`를 부른다.
+  - 설치 스크립트: 처음 설계는 `gui/.npmrc`의 `ignore-scripts=true`였다. 루트 `.gitignore`가 비밀 보호를 위해 모든 `.npmrc`를 막으므로 커밋할 수 없다. 그래서 `gui/scripts/build/check-lock.mjs`가 대신 지킨다(`npm test`에서 실행).
+    - `package.json`에 실행 의존성이 없고, 개발 의존성이 승인 목록과 같다.
+    - lock의 모든 패키지가 npm 레지스트리에서 오고, sha512 무결성이 있고, 개발 전용이다.
+    - 설치 스크립트(`hasInstallScript`)가 있는 패키지가 없다.
+- 확인한 사실(GU-1 설치, 2026-11-12, `npm install` 한 번)
+  - `electron` 45.3.1에는 설치 스크립트가 없다. 실행 파일은 처음 쓸 때 패키지의 `install.js`가 `@electron/get`으로 내려받고, 패키지에 든 `checksums.json`의 SHA-256과 대조한다.
+  - GU-1에서는 승인된 설치 단계로 `node node_modules/electron/install.js`를 한 번 실행했다. 실행 파일은 `gui/node_modules/electron/dist/`에 있다. `@electron/get`은 내려받은 zip을 사용자 캐시 디렉터리에도 남긴다[추정: 그 위치는 보지 않았다].
+  - lock에 든 패키지는 13개다: `electron`, `@electron/get`, `@electron-internal/extract-zip`, `@types/node`(24.19.2), `debug`, `env-paths`, `graceful-fs`, `ms`, `progress`, `semver`, `sumchecker`, `undici`, `undici-types`. 모두 개발 전용이고 설치 스크립트가 없다.
 
-| 패키지 | 쓰임 | 넣는 단위 | 후보 판 [추정] | 고르는 규칙 | 근거 | 추가 전 확인 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `electron` | 셸 런타임(Chromium, Node). 개발 실행과 시험 실행기, 패키지의 원본 | GU-1(첫 단위) | 45.x의 최신 패치. Electron이 8주 주기로 주 버전을 낸다고 보고 2026-11의 최신 주 버전을 셈한 것이다 | 그 시점에 보안 지원 중인 가장 새 주 버전의 최신 패치. 내장 Node가 E-1을 통과해야 한다 | DR-20 형태 그 자체 | E-1(내장 Node 판과 엔진 시험), E-2, E-3, E-7(내려받기와 체크섬 확인) |
-| `@electron/fuses` | 패키지 뒤 실행 기능 끄기(6.7) | GU-9(패키징) | 최신 판 | `electron` 판이 지원하는 fuse 목록을 다루는 최신 판 | 6.7 | E-4(fuse 이름과 기본값) |
-| `@electron/packager` | Windows x64 실행 파일 디렉터리 만들기, asar | GU-9 | 최신 주 버전 | 의존이 가장 적은 공식 패키저[추정]. Forge와 electron-builder는 더 넓다 | 8.2 | asar 무결성 옵션, `win32`/`x64` 출력 |
+| 패키지 | 쓰임 | 넣는 단위 | 판 | 근거 | 상태 |
+| --- | --- | --- | --- | --- | --- |
+| `electron` | 셸 런타임(Chromium 156, 내장 Node 24.22.2). 개발 실행, 연기 시험 실행기, 패키지의 원본 | GU-1 | **45.3.1**(고정) | DR-20, DR-26 | 추가함(GU-1) |
+| `@electron/fuses` | 패키지 뒤 실행 기능 끄기(6.7) | GU-9 | 그때의 최신 판[추정] | 6.7 | 아직 넣지 않음. 추가 전에 PM 승인 |
+| `@electron/packager` | Windows x64 실행 파일 디렉터리, asar | GU-9 | 그때의 최신 주 버전[추정] | 의존이 가장 적은 공식 패키저[추정] | 아직 넣지 않음. 추가 전에 PM 승인 |
 
+- 배포용 Node 26 실행 파일: 의존성이 아니라 배포물이다. 묶는 방법(판 고정, 체크섬, 서명)은 배포 전에 정한다(DR-26).
 - 지금 넣지 않는 것과 이유
-  - 설치 파일 도구(electron-builder의 NSIS, WiX 기반 MSI 등): 첫 배포는 실행 파일 디렉터리를 묶은 zip이다. 새 의존성이 없다. 설치 파일과 서명은 배포 전에 정한다(GUI-D9, DR-20).
-  - E2E 도구(Playwright의 Electron 지원[추정]), 접근성 자동 검사(axe-core[추정]): 화면이 생긴 뒤 필요하면 PM 승인으로 넣는다. 그 전에는 8.3의 Electron 실행기 시험과 수동 점검표.
-  - UI 프레임워크(React 등), 번들러(esbuild, webpack, Vite), 상태 관리, CSS 프레임워크: 쓰지 않는다(GUI-D15). 화면은 TypeScript와 DOM으로 만들고 `tsc`만으로 빌드한다. Vite류는 개발 서버를 전제해 6.1과도 맞지 않는다.
+  - 설치 파일 도구(electron-builder의 NSIS, WiX 기반 MSI 등): 첫 배포는 실행 파일 디렉터리를 묶은 zip이다. 설치 파일과 서명은 배포 전에 정한다(GUI-D9, DR-20).
+  - E2E 도구(Playwright의 Electron 지원[추정]), 접근성 자동 검사(axe-core[추정]): 화면이 생긴 뒤 필요하면 PM 승인으로 넣는다. 그 전에는 8.3의 Electron 실행기 연기 시험과 수동 점검표다.
+  - UI 프레임워크(React 등), 번들러(esbuild, webpack, Vite), 상태 관리, CSS 프레임워크: 쓰지 않는다(GUI-D15). 화면은 TypeScript와 DOM으로 만들고 `tsc`만으로 빌드한다.
   - 비교 계산, 인자 검사, 상태 저장 라이브러리(diff, zod, electron-store 등): 작은 순수 함수로 직접 만든다.
-  - `@types/electron`: 필요 없다. `electron` 패키지가 타입을 담고 있다[추정].
-- 형 정의의 판 차이: 루트의 `@types/node`는 26.6.6이다. Electron 내장 Node가 26보다 낮으면 엔진 호스트에서 쓸 수 없는 API가 형 검사를 지난다. 그래서 엔진 호스트 코드는 앱 계층만 부르고, 엔진 전체는 E-1의 호환 시험(8.3)으로 확인한다.
+  - `@types/electron`: 필요 없다. `electron` 패키지가 `electron.d.ts`를 담고 있다(확인함).
+- 형 정의
+  - 메인과 preload는 `electron.d.ts`와 Electron이 데려온 `@types/node` 24.19.2로 검사한다(`tsconfig.main.json`). 실행되는 곳이 Node 24다.
+  - 엔진 호스트와 유닛 시험은 루트의 `@types/node` 26.6.6으로 검사한다(`tsconfig.host.json`, `tsconfig.test.json`의 `typeRoots`). 실행되는 곳이 Node 26이다.
+  - 화면은 DOM 형만 쓴다(`tsconfig.renderer.json`, `types: []`).
 
 ## 8. 디렉터리 배치와 빌드·시험
 
@@ -621,59 +677,52 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - 루트와의 관계
   - `gui/`는 npm workspaces가 아닌 독립 패키지다. 루트 `npm ci`는 Electron을 설치하지 않고, 루트 `package-lock.json`이 바뀌지 않는다.
   - 루트 `tsconfig.json`의 `include`는 `src/**`, `tests/**`이므로 `gui/`는 루트 형 검사와 시험에 들어가지 않는다.
-  - 엔진 코드는 루트 빌드 산출(`dist/src`)을 `gui/build/engine/`으로 복사해 쓴다. 엔진 호스트는 그 사본의 `app/index.js`를 부른다. 개발과 패키지에서 경로가 같다.
+  - 엔진 코드: 개발 중에는 엔진 호스트(Node 26, DR-26)가 루트 빌드 산출 `dist/src`를 그대로 부른다(복사하지 않는다). 배포 때 엔진과 Node 26을 묶는 방법은 GU-9에서 정한다.
 
 ```
 gui/
-  .npmrc                      ignore-scripts=true
-  package.json                private, "type": "module", devDependencies만
+  package.json                private, "type": "module", devDependencies만(electron 45.3.1)
   package-lock.json
-  tsconfig.base.json          루트와 같은 엄격 옵션
-  tsconfig.main.json          src/main, src/shared → build/main (ESM)
-  tsconfig.preload.json       src/preload → build/preload (CommonJS 한 파일)
-  tsconfig.renderer.json      src/renderer, src/shared → build/renderer (ESM, lib DOM)
-  tsconfig.host.json          src/engine-host, src/shared → build/engine-host (ESM)
-  tsconfig.test.json          tests → build/tests
+  tsconfig.base.json          루트와 같은 엄격 옵션, rootDir ".", outDir "build"
+  tsconfig.main.json          src/main, src/preload(.cts), tests/smoke → Electron 형, Node 24 형
+  tsconfig.renderer.json      src/renderer → DOM 형만
+  tsconfig.host.json          src/engine-host → 루트의 Node 26 형
+  tsconfig.test.json          tests/unit → 루트의 Node 26 형
   scripts/
-    build/                    build.mjs: 루트 산출 확인, tsc 네 번, 정적 파일과 엔진 복사
-    package/                  package.mjs: packager, fuses, zip (GU-9)
+    build/                    build.mjs(화면 금지 API 검사, tsc 네 번, 정적 파일 복사),
+                              check-lock.mjs(7절), smoke.mjs(연기 시험 실행과 판정)
+    package/                  packager, fuses, zip, Node 26 묶기 (GU-9)
   src/
-    shared/                   IPC 채널 이름, 메시지 형식, 인자 검사기, 상태 → 낱말·다음 행동
+    shared/                   protocol.ts(엔진 호스트 통로), ipc.ts(IPC 채널, 인자 검사, 보기)
                               (DOM·Electron·Node API 없음)
-    main/                     main.ts(수명), security.ts, protocol.ts, window.ts, ipc.ts,
-                              handles.ts, confirm.ts, dialogs.ts, gui-state.ts, host.ts
-    preload/                  preload.ts (한 파일)
-    engine-host/              host.ts(진입점), relay.ts(요청·이벤트 중계)
+    main/                     main.ts(진입), app.ts(수명), security.ts·security-policy.ts,
+                              protocol.ts·app-url.ts, ipc.ts, handles.ts, engine-client.ts,
+                              environment.ts, node-path.ts
+    preload/                  preload.cts (한 파일, CommonJS)
+    engine-host/              main.ts(Node 26 진입), host.ts(요청 처리)
     renderer/
-      index.html, styles/
-      shell/                  창 틀, 영역, 명령 찾기, 상태 표시줄, 알림, 포커스, 글 넣기 도우미
-      workspace/              작업 공간 열기, 최근 폴더, 파일 트리
-      diff/                   비교 계산(순수)과 비교 보기
-      run/                    새 작업, 진행 표시, 결과
-      runs/                   실행 목록, 되돌리기 미리보기
-      plan/                   계획 화면, 사람 확인
-      settings/               설정, 첫 실행 안내
-      i18n/                   GUI 전용 문구(11절)
+      index.html, styles.css, app.ts, texts.ts   (GU-1의 임시 화면)
+      shell/ workspace/ diff/ run/ runs/ plan/ settings/ i18n/   (화면 단위, 14.2)
   tests/
-    unit/                     Node 기본 러너(루트 Node 26)로 도는 순수 함수 시험
-    smoke/                    Electron을 실행기로 쓰는 시험(창 설정, 소켓, IPC)
-    security/                 GS-1~GS-16
-  build/                      산출(Git 제외)
+    unit/                     Node 기본 러너(루트 Node 26)로 도는 시험. Electron 없음
+    smoke/                    Electron을 실행기로 쓰는 시험
+    security/                 GS-1~GS-17 (GU-8)
+  build/                      산출(Git 제외): build/src/..., build/tests/...
   out/                        패키지 산출(Git 제외)
 ```
 
 - 화면 파일 중 DOM을 쓰지 않는 부분(모델·계산)은 `*.model.ts`로 나눈다. Node 기본 러너로 시험할 수 있게 한다.
-- 루트 `.gitignore`에 `gui/node_modules/`, `gui/build/`, `gui/out/`을 더한다(관리자 소유, 15절).
+- 루트 `.gitignore`에 `gui/build/`, `gui/out/`을 더했다(GU-1). `gui/node_modules/`는 기존 `node_modules/` 줄이 막는다.
 
 ### 8.2 빌드
 
 | 명령 | 하는 일 |
 | --- | --- |
 | 루트 `npm ci` → `npm run build` | 엔진 산출 `dist/src`. 지금과 같다 |
-| `gui`에서 `npm ci` → Electron 바이너리 받기 | `ignore-scripts`라서 Electron 설치 스크립트를 명시적으로 한 번 실행한다[추정 E-7] |
-| `gui`에서 `npm run build` | `scripts/build/build.mjs`: 루트 `dist/src`가 있는지 보고, `tsc`를 설정별로 네 번 실행하고, `index.html`·CSS를 `build/renderer`에, `dist/src`를 `build/engine`에 복사한다 |
-| `gui`에서 `npm start` | 개발 실행(`electron .`). 개발 서버 없음. 개발 빌드에서만 개발자 도구를 켤 수 있다 |
-| `gui`에서 `npm run package` | GU-9: packager로 `out/Codaryn-win32-x64/`, fuses, zip |
+| `gui`에서 `npm ci` | 개발 의존성(7절). Electron 실행 파일은 처음 쓸 때 받는다. 미리 받으려면 `node node_modules/electron/install.js`(승인된 설치 단계) |
+| `gui`에서 `npm run build` | `scripts/build/build.mjs`: 화면 소스의 금지 API 검사, 루트의 `tsc`로 네 설정 컴파일, `index.html`·`styles.css` 복사. 루트 `dist/src`가 없으면 알린다 |
+| `gui`에서 `npm start` | 개발 실행(`electron .`). 개발 서버 없음. 엔진 호스트는 `npm`을 실행한 Node(26 이상)로 뜬다. 개발자 도구는 `CODARYN_GUI_DEVTOOLS=1`일 때만 |
+| `gui`에서 `npm run package` | GU-9: packager로 `out/Codaryn-win32-x64/`, fuses, Node 26 묶기, zip |
 
 - 스크립트는 `.mjs`로 쓰고 셸 문법에 기대지 않는다(Windows PowerShell과 POSIX 셸 모두).
 - 정규식은 리터럴 안의 U+2028 이스케이프를 피한다(개발 절차 7절 G-5).
@@ -682,16 +731,16 @@ gui/
 
 | 층 | 무엇 | 실행 |
 | --- | --- | --- |
-| 유닛 | `shared`(인자 검사기, 상태 매핑), `main`의 순수 부분(핸들 표, 토큰, 프로토콜 경로 해석, 환경 걸러내기, `gui-state.json` 읽기), `engine-host` 중계(가짜 `CodarynApp`), 화면의 `*.model.ts`(비교 계산, 트리 모델) | `gui`에서 `npm test` = 루트 Node 26의 `node --test build/tests/unit/**/*.test.js` |
-| 엔진 호환(E-1) | 루트의 유닛·통합 시험을 Electron 내장 Node로 돌린다 | `ELECTRON_RUN_AS_NODE=1`로 개발용 Electron을 Node처럼 실행해 `--test`[추정]. 개발용 바이너리에는 fuses를 적용하지 않는다 |
-| 연기(smoke) | 실제 Electron으로 메인을 띄워 창 설정(6.2), 요청 막기, 탐색 막기, 화면에 `process` 없음, IPC 거부, 듣는 소켓 0 | 시험 전용 진입점 `build/tests/smoke/run.js`를 Electron으로 실행. 제품 빌드에 들어가지 않는다 |
-| 계약 | 같은 대본 사례를 CLI와 엔진 호스트로 각각 실행해 `EngineResult`와 기록 사건이 같은지 | Node 기본 러너, 대본 제공자 |
-| 보안 | 6.10 GS-1~GS-16 | 연기 시험과 같은 실행기 |
-| 화면 코드 검사 | `src/renderer`에서 6.2의 금지 API 사용을 찾는다 | `scripts`의 검사 스크립트(새 의존성 없음) |
+| 유닛 | `shared`(통로, 인자 검사, 보기), `main`의 순수 부분(환경 걸러내기, Node 찾기, 핸들, 앱 URL, 보안 값), 엔진 호스트(가짜 앱), 실제 Node 26 호스트와 실제 엔진, 가짜 엔진·가짜 호스트의 실패, preload 채널 일치, 화면의 `*.model.ts` | `gui`에서 `npm test`(빌드, lock 검사, `node --test build/tests/unit/**/*.test.js`). Electron 없이 루트 Node 26 |
+| 연기(smoke) | 실제 Electron과 실제 엔진 호스트로 창의 점검 표시, 핸들로 다시 점검, 경로·모르는 핸들 거부, 화면에 Node 객체 없음, 바깥 요청·`file://`·새 창·탐색 막힘, 앱 프로세스의 TCP 대기 소켓과 UDP 끝점 0, 맞춤법 사전 받지 않음 | `npm run test:smoke`: `scripts/build/smoke.mjs`가 키 없는 환경, 없는 설정 파일, 새 Chromium 프로필로 `build/tests/smoke/smoke.js`를 Electron에서 실행하고 판정한다. 제품 진입(`main.ts`)에는 들어가지 않는다 |
+| 계약 | 같은 대본 사례를 CLI와 엔진 호스트로 각각 실행해 `EngineResult`와 기록 사건이 같은지 | Node 기본 러너, 대본 제공자(GU-3 뒤) |
+| 보안 | 6.10 GS-1~GS-17 | 연기 시험과 같은 실행기(GU-8) |
+| 화면 코드 검사 | `src/renderer`에서 6.2의 금지 API 사용을 찾는다 | `build.mjs`와 유닛(새 의존성 없음) |
 | 접근성 | 10절 | 수동 점검표. 자동 도구는 승인 뒤 |
 | 실제 API | 하지 않는다. 모델 화면은 가짜 전송으로 시험하고 이름에 `[모의 API·실제 API 아님]`을 붙인다(Y-5) | — |
 
 - 루트 시험(`npm test`)은 GUI 때문에 바뀌지 않는다. 관리자의 병합 전 검사(개발 절차 8절)에 `gui`의 `npm test`와 연기 시험을 더한다.
+- 엔진 호스트가 Node 26에서 돌므로(DR-26) Electron 내장 Node로 엔진 시험을 돌리는 "엔진 호환" 층은 두지 않는다.
 
 ## 9. 지원 OS
 
@@ -735,9 +784,8 @@ gui/
 | 층 | 내용 | 도구 |
 | --- | --- | --- |
 | 유닛 | 8.3 | Node 기본 러너(P-1) |
-| 엔진 호환 | 루트 유닛·통합 시험이 Electron 내장 Node에서 모두 통과(E-1) | 개발용 Electron |
 | 계약 | 같은 대본 사례에서 CLI와 GUI 엔진 호스트의 결과와 기록 사건이 같다. 취소, 권한 확인의 기본 거부와 `by` 값(AC 5.7)도 같다 | Node 기본 러너, 대본 제공자 |
-| 보안 | 6.10 | 연기 시험 실행기 |
+| 보안 | 6.10 GS-1~GS-17 | 연기 시험 실행기 |
 | 접근성 | 10절 | 수동 점검표 |
 
 - GUI 묶음의 완료 기준(단계 5): 3절의 화면이 5절의 앱 계층 함수만으로 동작하고, 위 층이 모두 통과하고, 교차 검토(개발 절차 9절)를 받았다. 검증하지 않은 OS는 지원한다고 말하지 않는다.
@@ -746,70 +794,85 @@ gui/
 
 ### 13.1 확인 방법
 
-decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날짜를 적는다. 확인 결과로 이 문서의 [추정]을 고친다.
+decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날짜를 적는다. 확인 결과로 이 문서의 [추정]을 고친다. GU-1 실행으로 확인한 것은 "실행으로 확인"이라고 적는다. 공식 문서 확인과는 다르다.
 
 ### 13.2 목록
 
-| 번호 | 확인할 것 | 쓰는 곳 |
-| --- | --- | --- |
-| E-1 | 고를 Electron 판의 내장 Node 판. 루트 `engines`(`>=26.0.0`)와 M-21(Node 26.13)보다 낮으면 엔진 시험이 그 Node에서 통과하는지. 실패하면 GUI-D14 | 7절, 8.3 |
-| E-2 | `utilityProcess`: ESM 진입점, `env` 옵션, 메시지 포트, 앱 종료 때의 수명 | 4절 |
-| E-3 | 보안 설정 이름과 기본값(6.2~6.4), 샌드박스 preload의 모듈 제한, 작업 표시줄 진행 표시 | 6절, 3.6 |
-| E-4 | fuses 이름과 기본값, Chromium 원격 디버깅 스위치가 fuses로 막히는지 | 6.7 |
-| E-5 | Windows UIA 연결, Narrator·NVDA 동작, forced-colors, 메시지 상자의 낭독 | 10절 |
-| E-6 | 설치 크기, Windows 코드 서명과 SmartScreen, 설치 파일 형식 | GUI-D9 |
-| E-7 | `electron` 패키지가 바이너리를 내려받는 방식, 체크섬 확인, `ignore-scripts`일 때 명시적으로 받는 방법 | 7절, 8.2 |
-| E-8 | Windows에서 사용자 환경 변수를 등록한 뒤 새로 실행한 앱이 그 값을 받는지(다시 로그인 필요 여부). macOS Finder 실행 앱의 환경 | 3.10, GUI-D7 |
-| E-9 | `requestSingleInstanceLock`이 Windows와 macOS·Linux에서 쓰는 수단(소켓 여부) | 6.9, GUI-D18 |
-| E-10 | `userData` 기본 위치와 Chromium이 그 안에 쓰는 파일, 저장하지 않는 세션의 동작 | 6.3 |
-| E-11 | 기본 상태의 Electron이 스스로 하는 바깥 연결(맞춤법 사전, 구성 요소 갱신 등)이 있는지 | 6.2, GS-11 |
+| 번호 | 확인할 것 | 상태 | 쓰는 곳 |
+| --- | --- | --- | --- |
+| E-1 | Electron 안정판의 내장 Node 판 | **확인함(DR-26)**: 45.3.1의 내장 Node는 24.22.2, Node 26은 46 alpha에만 있다. GU-1에서 실행으로 다시 확인했다(Node 24.22.2, Chromium 156.0.8078.96). 그래서 엔진은 별도 Node 26 프로세스다 | 4절, 7절 |
+| E-2 | (처음: `utilityProcess`) → 배포 때 Node 26 실행 파일을 묶는 방법: 판 고정, 체크섬, 서명, 크기, 갱신 | 배포 전에 정함(DR-26). `utilityProcess`는 쓰지 않는다 | 4.3, GUI-D9 |
+| E-3 | 보안 설정 이름과 기본값(6.2~6.4), 샌드박스 preload의 모듈 제한, 작업 표시줄 진행 표시 | 이름은 `electron.d.ts`(45.3.1)로 확인했다. 동작은 연기 시험으로 확인했다: 화면에 `process`·`require`·`ipcRenderer` 없음, 바깥 요청·`file://`·새 창·탐색 막힘. 작업 표시줄은 GU-3 | 6절, 3.6 |
+| E-4 | fuses 이름과 기본값, Chromium 원격 디버깅 스위치가 fuses로 막히는지 | 미확인(GU-9). GU-1은 시작 때 스위치를 보고 끝낸다 | 6.7 |
+| E-5 | Windows UIA 연결, Narrator·NVDA 동작, forced-colors, 메시지 상자의 낭독 | 미확인(화면 단위) | 10절 |
+| E-6 | 설치 크기, Windows 코드 서명과 SmartScreen, 설치 파일 형식 | 미확인(배포 전) | GUI-D9 |
+| E-7 | `electron` 패키지가 실행 파일을 받는 방식과 체크섬 확인 | **실행으로 확인**: 설치 스크립트 없음, 처음 쓸 때 `install.js`가 `@electron/get`으로 받고 패키지의 `checksums.json`과 대조(7절) | 7절, 8.2 |
+| E-8 | Windows에서 사용자 환경 변수를 등록한 뒤 새로 실행한 앱이 그 값을 받는지. macOS Finder 실행 앱의 환경 | 미확인 | 3.10, GUI-D7 |
+| E-9 | `requestSingleInstanceLock`이 Windows와 macOS·Linux에서 쓰는 수단(소켓 여부) | Windows 연기 시험에서 앱의 모든 프로세스에 TCP 대기 소켓과 UDP 끝점이 0개였다. macOS·Linux는 미확인 | 6.9, GUI-D18 |
+| E-10 | `userData` 기본 위치와 Chromium이 그 안에 쓰는 파일, 저장하지 않는 세션의 동작 | 부분 확인: 메인이 시작 때 위치를 바꾼다(`%LOCALAPPDATA%\Codaryn\gui-profile`). 창이 저장하지 않는 세션을 써도 Chromium은 기본 세션의 파일(Local State, 캐시 등)을 그 위치에 쓴다 | 6.3 |
+| E-11 | 기본 상태의 Electron이 스스로 하는 바깥 연결 | **실행으로 확인, 막음**: 아무 요청도 없는 창 하나에도 Electron 45.3.1의 맞춤법 검사기가 한국어 사전(11 MB)을 바깥에서 내려받았다. 그 DNS 조회 때문에 네트워크 서비스 프로세스에 UDP 끝점이 생겼다. 기본 세션과 창의 세션 모두에서 맞춤법 검사기를 끄고 사전 주소를 열 수 없는 주소로 바꾼 뒤에는, 사전이 받아지지 않고 UDP 끝점도 0개다(연기 시험 `noDictionaryDownload`, `listening`) | 6.2, 6.10 |
 
 ## 14. 구현 분할안과 첫 구현 단위
 
 ### 14.1 선행 조건
 
-- PM의 `electron` 추가 승인(7절)과 E-1·E-2·E-3·E-7 확인. E-1이 실패하면 GUI-D14를 먼저 정한다.
-- 앱 계층: DR-14(실행 목록, 되돌리기 미리보기)와 5절 "추가 요청" 함수. 화면 단위는 해당 함수가 main에 들어온 뒤 시작한다.
-- 계약: 5절의 추가 타입(DR-21 동의 필드, 적용 전 점검, 작업 공간 목록, 설정 읽기·변경, 정리)은 w3:p9.
-- G-A 계약과 N-B 문구 묶음(DR-12): 계획·사람 확인 화면의 선행.
+- [결정] DR-26: `electron` 45.3.1 추가와 실행 파일 내려받기가 승인되었다. E-1은 별도 Node 26 프로세스로 풀렸다(GUI-D14).
+- 앱 계층: DR-14(실행 목록, 되돌리기 미리보기)와 5절의 "추가 요청" 함수. 화면 단위는 해당 함수가 main에 들어온 뒤 시작한다.
+- 계약: 5절의 추가 타입(적용 전 점검 출력, 작업 공간 목록, 설정 읽기·변경, 정리)은 w3:p9. DR-21 동의 필드(`UnsafeMoveConsent`)는 들어왔다(claude/general-tasks).
+- G-A 계약과 N-B 문구 묶음(DR-12): 계획·사람 확인 화면의 선행. 공용 카탈로그에 `doctor.*` 문구가 들어오기 전에는 GUI가 자기 낱말(상태)과 점검 id를 대신 보인다.
+- 화면 단위의 담당은 GU-1 결과를 보고 PM이 나눈다.
 
 ### 14.2 분할 (소유 파일이 겹치지 않는다)
 
 | 단위 | 내용 | 소유 파일 | 담당(제안) | 순서 |
 | --- | --- | --- | --- | --- |
-| GC 계약 추가분 | 5절의 추가 타입, `ApplyPlanRequest`의 동의 필드(DR-21) | `src/contracts/**` | w3:p9 | 1 |
+| GC 계약 추가분 | 5절의 추가 타입 | `src/contracts/**` | w3:p9 | 1 |
 | GA 앱 계층 추가분 | DR-14, 적용 전 점검, 작업 공간 목록, 설정 읽기·변경 제안·적용, 모델, 정리 함수와 유닛 | `src/app/**`, `tests/unit/app/**` | w3:pA | 1~2 |
-| GU-1 골격과 보안(첫 단위) | 14.3 | `gui/package.json`, `gui/package-lock.json`, `gui/.npmrc`, `gui/tsconfig*.json`, `gui/scripts/build/**`, `gui/src/shared/**`, `gui/src/main/**`, `gui/src/preload/**`, `gui/src/engine-host/**`, `gui/src/renderer/index.html`, `gui/src/renderer/shell/**`, `gui/tests/unit/{shared,main,engine-host}/**`, `gui/tests/smoke/**` | w3:pB | 2 |
-| GU-2 작업 공간·파일 트리·비교 | 3.2, 3.3, 3.4 | `gui/src/renderer/workspace/**`, `gui/src/renderer/diff/**`, `gui/tests/unit/renderer/{workspace,diff}/**` | GUI 화면 담당 | 3 |
-| GU-3 새 작업·진행·결과 | 3.5, 3.6, 3.7(사람 확인 제외) | `gui/src/renderer/run/**`, `gui/tests/unit/renderer/run/**` | GUI 화면 담당 | 3 |
-| GU-4 실행 목록·되돌리기·정리 | 3.8 | `gui/src/renderer/runs/**`, `gui/tests/unit/renderer/runs/**` | GUI 화면 담당 | 3 |
-| GU-5 계획·사람 확인 | 3.9, 3.7 사람 확인 | `gui/src/renderer/plan/**`, `gui/tests/unit/renderer/plan/**` | GUI 화면 담당 | 4(G-A 뒤) |
-| GU-6 설정·첫 실행 안내 | 3.10, 3.11 | `gui/src/renderer/settings/**`, `gui/tests/unit/renderer/settings/**` | GUI 화면 담당 | 3 |
-| GU-7 GUI 전용 문구 | 11절 두 언어 | `gui/src/renderer/i18n/**` | GUI 화면 담당 또는 N-B(w3:p5) | 3 |
+| GU-1 골격과 보안(첫 단위) | 14.3 | `gui/package.json`, `gui/package-lock.json`, `gui/tsconfig*.json`, `gui/scripts/build/**`, `gui/src/shared/**`, `gui/src/main/**`, `gui/src/preload/**`, `gui/src/engine-host/**`, `gui/src/renderer/index.html`, `gui/src/renderer/styles.css`, `gui/src/renderer/app.ts`, `gui/src/renderer/texts.ts`, `gui/tests/unit/*.test.ts`, `gui/tests/smoke/**`, 루트 `.gitignore`의 GUI 줄 | w3:pB | 2 |
+| GU-2 작업 공간·파일 트리·비교 | 3.2, 3.3, 3.4 | `gui/src/renderer/workspace/**`, `gui/src/renderer/diff/**`, `gui/tests/unit/renderer/{workspace,diff}/**` | PM이 나눔 | 3 |
+| GU-3 새 작업·진행·결과 | 3.5, 3.6, 3.7(사람 확인 제외), 통로의 이벤트·실행 끝 메시지 | `gui/src/renderer/run/**`, `gui/tests/unit/renderer/run/**` | PM이 나눔 | 3 |
+| GU-4 실행 목록·되돌리기·정리 | 3.8 | `gui/src/renderer/runs/**`, `gui/tests/unit/renderer/runs/**` | PM이 나눔 | 3 |
+| GU-5 계획·사람 확인 | 3.9, 3.7 사람 확인 | `gui/src/renderer/plan/**`, `gui/tests/unit/renderer/plan/**` | PM이 나눔 | 4(G-A 뒤) |
+| GU-6 설정·첫 실행 안내 | 3.10, 3.11 | `gui/src/renderer/settings/**`, `gui/tests/unit/renderer/settings/**` | PM이 나눔 | 3 |
+| GU-7 GUI 전용 문구 | 11절 두 언어 | `gui/src/renderer/i18n/**` | PM이 나눔 | 3 |
 | GU-8 보안·계약 시험 | 6.10, 12절 계약 | `gui/tests/security/**`, `gui/tests/contract/**` | 구현자가 아닌 세션 | 4 |
-| GU-9 패키징 | fuses, packager, zip, 사용 안내 | `gui/scripts/package/**`, `docs/gui-usage.md` | w3:pB | 5 |
+| GU-9 패키징 | fuses, packager, zip, Node 26 묶기(DR-26), 사용 안내 | `gui/scripts/package/**`, `docs/gui-usage.md` | w3:pB | 5 |
 
-- 같은 순서는 병렬로 한다. 화면 단위(GU-2~GU-7)는 `gui/src/shared`와 `shell`을 고치지 않고 쓴다. 고칠 것이 생기면 GU-1 소유자에게 요청한다.
+- 같은 순서는 병렬로 한다. 화면 단위(GU-2~GU-7)는 `gui/src/shared`, `gui/src/main`, `gui/src/preload`, `gui/src/engine-host`와 GU-1의 화면 파일을 고치지 않고 쓴다. 새 IPC 함수나 호스트 호출이 필요하면 GU-1 소유자에게 요청한다(통로와 검사가 한 곳에 모인다).
+- GU-1의 `app.ts`(화면 진입)와 `texts.ts`는 GU-1 동안의 임시 화면이다. GU-3·GU-7이 시작할 때 PM이 소유를 옮긴다.
 - `gui/package.json`의 스크립트 줄과 의존성은 GU-1 소유다. GU-9가 패키징 스크립트 줄을 더할 때는 GU-1 소유자가 반영한다.
-- 개발 절차 9절: GU-1(보안 경계)과 GU-9(fuses)는 구현자가 아닌 보안·개인정보 검토자의 교차 검토 뒤 main에 병합한다.
+- 개발 절차 9절: GU-1(보안 경계)과 GU-9(fuses, Node 묶기)는 구현자가 아닌 보안·개인정보 검토자의 교차 검토 뒤 main에 병합한다.
 
 ### 14.3 첫 구현 단위 GU-1
 
-- 목표: 보안 설정을 갖춘 빈 창과, 작업 공간 열기 → 점검 결과 표시까지의 세로 한 줄. 이미 main에 있는 앱 계층 함수(`doctor`)만 쓴다.
-- 만드는 것
-  1. `gui/` 패키지 골격(8.1), `.npmrc`, tsconfig 다섯 개, `scripts/build/build.mjs`.
-  2. 메인: 6.2·6.3·6.7(시작 때 스위치 검사)의 설정, `app://codaryn/` 처리기와 CSP, `userData` 위치, 단일 인스턴스, 창 하나.
-  3. preload: `info`, `onEvents`, `openFolder`, `recent`, `openRecent`, `forgetRecent`, `doctor` 일곱 개.
-  4. 메인 IPC: 보낸 쪽 확인, 인자 검사기, 작업 공간 핸들 표, `gui-state.json`(최근 폴더).
-  5. 엔진 호스트: `createCodarynApp`, 요청 중계, 비정상 종료 처리(4.4).
-  6. 화면 틀: 창 배치(3.1)의 빈 영역, 작업 공간 열기와 최근 폴더, 점검 결과 목록(낱말 상태), 두 언어(공용 카탈로그의 `doctor` 문구와 최소 GUI 문구).
+- 목표(PM 지시): 메인 프로세스, 격리된 렌더러, Node 26 엔진 호스트와 표준 입출력 통로, 그리고 엔진 호스트가 앱 계층의 `doctor`를 불러 결과를 창에 보이는 데까지.
+- 만든 것
+  1. `gui/` 패키지(8.1), tsconfig 다섯 개, `scripts/build/build.mjs`(화면 금지 API 검사, 네 프로그램 컴파일, 정적 파일 복사), `check-lock.mjs`, `smoke.mjs`.
+  2. 메인
+     - 6.2·6.3의 설정, 6.7의 시작 때 스위치 검사. 단일 인스턴스, 앱 메뉴 없음.
+     - 맞춤법 검사기는 기본 세션과 창의 세션 모두에서 끈다(E-11).
+     - `app://codaryn/` 처리기와 CSP, `userData` 위치, 창 하나.
+  3. preload: `info`, `openFolder`, `doctor` 세 함수. 최근 폴더(`recent`·`openRecent`·`forgetRecent`)와 `onEvents`는 다음 단위로 미뤘다.
+  4. 메인 IPC: 보낸 쪽 확인(앱 창의 주 프레임, `app://codaryn/`), 인자 검사기, 작업 공간 핸들 표.
+  5. 엔진 호스트: Node 26 별도 프로세스, stdin·stdout 통로, `doctor`·`messages` 호출, stdout 보호, 시작 실패와 종료 처리(4.2~4.4).
+  6. 화면: 작업 공간 열기 단추, 점검 결과 목록(상태 낱말 먼저, 점검 이름, 영어 세부), 두 언어(GUI 낱말 + 공용 카탈로그 문구), 오류 카드.
 - 완료 기준
-  - 루트 `npm ci`, `typecheck`, `npm test`의 결과가 GUI 추가 전과 같다. 루트 `package.json`·lock이 바뀌지 않는다.
-  - `gui`의 `npm test`(유닛)가 통과한다: 인자 검사기가 형식이 틀린 인자·경로 문자열·모르는 핸들을 거부, 프로토콜 처리기가 `..`·절대 경로·허용 밖 디렉터리를 거부, 환경 걸러내기, 가짜 앱으로 중계.
-  - 연기 시험이 통과한다: 6.2의 창 설정 값, 외부 주소·`file://` 요청 취소, 새 창·탐색 거부, 화면에 `process` 없음(GS-12), 듣는 소켓 0(GS-1), 다른 프레임의 IPC 거부(GS-2 일부), 스위치 검사(GS-15).
-  - 엔진 호환 시험(E-1)의 결과를 보고한다. 실패하면 실패 목록과 GUI-D14 선택지를 보고하고 멈춘다.
-  - 실제 API를 부르지 않는다. 대본 제공자와 가짜 키 값만 쓴다.
-- 이 단위에서 하지 않는 것: 실행 시작과 진행 표시(GU-3), 파일 트리(GU-2, 앱 계층 함수 대기), 패키징(GU-9).
+  - 루트 `npm ci`, `typecheck`, 유닛, 통합의 결과가 GUI 추가 전과 같다. 루트 `package.json`·lock이 바뀌지 않는다.
+  - `gui`의 `npm test`(빌드, lock 검사, 유닛)가 Electron 없이 Node로 통과한다.
+    - 통로: 줄 나누기, 상한, 형식 검사, 대기 요청
+    - 호스트: 가짜 앱으로 인자 검사, 예외 글을 넘기지 않음, 순서가 바뀐 응답
+    - 실제 Node 26 호스트와 실제 엔진으로 `doctor`·`messages`
+    - 가짜 엔진과 가짜 호스트로 stdout 보호, 중간 종료, 프로토콜 위반, Node 26 미만, 준비 시간 초과, 닫기
+    - 메인의 순수 부분: 환경, Node 찾기, 핸들, 앱 URL, 보안 값
+  - 연기 시험(`npm run test:smoke`, 실제 Electron)이 통과한다.
+    - 창이 엔진 호스트의 점검을 보인다. 작업 공간 핸들로 다시 점검한다.
+    - 경로 문자열·모르는 핸들은 거부된다.
+    - 화면에 Node 객체가 없다.
+    - 바깥 요청, `file://`, 새 창, 탐색이 막힌다.
+    - 앱의 모든 프로세스에 TCP 대기 소켓과 UDP 끝점이 0개다.
+    - 맞춤법 사전을 받지 않는다.
+  - 실제 API를 부르지 않는다. 시험은 키 없는 환경과 없는 설정 파일로 돈다.
+- 하지 않은 것: 최근 폴더와 `gui-state.json`, 실행 시작과 진행(GU-3), 파일 트리(GU-2, 앱 계층 함수 대기), 패키징과 fuses(GU-9), "엔진 다시 시작" 단추.
 
 ## 15. 다른 문서와 맞출 점
 
@@ -825,7 +888,7 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 | N-B `src/i18n`(w3:p5) | 공용 문구는 그대로 쓰고 GUI 전용 문구는 `gui/` 안에 둔다(GUI-D21). 카탈로그가 Node API 없이 순수하게 남아야 한다 |
 | N-C `src/cli/human`(w3:p6) | 진행 문장과 오류 카드 문구를 같은 순수 함수에서 받는다 |
 | [민감정보 처리](../privacy.md) | `gui-state.json`과 Chromium 프로필 위치(6.3), 실행 기록 정리와 보관함 정리가 따로라는 점(DR-9), 작업 공간 범위 고지 |
-| 루트 `.gitignore`(관리자) | `gui/node_modules/`, `gui/build/`, `gui/out/` |
+| 루트 `.gitignore` | `gui/build/`, `gui/out/`을 GU-1이 더했다(PM이 GU-1 소유에 포함). `gui/node_modules/`는 기존 `node_modules/` 줄이 막는다 |
 | [개발 절차](../development-workflow.md) 8절(관리자) | 병합 전 검사에 `gui`의 유닛·연기 시험 추가 |
 
 ## 16. 결정
@@ -834,7 +897,7 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 | --- | --- | --- | --- |
 | GUI-D1 | 형태 | **결정됨(DR-20)**: Electron | 사용자 확정 |
 | GUI-D2 | 단일 프로세스 원칙의 뜻 | **결정됨(DR-8)**: 듣는 소켓 없음, 어댑터보다 오래 사는 프로세스 없음 | DR-8 |
-| GUI-D3 | 앱 계층을 부르는 곳 | **결정됨(이 개정 지시)**: 엔진 전용 프로세스에서 함수로 | 창 응답성, 비정상 종료 격리, RunAsNode 불필요 |
+| GUI-D3 | 앱 계층을 부르는 곳 | **결정됨(이 개정 지시, DR-26)**: Node 26 이상의 별도 엔진 프로세스에서 함수로. 메인과는 표준 입출력 | 엔진의 Node 판, 창 응답성, 비정상 종료 격리, RunAsNode 불필요 |
 | GUI-D4 | 지원 OS | **결정됨(DR-20)**: Windows 11 x64 먼저. 2차 macOS·Linux는 권고 | O-2 |
 | GUI-D5 | 코드 배치 | **결정됨(이 개정 지시)**: `gui/` 별도 패키지, 루트 실행 의존성 0 | 8.1 |
 | GUI-D6 | 변경 비교 | **결정됨(DR-7)**: 다시 가린 비교만 | DR-7 |
@@ -845,7 +908,7 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 | GUI-D11 | 목표 원문 저장 | **저장하지 않는다** | 원문 저장소를 늘리지 않는다 |
 | GUI-D12 | 동시 실행 수 | **앱 전체에서 실행 하나** | 확인 질문과 알림이 섞이지 않는다 |
 | GUI-D13 | 자기 개발 후보 화면 | **범위 밖(CLI)** | 관리자 과업 |
-| GUI-D14 | E-1 실패 때 | **[미정]** 선택지: (a) 내장 Node가 26 이상인 Electron을 기다림 (b) 엔진을 그 Node에 맞춤(M-21과 `engines` 고침) (c) 엔진 호스트용 Node 26 런타임을 따로 묶음(런타임 둘) | E-1 결과를 보고 PM이 정한다. 권고 순서는 (a) → (b) → (c) |
+| GUI-D14 | Electron 내장 Node가 26보다 낮을 때 | **결정됨(DR-26)**: 엔진 호스트를 Node 26 이상의 별도 프로세스로 띄운다. 개발 중에는 설치된 Node 26, 배포 때 묶는 방법은 배포 전에 정한다. Node 26 이상을 내장한 Electron 안정판이 나오면 다시 본다 | E-1 확인(Electron 45.3.1의 내장 Node 24.22.2) |
 | GUI-D15 | UI 프레임워크 | **쓰지 않음**: TypeScript와 DOM, `tsc`만 | 의존성과 공급망을 줄인다. `textContent` 원칙을 지키기 쉽다 |
 | GUI-D16 | 화면을 불러오는 방식 | **사용자 정의 `app://` 프로토콜**. `file://`과 개발 서버를 쓰지 않음 | ES 모듈, CSP `'self'`, 허용 디렉터리 목록 |
 | GUI-D17 | 창 | **창 하나, 작업 공간 하나**. 바꾸려면 다른 폴더를 연다 | v1 단순화. 여러 창은 나중 |

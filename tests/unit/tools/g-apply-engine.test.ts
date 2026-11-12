@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { asRawText } from "../../../src/contracts/index.js";
+import { PLAN_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME, asRawText } from "../../../src/contracts/index.js";
 import type {
   ApplyDeps,
   ApplyJournalEvent,
@@ -32,6 +32,7 @@ import type {
 import { applyPlan } from "../../../src/engine/index.js";
 import { createPolicyGate } from "../../../src/policy/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
+import { canonicalActions, createPlanRecorder } from "../../../src/store/index.js";
 import { createPlanExecutor, createToolRunner, discardedRootOf } from "../../../src/tools/index.js";
 import type { PlanFileOps } from "../../../src/tools/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
@@ -146,6 +147,10 @@ async function apply(
     fileOps?: Partial<PlanFileOps>;
     controller?: AbortController;
     onMark?: () => Promise<void>;
+    /** DR-21: no consent, a person's consent for this plan's digest, or one given for another plan. */
+    consent?: "none" | "this_plan" | "other_plan";
+    /** DR-28: the secrets registered when applying. Default: the plan run's (FAKE_SECRET). */
+    secrets?: readonly string[];
   } = {},
 ): Promise<Run> {
   const planActions = options.planActions ?? ["move", "discard"];
@@ -159,12 +164,17 @@ async function apply(
   };
   const journal = new MemoryJournal();
   const inventory = new RecordingInventory();
+  const digest = sha(JSON.stringify(plan.actions));
+  const consent = options.consent ?? "none";
   let marks = 0;
   const deps: ApplyDeps = {
     plan,
     planRunId: PLAN_RUN,
-    digest: sha(JSON.stringify(plan.actions)),
+    digest,
     approval: "cli-flag",
+    ...(consent === "none"
+      ? {}
+      : { unsafeMoveConsent: { channel: "cli-flag" as const, digest: consent === "this_plan" ? digest : sha("another plan") } }),
     runId: APPLY_RUN,
     taskId: "tidy",
     maxDurationMs: 60_000,
@@ -178,7 +188,7 @@ async function apply(
     policy: createPolicyGate({ config, workspace: fx.workspace }),
     planActions,
     discardedRoot: discardedRootOf(fx.workspace.root, APPLY_RUN),
-    privacy: createPrivacyGateway({ secrets: [FAKE_SECRET] }),
+    privacy: createPrivacyGateway({ secrets: [...(options.secrets ?? [FAKE_SECRET])] }),
     verifiers: NO_VERIFIERS,
     inventory,
     journal,
@@ -275,6 +285,93 @@ test("G-C+G-B: the apply-time policy decides (DR-5): an unlisted kind or a prote
   }
 });
 
+/** A volume without hard links: every link (the preflight's probe and the moves) is refused. */
+const NO_HARD_LINKS: Partial<PlanFileOps> = {
+  link: () => Promise.reject(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" })),
+};
+
+function eventOf<T extends ApplyJournalEvent["type"]>(journal: MemoryJournal, type: T): Extract<ApplyJournalEvent, { type: T }> | undefined {
+  return journal.events.find((event): event is Extract<ApplyJournalEvent, { type: T }> => event.type === type);
+}
+
+test("G-C+G-B (DR-21): without consent a volume without hard links ends the apply as consent_required with nothing moved", async () => {
+  const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
+  try {
+    const plan = await proposeReal(fx, [
+      { kind: "move", from: "a.txt", to: "x/a.txt" },
+      { kind: "discard", path: "b.txt" },
+    ]);
+    for (const consent of ["none", "other_plan"] as const) {
+      const { result, journal, marks } = await apply(fx, plan, { fileOps: NO_HARD_LINKS, consent });
+      assert.equal(result.status, "needs-input", consent);
+      assert.equal(result.reason, "consent_required", consent);
+      assert.equal(marks, 0, "the plan is not claimed");
+      assert.deepEqual(result.applied, []);
+      assert.equal(eventOf(journal, "apply_started")?.unsafeMoveConsent, null, "no consent recorded");
+      const checked = eventOf(journal, "plan_checked");
+      assert.deepEqual(checked?.problems, [], "unsafe moves are not problems");
+      assert.deepEqual(checked?.unsafeMoves, [0, 1], "the preflight finds both, the discard too");
+      assert.equal(eventOf(journal, "file_moved"), undefined);
+      assert.equal(await read(fx.root, "a.txt"), "alpha");
+      assert.equal(await read(fx.root, "b.txt"), "bravo");
+      assert.equal(await read(fx.root, "x/a.txt"), null);
+    }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C+G-B (DR-21): with the person's consent for this plan the unsafe moves are made and marked unsafe", async () => {
+  const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
+  try {
+    const plan = await proposeReal(fx, [
+      { kind: "move", from: "a.txt", to: "x/a.txt" },
+      { kind: "discard", path: "b.txt" },
+    ]);
+    const { result, journal, marks } = await apply(fx, plan, { fileOps: NO_HARD_LINKS, consent: "this_plan" });
+    assert.equal(result.status, "done", JSON.stringify(result));
+    assert.equal(result.reason, "verified");
+    assert.equal(marks, 1);
+    assert.deepEqual(
+      result.applied.map((item) => [item.index, item.stored, item.unsafe]),
+      [
+        [0, null, true],
+        [1, "1", true],
+      ],
+    );
+    assert.equal(eventOf(journal, "apply_started")?.unsafeMoveConsent, "cli-flag");
+    assert.deepEqual(eventOf(journal, "plan_checked")?.unsafeMoves, [0, 1]);
+    assert.equal(eventOf(journal, "file_moved")?.unsafe, true);
+    assert.equal(eventOf(journal, "file_discarded")?.unsafe, true);
+    assert.equal(await read(fx.root, "a.txt"), null);
+    assert.equal(await read(fx.root, "x/a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), null);
+    assert.equal(await fs.readFile(path.join(discardedRootOf(fx.root, APPLY_RUN), "1"), "utf8"), "bravo");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C+G-B (DR-21): with consent, a destination taken after the preflight is still not replaced", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    const plan = await proposeReal(fx, [{ kind: "move", from: "a.txt", to: "b.txt" }]);
+    const { result, marks } = await apply(fx, plan, {
+      fileOps: NO_HARD_LINKS,
+      consent: "this_plan",
+      // After the preflight and the claim, before the move: someone creates the destination.
+      onMark: () => fs.writeFile(path.join(fx.root, "b.txt"), "created in the window", "utf8"),
+    });
+    assert.equal(marks, 1);
+    assert.equal(result.status, "failed", JSON.stringify(result));
+    assert.equal(result.reason, "apply_incomplete");
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), "created in the window");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("G-C+G-B: a cancel during an action finishes that action and ends the apply as cancelled", async () => {
   const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
   try {
@@ -285,7 +382,8 @@ test("G-C+G-B: a cancel during an action finishes that action and ends the apply
     const controller = new AbortController();
     const fileOps: Partial<PlanFileOps> = {
       async link(existing, created) {
-        controller.abort(); // the person cancels while the first move is under way
+        // The preflight's hard link probe (PQ-6) is not a move; cancel during the first real move.
+        if (!path.basename(created).startsWith(".codaryn-link-probe-")) controller.abort();
         await fs.link(existing, created);
       },
     };
@@ -338,5 +436,59 @@ test("G-C+G-B: a destination taken after the preflight ends the apply as apply_i
     assert.equal(await read(fx.root, "x/b.txt"), "theirs", "the other file is not replaced");
   } finally {
     await fx.cleanup();
+  }
+});
+
+test("G-C+G-B+store (DR-28): a plan stored by the real store is applied with the plan run's secrets and refused with other secrets", async () => {
+  const secretName = `photos/${FAKE_SECRET}.jpg`;
+  for (const [label, secrets, applies] of [
+    ["same secrets", [FAKE_SECRET], true],
+    ["another secret", ["fake-other-secret-gc02"], false],
+    ["no secret", [], false],
+  ] as const) {
+    const fx = await fixture({ [secretName]: "SSS", "a.txt": "alpha" });
+    try {
+      // The plan run: the real tool with the real store's recorder writes plan.json.
+      const runner = createToolRunner({
+        workspace: fx.workspace,
+        privacy: createPrivacyGateway({ secrets: [FAKE_SECRET] }),
+        planRecorder: createPlanRecorder({ workspaceRoot: fx.root, runId: PLAN_RUN }),
+      });
+      assert.ok(runner.executeWorkflowTool !== undefined);
+      const proposed = await runner.executeWorkflowTool(
+        {
+          id: "p1",
+          name: "propose_plan",
+          args: { summary: "tidy", actions: [{ kind: "move", from: secretName, to: "2026/s.jpg" }, { kind: "discard", path: "a.txt" }] },
+        },
+        new AbortController().signal,
+      );
+      assert.equal(proposed.ok, true, JSON.stringify(proposed));
+      const text = await fs.readFile(path.join(fx.root, STATE_DIR_NAME, RUNS_DIR_NAME, PLAN_RUN, PLAN_FILE_NAME), "utf8");
+      const actions = canonicalActions((JSON.parse(text) as { actions: unknown }).actions);
+      assert.ok(actions !== null && actions.every((action) => action.shown !== undefined), "every stored action has its masked form");
+      assert.doesNotMatch(JSON.stringify(actions.map((action) => action.shown)), new RegExp(FAKE_SECRET), "the masked form holds no secret");
+      const plan: StoredPlan = { schemaVersion: 1, kind: "plan", runId: PLAN_RUN, actions };
+
+      // The apply, with the secrets registered now.
+      const { result, journal, marks } = await apply(fx, plan, { secrets });
+      if (applies) {
+        assert.equal(result.status, "done", `${label}: ${JSON.stringify(result)}`);
+        assert.equal(marks, 1);
+        assert.equal(await read(fx.root, "2026/s.jpg"), "SSS");
+        assert.equal(await read(fx.root, "a.txt"), null);
+      } else {
+        assert.equal(result.status, "failed", label);
+        assert.equal(result.reason, "plan_stale", label);
+        assert.equal(marks, 0, `${label}: the plan is not claimed`);
+        assert.ok(result.notices.some((notice) => notice.includes("plan_secrets_differ")), `${label}: ${JSON.stringify(result.notices)}`);
+        assert.equal(journal.events.some((event) => event.type === "plan_checked" || event.type === "file_moved"), false, `${label}: nothing checked or moved`);
+        assert.equal(await read(fx.root, secretName), "SSS");
+        assert.equal(await read(fx.root, "a.txt"), "alpha");
+        assert.doesNotMatch(JSON.stringify({ result, events: journal.events }), new RegExp(FAKE_SECRET), `${label}: no plain secret in the result or the record`);
+      }
+    } finally {
+      await fx.cleanup();
+    }
   }
 });

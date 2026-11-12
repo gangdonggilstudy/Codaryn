@@ -24,6 +24,7 @@ import {
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
+  planActionShownMatches,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -120,6 +121,14 @@ export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
   /** Set by the app layer only (AdapterApply). Absent: the CLI's channels (`--digest`, terminal). */
   readonly adapter?: AdapterApply;
   /**
+   * DR-4: the parent environment of the verifiers' commands: the apply's own copy (the app layer's,
+   * with its variables file loaded), filtered by CHILD_ENV_ALLOWLIST as for a run. Absent: `env`,
+   * which is `process.env` in the CLI's own process (its variables file is loaded there).
+   */
+  readonly parentEnv?: Readonly<Record<string, string | undefined>>;
+  /** DR-4: the platform the copy was made for (Windows looks names up without case). Absent: this process's. */
+  readonly platform?: NodeJS.Platform;
+  /**
    * Shows the question on stderr and returns the line typed, or null. Present only when stdin and
    * stderr are terminals; without it an apply needs `--digest`.
    */
@@ -185,6 +194,19 @@ function actionLines(actions: readonly MaskedPlanAction[], currentKey: string | 
 
 type Prepared = { readonly prepared: PreparedTask; readonly workspaceRoot: string; readonly runId: string };
 
+/**
+ * Review R-11 L-2: plan, apply and review run no model, but their quick form builds the run's
+ * settings as `run` does, limits included, from the config file. A missing setting says so and
+ * points at the plan run's task, which also keeps the plan run's secrets (DR-28).
+ */
+function withQuickFormHint(outcome: CommandOutcome, form: TaskFormArgs): CommandOutcome {
+  if (form.input.kind !== "quick" || !("output" in outcome) || outcome.output.kind !== "error") return outcome;
+  const output = outcome.output;
+  if (output.code !== "invalid_config" || !output.message.includes("is not set")) return outcome;
+  const message = `${output.message}. The quick form of plan, apply and review reads the run settings, limits included, from the config file; give the plan run's task with --task instead`;
+  return { ...outcome, output: { ...output, message } };
+}
+
 /** Steps 1 to 7, the workspace's real path and the run `--run` names. */
 async function prepareFor(
   io: PlanCommandEnvironment,
@@ -195,7 +217,7 @@ async function prepareFor(
   secrets = true,
 ): Promise<{ ok: true; value: Prepared } | { ok: false; outcome: CommandOutcome }> {
   const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets });
-  if (!("prepared" in ready)) return { ok: false, outcome: ready };
+  if (!("prepared" in ready)) return { ok: false, outcome: withQuickFormHint(ready, form) };
   let workspaceRoot: string;
   try {
     workspaceRoot = (await createWorkspace({ root: ready.prepared.task.workspaceRoot })).root;
@@ -228,6 +250,8 @@ async function prepareFor(
 const LOAD_MESSAGES = {
   run_not_found: "the workspace has no records for that run id",
   run_not_plan: "that run did not end with a stored plan (needs-input/plan_pending); there is nothing to show or apply",
+  // R-9c C-1: the plan run ended as plan_pending but its plan.json is gone.
+  plan_run_missing: "the plan run ended with a plan, but its plan.json is gone; nothing was shown or changed. Make the plan again",
   invalid_run_record: "the plan run's records cannot be used (plan.json or result.json cannot be read, or they disagree)",
 } as const;
 
@@ -246,6 +270,18 @@ async function loadShown(
   for (const action of loaded.plan.actions) {
     const masked = maskAction(action, privacy);
     if (masked === null) return { ok: false, outcome: cliError("internal_error", "a path of the plan could not be masked; nothing is shown") };
+    // DR-28 (R-11 M-1): the secrets registered now must leave exactly the text visible that the
+    // plan run left visible (its masked form, stored with each action). Otherwise, or for a plan
+    // stored without that form, nothing is shown, asked, recorded or moved.
+    if (!planActionShownMatches(action, masked)) {
+      return {
+        ok: false,
+        outcome: cliError(
+          "plan_secrets_differ",
+          "the secrets registered now mask the plan's paths differently from the plan run, or the plan has no masked form; nothing was shown, asked, recorded or moved. Use the plan run's task form (--task), or make the plan again",
+        ),
+      };
+    }
     actions.push(masked);
   }
   const manifest = await createInventoryChecker({ workspaceRoot: value.workspaceRoot }).capture();
@@ -355,7 +391,14 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     try {
       const workspace = await createWorkspace({ root: workspaceRoot });
       const privacy = shown.privacy;
-      const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
+      // T-1 as in a run; DR-4: the commands' parent environment is the apply's copy, never process.env
+      // behind the caller's back.
+      const commandRunner = createCommandRunner({
+        allowEnvValue: envValueFreeOfSecrets(privacy),
+        workspaceRoot,
+        parentEnv: (io.parentEnv ?? io.env) as NodeJS.ProcessEnv,
+        ...(io.platform === undefined ? {} : { platform: io.platform }),
+      });
       const protectedPaths = task.policy.protectedPaths ?? [];
       const integrity =
         protectedPaths.length > 0 || prepared.integrityPaths.length > 0

@@ -1,19 +1,25 @@
 /**
  * Assembly of one run for the app layer: the same modules in the same order as the CLI's
- * `assembleRun` (src/cli/assemble.ts:126-188), with one difference (DR-4): the command runner
+ * `assembleRun` (src/cli/assemble.ts), with one difference (DR-4): the command runner
  * takes its parent environment from the run's environment copy, not from `process.env`.
  *
- * Why: the CLI loads `--vars-file` into `process.env`, so allowed variables (PATH, TEMP, ...) set by
- * that file reach the child commands. The app layer loads the file into a copy instead, so it must
- * hand that copy to the runner to keep the same result; in a process shared with other code it also
- * keeps the host's own variables out of the children.
+ * Why: the CLI loads `--vars-file` into `process.env`, and the runner passes the variables on its
+ * allowlist (CHILD_ENV_ALLOWLIST) from there to the child commands. The app layer loads the file
+ * into a copy instead, so it hands that copy to the runner to keep the same result; in a process
+ * shared with other code it also keeps the host's own variables out of the children.
+ *
+ * What actually reaches a child from the variables file (R-4 I-1): only an allowlisted variable
+ * whose value is shorter than 8 characters. A value of 8 or more characters that the file newly
+ * sets is registered as a secret (S-4), and the runner leaves out every variable whose value holds
+ * a registered secret (T-1, `envValueFreeOfSecrets`). So a long PATH or TEMP from the file does not
+ * reach the child, in the CLI and in the app layer alike.
  *
  * Interim: migration step 2 moves `assembleRun` here and removes the CLI's copy.
  */
 
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createChangeRecorder, createJournal, releaseLock, writeResult } from "../store/index.js";
+import { acquireLock, createChangeRecorder, createJournal, createPlanRecorder, releaseLock, writeResult } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
@@ -60,7 +66,9 @@ export function createAppAssemble(
         platform,
       });
       const changeRecorder = createChangeRecorder({ workspaceRoot, runId });
-      const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder });
+      // G-A, G-F as in the CLI: propose_plan stores plan.json for this run; the other tools never use it.
+      const planRecorder = createPlanRecorder({ workspaceRoot, runId });
+      const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
       const verifiers = createVerifierRunner({ workspace, commandRunner });
       const journal = createJournal({ workspaceRoot, runId, clock });
       const protectedPaths = task.policy.protectedPaths ?? [];

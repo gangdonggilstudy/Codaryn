@@ -63,7 +63,7 @@ import {
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { PROCESS_START_TOLERANCE_MS, isRunTimestamp, processStartTime } from "../store/index.js";
+import { inspectLock, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
@@ -364,87 +364,26 @@ function fieldOf(position: InputErrorPosition | undefined, message?: string): Sc
 }
 
 /**
- * N-25 (a, b), review R-6 low 1: reads the lock file without changing it and judges its holder as
- * the store's `acquireLock` does: a pid that does not run is stale; a lock with
- * `processStartedAt` whose pid now runs a process started at another time (beyond
- * PROCESS_START_TOLERANCE_MS) is stale too, since the pid was given to another process; an unknown
- * start time counts as held; a lock without it (written before N-25 b) is judged by its pid alone.
- * A start time that is not a timestamp is not understood: "unreadable", as the store never reclaims it.
- *
- * DR-27 (b): `lock.json.reclaim` is read first, as the store's reclaimer reads it. One whose owner
- * has ended is cleared by the next run, so `lock.json` decides. Any other one stays: text still
- * being written (no final newline and not yet whole JSON; an exclusive create on a volume without
- * hard links leaves it so when the attempt ends in between), text that is not understood, or a
- * live owner. Then no lock is reclaimed while it stays: `reclaim_left`.
+ * N-25 (a, b), N-27 (d), DR-27 (b): the lock as the next run would find it, judged by the store's
+ * `inspectLock` with acquireLock's own rules (the Linux identity, then the process start time, then
+ * the pid; and `lock.json.reclaim`). Reads only. `readText` and the liveness functions are injected
+ * by tests; when a test injects liveness, the Linux identity is not asked, so the answer does not
+ * depend on the platform. By default the store's functions decide.
  */
 export async function inspectLockFile(
   workspaceRoot: string,
   readText: (file: string) => Promise<string>,
-  isAlive: (pid: number) => boolean = processAlive,
-  startTimeOf: (pid: number) => Promise<number | null> = processStartTime,
+  isAlive?: (pid: number) => boolean,
+  startTimeOf?: (pid: number) => Promise<number | null>,
 ): Promise<LockState> {
-  let reclaim: string | null;
-  try {
-    reclaim = await readText(path.join(workspaceRoot, STATE_DIR_NAME, `${LOCK_FILE_NAME}.reclaim`));
-  } catch (failure) {
-    if (!isMissingFile(failure)) return "reclaim_left";
-    reclaim = null;
-  }
-  if (reclaim !== null && (stillWritten(reclaim) || (await judgeLockText(reclaim, isAlive, startTimeOf)) !== "stale")) return "reclaim_left";
-  let text: string;
-  try {
-    text = await readText(path.join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME));
-  } catch (failure) {
-    return isMissingFile(failure) ? "none" : "unreadable";
-  }
-  return judgeLockText(text, isAlive, startTimeOf);
-}
-
-/** As the store: text with no final newline that is not yet whole JSON may still be growing. */
-function stillWritten(text: string): boolean {
-  if (text.endsWith("\n")) return false;
-  try {
-    JSON.parse(text);
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/** A complete lock-shaped text's holder, judged as the store's `acquireLock` judges it. */
-async function judgeLockText(
-  text: string,
-  isAlive: (pid: number) => boolean,
-  startTimeOf: (pid: number) => Promise<number | null>,
-): Promise<"held" | "stale" | "unreadable"> {
-  let pid: unknown;
-  let processStartedAt: unknown;
-  try {
-    ({ pid, processStartedAt } = (JSON.parse(text) ?? {}) as { pid?: unknown; processStartedAt?: unknown });
-  } catch {
-    return "unreadable";
-  }
-  if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return "unreadable";
-  if (processStartedAt !== undefined && (typeof processStartedAt !== "string" || !isRunTimestamp(processStartedAt))) return "unreadable";
-  if (!isAlive(pid)) return "stale";
-  if (processStartedAt === undefined) return "held";
-  let actual: number | null;
-  try {
-    actual = await startTimeOf(pid);
-  } catch {
-    actual = null;
-  }
-  if (actual === null) return "held";
-  return Math.abs(actual - Date.parse(processStartedAt)) <= PROCESS_START_TOLERANCE_MS ? "held" : "stale";
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as { code?: unknown }).code === "EPERM";
-  }
+  const injected = isAlive !== undefined || startTimeOf !== undefined;
+  const inspection = await inspectLock(workspaceRoot, {
+    fileSystem: { ...nodeLockFileSystem, readText },
+    ...(isAlive === undefined ? {} : { isProcessAlive: isAlive }),
+    ...(startTimeOf === undefined ? {} : { processStartTime: startTimeOf }),
+    ...(injected ? { processIdentity: async () => null } : {}),
+  });
+  return inspection.state;
 }
 
 function worst(checks: readonly DoctorCheck[]): DoctorStatus {
@@ -754,10 +693,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
         "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
       if (checked.status === "ok") {
-        // No typed text yet: the contract base (claude/general-tasks b89ee16) does not have
-        // `doctor.commands.extra_args_with_plan` (e6a4289 came after it). Without a text the
-        // renderer prints this English message.
-        results.set("commands", { id: "commands", status: "warn", message: warning });
+        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } });
       } else {
         set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
       }

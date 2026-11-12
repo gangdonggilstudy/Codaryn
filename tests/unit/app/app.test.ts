@@ -9,7 +9,7 @@ import { writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES } from "../../../src/contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, DOCTOR_CHECK_IDS } from "../../../src/contracts/index.js";
 import type { CliErrorCode, EngineResult, JournalRecord, ModelProvider } from "../../../src/contracts/index.js";
 import { MODEL_NOT_FOUND_HINT } from "../../../src/cli/run.js";
 import { RUN_ID_PATTERN } from "../../../src/cli/run-id.js";
@@ -308,7 +308,11 @@ describe("report, revert, doctor", () => {
     assert.equal(checked.ok, true, JSON.stringify(checked));
     const output = (checked as { output: { kind: string; checks: readonly { id: string }[] } }).output;
     assert.equal(output.kind, "doctor");
-    assert.equal(output.checks.length, 12);
+    // One per contract id, in its order (12 before N-20 and N-25 added `language` and `lock`).
+    assert.deepEqual(
+      output.checks.map((check) => check.id),
+      [...DOCTOR_CHECK_IDS],
+    );
 
     const both = await app.doctor({
       configPath: null,

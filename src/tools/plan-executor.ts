@@ -6,7 +6,10 @@
  * - Every workspace path goes through `Workspace.resolve`. The only place written outside it is
  *   the apply run's own `.codaryn/discarded/<runId>/` (DR-9).
  * - A move never replaces an existing file and never copies (`moveNoReplace`). Where hard links
- *   cannot be used it does not move at all (DR-18 b, HARD_LINK_UNAVAILABLE_PROBLEM).
+ *   cannot be used it does not move (DR-18 b, HARD_LINK_UNAVAILABLE_PROBLEM): `check` finds that
+ *   ahead of the apply, and the engine ends the apply as `consent_required` (DR-21). Only with the
+ *   person's consent for this apply (`allowUnsafeMove`) does `apply` look once more that the
+ *   destination is absent and rename (`renameIfAbsent`), marking the outcome `unsafe`.
  * - A discard moves the file the same way into the discarded directory, under a name built from
  *   the action index only, never from the file name.
  * - The source must still be the file the plan hashed: `check` hashes it, and `apply` hashes it
@@ -20,7 +23,7 @@
 
 import path from "node:path";
 
-import { DISCARDED_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import { DISCARDED_DIR_NAME, STATE_DIR_NAME, discardedStoredName } from "../contracts/index.js";
 import type {
   CreatePlanExecutor,
   PlanExecutor,
@@ -42,6 +45,8 @@ import {
   isMissing,
   moveNoReplace,
   nodePlanFileOps,
+  probeHardLink,
+  renameIfAbsent,
   sameIdentity,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
@@ -84,6 +89,31 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
   /** What `check` hashed, by action (kind, source, planned hash). Lets `apply` skip a second hash. */
   const verified = new Map<string, { readonly identity: FileIdentity; readonly sha256: string }>();
   const verifiedKey = (action: ResolvedPlanAction): string => `${action.kind}\u0000${sourceOf(action)}\u0000${action.sha256}`;
+
+  /** PQ-6: hard link support, probed once per volume (device id) of the sources. */
+  const linkSupport = new Map<bigint, "supported" | "unsupported">();
+
+  /**
+   * PQ-6, DR-18 (b): tells the preflight before any action whether moves are possible on the
+   * source's volume. The probe goes into the state directory when it is on the same volume (no
+   * name appears among the person's files), else next to the source, and is taken back at once.
+   * A definite answer is kept for the volume; "unknown" is not, so the apply decides per move.
+   */
+  async function hardLinkProblem(sourceAbsolute: string, identity: FileIdentity): Promise<PlanItemProblem | null> {
+    const known = linkSupport.get(identity.dev);
+    if (known !== undefined) return known === "unsupported" ? HARD_LINK_UNAVAILABLE_PROBLEM : null;
+    let dir = path.dirname(sourceAbsolute);
+    try {
+      const state = await ops.lstat(path.join(root, STATE_DIR_NAME));
+      if (state.isDirectory() && !state.isSymbolicLink() && state.dev === identity.dev) dir = path.join(root, STATE_DIR_NAME);
+    } catch {
+      // No state directory: probe next to the source.
+    }
+    const probed = await probeHardLink(sourceAbsolute, dir, ops);
+    if (probed === "unknown") return null;
+    linkSupport.set(identity.dev, probed);
+    return probed === "unsupported" ? HARD_LINK_UNAVAILABLE_PROBLEM : null;
+  }
 
   /** Checks the source as it is now. On success, its identity matches the plan's hash. */
   async function checkSource(
@@ -139,13 +169,15 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
           const destination = await inspectDestination(workspace, action.to, ops);
           if (!destination.ok) return destination.problem;
         }
-        return null;
+        // DR-21: a move that could only be made unsafely is reported here, before any action, so
+        // the engine can list it (plan_checked.unsafeMoves) and ask for the person's consent.
+        return await hardLinkProblem(source.absolute, source.identity);
       } catch {
         return "io_error";
       }
     },
 
-    async apply(action, index, signal) {
+    async apply(action, index, signal, options) {
       try {
         if (signal.aborted) return itemFailure("io_error");
         if (!Number.isInteger(index) || index < 0) return itemFailure("io_error");
@@ -163,7 +195,7 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
         } else {
           const discarded = await discardedDir();
           if (!discarded.ok) return itemFailure("io_error");
-          stored = String(index);
+          stored = discardedStoredName(index);
           target = path.join(discarded.dir, stored);
         }
 
@@ -178,15 +210,22 @@ export function createPlanExecutor(deps: PlanExecutorDeps): PlanExecutor {
           return itemFailure(isMissing(error) ? "source_missing" : "io_error");
         }
 
-        const moved = await moveNoReplace(source.absolute, target, ops);
+        let moved = await moveNoReplace(source.absolute, target, ops);
+        let unsafe = false;
+        if (moved === "no_hard_link") {
+          // DR-18 (b): no move that could replace a file, unless the person consented to that for
+          // this apply (DR-21). The engine passes the consent only for the actions the preflight
+          // listed as unsafe. The source is still the checked file: moveNoReplace changed nothing.
+          if (options?.allowUnsafeMove !== true) return itemFailure(HARD_LINK_UNAVAILABLE_PROBLEM);
+          moved = await renameIfAbsent(source.absolute, target, ops);
+          unsafe = moved === "moved";
+        }
         if (moved !== "moved") {
           // A discard target is new and named by index only: "exists" there is not the plan's fault.
           if (moved === "destination_exists" && action.kind === "discard") return itemFailure("io_error");
-          // DR-18 (b): no hard links here, so no move that could replace a file.
-          if (moved === "no_hard_link") return itemFailure(HARD_LINK_UNAVAILABLE_PROBLEM);
           return itemFailure(moved);
         }
-        return { ok: true, applied: { index, action, stored } };
+        return { ok: true, applied: { index, action, stored, ...(unsafe ? { unsafe: true as const } : {}) } };
       } catch {
         return itemFailure("io_error");
       }

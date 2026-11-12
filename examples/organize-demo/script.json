@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "toolCalls": [{ "name": "inspect_files", "args": { "path": "inbox", "hash": true } }],
+      "usage": { "inputTokens": 0, "outputTokens": 0 }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "propose_plan",
+          "args": {
+            "summary": "사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다",
+            "actions": [
+              { "kind": "move", "from": "inbox/beach-2025.jpg", "to": "photos/2025/beach-2025.jpg" },
+              { "kind": "move", "from": "inbox/receipt-2026.pdf", "to": "documents/2026/receipt-2026.pdf" },
+              { "kind": "discard", "path": "inbox/old-draft.tmp" }
+            ]
+          }
+        }
+      ],
+      "usage": { "inputTokens": 0, "outputTokens": 0 }
+    },
+    { "text": "계획을 제안했다.", "usage": { "inputTokens": 0, "outputTokens": 0 } }
+  ]
+}

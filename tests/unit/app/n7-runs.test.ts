@@ -117,7 +117,8 @@ describe("revert with dry run and the revert record (N-7)", () => {
 
     const again = ok<RevertOutput>(await app.revert({ workspace, runId, dryRun: true }));
     assert.equal(again.revertedBefore?.status, "complete", "the earlier revert is reported");
-    assert.deepEqual(again.skipped.map((file) => file.reason), ["changed_since_run"]);
+    // N-22: the CLI's revert names an already reverted file as such.
+    assert.deepEqual(again.skipped.map((file) => file.reason), ["already_reverted"]);
     assert.equal(await exists(path.join(workspace, ".codaryn", "lock.json")), false);
   });
 

@@ -234,7 +234,10 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
  */
 function underDefinition(config: CodarynConfig | null, definition: WorkflowDefinition, quick: boolean): CodarynConfig {
   const base: CodarynConfig = config ?? { schemaVersion: 1 };
-  const limits = definition.limits === undefined ? base.limits : { ...definition.limits, ...(base.limits ?? {}) };
+  // Review R-11 L-1: a definition's limits are defaults (contract: "laid under"), never bounds. In
+  // the quick form the config's limits are the run's, with the definition's filling the gaps; a task
+  // file gets them through parseTask's workflowLimits, and only the config bounds it (S-7).
+  const limits = !quick || definition.limits === undefined ? base.limits : { ...definition.limits, ...(base.limits ?? {}) };
   const policy = quick ? (base.policy ?? definition.policy) : base.policy;
   const verifiers = quick ? (base.verifiers ?? definition.verifiers) : base.verifiers;
   return {
@@ -529,7 +532,7 @@ export async function prepareTask(
 
   const taskOutcome =
     taskFile !== null
-      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: taskConfig?.limits })
+      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: taskConfig?.limits, workflowLimits: definition?.limits })
       : args.input.kind === "quick"
         ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config: taskConfig, workflowRef: args.workflow })
         : null;

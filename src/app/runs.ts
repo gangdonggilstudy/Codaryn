@@ -1,49 +1,21 @@
 /**
- * N-7 in the app layer (DR-14): the run list, `latest`, and the revert with its dry run and its
- * revert record.
+ * N-7 in the app layer (DR-14): the run list and which run a reference (`latest`) names.
  *
  * Which runs are listed, which are damaged and which one `latest` names are decided by the store
- * (`listRuns`, `latestRunId`) and the CLI's `resolveRunRef` (N-18 ambiguity), never here. So the
- * N-23 corrections in progress (forged or future start times are damaged; only runs with a result
- * can be `latest`) reach the app layer as soon as they reach those functions.
- *
- * The revert follows the contract (src/contracts/changes.ts, engine.ts RevertOutput):
- * - dry run: the same decisions, nothing changed, no lock, no revert record;
- * - revert: the workspace lock is held while files are put back and while the revert record is
- *   written, and released afterwards;
- * - `revertedBefore`: the run's revert record from before this call, when it passes its checks.
+ * (`listRuns`, `latestRunId`) and the CLI's `resolveRunRef` (N-18, N-23, N-26), never here, so
+ * their rules reach the app layer as they change. The revert itself is the CLI's revert command
+ * (app.ts), with the options main.ts gives it.
  */
 
-import path from "node:path";
-import { lstat } from "node:fs/promises";
-import {
-  ANTHROPIC_API_KEY_ENV,
-  JOURNAL_FILE_NAME,
-  LATEST_RUN_ALIAS,
-  REVERT_EXIT_CODES,
-  RUNS_DEFAULT_LIMIT,
-  RUNS_DIR_NAME,
-  RUNS_EXIT_CODES,
-  RUNS_MAX_LIMIT,
-  STATE_DIR_NAME,
-} from "../contracts/index.js";
-import type { Clock, RevertOutcome, RevertOutput, RevertRecord, RunListing, RunsOutput } from "../contracts/index.js";
-import {
-  RevertRunError,
-  acquireLock,
-  listRuns as storeListRuns,
-  readRevertRecord,
-  releaseLock,
-  revertRun,
-  writeRevertRecord,
-} from "../store/index.js";
+import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT } from "../contracts/index.js";
+import type { RunListing, RunsOutput } from "../contracts/index.js";
+import { listRuns as storeListRuns } from "../store/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
-import { createRunId } from "../cli/run-id.js";
 import { resolveRunRef, resolveWorkspaceRoot } from "../cli/runs.js";
 import { hideKeys } from "../cli/text-safety.js";
 import { lookupEnv } from "./environment.js";
 import { appError, fromCliError } from "./errors.js";
-import type { AppCallOutcome, AppEnvironment, AppError, ListRunsRequest, ResolvedRun, ResolveRunRequest, RevertRequest } from "./types.js";
+import type { AppCallOutcome, AppEnvironment, AppError, ListRunsRequest, ResolvedRun, ResolveRunRequest } from "./types.js";
 
 type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: AppError };
 
@@ -127,90 +99,6 @@ export async function resolveRunIn(environment: AppEnvironment, request: Resolve
       latest: request.run === LATEST_RUN_ALIAS,
       startedAt: entry !== undefined && entry.state === "checked" ? entry.startedAt : null,
       damaged: entry !== undefined && entry.state === "damaged",
-    },
-  };
-}
-
-async function isFile(file: string): Promise<boolean> {
-  try {
-    return (await lstat(file)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function revertError(error: unknown): AppError {
-  return error instanceof RevertRunError && error.code === "run_not_found"
-    ? appError("run_not_found", "the workspace has no journal for that run id; nothing was changed")
-    : appError("invalid_run_record", "the run's journal cannot be read; nothing was changed");
-}
-
-function lockedMessage(holder: { readonly runId: string; readonly pid: number } | null): string {
-  const who = holder === null ? "an unreadable lock file" : `run ${holder.runId} (pid ${holder.pid})`;
-  return `the workspace is locked by ${who}; nothing was changed`;
-}
-
-export async function revertIn(environment: AppEnvironment, request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
-  const root = await workspaceRootOf(request.workspace, environment.cwd);
-  if (!root.ok) return root;
-  const workspaceRoot = root.value;
-  const id = await runIdOf(workspaceRoot, request.runId);
-  if (!id.ok) return id;
-  const runId = id.value;
-  if (!(await isFile(path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId, JOURNAL_FILE_NAME)))) {
-    return { ok: false, error: appError("run_not_found", "the workspace has no journal for that run id; nothing was changed") };
-  }
-  // N-16, N-23(g): a revert record that fails its checks only takes the mark away.
-  const before: RevertRecord | null = await readRevertRecord(workspaceRoot, runId).catch(() => null);
-  const dryRun = request.dryRun === true;
-
-  let outcome: RevertOutcome;
-  if (dryRun) {
-    try {
-      outcome = await revertRun({ workspaceRoot, runId, dryRun: true });
-    } catch (error) {
-      return { ok: false, error: revertError(error) };
-    }
-  } else {
-    const clock: Clock = environment.clock;
-    const lockId = createRunId(new Date(clock.now()), environment.randomBytes);
-    const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
-    if (!lock.ok) return { ok: false, error: appError("workspace_locked", lockedMessage(lock.holder)) };
-    try {
-      try {
-        outcome = await revertRun({ workspaceRoot, runId });
-      } catch (error) {
-        return { ok: false, error: revertError(error) };
-      }
-      const record: RevertRecord = {
-        schemaVersion: 1,
-        kind: "revert_record",
-        runId,
-        at: new Date(clock.now()).toISOString(),
-        status: outcome.skipped.length === 0 ? "complete" : "partial",
-        reverted: outcome.reverted.length,
-        skipped: outcome.skipped.length,
-      };
-      // The record only marks the run as reverted in the list; the files are already back.
-      await writeRevertRecord(workspaceRoot, record).catch(() => undefined);
-    } finally {
-      await releaseLock({ workspaceRoot, runId: lockId });
-    }
-  }
-
-  const status = outcome.skipped.length === 0 ? "complete" : "partial";
-  return {
-    ok: true,
-    output: {
-      schemaVersion: 1,
-      kind: "revert",
-      runId,
-      status,
-      exitCode: REVERT_EXIT_CODES[status],
-      reverted: outcome.reverted,
-      skipped: outcome.skipped,
-      ...(dryRun ? { dryRun: true as const } : {}),
-      ...(before === null ? {} : { revertedBefore: { at: before.at, status: before.status } }),
     },
   };
 }

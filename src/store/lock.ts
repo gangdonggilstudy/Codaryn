@@ -91,17 +91,8 @@ export const nodeLockFileSystem: LockFileSystem = {
   remove: (path) => rm(path, { force: true }),
 };
 
-export interface AcquireLockOptions {
-  readonly workspaceRoot: string;
-  readonly runId: string;
-  readonly clock: Clock;
-  /** Defaults to the real file system. */
-  readonly fileSystem?: LockFileSystem;
-  /**
-   * How long to keep trying while the lock is being reclaimed or a file operation reports EPERM or
-   * EBUSY. A live holder ends the attempt at once. Defaults to DEFAULT_LOCK_RETRY_MS.
-   */
-  readonly retryForMs?: number;
+/** How a lock's holder is judged alive. acquireLock, inspectLock and lockHolderAlive share it. */
+export interface LockLivenessOptions {
   /**
    * Whether the process with this pid is alive. Defaults to `process.kill(pid, 0)`. Tests pass a
    * fixed answer, because the system may give an exited process's pid to a new process at any time.
@@ -119,6 +110,19 @@ export interface AcquireLockOptions {
    * exactly, before any wall-clock comparison.
    */
   readonly processIdentity?: (pid: number) => Promise<ProcessIdentity | null>;
+}
+
+export interface AcquireLockOptions extends LockLivenessOptions {
+  readonly workspaceRoot: string;
+  readonly runId: string;
+  readonly clock: Clock;
+  /** Defaults to the real file system. */
+  readonly fileSystem?: LockFileSystem;
+  /**
+   * How long to keep trying while the lock is being reclaimed or a file operation reports EPERM or
+   * EBUSY. A live holder ends the attempt at once. Defaults to DEFAULT_LOCK_RETRY_MS.
+   */
+  readonly retryForMs?: number;
 }
 
 export type AcquireLockOutcome =
@@ -156,7 +160,8 @@ function isTransient(error: unknown): boolean {
  * after the process was created; `ps` reports whole seconds.
  */
 export const PROCESS_START_TOLERANCE_MS = 5_000;
-const START_QUERY_TIMEOUT_MS = 5_000;
+/** How long a start-time query may take before its answer counts as unknown (null). */
+export const START_QUERY_TIMEOUT_MS = 5_000;
 
 function windowsPowerShell(): string {
   const systemRoot = process.env["SystemRoot"] ?? process.env["SYSTEMROOT"] ?? "C:\\Windows";
@@ -164,13 +169,13 @@ function windowsPowerShell(): string {
 }
 
 /** Runs a fixed system tool by its absolute path and returns its stdout, or null on any failure. */
-function systemQuery(file: string, args: readonly string[], cwd: string): Promise<string | null> {
+function systemQuery(file: string, args: readonly string[], cwd: string, timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       execFile(
         file,
         [...args],
-        { timeout: START_QUERY_TIMEOUT_MS, windowsHide: true, cwd, env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 },
+        { timeout: timeoutMs, windowsHide: true, cwd, env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 },
         (error, stdout) => resolve(error === null ? String(stdout) : null),
       );
     } catch {
@@ -192,20 +197,24 @@ function parseElapsed(text: string): number | null {
  * is no such process or its start time cannot be learned. This process: `performance.timeOrigin`.
  * Others: Windows PowerShell's Get-Process, or `ps -o etime=` elsewhere, run by absolute path with
  * a fixed command line that holds nothing but the pid number.
+ * `timeoutMs` (default START_QUERY_TIMEOUT_MS): a query that takes longer answers null, which a lock
+ * judgment treats as "unknown, so held" (the safe side). Z-1: on a heavily loaded machine Windows
+ * PowerShell alone can take longer than the default; tests that need the real answer wait longer.
  */
-export async function processStartTime(pid: number): Promise<number | null> {
+export async function processStartTime(pid: number, options: { readonly timeoutMs?: number } = {}): Promise<number | null> {
+  const timeoutMs = options.timeoutMs ?? START_QUERY_TIMEOUT_MS;
   if (pid === process.pid) return performance.timeOrigin;
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   if (process.platform === "win32") {
     const powershell = windowsPowerShell();
     const script = `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p -and $p.StartTime) { [DateTimeOffset]::new($p.StartTime).ToUnixTimeMilliseconds() }`;
-    const out = await systemQuery(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], join(powershell, ".."));
+    const out = await systemQuery(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], join(powershell, ".."), timeoutMs);
     const value = out === null ? Number.NaN : Number(out.trim());
     return out !== null && out.trim().length > 0 && Number.isSafeInteger(value) && value > 0 ? value : null;
   }
   for (const ps of ["/bin/ps", "/usr/bin/ps"]) {
     const asked = Date.now();
-    const out = await systemQuery(ps, ["-o", "etime=", "-p", String(pid)], "/");
+    const out = await systemQuery(ps, ["-o", "etime=", "-p", String(pid)], "/", timeoutMs);
     if (out === null) continue;
     const elapsed = parseElapsed(out);
     return elapsed === null ? null : asked - elapsed * 1000;
@@ -405,18 +414,16 @@ async function removeIfUnchanged(fs: LockFileSystem, stateDir: string, file: str
 
 type Step = { readonly kind: "acquired" } | { readonly kind: "locked"; readonly holder: LockInfo | null } | { readonly kind: "retry" };
 
-export async function acquireLock(options: AcquireLockOptions): Promise<AcquireLockOutcome> {
-  const { workspaceRoot, runId, clock } = options;
-  const fs = options.fileSystem ?? nodeLockFileSystem;
+/**
+ * Whether a lock's holder (or a reclaim file's owner) still runs (N-25 b, N-27 d). One judge per
+ * attempt: it asks each pid's start time once.
+ */
+function livenessJudge(options: LockLivenessOptions): (holder: LockInfo) => Promise<boolean> {
   const alive = options.isProcessAlive ?? isProcessAlive;
   const startTimeOf = options.processStartTime ?? processStartTime;
   const identityOf = options.processIdentity ?? ((pid: number) => linuxProcessIdentity(pid));
-  /** One answer per pid for this attempt. */
   const startTimes = new Map<number, Promise<number | null>>();
-  assertRunId(runId);
-
-  /** Whether the lock's holder (or a reclaim file's owner) still runs (N-25(b)). */
-  async function holderAlive(holder: LockInfo): Promise<boolean> {
+  return async (holder) => {
     if (!alive(holder.pid)) return false;
     // N-27 (d): the Linux identity does not move with the wall clock; when both sides have one it
     // decides exactly.
@@ -433,7 +440,78 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     const actual = await asked;
     if (actual === null) return true;
     return Math.abs(actual - Date.parse(holder.processStartedAt)) <= PROCESS_START_TOLERANCE_MS;
+  };
+}
+
+/**
+ * Whether the holder of a lock (a parsed `lock.json`) still runs, by the rule acquireLock uses:
+ * the Linux identity (ticks since boot and boot id) when both sides have it, then the process start
+ * time within PROCESS_START_TOLERANCE_MS, then the pid alone. An unknown start time counts as alive.
+ */
+export function lockHolderAlive(holder: LockInfo, options: LockLivenessOptions = {}): Promise<boolean> {
+  return livenessJudge(options)(holder);
+}
+
+/**
+ * What the next run would find, judged by acquireLock's rules:
+ * - `none`: no lock; the next run takes it.
+ * - `held`: a holder that still runs; the next run ends as `workspace_locked`.
+ * - `stale`: a holder that has ended; the next run reclaims the lock.
+ * - `unreadable`: a lock that is not understood or still being written, or cannot be read; it is
+ *   never reclaimed, so the next run ends as `workspace_locked` until it is removed.
+ * - `reclaim_left`: `lock.json.reclaim` is still being written (DR-27 b), cannot be read, or belongs
+ *   to a reclaimer that still runs; while it stays, no lock is reclaimed. One left by a reclaimer that
+ *   ended, or a whole one that is not understood, is cleared by the next run, so `lock.json` decides.
+ */
+export type LockInspection =
+  | { readonly state: "none" }
+  | { readonly state: "held"; readonly holder: LockInfo }
+  | { readonly state: "stale"; readonly holder: LockInfo }
+  | { readonly state: "unreadable" }
+  | { readonly state: "reclaim_left" };
+
+export interface InspectLockOptions extends LockLivenessOptions {
+  /** Defaults to the real file system. Only `readText` is used. */
+  readonly fileSystem?: LockFileSystem;
+}
+
+/**
+ * Reads `<root>/.codaryn/lock.json` and `lock.json.reclaim` without changing anything and judges them
+ * as acquireLock would (for `codaryn doctor`). Never rejects.
+ */
+export async function inspectLock(workspaceRoot: string, options: InspectLockOptions = {}): Promise<LockInspection> {
+  const fs = options.fileSystem ?? nodeLockFileSystem;
+  const holderAlive = livenessJudge(options);
+  const stateDir = join(workspaceRoot, STATE_DIR_NAME);
+  let reclaim: Read;
+  try {
+    reclaim = await readState(fs, join(stateDir, RECLAIM_FILE_NAME));
+  } catch {
+    return { state: "reclaim_left" };
   }
+  if (reclaim !== "missing") {
+    if (stillWritten(reclaim.text)) return { state: "reclaim_left" };
+    // As reclaimInUse: this process's own reclaim counts only while an attempt holds it.
+    const owner = reclaim.holder;
+    if (owner !== null && (owner.pid === process.pid ? heldReclaims.has(reclaim.text) : await holderAlive(owner))) return { state: "reclaim_left" };
+  }
+  let lock: Read;
+  try {
+    lock = await readState(fs, join(stateDir, LOCK_FILE_NAME));
+  } catch {
+    return { state: "unreadable" };
+  }
+  if (lock === "missing") return { state: "none" };
+  if (stillWritten(lock.text) || lock.holder === null) return { state: "unreadable" };
+  return (await holderAlive(lock.holder)) ? { state: "held", holder: lock.holder } : { state: "stale", holder: lock.holder };
+}
+
+export async function acquireLock(options: AcquireLockOptions): Promise<AcquireLockOutcome> {
+  const { workspaceRoot, runId, clock } = options;
+  const fs = options.fileSystem ?? nodeLockFileSystem;
+  const identityOf = options.processIdentity ?? ((pid: number) => linuxProcessIdentity(pid));
+  const holderAlive = livenessJudge(options);
+  assertRunId(runId);
   const locked = (holder: LockInfo | null): AcquireLockOutcome => ({ ok: false, code: "workspace_locked", holder });
 
   let stateDir: string;

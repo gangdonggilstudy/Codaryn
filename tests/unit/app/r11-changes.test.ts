@@ -14,7 +14,7 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, ChangesOutput } from "../../../src/app/index.js";
-import { FAKE_SECRET, WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
+import { FAKE_SECRET, WRITE_NOTES, appEnvironment, setupRun, taskForm, taskRequest } from "./support.js";
 
 const ORIGINAL = `# Title\nkey ${FAKE_SECRET}\n`;
 const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
@@ -49,7 +49,7 @@ describe("R-11: changes with other secrets than the run", () => {
     const task = JSON.parse(await readFile(path.join(base, "task.json"), "utf8")) as Record<string, unknown>;
     await writeFile(path.join(base, "other.json"), JSON.stringify({ ...task, privacy: { secretEnv: [] } }), "utf8");
     const other = createCodarynApp(await appEnvironment(base, { env: {} }));
-    const view = ok(await other.changes({ run: taskRequest(base, { input: { kind: "task", taskPath: path.join(base, "other.json") } }), runId }));
+    const view = ok(await other.changes({ settings: taskForm(base, { input: { kind: "task", taskPath: path.join(base, "other.json") } }), runId }));
 
     assert.equal(JSON.stringify(view).includes(FAKE_SECRET), false, "no plain text of the run's secret");
     assert.deepEqual(
@@ -64,7 +64,7 @@ describe("R-11: changes with other secrets than the run", () => {
   test("with the run's own task form the text is not shown either while the run keeps no record of its masking", async () => {
     const { base, runId } = await changedRun();
     const app = createCodarynApp(await appEnvironment(base));
-    const view = ok(await app.changes({ run: taskRequest(base), runId }));
+    const view = ok(await app.changes({ settings: taskForm(base), runId }));
     assert.deepEqual(
       view.files.map((file) => [file.path, file.before, file.after, file.unavailable]),
       [

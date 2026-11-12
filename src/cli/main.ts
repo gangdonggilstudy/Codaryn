@@ -365,7 +365,8 @@ if ("output" in outcome && outcome.output.kind === "error") {
     // Human output is best effort.
   }
 }
-// DR-49 (U-23): at a terminal the JSON line after the human text is left out (stdoutText).
-const written = stdoutText(outcome, { argv, stdoutIsTerminal: process.stdout.isTTY === true });
+// DR-49 (U-23): at a terminal the JSON line after the human text is left out (stdoutText);
+// U-45 (R-58 Q-1): only when stderr, where that text goes, is a terminal too.
+const written = stdoutText(outcome, { argv, stdoutIsTerminal: process.stdout.isTTY === true, stderrIsTerminal: process.stderr.isTTY === true });
 if (written.length > 0) process.stdout.write(written);
 process.exitCode = outcome.exitCode;

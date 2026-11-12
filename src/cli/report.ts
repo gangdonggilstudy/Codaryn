@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
   APPLY_NOTICE_KINDS,
+  PLAN_RECORDS_UNCHECKED_CAUSES,
   APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
   INTEGRITY_PHASES,
@@ -38,6 +39,7 @@ import type {
   ApplyReportJournalSummary,
   ApplyReportOutput,
   ApplyNoticeKind,
+  PlanRecordsUncheckedCause,
   ApplyResult,
   ApprovalChannel,
   ListRuns,
@@ -323,6 +325,14 @@ function noticeKindsOf(value: unknown): { readonly noticeKinds?: readonly ApplyN
   const kinds = value.map((kind) => oneOf(kind, APPLY_NOTICE_KINDS));
   if (new Set(kinds).size !== kinds.length) bad("result.json names a notice kind twice");
   return kinds.length === 0 ? {} : { noticeKinds: kinds };
+}
+
+/**
+ * U-46 (R-56b R56b-L1): an apply result's recorded cause of plan_records_unchecked
+ * (PLAN_RECORDS_UNCHECKED_CAUSES); absent is left out. Any other value is a damaged field.
+ */
+function planRecordsUncheckedCauseOf(value: unknown): { readonly planRecordsUncheckedCause?: PlanRecordsUncheckedCause } {
+  return value === undefined ? {} : { planRecordsUncheckedCause: oneOf(value, PLAN_RECORDS_UNCHECKED_CAUSES) };
 }
 
 export function readResult(text: string, runId: string, taskId: string): EngineResult {
@@ -745,6 +755,8 @@ export function readApplyResult(text: string, runId: string, journal: ApplyRepor
     ...stateChangedOf(rec["stateChanged"]),
     // U-8: what the apply told besides its status, as recorded; absent when none.
     ...noticeKindsOf(rec["noticeKinds"]),
+    // U-46 (R56b-L1): why plan_records_unchecked was told, when it was not the apply's own check (U-33).
+    ...planRecordsUncheckedCauseOf(rec["planRecordsUncheckedCause"]),
   };
 }
 

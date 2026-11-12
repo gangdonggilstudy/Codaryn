@@ -467,6 +467,16 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.ko["progress.integrity_unchanged"], /^보호 대상 확인/);
   });
 
+  test("U-25 (DR-52): the masking line gives two counts and says what each counts", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    assert.match(en["summary.masking"], /values registered \{registered\}.*places masked in what the model was sent \{masked\}/);
+    assert.match(ko["summary.masking"], /등록된 가릴 값 \{registered\}개.*모델에 보낸 글에서 가린 곳 \{masked\}개/);
+    // Counts only: no other parameter, and the words of DR-50 (가릴 값).
+    for (const text of [en["summary.masking"], ko["summary.masking"]]) {
+      assert.deepEqual(text.match(/\{[a-zA-Z]+\}/g), ["{registered}", "{masked}"]);
+    }
+  });
+
   test("U-19 (UXM-2): the general fix texts of argument and task file errors do not send the person to the wrong place", () => {
     const { en, ko } = MESSAGE_TEXTS;
     // invalid_arguments also answers an unknown command, which has no help of its own: the fix names the command list too.

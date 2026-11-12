@@ -270,6 +270,16 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         const seconds = Math.round(usage.durationMs / 100) / 10;
         out.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, seconds }));
       }
+      // DR-52 (AXM-17): whether masking worked, as two counts (EngineResult.masking): the values
+      // registered, and the places masked in what was sent to the model. Never a value, a place or a
+      // length. No line when the result has none, or when either is not a count.
+      const masking: unknown = result.masking;
+      if (typeof masking === "object" && masking !== null) {
+        const { registeredValues, maskedPlaces } = masking as { registeredValues?: unknown; maskedPlaces?: unknown };
+        if (isCount(registeredValues) && isCount(maskedPlaces)) {
+          out.push(catalog.format("summary.masking", { registered: registeredValues, masked: maskedPlaces }));
+        }
+      }
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
       // DR-47 (AXM-1): the agent's last message, after the facts and before the advice. It is the

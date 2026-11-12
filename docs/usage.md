@@ -110,10 +110,10 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T030342Z-42ed82a7
 
 ```
 run id                     started              changes  result
-20261112T030342Z-42ed82a7  2026-11-12 12:03:42  2        done (done/verified)
+20261112T030342Z-42ed82a7  2026-11-12 12:03:42  1        done (done/verified)
 ```
 
-시작 시각은 지역 시간이다. `changes`는 결과 JSON의 `changes` 개수(파일 도구가 쓴 횟수)다.
+시작 시각은 지역 시간이다. `changes`는 실행이 바꾼 서로 다른 파일 수다. 이 체험은 `summary.md`를 두 번 썼으므로 결과 JSON의 `changes`에는 두 건이 있지만 목록에는 1로 나온다(끝 요약의 `Files changed`와 같다).
 
 **report:** `--run latest`는 가장 최근 실행을 고른다. 고른 실행은 stderr에 먼저 나온다.
 

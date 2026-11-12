@@ -54,6 +54,7 @@ import {
   APPLY_REASONS_BY_STATUS,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
   REVERT_ERROR_CODES,
+  HELP_OPTIONS,
   maskedParts,
   planActionShown,
   planActionShownMatches,
@@ -71,7 +72,11 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  AnyReportOutput,
+  ApplyReportOutput,
+  RunReportOutput,
   DoctorMessageId,
+  LoadPlanOutcome,
   MaskedPlanAction,
   PrivacyGateway,
   StoredPlanAction,
@@ -213,7 +218,49 @@ const revertRecord: RevertRecord = {
   unsafeMoveConsent: "cli-flag",
   unsafeMoves: 1,
 };
+/** G-G (DR-12): the report forms the CLI, the app layer and the GUI share; runKind tells them apart. */
+const applyReport: ApplyReportOutput = {
+  schemaVersion: 1,
+  kind: "report",
+  runKind: "apply",
+  runId: "20261112T120500Z-0000bbbb",
+  status: "incomplete",
+  exitCode: 3,
+  result: null,
+  journal: {
+    planRunId: "20261112T120000Z-0000aaaa",
+    taskId: "tidy",
+    digest: "d".repeat(64) as ContentHash,
+    approval: "cli-flag",
+    unsafeMoveConsent: null,
+    actions: 2,
+    maxDurationMs: 60_000,
+    records: 4,
+    checked: { problems: 0, inventoryLimitReached: false, unsafeMoves: 0 },
+    started: 1,
+    moved: [{ index: 0, from: "a.jpg" as MaskedText, to: "2026/a.jpg" as MaskedText, unsafe: false }],
+    discarded: [],
+    failed: [],
+    lastRound: [],
+    integrityChecks: [],
+    finished: null,
+  },
+};
+const reviewVerdict: RunReportOutput["verdict"] = {
+  schemaVersion: 1,
+  kind: "review_record",
+  runId: "20261112T120000Z-0000aaaa",
+  at: "2026-11-12T12:10:00Z",
+  verdict: "accepted",
+  note: null,
+};
+function reportKind(report: AnyReportOutput): "apply" | "run" {
+  return "runKind" in report ? report.runKind : "run";
+}
 void [
+  applyReport,
+  reviewVerdict,
+  reportKind,
   noConsentInFiles,
   applyEntry,
   legacyEntry,
@@ -461,6 +508,13 @@ describe("G-A plan contract", () => {
   test("DR-24 (b): a revert that could move a file back only unsafely skips it with its own reason", () => {
     assert.ok((REVERT_SKIP_REASONS as readonly string[]).includes("unsafe_move"));
     assert.ok((MESSAGE_IDS as readonly string[]).includes("revert.skip.unsafe_move"));
+  });
+
+  test("R-9c C-1: a plan run whose plan.json is gone is its own outcome for plan and apply; help names --allow-unsafe-move", () => {
+    const gone: LoadPlanOutcome = { ok: false, code: "plan_run_missing" };
+    assert.equal(CLI_ERROR_EXIT_CODES[gone.ok ? "internal_error" : gone.code], 2);
+    assert.ok((HELP_OPTIONS as readonly string[]).includes("allow_unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("help.option.allow_unsafe_move"));
   });
 
   test("R-9c C-1: a revert whose plan run is gone says so with its own error code", () => {

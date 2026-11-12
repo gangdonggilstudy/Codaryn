@@ -249,6 +249,8 @@ async function prepareFor(
 const LOAD_MESSAGES = {
   run_not_found: "the workspace has no records for that run id",
   run_not_plan: "that run did not end with a stored plan (needs-input/plan_pending); there is nothing to show or apply",
+  // R-9c C-1: the plan run ended as plan_pending but its plan.json is gone.
+  plan_run_missing: "the plan run ended with a plan, but its plan.json is gone; nothing was shown or changed. Make the plan again",
   invalid_run_record: "the plan run's records cannot be used (plan.json or result.json cannot be read, or they disagree)",
 } as const;
 

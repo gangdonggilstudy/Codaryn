@@ -32,6 +32,8 @@ import {
 } from "../contracts/index.js";
 import type {
   AppliedActionRecord,
+  ApplyReportJournalSummary,
+  ApplyReportOutput,
   ApplyResult,
   ApprovalChannel,
   ListRuns,
@@ -48,6 +50,7 @@ import type {
   ReportOutput,
   ReportStatus,
   ReviewRecord,
+  RunReportOutput,
   RunReason,
   RunUsage,
   TerminalRunStatus,
@@ -502,65 +505,8 @@ function renderReportText(report: RunReportOutput): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Review verdicts (N-D 5th round)
-
-/**
- * A run report with the person's review verdict. `verdict` is present only for a run that ended as
- * `needs-input`/`awaiting_review`: its review.json (ReviewRecord), or null before a verdict (or
- * when the record cannot be read, which never stops the report). The contract's ReportOutput has
- * no such field; this one is the CLI's until the contract takes it (proposed as it is).
- */
-export interface RunReportOutput extends ReportOutput {
-  readonly verdict?: ReviewRecord | null;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Apply runs (DR-12)
-
-/**
- * DR-12 (G-G report): what the report takes from an apply run's journal, which starts with
- * `apply_started`. The contract's ReportOutput has a run's form only; this form is the CLI's until
- * the contract takes it (proposed to the contract owner as it is). Text fields are masked as recorded.
- */
-export interface ApplyReportJournalSummary {
-  readonly planRunId: string;
-  readonly taskId: string;
-  readonly digest: ContentHash;
-  readonly approval: ApprovalChannel;
-  /** DR-21: the channel of the person's consent to unsafe moves, or null for none. */
-  readonly unsafeMoveConsent: ApprovalChannel | null;
-  /** Number of actions in the plan (`apply_started.actions`). */
-  readonly actions: number;
-  readonly maxDurationMs: number;
-  /** Number of records read. */
-  readonly records: number;
-  /** The preflight (`plan_checked`), or null when the journal has none. */
-  readonly checked: { readonly problems: number; readonly inventoryLimitReached: boolean; readonly unsafeMoves: number } | null;
-  /** R-9 I-4: `plan_item_started` records. */
-  readonly started: number;
-  readonly moved: readonly { readonly index: number; readonly from: MaskedText; readonly to: MaskedText; readonly unsafe: boolean }[];
-  readonly discarded: readonly { readonly index: number; readonly path: MaskedText; readonly stored: string }[];
-  readonly failed: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
-  /** `verifier_result` records: the inventory check first, then the task's verifiers. */
-  readonly lastRound: readonly VerifierResult[];
-  readonly integrityChecks: readonly { readonly phase: IntegrityPhase; readonly changed: readonly MaskedText[] }[];
-  /** From `run_finished`, or null when the journal has none. */
-  readonly finished: { readonly status: TerminalRunStatus; readonly reason: RunReason } | null;
-}
-
-/** DR-12: printed by `codaryn report --json` for an apply run; without `--json` as Markdown. */
-export interface ApplyReportOutput {
-  readonly schemaVersion: 1;
-  readonly kind: "report";
-  /** Tells an apply run's report from a run's (ReportOutput has no such field). */
-  readonly runKind: "apply";
-  readonly runId: string;
-  readonly status: ReportStatus;
-  readonly exitCode: number;
-  /** The apply run's result.json, or null when it has none (`incomplete`). */
-  readonly result: ApplyResult | null;
-  readonly journal: ApplyReportJournalSummary;
-}
+// Apply runs (DR-12). The report forms (RunReportOutput with its verdict, ApplyReportOutput,
+// ApplyReportJournalSummary) are the contract's (src/contracts/commands.ts, eab970f).
 
 /** The `type` of the journal's first record, or null when the first line is not a JSON object. */
 function firstRecordType(text: string): unknown {

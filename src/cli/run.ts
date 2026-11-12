@@ -417,7 +417,11 @@ export async function prepareTask(
    * `secrets: false` (review without a note, R-4 L-4): the secretEnv variables are not read, so a
    * missing one does not stop the command. The key and the variable file's values are still kept.
    */
-  options: { readonly secrets?: boolean } = {},
+  options: {
+    readonly secrets?: boolean;
+    /** U-17: the quick form of a command that runs nothing (QuickTaskInput.readOnly). */
+    readonly readOnly?: boolean;
+  } = {},
 ): Promise<CliRunOutcome | { readonly prepared: PreparedTask }> {
   // 1. S-5: nothing given on the command line may reach another machine or a device.
   const argumentPaths: [string | null, CliErrorCode, string][] = [
@@ -575,7 +579,7 @@ export async function prepareTask(
     taskFile !== null
       ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: taskConfig?.limits, workflowLimits: definition?.limits })
       : args.input.kind === "quick"
-        ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config: taskConfig, workflowRef: args.workflow })
+        ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config: taskConfig, workflowRef: args.workflow, ...(options.readOnly === true ? { readOnly: true } : {}) })
         : null;
   if (taskOutcome === null) return error("internal_error", "no task input");
   if (!taskOutcome.ok) {

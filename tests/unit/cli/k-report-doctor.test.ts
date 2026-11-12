@@ -108,6 +108,10 @@ describe("U-5 report", () => {
       "Not checked: the run had no integrity check",
       "## Changes (1)",
       "- `notes.txt` created (",
+      // DR-47 (U-21): the agent's last message, under the catalog's English label, quoted as the model's words.
+      "## The agent's last message",
+      "The agent's last message. These are the agent's own words, not a verified fact.",
+      "  | done",
       "## Usage",
       "- Tool calls: 1 of 10 (denied: 1)",
       "## Not checked",
@@ -129,6 +133,8 @@ describe("U-5 report", () => {
     assert.equal(parsed.status, "complete");
     assert.equal(parsed.exitCode, 0);
     assert.deepEqual(parsed.result, run.result);
+    // DR-47 (U-21): the agent's last message as the run recorded it.
+    assert.deepEqual(parsed.result?.finalMessage, { text: "done", truncated: false });
     assert.equal(parsed.journal.taskId, "k1-task");
     assert.equal(parsed.journal.deniedToolCalls, 1);
     assert.equal(parsed.journal.changes.length, 1);

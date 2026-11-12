@@ -58,7 +58,7 @@ export const RUN_USAGE =
   'codaryn run ("<goal>" | --task <task.json> | --workspace <dir> --goal <text>) ' +
   "[--config <config.json>] [--vars-file <path>] [--cancel-file <path>] [--quiet] [--profile <name>] [--workflow <id>]";
 export const REVERT_USAGE = `codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | ${UNSAFE_MOVE_CONSENT_ARGUMENT}] [--quiet]`;
-export const REPORT_USAGE = "codaryn report --workspace <dir> --run <runId|latest> [--json]";
+export const REPORT_USAGE = "codaryn report [--workspace <dir>] --run <runId|latest> [--json]";
 export const DOCTOR_USAGE =
   "codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--profile <name>] [--json]";
 
@@ -209,7 +209,8 @@ export function parseRevertArgs(argv: readonly string[]): ParseRevertArgsOutcome
   const workspace = read.values.get("--workspace");
   const runId = read.values.get("--run");
   if (workspace === undefined || runId === undefined) {
-    return { ok: false, message: `--workspace and --run are required. usage: ${REVERT_USAGE}` };
+    // U-17 (UXM-19): a command that changes files names its workspace; the message says how.
+    return { ok: false, message: `--workspace and --run are required. ${workspace === undefined ? `${CURRENT_DIRECTORY_HINT} ` : ""}usage: ${REVERT_USAGE}` };
   }
   if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
   const dryRun = read.switches.has("--dry-run");
@@ -242,10 +243,11 @@ export function parseReportArgs(argv: readonly string[]): ParseReportArgsOutcome
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<ReportOption, JsonSwitch>(rest, REPORT_OPTIONS, `usage: ${REPORT_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
-  const workspace = read.values.get("--workspace");
+  // U-17 (UXM-19, DR-46): a reading command takes the current directory when --workspace is left out.
+  const workspace = read.values.get("--workspace") ?? CURRENT_DIRECTORY;
   const runId = read.values.get("--run");
-  if (workspace === undefined || runId === undefined) {
-    return { ok: false, message: `--workspace and --run are required. usage: ${REPORT_USAGE}` };
+  if (runId === undefined) {
+    return { ok: false, message: `--run is required. usage: ${REPORT_USAGE}` };
   }
   if (!isRunId(runId)) return { ok: false, message: RUN_ID_MESSAGE };
   return { ok: true, args: { command: "report", workspace, runId, json: read.switches.has("--json") } };
@@ -373,6 +375,11 @@ export function parseInitArgs(argv: readonly string[]): ParseInitArgsOutcome {
  */
 export interface TaskFormArgs {
   readonly input: { readonly kind: "task"; readonly taskPath: string } | { readonly kind: "quick"; readonly workspace: string };
+  /**
+   * U-17 (UXM-3, AXM-14): the command runs no model and no verifier (`plan`, `review`), so its quick
+   * form does not need the run's limits; the form is read for the secrets and the workflow only.
+   */
+  readonly readOnly?: boolean;
   readonly configPath: string | null;
   readonly varsFile: string | null;
   readonly profile: string | null;
@@ -385,11 +392,22 @@ export const PLAN_USAGE = `codaryn plan ${TASK_FORM_USAGE} --run <runId|latest> 
 export const APPLY_USAGE = `codaryn apply ${TASK_FORM_USAGE} --run <runId> --digest <first 12+ hex> [${UNSAFE_MOVE_CONSENT_ARGUMENT}] [--cancel-file <path>] [--quiet]`;
 export const REVIEW_USAGE = `codaryn review ${TASK_FORM_USAGE} --run <runId|latest> (--accept | --reject) [--note <text>] [--json]`;
 
-function taskFormOf(values: ReadonlyMap<string, string>, usage: string): { ok: true; form: TaskFormArgs } | { ok: false; message: string } {
+/** U-17 (UXM-19, DR-46): what a reading command takes when --workspace is left out. */
+export const CURRENT_DIRECTORY = ".";
+export const CURRENT_DIRECTORY_HINT = "If you mean the current directory, give --workspace .";
+
+function taskFormOf(
+  values: ReadonlyMap<string, string>,
+  usage: string,
+  /** U-17: `reads`: neither --task nor --workspace means the current directory; `light`: TaskFormArgs.readOnly. */
+  options: { readonly reads?: boolean; readonly light?: boolean } = {},
+): { ok: true; form: TaskFormArgs } | { ok: false; message: string } {
   const taskPath = values.get("--task");
-  const workspace = values.get("--workspace");
+  let workspace = values.get("--workspace");
+  if (taskPath === undefined && workspace === undefined && options.reads === true) workspace = CURRENT_DIRECTORY;
   if ((taskPath === undefined) === (workspace === undefined)) {
-    return { ok: false, message: `give --task or --workspace, not both. usage: ${usage}` };
+    const hint = taskPath === undefined ? ` ${CURRENT_DIRECTORY_HINT}` : "";
+    return { ok: false, message: `give --task or --workspace, not both.${hint} usage: ${usage}` };
   }
   const input: TaskFormArgs["input"] = taskPath !== undefined ? { kind: "task", taskPath } : { kind: "quick", workspace: workspace as string };
   const profile = profileOf(values);
@@ -398,7 +416,14 @@ function taskFormOf(values: ReadonlyMap<string, string>, usage: string): { ok: t
   if (!workflow.ok) return workflow;
   return {
     ok: true,
-    form: { input, configPath: values.get("--config") ?? null, varsFile: values.get("--vars-file") ?? null, profile: profile.profile, workflow: workflow.workflow },
+    form: {
+      input,
+      configPath: values.get("--config") ?? null,
+      varsFile: values.get("--vars-file") ?? null,
+      profile: profile.profile,
+      workflow: workflow.workflow,
+      ...(options.light === true ? { readOnly: true } : {}),
+    },
   };
 }
 
@@ -417,7 +442,7 @@ export function parsePlanArgs(argv: readonly string[]): { readonly ok: true; rea
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const read = readOptions<(typeof TASK_FORM_OPTIONS)[number] | "--run", JsonSwitch>(rest, [...TASK_FORM_OPTIONS, "--run"], `usage: ${PLAN_USAGE}`, JSON_SWITCH);
   if (!read.ok) return read;
-  const form = taskFormOf(read.values, PLAN_USAGE);
+  const form = taskFormOf(read.values, PLAN_USAGE, { reads: true, light: true });
   if (!form.ok) return form;
   const runId = read.values.get("--run");
   if (runId === undefined) return { ok: false, message: `--run is required. usage: ${PLAN_USAGE}` };
@@ -499,7 +524,7 @@ export function parseReviewArgs(argv: readonly string[]): { readonly ok: true; r
     "--json",
   ]);
   if (!read.ok) return read;
-  const form = taskFormOf(read.values, REVIEW_USAGE);
+  const form = taskFormOf(read.values, REVIEW_USAGE, { light: true });
   if (!form.ok) return form;
   const runId = read.values.get("--run");
   if (runId === undefined) return { ok: false, message: `--run is required. usage: ${REVIEW_USAGE}` };

@@ -55,7 +55,9 @@ import {
   UNKNOWN_TOOL_RECORD_NAME,
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_NAMES,
+  REFUSAL_HINTS,
   asRawText,
+  failedToolContent,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -99,8 +101,18 @@ import type {
 import { countPrivacyTokens } from "../contracts/index.js";
 import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
 import type { FailedForFeedback } from "./feedback.js";
+import { FINAL_MESSAGE_KEY_MARKER, finalMessageOf } from "./final-message.js";
 import { RunState } from "./state.js";
-import { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
+import {
+  ARGS_RULES,
+  INVALID_ARGS_LEAD,
+  argsProblemText,
+  toolArgsProblem,
+  validateToolArgs,
+  validateWorkflowToolArgs,
+  workflowToolArgsProblem,
+} from "./validate-args.js";
+import type { ArgsProblem } from "./validate-args.js";
 
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { APPLY_FIXED_TEXTS, applyPlan } from "./apply.js";
@@ -129,7 +141,11 @@ export const SYSTEM_PROMPT = [
   "Some text is replaced by protected placeholders: an uppercase label, a colon and 16 hex digits inside double square brackets.",
   "Keep each placeholder exactly where it is. Never copy, move, alter or remove it. A line that holds a placeholder cannot be changed.",
   "A denied tool call is final for that request. Do not try to work around it.",
-  "When the work is finished, reply without tool calls. Verifiers decide whether the task succeeded.",
+  // U-15 (AXM-16, approved by the PM): the run offers only some tools, nobody can be asked during
+  // it, and the last reply is what a person reads (DR-47).
+  "Only the tools offered in this run exist.",
+  "You cannot ask the person anything during the run. If something is unclear, take the most careful reading of the goal and say which one you took.",
+  "When the work is finished, reply without tool calls: what you changed, what you could not do and why, and what the person should check. Verifiers decide whether the task succeeded.",
 ].join("\n");
 
 /**
@@ -144,8 +160,10 @@ const PLAN_ACTION_LEAD = "action ";
 /** GT-E4: notice of a run that waits for a person's review. */
 const REVIEW_NOTICE = "awaiting human review: the configured checks are done; a person records the verdict";
 const NO_VERIFIER_NOTICE = "no automatic verification: no verifier is configured for this task";
-const UNKNOWN_TOOL_MESSAGE = "unknown tool";
-const INVALID_ARGS_MESSAGE = "invalid arguments for this tool";
+/** U-15 (AXM-5): an unknown tool is answered with the tools this run offers, never the name given. */
+const UNKNOWN_TOOL_LEAD = "unknown tool; the tools offered in this run: ";
+/** U-15 (AXM-7): the two fixed parts of failedToolContent, `error (<code>): <message>`. */
+const FAILED_CONTENT_PARTS = ["error (", "): "] as const;
 const WRITE_NOT_APPLIED_MESSAGE = "the write was not applied";
 const VERIFIER_NOT_RUN_EVIDENCE = "the verifier could not be run";
 const VERIFIER_NOT_RUN_CHECKED = "nothing: the verifier did not complete";
@@ -176,8 +194,11 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   PLAN_ACTION_LEAD,
   REVIEW_NOTICE,
   NO_VERIFIER_NOTICE,
-  UNKNOWN_TOOL_MESSAGE,
-  INVALID_ARGS_MESSAGE,
+  UNKNOWN_TOOL_LEAD,
+  INVALID_ARGS_LEAD,
+  ...Object.values(ARGS_RULES),
+  ...Object.values(REFUSAL_HINTS),
+  ...FAILED_CONTENT_PARTS,
   WRITE_NOT_APPLIED_MESSAGE,
   VERIFIER_NOT_RUN_EVIDENCE,
   VERIFIER_NOT_RUN_CHECKED,
@@ -189,6 +210,7 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   ...INTEGRITY_MORE_PATHS,
   ...INTEGRITY_FAILED_NOTICE,
   INTEGRITY_END_LEAD,
+  FINAL_MESSAGE_KEY_MARKER,
   INTEGRITY_END_UNMASKABLE,
   INTEGRITY_END_LABEL,
   STATE_NOTICE_LEAD,
@@ -324,6 +346,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   // DR-52 (U-25): the protected tokens in what the engine sent to the model (EngineResult.masking).
   let maskedPlaces = 0;
   let protectedChanged: readonly MaskedText[] | undefined;
+  // DR-47 (U-21): the masked text of the last model response when it was a final reply; reset when
+  // the model is asked again, so a run that ended without a reply has none.
+  let lastFinal: MaskedText | null = null;
   // DR-38: the state guard, the last tier-run fingerprint (each window chains from it) and the
   // tier-state base of the run's start; the last recorded list goes into the result.
   const stateGuard = deps.stateGuard;
@@ -565,7 +590,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
    * Every result handed back to the model is recorded as a tool_result.
    */
   const errorResult = async (call: ToolCall, code: ToolErrorCode, message: string): Promise<ToolResult | End> => {
-    const content = mask(message);
+    const content = mask(failedToolContent(code, message));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = { callId: call.id, tool: call.name, ok: false, content, errorCode: code };
     await record({ type: "tool_result", result });
@@ -586,7 +611,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       permission: decision.permission,
       code: decision.code,
     });
-    return errorResult(call, "policy_denied", `denied by policy: ${decision.permission}/${decision.code}`);
+    return errorResult(call, "policy_denied", `denied by policy: ${decision.permission}/${decision.code}. ${REFUSAL_HINTS[decision.code]}`);
   };
 
   /**
@@ -641,10 +666,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       permission: null,
       code: "unknown_tool",
     });
-    return errorResult(call, "unknown_tool", UNKNOWN_TOOL_MESSAGE);
+    return errorResult(call, "unknown_tool", `${UNKNOWN_TOOL_LEAD}${offered.join(", ")}`);
   };
 
-  const invalidArgsOf = async (call: ToolCall): Promise<ToolResult | End> => {
+  const invalidArgsOf = async (call: ToolCall, problem: ArgsProblem | null): Promise<ToolResult | End> => {
     await record({
       type: "tool_decision",
       callId: call.id,
@@ -654,7 +679,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       permission: null,
       code: "invalid_args",
     });
-    return errorResult(call, "invalid_args", INVALID_ARGS_MESSAGE);
+    return errorResult(call, "invalid_args", argsProblemText(problem ?? { field: "", rule: ARGS_RULES.nonEmpty }));
   };
 
   /**
@@ -687,7 +712,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     name: WorkflowToolName,
     outcome: RawWorkflowToolOutcome,
   ): Promise<ToolResult | End> => {
-    const content = outcome.ok ? maskJson(outcome.payload) : mask(outcome.message);
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, outcome.message));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,
@@ -729,7 +754,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         return errorResult(
           call,
           "policy_denied",
-          `denied by policy: ${PLAN_ACTION_LEAD}${index}: ${decision.permission}/${decision.code}`,
+          `denied by policy: ${PLAN_ACTION_LEAD}${index}: ${decision.permission}/${decision.code}. ${REFUSAL_HINTS[decision.code]}`,
         );
       };
       // The task's planActions are checked here as well as by the gate (fail closed).
@@ -754,14 +779,15 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
           permission: "restore",
           code: resolved.code,
         });
-        return errorResult(call, resolved.code, `token not usable in field: ${PLAN_ACTION_LEAD}${index}: ${resolved.field}`);
+        return errorResult(call, resolved.code, `token not usable in field: ${PLAN_ACTION_LEAD}${index}: ${resolved.field}. ${REFUSAL_HINTS[resolved.code]}`);
       }
       const checked = await policy.checkEffective({ id: call.id, name: actionDescriptor.name, args: resolved.args }, actionDescriptor);
       if (!checked.allowed) return denyAction("policy_effective", checked);
       effectiveActions.push({ kind: action.kind, ...resolved.args });
     }
-    const effectiveArgs = validateWorkflowToolArgs("propose_plan", { summary: args.summary, actions: effectiveActions });
-    if (effectiveArgs === null) return invalidArgsOf(call);
+    const effectiveInput = { summary: args.summary, actions: effectiveActions };
+    const effectiveArgs = validateWorkflowToolArgs("propose_plan", effectiveInput);
+    if (effectiveArgs === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_plan", effectiveInput));
     await record({
       type: "tool_decision",
       callId: call.id,
@@ -788,10 +814,11 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     const descriptor = WORKFLOW_TOOLS[name];
     if (descriptor.endsRun === "plan") {
       const args = validateWorkflowToolArgs("propose_plan", call.args);
-      if (args === null) return invalidArgsOf(call);
+      if (args === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_plan", call.args));
       return handlePlanCall(call, args, descriptor);
     }
-    if (validateWorkflowToolArgs(name, call.args) === null) return invalidArgsOf(call);
+    const problem = workflowToolArgsProblem(name, call.args);
+    if (problem !== null) return invalidArgsOf(call, problem);
 
     const requested = policy.checkRequested(call, descriptor);
     if (!requested.allowed) return denied(call, "policy_requested", requested);
@@ -811,10 +838,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         permission: "restore",
         code: resolved.code,
       });
-      return errorResult(call, resolved.code, `token not usable in field: ${resolved.field}`);
+      return errorResult(call, resolved.code, `token not usable in field: ${resolved.field}. ${REFUSAL_HINTS[resolved.code]}`);
     }
     const effectiveArgs = validateWorkflowToolArgs(name, resolved.args);
-    if (effectiveArgs === null) return invalidArgsOf(call);
+    if (effectiveArgs === null) return invalidArgsOf(call, workflowToolArgsProblem(name, resolved.args));
     const effective = { id: call.id, name, args: effectiveArgs } as EffectiveWorkflowToolCall;
 
     const checked = await policy.checkEffective(effective, descriptor);
@@ -843,7 +870,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (!isToolName(call.name)) return unknownTool(call);
     const name = call.name;
     const descriptor = BUILTIN_TOOLS[name];
-    const invalidArgs = async (): Promise<ToolResult | End> => {
+    const invalidArgs = async (problem: ArgsProblem | null): Promise<ToolResult | End> => {
       await record({
         type: "tool_decision",
         callId: call.id,
@@ -853,9 +880,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         permission: null,
         code: "invalid_args",
       });
-      return errorResult(call, "invalid_args", INVALID_ARGS_MESSAGE);
+      return errorResult(call, "invalid_args", argsProblemText(problem ?? { field: "", rule: ARGS_RULES.nonEmpty }));
     };
-    if (validateToolArgs(name, call.args) === null) return invalidArgs();
+    const requestedProblem = toolArgsProblem(name, call.args);
+    if (requestedProblem !== null) return invalidArgs(requestedProblem);
 
     const requested = policy.checkRequested(call, descriptor);
     if (!requested.allowed) return denied(call, "policy_requested", requested);
@@ -875,11 +903,11 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         permission: "restore",
         code: resolved.code,
       });
-      return errorResult(call, resolved.code, `token not usable in field: ${resolved.field}`);
+      return errorResult(call, resolved.code, `token not usable in field: ${resolved.field}. ${REFUSAL_HINTS[resolved.code]}`);
     }
 
     const effectiveArgs = validateToolArgs(name, resolved.args);
-    if (effectiveArgs === null) return invalidArgs();
+    if (effectiveArgs === null) return invalidArgs(toolArgsProblem(name, resolved.args));
     const effective = { id: call.id, name, args: effectiveArgs } as EffectiveToolCall;
 
     const checked = await policy.checkEffective(effective, descriptor);
@@ -910,7 +938,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (isEnd(outcome)) return outcome;
 
     // Mask before anything is recorded or returned to the model.
-    const content = outcome.ok ? maskJson(outcome.payload) : mask(outcome.message);
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, outcome.message));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,
@@ -1042,6 +1070,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         offeredWorkflow.length > 0
           ? { system, messages, tools: offeredBuiltin, workflowTools: offeredWorkflow }
           : { system, messages, tools: offeredBuiltin };
+      lastFinal = null;
       const outcome = await model.complete(request, runSignal);
       modelTurns = turn;
       if (!outcome.ok) {
@@ -1093,6 +1122,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       const wantsTools = response.toolCalls.length > 0;
       if (response.stop === "final" && !wantsTools) {
         // Kept so that a repair message follows the model's own reply.
+        lastFinal = text;
         messages.push({ role: "assistant", text, toolCalls: [] });
         return null;
       }
@@ -1316,6 +1346,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       repairAttempts,
     };
     await record({ type: "run_finished", status: end.status, reason: end.reason, usage });
+    const finalMessage = lastFinal !== null && end.reason !== "plan_pending" ? finalMessageOf(lastFinal, (text) => privacy.mask(text)) : null;
     return {
       schemaVersion: RESULT_SCHEMA_VERSION,
       kind: "run",
@@ -1338,6 +1369,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         : {}),
       // DR-38: only when at least one state_checked was recorded; the last one's list.
       ...(stateChanged !== undefined ? { stateChanged } : {}),
+      // DR-47: the agent's last message, only when the run's last model response was a final reply
+      // and the run is not a plan run (its place is the plan's summary).
+      ...(finalMessage !== null ? { finalMessage } : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),

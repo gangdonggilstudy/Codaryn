@@ -1,6 +1,8 @@
 /**
  * DR-7, DR-14: `codaryn changes` (src/cli/changes.ts): arguments, the text and JSON forms, errors,
  * and one run through the real app layer with a scripted model. Fake values only, no network.
+ * U-36 (UXM-7 ③, survey docs/reviews/2026-11-13-u19-korean-gaps-survey.md 3 D): the text comes from the
+ * message catalog (the contract's ids, U-36 contract 1ca962e); see the U-36 sections at the end.
  */
 
 import assert from "node:assert/strict";
@@ -9,11 +11,12 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { ANTHROPIC_API_KEY_ENV } from "../../../src/contracts/index.js";
-import type { CliErrorOutput, EngineResult } from "../../../src/contracts/index.js";
+import type { CliErrorOutput, EngineResult, MessageCatalog } from "../../../src/contracts/index.js";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, ChangesOutput, ChangesRequest, RunHandle } from "../../../src/app/index.js";
 import { CHANGES_USAGE, MAX_SHOWN_LINES, changedRegion, parseChangesArgs, renderChanges, runChanges } from "../../../src/cli/changes.js";
 import type { CommandOutcome } from "../../../src/cli/guard.js";
+import { createMessageCatalog } from "../../../src/i18n/index.js";
 import { FAKE_SECRET, WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "../app/support.js";
 
 const FAKE_KEY = "fake-changes-key-value-0083";
@@ -191,5 +194,172 @@ describe("runChanges", () => {
     // NOTES.md holds no secret: either set of secrets leaves the same text visible.
     assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n@@ -1,0 \+1,1 @@\n\+ # Notes\n/);
     assert.equal(shown.includes(FAKE_SECRET), false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+/**
+ * Unit U-36 (UXM-7 ③, survey docs/reviews/2026-11-13-u19-korean-gaps-survey.md 3 D), the `changes`
+ * part: the text of `codaryn changes` comes from the message catalog (the contract's ids, U-36
+ * contract 1ca962e), so a person reads it in their language. Pinned:
+ * - English: without a catalog (the fallback) and with the English catalog, the text is the one
+ *   before U-36 character for character, except the no-text line, which loses "(DR-29)".
+ * - `changes --json` is not changed.
+ * - With a catalog every piece of text is the catalog's: no fixed English word is left.
+ * - A run with a records-changed mark (ChangesOutput.recordsChanged, U-43) says so with the catalog's
+ *   `changes.records_changed`, which nothing used before.
+ * Reproduced first (e4865d6, todo, in u36-changes-texts.test.ts, moved here to stay in this owner's
+ * file); the renderer takes the catalog now. The English and Korean catalog cases wait for
+ * unit/U-36-nb-i18n's texts (todo). Fake values only.
+ */
+
+const TEXTS_TODO = { todo: "U-36: wait for unit/U-36-nb-i18n's texts of the changes ids" };
+
+const RUN = "20261113T010203Z-0123abcd";
+const BASE = { schemaVersion: 1, kind: "changes", runId: RUN, exitCode: 0, masking: "current_secrets" } as const;
+const BIG = Array.from({ length: 203 }, (_, i) => `line ${i}`).join("\n") + "\n";
+
+/** Every line kind: created, changed, missing, unreadable, masking_unverified, no difference, a cut side. */
+const ALL: ChangesOutput = {
+  ...BASE,
+  files: [
+    { path: "new.md" as never, created: true, state: "as_run_left", before: null, after: "a\nb\n" as never, unavailable: null },
+    { path: "doc.md" as never, created: false, state: "changed_since_run", before: "x\ny\n" as never, after: "x\nY\n" as never, unavailable: null },
+    { path: "gone.md" as never, created: false, state: "missing", before: "z\n" as never, after: null, unavailable: null },
+    { path: "odd.bin" as never, created: false, state: "unknown", before: null, after: null, unavailable: "unreadable" },
+    { path: "secret.md" as never, created: false, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" },
+    { path: "same.md" as never, created: false, state: "as_run_left", before: "s\n" as never, after: "s\n" as never, unavailable: null },
+    { path: "big.md" as never, created: true, state: "as_run_left", before: null, after: BIG as never, unavailable: null },
+  ],
+};
+const NONE: ChangesOutput = { ...BASE, files: [] };
+const APPLY: ChangesOutput = { ...BASE, files: [], applyRun: { planRunId: "20261113T000000Z-89abcdef" as never, actions: 2 } };
+const MARKED: ChangesOutput = { ...ALL, files: [ALL.files[4]!], recordsChanged: true };
+
+const HEADING = `changes of run ${RUN}, masked with the secrets registered now (not the run's own masking)`;
+/** The English text before U-36 (main 1e54ca9), the no-text line without "(DR-29)". */
+const ALL_EN = [
+  HEADING,
+  "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only",
+  "== new.md: created by the run; as the run left it",
+  "@@ -1,0 +1,2 @@",
+  "+ a",
+  "+ b",
+  "== doc.md: changed by the run; changed again since the run",
+  "@@ -2,1 +2,1 @@",
+  "- y",
+  "+ Y",
+  "== gone.md: changed by the run; no longer exists",
+  "@@ -1,1 +1,0 @@",
+  "- z",
+  "== odd.bin: changed by the run; could not be read now",
+  "   the text is not shown (unreadable)",
+  "== secret.md: changed by the run; as the run left it",
+  "   the text is not shown (masking_unverified)",
+  "== same.md: changed by the run; as the run left it",
+  "   no difference to the original",
+  "== big.md: created by the run; as the run left it",
+  "@@ -1,0 +1,203 @@",
+  ...Array.from({ length: 200 }, (_, i) => `+ line ${i}`),
+  "+ ... 3 more lines",
+  "",
+].join("\n");
+const NONE_EN = `${HEADING}\nthe run changed no file\n`;
+const APPLY_EN = `${HEADING}\nthe run is an apply run: it applied 2 action(s) of the plan of run 20261113T000000Z-89abcdef (moves and discards, not file writes); codaryn report lists them\n`;
+
+/** Every fixed English word of the text before U-36. */
+const ENGLISH = [
+  "changes of run",
+  "masked with the secrets",
+  "no text for some files",
+  "created by the run",
+  "changed by the run",
+  "as the run left it",
+  "changed again since the run",
+  "no longer exists",
+  "could not be read now",
+  "the text is not shown",
+  "no difference to the original",
+  "more lines",
+  "the run changed no file",
+  "the run is an apply run",
+  "records-changed mark",
+];
+
+/** A catalog whose every text names its id (and its parameters), so a text not from it shows. */
+const NAMING = {
+  language: "en",
+  format: (id: string, params?: Readonly<Record<string, unknown>>) => `‹${id}${params === undefined ? "" : ` ${JSON.stringify(params)}`}›`,
+} as unknown as MessageCatalog;
+
+describe("U-36: changes' English text is as before", () => {
+  test("without a catalog: as before, the no-text line without (DR-29)", () => {
+    assert.equal(renderChanges(ALL), ALL_EN);
+  });
+
+  test("without a catalog: no file changed, and an apply run, as before", () => {
+    assert.equal(renderChanges(NONE), NONE_EN);
+    assert.equal(renderChanges(APPLY), APPLY_EN);
+  });
+
+  test("with the English catalog: the same text as without one", TEXTS_TODO, () => {
+    const en = createMessageCatalog("en");
+    // Not vacuous: the renderer falls back to English when the catalog refuses an id.
+    for (const id of ["changes.none", "changes.no_text_note", "changes.state.missing", "changes.unavailable.unreadable"] as const) assert.doesNotThrow(() => en.format(id), id);
+    assert.equal(renderChanges(ALL, en), ALL_EN);
+    assert.equal(renderChanges(NONE, en), NONE_EN);
+    assert.equal(renderChanges(APPLY, en), APPLY_EN);
+  });
+
+  test("changes --json is not changed", async () => {
+    const outcome = await runChanges({
+      argv: ["changes", "--task", "t.json", "--run", RUN, "--json"],
+      env: {},
+      app: { changes: async (_request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>> => ({ ok: true, output: ALL }) },
+    });
+    assert.ok("text" in outcome);
+    assert.equal(outcome.text, `${JSON.stringify(ALL)}\n`);
+  });
+});
+
+describe("U-36: with a catalog every piece of changes' text is the catalog's", () => {
+  test("each line: the catalog's ids, the masked paths, the region, the reason codes", () => {
+    const shown = renderChanges(ALL, NAMING);
+    for (const word of ENGLISH) assert.equal(shown.includes(word), false, `fixed English left: ${word}`);
+    const lines = shown.split("\n");
+    assert.equal(lines[0], `‹changes.heading {"runId":"${RUN}"}›`);
+    assert.equal(lines[1], "‹changes.no_text_note›");
+    assert.ok(lines.includes("== gone.md: ‹changes.file.changed›; ‹changes.state.missing›"));
+    assert.ok(lines.includes("== new.md: ‹changes.file.created›; ‹changes.state.as_run_left›"));
+    assert.ok(lines.includes("   ‹changes.unavailable.unreadable› (unreadable)"));
+    assert.ok(lines.includes("   ‹changes.no_difference›"));
+    assert.ok(lines.includes('+ ‹changes.more_lines {"count":3}›'));
+    assert.equal(renderChanges(NONE, NAMING).split("\n")[1], "‹changes.none›");
+    assert.equal(renderChanges(APPLY, NAMING).split("\n")[1], '‹changes.apply_run {"count":2,"runId":"20261113T000000Z-89abcdef"}›');
+  });
+
+  test("runChanges gives the text its catalog", async () => {
+    const outcome = await runChanges({
+      argv: ["changes", "--task", "t.json", "--run", RUN],
+      env: {},
+      app: { changes: async (): Promise<AppCallOutcome<ChangesOutput>> => ({ ok: true, output: NONE }) },
+      messages: NAMING,
+    });
+    assert.ok("text" in outcome);
+    assert.equal(outcome.text, `‹changes.heading {"runId":"${RUN}"}›\n‹changes.none›\n`);
+  });
+
+  test("with the Korean catalog: no fixed English word", TEXTS_TODO, () => {
+    const shown = [ALL, NONE, APPLY, MARKED].map((output) => renderChanges(output, createMessageCatalog("ko"))).join("\n");
+    for (const word of ENGLISH) assert.equal(shown.includes(word), false, `English left: ${word}`);
+  });
+});
+
+describe("U-36: a run with a records-changed mark says so (changes.records_changed)", () => {
+  test("after the heading, before the no-text line; only for a marked run", () => {
+    const lines = renderChanges(MARKED, NAMING).split("\n");
+    assert.deepEqual(lines.slice(0, 3), [`‹changes.heading {"runId":"${RUN}"}›`, "‹changes.records_changed›", "‹changes.no_text_note›"]);
+    assert.equal(renderChanges(ALL, NAMING).includes("changes.records_changed"), false);
+    assert.equal(renderChanges(MARKED).split("\n")[1], "This run has a records-changed mark, so no file text is shown; only paths and states.");
   });
 });

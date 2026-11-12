@@ -173,8 +173,16 @@ export function mergeWorkflowPolicy(definition: PolicyConfig | undefined, config
  *   of their lines)
  * - plan_actions_dropped: plan action kinds the given policy states that the definition does not list
  * - restore_path_tokens_off: the given policy allows restoring path tokens, the definition does not
+ * - verifiers_dropped (DR-43 (a)): given verifiers left out because their id is one of the
+ *   definition's own and they are not the same check (workflowVerifierNarrowings)
  */
-export const POLICY_NARROWING_KINDS = ["commands_dropped", "commands_narrowed", "plan_actions_dropped", "restore_path_tokens_off"] as const;
+export const POLICY_NARROWING_KINDS = [
+  "commands_dropped",
+  "commands_narrowed",
+  "plan_actions_dropped",
+  "restore_path_tokens_off",
+  "verifiers_dropped",
+] as const;
 export type PolicyNarrowingKind = (typeof POLICY_NARROWING_KINDS)[number];
 
 export interface PolicyNarrowing {
@@ -213,8 +221,52 @@ export function workflowPolicyNarrowings(definition: PolicyConfig | undefined, c
     commands_narrowed: narrowed,
     plan_actions_dropped: planDropped,
     restore_path_tokens_off: configured.restorePathTokens && !definition.restorePathTokens ? 1 : 0,
+    verifiers_dropped: 0,
   };
   return POLICY_NARROWING_KINDS.filter((kind) => counts[kind] > 0).map((kind) => ({ kind, count: counts[kind] }));
+}
+
+/** JSON with object keys in code unit order, for comparing two configurations. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as { [key: string]: unknown }).filter(([, field]) => field !== undefined);
+    entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, field]) => `${JSON.stringify(key)}:${canonicalJson(field)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * DR-43 (a), R-31 L-2: the verifiers a run uses where a workflow definition's own checks meet a
+ * given list (the profile's or the config's in the quick form, a task file's own when it names a
+ * workflow). The definition's checks always run: its verifiers first, then each given verifier whose
+ * id is not one of the definition's. An empty given list removes none of them. Either absent (or the
+ * definition's empty): the other, as before. Pure.
+ */
+export function mergeWorkflowVerifiers(
+  definition: readonly VerifierConfig[] | undefined,
+  given: readonly VerifierConfig[] | undefined,
+): readonly VerifierConfig[] | undefined {
+  if (definition === undefined || definition.length === 0) return given;
+  if (given === undefined) return definition;
+  const ids = new Set(definition.map((verifier) => verifier.id));
+  return [...definition, ...given.filter((verifier) => !ids.has(verifier.id))];
+}
+
+/**
+ * DR-43 (a): what mergeWorkflowVerifiers left out of the given list: `verifiers_dropped`, the given
+ * verifiers whose id is one of the definition's and that are not the same check (compared as data,
+ * key order aside). Empty when nothing was left out or either side is absent. Pure.
+ */
+export function workflowVerifierNarrowings(
+  definition: readonly VerifierConfig[] | undefined,
+  given: readonly VerifierConfig[] | undefined,
+): readonly PolicyNarrowing[] {
+  if (definition === undefined || given === undefined) return [];
+  const own = new Map(definition.map((verifier) => [verifier.id, canonicalJson(verifier)]));
+  const dropped = given.filter((verifier) => own.has(verifier.id) && own.get(verifier.id) !== canonicalJson(verifier)).length;
+  return dropped === 0 ? [] : [{ kind: "verifiers_dropped", count: dropped }];
 }
 
 /**
@@ -227,7 +279,8 @@ export function workflowPolicyNarrowings(definition: PolicyConfig | undefined, c
  * - policy, verifiers, limits: defaults, laid under a profile's and the task's own values as
  *   `ResolveWorkflow` says. Limits follow S-7 like the config's own. DR-41: its policy is merged
  *   with the profile's or the config's (quick form) or the task file's own (mergeWorkflowPolicy),
- *   never replaced by it.
+ *   never replaced by it. DR-43 (a): its verifiers likewise always run, the given ones added
+ *   (mergeWorkflowVerifiers).
  */
 export interface WorkflowDefinition {
   /** Display only. */

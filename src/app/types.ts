@@ -14,6 +14,7 @@ import type {
   EngineResult,
   JournalRecord,
   MaskedText,
+  ModelsOutput,
   PermissionKind,
   ReportOutput,
   RevertOutput,
@@ -189,6 +190,22 @@ export interface ResolvedRun {
   readonly damaged: boolean;
 }
 
+/**
+ * Y-1, Y-2, DR-22: the models a provider's key can use. A real API request: only when a person
+ * asked for the list. `configPath` null: CODARYN_CONFIG, then the default location (N-1).
+ */
+export interface ListModelsRequest {
+  /** Only "anthropic" is connected (DR-22 adds a second provider later). */
+  readonly provider: string;
+  readonly configPath: string | null;
+  readonly varsFile: string | null;
+}
+
+/** Y-3: lists again and writes this id into the config file's `model`, only when the list holds it. */
+export interface SelectModelRequest extends ListModelsRequest {
+  readonly model: string;
+}
+
 export interface DoctorRequest {
   readonly configPath: string | null;
   readonly varsFile: string | null;
@@ -324,6 +341,10 @@ export interface CodarynApp {
   resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>>;
   /** `codaryn doctor --json`: no network access, no write. */
   doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>>;
+  /** `codaryn models --json`: a real API request; only when a person asked. Writes nothing. */
+  listModels(request: ListModelsRequest): Promise<AppCallOutcome<ModelsOutput>>;
+  /** `codaryn models --json --use <id>`: writes the config file's `model` atomically, nothing else. */
+  selectModel(request: SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>>;
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
   /**

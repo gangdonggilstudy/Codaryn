@@ -18,6 +18,8 @@ import type {
   CreateAnthropicProvider,
   DefaultConfigLocation,
   DoctorOutput,
+  ListAnthropicModels,
+  ModelsOutput,
   PrivacyGateway,
   ReportOutput,
   RevertOutput,
@@ -34,6 +36,9 @@ import { createCancelSource } from "../cli/cancel.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
+import { runModels } from "../cli/models.js";
+import type { ModelsEnvironment } from "../cli/models.js";
+import { anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
 import { runCli } from "../cli/run.js";
@@ -44,6 +49,7 @@ import { readChanges } from "./changes.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
+import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
 import type {
   AppCallOutcome,
@@ -53,8 +59,10 @@ import type {
   ChangesRequest,
   CodarynApp,
   DoctorRequest,
+  ListModelsRequest,
   ListRunsRequest,
   ReportRequest,
+  SelectModelRequest,
   ResolvedRun,
   ResolveRunRequest,
   RevertRequest,
@@ -74,6 +82,10 @@ export interface AppHooks {
   readonly createAnthropicProvider?: CreateAnthropicProvider;
   readonly anthropicDeps?: AnthropicProviderDeps;
   readonly runTask?: RunTask;
+  /** The model listing (`listAnthropicModels` when absent). Tests give a fake so nothing is sent. */
+  readonly listModels?: ListAnthropicModels;
+  /** The config writer of `selectModel` (`writeConfigAtomic` when absent). */
+  readonly writeConfig?: ModelsEnvironment["writeConfig"];
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -384,5 +396,31 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   // plan, applyPlan and review (DR-1, DR-2, DR-17) are left out until the general task commands exist.
-  return { startRun, report, revert, listRuns, resolveRun, doctor, changes };
+  /** `codaryn models` as main.ts calls it, with this environment and no terminal question. */
+  async function models(request: ListModelsRequest | SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>> {
+    const args = modelsArguments(request);
+    if (!args.ok) return args;
+    const env = copyEnvironment(environment.env, platform);
+    try {
+      const outcome = await runModels({
+        argv: args.argv,
+        env,
+        cwd: environment.cwd,
+        readFile: environment.readFile,
+        loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
+        listModels: hooks.listModels ?? anthropicModelLister,
+        anthropicDeps: hooks.anthropicDeps,
+        defaultConfig: defaultConfigOf(),
+        ...(hooks.writeConfig === undefined ? {} : { writeConfig: hooks.writeConfig }),
+      });
+      return jsonOutcome<ModelsOutput>(outcome, "models");
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  const listModels = (request: ListModelsRequest) => models(request);
+  const selectModel = (request: SelectModelRequest) => models(request);
+
+  return { startRun, report, revert, listRuns, resolveRun, doctor, changes, listModels, selectModel };
 }

@@ -47,8 +47,8 @@ export interface PlanFileOps {
   lstat(target: string): Promise<BigIntStats>;
   link(existing: string, created: string): Promise<void>;
   /**
-   * Not used by any move (DR-18 b: `rename` can replace a file). It stays in the interface so a
-   * test can replace it and show that it is never called.
+   * Used only by `renameIfAbsent`, the unsafe move a person consented to (DR-21): `rename` can
+   * replace a file (DR-18 b). Tests replace it to show when it is and is not called.
    */
   rename(from: string, to: string): Promise<void>;
   unlink(target: string): Promise<void>;
@@ -288,10 +288,11 @@ export async function createParents(
 }
 
 /**
- * DR-18 (b): the item problem for a move that stops because the file system offers no move that
- * refuses an existing destination (no hard links, or a source that cannot be unlinked), so the
+ * DR-18 (b), DR-21: the item problem for a move that stops because the file system offers no move
+ * that refuses an existing destination (no hard links, or a source that cannot be unlinked), so the
  * file could only be moved by a rename that might replace one created in the meantime. The
- * contract's code is `unsafe_move` (plan.ts PLAN_ITEM_PROBLEMS).
+ * contract's code is `unsafe_move` (plan.ts PLAN_ITEM_PROBLEMS). The preflight lists such moves and
+ * the apply waits for a person's consent; only with it are they made (`renameIfAbsent`).
  */
 export const HARD_LINK_UNAVAILABLE_PROBLEM: PlanItemProblem = "unsafe_move";
 
@@ -314,9 +315,9 @@ export function isLinkUnsupported(error: unknown): boolean {
  * Moves a file without ever replacing an existing one and without copying: `link(from, to)`,
  * which fails when anything exists at `to`, then `unlink(from)`.
  *
- * DR-18 (b), R-5 L-1: there is no other way. Node's `rename` replaces an existing file on every
- * platform, so "check that nothing is there, then rename" would replace a file created between
- * the two steps. Where hard links cannot be used the move stops as `no_hard_link` and nothing
+ * DR-18 (b), R-5 L-1: there is no other safe way. Node's `rename` replaces an existing file on
+ * every platform, so "check that nothing is there, then rename" would replace a file created
+ * between the two steps; that is `renameIfAbsent`, used only with a person's consent (DR-21). Where hard links cannot be used the move stops as `no_hard_link` and nothing
  * changes. Where the source cannot be unlinked after the link (a read-only file on Windows), the
  * second name is taken back and the move also stops as `no_hard_link` (the contract's
  * `unsafe_move`); if the second name cannot be taken back, both names stay and it is `io_error`.
@@ -346,6 +347,30 @@ export async function moveNoReplace(from: string, to: string, ops: PlanFileOps):
       return "io_error";
     }
     return "no_hard_link";
+  }
+}
+
+/**
+ * DR-21: the unsafe move, only after a person's consent for this apply (UnsafeMoveConsent) and
+ * only where `moveNoReplace` reported `no_hard_link`. It looks once more that nothing is at `to`
+ * and then renames. A file created between that look and the rename can still be replaced: that
+ * window is the risk the person consented to. Nothing is copied: another volume is `cross_device`.
+ */
+export async function renameIfAbsent(from: string, to: string, ops: PlanFileOps): Promise<Exclude<MoveOutcome, "no_hard_link">> {
+  try {
+    await ops.lstat(to);
+    return "destination_exists";
+  } catch (error) {
+    if (!isMissing(error)) return "io_error";
+  }
+  try {
+    await ops.rename(from, to);
+    return "moved";
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "EXDEV") return "cross_device";
+    if (code === "EEXIST" || code === "ENOTEMPTY") return "destination_exists";
+    return "io_error";
   }
 }
 

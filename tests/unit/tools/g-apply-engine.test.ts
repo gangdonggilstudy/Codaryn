@@ -146,6 +146,8 @@ async function apply(
     fileOps?: Partial<PlanFileOps>;
     controller?: AbortController;
     onMark?: () => Promise<void>;
+    /** DR-21: no consent, a person's consent for this plan's digest, or one given for another plan. */
+    consent?: "none" | "this_plan" | "other_plan";
   } = {},
 ): Promise<Run> {
   const planActions = options.planActions ?? ["move", "discard"];
@@ -159,12 +161,17 @@ async function apply(
   };
   const journal = new MemoryJournal();
   const inventory = new RecordingInventory();
+  const digest = sha(JSON.stringify(plan.actions));
+  const consent = options.consent ?? "none";
   let marks = 0;
   const deps: ApplyDeps = {
     plan,
     planRunId: PLAN_RUN,
-    digest: sha(JSON.stringify(plan.actions)),
+    digest,
     approval: "cli-flag",
+    ...(consent === "none"
+      ? {}
+      : { unsafeMoveConsent: { channel: "cli-flag" as const, digest: consent === "this_plan" ? digest : sha("another plan") } }),
     runId: APPLY_RUN,
     taskId: "tidy",
     maxDurationMs: 60_000,
@@ -275,27 +282,88 @@ test("G-C+G-B: the apply-time policy decides (DR-5): an unlisted kind or a prote
   }
 });
 
-test("G-C+G-B (PQ-6, Q-8 pending): a volume without hard links stops the apply at the preflight with unsafe_move", async () => {
+/** A volume without hard links: every link (the preflight's probe and the moves) is refused. */
+const NO_HARD_LINKS: Partial<PlanFileOps> = {
+  link: () => Promise.reject(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" })),
+};
+
+function eventOf<T extends ApplyJournalEvent["type"]>(journal: MemoryJournal, type: T): Extract<ApplyJournalEvent, { type: T }> | undefined {
+  return journal.events.find((event): event is Extract<ApplyJournalEvent, { type: T }> => event.type === type);
+}
+
+test("G-C+G-B (DR-21): without consent a volume without hard links ends the apply as consent_required with nothing moved", async () => {
   const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
   try {
     const plan = await proposeReal(fx, [
       { kind: "move", from: "a.txt", to: "x/a.txt" },
       { kind: "discard", path: "b.txt" },
     ]);
-    const fileOps: Partial<PlanFileOps> = {
-      link: () => Promise.reject(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" })),
-    };
-    const { result, journal, marks } = await apply(fx, plan, { fileOps });
-    assert.equal(result.status, "failed");
-    assert.equal(result.reason, "plan_stale");
-    assert.equal(marks, 0, "the plan is not claimed");
-    const checked = journal.events.find((event) => event.type === "plan_checked");
-    assert.deepEqual(checked !== undefined && "problems" in checked ? checked.problems : null, [
-      { index: 0, problem: "unsafe_move" },
-      { index: 1, problem: "unsafe_move" },
+    for (const consent of ["none", "other_plan"] as const) {
+      const { result, journal, marks } = await apply(fx, plan, { fileOps: NO_HARD_LINKS, consent });
+      assert.equal(result.status, "needs-input", consent);
+      assert.equal(result.reason, "consent_required", consent);
+      assert.equal(marks, 0, "the plan is not claimed");
+      assert.deepEqual(result.applied, []);
+      assert.equal(eventOf(journal, "apply_started")?.unsafeMoveConsent, null, "no consent recorded");
+      const checked = eventOf(journal, "plan_checked");
+      assert.deepEqual(checked?.problems, [], "unsafe moves are not problems");
+      assert.deepEqual(checked?.unsafeMoves, [0, 1], "the preflight finds both, the discard too");
+      assert.equal(eventOf(journal, "file_moved"), undefined);
+      assert.equal(await read(fx.root, "a.txt"), "alpha");
+      assert.equal(await read(fx.root, "b.txt"), "bravo");
+      assert.equal(await read(fx.root, "x/a.txt"), null);
+    }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C+G-B (DR-21): with the person's consent for this plan the unsafe moves are made and marked unsafe", async () => {
+  const fx = await fixture({ "a.txt": "alpha", "b.txt": "bravo" });
+  try {
+    const plan = await proposeReal(fx, [
+      { kind: "move", from: "a.txt", to: "x/a.txt" },
+      { kind: "discard", path: "b.txt" },
     ]);
+    const { result, journal, marks } = await apply(fx, plan, { fileOps: NO_HARD_LINKS, consent: "this_plan" });
+    assert.equal(result.status, "done", JSON.stringify(result));
+    assert.equal(result.reason, "verified");
+    assert.equal(marks, 1);
+    assert.deepEqual(
+      result.applied.map((item) => [item.index, item.stored, item.unsafe]),
+      [
+        [0, null, true],
+        [1, "1", true],
+      ],
+    );
+    assert.equal(eventOf(journal, "apply_started")?.unsafeMoveConsent, "cli-flag");
+    assert.deepEqual(eventOf(journal, "plan_checked")?.unsafeMoves, [0, 1]);
+    assert.equal(eventOf(journal, "file_moved")?.unsafe, true);
+    assert.equal(eventOf(journal, "file_discarded")?.unsafe, true);
+    assert.equal(await read(fx.root, "a.txt"), null);
+    assert.equal(await read(fx.root, "x/a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), null);
+    assert.equal(await fs.readFile(path.join(discardedRootOf(fx.root, APPLY_RUN), "1"), "utf8"), "bravo");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C+G-B (DR-21): with consent, a destination taken after the preflight is still not replaced", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    const plan = await proposeReal(fx, [{ kind: "move", from: "a.txt", to: "b.txt" }]);
+    const { result, marks } = await apply(fx, plan, {
+      fileOps: NO_HARD_LINKS,
+      consent: "this_plan",
+      // After the preflight and the claim, before the move: someone creates the destination.
+      onMark: () => fs.writeFile(path.join(fx.root, "b.txt"), "created in the window", "utf8"),
+    });
+    assert.equal(marks, 1);
+    assert.equal(result.status, "failed", JSON.stringify(result));
+    assert.equal(result.reason, "apply_incomplete");
     assert.equal(await read(fx.root, "a.txt"), "alpha");
-    assert.equal(await read(fx.root, "b.txt"), "bravo");
+    assert.equal(await read(fx.root, "b.txt"), "created in the window");
   } finally {
     await fx.cleanup();
   }

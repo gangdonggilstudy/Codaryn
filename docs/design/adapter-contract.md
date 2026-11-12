@@ -436,11 +436,11 @@ GUI의 첫 실행 마법사와 설정 화면이 쓴다. 파일을 고르는 규�
 
 ```ts
 readSettings({ configPath }) → SettingsView               // a86cd12
-  // file: 출처(argument·environment·default), 경로, 표시 이름, 있는지 / config / profiles / workflows / keyAvailable
+  // file: 출처(argument·environment·default), 경로, 표시 이름, 있는지 / config / profiles / workflows / keyAvailable / policyNarrowings(DR-41)
   // builtinWorkflows: G-A BUILTIN_WORKFLOW_IDS (설정 파일 없이도) / profileWorkflows: 프로필마다 { profile, workflowRef | null }   // 59dc39a
 createSettings({ configPath, workspace }) → InitOutput     // b015c9f, `init --json` 그대로(질문 없음)
 settingsSuggestions({ workspace }) → { commands: { shown, rule }[], protectedPaths }   // b015c9f
-proposeSettingsChange({ configPath, next }) → { baseDigest, digest, changes, widening, config }   // c1957d8
+proposeSettingsChange({ configPath, next }) → { baseDigest, digest, changes, widening, policyNarrowings, config }   // c1957d8, DR-41
 applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { written, digest, changes, widening }
 ```
 
@@ -475,11 +475,17 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
         - `providers.anthropic`이 있으면 실행이 최상위 주소를 읽지 않으므로 그것만 바꾼 변경도 아니다.
         - 환경 변수의 주소는 설정 파일 밖이다(R-27 I3).
       - 프로필의 제공자(SP-D10)가 그 프로필의 간편 실행을 다른 제공자로 보내면 `provider_changed`(`profiles.<이름>.provider`)도 준다(R-27 I4).
-    - 작업 종류 자기 규칙의 대체(GUI F-5)
-      - 간편 형식에서 작업 종류의 `policy`·`verifiers`는 설정에 그것이 없을 때만 쓰인다(CLI `underDefinition`).
-      - 그래서 설정의 `policy`나 `verifiers`가 처음 생기거나 없어지면, 자기 규칙을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)의 규칙을 그 실행이 보는 대로 전과 후로 비교한다.
-      - 필드는 `workflows.<id>.policy.protectedPaths`처럼 작업 종류를 이름에 담는다.
-      - 좁히기(예: `organize`가 계획 동작을 잃음)는 확인 대상이 아니다.
+    - 작업 종류 자기 규칙(GUI F-5, DR-41)
+      - DR-41부터 작업 종류의 `policy`는 설정의 것과 합쳐진다(계약 `mergeWorkflowPolicy`: 보호 경로는 합집합, 명령과 계획 동작은 양쪽이 모두 허용한 것만). 그래서 자기 정책을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)마다, 무엇이 바뀌었든, 합친 정책을 전과 후로 비교한다.
+      - 설정의 첫 정책이 보호 경로만 더하면 작업 종류의 보호 경로는 남으므로 넓히기가 아니다. 설정이 `planActions`를 적지 않게 되거나 정책을 지우면, `organize`가 좁혀졌던 계획 동작을 되찾으므로 넓히기다.
+      - 필드는 `workflows.<id>.policy.planActions`처럼 작업 종류를 이름에 담는다. 설정 쪽 항목과 같은 종류·같은 필드(작업 종류 앞부분과 목록 번호를 뺀 것)를 되풀이하는 항목은 빼고, 작업 종류의 실행이 다르게 넓어질 때만 준다.
+      - `verifiers`는 합치지 않는다(설정의 것, 없으면 작업 종류의 것). 그래서 설정의 `verifiers`가 처음 생기거나 없어질 때 비교한다.
+      - 좁히기는 확인 대상이 아니다. 대신 무엇이 빠지는지 알린다(아래 `policyNarrowings`).
+    - `policyNarrowings`(DR-41, 계약 `workflowPolicyNarrowings`)
+      - `readSettings`의 보기와 변경 제안에 있다. 작업 종류마다, 자기 규칙이 설정의 정책에서 빼는 것을 `{ workflow, kind, count }`로 준다.
+      - 종류는 `commands_dropped`, `commands_narrowed`, `plan_actions_dropped`, `restore_path_tokens_off`이다. 규칙·명령·경로는 담지 않는다.
+      - 예: 설정에 명령을 더하면 `organize`는 그것을 빼므로 `{ workflow: "organize", kind: "commands_dropped", count: 1 }`이다.
+      - 프로필의 정책은 여기서 보지 않는다.
   - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.
   - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
   - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.

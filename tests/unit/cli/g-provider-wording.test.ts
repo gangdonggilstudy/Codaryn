@@ -74,10 +74,33 @@ describe("(1) doctor names where the missing output cap is read", () => {
     assert.ok(message.includes("providers.openai.maxOutputTokens"), message);
   });
 
+  test("N-A 33.3 (0d38bfa): the model texts carry the provider's variable and config places", async () => {
+    const { dir, ws, configPath } = await base({ limits: LIMITS, ...OPENAI_NO_CAP });
+    const doctor = async (config: string): Promise<unknown> => {
+      const outcome = await runDoctor({
+        argv: ["doctor", "--config", config, "--workspace", ws, "--json"],
+        env: { [OPENAI_API_KEY_ENV]: OPENAI_VALUE },
+        cwd: dir,
+        nodeVersion: "26.0.0",
+        readFile: (file) => readFile(file, "utf8"),
+        isDirectory: async (folder) => (await stat(folder).catch(() => null))?.isDirectory() ?? false,
+        isFile: async (file) => (await stat(file).catch(() => null))?.isFile() ?? false,
+        locateInWorkspace: (file, root) => locateInWorkspace(file, root),
+        relatePaths: (target, root) => relateRealPaths(target, root),
+      });
+      assert.ok("text" in outcome);
+      return (JSON.parse(outcome.text) as DoctorOutput).checks.find((check) => check.id === "model")?.text;
+    };
+    assert.deepEqual(await doctor(configPath), { id: "doctor.model.output_cap_missing", params: { field: "providers.openai.maxOutputTokens" } });
+    const noModel = path.join(dir, "no-model.json");
+    await writeFile(noModel, JSON.stringify({ schemaVersion: 1, limits: LIMITS, provider: "openai", providers: { openai: { maxOutputTokens: 64 } } }), "utf8");
+    assert.deepEqual(await doctor(noModel), { id: "doctor.model.missing", params: { variable: "CODARYN_OPENAI_MODEL", field: "providers.openai.model" } });
+  });
+
   for (const language of ["en", "ko"] as const) {
     test(
       `${language}: the person's line names providers.openai.maxOutputTokens for an openai config`,
-      { todo: "contract: doctor.model.output_cap_missing takes no parameter for the config place (requested; after the third bundle)" },
+      { todo: "N-B: the texts of doctor.model.output_cap_missing {field} (claude/security-core b88114c); the CLI passes the place (0d38bfa)" },
       async () => {
         const { line } = await modelLine(OPENAI_NO_CAP, language);
         assert.ok(line.includes("providers.openai.maxOutputTokens"), line);
@@ -114,25 +137,24 @@ describe("(2) key_in_file names the key variable of the provider whose key was f
     assert.ok(message.includes(ANTHROPIC_API_KEY_ENV), message);
   });
 
-  const todo = { todo: "CLI: the key hint names the matched provider's key variable (no contract change; with the third-bundle follow-up)" };
 
-  test("an OpenAI-shaped key in the config names OPENAI_API_KEY", todo, async () => {
+  test("an OpenAI-shaped key in the config names OPENAI_API_KEY", async () => {
     const message = await refusal({ model: OPENAI_SHAPED }, "g");
     assert.ok(message.includes(OPENAI_API_KEY_ENV) && !message.includes(ANTHROPIC_API_KEY_ENV), message);
   });
 
-  test("an OpenAI-shaped key in the goal names OPENAI_API_KEY", todo, async () => {
+  test("an OpenAI-shaped key in the goal names OPENAI_API_KEY", async () => {
     const message = await refusal({}, `use ${OPENAI_SHAPED}`);
     assert.ok(message.includes(OPENAI_API_KEY_ENV) && !message.includes(ANTHROPIC_API_KEY_ENV), message);
   });
 
-  test("the OpenAI key's registered value in the goal names OPENAI_API_KEY", todo, async () => {
+  test("the OpenAI key's registered value in the goal names OPENAI_API_KEY", async () => {
     const message = await refusal({}, `use ${OPENAI_VALUE}`, { [OPENAI_API_KEY_ENV]: OPENAI_VALUE });
     assert.ok(message.includes(OPENAI_API_KEY_ENV) && !message.includes(ANTHROPIC_API_KEY_ENV), message);
     assert.equal(message.includes(OPENAI_VALUE), false);
   });
 
-  test("a key field, which belongs to no provider, names every key variable", todo, async () => {
+  test("a key field, which belongs to no provider, names every key variable", async () => {
     const message = await refusal({ apiKey: "x" }, "g");
     assert.ok(message.includes(ANTHROPIC_API_KEY_ENV) && message.includes(OPENAI_API_KEY_ENV), message);
   });

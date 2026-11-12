@@ -79,6 +79,8 @@ export interface ReportOutput {
   readonly runId: string;
   readonly status: ReportStatus;
   readonly exitCode: number;
+  /** DR-38: the run has a records-changed mark (state.ts), so its records are not to be trusted. Absent: false. */
+  readonly recordsChanged?: boolean;
   /** The run's result.json, or null when it has none (`incomplete`). */
   readonly result: EngineResult | null;
   readonly journal: ReportJournalSummary;
@@ -439,6 +441,11 @@ export type RunListEntry =
        * Absent means false (entries built without the revert record check, as G-A's contract tests do).
        */
       readonly revertRecordDamaged?: boolean;
+      /**
+       * DR-38: the run has a records-changed mark (RECORDS_CHANGED_FILE_NAME, state.ts), or one that
+       * could not be read or checked. Absent means false (lists built before DR-38).
+       */
+      readonly recordsChanged?: boolean;
     }
   | { readonly state: "damaged"; readonly runId: RunId };
 

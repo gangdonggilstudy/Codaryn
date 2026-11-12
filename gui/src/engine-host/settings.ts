@@ -103,6 +103,8 @@ export interface ApiProviderEntry {
   readonly name: string;
   readonly keyEnv: string;
   readonly modelEnv: string;
+  /** The variable that overrides this provider's address (DR-34); absent in older tables. */
+  readonly baseUrlEnv?: string;
 }
 
 /** Where the config keeps a provider's model (as `codaryn models --use` writes it): anthropic's top-level unless `providers.anthropic` is given. */
@@ -127,6 +129,9 @@ function apiProvidersView(config: Obj | null, table: readonly ApiProviderEntry[]
       modelEnv: entry.modelEnv,
       modelEnvSet: envSet(entry.modelEnv),
       model: model === null ? null : shown(model),
+      // R27-I3: when set, runs send to that variable's address, not the config file's (as doctor's sends_to_env says).
+      baseUrlEnv: entry.baseUrlEnv ?? null,
+      baseUrlEnvSet: entry.baseUrlEnv === undefined ? false : envSet(entry.baseUrlEnv),
       listable: listable.includes(entry.name),
     };
   });

@@ -592,6 +592,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 ### 6.7 빌드에서 끄는 실행 기능 [추정 E-4]
 
 - 패키지할 때 `@electron/fuses`로 정한다.
+- 꾸러미에는 `build/tests`(연기 시험 진입점)를 넣지 않는다. 그 진입점은 OS 대화상자에 자동으로 답하고(`answerDialog`) 시험 전송을 켠다. 제품 시작 경로(`build/src/main/main.js`)는 이 선택지를 넘기지 않는다(R29-I4).
   - 끔: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, `GrantFileProtocolExtraPrivileges`
   - 켬: `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`
 - 시작할 때 메인이 원격 디버깅 스위치(`--remote-debugging-port`, `--remote-debugging-pipe`)와 `--inspect` 계열 인자, 그 인자를 담은 `NODE_OPTIONS`, 이미 열린 검사기(`inspector.url()`)를 보면 검사기를 닫고 바로 끝낸다[설계, R-10 L-1]. Chromium 스위치는 fuses로 막히지 않을 수 있기 때문이다[추정].
@@ -895,7 +896,7 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 - 최근 목록(R21-I-1): 폴더 이름과 그 폴더가 든 폴더의 이름만 보인다. 전체 경로는 메인에만 있다.
 - 키 값(R21-I-2): 엔진 호스트는 계약의 제공자 표(`API_PROVIDERS`)에 있는 모든 키 변수의 값을 화면으로 가는 글에서 가린다.
 - 시험의 전송(R21-I-3): 연기 시험과 실제 엔진 호스트를 띄우는 유닛은 엔진 호스트에 `--transport loopback-only`를 준다. 그러면 앱 계층의 `fetch`가 이 컴퓨터(loopback)만 부르고, 다른 곳은 보내기 전에 거절한다. 앱의 시작(`main.ts`)은 이 인자를 주지 않는다.
-  - 거절하는 곳(R21b-I-1, PM 지시): 앱 계층의 `providerDeps`로 제공자 표의 제공자마다 주는 `fetch`(F-2), `net.Socket.prototype.connect`(node:net·http·https·tls). 전역 `fetch`를 바꾸던 임시 우회는 F-2 뒤 걷어냈다. 전역 `fetch`를 쓰는 길은 소켓 감싸기가 막는다. 이 컴퓨터로 치는 것은 127.0.0.1, ::1, localhost뿐이다. 이름은 찾기 전에 거절한다. `node:dgram`과 `node:dns`를 직접 쓰는 길은 막지 않는다(엔진에 그런 사용이 없다).
+  - 거절하는 곳(R21b-I-1, PM 지시): 앱 계층의 `providerDeps`로 제공자 표의 제공자마다 주는 `fetch`(F-2), `net.Socket.prototype.connect`(node:net·http·https·tls). 전역 `fetch`를 바꾸던 임시 우회는 F-2 뒤 걷어냈다. 전역 `fetch`를 쓰는 길은 소켓 감싸기가 막는다. 이 컴퓨터로 치는 것은 127.0.0.1, ::1, localhost뿐이다. 이름은 찾기 전에 거절한다. `node:dgram`과 `node:dns`를 직접 쓰는 길은 막지 않는다(엔진에 그런 사용이 없다). 엔진 호스트 프로세스 안만 감싼다. 허용 명령(`run_command`)과 명령 검증기는 자식 프로세스라 감싸지 않는다. 시험은 바깥으로 가는 허용 명령을 두지 않는다(R29-I1).
   - 거절은 센다. 엔진 호스트의 `transport` 호출이 방식과 거절 수를 준다. 실제 엔진 호스트를 띄우는 유닛과 연기 시험(7단계 뒤, 끝, 수명 진입점)은 끝에 거절 0을 단언한다. 거절을 일부러 보는 시험 두 개는 정확히 1을 단언한다.
   - 닿지 않는 주소가 필요한 시험·탐침은 예약 주소(TEST-NET 등)를 쓰지 않는다. 127.0.0.1의 닫힌 포트를 쓰고, 거절을 보는 시험은 127.0.0.2의 닫힌 포트를 쓴다. 127.0.0.2는 loopback 대역이라 이 컴퓨터를 떠나지 않지만, 전송은 이 컴퓨터로 치지 않는다. 방어를 지워 보는 확인도 이 조건에서만 한다.
 

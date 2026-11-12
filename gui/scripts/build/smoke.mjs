@@ -103,6 +103,19 @@ env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
 env[API_PROVIDERS.openai.keyEnv] = FAKE_OPENAI_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
+// R29-L1: how many model requests the fake API has received, for the app's steps that cancel or close
+// a run: they wait until that run's request arrived (a file on this machine, rewritten every 50 ms).
+const apiCountFile = join(gui, "build", "smoke-api-count.json");
+const writeApiCount = () => {
+  const messages = api.requests.filter((request) => request.method === "POST" && request.path.split("?")[0] === "/v1/messages").length;
+  try {
+    writeFileSync(apiCountFile, JSON.stringify({ messages }));
+  } catch {
+    // The app reads it again on its next try.
+  }
+};
+writeApiCount();
+env.CODARYN_SMOKE_API_COUNT = apiCountFile;
 
 // R-10 L-4: a link inside the built renderer to a folder outside it (the temporary folder, on
 // another drive than the build here) with a script the page will try to import.
@@ -119,6 +132,7 @@ try {
 
 for (const target of [result, profile, stateDir]) rmSync(target, { recursive: true, force: true });
 // Started without blocking: the fake API in this process must answer while the app runs.
+const apiCountTimer = setInterval(writeApiCount, 50);
 const run = await new Promise((resolve) => {
   const child = spawn(electron, [join(gui, "build", "tests", "smoke", "smoke.js"), first], { cwd: gui, env, stdio: "inherit" });
   const timer = setTimeout(() => child.kill(), 240_000);
@@ -131,6 +145,8 @@ const run = await new Promise((resolve) => {
     resolve({ status, error: undefined });
   });
 });
+clearInterval(apiCountTimer);
+rmSync(apiCountFile, { force: true });
 const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
 const apiRequests = {
   models: apiRequestRows.filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length,
@@ -189,10 +205,10 @@ const expected = [
   ],
   ["expanded", (v) => v === "ok"],
   ["keyboard", (v) => v.moved === true && v.inTree === true],
-  ["treeText", (v) => typeof v === "string" && !v.includes("FAKEFAKE") && !v.includes(second)],
+  ["treeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("FAKEFAKE") && !v.includes(second)],
   ["recentShown", (v) => v === "2"],
   ["recentNames", (v) => JSON.stringify(v) === JSON.stringify([secondName, firstName])],
-  ["recentText", (v) => typeof v === "string" && v.length > 0 && !v.includes(first) && !v.includes(second) && !v.includes(tmpdir())],
+  ["recentText", (v) => typeof v === "string" && v.length > 0 && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(first) && !v.includes(second) && !v.includes(tmpdir())],
   ["stateFile", (v) => JSON.stringify(v) === JSON.stringify([secondName, firstName])],
   ["checks", (v) => v === "ok"],
   ["checksShown", (v) => typeof v === "number" && v >= 5],
@@ -214,7 +230,7 @@ const expected = [
   ["settingsFile", (v) => v.source === "environment" && typeof v.text === "string" && v.text.includes("CODARYN_CONFIG") && !v.text.includes("smoke-config")],
   ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy"])],
   ["settingsKey", (v) => v === "available"],
-  ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(api.url)],
+  ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(api.url)],
   ["modelsBeforeAsking", (v) => v === 0],
   ["modelsListed", (v) => v === "2"],
   ["modelChosen", (v) => v === "fake-model-b"],
@@ -245,7 +261,7 @@ const expected = [
       JSON.stringify(v.protectedPaths) === JSON.stringify(["notes/private.md"]) &&
       JSON.stringify(v.secretEnv) === "[]",
   ],
-  ["settingsChangeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes("smoke-config")],
+  ["settingsChangeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
   // PM task (2): the provider choice; keys set or not by name, never a value; the list only for the provider in use.
   ["providerRows", (v) => JSON.stringify(v) === JSON.stringify([["anthropic", "set"], ["openai", "set"]])],
   ["providerInUse", (v) => v === "anthropic"],
@@ -268,7 +284,7 @@ const expected = [
   ["runResult", (v) => v !== null && ["done", "needs-input"].includes(v.status) && /^\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(v.runId)],
   ["runLog", (v) => rows(v).length >= 2 && rows(v).includes("tool_decision")],
   ["runCounts", (v) => typeof v === "string" && /(도구 호출|tool calls) [1-9]/.test(v)],
-  ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes(api.url)],
+  ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
   ["cancelReady", (v) => v === "ready"],
   ["secondStartRefused", (v) => v.ok === false && v.code === "run_active"],
@@ -290,7 +306,7 @@ const expected = [
   // DR-29: paths and states only; the file's content never shows.
   ["changesShown", (v) => v === "1"],
   ["changesRows", (v) => rows(v).length === 1 && rows(v)[0].state === "missing" && rows(v)[0].created === "true" && rows(v)[0].text === "none" && rows(v)[0].path === "made.txt"],
-  ["changesText", (v) => typeof v === "string" && !v.includes("made by the smoke run")],
+  ["changesText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("made by the smoke run")],
   ["changesLatest", (v) => v.ok === false && v.code === "invalid_args"],
   // GU-5: a plan run, the plan screen, refused requests, an apply the main process asked about, a review.
   // R-14 L-3, R21-M-1: a plan whose task kind was chosen directly is shown and applied through the task form's workflowRef.
@@ -330,7 +346,7 @@ const expected = [
         { path: "notes.md", state: "changed_since_run", text: "none", hidden: true },
       ]),
   ],
-  ["changesPerFileText", (v) => typeof v === "string" && !v.includes("changed after the run") && !v.includes("메모")],
+  ["changesPerFileText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("changed after the run") && !v.includes("메모")],
   ["reportDiff", (v) => v !== null && v.text === "shown" && JSON.stringify(v.kinds) === JSON.stringify(["added", "added"]) && JSON.stringify(v.lines) === JSON.stringify(["결과 표", "해석"])],
   ["reportF7", (v) => v === true],
   // GU-3 (3.7): reports from a result and from the run list.
@@ -338,11 +354,14 @@ const expected = [
   ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
   ["reportSummary", (v) => v === "awaiting_review"],
   ["reportVerdict", (v) => v === "accepted"],
-  ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
+  ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
   // PM (a): the engine host's test transport refused no request to another machine.
   ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
   ["transportRefusedEnd", (v) => v === "host ended" || JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
+  // R29-L1: the run cancelled in the window and the run closed with it had sent their request first.
+  ["cancelRequestArrived", (v) => v === true],
+  ["closeRequestArrived", (v) => v === true],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's

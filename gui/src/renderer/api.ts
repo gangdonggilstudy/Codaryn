@@ -208,6 +208,8 @@ function asApiProvider(value: unknown): ApiProviderView[] {
       modelEnv: value["modelEnv"],
       modelEnvSet: value["modelEnvSet"] === true,
       model: str(value["model"]) ? value["model"] : null,
+      baseUrlEnv: str(value["baseUrlEnv"]) ? value["baseUrlEnv"] : null,
+      baseUrlEnvSet: value["baseUrlEnvSet"] === true,
       listable: value["listable"] === true,
     },
   ];

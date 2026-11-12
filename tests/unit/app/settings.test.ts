@@ -46,6 +46,8 @@ describe("readSettings", () => {
       builtinWorkflows: [...BUILTIN_WORKFLOW_IDS],
       profileWorkflows: [],
       keyAvailable: true,
+      // DR-41: no configured policy, so no workflow leaves anything out.
+      policyNarrowings: [],
     });
     assert.equal(JSON.stringify(view).includes(FAKE_KEY), false);
   });

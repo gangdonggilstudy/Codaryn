@@ -198,6 +198,27 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("no text names VS Code: the app is the standalone GUI only (DR-20)", () => {
+    for (const language of LANGS) {
+      for (const id of IDS) assert.ok(!MESSAGE_TEXTS[language][id].includes("VS Code"), `${language} ${id}`);
+    }
+  });
+
+  test("revert's help covers a plan's moves and discards too (G-E)", () => {
+    const ko = MESSAGE_TEXTS.ko["help.command.revert"];
+    const en = MESSAGE_TEXTS.en["help.command.revert"];
+    assert.ok(ko.includes("이동") && ko.includes("폐기"), ko);
+    assert.match(en, /\bmoves?\b/, en);
+    assert.match(en, /\bdiscard/, en);
+  });
+
+  test("the discarded files folder has one Korean name (DR-9: 폐기 보관함)", () => {
+    for (const id of ["progress.file_discarded", "revert.action.restored_from_discard"] as const) {
+      assert.ok(MESSAGE_TEXTS.ko[id].includes("폐기 보관함"), id);
+    }
+    for (const id of IDS) assert.ok(!MESSAGE_TEXTS.ko[id].includes("버린 파일 보관"), id);
+  });
+
   test("the Korean particle after {keyEnv} fits every key variable name (SP-D12)", () => {
     // ko writes "{keyEnv}가" and "{keyEnv}를", which fit a name read with a final vowel: every name
     // ends in KEY ("키"). A new name that does not would need these texts reworded.

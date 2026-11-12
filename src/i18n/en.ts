@@ -142,7 +142,7 @@ export const EN_MESSAGES: MessageTexts = {
   "help.options_heading": "Options:",
   "help.exit_heading": "Exit codes:",
   "help.command.run": "Runs one task: from a task file, in the quick form (--workspace and --goal), or as a one-line run (the current directory and a goal).",
-  "help.command.revert": "Puts back the files a run changed with its file tools, except files changed again since.",
+  "help.command.revert": "Puts back what a run changed: files changed with its file tools, and the moves and discards of an applied plan (restored from the discarded files folder), except files changed again since.",
   "help.command.report": "Summarizes one run from its masked records: status, checks, protected material, changes, usage and what was not checked. Nothing is changed.",
   "help.command.doctor": "Checks what a run would need without running one. No network access is made and nothing is changed, so whether the model exists is not checked.",
   "help.command.models": "Lists the models the key can use, numbered, and marks the current one. This sends a request to the API.",
@@ -450,7 +450,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "approval.cli-tty": "approved at the terminal",
   "approval.cli-flag": "approved by a command-line argument",
-  "approval.adapter": "approved in an adapter (VS Code or GUI)",
+  "approval.adapter": "approved in the app",
 
   "plan.problem.source_missing": "the source is gone",
   "plan.problem.source_changed": "the source changed after the plan (SHA-256 differs)",

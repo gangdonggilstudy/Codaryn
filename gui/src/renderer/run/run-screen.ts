@@ -10,7 +10,9 @@
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
-import type { CodarynApi } from "../api.js";
+import { asReview, asStartRun } from "../api.js";
+import type { CodarynApi, Workspace } from "../api.js";
+import { actionLine } from "../plan/plan-screen.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
@@ -23,6 +25,89 @@ export interface RunScreenDeps {
   readonly run: RunModel;
   readonly newTask: () => void;
   readonly announce: (text: string) => void;
+  /** GU-5: the open workspace (for a review) and the plan screen for a plan run. */
+  readonly current: () => Workspace | null;
+  readonly openPlan: (runId: string, profile: string | null) => void;
+}
+
+const MAX_NOTE = 500;
+
+/** GU-5: what follows a result: the plan, the DR-21 consent question, the applied actions, a review. */
+function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
+  const { api, run } = deps;
+  const out: HTMLElement[] = [];
+  if (result.plan !== null) {
+    out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null), { id: "run-view-plan" }));
+  }
+  if (result.kind === "apply") {
+    const applied = el("div", undefined, { id: "run-applied" });
+    applied.append(el("h4", t.format("run.applied", { count: String(result.applied.length) })));
+    const list = el("ul");
+    for (const action of result.applied) list.append(el("li", `${actionLine(t, action)}${action.unsafe === true ? ` ${t.format("runs.unsafe")}` : ""}`, { "data-kind": action.kind }));
+    applied.append(list);
+    out.push(applied);
+    if (result.reason === "consent_required" && run.approval !== null) {
+      const approval = run.approval;
+      const message = el("div", undefined, { role: "alert" });
+      const agree = button(t.format("run.consentAsk"), () => {
+        if (!run.startingApply(approval)) return;
+        agree.setAttribute("disabled", "");
+        void (async () => {
+          const started = asStartRun(await api.applyPlan(approval, true));
+          if (started.ok) run.started(started.runId, Date.now());
+          else {
+            run.failedToStart(started.code);
+            message.replaceChildren(el("p", `${errorText(t, started.code)} ${t.format("error.code", { code: started.code })}`, { "data-error": started.code }));
+          }
+        })();
+      }, { id: "run-consent" });
+      out.push(el("p", t.format("run.consentNeeded", { count: String(result.unsafeMoves ?? 0) }), { id: "run-consent-text", class: "notice" }), agree, message);
+    }
+  }
+  const workspace = deps.current();
+  if (result.review !== null && workspace !== null) {
+    const panel = el("section", undefined, { id: "run-review-panel", "aria-labelledby": "run-review-title" });
+    const note = el("textarea", undefined, { id: "review-note", rows: "3", maxlength: String(MAX_NOTE) });
+    const confirm = el("div", undefined, { id: "review-confirm", hidden: "", role: "alertdialog", "aria-labelledby": "review-confirm-text" });
+    const outcome = el("div", undefined, { id: "review-outcome", role: "status" });
+    let decision: "accept" | "reject" = "accept";
+    const ask = (chosen: "accept" | "reject"): void => {
+      decision = chosen;
+      confirmText.textContent = t.format(chosen === "accept" ? "review.confirmAccept" : "review.confirmReject");
+      confirm.removeAttribute("hidden");
+      keep.focus();
+    };
+    const confirmText = el("p", "", { id: "review-confirm-text" });
+    const keep = button(t.format("review.back"), () => confirm.setAttribute("hidden", ""), { id: "review-back" });
+    const record = button(t.format("review.record"), () => {
+      confirm.setAttribute("hidden", "");
+      void (async () => {
+        const text = note.value.trim();
+        const reply = asReview(await api.review(workspace.handle, result.runId, run.last?.profile ?? null, decision, text === "" ? null : text));
+        if (!reply.ok) {
+          outcome.replaceChildren(el("p", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { "data-error": reply.code }));
+          return;
+        }
+        outcome.replaceChildren(el("p", t.format(reply.verdict === "accepted" ? "review.accepted" : "review.rejected")));
+        outcome.setAttribute("data-verdict", reply.verdict);
+        deps.announce(t.format(reply.verdict === "accepted" ? "review.accepted" : "review.rejected"));
+      })();
+    }, { id: "review-record" });
+    confirm.append(confirmText, keep, record);
+    // No default button (3.7): the person picks one; the window asks once more before recording.
+    panel.append(
+      el("h4", t.format("review.title"), { id: "run-review-title" }),
+      el("p", t.format("review.text")),
+      el("label", t.format("review.note"), { for: "review-note" }),
+      note,
+      button(t.format("review.accept"), () => ask("accept"), { id: "review-accept" }),
+      button(t.format("review.reject"), () => ask("reject"), { id: "review-reject" }),
+      confirm,
+      outcome,
+    );
+    out.push(panel);
+  }
+  return out;
 }
 
 const FILTERS: readonly RunFilter[] = ["all", "denied", "files", "checks"];
@@ -186,7 +271,7 @@ export function runScreen(deps: RunScreenDeps): Screen {
         }
         if (phase === "idle" && run.startError === null && run.done === null) end.append(el("p", t.format("run.none")));
         if (phase === "done" && run.done !== null) {
-          if (run.done.ok) end.append(resultView(t, run.done.result, run.done.labels));
+          if (run.done.ok) end.append(resultView(t, run.done.result, run.done.labels), ...nextSteps(t, deps, run.done.result));
           else end.append(el("div", `${errorText(t, run.done.code)} ${t.format("error.code", { code: run.done.code })}`, { role: "alert", class: "error", "data-error": run.done.code }));
         }
         if (phase === "idle" || phase === "done") end.append(button(t.format("run.again"), deps.newTask, { id: "run-again" }));

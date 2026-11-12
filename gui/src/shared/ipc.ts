@@ -24,6 +24,9 @@ export const IPC_CHANNELS = {
   listRuns: "codaryn:runs:list",
   previewRevert: "codaryn:runs:previewrevert",
   revert: "codaryn:runs:revert",
+  plan: "codaryn:plan:read",
+  applyPlan: "codaryn:plan:apply",
+  review: "codaryn:review:record",
 } as const;
 
 /**
@@ -429,6 +432,31 @@ export interface RunResultView {
   readonly plan: { readonly digest: string; readonly actions: number | null } | null;
   readonly review: { readonly checklist: readonly string[] } | null;
   readonly protectedChanged: number | null;
+  /** GU-5: "apply" for an apply run (DR-2), with its plan run, its done actions and the unsafe moves its check found. */
+  readonly kind: "run" | "apply";
+  readonly planRunId: string | null;
+  readonly unsafeMoves: number | null;
+  readonly applied: readonly PlanActionView[];
+}
+
+/** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
+export interface PlanActionView {
+  readonly kind: "move" | "discard";
+  readonly from: string;
+  readonly to: string | null;
+  readonly unsafe?: boolean;
+}
+
+function toPlanActions(value: unknown, limit: number): PlanActionView[] | null {
+  if (!Array.isArray(value) || value.length > limit) return null;
+  const actions: PlanActionView[] = [];
+  for (const action of value) {
+    if (!isObj(action) || !shortText(action["from"])) return null;
+    if (action["kind"] === "move" && shortText(action["to"])) actions.push({ kind: "move", from: action["from"], to: action["to"], ...(action["unsafe"] === true ? { unsafe: true } : {}) });
+    else if (action["kind"] === "discard" && action["to"] === null) actions.push({ kind: "discard", from: action["from"], to: null, ...(action["unsafe"] === true ? { unsafe: true } : {}) });
+    else return null;
+  }
+  return actions;
 }
 
 export type RunDonePayload =
@@ -469,6 +497,11 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
     if (!isObj(review) || !textList(review["checklist"])) return fail;
     reviewView = { checklist: review["checklist"] };
   }
+  const kind = result["kind"] === "apply" ? "apply" : "run";
+  const planRunId = result["planRunId"] ?? null;
+  const unsafeMoves = result["unsafeMoves"] ?? null;
+  const applied = kind === "apply" ? toPlanActions(result["applied"], 10_000) : [];
+  if (applied === null || !(planRunId === null || isRunId(planRunId)) || !numOrNull(unsafeMoves)) return fail;
   return {
     ok: true,
     result: {
@@ -489,8 +522,81 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       plan: planView,
       review: reviewView,
       protectedChanged: protectedChanged as number | null,
+      kind,
+      planRunId: planRunId as string | null,
+      unsafeMoves: unsafeMoves as number | null,
+      applied,
     },
   };
+}
+
+/** GU-5: `plan` arguments: the workspace, the plan run chosen, and the profile of its task form (DR-17, DR-28). */
+export function parsePlanArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile"])) return null;
+  const { workspace, runId } = value;
+  const profile = value["profile"] ?? null;
+  if (!isHandle(workspace) || !isRunId(runId) || (profile !== null && (typeof profile !== "string" || !NAME.test(profile)))) return null;
+  return { workspace, runId, profile: profile as string | null };
+}
+
+/**
+ * GU-5: `applyPlan` arguments: the approval token of a plan view, and whether the person asks to be
+ * asked for the DR-21 consent. The window cannot give a consent or a digest: the main process asks
+ * the person in its own dialog and makes the consent from that answer only (6.6).
+ */
+export function parseApplyArgs(value: unknown): { readonly approval: string; readonly askConsent: boolean } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["approval", "askConsent"])) return null;
+  const { approval, askConsent } = value;
+  return isHandle(approval) && typeof askConsent === "boolean" ? { approval, askConsent } : null;
+}
+
+/** GU-5: `review` arguments. A note is at most 500 characters (MAX_REVIEW_NOTE_CHARS); the CLI checks it for keys (S-8). */
+export function parseReviewArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly decision: "accept" | "reject"; readonly note: string | null } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "decision", "note"])) return null;
+  const { workspace, runId, decision } = value;
+  const profile = value["profile"] ?? null;
+  const note = value["note"] ?? null;
+  if (!isHandle(workspace) || !isRunId(runId) || (decision !== "accept" && decision !== "reject")) return null;
+  if (profile !== null && (typeof profile !== "string" || !NAME.test(profile))) return null;
+  if (note !== null && (typeof note !== "string" || note.length > 500 || note.includes("\u0000"))) return null;
+  return { workspace, runId, profile: profile as string | null, decision, note: note as string | null };
+}
+
+/** GU-5 (3.9): a plan as the window shows it. `approval` is the token its apply takes (null once applied). */
+export interface PlanView {
+  readonly runId: string;
+  readonly status: "pending" | "applied";
+  readonly digest: string;
+  readonly actions: readonly PlanActionView[];
+  readonly inventoryLimitReached: boolean;
+  readonly appliedBy: { readonly runId: string; readonly at: string } | null;
+}
+
+export type PlanReply = { readonly ok: true; readonly view: PlanView; readonly approval: string | null } | { readonly ok: false; readonly code: string };
+
+/** The engine host's plan value, checked field by field. */
+export function toPlanView(value: unknown): { readonly ok: true; readonly view: PlanView } | { readonly ok: false; readonly code: string } {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { runId, status, digest, inventoryLimitReached, appliedBy } = value;
+  const actions = toPlanActions(value["actions"], 10_000);
+  if (!isRunId(runId) || (status !== "pending" && status !== "applied") || typeof digest !== "string" || !DIGEST.test(digest) || actions === null || typeof inventoryLimitReached !== "boolean") return fail;
+  let applied: PlanView["appliedBy"] = null;
+  if (appliedBy !== null) {
+    if (!isObj(appliedBy) || !isRunId(appliedBy["runId"]) || typeof appliedBy["at"] !== "string" || !TIME.test(appliedBy["at"])) return fail;
+    applied = { runId: appliedBy["runId"], at: appliedBy["at"] };
+  }
+  return { ok: true, view: { runId, status, digest, actions, inventoryLimitReached, appliedBy: applied } };
+}
+
+export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };
+
+/** The engine host's review value, checked. */
+export function toReviewReply(value: unknown): ReviewReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const { verdict, replaced } = value;
+  if ((verdict !== "accepted" && verdict !== "rejected") || typeof replaced !== "boolean") return { ok: false, code: "host_error" };
+  return { ok: true, verdict, replaced };
 }
 
 /** GU-4: `listRuns` arguments: `{workspace}`. */

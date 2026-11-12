@@ -31,6 +31,8 @@ export interface HostStartRunRequest {
 
 export interface RunsDeps {
   readonly startRun: (request: HostStartRunRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
+  /** GU-5: the app layer's applyPlan (ApplyPlanRequest); absent before the general task commands. */
+  readonly applyPlan?: (request: Obj, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
   readonly itemOf: RunItemOf;
   readonly shown: Shown;
   readonly token: () => string;
@@ -95,9 +97,47 @@ interface Running {
 
 export interface RunRegistry {
   start(args: { readonly workspace: string; readonly goal: string; readonly profile: string | null; readonly workflowRef: string | null }): Promise<Obj | HostFailure>;
+  /**
+   * GU-5: applies a plan (DR-1, DR-2): the same events and cancel as a run. `consent` is the
+   * person's DR-21 consent for this plan's digest, set only by the main process after its dialog.
+   */
+  startApply(args: { readonly workspace: string; readonly profile: string | null; readonly planRunId: string; readonly digest: string; readonly consent: boolean }): Promise<Obj | HostFailure>;
   cancel(token: string): boolean;
   cancelAll(): void;
   readonly size: number;
+}
+
+/** The task form `plan`, `applyPlan`, `review` and `changes` take (DR-17): the workspace with the config file's defaults. */
+export function taskForm(workspace: string, profile: string | null): Obj {
+  return { input: { kind: "workspace", workspace }, configPath: null, varsFile: null, profile };
+}
+
+/** An apply's result (AppCallOutcome<ApplyResult>) as the window may see it; `unsafeMoves` from its plan_checked record. */
+export function applyResultValue(outcome: unknown, shown: Shown, unsafeMoves: number | null): Obj | HostFailure {
+  if (!isObj(outcome) || outcome["ok"] !== true || !isObj(outcome["output"])) return failureOf(outcome);
+  const output = outcome["output"];
+  const base = runResultValue({ ok: true, result: { ...output, changes: [], plan: undefined, review: undefined } }, shown);
+  if (base["ok"] !== true) return base as HostFailure;
+  const applied = Array.isArray(output["applied"]) ? output["applied"].slice(0, MAX_LIST) : [];
+  return {
+    ok: true,
+    result: {
+      ...((base as Obj)["result"] as Obj),
+      kind: "apply",
+      planRunId: typeof output["planRunId"] === "string" ? output["planRunId"] : null,
+      unsafeMoves,
+      applied: applied.flatMap((item): Obj[] => {
+        const action = isObj(item) ? item["action"] : null;
+        if (!isObj(action)) return [];
+        const unsafe = isObj(item) && item["unsafe"] === true;
+        if (action["kind"] === "move" && typeof action["from"] === "string" && typeof action["to"] === "string") {
+          return [{ kind: "move", from: shown(action["from"]), to: shown(action["to"]), unsafe }];
+        }
+        if (action["kind"] === "discard" && typeof action["path"] === "string") return [{ kind: "discard", from: shown(action["path"]), to: null, unsafe }];
+        return [];
+      }),
+    },
+  };
 }
 
 export function createRunRegistry(deps: RunsDeps): RunRegistry {
@@ -119,15 +159,16 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
     if (run.open && run.timer === null) run.timer = setTimeout(() => flush(token, run), flushMs);
   };
 
-  return {
-    get size() {
-      return runs.size;
-    },
-
-    async start(args) {
+  /** Starts through `begin` and tracks the run; `resultOf` turns its end into the done value. */
+  async function launch(
+    begin: (observer: { onEvent(event: unknown): void }) => Promise<unknown>,
+    resultOf: (done: unknown, unsafeMoves: number | null) => Obj | HostFailure,
+  ): Promise<Obj | HostFailure> {
+    {
       const token = deps.token();
       const run: Running = { cancel: () => undefined, pending: [], dropped: false, open: false, timer: null, turns: 0, tools: 0 };
       let lastSeq = 0;
+      let unsafeMoves: number | null = null;
       const observer = {
         onEvent(event: unknown): void {
           const record = isObj(event) && event["kind"] === "record" && isObj(event["record"]) ? event["record"] : null;
@@ -137,6 +178,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             if (typeof seq === "number") lastSeq = seq;
             if (record["type"] === "model_request") run.turns += 1;
             if (record["type"] === "tool_result") run.tools += 1;
+            if (record["type"] === "plan_checked") unsafeMoves = Array.isArray(record["unsafeMoves"]) ? record["unsafeMoves"].length : 0;
           }
           let item: HostRunItem | null = null;
           try {
@@ -154,10 +196,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
           later(token, run);
         },
       };
-      const outcome = await deps.startRun(
-        { input: { kind: "quick", workspace: args.workspace, goal: args.goal }, configPath: null, varsFile: null, profile: args.profile, workflowRef: args.workflowRef, cancelFile: null },
-        observer,
-      );
+      const outcome = await begin(observer);
       const handle = isObj(outcome) && outcome["ok"] === true && isObj(outcome["handle"]) ? outcome["handle"] : null;
       if (handle === null || typeof handle["runId"] !== "string" || typeof handle["cancel"] !== "function" || !(handle["done"] instanceof Promise)) {
         return failureOf(outcome);
@@ -176,7 +215,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             run.open = false;
             runs.delete(token);
             try {
-              deps.write(encodeLine({ v: 1, type: "done", run: token, outcome: runResultValue(done, deps.shown) }));
+              deps.write(encodeLine({ v: 1, type: "done", run: token, outcome: resultOf(done, unsafeMoves) }));
             } catch {
               deps.write(encodeLine({ v: 1, type: "done", run: token, outcome: { ok: false, code: "host_error" } }));
             }
@@ -185,6 +224,43 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
         () => undefined,
       );
       return { ok: true, run: token, runId: handle["runId"] };
+    }
+  }
+
+  return {
+    get size() {
+      return runs.size;
+    },
+
+    start(args) {
+      return launch(
+        (observer) =>
+          deps.startRun(
+            { input: { kind: "quick", workspace: args.workspace, goal: args.goal }, configPath: null, varsFile: null, profile: args.profile, workflowRef: args.workflowRef, cancelFile: null },
+            observer,
+          ),
+        (done) => runResultValue(done, deps.shown),
+      );
+    },
+
+    startApply(args) {
+      const applyPlan = deps.applyPlan;
+      if (applyPlan === undefined) return Promise.resolve({ ok: false, code: "host_error" });
+      return launch(
+        (observer) =>
+          applyPlan(
+            {
+              settings: taskForm(args.workspace, args.profile),
+              planRunId: args.planRunId,
+              digest: args.digest,
+              cancelFile: null,
+              // DR-21: a consent only when the main process asked the person; it names this plan's digest.
+              unsafeMoveConsent: args.consent ? { digest: args.digest } : null,
+            },
+            observer,
+          ),
+        (done, unsafeMoves) => applyResultValue(done, deps.shown, unsafeMoves),
+      );
     },
 
     cancel(token) {

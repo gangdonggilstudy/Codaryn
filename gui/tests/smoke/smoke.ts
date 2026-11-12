@@ -202,6 +202,59 @@ startGui({
       results["revertDone"] = await waitFor("document.getElementById('revert-panel')?.getAttribute('data-revert') ?? null", 60_000);
       results["madeAfterRevert"] = existsSync(join(SECOND, "made.txt"));
 
+      // 5f. GU-5: a plan run (organize), the plan screen, refused requests, and an apply the main process asked about.
+      const resultId = (): Promise<unknown> => js("document.getElementById('run-result-id')?.textContent ?? null");
+      const newResult = (previous: unknown, ms = 90_000): Promise<unknown> =>
+        waitFor(`(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; return id !== null && id !== ${JSON.stringify(previous)} ? id : null; })()`, ms);
+      const taskWith = async (workflow: string, goal: string): Promise<void> => {
+        await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+        await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+        await js(`(() => { document.getElementById('task-workflow').value = ${JSON.stringify(workflow)}; const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
+      };
+      // A: the task kind chosen directly. The app layer's task form has no workflow, so the apply
+      // cannot name organize (reported to the PM); the window shows the error.
+      const beforeDirect = await resultId();
+      await taskWith("organize", "a.txt를 moved 폴더로 옮긴다");
+      await newResult(beforeDirect);
+      await js("document.getElementById('run-view-plan')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      await js("document.getElementById('plan-apply')?.click(); true");
+      results["applyByWorkflow"] = await waitFor("document.querySelector('#plan-message [data-error]')?.getAttribute('data-error') ?? null", 60_000);
+
+      // B: the same through a profile whose workflowRef is organize: the plan's apply takes the same profile.
+      const beforePlan = await resultId();
+      await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+      await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+      await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'a.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
+      const planRunId = (await newResult(beforePlan)) as string;
+      results["planRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
+      await js("document.getElementById('run-view-plan')?.click(); true");
+      results["planShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      results["planActions"] = await js("[...document.querySelectorAll('#plan-actions li')].map((li) => li.getAttribute('data-kind'))");
+      results["planForged"] = await js(`window.codaryn.applyPlan(${JSON.stringify("0".repeat(32))}, false)`);
+      // A fresh approval of the same plan, asking for a consent its apply never needed: refused before any dialog.
+      results["consentUnasked"] = await js(
+        `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(planRunId)}, 'tidy').then((r) => window.codaryn.applyPlan(r.approval, true))`,
+      );
+      await js("document.getElementById('plan-apply')?.click(); true");
+      await newResult(planRunId);
+      results["applyDone"] = await js(
+        "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
+      );
+      results["applyMoved"] = { from: existsSync(join(SECOND, "a.txt")), to: existsSync(join(SECOND, "moved", "a.txt")) };
+
+      // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
+      const beforeReview = await resultId();
+      await taskWith("analyze", "a.txt를 분석한다");
+      await newResult(beforeReview);
+      results["reviewRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
+      if ((await js("document.getElementById('review-accept') !== null")) === true) {
+        await js("document.getElementById('review-accept').click(); true");
+        results["reviewAsked"] = await js("document.getElementById('review-confirm')?.hasAttribute('hidden') === false && document.activeElement?.id === 'review-back'");
+        await js("document.getElementById('review-record').click(); true");
+        results["reviewRecorded"] = await waitFor("document.getElementById('review-outcome')?.getAttribute('data-verdict') ?? null", 30_000);
+      }
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",

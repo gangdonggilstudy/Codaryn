@@ -40,6 +40,9 @@ const steps = [
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } })]),
   fakeApi.replyText("done"),
   { kind: "hang" },
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
+  fakeApi.replyText("analysis written"),
   { kind: "hang" },
 ];
 const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
@@ -59,7 +62,7 @@ writeFileSync(
     requestTimeoutMs: 20000,
     maxRetries: 0,
     limits: { maxModelTurns: 6, maxToolCalls: 10, maxTotalTokens: 100000, maxDurationMs: 120000 },
-    profiles: { doc: { limits: { maxModelTurns: 5 } } },
+    profiles: { doc: { limits: { maxModelTurns: 5 } }, tidy: { workflowRef: "organize" } },
   }),
 );
 
@@ -141,7 +144,7 @@ if (!existsSync(result)) {
 const seen = JSON.parse(readFileSync(result, "utf8"));
 const [firstName, secondName] = [basename(first), basename(second)];
 const rows = (value) => (Array.isArray(value) ? value : []);
-const API = "cancelRun,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,previewRevert,recent,reveal,revert,selectModel,settings,startRun,tree";
+const API = "applyPlan,cancelRun,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewRevert,recent,reveal,revert,review,selectModel,settings,startRun,tree";
 seen.apiRequests = apiRequests;
 seen.configModel = configModel;
 
@@ -192,7 +195,7 @@ const expected = [
   ["settingsReady", (v) => v === "ok"],
   // N-14: a file the environment names is shown by the variable name, not its path.
   ["settingsFile", (v) => v.source === "environment" && typeof v.text === "string" && v.text.includes("CODARYN_CONFIG") && !v.text.includes("smoke-config")],
-  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc"])],
+  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy"])],
   ["settingsKey", (v) => v === "available"],
   ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(api.url)],
   ["modelsBeforeAsking", (v) => v === 0],
@@ -206,7 +209,7 @@ const expected = [
     "apiRequests",
     (v) =>
       rows(v).filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length >= 2 &&
-      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 4 &&
+      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 7 &&
       rows(v).every((r) => r.key === true && ((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
@@ -231,7 +234,20 @@ const expected = [
   ["previewUnlisted", (v) => v.ok === false && v.code === "unknown_run"],
   ["revertDone", (v) => v === "complete"],
   ["madeAfterRevert", (v) => v === false],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // GU-5: a plan run, the plan screen, refused requests, an apply the main process asked about, a review.
+  // Reported to the PM: the task form has no workflow, so a plan whose task kind was chosen directly cannot be applied.
+  ["applyByWorkflow", (v) => v === "run_not_plan"],
+  ["planRun", (v) => v === "plan_pending"],
+  ["planShown", (v) => v === "pending"],
+  ["planActions", (v) => JSON.stringify(v) === JSON.stringify(["move"])],
+  ["planForged", (v) => v.ok === false && v.code === "unknown_plan"],
+  ["consentUnasked", (v) => v.ok === false && v.code === "consent_not_asked"],
+  ["applyDone", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
+  ["applyMoved", (v) => v.from === false && v.to === true],
+  ["reviewRun", (v) => v === "awaiting_review"],
+  ["reviewAsked", (v) => v === true],
+  ["reviewRecorded", (v) => v === "accepted"],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

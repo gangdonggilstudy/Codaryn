@@ -47,6 +47,8 @@ export class RunModel {
   startError: string | null = null;
   /** The last request of this session (GUI-D11: memory only). */
   last: RunRequest | null = null;
+  /** GU-5: the approval token of the plan the last apply came from (to be asked for the DR-21 consent). */
+  approval: string | null = null;
   private readonly listeners = new Set<() => void>();
 
   subscribe(listener: () => void): () => void {
@@ -86,6 +88,16 @@ export class RunModel {
     this.done = null;
     this.startError = null;
     this.changed();
+    return true;
+  }
+
+  /** GU-5: an apply starts (DR-2: shown as a run); the session's goal stays for running again. */
+  startingApply(approval: string): boolean {
+    if (!this.canStart) return false;
+    const last = this.last;
+    this.starting({ goal: "", profile: null, workflow: null });
+    this.last = last;
+    this.approval = approval;
     return true;
   }
 

@@ -19,6 +19,11 @@ import {
   parseRevealArgs,
   parseStartRunArgs,
   parsePreviewArgs,
+  parsePlanArgs,
+  parseApplyArgs,
+  parseReviewArgs,
+  toPlanView,
+  toReviewReply,
   parseRunArgs,
   parseWorkspaceArgs,
   toRevertView,
@@ -37,7 +42,8 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { RevertPreview, RunHistory } from "./history.js";
-import type { RevertReply, RunsReply } from "../shared/ipc.js";
+import type { PlanReply, RevertReply, ReviewReply, RunsReply } from "../shared/ipc.js";
+import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { Workspaces } from "./workspaces.js";
 
 const DOCTOR_TIMEOUT_MS = 60_000;
@@ -76,6 +82,12 @@ export interface IpcDeps {
   readonly history: RunHistory;
   /** GU-4 (6.6): asks the person (an OS dialog) whether to revert as previewed; true only on "revert". */
   readonly confirmRevert: (preview: RevertPreview) => Promise<boolean>;
+  /** GU-5: the plans shown and their approval tokens. */
+  readonly approvals: PlanApprovals;
+  /** GU-5 (3.9, 6.6): asks the person (an OS dialog) whether to apply this plan; true only on "apply". */
+  readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
+  /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
+  readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -318,6 +330,77 @@ export function registerIpc(deps: IpcDeps): void {
     if (!checked.ok) return checked;
     if (checked.view.runId !== preview.runId || checked.view.dryRun) return { ok: false, code: "host_error" };
     return { ok: true, view: checked.view, preview: null };
+  });
+
+  // GU-5 (3.9, 3.7): the plan view, its apply (asked first, DR-21 consent asked separately) and a review.
+  handle(IPC_CHANNELS.plan, async (args): Promise<PlanReply> => {
+    const parsed = args.length === 1 ? parsePlanArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("plan", { workspace: root, profile: parsed.profile, runId: parsed.runId }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const checked = toPlanView(response.value);
+    if (!checked.ok) return checked;
+    if (checked.view.runId !== parsed.runId) return { ok: false, code: "host_error" };
+    const moves = checked.view.actions.filter((action) => action.kind === "move").length;
+    const approval =
+      checked.view.status === "pending"
+        ? deps.approvals.issue({ workspace: parsed.workspace, profile: parsed.profile, planRunId: parsed.runId, digest: checked.view.digest, moves, discards: checked.view.actions.length - moves })
+        : null;
+    return { ok: true, view: checked.view, approval };
+  });
+
+  handle(IPC_CHANNELS.applyPlan, async (args): Promise<StartRunReply> => {
+    const parsed = args.length === 1 ? parseApplyArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const approval = deps.approvals.get(parsed.approval);
+    if (approval === null) return { ok: false, code: "unknown_plan" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    const root = workspaces.path(approval.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    let consent = false;
+    if (parsed.askConsent) {
+      // DR-21: only after this plan's apply stopped as consent_required, and only from the person's answer.
+      if (!deps.approvals.mayAskConsent(parsed.approval)) return { ok: false, code: "consent_not_asked" };
+      if (!(await deps.confirmConsent(approval))) return { ok: false, code: "not_confirmed" };
+      consent = true;
+    } else if (!(await deps.confirmApply(approval))) {
+      return { ok: false, code: "not_confirmed" };
+    }
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    starting = true;
+    try {
+      const request = { workspace: root, profile: approval.profile, planRunId: approval.planRunId, digest: approval.digest, consent, language };
+      const response = await state.host.call("applyPlan", request, START_TIMEOUT_MS);
+      if (!response.ok) return { ok: false, code: response.error.code };
+      const value = response.value as Record<string, unknown> | null;
+      if (typeof value !== "object" || value === null || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+      const token = value["run"];
+      const runId = value["runId"];
+      if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
+      deps.approvals.applied(parsed.approval, runId);
+      deps.runs.begin(token, runId);
+      return { ok: true, runId };
+    } finally {
+      starting = false;
+    }
+  });
+
+  handle(IPC_CHANNELS.review, async (args): Promise<ReviewReply> => {
+    const parsed = args.length === 1 ? parseReviewArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("review", { workspace: root, profile: parsed.profile, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toReviewReply(response.value);
   });
 
   handle(IPC_CHANNELS.cancelRun, async (args): Promise<boolean> => {

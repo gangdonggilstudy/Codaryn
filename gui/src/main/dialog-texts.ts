@@ -19,6 +19,14 @@ const KO = {
   "revert.detail": "되돌릴 파일 {reverted}개, 건너뛸 파일 {skipped}개(미리보기 기준). 미리보기 뒤에 바뀐 파일은 건너뜁니다.",
   "revert.confirm": "되돌리기",
   "revert.keep": "되돌리지 않음",
+  "apply.message": "이 계획을 적용할까요? 이동 {moves}개, 보관함으로 {discards}개 (다이제스트 {digest})",
+  "apply.detail": "폐기하는 파일은 .codaryn/discarded/<적용 실행 id>/ 보관함으로 옮깁니다. 실행 기록을 정리해도 보관함은 지워지지 않습니다. 계획 뒤에 파일이 바뀌었으면 아무것도 옮기지 않습니다.",
+  "apply.confirm": "이 계획 적용",
+  "apply.keep": "적용 안 함",
+  "consent.message": "이 드라이브는 하드 링크를 쓸 수 없습니다. 이번 적용 한 번에만 동의할까요? (다이제스트 {digest})",
+  "consent.detail": "옮기는 도중 같은 이름의 파일이 새로 생기면 그 파일을 덮어쓸 수 있습니다. 동의하지 않으면 아무것도 옮기지 않습니다. 동의는 적용 기록에 남습니다.",
+  "consent.agree": "이번 적용에 동의",
+  "consent.keep": "동의하지 않음",
 } as const;
 
 const EN: { readonly [K in keyof typeof KO]: string } = {
@@ -33,6 +41,14 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "revert.detail": "{reverted} files to revert, {skipped} to skip (as previewed). Files changed after the preview are skipped.",
   "revert.confirm": "Revert",
   "revert.keep": "Do not revert",
+  "apply.message": "Apply this plan? {moves} moves, {discards} to the discard box (digest {digest})",
+  "apply.detail": "Discarded files are moved to the discard box .codaryn/discarded/<apply run id>/. Cleaning up the run records does not remove the discard box. If files changed after the plan, nothing is moved.",
+  "apply.confirm": "Apply this plan",
+  "apply.keep": "Do not apply",
+  "consent.message": "This drive cannot use hard links. Agree for this one apply only? (digest {digest})",
+  "consent.detail": "If a file with the same name appears while files are moved, it could be replaced. Without your agreement nothing is moved. The agreement is kept in the apply's record.",
+  "consent.agree": "Agree for this apply",
+  "consent.keep": "Do not agree",
 };
 
 export type DialogTextId = keyof typeof KO;

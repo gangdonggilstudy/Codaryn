@@ -25,6 +25,7 @@ import type { DialogLanguage, DialogTextId } from "./dialog-texts.js";
 import { cancelActiveRun, registerIpc, texts } from "./ipc.js";
 import { RunManager } from "./runs.js";
 import { RunHistory } from "./history.js";
+import { PlanApprovals } from "./plans.js";
 import { ModelEntries } from "./model-entries.js";
 import { envValue, findDevelopmentNode } from "./node-path.js";
 import { handleAppProtocol, registerAppScheme } from "./protocol.js";
@@ -141,6 +142,7 @@ export function startGui(options: GuiOptions): void {
   let initialWorkspace: { readonly handle: string; readonly name: string } | null = null;
   let language: DialogLanguage = "en";
   const history = new RunHistory((size) => randomBytes(size), () => Date.now());
+  const approvals = new PlanApprovals((size) => randomBytes(size), () => Date.now());
   const runs = new RunManager({
     send: (channel, payload) => {
       if (window !== null && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -152,6 +154,7 @@ export function startGui(options: GuiOptions): void {
       return { status: found?.texts[ids[0] as string] ?? status, reason: found?.texts[ids[1] as string] ?? reason };
     },
     // 3.6: the taskbar shows that a run goes on, without a number or the goal.
+    onEnded: (runId, reason) => approvals.ended(runId, reason),
     onChange: (running) => {
       if (window !== null && !window.isDestroyed()) window.setProgressBar(running ? 2 : -1, { mode: running ? "indeterminate" : "none" });
     },
@@ -244,6 +247,21 @@ export function startGui(options: GuiOptions): void {
         const answer = await ask("revert.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "revert.detail", values), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
         return answer === 0;
       },
+      approvals,
+      // 3.9: "do not apply" is the default; the digest's first 12 characters and the counts are shown.
+      confirmApply: async (approval) => {
+        const values = { moves: approval.moves, discards: approval.discards, digest: approval.digest.slice(0, 12) };
+        const buttons = [dialogText(language, "apply.confirm"), dialogText(language, "apply.keep")];
+        const answer = await ask("apply.message", { type: "question", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "apply.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
+      // DR-21: a separate dialog; "do not agree" is the default. Agreeing holds for the next apply only.
+      confirmConsent: async (approval) => {
+        const values = { digest: approval.digest.slice(0, 12) };
+        const buttons = [dialogText(language, "consent.agree"), dialogText(language, "consent.keep")];
+        const answer = await ask("consent.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "consent.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true }, values);
+        return answer === 0;
+      },
     });
 
     const devTools = !app.isPackaged && process.env["CODARYN_GUI_DEVTOOLS"] === "1";
@@ -276,6 +294,7 @@ export function startGui(options: GuiOptions): void {
       window = null;
       workspaces.clear();
       history.clear();
+      approvals.clear();
     });
     await window.loadURL(APP_INDEX_URL);
     if (devTools) window.webContents.openDevTools({ mode: "detach" });

@@ -8,7 +8,8 @@ import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
 import { revertValue, runsValue } from "./history.js";
-import { createRunRegistry } from "./runs.js";
+import { planValue, reviewValue } from "./plans.js";
+import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostStartRunRequest, RunItemOf } from "./runs.js";
 import { modelsValue, selectedValue, settingsValue } from "./settings.js";
 import type { Shown } from "./settings.js";
@@ -40,6 +41,10 @@ export interface HostApp {
   /** GU-4: the run list (N-7) and a revert, dry run or not (N-7, AC 5.5). */
   listRuns(request: { readonly workspace: string; readonly limit: number }): Promise<unknown>;
   revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean }): Promise<unknown>;
+  /** GU-5: the plan view, its apply (DR-1, DR-2, DR-21) and a person's review (GT-D6). */
+  plan(request: { readonly settings: Record<string, unknown>; readonly runId: string }): Promise<unknown>;
+  applyPlan(request: Record<string, unknown>, observer: { onEvent(event: unknown): void }): Promise<unknown>;
+  review(request: { readonly settings: Record<string, unknown>; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -148,6 +153,16 @@ function startRunArgs(args: unknown): { workspace: string; goal: string; profile
 const RUN_LIST_LIMIT = 200;
 const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
 
+/** A review note's longest length (MAX_REVIEW_NOTE_CHARS of the contract; the CLI checks it again). */
+const MAX_NOTE_CHARS = 500;
+
+/** A profile name or null. */
+function nameArg(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !NAME.test(value)) throw new ArgsError();
+  return value;
+}
+
 function workspaceArg(args: Obj, keys: readonly string[]): string {
   if (!onlyKeys(args, keys)) throw new ArgsError();
   const workspace = args["workspace"];
@@ -178,6 +193,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
   let language: "ko" | "en" = "en";
   const runs = createRunRegistry({
     startRun: (request, observer) => deps.app.startRun(request, observer),
+    applyPlan: (request, observer) => deps.app.applyPlan(request, observer),
     itemOf: (event) => {
       let of = items.get(language);
       if (of === undefined) {
@@ -231,6 +247,34 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const { runId, dryRun } = args;
         if (typeof runId !== "string" || !RUN_ID.test(runId) || typeof dryRun !== "boolean") throw new ArgsError();
         return revertValue(await deps.app.revert({ workspace, runId, dryRun }), deps.shown);
+      }
+      case "plan": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "runId"]);
+        const profile = nameArg(args["profile"]);
+        const runId = args["runId"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
+        return planValue(await deps.app.plan({ settings: taskForm(workspace, profile), runId }), deps.shown);
+      }
+      case "applyPlan": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "planRunId", "digest", "consent", "language"]);
+        const profile = nameArg(args["profile"]);
+        const { planRunId, digest, consent, language: chosen } = args;
+        if (typeof planRunId !== "string" || !RUN_ID.test(planRunId) || typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new ArgsError();
+        if (typeof consent !== "boolean" || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
+        language = chosen;
+        return runs.startApply({ workspace, profile, planRunId, digest, consent });
+      }
+      case "review": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "runId", "decision", "note"]);
+        const profile = nameArg(args["profile"]);
+        const { runId, decision } = args;
+        const note = args["note"] ?? null;
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || (decision !== "accept" && decision !== "reject")) throw new ArgsError();
+        if (note !== null && (typeof note !== "string" || note.length > MAX_NOTE_CHARS)) throw new ArgsError();
+        return reviewValue(await deps.app.review({ settings: taskForm(workspace, profile), runId, decision, note }));
       }
       case "cancelRun": {
         if (!isObj(args) || !onlyKeys(args, ["run"]) || typeof args["run"] !== "string" || !/^[0-9a-f]{32}$/.test(args["run"])) throw new ArgsError();

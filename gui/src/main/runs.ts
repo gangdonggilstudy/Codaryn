@@ -20,6 +20,8 @@ export interface RunManagerDeps {
   readonly labels: (status: string, reason: string) => Promise<{ readonly status: string; readonly reason: string }>;
   /** Told when a run begins (true) and when it ends (false). */
   readonly onChange?: (running: boolean) => void;
+  /** Told how a run ended: its reason, or null when the end is not known (GU-5: an apply's consent). */
+  readonly onEnded?: (runId: string, reason: string | null) => void;
 }
 
 interface Active {
@@ -99,6 +101,7 @@ export class RunManager {
       payload = { runId: active.runId, ok: false, code: checked.code };
     }
     this.deps.send(IPC_EVENTS.runDone, payload);
+    this.deps.onEnded?.(active.runId, payload.ok ? payload.result.reason : null);
     active.end();
   }
 
@@ -109,6 +112,7 @@ export class RunManager {
     this.active = null;
     this.deps.onChange?.(false);
     this.deps.send(IPC_EVENTS.runDone, { runId: active.runId, ok: false, code: "adapter_host_exited" });
+    this.deps.onEnded?.(active.runId, null);
     active.end();
   }
 

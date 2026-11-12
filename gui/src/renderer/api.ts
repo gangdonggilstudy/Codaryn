@@ -11,7 +11,10 @@ import type {
   ModelsReply,
   OpenReply,
   ProfileView,
+  PlanReply,
+  PlanView,
   RecentView,
+  ReviewReply,
   RevertReply,
   RevertView,
   RunDonePayload,
@@ -45,6 +48,9 @@ export interface CodarynApi {
   listRuns(workspace: string): Promise<unknown>;
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;
+  plan(workspace: string, runId: string, profile: string | null): Promise<unknown>;
+  applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
+  review(workspace: string, runId: string, profile: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -244,4 +250,19 @@ export function asRevert(value: unknown): RevertReply {
   if (!str(view["runId"]) || !Array.isArray(view["reverted"]) || !Array.isArray(view["skipped"])) return failed(value);
   const preview = str(value["preview"]) && HEX.test(value["preview"]) ? value["preview"] : null;
   return { ok: true, view: view as unknown as RevertView, preview };
+}
+
+/** GU-5: a plan view (the main process checked it already) and the approval token its apply takes. */
+export function asPlan(value: unknown): PlanReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  if (!str(view["runId"]) || !str(view["digest"]) || !Array.isArray(view["actions"]) || (view["status"] !== "pending" && view["status"] !== "applied")) return failed(value);
+  const approval = str(value["approval"]) && HEX.test(value["approval"]) ? value["approval"] : null;
+  return { ok: true, view: view as unknown as PlanView, approval };
+}
+
+/** GU-5: a recorded review. */
+export function asReview(value: unknown): ReviewReply {
+  if (!isObj(value) || value["ok"] !== true || (value["verdict"] !== "accepted" && value["verdict"] !== "rejected")) return failed(value);
+  return { ok: true, verdict: value["verdict"], replaced: value["replaced"] === true };
 }

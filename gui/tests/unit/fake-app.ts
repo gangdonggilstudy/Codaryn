@@ -16,6 +16,9 @@ export function fakeApp(overrides: Partial<HostApp> = {}): HostApp {
     startRun: unused,
     listRuns: unused,
     revert: unused,
+    plan: unused,
+    applyPlan: unused,
+    review: unused,
     ...overrides,
   };
 }

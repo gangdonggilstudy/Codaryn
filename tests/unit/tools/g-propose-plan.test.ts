@@ -304,6 +304,20 @@ test("G-C propose_plan: without a recorder, or when storing fails, nothing is st
   }
 });
 
+test("G-C propose_plan (R-5 I-4): a digest that is not 64 lowercase hex characters is not passed on", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    for (const digest of ["", "ABC", "g".repeat(64), "A".repeat(64), `${"a".repeat(64)}\n`]) {
+      const planRecorder: PlanRecorder = { savePlan: async () => digest };
+      const outcome = await propose(fx, [{ kind: "discard", path: "a.txt" }], { planRecorder });
+      assert.equal(outcome.ok, false, JSON.stringify(digest));
+      if (!outcome.ok) assert.equal(outcome.code, "io_error");
+    }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("G-C propose_plan: a cancelled call stores nothing", async () => {
   const fx = await fixture({ "a.txt": "alpha" });
   try {

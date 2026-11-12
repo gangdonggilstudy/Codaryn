@@ -12,7 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import type { PlanExecutor, ResolvedPlanAction, Workspace } from "../../../src/contracts/index.js";
-import { createPlanExecutor } from "../../../src/tools/index.js";
+import { HARD_LINK_UNAVAILABLE_PROBLEM, createPlanExecutor } from "../../../src/tools/index.js";
 import type { PlanFileOps } from "../../../src/tools/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 
@@ -176,31 +176,77 @@ test("G-C executor: the link step refuses an existing destination even when the 
   }
 });
 
-test("G-C executor: where hard links are not supported it falls back to a checked rename", async () => {
+test("G-C executor (R-5 E9, DR-18 b): without hard links a file created in the window is not replaced", async () => {
   const fx = await fixture({ "a.txt": "alpha" });
   try {
+    // E9: link is refused (a volume without hard links), and someone creates the destination
+    // between the existence check and a rename. Before DR-18 the rename replaced that file.
     let renames = 0;
     const fileOps: Partial<PlanFileOps> = {
       link: () => Promise.reject(errno("EPERM")),
       rename: async (from, to) => {
         renames += 1;
+        await fs.writeFile(to, "created in the window", "utf8");
         await fs.rename(from, to);
       },
     };
     const outcome = await executor(fx, fileOps).apply(move("a.txt", "b.txt", "alpha"), 0, never);
-    assert.equal(outcome.ok, true);
-    assert.equal(renames, 1);
-    assert.equal(await read(fx.root, "b.txt"), "alpha");
-    assert.equal(await read(fx.root, "a.txt"), null);
+    assert.deepEqual(outcome, { ok: false, problem: HARD_LINK_UNAVAILABLE_PROBLEM });
+    assert.equal(renames, 0, "no rename that could replace a file");
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), null);
   } finally {
     await fx.cleanup();
   }
 });
 
-test("G-C executor: a source that cannot be unlinked is taken back to one name and renamed", async () => {
+test("G-C executor (DR-18 b): every 'no hard link here' code stops the move; other link errors are io_error", async () => {
+  for (const [code, problem] of [
+    ["EPERM", HARD_LINK_UNAVAILABLE_PROBLEM],
+    ["ENOTSUP", HARD_LINK_UNAVAILABLE_PROBLEM],
+    ["EOPNOTSUPP", HARD_LINK_UNAVAILABLE_PROBLEM],
+    ["ENOSYS", HARD_LINK_UNAVAILABLE_PROBLEM],
+    ["EMLINK", HARD_LINK_UNAVAILABLE_PROBLEM],
+    ["EINVAL", HARD_LINK_UNAVAILABLE_PROBLEM],
+    ["EACCES", "io_error"],
+    ["EIO", "io_error"],
+  ] as const) {
+    const fx = await fixture({ "a.txt": "alpha" });
+    try {
+      const fileOps: Partial<PlanFileOps> = {
+        link: () => Promise.reject(errno(code)),
+        rename: () => Promise.reject(new Error("rename must not be called")),
+      };
+      assert.deepEqual(await executor(fx, fileOps).apply(move("a.txt", "b.txt", "alpha"), 0, never), { ok: false, problem }, code);
+      assert.equal(await read(fx.root, "a.txt"), "alpha", code);
+    } finally {
+      await fx.cleanup();
+    }
+  }
+});
+
+test("G-C executor (DR-18 b): a discard on a volume without hard links also stops and keeps the file", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    const fileOps: Partial<PlanFileOps> = {
+      link: () => Promise.reject(errno("ENOTSUP")),
+      rename: () => Promise.reject(new Error("rename must not be called")),
+    };
+    assert.deepEqual(await executor(fx, fileOps).apply(discard("a.txt", "alpha"), 0, never), {
+      ok: false,
+      problem: HARD_LINK_UNAVAILABLE_PROBLEM,
+    });
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C executor (DR-18 b): a source that cannot be unlinked is taken back to one name and not moved", async () => {
   const fx = await fixture({ "a.txt": "alpha" });
   try {
     let refused = false;
+    let renames = 0;
     const fileOps: Partial<PlanFileOps> = {
       unlink: async (target) => {
         if (!refused && target.endsWith(`${path.sep}a.txt`)) {
@@ -209,11 +255,41 @@ test("G-C executor: a source that cannot be unlinked is taken back to one name a
         }
         await fs.unlink(target);
       },
+      rename: async (from, to) => {
+        renames += 1;
+        await fs.rename(from, to);
+      },
     };
     const outcome = await executor(fx, fileOps).apply(move("a.txt", "b.txt", "alpha"), 0, never);
-    assert.equal(outcome.ok, true);
-    assert.equal(await read(fx.root, "a.txt"), null);
-    assert.equal(await read(fx.root, "b.txt"), "alpha");
+    assert.deepEqual(outcome, { ok: false, problem: "io_error" });
+    assert.equal(renames, 0);
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), null, "the second name was taken back");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("G-C executor (R-5 I-5): an edit between the hash and the move is caught by the last look", async () => {
+  const fx = await fixture({ "a.txt": "alpha" });
+  try {
+    const source = path.join(fx.root, "a.txt");
+    let sourceLooks = 0;
+    const fileOps: Partial<PlanFileOps> = {
+      async lstat(target) {
+        const stat = await fs.lstat(target, { bigint: true });
+        if (target === source) {
+          sourceLooks += 1;
+          // The two looks of the source check see the file as hashed; the last look sees it grown.
+          if (sourceLooks === 3) Object.defineProperty(stat, "size", { value: stat.size + 1n });
+        }
+        return stat;
+      },
+    };
+    const outcome = await executor(fx, fileOps).apply(move("a.txt", "b.txt", "alpha"), 0, never);
+    assert.deepEqual(outcome, { ok: false, problem: "source_changed" });
+    assert.equal(await read(fx.root, "a.txt"), "alpha");
+    assert.equal(await read(fx.root, "b.txt"), null);
   } finally {
     await fx.cleanup();
   }

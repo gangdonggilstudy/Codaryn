@@ -204,6 +204,13 @@ export const CLI_ERROR_EXIT_CODES = {
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
   invalid_run_record: 2,
   /**
+   * G-A (R-9c C-1), `codaryn revert --run <apply runId>`: the plan run that apply used
+   * (`apply_started.planRunId`) has no directory or no plan.json any more. The real paths of the
+   * apply's files are known only from that plan (DR-24 f), so nothing was changed. A plan run must
+   * be kept while its apply may be reverted.
+   */
+  plan_run_missing: 2,
+  /**
    * G-A, `codaryn plan`, `codaryn apply`: the run has no stored plan (it did not end as
    * `plan_pending`), or the task given to `apply` does not resolve to `plan: "apply"`. Nothing was
    * changed.
@@ -217,6 +224,14 @@ export const CLI_ERROR_EXIT_CODES = {
   plan_not_approved: 2,
   /** G-A, `codaryn apply`: the plan was already applied (applied.json exists). Nothing was changed. */
   plan_already_applied: 2,
+  /**
+   * DR-28 (R-11 M-1), `codaryn plan`, `codaryn apply` and the app layer: the secrets registered now
+   * mask the plan's paths differently from the plan run (planActionShownMatches is false for an
+   * action), or the plan was stored without its masked form. Checked right after the plan is
+   * loaded: nothing was shown, asked, recorded or moved. Use the same task form, and so the same
+   * secrets, as the plan run, or make the plan again.
+   */
+  plan_secrets_differ: 2,
   /** G-A, `codaryn review`: the run did not end as `needs-input`/`awaiting_review`. Nothing was written. */
   run_not_awaiting_review: 2,
   internal_error: 70,

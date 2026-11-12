@@ -12,6 +12,7 @@
  * directory; nothing removes them automatically. Delete it once the run is no longer needed.
  */
 
+import type { CliErrorCode } from "./engine.js";
 import type { ApprovalChannel } from "./plan.js";
 import type { RawText } from "./text.js";
 import type { ResolvedPath } from "./workspace.js";
@@ -191,6 +192,17 @@ export interface RevertOutcome {
 }
 
 /**
+ * The codes `revertRun` rejects with (an error carrying one of them as `code`), always before it
+ * changes anything, also with `dryRun`. The CLI prints each as CliErrorOutput with that code:
+ * - run_not_found: the workspace has no journal for that run
+ * - invalid_run_record: the run's records cannot be read or parsed, or fail a check
+ * - plan_run_missing (R-9c C-1): an apply run whose plan run (`apply_started.planRunId`) has no
+ *   directory or no plan.json any more, so its files' real paths are not known
+ */
+export const REVERT_ERROR_CODES = ["run_not_found", "invalid_run_record", "plan_run_missing"] as const satisfies readonly CliErrorCode[];
+export type RevertErrorCode = (typeof REVERT_ERROR_CODES)[number];
+
+/**
  * Signature of `revertRun`, exported by `src/store/index.ts`.
  *
  * - Reads `<root>/.codaryn/runs/<runId>/journal.jsonl`. Every distinct path of its
@@ -206,8 +218,8 @@ export interface RevertOutcome {
  *   token therefore shows up twice: masked as `missing_snapshot`, unmasked as `missing_record`.
  * - A last journal line that was cut off (no final LF, not parseable) is ignored (T-10).
  * - A failure on one file is reported for that file and the others continue. It rejects only
- *   when the journal cannot be read or another line cannot be parsed, and then nothing was
- *   changed.
+ *   when the journal cannot be read or another line cannot be parsed, or (an apply run) its plan
+ *   cannot be used, and then nothing was changed. The codes are REVERT_ERROR_CODES.
  * - The caller holds the workspace lock while it runs. Nothing is written to the run's journal.
  * - With `dryRun` (N-7) the same decisions are made and reported, and nothing is changed; the
  *   caller takes no lock. Errors are the same.
@@ -221,7 +233,9 @@ export interface RevertOutcome {
  *     plan.json (StoredPlan.actions, by `index`). Before any of it is used, the SHA-256 of
  *     plan.json's bytes must equal the apply journal's `apply_started.digest`, and the plan must
  *     name `apply_started.planRunId`; otherwise the revert rejects as `invalid_run_record` and
- *     changes nothing (also with `dryRun`). Each record's `sha256` must equal the plan action's.
+ *     changes nothing (also with `dryRun`). R-9c C-1: when the plan run's directory or its
+ *     plan.json does not exist at all, it rejects as `plan_run_missing` instead, so the person
+ *     learns the cause (a deleted plan run), not "damaged records". Each record's `sha256` must equal the plan action's.
  *   - DR-24 (a): a discarded file is read only at `.codaryn/discarded/<runId>/<stored>`, where the
  *     discarded directory and the run's directory in it are plain directories (not links) and
  *     `stored` is one segment matching DISCARDED_STORED_NAME_PATTERN_SOURCE and equal to the

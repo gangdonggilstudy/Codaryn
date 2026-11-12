@@ -15,7 +15,7 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MAX_RUN_ITEM_CHARS, MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
-import { loopbackOnlyFetch } from "./transport.js";
+import { guardGlobalFetch, loopbackOnlyFetch } from "./transport.js";
 import type { HostApp, HostMessages } from "./host.js";
 import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
@@ -144,10 +144,11 @@ async function main(): Promise<number> {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
-  // R21-I-3: tests reach this machine only (their fake API); nothing else is sent.
-  const hooks = args.loopbackOnly
-    ? { anthropicDeps: { fetch: loopbackOnlyFetch(fetch, () => log("codaryn engine host: the test transport refused a request outside this machine")) } }
-    : undefined;
+  // R21-I-3, R21b-I-1: tests reach this machine only (their fake API); nothing else is sent, by any
+  // provider: the global fetch (taken by providers given none) and Anthropic's own are guarded.
+  const refused = (): void => log("codaryn engine host: the test transport refused a request outside this machine");
+  if (args.loopbackOnly) guardGlobalFetch(globalThis, refused);
+  const hooks = args.loopbackOnly ? { anthropicDeps: { fetch: loopbackOnlyFetch(fetch, refused) } } : undefined;
   const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment(), hooks);
   // R21-I-2: the key variables of every provider the contract knows (API_PROVIDERS), not one name.
   const contracts = (await import(pathToFileURL(join(engineDir, "contracts", "index.js")).href)) as Record<string, unknown>;
@@ -157,6 +158,16 @@ async function main(): Promise<number> {
       ? Object.values(table).flatMap((spec) => (typeof spec === "object" && spec !== null && typeof (spec as Record<string, unknown>)["keyEnv"] === "string" ? [(spec as Record<string, string>)["keyEnv"] as string] : []))
       : [];
   if (!keyEnvs.includes("ANTHROPIC_API_KEY")) keyEnvs.push("ANTHROPIC_API_KEY");
+  // The settings screen's providers: the table's names and variable names, in its order.
+  const apiProviders =
+    typeof table === "object" && table !== null
+      ? Object.entries(table).flatMap(([name, spec]) => {
+          const record = typeof spec === "object" && spec !== null ? (spec as Record<string, unknown>) : {};
+          const keyEnv = record["keyEnv"];
+          const modelEnv = record["modelEnv"];
+          return /^[a-z][a-z0-9_-]{0,31}$/.test(name) && typeof keyEnv === "string" && typeof modelEnv === "string" ? [{ name, keyEnv, modelEnv }] : [];
+        })
+      : [];
   /** Key shapes, and the value of every provider's key variable now set, hidden. */
   const hideAllKeys = (text: string): string => {
     let out = textSafety.hideKeys(text, null);
@@ -199,7 +210,7 @@ async function main(): Promise<number> {
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
   const envSet = (name: string): boolean => (process.env[name] ?? "").length > 0;
-  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, providers, itemsIn, token, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, apiProviders, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

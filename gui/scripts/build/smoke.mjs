@@ -31,8 +31,8 @@ const rootDist = join(gui, "..", "dist");
 const fromRoot = (...parts) => import(pathToFileURL(join(rootDist, ...parts)).href);
 const fakeApi = await fromRoot("tests", "support", "fake-anthropic.js");
 const fakeModels = await fromRoot("tests", "support", "fake-models.js");
-const { FAKE_API_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
-const { ANTHROPIC_API_KEY_ENV } = await fromRoot("src", "contracts", "index.js");
+const { FAKE_API_KEY, FAKE_OPENAI_KEY } = await fromRoot("tests", "fixtures", "secrets.js");
+const { ANTHROPIC_API_KEY_ENV, API_PROVIDERS } = await fromRoot("src", "contracts", "index.js");
 const closeFake = [];
 // Model answers in order: a run that creates a file and ends; a run that hangs (cancelled from the
 // window); a run that hangs (cancelled by closing the window).
@@ -89,12 +89,18 @@ try {
 const env = {};
 for (const [name, value] of Object.entries(process.env)) {
   if (value === undefined) continue;
-  if (/^(ANTHROPIC_API_KEY|CODARYN_CONFIG|CODARYN_LANG|CODARYN_MODEL|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|npm_node_execpath)$/i.test(name)) continue;
+  // Every provider's key, model and address variable of this machine stays out, and every Codaryn variable.
+  const providerVariables = Object.values(API_PROVIDERS).flatMap((spec) => [spec.keyEnv, spec.modelEnv, spec.baseUrlEnv]);
+  if (providerVariables.some((known) => known.toUpperCase() === name.toUpperCase())) continue;
+  if (/^(ANTHROPIC_API_KEY|OPENAI_API_KEY|CODARYN_[A-Z0-9_]+|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|npm_node_execpath)$/i.test(name)) continue;
   env[name] = value;
 }
 env.CODARYN_CONFIG = configFile;
 // The fixtures' fake key, as the root tests set it (tests/support/cli.ts).
 env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
+// The fixtures' fake OpenAI key: the settings screen shows that it is set, never its value. Runs here
+// stay on anthropic; the engine host's test transport reaches this machine only, for every provider.
+env[API_PROVIDERS.openai.keyEnv] = FAKE_OPENAI_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
 
@@ -234,6 +240,14 @@ const expected = [
       JSON.stringify(v.secretEnv) === "[]",
   ],
   ["settingsChangeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes("smoke-config")],
+  // PM task (2): the provider choice; keys set or not by name, never a value; the list only for the provider in use.
+  ["providerRows", (v) => JSON.stringify(v) === JSON.stringify([["anthropic", "set"], ["openai", "set"]])],
+  ["providerInUse", (v) => v === "anthropic"],
+  ["providerProposal", (v) => v === "ready"],
+  ["providerOpenai", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "openai", lists: 0, noList: true })],
+  ["providerBack", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "anthropic", lists: 1, noList: false })],
+  ["providerText", (v) => typeof v === "string" && v.includes(API_PROVIDERS.openai.keyEnv) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(FAKE_API_KEY)],
+  ["providerOnDisk", (v) => v === "anthropic"],
   ["configModel", (v) => v === "fake-model-b"],
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [

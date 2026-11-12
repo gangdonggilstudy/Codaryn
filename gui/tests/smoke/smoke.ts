@@ -384,6 +384,33 @@ startGui({
       })();
       results["settingsChangeText"] = await js("document.getElementById('settings')?.textContent ?? ''");
 
+      // 5k. PM task (2): the provider choice. The providers come from the contract's table; a key shows
+      // set or not by its variable's name. Switched to openai and back (later runs use anthropic).
+      await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+      await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+      results["providerRows"] = await js("[...document.querySelectorAll('#settings-provider li[data-provider]')].map((li) => [li.getAttribute('data-provider'), li.getAttribute('data-key')])");
+      results["providerInUse"] = await js("document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null");
+      const inUse =
+        "(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? { inUse: document.getElementById('settings-provider-current')?.getAttribute('data-provider') ?? null, lists: document.querySelectorAll('[data-list-models]').length, noList: document.getElementById('settings-model-no-list') !== null } : null; })()";
+      const choose = (name: string): string =>
+        `(() => { const c = document.getElementById('settings-provider-choice'); c.value = ${JSON.stringify(name)}; document.getElementById('settings-provider-change').click(); return true; })()`;
+      await js(choose("openai"));
+      results["providerProposal"] = await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["providerOpenai"] = await waitFor(inUse);
+      results["providerText"] = await js("document.getElementById('settings')?.textContent ?? ''");
+      await js(choose("anthropic"));
+      await proposal();
+      await js("document.getElementById('settings-write')?.click(); true");
+      results["providerBack"] = await waitFor(inUse);
+      results["providerOnDisk"] = (() => {
+        try {
+          return (JSON.parse(readFileSync(process.env["CODARYN_CONFIG"] ?? "", "utf8")) as { provider?: string }).provider ?? null;
+        } catch {
+          return "unreadable";
+        }
+      })();
+
       // 6. What the page can and cannot do.
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",

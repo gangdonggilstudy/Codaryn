@@ -34,3 +34,13 @@ export function loopbackOnlyFetch(real: typeof fetch, refused: () => void): type
   };
   return guarded as typeof fetch;
 }
+
+/**
+ * R21b-I-1: the same guard on the global `fetch`. The app layer hands a `fetch` to Anthropic's
+ * transport only (anthropicDeps); another provider's adapter (OpenAI's) takes `globalThis.fetch`
+ * when given none. Guarding the global one too keeps every provider, present and later, on this
+ * machine in tests.
+ */
+export function guardGlobalFetch(target: { fetch: typeof fetch }, refused: () => void): void {
+  target.fetch = loopbackOnlyFetch(target.fetch.bind(target), refused);
+}

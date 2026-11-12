@@ -95,8 +95,48 @@ function rulesView(config: Obj | null, shown: Shown, envSet: (name: string) => b
   };
 }
 
+/** One API provider of the contract's table (API_PROVIDERS): its name and its variables' names. */
+export interface ApiProviderEntry {
+  readonly name: string;
+  readonly keyEnv: string;
+  readonly modelEnv: string;
+}
+
+/** Where the config keeps a provider's model (as `codaryn models --use` writes it): anthropic's top-level unless `providers.anthropic` is given. */
+function providerModel(config: Obj | null, name: string): string | null {
+  const entry = own(own(config, "providers"), name);
+  const model = isObj(entry) ? entry["model"] : name === "anthropic" ? own(config, "model") : undefined;
+  return typeof model === "string" && model.trim().length > 0 ? model : null;
+}
+
+/**
+ * Each provider of the table as the settings screen shows it: the key variable's name and whether
+ * it is set now (never its value), the model the config keeps for it and whether its model
+ * variable overrides that, and whether the app layer lists its models (CONNECTED_MODEL_PROVIDERS).
+ */
+function apiProvidersView(config: Obj | null, table: readonly ApiProviderEntry[], listable: readonly string[], shown: Shown, envSet: (name: string) => boolean): Obj[] {
+  return table.map((entry) => {
+    const model = providerModel(config, entry.name);
+    return {
+      name: entry.name,
+      keyEnv: entry.keyEnv,
+      keySet: envSet(entry.keyEnv),
+      modelEnv: entry.modelEnv,
+      modelEnvSet: envSet(entry.modelEnv),
+      model: model === null ? null : shown(model),
+      listable: listable.includes(entry.name),
+    };
+  });
+}
+
 /** `readSettings` → `{ok, view}` (see SettingsView in src/shared/ipc.ts) or a failure. */
-export function settingsValue(outcome: unknown, shown: Shown, providers: readonly string[], envSet: (name: string) => boolean = () => false): Obj | HostFailure {
+export function settingsValue(
+  outcome: unknown,
+  shown: Shown,
+  providers: readonly string[],
+  envSet: (name: string) => boolean = () => false,
+  table: readonly ApiProviderEntry[] = [],
+): Obj | HostFailure {
   const view = outputOf(outcome);
   if (view === null) return failureOf(outcome);
   const file = view["file"];
@@ -125,6 +165,10 @@ export function settingsValue(outcome: unknown, shown: Shown, providers: readonl
       keyAvailable: view["keyAvailable"] === true,
       providers: [...providers],
       rules: rulesView(config, shown, envSet),
+      // SP-D3: the config's provider when it names one of the table; null: none (the CLI then uses anthropic).
+      provider: typeof own(config, "provider") === "string" && table.some((entry) => entry.name === own(config, "provider")) ? (own(config, "provider") as string) : null,
+      defaultProvider: table.some((entry) => entry.name === "anthropic") ? "anthropic" : (table[0]?.name ?? null),
+      apiProviders: apiProvidersView(config, table, providers, shown, envSet),
     },
   };
 }

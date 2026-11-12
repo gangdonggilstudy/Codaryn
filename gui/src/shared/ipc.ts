@@ -270,6 +270,42 @@ export interface SettingsView {
   readonly env: { readonly model: boolean; readonly language: boolean };
   /** GU-6: the config file's own rules (3.10): limits, command rules as text, protected paths, secret names. */
   readonly rules: SettingsRules;
+  /** SP-D3: the provider the config names (null: none, so `defaultProvider` is used). */
+  readonly provider: string | null;
+  readonly defaultProvider: string | null;
+  /** The contract's API providers, in its order (DR-22: no name is written into the screens). */
+  readonly apiProviders: readonly ApiProviderView[];
+}
+
+export interface ApiProviderView {
+  readonly name: string;
+  /** The key variable's name and whether it is set now; never its value (C-1, N-10). */
+  readonly keyEnv: string;
+  readonly keySet: boolean;
+  /** The model variable's name and whether it is set now (it overrides the config's model). */
+  readonly modelEnv: string;
+  readonly modelEnvSet: boolean;
+  /** The model the config keeps for this provider. */
+  readonly model: string | null;
+  /** Whether the app layer lists this provider's models (CONNECTED_MODEL_PROVIDERS). */
+  readonly listable: boolean;
+}
+
+const PROVIDER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+const ENV_NAME_TEXT = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+function toApiProviders(value: unknown): ApiProviderView[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 16) return null;
+  const out: ApiProviderView[] = [];
+  for (const item of value) {
+    if (!isObj(item) || !hasOnlyKeys(item, ["name", "keyEnv", "keySet", "modelEnv", "modelEnvSet", "model", "listable"])) return null;
+    const { name, keyEnv, keySet, modelEnv, modelEnvSet, model, listable } = item;
+    if (typeof name !== "string" || !PROVIDER_NAME.test(name) || typeof keyEnv !== "string" || !ENV_NAME_TEXT.test(keyEnv) || typeof modelEnv !== "string" || !ENV_NAME_TEXT.test(modelEnv)) return null;
+    if (typeof keySet !== "boolean" || typeof modelEnvSet !== "boolean" || typeof listable !== "boolean" || !(model === null || shortText(model))) return null;
+    out.push({ name, keyEnv, keySet, modelEnv, modelEnvSet, model: model as string | null, listable });
+  }
+  return out;
 }
 
 export interface SettingsRules {
@@ -331,6 +367,10 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
   const { file, model, language, profiles, workflows, keyAvailable, providers } = view;
   const rules = toRules(view["rules"]);
   if (rules === null) return fail;
+  const apiProviders = toApiProviders(view["apiProviders"]);
+  const provider = view["provider"] ?? null;
+  const defaultProvider = view["defaultProvider"] ?? null;
+  if (apiProviders === null || !(provider === null || (typeof provider === "string" && PROVIDER_NAME.test(provider))) || !(defaultProvider === null || (typeof defaultProvider === "string" && PROVIDER_NAME.test(defaultProvider)))) return fail;
   let fileView: SettingsView["file"] = null;
   if (file !== null) {
     if (!isObj(file) || !shortText(file["display"]) || typeof file["exists"] !== "boolean") return fail;
@@ -359,6 +399,9 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
       providers,
       env,
       rules,
+      provider: provider as string | null,
+      defaultProvider: defaultProvider as string | null,
+      apiProviders,
     },
   };
 }

@@ -8,6 +8,10 @@
  *   only the main process's token. When the change widens, the main process asks in an OS dialog
  *   whose default is "do not write"; this screen's notice is not the confirmation.
  * - Secret variables are names only; there is no value field (S-3).
+ * - Providers come from the contract's table through the engine host (DR-22): the screen shows each
+ *   one's key variable (set or not, never its value) and model, and the person chooses the one the
+ *   config names. The model list is fetched for the provider in use only, and only for a provider
+ *   the app layer lists (the app layer's list follows the config's provider).
  * - The model list asks the provider's API, so it is fetched only when the person presses the
  *   button, and the button says so (Y-2). A model is chosen by the entry id the list gave out.
  * - Provider names come from the app layer (DR-22); this file names none.
@@ -183,6 +187,53 @@ function secretsSection(t: Texts, rules: SettingsRules, propose: Propose, warn: 
   return box;
 }
 
+/** The provider runs use now: the one the config names, else the CLI's default. */
+function providerInUse(view: SettingsView): string | null {
+  return view.provider ?? view.defaultProvider;
+}
+
+function providerSection(t: Texts, view: SettingsView, propose: Propose | null): HTMLElement {
+  const box = section("settings-provider", t.format("settings.provider"));
+  const inUse = providerInUse(view);
+  box.append(
+    el("p", t.format(view.provider === null ? "settings.providerDefault" : "settings.providerChosen", { provider: inUse ?? "-" }), {
+      id: "settings-provider-current",
+      "data-provider": inUse ?? "none",
+    }),
+  );
+  const list = el("ul", undefined, { class: "providers" });
+  for (const provider of view.apiProviders) {
+    const row = el("li", undefined, { "data-provider": provider.name, "data-key": provider.keySet ? "set" : "missing" });
+    if (provider.name === inUse) row.setAttribute("aria-current", "true");
+    row.append(el("h4", provider.name, { lang: "en" }));
+    const facts = el("ul", undefined, { class: "facts" });
+    facts.append(
+      el("li", t.format(provider.keySet ? "settings.providerKeySet" : "settings.providerKeyMissing", { env: provider.keyEnv })),
+      el("li", provider.model === null ? t.format("settings.providerNoModel") : t.format("settings.providerModel", { model: provider.model })),
+    );
+    if (provider.modelEnvSet) facts.append(el("li", t.format("settings.providerModelEnv", { env: provider.modelEnv })));
+    if (!provider.listable) facts.append(el("li", t.format("settings.providerNoList", { provider: provider.name }), { "data-no-list": provider.name }));
+    row.append(facts);
+    list.append(row);
+  }
+  box.append(list);
+  if (propose !== null && view.apiProviders.length > 0) {
+    const choice = el("select", undefined, { id: "settings-provider-choice" });
+    for (const provider of view.apiProviders) {
+      const option = el("option", provider.name, { value: provider.name, lang: "en" });
+      if (provider.name === inUse) option.setAttribute("selected", "");
+      choice.append(option);
+    }
+    choice.value = inUse ?? "";
+    box.append(
+      labelled("settings-provider-choice", t.format("settings.providerChoice"), choice),
+      button(t.format("settings.propose"), () => propose({ op: "provider", value: choice.value }), { id: "settings-provider-change" }),
+      el("p", t.format("settings.providerNotice"), { class: "notice" }),
+    );
+  }
+  return box;
+}
+
 function general(t: Texts, view: SettingsView, language: "ko" | "en", propose?: Propose): HTMLElement {
   const box = section("settings-general", t.format("settings.general"));
   const file = view.file;
@@ -292,11 +343,17 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         const view = reply.view;
 
         const model = section("settings-model", t.format("settings.model"));
-        const current = el("p", view.model === null ? t.format("settings.modelNone") : t.format("settings.modelCurrent", { model: view.model }), { id: "settings-model-current" });
+        const inUse = providerInUse(view);
+        const inUseView = view.apiProviders.find((provider) => provider.name === inUse) ?? null;
+        const currentModel = inUseView === null ? view.model : inUseView.model;
+        const current = el("p", currentModel === null ? t.format("settings.modelNone") : t.format("settings.modelCurrent", { model: currentModel }), { id: "settings-model-current" });
         model.append(current);
-        if (view.env.model) model.append(el("p", t.format("settings.modelEnv")));
+        if (inUseView === null ? view.env.model : inUseView.modelEnvSet) model.append(el("p", inUseView === null ? t.format("settings.modelEnv") : t.format("settings.providerModelEnv", { env: inUseView.modelEnv })));
         const outcome = el("div", undefined, { id: "settings-model-outcome", role: "status" });
-        for (const provider of view.providers) {
+        // The app layer's list follows the config's provider, so only the provider in use is listed here.
+        const listed = view.providers.filter((provider) => inUse === null || provider === inUse);
+        if (inUse !== null && listed.length === 0) model.append(el("p", t.format("settings.providerNoList", { provider: inUse }), { class: "notice", id: "settings-model-no-list" }));
+        for (const provider of listed) {
           const list = el("ol", undefined, { class: "models", "data-provider": provider });
           const fetch = button(t.format("settings.listModels", { provider }), () => {
             void (async () => {
@@ -370,7 +427,7 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         key.append(el("p", t.format("settings.keyHow")));
 
         const editable = view.file !== null && view.file.exists;
-        const sections = [general(t, view, deps.language, propose), model, profiles, workflows];
+        const sections = [general(t, view, deps.language, propose), providerSection(t, view, editable ? propose : null), model, profiles, workflows];
         if (editable) sections.push(rulesSection(t, view.rules, propose, warn), secretsSection(t, view.rules, propose, warn));
         else sections.push(el("p", t.format("settings.createFirst"), { class: "notice", id: "settings-create-first" }));
         body.replaceChildren(proposal, ...sections, key);

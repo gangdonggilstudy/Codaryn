@@ -27,7 +27,8 @@ const ENGINE_BUILT = existsSync(path.join(ENGINE_DIR, "app", "index.js"));
 function testEnv(dir: string, extra: Record<string, string> = {}): Record<string, string> {
   const env = hostEnvironment(process.env);
   for (const name of Object.keys(env)) {
-    if (/^(ANTHROPIC_API_KEY|CODARYN_CONFIG|CODARYN_LANG|CODARYN_MODEL)$/i.test(name)) delete env[name];
+    // Every provider key and every Codaryn variable (models, addresses, config, language) of this machine stays out.
+    if (/^(ANTHROPIC_API_KEY|OPENAI_API_KEY|CODARYN_[A-Z0-9_]+)$/i.test(name)) delete env[name];
   }
   return { ...env, CODARYN_CONFIG: path.join(dir, "no-config.json"), ...extra };
 }
@@ -395,6 +396,51 @@ test("host process (R-10 L-2): a host whose stdin closes during a slow call ends
     const took = Date.now() - begin;
     assert.equal(host.exited, true);
     assert.ok(took < 3_000, `the host ended ${took} ms after its stdin closed, not after the 6 s call`);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("host process (R21b-I-1): with the test transport a run with the OpenAI provider cannot reach any other machine either", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
+  const { dir, cleanup } = await tempDir();
+  try {
+    // The app layer hands only Anthropic's transport a `fetch` (anthropicDeps); OpenAI's adapter
+    // takes the global one. A documentation address (TEST-NET-1): without the guard the request
+    // waits for its 20 s limit; with it, it is refused before it is sent.
+    const workspace = path.join(dir, "ws");
+    await fs.mkdir(workspace);
+    const config = path.join(dir, "config.json");
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        schemaVersion: 1,
+        provider: "openai",
+        providers: { openai: { model: "fake-model", maxOutputTokens: 64, apiBaseUrl: "https://192.0.2.1/v1", requestTimeoutMs: 20_000, maxRetries: 0 } },
+        limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: 10_000, maxDurationMs: 60_000 },
+      }),
+    );
+    const secrets = (await import(pathToFileURL(path.join(GUI, "..", "dist", "tests", "fixtures", "secrets.js")).href)) as { FAKE_OPENAI_KEY: string };
+    const contracts = (await import(pathToFileURL(path.join(ENGINE_DIR, "contracts", "index.js")).href)) as { API_PROVIDERS: { openai: { keyEnv: string } } };
+    const env = { ...testEnv(dir), CODARYN_CONFIG: config, [contracts.API_PROVIDERS.openai.keyEnv]: secrets.FAKE_OPENAI_KEY };
+    const host = await started(options(dir, { env }));
+    try {
+      const done = new Promise<unknown>((resolve) =>
+        host.onRunMessage((message) => {
+          if (message.type === "done") resolve(message.outcome);
+        }),
+      );
+      const begin = Date.now();
+      const answer = await host.call("startRun", { workspace: await fs.realpath(workspace), goal: "Say hello.", profile: null, workflowRef: null, language: "en" }, 30_000);
+      assert.equal(answer.ok, true, JSON.stringify(answer));
+      assert.equal((answer as { value: { ok: boolean } }).value.ok, true, `the run started: ${JSON.stringify(answer)}`);
+      const outcome = await Promise.race([done, new Promise((resolve) => setTimeout(() => resolve("timeout"), 40_000))]);
+      const took = Date.now() - begin;
+      assert.notEqual(outcome, "timeout", "the run ended");
+      assert.ok(took < 8_000, `refused at once, not after the request's time limit (${took} ms): ${JSON.stringify(outcome).slice(0, 300)}`);
+      assert.match(JSON.stringify(outcome), /model_error/, "the run ended as a model error");
+    } finally {
+      await host.close();
+    }
   } finally {
     await cleanup();
   }

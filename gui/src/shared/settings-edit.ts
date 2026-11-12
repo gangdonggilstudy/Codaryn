@@ -21,6 +21,8 @@ export type LimitKey = (typeof LIMIT_KEYS)[number];
 
 export type SettingsEdit =
   | { readonly op: "language"; readonly value: "ko" | "en" | null }
+  /** The config's `provider` (null: none named, the CLI's default). The engine host checks the name against the contract's table. */
+  | { readonly op: "provider"; readonly value: string | null }
   | { readonly op: "limit"; readonly key: LimitKey; readonly value: number | null }
   | { readonly op: "addCommand"; readonly executable: string; readonly argsPrefix: readonly string[]; readonly allowExtraArgs: boolean }
   | { readonly op: "removeCommand"; readonly index: number; readonly shown: string }
@@ -32,6 +34,7 @@ export type SettingsEdit =
 const PLAIN = /^[^\u0000-\u001f\u007f]{1,200}$/;
 const PATH = /^[^\u0000-\u001f\u007f]{1,1024}$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const PROVIDER = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_ARGS = 20;
 const MAX_LIMIT = 1_000_000_000;
 
@@ -45,6 +48,8 @@ export function parseSettingsEdit(value: unknown): SettingsEdit | null {
   switch (v["op"]) {
     case "language":
       return only(v, ["op", "value"]) && (v["value"] === "ko" || v["value"] === "en" || v["value"] === null) ? { op: "language", value: v["value"] } : null;
+    case "provider":
+      return only(v, ["op", "value"]) && (v["value"] === null || (typeof v["value"] === "string" && PROVIDER.test(v["value"]))) ? { op: "provider", value: v["value"] } : null;
     case "limit": {
       const key = v["key"];
       const limit = v["value"];
@@ -106,6 +111,10 @@ export function applySettingsEdit(config: unknown, edit: SettingsEdit, shown: Sh
     case "language":
       if (edit.value === null) delete next["language"];
       else next["language"] = edit.value;
+      break;
+    case "provider":
+      if (edit.value === null) delete next["provider"];
+      else next["provider"] = edit.value;
       break;
     case "limit": {
       if (!isObj(next["limits"])) next["limits"] = {};

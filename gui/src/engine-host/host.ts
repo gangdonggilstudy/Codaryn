@@ -13,6 +13,7 @@ import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
 import { modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
+import type { ApiProviderEntry } from "./settings.js";
 import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
 import type { Shown } from "./settings.js";
 
@@ -80,6 +81,8 @@ export interface HostDeps {
   readonly providers: readonly string[];
   /** GU-6: whether an environment variable is set now (never its value); absent: none is. */
   readonly envSet?: (name: string) => boolean;
+  /** The contract's API provider table (API_PROVIDERS): names and variable names. Absent: none. */
+  readonly apiProviders?: readonly ApiProviderEntry[];
   /** GU-3: how a run's events become progress items, in the window's language. */
   readonly itemsIn: (language: "ko" | "en") => RunItemOf;
   /** GU-3: a new run token (128 random bits as hex). */
@@ -239,7 +242,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         return deps.tree(treeArgs(args));
       case "settings":
         noArgs(args);
-        return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers, deps.envSet);
+        return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers, deps.envSet, deps.apiProviders);
       case "listModels": {
         const { provider } = providerArg(args, deps.providers, ["provider"]);
         return modelsValue(provider, await deps.app.listModels({ provider, configPath: null, varsFile: null }), deps.shown);
@@ -303,6 +306,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         if (!isObj(args) || !onlyKeys(args, ["edit"])) throw new ArgsError();
         const edit = parseSettingsEdit(args["edit"]);
         if (edit === null) throw new ArgsError();
+        if (edit.op === "provider" && edit.value !== null && !(deps.apiProviders ?? []).some((entry) => entry.name === edit.value)) throw new ArgsError();
         const read = await deps.app.readSettings({ configPath: null });
         const output = isObj(read) && read["ok"] === true && isObj(read["output"]) ? read["output"] : null;
         if (output === null) return { ok: false, code: "settings_unreadable" };

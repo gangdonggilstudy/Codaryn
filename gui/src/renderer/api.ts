@@ -31,6 +31,7 @@ import type {
   SettingsReply,
   SettingsProposalReply,
   SettingsRules,
+  ApiProviderView,
   SettingsWrittenReply,
   TreeEntryView,
   TreeReply,
@@ -172,8 +173,26 @@ export function asSettings(value: unknown): SettingsReply {
       providers: strList(view["providers"]) ? view["providers"] : [],
       env: { model: env["model"] === true, language: env["language"] === true },
       rules: asRules(view["rules"]),
+      provider: str(view["provider"]) ? view["provider"] : null,
+      defaultProvider: str(view["defaultProvider"]) ? view["defaultProvider"] : null,
+      apiProviders: Array.isArray(view["apiProviders"]) ? view["apiProviders"].flatMap(asApiProvider) : [],
     },
   };
+}
+
+function asApiProvider(value: unknown): ApiProviderView[] {
+  if (!isObj(value) || !str(value["name"]) || !str(value["keyEnv"]) || !str(value["modelEnv"])) return [];
+  return [
+    {
+      name: value["name"],
+      keyEnv: value["keyEnv"],
+      keySet: value["keySet"] === true,
+      modelEnv: value["modelEnv"],
+      modelEnvSet: value["modelEnvSet"] === true,
+      model: str(value["model"]) ? value["model"] : null,
+      listable: value["listable"] === true,
+    },
+  ];
 }
 
 function asRules(value: unknown): SettingsRules {

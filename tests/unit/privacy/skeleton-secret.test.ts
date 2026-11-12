@@ -10,10 +10,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { keyLettersAndDigits } from "../../../src/contracts/keys.js";
+import { keyLettersAndDigits, keyLikeSkeleton } from "../../../src/contracts/keys.js";
 import type { PrivacyGateway } from "../../../src/contracts/privacy.js";
 import { asRawText, PRIVACY_TOKEN_PATTERN_SOURCE } from "../../../src/contracts/text.js";
-import { createPrivacyGateway, keyLikeSkeleton, skeletonView } from "../../../src/privacy/index.js";
+import { createPrivacyGateway, skeletonView } from "../../../src/privacy/index.js";
 
 const p = (...parts: string[]) => parts.join("");
 /** 106 characters in a real key's format, as in tests/unit/privacy/split-secret.test.ts. */

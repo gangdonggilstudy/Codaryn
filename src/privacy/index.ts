@@ -10,7 +10,8 @@
  * inside it included, so restoring or rebuilding gives back the exact bytes. Separators before or
  * after the value stay outside the token.
  *
- * DR-42 (a), R-28 I-3: a key-like registered value (keyLikeSkeleton: at least MIN_KEY_SKELETON_LENGTH
+ * DR-42 (a), R-28 I-3: a key-like registered value (the contract's keyLikeSkeleton, DR-43 (c), the
+ * condition the CLI's output hiding uses too: at least MIN_KEY_SKELETON_LENGTH
  * letters and digits, with a digit and both cases, or 32 or more with a digit and a letter) is also
  * found in the text's letters and digits alone (keyLettersAndDigits), so a split by a character
  * that is not a separator (a variation selector, the combining grapheme joiner, a Hangul filler, a
@@ -52,7 +53,7 @@ import {
   PRIVACY_TOKEN_SUFFIX,
 } from "../contracts/text.js";
 import type { JsonObject, JsonValue, MaskedText } from "../contracts/text.js";
-import { compactKeyText, KEY_SEPARATOR_PATTERN_SOURCE, keyLettersAndDigits, MIN_KEY_SKELETON_LENGTH } from "../contracts/keys.js";
+import { compactKeyText, KEY_SEPARATOR_PATTERN_SOURCE, keyLettersAndDigits, keyLikeSkeleton } from "../contracts/keys.js";
 
 /**
  * DR-40 (a): the shortest registered value (or listed variant), in code points without separators,
@@ -84,17 +85,6 @@ export function compactView(text: string, from: number, to: number): { compact: 
     index += char.length;
   }
   return { compact, at };
-}
-
-/**
- * DR-42 (a): whether a value's letters and digits (keyLettersAndDigits) look like a key rather
- * than words: at least MIN_KEY_SKELETON_LENGTH of them with a digit, an upper-case and a lower-case
- * letter, or at least 32 with a digit and a letter (a long hex or single-case token). R-28 I-1's
- * values (`summer2026winter`, `My Awesome Application`, `notapassword1234`, digit groups) are not.
- */
-export function keyLikeSkeleton(skeleton: string): boolean {
-  if (skeleton.length < MIN_KEY_SKELETON_LENGTH || !/[0-9]/.test(skeleton) || !/[A-Za-z]/.test(skeleton)) return false;
-  return (/[A-Z]/.test(skeleton) && /[a-z]/.test(skeleton)) || skeleton.length >= 32;
 }
 
 /**

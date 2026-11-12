@@ -21,10 +21,12 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { CODARYN_LANG_ENV } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
+import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
 import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
+import { runChanges } from "./changes.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
 import { runDoctor } from "./doctor.js";
 import { renderOutcome, runGuardedCommand } from "./guard.js";
@@ -189,6 +191,9 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       return plain(await runReport({ argv, cwd: process.cwd(), env: process.env, listRuns, announceLatest }));
     case "runs":
       return plain(await runRuns({ argv, cwd: process.cwd(), env: process.env, human: human.output }));
+    case "changes":
+      // DR-7, DR-14: the app layer's `changes` with this process's environment; it reads only.
+      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()) }));
     case "plan":
     case "apply":
     case "review": {

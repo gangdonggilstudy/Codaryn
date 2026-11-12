@@ -3,7 +3,8 @@
  */
 
 import type { RevertOutcome } from "./changes.js";
-import type { DoctorOutput, ModelsOutput, ReportOutput } from "./commands.js";
+import type { DoctorOutput, InitOutput, ModelsOutput, ReportOutput, RunsOutput } from "./commands.js";
+import type { InputDiagnosticFile, SchemaFieldPath } from "./human.js";
 import type { IntegrityChecker } from "./integrity.js";
 import type { Journal } from "./journal.js";
 import type { ModelProvider } from "./model.js";
@@ -74,6 +75,28 @@ export interface RunReasonByStatus {
 }
 export type RunReason = RunReasonByStatus[TerminalRunStatus];
 
+/** Every RunReason, for lists that must cover them all (N-4 message ids). */
+export const RUN_REASONS = [
+  "verified",
+  "verifier_failed",
+  "model_error",
+  "repeated_failure",
+  "verifier_inconclusive",
+  "no_verifier",
+  "unknown_tool_outcome",
+  "protected_changed",
+  "cancelled",
+  "max_model_turns",
+  "max_tool_calls",
+  "max_total_tokens",
+  "max_duration",
+  "usage_unknown",
+] as const satisfies readonly RunReason[];
+/** Compile-time check that RUN_REASONS misses none. */
+export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
+const runReasonsComplete: [MissingRunReason] extends [never] ? true : false = true;
+void runReasonsComplete;
+
 /** Process exit code for each terminal status. */
 export const RUN_EXIT_CODES: { readonly [S in TerminalRunStatus]: number } = {
   done: 0,
@@ -107,8 +130,10 @@ export const CLI_ERROR_EXIT_CODES = {
   provider_not_implemented: 7,
   /** `codaryn models` (Y-1): the Models API request failed. The message names the ModelErrorKind. */
   model_list_failed: 8,
-  /** `codaryn models --use` (Y-3): the config file could not be written. It was left as it was. */
+  /** `codaryn models --use` (Y-3), `codaryn init` (N-2): the config file could not be written. It was left as it was. */
   config_write_failed: 2,
+  /** `codaryn init` (N-2): a file already exists where the config would be written. Nothing was written. */
+  config_exists: 2,
   /** `codaryn revert`: the workspace has no journal for that run id. */
   run_not_found: 2,
   /** `codaryn revert`: the run's journal cannot be read or parsed. Nothing was changed. */
@@ -184,6 +209,34 @@ export interface CliErrorOutput {
   readonly exitCode: number;
   /** Never contains secret values, keys or file contents. */
   readonly message: string;
+  /**
+   * N-15: where in a config, task or script file the problem is, for `invalid_config`,
+   * `invalid_task` and `invalid_script` when it can be said safely. Absent otherwise.
+   */
+  readonly diagnostic?: InputDiagnostic;
+}
+
+/**
+ * N-15 (review M1): a structured input diagnostic. It holds a fixed code, a schema field position
+ * and numbers only: never the JSON parser's message, a value, or the name of an unknown key.
+ */
+export const INPUT_DIAGNOSTIC_CODES = ["json_syntax", "unknown_field", "invalid_value", "missing_field", "too_deep"] as const;
+export type InputDiagnosticCode = (typeof INPUT_DIAGNOSTIC_CODES)[number];
+
+export interface InputDiagnostic {
+  readonly code: InputDiagnosticCode;
+  readonly file: InputDiagnosticFile;
+  /**
+   * The field: for `unknown_field` the object that holds the unknown key (`config`, `limits`,
+   * `policy.commands[0]`), never the key itself; for `invalid_value` and `missing_field` the field.
+   * Null for `json_syntax` and `too_deep`, and whenever no safe position exists.
+   */
+  readonly field: SchemaFieldPath | null;
+  /** `json_syntax` only: 1-based line and column (in Unicode code points, a BOM not counted). Else null. */
+  readonly line: number | null;
+  readonly column: number | null;
+  /** `unknown_field` only: the closest allowed field name at that position, when one is close. */
+  readonly suggestion?: SchemaFieldPath | null;
 }
 
 export type CliOutput = EngineResult | CliErrorOutput;
@@ -193,8 +246,11 @@ export const REVERT_EXIT_CODES = { complete: 0, partial: 3 } as const;
 export type RevertStatus = keyof typeof REVERT_EXIT_CODES;
 
 /**
- * Printed on stdout as one JSON line by `codaryn revert --workspace <dir> --run <runId>`.
+ * Printed on stdout as one JSON line by
+ * `codaryn revert --workspace <dir> --run <runId|latest> [--dry-run] [--quiet]`.
  * Its errors use CliErrorOutput (for example `run_not_found` or `workspace_locked`).
+ * With `--dry-run` (N-7) `reverted` and `skipped` say what a revert would do, nothing was changed,
+ * and `status` and `exitCode` are what the revert would give.
  */
 export interface RevertOutput {
   readonly schemaVersion: 1;
@@ -205,15 +261,24 @@ export interface RevertOutput {
   /** Paths as the run's journal recorded them (masked). See `RevertRun`. */
   readonly reverted: RevertOutcome["reverted"];
   readonly skipped: RevertOutcome["skipped"];
+  /** N-7: present and true for `--dry-run` only. */
+  readonly dryRun?: true;
+  /**
+   * N-7: the run's revert record from before this command, when it had one: the run was already
+   * reverted at `at` with that status. A second revert of the same run normally skips every file
+   * as `changed_since_run`; this says why. N-16: present only when the record passes the run
+   * list's checks (same run id, `at` matching RUN_TIMESTAMP_PATTERN_SOURCE, a known status).
+   */
+  readonly revertedBefore?: { readonly at: string; readonly status: RevertStatus };
 }
 
 /**
  * Every JSON object the `codaryn` process can print: `run` prints CliOutput, `revert` prints
- * RevertOutput or CliErrorOutput, and `report --json`, `doctor --json` and `models --json` print
- * ReportOutput, DoctorOutput and ModelsOutput (their default output is text, see commands.ts) or
- * CliErrorOutput.
+ * RevertOutput or CliErrorOutput, and `report --json`, `doctor --json`, `models --json`,
+ * `init --json` and `runs --json` print ReportOutput, DoctorOutput, ModelsOutput, InitOutput and
+ * RunsOutput (their default output is text, see commands.ts) or CliErrorOutput.
  */
-export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput | ModelsOutput;
+export type CommandOutput = CliOutput | RevertOutput | ReportOutput | DoctorOutput | ModelsOutput | InitOutput | RunsOutput;
 
 /** Injected time source in milliseconds. */
 export interface Clock {

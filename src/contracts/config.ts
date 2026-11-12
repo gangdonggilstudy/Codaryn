@@ -136,8 +136,8 @@ export type ConfigSource = (typeof CONFIG_SOURCES)[number];
 export interface DefaultConfigLocation {
   /** Absolute path of the file. Used to read and write it; never printed. */
   readonly path: string;
-  /** One of DEFAULT_CONFIG_DISPLAY's values. */
-  readonly display: string;
+  /** One of DEFAULT_CONFIG_DISPLAY's values (N-14: the type admits nothing else). */
+  readonly display: DefaultConfigDisplay;
 }
 
 export const DEFAULT_CONFIG_DIR_WINDOWS = "Codaryn";
@@ -149,6 +149,8 @@ export const DEFAULT_CONFIG_DISPLAY = {
   xdg: "$XDG_CONFIG_HOME/codaryn/config.json",
   home: "~/.config/codaryn/config.json",
 } as const;
+/** N-14: one of DEFAULT_CONFIG_DISPLAY's values. */
+export type DefaultConfigDisplay = (typeof DEFAULT_CONFIG_DISPLAY)[keyof typeof DEFAULT_CONFIG_DISPLAY];
 
 /**
  * Signature of the function that finds the default location (`src/cli/config-location.ts`).

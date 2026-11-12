@@ -6,6 +6,8 @@
  * - Empty cells are skipped by every op. `count` counts the non-empty cells and needs no number.
  *   `sum`, `min`, `max` and `mean` need every non-empty cell to be a number, and at least one.
  * - Sums use compensated (Neumaier) summation, so long columns of decimals keep their precision.
+ * - A sum or mean whose computation leaves a double's range (a partial sum overflows) has no value
+ *   to compare: `out_of_range` (review R-13 L-1), never NaN or Infinity.
  */
 
 import type { AggregateOp } from "../contracts/index.js";
@@ -36,7 +38,9 @@ export type AggregateOutcome =
   /** A non-empty cell is not a number: the first such data row. */
   | { readonly ok: false; readonly problem: "not_a_number"; readonly dataRow: number }
   /** `sum`, `min`, `max`, `mean` over no non-empty cell: there is no value to compare. */
-  | { readonly ok: false; readonly problem: "no_values" };
+  | { readonly ok: false; readonly problem: "no_values" }
+  /** `sum` or `mean` whose computation left a double's range: there is no value to compare. */
+  | { readonly ok: false; readonly problem: "out_of_range" };
 
 /** Neumaier's compensated sum. */
 function compensatedSum(values: readonly number[]): number {
@@ -62,9 +66,11 @@ export function aggregate(cells: readonly CellAt[], op: AggregateOp): AggregateO
   if (numbers.length === 0) return { ok: false, problem: "no_values" };
   switch (op) {
     case "sum":
-      return { ok: true, value: compensatedSum(numbers), values: numbers.length };
-    case "mean":
-      return { ok: true, value: compensatedSum(numbers) / numbers.length, values: numbers.length };
+    case "mean": {
+      const sum = compensatedSum(numbers);
+      const value = op === "sum" ? sum : sum / numbers.length;
+      return Number.isFinite(value) ? { ok: true, value, values: numbers.length } : { ok: false, problem: "out_of_range" };
+    }
     case "min":
       return { ok: true, value: numbers.reduce((a, b) => Math.min(a, b)), values: numbers.length };
     case "max":

@@ -41,6 +41,7 @@ export const DATA_CHECKS_LIMITS: readonly string[] = [
   "only the listed table shapes and aggregates are checked; the method, the interpretation and any number written in prose are not",
   "tables are read as CSV (an RFC 4180 subset), TSV or JSON Lines of at most 16 MiB; numbers are plain decimals (-?digits[.digits][e±digits]) computed as doubles",
   "group values are compared as exact text, and rows whose group cell is empty are left out of the groups",
+  "sum, min, max and mean cannot be checked (inconclusive) when the column, or any one group of a grouped rule, has only empty cells, or when the sum goes beyond a double's range",
 ];
 
 type Role = "source" | "target";
@@ -269,9 +270,15 @@ async function checkShape(
 
 /** What an aggregate problem in the source means: the model cannot fix the input. */
 function sourceProblem(outcome: Extract<AggregateOutcome, { ok: false }>, column: string, scope: string): Verdict {
-  return outcome.problem === "not_a_number"
-    ? undecided(`source data row ${outcome.dataRow} of column ${shownName(column)} is not a number${scope}`)
-    : undecided(`source column ${shownName(column)} has no number to compute${scope}`);
+  switch (outcome.problem) {
+    case "not_a_number":
+      return undecided(`source data row ${outcome.dataRow} of column ${shownName(column)} is not a number${scope}`);
+    case "no_values":
+      return undecided(`source column ${shownName(column)} has no number to compute${scope}`);
+    case "out_of_range":
+      // R-13 L-1: the source's numbers overflow a double while being added; the target cannot fix that.
+      return undecided(`the computation over source column ${shownName(column)} is out of range of a double${scope}`);
+  }
 }
 
 function compareValue(
@@ -340,6 +347,8 @@ async function checkAggregate(
   if (!targetKey.ok) return notHeld(`target column ${shownName(keyName)} is ${targetKey.problem}`);
 
   const grouping = groupCells(source.table, sourceColumn.index, keyColumn.index);
+  // R-13 L-2 (PM decision: kept, and named in DATA_CHECKS_LIMITS): a group without any number in the
+  // column leaves the whole rule undecided, like every other source problem.
   const computed = new Map<string, { value: number; firstDataRow: number }>();
   for (const group of grouping.groups) {
     const outcome = aggregate(group.cells, op);

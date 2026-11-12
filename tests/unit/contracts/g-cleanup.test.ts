@@ -13,18 +13,31 @@ import {
   CLEANUP_BLOCK_CODES,
   CLEANUP_FAILURE_CODES,
   CLEANUP_KEPT_REASONS,
+  CLEANUP_LEFTOVER_MARK_FILE_NAME,
   CLEANUP_LEFTOVER_PATTERN_SOURCE,
   CLEANUP_LOG_FILE_NAME,
   CLEANUP_WARNING_CODES,
   cleanupRecordWarnings,
   FIXED_MESSAGES,
+  isCleanupLeftoverMark,
   MESSAGE_IDS,
   needsNotRevertedConfirmation,
   NOT_REVERTED_WARNINGS,
   selectedAsReverted,
   toRunId,
 } from "../../../src/contracts/index.js";
-import type { CleanupConfirmation, CleanupLogLine, CleanupOutcome, CleanupPlan, ContentHash, LastRevert, PlanCleanup, RunId, StateSummary } from "../../../src/contracts/index.js";
+import type {
+  CleanupConfirmation,
+  CleanupLeftoverMark,
+  CleanupLogLine,
+  CleanupOutcome,
+  CleanupPlan,
+  ContentHash,
+  LastRevert,
+  PlanCleanup,
+  RunId,
+  StateSummary,
+} from "../../../src/contracts/index.js";
 
 const runId = toRunId("20261112T120000Z-0000abcd") as RunId;
 const digest = "a".repeat(64) as ContentHash;
@@ -37,7 +50,7 @@ const emptyTotals: CleanupPlan["totals"] = {
 describe("DR-39: cleaning up run records and discarded files", () => {
   test("the codes", () => {
     assert.deepEqual([...CLEANUP_BLOCK_CODES], ["lock_held", "no_result", "plan_used_by_apply"]);
-    assert.deepEqual([...CLEANUP_WARNING_CODES], ["not_reverted", "partly_reverted", "discarded_left", "people_files", "records_changed", "leftover"]);
+    assert.deepEqual([...CLEANUP_WARNING_CODES], ["not_reverted", "partly_reverted", "records_unreadable", "discarded_left", "people_files", "records_changed", "leftover"]);
     assert.deepEqual([...CLEANUP_KEPT_REASONS], [
       "not_confirmed",
       "not_reverted_not_confirmed",
@@ -106,11 +119,10 @@ describe("DR-44 (R-34): what a person sees is what happens, and no way back is l
     assert.deepEqual(run("complete"), []);
     assert.deepEqual([selectedAsReverted("complete"), selectedAsReverted("partial"), selectedAsReverted(null)], [true, false, false]);
     assert.deepEqual(run(null, { changes: 0 }), [], "a run that changed nothing has nothing to revert");
-    assert.deepEqual(run(null, { kind: null }), [], "damaged records: no kind, no revert claim");
   });
 
   test("(a) not reverted and partly reverted records go only with their own confirmation", () => {
-    assert.deepEqual([...NOT_REVERTED_WARNINGS], ["not_reverted", "partly_reverted"]);
+    assert.deepEqual([...NOT_REVERTED_WARNINGS], ["not_reverted", "partly_reverted", "records_unreadable"]);
     assert.equal(needsNotRevertedConfirmation(run(null)), true);
     assert.equal(needsNotRevertedConfirmation(run("partial")), true);
     assert.equal(needsNotRevertedConfirmation(run("complete", { recordsChanged: true })), false);
@@ -168,5 +180,32 @@ describe("DR-44 (R-34): what a person sees is what happens, and no way back is l
     assert.deepEqual(FIXED_MESSAGES["cleanup.summary.leftovers"], { count: "count", bytes: "count" });
     assert.deepEqual(FIXED_MESSAGES["cleanup.confirm.leftovers"], { count: "count", bytes: "count" });
     assert.deepEqual(FIXED_MESSAGES["cleanup.done_leftovers"], { count: "count", bytes: "count" });
+  });
+});
+
+describe("R-34b: damaged records, folders a cleanup did not leave", () => {
+  test("P-1 (L-1): records that cannot be checked go only with the not reverted confirmation, and say why", () => {
+    // R-34b exp 2: r1 made a.txt, then its result.json was broken; it was removed with --confirm alone.
+    const damaged = (changes: number) => cleanupRecordWarnings({ kind: null, changes, lastRevert: null, hasDiscarded: true, recordsChanged: false });
+    assert.deepEqual(damaged(0), ["records_unreadable"], "what it changed is not known either");
+    assert.deepEqual(damaged(3), ["records_unreadable"]);
+    assert.equal(needsNotRevertedConfirmation(damaged(0)), true);
+    assert.deepEqual(cleanupRecordWarnings({ kind: null, changes: 0, lastRevert: null, hasDiscarded: false, recordsChanged: true }), ["records_unreadable", "records_changed"]);
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("cleanup.warning.records_unreadable"));
+  });
+
+  test("P-2 (L-2): a leftover is a folder with the mark a cleanup wrote for it; others are unknown folders, shown only", () => {
+    assert.equal(CLEANUP_LEFTOVER_MARK_FILE_NAME, "cleanup-leftover.json");
+    const mark: CleanupLeftoverMark = { schemaVersion: 1, kind: "cleanup_leftover", leftoverId: "0123456789abcdef" };
+    assert.equal(isCleanupLeftoverMark(mark, "0123456789abcdef"), true);
+    assert.equal(isCleanupLeftoverMark(JSON.parse(JSON.stringify(mark)) as unknown, "0123456789abcdef"), true, "as read back from its file");
+    // R-34b exp 4: a person's folder named like one, with no mark or another folder's mark.
+    for (const value of [undefined, null, "", {}, [], { ...mark, leftoverId: "fedcba9876543210" }, { ...mark, kind: "records_changed" }, { ...mark, schemaVersion: 2 }, { ...mark, extra: 1 }]) {
+      assert.equal(isCleanupLeftoverMark(value, "0123456789abcdef"), false, JSON.stringify(value));
+    }
+    const summary: Pick<StateSummary, "leftovers" | "unknownFolders"> = { leftovers: { count: 0, files: 0, bytes: 0 }, unknownFolders: { count: 1, files: 1, bytes: 16 } };
+    const none: Pick<StateSummary, "leftovers" | "unknownFolders"> = { leftovers: { count: 0, files: 0, bytes: 0 } };
+    assert.ok(summary.unknownFolders?.count === 1 && none.unknownFolders === undefined, "absent when there is none");
+    assert.deepEqual(FIXED_MESSAGES["cleanup.summary.unknown_folders"], { count: "count", bytes: "count" });
   });
 });

@@ -11,6 +11,10 @@
  * confirmation (`includeNotReverted`); an apply run's records are warned about whenever its
  * discarded files could stay; a folder that could not be removed entirely is never reported as
  * removed, and the next plan shows it (a `leftover` item) so it can be.
+ *
+ * R-34b: records that cannot be checked (a damaged run) are treated as not reverted
+ * (`records_unreadable`); a leftover is told by the mark the cleanup wrote into it, not by its name
+ * alone, and a folder named like one without its mark is an unknown folder, shown and never removed.
  */
 
 import type { TerminalRunStatus } from "./engine.js";
@@ -45,9 +49,35 @@ export interface StateRunSummary {
 
 /**
  * DR-44 (d): the name of a folder an earlier applyCleanup moved an item into and could not remove
- * entirely (`cleanup-` and 16 lowercase hex digits, directly in the state directory).
+ * entirely (`cleanup-` and 16 lowercase hex digits, directly in the state directory). R-34b P-2: the
+ * name alone is not enough; a leftover also holds its mark (CLEANUP_LEFTOVER_MARK_FILE_NAME).
  */
 export const CLEANUP_LEFTOVER_PATTERN_SOURCE = "^cleanup-[0-9a-f]{16}$";
+
+/**
+ * R-34b P-2: the mark applyCleanup writes, as a plain file directly inside, into each folder it moves
+ * an item aside to, right after the move. A plain directory whose name matches
+ * CLEANUP_LEFTOVER_PATTERN_SOURCE is a leftover only when it holds this file and the file's JSON is
+ * its own mark (isCleanupLeftoverMark); otherwise it is an unknown folder (StateSummary.unknownFolders).
+ * No run record and no stored discarded file (`discardedStoredName`) has this name.
+ */
+export const CLEANUP_LEFTOVER_MARK_FILE_NAME = "cleanup-leftover.json";
+
+/** The content of CLEANUP_LEFTOVER_MARK_FILE_NAME: nothing but which folder it was written into. */
+export interface CleanupLeftoverMark {
+  readonly schemaVersion: 1;
+  readonly kind: "cleanup_leftover";
+  /** The 16 hex digits of the folder's name (`cleanup-<leftoverId>`). */
+  readonly leftoverId: string;
+}
+
+/** R-34b P-2: whether `value` (the mark file's parsed JSON) is exactly the mark of the folder `leftoverId` names. */
+export function isCleanupLeftoverMark(value: unknown, leftoverId: string): value is CleanupLeftoverMark {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (Object.keys(value).sort().join(",") !== "kind,leftoverId,schemaVersion") return false;
+  const mark = value as Record<string, unknown>;
+  return mark["schemaVersion"] === 1 && mark["kind"] === "cleanup_leftover" && mark["leftoverId"] === leftoverId;
+}
 
 export interface StateSummary {
   readonly runs: { readonly count: number; readonly bytes: number; readonly oldest: string | null; readonly newest: string | null };
@@ -57,8 +87,13 @@ export interface StateSummary {
   readonly discarded: { readonly runs: number; readonly files: number; readonly bytes: number };
   /** Never cleaned; shown so a person knows the files are there. */
   readonly parked: StateSize;
-  /** DR-44 (d): folders an earlier cleanup could not remove entirely (CLEANUP_LEFTOVER_PATTERN_SOURCE). */
+  /** DR-44 (d): folders an earlier cleanup could not remove entirely (with their mark, R-34b P-2). */
   readonly leftovers: { readonly count: number } & StateSize;
+  /**
+   * R-34b P-2: plain directories named like a leftover without their mark. Never an item and never
+   * removed; shown only (cleanup.summary.unknown_folders). Absent when there is none.
+   */
+  readonly unknownFolders?: { readonly count: number } & StateSize;
 }
 
 /** Signature of `summarizeState`, exported by `src/store/index.ts`. Reads only; never rejects for one run. */
@@ -67,7 +102,8 @@ export type SummarizeState = (request: { readonly workspaceRoot: string }) => Pr
 /**
  * What to remove. A run is selected when it matches every criterion its part gives; a part with no
  * criterion, or an absent part, selects nothing. `olderThanDays` counts from the request's `now` to
- * the run's start. Leftover folders (DR-44 (d)) are not selected: every plan includes them.
+ * the run's start. Leftover folders (DR-44 (d)) are not selected: every plan includes them (those with
+ * their mark only, R-34b P-2).
  */
 export interface CleanupSelection {
   /**
@@ -93,19 +129,30 @@ export type CleanupBlockCode = (typeof CLEANUP_BLOCK_CODES)[number];
  * What a person is told before confirming:
  * - not_reverted: the run changed files and was never reverted; without its records they cannot be
  * - partly_reverted (DR-44 (b)): its last revert was partial; without its records the rest cannot be
+ * - records_unreadable (R-34b P-1): its records cannot be checked (a damaged run), so whether it
+ *   changed files and was reverted is not known; its records may hold the last copies of them
  * - discarded_left (DR-44 (c)): an apply run's records go while its discarded files may stay (their
  *   folder is not selected, or it is and its removal is not confirmed); if they stay, a revert can
  *   no longer put them back
  * - people_files: a discarded-files folder: people's own files are deleted
  * - records_changed: the run has a records-changed mark (DR-38); its records are evidence (P-5)
  * - leftover (DR-44 (d)): what an earlier cleanup confirmed and could not remove entirely
- * not_reverted and partly_reverted need CleanupConfirmation.includeNotReverted (NOT_REVERTED_WARNINGS).
+ * not_reverted, partly_reverted and records_unreadable need CleanupConfirmation.includeNotReverted
+ * (NOT_REVERTED_WARNINGS).
  */
-export const CLEANUP_WARNING_CODES = ["not_reverted", "partly_reverted", "discarded_left", "people_files", "records_changed", "leftover"] as const;
+export const CLEANUP_WARNING_CODES = [
+  "not_reverted",
+  "partly_reverted",
+  "records_unreadable",
+  "discarded_left",
+  "people_files",
+  "records_changed",
+  "leftover",
+] as const;
 export type CleanupWarningCode = (typeof CLEANUP_WARNING_CODES)[number];
 
 /** DR-44 (a): the warnings whose run records go only with CleanupConfirmation.includeNotReverted. */
-export const NOT_REVERTED_WARNINGS = ["not_reverted", "partly_reverted"] as const satisfies readonly CleanupWarningCode[];
+export const NOT_REVERTED_WARNINGS = ["not_reverted", "partly_reverted", "records_unreadable"] as const satisfies readonly CleanupWarningCode[];
 
 /** How a run's last revert went, as its revert record says: complete, partial, or none. */
 export type LastRevert = "complete" | "partial" | null;
@@ -113,6 +160,7 @@ export type LastRevert = "complete" | "partial" | null;
 /**
  * DR-44 (a)-(c): the warnings of a run's records item, the one rule the store, the CLI and the app
  * share. `changes`: the files the run changed or the actions an apply applied (0: nothing to revert).
+ * `kind: null`: the records cannot be checked (R-34b P-1: records_unreadable, whatever `changes`).
  */
 export function cleanupRecordWarnings(run: {
   readonly kind: "run" | "apply" | null;
@@ -122,7 +170,8 @@ export function cleanupRecordWarnings(run: {
   readonly recordsChanged: boolean;
 }): CleanupWarningCode[] {
   const warnings: CleanupWarningCode[] = [];
-  if (run.kind !== null && run.changes > 0) {
+  if (run.kind === null) warnings.push("records_unreadable");
+  else if (run.changes > 0) {
     if (run.lastRevert === null) warnings.push("not_reverted");
     else if (run.lastRevert === "partial") warnings.push("partly_reverted");
   }
@@ -241,8 +290,11 @@ export type CleanupOutcome =
  * confirmation's. Each item is checked again (exact name, plain directory, not a link, same
  * fingerprint), renamed to `cleanup-<16 hex>` inside the state directory and then removed, so no
  * half-removed run is left in place. A removal that fails after the rename keeps the item as
- * `partly_removed` (DR-44 (d)). It appends one CleanupLogLine to CLEANUP_LOG_FILE_NAME with what was
- * removed entirely only.
+ * `partly_removed` (DR-44 (d)). R-34b P-2: right after the rename it writes the folder's mark
+ * (CLEANUP_LEFTOVER_MARK_FILE_NAME, exclusive create) and removes everything else before the mark, so a
+ * folder not removed entirely keeps it; a mark that cannot be written does not stop the removal (what
+ * is then left is an unknown folder). A leftover item is removed in the same order. It appends one
+ * CleanupLogLine to CLEANUP_LOG_FILE_NAME with what was removed entirely only.
  */
 export type ApplyCleanup = (request: {
   readonly workspaceRoot: string;

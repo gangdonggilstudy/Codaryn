@@ -454,7 +454,8 @@ export const FIXED_MESSAGES = {
   "cleanup.done": { runs: "count", folders: "count", bytes: "count" },
   "cleanup.plan_changed": {},
   // DR-44 (R-34): shown after cleanup.confirm.runs when above 0: how many of those run records are of
-  // runs not reverted or only partly reverted (CleanupPlan.totals.runs.notReverted), which go only with
+  // runs not reverted or only partly reverted, or whose records cannot be checked (R-34b P-1)
+  // (CleanupPlan.totals.runs.notReverted), which go only with
   // their own confirmation (CLI `--include-not-reverted`; the GUI asks apart). Not a question.
   "cleanup.confirm.not_reverted": { count: "count" },
   // DR-44 (d): folders an earlier cleanup moved aside and could not remove entirely (StateSummary.
@@ -463,6 +464,9 @@ export const FIXED_MESSAGES = {
   "cleanup.summary.leftovers": { count: "count", bytes: "count" },
   "cleanup.confirm.leftovers": { count: "count", bytes: "count" },
   "cleanup.done_leftovers": { count: "count", bytes: "count" },
+  // R-34b P-2: folders in the state directory named like a leftover but without a cleanup's mark
+  // (StateSummary.unknownFolders): shown when there are any; Codaryn does not remove them.
+  "cleanup.summary.unknown_folders": { count: "count", bytes: "count" },
   // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
   // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.next_revert_unsafe": { runId: "runId" },

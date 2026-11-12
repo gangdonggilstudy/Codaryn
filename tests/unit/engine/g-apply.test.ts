@@ -723,3 +723,45 @@ describe("DR-38: the apply run checks the run records with its state guard (Appl
     assert.deepEqual([checks(plain).length, Object.hasOwn(done, "stateChanged")], [0, false]);
   });
 });
+
+describe("U-1 (R-33 R33-L3): a plan run whose records were changed is not applied (ApplyDeps.planRecordsChanged)", () => {
+  test("a mark found under the lock: failed/plan_stale with a notice naming plan_records_changed; nothing checked or moved", async () => {
+    let asked = 0;
+    const run = setup({
+      planRecordsChanged: async () => {
+        asked += 1;
+        return true;
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
+    assert.ok(result.notices.some((notice) => notice.includes("plan_records_changed")), "the notice names the code");
+    assert.equal(asked, 1);
+    assert.deepEqual(run.journal.types(), ["apply_started", "run_finished"]);
+    assert.deepEqual([run.inventory.captures, run.executor.applied, run.marks, result.applied, result.verifiers], [0, [], [], [], []]);
+  });
+
+  test("a check that cannot be made counts as a mark (fail closed)", async () => {
+    const run = setup({
+      planRecordsChanged: async () => {
+        throw new Error("cannot read");
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
+    assert.deepEqual([run.executor.applied, run.marks], [[], []]);
+  });
+
+  test("no mark: the apply goes on as before, asked once right after apply_started", async () => {
+    const order: string[] = [];
+    const run = setup({
+      planRecordsChanged: async () => {
+        order.push(`checked after ${run.journal.types().join(",")}`);
+        return false;
+      },
+    });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.deepEqual(order, ["checked after apply_started"]);
+  });
+});

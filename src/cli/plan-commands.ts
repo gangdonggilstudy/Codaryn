@@ -1,0 +1,479 @@
+/**
+ * G-F: `codaryn plan`, `codaryn apply` and `codaryn review` (docs/design/general-tasks.md sections
+ * 6 and 8; contract src/contracts/plan.ts and workflow.ts).
+ *
+ * All three take the task form `run` takes (DR-17) and pass the same steps 1 to 7 (`prepareTask`),
+ * so they register the same secrets and resolve the same workflow. None of them sends anything to
+ * a model, so a missing key or model does not stop them.
+ * - plan: shows plan.json masked again with those secrets (DR-5), never the journal's copy, and
+ *   says whether the workspace is over the inventory limit (DR-6). Changes nothing, takes no lock.
+ * - apply: checks the approval (the digest's first characters, or a `[y/N]` question at a
+ *   terminal whose default is no), takes the lock, builds ApplyDeps from the task's current policy,
+ *   verifiers and secrets (DR-5), and runs `applyPlan`. One JSON line (ApplyResult) on stdout.
+ * - review: writes review.json only, under the lock, for a run that ended as `awaiting_review`.
+ */
+
+import { lstat, readFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  MAX_REPORT_FILE_BYTES,
+  PLAN_EXIT_CODES,
+  RESULT_FILE_NAME,
+  RESULT_SCHEMA_VERSION,
+  REVIEW_EXIT_CODES,
+  RUNS_DIR_NAME,
+  STATE_DIR_NAME,
+  workflowSettingsOf,
+} from "../contracts/index.js";
+import type {
+  ApplyJournal,
+  ApplyJournalEvent,
+  ApplyPlan,
+  ApplyResult,
+  ApprovalChannel,
+  Clock,
+  ContentHash,
+  EngineResult,
+  HumanOutput,
+  ListRuns,
+  LoadPlan,
+  MaskedPlanAction,
+  MaskedText,
+  PlanOutput,
+  PrivacyGateway,
+  ResolvedPlanAction,
+  ReviewOutput,
+  StoredPlan,
+} from "../contracts/index.js";
+import { applyPlan as engineApplyPlan } from "../engine/index.js";
+import { createPolicyGate } from "../policy/index.js";
+import { createPrivacyGateway } from "../privacy/index.js";
+import {
+  acquireLock,
+  createApplyJournal,
+  latestRun,
+  listRuns as storeListRuns,
+  loadPlan as storeLoadPlan,
+  markPlanApplied,
+  prepareDiscardedRoot,
+  readReviewRecord,
+  releaseLock,
+  writeResult,
+  writeReviewRecord,
+} from "../store/index.js";
+import { createCommandRunner, createPlanExecutor, envValueFreeOfSecrets } from "../tools/index.js";
+import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } from "../verify/index.js";
+import { createWorkspace } from "../workspace/index.js";
+import { parseApplyArgs, parsePlanArgs, parseReviewArgs } from "./args.js";
+import type { RunArgs, TaskFormArgs } from "./args.js";
+import type { CommandOutcome } from "./guard.js";
+import { jsonLine } from "./guard.js";
+import { PROGRESS_PREFIX } from "./progress.js";
+import { resolveRunReference } from "./run-ref.js";
+import type { CheckedRun } from "./run-ref.js";
+import { cliError, prepareTask } from "./run.js";
+import type { PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
+import { createRunId } from "./run-id.js";
+import { goalHoldsKey } from "./security/index.js";
+import { envValue } from "./settings.js";
+import { cleanText, hideKeys } from "./text-safety.js";
+
+/** The goal the task form carries for commands that never run a model. */
+export const NO_GOAL = "(no goal: plan, apply and review do not run a model)";
+
+export interface PlanCommandEnvironment extends PrepareEnvironment {
+  readonly argv: readonly string[];
+  readonly clock: Clock;
+  readonly randomBytes: (size: number) => Uint8Array;
+  /** Overrides for tests; the store's functions otherwise. */
+  readonly listRuns?: ListRuns;
+  readonly loadPlan?: LoadPlan;
+  /** N-23: told which run `--run latest` chose, before anything is read. */
+  readonly announceLatest?: (entry: CheckedRun) => void;
+}
+
+export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
+  readonly applyPlan?: ApplyPlan;
+  /**
+   * Shows the question on stderr and returns the line typed, or null. Present only when stdin and
+   * stderr are terminals; without it an apply needs `--digest`.
+   */
+  readonly ask?: (question: string) => Promise<string | null>;
+  /** One line (with its line feed) to stderr; absent or `--quiet`: nothing is written. */
+  readonly writeProgress?: (line: string) => void;
+  /** The human renderer, for apply progress lines and the end summary (optional methods, G-A). */
+  readonly human?: HumanOutput;
+  readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
+}
+
+/** The RunArgs `prepareTask` takes for a task form. */
+function runArgsOf(form: TaskFormArgs, cancelFile: string | null, quiet: boolean): RunArgs {
+  return {
+    command: "run",
+    input: form.input.kind === "task" ? form.input : { kind: "quick", workspace: form.input.workspace, goal: NO_GOAL, oneLine: false },
+    configPath: form.configPath,
+    varsFile: form.varsFile,
+    cancelFile,
+    quiet,
+    profile: form.profile,
+    workflow: form.workflow,
+  };
+}
+
+function notes(): RunNotes {
+  return { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+}
+
+async function exists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Masks a stored action's paths with the command's secrets (DR-5). Null when masking fails. */
+function maskAction(action: ResolvedPlanAction, privacy: PrivacyGateway): MaskedPlanAction | null {
+  const mask = (text: string): MaskedText | null => {
+    const masked = privacy.mask(text);
+    return masked.ok ? masked.text : null;
+  };
+  if (action.kind === "move") {
+    const from = mask(action.from);
+    const to = mask(action.to);
+    return from === null || to === null ? null : { kind: "move", from, to, sha256: action.sha256 };
+  }
+  const where = mask(action.path);
+  return where === null ? null : { kind: "discard", path: where, sha256: action.sha256 };
+}
+
+/** One printable line per action, cleaned, keys hidden. */
+function actionLines(actions: readonly MaskedPlanAction[], currentKey: string | null): string[] {
+  const shown = (text: string): string => cleanText(hideKeys(text, currentKey));
+  return actions.map((action, index) =>
+    action.kind === "move"
+      ? `  ${index + 1}. move     ${shown(action.from)}  ->  ${shown(action.to)}`
+      : `  ${index + 1}. discard  ${shown(action.path)}  (kept in .codaryn/discarded/ until removed)`,
+  );
+}
+
+type Prepared = { readonly prepared: PreparedTask; readonly workspaceRoot: string; readonly runId: string };
+
+/** Steps 1 to 7, the workspace's real path and the run `--run` names. */
+async function prepareFor(
+  io: PlanCommandEnvironment,
+  form: TaskFormArgs,
+  run: string,
+  cancelFile: string | null,
+  quiet: boolean,
+  secrets = true,
+): Promise<{ ok: true; value: Prepared } | { ok: false; outcome: CommandOutcome }> {
+  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets });
+  if (!("prepared" in ready)) return { ok: false, outcome: ready };
+  let workspaceRoot: string;
+  try {
+    workspaceRoot = (await createWorkspace({ root: ready.prepared.task.workspaceRoot })).root;
+  } catch {
+    return { ok: false, outcome: cliError("workspace_not_found", "workspaceRoot is not an existing directory") };
+  }
+  const reference = await resolveRunReference(workspaceRoot, run, { exists, listRuns: io.listRuns ?? storeListRuns });
+  if (!reference.ok) return { ok: false, outcome: cliError(reference.code, reference.message) };
+  if (reference.latest !== null) {
+    try {
+      io.announceLatest?.(reference.latest);
+    } catch {
+      // Best effort.
+    }
+  }
+  return { ok: true, value: { prepared: ready.prepared, workspaceRoot, runId: reference.runId } };
+}
+
+const LOAD_MESSAGES = {
+  run_not_found: "the workspace has no records for that run id",
+  run_not_plan: "that run did not end with a stored plan (needs-input/plan_pending); there is nothing to show or apply",
+  invalid_run_record: "the plan run's records cannot be used (plan.json or result.json cannot be read, or they disagree)",
+} as const;
+
+/** The plan, masked again, with its digest, applied state and the inventory limit (DR-5, DR-6). */
+async function loadShown(
+  io: PlanCommandEnvironment,
+  value: Prepared,
+): Promise<
+  | { ok: true; plan: StoredPlan; digest: ContentHash; output: PlanOutput; privacy: PrivacyGateway }
+  | { ok: false; outcome: CommandOutcome }
+> {
+  const loaded = await (io.loadPlan ?? storeLoadPlan)({ workspaceRoot: value.workspaceRoot, runId: value.runId });
+  if (!loaded.ok) return { ok: false, outcome: cliError(loaded.code, LOAD_MESSAGES[loaded.code]) };
+  const privacy = createPrivacyGateway({ secrets: [...value.prepared.secrets] });
+  const actions: MaskedPlanAction[] = [];
+  for (const action of loaded.plan.actions) {
+    const masked = maskAction(action, privacy);
+    if (masked === null) return { ok: false, outcome: cliError("internal_error", "a path of the plan could not be masked; nothing is shown") };
+    actions.push(masked);
+  }
+  const manifest = await createInventoryChecker({ workspaceRoot: value.workspaceRoot }).capture();
+  const status = loaded.applied === null ? "pending" : "applied";
+  const output: PlanOutput = {
+    schemaVersion: RESULT_SCHEMA_VERSION,
+    kind: "plan",
+    runId: value.runId,
+    status,
+    exitCode: PLAN_EXIT_CODES[status],
+    digest: loaded.digest,
+    actions,
+    inventoryLimitReached: manifest.limitReached,
+    appliedBy: loaded.applied === null ? null : { runId: loaded.applied.applyRunId, at: loaded.applied.at },
+  };
+  return { ok: true, plan: loaded.plan, digest: loaded.digest, output, privacy };
+}
+
+/** The text of `codaryn plan` without `--json`. */
+export function renderPlan(output: PlanOutput, currentKey: string | null): string {
+  const lines = [
+    `Plan of run ${output.runId}: ${output.actions.length} action(s), ${output.status}`,
+    `Digest: ${output.digest}`,
+    ...actionLines(output.actions, currentKey),
+  ];
+  if (output.inventoryLimitReached) {
+    lines.push("The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.");
+  }
+  if (output.appliedBy !== null) lines.push(`Applied by run ${output.appliedBy.runId} at ${output.appliedBy.at}.`);
+  else lines.push(`To apply it: codaryn apply <the same task form> --run ${output.runId} --digest ${output.digest.slice(0, 12)}`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** `codaryn plan ... --run <runId|latest> [--json]` (DR-5, DR-17). */
+export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcome> {
+  const parsed = parsePlanArgs(io.argv);
+  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  const ready = await prepareFor(io, parsed.args.form, parsed.args.runId, null, false);
+  if (!ready.ok) return ready.outcome;
+  const shown = await loadShown(io, ready.value);
+  if (!shown.ok) return shown.outcome;
+  const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+  if (parsed.args.json) return { output: shown.output, exitCode: shown.output.exitCode };
+  return { text: renderPlan(shown.output, currentKey), exitCode: shown.output.exitCode };
+}
+
+const YES = new Set(["y", "yes", "예", "네"]);
+
+/** `codaryn apply ... --run <planRunId> --digest <prefix> [--cancel-file <path>] [--quiet]` (6.2, 6.4). */
+export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutcome> {
+  const parsed = parseApplyArgs(io.argv);
+  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  const args = parsed.args;
+  const ready = await prepareFor(io, args.form, args.runId, args.cancelFile, args.quiet);
+  if (!ready.ok) return ready.outcome;
+  const { prepared, workspaceRoot, runId: planRunId } = ready.value;
+  const task = prepared.task;
+  if (workflowSettingsOf(task).plan !== "apply") {
+    return cliError("run_not_plan", 'the task given to apply does not resolve to a workflow with plan "apply"; nothing was moved');
+  }
+  const shown = await loadShown(io, ready.value);
+  if (!shown.ok) return shown.outcome;
+  if (shown.output.appliedBy !== null) {
+    return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
+  }
+
+  // Approval (6.4 1): the digest's first characters, or a [y/N] question at a terminal.
+  let approval: ApprovalChannel;
+  if (args.digest !== null) {
+    if (!shown.digest.startsWith(args.digest)) {
+      return cliError("plan_not_approved", "--digest does not match the plan's digest; nothing was moved. `codaryn plan` shows it");
+    }
+    approval = "cli-flag";
+  } else if (io.ask !== undefined) {
+    const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+    const question = [renderPlan(shown.output, currentKey).trimEnd(), "Apply this plan? [y/N] "].join("\n");
+    const answer = (await io.ask(question))?.trim().toLowerCase() ?? "";
+    if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
+    approval = "cli-tty";
+  } else {
+    return cliError("plan_not_approved", "an apply needs --digest with the plan's digest (codaryn plan shows it); nothing was moved");
+  }
+
+  const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
+  const lock = await acquireLock({ workspaceRoot, runId, clock: io.clock });
+  if (!lock.ok) return cliError("workspace_locked", "another run or revert holds the workspace; nothing was moved");
+  const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
+  let result: ApplyResult | null = null;
+  try {
+    const workspace = await createWorkspace({ root: workspaceRoot });
+    const privacy = shown.privacy;
+    const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
+    const protectedPaths = task.policy.protectedPaths ?? [];
+    const integrity =
+      protectedPaths.length > 0 || prepared.integrityPaths.length > 0
+        ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
+        : undefined;
+    const journal = withApplyProgress(createApplyJournal({ workspaceRoot, runId, clock: io.clock }), privacy, args.quiet ? undefined : io.writeProgress, io.human);
+    result = await (io.applyPlan ?? engineApplyPlan)({
+      plan: shown.plan,
+      planRunId,
+      digest: shown.digest,
+      approval,
+      runId,
+      taskId: task.id,
+      maxDurationMs: task.limits.maxDurationMs,
+      verifierConfigs: task.verifiers,
+      executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
+      policy: createPolicyGate({ config: task.policy, workspace }),
+      planActions: task.policy.planActions ?? [],
+      // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
+      discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
+      privacy,
+      verifiers: createVerifierRunner({ workspace, commandRunner }),
+      inventory: createInventoryChecker({ workspaceRoot }),
+      journal,
+      clock: io.clock,
+      signal: cancel.signal,
+      ...(integrity === undefined ? {} : { integrity }),
+      markApplied: () => markPlanApplied({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(io.clock.now()).toISOString() }),
+    });
+    // ApplyResult is stored as the apply run's result.json; the store's writer takes it as JSON.
+    await writeResult(workspaceRoot, result as unknown as EngineResult);
+  } catch {
+    return cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done");
+  } finally {
+    await releaseLock({ workspaceRoot, runId });
+    cancel.dispose();
+  }
+  if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
+    try {
+      const form = args.form.input.kind === "task" ? "task" : "given";
+      const summary = io.human.applySummary(result, { workspaceForm: form });
+      const masked = shown.privacy.mask(summary);
+      if (masked.ok) io.writeProgress(cleanText(masked.text, true));
+    } catch {
+      // Human output is best effort.
+    }
+  }
+  return { output: result, exitCode: result.exitCode };
+}
+
+/** Writes an apply record's progress line after storing it; best effort (G-A applyProgressLine). */
+function withApplyProgress(
+  journal: ApplyJournal,
+  privacy: PrivacyGateway,
+  write: ((line: string) => void) | undefined,
+  human: HumanOutput | undefined,
+): ApplyJournal {
+  if (write === undefined || human?.applyProgressLine === undefined) return journal;
+  const render = human.applyProgressLine.bind(human);
+  return {
+    async append(event: ApplyJournalEvent) {
+      await journal.append(event);
+      try {
+        const line = render(event);
+        if (line === null) return;
+        const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
+        if (masked.ok) write(`${cleanText(masked.text)}\n`);
+      } catch {
+        // Progress is best effort.
+      }
+    },
+    close: () => journal.close(),
+  };
+}
+
+/** The checklist of a run that ended as `needs-input`/`awaiting_review`, from its result.json. */
+async function awaitingReview(
+  workspaceRoot: string,
+  runId: string,
+): Promise<{ ok: true; checklist: readonly MaskedText[] } | { ok: false; outcome: CommandOutcome }> {
+  const dir = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory()) return { ok: false, outcome: cliError("invalid_run_record", "the run directory is not a plain directory") };
+  } catch {
+    return { ok: false, outcome: cliError("run_not_found", "the workspace has no records for that run id") };
+  }
+  let value: unknown;
+  try {
+    const file = path.join(dir, RESULT_FILE_NAME);
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > MAX_REPORT_FILE_BYTES) throw new Error("not a plain file");
+    value = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return { ok: false, outcome: cliError("run_not_awaiting_review", "that run has no readable result; only a run that ended as awaiting_review can be reviewed") };
+  }
+  const result = value as Partial<EngineResult> | null;
+  if (result === null || typeof result !== "object" || result.kind !== "run" || result.runId !== runId) {
+    return { ok: false, outcome: cliError("invalid_run_record", "the run's result.json is not this run's result") };
+  }
+  if (result.status !== "needs-input" || result.reason !== "awaiting_review") {
+    return { ok: false, outcome: cliError("run_not_awaiting_review", "that run did not end as needs-input/awaiting_review; nothing was written") };
+  }
+  const checklist = result.review?.checklist;
+  if (!Array.isArray(checklist) || !checklist.every((item) => typeof item === "string")) {
+    return { ok: false, outcome: cliError("invalid_run_record", "the run's result.json has no readable checklist") };
+  }
+  return { ok: true, checklist: checklist as MaskedText[] };
+}
+
+/** `codaryn review ... --run <runId|latest> (--accept | --reject) [--note <text>] [--json]` (GT-D6). */
+export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutcome> {
+  const parsed = parseReviewArgs(io.argv);
+  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  const args = parsed.args;
+  const currentKey = envValue(io.env, "ANTHROPIC_API_KEY");
+  // S-8: a note is written to review.json and shown by report; a key never goes there.
+  if (args.note !== null && goalHoldsKey(args.note, currentKey)) {
+    return cliError("key_in_file", "the note contains a key value; nothing was written");
+  }
+  // R-4 L-4: without a note no secret is needed and none is read.
+  const ready = await prepareFor(io, args.form, args.runId, null, false, args.note !== null);
+  if (!ready.ok) return ready.outcome;
+  const { prepared, workspaceRoot, runId } = ready.value;
+  const review = await awaitingReview(workspaceRoot, runId);
+  if (!review.ok) return review.outcome;
+
+  let note: MaskedText | null = null;
+  if (args.note !== null) {
+    const masked = createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(cleanText(args.note));
+    if (!masked.ok) return cliError("internal_error", "the note could not be masked; nothing was written");
+    note = masked.text;
+  }
+
+  const lockId = createRunId(new Date(io.clock.now()), io.randomBytes);
+  const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: io.clock });
+  if (!lock.ok) return cliError("workspace_locked", "another run or revert holds the workspace; nothing was written");
+  let replaced: boolean;
+  try {
+    replaced = (await readReviewRecord(workspaceRoot, runId).catch(() => null)) !== null;
+    await writeReviewRecord(workspaceRoot, {
+      schemaVersion: 1,
+      kind: "review_record",
+      runId,
+      at: new Date(io.clock.now()).toISOString(),
+      verdict: args.verdict,
+      note,
+    });
+  } catch {
+    return cliError("internal_error", "the review could not be written; review.json was left as it was");
+  } finally {
+    await releaseLock({ workspaceRoot, runId: lockId });
+  }
+  const output: ReviewOutput = {
+    schemaVersion: RESULT_SCHEMA_VERSION,
+    kind: "review",
+    runId,
+    verdict: args.verdict,
+    exitCode: REVIEW_EXIT_CODES[args.verdict],
+    checklist: review.checklist,
+    replaced,
+  };
+  if (args.json) return { output, exitCode: output.exitCode };
+  const lines = [
+    `Review of run ${runId}: ${args.verdict}${replaced ? " (an earlier review was replaced)" : ""}.`,
+    ...review.checklist.map((item, index) => `  ${index + 1}. ${cleanText(hideKeys(item, currentKey))}`),
+    "The run's result and records are unchanged; `codaryn report` shows the verdict.",
+  ];
+  return { text: `${lines.join("\n")}\n`, exitCode: output.exitCode };
+}
+
+/** Exposed for tests: the latest run rule the commands share with the store (N-23 b). */
+export const latestPlanRule = latestRun;
+/** Exposed for tests: the JSON line writer (N-19). */
+export const planJsonLine = jsonLine;

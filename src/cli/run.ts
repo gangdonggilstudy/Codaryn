@@ -376,6 +376,11 @@ export async function prepareTask(
   io: PrepareEnvironment,
   args: RunArgs,
   notes: RunNotes,
+  /**
+   * `secrets: false` (review without a note, R-4 L-4): the secretEnv variables are not read, so a
+   * missing one does not stop the command. The key and the variable file's values are still kept.
+   */
+  options: { readonly secrets?: boolean } = {},
 ): Promise<CliRunOutcome | { readonly prepared: PreparedTask }> {
   // 1. S-5: nothing given on the command line may reach another machine or a device.
   const argumentPaths: [string | null, CliErrorCode, string][] = [
@@ -611,7 +616,7 @@ export async function prepareTask(
   const addSecret = (value: string): void => {
     if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
   };
-  for (const source of secretSources) {
+  for (const source of options.secrets === false ? [] : secretSources) {
     const value = io.env[source.name];
     if (value === undefined || value.length === 0) {
       return error("secret_env_missing", secretEnvNotSetMessage(source.field, source.index));

@@ -53,11 +53,9 @@ describe("plan", () => {
 
 describe("DR-28 (R-11 M-1)", () => {
   // The app layer passes plan and apply to the CLI, which compares the masked paths (contract
-  // bed4d81). Until the CLI (w3:p2) and the store (w3:p6) implement it, this case fails; it is a
-  // todo so the suite shows it without failing. Remove the todo once both are merged.
+  // bed4d81; the CLI and the store implement it since the bundle merge d7f8381).
   test(
     "a task form with other secrets than the plan run shows and moves nothing: plan_secrets_differ",
-    { todo: "DR-28: the comparison is not implemented in the CLI and the store yet" },
     async () => {
       const secretName = `${FAKE_SECRET}.txt`;
       const { base, app, plan, digest } = await plannedRun({ [secretName]: "alpha\n" }, planSteps(secretName, "sorted/b.txt"));

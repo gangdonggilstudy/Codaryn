@@ -881,6 +881,7 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
   - `PlanOutput`: 행동 목록(지금 비밀로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
+  - U-17(UXM-3, UXM-19, AXM-14, DR-46): `plan`과 `review`는 모델도 검증기도 돌리지 않으므로 간편 형식에서 실행 한도를 요구하지 않는다(설정 파일에 한도가 없어도 됨. 준 한도는 그대로 검사). 비밀 이름과 워크플로만 해석한다. `apply`는 검증기를 그 설정으로 돌리므로 지금처럼 요구한다. 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 쓴다. 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 지금처럼 명시를 요구하고, 오류에 `--workspace .`를 주면 현재 폴더라는 안내를 붙인다. `changes`의 간편 형식이 제공자 설정을 요구하지 않게 하는 것은 앱 계층 몫이다.
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).

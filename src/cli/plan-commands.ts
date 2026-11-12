@@ -228,7 +228,8 @@ async function prepareFor(
   quiet: boolean,
   secrets = true,
 ): Promise<{ ok: true; value: Prepared } | { ok: false; outcome: CommandOutcome }> {
-  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets });
+  // U-17: plan and review run nothing, so their quick form needs no run limits (TaskFormArgs.readOnly).
+  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets, ...(form.readOnly === true ? { readOnly: true } : {}) });
   if (!("prepared" in ready)) return { ok: false, outcome: withQuickFormHint(ready, form) };
   let workspaceRoot: string;
   try {

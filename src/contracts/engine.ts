@@ -348,6 +348,8 @@ export interface RevertOutput {
   readonly skipped: RevertOutcome["skipped"];
   /** N-7: present and true for `--dry-run` only. */
   readonly dryRun?: true;
+  /** DR-25: RevertOutcome.moveSafetyUnchecked, passed on (a dry run that lists a file to move back). */
+  readonly moveSafetyUnchecked?: true;
   /**
    * N-7: the run's revert record from before this command, when it had one: the run was already
    * reverted at `at` with that status. A second revert of the same run normally skips every file

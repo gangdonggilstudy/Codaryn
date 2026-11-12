@@ -67,6 +67,8 @@ import {
   WORKFLOW_PROBLEMS,
 } from "../../../src/contracts/index.js";
 import type {
+  RevertOutcome,
+  RevertOutput,
   RevertRecord,
   RevertRequest,
   RevertedFile,
@@ -176,6 +178,13 @@ const revertWithConsent: RevertRequest = {
 };
 const revertWithout: RevertRequest = { workspaceRoot: "/work", runId: "20261112T120500Z-0000bbbb" };
 const unsafeBack: RevertedFile = { path: "a.jpg", action: "moved_back", from: "2026/a.jpg", unsafe: true };
+/** DR-25: a dry run judges no drive and says so; its outcome and output carry the notice. */
+const dryRunOutcome: RevertOutcome = {
+  reverted: [{ path: "a.jpg", action: "moved_back", from: "2026/a.jpg" }],
+  skipped: [],
+  moveSafetyUnchecked: true,
+};
+const dryRunOutput: Pick<RevertOutput, "dryRun" | "moveSafetyUnchecked"> = { dryRun: true, moveSafetyUnchecked: true };
 const revertRecord: RevertRecord = {
   schemaVersion: 1,
   kind: "revert_record",
@@ -187,7 +196,19 @@ const revertRecord: RevertRecord = {
   unsafeMoveConsent: "cli-flag",
   unsafeMoves: 1,
 };
-void [noConsentInFiles, applyEntry, legacyEntry, startNotShown, startEntry, revertWithConsent, revertWithout, unsafeBack, revertRecord];
+void [
+  noConsentInFiles,
+  applyEntry,
+  legacyEntry,
+  startNotShown,
+  startEntry,
+  revertWithConsent,
+  revertWithout,
+  unsafeBack,
+  revertRecord,
+  dryRunOutcome,
+  dryRunOutput,
+];
 /** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
 // @ts-expect-error a raw note cannot be stored
 const rawNote: ReviewRecord["note"] = "typed by a person" as string;
@@ -369,7 +390,8 @@ describe("G-A plan contract", () => {
   test("DR-25: a revert has the same consent path; its messages say what was moved unsafely and how to consent", () => {
     assert.deepEqual(FIXED_MESSAGES["revert.unsafe_moved"], { count: "count" });
     assert.deepEqual(FIXED_MESSAGES["summary.next_revert_unsafe"], { runId: "runId" });
-    for (const id of ["revert.unsafe_moved", "summary.next_revert_unsafe", "revert.skip.unsafe_move"]) {
+    assert.deepEqual(FIXED_MESSAGES["revert.dry_run_move_unchecked"], {});
+    for (const id of ["revert.unsafe_moved", "summary.next_revert_unsafe", "revert.skip.unsafe_move", "revert.dry_run_move_unchecked"]) {
       assert.ok((MESSAGE_IDS as readonly string[]).includes(id), id);
     }
   });

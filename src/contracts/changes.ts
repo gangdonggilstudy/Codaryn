@@ -148,7 +148,7 @@ export interface RevertedFile {
    * moved or discarded file `path` is the place it returned to. Absent for the other actions.
    */
   readonly from?: string;
-  /** DR-25: present and true when the file was (or, in a dry run, would be) moved back unsafely, with consent. */
+  /** DR-25: present and true when the file was moved back unsafely, with consent. Never in a dry run. */
   readonly unsafe?: true;
 }
 
@@ -165,6 +165,14 @@ export interface SkippedFile {
 export interface RevertOutcome {
   readonly reverted: readonly RevertedFile[];
   readonly skipped: readonly SkippedFile[];
+  /**
+   * DR-25, dry run only: present and true when `reverted` lists a file that would be moved back
+   * (`moved_back`, `restored_from_discard`). A dry run does not check whether this drive can move
+   * files back without risk of replacing one (it creates nothing, N-7); the real revert checks it
+   * before each move and, without the person's consent, skips the files it cannot move safely as
+   * `unsafe_move`. So such a file may still be skipped by the real revert.
+   */
+  readonly moveSafetyUnchecked?: true;
 }
 
 /**
@@ -212,10 +220,10 @@ export interface RevertOutcome {
  *     still free, and is reported `unsafe: true`. A consent for another run counts as none. Files
  *     that can go back safely are moved safely either way. The CLI writes the consent channel and
  *     the number of unsafe moves into revert.json (RevertRecord).
- *   - With `dryRun` the same decisions are reported (`unsafe_move` skips without consent, `unsafe`
- *     files with it). To learn whether the volume has hard links, a dry run may create a probe file
- *     and a hard link to it inside the state directory and remove both at once; nothing else is
- *     created and nothing remains.
+ *   - With `dryRun` nothing is created, not even a probe (N-7), so whether the volume has hard links
+ *     is not judged: a file that could go back is listed in `reverted` without `unsafe`, no file is
+ *     skipped as `unsafe_move`, and the consent is not used. The outcome says so with
+ *     `moveSafetyUnchecked` whenever it lists such a file. The real revert checks it.
  *   - R-9 I-4: an action with a `plan_item_started` record (PlanItemStartedEvent) but neither a
  *     `file_moved`/`file_discarded` nor a `plan_item_failed` for its index may or may not have
  *     been done (the process ended in between). It is handled in the same reverse order, with the

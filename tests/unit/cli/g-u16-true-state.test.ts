@@ -20,7 +20,7 @@ import { ANTHROPIC_API_KEY_ENV } from "../../../src/contracts/index.js";
 import type { ApplyResult, EngineResult, RunsOutput } from "../../../src/contracts/index.js";
 import { createCodarynApp, createNodeAppEnvironment } from "../../../src/app/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
-import { runChanges } from "../../../src/cli/changes.js";
+import { renderChanges, runChanges } from "../../../src/cli/changes.js";
 import { createHumanOutput } from "../../../src/cli/human/index.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
 import { appliedPlanHint, runRevert } from "../../../src/cli/revert.js";
@@ -172,6 +172,20 @@ describe("U-16 (UXM-4): changes of an apply run does not say the run changed no 
   );
 });
 
+describe("U-16 (UXM-4): the CLI's text over the app layer's applyRun (contract ChangesApplyRun)", () => {
+  const VIEW = { schemaVersion: 1, kind: "changes", runId: "20261112T010203Z-0a1b2c3d", exitCode: 0, masking: "current_secrets", files: [] } as const;
+
+  test("an apply run: the text names the plan run and the count of applied actions, not 'changed no file'", () => {
+    const text = renderChanges({ ...VIEW, applyRun: { planRunId: "20261112T010100Z-0a1b2c3c", actions: 2 } } as never);
+    assert.equal(text.includes("the run changed no file"), false, text);
+    assert.ok(text.includes("20261112T010100Z-0a1b2c3c") && text.includes("2 action(s)") && text.includes("codaryn report"), text);
+  });
+
+  test("a run without applyRun and without files: as before", () => {
+    assert.equal(renderChanges(VIEW as never), `changes of run ${VIEW.runId}, masked with the secrets registered now (not the run's own masking)\nthe run changed no file\n`);
+  });
+});
+
 describe("U-16 (UXM-15): a plan made from a task file and applied in the quick form", () => {
   async function quickApply(): Promise<{ withTask: ApplyResult; quick: ApplyResult }> {
     const first = await planRun();
@@ -193,12 +207,11 @@ describe("U-16 (UXM-15): a plan made from a task file and applied in the quick f
     assert.notEqual(quick.taskId, withTask.taskId);
   });
 
-  test(
-    "the quick apply's result tells that the plan was made for another task, whose checks and rules are not used",
-    { todo: "contract (U-16): an apply notice kind for a plan made by another task; then the CLI sets it (src/cli/plan-commands.ts), texts N-B, the summary N-C" },
-    async () => {
-      const { quick } = await quickApply();
-      assert.ok(quick.notices.some((notice) => /organize-demo|another task|task/.test(notice)), JSON.stringify(quick.notices));
-    },
-  );
+  test("the quick apply's result tells that the plan was made by another task (plan_task_differs); the task-file apply does not", async () => {
+    const { withTask, quick } = await quickApply();
+    assert.deepEqual(quick.noticeKinds, ["plan_task_differs"], JSON.stringify(quick));
+    assert.ok(quick.notices.some((notice) => notice.includes("another task")), JSON.stringify(quick.notices));
+    assert.equal(quick.status, "done", "told, not refused");
+    assert.equal(withTask.noticeKinds, undefined, JSON.stringify(withTask));
+  });
 });

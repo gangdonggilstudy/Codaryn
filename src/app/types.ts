@@ -8,6 +8,7 @@
  */
 
 import type {
+  ChangesApplyRun,
   CliErrorCode,
   Clock,
   CodarynConfig,
@@ -542,6 +543,13 @@ export interface ChangesOutput {
   readonly masking: "current_secrets";
   /** One entry per changed path, in the order the run first changed them. */
   readonly files: readonly ChangedFileView[];
+  /**
+   * U-16 (UXM-4): for an apply run only, the plan run it applied and how many actions it applied
+   * (ChangesApplyRun). Its moves and discards are its plan's actions, not file writes of its own, so
+   * `files` is empty; its report lists them. Judged as the run list judges the run; absent while
+   * the apply has no result yet (the number of actions is not known then).
+   */
+  readonly applyRun?: ChangesApplyRun;
 }
 
 /** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */

@@ -13,7 +13,7 @@ import type { ApplyNoticeKind, ApplyResult } from "../../../src/contracts/index.
 
 describe("U-8: an apply whose plan run's records could not be checked says so", () => {
   test("the notice kind and its text id", () => {
-    assert.deepEqual([...APPLY_NOTICE_KINDS], ["plan_records_unchecked"]);
+    assert.ok((APPLY_NOTICE_KINDS as readonly string[]).includes("plan_records_unchecked"), "the full list is pinned by g-u16-true-state");
     const kind: ApplyNoticeKind = "plan_records_unchecked";
     assert.ok((MESSAGE_IDS as readonly string[]).includes(`apply.notice.${kind}`));
   });

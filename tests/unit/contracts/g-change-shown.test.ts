@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, test } from "node:test";
 
-import { PARKED_DIR_NAME, changeShownMatches, maskedParts, sameMaskedParts } from "../../../src/contracts/index.js";
+import { FIXED_MESSAGES, PARKED_DIR_NAME, changeShownMatches, maskedParts, sameMaskedParts } from "../../../src/contracts/index.js";
 import type { ChangeShown, ContentHash, ListParkedFiles, ParkedFile, PrivacyGateway, SkippedFile } from "../../../src/contracts/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 
@@ -95,5 +95,10 @@ describe("R-16 L-1: a file a revert moved aside and could not put back is findab
     assert.match(skipped.parkedAt ?? "", /^\.codaryn\/parked\/[^/]+\/[0-9]+-[0-9a-f]+$/);
     const list: ListParkedFiles = async () => [{ path: skipped.parkedAt ?? "", runId: "20261112T120500Z-0000bbbb" } satisfies ParkedFile];
     assert.equal((await list("/work")).length, 1);
+  });
+
+  test("the revert summary and doctor say how many files were left there", () => {
+    assert.deepEqual(FIXED_MESSAGES["revert.parked"], { count: "count" });
+    assert.deepEqual(FIXED_MESSAGES["doctor.lock.parked_left"], { count: "count" });
   });
 });

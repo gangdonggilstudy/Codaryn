@@ -56,8 +56,10 @@ import {
   WORKFLOW_TOOLS,
   WORKFLOW_TOOL_NAMES,
   REFUSAL_HINTS,
+  TOOL_FAILURE_HINTS,
   asRawText,
   failedToolContent,
+  toolFailureMessage,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -200,6 +202,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   INVALID_ARGS_LEAD,
   ...Object.values(ARGS_RULES),
   ...Object.values(REFUSAL_HINTS),
+  // U-50 (AXM-6): the hint after a tool runner's failure.
+  ...(Object.values(TOOL_FAILURE_HINTS) as string[]),
   ...FAILED_CONTENT_PARTS,
   WRITE_NOT_APPLIED_MESSAGE,
   VERIFIER_NOT_RUN_EVIDENCE,
@@ -714,7 +718,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     name: WorkflowToolName,
     outcome: RawWorkflowToolOutcome,
   ): Promise<ToolResult | End> => {
-    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, outcome.message));
+    // U-50 (AXM-6): a runner's failure gets its code's hint (TOOL_FAILURE_HINTS), then the one form.
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, toolFailureMessage(outcome.code, outcome.message)));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,
@@ -940,7 +945,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (isEnd(outcome)) return outcome;
 
     // Mask before anything is recorded or returned to the model.
-    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, outcome.message));
+    // U-50 (AXM-6): a runner's failure gets its code's hint (TOOL_FAILURE_HINTS), then the one form.
+    const content = outcome.ok ? maskJson(outcome.payload) : mask(failedToolContent(outcome.code, toolFailureMessage(outcome.code, outcome.message)));
     if (content === null) return MASKING_FAILED;
     const result: ToolResult = {
       callId: call.id,

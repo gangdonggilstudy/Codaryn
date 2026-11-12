@@ -50,9 +50,29 @@ env.CODARYN_CONFIG = join(gui, "build", "smoke-no-config.json");
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
 
+// R-10 L-4: a link inside the built renderer to a folder outside it (the temporary folder, on
+// another drive than the build here) with a script the page will try to import.
+const outside = mkdtempSync(join(tmpdir(), "codaryn-smoke-outside-"));
+writeFileSync(join(outside, "probe.js"), "export const probe = 1;\n");
+const outsideLink = join(gui, "build", "src", "renderer", "outside-link");
+rmSync(outsideLink, { recursive: true, force: true });
+let outsideLinked = true;
+try {
+  symlinkSync(outside, outsideLink, "junction");
+} catch {
+  outsideLinked = false;
+}
+
 for (const target of [result, profile, stateDir]) rmSync(target, { recursive: true, force: true });
 const run = spawnSync(electron, [join(gui, "build", "tests", "smoke", "smoke.js"), first], { cwd: gui, env, stdio: "inherit", timeout: 180_000 });
 for (const dir of [first, second]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+// The link itself is removed, not what it points to; then the folder it pointed to.
+try {
+  rmSync(outsideLink, { force: true });
+} catch {
+  // A junction removed as a file can fail on some systems; the build directory is rebuilt anyway.
+}
+rmSync(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (!existsSync(result)) {
   process.stderr.write(`gui smoke: no result (exit ${run.status}, ${run.error?.message ?? "no error"})\n`);
   process.exit(1);
@@ -98,6 +118,7 @@ const expected = [
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],
   ["doctorWithPath", (v) => v.ok === false && v.code === "invalid_args"],
+  ["linkedScript", (v) => !outsideLinked || v === "blocked"],
   ["fetchHttp", (v) => v === "blocked"],
   ["fetchFile", (v) => v === "blocked"],
   ["windowOpen", (v) => v === "blocked"],

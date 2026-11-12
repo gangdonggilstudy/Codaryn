@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 
-import { APP_INDEX_URL, isAppUrl, resolveAppUrl } from "../../src/main/app-url.js";
+import { APP_INDEX_URL, isAppUrl, isInsideRoot, resolveAppUrl } from "../../src/main/app-url.js";
 import { REMOVED_HOST_VARIABLES, hostEnvironment } from "../../src/main/environment.js";
 import { WorkspaceHandles } from "../../src/main/handles.js";
 import { envValue, findDevelopmentNode } from "../../src/main/node-path.js";
@@ -160,4 +160,17 @@ test("main (R-10 L-3): finding Node never touches network or device paths on PAT
   touched.length = 0;
   assert.equal(findDevelopmentNode({ PATH: "/dev/fd:/usr/bin" }, "linux", (file) => (touched.push(file), false)), null);
   assert.deepEqual(touched, ["/usr/bin/node"]);
+});
+
+test("main (R-10 L-4): inside the root means strictly under it, on the same drive", () => {
+  const w = path.win32;
+  assert.equal(isInsideRoot("D:\\gui\\build", "D:\\gui\\build\\app.js", w), true);
+  assert.equal(isInsideRoot("D:\\gui\\build", "D:\\gui\\build\\a\\b.js", w), true);
+  assert.equal(isInsideRoot("D:\\gui\\build", "C:\\other\\x.js", w), false, "another drive");
+  assert.equal(isInsideRoot("D:\\gui\\build", "D:\\gui\\other.js", w), false);
+  assert.equal(isInsideRoot("D:\\gui\\build", "D:\\gui\\build", w), false, "the root itself");
+  assert.equal(isInsideRoot("D:\\gui\\build", "\\\\server\\share\\x.js", w), false, "a network path");
+  assert.equal(isInsideRoot("/srv/build", "/srv/build/app.js", path.posix), true);
+  assert.equal(isInsideRoot("/srv/build", "/srv/buildx/app.js", path.posix), false);
+  assert.equal(isInsideRoot("/srv/build", "/srv/build/..x/a.js", path.posix), false, "a name starting with .. is refused too");
 });

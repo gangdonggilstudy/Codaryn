@@ -4,7 +4,7 @@
  * protocol handler (protocol.ts) also checks that the real path stays under the root.
  */
 
-import { extname, isAbsolute, join, relative, sep } from "node:path";
+import path, { extname, join } from "node:path";
 
 export const APP_SCHEME = "app";
 export const APP_HOST = "codaryn";
@@ -20,6 +20,16 @@ export const SERVED_TYPES: Readonly<Record<string, string>> = {
 
 const SEGMENT = /^[A-Za-z0-9._-]{1,128}$/;
 const MAX_SEGMENTS = 16;
+
+/**
+ * Whether `target` lies strictly inside `root`. `relative` gives an absolute path when the two are on
+ * different drives (R-10 L-4), so that is refused too, as is anything that climbs out with "..".
+ * `paths` is the platform's path module; tests pass `path.win32` or `path.posix`.
+ */
+export function isInsideRoot(root: string, target: string, paths: typeof path = path): boolean {
+  const inside = paths.relative(root, target);
+  return inside.length > 0 && !paths.isAbsolute(inside) && !inside.split(paths.sep).includes("..") && !inside.startsWith("..");
+}
 
 /** Whether a URL belongs to the app's own origin. */
 export function isAppUrl(url: string): boolean {
@@ -50,7 +60,6 @@ export function resolveAppUrl(url: string, root: string): { readonly file: strin
   const type = SERVED_TYPES[extname(segments[segments.length - 1] as string).toLowerCase()];
   if (type === undefined) return null;
   const file = join(root, ...segments);
-  const inside = relative(root, file);
-  if (inside.length === 0 || inside.startsWith("..") || isAbsolute(inside) || inside.split(sep).includes("..")) return null;
+  if (!isInsideRoot(root, file)) return null;
   return { file, type };
 }

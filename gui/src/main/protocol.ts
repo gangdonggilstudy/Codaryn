@@ -4,10 +4,9 @@
  */
 
 import { readFile, realpath } from "node:fs/promises";
-import { relative, sep } from "node:path";
 import { protocol } from "electron";
 import type { Session } from "electron";
-import { APP_SCHEME, resolveAppUrl } from "./app-url.js";
+import { APP_SCHEME, isInsideRoot, resolveAppUrl } from "./app-url.js";
 import { CONTENT_SECURITY_POLICY } from "./security-policy.js";
 
 /** Must run before the app is ready. */
@@ -33,8 +32,8 @@ export function handleAppProtocol(ses: Session, root: string): void {
       const base = await realRoot;
       // A link inside the build directory must not lead out of it.
       const real = await realpath(target.file);
-      const inside = relative(base, real);
-      if (inside.length === 0 || inside.startsWith("..") || inside.split(sep).includes("..")) return notFound();
+      // R-10 L-4: the same check as the URL mapping, so a link to another drive is refused too.
+      if (!isInsideRoot(base, real)) return notFound();
       const body = await readFile(real);
       return new Response(body, {
         status: 200,

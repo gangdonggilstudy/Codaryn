@@ -14,6 +14,27 @@ export function progressLines(run: CliRun): string[] {
   return run.stderr.split(/\r?\n/).filter((line) => line.trim() !== "");
 }
 
+/**
+ * DR-47 (U-21): how the end summary quotes the agent's last message: each row of it after this
+ * prefix (MODEL_TEXT_PREFIX in src/cli/human/format.ts), under a label that says it is the agent's
+ * own words. The rows are in whatever language the model wrote, not in the message language.
+ */
+export const AGENT_WORDS_PREFIX = "  | ";
+
+/**
+ * `text` without the rows of the agent's last message, for checks of the message language.
+ * The quoted rows must form one block (consecutive lines); nothing else is taken out.
+ */
+export function withoutAgentWords(text: string): string {
+  const lines = text.split("\n");
+  const quoted = lines.flatMap((line, index) => (line.startsWith(AGENT_WORDS_PREFIX) ? [index] : []));
+  assert.ok(
+    quoted.every((index, at) => at === 0 || index === (quoted[at - 1] ?? -2) + 1),
+    "the agent's quoted words are one block of rows",
+  );
+  return lines.filter((line) => !line.startsWith(AGENT_WORDS_PREFIX)).join("\n");
+}
+
 /** stderr as written, and with every JSON line (if a line is JSON) decoded. */
 export function progressSources(run: CliRun): TextSource[] {
   return [{ label: "stderr", text: run.stderr }, decodedSource("stderr", run.stderr, true)];

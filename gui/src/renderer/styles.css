@@ -268,3 +268,11 @@ button:focus-visible,
     background: none;
   }
 }
+/* U-21 (DR-47): the agent's own words, set apart from what was checked; lines and tabs kept. */
+.agent-words {
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 3px solid #888;
+  padding-left: 0.6rem;
+  margin: 0.4rem 0;
+}

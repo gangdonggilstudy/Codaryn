@@ -16,7 +16,7 @@ import { actionLine } from "../plan/plan-screen.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
-import { clock, localTime } from "./run-model.js";
+import { FINAL_MESSAGE_LIMIT, clock, localTime } from "./run-model.js";
 import { saveReportButton } from "../report/report-screen.js";
 import type { RunFilter, RunModel } from "./run-model.js";
 
@@ -167,6 +167,15 @@ function resultView(t: Texts, result: RunResultView, labels: { status: string; r
     }
   }
   box.append(checks);
+
+  // U-21 (DR-47, AXM-1): the agent's last message, after what was checked, under a label that says
+  // it is the agent's own words; text only, its lines kept.
+  if (result.finalMessage !== undefined && result.finalMessage !== null) {
+    const words = el("div", undefined, { id: "run-final-message" });
+    words.append(el("h4", t.format("run.finalMessage")), el("div", result.finalMessage.text, { class: "agent-words", id: "run-final-message-text" }));
+    if (result.finalMessage.truncated) words.append(el("p", t.format("run.finalMessageTruncated", { count: String(FINAL_MESSAGE_LIMIT) }), { class: "notice" }));
+    box.append(words);
+  }
 
   const usage = result.usage;
   const seconds = usage.durationMs === null ? null : Math.round(usage.durationMs / 1000);

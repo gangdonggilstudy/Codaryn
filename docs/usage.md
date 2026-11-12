@@ -94,6 +94,8 @@ Files changed: 1
 Denied calls: 1
 To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.
 Usage: model turns 6 · tool calls 3 · 0 s
+The agent's last message (the agent's own words, not a verified fact):
+  | 빠진 '## 할 일' 절을 더했다.
 Read the report, and revert if needed.
 Run id: 20261112T030342Z-42ed82a7
 Report: codaryn report --workspace <workspace> --run 20261112T030342Z-42ed82a7
@@ -104,6 +106,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T030342Z-42ed82a7
 - `run command — denied (command/command_not_allowed)`: 허용 목록이 비어 있어 명령이 거부됐다. 거부는 실행을 끝내지 않고 모델에 돌아간다. 끝 요약의 `Denied calls`와 그 아래 안내가 이것이다. task 파일 실행이므로 안내는 task 파일의 `policy.commands`를 가리킨다.
 - `check #1 — not passed (fail)` → `repair 1`: 검증 실패 근거를 모델에 돌려보내 다시 고치게 했다(9절). 검증기는 id가 아니라 순번으로 나온다.
 - 끝 요약의 `Files changed`는 바뀐 파일 수다. `summary.md`를 두 번 썼어도 파일은 하나다.
+- `The agent's last message (…)` 아래의 `|` 줄은 모델이 마지막에 한 답이다(대본의 마지막 단계). 에이전트의 말이며 검증된 사실이 아니다. 무엇이 확인됐는지는 위의 `Checks passed`가 말한다(8절 "에이전트의 마지막 답").
 - stdout의 JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이다. `changes`에는 `summary.md`의 생성과 변경 두 건, `usage.repairAttempts`는 1이다. JSON의 한글은 `\uXXXX`로 나오므로 PowerShell에서 `$r = node dist/src/cli/main.js run --task $demo\task.json | ConvertFrom-Json`처럼 바로 변수로 받을 수 있다.
 - `init`으로 기본 설정을 만든 뒤라면(4절) 두 줄이 더 나온다: 진행 줄 `codaryn: using the config file in the default location: %APPDATA%\Codaryn\config.json`과 요약 줄 `Used the config file in the default location: %APPDATA%\Codaryn\config.json`. `init`의 기본 한도는 이 예시의 한도보다 크므로 실행 결과는 같다.
 
@@ -510,7 +513,14 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 **사람용 출력(stderr):** stdout은 늘 JSON 한 줄이고, 사람이 읽는 글은 stderr에 나온다.
 
 - 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
-- 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 에이전트의 마지막 답(있을 때), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- **에이전트의 마지막 답(DR-47):** 실행이 모델의 마지막 답(도구 호출 없이 끝낸 응답)으로 끝났으면, 끝 요약의 사용량 다음에 머리말 `The agent's last message (the agent's own words, not a verified fact):`(한국어 `에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님):`) 아래로 그 글이 나온다.
+  - 머리말 그대로 에이전트의 말이며 검증된 사실이 아니다. "다 고쳤다"고 써도 검증을 통과했다는 뜻이 아니다. 판정은 검증 결과와 `report`로 한다.
+  - 글은 줄마다 `  | `로 시작한다. 탭과 이어진 공백은 공백 하나로 보이고, 긴 줄은 접힌다.
+  - 글은 가린 기록에서 만든다. 가릴 값은 토큰(`[[CODARYN_SECRET:…]]`)으로, 키 모양은 `[key]`로 보인다. 제어 문자와 보이지 않는 문자(양방향 제어, 영폭 공백 등)는 빠진다(개인정보 문서 5절).
+  - 2,000자(코드 포인트)까지다. 넘으면 앞 2,000자만 보이고 그 아래에 `(cut: only the first 2000 characters are shown)`(한국어 `(잘림: 앞 2000자만 보입니다)`)가 붙는다.
+  - 없는 경우: 계획 실행(`plan_pending`, 그 자리는 계획의 요약이다), 한도에 걸리는 등 모델의 답 없이 끝난 실행, 답이 비었거나 공백뿐인 실행.
+  - 확인(U-21 통합 판 `be5e089`의 실제 CLI): 3절 체험, `analyze` 실행(답 `done`), 가릴 값·키 모양·탭·CRLF·제어 문자·이어진 공백·2,100자를 넣은 대본(영어·한국어), 계획 실행, `max_model_turns`로 끝난 실행, 공백뿐인 답(셋 다 없음).
 - 오류 설명: 무엇이 잘못됐는지, 위치(6절 "오류 위치"), 고치는 법, 코드. 실행 전 오류에도 나온다. 오류 JSON의 영어 `message`는 stdout에만 있다. 예:
 
 ```
@@ -557,7 +567,7 @@ codaryn: 오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 �
 
 `run`의 stdout에는 JSON 한 줄만 나온다. 비 ASCII 문자는 `\uXXXX`로 나오므로 어느 코드 페이지에서도 JSON으로 읽힌다.
 
-- **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다.
+- **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다. 에이전트의 마지막 답이 있으면 `finalMessage`(`text`, `truncated`)도 있다(8절). `text`는 끝 요약과 같은 처리를 거친 글이고, 줄바꿈은 LF, 탭은 그대로다. 실행 폴더의 `result.json`에도 같은 필드가 있다. DR-47 전의 판이 쓴 `result.json`에는 없다.
 - **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절). 메시지에는 값 대신 필드 이름만 적힌다.
 - `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다.
 

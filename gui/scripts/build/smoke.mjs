@@ -517,6 +517,8 @@ const expected = [
   // U-32: the report's warning above its tabs; the marked run's revert preview says so, as the CLI's revert.
   ["reportRecordsChangedFirst", (v) => v === "report-records-changed"],
   ["revertRecordsChanged", (v) => v === true],
+  // U-48 (U-43): the marked run's changes: the warning first, every file without text, no comparison.
+  ["changesRecordsChanged", (v) => v !== null && v.first === "changes-records-changed" && v.files >= 1 && v.ready === String(v.files) && v.hidden === v.files && v.diffs === 0],
   // U-11 (3.11): the first-run guide.
   ["setupSandbox", (v) => v.made === true && v.realUntouched === true],
   ["setupFolder", (v) => v === "folder"],

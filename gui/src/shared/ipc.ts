@@ -806,7 +806,7 @@ export interface PlanView {
   readonly recordsChanged?: true;
   /**
    * U-32 (U-14 AXM-15): the summary the model wrote for this plan, the agent's words and not what is
-   * approved, as rows (the engine's quoteModelText, model-text.ts). Absent when there is none, and
+   * approved, as rows (the app layer's modelTextRows, engine-host/model-text.ts). Absent when there is none, and
    * for a marked plan run.
    */
   readonly summary?: readonly string[];
@@ -877,7 +877,10 @@ export interface ChangedFileItem {
   readonly after: string | null;
 }
 
-export type ChangesReply = { readonly ok: true; readonly runId: string; readonly files: readonly ChangedFileItem[] } | { readonly ok: false; readonly code: string };
+/** U-48 (U-43, DR-38): `recordsChanged`, the run has a records-changed mark (its files then have no text). */
+export type ChangesReply =
+  | { readonly ok: true; readonly runId: string; readonly recordsChanged: boolean; readonly files: readonly ChangedFileItem[] }
+  | { readonly ok: false; readonly code: string };
 
 /** The longest file text one side may have (MAX_READ_BYTES of the app layer is 262,144 bytes), and all of them together. */
 export const MAX_CHANGE_TEXT_CHARS = 300_000;
@@ -889,6 +892,8 @@ export function toChangesReply(value: unknown): ChangesReply {
   const fail = { ok: false, code: "host_error" } as const;
   const { runId, masking, files } = value;
   if (!isRunId(runId) || masking !== "current_secrets" || !Array.isArray(files) || files.length > 10_000) return fail;
+  const recordsChanged = value["recordsChanged"] ?? false;
+  if (typeof recordsChanged !== "boolean") return fail;
   const items: ChangedFileItem[] = [];
   let total = 0;
   const text = (v: unknown): v is string | null => v === null || (typeof v === "string" && v.length <= MAX_CHANGE_TEXT_CHARS);
@@ -903,7 +908,7 @@ export function toChangesReply(value: unknown): ChangesReply {
     if (total > MAX_CHANGES_TOTAL_CHARS) return fail;
     items.push({ path, created, state: state as ChangedFileItem["state"], unavailable: unavailable as string | null, before, after });
   }
-  return { ok: true, runId, files: items };
+  return { ok: true, runId, recordsChanged, files: items };
 }
 
 /** GU-3 (3.7): one check of a run's last round, by number (N-24 (a)). */

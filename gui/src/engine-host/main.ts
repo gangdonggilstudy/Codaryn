@@ -22,7 +22,7 @@ import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
 import type { TreeEngine } from "./tree.js";
 import { modelTextOf } from "./model-text.js";
-import type { ModelText, QuoteModelText } from "./model-text.js";
+import type { ModelText, ModelTextRows } from "./model-text.js";
 import { MAX_PLAN_SUMMARY_ROWS } from "../shared/ipc.js";
 
 const channelWrite = process.stdout.write.bind(process.stdout);
@@ -47,6 +47,9 @@ interface EngineAppModule {
   createCodarynApp(environment: unknown, hooks?: { readonly providerDeps?: Readonly<Record<string, { readonly fetch?: typeof fetch }>> }): HostApp;
   /** DR-22: the providers the app layer connects (an array of names). */
   readonly CONNECTED_MODEL_PROVIDERS?: unknown;
+  /** U-48 (U-42): a model's text as the CLI draws it, and its rows (model-text.ts). */
+  readonly modelTextRows?: unknown;
+  readonly MODEL_TEXT_MAX_ROWS?: unknown;
 }
 
 interface EngineWorkspaceModule {
@@ -69,14 +72,6 @@ interface EngineHumanModule {
     progressLine(event: unknown): string | null;
     applyProgressLine?(event: unknown): string | null;
   };
-  /** U-32: the rows of a model's text the CLI shows (DR-47); its plan view uses the same number. */
-  readonly FINAL_MESSAGE_MAX_LINES?: unknown;
-}
-
-/** U-32: the CLI's drawing of a model's text for people (src/cli/human/format.ts), model-text.ts. */
-interface EngineQuoteModule {
-  quoteModelText: QuoteModelText;
-  readonly MODEL_TEXT_PREFIX?: unknown;
 }
 
 const RECORD_TYPE = /^[a-z][a-z_]{0,39}$/;
@@ -221,14 +216,14 @@ async function main(): Promise<number> {
   const providers = Array.isArray(appModule.CONNECTED_MODEL_PROVIDERS)
     ? appModule.CONNECTED_MODEL_PROVIDERS.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name))
     : [];
-  // U-32 (U-14 AXM-15): a plan's summary as the CLI's plan draws it, every key value now set hidden
-  // first; at most the CLI's rows, and never more than the main process takes (its "… (+N)" row
+  // U-32 (U-14 AXM-15), U-48 (U-42): a plan's summary as the CLI's plan draws it, by the app layer's
+  // modelTextRows (no CLI module read by path), every key value now set hidden first; at most the
+  // app layer's MODEL_TEXT_MAX_ROWS, and never more than the main process takes (its "… (+N)" row
   // included). An engine without it shows no model text.
-  const quoting = await load<EngineQuoteModule>(join(engineDir, "cli", "human", "format.js"), ["quoteModelText"]);
-  const lines = humanModule.FINAL_MESSAGE_MAX_LINES;
-  const maxRows = Math.min(MAX_PLAN_SUMMARY_ROWS - 1, typeof lines === "number" && Number.isSafeInteger(lines) && lines > 0 ? lines : MAX_PLAN_SUMMARY_ROWS - 1);
-  const modelText: ModelText | undefined =
-    quoting === null || typeof quoting.MODEL_TEXT_PREFIX !== "string" ? undefined : modelTextOf((text, rows, columns) => quoting.quoteModelText(text, rows, columns), quoting.MODEL_TEXT_PREFIX, maxRows, hideAllKeys);
+  const drawRows = appModule.modelTextRows;
+  const rowsGiven = appModule.MODEL_TEXT_MAX_ROWS;
+  const maxRows = Math.min(MAX_PLAN_SUMMARY_ROWS - 1, typeof rowsGiven === "number" && Number.isSafeInteger(rowsGiven) && rowsGiven > 0 ? rowsGiven : MAX_PLAN_SUMMARY_ROWS - 1);
+  const modelText: ModelText | undefined = typeof drawRows === "function" ? modelTextOf((text, options) => (drawRows as ModelTextRows)(text, options), maxRows, hideAllKeys) : undefined;
   const shown = (text: string): string => hideAllKeys(textSafety.cleanText(text));
   // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
   const shownText = (text: string): string => hideAllKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true));

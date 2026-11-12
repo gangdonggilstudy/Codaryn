@@ -77,5 +77,7 @@ export function revertValue(outcome: unknown, shown: Shown): Obj | HostFailure {
     skipped,
     moveSafetyUnchecked: output["moveSafetyUnchecked"] === true,
     revertedBefore: isObj(before) && typeof before["at"] === "string" ? { at: before["at"], status: before["status"] === "partial" ? "partial" : "complete" } : null,
+    // U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checked every file.
+    ...(output["recordsChanged"] === true ? { recordsChanged: true } : {}),
   };
 }

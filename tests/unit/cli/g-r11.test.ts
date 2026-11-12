@@ -3,13 +3,14 @@
  * workspace; scripted model; the secret is a fake value built at run time. Nothing is sent.
  *
  * - M-1 (DR-28): plan and apply with other secrets than the plan run's showed and recorded what the
- *   plan run had masked. They must stop before anything is shown or moved. Until plan.json carries
- *   the plan run's masked notation (contract w3:p9, store w3:p6) these tests are `todo`.
+ *   plan run had masked. They stop as plan_secrets_differ before anything is shown, asked, recorded
+ *   or moved; so does a plan stored without its masked form (before DR-28).
  * - L-1: a workflow definition's limits are defaults, not caps; the cap is the config's (S-7).
  * - L-2: the quick form of plan, apply and review says why it needs the config's run settings.
  */
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -77,7 +78,8 @@ async function planRun(): Promise<{ base: string; ws: string; planned: EngineRes
   await writeFile(path.join(base, "script.json"), JSON.stringify({ schemaVersion: 1, steps }), "utf8");
   await writeFile(path.join(base, "task.json"), JSON.stringify(task()), "utf8");
   // A config without the secret: what the quick form of plan and apply would read.
-  await writeFile(path.join(base, "config.json"), JSON.stringify({ schemaVersion: 1, limits: LIMITS }), "utf8");
+  // The quick form uses the anthropic rules (S-7): the token limit must be a number.
+  await writeFile(path.join(base, "config.json"), JSON.stringify({ schemaVersion: 1, limits: { ...LIMITS, maxTotalTokens: 100_000 } }), "utf8");
   const outcome = await runCli({ ...io(base, ["run", "--task", "task.json", "--quiet"]), assemble: assembleRun });
   assert.equal(outcome.output.kind, "run", JSON.stringify(outcome.output));
   const planned = outcome.output as EngineResult;
@@ -86,7 +88,6 @@ async function planRun(): Promise<{ base: string; ws: string; planned: EngineRes
 }
 
 const shows = (outcome: unknown): string => JSON.stringify(outcome);
-const DR28 = "DR-28: needs the plan run's masked notation in plan.json (contract w3:p9, store w3:p6)";
 
 describe("R-11 M-1: plan and apply with the plan run's secrets", () => {
   test("plan with the plan run's task shows the plan masked", async () => {
@@ -100,26 +101,55 @@ describe("R-11 M-1: plan and apply with the plan run's secrets", () => {
 });
 
 describe("R-11 M-1 (DR-28): plan and apply with other secrets stop before anything is shown or moved", () => {
-  test("plan in the quick form with a config that does not register the secret", { todo: DR28 }, async () => {
+  test("plan in the quick form with a config that does not register the secret", async () => {
     const { base, ws, planned } = await planRun();
     for (const extra of [[], ["--json"]]) {
       const argv = ["plan", "--workspace", ws, "--config", "config.json", "--workflow", "organize", "--run", planned.runId, ...extra];
       const shown = await runPlan(io(base, argv));
       assert.equal(shows(shown).includes(SECRET), false, "the value the plan run masked is not shown");
-      assert.ok("output" in shown && shown.output.kind === "error", shows(shown));
+      assert.ok("output" in shown && shown.output.kind === "error" && shown.output.code === "plan_secrets_differ", shows(shown));
     }
   });
 
-  test("apply in that form moves nothing and records nothing", { todo: DR28 }, async () => {
+  test("apply in that form moves nothing, records nothing and asks nothing", async () => {
     const { base, ws, planned } = await planRun();
     const runsBefore = await readdir(path.join(ws, ".codaryn", "runs"));
     const digest = (planned.plan?.digest ?? "").slice(0, 12);
     const argv = ["apply", "--workspace", ws, "--config", "config.json", "--workflow", "organize", "--run", planned.runId, "--digest", digest, "--quiet"];
-    const applied = await runApply(io(base, argv));
-    assert.equal(shows(applied).includes(SECRET), false);
-    assert.ok("output" in applied && applied.output.kind === "error", shows(applied));
+    let asked = 0;
+    const ask = async (): Promise<string> => {
+      asked += 1;
+      return "y";
+    };
+    for (const extra of [[], ["--allow-unsafe-move"]]) {
+      const applied = await runApply({ ...io(base, [...argv, ...extra]), ask });
+      assert.equal(shows(applied).includes(SECRET), false);
+      assert.ok("output" in applied && applied.output.kind === "error" && applied.output.code === "plan_secrets_differ", shows(applied));
+    }
+    // Without --digest at a terminal the plan would be shown in the question: it is not asked.
+    const noDigest = argv.filter((item, index) => item !== "--digest" && argv[index - 1] !== "--digest");
+    const unasked = await runApply({ ...io(base, noDigest), ask });
+    assert.ok("output" in unasked && unasked.output.kind === "error" && unasked.output.code === "plan_secrets_differ", shows(unasked));
+    assert.equal(asked, 0, "nothing was asked");
     assert.equal(await readFile(path.join(ws, SECRET, "a.txt"), "utf8"), "alpha\n", "nothing moved");
     assert.deepEqual(await readdir(path.join(ws, ".codaryn", "runs")), runsBefore, "no apply run was recorded");
+  });
+
+  test("a plan stored without its masked form (before DR-28) is neither shown nor applied", async () => {
+    const { base, ws, planned } = await planRun();
+    const file = path.join(ws, ".codaryn", "runs", planned.runId, "plan.json");
+    const stored = JSON.parse(await readFile(file, "utf8")) as { actions: Record<string, unknown>[] };
+    // Remove the masked form, and give result.json the new bytes' digest, as a plan written
+    // before DR-28 would have: only the masking check can refuse it then.
+    const bare = JSON.stringify({ ...stored, actions: stored.actions.map(({ shown: _shown, ...action }) => action) });
+    await writeFile(file, bare, "utf8");
+    const resultFile = path.join(ws, ".codaryn", "runs", planned.runId, "result.json");
+    const result = JSON.parse(await readFile(resultFile, "utf8")) as EngineResult;
+    const digest = createHash("sha256").update(bare, "utf8").digest("hex");
+    await writeFile(resultFile, JSON.stringify({ ...result, plan: { ...result.plan, digest } }), "utf8");
+    const shown = await runPlan(io(base, ["plan", "--task", "task.json", "--run", planned.runId]));
+    assert.ok("output" in shown && shown.output.kind === "error" && shown.output.code === "plan_secrets_differ", shows(shown));
+    assert.equal(shows(shown).includes(SECRET), false);
   });
 });
 

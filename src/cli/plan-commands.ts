@@ -24,6 +24,7 @@ import {
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
+  planActionShownMatches,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
@@ -269,6 +270,18 @@ async function loadShown(
   for (const action of loaded.plan.actions) {
     const masked = maskAction(action, privacy);
     if (masked === null) return { ok: false, outcome: cliError("internal_error", "a path of the plan could not be masked; nothing is shown") };
+    // DR-28 (R-11 M-1): the secrets registered now must leave exactly the text visible that the
+    // plan run left visible (its masked form, stored with each action). Otherwise, or for a plan
+    // stored without that form, nothing is shown, asked, recorded or moved.
+    if (!planActionShownMatches(action, masked)) {
+      return {
+        ok: false,
+        outcome: cliError(
+          "plan_secrets_differ",
+          "the secrets registered now mask the plan's paths differently from the plan run, or the plan has no masked form; nothing was shown, asked, recorded or moved. Use the plan run's task form (--task), or make the plan again",
+        ),
+      };
+    }
     actions.push(masked);
   }
   const manifest = await createInventoryChecker({ workspaceRoot: value.workspaceRoot }).capture();

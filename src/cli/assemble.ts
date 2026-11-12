@@ -3,7 +3,7 @@
  * Other modules are used through their public `index.ts` exports only.
  */
 
-import { stat } from "node:fs/promises";
+import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
 import { JOURNAL_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import { createPolicyGate } from "../policy/index.js";
@@ -25,12 +25,16 @@ import type {
   Clock,
   EngineDeps,
   EngineResult,
+  ListRuns,
   ModelProvider,
   ResolvedTaskSpec,
   RevertOutcome,
   RevertRun,
+  RevertStatus,
   Workspace,
 } from "../contracts/index.js";
+import { readRevertRecord, writeRevertRecord } from "./revert-record.js";
+import { resolveRunReference } from "./run-ref.js";
 
 export interface AssemblyInput {
   readonly task: ResolvedTaskSpec;
@@ -66,18 +70,47 @@ function lockedMessage(holder: LockInfo | null): string {
 export interface RevertCommandInput {
   /** Absolute path of an existing directory. */
   readonly workspace: string;
-  /** The run to revert. Already checked against RUN_ID_PATTERN. */
+  /** The run to revert, or LATEST_RUN_ALIAS. Already checked against RUN_ID_PATTERN. */
   readonly runId: string;
   /** Id under which this revert holds the workspace lock. */
   readonly lockId: string;
   readonly clock: Clock;
+  /** N-7: decide and report, change nothing; no lock and no revert record. */
+  readonly dryRun?: boolean;
 }
 
 export type RevertCommandOutcome =
-  | { readonly ok: true; readonly outcome: RevertOutcome }
+  | {
+      readonly ok: true;
+      readonly outcome: RevertOutcome;
+      /** The run that was (or would be) reverted: `latest` resolved. */
+      readonly runId: string;
+      /** N-7: the run's checked revert record from before this command, or null. */
+      readonly revertedBefore: { readonly at: string; readonly status: RevertStatus } | null;
+    }
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
 export type RevertCommand = (input: RevertCommandInput) => Promise<RevertCommandOutcome>;
+
+export interface RevertCommandOptions {
+  /**
+   * N-7: the store's `revertRun` when it honours `RevertRequest.dryRun` (it changes nothing then).
+   * Absent: `--dry-run` stops before anything is read, because a store that ignored the flag
+   * would really revert.
+   */
+  readonly dryRun?: RevertRun;
+  /** N-7: the store's `listRuns`, for `--run latest`. Absent: `latest` is not available. */
+  readonly listRuns?: ListRuns;
+}
+
+async function exists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function isFile(file: string): Promise<boolean> {
   try {
@@ -92,31 +125,62 @@ async function isFile(file: string): Promise<boolean> {
  * workspace. The workspace lock is held while files are put back, so no run can start meanwhile,
  * and a running task makes the revert stop with `workspace_locked` before anything changes.
  */
-export function createRevertCommand(revertRun: RevertRun): RevertCommand {
-  return async ({ workspace, runId, lockId, clock }) => {
+export function createRevertCommand(revertRun: RevertRun, options: RevertCommandOptions = {}): RevertCommand {
+  const failed = (error: unknown): RevertCommandOutcome => {
+    // revertRun rejects only before it changes anything. Its text is not passed on.
+    const code = error instanceof RevertRunError && error.code === "run_not_found" ? "run_not_found" : "invalid_run_record";
+    const message =
+      code === "run_not_found"
+        ? "the workspace has no journal for that run id; nothing was changed"
+        : "the run's journal cannot be read; nothing was changed";
+    return { ok: false, code, message };
+  };
+  return async ({ workspace, runId: requested, lockId, clock, dryRun = false }) => {
+    if (dryRun && options.dryRun === undefined) {
+      return { ok: false, code: "internal_error", message: "--dry-run is not connected in this build; nothing was read or changed" };
+    }
     let workspaceRoot: string;
     try {
       workspaceRoot = (await createWorkspace({ root: workspace })).root;
     } catch {
       return { ok: false, code: "workspace_not_found", message: "the workspace is not an existing directory" };
     }
+    // N-7, N-18: `latest` is resolved first; an ambiguous one stops here.
+    const resolved = await resolveRunReference(workspaceRoot, requested, { exists, ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }) });
+    if (!resolved.ok) return resolved;
+    const runId = resolved.runId;
     const journal = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId, JOURNAL_FILE_NAME);
     if (!(await isFile(journal))) {
       return { ok: false, code: "run_not_found", message: "the workspace has no journal for that run id; nothing was changed" };
+    }
+    const revertedBefore = await readRevertRecord(workspaceRoot, runId);
+
+    if (dryRun && options.dryRun !== undefined) {
+      // N-7: no lock, no record, nothing written.
+      try {
+        return { ok: true, outcome: await options.dryRun({ workspaceRoot, runId, dryRun: true }), runId, revertedBefore };
+      } catch (error) {
+        return failed(error);
+      }
     }
 
     const lock = await acquireLock({ workspaceRoot, runId: lockId, clock });
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
     try {
-      return { ok: true, outcome: await revertRun({ workspaceRoot, runId }) };
+      const outcome = await revertRun({ workspaceRoot, runId });
+      // N-7: the revert record, written while the lock is held; best effort.
+      await writeRevertRecord(workspaceRoot, {
+        schemaVersion: 1,
+        kind: "revert_record",
+        runId,
+        at: new Date(clock.now()).toISOString(),
+        status: outcome.skipped.length === 0 ? "complete" : "partial",
+        reverted: outcome.reverted.length,
+        skipped: outcome.skipped.length,
+      });
+      return { ok: true, outcome, runId, revertedBefore };
     } catch (error) {
-      // revertRun rejects only before it changes anything. Its text is not passed on.
-      const code = error instanceof RevertRunError && error.code === "run_not_found" ? "run_not_found" : "invalid_run_record";
-      const message =
-        code === "run_not_found"
-          ? "the workspace has no journal for that run id; nothing was changed"
-          : "the run's journal cannot be read; nothing was changed";
-      return { ok: false, code, message };
+      return failed(error);
     } finally {
       await releaseLock({ workspaceRoot, runId: lockId });
     }

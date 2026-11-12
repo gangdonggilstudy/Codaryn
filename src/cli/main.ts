@@ -10,12 +10,14 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { readFile, stat } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { revertRun } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
+import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
 import { runDoctor } from "./doctor.js";
 import { runModels } from "./models.js";
 import { anthropicModelLister } from "./provider.js";
@@ -71,8 +73,20 @@ async function install(): Promise<InstallInfo | null> {
   }
 }
 
+/** os.homedir() can throw when no home directory is known; there is then no default location. */
+function homeDirectory(): string | null {
+  try {
+    return homedir();
+  } catch {
+    return null;
+  }
+}
+
 async function dispatch(): Promise<CommandOutcome> {
   const info = await install();
+  // N-1: the default config location, read when neither --config nor CODARYN_CONFIG is given.
+  const home = homeDirectory();
+  const defaultConfig = findDefaultConfigLocation(process.platform, process.env, home);
   // U-3: null means the package root was not found; every run is then refused.
   const installDir = info?.dir ?? null;
   const asked = helpRequest(argv);
@@ -102,6 +116,7 @@ async function dispatch(): Promise<CommandOutcome> {
         // Y-1: listAnthropicModels (src/model/anthropic) through the CLI's provider module. It is
         // called only after the key and the address are resolved, with the global fetch.
         listModels: anthropicModelLister,
+        defaultConfig,
         // Y-3: the number is asked only when both stdin and stdout are terminals.
         ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask: askLine } : {}),
       });
@@ -117,6 +132,8 @@ async function dispatch(): Promise<CommandOutcome> {
         isFile,
         locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),
         relatePaths: (target, base) => relateRealPaths(target, base),
+        defaultConfig,
+        defaultConfigRefused: defaultLocationRefused(process.platform, process.env, home),
       });
     default:
       return runCli({
@@ -134,6 +151,7 @@ async function dispatch(): Promise<CommandOutcome> {
         assemble: assembleRun,
         installDir,
         relatePaths: (target, base) => relateRealPaths(target, base),
+        defaultConfig,
         writeProgress: (line) => {
           process.stderr.write(line);
         },

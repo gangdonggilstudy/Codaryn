@@ -171,6 +171,23 @@ describe("i18n catalog: language and wording", () => {
     }
   });
 
+  test("yes/no prompts show the default answer as the capital letter (N-20, UX 7)", () => {
+    for (const language of LANGS) {
+      assert.match(MESSAGE_TEXTS[language]["prompt.yes_no_default_yes"], /\[Y\/n\]/);
+      assert.match(MESSAGE_TEXTS[language]["prompt.yes_no_default_no"], /\[y\/N\]/);
+    }
+    assert.match(MESSAGE_TEXTS.ko["prompt.yes_no_default_no"], /Enter: 아니오/);
+  });
+
+  test("help and doctor texts keep option names, check ids' codes and exit codes as they are", () => {
+    for (const language of LANGS) {
+      assert.match(MESSAGE_TEXTS[language]["help.option.dry_run"], /^--dry-run: /);
+      assert.match(MESSAGE_TEXTS[language]["help.option.vars_file"], /^--vars-file <[^>]+>: /);
+      assert.match(MESSAGE_TEXTS[language]["help.exit.run"], /done 0, failed 1, .*70$/);
+      assert.match(MESSAGE_TEXTS[language]["doctor.api_key.missing"], /provider_not_configured/);
+    }
+  });
+
   test("a pass is always within the configured checks", () => {
     assert.match(MESSAGE_TEXTS.ko["summary.verifiers"], /지정한 검증 범위에서/);
     assert.match(MESSAGE_TEXTS.en["summary.verifiers"], /within the configured checks/);

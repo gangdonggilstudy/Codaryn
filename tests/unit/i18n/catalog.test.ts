@@ -385,6 +385,19 @@ describe("i18n catalog: language and wording", () => {
     assert.match(MESSAGE_TEXTS.ko["reason.verified"], /지정한 검증/);
   });
 
+  test("U-21 (DR-47): the agent's last message is always labelled as its own words, not a verified fact", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    for (const id of ["summary.final_message", "report.final_message"] as const) {
+      assert.match(en[id], /agent's last message.*agent's own words, not a verified fact/, id);
+      assert.match(ko[id], /에이전트의 마지막 답.*에이전트의 말이며 검증된 사실이 아/, id);
+      // It never reads as a result of the run: no "passed" or "done".
+      assert.ok(!/통과|완료/.test(ko[id]) && !/passed|done/.test(en[id]), id);
+    }
+    // A cut text says so and how much is shown.
+    assert.match(en["summary.final_message_truncated"], /cut.*first \{count\} characters/);
+    assert.match(ko["summary.final_message_truncated"], /잘림.*앞 \{count\}자/);
+  });
+
   test("U-24 (DR-50): one word for one thing in what people read", () => {
     const texts = (language: "en" | "ko") => Object.entries(MESSAGE_TEXTS[language]) as [string, string][];
     // Option names (--workflow, --digest) and field names (secretEnv, policy.planActions) stay as they are.

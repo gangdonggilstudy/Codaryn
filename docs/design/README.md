@@ -11,6 +11,7 @@
 | [vscode-extension.md](vscode-extension.md) | VS Code 확장 설계(P5-A): 실행마다 CLI 자식, 화면과 명령, 확인 질문·취소의 같은 의미, 설정·키 규칙, 패키징, 시험, 결정 VX-D1~VX-D12 | PM 채택(`3d1eec2`). VX-D6은 DR-7로 바뀜. DR-1(계획·사람 확인 화면)에 맞춘 수정 대기. VX-D4(`@types/vscode`)는 사용자 확인 대기(Q-3). 코드 없음 |
 | [general-tasks.md](general-tasks.md) | 범용 작업 워크플로 설계(P4-G): 워크플로 정의와 등록, 문서 작성·자료 분석·파일 정리, 실행 사이 계획 확인과 적용, 사람 확인, 엔진 변경 E1~E5, 계약 제안, 결정 GT-D1~GT-D14 | PM 채택(`09bbb2e`). GT-D8은 (b). DR-3·DR-5·DR-6·DR-9에 맞춘 수정 대기. Q-4~Q-6 사용자 확인 대기. 코드 없음. 구현 G-A 착수 |
 | [standalone-gui.md](standalone-gui.md) | 비개발자용 독립 GUI 설계(P5-U): 화면 흐름(계획 화면, 사람 확인 포함), 형태 후보와 권고, 엔진 연결, 지원 OS, 접근성, 두 언어, 보안 경계, 결정 GUI-D1~GUI-D13 | 병합(`b246f7c`). DR-1·DR-7·DR-8·DR-9 반영(D3). 권고는 설계 기준으로만 받았고, GUI-D2·GUI-D6은 DR-8·DR-7로 정해졌다. 형태 확정은 단계 4 뒤, 구현은 Q-7 뒤 |
+| [second-provider-facts.md](second-provider-facts.md) | 두 번째 제공자(OpenAI, DR-22)의 사실 확인: 두 번째 제공자 설계의 확인 필요 C-1~C-15에 대한 답(Responses API, 인증, 키 환경 변수, 주소, 오류와 429 구분 등), 설계의 가정과 다른 점, 출처. 항목마다 [확인]·[미확인] 표기 | PM이 OpenAI 공식 문서로 확인(2026-11-12, `1396caa`). 실제 API는 호출하지 않았다. DR-31의 사실 기준. 짝인 설계 문서는 아직 main에 없다 |
 
 ## 표기 규칙
 
@@ -38,6 +39,6 @@
 
 ## 관련 문서
 
-- [사용 안내](../usage.md): 현재 명령(설치, 키 없는 체험, `models`, `doctor`, `report`, 진행 표시)을 다룬다(N-12, `aa1b59e`). `init`, `runs`, `--profile`, 한 줄 실행, 워크플로와 계획 확인 절은 해당 기능이 병합된 뒤 더한다.
+- [사용 안내](../usage.md): 현재 명령(설치, 키 없는 체험, `init`, `models`, `doctor`, 프로필, 한 줄 실행, `runs`, `report`, `changes`, 되돌리기)과 범용 작업(워크플로, `plan`·`apply`·`review`, 18절)을 다룬다. 알려진 한계는 16절에 모았다. 두 번째 제공자는 구현된 뒤에 더한다.
 - [자기 개발 절차](../self-development.md): 후보 준비, 무결성 확인, 보고서와 검토 순서.
 - [단계 3 작업 지시](../work-orders/phase-3-self-development.md): `models` 명령 결정 Y-1~Y-5 포함.

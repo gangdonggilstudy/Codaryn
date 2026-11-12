@@ -15,7 +15,8 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MAX_RUN_ITEM_CHARS, MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
-import { guardGlobalFetch, loopbackOnlyFetch } from "./transport.js";
+import net from "node:net";
+import { guardGlobalFetch, guardSockets, loopbackOnlyFetch } from "./transport.js";
 import type { HostApp, HostMessages } from "./host.js";
 import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
@@ -146,8 +147,18 @@ async function main(): Promise<number> {
   }
   // R21-I-3, R21b-I-1: tests reach this machine only (their fake API); nothing else is sent, by any
   // provider: the global fetch (taken by providers given none) and Anthropic's own are guarded.
-  const refused = (): void => log("codaryn engine host: the test transport refused a request outside this machine");
-  if (args.loopbackOnly) guardGlobalFetch(globalThis, refused);
+  // PM (a)(c): every refusal is counted (the tests end by asking for the count), and connections
+  // made without fetch (node:net, http, https, tls) are guarded too.
+  let refusedCount = 0;
+  const refused = (): void => {
+    refusedCount += 1;
+    log("codaryn engine host: the test transport refused a request outside this machine");
+  };
+  if (args.loopbackOnly) {
+    guardGlobalFetch(globalThis, refused);
+    guardSockets(net, refused);
+  }
+  const transport = (): { readonly mode: "loopback-only" | "real"; readonly refused: number } => ({ mode: args.loopbackOnly ? "loopback-only" : "real", refused: refusedCount });
   const hooks = args.loopbackOnly ? { anthropicDeps: { fetch: loopbackOnlyFetch(fetch, refused) } } : undefined;
   const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment(), hooks);
   // R21-I-2: the key variables of every provider the contract knows (API_PROVIDERS), not one name.
@@ -215,7 +226,7 @@ async function main(): Promise<number> {
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
   const token = (): string => randomBytes(16).toString("hex");
   const envSet = (name: string): boolean => (process.env[name] ?? "").length > 0;
-  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, apiProviders, providers, itemsIn, token, write: writeLine, log });
+  await serve(process.stdin, { app, messages, tree, shown, shownText, envSet, apiProviders, transport, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

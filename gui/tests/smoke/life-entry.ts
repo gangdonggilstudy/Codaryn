@@ -23,7 +23,10 @@ startGui({
   async afterLoad({ host }) {
     const state = await host();
     const hostPid = "host" in state ? (state.host.pid ?? null) : null;
-    writeFileSync(join(GUI, "build", "life.json"), `${JSON.stringify({ mainPid: process.pid, hostPid })}\n`);
+    // PM (a): the test transport's count, checked by the smoke script (no request is made here).
+    const answer = "host" in state ? await state.host.call("transport", {}, 10_000) : null;
+    const transport = answer === null ? null : answer.ok ? answer.value : answer.error.code;
+    writeFileSync(join(GUI, "build", "life.json"), `${JSON.stringify({ mainPid: process.pid, hostPid, transport })}\n`);
     if (process.env["CODARYN_SMOKE_LIFE"] !== "hold") app.quit();
   },
 });

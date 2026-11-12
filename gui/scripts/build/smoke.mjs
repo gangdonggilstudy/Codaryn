@@ -334,6 +334,9 @@ const expected = [
   ["reportVerdict", (v) => v === "accepted"],
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
+  // PM (a): the engine host's test transport refused no request to another machine.
+  ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
+  ["transportRefusedEnd", (v) => v === "host ended" || JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
@@ -442,6 +445,7 @@ if (life === null || typeof life.hostPid !== "number") {
   lifeCheck("hostEndsWhenMainKilled", false, "the app did not start");
   held.kill();
 } else {
+  lifeCheck("lifeTransportRefused", JSON.stringify(life.transport) === JSON.stringify({ mode: "loopback-only", refused: 0 }), `transport ${JSON.stringify(life.transport)}`);
   // Kills the main process only (TerminateProcess on Windows), not its children.
   process.kill(life.mainPid);
   const gone = await goneWithin(life.hostPid, 5_000);

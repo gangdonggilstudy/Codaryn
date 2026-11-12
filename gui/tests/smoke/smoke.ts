@@ -73,6 +73,8 @@ function sockets(pids: readonly number[]): { tcp: number; udp: number; outside: 
 }
 
 const results: Record<string, unknown> = {};
+/** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
+const transportOf = (response: { readonly ok: boolean; readonly value?: unknown; readonly error?: { readonly code: string } }): unknown => (response.ok ? response.value : response.error?.code);
 /** The main process's OS dialogs this test answered, by id. */
 const dialogs: string[] = [];
 /** GU-6: answer the next widening dialog with "do not write". */
@@ -461,6 +463,8 @@ startGui({
         }),
       );
       results["sockets"] = sockets([...pids]);
+      // PM (a): the engine host's test transport refused no request to another machine in steps 1 to 7.
+      results["transportRefused"] = "host" in state ? transportOf(await state.host.call("transport", {}, 10_000)) : state.failure;
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.
@@ -473,6 +477,9 @@ startGui({
       window.close();
       await Promise.race([closed, sleep(30_000)]);
       results["closeGuard"] = { dialogs: [...dialogs], closed: window.isDestroyed(), ms: Date.now() - begin };
+      // And none in step 8 either, while the host still runs.
+      const after = await host();
+      results["transportRefusedEnd"] = "host" in after && !after.host.exited ? transportOf(await after.host.call("transport", {}, 10_000)) : "host ended";
     } catch (error) {
       results["error"] = error instanceof Error ? error.message : String(error);
     } finally {

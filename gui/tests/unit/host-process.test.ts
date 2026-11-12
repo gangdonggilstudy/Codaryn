@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import net from "node:net";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -47,6 +48,42 @@ async function started(opts: EngineHostOptions): Promise<EngineHost> {
   const outcome = await startEngineHost(opts);
   assert.ok(outcome.ok, `the host started: ${JSON.stringify(outcome)}`);
   return outcome.host;
+}
+
+/** PM (a): how many requests to another machine the host's test transport refused. */
+async function refusedCount(host: EngineHost): Promise<number> {
+  const answer = await host.call("transport", {}, 10_000);
+  assert.ok(answer.ok, JSON.stringify(answer));
+  const value = answer.value as { mode: string; refused: number };
+  assert.equal(value.mode, "loopback-only");
+  return value.refused;
+}
+
+/** PM (a): a real host's test ends with no refused request, unless the test makes one on purpose. */
+async function closeChecked(host: EngineHost, refused = 0): Promise<void> {
+  try {
+    assert.equal(await refusedCount(host), refused, "requests to another machine the test transport refused");
+  } finally {
+    await host.close();
+  }
+}
+
+/**
+ * PM (1): an address no test may reach is never another machine. The "outside" address of these
+ * tests is 127.0.0.2 on a port nobody listens on: in the loopback block (on Windows routed to the
+ * loopback interface), so even without the transport nothing leaves this machine and the system
+ * refuses the connection at once; the transport counts only 127.0.0.1, ::1 and localhost as this
+ * machine, so it refuses it and counts it.
+ */
+async function closedLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => resolve(typeof address === "object" && address !== null ? address.port : 0));
+    });
+  });
 }
 
 /** A fake engine directory with app/index.js and i18n/index.js. */
@@ -118,7 +155,7 @@ test("host process: the real host on this Node answers doctor with and without a
     const refused = await host.call("doctor", { workspace: "relative" }, 10_000);
     assert.equal(!refused.ok && refused.error.code, "invalid_args");
   } finally {
-    await host.close();
+    await closeChecked(host);
     await cleanup();
   }
   assert.equal(host.exited, true, "close ends the host");
@@ -137,7 +174,7 @@ test("host process: messages come from the shared catalog in the language the CL
     assert.match(value.texts["status.done"] ?? "", /[가-힣]/, "the Korean catalog answered");
     assert.ok(Object.values(value.texts).every((text) => text.length > 0));
   } finally {
-    await host.close();
+    await closeChecked(host);
     await cleanup();
   }
 });
@@ -145,10 +182,11 @@ test("host process: messages come from the shared catalog in the language the CL
 test("host process (R21-I-3): with the test transport the real host's model list cannot reach any other machine", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
   const { dir, cleanup } = await tempDir();
   try {
-    // A documentation address (TEST-NET-1, RFC 5737): nothing answers there. Without the transport
-    // the request would wait for its 20 s time limit; with it, it is refused before it is sent.
+    // PM (1): 127.0.0.2 on a closed port (see closedLoopbackPort). The transport refuses the request
+    // before it is sent and counts it; without the transport the system would refuse it.
+    const port = await closedLoopbackPort();
     const config = path.join(dir, "config.json");
-    await fs.writeFile(config, JSON.stringify({ schemaVersion: 1, model: "fake-model", apiBaseUrl: "https://192.0.2.1", requestTimeoutMs: 20_000, maxRetries: 0 }));
+    await fs.writeFile(config, JSON.stringify({ schemaVersion: 1, model: "fake-model", apiBaseUrl: `https://127.0.0.2:${port}`, requestTimeoutMs: 20_000, maxRetries: 0 }));
     const secrets = (await import(pathToFileURL(path.join(GUI, "..", "dist", "tests", "fixtures", "secrets.js")).href)) as { FAKE_API_KEY: string };
     const contracts = (await import(pathToFileURL(path.join(ENGINE_DIR, "contracts", "index.js")).href)) as { ANTHROPIC_API_KEY_ENV: string };
     const env = { ...testEnv(dir), CODARYN_CONFIG: config, [contracts.ANTHROPIC_API_KEY_ENV]: secrets.FAKE_API_KEY };
@@ -159,9 +197,10 @@ test("host process (R21-I-3): with the test transport the real host's model list
       const took = Date.now() - begin;
       assert.equal(answer.ok, true, JSON.stringify(answer));
       assert.equal((answer as { value: { ok: boolean } }).value.ok, false, "the list failed");
-      assert.ok(took < 5_000, `refused at once, not after the request's time limit (${took} ms)`);
+      assert.ok(took < 5_000, `refused at once (${took} ms)`);
     } finally {
-      await host.close();
+      // The one request of the list, refused by the transport (not by the system).
+      await closeChecked(host, 1);
     }
   } finally {
     await cleanup();
@@ -191,7 +230,7 @@ test("host process (R21-I-2): the value of every provider's key variable is hidd
       assert.equal(entry.shown.includes(value), false, "the shown name hides the value");
       assert.equal(entry.masked, true);
     } finally {
-      await host.close();
+      await closeChecked(host);
     }
   } finally {
     await cleanup();
@@ -227,7 +266,7 @@ test("host process (PM, R-21): the value of every key variable the contract know
         assert.ok(/key_in_file/.test(text) || text.includes("model-"), `${name}: ${text.slice(0, 200)}`);
         assert.equal(text.includes(value), false, `${name}: the answer does not hold the value`);
       } finally {
-        await host.close();
+        await closeChecked(host);
       }
     } finally {
       await cleanup();
@@ -442,8 +481,9 @@ test("host process (R21b-I-1): with the test transport a run with the OpenAI pro
   const { dir, cleanup } = await tempDir();
   try {
     // The app layer hands only Anthropic's transport a `fetch` (anthropicDeps); OpenAI's adapter
-    // takes the global one. A documentation address (TEST-NET-1): without the guard the request
-    // waits for its 20 s limit; with it, it is refused before it is sent.
+    // takes the global one. PM (1): 127.0.0.2 on a closed port (see closedLoopbackPort); the
+    // transport refuses the request before it is sent and counts it.
+    const port = await closedLoopbackPort();
     const workspace = path.join(dir, "ws");
     await fs.mkdir(workspace);
     const config = path.join(dir, "config.json");
@@ -452,7 +492,7 @@ test("host process (R21b-I-1): with the test transport a run with the OpenAI pro
       JSON.stringify({
         schemaVersion: 1,
         provider: "openai",
-        providers: { openai: { model: "fake-model", maxOutputTokens: 64, apiBaseUrl: "https://192.0.2.1/v1", requestTimeoutMs: 20_000, maxRetries: 0 } },
+        providers: { openai: { model: "fake-model", maxOutputTokens: 64, apiBaseUrl: `https://127.0.0.2:${port}/v1`, requestTimeoutMs: 20_000, maxRetries: 0 } },
         limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: 10_000, maxDurationMs: 60_000 },
       }),
     );
@@ -473,10 +513,11 @@ test("host process (R21b-I-1): with the test transport a run with the OpenAI pro
       const outcome = await Promise.race([done, new Promise((resolve) => setTimeout(() => resolve("timeout"), 40_000))]);
       const took = Date.now() - begin;
       assert.notEqual(outcome, "timeout", "the run ended");
-      assert.ok(took < 8_000, `refused at once, not after the request's time limit (${took} ms): ${JSON.stringify(outcome).slice(0, 300)}`);
+      assert.ok(took < 8_000, `ended at once (${took} ms): ${JSON.stringify(outcome).slice(0, 300)}`);
       assert.match(JSON.stringify(outcome), /model_error/, "the run ended as a model error");
     } finally {
-      await host.close();
+      // The run's one model request, refused by the transport (not by the system).
+      await closeChecked(host, 1);
     }
   } finally {
     await cleanup();

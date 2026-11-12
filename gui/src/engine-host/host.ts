@@ -81,6 +81,8 @@ export interface HostDeps {
   readonly providers: readonly string[];
   /** GU-6: whether an environment variable is set now (never its value); absent: none is. */
   readonly envSet?: (name: string) => boolean;
+  /** PM (a): the test transport (loopback-only) and its count of refused requests; absent: real. */
+  readonly transport?: () => { readonly mode: "loopback-only" | "real"; readonly refused: number };
   /** The contract's API provider table (API_PROVIDERS): names and variable names. Absent: none. */
   readonly apiProviders?: readonly ApiProviderEntry[];
   /** GU-3: how a run's events become progress items, in the window's language. */
@@ -302,6 +304,10 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
         return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
       }
+      case "transport":
+        // PM (a): the test transport's mode and how many requests to another machine it refused.
+        if (!isObj(args) || Object.keys(args).length > 0) throw new ArgsError();
+        return deps.transport?.() ?? { mode: "real", refused: 0 };
       case "proposeSettings": {
         if (!isObj(args) || !onlyKeys(args, ["edit"])) throw new ArgsError();
         const edit = parseSettingsEdit(args["edit"]);

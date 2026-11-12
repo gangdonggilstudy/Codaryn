@@ -248,11 +248,17 @@ export const CUT_COMPLETE_MARK = "CUT-COMPLETE-LINE written well before the cut"
 export const CUT_LATE_MARK = "CUT-LATE-LINE";
 
 /**
- * `node checks/cut-after-exit.mjs`: starts a detached child that inherits stdout and exits after
- * one second. The child writes CUT_COMPLETE_MARK, about 6 KB of filler lines and the first half
- * of the secret from data/settings.txt at once, and the rest of the secret plus CUT_LATE_MARK only
- * four seconds later. A runner that stops reading shortly after the parent exits (V-2) therefore
- * holds output that ends inside the secret.
+ * `node checks/cut-after-exit.mjs`: starts a detached child that inherits stdout. The child writes
+ * CUT_COMPLETE_MARK, about 6 KB of filler lines and the first half of the secret from
+ * data/settings.txt at once, and the rest of the secret plus CUT_LATE_MARK only four seconds after
+ * that write. A runner that stops reading shortly after the parent exits (V-2) therefore holds
+ * output that ends inside the secret.
+ *
+ * Order (Z-1, docs/reviews/2026-11-12-z1-investigation.md 3): the parent exits only after the child
+ * says, over IPC, that its first write was handed to the pipe. The parent used to exit after a fixed
+ * second; under load the child could start later than that, and the runner then settled on an
+ * empty stdout. The runner still settles after the parent's exit while the child keeps the pipe
+ * open, which is what V-2 checks.
  */
 export const CUT_AFTER_EXIT = [
   'import { spawn } from "node:child_process";',
@@ -260,12 +266,15 @@ export const CUT_AFTER_EXIT = [
   'if (process.argv[2] === "child") {',
   '  const token = /^token=(.*)$/m.exec(readFileSync("data/settings.txt", "utf8"))[1];',
   "  const half = token.slice(0, Math.floor(token.length / 2));",
-  `  process.stdout.write(${JSON.stringify(`${CUT_COMPLETE_MARK}\n`)} + ("f".repeat(100) + "\\n").repeat(60) + half);`,
-  `  setTimeout(() => process.stdout.write(token.slice(half.length) + "\\n" + ${JSON.stringify(`${CUT_LATE_MARK}\n`)}), 4000);`,
+  `  process.stdout.write(${JSON.stringify(`${CUT_COMPLETE_MARK}\n`)} + ("f".repeat(100) + "\\n").repeat(60) + half, () => {`,
+  '    process.send("written", () => process.disconnect());',
+  `    setTimeout(() => process.stdout.write(token.slice(half.length) + "\\n" + ${JSON.stringify(`${CUT_LATE_MARK}\n`)}), 4000);`,
+  "  });",
   "} else {",
-  '  const child = spawn(process.execPath, [process.argv[1], "child"], { detached: true, stdio: ["ignore", "inherit", "inherit"] });',
+  '  const child = spawn(process.execPath, [process.argv[1], "child"], { detached: true, stdio: ["ignore", "inherit", "inherit", "ipc"] });',
   "  child.unref();",
-  "  setTimeout(() => process.exit(0), 1000);",
+  '  child.once("message", () => process.exit(0));',
+  '  child.once("exit", () => process.exit(0));',
   "}",
   "",
 ].join("\n");

@@ -260,3 +260,22 @@ describe("DR-40 (b): a real-format key glued to what comes before it is refused 
     refused(run, api.requests.length);
   });
 });
+
+describe("DR-42 (a): the CLI's output hiding finds a registered value split by any other character", () => {
+  const REGISTERED = ["fake", "registered", "value", "not", "shaped", "0001"].join("-");
+  const OTHERS: readonly (readonly [string, string])[] = [
+    ["variation selector", char(0xfe0f)],
+    ["combining grapheme joiner", char(0x034f)],
+    ["Hangul filler", char(0x3164)],
+    ["middle dot", char(0x00b7)],
+    ["a literal backslash-n", "\n"],
+  ];
+  for (const [name, splitter] of OTHERS) {
+    test(`${name}: nothing of the value is left`, async () => {
+      const { hideKeys } = await import("../../../src/cli/text-safety.js");
+      const hidden = hideKeys(`a ${REGISTERED.slice(0, 10)}${splitter}${REGISTERED.slice(10)} b`, [REGISTERED]);
+      assert.equal(hidden.includes(REGISTERED.slice(10)), false, JSON.stringify(hidden));
+      assert.ok(hidden.startsWith("a ") && hidden.endsWith(" b"), JSON.stringify(hidden));
+    });
+  }
+});

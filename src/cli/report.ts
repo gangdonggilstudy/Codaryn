@@ -367,7 +367,20 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     ...(review === undefined ? {} : { review: { checklist: recordedList(obj(review)["checklist"]) } }),
     // DR-47 (U-21): the agent's last message as recorded; never for a plan run.
     ...finalMessageOf(rec["finalMessage"], reason),
+    // DR-52 (U-25): whether masking worked, the two counts as recorded.
+    ...maskingOf(rec["masking"]),
   };
+}
+
+/**
+ * DR-52 (U-25): EngineResult.masking, absent when the result has none (nothing registered, or a
+ * result written before DR-52). Two counts only, rebuilt from those fields: anything else the field
+ * holds is not carried. Present only with at least one registered value.
+ */
+function maskingOf(value: unknown): { masking?: { registeredValues: number; maskedPlaces: number } } {
+  if (value === undefined) return {};
+  const rec = obj(value);
+  return { masking: { registeredValues: int(rec["registeredValues"], 1), maskedPlaces: int(rec["maskedPlaces"]) } };
 }
 
 /** DR-47: EngineResult.finalMessage, absent when the result has none. A plan run has none. */

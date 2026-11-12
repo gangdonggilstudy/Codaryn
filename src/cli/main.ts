@@ -23,7 +23,7 @@ import { CODARYN_LANG_ENV } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
 import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
-import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
+import { inspectRun, listRuns, loadPlan, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runChanges } from "./changes.js";
@@ -170,6 +170,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
     case "revert": {
       const outcome = await runRevert({
         argv,
+        // U-16 (R-55 L-1): the hint's lines in the person's language once the catalog has them.
+        messages: human.messages,
         cwd: process.cwd(),
         isDirectory,
         clock,
@@ -184,11 +186,14 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           // N-26, N-27 (a): the store judges one run as the run list does: an id with no entry of
           // exactly that name is run_not_found, a damaged run is refused.
           inspect: inspectRun,
+          // U-16 (UXM-5): a plan run an apply used is told apart; nothing of it is marked reverted.
+          loadPlan,
         }),
         // DR-25: at a terminal, files skipped as unsafe_move may go back after a [y/N] question on stderr.
         ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
       });
       if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));
+      if (outcome.hint !== undefined) writeHuman(outcome.hint);
       return plain(outcome);
     }
     case "report":

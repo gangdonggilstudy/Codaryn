@@ -191,6 +191,18 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - `runId`는 `<UTC yyyymmddThhmmssZ>-<8자리 16진 난수>`다(P-3). 예: `20261112T031500Z-9f2c41ab`.
 - 치환 대응표는 실행 중 메모리에만 둔다. 영구 금고와 재개는 없다. 되돌리기용 원문은 14절의 스냅샷으로 디스크에 남는다.
 
+### 8.1 가림 개수 (U-25, DR-52, AXM-17)
+
+- `EngineResult`의 선택 필드 `masking`(`{registeredValues, maskedPlaces}`)은 가림이 일했는지를 개수로만 말한다. 가릴 값, 그 값이 있던 곳, 길이는 담지 않는다.
+  - `registeredValues`: 실행이 등록한 서로 다른 가릴 값의 수다. 키를 등록했으면 키도 하나로 센다. 같은 값을 다른 줄 바꿈으로 쓴 변형은 따로 세지 않는다.
+  - `maskedPlaces`: 엔진이 모델에 보낸 글(시스템 글, 작업 메시지, 도구 결과, 재수정 메시지)에서 가린 곳의 수다. 글마다 처음 보낼 때 한 번 센다. 모델이 돌려준 글은 세지 않는다.
+  - 등록된 가릴 값이 없으면 필드가 없다. DR-52 전에 쓴 결과와 개수를 말하지 않는 가림(시험용 가짜)에도 없다. 등록했지만 가린 곳이 없으면 `maskedPlaces`가 0이어서, 필드가 없는 경우와 구별된다.
+  - `run`의 stdout과 `result.json`이 같은 객체를 담는다. 필드를 더하기만 한다(DR-48).
+- `report --json`의 `result`는 `result.json`의 `masking`을 기록된 대로 담는다. 두 개수만 다시 짓고, 그 필드의 다른 내용은 옮기지 않는다. 개수가 아니면(객체가 아님, 정수가 아님, `registeredValues`가 1보다 작음, `maskedPlaces`가 음수) 다른 손상된 필드처럼 `invalid_run_record`다. 보고서의 글 본문은 바뀌지 않는다.
+- 사람용 끝 요약은 문구 `summary.masking`으로 두 개수를 보인다(출력 담당의 몫).
+- SP-0: `run --json` 고정 값에 `"masking":{"registeredValues":1,"maskedPlaces":0}`이 더해졌다(PM 승인, 더하기만).
+- 계약에 따라, 보안 검토자가 이 개수가 비밀의 단서가 되지 않는다고 확인한 뒤에 합친다(DR-52).
+
 ## 9. 계약 변경 절차
 
 변경이 필요하면 담당자가 사유와 원하는 형태를 PM에 요청한다 → PM이 승인한다 → 역할 1(기반 담당)만 `src/contracts/**`와 이 문서를 수정한다. 다른 담당자는 계약을 직접 고치거나 로컬 사본을 만들지 않는다.
@@ -1135,6 +1147,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - `revert`: 막지 않는다(스냅샷·다이제스트 확인은 그대로). 결과에 `recordsChanged: true`(미리보기 포함). 사람용 줄은 렌더러(N-C) 몫이다.
   - 표시가 없으면 두 필드 모두 없다.
   - `apply`(U-1, R-33 R33-L3): 표시가 있는 계획 실행(읽을 수 없는 표시도)은 적용하지 않는다. 계획을 불러온 직후, 아무것도 묻기 전에 `plan_records_changed`(종료 2)로 거부한다. 묻거나 기록하거나 옮긴 것이 없고 적용 실행도 만들지 않는다. 계획을 새 실행으로 다시 만든다. 엔진에는 같은 확인(`ApplyDeps.planRecordsChanged`, store의 `hasRecordsChangedMark`)을 넘겨 잠금 아래에서 다시 본다.
+  - U-29(R-44 R44-L1): `apply`는 store의 `stateUncheckedSince`를 `ApplyDeps.planRecordsUnchecked`로 엔진에 넘긴다. 계획 실행이나 그 뒤의 실행이 상태 디렉터리를 다 확인하지 못했으면(또는 그 기록을 읽을 수 없으면) 적용은 계속하고 `noticeKinds: ["plan_records_unchecked"]`와 알림 하나를 더한다. 계획 실행보다 앞선 실행은 세지 않는다.
   - `apply`(U-8, R-39 L-1): 상태 디렉터리가 너무 커서 다 확인하지 못한 적용은 거부하지 않고 알린다. 결과의 `noticeKinds`에 `plan_records_unchecked`가 있고 `notices`에 고정 알림 한 줄이 있다. `report`는 둘을 그대로 싣는다. 확인이 다 된 적용은 `noticeKinds`가 없고 출력이 전과 같다.
 
 
@@ -1161,3 +1174,8 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - `plan`과 `review`는 모델도 검증기도 돌리지 않으므로 간편 형식에서 실행 한도를 요구하지 않는다(설정 파일에 한도가 없어도 됨. 준 한도는 그대로 검사). 가릴 값의 이름과 작업 종류만 해석한다. `apply`는 검증기를 그 설정으로 돌리므로 지금처럼 요구한다.
 - 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 쓴다. 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 지금처럼 명시를 요구하고, 오류에 `--workspace .`를 주면 현재 폴더라는 안내를 붙인다.
 - `changes`의 간편 형식이 제공자 설정을 요구하지 않게 하는 것은 앱 계층 몫이다.
+
+### 18.15 적용된 계획 실행의 되돌리기 (U-16, UXM-5, R-55 L-1)
+
+- 계획 실행은 스스로 파일을 바꾸지 않는다. 그 계획을 적용한 실행이 있고 이번 되돌리기가 되돌린 것도 건너뛴 것도 없으면 되돌리기 기록을 쓰지 않는다(목록에 "되돌림"이 붙지 않음). JSON 줄은 그대로다.
+- stderr의 안내는 `revert.plan_only` 한 줄과, 그 적용 실행을 계약의 규칙 `planApplyStateOf`(실행 목록)로 판정한 상태의 줄이다. `PLAN_APPLY_STATES_TO_REVERT`(`applied`, `unfinished`)일 때만 그 실행을 되돌리라고 한다(`revert.plan_revert_apply`, `--run <적용 실행>`). `applying`(결과가 아직 없음), `reverted`(마지막 되돌리기가 complete), `record_missing`(목록에 없거나 손상)은 그렇다고만 말한다(`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`). 목록을 읽지 못하면 그렇다고 말한다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다. `--dry-run`도 같다.

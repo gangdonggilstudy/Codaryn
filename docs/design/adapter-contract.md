@@ -224,6 +224,7 @@ export interface RunObserver {
 ### 5.4 결과와 보고서 [구현 A-1]
 
 - 실행 결과는 `EngineResult` 그대로다(`engine.ts:151-177`). 적용 결과는 범용 작업의 `ApplyResult`다(5.6). 어댑터마다 다른 결과 형식은 만들지 않는다.
+  - U-25 (DR-52): 가리기가 됐는지는 `EngineResult.masking { registeredValues, maskedPlaces }`(개수만)으로 `done`의 결과에 그대로 실린다. 가릴 값이 하나도 없으면 이 필드가 없다. 앱 계층은 실행의 게이트웨이를 `createPrivacyGateway`로 만들어 그대로 엔진에 넘기고(`assemble.ts`), 결과를 고르지 않고 넘긴다. `report`의 `result`에도 result.json에 적힌 같은 값이 실린다(CLI의 report가 그 필드를 지닌다).
 - `report({ workspace, runId })` → `ReportOutput`(`commands.ts:62-71`). 작업 공간의 기록만 읽고 잠금을 잡지 않는다. 실행 중이면 `incomplete`(종료 3)다.
 - `reportMarkdown({ workspace, runId })` → `{ kind: "report_markdown", markdown, exitCode }`(GU-3 보고서 저장).
   - `codaryn report`를 `--json` 없이 부른 글 그대로다. Markdown이고 모든 API 제공자의 키 값을 가린다.
@@ -335,7 +336,9 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```ts
 changes(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
 
-interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[] }
+interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[]; applyRun?: ChangesApplyRun }
+// U-16 (UXM-4): 적용 실행일 때만. 그 실행이 적용한 계획 실행과 적용한 동작 수(실행 목록의 판정). 이동·폐기는 계획의 동작이라 files는 비어 있다. 결과가 아직 없으면 없다.
+interface ChangesApplyRun { planRunId: RunId; actions: number }
 interface ChangedFileView {
   path: MaskedText;                    // 기록의 경로
   created: boolean;                    // 실행이 만든 파일(원본 없음)

@@ -22,6 +22,7 @@ import {
   JOURNAL_FILE_NAME,
   MAX_REPORT_FILE_BYTES,
   MODEL_PROVIDER_NAMES,
+  PLAN_APPLIED_FILE_NAME,
   PROFILE_NAME_PATTERN_SOURCE,
   RESULT_FILE_NAME,
   REVERT_RECORD_FILE_NAME,
@@ -292,6 +293,29 @@ async function revertRecordAt(file: string, runId: string): Promise<RevertRecord
   return parseRevertRecord(parseObject(await readText(file, REVERT_RECORD_MAX_BYTES)), runId);
 }
 
+/** applied.json is one short JSON line (markPlanApplied). */
+const PLAN_APPLIED_MAX_BYTES = 4096;
+
+/**
+ * U-16 (UXM-5): the apply run that claimed this plan run's plan and when, from its
+ * PLAN_APPLIED_FILE_NAME as markPlanApplied writes it (exactly schemaVersion, kind, planRunId,
+ * applyRunId, at). null when there is none or it cannot be read: such a record is left out, it
+ * never makes the run damaged (the plan view and apply read it themselves).
+ */
+async function appliedByAt(file: string, runId: string): Promise<{ runId: RunId; at: string } | null> {
+  try {
+    if ((await checkedFile(file, PLAN_APPLIED_MAX_BYTES)) === "missing") return null;
+    const record = parseObject(await readText(file, PLAN_APPLIED_MAX_BYTES));
+    if (Object.keys(record).sort().join(",") !== "applyRunId,at,kind,planRunId,schemaVersion") return null;
+    if (record["schemaVersion"] !== 1 || record["kind"] !== "plan_applied" || record["planRunId"] !== runId) return null;
+    const applyRunId = typeof record["applyRunId"] === "string" ? toRunId(record["applyRunId"]) : null;
+    const at = timestamp(record["at"]);
+    return applyRunId === null || applyRunId === runId || at === null ? null : { runId: applyRunId, at };
+  } catch {
+    return null;
+  }
+}
+
 type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
 
 /** The UTC second a CLI run id names, in milliseconds, or null for any other id or an impossible date. */
@@ -360,7 +384,16 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
     revertRecordDamaged,
     // DR-38: a records-changed mark (or one that cannot be read). Left out when there is none.
     ...((await recordsChangedMarkIn(dir)) ? { recordsChanged: true } : {}),
+    // U-16 (UXM-5): a plan run whose plan an apply claimed. Left out otherwise.
+    ...(await appliedByOf(dir, runId, first.kind, reason)),
   };
+}
+
+/** U-16: `appliedBy` for a plan run (a model run that ended plan_pending) whose plan was applied. */
+async function appliedByOf(dir: string, runId: RunId, kind: "run" | "apply", reason: RunReason | null): Promise<{ appliedBy?: { runId: RunId; at: string } }> {
+  if (kind !== "run" || reason !== "plan_pending") return {};
+  const appliedBy = await appliedByAt(join(dir, PLAN_APPLIED_FILE_NAME), runId);
+  return appliedBy === null ? {} : { appliedBy };
 }
 
 /** Newest first by start time, then by run id, both descending. */

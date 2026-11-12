@@ -21,7 +21,6 @@
 import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS } from "../contracts/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
-import type { ChangesApplyRun } from "../contracts/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
@@ -156,7 +155,7 @@ export function renderChanges(output: ChangesOutput): string {
   }
   // U-16 (UXM-4): an apply run's changes are its plan's actions, not file writes of its own; the
   // app layer gives them as `applyRun` (contract ChangesApplyRun). Fixed English, as the rest here.
-  const applyRun = (output as ChangesOutput & { readonly applyRun?: ChangesApplyRun }).applyRun;
+  const applyRun = output.applyRun;
   if (applyRun !== undefined) {
     out.push(
       `the run is an apply run: it applied ${applyRun.actions} action(s) of the plan of run ${cleanText(applyRun.planRunId)} (moves and discards, not file writes); codaryn report lists them`,

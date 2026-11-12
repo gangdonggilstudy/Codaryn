@@ -221,10 +221,13 @@
 - 가짜 키
   - `FAKE_OPENAI_KEY`는 `cliEnv({ fakeOpenAiKey })`로만 `OPENAI_API_KEY`에 들어간다.
   - `extra`로는 어느 키 변수도 넣을 수 없다. `sk-`로 시작하는 값은 가짜 키로도 받지 않는다.
-  - 키 모양 거부 사례용 `sk-` 모양 값은 `skShapedValue`로 실행 중에만 만든다. 소스에 그 모양이 없음을 `o00`이 확인한다.
+  - `sk-` 모양 값은 `skShapedValue`로 실행 중에만 만든다. 소스에 그 모양이 없음을 `o00`이 확인한다. 계약의 두 모양(DR-32 (a))을 따른다.
+    - `refused`: 실행을 거부하는 좁은 모양(`OPENAI_KEY_PATTERN_SOURCE`)
+    - `masked_only`: 출력에서 가리기만 하는 느슨한 모양(`OPENAI_KEY_LOOSE_PATTERN_SOURCE`)
 - `o00`은 CLI 없이 `fetch`로 가짜 서버만 시험한다. 응답 모양, 사실·설계 규칙 위반, 대본 소진, 사슬 검사, 오류·할당량 본문, 모델 목록, 매달림·범람, `cliEnv` 가드, fixture 불변식을 본다.
   - 규칙 셋(`store`, `strict`, 출력 되돌림)을 빌드 산출물에서 하나씩 빼면 `o00`이 실패함을 확인했다.
-- 제공자 계약(SP-1)이 main에 오면 `OPENAI_KEY_ENV`와 키 변수 목록을 계약 상수(`OPENAI_API_KEY_ENV`, `API_KEY_ENVS`, `API_KEY_PATTERN_SOURCES`)로 바꾼다.
+- 키 변수와 키 모양은 제공자 계약(SP-1)의 상수를 쓴다: `OPENAI_API_KEY_ENV`, `API_KEY_ENVS`, `API_KEY_PATTERN_SOURCES`, `API_KEY_MASK_PATTERN_SOURCES`.
+  - 가짜 서버가 지키는 사실 값(`max_output_tokens` 최소 16, 주소의 `/v1`)은 계약과 따로 둔다. 두 쪽이 맞는지는 `o00`이 확인한다.
 
 ## 진단 (Z-1)
 

@@ -14,11 +14,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   ANTHROPIC_API_KEY_ENV,
-  ANTHROPIC_KEY_PATTERN_SOURCE,
+  API_KEY_ENVS,
+  API_KEY_MASK_PATTERN_SOURCES,
   CHILD_ENV_ALLOWLIST,
   JOURNAL_FILE_NAME,
   LOCK_FILE_NAME,
   RESULT_FILE_NAME,
+  OPENAI_API_KEY_ENV,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
 } from "../../src/contracts/index.js";
@@ -31,7 +33,7 @@ import type {
   ModelProviderName,
   ToolResult,
 } from "../../src/contracts/index.js";
-import { LOOSE_SK_SHAPE, OPENAI_KEY_ENV } from "../fixtures/openai.js";
+import { LOOSE_SK_SHAPE } from "../fixtures/openai.js";
 import { FAKE_API_KEYS } from "../fixtures/secrets.js";
 import { NET_GUARD_LOG_ENV } from "./net-guard.js";
 
@@ -62,11 +64,15 @@ export interface EnvOptions {
   readonly fakeOpenAiKey?: string;
 }
 
-/** Key variables a test can never set through `extra` (contract API_KEY_ENVS once SP-1 is on main). */
-const KEY_ENVS: readonly string[] = [ANTHROPIC_API_KEY_ENV, OPENAI_KEY_ENV];
+/** Key variables a test can never set through `extra`: every key variable Codaryn knows (SP-1). */
+const KEY_ENVS: readonly string[] = API_KEY_ENVS;
 
+/**
+ * A fake key must be listed in FAKE_API_KEYS and match none of the key shapes Codaryn hides
+ * (API_KEY_MASK_PATTERN_SOURCES, DR-32 (a)) nor anything starting with `sk-` (stricter still).
+ */
 function checkedFakeKey(value: string): string {
-  if (!FAKE_API_KEYS.includes(value) || new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(value) || LOOSE_SK_SHAPE.test(value)) {
+  if (!FAKE_API_KEYS.includes(value) || API_KEY_MASK_PATTERN_SOURCES.some((source) => new RegExp(source).test(value)) || LOOSE_SK_SHAPE.test(value)) {
     throw new Error("Integration tests set only the fake API keys from tests/fixtures/secrets.ts.");
   }
   return value;
@@ -110,7 +116,7 @@ export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
     env[name] = value;
   }
   if (options.fakeApiKey !== undefined) env[ANTHROPIC_API_KEY_ENV] = checkedFakeKey(options.fakeApiKey);
-  if (options.fakeOpenAiKey !== undefined) env[OPENAI_KEY_ENV] = checkedFakeKey(options.fakeOpenAiKey);
+  if (options.fakeOpenAiKey !== undefined) env[OPENAI_API_KEY_ENV] = checkedFakeKey(options.fakeOpenAiKey);
   return env;
 }
 

@@ -9,7 +9,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ANTHROPIC_API_KEY_ENV, ANTHROPIC_KEY_PATTERN_SOURCE, CALL_ID_PATTERN_SOURCE } from "../../src/contracts/index.js";
+import {
+  ANTHROPIC_API_KEY_ENV,
+  API_KEY_ENVS,
+  API_KEY_MASK_PATTERN_SOURCES,
+  API_KEY_PATTERN_SOURCES,
+  API_PROVIDERS,
+  CALL_ID_PATTERN_SOURCE,
+  DEFAULT_OPENAI_API_BASE_URL,
+  OPENAI_API_KEY_ENV,
+  OPENAI_KEY_LOOSE_PATTERN_SOURCE,
+  OPENAI_KEY_PATTERN_SOURCE,
+} from "../../src/contracts/index.js";
 import { sharesKeyRun } from "../fixtures/anthropic.js";
 import {
   CALL_ID_LONG,
@@ -20,9 +31,10 @@ import {
   FAKE_OPENAI_MODEL_CATALOG,
   LISTED_OPENAI_MODEL_PREFIX,
   LOOSE_SK_SHAPE,
-  OPENAI_KEY_ENV,
+  MIN_MAX_OUTPUT_TOKENS,
   OPENAI_MODELS_PATH,
   OPENAI_RESPONSES_PATH,
+  OPENAI_VERSION_PATH,
   QUOTA_CASES,
   skShapedValue,
 } from "../fixtures/openai.js";
@@ -422,32 +434,51 @@ test(`${LABEL} 응답하지 않는 요청은 클라이언트가 끊고, 큰 본�
 
 test(`${LABEL} cliEnv는 가짜 OpenAI 키만 OPENAI_API_KEY로 넣고, 키 변수는 extra로도 개발자 환경에서도 넘어가지 않는다`, () => {
   const env = cliEnv({ fakeOpenAiKey: FAKE_OPENAI_KEY });
-  assert.equal(env[OPENAI_KEY_ENV], FAKE_OPENAI_KEY);
+  assert.equal(env[OPENAI_API_KEY_ENV], FAKE_OPENAI_KEY);
   assert.equal(env[ANTHROPIC_API_KEY_ENV], undefined);
   assert.throws(() => cliEnv({ fakeOpenAiKey: "cdy-not-a-listed-fake-key" }), /fake API keys/);
   assert.throws(() => cliEnv({ fakeOpenAiKey: skShapedValue("guard") }), /fake API keys/);
-  assert.throws(() => cliEnv({ extra: { [OPENAI_KEY_ENV]: FAKE_OPENAI_KEY } }), /never set an API key/);
-  assert.throws(() => cliEnv({ extra: { openai_api_key: FAKE_OPENAI_KEY } }), /never set an API key/);
-  const saved = process.env[OPENAI_KEY_ENV];
-  process.env[OPENAI_KEY_ENV] = "cdy-developer-sentinel-value";
+  for (const name of API_KEY_ENVS) {
+    assert.throws(() => cliEnv({ extra: { [name]: FAKE_OPENAI_KEY } }), /never set an API key/, name);
+    assert.throws(() => cliEnv({ extra: { [name.toLowerCase()]: FAKE_OPENAI_KEY } }), /never set an API key/, name);
+  }
+  const saved = process.env[OPENAI_API_KEY_ENV];
+  process.env[OPENAI_API_KEY_ENV] = "cdy-developer-sentinel-value";
   try {
     assert.equal(Object.values(cliEnv()).includes("cdy-developer-sentinel-value"), false, "a developer's OPENAI_API_KEY never reaches the CLI");
   } finally {
-    if (saved === undefined) delete process.env[OPENAI_KEY_ENV];
-    else process.env[OPENAI_KEY_ENV] = saved;
+    if (saved === undefined) delete process.env[OPENAI_API_KEY_ENV];
+    else process.env[OPENAI_API_KEY_ENV] = saved;
   }
 });
 
-test(`${LABEL} fixture 불변식: 가짜 키는 키 모양이 아니고, 목록 id는 키와 8자를 겹치지 않으며, sk- 모양은 실행 중에만 생긴다`, () => {
+test(`${LABEL} fixture 불변식: 가짜 값은 어떤 키 모양도 아니고, sk- 모양은 계약의 두 모양대로 실행 중에만 생기며, 사실 값이 계약과 맞는다`, () => {
+  const maskShapes = API_KEY_MASK_PATTERN_SOURCES.map((source) => new RegExp(source));
+  const fakeValues = [...FAKE_API_KEYS, ...FAKE_OPENAI_MODEL_CATALOG.map((model) => model.id), FAKE_ENCRYPTED_CONTENT, CALL_ID_LONG, CALL_ID_ODD, CALL_ID_PLAIN];
+  for (const value of fakeValues) {
+    assert.equal(LOOSE_SK_SHAPE.test(value), false, "no fake value starts with sk-");
+    assert.equal(maskShapes.some((shape) => shape.test(value)), false, "no fake value has a key shape Codaryn hides");
+  }
   for (const key of FAKE_API_KEYS) {
-    assert.equal(LOOSE_SK_SHAPE.test(key), false, "no fake key has the loose sk- shape");
-    assert.equal(new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(key), false);
     for (const model of FAKE_OPENAI_MODEL_CATALOG) assert.equal(sharesKeyRun(model.id, key), false, `${model.id} shares eight characters with a fake key`);
   }
   assert.ok(FAKE_OPENAI_MODEL_CATALOG.every((model) => model.id.startsWith(LISTED_OPENAI_MODEL_PREFIX)));
-  const shaped = skShapedValue("probe");
-  assert.match(shaped, new RegExp(["\\bs", "k-[A-Za-z0-9_-]{20,}"].join("")), "the loose shape of design 4.3");
-  assert.ok(LOOSE_SK_SHAPE.test(shaped));
+
+  // DR-32 (a): the refused value matches the narrow shape that refuses a run; the masked-only value
+  // matches the loose shape that hides output and not the narrow one.
+  const refused = skShapedValue("probe");
+  assert.match(refused, new RegExp(OPENAI_KEY_PATTERN_SOURCE));
+  assert.ok(API_KEY_PATTERN_SOURCES.some((source) => new RegExp(source).test(refused)));
+  const maskedOnly = skShapedValue("probe", "masked_only");
+  assert.match(maskedOnly, new RegExp(OPENAI_KEY_LOOSE_PATTERN_SOURCE));
+  assert.equal(API_KEY_PATTERN_SOURCES.some((source) => new RegExp(source).test(maskedOnly)), false, "not a reason to refuse");
+  assert.ok(maskShapes.some((shape) => shape.test(maskedOnly)), "but hidden in output");
+
+  // The fake's facts agree with the contract where both say something.
+  assert.equal(MIN_MAX_OUTPUT_TOKENS, API_PROVIDERS.openai.minOutputTokens, "C-10: at least 16 output tokens");
+  assert.equal(API_PROVIDERS.openai.keyEnv, OPENAI_API_KEY_ENV);
+  assert.equal(API_PROVIDERS.openai.baseUrlPath, "with_version");
+  assert.ok(DEFAULT_OPENAI_API_BASE_URL.endsWith(OPENAI_VERSION_PATH), "C-4: the address includes /v1");
   const literal = new RegExp(["s", "k-[A-Za-z0-9]"].join(""));
   for (const file of ["tests/fixtures/openai.ts", "tests/support/fake-openai.ts", "tests/integration/o00-fake-openai.test.ts"]) {
     assert.equal(literal.test(readFileSync(join(REPO_ROOT, file), "utf8")), false, `${file} holds no key-shaped text`);

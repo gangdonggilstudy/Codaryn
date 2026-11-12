@@ -1,15 +1,12 @@
 /**
  * Values for mock API tests of the second provider, OpenAI (docs/design/second-provider.md, DR-31).
  * Shapes and names follow docs/design/second-provider-facts.md; each constant names its item (C-n).
- * Mock API verification only, not the real API.
- *
- * The provider contract (SP-1: OPENAI_API_KEY_ENV, API_KEY_ENVS, API_KEY_PATTERN_SOURCES) is not
- * on main yet. Until it is, OPENAI_KEY_ENV below stands in for the contract's name; switch to the
- * contract constant when it lands. Task and config writers wait for SP-4's schema.
+ * These are the facts as the fake server enforces them, kept apart from the product contract on
+ * purpose; o00 checks that the two agree where both say something (minimum output tokens, the
+ * address with `/v1`). Key names and shapes come from the contract (SP-1: OPENAI_API_KEY_ENV,
+ * API_KEY_ENVS, API_KEY_PATTERN_SOURCES, API_KEY_MASK_PATTERN_SOURCES).
+ * Mock API verification only, not the real API. Task and config writers wait for SP-4's schema.
  */
-
-/** C-3: the variable the OpenAI provider reads its key from. Contract: OPENAI_API_KEY_ENV (SP-1). */
-export const OPENAI_KEY_ENV = "OPENAI_API_KEY";
 
 /** C-4: paths below the base address, which itself ends with `/v1`. */
 export const OPENAI_VERSION_PATH = "/v1";
@@ -100,13 +97,17 @@ export const FAKE_OPENAI_MODEL_CATALOG: readonly FakeOpenAIModel[] = [
 ];
 
 /**
- * A value with the loose OpenAI key shape (`sk-` and 20 or more characters, design 4.3), built at
- * run time so no source file holds the shape (the commit hook would flag it). For key-shape refusal
- * cases only: such a value must never reach a server.
+ * A value with an OpenAI key shape, built at run time so no source file holds the shape (the commit
+ * hook would flag it). Key-shape cases only: such a value must never reach a server.
+ * - `refused`: the narrow shape that refuses a run (contract OPENAI_KEY_PATTERN_SOURCE, DR-32 (a)):
+ *   `sk-`, then 40 characters with a digit and an upper-case letter.
+ * - `masked_only`: the loose shape only (OPENAI_KEY_LOOSE_PATTERN_SOURCE): 40 lower-case letters
+ *   after `sk-`, hidden in output but never a reason to refuse.
  */
-export function skShapedValue(tag: string): string {
-  if (!/^[A-Za-z0-9]{1,16}$/.test(tag)) throw new Error("tag must be 1 to 16 letters or digits");
-  return ["s", "k-"].join("") + `cdyShape${tag}`.padEnd(28, "Q");
+export function skShapedValue(tag: string, kind: "refused" | "masked_only" = "refused"): string {
+  if (!/^[A-Za-z]{1,16}$/.test(tag)) throw new Error("tag must be 1 to 16 letters");
+  const body = kind === "refused" ? `cdyShape7${tag}`.padEnd(40, "Q") : `cdyshape${tag.toLowerCase()}`.padEnd(40, "q");
+  return ["s", "k-"].join("") + body;
 }
 
 /** The loose shape the guard in cliEnv refuses for a fake key (anything starting with `sk-`). */

@@ -58,7 +58,6 @@ import type {
   ModelProviderName,
   PlanApplyState,
   RevertOutput,
-  RevertSummaryContext,
   RunId,
   RunListEntry,
   RunReason,
@@ -451,7 +450,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       return line === null ? null : finalLine(line);
     },
 
-    revertSummary(output: RevertOutput, context?: RevertSummaryContext): string {
+    // R-70 L-1 (PM): revert knows no registered values, so its hints never show a typed workspace,
+    // whatever context a caller gives (RevertSummaryContext is not read): `<workspace>` always.
+    revertSummary(output: RevertOutput): string {
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
       const title = output.dryRun === true ? "revert.dry_run_title" : "revert.done_title";
@@ -491,13 +492,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // DR-25: files skipped as unsafe_move go back on a revert with the person's consent.
       const revertedRun = toRunId(String(output.runId));
       if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
-        // DR-51 (U-38): with the workspace revert was given, when its context has it.
-        const workspace = typedWorkspace(context?.workspaceShown);
-        out.push(
-          workspace === null
-            ? catalog.format("summary.next_revert_unsafe", { runId: revertedRun })
-            : catalog.format("summary.next_revert_unsafe_typed", { runId: revertedRun, workspace }),
-        );
+        out.push(catalog.format("summary.next_revert_unsafe", { runId: revertedRun }));
       }
       if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);

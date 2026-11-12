@@ -5,7 +5,8 @@
  * - run and apply: with workspaceForm "given" only. Report and revert use summary.next_report_typed and
  *   summary.next_revert_typed; plan, apply, review and the unsafe-move consent take
  *   summary.form.typed as their form. "current" and "task" stay as they are.
- * - revert: summary.next_revert_unsafe_typed with its context's workspaceShown.
+ * - revert (R-70 L-1, PM): its unsafe-move consent always says `<workspace>`, a context given or not:
+ *   revert knows no registered values, so a typed path there is never checked against them.
  * - Absent, or a value that is not exactly what toShownWorkspace makes, or one the line's own
  *   cleaning would change: `<workspace>` as before (fail closed).
  * Paths: spaces, Hangul and a Windows path are shown; a quote, a control character, `$`, `%`, a path
@@ -162,14 +163,13 @@ describe("U-38: the end summaries' hints with the typed workspace", () => {
     }
   });
 
-  test("revert: the unsafe-move consent takes the typed path; without a context, as before", () => {
-    const workspace = shown("C:\\Users\\me\\My Work");
-    const lines = linesOf(out.revertSummary(revert(), { workspaceShown: workspace }));
-    assert.ok(lines.includes(mark("summary.next_revert_unsafe_typed", { runId: RUN, workspace })), lines.join("\n"));
+  test("revert (R-70 L-1): the unsafe-move consent always says <workspace>, a typed path given or not", () => {
     const plain = out.revertSummary(revert());
     assert.ok(linesOf(plain).includes(mark("summary.next_revert_unsafe", { runId: RUN })), plain);
+    for (const typed of SHOWN) assert.equal(out.revertSummary(revert(), { workspaceShown: shown(typed) }), plain, typed);
     assert.equal(out.revertSummary(revert(), {}), plain);
     assert.equal(out.revertSummary(revert(), { workspaceShown: "my work" as ShownWorkspace }), plain);
+    assert.equal(plain.includes("_typed"), false, plain);
   });
 
   test("the result objects are not changed (the JSON is the CLI's, built from them)", () => {
@@ -193,9 +193,10 @@ describe("U-38 with the real catalog", () => {
         const placeholder = linesOf(createHumanOutput(createMessageCatalog(language)).runSummary(run(PLAN_PENDING), context()));
         assert.deepEqual(typedText, placeholder.map((line) => line.split("<workspace>").join(workspace)), typed);
         assert.ok(typedText.some((line) => line.includes(workspace)), typedText.join("\n"));
-        const reverted = linesOf(out.revertSummary(revert(), { workspaceShown: workspace }));
-        const plainRevert = linesOf(createHumanOutput(createMessageCatalog(language)).revertSummary(revert()));
-        assert.deepEqual(reverted, plainRevert.map((line) => line.split("<workspace>").join(workspace)), typed);
+        // R-70 L-1: revert's hint keeps <workspace>.
+        const reverted = out.revertSummary(revert(), { workspaceShown: workspace });
+        assert.equal(reverted, createHumanOutput(createMessageCatalog(language)).revertSummary(revert()), typed);
+        assert.ok(reverted.includes("<workspace>"), reverted);
       }
     });
   }

@@ -50,9 +50,13 @@ describe("U-18: a failed call and a command that did not end well are told", () 
       policySource: "config",
     };
     assert.equal(context.failedToolCalls, 4);
-    // @ts-expect-error every caller says how many calls failed (0 when none)
-    const missing: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "config" };
-    assert.equal(missing.deniedToolCalls, 0);
+    // PM (U-18, after e94decc): optional, absent counts as 0, so a context made before U-18 (the
+    // fixed real-catalog test among them) stays a valid one and gives no summary.failed line.
+    const before: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "config" };
+    assert.equal(before.failedToolCalls ?? 0, 0);
+    // @ts-expect-error the count is a number, never text
+    const text: RunSummaryContext = { ...before, failedToolCalls: "4" };
+    assert.ok(text);
   });
 
   test("Q-3: report --json does not change, so the report's journal summary has no new field", () => {

@@ -219,6 +219,8 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.file_locations.inside": "입력 파일 {count}개가 작업 공간 안에 있거나 위치를 확인할 수 없습니다. 실행은 이를 거부합니다",
   "doctor.file_locations.ok": "입력 파일 {count}개가 작업 공간 밖에 있습니다",
   "doctor.commands.none": "허용한 명령도 명령 검증기도 없습니다",
+  "doctor.commands.extra_args_with_plan":
+    "추가 인수를 받는 명령 규칙 {count}개가 계획 행동(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
   "doctor.commands.ok": "실행 파일 {count}개를 찾았고 실행 규칙이 허용합니다",
   "doctor.commands.ok_unchecked": "실행 파일 {count}개를 찾았습니다. 실행 규칙은 작업 공간이 있어야 확인할 수 있어 확인하지 않았습니다",
   "doctor.commands.problems":
@@ -283,6 +285,10 @@ export const KO_MESSAGES: MessageTexts = {
   "error.plan_not_approved.fix": "codaryn plan으로 계획을 확인한 뒤, 승인하려면 codaryn apply에 --digest <계획 digest의 앞 12자 이상>을 주세요.",
   "error.plan_already_applied.what": "이 계획은 이미 적용했습니다. 아무것도 바꾸지 않았습니다",
   "error.plan_already_applied.fix": "결과는 codaryn report로 보고, 되돌리려면 codaryn revert를 쓰세요.",
+  "error.plan_secrets_differ.what": "지금 등록된 비밀 값이 계획 실행 때와 다르게 계획의 경로를 가려, 아무것도 보여 주거나 바꾸지 않았습니다",
+  "error.plan_secrets_differ.fix": "계획 실행 때와 같은 작업 지정 방식(따라서 같은 비밀 값)으로 다시 하거나, 계획을 새로 만드세요.",
+  "error.plan_run_missing.what": "이 적용이 쓴 계획 실행의 기록(plan.json)이 없어, 아무것도 바꾸지 않았습니다",
+  "error.plan_run_missing.fix": "적용을 되돌리려면 그 계획 실행을 남겨 두어야 합니다. 지운 실행 폴더가 있으면 되살리세요.",
   "error.run_not_awaiting_review.what": "그 실행은 사람의 검토를 기다리는 상태가 아닙니다. 아무것도 쓰지 않았습니다",
   "error.run_not_awaiting_review.fix": "검토 대기(awaiting_review)로 끝난 실행의 id를 주세요. codaryn runs로 찾을 수 있습니다.",
   "error.internal_error.what": "예상하지 못한 내부 오류입니다",

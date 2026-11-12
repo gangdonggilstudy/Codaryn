@@ -10,7 +10,7 @@ import { REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION, UNSAFE_MOVE_CONSENT_ARGUMENT 
 import type { CliErrorOutput, Clock, RevertOutput } from "../contracts/index.js";
 import { parseRevertArgs } from "./args.js";
 import { revertStatus } from "./assemble.js";
-import type { RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
+import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
 import { cliError } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { localPathProblem } from "./task.js";
@@ -61,12 +61,22 @@ export interface RevertCliOutcome {
   readonly hint?: string;
 }
 
-/** U-16 (UXM-5): what reverting an applied plan run tells the person. */
-export function appliedPlanHint(planRunId: string, applyRunId: string, dryRun: boolean): string {
-  return (
-    `Run ${planRunId} only made a plan and changed no file itself, so there ${dryRun ? "is" : "was"} nothing to put back and it is not marked as reverted. ` +
-    `Its plan was applied by run ${applyRunId}: to undo those changes, revert that run (--run ${applyRunId}).`
-  );
+/**
+ * U-16 (UXM-5): what reverting an applied plan run tells the person. R-55 L-1: it advises reverting
+ * the apply run only while that run is in the run list and not reverted; otherwise it says what is so.
+ */
+export function appliedPlanHint(planRunId: string, apply: PlanApply, dryRun: boolean): string {
+  const id = apply.runId;
+  const head = `Run ${planRunId} only made a plan and changed no file itself, so there ${dryRun ? "is" : "was"} nothing to put back and it is not marked as reverted. `;
+  const tail: { readonly [S in PlanApply["state"]]: string } = {
+    not_reverted: `Its plan was applied by run ${id}: to undo those changes, revert that run (--run ${id}).`,
+    reverted: `Its plan was applied by run ${id}, which was already reverted.`,
+    partly_reverted: `Its plan was applied by run ${id}, which was reverted only in part; its report says what is left.`,
+    missing: `Its plan was applied by run ${id}, whose records are no longer in this workspace (a cleanup removes them, for example), so that run cannot be reverted any more.`,
+    damaged: `Its plan was applied by run ${id}, whose records do not pass the checks (codaryn runs shows it as damaged), so it is not reverted from here.`,
+    unknown: `Its plan was applied by run ${id}; the run list could not be read to tell whether that run can still be reverted.`,
+  };
+  return head + tail[apply.state];
 }
 
 const YES = new Set(["y", "yes", "예", "네"]);
@@ -159,6 +169,6 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
     },
     exitCode,
     quiet,
-    ...(result.planAppliedBy === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planAppliedBy, dryRun) }),
+    ...(result.planApply === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planApply, dryRun) }),
   };
 }

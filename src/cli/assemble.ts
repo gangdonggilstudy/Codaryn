@@ -13,6 +13,7 @@ import {
   acquireLock,
   createRunRecorders,
   hasRecordsChangedMark,
+  listRuns as storeListRuns,
   releaseLock,
   writeResult,
 } from "../store/index.js";
@@ -105,12 +106,28 @@ export type RevertCommandOutcome =
        * U-16 (UXM-5): the run is a plan run whose plan an apply run used, and this revert found
        * nothing of its own to put back: the changes are the apply run's. No revert record is written
        * for it (the run list would show it as reverted while the apply's changes stay).
+       * R-55 L-1: with where that apply run stands in the run list, so the hint advises reverting it
+       * only while it is there and not reverted.
        */
-      readonly planAppliedBy?: string;
+      readonly planApply?: PlanApply;
     }
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
 export type RevertCommand = (input: RevertCommandInput) => Promise<RevertCommandOutcome>;
+
+/**
+ * U-16, R-55 L-1: the apply run that used a plan run's plan, as the run list sees it.
+ * - not_reverted: a checked entry without a revert record; it is the run to revert
+ * - reverted / partly_reverted: its last revert was complete / partial
+ * - missing: no entry of that id (its records were removed, by a cleanup for example)
+ * - damaged: its records do not pass the checks
+ * - unknown: the run list could not be read
+ */
+export type PlanApplyState = "not_reverted" | "reverted" | "partly_reverted" | "missing" | "damaged" | "unknown";
+export interface PlanApply {
+  readonly runId: string;
+  readonly state: PlanApplyState;
+}
 
 export interface RevertCommandOptions {
   /**
@@ -270,14 +287,34 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     const marked = recordsChanged ? { recordsChanged: true as const } : {};
     // U-16 (UXM-5): a plan run changes no file; when its plan was applied, the changes are the apply
     // run's. Told only when this revert had nothing to put back or skip. Reads only; best effort.
-    const appliedPlanOf = async (outcome: RevertOutcome): Promise<{ planAppliedBy?: string }> => {
+    // R-55 L-1: and where the apply run stands in the run list (the store's, or the one given).
+    const appliedPlanOf = async (outcome: RevertOutcome): Promise<{ planApply?: PlanApply }> => {
       if (options.loadPlan === undefined || outcome.reverted.length > 0 || outcome.skipped.length > 0) return {};
+      let applyRunId: string;
       try {
         const loaded = await options.loadPlan({ workspaceRoot, runId });
-        return loaded.ok && loaded.applied !== null ? { planAppliedBy: loaded.applied.applyRunId } : {};
+        if (!loaded.ok || loaded.applied === null) return {};
+        applyRunId = loaded.applied.applyRunId;
       } catch {
         return {};
       }
+      let state: PlanApplyState;
+      try {
+        const entry = (await (options.listRuns ?? storeListRuns)({ workspaceRoot })).runs.find((run) => run.runId === applyRunId);
+        state =
+          entry === undefined
+            ? "missing"
+            : entry.state !== "checked"
+              ? "damaged"
+              : entry.reverted === null
+                ? "not_reverted"
+                : entry.reverted.status === "complete"
+                  ? "reverted"
+                  : "partly_reverted";
+      } catch {
+        state = "unknown";
+      }
+      return { planApply: { runId: applyRunId, state } };
     };
 
     if (dryRun && options.dryRun !== undefined) {
@@ -300,7 +337,7 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
       });
       // U-16 (UXM-5): nothing of an applied plan run was reverted, so no record says it was.
       const appliedPlan = await appliedPlanOf(outcome);
-      if (appliedPlan.planAppliedBy !== undefined) return { ok: true, outcome, runId, revertedBefore, ...marked, ...appliedPlan };
+      if (appliedPlan.planApply !== undefined) return { ok: true, outcome, runId, revertedBefore, ...marked, ...appliedPlan };
       // N-7, N-22: the revert record, written while the lock is held; best effort.
       try {
         await options.writeRecord?.(workspaceRoot, {

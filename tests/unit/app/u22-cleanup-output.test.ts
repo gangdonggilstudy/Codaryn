@@ -21,6 +21,7 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { LOCK_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import { createCodarynApp } from "../../../src/app/index.js";
+import type { AppHooks } from "../../../src/app/app.js";
 import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp, RunHandle } from "../../../src/app/index.js";
 import { WRITE_NOTES, appEnvironment, exists, setupRun, taskRequest } from "./support.js";
 
@@ -150,18 +151,16 @@ async function busyOn(run: { base: string; workspace: string; app: CodarynApp })
 }
 
 /**
- * Review R-51 of U-22, the app layer's part (reproduced first, todo until the app follows):
+ * Review R-51 of U-22, the app layer's part (reproduced first in a7e3ec2; the app follows now):
  * - M-2: DR-48 (b) holds for every command and app call that takes `latest`. The app's `changes`
  *   (and the CLI's `changes`, which calls it) and `resolveRun` still chose the run before the
  *   newest one while that one was going.
  * - M-1: a cleanup that removed nothing, or failed in part, is a result for the GUI, not an error:
  *   the call is ok, with `status` and what was removed and kept and why.
  */
-const TODO_R51_M2 = { todo: "R-51 M-2: wait for the app's latest to follow the CLI's rule" };
-const TODO_R51_M1 = { todo: "R-51 M-1: wait for the app to take the store's cleanup operations from its hooks" };
 
 describe("R-51: latest in the app's other calls, and the new cleanup results as results", () => {
-  test("changes --run latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", TODO_R51_M2, async () => {
+  test("changes --run latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", async () => {
     const run = await finishedRun();
     const handle = await busyOn(run);
     const settings = { input: { kind: "task" as const, taskPath: path.join(run.base, "task.json") }, configPath: null, varsFile: null, profile: null, workflowRef: null };
@@ -174,7 +173,7 @@ describe("R-51: latest in the app's other calls, and the new cleanup results as 
     }
   });
 
-  test("resolveRun latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", TODO_R51_M2, async () => {
+  test("resolveRun latest while the newest run is going, after a finished one: run_in_progress; the finished one by its id", async () => {
     const run = await finishedRun();
     const handle = await busyOn(run);
     try {
@@ -196,12 +195,12 @@ describe("R-51: latest in the app's other calls, and the new cleanup results as 
     assert.deepEqual(carried.outcome.kept.map((item) => [item.target, item.reason]), [["run", "not_reverted_not_confirmed"]]);
   });
 
-  test("a cleanup that failed in part is an ok call with its result: partly_failed, the outcome not ok, the folder kept as partly_removed", TODO_R51_M1, async () => {
+  test("a cleanup that failed in part is an ok call with its result: partly_failed, the outcome not ok, the folder kept as partly_removed", async () => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const busy = (): Error => Object.assign(new Error("the file is in use"), { code: "EBUSY" });
     // The store's removal refused, as a file another process holds open would make it (the hook is
     // the app's test seam; nothing else changes).
-    const hooks = { cleanupOperations: { remove: async () => { throw busy(); }, retryDelayMs: 1 } } as never;
+    const hooks: AppHooks = { cleanupOperations: { remove: async () => { throw busy(); }, retryDelayMs: 1 } };
     const app = createCodarynApp(await appEnvironment(base), hooks);
     const started = await app.startRun(taskRequest(base));
     assert.ok(started.ok, JSON.stringify(started));

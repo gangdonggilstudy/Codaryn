@@ -2,16 +2,20 @@
  * N-7 in the app layer (DR-14): the run list and which run a reference (`latest`) names.
  *
  * Which runs are listed, which are damaged and which one `latest` names are decided by the store
- * (`listRuns`, `latestRunId`) and the CLI's `resolveRunRef` (N-18, N-23, N-26), never here, so
- * their rules reach the app layer as they change. The revert itself is the CLI's revert command
+ * (`listRuns`, `latestRun`) and the CLI's `resolveRunReference` (N-18, N-23, N-26, and U-22's
+ * DR-48 (b): `latest` is the newest run, so one still going is `run_in_progress` even after a
+ * finished one), never here, so their rules reach the app layer as they change, the same as the
+ * CLI's `report`, `revert` and `plan`. The revert itself is the CLI's revert command
  * (app.ts), with the options main.ts gives it.
  */
 
+import { lstat } from "node:fs/promises";
 import { LATEST_RUN_ALIAS, RUNS_DEFAULT_LIMIT, RUNS_EXIT_CODES, RUNS_MAX_LIMIT } from "../contracts/index.js";
 import type { RunListing, RunsOutput } from "../contracts/index.js";
 import { listRuns as storeListRuns } from "../store/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
-import { resolveRunRef, resolveWorkspaceRoot } from "../cli/runs.js";
+import { resolveWorkspaceRoot } from "../cli/runs.js";
+import { resolveRunReference } from "../cli/run-ref.js";
 import { knownKeyValues } from "../cli/settings.js";
 import { hideKeys } from "../cli/text-safety.js";
 import type { KnownKeys } from "../cli/security/index.js";
@@ -33,17 +37,28 @@ export async function workspaceRootOf(workspace: string, cwd: string): Promise<R
   return { ok: true, value: root.value };
 }
 
-/** A run id as given, or the id `latest` names (store and CLI rules, N-7, N-18, N-23). */
+/** True when anything (file, directory, link) is at the path. Never throws. */
+async function exists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A run id as given, or the id `latest` names, by the CLI's one rule (resolveRunReference: N-7,
+ * N-18, N-23, and DR-48 (b) `run_in_progress` while the newest run is going). A given id is used as
+ * it is (the callers judge the run, as before).
+ */
 export async function runIdOf(workspaceRoot: string, run: string): Promise<Resolved<string>> {
   if (run !== LATEST_RUN_ALIAS && (!RUN_ID_PATTERN.test(run) || run.includes(".."))) {
     return { ok: false, error: appError("invalid_arguments", RUN_ID_MESSAGE) };
   }
-  const resolved = await resolveRunRef(workspaceRoot, run);
-  if (!resolved.ok) {
-    const output = resolved.error.output;
-    return { ok: false, error: output.kind === "error" ? fromCliError(output) : appError("internal_error", "the run could not be resolved") };
-  }
-  return { ok: true, value: resolved.value };
+  const resolved = await resolveRunReference(workspaceRoot, run, { exists, listRuns: storeListRuns });
+  if (!resolved.ok) return { ok: false, error: appError(resolved.code, resolved.message) };
+  return { ok: true, value: resolved.runId };
 }
 
 /** Every string in `value` with key shapes and the current key hidden, as `runs --json` does (N-23 a). */

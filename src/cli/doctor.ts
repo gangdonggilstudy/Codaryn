@@ -21,10 +21,12 @@ import {
   DOCTOR_EXIT_CODES,
   CODARYN_LANG_ENV,
   LOCK_FILE_NAME,
+  PARKED_DIR_NAME,
   STATE_DIR_NAME,
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
+  ListParkedFiles,
   CatalogText,
   CodarynConfig,
   ConfigLocationDisplay,
@@ -63,7 +65,7 @@ import {
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { inspectLock, nodeLockFileSystem } from "../store/index.js";
+import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
@@ -105,6 +107,8 @@ export interface DoctorEnvironment {
   readonly osLocale?: string | null;
   /** N-25 (a): the state of `<workspace>/.codaryn/lock.json`, read without changing it. Absent: `skipped`. */
   readonly inspectLock?: (workspaceRoot: string) => Promise<LockState>;
+  /** R-16 L-1: the store's `listParkedFiles` (the default); tests inject it. */
+  readonly listParkedFiles?: ListParkedFiles;
 }
 
 /**
@@ -781,7 +785,20 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       ],
     };
     const [status, message] = lockMessages[state];
-    set("lock", status, message, { id: `doctor.lock.${state}` });
+    // R-16 L-1: files a revert moved aside and could not put back stay in .codaryn/parked/ until the
+    // person moves them back or deletes them. A lock problem keeps its text; the warning joins it.
+    let parked: number;
+    try {
+      parked = (await (io.listParkedFiles ?? listParkedFiles)(workspaceRoot)).length;
+    } catch {
+      parked = 0;
+    }
+    const parkedWarning = `${parked} file(s) a revert could not put back are in ${STATE_DIR_NAME}/${PARKED_DIR_NAME}/; move them back or delete them`;
+    if (parked > 0 && status === "ok") {
+      set("lock", "warn", parkedWarning, { id: "doctor.lock.parked_left", params: { count: parked } });
+    } else {
+      set("lock", status, parked > 0 ? `${message}; ${parkedWarning}` : message, { id: `doctor.lock.${state}` });
+    }
   }
 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);

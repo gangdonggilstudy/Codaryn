@@ -15,8 +15,9 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import { CLEANUP_LOG_FILE_NAME } from "../../../src/contracts/index.js";
-import type { ApplyJournalEvent, ContentHash, EngineResult, JournalEvent, MaskedText } from "../../../src/contracts/index.js";
+import type { ApplyJournalEvent, CleanupItemRef, ContentHash, EngineResult, JournalEvent, MaskedText } from "../../../src/contracts/index.js";
 import {
+  applyCleanup,
   createApplyJournal,
   createJournal,
   journalRelativePath,
@@ -41,6 +42,8 @@ const HASH = "a".repeat(64) as ContentHash;
 const at = (runId: string): number => Date.UTC(2026, Number(runId.slice(4, 6)) - 1, Number(runId.slice(6, 8)), Number(runId.slice(9, 11)), 0, 1);
 const STARTED = { type: "run_started", schemaVersion: 1, taskId: "t", workflow: "document", provider: "scripted", limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: null, maxDurationMs: 60_000 } } as unknown as JournalEvent;
 const usage = { modelTurns: 1, toolCalls: 1, inputTokens: null, outputTokens: null, durationMs: 9 };
+/** An item's id: its run id, or a leftover folder's hex digits (DR-44 (d)). */
+const idOf = (item: CleanupItemRef): string => (item.target === "leftover" ? item.leftoverId : item.runId);
 const state = (root: string, ...parts: string[]) => join(root, ".codaryn", ...parts);
 
 async function modelRun(root: string, runId: string, changes: number): Promise<void> {
@@ -80,13 +83,14 @@ async function workspace(): Promise<string> {
 }
 
 describe("DR-44 (나), R-34 L-1: a partly reverted run is not a reverted run", () => {
-  test("the summary, the reverted criterion and the warning treat it as not reverted", async () => {
+  test("the summary, the reverted criterion and the warning (partly_reverted) treat it as not reverted", async () => {
     const root = await workspace();
     const byId = Object.fromEntries((await summarizeState({ workspaceRoot: root })).entries.map((entry) => [entry.runId, entry]));
     assert.deepEqual([byId[PART]?.reverted, byId[FULL]?.reverted], [false, true]);
-    assert.deepEqual((await planCleanup({ workspaceRoot: root, selection: { runs: { reverted: true } }, now: NOW })).items.map((item) => item.runId), [FULL]);
+    assert.deepEqual([byId[PART]?.partlyReverted, byId[FULL]?.partlyReverted], [true, false]);
+    assert.deepEqual((await planCleanup({ workspaceRoot: root, selection: { runs: { reverted: true } }, now: NOW })).items.map((item) => idOf(item)), [FULL]);
     const both = await planCleanup({ workspaceRoot: root, selection: { runs: { runIds: [PART, FULL] } }, now: NOW });
-    assert.deepEqual(both.items.map((item) => [item.runId, item.warnings]), [[FULL, []], [PART, ["not_reverted"]]]);
+    assert.deepEqual(both.items.map((item) => [idOf(item), item.warnings]), [[FULL, []], [PART, ["partly_reverted"]]]);
   });
 });
 
@@ -94,12 +98,43 @@ describe("DR-44 (다), R-34 L-2: an apply run's records with its discarded-files
   test("discarded_left is shown whether the folder is selected or not: it stays unless its removal is confirmed", async () => {
     const root = await workspace();
     const withFolder = await planCleanup({ workspaceRoot: root, selection: { runs: { runIds: [PLAN, APPLY] }, discarded: { runIds: [APPLY] } }, now: NOW });
-    assert.deepEqual(withFolder.items.map((item) => [item.target, item.runId, item.warnings]), [
+    assert.deepEqual(withFolder.items.map((item) => [item.target, idOf(item), item.warnings]), [
       ["run", APPLY, ["not_reverted", "discarded_left"]],
       ["run", PLAN, []],
       ["discarded", APPLY, ["people_files"]],
     ]);
     const without = await planCleanup({ workspaceRoot: root, selection: { runs: { runIds: [PLAN, APPLY] } }, now: NOW });
-    assert.deepEqual(without.items.map((item) => [item.runId, item.warnings]), [[APPLY, ["not_reverted", "discarded_left"]], [PLAN, []]]);
+    assert.deepEqual(without.items.map((item) => [idOf(item), item.warnings]), [[APPLY, ["not_reverted", "discarded_left"]], [PLAN, []]]);
+  });
+});
+
+describe("DR-44 (가): records of runs that were not, or only partly, reverted go only with includeNotReverted", () => {
+  test("without it they stay (not_reverted_not_confirmed) and the plan counts them; with it they go", async () => {
+    const root = await workspace();
+    const selection = { runs: { runIds: [PART, FULL] } };
+    const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+    assert.deepEqual([shown.totals.runs.count, shown.totals.runs.notReverted], [2, 1]);
+    const without = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } });
+    assert.ok(without.ok);
+    assert.deepEqual(without.removed.map(idOf), [FULL]);
+    assert.deepEqual(without.kept, [{ target: "run", runId: PART, reason: "not_reverted_not_confirmed" }]);
+    const again = await planCleanup({ workspaceRoot: root, selection: { runs: { runIds: [PART] } }, now: NOW });
+    const withIt = await applyCleanup({ workspaceRoot: root, selection: { runs: { runIds: [PART] } }, now: NOW, confirmation: { digest: again.digest, discarded: false, includeNotReverted: true } });
+    assert.deepEqual(withIt.ok ? [withIt.removed.map(idOf), withIt.kept] : null, [[PART], []]);
+  });
+
+  test("a plan run whose apply run stays is kept too (used_by_kept_apply)", async () => {
+    const root = await workspace();
+    const selection = { runs: { runIds: [PLAN, APPLY] } };
+    const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+    const kept = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } });
+    assert.ok(kept.ok);
+    assert.deepEqual(kept.removed, []);
+    assert.deepEqual(kept.kept, [
+      { target: "run", runId: APPLY, reason: "not_reverted_not_confirmed" },
+      { target: "run", runId: PLAN, reason: "used_by_kept_apply" },
+    ]);
+    const both = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } });
+    assert.deepEqual(both.ok ? [both.removed.map(idOf), both.kept] : null, [[APPLY, PLAN], []]);
   });
 });

@@ -5,6 +5,12 @@
  * files folders (`discarded/<runId>/`, people's files) are confirmed apart. Parked files, the lock
  * file, `.gitignore` and anything else are never removed. Exact run directory names and plain
  * directories only; no link is followed, and a run directory that is a link is not an item.
+ *
+ * DR-44 (R-34): records of runs that were not, or only partly, reverted go only with
+ * `includeNotReverted`; an apply run whose records are an item is warned about whenever its
+ * discarded files could stay; apply runs are handled before the plan runs they use, and a plan run
+ * whose apply run stays is kept; a folder moved aside that cannot be removed entirely is kept as
+ * `partly_removed`, never reported or logged as removed, and the next plan shows it (a leftover).
  */
 
 import { randomBytes } from "node:crypto";
@@ -13,24 +19,29 @@ import { appendFile, lstat, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  CLEANUP_LEFTOVER_PATTERN_SOURCE,
   CLEANUP_LOG_FILE_NAME,
   CLEANUP_WARNING_CODES,
   DISCARDED_DIR_NAME,
   PARKED_DIR_NAME,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
+  cleanupRecordWarnings,
+  needsNotRevertedConfirmation,
+  selectedAsReverted,
 } from "../contracts/index.js";
 import type {
   ApplyCleanup,
   CleanupBlockCode,
   CleanupItem,
+  CleanupItemRef,
   CleanupKeptReason,
   CleanupLogLine,
   CleanupPlan,
   CleanupSelection,
-  CleanupTarget,
   CleanupWarningCode,
   ContentHash,
+  LastRevert,
   PlanCleanup,
   RunId,
   RunListEntry,
@@ -45,6 +56,8 @@ import { recordsChangedMarkIn } from "./marks.js";
 import { isStoredRunId, listRuns, runIdSecond } from "./runs.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const LEFTOVER = new RegExp(CLEANUP_LEFTOVER_PATTERN_SOURCE);
+const LEFTOVER_PREFIX = "cleanup-";
 
 /** A plain directory's files and bytes and the metadata fingerprint of everything below it. */
 interface Tree {
@@ -107,12 +120,15 @@ interface RunFacts {
   readonly discardedTree: Tree | null;
   readonly changes: number;
   readonly planRunId: string | null;
+  readonly lastRevert: LastRevert;
 }
 
 interface Scan {
   readonly runs: readonly RunFacts[];
   /** Discarded-files folders whose run has no records any more (newest first). */
   readonly orphanDiscarded: readonly { readonly runId: RunId; readonly tree: Tree }[];
+  /** DR-44 (d): folders an earlier cleanup could not remove entirely, by name. */
+  readonly leftovers: readonly { readonly leftoverId: string; readonly tree: Tree }[];
   readonly parked: StateSize;
   readonly lockHolder: string | null;
 }
@@ -146,18 +162,27 @@ async function scan(workspaceRoot: string): Promise<Scan> {
     const records = await measure(join(runsDir, entry.runId));
     const discardedTree = discardedNames.includes(entry.runId) ? await measure(join(discardedDir, entry.runId)) : null;
     const checked = entry.state === "checked" ? entry : null;
+    const lastRevert: LastRevert = checked?.reverted?.status ?? null;
     const summary: StateRunSummary = {
       runId: entry.runId,
       kind: checked?.kind ?? null,
       status: checked?.status ?? null,
       startedAt: checked?.startedAt ?? null,
       records: records?.size ?? ZERO,
-      // DR-44 (나), R-34 L-1: a partial revert left changes in place, so the run is not reverted.
-      reverted: checked !== null && checked.reverted !== null && checked.reverted.status === "complete",
+      // DR-44 (b): a partial revert left changes in place, so the run is not reverted.
+      reverted: lastRevert === "complete",
+      partlyReverted: lastRevert === "partial",
       discarded: discardedTree?.size ?? null,
       recordsChanged: await recordsChangedMarkIn(join(runsDir, entry.runId)),
     };
-    runs.push({ summary, records, discardedTree, changes: checked?.changes ?? 0, planRunId: checked?.kind === "apply" ? (checked.planRunId ?? null) : null });
+    runs.push({
+      summary,
+      records,
+      discardedTree,
+      changes: checked?.changes ?? 0,
+      planRunId: checked?.kind === "apply" ? (checked.planRunId ?? null) : null,
+      lastRevert,
+    });
   }
   const known = new Set(entries.map((entry) => entry.runId as string));
   const orphanDiscarded: { runId: RunId; tree: Tree }[] = [];
@@ -165,6 +190,17 @@ async function scan(workspaceRoot: string): Promise<Scan> {
     if (known.has(name)) continue;
     const tree = await measure(join(discardedDir, name));
     if (tree !== null) orphanDiscarded.push({ runId: name as RunId, tree });
+  }
+  const leftovers: { leftoverId: string; tree: Tree }[] = [];
+  let stateNames: string[] = [];
+  try {
+    stateNames = await readdir(stateDir);
+  } catch {
+    stateNames = [];
+  }
+  for (const name of stateNames.filter((entry) => LEFTOVER.test(entry)).sort()) {
+    const tree = await measure(join(stateDir, name));
+    if (tree !== null) leftovers.push({ leftoverId: name.slice(LEFTOVER_PREFIX.length), tree });
   }
   const parked = (await measure(join(stateDir, PARKED_DIR_NAME)))?.size ?? ZERO;
   let lockHolder: string | null = null;
@@ -174,8 +210,13 @@ async function scan(workspaceRoot: string): Promise<Scan> {
   } catch {
     lockHolder = null;
   }
-  return { runs, orphanDiscarded, parked, lockHolder };
+  return { runs, orphanDiscarded, leftovers, parked, lockHolder };
 }
+
+const sizeOf = (trees: readonly Tree[]): StateSize => ({
+  files: trees.reduce((sum, tree) => sum + tree.size.files, 0),
+  bytes: trees.reduce((sum, tree) => sum + tree.size.bytes, 0),
+});
 
 export const summarizeState: SummarizeState = async (request) => {
   const found = await scan(request.workspaceRoot);
@@ -190,12 +231,9 @@ export const summarizeState: SummarizeState = async (request) => {
       newest: starts[starts.length - 1] ?? null,
     },
     entries: found.runs.map((run) => run.summary),
-    discarded: {
-      runs: folders.length,
-      files: folders.reduce((sum, tree) => sum + tree.size.files, 0),
-      bytes: folders.reduce((sum, tree) => sum + tree.size.bytes, 0),
-    },
+    discarded: { runs: folders.length, ...sizeOf(folders) },
     parked: found.parked,
+    leftovers: { count: found.leftovers.length, ...sizeOf(found.leftovers.map((item) => item.tree)) },
   } satisfies StateSummary;
 };
 
@@ -213,10 +251,18 @@ function matches(part: CleanupSelection["runs"] | CleanupSelection["discarded"],
 
 const ordered = (codes: readonly CleanupWarningCode[]): CleanupWarningCode[] => CLEANUP_WARNING_CODES.filter((code) => codes.includes(code));
 
+/** What applyCleanup needs to know of a run item besides the plan: its kind and the plan run it uses. */
+interface ItemFacts {
+  readonly kind: "run" | "apply" | null;
+  readonly planRunId: string | null;
+}
+
 interface Planned {
   readonly plan: CleanupPlan;
   /** For each item, in plan order, the fingerprint the digest holds. */
   readonly prints: readonly string[];
+  /** For each item, in plan order (null for a discarded-files or leftover folder). */
+  readonly facts: readonly (ItemFacts | null)[];
 }
 
 async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowText: string): Promise<Planned> {
@@ -225,9 +271,12 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
   const found = await scan(workspaceRoot);
   const items: CleanupItem[] = [];
   const prints: string[] = [];
-  const blocked: { target: CleanupTarget; runId: RunId; code: CleanupBlockCode }[] = [];
+  const facts: (ItemFacts | null)[] = [];
+  const blocked: { target: "run" | "discarded"; runId: RunId; code: CleanupBlockCode }[] = [];
 
-  const selectedRuns = found.runs.filter((run) => run.records !== null && matches(selection.runs, run.summary.runId, startOf(run.summary.runId, run.summary.startedAt), run.summary.reverted, now));
+  const selectedRuns = found.runs.filter(
+    (run) => run.records !== null && matches(selection.runs, run.summary.runId, startOf(run.summary.runId, run.summary.startedAt), selectedAsReverted(run.lastRevert), now),
+  );
   const blockOf = (run: RunFacts): CleanupBlockCode | null => {
     if (found.lockHolder !== null && found.lockHolder === run.summary.runId) return "lock_held";
     if (run.summary.kind !== null && run.summary.status === null) return "no_result";
@@ -251,13 +300,17 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
       blocked.push({ target: "run", runId: id, code });
       continue;
     }
-    const warnings: CleanupWarningCode[] = [];
-    if (run.summary.kind !== null && run.changes > 0 && !run.summary.reverted) warnings.push("not_reverted");
-    // DR-44 (다), R-34 L-2: its discarded-files folder stays unless its removal is confirmed apart.
-    if (run.summary.kind === "apply" && run.discardedTree !== null) warnings.push("discarded_left");
-    if (run.summary.recordsChanged) warnings.push("records_changed");
-    items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings: ordered(warnings) });
+    // DR-44 (a)-(c): the contract's one rule for a run's records.
+    const warnings = cleanupRecordWarnings({
+      kind: run.summary.kind,
+      changes: run.changes,
+      lastRevert: run.lastRevert,
+      hasDiscarded: run.discardedTree !== null,
+      recordsChanged: run.summary.recordsChanged,
+    });
+    items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings });
     prints.push((run.records as Tree).print);
+    facts.push({ kind: run.summary.kind, planRunId: run.planRunId });
   }
   for (const item of discardedCandidates) {
     const run = item.run;
@@ -272,23 +325,37 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
     if (run?.summary.recordsChanged === true) warnings.push("records_changed");
     items.push({ target: "discarded", runId: item.runId, size: item.tree.size, warnings: ordered(warnings) });
     prints.push(item.tree.print);
+    facts.push(null);
+  }
+  // DR-44 (d): what an earlier cleanup could not remove entirely; always included, last.
+  for (const leftover of found.leftovers) {
+    items.push({ target: "leftover", leftoverId: leftover.leftoverId, size: leftover.tree.size, warnings: ["leftover"] });
+    prints.push(leftover.tree.print);
+    facts.push(null);
   }
 
-  const total = (target: CleanupTarget) => {
+  const totals = totalsOf(items);
+  const digest = sha256Hex(JSON.stringify({ items, blocked, totals, parked: found.parked, prints })) as ContentHash;
+  return { plan: { items, blocked, totals, parked: found.parked, digest }, prints, facts };
+}
+
+/** CleanupPlan.totals of `items` (the items of a plan, or what was removed). */
+function totalsOf(items: readonly (CleanupItemRef & { readonly size: StateSize; readonly warnings?: readonly CleanupWarningCode[] })[]): CleanupPlan["totals"] {
+  const of = (target: CleanupItemRef["target"]) => {
     const chosen = items.filter((item) => item.target === target);
     return { count: chosen.length, files: chosen.reduce((sum, item) => sum + item.size.files, 0), bytes: chosen.reduce((sum, item) => sum + item.size.bytes, 0) };
   };
-  const totals = { runs: total("run"), discarded: total("discarded") };
-  const digest = sha256Hex(JSON.stringify({ items, blocked, totals, parked: found.parked, prints })) as ContentHash;
-  return { plan: { items, blocked, totals, parked: found.parked, digest }, prints };
+  const runs = of("run");
+  const notReverted = items.filter((item) => item.target === "run" && needsNotRevertedConfirmation(item.warnings ?? [])).length;
+  return { runs: { count: runs.count, notReverted, files: runs.files, bytes: runs.bytes }, discarded: of("discarded"), leftovers: of("leftover") };
 }
 
 export const planCleanup: PlanCleanup = async (request) => (await makePlan(request.workspaceRoot, request.selection, request.now)).plan;
 
-/** Whether `.codaryn/discarded` has an entry named exactly `runId` (N-27 (a), as for run directories). */
-async function hasExactDiscardedEntry(discardedDir: string, runId: string): Promise<boolean> {
+/** Whether `parent` has an entry named exactly `name` (N-27 (a), as for run directories). */
+async function hasExactEntry(parent: string, name: string): Promise<boolean> {
   try {
-    return (await readdir(discardedDir)).includes(runId);
+    return (await readdir(parent)).includes(name);
   } catch {
     return false;
   }
@@ -328,55 +395,94 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
   const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: { now: () => Date.now() } });
   if (!lock.ok) return { ok: false, code: "workspace_locked" };
   try {
-    const { plan, prints } = await makePlan(workspaceRoot, selection, now);
+    const { plan, prints, facts } = await makePlan(workspaceRoot, selection, now);
     if (plan.digest !== confirmation.digest) return { ok: false, code: "plan_changed" };
-    const removed: { target: CleanupTarget; runId: RunId; size: StateSize }[] = [];
-    const kept: { target: CleanupTarget; runId: RunId; reason: CleanupKeptReason }[] = [];
-    for (const [index, item] of plan.items.entries()) {
-      if (item.target === "discarded" && !confirmation.discarded) {
-        kept.push({ target: item.target, runId: item.runId, reason: "not_confirmed" });
+    const removed: (CleanupItemRef & { size: StateSize; warnings: readonly CleanupWarningCode[] })[] = [];
+    const kept: (CleanupItemRef & { reason: CleanupKeptReason })[] = [];
+    const refOf = (item: CleanupItem): CleanupItemRef =>
+      item.target === "leftover" ? { target: "leftover", leftoverId: item.leftoverId } : { target: item.target, runId: item.runId };
+    const keep = (item: CleanupItem, reason: CleanupKeptReason): void => {
+      kept.push({ ...refOf(item), reason });
+    };
+    // DR-44 (a): apply runs first, then the other runs (their plan runs among them), then folders.
+    const order = plan.items.map((item, index) => ({ item, index }));
+    const rank = ({ item, index }: { item: CleanupItem; index: number }): number =>
+      item.target === "run" ? (facts[index]?.kind === "apply" ? 0 : 1) : item.target === "discarded" ? 2 : 3;
+    order.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
+    /** Plan runs an apply run uses that was selected and stays. */
+    const plansOfKeptApplies = new Set<string>();
+
+    for (const { item, index } of order) {
+      const itemFacts = facts[index] ?? null;
+      const keepApply = (reason: CleanupKeptReason): void => {
+        keep(item, reason);
+        if (itemFacts?.kind === "apply" && itemFacts.planRunId !== null) plansOfKeptApplies.add(itemFacts.planRunId);
+      };
+      if (item.target === "run" && needsNotRevertedConfirmation(item.warnings) && !confirmation.includeNotReverted) {
+        keepApply("not_reverted_not_confirmed");
         continue;
       }
-      const parent = join(stateDir, item.target === "run" ? RUNS_DIR_NAME : DISCARDED_DIR_NAME);
-      const dir = join(parent, item.runId);
-      const exact = item.target === "run" ? await hasExactRunEntry(workspaceRoot, item.runId) : await hasExactDiscardedEntry(parent, item.runId);
+      if (item.target === "run" && plansOfKeptApplies.has(item.runId)) {
+        keep(item, "used_by_kept_apply");
+        continue;
+      }
+      if (item.target === "discarded" && !confirmation.discarded) {
+        keep(item, "not_confirmed");
+        continue;
+      }
+      let dir: string;
+      let exact: boolean;
+      if (item.target === "leftover") {
+        const name = `${LEFTOVER_PREFIX}${item.leftoverId}`;
+        dir = join(stateDir, name);
+        exact = LEFTOVER.test(name) && (await hasExactEntry(stateDir, name));
+      } else {
+        const parent = join(stateDir, item.target === "run" ? RUNS_DIR_NAME : DISCARDED_DIR_NAME);
+        dir = join(parent, item.runId);
+        exact = item.target === "run" ? await hasExactRunEntry(workspaceRoot, item.runId) : await hasExactEntry(parent, item.runId);
+      }
       const tree = exact ? await measure(dir) : null;
       if (tree === null) {
-        kept.push({ target: item.target, runId: item.runId, reason: "not_plain_directory" });
+        keepApply("not_plain_directory");
         continue;
       }
       if (tree.print !== prints[index]) {
-        kept.push({ target: item.target, runId: item.runId, reason: "changed" });
+        keepApply("changed");
         continue;
       }
-      // Renamed aside first, so no half-removed run directory is ever left in place.
-      const aside = join(stateDir, `cleanup-${randomBytes(8).toString("hex")}`);
-      try {
-        await rename(dir, aside);
-      } catch {
-        kept.push({ target: item.target, runId: item.runId, reason: "io_error" });
-        continue;
+      let aside = dir;
+      if (item.target !== "leftover") {
+        // Renamed aside first, so no half-removed run directory is ever left in place.
+        aside = join(stateDir, `${LEFTOVER_PREFIX}${randomBytes(8).toString("hex")}`);
+        try {
+          await rename(dir, aside);
+        } catch {
+          keepApply("io_error");
+          continue;
+        }
       }
-      // DR-44 (라), R-34 L-3: what is left aside is not removed; it is not reported or logged as removed.
+      // DR-44 (d): what is left aside is a leftover the next plan shows; not reported or logged as removed.
       if (!(await removeAside(aside))) {
-        kept.push({ target: item.target, runId: item.runId, reason: "io_error" });
+        keepApply("partly_removed");
         continue;
       }
-      removed.push({ target: item.target, runId: item.runId, size: item.size });
+      removed.push({ ...refOf(item), size: item.size, warnings: item.warnings });
     }
-    const total = (target: CleanupTarget) => {
-      const chosen = removed.filter((item) => item.target === target);
-      return { count: chosen.length, files: chosen.reduce((sum, item) => sum + item.size.files, 0), bytes: chosen.reduce((sum, item) => sum + item.size.bytes, 0) };
+    const totals = totalsOf(removed);
+    const line: CleanupLogLine = {
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      runs: { count: totals.runs.count, files: totals.runs.files, bytes: totals.runs.bytes },
+      discarded: totals.discarded,
+      ...(totals.leftovers.count > 0 ? { leftovers: totals.leftovers } : {}),
     };
-    const totals = { runs: total("run"), discarded: total("discarded") };
-    const line: CleanupLogLine = { schemaVersion: 1, at: new Date().toISOString(), runs: totals.runs, discarded: totals.discarded };
     try {
       await appendFile(join(stateDir, CLEANUP_LOG_FILE_NAME), `${JSON.stringify(line)}\n`, "utf8");
     } catch (error) {
       // The removal happened; a log that cannot be written does not undo it.
       void errorCode(error);
     }
-    return { ok: true, removed, kept, totals };
+    return { ok: true, removed: removed.map(({ warnings: _warnings, ...entry }) => entry), kept, totals };
   } finally {
     await releaseLock({ workspaceRoot, runId: lockId }).catch(() => false);
   }

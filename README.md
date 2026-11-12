@@ -43,13 +43,13 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run latest --dry-ru
 - 설정 파일은 `--config` → `CODARYN_CONFIG` → 기본 위치 순서로 찾으므로, `init` 뒤에는 `--config`를 줄 필요가 없다([4절](docs/usage.md#4-처음-설정-init-키-모델)).
 - `npm link`를 하면 `node dist/src/cli/main.js` 대신 `codaryn`으로 쓸 수 있고, 작업 폴더에서 `codaryn run "<목표>"`로 한 줄 실행을 할 수 있다([2절](docs/usage.md#2-설치와-빌드), [8절](docs/usage.md#8-실행)).
 - 작업 공간(`D:\work\notes`)은 Git 커밋이나 사본으로 보존한다. `revert`는 파일 도구의 변경과 파일 정리의 이동·폐기만 되돌린다.
-- `.codaryn\runs\`의 실행 폴더는 되돌릴 일이 없어진 모델 실행만 지운다. 계획 실행의 폴더와 `.codaryn\discarded\`(폐기한 사람의 파일)는 남긴다([11절](docs/usage.md#11-되돌리기), [18.8절](docs/usage.md#188-기록-폴더와-보관함-정리)).
+- `.codaryn\`의 실행 기록과 보관함은 `node dist/src/cli/main.js cleanup --workspace D:\work\notes --older-than 30`으로 미리 본 뒤 `--confirm <digest>`로 지운다. 되돌리지 않은 실행의 기록(`--include-not-reverted`)과 폐기한 사람의 파일(`--delete-discarded`)은 따로 확인해야 지워진다([11절](docs/usage.md#11-되돌리기), [18.8절](docs/usage.md#188-기록-폴더와-보관함-정리-cleanup)).
 - 사람이 읽는 글은 한국어·영어다. `$env:CODARYN_LANG = "en"` 또는 `"ko"`로 고른다. stdout의 JSON과 오류 코드는 영어다.
 - 변수 파일을 쓸 때는 `--vars-file`로 준다. `--env-file`은 Node가 먼저 가로채므로 쓰지 않는다.
 
 ## 문서
 
-- [사용 안내](docs/usage.md): 설치, 키 없는 체험, `init`과 키·모델, 두 번째 제공자(OpenAI), 설정과 프로필, 점검(`doctor`), 실행(한 줄 실행, 사람용 출력, 언어), 재수정 반복, 결과(`runs`, `report`, `--run latest`), 되돌리기(`--dry-run`), 비밀, 정책, 점검표, 한계, 문제 해결, 범용 작업(워크플로, `plan`·`apply`·`review`, 하드 링크 없는 드라이브의 동의, 기록 폴더와 보관함 정리)
+- [사용 안내](docs/usage.md): 설치, 키 없는 체험, `init`과 키·모델, 두 번째 제공자(OpenAI), 설정과 프로필, 점검(`doctor`), 실행(한 줄 실행, 사람용 출력, 언어), 재수정 반복, 결과(`runs`, `report`, `--run latest`), 되돌리기(`--dry-run`), 기록 정리(`cleanup`), 비밀, 정책, 점검표, 한계, 문제 해결, 범용 작업(워크플로, `plan`·`apply`·`review`, 하드 링크 없는 드라이브의 동의, 기록 폴더와 보관함 정리)
 - [CLI·공통 계약](docs/cli-contract.md)
 - [문서 안내](docs/README.md)
 - [공통 개발 지침](AGENTS.md), [Claude 작업 지침](CLAUDE.md)

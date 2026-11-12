@@ -29,6 +29,7 @@ import {
   STATE_DIR_NAME,
 } from "../contracts/index.js";
 import type {
+  ChangeShown,
   ContentHash,
   CreateChangeRecorder,
   RawText,
@@ -38,6 +39,7 @@ import type {
   RevertRun,
   RevertSkipReason,
   RevertedFile,
+  RunOriginal,
   SkippedFile,
   Workspace,
 } from "../contracts/index.js";
@@ -46,6 +48,20 @@ import { ApplyRecordError, PlanRunMissingError, isApplyJournal, revertApplyRun }
 import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
+/**
+ * DR-29, DR-32 (c): how the run masked the path at index position `n` (ChangeShown), next to its
+ * snapshot: `shown-<n>.json` = `{ schemaVersion: 2, path, original, next }`. Digests only: no
+ * visible text, no token, no secret (R-19 L-3). Version 1 held the visible parts themselves; such a
+ * file is not given (the view shows no text for it).
+ */
+const SHOWN_FILE_PREFIX = "shown-";
+const SHOWN_SCHEMA_VERSION = 2;
+/** A shown file holds a path and three hashes; anything larger is not read. */
+const MAX_SHOWN_FILE_BYTES = 16_384;
+
+function shownFileName(position: number): string {
+  return `${SHOWN_FILE_PREFIX}${position}.json`;
+}
 const CONTENT_FILE_PATTERN = /^([1-9][0-9]{0,8})\.orig$/;
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 const TOKEN_FRAGMENT = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
@@ -166,13 +182,18 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
     return entries;
   }
 
-  async function save(path: ResolvedPath, original: RawText | null): Promise<void> {
+  async function save(path: ResolvedPath, original: RawText | null, shownOriginal: ContentHash | null | undefined): Promise<void> {
     const relative: unknown = (path as Partial<ResolvedPath> | null)?.relative;
     if (!isRelativeFilePath(relative)) {
       throw new TypeError("saveOriginal needs a resolved path below the workspace root");
     }
     if (original !== null && (typeof original !== "string" || !original.isWellFormed())) {
       throw new TypeError("saveOriginal needs the original text as read, or null");
+    }
+    // DR-29, DR-32 (c): the digest of the original's visible parts, or null for a file that did not exist.
+    if (shownOriginal !== undefined) {
+      const fits = shownOriginal === null ? original === null : original !== null && typeof shownOriginal === "string" && CONTENT_HASH.test(shownOriginal);
+      if (!fits) throw new TypeError("saveOriginal needs the digest of the original's visible parts, or null for a file that did not exist");
     }
     const current = await load();
     if (current.some((entry) => entry.path === relative)) return;
@@ -190,16 +211,90 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
     const next = [...current, entry];
     await writeAtomically(join(dir, INDEX_FILE_NAME), `${JSON.stringify({ schemaVersion: 1, entries: next })}\n`);
     entries = next;
+    // DR-29: after the index, so a form never exists for a path the index does not name.
+    if (shownOriginal !== undefined) {
+      const record: ShownRecord = { schemaVersion: SHOWN_SCHEMA_VERSION, path: relative, original: shownOriginal, next: null };
+      await writeAtomically(join(dir, shownFileName(current.length)), `${JSON.stringify(record)}\n`);
+    }
+  }
+
+  /** DR-29, DR-32 (c): the last written text's digest replaces the earlier one. */
+  async function saveNextShown(path: ResolvedPath, sha256: ContentHash, partsDigest: ContentHash): Promise<void> {
+    const relative: unknown = (path as Partial<ResolvedPath> | null)?.relative;
+    if (!isRelativeFilePath(relative)) throw new TypeError("saveNext needs a resolved path below the workspace root");
+    if (typeof sha256 !== "string" || !CONTENT_HASH.test(sha256)) throw new TypeError("saveNext needs the SHA-256 of the bytes written");
+    if (typeof partsDigest !== "string" || !CONTENT_HASH.test(partsDigest)) throw new TypeError("saveNext needs the digest of the written text's visible parts");
+    const current = await load();
+    const position = current.findIndex((entry) => entry.path === relative);
+    if (position < 0) throw new Error("saveNext was called before saveOriginal for this path; nothing was kept");
+    const existing = await readShown(dir, current[position] as IndexEntry, position);
+    // Without the original's digest (a tool that could not mask it) no view can show the text.
+    if (existing === null) return;
+    const record: ShownRecord = { schemaVersion: SHOWN_SCHEMA_VERSION, path: relative, original: existing.original, next: { sha256, partsDigest } };
+    await writeAtomically(join(dir, shownFileName(position)), `${JSON.stringify(record)}\n`);
   }
 
   return {
-    saveOriginal(path, original) {
-      const run = queue.then(() => save(path, original));
+    saveOriginal(path, original, shownOriginal) {
+      const run = queue.then(() => save(path, original, shownOriginal));
+      queue = run.catch(() => undefined);
+      return run;
+    },
+    saveNext(path, sha256, partsDigest) {
+      const run = queue.then(() => saveNextShown(path, sha256, partsDigest));
       queue = run.catch(() => undefined);
       return run;
     },
   };
 };
+
+/** DR-29, DR-32 (c): a shown file as stored. */
+interface ShownRecord extends ChangeShown {
+  readonly schemaVersion: typeof SHOWN_SCHEMA_VERSION;
+  readonly path: string;
+}
+
+function isDigest(value: unknown): value is ContentHash {
+  return typeof value === "string" && CONTENT_HASH.test(value);
+}
+
+/**
+ * DR-29, DR-32 (c): the shown form kept for the index entry at `position`, or null when there is
+ * none or it fails a check: version 2, exact keys, the entry's path, an original digest that matches
+ * whether the file existed, and SHA-256 digests only. A regular file only (no link), of bounded size.
+ */
+async function readShown(dir: string, entry: IndexEntry, position: number): Promise<ChangeShown | null> {
+  let value: unknown;
+  try {
+    const file = join(dir, shownFileName(position));
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > MAX_SHOWN_FILE_BYTES) return null;
+    value = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 4 || !["schemaVersion", "path", "original", "next"].every((key) => Object.hasOwn(value, key))) return null;
+  if (value["schemaVersion"] !== SHOWN_SCHEMA_VERSION || value["path"] !== entry.path) return null;
+  // A created file has no original digest; a file that existed has one.
+  const recorded = value["original"];
+  let original: ContentHash | null;
+  if (recorded === null) {
+    if (entry.existed) return null;
+    original = null;
+  } else {
+    if (!entry.existed || !isDigest(recorded)) return null;
+    original = recorded;
+  }
+  const nextValue = value["next"];
+  if (nextValue === null) return { original, next: null };
+  if (!isRecord(nextValue) || Object.keys(nextValue).length !== 2) return null;
+  const sha256 = nextValue["sha256"];
+  const partsDigest = nextValue["partsDigest"];
+  if (!isDigest(sha256) || !isDigest(partsDigest)) return null;
+  return { original, next: { sha256, partsDigest } };
+}
 
 /** The contract's REVERT_ERROR_CODES (R-9c C-1 adds plan_run_missing). */
 export type RevertRunErrorCode = RevertErrorCode;
@@ -278,7 +373,7 @@ function changedPaths(text: string, runId: string): ChangedPath[] {
 }
 
 type Snapshots =
-  | { readonly kind: "found"; readonly dir: string; readonly byPath: ReadonlyMap<string, IndexEntry> }
+  | { readonly kind: "found"; readonly dir: string; readonly byPath: ReadonlyMap<string, IndexEntry & { readonly position: number }> }
   | { readonly kind: "missing" }
   | { readonly kind: "unreadable" };
 
@@ -296,7 +391,7 @@ async function loadSnapshots(dir: string): Promise<Snapshots> {
     const found = await readIndex(dir);
     if (found === "missing") return { kind: "missing" };
     if (found === "invalid") return { kind: "unreadable" };
-    return { kind: "found", dir, byPath: new Map(found.map((entry) => [entry.path, entry])) };
+    return { kind: "found", dir, byPath: new Map(found.map((entry, position) => [entry.path, { ...entry, position }])) };
   } catch {
     return { kind: "unreadable" };
   }
@@ -476,25 +571,8 @@ export const revertRun: RevertRun = async (request) => {
   return { reverted, skipped };
 };
 
-/** DR-14: why a run's original of a path is not given. */
-export type OriginalUnavailable = "masked_path" | "snapshot_missing" | "not_text" | "too_large" | "unreadable";
-
-/** DR-14: one changed path of a run and its original, for a comparison view. */
-export interface RunOriginal {
-  /** As the journal recorded it (masked). */
-  readonly path: string;
-  /** The run created the file: there is no original. */
-  readonly created: boolean;
-  /** The path's first `previousHash` (the state before the run), null when the run created it. */
-  readonly before: ContentHash | null;
-  /** The path's last `newHash` (the state the run left). */
-  readonly after: ContentHash;
-  /**
-   * The original as UTF-8 text (raw local text, R-8: mask it before it leaves the process), why it
-   * is not given, or null for a created file.
-   */
-  readonly original: { readonly text: RawText } | { readonly unavailable: OriginalUnavailable } | null;
-}
+/** DR-14, DR-29: the types moved to the contract (src/contracts/changes.ts); exported here as before. */
+export type { OriginalUnavailable, RunOriginal } from "../contracts/index.js";
 
 /** The kept original of a changed path, checked as `revertRun` checks it, with a finer reason. */
 async function originalText(change: ChangedPath, snapshots: Snapshots): Promise<RunOriginal["original"]> {
@@ -559,7 +637,10 @@ export async function readRunOriginals(request: { readonly workspaceRoot: string
   for (const change of changes) {
     const created = change.before === null;
     const original = created ? null : TOKEN_FRAGMENT.test(change.path) ? { unavailable: "masked_path" as const } : await originalText(change, snapshots);
-    originals.push({ path: change.path, created, before: change.before, after: change.after, original });
+    // DR-29: how the run masked this path, when it was recorded and passes the checks.
+    const entry = snapshots.kind === "found" ? snapshots.byPath.get(change.path) : undefined;
+    const shown = entry === undefined || snapshots.kind !== "found" ? null : await readShown(snapshots.dir, entry, entry.position);
+    originals.push({ path: change.path, created, before: change.before, after: change.after, original, ...(shown === null ? {} : { shown }) });
   }
   return originals;
 }

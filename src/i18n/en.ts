@@ -12,6 +12,8 @@ export const EN_MESSAGES: MessageTexts = {
   "error.label": "error",
   "error.fix_label": "To fix",
   "error.doctor_hint": "Check: codaryn doctor",
+  "error.hint.quick_form_needs_task":
+    "The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.",
 
   "diagnostic.json_syntax": "JSON syntax error at line {line}, column {column}",
   "diagnostic.unknown_field": "{field} has an unknown field (its name is not shown)",
@@ -90,6 +92,8 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.dry_run_next": "Run again without --dry-run to apply.",
   "revert.reverted_before": "This run was already reverted before, so its files may show as changed since the run.",
   "revert.unsafe_moved": "Files moved back with your consent in a way that could replace a file: {count}",
+  "revert.parked":
+    "Files the revert moved aside and could not put back, left in .codaryn/parked/: {count}. Move them back or delete them yourself; nothing removes them.",
   "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
   "runs.column.run_id": "run id",
@@ -247,6 +251,8 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.lock.unreadable": "the workspace lock file (.codaryn/lock.json) cannot be read",
   "doctor.lock.reclaim_left":
     "a lock reclaim file (.codaryn/lock.json.reclaim) is left, so a lock left by an ended process is not reclaimed; if no Codaryn is running in this workspace, remove that file",
+  "doctor.lock.parked_left":
+    "files a revert could not put back are left in .codaryn/parked/: {count}; move them back or delete them, as nothing removes them",
   "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.",
 
   "error.invalid_arguments.what": "the command arguments are not valid",

@@ -440,6 +440,35 @@ describe("HumanOutput.revertSummary (N-7)", () => {
     );
   });
 
+  test("R-16 L-1: files a revert left parked are counted after the skipped list; the place is not printed", () => {
+    const parkedAt = `.codaryn/parked/${RUN}/0-0123456789abcdef`;
+    const text = createHumanOutput(strictCatalog()).revertSummary(
+      output({
+        reverted: [],
+        skipped: [
+          { path: "inbox/a.txt", reason: "io_error", parkedAt },
+          { path: "inbox/b.txt", reason: "io_error" },
+        ],
+      }),
+    );
+    assert.equal(
+      text,
+      [
+        "codaryn: [revert.done_title count=0] (partial)",
+        "[revert.skipped_title count=2]",
+        "  inbox/a.txt — [revert.skip.io_error] (io_error)",
+        "  inbox/b.txt — [revert.skip.io_error] (io_error)",
+        "[revert.parked count=1]",
+        "",
+      ].join("\n"),
+    );
+    assert.equal(
+      createHumanOutput(strictCatalog()).revertSummary(output({ reverted: [], skipped: [{ path: "inbox/b.txt", reason: "io_error" }] })).includes("revert.parked"),
+      false,
+      "only when a file was left parked",
+    );
+  });
+
   test("N-24(c): an impossible date such as 2026-02-30 shows no time", () => {
     const human = createHumanOutput(strictCatalog());
     const revertText = human.revertSummary(output({ revertedBefore: { at: "2026-02-30T00:00:00Z", status: "complete" } }));

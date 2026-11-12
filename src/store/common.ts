@@ -6,8 +6,8 @@ import { link, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/prom
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { ContentHash } from "../contracts/index.js";
+import { PRIVACY_TOKEN_PATTERN_SOURCE, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import type { ContentHash, MaskedParts } from "../contracts/index.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -155,4 +155,22 @@ export async function ensureRunDir(workspaceRoot: string, runId: string): Promis
   await mkdir(dir, { recursive: true });
   if (!(await isPlainDirectory(dir))) throw new Error("the run directory is a link or not a directory; nothing was written");
   return dir;
+}
+
+const PRIVACY_TOKEN = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE);
+
+/**
+ * DR-28, DR-29: visible parts (MaskedParts) as a reader or writer of them checks them: an array of
+ * 1 to `maxParts` strings, none holding a privacy token (the text was split at the tokens), at most
+ * `maxText` characters in all. A copy, or null for anything else.
+ */
+export function maskedPartsOf(value: unknown, maxParts: number, maxText: number): MaskedParts | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxParts) return null;
+  let total = 0;
+  for (const part of value) {
+    if (typeof part !== "string" || PRIVACY_TOKEN.test(part)) return null;
+    total += part.length;
+    if (total > maxText) return null;
+  }
+  return [...(value as string[])];
 }

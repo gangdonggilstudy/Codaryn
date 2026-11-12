@@ -163,7 +163,7 @@ function modelTextWidth(columns: number | null): number {
 
 /** Every line break a terminal may honour: CR LF, LF, CR, VT, FF, NEL, and the line and paragraph separators. */
 const MODEL_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
-/** Characters that show nothing: zero-width spaces and joiners, the soft hyphen, the word joiner, the BOM, the Mongolian vowel separator. */
+/** Characters that show nothing: zero-width spaces and joiners, the soft hyphen, the word joiner, the BOM, the Mongolian vowel separator. Shown as REPLACEMENT. */
 const INVISIBLE = /[\u00ad\u180e\u200b-\u200d\u2060\ufeff]/g;
 /** A run of white space of any kind (Unicode spaces, tabs). */
 const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
@@ -171,7 +171,7 @@ const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
 /**
  * U-14 (R-49 R49-L2), DR-47: text a model wrote (a plan's summary, the agent's last message) as rows
  * for people. It is the model's own words, so every row starts with MODEL_TEXT_PREFIX. Runs of
- * white space become one space and invisible characters go, so padding cannot place words at the
+ * white space become one space and invisible characters show as REPLACEMENT, so padding cannot place words at the
  * start of a terminal row; the text is folded here (at a space when there is one), so the terminal
  * does not fold it: R-52 R52-L1, for a terminal `columns` wide (by default the terminal's,
  * terminalColumns) one column narrower, at most MODEL_TEXT_COLUMNS, and MODEL_TEXT_COLUMNS when the
@@ -182,9 +182,13 @@ const WHITE_SPACE = /[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+/g;
 export function quoteModelText(text: string, maxRows: number, columns: number | null = terminalColumns()): string[] {
   const room = modelTextWidth(columns) - displayWidth(MODEL_TEXT_PREFIX);
   const rows: string[] = [];
-  for (const raw of text.split(MODEL_LINE_BREAK)) {
-    // White space first (a tab is a space here, not a control character to mark), then the last step of every line.
-    const line = finalLine(raw.replace(INVISIBLE, "").replace(WHITE_SPACE, " ")).trim();
+  // R-52 R52-M2: key shapes over the whole text first, so a key split by LF, TAB or CRLF (which split
+  // it into rows below) is still found; hideKeys skips control and format characters.
+  for (const raw of hideKeys(text, null).split(MODEL_LINE_BREAK)) {
+    // White space first (a tab is a space here, not a control character to mark), then the last step
+    // of every line. R-52 R52-M1: an invisible character shows as REPLACEMENT; removing it could put a
+    // value back together that was masked apart (a short registered value split by a zero-width space).
+    const line = finalLine(raw.replace(INVISIBLE, REPLACEMENT).replace(WHITE_SPACE, " ")).trim();
     if (line.length === 0) continue;
     let row = "";
     let width = 0;

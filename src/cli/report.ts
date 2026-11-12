@@ -69,7 +69,7 @@ import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
-import { cliError } from "./run.js";
+import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
@@ -503,7 +503,8 @@ function renderReportText(report: RunReportOutput, failedToolCalls: number): str
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
-  out.push(`- Task: ${code(journal.taskId)} (workflow ${code(journal.workflow)})`);
+  // DR-50 (U-58): the words for people; the JSON keeps its field `workflow`.
+  out.push(`- Task: ${code(journal.taskId)} (task type ${code(journal.workflow)})`);
   out.push(
     `- Provider: ${code(journal.provider)}${journal.provider === "scripted" ? " (scripted model; no API was called)" : ""}`,
   );
@@ -937,7 +938,7 @@ async function readRecordFile(file: string): Promise<string> {
 
 export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> {
   const parsed = parseReportArgs(io.argv);
-  if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
+  if (!parsed.ok) return argumentsError(parsed);
   const { json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.

@@ -320,6 +320,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const offeredWorkflow = offered.filter(isWorkflowToolName);
   /** GT-E3: set when `propose_plan` stored a plan; the run then ends as plan_pending. */
   let proposedPlan: ProposedPlan | null = null;
+  /** U-59 (AXM-15): the made-safe summary of the propose_plan call that stored proposedPlan. */
+  let planSummary: MaskedText | null = null;
   /** GT-E4: the masked checklist of a run that ends as awaiting_review. */
   let reviewChecklist: readonly MaskedText[] | null = null;
   const state = new RunState();
@@ -811,6 +813,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (isEnd(result) || !outcome.ok) return result;
     if (!isProposedPlan(outcome.payload)) return UNKNOWN_OUTCOME;
     proposedPlan = { digest: outcome.payload.digest, actions: outcome.payload.actions.length };
+    // U-59 (AXM-15): the agent's description of this plan, masked and made safe as the last message.
+    const maskedSummary = mask(args.summary);
+    planSummary = maskedSummary === null ? null : (finalMessageOf(maskedSummary, (text) => privacy.mask(text))?.text ?? null);
     return result;
   };
 
@@ -1382,6 +1387,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       ...(finalMessage !== null ? { finalMessage } : {}),
       // GT-E3, GT-E4: only with the reasons that carry them.
       ...(end.reason === "plan_pending" && proposedPlan !== null ? { plan: proposedPlan } : {}),
+      // U-59 (AXM-15): apart from `plan`, whose two fields stay.
+      ...(end.reason === "plan_pending" && proposedPlan !== null && planSummary !== null ? { planSummary } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),
     };
   } finally {

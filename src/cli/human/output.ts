@@ -15,11 +15,15 @@
  */
 
 import {
+  API_KEY_ENVS,
+  API_MODEL_ENVS,
   APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
+  CLI_ERROR_HINT_DETAIL,
   MAX_FINAL_MESSAGE_CHARS,
   CLI_ERROR_HINTS,
+  DETAILED_CLI_ERROR_HINTS,
   DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
@@ -27,6 +31,7 @@ import {
   PLAN_RECORDS_UNCHECKED_CAUSES,
   PERMISSION_KINDS,
   POLICY_NARROWING_KINDS,
+  PROVIDER_SETTINGS,
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
@@ -236,6 +241,61 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     return `── ${words} (${pair.status}/${pair.reason}) ──`;
   }
 
+  /**
+   * U-37 (R-69 M1): the lines of a hint that takes a value (DETAILED_CLI_ERROR_HINTS), from the error's
+   * CLI_ERROR_HINT_DETAIL. A detail that is absent or does not fit gives no line (the contract:
+   * such a hint's line is left out), and never only part of them.
+   */
+  function detailedHintLines(output: CliErrorOutput): string[] {
+    const hint: unknown = output.hint;
+    const detail: unknown = (output as { readonly [CLI_ERROR_HINT_DETAIL]?: unknown })[CLI_ERROR_HINT_DETAIL];
+    if (!isOneOf(hint, DETAILED_CLI_ERROR_HINTS) || typeof detail !== "object" || detail === null) return [];
+    const { position, field, missing } = detail as { readonly position?: unknown; readonly field?: unknown; readonly missing?: unknown };
+    switch (hint) {
+      case "unknown_option":
+        return isCount(position, 1) ? [`  ${catalog.format("error.hint.unknown_option", { position })}`] : [];
+      case "key_field_in_task":
+      case "key_field_in_config": {
+        const place = typeof field === "string" ? toSchemaFieldPath(field) : null;
+        return place === null ? [] : [`  ${catalog.format(`error.hint.${hint}`, { field: place })}`];
+      }
+      case "provider_settings_missing": {
+        const items = missingItems(missing);
+        return items === null ? [] : [`  ${catalog.format("error.hint.provider_settings_missing")}`, ...items.map((item) => `    - ${item}`)];
+      }
+    }
+  }
+
+  /**
+   * U-37: provider_settings_missing's items, one per setting not set, or null when the list does not
+   * fit: not a list, empty, an item that is not one of ProviderSettingMissing's forms, or the
+   * settings not in PROVIDER_SETTINGS order, each once.
+   */
+  function missingItems(missing: unknown): CatalogText[] | null {
+    if (!Array.isArray(missing) || missing.length === 0) return null;
+    const items: CatalogText[] = [];
+    let last = -1;
+    for (const entry of missing as readonly unknown[]) {
+      if (typeof entry !== "object" || entry === null) return null;
+      const { setting, keyEnv, modelEnv, field, placeholder } = entry as Record<string, unknown>;
+      const order = isOneOf(setting, PROVIDER_SETTINGS) ? PROVIDER_SETTINGS.indexOf(setting) : -1;
+      if (order <= last) return null;
+      last = order;
+      const place = typeof field === "string" ? toSchemaFieldPath(field) : null;
+      if (setting === "key") {
+        if (!isOneOf(keyEnv, API_KEY_ENVS)) return null;
+        items.push(catalog.format("error.missing.key", { keyEnv }));
+      } else if (setting === "model") {
+        if (!isOneOf(modelEnv, API_MODEL_ENVS) || place === null || typeof placeholder !== "boolean") return null;
+        items.push(catalog.format(placeholder ? "error.missing.model_placeholder" : "error.missing.model", { variable: modelEnv, field: place }));
+      } else {
+        if (place === null) return null;
+        items.push(catalog.format("error.missing.output_limit", { field: place }));
+      }
+    }
+    return items;
+  }
+
   /** The run id, and the report and revert commands for it. */
   function nextCommands(id: unknown, here: boolean, revertable: boolean): string[] {
     const runId = toRunId(String(id));
@@ -261,6 +321,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
       // R-12 L-2: the error's own advice (CliErrorOutput.hint), as one more indented line.
       if (isOneOf(output.hint, CLI_ERROR_HINTS)) out.push(`  ${catalog.format(`error.hint.${output.hint}`)}`);
+      // U-37 (R-69 M1): or a hint that takes a value, from the error's detail.
+      else out.push(...detailedHintLines(output));
       return lines(out);
     },
 

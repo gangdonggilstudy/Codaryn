@@ -4,6 +4,7 @@
 
 import type { RevertOutcome } from "./changes.js";
 import type { DoctorOutput, InitOutput, ModelsOutput, ReportOutput, RunsOutput } from "./commands.js";
+import type { ApiKeyEnv, ApiModelEnv } from "./config.js";
 import type { InputDiagnosticFile, SchemaFieldPath } from "./human.js";
 import type { IntegrityChecker } from "./integrity.js";
 import type { StateGuard } from "./state.js";
@@ -336,6 +337,16 @@ export interface EngineResult {
    */
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
   /**
+   * U-59 (AXM-15): with `plan`, the agent's description of that plan: the `summary` of the
+   * propose_plan call that stored it (ProposePlanArgs.summary), masked by the run's gateway and made
+   * safe as finalMessage is (safeModelText: invisible characters left out, key shapes as `[key]`).
+   * The model's own words, not checked; not in plan.json or the digest, so not what a person
+   * approves (PlanOutput.summary is the same text read back for the plan view). Apart from `plan`,
+   * whose two fields stay. Absent without `plan`, when it is empty after that, and in results
+   * written before U-59.
+   */
+  readonly planSummary?: MaskedText;
+  /**
    * DR-52 (AXM-17): whether masking worked, in counts only (never a value, a place or a length).
    * `registeredValues`: PrivacyGateway.registeredValues. `maskedPlaces`: the protected tokens
    * (countPrivacyTokens) in the texts the engine sent to the model (the system text, the task's
@@ -387,7 +398,13 @@ export interface CliErrorOutput {
    * adds it as its own line (`error.hint.<hint>`); `message` says the same for JSON readers.
    * Absent otherwise.
    */
-  readonly hint?: CliErrorHint;
+  readonly hint?: CliErrorHint | DetailedCliErrorHint;
+  /**
+   * U-37: the values a DETAILED_CLI_ERROR_HINTS line needs, for the human error only. Under a symbol
+   * key, so the JSON line (JSON.stringify) never has it; a spread copy keeps it. Absent, or not
+   * matching the hint, the human error leaves that hint's line out.
+   */
+  readonly [CLI_ERROR_HINT_DETAIL]?: CliErrorHintDetail;
 }
 
 /**
@@ -395,9 +412,98 @@ export interface CliErrorOutput {
  * - quick_form_needs_task: `plan`, `apply` or `review` in the quick form (`--workspace`) failed on
  *   the config file's run settings (limits included, `invalid_config`); the plan run's task given
  *   with `--task` brings its own settings, and its secrets (DR-28).
+ *
+ * U-37 (UXM-2, DR-57): the reason of an argument, input or setting error, which `message` gives in
+ * English only, so the human error tells it in the chosen language. JSON readers get more values of
+ * `hint` and nothing else. One hint per error, the one that names the cause.
+ * - invalid_arguments: unknown_command (no command word, or a word that is no command, also after
+ *   `help`), workspace_goal_together (the quick form needs both `--workspace` and `--goal`),
+ *   apply_needs_run_id (apply takes the plan run's id; `latest` is not accepted), digest_form (a
+ *   digest given with `--digest` or cleanup's `--confirm` is MIN_PLAN_DIGEST_PREFIX to 64 lowercase
+ *   hex characters), review_needs_verdict (`--accept` or `--reject`), run_id_form (`--run` takes a
+ *   run id or `latest`), version_no_json (`--version` takes no other argument).
+ * - invalid_task (or invalid_config for the config file): task_file_unreadable (the file given with
+ *   `--task` cannot be read: missing, not a file, unreadable), input_too_large (an input file is
+ *   larger than the limit), input_inside_workspace (an input file is inside the workspace or its
+ *   place cannot be confirmed).
+ * - invalid_config: profile_needs_config (`--profile` needs a config file), profile_not_found (the
+ *   config file has no profile of that name), task_type_not_found (the task type named by
+ *   `workflowRef` or `--workflow` is neither built in nor in the config's `workflows`; invalid_task
+ *   when the task file names it).
+ * - key_in_file: key_in_goal, key_in_task, key_in_config (where a key value was found);
+ *   key_field_in_task or key_field_in_config when its place is a SchemaFieldPath.
+ * Each has a listed `error.hint.<hint>` without parameters; DETAILED_CLI_ERROR_HINTS are apart.
  */
-export const CLI_ERROR_HINTS = ["quick_form_needs_task"] as const;
+export const CLI_ERROR_HINTS = [
+  "quick_form_needs_task",
+  "unknown_command",
+  "workspace_goal_together",
+  "apply_needs_run_id",
+  "digest_form",
+  "review_needs_verdict",
+  "run_id_form",
+  "version_no_json",
+  "task_file_unreadable",
+  "input_too_large",
+  "input_inside_workspace",
+  "profile_needs_config",
+  "profile_not_found",
+  "task_type_not_found",
+  "key_in_goal",
+  "key_in_task",
+  "key_in_config",
+] as const;
 export type CliErrorHint = (typeof CLI_ERROR_HINTS)[number];
+/**
+ * U-37: hints whose line takes a value from CliErrorOutput's CLI_ERROR_HINT_DETAIL. Kept apart from
+ * CLI_ERROR_HINTS, so a renderer that knows only those leaves these lines out rather than fail.
+ * - unknown_option (invalid_arguments, `position`): an option the command does not take, or one
+ *   given twice. Told by its position, never by its name (DR-57).
+ * - key_field_in_task, key_field_in_config (key_in_file, `field`): where the key field or value is.
+ * - provider_settings_missing (provider_not_configured, `missing`): the line, then one item line per
+ *   setting not set (`error.missing.<setting>`), in PROVIDER_SETTINGS order.
+ */
+export const DETAILED_CLI_ERROR_HINTS = ["unknown_option", "key_field_in_task", "key_field_in_config", "provider_settings_missing"] as const;
+export type DetailedCliErrorHint = (typeof DETAILED_CLI_ERROR_HINTS)[number];
+/** U-37: every value CliErrorOutput.hint may have. */
+export const ALL_CLI_ERROR_HINTS = [...CLI_ERROR_HINTS, ...DETAILED_CLI_ERROR_HINTS] as const;
+
+/** U-37: the key of CliErrorOutput's hint detail. A symbol, so no JSON line carries it. */
+export const CLI_ERROR_HINT_DETAIL: unique symbol = Symbol("codaryn.cliErrorHintDetail");
+
+/** U-37: the settings provider_not_configured can miss, in the order their items are told. */
+export const PROVIDER_SETTINGS = ["key", "model", "output_limit"] as const;
+export type ProviderSetting = (typeof PROVIDER_SETTINGS)[number];
+
+/**
+ * U-37: one setting not set, as the run's settings resolve it (src/cli/settings.ts):
+ * - key: the provider's key variable (`error.missing.key`).
+ * - model: no model left, or only a placeholder (`error.missing.model`,
+ *   `error.missing.model_placeholder`): the task's `model.model`, the provider's model variable,
+ *   the config's field for it (`model`, or `providers.<provider>.model`).
+ * - output_limit: `maxOutputTokens` (`error.missing.output_limit`): the task's
+ *   `model.maxOutputTokens` or the config's field for it.
+ * Names and field positions only, never a value.
+ */
+export type ProviderSettingMissing =
+  | { readonly setting: "key"; readonly keyEnv: ApiKeyEnv }
+  | { readonly setting: "model"; readonly modelEnv: ApiModelEnv; readonly field: SchemaFieldPath; readonly placeholder: boolean }
+  | { readonly setting: "output_limit"; readonly field: SchemaFieldPath };
+
+/**
+ * U-37: what a detailed hint's line needs. Numbers, field positions and fixed names only; no text
+ * typed or read from a file reaches it.
+ * - position (unknown_option): the argument's place after the command word, counted from 1; for a
+ *   repeated option, the place of its second use.
+ * - field (key_field_in_task, key_field_in_config): a SchemaFieldPath (`toSchemaFieldPath`); when
+ *   the place is not one, the plain key_in_task or key_in_config is the hint.
+ * - missing (provider_settings_missing): at least one item, in PROVIDER_SETTINGS order, each once.
+ */
+export interface CliErrorHintDetail {
+  readonly position?: number;
+  readonly field?: SchemaFieldPath;
+  readonly missing?: readonly ProviderSettingMissing[];
+}
 
 /**
  * N-15 (review M1): a structured input diagnostic. It holds a fixed code, a schema field position

@@ -73,11 +73,16 @@ export function paramsFor(
 
 /** A fake value with the shape of an Anthropic key, built at run time so no source line has that shape. */
 export const KEY_SHAPED = ["sk", "ant", "Q".repeat(24)].join("-");
-/** Fake OpenAI key shapes (DR-32 (a)), built the same way: the narrow one (a digit and an upper-case letter) and one only the loose shape takes. */
-export const OPENAI_KEY_SHAPED = ["sk", "Q7".repeat(18)].join("-");
+/**
+ * Fake OpenAI key shapes, built the same way. DR-33: the narrow shapes are a distinct prefix
+ * (`sk-proj-` and the like) and a long older key with a digit and both cases; the loose shape
+ * (output hiding only, DR-32 (a)) also takes the last one.
+ */
+export const OPENAI_KEY_SHAPED = ["sk", "proj", "Q7q".repeat(8)].join("-");
+export const OPENAI_LEGACY_SHAPED = ["sk", "Q7q".repeat(14)].join("-");
 export const OPENAI_LOOSE_SHAPED = ["sk", "q".repeat(36)].join("-");
 /** Every fake key shape above. */
-export const KEY_SHAPES: readonly string[] = [KEY_SHAPED, OPENAI_KEY_SHAPED, OPENAI_LOOSE_SHAPED];
+export const KEY_SHAPES: readonly string[] = [KEY_SHAPED, OPENAI_KEY_SHAPED, OPENAI_LEGACY_SHAPED, OPENAI_LOOSE_SHAPED];
 
 /**
  * C0, C1, line and paragraph separators, bidirectional controls. Built from a string: the

@@ -19,7 +19,7 @@ import {
 } from "../../../src/contracts/index.js";
 import type { MessageParamKind } from "../../../src/contracts/index.js";
 import { cleanLine, CLOSED_KIND_VALUES, formatParam, HIDDEN_KEY, REPLACEMENT } from "../../../src/i18n/index.js";
-import { KEY_SHAPED, OPENAI_KEY_SHAPED, OPENAI_LOOSE_SHAPED } from "./support.js";
+import { KEY_SHAPED, OPENAI_KEY_SHAPED, OPENAI_LEGACY_SHAPED, OPENAI_LOOSE_SHAPED } from "./support.js";
 
 function show(kind: MessageParamKind, value: unknown, own: readonly string[] = []): string {
   return formatParam(kind, value, (text) => own.includes(text));
@@ -137,9 +137,10 @@ describe("i18n params: cleanLine", () => {
     assert.equal(cleanLine(`x ${KEY_SHAPED} y`), `x ${HIDDEN_KEY} y`);
   });
 
-  test("OpenAI key shapes, narrow and loose, are hidden too (DR-32 (a), API_KEY_MASK_PATTERN_SOURCES)", () => {
+  test("OpenAI key shapes, narrow and loose, are hidden too (DR-32 (a), DR-33, API_KEY_MASK_PATTERN_SOURCES)", () => {
     const BEL = String.fromCharCode(0x07);
     assert.equal(cleanLine(`x ${OPENAI_KEY_SHAPED} y`), `x ${HIDDEN_KEY} y`);
+    assert.equal(cleanLine(`x ${OPENAI_LEGACY_SHAPED} y`), `x ${HIDDEN_KEY} y`);
     assert.equal(cleanLine(`x ${OPENAI_LOOSE_SHAPED} y`), `x ${HIDDEN_KEY} y`);
     assert.equal(cleanLine(`a ${OPENAI_KEY_SHAPED.slice(0, 12)}${BEL}${OPENAI_KEY_SHAPED.slice(12)} b`), `a ${HIDDEN_KEY} b`);
     assert.equal(cleanLine(`${KEY_SHAPED} ${OPENAI_KEY_SHAPED}`), `${HIDDEN_KEY} ${HIDDEN_KEY}`);

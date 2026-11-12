@@ -10,9 +10,14 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { describe, test } from "node:test";
 
-import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, PRIVACY_TOKEN_PREFIX, toRunId } from "../../../src/contracts/index.js";
+import { API_KEY_ENVS, API_KEY_MASK_PATTERN_SOURCES, API_PROVIDERS, PRIVACY_TOKEN_PREFIX, toRunId } from "../../../src/contracts/index.js";
 import { createMessageCatalog, MESSAGE_TEXTS } from "../../../src/i18n/index.js";
 import { CONTROL, IDS, KEY_SHAPED, KEY_SHAPES, LANGS, loose, OPENAI_KEY_SHAPED, OPENAI_LOOSE_SHAPED, paramsFor, specOf } from "./support.js";
+
+/** Every provider's key, model and address variable (DR-34), and every key variable. */
+const PROVIDER_VARIABLES: readonly string[] = [
+  ...new Set([...API_KEY_ENVS, ...Object.values(API_PROVIDERS).flatMap((provider) => [provider.keyEnv, provider.modelEnv, provider.baseUrlEnv])]),
+];
 
 /** Every output key shape of the contract (DR-32 (a)): Anthropic's and OpenAI's narrow and loose ones. */
 const KEY_PATTERN = new RegExp(API_KEY_MASK_PATTERN_SOURCES.map((source) => `(?:${source})`).join("|"));
@@ -130,8 +135,9 @@ describe("i18n P0: no file or environment value in a message", () => {
         assert.doesNotMatch(text, KEY_PATTERN, `${language} ${id}`);
         assert.ok(!text.includes(PRIVACY_TOKEN_PREFIX), `${language} ${id}`);
         assert.doesNotMatch(text, /\b(ANTHROPIC_API_KEY|OPENAI_API_KEY)\s*[=:]/, `${language} ${id}`);
-        // SP-D12: a key variable's name reaches a text only through the closed parameter {keyEnv}.
-        for (const name of API_KEY_ENVS) assert.ok(!text.includes(name), `${language} ${id} names ${name}`);
+        // SP-D12, DR-34: a provider's variable (key, model, address) differs per provider, so no
+        // fixed text names one; a key variable reaches a text only through the closed {keyEnv}.
+        for (const name of PROVIDER_VARIABLES) assert.ok(!text.includes(name), `${language} ${id} names ${name}`);
         assert.doesNotMatch(text, /[A-Za-z]:\\Users\\|\/home\/|\/Users\//, `${language} ${id}`);
       }
     }

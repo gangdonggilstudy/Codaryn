@@ -189,3 +189,24 @@ describe("DR-38: report and revert say a run has a records-changed mark", () => 
     assert.equal(output.recordsChanged, undefined);
   });
 });
+
+describe("DR-38 on the real assembly: a run whose records change during the run", () => {
+  test("a command verifier that adds a file to the run's records ends the run failed/state_changed; report shows it", async () => {
+    const base = await setup([{ text: "done" }]);
+    // The verifier is task configuration (no model request): it adds a file to every run's records.
+    const tamper = "const fs=require('fs');const d='.codaryn/runs';for(const r of fs.readdirSync(d))fs.writeFileSync(d+'/'+r+'/extra.txt','x')";
+    const task = JSON.parse(await readFile(path.join(base, "task.json"), "utf8")) as Record<string, unknown>;
+    task["verifiers"] = [{ id: "tamper", kind: "command", executable: process.execPath, args: ["-e", tamper] }];
+    await writeFile(path.join(base, "task.json"), JSON.stringify(task), "utf8");
+    const outcome = await runCli(io(base));
+    const result = outcome.output as { status?: string; reason?: string; stateChanged?: readonly string[] };
+    assert.deepEqual([result.status, result.reason], ["failed", "state_changed"], JSON.stringify(outcome.output));
+    const runId = await onlyRunId(base);
+    assert.deepEqual(result.stateChanged, [`${RUNS_DIR_NAME}/${runId}/extra.txt`]);
+
+    const shown = JSON.parse((await report(base, runId, true)).text) as ReportOutput;
+    assert.equal(shown.recordsChanged, true, "the engine marked the run");
+    assert.deepEqual(shown.result?.stateChanged, result.stateChanged, "the report keeps the recorded list");
+    assert.deepEqual([shown.result?.status, shown.result?.reason], ["failed", "state_changed"]);
+  });
+});

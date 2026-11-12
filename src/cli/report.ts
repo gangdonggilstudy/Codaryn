@@ -342,6 +342,8 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     journalPath: str(rec["journalPath"]),
     notices: recordedList(rec["notices"]),
     ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
+    // DR-38: the state checks' last recorded list (masked), as the engine wrote it.
+    ...(rec["stateChanged"] === undefined ? {} : { stateChanged: recordedList(rec["stateChanged"]) }),
     ...(plan === undefined ? {} : { plan: planOf(plan) }),
     ...(review === undefined ? {} : { review: { checklist: recordedList(obj(review)["checklist"]) } }),
   };
@@ -684,6 +686,8 @@ export function readApplyResult(text: string, runId: string, journal: ApplyRepor
     journalPath: str(rec["journalPath"]),
     notices: recordedList(rec["notices"]),
     ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
+    // DR-38: the state checks' last recorded list (masked), as the engine wrote it.
+    ...(rec["stateChanged"] === undefined ? {} : { stateChanged: recordedList(rec["stateChanged"]) }),
   };
 }
 

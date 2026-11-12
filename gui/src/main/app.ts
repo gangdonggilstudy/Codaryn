@@ -302,7 +302,7 @@ export function startGui(options: GuiOptions): void {
           leftovers: questions.leftovers,
           digest: record.plan.digest.slice(0, 12),
         };
-        // DR-44 (c): apply runs whose records go while their discard boxes may stay.
+        // DR-44 (c), U-13 (DR-53): apply runs with discarded files keep their records unless those files go too.
         const detail = [...(questions.discardedLeft > 0 ? [dialogText(language, "cleanup.discardedLeft", { count: questions.discardedLeft })] : []), dialogText(language, "cleanup.detail")].join("\n");
         const buttons = [dialogText(language, "cleanup.confirm"), dialogText(language, "cleanup.keep")];
         return (await ask("cleanup.message", { type: "warning", title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true }, values)) === 0;
@@ -317,7 +317,7 @@ export function startGui(options: GuiOptions): void {
         const discarded = cleanupQuestions(record.plan).discarded;
         const values = { count: discarded.count, files: discarded.files, size: formatBytes(language, discarded.bytes) };
         const buttons = [dialogText(language, "cleanup.discarded.confirm"), dialogText(language, "cleanup.discarded.keep")];
-        // R33b-I1: keeping the boxes (the default) is what leaves apply runs' files unrevertable; said here too.
+        // R33b-I1, U-13: keeping the discarded files (the default) keeps those apply runs' records too; said here.
         const detail = cleanupDiscardedDetail(language, cleanupQuestions(record.plan).discardedLeft);
         const box = { type: "warning" as const, title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true };
         return (await ask("cleanup.discarded.message", box, values)) === 0;

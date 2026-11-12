@@ -125,16 +125,18 @@ describe("DR-44 (가): records of runs that were not, or only partly, reverted g
 
   test("a plan run whose apply run stays is kept too (used_by_kept_apply)", async () => {
     const root = await workspace();
-    const selection = { runs: { runIds: [PLAN, APPLY] } };
+    // U-13: the apply's discarded files go in the same cleanup, so its records may go.
+    const selection = { runs: { runIds: [PLAN, APPLY] }, discarded: { runIds: [APPLY] } };
     const shown = await planCleanup({ workspaceRoot: root, selection, now: NOW });
     const kept = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: false } });
     assert.ok(kept.ok);
     assert.deepEqual(kept.removed, []);
     assert.deepEqual(kept.kept, [
+      { target: "discarded", runId: APPLY, reason: "not_confirmed" },
       { target: "run", runId: APPLY, reason: "not_reverted_not_confirmed" },
       { target: "run", runId: PLAN, reason: "used_by_kept_apply" },
     ]);
-    const both = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: false, includeNotReverted: true } });
-    assert.deepEqual(both.ok ? [both.removed.map(idOf), both.kept] : null, [[APPLY, PLAN], []]);
+    const both = await applyCleanup({ workspaceRoot: root, selection, now: NOW, confirmation: { digest: shown.digest, discarded: true, includeNotReverted: true } });
+    assert.deepEqual(both.ok ? [both.removed.map((item) => [item.target, idOf(item)]), both.kept] : null, [[["discarded", APPLY], ["run", APPLY], ["run", PLAN]], []]);
   });
 });

@@ -123,8 +123,8 @@ export async function startEngineHost(options: EngineHostOptions): Promise<Start
       endStart({ ok: true, host });
       return;
     }
-    // R-10 M-1: a late answer to a timed-out request is dropped; only an id nobody waits for and
-    // that never timed out (never issued, or answered already) breaks the channel.
+    // R-10 M-1, R10b-L-1: an answer to a request settled already (timed out, or answered) is
+    // dropped, however many there were; only an id this side never issued breaks the channel.
     if (nodeVersion === null || pending.settle(message) === "unknown") violation();
   }, violation);
 

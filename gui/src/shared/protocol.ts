@@ -174,15 +174,13 @@ export class LineDecoder {
   }
 }
 
-/** How many timed-out ids are remembered so that their late answers can be dropped quietly. */
-export const MAX_LATE_IDS = 1000;
-
 /**
  * What became of a response:
  * - delivered: a request was waiting for it.
- * - late: its request had timed out; the answer is dropped and the host is fine (R-10 M-1).
- * - unknown: no request with that id is waiting or late (never issued, or answered already).
- *   Only this breaks the channel.
+ * - late: its id was issued, but its request is settled already (the time ran out, or an answer
+ *   came before). The answer is dropped and the host is fine (R-10 M-1). Ids are issued in order
+ *   from 1, so this needs no memory of past ids and holds for any number of them (R10b-L-1).
+ * - unknown: an id this side never issued. Only this breaks the channel.
  */
 export type SettleOutcome = "delivered" | "late" | "unknown";
 
@@ -190,8 +188,6 @@ export type SettleOutcome = "delivered" | "late" | "unknown";
 export class PendingCalls {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (response: HostResponse) => void; timer: ReturnType<typeof setTimeout> }>();
-  /** Ids whose time ran out, oldest first, at most MAX_LATE_IDS. */
-  private readonly late = new Set<number>();
 
   /** A new request id. */
   next(): number {
@@ -204,16 +200,16 @@ export class PendingCalls {
     return this.pending.size;
   }
 
+  /** Whether this side has issued `id` (1 up to the last one). */
+  private issued(id: number): boolean {
+    return Number.isSafeInteger(id) && id >= 1 && id < this.nextId;
+  }
+
   /** Waits for the response with this id; after `timeoutMs` it resolves with an `adapter_timeout` error. */
   wait(id: number, timeoutMs: number): Promise<HostResponse> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        this.late.add(id);
-        if (this.late.size > MAX_LATE_IDS) {
-          const oldest = this.late.values().next().value;
-          if (oldest !== undefined) this.late.delete(oldest);
-        }
         resolve({ v: 1, id, ok: false, error: { code: CHANNEL_ERRORS.timeout, message: "the engine host did not answer in time" } });
       }, timeoutMs);
       this.pending.set(id, { resolve, timer });
@@ -223,7 +219,7 @@ export class PendingCalls {
   /** Delivers a response to the request waiting for it, or says why it cannot (SettleOutcome). */
   settle(response: HostResponse): SettleOutcome {
     const entry = this.pending.get(response.id);
-    if (entry === undefined) return this.late.delete(response.id) ? "late" : "unknown";
+    if (entry === undefined) return this.issued(response.id) ? "late" : "unknown";
     clearTimeout(entry.timer);
     this.pending.delete(response.id);
     entry.resolve(response);

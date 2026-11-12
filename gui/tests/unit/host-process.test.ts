@@ -277,6 +277,46 @@ test("host process (R-10 M-1): an answer that comes after its time limit is drop
   }
 });
 
+test("host process (R10b-L-1): late answers to more than 1000 timed-out calls do not end the host", async () => {
+  const { dir, cleanup } = await tempDir();
+  try {
+    // Answers requests 1 to 1001 after 400 ms, every later one at once.
+    const slow = await fakeHost(
+      dir,
+      "slower",
+      [
+        'process.stdout.write(JSON.stringify({ v: 1, type: "ready", node: "26.0.0" }) + "\\n");',
+        'let buffer = "";',
+        'process.stdin.setEncoding("utf8");',
+        'process.stdin.on("data", (chunk) => {',
+        '  buffer += chunk;',
+        '  let end;',
+        '  while ((end = buffer.indexOf("\\n")) >= 0) {',
+        '    const request = JSON.parse(buffer.slice(0, end));',
+        '    buffer = buffer.slice(end + 1);',
+        '    const delay = request.id <= 1001 ? 400 : 0;',
+        '    setTimeout(() => process.stdout.write(JSON.stringify({ v: 1, id: request.id, ok: true, value: request.id }) + "\\n"), delay);',
+        '  }',
+        '});',
+      ].join("\n"),
+    );
+    const host = await started(options(dir, { hostScript: slow }));
+    try {
+      const calls = Array.from({ length: 1001 }, () => host.call("doctor", { workspace: null }, 50));
+      const replies = await Promise.all(calls);
+      assert.ok(replies.every((reply) => !reply.ok && reply.error.code === "adapter_timeout"), "every call timed out");
+      // Every late answer arrives (the last one 400 ms after its request), then one more call.
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      assert.equal(host.exited, false, "the late answers did not end the host");
+      assert.deepEqual(await host.call("doctor", { workspace: null }, 5_000), { v: 1, id: 1002, ok: true, value: 1002 });
+    } finally {
+      await host.close();
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
 test("host process (R-10 L-2): a host whose stdin closes during a slow call ends without waiting for it", async () => {
   const { dir, cleanup } = await tempDir();
   const engine = await fakeEngine(dir, "await new Promise((resolve) => setTimeout(resolve, 6000)); return { ok: true, output: 'slow' };");

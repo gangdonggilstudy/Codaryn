@@ -301,9 +301,17 @@ describe("i18n catalog: language and wording", () => {
     // The summary is the agent's description: not checked, and not what is approved.
     assert.match(en["plan.summary_label"], /agent's description.*not checked.*not what you approve/);
     assert.match(ko["plan.summary_label"], /에이전트의 설명.*검증되지 않았고.*승인하는 대상이 아님/);
-    // The digest: exactly these actions and the files' contents then; apply refuses a later change.
-    assert.match(en["plan.digest_guarantee"], /exactly these actions.*when the plan was made.*refuses if the plan, a file or the run's records changed/);
-    assert.match(ko["plan.digest_guarantee"], /바로 이 동작들.*계획을 만들 때의 파일 내용.*계획이나 파일, 실행 기록이 바뀌었으면 적용을 거부/);
+    // The digest: exactly these actions and the contents of the plan's own files then.
+    assert.match(en["plan.digest_guarantee"], /exactly these actions.*contents the plan's files had when the plan was made/);
+    assert.match(ko["plan.digest_guarantee"], /바로 이 동작들.*계획을 만들 때 계획에 든 파일의 내용/);
+    // R-49 R49-L1: it says no more than apply does. Apply refuses a changed plan or a changed file
+    // of the plan, and a plan run with a records-changed mark; records changed without a mark pass.
+    assert.match(en["plan.digest_guarantee"], /refuses if the plan or one of its files changed since, and when the plan run has a records-changed mark/);
+    assert.match(ko["plan.digest_guarantee"], /계획이나 계획에 든 파일이 바뀌었으면 적용을 거부하고, 계획 실행에 기록 변경 표시가 있어도 거부/);
+    assert.ok(!/a file or the run's records changed/.test(en["plan.digest_guarantee"]), "not any file, not any change of the records");
+    assert.ok(!/파일, 실행 기록이 바뀌었으면/.test(ko["plan.digest_guarantee"]));
+    assert.match(en["plan.digest_guarantee"], /does not cover the run's other records/);
+    assert.match(ko["plan.digest_guarantee"], /실행의 다른 기록은 다이제스트에 들지 않습니다/);
   });
 
   test("R-34b: a damaged run's warning and the separate confirmation name it; an unknown folder is never removed", () => {

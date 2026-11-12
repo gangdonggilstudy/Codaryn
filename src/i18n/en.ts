@@ -52,7 +52,7 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.records_changed": "Warning: this plan run has a records-changed mark: something other than the run changed its records, so this plan may not be the one the run made.",
   "plan.cannot_apply": "This plan cannot be applied. Make the plan again with a new run (codaryn run), read the new plan, and apply that one.",
   "plan.summary_label": "The agent's description (the model's own words, not checked, and not what you approve)",
-  "plan.digest_guarantee": "The digest names exactly these actions and the contents the files had when the plan was made. The apply refuses if the plan, a file or the run's records changed since.",
+  "plan.digest_guarantee": "The digest names exactly these actions and the contents the plan's files had when the plan was made. The apply refuses if the plan or one of its files changed since, and when the plan run has a records-changed mark. The digest does not cover the run's other records.",
   "summary.unsafe_moves": "Not applied: moves that could replace a file: {count}. Nothing was moved.",
   "summary.next_apply_unsafe": "Consent for this apply only: codaryn apply {form} --run {runId} --digest <digest> --allow-unsafe-move",
   "summary.next_revert_unsafe": "Consent for this revert only: codaryn revert --workspace <workspace> --run {runId} --allow-unsafe-move",

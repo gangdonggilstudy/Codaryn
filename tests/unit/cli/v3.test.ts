@@ -60,7 +60,8 @@ describe("V-3 --env-file-if-exists is refused like --env-file", () => {
     });
     const outcome = await runCli({ ...io, argv: ["run", "--env-file-if-exists=no-such.env", "--task", "none.json"] });
     assert.equal(outcome.exitCode, 2);
-    assert.deepEqual(outcome.output, { schemaVersion: 1, kind: "error", code: "invalid_arguments", exitCode: 2, message: ENV_FILE_REFUSED_MESSAGE });
+    // U-55 (AXM-9): with its category and whether trying again may help.
+    assert.deepEqual(outcome.output, { schemaVersion: 1, kind: "error", code: "invalid_arguments", exitCode: 2, message: ENV_FILE_REFUSED_MESSAGE, category: "input", retryable: false });
     assert.deepEqual(read, []);
   });
 });

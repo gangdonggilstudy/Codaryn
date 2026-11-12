@@ -20,6 +20,7 @@
 import path from "node:path";
 import {
   CLI_ERROR_EXIT_CODES,
+  cliErrorFacts,
   LEGACY_WORKFLOW_SETTINGS,
   RESULT_SCHEMA_VERSION,
   mergeWorkflowPolicy,
@@ -181,7 +182,8 @@ export interface CliRunOutcome {
 function error(code: CliErrorCode, message: string, diagnostic?: InputDiagnostic): { output: CliErrorOutput; exitCode: number } {
   const exitCode = CLI_ERROR_EXIT_CODES[code];
   return {
-    output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message, ...(diagnostic === undefined ? {} : { diagnostic }) },
+    // U-55 (AXM-9): every error says its category and whether the same command may succeed later.
+    output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message, ...(diagnostic === undefined ? {} : { diagnostic }), ...cliErrorFacts(code) },
     exitCode,
   };
 }

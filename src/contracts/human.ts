@@ -482,6 +482,7 @@ export const FIXED_MESSAGES = {
   "progress.workflow_policy.commands_narrowed": { count: "count" },
   "progress.workflow_policy.plan_actions_dropped": { count: "count" },
   "progress.workflow_policy.restore_path_tokens_off": {},
+  "progress.workflow_policy.verifiers_dropped": { count: "count" },
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
@@ -611,6 +612,7 @@ export const FIXED_MESSAGES = {
   "doctor.workflow_policy.commands_narrowed": { count: "count" },
   "doctor.workflow_policy.plan_actions_dropped": { count: "count" },
   "doctor.workflow_policy.restore_path_tokens_off": {},
+  "doctor.workflow_policy.verifiers_dropped": { count: "count" },
   "doctor.install_dir.unknown_env": {},
   "doctor.install_dir.not_found": {},
   "doctor.install_dir.ok": {},

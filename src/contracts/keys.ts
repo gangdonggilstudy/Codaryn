@@ -59,6 +59,19 @@ export function keyLettersAndDigits(text: string): string {
 }
 
 /**
+ * DR-43 (c), R-32 L-1: whether a value's letters and digits (keyLettersAndDigits) look like a
+ * generated key rather than words: at least MIN_KEY_SKELETON_LENGTH of them with a digit, an
+ * upper-case and a lower-case letter, or at least 32 with a digit and a letter (a long hex or
+ * single-case token). A phrase kept in a key variable for a local server (`your-api-key-goes-here`)
+ * and values such as `summer2026winter` or `notapassword1234` are not. The one condition the privacy
+ * gateway and the CLI's output hiding use too.
+ */
+export function keyLikeSkeleton(skeleton: string): boolean {
+  if (skeleton.length < MIN_KEY_SKELETON_LENGTH || !/[0-9]/.test(skeleton) || !/[A-Za-z]/.test(skeleton)) return false;
+  return (/[A-Z]/.test(skeleton) && /[a-z]/.test(skeleton)) || skeleton.length >= 32;
+}
+
+/**
  * DR-40 (c), R-25 L-2: whether `text` matches ANTHROPIC_KEY_REFUSAL_PATTERN_SOURCE, in linear time.
  * That source's look-ahead rescans the run after every word-start prefix, so as a regular
  * expression it takes time growing with the square of the length (seconds for 256 KiB). Here each
@@ -99,10 +112,12 @@ export function holdsRefusedKeyShape(text: string): boolean {
 /**
  * DR-40 (a), DR-42 (a): whether `text` holds one of `values` (registered key values): as written;
  * split by KEY_SEPARATOR_PATTERN_SOURCE characters (both compacted); or split by any other
- * character, comparing letters and digits only (keyLettersAndDigits) for a value that has at least
- * MIN_KEY_SKELETON_LENGTH of them (R-25b L-1: variation selectors, the combining grapheme joiner,
- * the Hangul filler, the Braille blank, a backslash, a middle dot, a lone surrogate). Miss left: a
- * split written as a character reference with digits (`&#8203;`). Empty values are ignored.
+ * character, comparing letters and digits only (keyLettersAndDigits; R-25b L-1: variation
+ * selectors, the combining grapheme joiner, the Hangul filler, the Braille blank, a backslash, a
+ * middle dot, a lone surrogate). DR-43 (c), R-32 L-1: that last comparison only for a key-like value
+ * (keyLikeSkeleton), so a phrase kept in a key variable does not match an ordinary sentence with
+ * the same words. Miss left: a split written as a character reference with digits (`&#8203;`).
+ * Empty values are ignored.
  */
 export function createKeyValueCheck(values: readonly string[]): (text: string) => boolean {
   const keys = values
@@ -113,7 +128,7 @@ export function createKeyValueCheck(values: readonly string[]): (text: string) =
     const compact = compactKeyText(text);
     if (compact !== text && keys.some((key) => key.compact.length > 0 && compact.includes(key.compact))) return true;
     const skeleton = keyLettersAndDigits(text);
-    return keys.some((key) => key.skeleton.length >= MIN_KEY_SKELETON_LENGTH && skeleton.includes(key.skeleton));
+    return keys.some((key) => keyLikeSkeleton(key.skeleton) && skeleton.includes(key.skeleton));
   };
 }
 

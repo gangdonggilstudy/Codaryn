@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  APPLY_REASONS_BY_STATUS,
   FIXED_MESSAGES,
   MAX_STATE_ENTRIES,
   MAX_STATE_HASH_BYTES,
@@ -18,6 +19,11 @@ import {
   STATE_TIERS,
 } from "../../../src/contracts/index.js";
 import type {
+  ApplyDeps,
+  ApplyJournalEvent,
+  ApplyResult,
+  CreateApplyRecorders,
+  CreateRunRecorders,
   EngineDeps,
   EngineResult,
   JournalEvent,
@@ -27,6 +33,7 @@ import type {
   ReportOutput,
   RevertOutput,
   RunListEntry,
+  RunRecorders,
   StateComparison,
   StateFingerprint,
   StateGuard,
@@ -83,5 +90,30 @@ describe("DR-38: changes to the run records during a run", () => {
       assert.deepEqual(FIXED_MESSAGES[id], {}, id);
     }
     assert.deepEqual(FIXED_MESSAGES["progress.state_changed"], { count: "count" });
+  });
+});
+
+describe("DR-38 (PM after 93eed67): the recorders the CLI and the app make, and the apply run's guard", () => {
+  test("createRunRecorders and createApplyRecorders, typed; the apply guard and its reason", async () => {
+    const guard: StateGuard = { capture: async (tier) => ({ tier }) as unknown as StateFingerprint, compare: () => ({ changed: [], limited: false }), markRecordsChanged: async () => {} };
+    const journal = { append: async () => {}, close: async () => {} };
+    const runRecorders: CreateRunRecorders = (options) => {
+      assert.equal(options.runId, "20261112T120000Z-0000abcd");
+      return { journal, changeRecorder: {} as RunRecorders["changeRecorder"], planRecorder: {} as RunRecorders["planRecorder"], stateGuard: guard };
+    };
+    const applyRecorders: CreateApplyRecorders = (options) => {
+      assert.equal(options.planRunId, "20261112T110000Z-0000aaaa");
+      return { journal, markApplied: async () => "marked", stateGuard: guard };
+    };
+    const clock = { now: () => 0 };
+    const made = runRecorders({ workspaceRoot: "/work", runId: "20261112T120000Z-0000abcd", clock, limits: { maxEntries: 10 } });
+    const applied = applyRecorders({ workspaceRoot: "/work", runId: "20261112T120000Z-0000abcd", planRunId: "20261112T110000Z-0000aaaa", clock });
+    const deps: Pick<EngineDeps, "stateGuard"> & Pick<ApplyDeps, "stateGuard"> = { stateGuard: made.stateGuard };
+    assert.equal(deps.stateGuard, applied.stateGuard);
+    assert.equal(await applied.markApplied(), "marked");
+    assert.ok((APPLY_REASONS_BY_STATUS.failed as readonly string[]).includes("state_changed"));
+    const result: Pick<ApplyResult, "reason" | "stateChanged"> = { reason: "state_changed", stateChanged: [] };
+    const record: Extract<ApplyJournalEvent, { type: "state_checked" }> = { type: "state_checked", phase: "after_verify", changed: [], limited: false };
+    assert.ok(result && record);
   });
 });

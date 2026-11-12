@@ -47,6 +47,8 @@ export function narrowingLines(event: JournalEvent): string[] {
         return shown === null ? [] : [`the workflow's own rules leave out plan actions of the configured policy: ${shown}`];
       case "restore_path_tokens_off":
         return ["the workflow's own rules turn off restoring path tokens, which the configured policy allows"];
+      case "verifiers_dropped":
+        return shown === null ? [] : [`the workflow's own checks leave out configured verifiers that take their ids: ${shown}`];
       default:
         return [];
     }

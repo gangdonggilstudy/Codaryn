@@ -855,7 +855,11 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - 보호 경로는 합집합이다. 명령은 양쪽이 모두 허용한 명령 줄만 남는다. 계획 동작은 주어진 정책이 말하면 양쪽이 모두 가진 것만 남고, 말하지 않으면 정의의 것 그대로다. `restorePathTokens`는 둘 다 허용할 때만 참이다.
   - 정의가 명령을 허용하지 않을 때(`organize`): task 파일 자신의 명령 규칙은 먼저 `invalid_task`로 거부한다(GT-D10, 합치기 전에 센다). 프로필·설정의 규칙은 빠진다.
   - 정의가 없는 task 파일은 자기 정책을 그대로 쓴다.
-- 합치기에서 빠진 것(`workflowPolicyNarrowings`: 종류와 수만)은 실행할 task의 `policyNarrowings`에 싣는다. 엔진이 `run_started`에 기록한다.
+- 검증기도 같다(DR-43 (a), R-31 L-2). 주어진 검증기는 정의의 검증기를 대체하지 않고 더해진다(`mergeWorkflowVerifiers`).
+  - 정의의 검증기가 먼저이고, 그다음 id가 정의의 것과 겹치지 않는 주어진 검증기다. 주어진 목록이 비어도 정의의 검사는 남는다.
+  - 정의의 id를 쓰면서 검사가 다른 주어진 검증기는 빠지고 알린다(`verifiers_dropped`). 같은 검사(키 순서만 다른 것 포함)는 세지 않는다.
+  - 정의가 없는 task 파일은 자기 검증기를 그대로 쓴다.
+- 합치기에서 빠진 것(`workflowPolicyNarrowings`, `workflowVerifierNarrowings`: 종류와 수만)은 실행할 task의 `policyNarrowings`에 싣는다. 엔진이 `run_started`에 기록한다.
 - doctor의 `commands` 점검은 합친 정책을 보고, 빠진 것을 notes(`doctor.workflow_policy.*`)로 적는다.
 
 ### 18.2 task 형식 (DR-17)

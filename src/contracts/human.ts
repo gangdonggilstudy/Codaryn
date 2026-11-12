@@ -38,8 +38,8 @@ import type { PermissionKind, PolicyDenialCode } from "./policy.js";
 import { APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
 import type { ApplyJournalEvent, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
-import { TOOL_ERROR_CODES, TOOL_NAMES } from "./tool.js";
-import type { ToolErrorCode, ToolName } from "./tool.js";
+import { ALL_TOOL_NAMES, TOOL_ERROR_CODES } from "./tool.js";
+import type { AnyToolName, ToolErrorCode } from "./tool.js";
 
 export const MESSAGE_LANGUAGES = ["ko", "en"] as const;
 export type MessageLanguage = (typeof MESSAGE_LANGUAGES)[number];
@@ -544,7 +544,10 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `status.<status>`: the status word (완료, 실패, 확인 필요, 한도 도달, 취소됨 in Korean).
  * - `reason.<reason>`: the reason as words, e.g. "지정한 검증 모두 통과".
  * - `advice.<reason>`: what the user can do next (UX design section 6).
- * - `tool.<name>`: a tool as words, e.g. "파일 읽기".
+ * - `tool.<name>`: a tool as words, e.g. "파일 읽기". G-A: for every name in ALL_TOOL_NAMES, the
+ *   built-in tools and the workflow tools (`inspect_files`, `propose_plan`), so a workflow tool's
+ *   progress line names it. Only a recorded UNKNOWN_TOOL_RECORD_NAME (AC-D15), a name in no tool
+ *   list, is shown as `progress.unknown_tool`.
  * - `revert.skip.<reason>`: why a file was or would be skipped.
  * - `diagnostic.file.<file>`: the file a diagnostic points into.
  * - `denial.<code>` (N-20): a policy denial or tool error code as words ("허용 목록에 없음").
@@ -562,7 +565,7 @@ export type ListedMessageId =
   | `status.${TerminalRunStatus}`
   | `reason.${RunReason}`
   | `advice.${RunReason}`
-  | `tool.${ToolName}`
+  | `tool.${AnyToolName}`
   | `revert.skip.${RevertSkipReason}`
   | `diagnostic.file.${InputDiagnosticFile}`
   | `denial.${PolicyDenialCode | ToolErrorCode}`
@@ -604,7 +607,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...TERMINAL_RUN_STATUSES.map((status) => `status.${status}` as const),
   ...RUN_REASONS.map((reason) => `reason.${reason}` as const),
   ...RUN_REASONS.map((reason) => `advice.${reason}` as const),
-  ...TOOL_NAMES.map((name) => `tool.${name}` as const),
+  ...ALL_TOOL_NAMES.map((name) => `tool.${name}` as const),
   ...REVERT_SKIP_REASONS.map((reason) => `revert.skip.${reason}` as const),
   ...INPUT_DIAGNOSTIC_FILES.map((file) => `diagnostic.file.${file}` as const),
   ...[...POLICY_DENIAL_CODES, ...TOOL_ERROR_CODES]

@@ -139,8 +139,16 @@ const noConsentInFiles: [
   HasConsentField<PolicyConfig>,
   HasConsentField<StoredPlan>,
 ] = [false, false, false, false, false, false];
-/** The run list tells apply runs apart; an entry written before G-A (no kind) still type-checks. */
-const applyEntry: RunListEntry = {
+/**
+ * The run list tells apply runs apart; an entry written before G-A (no kind) still type-checks.
+ * Only the fields this check is about are picked, so fields other owners add to the entry (for
+ * example N-23 g) do not make it fail.
+ */
+type ListEntryFields = Pick<
+  Extract<RunListEntry, { state: "checked" }>,
+  "state" | "runId" | "kind" | "planRunId" | "startedAt" | "taskId" | "status" | "reason" | "changes" | "reverted"
+>;
+const applyEntry: ListEntryFields = {
   state: "checked",
   runId: "20261112T120500Z-0000bbbb" as RunId,
   kind: "apply",
@@ -152,7 +160,7 @@ const applyEntry: RunListEntry = {
   changes: 0,
   reverted: null,
 };
-const legacyEntry: RunListEntry = {
+const legacyEntry: ListEntryFields = {
   state: "checked",
   runId: "20261112T120000Z-0000aaaa" as RunId,
   startedAt: "2026-11-12T12:00:00Z",

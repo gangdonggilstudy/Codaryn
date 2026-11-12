@@ -36,6 +36,8 @@ import {
   STATE_DIR_NAME,
 } from "../contracts/index.js";
 import type { ContentHash, MaskedText, PrivacyGateway } from "../contracts/index.js";
+import { inspectRun } from "../store/index.js";
+import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { appError } from "./errors.js";
@@ -163,13 +165,17 @@ async function originalOf(change: ChangedPath, index: Map<string, IndexEntry> | 
 
 /**
  * Builds the changes view for a run whose workspace root (`workspaceRoot`, absolute) and current
- * secrets (`privacy`) are known.
+ * secrets (`privacy`) are known. R-14 L-1: the run is judged first as the run list, `report` and
+ * `revert` judge it (`inspect`, the store's `inspectRun`): no entry of exactly that name is
+ * `run_not_found` (N-27 a), a damaged run is `invalid_run_record` (N-26, N-27 b), and nothing of
+ * it is shown.
  */
 export async function readChanges(
   workspaceRoot: string,
   runId: string,
   privacy: PrivacyGateway,
   platform: NodeJS.Platform,
+  inspect: (workspaceRoot: string, runId: string) => Promise<RunInspection> = inspectRun,
 ): Promise<AppCallOutcome<ChangesOutput>> {
   if (!RUN_ID_PATTERN.test(runId) || runId.includes("..")) {
     return { ok: false, error: appError("invalid_arguments", "the run id must be 1-128 characters of letters, digits, '.', '_' and '-'") };
@@ -179,6 +185,19 @@ export async function readChanges(
     workspace = await createWorkspace({ root: workspaceRoot });
   } catch {
     return { ok: false, error: appError("workspace_not_found", "the workspace is not an existing directory") };
+  }
+  let judged: RunInspection;
+  try {
+    judged = await inspect(workspace.root, runId);
+  } catch {
+    judged = "damaged";
+  }
+  if (judged === "missing") return { ok: false, error: appError("run_not_found", "the workspace has no records for that run id") };
+  if (judged === "damaged") {
+    return {
+      ok: false,
+      error: appError("invalid_run_record", "the run's records do not pass the checks (`codaryn runs` shows it as damaged); nothing is shown"),
+    };
   }
   const runDir = path.join(workspace.root, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
   const fold = (value: string): string => (platform === "win32" ? value.toLowerCase() : value);

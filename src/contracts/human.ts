@@ -42,6 +42,13 @@ import type { ApplyJournalEvent, ApplyNoticeKind, ApplyResult, ApprovalChannel, 
 import type { ModelProviderName } from "./task.js";
 import { ALL_TOOL_NAMES, TOOL_ERROR_CODES } from "./tool.js";
 import type { AnyToolName, ToolErrorCode } from "./tool.js";
+// U-36: the lists whose words `plan`, `review` and `changes` show.
+import { CHANGED_FILE_STATES, CHANGED_FILE_UNAVAILABLE_REASONS } from "./changes.js";
+import type { ChangedFileState, ChangedFileUnavailableReason } from "./changes.js";
+import { PLAN_ACTION_KINDS, PLAN_STATUSES } from "./plan.js";
+import type { PlanActionKind, PlanStatus } from "./plan.js";
+import { REVIEW_VERDICTS } from "./workflow.js";
+import type { ReviewVerdict } from "./workflow.js";
 
 export const MESSAGE_LANGUAGES = ["ko", "en"] as const;
 export type MessageLanguage = (typeof MESSAGE_LANGUAGES)[number];
@@ -429,6 +436,38 @@ export const FIXED_MESSAGES = {
   "plan.cannot_apply": {},
   "plan.summary_label": {},
   "plan.digest_guarantee": {},
+  // U-36 (UXM-7 ③ ④): the rest of `codaryn plan`'s text, which apply's terminal question shows too,
+  // apply's two questions, and review's lines.
+  // - plan.heading: `{status}` is `plan.status.<status>`. Then plan.digest_label, after which the
+  //   renderer puts the digest (PlanOutput.digest, an item as G-A allows).
+  // - Each action: `plan.action.<kind>` and its masked paths; a discard ends with plan.discard_kept
+  //   (it stays in the discarded-files folder until removed).
+  // - plan.inventory_limit when PlanOutput.inventoryLimitReached (an apply would stop as plan_stale).
+  // - plan.applied_by ({runId}: the apply run) when the plan was applied. UXM-23: the renderer puts
+  //   the apply's time (PlanOutput.appliedBy.at) after it in local wall time, as `runs` shows times;
+  //   a time that is not a run timestamp is left out (N-24 (c)). No message takes a time.
+  // - plan.next_apply ({runId}: the plan run) while pending and not marked: the command up to
+  //   `--digest`, with `<the same task form>` as words; the renderer puts the digest's first
+  //   MIN_PLAN_DIGEST_PREFIX characters after it, one space apart (G-A: no message takes a digest).
+  // - apply.question before the answer; apply.unsafe_move_question after an apply stopped as
+  //   consent_required at a terminal: {count} moves can only be made without the guarantee that
+  //   nothing at the destination is replaced, nothing was moved, make them for this apply only
+  //   (DR-21). The renderer adds `prompt.yes_no_default_no` after each.
+  // - review.recorded, or review.recorded_replaced when an earlier review was replaced
+  //   (ReviewOutput.replaced): `{verdict}` is `review.verdict.<verdict>`. The checklist follows as
+  //   items, then review.unchanged (the run's result and records are unchanged; `codaryn report`
+  //   shows the verdict).
+  "plan.heading": { runId: "runId", count: "count", status: "text" },
+  "plan.digest_label": {},
+  "plan.discard_kept": {},
+  "plan.inventory_limit": {},
+  "plan.applied_by": { runId: "runId" },
+  "plan.next_apply": { runId: "runId" },
+  "apply.question": {},
+  "apply.unsafe_move_question": { count: "count" },
+  "review.recorded": { runId: "runId", verdict: "text" },
+  "review.recorded_replaced": { runId: "runId", verdict: "text" },
+  "review.unchanged": {},
   // DR-21: an apply that ended as consent_required: how many moves are unsafe, and the command that
   // gives consent for one apply (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.unsafe_moves": { count: "count" },
@@ -590,6 +629,21 @@ export const FIXED_MESSAGES = {
   // U-16 (UXM-4): `changes` of an apply run (ChangesApplyRun) in place of "no file changed": it
   // applied the plan of run `{runId}`, `{count}` actions, which its report lists.
   "changes.apply_run": { count: "count", runId: "runId" },
+  // U-36 (UXM-7 ③): the rest of `codaryn changes`'s text.
+  // - changes.heading ({runId}): masked with the secrets registered now, not the run's own masking.
+  // - changes.no_text_note once when a file has no text for masking_unverified (DR-29).
+  // - changes.none when the run changed no file (an apply run has changes.apply_run instead).
+  // - Each file: its masked path, changes.file.created or changes.file.changed, and
+  //   `changes.state.<state>`. Then `changes.unavailable.<reason>` (the renderer adds the code in
+  //   parentheses), or the changed region, or changes.no_difference. A side cut after its first
+  //   lines ends with changes.more_lines ({count}: the lines not shown).
+  "changes.heading": { runId: "runId" },
+  "changes.no_text_note": {},
+  "changes.none": {},
+  "changes.file.created": {},
+  "changes.file.changed": {},
+  "changes.no_difference": {},
+  "changes.more_lines": { count: "count" },
   "revert.records_changed": {},
   // U-16, R-55 L-1: `revert` of a plan run: it only made a plan and changed no file (nothing put
   // back, not marked as reverted); then by its apply run (PLAN_APPLY_STATES_TO_REVERT): revert that
@@ -800,6 +854,10 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  *   The check ids and statuses stay English in the JSON.
  * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
  * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
+ * - `plan.status.<status>`, `plan.action.<kind>`, `review.verdict.<verdict>` (U-36): a plan's
+ *   status, an action's kind and a review's verdict as words.
+ * - `changes.state.<state>`, `changes.unavailable.<reason>` (U-36): a changed file's state now and
+ *   why its text is not shown (CHANGED_FILE_STATES, CHANGED_FILE_UNAVAILABLE_REASONS).
  * - `error.hint.<hint>` (R-12 L-2): an error's extra advice line (CliErrorOutput.hint).
  * - `cleanup.blocked.<code>`, `cleanup.warning.<code>`, `cleanup.kept.<reason>` (DR-39): why an item
  *   is not removed, what a person is told before confirming, why a confirmed item was kept.
@@ -830,6 +888,11 @@ export type ListedMessageId =
   | `doctor.status.${DoctorCheckStatus}`
   | `approval.${ApprovalChannel}`
   | `plan.problem.${PlanItemProblem}`
+  | `plan.status.${PlanStatus}`
+  | `plan.action.${PlanActionKind}`
+  | `review.verdict.${ReviewVerdict}`
+  | `changes.state.${ChangedFileState}`
+  | `changes.unavailable.${ChangedFileUnavailableReason}`
   | `error.hint.${CliErrorHint}`
   | `cleanup.blocked.${CleanupBlockCode}`
   | `cleanup.warning.${CleanupWarningCode}`
@@ -881,6 +944,11 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...DOCTOR_CHECK_STATUSES.map((status) => `doctor.status.${status}` as const),
   ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
   ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
+  ...PLAN_STATUSES.map((status) => `plan.status.${status}` as const),
+  ...PLAN_ACTION_KINDS.map((kind) => `plan.action.${kind}` as const),
+  ...REVIEW_VERDICTS.map((verdict) => `review.verdict.${verdict}` as const),
+  ...CHANGED_FILE_STATES.map((state) => `changes.state.${state}` as const),
+  ...CHANGED_FILE_UNAVAILABLE_REASONS.map((reason) => `changes.unavailable.${reason}` as const),
   ...CLI_ERROR_HINTS.map((hint) => `error.hint.${hint}` as const),
   ...CLEANUP_BLOCK_CODES.map((code) => `cleanup.blocked.${code}` as const),
   ...CLEANUP_WARNING_CODES.map((code) => `cleanup.warning.${code}` as const),

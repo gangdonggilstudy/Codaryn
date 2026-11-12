@@ -1138,8 +1138,10 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 확인은 둘이다(DR-39 P-4).
   - `--confirm <digest>`: 지금 만든 계획의 digest와 앞부분이 같아야 한다. 다르면 아무것도 지우지 않고 `plan_changed`(종료 3)다. store가 잠금 아래에서 계획을 다시 만들어 digest가 같을 때만 지운다.
   - `--delete-discarded`: `--confirm`과 함께일 때만. 사람의 파일인 폐기 보관함 폴더는 이것이 있을 때만 지운다. 없으면 `not_confirmed`로 남는다.
+  - `--include-not-reverted`(DR-44 (가)): `--confirm`과 함께일 때만. 되돌리지 않은 실행과 일부만 되돌린 실행(`not_reverted`)의 기록은 이것이 있어야 지운다. 막지는 않는다. 미리보기의 확인 머리줄에 그런 실행의 수를 적는다. store가 확인된 계획에서 그것만 따로 남기게 될 때까지는, 그런 실행이 든 계획을 이것 없이 확인하면 아무것도 지우지 않는다(`needs_confirmation`, 종료 3).
+  - 끝 줄은 확인할 것을 말한다(R-34 I-3): 지울 실행 기록이 없고 보관함만 있으면 `--confirm <digest> --delete-discarded`를 말한다.
 - 지우지 않는 것(store가 막음): `parked`, 잠금, `.gitignore`, 진행 중인 실행(`lock_held`), 결과가 없는 실행(`no_result`), 선택되지 않은 적용 실행이 쓰는 계획 실행(`plan_used_by_apply`: 그 적용의 되돌리기에 필요하다). 변경 표시가 있는 실행은 막지 않고 경고한다(P-5).
 - 고르기: 실행 기록은 `--older-than`, `--run`, `--reverted`. 보관함은 `--discarded-older-than`, `--discarded-run`. 한 부분의 조건을 모두 만족해야 고른다. 조건이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확한 이름이다(`latest` 없음).
-- 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
+- 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3), `needs_confirmation`(종료 3, `notReverted`). 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.

@@ -9,6 +9,11 @@
  *   besides: the two confirmations are apart in the same command (DR-39 P-4). The CLI checks the
  *   given digest against a plan made now; the store makes the plan again under the workspace lock
  *   and removes nothing unless its digest is the same (plan_changed).
+ * - DR-44 (가): the records of a run not reverted, or only partly (warned `not_reverted`), need
+ *   `--include-not-reverted` besides: a third confirmation, apart from the other two. The preview's
+ *   head line says how many such runs the plan holds. Until the store keeps them apart from the
+ *   rest of a confirmed plan, a plan that holds one is not applied without it (nothing is removed,
+ *   `needs_confirmation`, exit 3); they are never blocked.
  * - Never removed: parked files, the lock, `.gitignore`, a running run, a run without a result, and
  *   a plan run that an apply not selected uses (a revert of that apply needs it). The store blocks
  *   them; a marked run (DR-38) is not blocked but warned about (P-5).
@@ -53,7 +58,7 @@ const realpathNative = promisify(realpathCallback.native);
 
 export const CLEANUP_USAGE =
   "codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] " +
-  "[--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <first 12+ hex of the digest> [--delete-discarded]] [--json]";
+  "[--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <first 12+ hex of the digest> [--delete-discarded] [--include-not-reverted]] [--json]";
 
 /** What `codaryn cleanup` prints (one JSON line with `--json`). Exit codes: 0, 1 (some kept for a problem), 3 (plan changed). */
 export type CleanupOutput =
@@ -80,6 +85,18 @@ export type CleanupOutput =
       /** The confirmed digest is not the plan's (it changed, or another plan was shown); nothing was removed. */
       readonly mode: "plan_changed";
       readonly exitCode: 3;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly kind: "cleanup";
+      /**
+       * DR-44 (가): the plan holds records of runs not reverted (or only partly) and
+       * --include-not-reverted was not given; nothing was removed.
+       */
+      readonly mode: "needs_confirmation";
+      readonly exitCode: 3;
+      /** How many such runs the plan selects. */
+      readonly notReverted: number;
     };
 
 export interface CleanupEnvironment {
@@ -101,12 +118,14 @@ interface CleanupArgs {
   readonly selection: CleanupSelection;
   readonly confirm: string | null;
   readonly deleteDiscarded: boolean;
+  /** DR-44 (가): the records of runs not reverted (or only partly) may go too. */
+  readonly includeNotReverted: boolean;
   readonly json: boolean;
 }
 
 const VALUE_OPTIONS = ["--workspace", "--older-than", "--run", "--discarded-older-than", "--discarded-run", "--confirm"] as const;
 type ValueOption = (typeof VALUE_OPTIONS)[number];
-const SWITCHES = ["--reverted", "--delete-discarded", "--json"] as const;
+const SWITCHES = ["--reverted", "--delete-discarded", "--include-not-reverted", "--json"] as const;
 type CleanupSwitch = (typeof SWITCHES)[number];
 const DIGEST_PREFIX = /^[0-9a-f]+$/;
 const DAYS = /^(0|[1-9][0-9]{0,5})$/;
@@ -175,6 +194,8 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
   }
   const deleteDiscarded = switches.has("--delete-discarded");
   if (deleteDiscarded && confirm === null) return usage("--delete-discarded is a second confirmation and needs --confirm");
+  const includeNotReverted = switches.has("--include-not-reverted");
+  if (includeNotReverted && confirm === null) return usage("--include-not-reverted is a confirmation of its own and needs --confirm");
   return {
     ok: true,
     args: {
@@ -185,6 +206,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
       },
       confirm,
       deleteDiscarded,
+      includeNotReverted,
       json: switches.has("--json"),
     },
   };
@@ -194,7 +216,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
 export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome> {
   const parsed = parseCleanupArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
-  const { selection, confirm, deleteDiscarded, json } = parsed.args;
+  const { selection, confirm, deleteDiscarded, includeNotReverted, json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.
   const problem = localPathProblem(parsed.args.workspace, io.cwd);
@@ -219,6 +241,8 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
       output = { schemaVersion: 1, kind: "cleanup", mode: "preview", exitCode: 0, summary: await summarize({ workspaceRoot }), plan: shown };
     } else if (!shown.digest.startsWith(confirm)) {
       output = { schemaVersion: 1, kind: "cleanup", mode: "plan_changed", exitCode: 3 };
+    } else if (!includeNotReverted && notRevertedRuns(shown) > 0) {
+      output = { schemaVersion: 1, kind: "cleanup", mode: "needs_confirmation", exitCode: 3, notReverted: notRevertedRuns(shown) };
     } else {
       const outcome = await apply({ workspaceRoot, selection, now: now(), confirmation: { digest: shown.digest, discarded: deleteDiscarded } });
       if (!outcome.ok) {
@@ -242,11 +266,24 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
 
 const sizeText = (size: StateSize): string => `${size.files} file(s), ${size.bytes} bytes`;
 
+/** DR-44 (가): run records in the plan whose run was not reverted, or only partly (the store's `not_reverted`). */
+function notRevertedRuns(plan: CleanupPlan): number {
+  return plan.items.filter((item) => item.target === "run" && item.warnings.includes("not_reverted")).length;
+}
+
 /** The person's text: the catalog's lines (cleanup.*) and the run ids and sizes. */
 export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): string {
   const out: string[] = [];
   if (output.mode === "plan_changed") {
     out.push(messages.format("cleanup.plan_changed"));
+    return `${out.join("\n")}\n`;
+  }
+  if (output.mode === "needs_confirmation") {
+    // No catalog text yet (N-B): fixed English, as the confirmation hints below.
+    out.push(
+      `Nothing was removed: ${output.notReverted} selected run(s) were not reverted, or only partly; a revert could no longer undo them without their records. ` +
+        "Add --include-not-reverted to remove them too, or leave them out of the selection.",
+    );
     return `${out.join("\n")}\n`;
   }
   if (output.mode === "applied") {
@@ -279,8 +316,13 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
       out.push(`- ${item.runId}: ${sizeText(item.size)}${warnings.length === 0 ? "" : `; ${warnings.join("; ")}`}`);
     }
   };
+  const notReverted = notRevertedRuns(plan);
   if (plan.totals.runs.count > 0) {
     out.push(messages.format("cleanup.confirm.runs", { count: plan.totals.runs.count, bytes: plan.totals.runs.bytes }));
+    // DR-44 (가): the head line says how many of them were not reverted (no catalog text yet).
+    if (notReverted > 0) {
+      out.push(`  ${notReverted} of them not reverted, or only partly: their records go only with --include-not-reverted besides --confirm.`);
+    }
     itemsOf("run");
   }
   if (plan.totals.discarded.count > 0) {
@@ -295,8 +337,16 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
     const digest = plan.digest.slice(0, MIN_PLAN_DIGEST_PREFIX);
     out.push("");
     // No catalog text for these yet: fixed English, as other command hints.
-    out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}.`);
-    if (plan.totals.discarded.count > 0) out.push("People's discarded files are deleted only with --delete-discarded besides.");
+    // R-34 I-3: name what there is to confirm.
+    const runs = plan.totals.runs.count > 0;
+    const discarded = plan.totals.discarded.count > 0;
+    if (runs) {
+      const extra = notReverted > 0 ? " --include-not-reverted" : "";
+      out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}${extra}.`);
+      if (discarded) out.push("People's discarded files are deleted only with --delete-discarded besides.");
+    } else if (discarded) {
+      out.push(`Nothing was removed. To delete the discarded files, run the same command with --confirm ${digest} --delete-discarded.`);
+    }
   }
   return `${out.join("\n")}\n`;
 }

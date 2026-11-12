@@ -5,6 +5,10 @@
  * - Taking a free lock: the complete content is written to a unique temporary file and hard-linked
  *   to `lock.json`. The link fails when the lock exists, so two runs never both create it, and a
  *   reader never sees a half-written lock.
+ * - DR-27 (b): on a volume without hard links (isLinkUnsupported) the same file is made by an
+ *   exclusive create (`wx`) instead; it still fails when the name exists. A reader may then see the
+ *   file before its content is complete. Every lock and reclaim text ends with a newline, so a file
+ *   without one is still being written: the attempt waits for it and never reclaims or clears it.
  * - Reclaiming a lock whose pid is dead (T-9): only one process at a time may reclaim. It holds
  *   `lock.json.reclaim` (taken the same way), reads `lock.json` again, moves it to a unique name,
  *   checks that the moved content is the dead lock it read, and deletes it. Then it competes for
@@ -38,7 +42,7 @@ import { join } from "node:path";
 
 import { LOCK_FILE_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { Clock } from "../contracts/index.js";
-import { assertRunId, ensureStateDir, errorCode } from "./common.js";
+import { assertRunId, ensureStateDir, errorCode, isLinkUnsupported } from "./common.js";
 import { isRunTimestamp } from "./runs.js";
 
 export interface LockInfo {
@@ -315,10 +319,33 @@ async function guarded<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Links `temporary` to `target`. False when `target` exists. */
-async function tryLink(fs: LockFileSystem, temporary: string, target: string): Promise<boolean> {
+/**
+ * Reads a lock-shaped file whose writer has finished. One without its final newline is still being
+ * written on a volume without hard links (DR-27 b); it is waited for (TransientLockError), never judged.
+ */
+async function readSettled(fs: LockFileSystem, file: string): Promise<Read> {
+  const read = await readState(fs, file);
+  if (read !== "missing" && !read.text.endsWith("\n")) throw new TransientLockError();
+  return read;
+}
+
+/**
+ * Makes `target` with `text` (already in `temporary`) without replacing anything: a hard link, or
+ * an exclusive create where the volume has no hard links (DR-27 b). False when `target` exists.
+ */
+async function tryCreate(fs: LockFileSystem, temporary: string, target: string, text: string): Promise<boolean> {
   try {
-    await guarded(() => fs.link(temporary, target));
+    await fs.link(temporary, target);
+    return true;
+  } catch (error) {
+    if (errorCode(error) === "EEXIST") return false;
+    if (!isLinkUnsupported(error)) {
+      if (isTransient(error)) throw new TransientLockError();
+      throw error;
+    }
+  }
+  try {
+    await guarded(() => fs.writeNew(target, text));
     return true;
   } catch (error) {
     if (errorCode(error) === "EEXIST") return false;
@@ -348,8 +375,10 @@ async function removeIfUnchanged(fs: LockFileSystem, stateDir: string, file: str
     if (content !== expected) {
       try {
         await fs.link(moved, file);
-      } catch {
-        // Someone took the name meanwhile. Their file stays; the moved one is dropped.
+      } catch (error) {
+        // DR-27 (b): without hard links the content goes back by an exclusive create. When someone
+        // took the name meanwhile, their file stays and the moved one is dropped.
+        if (content !== null && isLinkUnsupported(error)) await fs.writeNew(file, content).catch(() => undefined);
       }
     }
   } finally {
@@ -427,12 +456,12 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     heldReclaims.add(reclaimText);
     let taken = false;
     try {
-      taken = await tryLink(fs, reclaimTemporary, reclaimFile);
+      taken = await tryCreate(fs, reclaimTemporary, reclaimFile, reclaimText);
     } finally {
       if (!taken) heldReclaims.delete(reclaimText);
     }
     if (taken) return "taken";
-    const held = await readState(fs, reclaimFile);
+    const held = await readSettled(fs, reclaimFile);
     if (held === "missing") return "busy";
     if (await reclaimInUse(held)) return "busy";
     // A reclaimer that died or finished without removing it (or a file that is not ours to
@@ -455,7 +484,7 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   async function reclaim(deadText: string): Promise<void> {
     if ((await takeReclaim()) !== "taken") return;
     try {
-      const now = await readState(fs, lockFile);
+      const now = await readSettled(fs, lockFile);
       if (now === "missing" || now.text !== deadText) return;
       await removeIfUnchanged(fs, stateDir, lockFile, deadText);
     } finally {
@@ -464,8 +493,8 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   }
 
   async function attempt(): Promise<Step> {
-    if (await tryLink(fs, temporary, lockFile)) return { kind: "acquired" };
-    const seen = await readState(fs, lockFile);
+    if (await tryCreate(fs, temporary, lockFile, lockText)) return { kind: "acquired" };
+    const seen = await readSettled(fs, lockFile);
     if (seen === "missing") return { kind: "retry" };
     if (seen.holder === null || (await holderAlive(seen.holder))) return { kind: "locked", holder: seen.holder };
     await reclaim(seen.text);
@@ -496,7 +525,7 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
       if (step.kind === "acquired") return { ok: true, lock };
       if (step.kind === "locked") return locked(step.holder);
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS + Math.floor(Math.random() * RETRY_DELAY_MS)));
-      const seen = await readState(fs, lockFile).catch(() => "missing" as const);
+      const seen = await readSettled(fs, lockFile).catch(() => "missing" as const);
       lastHolder = seen === "missing" ? lastHolder : seen.holder;
     }
     return locked(lastHolder);

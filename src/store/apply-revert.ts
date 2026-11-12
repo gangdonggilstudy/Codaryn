@@ -41,14 +41,12 @@ import {
 } from "../contracts/index.js";
 import type { ContentHash, RevertAction, RevertOutcome, RevertSkipReason, RevertedFile, ResolvedPlanAction, SkippedFile, Workspace } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
-import { errorCode, isPlainDirectory, runDir } from "./common.js";
+import { errorCode, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
 import { discardedRootPath } from "./discarded.js";
 import { canonicalActions } from "./plan.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 const STORED_NAME = new RegExp(DISCARDED_STORED_NAME_PATTERN_SOURCE);
-/** Link errors that mean the volume cannot make the move without the risk of replacing a file. */
-const LINK_UNSUPPORTED: ReadonlySet<string> = new Set(["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK"]);
 
 /**
  * One action to look at. `recorded`: a done record exists. `started`: only a start record (R-9 I-4).
@@ -259,9 +257,8 @@ export async function moveWithoutReplacing(source: string, target: string, opera
   try {
     await linkFile(source, target);
   } catch (error) {
-    const code = errorCode(error) ?? "";
-    if (code === "EEXIST") return "taken";
-    return LINK_UNSUPPORTED.has(code) ? "unsafe" : "failed";
+    if (errorCode(error) === "EEXIST") return "taken";
+    return isLinkUnsupported(error) ? "unsafe" : "failed";
   }
   try {
     await rm(source);

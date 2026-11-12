@@ -61,8 +61,19 @@ export async function isPlainDirectory(dir: string): Promise<boolean> {
   }
 }
 
-/** Errors that mean the volume does not make hard links (or not here). */
-const LINK_UNSUPPORTED: ReadonlySet<string> = new Set(["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK"]);
+/**
+ * Errors from link() that mean the volume does not make hard links (or not here). DR-27 (b): one
+ * rule for every exclusive create, the workspace lock and a revert's move. EISDIR is what libuv
+ * makes of Windows' ERROR_INVALID_FUNCTION, which FAT32 and exFAT give for CreateHardLink [assumed;
+ * this host has NTFS only]. EPERM is also a passing error on Windows (a file being deleted); callers
+ * that fall back to an exclusive create see that error again there.
+ */
+const LINK_UNSUPPORTED: ReadonlySet<string> = new Set(["EPERM", "EXDEV", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK", "EISDIR"]);
+
+/** Whether a link() error means that hard links cannot be made there (DR-24 c, DR-27 b). */
+export function isLinkUnsupported(error: unknown): boolean {
+  return LINK_UNSUPPORTED.has(errorCode(error) ?? "");
+}
 
 function temporaryBeside(target: string): string {
   return join(dirname(target), `.${randomBytes(8).toString("hex")}.tmp`);
@@ -88,7 +99,7 @@ export async function createExclusive(
       return true;
     } catch (error) {
       if (errorCode(error) === "EEXIST") return false;
-      if (!LINK_UNSUPPORTED.has(errorCode(error) ?? "")) throw error;
+      if (!isLinkUnsupported(error)) throw error;
       // DR-24 (c): a volume without hard links still gets an exclusive create; a reader may then
       // see the file before it is complete, which loadPlan's digest check turns into
       // invalid_run_record, and applied.json counts by its presence.

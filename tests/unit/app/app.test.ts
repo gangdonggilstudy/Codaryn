@@ -244,7 +244,8 @@ describe("startRun", () => {
     );
     const provider: ModelProvider = {
       name: "anthropic",
-      complete: async () => ({ ok: false, kind: "api_error", message: "HTTP 404 not_found_error: model: fake-model-gone" }),
+      // SP-3: the adapter fills httpStatus for an HTTP answer; the CLI's Y-4 hint follows it.
+      complete: async () => ({ ok: false, kind: "api_error", message: "HTTP 404 not_found_error: model: fake-model-gone", httpStatus: 404 }),
     };
     const environment = await appEnvironment(base);
     const app = createCodarynApp(

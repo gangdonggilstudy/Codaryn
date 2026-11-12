@@ -62,7 +62,7 @@ export const REPORT_USAGE = "codaryn report --workspace <dir> --run <runId|lates
 export const DOCTOR_USAGE =
   "codaryn doctor [--config <config.json>] [--vars-file <path>] [--task <task.json> | --workspace <dir>] [--profile <name>] [--json]";
 
-export const MODELS_USAGE = "codaryn models [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]";
+export const MODELS_USAGE = "codaryn models [--provider <name>] [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]";
 export const INIT_USAGE = "codaryn init [--config <config.json>] [--workspace <dir>] [--json]";
 /** The same text as `RUNS_USAGE` in src/cli/runs.ts, which parses `runs` (N-22); kept here for USAGE. */
 export const RUNS_USAGE = "codaryn runs [--workspace <dir>] [--limit <n>] [--json]";
@@ -294,7 +294,7 @@ export function parseDoctorArgs(argv: readonly string[]): ParseDoctorArgsOutcome
   };
 }
 
-const MODELS_OPTIONS = ["--config", "--vars-file", "--use"] as const;
+const MODELS_OPTIONS = ["--config", "--vars-file", "--use", "--provider"] as const;
 type ModelsOption = (typeof MODELS_OPTIONS)[number];
 
 export interface ModelsArgs {
@@ -303,6 +303,8 @@ export interface ModelsArgs {
   readonly varsFile: string | null;
   /** `--use`: a 1-based number from the list or a listed model id. */
   readonly use: string | null;
+  /** SP-6: `--provider <name>`, checked by the command (API_PROVIDER_NAMES). */
+  readonly provider: string | null;
   readonly json: boolean;
 }
 
@@ -324,6 +326,7 @@ export function parseModelsArgs(argv: readonly string[]): ParseModelsArgsOutcome
       configPath: read.values.get("--config") ?? null,
       varsFile: read.values.get("--vars-file") ?? null,
       use: read.values.get("--use") ?? null,
+      provider: read.values.get("--provider") ?? null,
       json: read.switches.has("--json"),
     },
   };

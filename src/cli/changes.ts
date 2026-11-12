@@ -24,7 +24,7 @@ import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { cliError } from "./run.js";
-import { envValue } from "./settings.js";
+import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
 
@@ -184,7 +184,7 @@ export async function runChanges(io: ChangesEnvironment): Promise<CommandOutcome
     const output = toCliError(outcome.error);
     return { output, exitCode: output.exitCode };
   }
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  const currentKey = knownKeyValues(io.env);
   // N-19: one ASCII JSON line. N-27 (c): keys are hidden in the strings before the JSON is written
   // (in JSON text a control character becomes a six-character escape the key check cannot see through).
   const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output), currentKey);

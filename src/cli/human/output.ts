@@ -31,6 +31,7 @@ import {
   isReasonOfStatus,
   toRunId,
   toSchemaFieldPath,
+  MODEL_PROVIDER_NAMES,
 } from "../../contracts/index.js";
 import type {
   ApplyJournalEvent,
@@ -70,7 +71,8 @@ export const HIDDEN_PATH = "?";
 /** N-22: the errors after which the error text adds `error.doctor_hint` (the contract's list). */
 const DOCTOR_CODES: ReadonlySet<string> = new Set<string>(DOCTOR_HINT_ERROR_CODES);
 
-const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
+// SP-1: the contract's provider names, not a list of its own.
+const PROVIDERS: readonly ModelProviderName[] = MODEL_PROVIDER_NAMES;
 const WORKSPACE_FORMS = ["current", "given", "task"] as const;
 /** EngineResult.plan.digest in its only valid form. */
 const DIGEST = /^[0-9a-f]{64}$/;

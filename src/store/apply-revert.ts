@@ -28,7 +28,9 @@
  *   back). The added name (the destination, or the discarded copy) is removed and the file stays at
  *   its original path: `moved_back`, `restored_from_discard`. The added name is first renamed to a
  *   new name in the state directory and deleted only if it is still that file there, so no other
- *   file is ever removed.
+ *   file is ever removed. R-16 L-1: if it is another file and cannot be put back (its name was taken
+ *   meanwhile), it stays in `.codaryn/parked/<runId>/<index>-<random>`, where listParkedFiles (and
+ *   doctor) find it; the item is `io_error`.
  * - A record that does not belong to the run, a stored name other than the action's
  *   (DISCARDED_STORED_NAME_PATTERN_SOURCE), or a plan that cannot be trusted rejects with
  *   ApplyRecordError (`invalid_run_record`) before anything is changed. A plan run that is gone
@@ -37,7 +39,7 @@
 
 import { createReadStream } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { link, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, readdir, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -362,28 +364,107 @@ async function sameFile(a: string, b: string): Promise<boolean> {
   }
 }
 
+/** R-16 L-1: the state directory's folder for files a revert moved aside and could not put back. */
+const PARKED_DIR_NAME = "parked";
+
+/** Where removeSecondName may move a name aside: `.codaryn/parked/<runId>/<index>-<random>`. */
+export interface ParkPlace {
+  readonly workspaceRoot: string;
+  /** The run being reverted. */
+  readonly runId: string;
+  /** The action's index in the plan. */
+  readonly index: number;
+}
+
+/**
+ * removed: the second name is gone, the file stays at `kept`. kept: nothing was removed (the name is
+ * where it was). parked: another file was at the name and could not be put back; it stays at `path`
+ * (state-directory relative, `/` separated).
+ */
+export type SecondNameOutcome = { readonly kind: "removed" } | { readonly kind: "kept" } | { readonly kind: "parked"; readonly path: string };
+
+/** `.codaryn/parked/<runId>`, made one level at a time and only as plain directories (no link is followed), or null. */
+async function parkingDir(place: ParkPlace): Promise<string | null> {
+  const parent = join(place.workspaceRoot, STATE_DIR_NAME, PARKED_DIR_NAME);
+  const dir = join(parent, place.runId);
+  for (const step of [parent, dir]) {
+    try {
+      await mkdir(step);
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") return null;
+    }
+    if (!(await isPlainDirectory(step))) return null;
+  }
+  return dir;
+}
+
+/** Removes the run's parking folder (and the parent) when they are empty. */
+async function dropEmptyParking(dir: string): Promise<void> {
+  await rmdir(dir).catch(() => undefined);
+  await rmdir(dirname(dir)).catch(() => undefined);
+}
+
 /**
  * R-15 L-1: removes `added`, a second name of the file at `kept`. It is renamed to a new name in
- * `parkDir` first (nothing exists there to replace), checked again, and deleted only while it is
- * still that file; otherwise it is put back without replacing anything. False when it was not removed.
+ * the run's parking folder first (nothing exists there to replace), checked again, and deleted only
+ * while it is still that file; otherwise it is put back without replacing anything. R-16 L-1: when
+ * putting it back fails (the name was taken meanwhile), it stays parked and the outcome says where.
  */
-export async function removeSecondName(added: string, kept: string, parkDir: string): Promise<boolean> {
-  const parked = join(parkDir, `revert-${randomBytes(8).toString("hex")}.tmp`);
+export async function removeSecondName(added: string, kept: string, place: ParkPlace, operations: MoveOperations = {}): Promise<SecondNameOutcome> {
+  const dir = await parkingDir(place);
+  if (dir === null) return { kind: "kept" };
+  const name = `${place.index}-${randomBytes(8).toString("hex")}`;
+  const parked = join(dir, name);
   try {
     await rename(added, parked);
   } catch {
-    return false;
+    await dropEmptyParking(dir);
+    return { kind: "kept" };
   }
   if (await sameFile(parked, kept)) {
     try {
       await rm(parked);
-      return true;
+      await dropEmptyParking(dir);
+      return { kind: "removed" };
     } catch {
       // Not removed: it goes back below.
     }
   }
-  await moveWithoutReplacing(parked, added);
-  return false;
+  if ((await moveWithoutReplacing(parked, added, operations)) === "moved") {
+    await dropEmptyParking(dir);
+    return { kind: "kept" };
+  }
+  return { kind: "parked", path: [STATE_DIR_NAME, PARKED_DIR_NAME, place.runId, name].join("/") };
+}
+
+/** A file a revert left in the parking folder (R-16 L-1). */
+export interface ParkedFile {
+  /** State-directory relative, `/` separated: `.codaryn/parked/<runId>/<index>-<random>`. */
+  readonly path: string;
+  readonly runId: string;
+}
+
+/**
+ * R-16 L-1: the files reverts left in `.codaryn/parked/`, for doctor and people. Only plain
+ * directories named as run ids and the regular files in them; links are not followed. Never rejects.
+ */
+export async function listParkedFiles(workspaceRoot: string): Promise<ParkedFile[]> {
+  const parent = join(workspaceRoot, STATE_DIR_NAME, PARKED_DIR_NAME);
+  const found: ParkedFile[] = [];
+  try {
+    if (!(await isPlainDirectory(parent))) return found;
+    for (const runId of (await readdir(parent)).sort()) {
+      const dir = join(parent, runId);
+      if (toRunId(runId) === null || !(await isPlainDirectory(dir))) continue;
+      for (const name of (await readdir(dir)).sort()) {
+        const info = await lstat(join(dir, name)).catch(() => null);
+        if (info !== null && info.isFile()) found.push({ path: [STATE_DIR_NAME, PARKED_DIR_NAME, runId, name].join("/"), runId });
+      }
+    }
+  } catch {
+    return found;
+  }
+  return found;
 }
 
 /**
@@ -396,7 +477,8 @@ async function revertItem(
   sha256: ContentHash,
   recorded: boolean,
   action: RevertAction,
-  mode: { readonly dryRun: boolean; readonly consent: boolean; readonly parkDir: string },
+  mode: { readonly dryRun: boolean; readonly consent: boolean },
+  park: ParkPlace,
 ): Promise<Outcome> {
   // `away` null: the place it would have gone is known not to exist (R-9c C-2); nothing is read there.
   const there: FileState = away === null ? { kind: "absent" } : await stateOf(away);
@@ -407,7 +489,7 @@ async function revertItem(
   // source. Removing the added name finishes it; the original path keeps the file.
   if (away !== null && isDone && original.kind === "file" && original.sha256 === sha256 && (await sameFile(away, back))) {
     if (mode.dryRun) return { action };
-    return (await removeSecondName(away, back, mode.parkDir)) ? { action } : { reason: "io_error" };
+    return (await removeSecondName(away, back, park)).kind === "removed" ? { action } : { reason: "io_error" };
   }
   if (!recorded) {
     const notDone = original.kind === "file" && original.sha256 === sha256 && there.kind === "absent";
@@ -430,7 +512,7 @@ async function revertItem(
  * Rejects with ApplyRecordError before anything is changed when a record or the plan fails its checks.
  */
 export async function revertApplyRun(workspaceRoot: string, runId: string, journal: string, dryRun: boolean, consent = false): Promise<RevertOutcome> {
-  const mode = { dryRun, consent: consent && !dryRun, parkDir: join(workspaceRoot, STATE_DIR_NAME) };
+  const mode = { dryRun, consent: consent && !dryRun };
   const { planRunId, digest, items } = applyRecords(journal, runId);
   const reverted: RevertedFile[] = [];
   const skipped: SkippedFile[] = [];
@@ -459,7 +541,7 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
       } else if (planned.kind === "move") {
         const away = await resolved(workspace, planned.to);
         const back = await resolved(workspace, planned.from);
-        outcome = away === null || back === null ? { reason: "changed_since_run" } : await revertItem(away, back, item.sha256, item.recorded, "moved_back", mode);
+        outcome = away === null || back === null ? { reason: "changed_since_run" } : await revertItem(away, back, item.sha256, item.recorded, "moved_back", mode, { workspaceRoot, runId, index: item.index });
       } else {
         const back = await resolved(workspace, planned.path);
         outcome =
@@ -474,6 +556,7 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
                   item.recorded,
                   "restored_from_discard",
                   mode,
+                  { workspaceRoot, runId, index: item.index },
                 );
       }
     } catch {

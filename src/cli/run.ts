@@ -21,12 +21,15 @@ import path from "node:path";
 import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
+  ApiProviderDeps,
+  ApiProviderName,
   CliErrorCode,
   CliErrorOutput,
   CliOutput,
   Clock,
   CodarynConfig,
   CreateAnthropicProvider,
+  CreateApiProvider,
   DefaultConfigDisplay,
   DefaultConfigLocation,
   EngineResult,
@@ -55,7 +58,7 @@ import type { Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
-import { anthropicProviderFactory } from "./provider.js";
+import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "./run-id.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import {
@@ -68,7 +71,7 @@ import {
   selectEnvFileSecrets,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
-import { envValue, resolveAnthropicSettings } from "./settings.js";
+import { envValue, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
@@ -99,6 +102,13 @@ export interface CliEnvironment {
   readonly createAnthropicProvider?: CreateAnthropicProvider | null;
   /** Passed to the anthropic provider. Tests inject `fetch` here; the real CLI leaves it unset. */
   readonly anthropicDeps?: AnthropicProviderDeps;
+  /**
+   * SP-6: overrides an API provider's factory (API_PROVIDER_FACTORIES when absent); `null` stands for
+   * a provider that is not connected. For anthropic, `createAnthropicProvider` is read first.
+   */
+  readonly providerFactories?: { readonly [P in ApiProviderName]?: CreateApiProvider | null };
+  /** SP-6: injection points per API provider; anthropic falls back to `anthropicDeps`. */
+  readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
   /** Cancellation for the run. Created from the parsed arguments. */
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
   /**
@@ -197,9 +207,19 @@ export const cliError = error;
 export const MODEL_NOT_FOUND_HINT =
   "the API answered HTTP 404, which usually means the model id is unknown: run `codaryn models` to list the models this key can use";
 
-/** The provider describes an HTTP failure as "HTTP <status>..." (src/model/anthropic). */
-function isModelNotFound(message: string): boolean {
-  return message.startsWith("HTTP 404");
+/**
+ * Y-4 with SP-3: `model` with every outcome watched; `onNotFound` is called when a request was
+ * answered with HTTP 404 (ModelOutcome.httpStatus, not the message's first characters).
+ */
+function watchingNotFound(model: ModelProvider, onNotFound: () => void): ModelProvider {
+  return {
+    name: model.name,
+    async complete(request, signal) {
+      const outcome = await model.complete(request, signal);
+      if (!outcome.ok && outcome.httpStatus === 404) onNotFound();
+      return outcome;
+    },
+  };
 }
 
 function withModelHint(
@@ -438,7 +458,8 @@ export async function prepareTask(
   }
 
   // 3. The current key, the config file (N-1: --config, CODARYN_CONFIG, the default location), the goal (S-5, S-8).
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  // SP-2: every key variable Codaryn knows, whatever provider runs.
+  const currentKey = knownKeyValues(io.env);
   const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   if (!chosen.ok) return error("invalid_config", chosen.message);
   if (args.input.kind === "quick" && goalHoldsKey(args.input.goal, currentKey)) {
@@ -626,9 +647,10 @@ export async function prepareTask(
     }
     addSecret(value);
   }
-  // S-2: the key is masked in every run, whatever the provider. A scripted task can still read
-  // a workspace file that holds it.
-  if (currentKey !== null) addSecret(currentKey);
+  // S-2, SP-2, DR-34 (b): the run's own key, and every other known key from 20 characters, are
+  // masked whatever the provider (a scripted task can still read a file that holds one). A short
+  // placeholder in a key variable the run does not use is left alone (review R-20 M-2).
+  runKeySecrets(io.env, task.model.provider).forEach(addSecret);
   // S-4: what the env file set, so a value read back from a file or an output is masked too.
   envSecrets.forEach(addSecret);
 
@@ -646,20 +668,25 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
 
   // 8. The model.
   let model: ModelProvider;
-  if (task.model.provider === "anthropic") {
-    const resolved = resolveAnthropicSettings(task.model, io.env, config);
+  if (task.model.provider !== "scripted") {
+    // SP-4, DR-34 (c): every API provider's settings are resolved first, its address variable
+    // checked with its own rule, before any provider is made.
+    const resolved = resolveApiSettings(task.model, io.env, config);
     if (!resolved.ok) return error(resolved.code, resolved.message);
     // Already registered above (S-2); kept so the key sent is always a registered secret.
     addSecret(resolved.settings.apiKey);
-    const factory = io.createAnthropicProvider === undefined ? anthropicProviderFactory : io.createAnthropicProvider;
+    // SP-6: the factory of the task's provider (API_PROVIDER_FACTORIES), given only its own settings.
+    const provider = task.model.provider;
+    const override = provider === "anthropic" && io.createAnthropicProvider !== undefined ? io.createAnthropicProvider : io.providerFactories?.[provider];
+    const factory = override === undefined ? API_PROVIDER_FACTORIES[provider] : override;
     if (factory === null) {
-      return error("provider_not_implemented", "the anthropic provider is not connected; nothing was sent");
+      return error("provider_not_implemented", `the ${provider} provider is not connected; nothing was sent`);
     }
     try {
-      model = factory(resolved.settings, io.anthropicDeps);
+      model = factory(resolved.settings, io.providerDeps?.[provider] ?? (provider === "anthropic" ? io.anthropicDeps : undefined));
     } catch {
       // The provider re-checks the settings and throws only if they disagree with the CLI's checks.
-      return error("internal_error", "the anthropic provider rejected the resolved settings; nothing was sent");
+      return error("internal_error", `the ${provider} provider rejected the resolved settings; nothing was sent`);
     }
   } else {
     const scriptText = await readText(io, task.model.scriptPath);
@@ -674,18 +701,20 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     model = createScriptedProvider(script.script);
   }
 
+  // Y-4: a model request answered with HTTP 404 (usually an unknown model id).
+  let modelNotFound = false;
+  const watchedModel = watchingNotFound(model, () => {
+    modelNotFound = true;
+  });
   const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
   const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
   try {
-    const assembled = await io.assemble({ task, runId, model, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
+    const assembled = await io.assemble({ task, runId, model: watchedModel, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
-    // Y-4: watch for a model request answered with HTTP 404 (usually an unknown model id).
     const recorded = assembled.deps.journal;
-    let modelNotFound = false;
     const watched: Journal = {
       async append(event) {
         await recorded.append(event);
-        if (event.type === "model_error" && isModelNotFound(event.message)) modelNotFound = true;
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;

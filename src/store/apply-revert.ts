@@ -6,7 +6,11 @@
  *   nothing exists at `from`. A discarded file goes back from
  *   `.codaryn/discarded/<runId>/<discardedStoredName(index)>` (DR-9) the same way. A move back is
  *   a hard link and the source's removal, so nothing is ever replaced; where a link cannot be made
- *   the file is skipped as `unsafe_move` (DR-24 b, DR-21: no "check, then rename").
+ *   the file is skipped as `unsafe_move` (DR-24 b: no "check, then rename" on its own).
+ * - DR-25: with the person's consent for this revert, such a file goes back by a plain rename made
+ *   right after checking that its original path is still free, and is reported `unsafe: true`.
+ *   A dry run creates nothing (N-7), so it cannot tell whether the volume makes hard links: it lists
+ *   moves without `unsafe` and says so with `moveSafetyUnchecked`.
  * - Skips: the file changed since (`changed_since_run`), something at the original path
  *   (`original_path_taken`), the file already back (`already_reverted`), no safe move
  *   (`unsafe_move`), a read or write failure (`io_error`).
@@ -26,7 +30,7 @@
 
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
-import { link, lstat, mkdir, readFile, rm } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -278,11 +282,28 @@ export async function moveWithoutReplacing(source: string, target: string, opera
   }
 }
 
-type Outcome = { readonly action: RevertAction } | { readonly reason: RevertSkipReason } | { readonly unlisted: true };
+type Outcome = { readonly action: RevertAction; readonly unsafe?: true } | { readonly reason: RevertSkipReason } | { readonly unlisted: true };
 
 function movedOutcome(moved: "moved" | "taken" | "unsafe" | "failed", action: RevertAction): Outcome {
   if (moved === "moved") return { action };
   return { reason: moved === "taken" ? "original_path_taken" : moved === "unsafe" ? "unsafe_move" : "io_error" };
+}
+
+/**
+ * A move back: safe (moveWithoutReplacing) where the volume makes hard links. DR-25: where it does
+ * not, and only with the person's consent for this revert, a plain rename right after checking that
+ * the original path is still free; the outcome is then marked unsafe.
+ */
+async function moveBack(away: string, back: string, action: RevertAction, consent: boolean): Promise<Outcome> {
+  const moved = await moveWithoutReplacing(away, back);
+  if (moved !== "unsafe" || !consent) return movedOutcome(moved, action);
+  if ((await stateOf(back)).kind !== "absent") return { reason: "original_path_taken" };
+  try {
+    await rename(away, back);
+    return { action, unsafe: true };
+  } catch {
+    return { reason: "io_error" };
+  }
 }
 
 /** A workspace path to write through, or null when it cannot be resolved as it was given. */
@@ -295,7 +316,14 @@ async function resolved(workspace: Workspace, path: string): Promise<string | nu
  * One action back: `away` is where the file went (the move's destination, or its place in the
  * discarded directory), `back` its original path. `recorded` false: only a start record exists.
  */
-async function revertItem(away: string, back: string, sha256: ContentHash, recorded: boolean, action: RevertAction, dryRun: boolean): Promise<Outcome> {
+async function revertItem(
+  away: string,
+  back: string,
+  sha256: ContentHash,
+  recorded: boolean,
+  action: RevertAction,
+  mode: { readonly dryRun: boolean; readonly consent: boolean },
+): Promise<Outcome> {
   const there = await stateOf(away);
   const original = await stateOf(back);
   if (there.kind === "error" || original.kind === "error") return { reason: "io_error" };
@@ -310,15 +338,17 @@ async function revertItem(away: string, back: string, sha256: ContentHash, recor
     return { reason: "changed_since_run" };
   }
   if (original.kind !== "absent") return { reason: "original_path_taken" };
-  if (dryRun) return { action };
-  return movedOutcome(await moveWithoutReplacing(away, back), action);
+  if (mode.dryRun) return { action };
+  return moveBack(away, back, action, mode.consent);
 }
 
 /**
  * Reverts (or, with `dryRun`, decides) an apply run whose journal text was read by `revertRun`.
+ * `consent`: the person consented to unsafe moves for this revert (DR-25; checked by the caller).
  * Rejects with ApplyRecordError before anything is changed when a record or the plan fails its checks.
  */
-export async function revertApplyRun(workspaceRoot: string, runId: string, journal: string, dryRun: boolean): Promise<RevertOutcome> {
+export async function revertApplyRun(workspaceRoot: string, runId: string, journal: string, dryRun: boolean, consent = false): Promise<RevertOutcome> {
+  const mode = { dryRun, consent: consent && !dryRun };
   const { planRunId, digest, items } = applyRecords(journal, runId);
   const reverted: RevertedFile[] = [];
   const skipped: SkippedFile[] = [];
@@ -347,7 +377,7 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
       } else if (planned.kind === "move") {
         const away = await resolved(workspace, planned.to);
         const back = await resolved(workspace, planned.from);
-        outcome = away === null || back === null ? { reason: "changed_since_run" } : await revertItem(away, back, item.sha256, item.recorded, "moved_back", dryRun);
+        outcome = away === null || back === null ? { reason: "changed_since_run" } : await revertItem(away, back, item.sha256, item.recorded, "moved_back", mode);
       } else {
         const back = await resolved(workspace, planned.path);
         outcome =
@@ -355,17 +385,23 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
             ? { reason: "changed_since_run" }
             : discarded === null
               ? { reason: "io_error" }
-              : await revertItem(join(discarded, discardedStoredName(item.index)), back, item.sha256, item.recorded, "restored_from_discard", dryRun);
+              : await revertItem(join(discarded, discardedStoredName(item.index)), back, item.sha256, item.recorded, "restored_from_discard", mode);
       }
     } catch {
       outcome = { reason: "io_error" };
     }
     if ("unlisted" in outcome) continue;
     if ("action" in outcome) {
-      reverted.push(item.kind === "move" && item.shownTo !== null ? { path: item.shown, action: outcome.action, from: item.shownTo } : { path: item.shown, action: outcome.action });
+      const unsafe = outcome.unsafe === true ? { unsafe: true as const } : {};
+      reverted.push(
+        item.kind === "move" && item.shownTo !== null
+          ? { path: item.shown, action: outcome.action, from: item.shownTo, ...unsafe }
+          : { path: item.shown, action: outcome.action, ...unsafe },
+      );
     } else {
       skipped.push({ path: item.shown, reason: outcome.reason });
     }
   }
-  return { reverted, skipped };
+  // DR-25: a dry run that lists a move back did not judge whether it can be made safely.
+  return dryRun && reverted.length > 0 ? { reverted, skipped, moveSafetyUnchecked: true } : { reverted, skipped };
 }

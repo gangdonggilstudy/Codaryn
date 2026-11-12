@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import type { ApplyJournalEvent, ContentHash, MaskedText, RunListEntry } from "../../../src/contracts/index.js";
-import { createApplyJournal, discardedRootPath, inspectRun, latestRunId, listRuns, prepareDiscardedRoot } from "../../../src/store/index.js";
+import { RunListError, createApplyJournal, discardedRootPath, inspectRun, latestRunId, listRuns, prepareDiscardedRoot, readRevertRecord, writeRevertRecord } from "../../../src/store/index.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -178,6 +178,38 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
       const root = await workspace();
       await applyRun(root, applyResult(extra));
       assert.deepEqual((await listRuns({ workspaceRoot: root })).runs, [{ state: "damaged", runId: APPLY_RUN }], JSON.stringify(extra));
+    }
+  });
+});
+
+describe("DR-25 fields of the revert record", () => {
+  const record = { schemaVersion: 1, kind: "revert_record", runId: APPLY_RUN, at: "2026-01-02T04:00:00.000Z", status: "complete", reverted: 2, skipped: 0 } as const;
+
+  test("the consent channel and the number of unsafe moves are kept, and records without them read as before", async () => {
+    const root = await workspace();
+    await applyRun(root);
+    await writeRevertRecord(root, { ...record, unsafeMoveConsent: "cli-flag", unsafeMoves: 2 });
+    assert.deepEqual(await readRevertRecord(root, APPLY_RUN), { ...record, unsafeMoveConsent: "cli-flag", unsafeMoves: 2 });
+    await writeRevertRecord(root, { ...record, unsafeMoveConsent: null, unsafeMoves: 0 });
+    assert.deepEqual(await readRevertRecord(root, APPLY_RUN), { ...record, unsafeMoveConsent: null, unsafeMoves: 0 });
+    await writeRevertRecord(root, record);
+    assert.deepEqual(await readRevertRecord(root, APPLY_RUN), record);
+  });
+
+  test("an unknown channel, unsafe moves without a consent or more than were reverted make the record damaged", async () => {
+    for (const bad of [
+      { unsafeMoveConsent: "model" },
+      { unsafeMoveConsent: null, unsafeMoves: 1 },
+      { unsafeMoveConsent: "cli-flag", unsafeMoves: 3 },
+      { unsafeMoveConsent: "cli-flag", unsafeMoves: -1 },
+    ]) {
+      const root = await workspace();
+      await applyRun(root);
+      await assert.rejects(writeRevertRecord(root, { ...record, ...bad } as never), TypeError, JSON.stringify(bad));
+      await writeFile(join(root, ".codaryn", "runs", APPLY_RUN, "revert.json"), `${JSON.stringify({ ...record, ...bad })}\n`, "utf8");
+      await assert.rejects(readRevertRecord(root, APPLY_RUN), RunListError, JSON.stringify(bad));
+      const entry = (await listRuns({ workspaceRoot: root })).runs[0] as Extract<RunListEntry, { state: "checked" }>;
+      assert.equal(entry.revertRecordDamaged, true, JSON.stringify(bad));
     }
   });
 });

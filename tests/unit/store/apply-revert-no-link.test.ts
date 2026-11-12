@@ -122,3 +122,64 @@ describe("R-9b N-5 (DR-27 c): record indexes outside the plan", () => {
     }
   });
 });
+
+describe("DR-25: the person's consent to move files back unsafely, for one revert", () => {
+  const consent = { channel: "cli-flag" as const, runId: APPLY_RUN };
+
+  test("with consent for this run, both files go back by a rename after the check, reported unsafe", async () => {
+    const root = await appliedWorkspace();
+    const outcome = await withoutHardLinks("EPERM", () => revertRun({ workspaceRoot: root, runId: APPLY_RUN, unsafeMoveConsent: consent }));
+    assert.deepEqual(outcome.reverted, [
+      { path: "inbox/old.log", action: "restored_from_discard", unsafe: true },
+      { path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt", unsafe: true },
+    ]);
+    assert.deepEqual(outcome.skipped, []);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
+    assert.equal(await readFile(join(root, "inbox", "old.log"), "utf8"), LOG);
+    assert.deepEqual(await readdir(join(root, ".codaryn", "discarded", APPLY_RUN)), []);
+  });
+
+  test("a consent for another run counts as none: the files are skipped as unsafe_move", async () => {
+    const root = await appliedWorkspace();
+    const before = await tree(root);
+    const other = { channel: "cli-flag" as const, runId: "20260102T030600Z-22222222" };
+    const outcome = await withoutHardLinks("EPERM", () => revertRun({ workspaceRoot: root, runId: APPLY_RUN, unsafeMoveConsent: other }));
+    assert.deepEqual(outcome.skipped.map((file) => file.reason), ["unsafe_move", "unsafe_move"]);
+    assert.deepEqual(await tree(root), before);
+  });
+
+  test("with consent, an occupied original path is still original_path_taken: nothing is replaced", async () => {
+    const root = await appliedWorkspace();
+    await writeFile(join(root, "inbox", "report.txt"), "someone else's file\n", "utf8");
+    const outcome = await withoutHardLinks("EPERM", () => revertRun({ workspaceRoot: root, runId: APPLY_RUN, unsafeMoveConsent: consent }));
+    assert.deepEqual(outcome.skipped, [{ path: "inbox/report.txt", reason: "original_path_taken" }]);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), "someone else's file\n");
+    assert.equal(await readFile(join(root, "docs", "report.txt"), "utf8"), REPORT);
+  });
+
+  test("where hard links work, a consent changes nothing: the files move safely and are not marked unsafe", async () => {
+    const root = await appliedWorkspace();
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN, unsafeMoveConsent: consent });
+    assert.deepEqual(outcome.reverted.map((file) => [file.action, file.unsafe]), [
+      ["restored_from_discard", undefined],
+      ["moved_back", undefined],
+    ]);
+  });
+
+  test("a dry run creates nothing, judges no volume, lists the moves without unsafe and says so", async () => {
+    const root = await appliedWorkspace();
+    const before = await tree(root);
+    for (const request of [{}, { unsafeMoveConsent: consent }]) {
+      const outcome = await withoutHardLinks("EPERM", () => revertRun({ workspaceRoot: root, runId: APPLY_RUN, dryRun: true, ...request }));
+      assert.deepEqual(outcome, {
+        reverted: [
+          { path: "inbox/old.log", action: "restored_from_discard" },
+          { path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" },
+        ],
+        skipped: [],
+        moveSafetyUnchecked: true,
+      });
+    }
+    assert.deepEqual(await tree(root), before);
+  });
+});

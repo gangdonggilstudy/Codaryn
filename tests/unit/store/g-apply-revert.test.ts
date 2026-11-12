@@ -96,6 +96,8 @@ describe("revertRun on an apply run (G-E)", () => {
         { path: "inbox/report.txt", action: "moved_back", from: "docs/report.txt" },
       ],
       skipped: [],
+      // DR-25: a dry run does not judge whether this volume can move the files back safely.
+      moveSafetyUnchecked: true,
     });
     assert.deepEqual(await tree(root), before);
   });

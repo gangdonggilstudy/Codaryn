@@ -22,6 +22,7 @@ export type {
   ConfirmAnswer,
   ConfirmRequest,
   DoctorRequest,
+  PlanActionView,
   PlanView,
   ReportRequest,
   ReviewOutputView,

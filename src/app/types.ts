@@ -114,7 +114,10 @@ export type ConfirmAnswer =
 export interface RunObserver {
   /** Called synchronously for each event. Exceptions are ignored and never change the run. */
   onEvent?(event: RunEvent): void;
-  /** Stage 5 (DR-3). Not called yet. */
+  /**
+   * Stage 5 (DR-3). Not called yet. When it is absent the app layer itself records each question
+   * as denied with `by: "default"`, so a denial no person gave is never recorded as theirs (DR-10).
+   */
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 }
 
@@ -209,20 +212,39 @@ export interface ChangesOutput {
   readonly files: readonly ChangedFileView[];
 }
 
-/** Assumption (G-A): `codaryn plan` output, a masked view of the proposed plan (DR-1, DR-5). */
+/*
+ * The plan, apply and review shapes below mirror the G-A contract commit `f53fb16`
+ * (`src/contracts/plan.ts` PlanOutput and ApplyResult, `src/contracts/workflow.ts` ReviewOutput),
+ * which is not merged here: G-A enters main together with its N-B texts (DR-12), and on its own it
+ * does not compile against main. When it is merged these are replaced by imports of those types.
+ */
+
+/** Assumption (G-A): a masked plan action, as G-A's MaskedPlanAction. */
+export type PlanActionView =
+  | { readonly kind: "move"; readonly from: MaskedText; readonly to: MaskedText; readonly sha256: string }
+  | { readonly kind: "discard"; readonly path: MaskedText; readonly sha256: string };
+
+/** Assumption (G-A): `codaryn plan --json`, plan.json masked again (DR-1, DR-5, DR-6). */
 export interface PlanView {
   readonly kind: "plan";
   readonly runId: string;
-  /** The GT digest (SHA-256 of plan.json); the one value an approval names. */
+  readonly status: "pending" | "applied";
+  /** The GT digest (SHA-256 of plan.json's bytes); the one value an approval names. */
   readonly digest: string;
-  readonly actions: readonly MaskedText[];
+  readonly actions: readonly PlanActionView[];
+  /** DR-6: an apply would stop as `plan_stale` because the workspace has too many files. */
+  readonly inventoryLimitReached: boolean;
+  readonly appliedBy: { readonly runId: string; readonly at: string } | null;
 }
 
-/** Assumption (G-A): DR-1, DR-2. The settings decide the policy and verifiers at apply time (DR-5). */
+/**
+ * Assumption (G-A): DR-1, DR-2. The apply takes a task, or the quick form with a profile (DR-12);
+ * its policy and verifiers come from these settings at apply time, not from the plan (DR-5).
+ */
 export interface ApplyPlanRequest {
   readonly settings: StartRunRequest;
   readonly planRunId: string;
-  /** The digest, or its first 12 or more characters (GT 6.2). */
+  /** The digest, or its first 12 or more characters (MIN_PLAN_DIGEST_PREFIX). */
   readonly digest: string;
 }
 
@@ -231,7 +253,10 @@ export interface ApplyResultView {
   readonly kind: "apply";
   readonly runId: string;
   readonly planRunId: string;
+  readonly digest: string;
   readonly status: TerminalRunStatus;
+  /** verified, verifier_failed, verifier_inconclusive, protected_changed, plan_stale, apply_incomplete, cancelled, max_duration. */
+  readonly reason: string;
   readonly exitCode: number;
 }
 
@@ -250,10 +275,14 @@ export interface ReviewRequest {
   readonly note: string | null;
 }
 
+/** Assumption (G-A): `codaryn review --json`, as G-A's ReviewOutput. */
 export interface ReviewOutputView {
   readonly kind: "review";
   readonly runId: string;
-  readonly decision: "accept" | "reject";
+  readonly verdict: "accepted" | "rejected";
+  readonly checklist: readonly MaskedText[];
+  /** An earlier review of this run was replaced. */
+  readonly replaced: boolean;
 }
 
 export interface CodarynApp {

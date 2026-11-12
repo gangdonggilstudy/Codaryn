@@ -49,6 +49,13 @@ export interface AppEnvironment {
   readonly randomBytes: (size: number) => Uint8Array;
   /** Defaults to `process.platform`. Windows looks environment names up without case. */
   readonly platform?: NodeJS.Platform;
+  /**
+   * N-1: the home directory, for the default config location the CLI reads when neither a config
+   * path nor CODARYN_CONFIG is given. Absent or null: no default location (as the CLI without one).
+   */
+  readonly homeDir?: string | null;
+  /** N-4, N-20: the operating system's locale, for `doctor`'s language check. Absent: not known. */
+  readonly osLocale?: string | null;
 }
 
 /** One error that stopped a call before anything changed, or an internal error after a start. */

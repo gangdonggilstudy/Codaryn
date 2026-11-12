@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import type {
   AnthropicProviderDeps,
   CreateAnthropicProvider,
+  DefaultConfigLocation,
   DoctorOutput,
   PrivacyGateway,
   ReportOutput,
@@ -24,12 +25,17 @@ import type {
   RunsOutput,
 } from "../contracts/index.js";
 import { runTask as engineRunTask } from "../engine/index.js";
+import { explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
+import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
+import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "../cli/assemble.js";
 import { createCancelSource } from "../cli/cancel.js";
+import { defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
 import { runReport } from "../cli/report.js";
+import { runRevert } from "../cli/revert.js";
 import { runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
@@ -38,7 +44,7 @@ import { readChanges } from "./changes.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
-import { listRunsIn, resolveRunIn, revertIn, runIdOf, workspaceRootOf } from "./runs.js";
+import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -149,10 +155,17 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       clock: environment.clock,
       randomBytes: environment.randomBytes,
       installDir: environment.installDir,
+      // N-1: the same default config location the CLI reads (main.ts).
+      defaultConfig: defaultConfigOf(),
       createAnthropicProvider: hooks.createAnthropicProvider,
       anthropicDeps: hooks.anthropicDeps,
       ...parts,
     }).catch(() => null);
+  }
+
+  /** N-1: where the CLI would look for the user's config file now, from this environment. */
+  function defaultConfigOf(): DefaultConfigLocation | null {
+    return findDefaultConfigLocation(platform, environment.env, environment.homeDir ?? null);
   }
 
   async function startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome> {
@@ -283,16 +296,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>> {
     try {
-      // N-7: "latest" is resolved by the store's rules (N-18, N-23) before the report reads anything.
-      const root = await workspaceRootOf(request.workspace, environment.cwd);
-      if (!root.ok) return root;
-      const runId = await runIdOf(root.value, request.runId);
-      if (!runId.ok) return runId;
+      // N-7: the CLI's report resolves "latest" with the store's rules (N-18, N-23, N-26).
       const outcome = await runReport({
-        argv: ["report", "--workspace", root.value, "--run", runId.value, "--json"],
+        argv: ["report", "--workspace", request.workspace, "--run", request.runId, "--json"],
         cwd: environment.cwd,
         env: copyEnvironment(environment.env, platform),
         platform,
+        listRuns: storeListRuns,
       });
       return jsonOutcome<ReportOutput>(outcome, "report");
     } catch {
@@ -302,7 +312,23 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
     try {
-      return await revertIn(environment, request);
+      // The CLI's revert with the options main.ts gives it (N-7, N-16, N-26): dry run, "latest",
+      // the damage check, and the revert record written under the lock.
+      const { output } = await runRevert({
+        argv: ["revert", "--workspace", request.workspace, "--run", request.runId, ...(request.dryRun === true ? ["--dry-run"] : [])],
+        cwd: environment.cwd,
+        isDirectory: environment.isDirectory,
+        clock: environment.clock,
+        randomBytes: environment.randomBytes,
+        revert: createRevertCommand(revertRun, {
+          dryRun: revertRun,
+          listRuns: storeListRuns,
+          readRecord: readRevertRecord,
+          writeRecord: writeRevertRecord,
+          isDamaged: async (workspaceRoot, runId) => (await inspectRun(workspaceRoot, runId)) === "damaged",
+        }),
+      });
+      return output.kind === "revert" ? { ok: true, output } : { ok: false, error: fromCliError(output) };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }
@@ -344,6 +370,12 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         locateInWorkspace: locate,
         relatePaths: relate,
         platform,
+        // As main.ts: the default config location (N-1), whether it is refused, and where the
+        // language comes from (N-20). The messages stay English: the app returns codes and fields.
+        defaultConfig: defaultConfigOf(),
+        defaultConfigRefused: defaultLocationRefused(platform, environment.env, environment.homeDir ?? null),
+        osLocale: environment.osLocale ?? null,
+        explainLanguage: explainMessageLanguage,
       });
       return jsonOutcome<DoctorOutput>(outcome, "doctor");
     } catch {

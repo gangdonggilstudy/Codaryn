@@ -15,6 +15,7 @@
  */
 
 import {
+  APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
   CLI_ERROR_HINTS,
@@ -27,6 +28,7 @@ import {
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
+  STATE_CHECK_PHASES,
   TERMINAL_RUN_STATUSES,
   ALL_TOOL_NAMES,
   TOOL_ERROR_CODES,
@@ -347,6 +349,13 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
                 : catalog.format("progress.integrity_changed", { phase: event.phase, count: event.changed.length });
           }
           break;
+        case "state_checked":
+          // DR-38, U-8 (R-39 L-1): a change (the count only), or a check that could not cover the whole
+          // state directory; a complete check that found nothing gets no line.
+          if (!isOneOf(event.phase, STATE_CHECK_PHASES) || !Array.isArray(event.changed) || typeof event.limited !== "boolean") line = null;
+          else if (event.changed.length > 0) line = catalog.format("progress.state_changed", { count: event.changed.length });
+          else line = event.limited ? catalog.format("progress.state_unchecked") : null;
+          break;
         case "run_finished": {
           const pair = validStatusReason(event.status, event.reason);
           line = pair === null ? null : catalog.format("progress.finished", { status: catalog.format(`status.${pair.status}`), reason: pair.reason });
@@ -511,6 +520,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         // Records shared with model runs render as in progressLine.
         case "verifier_result":
         case "integrity_checked":
+        case "state_checked":
         case "run_finished":
           return output.progressLine(event);
         default:
@@ -547,6 +557,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(catalog.format("summary.verifiers", { passed: verifiers.filter((verifier) => verifier.outcome === "pass").length, total: verifiers.length }));
       }
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
+      // U-8: what the apply tells besides its status (ApplyResult.noticeKinds), each kind once.
+      const kinds: readonly unknown[] = Array.isArray(result.noticeKinds) ? result.noticeKinds : [];
+      for (const kind of APPLY_NOTICE_KINDS) {
+        if (kinds.includes(kind)) out.push(catalog.format(`apply.notice.${kind}`));
+      }
       out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0));
       // DR-21: stopped for the person's consent to unsafe moves; how to give it for one apply.
       if (pair?.reason === "consent_required" && planRunId !== null) {

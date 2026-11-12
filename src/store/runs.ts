@@ -239,7 +239,9 @@ async function resultOf(
   if (typeof result["provider"] !== "string" || !PROVIDERS.includes(result["provider"])) unreadable();
   const changes = result["changes"];
   if (!Array.isArray(changes) || !changes.every(isChangeRecord)) unreadable();
-  return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: changes.length };
+  // N-D 5: files, not change records, as the end-of-run summary counts them (N-23 d).
+  const paths = new Set((changes as Obj[]).map((change) => change["path"]));
+  return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: paths.size };
 }
 
 /** A FileChangeRecord as result.json holds it (report.ts checks the same fields). */

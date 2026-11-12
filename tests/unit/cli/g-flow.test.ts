@@ -24,7 +24,8 @@ after(async () => {
   for (const dir of temporaryDirs) await rm(dir, { recursive: true, force: true });
 });
 const LIMITS = { maxModelTurns: 4, maxToolCalls: 8, maxTotalTokens: null, maxDurationMs: 60_000 };
-let clockMs = Date.UTC(2026, 10, 12, 3, 0, 0);
+/** Real time (DR-19 judges future times damaged), moving one second per call. */
+let clockMs = Date.now() - 600_000;
 const clock = { now: () => (clockMs += 1000) };
 let randomByte = 1;
 const randomBytes = (size: number): Uint8Array => new Uint8Array(size).fill(randomByte++ % 250);

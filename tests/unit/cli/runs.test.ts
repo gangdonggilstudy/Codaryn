@@ -420,6 +420,17 @@ describe("listRuns (N-7, N-16)", () => {
     );
   });
 
+  test("N-D 5: a run's change count is its distinct changed paths, as the end-of-run summary counts them", async () => {
+    const work = await tempDir();
+    const change = (path: string, created: boolean, from: string | null, to: string): Record<string, unknown> => ({ path, created, previousHash: from, newHash: to });
+    await writeRun(work, "20260102T030401Z-00000001", {
+      at: "2026-01-02T03:04:01.000Z",
+      result: { changes: [change("summary.md", true, null, "a".repeat(64)), change("summary.md", false, "a".repeat(64), "b".repeat(64)), change("notes.md", false, "c".repeat(64), "d".repeat(64))] } as never,
+    });
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.equal(checked(listing.runs[0]).changes, 2);
+  });
+
   test("records that fail a check are listed as damaged with their id only and never chosen as latest", async () => {
     const work = await tempDir();
     const at = (second: number): string => `2026-01-02T03:04:${String(second).padStart(2, "0")}.000Z`;

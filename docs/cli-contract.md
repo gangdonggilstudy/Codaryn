@@ -1077,6 +1077,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - `doctor`: `api_key`, `model` 점검은 고른 제공자의 키 변수(`doctor.api_key.ok {keyEnv}`, `doctor.api_key.missing {keyEnv, provider}`), 모델·주소 변수, 설정, 주소 규칙으로 한다.
   - 키가 있으면 `api_key`의 `message`가 그 키가 가는 주소의 origin(스킴·호스트·포트)과 그 주소의 출처(주소 변수, 설정 필드, 기본 주소)를 적는다(DR-34 (a)). 경로는 적지 않는다. 경로에 주소 말고 다른 것이 들어 있을 수 있어서다.
     - 예: `ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)`
+    - 설정 파일이 검사를 지나지 못하면(`config_file` 실패) 주소 변수가 정하는 경우가 아니면 목적지를 말하지 않는다. 글은 `doctor.api_key.ok`, 메시지는 "where it is sent is not known until the config file passes its checks"다(검토 R-26 L-1). 설정이 주소와 간편 형식의 제공자를 정하는데, 검사에 걸린 설정은 쓰이지 않기 때문이다.
     - 사람용 글(DR-36 (b)): `doctor.api_key.sends_to_default`, `sends_to_env`(`{variable}`), `sends_to_config`(`{field}`)가 `{keyEnv}`, `{provider}`, `{origin}`(`toApiOrigin`)을 받는다. 주소 변수가 규칙에 어긋나면 `doctor.api_key.address_invalid`다. origin이 계약의 모양이 아니면 주소를 적지 않고 `doctor.api_key.ok`로 둔다.
   - 다른 제공자의 모델·주소 변수가 설정돼 있으면 `model`의 `message`가 그 변수 이름을 들어, 이 실행이 읽지 않는다고 적는다(SP-6, R-19 I-4). 값은 적지 않는다.
     - 예: `CODARYN_MODEL is set but is anthropic's; an openai run does not read it`

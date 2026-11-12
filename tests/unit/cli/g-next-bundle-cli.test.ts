@@ -60,16 +60,15 @@ describe("R-26 L-1: doctor names no key destination when the config file fails i
     return { status: check?.status ?? "", message: check?.message ?? "", text: check?.text, configStatus: output.checks.find((entry) => entry.id === "config_file")?.status ?? "" };
   }
 
-  const todo = { todo: "contract: a text for a key whose destination is not known yet (R-26 L-1; doctor.api_key.destination_unknown or the plain one)" };
 
-  test("anthropic config with its own address and a bad limit: neither the default nor that address", todo, async () => {
+  test("anthropic config with its own address and a bad limit: neither the default nor that address", async () => {
     const check = await apiKeyCheck({ apiBaseUrl: "http://127.0.0.1:8447/proxy", model: "claude-x", maxOutputTokens: 100, limits: { ...LIMITS, maxModelTurns: -5 } }, { [ANTHROPIC_API_KEY_ENV]: ANTHROPIC_VALUE });
     assert.equal(check.configStatus, "fail");
     const said = `${check.message} ${JSON.stringify(check.text)}`;
     assert.equal(said.includes("api.anthropic.com") || said.includes("127.0.0.1:8447") || said.includes("sends_to"), false, said);
   });
 
-  test("openai config with a bad limit: no anthropic destination either", todo, async () => {
+  test("openai config with a bad limit: no anthropic destination either", async () => {
     const check = await apiKeyCheck(
       { provider: "openai", providers: { openai: { model: "gpt-x", maxOutputTokens: 64, apiBaseUrl: "http://127.0.0.1:8448/v1" } }, limits: { ...LIMITS, maxModelTurns: -5 } },
       { [OPENAI_API_KEY_ENV]: OPENAI_VALUE, [ANTHROPIC_API_KEY_ENV]: ANTHROPIC_VALUE },

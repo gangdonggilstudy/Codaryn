@@ -638,7 +638,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       const origin = destination.kind === "invalid" ? null : toApiOrigin(destination.address);
       let where: string;
       let keyText: DoctorText = { id: "doctor.api_key.ok", params: { keyEnv } };
-      if (destination.kind === "invalid") {
+      // Review R-26 L-1: the config file gives the address (and the quick form's provider); when it
+      // failed its checks it was set aside, so only an address variable still decides. Without one,
+      // no destination is named (it was the default address, which may not be where runs go).
+      const configSetAside = results.get("config_file")?.status === "fail";
+      if (configSetAside && destination.kind !== "env" && destination.kind !== "invalid") {
+        where = "where it is sent is not known until the config file passes its checks";
+      } else if (destination.kind === "invalid") {
         where = `its address in ${destination.variable} is not valid (see the model check), so nothing is sent`;
         keyText = { id: "doctor.api_key.address_invalid", params: { keyEnv, variable: destination.variable } };
       } else if (origin === null) {

@@ -30,6 +30,8 @@ import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
 import type { PermissionKind, PolicyDenialCode } from "./policy.js";
+import { APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
+import type { ApplyJournalEvent, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
 import { TOOL_NAMES } from "./tool.js";
 import type { ToolErrorCode, ToolName } from "./tool.js";
@@ -230,6 +232,18 @@ export const FIXED_MESSAGES = {
   "summary.next_revert_here": { runId: "runId" },
   "summary.config_default": { location: "location" },
   "summary.profile_applied": {},
+  // G-A: plan runs, human review and apply runs. `{form}` is one of `summary.form.*`, chosen by
+  // the context's workspaceForm, so a hint repeats the task form the user typed without its value.
+  "summary.form.task": {},
+  "summary.form.given": {},
+  "summary.form.current": {},
+  "summary.plan_ready": { actions: "count" },
+  "summary.next_plan": { form: "text", runId: "runId" },
+  "summary.next_apply": { form: "text", runId: "runId" },
+  "summary.review_checklist": { count: "count" },
+  "summary.next_review": { form: "text", runId: "runId" },
+  "summary.apply_actions": { applied: "count", total: "count" },
+  "summary.apply_plan_run": { runId: "runId" },
 
   // Progress lines (N-5, R-11): words first, the internal code in parentheses after them.
   "progress.run_started": { provider: "provider" },
@@ -247,6 +261,15 @@ export const FIXED_MESSAGES = {
   "progress.finished": { status: "text", reason: "reason" },
   "progress.model_not_found": {},
   "progress.unknown_tool": {},
+  // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
+  // `{problem}` is `plan.problem.<problem>`; an action is shown by its number (index + 1).
+  "progress.apply_started": { actions: "count", approval: "text" },
+  "progress.plan_checked": { count: "count" },
+  "progress.plan_item_problem": { number: "count", problem: "text" },
+  "progress.inventory_limit": {},
+  "progress.file_moved": { number: "count" },
+  "progress.file_discarded": { number: "count" },
+  "progress.plan_item_failed": { number: "count", problem: "text" },
   "outcome.pass": {},
   "outcome.fail": {},
   "outcome.inconclusive": {},
@@ -312,6 +335,8 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `tool.<name>`: a tool as words, e.g. "파일 읽기".
  * - `revert.skip.<reason>`: why a file was or would be skipped.
  * - `diagnostic.file.<file>`: the file a diagnostic points into.
+ * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
+ * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -321,7 +346,9 @@ export type ListedMessageId =
   | `advice.${RunReason}`
   | `tool.${ToolName}`
   | `revert.skip.${RevertSkipReason}`
-  | `diagnostic.file.${InputDiagnosticFile}`;
+  | `diagnostic.file.${InputDiagnosticFile}`
+  | `approval.${ApprovalChannel}`
+  | `plan.problem.${PlanItemProblem}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -352,6 +379,8 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...TOOL_NAMES.map((name) => `tool.${name}` as const),
   ...REVERT_SKIP_REASONS.map((reason) => `revert.skip.${reason}` as const),
   ...INPUT_DIAGNOSTIC_FILES.map((file) => `diagnostic.file.${file}` as const),
+  ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
+  ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */
@@ -395,9 +424,13 @@ export interface RunSummaryContext {
  * lines ending with LF (or null where noted) and never reads anything.
  *
  * Paths: messages never take a path. A renderer may print the masked paths that the outputs and
- * records already carry (`changes[].path`, `reverted[].path`, `skipped[].path`, `file_changed.path`)
- * as items after a message, with control characters replaced, key shapes hidden and the length
- * cut, as `report` prints them. No other value from an output or a record is printed as text.
+ * records already carry (`changes[].path`, `reverted[].path`, `skipped[].path`, `file_changed.path`,
+ * and G-A's `file_moved.from`/`to`, `file_discarded.path`, `ApplyResult.applied[].action` paths) as
+ * items after a message, with control characters replaced, key shapes hidden and the length cut, as
+ * `report` prints them. G-A: the same holds for `EngineResult.review.checklist` entries (masked text
+ * from the user's own config) and for `EngineResult.plan.digest` (64 lowercase hex characters),
+ * which follows `summary.next_apply` as an item so the user can copy it into `--digest`. No other
+ * value from an output or a record is printed as text.
  * The CLI masks the rendered text again with the run's privacy gateway where it has one, and
  * writes it best effort.
  */
@@ -424,6 +457,26 @@ export interface HumanOutput {
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;
+  /**
+   * G-A: one progress line body for an apply run's record, or null for records not shown. The
+   * shared records (`verifier_result`, `integrity_checked`, `run_finished`) render as in
+   * `progressLine`. Optional only until the renderer (N-C) has it; then it becomes required.
+   */
+  applyProgressLine?(event: ApplyJournalEvent): string | null;
+  /**
+   * G-A: stderr at the end of `apply`: status and reason as words, actions applied of the plan's
+   * total (`summary.apply_actions`), the plan run (`summary.apply_plan_run`), verifier result, run id,
+   * and the next commands (report, revert). Optional only until the renderer (N-C) has it.
+   * `runSummary` covers the plan run (`plan_pending`: `summary.plan_ready`, `summary.next_plan`,
+   * `summary.next_apply` with the digest as an item) and human review (`awaiting_review`:
+   * `summary.review_checklist` with the checklist entries as items, `summary.next_review`).
+   */
+  applySummary?(result: ApplyResult, context: ApplySummaryContext): string;
+}
+
+/** G-A: what an apply summary needs besides the result. As RunSummaryContext's workspaceForm. */
+export interface ApplySummaryContext {
+  readonly workspaceForm: "current" | "given" | "task";
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

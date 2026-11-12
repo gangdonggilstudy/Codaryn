@@ -4,7 +4,7 @@
  * `window.codaryn` (the preload) and to nothing else.
  */
 
-import { asInfo, asOpen, asRunDone, asRunEvents } from "./api.js";
+import { asInfo, asOpen, asRunDone, asRunEvents, asSettings } from "./api.js";
 import type { Workspace } from "./api.js";
 import { checksScreen } from "./checks/checks.js";
 import { textsFor } from "./i18n/catalog.js";
@@ -17,6 +17,7 @@ import { planScreen } from "./plan/plan-screen.js";
 import { changesScreen } from "./changes/changes-screen.js";
 import { reportScreen } from "./report/report-screen.js";
 import { cleanupScreen } from "./runs/cleanup-screen.js";
+import { setupScreen } from "./setup/setup-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
@@ -84,8 +85,8 @@ async function start(): Promise<void> {
   );
   const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
   /** `formKnown` false: the run's form is unknown (started elsewhere); its plan is shown, not applied. */
-  const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true): void => {
-    plan.choose(runId, profile, workflow, formKnown);
+  const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true, recordsChanged = false): void => {
+    plan.choose(runId, profile, workflow, formKnown, recordsChanged);
     shell?.show("plan");
   };
   const changes = changesScreen({ texts, api, current: () => current });
@@ -107,9 +108,15 @@ async function start(): Promise<void> {
   shell.add(cleanupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
+  shell.add(setupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text), show: (id) => shell?.show(id) }));
   shell.setEngine(info.engine);
   shell.setWorkspace(null);
   shell.show("home");
+  // U-11 (3.11): the first start (no config file at the default location yet) begins with the guide.
+  void (async () => {
+    const settings = asSettings(await api.settings());
+    if (settings.ok && settings.view.file !== null && !settings.view.file.exists) shell?.show("setup");
+  })();
 
   // GU-3: progress and the end of the run come from the main process; the status bar follows them.
   api.onRunEvents((payload) => {

@@ -65,15 +65,15 @@ describe("DR-38: an apply run's own writes are no change", () => {
     assert.deepEqual(records.stateGuard.compare(base, await records.stateGuard.capture("state")).changed, [`runs/${PLAN}/applied.json`]);
   });
 
-  test("createApplyRecorders notes the plan mark, the discarded-files folder and each discarded file", async () => {
+  test("createApplyRecorders notes the plan mark (markApplied) and each discarded file", async () => {
     const root = await workspace();
-    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock });
+    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock, planRunId: PLAN });
     journals.push(records.journal);
-    const discardedRoot = await records.prepareDiscardedRoot();
+    const discardedRoot = await prepareDiscardedRoot(root, APPLY);
     await records.journal.append(STARTED);
     const run = await records.stateGuard.capture("run");
     const base = await records.stateGuard.capture("state");
-    await applyActions(root, discardedRoot, () => records.markPlanApplied({ planRunId: PLAN, at: AT }), (event) => records.journal.append(event));
+    await applyActions(root, discardedRoot, () => records.markApplied(), (event) => records.journal.append(event));
     const run1 = await records.stateGuard.capture("run");
     assert.deepEqual(records.stateGuard.compare(run, run1), { changed: [], limited: false });
     assert.deepEqual(records.stateGuard.compare(base, await records.stateGuard.capture("state")), { changed: [], limited: false });
@@ -83,13 +83,13 @@ describe("DR-38: an apply run's own writes are no change", () => {
 
   test("a discarded-files folder the executor makes itself during the apply is noted too", async () => {
     const root = await workspace();
-    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock });
+    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock, planRunId: PLAN });
     journals.push(records.journal);
     await records.journal.append(STARTED);
     const run = await records.stateGuard.capture("run");
     const base = await records.stateGuard.capture("state");
     const discardedRoot = await prepareDiscardedRoot(root, APPLY); // as the executor's own mkdir would
-    await applyActions(root, discardedRoot, () => records.markPlanApplied({ planRunId: PLAN, at: AT }), (event) => records.journal.append(event));
+    await applyActions(root, discardedRoot, () => records.markApplied(), (event) => records.journal.append(event));
     assert.deepEqual(records.stateGuard.compare(run, await records.stateGuard.capture("run")).changed, []);
     assert.deepEqual(records.stateGuard.compare(base, await records.stateGuard.capture("state")).changed, []);
   });
@@ -98,12 +98,12 @@ describe("DR-38: an apply run's own writes are no change", () => {
 describe("DR-38: changes to what an apply wrote are still found", () => {
   test("a discarded file changed after the move, and another run's records, are changes", async () => {
     const root = await workspace();
-    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock });
+    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock, planRunId: PLAN });
     journals.push(records.journal);
-    const discardedRoot = await records.prepareDiscardedRoot();
+    const discardedRoot = await prepareDiscardedRoot(root, APPLY);
     await records.journal.append(STARTED);
     const base = await records.stateGuard.capture("state");
-    await applyActions(root, discardedRoot, () => records.markPlanApplied({ planRunId: PLAN, at: AT }), (event) => records.journal.append(event));
+    await applyActions(root, discardedRoot, () => records.markApplied(), (event) => records.journal.append(event));
     const run1 = await records.stateGuard.capture("run");
     await writeFile(join(discardedRoot, "0"), "replaced by a command\n", "utf8");
     await writeFile(state(root, "runs", PLAN, "review.json"), "{}\n", "utf8");
@@ -113,9 +113,9 @@ describe("DR-38: changes to what an apply wrote are still found", () => {
 
   test("a file_discarded record naming a stored file that is not a plain index notes nothing", async () => {
     const root = await workspace();
-    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock });
+    const records = createApplyRecorders({ workspaceRoot: root, runId: APPLY, clock, planRunId: PLAN });
     journals.push(records.journal);
-    const discardedRoot = await records.prepareDiscardedRoot();
+    const discardedRoot = await prepareDiscardedRoot(root, APPLY);
     await records.journal.append(STARTED);
     const run = await records.stateGuard.capture("run");
     await writeFile(join(discardedRoot, "x"), "not the executor's\n", "utf8");

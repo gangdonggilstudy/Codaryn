@@ -35,25 +35,23 @@ import {
   STATE_DIR_NAME,
 } from "../contracts/index.js";
 import type {
-  ApplyJournal,
   ApplyJournalEntry,
-  CreateChangeRecorder,
-  CreatePlanRecorder,
-  Journal,
+  CreateApplyRecorders,
+  CreateRunRecorders,
   JournalEvent,
   MaskedText,
   RawText,
   RecordsChangedMark,
+  RunRecordersOptions,
   StateComparison,
   StateFingerprint,
   StateGuard,
   StateTier,
 } from "../contracts/index.js";
 import { changeRecorderWith } from "./changes.js";
-import { discardedRootPath, prepareDiscardedRootWith } from "./discarded.js";
+import { discardedRootPath } from "./discarded.js";
 import { assertRunId, createExclusive, errorCode, hasExactRunEntry, isPlainDirectory, replaceAtomically, runDir, sha256Hex } from "./common.js";
 import { appendOnlyJournal } from "./journal.js";
-import type { JournalOptions } from "./journal.js";
 import { markPlanAppliedWith, planRecorderWith } from "./plan.js";
 import type { RunWriteNotes } from "./run-writes.js";
 import { isStoredRunId } from "./runs.js";
@@ -119,30 +117,12 @@ function walkOrder(a: string, b: string): number {
   return x.length - y.length;
 }
 
-export interface StateGuardLimits {
-  readonly maxEntries?: number;
-  readonly maxHashBytes?: number;
-}
-
-export interface RunRecordersOptions extends JournalOptions {
-  /** Smaller limits than the contract's (MAX_STATE_ENTRIES, MAX_STATE_HASH_BYTES), for tests. */
-  readonly limits?: StateGuardLimits;
-}
-
-export interface RunRecorders {
-  readonly journal: Journal;
-  readonly changeRecorder: ReturnType<CreateChangeRecorder>;
-  readonly planRecorder: ReturnType<CreatePlanRecorder>;
-  /** DR-38: EngineDeps.stateGuard for this run. */
-  readonly stateGuard: StateGuard;
-}
-
 /**
- * DR-38: the run's journal, change recorder and plan recorder (as createJournal, createChangeRecorder
- * and createPlanRecorder make them) and the state guard that knows what they write. The CLI and the
- * app pass `stateGuard` to the engine as EngineDeps.stateGuard.
+ * DR-38: CreateRunRecorders (state.ts): the run's journal, change recorder and plan recorder (as
+ * createJournal, createChangeRecorder and createPlanRecorder make them) and the state guard that
+ * knows what they write. The CLI and the app pass `stateGuard` to the engine as EngineDeps.stateGuard.
  */
-export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
+export const createRunRecorders: CreateRunRecorders = (options) => {
   const { notes, stateGuard } = guardFor(options);
   const { workspaceRoot, runId } = options;
   return {
@@ -151,32 +131,22 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
     planRecorder: planRecorderWith({ workspaceRoot, runId }, notes),
     stateGuard,
   };
-}
-
-export interface ApplyRecorders {
-  /** The apply run's journal (as createApplyJournal makes it). */
-  readonly journal: ApplyJournal;
-  /** DR-38: ApplyDeps.stateGuard for this apply. */
-  readonly stateGuard: StateGuard;
-  /** ApplyDeps.markApplied: markPlanApplied for this apply run, noted. */
-  markPlanApplied(request: { readonly planRunId: string; readonly at: string }): Promise<"marked" | "already_applied">;
-  /** ApplyDeps.discardedRoot: prepareDiscardedRoot for this apply run, noted. */
-  prepareDiscardedRoot(): Promise<string>;
-}
+};
 
 /** A stored name the executor gives a discarded file (discardedStoredName: the action index). */
 const STORED_NAME = /^(?:0|[1-9][0-9]{0,8})$/;
 
 /**
- * DR-38 for apply runs: the apply's journal, its plan mark and its discarded-files folder, with the
- * state guard that knows them. The executor moves each discarded file into the folder before the
- * engine records it (`file_discarded`), so the journal notes `discarded/<runId>/<stored>` as it is
- * when that record is appended; the plan mark (applied.json in the plan run, tier "state") is noted
- * when it is created. The CLI and the app pass `stateGuard` as ApplyDeps.stateGuard.
+ * DR-38: CreateApplyRecorders (state.ts) for apply runs: the apply's journal and markApplied (its
+ * plan run's PLAN_APPLIED_FILE_NAME, tier "state", noted when created), with the state guard that
+ * knows them. The engine takes tier "run" afresh after the actions (ApplyDeps.stateGuard); the
+ * journal also notes `discarded/<runId>/<stored>` and its folders as they are when `file_discarded`
+ * is appended (the executor moved the file just before), so those moves are the apply's own either way.
  */
-export function createApplyRecorders(options: RunRecordersOptions): ApplyRecorders {
+export const createApplyRecorders: CreateApplyRecorders = (options) => {
   const { notes, stateGuard } = guardFor(options);
-  const { workspaceRoot, runId } = options;
+  const { workspaceRoot, runId, planRunId, clock } = options;
+  assertRunId(planRunId);
   const discardedRoot = discardedRootPath(workspaceRoot, runId);
   const afterAppend = async (event: ApplyJournalEntry): Promise<void> => {
     if (event.type !== "file_discarded") return;
@@ -187,11 +157,10 @@ export function createApplyRecorders(options: RunRecordersOptions): ApplyRecorde
   };
   return {
     journal: appendOnlyJournal<ApplyJournalEntry>(options, notes, afterAppend),
+    markApplied: () => markPlanAppliedWith({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(clock.now()).toISOString() }, notes),
     stateGuard,
-    markPlanApplied: (request) => markPlanAppliedWith({ workspaceRoot, planRunId: request.planRunId, applyRunId: runId, at: request.at }, notes),
-    prepareDiscardedRoot: () => prepareDiscardedRootWith(workspaceRoot, runId, notes),
   };
-}
+};
 
 /** The write log, the notes the writers use and the state guard over them, for one run. */
 function guardFor(options: RunRecordersOptions): { readonly notes: RunWriteNotes; readonly stateGuard: StateGuard } {

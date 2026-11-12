@@ -6,9 +6,9 @@
  * (registered, 0 places) and "nothing registered" (absent) are told apart.
  * The app layer makes the run's gateway with createPrivacyGateway (assemble.ts) and passes the
  * result on as it is. Reproduced first (6da6cd2, todo); the run handle's cases are on since the
- * gateway says how many values it holds (PrivacyGateway.registeredValues, unit/U-25-nb-i18n 21d3bcd).
- * The report's case stays todo until the CLI's report keeps masking. Real runs through the app
- * (scripted model), the real store. Fake values only.
+ * gateway says how many values it holds (PrivacyGateway.registeredValues, unit/U-25-nb-i18n 21d3bcd),
+ * the report's since the CLI's report keeps masking (unit/U-25-na-core bc32b63). Real runs through
+ * the app (scripted model), the real store. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -18,9 +18,6 @@ import type { EngineResult } from "../../../src/contracts/index.js";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CodarynApp } from "../../../src/app/index.js";
 import { FAKE_SECRET, WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
-
-/** The report's reader (src/cli/report.ts readResult) keeps only the result.json fields it knows (seen with U-21's finalMessage). */
-const REPORT_TODO = { todo: "U-25: wait for the CLI's report to keep masking" };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -47,7 +44,7 @@ describe("U-25 (DR-52): the masking counts reach the GUI with the result", () =>
     assert.equal(JSON.stringify(result).includes(FAKE_SECRET), false);
   });
 
-  test("the report's result (the run's result.json) says the same", REPORT_TODO, async () => {
+  test("the report's result (the run's result.json) says the same", async () => {
     const { app, workspace, runId, result } = await run(`the token is ${FAKE_SECRET}\n`);
     assert.ok(result.masking !== undefined);
     const report = ok(await app.report({ workspace, runId }));

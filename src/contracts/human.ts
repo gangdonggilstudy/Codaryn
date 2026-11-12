@@ -244,6 +244,10 @@ export const FIXED_MESSAGES = {
   "summary.next_review": { form: "text", runId: "runId" },
   "summary.apply_actions": { applied: "count", total: "count" },
   "summary.apply_plan_run": { runId: "runId" },
+  // DR-21: an apply that ended as consent_required: how many moves are unsafe, and the command that
+  // gives consent for one apply (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
+  "summary.unsafe_moves": { count: "count" },
+  "summary.next_apply_unsafe": { form: "text", runId: "runId" },
 
   // Progress lines (N-5, R-11): words first, the internal code in parentheses after them.
   "progress.run_started": { provider: "provider" },
@@ -264,7 +268,14 @@ export const FIXED_MESSAGES = {
   // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
   // `{problem}` is `plan.problem.<problem>`; an action is shown by its number (index + 1).
   "progress.apply_started": { actions: "count", approval: "text" },
+  // `{count}` is the number of problems the preflight found: the entries of `plan_checked.problems`
+  // (unsafe moves and the inventory limit are not counted; they have their own lines). 0 means every
+  // action can be applied. It is not the number of actions (that is `progress.apply_started`).
   "progress.plan_checked": { count: "count" },
+  // DR-21: `{count}` moves could only be made unsafely (`plan_checked.unsafeMoves`), and the
+  // consent line when `apply_started.unsafeMoveConsent` is set (`{approval}` is `approval.<channel>`).
+  "progress.unsafe_moves": { count: "count" },
+  "progress.unsafe_move_consent": { approval: "text" },
   "progress.plan_item_problem": { number: "count", problem: "text" },
   "progress.inventory_limit": {},
   "progress.file_moved": { number: "count" },
@@ -285,6 +296,15 @@ export const FIXED_MESSAGES = {
   "revert.action.restored_from_discard": {},
   "revert.dry_run_next": {},
   "revert.reverted_before": {},
+  // DR-25: `{count}` files were moved back unsafely, with the person's consent (RevertedFile.unsafe).
+  // Shown after the reverted list when the count is above 0 (never in a dry run).
+  "revert.unsafe_moved": { count: "count" },
+  // DR-25: a dry run did not check whether this drive can move the listed files back safely; the
+  // real revert checks it and, without consent, skips the ones it cannot (RevertOutput.moveSafetyUnchecked).
+  "revert.dry_run_move_unchecked": {},
+  // DR-25: some files were skipped as `unsafe_move`: the command that reverts again with consent
+  // (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
+  "summary.next_revert_unsafe": { runId: "runId" },
 
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
@@ -428,8 +448,9 @@ export interface RunSummaryContext {
  * and G-A's `file_moved.from`/`to`, `file_discarded.path`, `ApplyResult.applied[].action` paths) as
  * items after a message, with control characters replaced, key shapes hidden and the length cut, as
  * `report` prints them. G-A: the same holds for `EngineResult.review.checklist` entries (masked text
- * from the user's own config) and for `EngineResult.plan.digest` (64 lowercase hex characters),
- * which follows `summary.next_apply` as an item so the user can copy it into `--digest`. No other
+ * from the user's own config) and for `EngineResult.plan.digest` / `ApplyResult.digest` (64
+ * lowercase hex characters), which follows `summary.next_apply` or `summary.next_apply_unsafe` as an
+ * item so the user can copy it into `--digest`. No other
  * value from an output or a record is printed as text.
  * The CLI masks the rendered text again with the run's privacy gateway where it has one, and
  * writes it best effort.
@@ -453,7 +474,11 @@ export interface HumanOutput {
    * which the renderer counts itself; the id is never shown.
    */
   progressLine(event: JournalEvent): string | null;
-  /** N-7: stderr after `revert` and `revert --dry-run`. */
+  /**
+   * N-7: stderr after `revert` and `revert --dry-run`. DR-25: `revert.unsafe_moved` when files were
+   * moved back unsafely, `summary.next_revert_unsafe` when files were skipped as `unsafe_move`, and
+   * `revert.dry_run_move_unchecked` when `moveSafetyUnchecked` is present.
+   */
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;
@@ -466,7 +491,9 @@ export interface HumanOutput {
   /**
    * G-A: stderr at the end of `apply`: status and reason as words, actions applied of the plan's
    * total (`summary.apply_actions`), the plan run (`summary.apply_plan_run`), verifier result, run id,
-   * and the next commands (report, revert). Optional only until the renderer (N-C) has it.
+   * and the next commands (report, revert). For `consent_required` (DR-21): `summary.unsafe_moves`
+   * and `summary.next_apply_unsafe` with the digest as an item. Optional only until the renderer
+   * (N-C) has it.
    * `runSummary` covers the plan run (`plan_pending`: `summary.plan_ready`, `summary.next_plan`,
    * `summary.next_apply` with the digest as an item) and human review (`awaiting_review`:
    * `summary.review_checklist` with the checklist entries as items, `summary.next_review`).

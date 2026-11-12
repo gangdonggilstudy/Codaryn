@@ -76,6 +76,8 @@ export interface RunReasonByStatus {
    * a person's approval and `codaryn apply` (EngineResult.plan). awaiting_review: the workflow's
    * completion is `human_review` and its verifiers all passed (or there is none); a person records
    * a verdict with `codaryn review` (EngineResult.review). Neither is ever `done`.
+   * consent_required (DR-21, apply runs only): the preflight found moves that could only be made
+   * unsafely and the person gave no consent for this apply; nothing was moved.
    */
   readonly "needs-input":
     | "verifier_inconclusive"
@@ -83,7 +85,8 @@ export interface RunReasonByStatus {
     | "unknown_tool_outcome"
     | "protected_changed"
     | "plan_pending"
-    | "awaiting_review";
+    | "awaiting_review"
+    | "consent_required";
   readonly cancelled: "cancelled";
   readonly "budget-exhausted":
     | "max_model_turns"
@@ -114,6 +117,7 @@ export const RUN_REASONS = [
   "apply_incomplete",
   "plan_pending",
   "awaiting_review",
+  "consent_required",
 ] as const satisfies readonly RunReason[];
 /** Compile-time check that RUN_REASONS misses none. */
 export type MissingRunReason = Exclude<RunReason, (typeof RUN_REASONS)[number]>;
@@ -136,6 +140,7 @@ export const RUN_REASONS_BY_STATUS = {
     "protected_changed",
     "plan_pending",
     "awaiting_review",
+    "consent_required",
   ],
   cancelled: ["cancelled"],
   "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
@@ -343,6 +348,8 @@ export interface RevertOutput {
   readonly skipped: RevertOutcome["skipped"];
   /** N-7: present and true for `--dry-run` only. */
   readonly dryRun?: true;
+  /** DR-25: RevertOutcome.moveSafetyUnchecked, passed on (a dry run that lists a file to move back). */
+  readonly moveSafetyUnchecked?: true;
   /**
    * N-7: the run's revert record from before this command, when it had one: the run was already
    * reverted at `at` with that status. A second revert of the same run normally skips every file

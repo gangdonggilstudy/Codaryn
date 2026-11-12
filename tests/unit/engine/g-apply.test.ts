@@ -12,7 +12,7 @@ import { PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, asRawText } from "../../../src/c
 import type {
   AppliedPlanAction,
   ApplyDeps,
-  ApplyJournalEvent,
+  ApplyJournalEntry,
   IntegrityChecker,
   IntegrityManifest,
   InventoryCheckInput,
@@ -33,9 +33,12 @@ const MOVE: ResolvedPlanAction = { kind: "move", from: "a.jpg", to: "2026/a.jpg"
 const DISCARD: ResolvedPlanAction = { kind: "discard", path: "b.tmp", sha256: HASH_B };
 
 class FakeApplyJournal {
-  readonly events: ApplyJournalEvent[] = [];
+  readonly events: ApplyJournalEntry[] = [];
   closed = false;
-  async append(event: ApplyJournalEvent): Promise<void> {
+  /** R-9 I-4: a record type whose append fails, as when the process ends right before it. */
+  failOn: string | null = null;
+  async append(event: ApplyJournalEntry): Promise<void> {
+    if (event.type === this.failOn) throw new Error("the process ended");
     this.events.push(event);
   }
   async close(): Promise<void> {
@@ -44,29 +47,51 @@ class FakeApplyJournal {
   types(): string[] {
     return this.events.map((event) => event.type);
   }
-  ofType<T extends ApplyJournalEvent["type"]>(type: T): Extract<ApplyJournalEvent, { type: T }>[] {
-    return this.events.filter((event): event is Extract<ApplyJournalEvent, { type: T }> => event.type === type);
+  ofType<T extends ApplyJournalEntry["type"]>(type: T): Extract<ApplyJournalEntry, { type: T }>[] {
+    return this.events.filter((event): event is Extract<ApplyJournalEntry, { type: T }> => event.type === type);
   }
 }
 
 class FakeExecutor implements PlanExecutor {
   readonly checked: number[] = [];
   readonly applied: number[] = [];
+  /** DR-21: the `allowUnsafeMove` the engine passed for each applied index. */
+  readonly allowUnsafe: { index: number; allow: boolean | undefined }[] = [];
   constructor(
     private readonly options: {
       check?: (action: ResolvedPlanAction) => PlanItemProblem | null;
-      apply?: (action: ResolvedPlanAction, index: number) => PlanItemOutcome;
+      apply?: (action: ResolvedPlanAction, index: number, allowUnsafeMove: boolean | undefined) => PlanItemOutcome;
     } = {},
   ) {}
   async check(action: ResolvedPlanAction): Promise<PlanItemProblem | null> {
     this.checked.push(this.checked.length);
     return this.options.check?.(action) ?? null;
   }
-  async apply(action: ResolvedPlanAction, index: number): Promise<PlanItemOutcome> {
+  async apply(
+    action: ResolvedPlanAction,
+    index: number,
+    _signal: AbortSignal,
+    options?: { readonly allowUnsafeMove: boolean },
+  ): Promise<PlanItemOutcome> {
     this.applied.push(index);
-    if (this.options.apply !== undefined) return this.options.apply(action, index);
-    return { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index).padStart(4, "0") : null } };
+    this.allowUnsafe.push({ index, allow: options?.allowUnsafeMove });
+    if (this.options.apply !== undefined) return this.options.apply(action, index, options?.allowUnsafeMove);
+    return { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null } };
   }
+}
+
+/**
+ * DR-21: an executor on a drive without hard links. The check reports every action as unsafe; the
+ * apply moves only with `allowUnsafeMove` and then marks the outcome unsafe.
+ */
+function noHardLinkExecutor(): FakeExecutor {
+  return new FakeExecutor({
+    check: () => "unsafe_move",
+    apply: (action, index, allow) =>
+      allow === true
+        ? { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null, unsafe: true } }
+        : { ok: false, problem: "unsafe_move" },
+  });
 }
 
 class FakeInventory implements InventoryChecker {
@@ -152,7 +177,9 @@ describe("applyPlan: a plan that fits", () => {
     assert.deepEqual(run.journal.types(), [
       "apply_started",
       "plan_checked",
+      "plan_item_started",
       "file_moved",
+      "plan_item_started",
       "file_discarded",
       "verifier_result",
       "verifier_result",
@@ -162,7 +189,7 @@ describe("applyPlan: a plan that fits", () => {
     assert.deepEqual(result.verifiers.map((verifier) => verifier.id), ["inventory", "v1"]);
     assert.deepEqual(result.applied.map((record) => [record.index, record.action.kind, record.stored]), [
       [0, "move", null],
-      [1, "discard", "0001"],
+      [1, "discard", "1"],
     ]);
     assert.deepEqual(run.marks, ["mark"]);
     assert.equal(run.inventory.captures, 2, "before the actions and after them");
@@ -262,6 +289,161 @@ describe("applyPlan: preflight stops before anything moves", () => {
     assert.equal(result.reason, "plan_stale");
     assert.deepEqual(run.marks, ["mark"]);
     assert.deepEqual(run.executor.applied, []);
+  });
+});
+
+describe("applyPlan: unsafe moves need a person's consent for this apply (DR-21)", () => {
+  test("without consent the apply stops as needs-input/consent_required; nothing is claimed or moved", async () => {
+    const executor = noHardLinkExecutor();
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["needs-input", "consent_required"]);
+    const checked = run.journal.ofType("plan_checked")[0];
+    assert.deepEqual(checked?.problems, []);
+    assert.deepEqual(checked?.unsafeMoves, [0, 1]);
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, null);
+    assert.deepEqual(executor.applied, []);
+    assert.deepEqual(run.marks, []);
+    assert.deepEqual(result.applied, []);
+    assert.deepEqual(result.verifiers, []);
+    assert.deepEqual(run.journal.types(), ["apply_started", "plan_checked", "run_finished"]);
+    assert.ok(result.notices.some((notice) => notice.includes("consent")));
+  });
+
+  test("with consent for this plan the moves are made, passed allowUnsafeMove, and recorded as unsafe", async () => {
+    const executor = noHardLinkExecutor();
+    const run = setup({ executor, unsafeMoveConsent: { channel: "cli-tty", digest: "d".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, "cli-tty");
+    assert.deepEqual(executor.allowUnsafe, [
+      { index: 0, allow: true },
+      { index: 1, allow: true },
+    ]);
+    assert.equal(run.journal.ofType("file_moved")[0]?.unsafe, true);
+    assert.equal(run.journal.ofType("file_discarded")[0]?.unsafe, true);
+    assert.deepEqual(
+      result.applied.map((record) => record.unsafe),
+      [true, true],
+    );
+    assert.ok(result.notices.some((notice) => notice.includes("consent")));
+  });
+
+  test("consent only lets the actions the preflight listed move unsafely", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "move" ? "unsafe_move" : null) });
+    const run = setup({ executor, unsafeMoveConsent: { channel: "adapter", digest: "d".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.unsafeMoves, [0]);
+    assert.deepEqual(executor.allowUnsafe, [
+      { index: 0, allow: true },
+      { index: 1, allow: false },
+    ]);
+    assert.equal(run.journal.ofType("file_discarded")[0]?.unsafe, undefined);
+  });
+
+  test("a consent given for another plan counts as none and says so", async () => {
+    const executor = noHardLinkExecutor();
+    const run = setup({ executor, unsafeMoveConsent: { channel: "cli-flag", digest: "e".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "consent_required");
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, null);
+    assert.deepEqual(executor.applied, []);
+    assert.ok(result.notices.some((notice) => notice.includes("another plan")));
+  });
+
+  test("a plan with no unsafe move ignores a consent: nothing is passed or marked unsafe", async () => {
+    const run = setup({ unsafeMoveConsent: { channel: "cli-flag", digest: "d".repeat(64) } });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.equal(run.journal.ofType("apply_started")[0]?.unsafeMoveConsent, "cli-flag");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.unsafeMoves, []);
+    assert.ok(run.executor.allowUnsafe.every((entry) => entry.allow === false));
+    assert.ok(result.applied.every((record) => record.unsafe === undefined));
+  });
+
+  test("a problem still wins over unsafe moves: plan_stale, not consent_required", async () => {
+    const executor = new FakeExecutor({ check: (action) => (action.kind === "move" ? "unsafe_move" : "source_changed") });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "plan_stale");
+    assert.deepEqual(run.journal.ofType("plan_checked")[0]?.problems, [{ index: 1, problem: "source_changed" }]);
+  });
+
+  test("an action the executor finds unsafe only while applying stops the apply; it is not moved", async () => {
+    const executor = new FakeExecutor({
+      apply: (action, index) =>
+        action.kind === "discard"
+          ? { ok: false, problem: "unsafe_move" }
+          : { ok: true, applied: { index, action, stored: null } },
+    });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason], ["failed", "apply_incomplete"]);
+    const failed = run.journal.ofType("plan_item_failed")[0];
+    assert.deepEqual([failed?.index, failed?.problem], [1, "unsafe_move"]);
+  });
+});
+
+describe("applyPlan: a start record before each action (R-9 I-4)", () => {
+  test("a stop right after an action, before its record, still leaves a record naming it", async () => {
+    const run = setup();
+    run.journal.failOn = "file_moved";
+    await assert.rejects(applyPlan(run.deps));
+    assert.deepEqual(run.executor.applied, [0], "the move was made");
+    assert.deepEqual(run.journal.ofType("plan_item_started"), [
+      { type: "plan_item_started", index: 0, action: { kind: "move", from: "a.jpg", to: "2026/a.jpg", sha256: HASH_A } },
+    ]);
+  });
+
+  test("each action's start record is written before the executor runs it", async () => {
+    let journal: FakeApplyJournal | undefined;
+    const lastTypes: string[] = [];
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        lastTypes.push(journal?.types().at(-1) ?? "");
+        return { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null } };
+      },
+    });
+    const run = setup({ executor });
+    journal = run.journal;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(lastTypes, ["plan_item_started", "plan_item_started"]);
+    assert.deepEqual(run.journal.types().slice(0, 6), [
+      "apply_started",
+      "plan_checked",
+      "plan_item_started",
+      "file_moved",
+      "plan_item_started",
+      "file_discarded",
+    ]);
+  });
+
+  test("an action that is not reached has no start record", async () => {
+    let controller: AbortController | undefined;
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        controller?.abort();
+        return { ok: true, applied: { index, action, stored: null } };
+      },
+    });
+    const run = setup({ executor });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "cancelled");
+    assert.deepEqual(
+      run.journal.ofType("plan_item_started").map((event) => event.index),
+      [0],
+    );
+  });
+
+  test("a failed action keeps its start record and then its failure", async () => {
+    const executor = new FakeExecutor({ apply: () => ({ ok: false, problem: "source_changed" }) });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "apply_incomplete");
+    assert.deepEqual(run.journal.types().slice(0, 4), ["apply_started", "plan_checked", "plan_item_started", "plan_item_failed"]);
   });
 });
 

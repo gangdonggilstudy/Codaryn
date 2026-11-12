@@ -12,7 +12,7 @@ import { PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, asRawText } from "../../../src/c
 import type {
   AppliedPlanAction,
   ApplyDeps,
-  ApplyJournalEvent,
+  ApplyJournalEntry,
   IntegrityChecker,
   IntegrityManifest,
   InventoryCheckInput,
@@ -33,9 +33,12 @@ const MOVE: ResolvedPlanAction = { kind: "move", from: "a.jpg", to: "2026/a.jpg"
 const DISCARD: ResolvedPlanAction = { kind: "discard", path: "b.tmp", sha256: HASH_B };
 
 class FakeApplyJournal {
-  readonly events: ApplyJournalEvent[] = [];
+  readonly events: ApplyJournalEntry[] = [];
   closed = false;
-  async append(event: ApplyJournalEvent): Promise<void> {
+  /** R-9 I-4: a record type whose append fails, as when the process ends right before it. */
+  failOn: string | null = null;
+  async append(event: ApplyJournalEntry): Promise<void> {
+    if (event.type === this.failOn) throw new Error("the process ended");
     this.events.push(event);
   }
   async close(): Promise<void> {
@@ -44,8 +47,8 @@ class FakeApplyJournal {
   types(): string[] {
     return this.events.map((event) => event.type);
   }
-  ofType<T extends ApplyJournalEvent["type"]>(type: T): Extract<ApplyJournalEvent, { type: T }>[] {
-    return this.events.filter((event): event is Extract<ApplyJournalEvent, { type: T }> => event.type === type);
+  ofType<T extends ApplyJournalEntry["type"]>(type: T): Extract<ApplyJournalEntry, { type: T }>[] {
+    return this.events.filter((event): event is Extract<ApplyJournalEntry, { type: T }> => event.type === type);
   }
 }
 
@@ -174,7 +177,9 @@ describe("applyPlan: a plan that fits", () => {
     assert.deepEqual(run.journal.types(), [
       "apply_started",
       "plan_checked",
+      "plan_item_started",
       "file_moved",
+      "plan_item_started",
       "file_discarded",
       "verifier_result",
       "verifier_result",
@@ -377,6 +382,68 @@ describe("applyPlan: unsafe moves need a person's consent for this apply (DR-21)
     assert.deepEqual([result.status, result.reason], ["failed", "apply_incomplete"]);
     const failed = run.journal.ofType("plan_item_failed")[0];
     assert.deepEqual([failed?.index, failed?.problem], [1, "unsafe_move"]);
+  });
+});
+
+describe("applyPlan: a start record before each action (R-9 I-4)", () => {
+  test("a stop right after an action, before its record, still leaves a record naming it", async () => {
+    const run = setup();
+    run.journal.failOn = "file_moved";
+    await assert.rejects(applyPlan(run.deps));
+    assert.deepEqual(run.executor.applied, [0], "the move was made");
+    assert.deepEqual(run.journal.ofType("plan_item_started"), [
+      { type: "plan_item_started", index: 0, action: { kind: "move", from: "a.jpg", to: "2026/a.jpg", sha256: HASH_A } },
+    ]);
+  });
+
+  test("each action's start record is written before the executor runs it", async () => {
+    let journal: FakeApplyJournal | undefined;
+    const lastTypes: string[] = [];
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        lastTypes.push(journal?.types().at(-1) ?? "");
+        return { ok: true, applied: { index, action, stored: action.kind === "discard" ? String(index) : null } };
+      },
+    });
+    const run = setup({ executor });
+    journal = run.journal;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "verified");
+    assert.deepEqual(lastTypes, ["plan_item_started", "plan_item_started"]);
+    assert.deepEqual(run.journal.types().slice(0, 6), [
+      "apply_started",
+      "plan_checked",
+      "plan_item_started",
+      "file_moved",
+      "plan_item_started",
+      "file_discarded",
+    ]);
+  });
+
+  test("an action that is not reached has no start record", async () => {
+    let controller: AbortController | undefined;
+    const executor = new FakeExecutor({
+      apply: (action, index) => {
+        controller?.abort();
+        return { ok: true, applied: { index, action, stored: null } };
+      },
+    });
+    const run = setup({ executor });
+    controller = run.controller;
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "cancelled");
+    assert.deepEqual(
+      run.journal.ofType("plan_item_started").map((event) => event.index),
+      [0],
+    );
+  });
+
+  test("a failed action keeps its start record and then its failure", async () => {
+    const executor = new FakeExecutor({ apply: () => ({ ok: false, problem: "source_changed" }) });
+    const run = setup({ executor });
+    const result = await applyPlan(run.deps);
+    assert.equal(result.reason, "apply_incomplete");
+    assert.deepEqual(run.journal.types().slice(0, 4), ["apply_started", "plan_checked", "plan_item_started", "plan_item_failed"]);
   });
 });
 

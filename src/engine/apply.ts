@@ -60,6 +60,9 @@ const INVENTORY_LIMIT_NOTICE =
   "the workspace has more files than the inventory check can list, so the apply could not be verified; nothing was moved";
 const INVENTORY_FAILED_NOTICE = "the workspace inventory could not be taken; nothing was moved";
 const ALREADY_APPLIED_NOTICE = "the plan was already applied; nothing was moved";
+/** U-1 (R-33 R33-L3): the plan run's records-changed mark, found under the lock (ApplyDeps.planRecordsChanged). */
+const PLAN_RECORDS_CHANGED_NOTICE =
+  "the plan run's records were changed outside its run, or could not be checked (plan_records_changed): its plan may differ from the one approved, so nothing was moved. Make the plan again";
 const UNMASKABLE_NOTICE = "the plan's paths could not be masked for the record; nothing was moved";
 const PLAN_SECRETS_DIFFER_NOTICE =
   "the secrets registered now mask the plan's paths differently from the plan run (plan_secrets_differ); nothing was checked or moved. Apply with the same task form as the plan run, or make the plan again";
@@ -83,6 +86,7 @@ export const APPLY_FIXED_TEXTS: readonly string[] = [
   INVENTORY_LIMIT_NOTICE,
   INVENTORY_FAILED_NOTICE,
   ALREADY_APPLIED_NOTICE,
+  PLAN_RECORDS_CHANGED_NOTICE,
   UNMASKABLE_NOTICE,
   PLAN_SECRETS_DIFFER_NOTICE,
   APPLY_INCOMPLETE_NOTICE,
@@ -340,6 +344,20 @@ export const applyPlan: ApplyPlan = async (deps) => {
       unsafeMoveConsent: consented ? consent.channel : null,
     });
     state.transition("running");
+    // U-1 (R-33 R33-L3): the caller refused a marked plan run; a mark written since then is found
+    // here, under the lock, before anything else. A check that cannot be made counts as a mark.
+    if (deps.planRecordsChanged !== undefined) {
+      let marked: boolean;
+      try {
+        marked = await deps.planRecordsChanged();
+      } catch {
+        marked = true;
+      }
+      if (marked) {
+        notice(PLAN_RECORDS_CHANGED_NOTICE);
+        return PLAN_STALE;
+      }
+    }
     if (consent !== null && !consented) notice(CONSENT_OTHER_PLAN_NOTICE);
     if ((await inspect("run_start")) === "changed") return PROTECTED_CHANGED;
     const stateStart = await checkState("run_start", "skip");

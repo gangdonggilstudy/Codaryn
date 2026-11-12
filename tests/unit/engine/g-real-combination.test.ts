@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
 
-import { PLAN_APPLIED_FILE_NAME, PLAN_FILE_NAME, asRawText } from "../../../src/contracts/index.js";
+import { PLAN_APPLIED_FILE_NAME, PLAN_FILE_NAME, asRawText, planActionShown } from "../../../src/contracts/index.js";
 import type {
   ApplyDeps,
   ApplyJournalEntry,
@@ -22,12 +22,16 @@ import type {
   EngineDeps,
   InventoryChecker,
   JsonObject,
+  MaskedPlanAction,
+  MaskedText,
   PlanActionKind,
   PlanRecorder,
   PolicyConfig,
+  PrivacyGateway,
   ResolvedPlanAction,
   ResolvedTaskSpec,
   StoredPlan,
+  StoredPlanAction,
   Workspace,
 } from "../../../src/contracts/index.js";
 import { applyPlan, runTask } from "../../../src/engine/index.js";
@@ -79,10 +83,33 @@ async function space(): Promise<Space> {
   };
 }
 
-/** G-E stand-in with the contract's behaviour: plan.json with actions and hashes only, created once. */
-function planRecorder(root: string, runId: string): PlanRecorder {
+/**
+ * DR-28: the shown form of an action, masked with the plan run's gateway, as the propose_plan tool
+ * is to make it (PlanRecorder.savePlan).
+ */
+function shownWith(privacy: PrivacyGateway, action: StoredPlanAction): StoredPlanAction {
+  const mask = (text: string): MaskedText => {
+    const masked = privacy.mask(text);
+    if (!masked.ok) throw new Error("cannot mask");
+    return masked.text;
+  };
+  const masked: MaskedPlanAction =
+    action.kind === "move"
+      ? { kind: "move", from: mask(action.from), to: mask(action.to), sha256: action.sha256 }
+      : { kind: "discard", path: mask(action.path), sha256: action.sha256 };
+  return { ...action, shown: planActionShown(masked) } as StoredPlanAction;
+}
+
+/**
+ * G-E stand-in with the contract's behaviour: plan.json with actions and hashes only, created once.
+ * DR-28: `received` keeps what the tool handed over. Until G-C's propose_plan supplies `shown`, the
+ * stand-in adds it with the plan run's gateway as the tool is to (the todo test below shows the gap).
+ */
+function planRecorder(root: string, runId: string, privacy: PrivacyGateway, received: StoredPlanAction[][] = []): PlanRecorder {
   return {
-    async savePlan(actions) {
+    async savePlan(given) {
+      received.push([...given]);
+      const actions = given.map((action) => (action.shown === undefined ? shownWith(privacy, action) : action));
       const stored: StoredPlan = { schemaVersion: 1, kind: "plan", runId, actions };
       const bytes = Buffer.from(`${JSON.stringify(stored)}\n`, "utf8");
       await fs.writeFile(path.join(root, ".codaryn", "runs", runId, PLAN_FILE_NAME), bytes, { flag: "wx" });
@@ -119,7 +146,12 @@ function planTask(root: string, policy: PolicyConfig = POLICY): ResolvedTaskSpec
   };
 }
 
-async function planRun(s: Space, steps: ConstructorParameters<typeof FakeModel>[0], policy: PolicyConfig = POLICY) {
+async function planRun(
+  s: Space,
+  steps: ConstructorParameters<typeof FakeModel>[0],
+  policy: PolicyConfig = POLICY,
+  received: StoredPlanAction[][] = [],
+) {
   const privacy = createPrivacyGateway({ secrets: [FAKE_SECRET] });
   const journal = new FakeJournal();
   const model = new FakeModel(steps);
@@ -129,7 +161,7 @@ async function planRun(s: Space, steps: ConstructorParameters<typeof FakeModel>[
     model,
     privacy,
     policy: createPolicyGate({ config: policy, workspace: s.workspace }),
-    tools: createToolRunner({ workspace: s.workspace, privacy, planRecorder: planRecorder(s.root, PLAN_RUN) }),
+    tools: createToolRunner({ workspace: s.workspace, privacy, planRecorder: planRecorder(s.root, PLAN_RUN, privacy, received) }),
     verifiers: new FakeVerifiers(),
     journal,
     clock: new FakeClock(),
@@ -159,8 +191,13 @@ const inventory: InventoryChecker = {
   },
 };
 
-async function applyRun(s: Space, plan: StoredPlan, digest: ContentHash, options: { gate?: PolicyConfig; planActions?: readonly PlanActionKind[] } = {}) {
-  const privacy = createPrivacyGateway({ secrets: [FAKE_SECRET] });
+async function applyRun(
+  s: Space,
+  plan: StoredPlan,
+  digest: ContentHash,
+  options: { gate?: PolicyConfig; planActions?: readonly PlanActionKind[]; secrets?: readonly string[] } = {},
+) {
+  const privacy = createPrivacyGateway({ secrets: [...(options.secrets ?? [FAKE_SECRET])] });
   const journal: ApplyJournalEntry[] = [];
   const deps: ApplyDeps = {
     plan,
@@ -302,9 +339,47 @@ describe("plan run and apply run with the real parts", () => {
         { kind: "move", from: "photos/a.jpg", to: "2026/a.jpg", sha256: sha("jpeg bytes a") },
         { kind: "discard", path: "old/b.tmp", sha256: sha("temporary b") },
       ];
-      assert.deepEqual(plan.actions, expected);
+      assert.deepEqual(
+        plan.actions.map(({ shown: _shown, ...action }) => action),
+        expected,
+      );
     } finally {
       await s.cleanup();
     }
   });
+
+  test("DR-28 (R-11 M-1): a plan made with a secret and applied without it moves nothing and records no plain value", async () => {
+    const s = await space();
+    try {
+      await planRun(s, [() => proposal([{ kind: "move", from: `notes/${FAKE_SECRET}.md`, to: `archive/${FAKE_SECRET}.md` }])]);
+      const { plan, digest } = await storedPlan(s);
+      const applied = await applyRun(s, plan, digest, { secrets: [] });
+      assert.deepEqual([applied.result.status, applied.result.reason], ["failed", "plan_stale"]);
+      assert.ok(applied.result.notices.some((notice) => notice.includes("plan_secrets_differ")));
+      assert.equal(await s.read(`notes/${FAKE_SECRET}.md`), "named after a secret", "nothing was moved");
+      assert.equal(JSON.stringify([applied.journal, applied.result]).includes(FAKE_SECRET), false, "no plain value recorded");
+
+      const same = await applyRun(s, plan, digest);
+      assert.equal(same.result.reason, "verified", "with the plan run's secrets the plan applies");
+      assert.equal(JSON.stringify([same.journal, same.result]).includes(FAKE_SECRET), false);
+    } finally {
+      await s.cleanup();
+    }
+  });
+
+  test(
+    "DR-28: the real propose_plan hands every action to the store with its shown form",
+    { todo: "G-C: propose_plan builds shown with the run's gateway (PlanRecorder.savePlan, DR-28)" },
+    async () => {
+      const s = await space();
+      try {
+        const received: StoredPlanAction[][] = [];
+        await planRun(s, [() => proposal(MOVE_AND_DISCARD)], POLICY, received);
+        assert.equal(received.length, 1);
+        assert.ok(received[0]?.every((action) => action.shown !== undefined), "every action carries shown");
+      } finally {
+        await s.cleanup();
+      }
+    },
+  );
 });

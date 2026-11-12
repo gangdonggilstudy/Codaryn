@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import { PLAN_APPLIED_FILE_NAME } from "../../../src/contracts/index.js";
-import type { ContentHash, EngineResult, JournalEvent, RunListEntry } from "../../../src/contracts/index.js";
+import type { ContentHash, EngineResult, JournalEvent, RunId, RunListEntry } from "../../../src/contracts/index.js";
 import { createJournal, journalRelativePath, listRuns, markPlanApplied, writeResult } from "../../../src/store/index.js";
+import { createHumanOutput } from "../../../src/cli/human/index.js";
+import { createMessageCatalog } from "../../../src/i18n/index.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -96,5 +98,37 @@ describe("U-16 (UXM-5): a plan run whose plan was applied names the apply run", 
     const root = await workspace(false);
     await writeFile(state(root, "runs", OTHER, PLAN_APPLIED_FILE_NAME), JSON.stringify({ schemaVersion: 1, kind: "plan_applied", planRunId: OTHER, applyRunId: APPLY, at: AT }), "utf8");
     assert.equal(appliedByOf((await byId(root))[OTHER]), "absent");
+  });
+});
+
+describe("R-55 M-1: what the run list's row of the plan run says, by how its apply run ended", () => {
+  const en = createMessageCatalog("en");
+  const rowOf = async (root: string, runId: string): Promise<string> => {
+    const text = createHumanOutput(en).runsText({ schemaVersion: 1, kind: "runs", ...(await listRuns({ workspaceRoot: root })) } as never);
+    return text.split(String.fromCharCode(10)).find((row) => row.startsWith(runId)) ?? "";
+  };
+  const applyResult = (status: string, reason: string, exitCode: number) => ({
+    schemaVersion: 1, kind: "apply", runId: APPLY, planRunId: PLAN, taskId: "t", digest: HASH, status, reason, exitCode,
+    applied: [{ index: 0, action: { kind: "move", from: "a.txt", to: "b/a.txt", sha256: HASH }, stored: null }], verifiers: [],
+    usage: { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs: 5 }, journalPath: journalRelativePath(APPLY), notices: [],
+  });
+  const applied = en.format("runs.plan_applied", { runId: APPLY as RunId });
+
+  test("the apply run is still going (its journal only): the plan row does not say applied", async () => {
+    const root = await workspace(true);
+    assert.equal((await rowOf(root, PLAN)).includes(applied), false, await rowOf(root, PLAN));
+  });
+
+  test("the apply failed part way (failed/apply_incomplete): the plan row does not say applied", async () => {
+    const root = await workspace(true);
+    await writeFile(state(root, "runs", APPLY, "result.json"), `${JSON.stringify(applyResult("failed", "apply_incomplete", 1))}\n`, "utf8");
+    assert.ok((await rowOf(root, APPLY)).includes("apply_incomplete"), await rowOf(root, APPLY));
+    assert.equal((await rowOf(root, PLAN)).includes(applied), false, await rowOf(root, PLAN));
+  });
+
+  test("the apply ended done: the plan row says applied, with the apply run", async () => {
+    const root = await workspace(true);
+    await writeFile(state(root, "runs", APPLY, "result.json"), `${JSON.stringify(applyResult("done", "verified", 0))}\n`, "utf8");
+    assert.ok((await rowOf(root, PLAN)).includes(applied), await rowOf(root, PLAN));
   });
 });

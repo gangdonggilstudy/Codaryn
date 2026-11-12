@@ -231,10 +231,23 @@ export function cleanupPlanOf(value: unknown): CleanupPlanView | null {
 
 export const isCleanupTimestamp = (value: unknown): value is string => typeof value === "string" && TIMESTAMP.test(value);
 
-/** What a cleanup did: removed entirely, kept and why (DR-44 (d): partly_removed is kept, not removed), or why nothing was. */
+/**
+ * DR-48 (U-22): what a cleanup that was carried out did, the contract's CLEANUP_STATUSES without
+ * preview: removed (something removed, nothing kept for a problem), nothing_removed (nothing removed,
+ * nothing kept for a problem), partly_failed (something kept for a problem: changed,
+ * not_plain_directory, io_error, partly_removed).
+ */
+export const CLEANUP_RESULT_STATUSES = ["removed", "nothing_removed", "partly_failed"] as const;
+export type CleanupResultStatus = (typeof CLEANUP_RESULT_STATUSES)[number];
+
+/**
+ * What a cleanup did: removed entirely, kept and why (DR-44 (d): partly_removed is kept, not removed),
+ * or why nothing was. `ok: true` is a cleanup that was carried out, whatever its `status`.
+ */
 export type CleanupResultView =
   | {
       readonly ok: true;
+      readonly status: CleanupResultStatus;
       readonly removed: readonly { readonly target: "run" | "discarded" | "leftover"; readonly id: string; readonly files: number; readonly bytes: number }[];
       readonly kept: readonly { readonly target: "run" | "discarded" | "leftover"; readonly id: string; readonly reason: string }[];
       readonly totals: CleanupTotalsView;
@@ -246,6 +259,8 @@ export function cleanupResultOf(value: unknown): CleanupResultView | null {
   if (!isObj(value)) return null;
   if (value["ok"] === false) return typeof value["code"] === "string" && CODE.test(value["code"]) ? { ok: false, code: value["code"] } : null;
   if (value["ok"] !== true || !Array.isArray(value["removed"]) || !Array.isArray(value["kept"]) || value["removed"].length > MAX_ITEMS || value["kept"].length > MAX_ITEMS) return null;
+  const status = value["status"];
+  if (typeof status !== "string" || !(CLEANUP_RESULT_STATUSES as readonly string[]).includes(status)) return null;
   const removed: { target: "run" | "discarded" | "leftover"; id: string; files: number; bytes: number }[] = [];
   for (const item of value["removed"]) {
     if (!isObj(item) || !(item["target"] === "run" || item["target"] === "discarded" || item["target"] === "leftover") || !idFits(item["target"], item["id"]) || !count(item["files"]) || !count(item["bytes"])) return null;
@@ -257,7 +272,7 @@ export function cleanupResultOf(value: unknown): CleanupResultView | null {
     kept.push({ target: item["target"], id: item["id"], reason: item["reason"] });
   }
   const totals = totalsOf(value["totals"]);
-  return totals === null ? null : { ok: true, removed, kept, totals };
+  return totals === null ? null : { ok: true, status: status as CleanupResultStatus, removed, kept, totals };
 }
 
 /**

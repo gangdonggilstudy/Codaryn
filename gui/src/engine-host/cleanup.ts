@@ -52,20 +52,23 @@ export function previewValue(outcome: unknown): Obj | HostFailure {
   return view === null ? HOST_ERROR : { ok: true, now: output["now"], plan: view };
 }
 
-/** `applyCleanup` → `{ok, result}`: removed entirely, kept and why, or why nothing was (plan_changed, workspace_locked). */
+/**
+ * `applyCleanup` → `{ok, result}`: what the cleanup did (DR-48 `status`), removed entirely, kept and
+ * why. U-22 (R51-M-1): the app's `outcome.ok` is true for `removed` only, so it is not read here; a
+ * cleanup that removed nothing or failed in part is still a result. A digest that is not the plan's
+ * (cleanup_plan_changed) and a held lock (workspace_locked) are the call's errors.
+ */
 export function appliedValue(outcome: unknown): Obj | HostFailure {
   const output = outputOf(outcome, "cleanup_applied");
   if (output === null) return isObj(outcome) && outcome["ok"] === true ? HOST_ERROR : failureOf(outcome);
   const result = output["outcome"];
-  if (!isObj(result)) return HOST_ERROR;
-  const view =
-    result["ok"] === true && Array.isArray(result["removed"]) && Array.isArray(result["kept"])
-      ? cleanupResultOf({
-          ok: true,
-          removed: result["removed"].map((item) => (isObj(item) ? { ...refOf(item), ...sizeFields(item["size"]) } : item)),
-          kept: result["kept"].map((item) => (isObj(item) ? { ...refOf(item), reason: item["reason"] } : item)),
-          totals: result["totals"],
-        })
-      : cleanupResultOf(result);
+  if (!isObj(result) || !Array.isArray(result["removed"]) || !Array.isArray(result["kept"])) return HOST_ERROR;
+  const view = cleanupResultOf({
+    ok: true,
+    status: output["status"],
+    removed: result["removed"].map((item) => (isObj(item) ? { ...refOf(item), ...sizeFields(item["size"]) } : item)),
+    kept: result["kept"].map((item) => (isObj(item) ? { ...refOf(item), reason: item["reason"] } : item)),
+    totals: result["totals"],
+  });
   return view === null ? HOST_ERROR : { ok: true, result: view };
 }

@@ -105,8 +105,10 @@ test("cleanup (DR-39, DR-44): the engine host passes the three calls and keeps t
         ok: true,
         output: {
           kind: "cleanup_applied",
+          // DR-48: what it did; `ok` for removed only (here partly_removed was kept).
+          status: "partly_failed",
           outcome: {
-            ok: true,
+            ok: false,
             removed: [{ target: "run", runId: RUN_A, size: size(4, 1000) }],
             kept: [
               { target: "run", runId: APPLY_B, reason: "not_reverted_not_confirmed" },
@@ -148,12 +150,16 @@ test("cleanup (DR-39, DR-44): the engine host passes the three calls and keeps t
   if (!result.ok || !result.result.ok) return;
   assert.deepEqual(result.result.removed, [{ target: "run", id: RUN_A, files: 4, bytes: 1000 }], "only what was removed entirely");
   assert.deepEqual(result.result.kept.map((item) => item.reason), ["not_reverted_not_confirmed", "partly_removed"]);
+  assert.equal(result.result.status, "partly_failed");
 });
 
 test("cleanup: a failed cleanup is a code; a plan with another shape is refused by the main process", async () => {
-  const call = host({ applyCleanup: async () => ({ ok: true, output: { kind: "cleanup_applied", outcome: { ok: false, code: "plan_changed" } } }) });
-  const result = toCleanupResultReply(await call(1, "applyCleanup", { workspace: WS, selection: {}, now: NOW, confirmation: { digest: DIGEST, discarded: true, includeNotReverted: true } }));
-  assert.deepEqual(result, { ok: true, result: { ok: false, code: "plan_changed" } });
+  const confirmation = { digest: DIGEST, discarded: true, includeNotReverted: true };
+  const call = host({ applyCleanup: async () => ({ ok: false, error: { code: "cleanup_plan_changed", message: "C:\\x" } }) });
+  const result = toCleanupResultReply(await call(1, "applyCleanup", { workspace: WS, selection: {}, now: NOW, confirmation }));
+  assert.deepEqual(result, { ok: false, code: "cleanup_plan_changed" }, "DR-48: the app's call error, its code only");
+  const old = host({ applyCleanup: async () => ({ ok: true, output: { kind: "cleanup_applied", outcome: { ok: false, code: "plan_changed" } } }) });
+  assert.deepEqual(toCleanupResultReply(await old(2, "applyCleanup", { workspace: WS, selection: {}, now: NOW, confirmation })), { ok: false, code: "host_error" }, "the shape before DR-48 is not a result");
   const value = { ok: true, now: NOW, plan: { ...PLAN, items: [{ target: "leftover", id: "../x", files: 1, bytes: 1, warnings: [] }] } };
   assert.equal(toHostCleanupPreview(value).ok, false, "a leftover id is 16 hex digits");
   assert.equal(toHostCleanupPreview({ ...value, plan: { ...PLAN, items: [], digest: "x" } }).ok, false);
@@ -193,6 +199,7 @@ test("cleanup (DR-44): the screen asks apart about not reverted runs and discard
             ok: true,
             result: {
               ok: true,
+              status: "partly_failed",
               removed: [{ target: "run", id: RUN_A, files: 4, bytes: 1000 }],
               kept: [
                 { target: "run", id: APPLY_B, reason: "not_reverted_not_confirmed" },

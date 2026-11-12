@@ -251,6 +251,11 @@ describe("G-A plan contract", () => {
     assert.deepEqual([...PLAN_ACTION_KINDS], ["move", "discard"]);
   });
 
+  test("DR-18 (b): a move the file system cannot make without risk of replacing a file has its own problem code", () => {
+    assert.ok((PLAN_ITEM_PROBLEMS as readonly string[]).includes("unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("plan.problem.unsafe_move"));
+  });
+
   test("problem and channel lists have no duplicates", () => {
     for (const list of [PLAN_PROBLEMS, PLAN_ITEM_PROBLEMS, APPROVAL_CHANNELS, WORKFLOW_PROBLEMS]) {
       assert.ok(unique(list), list.join(","));

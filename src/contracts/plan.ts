@@ -10,6 +10,10 @@
  *    with the policy gate (PLAN_ACTION_DESCRIPTORS), the tool checks the plan against the workspace,
  *    hashes every source file and stores the actions as `plan.json` (PlanRecorder). The run ends as
  *    `needs-input`/`plan_pending` with `EngineResult.plan`. No workspace file changes.
+ *    DR-18 (c): a cancel or the duration limit that arrives while the plan is being stored ends the
+ *    plan run as `cancelled` or `budget-exhausted`, without `EngineResult.plan`. plan.json may stay,
+ *    but its run did not end as `plan_pending`, so LoadPlan answers `run_not_plan` and it cannot be
+ *    applied.
  * 2. The apply run. `codaryn apply` (with the same task form as `run`: `--task <task.json>`, or
  *    `--workspace <dir> [--profile <name>] [--workflow <id>]`; with `--run <plan run id>` and
  *    `--digest <hex>`), or an adapter's `applyPlan(runId, digest)` after a person approved the
@@ -275,6 +279,9 @@ export type ApprovalChannel = (typeof APPROVAL_CHANNELS)[number];
  * - source_not_file, destination_exists, destination_parent_not_dir: as in PLAN_PROBLEMS, now
  * - denied: the policy at apply time refuses the action (DR-5)
  * - cross_device: the rename would cross a volume; nothing is copied
+ * - unsafe_move (DR-18 b): the file system offers no move that refuses an existing destination
+ *   (no hard links, as on FAT or exFAT, or a read-only source on Windows), so a file created at
+ *   `to` meanwhile could be replaced; the action is not done, keeping "never replace a file"
  * - io_error: any other file system failure
  */
 export const PLAN_ITEM_PROBLEMS = [
@@ -285,6 +292,7 @@ export const PLAN_ITEM_PROBLEMS = [
   "destination_parent_not_dir",
   "denied",
   "cross_device",
+  "unsafe_move",
   "io_error",
 ] as const;
 export type PlanItemProblem = (typeof PLAN_ITEM_PROBLEMS)[number];

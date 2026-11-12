@@ -14,7 +14,8 @@
  *   the text says why once instead of per file.
  * - U-36 (UXM-7 ③): the words of the text form come from the message catalog when one is given
  *   (ChangesEnvironment.messages: the contract's `changes.*` ids); without one, the English below,
- *   which is the text before U-36 without "(DR-29)". The JSON is not touched. A run with a
+ *   which is the text before U-36 as it was (the English catalog gives the same lines but those of
+ *   `changes.apply_run` and `changes.unavailable.<reason>`). The JSON is not touched. A run with a
  *   records-changed mark (ChangesOutput.recordsChanged, U-43) says so (`changes.records_changed`).
  * Reads only: nothing is created, changed or locked, and no request is made.
  *
@@ -138,11 +139,11 @@ const STATE_TEXT: { readonly [S in FileState]: string } = {
   unknown: "could not be read now",
 };
 
-/** The text before U-36 (only "(DR-29)" left out), the English catalog's text and the fallback. */
+/** The text before U-36, character for character: the fallback without a catalog. */
 const ENGLISH_WORDS: ChangesWords = {
   heading: (runId) => `changes of run ${runId}, masked with the secrets registered now (not the run's own masking)`,
   noTextNote: () =>
-    "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only",
+    "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)",
   recordsChanged: () => "This run has a records-changed mark, so no file text is shown; only paths and states.",
   none: () => "the run changed no file",
   applyRun: (count, planRunId) => `the run is an apply run: it applied ${count} action(s) of the plan of run ${cleanText(planRunId)} (moves and discards, not file writes); codaryn report lists them`,

@@ -186,10 +186,8 @@ describe("runChanges", () => {
     const app = createCodarynApp(await appEnvironment(base, { env: {} }));
     const shown = text(await runChanges({ argv: ["changes", "--task", path.join(base, "other.json"), "--run", "latest"], env: {}, app }));
     // The reason is given once; the file without text has its path, its state and its own mark
-    // (the app layer's finding: one result can hold files with and without text). U-36: the line no
-    // longer ends with "(DR-29)" (the PM's exception to the unchanged English text).
-    assert.equal(shown.split("the others have their path and state only\n").length, 2, shown);
-    assert.equal(shown.includes("(DR-29)"), false);
+    // (the app layer's finding: one result can hold files with and without text).
+    assert.equal(shown.split("(DR-29)\n").length, 2, shown);
     assert.match(shown, /== README\.md: changed by the run; as the run left it\n {3}the text is not shown \(masking_unverified\)\n== NOTES\.md/);
     // NOTES.md holds no secret: either set of secrets leaves the same text visible.
     assert.match(shown, /== NOTES\.md: created by the run; as the run left it\n@@ -1,0 \+1,1 @@\n\+ # Notes\n/);
@@ -203,17 +201,21 @@ describe("runChanges", () => {
  * part: the text of `codaryn changes` comes from the message catalog (the contract's ids, U-36
  * contract 1ca962e), so a person reads it in their language. Pinned:
  * - English: without a catalog (the fallback) and with the English catalog, the text is the one
- *   before U-36 character for character, except the no-text line, which loses "(DR-29)".
+ *   before U-36 character for character. The no-text line keeps "(DR-29)", as the English catalog
+ *   and g-changes-wire keep it (the Korean leaves it out), so the PM's exception is not used.
  * - `changes --json` is not changed.
  * - With a catalog every piece of text is the catalog's: no fixed English word is left.
  * - A run with a records-changed mark (ChangesOutput.recordsChanged, U-43) says so with the catalog's
  *   `changes.records_changed`, which nothing used before.
  * Reproduced first (e4865d6, todo, in u36-changes-texts.test.ts, moved here to stay in this owner's
- * file); the renderer takes the catalog now. The English and Korean catalog cases wait for
- * unit/U-36-nb-i18n's texts (todo). Fake values only.
+ * file); the renderer takes the catalog now, with unit/U-36-nb-i18n's texts (2794d22). The English
+ * catalog case is todo for a PM question (ENGLISH_TODO). Fake values only.
  */
 
-const TEXTS_TODO = { todo: "U-36: wait for unit/U-36-nb-i18n's texts of the changes ids" };
+/** PM question (U-36): the English catalog (unit/U-36-nb-i18n 2794d22) words these lines otherwise. */
+const ENGLISH_TODO = {
+  todo: "U-36: the English catalog words changes.apply_run and changes.unavailable.<reason> (all but masking_unverified) otherwise than the text before U-36",
+};
 
 const RUN = "20261113T010203Z-0123abcd";
 const BASE = { schemaVersion: 1, kind: "changes", runId: RUN, exitCode: 0, masking: "current_secrets" } as const;
@@ -237,10 +239,10 @@ const APPLY: ChangesOutput = { ...BASE, files: [], applyRun: { planRunId: "20261
 const MARKED: ChangesOutput = { ...ALL, files: [ALL.files[4]!], recordsChanged: true };
 
 const HEADING = `changes of run ${RUN}, masked with the secrets registered now (not the run's own masking)`;
-/** The English text before U-36 (main 1e54ca9), the no-text line without "(DR-29)". */
+/** The English text before U-36 (main 1e54ca9). */
 const ALL_EN = [
   HEADING,
-  "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only",
+  "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)",
   "== new.md: created by the run; as the run left it",
   "@@ -1,0 +1,2 @@",
   "+ a",
@@ -293,7 +295,7 @@ const NAMING = {
 } as unknown as MessageCatalog;
 
 describe("U-36: changes' English text is as before", () => {
-  test("without a catalog: as before, the no-text line without (DR-29)", () => {
+  test("without a catalog: as before, character for character", () => {
     assert.equal(renderChanges(ALL), ALL_EN);
   });
 
@@ -302,7 +304,7 @@ describe("U-36: changes' English text is as before", () => {
     assert.equal(renderChanges(APPLY), APPLY_EN);
   });
 
-  test("with the English catalog: the same text as without one", TEXTS_TODO, () => {
+  test("with the English catalog: the same text as without one", ENGLISH_TODO, () => {
     const en = createMessageCatalog("en");
     // Not vacuous: the renderer falls back to English when the catalog refuses an id.
     for (const id of ["changes.none", "changes.no_text_note", "changes.state.missing", "changes.unavailable.unreadable"] as const) assert.doesNotThrow(() => en.format(id), id);
@@ -349,7 +351,7 @@ describe("U-36: with a catalog every piece of changes' text is the catalog's", (
     assert.equal(outcome.text, `‹changes.heading {"runId":"${RUN}"}›\n‹changes.none›\n`);
   });
 
-  test("with the Korean catalog: no fixed English word", TEXTS_TODO, () => {
+  test("with the Korean catalog: no fixed English word", () => {
     const shown = [ALL, NONE, APPLY, MARKED].map((output) => renderChanges(output, createMessageCatalog("ko"))).join("\n");
     for (const word of ENGLISH) assert.equal(shown.includes(word), false, `English left: ${word}`);
   });

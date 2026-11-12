@@ -159,6 +159,22 @@ export async function runRuns(io: RunsEnvironment): Promise<CommandOutcome> {
     runs: listing.runs.slice(0, limit),
     omitted: Math.max(0, listing.runs.length - limit),
   };
-  if (json) return { output, exitCode: output.exitCode };
-  return { text: hideKeys(io.human.runsText(output), envValue(io.env, ANTHROPIC_API_KEY_ENV)), exitCode: output.exitCode };
+  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  // N-23(a): the JSON hides key shapes and the current key too, as `report` does. Run ids and
+  // task ids are names a command allowed during a run could have chosen.
+  if (json) return { output: hideKeysInStrings(output, currentKey), exitCode: output.exitCode };
+  return { text: hideKeys(io.human.runsText(output), currentKey), exitCode: output.exitCode };
+}
+
+/** Every string in `value` with key-shaped text and the current key hidden. */
+function hideKeysInStrings<T>(value: T, currentKey: string | null): T {
+  const walk = (item: unknown): unknown => {
+    if (typeof item === "string") return hideKeys(item, currentKey);
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item === "object" && item !== null) {
+      return Object.fromEntries(Object.entries(item).map(([name, child]) => [name, walk(child)]));
+    }
+    return item;
+  };
+  return walk(value) as T;
 }

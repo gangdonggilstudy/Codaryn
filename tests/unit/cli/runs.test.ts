@@ -436,6 +436,18 @@ describe("codaryn runs (N-7)", () => {
     assert.equal(await exists(path.join(work, ".codaryn")), false);
   });
 
+  test("N-23(a): --json hides key-shaped text and the current key, as report does", async () => {
+    const work = await tempDir();
+    const currentKey = "fake-current-key-N23a-0123456789";
+    await mkdir(path.join(runsDir(work), KEY_SHAPED), { recursive: true });
+    await mkdir(path.join(runsDir(work), currentKey));
+    const outcome = await runRuns({ argv: ["runs", "--json"], cwd: work, env: { ANTHROPIC_API_KEY: currentKey }, human: stubHuman([]) });
+    const printed = JSON.stringify("output" in outcome ? outcome.output : outcome.text);
+    assert.equal(printed.includes(KEY_SHAPED), false, "a key-shaped run directory name is hidden");
+    assert.equal(printed.includes(currentKey), false, "the current key is hidden");
+    assert.ok(printed.includes("[key]"));
+  });
+
   test("a missing workspace, a network path and bad options are CliErrorOutput", async () => {
     const work = await tempDir();
     const run = (argv: string[]) => runRuns({ argv, cwd: work, env: {}, human: stubHuman([]) });

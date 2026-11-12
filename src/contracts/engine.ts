@@ -4,6 +4,7 @@
 
 import type { RevertOutcome } from "./changes.js";
 import type { DoctorOutput, InitOutput, ModelsOutput, ReportOutput, RunsOutput } from "./commands.js";
+import type { InputDiagnosticFile, SchemaFieldPath } from "./human.js";
 import type { IntegrityChecker } from "./integrity.js";
 import type { Journal } from "./journal.js";
 import type { ModelProvider } from "./model.js";
@@ -208,6 +209,34 @@ export interface CliErrorOutput {
   readonly exitCode: number;
   /** Never contains secret values, keys or file contents. */
   readonly message: string;
+  /**
+   * N-15: where in a config, task or script file the problem is, for `invalid_config`,
+   * `invalid_task` and `invalid_script` when it can be said safely. Absent otherwise.
+   */
+  readonly diagnostic?: InputDiagnostic;
+}
+
+/**
+ * N-15 (review M1): a structured input diagnostic. It holds a fixed code, a schema field position
+ * and numbers only: never the JSON parser's message, a value, or the name of an unknown key.
+ */
+export const INPUT_DIAGNOSTIC_CODES = ["json_syntax", "unknown_field", "invalid_value", "missing_field", "too_deep"] as const;
+export type InputDiagnosticCode = (typeof INPUT_DIAGNOSTIC_CODES)[number];
+
+export interface InputDiagnostic {
+  readonly code: InputDiagnosticCode;
+  readonly file: InputDiagnosticFile;
+  /**
+   * The field: for `unknown_field` the object that holds the unknown key (`config`, `limits`,
+   * `policy.commands[0]`), never the key itself; for `invalid_value` and `missing_field` the field.
+   * Null for `json_syntax` and `too_deep`, and whenever no safe position exists.
+   */
+  readonly field: SchemaFieldPath | null;
+  /** `json_syntax` only: 1-based line and column (in Unicode code points, a BOM not counted). Else null. */
+  readonly line: number | null;
+  readonly column: number | null;
+  /** `unknown_field` only: the closest allowed field name at that position, when one is close. */
+  readonly suggestion?: SchemaFieldPath | null;
 }
 
 export type CliOutput = EngineResult | CliErrorOutput;
@@ -237,7 +266,8 @@ export interface RevertOutput {
   /**
    * N-7: the run's revert record from before this command, when it had one: the run was already
    * reverted at `at` with that status. A second revert of the same run normally skips every file
-   * as `changed_since_run`; this says why.
+   * as `changed_since_run`; this says why. N-16: present only when the record passes the run
+   * list's checks (same run id, `at` matching RUN_TIMESTAMP_PATTERN_SOURCE, a known status).
    */
   readonly revertedBefore?: { readonly at: string; readonly status: RevertStatus };
 }

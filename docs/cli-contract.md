@@ -32,13 +32,16 @@
 ## 2. 실행
 
 ```
+node dist/src/cli/main.js run "<목표>" [옵션]
 node dist/src/cli/main.js run --task <task.json> [옵션]
 node dist/src/cli/main.js run --workspace <디렉터리> --goal <문장> [옵션]
-옵션: --config <config.json>  --vars-file <경로>  --cancel-file <경로>  --quiet
-node dist/src/cli/main.js revert --workspace <디렉터리> --run <runId>
-node dist/src/cli/main.js report --workspace <디렉터리> --run <runId> [--json]
-node dist/src/cli/main.js doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]
+옵션: --config <config.json>  --vars-file <경로>  --cancel-file <경로>  --quiet  --profile <이름>
+node dist/src/cli/main.js revert --workspace <디렉터리> --run <runId|latest> [--dry-run] [--quiet]
+node dist/src/cli/main.js report --workspace <디렉터리> --run <runId|latest> [--json]
+node dist/src/cli/main.js doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--profile <이름>] [--json]
 node dist/src/cli/main.js models [--config <config.json>] [--vars-file <경로>] [--json] [--use <번호|id>]
+node dist/src/cli/main.js init [--config <config.json>] [--workspace <디렉터리>] [--json]
+node dist/src/cli/main.js runs [--workspace <디렉터리>] [--limit <n>] [--json]
 node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 ```
 
@@ -593,9 +596,9 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
 - 실행이 모델 오류로 끝났고, 그 모델 요청이 HTTP 404로 응답받았으면(제공자 문구가 `HTTP 404`로 시작) CLI가 결과의 `notices`에 안내 한 줄을 더한다: `codaryn models`로 목록을 보라는 내용이다. `result.json`에도 같은 안내가 들어가고, 진행 표시가 켜져 있으면 stderr에도 한 줄을 쓴다. 오류 종류(`api_error`)와 분류는 제공자(p5)의 것이며 바꾸지 않는다.
 - `doctor`는 네트워크에 접속하지 않으므로 모델이 있는지 확인하지 않는다. `model` 항목의 메시지에 그 사실과 `codaryn models` 안내를 적는다. 모델이 설정되지 않았을 때의 `fail` 메시지에도 같은 안내를 붙인다.
 
-## 17. 사용성 계약 (N-1~N-9)
+## 17. 사용성 계약 (N-1~N-9, N-14~N-18)
 
-결정은 `docs/work-orders/phase-4-usability.md`의 N-1~N-13이다. 이 절은 역할 1(N-A)의 계약 추가분이며, 이 커밋 시점에는 **계약만 있고 구현은 없다**. 구현과 연결의 진행은 각 항목의 "담당"과 보고서에 따른다.
+결정은 `docs/work-orders/phase-4-usability.md`의 N-1~N-13과, 계약 검토(`docs/reviews/2026-11-12-n-review-usability-contract.md`) 뒤의 N-14~N-19다. 이 절은 역할 1(N-A)의 계약 추가분이며, 계약 커밋(`9735b5f`, N-14~N-18 수정 커밋) 시점에는 **계약만 있고 구현은 없다**. 구현과 연결의 진행은 각 항목의 "담당"과 보고서에 따른다.
 
 | 영역 | 계약 위치 | 구현 담당 |
 | --- | --- | --- |
@@ -650,10 +653,15 @@ codaryn doctor [...기존] [--profile <이름>]
   - 명령·보호 경로 제안은 `--workspace`가 있을 때만, 고정된 이름 목록과 비교해 만든다. 파일 내용은 출력하지 않는다. 제안은 하나씩 승인하고 명령 규칙은 `allowExtraArgs: false`다.
   - 키가 있고 묻는 중이면 모델 목록을 요청한다(실제 API 요청). 실패하면 자리표시자를 남긴다.
   - 종료: `created` 0, `declined` 3(터미널에서 거절).
-- **`runs`(N-7)**: `RunsOutput`. `--workspace`가 없으면 현재 디렉터리다. `--limit`은 1~`RUNS_MAX_LIMIT`(1000), 기본 `RUNS_DEFAULT_LIMIT`(20). 상태 디렉터리를 만들지 않고 잠금도 잡지 않는다. 기록이 없으면 빈 목록(종료 0)이다. 정렬과 읽는 범위는 `ListRuns`·`RunListing` 주석.
-- **`--run latest`(N-7)**: `report`, `revert`에서 `listRuns`의 첫 실행을 뜻한다. 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리는 이름으로 고를 수 없다.
+- **`runs`(N-7)**: `RunsOutput`. `--workspace`가 없으면 현재 디렉터리다. `--limit`은 1~`RUNS_MAX_LIMIT`(1000), 기본 `RUNS_DEFAULT_LIMIT`(20). 상태 디렉터리를 만들지 않고 잠금도 잡지 않는다. 기록이 없으면 빈 목록(종료 0)이다.
+- **실행 기록 확인(N-16, 검토 M2)**: `listRuns`는 `report`와 같은 수준으로 기록을 확인한다. 세부는 `RunListEntry` 주석이 기준이다.
+  - 확인: 실행 디렉터리가 링크가 아님, journal 첫 기록이 `seq` 1의 `run_started`이고 `runId`가 디렉터리 이름과 같음, `taskId`가 task id 형식, 시각이 `RUN_TIMESTAMP_PATTERN_SOURCE`(UTC `Z`) 형식, result.json의 `kind`·`runId`·상태와 이유의 조합·`exitCode`, revert.json의 `kind`·`runId`·시각·상태.
+  - 통과한 실행은 `state: "checked"`다. 하나라도 실패하면 `state: "damaged"`이고 실행 id만 가진다. 손상된 실행은 목록 뒤쪽에 "손상"으로만 표시하고 `latest`로 고르지 않는다.
+  - result.json이나 revert.json이 없는 것은 손상이 아니다(해당 필드가 null). 있는데 읽기·해석·확인에 실패하면 손상이다.
+  - 항목에 들어가는 문자열은 위 형식을 통과한 것뿐이라 제어 문자나 키 모양이 들어갈 수 없다. 사람용 표에는 `taskId`를 쓰지 않는다(N-14).
+- **`--run latest`(N-7, N-18)**: `report`, `revert`에서 `listRuns`의 첫 `checked` 실행을 뜻한다. 그런 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리(`.codaryn/runs/latest`)가 실제로 있으면 별칭으로 해석하지 않고 `invalid_arguments`로 끝나며 아무것도 바꾸지 않는다(검토 L1).
 - **`revert --dry-run`(N-7)**: `RevertRequest.dryRun`. 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 출력은 `dryRun: true`인 `RevertOutput`이고 상태·종료 코드는 실제 되돌리기와 같다(`complete` 0, `partial` 3).
-- **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 있으면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
+- **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 N-16의 확인을 통과하면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
 - **`--quiet`**: `run`과 `revert`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
 
 ### 17.4 사람용 출력과 문구 (N-4, N-5)
@@ -664,11 +672,28 @@ codaryn doctor [...기존] [--profile <이름>]
   - 진행 줄: `PROGRESS_PREFIX` 뒤에 `HumanOutput.progressLine`. 사람 표현을 먼저 쓰고 내부 코드는 괄호에 둔다.
   - `revert` 요약: `HumanOutput.revertSummary`
 - 언어는 `SelectMessageLanguage`로 정한다. 오류 코드, JSON 필드, 종료 코드, 명령 이름은 영어로 고정한다.
-- 문구는 `MESSAGE_IDS`의 id로만 만든다. 고정 id의 매개변수는 `FIXED_MESSAGES`가 정하고, 종류(`MessageParamKind`)는 개수, 코드, 필드 위치, 실행 id, CLI가 만든 명령 줄, 기록의 가림 경로나 기호 위치, 검증기 id·프로필 이름·도구 이름, `CliErrorOutput.message`, 다른 문구다. 파일이나 환경에서 읽은 값은 넣지 않는다. 두 카탈로그는 모든 id를 가지고, 템플릿은 정해진 매개변수를 모두 쓰고 다른 것은 쓰지 않는다.
+- 문구는 `MESSAGE_IDS`의 id로만 만든다. 두 카탈로그는 모든 id를 가지고, 템플릿은 `FIXED_MESSAGES`가 정한 매개변수를 모두 쓰고 다른 것은 쓰지 않는다.
+- **매개변수 타입(N-14, 검토 H1)**: `MessageCatalog.format(id, params)`의 `params`는 id마다 타입이 정해진다(`MessageParamsOf`). 종류(`MessageParamTypeByKind`)와 타입:
+  - 숫자(`count`): 개수, 턴, 회차, 줄·열, 시간(ms)
+  - 고정 코드: 상태, 이유, 권한 종류, 거부 코드, 모델 오류 종류, 무결성 단계, 제공자(모두 닫힌 합집합 타입)
+  - 스키마 필드 위치(`SchemaFieldPath`): `toSchemaFieldPath`만 만든다. 이름 조각은 `SCHEMA_FIELD_NAMES`에 있는 것뿐이고 나머지는 `[숫자]`다. 프로필은 `profiles[3]`처럼 순번으로 쓰고, 모르는 키는 그 키를 가진 객체의 위치로 쓴다.
+  - 실행 id(`RunId`, `toRunId`), 다른 문구(`CatalogText`, `format`의 반환값만), 설정 위치 표기(`ConfigLocationDisplay`: `DEFAULT_CONFIG_DISPLAY`의 값, `--config`, `CODARYN_CONFIG`), `init` 제안 목록(`INIT_SUGGESTED_COMMANDS`, `INIT_SUGGESTED_PROTECTED_PATHS`)
+  - 자유 문자열을 받는 매개변수는 없다. 검증기는 id 대신 순번(그 실행의 `verifier_result`에 처음 나온 순서)으로, 프로필은 적용 여부로만, 작업 공간은 `<작업 공간>` 또는 `.`로만 보여 준다. 명령 안내는 템플릿의 고정 글이고 매개변수는 실행 id뿐이다.
+  - `DefaultConfigLocation.display`, `InitOutput.config.display`도 같은 고정 상수 타입으로 좁혔다.
+- **경로**: 문구는 경로를 받지 않는다. 렌더러는 출력과 기록에 이미 있는 가림 경로(`changes[].path`, `reverted[].path`, `skipped[].path`, `file_changed.path`)만 문구 뒤의 항목으로 쓸 수 있고, `report`처럼 제어 문자를 바꾸고 키 모양을 가리고 길이를 자른다.
+- **오류 설명(N-15)**: `HumanOutput.error`는 `error.<code>.what`, 진단(있을 때), `error.<code>.fix`, 코드를 쓴다. 영어 `message`는 JSON에만 남고 stderr 설명에는 쓰지 않는다.
+- **실행 끝 요약(N-17, 검토 M3)**: `RunSummaryContext`는 `workspaceForm`(`current`, `given`, `task`), `configDefault`(기본 위치 표기 또는 null), `profileApplied`, `deniedToolCalls`를 넘긴다. `deniedToolCalls`는 그 실행에서 `allowed: false`인 `tool_decision` 기록 수로, `ReportJournalSummary.deniedToolCalls`와 같은 뜻이다. CLI가 기록을 따라가며 센다.
 - CLI는 렌더링된 글을 실행의 개인정보 게이트로 가리고(있을 때) 제어 문자를 바꾼 뒤 쓴다. stderr 쓰기 실패는 결과에 영향을 주지 않는다.
 - 모듈 경계: `src/i18n/index.ts`가 `selectMessageLanguage`, `createMessageCatalog`를, `src/cli/human/index.ts`가 `createHumanOutput`을 export한다. CLI는 진입 파일에서 이것들을 만들어 각 명령에 넘긴다. `init`의 글은 `src/cli/init.ts`가 카탈로그로 직접 만든다.
 
-### 17.5 오류 코드 추가
+### 17.5 입력 진단 (N-15, 검토 M1)
+
+- `CliErrorOutput.diagnostic`(선택, `InputDiagnostic`): `invalid_config`, `invalid_task`, `invalid_script`에서 위치를 안전하게 말할 수 있을 때만 둔다. 기존 `message`는 그대로다.
+- 필드: `code`(`INPUT_DIAGNOSTIC_CODES`: `json_syntax`, `unknown_field`, `invalid_value`, `missing_field`, `too_deep`), `file`(`config`, `task`, `script`), `field`(`SchemaFieldPath` 또는 null), `line`·`column`(`json_syntax`만, 1부터, 열은 유니코드 코드 포인트 단위, BOM 제외), `suggestion`(`unknown_field`만, 가까운 허용 필드 이름).
+- 내보내지 않는 것: JSON 파서의 예외 문구(원문 조각을 담을 수 있다), 값, 모르는 키의 이름. 모르는 키는 그 키를 가진 객체의 위치(`config`, `limits`, `policy.commands[0]`)로만 말한다.
+- 문구는 `diagnostic.<code>`와 `diagnostic.file.<file>`이다. 구현은 N-A(검증기와 CLI)다.
+
+### 17.6 오류 코드 추가
 
 - `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.
 - `config_write_failed`(종료 2)는 `init`에서도 쓴다.

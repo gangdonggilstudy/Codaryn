@@ -23,6 +23,24 @@ const STATE = join(GUI, "build", "smoke-state", "gui-state.json");
 const SECOND = process.env["CODARYN_SMOKE_SECOND"] ?? "";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/** R29-L1: the model requests the fake API has received so far (the smoke script's count file); -1 when unread. */
+const API_COUNT = process.env["CODARYN_SMOKE_API_COUNT"] ?? "";
+function messagesReceived(): number {
+  try {
+    const value = (JSON.parse(readFileSync(API_COUNT, "utf8")) as { messages?: unknown }).messages;
+    return typeof value === "number" ? value : -1;
+  } catch {
+    return -1;
+  }
+}
+/** Waits until the fake API has received more model requests than `before`; false after `ms`. */
+async function requestArrived(before: number, ms = 60_000): Promise<boolean> {
+  for (let waited = 0; waited < ms; waited += 50) {
+    if (before >= 0 && messagesReceived() > before) return true;
+    await sleep(50);
+  }
+  return false;
+}
 
 interface Endpoint {
   readonly proto: string;
@@ -189,8 +207,12 @@ startGui({
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
+      // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging
+      // answer is the one this run used, whatever the machine's speed.
+      const beforeHang = messagesReceived();
       await startTask("멈추는 작업");
       results["cancelReady"] = await waitFor("document.getElementById('run-cancel')?.hasAttribute('disabled') === false ? 'ready' : null", 60_000);
+      results["cancelRequestArrived"] = await requestArrived(beforeHang);
       results["secondStartRefused"] = await js(`window.codaryn.startRun(${JSON.stringify(second.ok ? second.handle : "")}, 'again', null, null)`);
       await js("document.getElementById('run-cancel').click(); true");
       results["cancelAsked"] = await js("document.getElementById('run-confirm')?.hasAttribute('hidden') === false && document.activeElement?.id === 'run-keep'");
@@ -471,8 +493,11 @@ startGui({
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+      const beforeClose = messagesReceived();
       await js("(() => { const g = document.getElementById('task-goal'); g.value = 'close while running'; document.getElementById('task-run').click(); return true; })()");
       await waitFor("document.getElementById('run-cancel')?.hasAttribute('disabled') === false ? 'ready' : null", 60_000);
+      // R29-L1: closed only once this run's model request reached the fake API.
+      results["closeRequestArrived"] = await requestArrived(beforeClose);
       const closed = new Promise<void>((resolve) => window.once("closed", () => resolve()));
       const begin = Date.now();
       window.close();

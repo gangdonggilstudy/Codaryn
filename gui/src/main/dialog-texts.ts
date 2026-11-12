@@ -21,6 +21,8 @@ const KO = {
   "revert.keep": "되돌리지 않음",
   "apply.message": "이 계획을 적용할까요? 이동 {moves}개, 보관함으로 {discards}개 (다이제스트 {digest})",
   "apply.detail": "폐기하는 파일은 .codaryn/discarded/<적용 실행 id>/ 보관함으로 옮깁니다. 실행 기록을 정리해도 보관함은 지워지지 않습니다. 계획 뒤에 파일이 바뀌었으면 아무것도 옮기지 않습니다.",
+  "apply.form": "적용할 형식: 프로필 {profile} · 작업 종류 {workflow}",
+  "apply.formDefault": "(설정의 기본)",
   "apply.confirm": "이 계획 적용",
   "apply.keep": "적용 안 함",
   "consent.message": "이 드라이브는 하드 링크를 쓸 수 없습니다. 이번 적용 한 번에만 동의할까요? (다이제스트 {digest})",
@@ -50,6 +52,8 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "revert.keep": "Do not revert",
   "apply.message": "Apply this plan? {moves} moves, {discards} to the discard box (digest {digest})",
   "apply.detail": "Discarded files are moved to the discard box .codaryn/discarded/<apply run id>/. Cleaning up the run records does not remove the discard box. If files changed after the plan, nothing is moved.",
+  "apply.form": "Applied with: profile {profile} · task kind {workflow}",
+  "apply.formDefault": "(the config's default)",
   "apply.confirm": "Apply this plan",
   "apply.keep": "Do not apply",
   "consent.message": "This drive cannot use hard links. Agree for this one apply only? (digest {digest})",
@@ -136,4 +140,13 @@ export function widenText(language: DialogLanguage, kind: string, field: string)
   const table = language === "ko" ? WIDEN_KO : WIDEN_EN;
   const words = Object.hasOwn(table, kind) ? table[kind as keyof typeof table] : table.other;
   return `- ${words} (${field.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, 200)})`;
+}
+
+/**
+ * R29-I2: the task form an apply runs with (its policy and checks), from the approval token, as
+ * the apply dialog's first detail line. Names are config names; control characters are replaced.
+ */
+export function applyFormText(language: DialogLanguage, profile: string | null, workflow: string | null): string {
+  const name = (value: string | null): string => (value === null ? dialogText(language, "apply.formDefault") : value.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, 200));
+  return dialogText(language, "apply.form", { profile: name(profile), workflow: name(workflow) });
 }

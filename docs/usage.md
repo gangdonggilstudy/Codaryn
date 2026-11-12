@@ -2,7 +2,7 @@
 
 Codaryn CLI를 실제 작업에 쓰는 방법이다. 설명은 현재 코드 동작 기준이며 세부 규칙은 [CLI·공통 계약](cli-contract.md)이 기준이다.
 
-> 오프라인 검증(유닛, 프로세스 통합)과 로컬 가짜 서버를 쓴 모의 API 검증만 통과했다. 실제 Anthropic API로는 아직 검증하지 않았다. 처음에는 [키 없이 체험하기](#3-키-없이-체험하기)로 흐름을 익히고, 실제 작업 전에 [실제 호출 점검](#14-실제-호출-점검)을 한다.
+> 오프라인 검증(유닛, 프로세스 통합)과 로컬 가짜 서버를 쓴 모의 API 검증만 통과했다. 실제 Anthropic API와 실제 OpenAI API로는 아직 검증하지 않았다. 처음에는 [키 없이 체험하기](#3-키-없이-체험하기)로 흐름을 익히고, 실제 작업 전에 [실제 호출 점검](#14-실제-호출-점검)을 한다.
 
 처음 쓰는 순서: 설치(2절) → 기본 설정 만들기 `init`(4절) → 실행 전 점검 `doctor`(7절) → 키 없는 체험(3절) → 결과 읽기 `runs`·`report`(10절) → 되돌리기 `revert`(11절). 체험은 `init` 없이도 된다. 워크플로를 고르는 범용 작업(파일 정리의 계획 확인 → 적용 → 되돌리기, 자료 분석의 사람 확인)은 18절이다.
 
@@ -213,20 +213,25 @@ Next: codaryn doctor
 
 ### 키
 
-- 키는 환경 변수 `ANTHROPIC_API_KEY`로만 받는다. Windows 사용자 환경 변수에 등록하는 것이 기본이다: `rundll32 sysdm.cpl,EditEnvironmentVariables`로 창을 열어 사용자 변수 `ANTHROPIC_API_KEY`를 더하고 새 터미널을 연다(`init`이 같은 안내를 한다). 키 파일을 자동으로 읽는 기능은 없다.
+- 키는 제공자마다 정해진 환경 변수로만 받는다: Anthropic은 `ANTHROPIC_API_KEY`, OpenAI는 `OPENAI_API_KEY`(아래 "두 번째 제공자: OpenAI"). 한 제공자의 키는 그 제공자의 주소로만 간다. Windows 사용자 환경 변수에 등록하는 것이 기본이다: `rundll32 sysdm.cpl,EditEnvironmentVariables`로 창을 열어 사용자 변수 `ANTHROPIC_API_KEY`를 더하고 새 터미널을 연다(`init`이 같은 안내를 한다. `init`은 Anthropic 키만 안내한다). 키 파일을 자동으로 읽는 기능은 없다.
 - 작업 공간 밖의 변수 파일에 적고 `--vars-file <경로>`로 읽을 수도 있다. 변수 파일은 이 옵션을 줄 때만 읽고 자동으로 찾지 않으며, 이미 설정된 환경 변수가 파일 값보다 우선한다.
 - **`--env-file`은 쓰지 않는다.** Node 26이 그 이름을 스스로 먼저 읽는다. 파일이 없으면 CLI가 시작되기 전에 Node 오류(종료 코드 9)로 끝나고, 있으면 Node가 읽은 뒤 CLI가 `invalid_arguments`로 거부한다.
 - 변수 파일 만들기: `New-Item -ItemType Directory -Force D:\codaryn-settings`와 `Copy-Item .env.example D:\codaryn-settings\.env`로 만들고 편집기에서 값을 채운다. BOM 없는 UTF-8로 저장한다(BOM이 있으면 `invalid_config`). 메모장의 "UTF-8"은 BOM이 없고, PowerShell 5.1의 `Set-Content -Encoding utf8`은 BOM을 붙인다.
-- **변수 파일이 새로 설정한 값은 비밀로 등록되어** 파일 내용, 명령 출력, 기록에 나타나면 가려진다. 예외는 이미 설정돼 있던 변수(Windows는 이름의 대소문자 무시), `CODARYN_MODEL`·`CODARYN_CONFIG`·`CODARYN_API_BASE_URL`, 8자 미만 값이다. 비밀로 등록된 값은 실행하는 명령의 환경에도 넘어가지 않는다(12절).
-- 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일에 키 이름의 필드(`apiKey`, `token`, `password` 등)나 Anthropic 키 모양의 값이 있으면 `key_in_file`로 바로 멈춘다. 간편 형식의 `--goal`과 한 줄 실행의 목표도 같은 검사를 한다.
+- **변수 파일이 새로 설정한 값은 비밀로 등록되어** 파일 내용, 명령 출력, 기록에 나타나면 가려진다. 예외는 이미 설정돼 있던 변수(Windows는 이름의 대소문자 무시), `CODARYN_CONFIG`와 제공자별 모델·주소 변수(`CODARYN_MODEL`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`), 8자 미만 값이다. 비밀로 등록된 값은 실행하는 명령의 환경에도 넘어가지 않는다(12절).
+- 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일에 키 이름의 필드(`apiKey`, `token`, `password` 등)나 키 모양의 값이 있으면 `key_in_file`로 바로 멈춘다. 키 모양은 Anthropic 키 모양과 OpenAI 키 모양 두 가지(`sk-proj-` 같은 접두사가 붙은 것, 대소문자와 숫자가 섞인 긴 예전 형식)다. `sk-learn` 같은 짧은 이름은 멈추지 않는다. 간편 형식의 `--goal`과 한 줄 실행의 목표도 같은 검사를 한다.
 
 | 환경 변수 | 뜻 |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | API 키 |
-| `CODARYN_MODEL` | 모델 ID. 우선순위는 task `model.model` → 이 변수 → 설정 파일 `model`. 코드 기본값은 없다 |
+| `ANTHROPIC_API_KEY` | Anthropic API 키 |
+| `CODARYN_MODEL` | Anthropic 모델 ID. 우선순위는 task `model.model` → 이 변수 → 설정 파일 `model`. 코드 기본값은 없다 |
+| `CODARYN_API_BASE_URL` | Anthropic API 주소. 기본은 공식 주소(`https://api.anthropic.com`). `https`만 허용하며 `http`는 루프백 시험용이다 |
+| `OPENAI_API_KEY` | OpenAI API 키 |
+| `CODARYN_OPENAI_MODEL` | OpenAI 모델 ID. 우선순위는 task `model.model` → 이 변수 → 설정 파일 `providers.openai.model`. 코드 기본값은 없다 |
+| `CODARYN_OPENAI_API_BASE_URL` | OpenAI API 주소. 기본은 `https://api.openai.com/v1`(버전 경로 포함). 규칙은 위와 같고, `/responses`나 `/models`로 끝나면 안 된다 |
 | `CODARYN_CONFIG` | 설정 파일 경로. `--config`가 없을 때 쓴다 |
-| `CODARYN_API_BASE_URL` | API 주소. 기본은 공식 주소. `https`만 허용하며 `http`는 루프백 시험용이다 |
 | `CODARYN_LANG` | 사람용 글의 언어(`ko`, `en`). 8절 |
+
+제공자별 변수는 그 제공자에만 쓰인다. 예를 들어 `CODARYN_MODEL`은 openai 실행의 모델을 정하지 않는다. 제공자를 고르는 환경 변수는 없다(설정 파일이나 task에서 고른다).
 
 키, 모델, 요청당 출력 토큰 상한(`maxOutputTokens`) 중 하나라도 없으면 `provider_not_configured`(종료 코드 7)로 끝나고 아무것도 전송하지 않는다. 모델 값이 `<model id>` 같은 자리표시자이거나 비어 있으면 설정되지 않은 것으로 본다.
 
@@ -242,15 +247,95 @@ node dist/src/cli/main.js models --use 2
 ```
 
 - **실제 API에 요청한다**(`GET /v1/models`). 키는 요청 헤더에만 들어간다. 키가 없으면 `provider_not_configured`(종료 7)이고 아무것도 보내지 않는다. 작업 공간은 필요 없다.
-- 표에는 번호, id, 이름, 입력·출력 토큰 상한이 나온다. 지금 실행이 쓸 모델(`CODARYN_MODEL`, 없으면 설정 파일 `model`)에는 `*`가 붙는다. `--json`이면 `kind:"models"` JSON 한 줄이다.
-- **`--use <번호|id>`**: 설정 파일의 `model`만 바꾼다. 다른 필드와 값, 순서는 그대로이고, 줄 안의 공백 배치는 다시 쓴다(한 줄에 쓴 배열이 여러 줄로 펼쳐진다).
+- **`--provider <anthropic|openai>`**: 어느 제공자의 목록인지 고른다. 없으면 설정 파일의 `provider`, 그것도 없으면 anthropic이다. 고른 제공자의 키·주소·모델 변수만 쓴다.
+- 표에는 번호, id, 이름, 입력·출력 토큰 상한이 나온다. 지금 실행이 쓸 모델(그 제공자의 모델 변수, 없으면 설정 파일)에는 `*`가 붙는다. `--json`이면 `kind:"models"` JSON 한 줄이다.
+- **`--use <번호|id>`**: 설정 파일에서 그 제공자의 모델 한 곳만 바꾼다. anthropic은 최상위 `model`, openai는 `providers.openai.model`이다. 다른 필드와 값, 순서는 그대로이고, 줄 안의 공백 배치는 다시 쓴다(한 줄에 쓴 배열이 여러 줄로 펼쳐진다).
   - `--config`나 `CODARYN_CONFIG`로 준 파일, 또는 기본 위치에 있는 파일이 필요하다. 기본 위치에 파일이 없으면 요청을 보내기 전에 `invalid_arguments`(종료 2)다. 먼저 `init`을 한다.
   - `--config`로 준 파일이 없으면 `schemaVersion`과 `model`만 있는 파일을 새로 만든다.
   - 목록에 없는 번호나 id는 `invalid_arguments`이고 아무것도 쓰지 않는다.
-  - `CODARYN_MODEL`이 설정돼 있으면 실행은 그 값을 쓴다.
+  - 그 제공자의 모델 변수(`CODARYN_MODEL`, `CODARYN_OPENAI_MODEL`)가 설정돼 있으면 실행은 그 값을 쓴다.
 - 터미널에서 `--use`와 `--json` 없이 실행하면 번호를 묻는다. 빈 줄이면 쓰지 않는다(터미널 대화는 확인하지 않았다).
 - 오류: API 요청 실패는 `model_list_failed`(종료 8, 메시지에 종류), 설정 파일을 쓰지 못하면 `config_write_failed`(종료 2, 파일은 그대로)다.
-- 확인 범위: 실제 API로는 실행하지 않았다. 로컬 가짜 서버(`CODARYN_API_BASE_URL`에 루프백 `http` 주소)와 가짜 키로 표, `--json`, `--use`를 확인했다(1차 문서 작성 때).
+- 확인 범위: 실제 API로는 실행하지 않았다. 로컬 가짜 서버와 가짜 키로 확인했다. Anthropic은 1차 문서 작성 때 `CODARYN_API_BASE_URL`에 루프백 `http` 주소로 표, `--json`, `--use`를 봤다. OpenAI는 main `3e36b1b`에서 `CODARYN_OPENAI_API_BASE_URL`로 같은 것을 봤다(아래).
+
+### 두 번째 제공자: OpenAI
+
+제공자는 Anthropic(기본)과 OpenAI 둘이다. OpenAI는 Responses API(`POST /v1/responses`)를 쓴다.
+
+**확인 범위:** 실제 OpenAI API로는 점검하지 않았다. OpenAI의 공식 문서로 확인한 사실([사실 확인](design/second-provider-facts.md))과 로컬 가짜 서버로만 확인했다. 아래 출력은 main `3e36b1b`의 실제 CLI를 가짜 키와 루프백 가짜 서버로 실행한 것이다. 14절의 실제 호출 점검은 Anthropic용만 있다.
+
+**고르기:** 간편 형식과 한 줄 실행은 설정 파일의 `provider`를 쓰고, 없으면 anthropic이다. task 파일은 `model.provider`로 고른다. 제공자를 고르는 환경 변수는 없다.
+
+**설정:** OpenAI의 설정은 설정 파일의 `providers.openai` 아래에 둔다(`model`, `maxOutputTokens`, 필요하면 `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`). 최상위의 `model`·`maxOutputTokens`·`apiBaseUrl`은 Anthropic 몫이다. 그래서 `init`이 만든 파일에 `"provider": "openai"`만 더하면 출력 상한이 없어 실행이 멈춘다:
+
+```
+{"schemaVersion":1,"kind":"error","code":"provider_not_configured","exitCode":7,"message":"not set: maxOutputTokens (task model.maxOutputTokens or config providers.openai.maxOutputTokens). Nothing was sent"}
+```
+
+- 이때 `doctor`의 모델 항목은 `maxOutputTokens is not set (task model.maxOutputTokens or config maxOutputTokens)`라고 적는다. OpenAI가 읽는 곳은 `providers.openai.maxOutputTokens`다.
+- `init`은 지금처럼 Anthropic 설정만 만들고 Anthropic 키만 안내한다. OpenAI 설정은 직접 더한다.
+
+**모델:** 코드에 기본 모델이 없다. 현행 Codex 계열 모델 id는 API에 없으므로(결정 DR-31) 특정 모델을 전제로 하지 않는다. `models --provider openai`로 키가 쓸 수 있는 목록을 보고 고른다.
+
+```powershell
+# OPENAI_API_KEY는 미리 사용자 환경 변수로 등록해 둔다(4절 "키"와 같은 방법)
+node dist/src/cli/main.js models --provider openai
+node dist/src/cli/main.js models --provider openai --use 1
+```
+
+가짜 서버의 목록으로 본 실제 출력(stdout):
+
+```
+Models this key can use (2):
+
+  #  id            name          input tokens  output tokens
+* 1  fake-model-a  fake-model-a             -              -
+  2  fake-model-b  fake-model-b             -              -
+
+* current model (from the config file): fake-model-a
+Written: fake-model-a is now the config file's providers.openai.model.
+```
+
+- OpenAI 목록에는 이름과 토큰 상한이 없어 이름 칸에 id가, 상한 칸에 `-`가 나온다.
+- `OPENAI_API_KEY`가 없으면 `provider_not_configured`(종료 7, 메시지 `not set: OPENAI_API_KEY. Nothing was sent`)이고 아무것도 보내지 않는다.
+
+`--use 1`은 `init`이 만든 파일 끝에 `providers.openai.model`을 더한다. 여기에 `maxOutputTokens`와 `provider`를 직접 더하면 설정 파일의 뒷부분이 이렇게 된다(앞부분은 `init`이 만든 그대로):
+
+```json
+  "providers": {
+    "openai": {
+      "model": "fake-model-a",
+      "maxOutputTokens": 4096
+    }
+  },
+  "provider": "openai"
+}
+```
+
+이 설정으로 `doctor --workspace <폴더>`는 키 항목이 `OPENAI_API_KEY is set (its value is not looked at)`, 모델 항목이 ok이고 종료 0이다. 간편 형식 실행의 진행 줄(stderr):
+
+```
+codaryn: run started — provider openai
+codaryn: using the config file in the default location: %APPDATA%\Codaryn\config.json
+codaryn: turn 1
+codaryn: write file — allowed (write_file)
+codaryn: created summary.md
+codaryn: turn 2
+codaryn: finished — needs input (no_verifier)
+```
+
+**보내는 것과 남기는 것:**
+- 키는 `Authorization` 헤더에만 들어간다. 요청 본문과 기록에는 없다.
+- 요청마다 `store: false`로 OpenAI 쪽 응답 저장을 끈다. 그래서 다음 요청에 앞 응답의 항목(추론 항목 포함)을 다시 보낸다. 추론 항목은 암호문이라 Codaryn의 가림이 볼 수 없다. 자세한 것은 [민감정보 처리](privacy.md) "OpenAI 제공자"다.
+- 실행 기록에는 추론 항목의 개수만 남는다(`model_response`의 `reasoningItems`).
+- 키가 거부되면(401·403) 제공자의 문구를 옮기지 않고 고정 문구와 요청 id만 남긴다. 예: `HTTP 401: the key or its access was refused; the provider's message is not shown (request req_fake_1)`.
+- 할당량 소진(429 중 `insufficient_quota`나 과금 코드)은 다시 시도하지 않는다.
+
+**지금의 결함: OpenAI 실행의 기록을 읽지 못한다(main `3e36b1b`).** OpenAI로 한 실행은 끝까지 돌고 기록도 남지만, 기록을 읽는 쪽이 제공자 이름 `openai`를 받지 않는다.
+- `runs`는 그 실행을 `damaged (the record could not be checked)`로 보인다.
+- `report`, `changes`, `revert`는 그 실행 id에 `invalid_run_record`(종료 2)로 거부한다.
+- `--run latest`는 그 실행을 고르지 못한다(`run_not_found`).
+- 그래서 **OpenAI 실행이 바꾼 파일을 Codaryn으로 되돌릴 수 없다.** OpenAI로 실행하기 전에 작업 공간을 Git 커밋이나 사본으로 보존한다. 고쳐지면 이 단락을 지운다.
 
 ## 5. 파일 위치 규칙
 
@@ -364,7 +449,7 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 [ok]      config file               the config file at the default location %APPDATA%\Codaryn\config.json is valid
 [skipped] variables file            no --vars-file given
 [skipped] task file                 no --task given
-[failed]  API key                   ANTHROPIC_API_KEY is not set; an anthropic run stops with provider_not_configured
+[failed]  API key                   ANTHROPIC_API_KEY is not set; a run with the anthropic provider stops with provider_not_configured
 [failed]  model                     the model is still a placeholder, so it counts as not set; choose one with codaryn models --use
 [ok]      limits                    every limit is set for the quick form
 [ok]      file locations            input files outside the workspace: 1
@@ -396,7 +481,7 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 - **한 줄 실행** `run "<목표>"`은 `--workspace <현재 디렉터리> --goal <목표>`와 같다. 위치 인자는 하나만 받고, `--task`·`--workspace`·`--goal`과 함께 쓰면 `invalid_arguments`다. `--`로 시작하는 목표는 옵션으로 읽힌다. `npm link`했으면 `codaryn run "<목표>"`다.
   - 현재 디렉터리가 설치 위치(이 저장소)와 겹치면 `workspace_is_install_dir`(종료 2)다.
   - 확인 범위: 이 문서 작성 때 한 줄 실행은 키 없음·자리표시자 모델의 `provider_not_configured`(종료 7, 전송 없음)와 설치 위치 거부까지 실제로 확인했다. 실제 모델로 끝까지 실행하지는 않았다(실제 API 미검증).
-- 지금 제공자는 anthropic 하나다(키 없는 시험용 `scripted` 제외). 간편 형식과 한 줄 실행은 늘 anthropic을 쓴다.
+- 제공자는 anthropic과 openai다(키 없는 시험용 `scripted` 제외). 간편 형식과 한 줄 실행은 설정 파일의 `provider`를 쓰고, 없으면 anthropic이다(4절 "두 번째 제공자: OpenAI").
 - 예시를 직접 돌릴 때는 `examples` 폴더를 저장소 밖에 복사한 뒤 그 사본의 task를 실행한다. 모델이 예시 파일을 실제로 고치고, 작업 공간에 `.codaryn/`가 생긴다.
 - 옵션은 `--config`, `--vars-file`, `--cancel-file`, `--profile`, `--quiet`이다.
 - 취소는 Ctrl+C로 하거나, `--cancel-file`로 지정한 파일(작업 공간 밖)을 만들어서 한다. 상태는 `cancelled`(5)가 되고 이미 적용한 변경은 남는다.
@@ -410,9 +495,11 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 
 ```
 codaryn: error — the model provider is not fully configured (key, model, output limit), so nothing was sent (provider_not_configured)
-  To fix: Run codaryn doctor to see what is missing. The key is the user environment variable ANTHROPIC_API_KEY; choose the model with codaryn models --use.
-Check: codaryn doctor
+  To fix: Run codaryn doctor to see what is missing, including the provider's key variable; choose the model with codaryn models --use.
+  Check: codaryn doctor
 ```
+
+- 이 예는 키도 모델도 없는 상태(`init` 직후)의 `run --workspace … --goal …`이다(main `3e36b1b`, `CODARYN_LANG=en`). 빠진 것(어느 키 변수인지 포함)은 stdout JSON의 `message`와 `doctor`가 알린다(`not set: ANTHROPIC_API_KEY; the model …`).
 
 - **`--quiet`**: `run`과 `revert`가 받는다. 진행 줄, 끝 요약, 오류 설명을 모두 생략한다. stdout의 JSON은 그대로다.
 
@@ -518,16 +605,36 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 node dist/src/cli/main.js changes --task <task.json> --run <runId|latest> [--json]
 ```
 
-실행이 파일 도구로 바꾼 파일과 그 상태를 보여 준다. 읽기만 하고 잠금도 잡지 않는다. 3절 체험 실행의 실제 출력(stdout):
+실행이 파일 도구로 바꾼 파일과 그 상태, 그리고 가린 글의 줄 단위 비교를 보여 준다. 읽기만 하고 잠금도 잡지 않는다. 3절 체험 실행의 실제 출력(stdout, main `3e36b1b`. 빈 줄을 나타내는 `+` 뒤의 공백 하나는 이 문서에서 뺐다):
 
 ```
-changes of run 20261112T055920Z-5673ae9d, masked with the secrets registered now (not the run's own masking)
+changes of run 20261112T081531Z-dfd155bd, masked with the secrets registered now (not the run's own masking)
 == summary.md: created by the run; as the run left it
-   the text is not shown (masking_unverified)
+@@ -1,0 +1,11 @@
++ # 회의 요약
++
++ ## 결정 사항
++
++ - 문서 사이트 개편은 다음 주에 시작한다.
++ - 체험 예시는 API 키 없이 실행되게 한다.
++
++ ## 할 일
++
++ - 문서 담당: 사용 안내 초안(금요일까지)
++ - 개발 담당: 오류 문구 목록 정리
 ```
 
-- 지금은 **경로와 상태만** 보인다. 파일 내용(실행 전후의 글)은 `masking_unverified`로 보이지 않는다. 실행이 바꾼 파일의 가린 표기를 기록하지 않아서, 지금 비밀로 다시 가린 글이 실행 때와 같은지 확인할 수 없기 때문이다(16절).
-- 바뀐 내용은 `report`의 변경 절(해시), 작업 공간의 Git 비교, `revert --dry-run`으로 본다.
+- 글은 **지금 등록된 비밀로 가린 것**이다. 쓰기 도구가 실행 때 가린 표기의 다이제스트를 기록해 두고, 지금 다시 가린 글이 그것과 같을 때만 글을 보인다. 비밀 자리는 토큰으로 보인다. 예: 비밀로 등록한 값이 든 줄은 `+ - [[CODARYN_SECRET:f44831dde79cb2f6]] 개편은 다음 주에 시작한다.`처럼 나온다.
+- 다음 경우에는 그 파일의 경로와 상태만 보이고(JSON의 `unavailable`은 `masking_unverified`), 머리에 그 사실을 한 줄로 알린다.
+  - 실행 뒤에 파일이 바뀌었을 때(상태 `changed_since_run`). 예: 위 실행 뒤 `summary.md`에 한 줄을 더하면
+    ```
+    no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)
+    == summary.md: created by the run; changed again since the run
+    ```
+  - 지금 등록된 비밀의 값이 실행 때와 달라 가린 결과가 다를 때. 상태는 `as_run_left` 그대로다.
+  - 이 기록이 없는 실행(쓰기 도구가 다이제스트를 남기기 전의 실행).
+- `--json`이면 `kind:"changes"` JSON 한 줄이고, 파일마다 `before`·`after`(가린 글 또는 `null`)와 `unavailable`(글이 없는 이유 또는 `null`)이 있다.
+- 기록 파일을 고쳐 이 확인을 속일 수 있다(16절 "실행 기록 변조").
 
 ## 11. 되돌리기
 
@@ -560,7 +667,10 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 ## 12. 비밀 등록과 가려지는 범위
 
 - `privacy.secretEnv`(task)나 `secretEnv`(설정)에는 환경 변수 **이름**만 적는다. 값은 실행할 때 환경에서 읽는다(`--vars-file`로 읽은 값 포함). 값이 없으면 `secret_env_missing`이다.
-- API 키와 변수 파일이 새로 설정한 값(4절)은 자동으로 비밀로 등록된다.
+- 다음 값은 자동으로 비밀로 등록된다.
+  - 실행이 쓰는 제공자의 키(길이와 관계없이)
+  - 다른 제공자의 키 변수 값 중 20자 이상인 것. 예: openai 실행에서 `ANTHROPIC_API_KEY` 값이 작업 공간 파일에 있으면 모델에 가려져 간다. 20자 미만이면 등록하지 않는다(`x` 같은 자리표시자가 흔한 글자를 가리지 않게)
+  - 변수 파일이 새로 설정한 값(4절)
 - **가리는 범위:** 모델에 보내는 내용과 실행 기록 전체. 목표, 파일 내용, 경로, 명령 출력, 검증 근거, 오류 문구가 모두 해당한다.
 - **가리는 형태:** 원문, Base64(패딩 유무, URL 문자 집합), URL 인코딩(대·소문자), JSON 이스케이프, 16진(대·소문자), 여러 줄 비밀의 LF와 CRLF 표기. 가려진 자리는 토큰으로 보이고, 대응표는 실행 중 메모리에만 있다.
 - 비밀이 든 줄을 모델이 고치거나 옮기는 변경은 전체가 거부된다(`protected_span_violation`). 다른 줄은 고칠 수 있다.
@@ -611,6 +721,7 @@ node --test dist/tests/live/anthropic-live.js
 ```
 
 - 모델 ID는 `models`(4절)로 확인한다.
+- 이 점검은 Anthropic용이다. OpenAI용 실제 호출 점검은 아직 없다(4절 "두 번째 제공자: OpenAI").
 - 임시 폴더 문서에 절 하나를 추가하는 작업을 실행하고 `done`인지, stdout·stderr·기록에 키가 없는지 확인한다. 세 변수 중 하나라도 없으면 아무것도 보내지 않고 "건너뜀"으로 끝난다. 고정 상한: 턴 4, 도구 호출 4, 출력 1024토큰/요청, 총 30000토큰, 3분, HTTP 요청 최대 8건.
 
 ## 15. 투입 전 점검표
@@ -643,7 +754,9 @@ node --test dist/tests/live/anthropic-live.js
 - **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 직접 지운다(지워도 되는 폴더는 11절).
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 비밀 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
 - **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
-- **변경 보기는 경로와 상태만:** `changes`는 실행이 바꾼 파일의 경로와 상태만 보이고 내용은 보이지 않는다(`masking_unverified`). 실행이 바꾼 파일의 가린 표기를 기록하지 않아, 지금 비밀로 가린 글이 실행 때와 같은지 확인할 수 없기 때문이다(10절 "변경 보기").
+- **OpenAI 실행의 기록(지금의 결함):** main `3e36b1b`에서 OpenAI로 한 실행은 `runs`에 `damaged`로 나오고, `report`·`changes`·`revert`가 `invalid_run_record`로 거부하며, `--run latest`가 고르지 못한다. 그 실행이 바꾼 파일은 Codaryn으로 되돌릴 수 없다. 작업 공간을 Git이나 사본으로 보존한다(4절 "두 번째 제공자: OpenAI").
+- **OpenAI 제공자:** 실제 OpenAI API로는 점검하지 않았다. 추론 항목은 암호문이라 가림이 볼 수 없고, 다음 요청에 받은 그대로 다시 간다([민감정보 처리](privacy.md) "OpenAI 제공자").
+- **변경 보기의 글:** `changes`는 지금 등록된 비밀로 가린 글이 실행 때와 같을 때만 글을 보인다. 실행 뒤 바뀐 파일, 비밀의 값이 바뀐 경우, 쓰기 도구가 기록을 남기기 전의 실행은 경로와 상태만 보인다(10절 "변경 보기").
 - **보관함:** 폐기한 파일은 `.codaryn\discarded\`에 쌓이고 비우는 명령이 없다(18.8절).
 - **계획의 비밀 표기:** 계획 보기는 비밀이 든 경로를 실행마다 다른 토큰(`[[CODARYN_SECRET:…]]`)으로 보인다. 그래서 비밀이 둘 이상 등록되어 있으면 어느 비밀 이름의 폴더로 가는지 보기만으로 구별할 수 없다. 계획 실행의 끝 요약에 나온 다이제스트로 승인한다(18.3절).
 - **계획 뒤에 등록한 비밀:** 계획 경로에 든 값을 계획 실행 뒤에 비밀로 새로 등록하면, 그 계획은 `plan_secrets_differ`로 보거나 적용할 수 없다. 계획을 새로 만든다(18.3절).
@@ -651,14 +764,17 @@ node --test dist/tests/live/anthropic-live.js
 - **자료 검증(`data_checks`):** 판단 불가(`inconclusive`)가 되는 경우가 둘 있다. 검증 결과의 한계 목록에도 같은 내용이 나온다.
   - 열이나, 묶은 규칙의 묶음 하나라도 값이 모두 비어 있으면 sum·min·max·mean 규칙
   - 더해 가는 합이 double 범위를 넘으면 sum·mean 규칙. 넘는지는 행 순서에 달렸다. 같은 값 `1e308, -1e308, 1e308`은 검사되고 `1e308, 1e308, -1e308`은 판단 불가다.
-- **큰 작업 공간의 파일 목록:** 적용 한 번에 작업 공간의 파일 목록(상한 10만 개)을 세 번 만든다. 계획을 읽을 때 한 번, 행동 앞뒤로 두 번이다. 파일이 아주 많으면 시간이 걸리고, 그동안의 취소는 목록이 끝난 뒤 반영된다.
+- **큰 작업 공간의 파일 목록:** 작업 공간의 파일 목록(상한 10만 개)을 `plan`은 한 번, `apply --digest`는 두 번(행동 앞뒤) 만든다. 터미널 질문으로 승인하면 계획을 보이기 전에 한 번 더 만든다(코드 기준, 터미널 대화는 확인하지 않았다). 파일이 아주 많으면 시간이 걸린다. 목록을 만드는 중의 취소는 목록이 끝나기를 기다리지 않는다. 파일 5만 개(목록 하나에 약 0.5초)에서 첫 목록 중에 취소 파일을 만들자 약 0.1초 뒤 `cancelled`로 끝났고 아무것도 옮기지 않았다(main `3e36b1b`).
 - **보호 경로:** 파일 도구만 막는다. 명령으로 고치는 것은 막지 못하고, 무결성 확인은 사후 탐지다. 두 확인 사이에 바뀌었다가 다음 확인 전에 되돌려진 변경은 탐지하지 못한다.
 - **되돌리기:** 명령이 바꾼 파일은 대상이 아니다. 실행 중 다른 프로그램이 같은 파일을 바꾸면 스냅샷이 실제 실행 전 상태와 다를 수 있다.
 - **같은 실패 판정:** 숫자만 바뀌는 진전(실패 3건 → 1건)도 같은 실패로 보아 `maxSameFailures`에서 멈춘다. 임시 경로처럼 숫자가 아닌 내용이 매번 바뀌면 다른 실패로 보아 `maxRepairAttempts`와 예산 한도만 반복을 멈춘다.
 - **가림의 빈틈:** 12절 목록 밖의 변형, 다른 값과 함께 인코딩된 Base64, UTF-16·CP949 출력은 가려지지 않는다. 출력 끝에서 4096바이트보다 긴 변형이 잘리면 일부가 남을 수 있다. 아주 짧은 비밀이나 변수 파일의 흔한 값(예: `postgres`)은 엉뚱한 곳까지 가릴 수 있다.
 - **파일 해시 노출:** 파일 해시가 모델과 기록에 남는다. 짧은 비밀이 든 파일은 추측 검증이 가능하다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
-- **점검과 보고서:** `doctor`는 모델이 실제로 있는지 확인하지 않는다. `report`는 실행 기록만큼만 믿을 수 있다.
+- **점검:** `doctor`는 모델이 실제로 있는지 확인하지 않는다.
+- **실행 기록 변조:** `report`와 `changes`는 `.codaryn\runs\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
+  - `report`는 실행 기록만큼만 믿을 수 있다.
+  - 변경 기록 파일의 다이제스트를 지금 값으로 바꿔 넣으면, `changes`를 다른 비밀로 볼 때 실행 때 가렸던 값이 그대로 보인다(결정 DR-37 (b)). 드러나는 값은 작업 공간 파일에 이미 있는 값이다. 엔진이 명령 실행 전후로 이 폴더의 변경을 알아채는 것은 후속 과제다.
 - **출력 언어:** `report`의 Markdown과 `models`의 표는 `CODARYN_LANG`과 관계없이 영어다. 오류 JSON의 `message`, `--json` 출력도 영어다. `plan`·`apply`·`review`·`changes`의 도움말과 적용·동의를 묻는 터미널 질문도 아직 영어다.
 - **OS 언어 판단:** `CODARYN_LANG`과 설정의 `language`가 없으면 Node의 `Intl` 기본 로캘로 언어를 고른다. Windows에서는 이것이 표시 언어가 아니라 지역 형식을 따를 수 있다. 원하는 언어가 아니면 `CODARYN_LANG`이나 설정의 `language`로 고정한다(8절). Linux·macOS에서는 확인하지 않았다.
 - **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다. 끝난 실행의 잠금은 다음 실행이 회수한다.
@@ -886,7 +1002,7 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
   - 행동마다 지금 정책(`policy.planActions`, 보호 경로)으로 다시 판정한다.
   - 계획 뒤에 원본이 바뀌었거나 없어졌으면 아무것도 옮기지 않고 `failed`/`plan_stale`(종료 1)이다. 정책이 거부한 행동이 있어도 같다.
   - 작업 공간 파일이 파일 목록 확인의 상한을 넘어도 `plan_stale`이다. `plan`이 이 경우를 미리 알린다.
-- **적용 순서:** 잠금 → 사전 점검(모든 행동) → 계획 순서대로 이동·폐기 → 파일 목록 확인(`inventory`) → task 검증기
+- **적용 순서:** 잠금 → 사전 점검(파일 목록, 모든 행동) → 계획 순서대로 이동·폐기 → 파일 목록 확인(`inventory`, 두 번째 목록과 비교) → task 검증기. 목록 횟수와 취소는 16절 "큰 작업 공간의 파일 목록"
   - 이동은 대상에 파일이 있으면 하지 않는다(덮어쓰지 않음). 대상의 부모 폴더는 만든다.
   - **폐기는 지우지 않는다.** `.codaryn\discarded\<적용 실행 id>\`로 옮긴다.
   - 중간에 한 행동이 실패하면 그 뒤 행동은 하지 않고 `failed`/`apply_incomplete`(종료 1)다. 이미 한 행동은 `revert`로 되돌린다.

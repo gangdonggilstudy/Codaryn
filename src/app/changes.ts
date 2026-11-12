@@ -5,6 +5,8 @@
  *   config file, the current key, values the variables file sets). They come from the CLI's own
  *   steps 1 to 7 as a reading command (see `readingSecrets` in app.ts; U-17: the quick form needs
  *   no key, model or run limits), so nothing here decides what is a secret.
+ * - U-16 (UXM-4): an apply run's view carries `applyRun` (its plan run and the actions it applied,
+ *   from the run list), since its moves and discards are no file writes of its own.
  * - The run: judged first as the run list, `report` and `revert` judge it (R-14 L-1). Its changed
  *   paths, originals and DR-29 record come from the store's `readRunOriginals` (DR-14: it replaced
  *   this module's own reading of the snapshot layout) with the same checks `revertRun` applies.
@@ -33,8 +35,8 @@ import {
   maskedParts,
   maskedPartsEncoding,
 } from "../contracts/index.js";
-import type { ChangeNow, ContentHash, MaskedText, PrivacyGateway, ReadRunOriginals, RunOriginal } from "../contracts/index.js";
-import { RevertRunError, inspectRun, readRunOriginals } from "../store/index.js";
+import type { ChangeNow, ChangesApplyRun, ContentHash, ListRuns, MaskedText, PrivacyGateway, ReadRunOriginals, RunOriginal } from "../contracts/index.js";
+import { RevertRunError, inspectRun, listRuns, readRunOriginals } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
@@ -53,6 +55,21 @@ export interface ReadChangesDeps {
   readonly inspect?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
   /** The store's originals and DR-29 records. */
   readonly readOriginals?: ReadRunOriginals;
+  /** U-16: the store's run list, which says whether the run is an apply run and of which plan run. */
+  readonly listRuns?: ListRuns;
+}
+
+/**
+ * U-16 (UXM-4): the plan run an apply run applied and how many actions it applied, as the run list
+ * gives them (its entry's `kind`, `planRunId` and `changes`, the applied actions). Null for a run
+ * that is not an apply run, and for an apply whose result is not there yet.
+ */
+async function applyRunOf(workspaceRoot: string, runId: string, list: ListRuns): Promise<ChangesApplyRun | null> {
+  const listing = await list({ workspaceRoot });
+  const entry = listing.runs.find((run) => run.state === "checked" && run.runId === runId);
+  if (entry === undefined || entry.state !== "checked" || entry.kind !== "apply") return null;
+  if (entry.planRunId === undefined || entry.changes === null) return null;
+  return { planRunId: entry.planRunId, actions: entry.changes };
 }
 
 /**
@@ -172,5 +189,11 @@ export async function readChanges(
     }
     files.push({ path: shownPath, created, state, before, after, unavailable });
   }
-  return { ok: true, output: { schemaVersion: 1, kind: "changes", runId, exitCode: 0, masking: "current_secrets", files } };
+  let applyRun: ChangesApplyRun | null;
+  try {
+    applyRun = await applyRunOf(workspace.root, runId, deps.listRuns ?? listRuns);
+  } catch {
+    return { ok: false, error: appError("invalid_run_record", "the run list cannot be read") };
+  }
+  return { ok: true, output: { schemaVersion: 1, kind: "changes", runId, exitCode: 0, masking: "current_secrets", files, ...(applyRun === null ? {} : { applyRun }) } };
 }

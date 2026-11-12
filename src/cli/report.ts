@@ -25,8 +25,11 @@ import {
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   TERMINAL_RUN_STATUSES,
+  isReasonOfStatus,
 } from "../contracts/index.js";
 import type {
+  ListRuns,
+  ContentHash,
   EngineResult,
   FileChangeRecord,
   IntegrityPhase,
@@ -37,18 +40,22 @@ import type {
   ReportOutput,
   ReportStatus,
   RunReason,
-  RunReasonByStatus,
   RunUsage,
   TerminalRunStatus,
   VerifierResult,
 } from "../contracts/index.js";
 import { parseReportArgs } from "./args.js";
+import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
+import { resolveRunReference } from "./run-ref.js";
+import type { CheckedRun } from "./run-ref.js";
 import { cliError } from "./run.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
-import { cleanText, hideKeys } from "./text-safety.js";
+import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
+import { inspectRun } from "../store/index.js";
+import type { RunInspection } from "../store/index.js";
 
 export interface ReportEnvironment {
   readonly argv: readonly string[];
@@ -56,18 +63,33 @@ export interface ReportEnvironment {
   /** Read only to keep the current key out of the printed report. */
   readonly env: SettingsEnvironment;
   readonly platform?: NodeJS.Platform;
+  /** N-7: the store's `listRuns`, for `--run latest`. Absent: `latest` is not available. */
+  readonly listRuns?: ListRuns;
+  /** N-23: told which run `--run latest` chose, before anything is read. */
+  readonly announceLatest?: (entry: CheckedRun) => void;
+  /**
+   * N-27 (b): whether the run list judges the run damaged (the store's `inspectRun` when absent).
+   * A damaged run is refused as revert refuses it (N-26).
+   */
+  readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+  /** N-27 (a): the store's `inspectRun` (the default); injected by tests. */
+  readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const realpathNative = promisify(realpathCallback.native);
 
 /** Every reason, per status. The type keeps each entry a valid reason for its status. */
-const REASONS: { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] } = {
-  done: ["verified"],
-  failed: ["verifier_failed", "model_error", "repeated_failure"],
-  "needs-input": ["verifier_inconclusive", "no_verifier", "unknown_tool_outcome", "protected_changed"],
-  cancelled: ["cancelled"],
-  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
-};
+// DR-16: the reasons of each status come from the contract (RUN_REASONS_BY_STATUS through
+// isReasonOfStatus); the report keeps no list of its own.
 
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
 const VERIFIER_KINDS = ["command", "file_rules"] as const;
@@ -76,6 +98,12 @@ const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
 /** A record failed a check. Its message is fixed text, never record content. */
 class RecordError extends Error {}
+
+/**
+ * DR-12: the journal starts with `apply_started`: an apply run. ReportOutput has no form for
+ * apply runs yet (its `result` and `journal` are a run's), so the report says so and shows nothing.
+ */
+class ApplyRunError extends Error {}
 
 function bad(message: string): never {
   throw new RecordError(message);
@@ -110,8 +138,8 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
 
 function statusAndReason(statusValue: unknown, reasonValue: unknown): { status: TerminalRunStatus; reason: RunReason } {
   const status = oneOf(statusValue, TERMINAL_RUN_STATUSES);
-  const reason = oneOf<RunReason>(reasonValue, REASONS[status] as readonly RunReason[]);
-  return { status, reason };
+  if (typeof reasonValue !== "string" || !isReasonOfStatus(status, reasonValue)) bad("a record has an unknown value");
+  return { status, reason: reasonValue };
 }
 
 function limitsOf(value: unknown): Limits {
@@ -202,6 +230,7 @@ export function summarizeJournal(text: string, runId: string, hasResult: boolean
     if (rec["seq"] !== index + 1) bad("journal records are out of order");
     const type = rec["type"];
     if (index === 0) {
+      if (type === "apply_started") throw new ApplyRunError();
       if (type !== "run_started") bad("the journal does not start with run_started");
       started = {
         taskId: str(rec["taskId"]),
@@ -275,6 +304,11 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
   const changes = rec["changes"];
   if (!Array.isArray(verifiers) || !Array.isArray(changes)) bad("result.json has a field of the wrong type");
   const protectedChanged = rec["protectedChanged"];
+  // G-A: a plan run names its plan; a run awaiting review carries the workflow's checklist.
+  const plan = rec["plan"];
+  const review = rec["review"];
+  if (plan !== undefined && reason !== "plan_pending") bad("result.json has a plan for another reason");
+  if (review !== undefined && reason !== "awaiting_review") bad("result.json has a review for another reason");
   return {
     schemaVersion: 1,
     kind: "run",
@@ -290,7 +324,14 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     journalPath: str(rec["journalPath"]),
     notices: recordedList(rec["notices"]),
     ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
+    ...(plan === undefined ? {} : { plan: planOf(plan) }),
+    ...(review === undefined ? {} : { review: { checklist: recordedList(obj(review)["checklist"]) } }),
   };
+}
+
+function planOf(value: unknown): { digest: ContentHash; actions: number } {
+  const rec = obj(value);
+  return { digest: hashOf(rec["digest"]) as ContentHash, actions: int(rec["actions"], 1) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -310,9 +351,20 @@ function longestBacktickRun(text: string): number {
   return longest;
 }
 
+/**
+ * N-23 (review R-2 h): key shapes and the current key are hidden before control characters are
+ * replaced, so a control character cannot break a key into pieces the check misses. Set by
+ * `renderReport` for the duration of one (synchronous) rendering.
+ */
+let renderingKey: string | null = null;
+
+function safe(text: string, keepLineBreaks = false): string {
+  return cleanText(hideKeys(text, renderingKey), keepLineBreaks);
+}
+
 /** Inline code that cannot be closed early by the text it shows. */
 function code(text: string): string {
-  const clean = cleanText(text);
+  const clean = safe(text);
   const longest = longestBacktickRun(clean);
   const fence = "`".repeat(longest + 1);
   const pad = clean.startsWith("`") || clean.endsWith("`") || clean.length === 0 ? " " : "";
@@ -321,7 +373,7 @@ function code(text: string): string {
 
 /** A fenced block that the text inside cannot close. */
 function block(text: string): string[] {
-  const clean = cleanText(text, true);
+  const clean = safe(text, true);
   const fence = "`".repeat(Math.max(3, longestBacktickRun(clean) + 1));
   return [fence].concat(clean.split(String.fromCharCode(10)), [fence]);
 }
@@ -344,7 +396,16 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
 ];
 
-export function renderReport(report: ReportOutput): string {
+export function renderReport(report: ReportOutput, currentKey: string | null = null): string {
+  renderingKey = currentKey;
+  try {
+    return renderReportText(report);
+  } finally {
+    renderingKey = null;
+  }
+}
+
+function renderReportText(report: ReportOutput): string {
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
@@ -354,6 +415,9 @@ export function renderReport(report: ReportOutput): string {
   );
   if (result !== null) {
     out.push(`- Result: ${code(result.status)} / ${code(result.reason)}, exit code ${result.exitCode}`);
+    if (result.plan !== undefined) {
+      out.push(`- Plan: ${result.plan.actions} action(s) waiting for approval, digest ${code(result.plan.digest)}. See it with ${code("codaryn plan --run " + report.runId)}.`);
+    }
   } else {
     out.push("- Result: none. The run has no result.json: it is still running, or it stopped without writing one.");
     out.push(
@@ -369,8 +433,9 @@ export function renderReport(report: ReportOutput): string {
   if (verifiers.length === 0) {
     out.push("No verifier result was recorded for the last round.");
   } else {
-    for (const verifier of verifiers) {
-      out.push(`- ${code(verifier.id)} (${verifier.kind}): **${verifier.outcome}**`);
+    // N-24 (a): a verifier is shown by its number in the run's verifier order; the id is in --json only.
+    for (const [index, verifier] of verifiers.entries()) {
+      out.push(`- verifier ${index + 1} (${verifier.kind}): **${verifier.outcome}**`);
       for (const item of verifier.checked) out.push(`  - checked: ${code(item)}`);
       if (verifier.outcome !== "pass" && verifier.evidence.length > 0) {
         out.push("");
@@ -379,6 +444,11 @@ export function renderReport(report: ReportOutput): string {
     }
   }
   if (journal.repairs > 0) out.push("", `Repairs started: ${journal.repairs}.`);
+  if (result?.review !== undefined) {
+    out.push("", "## Review checklist", "");
+    out.push(`The run waits for a person's verdict (${code("codaryn review --run " + report.runId + " --accept | --reject")}).`);
+    for (const item of result.review.checklist) out.push(`- ${code(item)}`);
+  }
 
   out.push("", "## Protected material", "");
   const lastCheck = journal.integrityChecks[journal.integrityChecks.length - 1];
@@ -426,8 +496,8 @@ export function renderReport(report: ReportOutput): string {
   out.push(`- Repairs: ${journal.repairs}${limits.maxRepairAttempts === undefined ? "" : ` of ${limits.maxRepairAttempts}`}`);
 
   out.push("", "## Not checked", "");
-  for (const verifier of verifiers) {
-    for (const item of verifier.limits) out.push(`- ${code(verifier.id)}: ${code(item)}`);
+  for (const [index, verifier] of verifiers.entries()) {
+    for (const item of verifier.limits) out.push(`- verifier ${index + 1}: ${code(item)}`);
   }
   for (const item of REPORT_FIXED_LIMITS) out.push(`- ${item}`);
 
@@ -464,7 +534,7 @@ async function readRecordFile(file: string): Promise<string> {
 export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> {
   const parsed = parseReportArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
-  const { runId, json } = parsed.args;
+  const { json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.
   const problem = localPathProblem(parsed.args.workspace, io.cwd);
@@ -476,6 +546,32 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     if (!(await lstat(root)).isDirectory()) throw new Error("not a directory");
   } catch {
     return cliError("workspace_not_found", "the workspace is not an existing directory");
+  }
+  // N-7, N-18: `latest` is the newest checked run; ambiguous when a directory has that name.
+  const reference = await resolveRunReference(root, parsed.args.runId, {
+    exists: pathExists,
+    ...(io.listRuns === undefined ? {} : { listRuns: io.listRuns }),
+    inspect: io.inspectRun ?? inspectRun,
+  });
+  if (!reference.ok) return cliError(reference.code, reference.message);
+  const runId = reference.runId;
+  // N-27 (b), review R-7 I-2: the run list's judgment (record ownership, schema, times, and the
+  // id's exact form, N-27 a) applies to the report too; its records are not shown as a report.
+  let damaged: boolean;
+  try {
+    damaged = await (io.isDamaged ?? (async (workspaceRoot: string, id: string) => (await (io.inspectRun ?? inspectRun)(workspaceRoot, id)) === "damaged"))(root, runId);
+  } catch {
+    damaged = true;
+  }
+  if (damaged) {
+    return cliError("invalid_run_record", "the run's records do not pass the checks (`codaryn runs` shows it as damaged); no report is shown");
+  }
+  if (reference.latest !== null) {
+    try {
+      io.announceLatest?.(reference.latest);
+    } catch {
+      // The notice is best effort.
+    }
   }
 
   const runDir = path.join(root, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
@@ -508,6 +604,12 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     const status: ReportStatus = result === null ? "incomplete" : "complete";
     report = { schemaVersion: 1, kind: "report", runId, status, exitCode: REPORT_EXIT_CODES[status], result, journal };
   } catch (error) {
+    if (error instanceof ApplyRunError) {
+      return cliError(
+        "invalid_arguments",
+        "the run is an apply run; report does not read apply runs yet. `codaryn runs` lists it, and `codaryn revert --run <id>` undoes it",
+      );
+    }
     if (error instanceof RecordError) return cliError("invalid_run_record", `the run's records cannot be used: ${error.message}`);
     return cliError("invalid_run_record", "the run's records cannot be read");
   }
@@ -515,7 +617,8 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
   let text: string;
   try {
-    text = json ? `${JSON.stringify(report)}\n` : renderReport(report);
+    // N-27 (c): keys are hidden in the strings before the JSON is written, as in the text.
+    text = json ? jsonLine(hideKeysInStrings(report, currentKey)) : renderReport(report, currentKey);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

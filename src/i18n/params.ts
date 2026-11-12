@@ -5,7 +5,9 @@
  * REPLACEMENT, never the value itself. Pure: reads nothing.
  *
  * - count: a non-negative safe integer, in decimal digits.
- * - status, reason, permission, denial, modelError, phase, provider: one of the contracts' codes.
+ * - seconds: a non-negative number with at most one decimal place, in decimal digits ("12", "4.2").
+ * - status, reason, permission, denial, modelError, phase, provider, language: one of the
+ *   contracts' codes.
  * - field: a SchemaFieldPath (`toSchemaFieldPath`). runId: a RunId (`toRunId`).
  * - text: text the same catalog produced (`ownText`).
  * - location, suggestedCommand, suggestedPath: one of the fixed display strings.
@@ -17,6 +19,7 @@ import {
   INIT_SUGGESTED_COMMANDS,
   INIT_SUGGESTED_PROTECTED_PATHS,
   INTEGRITY_PHASES,
+  MESSAGE_LANGUAGES,
   MODEL_ERROR_KINDS,
   PERMISSION_KINDS,
   POLICY_DENIAL_CODES,
@@ -42,7 +45,10 @@ void providersComplete;
 
 const LOCATIONS = [...Object.values(DEFAULT_CONFIG_DISPLAY), "--config", "CODARYN_CONFIG"] as const satisfies readonly ConfigLocationDisplay[];
 
-type ClosedKind = Exclude<MessageParamKind, "count" | "field" | "runId" | "text">;
+type ClosedKind = Exclude<MessageParamKind, "count" | "seconds" | "field" | "runId" | "text">;
+
+/** Largest number of seconds shown (about 31 years); larger values are not plausible durations. */
+const MAX_SECONDS = 1_000_000_000;
 
 /** The values each closed kind accepts. */
 export const CLOSED_KIND_VALUES: { readonly [K in ClosedKind]: ReadonlySet<string> } = {
@@ -56,6 +62,7 @@ export const CLOSED_KIND_VALUES: { readonly [K in ClosedKind]: ReadonlySet<strin
   location: new Set(LOCATIONS),
   suggestedCommand: new Set(INIT_SUGGESTED_COMMANDS),
   suggestedPath: new Set(INIT_SUGGESTED_PROTECTED_PATHS),
+  language: new Set(MESSAGE_LANGUAGES),
 };
 
 /** C0 and C1 controls, line and paragraph separators, and bidirectional controls. */
@@ -66,13 +73,47 @@ function isUnsafeCodePoint(cp: number): boolean {
 }
 
 /**
- * One line for a terminal: every unsafe character (line breaks included) becomes REPLACEMENT and
- * key-shaped text becomes HIDDEN_KEY. The same character rules as `src/cli/text-safety.ts`.
+ * One line for a terminal. Key-shaped text is hidden first, and unsafe characters inside it do not
+ * break it up (N-23 h, review R-2 L-5): the key search runs on the text without them, and the whole
+ * stretch, unsafe characters included, becomes HIDDEN_KEY. Then every other unsafe character (line
+ * breaks included) becomes REPLACEMENT. The same character rules as `src/cli/text-safety.ts`.
  */
 export function cleanLine(text: string): string {
+  const chars = Array.from(text);
+  const unsafe = chars.map((char) => isUnsafeCodePoint(char.codePointAt(0) as number));
+  // The safe characters, with the index of each in `chars` by its UTF-16 offset in `visible`.
+  let visible = "";
+  const indexAtOffset: number[] = [];
+  chars.forEach((char, index) => {
+    if (unsafe[index] === true) return;
+    for (let unit = 0; unit < char.length; unit += 1) indexAtOffset.push(index);
+    visible += char;
+  });
+  const hiddenFrom = new Map<number, number>();
+  for (const match of visible.matchAll(KEY_PATTERN)) {
+    const first = indexAtOffset[match.index] as number;
+    const last = indexAtOffset[match.index + match[0].length - 1] as number;
+    hiddenFrom.set(first, last);
+  }
   let out = "";
-  for (const char of text) out += isUnsafeCodePoint(char.codePointAt(0) as number) ? REPLACEMENT : char;
-  return out.replace(KEY_PATTERN, HIDDEN_KEY);
+  for (let index = 0; index < chars.length; index += 1) {
+    const last = hiddenFrom.get(index);
+    if (last !== undefined) {
+      out += HIDDEN_KEY;
+      index = last;
+      continue;
+    }
+    out += unsafe[index] === true ? REPLACEMENT : (chars[index] as string);
+  }
+  return out;
+}
+
+/** Seconds with at most one decimal place, or REPLACEMENT. */
+function formatSeconds(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > MAX_SECONDS) return REPLACEMENT;
+  const tenths = Math.round(value * 10);
+  if (Math.abs(value * 10 - tenths) > 1e-6) return REPLACEMENT;
+  return tenths % 10 === 0 ? String(tenths / 10) : (tenths / 10).toFixed(1);
 }
 
 /**
@@ -83,6 +124,8 @@ export function formatParam(kind: MessageParamKind, value: unknown, ownText: (te
   switch (kind) {
     case "count":
       return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : REPLACEMENT;
+    case "seconds":
+      return formatSeconds(value);
     case "field":
       return typeof value === "string" && toSchemaFieldPath(value) !== null ? value : REPLACEMENT;
     case "runId":

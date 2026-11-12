@@ -20,6 +20,10 @@ export function samples(kind: MessageParamKind, catalog: MessageCatalog): readon
   switch (kind) {
     case "count":
       return [11, 12];
+    case "seconds":
+      return [4.2, 12];
+    case "language":
+      return ["ko", "en"];
     case "status":
       return ["done", "failed"];
     case "reason":
@@ -46,6 +50,10 @@ export function samples(kind: MessageParamKind, catalog: MessageCatalog): readon
       return ["npm test", "npm run build"];
     case "suggestedPath":
       return ["tests", "package.json"];
+    default:
+      // A kind the contract added after these samples: the tests that use it fail here, by name,
+      // instead of the whole build stopping on a switch that is no longer exhaustive.
+      throw new Error(`no sample for the parameter kind ${String(kind)}`);
   }
 }
 

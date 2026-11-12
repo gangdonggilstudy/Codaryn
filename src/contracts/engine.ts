@@ -186,6 +186,10 @@ export const CLI_ERROR_EXIT_CODES = {
    * holds the entry file), lies inside it or contains it. Checked before the lock; nothing is written.
    */
   workspace_is_install_dir: 2,
+  /**
+   * Another run (or revert) holds `<workspace>/.codaryn/lock.json`. N-25 (a): the human-readable
+   * error adds `lock.remove_hint`: when no Codaryn is running in that workspace, remove the file.
+   */
   workspace_locked: 6,
   provider_not_configured: 7,
   provider_not_implemented: 7,
@@ -326,7 +330,10 @@ export interface InputDiagnostic {
 
 export type CliOutput = EngineResult | CliErrorOutput;
 
-/** `complete`: every changed file was reverted (or nothing had changed). `partial`: some were skipped. */
+/**
+ * `complete`: every changed file was reverted or was already as before the run (`already_reverted`),
+ * or nothing had changed. `partial`: some file was skipped for any other reason (N-22).
+ */
 export const REVERT_EXIT_CODES = { complete: 0, partial: 3 } as const;
 export type RevertStatus = keyof typeof REVERT_EXIT_CODES;
 

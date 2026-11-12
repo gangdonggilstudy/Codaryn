@@ -57,9 +57,19 @@ function failing(operation: keyof LockFileSystem, code: string, times = Number.P
 }
 
 for (const code of ["EPERM", "EBUSY"]) {
-  test(`T-9: ${code} while linking a free lock ends as workspace_locked`, async () => {
+  test(`T-9: ${code} while creating a free lock (by link and by exclusive create) ends as workspace_locked`, async () => {
     await withRoot(async (root) => {
-      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-x", clock, fileSystem: failing("link", code), retryForMs: 150 });
+      // DR-27 (b): EPERM from link alone may mean "no hard links", and the lock is then created
+      // exclusively (lock-no-link.test.ts). A name being deleted fails every create the same way.
+      const base = failing("link", code);
+      const fileSystem: LockFileSystem = {
+        ...base,
+        writeNew: async (path, text) => {
+          if (path.endsWith("lock.json")) throw Object.assign(new Error(`${code}: injected`), { code });
+          return base.writeNew(path, text);
+        },
+      };
+      const outcome = await acquireLock({ workspaceRoot: root, runId: "run-x", clock, fileSystem, retryForMs: 150 });
       assert.deepEqual(outcome, { ok: false, code: "workspace_locked", holder: null });
       assert.deepEqual(await readdir(join(root, ".codaryn")), [".gitignore"], "no lock and no leftovers");
     });

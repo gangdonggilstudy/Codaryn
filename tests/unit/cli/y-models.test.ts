@@ -10,7 +10,15 @@ import path from "node:path";
 import { describe, test } from "node:test";
 
 import { ANTHROPIC_API_KEY_ENV, CODARYN_API_BASE_URL_ENV, CODARYN_CONFIG_ENV, CODARYN_MODEL_ENV } from "../../../src/contracts/index.js";
-import type { AnthropicListSettings, EngineResult, ListAnthropicModels, ModelInfo, ModelProvider, ModelsOutput } from "../../../src/contracts/index.js";
+import type {
+  AnthropicListSettings,
+  EngineResult,
+  ListAnthropicModels,
+  MessageCatalog,
+  ModelInfo,
+  ModelProvider,
+  ModelsOutput,
+} from "../../../src/contracts/index.js";
 import { parseModelsArgs } from "../../../src/cli/args.js";
 import { runDoctor } from "../../../src/cli/doctor.js";
 import type { CommandOutcome } from "../../../src/cli/guard.js";
@@ -334,8 +342,10 @@ describe("arguments and help", () => {
 
   test("help lists the command", () => {
     assert.deepEqual(helpRequest(["models", "--help"]), { kind: "help", command: "models" });
-    assert.ok(helpText(null).includes("codaryn models"));
-    assert.ok(helpText("models").includes("--use <number|id>"));
-    assert.ok(helpText("doctor").includes("does not check that the model"));
+    // N-21: descriptions come from the catalog; a stand-in shows the ids.
+    const messages = { language: "en", format: (id: string) => `<${id}>` } as unknown as MessageCatalog;
+    assert.ok(helpText(null, messages).includes("codaryn models"));
+    assert.ok(helpText("models", messages).includes("--use <number|id>"));
+    assert.ok(helpText("models", messages).includes("<help.command.models>"));
   });
 });

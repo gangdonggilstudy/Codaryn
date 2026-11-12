@@ -342,6 +342,22 @@ describe("HumanOutput.revertSummary (N-7)", () => {
     );
   });
 
+  test("N-24(c): an impossible date such as 2026-02-30 shows no time", () => {
+    const human = createHumanOutput(strictCatalog());
+    const revertText = human.revertSummary(output({ revertedBefore: { at: "2026-02-30T00:00:00Z", status: "complete" } }));
+    assert.ok(revertText.includes("[revert.reverted_before] (complete)\n"), revertText);
+    const runs = human.runsText({
+      schemaVersion: 1,
+      kind: "runs",
+      status: "listed",
+      exitCode: 0,
+      omitted: 0,
+      runs: [{ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: null, reason: null, changes: null, reverted: null }],
+    });
+    assert.equal(runs.includes("2026-03-02"), false, runs);
+    assert.ok(runs.split("\n")[1]?.includes("  ?  "), runs);
+  });
+
   test("an earlier revert with a time of another shape shows no time", () => {
     const text = createHumanOutput(strictCatalog()).revertSummary(output({ revertedBefore: { at: `${SECRET}`, status: "partial" } }));
     assert.ok(text.includes("[revert.reverted_before] (partial)\n"));

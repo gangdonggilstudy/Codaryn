@@ -22,7 +22,6 @@ import {
   POLICY_DENIAL_CODES,
   REVERT_SKIP_REASONS,
   RUN_REASONS,
-  RUN_TIMESTAMP_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
   TOOL_ERROR_CODES,
   TOOL_NAMES,
@@ -49,6 +48,7 @@ import type {
   TerminalRunStatus,
   ToolName,
 } from "../../contracts/index.js";
+import { isRunTimestamp } from "../../store/index.js";
 import { displayWidth, finalLine, formatLocalTime, padEnd, shownPath, token } from "./format.js";
 
 /** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
@@ -73,7 +73,6 @@ const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
   "model_list_failed",
 ]);
 
-const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
 const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
 const REASONS_BY_STATUS: { readonly [S in TerminalRunStatus]: readonly RunReason[] } = {
@@ -97,10 +96,9 @@ function validStatusReason(status: unknown, reason: unknown): { status: Terminal
   return REASONS_BY_STATUS[status].includes(reason) ? { status, reason } : null;
 }
 
+/** A recorded time in local wall time, or null when it is not a real timestamp (N-24(c)). */
 function localTime(at: unknown): string | null {
-  if (typeof at !== "string" || !RUN_TIMESTAMP.test(at)) return null;
-  const time = Date.parse(at);
-  return Number.isFinite(time) ? formatLocalTime(time) : null;
+  return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
 }
 
 /** "(+3)" after a cut list. */

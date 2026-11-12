@@ -356,6 +356,33 @@ describe("listRuns (N-7, N-16)", () => {
     await assert.rejects(readRevertRecord(work, "20260102T030402Z-00000002"), RunListError);
   });
 
+  test("N-24(c): a time must survive a toISOString round trip; 2026-02-30 does not", async () => {
+    const work = await tempDir();
+    await writeRun(work, "20260102T030401Z-00000001", { at: "2026-01-02T03:04:01Z" });
+    await writeRun(work, "20260102T030402Z-00000002", { at: "2026-01-02T03:04:02.5Z" });
+    await writeFile(
+      path.join(runsDir(work), "20260102T030401Z-00000001", "revert.json"),
+      JSON.stringify({ schemaVersion: 1, kind: "revert_record", runId: "20260102T030401Z-00000001", at: "2026-02-30T00:00:00Z", status: "complete", reverted: 1, skipped: 0 }),
+      "utf8",
+    );
+    await writeRun(work, "20260230T000000Z-00000003", { at: "2026-02-30T00:00:00Z" });
+    const listing = await listRuns({ workspaceRoot: work });
+    assert.deepEqual(
+      listing.runs.map((run) => [run.runId, run.state]),
+      [
+        ["20260102T030402Z-00000002", "checked"],
+        ["20260102T030401Z-00000001", "checked"],
+        ["20260230T000000Z-00000003", "damaged"],
+      ],
+    );
+    assert.equal(checked(listing.runs[1]).reverted, null, "a revert record dated 2026-02-30 is not a record");
+    await assert.rejects(readRevertRecord(work, "20260102T030401Z-00000001"), RunListError);
+    await assert.rejects(
+      writeRevertRecord(work, { schemaVersion: 1, kind: "revert_record", runId: "20260102T030401Z-00000001", at: "2026-02-30T00:00:00Z", status: "complete", reverted: 0, skipped: 0 }),
+      TypeError,
+    );
+  });
+
   test("records that fail a check are listed as damaged with their id only and never chosen as latest", async () => {
     const work = await tempDir();
     const at = (second: number): string => `2026-01-02T03:04:${String(second).padStart(2, "0")}.000Z`;

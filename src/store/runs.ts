@@ -90,10 +90,23 @@ export function isStoredRunId(name: string): boolean {
   return toRunId(name) !== null;
 }
 
-/** A timestamp as recorded, when it matches RUN_TIMESTAMP_PATTERN_SOURCE and Date.parse accepts it. */
+/**
+ * N-24(c): a recorded time in RUN_TIMESTAMP_PATTERN_SOURCE form that names a real UTC instant.
+ * `Date` carries impossible dates over (2026-02-30 becomes 2026-03-02), so the text must equal
+ * `toISOString` of what it parses to, with the milliseconds written out to three digits.
+ */
+export function isRunTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || !RUN_TIMESTAMP.test(value)) return false;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return false;
+  const dot = value.indexOf(".");
+  const full = dot < 0 ? `${value.slice(0, -1)}.000Z` : `${value.slice(0, dot + 1)}${value.slice(dot + 1, -1).padEnd(3, "0")}Z`;
+  return new Date(time).toISOString() === full;
+}
+
+/** A timestamp as recorded, when it is a real one (`isRunTimestamp`). */
 function timestamp(value: unknown): string | null {
-  if (typeof value !== "string" || !RUN_TIMESTAMP.test(value)) return null;
-  return Number.isFinite(Date.parse(value)) ? value : null;
+  return isRunTimestamp(value) ? value : null;
 }
 
 function sameFsPath(a: string, b: string): boolean {

@@ -577,6 +577,13 @@ node dist/src/cli/main.js runs --workspace D:\work\notes --limit 5 --json
 `report`와 `revert`의 `--run`에 `latest`를 주면 실행 목록의 맨 위(확인을 통과한 가장 최근 실행)를 쓴다. 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 쓴다(3절). `--quiet`이면 쓰지 않는다.
 
 - 그런 실행이 없으면 `run_not_found`(종료 2)다.
+- **가장 새 실행이 아직 도는 중이면** 앞에 끝난 실행이 있어도 그것을 고르지 않고 `run_in_progress`(종료 6)로 끝난다. 아무것도 바꾸지 않는다(DR-48). 앞선 실행을 보려면 그 실행 id를 준다. 도는 실행의 id를 주면 `report`는 지금까지의 기록을 `incomplete`(종료 3)로 보인다. 실행이 끝나면 `latest`는 그 실행이다.
+  - 확인(U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)의 실제 CLI): 끝난 실행 뒤에 명령 하나를 기다리는 실행을 띄워 두고 `report`, `revert --dry-run`, `plan`, `review`의 `--run latest`가 모두 아래 오류였다. 한국어는 `가장 최근 실행이 아직 도는 중이어서 결과가 없습니다. 아무것도 바꾸지 않았습니다`로 시작한다.
+
+    ```
+    codaryn: error — the latest run is still going and has no result yet; nothing was changed (run_in_progress)
+      To fix: Try again when the run ends. To see an earlier run, give its id; codaryn runs lists the runs of the workspace.
+    ```
 - 이름이 `latest`인 실행 디렉터리가 실제로 있으면 별칭으로 풀지 않고 `invalid_arguments`(종료 2)로 끝난다. 이때는 `runs`의 실행 id를 준다.
 
 ### 보고서 (`report`)
@@ -596,12 +603,12 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 | 종료 코드 | 뜻 |
 | --- | --- |
 | 0 | `done`: 모든 검증기 통과. 되돌리기 `complete`, 보고서 `complete`, 점검 `ok`, 모델 목록 `listed`·`selected`, `init` `created`, `runs` `listed`, `plan` 보기, `review` 판정 |
-| 1 | `failed`: `verifier_failed`, `repeated_failure`, `model_error`, `state_changed`(16절 "실행 기록 변조"), 적용의 `plan_stale`·`apply_incomplete`(18.3절). 점검 `fail`. 정리에서 지우지 못하고 남긴 항목(`partly_removed` 등, 18.8절) |
-| 2 | 입력 오류: `invalid_arguments`, `invalid_task`, `invalid_config`, `invalid_script`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `workspace_is_install_dir`, `run_not_found`, `invalid_run_record`, `config_write_failed`, `config_exists`, `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `plan_secrets_differ`, `plan_records_changed`, `plan_run_missing`, `run_not_awaiting_review` |
-| 3 | `needs-input`: `no_verifier`, `verifier_inconclusive`, `unknown_tool_outcome`, `protected_changed`, `plan_pending`, `awaiting_review`, `consent_required`(18절). 되돌리기 `partial`, 보고서 `incomplete`, 점검 `warn`, `init` `declined`, 정리의 `plan_changed`(미리보기 뒤 상태가 바뀜, 18.8절) |
+| 1 | `failed`: `verifier_failed`, `repeated_failure`, `model_error`, `state_changed`(16절 "실행 기록 변조"), 적용의 `plan_stale`·`apply_incomplete`(18.3절). 점검 `fail`. 정리의 `partly_failed`(지우기가 일부 실패해 남긴 것이 있음, 18.8절) |
+| 2 | 입력 오류: `invalid_arguments`, `invalid_task`, `invalid_config`, `invalid_script`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `workspace_is_install_dir`, `run_not_found`, `invalid_run_record`, `config_write_failed`, `config_exists`, `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `plan_secrets_differ`, `plan_records_changed`, `plan_run_missing`, `run_not_awaiting_review`, `cleanup_plan_changed`(정리의 다이제스트가 지금의 미리보기와 다름, 18.8절) |
+| 3 | `needs-input`: `no_verifier`, `verifier_inconclusive`, `unknown_tool_outcome`, `protected_changed`, `plan_pending`, `awaiting_review`, `consent_required`(18절). 되돌리기 `partial`, 보고서 `incomplete`, 점검 `warn`, `init` `declined`, 정리의 `nothing_removed`(확인했지만 지운 것이 없음, 18.8절) |
 | 4 | `budget-exhausted`: `max_model_turns`, `max_tool_calls`, `max_total_tokens`, `max_duration`, `usage_unknown` |
 | 5 | `cancelled` |
-| 6 | `workspace_locked`: 같은 작업 공간에서 다른 실행이나 되돌리기가 진행 중 |
+| 6 | `workspace_locked`: 같은 작업 공간에서 다른 실행이나 되돌리기가 진행 중. `run_in_progress`: `--run latest`가 고를 가장 새 실행이 아직 도는 중(9절) |
 | 7 | `provider_not_configured`: 키·모델·출력 상한 미설정(자리표시자 모델 포함). 전송 없음 |
 | 8 | `model_list_failed`: `models`의 API 요청 실패 |
 | 70 | `internal_error` |
@@ -845,6 +852,7 @@ node --test dist/tests/live/anthropic-live.js
 | `budget-exhausted` | `reason`의 한도를 올리거나(설정 상한 이내) 목표를 작게 나눈다 |
 | `budget-exhausted`/`usage_unknown` | 제공자가 토큰 사용량을 알려 주지 않았다. scripted 대본이면 단계마다 `usage`를 적는다(3절) |
 | `run_not_found` | 그 작업 공간에 그 runId의 기록이 없거나, `--run latest`로 고를 실행이 없다. `runs`로 실행 목록을 본다 |
+| `run_in_progress`(종료 6) | `--run latest`가 고를 가장 새 실행이 아직 돈다. 끝난 뒤 다시 하거나, 앞선 실행의 id를 준다(9절) |
 | `invalid_run_record` | 기록을 읽을 수 없다. `runs`에서는 `.codaryn`이나 `runs`가 링크이거나 나열할 수 없을 때다. 파일 정리의 적용 실행을 되돌릴 때는 계획 실행의 `plan.json`이 승인한 다이제스트와 다르게 바뀐 경우도 여기다(18.4절) |
 | `plan_run_missing` | 되돌리려는 적용 실행의 계획 실행 폴더나 `plan.json`이 없다. 그 폴더를 지웠다면 되살린다. 없으면 그 적용은 되돌릴 수 없다(18.4절, 18.8절) |
 | `plan_secrets_differ` | 지금 등록한 가릴 값이 계획 실행 때와 다르게 계획의 경로를 가린다. 아무것도 보이거나 옮기지 않았다. 계획 실행에 쓴 task로 다시 하거나, 계획을 새로 만든다(18.3절) |
@@ -854,8 +862,9 @@ node --test dist/tests/live/anthropic-live.js
 | `run_not_awaiting_review` | `review`에 준 실행이 `awaiting_review`로 끝나지 않았다 |
 | `plan_records_changed` | 그 계획 실행에 기록 변경 표시가 있다(`runs`의 결과 칸 끝에 `records changed`). 실행이 아닌 것이 그 기록을 바꿔 계획이 읽은 것과 다를 수 있어 아무것도 묻거나 옮기지 않았다. 계획을 새로 만들어 적용한다(18.3절) |
 | `failed`/`state_changed` | 실행 중에 그 실행이 아닌 것(허용한 명령, 명령형 검증기, 다른 프로그램)이 `.codaryn\`을 바꿨다. 실행을 멈췄고 표시를 남겼다. `report`를 읽고, 허용한 명령과 검증기가 `.codaryn\`에 쓰지 않는지 본 뒤 다시 실행한다(16절 "실행 기록 변조") |
-| `cleanup`의 `plan_changed`(종료 3) | 미리보기 뒤에 새 실행, 되돌리기, 남은 폴더 등으로 상태 디렉터리가 바뀌었다. 아무것도 지우지 않았다. 다시 미리 보고 새 다이제스트로 확인한다(18.8절) |
-| `cleanup`의 `partly_removed`(종료 1) | 권한이나 다른 프로그램 때문에 다 지우지 못했다. 원인을 없앤 뒤 다시 미리 보면 남은 것이 `Leftover folders to remove`로 나온다(18.8절) |
+| `cleanup_plan_changed`(종료 2) | 준 다이제스트가 지금의 정리 미리보기의 것과 다르다. 미리보기 뒤에 새 실행, 되돌리기, 남은 폴더 등으로 상태 디렉터리가 바뀌었거나 다른 미리보기의 다이제스트다. 아무것도 지우지 않았다. 다시 미리 보고 새 다이제스트로 확인한다(18.8절) |
+| `cleanup`의 `nothing_removed`(종료 3) | 확인했지만 지운 것이 없다. 줄마다 남긴 이유가 나온다(되돌리지 않은 실행, 폐기 보관함이 남은 적용 등). 지우려면 그 이유가 말하는 확인(`--include-not-reverted`, `--delete-discarded`)을 더해 다시 미리 본다(18.8절) |
+| `cleanup`의 `partly_failed`(종료 1) | 권한이나 다른 프로그램 때문에 다 지우지 못했다. 원인을 없앤 뒤 다시 미리 보면 남은 것이 `Leftover folders to remove`로 나온다(18.8절) |
 | `needs-input`/`plan_pending` | 계획을 제안하고 멈췄다. 정상이다. `plan`으로 보고 승인하면 `apply`한다(18.3절) |
 | `needs-input`/`awaiting_review` | 검증을 통과했고 사람의 판정을 기다린다. 결과를 보고 `review --accept` 또는 `--reject`를 한다(18.6절) |
 | `needs-input`/`consent_required` | 하드 링크가 없는 드라이브라 이동을 하지 않았다. 계획은 그대로다. 위험을 받아들이면 `--allow-unsafe-move`로 다시 적용한다(18.5절) |
@@ -1186,45 +1195,46 @@ node dist/src/cli/main.js cleanup --workspace D:\work\notes --older-than 30 --co
   - 폐기 보관함: `--discarded-older-than <일>`, `--discarded-run <id>[,<id>…]`
   - 한 부분의 기준을 모두 만족하는 것이 골라진다. 기준이 없는 부분은 아무것도 고르지 않는다. 실행 id는 정확히 쓴다(`latest`는 받지 않는다).
 - **확인은 셋이고, 뒤의 둘은 `--confirm`과 함께만 받는다.**
-  - `--confirm <digest>`: 미리보기가 보인 계획 그대로일 때만 지운다. 미리보기 뒤에 새 실행이나 되돌리기로 상태가 바뀌면 `plan_changed`(종료 3)이고 아무것도 지우지 않는다. 다시 미리 본다.
-  - `--include-not-reverted`: 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록을 지운다. 없으면 그 기록은 남고(`not_reverted_not_confirmed`) 나머지만 지워진다(종료 0). 남은 적용 실행이 쓰는 계획 실행도 함께 남는다. 지운 실행은 더는 되돌릴 수 없다.
-  - `--delete-discarded`: 고른 폐기 보관함(사람의 파일)을 지운다. 없으면 폐기 보관함은 남고, 그 폐기 보관함을 만든 적용 실행의 기록도 남는다(DR-53, `discarded_left`). 파일의 원래 이름과 자리는 그 기록에만 있기 때문이다. 그 적용 실행이 쓰는 계획 실행도 함께 남는다(`used_by_kept_apply`). 이 기록은 같은 정리에서 그 폐기 보관함을 고르고 `--delete-discarded`를 줄 때, 또는 그 적용을 먼저 되돌린 뒤에 지워진다. 남긴 것은 사람이 고른 결과라 종료는 0이다.
-- 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, U-24 문구 브랜치 `f2ed116`(main `266c46d` 위). 실행 id와 다이제스트는 실행마다 다르다):
+  - `--confirm <digest>`: 미리보기가 보인 계획 그대로일 때만 지운다. 미리보기 뒤에 새 실행이나 되돌리기로 상태가 바뀌었거나 다른 미리보기의 다이제스트면 오류 `cleanup_plan_changed`(종료 2)이고 아무것도 지우지 않는다. 다시 미리 본다.
+  - `--include-not-reverted`: 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록을 지운다. 없으면 그 기록은 남고(`not_reverted_not_confirmed`) 나머지만 지워진다. 나머지에서 하나라도 지웠으면 종료 0, 하나도 지우지 못했으면 `nothing_removed`(종료 3)다. 남은 적용 실행이 쓰는 계획 실행도 함께 남는다. 지운 실행은 더는 되돌릴 수 없다.
+  - `--delete-discarded`: 고른 폐기 보관함(사람의 파일)을 지운다. 없으면 폐기 보관함은 남고, 그 폐기 보관함을 만든 적용 실행의 기록도 남는다(DR-53, `discarded_left`). 파일의 원래 이름과 자리는 그 기록에만 있기 때문이다. 그 적용 실행이 쓰는 계획 실행도 함께 남는다(`used_by_kept_apply`). 이 기록은 같은 정리에서 그 폐기 보관함을 고르고 `--delete-discarded`를 줄 때, 또는 그 적용을 먼저 되돌린 뒤에 지워진다. 다른 것을 하나라도 지웠으면 종료 0, 하나도 지우지 못했으면 `nothing_removed`(종료 3)다.
+- 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것). 실행 id와 다이제스트는 실행마다, 기록의 바이트 수는 판마다 다르다):
 
 ```
-Run records: 2 (30151 bytes)
+Run records: 2 (30981 bytes)
 Discarded files (people's own files an apply set aside): 0 (0 bytes)
 Files a revert could not put back (.codaryn/parked/, never cleaned up): 0 (0 bytes)
 
-Run records to remove: 2 (30151 bytes)
+Run records to remove: 2 (30981 bytes)
   Of these, runs not reverted, only partly reverted, or whose records cannot be checked: 1. Their records go only with a confirmation of their own; without them those runs can no longer be reverted or put back by hand.
-- 20261112T132239Z-0fca101f: 4 file(s), 14977 bytes; not reverted: without its records it can no longer be reverted
-- 20261112T132239Z-af1ad371: 5 file(s), 15174 bytes
+- 20261112T175001Z-dc8f7ff4: 4 file(s), 15392 bytes; not reverted: without its records it can no longer be reverted
+- 20261112T175001Z-7c523da5: 5 file(s), 15589 bytes
 
-Nothing was removed. To remove the run records, run the same command with --confirm 3c7ebbb02bcc.
+Nothing was removed. To remove the run records, run the same command with --confirm fde688129e87.
 The records of 1 run(s) not reverted, only partly reverted, or whose records cannot be checked are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.
 ```
 
-  - 그 다이제스트로 `--confirm`만 주면 `Removed: run records 1, discarded-files folders 0, 15174 bytes`이고, 되돌리지 않은 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
+  - 그 다이제스트로 `--confirm`만 주면 `Removed: run records 1, discarded-files folders 0, 15589 bytes`이고 종료 0이다. 되돌리지 않은 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
+  - 남은 것이 그 실행뿐일 때 다시 `--confirm`만 주면 첫 줄이 `Nothing was removed.`이고 종료 3(`nothing_removed`)이다.
   - 새 미리보기의 다이제스트로 `--include-not-reverted`를 더하면 그 실행도 지워진다.
   - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was`가 붙는다. 폐기 보관함 줄은 `a discarded-files folder: people's own files are deleted`이다. 끝에는 `People's discarded files are deleted only with --delete-discarded besides.`와 `The records of 1 apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.`가 나온다(main `531c8b8`의 실제 출력).
-  - 그 미리보기의 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 0이다(stdout, main `531c8b8`):
+  - 그 미리보기의 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 3(`nothing_removed`)이다(stdout, U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)):
 
     ```
-    Removed: run records 0, discarded-files folders 0, 0 bytes
+    Nothing was removed.
     Kept: the records of apply runs whose discarded files stay: 1. The records are the only note of what each of those files was called and where it was. They go once those applies are reverted, or when their discarded files are deleted in the same cleanup.
-    - discarded 20261112T161801Z-374650b1: deleting the discarded files was not confirmed
-    - run 20261112T161801Z-374650b1: its discarded files stay, and only its records say what each file was called and where it was
-    - run 20261112T161800Z-72e76eb6: a plan run whose apply run is kept; without it that apply could not be reverted
+    - discarded 20261112T175002Z-8af6e896: deleting the discarded files was not confirmed
+    - run 20261112T175002Z-8af6e896: its discarded files stay, and only its records say what each file was called and where it was
+    - run 20261112T175002Z-232ca09b: a plan run whose apply run is kept; without it that apply could not be reverted
     ```
 
-  - `--delete-discarded`까지 더하면 `Removed: run records 2, discarded-files folders 1, 13630 bytes`이고 종료 0이다. 바이트 수는 기록에 든 시각과 걸린 시간에 따라 실행마다 몇 바이트씩 다르다.
+  - `--delete-discarded`까지 더하면 `Removed: run records 2, discarded-files folders 1, 13903 bytes`이고 종료 0이다. 바이트 수는 기록에 든 시각과 걸린 시간에 따라 실행마다 몇 바이트씩 다르다.
   - 실행 기록만 고른 경우(`--discarded-older-than` 없음)와 기록을 확인할 수 없는 적용 실행도 같은 이유로 남는다. 적용을 먼저 되돌리면(`complete`) 그 실행의 폐기 보관함 폴더는 비고, `--older-than 0`의 확인으로 두 실행의 기록이 지워진다. 빈 폴더는 남는다.
 - **지우지 않는 것**: `.codaryn\parked\`(되돌리기가 제자리에 두지 못한 파일), 잠금, `.gitignore`, 돌고 있는 실행(`lock_held`, 적용 중이면 `workspace_locked`), 결과가 없는 실행(`no_result`), 고르지 않은 적용이 쓰는 계획 실행. 상태 디렉터리 안의 링크를 따라 밖을 지우지 않는다.
-- **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`이고 종료 1이다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).
+- **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`로 남고 정리는 `partly_failed`(종료 1)다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).
 - **기록을 확인할 수 없는 실행**(결과 기록이 깨진 실행 등)의 줄에는 `records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files`가 붙고, `--include-not-reverted`를 따로 줘야 지워진다.
 - 지운 것은 `.codaryn\cleanup.jsonl`에 개수와 바이트만 남는다(이름과 경로는 없다).
-- `--json`이면 `kind:"cleanup"` JSON 한 줄이다(`mode` `preview`, `applied`, `plan_changed`). 터미널 질문은 없다. 지우는 길은 다이제스트 확인뿐이다.
+- `--json`이면 `kind:"cleanup"` JSON 한 줄이고, `status`가 한 일을 말한다(DR-48): `preview`(종료 0), `removed`(하나라도 지움, 0), `nothing_removed`(지운 것이 없음, 3), `partly_failed`(지우기가 일부 실패, 1). `outcome.ok`는 `removed`일 때만 `true`다. 다이제스트가 다르면 정리 JSON이 아니라 오류 JSON(`kind:"error"`, `cleanup_plan_changed`, 종료 2)이다. 터미널 질문은 없다. 지우는 길은 다이제스트 확인뿐이다.
 - 한국어 출력에서도 크기 조각(`N file(s), N bytes`)과 끝의 안내 줄은 아직 영어다.
-- 확인 범위: 위 출력과 `--confirm`만 준 결과는 `f2ed116`, `--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
+- 확인 범위: 위 출력, `--confirm`만 준 결과, `status`와 종료 코드(`removed`, `nothing_removed`, 지우기 거부 ACL로 만든 `partly_failed`, 틀리거나 낡은 다이제스트의 `cleanup_plan_changed`)는 U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것), `--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
 - **계획 실행의 기록**은 그 계획의 적용 실행을 되돌리는 데 필요하다. 손으로 지우면 그 적용은 되돌릴 수 없다(`revert`는 `plan_run_missing`, 종료 2). 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.

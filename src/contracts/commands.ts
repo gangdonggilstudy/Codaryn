@@ -192,7 +192,9 @@ export interface DoctorCheck {
   /**
    * One line built from fixed text, field positions (such as `policy.commands[2]`) and counts.
    * Never a value read from a file or the environment: the API key is reported as present or
-   * absent only, and paths, names and contents are not echoed.
+   * absent only, and paths, names and contents are not echoed. One exception (DR-34 (a), DR-36 (b)):
+   * the origin (scheme, host, port) the chosen provider's requests and key go to, from the person's
+   * own setting, as ApiOrigin.
    */
   readonly message: string;
   /**
@@ -200,6 +202,12 @@ export interface DoctorCheck {
    * in the chosen language. Absent only in outputs from before N-21.
    */
   readonly text?: DoctorText;
+  /**
+   * DR-36 (b): further lines of the same check in the chosen language, after `text`, in order (for
+   * example `doctor.model.other_provider_variable`, one per variable). Absent: none. They do not
+   * change the check's status.
+   */
+  readonly notes?: readonly DoctorText[];
 }
 
 /** `warn`: a run may work but something needs attention. `fail`: a run would stop. */

@@ -231,8 +231,9 @@ $ codaryn plan --workspace D:\work\photos --run latest
 | revert | 되돌리기 | revert | 건너뛴 파일과 이유를 반드시 보여 준다 |
 | run, workspace, journal | 실행, 작업 공간, 실행 기록 | run, workspace, run record | 실행 id는 복사할 수 있게 한 줄에 둔다 |
 | workflow, workflowRef | 작업 종류 | task type | 내장 이름(`document` 등)은 표시 이름으로 바꿔 보인다 |
+| plan action | 동작(이동·폐기) | action | 계획의 한 항목이다. "행동"이라 쓰지 않는다 |
 | plan, apply, digest | 계획, 적용, 다이제스트 | plan, apply, digest | 다이제스트는 앞 12자를 보인다. "계획을 본 뒤 적용"이 한 문장에 함께 나오게 한다 |
-| discard | 폐기(보관함으로 옮김) | discard (moved to the run archive) | "삭제"라고만 쓰지 않는다. 되살릴 수 있다는 것과 보관함 위치를 함께 말한다 |
+| discard | 폐기(폐기 보관함으로 옮김) | discard (moved to discarded files) | "삭제"라고만 쓰지 않는다. 되살릴 수 있다는 것과 폐기 보관함 위치를 함께 말한다 |
 | awaiting_review, review | 사람 확인 대기, 사람 확인 | awaiting review, human review | 승인해도 "완료(검증 통과)"와 다른 표시를 쓴다 |
 | confirm, allow_once | 확인, 이번 한 번 허용 | confirm, allow once | "항상 허용"은 없다 |
 

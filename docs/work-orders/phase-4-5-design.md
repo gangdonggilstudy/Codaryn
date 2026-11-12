@@ -58,4 +58,25 @@
 
 ## 결정 (PM)
 
-(설계 문서 채택 뒤 기록한다.)
+세 설계 문서를 2026-11-12에 main에 병합했다(`3d1eec2`, `09bbb2e`, `b246f7c`). PM이 각 문서의 "결정 필요"를 아래와 같이 정했다. 근거는 각 문서의 표에 있다.
+
+| 계열 | 결정 | 비고 |
+| --- | --- | --- |
+| AC-D1~D12 ([어댑터 계약](../design/adapter-contract.md) 10절) | 모두 권고대로 채택한다. 앱 계층은 새 모듈 `src/app`, 이벤트는 가림본 `JournalRecord`, 프로세스 밖 어댑터는 실행마다 CLI 자식 하나와 줄 프로토콜(`--events jsonl`, `--confirm stdio`), 취소는 기존 `--cancel-file` | 단일 프로세스 원칙의 조건(듣는 소켓 없음, 상주 없음, 실행 하나에 자식 하나)을 architecture 1절에 적는다(AC-D11) |
+| VX-D1~D3, D5~D12 ([VS Code 확장](../design/vscode-extension.md) 11절) | 권고대로 채택한다. 엔진 호출은 B안(실행마다 CLI 자식), 확장 코드는 같은 저장소 `vscode/` | M-1 단일 패키지의 예외로 decisions에 기록한다 |
+| VX-D4 (`@types/vscode` 개발 의존성) | 보류. 새 의존성이므로 사용자 확인 대기(Q-3). 그 전에는 VS Code API에 의존하지 않는 확장 코어(줄 해석, 상태 모델)까지만 구현한다 | |
+| GT-D1~D7, D9~D14 ([범용 작업](../design/general-tasks.md) 14절) | 권고대로 채택한다. 워크플로 정의와 `workflowRef`, 실행 사이 계획 확인(`plan_pending` → `apply --digest`), 폐기는 보관함 이동, 사람 확인은 `awaiting_review` | GT-D5, GT-D7과 바이너리 이동은 가정으로 진행하고 사용자 확인 대기(Q-5, Q-6) |
+| GT-D8 (개인정보가 든 자료 분석) | (b)로 진행한다. 집계 도구(P1) 전에는 개인정보 자료를 다루지 않는다 | 보수적인 쪽이다. 사용자 확인 대기(Q-4) |
+| GUI-D ([독립 GUI](../design/standalone-gui.md) 14절) | 형태 확정은 단계 4 뒤(N-13)다. 권고(Electron과 엔진 전용 프로세스)는 설계 기준으로만 받고, 구현은 Q-7의 답과 외부 사실 확인(E-1~E-8) 뒤에 연다 | |
+
+## 구현 배정 (1차)
+
+| 작업 | pane | worktree / 브랜치 | 소유 파일 | 선행 |
+| --- | --- | --- | --- | --- |
+| G-A 범용 작업 계약(역할 1b) | w3:p9 | `claude-general` / `claude/general-tasks` | `src/contracts/**` 중 general-tasks 9절의 추가분, `tests/unit/contracts/g-*.test.ts`(신규) | 없음. N-A의 계약 커밋 `9735b5f`를 먼저 병합해 그 위에 더한다. `docs/cli-contract.md`는 N-A 소유이므로 추가할 내용을 보고서에 적는다 |
+| A-1 앱 계층(신규 모듈) | w3:pA | `claude-adapter` / `claude/adapter-contract` | `src/app/**`, `tests/unit/app/**`(신규) | 없음. 기존 `src/cli/**`, `src/contracts/**`, `src/store/**`를 고쳐야 하는 이행 단계는 고치지 않고 필요한 변경을 보고한다(N-A 병합 뒤 배정) |
+| D3 설계 문서 맞춤 | w3:pB | `claude-gui` / `claude/gui-design` | `docs/architecture.md`, `docs/decisions.md`, `docs/README.md`, `docs/design/README.md`, `docs/design/ux-design.md`, `docs/roadmap.md` | 없음. 세 설계 문서의 "다른 문서와 맞출 점"과 위 결정을 반영한다. `cli-contract.md`, `usage.md`, `privacy.md`, `testing.md`는 다른 소유자이므로 고치지 않고 목록으로 보고한다 |
+| R-1 설계 교차 검토(읽기 전용) | w3:p7 | `claude-store` | 없음(보고서만) | 없음. 세 설계 문서 사이의 어긋남과 현재 코드와 맞지 않는 서술을 찾는다 |
+
+- G-B~G-H(엔진, 도구·적용기, 검증기, 저장, CLI 연결, 통합, 문서)는 G-A 계약 커밋과 N-A·N-C 병합 뒤 배정한다.
+- 계약 소유: N-A(w3:p2)의 사용성 계약은 `9735b5f`로 끝났다. 이후 `src/contracts`의 범용 작업 추가분은 w3:p9가 맡는다. 두 담당이 같은 계약 파일의 다른 부분을 바꿀 수 있으므로 PM이 병합 때 합친 트리로 확인한다.

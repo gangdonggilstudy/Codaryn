@@ -152,7 +152,8 @@ async function scan(workspaceRoot: string): Promise<Scan> {
       status: checked?.status ?? null,
       startedAt: checked?.startedAt ?? null,
       records: records?.size ?? ZERO,
-      reverted: checked !== null && checked.reverted !== null,
+      // DR-44 (나), R-34 L-1: a partial revert left changes in place, so the run is not reverted.
+      reverted: checked !== null && checked.reverted !== null && checked.reverted.status === "complete",
       discarded: discardedTree?.size ?? null,
       recordsChanged: await recordsChangedMarkIn(join(runsDir, entry.runId)),
     };
@@ -234,12 +235,10 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
   };
   // Apply runs that will go: selected and not blocked. A plan run one of the others uses stays.
   const goingApplies = new Set(selectedRuns.filter((run) => run.summary.kind === "apply" && blockOf(run) === null).map((run) => run.summary.runId as string));
-  const selectedDiscarded = new Set<string>();
   const discardedCandidates = [
     ...found.runs.filter((run) => run.discardedTree !== null).map((run) => ({ runId: run.summary.runId, tree: run.discardedTree as Tree, run: run as RunFacts | null })),
     ...found.orphanDiscarded.map((item) => ({ runId: item.runId, tree: item.tree, run: null as RunFacts | null })),
   ].filter((item) => matches(selection.discarded, item.runId, startOf(item.runId, item.run?.summary.startedAt ?? null), false, now));
-  for (const item of discardedCandidates) selectedDiscarded.add(item.runId);
 
   for (const run of selectedRuns) {
     const id = run.summary.runId;
@@ -254,7 +253,8 @@ async function makePlan(workspaceRoot: string, selection: CleanupSelection, nowT
     }
     const warnings: CleanupWarningCode[] = [];
     if (run.summary.kind !== null && run.changes > 0 && !run.summary.reverted) warnings.push("not_reverted");
-    if (run.summary.kind === "apply" && run.discardedTree !== null && !selectedDiscarded.has(id)) warnings.push("discarded_left");
+    // DR-44 (다), R-34 L-2: its discarded-files folder stays unless its removal is confirmed apart.
+    if (run.summary.kind === "apply" && run.discardedTree !== null) warnings.push("discarded_left");
     if (run.summary.recordsChanged) warnings.push("records_changed");
     items.push({ target: "run", runId: id, size: (run.records as Tree).size, warnings: ordered(warnings) });
     prints.push((run.records as Tree).print);
@@ -294,8 +294,35 @@ async function hasExactDiscardedEntry(discardedDir: string, runId: string): Prom
   }
 }
 
-export const applyCleanup: ApplyCleanup = async (request) => {
+/** How applyCleanup removes a directory it moved aside; for tests. */
+export interface CleanupOperations {
+  readonly remove?: (dir: string) => Promise<void>;
+  /** Wait between the REMOVE_ATTEMPTS attempts. */
+  readonly retryDelayMs?: number;
+}
+
+/** A removal that fails (a file another process has open, a denied delete) is tried this often. */
+const REMOVE_ATTEMPTS = 4;
+
+export const applyCleanup: ApplyCleanup = (request) => applyCleanupWith(request);
+
+/** applyCleanup with the removal step given (CleanupOperations), for tests. */
+export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], operations: CleanupOperations = {}): Promise<Awaited<ReturnType<ApplyCleanup>>> {
   const { workspaceRoot, selection, now, confirmation } = request;
+  const remove = operations.remove ?? ((dir: string) => rm(dir, { recursive: true, force: true }));
+  const retryDelayMs = operations.retryDelayMs ?? 100;
+  /** True when `dir` is gone in the end. */
+  const removeAside = async (dir: string): Promise<boolean> => {
+    for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt += 1) {
+      try {
+        await remove(dir);
+        return true;
+      } catch {
+        if (attempt < REMOVE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+    return false;
+  };
   const stateDir = await ensureStateDir(workspaceRoot);
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
   const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: { now: () => Date.now() } });
@@ -330,7 +357,11 @@ export const applyCleanup: ApplyCleanup = async (request) => {
         kept.push({ target: item.target, runId: item.runId, reason: "io_error" });
         continue;
       }
-      await rm(aside, { recursive: true, force: true }).catch(() => undefined);
+      // DR-44 (라), R-34 L-3: what is left aside is not removed; it is not reported or logged as removed.
+      if (!(await removeAside(aside))) {
+        kept.push({ target: item.target, runId: item.runId, reason: "io_error" });
+        continue;
+      }
       removed.push({ target: item.target, runId: item.runId, size: item.size });
     }
     const total = (target: CleanupTarget) => {
@@ -349,4 +380,4 @@ export const applyCleanup: ApplyCleanup = async (request) => {
   } finally {
     await releaseLock({ workspaceRoot, runId: lockId }).catch(() => false);
   }
-};
+}

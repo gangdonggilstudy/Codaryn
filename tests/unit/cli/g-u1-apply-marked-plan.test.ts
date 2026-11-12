@@ -22,6 +22,7 @@ import { runApply } from "../../../src/cli/plan-commands.js";
 import { runCli } from "../../../src/cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
 import { applyPlan as engineApplyPlan } from "../../../src/engine/index.js";
+import { createMessageCatalog } from "../../../src/i18n/index.js";
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -136,7 +137,6 @@ describe("U-1: apply refuses a plan run whose records were changed", () => {
 
   test(
     "a mark written after the CLI's check: the engine's check under the lock ends the apply failed/plan_stale; nothing moved",
-    { todo: "engine (U-1): ApplyDeps.planRecordsChanged right after apply_started" },
     async () => {
       const { base, ws, planned, digest } = await planRun();
       let calls = 0;
@@ -198,13 +198,12 @@ describe("U-1 on the real CLI: R-33's procedure A", () => {
     refusedStderr = apply.stderr;
   });
 
-  test(
-    "the person's error lines name the refusal (error.plan_records_changed.what/.fix)",
-    { todo: "N-B (U-1): the texts of error.plan_records_changed.what and .fix; without them the error lines are not written" },
-    () => {
-      assert.ok(refusedStderr.includes("(plan_records_changed)"), refusedStderr);
-    },
-  );
+  test("the person's error lines name the refusal and what to do (error.plan_records_changed.what/.fix)", () => {
+    const en = createMessageCatalog("en");
+    assert.ok(refusedStderr.includes("(plan_records_changed)"), refusedStderr);
+    assert.ok(refusedStderr.includes(en.format("error.plan_records_changed.what")), refusedStderr);
+    assert.ok(refusedStderr.includes(en.format("error.plan_records_changed.fix")), refusedStderr);
+  });
 });
 
 /** The stderr of the refused apply above, for the case that checks the person's lines. */

@@ -67,6 +67,8 @@ const OPTION_SYNTAX: { readonly [O in HelpOption]: string } = {
   json: "--json",
   use: "--use <number|id>",
   limit: "--limit <n>",
+  // SP-6: listed for models once models takes it (COMMAND_OPTIONS below).
+  provider: "--provider <name>",
 };
 
 /** The options each command's help describes, in order. */

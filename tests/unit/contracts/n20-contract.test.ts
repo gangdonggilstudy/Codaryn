@@ -66,12 +66,13 @@ test("N-21: help and doctor texts are catalog ids; doctor checks carry a typed t
   for (const id of DOCTOR_CHECK_IDS) assert.ok(ids.has(`doctor.check.${id}`), id);
   assert.deepEqual(DOCTOR_CHECK_IDS.slice(-2), ["language", "lock"]);
   const ok: DoctorText = { id: "doctor.vars_file.ok", params: { count: 2 } };
-  const plain: DoctorText = { id: "doctor.api_key.ok" };
+  const plain: DoctorText = { id: "doctor.api_key.scripted" };
+  const keyed: DoctorText = { id: "doctor.api_key.ok", params: { keyEnv: "ANTHROPIC_API_KEY" } };
   // @ts-expect-error a doctor text cannot carry a file value
   const leaky: DoctorText = { id: "doctor.vars_file.ok", params: { count: SYNTHETIC } };
   // @ts-expect-error only doctor ids
   const other: DoctorText = { id: "summary.changes", params: { count: 1 } };
-  assert.ok(ok && plain && leaky && other);
+  assert.ok(ok && plain && keyed && leaky && other);
 });
 
 test("N-24, N-25: script usage fields are schema positions; the lock has a doctor check and a removal hint", () => {

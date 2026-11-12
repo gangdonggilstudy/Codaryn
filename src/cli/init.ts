@@ -12,6 +12,7 @@
 import path from "node:path";
 import {
   ANTHROPIC_API_KEY_ENV,
+  API_PROVIDERS,
   DENY_ALL_POLICY,
   INIT_DEFAULT_LIMITS,
   INIT_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -157,8 +158,10 @@ export function renderInit(output: InitOutput, messages: MessageCatalog, platfor
   if (!output.interactive) lines.push(messages.format("init.not_terminal"));
   lines.push(messages.format("init.saved", { location: output.config.display }));
   if (output.model === "placeholder") lines.push(messages.format("init.model_placeholder"));
-  lines.push(messages.format(output.keySet ? "init.key_set" : "init.key_missing"));
-  if (!output.keySet) lines.push(messages.format(platform === "win32" ? "init.key_hint_windows" : "init.key_hint_posix"));
+  // SP-D12: the key variable of the provider the written config uses (anthropic until SP-6 sets it).
+  const keyEnv = API_PROVIDERS[output.provider ?? "anthropic"].keyEnv;
+  lines.push(messages.format(output.keySet ? "init.key_set" : "init.key_missing", { keyEnv }));
+  if (!output.keySet) lines.push(messages.format(platform === "win32" ? "init.key_hint_windows" : "init.key_hint_posix", { keyEnv }));
   if (output.overriddenBy !== null) lines.push(messages.format("init.overridden_by_env"));
   lines.push(messages.format("init.next"));
   return `${lines.join("\n")}\n`;

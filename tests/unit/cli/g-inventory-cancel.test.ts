@@ -3,9 +3,8 @@
  * aborted signal (cf2029b), but the CLI's apply built it without the apply's cancel signal, so a
  * cancel could not stop a long listing.
  * - The CLI case: the checker the engine receives sees the apply's cancel signal.
- * - The engine case: a cancel during the preflight listing ends the apply as cancelled. The engine
- *   reads the listing's rejection as "the inventory could not be taken" (failed/plan_stale) today;
- *   that is the engine owner's, and the case is todo until it is changed.
+ * - The engine case: a cancel during the preflight listing ends the apply as cancelled (the engine
+ *   owner's fix for review R-18 M1, 22f8b4a; before it the apply ended as failed/plan_stale).
  * Real store, tools and inventory; scripted model. Nothing is sent.
  */
 
@@ -106,7 +105,6 @@ describe("R-13 L-3: the apply's cancel reaches the inventory listing", () => {
 describe("R-13 L-3: the engine ends a cancel during the listing as cancelled", () => {
   test(
     "a cancel while the preflight lists the workspace is cancelled/cancelled, not plan_stale",
-    { todo: "engine owner: applyPlan reads the listing's AbortError as 'inventory could not be taken' (src/engine/apply.ts preflight)" },
     async () => {
       const { base, ws, planned } = await planRun();
       const cancel = new AbortController();

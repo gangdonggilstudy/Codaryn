@@ -13,7 +13,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseEnv } from "node:util";
 import {
-  ANTHROPIC_API_KEY_ENV,
   API_PROVIDERS,
   CODARYN_API_BASE_URL_ENV,
   CODARYN_CONFIG_ENV,
@@ -584,12 +583,15 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("api_key", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (provider === "scripted") {
     set("api_key", "skipped", "the task uses the scripted model; no key is needed", { id: "doctor.api_key.scripted" });
-  } else if (envValue(env, API_PROVIDERS[provider].keyEnv) !== null) {
-    // The chosen provider's own key (API_PROVIDERS); the other known keys do not count (SP-2 only
-    // hides them).
-    set("api_key", "ok", `${ANTHROPIC_API_KEY_ENV} is set`, { id: "doctor.api_key.ok" });
   } else {
-    set("api_key", "fail", `${ANTHROPIC_API_KEY_ENV} is not set; an anthropic run stops with provider_not_configured`, { id: "doctor.api_key.missing" });
+    // The chosen provider's own key variable (API_PROVIDERS, SP-D12); the other known keys do not
+    // count (SP-2 only hides them).
+    const keyEnv = API_PROVIDERS[provider].keyEnv;
+    if (envValue(env, keyEnv) !== null) {
+      set("api_key", "ok", `${keyEnv} is set`, { id: "doctor.api_key.ok", params: { keyEnv } });
+    } else {
+      set("api_key", "fail", `${keyEnv} is not set; an ${provider} run stops with provider_not_configured`, { id: "doctor.api_key.missing", params: { keyEnv, provider } });
+    }
   }
 
   // model

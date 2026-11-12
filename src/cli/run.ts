@@ -672,6 +672,9 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
       // The provider re-checks the settings and throws only if they disagree with the CLI's checks.
       return error("internal_error", "the anthropic provider rejected the resolved settings; nothing was sent");
     }
+  } else if (task.model.provider !== "scripted") {
+    // SP-6 connects the other API providers (DR-31); until then nothing is sent.
+    return error("provider_not_implemented", `the ${task.model.provider} provider is not connected yet; nothing was sent`);
   } else {
     const scriptText = await readText(io, task.model.scriptPath);
     if (scriptText === null) return error("invalid_script", "the script file cannot be read as JSON");

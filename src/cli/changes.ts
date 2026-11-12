@@ -8,7 +8,9 @@
  * secrets the text is masked with (the ones a run with them registers now) and the workspace. The
  * work is the app layer's `changes`; this file parses, calls and prints.
  * - `--json`: ChangesOutput as one JSON line (what the VS Code extension reads, VX-D14).
- * - otherwise: per file its state, then the changed region as `-`/`+` lines.
+ * - otherwise: per file its path and state, then the changed region as `-`/`+` lines when the
+ *   text is shown. DR-29: runs do not record how they masked a file's text yet, so no text is
+ *   shown (`masking_unverified`); the text says so once instead of per file.
  * Reads only: nothing is created, changed or locked, and no request is made.
  *
  * The parser lives here until N-A moves it into args.ts; main.ts, help and the contract are N-A's
@@ -144,10 +146,16 @@ export function changedRegion(before: string | null, after: string | null): stri
 /** The text form. Every piece comes from the masked output; control characters are replaced. */
 export function renderChanges(output: ChangesOutput): string {
   const out = [`changes of run ${output.runId}, masked with the secrets registered now (not the run's own masking)`];
+  // DR-29: a file's text is shown only when the run recorded how it masked that text, which runs
+  // do not record yet. Then only paths and states are given; this is said once, not per file.
+  if (output.files.some((file) => file.unavailable === "masking_unverified")) {
+    out.push("paths and states only: a file's text is shown only when the run recorded how it masked it, and runs do not record that yet (DR-29)");
+  }
   if (output.files.length === 0) out.push("the run changed no file");
   for (const file of output.files) {
     const what = file.created ? "created by the run" : "changed by the run";
     out.push(`== ${cleanText(file.path)}: ${what}; ${STATE_TEXT[file.state]}`);
+    if (file.unavailable === "masking_unverified") continue;
     if (file.unavailable !== null) {
       out.push(`   the text is not shown (${file.unavailable})`);
       continue;

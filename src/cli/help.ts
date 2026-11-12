@@ -31,7 +31,7 @@ const USAGE_ONLY = {
   },
   cleanup: {
     usage: CLEANUP_USAGE,
-    about: "Shows how much the state directory holds and what a selection would remove; removes run records only with --confirm <digest>, and people's discarded files only with --delete-discarded besides. Parked files, the lock and what a revert still needs are never removed (DR-39).",
+    about: "Shows how much the state directory holds and what a selection would remove; removes run records only with --confirm <digest>, the records of runs not reverted only with --include-not-reverted besides, and people's discarded files only with --delete-discarded besides. Parked files, the lock and what a revert still needs are never removed (DR-39).",
   },
 } as const;
 type UsageOnlyCommand = keyof typeof USAGE_ONLY;

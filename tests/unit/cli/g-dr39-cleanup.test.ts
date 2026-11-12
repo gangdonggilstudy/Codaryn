@@ -19,7 +19,7 @@ import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
 import { runRevert } from "../../../src/cli/revert.js";
 import { inspectRun, revertRun } from "../../../src/store/index.js";
-import { runCleanup } from "../../../src/cli/cleanup.js";
+import { itemName, runCleanup } from "../../../src/cli/cleanup.js";
 import type { CleanupOutput } from "../../../src/cli/cleanup.js";
 import { runCli } from "../../../src/cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
@@ -98,7 +98,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     assert.equal(preview.exitCode, 0, JSON.stringify(preview));
     const output = preview.output;
     assert.ok(output !== null && output.mode === "preview", JSON.stringify(output));
-    assert.deepEqual(output.plan.items.map((item) => [item.target, item.runId]), [["run", target]]);
+    assert.deepEqual(output.plan.items.map((item) => [item.target, itemName(item)]), [["run", target]]);
     assert.deepEqual(output.plan.items[0]?.warnings, [], "a run that changed nothing has nothing to revert");
     assert.equal(output.summary.runs.count, 2);
     assert.match(output.plan.digest, /^[0-9a-f]{64}$/);
@@ -114,7 +114,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     const done = await cleanup(base, ["--run", target, "--confirm", digest]);
     assert.equal(done.exitCode, 0, JSON.stringify(done));
     assert.ok(done.output?.mode === "applied", JSON.stringify(done.output));
-    assert.deepEqual(done.output.outcome.removed.map((item) => item.runId), [target]);
+    assert.deepEqual(done.output.outcome.removed.map((item) => itemName(item)), [target]);
     assert.equal(await exists(runDir(work, target)), false);
     assert.ok(await exists(runDir(work, other)), "a run not selected stays");
     const log = await readFile(path.join(work, STATE_DIR_NAME, "cleanup.jsonl"), "utf8");
@@ -138,7 +138,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     await writeFile(path.join(folder, "0"), "a person's file\n", "utf8");
     const preview = await cleanup(base, ["--discarded-run", target]);
     assert.ok(preview.output?.mode === "preview", JSON.stringify(preview));
-    assert.deepEqual(preview.output.plan.items.map((item) => [item.target, item.runId]), [["discarded", target]]);
+    assert.deepEqual(preview.output.plan.items.map((item) => [item.target, itemName(item)]), [["discarded", target]]);
     assert.ok(preview.output.plan.items[0]?.warnings.includes("people_files"));
     const digest = preview.output.plan.digest.slice(0, 12);
 
@@ -149,7 +149,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
 
     const both = await cleanup(base, ["--discarded-run", target, "--confirm", digest, "--delete-discarded"]);
     assert.ok(both.output?.mode === "applied", JSON.stringify(both.output));
-    assert.deepEqual(both.output.outcome.removed.map((item) => [item.target, item.runId]), [["discarded", target]]);
+    assert.deepEqual(both.output.outcome.removed.map((item) => [item.target, itemName(item)]), [["discarded", target]]);
     assert.equal(await exists(folder), false);
   });
 
@@ -170,10 +170,15 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
   test("the human preview names the totals, the warnings and how to confirm; nothing removed", async () => {
     const { base, work, runIds } = await workspaceWithRuns(1);
     const target = runIds[0] as string;
+    const shown = await cleanup(base, ["--run", target]);
+    assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+    const { summary, plan } = shown.output;
     const preview = await cleanup(base, ["--run", target], false);
     assert.equal(preview.exitCode, 0);
-    assert.ok(preview.text.includes("Run records: 1"), preview.text);
-    assert.ok(preview.text.includes("Remove these run records: 1"), preview.text);
+    // The catalog's lines (their words are N-B's), with the numbers of the JSON preview.
+    const en = createMessageCatalog("en");
+    assert.ok(preview.text.includes(en.format("cleanup.summary.runs", { count: summary.runs.count, bytes: summary.runs.bytes })), preview.text);
+    assert.ok(preview.text.includes(en.format("cleanup.confirm.runs", { count: plan.totals.runs.count, bytes: plan.totals.runs.bytes })), preview.text);
     assert.ok(preview.text.includes(target), preview.text);
     assert.ok(preview.text.includes("--confirm "), preview.text);
     assert.ok(await exists(runDir(work, target)));
@@ -183,7 +188,7 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     const { base } = await workspaceWithRuns(1);
     const preview = await cleanup(base, [], false);
     assert.equal(preview.exitCode, 0);
-    assert.ok(preview.text.includes("Nothing to clean up."), preview.text);
+    assert.ok(preview.text.includes(createMessageCatalog("en").format("cleanup.nothing")), preview.text);
   });
 
   test("bad arguments are refused before anything is read", async () => {
@@ -276,7 +281,7 @@ describe("DR-39: cleanup keeps what a revert needs", () => {
     const applyRunId = (applied.output as unknown as ApplyResult).runId;
     const preview = await cleanupAt(base, ["--run", `${planned.runId},${applyRunId}`]);
     assert.ok(preview.mode === "preview", JSON.stringify(preview));
-    const applyItem = preview.plan.items.find((item) => item.runId === applyRunId);
+    const applyItem = preview.plan.items.find((item) => itemName(item) === applyRunId);
     assert.ok(applyItem?.warnings.includes("not_reverted"), JSON.stringify(preview.plan.items));
   });
 });

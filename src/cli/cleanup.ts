@@ -9,6 +9,15 @@
  *   besides: the two confirmations are apart in the same command (DR-39 P-4). The CLI checks the
  *   given digest against a plan made now; the store makes the plan again under the workspace lock
  *   and removes nothing unless its digest is the same (plan_changed).
+ * - DR-44 (가): the records of a run not reverted, or only partly (NOT_REVERTED_WARNINGS), need
+ *   `--include-not-reverted` besides (CleanupConfirmation.includeNotReverted): a confirmation apart
+ *   from the other two. The preview's head line says how many such runs the plan holds
+ *   (cleanup.confirm.not_reverted). Without it the store keeps them (not_reverted_not_confirmed),
+ *   and a plan run whose apply stays with them (used_by_kept_apply), and removes the rest; that is
+ *   the person's choice, so the command still ends with 0. They are never blocked.
+ * - DR-44 (d): folders an earlier cleanup could not remove entirely (`leftover` items) are in every
+ *   plan; the summary, the plan and the outcome name them. A removal that fails after the move is
+ *   `partly_removed`: never reported as removed, and the command ends with 1.
  * - Never removed: parked files, the lock, `.gitignore`, a running run, a run without a result, and
  *   a plan run that an apply not selected uses (a revert of that apply needs it). The store blocks
  *   them; a marked run (DR-38) is not blocked but warned about (P-5).
@@ -25,9 +34,11 @@ import { realpath as realpathCallback } from "node:fs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES, MIN_PLAN_DIGEST_PREFIX } from "../contracts/index.js";
+import { CLEANUP_BLOCK_CODES, CLEANUP_KEPT_REASONS, CLEANUP_WARNING_CODES, MIN_PLAN_DIGEST_PREFIX, needsNotRevertedConfirmation } from "../contracts/index.js";
 import type {
   ApplyCleanup,
+  CleanupItemRef,
+  CleanupKeptReason,
   CleanupOutcome,
   CleanupPlan,
   CleanupSelection,
@@ -53,9 +64,12 @@ const realpathNative = promisify(realpathCallback.native);
 
 export const CLEANUP_USAGE =
   "codaryn cleanup --workspace <dir> [--older-than <days>] [--run <id>[,<id>...]] [--reverted] " +
-  "[--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <first 12+ hex of the digest> [--delete-discarded]] [--json]";
+  "[--discarded-older-than <days>] [--discarded-run <id>[,<id>...]] [--confirm <first 12+ hex of the digest> [--delete-discarded] [--include-not-reverted]] [--json]";
 
-/** What `codaryn cleanup` prints (one JSON line with `--json`). Exit codes: 0, 1 (some kept for a problem), 3 (plan changed). */
+/**
+ * What `codaryn cleanup` prints (one JSON line with `--json`). Exit codes: 0, 1 (an item kept for a
+ * problem, partly_removed among them), 3 (plan changed, or a confirmation missing).
+ */
 export type CleanupOutput =
   | {
       readonly schemaVersion: 1;
@@ -101,12 +115,14 @@ interface CleanupArgs {
   readonly selection: CleanupSelection;
   readonly confirm: string | null;
   readonly deleteDiscarded: boolean;
+  /** DR-44 (가): the records of runs not reverted (or only partly) may go too. */
+  readonly includeNotReverted: boolean;
   readonly json: boolean;
 }
 
 const VALUE_OPTIONS = ["--workspace", "--older-than", "--run", "--discarded-older-than", "--discarded-run", "--confirm"] as const;
 type ValueOption = (typeof VALUE_OPTIONS)[number];
-const SWITCHES = ["--reverted", "--delete-discarded", "--json"] as const;
+const SWITCHES = ["--reverted", "--delete-discarded", "--include-not-reverted", "--json"] as const;
 type CleanupSwitch = (typeof SWITCHES)[number];
 const DIGEST_PREFIX = /^[0-9a-f]+$/;
 const DAYS = /^(0|[1-9][0-9]{0,5})$/;
@@ -175,6 +191,8 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
   }
   const deleteDiscarded = switches.has("--delete-discarded");
   if (deleteDiscarded && confirm === null) return usage("--delete-discarded is a second confirmation and needs --confirm");
+  const includeNotReverted = switches.has("--include-not-reverted");
+  if (includeNotReverted && confirm === null) return usage("--include-not-reverted is a confirmation of its own and needs --confirm");
   return {
     ok: true,
     args: {
@@ -185,6 +203,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
       },
       confirm,
       deleteDiscarded,
+      includeNotReverted,
       json: switches.has("--json"),
     },
   };
@@ -194,7 +213,7 @@ export function parseCleanupArgs(argv: readonly string[]): { ok: true; args: Cle
 export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome> {
   const parsed = parseCleanupArgs(io.argv);
   if (!parsed.ok) return cliError("invalid_arguments", parsed.message);
-  const { selection, confirm, deleteDiscarded, json } = parsed.args;
+  const { selection, confirm, deleteDiscarded, includeNotReverted, json } = parsed.args;
 
   // S-5: a network or device path is refused before the file system is touched.
   const problem = localPathProblem(parsed.args.workspace, io.cwd);
@@ -220,14 +239,19 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
     } else if (!shown.digest.startsWith(confirm)) {
       output = { schemaVersion: 1, kind: "cleanup", mode: "plan_changed", exitCode: 3 };
     } else {
-      const outcome = await apply({ workspaceRoot, selection, now: now(), confirmation: { digest: shown.digest, discarded: deleteDiscarded } });
+      const outcome = await apply({
+        workspaceRoot,
+        selection,
+        now: now(),
+        confirmation: { digest: shown.digest, discarded: deleteDiscarded, includeNotReverted },
+      });
       if (!outcome.ok) {
         if (outcome.code === "workspace_locked") {
           return cliError("workspace_locked", "another Codaryn process holds the workspace lock; nothing was removed");
         }
         output = { schemaVersion: 1, kind: "cleanup", mode: "plan_changed", exitCode: 3 };
       } else {
-        const problem = outcome.kept.some((item) => item.reason !== "not_confirmed");
+        const problem = outcome.kept.some((item) => !PERSON_CHOICES.has(item.reason));
         output = { schemaVersion: 1, kind: "cleanup", mode: "applied", exitCode: problem ? 1 : 0, outcome };
       }
     }
@@ -240,25 +264,63 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }
 
+/**
+ * Items kept by the person's own choice (a confirmation not given, or what such a choice keeps):
+ * they do not make the command fail. Every other reason does (DR-44 (d): partly_removed among them).
+ */
+const PERSON_CHOICES: ReadonlySet<CleanupKeptReason> = new Set<CleanupKeptReason>(["not_confirmed", "not_reverted_not_confirmed", "used_by_kept_apply"]);
+
 const sizeText = (size: StateSize): string => `${size.files} file(s), ${size.bytes} bytes`;
 
-/** The person's text: the catalog's lines (cleanup.*) and the run ids and sizes. */
+/** How an item is named: its run id, or a leftover's folder name. */
+export function itemName(item: CleanupItemRef): string {
+  return item.target === "leftover" ? `cleanup-${item.leftoverId}` : item.runId;
+}
+
+/** DR-44 (a): run records in the plan that go only with includeNotReverted (NOT_REVERTED_WARNINGS). */
+function notRevertedRuns(plan: CleanupPlan): number {
+  return plan.items.filter((item) => item.target === "run" && needsNotRevertedConfirmation(item.warnings)).length;
+}
+
+/** A catalog text, or `fallback` while this build's catalog does not have the id yet (N-B). */
+function textOr(make: () => string, fallback: string): string {
+  try {
+    return make();
+  } catch {
+    return fallback;
+  }
+}
+
+/** DR-44 (a): the head line under cleanup.confirm.runs. */
+export function notRevertedHeadLine(messages: MessageCatalog, count: number): string {
+  return textOr(
+    () => messages.format("cleanup.confirm.not_reverted", { count }),
+    `${count} of them not reverted, or only partly: their records go only with --include-not-reverted besides --confirm.`,
+  );
+}
+
+/** The person's text: the catalog's lines (cleanup.*) and the item names and sizes. */
 export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): string {
   const out: string[] = [];
+  const keptText = (reason: CleanupKeptReason): string =>
+    (CLEANUP_KEPT_REASONS as readonly string[]).includes(reason) ? textOr(() => messages.format(`cleanup.kept.${reason}`), reason) : reason;
   if (output.mode === "plan_changed") {
     out.push(messages.format("cleanup.plan_changed"));
     return `${out.join("\n")}\n`;
   }
   if (output.mode === "applied") {
     const { removed, kept } = output.outcome;
-    const runs = removed.filter((item) => item.target === "run").length;
-    const folders = removed.filter((item) => item.target === "discarded").length;
-    const bytes = removed.reduce((sum, item) => sum + item.size.bytes, 0);
-    out.push(messages.format("cleanup.done", { runs, folders, bytes }));
-    for (const item of kept) {
-      const reason = (CLEANUP_KEPT_REASONS as readonly string[]).includes(item.reason) ? messages.format(`cleanup.kept.${item.reason}`) : item.reason;
-      out.push(`- ${item.target} ${item.runId}: ${reason}`);
+    const runs = removed.filter((item) => item.target === "run");
+    const folders = removed.filter((item) => item.target === "discarded");
+    const leftovers = removed.filter((item) => item.target === "leftover");
+    const bytes = [...runs, ...folders].reduce((sum, item) => sum + item.size.bytes, 0);
+    // DR-44 (d): only what was removed entirely is counted.
+    out.push(messages.format("cleanup.done", { runs: runs.length, folders: folders.length, bytes }));
+    if (leftovers.length > 0) {
+      const leftoverBytes = leftovers.reduce((sum, item) => sum + item.size.bytes, 0);
+      out.push(textOr(() => messages.format("cleanup.done_leftovers", { count: leftovers.length, bytes: leftoverBytes }), `Removed what earlier cleanups left: ${leftovers.length} folder(s), ${leftoverBytes} bytes`));
     }
+    for (const item of kept) out.push(`- ${item.target} ${itemName(item)}: ${keptText(item.reason)}`);
     return `${out.join("\n")}\n`;
   }
 
@@ -266,26 +328,54 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
   out.push(messages.format("cleanup.summary.runs", { count: summary.runs.count, bytes: summary.runs.bytes }));
   out.push(messages.format("cleanup.summary.discarded", { files: summary.discarded.files, bytes: summary.discarded.bytes }));
   out.push(messages.format("cleanup.summary.parked", { files: summary.parked.files, bytes: summary.parked.bytes }));
+  // DR-44 (d): when above 0 (a store before DR-44 gives none).
+  const leftoverSummary = summary.leftovers as StateSummary["leftovers"] | undefined;
+  if (leftoverSummary !== undefined && leftoverSummary.count > 0) {
+    out.push(
+      textOr(
+        () => messages.format("cleanup.summary.leftovers", { count: leftoverSummary.count, bytes: leftoverSummary.bytes }),
+        `Folders an earlier cleanup could not remove entirely: ${leftoverSummary.count} (${leftoverSummary.bytes} bytes)`,
+      ),
+    );
+  }
   out.push("");
   if (plan.items.length === 0 && plan.blocked.length === 0) {
     out.push(messages.format("cleanup.nothing"));
     return `${out.join("\n")}\n`;
   }
   const warningText = (code: string): string =>
-    (CLEANUP_WARNING_CODES as readonly string[]).includes(code) ? messages.format(`cleanup.warning.${code as (typeof CLEANUP_WARNING_CODES)[number]}`) : code;
-  const itemsOf = (target: "run" | "discarded"): void => {
+    (CLEANUP_WARNING_CODES as readonly string[]).includes(code)
+      ? textOr(() => messages.format(`cleanup.warning.${code as (typeof CLEANUP_WARNING_CODES)[number]}`), code)
+      : code;
+  const itemsOf = (target: "run" | "discarded" | "leftover"): void => {
     for (const item of plan.items.filter((entry) => entry.target === target)) {
       const warnings = item.warnings.map(warningText);
-      out.push(`- ${item.runId}: ${sizeText(item.size)}${warnings.length === 0 ? "" : `; ${warnings.join("; ")}`}`);
+      out.push(`- ${itemName(item)}: ${sizeText(item.size)}${warnings.length === 0 ? "" : `; ${warnings.join("; ")}`}`);
     }
   };
-  if (plan.totals.runs.count > 0) {
+  const notReverted = notRevertedRuns(plan);
+  const runs = plan.items.some((item) => item.target === "run");
+  const discarded = plan.items.some((item) => item.target === "discarded");
+  const leftoverItems = plan.items.filter((item) => item.target === "leftover");
+  if (runs) {
     out.push(messages.format("cleanup.confirm.runs", { count: plan.totals.runs.count, bytes: plan.totals.runs.bytes }));
+    // DR-44 (a): how many of them were not reverted, or only partly.
+    if (notReverted > 0) out.push(`  ${notRevertedHeadLine(messages, notReverted)}`);
     itemsOf("run");
   }
-  if (plan.totals.discarded.count > 0) {
+  if (discarded) {
     out.push(messages.format("cleanup.confirm.discarded", { files: plan.totals.discarded.files, bytes: plan.totals.discarded.bytes }));
     itemsOf("discarded");
+  }
+  if (leftoverItems.length > 0) {
+    const size = leftoverItems.reduce((sum, item) => ({ files: sum.files + item.size.files, bytes: sum.bytes + item.size.bytes }), { files: 0, bytes: 0 });
+    out.push(
+      textOr(
+        () => messages.format("cleanup.confirm.leftovers", { count: leftoverItems.length, bytes: size.bytes }),
+        `What earlier cleanups could not remove entirely goes too: ${leftoverItems.length} folder(s) (${size.bytes} bytes)`,
+      ),
+    );
+    itemsOf("leftover");
   }
   for (const item of plan.blocked) {
     const reason = (CLEANUP_BLOCK_CODES as readonly string[]).includes(item.code) ? messages.format(`cleanup.blocked.${item.code}`) : item.code;
@@ -294,9 +384,17 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog): 
   if (plan.items.length > 0) {
     const digest = plan.digest.slice(0, MIN_PLAN_DIGEST_PREFIX);
     out.push("");
-    // No catalog text for these yet: fixed English, as other command hints.
-    out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}.`);
-    if (plan.totals.discarded.count > 0) out.push("People's discarded files are deleted only with --delete-discarded besides.");
+    // No catalog text for these: fixed English, as other command hints.
+    // R-34 I-3: name what there is to confirm.
+    if (runs) {
+      const extra = notReverted > 0 ? " --include-not-reverted" : "";
+      out.push(`Nothing was removed. To remove the run records, run the same command with --confirm ${digest}${extra}.`);
+      if (discarded) out.push("People's discarded files are deleted only with --delete-discarded besides.");
+    } else if (discarded) {
+      out.push(`Nothing was removed. To delete the discarded files, run the same command with --confirm ${digest} --delete-discarded.`);
+    } else {
+      out.push(`Nothing was removed. To remove what earlier cleanups left, run the same command with --confirm ${digest}.`);
+    }
   }
   return `${out.join("\n")}\n`;
 }

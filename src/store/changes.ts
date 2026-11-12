@@ -32,7 +32,6 @@ import type {
   ChangeShown,
   ContentHash,
   CreateChangeRecorder,
-  MaskedParts,
   RawText,
   RevertErrorCode,
   ResolvedPath,
@@ -46,19 +45,19 @@ import type {
 } from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { ApplyRecordError, PlanRunMissingError, isApplyJournal, revertApplyRun } from "./apply-revert.js";
-import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, maskedPartsOf, runDir } from "./common.js";
+import { assertRunId, ensureStateDir, errorCode, hasExactRunEntry, isPlainDirectory, runDir } from "./common.js";
 
 const INDEX_FILE_NAME = "index.json";
 /**
- * DR-29: how the run masked the path at index position `n` (ChangeShown), next to its snapshot:
- * `shown-<n>.json` = `{ schemaVersion: 1, path, original, next }`. Visible parts only.
+ * DR-29, DR-32 (c): how the run masked the path at index position `n` (ChangeShown), next to its
+ * snapshot: `shown-<n>.json` = `{ schemaVersion: 2, path, original, next }`. Digests only: no
+ * visible text, no token, no secret (R-19 L-3). Version 1 held the visible parts themselves; such a
+ * file is not given (the view shows no text for it).
  */
 const SHOWN_FILE_PREFIX = "shown-";
-/** DR-29: a file's visible parts are at most what the tools read (MAX_READ_BYTES characters). */
-const MAX_SHOWN_TEXT = MAX_READ_BYTES;
-const MAX_SHOWN_PARTS = MAX_READ_BYTES + 1;
-/** A shown file's size on disk may exceed its text by JSON escapes; anything larger is not read. */
-const MAX_SHOWN_FILE_BYTES = 8 * MAX_READ_BYTES + 65_536;
+const SHOWN_SCHEMA_VERSION = 2;
+/** A shown file holds a path and three hashes; anything larger is not read. */
+const MAX_SHOWN_FILE_BYTES = 16_384;
 
 function shownFileName(position: number): string {
   return `${SHOWN_FILE_PREFIX}${position}.json`;
@@ -183,7 +182,7 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
     return entries;
   }
 
-  async function save(path: ResolvedPath, original: RawText | null, shownOriginal: MaskedParts | null | undefined): Promise<void> {
+  async function save(path: ResolvedPath, original: RawText | null, shownOriginal: ContentHash | null | undefined): Promise<void> {
     const relative: unknown = (path as Partial<ResolvedPath> | null)?.relative;
     if (!isRelativeFilePath(relative)) {
       throw new TypeError("saveOriginal needs a resolved path below the workspace root");
@@ -191,13 +190,10 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
     if (original !== null && (typeof original !== "string" || !original.isWellFormed())) {
       throw new TypeError("saveOriginal needs the original text as read, or null");
     }
-    // DR-29: the original's masked form, parts for a text and null for a file that did not exist.
-    let shown: MaskedParts | null | undefined = undefined;
+    // DR-29, DR-32 (c): the digest of the original's visible parts, or null for a file that did not exist.
     if (shownOriginal !== undefined) {
-      shown = shownOriginal === null ? null : maskedPartsOf(shownOriginal, MAX_SHOWN_PARTS, MAX_SHOWN_TEXT);
-      if ((original === null) !== (shownOriginal === null) || (shownOriginal !== null && shown === null)) {
-        throw new TypeError("saveOriginal needs the original's masked form as visible parts, or null for a file that did not exist");
-      }
+      const fits = shownOriginal === null ? original === null : original !== null && typeof shownOriginal === "string" && CONTENT_HASH.test(shownOriginal);
+      if (!fits) throw new TypeError("saveOriginal needs the digest of the original's visible parts, or null for a file that did not exist");
     }
     const current = await load();
     if (current.some((entry) => entry.path === relative)) return;
@@ -216,26 +212,25 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
     await writeAtomically(join(dir, INDEX_FILE_NAME), `${JSON.stringify({ schemaVersion: 1, entries: next })}\n`);
     entries = next;
     // DR-29: after the index, so a form never exists for a path the index does not name.
-    if (shown !== undefined) {
-      const record: ShownRecord = { schemaVersion: 1, path: relative, original: shown, next: null };
+    if (shownOriginal !== undefined) {
+      const record: ShownRecord = { schemaVersion: SHOWN_SCHEMA_VERSION, path: relative, original: shownOriginal, next: null };
       await writeAtomically(join(dir, shownFileName(current.length)), `${JSON.stringify(record)}\n`);
     }
   }
 
-  /** DR-29: the last written text's masked form replaces the earlier one. */
-  async function saveNextShown(path: ResolvedPath, sha256: ContentHash, parts: MaskedParts): Promise<void> {
+  /** DR-29, DR-32 (c): the last written text's digest replaces the earlier one. */
+  async function saveNextShown(path: ResolvedPath, sha256: ContentHash, partsDigest: ContentHash): Promise<void> {
     const relative: unknown = (path as Partial<ResolvedPath> | null)?.relative;
     if (!isRelativeFilePath(relative)) throw new TypeError("saveNext needs a resolved path below the workspace root");
     if (typeof sha256 !== "string" || !CONTENT_HASH.test(sha256)) throw new TypeError("saveNext needs the SHA-256 of the bytes written");
-    const shown = maskedPartsOf(parts, MAX_SHOWN_PARTS, MAX_SHOWN_TEXT);
-    if (shown === null) throw new TypeError("saveNext needs the written text's masked form as visible parts");
+    if (typeof partsDigest !== "string" || !CONTENT_HASH.test(partsDigest)) throw new TypeError("saveNext needs the digest of the written text's visible parts");
     const current = await load();
     const position = current.findIndex((entry) => entry.path === relative);
     if (position < 0) throw new Error("saveNext was called before saveOriginal for this path; nothing was kept");
     const existing = await readShown(dir, current[position] as IndexEntry, position);
-    // Without the original's form (a tool that could not mask it) no view can show the text.
+    // Without the original's digest (a tool that could not mask it) no view can show the text.
     if (existing === null) return;
-    const record: ShownRecord = { schemaVersion: 1, path: relative, original: existing.original, next: { sha256, parts: shown } };
+    const record: ShownRecord = { schemaVersion: SHOWN_SCHEMA_VERSION, path: relative, original: existing.original, next: { sha256, partsDigest } };
     await writeAtomically(join(dir, shownFileName(position)), `${JSON.stringify(record)}\n`);
   }
 
@@ -245,24 +240,28 @@ export const createChangeRecorder: CreateChangeRecorder = (options) => {
       queue = run.catch(() => undefined);
       return run;
     },
-    saveNext(path, sha256, shown) {
-      const run = queue.then(() => saveNextShown(path, sha256, shown));
+    saveNext(path, sha256, partsDigest) {
+      const run = queue.then(() => saveNextShown(path, sha256, partsDigest));
       queue = run.catch(() => undefined);
       return run;
     },
   };
 };
 
-/** DR-29: a shown file as stored. */
+/** DR-29, DR-32 (c): a shown file as stored. */
 interface ShownRecord extends ChangeShown {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: typeof SHOWN_SCHEMA_VERSION;
   readonly path: string;
 }
 
+function isDigest(value: unknown): value is ContentHash {
+  return typeof value === "string" && CONTENT_HASH.test(value);
+}
+
 /**
- * DR-29: the shown form kept for the index entry at `position`, or null when there is none or it
- * fails a check: exact keys, the entry's path, an original that matches whether the file existed,
- * visible parts without tokens, a SHA-256. A regular file only (no link), of bounded size.
+ * DR-29, DR-32 (c): the shown form kept for the index entry at `position`, or null when there is
+ * none or it fails a check: version 2, exact keys, the entry's path, an original digest that matches
+ * whether the file existed, and SHA-256 digests only. A regular file only (no link), of bounded size.
  */
 async function readShown(dir: string, entry: IndexEntry, position: number): Promise<ChangeShown | null> {
   let value: unknown;
@@ -277,16 +276,24 @@ async function readShown(dir: string, entry: IndexEntry, position: number): Prom
   if (!isRecord(value)) return null;
   const keys = Object.keys(value);
   if (keys.length !== 4 || !["schemaVersion", "path", "original", "next"].every((key) => Object.hasOwn(value, key))) return null;
-  if (value["schemaVersion"] !== 1 || value["path"] !== entry.path) return null;
-  const original = value["original"] === null ? null : maskedPartsOf(value["original"], MAX_SHOWN_PARTS, MAX_SHOWN_TEXT);
-  if ((value["original"] === null) !== !entry.existed || (value["original"] !== null && original === null)) return null;
+  if (value["schemaVersion"] !== SHOWN_SCHEMA_VERSION || value["path"] !== entry.path) return null;
+  // A created file has no original digest; a file that existed has one.
+  const recorded = value["original"];
+  let original: ContentHash | null;
+  if (recorded === null) {
+    if (entry.existed) return null;
+    original = null;
+  } else {
+    if (!entry.existed || !isDigest(recorded)) return null;
+    original = recorded;
+  }
   const nextValue = value["next"];
   if (nextValue === null) return { original, next: null };
   if (!isRecord(nextValue) || Object.keys(nextValue).length !== 2) return null;
   const sha256 = nextValue["sha256"];
-  const parts = maskedPartsOf(nextValue["parts"], MAX_SHOWN_PARTS, MAX_SHOWN_TEXT);
-  if (typeof sha256 !== "string" || !CONTENT_HASH.test(sha256) || parts === null) return null;
-  return { original, next: { sha256: sha256 as ContentHash, parts } };
+  const partsDigest = nextValue["partsDigest"];
+  if (!isDigest(sha256) || !isDigest(partsDigest)) return null;
+  return { original, next: { sha256, partsDigest } };
 }
 
 /** The contract's REVERT_ERROR_CODES (R-9c C-1 adds plan_run_missing). */

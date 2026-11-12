@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import { MAX_READ_BYTES, asRawText, changeShownMatches, maskedParts } from "../../../src/contracts/index.js";
+import { MAX_READ_BYTES, asRawText, changeShownMatches, maskedParts, maskedPartsEncoding } from "../../../src/contracts/index.js";
 import type { ContentHash, MaskedText } from "../../../src/contracts/index.js";
 import { RevertRunError, createChangeRecorder, createJournal, readRunOriginals } from "../../../src/store/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
@@ -139,28 +139,31 @@ describe("readRunOriginals (DR-14)", () => {
   });
 });
 
-describe("DR-29: how the run masked each changed file (shown), kept with its snapshot", () => {
+describe("DR-29, DR-32 (c): how the run masked each changed file, kept as digests with its snapshot", () => {
   const SECRET = "fake-dr29-secret-value";
   const NOW_TOKEN = "[[CODARYN_SECRET:00000000000000bb]]";
   /** A stand-in gateway: the registered secrets become tokens (token ids differ per run). */
   const maskWith = (token: string, secrets: readonly string[]) => (text: string): string => secrets.reduce((masked, secret) => masked.split(secret).join(token), text);
   const runMask = maskWith(TOKEN, [SECRET]);
+  /** The digest a tool or view computes: SHA-256 of maskedPartsEncoding(maskedParts(masked text)). */
+  const digestOf = (masked: string): ContentHash => sha(maskedPartsEncoding(maskedParts(masked)));
+  const snapshotsOf = (root: string): string => join(root, ".codaryn", "runs", RUN, "snapshots");
 
-  /** A run changes `path` from `before` through `writes`, recording the masked forms as a writing tool does. */
+  /** A run changes `path` from `before` through `writes`, recording the digests as a writing tool does. */
   async function recorded(root: string, path: string, before: string | null, writes: readonly string[], withShown = true): Promise<void> {
     const ws = await createWorkspace({ root });
     const resolved = await ws.resolve(path, "write");
     assert.ok(resolved.ok);
     const recorder = createChangeRecorder({ workspaceRoot: root, runId: RUN });
     const original = before === null ? null : asRawText(before);
-    if (withShown) await recorder.saveOriginal(resolved.path, original, before === null ? null : maskedParts(runMask(before)));
+    if (withShown) await recorder.saveOriginal(resolved.path, original, before === null ? null : digestOf(runMask(before)));
     else await recorder.saveOriginal(resolved.path, original);
     let previous = before;
     for (const text of writes) {
       await writeFile(join(root, path), text, "utf8");
       if (withShown) {
         assert.ok(recorder.saveNext !== undefined, "the store implements saveNext");
-        await recorder.saveNext(resolved.path, sha(text), maskedParts(runMask(text)));
+        await recorder.saveNext(resolved.path, sha(text), digestOf(runMask(text)));
       }
       const journal = createJournal({ workspaceRoot: root, runId: RUN, clock });
       await journal.append({ type: "file_changed", callId: "c", path: path as MaskedText, previousHash: previous === null ? null : sha(previous), newHash: sha(text), created: previous === null });
@@ -169,7 +172,28 @@ describe("DR-29: how the run masked each changed file (shown), kept with its sna
     }
   }
 
-  test("review reproduction: masked with other secrets, the run's secret would show; the stored form tells it apart", async () => {
+  test("review reproduction R-19 L-3: what is kept holds no visible text, so no guessed secret can be confirmed from it", async () => {
+    const root = await workspace();
+    await startedRun(root);
+    const written = `deploy:\n  token: ${SECRET}\n  region: eu\n`;
+    await recorded(root, "deploy.yml", null, [written]);
+    const kept = await Promise.all((await readdir(snapshotsOf(root))).filter((name) => name.startsWith("shown-")).map((name) => readFile(join(snapshotsOf(root), name), "utf8")));
+    assert.equal(kept.length, 1);
+    const text = kept.join("\n");
+    for (const visible of ["deploy:", "token: ", "region: eu", SECRET, "CODARYN_SECRET"]) assert.equal(text.includes(visible), false, visible);
+    // The R-19 probe: any list of strings kept, joined with a guess, hashed, against any kept hash.
+    const hashes = new Set(text.match(/[0-9a-f]{64}/g) ?? []);
+    const lists: string[][] = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value) && value.every((item) => typeof item === "string")) lists.push(value as string[]);
+      else if (value !== null && typeof value === "object") for (const item of Object.values(value)) walk(item);
+    };
+    for (const file of kept) walk(JSON.parse(file));
+    const guesses = ["password", "hunter2", SECRET, "fake-dr29-secret-valuf"];
+    assert.deepEqual(guesses.filter((guess) => lists.some((list) => hashes.has(sha(list.join(guess))))), [], "no guess is confirmed");
+  });
+
+  test("a view compares digests: same secrets (other token ids) match; without the secret, or with the file changed, they do not", async () => {
     const root = await workspace();
     await startedRun(root);
     const before = `key: ${SECRET}\nold\n`;
@@ -177,56 +201,43 @@ describe("DR-29: how the run masked each changed file (shown), kept with its sna
     await writeFile(join(root, "notes.md"), before, "utf8");
     await recorded(root, "notes.md", before, [`key: ${SECRET}\nnew\n`, last]);
     const [entry] = await readRunOriginals({ workspaceRoot: root, runId: RUN });
-    assert.deepEqual(entry?.shown, { original: ["key: ", "\nold\n"], next: { sha256: sha(last), parts: ["key: ", "\nnewer\n"] } }, "the last write is kept");
+    assert.deepEqual(entry?.shown, { original: digestOf(runMask(before)), next: { sha256: sha(last), partsDigest: digestOf(runMask(last)) } }, "the last write is kept");
     const nowMask = maskWith(NOW_TOKEN, [SECRET]);
-    assert.equal(changeShownMatches(entry?.shown, { original: nowMask(before), current: { sha256: sha(last), masked: nowMask(last) } }), true, "same secrets, other token ids");
-    assert.equal(changeShownMatches(entry?.shown, { original: before, current: { sha256: sha(last), masked: last } }), false, "without the secret its value would show");
-    assert.equal(changeShownMatches(entry?.shown, { original: nowMask(before), current: { sha256: sha("changed since\n"), masked: "changed since\n" } }), false, "the file changed since the run");
+    assert.equal(changeShownMatches(entry?.shown, { original: digestOf(nowMask(before)), current: { sha256: sha(last), partsDigest: digestOf(nowMask(last)) } }), true);
+    assert.equal(changeShownMatches(entry?.shown, { original: digestOf(before), current: { sha256: sha(last), partsDigest: digestOf(last) } }), false, "without the secret its value would show");
+    assert.equal(changeShownMatches(entry?.shown, { original: digestOf(nowMask(before)), current: { sha256: sha("changed\n"), partsDigest: digestOf("changed\n") } }), false, "the file changed since the run");
   });
 
-  test("a created file has no original form; a caller from before DR-29 gives no shown", async () => {
+  test("a created file has no original digest; a caller from before DR-29 gives no shown", async () => {
     const root = await workspace();
     await startedRun(root);
     await recorded(root, "new.txt", null, ["x\n"]);
     await recorded(root, "plain.txt", null, ["y\n"], false);
     const originals = await readRunOriginals({ workspaceRoot: root, runId: RUN });
-    assert.deepEqual(originals.find((item) => item.path === "new.txt")?.shown, { original: null, next: { sha256: sha("x\n"), parts: ["x\n"] } });
+    assert.deepEqual(originals.find((item) => item.path === "new.txt")?.shown, { original: null, next: { sha256: sha("x\n"), partsDigest: digestOf("x\n") } });
     assert.equal("shown" in (originals.find((item) => item.path === "plain.txt") ?? {}), false);
   });
 
-  test("the stored forms hold visible parts only: no secret value and no token", async () => {
-    const root = await workspace();
-    await startedRun(root);
-    const before = `${SECRET}\n`;
-    await writeFile(join(root, "a.txt"), before, "utf8");
-    await recorded(root, "a.txt", before, [`${SECRET} changed\n`]);
-    const dir = join(root, ".codaryn", "runs", RUN, "snapshots");
-    const shownFiles = (await readdir(dir)).filter((name) => name.startsWith("shown-"));
-    assert.equal(shownFiles.length, 1);
-    const text = await readFile(join(dir, shownFiles[0] as string), "utf8");
-    assert.equal(text.includes(SECRET), false);
-    assert.equal(text.includes("CODARYN_SECRET"), false);
-  });
-
-  test("a stored form that fails the checks is not given (the view then shows no text); the rest stays", async () => {
+  test("a kept form that fails the checks is not given (the view then shows no text); the rest stays", async () => {
     const before = "a\n";
     const after = "b\n";
-    const good = { schemaVersion: 1, path: "a.txt", original: ["a\n"], next: { sha256: sha(after), parts: ["b\n"] } };
+    const good = { schemaVersion: 2, path: "a.txt", original: digestOf("a\n"), next: { sha256: sha(after), partsDigest: digestOf("b\n") } };
     for (const bad of [
       { ...good, extra: 1 },
       { ...good, path: "other.txt" },
       { ...good, original: null },
-      { ...good, original: [`a${TOKEN}`] },
-      { ...good, original: [] },
-      { ...good, next: { sha256: "x", parts: ["b\n"] } },
-      { ...good, next: { sha256: sha(after), parts: [1] } },
-      { ...good, schemaVersion: 2 },
+      { ...good, original: "not-a-digest" },
+      { ...good, original: ["a\n"] },
+      { ...good, next: { sha256: "x", partsDigest: digestOf("b\n") } },
+      { ...good, next: { sha256: sha(after), partsDigest: digestOf("b\n"), parts: ["b\n"] } },
+      { ...good, next: { sha256: sha(after), parts: ["b\n"] } },
+      { ...good, schemaVersion: 1 },
     ]) {
       const root = await workspace();
       await startedRun(root);
       await writeFile(join(root, "a.txt"), before, "utf8");
       await recorded(root, "a.txt", before, [after]);
-      await writeFile(join(root, ".codaryn", "runs", RUN, "snapshots", "shown-0.json"), `${JSON.stringify(bad)}\n`, "utf8");
+      await writeFile(join(snapshotsOf(root), "shown-0.json"), `${JSON.stringify(bad)}\n`, "utf8");
       const [entry] = await readRunOriginals({ workspaceRoot: root, runId: RUN });
       assert.equal(entry !== undefined && "shown" in entry, false, JSON.stringify(bad));
       assert.deepEqual(entry?.original, { text: before }, "the original is still given");
@@ -239,13 +250,13 @@ describe("DR-29: how the run masked each changed file (shown), kept with its sna
     const resolved = await ws.resolve("a.txt", "write");
     assert.ok(resolved.ok);
     const recorder = createChangeRecorder({ workspaceRoot: root, runId: RUN });
-    await assert.rejects(recorder.saveOriginal(resolved.path, null, ["x"]), TypeError, "a created file has no original form");
-    await assert.rejects(recorder.saveOriginal(resolved.path, asRawText("x"), null), TypeError, "an existing file's form is parts");
-    await assert.rejects(recorder.saveOriginal(resolved.path, asRawText("x"), [`a${TOKEN}`]), TypeError, "no token in a part");
+    await assert.rejects(recorder.saveOriginal(resolved.path, null, digestOf("x")), TypeError, "a created file has no original digest");
+    await assert.rejects(recorder.saveOriginal(resolved.path, asRawText("x"), null), TypeError, "an existing file's form is a digest");
+    await assert.rejects(recorder.saveOriginal(resolved.path, asRawText("x"), "not-a-digest" as ContentHash), TypeError);
     assert.ok(recorder.saveNext !== undefined);
-    await assert.rejects(recorder.saveNext(resolved.path, sha("x"), ["x"]), "saveNext before saveOriginal");
-    await recorder.saveOriginal(resolved.path, asRawText("x"), ["x"]);
-    await assert.rejects(recorder.saveNext(resolved.path, "not-a-hash" as ContentHash, ["x"]), TypeError);
-    await assert.rejects(recorder.saveNext(resolved.path, sha("x"), []), TypeError);
+    await assert.rejects(recorder.saveNext(resolved.path, sha("x"), digestOf("x")), "saveNext before saveOriginal");
+    await recorder.saveOriginal(resolved.path, asRawText("x"), digestOf("x"));
+    await assert.rejects(recorder.saveNext(resolved.path, "not-a-hash" as ContentHash, digestOf("x")), TypeError);
+    await assert.rejects(recorder.saveNext(resolved.path, sha("x"), "not-a-digest" as ContentHash), TypeError);
   });
 });

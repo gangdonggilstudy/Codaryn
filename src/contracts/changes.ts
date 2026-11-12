@@ -12,6 +12,7 @@
  * directory; nothing removes them automatically. Delete it once the run is no longer needed.
  */
 
+import type { ApprovalChannel } from "./plan.js";
 import type { RawText } from "./text.js";
 import type { ResolvedPath } from "./workspace.js";
 
@@ -48,10 +49,26 @@ export interface ChangeRecorderOptions {
 /** Signature of `createChangeRecorder`, exported by `src/store/index.ts`. */
 export type CreateChangeRecorder = (options: ChangeRecorderOptions) => ChangeRecorder;
 
+/**
+ * DR-25: the person's consent to move files back unsafely (`unsafe_move`: no hard links on that
+ * volume) in one revert of an apply run. Like UnsafeMoveConsent (DR-21) it comes only from a
+ * person: the CLI's own argument on `codaryn revert` (UNSAFE_MOVE_CONSENT_ARGUMENT, `cli-flag`), a
+ * terminal answer (`cli-tty`), or an adapter after the person agreed on screen (`adapter`). No task,
+ * config, profile, record or model can give it. It names the run being reverted and holds for this
+ * one revert only: a later revert needs it again.
+ */
+export interface RevertUnsafeMoveConsent {
+  readonly channel: ApprovalChannel;
+  /** Must equal RevertRequest.runId; a consent for another run counts as none. */
+  readonly runId: string;
+}
+
 export interface RevertRequest {
   /** Real absolute path of the workspace root. */
   readonly workspaceRoot: string;
   readonly runId: string;
+  /** DR-25: the person's consent for this revert, or absent/null for none (unsafe moves are skipped). */
+  readonly unsafeMoveConsent?: RevertUnsafeMoveConsent | null;
   /**
    * N-7: decide every file exactly as a revert would, and change nothing: no file is written,
    * deleted or created, and no lock or record is taken or written. The outcome lists what would be
@@ -78,6 +95,13 @@ export interface RevertRecord {
   /** Number of files reverted and skipped. */
   readonly reverted: number;
   readonly skipped: number;
+  /**
+   * DR-25: how the person consented to unsafe moves for this revert, or null for no consent.
+   * Absent in records written before DR-25 (no consent).
+   */
+  readonly unsafeMoveConsent?: ApprovalChannel | null;
+  /** DR-25: number of files moved back unsafely, with that consent. Absent: 0. */
+  readonly unsafeMoves?: number;
 }
 
 /**
@@ -97,8 +121,9 @@ export type RevertAction = (typeof REVERT_ACTIONS)[number];
  * state the run left is unknown and the file is not touched (T-10).
  * original_path_taken (G-A): a moved or discarded file cannot go back because something now
  * exists at its original path; nothing is replaced.
- * unsafe_move (DR-24 b, DR-21): the file could go back only by a rename that does not refuse an
- * existing destination (no hard links on that volume); it is not moved. A revert has no consent path.
+ * unsafe_move (DR-24 b, DR-25): the file could go back only by a rename that does not refuse an
+ * existing destination (no hard links on that volume), and the request has no consent for this
+ * revert (RevertRequest.unsafeMoveConsent); it is not moved. Reverting again with consent moves it.
  */
 export const REVERT_SKIP_REASONS = [
   "changed_since_run",
@@ -123,6 +148,8 @@ export interface RevertedFile {
    * moved or discarded file `path` is the place it returned to. Absent for the other actions.
    */
   readonly from?: string;
+  /** DR-25: present and true when the file was (or, in a dry run, would be) moved back unsafely, with consent. */
+  readonly unsafe?: true;
 }
 
 export interface SkippedFile {
@@ -179,7 +206,16 @@ export interface RevertOutcome {
  *     a file there that is a link is skipped (`changed_since_run`).
  *   - DR-24 (b): a move back is made like an apply's move (refusing an existing destination). When
  *     that cannot be done on the volume, the file is skipped as `unsafe_move`; nothing falls back
- *     to "check, then rename".
+ *     to "check, then rename" on its own.
+ *   - DR-25: with the person's consent for this revert (`unsafeMoveConsent` naming this `runId`),
+ *     such a file goes back by a plain rename made right after checking that its original path is
+ *     still free, and is reported `unsafe: true`. A consent for another run counts as none. Files
+ *     that can go back safely are moved safely either way. The CLI writes the consent channel and
+ *     the number of unsafe moves into revert.json (RevertRecord).
+ *   - With `dryRun` the same decisions are reported (`unsafe_move` skips without consent, `unsafe`
+ *     files with it). To learn whether the volume has hard links, a dry run may create a probe file
+ *     and a hard link to it inside the state directory and remove both at once; nothing else is
+ *     created and nothing remains.
  *   - R-9 I-4: an action with a `plan_item_started` record (PlanItemStartedEvent) but neither a
  *     `file_moved`/`file_discarded` nor a `plan_item_failed` for its index may or may not have
  *     been done (the process ended in between). It is handled in the same reverse order, with the

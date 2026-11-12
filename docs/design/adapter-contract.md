@@ -397,6 +397,19 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 - Windows에서 부모가 보낸 SIGINT는 자식의 처리기를 거치지 않고 강제 종료가 된다고 알려져 있다 [추정, 확인하지 않음]. 그래서 취소는 파일 방식이다(AC-D9).
 - 이 프로토콜은 로컬 웹 서버가 아니다. 듣는 소켓이 없고, 자식은 실행 하나가 끝나면 끝나며, 부모(어댑터)보다 오래 살지 않는다(DR-8).
 
+구현 상태 [구현 A-3, 연결 전]
+- CLI 쪽은 `src/cli/protocol/`에 있다(`3c09b58`).
+  - 줄 만들기: `startedLine`, `eventLine`, `confirmLine`.
+  - 답 읽기: `parseAnswerLine`, `AnswerBook`, `readAnswers`. 위의 무시 규칙, EOF 규칙, 취소 우선을 지킨다.
+  - 질문 하나: `askOverProtocol`. 답 없음은 `dismissed`, 취소는 거부(reject)다.
+  - 이벤트 줄: `protocolJournal`이 앱 계층의 DR-15 래퍼(`journalWithEvents`)를 쓴다. 엔진이 기록에 넘긴 사건을 다시 가린 것만 쓰고, journal 파일은 읽지 않는다.
+  - 옵션: `takeProtocolOptions`가 `--events jsonl`·`--confirm stdio`를 명령줄에서 떼어 낸다(`apply`에 `--confirm`은 거부).
+- `main.ts`·`run.ts`·`args.ts`·계약·cli-contract 연결은 CLI 담당 몫이다(A-3 보고서의 연결 목록).
+  - `--events jsonl`이면 stderr에는 프로토콜 줄만 쓴다(진행 줄·끝 요약·사람용 오류 없음).
+  - 실행이 끝나면 stdin 읽기를 멈춰야 프로세스가 기다리지 않고 끝난다.
+- VS Code 코어(`vscode/src/core`)와의 왕복을 시험했다: CLI 쪽이 쓴 줄을 코어가 같은 사건과 상태로 읽고, 코어의 답 줄을 CLI 쪽이 같은 답으로 읽는다(`tests/unit/cli/protocol/round-trip.test.ts`).
+- 적용의 기록은 `ApplyJournal`(G-A)이라 `protocolJournal`이 아직 받지 못한다. G-A 병합 뒤 같은 래퍼를 적용 기록에도 연다.
+
 ## 7. CLI 이행 계획 (N-13, UX-D2)
 
 ### 7.1 바꾸지 않는 것 (완료 기준: 같은 입력에 같은 결과)
@@ -418,7 +431,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 앱 계층 쪽은 됨(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않음 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 앱 함수: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI `changes` 명령은 `src/cli/changes.ts`(연결은 N-A). store의 스냅샷 읽기는 N-C 몫 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | `doctor` 감싸기만 있다 |
-| 6 줄 프로토콜 | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/events.ts`(신규), `src/contracts/**` | 없음 |
+| 6 줄 프로토콜 | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | CLI 쪽 모듈과 VS Code 코어 왕복 시험은 됨(`3c09b58`). `main.ts`·`run.ts` 연결은 CLI 담당 |
 | 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 타입은 G-A의 것(`src/app/general-tasks.ts`가 되풀이, DR-17). 함수는 G-B~G-F 뒤 |
 | 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 단계 5 시작(DR-3) |
 

@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import type { ContentHash, MaskedText, ResolvedPlanAction } from "../../../src/contracts/index.js";
+import { planActionShown } from "../../../src/contracts/index.js";
+import type { ContentHash, MaskedPlanAction, MaskedText, ResolvedPlanAction, StoredPlanAction } from "../../../src/contracts/index.js";
 import { RevertRunError, createApplyJournal, createPlanRecorder, prepareDiscardedRoot, revertRun } from "../../../src/store/index.js";
 import { moveWithoutReplacing } from "../../../src/store/apply-revert.js";
 
@@ -61,7 +62,7 @@ interface Applied {
  * discarded to `.codaryn/discarded/<applyRun>/1`. The plan is stored; the apply journal records
  * both actions. `paths` lets a test record masked paths instead of the real ones.
  */
-async function appliedWorkspace(options: { recordedFrom?: string; withPlan?: boolean } = {}): Promise<Applied> {
+async function appliedWorkspace(options: { recordedFrom?: string; withPlan?: boolean; withShown?: boolean } = {}): Promise<Applied> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-g-revert-")));
   roots.push(root);
   await mkdir(join(root, "inbox"));
@@ -71,7 +72,9 @@ async function appliedWorkspace(options: { recordedFrom?: string; withPlan?: boo
     { kind: "move", from: "inbox/report.txt", to: "docs/report.txt", sha256: sha(REPORT) },
     { kind: "discard", path: "inbox/old.log", sha256: sha(LOG) },
   ];
-  const digest = options.withPlan !== false ? await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(actions) : ("d".repeat(64) as ContentHash);
+  // DR-28: a plan written with each action's masked form, as the engine writes it now.
+  const toStore = options.withShown === true ? actions.map((action) => ({ ...action, shown: planActionShown(action as MaskedPlanAction) }) as StoredPlanAction) : actions;
+  const digest = options.withPlan !== false ? await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(toStore) : ("d".repeat(64) as ContentHash);
 
   const discarded = await prepareDiscardedRoot(root, APPLY_RUN);
   await mkdir(join(root, "docs"));
@@ -458,5 +461,15 @@ describe("R-9c C-1: an apply whose plan run is gone", () => {
     await rename(planDir, join(elsewhere, PLAN_RUN));
     await symlink(join(elsewhere, PLAN_RUN), planDir, "junction");
     await rejectsWith(linked.root, "invalid_run_record");
+  });
+});
+
+describe("DR-28: a plan stored with each action's masked form", () => {
+  test("is still read by a revert of its apply: the files go back", async () => {
+    const { root } = await appliedWorkspace({ withShown: true });
+    const outcome = await revertRun({ workspaceRoot: root, runId: APPLY_RUN });
+    assert.deepEqual(outcome.reverted.map((file) => file.action), ["restored_from_discard", "moved_back"]);
+    assert.deepEqual(outcome.skipped, []);
+    assert.equal(await readFile(join(root, "inbox", "report.txt"), "utf8"), REPORT);
   });
 });

@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import type { ContentHash, ResolvedPlanAction } from "../../../src/contracts/index.js";
+import { planActionShown, planActionShownMatches } from "../../../src/contracts/index.js";
+import type { ContentHash, MaskedPlanAction, MaskedText, ResolvedPlanAction, StoredPlanAction } from "../../../src/contracts/index.js";
 import { createPlanRecorder, loadPlan, markPlanApplied } from "../../../src/store/index.js";
 import { createExclusive } from "../../../src/store/common.js";
 
@@ -145,7 +146,7 @@ describe("loadPlan (G-E)", () => {
     assert.deepEqual(outcome, { ok: true, plan: { schemaVersion: 1, kind: "plan", runId: PLAN_RUN, actions: ACTIONS }, digest, applied: null });
   });
 
-  test("run_not_found, run_not_plan and invalid_run_record as the contract says", async () => {
+  test("run_not_found, run_not_plan, plan_run_missing and invalid_run_record as the contract says", async () => {
     const code = async (root: string): Promise<string> => {
       const outcome = await loadPlan({ workspaceRoot: root, runId: PLAN_RUN });
       return outcome.ok ? "ok" : outcome.code;
@@ -162,9 +163,10 @@ describe("loadPlan (G-E)", () => {
     await rm(join(runDir(noResult), "result.json"));
     assert.equal(await code(noResult), "run_not_plan");
 
+    // R-9c C-1: the run ended as plan_pending but its plan.json is gone (deleted).
     const noPlan = await workspace();
     await planRun(noPlan, HASH_A);
-    assert.equal(await code(noPlan), "run_not_plan");
+    assert.equal(await code(noPlan), "plan_run_missing");
 
     const otherDigest = await workspace();
     await createPlanRecorder({ workspaceRoot: otherDigest, runId: PLAN_RUN }).savePlan(ACTIONS);
@@ -227,5 +229,81 @@ describe("markPlanApplied (G-E, applied.json)", () => {
     const root = await workspace();
     await assert.rejects(markPlanApplied({ workspaceRoot: root, planRunId: PLAN_RUN, applyRunId: APPLY_RUN, at: "2026-01-02T03:05:00.000Z" }));
     assert.equal(await exists(join(root, ".codaryn")), false, "nothing is created");
+  });
+});
+
+describe("DR-28 (R-11 M-1): each action keeps how the plan run masked its paths", () => {
+  const TOKEN = "[[CODARYN_SECRET:00000000000000aa]]";
+  const SECRET_DIR = "zz-r11-fake-secret-value-zz";
+  const real: ResolvedPlanAction[] = [
+    { kind: "move", from: `${SECRET_DIR}/a.jpg`, to: `photos/${SECRET_DIR}/a.jpg`, sha256: HASH_A },
+    { kind: "discard", path: "inbox/tmp.log", sha256: HASH_B },
+  ];
+  /** The actions as the plan run's gateway masked them (the secret registered then). */
+  const maskedThen: MaskedPlanAction[] = [
+    { kind: "move", from: `${TOKEN}/a.jpg` as MaskedText, to: `photos/${TOKEN}/a.jpg` as MaskedText, sha256: HASH_A },
+    { kind: "discard", path: "inbox/tmp.log" as MaskedText, sha256: HASH_B },
+  ];
+  const stored: StoredPlanAction[] = real.map((action, index) => ({ ...action, shown: planActionShown(maskedThen[index] as MaskedPlanAction) }) as StoredPlanAction);
+
+  test("review reproduction: the stored masked form tells a masking with other secrets apart before anything is shown", async () => {
+    const root = await workspace();
+    const digest = await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(stored);
+    await planRun(root, digest);
+    const outcome = await loadPlan({ workspaceRoot: root, runId: PLAN_RUN });
+    assert.equal(outcome.ok, true);
+    const actions = outcome.ok ? outcome.plan.actions : [];
+    assert.deepEqual(actions, stored, "loadPlan gives the actions with their masked form");
+    // Masked again with the same secret (a new token id): the same visible text.
+    const sameSecret: MaskedPlanAction = { kind: "move", from: "[[CODARYN_SECRET:00000000000000bb]]/a.jpg" as MaskedText, to: "photos/[[CODARYN_SECRET:00000000000000bb]]/a.jpg" as MaskedText, sha256: HASH_A };
+    assert.equal(planActionShownMatches(actions[0] as StoredPlanAction, sameSecret), true);
+    // Masked with secrets that do not include it (the review's plan --workspace): the value would show.
+    const otherSecrets: MaskedPlanAction = { kind: "move", from: `${SECRET_DIR}/a.jpg` as MaskedText, to: `photos/${SECRET_DIR}/a.jpg` as MaskedText, sha256: HASH_A };
+    assert.equal(planActionShownMatches(actions[0] as StoredPlanAction, otherSecrets), false);
+    assert.equal(planActionShownMatches(actions[1] as StoredPlanAction, maskedThen[1] as MaskedPlanAction), true);
+  });
+
+  test("plan.json holds the visible parts only: no secret value, no token, no hash of a secret", async () => {
+    const root = await workspace();
+    await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(stored);
+    const text = await readFile(join(runDir(root), "plan.json"), "utf8");
+    const parsed = JSON.parse(text) as { actions: Record<string, unknown>[] };
+    assert.deepEqual(parsed.actions[0]?.["shown"], { from: ["", "/a.jpg"], to: ["photos/", "/a.jpg"] });
+    assert.deepEqual(parsed.actions[1]?.["shown"], { path: ["inbox/tmp.log"] });
+    assert.equal(text.includes("CODARYN_SECRET"), false);
+    assert.equal(text.split(SECRET_DIR).length - 1, 2, "the real paths only (from, to), as before DR-28");
+  });
+
+  test("a plan written before DR-28 (no shown) still loads; its actions have no shown", async () => {
+    const root = await workspace();
+    const digest = await createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan(ACTIONS);
+    await planRun(root, digest);
+    const outcome = await loadPlan({ workspaceRoot: root, runId: PLAN_RUN });
+    assert.deepEqual(outcome.ok ? outcome.plan.actions : null, ACTIONS);
+    assert.equal(planActionShownMatches((outcome.ok ? outcome.plan.actions[0] : undefined) as StoredPlanAction, maskedThen[0] as MaskedPlanAction), false, "no shown: treated as masked differently");
+  });
+
+  test("a shown of the wrong shape is refused when saved and when loaded", async () => {
+    const bad: unknown[] = [
+      { ...real[0], shown: { path: ["x"] } },
+      { ...real[0], shown: { from: [""], to: ["photos/", "/a.jpg"], extra: [] } },
+      { ...real[0], shown: { from: "x", to: ["y"] } },
+      { ...real[0], shown: { from: [], to: ["y"] } },
+      { ...real[0], shown: { from: [1], to: ["y"] } },
+      { ...real[0], shown: { from: [`a${TOKEN}b`], to: ["y"] } },
+      { ...real[1], shown: { from: ["x"], to: ["y"] } },
+      { ...real[1], shown: null },
+    ];
+    for (const action of bad) {
+      const root = await workspace();
+      await assert.rejects(createPlanRecorder({ workspaceRoot: root, runId: PLAN_RUN }).savePlan([action as StoredPlanAction]), TypeError, JSON.stringify(action));
+      assert.equal(await exists(join(runDir(root), "plan.json")), false);
+      // Written by hand with a matching digest, it is not loaded either.
+      await mkdir(runDir(root), { recursive: true });
+      const text = `${JSON.stringify({ schemaVersion: 1, kind: "plan", runId: PLAN_RUN, actions: [action] })}\n`;
+      await writeFile(join(runDir(root), "plan.json"), text, "utf8");
+      await planRun(root, sha(text), { plan: { digest: sha(text), actions: 1 } });
+      assert.deepEqual(await loadPlan({ workspaceRoot: root, runId: PLAN_RUN }), { ok: false, code: "invalid_run_record" }, JSON.stringify(action));
+    }
   });
 });

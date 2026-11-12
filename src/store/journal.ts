@@ -29,6 +29,8 @@ export interface JournalOptions {
 export function appendOnlyJournal<E extends { readonly type: string }>(
   options: JournalOptions,
   notes?: RunWriteNotes,
+  /** DR-38: called after each record is appended and noted (an apply notes the file a record names). */
+  afterAppend?: (event: E) => Promise<void>,
 ): { append(event: E): Promise<void>; close(): Promise<void> } {
   const { workspaceRoot, runId, clock } = options;
   assertRunId(runId);
@@ -85,6 +87,7 @@ export function appendOnlyJournal<E extends { readonly type: string }>(
         expected.update(line, "utf8");
         expectedSize += Buffer.byteLength(line, "utf8");
         if (notes !== undefined) await notes.file(file, { sha256: expected.copy().digest("hex"), size: expectedSize });
+        if (afterAppend !== undefined) await afterAppend(event);
       });
     },
     close(): Promise<void> {

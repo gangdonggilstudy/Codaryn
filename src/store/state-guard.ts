@@ -35,6 +35,8 @@ import {
   STATE_DIR_NAME,
 } from "../contracts/index.js";
 import type {
+  ApplyJournal,
+  ApplyJournalEntry,
   CreateChangeRecorder,
   CreatePlanRecorder,
   Journal,
@@ -48,10 +50,11 @@ import type {
   StateTier,
 } from "../contracts/index.js";
 import { changeRecorderWith } from "./changes.js";
+import { discardedRootPath, prepareDiscardedRootWith } from "./discarded.js";
 import { assertRunId, createExclusive, errorCode, hasExactRunEntry, isPlainDirectory, replaceAtomically, runDir, sha256Hex } from "./common.js";
 import { appendOnlyJournal } from "./journal.js";
 import type { JournalOptions } from "./journal.js";
-import { planRecorderWith } from "./plan.js";
+import { markPlanAppliedWith, planRecorderWith } from "./plan.js";
 import type { RunWriteNotes } from "./run-writes.js";
 import { isStoredRunId } from "./runs.js";
 
@@ -140,6 +143,58 @@ export interface RunRecorders {
  * app pass `stateGuard` to the engine as EngineDeps.stateGuard.
  */
 export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
+  const { notes, stateGuard } = guardFor(options);
+  const { workspaceRoot, runId } = options;
+  return {
+    journal: appendOnlyJournal<JournalEvent>(options, notes),
+    changeRecorder: changeRecorderWith({ workspaceRoot, runId }, notes),
+    planRecorder: planRecorderWith({ workspaceRoot, runId }, notes),
+    stateGuard,
+  };
+}
+
+export interface ApplyRecorders {
+  /** The apply run's journal (as createApplyJournal makes it). */
+  readonly journal: ApplyJournal;
+  /** DR-38: ApplyDeps.stateGuard for this apply. */
+  readonly stateGuard: StateGuard;
+  /** ApplyDeps.markApplied: markPlanApplied for this apply run, noted. */
+  markPlanApplied(request: { readonly planRunId: string; readonly at: string }): Promise<"marked" | "already_applied">;
+  /** ApplyDeps.discardedRoot: prepareDiscardedRoot for this apply run, noted. */
+  prepareDiscardedRoot(): Promise<string>;
+}
+
+/** A stored name the executor gives a discarded file (discardedStoredName: the action index). */
+const STORED_NAME = /^(?:0|[1-9][0-9]{0,8})$/;
+
+/**
+ * DR-38 for apply runs: the apply's journal, its plan mark and its discarded-files folder, with the
+ * state guard that knows them. The executor moves each discarded file into the folder before the
+ * engine records it (`file_discarded`), so the journal notes `discarded/<runId>/<stored>` as it is
+ * when that record is appended; the plan mark (applied.json in the plan run, tier "state") is noted
+ * when it is created. The CLI and the app pass `stateGuard` as ApplyDeps.stateGuard.
+ */
+export function createApplyRecorders(options: RunRecordersOptions): ApplyRecorders {
+  const { notes, stateGuard } = guardFor(options);
+  const { workspaceRoot, runId } = options;
+  const discardedRoot = discardedRootPath(workspaceRoot, runId);
+  const afterAppend = async (event: ApplyJournalEntry): Promise<void> => {
+    if (event.type !== "file_discarded") return;
+    const stored: unknown = (event as { readonly stored?: unknown }).stored;
+    if (typeof stored !== "string" || !STORED_NAME.test(stored)) return;
+    await notes.dir(discardedRoot);
+    await notes.present(join(discardedRoot, stored));
+  };
+  return {
+    journal: appendOnlyJournal<ApplyJournalEntry>(options, notes, afterAppend),
+    stateGuard,
+    markPlanApplied: (request) => markPlanAppliedWith({ workspaceRoot, planRunId: request.planRunId, applyRunId: runId, at: request.at }, notes),
+    prepareDiscardedRoot: () => prepareDiscardedRootWith(workspaceRoot, runId, notes),
+  };
+}
+
+/** The write log, the notes the writers use and the state guard over them, for one run. */
+function guardFor(options: RunRecordersOptions): { readonly notes: RunWriteNotes; readonly stateGuard: StateGuard } {
   const { workspaceRoot, runId, clock } = options;
   assertRunId(runId);
   const maxEntries = options.limits?.maxEntries ?? MAX_STATE_ENTRIES;
@@ -199,6 +254,15 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
         } catch {
           // Not noted.
         }
+      }
+    },
+    async present(file) {
+      const path = pathOf(file);
+      if (path === null || path === "") return;
+      try {
+        note(path, entryOf(await lstat(file, { bigint: true }), null));
+      } catch {
+        // Not noted: the next check sees what is there.
       }
     },
   };
@@ -410,12 +474,7 @@ export function createRunRecorders(options: RunRecordersOptions): RunRecorders {
     },
   };
 
-  return {
-    journal: appendOnlyJournal<JournalEvent>(options, notes),
-    changeRecorder: changeRecorderWith({ workspaceRoot, runId }, notes),
-    planRecorder: planRecorderWith({ workspaceRoot, runId }, notes),
-    stateGuard,
-  };
+  return { notes, stateGuard };
 }
 
 const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);

@@ -1064,8 +1064,14 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - 키가 있으면 `api_key`의 `message`가 그 키가 가는 주소의 origin(스킴·호스트·포트)과 그 주소의 출처(주소 변수, 설정 필드, 기본 주소)를 적는다(DR-34 (a)). 경로는 적지 않는다. 경로에 주소 말고 다른 것이 들어 있을 수 있어서다.
     - 예: `ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)`
     - 사람용 글(카탈로그 `doctor.api_key.ok`)에 주소를 싣는 매개변수는 아직 계약에 없다.
-- `models`: 아직 anthropic 목록만 보이고, 현재 모델은 anthropic 설정(최상위 또는 `providers.anthropic`)에서 읽는다.
-  - 설정의 `provider`가 anthropic이 아니면 요청 없이 `provider_not_implemented`로 끝난다(DR-34 (a), R-20 D2). 그 제공자의 연결(SP-6) 뒤에는 그 제공자를 따른다.
-  - `--use`는 최상위 `model`에 쓴다. 설정이 `providers.anthropic`을 쓰면 쓴 결과가 위 모호성 규칙에 걸리므로, 파일을 바꾸지 않고 `config_write_failed`로 끝난다.
-  - `--provider <name>`과 제공자 자리에 쓰기는 SP-6이다. 도움말의 `--provider` 줄도 그때 `models`에 붙는다.
+- `models [--provider <name>]`(SP-6): 제공자는 `--provider`, 없으면 설정의 `provider`, 없으면 anthropic이다. `--provider`의 값은 `API_PROVIDER_NAMES` 중 하나여야 하고, 아니면 아무것도 보내지 않고 `invalid_arguments`다.
+  - 그 제공자의 키 변수, 주소(주소 변수 → 제공자 설정 → 기본 주소), 목록 함수(`API_MODEL_LISTERS`)만 쓴다. 다른 제공자의 키나 주소는 쓰지 않는다(DR-34 (a), R-20 D2).
+  - 목록 함수는 `main.ts`가 넘길 때만 연결된다(`listModels`, `listers`). 넘기지 않으면 아무것도 보내지 않고 `provider_not_implemented`다.
+  - 키가 거부되면(`auth_failed`) 안내는 그 제공자의 키 변수(`check OPENAI_API_KEY` 등)를 적는다.
+  - 현재 모델: 그 제공자의 모델 변수 → 그 제공자의 설정 `model`.
+    - 계약의 `current.source`와 `selected.overriddenBy`는 `CODARYN_MODEL`만 담을 수 있다. 그래서 openai의 `CODARYN_OPENAI_MODEL`이 설정돼 있으면 `current`는 null이고, 사람용 글이 그 변수가 쓰인다고 적는다. 계약이 그 변수를 담을 수 있게 되면 맞춘다.
+  - `--use`가 쓰는 자리: anthropic은 최상위 `model`이다. 설정이 `providers.anthropic`을 쓰면 `providers.anthropic.model`, 다른 제공자는 `providers.<이름>.model`이다.
+    - 다른 필드와 그 순서는 그대로 둔다. 없는 `providers`나 항목은 끝에 더한다.
+    - 설정 파일이 없으면 `schemaVersion`과 그 자리의 모델만으로 만든다. `provider`는 쓰지 않는다. 간편 형식의 제공자를 바꾸는 것은 사람이 정한다.
+  - `ModelsOutput.provider`: anthropic이 아닌 제공자를 보일 때 싣는다. anthropic에도 싣는 것은 SP-0 고정 값(P-8 `models --json`) 변경이라 PM 승인 뒤에 한다.
 - `init`: 지금처럼 anthropic 설정을 쓴다. 키 안내 글은 `{keyEnv}`를 받는다.

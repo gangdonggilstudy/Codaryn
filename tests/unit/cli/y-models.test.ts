@@ -330,10 +330,11 @@ describe("Y-4 hints", () => {
 
 describe("arguments and help", () => {
   test("parseModelsArgs", () => {
-    assert.deepEqual(parseModelsArgs(["models"]), { ok: true, args: { command: "models", configPath: null, varsFile: null, use: null, json: false } });
-    assert.deepEqual(parseModelsArgs(["models", "--json", "--use", "2", "--config", "c.json"]), {
+    assert.deepEqual(parseModelsArgs(["models"]), { ok: true, args: { command: "models", configPath: null, varsFile: null, use: null, provider: null, json: false } });
+    assert.deepEqual(parseModelsArgs(["models", "--json", "--use", "2", "--config", "c.json", "--provider", "openai"]), {
       ok: true,
-      args: { command: "models", configPath: "c.json", varsFile: null, use: "2", json: true },
+      // SP-6: --provider is read here and checked by the command.
+      args: { command: "models", configPath: "c.json", varsFile: null, use: "2", provider: "openai", json: true },
     });
     assert.equal(parseModelsArgs(["models", "--workspace", "w"]).ok, false);
     assert.equal(parseModelsArgs(["models", "--use"]).ok, false);

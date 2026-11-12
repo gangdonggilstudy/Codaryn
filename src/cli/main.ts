@@ -38,7 +38,7 @@ import { findInstall } from "./install.js";
 import type { InstallInfo } from "./install.js";
 import { runModels } from "./models.js";
 import { runApply, runPlan, runReview } from "./plan-commands.js";
-import { anthropicModelLister } from "./provider.js";
+import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { runReport } from "./report.js";
 import { runRevert } from "./revert.js";
 import { runCli } from "./run.js";
@@ -271,9 +271,11 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           readFile: readText,
           // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
           loadEnvFile: (file) => process.loadEnvFile(file),
-          // Y-1: listAnthropicModels (src/model/anthropic) through the CLI's provider module. It is
-          // called only after the key and the address are resolved, with the global fetch.
+          // Y-1, SP-6: each provider's lister through the CLI's provider module (anthropic: listAnthropicModels,
+          // openai: listOpenAIModels). One is called only after that provider's key and address are
+          // resolved, with the global fetch.
           listModels: anthropicModelLister,
+          listers: API_MODEL_LISTERS,
           defaultConfig,
           // Y-3: the number is asked only when both stdin and stdout are terminals.
           ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask: (question: string) => askLine(question) } : {}),

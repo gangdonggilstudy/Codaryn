@@ -332,6 +332,12 @@ export interface Transport {
    */
   readonly retryAfter?: "cap" | "minimum";
   /**
+   * DR-35 (b): how many bytes of an error body are read for classifyStatus and describeError
+   * (absent: MAX_ERROR_BODY_BYTES, as before). OpenAI reads more, so that a quota error with a long
+   * message is still told apart from a rate limit.
+   */
+  readonly errorBodyLimit?: number;
+  /**
    * The provider's description of an error response (what of its body may be quoted). SP-5: it also
    * gets the response headers, for a provider whose request id is a header (OpenAI `x-request-id`).
    */
@@ -430,7 +436,7 @@ async function attemptOnce(transport: Transport, request: HttpRequest, signal: A
 
     let read: LimitedBody;
     try {
-      read = await readLimited(response, success ? MAX_SUCCESS_BODY_BYTES : MAX_ERROR_BODY_BYTES);
+      read = await readLimited(response, success ? MAX_SUCCESS_BODY_BYTES : (transport.errorBodyLimit ?? MAX_ERROR_BODY_BYTES));
     } catch (error) {
       return transportFailure(error, "read");
     }

@@ -72,7 +72,6 @@ import {
   defaultSleep,
   isPlainObject,
   isUsableApiKey,
-  MAX_ERROR_BODY_BYTES,
   sendWithRetries,
   UNUSABLE_KEY_MESSAGE,
   validateConnection,
@@ -95,6 +94,12 @@ export const OPENAI_QUOTA_ERROR_CODES: readonly string[] = [
   "organization_usage_limit_exceeded",
   "insufficient_quota",
 ];
+
+/**
+ * DR-35 (b), R-22 L-2: the bytes of an error body read to classify it (quota or rate limit) and to
+ * describe it. A quota error with a long message is still found; the message is cut as before.
+ */
+export const MAX_OPENAI_ERROR_BODY_BYTES = 64 * 1024;
 
 /** Every key shape Codaryn hides in output (DR-32 (a)): removed from messages, refused in listed values. */
 const KEY_SHAPES: readonly string[] = API_KEY_MASK_PATTERN_SOURCES;
@@ -390,7 +395,7 @@ function describeHttpError(status: number, body: LimitedBody, headers?: Headers)
     return `HTTP ${status}${type}${code}${message}${requestId}`;
   }
   if (body.bytes.byteLength === 0) return `HTTP ${status}${requestId}`;
-  const why = body.over ? `longer than ${MAX_ERROR_BODY_BYTES} bytes` : "not a JSON error object";
+  const why = body.over ? `longer than ${MAX_OPENAI_ERROR_BODY_BYTES} bytes` : "not a JSON error object";
   return `HTTP ${status} (the error body is ${why} and is not shown)${requestId}`;
 }
 
@@ -403,6 +408,7 @@ function transportFor(apiKey: string, settings: ListModelsSettings, deps: ApiPro
     maxRetries: settings.maxRetries,
     classifyStatus,
     retryAfter: "minimum",
+    errorBodyLimit: MAX_OPENAI_ERROR_BODY_BYTES,
     describeError: describeHttpError,
   };
 }

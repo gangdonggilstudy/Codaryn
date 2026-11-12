@@ -432,3 +432,21 @@ describe("R-22 L-1, DR-35 (a): 401 and 403 quote nothing of the provider's messa
     assert.deepEqual(outcome.ok ? null : [outcome.kind, outcome.message], ["auth_failed", "HTTP 401: the key or its access was refused; the provider's message is not shown"]);
   });
 });
+
+describe("R-22 L-2, DR-35 (b): a quota 429 with a long body is still told apart", () => {
+  const long = (bytes: number) => "quota detail ".repeat(Math.ceil(bytes / 13)).slice(0, bytes);
+
+  test("a body over 4096 bytes and within 64 KiB: quota_exhausted, not retried", async () => {
+    for (const error of [{ type: "insufficient_quota" }, { type: "invalid_request_error", code: "project_spend_limit_exceeded" }]) {
+      const { outcome, sent, delays } = await once([apiError(429, { ...error, message: long(20_000) }), completed([message("ok")])]);
+      assert.deepEqual([failure(outcome).kind, failure(outcome).httpStatus, sent.length, delays.length], ["quota_exhausted", 429, 1, 0], JSON.stringify(error));
+      assert.ok(failure(outcome).message.length <= 300, "the message is still cut");
+    }
+  });
+
+  test("a body over 64 KiB is not read whole: a rate limit, retried", async () => {
+    const { outcome, sent } = await once([apiError(429, { type: "insufficient_quota", message: long(70_000) })]);
+    assert.deepEqual([failure(outcome).kind, sent.length], ["rate_limited", 3]);
+    assert.match(failure(outcome).message, /longer than 65536 bytes/);
+  });
+});

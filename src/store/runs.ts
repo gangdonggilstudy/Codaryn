@@ -28,6 +28,7 @@ import {
   STATE_DIR_NAME,
   TASK_ID_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
+  isReasonOfStatus,
   toRunId,
 } from "../contracts/index.js";
 import type {
@@ -36,7 +37,6 @@ import type {
   RunListEntry,
   RunListing,
   RunReason,
-  RunReasonByStatus,
   RunId,
   TerminalRunStatus,
 } from "../contracts/index.js";
@@ -55,14 +55,6 @@ const FIRST_RECORD_MAX_BYTES = 64 * 1024;
 /** Largest revert record read. It holds a few short fields. */
 const REVERT_RECORD_MAX_BYTES = 4 * 1024;
 
-/** Every reason, per status (as report.ts checks them). */
-const REASONS: { readonly [S in TerminalRunStatus]: readonly RunReasonByStatus[S][] } = {
-  done: ["verified"],
-  failed: ["verifier_failed", "model_error", "repeated_failure"],
-  "needs-input": ["verifier_inconclusive", "no_verifier", "unknown_tool_outcome", "protected_changed"],
-  cancelled: ["cancelled"],
-  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
-};
 
 /** The run records directory cannot be listed. The message names no path and no content. */
 export class RunListError extends Error {
@@ -190,8 +182,8 @@ async function resultOf(
   const status = result["status"];
   if (typeof status !== "string" || !(TERMINAL_RUN_STATUSES as readonly string[]).includes(status)) unreadable();
   const reason = result["reason"];
-  const reasons = REASONS[status as TerminalRunStatus] as readonly string[];
-  if (typeof reason !== "string" || !reasons.includes(reason)) unreadable();
+  // DR-16: the contract's one table of reasons per status (G-A reasons included).
+  if (typeof reason !== "string" || !isReasonOfStatus(status as TerminalRunStatus, reason)) unreadable();
   if (result["exitCode"] !== RUN_EXIT_CODES[status as TerminalRunStatus]) unreadable();
   if (typeof result["provider"] !== "string" || !PROVIDERS.includes(result["provider"])) unreadable();
   const changes = result["changes"];

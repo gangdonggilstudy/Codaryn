@@ -11,6 +11,7 @@
  *   no journal path; every text is masked by the engine and cleaned again here.
  */
 
+import { MAX_FINAL_MESSAGE_CHARS } from "../shared/ipc.js";
 import { encodeLine } from "../shared/protocol.js";
 import type { HostRunItem } from "../shared/protocol.js";
 import { failureOf } from "./settings.js";
@@ -44,6 +45,8 @@ export interface RunsDeps {
   readonly applyPlan?: (request: HostApplyRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
   readonly itemOf: RunItemOf;
   readonly shown: Shown;
+  /** The display filter that keeps line breaks and tabs (the agent's last message); by line with `shown` when absent. */
+  readonly shownText?: Shown;
   readonly token: () => string;
   readonly write: (line: string) => void;
   readonly log: (text: string) => void;
@@ -61,8 +64,23 @@ const isObj = (value: unknown): value is Obj => typeof value === "object" && val
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const texts = (value: unknown, shown: Shown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, MAX_LIST).map(shown) : []);
 
+/** `shown` line by line and between tabs: LF and TAB stay, everything else is cleaned as `shown` does. */
+export const byLine = (shown: Shown): Shown => (text: string) => text.replace(/\r\n/g, "\n").split("\n").map((line) => line.split("\t").map(shown).join("\t")).join("\n");
+
+/**
+ * U-21 (DR-47): the agent's last message as the window may see it: cleaned keeping LF and TAB, keys
+ * hidden again (the engine masked it), and cut again at MAX_FINAL_MESSAGE_CHARS code points when
+ * hiding made it longer. Null when there is none or it is not the contract's shape.
+ */
+export function finalMessageValue(value: unknown, shownText: Shown): { readonly text: string; readonly truncated: boolean } | null {
+  if (!isObj(value) || typeof value["text"] !== "string" || typeof value["truncated"] !== "boolean") return null;
+  const chars = [...shownText(value["text"])];
+  const cut = chars.length > MAX_FINAL_MESSAGE_CHARS;
+  return { text: (cut ? chars.slice(0, MAX_FINAL_MESSAGE_CHARS) : chars).join(""), truncated: value["truncated"] || cut };
+}
+
 /** A run's result as the window may see it (RunResultView in src/shared/ipc.ts, checked again by the main process). */
-export function runResultValue(outcome: unknown, shown: Shown): Obj | HostFailure {
+export function runResultValue(outcome: unknown, shown: Shown, shownText: Shown = byLine(shown)): Obj | HostFailure {
   if (!isObj(outcome) || outcome["ok"] !== true || !isObj(outcome["result"])) return failureOf(outcome);
   const result = outcome["result"];
   const usage = isObj(result["usage"]) ? result["usage"] : {};
@@ -90,6 +108,7 @@ export function runResultValue(outcome: unknown, shown: Shown): Obj | HostFailur
       plan: isObj(plan) && typeof plan["digest"] === "string" ? { digest: plan["digest"], actions: num(plan["actions"]) } : null,
       review: isObj(review) ? { checklist: texts(review["checklist"], shown) } : null,
       protectedChanged: Array.isArray(result["protectedChanged"]) ? result["protectedChanged"].length : null,
+      finalMessage: finalMessageValue(result["finalMessage"], shownText),
     },
   };
 }
@@ -266,7 +285,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             { input: { kind: "quick", workspace: args.workspace, goal: args.goal }, configPath: null, varsFile: null, profile: args.profile, workflowRef: args.workflowRef, cancelFile: null },
             observer,
           ),
-        (done) => runResultValue(done, deps.shown),
+        (done) => runResultValue(done, deps.shown, deps.shownText),
       );
     },
 

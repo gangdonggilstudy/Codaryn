@@ -601,6 +601,35 @@ export interface RunEventsPayload {
   readonly counts: { readonly turns: number; readonly tools: number };
 }
 
+/**
+ * U-21 (DR-47): the longest agent's last message, in characters (code points): the contract's
+ * MAX_FINAL_MESSAGE_CHARS (src/contracts/engine.ts), repeated here as the window does not load the
+ * engine; a unit test compares the two.
+ */
+export const MAX_FINAL_MESSAGE_CHARS = 2000;
+
+/**
+ * U-21 (DR-47, AXM-1): the agent's last message (EngineResult.finalMessage), the model's own words
+ * and not a verified fact: every screen shows it after a label that says so. Masked; line breaks
+ * (LF) and tabs kept; `truncated` when it was cut at MAX_FINAL_MESSAGE_CHARS.
+ */
+export interface FinalMessageView {
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
+/** Control and direction characters other than LF and TAB (the engine host replaced them). */
+const UNSAFE_IN_MESSAGE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+
+/** A final message as the engine host gives it: null when there is none, "bad" when it does not fit. */
+function toFinalMessage(value: unknown): FinalMessageView | null | "bad" {
+  if (value === undefined || value === null) return null;
+  if (!isObj(value) || typeof value["text"] !== "string" || typeof value["truncated"] !== "boolean") return "bad";
+  const text = value["text"];
+  if (text.length > MAX_FINAL_MESSAGE_CHARS * 2 || [...text].length > MAX_FINAL_MESSAGE_CHARS || UNSAFE_IN_MESSAGE.test(text)) return "bad";
+  return { text, truncated: value["truncated"] };
+}
+
 /** GU-3 (3.7 summary): what the window shows of a finished run. Texts are masked and cleaned. */
 export interface RunResultView {
   readonly runId: string;
@@ -625,6 +654,8 @@ export interface RunResultView {
   readonly planRunId: string | null;
   readonly unsafeMoves: number | null;
   readonly applied: readonly PlanActionView[];
+  /** U-21 (DR-47): the agent's last message; null when there is none (a plan or apply run, an older result). */
+  readonly finalMessage?: FinalMessageView | null;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -690,6 +721,8 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   const unsafeMoves = result["unsafeMoves"] ?? null;
   const applied = kind === "apply" ? toPlanActions(result["applied"], 10_000) : [];
   if (applied === null || !(planRunId === null || isRunId(planRunId)) || !numOrNull(unsafeMoves)) return fail;
+  const finalMessage = toFinalMessage(result["finalMessage"]);
+  if (finalMessage === "bad") return fail;
   return {
     ok: true,
     result: {
@@ -714,6 +747,7 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       planRunId: planRunId as string | null,
       unsafeMoves: unsafeMoves as number | null,
       applied,
+      finalMessage,
     },
   };
 }
@@ -845,6 +879,8 @@ export interface ReportView {
   readonly runId: string;
   /** UXM-14, DR-38: the run has a records-changed mark; its records are not to be trusted. */
   readonly recordsChanged?: boolean;
+  /** U-21 (DR-47): the agent's last message from the run's result; null when there is none. */
+  readonly finalMessage?: FinalMessageView | null;
   readonly kind: "run" | "apply";
   readonly status: "complete" | "incomplete";
   readonly finished: { readonly status: string; readonly reason: string } | null;
@@ -894,6 +930,8 @@ export function toReportReply(value: unknown): ReportReply {
   const { runId, kind, status, finished, usage, verifiers, integrity, records, taskId } = value;
   const recordsChanged = value["recordsChanged"] ?? false;
   if (typeof recordsChanged !== "boolean") return fail;
+  const finalMessage = toFinalMessage(value["finalMessage"]);
+  if (finalMessage === "bad") return fail;
   if (!isRunId(runId) || (kind !== "run" && kind !== "apply") || (status !== "complete" && status !== "incomplete") || !shortText(taskId) || !numOrNull(records)) return fail;
   let finishedView: ReportView["finished"] = null;
   if (finished !== null) {
@@ -969,7 +1007,7 @@ export function toReportReply(value: unknown): ReportReply {
       failed,
     };
   }
-  return { ok: true, view: { runId, kind, status, recordsChanged, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
+  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
 }
 
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };

@@ -94,6 +94,8 @@ Files changed: 1
 Denied calls: 1
 To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.
 Usage: model turns 6 · tool calls 3 · 0 s
+The agent's last message (the agent's own words, not a verified fact):
+  | 빠진 '## 할 일' 절을 더했다.
 Read the report, and revert if needed.
 Run id: 20261112T030342Z-42ed82a7
 Report: codaryn report --workspace <workspace> --run 20261112T030342Z-42ed82a7
@@ -104,6 +106,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T030342Z-42ed82a7
 - `run command — denied (command/command_not_allowed)`: 허용 목록이 비어 있어 명령이 거부됐다. 거부는 실행을 끝내지 않고 모델에 돌아간다. 끝 요약의 `Denied calls`와 그 아래 안내가 이것이다. task 파일 실행이므로 안내는 task 파일의 `policy.commands`를 가리킨다.
 - `check #1 — not passed (fail)` → `repair 1`: 검증 실패 근거를 모델에 돌려보내 다시 고치게 했다(9절). 검증기는 id가 아니라 순번으로 나온다.
 - 끝 요약의 `Files changed`는 바뀐 파일 수다. `summary.md`를 두 번 썼어도 파일은 하나다.
+- `The agent's last message (…)` 아래의 `|` 줄은 모델이 마지막에 한 답이다(대본의 마지막 단계). 에이전트의 말이며 검증된 사실이 아니다. 무엇이 확인됐는지는 위의 `Checks passed`가 말한다(8절 "에이전트의 마지막 답").
 - stdout의 JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이다. `changes`에는 `summary.md`의 생성과 변경 두 건, `usage.repairAttempts`는 1이다. JSON의 한글은 `\uXXXX`로 나오므로 PowerShell에서 `$r = node dist/src/cli/main.js run --task $demo\task.json | ConvertFrom-Json`처럼 바로 변수로 받을 수 있다.
 - `init`으로 기본 설정을 만든 뒤라면(4절) 두 줄이 더 나온다: 진행 줄 `codaryn: using the config file in the default location: %APPDATA%\Codaryn\config.json`과 요약 줄 `Used the config file in the default location: %APPDATA%\Codaryn\config.json`. `init`의 기본 한도는 이 예시의 한도보다 크므로 실행 결과는 같다.
 
@@ -510,7 +513,14 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 **사람용 출력(stderr):** stdout은 늘 JSON 한 줄이고, 사람이 읽는 글은 stderr에 나온다.
 
 - 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
-- 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수와 허용 방법, 사용량(턴, 도구 호출, 초), 에이전트의 마지막 답(있을 때), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- **에이전트의 마지막 답(DR-47):** 실행이 모델의 마지막 답(도구 호출 없이 끝낸 응답)으로 끝났으면, 끝 요약의 사용량 다음에 머리말 `The agent's last message (the agent's own words, not a verified fact):`(한국어 `에이전트의 마지막 답(에이전트의 말이며 검증된 사실이 아님):`) 아래로 그 글이 나온다.
+  - 머리말 그대로 에이전트의 말이며 검증된 사실이 아니다. "다 고쳤다"고 써도 검증을 통과했다는 뜻이 아니다. 판정은 검증 결과와 `report`로 한다.
+  - 글은 줄마다 `  | `로 시작한다. 탭과 이어진 공백은 공백 하나로 보이고, 긴 줄은 접힌다.
+  - 글은 가린 기록에서 만든다. 가릴 값은 토큰(`[[CODARYN_SECRET:…]]`)으로, 키 모양은 `[key]`로 보인다. 제어 문자와 보이지 않는 문자(양방향 제어, 영폭 공백 등)는 빠진다(개인정보 문서 5절).
+  - 2,000자(코드 포인트)까지다. 넘으면 앞 2,000자만 보이고 그 아래에 `(cut: only the first 2000 characters are shown)`(한국어 `(잘림: 앞 2000자만 보입니다)`)가 붙는다.
+  - 없는 경우: 계획 실행(`plan_pending`, 그 자리는 계획의 요약이다), 한도에 걸리는 등 모델의 답 없이 끝난 실행, 답이 비었거나 공백뿐인 실행.
+  - 확인(U-21 통합 판 `be5e089`의 실제 CLI): 3절 체험, `analyze` 실행(답 `done`), 가릴 값·키 모양·탭·CRLF·제어 문자·이어진 공백·2,100자를 넣은 대본(영어·한국어), 계획 실행, `max_model_turns`로 끝난 실행, 공백뿐인 답(셋 다 없음).
 - 오류 설명: 무엇이 잘못됐는지, 위치(6절 "오류 위치"), 고치는 법, 코드. 실행 전 오류에도 나온다. 오류 JSON의 영어 `message`는 stdout에만 있다. 예:
 
 ```
@@ -557,7 +567,7 @@ codaryn: 오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 �
 
 `run`의 stdout에는 JSON 한 줄만 나온다. 비 ASCII 문자는 `\uXXXX`로 나오므로 어느 코드 페이지에서도 JSON으로 읽힌다.
 
-- **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다.
+- **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다. 에이전트의 마지막 답이 있으면 `finalMessage`(`text`, `truncated`)도 있다(8절). `text`는 끝 요약과 같은 처리를 거친 글이고, 줄바꿈은 LF, 탭은 그대로다. 실행 폴더의 `result.json`에도 같은 필드가 있다. DR-47 전의 판이 쓴 `result.json`에는 없다.
 - **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절). 메시지에는 값 대신 필드 이름만 적힌다.
 - `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다.
 
@@ -685,6 +695,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록은 `--include-not-reverted`를 따로 줘야 지워진다.
   - **계획 실행**(`plan_pending`으로 끝난 실행)의 기록은 그 계획을 적용한 실행을 되돌리는 데 필요하다. `cleanup`은 그 적용을 함께 지울 때만 지운다.
   - **`.codaryn\discarded\`**: 실행 기록이 아니라 파일 정리에서 폐기한 사람의 파일이다. `cleanup`에 `--delete-discarded`를 따로 줘야 지워지고, 지우면 되찾을 수 없다.
+  - **폐기 보관함에 파일이 남은 적용 실행**의 기록에만 그 파일들의 원래 이름과 자리가 있다. `cleanup`은 그 폐기 보관함을 같은 정리에서 함께 지우거나 그 적용을 되돌린 뒤에만 이 기록을 지운다(DR-53, 18.8절).
 
 ## 12. 가릴 값 등록과 가려지는 범위
 
@@ -1187,7 +1198,7 @@ node dist/src/cli/main.js cleanup --workspace D:\work\notes --older-than 30 --co
 - **확인은 셋이고, 뒤의 둘은 `--confirm`과 함께만 받는다.**
   - `--confirm <digest>`: 미리보기가 보인 계획 그대로일 때만 지운다. 미리보기 뒤에 새 실행이나 되돌리기로 상태가 바뀌면 `plan_changed`(종료 3)이고 아무것도 지우지 않는다. 다시 미리 본다.
   - `--include-not-reverted`: 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록을 지운다. 없으면 그 기록은 남고(`not_reverted_not_confirmed`) 나머지만 지워진다(종료 0). 남은 적용 실행이 쓰는 계획 실행도 함께 남는다. 지운 실행은 더는 되돌릴 수 없다.
-  - `--delete-discarded`: 고른 폐기 보관함(사람의 파일)을 지운다. 없으면 폐기 보관함은 남는다. 적용 실행의 기록만 지우고 폐기 보관함을 남기면 그 파일은 되돌리기로 제자리에 돌아가지 않는다. 미리보기가 그 적용 실행 줄에 이것을 알린다.
+  - `--delete-discarded`: 고른 폐기 보관함(사람의 파일)을 지운다. 없으면 폐기 보관함은 남고, 그 폐기 보관함을 만든 적용 실행의 기록도 남는다(DR-53, `discarded_left`). 파일의 원래 이름과 자리는 그 기록에만 있기 때문이다. 그 적용 실행이 쓰는 계획 실행도 함께 남는다(`used_by_kept_apply`). 이 기록은 같은 정리에서 그 폐기 보관함을 고르고 `--delete-discarded`를 줄 때, 또는 그 적용을 먼저 되돌린 뒤에 지워진다. 남긴 것은 사람이 고른 결과라 종료는 0이다.
 - 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, U-24 문구 브랜치 `f2ed116`(main `266c46d` 위). 실행 id와 다이제스트는 실행마다 다르다):
 
 ```
@@ -1206,7 +1217,19 @@ The records of 1 run(s) not reverted, only partly reverted, or whose records can
 
   - 그 다이제스트로 `--confirm`만 주면 `Removed: run records 1, discarded-files folders 0, 15174 bytes`이고, 되돌리지 않은 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
   - 새 미리보기의 다이제스트로 `--include-not-reverted`를 더하면 그 실행도 지워진다.
-  - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `the apply run's records go; if its discarded files stay (their folder not selected, or its deletion not confirmed), a revert can no longer put them back`이 붙는다. 폐기 보관함 줄은 `a discarded-files folder: people's own files are deleted`이고, 끝에 `People's discarded files are deleted only with --delete-discarded besides.`가 나온다.
+  - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was`가 붙는다. 폐기 보관함 줄은 `a discarded-files folder: people's own files are deleted`이다. 끝에는 `People's discarded files are deleted only with --delete-discarded besides.`와 `The records of 1 apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.`가 나온다(main `531c8b8`의 실제 출력).
+  - 그 미리보기의 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 0이다(stdout, main `531c8b8`):
+
+    ```
+    Removed: run records 0, discarded-files folders 0, 0 bytes
+    Kept: the records of apply runs whose discarded files stay: 1. The records are the only note of what each of those files was called and where it was. They go once those applies are reverted, or when their discarded files are deleted in the same cleanup.
+    - discarded 20261112T161801Z-374650b1: deleting the discarded files was not confirmed
+    - run 20261112T161801Z-374650b1: its discarded files stay, and only its records say what each file was called and where it was
+    - run 20261112T161800Z-72e76eb6: a plan run whose apply run is kept; without it that apply could not be reverted
+    ```
+
+  - `--delete-discarded`까지 더하면 `Removed: run records 2, discarded-files folders 1, 13630 bytes`이고 종료 0이다. 바이트 수는 기록에 든 시각과 걸린 시간에 따라 실행마다 몇 바이트씩 다르다.
+  - 실행 기록만 고른 경우(`--discarded-older-than` 없음)와 기록을 확인할 수 없는 적용 실행도 같은 이유로 남는다. 적용을 먼저 되돌리면(`complete`) 그 실행의 폐기 보관함 폴더는 비고, `--older-than 0`의 확인으로 두 실행의 기록이 지워진다. 빈 폴더는 남는다.
 - **지우지 않는 것**: `.codaryn\parked\`(되돌리기가 제자리에 두지 못한 파일), 잠금, `.gitignore`, 돌고 있는 실행(`lock_held`, 적용 중이면 `workspace_locked`), 결과가 없는 실행(`no_result`), 고르지 않은 적용이 쓰는 계획 실행. 상태 디렉터리 안의 링크를 따라 밖을 지우지 않는다.
 - **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`이고 종료 1이다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).
 - **기록을 확인할 수 없는 실행**(결과 기록이 깨진 실행 등)의 줄에는 `records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files`가 붙고, `--include-not-reverted`를 따로 줘야 지워진다.

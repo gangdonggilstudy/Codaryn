@@ -151,6 +151,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
+  - DR-47(U-21, AXM-1): 선택 `finalMessage`(`{text, truncated}`): 에이전트의 마지막 답. 실행의 마지막 모델 응답이 도구 호출 없는 마지막 답(`stop: "final"`)일 때만 있고, 맨 끝 필드다. 등록된 가릴 값은 가려지고 키 모양은 `[key]`, 줄 바꿈은 LF, 탭 말고 제어·보이지 않는 문자는 빠진다. `MAX_FINAL_MESSAGE_CHARS`(2000자)를 넘으면 잘리고 `truncated`가 true다. 계획 실행(`plan_pending`)과 답 없이 끝난 실행, DR-47 전에 쓴 결과에는 없다. 모델의 말이지 검증된 사실이 아니며, 사람용 끝 요약은 `summary.final_message` 머리말 뒤에 인용 줄로 보인다. 필드를 더하기만 한다(DR-48).
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
   - 선택 필드
@@ -536,6 +537,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 상태(`REPORT_EXIT_CODES`): `complete`(0)는 둘 다 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. `incomplete`는 기록만으로 만들고, 줄바꿈 없는 마지막 줄은 아직 쓰는 중으로 보고 무시한다.
 - 오류(`CliErrorOutput`): `invalid_arguments`, `workspace_not_found`, `run_not_found`(그 실행의 기록이 없음), `invalid_run_record`(읽기·해석 실패, `MAX_REPORT_FILE_BYTES`(256 MiB) 초과, 다른 실행의 파일).
 - `ReportOutput`: `schemaVersion`, `kind:"report"`, `runId`, `status`, `exitCode`, `result`(`EngineResult` 또는 null), `journal`(`ReportJournalSummary`: 작업 id, 작업 종류, 제공자, 한도, 기록 수, 모델 요청 수, 거부된 도구 호출 수, 재수정 수, 마지막 검증 회차, 변경 목록, 무결성 확인, 종료 기록).
+  - DR-47(U-21): `result`는 `result.json`의 `finalMessage`를 그대로 담는다(계획 실행에 있으면 `invalid_run_record`). 본문에는 그 답이 있으면 `## The agent's last message` 절이 `## Changes` 뒤에 붙는다: 머리말(`report.final_message`의 영어), 끝 요약과 같은 인용 줄(출력 담당의 `quoteModelText`, 최대 `FINAL_MESSAGE_MAX_LINES`줄)을 담은 코드 블록, 잘렸으면 잘린 줄.
 - 한계: 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로 실행 중 허용된 명령이 바꿀 수 있다.
 
 ### doctor (U-6)
@@ -881,6 +883,8 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
   - `PlanOutput`: 동작 목록(지금 가릴 값으로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
+  - U-14(UXM-6, AXM-2, AXM-15): 계획 실행에 기록 변경 표시가 있으면(읽을 수 없는 표시도) 그래도 보이되(종료 0) `recordsChanged: true`를 넣고, 글은 경고 줄(`plan.records_changed`)로 시작하며 적용 명령 대신 적용할 수 없다는 줄(`plan.cannot_apply`: 새 `codaryn run`으로 계획을 다시 만든다)을 적는다. 모델이 쓴 요약(`summary`)은 계획 실행 journal의 `propose_plan` 호출(결과가 이 다이제스트를 가리키는 것)에서 읽어 넣고, 글에서는 `plan.summary_label` 뒤에 에이전트의 설명으로 보인다(승인 대상이 아님). 찾지 못하거나 읽지 못하면, 그리고 표시가 있으면 뺀다. 글의 마지막 줄은 다이제스트가 보장하는 것(`plan.digest_guarantee`)이다. `apply`의 터미널 질문도 같은 글을 쓴다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다.
+  - R-49 R49-M1: 요약은 읽는 자리에서 지금의 가릴 값, 현재 키와 키 모양, 제어 문자를 차례로 거친다. 그래서 글과 `--json`, 앱 계층, `apply`의 질문이 같은 글을 싣는다. 동작의 경로는 기계가 쓰는 자료라 키 모양 가림을 걸지 않는다(PM 답, DR-48이 깨는 변경을 두 곳으로 한정함).
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
@@ -1150,3 +1154,9 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). `applied`는 문제로 남긴 것(`partly_removed` 포함)이 있으면 종료 1이고, 사람의 선택으로 남긴 것(`not_confirmed`, `not_reverted_not_confirmed`, `discarded_left`, `used_by_kept_apply`)은 0이다. U-13(UXM-1): 폐기 보관함에 파일이 남는 적용 실행의 기록은 그 폐기 보관함을 같은 정리에서 지우지 않으면(`--delete-discarded`와 폐기 보관함 선택) 남긴다(`discarded_left`, 그 적용이 쓰는 계획 실행은 `used_by_kept_apply`). 미리보기는 그런 적용의 수를 안내 줄로, 완료 출력은 `cleanup.done_discarded_left` 줄과 항목별 이유로 알린다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.
+
+### 18.14 읽기 명령의 가벼운 형식과 `--workspace` 생략 (U-17, UXM-3, UXM-19, AXM-14, DR-46)
+
+- `plan`과 `review`는 모델도 검증기도 돌리지 않으므로 간편 형식에서 실행 한도를 요구하지 않는다(설정 파일에 한도가 없어도 됨. 준 한도는 그대로 검사). 가릴 값의 이름과 작업 종류만 해석한다. `apply`는 검증기를 그 설정으로 돌리므로 지금처럼 요구한다.
+- 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 쓴다. 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 지금처럼 명시를 요구하고, 오류에 `--workspace .`를 주면 현재 폴더라는 안내를 붙인다.
+- `changes`의 간편 형식이 제공자 설정을 요구하지 않게 하는 것은 앱 계층 몫이다.

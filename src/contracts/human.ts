@@ -367,6 +367,12 @@ export const FIXED_MESSAGES = {
   "summary.next_revert_here": { runId: "runId" },
   "summary.config_default": { location: "location" },
   "summary.profile_applied": {},
+  // DR-47 (AXM-1): the agent's last message (EngineResult.finalMessage), shown as an item after this
+  // label, which says it is the agent's own words and not a verified fact; the second line follows
+  // it when the text was cut (`{count}`: MAX_FINAL_MESSAGE_CHARS). The report's section starts with
+  // `report.final_message`, which says the same.
+  "summary.final_message": {},
+  "summary.final_message_truncated": { count: "count" },
   // G-A: plan runs, human review and apply runs. `{form}` is one of `summary.form.*`, chosen by
   // the context's workspaceForm, so a hint repeats the task form the user typed without its value.
   "summary.form.task": {},
@@ -379,6 +385,17 @@ export const FIXED_MESSAGES = {
   "summary.next_review": { form: "text", runId: "runId" },
   "summary.apply_actions": { applied: "count", total: "count" },
   "summary.apply_plan_run": { runId: "runId" },
+  // U-14 (UXM-6, AXM-2, AXM-15): lines of the plan view (`codaryn plan`, the approval screen).
+  // records_changed: first, when PlanOutput.recordsChanged (the records were changed outside the run,
+  // so this plan may not be the one the run made); cannot_apply: in place of the command to apply it
+  // (make the plan again with a new run); summary_label: before the model's summary, shown as an
+  // item (the agent's description, not what is approved); digest_guarantee: last (the digest names
+  // exactly these actions and the files' contents when the plan was made; apply refuses if the plan,
+  // a file or the run's records changed since).
+  "plan.records_changed": {},
+  "plan.cannot_apply": {},
+  "plan.summary_label": {},
+  "plan.digest_guarantee": {},
   // DR-21: an apply that ended as consent_required: how many moves are unsafe, and the command that
   // gives consent for one apply (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
   "summary.unsafe_moves": { count: "count" },
@@ -492,6 +509,7 @@ export const FIXED_MESSAGES = {
   // DR-38: a run whose records were changed by something other than the run (state.ts).
   "runs.records_changed": {},
   "report.records_changed": {},
+  "report.final_message": {},
   "changes.records_changed": {},
   "revert.records_changed": {},
   // DR-38: progress lines of the state checks: `{count}` paths changed (the run stops), and a part

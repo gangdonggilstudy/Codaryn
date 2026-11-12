@@ -267,6 +267,7 @@ describe("GT-E3 plan step", () => {
     assert.equal(result.exitCode, 3);
     assert.deepEqual(result.plan, { digest: HASH_A, actions: 2 });
     assert.equal(Object.hasOwn(result, "review"), false);
+    assert.equal(Object.hasOwn(result, "finalMessage"), false, "DR-47: a plan run's place is the plan's summary");
     assert.deepEqual(run.verifiers.runs, [], "the plan run verifies nothing");
     assert.deepEqual(result.verifiers, []);
     // The read before the plan ran; the read after it in the same turn did not.

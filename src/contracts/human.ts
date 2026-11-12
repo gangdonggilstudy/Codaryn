@@ -149,6 +149,9 @@ export const SCHEMA_FIELD_NAMES = [
   "stop",
   "usage",
   "delayMs",
+  // N-24 (review R-3 R3-4): the scripted model's usage fields.
+  "inputTokens",
+  "outputTokens",
 ] as const;
 
 const SCHEMA_FIELD_SEGMENT = /^(?:[A-Za-z]+|\[(?:0|[1-9][0-9]{0,5})\])/;
@@ -360,6 +363,8 @@ export const FIXED_MESSAGES = {
   "runs.incomplete": {},
   "runs.damaged": {},
   "runs.reverted": {},
+  // N-23 (g): the run's own records are fine, only its revert record failed the checks.
+  "runs.revert_record_damaged": {},
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
@@ -401,16 +406,29 @@ export const FIXED_MESSAGES = {
   "help.exit_heading": {},
 
   // doctor (N-21): one id per outcome; the check id and its status word come from listed ids.
+  // A DoctorCheck's `text` is in the JSON, so doctor ids never take `text` (catalog output).
   "doctor.footer": { status: "text", exitCode: "count" },
   "doctor.task_unusable": {},
   "doctor.no_workspace": {},
-  "doctor.file.unreadable": { file: "text" },
-  "doctor.file.json_syntax": { file: "text", line: "count", column: "count" },
-  "doctor.file.key": { file: "text" },
-  "doctor.file.too_deep": { file: "text" },
-  "doctor.file.invalid": { file: "text", field: "field" },
-  "doctor.file.invalid_unlocated": { file: "text" },
-  "doctor.file.valid": { file: "text" },
+  "doctor.config_file.unreadable": { location: "location" },
+  "doctor.config_file.json_syntax": { location: "location", line: "count", column: "count" },
+  "doctor.config_file.key": { location: "location" },
+  "doctor.config_file.too_deep": { location: "location" },
+  "doctor.config_file.invalid": { location: "location", field: "field" },
+  "doctor.config_file.invalid_unlocated": { location: "location" },
+  "doctor.task_file.unreadable": {},
+  "doctor.task_file.json_syntax": { line: "count", column: "count" },
+  "doctor.task_file.key": {},
+  "doctor.task_file.too_deep": {},
+  "doctor.task_file.invalid": { field: "field" },
+  "doctor.task_file.invalid_unlocated": {},
+  "doctor.task_file.valid": {},
+  "doctor.model.script_unreadable": {},
+  "doctor.model.script_json_syntax": { line: "count", column: "count" },
+  "doctor.model.script_key": {},
+  "doctor.model.script_too_deep": {},
+  "doctor.model.script_invalid": { field: "field" },
+  "doctor.model.script_invalid_unlocated": {},
   "doctor.node_version.ok": { major: "count", required: "count" },
   "doctor.node_version.fail": { required: "count" },
   "doctor.vars_file.skipped": {},
@@ -454,14 +472,24 @@ export const FIXED_MESSAGES = {
   "doctor.integrity_paths.skipped": {},
   "doctor.integrity_paths.problems": { missing: "count", inside: "count" },
   "doctor.integrity_paths.ok": { count: "count" },
-  "doctor.language.ok": { text: "text" },
-  "doctor.language.env_ignored": { text: "text" },
+  "doctor.language.from_env": { language: "language" },
+  "doctor.language.from_config": { language: "language" },
+  "doctor.language.from_os": { language: "language" },
+  "doctor.language.from_default": { language: "language" },
+  "doctor.language.env_ignored": { language: "language" },
+  "doctor.language.unchecked": {},
+  // N-25 (a): the workspace lock. When a lock is held but no Codaryn runs, the user removes it.
+  "doctor.lock.none": {},
+  "doctor.lock.held": {},
+  "doctor.lock.stale": {},
+  "doctor.lock.unreadable": {},
+  "lock.remove_hint": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;
 
-/** N-21: the fixed ids a DoctorCheck's `text` may use. */
-export type DoctorMessageId = Extract<FixedMessageId, `doctor.${string}`>;
+/** N-21: the fixed ids a DoctorCheck's `text` may use (not the footer, which is rendered only). */
+export type DoctorMessageId = Exclude<Extract<FixedMessageId, `doctor.${string}`>, "doctor.footer">;
 
 /** Files an input diagnostic can point into (N-15). */
 export const INPUT_DIAGNOSTIC_FILES = ["config", "task", "script"] as const;
@@ -556,6 +584,14 @@ export function messageParams(id: MessageId): { readonly [param: string]: Messag
  * in decimal digits, anything else as given); the types above limit what can be given. It never
  * reads a file or the environment. A missing or extra parameter at run time is a programming
  * error and throws.
+ *
+ * N-24 (review R-3 GAP-1 to GAP-6): the types can be bypassed (casts, `any`, JSON), so `format`
+ * checks every value's kind again at run time: a count is a non-negative safe integer, seconds a
+ * non-negative number with at most one decimal place, a code one of its contract list, a field a
+ * `toSchemaFieldPath` result, a run id a `toRunId` result, a location or suggestion one of the
+ * fixed strings, text one this catalog produced. A value that fails is not shown (a fixed
+ * replacement such as "?" stands in its place). Run ids and task ids are shown with key shapes
+ * hidden, as every printed text is.
  */
 export interface MessageCatalog {
   readonly language: MessageLanguage;

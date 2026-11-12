@@ -1,28 +1,23 @@
 /**
- * Run events (adapter-contract 5.2): every record the run's journal stored, delivered after it
- * was written, as the stored line says it (`seq`, `at`, `runId` included), except for the fields
- * the journal does not mask (R-1 L-1).
+ * Run events (adapter-contract 5.2, DR-15): the records the engine handed to the run's journal,
+ * delivered after the journal stored them, built in memory. The journal file is never read back:
+ * commands allowed during a run can append lines to it (R-4 H-1), and such a line must not reach
+ * an observer.
  *
- * Model-given names and call ids are recorded as the model sent them (`src/engine/index.ts:403-412`,
- * `:573`, and again inside the next `model_request`'s messages): they are plain strings, not
- * MaskedText. Before an event leaves the app layer, a tool
- * name outside the built-in set becomes "(unknown tool)" (as the CLI's progress lines do) and every
- * call id is masked with the run's gateway. All other fields are delivered as stored.
- *
- * Interim: `Journal.append` does not return the stored record yet (AC-D3), so the records are read
- * back from the journal file after each append resolves. The store writes each record as one
- * complete line before `append` resolves, so the new bytes are always whole lines.
+ * - `seq` counts the stored records from 1, as the store numbers a new run's journal.
+ * - `at` is read from the run's clock when the record was stored. The store reads the same clock
+ *   for its own line, so the two can differ by the time between the readings.
+ * - Every string in the record is masked again with the run's gateway (masking text that gateway
+ *   already masked leaves it as it is). A tool name outside the built-in set reads "(unknown tool)"
+ *   first (R-1 L-1), as the CLI's progress lines do. A record that cannot be masked is not
+ *   delivered; the gap in `seq` shows it.
  */
 
-import { open } from "node:fs/promises";
-import type { FileHandle } from "node:fs/promises";
 import { TOOL_NAMES } from "../contracts/index.js";
-import type { Journal, JournalRecord, MaskedToolCall, ModelMessage, PrivacyGateway, ToolResult } from "../contracts/index.js";
+import type { Clock, Journal, JournalRecord, MaskedToolCall, ModelMessage, PrivacyGateway, ToolResult } from "../contracts/index.js";
 import type { RunEvent, RunObserver } from "./types.js";
 
 export const UNKNOWN_TOOL_NAME = "(unknown tool)";
-/** Shown for a call id that could not be masked. */
-export const UNSHOWN_CALL_ID = "(not shown)";
 
 /** Delivers one event. An observer's exception or absence never reaches the run. */
 export function deliver(observer: RunObserver | undefined, event: RunEvent): void {
@@ -34,22 +29,11 @@ export function deliver(observer: RunObserver | undefined, event: RunEvent): voi
   }
 }
 
-/**
- * The record as an event may show it: model-given tool names limited to the built-in set and call
- * ids masked. Records without such fields are returned as they are.
- */
-export function sanitizeRecord(record: JournalRecord, privacy: PrivacyGateway): JournalRecord {
+/** Model-given tool names limited to the built-in set, wherever a record repeats them. */
+function limitToolNames(record: JournalRecord): JournalRecord {
   const tool = (name: string): string => ((TOOL_NAMES as readonly string[]).includes(name) ? name : UNKNOWN_TOOL_NAME);
-  const id = (value: string): string => {
-    try {
-      const masked = privacy.mask(value);
-      return masked.ok ? masked.text : UNSHOWN_CALL_ID;
-    } catch {
-      return UNSHOWN_CALL_ID;
-    }
-  };
-  const call = (item: MaskedToolCall): MaskedToolCall => ({ ...item, id: id(item.id), name: tool(item.name) });
-  const result = (item: ToolResult): ToolResult => ({ ...item, tool: tool(item.tool), callId: id(item.callId) });
+  const call = (item: MaskedToolCall): MaskedToolCall => ({ ...item, name: tool(item.name) });
+  const result = (item: ToolResult): ToolResult => ({ ...item, tool: tool(item.tool) });
   const message = (item: ModelMessage): ModelMessage => {
     if (item.role === "assistant") return { ...item, toolCalls: item.toolCalls.map(call) };
     if (item.role === "tool") return { ...item, results: item.results.map(result) };
@@ -57,14 +41,11 @@ export function sanitizeRecord(record: JournalRecord, privacy: PrivacyGateway): 
   };
   switch (record.type) {
     case "tool_decision":
-      return { ...record, tool: tool(record.tool), callId: id(record.callId) };
+      return { ...record, tool: tool(record.tool) };
     case "tool_result":
       return { ...record, result: result(record.result) };
-    case "file_changed":
-      return { ...record, callId: id(record.callId) };
     case "model_response":
       return { ...record, toolCalls: record.toolCalls.map(call) };
-    // The conversation sent back to the model repeats the calls and their results.
     case "model_request":
       return { ...record, newMessages: record.newMessages.map(message) };
     default:
@@ -72,93 +53,53 @@ export function sanitizeRecord(record: JournalRecord, privacy: PrivacyGateway): 
   }
 }
 
-function isRecord(value: unknown, runId: string): value is JournalRecord {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const record = value as { seq?: unknown; at?: unknown; runId?: unknown; type?: unknown };
-  return (
-    typeof record.seq === "number" &&
-    Number.isSafeInteger(record.seq) &&
-    typeof record.at === "string" &&
-    record.runId === runId &&
-    typeof record.type === "string"
-  );
-}
-
-/** Reads the lines appended to the journal file since the previous read. */
-class JournalTail {
-  private handle: FileHandle | null = null;
-  private offset = 0;
-  private carry: Buffer = Buffer.alloc(0);
-
-  constructor(
-    private readonly file: string,
-    private readonly runId: string,
-  ) {}
-
-  async read(): Promise<JournalRecord[]> {
-    this.handle ??= await open(this.file, "r");
-    const { size } = await this.handle.stat();
-    if (size <= this.offset) return [];
-    const chunk = Buffer.alloc(size - this.offset);
-    const { bytesRead } = await this.handle.read(chunk, 0, chunk.length, this.offset);
-    this.offset += bytesRead;
-    const bytes = Buffer.concat([this.carry, chunk.subarray(0, bytesRead)]);
-    const end = bytes.lastIndexOf(0x0a);
-    if (end < 0) {
-      this.carry = bytes;
-      return [];
-    }
-    this.carry = Buffer.from(bytes.subarray(end + 1));
-    const records: JournalRecord[] = [];
-    for (const line of bytes.subarray(0, end).toString("utf8").split("\n")) {
+/**
+ * The record as an event may show it: tool names limited, then every string masked with the run's
+ * gateway. Null when any string cannot be masked.
+ */
+export function sanitizeRecord(record: JournalRecord, privacy: PrivacyGateway): JournalRecord | null {
+  let failed = false;
+  const walk = (item: unknown): unknown => {
+    if (failed) return null;
+    if (typeof item === "string") {
       try {
-        const value: unknown = JSON.parse(line);
-        if (isRecord(value, this.runId)) records.push(value);
+        const masked = privacy.mask(item);
+        if (masked.ok) return masked.text;
       } catch {
-        // Not a record line; the journal itself stays the reference.
+        // Falls through: not masked.
       }
+      failed = true;
+      return null;
     }
-    return records;
-  }
-
-  async close(): Promise<void> {
-    const handle = this.handle;
-    this.handle = null;
-    await handle?.close();
-  }
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item === "object" && item !== null) return Object.fromEntries(Object.entries(item).map(([key, value]) => [key, walk(value)]));
+    return item;
+  };
+  const shown = walk(limitToolNames(record));
+  return failed ? null : (shown as JournalRecord);
 }
 
 /**
- * Wraps the run's journal so that each stored record is delivered to `observer`, sanitized with
- * the run's gateway. Without an `onEvent` the journal is returned as it is. Reading or delivery
- * problems are ignored: events are a view of the journal, never a condition of the run.
+ * Wraps the run's journal so that each record the engine appends is delivered to `observer` once
+ * the journal stored it. Without an `onEvent` the journal is returned as it is.
  */
 export function journalWithEvents(
   journal: Journal,
-  file: string,
   runId: string,
   observer: RunObserver | undefined,
   privacy: PrivacyGateway,
+  clock: Clock,
 ): Journal {
   if (observer?.onEvent === undefined) return journal;
-  const tail = new JournalTail(file, runId);
+  let seq = 0;
   return {
     async append(event) {
       await journal.append(event);
-      let records: JournalRecord[];
-      try {
-        records = await tail.read();
-      } catch {
-        return;
-      }
-      for (const record of records) deliver(observer, { kind: "record", record: sanitizeRecord(record, privacy) });
+      seq += 1;
+      const record = { seq, at: new Date(clock.now()).toISOString(), runId, ...event } as JournalRecord;
+      const shown = sanitizeRecord(record, privacy);
+      if (shown !== null) deliver(observer, { kind: "record", record: shown });
     },
-    async close() {
-      try {
-        await journal.close();
-      } finally {
-        await tail.close().catch(() => undefined);
-      }
-    },
+    close: () => journal.close(),
   };
 }

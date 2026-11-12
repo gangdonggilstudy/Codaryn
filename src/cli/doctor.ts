@@ -19,10 +19,21 @@ import {
   CODARYN_MODEL_ENV,
   DOCTOR_CHECK_IDS,
   DOCTOR_EXIT_CODES,
+  CODARYN_LANG_ENV,
+  LOCK_FILE_NAME,
+  STATE_DIR_NAME,
+  toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
+  CatalogText,
   CodarynConfig,
+  ConfigLocationDisplay,
   DefaultConfigLocation,
+  DoctorText,
+  ExplainMessageLanguage,
+  MessageCatalog,
+  MessageId,
+  SchemaFieldPath,
   DoctorCheck,
   DoctorCheckId,
   DoctorCheckStatus,
@@ -53,6 +64,7 @@ import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, missingModelText, modelPlaceholderSeen, resolveModelId } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask } from "./task.js";
+import type { InputErrorPosition } from "./task.js";
 import { hideKeys } from "./text-safety.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
@@ -84,11 +96,32 @@ export interface DoctorEnvironment {
   readonly defaultConfig?: DefaultConfigLocation | null;
   /** N-1: a default location exists but is a network or device path, so it is not used. */
   readonly defaultConfigRefused?: boolean;
+  /** N-21: the catalog for the text output in the chosen language. Absent: the English messages. */
+  readonly messages?: MessageCatalog;
+  /** N-20: `explainMessageLanguage` (src/i18n). Absent: the `language` check is `skipped`. */
+  readonly explainLanguage?: ExplainMessageLanguage;
+  /** `Intl` locale for the language check (`runtimeLocale()` in the real CLI). */
+  readonly osLocale?: string | null;
+  /** N-25 (a): the state of `<workspace>/.codaryn/lock.json`, read without changing it. Absent: `skipped`. */
+  readonly inspectLock?: (workspaceRoot: string) => Promise<LockState>;
 }
+
+/** N-25 (a): none, held by a live process, left by an ended one, or unreadable. */
+export type LockState = "none" | "held" | "stale" | "unreadable";
+
+/** Why a JSON input could not be used, for the typed doctor texts (N-21). */
+type LoadFailure = "unreadable" | "key" | "json_syntax" | "too_deep";
 
 type Loaded =
   | { readonly ok: true; readonly value: unknown; readonly path: string }
-  | { readonly ok: false; readonly message: string; readonly missing?: boolean };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly missing?: boolean;
+      readonly failure: LoadFailure;
+      readonly line?: number;
+      readonly column?: number;
+    };
 
 /** Read, key check on the raw text, parse, key check on the parsed value: the order `run` uses (S-6). */
 async function loadJson(io: DoctorEnvironment, file: string, label: string, currentKey: string | null): Promise<Loaded> {
@@ -96,21 +129,28 @@ async function loadJson(io: DoctorEnvironment, file: string, label: string, curr
   try {
     text = await io.readFile(file);
   } catch (failure) {
-    return { ok: false, message: `the ${label} cannot be read`, missing: isMissingFile(failure) };
+    return { ok: false, message: `the ${label} cannot be read`, missing: isMissingFile(failure), failure: "unreadable" };
   }
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  if (rawTextHoldsKey(text, currentKey)) return { ok: false, message: `the ${label} contains a key value` };
+  if (rawTextHoldsKey(text, currentKey)) return { ok: false, message: `the ${label} contains a key value`, failure: "key" };
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
     // N-15: the position from our own scan, never the parser's message.
     const at = jsonSyntaxPosition(text);
-    return { ok: false, message: `the ${label} cannot be read as JSON${at === null ? "" : ` (line ${at.line}, column ${at.column})`}` };
+    return {
+      ok: false,
+      message: `the ${label} cannot be read as JSON${at === null ? "" : ` (line ${at.line}, column ${at.column})`}`,
+      failure: "json_syntax",
+      ...(at === null ? {} : { line: at.line, column: at.column }),
+    };
   }
   const found = findKeyInJson(value, currentKey);
-  if (found.kind === "key") return { ok: false, message: `the ${label} has a key field or key value at ${found.location}` };
-  if (found.kind === "too_deep") return { ok: false, message: `the ${label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep` };
+  if (found.kind === "key") return { ok: false, message: `the ${label} has a key field or key value at ${found.location}`, failure: "key" };
+  if (found.kind === "too_deep") {
+    return { ok: false, message: `the ${label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`, failure: "too_deep" };
+  }
   return { ok: true, value, path: file };
 }
 
@@ -205,7 +245,7 @@ async function checkCommands(
   env: SettingsEnvironment,
   workspaceRoot: string | null,
   platform: NodeJS.Platform,
-): Promise<{ status: DoctorCheckStatus; message: string }> {
+): Promise<{ status: DoctorCheckStatus; message: string; text: DoctorText }> {
   const isLocal = (file: string): boolean => checkLocalPathSyntax(file, platform).ok;
   const childEnv = buildChildEnv(env as NodeJS.ProcessEnv, platform);
   const pathKey = Object.keys(childEnv).find((key) => (platform === "win32" ? key.toUpperCase() === "PATH" : key === "PATH"));
@@ -274,17 +314,78 @@ async function checkCommands(
   if (remote > 0) {
     parts.push(`${remote} network or device PATH ${remote === 1 ? "entry" : "entries"} not checked: remote paths are not accessed`);
   }
-  if (rejected.length > 0 || notFound.length > 0) return { status: "fail", message: parts.join("; ") };
-  if (parts.length > 0) {
-    return { status: "warn", message: allowed > 0 ? `${allowed} executable(s) found; ${parts.join("; ")}` : parts.join("; ") };
-  }
-  return {
-    status: "ok",
-    message:
-      workspace !== null
-        ? `${allowed} executable(s) found and allowed by the run's rules`
-        : `${allowed} executable(s) found; the run's rules need a workspace and were not checked`,
+  const problems: DoctorText = {
+    id: "doctor.commands.problems",
+    params: { rejected: rejected.length, notFound: notFound.length, notFoundLocally: notFoundLocally.length, remote },
   };
+  if (rejected.length > 0 || notFound.length > 0) return { status: "fail", message: parts.join("; "), text: problems };
+  if (parts.length > 0) {
+    return { status: "warn", message: allowed > 0 ? `${allowed} executable(s) found; ${parts.join("; ")}` : parts.join("; "), text: problems };
+  }
+  return workspace !== null
+    ? { status: "ok", message: `${allowed} executable(s) found and allowed by the run's rules`, text: { id: "doctor.commands.ok", params: { count: allowed } } }
+    : {
+        status: "ok",
+        message: `${allowed} executable(s) found; the run's rules need a workspace and were not checked`,
+        text: { id: "doctor.commands.ok_unchecked", params: { count: allowed } },
+      };
+}
+
+/** N-21: a failed load of a config, task or script file as a typed doctor text. */
+function loadText(kind: "config" | "task" | "script", loaded: Extract<Loaded, { ok: false }>, location: ConfigLocationDisplay): DoctorText {
+  const syntax = loaded.line !== undefined && loaded.column !== undefined ? { line: loaded.line, column: loaded.column } : null;
+  if (kind === "config") {
+    if (loaded.failure === "json_syntax" && syntax !== null) return { id: "doctor.config_file.json_syntax", params: { location, ...syntax } };
+    if (loaded.failure === "key") return { id: "doctor.config_file.key", params: { location } };
+    if (loaded.failure === "too_deep") return { id: "doctor.config_file.too_deep", params: { location } };
+    return { id: "doctor.config_file.unreadable", params: { location } };
+  }
+  if (kind === "task") {
+    if (loaded.failure === "json_syntax" && syntax !== null) return { id: "doctor.task_file.json_syntax", params: syntax };
+    if (loaded.failure === "key") return { id: "doctor.task_file.key" };
+    if (loaded.failure === "too_deep") return { id: "doctor.task_file.too_deep" };
+    return { id: "doctor.task_file.unreadable" };
+  }
+  if (loaded.failure === "json_syntax" && syntax !== null) return { id: "doctor.model.script_json_syntax", params: syntax };
+  if (loaded.failure === "key") return { id: "doctor.model.script_key" };
+  if (loaded.failure === "too_deep") return { id: "doctor.model.script_too_deep" };
+  return { id: "doctor.model.script_unreadable" };
+}
+
+/** N-15, N-21: a validator's position as a schema field, or null when it is not a plain schema path. */
+function fieldOf(position: InputErrorPosition | undefined, message?: string): SchemaFieldPath | null {
+  if (position !== undefined) return toSchemaFieldPath(position.field);
+  return message === undefined ? null : toSchemaFieldPath(message.split(" ", 1)[0] ?? "");
+}
+
+/** N-25 (a): reads the lock file without changing it. A live pid means held; an ended one, stale. */
+export async function inspectLockFile(
+  workspaceRoot: string,
+  readText: (file: string) => Promise<string>,
+  isAlive: (pid: number) => boolean = processAlive,
+): Promise<LockState> {
+  let text: string;
+  try {
+    text = await readText(path.join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME));
+  } catch (failure) {
+    return isMissingFile(failure) ? "none" : "unreadable";
+  }
+  try {
+    const pid = (JSON.parse(text) as { pid?: unknown } | null)?.pid;
+    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return "unreadable";
+    return isAlive(pid) ? "held" : "stale";
+  } catch {
+    return "unreadable";
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: unknown }).code === "EPERM";
+  }
 }
 
 function worst(checks: readonly DoctorCheck[]): DoctorStatus {
@@ -293,7 +394,38 @@ function worst(checks: readonly DoctorCheck[]): DoctorStatus {
   return "ok";
 }
 
-export function renderDoctor(output: DoctorOutput): string {
+/** N-21: the text output in the catalog's language. Without a catalog (or a text), the English lines. */
+export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog): string {
+  if (messages === undefined) return renderDoctorEnglish(output);
+  const raw = messages.format as (id: MessageId, params?: object) => CatalogText;
+  // A catalog without a text for an id (an older catalog) must not stop doctor: the English stays.
+  const format = (id: MessageId, fallback: string, params?: object): string => {
+    try {
+      return raw(id, params);
+    } catch {
+      return fallback;
+    }
+  };
+  const status = (value: DoctorCheckStatus): string => `[${format(`doctor.status.${value}`, value)}]`;
+  const labels = output.checks.map((check) => format(`doctor.check.${check.id}`, check.id));
+  const width = Math.max(...labels.map((label) => label.length));
+  const lines = output.checks.map((check, index) => {
+    const body =
+      check.text === undefined ? check.message : format(check.text.id, check.message, "params" in check.text ? check.text.params : undefined);
+    return `${status(check.status).padEnd(10)}${(labels[index] ?? check.id).padEnd(width)}  ${body}`;
+  });
+  const english = `doctor: ${output.status} (exit code ${output.exitCode}). No network access was made and nothing was changed.`;
+  let footer: string;
+  try {
+    footer = raw("doctor.footer", { status: raw(`doctor.status.${output.status}`), exitCode: output.exitCode });
+  } catch {
+    footer = english;
+  }
+  lines.push("", footer);
+  return `${lines.join("\n")}\n`;
+}
+
+function renderDoctorEnglish(output: DoctorOutput): string {
   const width = Math.max(...output.checks.map((check) => check.id.length));
   const lines = output.checks.map((check) => `[${check.status}]`.padEnd(10) + `${check.id.padEnd(width)}  ${check.message}`);
   lines.push("", `doctor: ${output.status} (exit code ${output.exitCode}). No network access was made and nothing was changed.`);
@@ -320,23 +452,26 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   }
 
   const results = new Map<DoctorCheckId, DoctorCheck>();
-  const set = (id: DoctorCheckId, status: DoctorCheckStatus, message: string): void => {
-    results.set(id, { id, status, message });
+  const set = (id: DoctorCheckId, status: DoctorCheckStatus, message: string, text: DoctorText): void => {
+    results.set(id, { id, status, message, text });
   };
 
   // node_version
   const major = Number.parseInt(io.nodeVersion.split(".")[0] ?? "", 10);
   if (Number.isSafeInteger(major) && major >= REQUIRED_NODE_MAJOR) {
-    set("node_version", "ok", `Node.js ${major} meets the requirement (${REQUIRED_NODE_MAJOR} or later)`);
+    set("node_version", "ok", `Node.js ${major} meets the requirement (${REQUIRED_NODE_MAJOR} or later)`, {
+      id: "doctor.node_version.ok",
+      params: { major, required: REQUIRED_NODE_MAJOR },
+    });
   } else {
-    set("node_version", "fail", `Node.js ${REQUIRED_NODE_MAJOR} or later is required`);
+    set("node_version", "fail", `Node.js ${REQUIRED_NODE_MAJOR} or later is required`, { id: "doctor.node_version.fail", params: { required: REQUIRED_NODE_MAJOR } });
   }
 
   // vars_file: parsed, never loaded. Variables already set keep their values, as in `run`.
   let env: SettingsEnvironment = io.env;
   let varsPath: string | null = null;
   if (args.varsFile === null) {
-    set("vars_file", "skipped", "no --vars-file given");
+    set("vars_file", "skipped", "no --vars-file given", { id: "doctor.vars_file.skipped" });
   } else {
     varsPath = path.resolve(io.cwd, args.varsFile);
     let text: string | null;
@@ -346,9 +481,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       text = null;
     }
     if (text === null) {
-      set("vars_file", "fail", "the file given by --vars-file cannot be read");
+      set("vars_file", "fail", "the file given by --vars-file cannot be read", { id: "doctor.vars_file.unreadable" });
     } else if (text.charCodeAt(0) === 0xfeff) {
-      set("vars_file", "fail", "the file given by --vars-file starts with a byte order mark; save it as UTF-8 without BOM");
+      set("vars_file", "fail", "the file given by --vars-file starts with a byte order mark; save it as UTF-8 without BOM", { id: "doctor.vars_file.bom" });
     } else {
       let loaded: Record<string, string | undefined>;
       try {
@@ -358,7 +493,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       }
       env = { ...loaded, ...io.env };
       const count = Object.keys(loaded).length;
-      set("vars_file", "ok", `the file given by --vars-file defines ${count} variable(s)`);
+      set("vars_file", "ok", `the file given by --vars-file defines ${count} variable(s)`, { id: "doctor.vars_file.ok", params: { count } });
     }
   }
   const currentKey = envValue(env, ANTHROPIC_API_KEY_ENV);
@@ -369,26 +504,42 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   const chosen = chooseConfigFile({ argument: args.configPath, env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   const refusedNote = io.defaultConfigRefused === true ? "; the default location is a network or device path and is not used" : "";
   if (!chosen.ok) {
-    set("config_file", "fail", `the path given by ${CODARYN_CONFIG_ENV} is not a plain local path`);
+    set("config_file", "fail", `the path given by ${CODARYN_CONFIG_ENV} is not a plain local path`, { id: "doctor.config_file.env_not_local" });
   } else if (chosen.candidate === null) {
-    if (io.defaultConfigRefused === true) set("config_file", "warn", `no --config given and ${CODARYN_CONFIG_ENV} is not set${refusedNote}`);
-    else set("config_file", "skipped", `no --config given, ${CODARYN_CONFIG_ENV} is not set and there is no default location`);
+    if (io.defaultConfigRefused === true) {
+      set("config_file", "warn", `no --config given and ${CODARYN_CONFIG_ENV} is not set${refusedNote}`, { id: "doctor.config_file.default_refused" });
+    } else {
+      set("config_file", "skipped", `no --config given, ${CODARYN_CONFIG_ENV} is not set and there is no default location`, { id: "doctor.config_file.none" });
+    }
   } else {
     const candidate = chosen.candidate;
     const where = candidate.source === "default" ? ` at the default location ${candidate.display}` : "";
     const loaded = await loadJson(io, candidate.path, "config file", currentKey);
     if (!loaded.ok && candidate.optional && loaded.missing === true) {
-      set("config_file", "skipped", `no --config given, ${CODARYN_CONFIG_ENV} is not set and there is no file at the default location ${candidate.display}; \`codaryn init\` creates one`);
+      set(
+        "config_file",
+        "skipped",
+        `no --config given, ${CODARYN_CONFIG_ENV} is not set and there is no file at the default location ${candidate.display}; \`codaryn init\` creates one`,
+        { id: "doctor.config_file.default_missing", params: { location: candidate.display } },
+      );
     } else if (!loaded.ok) {
-      set("config_file", "fail", `${loaded.message}${where}`);
+      set("config_file", "fail", `${loaded.message}${where}`, loadText("config", loaded, candidate.display));
     } else {
       const outcome = parseConfig(loaded.value);
       if (outcome.ok) {
         config = outcome.config;
         configPath = loaded.path;
-        set("config_file", "ok", `the config file${where} is valid`);
+        set("config_file", "ok", `the config file${where} is valid`, { id: "doctor.config_file.valid_at", params: { location: candidate.display } });
       } else {
-        set("config_file", "fail", outcome.message);
+        const field = fieldOf(outcome.position);
+        set(
+          "config_file",
+          "fail",
+          outcome.message,
+          field === null
+            ? { id: "doctor.config_file.invalid_unlocated", params: { location: candidate.display } }
+            : { id: "doctor.config_file.invalid", params: { location: candidate.display, field } },
+        );
       }
     }
   }
@@ -396,26 +547,27 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   if (args.profile !== null) {
     const selected = selectProfile(config, args.profile);
     if (selected.ok) config = selected.config;
-    else set("config_file", "fail", selected.message);
+    else set("config_file", "fail", selected.message, { id: "doctor.config_file.profile_missing" });
   }
 
   // task_file
   let task: ResolvedTaskSpec | null = null;
   let taskPath: string | null = null;
   if (args.taskPath === null) {
-    set("task_file", "skipped", "no --task given");
+    set("task_file", "skipped", "no --task given", { id: "doctor.task_file.skipped" });
   } else {
     const loaded = await loadJson(io, path.resolve(io.cwd, args.taskPath), "task file", currentKey);
     if (!loaded.ok) {
-      set("task_file", "fail", loaded.message);
+      set("task_file", "fail", loaded.message, loadText("task", loaded, "--config"));
     } else {
       const outcome = parseTask(loaded.value, path.dirname(loaded.path), { limits: config?.limits });
       if (outcome.ok) {
         task = outcome.task;
         taskPath = loaded.path;
-        set("task_file", "ok", "the task file is valid");
+        set("task_file", "ok", "the task file is valid", { id: "doctor.task_file.valid" });
       } else {
-        set("task_file", "fail", outcome.message);
+        const field = fieldOf(outcome.position);
+        set("task_file", "fail", outcome.message, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } });
       }
     }
   }
@@ -424,25 +576,27 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
 
   // api_key: present or not, nothing else.
   if (taskUnusable) {
-    set("api_key", "skipped", "the task file could not be used");
+    set("api_key", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (provider === "scripted") {
-    set("api_key", "skipped", "the task uses the scripted model; no key is needed");
+    set("api_key", "skipped", "the task uses the scripted model; no key is needed", { id: "doctor.api_key.scripted" });
   } else if (currentKey !== null) {
-    set("api_key", "ok", `${ANTHROPIC_API_KEY_ENV} is set`);
+    set("api_key", "ok", `${ANTHROPIC_API_KEY_ENV} is set`, { id: "doctor.api_key.ok" });
   } else {
-    set("api_key", "fail", `${ANTHROPIC_API_KEY_ENV} is not set; an anthropic run stops with provider_not_configured`);
+    set("api_key", "fail", `${ANTHROPIC_API_KEY_ENV} is not set; an anthropic run stops with provider_not_configured`, { id: "doctor.api_key.missing" });
   }
 
   // model
   if (taskUnusable) {
-    set("model", "skipped", "the task file could not be used");
+    set("model", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (task !== null && task.model.provider === "scripted") {
     const scriptPath = task.model.scriptPath;
     const loaded = await loadJson(io, scriptPath, "script file", currentKey);
     const script = loaded.ok ? parseScript(loaded.value) : null;
-    if (!loaded.ok) set("model", "fail", loaded.message);
-    else if (script !== null && !script.ok) set("model", "fail", script.message);
-    else set("model", "ok", "the scripted model file is valid");
+    if (!loaded.ok) set("model", "fail", loaded.message, loadText("script", loaded, "--config"));
+    else if (script !== null && !script.ok) {
+      const field = fieldOf(undefined, script.message);
+      set("model", "fail", script.message, field === null ? { id: "doctor.model.script_invalid_unlocated" } : { id: "doctor.model.script_invalid", params: { field } });
+    } else set("model", "ok", "the scripted model file is valid", { id: "doctor.model.scripted_ok" });
   } else {
     const fromTask = task !== null && task.model.provider === "anthropic" ? task.model : null;
     // N-3: a placeholder (blank or <...>) counts as not set at every level.
@@ -453,37 +607,43 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     if (maxOutputTokens === null) missing.push("maxOutputTokens (task model.maxOutputTokens or config maxOutputTokens)");
     const baseUrl = envValue(env, CODARYN_API_BASE_URL_ENV);
     const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, CODARYN_API_BASE_URL_ENV);
-    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}`);
-    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", baseUrlProblem.message);
-    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}`);
+    const placeholder = modelPlaceholderSeen(fromTask?.model, env, config);
+    const missingText: DoctorText =
+      modelId === null ? { id: placeholder ? "doctor.model.placeholder" : "doctor.model.missing" } : { id: "doctor.model.output_cap_missing" };
+    if (missing.length > 0) set("model", "fail", `not set: ${missing.join("; ")}; ${MODELS_HINT}`, missingText);
+    else if (baseUrlProblem !== null && !baseUrlProblem.ok) set("model", "fail", baseUrlProblem.message, { id: "doctor.model.base_url_invalid" });
+    else set("model", "ok", `the model and maxOutputTokens are set; ${MODEL_EXISTENCE_NOT_CHECKED}`, { id: "doctor.model.ok" });
   }
 
   // limits
   if (taskUnusable) {
-    set("limits", "skipped", "the task file could not be used");
+    set("limits", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (task !== null) {
-    set("limits", "ok", "every limit is set");
+    set("limits", "ok", "every limit is set", { id: "doctor.limits.ok" });
   } else {
     const quick = buildQuickTask({ workspace: args.workspace ?? ".", goal: "doctor", cwd: io.cwd, config });
-    if (quick.ok) set("limits", "ok", "every limit is set for the quick form");
-    else set("limits", "fail", quick.message);
+    if (quick.ok) set("limits", "ok", "every limit is set for the quick form", { id: "doctor.limits.ok_quick" });
+    else {
+      const field = fieldOf(quick.position);
+      set("limits", "fail", quick.message, field === null ? { id: "doctor.limits.invalid_unlocated" } : { id: "doctor.limits.invalid", params: { field } });
+    }
   }
 
   // workspace
   const workspaceRoot = task?.workspaceRoot ?? (args.workspace === null ? null : path.resolve(io.cwd, args.workspace));
   let workspaceReady = false;
   if (workspaceRoot === null) {
-    set("workspace", "skipped", "no --workspace or --task given");
+    set("workspace", "skipped", "no --workspace or --task given", { id: "doctor.workspace.skipped" });
   } else if (await io.isDirectory(workspaceRoot)) {
     workspaceReady = true;
-    set("workspace", "ok", "the workspace is an existing directory");
+    set("workspace", "ok", "the workspace is an existing directory", { id: "doctor.workspace.ok" });
   } else {
-    set("workspace", "fail", "the workspace is not an existing directory");
+    set("workspace", "fail", "the workspace is not an existing directory", { id: "doctor.workspace.missing" });
   }
 
   // file_locations (S-1)
   if (!workspaceReady || workspaceRoot === null) {
-    set("file_locations", "skipped", "no usable workspace");
+    set("file_locations", "skipped", "no usable workspace", { id: "doctor.no_workspace" });
   } else {
     const files: [string | null, string][] = [
       [varsPath, "the file given by --vars-file"],
@@ -498,10 +658,13 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       checked += 1;
       if ((await io.locateInWorkspace(file, workspaceRoot)) !== "outside") inside.push(label);
     }
-    if (checked === 0) set("file_locations", "skipped", "no input file given");
+    if (checked === 0) set("file_locations", "skipped", "no input file given", { id: "doctor.file_locations.no_input" });
     else if (inside.length > 0) {
-      set("file_locations", "fail", `inside the workspace or not confirmable: ${inside.join(", ")}; a run refuses them`);
-    } else set("file_locations", "ok", `${checked} input file(s) are outside the workspace`);
+      set("file_locations", "fail", `inside the workspace or not confirmable: ${inside.join(", ")}; a run refuses them`, {
+        id: "doctor.file_locations.inside",
+        params: { count: inside.length },
+      });
+    } else set("file_locations", "ok", `${checked} input file(s) are outside the workspace`, { id: "doctor.file_locations.ok", params: { count: checked } });
   }
 
   // commands
@@ -517,31 +680,35 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     }
   });
   if (taskUnusable) {
-    set("commands", "skipped", "the task file could not be used");
+    set("commands", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (commandEntries.length === 0) {
-    set("commands", "skipped", "no command is allowed and no command verifier is configured");
+    set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" });
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
-    set("commands", checked.status, checked.message);
+    set("commands", checked.status, checked.message, checked.text);
   }
 
   // install_dir (U-3)
   if (!workspaceReady || workspaceRoot === null) {
-    set("install_dir", "skipped", "no usable workspace");
+    set("install_dir", "skipped", "no usable workspace", { id: "doctor.no_workspace" });
   } else if (io.installDir === undefined) {
-    set("install_dir", "skipped", "the install directory is not known in this environment");
+    set("install_dir", "skipped", "the install directory is not known in this environment", { id: "doctor.install_dir.unknown_env" });
   } else if (io.installDir === null) {
-    set("install_dir", "fail", "the CLI's install directory cannot be determined; a run refuses to start");
+    set("install_dir", "fail", "the CLI's install directory cannot be determined; a run refuses to start", { id: "doctor.install_dir.not_found" });
   } else {
     const relation = await io.relatePaths(workspaceRoot, io.installDir);
-    if (relation === "separate") set("install_dir", "ok", "the workspace is outside the CLI's install directory");
-    else set("install_dir", "fail", "the workspace is the CLI's install directory, lies inside it, contains it, or cannot be compared");
+    if (relation === "separate") set("install_dir", "ok", "the workspace is outside the CLI's install directory", { id: "doctor.install_dir.ok" });
+    else {
+      set("install_dir", "fail", "the workspace is the CLI's install directory, lies inside it, contains it, or cannot be compared", {
+        id: "doctor.install_dir.overlap",
+      });
+    }
   }
 
   // integrity_paths (U-1)
   const integrityPaths = config?.integrity?.paths ?? [];
   if (integrityPaths.length === 0) {
-    set("integrity_paths", "skipped", "integrity.paths is not set");
+    set("integrity_paths", "skipped", "integrity.paths is not set", { id: "doctor.integrity_paths.skipped" });
   } else {
     const problems: string[] = [];
     for (const [index, entry] of integrityPaths.entries()) {
@@ -549,14 +716,59 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       if (relation === "unknown") problems.push(`integrity.paths[${index}] does not exist`);
       else if (workspaceReady && relation !== "separate") problems.push(`integrity.paths[${index}] is not outside the workspace`);
     }
-    if (problems.length > 0) set("integrity_paths", "fail", problems.join("; "));
-    else if (workspaceReady) set("integrity_paths", "ok", `${integrityPaths.length} path(s) exist outside the workspace`);
-    else set("integrity_paths", "ok", `${integrityPaths.length} path(s) exist; give --workspace or --task to check their position`);
+    const missingCount = problems.filter((problem) => problem.endsWith("does not exist")).length;
+    const integrityCount = { count: integrityPaths.length };
+    if (problems.length > 0) {
+      set("integrity_paths", "fail", problems.join("; "), {
+        id: "doctor.integrity_paths.problems",
+        params: { missing: missingCount, inside: problems.length - missingCount },
+      });
+    } else if (workspaceReady) {
+      set("integrity_paths", "ok", `${integrityPaths.length} path(s) exist outside the workspace`, { id: "doctor.integrity_paths.ok", params: integrityCount });
+    } else {
+      set("integrity_paths", "ok", `${integrityPaths.length} path(s) exist; give --workspace or --task to check their position`, {
+        id: "doctor.integrity_paths.ok",
+        params: integrityCount,
+      });
+    }
+  }
+
+  // language (N-20): which language the human output uses and where that came from.
+  if (io.explainLanguage === undefined) {
+    set("language", "skipped", "the language selection is not connected in this build", { id: "doctor.language.unchecked" });
+  } else {
+    const choice = io.explainLanguage({ env: env[CODARYN_LANG_ENV] ?? null, config: config?.language ?? null, osLocale: io.osLocale ?? null });
+    if (choice.envIgnored) {
+      set("language", "warn", `${CODARYN_LANG_ENV} is not ko or en and is ignored; messages use ${choice.language}`, {
+        id: "doctor.language.env_ignored",
+        params: { language: choice.language },
+      });
+    } else {
+      set("language", "ok", `messages use ${choice.language} (from ${choice.source})`, {
+        id: `doctor.language.from_${choice.source}`,
+        params: { language: choice.language },
+      });
+    }
+  }
+
+  // lock (N-25 a): read only. A lock held by a live process may be a run in progress.
+  if (!workspaceReady || workspaceRoot === null) {
+    set("lock", "skipped", "no usable workspace", { id: "doctor.no_workspace" });
+  } else {
+    const state = await (io.inspectLock ?? ((root: string) => inspectLockFile(root, io.readFile)))(workspaceRoot);
+    const lockMessages: { readonly [S in LockState]: readonly [DoctorCheckStatus, string] } = {
+      none: ["ok", "no run holds the workspace lock"],
+      held: ["warn", `a process holds ${STATE_DIR_NAME}/${LOCK_FILE_NAME}; if no Codaryn is running in this workspace, remove that file`],
+      stale: ["ok", "the lock was left by a process that has ended; the next run reclaims it"],
+      unreadable: ["warn", `${STATE_DIR_NAME}/${LOCK_FILE_NAME} cannot be read; if no Codaryn is running in this workspace, remove that file`],
+    };
+    const [status, message] = lockMessages[state];
+    set("lock", status, message, { id: `doctor.lock.${state}` });
   }
 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);
   const status = worst(checks);
   const output: DoctorOutput = { schemaVersion: 1, kind: "doctor", status, exitCode: DOCTOR_EXIT_CODES[status], checks };
-  const text = args.json ? jsonLine(output) : renderDoctor(output);
+  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages);
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }

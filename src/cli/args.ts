@@ -16,7 +16,7 @@
  * Each may appear once. Only `run` takes a positional argument (the goal), at most one.
  */
 
-import { LATEST_RUN_ALIAS, PROFILE_NAME_PATTERN_SOURCE, RUNS_DEFAULT_LIMIT, RUNS_MAX_LIMIT } from "../contracts/index.js";
+import { LATEST_RUN_ALIAS, PROFILE_NAME_PATTERN_SOURCE } from "../contracts/index.js";
 
 /**
  * Where the task comes from: a task file, or the quick form built from the config file.
@@ -55,6 +55,7 @@ export const DOCTOR_USAGE =
 
 export const MODELS_USAGE = "codaryn models [--config <config.json>] [--vars-file <path>] [--json] [--use <number|id>]";
 export const INIT_USAGE = "codaryn init [--config <config.json>] [--workspace <dir>] [--json]";
+/** The same text as `RUNS_USAGE` in src/cli/runs.ts, which parses `runs` (N-22); kept here for USAGE. */
 export const RUNS_USAGE = "codaryn runs [--workspace <dir>] [--limit <n>] [--json]";
 
 export const USAGE =
@@ -325,41 +326,6 @@ export function parseInitArgs(argv: readonly string[]): ParseInitArgsOutcome {
       workspace: read.values.get("--workspace") ?? null,
       json: read.switches.has("--json"),
     },
-  };
-}
-
-const RUNS_OPTIONS = ["--workspace", "--limit"] as const;
-type RunsOption = (typeof RUNS_OPTIONS)[number];
-
-export interface RunsArgs {
-  readonly command: "runs";
-  /** Absent: the current directory. */
-  readonly workspace: string | null;
-  /** 1 to RUNS_MAX_LIMIT; RUNS_DEFAULT_LIMIT when not given. */
-  readonly limit: number;
-  readonly json: boolean;
-}
-
-export type ParseRunsArgsOutcome =
-  | { readonly ok: true; readonly args: RunsArgs }
-  | { readonly ok: false; readonly message: string };
-
-/** `codaryn runs [--workspace <dir>] [--limit <n>] [--json]` (N-7). */
-export function parseRunsArgs(argv: readonly string[]): ParseRunsArgsOutcome {
-  const [command, ...rest] = argv;
-  if (command !== "runs") return { ok: false, message: USAGE };
-  if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
-  const read = readOptions<RunsOption, JsonSwitch>(rest, RUNS_OPTIONS, `usage: ${RUNS_USAGE}`, JSON_SWITCH);
-  if (!read.ok) return read;
-  const limitText = read.values.get("--limit");
-  let limit = RUNS_DEFAULT_LIMIT;
-  if (limitText !== undefined) {
-    limit = /^[1-9][0-9]{0,3}$/.test(limitText) ? Number(limitText) : 0;
-    if (limit < 1 || limit > RUNS_MAX_LIMIT) return { ok: false, message: `--limit must be an integer from 1 to ${RUNS_MAX_LIMIT}` };
-  }
-  return {
-    ok: true,
-    args: { command: "runs", workspace: read.values.get("--workspace") ?? null, limit, json: read.switches.has("--json") },
   };
 }
 

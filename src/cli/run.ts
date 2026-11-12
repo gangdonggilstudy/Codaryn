@@ -36,9 +36,12 @@ import type {
   MessageLanguage,
   ModelProvider,
   PrivacyGateway,
+  HumanOutput,
+  MessageCatalog,
   RunSummaryContext,
   RunTask,
 } from "../contracts/index.js";
+import { cleanText } from "./text-safety.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
@@ -107,6 +110,11 @@ export interface CliEnvironment {
    * neither `--config` nor CODARYN_CONFIG is given and a file exists there. Absent or null: none.
    */
   readonly defaultConfig?: DefaultConfigLocation | null;
+  /**
+   * N-4, N-5: the human renderer and the catalog for the config file's language (null when it has
+   * none). Called once the config is read. Absent: English progress lines and no end summary.
+   */
+  readonly human?: (configLanguage: MessageLanguage | null) => { readonly output: HumanOutput; readonly messages: MessageCatalog };
 }
 
 /**
@@ -127,6 +135,8 @@ interface RunNotes {
   configDefault: DefaultConfigDisplay | null;
   /** N-17: `tool_decision` records with `allowed: false`, as ReportJournalSummary counts them. */
   deniedToolCalls: number;
+  /** N-23: the denied calls whose permission is `command`. */
+  deniedCommandCalls: number;
 }
 
 export interface CliRunOutcome {
@@ -187,16 +197,16 @@ function isModelNotFound(message: string): boolean {
   return message.startsWith("HTTP 404");
 }
 
-function withModelHint(result: EngineResult, privacy: PrivacyGateway, write: ((line: string) => void) | undefined): EngineResult {
+function withModelHint(
+  result: EngineResult,
+  privacy: PrivacyGateway,
+  write: ((line: string) => void) | undefined,
+  /** N-4: the progress line in the chosen language; the notice in the result stays English. */
+  progressText: string = MODEL_NOT_FOUND_HINT,
+): EngineResult {
   const masked = privacy.mask(MODEL_NOT_FOUND_HINT);
   if (!masked.ok) return result;
-  if (write !== undefined) {
-    try {
-      write(`${PROGRESS_PREFIX}${masked.text}\n`);
-    } catch {
-      // Progress is best effort.
-    }
-  }
+  if (write !== undefined) writeMasked(write, privacy, progressText);
   return { ...result, notices: [...result.notices, masked.text] };
 }
 
@@ -259,22 +269,33 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const parsed = parseArgs(io.argv);
   if (!parsed.ok) return error("invalid_arguments", parsed.message);
   const args = parsed.args;
-  const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0 };
+  const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
   const outcome = await runParsed(io, args, notes);
-  const workspaceForm = args.input.kind === "task" ? "task" : args.input.oneLine ? "current" : "given";
+  return { ...outcome, info: { configLanguage: notes.configLanguage, summary: summaryContext(args, notes), quiet: args.quiet } };
+}
+
+/** N-5, N-17, N-23: what the end summary needs; no typed or file value. */
+function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
   return {
-    ...outcome,
-    info: {
-      configLanguage: notes.configLanguage,
-      summary: {
-        workspaceForm,
-        configDefault: notes.configDefault,
-        profileApplied: args.profile !== null,
-        deniedToolCalls: notes.deniedToolCalls,
-      },
-      quiet: args.quiet,
-    },
+    workspaceForm: args.input.kind === "task" ? "task" : args.input.oneLine ? "current" : "given",
+    configDefault: notes.configDefault,
+    profileApplied: args.profile !== null,
+    deniedToolCalls: notes.deniedToolCalls,
+    deniedCommandCalls: notes.deniedCommandCalls,
+    policySource: args.input.kind === "task" ? "task" : "config",
   };
+}
+
+/** Writes human text (several lines) masked with the run's gateway and cleaned; best effort. */
+function writeHuman(write: (line: string) => void, privacy: PrivacyGateway, text: string): void {
+  if (text.length === 0) return;
+  const masked = privacy.mask(text);
+  if (!masked.ok) return;
+  try {
+    write(`${cleanText(masked.text, true).replace(/\t/g, " ").replace(/\n?$/, "\n")}`);
+  } catch {
+    // Human output is best effort.
+  }
 }
 
 async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Promise<CliRunOutcome> {
@@ -525,15 +546,26 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
       async append(event) {
         await recorded.append(event);
         if (event.type === "model_error" && isModelNotFound(event.message)) modelNotFound = true;
-        if (event.type === "tool_decision" && !event.allowed) notes.deniedToolCalls += 1;
+        if (event.type === "tool_decision" && !event.allowed) {
+          notes.deniedToolCalls += 1;
+          if (event.permission === "command") notes.deniedCommandCalls += 1;
+        }
       },
       close: () => recorded.close(),
     };
     // U-8: progress lines follow the journal; they start only once the run has started.
     const write = args.quiet ? undefined : io.writeProgress;
     const privacy = assembled.deps.privacy;
+    // N-4, N-5: the human renderer in the chosen language (the config's language is known now).
+    let human: { readonly output: HumanOutput; readonly messages: MessageCatalog } | undefined;
+    try {
+      human = write === undefined ? undefined : io.human?.(notes.configLanguage);
+    } catch {
+      human = undefined;
+    }
     let announced = defaultDisplay === null;
-    const progressed = write === undefined ? watched : withProgress(watched, privacy, write);
+    const progressed =
+      write === undefined ? watched : withProgress(watched, privacy, write, human === undefined ? undefined : (event) => human.output.progressLine(event));
     // N-1: say once, right after the run started, that the default config location was used.
     const journal: Journal =
       announced || write === undefined
@@ -543,7 +575,13 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
               await progressed.append(event);
               if (!announced && event.type === "run_started") {
                 announced = true;
-                writeMasked(write, privacy, defaultConfigNotice(defaultDisplay ?? ""));
+                writeMasked(
+                  write,
+                  privacy,
+                  human !== undefined && defaultDisplay !== null
+                    ? human.messages.format("progress.config_default", { location: defaultDisplay })
+                    : defaultConfigNotice(defaultDisplay ?? ""),
+                );
               }
             },
             close: () => progressed.close(),
@@ -552,11 +590,22 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     let result: EngineResult | null = null;
     try {
       const ended = await (io.runTask ?? engineRunTask)(deps);
-      const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write) : ended;
+      const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
+      const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
       result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));
     } finally {
       // Releases the workspace lock even when the run threw.
       await assembled.finish(result);
+    }
+    // N-5: the end summary on stderr, after the lock is released.
+    if (write !== undefined && human !== undefined) {
+      let summary = "";
+      try {
+        summary = human.output.runSummary(result, summaryContext(args, notes));
+      } catch {
+        summary = "";
+      }
+      writeHuman(write, privacy, summary);
     }
     return { output: result, exitCode: result.exitCode };
   } catch {

@@ -13,8 +13,6 @@
  */
 
 import { existsSync } from "node:fs";
-import path from "node:path";
-import { JOURNAL_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   CreateAnthropicProvider,
@@ -158,8 +156,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       const assembled = await ownAssemble(input);
       if (!assembled.ok || assembledRun === null) return assembled;
       const { privacy, workspaceRoot } = assembledRun;
-      const file = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, input.runId, JOURNAL_FILE_NAME);
-      const journal = journalWithEvents(assembled.deps.journal, file, input.runId, observer, privacy);
+      // DR-15: events from the records the engine appends, in memory, masked again with this gateway.
+      const journal = journalWithEvents(assembled.deps.journal, input.runId, observer, privacy, input.clock);
       reportStart({ runId: input.runId, workspaceRoot });
       return { ...assembled, deps: { ...assembled.deps, journal } };
     };

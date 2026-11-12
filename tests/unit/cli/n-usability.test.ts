@@ -35,6 +35,7 @@ import { runRevert } from "../../../src/cli/revert.js";
 import { defaultConfigNotice, runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../../../src/cli/run.js";
 import { isModelPlaceholder, resolveModelId } from "../../../src/cli/settings.js";
+import { readRevertRecord, writeRevertRecord } from "../../../src/store/index.js";
 import { lexicalLocate } from "./locate.js";
 
 const SYNTHETIC = "SYNTHETIC_PRIVATE_VALUE";
@@ -568,7 +569,7 @@ describe("N-7, N-18 --run latest and revert --dry-run", () => {
     randomBytes: (size: number) => new Uint8Array(size).fill(0xab),
     revert,
   });
-  const listRuns: ListRuns = async () => ({ runs: [{ state: "damaged", runId: toRunId("20261112T090000Z-ffffffff") ?? runId }, { state: "checked", runId, startedAt: "2026-11-12T02:00:00.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null }] });
+  const listRuns: ListRuns = async () => ({ runs: [{ state: "damaged", runId: toRunId("20261112T090000Z-ffffffff") ?? runId }, { state: "checked", runId, startedAt: "2026-11-12T02:00:00.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false }] });
 
   test("N-18: a run directory named latest makes the alias an error and nothing changes", async () => {
     const dir = await workspace(["latest"]);
@@ -634,7 +635,8 @@ describe("N-7, N-18 --run latest and revert --dry-run", () => {
 
   test("a real revert writes the record; the next revert reports it, and a forged record is ignored", async () => {
     const dir = await workspace();
-    const command = createRevertCommand(async () => complete);
+    // N-22: the store's record functions.
+    const command = createRevertCommand(async () => complete, { readRecord: readRevertRecord, writeRecord: writeRevertRecord });
     const first = await runRevert(revertEnv(dir, ["revert", "--workspace", dir, "--run", RUN, "--quiet"], command));
     assert.ok(first.output.kind === "revert" && first.output.revertedBefore === undefined);
     assert.equal(first.quiet, true);
@@ -645,7 +647,10 @@ describe("N-7, N-18 --run latest and revert --dry-run", () => {
     assert.deepEqual(second.output.revertedBefore, { at: "2026-11-12T03:15:00.000Z", status: "complete" });
     for (const forged of [{ ...record, runId: "other" }, { ...record, at: SYNTHETIC }, { ...record, status: SYNTHETIC }]) {
       await writeFile(path.join(dir, ".codaryn", "runs", RUN, "revert.json"), JSON.stringify(forged), "utf8");
-      const third = await runRevert(revertEnv(dir, ["revert", "--workspace", dir, "--run", RUN, "--dry-run"], createRevertCommand(async () => complete, { dryRun: async () => complete })));
+      // N-23: a record that fails the checks is ignored, never an error.
+      const third = await runRevert(
+        revertEnv(dir, ["revert", "--workspace", dir, "--run", RUN, "--dry-run"], createRevertCommand(async () => complete, { dryRun: async () => complete, readRecord: readRevertRecord })),
+      );
       assert.ok(third.output.kind === "revert");
       assert.equal(third.output.revertedBefore, undefined, JSON.stringify(forged));
       assert.equal(JSON.stringify(third.output).includes(SYNTHETIC), false);

@@ -9,6 +9,7 @@ import path from "node:path";
 import { REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION } from "../contracts/index.js";
 import type { CliErrorOutput, Clock, RevertOutput } from "../contracts/index.js";
 import { parseRevertArgs } from "./args.js";
+import { revertStatus } from "./assemble.js";
 import type { RevertCommand, RevertCommandOutcome } from "./assemble.js";
 import { cliError } from "./run.js";
 import { createRunId } from "./run-id.js";
@@ -61,7 +62,7 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
   }
   if (!result.ok) return { ...cliError(result.code, result.message), quiet };
 
-  const status = result.outcome.skipped.length === 0 ? "complete" : "partial";
+  const status = revertStatus(result.outcome);
   const exitCode = REVERT_EXIT_CODES[status];
   return {
     output: {

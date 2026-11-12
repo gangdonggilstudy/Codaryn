@@ -28,13 +28,15 @@ import type {
   ListRuns,
   ModelProvider,
   ResolvedTaskSpec,
+  ReadRevertRecord,
   RevertOutcome,
   RevertRun,
   RevertStatus,
+  WriteRevertRecord,
   Workspace,
 } from "../contracts/index.js";
-import { readRevertRecord, writeRevertRecord } from "./revert-record.js";
 import { resolveRunReference } from "./run-ref.js";
+import type { CheckedRun } from "./run-ref.js";
 
 export interface AssemblyInput {
   readonly task: ResolvedTaskSpec;
@@ -101,6 +103,31 @@ export interface RevertCommandOptions {
   readonly dryRun?: RevertRun;
   /** N-7: the store's `listRuns`, for `--run latest`. Absent: `latest` is not available. */
   readonly listRuns?: ListRuns;
+  /** N-22: the store's revert record functions. Absent: no record is read or written. */
+  readonly readRecord?: ReadRevertRecord;
+  readonly writeRecord?: WriteRevertRecord;
+  /** N-23: told which run `--run latest` chose, before anything is read or changed. */
+  readonly announceLatest?: (entry: CheckedRun) => void;
+  /**
+   * N-26: whether a run's records pass the run list's checks. A damaged run is refused even when
+   * named by its id. Absent: `listRuns` decides (the run's entry is `damaged`); without either,
+   * nothing is refused.
+   */
+  readonly isDamaged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+}
+
+/** N-26: `listRuns` as the damage check, until the store's own function is passed. */
+async function damagedByListing(listRuns: ListRuns, workspaceRoot: string, runId: string): Promise<boolean> {
+  const listing = await listRuns({ workspaceRoot });
+  return listing.runs.some((entry) => entry.runId === runId && entry.state === "damaged");
+}
+
+/**
+ * N-7, N-22: the revert outcome's status. A file skipped as `already_reverted` is already as it
+ * was before the run, so only the other reasons make it partial.
+ */
+export function revertStatus(outcome: RevertOutcome): RevertStatus {
+  return outcome.skipped.some((file) => file.reason !== "already_reverted") ? "partial" : "complete";
 }
 
 async function exists(target: string): Promise<boolean> {
@@ -149,11 +176,44 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     const resolved = await resolveRunReference(workspaceRoot, requested, { exists, ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }) });
     if (!resolved.ok) return resolved;
     const runId = resolved.runId;
+    if (resolved.latest !== null) {
+      try {
+        options.announceLatest?.(resolved.latest);
+      } catch {
+        // The notice is best effort.
+      }
+    }
     const journal = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId, JOURNAL_FILE_NAME);
     if (!(await isFile(journal))) {
       return { ok: false, code: "run_not_found", message: "the workspace has no journal for that run id; nothing was changed" };
     }
-    const revertedBefore = await readRevertRecord(workspaceRoot, runId);
+    // N-26: the records of a damaged run are not trusted to decide what to put back.
+    const damageCheck =
+      options.isDamaged ??
+      (options.listRuns === undefined ? undefined : (root: string, id: string) => damagedByListing(options.listRuns as ListRuns, root, id));
+    if (damageCheck !== undefined) {
+      let damaged: boolean;
+      try {
+        damaged = await damageCheck(workspaceRoot, runId);
+      } catch {
+        damaged = true;
+      }
+      if (damaged) {
+        return {
+          ok: false,
+          code: "invalid_run_record",
+          message: "the run's records do not pass the checks (`codaryn runs` shows it as damaged); nothing was changed",
+        };
+      }
+    }
+    // N-22, N-23: a record that cannot be read or checked is ignored, never an error.
+    let revertedBefore: { readonly at: string; readonly status: RevertStatus } | null = null;
+    try {
+      const record = (await options.readRecord?.(workspaceRoot, runId)) ?? null;
+      revertedBefore = record === null ? null : { at: record.at, status: record.status };
+    } catch {
+      revertedBefore = null;
+    }
 
     if (dryRun && options.dryRun !== undefined) {
       // N-7: no lock, no record, nothing written.
@@ -168,16 +228,20 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
     if (!lock.ok) return { ok: false, code: "workspace_locked", message: `${lockedMessage(lock.holder)}; nothing was changed` };
     try {
       const outcome = await revertRun({ workspaceRoot, runId });
-      // N-7: the revert record, written while the lock is held; best effort.
-      await writeRevertRecord(workspaceRoot, {
-        schemaVersion: 1,
-        kind: "revert_record",
-        runId,
-        at: new Date(clock.now()).toISOString(),
-        status: outcome.skipped.length === 0 ? "complete" : "partial",
-        reverted: outcome.reverted.length,
-        skipped: outcome.skipped.length,
-      });
+      // N-7, N-22: the revert record, written while the lock is held; best effort.
+      try {
+        await options.writeRecord?.(workspaceRoot, {
+          schemaVersion: 1,
+          kind: "revert_record",
+          runId,
+          at: new Date(clock.now()).toISOString(),
+          status: revertStatus(outcome),
+          reverted: outcome.reverted.length,
+          skipped: outcome.skipped.length,
+        });
+      } catch {
+        // The record never changes the outcome.
+      }
       return { ok: true, outcome, runId, revertedBefore };
     } catch (error) {
       return failed(error);

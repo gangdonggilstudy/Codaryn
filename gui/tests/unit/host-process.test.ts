@@ -480,9 +480,9 @@ test("host process (R-10 L-2): a host whose stdin closes during a slow call ends
 test("host process (R21b-I-1): with the test transport a run with the OpenAI provider cannot reach any other machine either", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
   const { dir, cleanup } = await tempDir();
   try {
-    // The app layer hands only Anthropic's transport a `fetch` (anthropicDeps); OpenAI's adapter
-    // takes the global one. PM (1): 127.0.0.2 on a closed port (see closedLoopbackPort); the
-    // transport refuses the request before it is sent and counts it.
+    // Every provider gets the test transport's fetch through the app layer's providerDeps (F-2).
+    // PM (1): 127.0.0.2 on a closed port (see closedLoopbackPort); the transport refuses the request
+    // before it is sent and counts it.
     const port = await closedLoopbackPort();
     const workspace = path.join(dir, "ws");
     await fs.mkdir(workspace);

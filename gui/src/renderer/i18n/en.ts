@@ -173,6 +173,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "widen.restore_path_tokens_enabled": "path tokens restored",
   "widen.plan_action_allowed": "a plan action allowed",
   "widen.api_base_url_changed": "the API address changed",
+  "widen.provider_changed": "the provider changed (work goes to another API)",
   "widen.profile_changed": "a profile changed",
   "widen.workflow_changed": "a task kind definition changed",
   "widen.other": "another widening",

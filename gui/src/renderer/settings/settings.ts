@@ -10,8 +10,8 @@
  * - Secret variables are names only; there is no value field (S-3).
  * - Providers come from the contract's table through the engine host (DR-22): the screen shows each
  *   one's key variable (set or not, never its value) and model, and the person chooses the one the
- *   config names. The model list is fetched for the provider in use only, and only for a provider
- *   the app layer lists (the app layer's list follows the config's provider).
+ *   config names. Each provider the app layer lists (CONNECTED_MODEL_PROVIDERS) has its own model
+ *   list button; the list and the choice are that provider's (the app layer passes --provider).
  * - The model list asks the provider's API, so it is fetched only when the person presses the
  *   button, and the button says so (Y-2). A model is chosen by the entry id the list gave out.
  * - Provider names come from the app layer (DR-22); this file names none.
@@ -350,9 +350,8 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         model.append(current);
         if (inUseView === null ? view.env.model : inUseView.modelEnvSet) model.append(el("p", inUseView === null ? t.format("settings.modelEnv") : t.format("settings.providerModelEnv", { env: inUseView.modelEnv })));
         const outcome = el("div", undefined, { id: "settings-model-outcome", role: "status" });
-        // The app layer's list follows the config's provider, so only the provider in use is listed here.
-        const listed = view.providers.filter((provider) => inUse === null || provider === inUse);
-        if (inUse !== null && listed.length === 0) model.append(el("p", t.format("settings.providerNoList", { provider: inUse }), { class: "notice", id: "settings-model-no-list" }));
+        const listed = view.providers;
+        if (inUse !== null && !listed.includes(inUse)) model.append(el("p", t.format("settings.providerNoList", { provider: inUse }), { class: "notice", id: "settings-model-no-list" }));
         for (const provider of listed) {
           const list = el("ol", undefined, { class: "models", "data-provider": provider });
           const fetch = button(t.format("settings.listModels", { provider }), () => {
@@ -386,7 +385,8 @@ export function settingsScreen(deps: SettingsDeps): Screen {
                         if (chosen.selected.overridden) lines.push(t.format("settings.modelEnv"));
                         outcome.replaceChildren(...lines.map((line) => el("p", line)));
                         outcome.setAttribute("data-selected", chosen.selected.id);
-                        current.textContent = t.format("settings.modelCurrent", { model: chosen.selected.id });
+                        // The line names the model of the provider in use; another provider's choice leaves it.
+                        if (provider === inUse) current.textContent = t.format("settings.modelCurrent", { model: chosen.selected.id });
                         deps.announce(lines[0] as string);
                       })();
                     });

@@ -112,7 +112,7 @@ test("provider choice: the main process refuses a provider view with values or o
   assert.equal(toSettingsView({ ok: true, view: { ...base, provider: "Open AI", apiProviders: [entry] } }, env).ok, false);
 });
 
-test("provider choice: the screen shows the providers, lists models only for the one in use, and proposes a choice", async () => {
+test("provider choice: the screen shows the providers, a model list for each listed one, and proposes a choice", async () => {
   const restore = installFakeDom();
   try {
     let provider: string | null = null;
@@ -172,11 +172,15 @@ test("provider choice: the screen shows the providers, lists models only for the
     await settle();
     assert.deepEqual(calls, [{ op: "provider", value: "openai" }]);
 
-    // With openai in use: no list button (the app layer does not list it), and the screen says how to choose its model.
+    // With openai in use: the provider the app layer lists keeps its button; openai, not listed in
+    // this view, has none, and the screen says how to choose its model.
     provider = "openai";
     await show();
     assert.equal(byId("settings-provider-current")?.getAttribute("data-provider"), "openai");
-    assert.equal(root.findAll((e) => e.hasAttribute("data-list-models")).length, 0);
+    assert.deepEqual(
+      root.findAll((e) => e.hasAttribute("data-list-models")).map((e) => e.getAttribute("data-list-models")),
+      ["anthropic"],
+    );
     assert.ok(byId("settings-model-no-list")?.textContent.includes("codaryn models --provider openai"));
     assert.equal(byId("settings-model-current")?.textContent, textsFor("en").format("settings.modelNone"), "openai's model, not anthropic's");
   } finally {

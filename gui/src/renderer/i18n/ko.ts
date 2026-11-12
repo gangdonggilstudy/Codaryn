@@ -175,6 +175,7 @@ export const KO = {
   "widen.restore_path_tokens_enabled": "경로의 가린 값 되살리기 켬",
   "widen.plan_action_allowed": "계획 동작 허용",
   "widen.api_base_url_changed": "API 주소 바꿈",
+  "widen.provider_changed": "제공자 바꿈(작업 내용이 다른 API로 감)",
   "widen.profile_changed": "프로필 바꿈",
   "widen.workflow_changed": "작업 종류 정의 바꿈",
   "widen.other": "그 밖의 넓히기",

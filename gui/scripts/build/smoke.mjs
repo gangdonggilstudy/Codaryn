@@ -131,7 +131,13 @@ const run = await new Promise((resolve) => {
     resolve({ status, error: undefined });
   });
 });
-const apiRequests = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
+const apiRequestRows = api.requests.map((request) => ({ path: request.path.split("?")[0], method: request.method, key: request.headers["x-api-key"] === FAKE_API_KEY }));
+const apiRequests = {
+  models: apiRequestRows.filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length,
+  messages: apiRequestRows.filter((r) => r.path === "/v1/messages" && r.method === "POST").length,
+  other: apiRequestRows.filter((r) => !((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
+  allFakeKey: apiRequestRows.every((r) => r.key === true),
+};
 for (const close of closeFake) await close();
 let configModel = null;
 try {
@@ -243,19 +249,19 @@ const expected = [
   // PM task (2): the provider choice; keys set or not by name, never a value; the list only for the provider in use.
   ["providerRows", (v) => JSON.stringify(v) === JSON.stringify([["anthropic", "set"], ["openai", "set"]])],
   ["providerInUse", (v) => v === "anthropic"],
-  ["providerProposal", (v) => v === "ready"],
-  ["providerOpenai", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "openai", lists: 0, noList: true })],
-  ["providerBack", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "anthropic", lists: 1, noList: false })],
+  // F-3 (app layer): a change of provider is a widening; the main process asks first.
+  ["providerProposal", (v) => v === "widens"],
+  ["providerWidenKinds", (v) => JSON.stringify(v) === JSON.stringify(["provider_changed"])],
+  // F-1 (app layer): each provider has its own model list button.
+  ["providerOpenai", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "openai", lists: 2, noList: false })],
+  ["providerBack", (v) => JSON.stringify(v) === JSON.stringify({ inUse: "anthropic", lists: 2, noList: false })],
   ["providerText", (v) => typeof v === "string" && v.includes(API_PROVIDERS.openai.keyEnv) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(FAKE_API_KEY)],
   ["providerOnDisk", (v) => v === "anthropic"],
   ["configModel", (v) => v === "fake-model-b"],
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [
     "apiRequests",
-    (v) =>
-      rows(v).filter((r) => r.path.startsWith("/v1/models") && r.method === "GET").length >= 2 &&
-      rows(v).filter((r) => r.path === "/v1/messages" && r.method === "POST").length === 8 &&
-      rows(v).every((r) => r.key === true && ((r.path.startsWith("/v1/models") && r.method === "GET") || (r.path === "/v1/messages" && r.method === "POST"))),
+    (v) => v.models >= 2 && v.messages === 8 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -337,7 +343,7 @@ const expected = [
   // PM (a): the engine host's test transport refused no request to another machine.
   ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
   ["transportRefusedEnd", (v) => v === "host ended" || JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["revert.message", "apply.message", "apply.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

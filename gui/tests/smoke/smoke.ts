@@ -415,6 +415,7 @@ startGui({
         `(() => { const c = document.getElementById('settings-provider-choice'); c.value = ${JSON.stringify(name)}; document.getElementById('settings-provider-change').click(); return true; })()`;
       await js(choose("openai"));
       results["providerProposal"] = await proposal();
+      results["providerWidenKinds"] = await js("[...document.querySelectorAll('#settings-proposal [data-kind]')].map((li) => li.getAttribute('data-kind'))");
       await js("document.getElementById('settings-write')?.click(); true");
       results["providerOpenai"] = await waitFor(inUse);
       results["providerText"] = await js("document.getElementById('settings')?.textContent ?? ''");

@@ -178,6 +178,7 @@ describe("i18n catalog: language and wording", () => {
   test("the unsafe move consent hint uses the contract's argument; approval words name no flag (DR-21)", () => {
     for (const language of LANGS) {
       assert.ok(MESSAGE_TEXTS[language]["summary.next_apply_unsafe"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
+      assert.ok(MESSAGE_TEXTS[language]["summary.next_revert_unsafe"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
       assert.ok(MESSAGE_TEXTS[language]["advice.consent_required"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
       // approval.<channel> words serve both the plan approval and the consent line.
       for (const id of ["approval.cli-tty", "approval.cli-flag", "approval.adapter"] as const) {

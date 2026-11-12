@@ -46,6 +46,7 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.apply_plan_run": "계획 실행: {runId}",
   "summary.unsafe_moves": "덮어쓸 위험이 있는 이동 {count}개 때문에 적용하지 않았습니다. 아무것도 옮기지 않았습니다.",
   "summary.next_apply_unsafe": "이 적용에 한해 동의: codaryn apply {form} --run {runId} --digest <digest> --allow-unsafe-move",
+  "summary.next_revert_unsafe": "이 되돌리기에 한해 동의: codaryn revert --workspace <workspace> --run {runId} --allow-unsafe-move",
 
   "progress.run_started": "실행 시작 — 모델 제공자 {provider}",
   "progress.config_default": "기본 위치의 설정 파일을 씁니다: {location}",
@@ -87,6 +88,8 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.action.restored_from_discard": "버린 파일 보관 폴더에서 되살림",
   "revert.dry_run_next": "실행하려면 --dry-run 없이 다시 실행하세요.",
   "revert.reverted_before": "이 실행은 이미 되돌린 적이 있습니다. 그래서 파일이 실행 뒤에 바뀐 것으로 보일 수 있습니다.",
+  "revert.unsafe_moved": "동의를 받아, 덮어쓸 위험이 있는 방식으로 되돌려 옮긴 파일: {count}개",
+  "revert.dry_run_move_unchecked": "미리보기는 이 드라이브가 덮어쓰지 않고 되돌려 옮길 수 있는지 확인하지 않았습니다. 실제 되돌리기가 확인하고, 동의가 없으면 그런 파일은 건너뜁니다.",
 
   "runs.column.run_id": "실행 id",
   "runs.column.started": "시작",

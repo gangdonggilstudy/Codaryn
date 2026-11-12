@@ -47,6 +47,7 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.apply_plan_run": "Plan run: {runId}",
   "summary.unsafe_moves": "Not applied: moves that could replace a file: {count}. Nothing was moved.",
   "summary.next_apply_unsafe": "Consent for this apply only: codaryn apply {form} --run {runId} --digest <digest> --allow-unsafe-move",
+  "summary.next_revert_unsafe": "Consent for this revert only: codaryn revert --workspace <workspace> --run {runId} --allow-unsafe-move",
 
   "progress.run_started": "run started — provider {provider}",
   "progress.config_default": "using the config file in the default location: {location}",
@@ -88,6 +89,8 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.action.restored_from_discard": "restored from the discarded files folder",
   "revert.dry_run_next": "Run again without --dry-run to apply.",
   "revert.reverted_before": "This run was already reverted before, so its files may show as changed since the run.",
+  "revert.unsafe_moved": "Files moved back with your consent in a way that could replace a file: {count}",
+  "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
   "runs.column.run_id": "run id",
   "runs.column.started": "started",

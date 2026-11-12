@@ -538,7 +538,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "diffkind.added": "added",
   "changes.empty": "No file was changed.",
   "changes.created": "made by this run",
-  "plan.formUnknown": "This app does not know the task type and profile of the run that made this plan ({runId}; it was started outside this app). The plan can be looked at but not applied here. Apply it with the CLI. Below is the form of the apply command with this plan's run and digest; fill in its task part the way the run was started: the task file, or the workspace folder and its task type (add --profile and the profile's name when the run was started with one). codaryn plan with the same task part shows this plan again.",
+  "plan.formUnknown": "This app does not know the task type and profile of the run that made this plan ({runId}; it was started outside this app). The plan can be looked at but not applied here. Apply it with the CLI. Below is the form of the apply command with this plan's run and digest; fill in its task part the way the run was started: the task file, or the workspace folder and its task type (add --profile and the profile's name when the run was started with one). Add --config and --vars-file too, with the same files, when the run was started with them: without the run's config file the apply does not read the run's settings. codaryn plan with the same task part shows this plan again.",
   "plan.cli.taskFile": "task file",
   "plan.cli.workspace": "workspace folder",
   "plan.cli.taskType": "task type",

@@ -2,7 +2,7 @@
  * DR-39 for the GUI (standalone-gui 3.8, GU-4): the app layer gives the store's summary, cleanup
  * plan and cleanup. What would be removed comes first (a preview, nothing removed); only a plan the
  * person confirmed (its digest) is removed, and the discarded-files folders (people's own files)
- * only with their own yes. Real runs through the app (scripted model), the real store. Fake values only.
+ * only with their own yes, and (DR-44 (a)) the records of runs not reverted only with theirs. Real runs through the app (scripted model), the real store. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -43,6 +43,8 @@ async function appliedDiscard(): Promise<{ base: string; workspace: string; app:
   return { base, workspace: path.join(base, "work"), app, planRunId: plan.result.runId, applyRunId: applied.handle.runId };
 }
 
+/** "run <id>", "discarded <id>" or "leftover <id>" (DR-44 (d): a leftover folder has no run id). */
+const refOf = (item: { readonly target: string; readonly runId?: string; readonly leftoverId?: string }): string => `${item.target} ${item.runId ?? item.leftoverId}`;
 const runsIn = async (workspace: string): Promise<string[]> => (await readdir(path.join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME))).sort();
 const discardedOf = (workspace: string, runId: string): string => path.join(workspace, STATE_DIR_NAME, DISCARDED_DIR_NAME, runId);
 
@@ -63,22 +65,22 @@ describe("DR-39: the app layer's state summary and cleanup", () => {
     const preview = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection }));
     assert.equal(preview.kind, "cleanup_preview");
     assert.match(preview.plan.digest, /^[0-9a-f]{64}$/);
-    assert.deepEqual(preview.plan.items.map((item) => `${item.target} ${item.runId}`).sort(), [`discarded ${applyRunId}`, `run ${applyRunId}`, `run ${planRunId}`].sort());
+    assert.deepEqual(preview.plan.items.map(refOf).sort(), [`discarded ${applyRunId}`, `run ${applyRunId}`, `run ${planRunId}`].sort());
     assert.ok(preview.plan.items.find((item) => item.target === "discarded")?.warnings.includes("people_files"));
     assert.deepEqual(await runsIn(workspace), [planRunId, applyRunId].sort(), "the preview removed nothing");
 
     const applied = ok<CleanupApplied>(
-      await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false } }),
+      await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }),
     );
     assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
-    assert.deepEqual(applied.outcome.removed.map((item) => `${item.target} ${item.runId}`).sort(), [`run ${applyRunId}`, `run ${planRunId}`].sort());
+    assert.deepEqual(applied.outcome.removed.map(refOf).sort(), [`run ${applyRunId}`, `run ${planRunId}`].sort());
     assert.deepEqual(applied.outcome.kept, [{ target: "discarded", runId: applyRunId, reason: "not_confirmed" }]);
     assert.deepEqual(await runsIn(workspace), []);
     assert.equal(await exists(discardedOf(workspace, applyRunId)), true, "people's files stay without their own yes");
 
     const again = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection: { discarded: { runIds: [applyRunId] } } }));
     const removed = ok<CleanupApplied>(
-      await app.applyCleanup({ workspace, selection: { discarded: { runIds: [applyRunId] } }, now: again.now, confirmation: { digest: again.plan.digest, discarded: true } }),
+      await app.applyCleanup({ workspace, selection: { discarded: { runIds: [applyRunId] } }, now: again.now, confirmation: { digest: again.plan.digest, discarded: true, includeNotReverted: false } }),
     );
     assert.ok(removed.outcome.ok && removed.outcome.removed.length === 1, JSON.stringify(removed.outcome));
     assert.equal(await exists(discardedOf(workspace, applyRunId)), false);
@@ -88,11 +90,11 @@ describe("DR-39: the app layer's state summary and cleanup", () => {
     const { workspace, app, planRunId } = await appliedDiscard();
     const selection = { runs: { olderThanDays: 0 } };
     const preview = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection }));
-    const forged = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: "0".repeat(64), discarded: true } }));
+    const forged = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: "0".repeat(64), discarded: true, includeNotReverted: true } }));
     assert.deepEqual(forged.outcome, { ok: false, code: "plan_changed" });
     // A file appears in a selected run after the preview: its fingerprint changes.
     await writeFile(path.join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME, planRunId, "late.txt"), "x", "utf8");
-    const stale = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false } }));
+    const stale = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }));
     assert.deepEqual(stale.outcome, { ok: false, code: "plan_changed" });
     assert.equal((await runsIn(workspace)).length, 2, "nothing was removed");
   });
@@ -111,9 +113,12 @@ describe("DR-39: the app layer's state summary and cleanup", () => {
       assert.equal(code(await app.previewCleanup({ workspace, selection: selection as never })), "invalid_arguments", JSON.stringify(selection));
     }
     const selection = { runs: { olderThanDays: 0 } };
-    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "yesterday", confirmation: { digest: "0".repeat(64), discarded: false } })), "invalid_arguments");
-    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "2026-11-12T00:00:00Z", confirmation: { digest: "abc", discarded: false } })), "invalid_arguments");
-    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "2026-11-12T00:00:00Z", confirmation: { digest: "0".repeat(64), discarded: "yes" as never } })), "invalid_arguments");
+    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "yesterday", confirmation: { digest: "0".repeat(64), discarded: false, includeNotReverted: false } })), "invalid_arguments");
+    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "2026-11-12T00:00:00Z", confirmation: { digest: "abc", discarded: false, includeNotReverted: false } })), "invalid_arguments");
+    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "2026-11-12T00:00:00Z", confirmation: { digest: "0".repeat(64), discarded: "yes" as never, includeNotReverted: false } })), "invalid_arguments");
+    // DR-44 (a): the runs not reverted are asked apart; leaving the answer out is no yes.
+    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "2026-11-12T00:00:00Z", confirmation: { digest: "0".repeat(64), discarded: false } as never })), "invalid_arguments");
+    assert.equal(code(await app.applyCleanup({ workspace, selection, now: "2026-11-12T00:00:00Z", confirmation: { digest: "0".repeat(64), discarded: false, includeNotReverted: "yes" as never } })), "invalid_arguments");
     assert.equal(code(await app.stateSummary({ workspace: path.join(workspace, "missing") })), "workspace_not_found");
     assert.equal((await runsIn(workspace)).length, 2);
   });

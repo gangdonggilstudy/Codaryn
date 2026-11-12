@@ -1,11 +1,11 @@
 /**
  * DR-44 (review R-34, the cleanup of DR-39) through the app layer, the GUI's path. Reproductions
- * first, todo until the contract and the store follow DR-44; then the app layer asks for the extra
- * confirmation and these become tests.
+ * first; the contract is in (73ec895) and the app layer passes includeNotReverted on; todo until the
+ * store follows DR-44.
  * - (가) a run not reverted (or reverted only in part) loses its only way back when its records go:
  *   they go only with a confirmation of their own, besides the plan's digest. Not blocked.
  * - (나) L-1: a run reverted only in part is not a reverted run: `reverted: true` does not select
- *   it, and it gets the same warning as a run not reverted.
+ *   it, it is warned `partly_reverted`, and its records need the same confirmation.
  * - (다) L-2: an apply run whose discarded-files folder is selected too is warned `discarded_left`
  *   in the preview, as the person may keep the folder when confirming.
  * L-3 (a removal that fails after the move) needs a removal the OS refuses; the store's tests show
@@ -23,7 +23,7 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp } from "../../../src/app/index.js";
 import { appEnvironment, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "DR-44: waits for the contract's confirmation field and the store (review R-34 L-1, L-2, decision (가))" };
+const TODO = { todo: "DR-44: waits for the store (contract 73ec895: includeNotReverted, partly_reverted, discarded_left, leftovers)" };
 const sha = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
@@ -54,10 +54,11 @@ async function changedRun(partly: boolean): Promise<{ base: string; workspace: s
 const runsIn = async (workspace: string): Promise<string[]> => readdir(path.join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME));
 
 describe("DR-44: cleanup of runs that keep a way back", () => {
-  test("(나) L-1: a run reverted only in part is warned as not reverted and is not selected by reverted: true", TODO, async () => {
+  test("(나) L-1: a run reverted only in part is warned partly_reverted and is not selected by reverted: true", TODO, async () => {
     const { workspace, app, runId } = await changedRun(true);
     const all = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection: { runs: { runIds: [runId] } } }));
-    assert.ok(all.plan.items.find((item) => item.runId === runId)?.warnings.includes("not_reverted"), JSON.stringify(all.plan.items));
+    assert.ok(all.plan.items.find((item) => "runId" in item && item.runId === runId)?.warnings.includes("partly_reverted"), JSON.stringify(all.plan.items));
+    assert.equal(all.plan.totals.runs.notReverted, 1, "it needs the confirmation of runs not reverted");
     const reverted = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection: { runs: { olderThanDays: 0, reverted: true } } }));
     assert.deepEqual(reverted.plan.items, [], "a partial revert is not a reverted run");
   });
@@ -67,10 +68,15 @@ describe("DR-44: cleanup of runs that keep a way back", () => {
     const selection = { runs: { runIds: [runId] } };
     const preview = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection }));
     assert.ok(preview.plan.items[0]?.warnings.includes("not_reverted"));
-    const applied = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false } }));
-    assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
-    assert.deepEqual(applied.outcome.removed, [], "the digest alone does not remove a run not reverted");
+    assert.equal(preview.plan.totals.runs.notReverted, 1);
+    const kept = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: false } }));
+    assert.ok(kept.outcome.ok, JSON.stringify(kept.outcome));
+    assert.deepEqual(kept.outcome.removed, [], "the digest alone does not remove a run not reverted");
+    assert.deepEqual(kept.outcome.kept, [{ target: "run", runId, reason: "not_reverted_not_confirmed" }]);
     assert.deepEqual(await runsIn(workspace), [runId]);
+    const removed = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }));
+    assert.ok(removed.outcome.ok && removed.outcome.removed.length === 1, JSON.stringify(removed.outcome));
+    assert.deepEqual(await runsIn(workspace), []);
   });
 
   test("(다) L-2: an apply run whose discarded folder is selected too is warned discarded_left before the confirmation", TODO, async () => {
@@ -88,7 +94,7 @@ describe("DR-44: cleanup of runs that keep a way back", () => {
     const applyRunId = applied.handle.runId;
     const workspace = path.join(base, "work");
     const preview = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection: { runs: { runIds: [applyRunId] }, discarded: { runIds: [applyRunId] } } }));
-    const item = preview.plan.items.find((entry) => entry.target === "run" && entry.runId === applyRunId);
+    const item = preview.plan.items.find((entry) => entry.target === "run" && "runId" in entry && entry.runId === applyRunId);
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(preview.plan.items));
   });
 });

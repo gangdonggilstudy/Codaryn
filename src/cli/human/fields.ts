@@ -1,10 +1,14 @@
 /**
  * N-6, N-15 helpers for the validators (config.ts, task.ts): a schema field position as text, and
  * the known field name closest to an unknown one. Neither ever returns text read from the file:
- * positions are built from names the validator knows (anything else shows as "?"), and the
- * suggestion is an entry of the known list. The unknown name itself is never part of an answer
- * (S-6, T-14). Line and column of a JSON syntax error come from ./json-position.ts.
+ * a position shows only names in SCHEMA_FIELD_NAMES and indexes (anything else, profile names and
+ * map keys included, as "?"), and the suggestion is a schema name from the known list. The unknown
+ * name itself is never part of an answer (S-6, T-14, N-23(c)). Validators should still pass the
+ * result through `toSchemaFieldPath` for a SchemaFieldPath. Line and column of a JSON syntax error
+ * come from ./json-position.ts.
  */
+
+import { SCHEMA_FIELD_NAMES } from "../../contracts/index.js";
 
 export type FieldSegment = string | number;
 
@@ -14,11 +18,14 @@ export const TOP_LEVEL_POSITION = "(top level)";
 /** Names longer than this are not compared (the comparison is quadratic). */
 const MAX_COMPARED_NAME = 128;
 
-const NAME = /^[A-Za-z_$][A-Za-z0-9_$-]{0,63}$/;
+const SCHEMA_NAMES: ReadonlySet<string> = new Set(SCHEMA_FIELD_NAMES);
 
-/** A schema field name as the validators know them. */
+/**
+ * N-23(c): a field name of the task, config or script schema (SCHEMA_FIELD_NAMES). Anything else,
+ * a profile name or a map key or an unknown key included, is not shown even if it looks like one.
+ */
 export function isFieldName(name: string): boolean {
-  return NAME.test(name);
+  return SCHEMA_NAMES.has(name);
 }
 
 /** `limits.maxModelTurns`, `policy.commands[2].args`; an empty position is TOP_LEVEL_POSITION. */

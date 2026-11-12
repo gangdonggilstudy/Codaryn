@@ -22,16 +22,24 @@
 
 import { REVERT_SKIP_REASONS } from "./changes.js";
 import type { RevertSkipReason } from "./changes.js";
-import type { RunsOutput } from "./commands.js";
+import type { RunListEntry, RunsOutput } from "./commands.js";
 import type { DefaultConfigDisplay } from "./config.js";
+import { DOCTOR_CHECK_IDS, DOCTOR_CHECK_STATUSES } from "./commands.js";
+import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
 import { CLI_ERROR_EXIT_CODES, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
+import { INTEGRITY_PHASES } from "./integrity.js";
+import { MODEL_ERROR_KINDS } from "./model.js";
+import { PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
 import type { CliErrorCode, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
 import type { PermissionKind, PolicyDenialCode } from "./policy.js";
+import { APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS } from "./plan.js";
+import type { ApplyJournalEvent, ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
-import { TOOL_NAMES } from "./tool.js";
+import type { ContentHash } from "./text.js";
+import { TOOL_ERROR_CODES, TOOL_NAMES } from "./tool.js";
 import type { ToolErrorCode, ToolName } from "./tool.js";
 
 export const MESSAGE_LANGUAGES = ["ko", "en"] as const;
@@ -53,6 +61,27 @@ export interface MessageLanguageInput {
 
 /** Signature of `selectMessageLanguage`, exported by `src/i18n/index.ts`. Pure; reads nothing. */
 export type SelectMessageLanguage = (input: MessageLanguageInput) => MessageLanguage;
+
+/** N-20: which rule of MessageLanguageInput decided the language ("default": none did, so `en`). */
+export const LANGUAGE_SOURCES = ["env", "config", "os", "default"] as const;
+export type LanguageSource = (typeof LANGUAGE_SOURCES)[number];
+
+/**
+ * N-20: the language, where it came from, and whether CODARYN_LANG was set to something other
+ * than `ko` or `en` and so ignored. Never carries the input values themselves.
+ */
+export interface MessageLanguageChoice {
+  readonly language: MessageLanguage;
+  readonly source: LanguageSource;
+  readonly envIgnored: boolean;
+}
+
+/**
+ * Signature of `explainMessageLanguage`, exported by `src/i18n/index.ts` (N-20). Same rules as
+ * SelectMessageLanguage; `explainMessageLanguage(input).language === selectMessageLanguage(input)`.
+ * `doctor` shows the result with `language.source.<source>` and `language.env_ignored`.
+ */
+export type ExplainMessageLanguage = (input: MessageLanguageInput) => MessageLanguageChoice;
 
 declare const schemaFieldPathBrand: unique symbol;
 declare const runIdBrand: unique symbol;
@@ -123,6 +152,9 @@ export const SCHEMA_FIELD_NAMES = [
   "stop",
   "usage",
   "delayMs",
+  // N-24 (review R-3 R3-4): the scripted model's usage fields.
+  "inputTokens",
+  "outputTokens",
 ] as const;
 
 const SCHEMA_FIELD_SEGMENT = /^(?:[A-Za-z]+|\[(?:0|[1-9][0-9]{0,5})\])/;
@@ -169,12 +201,65 @@ export type InitSuggestedProtectedPath = (typeof INIT_SUGGESTED_PROTECTED_PATHS)
 export type ConfigLocationDisplay = DefaultConfigDisplay | "--config" | "CODARYN_CONFIG";
 
 /**
+ * N-20: the default answer of each `init` question (UX design section 7). A question that would
+ * widen what a run may do defaults to "no" (nothing changes when Enter is pressed); creating the
+ * file the user asked for and protecting a path default to "yes". The prompt shows the matching
+ * `prompt.yes_no_default_yes` or `prompt.yes_no_default_no`. Input that is not a clear yes or
+ * no gives the default; end of input gives "no".
+ */
+export const INIT_QUESTION_DEFAULTS = {
+  confirm_create: "yes",
+  commands_suggest: "no",
+  protected_suggest: "yes",
+} as const;
+
+/** N-21: commands with a help text. */
+export const HELP_COMMANDS = ["run", "revert", "report", "doctor", "models", "init", "runs"] as const;
+export type HelpCommand = (typeof HELP_COMMANDS)[number];
+
+/** N-21: options described in the help texts (`--dry-run` is `dry_run`). */
+export const HELP_OPTIONS = [
+  "task",
+  "workspace",
+  "goal",
+  "config",
+  "vars_file",
+  "cancel_file",
+  "quiet",
+  "profile",
+  "run",
+  "dry_run",
+  "json",
+  "use",
+  "limit",
+] as const;
+export type HelpOption = (typeof HELP_OPTIONS)[number];
+
+/**
+ * N-22: the error codes after which the human-readable error adds `error.doctor_hint`
+ * ("check: codaryn doctor"): the ones `doctor` can explain further.
+ */
+export const DOCTOR_HINT_ERROR_CODES = [
+  "invalid_config",
+  "invalid_task",
+  "key_in_file",
+  "secret_env_missing",
+  "workspace_is_install_dir",
+  "provider_not_configured",
+  "model_list_failed",
+] as const satisfies readonly CliErrorCode[];
+
+/**
  * The kinds of parameters and the type each one has:
  * - count: number (non-negative integer: counts, turns, attempts, line, column, durations)
  * - status, reason, permission, denial, modelError, phase, provider: closed code unions
  * - field: SchemaFieldPath. runId: RunId. text: CatalogText (another message of the same catalog)
  * - location: ConfigLocationDisplay
  * - suggestedCommand, suggestedPath: the fixed init suggestion lists
+ * - seconds (N-20): a non-negative number of seconds with at most one decimal place (the
+ *   renderer rounds milliseconds to tenths); the catalog writes it in decimal digits
+ * - language (N-20): a MessageLanguage code
+ * - digest (G-A): a plan digest, ContentHash (64 lowercase hex characters, a closed shape)
  */
 export interface MessageParamTypeByKind {
   readonly count: number;
@@ -191,6 +276,9 @@ export interface MessageParamTypeByKind {
   readonly location: ConfigLocationDisplay;
   readonly suggestedCommand: InitSuggestedCommand;
   readonly suggestedPath: InitSuggestedProtectedPath;
+  readonly seconds: number;
+  readonly language: MessageLanguage;
+  readonly digest: ContentHash;
 }
 export type MessageParamKind = keyof MessageParamTypeByKind;
 
@@ -222,7 +310,9 @@ export const FIXED_MESSAGES = {
   "summary.changes": { count: "count" },
   "summary.denied": { count: "count" },
   "summary.denied_hint": {},
-  "summary.usage": { turns: "count", toolCalls: "count", durationMs: "count" },
+  // N-23: the same hint for a task file run, whose policy is the task's own.
+  "summary.denied_hint_task": {},
+  "summary.usage": { turns: "count", toolCalls: "count", seconds: "seconds" },
   "summary.run_id": { runId: "runId" },
   "summary.next_report": { runId: "runId" },
   "summary.next_report_here": { runId: "runId" },
@@ -230,6 +320,22 @@ export const FIXED_MESSAGES = {
   "summary.next_revert_here": { runId: "runId" },
   "summary.config_default": { location: "location" },
   "summary.profile_applied": {},
+  // G-A: plan runs, human review and apply runs. `{form}` is one of `summary.form.*`, chosen by
+  // the context's workspaceForm, so a hint repeats the task form the user typed without its value.
+  "summary.form.task": {},
+  "summary.form.given": {},
+  "summary.form.current": {},
+  "summary.plan_ready": { actions: "count" },
+  "summary.next_plan": { form: "text", runId: "runId" },
+  "summary.next_apply": { form: "text", runId: "runId" },
+  "summary.review_checklist": { count: "count" },
+  "summary.next_review": { form: "text", runId: "runId" },
+  "summary.apply_actions": { applied: "count", total: "count" },
+  "summary.apply_plan_run": { runId: "runId" },
+  // DR-21: an apply that ended as consent_required: how many moves are unsafe, and the command that
+  // gives consent for one apply (UNSAFE_MOVE_CONSENT_ARGUMENT is fixed text in the template).
+  "summary.unsafe_moves": { count: "count" },
+  "summary.next_apply_unsafe": { form: "text", runId: "runId" },
 
   // Progress lines (N-5, R-11): words first, the internal code in parentheses after them.
   "progress.run_started": { provider: "provider" },
@@ -238,6 +344,8 @@ export const FIXED_MESSAGES = {
   "progress.model_error": { turn: "count", kind: "modelError" },
   "progress.tool_allowed": { tool: "text" },
   "progress.tool_denied": { tool: "text", permission: "permission", code: "denial" },
+  // N-22: a call stopped by a check before the policy (validate or restore stage), with no permission.
+  "progress.tool_rejected": { tool: "text", code: "denial" },
   "progress.file_created": {},
   "progress.file_changed": {},
   "progress.verifier": { number: "count", outcome: "text" },
@@ -247,9 +355,29 @@ export const FIXED_MESSAGES = {
   "progress.finished": { status: "text", reason: "reason" },
   "progress.model_not_found": {},
   "progress.unknown_tool": {},
+  // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
+  // `{problem}` is `plan.problem.<problem>`; an action is shown by its number (index + 1).
+  "progress.apply_started": { actions: "count", approval: "text" },
+  // `{count}` is the number of problems the preflight found: the entries of `plan_checked.problems`
+  // (unsafe moves and the inventory limit are not counted; they have their own lines). 0 means every
+  // action can be applied. It is not the number of actions (that is `progress.apply_started`).
+  "progress.plan_checked": { count: "count" },
+  // DR-21: `{count}` moves could only be made unsafely (`plan_checked.unsafeMoves`), and the
+  // consent line when `apply_started.unsafeMoveConsent` is set (`{approval}` is `approval.<channel>`).
+  "progress.unsafe_moves": { count: "count" },
+  "progress.unsafe_move_consent": { approval: "text" },
+  "progress.plan_item_problem": { number: "count", problem: "text" },
+  "progress.inventory_limit": {},
+  "progress.file_moved": { number: "count" },
+  "progress.file_discarded": { number: "count" },
+  "progress.plan_item_failed": { number: "count", problem: "text" },
   "outcome.pass": {},
   "outcome.fail": {},
   "outcome.inconclusive": {},
+
+  // `--run latest` (N-23): which run was chosen, before anything is done. The start time follows
+  // as an item in local time, from the checked `startedAt`.
+  "latest.chosen": { runId: "runId" },
 
   // Revert (N-7).
   "revert.dry_run_title": { count: "count" },
@@ -257,6 +385,9 @@ export const FIXED_MESSAGES = {
   "revert.skipped_title": { count: "count" },
   "revert.action.restored": {},
   "revert.action.deleted": {},
+  // G-A: one per RevertAction of an apply run.
+  "revert.action.moved_back": {},
+  "revert.action.restored_from_discard": {},
   "revert.dry_run_next": {},
   "revert.reverted_before": {},
 
@@ -269,6 +400,8 @@ export const FIXED_MESSAGES = {
   "runs.incomplete": {},
   "runs.damaged": {},
   "runs.reverted": {},
+  // N-23 (g): the run's own records are fine, only its revert record failed the checks.
+  "runs.revert_record_damaged": {},
   "runs.omitted": { count: "count" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
@@ -291,10 +424,109 @@ export const FIXED_MESSAGES = {
   "init.saved": { location: "location" },
   "init.next": {},
   "init.overridden_by_env": {},
-  "init.yes_no": {},
+
+  // Yes/no prompts (N-20): the hint shows the default answer, as INIT_QUESTION_DEFAULTS says.
+  "prompt.yes_no_default_yes": {},
+  "prompt.yes_no_default_no": {},
+
+  // Language (N-20): where it came from is `language.source.<source>`.
+  "language.chosen": { language: "language", source: "text" },
+  "language.env_ignored": {},
+
+  // Help (N-21): one line each; usage lines stay English and are printed by the CLI.
+  "help.intro": {},
+  "help.commands_heading": {},
+  "help.output": {},
+  "help.key": {},
+  "help.contract": {},
+  "help.options_heading": {},
+  "help.exit_heading": {},
+
+  // doctor (N-21): one id per outcome; the check id and its status word come from listed ids.
+  // A DoctorCheck's `text` is in the JSON, so doctor ids never take `text` (catalog output).
+  "doctor.footer": { status: "text", exitCode: "count" },
+  "doctor.task_unusable": {},
+  "doctor.no_workspace": {},
+  "doctor.config_file.unreadable": { location: "location" },
+  "doctor.config_file.json_syntax": { location: "location", line: "count", column: "count" },
+  "doctor.config_file.key": { location: "location" },
+  "doctor.config_file.too_deep": { location: "location" },
+  "doctor.config_file.invalid": { location: "location", field: "field" },
+  "doctor.config_file.invalid_unlocated": { location: "location" },
+  "doctor.task_file.unreadable": {},
+  "doctor.task_file.json_syntax": { line: "count", column: "count" },
+  "doctor.task_file.key": {},
+  "doctor.task_file.too_deep": {},
+  "doctor.task_file.invalid": { field: "field" },
+  "doctor.task_file.invalid_unlocated": {},
+  "doctor.task_file.valid": {},
+  "doctor.model.script_unreadable": {},
+  "doctor.model.script_json_syntax": { line: "count", column: "count" },
+  "doctor.model.script_key": {},
+  "doctor.model.script_too_deep": {},
+  "doctor.model.script_invalid": { field: "field" },
+  "doctor.model.script_invalid_unlocated": {},
+  "doctor.node_version.ok": { major: "count", required: "count" },
+  "doctor.node_version.fail": { required: "count" },
+  "doctor.vars_file.skipped": {},
+  "doctor.vars_file.unreadable": {},
+  "doctor.vars_file.bom": {},
+  "doctor.vars_file.ok": { count: "count" },
+  "doctor.config_file.env_not_local": {},
+  "doctor.config_file.none": {},
+  "doctor.config_file.default_refused": {},
+  "doctor.config_file.default_missing": { location: "location" },
+  "doctor.config_file.valid_at": { location: "location" },
+  "doctor.config_file.profile_missing": {},
+  "doctor.task_file.skipped": {},
+  "doctor.api_key.scripted": {},
+  "doctor.api_key.ok": {},
+  "doctor.api_key.missing": {},
+  "doctor.model.scripted_ok": {},
+  "doctor.model.ok": {},
+  "doctor.model.missing": {},
+  "doctor.model.placeholder": {},
+  "doctor.model.output_cap_missing": {},
+  "doctor.model.base_url_invalid": {},
+  "doctor.limits.ok": {},
+  "doctor.limits.ok_quick": {},
+  "doctor.limits.invalid": { field: "field" },
+  "doctor.limits.invalid_unlocated": {},
+  "doctor.workspace.skipped": {},
+  "doctor.workspace.ok": {},
+  "doctor.workspace.missing": {},
+  "doctor.file_locations.no_input": {},
+  "doctor.file_locations.inside": { count: "count" },
+  "doctor.file_locations.ok": { count: "count" },
+  "doctor.commands.none": {},
+  "doctor.commands.ok": { count: "count" },
+  "doctor.commands.ok_unchecked": { count: "count" },
+  "doctor.commands.problems": { rejected: "count", notFound: "count", notFoundLocally: "count", remote: "count" },
+  "doctor.install_dir.unknown_env": {},
+  "doctor.install_dir.not_found": {},
+  "doctor.install_dir.ok": {},
+  "doctor.install_dir.overlap": {},
+  "doctor.integrity_paths.skipped": {},
+  "doctor.integrity_paths.problems": { missing: "count", inside: "count" },
+  "doctor.integrity_paths.ok": { count: "count" },
+  "doctor.language.from_env": { language: "language" },
+  "doctor.language.from_config": { language: "language" },
+  "doctor.language.from_os": { language: "language" },
+  "doctor.language.from_default": { language: "language" },
+  "doctor.language.env_ignored": { language: "language" },
+  "doctor.language.unchecked": {},
+  // N-25 (a): the workspace lock. When a lock is held but no Codaryn runs, the user removes it.
+  "doctor.lock.none": {},
+  "doctor.lock.held": {},
+  "doctor.lock.stale": {},
+  "doctor.lock.unreadable": {},
+  "lock.remove_hint": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;
+
+/** N-21: the fixed ids a DoctorCheck's `text` may use (not the footer, which is rendered only). */
+export type DoctorMessageId = Exclude<Extract<FixedMessageId, `doctor.${string}`>, "doctor.footer">;
 
 /** Files an input diagnostic can point into (N-15). */
 export const INPUT_DIAGNOSTIC_FILES = ["config", "task", "script"] as const;
@@ -309,6 +541,14 @@ export type InputDiagnosticFile = (typeof INPUT_DIAGNOSTIC_FILES)[number];
  * - `tool.<name>`: a tool as words, e.g. "파일 읽기".
  * - `revert.skip.<reason>`: why a file was or would be skipped.
  * - `diagnostic.file.<file>`: the file a diagnostic points into.
+ * - `denial.<code>` (N-20): a policy denial or tool error code as words ("허용 목록에 없음").
+ * - `permission.<kind>`, `phase.<phase>`, `modelError.<kind>` (N-20): those codes as words.
+ * - `language.source.<source>` (N-20): where the language came from.
+ * - `help.command.<command>`, `help.option.<option>`, `help.exit.<command>` (N-21): one line each.
+ * - `doctor.check.<id>`, `doctor.status.<status>` (N-21): a check's label and its status word.
+ *   The check ids and statuses stay English in the JSON.
+ * - `approval.<channel>` (G-A): how a plan was approved, e.g. "터미널에서 승인".
+ * - `plan.problem.<problem>` (G-A): why an apply action cannot be or was not applied.
  */
 export type ListedMessageId =
   | `error.${CliErrorCode}.what`
@@ -318,7 +558,19 @@ export type ListedMessageId =
   | `advice.${RunReason}`
   | `tool.${ToolName}`
   | `revert.skip.${RevertSkipReason}`
-  | `diagnostic.file.${InputDiagnosticFile}`;
+  | `diagnostic.file.${InputDiagnosticFile}`
+  | `denial.${PolicyDenialCode | ToolErrorCode}`
+  | `permission.${PermissionKind}`
+  | `phase.${IntegrityPhase}`
+  | `modelError.${ModelErrorKind}`
+  | `language.source.${LanguageSource}`
+  | `help.command.${HelpCommand}`
+  | `help.option.${HelpOption}`
+  | `help.exit.${HelpCommand}`
+  | `doctor.check.${DoctorCheckId}`
+  | `doctor.status.${DoctorCheckStatus}`
+  | `approval.${ApprovalChannel}`
+  | `plan.problem.${PlanItemProblem}`;
 
 export type MessageId = FixedMessageId | ListedMessageId;
 
@@ -349,6 +601,20 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...TOOL_NAMES.map((name) => `tool.${name}` as const),
   ...REVERT_SKIP_REASONS.map((reason) => `revert.skip.${reason}` as const),
   ...INPUT_DIAGNOSTIC_FILES.map((file) => `diagnostic.file.${file}` as const),
+  ...[...POLICY_DENIAL_CODES, ...TOOL_ERROR_CODES]
+    .filter((code, index, all) => all.indexOf(code) === index)
+    .map((code) => `denial.${code}` as const),
+  ...PERMISSION_KINDS.map((kind) => `permission.${kind}` as const),
+  ...INTEGRITY_PHASES.map((phase) => `phase.${phase}` as const),
+  ...MODEL_ERROR_KINDS.map((kind) => `modelError.${kind}` as const),
+  ...LANGUAGE_SOURCES.map((source) => `language.source.${source}` as const),
+  ...HELP_COMMANDS.map((command) => `help.command.${command}` as const),
+  ...HELP_OPTIONS.map((option) => `help.option.${option}` as const),
+  ...HELP_COMMANDS.map((command) => `help.exit.${command}` as const),
+  ...DOCTOR_CHECK_IDS.map((id) => `doctor.check.${id}` as const),
+  ...DOCTOR_CHECK_STATUSES.map((status) => `doctor.status.${status}` as const),
+  ...APPROVAL_CHANNELS.map((channel) => `approval.${channel}` as const),
+  ...PLAN_ITEM_PROBLEMS.map((problem) => `plan.problem.${problem}` as const),
 ];
 
 /** The parameters a message takes, name → kind (none for listed ids). For catalog tests. */
@@ -361,6 +627,14 @@ export function messageParams(id: MessageId): { readonly [param: string]: Messag
  * in decimal digits, anything else as given); the types above limit what can be given. It never
  * reads a file or the environment. A missing or extra parameter at run time is a programming
  * error and throws.
+ *
+ * N-24 (review R-3 GAP-1 to GAP-6): the types can be bypassed (casts, `any`, JSON), so `format`
+ * checks every value's kind again at run time: a count is a non-negative safe integer, seconds a
+ * non-negative number with at most one decimal place, a code one of its contract list, a field a
+ * `toSchemaFieldPath` result, a run id a `toRunId` result, a location or suggestion one of the
+ * fixed strings, text one this catalog produced. A value that fails is not shown (a fixed
+ * replacement such as "?" stands in its place). Run ids and task ids are shown with key shapes
+ * hidden, as every printed text is.
  */
 export interface MessageCatalog {
   readonly language: MessageLanguage;
@@ -371,6 +645,16 @@ export interface MessageCatalog {
 export type CreateMessageCatalog = (language: MessageLanguage) => MessageCatalog;
 
 /**
+ * N-21: a doctor check's text as a message id and its parameters, for the human output in the
+ * chosen language. `DoctorCheck.message` stays the English line in the JSON.
+ */
+export type DoctorText = {
+  readonly [I in DoctorMessageId]: keyof MessageParamsOf<I> extends never
+    ? { readonly id: I }
+    : { readonly id: I; readonly params: MessageParamsOf<I> };
+}[DoctorMessageId];
+
+/**
  * What a run summary needs besides the result (N-5, N-17). Nothing in it is a typed or file value.
  * - workspaceForm: how the workspace was given, for the "next command" hints: "current" (one-line
  *   run: `--workspace .`), "given" (`--workspace <dir>`: the hint says `<workspace>`, the typed
@@ -379,12 +663,19 @@ export type CreateMessageCatalog = (language: MessageLanguage) => MessageCatalog
  * - profileApplied (N-8): whether `--profile` was used. The name is not shown.
  * - deniedToolCalls (N-17): `tool_decision` records with `allowed: false` in this run, the same
  *   count as ReportJournalSummary.deniedToolCalls.
+ * - deniedCommandCalls (N-23): the denied calls whose permission is `command`. The hint to allow a
+ *   command is shown only when it is above 0.
+ * - policySource (N-23): where the run's policy came from, so the denied-call hint points there:
+ *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
+ *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
  */
 export interface RunSummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
   readonly configDefault: DefaultConfigDisplay | null;
   readonly profileApplied: boolean;
   readonly deniedToolCalls: number;
+  readonly deniedCommandCalls: number;
+  readonly policySource: "task" | "config";
 }
 
 /**
@@ -392,9 +683,14 @@ export interface RunSummaryContext {
  * lines ending with LF (or null where noted) and never reads anything.
  *
  * Paths: messages never take a path. A renderer may print the masked paths that the outputs and
- * records already carry (`changes[].path`, `reverted[].path`, `skipped[].path`, `file_changed.path`)
- * as items after a message, with control characters replaced, key shapes hidden and the length
- * cut, as `report` prints them. No other value from an output or a record is printed as text.
+ * records already carry (`changes[].path`, `reverted[].path`, `skipped[].path`, `file_changed.path`,
+ * and G-A's `file_moved.from`/`to`, `file_discarded.path`, `ApplyResult.applied[].action` paths) as
+ * items after a message, with control characters replaced, key shapes hidden and the length cut, as
+ * `report` prints them. G-A: the same holds for `EngineResult.review.checklist` entries (masked text
+ * from the user's own config) and for `EngineResult.plan.digest` / `ApplyResult.digest` (64
+ * lowercase hex characters), which follows `summary.next_apply` or `summary.next_apply_unsafe` as an
+ * item so the user can copy it into `--digest`. No other
+ * value from an output or a record is printed as text.
  * The CLI masks the rendered text again with the run's privacy gateway where it has one, and
  * writes it best effort.
  */
@@ -407,7 +703,9 @@ export interface HumanOutput {
   error(output: CliErrorOutput): string;
   /**
    * N-5: stderr at the end of `run`: status and reason as words, verifier result, number of
-   * changed files, denied calls (with the hint once, N-17), usage, run id, next commands.
+   * changed files, denied calls (with the hint once, N-17), usage (seconds, N-20), run id, next
+   * commands. The result's `notices` are not shown (N-22): the model-not-found hint is a progress
+   * line (`progress.model_not_found`), and every notice stays in the JSON and the report.
    */
   runSummary(result: EngineResult, context: RunSummaryContext): string;
   /**
@@ -421,6 +719,33 @@ export interface HumanOutput {
   revertSummary(output: RevertOutput): string;
   /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
   runsText(output: RunsOutput): string;
+  /**
+   * N-23: stderr before `revert --run latest` and `report --run latest` act: the chosen run id
+   * (`latest.chosen`) and its start time in local time.
+   */
+  latestChosen(entry: Extract<RunListEntry, { readonly state: "checked" }>): string;
+  /**
+   * G-A: one progress line body for an apply run's record, or null for records not shown. The
+   * shared records (`verifier_result`, `integrity_checked`, `run_finished`) render as in
+   * `progressLine`. Optional only until the renderer (N-C) has it; then it becomes required.
+   */
+  applyProgressLine?(event: ApplyJournalEvent): string | null;
+  /**
+   * G-A: stderr at the end of `apply`: status and reason as words, actions applied of the plan's
+   * total (`summary.apply_actions`), the plan run (`summary.apply_plan_run`), verifier result, run id,
+   * and the next commands (report, revert). For `consent_required` (DR-21): `summary.unsafe_moves`
+   * and `summary.next_apply_unsafe` with the digest as an item. Optional only until the renderer
+   * (N-C) has it.
+   * `runSummary` covers the plan run (`plan_pending`: `summary.plan_ready`, `summary.next_plan`,
+   * `summary.next_apply` with the digest as an item) and human review (`awaiting_review`:
+   * `summary.review_checklist` with the checklist entries as items, `summary.next_review`).
+   */
+  applySummary?(result: ApplyResult, context: ApplySummaryContext): string;
+}
+
+/** G-A: what an apply summary needs besides the result. As RunSummaryContext's workspaceForm. */
+export interface ApplySummaryContext {
+  readonly workspaceForm: "current" | "given" | "task";
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

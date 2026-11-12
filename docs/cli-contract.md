@@ -141,6 +141,8 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 
 stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`run`은 `CliOutput`, `revert`는 `RevertOutput` 또는 `CliErrorOutput`). `report`와 `doctor`는 기본이 사람이 읽는 글이고, `--json`이면 `ReportOutput`·`DoctorOutput` JSON 한 줄이다. 어느 명령이든 오류는 `CliErrorOutput` JSON 한 줄이다(이 JSON들을 합쳐 `CommandOutput`). `--help`와 `--version`은 글이다. `run`의 진행 표시는 stderr다(15절 U-8).
 
+- N-19: stdout의 JSON 한 줄(모든 명령의 JSON 출력과 `--json`)은 U+007F보다 큰 문자를 모두 `\uXXXX`로 쓴다(BMP 밖 문자는 서로게이트 쌍). JSON으로 읽으면 값은 같다. Windows PowerShell 5.1의 기본 코드 페이지에서도 깨지지 않게 하기 위해서다. `report`·`doctor`·`models`의 기본 글 출력은 그대로다.
+
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
@@ -477,7 +479,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
 - `--task`와 `--workspace`는 함께 쓸 수 없다(`invalid_arguments`, W-5). task 파일이 자기 작업 공간(`workspaceRoot`)을 정하기 때문이다. 작업 공간을 보는 항목(`workspace`, `file_locations`, `install_dir`, `integrity_paths`의 위치 판정)은 task의 `workspaceRoot`나 `--workspace`를 쓰고, 둘 다 없으면 `skipped`다.
-- 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`. 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
+- 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`, `language`(N-20). 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
 - 종료(`DOCTOR_EXIT_CODES`): 가장 나쁜 항목에 따라 `ok` 0, `warn` 3, `fail` 1이다(`skipped`는 `ok`로 센다). 인자 오류는 `invalid_arguments`(`CliErrorOutput`)다.
 - 메시지는 고정 문구, 필드 위치(`policy.commands[2]` 등), 개수로만 만든다. 파일이나 환경에서 읽은 값은 내지 않으며, 키는 있음·없음만 적는다.
 
@@ -580,7 +582,7 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
   - `model_list_failed`: 종료 8. API 요청이 실패했고, 메시지에 종류가 있다. 아무것도 쓰지 않았다.
   - `config_write_failed`: 종료 2. 설정 파일을 쓰지 못했고, 파일은 그대로다.
 - `--use <번호|id>`: 목록의 번호(1부터)나 목록에 있는 id만 받는다. 그 밖은 `invalid_arguments`이고 아무것도 쓰지 않는다.
-  - `--config`(또는 `CODARYN_CONFIG`)가 필요하다. 없으면 요청을 보내기 전에 `invalid_arguments`다.
+  - `--config`(또는 `CODARYN_CONFIG`)나 기본 위치의 설정 파일(N-1)이 필요하다. 셋 다 없으면 요청을 보내기 전에 `invalid_arguments`다. 기본 위치에는 새 파일을 만들지 않는다(`codaryn init`이 만든다).
   - 쓰기 전에 설정 파일을 `run`과 같은 순서로 검사한다(원문 키 검사, 파싱, 키 필드 검사, `parseConfig`). 키 필드나 키 값이 있으면 지금처럼 `key_in_file`이고, 요청도 쓰기도 하지 않는다.
   - 고른 id가 일반 모델 id 형식(영숫자로 시작, 영숫자와 `._:-`, 200자 이하)이 아니거나 키를 담고 있으면 `config_write_failed`이고 쓰지 않는다.
   - 원자적 쓰기: 같은 디렉터리의 임시 파일에 쓰고 이름을 바꾼다. 바꾸기 직전에 파일이 읽었을 때와 같은지 확인하고, 다르면 쓰지 않는다(`config_write_failed`). 링크면 가리키는 파일을 바꾸고 링크는 그대로 둔다. POSIX에서는 원래 파일의 권한을 옮긴다. 실패하면 임시 파일을 지우고 원래 파일은 그대로다.
@@ -693,7 +695,181 @@ codaryn doctor [...기존] [--profile <이름>]
 - 내보내지 않는 것: JSON 파서의 예외 문구(원문 조각을 담을 수 있다), 값, 모르는 키의 이름. 모르는 키는 그 키를 가진 객체의 위치(`config`, `limits`, `policy.commands[0]`)로만 말한다.
 - 문구는 `diagnostic.<code>`와 `diagnostic.file.<file>`이다. 구현은 N-A(검증기와 CLI)다.
 
-### 17.6 오류 코드 추가
+### 17.6 문구·출력 계약 추가 (N-20~N-23)
+
+N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만 있고, 카탈로그 글(N-B)과 렌더러(N-C)는 이 계약에 맞춰야 컴파일된다(새 id가 `MessageTexts`에 필요하고 `summary.usage`의 매개변수가 바뀌었다).
+
+- **코드의 사람 말(N-20)**: 목록 id `denial.<거부·도구 오류 코드>`, `permission.<권한 종류>`, `phase.<무결성 단계>`, `modelError.<모델 오류 종류>`를 더했다. 진행 줄과 요약은 사람 말을 먼저 쓰고 코드는 괄호에 둔다.
+- **초 단위 시간(N-20)**: 매개변수 종류 `seconds`(0 이상, 소수 한 자리까지)를 더했다. `summary.usage`는 `{ turns, toolCalls, seconds }`다. 렌더러가 ms를 0.1초 단위로 반올림한다.
+- **예·아니오 기본 답(N-20)**: `init.yes_no`를 없애고 `prompt.yes_no_default_yes`, `prompt.yes_no_default_no`를 두었다. 질문별 기본은 `INIT_QUESTION_DEFAULTS`다: 파일 만들기 예, 명령 허용 제안 아니오(실행 권한을 넓히는 질문은 Enter로 바뀌지 않는다), 보호 경로 제안 예. 분명한 예·아니오가 아니면 기본 답, 입력이 끝나면 아니오다.
+- **언어 출처(N-20)**: `explainMessageLanguage`(`ExplainMessageLanguage`)가 `{ language, source, envIgnored }`를 돌려준다(`source`: `env`, `config`, `os`, `default`). 입력 값은 담지 않는다. 문구는 `language.chosen`, `language.source.<출처>`, `language.env_ignored`다. `doctor`에 `language` 점검을 마지막 항목으로 더했다(CODARYN_LANG이 ko·en이 아니면 `warn`).
+- **help와 doctor 문구(N-21)**: 한 줄짜리 고정 id(`help.*`, `doctor.*`)와 목록 id(`help.command.<명령>`, `help.option.<옵션>`, `help.exit.<명령>`, `doctor.check.<점검 id>`, `doctor.status.<상태>`)를 더했다. 사용법 줄(명령 문법)은 영어로 CLI가 찍는다. `DoctorCheck.text`(`DoctorText`, 선택)가 같은 결과를 문구 id와 매개변수로 담고, JSON의 영어 `message`는 그대로 둔다. 점검 id와 상태 값은 영어다.
+- **진행 줄 `progress.tool_rejected`(N-22)**: 권한 판정 전 단계(형식 검사, 복원)에서 멈춘 호출이다. `permission`이 없으므로 `{ tool, code }`만 받는다.
+- **`already_reverted`(N-22)**: 되돌리기 건너뜀 사유에 더했다. 현재 해시가 그 파일의 첫 `previousHash`와 같거나, 실행이 만든 파일이 이미 없을 때다. 할 일이 없으므로 `partial`로 세지 않는다(`complete`가 될 수 있다).
+- **되돌리기 기록(N-22, N-23)**: store의 `readRevertRecord`·`writeRevertRecord`(`ReadRevertRecord`, `WriteRevertRecord`)를 쓴다. 읽기가 실패하거나 기록이 확인을 통과하지 못하면 오류로 끝내지 않고 그 기록 없이 진행한다(`revertedBefore` 없음). 쓰기 실패는 결과를 바꾸지 않는다.
+- **`runs` 오류(N-22)**: `invalid_run_record`(`.codaryn`이나 `runs`가 링크이거나 나열할 수 없음)를 더했다. `--run latest`의 목록 실패도 같다. `parseRunsArgs`와 `RUNS_USAGE`는 `src/cli/runs.ts`에 있다. 실행 목록 확인은 `report`만큼 엄격하다(`RunListEntry` 주석).
+- **`doctor` 안내(N-22)**: `DOCTOR_HINT_ERROR_CODES`(`invalid_config`, `invalid_task`, `key_in_file`, `secret_env_missing`, `workspace_is_install_dir`, `provider_not_configured`, `model_list_failed`)의 오류에만 `error.doctor_hint`를 붙인다.
+- **요약의 notices(N-22)**: 실행 끝 요약은 `notices`를 보이지 않는다. 모델 404 안내는 진행 줄(`progress.model_not_found`)이 맡고, notices는 JSON과 보고서에 남는다.
+- **거부 안내의 정책 위치(N-23)**: `RunSummaryContext.policySource`(`task`, `config`)와 `deniedCommandCalls`(권한이 `command`인 거부 수)를 더했다. 안내는 `deniedCommandCalls`가 1 이상일 때만 낸다. task 파일 실행이면 `summary.denied_hint_task`(task의 `policy.commands`), 간편 형식과 한 줄 실행이면 `summary.denied_hint`(설정 파일이나 프로필)를 쓴다.
+- **`--run latest`가 고른 실행(N-23)**: `revert`와 `report`는 `latest`를 풀면 무엇을 하기 전에 stderr에 고른 실행 id와 시작 시각을 먼저 쓴다(`HumanOutput.latestChosen`, 문구 `latest.chosen`, 시각은 확인된 `startedAt`을 지역 시간으로). `--quiet`이면 쓰지 않는다.
+
+- **N-24(검토 R-3)**
+  - (a) `report`의 Markdown과 진행 줄은 검증기를 id 대신 순번으로 쓴다. id는 `--json`에만 남는다.
+  - (b) 실행 목록 항목의 실행 id·작업 id는 패턴을 통과해도 키 모양일 수 있다. 그래서 JSON과 표 모두 키 모양을 가린다(`report`와 같다).
+  - (d) `SCHEMA_FIELD_NAMES`에 대본의 `usage` 하위 필드 `inputTokens`, `outputTokens`를 더했다.
+  - (e) 문구 함수는 값의 종류를 실행 중에 다시 확인한다. 맞지 않는 값은 내지 않고 고정 대체 글로 둔다(`MessageCatalog` 주석).
+- **N-25(a) 작업 공간 잠금**
+  - `workspace_locked`의 사람용 오류에 `lock.remove_hint`("이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지우세요")를 붙인다.
+  - `doctor`에 `lock` 점검을 마지막 항목으로 더했다. `.codaryn/lock.json`을 바꾸지 않고 읽는다.
+  - 결과: 없음(`ok`), 살아 있는 프로세스가 쥠(`warn`, 안내 포함), 끝난 프로세스가 남김(`ok`, 다음 실행이 회수), 읽을 수 없음(`warn`). 작업 공간이 없으면 `skipped`다.
+  - pid가 다른 프로세스에 다시 주어질 수 있어 "쥠" 판정은 틀릴 수 있다(architecture A-6).
+
+### 17.7 오류 코드 추가
 
 - `config_exists`(종료 2): `init`의 대상 위치에 파일이 이미 있다. 아무것도 쓰지 않았다.
 - `config_write_failed`(종료 2)는 `init`에서도 쓴다.
+
+## 18. 범용 작업 명령 (G-F: 워크플로, plan, apply, review, changes)
+
+계약 원문은 `src/contracts/workflow.ts`, `plan.ts`, `changes.ts`, `engine.ts`이고, 설계는 `docs/design/general-tasks.md`, 결정은 `docs/work-orders/phase-4-5-design.md`(DR-1~DR-25)다. 이 절은 CLI가 그 계약을 어떻게 받는지 적는다.
+
+### 18.1 워크플로 해석 (DR-2, DR-3)
+
+- 실행이 쓰는 워크플로는 다음 순서로 처음 있는 것이다.
+  1. task 파일의 `workflowRef`
+  2. 간편 형식의 `--workflow <id>`
+  3. 프로필의 `workflowRef`
+- 셋 다 없으면 단계 1~3의 실행과 같다(워크플로 설정 없음).
+- 간편 형식에서는 `--workflow`의 id가 이름표(`workflow`)도 된다.
+- 내장 워크플로 다섯 개는 `src/workflows`에 있다. 설정 파일의 `workflows`는 새 id만 정의할 수 있고, 내장 id를 다시 정의하면 거부된다.
+
+  | id | 도구 | 계획 | 완료 |
+  | --- | --- | --- | --- |
+  | `general` | 전체 | 없음 | 검증기 |
+  | `code` | 전체 | 없음 | 검증기 |
+  | `document` | 읽기·찾기·쓰기 | 없음 | 검증기 |
+  | `analyze` | 읽기·찾기·쓰기 | 없음 | 사람 검토(확인 목록 2개) |
+  | `organize` | 읽기·찾기·`inspect_files`·`propose_plan` | `apply`, 명령 금지 | 계획 승인 |
+
+- 해석 규칙(`resolveWorkflow`)
+  - 도구는 워크플로가 허용한 것 안에서만 좁힐 수 있다.
+  - `plan: "apply"`는 약하게 바꿀 수 없다.
+  - `allowCommands: false`인 워크플로에서는 `policy.commands`를 쓸 수 없다.
+  - 사람 검토 워크플로에는 확인 목록이 있어야 한다.
+- task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 워크플로의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
+- 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
+- `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 워크플로, 비밀 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
+
+### 18.2 task 형식 (DR-17)
+
+`plan`, `apply`, `review`, `changes`는 `run`과 같은 형식을 받는다.
+
+```
+(--task <task.json> | --workspace <dir> [--profile <name>] [--workflow <id>]) [--config <config.json>] [--vars-file <path>]
+```
+
+그 설정이 가리는 비밀은 지금 실행을 시작했다면 등록될 비밀이다. 그 비밀로 계획·기록을 다시 가려서 보여 준다(DR-5). 이 명령들은 모델을 부르지 않는다.
+
+### 18.3 `codaryn plan`
+
+```
+codaryn plan <task 형식> --run <runId|latest> [--json]
+```
+
+- 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
+- 출력
+  - `PlanOutput`: 행동 목록(지금 비밀로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
+  - 인벤토리 상한 도달 여부
+  - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
+- 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
+
+### 18.4 `codaryn apply`
+
+```
+codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수> [--allow-unsafe-move] [--cancel-file <path>] [--quiet]
+```
+
+- `--run latest`는 받지 않는다. 승인이 계획 하나를 가리켜야 하기 때문이다.
+- 거부 조건(모두 종료 2, 아무것도 옮기지 않는다)
+  - task가 `plan: "apply"` 워크플로로 해석되지 않으면 `run_not_plan`
+  - 이미 적용된 계획이면 `plan_already_applied`
+- 승인
+  - `--digest`가 저장된 다이제스트의 앞부분이어야 한다(`MIN_PLAN_DIGEST_PREFIX` = 12자 이상).
+  - stdin과 stderr가 터미널이고 `--digest`가 없으면 계획을 보이고 `[y/N]`을 묻는다. 기본은 아니오다.
+  - 어느 쪽도 아니면 `plan_not_approved`(종료 2)다.
+- 적용
+  - 잠금을 잡고 적용 실행을 새로 만든다. 첫 기록은 `apply_started`다.
+  - 지금 task의 정책·검증기·비밀로 적용한다(DR-5).
+  - 폐기한 파일은 `.codaryn/discarded/<적용 runId>/`에 행동 번호 이름으로 남는다(DR-9).
+  - stdout에는 `ApplyResult` 한 줄이 나오고, 같은 내용이 적용 실행의 `result.json`이 된다.
+  - 되돌리기: `codaryn revert --run <적용 runId>`
+- 위험한 이동에 대한 동의(DR-21)
+  - 하드 링크가 없는 드라이브에서는 대상에 생긴 파일을 덮지 않는다는 보장 없이만 옮길 수 있다. 기본은 옮기지 않는다. 적용 전 점검이 그 이동을 `plan_checked.unsafeMoves`에 적고, 적용은 `needs-input`/`consent_required`로 끝난다(아무것도 옮기지 않음).
+  - 동의는 사람의 입력으로만 받는다.
+    - `--allow-unsafe-move`(`cli-flag`)
+    - 터미널에서 그 적용이 `consent_required`로 끝난 뒤 한 번 묻는 `[y/N]`(`cli-tty`). 예이면 동의를 붙여 적용 실행을 하나 더 한다.
+  - task·설정·프로필·계획·모델에는 동의 필드가 없다. task에 그런 필드가 있으면 `invalid_task`다.
+  - 동의는 그 계획의 다이제스트에 대해 그 적용 한 번만 유효하다. `apply_started.unsafeMoveConsent`에 기록되고, 그렇게 옮긴 이동에는 `unsafe: true`가 붙는다.
+- 앱 계층의 적용(DR-1, DR-21, PM 결정: 앱 계층 질문 A-4 1)
+  - 앱 계층은 GUI의 적용에 같은 `runApply`를 부르고, `ApplyCommandEnvironment.adapter`(`AdapterApply`, `src/cli/plan-commands.ts`)를 넘긴다. CLI 자기 프로세스는 이 필드를 쓰지 않는다.
+  - 승인은 `adapter`로 기록된다. GUI의 적용이 `cli-flag`로 기록되지 않는다. 승인할 계획은 여전히 `--digest`로 가리킨다. 없으면 `plan_not_approved`다.
+  - 터미널 질문은 하지 않는다. `--allow-unsafe-move`는 `invalid_arguments`로 거부한다.
+  - `adapter.unsafeMoveConsent`는 **호출자가 사람의 입력으로 받은 것만** 넘긴다. 사람이 화면에서 그 적용 한 번에 동의한 것이어야 한다. task·설정·프로필·계획·모델이나 이전 적용에서 온 값을 넘기지 않는다.
+  - 그 동의의 경로는 `adapter`, 다이제스트는 적용하는 계획의 전체 다이제스트여야 한다. 아니면 실행 전에 `invalid_arguments`다. 동의가 null이면 `consent_required`로 끝나고 다시 묻지 않는다. GUI가 사람에게 묻고 다시 부른다.
+
+### 18.5 `codaryn review`
+
+```
+codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note <text>] [--json]
+```
+
+- 대상: `needs-input`/`awaiting_review`로 끝난 실행. 다른 실행이면 `run_not_awaiting_review`(종료 2)다.
+- 판정을 `review.json`에 쓴다(`ReviewRecord`). 다시 판정하면 이전 판정을 바꾸고 출력에 `replaced`가 나온다. `result.json`은 바뀌지 않는다. 검토로 실행이 `done`이 되지는 않는다.
+- 메모
+  - `MAX_REVIEW_NOTE_CHARS`(500)자 이하
+  - 키 모양이 있으면 `key_in_file`
+  - 나머지는 지금 비밀로 가려서 저장한다.
+
+### 18.6 `codaryn changes` (DR-7, DR-14)
+
+```
+codaryn changes <task 형식> --run <runId|latest> [--json]
+```
+
+- 실행이 바꾼 파일마다 상태, 실행 전후 내용, 바뀐 구역(`-`/`+` 줄)을 보여 준다. 지금 비밀로 가린다(`masking: "current_secrets"`).
+- 읽기만 한다. 잠금도, 요청도 하지 않는다.
+- `--json`은 `ChangesOutput` ASCII 한 줄이다(N-19). 키 모양은 JSON으로 만들기 전에 문자열마다 가린다(N-27 (c)).
+
+### 18.7 기록을 읽는 명령의 공통 규칙
+
+- 실행 id(N-27 (a))
+  - 명시한 `--run <id>`는 store의 `inspectRun` 판정을 따른다. 그 이름 그대로인 항목이 없으면 `run_not_found`다. 대소문자만 다른 id도 여기에 걸린다.
+  - 목록이 "손상"으로 보는 실행은 `revert`(N-26), `report`(N-27 (b)), `plan`, `apply`, `review`가 모두 `invalid_run_record`로 거부한다.
+- 상태별 이유 표(DR-16)
+  - 실행과 적용 실행의 이유는 `RUN_REASONS_BY_STATUS`(`isReasonOfStatus`) 하나로 판정한다. CLI는 따로 목록을 두지 않는다.
+  - 적용 실행의 이유는 그 부분집합인 `APPLY_REASONS_BY_STATUS`를 쓴다.
+- `report`
+  - 계획 실행은 행동 수, 다이제스트, `plan` 명령을 보여 준다.
+  - 검토 대기 실행은 확인 목록을 보여 준다.
+  - 적용 실행(첫 기록 `apply_started`)은 아직 읽지 않는다. `ReportOutput`에 적용 실행의 형태가 없어서 `invalid_arguments`로 "적용 실행"이라고 알린다.
+  - `--json`은 문자열마다 키를 가린 뒤에 만든다(N-27 (c)).
+- 기록의 도구 이름과 호출 id(AC-D15)
+  - 목록 밖의 도구 이름은 `unknown_tool`로 기록한다.
+  - 호출 id는 `[A-Za-z0-9_-]{1,64}`이고 비밀이 없어야 한다. 아니면 `codaryn-call-<n>`으로 기록한다.
+
+### 18.8 오류 코드 추가 (G-A)
+
+- 모두 종료 2이고, 아무것도 바꾸지 않는다.
+- `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
+- 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
+
+### 18.9 아직 없는 것
+
+- 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
+- 영어 고정 글
+  - `plan`·`review`의 글 출력과 적용 질문 두 개(`Apply this plan?`, 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
+  - 적용 끝 요약의 `summary.unsafe_moves`에는 위험한 이동 수가 필요하다. 그런데 `ApplySummaryContext`에 그 필드가 없다(w3:p9).
+- `report`는 적용 실행과 검토 판정(`review.json`)을 아직 보여 주지 않는다. `ReportOutput`에 필드가 필요하다(w3:p9).
+- DR-25(하드 링크 없는 드라이브의 되돌리기도 동의가 있을 때만 옮김)
+  - 계약(w3:p9)이 나오면 `revert`의 동의 입력을 `apply`와 같은 방식으로 연결한다: 인자, 그리고 터미널 질문.
+  - 지금 되돌리기는 그런 파일을 `unsafe_move`로 건너뛴다(DR-24 (b)).

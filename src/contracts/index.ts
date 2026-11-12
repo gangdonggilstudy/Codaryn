@@ -18,3 +18,5 @@ export * from "./integrity.js";
 export * from "./engine.js";
 export * from "./commands.js";
 export * from "./human.js";
+export * from "./workflow.js";
+export * from "./plan.js";

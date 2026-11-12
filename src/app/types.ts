@@ -1,10 +1,10 @@
 /**
  * Adapter contract of the app layer (docs/design/adapter-contract.md, sections 4 and 5, with the
- * R-1 decisions DR-1 to DR-4 and DR-7).
+ * decisions DR-1 to DR-4, DR-7, DR-10, DR-12, DR-14, DR-15 and DR-17).
  *
  * Interim location: these types belong in `src/contracts/app.ts` (migration step 1, role 1).
- * Types marked "assumption (G-A)" stand for general task contracts (plan, apply, review) that the
- * G-A contract commit has not defined yet; they are replaced by G-A's types when it is merged.
+ * Plan, apply and review use the G-A contract's own types (DR-17); until G-A is in main they come
+ * from ./general-tasks.ts, which repeats them under the same names.
  */
 
 import type {
@@ -17,9 +17,10 @@ import type {
   PermissionKind,
   ReportOutput,
   RevertOutput,
-  TerminalRunStatus,
+  RunsOutput,
   ToolName,
 } from "../contracts/index.js";
+import type { ApplyJournalRecord, ApplyResult, PlanOutput, ReviewOutput } from "./general-tasks.js";
 
 /** Process facts an adapter hands to the app layer. The app layer never touches process globals. */
 export interface AppEnvironment {
@@ -145,12 +146,40 @@ export type AppCallOutcome<T> = { readonly ok: true; readonly output: T } | { re
 
 export interface ReportRequest {
   readonly workspace: string;
+  /** A run id or "latest" (N-7). */
   readonly runId: string;
 }
 
 export interface RevertRequest {
   readonly workspace: string;
+  /** A run id or "latest" (N-7). */
   readonly runId: string;
+  /** N-7: decide and report every file the same way, change nothing, take no lock, write no revert record. */
+  readonly dryRun?: boolean;
+}
+
+/** N-7: `codaryn runs --json`. */
+export interface ListRunsRequest {
+  readonly workspace: string;
+  /** 1 to RUNS_MAX_LIMIT; RUNS_DEFAULT_LIMIT when absent. */
+  readonly limit?: number;
+}
+
+/** N-7, N-23(b): which run a reference names, so an adapter can show it before acting on it. */
+export interface ResolveRunRequest {
+  readonly workspace: string;
+  /** A run id or "latest". */
+  readonly run: string;
+}
+
+export interface ResolvedRun {
+  readonly runId: string;
+  /** The reference was "latest". */
+  readonly latest: boolean;
+  /** `run_started`'s time when the run list checked the run; null otherwise. */
+  readonly startedAt: string | null;
+  /** The run list holds this id as damaged (a given id may be; "latest" never names one). */
+  readonly damaged: boolean;
 }
 
 export interface DoctorRequest {
@@ -167,9 +196,22 @@ export interface DoctorRequest {
  * never read the snapshot directory themselves.
  */
 export interface ChangesRequest {
-  /** The settings the run was started with; they decide the secrets and the workspace. */
-  readonly run: StartRunRequest;
+  /** The task form the run was started with; it decides the secrets and the workspace (DR-17). */
+  readonly settings: TaskForm;
+  /** A run id or "latest". */
   readonly runId: string;
+}
+
+/**
+ * DR-17: the task form `plan`, `apply`, `review` and `changes` take, as G-A defines it for the CLI:
+ * a task file, or a workspace with the config file's defaults and an optional profile. It decides
+ * the secrets (S-2 to S-4) and the workspace exactly as for a run; it needs no goal and no model.
+ */
+export interface TaskForm {
+  readonly input: { readonly kind: "task"; readonly taskPath: string } | { readonly kind: "workspace"; readonly workspace: string };
+  readonly configPath: string | null;
+  readonly varsFile: string | null;
+  readonly profile: string | null;
 }
 
 export type ChangedFileUnavailable =
@@ -204,85 +246,59 @@ export interface ChangedFileView {
 }
 
 export interface ChangesOutput {
+  readonly schemaVersion: 1;
   readonly kind: "changes";
   readonly runId: string;
+  /** Always 0: reading the changes is not a judgement of them. */
+  readonly exitCode: 0;
   /** Always "current_secrets": masked with the secrets registered now, not with the run's table. */
   readonly masking: "current_secrets";
   /** One entry per changed path, in the order the run first changed them. */
   readonly files: readonly ChangedFileView[];
 }
 
-/*
- * The plan, apply and review shapes below mirror the G-A contract commit `f53fb16`
- * (`src/contracts/plan.ts` PlanOutput and ApplyResult, `src/contracts/workflow.ts` ReviewOutput),
- * which is not merged here: G-A enters main together with its N-B texts (DR-12), and on its own it
- * does not compile against main. When it is merged these are replaced by imports of those types.
- */
-
-/** Assumption (G-A): a masked plan action, as G-A's MaskedPlanAction. */
-export type PlanActionView =
-  | { readonly kind: "move"; readonly from: MaskedText; readonly to: MaskedText; readonly sha256: string }
-  | { readonly kind: "discard"; readonly path: MaskedText; readonly sha256: string };
-
-/** Assumption (G-A): `codaryn plan --json`, plan.json masked again (DR-1, DR-5, DR-6). */
-export interface PlanView {
-  readonly kind: "plan";
+/** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */
+export interface PlanRequest {
+  readonly settings: TaskForm;
+  /** The plan run's id or "latest". */
   readonly runId: string;
-  readonly status: "pending" | "applied";
-  /** The GT digest (SHA-256 of plan.json's bytes); the one value an approval names. */
-  readonly digest: string;
-  readonly actions: readonly PlanActionView[];
-  /** DR-6: an apply would stop as `plan_stale` because the workspace has too many files. */
-  readonly inventoryLimitReached: boolean;
-  readonly appliedBy: { readonly runId: string; readonly at: string } | null;
 }
 
-/**
- * Assumption (G-A): DR-1, DR-2. The apply takes a task, or the quick form with a profile (DR-12);
- * its policy and verifiers come from these settings at apply time, not from the plan (DR-5).
- */
+/** DR-1, DR-2, DR-12: the apply takes the task form; its policy and verifiers come from it at apply time (DR-5). */
 export interface ApplyPlanRequest {
-  readonly settings: StartRunRequest;
+  readonly settings: TaskForm;
   readonly planRunId: string;
-  /** The digest, or its first 12 or more characters (MIN_PLAN_DIGEST_PREFIX). */
+  /** The digest, or its first 12 or more characters (G-A MIN_PLAN_DIGEST_PREFIX). */
   readonly digest: string;
+  /** `--cancel-file` (DR-2). Outside the workspace (T-12). */
+  readonly cancelFile: string | null;
 }
 
-/** Assumption (G-A): the apply result (`kind: "apply"`), a new run that names the plan run. */
-export interface ApplyResultView {
-  readonly kind: "apply";
-  readonly runId: string;
-  readonly planRunId: string;
-  readonly digest: string;
-  readonly status: TerminalRunStatus;
-  /** verified, verifier_failed, verifier_inconclusive, protected_changed, plan_stale, apply_incomplete, cancelled, max_duration. */
-  readonly reason: string;
-  readonly exitCode: number;
+/** DR-2: an apply run's events: its own records (G-A ApplyJournalRecord), sanitized as run events are. */
+export type ApplyEvent =
+  | { readonly kind: "record"; readonly record: ApplyJournalRecord }
+  | { readonly kind: "notice"; readonly text: MaskedText };
+
+export interface ApplyObserver {
+  /** Called synchronously for each event. Exceptions are ignored. */
+  onEvent?(event: ApplyEvent): void;
 }
 
 /** DR-2: applying has the same event and cancel channel as a run. */
 export interface ApplyHandle {
   readonly runId: string;
   cancel(): void;
-  readonly done: Promise<AppCallOutcome<ApplyResultView>>;
+  /** Never rejects; resolves after the apply's result.json is written and the lock released. */
+  readonly done: Promise<AppCallOutcome<ApplyResult>>;
 }
 
-/** Assumption (G-A): `codaryn review` (GT-D6), the person's verdict on an `awaiting_review` run. */
+/** DR-17, R-4 L-4: `codaryn review` takes the task form; the note is masked with its secrets before it is stored. */
 export interface ReviewRequest {
-  readonly workspace: string;
+  readonly settings: TaskForm;
+  /** A run id or "latest". */
   readonly runId: string;
   readonly decision: "accept" | "reject";
   readonly note: string | null;
-}
-
-/** Assumption (G-A): `codaryn review --json`, as G-A's ReviewOutput. */
-export interface ReviewOutputView {
-  readonly kind: "review";
-  readonly runId: string;
-  readonly verdict: "accepted" | "rejected";
-  readonly checklist: readonly MaskedText[];
-  /** An earlier review of this run was replaced. */
-  readonly replaced: boolean;
 }
 
 export interface CodarynApp {
@@ -291,19 +307,23 @@ export interface CodarynApp {
    * its handle. A failure before the start returns an AppError and creates nothing.
    */
   startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome>;
-  /** `codaryn report --json`: reads the run's records only, takes no lock. */
+  /** `codaryn report --json` (run id or "latest"): reads the run's records only, takes no lock. */
   report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>>;
-  /** `codaryn revert`: holds the lock and puts back files whose hash is still the run's. */
+  /** `codaryn revert [--dry-run]` (run id or "latest"). See RevertRequest. */
   revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>>;
+  /** N-7: `codaryn runs --json`. Reads only. */
+  listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>>;
+  /** N-7, N-23(b): the run a reference names and its start time. Reads only. */
+  resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>>;
   /** `codaryn doctor --json`: no network access, no write. */
   doctor(request: DoctorRequest): Promise<AppCallOutcome<DoctorOutput>>;
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
   /**
-   * DR-1 (assumption, G-A): present once the general task commands exist. An adapter opens the plan
-   * screen after a `needs-input`/`plan_pending` result and checks for these before offering them.
+   * DR-1, DR-17: present once the general task commands exist (G-B to G-F). An adapter opens the
+   * plan screen after a `needs-input`/`plan_pending` result and checks for these before offering them.
    */
-  plan?(request: ReportRequest): Promise<AppCallOutcome<PlanView>>;
-  applyPlan?(request: ApplyPlanRequest, observer?: RunObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
-  review?(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutputView>>;
+  plan?(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
+  applyPlan?(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
+  review?(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
 }

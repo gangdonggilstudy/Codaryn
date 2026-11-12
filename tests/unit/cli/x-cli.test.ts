@@ -47,7 +47,9 @@ describe("X-1 executables and verifier cwd are local paths", { skip: !IS_WINDOWS
   ];
   for (const [name, fields, message] of cases) {
     test(`${name} is refused by the config and task checks, naming the field only`, () => {
-      assert.deepEqual(parseConfig({ schemaVersion: 1, ...fields }), { ok: false, message });
+      // N-15: the outcome also names the field as a position; the message is unchanged.
+      const position = { code: "invalid_value", field: message.split(" ", 1)[0] };
+      assert.deepEqual(parseConfig({ schemaVersion: 1, ...fields }), { ok: false, message, position });
       const task = {
         schemaVersion: 1,
         id: "x1",
@@ -61,7 +63,7 @@ describe("X-1 executables and verifier cwd are local paths", { skip: !IS_WINDOWS
         verifiers: [],
         ...fields,
       };
-      assert.deepEqual(parseTask(task, "C:/"), { ok: false, code: "invalid_task", message });
+      assert.deepEqual(parseTask(task, "C:/"), { ok: false, code: "invalid_task", message, position });
       assert.equal(message.includes("attacker"), false);
     });
   }

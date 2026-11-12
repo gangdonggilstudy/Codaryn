@@ -21,17 +21,15 @@ import type {
   ReportOutput,
   RevertOutput,
   RunTask,
+  RunsOutput,
 } from "../contracts/index.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { revertRun } from "../store/index.js";
-import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "../cli/assemble.js";
 import { createCancelSource } from "../cli/cancel.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
 import { runReport } from "../cli/report.js";
-import { runRevert } from "../cli/revert.js";
 import { runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
@@ -40,6 +38,7 @@ import { readChanges } from "./changes.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
+import { listRunsIn, resolveRunIn, revertIn, runIdOf, workspaceRootOf } from "./runs.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
@@ -48,13 +47,17 @@ import type {
   ChangesRequest,
   CodarynApp,
   DoctorRequest,
+  ListRunsRequest,
   ReportRequest,
+  ResolvedRun,
+  ResolveRunRequest,
   RevertRequest,
   RunHandle,
   RunObserver,
   RunOutcome,
   StartOutcome,
   StartRunRequest,
+  TaskForm,
 } from "./types.js";
 
 /**
@@ -98,6 +101,27 @@ const nextMacrotask = (): Promise<void> => new Promise((resolve) => setImmediate
 
 /** Stands for "stop here" in the secrets probe; never shown, the probe reports its own outcome. */
 const PROBE_STOP = "the settings were resolved; nothing was run";
+
+/**
+ * The goal the secrets probe gives `runCli` for the workspace form. The probe never runs anything
+ * and no goal decides a secret; the CLI's quick form only needs one to parse (S-8 finds no key in it).
+ */
+export const PROBE_GOAL = "codaryn: resolve the settings only";
+
+/** DR-17: the run settings that register the same secrets as a task form. */
+export function runRequestOf(settings: TaskForm): StartRunRequest {
+  return {
+    input:
+      settings.input.kind === "task"
+        ? { kind: "task", taskPath: settings.input.taskPath }
+        : { kind: "quick", workspace: settings.input.workspace, goal: PROBE_GOAL },
+    configPath: settings.configPath,
+    varsFile: settings.varsFile,
+    profile: settings.profile,
+    workflowRef: null,
+    cancelFile: null,
+  };
+}
 
 export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = {}): CodarynApp {
   const platform = environment.platform ?? process.platform;
@@ -245,9 +269,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>> {
     try {
-      const probe = await probeSecrets(request.run);
+      const probe = await probeSecrets(runRequestOf(request.settings));
       if (!probe.ok) return probe;
-      return await readChanges(probe.workspaceRoot, request.runId, createPrivacyGateway({ secrets: probe.secrets }), platform);
+      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!root.ok) return root;
+      const runId = await runIdOf(root.value, request.runId);
+      if (!runId.ok) return runId;
+      return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }), platform);
     } catch {
       return { ok: false, error: appError("internal_error", "the changes could not be read") };
     }
@@ -255,8 +283,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>> {
     try {
+      // N-7: "latest" is resolved by the store's rules (N-18, N-23) before the report reads anything.
+      const root = await workspaceRootOf(request.workspace, environment.cwd);
+      if (!root.ok) return root;
+      const runId = await runIdOf(root.value, request.runId);
+      if (!runId.ok) return runId;
       const outcome = await runReport({
-        argv: ["report", "--workspace", request.workspace, "--run", request.runId, "--json"],
+        argv: ["report", "--workspace", root.value, "--run", runId.value, "--json"],
         cwd: environment.cwd,
         env: copyEnvironment(environment.env, platform),
         platform,
@@ -269,15 +302,23 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   async function revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
     try {
-      const { output } = await runRevert({
-        argv: ["revert", "--workspace", request.workspace, "--run", request.runId],
-        cwd: environment.cwd,
-        isDirectory: environment.isDirectory,
-        clock: environment.clock,
-        randomBytes: environment.randomBytes,
-        revert: createRevertCommand(revertRun),
-      });
-      return output.kind === "revert" ? { ok: true, output } : { ok: false, error: fromCliError(output) };
+      return await revertIn(environment, request);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>> {
+    try {
+      return await listRunsIn(environment, request);
+    } catch {
+      return { ok: false, error: INTERNAL_ERROR };
+    }
+  }
+
+  async function resolveRun(request: ResolveRunRequest): Promise<AppCallOutcome<ResolvedRun>> {
+    try {
+      return await resolveRunIn(environment, request);
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }
@@ -310,6 +351,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
-  // plan, applyPlan and review (DR-1, DR-2) are left out until the general task commands exist.
-  return { startRun, report, revert, doctor, changes };
+  // plan, applyPlan and review (DR-1, DR-2, DR-17) are left out until the general task commands exist.
+  return { startRun, report, revert, listRuns, resolveRun, doctor, changes };
 }

@@ -1,5 +1,6 @@
 /**
- * Workspace lock `<root>/.codaryn/lock.json` (`{pid, runId, startedAt}`), P-4 and T-9.
+ * Workspace lock `<root>/.codaryn/lock.json` (`{pid, runId, startedAt, processStartedAt}`), P-4,
+ * T-9 and N-25(b).
  *
  * - Taking a free lock: the complete content is written to a unique temporary file and hard-linked
  *   to `lock.json`. The link fails when the lock exists, so two runs never both create it, and a
@@ -15,14 +16,19 @@
  *   not by its pid (which is always alive here). One left behind by a finished attempt (its
  *   removal failed with EPERM or EBUSY) is cleared like a dead reclaimer's, so contenders in one
  *   process keep making progress. Every attempt writes a unique reclaim text for this.
- * - Liveness is `process.kill(pid, 0)`. A pid the system has given to a new process makes a dead
- *   lock look held until that process ends (known limit; the lock records no process start time).
- *   Tests inject `isProcessAlive` so that they do not depend on pid reuse.
+ * - Liveness is `process.kill(pid, 0)`, and since N-25(b) also the holder's process start time:
+ *   a lock records when its process started (`processStartedAt`, from `performance.timeOrigin`).
+ *   When the pid is alive but the process now using it started at another time (more than
+ *   PROCESS_START_TOLERANCE_MS apart), the system gave the pid to a new process (Z-2) and the lock
+ *   is dead. When that start time cannot be learned, the pid alone decides, as before. A lock in
+ *   the old format (no `processStartedAt`) is judged by its pid alone.
+ *   Tests inject `isProcessAlive` and `processStartTime` so that they do not depend on pid reuse.
  * - EPERM and EBUSY (Windows reports them for files that are being deleted or are in use) are
  *   retried a few times and then end as `workspace_locked`, never as an exception.
  * - A lock file that cannot be understood is never reclaimed.
  */
 
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { link, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -30,12 +36,18 @@ import { join } from "node:path";
 import { LOCK_FILE_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { Clock } from "../contracts/index.js";
 import { assertRunId, ensureStateDir, errorCode } from "./common.js";
+import { isRunTimestamp } from "./runs.js";
 
 export interface LockInfo {
   readonly pid: number;
   readonly runId: string;
   /** ISO 8601 UTC time. */
   readonly startedAt: string;
+  /**
+   * N-25(b): when the holder's process started, ISO 8601 UTC. Absent in locks written before
+   * N-25(b); those are judged by their pid alone.
+   */
+  readonly processStartedAt?: string;
 }
 
 /** File operations the lock uses. Tests replace single operations to inject errors. */
@@ -74,6 +86,12 @@ export interface AcquireLockOptions {
    * fixed answer, because the system may give an exited process's pid to a new process at any time.
    */
   readonly isProcessAlive?: (pid: number) => boolean;
+  /**
+   * N-25(b): when the process using this pid now started, in milliseconds since 1970, or null when
+   * it cannot be learned. Defaults to `processStartTime`. Asked only for a live pid of a lock that
+   * records its start time.
+   */
+  readonly processStartTime?: (pid: number) => Promise<number | null>;
 }
 
 export type AcquireLockOutcome =
@@ -105,6 +123,69 @@ function isTransient(error: unknown): boolean {
   return code === "EPERM" || code === "EBUSY";
 }
 
+/**
+ * N-25(b): how far a recorded process start time may be from the one the system reports for the
+ * pid and still be the same process. The recorded time is `performance.timeOrigin`, a little
+ * after the process was created; `ps` reports whole seconds.
+ */
+export const PROCESS_START_TOLERANCE_MS = 5_000;
+const START_QUERY_TIMEOUT_MS = 5_000;
+
+function windowsPowerShell(): string {
+  const systemRoot = process.env["SystemRoot"] ?? process.env["SYSTEMROOT"] ?? "C:\\Windows";
+  return join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
+
+/** Runs a fixed system tool by its absolute path and returns its stdout, or null on any failure. */
+function systemQuery(file: string, args: readonly string[], cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        file,
+        [...args],
+        { timeout: START_QUERY_TIMEOUT_MS, windowsHide: true, cwd, env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 },
+        (error, stdout) => resolve(error === null ? String(stdout) : null),
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/** `ps -o etime=`: `[[dd-]hh:]mm:ss` → seconds, or null. */
+function parseElapsed(text: string): number | null {
+  const match = /^\s*(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)\s*$/.exec(text);
+  if (match === null) return null;
+  const [days, hours, minutes, seconds] = [match[1], match[2], match[3], match[4]].map((part) => Number(part ?? 0)) as [number, number, number, number];
+  return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+}
+
+/**
+ * N-25(b): when the process with this pid started, in milliseconds since 1970, or null when there
+ * is no such process or its start time cannot be learned. This process: `performance.timeOrigin`.
+ * Others: Windows PowerShell's Get-Process, or `ps -o etime=` elsewhere, run by absolute path with
+ * a fixed command line that holds nothing but the pid number.
+ */
+export async function processStartTime(pid: number): Promise<number | null> {
+  if (pid === process.pid) return performance.timeOrigin;
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  if (process.platform === "win32") {
+    const powershell = windowsPowerShell();
+    const script = `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p -and $p.StartTime) { [DateTimeOffset]::new($p.StartTime).ToUnixTimeMilliseconds() }`;
+    const out = await systemQuery(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], join(powershell, ".."));
+    const value = out === null ? Number.NaN : Number(out.trim());
+    return out !== null && out.trim().length > 0 && Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  for (const ps of ["/bin/ps", "/usr/bin/ps"]) {
+    const asked = Date.now();
+    const out = await systemQuery(ps, ["-o", "etime=", "-p", String(pid)], "/");
+    if (out === null) continue;
+    const elapsed = parseElapsed(out);
+    return elapsed === null ? null : asked - elapsed * 1000;
+  }
+  return null;
+}
+
 function parseLock(text: string): LockInfo | null {
   let value: unknown;
   try {
@@ -113,10 +194,13 @@ function parseLock(text: string): LockInfo | null {
     return null;
   }
   if (typeof value !== "object" || value === null) return null;
-  const { pid, runId, startedAt } = value as Record<string, unknown>;
+  const { pid, runId, startedAt, processStartedAt } = value as Record<string, unknown>;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
   if (typeof runId !== "string" || typeof startedAt !== "string") return null;
-  return { pid, runId, startedAt };
+  if (processStartedAt === undefined) return { pid, runId, startedAt };
+  // A start time that is not a real timestamp: the lock is not understood and never reclaimed.
+  if (!isRunTimestamp(processStartedAt)) return null;
+  return { pid, runId, startedAt, processStartedAt };
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -217,7 +301,24 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   const { workspaceRoot, runId, clock } = options;
   const fs = options.fileSystem ?? nodeLockFileSystem;
   const alive = options.isProcessAlive ?? isProcessAlive;
+  const startTimeOf = options.processStartTime ?? processStartTime;
+  /** One answer per pid for this attempt. */
+  const startTimes = new Map<number, Promise<number | null>>();
   assertRunId(runId);
+
+  /** Whether the lock's holder (or a reclaim file's owner) still runs (N-25(b)). */
+  async function holderAlive(holder: LockInfo): Promise<boolean> {
+    if (!alive(holder.pid)) return false;
+    if (holder.processStartedAt === undefined) return true;
+    let asked = startTimes.get(holder.pid);
+    if (asked === undefined) {
+      asked = startTimeOf(holder.pid).catch(() => null);
+      startTimes.set(holder.pid, asked);
+    }
+    const actual = await asked;
+    if (actual === null) return true;
+    return Math.abs(actual - Date.parse(holder.processStartedAt)) <= PROCESS_START_TOLERANCE_MS;
+  }
   const locked = (holder: LockInfo | null): AcquireLockOutcome => ({ ok: false, code: "workspace_locked", holder });
 
   let stateDir: string;
@@ -229,7 +330,12 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   }
   const lockFile = join(stateDir, LOCK_FILE_NAME);
   const reclaimFile = join(stateDir, RECLAIM_FILE_NAME);
-  const lock: LockInfo = { pid: process.pid, runId, startedAt: new Date(clock.now()).toISOString() };
+  const lock: LockInfo = {
+    pid: process.pid,
+    runId,
+    startedAt: new Date(clock.now()).toISOString(),
+    processStartedAt: new Date(performance.timeOrigin).toISOString(),
+  };
   const lockText = `${JSON.stringify(lock)}\n`;
   // Unique per attempt, so this process can tell its own held reclaim from a left-over one (W-4).
   const reclaimText = `${JSON.stringify({ ...lock, reclaim: uniqueSuffix() })}\n`;
@@ -237,11 +343,11 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   const reclaimTemporary = join(stateDir, `${RECLAIM_FILE_NAME}.${runId}.${uniqueSuffix()}.tmp`);
 
   /** Whether the reclaim file read is held by a reclaimer that is still at work. */
-  function reclaimInUse(held: { readonly text: string; readonly holder: LockInfo | null }): boolean {
+  async function reclaimInUse(held: { readonly text: string; readonly holder: LockInfo | null }): Promise<boolean> {
     if (held.holder === null) return false;
     // This process: only an attempt that holds it right now counts, whatever the pid says.
     if (held.holder.pid === process.pid) return heldReclaims.has(held.text);
-    return alive(held.holder.pid);
+    return holderAlive(held.holder);
   }
 
   /** Takes the reclaim file. "busy" while a reclaimer at work holds it. */
@@ -257,7 +363,7 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     if (taken) return "taken";
     const held = await readState(fs, reclaimFile);
     if (held === "missing") return "busy";
-    if (reclaimInUse(held)) return "busy";
+    if (await reclaimInUse(held)) return "busy";
     // A reclaimer that died or finished without removing it (or a file that is not ours to
     // understand) is cleared, then retried.
     await removeIfUnchanged(fs, stateDir, reclaimFile, held.text);
@@ -290,7 +396,7 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     if (await tryLink(fs, temporary, lockFile)) return { kind: "acquired" };
     const seen = await readState(fs, lockFile);
     if (seen === "missing") return { kind: "retry" };
-    if (seen.holder === null || alive(seen.holder.pid)) return { kind: "locked", holder: seen.holder };
+    if (seen.holder === null || (await holderAlive(seen.holder))) return { kind: "locked", holder: seen.holder };
     await reclaim(seen.text);
     return { kind: "retry" };
   }

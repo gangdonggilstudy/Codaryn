@@ -10,13 +10,18 @@ import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JOURNAL_FILE_NAME, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
+import type { ApplyJournal, ApplyJournalEvent, Clock, EngineResult, Journal, JournalEvent } from "../contracts/index.js";
 import { assertRunId, ensureStateDir, errorCode, runDir } from "./common.js";
 
-export { RevertRunError, createChangeRecorder, revertRun, snapshotsRelativePath } from "./changes.js";
-export type { RevertRunErrorCode } from "./changes.js";
-export { RunListError, isStoredRunId, latestRunId, listRuns, readRevertRecord, writeRevertRecord } from "./runs.js";
-export { acquireLock, nodeLockFileSystem, releaseLock } from "./lock.js";
+export { RevertRunError, createChangeRecorder, readRunOriginals, revertRun, snapshotsRelativePath } from "./changes.js";
+export type { OriginalUnavailable, RevertRunErrorCode, RunOriginal } from "./changes.js";
+export { RUN_START_TOLERANCE_MS, RunListError, inspectRun, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
+export type { RunInspection } from "./runs.js";
+export { PROCESS_START_TOLERANCE_MS, acquireLock, nodeLockFileSystem, processStartTime, releaseLock } from "./lock.js";
+export { canonicalActions, createPlanRecorder, isWorkspaceRelativePath, loadPlan, markPlanApplied } from "./plan.js";
+export type { MarkPlanAppliedRequest } from "./plan.js";
+export { readReviewRecord, writeReviewRecord } from "./review.js";
+export { discardedRootPath, prepareDiscardedRoot } from "./discarded.js";
 export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ReleaseLockOptions } from "./lock.js";
 
 export interface JournalOptions {
@@ -38,6 +43,19 @@ export function journalRelativePath(runId: string): string {
  * run is continued, never rewritten.
  */
 export function createJournal(options: JournalOptions): Journal {
+  return appendOnlyJournal<JournalEvent>(options);
+}
+
+/**
+ * G-E, DR-12: the journal of an apply run (ApplyJournal). Same file, same record layout
+ * (`{seq, at, runId, ...event}`) and same rules as `createJournal`; its first record is
+ * `apply_started`, which is how readers tell an apply run from a model run.
+ */
+export function createApplyJournal(options: JournalOptions): ApplyJournal {
+  return appendOnlyJournal<ApplyJournalEvent>(options);
+}
+
+function appendOnlyJournal<E extends { readonly type: string }>(options: JournalOptions): { append(event: E): Promise<void>; close(): Promise<void> } {
   const { workspaceRoot, runId, clock } = options;
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
@@ -71,7 +89,7 @@ export function createJournal(options: JournalOptions): Journal {
   }
 
   return {
-    append(event: JournalEvent): Promise<void> {
+    append(event: E): Promise<void> {
       return enqueue(async () => {
         if (closed) throw new Error("journal is closed");
         handle ??= await openForAppend();

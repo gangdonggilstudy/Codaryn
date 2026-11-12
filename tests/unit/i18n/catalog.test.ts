@@ -144,8 +144,14 @@ describe("i18n catalog: format", () => {
 describe("i18n catalog: language and wording", () => {
   test("Korean texts are Korean, English texts have no Hangul", () => {
     for (const id of IDS) {
-      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
       assert.doesNotMatch(MESSAGE_TEXTS.en[id], HANGUL, `en ${id}`);
+      // `summary.form.*` are command fragments put into a command line: the same in both languages.
+      if (id.startsWith("summary.form.")) {
+        assert.equal(MESSAGE_TEXTS.ko[id], MESSAGE_TEXTS.en[id], id);
+        assert.match(MESSAGE_TEXTS.ko[id], /^--[a-z]+ \S+$/, id);
+        continue;
+      }
+      assert.match(MESSAGE_TEXTS.ko[id], HANGUL, `ko ${id}`);
     }
   });
 
@@ -168,6 +174,23 @@ describe("i18n catalog: language and wording", () => {
     for (const id of IDS) {
       for (const word of overclaimKo) assert.ok(!MESSAGE_TEXTS.ko[id].includes(word), `ko ${id}: ${word}`);
       for (const word of overclaimEn) assert.doesNotMatch(MESSAGE_TEXTS.en[id], word, `en ${id}`);
+    }
+  });
+
+  test("yes/no prompts show the default answer as the capital letter (N-20, UX 7)", () => {
+    for (const language of LANGS) {
+      assert.match(MESSAGE_TEXTS[language]["prompt.yes_no_default_yes"], /\[Y\/n\]/);
+      assert.match(MESSAGE_TEXTS[language]["prompt.yes_no_default_no"], /\[y\/N\]/);
+    }
+    assert.match(MESSAGE_TEXTS.ko["prompt.yes_no_default_no"], /Enter: 아니오/);
+  });
+
+  test("help and doctor texts keep option names, check ids' codes and exit codes as they are", () => {
+    for (const language of LANGS) {
+      assert.match(MESSAGE_TEXTS[language]["help.option.dry_run"], /^--dry-run: /);
+      assert.match(MESSAGE_TEXTS[language]["help.option.vars_file"], /^--vars-file <[^>]+>: /);
+      assert.match(MESSAGE_TEXTS[language]["help.exit.run"], /done 0, failed 1, .*70$/);
+      assert.match(MESSAGE_TEXTS[language]["doctor.api_key.missing"], /provider_not_configured/);
     }
   });
 

@@ -15,21 +15,27 @@
  */
 
 import {
+  APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
+  DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
+  PLAN_ITEM_PROBLEMS,
   PERMISSION_KINDS,
   POLICY_DENIAL_CODES,
+  REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
-  RUN_REASONS,
-  RUN_TIMESTAMP_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
   TOOL_ERROR_CODES,
   TOOL_NAMES,
+  isReasonOfStatus,
   toRunId,
   toSchemaFieldPath,
 } from "../../contracts/index.js";
 import type {
+  ApplyJournalEvent,
+  ApplyResult,
+  ApplySummaryContext,
   CatalogText,
   CliErrorCode,
   CliErrorOutput,
@@ -49,6 +55,7 @@ import type {
   TerminalRunStatus,
   ToolName,
 } from "../../contracts/index.js";
+import { isRunTimestamp } from "../../store/index.js";
 import { displayWidth, finalLine, formatLocalTime, padEnd, shownPath, token } from "./format.js";
 
 /** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
@@ -60,27 +67,18 @@ export const REVERT_MAX_LISTED = 20;
 /** Shown in place of a path that may not be printed (a `missing_record` path is unmasked). */
 export const HIDDEN_PATH = "?";
 
-/** Errors whose cause `codaryn doctor` can check. */
-const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
-  "invalid_config",
-  "invalid_task",
-  "key_in_file",
-  "secret_env_missing",
-  "workspace_is_install_dir",
-  "provider_not_configured",
-  "model_list_failed",
-]);
+/** N-22: the errors after which the error text adds `error.doctor_hint` (the contract's list). */
+const DOCTOR_CODES: ReadonlySet<string> = new Set<string>(DOCTOR_HINT_ERROR_CODES);
 
-const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
+const WORKSPACE_FORMS = ["current", "given", "task"] as const;
+/** EngineResult.plan.digest in its only valid form. */
+const DIGEST = /^[0-9a-f]{64}$/;
+/** Plan problems shown in one preflight line. The rest are counted. */
+const PLAN_PROBLEMS_SHOWN = 5;
+/** Apply reasons after which every action was applied (verification only runs then). */
+const APPLIED_ALL_REASONS: ReadonlySet<string> = new Set(["verified", "verifier_failed", "verifier_inconclusive", "protected_changed"]);
 const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
-const REASONS_BY_STATUS: { readonly [S in TerminalRunStatus]: readonly RunReason[] } = {
-  done: ["verified"],
-  failed: ["verifier_failed", "model_error", "repeated_failure"],
-  "needs-input": ["verifier_inconclusive", "no_verifier", "unknown_tool_outcome", "protected_changed"],
-  cancelled: ["cancelled"],
-  "budget-exhausted": ["max_model_turns", "max_tool_calls", "max_total_tokens", "max_duration", "usage_unknown"],
-};
 
 function isOneOf<T extends string>(value: unknown, list: readonly T[]): value is T {
   return typeof value === "string" && (list as readonly string[]).includes(value);
@@ -91,19 +89,27 @@ function isCount(value: unknown, min = 0): value is number {
 }
 
 function validStatusReason(status: unknown, reason: unknown): { status: TerminalRunStatus; reason: RunReason } | null {
-  if (!isOneOf(status, TERMINAL_RUN_STATUSES) || !isOneOf(reason, RUN_REASONS)) return null;
-  return REASONS_BY_STATUS[status].includes(reason) ? { status, reason } : null;
+  if (!isOneOf(status, TERMINAL_RUN_STATUSES) || typeof reason !== "string") return null;
+  // DR-16: the contract's one table of reasons per status (G-A reasons included).
+  return isReasonOfStatus(status, reason) ? { status, reason } : null;
 }
 
+/** A recorded time in local wall time, or null when it is not a real timestamp (N-24(c)). */
 function localTime(at: unknown): string | null {
-  if (typeof at !== "string" || !RUN_TIMESTAMP.test(at)) return null;
-  const time = Date.parse(at);
-  return Number.isFinite(time) ? formatLocalTime(time) : null;
+  return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
 }
 
 /** "(+3)" after a cut list. */
 function moreLine(count: number): string {
   return `  … (+${count})`;
+}
+
+/**
+ * The code in parentheses after a title. A title that introduces a list ends with a colon in some
+ * languages; the code then goes before the colon, so the colon still leads into the list.
+ */
+function withCode(title: string, code: string): string {
+  return title.endsWith(":") ? `${title.slice(0, -1)} (${code}):` : `${title} (${code})`;
 }
 
 function lines(out: readonly string[]): string {
@@ -120,8 +126,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
     if (file === null) return null;
     const fileText = catalog.format(`diagnostic.file.${file}`);
-    const field: SchemaFieldPath | null =
-      (typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null) ?? toSchemaFieldPath(file);
+    const ownField = typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null;
+    const field: SchemaFieldPath | null = ownField ?? toSchemaFieldPath(file);
     let text: CatalogText | null = null;
     switch (diagnostic.code) {
       case "json_syntax":
@@ -130,7 +136,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         }
         break;
       case "unknown_field": {
-        const suggestion = typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
+        // N-23(f): a suggestion belongs to the position it was made for; at the file root it misleads.
+        const suggestion = ownField !== null && typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
         if (field !== null) {
           text =
             suggestion === null
@@ -149,10 +156,27 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         text = catalog.format("diagnostic.too_deep");
         break;
     }
-    return text === null ? null : `${fileText}: ${text}`;
+    // A dash, not a colon: the diagnostic text often has a colon of its own.
+    return text === null ? null : `${fileText} — ${text}`;
   }
 
-  return {
+  /** "── <status and reason in words> (status/reason) ──". */
+  function heading(pair: { status: TerminalRunStatus; reason: RunReason } | null, status: unknown, reason: unknown): string {
+    if (pair === null) return `── ? (${token(status)}/${token(reason)}) ──`;
+    const words = catalog.format("summary.result", { status: catalog.format(`status.${pair.status}`), reason: catalog.format(`reason.${pair.reason}`) });
+    return `── ${words} (${pair.status}/${pair.reason}) ──`;
+  }
+
+  /** The run id, and the report and revert commands for it. */
+  function nextCommands(id: unknown, here: boolean, revertable: boolean): string[] {
+    const runId = toRunId(String(id));
+    if (runId === null) return [];
+    const out = [catalog.format("summary.run_id", { runId }), catalog.format(here ? "summary.next_report_here" : "summary.next_report", { runId })];
+    if (revertable) out.push(catalog.format(here ? "summary.next_revert_here" : "summary.next_revert", { runId }));
+    return out;
+  }
+
+  const output: HumanOutput = {
     error(output: CliErrorOutput): string {
       const label = catalog.format("error.label");
       const code = output.code;
@@ -163,57 +187,73 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const diagnostic = output.diagnostic === undefined ? null : diagnosticText(output.diagnostic);
       if (diagnostic !== null) out.push(`  ${diagnostic}`);
       out.push(`  ${catalog.format("error.fix_label")}: ${catalog.format(`error.${code}.fix`)}`);
+      // N-D 4: the hints are the renderer's own indented lines, so the CLI finds them and adds none.
       if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
+      if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
       return lines(out);
     },
 
     runSummary(result: EngineResult, context: RunSummaryContext): string {
       const pair = validStatusReason(result.status, result.reason);
-      const out: string[] = [];
-      if (pair !== null) {
-        const heading = catalog.format("summary.result", {
-          status: catalog.format(`status.${pair.status}`),
-          reason: catalog.format(`reason.${pair.reason}`),
-        });
-        out.push(`── ${heading} (${pair.status}/${pair.reason}) ──`);
-      } else {
-        out.push(`── ? (${token(result.status)}/${token(result.reason)}) ──`);
-      }
-
+      const out: string[] = [heading(pair, result.status, result.reason)];
+      // G-A: a plan waiting for approval says so first.
+      const planReady = pair?.reason === "plan_pending" && result.plan !== undefined && isCount(result.plan.actions);
+      if (planReady && result.plan !== undefined) out.push(catalog.format("summary.plan_ready", { actions: result.plan.actions }));
+      // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
       const passed = verifiers.filter((verifier) => verifier.outcome === "pass").length;
-      const facts: string[] = [
+      out.push(
         verifiers.length === 0
           ? catalog.format("summary.no_verifiers")
           : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
-        catalog.format("summary.changes", { count: changes.length }),
-      ];
+      );
+      // N-23(d): files, not change records. A path's first record says whether the run created it.
+      const files = new Map<string, boolean>();
+      for (const change of changes) {
+        const key = String(change.path);
+        if (!files.has(key)) files.set(key, change.created === true);
+      }
+      out.push(catalog.format("summary.changes", { count: files.size }));
+      for (const [file, created] of [...files].slice(0, SUMMARY_MAX_PATHS)) {
+        const word = catalog.format(created ? "progress.file_created" : "progress.file_changed");
+        out.push(`  ${shownPath(file)} (${word})`);
+      }
+      if (files.size > SUMMARY_MAX_PATHS) out.push(moreLine(files.size - SUMMARY_MAX_PATHS));
+
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
-      if (denied > 0) facts.push(catalog.format("summary.denied", { count: denied }));
+      if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
+      // it points where the run's policy came from.
+      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
+        out.push(catalog.format(context.policySource === "task" ? "summary.denied_hint_task" : "summary.denied_hint"));
+      }
       const usage = result.usage;
       if (isCount(usage?.modelTurns) && isCount(usage.toolCalls) && isCount(usage.durationMs)) {
-        facts.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, durationMs: usage.durationMs }));
+        // N-20: seconds with one decimal, rounded from the recorded milliseconds.
+        const seconds = Math.round(usage.durationMs / 100) / 10;
+        out.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, seconds }));
       }
-      out.push(facts.join(" · "));
-
-      for (const change of changes.slice(0, SUMMARY_MAX_PATHS)) {
-        const word = catalog.format(change.created ? "progress.file_created" : "progress.file_changed");
-        out.push(`  ${shownPath(String(change.path))} (${word})`);
-      }
-      if (changes.length > SUMMARY_MAX_PATHS) out.push(moreLine(changes.length - SUMMARY_MAX_PATHS));
-
-      if (denied > 0) out.push(catalog.format("summary.denied_hint"));
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
 
-      const runId = toRunId(result.runId);
-      if (runId !== null) {
-        const here = context.workspaceForm === "current";
-        out.push(catalog.format("summary.run_id", { runId }));
-        out.push(catalog.format(here ? "summary.next_report_here" : "summary.next_report", { runId }));
-        if (changes.length > 0) out.push(catalog.format(here ? "summary.next_revert_here" : "summary.next_revert", { runId }));
+      const here = context.workspaceForm === "current";
+      out.push(...nextCommands(result.runId, here, changes.length > 0));
+      // G-A: a plan waiting for approval, or a run waiting for a person's review.
+      const runId = toRunId(String(result.runId));
+      const form = catalog.format(`summary.form.${isOneOf(context.workspaceForm, WORKSPACE_FORMS) ? context.workspaceForm : "given"}`);
+      if (runId !== null && planReady && result.plan !== undefined) {
+        out.push(catalog.format("summary.next_plan", { form, runId }));
+        out.push(catalog.format("summary.next_apply", { form, runId }));
+        // Printed only in its closed form, so it can be copied into --digest.
+        if (typeof result.plan.digest === "string" && DIGEST.test(result.plan.digest)) out.push(`  ${result.plan.digest}`);
+      }
+      if (runId !== null && pair?.reason === "awaiting_review" && result.review !== undefined && Array.isArray(result.review.checklist)) {
+        const checklist = result.review.checklist;
+        out.push(catalog.format("summary.review_checklist", { count: checklist.length }));
+        for (const entry of checklist.slice(0, REVERT_MAX_LISTED)) out.push(`  - ${shownPath(String(entry))}`);
+        out.push(catalog.format("summary.next_review", { form, runId }));
       }
       return lines(out);
     },
@@ -240,6 +280,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             line = `${catalog.format("progress.tool_allowed", { tool })} (${name})`;
           } else if (isOneOf(event.permission, PERMISSION_KINDS) && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {
             line = catalog.format("progress.tool_denied", { tool, permission: event.permission, code: event.code });
+          } else if (event.permission === null && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {
+            // N-22: stopped by a check of the call itself (validate, restore), not by a permission.
+            line = catalog.format("progress.tool_rejected", { tool, code: event.code });
           } else {
             line = `${tool} (${token(event.permission ?? "check")}/${token(event.code ?? "none")})`;
           }
@@ -294,15 +337,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
       const title = output.dryRun === true ? "revert.dry_run_title" : "revert.done_title";
-      const out = [`${HUMAN_PREFIX}${catalog.format(title, { count: reverted.length })} (${token(output.status)})`];
-      if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
-
+      // Each title is followed by its own list: reverted files, then skipped files.
+      const out = [`${HUMAN_PREFIX}${withCode(catalog.format(title, { count: reverted.length }), token(output.status))}`];
       for (const file of reverted.slice(0, REVERT_MAX_LISTED)) {
         const action: unknown = file.action;
-        const word = isOneOf(action, ["restored", "deleted"] as const) ? catalog.format(`revert.action.${action}`) : "?";
+        const word = isOneOf(action, REVERT_ACTIONS) ? catalog.format(`revert.action.${action}`) : "?";
         out.push(`  ${shownPath(String(file.path))} — ${word}`);
       }
       if (reverted.length > REVERT_MAX_LISTED) out.push(moreLine(reverted.length - REVERT_MAX_LISTED));
+      if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
       for (const file of skipped.slice(0, REVERT_MAX_LISTED)) {
         const reason: unknown = file.reason;
         const word = isOneOf(reason, REVERT_SKIP_REASONS) ? catalog.format(`revert.skip.${reason}`) : "?";
@@ -320,6 +363,14 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);
+    },
+
+    latestChosen(entry: Extract<RunListEntry, { readonly state: "checked" }>): string {
+      const runId = toRunId(String(entry.runId));
+      if (runId === null) return lines([`${HUMAN_PREFIX}?`]);
+      const time = localTime(entry.startedAt);
+      const chosen = catalog.format("latest.chosen", { runId });
+      return lines([`${HUMAN_PREFIX}${chosen}${time === null ? "" : ` (${catalog.format("runs.column.started")} ${time})`}`]);
     },
 
     runsText(output: RunsOutput): string {
@@ -346,6 +397,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         if (entry.reverted !== null && isOneOf(entry.reverted.status, ["complete", "partial"] as const)) {
           status += ` · ${catalog.format("runs.reverted")} (${entry.reverted.status})`;
         }
+        if (entry.revertRecordDamaged === true) status += ` · ${catalog.format("runs.revert_record_damaged")}`;
         rows.push([runId, localTime(entry.startedAt) ?? "?", isCount(entry.changes) ? String(entry.changes) : "-", status]);
       }
       // Every column but the last is padded to its widest cell (Hangul counts two columns).
@@ -359,5 +411,86 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (omitted > 0) out.push(catalog.format("runs.omitted", { count: omitted }));
       return lines(out);
     },
+
+    applyProgressLine(event: ApplyJournalEvent): string | null {
+      let line: string | null;
+      switch (event.type) {
+        case "apply_started": {
+          const approval: unknown = event.approval;
+          line =
+            isCount(event.actions, 1) && isOneOf(approval, APPROVAL_CHANNELS)
+              ? catalog.format("progress.apply_started", { actions: event.actions, approval: catalog.format(`approval.${approval}`) })
+              : null;
+          break;
+        }
+        case "plan_checked": {
+          const problems = Array.isArray(event.problems) ? event.problems : [];
+          const parts: string[] = [catalog.format("progress.plan_checked", { count: problems.length })];
+          for (const item of problems.slice(0, PLAN_PROBLEMS_SHOWN)) {
+            const problem: unknown = item.problem;
+            if (!isCount(item.index) || !isOneOf(problem, PLAN_ITEM_PROBLEMS)) continue;
+            parts.push(`${catalog.format("progress.plan_item_problem", { number: item.index + 1, problem: catalog.format(`plan.problem.${problem}`) })} (${problem})`);
+          }
+          if (problems.length > PLAN_PROBLEMS_SHOWN) parts.push(`(+${problems.length - PLAN_PROBLEMS_SHOWN})`);
+          if (event.inventoryLimitReached === true) parts.push(catalog.format("progress.inventory_limit"));
+          line = parts.join(" · ");
+          break;
+        }
+        case "file_moved":
+          line = isCount(event.index)
+            ? `${catalog.format("progress.file_moved", { number: event.index + 1 })} ${shownPath(String(event.from))} → ${shownPath(String(event.to))}`
+            : null;
+          break;
+        case "file_discarded":
+          line = isCount(event.index) ? `${catalog.format("progress.file_discarded", { number: event.index + 1 })} ${shownPath(String(event.path))}` : null;
+          break;
+        case "plan_item_failed": {
+          const problem: unknown = event.problem;
+          line =
+            isCount(event.index) && isOneOf(problem, PLAN_ITEM_PROBLEMS)
+              ? `${catalog.format("progress.plan_item_failed", { number: event.index + 1, problem: catalog.format(`plan.problem.${problem}`) })} (${problem})`
+              : null;
+          break;
+        }
+        // Records shared with model runs render as in progressLine.
+        case "verifier_result":
+        case "integrity_checked":
+        case "run_finished":
+          return output.progressLine(event);
+      }
+      return line === null ? null : finalLine(line);
+    },
+
+    applySummary(result: ApplyResult, context: ApplySummaryContext): string {
+      const pair = validStatusReason(result.status, result.reason);
+      const out: string[] = [heading(pair, result.status, result.reason)];
+      const applied = Array.isArray(result.applied) ? result.applied : [];
+      // ApplyResult has no plan total (reported): only when verification ran was every action
+      // applied, so only then is "applied of total" known.
+      if (pair !== null && APPLIED_ALL_REASONS.has(pair.reason)) {
+        out.push(catalog.format("summary.apply_actions", { applied: applied.length, total: applied.length }));
+      }
+      for (const item of applied.slice(0, REVERT_MAX_LISTED)) {
+        if (!isCount(item.index)) continue;
+        const action = item.action;
+        // The same words as the progress lines, so a move and a discard read apart.
+        out.push(
+          action.kind === "move"
+            ? `  ${catalog.format("progress.file_moved", { number: item.index + 1 })} ${shownPath(String(action.from))} → ${shownPath(String(action.to))}`
+            : `  ${catalog.format("progress.file_discarded", { number: item.index + 1 })} ${shownPath(String(action.path))}`,
+        );
+      }
+      if (applied.length > REVERT_MAX_LISTED) out.push(moreLine(applied.length - REVERT_MAX_LISTED));
+      const planRunId = toRunId(String(result.planRunId));
+      if (planRunId !== null) out.push(catalog.format("summary.apply_plan_run", { runId: planRunId }));
+      const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
+      if (verifiers.length > 0) {
+        out.push(catalog.format("summary.verifiers", { passed: verifiers.filter((verifier) => verifier.outcome === "pass").length, total: verifiers.length }));
+      }
+      if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
+      out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0));
+      return lines(out);
+    },
   };
+  return output;
 };

@@ -7,7 +7,13 @@
  */
 
 import { MESSAGE_LANGUAGES } from "../contracts/index.js";
-import type { MessageLanguage, MessageLanguageInput, SelectMessageLanguage } from "../contracts/index.js";
+import type {
+  ExplainMessageLanguage,
+  MessageLanguage,
+  MessageLanguageChoice,
+  MessageLanguageInput,
+  SelectMessageLanguage,
+} from "../contracts/index.js";
 
 /** Used when nothing tells the language. */
 export const DEFAULT_MESSAGE_LANGUAGE: MessageLanguage = "en";
@@ -29,14 +35,26 @@ export function localeLanguage(locale: unknown): string | null {
   return /^[a-z]{2,8}$/.test(head) ? head : null;
 }
 
-export const selectMessageLanguage: SelectMessageLanguage = (input: MessageLanguageInput): MessageLanguage => {
+/**
+ * N-20: the language and the rule that decided it. `envIgnored` is true when CODARYN_LANG holds
+ * something other than blank, ko or en. Only codes and a flag come back, never an input value.
+ * - env, config: that setting held ko or en.
+ * - os: the locale has a language subtag (other than `und`); ko gives ko, anything else en.
+ * - default: no locale could be read, so DEFAULT_MESSAGE_LANGUAGE.
+ */
+export const explainMessageLanguage: ExplainMessageLanguage = (input: MessageLanguageInput): MessageLanguageChoice => {
+  const envIgnored = typeof input.env === "string" && input.env.trim().length > 0 && parseMessageLanguage(input.env) === null;
   const fromEnv = parseMessageLanguage(input.env);
-  if (fromEnv !== null) return fromEnv;
+  if (fromEnv !== null) return { language: fromEnv, source: "env", envIgnored };
   const fromConfig = parseMessageLanguage(input.config);
-  if (fromConfig !== null) return fromConfig;
-  if (localeLanguage(input.osLocale) === "ko") return "ko";
-  return DEFAULT_MESSAGE_LANGUAGE;
+  if (fromConfig !== null) return { language: fromConfig, source: "config", envIgnored };
+  const subtag = localeLanguage(input.osLocale);
+  if (subtag !== null && subtag !== "und") return { language: subtag === "ko" ? "ko" : "en", source: "os", envIgnored };
+  return { language: DEFAULT_MESSAGE_LANGUAGE, source: "default", envIgnored };
 };
+
+export const selectMessageLanguage: SelectMessageLanguage = (input: MessageLanguageInput): MessageLanguage =>
+  explainMessageLanguage(input).language;
 
 /**
  * The runtime's default locale, for `MessageLanguageInput.osLocale`, or null when it cannot be

@@ -57,6 +57,11 @@ export class FakeElement {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
 
+  /** Runs the listeners of an event other than a click (for example "change"). */
+  dispatch(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) listener();
+  }
+
   click(): void {
     if (this.hasAttribute("disabled")) return;
     for (const listener of this.listeners.get("click") ?? []) listener();

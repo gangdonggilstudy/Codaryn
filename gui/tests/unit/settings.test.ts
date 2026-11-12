@@ -93,6 +93,7 @@ test("settings (GU-6): the host sends the display form only, and every config te
   assert.deepEqual(reply.view.profiles[0], {
     name: "<doc>",
     workflowRef: "<organize>",
+    provider: null,
     limits: [
       ["maxModelTurns", 5],
       ["maxTotalTokens", null],
@@ -102,7 +103,7 @@ test("settings (GU-6): the host sends the display form only, and every config te
     protectedPaths: 2,
   });
   // A profile name that is an object key of every object does not reach into the prototype.
-  assert.deepEqual(reply.view.profiles[1], { name: "<__proto__>", workflowRef: null, limits: [], commands: [], verifiers: 0, protectedPaths: 0 });
+  assert.deepEqual(reply.view.profiles[1], { name: "<__proto__>", workflowRef: null, provider: null, limits: [], commands: [], verifiers: 0, protectedPaths: 0 });
   assert.deepEqual(reply.view.workflows, { builtin: ["<code>", "<document>"], config: ["<mine>"] });
   assert.deepEqual(reply.view.providers, ["anthropic"]);
   assert.deepEqual(reply.view.env, ENV);

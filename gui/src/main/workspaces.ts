@@ -7,7 +7,8 @@
 import { basename, dirname } from "node:path";
 import { isHandle } from "../shared/ipc.js";
 import type { OpenReply, RecentView, TreeEntryView, TreeKind, TreeReply } from "../shared/ipc.js";
-import { EMPTY_STATE, readGuiState, withOpened, withoutPath, writeGuiState } from "./gui-state.js";
+import { EMPTY_STATE, memoryFor, readGuiState, withOpened, withoutPath, withRunForm, writeGuiState } from "./gui-state.js";
+import type { RunForm } from "./gui-state.js";
 import type { GuiState } from "./gui-state.js";
 import { WorkspaceHandles } from "./handles.js";
 import { isLocalPathSyntax } from "./node-path.js";
@@ -71,8 +72,23 @@ export class Workspaces {
     if (!isLocalPathSyntax(path, this.deps.platform)) return { ok: false, code: "workspace_not_local" };
     if (!(await this.deps.isDirectory(path))) return { ok: false, code: "workspace_missing" };
     const handle = this.handles.issue(path);
-    await this.save(withOpened(await this.load(), path, this.deps.now(), this.deps.platform));
-    return { ok: true, handle, name: folderName(path) };
+    const state = withOpened(await this.load(), path, this.deps.now(), this.deps.platform);
+    await this.save(state);
+    return { ok: true, handle, name: folderName(path), lastForm: memoryFor(state, path, this.deps.platform)?.lastForm ?? null };
+  }
+
+  /** R21b-L-1: run `runId` was started in the workspace of `handle` with `form`. */
+  async rememberRun(handle: string, runId: string, form: RunForm): Promise<void> {
+    const path = this.path(handle);
+    if (path === null) return;
+    await this.save(withRunForm(await this.load(), path, runId, form, this.deps.platform));
+  }
+
+  /** The remembered form of each run of the workspace of `handle` (runs started elsewhere are absent). */
+  async runForms(handle: string): Promise<ReadonlyMap<string, RunForm>> {
+    const path = this.path(handle);
+    const memory = path === null ? null : memoryFor(await this.load(), path, this.deps.platform);
+    return new Map((memory?.runs ?? []).map((run) => [run.runId, { profile: run.profile, workflow: run.workflow }]));
   }
 
   /** The recent list with fresh ids (earlier ids stop working) and whether each folder still exists. */

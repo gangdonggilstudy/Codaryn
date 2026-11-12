@@ -218,7 +218,12 @@ Next: codaryn doctor
 - **`--env-file`은 쓰지 않는다.** Node 26이 그 이름을 스스로 먼저 읽는다. 파일이 없으면 CLI가 시작되기 전에 Node 오류(종료 코드 9)로 끝나고, 있으면 Node가 읽은 뒤 CLI가 `invalid_arguments`로 거부한다.
 - 변수 파일 만들기: `New-Item -ItemType Directory -Force D:\codaryn-settings`와 `Copy-Item .env.example D:\codaryn-settings\.env`로 만들고 편집기에서 값을 채운다. BOM 없는 UTF-8로 저장한다(BOM이 있으면 `invalid_config`). 메모장의 "UTF-8"은 BOM이 없고, PowerShell 5.1의 `Set-Content -Encoding utf8`은 BOM을 붙인다.
 - **변수 파일이 새로 설정한 값은 비밀로 등록되어** 파일 내용, 명령 출력, 기록에 나타나면 가려진다. 예외는 이미 설정돼 있던 변수(Windows는 이름의 대소문자 무시), `CODARYN_CONFIG`와 제공자별 모델·주소 변수(`CODARYN_MODEL`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`), 8자 미만 값이다. 비밀로 등록된 값은 실행하는 명령의 환경에도 넘어가지 않는다(12절).
-- 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일에 키 이름의 필드(`apiKey`, `token`, `password` 등)나 키 모양의 값이 있으면 `key_in_file`로 바로 멈춘다. 키 모양은 Anthropic 키 모양과 OpenAI 키 모양 두 가지(`sk-proj-` 같은 접두사가 붙은 것, 대소문자와 숫자가 섞인 긴 예전 형식)다. `sk-learn` 같은 짧은 이름은 멈추지 않는다. 간편 형식의 `--goal`과 한 줄 실행의 목표도 같은 검사를 한다.
+- 키를 task 파일, 설정 파일, 명령줄 인자에 적지 않는다. task·설정 파일, 간편 형식의 `--goal`, 한 줄 실행의 목표에 다음이 있으면 `key_in_file`(종료 2)로 바로 멈추고 아무것도 보내지 않는다.
+  - 키 이름의 필드(`apiKey`, `token`, `password` 등)
+  - 지금 설정된 키 변수(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)의 값. 16자 이상인 값만 찾는다. 줄바꿈, 공백, 영폭 공백 같은 보이지 않는 문자로 끊겨 있어도 찾는다.
+  - 키 모양의 값: Anthropic 키 모양(실제 키 형식이면 앞에 다른 글자가 붙어 있거나 줄바꿈으로 끊겨 있어도), OpenAI 키 모양 두 가지(`sk-proj-` 같은 접두사가 붙은 것, 대소문자와 숫자가 섞인 긴 예전 형식).
+  - `sk-learn` 같은 짧은 이름만으로는 멈추지 않는다. 다만 그 뒤에 영어 단어와 숫자가 이어지면 멈출 수 있고, 끊긴 키 가운데 놓치는 것도 있다(16절 "키 거부의 빈틈과 오탐").
+- task·설정 파일이 1 MiB(1,048,576바이트)보다 크면 내용을 쓰지 않고 `invalid_task`·`invalid_config`(종료 2)로 멈춘다. 메시지는 `the config file is larger than 1048576 bytes (1 MiB); nothing in it was used`이다(task 파일도 같은 꼴).
 
 | 환경 변수 | 뜻 |
 | --- | --- |
@@ -312,7 +317,7 @@ Written: fake-model-a is now the config file's providers.openai.model.
 }
 ```
 
-이 설정으로 `doctor --workspace <폴더>`는 키 항목이 `OPENAI_API_KEY is set (its value is not looked at)`, 모델 항목이 ok이고 종료 0이다. 간편 형식 실행의 진행 줄(stderr):
+이 설정으로 `doctor --workspace <폴더>`는 키 항목이 `OPENAI_API_KEY is set; openai requests send it to https://api.openai.com, the default address`(main `5701ebe`. 주소 변수를 두면 그 주소와 변수 이름이 나온다), 모델 항목이 ok이고 종료 0이다. 간편 형식 실행의 진행 줄(stderr):
 
 ```
 codaryn: run started — provider openai
@@ -443,7 +448,7 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 - 옵션: `--config`, `--vars-file`, `--task` 또는 `--workspace`, `--profile`, `--json`.
 - 항목은 Node.js 버전, 설정 파일, 변수 파일, task 파일, API 키, 모델, 한도, 파일 위치, 허용 명령(실행 때와 같은 규칙으로 찾고 판정), 작업 공간, 설치 위치, 보호 자료 경로, 메시지 언어, 작업 공간 잠금이다. 줄마다 상태(`[ok]`, `[warning]`, `[failed]`, `[skipped]`)와 이유가 나온다. `--json`의 점검 id와 상태 값(`ok`, `warn`, `fail`, `skipped`)은 영어로 고정이다.
 - 종료: 가장 나쁜 항목이 `ok`(또는 `skipped`)면 0, `fail`이면 1, `warn`이면 3이다. 인자 오류는 `invalid_arguments`(종료 2)다. `--task`와 `--workspace`를 함께 주면 이 오류다.
-- 키는 있음·없음만 적고 값은 내지 않는다. 파일이나 환경에서 읽은 값도 내지 않는다.
+- 키는 있음·없음만 적고 값은 내지 않는다. 파일이나 환경에서 읽은 값도 내지 않는다. 키가 있으면 그 키를 보낼 주소와, 그 주소를 정한 곳(제공자의 주소 변수, 설정 필드, 기본값)을 함께 적는다. 예: `OPENAI_API_KEY is set; openai requests send it to https://api.openai.com, the default address`.
 - **모델이 실제로 있는지는 확인하지 않는다**(네트워크 없음). 자리표시자 모델은 `failed`다. 목록은 `models`(4절)로 본다.
 
 `init`만 한 상태(키 없음, 자리표시자 모델)에서 작업 공간을 점검한 실제 출력이다.
@@ -634,6 +639,7 @@ changes of run 20261112T081531Z-dfd155bd, masked with the secrets registered now
     ```
     no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)
     == summary.md: created by the run; changed again since the run
+       the text is not shown (masking_unverified)
     ```
   - 지금 등록된 비밀의 값이 실행 때와 달라 가린 결과가 다를 때. 상태는 `as_run_left` 그대로다.
   - 이 기록이 없는 실행(쓰기 도구가 다이제스트를 남기기 전의 실행).
@@ -676,7 +682,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 다른 제공자의 키 변수 값 중 20자 이상인 것. 예: openai 실행에서 `ANTHROPIC_API_KEY` 값이 작업 공간 파일에 있으면 모델에 가려져 간다. 20자 미만이면 등록하지 않는다(`x` 같은 자리표시자가 흔한 글자를 가리지 않게)
   - 변수 파일이 새로 설정한 값(4절)
 - **가리는 범위:** 모델에 보내는 내용과 실행 기록 전체. 목표, 파일 내용, 경로, 명령 출력, 검증 근거, 오류 문구가 모두 해당한다.
-- **가리는 형태:** 원문, Base64(패딩 유무, URL 문자 집합), URL 인코딩(대·소문자), JSON 이스케이프, 16진(대·소문자), 여러 줄 비밀의 LF와 CRLF 표기. 가려진 자리는 토큰으로 보이고, 대응표는 실행 중 메모리에만 있다.
+- **가리는 형태:** 원문, Base64(패딩 유무, URL 문자 집합), URL 인코딩(대·소문자), JSON 이스케이프, 16진(대·소문자), 여러 줄 비밀의 LF와 CRLF 표기. 가려진 자리는 토큰으로 보이고, 대응표는 실행 중 메모리에만 있다. 영폭 공백이나 줄바꿈으로 끊긴 비밀은 아직 가리지 않는다(16절 "키 거부의 빈틈과 오탐").
 - 비밀이 든 줄을 모델이 고치거나 옮기는 변경은 전체가 거부된다(`protected_span_violation`). 다른 줄은 고칠 수 있다.
 - 실행하는 명령의 환경에는 `PATH`, `PATHEXT`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `TEMP`, `TMP`, `TMPDIR`, `HOME`, `USERPROFILE`, `LANG`만 넘어간다. 키는 넘어가지 않고, 값에 등록된 비밀이 든 변수도 넘기지 않는다. 그래서 변수 파일로 설정한 8자 이상의 값(예: 긴 `PATH`)은 명령에 전달되지 않는다.
 
@@ -758,6 +764,13 @@ node --test dist/tests/live/anthropic-live.js
 - **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 직접 지운다(지워도 되는 폴더는 11절).
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 비밀 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
 - **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
+- **키 거부의 빈틈과 오탐(결정 DR-42, 다음 묶음에서 고친다):** 키가 든 입력의 거부(4절 "키")와 실행 중 가림에 남은 것이다. main `5701ebe`의 실제 CLI로 확인했다.
+  - 등록된 키 값이 이체 선택자(U+FE0F), 결합 자소 연결자(U+034F), 한글 채움 문자(U+3164)나 보이는 문자(예: `.`)로 끊기면 거부되지 않는다. 줄바꿈, 공백, 영폭 공백(U+200B), soft hyphen(U+00AD), word joiner(U+2060)로 끊긴 값은 거부한다(DR-42 (a)). 등록되지 않은 OpenAI 키가 단어 뒤에서 영폭 공백으로 끊긴 경우도 거부되지 않았다.
+  - 목표에 `sk-`로 시작하는 패키지 이름이나 로캘 코드가 있고 그 뒤에 영어 단어와 숫자가 이어지면, 키가 없어도 `key_in_file`로 멈출 수 있다. 검사가 공백까지 뺀 글에서 키 모양을 다시 찾기 때문이다(DR-42 (b)). 확인한 예:
+    - 멈춤: `README에 sk-learn installation guide for Windows users 2026 추가`, `README 언어 목록에 sk-SK Slovak translations for Settings and About pages 2026 추가`, `README에 sk-ant-design-system components guide 2026 추가`
+    - 통과: 같은 문장에서 이름을 백틱으로 감싼 것(`` `sk-learn` ``), 이름 바로 뒤에 쉼표를 둔 것(`sk-learn,`), 이름 뒤에 한글이 바로 오는 것(`sk-learn 설치 안내를 README에 추가`)
+    - 피하는 법: 이름을 백틱으로 감싸거나 이름 바로 뒤에 쉼표를 둔다.
+  - 실행 중 가림은 끊긴 등록 값을 아직 가리지 못한다(DR-42 (c)). 작업 공간 파일에 등록한 비밀이 영폭 공백이나 줄바꿈으로 끊겨 있으면 그 글이 그대로 모델과 기록에 간다. 같은 파일 안의 끊기지 않은 값은 토큰으로 가려졌다(대본 모델로 확인).
 - **OpenAI 설정을 가리키는 문구의 어긋남(고쳐질 때까지):** 두 곳의 문구가 OpenAI 설정을 잘못 가리킨다. 동작(멈추는 것)은 맞다.
   - 제공자가 openai이고 `providers.openai.maxOutputTokens`가 없으면, `doctor`의 모델 항목은 최상위 `maxOutputTokens`가 있어도 `maxOutputTokens is not set (task model.maxOutputTokens or config maxOutputTokens)`라고 적는다. 채울 곳은 `providers.openai.maxOutputTokens`다(4절 "두 번째 제공자: OpenAI").
   - 설정·task 파일에 OpenAI 키 모양의 값이 있으면 `key_in_file`의 메시지가 `keys are read only from the ANTHROPIC_API_KEY environment variable`이라고 적는다. OpenAI 키는 `OPENAI_API_KEY`에서 읽는다.
@@ -792,9 +805,9 @@ node --test dist/tests/live/anthropic-live.js
 | --- | --- |
 | `invalid_arguments` | 옵션 오류. 같은 옵션 반복, 모르는 옵션, `--env-file`, `--workspace`·`--goal` 한쪽만, 한 줄 실행 목표와 `--task` 등을 함께 씀, 작업 공간 안의 취소 파일, `doctor`의 `--task`와 `--workspace` 함께, 프로필 이름 형식, 목록에 없는 `models --use` 번호, 이름이 `latest`인 실행 디렉터리가 있는데 `--run latest`, `apply`의 `--run latest`나 형식이 틀린 `--digest`, task 파일과 `--workflow`를 함께 줌, `revert`의 `--dry-run`과 `--allow-unsafe-move`를 함께 줌 |
 | Node 오류, 종료 9 | `--env-file`의 파일이 없다. `--vars-file`로 바꾼다 |
-| `invalid_task`, `invalid_config` | stderr의 오류 설명이 파일과 필드(또는 줄·열)를 알려 준다(6절). 설정 상한보다 큰 task 한도, 설정 최상위보다 큰 프로필 한도, 없는 프로필, anthropic의 `maxTotalTokens: null`, 작업 공간 안의 파일, 변수 파일의 BOM도 여기다 |
+| `invalid_task`, `invalid_config` | stderr의 오류 설명이 파일과 필드(또는 줄·열)를 알려 준다(6절). 설정 상한보다 큰 task 한도, 설정 최상위보다 큰 프로필 한도, 없는 프로필, anthropic의 `maxTotalTokens: null`, 작업 공간 안의 파일, 변수 파일의 BOM, 1 MiB보다 큰 task·설정 파일(4절 "키")도 여기다 |
 | `config_exists` | `init`의 대상 위치에 파일이 이미 있다. 그 파일을 고치거나, `--config`로 다른 위치를 준다 |
-| `key_in_file` | task·설정 파일이나 `--goal`, 한 줄 실행 목표에서 키 필드나 키 값을 지우고 환경 변수로 옮긴다 |
+| `key_in_file` | task·설정 파일이나 `--goal`, 한 줄 실행 목표에서 키 필드나 키 값을 지우고 환경 변수로 옮긴다. 키가 없는데 목표에 `sk-`로 시작하는 이름(패키지, 로캘)이 있어 멈췄다면, 그 이름을 백틱으로 감싸거나 바로 뒤에 쉼표를 둔다(16절 "키 거부의 빈틈과 오탐") |
 | `secret_env_missing` | `secretEnv`에 적은 환경 변수가 없다 |
 | `workspace_not_found` | `workspaceRoot`나 `--workspace`가 있는 디렉터리가 아니다 |
 | `workspace_is_install_dir` | 작업 공간(한 줄 실행이면 현재 디렉터리)이 CLI 설치 위치(이 저장소)와 겹친다. 저장소 밖으로 복사해 실행한다(3절, 5절) |

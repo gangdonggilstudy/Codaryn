@@ -14,6 +14,9 @@ import type {
   ChangedFileItem,
   ChangesReply,
   PlanReply,
+  ReportReply,
+  RunFormView,
+  ReportView,
   PlanView,
   RecentView,
   ReviewReply,
@@ -27,6 +30,10 @@ import type {
   RunResultView,
   SelectModelReply,
   SettingsReply,
+  SettingsProposalReply,
+  SettingsRules,
+  ApiProviderView,
+  SettingsWrittenReply,
   TreeEntryView,
   TreeReply,
 } from "../shared/ipc.js";
@@ -43,6 +50,8 @@ export interface CodarynApi {
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;
   selectModel(entry: string): Promise<unknown>;
+  proposeSettings(edit: Readonly<Record<string, unknown>>): Promise<unknown>;
+  applySettings(token: string): Promise<unknown>;
   startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
@@ -51,6 +60,7 @@ export interface CodarynApi {
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;
   revertConsent(retry: string): Promise<unknown>;
+  report(workspace: string, runId: string): Promise<unknown>;
   plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
@@ -73,11 +83,20 @@ const KINDS = ["dir", "file", "link", "state", "other"];
 export interface Workspace {
   readonly handle: string;
   readonly name: string;
+  /** R21b-L-1: the form of the last run started here from this app, or null. */
+  readonly lastForm?: RunFormView | null;
+}
+
+/** A remembered task form, or null when it does not fit. */
+export function asForm(value: unknown): RunFormView | null {
+  if (!isObj(value)) return null;
+  const name = (v: unknown): v is string | null => v === null || (str(v) && v.length > 0 && v.length <= 200);
+  return name(value["profile"]) && name(value["workflow"]) ? { profile: value["profile"], workflow: value["workflow"] } : null;
 }
 
 export function asWorkspace(value: unknown): Workspace | null {
   if (!isObj(value) || !str(value["handle"]) || !HEX.test(value["handle"]) || !str(value["name"])) return null;
-  return { handle: value["handle"], name: value["name"] };
+  return { handle: value["handle"], name: value["name"], lastForm: asForm(value["lastForm"]) };
 }
 
 export function asInfo(value: unknown): InfoView {
@@ -138,7 +157,15 @@ function asProfile(value: unknown): ProfileView | null {
     ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
     : [];
   const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
-  return { name: value["name"], workflowRef: value["workflowRef"] as string | null, limits, commands: value["commands"], verifiers: n(value["verifiers"]), protectedPaths: n(value["protectedPaths"]) };
+  return {
+    name: value["name"],
+    workflowRef: value["workflowRef"] as string | null,
+    provider: str(value["provider"]) ? value["provider"] : null,
+    limits,
+    commands: value["commands"],
+    verifiers: n(value["verifiers"]),
+    protectedPaths: n(value["protectedPaths"]),
+  };
 }
 
 /** GU-6: the settings view, checked again on this side. */
@@ -163,8 +190,70 @@ export function asSettings(value: unknown): SettingsReply {
       keyAvailable: view["keyAvailable"] === true,
       providers: strList(view["providers"]) ? view["providers"] : [],
       env: { model: env["model"] === true, language: env["language"] === true },
+      rules: asRules(view["rules"]),
+      provider: str(view["provider"]) ? view["provider"] : null,
+      defaultProvider: str(view["defaultProvider"]) ? view["defaultProvider"] : null,
+      apiProviders: Array.isArray(view["apiProviders"]) ? view["apiProviders"].flatMap(asApiProvider) : [],
     },
   };
+}
+
+function asApiProvider(value: unknown): ApiProviderView[] {
+  if (!isObj(value) || !str(value["name"]) || !str(value["keyEnv"]) || !str(value["modelEnv"])) return [];
+  return [
+    {
+      name: value["name"],
+      keyEnv: value["keyEnv"],
+      keySet: value["keySet"] === true,
+      modelEnv: value["modelEnv"],
+      modelEnvSet: value["modelEnvSet"] === true,
+      model: str(value["model"]) ? value["model"] : null,
+      listable: value["listable"] === true,
+    },
+  ];
+}
+
+function asRules(value: unknown): SettingsRules {
+  if (!isObj(value)) return { policySet: false, limits: [], commands: [], protectedPaths: [], secretEnv: [] };
+  const limits = Array.isArray(value["limits"])
+    ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
+    : [];
+  const secretEnv = Array.isArray(value["secretEnv"])
+    ? value["secretEnv"].flatMap((item) => (isObj(item) && str(item["name"]) && typeof item["set"] === "boolean" ? [{ name: item["name"], set: item["set"] }] : []))
+    : [];
+  return { policySet: value["policySet"] === true, limits, commands: strList(value["commands"]) ? value["commands"] : [], protectedPaths: strList(value["protectedPaths"]) ? value["protectedPaths"] : [], secretEnv };
+}
+
+type FieldChange = { readonly field: string; readonly change: string };
+type Widening = { readonly kind: string; readonly field: string };
+
+function fields(value: unknown): { changes: FieldChange[]; widening: Widening[] } | null {
+  if (!isObj(value) || !Array.isArray(value["changes"]) || !Array.isArray(value["widening"])) return null;
+  const changes: FieldChange[] = [];
+  for (const item of value["changes"]) {
+    if (!isObj(item) || !str(item["field"]) || !str(item["change"])) return null;
+    changes.push({ field: item["field"], change: item["change"] });
+  }
+  const widening: Widening[] = [];
+  for (const item of value["widening"]) {
+    if (!isObj(item) || !str(item["field"]) || !str(item["kind"])) return null;
+    widening.push({ field: item["field"], kind: item["kind"] });
+  }
+  return { changes, widening };
+}
+
+/** GU-6: a settings change proposal (a token from the main process, the changed fields, the widening kinds). */
+export function asProposal(value: unknown): SettingsProposalReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["token"]) || !HEX.test(value["token"])) return failed(value);
+  const found = fields(value);
+  return found === null ? { ok: false, code: "host_error" } : { ok: true, token: value["token"], ...found };
+}
+
+/** GU-6: a written settings change. */
+export function asWritten(value: unknown): SettingsWrittenReply {
+  if (!isObj(value) || value["ok"] !== true || typeof value["written"] !== "boolean") return failed(value);
+  const found = fields(value);
+  return found === null ? { ok: false, code: "host_error" } : { ok: true, written: value["written"], ...found };
 }
 
 /** GU-6: a model list. Entries without a valid entry id are left out. */
@@ -241,6 +330,7 @@ export function asRuns(value: unknown): RunsReply {
         changes: typeof run["changes"] === "number" ? run["changes"] : null,
         reverted,
         revertRecordDamaged: run["revertRecordDamaged"] === true,
+        form: asForm(run["form"]),
       },
     ];
   });
@@ -290,4 +380,17 @@ export function asChanges(value: unknown): ChangesReply {
       : [],
   );
   return { ok: true, runId: value["runId"], files };
+}
+
+/** GU-3: a run's report (the main process checked it already). */
+export function asReport(value: unknown): ReportReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  if (!str(view["runId"]) || (view["kind"] !== "run" && view["kind"] !== "apply") || !Array.isArray(view["verifiers"]) || !Array.isArray(view["integrity"])) return failed(value);
+  const labels = value["labels"];
+  return {
+    ok: true,
+    view: view as unknown as ReportView,
+    labels: isObj(labels) && str(labels["status"]) && str(labels["reason"]) ? { status: labels["status"], reason: labels["reason"] } : null,
+  };
 }

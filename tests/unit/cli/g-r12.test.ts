@@ -50,7 +50,7 @@ describe("R-12 L-2: the quick form's config need", () => {
     }
   });
 
-  test("the person's stderr says it too", { todo: "R-12 L-2: the CLI sets hint quick_form_needs_task; the renderer line (N-C) and the texts error.hint.* (N-B) are next" }, async () => {
+  test("the person's stderr says it too", async () => {
     for (const command of ["plan", "apply", "review"] as const) {
       const { stderr } = await quickPlan(command);
       assert.ok(stderr.includes("--task"), `${command}: ${stderr}`);

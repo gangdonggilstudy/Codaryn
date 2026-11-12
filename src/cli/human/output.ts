@@ -17,11 +17,13 @@
 import {
   APPROVAL_CHANNELS,
   CLI_ERROR_EXIT_CODES,
+  CLI_ERROR_HINTS,
   DOCTOR_HINT_ERROR_CODES,
   INTEGRITY_PHASES,
   MODEL_ERROR_KINDS,
   PLAN_ITEM_PROBLEMS,
   PERMISSION_KINDS,
+  POLICY_NARROWING_KINDS,
   POLICY_DENIAL_CODES,
   REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
@@ -34,6 +36,7 @@ import {
   MODEL_PROVIDER_NAMES,
 } from "../../contracts/index.js";
 import type {
+  PolicyNarrowing,
   ApplyJournalEvent,
   ApplyResult,
   ApplySummaryContext,
@@ -198,6 +201,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // N-D 4: the hints are the renderer's own indented lines, so the CLI finds them and adds none.
       if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
       if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
+      // R-12 L-2: the error's own advice (CliErrorOutput.hint), as one more indented line.
+      if (isOneOf(output.hint, CLI_ERROR_HINTS)) out.push(`  ${catalog.format(`error.hint.${output.hint}`)}`);
       return lines(out);
     },
 
@@ -273,9 +278,19 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     progressLine(event: JournalEvent): string | null {
       let line: string | null;
       switch (event.type) {
-        case "run_started":
+        case "run_started": {
           line = isOneOf(event.provider, PROVIDERS) ? catalog.format("progress.run_started", { provider: event.provider }) : null;
+          // DR-43 (b), DR-41: kinds and counts only. One line per record (HumanOutput.progressLine), so
+          // each narrowing is one more fact of the start line.
+          const given: readonly PolicyNarrowing[] = Array.isArray(event.policyNarrowings) ? event.policyNarrowings : [];
+          const narrowings = given.flatMap((narrowing): string[] => {
+            if (!isOneOf(narrowing.kind, POLICY_NARROWING_KINDS)) return [];
+            if (narrowing.kind === "restore_path_tokens_off") return [catalog.format("progress.workflow_policy.restore_path_tokens_off")];
+            return isCount(narrowing.count) && narrowing.count > 0 ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
+          });
+          if (line !== null && narrowings.length > 0) line = [line, ...narrowings].join(" · ");
           break;
+        }
         case "model_request":
           line = isCount(event.turn) ? catalog.format("progress.turn", { turn: event.turn }) : null;
           break;
@@ -427,6 +442,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           status += ` · ${catalog.format("runs.reverted")} (${entry.reverted.status})`;
         }
         if (entry.revertRecordDamaged === true) status += ` · ${catalog.format("runs.revert_record_damaged")}`;
+        if (entry.recordsChanged === true) status += ` · ${catalog.format("runs.records_changed")}`;
         rows.push([runId, localTime(entry.startedAt) ?? "?", isCount(entry.changes) ? String(entry.changes) : "-", status]);
       }
       // Every column but the last is padded to its widest cell (Hangul counts two columns).

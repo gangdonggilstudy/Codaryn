@@ -70,15 +70,41 @@ const MAX_MARK_BYTES = 4096;
  * move aside and removes it last, so what a failed removal leaves still has it.
  */
 async function hasOwnMark(dir: string, leftoverId: string): Promise<boolean> {
-  const file = join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME);
-  try {
+  const read = async (name: string): Promise<unknown> => {
+    const file = join(dir, name);
     const info = await lstat(file);
-    if (!info.isFile() || info.size > MAX_MARK_BYTES) return false;
-    return isCleanupLeftoverMark(JSON.parse(await readFile(file, "utf8")) as unknown, leftoverId);
+    if (!info.isFile() || info.size > MAX_MARK_BYTES) throw new Error("not a mark file");
+    return JSON.parse(await readFile(file, "utf8")) as unknown;
+  };
+  try {
+    if (isCleanupLeftoverMark(await read(CLEANUP_LEFTOVER_MARK_FILE_NAME), leftoverId)) return true;
+  } catch {
+    // No mark of this build; the earlier one may be there.
+  }
+  try {
+    return isEarlierMark(await read(EARLIER_MARK_FILE_NAME));
   } catch {
     return false;
   }
 }
+
+/**
+ * U-7 (R-40 L-1): the mark the build of 6f85b65 wrote into a folder it moved aside (never released,
+ * but development workspaces may hold one): `.codaryn-cleanup` with exactly
+ * {schemaVersion: 1, kind: "cleanup_leftover", target: "run" | "discarded", at: <string>}. A folder
+ * with it is a leftover too; this build writes only CLEANUP_LEFTOVER_MARK_FILE_NAME.
+ */
+const EARLIER_MARK_FILE_NAME = ".codaryn-cleanup";
+
+function isEarlierMark(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (Object.keys(value).sort().join(",") !== "at,kind,schemaVersion,target") return false;
+  const mark = value as Record<string, unknown>;
+  return mark["schemaVersion"] === 1 && mark["kind"] === "cleanup_leftover" && (mark["target"] === "run" || mark["target"] === "discarded") && typeof mark["at"] === "string";
+}
+
+/** The mark files of a leftover: removed after everything else in it. */
+const MARK_FILE_NAMES: readonly string[] = [CLEANUP_LEFTOVER_MARK_FILE_NAME, EARLIER_MARK_FILE_NAME];
 
 /** A plain directory's files and bytes and the metadata fingerprint of everything below it. */
 interface Tree {
@@ -395,6 +421,8 @@ async function hasExactEntry(parent: string, name: string): Promise<boolean> {
 /** How applyCleanup removes a directory it moved aside; for tests. */
 export interface CleanupOperations {
   readonly remove?: (dir: string) => Promise<void>;
+  /** Writes the mark file (exclusive create). */
+  readonly writeMark?: (file: string, text: string) => Promise<void>;
   /** Wait between the REMOVE_ATTEMPTS attempts. */
   readonly retryDelayMs?: number;
 }
@@ -409,6 +437,30 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
   const { workspaceRoot, selection, now, confirmation } = request;
   const remove = operations.remove ?? ((dir: string) => rm(dir, { recursive: true, force: true }));
   const retryDelayMs = operations.retryDelayMs ?? 100;
+  const writeMark = operations.writeMark ?? ((file: string, text: string) => writeFile(file, text, { encoding: "utf8", flag: "wx" }));
+  /**
+   * Writes the folder's mark. A plain file already at the mark's name (inside records the person
+   * confirmed for removal) is replaced; anything else there, or any other failure, is false.
+   */
+  const marked = async (dir: string, leftoverId: string): Promise<boolean> => {
+    const file = join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME);
+    const mark: CleanupLeftoverMark = { schemaVersion: 1, kind: "cleanup_leftover", leftoverId };
+    const text = `${JSON.stringify(mark)}\n`;
+    try {
+      await writeMark(file, text);
+      return true;
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") return false;
+    }
+    try {
+      if (!(await lstat(file)).isFile()) return false;
+      await rm(file);
+      await writeMark(file, text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   /** True when `path` is gone in the end (REMOVE_ATTEMPTS tries). */
   const removeTried = async (path: string): Promise<boolean> => {
     for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt += 1) {
@@ -434,10 +486,13 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     }
     let whole = true;
     for (const name of names) {
-      if (name !== CLEANUP_LEFTOVER_MARK_FILE_NAME && !(await removeTried(join(dir, name)))) whole = false;
+      if (!MARK_FILE_NAMES.includes(name) && !(await removeTried(join(dir, name)))) whole = false;
     }
     if (!whole) return false;
-    return (await removeTried(join(dir, CLEANUP_LEFTOVER_MARK_FILE_NAME))) && (await removeTried(dir));
+    for (const name of MARK_FILE_NAMES) {
+      if (names.includes(name) && !(await removeTried(join(dir, name)))) return false;
+    }
+    return removeTried(dir);
   };
   const stateDir = await ensureStateDir(workspaceRoot);
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
@@ -510,10 +565,19 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
           keepApply("io_error");
           continue;
         }
-        // R-34b P-2: its mark, right after the move (exclusive create). One that cannot be written does
-        // not stop the removal; what a failed removal then leaves is an unknown folder.
-        const mark: CleanupLeftoverMark = { schemaVersion: 1, kind: "cleanup_leftover", leftoverId };
-        await writeFile(join(aside, CLEANUP_LEFTOVER_MARK_FILE_NAME), `${JSON.stringify(mark)}\n`, { encoding: "utf8", flag: "wx" }).catch(() => undefined);
+        // R-34b P-2: its mark, right after the move. U-7 (R-40 L-2): without the mark nothing of it is
+        // removed; the folder goes back to its place (io_error), so it can be selected again. Only when
+        // it cannot go back either does it stay aside, as a folder not removed entirely.
+        if (!(await marked(aside, leftoverId))) {
+          let back = true;
+          try {
+            await rename(aside, dir);
+          } catch {
+            back = false;
+          }
+          keepApply(back ? "io_error" : "partly_removed");
+          continue;
+        }
       }
       // DR-44 (d): what is left aside is a leftover the next plan shows; not reported or logged as removed.
       if (!(await removeAside(aside))) {

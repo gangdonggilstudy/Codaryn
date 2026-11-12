@@ -544,4 +544,21 @@ describe("i18n catalog: language and wording", () => {
     assert.match(en["revert.plan_apply_missing"], /no readable records in this workspace any more, so Codaryn cannot revert it/);
     assert.match(ko["revert.plan_apply_missing"], /더는 없거나 확인할 수 없어, Codaryn으로 되돌릴 수 없습니다/);
   });
+
+  test("U-23 (DR-49): help.output tells the JSON line rule: human lines only at a terminal, the JSON line with --json, through a pipe or a file, and with --quiet", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // Not the old rule (run always printed its JSON line on stdout).
+    assert.ok(!/^run prints one JSON line on stdout/.test(en["help.output"]), en["help.output"]);
+    assert.ok(!/^run은 stdout에 JSON 한 줄을/.test(ko["help.output"]), ko["help.output"]);
+    // At a terminal: the human lines on stderr only.
+    assert.match(en["help.output"], /^At a terminal only the human lines on stderr show/);
+    assert.match(ko["help.output"], /^터미널에서는 stderr의 사람용 줄\(진행 줄, 요약, 오류 설명\)만 보입니다\./);
+    // The JSON line: the result of run, revert and apply, and any error; with --json or when stdout is not a terminal.
+    assert.match(en["help.output"], /result of run, revert and apply, and any error, is also printed as one JSON line on stdout with --json, or when stdout is not a terminal \(a pipe or a file\)/);
+    assert.match(ko["help.output"], /run·revert·apply의 결과와 오류는 --json을 주거나 출력이 터미널이 아닐 때\(파이프, 파일\) stdout에 JSON 한 줄로도 냅니다/);
+    // --quiet: no human lines, so the JSON line stays at a terminal too.
+    assert.match(en["help.output"], /--quiet leaves the human lines out and prints the JSON line, at a terminal too\.$/);
+    assert.match(ko["help.output"], /--quiet면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다\.$/);
+    for (const language of LANGS) assert.deepEqual(placeholders(MESSAGE_TEXTS[language]["help.output"]), [], language);
+  });
 });

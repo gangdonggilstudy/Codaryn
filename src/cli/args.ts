@@ -73,7 +73,13 @@ export const USAGE =
 
 const OPTIONS = ["--task", "--workspace", "--goal", "--config", "--vars-file", "--cancel-file", "--profile", "--workflow"] as const;
 type Option = (typeof OPTIONS)[number];
-const SWITCHES = ["--quiet"] as const;
+/**
+ * DR-49 (U-23): `run`, `revert` and `apply` print one JSON line either way; `--json` keeps it at a
+ * terminal (main.ts, stdoutText), so it is taken as a switch and changes nothing else. It is not
+ * added to their usage lines: those are part of the invalid_arguments message, which a script
+ * reading stdout must get exactly as before. Their help and the contract name it.
+ */
+const SWITCHES = ["--quiet", "--json"] as const;
 type Switch = (typeof SWITCHES)[number];
 
 /**
@@ -90,7 +96,8 @@ const NODE_ENV_FILE_FLAG = /^--env-file(-if-exists)?(=|$)/;
 
 const REVERT_OPTIONS = ["--workspace", "--run"] as const;
 type RevertOption = (typeof REVERT_OPTIONS)[number];
-const REVERT_SWITCHES = ["--dry-run", "--quiet", UNSAFE_MOVE_CONSENT_ARGUMENT] as const;
+// DR-49 (U-23): `--json` as for `run` (SWITCHES).
+const REVERT_SWITCHES = ["--dry-run", "--quiet", UNSAFE_MOVE_CONSENT_ARGUMENT, "--json"] as const;
 type RevertSwitch = (typeof REVERT_SWITCHES)[number];
 
 const REPORT_OPTIONS = ["--workspace", "--run"] as const;
@@ -474,9 +481,11 @@ export function parseApplyArgs(argv: readonly string[]): { readonly ok: true; re
   if (command !== "apply") return { ok: false, message: USAGE };
   if (rest.some(isEnvFileFlag)) return { ok: false, message: ENV_FILE_REFUSED_MESSAGE };
   const options = [...TASK_FORM_OPTIONS, "--run", "--digest", "--cancel-file"] as const;
-  const read = readOptions<(typeof options)[number], "--quiet" | typeof UNSAFE_MOVE_CONSENT_ARGUMENT>(rest, options, `usage: ${APPLY_USAGE}`, [
+  // DR-49 (U-23): `--json` as for `run` (SWITCHES).
+  const read = readOptions<(typeof options)[number], "--quiet" | typeof UNSAFE_MOVE_CONSENT_ARGUMENT | "--json">(rest, options, `usage: ${APPLY_USAGE}`, [
     "--quiet",
     UNSAFE_MOVE_CONSENT_ARGUMENT,
+    "--json",
   ]);
   if (!read.ok) return read;
   const form = taskFormOf(read.values, APPLY_USAGE);

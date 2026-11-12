@@ -87,7 +87,7 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.action.restored": "실행 전 내용으로 되돌림",
   "revert.action.deleted": "삭제(이 실행이 만든 파일)",
   "revert.action.moved_back": "원래 위치로 다시 옮김",
-  "revert.action.restored_from_discard": "버린 파일 보관 폴더에서 되살림",
+  "revert.action.restored_from_discard": "폐기 보관함에서 되살림",
   "revert.dry_run_next": "실행하려면 --dry-run 없이 다시 실행하세요.",
   "revert.reverted_before": "이 실행은 이미 되돌린 적이 있습니다. 그래서 파일이 실행 뒤에 바뀐 것으로 보일 수 있습니다.",
   "revert.unsafe_moved": "동의를 받아, 덮어쓸 위험이 있는 방식으로 되돌려 옮긴 파일: {count}개",
@@ -141,7 +141,7 @@ export const KO_MESSAGES: MessageTexts = {
   "help.options_heading": "옵션:",
   "help.exit_heading": "종료 코드:",
   "help.command.run": "작업 하나를 실행합니다. task 파일, 간편 형식(--workspace와 --goal), 한 줄 실행(현재 폴더와 목표 문장) 중 하나로 줍니다.",
-  "help.command.revert": "실행이 파일 도구로 바꾼 파일을 되돌립니다. 실행 뒤에 다시 바뀐 파일은 건너뜁니다.",
+  "help.command.revert": "실행이 바꾼 것을 되돌립니다. 파일 도구로 바꾼 파일과, 적용한 계획의 이동·폐기(폐기 보관함에서 되살림)를 되돌리고, 실행 뒤에 다시 바뀐 파일은 건너뜁니다.",
   "help.command.report": "실행 기록(가린 기록만)으로 상태, 검증, 보호 대상, 변경, 사용량, 검사하지 않은 범위를 요약합니다. 아무것도 바꾸지 않습니다.",
   "help.command.doctor": "실행 없이 실행에 필요한 것을 점검합니다. 네트워크에 접속하지 않고 아무것도 바꾸지 않으므로 모델이 실제로 있는지는 확인하지 않습니다.",
   "help.command.models": "키로 쓸 수 있는 모델을 번호와 함께 보여 주고 현재 모델을 표시합니다. API에 요청을 보냅니다.",
@@ -449,7 +449,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "approval.cli-tty": "터미널에서 승인",
   "approval.cli-flag": "명령 인수로 승인",
-  "approval.adapter": "화면(VS Code·GUI)에서 승인",
+  "approval.adapter": "앱 화면에서 승인",
 
   "plan.problem.source_missing": "원본이 없음",
   "plan.problem.source_changed": "원본이 계획 뒤에 바뀜(SHA-256 다름)",

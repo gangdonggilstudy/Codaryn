@@ -140,6 +140,16 @@
 
 - 목록에 나오는 가짜 모델 id는 `cdy-listed-model-`로 시작한다. 가짜 키가 모두 `cdy-fake`(8자)로 시작하는데, 목록 조회는 키의 8자 조각이 든 항목을 거부하기 때문이다(`src/model/anthropic/index.ts`의 `KEY_FRAGMENT_CHARS`). 새 가짜 값은 `tests/fixtures/anthropic.ts`의 `sharesKeyRun`으로 확인한다.
 
+## 사용성 (`n01`~, N-E)
+
+[사용성 작업 지시](../../docs/work-orders/phase-4-usability.md) 완료 기준 2(처음 쓰는 사람이 문서만 보고 따라 함)를 확인한다. 문서가 출력에 대해 말하는 것은 두 번 확인한다: 문서가 아직 그렇게 말하는지, CLI가 아직 그렇게 하는지. 한쪽만 바뀌면 실패한다.
+
+| 사례 | 파일 | 판정 근거 |
+| --- | --- | --- |
+| 체험 예시 | `n01-demo-walkthrough` | `examples/demo`를 저장소 밖에 복사해 [사용 안내](../../docs/usage.md) 3절의 명령(doctor → run → report → revert)을 그대로 실행. 문서의 명령 목록과 옵션, doctor 종료 0·`api_key` 건너뜀 문구, 진행 줄 전체, 결과(`done`/`verified`, 변경 2건, 재수정 1회), 보고서 인용 줄(Markdown 렌더링 기준), 검증 통과·보호 대상 확인 5회, revert `complete`와 원래 바이트, 두 번째 revert `partial`/`changed_since_run`/종료 3, 되돌리지 않은 재실행의 `conflict`와 빈 `changes`. 키 없음, 네트워크 울타리 |
+
+- `init`, `runs`, `--run latest`, `revert --dry-run`(N-2, N-7)은 N-A 연결이 main에 들어온 뒤 더한다.
+
 ## 진단 (Z-1)
 
 - 단언 메시지(`parseCliOutput`, `parseCommandOutput`)는 종료 코드, 신호, 소요 시간, pid, stdout·stderr 앞부분을 담는다(`describeRun`).

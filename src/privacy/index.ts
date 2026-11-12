@@ -2,6 +2,14 @@
  * Privacy gateway (phase 1a): exact-match masking of registered secrets and their listed
  * variants, token validation, field-scoped restoration and in-place document rebuilding.
  *
+ * DR-40 (a), R-25 M-1 (the run's second defence after the S-6/S-8 refusal): a registered value or
+ * listed variant of MIN_SPLIT_MATCH_LENGTH or more code points is also found split by key separator
+ * characters (KEY_SEPARATOR_PATTERN_SOURCE: white space, line breaks, control and format characters
+ * such as the zero-width space and the soft hyphen, taken whole code point by code point, those
+ * outside the Basic Multilingual Plane included). The span masked is the original one, separators
+ * inside it included, so restoring or rebuilding gives back the exact bytes. Separators before or
+ * after the value stay outside the token.
+ *
  * The table lives in memory for one gateway instance. Its unit is a pair of
  * "matched string" and "token": the raw secret, each listed variant, each merged run of
  * overlapping or touching matches, and each pre-existing `CODARYN_SECRET` fragment are
@@ -36,6 +44,39 @@ import {
   PRIVACY_TOKEN_SUFFIX,
 } from "../contracts/text.js";
 import type { JsonObject, JsonValue, MaskedText } from "../contracts/text.js";
+import { compactKeyText, KEY_SEPARATOR_PATTERN_SOURCE } from "../contracts/keys.js";
+
+/**
+ * DR-40 (a): the shortest registered value (or listed variant), in code points without separators,
+ * that is also looked for split. The run's own key is registered from 16 characters (S-2,
+ * MIN_CURRENT_KEY_LENGTH), so every key reaches it. A shorter value stays exact-match only: in the
+ * compact view the ends and starts of separate lines run together, and a short value would match
+ * ordinary words there, each match a token and a protected line the model cannot edit.
+ */
+export const MIN_SPLIT_MATCH_LENGTH = 16;
+
+/** One key separator code point (KEY_SEPARATOR_PATTERN_SOURCE), for a single code point. */
+const SEPARATOR = new RegExp(`^${KEY_SEPARATOR_PATTERN_SOURCE}$`, "u");
+
+/**
+ * The compact view of `text` from `from` to `to` (compactKeyText of that slice), with the index in
+ * `text` of each of its UTF-16 units, so a match in the view maps back to its original span. Code
+ * points are taken whole: a separator outside the Basic Multilingual Plane is left out as one, and a
+ * kept one keeps both of its units.
+ */
+export function compactView(text: string, from: number, to: number): { compact: string; at: number[] } {
+  let compact = "";
+  const at: number[] = [];
+  let index = from;
+  for (const char of text.slice(from, to)) {
+    if (!SEPARATOR.test(char)) {
+      compact += char;
+      for (let unit = 0; unit < char.length; unit += 1) at.push(index + unit);
+    }
+    index += char.length;
+  }
+  return { compact, at };
+}
 
 const ID_BYTES = PRIVACY_TOKEN_ID_LENGTH / 2;
 const MAX_ID_ATTEMPTS = 8;
@@ -104,6 +145,10 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
     for (const form of listedForms(secret)) knownForms.add(form);
   }
   const forms = [...knownForms];
+  /** DR-40 (a): each form without separators, when long enough to look for split. */
+  const splitForms = [...new Set(forms.map((form) => compactKeyText(form)))].filter(
+    (form) => [...form].length >= MIN_SPLIT_MATCH_LENGTH,
+  );
 
   // Tokens are issued on first match, so a random-source failure surfaces inside `mask`.
   const tokenByForm = new Map<string, string>();
@@ -131,9 +176,9 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
   }
 
   /**
-   * Protected intervals inside `[from, to)`: every occurrence of every registered form and every
-   * `CODARYN_SECRET` fragment, merged when they overlap or touch. A match that would cross `to`
-   * (the start of an issued token) is not taken.
+   * Protected intervals inside `[from, to)`: every occurrence of every registered form, every split
+   * occurrence of a long enough one (DR-40 (a)) and every `CODARYN_SECRET` fragment, merged when they
+   * overlap or touch. A match that would cross `to` (the start of an issued token) is not taken.
    */
   function protectedIntervals(text: string, from: number, to: number): Interval[] {
     const found: Interval[] = [];
@@ -142,6 +187,17 @@ export const createPrivacyGateway: CreatePrivacyGateway = (options) => {
       while (at !== -1 && at + form.length <= to) {
         found.push({ start: at, end: at + form.length });
         at = text.indexOf(form, at + 1);
+      }
+    }
+    if (splitForms.length > 0) {
+      const view = compactView(text, from, to);
+      // Without a separator in the range, every split occurrence is an exact one, found above.
+      if (view.compact.length < to - from) {
+        for (const form of splitForms) {
+          for (let hit = view.compact.indexOf(form); hit !== -1; hit = view.compact.indexOf(form, hit + 1)) {
+            found.push({ start: view.at[hit] as number, end: (view.at[hit + form.length - 1] as number) + 1 });
+          }
+        }
       }
     }
     const fragment = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "gi");

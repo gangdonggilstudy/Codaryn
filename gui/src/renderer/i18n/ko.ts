@@ -119,6 +119,7 @@ export const KO = {
   "settings.providerModel": "모델: {model}",
   "settings.providerNoModel": "모델: 정하지 않음",
   "settings.providerModelEnv": "환경 변수 {env}이(가) 설정 파일의 모델을 덮어씁니다.",
+  "settings.providerBaseUrlEnv": "환경 변수 {env}이(가) 설정되어, 실행은 설정 파일의 주소가 아니라 그 변수의 주소로 보냅니다(값은 보이지 않습니다).",
   "settings.providerNoList": "이 제공자의 모델 목록은 아직 앱에 연결되지 않았습니다. 모델은 CLI로 고릅니다: codaryn models --provider {provider}",
   "settings.providerChoice": "쓸 제공자",
   "settings.providerNotice": "제공자를 바꾸면 다음 실행부터 목표와 작업 공간의 내용(가린 값 제외)이 그 제공자의 API로 갑니다. 키는 그 제공자의 환경 변수에서만 읽습니다.",

@@ -178,7 +178,9 @@ async function main(): Promise<number> {
           const record = typeof spec === "object" && spec !== null ? (spec as Record<string, unknown>) : {};
           const keyEnv = record["keyEnv"];
           const modelEnv = record["modelEnv"];
-          return /^[a-z][a-z0-9_-]{0,31}$/.test(name) && typeof keyEnv === "string" && typeof modelEnv === "string" ? [{ name, keyEnv, modelEnv }] : [];
+          const baseUrlEnv = record["baseUrlEnv"];
+          if (!/^[a-z][a-z0-9_-]{0,31}$/.test(name) || typeof keyEnv !== "string" || typeof modelEnv !== "string") return [];
+          return [{ name, keyEnv, modelEnv, ...(typeof baseUrlEnv === "string" ? { baseUrlEnv } : {}) }];
         })
       : [];
   /** Key shapes, and the value of every provider's key variable now set, hidden. */

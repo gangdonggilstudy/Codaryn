@@ -117,6 +117,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "settings.providerModel": "Model: {model}",
   "settings.providerNoModel": "Model: not set",
   "settings.providerModelEnv": "The environment variable {env} overrides the config file's model.",
+  "settings.providerBaseUrlEnv": "The environment variable {env} is set, so runs send to its address instead of the config file's (its value is not shown).",
   "settings.providerNoList": "This provider's model list is not connected to the app yet. Choose its model with the CLI: codaryn models --provider {provider}",
   "settings.providerChoice": "Provider to use",
   "settings.providerNotice": "After a change, the next runs send the goal and the workspace's content (secrets masked) to that provider's API. The key is read from that provider's environment variable only.",

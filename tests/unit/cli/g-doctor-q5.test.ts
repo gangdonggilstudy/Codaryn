@@ -28,7 +28,7 @@ function task(policy: Record<string, unknown>): string {
   });
 }
 
-async function commandsCheck(policy: Record<string, unknown>): Promise<{ status: string; message: string; text: { id: string; params?: unknown } }> {
+async function commandsCheck(policy: Record<string, unknown>): Promise<{ status: string; message: string; text?: { id: string; params?: unknown } }> {
   const outcome = await runDoctor({
     argv: ["doctor", "--task", "task.json", "--json"],
     env: {},
@@ -47,7 +47,7 @@ async function commandsCheck(policy: Record<string, unknown>): Promise<{ status:
   assert.ok("text" in outcome, JSON.stringify(outcome));
   const check = (JSON.parse(outcome.text) as DoctorOutput).checks.find((item) => item.id === "commands");
   assert.ok(check !== undefined);
-  return check as unknown as { status: string; message: string; text: { id: string; params?: unknown } };
+  return check as unknown as { status: string; message: string; text?: { id: string; params?: unknown } };
 }
 
 /** Node itself, by its absolute path, so the lookup finds it without PATH. */
@@ -58,13 +58,16 @@ describe("Q5: command rules with extra arguments beside plan actions", () => {
     const check = await commandsCheck({ commands: [RULE(true), RULE(false), RULE(true)], planActions: ["move"] });
     assert.equal(check.status, "warn", JSON.stringify(check));
     assert.ok(check.message.includes("allowExtraArgs") && check.message.includes("policy.planActions"), check.message);
-    assert.deepEqual([check.text.id, check.text.params], ["doctor.commands.extra_args_with_plan", { count: 2 }]);
+    assert.ok(check.message.startsWith("2 command rule(s)"), check.message);
+    // Until the contract base has doctor.commands.extra_args_with_plan, the check has no typed text
+    // and the renderer prints the English message.
+    assert.equal(check.text, undefined);
   });
 
   test("either alone does not", async () => {
     for (const policy of [{ commands: [RULE(true)] }, { commands: [RULE(false)], planActions: ["move", "discard"] }, { commands: [RULE(true)], planActions: [] }]) {
       const check = await commandsCheck(policy);
-      assert.notEqual(check.text.id, "doctor.commands.extra_args_with_plan", JSON.stringify(policy));
+      assert.ok(!check.message.includes("allowExtraArgs"), JSON.stringify(policy));
     }
   });
 });

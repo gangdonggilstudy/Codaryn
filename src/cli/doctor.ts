@@ -754,7 +754,10 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
         "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
       if (checked.status === "ok") {
-        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } });
+        // No typed text yet: the contract base (claude/general-tasks b89ee16) does not have
+        // `doctor.commands.extra_args_with_plan` (e6a4289 came after it). Without a text the
+        // renderer prints this English message.
+        results.set("commands", { id: "commands", status: "warn", message: warning });
       } else {
         set("commands", checked.status, `${checked.message}; ${warning}`, checked.text);
       }

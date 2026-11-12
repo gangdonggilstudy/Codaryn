@@ -450,3 +450,19 @@ describe("R-22 L-2, DR-35 (b): a quota 429 with a long body is still told apart"
     assert.match(failure(outcome).message, /longer than 65536 bytes/);
   });
 });
+
+describe("R-22 L-3, DR-35 (c): a call_id that passes AC-D15 is recorded as given, as for Anthropic", () => {
+  test("recorded, answered and sent back under the provider's own id", async () => {
+    const callId = "call_Ab12Cd34Ef56";
+    const first = [reasoning(1), functionCall(callId, "read_file", { path: "a.txt" })];
+    const transport = fake([completed(first), completed([message("done")])]);
+    const run = harness({ steps: [] });
+    const result = await runTask({ ...run.deps, model: createOpenAIProvider(SETTINGS, transport.deps) });
+    assert.deepEqual([result.status, result.reason], ["done", "verified"]);
+    assert.equal(run.journal.ofType("model_response")[0]?.toolCalls[0]?.id, callId);
+    assert.equal(run.journal.ofType("tool_result")[0]?.result.callId, callId);
+    const second = (transport.sent[1] as SentRequest).body.input;
+    assert.deepEqual(second.filter((item: { type: string }) => item.type === "function_call_output").map((item: { call_id: string }) => item.call_id), [callId]);
+    assert.equal(JSON.stringify(run.journal.events).includes("opaque-reasoning"), false, "the reasoning content still is not recorded");
+  });
+});

@@ -17,10 +17,10 @@
  *   record, the result or a report: the engine sees text and calls, and the count of reasoning items
  *   (ModelResponse.reasoningItems). Reasoning items are opaque to the privacy gateway (encrypted by
  *   the provider); they go back only to the same provider within the same run.
- * - Call ids (DR-31 (e)): a call's `call_id` is passed as ToolCall.id. When the engine records it
- *   under another id (AC-D15), its assistant message carries that id; the provider pairs the message
- *   with the response it kept and answers the call with the original `call_id`. The pairing is in
- *   memory only.
+ * - Call ids (DR-31 (e), DR-35 (c)): a call's `call_id` is passed as ToolCall.id. One that passes
+ *   AC-D15 is recorded as given, as for Anthropic. When the engine records one under another id, its
+ *   assistant message carries that id; the provider pairs the message with the response it kept and
+ *   answers the call with the original `call_id`. That pairing is in memory only.
  * - Stop (DR-31 (h)): `completed` with a `function_call` item is `tool_calls`, without one `final`;
  *   `incomplete` for `max_output_tokens` is `length`. A refusal part or `incomplete` for
  *   `content_filter` is `api_error` with a fixed phrase (the refusal text is not quoted); other

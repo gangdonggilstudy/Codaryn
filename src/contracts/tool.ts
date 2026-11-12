@@ -127,6 +127,9 @@ export const UNKNOWN_TOOL_RECORD_NAME = "unknown_tool";
  * registered secret, and not already standing for another id. The engine replaces any other id with
  * REPLACED_CALL_ID_PREFIX and a number (the same one for every use of that id in the run) before it
  * records the call, answers it or sends it back, so the pair of a call and its result still match.
+ * DR-35 (c): the same for every provider. An OpenAI `call_id` that passes is recorded as given, as an
+ * Anthropic tool_use id is (it is not a secret, and it lets a record be matched with its requests);
+ * for one that does not, the adapter keeps the original in memory only and answers with it.
  */
 export const CALL_ID_PATTERN_SOURCE = "^[A-Za-z0-9_-]{1,64}$";
 export const REPLACED_CALL_ID_PREFIX = "codaryn-call-";

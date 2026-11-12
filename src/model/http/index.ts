@@ -494,6 +494,12 @@ export async function sendWithRetries(transport: Transport, request: HttpRequest
 }
 
 
+/**
+ * DR-35 (a), DR-37 (a): what a 401 or 403 says in every provider, whatever the provider's body (its
+ * message may echo part of the key, and a run shorter than KEY_FRAGMENT_CHARS is not redacted).
+ */
+export const AUTH_REFUSED_MESSAGE = "the key or its access was refused; the provider's message is not shown";
+
 export const UNUSABLE_KEY_MESSAGE =
   "the API key may hold printable ASCII characters only (0x21-0x7E, no spaces); nothing was sent";
 

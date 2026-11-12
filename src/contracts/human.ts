@@ -508,6 +508,11 @@ export const FIXED_MESSAGES = {
   "doctor.commands.ok": { count: "count" },
   "doctor.commands.ok_unchecked": { count: "count" },
   "doctor.commands.problems": { rejected: "count", notFound: "count", notFoundLocally: "count", remote: "count" },
+  // G-F (general-tasks.md 7.1, PM answer Q5): `{count}` command rules take any further arguments
+  // (`allowExtraArgs: true`) while plans may move or discard files (`policy.planActions`). Codaryn
+  // does not check those arguments, so such a command can change files outside an approved plan.
+  // A warning in the `commands` check (no new check id).
+  "doctor.commands.extra_args_with_plan": { count: "count" },
   "doctor.install_dir.unknown_env": {},
   "doctor.install_dir.not_found": {},
   "doctor.install_dir.ok": {},

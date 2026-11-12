@@ -15,6 +15,11 @@
  * R-34b: records that cannot be checked (a damaged run) are treated as not reverted
  * (`records_unreadable`); a leftover is told by the mark the cleanup wrote into it, not by its name
  * alone, and a folder named like one without its mark is an unknown folder, shown and never removed.
+ *
+ * U-13 (UXM-1, completing DR-44): an apply run's records are not removed while its discarded-files
+ * folder still holds files, unless that folder is removed entirely in the same cleanup. Without the
+ * records the files would stay under their stored names (`discardedStoredName`) with nothing to say
+ * what they were or where they belong. Such an apply is kept (`discarded_left`) and the rest goes.
  */
 
 import type { TerminalRunStatus } from "./engine.js";
@@ -131,9 +136,9 @@ export type CleanupBlockCode = (typeof CLEANUP_BLOCK_CODES)[number];
  * - partly_reverted (DR-44 (b)): its last revert was partial; without its records the rest cannot be
  * - records_unreadable (R-34b P-1): its records cannot be checked (a damaged run), so whether it
  *   changed files and was reverted is not known; its records may hold the last copies of them
- * - discarded_left (DR-44 (c)): an apply run's records go while its discarded files may stay (their
- *   folder is not selected, or it is and its removal is not confirmed); if they stay, a revert can
- *   no longer put them back
+ * - discarded_left (DR-44 (c), U-13): an apply run whose discarded-files folder holds files: its
+ *   records are kept unless that folder is removed in the same cleanup (selected, and confirmed with
+ *   `discarded: true`), since only they say what the files were and let a revert put them back
  * - people_files: a discarded-files folder: people's own files are deleted
  * - records_changed: the run has a records-changed mark (DR-38); its records are evidence (P-5)
  * - leftover (DR-44 (d)): what an earlier cleanup confirmed and could not remove entirely
@@ -161,6 +166,8 @@ export type LastRevert = "complete" | "partial" | null;
  * DR-44 (a)-(c): the warnings of a run's records item, the one rule the store, the CLI and the app
  * share. `changes`: the files the run changed or the actions an apply applied (0: nothing to revert).
  * `kind: null`: the records cannot be checked (R-34b P-1: records_unreadable, whatever `changes`).
+ * `hasDiscarded` (U-13): its discarded-files folder holds at least one file. An empty folder, as a
+ * complete revert leaves it, holds nothing to lose.
  */
 export function cleanupRecordWarnings(run: {
   readonly kind: "run" | "apply" | null;
@@ -248,6 +255,10 @@ export interface CleanupConfirmation {
  * - not_confirmed: a discarded-files folder without `discarded: true`
  * - not_reverted_not_confirmed (DR-44 (a)): records with a NOT_REVERTED_WARNINGS code without
  *   `includeNotReverted: true`
+ * - discarded_left (U-13): an apply run's records whose discarded-files folder holds files and was
+ *   not removed entirely in this cleanup (not selected, not confirmed with `discarded: true`, or its
+ *   removal failed). Its plan run is kept too (used_by_kept_apply). When both apply, an apply's
+ *   reason is not_reverted_not_confirmed.
  * - changed: it differs from the plan (checked again item by item just before removal)
  * - not_plain_directory: it is no longer a plain directory (a link, or something else)
  * - used_by_kept_apply (DR-44 (a)): a plan run whose apply run, selected too, was kept (for any
@@ -259,6 +270,7 @@ export interface CleanupConfirmation {
 export const CLEANUP_KEPT_REASONS = [
   "not_confirmed",
   "not_reverted_not_confirmed",
+  "discarded_left",
   "used_by_kept_apply",
   "changed",
   "not_plain_directory",
@@ -293,8 +305,11 @@ export type CleanupOutcome =
  * `partly_removed` (DR-44 (d)). R-34b P-2: right after the rename it writes the folder's mark
  * (CLEANUP_LEFTOVER_MARK_FILE_NAME, exclusive create) and removes everything else before the mark, so a
  * folder not removed entirely keeps it; a mark that cannot be written does not stop the removal (what
- * is then left is an unknown folder). A leftover item is removed in the same order. It appends one
- * CleanupLogLine to CLEANUP_LOG_FILE_NAME with what was removed entirely only.
+ * is then left is an unknown folder). A leftover item is removed in the same order. U-13: an apply
+ * run's discarded-files folder is handled before its records, and the records go only when no
+ * discarded file of the run is left (the folder held none, or it was removed entirely just before);
+ * otherwise they are kept as `discarded_left`. It appends one CleanupLogLine to CLEANUP_LOG_FILE_NAME
+ * with what was removed entirely only.
  */
 export type ApplyCleanup = (request: {
   readonly workspaceRoot: string;

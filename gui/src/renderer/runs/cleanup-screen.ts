@@ -93,7 +93,7 @@ function planSection(t: Texts, plan: CleanupPlanView): HTMLElement[] {
   if (totals.discarded.count > 0) {
     parts.push(el("p", t.format("cleanup.plan.discarded", { count: String(totals.discarded.count), files: String(totals.discarded.files), size: sizeText(t, totals.discarded.bytes) }), { class: "notice", id: "cleanup-plan-discarded" }));
   }
-  // DR-44 (c): an apply run's records go while its discard box may stay.
+  // DR-44 (c), U-13 (DR-53): an apply run with discarded files keeps its records unless those files go too.
   const discardedLeft = plan.items.filter((item) => item.target === "run" && item.warnings.includes("discarded_left")).length;
   if (discardedLeft > 0) parts.push(el("p", t.format("cleanup.plan.discardedLeft", { count: String(discardedLeft) }), { class: "notice", id: "cleanup-plan-discarded-left" }));
   if (totals.leftovers.count > 0) parts.push(el("p", t.format("cleanup.plan.leftovers", { count: String(totals.leftovers.count), size: sizeText(t, totals.leftovers.bytes) }), { class: "notice", id: "cleanup-plan-leftovers" }));
@@ -140,6 +140,8 @@ function resultSection(t: Texts, result: CleanupResultView): HTMLElement[] {
     const list = el("ul", undefined, { id: "cleanup-kept" });
     for (const item of result.kept) list.append(el("li", `${word(t, "cleanup.target", item.target)} ${item.id}: ${word(t, "cleanup.kept", item.reason)}`, { "data-target": item.target, "data-id": item.id, "data-reason": item.reason }));
     parts.push(list);
+    const discardedLeft = result.kept.filter((item) => item.reason === "discarded_left").length;
+    if (discardedLeft > 0) parts.push(el("p", t.format("cleanup.result.discardedLeft", { count: String(discardedLeft) }), { class: "notice", id: "cleanup-kept-discarded-left" }));
     if (result.kept.some((item) => item.reason === "partly_removed")) parts.push(el("p", t.format("cleanup.result.partlyRemoved"), { class: "notice", id: "cleanup-partly-removed" }));
   }
   return parts;

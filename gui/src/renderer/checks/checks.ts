@@ -8,6 +8,7 @@ import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
 import { asDoctor } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
+import type { DoctorReply } from "../../shared/ipc.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 
@@ -38,24 +39,7 @@ export function checksScreen(deps: ChecksDeps): Screen {
           deps.announce(t.format("error.title"));
           return;
         }
-        const word = (status: string): string => {
-          const shared = reply.labels[`doctor.status.${status}`];
-          if (shared !== undefined) return shared;
-          const own = `status.${status}`;
-          return t.has(own) ? t.format(own) : status;
-        };
-        const scope = el("p", reply.workspaceName === null ? t.format("checks.noWorkspace") : t.format("checks.workspace", { name: reply.workspaceName }));
-        const overall = el("p", t.format("checks.overall", { status: word(reply.view.status) }), { class: "overall", "data-status": reply.view.status });
-        const list = el("ul", undefined, { class: "checks" });
-        for (const check of reply.view.checks) {
-          const item = el("li", undefined, { "data-status": check.status, "data-check": check.id });
-          item.append(
-            el("span", word(check.status), { class: "status" }),
-            el("span", reply.labels[`doctor.check.${check.id}`] ?? check.id, { class: "label" }),
-            el("span", check.message, { class: "detail", lang: "en", title: t.format("checks.detailInEnglish") }),
-          );
-          list.append(item);
-        }
+        const [scope, overall, list] = doctorParts(t, reply);
         results.replaceChildren(scope, overall, list);
         results.setAttribute("data-doctor-ready", "ok");
         deps.announce(overall.textContent ?? "");
@@ -66,4 +50,27 @@ export function checksScreen(deps: ChecksDeps): Screen {
       void run();
     },
   };
+}
+
+/** The checks as the window shows them: the scope, the overall status in words, one line per check. Also the first-run guide's last page. */
+export function doctorParts(t: Texts, reply: Extract<DoctorReply, { ok: true }>): [HTMLElement, HTMLElement, HTMLElement] {
+  const word = (status: string): string => {
+    const shared = reply.labels[`doctor.status.${status}`];
+    if (shared !== undefined) return shared;
+    const own = `status.${status}`;
+    return t.has(own) ? t.format(own) : status;
+  };
+  const scope = el("p", reply.workspaceName === null ? t.format("checks.noWorkspace") : t.format("checks.workspace", { name: reply.workspaceName }));
+  const overall = el("p", t.format("checks.overall", { status: word(reply.view.status) }), { class: "overall", "data-status": reply.view.status });
+  const list = el("ul", undefined, { class: "checks" });
+  for (const check of reply.view.checks) {
+    const item = el("li", undefined, { "data-status": check.status, "data-check": check.id });
+    item.append(
+      el("span", word(check.status), { class: "status" }),
+      el("span", reply.labels[`doctor.check.${check.id}`] ?? check.id, { class: "label" }),
+      el("span", check.message, { class: "detail", lang: "en", title: t.format("checks.detailInEnglish") }),
+    );
+    list.append(item);
+  }
+  return [scope, overall, list];
 }

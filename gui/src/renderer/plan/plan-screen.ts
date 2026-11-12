@@ -34,7 +34,7 @@ export interface PlanScreen extends Screen {
    * (R21b-L-1): the form it was made with is unknown (the run was started elsewhere), so the plan is
    * shown but cannot be applied here; an apply with another form would be refused after the OS dialog.
    */
-  choose(runId: string, profile: string | null, workflow: string | null, formKnown?: boolean): void;
+  choose(runId: string, profile: string | null, workflow: string | null, formKnown?: boolean, recordsChanged?: boolean): void;
 }
 
 export function actionLine(t: Texts, action: PlanActionView): string {
@@ -43,12 +43,12 @@ export function actionLine(t: Texts, action: PlanActionView): string {
 
 export function planScreen(deps: PlanDeps): PlanScreen {
   const { texts: t, api, run } = deps;
-  let chosen: { runId: string; profile: string | null; workflow: string | null; formKnown: boolean } | null = null;
+  let chosen: { runId: string; profile: string | null; workflow: string | null; formKnown: boolean; recordsChanged: boolean } | null = null;
   return {
     id: "plan",
     title: "nav.plan",
-    choose(runId, profile, workflow, formKnown = true) {
-      chosen = { runId, profile, workflow, formKnown };
+    choose(runId, profile, workflow, formKnown = true, recordsChanged = false) {
+      chosen = { runId, profile, workflow, formKnown, recordsChanged };
     },
     show(root) {
       const workspace = deps.current();
@@ -77,7 +77,10 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         if (view.inventoryLimitReached) parts.push(el("p", t.format("plan.inventoryLimit"), { class: "notice", id: "plan-inventory" }));
         parts.push(el("p", t.format("plan.modelMade"), { class: "notice" }));
         const message = el("div", undefined, { id: "plan-message", role: "alert" });
-        if (view.status !== "applied" && reply.approval !== null && !target.formKnown) {
+        if (view.status !== "applied" && target.recordsChanged) {
+          // UXM-14, DR-38: the engine refuses it (plan_records_changed); the window says so first.
+          parts.push(el("p", t.format("plan.recordsChanged"), { class: "notice", id: "plan-records-changed" }));
+        } else if (view.status !== "applied" && reply.approval !== null && !target.formKnown) {
           parts.push(el("p", t.format("plan.formUnknown", { runId: view.runId }), { class: "notice", id: "plan-form-unknown" }));
         } else if (view.status === "applied" || reply.approval === null) {
           parts.push(el("p", view.appliedBy === null ? t.format("plan.applied") : t.format("plan.appliedBy", { runId: view.appliedBy.runId, time: localDateTime(view.appliedBy.at) }), { id: "plan-applied" }));

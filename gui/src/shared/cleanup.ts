@@ -263,8 +263,8 @@ export function cleanupResultOf(value: unknown): CleanupResultView | null {
 /**
  * DR-44: what the main process asks about a plan before cleaning it, apart from the plan itself:
  * records of runs not (or only partly) reverted (`includeNotReverted`), and the discarded-files
- * folders (`discarded`, people's files). `discardedLeft`: apply runs whose records go while their
- * discarded files may stay; if they stay, a revert can no longer put them back.
+ * folders (`discarded`, people's files). `discardedLeft`: apply runs with discarded files; U-13
+ * (DR-53): their records are kept unless those files are deleted in the same cleanup.
  * R-34b P-1: which records need that question is the contract's rule (NOT_REVERTED_WARNINGS), and
  * the store counts them in `totals.runs.notReverted`, runs whose records cannot be checked
  * included. The main process follows that count, with the codes it knows as a floor.

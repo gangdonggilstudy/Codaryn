@@ -38,6 +38,8 @@ const CHANNELS = {
   previewCleanup: "codaryn:cleanup:preview",
   applyCleanup: "codaryn:cleanup:apply",
   saveReport: "codaryn:report:save",
+  createSettings: "codaryn:settings:create",
+  settingsSuggestions: "codaryn:settings:suggestions",
 } as const;
 
 const EVENTS = {
@@ -90,6 +92,9 @@ const api = Object.freeze({
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),
   revert: (preview: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revert, { preview: text(preview) }),
   /** DR-25: the retry token a revert's result gave; never a consent: the main process asks the person. */
+  /** U-11: the config file with the defaults; init's suggestions for a workspace. */
+  createSettings: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.createSettings, { workspace: workspace === null ? null : text(workspace) }),
+  settingsSuggestions: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.settingsSuggestions, { workspace: text(workspace) }),
   /** GU-3: saves a run's report; the main process's save dialog chooses the file. */
   saveReport: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.saveReport, { workspace: text(workspace), runId: text(runId) }),
   /** GU-4: the state summary; a cleanup preview of a selection (plain data); cleaning by the preview's token only. */

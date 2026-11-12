@@ -190,7 +190,10 @@ export interface SettingsView {
   readonly builtinWorkflows: readonly string[];
   /** N-8, G-A: each profile with the workflow it uses when the task names none (`workflowRef`), or null; file order. */
   readonly profileWorkflows: readonly { readonly profile: string; readonly workflowRef: string | null }[];
-  /** Whether ANTHROPIC_API_KEY is set. Never its value (C-1). */
+  /**
+   * Whether the key of the provider a quick run would use is set (SP-6: the config's `provider`,
+   * else anthropic; ANTHROPIC_API_KEY or OPENAI_API_KEY). Never its value (C-1).
+   */
   readonly keyAvailable: boolean;
 }
 

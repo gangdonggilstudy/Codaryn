@@ -16,17 +16,20 @@
  * call one function instead (A-4 report).
  */
 
-import { ANTHROPIC_API_KEY_ENV, BUILTIN_WORKFLOW_IDS } from "../contracts/index.js";
+import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS } from "../contracts/index.js";
 import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
 import { jsonSyntaxError, positionDiagnostic } from "../cli/run.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, rawTextHoldsKey } from "../cli/security/index.js";
-import { envValue } from "../cli/settings.js";
+import type { KnownKeys } from "../cli/security/index.js";
+import { envValue, knownKeyValues } from "../cli/settings.js";
+import { quickProvider } from "../cli/task.js";
 import { appError } from "./errors.js";
 import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsView } from "./types.js";
 
-const KEY_HINT = `keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`;
+/** SP-2: every API provider's key, as the CLI's `models` says it. */
+const KEY_HINT = `keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`;
 
 type Failure = { readonly ok: false; readonly error: AppError };
 
@@ -43,8 +46,11 @@ export interface SettingsIo {
 
 export type ChosenFile = { readonly source: "argument" | "environment" | "default"; readonly path: string; readonly display: string };
 
-/** Key checks, JSON and parseConfig on a config file's text (BOM dropped), in run.ts's order. */
-export function checkConfigText(text: string, currentKey: string | null): { readonly ok: true; readonly config: CodarynConfig } | Failure {
+/**
+ * Key checks, JSON and parseConfig on a config file's text (BOM dropped), in run.ts's order.
+ * SP-2: `currentKey` is every API provider's key value set now (knownKeyValues), as the CLI checks.
+ */
+export function checkConfigText(text: string, currentKey: KnownKeys): { readonly ok: true; readonly config: CodarynConfig } | Failure {
   if (rawTextHoldsKey(text, currentKey)) return failure("key_in_file", `the config file contains a key value; ${KEY_HINT}`);
   let value: unknown;
   try {
@@ -77,10 +83,11 @@ export async function loadSettingsFile(
   io: SettingsIo,
   configPath: string | null,
 ): Promise<
-  | { readonly ok: true; readonly currentKey: string | null; readonly file: ChosenFile | null; readonly raw: string | null; readonly config: CodarynConfig | null }
+  | { readonly ok: true; readonly currentKey: readonly string[]; readonly file: ChosenFile | null; readonly raw: string | null; readonly config: CodarynConfig | null }
   | Failure
 > {
-  const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
+  // SP-2: every API provider's key, so a file holding any of them is refused, as the CLI refuses it.
+  const currentKey = knownKeyValues(io.env);
   const chosen = chooseConfigFile({ argument: configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig });
   if (!chosen.ok) return failure("invalid_config", chosen.message);
   const candidate = chosen.candidate;
@@ -120,7 +127,8 @@ export async function readSettingsIn(io: SettingsIo, request: ReadSettingsReques
       workflows: Object.keys(config?.workflows ?? {}),
       builtinWorkflows: [...BUILTIN_WORKFLOW_IDS],
       profileWorkflows: profileWorkflowsOf(config),
-      keyAvailable: loaded.currentKey !== null,
+      // SP-6: the key of the provider a quick run would use (the config's `provider`, else anthropic).
+      keyAvailable: envValue(io.env, API_PROVIDERS[quickProvider(config)].keyEnv) !== null,
     },
   };
 }

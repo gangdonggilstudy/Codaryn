@@ -447,6 +447,9 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   4. JSON 해석. 문법 오류면 줄과 열을 준다.
   5. 값 키 검사(깊이 64).
   6. `parseConfig`. 필드 위치를 준다(N-6).
+  - 키 검사(3, 5)는 지금 설정된 모든 API 제공자의 키 값으로 한다(SP-2, CLI의 `knownKeyValues`). 그래서 OpenAI 키 값이 든 설정 파일도 읽기와 변경 제안·적용에서 `key_in_file`로 거부된다.
+  - `keyAvailable`은 간편 실행이 쓸 제공자(설정의 `provider`, 없으면 anthropic)의 키가 있는지다. 값은 주지 않는다.
+  - `listRuns`의 출력도 모든 API 제공자의 키 값을 가린다(CLI `runs`와 같다). 시험은 `tests/unit/app/provider-keys.test.ts`다.
 - **만들기.**
   - CLI `init`을 `--json`, 질문 없이 부른다. 그래서 기본값만 쓴다: 모델 자리표시자, 기본 한도, 모두 거부하는 정책.
   - 이미 있으면 `config_exists`이고 덮어쓰지 않는다. 작업 공간 안이면 거부한다(S-1). 키는 받지도 쓰지도 않는다(C-1).

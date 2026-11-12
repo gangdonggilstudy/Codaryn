@@ -231,6 +231,8 @@ export const HELP_OPTIONS = [
   "json",
   "use",
   "limit",
+  // DR-21, DR-25: `--allow-unsafe-move` of `apply` and `revert` (UNSAFE_MOVE_CONSENT_ARGUMENT).
+  "allow_unsafe_move",
 ] as const;
 export type HelpOption = (typeof HELP_OPTIONS)[number];
 

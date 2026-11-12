@@ -156,6 +156,8 @@ export const KO_MESSAGES: MessageTexts = {
   "help.option.json": "--json: 결과를 JSON 한 줄로 냅니다",
   "help.option.use": "--use <번호|id>: 그 모델을 설정 파일의 model에 씁니다",
   "help.option.limit": "--limit <n>: 보여 줄 실행 수(기본 20, 최대 1000)",
+  "help.option.allow_unsafe_move":
+    "--allow-unsafe-move: 이번 적용이나 되돌리기에 한해, 파일을 덮어쓸 수 있는 이동에 동의합니다",
   "help.exit.run": "done 0, failed 1, 입력 오류 2, needs-input 3, budget-exhausted 4, cancelled 5, 작업 공간 잠김 6, 제공자 설정 안 됨 7, 내부 오류 70",
   "help.exit.revert": "complete 0, partial 3, 오류 2 또는 6",
   "help.exit.report": "complete 0, incomplete(result.json 없음) 3, 오류 2",
@@ -219,6 +221,8 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.file_locations.inside": "입력 파일 {count}개가 작업 공간 안에 있거나 위치를 확인할 수 없습니다. 실행은 이를 거부합니다",
   "doctor.file_locations.ok": "입력 파일 {count}개가 작업 공간 밖에 있습니다",
   "doctor.commands.none": "허용한 명령도 명령 검증기도 없습니다",
+  "doctor.commands.extra_args_with_plan":
+    "추가 인수를 받는 명령 규칙 {count}개가 계획 행동(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
   "doctor.commands.ok": "실행 파일 {count}개를 찾았고 실행 규칙이 허용합니다",
   "doctor.commands.ok_unchecked": "실행 파일 {count}개를 찾았습니다. 실행 규칙은 작업 공간이 있어야 확인할 수 있어 확인하지 않았습니다",
   "doctor.commands.problems":
@@ -240,7 +244,9 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.held": "실행 중인 프로세스가 작업 공간을 잠그고 있습니다. 실행 중인 Codaryn이 없다면 .codaryn/lock.json을 지우세요(프로세스 번호가 다시 쓰이면 이 판정은 틀릴 수 있습니다)",
   "doctor.lock.stale": "끝난 프로세스가 남긴 잠금이 있습니다. 다음 실행이 회수합니다",
   "doctor.lock.unreadable": "작업 공간 잠금 파일(.codaryn/lock.json)을 읽을 수 없습니다",
-  "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json을 지우세요.",
+  "doctor.lock.reclaim_left":
+    "잠금 회수 파일(.codaryn/lock.json.reclaim)이 남아 있어, 끝난 프로세스가 남긴 잠금을 회수하지 못합니다. 이 작업 공간에서 실행 중인 Codaryn이 없으면 그 파일을 지우세요",
+  "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
   "error.invalid_arguments.fix": "codaryn help <명령>으로 사용법을 확인하세요.",
@@ -281,6 +287,10 @@ export const KO_MESSAGES: MessageTexts = {
   "error.plan_not_approved.fix": "codaryn plan으로 계획을 확인한 뒤, 승인하려면 codaryn apply에 --digest <계획 digest의 앞 12자 이상>을 주세요.",
   "error.plan_already_applied.what": "이 계획은 이미 적용했습니다. 아무것도 바꾸지 않았습니다",
   "error.plan_already_applied.fix": "결과는 codaryn report로 보고, 되돌리려면 codaryn revert를 쓰세요.",
+  "error.plan_secrets_differ.what": "지금 등록된 비밀 값이 계획 실행 때와 다르게 계획의 경로를 가려, 아무것도 보여 주거나 바꾸지 않았습니다",
+  "error.plan_secrets_differ.fix": "계획 실행 때와 같은 작업 지정 방식(따라서 같은 비밀 값)으로 다시 하거나, 계획을 새로 만드세요.",
+  "error.plan_run_missing.what": "이 적용이 쓴 계획 실행의 기록(plan.json)이 없어, 아무것도 바꾸지 않았습니다",
+  "error.plan_run_missing.fix": "적용을 되돌리려면 그 계획 실행을 남겨 두어야 합니다. 지운 실행 폴더가 있으면 되살리세요.",
   "error.run_not_awaiting_review.what": "그 실행은 사람의 검토를 기다리는 상태가 아닙니다. 아무것도 쓰지 않았습니다",
   "error.run_not_awaiting_review.fix": "검토 대기(awaiting_review)로 끝난 실행의 id를 주세요. codaryn runs로 찾을 수 있습니다.",
   "error.internal_error.what": "예상하지 못한 내부 오류입니다",
@@ -336,6 +346,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.search_files": "파일 검색",
   "tool.write_file": "파일 쓰기",
   "tool.run_command": "명령 실행",
+  "tool.inspect_files": "파일 목록 보기",
+  "tool.propose_plan": "계획 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

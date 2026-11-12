@@ -179,11 +179,21 @@ describe("i18n catalog: language and wording", () => {
     for (const language of LANGS) {
       assert.ok(MESSAGE_TEXTS[language]["summary.next_apply_unsafe"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
       assert.ok(MESSAGE_TEXTS[language]["summary.next_revert_unsafe"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
+      assert.ok(MESSAGE_TEXTS[language]["help.option.allow_unsafe_move"].startsWith(`${UNSAFE_MOVE_CONSENT_ARGUMENT}:`), language);
       assert.ok(MESSAGE_TEXTS[language]["advice.consent_required"].includes(UNSAFE_MOVE_CONSENT_ARGUMENT), language);
       // approval.<channel> words serve both the plan approval and the consent line.
       for (const id of ["approval.cli-tty", "approval.cli-flag", "approval.adapter"] as const) {
         assert.doesNotMatch(MESSAGE_TEXTS[language][id], /--[a-z]/, `${language} ${id}`);
       }
+    }
+  });
+
+  test("the lock hint names both files a person may remove (DR-27 b)", () => {
+    for (const language of LANGS) {
+      for (const id of ["lock.remove_hint", "doctor.lock.reclaim_left"] as const) {
+        assert.ok(MESSAGE_TEXTS[language][id].includes(".codaryn/lock.json.reclaim"), `${language} ${id}`);
+      }
+      assert.match(MESSAGE_TEXTS[language]["lock.remove_hint"], /\.codaryn\/lock\.json(?!\.)/, language);
     }
   });
 

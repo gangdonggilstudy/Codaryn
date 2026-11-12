@@ -52,3 +52,22 @@ export function assertProgressClean(run: CliRun, check: ProgressCheck, minLines 
 export function assertQuiet(run: CliRun): void {
   assert.equal(run.stderr, "", "--quiet must leave stderr empty");
 }
+
+/**
+ * N-5: a command that stops with a CliErrorOutput explains it on stderr in human text (unless
+ * `--quiet`). Checks the shape, not the wording: the code in parentheses, no stack frame or
+ * exception text, no line repeated, and none of `forbidden` (sandbox paths, values from files).
+ */
+export function assertHumanError(run: CliRun, code: string, forbidden: readonly string[] = []): void {
+  const lines = progressLines(run);
+  assert.ok(lines.length > 0, "a stopped command explains itself on stderr (N-5)");
+  assert.ok(run.stderr.includes(`(${code})`), `stderr names the code ${code}: ${JSON.stringify(run.stderr.slice(0, 300))}`);
+  assert.ok(!/^\s*at\s.+:\d+:\d+\)?\s*$/m.test(run.stderr), "no stack frame on stderr");
+  assert.ok(!/\b[A-Za-z]*Error:/.test(run.stderr), "no exception text on stderr");
+  const seen = new Set<string>();
+  for (const line of lines.map((text) => text.trim())) {
+    assert.ok(!seen.has(line), `a line is repeated on stderr: ${JSON.stringify(line)}`);
+    seen.add(line);
+  }
+  for (const value of forbidden) assert.ok(!run.stderr.includes(value), "stderr must not repeat a path or a value");
+}

@@ -23,3 +23,12 @@ export async function writeTextFile(path: string, text: string): Promise<void> {
 export function reportFileName(runId: string): string {
   return `codaryn-report-${runId}.md`;
 }
+
+/**
+ * The OS save dialog's options for a report: the offered file, the Markdown filter, and (R38-L-1)
+ * the question before an existing file is replaced, which Linux asks only when told to (Windows and
+ * macOS always ask).
+ */
+export function saveDialogOptions(defaultPath: string): { readonly defaultPath: string; readonly filters: { name: string; extensions: string[] }[]; readonly properties?: "showOverwriteConfirmation"[] } {
+  return { defaultPath, filters: [{ name: "Markdown", extensions: ["md"] }], properties: ["showOverwriteConfirmation"] };
+}

@@ -411,6 +411,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "cleanup.kept.partly_removed": "not removed entirely",
   "cleanup.announce": "{count} items were cleaned up.",
   "error.nothing_to_clean": "There is nothing to clean up.",
+  "error.plan_records_changed": "The plan run carries a records-changed mark: something other than the run changed its records, so its plan was not applied (nothing was changed). Make a new plan with the same task kind, read it, and apply that one. The marked run stays as evidence.",
   "error.plan_changed": "The state changed after the preview, so nothing was removed. See the cleanup plan again.",
   "nav.report": "Report",
   "run.viewReport": "View the report",

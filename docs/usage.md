@@ -484,13 +484,13 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 - 종료: `complete`(0)는 두 파일을 모두 읽음, `incomplete`(3)는 `result.json`이 없음(실행 중이거나 쓰지 못하고 멈춤)이다. 이때는 기록만으로 만들고 "Result: none"과 기록의 종료 기록을 적는다.
 - 오류(종료 2): 그 runId의 기록이 없으면 `run_not_found`, 기록을 읽거나 해석할 수 없으면 `invalid_run_record`, 작업 공간이 없으면 `workspace_not_found`다.
 - 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로, 실행 중 허용된 명령이 기록을 바꿀 수 있다.
-- 계획 실행은 행동 수와 다이제스트를, 사람 확인을 기다리는 실행은 확인 항목을 함께 보여 준다. 적용 실행은 아직 읽지 않고 `invalid_arguments`로 끝난다(18.3절).
+- 계획 실행은 행동 수와 다이제스트를, 사람 확인을 기다리는 실행은 확인 항목과 판정을 함께 보여 준다(18.6절). 적용 실행은 따로 만든 형식(`# Codaryn apply run report`)으로 보여 준다(18.2절).
 
 | 종료 코드 | 뜻 |
 | --- | --- |
 | 0 | `done`: 모든 검증기 통과. 되돌리기 `complete`, 보고서 `complete`, 점검 `ok`, 모델 목록 `listed`·`selected`, `init` `created`, `runs` `listed`, `plan` 보기, `review` 판정 |
 | 1 | `failed`: `verifier_failed`, `repeated_failure`, `model_error`, 적용의 `plan_stale`·`apply_incomplete`(18.3절). 점검 `fail` |
-| 2 | 입력 오류: `invalid_arguments`, `invalid_task`, `invalid_config`, `invalid_script`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `workspace_is_install_dir`, `run_not_found`, `invalid_run_record`, `config_write_failed`, `config_exists`, `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review` |
+| 2 | 입력 오류: `invalid_arguments`, `invalid_task`, `invalid_config`, `invalid_script`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `workspace_is_install_dir`, `run_not_found`, `invalid_run_record`, `config_write_failed`, `config_exists`, `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `plan_secrets_differ`, `plan_run_missing`, `run_not_awaiting_review` |
 | 3 | `needs-input`: `no_verifier`, `verifier_inconclusive`, `unknown_tool_outcome`, `protected_changed`, `plan_pending`, `awaiting_review`, `consent_required`(18절). 되돌리기 `partial`, 보고서 `incomplete`, 점검 `warn`, `init` `declined` |
 | 4 | `budget-exhausted`: `max_model_turns`, `max_tool_calls`, `max_total_tokens`, `max_duration`, `usage_unknown` |
 | 5 | `cancelled` |
@@ -511,6 +511,23 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 - `lock.json`: 실행 중 잠금. 기록된 프로세스가 이미 끝났으면 다음 실행이 회수한다.
 
 도구는 `.codaryn/` 안을 읽거나 쓸 수 없다. 거부된 도구 호출은 `tool_result`의 `errorCode`(`policy_denied`, `protected_span_violation`, `conflict` 등)와 `tool_decision`의 `code`(`protected_path`, `command_not_allowed` 등)로 남는다.
+
+### 변경 보기 (`changes`)
+
+```powershell
+node dist/src/cli/main.js changes --task <task.json> --run <runId|latest> [--json]
+```
+
+실행이 파일 도구로 바꾼 파일과 그 상태를 보여 준다. 읽기만 하고 잠금도 잡지 않는다. 3절 체험 실행의 실제 출력(stdout):
+
+```
+changes of run 20261112T055920Z-5673ae9d, masked with the secrets registered now (not the run's own masking)
+== summary.md: created by the run; as the run left it
+   the text is not shown (masking_unverified)
+```
+
+- 지금은 **경로와 상태만** 보인다. 파일 내용(실행 전후의 글)은 `masking_unverified`로 보이지 않는다. 실행이 바꾼 파일의 가린 표기를 기록하지 않아서, 지금 비밀로 다시 가린 글이 실행 때와 같은지 확인할 수 없기 때문이다(16절).
+- 바뀐 내용은 `report`의 변경 절(해시), 작업 공간의 Git 비교, `revert --dry-run`으로 본다.
 
 ## 11. 되돌리기
 
@@ -537,7 +554,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **되돌리지 않는 것:** 명령(`run_command`, 명령형 검증기)이 바꾼 파일. 그래서 작업 공간은 Git 커밋이나 사본으로도 보존한다.
 - **스냅샷:** `<작업 공간>\.codaryn\runs\<runId>\snapshots\`에 변경 전 원문 그대로 남아 비밀이 들어 있을 수 있다. 파일 도구로는 닿지 않지만 허용한 명령은 읽을 수 있고, 자동으로 지우지 않는다.
 - **실행 폴더 정리:** 되돌릴 필요가 없어진 **모델 실행**은 폴더째 지워도 된다(예: `Remove-Item -Recurse -Force D:\work\notes\.codaryn\runs\<runId>`). 지운 실행은 되돌릴 수 없다. 다음은 지우기 전에 18.8절을 먼저 본다.
-  - **계획 실행**(`plan_pending`으로 끝난 실행)의 폴더: 그 계획을 적용한 실행을 되돌리는 데 필요하다. 지우면 적용의 되돌리기가 원인을 알리지 않고 `invalid_run_record`로 끝난다.
+  - **계획 실행**(`plan_pending`으로 끝난 실행)의 폴더: 그 계획을 적용한 실행을 되돌리는 데 필요하다. 지우면 그 적용은 되돌릴 수 없다(`plan_run_missing`).
   - **`.codaryn\discarded\`**: 실행 기록이 아니라 파일 정리에서 폐기한 사람의 파일이다. 지우면 되찾을 수 없다.
 
 ## 12. 비밀 등록과 가려지는 범위
@@ -617,16 +634,22 @@ node --test dist/tests/live/anthropic-live.js
 
 ## 16. 알려진 한계
 
+알려진 한계를 이 절에 모은다. 범용 작업(18절)의 한계도 여기에 있다.
+
 - **검증기와 재수정:** 재수정을 켜면 명령형 검증기가 모델이 쓴 코드를 실행하고 그 출력(가린 뒤)이 모델에 돌아간다. 명령 허용 목록이 비어 있어도 마찬가지다.
 - **OS 격리 없음:** 허용한 명령과 검증기 명령은 사용자 권한으로 실행된다. 작업 공간 밖 파일 접근과 네트워크 사용을 OS 수준에서 막지 않는다.
 - **비밀이 든 줄:** 수정, 이동, 삭제할 수 없다. 사람이 직접 고친다. 그 줄 앞뒤의 다른 줄을 바꿔 여러 줄에 걸친 식의 의미가 달라지는 것은 막지 못한다.
 - **남는 자손 프로세스:** 명령이 끝난 뒤에도 분리되어 떠 있는 자손 프로세스(예: 백그라운드로 띄운 서버)는 남을 수 있다.
 - **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 직접 지운다(지워도 되는 폴더는 11절).
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 비밀 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
-- **하드 링크가 없는 드라이브:** 파일 정리의 이동과 되돌리기는 사람이 그때마다 동의해야 하고, 동의하면 덮어쓰지 않는다는 보장이 없다(18.5절). 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
+- **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
+- **변경 보기는 경로와 상태만:** `changes`는 실행이 바꾼 파일의 경로와 상태만 보이고 내용은 보이지 않는다(`masking_unverified`). 실행이 바꾼 파일의 가린 표기를 기록하지 않아, 지금 비밀로 가린 글이 실행 때와 같은지 확인할 수 없기 때문이다(10절 "변경 보기").
 - **보관함:** 폐기한 파일은 `.codaryn\discarded\`에 쌓이고 비우는 명령이 없다(18.8절).
-- **적용 실행의 보고서:** `report`는 적용 실행과 사람 확인의 판정을 아직 보여 주지 않는다(18.3절, 18.6절).
-- **plan·apply의 비밀:** 지금 명령이 등록한 비밀로 가린다. 계획 실행과 다른 task로 하면 계획 실행이 가린 값이 드러날 수 있다(18.3절).
+- **계획의 비밀 표기:** 계획 보기는 비밀이 든 경로를 실행마다 다른 토큰(`[[CODARYN_SECRET:…]]`)으로 보인다. 그래서 비밀이 둘 이상 등록되어 있으면 어느 비밀 이름의 폴더로 가는지 보기만으로 구별할 수 없다. 계획 실행의 끝 요약에 나온 다이제스트로 승인한다(18.3절).
+- **계획 뒤에 등록한 비밀:** 계획 경로에 든 값을 계획 실행 뒤에 비밀로 새로 등록하면, 그 계획은 `plan_secrets_differ`로 보거나 적용할 수 없다. 계획을 새로 만든다(18.3절).
+- **파일 정리의 명령 금지:** `organize`의 명령 금지는 모델이 부를 수 있는 명령에 대한 것이다. task나 설정에 사람이 둔 `command` 검증기는 적용 뒤에 실행되고, 그 검증기가 바꾼 파일은 파일 목록 확인(`inventory`)이 보지 못한다(18.1절).
+- **자료 검증(`data_checks`):** 열이나 묶음 하나라도 값이 모두 비어 있으면, 그리고 합이 double 범위를 넘으면 sum·min·max·mean 규칙은 판단 불가(`inconclusive`)다. 검증 결과의 한계 목록에도 같은 내용이 나온다.
+- **큰 작업 공간의 파일 목록:** 적용은 파일 목록(상한 10만 개)을 앞뒤로 두 번 만든다. 파일이 아주 많으면 시간이 걸리고, 그동안의 취소는 목록이 끝난 뒤 반영된다.
 - **보호 경로:** 파일 도구만 막는다. 명령으로 고치는 것은 막지 못하고, 무결성 확인은 사후 탐지다. 두 확인 사이에 바뀌었다가 다음 확인 전에 되돌려진 변경은 탐지하지 못한다.
 - **되돌리기:** 명령이 바꾼 파일은 대상이 아니다. 실행 중 다른 프로그램이 같은 파일을 바꾸면 스냅샷이 실제 실행 전 상태와 다를 수 있다.
 - **같은 실패 판정:** 숫자만 바뀌는 진전(실패 3건 → 1건)도 같은 실패로 보아 `maxSameFailures`에서 멈춘다. 임시 경로처럼 숫자가 아닌 내용이 매번 바뀌면 다른 실패로 보아 `maxRepairAttempts`와 예산 한도만 반복을 멈춘다.
@@ -634,14 +657,16 @@ node --test dist/tests/live/anthropic-live.js
 - **파일 해시 노출:** 파일 해시가 모델과 기록에 남는다. 짧은 비밀이 든 파일은 추측 검증이 가능하다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
 - **점검과 보고서:** `doctor`는 모델이 실제로 있는지 확인하지 않는다. `report`는 실행 기록만큼만 믿을 수 있다.
-- **출력 언어:** `report`의 Markdown과 `models`의 표는 `CODARYN_LANG`과 관계없이 영어다. 오류 JSON의 `message`, `--json` 출력도 영어다.
-- **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 끝난 실행의 잠금을 다른 프로세스가 쥔 것으로 볼 수 있다(17절 `workspace_locked`).
+- **출력 언어:** `report`의 Markdown과 `models`의 표는 `CODARYN_LANG`과 관계없이 영어다. 오류 JSON의 `message`, `--json` 출력도 영어다. `plan`·`apply`·`review`·`changes`의 도움말과 적용·동의를 묻는 터미널 질문도 아직 영어다.
+- **OS 언어 판단:** `CODARYN_LANG`과 설정의 `language`가 없으면 Node의 `Intl` 기본 로캘로 언어를 고른다. Windows에서는 이것이 표시 언어가 아니라 지역 형식을 따를 수 있다. 원하는 언어가 아니면 `CODARYN_LANG`이나 설정의 `language`로 고정한다(8절). Linux·macOS에서는 확인하지 않았다.
+- **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다. 끝난 실행의 잠금은 다음 실행이 회수한다.
+- **심한 부하에서의 잠금:** 시작 시각 조회(Windows PowerShell)가 5초 안에 답하지 않으면 그 잠금을 "쥐고 있음"으로 본다. 그래서 컴퓨터가 몹시 바쁠 때는 이미 끝난 실행의 잠금인데도 `workspace_locked`(종료 6)로 끝날 수 있다. 두 실행이 함께 작업 공간을 쓰지 않게 하려고 안전한 쪽으로 끝내는 것이다. 잠시 뒤 다시 실행하고, 계속되면 `doctor`의 작업 공간 잠금 항목을 본다(17절).
 
 ## 17. 문제 해결
 
 | 코드 | 뜻과 조치 |
 | --- | --- |
-| `invalid_arguments` | 옵션 오류. 같은 옵션 반복, 모르는 옵션, `--env-file`, `--workspace`·`--goal` 한쪽만, 한 줄 실행 목표와 `--task` 등을 함께 씀, 작업 공간 안의 취소 파일, `doctor`의 `--task`와 `--workspace` 함께, 프로필 이름 형식, 목록에 없는 `models --use` 번호, 이름이 `latest`인 실행 디렉터리가 있는데 `--run latest`, `apply`의 `--run latest`나 형식이 틀린 `--digest`, task 파일과 `--workflow`를 함께 줌, `revert`의 `--dry-run`과 `--allow-unsafe-move`를 함께 줌, `report`에 적용 실행 id |
+| `invalid_arguments` | 옵션 오류. 같은 옵션 반복, 모르는 옵션, `--env-file`, `--workspace`·`--goal` 한쪽만, 한 줄 실행 목표와 `--task` 등을 함께 씀, 작업 공간 안의 취소 파일, `doctor`의 `--task`와 `--workspace` 함께, 프로필 이름 형식, 목록에 없는 `models --use` 번호, 이름이 `latest`인 실행 디렉터리가 있는데 `--run latest`, `apply`의 `--run latest`나 형식이 틀린 `--digest`, task 파일과 `--workflow`를 함께 줌, `revert`의 `--dry-run`과 `--allow-unsafe-move`를 함께 줌 |
 | Node 오류, 종료 9 | `--env-file`의 파일이 없다. `--vars-file`로 바꾼다 |
 | `invalid_task`, `invalid_config` | stderr의 오류 설명이 파일과 필드(또는 줄·열)를 알려 준다(6절). 설정 상한보다 큰 task 한도, 설정 최상위보다 큰 프로필 한도, 없는 프로필, anthropic의 `maxTotalTokens: null`, 작업 공간 안의 파일, 변수 파일의 BOM도 여기다 |
 | `config_exists` | `init`의 대상 위치에 파일이 이미 있다. 그 파일을 고치거나, `--config`로 다른 위치를 준다 |
@@ -649,7 +674,7 @@ node --test dist/tests/live/anthropic-live.js
 | `secret_env_missing` | `secretEnv`에 적은 환경 변수가 없다 |
 | `workspace_not_found` | `workspaceRoot`나 `--workspace`가 있는 디렉터리가 아니다 |
 | `workspace_is_install_dir` | 작업 공간(한 줄 실행이면 현재 디렉터리)이 CLI 설치 위치(이 저장소)와 겹친다. 저장소 밖으로 복사해 실행한다(3절, 5절) |
-| `workspace_locked` | 다른 실행이나 되돌리기가 끝나기를 기다린다. 이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지운다(오류 설명과 `doctor`의 작업 공간 잠금 항목이 같은 안내를 한다) |
+| `workspace_locked` | 다른 실행이나 되돌리기가 끝나기를 기다린다. 컴퓨터가 몹시 바쁠 때는 끝난 실행의 잠금도 이렇게 끝날 수 있으니 잠시 뒤 다시 실행한다(16절). 이 작업 공간에서 실행 중인 Codaryn이 없으면 `.codaryn/lock.json`을 지운다(오류 설명과 `doctor`의 작업 공간 잠금 항목이 같은 안내를 한다) |
 | `provider_not_configured` | `doctor`로 무엇이 빠졌는지 본다. 키는 사용자 환경 변수, 모델은 `models --use`(자리표시자는 설정되지 않은 것), `maxOutputTokens`는 설정 파일 |
 | `model_list_failed` | `models`의 API 요청이 실패했다. 메시지의 종류를 본다(`auth_failed`는 키 확인). 아무것도 쓰지 않았다 |
 | `config_write_failed` | `models --use`나 `init`이 설정 파일을 쓰지 못했다. 파일은 그대로다 |
@@ -660,10 +685,12 @@ node --test dist/tests/live/anthropic-live.js
 | `budget-exhausted` | `reason`의 한도를 올리거나(설정 상한 이내) 목표를 작게 나눈다 |
 | `budget-exhausted`/`usage_unknown` | 제공자가 토큰 사용량을 알려 주지 않았다. scripted 대본이면 단계마다 `usage`를 적는다(3절) |
 | `run_not_found` | 그 작업 공간에 그 runId의 기록이 없거나, `--run latest`로 고를 실행이 없다. `runs`로 실행 목록을 본다 |
-| `invalid_run_record` | 기록을 읽을 수 없다. `runs`에서는 `.codaryn`이나 `runs`가 링크이거나 나열할 수 없을 때다. 파일 정리의 적용 실행을 되돌릴 때는 그 계획 실행의 폴더나 `plan.json`이 없거나 바뀐 경우도 여기다(18.4절) |
+| `invalid_run_record` | 기록을 읽을 수 없다. `runs`에서는 `.codaryn`이나 `runs`가 링크이거나 나열할 수 없을 때다. 파일 정리의 적용 실행을 되돌릴 때는 계획 실행의 `plan.json`이 승인한 다이제스트와 다르게 바뀐 경우도 여기다(18.4절) |
+| `plan_run_missing` | 되돌리려는 적용 실행의 계획 실행 폴더나 `plan.json`이 없다. 그 폴더를 지웠다면 되살린다. 없으면 그 적용은 되돌릴 수 없다(18.4절, 18.8절) |
+| `plan_secrets_differ` | 지금 등록한 비밀이 계획 실행 때와 다르게 계획의 경로를 가린다. 아무것도 보이거나 옮기지 않았다. 계획 실행에 쓴 task로 다시 하거나, 계획을 새로 만든다(18.3절) |
 | `run_not_plan` | `plan`·`apply`에 준 실행이 계획을 제안하고 멈춘 실행(`plan_pending`)이 아니다. 또는 `apply`의 task가 `workflowRef`로 `plan: "apply"` 워크플로를 고르지 않았다. 계획 실행에 쓴 task로 한다(18.3절) |
 | `plan_not_approved` | `--digest`가 없거나 그 계획의 다이제스트와 맞지 않는다. `plan`으로 다이제스트를 보고 앞 12자 이상을 준다 |
-| `plan_already_applied` | 그 계획은 이미 적용됐다. 결과는 적용 실행의 stdout JSON과 `runs`로 보고, 되돌리려면 `revert --run <적용 실행 id>`를 쓴다 |
+| `plan_already_applied` | 그 계획은 이미 적용됐다. 결과는 `report --run <적용 실행 id>`로 보고, 되돌리려면 `revert --run <적용 실행 id>`를 쓴다 |
 | `run_not_awaiting_review` | `review`에 준 실행이 `awaiting_review`로 끝나지 않았다 |
 | `needs-input`/`plan_pending` | 계획을 제안하고 멈췄다. 정상이다. `plan`으로 보고 승인하면 `apply`한다(18.3절) |
 | `needs-input`/`awaiting_review` | 검증을 통과했고 사람의 판정을 기다린다. 결과를 보고 `review --accept` 또는 `--reject`를 한다(18.6절) |
@@ -671,7 +698,6 @@ node --test dist/tests/live/anthropic-live.js
 | `failed`/`plan_stale` | 계획 뒤에 원본이 바뀌었거나 없어졌거나, 지금 정책이 행동을 거부했거나, 파일 목록 확인의 상한을 넘었다. 아무것도 옮기지 않았다. 계획 실행부터 다시 한다 |
 | `failed`/`apply_incomplete` | 적용 도중 한 행동이 실패해 멈췄다. 이미 한 행동은 `revert --run <적용 실행 id>`로 되돌린다 |
 | 되돌리기 `original_path_taken`, `unsafe_move` | 원래 자리에 다른 파일이 생겨 덮어쓰지 않았거나, 하드 링크가 없는 드라이브라 동의 없이는 옮기지 않았다(18.4절, 18.5절) |
-| `report`가 적용 실행에 `invalid_arguments` | 적용 실행의 보고서는 아직 없다. stdout JSON, `runs`, `revert --dry-run`으로 본다 |
 | `done`인데 `changes`가 비어 있음 | 이번 실행은 파일을 바꾸지 않았고, 이미 조건을 만족하던 파일로 검증이 통과했다. 끝 요약의 `Files changed`가 0이다. 이전 실행을 되돌렸는지 확인한다(3절) |
 | 도구 `policy_denied` | 명령이나 경로가 정책 밖이거나 보호 경로 쓰기다. `tool_decision.code`를 본다 |
 | 도구 `conflict` | 파일이 모델이 읽은 뒤 바뀌었거나, 새 파일로 쓰려는 경로에 파일이 이미 있다 |
@@ -705,11 +731,10 @@ node --test dist/tests/live/anthropic-live.js
 - **task가 바꿀 수 있는 범위**(넘으면 `invalid_task`, 간편 형식·프로필의 값이면 `invalid_config`):
   - `tools`는 워크플로가 주는 도구 안에서 줄이기만 한다.
   - `plan: "apply"` 워크플로에서 `plan: "none"`으로 바꿀 수 없다.
-  - `organize`처럼 `allowCommands: false`인 워크플로에서는 `policy.commands`가 비어 있어야 한다. `run_command`도 도구에서 빠진다.
+  - `organize`처럼 `allowCommands: false`인 워크플로에서는 `policy.commands`가 비어 있어야 한다. `run_command`도 도구에서 빠진다. 이 금지는 모델이 부를 수 있는 명령에 대한 것이다. task나 설정에 사람이 둔 `command` 검증기는 적용 뒤에 실행된다.
   - 없는 `workflowRef`는 `invalid_task`다.
-- **한도:** task 한도는 설정 파일 한도 안이어야 한다(6절). `organize`에는 기본 한도(턴 8, 도구 호출 40)가 있다.
-  - 설정 파일이 그 한도를 정하지 않으면 이 값이 상한이 된다. 이때 넘으면 오류 문구는 설정 파일의 한도를 넘었다고 말한다.
-- **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`).
+- **한도:** 워크플로 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
+- **간편 형식**(`--workspace … --workflow organize`)으로 `run`하면 다른 간편 형식처럼 설정 파일의 한도와 모델 설정을 쓴다. `plan`·`apply`·`review`의 간편 형식도 모델을 부르지는 않지만 설정 파일에 한도가 모두 있어야 한다(없으면 `invalid_config`). 보통은 계획 실행에 쓴 task를 `--task`로 준다(18.3절).
 
 ### 18.2 키 없이 체험하기: 파일 정리
 
@@ -729,32 +754,36 @@ node dist/src/cli/main.js revert --workspace $org\workspace --run <적용 실행
 **계획 실행(`run`):** 대본이 `inbox`를 살펴보고(`inspect_files`) 계획 하나를 제안한다(`propose_plan`). 파일은 바뀌지 않는다. 종료 3이다. 끝 요약(실제 출력):
 
 ```
+codaryn: run started — provider scripted
+codaryn: turn 1
+codaryn: inspect files — allowed (inspect_files)
+codaryn: turn 2
+codaryn: propose a plan — allowed (propose_plan)
+codaryn: finished — needs input (plan_pending)
 ── Result: needs input — a plan was proposed and waits for approval (needs-input/plan_pending) ──
 A plan is ready: actions 3. Nothing was changed; it waits for approval.
-Checks: none configured
 Files changed: 0
-Usage: model turns 2 · tool calls 2 · 0 s
+Usage: model turns 2 · tool calls 2 · 0.1 s
 Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.
-Run id: 20261112T044634Z-714f1259
-Report: codaryn report --workspace <workspace> --run 20261112T044634Z-714f1259
-Plan: codaryn plan --task <task.json> --run 20261112T044634Z-714f1259
-Apply after approval: codaryn apply --task <task.json> --run 20261112T044634Z-714f1259 --digest <digest>
-  662b5efb7e935007b06dac1c12a293556c822f770c4a9c534a8157060098a000
+Run id: 20261112T055810Z-6916ecde
+Report: codaryn report --workspace <workspace> --run 20261112T055810Z-6916ecde
+Plan: codaryn plan --task <task.json> --run 20261112T055810Z-6916ecde
+Apply after approval: codaryn apply --task <task.json> --run 20261112T055810Z-6916ecde --digest <digest>
+  e6abc377e2b93985f86db63918ed90f73076e316f56f5d7917de5befb58cc887
 ```
 
-- `Checks: none configured`는 계획 실행이 검증기를 돌리지 않았다는 뜻이다. task의 검증기는 적용 때 돈다.
-- 진행 줄에서 두 계획 도구는 아직 `(unknown tool) — allowed (?)`로 나온다. 기록에는 도구 이름이 그대로 남는다.
-- stdout JSON의 `plan`에 다이제스트와 행동 수가 있다.
+- 계획 실행은 검증기를 돌리지 않는다. task의 검증기는 적용 때 돈다.
+- stdout JSON의 `plan`에 다이제스트와 행동 수가 있다. 다이제스트는 실행마다 다르다(`plan.json`에 실행 id가 들어간다).
 
 **계획 보기(`plan`):** 실제 출력(stdout).
 
 ```
-Plan of run 20261112T044634Z-714f1259: 3 action(s), pending
-Digest: 662b5efb7e935007b06dac1c12a293556c822f770c4a9c534a8157060098a000
+Plan of run 20261112T055810Z-6916ecde: 3 action(s), pending
+Digest: e6abc377e2b93985f86db63918ed90f73076e316f56f5d7917de5befb58cc887
   1. move     inbox/beach-2025.jpg  ->  photos/2025/beach-2025.jpg
   2. move     inbox/receipt-2026.pdf  ->  documents/2026/receipt-2026.pdf
   3. discard  inbox/old-draft.tmp  (kept in .codaryn/discarded/ until removed)
-To apply it: codaryn apply <the same task form> --run 20261112T044634Z-714f1259 --digest 662b5efb7e93
+To apply it: codaryn apply <the same task form> --run 20261112T055810Z-6916ecde --digest e6abc377e2b9
 ```
 
 **적용(`apply`):** 실제 출력(stderr). 종료 0이다.
@@ -773,18 +802,44 @@ Actions applied: 3 of 3
   action #1 — moved inbox/beach-2025.jpg → photos/2025/beach-2025.jpg
   action #2 — moved inbox/receipt-2026.pdf → documents/2026/receipt-2026.pdf
   action #3 — moved to the discarded files inbox/old-draft.tmp
-Plan run: 20261112T044634Z-714f1259
+Plan run: 20261112T055810Z-6916ecde
 Checks passed: 2 of 2 (within the configured checks)
 Read the report, and revert if needed.
-Run id: 20261112T044635Z-2a3f438a
-Report: codaryn report --workspace <workspace> --run 20261112T044635Z-2a3f438a
-Revert: codaryn revert --workspace <workspace> --run 20261112T044635Z-2a3f438a
+Run id: 20261112T055810Z-56c6d7c5
+Report: codaryn report --workspace <workspace> --run 20261112T055810Z-56c6d7c5
+Revert: codaryn revert --workspace <workspace> --run 20261112T055810Z-56c6d7c5
 ```
 
 - 검증 1번은 적용이 늘 돌리는 파일 목록 확인(`inventory`)이다. 계획에 있던 이동·폐기만 일어났는지 본다. 2번은 task의 `file_rules`다.
 - 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등), 같은 내용이 그 실행의 `result.json`이 된다.
 - 폐기한 파일은 `.codaryn\discarded\<적용 실행 id>\` 아래에 행동 번호 이름(`2`)으로 있다.
 - `runs`에는 적용 실행이 맨 위에 `3  done (done/verified)`로 나온다(`changes`는 적용한 행동 수). `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> at <시각>` 줄이 붙는다.
+- `report --run <적용 실행 id>`는 적용 실행의 보고서다(실제 출력, 앞부분):
+
+```
+# Codaryn apply run report
+
+- Run: `20261112T055919Z-fa06002b` (an apply run: no model takes part)
+- Plan run: `20261112T055919Z-fc288980`, digest `9e2cf832027da6e15743b8d1694d5b966384be4addfd6278fcce805c669b86da`
+- Task: `organize-demo`
+- Approval: `cli-flag`; consent to unsafe moves: none
+- Result: `done` / `verified`, exit code 0
+- Report: complete (11 journal records)
+
+## Preflight
+
+- Actions that could not be applied: 0
+- Workspace too large to check: no
+- Moves that could only be made without the guarantee (no hard links): 0
+
+## Actions (3 of 3 done)
+
+- action 1: move `inbox/beach-2025.jpg` -> `photos/2025/beach-2025.jpg`
+- action 2: move `inbox/receipt-2026.pdf` -> `documents/2026/receipt-2026.pdf`
+- action 3: discard `inbox/old-draft.tmp` (kept as `.codaryn/discarded/20261112T055919Z-fa06002b/2`)
+```
+
+  이어서 검증(`inventory`와 task 검증기의 확인 항목), 보호 대상, 사용량, 되돌리기 명령(`Undo`), 확인하지 않은 범위가 나온다. 이 보고서는 다른 실행에서 만든 것이라 위의 id와 다르다.
 
 **되돌리기:** `revert --dry-run`은 아무것도 바꾸지 않고 판정만 보인다(실제 출력, stderr).
 
@@ -810,14 +865,20 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
   - 계획은 `.codaryn\runs\<계획 실행 id>\plan.json`에 행동(이동·폐기)과 원본 파일의 해시만 담는다.
   - 다이제스트는 그 파일의 SHA-256이다. 승인은 이 다이제스트로 한다.
   - 한 계획은 행동 1,000개, 원본 크기 합계 4 GiB까지다.
-- **계획 보기(`plan`):** `plan.json`을 지금 명령의 비밀로 다시 가려 보여 준다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--run latest`를 받는다.
+- **계획 보기(`plan`):** `plan.json`을 지금 명령의 비밀로 다시 가려 보여 준다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--run latest`를 받는다. 비밀이 든 경로는 `documents/[[CODARYN_SECRET:7a30010719392743]]/receipt-2026.pdf`처럼 토큰으로 보인다.
 - **승인**(둘 다 없으면 `plan_not_approved`, 종료 2, 아무것도 옮기지 않음):
   - `--digest`에 다이제스트 앞 12~64자(소문자 16진수)를 준다. 그 계획의 다이제스트와 맞아야 한다.
   - stdin과 stderr가 모두 터미널이고 `--digest`가 없으면, 계획을 보이고 `Apply this plan? [y/N]`을 묻는다. 기본은 아니오다.
   - 다이제스트는 계획 실행의 끝 요약에 나온 값을 쓴다. 상태 디렉터리는 허용 명령이 바꿀 수 있으므로, `plan`에서 본 다이제스트가 그 값과 같은지 확인하고 승인한다.
-- **같은 task로 한다:** `plan`·`apply`는 지금 명령이 등록한 비밀로 가린다.
-  - 계획 실행과 다른 task(또는 비밀을 등록하지 않는 간편 형식)로 하면 계획 실행이 가렸던 값이 화면에 보이고 적용 실행의 기록에 그대로 남을 수 있다.
-  - 계획 실행에 쓴 task 파일(같은 `privacy.secretEnv`)로 `plan`과 `apply`를 한다.
+- **같은 비밀로 한다:** 계획 파일은 계획 실행이 가린 표기를 행동마다 함께 담는다(비밀 값이나 그 해시는 담지 않는다). `plan`·`apply`는 지금 명령이 등록한 비밀로 다시 가린 결과가 그 표기와 같을 때만 진행한다.
+  - 다르면 계획을 읽은 직후 `plan_secrets_differ`(종료 2)로 끝난다. 아무것도 보이거나 묻거나 기록하거나 옮기지 않고, 적용 실행도 만들지 않는다. `--allow-unsafe-move`를 줘도 같다. 실제 출력(stderr):
+
+    ```
+    codaryn: error — the secrets registered now hide the plan's paths differently from the plan run, so nothing was shown or changed (plan_secrets_differ)
+      To fix: Use the same task form as the plan run, and so the same secrets, or make the plan again.
+    ```
+
+  - 계획 실행에 쓴 task 파일(같은 `privacy.secretEnv`)로 `plan`과 `apply`를 한다. 경로에 든 값을 계획 실행 뒤에 새로 비밀로 등록했다면, 그 계획은 보거나 적용할 수 없으니 계획을 새로 만든다.
 - **`--run`은 계획 실행 id로 꼭 준다.** `--run latest`는 받지 않는다(`invalid_arguments`). 승인이 계획 하나를 가리켜야 하기 때문이다.
 - **적용 때의 정책:** 정책, 검증기, 비밀은 계획을 만들 때가 아니라 **적용할 때**의 task와 설정에서 읽는다.
   - 행동마다 지금 정책(`policy.planActions`, 보호 경로)으로 다시 판정한다.
@@ -832,7 +893,7 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
 - **취소:** `--cancel-file`(작업 공간 밖) 또는 Ctrl+C. 상태는 `cancelled`(5)다.
   - 행동을 시작하기 전에 취소되면 아무것도 옮기지 않고 계획도 적용되지 않은 채로 남아, 다시 `apply`할 수 있다.
   - 행동을 시작한 뒤라면 하던 행동은 끝내고 멈춘다. 계획은 적용된 것으로 남으므로 이미 한 행동은 `revert`로 되돌린다.
-- **결과 읽기:** `report`는 계획 실행(행동 수, 다이제스트)을 읽지만 **적용 실행은 아직 읽지 않는다**(`invalid_arguments`). 적용 실행은 stdout JSON, `runs`, `revert --dry-run`으로 본다.
+- **결과 읽기:** `report`는 계획 실행(행동 수, 다이제스트)도, 적용 실행(승인 경로와 동의, 사전 점검, 행동, 검증, 되돌리기 명령)도 읽는다(18.2절). stdout JSON과 `runs`도 같은 결과를 준다.
 
 ### 18.4 적용을 되돌리기
 
@@ -844,8 +905,14 @@ node dist/src/cli/main.js revert --workspace <작업 공간> --run <적용 실�
 - 원래 자리에 다른 파일이 생겼으면 덮어쓰지 않고 건너뛴다(`original_path_taken`). 옮긴 파일이 그 뒤 바뀌었으면 `changed_since_run`이다. 하나라도 건너뛰면 `partial`(종료 3)이다.
 - 적용이 행동 도중 멈췄으면, 시작 기록만 있는 행동도 실제 파일 상태를 보고 되돌린다. 상태가 분명하지 않으면 건드리지 않고 `changed_since_run`으로 알린다.
 - **계획 실행의 폴더가 필요하다.** 실제 경로는 계획 실행의 `plan.json`에서 읽는다.
-  - 그 폴더를 지웠거나 `plan.json`이 승인한 다이제스트와 다르면, 적용 실행의 되돌리기가 아무것도 바꾸지 않고 `invalid_run_record`로 끝난다.
-  - 이때 오류 설명은 원인(계획 실행이 없음)을 말하지 않고 `.codaryn/runs`를 확인하라고만 한다. 18.8을 본다.
+  - 그 폴더나 `plan.json`을 지웠으면 아무것도 바꾸지 않고 `plan_run_missing`(종료 2)으로 끝난다. 실제 출력(stderr):
+
+    ```
+    codaryn: error — the plan run this apply used has no record (plan.json) any more, so nothing was changed (plan_run_missing)
+      To fix: An apply can be reverted only while its plan run is kept. Restore that run's folder if you removed it.
+    ```
+
+  - `plan.json`이 승인한 다이제스트와 다르게 바뀌었으면 `invalid_run_record`로 끝나고 아무것도 바꾸지 않는다. 18.8을 본다.
 
 ### 18.5 하드 링크가 없는 드라이브: 위험한 이동에 대한 동의
 
@@ -857,7 +924,7 @@ node dist/src/cli/main.js revert --workspace <작업 공간> --run <적용 실�
   ── Result: needs input — some moves could replace a file, so they wait for a person's consent; nothing was moved (needs-input/consent_required) ──
   Actions applied: 0 of 3
   Not applied: moves that could replace a file: 3. Nothing was moved.
-  Consent for this apply only: codaryn apply --task <task.json> --run 20261112T044717Z-48354b79 --digest <digest> --allow-unsafe-move
+  Consent for this apply only: codaryn apply --task <task.json> --run 20261112T055816Z-69d6cb14 --digest <digest> --allow-unsafe-move
   ```
 
 - **동의:** 그 적용 한 번에만 유효하고, 사람의 입력으로만 받는다.
@@ -868,7 +935,7 @@ node dist/src/cli/main.js revert --workspace <작업 공간> --run <적용 실�
 - **되돌리기도 같다.** 동의 없이 되돌리면 그 파일들을 `unsafe_move`로 건너뛰고(`partial`) 다음 명령을 알려 준다. `revert … --allow-unsafe-move`로 그 되돌리기 한 번에 동의한다.
   - 동의한 되돌리기는 `Files moved back with your consent in a way that could replace a file: <수>`를 알리고, 되돌리기 기록에 동의가 남는다.
   - `--dry-run`과 함께 줄 수 없다. 미리보기는 드라이브를 판정하지 않으므로, 미리보기에서 되돌릴 수 있다고 나온 파일도 실제로는 건너뛸 수 있다.
-- 확인 범위: 위 출력은 하드 링크 만들기가 실패하도록 흉내 낸 프로세스에서 확인했다. 실제 FAT32·exFAT 드라이브에서는 아직 확인하지 않았다. 터미널 질문(적용 승인과 동의의 `[y/N]`)은 터미널이 아닌 환경에서 문서를 확인해 실행하지 않았고, 코드로만 확인했다.
+- 확인 범위: 위 출력은 하드 링크 만들기가 실패하도록 흉내 낸 프로세스에서 확인했다. 실제 FAT32·exFAT 드라이브에서는 아직 확인하지 않았다(16절). 터미널 질문(적용 승인과 동의의 `[y/N]`)은 stdin·stderr를 터미널로 표시한 프로세스에 답을 넣어 확인했고, 실제 콘솔 창에서는 확인하지 않았다.
 
 ### 18.6 사람 확인 (`review`)
 
@@ -880,7 +947,7 @@ Checks passed: 1 of 1 (within the configured checks)
 Items to check: 2
   - The report's interpretation matches the result table.
   - No input data the goal names is missing from the analysis.
-Record a verdict: codaryn review --task <task.json> --run 20261112T044717Z-81ddfa83 --accept or --reject
+Record a verdict: codaryn review --task <task.json> --run 20261112T055815Z-425804d4 --accept or --reject
 ```
 
 ```powershell
@@ -892,7 +959,7 @@ node dist/src/cli/main.js review --task <task.json> --run <실행 id> --reject
 - 실행의 `result.json`은 바뀌지 않는다. 판정해도 실행이 `done`이 되지는 않는다.
 - 메모는 500자 이하다. 키 모양이 있으면 `key_in_file`이고, 등록한 비밀은 가려서 저장한다.
 - `awaiting_review`로 끝나지 않은 실행이면 `run_not_awaiting_review`(종료 2)다. `--run latest`를 받으므로, 고른 실행 id(stderr)가 본 실행과 같은지 확인한다.
-- `report`는 확인 항목을 보여 주지만 **판정은 아직 보여 주지 않는다**(`review` 출력의 안내와 다르다). 판정은 `.codaryn\runs\<실행 id>\review.json`에서 본다.
+- `report`의 `Review checklist` 절이 확인 항목과 판정을 보여 준다. 판정 전에는 `No verdict yet.`, 판정 뒤에는 예를 들어 `Verdict: **rejected** (`2026-11-12T05:58:15.969Z`)`다. 판정은 그 실행의 `review.json`에 있다.
 - 확인 항목은 워크플로가 정한다. task의 `humanReview.checklist`로 바꿀 수 있다.
 - 사람 확인은 사람의 판단을 기록할 뿐이다. 보고서의 해석이나 분석 방법을 Codaryn이 확인하지는 않는다.
 - 결과 표의 형태와 집계는 `data_checks` 검증기로 확인한다(규칙은 [CLI·공통 계약](cli-contract.md)과 `src/contracts/verify.ts`).
@@ -907,7 +974,7 @@ node dist/src/cli/main.js review --task <task.json> --run <실행 id> --reject
 ### 18.8 기록 폴더와 보관함 정리
 
 - **계획 실행의 폴더**(`.codaryn\runs\<계획 실행 id>\`)는 그 계획의 적용 실행을 되돌릴 일이 없을 때까지 지우지 않는다.
-  - 지우면 그 적용의 `revert`가 `invalid_run_record`로 끝나 원인을 알리지 못한다.
+  - 지우면 그 적용은 되돌릴 수 없다. `revert`는 `plan_run_missing`(종료 2)으로 끝나고 아무것도 바꾸지 않는다(18.4절).
   - `plan`·`apply`도 그 실행을 `run_not_found`로 본다. `runs` 목록에는 적용 실행만 남는다.
   - 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.
 - **보관함**(`.codaryn\discarded\`)은 기록이 아니라 **폐기한 사람의 파일**이다.

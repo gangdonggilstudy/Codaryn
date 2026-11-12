@@ -18,7 +18,9 @@ import {
   CODARYN_MODEL_ENV,
   CODARYN_OPENAI_API_BASE_URL_ENV,
   CODARYN_OPENAI_MODEL_ENV,
+  DEFAULT_MAX_RETRIES,
   DEFAULT_OPENAI_API_BASE_URL,
+  DEFAULT_REQUEST_TIMEOUT_MS,
   OPENAI_API_KEY_ENV,
 } from "../../../src/contracts/index.js";
 import type { CodarynConfig, DoctorOutput } from "../../../src/contracts/index.js";
@@ -204,9 +206,10 @@ async function workspace(configValue: Record<string, unknown>): Promise<{ base: 
 }
 
 describe("SP-4: commands with the openai provider chosen", () => {
-  test("run: an openai quick form stops before anything is sent (SP-6 connects it)", async () => {
+  test("run: an openai quick form makes the openai provider with its own settings, never the anthropic one", async () => {
     const { base, ws, configPath } = await workspace({ provider: "openai", providers: { openai: { model: "gpt-x", maxOutputTokens: 64 } }, limits: LIMITS });
     let created = false;
+    let given: unknown = null;
     const outcome = await runCli({
       argv: ["run", "--workspace", ws, "--goal", "g", "--config", configPath, "--quiet"],
       env: { [OPENAI_API_KEY_ENV]: OPENAI_VALUE },
@@ -226,9 +229,18 @@ describe("SP-4: commands with the openai provider chosen", () => {
         created = true;
         throw new Error("the anthropic provider may not be made");
       },
+      // SP-6: a stand-in for the OpenAI factory that keeps what it was given and stops the run, so
+      // nothing is ever sent.
+      providerFactories: {
+        openai: (settings) => {
+          given = settings;
+          throw new Error("stand-in stops here");
+        },
+      },
     });
-    assert.ok(outcome.output.kind === "error" && outcome.output.code === "provider_not_implemented", JSON.stringify(outcome.output));
+    assert.ok(outcome.output.kind === "error" && outcome.output.code === "internal_error", JSON.stringify(outcome.output));
     assert.equal(created, false);
+    assert.deepEqual(given, { apiKey: OPENAI_VALUE, apiBaseUrl: DEFAULT_OPENAI_API_BASE_URL, requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS, maxRetries: DEFAULT_MAX_RETRIES, model: "gpt-x", maxOutputTokens: 64 });
   });
 
   test("doctor: the quick form's api_key and model checks are about the chosen provider", async () => {

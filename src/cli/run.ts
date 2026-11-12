@@ -21,12 +21,15 @@ import path from "node:path";
 import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
+  ApiProviderDeps,
+  ApiProviderName,
   CliErrorCode,
   CliErrorOutput,
   CliOutput,
   Clock,
   CodarynConfig,
   CreateAnthropicProvider,
+  CreateApiProvider,
   DefaultConfigDisplay,
   DefaultConfigLocation,
   EngineResult,
@@ -55,7 +58,7 @@ import type { Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
-import { anthropicProviderFactory } from "./provider.js";
+import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "./run-id.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import {
@@ -99,6 +102,13 @@ export interface CliEnvironment {
   readonly createAnthropicProvider?: CreateAnthropicProvider | null;
   /** Passed to the anthropic provider. Tests inject `fetch` here; the real CLI leaves it unset. */
   readonly anthropicDeps?: AnthropicProviderDeps;
+  /**
+   * SP-6: overrides an API provider's factory (API_PROVIDER_FACTORIES when absent); `null` stands for
+   * a provider that is not connected. For anthropic, `createAnthropicProvider` is read first.
+   */
+  readonly providerFactories?: { readonly [P in ApiProviderName]?: CreateApiProvider | null };
+  /** SP-6: injection points per API provider; anthropic falls back to `anthropicDeps`. */
+  readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
   /** Cancellation for the run. Created from the parsed arguments. */
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
   /**
@@ -665,19 +675,18 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     if (!resolved.ok) return error(resolved.code, resolved.message);
     // Already registered above (S-2); kept so the key sent is always a registered secret.
     addSecret(resolved.settings.apiKey);
-    if (task.model.provider !== "anthropic") {
-      // SP-6 connects the other API providers (DR-31); until then nothing is sent.
-      return error("provider_not_implemented", `the ${task.model.provider} provider is not connected yet; nothing was sent`);
-    }
-    const factory = io.createAnthropicProvider === undefined ? anthropicProviderFactory : io.createAnthropicProvider;
+    // SP-6: the factory of the task's provider (API_PROVIDER_FACTORIES), given only its own settings.
+    const provider = task.model.provider;
+    const override = provider === "anthropic" && io.createAnthropicProvider !== undefined ? io.createAnthropicProvider : io.providerFactories?.[provider];
+    const factory = override === undefined ? API_PROVIDER_FACTORIES[provider] : override;
     if (factory === null) {
-      return error("provider_not_implemented", "the anthropic provider is not connected; nothing was sent");
+      return error("provider_not_implemented", `the ${provider} provider is not connected; nothing was sent`);
     }
     try {
-      model = factory(resolved.settings, io.anthropicDeps);
+      model = factory(resolved.settings, io.providerDeps?.[provider] ?? (provider === "anthropic" ? io.anthropicDeps : undefined));
     } catch {
       // The provider re-checks the settings and throws only if they disagree with the CLI's checks.
-      return error("internal_error", "the anthropic provider rejected the resolved settings; nothing was sent");
+      return error("internal_error", `the ${provider} provider rejected the resolved settings; nothing was sent`);
     }
   } else {
     const scriptText = await readText(io, task.model.scriptPath);

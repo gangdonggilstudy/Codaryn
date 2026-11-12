@@ -1059,7 +1059,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 
 ### 19.4 명령
 
-- `run`: openai를 고르면 아직 `provider_not_implemented`로 끝나고 아무것도 보내지 않는다. 어댑터 연결은 SP-6이다.
+- `run`(SP-6): API 제공자는 먼저 그 제공자의 설정(키, 모델, 출력 토큰, 주소, 시간)을 모두 해석한 뒤, 그 제공자의 공장(`API_PROVIDER_FACTORIES`, `src/cli/provider.ts`)으로 만든다. openai는 Responses API 어댑터(`src/model/openai`)다. 공장은 그 제공자의 해석 결과만 받으므로, 키는 그 제공자의 주소로만 간다.
 - `doctor`: `api_key`, `model` 점검은 고른 제공자의 키 변수(`doctor.api_key.ok {keyEnv}`, `doctor.api_key.missing {keyEnv, provider}`), 모델·주소 변수, 설정, 주소 규칙으로 한다.
   - 키가 있으면 `api_key`의 `message`가 그 키가 가는 주소의 origin(스킴·호스트·포트)과 그 주소의 출처(주소 변수, 설정 필드, 기본 주소)를 적는다(DR-34 (a)). 경로는 적지 않는다. 경로에 주소 말고 다른 것이 들어 있을 수 있어서다.
     - 예: `ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)`

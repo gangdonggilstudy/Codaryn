@@ -298,12 +298,22 @@ export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
 /**
- * DR-31 (g): a loose shape for OpenAI keys. Their prefixes, length and characters are not documented
- * (facts C-3), so keys are never checked by length or characters; this shape only finds key-like
- * text to hide and to refuse in files: `sk-` at a word start and 32 or more of `A-Z a-z 0-9 _ -`.
- * Short words such as `sk-learn` and `sk-` inside a word (`task-...`) are not matched.
+ * DR-31 (g), DR-32 (a): the shape of an OpenAI key for refusing it in files and arguments (S-6, S-8).
+ * Their prefixes, length and characters are not documented (facts C-3), so a key is never checked by
+ * length or characters; refusal rests mainly on matching the registered key values (S-2 registers
+ * every API_KEY_ENVS value). This shape is the narrow second check: `sk-` at a word start, then 32 or
+ * more of `A-Z a-z 0-9 _ -` among which there are both a digit and an upper-case letter. Random key
+ * text nearly always has both; ordinary names (kebab folders, branches, CSS classes, UUID ids,
+ * anchors) nearly never do (R-19 L-1).
  */
-export const OPENAI_KEY_PATTERN_SOURCE = "\\bsk-[A-Za-z0-9_-]{32,}";
+export const OPENAI_KEY_PATTERN_SOURCE = "\\bsk-(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]*[A-Z])[A-Za-z0-9_-]{32,}";
+
+/**
+ * DR-32 (a): the loose OpenAI key shape, for hiding key-like text in output only (never for
+ * refusing): `sk-` at a word start and 32 or more of `A-Z a-z 0-9 _ -`. It also hides some ordinary
+ * names; that costs readability, not a refused run.
+ */
+export const OPENAI_KEY_LOOSE_PATTERN_SOURCE = "\\bsk-[A-Za-z0-9_-]{32,}";
 
 /**
  * The API providers, in the order help and lists show them: Anthropic first (the first provider),
@@ -373,7 +383,14 @@ export const API_KEY_ENVS = [ANTHROPIC_API_KEY_ENV, OPENAI_API_KEY_ENV] as const
 export type ApiKeyEnv = (typeof API_KEY_ENVS)[number];
 
 /**
- * Every key shape Codaryn knows (regular expression sources), for refusing keys in files and
- * arguments (S-6, S-8) and hiding them in output. Each API_PROVIDERS entry's shapes are among them.
+ * Every key shape Codaryn knows (regular expression sources) for refusing keys in files and
+ * arguments (S-6, S-8), after the match against registered key values. Each API_PROVIDERS entry's
+ * shapes are among them. DR-32 (a): narrow shapes only.
  */
 export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
+
+/**
+ * DR-32 (a): the key shapes for hiding key-like text in output (human output, message parameters,
+ * provider error messages): the refusal shapes and the loose OpenAI shape. Never used to refuse.
+ */
+export const API_KEY_MASK_PATTERN_SOURCES = [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE, OPENAI_KEY_LOOSE_PATTERN_SOURCE] as const;

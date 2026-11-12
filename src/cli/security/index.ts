@@ -6,8 +6,19 @@
 
 export { checkLocalPathSyntax, locateInWorkspace, relateRealPaths } from "./paths.js";
 export type { PathRelation, PathSyntaxOutcome, RealpathFs, WorkspaceLocation } from "./paths.js";
-export { KNOWN_FIELD_NAMES, MAX_KEY_SCAN_DEPTH, MIN_CURRENT_KEY_LENGTH, findKeyInJson, goalHoldsKey, isKeyFieldName, rawTextHoldsKey } from "./keys.js";
-export type { KeyScanOutcome } from "./keys.js";
+export {
+  KEY_MASK_SHAPE_SOURCE,
+  KEY_REFUSAL_SHAPE_SOURCE,
+  KNOWN_FIELD_NAMES,
+  MAX_KEY_SCAN_DEPTH,
+  MIN_CURRENT_KEY_LENGTH,
+  findKeyInJson,
+  goalHoldsKey,
+  isKeyFieldName,
+  keyValuesOf,
+  rawTextHoldsKey,
+} from "./keys.js";
+export type { KeyScanOutcome, KnownKeys } from "./keys.js";
 export {
   ENV_FILE_NON_SECRETS,
   ENV_NAME_PATTERN,
@@ -19,5 +30,6 @@ export {
 export type { EnvSnapshot, SecretEnvNamesOutcome } from "./env.js";
 export { ABSOLUTE_LIMITS, MAX_TIMER_MS, checkTimerMs, resolveBoundedLimits } from "./limits.js";
 export type { BoundedLimitsInput, BoundedLimitsOutcome } from "./limits.js";
-export { API_BASE_URL_STRICT_RULE, normalizeApiBaseUrlStrict } from "./url.js";
+export { API_BASE_URL_STRICT_RULE, API_BASE_URL_WITH_VERSION_RULE, normalizeApiBaseUrlStrict } from "./url.js";
+export type { ApiBaseUrlPath } from "./url.js";
 export type { ApiBaseUrlOutcome } from "./url.js";

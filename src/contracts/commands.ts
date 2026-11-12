@@ -6,7 +6,7 @@
  */
 
 import type { FileChangeRecord, EngineResult, RunReason, TerminalRunStatus } from "./engine.js";
-import type { DefaultConfigDisplay } from "./config.js";
+import type { ApiModelEnv, ApiProviderName, DefaultConfigDisplay } from "./config.js";
 import type { DoctorText, MessageLanguage, RunId } from "./human.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { ModelInfo } from "./model.js";
@@ -192,7 +192,9 @@ export interface DoctorCheck {
   /**
    * One line built from fixed text, field positions (such as `policy.commands[2]`) and counts.
    * Never a value read from a file or the environment: the API key is reported as present or
-   * absent only, and paths, names and contents are not echoed.
+   * absent only, and paths, names and contents are not echoed. One exception (DR-34 (a), DR-36 (b)):
+   * the origin (scheme, host, port) the chosen provider's requests and key go to, from the person's
+   * own setting, as ApiOrigin.
    */
   readonly message: string;
   /**
@@ -200,6 +202,12 @@ export interface DoctorCheck {
    * in the chosen language. Absent only in outputs from before N-21.
    */
   readonly text?: DoctorText;
+  /**
+   * DR-36 (b): further lines of the same check in the chosen language, after `text`, in order (for
+   * example `doctor.model.other_provider_variable`, one per variable). Absent: none. They do not
+   * change the check's status.
+   */
+  readonly notes?: readonly DoctorText[];
 }
 
 /** `warn`: a run may work but something needs attention. `fail`: a run would stop. */
@@ -246,21 +254,27 @@ export interface ModelsListEntry extends ModelInfo {
 export interface ModelsOutput {
   readonly schemaVersion: 1;
   readonly kind: "models";
+  /** SP-6 (DR-31): the provider listed (`--provider`, else the config's). Optional until the CLI sets it. */
+  readonly provider?: ApiProviderName;
   readonly status: ModelsStatus;
   readonly exitCode: number;
   /** In the API's order. */
   readonly models: readonly ModelsListEntry[];
   /**
-   * The model a run without a task `model.model` would use now: CODARYN_MODEL, else the config
-   * file's `model`. `listed` says whether that id is in `models`. Null when neither is set.
+   * The model a run of the listed provider without a task `model.model` would use now: that
+   * provider's model variable (DR-34, DR-36 (a): CODARYN_MODEL for anthropic, CODARYN_OPENAI_MODEL
+   * for openai), else the config file's model for that provider. `source` names which: the
+   * variable's name or "config". `listed` says whether that id is in `models`. Null when neither is
+   * set.
    */
-  readonly current: { readonly id: string; readonly source: "CODARYN_MODEL" | "config"; readonly listed: boolean } | null;
+  readonly current: { readonly id: string; readonly source: ApiModelEnv | "config"; readonly listed: boolean } | null;
   /**
    * The model written by `--use` or chosen at the terminal prompt, or null. `created`: the config
    * file did not exist and was created with `schemaVersion` and `model` only.
-   * `overriddenBy`: CODARYN_MODEL is set, so runs keep using it until it is unset.
+   * `overriddenBy`: the listed provider's model variable (DR-36 (a)) is set, so its runs keep using
+   * that variable's model until it is unset.
    */
-  readonly selected: { readonly id: string; readonly created: boolean; readonly overriddenBy: "CODARYN_MODEL" | null } | null;
+  readonly selected: { readonly id: string; readonly created: boolean; readonly overriddenBy: ApiModelEnv | null } | null;
 }
 
 /**
@@ -297,6 +311,8 @@ export const INIT_EXIT_CODES: { readonly [S in InitStatus]: number } = { created
 export interface InitOutput {
   readonly schemaVersion: 1;
   readonly kind: "init";
+  /** SP-6 (DR-31): the provider the written config uses; `keySet` is about its key variable. Optional until the CLI sets it. */
+  readonly provider?: ApiProviderName;
   readonly status: InitStatus;
   readonly exitCode: number;
   /**

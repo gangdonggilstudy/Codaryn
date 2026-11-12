@@ -40,12 +40,21 @@ export const FAKE_API_KEY_DECOY = "cdy-fake-decoy-Bw6Jt1Qc5Gm";
 /** S-11: keys must be printable ASCII without spaces. These two are malformed on purpose. */
 export const FAKE_API_KEY_SPACE = "cdy-fake apikey-Mb5Tq8Lw";
 export const FAKE_API_KEY_NON_ASCII = "cdy-fake-apikey-ü-Wd3Kp9";
+/**
+ * The second provider (OpenAI, DR-31): set with `cliEnv({ fakeOpenAiKey })`. Not of the loose `sk-`
+ * shape (design 4.3), so neither the CLI nor the commit hook takes it for a real key.
+ */
+export const FAKE_OPENAI_KEY = "cdy-fake-oaikey-Tn4Rw8Kp2Zs6";
+/** For an OpenAI run that the fake server answers 401. */
+export const FAKE_OPENAI_KEY_REJECTED = "cdy-fake-oaikey-rejected-Hv5Jm3";
 export const FAKE_API_KEYS: readonly string[] = [
   FAKE_API_KEY,
   FAKE_API_KEY_ENV_FILE,
   FAKE_API_KEY_DECOY,
   FAKE_API_KEY_SPACE,
   FAKE_API_KEY_NON_ASCII,
+  FAKE_OPENAI_KEY,
+  FAKE_OPENAI_KEY_REJECTED,
 ];
 
 /** S-4: a value an env file sets. Eight characters or more, so it is registered as a secret. */

@@ -13,11 +13,19 @@ import type { WorkflowDefinition } from "./workflow.js";
 
 /** API key. Read from the process environment only, kept in memory, never written or printed. */
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
-/** Model id. Used when the task does not name one. */
+/**
+ * Model id. Used when the task does not name one. DR-34: the Anthropic provider's only, as before
+ * there was a second provider (API_PROVIDERS.anthropic.modelEnv); OpenAI has its own variable.
+ */
 export const CODARYN_MODEL_ENV = "CODARYN_MODEL";
 /** Path of the config file. Used when `--config` is not given. */
 export const CODARYN_CONFIG_ENV = "CODARYN_CONFIG";
-/** API base URL. Overrides the config file's `apiBaseUrl`. A task file cannot change it. */
+/**
+ * API base URL. DR-34: the Anthropic provider's only, as before there was a second provider
+ * (API_PROVIDERS.anthropic.baseUrlEnv): it overrides the config file's Anthropic address and never
+ * sets another provider's, so a key goes only to its own provider's address (R-20 M-1). A task file
+ * cannot change it.
+ */
 export const CODARYN_API_BASE_URL_ENV = "CODARYN_API_BASE_URL";
 
 export const CONFIG_SCHEMA_VERSION = 1;
@@ -26,9 +34,11 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * Config file shape. Every field except `schemaVersion` is optional. Unknown fields are rejected.
  *
  * Precedence:
- * - model: task `model.model` → CODARYN_MODEL → `model`. None of them → nothing is sent.
+ * - model: task `model.model` → the provider's model variable (DR-34: CODARYN_MODEL for anthropic,
+ *   CODARYN_OPENAI_MODEL for openai) → `model`. None of them → nothing is sent.
  * - maxOutputTokens: task `model.maxOutputTokens` → `maxOutputTokens`. None → nothing is sent.
- * - apiBaseUrl: CODARYN_API_BASE_URL → `apiBaseUrl` → DEFAULT_ANTHROPIC_API_BASE_URL.
+ * - apiBaseUrl: the provider's address variable (DR-34: CODARYN_API_BASE_URL for anthropic,
+ *   CODARYN_OPENAI_API_BASE_URL for openai) → `apiBaseUrl` → the provider's default address.
  * - requestTimeoutMs, maxRetries: this file → the DEFAULT_ constants.
  * - limits: each field from the task's `limits`, else from this file. A field set in neither is an error.
  *   This file's values are upper bounds: a task may lower them, never raise them or lift a token
@@ -45,6 +55,14 @@ export const CONFIG_SCHEMA_VERSION = 1;
  * - workflowRef (G-A, DR-2): the task file's `workflowRef`; in the quick form `--workflow <id>`;
  *   else the chosen profile's `workflowRef`; else none (legacy settings). `--workflow` is the quick
  *   form's only way to name a definition, in `run`, `plan`, `apply` and `review` alike.
+ * - provider (SP-D3, SP-D10, DR-31): a task file's `model.provider`; in the quick form the chosen
+ *   profile's `provider`, else this file's `provider`, else "anthropic". The provider's settings
+ *   (`model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`) come from
+ *   `providers.<name>`; for "anthropic" the top-level fields are read as before (backward
+ *   compatible). Giving top-level provider settings and `providers.anthropic` together is
+ *   `invalid_config`. Each provider has its own model and address variables (DR-34, API_PROVIDERS
+ *   `modelEnv`, `baseUrlEnv`); one never sets another provider's. The key comes from the provider's
+ *   own variable.
  */
 export interface CodarynConfig {
   readonly schemaVersion: 1;
@@ -73,6 +91,14 @@ export interface CodarynConfig {
   readonly integrity?: IntegrityConfig;
   /** N-4: language of the human-readable messages. CODARYN_LANG overrides it. Absent: the OS language. */
   readonly language?: MessageLanguage;
+  /** SP-D3: the API provider of a run whose task names none (the quick form). Absent: "anthropic". */
+  readonly provider?: ApiProviderName;
+  /**
+   * SP-D3: settings per API provider. `providers.anthropic` is the same as the top-level fields and
+   * may not be given together with them. A provider not listed uses the DEFAULT_ constants and its
+   * table entry (API_PROVIDERS); a model is never defaulted (C-3).
+   */
+  readonly providers?: { readonly [P in ApiProviderName]?: ProviderSettings };
   /**
    * N-8: named bundles of policy, verifiers and limits, chosen with `--profile <name>`. Names match
    * PROFILE_NAME_PATTERN_SOURCE; at most MAX_PROFILES entries. Profiles exist only in this file:
@@ -100,7 +126,20 @@ export interface CodarynConfig {
  * A task file run with `--profile` takes only the profile's limits (as upper bounds): a task file
  * states its own policy and verifiers.
  */
+/** SP-D3: one API provider's settings in the config file. Same rules as the top-level fields. */
+export interface ProviderSettings {
+  readonly model?: string;
+  /** Positive integer, at most the provider's `maxOutputTokensLimit` (API_PROVIDERS). */
+  readonly maxOutputTokens?: number;
+  /** `https:` URL, or `http:` for a loopback host only. Path rule: the provider's `baseUrlPath`. */
+  readonly apiBaseUrl?: string;
+  readonly requestTimeoutMs?: number;
+  readonly maxRetries?: number;
+}
+
 export interface ConfigProfile {
+  /** SP-D10: the API provider for the quick form with this profile; it wins over the config's `provider`. */
+  readonly provider?: ApiProviderName;
   readonly policy?: PolicyConfig;
   readonly verifiers?: readonly VerifierConfig[];
   readonly limits?: Partial<Limits>;
@@ -117,7 +156,7 @@ export const MAX_PROFILES = 32;
  * N-3: a model value that only holds a place. After trimming, an empty string or one that starts
  * with `<` and ends with `>` and has no other `<` or `>`. Example files and `codaryn init`
  * (without a key) write MODEL_PLACEHOLDER. A placeholder in the task (`model.model`), in
- * CODARYN_MODEL or in the config's `model` counts as not set at that level, so the next level in
+ * the provider's model variable or in the config's `model` counts as not set at that level, so the next level in
  * the model order is used; when none is left, `run` stops as `provider_not_configured` and
  * `doctor`'s `model` check fails. Nothing is sent.
  */
@@ -256,3 +295,182 @@ export const KEY_FIELD_NAMES = [
  * current ANTHROPIC_API_KEY value when it has at least 16 characters.
  */
 export const ANTHROPIC_KEY_PATTERN_SOURCE = "sk-ant-[A-Za-z0-9_-]{8,}";
+
+// ---------------------------------------------------------------------------------------------
+// SP-1 (docs/design/second-provider.md 4.1, DR-22, DR-31): one table of the API providers.
+
+/**
+ * DR-31 (g), facts C-3: the OpenAI key variable. Its provider joins API_PROVIDERS with its adapter
+ * (SP-5); the key is known now so that S-2 and every key check cover it whatever provider runs.
+ */
+export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
+
+/** DR-34: the OpenAI model id when the task does not name one (API_PROVIDERS.openai.modelEnv). */
+export const CODARYN_OPENAI_MODEL_ENV = "CODARYN_OPENAI_MODEL";
+
+/**
+ * DR-34: the OpenAI API address, with its version (API_PROVIDERS.openai.baseUrlEnv). It overrides
+ * the config file's OpenAI address only. A task file cannot change it.
+ */
+export const CODARYN_OPENAI_API_BASE_URL_ENV = "CODARYN_OPENAI_API_BASE_URL";
+
+/**
+ * DR-34 (b), R-20 M-2: S-2 registers the key value of the provider a run uses as a secret whatever
+ * its length, as before. The value of every other API_KEY_ENVS variable is registered only when it
+ * has at least this many characters, so a short placeholder kept there for another tool (`EMPTY`,
+ * `ollama`, `x`) does not turn ordinary words into secrets. A real key is far longer.
+ */
+export const MIN_OTHER_PROVIDER_KEY_LENGTH = 20;
+
+/**
+ * DR-36 (a): every provider's model variable (API_PROVIDERS `modelEnv`), for outputs that name where
+ * a model id came from. Fixed names, never values.
+ */
+export const API_MODEL_ENVS = [CODARYN_MODEL_ENV, CODARYN_OPENAI_MODEL_ENV] as const;
+export type ApiModelEnv = (typeof API_MODEL_ENVS)[number];
+
+/** DR-36: every provider's address variable (API_PROVIDERS `baseUrlEnv`). Fixed names, never values. */
+export const API_BASE_URL_ENVS = [CODARYN_API_BASE_URL_ENV, CODARYN_OPENAI_API_BASE_URL_ENV] as const;
+export type ApiBaseUrlEnv = (typeof API_BASE_URL_ENVS)[number];
+
+/**
+ * DR-33 (1): an OpenAI key with a distinct prefix: `sk-proj-`, `sk-svcacct-` or `sk-admin-` at a word
+ * start, then 20 or more of `A-Z a-z 0-9 _ -`.
+ */
+export const OPENAI_PREFIXED_KEY_PATTERN_SOURCE = "\\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}";
+
+/**
+ * DR-33 (2): the older OpenAI key without such a prefix: `sk-` at a word start, then a run of 40 or
+ * more letters and digits only (no `-`, no `_`) holding a digit, an upper-case and a lower-case
+ * letter, and ending there (not followed by a letter, digit, `-` or `_`). A name with a hyphen or an
+ * underscore after `sk-` is never this shape.
+ */
+export const OPENAI_LEGACY_KEY_PATTERN_SOURCE =
+  "\\bsk-(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])[A-Za-z0-9]{40,}(?![A-Za-z0-9_-])";
+
+/**
+ * DR-31 (g), DR-32 (a), DR-33: the OpenAI key shapes for refusing a key in files and arguments (S-6,
+ * S-8): OPENAI_PREFIXED_KEY_PATTERN_SOURCE or OPENAI_LEGACY_KEY_PATTERN_SOURCE, nothing else.
+ *
+ * - Not a key check. OpenAI documents no key prefix, length or character set (facts C-3); these
+ *   prefixes and lengths are observed practice. They are never used to accept or reject a key, only
+ *   as a second check when refusing. The main defence is matching the key values registered from the
+ *   environment (S-2 registers every API_KEY_ENVS value), which finds a key whatever its shape.
+ * - Still refused although not a key (false positives left): a name starting `sk-proj-`,
+ *   `sk-svcacct-` or `sk-admin-` with 20 or more characters after it (`sk-proj-` and a long kebab
+ *   name); a single unbroken run of 40 or more letters and digits after `sk-` mixing digits, upper
+ *   and lower case (a mixed-case hash or id written as one word).
+ * - Not refused by shape (misses left; the registered value still finds them): a key with any other
+ *   prefix; an older key shorter than 40, holding `-` or `_`, lacking one of the three character
+ *   kinds, or directly followed by `-` or `_`; a prefixed key with fewer than 20 characters after the
+ *   prefix; any key glued to a letter, digit or `_` before `sk` (no word start).
+ * - Word start: in these JavaScript patterns only `A-Z a-z 0-9 _` are word characters, so `sk` right
+ *   after Hangul or other non-ASCII text starts a word and is checked.
+ * - Not refused any more (Codex review, R-19): ordinary names with upper case and digits such as
+ *   branches, an id with an upper-case UUID, folders with a version, because each holds a hyphen.
+ */
+export const OPENAI_KEY_PATTERN_SOURCE = `(?:${OPENAI_PREFIXED_KEY_PATTERN_SOURCE})|(?:${OPENAI_LEGACY_KEY_PATTERN_SOURCE})` as const;
+
+/**
+ * DR-32 (a): the loose OpenAI key shape, for hiding key-like text in output only (never for
+ * refusing): `sk-` at a word start and 32 or more of `A-Z a-z 0-9 _ -`. It also hides some ordinary
+ * names; that costs readability, not a refused run. With the refusal shapes (API_KEY_MASK_PATTERN_SOURCES)
+ * it also hides the key-like text the refusal shapes leave out because of a hyphen or an underscore.
+ */
+export const OPENAI_KEY_LOOSE_PATTERN_SOURCE = "\\bsk-[A-Za-z0-9_-]{32,}";
+
+/**
+ * The API providers, in the order help and lists show them: Anthropic first (the first provider),
+ * then OpenAI (DR-22, DR-31, SP-5). Readers take provider facts from API_PROVIDERS, never from a list
+ * of their own.
+ */
+export const API_PROVIDER_NAMES = ["anthropic", "openai"] as const;
+export type ApiProviderName = (typeof API_PROVIDER_NAMES)[number];
+
+/** Every model provider a task may name: the scripted one (tests, offline runs) and the API providers. */
+export const MODEL_PROVIDER_NAMES = ["scripted", ...API_PROVIDER_NAMES] as const;
+
+/** What the CLI needs to know about one API provider. */
+export interface ApiProviderSpec {
+  /** The environment variable the key is read from (the only place a key comes from). */
+  readonly keyEnv: string;
+  /**
+   * DR-34: the environment variable that names this provider's model when the task does not. It
+   * applies to this provider only.
+   */
+  readonly modelEnv: ApiModelEnv;
+  /**
+   * DR-34: the environment variable that overrides this provider's address (over its config value).
+   * It applies to this provider only: no variable sends one provider's key to an address set for
+   * another. The address rule of `baseUrlPath` applies to it too.
+   */
+  readonly baseUrlEnv: ApiBaseUrlEnv;
+  /** Key shapes to find in files, arguments and output (regular expression sources). */
+  readonly keyPatternSources: readonly string[];
+  /** Used when neither CODARYN_API_BASE_URL nor the config gives an address. */
+  readonly defaultApiBaseUrl: string;
+  /**
+   * How the address relates to the API path: `without_version` (the adapter adds `/v1/...`, so an
+   * address ending in `/v1` is refused, S-9) or `with_version` (the address includes the version).
+   */
+  readonly baseUrlPath: "without_version" | "with_version";
+  /** Largest `maxOutputTokens` accepted. */
+  readonly maxOutputTokensLimit: number;
+  /** Smallest `maxOutputTokens` accepted (openai: 16, facts C-10). */
+  readonly minOutputTokens: number;
+}
+
+/** DR-31, facts C-4: the OpenAI API address; it includes the version (`/v1`). */
+export const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+
+/**
+ * The provider table. The Anthropic entry holds exactly the values the CLI used before it (its
+ * model and address variables included, DR-34).
+ * OpenAI (DR-31): key OPENAI_API_KEY, the refusal key shapes (DR-33), the address with `/v1`, at least 16
+ * output tokens (facts C-10). Its largest output cap is not documented (facts); Codaryn's own bound
+ * MAX_OUTPUT_TOKENS_LIMIT applies, as for Anthropic, until the PM sets another.
+ */
+export const API_PROVIDERS = {
+  anthropic: {
+    keyEnv: ANTHROPIC_API_KEY_ENV,
+    modelEnv: CODARYN_MODEL_ENV,
+    baseUrlEnv: CODARYN_API_BASE_URL_ENV,
+    keyPatternSources: [ANTHROPIC_KEY_PATTERN_SOURCE],
+    defaultApiBaseUrl: DEFAULT_ANTHROPIC_API_BASE_URL,
+    baseUrlPath: "without_version",
+    maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+    minOutputTokens: 1,
+  },
+  openai: {
+    keyEnv: OPENAI_API_KEY_ENV,
+    modelEnv: CODARYN_OPENAI_MODEL_ENV,
+    baseUrlEnv: CODARYN_OPENAI_API_BASE_URL_ENV,
+    keyPatternSources: [OPENAI_KEY_PATTERN_SOURCE],
+    defaultApiBaseUrl: DEFAULT_OPENAI_API_BASE_URL,
+    baseUrlPath: "with_version",
+    maxOutputTokensLimit: MAX_OUTPUT_TOKENS_LIMIT,
+    minOutputTokens: 16,
+  },
+} as const satisfies { readonly [P in ApiProviderName]: ApiProviderSpec };
+
+
+/**
+ * Every API key variable Codaryn knows, the providers still being added included. S-2 (SP-2)
+ * registers all of their values as secrets, whatever provider runs; output cleaning removes all of
+ * them. Each API_PROVIDERS entry's `keyEnv` is one of them.
+ */
+export const API_KEY_ENVS = [ANTHROPIC_API_KEY_ENV, OPENAI_API_KEY_ENV] as const;
+export type ApiKeyEnv = (typeof API_KEY_ENVS)[number];
+
+/**
+ * Every key shape Codaryn knows (regular expression sources) for refusing keys in files and
+ * arguments (S-6, S-8), after the match against registered key values. Each API_PROVIDERS entry's
+ * shapes are among them. DR-32 (a): narrow shapes only.
+ */
+export const API_KEY_PATTERN_SOURCES = [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE] as const;
+
+/**
+ * DR-32 (a): the key shapes for hiding key-like text in output (human output, message parameters,
+ * provider error messages): the refusal shapes and the loose OpenAI shape. Never used to refuse.
+ */
+export const API_KEY_MASK_PATTERN_SOURCES = [ANTHROPIC_KEY_PATTERN_SOURCE, OPENAI_KEY_PATTERN_SOURCE, OPENAI_KEY_LOOSE_PATTERN_SOURCE] as const;

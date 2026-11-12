@@ -9,12 +9,15 @@
  * - The host ends when stdin ends, so it never outlives the main process (DR-8).
  */
 
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
+import { MAX_RUN_ITEM_CHARS, MIN_NODE_MAJOR, encodeLine, nodeMajor } from "../shared/protocol.js";
 import { serve } from "./host.js";
+import { loopbackOnlyFetch } from "./transport.js";
 import type { HostApp, HostMessages } from "./host.js";
+import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
 import type { TreeEngine } from "./tree.js";
 
@@ -37,7 +40,9 @@ function writeLine(line: string): void {
 /** The engine modules this host uses, checked when loaded (src/app/index.ts, src/i18n/index.ts). */
 interface EngineAppModule {
   createNodeAppEnvironment(): Promise<unknown>;
-  createCodarynApp(environment: unknown): HostApp;
+  createCodarynApp(environment: unknown, hooks?: { readonly anthropicDeps?: { readonly fetch?: typeof fetch } }): HostApp;
+  /** DR-22: the providers the app layer connects (an array of names). */
+  readonly CONNECTED_MODEL_PROVIDERS?: unknown;
 }
 
 interface EngineWorkspaceModule {
@@ -45,7 +50,7 @@ interface EngineWorkspaceModule {
 }
 
 interface EngineTextSafetyModule {
-  cleanText(text: string): string;
+  cleanText(text: string, keepLineBreaks?: boolean): string;
   hideKeys(text: string, currentKey: string | null): string;
 }
 
@@ -54,11 +59,57 @@ interface EngineI18nModule {
   createMessageCatalog(language: string): { format(id: string): string };
 }
 
-function engineDirFromArgs(argv: readonly string[]): string | null {
-  if (argv.length !== 2 || argv[0] !== "--engine-dir") return null;
+/** N-C: the CLI's renderer for people (src/cli/human/output.ts); progress lines come from it (3.6). */
+interface EngineHumanModule {
+  createHumanOutput(catalog: unknown): {
+    progressLine(event: unknown): string | null;
+    applyProgressLine?(event: unknown): string | null;
+  };
+}
+
+const RECORD_TYPE = /^[a-z][a-z_]{0,39}$/;
+const RECORD_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
+
+/** GU-3: a run's events as progress items in `language`: the CLI's sentences, on one line, cleaned. */
+function runItems(human: ReturnType<EngineHumanModule["createHumanOutput"]>, shown: (text: string) => string): RunItemOf {
+  const oneLine = (text: string): string => shown(text.replace(/\r?\n+$/, "").replace(/\r?\n/g, " ")).slice(0, MAX_RUN_ITEM_CHARS);
+  return (event) => {
+    if (typeof event !== "object" || event === null) return null;
+    const { kind, text, record } = event as Record<string, unknown>;
+    if (kind === "notice") return typeof text === "string" ? { at: null, kind: "notice", text: oneLine(text) } : null;
+    if (kind !== "record" || typeof record !== "object" || record === null) return null;
+    const { type, at } = record as Record<string, unknown>;
+    if (typeof type !== "string" || !RECORD_TYPE.test(type)) return null;
+    let line: string | null = null;
+    try {
+      line = human.progressLine(record);
+    } catch {
+      line = null;
+    }
+    if (line === null && human.applyProgressLine !== undefined) {
+      try {
+        line = human.applyProgressLine(record);
+      } catch {
+        line = null;
+      }
+    }
+    if (line === null) return null;
+    // A denied tool call is its own kind, so the window can show denials only (3.6 filter).
+    const itemKind = type === "tool_decision" && (record as Record<string, unknown>)["allowed"] === false ? "tool_denied" : type;
+    return { at: typeof at === "string" && RECORD_TIME.test(at) ? at : null, kind: itemKind, text: oneLine(line) };
+  };
+}
+
+/**
+ * `--engine-dir <dir> [--transport loopback-only]`. R21-I-3: the transport argument is given only
+ * by tests (the smoke test, the unit tests that start this host); it only takes away (transport.ts).
+ */
+function parseArgs(argv: readonly string[]): { readonly engineDir: string; readonly loopbackOnly: boolean } | null {
+  const loopbackOnly = argv.length === 4 && argv[2] === "--transport" && argv[3] === "loopback-only";
+  if ((argv.length !== 2 && !loopbackOnly) || argv[0] !== "--engine-dir") return null;
   const dir = argv[1] as string;
-  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"]];
-  return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? dir : null;
+  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"], ["cli", "human", "output.js"], ["contracts", "index.js"]];
+  return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? { engineDir: dir, loopbackOnly } : null;
 }
 
 async function load<T>(file: string, names: readonly string[]): Promise<T | null> {
@@ -78,20 +129,43 @@ async function main(): Promise<number> {
     log(`codaryn engine host: Node ${MIN_NODE_MAJOR} or later is required`);
     return 3;
   }
-  const engineDir = engineDirFromArgs(process.argv.slice(2));
-  if (engineDir === null) {
-    log("codaryn engine host: usage: main.js --engine-dir <absolute path of the built engine>");
+  const args = parseArgs(process.argv.slice(2));
+  if (args === null) {
+    log("codaryn engine host: usage: main.js --engine-dir <absolute path of the built engine> [--transport loopback-only]");
     return 2;
   }
+  const engineDir = args.engineDir;
   const appModule = await load<EngineAppModule>(join(engineDir, "app", "index.js"), ["createNodeAppEnvironment", "createCodarynApp"]);
   const i18n = await load<EngineI18nModule>(join(engineDir, "i18n", "index.js"), ["selectMessageLanguage", "createMessageCatalog"]);
   const workspaceModule = await load<EngineWorkspaceModule>(join(engineDir, "workspace", "index.js"), ["createWorkspace"]);
   const textSafety = await load<EngineTextSafetyModule>(join(engineDir, "cli", "text-safety.js"), ["cleanText", "hideKeys"]);
-  if (appModule === null || i18n === null || workspaceModule === null || textSafety === null) {
+  const humanModule = await load<EngineHumanModule>(join(engineDir, "cli", "human", "output.js"), ["createHumanOutput"]);
+  if (appModule === null || i18n === null || workspaceModule === null || textSafety === null || humanModule === null) {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
-  const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment());
+  // R21-I-3: tests reach this machine only (their fake API); nothing else is sent.
+  const hooks = args.loopbackOnly
+    ? { anthropicDeps: { fetch: loopbackOnlyFetch(fetch, () => log("codaryn engine host: the test transport refused a request outside this machine")) } }
+    : undefined;
+  const app = appModule.createCodarynApp(await appModule.createNodeAppEnvironment(), hooks);
+  // R21-I-2: the key variables of every provider the contract knows (API_PROVIDERS), not one name.
+  const contracts = (await import(pathToFileURL(join(engineDir, "contracts", "index.js")).href)) as Record<string, unknown>;
+  const table = contracts["API_PROVIDERS"];
+  const keyEnvs =
+    typeof table === "object" && table !== null
+      ? Object.values(table).flatMap((spec) => (typeof spec === "object" && spec !== null && typeof (spec as Record<string, unknown>)["keyEnv"] === "string" ? [(spec as Record<string, string>)["keyEnv"] as string] : []))
+      : [];
+  if (!keyEnvs.includes("ANTHROPIC_API_KEY")) keyEnvs.push("ANTHROPIC_API_KEY");
+  /** Key shapes, and the value of every provider's key variable now set, hidden. */
+  const hideAllKeys = (text: string): string => {
+    let out = textSafety.hideKeys(text, null);
+    for (const name of keyEnvs) {
+      const value = process.env[name];
+      if (value !== undefined && value.length > 0) out = textSafety.hideKeys(out, value);
+    }
+    return out;
+  };
   const messages: HostMessages = {
     texts(osLocale, ids) {
       const language = i18n.selectMessageLanguage({ env: process.env["CODARYN_LANG"] ?? null, config: null, osLocale });
@@ -107,16 +181,24 @@ async function main(): Promise<number> {
       return { language, texts };
     },
   };
+  const providers = Array.isArray(appModule.CONNECTED_MODEL_PROVIDERS)
+    ? appModule.CONNECTED_MODEL_PROVIDERS.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name))
+    : [];
+  const shown = (text: string): string => hideAllKeys(textSafety.cleanText(text));
+  // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
+  const shownText = (text: string): string => hideAllKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true));
   const tree = createTreeLister({
     createWorkspace: (options) => workspaceModule.createWorkspace(options),
     cleanText: (text) => textSafety.cleanText(text),
-    hideKeys: (text, key) => textSafety.hideKeys(text, key),
-    currentKey: () => process.env["ANTHROPIC_API_KEY"] ?? null,
+    hideKeys: (text) => hideAllKeys(text),
+    currentKey: () => null,
     platform: process.platform,
   });
   writeLine(encodeLine({ v: 1, type: "ready", node }));
   process.stdin.setEncoding("utf8");
-  await serve(process.stdin, { app, messages, tree, write: writeLine, log });
+  const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);
+  const token = (): string => randomBytes(16).toString("hex");
+  await serve(process.stdin, { app, messages, tree, shown, shownText, providers, itemsIn, token, write: writeLine, log });
   return 0;
 }
 

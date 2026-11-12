@@ -304,13 +304,17 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `CODARYN_MODEL` | 모델 ID |
 | `CODARYN_CONFIG` | 설정 파일 경로. `--config`가 없을 때 쓴다 |
 | `CODARYN_API_BASE_URL` | API 주소. 설정 파일의 `apiBaseUrl`보다 우선한다 |
+| `OPENAI_API_KEY` | OpenAI API 키(19절). 이 환경 변수로만 받는다 |
+| `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL` | OpenAI의 모델 ID와 주소(19.3, DR-34 (a)) |
+
+- `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 anthropic 전용이다(DR-34 (a)). 다른 제공자의 실행에는 쓰이지 않는다.
 
 - 비어 있거나 공백뿐인 값은 설정되지 않은 것으로 본다.
 - `--vars-file <경로>`를 줄 때만 그 파일을 `process.loadEnvFile`로 읽는다(C-2, T-15). `.env`를 자동으로 찾지 않는다. 이미 설정된 환경 변수가 파일 값보다 우선한다. 형식은 env 파일과 같다.
 - BOM이 있는 변수 파일은 첫 변수를 조용히 놓치므로 `invalid_config`로 거부한다.
 - 변수 파일이 새로 설정한 변수의 값은 비밀로 등록된다(S-4). 그래서 파일 내용이나 명령 출력에 나타나면 가려진다. 다음은 등록하지 않는다.
   - 이미 설정돼 있던 변수. Windows에서는 대소문자를 무시해 비교한다.
-  - `CODARYN_MODEL`, `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`
+  - `CODARYN_MODEL`, `CODARYN_CONFIG`, `CODARYN_API_BASE_URL`, `CODARYN_OPENAI_MODEL`, `CODARYN_OPENAI_API_BASE_URL`
   - 8자 미만 값
   - 앞뒤 공백을 떼면 값이 달라지는 경우에는 두 형태를 모두 등록한다.
 - 변수 파일은 작업 공간 밖에 둔다(S-1). `.env.example`을 작업 공간 밖의 폴더(예: `D:\codaryn\.env`)로 복사해 값을 채우고 `--vars-file`로 그 경로를 준다. 이 저장소의 `.env`는 Git이 무시한다.
@@ -326,7 +330,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | 요청 시간 제한, 재시도 | 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`(600000), `DEFAULT_MAX_RETRIES`(2) | 기본값 |
 | 한도 | 필드마다 task `limits` → 설정 `limits`. 설정 값은 상한이다(아래) | task 형식은 `invalid_task`, 간편 형식은 `invalid_config`(C-6). 재수정 한도 둘은 0과 2 |
 
-해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. `ANTHROPIC_API_KEY`가 설정되어 있으면(앞뒤 공백을 뗀 값) 제공자와 관계없이 scripted 실행에서도 비밀로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2). `CODARYN_API_BASE_URL`에도 설정 파일의 `apiBaseUrl`과 같은 엄격한 규칙을 적용한다(S-9).
+해석한 값은 `ResolvedAnthropicSettings`로 제공자에 전달한다. 키는 메모리에만 둔다. 알려진 키 변수(`API_KEY_ENVS`)의 값(앞뒤 공백을 뗀 값)은 scripted 실행에서도 비밀로 등록하므로, 파일 내용이나 명령 출력에 나타나면 가려진다(S-2, SP-2). 실행의 제공자 자신의 키는 길이와 상관없이, 그 밖의 키는 20자 이상일 때만 등록한다(DR-34 (b)). `EMPTY`, `ollama`, `x` 같은 자리표시자가 관계없는 실행을 깨뜨리지 않게 하기 위해서다. `CODARYN_API_BASE_URL`에도 설정 파일의 `apiBaseUrl`과 같은 엄격한 규칙을 적용한다(S-9).
 
 ### 한도 (S-7)
 
@@ -335,7 +339,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
   - 설정이 숫자인데 task가 `maxTotalTokens: null`이면 상한을 푸는 것이므로 `invalid_task`다.
   - 설정이 `null`이면 그 필드는 절대 상한만 적용한다.
   - 설정에 없는 필드는 task 값을 쓴다.
-- **anthropic 제공자는 `maxTotalTokens: null`을 쓸 수 없다.** task가 준 `null`이면 `invalid_task`, 설정이 준 `null`이면 `invalid_config`다. scripted는 `null`을 허용한다.
+- **API 제공자(anthropic, openai)는 `maxTotalTokens: null`을 쓸 수 없다**(19.2). task가 준 `null`이면 `invalid_task`, 설정이 준 `null`이면 `invalid_config`다. scripted는 `null`을 허용한다.
 - **코드의 절대 상한(`ABSOLUTE_LIMITS`):**
   - 턴 1000
   - 도구 호출 5000
@@ -868,6 +872,7 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
 - 승인
   - `--digest`가 저장된 다이제스트의 앞부분이어야 한다(`MIN_PLAN_DIGEST_PREFIX` = 12자 이상).
   - stdin과 stderr가 터미널이고 `--digest`가 없으면 계획을 보이고 `[y/N]`을 묻는다. 기본은 아니오다.
+    - 이때만 계획 보기의 인벤토리 상한 줄을 위해 작업 공간 목록을 한 번 만든다. 그 목록은 적용의 취소 신호를 받고, 취소되면 아무것도 옮기지 않고 `plan_not_approved`로 끝난다. `--digest`나 앱 계층의 적용은 엔진의 목록(행동 앞뒤 두 번)만 만든다(검토 R-18 L1).
   - 어느 쪽도 아니면 `plan_not_approved`(종료 2)다.
 - 적용
   - 잠금을 잡고 적용 실행을 새로 만든다. 첫 기록은 `apply_started`다.
@@ -920,6 +925,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
   - 글 출력은 그 이유를 한 번 말하고, 파일마다 경로와 상태만 보인다.
   - 다른 이유(`masked_path`: 경로에 가림 토큰이 있음, `snapshot_missing`, `not_text`, `too_large` 등)는 파일마다 보인다.
   - 실행이 글의 가림을 기록하게 되면(계약·store) 바뀐 구역(`-`/`+` 줄)을 다시 보인다.
+- 실행 id는 18.7의 규칙을 따른다(앱 계층이 store의 `inspectRun`으로 판정). 그 이름 그대로인 실행 디렉터리가 없으면 `run_not_found`, 실행 목록이 손상으로 보는 실행은 `invalid_run_record`(종료 2)이고, 경로도 내지 않는다.
 - 읽기만 한다. 잠금도, 요청도 하지 않는다.
 - `--json`은 `ChangesOutput` ASCII 한 줄이다(N-19). 키 모양은 JSON으로 만들기 전에 문자열마다 가린다(N-27 (c)).
 
@@ -927,7 +933,7 @@ codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) [--c
 
 - 실행 id(N-27 (a))
   - 명시한 `--run <id>`는 store의 `inspectRun` 판정을 따른다. 그 이름 그대로인 항목이 없으면 `run_not_found`다. 대소문자만 다른 id도 여기에 걸린다.
-  - 목록이 "손상"으로 보는 실행은 `revert`(N-26), `report`(N-27 (b)), `plan`, `apply`, `review`가 모두 `invalid_run_record`로 거부한다.
+  - 목록이 "손상"으로 보는 실행은 `revert`(N-26), `report`(N-27 (b)), `plan`, `apply`, `review`, `changes`(검토 R-14 L-1, 앱 계층 `0363b69`)가 모두 `invalid_run_record`로 거부한다.
 - 상태별 이유 표(DR-16)
   - 실행과 적용 실행의 이유는 `RUN_REASONS_BY_STATUS`(`isReasonOfStatus`) 하나로 판정한다. CLI는 따로 목록을 두지 않는다.
   - 적용 실행의 이유는 그 부분집합인 `APPLY_REASONS_BY_STATUS`를 쓴다.
@@ -987,3 +993,87 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - store에는 `RevertRequest.unsafeMoveConsent { channel, runId }`로 넘긴다. 그렇게 옮긴 파일은 `reverted`에 `unsafe: true`로 나온다.
 - `revert.json`(RevertRecord)에는 동의 경로(`unsafeMoveConsent`, 없으면 null)와, `reverted` 중 `unsafe`인 항목 수(`unsafeMoves`)를 쓴다.
 - 드라이 런이 옮길 파일을 나열하면 출력에 `moveSafetyUnchecked: true`가 붙는다. 사람용 요약은 `revert.dry_run_move_unchecked`로 그 사실을 알린다.
+
+## 19. 제공자 선택과 설정 해석 (SP-4, DR-31)
+
+계약: `CodarynConfig.provider`·`providers`, `ConfigProfile.provider`, `ProviderSettings`, `API_PROVIDERS`(`src/contracts/config.ts`). 11절의 anthropic 규칙은 그대로이고, 아래는 다른 API 제공자를 고를 때 더해지는 규칙이다.
+
+### 19.1 설정 파일
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "provider": "openai",                       // 간편 형식의 제공자. 없으면 anthropic
+  "model": "…", "maxOutputTokens": 4096,      // 최상위 제공자 설정은 anthropic 몫(예전 그대로)
+  "providers": {
+    "openai": { "model": "…", "maxOutputTokens": 4096, "apiBaseUrl": "…", "requestTimeoutMs": 60000, "maxRetries": 2 }
+  },
+  "profiles": { "fast": { "provider": "anthropic" } }
+}
+```
+
+- `provider`, `profiles.<이름>.provider`: `API_PROVIDER_NAMES` 중 하나다. scripted는 task 파일에서만 고른다. 다른 값은 `invalid_config`다.
+- `providers`: 키는 `API_PROVIDER_NAMES` 중 하나다. 다른 키는 그 이름을 되풀이하지 않고 `invalid_config`로 거부한다.
+  - 항목의 필드는 `model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`뿐이다. 규칙은 최상위 필드와 같고, 아래 둘은 그 제공자의 것을 쓴다.
+    - 출력 토큰: `API_PROVIDERS[<이름>].minOutputTokens` 이상, `maxOutputTokensLimit` 이하(openai는 16 이상).
+    - 주소의 경로 규칙: `baseUrlPath`. 공통 규칙(S-9, https, 루프백만 http, 사용자 정보·질의·조각·공백·역슬래시 없음)은 같다.
+      - `without_version`(anthropic): `/v1`, `/v1/messages`로 끝나면 거부한다. 어댑터가 `/v1/messages`를 붙인다.
+      - `with_version`(openai): `/responses`, `/models`로 끝나면 거부한다. 기본 주소는 `https://api.openai.com/v1`이다.
+  - 오류 글은 위치를 `providers.<이름>.<필드>`로 적는다.
+- `providers.anthropic`과 최상위 제공자 설정(`model`, `maxOutputTokens`, `apiBaseUrl`, `requestTimeoutMs`, `maxRetries`)을 함께 쓰면 `invalid_config`다. 둘은 같은 설정이라 어느 쪽인지 모호하다.
+
+### 19.2 제공자 고르기
+
+| 실행 형식 | 제공자 |
+| --- | --- |
+| task 파일 | `model.provider`(scripted 또는 `API_PROVIDER_NAMES`). 설정의 `provider`는 쓰지 않는다 |
+| 간편 형식(`run`, `doctor`) | `--profile`의 `provider` → 설정 `provider` → anthropic |
+
+- task 파일의 `model: { provider: "openai", model?, maxOutputTokens? }`의 출력 토큰은 그 제공자의 범위로 검사한다.
+- 고른 제공자가 API 제공자이면 `limits.maxTotalTokens`는 숫자여야 한다(11절 "한도"의 anthropic 규칙과 같다). 오류 글은 제공자 이름을 적는다.
+
+### 19.3 해석 (`resolveApiSettings`, `src/cli/settings.ts`)
+
+모두 고른 제공자 몫으로 해석한다. 그 제공자의 설정은 `providers.<이름>`이고, anthropic은 그것이 없으면 최상위 필드다(`providerSettingsOf`). 다른 제공자의 항목은 읽지 않는다.
+
+| 값 | 순서 |
+| --- | --- |
+| 키 | `API_PROVIDERS[<이름>].keyEnv`만(anthropic `ANTHROPIC_API_KEY`, openai `OPENAI_API_KEY`). 다른 제공자의 키는 대신하지 않는다 |
+| 모델 | task `model.model` → 제공자의 모델 변수 → 제공자 설정 `model` |
+| 출력 토큰 | task `model.maxOutputTokens` → 제공자 설정 `maxOutputTokens` |
+| API 주소 | 제공자의 주소 변수(그 제공자의 경로 규칙으로 검사) → 제공자 설정 `apiBaseUrl` → `defaultApiBaseUrl` |
+| 요청 시간 한도, 재시도 | 제공자 설정 → `DEFAULT_REQUEST_TIMEOUT_MS`, `DEFAULT_MAX_RETRIES` |
+
+- 모델과 주소의 환경 변수는 제공자마다 따로다(DR-34 (a), 검토 R-20 M-1). 키는 언제나 그 제공자의 주소로만 간다.
+
+  | 제공자 | 모델 변수 | 주소 변수 |
+  | --- | --- | --- |
+  | anthropic | `CODARYN_MODEL` | `CODARYN_API_BASE_URL` |
+  | openai | `CODARYN_OPENAI_MODEL` | `CODARYN_OPENAI_API_BASE_URL` |
+
+  - `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 SP-4 전과 같이 anthropic 전용이다. SP-4에서 "고른 제공자에 적용"이라 했던 규칙은 이것으로 바뀌었다. 그래서 한 제공자용 값이 다른 제공자로 가지 않는다(R-19 I-4도 해소).
+  - OpenAI 변수 이름은 계약 담당이 상수로 낼 때까지 CLI(`PROVIDER_SETTING_ENVS`, `src/cli/security/env.ts`)에 적어 둔다.
+  - 변수 파일이 새로 설정한 이 네 변수의 값은 비밀로 등록하지 않는다(설정 값이다).
+- 빠진 키·모델·출력 토큰은 `provider_not_configured`이고, 글은 그 제공자의 키 변수와 설정 위치(`providers.openai.model` 등)를 적는다.
+- `resolveAnthropicSettings`, `resolveListSettings`, `resolveConnection`은 예전 이름과 인자로 남는다. 제공자를 주지 않으면 anthropic이고, 결과는 SP-4 전과 같다(고정 시험 SP-0 P-7).
+
+### 19.4 명령
+
+- `run`(SP-6): API 제공자는 먼저 그 제공자의 설정(키, 모델, 출력 토큰, 주소, 시간)을 모두 해석한 뒤, 그 제공자의 공장(`API_PROVIDER_FACTORIES`, `src/cli/provider.ts`)으로 만든다. openai는 Responses API 어댑터(`src/model/openai`)다. 공장은 그 제공자의 해석 결과만 받으므로, 키는 그 제공자의 주소로만 간다.
+- `doctor`: `api_key`, `model` 점검은 고른 제공자의 키 변수(`doctor.api_key.ok {keyEnv}`, `doctor.api_key.missing {keyEnv, provider}`), 모델·주소 변수, 설정, 주소 규칙으로 한다.
+  - 키가 있으면 `api_key`의 `message`가 그 키가 가는 주소의 origin(스킴·호스트·포트)과 그 주소의 출처(주소 변수, 설정 필드, 기본 주소)를 적는다(DR-34 (a)). 경로는 적지 않는다. 경로에 주소 말고 다른 것이 들어 있을 수 있어서다.
+    - 예: `ANTHROPIC_API_KEY is set; anthropic requests send it only to https://api.anthropic.com (the default address)`
+    - 사람용 글(카탈로그 `doctor.api_key.ok`)에 주소를 싣는 매개변수는 아직 계약에 없다.
+  - 다른 제공자의 모델·주소 변수가 설정돼 있으면 `model`의 `message`가 그 변수 이름을 들어, 이 실행이 읽지 않는다고 적는다(SP-6, R-19 I-4). 값은 적지 않는다.
+    - 예: `CODARYN_MODEL is set but is anthropic's; an openai run does not read it`
+- `models [--provider <name>]`(SP-6): 제공자는 `--provider`, 없으면 설정의 `provider`, 없으면 anthropic이다. `--provider`의 값은 `API_PROVIDER_NAMES` 중 하나여야 하고, 아니면 아무것도 보내지 않고 `invalid_arguments`다.
+  - 그 제공자의 키 변수, 주소(주소 변수 → 제공자 설정 → 기본 주소), 목록 함수(`API_MODEL_LISTERS`)만 쓴다. 다른 제공자의 키나 주소는 쓰지 않는다(DR-34 (a), R-20 D2).
+  - 목록 함수는 `main.ts`가 넘길 때만 연결된다(`listModels`, `listers`). 넘기지 않으면 아무것도 보내지 않고 `provider_not_implemented`다.
+  - 키가 거부되면(`auth_failed`) 안내는 그 제공자의 키 변수(`check OPENAI_API_KEY` 등)를 적는다.
+  - 현재 모델: 그 제공자의 모델 변수 → 그 제공자의 설정 `model`.
+    - 계약의 `current.source`와 `selected.overriddenBy`는 `CODARYN_MODEL`만 담을 수 있다. 그래서 openai의 `CODARYN_OPENAI_MODEL`이 설정돼 있으면 `current`는 null이고, 사람용 글이 그 변수가 쓰인다고 적는다. 계약이 그 변수를 담을 수 있게 되면 맞춘다.
+  - `--use`가 쓰는 자리: anthropic은 최상위 `model`이다. 설정이 `providers.anthropic`을 쓰면 `providers.anthropic.model`, 다른 제공자는 `providers.<이름>.model`이다.
+    - 다른 필드와 그 순서는 그대로 둔다. 없는 `providers`나 항목은 끝에 더한다.
+    - 설정 파일이 없으면 `schemaVersion`과 그 자리의 모델만으로 만든다. `provider`는 쓰지 않는다. 간편 형식의 제공자를 바꾸는 것은 사람이 정한다.
+  - `ModelsOutput.provider`: anthropic이 아닌 제공자를 보일 때 싣는다. anthropic에도 싣는 것은 SP-0 고정 값(P-8 `models --json`) 변경이라 PM 승인 뒤에 한다.
+- `init`: 지금처럼 anthropic 설정을 쓴다. 키 안내 글은 `{keyEnv}`를 받는다.

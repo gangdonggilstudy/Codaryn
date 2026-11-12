@@ -7,6 +7,7 @@
  * Neither file ever contains secret values or API keys.
  */
 
+import type { ApiProviderName, MODEL_PROVIDER_NAMES } from "./config.js";
 import type { PlanActionKind, PlanMode } from "./plan.js";
 import type { AnyToolName } from "./tool.js";
 import type { VerifierConfig } from "./verify.js";
@@ -63,7 +64,8 @@ export interface ResolvedTaskSpec extends TaskSpec {
   readonly instructions?: string | null;
 }
 
-export type ModelProviderName = "scripted" | "anthropic";
+/** SP-1: the names in MODEL_PROVIDER_NAMES (config.ts). */
+export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];
 
 export type ModelConfig =
   | {
@@ -71,13 +73,21 @@ export type ModelConfig =
       /** Scripted model file. Absolute, or relative to the directory of the task file. */
       readonly scriptPath: string;
     }
-  | {
-      readonly provider: "anthropic";
-      /** Model id. First in the model order: task, then CODARYN_MODEL, then the config file. */
-      readonly model?: string;
-      /** Output token cap per request, at most MAX_OUTPUT_TOKENS_LIMIT. Overrides the config file's value. */
-      readonly maxOutputTokens?: number;
-    };
+  | ApiModelConfig;
+
+/**
+ * SP-1, DR-31: the model settings of one API provider (API_PROVIDER_NAMES). A union with one member
+ * per provider, so `Extract<ModelConfig, { provider: "anthropic" }>` keeps working.
+ */
+export type ApiModelConfig = {
+  readonly [P in ApiProviderName]: {
+    readonly provider: P;
+    /** Model id. First in the model order: task, then the provider's model variable (DR-34), then the config file. */
+    readonly model?: string;
+    /** Output token cap per request, within the provider's limits (API_PROVIDERS). Overrides the config file's value. */
+    readonly maxOutputTokens?: number;
+  };
+}[ApiProviderName];
 
 export interface PrivacyConfig {
   /**

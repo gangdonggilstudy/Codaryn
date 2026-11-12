@@ -127,3 +127,4 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
   await writeFile(temporary, `${JSON.stringify(result)}\n`, "utf8");
   await rename(temporary, target);
 }
+export { listParkedFiles } from "./apply-revert.js";

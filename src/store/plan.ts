@@ -23,7 +23,6 @@ import {
   MAX_REPORT_FILE_BYTES,
   PLAN_APPLIED_FILE_NAME,
   PLAN_FILE_NAME,
-  PRIVACY_TOKEN_PATTERN_SOURCE,
   RESULT_FILE_NAME,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
@@ -39,12 +38,22 @@ import type {
   StoredPlan,
   StoredPlanAction,
 } from "../contracts/index.js";
-import { assertRunId, createExclusive, ensureRunDir, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sha256Hex } from "./common.js";
+import {
+  assertRunId,
+  createExclusive,
+  ensureRunDir,
+  errorCode,
+  hasExactRunEntry,
+  isOwnRunDir,
+  isPlainDirectory,
+  maskedPartsOf as sharedMaskedPartsOf,
+  runDir,
+  sha256Hex,
+} from "./common.js";
 import { isRunTimestamp } from "./runs.js";
 import { isStateDirName, isValidPathInput } from "../workspace/lexical.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
-const PRIVACY_TOKEN = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE);
 /** DR-28: bounds for one path's visible parts (a stored path has at most 4096 characters). */
 const MAX_SHOWN_PARTS = 4097;
 const MAX_SHOWN_TEXT = 8192;
@@ -79,14 +88,7 @@ export function isWorkspaceRelativePath(value: unknown): value is string {
  * none holding a privacy token (the text was split at the tokens). Null for anything else.
  */
 function maskedPartsOf(value: unknown): MaskedParts | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SHOWN_PARTS) return null;
-  let total = 0;
-  for (const part of value) {
-    if (typeof part !== "string" || PRIVACY_TOKEN.test(part)) return null;
-    total += part.length;
-    if (total > MAX_SHOWN_TEXT) return null;
-  }
-  return [...(value as string[])];
+  return sharedMaskedPartsOf(value, MAX_SHOWN_PARTS, MAX_SHOWN_TEXT);
 }
 
 /** The keys of an action, without or (DR-28) with its masked form `shown`. */

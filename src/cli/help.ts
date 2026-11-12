@@ -67,6 +67,8 @@ const OPTION_SYNTAX: { readonly [O in HelpOption]: string } = {
   json: "--json",
   use: "--use <number|id>",
   limit: "--limit <n>",
+  // SP-6: `codaryn models --provider <name>`.
+  provider: "--provider <name>",
 };
 
 /** The options each command's help describes, in order. */
@@ -75,7 +77,7 @@ export const COMMAND_OPTIONS: { readonly [C in HelpCommand]: readonly HelpOption
   revert: ["workspace", "run", "dry_run", "allow_unsafe_move", "quiet"],
   report: ["workspace", "run", "json"],
   doctor: ["config", "vars_file", "task", "workspace", "profile", "json"],
-  models: ["config", "vars_file", "use", "json"],
+  models: ["provider", "config", "vars_file", "use", "json"],
   init: ["config", "workspace", "json"],
   runs: ["workspace", "limit", "json"],
 };

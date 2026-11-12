@@ -202,8 +202,20 @@ export const SALES_BY_REGION = {
 export const SALES_SUMMARY_CSV = ["region,total,count", "east,45,1", "north,150.5,2", "south,99.5,2", ""].join("\n");
 /** The same with north's total off by 0.5 (the half dropped): aggregate_match must fail on it. */
 export const SALES_SUMMARY_WRONG_CSV = ["region,total,count", "east,45,1", "north,150,2", "south,99.5,2", ""].join("\n");
-/** A source whose amount column holds a non-number: the check cannot judge the output (inconclusive). */
-export const SALES_CSV_NOT_A_NUMBER = ["region,product,amount", "north,Widget,12abc", "south,Gadget,3", ""].join("\n");
+/**
+ * A source whose amount column holds one non-number. Its groups and non-empty cell counts are those
+ * of SALES_CSV, so against SALES_SUMMARY_CSV the shape and the counts hold and only north's sum
+ * cannot be judged: the verifier is inconclusive, not failed.
+ */
+export const SALES_CSV_NOT_A_NUMBER = [
+  "region,product,amount",
+  "north,Widget,120.50",
+  "north,Widget,12abc",
+  "south,Gadget,80",
+  "south,Gadget,19.5",
+  "east,Doohickey,45",
+  "",
+].join("\n");
 
 export const SALES_REPORT_MD = "# 지역별 매출\n\n- north가 가장 많다(150.5).\n- east는 금액이 빈 행이 하나 있다.\n";
 

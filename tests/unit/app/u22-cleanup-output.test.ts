@@ -8,8 +8,8 @@
  *   `workspace_locked`; neither is a cleanup outcome. Before, both came back as outcomes.
  * - `--run latest` while the latest run is still going is `run_in_progress`, not `run_not_found` or
  *   another run (the CLI resolves it; the app passes the code on).
- * Reproduced first, todo until the app layer (and, for run_in_progress, the CLI) follows the
- * contract. `partly_failed` needs a removal the OS refuses; the contract's tests show the rule and
+ * Reproduced first (584a31c, todo); the app layer follows the contract now. run_in_progress stays
+ * todo until the CLI answers it. `partly_failed` needs a removal the OS refuses; the contract's tests show the rule and
  * the app uses the same function. Real runs through the app (scripted model), the real store.
  * Fake values only.
  */
@@ -20,10 +20,9 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { LOCK_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppCallOutcome, CleanupPreview, CodarynApp, RunHandle } from "../../../src/app/index.js";
+import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp, RunHandle } from "../../../src/app/index.js";
 import { WRITE_NOTES, appEnvironment, exists, setupRun, taskRequest } from "./support.js";
 
-const TODO_APP = { todo: "U-22: wait for the app layer to follow the contract" };
 const TODO_CLI = { todo: "U-22: wait for the CLI to answer run_in_progress" };
 const WAIT = { text: "waiting", delayMs: 30_000 };
 
@@ -45,30 +44,23 @@ async function finishedRun(): Promise<{ base: string; workspace: string; app: Co
 
 const runDirOf = (workspace: string, runId: string): string => path.join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
 
-/** The fields of a carried-out cleanup the contract names, read without the app's type (it lacks `status` before U-22). */
-interface Carried {
-  readonly kind: string;
-  readonly status?: unknown;
-  readonly outcome: { readonly ok: boolean; readonly removed: readonly unknown[]; readonly kept: readonly { readonly reason: string }[] };
-}
-
-async function apply(run: { workspace: string; app: CodarynApp }, selection: Readonly<Record<string, unknown>>, includeNotReverted: boolean, digest?: string): Promise<AppCallOutcome<unknown>> {
+async function apply(run: { workspace: string; app: CodarynApp }, selection: Readonly<Record<string, unknown>>, includeNotReverted: boolean, digest?: string): Promise<AppCallOutcome<CleanupApplied>> {
   const preview = ok<CleanupPreview>(await run.app.previewCleanup({ workspace: run.workspace, selection }));
   return run.app.applyCleanup({ workspace: run.workspace, selection, now: preview.now, confirmation: { digest: digest ?? preview.plan.digest, discarded: false, includeNotReverted } });
 }
 
 describe("U-22 (DR-48): the app says what a cleanup did", () => {
-  test("something removed: status removed, the outcome ok", TODO_APP, async () => {
+  test("something removed: status removed, the outcome ok", async () => {
     const run = await finishedRun();
-    const carried = ok(await apply(run, { runs: { runIds: [run.runId] } }, true)) as Carried;
+    const carried = ok<CleanupApplied>(await apply(run, { runs: { runIds: [run.runId] } }, true));
     assert.equal(carried.status, "removed");
     assert.equal(carried.outcome.ok, true);
     assert.equal(carried.outcome.removed.length, 1);
   });
 
-  test("nothing removed (a confirmation not given): status nothing_removed, the outcome not ok", TODO_APP, async () => {
+  test("nothing removed (a confirmation not given): status nothing_removed, the outcome not ok", async () => {
     const run = await finishedRun();
-    const carried = ok(await apply(run, { runs: { runIds: [run.runId] } }, false)) as Carried;
+    const carried = ok<CleanupApplied>(await apply(run, { runs: { runIds: [run.runId] } }, false));
     assert.equal(carried.status, "nothing_removed");
     assert.equal(carried.outcome.ok, false, "a cleanup that removed nothing is not ok");
     assert.deepEqual(carried.outcome.removed, []);
@@ -76,14 +68,14 @@ describe("U-22 (DR-48): the app says what a cleanup did", () => {
     assert.equal(await exists(runDirOf(run.workspace, run.runId)), true);
   });
 
-  test("nothing selected: status nothing_removed", TODO_APP, async () => {
+  test("nothing selected: status nothing_removed", async () => {
     const run = await finishedRun();
-    const carried = ok(await apply(run, {}, true)) as Carried;
+    const carried = ok<CleanupApplied>(await apply(run, {}, true));
     assert.equal(carried.status, "nothing_removed");
     assert.equal(carried.outcome.ok, false);
   });
 
-  test("a digest the person did not see, or a plan that changed after the preview, is the error cleanup_plan_changed", TODO_APP, async () => {
+  test("a digest the person did not see, or a plan that changed after the preview, is the error cleanup_plan_changed", async () => {
     const run = await finishedRun();
     const selection = { runs: { runIds: [run.runId] } };
     assert.equal(codeOf(await apply(run, selection, true, "0".repeat(64))), "cleanup_plan_changed");
@@ -94,7 +86,7 @@ describe("U-22 (DR-48): the app says what a cleanup did", () => {
     assert.equal(await exists(runDirOf(run.workspace, run.runId)), true, "nothing was removed");
   });
 
-  test("while another task holds the workspace lock: the error workspace_locked", TODO_APP, async () => {
+  test("while another task holds the workspace lock: the error workspace_locked", async () => {
     const run = await finishedRun();
     const handle = await busyOn(run);
     try {

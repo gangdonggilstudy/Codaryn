@@ -69,12 +69,14 @@ describe("DR-44: cleanup of runs that keep a way back", () => {
     assert.ok(preview.plan.items[0]?.warnings.includes("not_reverted"));
     assert.equal(preview.plan.totals.runs.notReverted, 1);
     const kept = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: false } }));
-    assert.ok(kept.outcome.ok, JSON.stringify(kept.outcome));
+    // DR-48 (U-22): nothing removed, so the cleanup says so and its outcome is not ok.
+    assert.equal(kept.status, "nothing_removed", JSON.stringify(kept));
+    assert.equal(kept.outcome.ok, false);
     assert.deepEqual(kept.outcome.removed, [], "the digest alone does not remove a run not reverted");
     assert.deepEqual(kept.outcome.kept, [{ target: "run", runId, reason: "not_reverted_not_confirmed" }]);
     assert.deepEqual(await runsIn(workspace), [runId]);
     const removed = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: true } }));
-    assert.ok(removed.outcome.ok && removed.outcome.removed.length === 1, JSON.stringify(removed.outcome));
+    assert.ok(removed.status === "removed" && removed.outcome.ok && removed.outcome.removed.length === 1, JSON.stringify(removed));
     assert.deepEqual(await runsIn(workspace), []);
   });
 

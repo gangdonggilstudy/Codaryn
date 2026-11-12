@@ -11,6 +11,10 @@
  *   own files) may go and (DR-44 (a)) whether the records of runs not reverted or only partly
  *   reverted may go. The store makes the plan again under the workspace lock and removes nothing
  *   unless its digest is the confirmed one. The GUI's main process asks the person each question.
+ * - DR-48 (AXM-3): a cleanup that was carried out says what it did with the contract's one rule
+ *   (cleanupStatusOf: removed, nothing_removed, partly_failed), and its outcome is `ok` for
+ *   `removed` only, as the CLI's JSON. A digest that is not the plan's is the error
+ *   `cleanup_plan_changed` and a held lock `workspace_locked`; neither is an outcome.
  * - DR-44 and U-13: the store's warnings (partly_reverted, discarded_left, leftover), leftover
  *   folders and kept reasons (partly_removed, not_reverted_not_confirmed, used_by_kept_apply,
  *   discarded_left) are passed on as they are.
@@ -20,14 +24,15 @@
  * - The values name run ids, sizes and codes only, never a person's file name or a path.
  */
 
-import { RUN_TIMESTAMP_PATTERN_SOURCE } from "../contracts/index.js";
-import type { CleanupConfirmation, CleanupSelection } from "../contracts/index.js";
+import { RUN_TIMESTAMP_PATTERN_SOURCE, cleanupStatusOf } from "../contracts/index.js";
+import type { CleanupConfirmation, CleanupFailureCode, CleanupSelection } from "../contracts/index.js";
 import { applyCleanup, isStoredRunId, planCleanup, summarizeState } from "../store/index.js";
 import { INTERNAL_ERROR, appError } from "./errors.js";
 import { workspaceRootOf } from "./runs.js";
 import type {
   AppCallOutcome,
   AppEnvironment,
+  AppError,
   ApplyCleanupRequest,
   CleanupApplied,
   CleanupPreview,
@@ -124,6 +129,16 @@ export async function previewCleanupIn(environment: AppEnvironment, request: Cle
   }
 }
 
+/** DR-48: why nothing was removed, as the call's error (fixed text, no path or value). */
+function cleanupFailure(code: CleanupFailureCode): AppError {
+  switch (code) {
+    case "plan_changed":
+      return appError("cleanup_plan_changed", "the plan made again under the lock is not the confirmed one (the state changed since the preview, or another digest was given); nothing was removed. Preview again and confirm its digest.");
+    case "workspace_locked":
+      return appError("workspace_locked", "another task holds the workspace lock; nothing was removed. Try again when it ends.");
+  }
+}
+
 export async function applyCleanupIn(environment: AppEnvironment, request: ApplyCleanupRequest): Promise<AppCallOutcome<CleanupApplied>> {
   const selection = cleanupSelectionOf(request.selection);
   if (!selection.ok) return selection;
@@ -134,7 +149,9 @@ export async function applyCleanupIn(environment: AppEnvironment, request: Apply
   if (!root.ok) return root;
   try {
     const outcome = await applyCleanup({ workspaceRoot: root.value, selection: selection.value, now: request.now, confirmation: confirmation.value });
-    return { ok: true, output: { kind: "cleanup_applied", outcome } };
+    if (!outcome.ok) return { ok: false, error: cleanupFailure(outcome.code) };
+    const status = cleanupStatusOf(outcome);
+    return { ok: true, output: { kind: "cleanup_applied", status, outcome: { ...outcome, ok: status === "removed" } } };
   } catch {
     return { ok: false, error: INTERNAL_ERROR };
   }

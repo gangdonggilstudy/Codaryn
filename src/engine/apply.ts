@@ -348,6 +348,8 @@ export const applyPlan: ApplyPlan = async (deps) => {
       let outcome: PlanItemOutcome;
       // Only the moves the preflight reported, and only with consent, may be made unsafely.
       const allowUnsafeMove = consented && unsafeMoves.includes(index);
+      // R-9 I-4: name the action before it is done, so a stop right after it still leaves a record.
+      await journal.append({ type: "plan_item_started", index, action: masked[index] as MaskedPlanAction });
       try {
         outcome = await executor.apply(action, index, runSignal, { allowUnsafeMove });
       } catch {

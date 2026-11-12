@@ -195,5 +195,17 @@ export interface RevertOutcome {
  *   - DR-24 (b): a move back is made like an apply's move (refusing an existing destination). When
  *     that cannot be done on the volume, the file is skipped as `unsafe_move`; nothing falls back
  *     to "check, then rename".
+ *   - R-9 I-4: an action with a `plan_item_started` record (PlanItemStartedEvent) but neither a
+ *     `file_moved`/`file_discarded` nor a `plan_item_failed` for its index may or may not have
+ *     been done (the process ended in between). It is handled in the same reverse order, with the
+ *     real paths from the plan as above and the masked paths of the start record:
+ *     - done: the file with the action's SHA-256 is at `to` (a move) or at
+ *       `.codaryn/discarded/<runId>/<discardedStoredName(index)>` (a discard), and nothing exists
+ *       at the original path. It goes back as a recorded one would (`moved_back`,
+ *       `restored_from_discard`).
+ *     - not done: the file with that SHA-256 is still at its original path and nothing is at the
+ *       destination. Nothing is to be reverted and it is not listed.
+ *     - anything else: skipped as `changed_since_run`; nothing is touched.
+ *   - An action with a `plan_item_failed` record was not done and is not listed.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

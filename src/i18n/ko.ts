@@ -419,6 +419,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.kept.not_reverted_not_confirmed": "되돌리지 않았거나 일부만 되돌린 실행이고, 따로 확인하지 않음",
   "cleanup.kept.used_by_kept_apply": "남긴 적용 실행이 쓰는 계획 실행. 지우면 그 적용을 되돌릴 수 없음",
   "cleanup.kept.partly_removed": "옮겨 두었지만 다 지우지 못함. 남은 것은 다음 정리에 보이는 폴더에 있음",
+  "apply.notice.plan_records_unchecked": "상태 디렉터리가 너무 커서 다 확인하지 못해, 계획 실행의 기록이 바뀌었는지 확인하지 못했습니다. 이 때문에 적용을 멈추지는 않았습니다. 결과를 확인하고, codaryn cleanup으로 상태 디렉터리를 확인할 수 있는 크기로 줄이세요.",
 
   "diagnostic.file.config": "설정 파일",
   "diagnostic.file.task": "task 파일",

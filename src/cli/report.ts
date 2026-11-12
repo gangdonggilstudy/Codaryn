@@ -14,6 +14,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
+  APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
   INTEGRITY_PHASES,
@@ -35,6 +36,7 @@ import type {
   AppliedActionRecord,
   ApplyReportJournalSummary,
   ApplyReportOutput,
+  ApplyNoticeKind,
   ApplyResult,
   ApprovalChannel,
   ListRuns,
@@ -310,6 +312,15 @@ export function summarizeJournal(text: string, runId: string, hasResult: boolean
 function stateChangedOf(value: unknown): { readonly stateChanged?: readonly MaskedText[] } {
   if (value === undefined || (Array.isArray(value) && value.length === 0)) return {};
   return { stateChanged: recordedList(value) as readonly MaskedText[] };
+}
+
+/** U-8: an apply result's recorded notice kinds (APPLY_NOTICE_KINDS, each once); an absent or empty list is left out. */
+function noticeKindsOf(value: unknown): { readonly noticeKinds?: readonly ApplyNoticeKind[] } {
+  if (value === undefined) return {};
+  if (!Array.isArray(value)) bad("result.json has a field of the wrong type");
+  const kinds = value.map((kind) => oneOf(kind, APPLY_NOTICE_KINDS));
+  if (new Set(kinds).size !== kinds.length) bad("result.json names a notice kind twice");
+  return kinds.length === 0 ? {} : { noticeKinds: kinds };
 }
 
 export function readResult(text: string, runId: string, taskId: string): EngineResult {
@@ -694,6 +705,8 @@ export function readApplyResult(text: string, runId: string, journal: ApplyRepor
     ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
     // DR-38: the state checks' last recorded list (masked), only when it names a change (PM after bf04750).
     ...stateChangedOf(rec["stateChanged"]),
+    // U-8: what the apply told besides its status, as recorded; absent when none.
+    ...noticeKindsOf(rec["noticeKinds"]),
   };
 }
 

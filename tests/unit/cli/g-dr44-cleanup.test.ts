@@ -21,7 +21,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
+import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME, needsNotRevertedConfirmation } from "../../../src/contracts/index.js";
 import type { ApplyCleanup, ApplyResult, CleanupConfirmation, CleanupPlan, EngineResult, StateSummary } from "../../../src/contracts/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { itemName, notRevertedHeadLine, runCleanup } from "../../../src/cli/cleanup.js";
@@ -171,13 +171,13 @@ describe("DR-44 (나), R-34 L-1: a partly reverted run is not a reverted run", (
     return { base, runId };
   }
 
-  test("it is warned about as a run not reverted", STORE_TODO, async () => {
+  test("it is warned about as a run not reverted (store 0e8eab7: not_reverted; the contract: partly_reverted)", async () => {
     const { base, runId } = await partlyReverted();
     const plan = (await preview(base, ["--run", runId])).plan;
-    assert.ok(plan.items[0]?.warnings.includes("not_reverted"), JSON.stringify(plan.items));
+    assert.ok(needsNotRevertedConfirmation(plan.items[0]?.warnings ?? []), JSON.stringify(plan.items));
   });
 
-  test("--reverted does not select it", STORE_TODO, async () => {
+  test("--reverted does not select it", async () => {
     const { base } = await partlyReverted();
     assert.deepEqual((await preview(base, ["--reverted"])).plan.items, []);
   });
@@ -205,7 +205,7 @@ describe("DR-44 (다), R-34 L-2: an apply's records without its discarded files 
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(item));
   });
 
-  test("records and folder selected: discarded_left too, as its deletion may not be confirmed", STORE_TODO, async () => {
+  test("records and folder selected: discarded_left too, as its deletion may not be confirmed", async () => {
     const { base, applyRunId } = await discardingApply();
     const item = (await preview(base, ["--older-than", "0", "--discarded-older-than", "0"])).plan.items.find((entry) => entry.target === "run" && itemName(entry) === applyRunId);
     assert.ok(item?.warnings.includes("discarded_left"), JSON.stringify(item));

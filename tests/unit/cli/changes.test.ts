@@ -200,12 +200,12 @@ describe("runChanges", () => {
  * Unit U-36 (UXM-7 ③, survey docs/reviews/2026-11-13-u19-korean-gaps-survey.md 3 D), the `changes`
  * part: the text of `codaryn changes` comes from the message catalog (the contract's ids, U-36
  * contract 1ca962e), so a person reads it in their language. Pinned:
- * - English without a catalog (the fallback): the text before U-36 character for character. The
- *   no-text line keeps "(DR-29)", as the English catalog and g-changes-wire keep it (the Korean
- *   leaves it out), so the PM's exception is not used.
- * - English with the English catalog: the same, but for the lines the PM accepted otherwise (U-36,
- *   after ENGLISH_TODO): `changes.apply_run`'s sentence and the reason words of
- *   `changes.unavailable.<reason>` (all but masking_unverified). They are pinned here as they are.
+ * - English without a catalog (the fallback): the text before U-36 character for character, its
+ *   no-text line with "(DR-29)" as g-changes-wire pins it.
+ * - English with the English catalog (what the real CLI draws since 68648af): the same, but for the
+ *   lines the PM accepted otherwise: `changes.apply_run`'s sentence, the reason words of
+ *   `changes.unavailable.<reason>` (all but masking_unverified), and the no-text line without
+ *   "(DR-29)" (unit/U-36-nb-i18n c71da18, review R-66). They are pinned here as they are.
  * - `changes --json` is not changed.
  * - With a catalog every piece of text is the catalog's: no fixed English word is left.
  * - A run with a records-changed mark (ChangesOutput.recordsChanged, U-43) says so with the catalog's
@@ -269,7 +269,10 @@ const NONE_EN = `${HEADING}\nthe run changed no file\n`;
 const APPLY_EN = `${HEADING}\nthe run is an apply run: it applied 2 action(s) of the plan of run 20261113T000000Z-89abcdef (moves and discards, not file writes); codaryn report lists them\n`;
 
 /** The PM's decision (U-36): the English catalog's lines that differ from the text before U-36. */
-const ALL_EN_CATALOG = ALL_EN.replace("   the text is not shown (unreadable)", "   the text is not shown: the file could not be read (unreadable)");
+const ALL_EN_CATALOG = ALL_EN.replace("   the text is not shown (unreadable)", "   the text is not shown: the file could not be read (unreadable)").replace(
+  "the others have their path and state only (DR-29)\n",
+  "the others have their path and state only\n",
+);
 const APPLY_EN_CATALOG = `${HEADING}\nThis run applied the plan of run 20261113T000000Z-89abcdef; actions applied: 2. They are moves and discards of that plan, not files this run wrote, so no file text is shown here; the run's report lists them.\n`;
 const REASONS = ["masked_path", "snapshot_missing", "not_text", "too_large", "unreadable", "mask_failed", "masking_unverified"] as const;
 /** Every reason a file's text is not shown, one file each. */

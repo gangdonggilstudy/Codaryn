@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import { PLAN_APPLIED_FILE_NAME } from "../../../src/contracts/index.js";
-import type { ContentHash, EngineResult, JournalEvent, RunListEntry } from "../../../src/contracts/index.js";
+import type { ContentHash, EngineResult, JournalEvent, RunId, RunListEntry } from "../../../src/contracts/index.js";
 import { createJournal, journalRelativePath, listRuns, markPlanApplied, writeResult } from "../../../src/store/index.js";
+import { createHumanOutput } from "../../../src/cli/human/index.js";
+import { createMessageCatalog } from "../../../src/i18n/index.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -97,4 +99,44 @@ describe("U-16 (UXM-5): a plan run whose plan was applied names the apply run", 
     await writeFile(state(root, "runs", OTHER, PLAN_APPLIED_FILE_NAME), JSON.stringify({ schemaVersion: 1, kind: "plan_applied", planRunId: OTHER, applyRunId: APPLY, at: AT }), "utf8");
     assert.equal(appliedByOf((await byId(root))[OTHER]), "absent");
   });
+});
+
+describe("R-55b M-1b: what the run list's row of the plan run says, by how its apply run ended (both languages)", () => {
+  const rowOf = async (root: string, runId: string, language: "en" | "ko"): Promise<string> => {
+    const text = createHumanOutput(createMessageCatalog(language)).runsText({ schemaVersion: 1, kind: "runs", ...(await listRuns({ workspaceRoot: root })) } as never);
+    return text.split(String.fromCharCode(10)).find((row) => row.startsWith(runId)) ?? "";
+  };
+  const applyResult = (status: string, reason: string, exitCode: number) => ({
+    schemaVersion: 1, kind: "apply", runId: APPLY, planRunId: PLAN, taskId: "t", digest: HASH, status, reason, exitCode,
+    applied: [{ index: 0, action: { kind: "move", from: "a.txt", to: "b/a.txt", sha256: HASH }, stored: null }], verifiers: [],
+    usage: { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs: 5 }, journalPath: journalRelativePath(APPLY), notices: [],
+  });
+  const applyRun = APPLY as RunId;
+  /** Each case: how to leave the apply run, and the words the plan row then has. */
+  const cases: [string, (root: string) => Promise<void>, (catalog: ReturnType<typeof createMessageCatalog>) => string][] = [
+    ["still going (its journal only)", async () => {}, (catalog) => catalog.format("runs.plan_applying", { runId: applyRun })],
+    [
+      "failed part way (failed/apply_incomplete)",
+      (root) => writeFile(state(root, "runs", APPLY, "result.json"), `${JSON.stringify(applyResult("failed", "apply_incomplete", 1))}\n`, "utf8"),
+      (catalog) => catalog.format("runs.plan_apply_unfinished", { runId: applyRun, reason: "apply_incomplete" }),
+    ],
+    [
+      "ended done",
+      (root) => writeFile(state(root, "runs", APPLY, "result.json"), `${JSON.stringify(applyResult("done", "verified", 0))}\n`, "utf8"),
+      (catalog) => catalog.format("runs.plan_applied", { runId: applyRun }),
+    ],
+    ["its records removed", (root) => rm(state(root, "runs", APPLY), { recursive: true, force: true }), (catalog) => catalog.format("runs.plan_apply_missing", { runId: applyRun })],
+  ];
+
+  for (const [name, leave, words] of cases) {
+    test(`${name}: the plan row says so in both languages; appliedBy in the list is as before`, async () => {
+      const root = await workspace(true);
+      await leave(root);
+      for (const language of ["en", "ko"] as const) {
+        const row = await rowOf(root, PLAN, language);
+        assert.ok(row.endsWith(`${words(createMessageCatalog(language))} (needs-input/plan_pending)`), row);
+      }
+      assert.deepEqual(appliedByOf((await byId(root))[PLAN]), { runId: APPLY, at: AT });
+    });
+  }
 });

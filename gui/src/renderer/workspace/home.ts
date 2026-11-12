@@ -58,7 +58,8 @@ export function homeScreen(deps: HomeDeps): Screen {
           ...items.map((item) => {
             const row = el("li", undefined, { "data-recent": item.exists ? "exists" : "missing" });
             const text = el("div", undefined, { class: "recent-text" });
-            text.append(el("span", item.name, { class: "recent-name" }), el("span", item.path, { class: "recent-path" }));
+            text.append(el("span", item.name, { class: "recent-name" }));
+            if (item.where !== "") text.append(el("span", t.format("home.recentIn", { folder: item.where }), { class: "recent-path" }));
             if (!item.exists) text.append(el("span", t.format("home.recentMissing"), { class: "recent-missing" }));
             const open = button(t.format("home.recentOpen"), () => {
               void (async () => {

@@ -11,7 +11,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { startEngineHost } from "../../src/main/engine-client.js";
 import type { EngineHost, EngineHostOptions } from "../../src/main/engine-client.js";
@@ -37,8 +37,9 @@ async function tempDir(): Promise<{ dir: string; cleanup: () => Promise<void> }>
   return { dir, cleanup: () => fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) };
 }
 
+/** R21-I-3: every host these tests start reaches this machine only (the test transport). */
 function options(dir: string, overrides: Partial<EngineHostOptions> = {}): EngineHostOptions {
-  return { nodePath: process.execPath, hostScript: HOST_SCRIPT, engineDir: ENGINE_DIR, env: testEnv(dir), cwd: dir, ...overrides };
+  return { nodePath: process.execPath, hostScript: HOST_SCRIPT, engineDir: ENGINE_DIR, env: testEnv(dir), cwd: dir, transport: "loopback-only", ...overrides };
 }
 
 async function started(opts: EngineHostOptions): Promise<EngineHost> {
@@ -79,6 +80,9 @@ export function createMessageCatalog(language) { return { format(id) { if (id ==
 export function hideKeys(text) { return text; }
 `,
   );
+  await fs.mkdir(path.join(engine, "contracts"), { recursive: true });
+  await fs.writeFile(path.join(engine, "contracts", "index.js"), `export const API_PROVIDERS = { anthropic: { keyEnv: "ANTHROPIC_API_KEY" } };
+`);
   await fs.mkdir(path.join(engine, "cli", "human"), { recursive: true });
   await fs.writeFile(
     path.join(engine, "cli", "human", "output.js"),
@@ -133,6 +137,62 @@ test("host process: messages come from the shared catalog in the language the CL
     assert.ok(Object.values(value.texts).every((text) => text.length > 0));
   } finally {
     await host.close();
+    await cleanup();
+  }
+});
+
+test("host process (R21-I-3): with the test transport the real host's model list cannot reach any other machine", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
+  const { dir, cleanup } = await tempDir();
+  try {
+    // A documentation address (TEST-NET-1, RFC 5737): nothing answers there. Without the transport
+    // the request would wait for its 20 s time limit; with it, it is refused before it is sent.
+    const config = path.join(dir, "config.json");
+    await fs.writeFile(config, JSON.stringify({ schemaVersion: 1, model: "fake-model", apiBaseUrl: "https://192.0.2.1", requestTimeoutMs: 20_000, maxRetries: 0 }));
+    const secrets = (await import(pathToFileURL(path.join(GUI, "..", "dist", "tests", "fixtures", "secrets.js")).href)) as { FAKE_API_KEY: string };
+    const contracts = (await import(pathToFileURL(path.join(ENGINE_DIR, "contracts", "index.js")).href)) as { ANTHROPIC_API_KEY_ENV: string };
+    const env = { ...testEnv(dir), CODARYN_CONFIG: config, [contracts.ANTHROPIC_API_KEY_ENV]: secrets.FAKE_API_KEY };
+    const host = await started(options(dir, { env }));
+    try {
+      const begin = Date.now();
+      const answer = await host.call("listModels", { provider: "anthropic" }, 30_000);
+      const took = Date.now() - begin;
+      assert.equal(answer.ok, true, JSON.stringify(answer));
+      assert.equal((answer as { value: { ok: boolean } }).value.ok, false, "the list failed");
+      assert.ok(took < 5_000, `refused at once, not after the request's time limit (${took} ms)`);
+    } finally {
+      await host.close();
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
+test("host process (R21-I-2): the value of every provider's key variable is hidden, not only Anthropic's", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
+  const { dir, cleanup } = await tempDir();
+  try {
+    // A fake value (no key shape), set in the second provider's key variable; a file is named after it.
+    const value = "fake-second-provider-value-0001";
+    const workspace = path.join(dir, "ws");
+    await fs.mkdir(workspace);
+    await fs.writeFile(path.join(workspace, `${value}.txt`), "x");
+    const contracts = (await import(pathToFileURL(path.join(ENGINE_DIR, "contracts", "index.js")).href)) as { API_PROVIDERS: Record<string, { keyEnv: string }> };
+    const keyEnvs = Object.values(contracts.API_PROVIDERS).map((spec) => spec.keyEnv);
+    const other = keyEnvs.find((name) => name !== "ANTHROPIC_API_KEY");
+    assert.ok(other !== undefined, "the contract names a second provider's key variable");
+    const host = await started(options(dir, { env: { ...testEnv(dir), [other]: value } }));
+    try {
+      const answer = await host.call("tree", { workspace: await fs.realpath(workspace), dir: "", offset: 0 }, 10_000);
+      assert.equal(answer.ok, true, JSON.stringify(answer));
+      // The real name stays in the main process (for ids); the window gets `shown` only (3.3).
+      const entries = (answer as { value: { entries: { name: string; shown: string; masked: boolean }[] } }).value.entries;
+      const entry = entries.find((item) => item.name.includes(value));
+      assert.ok(entry !== undefined);
+      assert.equal(entry.shown.includes(value), false, "the shown name hides the value");
+      assert.equal(entry.masked, true);
+    } finally {
+      await host.close();
+    }
+  } finally {
     await cleanup();
   }
 });

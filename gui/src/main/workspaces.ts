@@ -4,7 +4,7 @@
  * the dialog and the shell stay in ipc.ts, so this is tested under Node.
  */
 
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { isHandle } from "../shared/ipc.js";
 import type { OpenReply, RecentView, TreeEntryView, TreeKind, TreeReply } from "../shared/ipc.js";
 import { EMPTY_STATE, readGuiState, withOpened, withoutPath, writeGuiState } from "./gui-state.js";
@@ -25,6 +25,12 @@ export interface WorkspacesDeps {
 /** What the window shows for a folder: its own name, or the whole path for a drive root. */
 export function folderName(path: string): string {
   return basename(path) || path;
+}
+
+/** R21-I-1: the name of the folder `path` is in, "" when `path` is a drive root. */
+export function parentName(path: string): string {
+  const parent = dirname(path);
+  return parent === path ? "" : folderName(parent);
 }
 
 const KINDS: readonly TreeKind[] = ["dir", "file", "link", "state", "other"];
@@ -77,7 +83,7 @@ export class Workspaces {
       const id = Array.from(this.deps.randomBytes(16), (byte) => byte.toString(16).padStart(2, "0")).join("");
       this.recentIds.set(id, item.path);
       const exists = isLocalPathSyntax(item.path, this.deps.platform) && (await this.deps.isDirectory(item.path));
-      views.push({ id, name: folderName(item.path), path: item.path, exists });
+      views.push({ id, name: folderName(item.path), where: parentName(item.path), exists });
     }
     return views;
   }

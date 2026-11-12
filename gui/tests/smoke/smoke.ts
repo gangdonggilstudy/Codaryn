@@ -77,6 +77,8 @@ const results: Record<string, unknown> = {};
 const dialogs: string[] = [];
 
 startGui({
+  // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
+  loopbackOnly: true,
   guiRoot: GUI,
   userDataDir: join(GUI, "build", "smoke-profile"),
   stateFile: STATE,
@@ -129,6 +131,8 @@ startGui({
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
       results["recentShown"] = await waitFor("document.querySelector('.recent')?.getAttribute('data-recent-ready') ?? null");
       results["recentNames"] = await js("[...document.querySelectorAll('.recent .recent-name')].map((n) => n.textContent)");
+      // R21-I-1: names and the folder they are in, never a full path.
+      results["recentText"] = await js("document.querySelector('.recent')?.textContent ?? ''");
       try {
         const saved = JSON.parse(readFileSync(STATE, "utf8")) as { recentWorkspaces?: { path: string }[] };
         results["stateFile"] = (saved.recentWorkspaces ?? []).map((item) => item.path.split(/[\\/]/).pop());
@@ -201,6 +205,9 @@ startGui({
       await js("document.getElementById('revert-run')?.click(); true");
       results["revertDone"] = await waitFor("document.getElementById('revert-panel')?.getAttribute('data-revert') ?? null", 60_000);
       results["madeAfterRevert"] = existsSync(join(SECOND, "made.txt"));
+      // DR-25: nothing was skipped as an unsafe move, so no consent is offered; a forged retry token is refused.
+      results["revertNoConsentOffer"] = await js("document.getElementById('revert-consent') === null");
+      results["revertConsentForged"] = await js(`window.codaryn.revertConsent(${JSON.stringify("0".repeat(32))})`);
 
       // 5e'. DR-29: the first run's changed file by path and state (it was reverted, so it is gone now).
       await waitFor(`document.querySelector('[data-changes="${firstRun}"]') !== null ? 'ready' : null`, 30_000);

@@ -4,7 +4,7 @@
  * `window.codaryn` (the preload) and to nothing else.
  */
 
-import { asInfo, asOpen, asWorkspace } from "./api.js";
+import { asInfo, asOpen } from "./api.js";
 import type { Workspace } from "./api.js";
 import { checksScreen } from "./checks/checks.js";
 import { textsFor } from "./i18n/catalog.js";
@@ -32,17 +32,32 @@ async function start(): Promise<void> {
     shell?.announce(texts.format("home.current", { name: workspace.name }));
   };
 
+  /** An error from the folder dialog, shown once by the workspace screen. */
+  let openError: string | null = null;
   const openWorkspace = (): void => {
     void (async () => {
-      const chosen = asWorkspace(await api.openFolder());
-      if (chosen !== null) setWorkspace(chosen);
+      const reply = await api.openFolder();
+      if (reply === null) return;
+      const opened = asOpen(reply);
+      if (opened.ok) {
+        setWorkspace({ handle: opened.handle, name: opened.name });
+        return;
+      }
+      // R10b-L-2: say why the chosen folder was refused, on the workspace screen.
+      openError = opened.code;
+      shell?.show("home");
     })();
+  };
+  const takeOpenError = (): string | null => {
+    const code = openError;
+    openError = null;
+    return code;
   };
 
   shell = new Shell(texts, { openWorkspace });
   shell.mount(root);
   tree = new TreeView(texts, api, shell.filePanel);
-  shell.add(homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace }));
+  shell.add(homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.setEngine(info.engine);
   shell.setWorkspace(null);

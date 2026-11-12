@@ -107,6 +107,8 @@ startGui({
         `(() => { const t = document.querySelector('.tree'); return t?.getAttribute('data-tree-ready') === 'ok' && document.getElementById('status-workspace')?.textContent?.includes(${JSON.stringify(SECOND.split(/[\\/]/).pop())}) ? 'ok' : null; })()`,
       );
       results["secondRows"] = await treeRows();
+      // R10b-L-2: a network folder from outside is refused untouched and stays out of the recent list.
+      results["networkFolder"] = await openFromOutside("\\\\files.example.invalid\\share\\work");
 
       // 3. Open the folder "sub" by clicking it; its children appear one level deeper.
       await js("[...document.querySelectorAll('.tree [data-kind=\"dir\"]')].find((li) => li.textContent.trim().endsWith('sub'))?.click(); true");

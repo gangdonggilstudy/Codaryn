@@ -65,4 +65,5 @@ export const EN: { readonly [K in TextId]: string } = {
   "error.adapter_timeout": "The engine process did not answer in time.",
   "error.unknown_workspace": "Open the workspace again.",
   "error.workspace_missing": "That folder cannot be found.",
+  "error.workspace_not_local": "A folder on a network location or a device path cannot be opened. Choose a folder on a drive of this computer.",
 };

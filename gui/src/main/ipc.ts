@@ -86,8 +86,7 @@ export function registerIpc(deps: IpcDeps): void {
     const chosen = await dialog.showOpenDialog(window, { properties: ["openDirectory", "dontAddToRecent"] });
     const folder = chosen.canceled ? undefined : chosen.filePaths[0];
     if (folder === undefined) return null;
-    const opened = await workspaces.open(folder);
-    return opened.ok ? { handle: opened.handle, name: opened.name } : null;
+    return workspaces.open(folder);
   });
 
   handle(IPC_CHANNELS.recent, async (args): Promise<RecentView[] | null> => (isNoArgs(args) ? workspaces.recent() : null));

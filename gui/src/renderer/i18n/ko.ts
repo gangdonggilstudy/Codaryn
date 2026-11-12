@@ -67,6 +67,7 @@ export const KO = {
   "error.adapter_timeout": "엔진 프로세스가 제시간에 답하지 않았습니다.",
   "error.unknown_workspace": "작업 공간을 다시 여세요.",
   "error.workspace_missing": "그 폴더를 찾을 수 없습니다.",
+  "error.workspace_not_local": "네트워크 위치나 장치 경로의 폴더는 열 수 없습니다. 이 컴퓨터의 드라이브에 있는 폴더를 고르세요.",
 } as const;
 
 export type TextId = keyof typeof KO;

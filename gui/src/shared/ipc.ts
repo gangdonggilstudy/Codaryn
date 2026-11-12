@@ -147,8 +147,12 @@ export type DoctorReply =
   | { readonly ok: true; readonly view: DoctorView; readonly labels: Readonly<Record<string, string>>; readonly workspaceName: string | null }
   | { readonly ok: false; readonly code: string };
 
-/** What `openFolder` answers: a handle and the folder's own name, or null when nothing was chosen. */
-export type OpenFolderReply = { readonly handle: string; readonly name: string } | null;
+/**
+ * What `openFolder` answers: null when nothing was chosen, else what opening the chosen folder
+ * answers (OpenReply), so the window can say why a folder was refused (R10b-L-2: a network
+ * location is `workspace_not_local`).
+ */
+export type OpenFolderReply = OpenReply | null;
 
 /** One remembered workspace. `path` is the folder the person chose; it is shown in the recent list only. */
 export interface RecentView {

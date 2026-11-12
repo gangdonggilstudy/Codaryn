@@ -88,6 +88,7 @@ const expected = [
   ["initialRows", (v) => rows(v).length === 1 && rows(v)[0].text.includes("first.txt")],
   ["secondOpened", (v) => v === true],
   ["secondTree", (v) => v === "ok"],
+  ["networkFolder", (v) => JSON.stringify(v) === JSON.stringify({ ok: false, code: "workspace_not_local" })],
   [
     "secondRows",
     (v) => {

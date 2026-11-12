@@ -1,6 +1,7 @@
 /**
  * Review R-34b of the cleanup (the last round, decided by the PM) through the app layer, the GUI's
- * path. Reproductions first, todo until the contract and the store follow it.
+ * path. Reproduced first (440c5bb, todo); the contract (eacd18e) and the store (26a10db, unit U-3)
+ * follow it now.
  * - P-1 (R-34b L-1): a run whose records cannot be checked (damaged) may have changed files; whether
  *   it was reverted is not known. It is treated as a run not reverted: warned, counted in
  *   totals.runs.notReverted, and its records go only with includeNotReverted.
@@ -18,10 +19,8 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { RUNS_DIR_NAME, STATE_DIR_NAME, needsNotRevertedConfirmation } from "../../../src/contracts/index.js";
 import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp } from "../../../src/app/index.js";
+import type { AppCallOutcome, CleanupApplied, CleanupPreview, CodarynApp, StateSummaryView } from "../../../src/app/index.js";
 import { WRITE_NOTES, appEnvironment, exists, setupRun, taskRequest } from "./support.js";
-
-const TODO = { todo: "R-34b P-1, P-2: wait for the contract and the store" };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -41,7 +40,7 @@ async function finishedRun(): Promise<{ workspace: string; app: CodarynApp; runI
 const runDirOf = (workspace: string, runId: string): string => path.join(workspace, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
 
 describe("R-34b: the cleanup's last round through the app layer", () => {
-  test("P-1: a run whose records cannot be checked needs the confirmation of runs not reverted", TODO, async () => {
+  test("P-1: a run whose records cannot be checked needs the confirmation of runs not reverted", async () => {
     const { workspace, app, runId } = await finishedRun();
     const result = path.join(runDirOf(workspace, runId), "result.json");
     assert.ok((await readFile(result, "utf8")).length > 0);
@@ -50,6 +49,7 @@ describe("R-34b: the cleanup's last round through the app layer", () => {
     const preview = ok<CleanupPreview>(await app.previewCleanup({ workspace, selection }));
     const item = preview.plan.items.find((entry) => "runId" in entry && entry.runId === runId);
     assert.ok(item !== undefined && needsNotRevertedConfirmation(item.warnings), JSON.stringify(preview.plan.items));
+    assert.ok(item.warnings.includes("records_unreadable"), "the contract's warning for damaged records");
     assert.equal(preview.plan.totals.runs.notReverted, 1);
     const kept = ok<CleanupApplied>(await app.applyCleanup({ workspace, selection, now: preview.now, confirmation: { digest: preview.plan.digest, discarded: false, includeNotReverted: false } }));
     assert.ok(kept.outcome.ok, JSON.stringify(kept.outcome));
@@ -57,7 +57,7 @@ describe("R-34b: the cleanup's last round through the app layer", () => {
     assert.equal(await exists(runDirOf(workspace, runId)), true, "its snapshot, the last copy of the originals, stays");
   });
 
-  test("P-2: a cleanup-<hex> folder without the cleanup's mark is never an item to remove", TODO, async () => {
+  test("P-2: a cleanup-<hex> folder without the cleanup's mark is never an item to remove", async () => {
     const { workspace, app, runId } = await finishedRun();
     const stranger = path.join(workspace, STATE_DIR_NAME, "cleanup-0123456789abcdef");
     await mkdir(stranger, { recursive: true });
@@ -70,5 +70,7 @@ describe("R-34b: the cleanup's last round through the app layer", () => {
     );
     assert.ok(applied.outcome.ok, JSON.stringify(applied.outcome));
     assert.deepEqual(await readdir(stranger), ["person.txt"], "the unknown folder stays, whatever was confirmed");
+    const summary = ok<StateSummaryView>(await app.stateSummary({ workspace }));
+    assert.deepEqual([summary.summary.unknownFolders?.count, summary.summary.unknownFolders?.files], [1, 1], "shown as an unknown folder");
   });
 });

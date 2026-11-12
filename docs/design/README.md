@@ -5,7 +5,7 @@
 | 문서 | 내용 | 상태 |
 | --- | --- | --- |
 | [usability-review.md](usability-review.md) | 현재 CLI를 처음 쓰는 사람의 관점으로 실행해 찾은 문제 16건(R-1~R-16)과 개선안 12건(A1~A12). 기존 보안 결정과의 충돌 검토, 우선순위(P0~P2), 결정 필요 D-1~D-6 | main `349726a` 기준 검토 기록. 결정은 N-1~N-13으로 내려졌다 |
-| [ux-design.md](ux-design.md) | CLI·GUI 공통 UX: 대상 사용자와 과업, 정보 구조, 핵심 흐름(계획 확인과 적용 포함), 용어와 문구, 상태 표현, 위험한 동작 확인, 접근성과 언어, GUI 형태, 결정 필요 UX-D1~UX-D7 | UX-D1~UX-D5는 N 계열로, UX-D6·UX-D7은 DR-7·DR-1로 결정. D3에서 main `f39593f` 기준으로 맞춤. 대부분 구현 없음 |
+| [ux-design.md](ux-design.md) | CLI·GUI 공통 UX: 대상 사용자와 과업, 정보 구조, 핵심 흐름(계획 확인과 적용 포함), 용어와 문구, 상태 표현, 위험한 동작 확인, 접근성과 언어, GUI 형태, 결정 필요 UX-D1~UX-D7 | UX-D1~UX-D5는 N 계열로, UX-D6·UX-D7은 DR-7·DR-1로 결정. D3에서 main `1d23dda` 기준으로 맞춤. 대부분 구현 없음 |
 | [implementation-map.md](implementation-map.md) | 기능마다 구현 파일, 결정 번호, 유닛·통합 시험을 잇는 표 | main `349726a` 기준. 이후 구현분(`models` 등)과 설계 채택분은 갱신 대기 |
 | [adapter-contract.md](adapter-contract.md) | 엔진 쪽 어댑터 계약(P5-A): 앱 계층 `src/app`, 실행 시작·이벤트·취소·결과·보고서·되돌리기·확인 질문·오류 모델, 줄 프로토콜, CLI 이행 계획, 결정 AC-D1~AC-D12 | PM 채택(`3d1eec2`). DR-1·DR-2·DR-3·DR-4·DR-7·DR-8에 맞춘 수정 대기. 코드 없음. 구현 A-1 착수 |
 | [vscode-extension.md](vscode-extension.md) | VS Code 확장 설계(P5-A): 실행마다 CLI 자식, 화면과 명령, 확인 질문·취소의 같은 의미, 설정·키 규칙, 패키징, 시험, 결정 VX-D1~VX-D12 | PM 채택(`3d1eec2`). VX-D6은 DR-7로 바뀜. DR-1(계획·사람 확인 화면)에 맞춘 수정 대기. VX-D4(`@types/vscode`)는 사용자 확인 대기(Q-3). 코드 없음 |

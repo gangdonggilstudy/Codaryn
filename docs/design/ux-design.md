@@ -1,11 +1,11 @@
 # UX 설계 (CLI·GUI 공통)
 
-- 기준: 처음 작성은 main `349726a`, D3 맞춤은 main `f39593f`(2026-11-12). 근거 검토는 [사용성 검토](usability-review.md)다.
+- 기준: 처음 작성은 main `349726a`, D3 맞춤은 main `1d23dda`(2026-11-12). 근거 검토는 [사용성 검토](usability-review.md)다.
 - 상태 표기: [구현]은 main에 있는 것, [설계]는 결정만 되고 코드가 없는 것, [제안]은 이 문서의 안이다. 출력 예시는 문구 초안이다.
 - 사용자 확정 요구: CLI 먼저·GUI와 VS Code는 후속(decisions U-2), 민감정보 가림(U-5), 편의성·UX 설계·문서화(2026-11-12 지시), "모델명을 외워 칠 수 없다"는 지적, 최종 설계까지 구현(U-21).
 - PM 설계 선택
   - 기존: 엔진 하나와 어댑터(M-2, architecture 1절), 권한은 사용자 설정과 CLI 인자로만(M-9), 설정·키 규칙(C-1~C-8, S-1~S-12), 진행 표시(단계 3 U-8), 모델 목록(Y-1~Y-5).
-  - 이 문서의 결정 필요를 정한 사용성 결정 N-1~N-19([사용성 개선 지시](../work-orders/phase-4-usability.md)).
+  - 이 문서의 결정 필요를 정한 사용성 결정 N-1~N-22([사용성 개선 지시](../work-orders/phase-4-usability.md)).
   - 단계 4·5 설계 결정([어댑터 계약](adapter-contract.md) AC-D, [VS Code 확장](vscode-extension.md) VX-D, [범용 작업](general-tasks.md) GT-D. 원문은 [단계 4·5 설계 지시](../work-orders/phase-4-5-design.md)).
   - 설계 교차 검토 뒤 결정 DR-1~DR-9(같은 지시서, [R-1 검토 보고](../reviews/2026-11-12-r1-review-stage-4-5-designs.md)). 앞의 채택보다 우선한다.
 - 미정: 독립 GUI 형태(O-5, 단계 4 뒤. 설계 기준은 [독립 GUI](standalone-gui.md)). UX-D6(변경 비교)과 UX-D7(계획 승인 통로)은 DR-7, DR-1로 정해졌다.
@@ -40,13 +40,13 @@
 
 | CLI 명령 | 상태 | GUI 화면 | VS Code 확장 |
 | --- | --- | --- | --- |
-| `init` | 설계(N-2) | 첫 실행 안내 | — |
+| `init` | 설계(N-2). 출력 계약만 있음 | 첫 실행 안내 | — |
 | `models` | 구현(Y-1~Y-4) | 설정 > 모델 | "모델 고르기" |
 | `doctor` | 구현 | 설정 > 점검 | "점검" |
 | `run` | 구현. `--profile`·한 줄 실행은 설계(N-8, N-9), `--workflow`는 설계(GT) | 새 작업 → 실행 화면 | "새 작업", "task 파일 실행" |
-| `runs`, `--run latest` | 설계(N-7, N-16, N-18). 확인하지 못한 실행은 "손상"으로만 보이고 `latest`에서 빠진다 | 홈(최근 실행) | 실행 목록 트리 |
+| `runs`, `--run latest` | 모듈 구현, CLI 연결 전(N-7, N-16, N-18). 확인하지 못한 실행은 "손상"으로만 보이고 `latest`에서 빠진다 | 홈(최근 실행) | 실행 목록 트리 |
 | `report` | 구현 | 결과 화면 | "보고서 열기" |
-| `revert` | 구현. `--dry-run`은 설계(N-7) | 결과 화면 > 되돌리기 | "되돌리기" |
+| `revert` | 구현. `--dry-run`은 저장소 함수만 구현, CLI 옵션 연결 전(N-7). `already_reverted`는 설계(N-22) | 결과 화면 > 되돌리기 | "되돌리기" |
 | `plan`, `apply --digest` | 설계(GT-D4, DR-1, DR-2, DR-5) | 계획 화면(`plan_pending` 결과 뒤) | 계획 화면(DR-1). 확장 설계 갱신 대기 |
 | `review --accept\|--reject` | 설계(GT-D6, DR-1) | 결과 화면 > 사람 확인 | 사람 확인(DR-1). 확장 설계 갱신 대기 |
 
@@ -278,8 +278,9 @@ $ codaryn plan --workspace D:\work\photos --run latest
 
 ## 8. 접근성과 언어
 
-- 언어[설계: N-4]
+- 언어[N-4. 카탈로그 모듈은 구현, CLI 연결 전]
   - 한국어·영어 고정 문구 카탈로그(`src/i18n`, CLI와 어댑터가 함께 쓴다).
+  - [설계: N-20, N-21] 거부 사유·권한 종류·모델 오류 종류의 사람 말, 초 단위 소요 시간, 예·아니오 질문의 기본 답("바꾸지 않음"), 언어가 어디서 정해졌는지의 안내, `doctor` 점검 문구와 `--help`도 카탈로그에 넣는다.
   - 선택: `CODARYN_LANG` > 설정 `language` > OS 표시 언어.
   - VS Code 확장은 OS 표시 언어 자리에 VS Code 표시 언어를 쓴다(VX-D11).
   - 코드, JSON 필드, 명령 이름은 영어로 고정한다.

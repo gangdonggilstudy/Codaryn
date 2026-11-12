@@ -1,8 +1,12 @@
 # Codaryn 아키텍처
 
-상태: 2026-11-12, main `f39593f` 기준.
+상태: 2026-11-12, main `1d23dda` 기준.
 - 단계 0 설계(같은 날 Codex 채택)를 바탕으로 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 기구와 `codaryn models`가 구현·병합됐다.
-- 사용성 개선(N-1~N-19)은 결정만 있고 구현이 진행 중이다. 단계 4·5 설계(어댑터 계약, VS Code 확장, 범용 작업 워크플로, 독립 GUI)는 PM이 채택했고 구현은 착수 단계다(코드 없음). 설계 교차 검토 R-1 뒤의 결정 DR-1~DR-9가 앞의 채택보다 우선한다([단계 4·5 설계 지시](work-orders/phase-4-5-design.md) "설계 교차 검토 뒤 결정").
+- 사용성 개선(N-1~N-22)은 구현이 진행 중이다.
+  - 사용성 계약(N-A)이 main에 있다.
+  - 문구 카탈로그 `src/i18n`(N-B)과 사람용 출력·실행 목록·되돌리기 미리보기 모듈(N-C)이 유닛 시험과 함께 main에 있다.
+  - CLI 명령 연결(N-A)은 아직이다. 그래서 `runs`, `revert --dry-run`, `init`, `--profile`, 사람용 stderr 출력은 CLI에서 쓸 수 없다.
+- 단계 4·5 설계(어댑터 계약, VS Code 확장, 범용 작업 워크플로, 독립 GUI)는 PM이 채택했고 구현은 착수 단계다(코드 없음). 설계 교차 검토 R-1 뒤의 결정 DR-1~DR-9가 앞의 채택보다 우선한다([단계 4·5 설계 지시](work-orders/phase-4-5-design.md) "설계 교차 검토 뒤 결정").
 - **실제 Anthropic API는 한 번도 호출하지 않았다**(`tests/live` 미실행). 모든 검증은 대본 모델, 가짜 HTTP 서버, 실제 CLI 프로세스로 한 오프라인 검증이다.
 - 이 문서는 구조를 설명한다. 각 기능의 파일, 결정 번호, 시험은 [구현 위치표](design/implementation-map.md)에 있다. 단계 4·5 설계의 세부는 [설계 문서 색인](design/README.md)의 문서들이 기준이다.
 
@@ -35,12 +39,12 @@
 
 ## 2. 모듈
 
-`src/` 아래 열 개 모듈이 구현돼 있다. 설계가 채택된 네 모듈(`app`, `i18n`, `workflows`, `tabular`)이 더해질 예정이다. 다른 모듈은 각 모듈의 `index.ts` 공개 export로만 쓴다.
+`src/` 아래 열한 개 모듈(`i18n` 포함)이 구현돼 있다. 설계가 채택된 세 모듈(`app`, `workflows`, `tabular`)이 더해질 예정이다. 다른 모듈은 각 모듈의 `index.ts` 공개 export로만 쓴다.
 
 | 모듈 | 책임 | 알지 못해야 하는 것 | 상태 |
 | --- | --- | --- | --- |
 | `contracts` | 모듈 사이의 타입·상수·한도(계약). 역할 1(계약 담당)만 바꾼다 | 구현 | 구현 |
-| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(`cli/security`), 조립(`assemble.ts`), 명령(run, revert, report, doctor, models, help/version), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 실행 전 검사와 조립은 `app`으로 옮길 예정(결정만). 사람용 출력 `cli/human`, `runs`, `init`(N-2, N-5, N-7)은 결정만 |
+| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(`cli/security`), 조립(`assemble.ts`), 명령(run, revert, report, doctor, models, help/version), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 실행 전 검사와 조립은 `app`으로 옮길 예정(결정만). 사람용 출력 `cli/human`과 실행 목록 `cli/runs.ts`(N-5~N-7, N-16)는 모듈과 유닛 시험만 있고 명령 연결 전. `init`(N-2)은 계약만 |
 | `engine` | 상태 기계, 모델↔도구 반복, 한도, 가림 적용 순서, 검증 회차, 재수정 판단, 무결성 점검 시점 | 파일 시스템, Git, 테스트 러너, Anthropic 형식 | 구현 |
 | `model` | 제공자 중립 `complete` 인터페이스. `anthropic`(내장 `fetch`)과 `scripted`(대본) | 파일 시스템, 정책 | 구현 |
 | `tools` | 내장 도구 네 개(`read_file`, `search_files`, `write_file`, `run_command`)와 명령 실행기 | 모델 제공자 | 구현 |
@@ -50,7 +54,7 @@
 | `store` | journal(가림본 기록), result.json, 작업 공간 잠금(`lock.ts`), 스냅샷과 되돌리기(`changes.ts`) | 모델 제공자 | 구현 |
 | `workspace` | 허용 루트 안의 경로 해석(링크·8.3 이름 해석), 텍스트 읽기, 원자적 쓰기, 목록 | 정책 판단 | 구현 |
 | `app` | 어댑터 공통 계층: 입력 해석과 실행 전 보안 검사, 조립, 실행 수명(이벤트 전달, 취소, 확인 질문 중계, 결과 저장, 잠금 해제), report·revert·runs·doctor·models 함수([어댑터 계약](design/adapter-contract.md) 3~5절) | 어댑터의 화면과 인자 형식, 프로세스 전역(`process.env`, 신호, stdout) | 결정만(AC-D1) |
-| `i18n` | 사람용 고정 문구 카탈로그(ko, en)와 언어 선택(N-4) | CLI 모듈(어댑터들이 함께 쓴다), 파일·환경의 값 | 결정만(N-B 구현 중) |
+| `i18n` | 사람용 고정 문구 카탈로그(ko, en)와 언어 선택(N-4) | CLI 모듈(어댑터들이 함께 쓴다), 파일·환경의 값 | 구현(유닛 `tests/unit/i18n`). CLI 연결 전. N-20, N-21의 문구 추가는 결정만 |
 | `workflows` | 내장 워크플로 정의(`general`, `code`, `document`, `analyze`, `organize`). 로직 없는 데이터 상수([범용 작업](design/general-tasks.md) 4절) | 실행 논리 | 결정만(GT-D12) |
 | `tabular` | 표(CSV, TSV, JSON Lines) 해석과 집계. 순수 함수. `query_table` 도구와 `data_checks` 검증기가 함께 쓴다 | 파일 시스템, 모델 | 결정만(GT-D12, P1) |
 
@@ -98,7 +102,7 @@
   - 기록 사건: `plan_proposed`, `plan_rejected`, `plan_approved`, `file_moved`, `file_discarded`.
   - 검증기: `data_checks`, `inventory`. `inventory`는 계획 대상의 해시와 나머지의 경로·크기 목록을 쓰고 자체 상한을 둔다(DR-6).
   - `ask`와 `EngineDeps.confirm`은 G-A에 넣지 않는다. 단계 5 시작에 넣는다(DR-3).
-- 사용성 계약(N-A, `9735b5f`): 설정 `language`·`profiles`, 기본 설정 위치, 새 명령의 출력 객체. 이 문서 기준 main에는 아직 없다.
+- 사용성 계약(N-A, main `b78d62e`로 병합): 설정 `language`·`profiles`, 기본 설정 위치, 새 명령의 출력 객체(`InitOutput`, `RunsOutput` 등), 문구 계약(`human.ts`). **구현(계약)**. 이를 쓰는 CLI 명령 연결은 아직이다. N-22의 계약 보완은 결정만이다.
 
 표시 등급(`read`, `write-local`, `exec`, `external`)은 보여 주기용이다. 허용 판단은 호출마다 권한별로 따로 한다. **구현**
 
@@ -235,9 +239,9 @@ revert --run <적용 runId>         이동을 되돌리고 보관함의 파일�
 | `doctor [--config] [--vars-file] [--task \| --workspace] [--json]` | 네트워크 없이 12개 항목을 점검한다. 키 값은 출력하지 않는다(U-6, W-5, X-1, X-3) | 구현 |
 | `--help`, `help <명령>`, `--version` | 도움말과 버전(U-7) | 구현 |
 | `models [--json] [--use <번호\|id> --config]` | 모델 목록 조회와 선택(Y-1~Y-4). 키와 실제 접속이 필요하다 | 구현(유닛 `cli/y-models`, 통합 `y01-models`는 가짜 서버). 실제 API 미실행 |
-| `init` | 기본 설정 위치에 설정 파일을 만든다. 키는 받지 않는다(N-2) | 결정만(N-A) |
-| `runs --workspace <d>`, `--run latest` | 실행 목록과 가장 최근 실행(N-7) | 결정만(N-C) |
-| `revert --dry-run` | 바꾸지 않고 되돌릴 것만 보인다(N-7) | 결정만(N-C) |
+| `init` | 기본 설정 위치에 설정 파일을 만든다. 키는 받지 않는다(N-2) | 계약만(N-A). 명령 없음 |
+| `runs --workspace <d>`, `--run latest` | 실행 목록과 가장 최근 실행(N-7, N-16, N-18) | 모듈 구현(`store/runs`, `cli/runs.ts`, 유닛). CLI 명령 연결 전 |
+| `revert --dry-run` | 바꾸지 않고 되돌릴 것만 보인다. 이미 되돌린 파일은 `already_reverted`(N-7, N-22) | 저장소 함수 구현(`store/changes`의 `dryRun`, 유닛). CLI 옵션 연결 전. `already_reverted`는 결정만 |
 | `run --profile <이름>`, `run "<목표>"` | 프로필(N-8)과 현재 디렉터리를 작업 공간으로 쓰는 한 줄 실행(N-9) | 결정만(N-A) |
 | `run --events jsonl --confirm stdio` | 프로세스 밖 어댑터용 줄 프로토콜(AC-D7, AC-D8). `apply`도 `--events jsonl`과 `--cancel-file`을 받는다(DR-2) | 결정만 |
 | `run --workflow <id>` | 워크플로 정의 고르기(간편 형식, GT 4.2) | 결정만 |

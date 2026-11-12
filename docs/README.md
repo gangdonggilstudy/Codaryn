@@ -2,10 +2,10 @@
 
 Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루프, 민감정보 처리, 검증과 협업 절차를 관리한다. 사용자가 제품 방향을 정하고 Codex가 최종 기술 판단과 개발 관리를 맡는다(위임 기간에는 임시 PM). 코딩과 토큰 사용이 많은 작업은 전문 페르소나를 지정한 Claude에 배정한다.
 
-현재 상태(2026-11-12, main `f39593f`):
+현재 상태(2026-11-12, main `1d23dda`):
 - 단계 1a·2·3의 오프라인 구현과 `codaryn models`가 main에 있다. 1b는 모의 API 검증까지다.
 - **실제 Anthropic API는 한 번도 호출하지 않았다.**
-- 사용성 개선(N-1~N-19)을 구현하고 있다.
+- 사용성 개선(N-1~N-22)을 구현하고 있다. 계약, 문구 카탈로그, 사람용 출력·실행 목록 모듈은 main에 있고 CLI 명령 연결은 아직이다.
 - 단계 4·5는 설계를 채택했고 구현에 착수했다.
 
 세부는 [개발 진행 현황](progress.md)과 [임시 PM 상태](pm-status.md), 단계별 완료 기준은 [단계별 계획](roadmap.md)을 따른다.
@@ -53,7 +53,7 @@ Codaryn의 범용 작업 엔진, CLI 우선 설계, 코딩과 자기 개발 루�
 | [설정 작업 지시](work-orders/phase-1b-config.md) | 설정과 Anthropic 제공자, 결정 C |
 | [단계 2 작업 지시](work-orders/phase-2-repair-loop.md) | 재수정 반복과 교차 검토 수정, 결정 R, S, T |
 | [단계 3 작업 지시](work-orders/phase-3-self-development.md) | 자기 개발 준비와 `models`, 결정 U(단계 3), V, W, X, Y |
-| [사용성 개선 지시](work-orders/phase-4-usability.md) | 사용성 결정 N-1~N-19와 구현 배정 |
+| [사용성 개선 지시](work-orders/phase-4-usability.md) | 사용성 결정 N-1~N-22와 구현 배정 |
 | [단계 4·5 설계 지시](work-orders/phase-4-5-design.md) | 설계 배정, 설계 결정(AC, VX, GT, GUI), 교차 검토 뒤 결정(DR-1~DR-9, 앞의 채택보다 우선)과 1차 구현 배정 |
 | `reviews/` | 교차 검토 원문 보관. 단계 4·5 설계 검토는 [R-1 검토 보고](reviews/2026-11-12-r1-review-stage-4-5-designs.md) |
 

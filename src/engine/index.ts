@@ -1337,7 +1337,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       repairAttempts,
     };
     await record({ type: "run_finished", status: end.status, reason: end.reason, usage });
-    const finalMessage = lastFinal !== null && end.reason !== "plan_pending" ? finalMessageOf(lastFinal) : null;
+    const finalMessage = lastFinal !== null && end.reason !== "plan_pending" ? finalMessageOf(lastFinal, (text) => privacy.mask(text)) : null;
     return {
       schemaVersion: RESULT_SCHEMA_VERSION,
       kind: "run",

@@ -9,9 +9,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { MAX_FINAL_MESSAGE_CHARS } from "../../../src/contracts/index.js";
+import { MAX_FINAL_MESSAGE_CHARS, PRIVACY_TOKEN_PATTERN_SOURCE } from "../../../src/contracts/index.js";
 import type { Limits, ModelOutcome, ModelRequest } from "../../../src/contracts/index.js";
 import { runTask } from "../../../src/engine/index.js";
+import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { FAKE_SECRET, FAKE_TOKEN, FakeVerifiers, finalAnswer, harness, readCall, response } from "./fakes.js";
 
 type Step = (request: ModelRequest) => ModelOutcome;
@@ -73,5 +74,33 @@ describe("U-21: the agent's last message in the result", () => {
     for (const result of [limit.result, failed.result, blank.result, stopped]) {
       assert.equal(Object.hasOwn(result, "finalMessage"), false, `${result.status}/${result.reason}`);
     }
+  });
+});
+
+describe("R-52: the last message is cleaned first, then masked, then its key shapes hidden", () => {
+  const ZWSP = String.fromCodePoint(0x200b);
+
+  test("R52-M1 (X11): a registered value shorter than 16 code points, split by an invisible character, is masked, not joined back", async () => {
+    for (const value of ["R52pass", "R52pass-fifteen"]) {
+      const h = harness({ steps: [() => finalAnswer(`the value is ${value.slice(0, 3)}${ZWSP}${value.slice(3)}.`)], privacy: createPrivacyGateway({ secrets: [value] }) });
+      const result = await runTask(h.deps);
+      const text = result.finalMessage?.text ?? "";
+      assert.equal(text.includes(value), false, `${value.length} code points`);
+      assert.match(text, new RegExp(`^the value is ${PRIVACY_TOKEN_PATTERN_SOURCE}[.]$`));
+    }
+  });
+
+  test("R52-M2 (X14, X15, X18): a key split by LF, TAB or CRLF after 12 characters is [key], nothing of it left", async () => {
+    for (const cut of ["\n", "\t", "\r\n"]) {
+      const h = harness({ steps: [() => finalAnswer(`key ${KEY.slice(0, 12)}${cut}${KEY.slice(12)} end`)] });
+      const result = await runTask(h.deps);
+      assert.deepEqual(result.finalMessage, { text: "key [key] end", truncated: false }, JSON.stringify(cut));
+    }
+  });
+
+  test("line breaks and tabs that do not split a key stay; a word after a key stays", async () => {
+    const h = harness({ steps: [() => finalAnswer(`line 1\n\tline 2 ${KEY} and it works`)] });
+    const result = await runTask(h.deps);
+    assert.deepEqual(result.finalMessage, { text: "line 1\n\tline 2 [key] and it works", truncated: false });
   });
 });

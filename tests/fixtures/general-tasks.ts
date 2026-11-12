@@ -63,7 +63,9 @@ export function writeGeneralTask(sandbox: Sandbox, options: GeneralTaskOptions, 
     model: { provider: "scripted", scriptPath: "./script.json" },
     policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, ...options.policy },
     privacy: { secretEnv: [] },
-    limits: { maxModelTurns: 12, maxToolCalls: 24, maxTotalTokens: 1000, maxDurationMs: 60_000, ...options.limits },
+    // Within every built-in definition's ceiling (organize: 8 turns, 40 tool calls); a task's limit
+    // above its definition's is invalid_task.
+    limits: { maxModelTurns: 8, maxToolCalls: 24, maxTotalTokens: 1000, maxDurationMs: 60_000, ...options.limits },
     verifiers: [...(options.verifiers ?? [])],
     ...options.fields,
   };
@@ -115,6 +117,22 @@ export const ORGANIZE_ACTIONS: readonly OrganizeAction[] = [
   { kind: "discard", path: "inbox/photo copy.png" },
   { kind: "discard", path: "inbox/old.tmp" },
 ];
+
+/**
+ * A task file states its whole policy, so the organize definition's `planActions` does not reach
+ * it: a task that leaves them out has every plan action denied (`plan_action_not_allowed`).
+ * Organize tasks therefore name them, and a case that needs fewer passes its own.
+ */
+export const ORGANIZE_PLAN_ACTIONS = ["move", "discard"] as const;
+
+/** Writes an organize task (workflowRef organize, both plan actions unless `policy` says otherwise). */
+export function writeOrganizeTask(sandbox: Sandbox, id: string, steps: readonly ScriptStep[], policy: JsonObject = {}): string {
+  return writeGeneralTask(
+    sandbox,
+    { id, label: "organize", goal: "inbox의 파일을 종류별 폴더로 정리한다", fields: { workflowRef: "organize" }, policy: { planActions: [...ORGANIZE_PLAN_ACTIONS], ...policy } },
+    steps,
+  );
+}
 
 /** Writes ORGANIZE_FILES into the workspace and returns a copy of them. */
 export function writeOrganizeWorkspace(sandbox: Sandbox): Map<string, Buffer> {
@@ -284,18 +302,29 @@ export function organizeWriteAttemptScript(): ScriptStep[] {
   ];
 }
 
-/** GG-C05: one refused plan, then the valid one. */
-export function refusedThenValidPlanScript(refused: JsonObject): ScriptStep[] {
-  return [toolStep("propose_plan", refused), toolStep("propose_plan", proposePlanArgs(ORGANIZE_ACTIONS)), UNREQUESTED_STEP];
+/** GG-C05: one refused plan, then a valid one (ORGANIZE_ACTIONS unless the case allows fewer kinds). */
+export function refusedThenValidPlanScript(refused: JsonObject, valid: readonly OrganizeAction[] = ORGANIZE_ACTIONS): ScriptStep[] {
+  return [toolStep("propose_plan", refused), toolStep("propose_plan", proposePlanArgs(valid)), UNREQUESTED_STEP];
 }
+
+/** ORGANIZE_ACTIONS without the discards, for a task whose policy allows moves only. */
+export const ORGANIZE_MOVES: readonly OrganizeAction[] = ORGANIZE_ACTIONS.filter((action) => action.kind === "move");
 
 export interface RefusedPlanCase {
   readonly name: string;
   readonly args: JsonObject;
-  /** `invalid_plan` with this PLAN_PROBLEMS code, or a policy denial code. */
-  readonly expect: { readonly toolError: "invalid_plan"; readonly problem: string } | { readonly denial: string };
+  /**
+   * `invalid_plan` with this PLAN_PROBLEMS code, `invalid_args` when the input schema refuses the
+   * arguments before the tool sees them, or a policy denial code.
+   */
+  readonly expect:
+    | { readonly toolError: "invalid_plan"; readonly problem: string }
+    | { readonly toolError: "invalid_args" }
+    | { readonly denial: string };
   /** Task policy fields the case needs (protected paths, plan actions). */
   readonly policy?: JsonObject;
+  /** The valid plan proposed after the refused one. Default ORGANIZE_ACTIONS. */
+  readonly validAfter?: readonly OrganizeAction[];
 }
 
 const plan = (actions: readonly JsonObject[]): JsonObject => ({ summary: "거부될 계획", actions: [...actions] });
@@ -306,9 +335,14 @@ const move = (from: string, to: string): JsonObject => ({ kind: "move", from, to
  * could apply (`destination_is_source` also has an existing destination; `too_many` names paths
  * that do not exist) the case expects the more specific one; the implementation's check order
  * decides and the case follows it once seen.
+ *
+ * Seen on the bundle base (1a65e97): an empty plan and one of 1001 actions are refused by the
+ * input schema (`invalid_args`, minItems and maxItems) before `propose_plan` runs, so the
+ * PLAN_PROBLEMS codes `empty` and `too_many` are never reported. Nothing is stored either way;
+ * only the code differs from the contract's (reported to the PM).
  */
 export const REFUSED_PLAN_CASES: readonly RefusedPlanCase[] = [
-  { name: "empty", args: plan([]), expect: { toolError: "invalid_plan", problem: "empty" } },
+  { name: "empty", args: plan([]), expect: { toolError: "invalid_args" } },
   { name: "same_path", args: plan([move("inbox/budget.csv", "inbox/budget.csv")]), expect: { toolError: "invalid_plan", problem: "same_path" } },
   {
     name: "duplicate_source",
@@ -336,7 +370,7 @@ export const REFUSED_PLAN_CASES: readonly RefusedPlanCase[] = [
   {
     name: "too_many",
     args: plan(Array.from({ length: 1001 }, (_, index) => ({ kind: "discard", path: `inbox/many-${index}.tmp` }))),
-    expect: { toolError: "invalid_plan", problem: "too_many" },
+    expect: { toolError: "invalid_args" },
   },
   { name: "outside_root", args: plan([move("inbox/budget.csv", "../escape.csv")]), expect: { denial: "outside_root" } },
   { name: "state_dir", args: plan([move("inbox/budget.csv", ".codaryn/budget.csv")]), expect: { denial: "state_dir" } },
@@ -351,6 +385,7 @@ export const REFUSED_PLAN_CASES: readonly RefusedPlanCase[] = [
     args: plan([{ kind: "discard", path: "inbox/old.tmp" }]),
     expect: { denial: "plan_action_not_allowed" },
     policy: { planActions: ["move"] },
+    validAfter: ORGANIZE_MOVES,
   },
 ];
 

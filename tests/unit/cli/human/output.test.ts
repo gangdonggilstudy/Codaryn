@@ -381,7 +381,7 @@ describe("HumanOutput.revertSummary (N-7)", () => {
       status: "listed",
       exitCode: 0,
       omitted: 0,
-      runs: [{ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: null, reason: null, changes: null, reverted: null }],
+      runs: [{ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: null, reason: null, changes: null, reverted: null, revertRecordDamaged: false }],
     });
     assert.equal(runs.includes("2026-03-02"), false, runs);
     assert.ok(runs.split("\n")[1]?.includes("  ?  "), runs);
@@ -414,19 +414,27 @@ describe("HumanOutput.revertSummary (N-7)", () => {
 describe("HumanOutput.latestChosen (N-23 b)", () => {
   test("names the chosen run and its start time in local time", () => {
     const startedAt = "2026-11-12T03:04:05.000Z";
-    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt, taskId: `t-${SECRET}`.slice(0, 40), status: "done", reason: "verified", changes: 1, reverted: null });
+    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt, taskId: `t-${SECRET}`.slice(0, 40), status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false });
     assert.equal(text, `codaryn: [latest.chosen runId=${RUN}] ([runs.column.started] ${formatLocalTime(Date.parse(startedAt))})\n`);
     assert.equal(text.includes(SECRET), false);
   });
 
   test("an impossible start time is left out", () => {
-    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null });
+    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false });
     assert.equal(text, `codaryn: [latest.chosen runId=${RUN}]\n`);
   });
 });
 
 describe("HumanOutput.runsText (N-7, N-16)", () => {
   const listed = (runs: RunsOutput["runs"], omitted = 0): RunsOutput => ({ schemaVersion: 1, kind: "runs", status: "listed", exitCode: 0, runs, omitted });
+
+  test("N-23(g): a run whose revert record failed its checks is marked apart, not as damaged", () => {
+    const text = createHumanOutput(strictCatalog()).runsText(
+      listed([{ state: "checked", runId: RUN, startedAt: "2026-01-02T03:04:05.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: true }]),
+    );
+    assert.ok(text.split("\n")[1]?.endsWith("[status.done] (done/verified) · [runs.revert_record_damaged]"), text);
+    assert.equal(text.includes("[runs.damaged]"), false);
+  });
 
   test("an empty list says so", () => {
     assert.equal(createHumanOutput(strictCatalog()).runsText(listed([])), "[runs.empty]\n");
@@ -438,8 +446,8 @@ describe("HumanOutput.runsText (N-7, N-16)", () => {
     const text = createHumanOutput(catalog).runsText(
       listed(
         [
-          { state: "checked", runId: RUN, startedAt, taskId: `task-${SECRET}`, status: "done", reason: "verified", changes: 2, reverted: { at: startedAt, status: "complete" } },
-          { state: "checked", runId: runId("20261112T030400Z-00000000"), startedAt, taskId: "t", status: null, reason: null, changes: null, reverted: null },
+          { state: "checked", runId: RUN, startedAt, taskId: `task-${SECRET}`, status: "done", reason: "verified", changes: 2, reverted: { at: startedAt, status: "complete" }, revertRecordDamaged: false },
+          { state: "checked", runId: runId("20261112T030400Z-00000000"), startedAt, taskId: "t", status: null, reason: null, changes: null, reverted: null, revertRecordDamaged: false },
           { state: "damaged", runId: runId("20261112T030300Z-ffffffff") },
         ],
         4,

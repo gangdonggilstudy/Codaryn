@@ -90,8 +90,8 @@ const RUNS: RunsOutput = {
   status: "listed",
   exitCode: 0,
   runs: [
-    { state: "checked", runId: RUN, startedAt: STARTED, taskId: `t-${SECRET}`.slice(0, 40), status: "done", reason: "verified", changes: 2, reverted: { at: STARTED, status: "complete" } },
-    { state: "checked", runId: toRunId("20261112T030400Z-00000000") as RunId, startedAt: STARTED, taskId: "t", status: null, reason: null, changes: null, reverted: null },
+    { state: "checked", runId: RUN, startedAt: STARTED, taskId: `t-${SECRET}`.slice(0, 40), status: "done", reason: "verified", changes: 2, reverted: { at: STARTED, status: "complete" }, revertRecordDamaged: false },
+    { state: "checked", runId: toRunId("20261112T030400Z-00000000") as RunId, startedAt: STARTED, taskId: "t", status: null, reason: null, changes: null, reverted: null, revertRecordDamaged: false },
     { state: "damaged", runId: toRunId("20261112T030300Z-ffffffff") as RunId },
   ],
   omitted: 4,

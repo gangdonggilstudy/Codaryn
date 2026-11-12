@@ -16,6 +16,8 @@ import { existsSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import type {
   AnthropicProviderDeps,
+  ApplyPlan,
+  ApplyResult,
   CreateAnthropicProvider,
   DefaultConfigLocation,
   DoctorOutput,
@@ -28,7 +30,7 @@ import type {
   RunTask,
   RunsOutput,
 } from "../contracts/index.js";
-import { runTask as engineRunTask } from "../engine/index.js";
+import { applyPlan as engineApplyPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
@@ -40,6 +42,7 @@ import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
 import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
+import { runApply } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
@@ -47,7 +50,9 @@ import { runRevert } from "../cli/revert.js";
 import { runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
+import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { createAppAssemble } from "./assemble.js";
+import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
@@ -61,6 +66,9 @@ import type {
   AppCallOutcome,
   AppEnvironment,
   AppError,
+  ApplyHandle,
+  ApplyObserver,
+  ApplyPlanRequest,
   ChangesOutput,
   ChangesRequest,
   CodarynApp,
@@ -97,6 +105,8 @@ export interface AppHooks {
   readonly createAnthropicProvider?: CreateAnthropicProvider;
   readonly anthropicDeps?: AnthropicProviderDeps;
   readonly runTask?: RunTask;
+  /** The apply engine (`applyPlan` of src/engine when absent). Tests give a stand-in to see what it was given. */
+  readonly applyPlan?: ApplyPlan;
   /** The model listing (`listAnthropicModels` when absent). Tests give a fake so nothing is sent. */
   readonly listModels?: ListAnthropicModels;
   /** The config writer of `selectModel` (`writeConfigAtomic` when absent). */
@@ -342,9 +352,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   async function revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>> {
+    // DR-25: only the consent the person gave on screen for this run, as the adapter's consent.
+    const consent = revertConsentOf(request);
+    if (!consent.ok) return consent;
     try {
-      // The CLI's revert with the options main.ts gives it (N-7, N-16, N-26): dry run, "latest",
-      // the damage check, and the revert record written under the lock.
+      // The CLI's revert with the options main.ts gives it (N-7, N-16, N-26, N-27 a): dry run,
+      // "latest", the store's judgement of one run, and the revert record written under the lock.
+      // As an adapter (AdapterRevert): no terminal question, the consent only from the request.
       const { output } = await runRevert({
         argv: ["revert", "--workspace", request.workspace, "--run", request.runId, ...(request.dryRun === true ? ["--dry-run"] : [])],
         cwd: environment.cwd,
@@ -356,8 +370,9 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
           listRuns: storeListRuns,
           readRecord: readRevertRecord,
           writeRecord: writeRevertRecord,
-          isDamaged: async (workspaceRoot, runId) => (await inspectRun(workspaceRoot, runId)) === "damaged",
+          inspect: inspectRun,
         }),
+        adapter: { unsafeMoveConsent: consent.consent },
       });
       return output.kind === "revert" ? { ok: true, output } : { ok: false, error: fromCliError(output) };
     } catch {
@@ -519,6 +534,88 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
   }
 
+  /**
+   * DR-1, DR-2, DR-21: the CLI's `apply` as an adapter (AdapterApply): the approval is recorded as
+   * `adapter` and the consent comes only from the request. The engine is the same `applyPlan`; only
+   * its journal is wrapped so the apply's events reach `observer` (start records left out). The
+   * handle comes before the first event, as for a run.
+   */
+  async function applyPlan(
+    request: ApplyPlanRequest,
+    observer?: ApplyObserver,
+  ): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }> {
+    const consent = unsafeMoveConsentOf(request);
+    if (!consent.ok) return consent;
+    const env = copyEnvironment(environment.env, platform);
+    const cancelHandlers = new Set<() => void>();
+    let reportStart: (runId: string) => void = () => {};
+    const started = new Promise<string>((resolve) => {
+      reportStart = resolve;
+    });
+    let openGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    const wrapped: ApplyPlan = async (deps) => {
+      const journal = applyJournalWithEvents(deps.journal, deps.runId, observer, deps.privacy, deps.clock);
+      reportStart(deps.runId);
+      await gate;
+      await nextMacrotask();
+      return (hooks.applyPlan ?? engineApplyPlan)({ ...deps, journal });
+    };
+    const running = runApply({
+      argv: applyArguments(request),
+      env,
+      cwd: environment.cwd,
+      readFile: environment.readFile,
+      isDirectory: environment.isDirectory,
+      loadEnvFile: (file) => loadVarsInto(env, file, environment.readVarsFile),
+      locateInWorkspace: locate,
+      relatePaths: relate,
+      installDir: environment.installDir,
+      defaultConfig: defaultConfigOf(),
+      clock: environment.clock,
+      randomBytes: environment.randomBytes,
+      listRuns: storeListRuns,
+      applyPlan: wrapped,
+      adapter: { unsafeMoveConsent: consent.consent },
+      cancelSignal: (cancelFile) =>
+        createCancelSource({
+          cancelFile,
+          fileExists: (file) => existsSync(file),
+          onSignal: (_name, handler) => {
+            cancelHandlers.add(handler);
+            return () => {
+              cancelHandlers.delete(handler);
+            };
+          },
+        }),
+    }).catch(() => null);
+
+    const first = await Promise.race([
+      started.then((runId) => ({ kind: "started" as const, runId })),
+      running.then((outcome) => ({ kind: "ended" as const, outcome })),
+    ]);
+    if (first.kind === "ended") {
+      const output = first.outcome !== null && "output" in first.outcome ? first.outcome.output : undefined;
+      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+    }
+    const done: Promise<AppCallOutcome<ApplyResult>> = running.then((outcome) => {
+      const output = outcome !== null && "output" in outcome ? outcome.output : undefined;
+      if (output?.kind === "apply") return { ok: true, output: output as ApplyResult };
+      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+    });
+    const handle: ApplyHandle = {
+      runId: first.runId,
+      cancel() {
+        for (const handler of [...cancelHandlers]) handler();
+      },
+      done,
+    };
+    openGate();
+    return { ok: true, handle };
+  }
+
   return {
     startRun,
     report,
@@ -534,5 +631,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     settingsSuggestions,
     proposeSettingsChange,
     applySettingsChange,
+    applyPlan,
   };
 }

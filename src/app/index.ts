@@ -9,7 +9,8 @@ export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } 
 export { CONNECTED_MODEL_PROVIDERS, modelsArguments } from "./models.js";
 export { initArguments, suggestionsFor } from "./init.js";
 export { changesOf, digestOf, wideningOf } from "./settings-change.js";
-export { unsafeMoveConsentOf } from "./consent.js";
+export { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
+export { applyArguments, applyJournalWithEvents, taskFormArguments } from "./apply.js";
 export { profileWorkflowsOf } from "./settings.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {
@@ -17,10 +18,12 @@ export type {
   ApplyJournalEvent,
   ApplyJournalRecord,
   ApplyReason,
+  ApplyJournalEntry,
   ApplyResult,
   ApprovalChannel,
   MaskedPlanAction,
   PlanItemProblem,
+  PlanItemStartedEvent,
   PlanOutput,
   PlanStatus,
   ReviewOutput,
@@ -68,6 +71,7 @@ export type {
   SettingsView,
   StartOutcome,
   StartRunRequest,
+  RevertConsentRequest,
   TaskForm,
   UnsafeMoveConsentRequest,
 } from "./types.js";

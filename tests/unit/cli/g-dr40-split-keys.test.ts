@@ -279,3 +279,21 @@ describe("DR-42 (a): the CLI's output hiding finds a registered value split by a
     });
   }
 });
+
+describe("review R-30 L-1: models measures the config file without its byte order mark, as run and doctor do", () => {
+  test("a config of exactly the cap with a BOM is read by models (not refused as too large)", async () => {
+    const { runModels } = await import("../../../src/cli/models.js");
+    const { MAX_INPUT_FILE_BYTES } = await import("../../../src/cli/security/index.js");
+    const { dir } = await base();
+    const head = '{"schemaVersion":1,"model":"';
+    const tail = '"}';
+    const body = head + "a".repeat(MAX_INPUT_FILE_BYTES - Buffer.byteLength(head + tail)) + tail;
+    assert.equal(Buffer.byteLength(body), MAX_INPUT_FILE_BYTES);
+    const file = path.join(dir, "config.json");
+    await writeFile(file, `${char(0xfeff)}${body}`, "utf8");
+    const outcome = await runModels({ argv: ["models", "--config", file, "--json"], env: {}, cwd: dir, readFile: (name) => readFile(name, "utf8"), loadEnvFile: () => {} });
+    const output = JSON.parse("text" in outcome ? outcome.text : JSON.stringify(outcome.output)) as { code?: string; message?: string };
+    // No key is set: models reads the file and stops at the key, as run and doctor read it.
+    assert.equal(output.code, "provider_not_configured", output.message ?? "");
+  });
+});

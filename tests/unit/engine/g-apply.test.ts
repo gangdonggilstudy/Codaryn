@@ -796,3 +796,28 @@ describe("U-8 (R-39 L-1): an apply whose state checks were limited is not refuse
     }
   });
 });
+
+describe("U-16 (UXM-15): an apply of a plan made by another task says so and goes on", () => {
+  const DIFFERS = "plan_task_differs";
+
+  test("another task than the plan run's: done, with the notice kind and one notice", async () => {
+    const run = setup({ planTaskId: "organize-demo" });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual([result.status, result.reason, result.noticeKinds], ["done", "verified", [DIFFERS]]);
+    assert.equal(result.notices.filter((notice) => notice.includes(DIFFERS)).length, 1);
+    assert.deepEqual(run.executor.applied, [0, 1], "not refused");
+  });
+
+  test("the same task, or no plan task id given: nothing is added", async () => {
+    for (const run of [setup({ planTaskId: "tidy" }), setup()]) {
+      const result = await applyPlan(run.deps);
+      assert.equal(Object.hasOwn(result, "noticeKinds"), false);
+    }
+  });
+
+  test("with a limited state check as well: both kinds, in APPLY_NOTICE_KINDS order", async () => {
+    const run = setup({ planTaskId: "organize-demo", stateGuard: new FakeApplyStateGuard({ limitedFrom: 1 }) });
+    const result = await applyPlan(run.deps);
+    assert.deepEqual(result.noticeKinds, ["plan_records_unchecked", DIFFERS]);
+  });
+});

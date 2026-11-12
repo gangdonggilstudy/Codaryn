@@ -102,9 +102,9 @@ async function cleanup(base: string, args: readonly string[], json = true): Prom
   return { text: outcome.text, exitCode: outcome.exitCode, output: json ? (JSON.parse(outcome.text) as CleanupOutput) : null, error: null };
 }
 
-async function preview(base: string, args: readonly string[]): Promise<Extract<CleanupOutput, { mode: "preview" }>> {
+async function preview(base: string, args: readonly string[]): Promise<Extract<CleanupOutput, { status: "preview" }>> {
   const shown = await cleanup(base, args);
-  assert.ok(shown.output?.mode === "preview", JSON.stringify(shown));
+  assert.ok(shown.output?.status === "preview", JSON.stringify(shown));
   return shown.output;
 }
 
@@ -134,7 +134,7 @@ describe("DR-44 (가): the records of a run not reverted go only with --include-
     const digest = (await preview(base, ["--older-than", "0"])).plan.digest.slice(0, 12);
     const result = await cleanup(base, ["--older-than", "0", "--confirm", digest]);
     assert.equal(result.exitCode, 0, JSON.stringify(result));
-    assert.ok(result.output?.mode === "applied", JSON.stringify(result.output));
+    assert.ok(result.output !== null && result.output.status !== "preview", JSON.stringify(result.output));
     assert.deepEqual(result.output.outcome.kept, [{ target: "run", runId: notReverted, reason: "not_reverted_not_confirmed" }]);
     assert.ok(await exists(runDir(work, notReverted)), "its records stay: a revert still needs them");
   });
@@ -305,14 +305,14 @@ describe("DR-44 (contract 73ec895): what the CLI does with the store's new answe
     assert.ok(result.text.includes("20260102T030405Z-0a0b0c0d"), result.text);
   });
 
-  test("records kept by the person's choice do not fail the command", async () => {
+  test("records kept by the person's choice are not a failure (1); with nothing removed the command ends 3 (U-22, DR-48)", async () => {
     const kept = [
       { target: "run", runId: "20260102T030405Z-0a0b0c0d", reason: "not_reverted_not_confirmed" },
       { target: "run", runId: "20260102T030405Z-0a0b0c0e", reason: "used_by_kept_apply" },
       { target: "discarded", runId: "20260102T030405Z-0a0b0c0f", reason: "not_confirmed" },
     ];
     const result = await withStore(["--confirm", "a".repeat(12)], () => done(kept));
-    assert.equal(result.exitCode, 0, result.text);
+    assert.equal(result.exitCode, 3, result.text);
   });
 
   test("leftover folders: the summary line, their items in the preview, and the done line", async () => {

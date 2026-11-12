@@ -313,7 +313,9 @@ export interface LoadPlanRequest {
 
 /**
  * - run_not_found: no journal for that run
- * - run_not_plan: the run's result.json is not `needs-input`/`plan_pending`, or it has no plan.json
+ * - run_not_plan: the run has no result.json, or it is not `needs-input`/`plan_pending`
+ * - plan_run_missing (R-9c C-1): the run ended as `needs-input`/`plan_pending` but its plan.json
+ *   is gone (deleted), so there is no plan to show or apply
  * - invalid_run_record: plan.json or result.json cannot be read or parsed, plan.json names another
  *   run, or its digest is not `EngineResult.plan.digest`. DR-24 (d): also when an action's path
  *   does not pass the workspace's lexical path rules (as `Workspace.resolve` applies them: relative,
@@ -328,7 +330,7 @@ export type LoadPlanOutcome =
       /** applied.json, or null when the plan was not applied. */
       readonly applied: PlanAppliedRecord | null;
     }
-  | { readonly ok: false; readonly code: "run_not_found" | "run_not_plan" | "invalid_run_record" };
+  | { readonly ok: false; readonly code: "run_not_found" | "run_not_plan" | "plan_run_missing" | "invalid_run_record" };
 
 /** Signature of `loadPlan`, exported by `src/store/index.ts` (G-E). Reads only; changes nothing. */
 export type LoadPlan = (request: LoadPlanRequest) => Promise<LoadPlanOutcome>;
@@ -708,8 +710,8 @@ export type ApplyPlan = (deps: ApplyDeps) => Promise<ApplyResult>;
  * apply (DR-6). It needs no model and makes no request: a missing key or model does not stop it.
  * Changes nothing, takes no lock. Errors (CliErrorOutput): `invalid_arguments`, `invalid_task`,
  * `invalid_config`, `key_in_file`, `secret_env_missing`, `workspace_not_found`, `run_not_found`,
- * `run_not_plan`, `invalid_run_record`, `plan_secrets_differ` (DR-28: checked before anything is
- * shown).
+ * `run_not_plan`, `plan_run_missing`, `invalid_run_record`, `plan_secrets_differ` (DR-28: checked
+ * before anything is shown).
  */
 export const PLAN_STATUSES = ["pending", "applied"] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];

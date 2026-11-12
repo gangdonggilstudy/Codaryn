@@ -4,7 +4,8 @@
  * a live holder of the workspace lock) the answer is run_in_progress (exit 6), even with a finished
  * run before it. A run id given as it is names that run. One case per command.
  * Before R-51, `changes --run latest` (through the app layer's runIdOf and the run list's
- * resolveRunRef, src/cli/runs.ts) passed over the run still going and showed the run before it.
+ * resolveRunRef, src/cli/runs.ts) passed over the run still going and showed the run before it;
+ * the app layer's runIdOf now calls resolveRunReference with STORE_RUN_REFERENCE_DEPS (c0c4535).
  * Real engine, store and app layer; the lock is held by this process; scripted model; nothing is sent.
  */
 
@@ -129,19 +130,15 @@ describe("U-22 (R-51 M-2): --run latest while the newest run is going, after a f
     }
   });
 
-  test(
-    "changes (through the app layer)",
-    { todo: "R-51 M-2: the app layer's runIdOf (src/app/runs.ts, app layer) or the run list's resolveRunRef (src/cli/runs.ts, output owner N-C) still has the old rule; either calls resolveRunReference with STORE_RUN_REFERENCE_DEPS" },
-    async () => {
-      const { base, release } = await workspace();
-      try {
-        const outcome = await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", "latest", "--json"], env: {}, app: createCodarynApp(await createNodeAppEnvironment()) });
-        assert.deepEqual(codeOf(outcome), IN_PROGRESS);
-      } finally {
-        await release();
-      }
-    },
-  );
+  test("changes (through the app layer, whose runIdOf calls the shared function)", async () => {
+    const { base, release } = await workspace();
+    try {
+      const outcome = await runChanges({ argv: ["changes", "--task", path.join(base, "task.json"), "--run", "latest", "--json"], env: {}, app: createCodarynApp(await createNodeAppEnvironment()) });
+      assert.deepEqual(codeOf(outcome), IN_PROGRESS);
+    } finally {
+      await release();
+    }
+  });
 
   test("apply takes run ids only, as before: latest is invalid_arguments", async () => {
     const { base, release } = await workspace();

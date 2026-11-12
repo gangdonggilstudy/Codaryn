@@ -20,9 +20,9 @@ import {
   MODEL_ERROR_KINDS,
   PERMISSION_KINDS,
   POLICY_DENIAL_CODES,
+  REVERT_ACTIONS,
   REVERT_SKIP_REASONS,
   RUN_REASONS,
-  RUN_TIMESTAMP_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
   TOOL_ERROR_CODES,
   TOOL_NAMES,
@@ -49,6 +49,7 @@ import type {
   TerminalRunStatus,
   ToolName,
 } from "../../contracts/index.js";
+import { isRunTimestamp } from "../../store/index.js";
 import { displayWidth, finalLine, formatLocalTime, padEnd, shownPath, token } from "./format.js";
 
 /** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
@@ -60,7 +61,9 @@ export const REVERT_MAX_LISTED = 20;
 /** Shown in place of a path that may not be printed (a `missing_record` path is unmasked). */
 export const HIDDEN_PATH = "?";
 
-/** Errors whose cause `codaryn doctor` can check. */
+const DOCTOR_COMMAND = "codaryn doctor";
+
+/** Errors whose cause `codaryn doctor` can check (N-22). */
 const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
   "invalid_config",
   "invalid_task",
@@ -71,7 +74,6 @@ const DOCTOR_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
   "model_list_failed",
 ]);
 
-const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
 const PROVIDERS: readonly ModelProviderName[] = ["scripted", "anthropic"];
 const OUTCOMES = ["pass", "fail", "inconclusive"] as const;
 const REASONS_BY_STATUS: { readonly [S in TerminalRunStatus]: readonly RunReason[] } = {
@@ -95,15 +97,22 @@ function validStatusReason(status: unknown, reason: unknown): { status: Terminal
   return REASONS_BY_STATUS[status].includes(reason) ? { status, reason } : null;
 }
 
+/** A recorded time in local wall time, or null when it is not a real timestamp (N-24(c)). */
 function localTime(at: unknown): string | null {
-  if (typeof at !== "string" || !RUN_TIMESTAMP.test(at)) return null;
-  const time = Date.parse(at);
-  return Number.isFinite(time) ? formatLocalTime(time) : null;
+  return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
 }
 
 /** "(+3)" after a cut list. */
 function moreLine(count: number): string {
   return `  … (+${count})`;
+}
+
+/**
+ * The code in parentheses after a title. A title that introduces a list ends with a colon in some
+ * languages; the code then goes before the colon, so the colon still leads into the list.
+ */
+function withCode(title: string, code: string): string {
+  return title.endsWith(":") ? `${title.slice(0, -1)} (${code}):` : `${title} (${code})`;
 }
 
 function lines(out: readonly string[]): string {
@@ -120,8 +129,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
     if (file === null) return null;
     const fileText = catalog.format(`diagnostic.file.${file}`);
-    const field: SchemaFieldPath | null =
-      (typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null) ?? toSchemaFieldPath(file);
+    const ownField = typeof diagnostic.field === "string" ? toSchemaFieldPath(diagnostic.field) : null;
+    const field: SchemaFieldPath | null = ownField ?? toSchemaFieldPath(file);
     let text: CatalogText | null = null;
     switch (diagnostic.code) {
       case "json_syntax":
@@ -130,7 +139,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         }
         break;
       case "unknown_field": {
-        const suggestion = typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
+        // N-23(f): a suggestion belongs to the position it was made for; at the file root it misleads.
+        const suggestion = ownField !== null && typeof diagnostic.suggestion === "string" ? toSchemaFieldPath(diagnostic.suggestion) : null;
         if (field !== null) {
           text =
             suggestion === null
@@ -149,7 +159,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         text = catalog.format("diagnostic.too_deep");
         break;
     }
-    return text === null ? null : `${fileText}: ${text}`;
+    // A dash, not a colon: the diagnostic text often has a colon of its own.
+    return text === null ? null : `${fileText} — ${text}`;
   }
 
   return {
@@ -162,8 +173,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const out = [`${HUMAN_PREFIX}${label} — ${catalog.format(`error.${code}.what`)} (${code})`];
       const diagnostic = output.diagnostic === undefined ? null : diagnosticText(output.diagnostic);
       if (diagnostic !== null) out.push(`  ${diagnostic}`);
-      out.push(`  ${catalog.format("error.fix_label")}: ${catalog.format(`error.${code}.fix`)}`);
-      if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
+      const fix = catalog.format(`error.${code}.fix`);
+      out.push(`  ${catalog.format("error.fix_label")}: ${fix}`);
+      // Command names are English in every catalog, so a fix that already names doctor is enough.
+      if (DOCTOR_CODES.has(code) && !fix.includes(DOCTOR_COMMAND)) out.push(`  ${catalog.format("error.doctor_hint")}`);
       return lines(out);
     },
 
@@ -180,30 +193,41 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`── ? (${token(result.status)}/${token(result.reason)}) ──`);
       }
 
+      // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
       const passed = verifiers.filter((verifier) => verifier.outcome === "pass").length;
-      const facts: string[] = [
+      out.push(
         verifiers.length === 0
           ? catalog.format("summary.no_verifiers")
           : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
-        catalog.format("summary.changes", { count: changes.length }),
-      ];
+      );
+      // N-23(d): files, not change records. A path's first record says whether the run created it.
+      const files = new Map<string, boolean>();
+      for (const change of changes) {
+        const key = String(change.path);
+        if (!files.has(key)) files.set(key, change.created === true);
+      }
+      out.push(catalog.format("summary.changes", { count: files.size }));
+      for (const [file, created] of [...files].slice(0, SUMMARY_MAX_PATHS)) {
+        const word = catalog.format(created ? "progress.file_created" : "progress.file_changed");
+        out.push(`  ${shownPath(file)} (${word})`);
+      }
+      if (files.size > SUMMARY_MAX_PATHS) out.push(moreLine(files.size - SUMMARY_MAX_PATHS));
+
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
-      if (denied > 0) facts.push(catalog.format("summary.denied", { count: denied }));
+      if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
+      // it points where the run's policy came from.
+      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
+        out.push(catalog.format(context.policySource === "task" ? "summary.denied_hint_task" : "summary.denied_hint"));
+      }
       const usage = result.usage;
       if (isCount(usage?.modelTurns) && isCount(usage.toolCalls) && isCount(usage.durationMs)) {
-        facts.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, durationMs: usage.durationMs }));
+        // N-20: seconds with one decimal, rounded from the recorded milliseconds.
+        const seconds = Math.round(usage.durationMs / 100) / 10;
+        out.push(catalog.format("summary.usage", { turns: usage.modelTurns, toolCalls: usage.toolCalls, seconds }));
       }
-      out.push(facts.join(" · "));
-
-      for (const change of changes.slice(0, SUMMARY_MAX_PATHS)) {
-        const word = catalog.format(change.created ? "progress.file_created" : "progress.file_changed");
-        out.push(`  ${shownPath(String(change.path))} (${word})`);
-      }
-      if (changes.length > SUMMARY_MAX_PATHS) out.push(moreLine(changes.length - SUMMARY_MAX_PATHS));
-
-      if (denied > 0) out.push(catalog.format("summary.denied_hint"));
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
@@ -240,6 +264,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             line = `${catalog.format("progress.tool_allowed", { tool })} (${name})`;
           } else if (isOneOf(event.permission, PERMISSION_KINDS) && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {
             line = catalog.format("progress.tool_denied", { tool, permission: event.permission, code: event.code });
+          } else if (event.permission === null && (isOneOf(event.code, POLICY_DENIAL_CODES) || isOneOf(event.code, TOOL_ERROR_CODES))) {
+            // N-22: stopped by a check of the call itself (validate, restore), not by a permission.
+            line = catalog.format("progress.tool_rejected", { tool, code: event.code });
           } else {
             line = `${tool} (${token(event.permission ?? "check")}/${token(event.code ?? "none")})`;
           }
@@ -294,15 +321,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
       const title = output.dryRun === true ? "revert.dry_run_title" : "revert.done_title";
-      const out = [`${HUMAN_PREFIX}${catalog.format(title, { count: reverted.length })} (${token(output.status)})`];
-      if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
-
+      // Each title is followed by its own list: reverted files, then skipped files.
+      const out = [`${HUMAN_PREFIX}${withCode(catalog.format(title, { count: reverted.length }), token(output.status))}`];
       for (const file of reverted.slice(0, REVERT_MAX_LISTED)) {
         const action: unknown = file.action;
-        const word = isOneOf(action, ["restored", "deleted"] as const) ? catalog.format(`revert.action.${action}`) : "?";
+        const word = isOneOf(action, REVERT_ACTIONS) ? catalog.format(`revert.action.${action}`) : "?";
         out.push(`  ${shownPath(String(file.path))} — ${word}`);
       }
       if (reverted.length > REVERT_MAX_LISTED) out.push(moreLine(reverted.length - REVERT_MAX_LISTED));
+      if (skipped.length > 0) out.push(catalog.format("revert.skipped_title", { count: skipped.length }));
       for (const file of skipped.slice(0, REVERT_MAX_LISTED)) {
         const reason: unknown = file.reason;
         const word = isOneOf(reason, REVERT_SKIP_REASONS) ? catalog.format(`revert.skip.${reason}`) : "?";
@@ -320,6 +347,14 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);
+    },
+
+    latestChosen(entry: Extract<RunListEntry, { readonly state: "checked" }>): string {
+      const runId = toRunId(String(entry.runId));
+      if (runId === null) return lines([`${HUMAN_PREFIX}?`]);
+      const time = localTime(entry.startedAt);
+      const chosen = catalog.format("latest.chosen", { runId });
+      return lines([`${HUMAN_PREFIX}${chosen}${time === null ? "" : ` (${catalog.format("runs.column.started")} ${time})`}`]);
     },
 
     runsText(output: RunsOutput): string {

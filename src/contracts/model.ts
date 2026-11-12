@@ -5,7 +5,7 @@
 
 import type { ModelProviderName } from "./task.js";
 import type { JsonObject, MaskedText } from "./text.js";
-import type { ToolCall, ToolName, ToolResult } from "./tool.js";
+import type { ToolCall, ToolName, ToolResult, WorkflowToolName } from "./tool.js";
 
 /** A tool call echoed back to the model. Args are kept as masked JSON text. */
 export interface MaskedToolCall {
@@ -28,6 +28,12 @@ export interface ModelRequest {
   readonly messages: readonly ModelMessage[];
   /** Tools offered in this request. A provider describes each one with `TOOL_DEFINITIONS`. */
   readonly tools: readonly ToolName[];
+  /**
+   * G-A: workflow tools offered in this request, after `tools`. A provider describes each one with
+   * `WORKFLOW_TOOL_DEFINITIONS`. Absent or empty for a task without workflow tools, so its requests
+   * stay as before stage 4.
+   */
+  readonly workflowTools?: readonly WorkflowToolName[];
 }
 
 export type ModelStop = "tool_calls" | "final" | "length";

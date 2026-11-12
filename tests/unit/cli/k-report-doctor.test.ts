@@ -101,7 +101,8 @@ describe("U-5 report", () => {
       "- Result: `done` / `verified`, exit code 0",
       "- Report: complete",
       "## Verification",
-      "- `readme` (file_rules): **pass**",
+      // N-24 (a): verifiers by number in the Markdown; the id stays in --json only.
+      "- verifier 1 (file_rules): **pass**",
       "## Protected material",
       "Not checked: the run had no integrity check",
       "## Changes (1)",
@@ -109,7 +110,7 @@ describe("U-5 report", () => {
       "## Usage",
       "- Tool calls: 1 of 10 (denied: 1)",
       "## Not checked",
-      "- `readme`: `",
+      "- verifier 1: `",
       "There is no OS isolation",
     ]) {
       assert.ok(markdown.includes(part), part);
@@ -224,7 +225,8 @@ describe("U-5 report", () => {
     assert.equal(markdown.includes(ESC), false);
     assert.equal(markdown.includes(String.fromCharCode(0x202e)), false);
     assert.ok(markdown.includes("a?[2J?b"));
-    assert.ok(markdown.includes("- ``v`1`` (command): **fail**"));
+    assert.ok(markdown.includes("- verifier 1 (command): **fail**"));
+    assert.equal(markdown.includes("v`1"), false, "N-24 (a): the verifier id is not shown");
     assert.ok(markdown.includes("  ````\n  line1\n  ```\n  line3\n  ````"));
     assert.ok(markdown.includes("````a?[2J?b```c````"));
     assert.equal(markdown.includes(KEY_SHAPED), false);

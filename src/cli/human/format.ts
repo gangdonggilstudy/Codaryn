@@ -3,26 +3,70 @@
  * arguments that can be copied, and the width of text in a terminal.
  */
 
-import { cleanText, hideKeys, safeToken } from "../text-safety.js";
+import { ANTHROPIC_KEY_PATTERN_SOURCE } from "../../contracts/index.js";
+import { REPLACEMENT, cleanText, hideKeys, safeToken } from "../text-safety.js";
 
 /** Longest path shown in a human line, in characters (as progress.ts). */
 export const MAX_SHOWN_PATH = 200;
 
-/** A recorded path for one line: control characters replaced, long paths cut. */
+/** A recorded path for one line: key shapes hidden, control characters replaced, long paths cut. */
 export function shownPath(text: string): string {
-  const clean = cleanText(text);
+  const clean = finalLine(text);
   return clean.length > MAX_SHOWN_PATH ? `${clean.slice(0, MAX_SHOWN_PATH)}...` : clean;
 }
 
 /** A code or id as recorded (status, reason, permission, run id), or "?" when it holds anything else. */
 export const token = safeToken;
 
+const KEY_SHAPE = new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE, "g");
+const HIDDEN_KEY = "[key]";
+
+/** A character that `cleanText` replaces (controls, line and paragraph separators, bidi controls). */
+function isUnsafe(char: string): boolean {
+  return char !== REPLACEMENT && cleanText(char) === REPLACEMENT;
+}
+
 /**
- * The last step for every line written for people: no control characters (a line cannot
- * overwrite another or reorder itself) and no key-shaped text.
+ * N-23(h): key-shaped text hidden before control characters are replaced. The key pattern is
+ * looked for in the text with the unsafe characters left out, so a control character inside a key
+ * cannot split it into two harmless-looking parts; the whole span, controls included, becomes
+ * "[key]". `hideKeys` runs afterwards as before.
+ */
+export function hideKeysAcrossControls(text: string): string {
+  const visible: string[] = [];
+  /** For each code unit of `visible.join("")`, the index in `text` of its character. */
+  const origin: number[] = [];
+  let index = 0;
+  for (const char of text) {
+    if (!isUnsafe(char)) {
+      visible.push(char);
+      for (let unit = 0; unit < char.length; unit += 1) origin.push(index);
+    }
+    index += char.length;
+  }
+  const joined = visible.join("");
+  const spans: [number, number][] = [];
+  for (const match of joined.matchAll(KEY_SHAPE)) {
+    const start = origin[match.index] as number;
+    const last = origin[match.index + match[0].length - 1] as number;
+    spans.push([start, last + 1]);
+  }
+  if (spans.length === 0) return text;
+  let out = "";
+  let at = 0;
+  for (const [start, end] of spans) {
+    out += text.slice(at, start) + HIDDEN_KEY;
+    at = end;
+  }
+  return out + text.slice(at);
+}
+
+/**
+ * The last step for every line written for people: no key-shaped text (looked for first, across
+ * control characters) and no control characters (a line cannot overwrite another or reorder itself).
  */
 export function finalLine(text: string): string {
-  return hideKeys(cleanText(text), null);
+  return hideKeys(cleanText(hideKeysAcrossControls(text)), null);
 }
 
 /** `YYYY-MM-DD HH:MM:SS` in the local time zone (ux-design 6절: people read local time). */

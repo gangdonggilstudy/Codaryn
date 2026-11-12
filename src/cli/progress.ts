@@ -62,11 +62,22 @@ export function progressLine(event: JournalEvent): string | null {
  * Wraps the run's journal: after a record is stored, its progress line (if any) is written.
  * `write` receives one complete line including the line feed.
  */
-export function withProgress(journal: Journal, privacy: PrivacyGateway, write: (line: string) => void): Journal {
+export function withProgress(
+  journal: Journal,
+  privacy: PrivacyGateway,
+  write: (line: string) => void,
+  /** N-5: the human renderer's `progressLine` in the chosen language; the English lines above otherwise. */
+  render: (event: JournalEvent) => string | null = progressLine,
+): Journal {
   return {
     async append(event) {
       await journal.append(event);
-      const line = progressLine(event);
+      let line: string | null;
+      try {
+        line = render(event);
+      } catch {
+        line = null;
+      }
       if (line === null) return;
       const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
       if (!masked.ok) return;

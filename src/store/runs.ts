@@ -48,6 +48,8 @@ const TASK_ID = new RegExp(TASK_ID_PATTERN_SOURCE);
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 const PROVIDERS: readonly string[] = ["scripted", "anthropic"];
 const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
+/** A run id as the CLI makes it (P-3): `<UTC yyyymmddThhmmssZ>-<8 lowercase hex>`. */
+const CLI_RUN_ID = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-[0-9a-f]{8}$/;
 /** The first journal record is read up to this many bytes. A longer first line is unreadable. */
 const FIRST_RECORD_MAX_BYTES = 64 * 1024;
 /** Largest revert record read. It holds a few short fields. */
@@ -88,10 +90,23 @@ export function isStoredRunId(name: string): boolean {
   return toRunId(name) !== null;
 }
 
-/** A timestamp as recorded, when it matches RUN_TIMESTAMP_PATTERN_SOURCE and Date.parse accepts it. */
+/**
+ * N-24(c): a recorded time in RUN_TIMESTAMP_PATTERN_SOURCE form that names a real UTC instant.
+ * `Date` carries impossible dates over (2026-02-30 becomes 2026-03-02), so the text must equal
+ * `toISOString` of what it parses to, with the milliseconds written out to three digits.
+ */
+export function isRunTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || !RUN_TIMESTAMP.test(value)) return false;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return false;
+  const dot = value.indexOf(".");
+  const full = dot < 0 ? `${value.slice(0, -1)}.000Z` : `${value.slice(0, dot + 1)}${value.slice(dot + 1, -1).padEnd(3, "0")}Z`;
+  return new Date(time).toISOString() === full;
+}
+
+/** A timestamp as recorded, when it is a real one (`isRunTimestamp`). */
 function timestamp(value: unknown): string | null {
-  if (typeof value !== "string" || !RUN_TIMESTAMP.test(value)) return null;
-  return Number.isFinite(Date.parse(value)) ? value : null;
+  return isRunTimestamp(value) ? value : null;
 }
 
 function sameFsPath(a: string, b: string): boolean {
@@ -214,10 +229,48 @@ async function revertRecordAt(file: string, runId: string): Promise<RevertRecord
 
 type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
 
-async function readEntry(dir: string, runId: RunId): Promise<CheckedRun> {
+/** The UTC second a CLI run id names, in milliseconds, or null for any other id or an impossible date. */
+export function runIdSecond(runId: string): number | null {
+  const match = CLI_RUN_ID.exec(runId);
+  if (match === null) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number) as [number, number, number, number, number, number];
+  const time = Date.UTC(year, month - 1, day, hour, minute, second);
+  const date = new Date(time);
+  const same =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute &&
+    date.getUTCSeconds() === second;
+  return same ? time : null;
+}
+
+/**
+ * How long after the run id's second the first record may be written. The CLI reads the clock for
+ * the run id, then sets up the workspace, the lock and the model before the engine writes
+ * `run_started` with a second reading, so the two can fall into different seconds.
+ */
+export const RUN_START_TOLERANCE_MS = 10 * 60 * 1000;
+
+/**
+ * N-23(b): the start time must agree with the run id (not before its second, at most
+ * RUN_START_TOLERANCE_MS after it) and must not lie in the future. A run that fails either was
+ * not written by a run as recorded, so it is damaged and never `latest`.
+ */
+function checkStartTime(runId: string, startedAt: string, now: number): void {
+  const second = runIdSecond(runId);
+  const started = Date.parse(startedAt);
+  if (second === null || started < second || started >= second + RUN_START_TOLERANCE_MS || started > now) unreadable();
+}
+
+async function readEntry(dir: string, runId: RunId, now: number): Promise<CheckedRun> {
   const { startedAt, taskId } = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  checkStartTime(runId, startedAt, now);
   const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, taskId);
-  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
+  // N-23(g): the revert record only marks a reverted run. One that fails its checks takes the
+  // mark away, not the run: the run stays checked and can still be reported and reverted.
+  const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId).catch(() => null);
   return {
     state: "checked",
     runId,
@@ -243,7 +296,10 @@ function newestFirst(a: CheckedRun, b: CheckedRun): number {
  * no runs. Rejects with RunListError when that directory exists but cannot be listed, or when it
  * (or `.codaryn`) is a link.
  */
-export const listRuns: ListRuns = async (request) => {
+export const listRuns: ListRuns = (request) => listRunsAt(request, Date.now());
+
+/** `listRuns` with the current time given, in milliseconds (start times after it are damaged). */
+export async function listRunsAt(request: { readonly workspaceRoot: string }, now: number): Promise<RunListing> {
   const runsDir = join(request.workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
   let real: string;
   try {
@@ -274,7 +330,7 @@ export const listRuns: ListRuns = async (request) => {
       continue;
     }
     try {
-      checked.push(await readEntry(join(runsDir, entry.name), runId));
+      checked.push(await readEntry(join(runsDir, entry.name), runId, now));
     } catch {
       damaged.push(runId);
     }
@@ -284,12 +340,61 @@ export const listRuns: ListRuns = async (request) => {
     runs: [...checked.sort(newestFirst), ...damaged.map((runId) => ({ state: "damaged" as const, runId }))],
   };
   return listing;
-};
+}
 
-/** The id `--run latest` stands for: the first checked run `listRuns` returns, or null when there is none. */
+/** N-26: how one run's records stand, as the run list would judge them. */
+export type RunInspection = "checked" | "damaged" | "missing";
+
+/**
+ * N-26: the run list's judgement for one run, for `revert` with an explicit id (and anything else
+ * that acts on a run named by the user). "damaged" is exactly what `listRuns` lists as damaged:
+ * not a run id, a link or junction in place of `.codaryn/runs` or the run directory, no journal,
+ * or records that fail the checks (forged or future start time included). A damaged revert record
+ * alone does not count (N-23(g)). "missing": the workspace has no directory for that run.
+ * Reads only; `now` is the current time in milliseconds.
+ */
+export async function inspectRun(workspaceRoot: string, runId: string, now: number = Date.now()): Promise<RunInspection> {
+  const id = toRunId(runId);
+  if (id === null) return "damaged";
+  const runsDir = join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
+  try {
+    const real = await realpathNative(runsDir);
+    if (!sameFsPath(real, runsDir) || !(await lstat(runsDir)).isDirectory()) return "damaged";
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
+  }
+  const dir = join(runsDir, id);
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return "damaged";
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "damaged";
+  }
+  if (!(await isPlainDirectory(dir))) return "damaged";
+  try {
+    await readEntry(dir, id, now);
+    return "checked";
+  } catch {
+    return "damaged";
+  }
+}
+
+/** The id `--run latest` stands for (see `latestRun`), or null when there is none. */
 export async function latestRunId(workspaceRoot: string): Promise<RunId | null> {
-  const listing = await listRuns({ workspaceRoot });
-  return listing.runs.find((run) => run.state === "checked")?.runId ?? null;
+  return latestRun((await listRuns({ workspaceRoot })).runs)?.runId ?? null;
+}
+
+/**
+ * The run `--run latest` names in a listing: the first checked run that has a result (N-23(b)).
+ * A run without result.json (running, or stopped without one) is listed but never chosen.
+ */
+export function latestRun(runs: readonly RunListEntry[]): CheckedRun | null {
+  for (const run of runs) {
+    if (run.state === "checked" && run.status !== null) return run;
+  }
+  return null;
 }
 
 /**
@@ -298,17 +403,34 @@ export async function latestRunId(workspaceRoot: string): Promise<RunId | null> 
  */
 export async function readRevertRecord(workspaceRoot: string, runId: string): Promise<RevertRecord | null> {
   assertRunId(runId);
+  const dir = runDir(workspaceRoot, runId);
+  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; its revert record is not read");
   try {
-    return await revertRecordAt(join(runDir(workspaceRoot, runId), REVERT_RECORD_FILE_NAME), runId);
+    return await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
   } catch {
     throw new RunListError("the run's revert record cannot be read");
   }
 }
 
 /**
+ * The directory exists and is the workspace's own: not a link or junction (as `listRuns` sees run
+ * directories), so a record is never read from or written to another place.
+ */
+async function isPlainDirectory(dir: string): Promise<boolean> {
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return false;
+    return sameFsPath(await realpathNative(dir), dir);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Writes `<root>/.codaryn/runs/<runId>/revert.json` atomically, replacing an earlier record.
  * `revert` calls it after `revertRun` (not a dry run) returned, while it still holds the lock.
- * The run directory must exist (the run has a journal); it is not created here.
+ * The run directory must exist (the run has a journal) and be a plain directory; it is not
+ * created, and a link or junction in its place is refused with RunListError, nothing written.
  */
 export async function writeRevertRecord(workspaceRoot: string, record: RevertRecord): Promise<void> {
   assertRunId(record.runId);
@@ -318,7 +440,9 @@ export async function writeRevertRecord(workspaceRoot: string, record: RevertRec
   } catch {
     throw new TypeError("writeRevertRecord needs a valid RevertRecord");
   }
-  const target = join(runDir(workspaceRoot, record.runId), REVERT_RECORD_FILE_NAME);
+  const dir = runDir(workspaceRoot, record.runId);
+  if (!(await isPlainDirectory(dir))) throw new RunListError("the run directory is missing or a link; no revert record was written");
+  const target = join(dir, REVERT_RECORD_FILE_NAME);
   const temporary = `${target}.${randomBytes(8).toString("hex")}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(checked)}\n`, { encoding: "utf8", flag: "wx" });

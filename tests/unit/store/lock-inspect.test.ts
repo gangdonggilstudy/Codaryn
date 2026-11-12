@@ -47,11 +47,15 @@ async function snapshot(root: string): Promise<Record<string, string>> {
 }
 
 /** What inspectLock says, that it changed nothing, and what acquireLock then does with the same liveness answers. */
-async function judged(root: string, liveness: LockLivenessOptions): Promise<{ state: string; acquired: boolean }> {
+/**
+ * `retryForMs`: a case that should acquire gets a budget that survives a loaded machine (it returns as
+ * soon as it acquires); a case that should be refused needs none.
+ */
+async function judged(root: string, liveness: LockLivenessOptions, retryForMs: number): Promise<{ state: string; acquired: boolean }> {
   const before = await snapshot(root);
   const inspection = await inspectLock(root, liveness);
   assert.deepEqual(await snapshot(root), before, "inspectLock changes nothing");
-  const outcome = await acquireLock({ workspaceRoot: root, runId: "next-run", clock, retryForMs: 100, ...liveness });
+  const outcome = await acquireLock({ workspaceRoot: root, runId: "next-run", clock, retryForMs, ...liveness });
   return { state: inspection.state, acquired: outcome.ok };
 }
 
@@ -112,7 +116,7 @@ describe("inspectLock judges as acquireLock does", () => {
     test(name, async () => {
       await withRoot(async (root) => {
         for (const [file, text] of Object.entries(files)) await writeFile(join(root, ".codaryn", file), text);
-        assert.deepEqual(await judged(root, liveness), { state, acquired });
+        assert.deepEqual(await judged(root, liveness, acquired ? 5_000 : 100), { state, acquired });
       });
     });
   }

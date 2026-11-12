@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, test } from "node:test";
 
-import { changeShownMatches, maskedParts, sameMaskedParts } from "../../../src/contracts/index.js";
-import type { ChangeShown, ContentHash, PrivacyGateway } from "../../../src/contracts/index.js";
+import { PARKED_DIR_NAME, changeShownMatches, maskedParts, sameMaskedParts } from "../../../src/contracts/index.js";
+import type { ChangeShown, ContentHash, ListParkedFiles, ParkedFile, PrivacyGateway, SkippedFile } from "../../../src/contracts/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 
 const SECRET = "zz-dr29-fake-client-zz";
@@ -85,5 +85,15 @@ describe("DR-29: changed files are shown only when masked as the run masked them
     assert.equal(sameMaskedParts(["", "/a"], ["", "/a"]), true);
     assert.equal(sameMaskedParts(["", "/a"], ["", "", "/a"]), false);
     assert.equal(sameMaskedParts(["x"], ["y"]), false);
+  });
+});
+
+describe("R-16 L-1: a file a revert moved aside and could not put back is findable", () => {
+  test("the skipped entry names where it was left; the folder is fixed", async () => {
+    const skipped: SkippedFile = { path: "a.txt", reason: "io_error", parkedAt: `.codaryn/${PARKED_DIR_NAME}/20261112T120500Z-0000bbbb/3-0123456789abcdef` };
+    assert.equal(PARKED_DIR_NAME, "parked");
+    assert.match(skipped.parkedAt ?? "", /^\.codaryn\/parked\/[^/]+\/[0-9]+-[0-9a-f]+$/);
+    const list: ListParkedFiles = async () => [{ path: skipped.parkedAt ?? "", runId: "20261112T120500Z-0000bbbb" } satisfies ParkedFile];
+    assert.equal((await list("/work")).length, 1);
   });
 });

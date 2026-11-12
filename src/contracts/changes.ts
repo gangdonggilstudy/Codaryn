@@ -193,7 +193,35 @@ export interface SkippedFile {
    */
   readonly path: string;
   readonly reason: RevertSkipReason;
+  /**
+   * R-16 L-1: the revert moved this file aside (to remove a second name, R-15 L-1) and could not
+   * put it back, so it was left at this place: `.codaryn/parked/<revert runId>/<index>-<random>`,
+   * relative to the workspace root, `/` separated. It names no file of the person's (only the run
+   * id, the action index and random hex). The reason stays `io_error`. Absent otherwise.
+   */
+  readonly parkedAt?: string;
 }
+
+/**
+ * R-16 L-1: `<root>/.codaryn/parked/`, where a revert leaves a file it moved aside and could not
+ * put back (SkippedFile.parkedAt). One directory per revert run id; nothing removes them on its own.
+ */
+export const PARKED_DIR_NAME = "parked";
+
+/** R-16 L-1: one file left in PARKED_DIR_NAME. */
+export interface ParkedFile {
+  /** `.codaryn/parked/<runId>/<name>`, relative to the workspace root, `/` separated. */
+  readonly path: string;
+  /** The revert run that left it. */
+  readonly runId: string;
+}
+
+/**
+ * Signature of `listParkedFiles`, exported by `src/store/index.ts` (R-16 L-1), for `doctor` and
+ * people. Lists the plain files in run-id-named plain directories under PARKED_DIR_NAME; follows no
+ * link, skips other names, never rejects (an unreadable directory lists nothing).
+ */
+export type ListParkedFiles = (workspaceRoot: string) => Promise<ParkedFile[]>;
 
 export interface RevertOutcome {
   readonly reverted: readonly RevertedFile[];
@@ -364,6 +392,11 @@ export function changeShownMatches(shown: ChangeShown | undefined, now: ChangeNo
  *     is still that file there; otherwise it is put back without replacing anything and is not
  *     removed. Two names that hold the same content but are different files are not this case:
  *     a started action is then `changed_since_run`, a recorded one `original_path_taken`.
+ *     R-16 L-1: the added name is parked in `.codaryn/parked/<revert runId>/<index>-<random>`
+ *     (PARKED_DIR_NAME, each level made one at a time and checked to be a plain directory). When it
+ *     cannot be put back to its name because something now takes that name, it stays parked: the file
+ *     is skipped as `io_error` with `parkedAt`, and `listParkedFiles` finds it. Nothing is removed
+ *     that is not the action's file.
  *   - An action with a `plan_item_failed` record was not done and is not listed.
  */
 export type RevertRun = (request: RevertRequest) => Promise<RevertOutcome>;

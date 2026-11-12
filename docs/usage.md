@@ -129,7 +129,7 @@ stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Pr
 codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
 codaryn: Files to revert: 1 (preview, nothing changed) (complete)
   summary.md — deleted (created by this run)
-Run again without --dry-run to apply.
+Run again without --dry-run to revert.
 ```
 
 **revert:** 실행이 만든 `summary.md`를 지운다. 결과는 `"status":"complete"`, `"reverted":[{"path":"summary.md","action":"deleted"}]`, 종료 0이다. `.codaryn/`의 기록은 남는다. stderr:
@@ -851,7 +851,7 @@ codaryn: Files to revert: 3 (preview, nothing changed) (complete)
   inbox/receipt-2026.pdf — moved back to where it was
   inbox/beach-2025.jpg — moved back to where it was
 The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.
-Run again without --dry-run to apply.
+Run again without --dry-run to revert.
 ```
 
 `--dry-run` 없이 실행하면 `Files reverted: 3 (complete)`, 종료 0이다. 세 파일이 `inbox`로 돌아오고 보관함의 그 실행 폴더는 빈다. 다시 되돌리면 세 파일 모두 `already_reverted`이고 `complete`다.

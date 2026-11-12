@@ -97,6 +97,8 @@ const transportOf = (response: { readonly ok: boolean; readonly value?: unknown;
 const dialogs: string[] = [];
 /** GU-6: answer the next widening dialog with "do not write". */
 let refuseWidening = false;
+/** DR-44: answer the next "also remove the records of runs not reverted?" dialog with "keep them". */
+let keepNotReverted = false;
 
 startGui({
   // R21-I-3: the engine host reaches this machine only (the loopback fake API); never a real API.
@@ -106,6 +108,10 @@ startGui({
   stateFile: STATE,
   answerDialog: async (id) => {
     dialogs.push(id);
+    if (id === "cleanup.notReverted.message" && keepNotReverted) {
+      keepNotReverted = false;
+      return 1;
+    }
     if (id === "widen.message" && refuseWidening) {
       refuseWidening = false;
       return 1;
@@ -411,7 +417,7 @@ startGui({
       // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
       const beforeReview = await resultId();
       await taskWith("analyze", "a.txt를 분석한다");
-      await newResult(beforeReview);
+      const analyzeRunId = (await newResult(beforeReview)) as string;
       results["reviewRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       if ((await js("document.getElementById('review-accept') !== null")) === true) {
         await js("document.getElementById('review-accept').click(); true");
@@ -455,6 +461,23 @@ startGui({
       results["listReport"] = await waitFor(
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
+
+      // 5j1. DR-44 (a): the analyze run changed files and was never reverted. Its records are asked about
+      // apart (the plan, then "also remove the records of runs not reverted?", answered "keep them"),
+      // and they stay (not_reverted_not_confirmed); nothing is removed.
+      await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+      await js(`(() => { const box = document.querySelector('[data-run-select="${analyzeRunId}"]'); if (box === null) return false; box.checked = true; document.getElementById('cleanup-preview').click(); return true; })()`);
+      results["cleanupKeepPlan"] = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+      results["cleanupKeepNotice"] = await js("document.getElementById('cleanup-plan-not-reverted') !== null");
+      const askedBeforeKeep = dialogs.length;
+      keepNotReverted = true;
+      await js("document.getElementById('cleanup-apply')?.click(); true");
+      results["cleanupKeepResult"] = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+      results["cleanupKeepRemoved"] = await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null");
+      results["cleanupKeepReasons"] = await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => li.getAttribute('data-reason'))");
+      results["cleanupKeepDialogs"] = dialogs.slice(askedBeforeKeep);
+      results["cleanupKeepStays"] = existsSync(join(SECOND, ".codaryn", "runs", analyzeRunId));
 
       // 5j. GU-4 (3.8), DR-39, DR-44: the state summary; a cleanup plan of the fully reverted runs (the
       // first run, reverted in 5e); the cleanup the main process asked about (the plan only: no run

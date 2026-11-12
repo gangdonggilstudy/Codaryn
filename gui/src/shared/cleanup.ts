@@ -265,6 +265,9 @@ export function cleanupResultOf(value: unknown): CleanupResultView | null {
  * records of runs not (or only partly) reverted (`includeNotReverted`), and the discarded-files
  * folders (`discarded`, people's files). `discardedLeft`: apply runs whose records go while their
  * discarded files may stay; if they stay, a revert can no longer put them back.
+ * R-34b P-1: which records need that question is the contract's rule (NOT_REVERTED_WARNINGS), and
+ * the store counts them in `totals.runs.notReverted`, runs whose records cannot be checked
+ * included. The main process follows that count, with the codes it knows as a floor.
  */
 export function cleanupQuestions(plan: CleanupPlanView): {
   readonly hasItems: boolean;
@@ -279,7 +282,7 @@ export function cleanupQuestions(plan: CleanupPlanView): {
   return {
     hasItems: plan.items.length > 0,
     records: { count: records.length, bytes: records.reduce((sum, item) => sum + item.bytes, 0) },
-    notReverted: records.filter((item) => item.warnings.includes("not_reverted") || item.warnings.includes("partly_reverted")).length,
+    notReverted: Math.max(plan.totals.runs.notReverted, records.filter((item) => item.warnings.includes("not_reverted") || item.warnings.includes("partly_reverted")).length),
     discarded: { count: discarded.length, files: discarded.reduce((sum, item) => sum + item.files, 0), bytes: discarded.reduce((sum, item) => sum + item.bytes, 0) },
     leftovers: plan.items.filter((item) => item.target === "leftover").length,
     discardedLeft: records.filter((item) => item.warnings.includes("discarded_left")).length,

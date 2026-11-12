@@ -365,6 +365,14 @@ const expected = [
   ["cancelRequestArrived", (v) => v === true],
   ["closeRequestArrived", (v) => v === true],
   // GU-4 (3.8), DR-39, DR-44: the cleanup of the fully reverted run.
+  // DR-44 (a): a run not reverted, asked about apart and kept.
+  ["cleanupKeepPlan", (v) => v === "1"],
+  ["cleanupKeepNotice", (v) => v === true],
+  ["cleanupKeepResult", (v) => v === "done"],
+  ["cleanupKeepRemoved", (v) => v === "0"],
+  ["cleanupKeepReasons", (v) => JSON.stringify(v) === JSON.stringify(["not_reverted_not_confirmed"])],
+  ["cleanupKeepDialogs", (v) => JSON.stringify(v) === JSON.stringify(["cleanup.message", "cleanup.notReverted.message"])],
+  ["cleanupKeepStays", (v) => v === true],
   ["cleanupReady", (v) => v === "ok"],
   ["cleanupRunsBefore", (v) => typeof v === "number" && v >= 2],
   ["cleanupPlan", (v) => v === "1"],
@@ -376,7 +384,7 @@ const expected = [
   ["cleanupFirstRunGone", (v) => v === true],
   ["cleanupForged", (v) => v.ok === false && v.code === "unknown_preview"],
   ["cleanupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second)],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

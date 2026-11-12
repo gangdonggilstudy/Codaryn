@@ -333,6 +333,8 @@ export const KO_MESSAGES: MessageTexts = {
   "error.plan_secrets_differ.fix": "계획 실행 때와 같은 작업 지정 방식(따라서 같은 비밀 값)으로 다시 하거나, 계획을 새로 만드세요.",
   "error.plan_run_missing.what": "이 적용이 쓴 계획 실행의 기록(plan.json)이 없어, 아무것도 바꾸지 않았습니다",
   "error.plan_run_missing.fix": "적용을 되돌리려면 그 계획 실행을 남겨 두어야 합니다. 지운 실행 폴더가 있으면 되살리세요.",
+  "error.plan_records_changed.what": "계획 실행에 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔 그 계획이 읽은 것과 다를 수 있어, 아무것도 묻거나 바꾸지 않았습니다",
+  "error.plan_records_changed.fix": "codaryn plan으로 계획을 새로 만들고, 새 계획을 확인한 뒤 그것을 적용하세요. 표시가 있는 실행은 무슨 일이 있었는지의 증거로 남겨 두세요.",
   "error.run_not_awaiting_review.what": "그 실행은 사람의 검토를 기다리는 상태가 아닙니다. 아무것도 쓰지 않았습니다",
   "error.run_not_awaiting_review.fix": "검토 대기(awaiting_review)로 끝난 실행의 id를 주세요. codaryn runs로 찾을 수 있습니다.",
   "error.internal_error.what": "예상하지 못한 내부 오류입니다",

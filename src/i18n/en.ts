@@ -334,6 +334,8 @@ export const EN_MESSAGES: MessageTexts = {
   "error.plan_secrets_differ.fix": "Use the same task form as the plan run, and so the same secrets, or make the plan again.",
   "error.plan_run_missing.what": "the plan run this apply used has no record (plan.json) any more, so nothing was changed",
   "error.plan_run_missing.fix": "An apply can be reverted only while its plan run is kept. Restore that run's folder if you removed it.",
+  "error.plan_records_changed.what": "the plan run has a records-changed mark: something other than the run changed its records, so its plan may not be the one you read; nothing was asked or changed",
+  "error.plan_records_changed.fix": "Make the plan again with codaryn plan, read the new plan, and apply that one. The marked run stays as evidence of what happened.",
   "error.run_not_awaiting_review.what": "that run is not waiting for a person's review, so nothing was written",
   "error.run_not_awaiting_review.fix": "Give the id of a run that ended waiting for review (awaiting_review). codaryn runs lists them.",
   "error.internal_error.what": "an unexpected internal error occurred",

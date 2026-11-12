@@ -2,6 +2,8 @@
  * GU-3: the new task screen (docs/design/standalone-gui.md 3.5), the quick form of `startRun`:
  * the open workspace (a handle), a goal, and the task kind and profile chosen from the settings.
  * - The model is shown, not chosen: settings and profiles decide it (settings > model changes it).
+ *   The notice names the provider the run will use: the chosen profile's, else the config's, else
+ *   the default (SP-D3, SP-D10), with that provider's model.
  * - "Advanced" only says where policy, limits and protected paths come from; the run request has
  *   no field to override them (AC 5.1, M-9).
  * - One run at a time (GUI-D12): the run button is off while a run starts or goes on.
@@ -68,9 +70,22 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         goal.value = run.last?.goal ?? "";
         goalField.append(el("label", t.format("task.goal"), { for: "task-goal" }), goal);
 
-        const model = el("p", view?.model === null || view === null ? t.format("task.modelNone") : t.format("task.model", { model: view.model }), { id: "task-model" });
-        const provider = view?.providers[0];
-        const notice = el("p", provider === undefined ? t.format("task.noticeAny") : t.format("task.notice", { provider }), { id: "task-notice", class: "notice" });
+        const model = el("p", undefined, { id: "task-model" });
+        const notice = el("p", undefined, { id: "task-notice", class: "notice" });
+        const providerInUse = (): string | null => {
+          const chosen = view?.profiles.find((item) => item.name === profile.input.value);
+          return chosen?.provider ?? view?.provider ?? view?.defaultProvider ?? null;
+        };
+        const describe = (): void => {
+          const provider = providerInUse();
+          const entry = view?.apiProviders.find((item) => item.name === provider);
+          const modelId = entry === undefined ? (view?.model ?? null) : entry.model;
+          model.textContent = modelId === null ? t.format("task.modelNone") : t.format("task.model", { model: modelId });
+          notice.textContent = provider === null ? t.format("task.noticeAny") : t.format("task.notice", { provider });
+          notice.setAttribute("data-provider", provider ?? "none");
+        };
+        describe();
+        profile.input.addEventListener("change", describe);
         const advanced = el("details", undefined, { id: "task-advanced" });
         advanced.append(el("summary", t.format("task.advanced")), el("p", t.format("task.advancedText")));
 

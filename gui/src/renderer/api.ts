@@ -147,7 +147,15 @@ function asProfile(value: unknown): ProfileView | null {
     ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
     : [];
   const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
-  return { name: value["name"], workflowRef: value["workflowRef"] as string | null, limits, commands: value["commands"], verifiers: n(value["verifiers"]), protectedPaths: n(value["protectedPaths"]) };
+  return {
+    name: value["name"],
+    workflowRef: value["workflowRef"] as string | null,
+    provider: str(value["provider"]) ? value["provider"] : null,
+    limits,
+    commands: value["commands"],
+    verifiers: n(value["verifiers"]),
+    protectedPaths: n(value["protectedPaths"]),
+  };
 }
 
 /** GU-6: the settings view, checked again on this side. */

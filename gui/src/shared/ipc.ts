@@ -246,6 +246,8 @@ export const SETTINGS_FILE_SOURCES = ["argument", "environment", "default"] as c
 export interface ProfileView {
   readonly name: string;
   readonly workflowRef: string | null;
+  /** SP-D10: the provider the profile names (it wins over the config's), or null. */
+  readonly provider: string | null;
   /** Limit name and value (null: no limit), as the profile sets them. */
   readonly limits: readonly (readonly [string, number | null])[];
   /** Executables the profile allows to run. */
@@ -345,7 +347,9 @@ export type SettingsReply = { readonly ok: true; readonly view: SettingsView } |
 function toProfileView(value: unknown): ProfileView | null {
   if (!isObj(value)) return null;
   const { name, workflowRef, limits, commands, verifiers, protectedPaths } = value;
+  const provider = value["provider"] ?? null;
   if (!shortText(name) || !(workflowRef === null || shortText(workflowRef)) || !textList(commands) || !count(verifiers) || !count(protectedPaths)) return null;
+  if (!(provider === null || (typeof provider === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(provider)))) return null;
   if (!Array.isArray(limits) || limits.length > 32) return null;
   const pairs: (readonly [string, number | null])[] = [];
   for (const pair of limits) {
@@ -355,7 +359,7 @@ function toProfileView(value: unknown): ProfileView | null {
     if (!(limit === null || (typeof limit === "number" && Number.isFinite(limit)))) return null;
     pairs.push([key, limit as number | null]);
   }
-  return { name, workflowRef: workflowRef as string | null, limits: pairs, commands, verifiers, protectedPaths };
+  return { name, workflowRef: workflowRef as string | null, provider: provider as string | null, limits: pairs, commands, verifiers, protectedPaths };
 }
 
 /** The engine host's settings value, checked field by field. `env` is added by the main process. */

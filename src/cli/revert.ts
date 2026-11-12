@@ -6,15 +6,14 @@
  */
 
 import path from "node:path";
-import { REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION, UNSAFE_MOVE_CONSENT_ARGUMENT, toShownWorkspace } from "../contracts/index.js";
-import type { CliErrorOutput, Clock, MessageCatalog, PlanApplyState, RevertOutput, RevertSummaryContext } from "../contracts/index.js";
+import { REVERT_EXIT_CODES, RESULT_SCHEMA_VERSION, UNSAFE_MOVE_CONSENT_ARGUMENT } from "../contracts/index.js";
+import type { CliErrorOutput, Clock, MessageCatalog, PlanApplyState, RevertOutput } from "../contracts/index.js";
 import { parseRevertArgs } from "./args.js";
 import { revertStatus } from "./assemble.js";
 import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
 import { cliError } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { localPathProblem } from "./task.js";
-import { hideKeys } from "./text-safety.js";
 
 export interface RevertEnvironment {
   readonly argv: readonly string[];
@@ -56,12 +55,6 @@ export interface RevertCliOutcome {
   readonly exitCode: number;
   /** `--quiet` (N-5): no human-readable output on stderr. False when the arguments were not parsed. */
   readonly quiet?: boolean;
-  /**
-   * DR-51 (U-38): what the revert summary needs besides the output: the typed --workspace with key
-   * shapes masked (revert knows no registered value), as toShownWorkspace gives it. Absent when it
-   * gives none (the hint says <workspace> as before), and on errors.
-   */
-  readonly summary?: RevertSummaryContext;
   /**
    * U-16 (UXM-5): a line for the person (stderr), when the run reverted is a plan run whose plan an
    * apply run used: nothing of it was put back, and the apply run is the one to revert. Fixed
@@ -123,8 +116,8 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
   if (problem !== null) return cliError("invalid_arguments", `the path given by --workspace ${problem}`);
 
   const workspace = path.resolve(io.cwd, parsed.args.workspace);
-  // DR-51 (U-38): the typed path for the summary's hints, key shapes masked.
-  const shownWorkspace = toShownWorkspace(parsed.args.workspace, hideKeys(parsed.args.workspace, null));
+  // DR-51 (U-38), review R-70 L-1 (PM): no typed path for the summary. revert knows no registered
+  // value, so its consent hint says <workspace> whatever was typed.
   if (!(await io.isDirectory(workspace))) {
     return cliError("workspace_not_found", "the workspace is not an existing directory");
   }
@@ -203,7 +196,6 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
     },
     exitCode,
     quiet,
-    ...(shownWorkspace === null ? {} : { summary: { workspaceShown: shownWorkspace } }),
     ...(result.planApply === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planApply, dryRun, io.messages) }),
   };
 }

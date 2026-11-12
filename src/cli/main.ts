@@ -196,8 +196,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         // DR-25: at a terminal, files skipped as unsafe_move may go back after a [y/N] question on stderr.
         ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
       });
-      // DR-51 (U-38): with the typed --workspace when revert gives it.
-      if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output, outcome.summary));
+      // DR-51 (U-38), R-70 L-1: no typed --workspace (revert knows no registered value).
+      if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));
       if (outcome.hint !== undefined) writeHuman(outcome.hint);
       return plain(outcome);
     }

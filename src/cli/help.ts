@@ -68,25 +68,33 @@ const OPTION_SYNTAX: { readonly [O in HelpOption]: string } = {
   confirm: "--confirm <first 12+ hex of the digest>",
   include_not_reverted: "--include-not-reverted",
   delete_discarded: "--delete-discarded",
+  // U-53 (R-64 L1, I1 to I3; R-58 L2): the same flags, with the text that fits the command.
+  workflow: "--workflow <id>",
+  json_line: "--json",
+  run_task: "--task <task.json>",
+  workspace_or_current: "--workspace <dir>",
 };
 
 /**
- * The options each command's help describes, in order. DR-49 (U-23): `run`, `revert` and `apply`
- * list `--json` (their JSON line at a terminal), which their usage lines leave out (args.ts
- * SWITCHES). U-35: the five plan and state commands list theirs in the order of their usage lines.
+ * The options each command's help describes, in the order of its usage line. DR-49 (U-23): `run`,
+ * `revert` and `apply` list `--json` last, which their usage lines leave out (args.ts SWITCHES; the
+ * usage lines are inside invalid_arguments messages). U-53: its text is `json_line` (the result's
+ * JSON line at a terminal too), not report's `json`; `--workflow` for run, plan, apply and review;
+ * `run_task` for the commands that read a run's task file and run nothing; `workspace_or_current`
+ * for the reading commands, which take the current directory without it (U-17).
  */
 export const COMMAND_OPTIONS: { readonly [C in HelpCommand]: readonly HelpOption[] } = {
-  run: ["task", "workspace", "goal", "config", "vars_file", "cancel_file", "quiet", "profile", "json"],
-  revert: ["workspace", "run", "dry_run", "allow_unsafe_move", "quiet", "json"],
-  report: ["workspace", "run", "json"],
+  run: ["task", "workspace", "goal", "config", "vars_file", "cancel_file", "quiet", "profile", "workflow", "json_line"],
+  revert: ["workspace", "run", "dry_run", "allow_unsafe_move", "quiet", "json_line"],
+  report: ["workspace_or_current", "run", "json"],
   doctor: ["config", "vars_file", "task", "workspace", "profile", "json"],
   models: ["provider", "config", "vars_file", "use", "json"],
   init: ["config", "workspace", "json"],
-  runs: ["workspace", "limit", "json"],
-  plan: ["task", "workspace", "profile", "config", "vars_file", "run", "json"],
-  apply: ["task", "workspace", "profile", "config", "vars_file", "plan_run", "digest", "allow_unsafe_move", "cancel_file", "quiet", "json"],
-  review: ["task", "workspace", "profile", "config", "vars_file", "run", "accept", "reject", "note", "json"],
-  changes: ["task", "workspace", "profile", "config", "vars_file", "run", "json"],
+  runs: ["workspace_or_current", "limit", "json"],
+  plan: ["run_task", "workspace_or_current", "profile", "workflow", "config", "vars_file", "run", "json"],
+  apply: ["run_task", "workspace", "profile", "workflow", "config", "vars_file", "plan_run", "digest", "allow_unsafe_move", "cancel_file", "quiet", "json_line"],
+  review: ["run_task", "workspace", "profile", "workflow", "config", "vars_file", "run", "accept", "reject", "note", "json"],
+  changes: ["run_task", "workspace_or_current", "profile", "config", "vars_file", "run", "json"],
   cleanup: ["workspace", "older_than", "run_ids", "reverted", "discarded_older_than", "discarded_run", "confirm", "delete_discarded", "include_not_reverted", "json"],
 };
 

@@ -479,11 +479,11 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - DR-41부터 작업 종류의 `policy`는 설정의 것과 합쳐진다(계약 `mergeWorkflowPolicy`: 보호 경로는 합집합, 명령과 계획 동작은 양쪽이 모두 허용한 것만). 그래서 자기 정책을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)마다, 무엇이 바뀌었든, 합친 정책을 전과 후로 비교한다.
       - 설정의 첫 정책이 보호 경로만 더하면 작업 종류의 보호 경로는 남으므로 넓히기가 아니다. 설정이 `planActions`를 적지 않게 되거나 정책을 지우면, `organize`가 좁혀졌던 계획 동작을 되찾으므로 넓히기다.
       - 필드는 `workflows.<id>.policy.planActions`처럼 작업 종류를 이름에 담는다. 설정 쪽 항목과 같은 종류·같은 필드(작업 종류 앞부분과 목록 번호를 뺀 것)를 되풀이하는 항목은 빼고, 작업 종류의 실행이 다르게 넓어질 때만 준다.
-      - `verifiers`는 합치지 않는다(설정의 것, 없으면 작업 종류의 것). 그래서 설정의 `verifiers`가 처음 생기거나 없어질 때 비교한다.
+      - `verifiers`도 DR-43 (a)부터 합친다(계약 `mergeWorkflowVerifiers`). 작업 종류의 검증기가 먼저 늘 돌고, 설정의 것은 id가 겹치지 않으면 더해진다. 빈 목록은 아무것도 지우지 못한다. 그래서 자기 검증기를 가진 작업 종류마다 합친 목록을 전과 후로 비교한다. 설정의 첫 검증기는 작업 종류의 검사를 대체하지 않으므로 넓히기가 아니다.
       - 좁히기는 확인 대상이 아니다. 대신 무엇이 빠지는지 알린다(아래 `policyNarrowings`).
-    - `policyNarrowings`(DR-41, 계약 `workflowPolicyNarrowings`)
-      - `readSettings`의 보기와 변경 제안에 있다. 작업 종류마다, 자기 규칙이 설정의 정책에서 빼는 것을 `{ workflow, kind, count }`로 준다.
-      - 종류는 `commands_dropped`, `commands_narrowed`, `plan_actions_dropped`, `restore_path_tokens_off`이다. 규칙·명령·경로는 담지 않는다.
+    - `policyNarrowings`(DR-41, DR-43 (a), 계약 `workflowPolicyNarrowings`·`workflowVerifierNarrowings`)
+      - `readSettings`의 보기와 변경 제안에 있다. 작업 종류마다, 자기 규칙이 설정의 정책과 검증기에서 빼는 것을 `{ workflow, kind, count }`로 준다.
+      - 종류는 `commands_dropped`, `commands_narrowed`, `plan_actions_dropped`, `restore_path_tokens_off`, `verifiers_dropped`(작업 종류의 것과 id가 겹치는 다른 검사)이다. 규칙·명령·경로·검사 내용은 담지 않는다.
       - 예: 설정에 명령을 더하면 `organize`는 그것을 빼므로 `{ workflow: "organize", kind: "commands_dropped", count: 1 }`이다.
       - 프로필의 정책은 여기서 보지 않는다.
   - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.

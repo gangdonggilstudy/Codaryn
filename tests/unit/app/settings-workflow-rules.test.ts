@@ -2,10 +2,11 @@
  * DR-41 (GUI report F-5, A-8): a workflow definition's own policy is merged with the configured one
  * (mergeWorkflowPolicy: protected paths joined, command lines and plan actions only where both
  * allow) instead of being replaced by it. The widening judgment compares, for every workflow that
- * has its own policy, the merged policy its quick runs get before and after the change. Verifiers
- * are still laid under (the config's, else the definition's), so they are compared when the
- * config's appear or go. What a workflow's rules leave out of the configured policy is told, kinds
- * and counts only (workflowPolicyNarrowings), in the settings view and a change proposal.
+ * has its own policy, the merged policy its quick runs get before and after the change. DR-43 (a):
+ * verifiers likewise, merged with mergeWorkflowVerifiers (the workflow's own always run, given ones
+ * added unless their id is one of the workflow's). What a workflow's rules leave out of the
+ * configured policy and verifiers is told, kinds and counts only (workflowPolicyNarrowings,
+ * workflowVerifierNarrowings), in the settings view and a change proposal.
  * Reproduced first: the judgment still followed the replacement rule. Fake values only.
  */
 
@@ -28,6 +29,7 @@ const DOCS = {
   policy: { ...POLICY, commands: [{ executable: "npm", argsPrefix: [], allowExtraArgs: true }], protectedPaths: ["private"] },
   verifiers: [{ id: "lint", kind: "command", executable: "npm", args: ["test"] }],
 } as unknown as NonNullable<CodarynConfig["workflows"]>[string];
+const EXISTS = { id: "exists", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] } as unknown as NonNullable<CodarynConfig["verifiers"]>[number];
 const kinds = (before: CodarynConfig, after: CodarynConfig): string[] => wideningOf(before, after).map((item) => `${item.kind} ${item.field}`);
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
@@ -64,10 +66,21 @@ describe("DR-41: the widening judgment compares the merged policies", () => {
     assert.deepEqual(kinds(BASE, { ...BASE, policy: { ...POLICY } }), []);
   });
 
-  test("the config's first verifiers replace a workflow's command verifier (verifiers are not merged)", () => {
+  test("DR-43 (a): the config's first verifiers are added to a workflow's own, so its check stays: not a widening", () => {
     const before: CodarynConfig = { ...BASE, workflows: { docs: DOCS } };
-    const after: CodarynConfig = { ...before, verifiers: [{ id: "exists", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] }] as unknown as CodarynConfig["verifiers"] };
-    assert.deepEqual(kinds(before, after), ["verifier_removed workflows.docs.verifiers"]);
+    const after: CodarynConfig = { ...before, verifiers: [EXISTS] };
+    assert.deepEqual(kinds(before, after), []);
+  });
+
+  test("DR-43 (a): an empty config list removes none of a workflow's verifiers", () => {
+    const before: CodarynConfig = { ...BASE, workflows: { docs: DOCS } };
+    assert.deepEqual(kinds(before, { ...before, verifiers: [] }), []);
+  });
+
+  test("DR-43 (a): a workflow's own verifier removed from its definition is said for that workflow", () => {
+    const before: CodarynConfig = { ...BASE, verifiers: [EXISTS], workflows: { docs: DOCS } };
+    const without = { ...DOCS, verifiers: [] } as unknown as NonNullable<CodarynConfig["workflows"]>[string];
+    assert.deepEqual(kinds(before, { ...before, workflows: { docs: without } }), ["workflow_changed workflows", "verifier_removed workflows.docs.verifiers"]);
   });
 
   test("a narrowing change asks for nothing", () => {
@@ -96,6 +109,16 @@ describe("DR-41: what a workflow's rules leave out of the configured policy", ()
       { workflow: "docs", kind: "restore_path_tokens_off", count: 1 },
     ]);
     assert.equal(JSON.stringify(proposal.policyNarrowings).includes("npm"), false, "no rule or command in them");
+  });
+
+  test("DR-43 (a): a config verifier whose id is one of a workflow's, and is another check, is left out and told", async () => {
+    const { config, app } = await setup({ ...BASE, workflows: { docs: DOCS } });
+    // Same id as docs' own command verifier, another check: docs keeps its own, this one is dropped.
+    const clash = { id: "lint", kind: "file_rules", rules: [{ type: "exists", path: "README.md" }] } as unknown as NonNullable<CodarynConfig["verifiers"]>[number];
+    const proposal = ok<SettingsChangeProposal>(await app.proposeSettingsChange({ configPath: config, next: { ...BASE, workflows: { docs: DOCS }, verifiers: [clash, EXISTS] } }));
+    assert.deepEqual(proposal.policyNarrowings, [{ workflow: "docs", kind: "verifiers_dropped", count: 1 }]);
+    assert.deepEqual(proposal.widening, [], "docs' own check stays");
+    assert.equal(JSON.stringify(proposal.policyNarrowings).includes("README"), false);
   });
 
   test("apply still asks for a merged widening", async () => {

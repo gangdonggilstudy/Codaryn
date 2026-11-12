@@ -5,7 +5,8 @@
  * absent for a plan run and for an empty or white-space text. The app layer passes the result on as
  * it is; the label ("the agent's words, not a verified fact") is the GUI's and the CLI's.
  * Reproduced first (d4756db, todo); the engine writes the field now (99f10cc), with the text rules
- * of 15a9cd7 (LF, tabs kept, other control and invisible characters left out, key shapes as [key]). Real runs through the app (scripted
+ * of 15a9cd7 (LF, tabs kept, other control and invisible characters left out, key shapes as [key]),
+ * and the CLI's report keeps it when it reads result.json (aea2076). Real runs through the app (scripted
  * model), the real store. Fake values only.
  */
 
@@ -18,9 +19,6 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CodarynApp } from "../../../src/app/index.js";
 import { FAKE_API_KEY } from "../../fixtures/secrets.js";
 import { FAKE_SECRET, WRITE_NOTES, appEnvironment, setupRun, taskRequest } from "./support.js";
-
-/** result.json has it; the report's reader (src/cli/report.ts readResult) keeps only the fields it knows. */
-const REPORT_TODO = { todo: "U-21: wait for the CLI's report to keep finalMessage when it reads result.json" };
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -53,7 +51,7 @@ describe("U-21 (DR-47): the agent's last message reaches the GUI with the result
     assert.equal(message.text.includes(FAKE_API_KEY), false, "a key is masked");
   });
 
-  test("the report's result (the run's result.json) carries the same", REPORT_TODO, async () => {
+  test("the report's result (the run's result.json) carries the same", async () => {
     const { app, workspace, runId, result } = await runEndingWith(`All done. Kept ${FAKE_SECRET} out of the notes.`);
     assert.ok(result.finalMessage !== undefined);
     const report = ok(await app.report({ workspace, runId }));

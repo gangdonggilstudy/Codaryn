@@ -112,6 +112,16 @@ describe("changedRegion and renderChanges", () => {
     assert.equal(/[\u0000-\u0008\u000b-\u001f\u007f]/.test(shown), false, "no control character but line feeds");
     assert.match(renderChanges({ ...VIEW, files: [] }), /the run changed no file/);
   });
+
+  // U-16 (UXM-4): an apply run's moves and discards are its plan's actions, not file writes of its
+  // own; its view says what it applied (changes.apply_run) instead of "no file changed".
+  test("an apply run's text says which plan run it applied and how many actions, not no file", { todo: "U-16: wait for renderChanges to say an apply run" }, () => {
+    const view: ChangesOutput = { ...VIEW, files: [], applyRun: { planRunId: "20261112T010000Z-0f0e0d0c" as never, actions: 3 } };
+    const shown = renderChanges(view);
+    assert.doesNotMatch(shown, /the run changed no file/);
+    assert.match(shown, /20261112T010000Z-0f0e0d0c/);
+    assert.match(shown, /\b3\b/);
+  });
 });
 
 describe("runChanges", () => {

@@ -1,6 +1,6 @@
 # Codaryn 단계별 계획
 
-현재 상태(2026-11-12, main `9d86212`)
+현재 상태(2026-11-12, main `f39593f`)
 - 단계 1a·2·3의 오프라인 구현이 main에 있다. 1b는 모의 API 검증까지다.
 - **실제 Anthropic API는 한 번도 호출하지 않았다.** 그래서 1b와 단계 2·3의 실 API 기준은 미수행이다.
 - 단계와 별도로 사용성 개선(N-1~N-19)을 구현하고 있다(아래 "사용성 개선").
@@ -97,13 +97,17 @@
 - 채택한 설계: [범용 작업 워크플로](design/general-tasks.md), 결정 GT-D1~GT-D14. **결정만, 코드 없음**
   - 등록: 내장 정의 다섯 개(`src/workflows`)와 사용자 설정 `workflows`, task의 `workflowRef`(GT-D1, GT-D2).
   - 엔진 변경은 GT-E1~GT-E5 한 번이다. 이유는 [decisions.md](decisions.md) 3절에 기록했다. 완료 기준의 "그 이유를 결정 기록에 남긴다"에 해당한다.
-  - 계획 확인은 실행 사이에서 한다(`plan_pending` → `plan` → `apply --digest`, GT-D4). 폐기는 보관함으로 옮긴다(GT-D5).
+  - 계획 확인은 실행 사이에서 하는 하나뿐이다(`plan_pending` → `plan` → `apply --digest`, GT-D4, DR-1).
+  - `plan.json`에는 행동과 원본 해시만 둔다. 적용 때의 정책·검증기는 그때의 설정과 task에서 읽는다(DR-5).
+  - 적용 뒤 확인 `inventory`는 계획 대상의 해시와 나머지의 경로·크기 목록을 쓰고 자체 상한을 둔다(DR-6).
+  - 폐기는 실행 디렉터리 밖 보관함 `.codaryn/discarded/<runId>/`로 옮긴다. 보관함 정리는 따로 확인한다(GT-D5, DR-9).
   - 사람 확인은 `awaiting_review`와 `review` 명령으로 한다. `done`이 되지 않는다(GT-D6).
   - 네트워크 도구는 두지 않는다. 파괴적 동작은 적용기만 하고 항목마다 기록한다(general-tasks 7절).
   - 구현 순서: G-A 계약 → (G-B 엔진, G-C 도구·적용기, G-D 검증기, G-E 저장) → G-F CLI 연결 → G-G 통합 → G-H 문서 → 교차 검토. G-B 이후는 G-A와 N-A·N-C 병합 뒤 배정한다.
   - P1(단계 4 안의 다음 묶음): `query_table`, `plan: "run"`, 읽기 제외 경로, `markdown` 규칙, 개인정보 자료 분석(`analyze-private`).
   - 사용자 확인 대기: Q-4(개인정보 자료), Q-5(보관함 이동, 자료 분석의 사람 확인), Q-6(바이너리 이동). 답 전에는 가정으로 진행한다([decisions.md](decisions.md) 4절).
-- 이 단계로 미룬 것 가운데 실행 중 권한 확인(N-11)은 단계 5 시작에 어댑터 확인 질문 통로와 함께 구현한다(GT-D9).
+- 이 단계로 미룬 것 가운데 실행 중 권한 확인(N-11)은 단계 5 시작에 어댑터 확인 질문 통로와 함께 구현한다(GT-D9). 형태는 DR-3으로 정했고, G-A 계약에는 `ask`와 `EngineDeps.confirm`을 넣지 않는다.
+- 설계 교차 검토 R-1의 결정 DR-1~DR-9가 위 채택보다 우선한다. 각 설계 문서의 수정은 담당이 한다([decisions.md](decisions.md) 3절 DR 표).
 
 ## 단계 5. GUI·IDE
 
@@ -116,11 +120,19 @@
   - GUI 형태: VS Code 확장을 먼저 만든다(N-13). 독립 GUI의 형태와 지원 OS는 단계 4 뒤에 정한다. 사용자 확인 Q-7 대기.
 - 채택한 설계. **결정만, 코드 없음**
   - [어댑터 계약](design/adapter-contract.md)
-    - 실행 시작, 진행 이벤트(가림본 기록), 취소, 결과·보고서·되돌리기·실행 목록 함수.
-    - 확인 질문 통로: 기본 거부, 한 번만, 대기 시간은 실행 시간 한도에 포함.
-    - 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, `--cancel-file`).
-  - [VS Code 확장](design/vscode-extension.md): 실행마다 CLI 자식(VX-D1), `vscode/` 별도 매니페스트(VX-D3), 웹뷰 없음, 키 보관 없음. `@types/vscode`는 Q-3 대기라서 그 전에는 VS Code API에 의존하지 않는 코어만 만든다.
-  - [독립 GUI](design/standalone-gui.md): 권고(Electron과 엔진 전용 프로세스, Windows 11 x64 먼저)를 설계 기준으로만 받았다. 구현은 Q-7과 외부 사실 확인 뒤에 연다.
+    - 실행 시작(워크플로 선택 `workflowRef` 포함, DR-2), 진행 이벤트(가림본 기록), 취소, 결과·보고서·되돌리기·실행 목록 함수.
+    - 계획 보기, `applyPlan(runId, digest)`, 사람 확인 `review`(DR-1). 다시 가린 변경 비교 함수(DR-7).
+    - 앱 환경의 대소문자 무시 조회와 실행기 부모 환경. CLI 이행의 완료 기준에 이 두 시험을 넣는다(DR-4).
+    - 확인 질문 통로는 권한 확인 전용이다: 기본 거부, 한 번만, 대기 시간은 실행 시간 한도에 포함, 답 뒤 재검사(DR-1, DR-3).
+    - 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, `--cancel-file`). `apply`도 같은 이벤트·취소 통로를 갖는다(DR-2).
+    - 단일 프로세스 조건은 "듣는 소켓 없음, 어댑터보다 오래 사는 프로세스 없음"이다(DR-8).
+  - [VS Code 확장](design/vscode-extension.md)
+    - 실행마다 CLI 자식(VX-D1), `vscode/` 별도 매니페스트(VX-D3), 웹뷰 없음, 키 보관 없음.
+    - 변경 비교는 다시 가린 비교만이다(DR-7). 계획 화면과 사람 확인을 더한다(DR-1).
+    - `@types/vscode`는 Q-3 대기라서 그 전에는 VS Code API에 의존하지 않는 코어만 만든다.
+  - [독립 GUI](design/standalone-gui.md)
+    - 권고(Electron과 엔진 전용 프로세스, Windows 11 x64 먼저)를 설계 기준으로만 받았다. 구현은 Q-7과 외부 사실 확인 뒤에 연다.
+    - DR-1·DR-7·DR-8·DR-9는 반영했다.
 - 완료 기준의 확인 방법(설계안, PM 채택 전 기준 변경 아님)
   - 같은 대본 사례를 CLI와 각 어댑터로 실행해 결과와 기록이 같은지 본다(adapter-contract 8절, standalone-gui 10절).
   - 실제 API 시험은 하지 않는다.

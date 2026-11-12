@@ -1152,3 +1152,9 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). `applied`는 문제로 남긴 것(`partly_removed` 포함)이 있으면 종료 1이고, 사람의 선택으로 남긴 것(`not_confirmed`, `not_reverted_not_confirmed`, `discarded_left`, `used_by_kept_apply`)은 0이다. U-13(UXM-1): 폐기 보관함에 파일이 남는 적용 실행의 기록은 그 폐기 보관함을 같은 정리에서 지우지 않으면(`--delete-discarded`와 폐기 보관함 선택) 남긴다(`discarded_left`, 그 적용이 쓰는 계획 실행은 `used_by_kept_apply`). 미리보기는 그런 적용의 수를 안내 줄로, 완료 출력은 `cleanup.done_discarded_left` 줄과 항목별 이유로 알린다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.
+
+### 18.14 읽기 명령의 가벼운 형식과 `--workspace` 생략 (U-17, UXM-3, UXM-19, AXM-14, DR-46)
+
+- `plan`과 `review`는 모델도 검증기도 돌리지 않으므로 간편 형식에서 실행 한도를 요구하지 않는다(설정 파일에 한도가 없어도 됨. 준 한도는 그대로 검사). 가릴 값의 이름과 작업 종류만 해석한다. `apply`는 검증기를 그 설정으로 돌리므로 지금처럼 요구한다.
+- 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 쓴다. 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 지금처럼 명시를 요구하고, 오류에 `--workspace .`를 주면 현재 폴더라는 안내를 붙인다.
+- `changes`의 간편 형식이 제공자 설정을 요구하지 않게 하는 것은 앱 계층 몫이다.

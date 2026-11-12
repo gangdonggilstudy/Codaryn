@@ -20,6 +20,9 @@ import type { EngineDeps, JournalEvent, ReportOutput, RevertOutput } from "../..
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { runReport } from "../../../src/cli/report.js";
 import { runRevert } from "../../../src/cli/revert.js";
+import { createHumanOutput } from "../../../src/cli/human/index.js";
+import { runRuns } from "../../../src/cli/runs.js";
+import { createMessageCatalog } from "../../../src/i18n/index.js";
 import { runCli } from "../../../src/cli/run.js";
 import type { CliEnvironment } from "../../../src/cli/run.js";
 import { locateInWorkspace } from "../../../src/cli/security/index.js";
@@ -209,4 +212,39 @@ describe("DR-38 on the real assembly: a run whose records change during the run"
     assert.deepEqual(shown.result?.stateChanged, result.stateChanged, "the report keeps the recorded list");
     assert.deepEqual([shown.result?.status, shown.result?.reason], ["failed", "state_changed"]);
   });
+});
+
+describe("DR-38: the run list marks a run whose records were changed", () => {
+  async function runs(base: string, json: boolean): Promise<string> {
+    const outcome = await runRuns({
+      argv: ["runs", "--workspace", path.join(base, "work"), ...(json ? ["--json"] : [])],
+      cwd: base,
+      env: {},
+      human: createHumanOutput(createMessageCatalog("en")),
+    });
+    return "text" in outcome ? outcome.text : JSON.stringify(outcome.output);
+  }
+
+  test("runs --json: recordsChanged on the marked run's entry (the store's listRuns)", async () => {
+    const base = await setup(WRITE_STEPS);
+    await runCli(io(base));
+    const runId = await onlyRunId(base);
+    const before = JSON.parse(await runs(base, true)) as { runs: { runId: string; recordsChanged?: boolean }[] };
+    assert.equal(before.runs[0]?.recordsChanged, undefined);
+    await writeFile(markFile(base, runId), "{}", "utf8");
+    const after = JSON.parse(await runs(base, true)) as { runs: { runId: string; recordsChanged?: boolean }[] };
+    assert.equal(after.runs[0]?.recordsChanged, true);
+  });
+
+  test(
+    "the person's list says it (runs.records_changed)",
+    { todo: "output owner (N-C): src/cli/human/output.ts runsText draws entry.recordsChanged with runs.records_changed" },
+    async () => {
+      const base = await setup(WRITE_STEPS);
+      await runCli(io(base));
+      await writeFile(markFile(base, await onlyRunId(base)), "{}", "utf8");
+      const text = await runs(base, false);
+      assert.ok(text.includes("records changed"), text);
+    },
+  );
 });

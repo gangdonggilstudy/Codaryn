@@ -881,7 +881,8 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
   - `PlanOutput`: 동작 목록(지금 가릴 값으로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
-  - U-17(UXM-3, UXM-19, AXM-14, DR-46): `plan`과 `review`는 모델도 검증기도 돌리지 않으므로 간편 형식에서 실행 한도를 요구하지 않는다(설정 파일에 한도가 없어도 됨. 준 한도는 그대로 검사). 가릴 값의 이름과 작업 종류만 해석한다. `apply`는 검증기를 그 설정으로 돌리므로 지금처럼 요구한다. 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 쓴다. 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 지금처럼 명시를 요구하고, 오류에 `--workspace .`를 주면 현재 폴더라는 안내를 붙인다. `changes`의 간편 형식이 제공자 설정을 요구하지 않게 하는 것은 앱 계층 몫이다.
+  - U-14(UXM-6, AXM-2, AXM-15): 계획 실행에 기록 변경 표시가 있으면(읽을 수 없는 표시도) 그래도 보이되(종료 0) `recordsChanged: true`를 넣고, 글은 경고 줄(`plan.records_changed`)로 시작하며 적용 명령 대신 적용할 수 없다는 줄(`plan.cannot_apply`: 새 `codaryn run`으로 계획을 다시 만든다)을 적는다. 모델이 쓴 요약(`summary`)은 계획 실행 journal의 `propose_plan` 호출(결과가 이 다이제스트를 가리키는 것)에서 읽어 넣고, 글에서는 `plan.summary_label` 뒤에 에이전트의 설명으로 보인다(승인 대상이 아님). 찾지 못하거나 읽지 못하면, 그리고 표시가 있으면 뺀다. 글의 마지막 줄은 다이제스트가 보장하는 것(`plan.digest_guarantee`)이다. `apply`의 터미널 질문도 같은 글을 쓴다. 문구 id가 카탈로그에 없는 동안은 CLI의 영어 문장을 쓴다.
+  - R-49 R49-M1: 요약은 읽는 자리에서 지금의 가릴 값, 현재 키와 키 모양, 제어 문자를 차례로 거친다. 그래서 글과 `--json`, 앱 계층, `apply`의 질문이 같은 글을 싣는다. 동작의 경로는 기계가 쓰는 자료라 키 모양 가림을 걸지 않는다(PM 답, DR-48이 깨는 변경을 두 곳으로 한정함).
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
@@ -1151,3 +1152,9 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 출력(`CleanupOutput`, 지금은 `src/cli/cleanup.ts`의 형. 계약으로 옮길 제안): `mode` `preview`(종료 0, `summary`·`plan`), `applied`(종료 0, `not_confirmed` 말고 남긴 것이 있으면 1, `outcome`), `plan_changed`(종료 3). `applied`는 문제로 남긴 것(`partly_removed` 포함)이 있으면 종료 1이고, 사람의 선택으로 남긴 것(`not_confirmed`, `not_reverted_not_confirmed`, `discarded_left`, `used_by_kept_apply`)은 0이다. U-13(UXM-1): 폐기 보관함에 파일이 남는 적용 실행의 기록은 그 폐기 보관함을 같은 정리에서 지우지 않으면(`--delete-discarded`와 폐기 보관함 선택) 남긴다(`discarded_left`, 그 적용이 쓰는 계획 실행은 `used_by_kept_apply`). 미리보기는 그런 적용의 수를 안내 줄로, 완료 출력은 `cleanup.done_discarded_left` 줄과 항목별 이유로 알린다. 다른 프로세스가 잠금을 쥐면 `workspace_locked`(6) 오류다.
 - 사람용 글은 카탈로그의 `cleanup.*` 문구와 실행 id·크기다. 확인 방법 안내 한 줄은 아직 카탈로그 id가 없어 영어로 둔다.
 - 기록: store가 `.codaryn/cleanup.jsonl`에 개수와 크기만 남긴다.
+
+### 18.14 읽기 명령의 가벼운 형식과 `--workspace` 생략 (U-17, UXM-3, UXM-19, AXM-14, DR-46)
+
+- `plan`과 `review`는 모델도 검증기도 돌리지 않으므로 간편 형식에서 실행 한도를 요구하지 않는다(설정 파일에 한도가 없어도 됨. 준 한도는 그대로 검사). 가릴 값의 이름과 작업 종류만 해석한다. `apply`는 검증기를 그 설정으로 돌리므로 지금처럼 요구한다.
+- 읽기 명령 `report`, `plan`, `changes`는 `--workspace`(와 `--task`)가 없으면 현재 폴더를 쓴다. 바꾸는 명령 `revert`, `cleanup`, `apply`, `review`는 지금처럼 명시를 요구하고, 오류에 `--workspace .`를 주면 현재 폴더라는 안내를 붙인다.
+- `changes`의 간편 형식이 제공자 설정을 요구하지 않게 하는 것은 앱 계층 몫이다.

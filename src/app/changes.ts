@@ -11,6 +11,14 @@
  *   store export.
  * - Current files: read through the workspace (links resolved, root and state directory enforced).
  *
+ * - R-11 (PM order), by the DR-28 principle: a file's text is shown only when the secrets registered
+ *   now mask it as the run did. Otherwise only its path and state are given (AC-D13). A run started
+ *   with other secrets would otherwise show what it had masked (reproduced: a task form without the
+ *   run's secretEnv printed the secret's value from the original and the current file). The run
+ *   records how it masked a changed file's path (`file_changed.path`) but not its text, so the text
+ *   cannot be checked and is not shown (`masking_unverified`). It comes back once the run keeps that
+ *   record (contract and store; proposal in the A-4 report).
+ *
  * Only masked text leaves this module. Reads only; no lock (like `report`).
  */
 
@@ -95,6 +103,15 @@ function changedPaths(text: string, runId: string): ChangedPath[] {
     take(record);
   }
   return [...byPath.values()];
+}
+
+/**
+ * R-11, DR-28 principle: whether the text the run changed at this path can be compared with how the
+ * run masked it. Nothing records that yet (file_changed holds the masked path only, the snapshot
+ * index no content), so it never can, and no text is shown.
+ */
+function textMaskingRecorded(_change: ChangedPath): boolean {
+  return false;
 }
 
 /** The snapshot index by path, or null when there is none or it is not a valid index. */
@@ -242,6 +259,11 @@ export async function readChanges(
       before = null;
       after = null;
       unavailable = "mask_failed";
+    }
+    if ((before !== null || after !== null) && !textMaskingRecorded(change)) {
+      before = null;
+      after = null;
+      unavailable = "masking_unverified";
     }
     files.push({ path: shownPath, created, state, before, after, unavailable });
   }

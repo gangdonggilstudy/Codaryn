@@ -20,6 +20,7 @@ export type { RunInspection } from "./runs.js";
 export { PROCESS_START_TOLERANCE_MS, acquireLock, nodeLockFileSystem, processStartTime, releaseLock } from "./lock.js";
 export { canonicalActions, createPlanRecorder, isWorkspaceRelativePath, loadPlan, markPlanApplied } from "./plan.js";
 export type { MarkPlanAppliedRequest } from "./plan.js";
+export { readReviewRecord, writeReviewRecord } from "./review.js";
 export type { AcquireLockOptions, AcquireLockOutcome, LockFileSystem, LockInfo, ReleaseLockOptions } from "./lock.js";
 
 export interface JournalOptions {

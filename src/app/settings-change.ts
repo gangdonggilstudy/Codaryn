@@ -19,14 +19,14 @@
  */
 
 import { createHash } from "node:crypto";
-import { API_PROVIDERS, API_PROVIDER_NAMES } from "../contracts/index.js";
+import { API_PROVIDERS, API_PROVIDER_NAMES, mergeWorkflowPolicy } from "../contracts/index.js";
 import type { ApiProviderName, CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
 import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
 import { workflowDefinitions } from "../workflows/index.js";
 import { appError } from "./errors.js";
-import { checkConfigText, loadSettingsFile } from "./settings.js";
+import { checkConfigText, loadSettingsFile, policyNarrowingsOf } from "./settings.js";
 import type { ChosenFile, SettingsIo } from "./settings.js";
 import type {
   AppCallOutcome,
@@ -96,24 +96,26 @@ function verifierWidening(before: VerifierRules, after: VerifierRules, prefix: s
 }
 
 /**
- * GUI F-5: in the quick form a workflow's own policy and verifiers apply only while the config has
- * none (src/cli/run.ts `underDefinition`: `config.policy ?? definition.policy`, the same for
- * verifiers). When the config's `policy` or `verifiers` appears or goes, the rules of every workflow
- * that has its own (built-in or the config's) change, so they are compared as such runs see them.
- * A workflow defined on one side only is `workflow_changed` already.
+ * The rules of the quick runs of every workflow that has its own (built-in or the config's), as
+ * such runs see them, compared before and after. A workflow defined on one side only is
+ * `workflow_changed` already.
+ * - Policy, DR-41 (GUI F-5, A-8): the definition's policy is merged with the config's
+ *   (mergeWorkflowPolicy: protected paths joined, command lines and plan actions only where both
+ *   allow), so the merged policies are compared whatever changed. A configured command rule a
+ *   workflow's own rules allow widens that workflow's runs; one organize drops does not.
+ * - Verifiers are still laid under (`config.verifiers ?? definition.verifiers`), so they are
+ *   compared when the config's appear or go (F-5).
  */
 function workflowRulesWidening(before: CodarynConfig, after: CodarynConfig): SettingsWidening[] {
-  const policyMoves = (before.policy === undefined) !== (after.policy === undefined);
   const verifiersMove = (before.verifiers === undefined) !== (after.verifiers === undefined);
-  if (!policyMoves && !verifiersMove) return [];
   const found: SettingsWidening[] = [];
   const definitionsAfter = workflowDefinitions(after.workflows);
   for (const [id, was] of Object.entries(workflowDefinitions(before.workflows))) {
     const is = definitionsAfter[id];
     if (is === undefined) continue;
     const prefix = `workflows.${id}.`;
-    if (policyMoves && (was.policy !== undefined || is.policy !== undefined)) {
-      found.push(...policyWidening(before.policy ?? was.policy, after.policy ?? is.policy, prefix));
+    if (was.policy !== undefined || is.policy !== undefined) {
+      found.push(...policyWidening(mergeWorkflowPolicy(was.policy, before.policy), mergeWorkflowPolicy(is.policy, after.policy), prefix));
     }
     if (verifiersMove && (was.verifiers !== undefined || is.verifiers !== undefined)) {
       found.push(...verifierWidening(before.verifiers ?? was.verifiers, after.verifiers ?? is.verifiers, prefix));
@@ -190,7 +192,12 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     if (was !== is) found.push({ kind: "provider_changed", field: `profiles.${name}.provider` });
   }
   if (!same(before.workflows, after.workflows)) found.push({ kind: "workflow_changed", field: "workflows" });
-  found.push(...workflowRulesWidening(before, after));
+  // A workflow's entry that only repeats a config entry (same kind, same field without the
+  // workflow's prefix and the list index) is left out: the workflow's runs widen in the way the
+  // config's entry already says. What a workflow drops is in the narrowings (policyNarrowingsOf).
+  const general = (field: string): string => field.replace(/^workflows\.[^.]+\./, "").replace(/\[\d+\]/g, "");
+  const said = new Set(found.map((item) => `${item.kind} ${general(item.field)}`));
+  found.push(...workflowRulesWidening(before, after).filter((item) => !said.has(`${item.kind} ${general(item.field)}`)));
   // One entry per kind and field.
   const seen = new Set<string>();
   return found.filter((item) => {
@@ -266,6 +273,8 @@ export async function proposeSettingsChangeIn(io: SettingsIo, request: SettingsC
       digest: digestOf(prepared.text),
       changes: changesOf(prepared.before, prepared.after),
       widening: wideningOf(prepared.before, prepared.after),
+      // DR-41: what each workflow's own rules would leave out of the new config's policy.
+      policyNarrowings: policyNarrowingsOf(prepared.after),
       config: prepared.after,
     },
   };

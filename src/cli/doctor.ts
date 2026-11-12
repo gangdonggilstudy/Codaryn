@@ -564,8 +564,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       }
     }
   }
-  // N-8: --profile is checked against the config file as a run would.
-  if (args.profile !== null) {
+  // N-8: --profile is checked against the config file as a run would. N-D 4.3: when the config
+  // file itself failed, that failure stays the reason (a profile cannot be looked up in it).
+  if (args.profile !== null && results.get("config_file")?.status !== "fail") {
     const selected = selectProfile(config, args.profile);
     if (selected.ok) config = selected.config;
     else set("config_file", "fail", selected.message, { id: "doctor.config_file.profile_missing" });

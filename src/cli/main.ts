@@ -19,7 +19,7 @@ import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { CODARYN_LANG_ENV, DOCTOR_HINT_ERROR_CODES } from "../contracts/index.js";
+import { CODARYN_LANG_ENV } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
 import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
@@ -44,6 +44,8 @@ import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
 import { envValue } from "./settings.js";
 import { cleanText, hideKeys } from "./text-safety.js";
+// N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).
+import { explainedErrorText } from "./error-text.js";
 
 const argv = process.argv.slice(2);
 /** N-5: `--quiet` anywhere turns the human-readable stderr output off, parsed or not. */
@@ -111,16 +113,14 @@ function humanFor(configLanguage: MessageLanguage | null): { readonly output: Hu
   return { output: createHumanOutput(messages), messages };
 }
 
-/** N-5, N-22, N-25: what happened, how to fix it, the code, and `doctor` or the lock hint where they help. */
+/**
+ * N-5, N-22, N-25: what happened, how to fix it and the code. The renderer adds the doctor hint
+ * itself (N-22); the lock hint is added indented, once (N-D 4.4, `explainedErrorText`).
+ */
 function explainError(output: CliErrorOutput, human: { readonly output: HumanOutput; readonly messages: MessageCatalog }): void {
   let text = "";
   try {
-    text = human.output.error(output);
-    // The renderer may already add these hints; each is written once.
-    const hints: string[] = [];
-    if ((DOCTOR_HINT_ERROR_CODES as readonly string[]).includes(output.code)) hints.push(human.messages.format("error.doctor_hint"));
-    if (output.code === "workspace_locked") hints.push(human.messages.format("lock.remove_hint"));
-    for (const hint of hints) if (!text.includes(hint)) text += `${hint}\n`;
+    text = explainedErrorText(output, human);
   } catch {
     text = "";
   }

@@ -83,7 +83,9 @@ export function helpText(command: CommandName | null, catalog: MessageCatalog = 
     lines.push(`usage: ${USAGES[command]}`, "", messages.format(`help.command.${command}`), "", messages.format("help.options_heading"));
     const width = Math.max(...COMMAND_OPTIONS[command].map((option) => OPTION_SYNTAX[option].length));
     for (const option of COMMAND_OPTIONS[command]) {
-      lines.push(`  ${OPTION_SYNTAX[option].padEnd(width)}  ${messages.format(`help.option.${option}`)}`);
+      // N-D 4.1: a text that already starts with the option's syntax is printed as it is.
+      const described = messages.format(`help.option.${option}`);
+      lines.push(described.startsWith("--") ? `  ${described}` : `  ${OPTION_SYNTAX[option].padEnd(width)}  ${described}`);
     }
     lines.push("", `${messages.format("help.exit_heading")} ${messages.format(`help.exit.${command}`)}`);
   }

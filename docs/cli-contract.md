@@ -917,8 +917,20 @@ codaryn changes <task 형식> --run <runId|latest> [--json]
   - 적용 실행의 이유는 그 부분집합인 `APPLY_REASONS_BY_STATUS`를 쓴다.
 - `report`
   - 계획 실행은 행동 수, 다이제스트, `plan` 명령을 보여 준다.
-  - 검토 대기 실행은 확인 목록을 보여 준다.
-  - 적용 실행(첫 기록 `apply_started`)은 아직 읽지 않는다. `ReportOutput`에 적용 실행의 형태가 없어서 `invalid_arguments`로 "적용 실행"이라고 알린다.
+  - 검토 대기 실행은 확인 목록과 사람의 판정을 보여 준다.
+    - `--json`에서는 `verdict`(`review.json`의 `ReviewRecord`)다. 판정 전이나 기록을 읽을 수 없으면 `null`이다.
+    - 검토 대기가 아닌 실행에는 이 필드가 없다.
+  - 검증기 종류는 계약의 `VERIFIER_KINDS`(`data_checks`, `inventory` 포함)를 따른다. 제공자와 검증 결과 목록은 계약 형과 컴파일 때 대조한다(통합 사례 n07).
+  - 적용 실행(첫 기록 `apply_started`, DR-12)은 적용 실행 보고서다.
+    - `--json`: `ApplyReportOutput`(`kind: "report"`, `runKind: "apply"`, `result`는 `ApplyResult` 또는 null, `journal`은 `ApplyReportJournalSummary`)
+    - `ApplyReportJournalSummary`의 필드
+      - 계획 실행, 다이제스트, 승인 경로, 동의 경로, 행동 수
+      - 사전 점검(문제 수, 인벤토리 상한, 위험한 이동 수)
+      - 시작한 행동 수, 옮긴·폐기한·실패한 행동
+      - 검증 결과(인벤토리 먼저), 무결성 점검, 끝 기록
+    - `result.json`이 기록과 다른 계획·task·다이제스트를 가리키면 `invalid_run_record`다.
+    - Markdown은 행동마다 무엇을 했는지와 되돌리는 명령을 보여 준다.
+  - `runKind`, `verdict`, `ApplyReportOutput`은 CLI 쪽 형(`src/cli/report.ts`)이다. 계약(`ReportOutput`)에 들어가면 그 형을 따른다.
   - `--json`은 문자열마다 키를 가린 뒤에 만든다(N-27 (c)).
 - 기록의 도구 이름과 호출 id(AC-D15)
   - 목록 밖의 도구 이름은 `unknown_tool`로 기록한다.
@@ -936,7 +948,7 @@ codaryn changes <task 형식> --run <runId|latest> [--json]
 - 도움말: `plan`, `apply`, `review`, `changes`는 사용법 줄과 영어 한 문장만 나온다. `HELP_COMMANDS`와 `help.*` 문구 id가 계약에 들어오면 두 언어로 바꾼다(w3:p9, N-B).
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
-- `report`는 적용 실행과 검토 판정(`review.json`)을 아직 보여 주지 않는다. `ReportOutput`에 필드가 필요하다(w3:p9).
+- `report`의 적용 실행 형태와 `verdict` 필드는 계약에 아직 없다(18.7, 계약 담당에 제안).
 - doctor의 Q5 경고는 계약 기준(`b89ee16`)에 `doctor.commands.extra_args_with_plan`이 없어 영어 글로만 나온다. 계약 소유자가 그 id를 더하면 두 언어로 바꾼다.
 - 도움말의 옵션 설명에 `--allow-unsafe-move`(`HelpOption`)가 없다. 사용법 줄에만 나온다.
 

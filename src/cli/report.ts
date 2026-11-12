@@ -14,11 +14,13 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
+  APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
   INTEGRITY_PHASES,
   JOURNAL_FILE_NAME,
   MAX_EVIDENCE_BYTES,
   MAX_REPORT_FILE_BYTES,
+  PLAN_ITEM_PROBLEMS,
   REPORT_EXIT_CODES,
   RESULT_FILE_NAME,
   RESULT_SCHEMA_VERSION,
@@ -29,17 +31,23 @@ import {
   isReasonOfStatus,
 } from "../contracts/index.js";
 import type {
+  AppliedActionRecord,
+  ApplyResult,
+  ApprovalChannel,
   ListRuns,
   ContentHash,
   EngineResult,
   FileChangeRecord,
   IntegrityPhase,
   Limits,
+  MaskedPlanAction,
   MaskedText,
   ModelProviderName,
+  PlanItemProblem,
   ReportJournalSummary,
   ReportOutput,
   ReportStatus,
+  ReviewRecord,
   RunReason,
   RunUsage,
   TerminalRunStatus,
@@ -56,7 +64,7 @@ import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
-import { inspectRun } from "../store/index.js";
+import { inspectRun, readReviewRecord } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 
 export interface ReportEnvironment {
@@ -107,11 +115,6 @@ const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 /** A record failed a check. Its message is fixed text, never record content. */
 class RecordError extends Error {}
 
-/**
- * DR-12: the journal starts with `apply_started`: an apply run. ReportOutput has no form for
- * apply runs yet (its `result` and `journal` are a run's), so the report says so and shows nothing.
- */
-class ApplyRunError extends Error {}
 
 function bad(message: string): never {
   throw new RecordError(message);
@@ -238,7 +241,7 @@ export function summarizeJournal(text: string, runId: string, hasResult: boolean
     if (rec["seq"] !== index + 1) bad("journal records are out of order");
     const type = rec["type"];
     if (index === 0) {
-      if (type === "apply_started") throw new ApplyRunError();
+      if (type === "apply_started") bad("the journal is an apply run's (summarizeApplyJournal reads it)");
       if (type !== "run_started") bad("the journal does not start with run_started");
       started = {
         taskId: str(rec["taskId"]),
@@ -404,7 +407,7 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
 ];
 
-export function renderReport(report: ReportOutput, currentKey: string | null = null): string {
+export function renderReport(report: RunReportOutput, currentKey: string | null = null): string {
   renderingKey = currentKey;
   try {
     return renderReportText(report);
@@ -413,7 +416,7 @@ export function renderReport(report: ReportOutput, currentKey: string | null = n
   }
 }
 
-function renderReportText(report: ReportOutput): string {
+function renderReportText(report: RunReportOutput): string {
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
@@ -437,42 +440,23 @@ function renderReportText(report: ReportOutput): string {
   out.push(`- Report: ${report.status} (${journal.records} journal records)`);
 
   const verifiers = result?.verifiers ?? journal.lastRound;
-  out.push("", "## Verification", "");
-  if (verifiers.length === 0) {
-    out.push("No verifier result was recorded for the last round.");
-  } else {
-    // N-24 (a): a verifier is shown by its number in the run's verifier order; the id is in --json only.
-    for (const [index, verifier] of verifiers.entries()) {
-      out.push(`- verifier ${index + 1} (${verifier.kind}): **${verifier.outcome}**`);
-      for (const item of verifier.checked) out.push(`  - checked: ${code(item)}`);
-      if (verifier.outcome !== "pass" && verifier.evidence.length > 0) {
-        out.push("");
-        for (const line of block(verifier.evidence)) out.push(`  ${line}`);
-      }
-    }
-  }
+  // N-24 (a): a verifier is shown by its number in the run's verifier order; the id is in --json only.
+  verificationSection(out, verifiers);
   if (journal.repairs > 0) out.push("", `Repairs started: ${journal.repairs}.`);
   if (result?.review !== undefined) {
     out.push("", "## Review checklist", "");
     out.push(`The run waits for a person's verdict (${code("codaryn review --run " + report.runId + " --accept | --reject")}).`);
     for (const item of result.review.checklist) out.push(`- ${code(item)}`);
-  }
-
-  out.push("", "## Protected material", "");
-  const lastCheck = journal.integrityChecks[journal.integrityChecks.length - 1];
-  const changedNow = result?.protectedChanged ?? lastCheck?.changed;
-  if (journal.integrityChecks.length === 0 && changedNow === undefined) {
-    out.push("Not checked: the run had no integrity check (nothing was protected, or it ran without the check).");
-  } else {
-    const phases = journal.integrityChecks.map((check) => PHASE_LABEL[check.phase]);
-    out.push(`Checked ${journal.integrityChecks.length} time(s)${phases.length > 0 ? `: ${phases.join(", ")}` : ""}.`);
-    if (changedNow === undefined || changedNow.length === 0) {
-      out.push("No protected path changed since the run started.");
+    out.push("");
+    const verdict = report.verdict ?? null;
+    if (verdict === null) {
+      out.push("No verdict yet.");
     } else {
-      out.push("Changed since the run started, or not checkable:");
-      for (const item of changedNow) out.push(`- ${code(item)}`);
+      out.push(`Verdict: **${verdict.verdict}** (${code(verdict.at)})${verdict.note === null ? "" : `, note: ${code(verdict.note)}`}`);
     }
   }
+
+  protectedSection(out, journal.integrityChecks, result?.protectedChanged, "the run");
 
   const changes = result?.changes ?? journal.changes;
   out.push("", `## Changes (${changes.length})`, "");
@@ -515,6 +499,368 @@ function renderReportText(report: ReportOutput): string {
     for (const notice of notices) out.push(`- ${code(notice)}`);
   }
   return `${out.join("\n")}\n`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review verdicts (N-D 5th round)
+
+/**
+ * A run report with the person's review verdict. `verdict` is present only for a run that ended as
+ * `needs-input`/`awaiting_review`: its review.json (ReviewRecord), or null before a verdict (or
+ * when the record cannot be read, which never stops the report). The contract's ReportOutput has
+ * no such field; this one is the CLI's until the contract takes it (proposed as it is).
+ */
+export interface RunReportOutput extends ReportOutput {
+  readonly verdict?: ReviewRecord | null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Apply runs (DR-12)
+
+/**
+ * DR-12 (G-G report): what the report takes from an apply run's journal, which starts with
+ * `apply_started`. The contract's ReportOutput has a run's form only; this form is the CLI's until
+ * the contract takes it (proposed to the contract owner as it is). Text fields are masked as recorded.
+ */
+export interface ApplyReportJournalSummary {
+  readonly planRunId: string;
+  readonly taskId: string;
+  readonly digest: ContentHash;
+  readonly approval: ApprovalChannel;
+  /** DR-21: the channel of the person's consent to unsafe moves, or null for none. */
+  readonly unsafeMoveConsent: ApprovalChannel | null;
+  /** Number of actions in the plan (`apply_started.actions`). */
+  readonly actions: number;
+  readonly maxDurationMs: number;
+  /** Number of records read. */
+  readonly records: number;
+  /** The preflight (`plan_checked`), or null when the journal has none. */
+  readonly checked: { readonly problems: number; readonly inventoryLimitReached: boolean; readonly unsafeMoves: number } | null;
+  /** R-9 I-4: `plan_item_started` records. */
+  readonly started: number;
+  readonly moved: readonly { readonly index: number; readonly from: MaskedText; readonly to: MaskedText; readonly unsafe: boolean }[];
+  readonly discarded: readonly { readonly index: number; readonly path: MaskedText; readonly stored: string }[];
+  readonly failed: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
+  /** `verifier_result` records: the inventory check first, then the task's verifiers. */
+  readonly lastRound: readonly VerifierResult[];
+  readonly integrityChecks: readonly { readonly phase: IntegrityPhase; readonly changed: readonly MaskedText[] }[];
+  /** From `run_finished`, or null when the journal has none. */
+  readonly finished: { readonly status: TerminalRunStatus; readonly reason: RunReason } | null;
+}
+
+/** DR-12: printed by `codaryn report --json` for an apply run; without `--json` as Markdown. */
+export interface ApplyReportOutput {
+  readonly schemaVersion: 1;
+  readonly kind: "report";
+  /** Tells an apply run's report from a run's (ReportOutput has no such field). */
+  readonly runKind: "apply";
+  readonly runId: string;
+  readonly status: ReportStatus;
+  readonly exitCode: number;
+  /** The apply run's result.json, or null when it has none (`incomplete`). */
+  readonly result: ApplyResult | null;
+  readonly journal: ApplyReportJournalSummary;
+}
+
+/** The `type` of the journal's first record, or null when the first line is not a JSON object. */
+function firstRecordType(text: string): unknown {
+  const end = text.indexOf("\n");
+  try {
+    const first = JSON.parse(end === -1 ? text : text.slice(0, end)) as unknown;
+    return typeof first === "object" && first !== null ? (first as { type?: unknown }).type : null;
+  } catch {
+    return null;
+  }
+}
+
+type ApplyStart = Pick<ApplyReportJournalSummary, "planRunId" | "taskId" | "digest" | "approval" | "unsafeMoveConsent" | "actions" | "maxDurationMs">;
+
+/**
+ * An apply run's journal summary: records of this run with `seq` 1, 2, 3, ..., the first
+ * `apply_started`, action indexes within the plan. A last line without its line feed is ignored
+ * when the run has no result.json and is an error otherwise, as for a run.
+ */
+export function summarizeApplyJournal(text: string, runId: string, hasResult: boolean): ApplyReportJournalSummary {
+  const lines = text.split("\n");
+  const tail = lines.pop();
+  if (tail !== undefined && tail.length > 0 && hasResult) bad("the journal ends inside a record");
+  if (lines.length === 0) bad("the journal has no records");
+
+  let start: ApplyStart | null = null;
+  let checked: ApplyReportJournalSummary["checked"] = null;
+  let started = 0;
+  const moved: { index: number; from: MaskedText; to: MaskedText; unsafe: boolean }[] = [];
+  const discarded: { index: number; path: MaskedText; stored: string }[] = [];
+  const failed: { index: number; problem: PlanItemProblem }[] = [];
+  const lastRound: VerifierResult[] = [];
+  const integrityChecks: { phase: IntegrityPhase; changed: MaskedText[] }[] = [];
+  let finished: { status: TerminalRunStatus; reason: RunReason } | null = null;
+
+  lines.forEach((line, index) => {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      bad("a journal line is not JSON");
+    }
+    const rec = obj(value);
+    if (rec["runId"] !== runId) bad("a journal record belongs to another run");
+    if (rec["seq"] !== index + 1) bad("journal records are out of order");
+    const type = rec["type"];
+    if (index === 0) {
+      if (type !== "apply_started" || rec["schemaVersion"] !== 1) bad("the journal does not start with apply_started");
+      const consent = rec["unsafeMoveConsent"];
+      start = {
+        planRunId: str(rec["planRunId"]),
+        taskId: str(rec["taskId"]),
+        digest: hashOf(rec["digest"]) as ContentHash,
+        approval: oneOf(rec["approval"], APPROVAL_CHANNELS),
+        unsafeMoveConsent: consent === undefined || consent === null ? null : oneOf(consent, APPROVAL_CHANNELS),
+        actions: int(rec["actions"]),
+        maxDurationMs: int(rec["maxDurationMs"], 1),
+      };
+      return;
+    }
+    const total = (start as ApplyStart | null)?.actions ?? 0;
+    const actionIndex = (item: unknown): number => {
+      const at = int(item);
+      return at < total ? at : bad("a record names an action the plan does not have");
+    };
+    switch (type) {
+      case "plan_checked": {
+        const problems = rec["problems"];
+        const unsafe = rec["unsafeMoves"] ?? [];
+        const limit = rec["inventoryLimitReached"];
+        if (!Array.isArray(problems) || !Array.isArray(unsafe) || typeof limit !== "boolean") bad("a record has a field of the wrong type");
+        for (const problem of problems) {
+          const item = obj(problem);
+          actionIndex(item["index"]);
+          oneOf(item["problem"], PLAN_ITEM_PROBLEMS);
+        }
+        unsafe.forEach(actionIndex);
+        checked = { problems: problems.length, inventoryLimitReached: limit, unsafeMoves: unsafe.length };
+        break;
+      }
+      case "plan_item_started":
+        actionIndex(rec["index"]);
+        started += 1;
+        break;
+      case "file_moved":
+        hashOf(rec["sha256"]);
+        moved.push({ index: actionIndex(rec["index"]), from: recorded(rec["from"]), to: recorded(rec["to"]), unsafe: rec["unsafe"] === true });
+        break;
+      case "file_discarded":
+        hashOf(rec["sha256"]);
+        discarded.push({ index: actionIndex(rec["index"]), path: recorded(rec["path"]), stored: str(rec["stored"]) });
+        break;
+      case "plan_item_failed":
+        failed.push({ index: actionIndex(rec["index"]), problem: oneOf(rec["problem"], PLAN_ITEM_PROBLEMS) });
+        break;
+      case "verifier_result":
+        lastRound.push(verifierOf(rec["result"]));
+        break;
+      case "integrity_checked":
+        integrityChecks.push({ phase: oneOf(rec["phase"], INTEGRITY_PHASES), changed: recordedList(rec["changed"]) });
+        break;
+      case "run_finished":
+        finished = statusAndReason(rec["status"], rec["reason"]);
+        break;
+      default:
+        // Other records, including types added later, are not part of the summary.
+        break;
+    }
+  });
+
+  const first = start as ApplyStart | null;
+  if (first === null) return bad("the journal does not start with apply_started");
+  return { ...first, records: lines.length, checked, started, moved, discarded, failed, lastRound, integrityChecks, finished };
+}
+
+function appliedOf(value: unknown): AppliedActionRecord {
+  const rec = obj(value);
+  const action = obj(rec["action"]);
+  const sha256 = hashOf(action["sha256"]) as ContentHash;
+  const masked: MaskedPlanAction =
+    action["kind"] === "move"
+      ? { kind: "move", from: recorded(action["from"]), to: recorded(action["to"]), sha256 }
+      : action["kind"] === "discard"
+        ? { kind: "discard", path: recorded(action["path"]), sha256 }
+        : bad("a record has an unknown value");
+  const stored = rec["stored"];
+  return {
+    index: int(rec["index"]),
+    action: masked,
+    stored: stored === null ? null : str(stored),
+    ...(rec["unsafe"] === true ? { unsafe: true as const } : {}),
+  };
+}
+
+/** An apply run's result.json, rebuilt from the checked fields and checked against its journal. */
+export function readApplyResult(text: string, runId: string, journal: ApplyReportJournalSummary): ApplyResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    bad("result.json is not JSON");
+  }
+  const rec = obj(value);
+  if (rec["schemaVersion"] !== RESULT_SCHEMA_VERSION || rec["kind"] !== "apply") bad("result.json is not an apply result");
+  if (rec["runId"] !== runId) bad("result.json belongs to another run");
+  if (rec["planRunId"] !== journal.planRunId || rec["taskId"] !== journal.taskId || rec["digest"] !== journal.digest) {
+    bad("result.json names another plan or task than the journal");
+  }
+  const { status, reason } = statusAndReason(rec["status"], rec["reason"]);
+  const applied = rec["applied"];
+  const verifiers = rec["verifiers"];
+  if (!Array.isArray(applied) || !Array.isArray(verifiers)) bad("result.json has a field of the wrong type");
+  const protectedChanged = rec["protectedChanged"];
+  return {
+    schemaVersion: 1,
+    kind: "apply",
+    runId,
+    planRunId: journal.planRunId,
+    taskId: journal.taskId,
+    digest: journal.digest,
+    status,
+    reason,
+    exitCode: int(rec["exitCode"]),
+    applied: applied.map(appliedOf),
+    verifiers: verifiers.map(verifierOf),
+    usage: usageOf(rec["usage"]),
+    journalPath: str(rec["journalPath"]),
+    notices: recordedList(rec["notices"]),
+    ...(protectedChanged === undefined ? {} : { protectedChanged: recordedList(protectedChanged) }),
+  };
+}
+
+/** What an apply run report never covers. Each verifier's own limits are listed with it. */
+export const APPLY_REPORT_FIXED_LIMITS: readonly string[] = [
+  "A pass means the inventory check and the configured verifiers passed. It is not a review of the plan.",
+  "There is no OS isolation: command verifiers ran with the user's rights and could reach the network.",
+  "This report reads the apply run's own records. Commands allowed in other runs could have changed them.",
+];
+
+export function renderApplyReport(report: ApplyReportOutput, currentKey: string | null = null): string {
+  renderingKey = currentKey;
+  try {
+    return renderApplyReportText(report);
+  } finally {
+    renderingKey = null;
+  }
+}
+
+function renderApplyReportText(report: ApplyReportOutput): string {
+  const { result, journal } = report;
+  const out: string[] = ["# Codaryn apply run report", ""];
+  out.push(`- Run: ${code(report.runId)} (an apply run: no model takes part)`);
+  out.push(`- Plan run: ${code(journal.planRunId)}, digest ${code(journal.digest)}`);
+  out.push(`- Task: ${code(journal.taskId)}`);
+  out.push(
+    `- Approval: ${code(journal.approval)}; consent to unsafe moves: ${journal.unsafeMoveConsent === null ? "none" : code(journal.unsafeMoveConsent)}`,
+  );
+  if (result !== null) {
+    out.push(`- Result: ${code(result.status)} / ${code(result.reason)}, exit code ${result.exitCode}`);
+  } else {
+    out.push("- Result: none. The apply run has no result.json: it is still running, or it stopped without writing one.");
+    out.push(
+      journal.finished === null
+        ? "- The journal has no end record."
+        : `- The journal's end record: ${code(journal.finished.status)} / ${code(journal.finished.reason)}`,
+    );
+  }
+  out.push(`- Report: ${report.status} (${journal.records} journal records)`);
+
+  out.push("", "## Preflight", "");
+  if (journal.checked === null) {
+    out.push("The journal has no preflight record: nothing was checked or moved.");
+  } else {
+    out.push(`- Actions that could not be applied: ${journal.checked.problems}`);
+    out.push(`- Workspace too large to check: ${journal.checked.inventoryLimitReached ? "yes" : "no"}`);
+    out.push(`- Moves that could only be made without the guarantee (no hard links): ${journal.checked.unsafeMoves}`);
+  }
+
+  const done = [
+    ...journal.moved.map((item) => ({
+      index: item.index,
+      line: `move ${code(item.from)} -> ${code(item.to)}${item.unsafe ? " (moved without the guarantee, with consent)" : ""}`,
+    })),
+    ...journal.discarded.map((item) => ({
+      index: item.index,
+      line: `discard ${code(item.path)} (kept as ${code(`.codaryn/discarded/${report.runId}/${item.stored}`)})`,
+    })),
+  ].sort((a, b) => a.index - b.index);
+  out.push("", `## Actions (${done.length} of ${journal.actions} done)`, "");
+  if (done.length === 0 && journal.failed.length === 0) out.push("No action was applied.");
+  for (const item of done) out.push(`- action ${item.index + 1}: ${item.line}`);
+  for (const item of journal.failed) out.push(`- action ${item.index + 1} failed: ${code(item.problem)}`);
+  const open = journal.started - done.length - journal.failed.length;
+  if (open > 0) {
+    out.push(`- ${open} action(s) were started with no record that they were done or failed; the revert handles them.`);
+  }
+
+  const verifiers = result?.verifiers ?? journal.lastRound;
+  verificationSection(out, verifiers);
+  protectedSection(out, journal.integrityChecks, result?.protectedChanged, "the apply");
+
+  out.push("", "## Usage", "");
+  if (result !== null) out.push(`- Duration: ${result.usage.durationMs} ms of ${journal.maxDurationMs} ms`);
+  else out.push(`- Duration limit: ${journal.maxDurationMs} ms`);
+
+  out.push("", "## Undo", "");
+  out.push(`Revert this apply with ${code(`codaryn revert --workspace <workspace> --run ${report.runId}`)}.`);
+
+  out.push("", "## Not checked", "");
+  for (const [index, verifier] of verifiers.entries()) {
+    for (const item of verifier.limits) out.push(`- verifier ${index + 1}: ${code(item)}`);
+  }
+  for (const item of APPLY_REPORT_FIXED_LIMITS) out.push(`- ${item}`);
+
+  const notices = result?.notices ?? [];
+  if (notices.length > 0) {
+    out.push("", "## Notices", "");
+    for (const notice of notices) out.push(`- ${code(notice)}`);
+  }
+  return `${out.join("\n")}\n`;
+}
+
+/** The verification section, shared by run and apply reports (N-24 a: verifiers by number). */
+function verificationSection(out: string[], verifiers: readonly VerifierResult[]): void {
+  out.push("", "## Verification", "");
+  if (verifiers.length === 0) {
+    out.push("No verifier result was recorded for the last round.");
+    return;
+  }
+  for (const [index, verifier] of verifiers.entries()) {
+    out.push(`- verifier ${index + 1} (${verifier.kind}): **${verifier.outcome}**`);
+    for (const item of verifier.checked) out.push(`  - checked: ${code(item)}`);
+    if (verifier.outcome !== "pass" && verifier.evidence.length > 0) {
+      out.push("");
+      for (const line of block(verifier.evidence)) out.push(`  ${line}`);
+    }
+  }
+}
+
+/** The protected material section, shared by run and apply reports. */
+function protectedSection(
+  out: string[],
+  checks: readonly { readonly phase: IntegrityPhase; readonly changed: readonly MaskedText[] }[],
+  resultChanged: readonly MaskedText[] | undefined,
+  subject: string,
+): void {
+  out.push("", "## Protected material", "");
+  const changedNow = resultChanged ?? checks[checks.length - 1]?.changed;
+  if (checks.length === 0 && changedNow === undefined) {
+    out.push(`Not checked: ${subject} had no integrity check (nothing was protected, or it ran without the check).`);
+    return;
+  }
+  const phases = checks.map((check) => PHASE_LABEL[check.phase]);
+  out.push(`Checked ${checks.length} time(s)${phases.length > 0 ? `: ${phases.join(", ")}` : ""}.`);
+  if (changedNow === undefined || changedNow.length === 0) {
+    out.push(`No protected path changed since ${subject} started.`);
+  } else {
+    out.push(`Changed since ${subject} started, or not checkable:`);
+    for (const item of changedNow) out.push(`- ${code(item)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -604,20 +950,41 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     if (state === "other") return cliError("invalid_run_record", "a run file is not a regular file or cannot be read");
   }
 
-  let report: ReportOutput;
+  let report: RunReportOutput | ApplyReportOutput;
   try {
     const hasResult = resultState === "file";
-    const journal = summarizeJournal(await readRecordFile(journalFile), runId, hasResult);
-    const result = hasResult ? readResult(await readRecordFile(resultFile), runId, journal.taskId) : null;
-    const status: ReportStatus = result === null ? "incomplete" : "complete";
-    report = { schemaVersion: 1, kind: "report", runId, status, exitCode: REPORT_EXIT_CODES[status], result, journal };
-  } catch (error) {
-    if (error instanceof ApplyRunError) {
-      return cliError(
-        "invalid_arguments",
-        "the run is an apply run; report does not read apply runs yet. `codaryn runs` lists it, and `codaryn revert --run <id>` undoes it",
-      );
+    const journalText = await readRecordFile(journalFile);
+    // DR-12: readers tell the two journals apart by the first record.
+    if (firstRecordType(journalText) === "apply_started") {
+      const journal = summarizeApplyJournal(journalText, runId, hasResult);
+      const result = hasResult ? readApplyResult(await readRecordFile(resultFile), runId, journal) : null;
+      const status: ReportStatus = result === null ? "incomplete" : "complete";
+      report = { schemaVersion: 1, kind: "report", runKind: "apply", runId, status, exitCode: REPORT_EXIT_CODES[status], result, journal };
+    } else {
+      const journal = summarizeJournal(journalText, runId, hasResult);
+      const result = hasResult ? readResult(await readRecordFile(resultFile), runId, journal.taskId) : null;
+      const status: ReportStatus = result === null ? "incomplete" : "complete";
+      // N-D 5th round: a run waiting for review shows the person's verdict (review.json) when there is one.
+      let verdict: ReviewRecord | null | undefined;
+      if (result?.reason === "awaiting_review") {
+        try {
+          verdict = await readReviewRecord(root, runId);
+        } catch {
+          verdict = null;
+        }
+      }
+      report = {
+        schemaVersion: 1,
+        kind: "report",
+        runId,
+        status,
+        exitCode: REPORT_EXIT_CODES[status],
+        result,
+        journal,
+        ...(verdict === undefined ? {} : { verdict }),
+      };
     }
+  } catch (error) {
     if (error instanceof RecordError) return cliError("invalid_run_record", `the run's records cannot be used: ${error.message}`);
     return cliError("invalid_run_record", "the run's records cannot be read");
   }
@@ -626,7 +993,11 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
   let text: string;
   try {
     // N-27 (c): keys are hidden in the strings before the JSON is written, as in the text.
-    text = json ? jsonLine(hideKeysInStrings(report, currentKey)) : renderReport(report, currentKey);
+    text = json
+      ? jsonLine(hideKeysInStrings(report, currentKey))
+      : "runKind" in report
+        ? renderApplyReport(report, currentKey)
+        : renderReport(report, currentKey);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

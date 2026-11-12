@@ -296,9 +296,11 @@ describe("U-23 (DR-49): run, revert and apply take --json and nothing else chang
     assert.ok(helpText("apply").includes("--json"));
   });
 
-  test("U-45 (R58-L2): apply's help says --json or --quiet, and no decision number", () => {
+  // U-35 replaced apply's fixed sentence with the catalog's help: its option list names --json and
+  // --quiet, and what the JSON line does at a terminal is help.output's (R58-L2's texts are N-B's).
+  test("U-45 (R58-L2), U-35: apply's help lists --json and --quiet, and no decision number", () => {
     const help = helpText("apply");
-    assert.ok(help.includes("only with --json or --quiet"), help);
+    for (const option of ["  --json: ", "  --quiet: "]) assert.ok(help.includes(option), help);
     assert.doesNotMatch(help, /\((DR|UXM|AXM)-\d+\)/, help);
   });
 });

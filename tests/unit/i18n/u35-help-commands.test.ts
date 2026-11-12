@@ -81,6 +81,24 @@ describe("U-35: the help of the five plan and state commands", () => {
     }
   });
 
+  test("the descriptions mean what main's help said (src/cli/help.ts USAGE_ONLY before U-35)", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // changes: a file's lines are shown when the current secrets mask it as the run did (DR-29), not
+    // never (g-changes-wire: "help says when the text is shown, not that it never is").
+    assert.match(en["help.command.changes"], /changed files and their state.*changed lines only when the current secrets mask it as the run did/);
+    assert.match(ko["help.command.changes"], /바꾼 파일과 그 상태.*바뀐 줄은 지금의 가릴 값이 실행 때와 같게 가릴 때만 보입니다/);
+    for (const text of [en["help.command.changes"], ko["help.command.changes"]]) assert.ok(!/not shown yet|not shown for now|아직 보이지 않/.test(text), text);
+    // apply: at a terminal the result's JSON line only with --json (or --quiet, DR-49 as U-23 has it).
+    for (const text of [en["help.command.apply"], ko["help.command.apply"]]) {
+      assert.ok(text.includes("--json") && text.includes("--quiet") && text.includes("JSON"), text);
+      assert.ok(text.includes("codaryn revert --run <"), text);
+    }
+    // plan, review, cleanup: the same facts as main's sentences.
+    assert.match(en["help.command.plan"], /stored plan, masked again, with its digest and whether it was applied/);
+    assert.match(en["help.command.review"], /verdict on a run that waits for review, in review\.json\. The run's result is not changed/);
+    assert.match(en["help.command.cleanup"], /Parked files, the lock and what a revert still needs are never removed\.$/);
+  });
+
   test("the exit codes are the contract's; none of the five asks the model (no 7 or 8)", () => {
     for (const language of LANGUAGES) {
       const t = MESSAGE_TEXTS[language];

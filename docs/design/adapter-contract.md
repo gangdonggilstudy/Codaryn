@@ -464,6 +464,11 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 경로 토큰 복원, 계획 동작 허용
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
+    - 작업 종류 자기 규칙의 대체(GUI F-5)
+      - 간편 형식에서 작업 종류의 `policy`·`verifiers`는 설정에 그것이 없을 때만 쓰인다(CLI `underDefinition`).
+      - 그래서 설정의 `policy`나 `verifiers`가 처음 생기거나 없어지면, 자기 규칙을 가진 작업 종류(내장 `organize`, 설정의 작업 종류)의 규칙을 그 실행이 보는 대로 전과 후로 비교한다.
+      - 필드는 `workflows.<id>.policy.protectedPaths`처럼 작업 종류를 이름에 담는다.
+      - 좁히기(예: `organize`가 계획 동작을 잃음)는 확인 대상이 아니다.
   - 적용은 검사를 다시 한다. 파일이 제안 때와 같아야 한다(`baseDigest`). 넓히는 변경은 `confirmWidening: true`일 때만 쓴다. 사람에게 묻는 것은 GUI 메인 프로세스다.
   - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
   - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.

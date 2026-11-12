@@ -324,7 +324,11 @@ export type RunListEntry =
        * APPLY_REASONS_BY_STATUS (plan.ts).
        */
       readonly reason: RunReason | null;
-      /** Number of `changes` in result.json (an apply run: of `applied`); null without one. */
+      /**
+       * Number of distinct files changed: the distinct `path`s of result.json's `changes`, as the
+       * end-of-run summary counts them (N-23 d, N-D 5). An apply run: the number of `applied`
+       * actions. Null without result.json.
+       */
       readonly changes: number | null;
       /** The last revert of this run, from its revert record; null when never reverted. */
       readonly reverted: { readonly at: string; readonly status: "complete" | "partial" } | null;

@@ -48,6 +48,8 @@ const TASK_ID = new RegExp(TASK_ID_PATTERN_SOURCE);
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 const PROVIDERS: readonly string[] = ["scripted", "anthropic"];
 const RUN_TIMESTAMP = new RegExp(RUN_TIMESTAMP_PATTERN_SOURCE);
+/** A run id as the CLI makes it (P-3): `<UTC yyyymmddThhmmssZ>-<8 lowercase hex>`. */
+const CLI_RUN_ID = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-[0-9a-f]{8}$/;
 /** The first journal record is read up to this many bytes. A longer first line is unreadable. */
 const FIRST_RECORD_MAX_BYTES = 64 * 1024;
 /** Largest revert record read. It holds a few short fields. */
@@ -214,8 +216,37 @@ async function revertRecordAt(file: string, runId: string): Promise<RevertRecord
 
 type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
 
-async function readEntry(dir: string, runId: RunId): Promise<CheckedRun> {
+/** The UTC second a CLI run id names, in milliseconds, or null for any other id or an impossible date. */
+export function runIdSecond(runId: string): number | null {
+  const match = CLI_RUN_ID.exec(runId);
+  if (match === null) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number) as [number, number, number, number, number, number];
+  const time = Date.UTC(year, month - 1, day, hour, minute, second);
+  const date = new Date(time);
+  const same =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute &&
+    date.getUTCSeconds() === second;
+  return same ? time : null;
+}
+
+/**
+ * N-23(b): the start time must agree with the run id, which the CLI makes from the same clock
+ * reading (same second), and must not lie in the future. A run that fails either was written by
+ * something else than a run, so it is damaged and never `latest`.
+ */
+function checkStartTime(runId: string, startedAt: string, now: number): void {
+  const second = runIdSecond(runId);
+  const started = Date.parse(startedAt);
+  if (second === null || Math.floor(started / 1000) * 1000 !== second || started > now) unreadable();
+}
+
+async function readEntry(dir: string, runId: RunId, now: number): Promise<CheckedRun> {
   const { startedAt, taskId } = await firstRecord(join(dir, JOURNAL_FILE_NAME), runId);
+  checkStartTime(runId, startedAt, now);
   const { status, reason, changes } = await resultOf(join(dir, RESULT_FILE_NAME), runId, taskId);
   const record = await revertRecordAt(join(dir, REVERT_RECORD_FILE_NAME), runId);
   return {
@@ -243,7 +274,10 @@ function newestFirst(a: CheckedRun, b: CheckedRun): number {
  * no runs. Rejects with RunListError when that directory exists but cannot be listed, or when it
  * (or `.codaryn`) is a link.
  */
-export const listRuns: ListRuns = async (request) => {
+export const listRuns: ListRuns = (request) => listRunsAt(request, Date.now());
+
+/** `listRuns` with the current time given, in milliseconds (start times after it are damaged). */
+export async function listRunsAt(request: { readonly workspaceRoot: string }, now: number): Promise<RunListing> {
   const runsDir = join(request.workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
   let real: string;
   try {
@@ -274,7 +308,7 @@ export const listRuns: ListRuns = async (request) => {
       continue;
     }
     try {
-      checked.push(await readEntry(join(runsDir, entry.name), runId));
+      checked.push(await readEntry(join(runsDir, entry.name), runId, now));
     } catch {
       damaged.push(runId);
     }
@@ -284,12 +318,22 @@ export const listRuns: ListRuns = async (request) => {
     runs: [...checked.sort(newestFirst), ...damaged.map((runId) => ({ state: "damaged" as const, runId }))],
   };
   return listing;
-};
+}
 
-/** The id `--run latest` stands for: the first checked run `listRuns` returns, or null when there is none. */
+/** The id `--run latest` stands for (see `latestRun`), or null when there is none. */
 export async function latestRunId(workspaceRoot: string): Promise<RunId | null> {
-  const listing = await listRuns({ workspaceRoot });
-  return listing.runs.find((run) => run.state === "checked")?.runId ?? null;
+  return latestRun((await listRuns({ workspaceRoot })).runs)?.runId ?? null;
+}
+
+/**
+ * The run `--run latest` names in a listing: the first checked run that has a result (N-23(b)).
+ * A run without result.json (running, or stopped without one) is listed but never chosen.
+ */
+export function latestRun(runs: readonly RunListEntry[]): CheckedRun | null {
+  for (const run of runs) {
+    if (run.state === "checked" && run.status !== null) return run;
+  }
+  return null;
 }
 
 /**

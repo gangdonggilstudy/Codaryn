@@ -7,6 +7,12 @@
 import { isAbsolute } from "node:path";
 import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
+import { revertValue, runsValue } from "./history.js";
+import { changesValue, planValue, reviewValue } from "./plans.js";
+import { createRunRegistry, taskForm } from "./runs.js";
+import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
+import { modelsValue, selectedValue, settingsValue } from "./settings.js";
+import type { Shown } from "./settings.js";
 
 /** The `DoctorRequest` of the app layer (src/app/types.ts). The GUI passes no config, vars or task file yet. */
 export interface HostDoctorRequest {
@@ -16,9 +22,31 @@ export interface HostDoctorRequest {
   readonly workspace: string | null;
 }
 
+/** `ListModelsRequest` (src/app/types.ts). The GUI uses the settings a run would use (no --config, no vars file). */
+export interface HostModelsRequest {
+  readonly provider: string;
+  readonly configPath: null;
+  readonly varsFile: null;
+}
+
 /** The part of `CodarynApp` (src/app/types.ts) this host calls. */
 export interface HostApp {
   doctor(request: HostDoctorRequest): Promise<unknown>;
+  readSettings(request: { readonly configPath: null }): Promise<unknown>;
+  /** A real API request (Y-2): only when the person asked for the list. */
+  listModels(request: HostModelsRequest): Promise<unknown>;
+  selectModel(request: HostModelsRequest & { readonly model: string }): Promise<unknown>;
+  /** GU-3: `startRun` with the quick form; the observer gets the run's events (RunEvent). */
+  startRun(request: HostStartRunRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
+  /** GU-4: the run list (N-7) and a revert, dry run or not (N-7, AC 5.5). */
+  listRuns(request: { readonly workspace: string; readonly limit: number }): Promise<unknown>;
+  revert(request: { readonly workspace: string; readonly runId: string; readonly dryRun: boolean }): Promise<unknown>;
+  /** GU-5: the plan view, its apply (DR-1, DR-2, DR-21) and a person's review (GT-D6). */
+  plan(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
+  applyPlan(request: HostApplyRequest, observer: { onEvent(event: unknown): void }): Promise<unknown>;
+  review(request: { readonly settings: HostTaskForm; readonly runId: string; readonly decision: "accept" | "reject"; readonly note: string | null }): Promise<unknown>;
+  /** DR-7, DR-29: a run's changed files, masked with the task form's secrets (paths and states go on). */
+  changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
 }
 
 /** Texts from the shared catalog (src/i18n), in the language the CLI would choose. */
@@ -33,6 +61,19 @@ export interface HostDeps {
   readonly app: HostApp;
   readonly messages: HostMessages;
   readonly tree: HostTree;
+  /** Text from a file or the API as the window may show it (control characters and key shapes hidden). */
+  readonly shown: Shown;
+  /**
+   * A file text as the window may show it: CRLF as LF, line breaks and tabs kept, other control
+   * characters and key shapes hidden. Absent in tests: each line then passes `shown`.
+   */
+  readonly shownText?: Shown;
+  /** The model providers the app layer connects (CONNECTED_MODEL_PROVIDERS, DR-22). */
+  readonly providers: readonly string[];
+  /** GU-3: how a run's events become progress items, in the window's language. */
+  readonly itemsIn: (language: "ko" | "en") => RunItemOf;
+  /** GU-3: a new run token (128 random bits as hex). */
+  readonly token: () => string;
   /** Writes one complete line to the channel. */
   readonly write: (line: string) => void;
   /** Diagnostics for stderr. Never the content of a request or a response. */
@@ -82,6 +123,60 @@ function treeArgs(args: unknown): { workspace: string; dir: string; offset: numb
   return { workspace, dir, offset };
 }
 
+/** A call that takes no arguments: `{}`. */
+function noArgs(args: unknown): void {
+  if (!isObj(args) || Object.keys(args).length > 0) throw new ArgsError();
+}
+
+/** A model id as the API gives it: printable ASCII without spaces. */
+const MODEL_ID = /^[!-~]{1,200}$/;
+
+function providerArg(args: unknown, providers: readonly string[], keys: readonly string[]): Obj & { provider: string } {
+  if (!isObj(args) || !onlyKeys(args, keys)) throw new ArgsError();
+  const provider = args["provider"];
+  if (typeof provider !== "string" || !providers.includes(provider)) throw new ArgsError();
+  return args as Obj & { provider: string };
+}
+
+/** The longest goal the window may send (the CLI's own checks still run in startRun). */
+const MAX_GOAL_CHARS = 20_000;
+/** A profile or task kind name: one short line without control characters. */
+const NAME = /^[^\u0000-\u001f\u007f]{1,200}$/;
+
+function startRunArgs(args: unknown): { workspace: string; goal: string; profile: string | null; workflowRef: string | null; language: "ko" | "en" } {
+  if (!isObj(args) || !onlyKeys(args, ["workspace", "goal", "profile", "workflowRef", "language"])) throw new ArgsError();
+  const { workspace, goal, language } = args;
+  const profile = args["profile"] ?? null;
+  const workflowRef = args["workflowRef"] ?? null;
+  if (typeof workspace !== "string" || workspace.length > MAX_PATH_CHARS || !isAbsolute(workspace) || workspace.includes("\0")) throw new ArgsError();
+  if (typeof goal !== "string" || goal.trim().length === 0 || goal.length > MAX_GOAL_CHARS || goal.includes("\0")) throw new ArgsError();
+  if (profile !== null && (typeof profile !== "string" || !NAME.test(profile))) throw new ArgsError();
+  if (workflowRef !== null && (typeof workflowRef !== "string" || !NAME.test(workflowRef))) throw new ArgsError();
+  if (language !== "ko" && language !== "en") throw new ArgsError();
+  return { workspace, goal, profile, workflowRef, language };
+}
+
+/** How many runs the list asks for (RUNS_MAX_LIMIT of the app layer is larger). */
+const RUN_LIST_LIMIT = 200;
+const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
+
+/** A review note's longest length (MAX_REVIEW_NOTE_CHARS of the contract; the CLI checks it again). */
+const MAX_NOTE_CHARS = 500;
+
+/** A profile name or null. */
+function nameArg(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !NAME.test(value)) throw new ArgsError();
+  return value;
+}
+
+function workspaceArg(args: Obj, keys: readonly string[]): string {
+  if (!onlyKeys(args, keys)) throw new ArgsError();
+  const workspace = args["workspace"];
+  if (typeof workspace !== "string" || workspace.length > MAX_PATH_CHARS || !isAbsolute(workspace) || workspace.includes("\0")) throw new ArgsError();
+  return workspace;
+}
+
 function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] } {
   if (!isObj(args) || !onlyKeys(args, ["osLocale", "ids"])) throw new ArgsError();
   const osLocale = args["osLocale"] ?? null;
@@ -94,11 +189,31 @@ function messagesArgs(args: unknown): { osLocale: string | null; ids: string[] }
 export interface HostHandler {
   /** Handles one request line. Resolves after its response line is written. */
   handleLine(line: string): Promise<void>;
+  /** Cancels every run this handler started (the main process is gone, R-10 L-2). */
+  cancelAll(): void;
 }
 
 export function createHostHandler(deps: HostDeps): HostHandler {
   const respond = (response: HostResponse): void => deps.write(encodeLine(response));
   const fail = (id: number, error: HostError): void => respond({ v: 1, id, ok: false, error });
+  const items = new Map<"ko" | "en", RunItemOf>();
+  let language: "ko" | "en" = "en";
+  const runs = createRunRegistry({
+    startRun: (request, observer) => deps.app.startRun(request, observer),
+    applyPlan: (request, observer) => deps.app.applyPlan(request, observer),
+    itemOf: (event) => {
+      let of = items.get(language);
+      if (of === undefined) {
+        of = deps.itemsIn(language);
+        items.set(language, of);
+      }
+      return of(event);
+    },
+    shown: deps.shown,
+    token: deps.token,
+    write: deps.write,
+    log: deps.log,
+  });
 
   async function run(call: HostCall, args: unknown): Promise<unknown> {
     switch (call) {
@@ -110,10 +225,86 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       }
       case "tree":
         return deps.tree(treeArgs(args));
+      case "settings":
+        noArgs(args);
+        return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers);
+      case "listModels": {
+        const { provider } = providerArg(args, deps.providers, ["provider"]);
+        return modelsValue(provider, await deps.app.listModels({ provider, configPath: null, varsFile: null }), deps.shown);
+      }
+      case "selectModel": {
+        const { provider, model } = providerArg(args, deps.providers, ["provider", "model"]);
+        if (typeof model !== "string" || !MODEL_ID.test(model)) throw new ArgsError();
+        return selectedValue(await deps.app.selectModel({ provider, configPath: null, varsFile: null, model }), deps.shown);
+      }
+      case "startRun": {
+        const { language: chosen, ...rest } = startRunArgs(args);
+        language = chosen;
+        return runs.start(rest);
+      }
+      case "listRuns": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace"]);
+        return runsValue(await deps.app.listRuns({ workspace, limit: RUN_LIST_LIMIT }), deps.shown);
+      }
+      case "revert": {
+        // The window never names "latest": a run id the person chose from the list (3.8).
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "runId", "dryRun"]);
+        const { runId, dryRun } = args;
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || typeof dryRun !== "boolean") throw new ArgsError();
+        return revertValue(await deps.app.revert({ workspace, runId, dryRun }), deps.shown);
+      }
+      case "plan": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId"]);
+        const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
+        const runId = args["runId"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
+        return planValue(await deps.app.plan({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown);
+      }
+      case "applyPlan": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "planRunId", "digest", "consent", "language"]);
+        const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
+        const { planRunId, digest, consent, language: chosen } = args;
+        if (typeof planRunId !== "string" || !RUN_ID.test(planRunId) || typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new ArgsError();
+        if (typeof consent !== "boolean" || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
+        language = chosen;
+        return runs.startApply({ workspace, profile, workflowRef, planRunId, digest, consent });
+      }
+      case "changes": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId"]);
+        const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
+        const runId = args["runId"];
+        if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
+        const shownText = deps.shownText ?? ((text: string) => text.split(/\r?\n/).map(deps.shown).join("\n"));
+        return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
+      }
+      case "review": {
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId", "decision", "note"]);
+        const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
+        const { runId, decision } = args;
+        const note = args["note"] ?? null;
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || (decision !== "accept" && decision !== "reject")) throw new ArgsError();
+        if (note !== null && (typeof note !== "string" || note.length > MAX_NOTE_CHARS)) throw new ArgsError();
+        return reviewValue(await deps.app.review({ settings: taskForm(workspace, profile, workflowRef), runId, decision, note }));
+      }
+      case "cancelRun": {
+        if (!isObj(args) || !onlyKeys(args, ["run"]) || typeof args["run"] !== "string" || !/^[0-9a-f]{32}$/.test(args["run"])) throw new ArgsError();
+        return { ok: runs.cancel(args["run"]) };
+      }
     }
   }
 
   return {
+    cancelAll: () => runs.cancelAll(),
     async handleLine(line: string): Promise<void> {
       const parsed = parseRequest(line);
       if (!parsed.ok) {
@@ -169,6 +360,7 @@ export async function serve(
     decoder.push(typeof chunk === "string" ? chunk : text.decode(chunk, { stream: true }));
   }
   decoder.end();
+  handler.cancelAll();
   deps.onInputEnd?.();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const grace = new Promise<void>((resolve) => {

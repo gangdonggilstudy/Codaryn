@@ -47,13 +47,25 @@ import {
   DISCARDED_STORED_NAME_PATTERN_SOURCE,
   MAX_PLAN_ACTIONS,
   MAX_REPORT_FILE_BYTES,
+  PARKED_DIR_NAME,
   PLAN_FILE_NAME,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   discardedStoredName,
   toRunId,
 } from "../contracts/index.js";
-import type { ContentHash, RevertAction, RevertOutcome, RevertSkipReason, RevertedFile, ResolvedPlanAction, SkippedFile, Workspace } from "../contracts/index.js";
+import type {
+  ContentHash,
+  ListParkedFiles,
+  ParkedFile,
+  RevertAction,
+  RevertOutcome,
+  RevertSkipReason,
+  RevertedFile,
+  ResolvedPlanAction,
+  SkippedFile,
+  Workspace,
+} from "../contracts/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { errorCode, hasExactRunEntry, isLinkUnsupported, isPlainDirectory, runDir } from "./common.js";
 import { discardedRootPath } from "./discarded.js";
@@ -306,7 +318,10 @@ export async function moveWithoutReplacing(source: string, target: string, opera
   }
 }
 
-type Outcome = { readonly action: RevertAction; readonly unsafe?: true } | { readonly reason: RevertSkipReason } | { readonly unlisted: true };
+type Outcome =
+  | { readonly action: RevertAction; readonly unsafe?: true }
+  | { readonly reason: RevertSkipReason; readonly parkedAt?: string }
+  | { readonly unlisted: true };
 
 function movedOutcome(moved: "moved" | "taken" | "unsafe" | "failed", action: RevertAction): Outcome {
   if (moved === "moved") return { action };
@@ -363,9 +378,6 @@ async function sameFile(a: string, b: string): Promise<boolean> {
     return false;
   }
 }
-
-/** R-16 L-1: the state directory's folder for files a revert moved aside and could not put back. */
-const PARKED_DIR_NAME = "parked";
 
 /** Where removeSecondName may move a name aside: `.codaryn/parked/<runId>/<index>-<random>`. */
 export interface ParkPlace {
@@ -437,18 +449,12 @@ export async function removeSecondName(added: string, kept: string, place: ParkP
   return { kind: "parked", path: [STATE_DIR_NAME, PARKED_DIR_NAME, place.runId, name].join("/") };
 }
 
-/** A file a revert left in the parking folder (R-16 L-1). */
-export interface ParkedFile {
-  /** State-directory relative, `/` separated: `.codaryn/parked/<runId>/<index>-<random>`. */
-  readonly path: string;
-  readonly runId: string;
-}
-
 /**
- * R-16 L-1: the files reverts left in `.codaryn/parked/`, for doctor and people. Only plain
- * directories named as run ids and the regular files in them; links are not followed. Never rejects.
+ * R-16 L-1 (ListParkedFiles): the files reverts left in `.codaryn/parked/`, for doctor and people.
+ * Only plain directories named as run ids and the regular files in them; links are not followed.
+ * Never rejects.
  */
-export async function listParkedFiles(workspaceRoot: string): Promise<ParkedFile[]> {
+export const listParkedFiles: ListParkedFiles = async (workspaceRoot) => {
   const parent = join(workspaceRoot, STATE_DIR_NAME, PARKED_DIR_NAME);
   const found: ParkedFile[] = [];
   try {
@@ -465,7 +471,7 @@ export async function listParkedFiles(workspaceRoot: string): Promise<ParkedFile
     return found;
   }
   return found;
-}
+};
 
 /**
  * One action back: `away` is where the file went (the move's destination, or its place in the
@@ -489,7 +495,10 @@ async function revertItem(
   // source. Removing the added name finishes it; the original path keeps the file.
   if (away !== null && isDone && original.kind === "file" && original.sha256 === sha256 && (await sameFile(away, back))) {
     if (mode.dryRun) return { action };
-    return (await removeSecondName(away, back, park)).kind === "removed" ? { action } : { reason: "io_error" };
+    const second = await removeSecondName(away, back, park);
+    if (second.kind === "removed") return { action };
+    // R-16 L-1: left parked: the result says where (SkippedFile.parkedAt).
+    return second.kind === "parked" ? { reason: "io_error", parkedAt: second.path } : { reason: "io_error" };
   }
   if (!recorded) {
     const notDone = original.kind === "file" && original.sha256 === sha256 && there.kind === "absent";
@@ -571,7 +580,7 @@ export async function revertApplyRun(workspaceRoot: string, runId: string, journ
           : { path: item.shown, action: outcome.action, ...unsafe },
       );
     } else {
-      skipped.push({ path: item.shown, reason: outcome.reason });
+      skipped.push(outcome.parkedAt === undefined ? { path: item.shown, reason: outcome.reason } : { path: item.shown, reason: outcome.reason, parkedAt: outcome.parkedAt });
     }
   }
   // DR-25: a dry run that lists a move back did not judge whether it can be made safely.

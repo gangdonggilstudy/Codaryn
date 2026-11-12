@@ -24,6 +24,8 @@ export class Shell {
   private readonly nav = el("nav", undefined, { id: "screens" });
   private readonly statusEngine = el("span", undefined, { id: "status-engine" });
   private readonly statusWorkspace = el("span", undefined, { id: "status-workspace" });
+  /** GU-3: the run that goes on (a button to its screen), hidden when there is none. */
+  private readonly statusRun = el("button", undefined, { id: "status-run", type: "button", hidden: "" });
   private readonly announcer = el("p", undefined, { class: "visually-hidden", "aria-live": "polite", role: "status" });
   private readonly screens: Screen[] = [];
   private readonly buttons = new Map<string, HTMLButtonElement>();
@@ -42,7 +44,8 @@ export class Shell {
     const header = el("header", undefined, { id: "top" });
     header.append(el("h1", t.format("app.title")), this.nav);
     const footer = el("footer", undefined, { id: "status", "aria-label": t.format("region.status") });
-    footer.append(this.statusEngine, this.statusWorkspace, el("span", t.format("status.language"), { lang: t.language }));
+    footer.append(this.statusEngine, this.statusWorkspace, this.statusRun, el("span", t.format("status.language"), { lang: t.language }));
+    this.statusRun.addEventListener("click", () => this.show("run"));
     const body = el("div", undefined, { id: "body" });
     body.append(this.filePanel, this.work);
     root.replaceChildren(header, body, footer, this.announcer);
@@ -86,6 +89,17 @@ export class Shell {
   setWorkspace(name: string | null): void {
     this.statusWorkspace.textContent = name === null ? this.texts.format("status.noWorkspace") : this.texts.format("status.workspace", { name });
     document.title = name === null ? this.texts.format("app.title") : `${name} - ${this.texts.format("app.title")}`;
+  }
+
+  /** GU-3: the run's state word and counts in the status bar, or null to hide it. */
+  setRun(text: string | null): void {
+    if (text === null) {
+      this.statusRun.setAttribute("hidden", "");
+      this.statusRun.textContent = "";
+      return;
+    }
+    this.statusRun.textContent = text;
+    this.statusRun.removeAttribute("hidden");
   }
 
   /** Says a short fixed text to screen readers. */

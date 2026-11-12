@@ -4,7 +4,7 @@
 
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const gui = fileURLToPath(new URL("../../", import.meta.url));
@@ -36,6 +36,27 @@ rmSync(build, { recursive: true, force: true });
 for (const config of ["tsconfig.main.json", "tsconfig.renderer.json", "tsconfig.host.json", "tsconfig.test.json"]) {
   const result = spawnSync(process.execPath, [tsc, "-p", join(gui, config)], { cwd: gui, stdio: "inherit" });
   if (result.status !== 0) fail(`tsc failed for ${config}`);
+}
+
+// 6.3: the page loads nothing outside its own directory (the app protocol serves only that). Type
+// imports are erased; a value imported from src/shared would fail in the window, so the build stops.
+const rendererBuild = join(build, "src", "renderer");
+function builtFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return builtFiles(full);
+    return entry.name.endsWith(".js") ? [full] : [];
+  });
+}
+for (const file of builtFiles(rendererBuild)) {
+  const text = readFileSync(file, "utf8");
+  for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)) {
+    const target = resolve(dirname(file), match[1]);
+    const inside = relative(rendererBuild, target);
+    if (!match[1].startsWith(".") || inside.startsWith("..") || isAbsolute(inside)) {
+      fail(`${relative(gui, file)} imports ${match[1]}, outside the page's own directory`);
+    }
+  }
 }
 
 for (const name of ["index.html", "styles.css"]) {

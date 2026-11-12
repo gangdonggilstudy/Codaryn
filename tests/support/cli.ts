@@ -14,11 +14,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   ANTHROPIC_API_KEY_ENV,
-  ANTHROPIC_KEY_PATTERN_SOURCE,
+  API_KEY_ENVS,
+  API_KEY_MASK_PATTERN_SOURCES,
   CHILD_ENV_ALLOWLIST,
   JOURNAL_FILE_NAME,
   LOCK_FILE_NAME,
   RESULT_FILE_NAME,
+  OPENAI_API_KEY_ENV,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
 } from "../../src/contracts/index.js";
@@ -31,6 +33,7 @@ import type {
   ModelProviderName,
   ToolResult,
 } from "../../src/contracts/index.js";
+import { LOOSE_SK_SHAPE } from "../fixtures/openai.js";
 import { FAKE_API_KEYS } from "../fixtures/secrets.js";
 import { NET_GUARD_LOG_ENV } from "./net-guard.js";
 
@@ -54,6 +57,25 @@ export interface EnvOptions {
    * it must not have the shape of a real key. Anything else throws.
    */
   readonly fakeApiKey?: string;
+  /**
+   * Sets OPENAI_API_KEY (the second provider, DR-31) the same way: only a value from FAKE_API_KEYS
+   * without the shape of a real key of either provider.
+   */
+  readonly fakeOpenAiKey?: string;
+}
+
+/** Key variables a test can never set through `extra`: every key variable Codaryn knows (SP-1). */
+const KEY_ENVS: readonly string[] = API_KEY_ENVS;
+
+/**
+ * A fake key must be listed in FAKE_API_KEYS and match none of the key shapes Codaryn hides
+ * (API_KEY_MASK_PATTERN_SOURCES, DR-32 (a)) nor anything starting with `sk-` (stricter still).
+ */
+function checkedFakeKey(value: string): string {
+  if (!FAKE_API_KEYS.includes(value) || API_KEY_MASK_PATTERN_SOURCES.some((source) => new RegExp(source).test(value)) || LOOSE_SK_SHAPE.test(value)) {
+    throw new Error("Integration tests set only the fake API keys from tests/fixtures/secrets.ts.");
+  }
+  return value;
 }
 
 /**
@@ -88,18 +110,13 @@ export function cliEnv(options: EnvOptions = {}): NodeJS.ProcessEnv {
   }
   Object.assign(env, DETERMINISTIC_ENV);
   for (const [name, value] of Object.entries(options.extra ?? {})) {
-    if (name.toUpperCase() === ANTHROPIC_API_KEY_ENV) {
+    if (KEY_ENVS.includes(name.toUpperCase())) {
       throw new Error("Integration tests never set an API key variable.");
     }
     env[name] = value;
   }
-  if (options.fakeApiKey !== undefined) {
-    const value = options.fakeApiKey;
-    if (!FAKE_API_KEYS.includes(value) || new RegExp(ANTHROPIC_KEY_PATTERN_SOURCE).test(value)) {
-      throw new Error("Integration tests set only the fake API keys from tests/fixtures/secrets.ts.");
-    }
-    env[ANTHROPIC_API_KEY_ENV] = value;
-  }
+  if (options.fakeApiKey !== undefined) env[ANTHROPIC_API_KEY_ENV] = checkedFakeKey(options.fakeApiKey);
+  if (options.fakeOpenAiKey !== undefined) env[OPENAI_API_KEY_ENV] = checkedFakeKey(options.fakeOpenAiKey);
   return env;
 }
 

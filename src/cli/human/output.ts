@@ -372,6 +372,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         out.push(`  ${shown} — ${word} (${token(reason)})`);
       }
       if (skipped.length > REVERT_MAX_LISTED) out.push(moreLine(skipped.length - REVERT_MAX_LISTED));
+      // R-16 L-1: files the revert moved aside and could not put back (SkippedFile.parkedAt). The line
+      // says how many and that they are in .codaryn/parked/ (fixed text); each place is in the JSON.
+      const parked = skipped.filter((file) => typeof file.parkedAt === "string").length;
+      if (parked > 0) out.push(catalog.format("revert.parked", { count: parked }));
       // DR-25: the preview did not check whether this drive can move the listed files back safely.
       if (output.dryRun === true && output.moveSafetyUnchecked === true) out.push(catalog.format("revert.dry_run_move_unchecked"));
 

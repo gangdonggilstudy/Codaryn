@@ -33,7 +33,7 @@ test("protocol: requests that are not version 1, have no id or name an unknown c
   const noId = parseRequest(JSON.stringify({ v: 1, id: 0, call: "doctor" }));
   assert.equal(noId.ok, false);
   assert.equal(!noId.ok && noId.id, null);
-  const unknown = parseRequest(JSON.stringify({ v: 1, id: 4, call: "startRun" }));
+  const unknown = parseRequest(JSON.stringify({ v: 1, id: 4, call: "eraseEverything" }));
   assert.deepEqual(unknown, { ok: false, id: 4, error: { code: CHANNEL_ERRORS.unknownCall, message: "unknown call" } });
   assert.equal(parseRequest(JSON.stringify({ v: 1, id: 4, call: "__proto__" })).ok, false);
 });
@@ -91,7 +91,7 @@ test("protocol: pending calls settle by id, time out, and all fail together", as
   const a = pending.wait(first, 5_000);
   const b = pending.wait(second, 5_000);
   assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 1 }), "delivered");
-  assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 2 }), "unknown", "a second answer is not delivered");
+  assert.equal(pending.settle({ v: 1, id: first, ok: true, value: 2 }), "late", "a second answer is dropped, not delivered");
   assert.deepEqual(await a, { v: 1, id: first, ok: true, value: 1 });
   pending.failAll({ code: CHANNEL_ERRORS.hostExited, message: "gone" });
   assert.deepEqual(await b, { v: 1, id: second, ok: false, error: { code: CHANNEL_ERRORS.hostExited, message: "gone" } });
@@ -114,10 +114,35 @@ test("protocol (R-10 M-1): an answer after the time limit is late, not unknown, 
   const timed = await pending.wait(id, 5);
   assert.equal(!timed.ok && timed.error.code, CHANNEL_ERRORS.timeout);
   assert.equal(pending.settle({ v: 1, id, ok: true, value: "late" }), "late");
-  assert.equal(pending.settle({ v: 1, id, ok: true, value: "again" }), "unknown", "only one late answer is expected");
+  assert.equal(pending.settle({ v: 1, id, ok: true, value: "again" }), "late", "another answer to a settled id is dropped too");
   assert.equal(pending.settle({ v: 1, id: 999, ok: true, value: 1 }), "unknown", "an id never issued");
   const next = pending.next();
   const answer = pending.wait(next, 5_000);
   assert.equal(pending.settle({ v: 1, id: next, ok: true, value: 2 }), "delivered");
   assert.deepEqual(await answer, { v: 1, id: next, ok: true, value: 2 });
+});
+
+test("protocol (R10b-L-1): every issued id with no waiting request is late, however many timed out", async () => {
+  const pending = new PendingCalls();
+  const ids: number[] = [];
+  const answers: Promise<unknown>[] = [];
+  for (let i = 0; i < 1001; i += 1) {
+    const id = pending.next();
+    ids.push(id);
+    answers.push(pending.wait(id, 1));
+  }
+  await Promise.all(answers);
+  assert.equal(pending.size, 0);
+  // The oldest is the one the earlier memory of 1000 ids forgot.
+  for (const id of [ids[0]!, ids[500]!, ids[1000]!]) {
+    assert.equal(pending.settle({ v: 1, id, ok: true, value: "late" }), "late", `id ${id}`);
+  }
+  const issued = ids[1000]!;
+  for (const id of [0, -1, issued + 1, issued + 1000, 1.5, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(pending.settle({ v: 1, id, ok: true, value: 1 }), "unknown", `never issued: ${id}`);
+  }
+  const next = pending.next();
+  const answer = pending.wait(next, 5_000);
+  assert.equal(pending.settle({ v: 1, id: next, ok: true, value: "now" }), "delivered");
+  assert.deepEqual(await answer, { v: 1, id: next, ok: true, value: "now" });
 });

@@ -12,7 +12,7 @@ import type { LimitedBody, Transport } from "../../../../src/model/http/index.js
 
 type Reply = { status: number; body?: string; headers?: Record<string, string> };
 
-function transport(replies: readonly Reply[], options: Partial<Pick<Transport, "retryAfter" | "maxRetries">> = {}) {
+function transport(replies: readonly Reply[], options: Partial<Pick<Transport, "retryAfter" | "maxRetries" | "errorBodyLimit">> = {}) {
   const delays: number[] = [];
   const seenBodies: string[] = [];
   let calls = 0;
@@ -34,6 +34,7 @@ function transport(replies: readonly Reply[], options: Partial<Pick<Transport, "
     },
     describeError: (status: number) => `HTTP ${status}`,
     ...(options.retryAfter === undefined ? {} : { retryAfter: options.retryAfter }),
+    ...(options.errorBodyLimit === undefined ? {} : { errorBodyLimit: options.errorBodyLimit }),
   };
   return { t, delays, seenBodies, calls: () => calls };
 }
@@ -96,6 +97,16 @@ ${shaped.slice(12)})`), "([redacted])", "after a bracket and split, as before");
     assert.equal(redact(`key${shaped}end`), "key[redacted]");
     assert.equal(redact(`key ${shaped.slice(0, 9)}
 ${shaped.slice(9)} . end`), "key [redacted] . end");
+  });
+
+  test("DR-35 (b): the error body read limit is the provider's; absent, 4096 bytes as before", async () => {
+    const big: Reply = { status: 400, body: "x".repeat(5000) };
+    const plain = transport([big]);
+    await send(plain.t);
+    assert.equal(plain.seenBodies[0]?.length, 4096);
+    const wide = transport([big], { errorBodyLimit: 65_536 });
+    await send(wide.t);
+    assert.equal(wide.seenBodies[0]?.length, 5000);
   });
 
   test("the provider's status reading gets the error body", async () => {

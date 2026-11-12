@@ -17,6 +17,8 @@ export interface HomeDeps {
   readonly current: () => Workspace | null;
   readonly open: () => void;
   readonly opened: (workspace: Workspace) => void;
+  /** Why the folder chosen in the dialog was refused, once, or null. */
+  readonly takeOpenError: () => string | null;
 }
 
 export function homeScreen(deps: HomeDeps): Screen {
@@ -42,6 +44,8 @@ export function homeScreen(deps: HomeDeps): Screen {
         message.textContent = `${errorText(t, code)} ${t.format("error.code", { code })}`;
         message.removeAttribute("hidden");
       };
+      const refused = deps.takeOpenError();
+      if (refused !== null) showError(refused);
 
       const load = async (): Promise<void> => {
         const items = asRecent(await api.recent());

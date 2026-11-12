@@ -5,7 +5,31 @@
  * directory.
  */
 
-import type { DoctorReply, InfoView, OpenReply, RecentView, TreeEntryView, TreeReply } from "../shared/ipc.js";
+import type {
+  DoctorReply,
+  InfoView,
+  ModelsReply,
+  OpenReply,
+  ProfileView,
+  ChangedFileItem,
+  ChangesReply,
+  PlanReply,
+  PlanView,
+  RecentView,
+  ReviewReply,
+  RevertReply,
+  RevertView,
+  RunDonePayload,
+  RunListItem,
+  RunsReply,
+  RunEventsPayload,
+  RunItemView,
+  RunResultView,
+  SelectModelReply,
+  SettingsReply,
+  TreeEntryView,
+  TreeReply,
+} from "../shared/ipc.js";
 
 export interface CodarynApi {
   info(): Promise<unknown>;
@@ -16,6 +40,20 @@ export interface CodarynApi {
   tree(workspace: string, node: string | null, offset: number): Promise<unknown>;
   reveal(workspace: string, node: string): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
+  settings(): Promise<unknown>;
+  listModels(provider: string): Promise<unknown>;
+  selectModel(entry: string): Promise<unknown>;
+  startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
+  cancelRun(): Promise<unknown>;
+  onRunEvents(listener: (payload: unknown) => void): void;
+  onRunDone(listener: (payload: unknown) => void): void;
+  listRuns(workspace: string): Promise<unknown>;
+  previewRevert(workspace: string, runId: string): Promise<unknown>;
+  revert(preview: string): Promise<unknown>;
+  plan(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
+  applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
+  review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
+  changes(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -88,4 +126,166 @@ export function asDoctor(value: unknown): DoctorReply {
   if (!isObj(value)) return { ok: false, code: "host_error" };
   if (value["ok"] !== true) return { ok: false, code: str(value["code"]) ? value["code"] : "host_error" };
   return value as unknown as DoctorReply;
+}
+
+const failed = (value: unknown): { readonly ok: false; readonly code: string } => ({ ok: false, code: isObj(value) && str(value["code"]) ? value["code"] : "host_error" });
+const strList = (value: unknown): value is string[] => Array.isArray(value) && value.every(str);
+
+function asProfile(value: unknown): ProfileView | null {
+  if (!isObj(value) || !str(value["name"]) || !(value["workflowRef"] === null || str(value["workflowRef"])) || !strList(value["commands"])) return null;
+  const limits = Array.isArray(value["limits"])
+    ? value["limits"].filter((pair): pair is [string, number | null] => Array.isArray(pair) && str(pair[0]) && (pair[1] === null || typeof pair[1] === "number"))
+    : [];
+  const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  return { name: value["name"], workflowRef: value["workflowRef"] as string | null, limits, commands: value["commands"], verifiers: n(value["verifiers"]), protectedPaths: n(value["protectedPaths"]) };
+}
+
+/** GU-6: the settings view, checked again on this side. */
+export function asSettings(value: unknown): SettingsReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  const file = view["file"];
+  const workflows = isObj(view["workflows"]) ? view["workflows"] : {};
+  const env = isObj(view["env"]) ? view["env"] : {};
+  const sources = ["argument", "environment", "default"];
+  return {
+    ok: true,
+    view: {
+      file:
+        isObj(file) && str(file["display"]) && str(file["source"]) && sources.includes(file["source"])
+          ? { display: file["display"], source: file["source"] as "argument" | "environment" | "default", exists: file["exists"] === true }
+          : null,
+      model: str(view["model"]) ? view["model"] : null,
+      language: view["language"] === "ko" || view["language"] === "en" ? view["language"] : null,
+      profiles: Array.isArray(view["profiles"]) ? view["profiles"].map(asProfile).filter((p): p is ProfileView => p !== null) : [],
+      workflows: { builtin: strList(workflows["builtin"]) ? workflows["builtin"] : [], config: strList(workflows["config"]) ? workflows["config"] : [] },
+      keyAvailable: view["keyAvailable"] === true,
+      providers: strList(view["providers"]) ? view["providers"] : [],
+      env: { model: env["model"] === true, language: env["language"] === true },
+    },
+  };
+}
+
+/** GU-6: a model list. Entries without a valid entry id are left out. */
+export function asModels(value: unknown): ModelsReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["provider"]) || !Array.isArray(value["models"])) return failed(value);
+  const models = value["models"].flatMap((m: unknown) =>
+    isObj(m) && str(m["entry"]) && HEX.test(m["entry"]) && typeof m["number"] === "number" && str(m["id"]) && str(m["name"])
+      ? [{ entry: m["entry"], number: m["number"], id: m["id"], name: m["name"] }]
+      : [],
+  );
+  const current = value["current"];
+  return {
+    ok: true,
+    provider: value["provider"],
+    models,
+    current:
+      isObj(current) && str(current["id"])
+        ? { id: current["id"], source: current["source"] === "CODARYN_MODEL" ? "CODARYN_MODEL" : "config", listed: current["listed"] === true }
+        : null,
+  };
+}
+
+export function asSelectModel(value: unknown): SelectModelReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["selected"]) || !str(value["selected"]["id"])) return failed(value);
+  const selected = value["selected"];
+  return { ok: true, selected: { id: selected["id"] as string, created: selected["created"] === true, overridden: selected["overridden"] === true } };
+}
+
+const RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/;
+
+/** GU-3: the answer to startRun. */
+export function asStartRun(value: unknown): { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string } {
+  if (isObj(value) && value["ok"] === true && str(value["runId"]) && RUN_ID.test(value["runId"])) return { ok: true, runId: value["runId"] };
+  return failed(value);
+}
+
+/** GU-3: a batch of progress items; null when it does not fit. */
+export function asRunEvents(value: unknown): RunEventsPayload | null {
+  if (!isObj(value) || !str(value["runId"]) || !Array.isArray(value["items"]) || !isObj(value["counts"])) return null;
+  const items: RunItemView[] = value["items"].flatMap((item: unknown) =>
+    isObj(item) && str(item["kind"]) && str(item["text"]) && (item["at"] === null || str(item["at"])) ? [{ at: item["at"] as string | null, kind: item["kind"], text: item["text"] }] : [],
+  );
+  const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  return { runId: value["runId"], items, counts: { turns: n(value["counts"]["turns"]), tools: n(value["counts"]["tools"]) } };
+}
+
+/** GU-3: a run's end; null when it does not fit. The main process checked the result already. */
+export function asRunDone(value: unknown): RunDonePayload | null {
+  if (!isObj(value) || !str(value["runId"])) return null;
+  if (value["ok"] !== true) return { runId: value["runId"], ok: false, code: str(value["code"]) ? value["code"] : "host_error" };
+  const result = value["result"];
+  const labels = value["labels"];
+  if (!isObj(result) || !str(result["status"]) || !str(result["reason"]) || !isObj(labels) || !str(labels["status"]) || !str(labels["reason"])) return null;
+  return { runId: value["runId"], ok: true, result: result as unknown as RunResultView, labels: { status: labels["status"], reason: labels["reason"] } };
+}
+
+/** GU-4: the run list. Rows that do not fit are left out. */
+export function asRuns(value: unknown): RunsReply {
+  if (!isObj(value) || value["ok"] !== true || !Array.isArray(value["runs"])) return failed(value);
+  const runs: RunListItem[] = value["runs"].flatMap((run: unknown): RunListItem[] => {
+    if (!isObj(run) || !str(run["runId"]) || !RUN_ID.test(run["runId"])) return [];
+    if (run["state"] === "damaged") return [{ state: "damaged", runId: run["runId"] }];
+    if (run["state"] !== "checked" || (run["kind"] !== "run" && run["kind"] !== "apply") || !str(run["taskId"])) return [];
+    const reverted = isObj(run["reverted"]) && str(run["reverted"]["at"]) ? { at: run["reverted"]["at"], status: run["reverted"]["status"] === "partial" ? ("partial" as const) : ("complete" as const) } : null;
+    return [
+      {
+        state: "checked",
+        runId: run["runId"],
+        kind: run["kind"],
+        startedAt: str(run["startedAt"]) ? run["startedAt"] : null,
+        taskId: run["taskId"],
+        status: str(run["status"]) ? run["status"] : null,
+        reason: str(run["reason"]) ? run["reason"] : null,
+        changes: typeof run["changes"] === "number" ? run["changes"] : null,
+        reverted,
+        revertRecordDamaged: run["revertRecordDamaged"] === true,
+      },
+    ];
+  });
+  return { ok: true, runs, omitted: typeof value["omitted"] === "number" ? value["omitted"] : 0 };
+}
+
+/** GU-4: a revert or its preview (the main process checked the view already). */
+export function asRevert(value: unknown): RevertReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  if (!str(view["runId"]) || !Array.isArray(view["reverted"]) || !Array.isArray(view["skipped"])) return failed(value);
+  const preview = str(value["preview"]) && HEX.test(value["preview"]) ? value["preview"] : null;
+  return { ok: true, view: view as unknown as RevertView, preview };
+}
+
+/** GU-5: a plan view (the main process checked it already) and the approval token its apply takes. */
+export function asPlan(value: unknown): PlanReply {
+  if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
+  const view = value["view"];
+  if (!str(view["runId"]) || !str(view["digest"]) || !Array.isArray(view["actions"]) || (view["status"] !== "pending" && view["status"] !== "applied")) return failed(value);
+  const approval = str(value["approval"]) && HEX.test(value["approval"]) ? value["approval"] : null;
+  return { ok: true, view: view as unknown as PlanView, approval };
+}
+
+/** GU-5: a recorded review. */
+export function asReview(value: unknown): ReviewReply {
+  if (!isObj(value) || value["ok"] !== true || (value["verdict"] !== "accepted" && value["verdict"] !== "rejected")) return failed(value);
+  return { ok: true, verdict: value["verdict"], replaced: value["replaced"] === true };
+}
+
+/** DR-29: a run's changed files, by path and state. Rows that do not fit are left out. */
+export function asChanges(value: unknown): ChangesReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["runId"]) || !Array.isArray(value["files"])) return failed(value);
+  const files: ChangedFileItem[] = value["files"].flatMap((file: unknown): ChangedFileItem[] =>
+    isObj(file) && str(file["path"]) && typeof file["created"] === "boolean" && str(file["state"])
+      ? [
+          {
+            path: file["path"],
+            created: file["created"],
+            state: file["state"] as ChangedFileItem["state"],
+            unavailable: str(file["unavailable"]) ? file["unavailable"] : null,
+            before: str(file["before"]) ? file["before"] : null,
+            after: str(file["after"]) ? file["after"] : null,
+          },
+        ]
+      : [],
+  );
+  return { ok: true, runId: value["runId"], files };
 }

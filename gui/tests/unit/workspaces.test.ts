@@ -196,6 +196,80 @@ test("command line: the folder argument skips the program, the app path and swit
   assert.equal(folderName("D:\\"), "D:\\");
 });
 
+/** Network, pipe and device paths, as R10b-L-2 found them reaching `isDirectory`. */
+const NOT_LOCAL_WIN = [
+  "\\\\files.example.invalid\\share\\work",
+  "//files.example.invalid/share/work",
+  "\\\\.\\pipe\\x",
+  "\\\\?\\D:\\work",
+  "\\??\\D:\\work",
+  "D:\\work\\con",
+  "D:\\work\\NUL.txt\\inner",
+];
+
+test("command line (R10b-L-2): a network, pipe or device folder is no folder argument", () => {
+  for (const folder of NOT_LOCAL_WIN) {
+    assert.equal(folderArgument(["C:\\app\\Codaryn.exe", folder], true, "C:\\", "win32"), null, folder);
+  }
+  // A relative argument under a network working directory (a second start from a share).
+  assert.equal(folderArgument(["C:\\app\\Codaryn.exe", "notes"], true, "\\\\files.example.invalid\\share", "win32"), null);
+  assert.equal(folderArgument(["Codaryn", "/dev/sda"], true, "/", "linux"), null);
+  assert.equal(folderArgument(["Codaryn", "notes"], true, "/dev", "linux"), null);
+});
+
+test("workspaces (R10b-L-2): network, pipe and device folders are refused without being touched", async () => {
+  const touched: string[] = [];
+  const workspaces = new Workspaces({
+    stateFile: null,
+    platform: "win32",
+    randomBytes: random,
+    now: () => new Date(),
+    isDirectory: async (p) => {
+      touched.push(p);
+      return true;
+    },
+  });
+  for (const folder of NOT_LOCAL_WIN) {
+    assert.deepEqual(await workspaces.open(folder), { ok: false, code: "workspace_not_local" }, folder);
+  }
+  assert.deepEqual(touched, [], "isDirectory was never called");
+  assert.deepEqual(await workspaces.recent(), [], "nothing refused entered the recent list");
+  const opened = await workspaces.open("D:\\work\\notes");
+  assert.equal(opened.ok, true);
+  assert.deepEqual(touched, ["D:\\work\\notes"]);
+});
+
+test("gui-state (R10b-L-2): network, pipe and device paths in the file are dropped, so the recent list never looks at them", async () => {
+  const { dir, cleanup } = await tempDir();
+  try {
+    const at = "2026-11-12T00:00:00.000Z";
+    const recentWorkspaces = [...NOT_LOCAL_WIN, "D:\\work\\a"].map((p) => ({ path: p, openedAt: at }));
+    const text = JSON.stringify({ schemaVersion: 1, recentWorkspaces });
+    assert.deepEqual(parseGuiState(text, "win32").recentWorkspaces.map((item) => item.path), ["D:\\work\\a"]);
+    assert.deepEqual(
+      parseGuiState(JSON.stringify({ schemaVersion: 1, recentWorkspaces: [{ path: "/dev/sda", openedAt: at }, { path: "/home/a", openedAt: at }] }), "linux").recentWorkspaces.map((item) => item.path),
+      ["/home/a"],
+    );
+    const stateFile = path.join(dir, "gui-state.json");
+    await fs.writeFile(stateFile, text, "utf8");
+    const touched: string[] = [];
+    const workspaces = new Workspaces({
+      stateFile,
+      platform: "win32",
+      randomBytes: random,
+      now: () => new Date(),
+      isDirectory: async (p) => {
+        touched.push(p);
+        return false;
+      },
+    });
+    assert.deepEqual((await workspaces.recent()).map((item) => item.name), ["a"]);
+    assert.deepEqual(touched, ["D:\\work\\a"]);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("ipc: the new calls take handles, ids and bounded offsets only", () => {
   assert.deepEqual(parseTreeArgs({ workspace: HANDLE, node: null, offset: 0 }), { workspace: HANDLE, node: null, offset: 0 });
   assert.deepEqual(parseTreeArgs({ workspace: HANDLE }), { workspace: HANDLE, node: null, offset: 0 });

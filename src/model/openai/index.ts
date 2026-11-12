@@ -13,20 +13,20 @@
  *   `max_output_tokens` and `store: false` (DR-31 (c)): the provider keeps no copy of the response.
  * - Without stored responses the next request must carry the previous responses' `output` items,
  *   reasoning items included (facts C-11). This provider keeps them in memory, for the provider
- *   object's life (one run), and sends them back as they came. They never reach the engine, the run
+ *   object's life (one run), and sends them back as they came, up to MAX_KEPT_OUTPUT_BYTES (DR-35 (d)). They never reach the engine, the run
  *   record, the result or a report: the engine sees text and calls, and the count of reasoning items
  *   (ModelResponse.reasoningItems). Reasoning items are opaque to the privacy gateway (encrypted by
  *   the provider); they go back only to the same provider within the same run.
- * - Call ids (DR-31 (e)): a call's `call_id` is passed as ToolCall.id. When the engine records it
- *   under another id (AC-D15), its assistant message carries that id; the provider pairs the message
- *   with the response it kept and answers the call with the original `call_id`. The pairing is in
- *   memory only.
+ * - Call ids (DR-31 (e), DR-35 (c)): a call's `call_id` is passed as ToolCall.id. One that passes
+ *   AC-D15 is recorded as given, as for Anthropic. When the engine records one under another id, its
+ *   assistant message carries that id; the provider pairs the message with the response it kept and
+ *   answers the call with the original `call_id`. That pairing is in memory only.
  * - Stop (DR-31 (h)): `completed` with a `function_call` item is `tool_calls`, without one `final`;
  *   `incomplete` for `max_output_tokens` is `length`. A refusal part or `incomplete` for
  *   `content_filter` is `api_error` with a fixed phrase (the refusal text is not quoted); other
  *   `incomplete` reasons, `failed` and `cancelled` are `api_error`, quoting a reason or code only when
  *   it is a short identifier.
- * - Errors: 401 and 403 `auth_failed`; 429 `quota_exhausted` (not retried) when the error type is
+ * - Errors: 401 and 403 `auth_failed`, with a fixed phrase (DR-35 (a)); 429 `quota_exhausted` (not retried) when the error type is
  *   `insufficient_quota` or its code is one of OPENAI_QUOTA_ERROR_CODES, otherwise `rate_limited`
  *   (retried); 503 `overloaded`; 408, 409 and other 5xx `api_error`, retried. Only a JSON error
  *   object is quoted: its type and code when they are identifiers, its message, and the
@@ -72,7 +72,6 @@ import {
   defaultSleep,
   isPlainObject,
   isUsableApiKey,
-  MAX_ERROR_BODY_BYTES,
   sendWithRetries,
   UNUSABLE_KEY_MESSAGE,
   validateConnection,
@@ -95,6 +94,12 @@ export const OPENAI_QUOTA_ERROR_CODES: readonly string[] = [
   "organization_usage_limit_exceeded",
   "insufficient_quota",
 ];
+
+/**
+ * DR-35 (b), R-22 L-2: the bytes of an error body read to classify it (quota or rate limit) and to
+ * describe it. A quota error with a long message is still found; the message is cut as before.
+ */
+export const MAX_OPENAI_ERROR_BODY_BYTES = 64 * 1024;
 
 /** Every key shape Codaryn hides in output (DR-32 (a)): removed from messages, refused in listed values. */
 const KEY_SHAPES: readonly string[] = API_KEY_MASK_PATTERN_SOURCES;
@@ -125,10 +130,24 @@ function validateSettings(settings: ResolvedApiSettings): string {
 // ---------------------------------------------------------------------------------------------
 // Responses kept in memory (DR-31 (c), (e))
 
+/**
+ * DR-35 (d), R-22 L-4: the most bytes of output items (their JSON as UTF-8) this provider keeps to
+ * send back over a run. Twice the limit of one response body (8 MiB) and far below the provider's
+ * request limit (128 MiB, facts C-13). When the kept items pass it, the next request is not sent and
+ * fails with a fixed message: the provider keeps no copy (`store: false`), so the conversation
+ * cannot go on without them. The response that passed it is still returned (a final answer ends
+ * the run without another request). Memory stays within this limit and one more response.
+ */
+export const MAX_KEPT_OUTPUT_BYTES = 16 * 1024 * 1024;
+
+const encoder = new TextEncoder();
+
 /** One response this provider returned, kept for the rest of the run. */
 interface KeptResponse {
   /** Its `output` items exactly as received, reasoning items included. Sent back as they are. */
   readonly items: readonly unknown[];
+  /** The size of `items` as JSON in UTF-8 bytes (DR-35 (d)). */
+  readonly bytes: number;
   /** Its function calls in order: the original `call_id` and name. */
   readonly calls: readonly { readonly callId: string; readonly name: string }[];
 }
@@ -160,6 +179,10 @@ type Tool = { type: "function"; name: AnyToolName; description: string; paramete
  * any other one is sent as the engine has it (its text and calls, no reasoning items).
  */
 function buildBody(settings: ResolvedApiSettings, request: ModelRequest, kept: readonly KeptResponse[]): { body: string } | string {
+  const keptBytes = kept.reduce((total, response) => total + response.bytes, 0);
+  if (keptBytes > MAX_KEPT_OUTPUT_BYTES) {
+    return `the output items to send back come to more than ${MAX_KEPT_OUTPUT_BYTES} bytes; the provider keeps no copy, so the conversation cannot go on`;
+  }
   const input: unknown[] = [];
   /** The engine's id of a call -> the `call_id` the provider gave it. */
   const callIds = new Map<string, string>();
@@ -335,7 +358,8 @@ function parseResponseBody(text: string): Parsed {
     usage: parseUsage(value.usage),
     ...(reasoningItems > 0 ? { reasoningItems } : {}),
   };
-  return { ok: true, response, kept: stop === "length" ? null : { items: value.output, calls } };
+  const kept = stop === "length" ? null : { items: value.output, bytes: encoder.encode(JSON.stringify(value.output)).byteLength, calls };
+  return { ok: true, response, kept };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -366,14 +390,21 @@ function classifyStatus(status: number, body: LimitedBody): { kind: ModelErrorKi
   return { kind: "api_error", retryable: false };
 }
 
+/** DR-35 (a): what a 401 or 403 says, whatever the provider's message. */
+export const AUTH_REFUSED_MESSAGE = "the key or its access was refused; the provider's message is not shown";
+
 /**
  * Describes an error response. Only a JSON error object is quoted: its `type` and `code` when they
  * are identifiers, its `message`, and an `x-request-id` header of identifier characters. Any other
  * body (HTML from a proxy, plain text, a body cut at the limit) is not quoted at all.
+ * DR-35 (a), R-22 L-1: a 401 or 403 quotes nothing of the body, only AUTH_REFUSED_MESSAGE and the
+ * request id: its message may echo part of the key (its start and its last characters), and a run
+ * of fewer than KEY_FRAGMENT_CHARS characters is not found by the redactor.
  */
 function describeHttpError(status: number, body: LimitedBody, headers?: Headers): string {
   const header = headers?.get("x-request-id") ?? null;
   const requestId = header !== null && REQUEST_ID.test(header) ? ` (request ${header})` : "";
+  if (status === 401 || status === 403) return `HTTP ${status}: ${AUTH_REFUSED_MESSAGE}${requestId}`;
   const error = errorObject(body);
   if (error !== null) {
     const type = typeof error.type === "string" && IDENTIFIER.test(error.type) ? ` ${error.type}` : "";
@@ -383,7 +414,7 @@ function describeHttpError(status: number, body: LimitedBody, headers?: Headers)
     return `HTTP ${status}${type}${code}${message}${requestId}`;
   }
   if (body.bytes.byteLength === 0) return `HTTP ${status}${requestId}`;
-  const why = body.over ? `longer than ${MAX_ERROR_BODY_BYTES} bytes` : "not a JSON error object";
+  const why = body.over ? `longer than ${MAX_OPENAI_ERROR_BODY_BYTES} bytes` : "not a JSON error object";
   return `HTTP ${status} (the error body is ${why} and is not shown)${requestId}`;
 }
 
@@ -396,6 +427,7 @@ function transportFor(apiKey: string, settings: ListModelsSettings, deps: ApiPro
     maxRetries: settings.maxRetries,
     classifyStatus,
     retryAfter: "minimum",
+    errorBodyLimit: MAX_OPENAI_ERROR_BODY_BYTES,
     describeError: describeHttpError,
   };
 }

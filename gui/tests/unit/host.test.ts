@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { createHostHandler, serve } from "../../src/engine-host/host.js";
 import type { HostApp, HostDeps, HostDoctorRequest, HostMessages } from "../../src/engine-host/host.js";
 import { encodeLine, parseHostMessage } from "../../src/shared/protocol.js";
+import { fakeApp } from "./fake-app.js";
 import type { HostMessage } from "../../src/shared/protocol.js";
 
 const ABSOLUTE = path.resolve("workspace-for-test");
@@ -17,13 +18,18 @@ function harness(app: Partial<HostApp> = {}, messages?: HostMessages) {
   const logs: string[] = [];
   const requests: HostDoctorRequest[] = [];
   const deps: HostDeps = {
-    app: {
+    app: fakeApp({
       doctor: async (request) => {
         requests.push(request);
         return DOCTOR_OUTPUT;
       },
       ...app,
-    },
+    }),
+    itemsIn: () => () => null,
+    token: () => "0".repeat(32),
+    // Marks every text that passed the host's cleaning, so a test sees which ones did.
+    shown: (text) => `<${text.replace(/[\u0000-\u001f]/g, "?")}>`,
+    providers: ["anthropic"],
     messages: messages ?? { texts: (_locale, ids) => ({ language: "en", texts: Object.fromEntries(ids.map((id) => [id, `T:${id}`])) }) },
     tree: async (request) => ({ ok: true, entries: [], total: 0, offset: request.offset, nextOffset: null, dir: request.dir }),
     write: (line) => {
@@ -73,7 +79,7 @@ test("host: arguments that do not fit are refused before the app is called", asy
 
 test("host: an unknown call is answered with its id; a line without an id is only logged", async () => {
   const { handler, written, logs } = harness();
-  await handler.handleLine(line(9, "startRun", {}));
+  await handler.handleLine(line(9, "eraseEverything", {}));
   await handler.handleLine("not json at all");
   assert.deepEqual(written, [{ v: 1, id: 9, ok: false, error: { code: "unknown_call", message: "unknown call" } }]);
   assert.equal(logs.length, 1);

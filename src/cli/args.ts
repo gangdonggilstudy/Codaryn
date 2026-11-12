@@ -16,7 +16,7 @@
  * Each may appear once. Only `run` takes a positional argument (the goal), at most one.
  */
 
-import { LATEST_RUN_ALIAS, PROFILE_NAME_PATTERN_SOURCE } from "../contracts/index.js";
+import { LATEST_RUN_ALIAS, PROFILE_NAME_PATTERN_SOURCE, WORKFLOW_ID_PATTERN_SOURCE } from "../contracts/index.js";
 
 /**
  * Where the task comes from: a task file, or the quick form built from the config file.
@@ -39,6 +39,8 @@ export interface RunArgs {
   readonly quiet: boolean;
   /** `--profile` (N-8): a profile name from the config file. */
   readonly profile: string | null;
+  /** `--workflow` (G-A, DR-2): the quick form's workflow definition id. Absent for a task file. */
+  readonly workflow: string | null;
 }
 
 export type ParseArgsOutcome =
@@ -47,7 +49,7 @@ export type ParseArgsOutcome =
 
 export const RUN_USAGE =
   'codaryn run ("<goal>" | --task <task.json> | --workspace <dir> --goal <text>) ' +
-  "[--config <config.json>] [--vars-file <path>] [--cancel-file <path>] [--quiet] [--profile <name>]";
+  "[--config <config.json>] [--vars-file <path>] [--cancel-file <path>] [--quiet] [--profile <name>] [--workflow <id>]";
 export const REVERT_USAGE = "codaryn revert --workspace <dir> --run <runId|latest> [--dry-run] [--quiet]";
 export const REPORT_USAGE = "codaryn report --workspace <dir> --run <runId|latest> [--json]";
 export const DOCTOR_USAGE =
@@ -62,7 +64,7 @@ export const USAGE =
   `usage: ${RUN_USAGE} | ${REVERT_USAGE} | ${REPORT_USAGE} | ${DOCTOR_USAGE} | ${MODELS_USAGE} | ` +
   `${INIT_USAGE} | ${RUNS_USAGE} | codaryn --help | codaryn --version`;
 
-const OPTIONS = ["--task", "--workspace", "--goal", "--config", "--vars-file", "--cancel-file", "--profile"] as const;
+const OPTIONS = ["--task", "--workspace", "--goal", "--config", "--vars-file", "--cancel-file", "--profile", "--workflow"] as const;
 type Option = (typeof OPTIONS)[number];
 const SWITCHES = ["--quiet"] as const;
 type Switch = (typeof SWITCHES)[number];
@@ -97,6 +99,21 @@ export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const RUN_ID_MESSAGE = `--run must be a run id (1-128 characters of letters, digits, '.', '_' and '-') or "${LATEST_RUN_ALIAS}"`;
 
 const PROFILE_NAME = new RegExp(PROFILE_NAME_PATTERN_SOURCE);
+const WORKFLOW_ID = new RegExp(WORKFLOW_ID_PATTERN_SOURCE);
+
+/** G-A (DR-2): `--workflow <id>`, quick form only. */
+export function workflowOf(
+  values: ReadonlyMap<string, string>,
+  input: RunInput,
+): { ok: true; workflow: string | null } | { ok: false; message: string } {
+  const workflow = values.get("--workflow") ?? null;
+  if (workflow === null) return { ok: true, workflow };
+  if (!WORKFLOW_ID.test(workflow)) {
+    return { ok: false, message: "--workflow must be a workflow id: 1-64 letters, digits, '.', '_' and '-', starting with a letter or digit" };
+  }
+  if (input.kind === "task") return { ok: false, message: "--workflow is for the quick form; a task file names its workflow with workflowRef" };
+  return { ok: true, workflow };
+}
 const PROFILE_MESSAGE = "--profile must be a profile name: 1-64 letters, digits, '.', '_' and '-', starting with a letter or digit";
 
 function isRunId(value: string): boolean {
@@ -371,6 +388,8 @@ export function parseArgs(argv: readonly string[]): ParseArgsOutcome {
   }
   const profile = profileOf(values);
   if (!profile.ok) return profile;
+  const workflow = workflowOf(values, input);
+  if (!workflow.ok) return workflow;
 
   return {
     ok: true,
@@ -382,6 +401,7 @@ export function parseArgs(argv: readonly string[]): ParseArgsOutcome {
       cancelFile: values.get("--cancel-file") ?? null,
       quiet: read.switches.has("--quiet"),
       profile: profile.profile,
+      workflow: workflow.workflow,
     },
   };
 }

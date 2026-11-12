@@ -13,8 +13,12 @@ import {
   MAX_RETRIES_LIMIT,
   MESSAGE_LANGUAGES,
   PROFILE_NAME_PATTERN_SOURCE,
+  BUILTIN_WORKFLOW_IDS,
+  MAX_WORKFLOWS,
+  MAX_WORKFLOW_INSTRUCTIONS_CHARS,
+  WORKFLOW_ID_PATTERN_SOURCE,
 } from "../contracts/index.js";
-import type { CodarynConfig, ConfigProfile, IntegrityConfig, Limits, MessageLanguage } from "../contracts/index.js";
+import type { CodarynConfig, ConfigProfile, IntegrityConfig, Limits, MessageLanguage, WorkflowDefinition } from "../contracts/index.js";
 import { checkLocalPathSyntax, checkTimerMs, normalizeApiBaseUrlStrict } from "./security/index.js";
 import {
   InputError,
@@ -26,6 +30,7 @@ import {
   parseVerifiers,
   record,
 } from "./task.js";
+import { parseCompletion, parseHumanReview, parsePlanMode, parseToolList, parseWorkflowRef, text } from "./task.js";
 import type { InputErrorPosition, Rec } from "./task.js";
 
 export type ParseConfigOutcome =
@@ -148,18 +153,81 @@ function parseProfiles(value: unknown, topLimits: Partial<Limits> | undefined): 
     // N-14: a profile is named by its position, never by its name.
     const at = `profiles[${index}]`;
     if (!PROFILE_NAME.test(name)) fail(`${at} has a name that is not a valid profile name`);
-    const rec = record((value as Rec)[name], at, ["policy", "verifiers", "limits"]);
+    const rec = record((value as Rec)[name], at, ["policy", "verifiers", "limits", "workflowRef"]);
     const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"]));
     const verifiers = rec["verifiers"] === undefined ? undefined : prefixed(at, () => parseVerifiers(rec["verifiers"]));
     const limits = rec["limits"] === undefined ? undefined : prefixed(at, () => parsePartialLimits(rec["limits"]));
+    // G-A: the definition this profile uses when the task names none.
+    const workflowRef = rec["workflowRef"] === undefined ? undefined : parseWorkflowRef(rec["workflowRef"], `${at}.workflowRef`);
     if (limits !== undefined) checkProfileLimits(at, limits, topLimits);
     profiles[name] = {
       ...(policy === undefined ? {} : { policy }),
       ...(verifiers === undefined ? {} : { verifiers }),
       ...(limits === undefined ? {} : { limits }),
+      ...(workflowRef === undefined ? {} : { workflowRef }),
     };
   });
   return profiles;
+}
+
+const WORKFLOW_ID = new RegExp(WORKFLOW_ID_PATTERN_SOURCE);
+
+/**
+ * G-A (GT-D1): the config file's `workflows`, id → definition. Ids follow
+ * WORKFLOW_ID_PATTERN_SOURCE, at most MAX_WORKFLOWS, none a built-in id. A definition is named by
+ * its position (`workflows[2]`) in messages, never by its id (N-14). Ceilings between the
+ * definition and a task are checked when the task is resolved (`resolveWorkflow`).
+ */
+function parseWorkflows(value: unknown): { [id: string]: WorkflowDefinition } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) fail("workflows must be an object");
+  const ids = Object.keys(value as Rec);
+  if (ids.length > MAX_WORKFLOWS) fail(`workflows may have at most ${MAX_WORKFLOWS} entries`);
+  const workflows: { [id: string]: WorkflowDefinition } = Object.create(null) as { [id: string]: WorkflowDefinition };
+  ids.forEach((id, index) => {
+    const at = `workflows[${index}]`;
+    if (!WORKFLOW_ID.test(id)) fail(`${at} has an id that is not a valid workflow id`);
+    if ((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(id)) fail(`${at} uses the id of a built-in workflow; copy it under a new id`);
+    const rec = record((value as Rec)[id], at, [
+      "label",
+      "tools",
+      "instructions",
+      "plan",
+      "completion",
+      "humanReview",
+      "allowCommands",
+      "policy",
+      "verifiers",
+      "limits",
+    ]);
+    const label = rec["label"] === undefined ? undefined : text(rec["label"], `${at}.label`);
+    const instructions = rec["instructions"] === undefined ? undefined : text(rec["instructions"], `${at}.instructions`);
+    if (instructions !== undefined && [...instructions].length > MAX_WORKFLOW_INSTRUCTIONS_CHARS) {
+      fail(`${at}.instructions must be at most ${MAX_WORKFLOW_INSTRUCTIONS_CHARS} characters`);
+    }
+    const allowCommands = rec["allowCommands"];
+    if (allowCommands !== undefined && typeof allowCommands !== "boolean") fail(`${at}.allowCommands must be a boolean`);
+    const plan = rec["plan"] === undefined ? undefined : parsePlanMode(rec["plan"], `${at}.plan`);
+    const completion = rec["completion"] === undefined ? undefined : parseCompletion(rec["completion"], `${at}.completion`);
+    const humanReview = rec["humanReview"] === undefined ? undefined : parseHumanReview(rec["humanReview"], `${at}.humanReview`);
+    if ((completion === "human_review") !== (humanReview !== undefined)) {
+      fail(`${at}.humanReview is required with completion "human_review" and not allowed otherwise`);
+    }
+    const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"]));
+    if (allowCommands === false && (policy?.commands.length ?? 0) > 0) fail(`${at}.policy.commands must be empty with allowCommands false`);
+    workflows[id] = {
+      ...(label === undefined ? {} : { label }),
+      tools: parseToolList(rec["tools"], `${at}.tools`),
+      ...(instructions === undefined ? {} : { instructions }),
+      ...(plan === undefined ? {} : { plan }),
+      ...(completion === undefined ? {} : { completion }),
+      ...(humanReview === undefined ? {} : { humanReview }),
+      ...(allowCommands === undefined ? {} : { allowCommands }),
+      ...(policy === undefined ? {} : { policy }),
+      ...(rec["verifiers"] === undefined ? {} : { verifiers: prefixed(at, () => parseVerifiers(rec["verifiers"])) }),
+      ...(rec["limits"] === undefined ? {} : { limits: prefixed(at, () => parsePartialLimits(rec["limits"])) }),
+    };
+  });
+  return workflows;
 }
 
 /** Validates a parsed config file. Unknown fields are rejected. */
@@ -179,6 +247,7 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
       "integrity",
       "language",
       "profiles",
+      "workflows",
     ]);
     if (rec["schemaVersion"] !== CONFIG_SCHEMA_VERSION) fail("config schemaVersion must be 1");
     const model = parseModelText(rec["model"]);
@@ -193,6 +262,7 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
     const integrity = rec["integrity"] === undefined ? undefined : parseIntegrity(rec["integrity"]);
     const language = parseLanguage(rec["language"]);
     const profiles = rec["profiles"] === undefined ? undefined : parseProfiles(rec["profiles"], limits);
+    const workflows = rec["workflows"] === undefined ? undefined : parseWorkflows(rec["workflows"]);
     const config: CodarynConfig = {
       schemaVersion: 1,
       ...(model === undefined ? {} : { model }),
@@ -207,6 +277,7 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
       ...(integrity === undefined ? {} : { integrity }),
       ...(language === undefined ? {} : { language }),
       ...(profiles === undefined ? {} : { profiles }),
+      ...(workflows === undefined ? {} : { workflows }),
     };
     return { ok: true, config };
   } catch (error) {

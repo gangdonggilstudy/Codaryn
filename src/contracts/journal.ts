@@ -1,6 +1,9 @@
 /**
  * Run journal: append-only, masked records under `<workspaceRoot>/.codaryn/`.
  * Free text fields are MaskedText, so raw text cannot be recorded by construction.
+ * AC-D15: tool names and call ids (`tool`, `callId`, `MaskedToolCall.name` and `id`) are plain
+ * strings, but the engine records only a tool name from a tool list or UNKNOWN_TOOL_RECORD_NAME, and
+ * only an id that passes CALL_ID_PATTERN_SOURCE and masking (else a replacement), see `ToolCall`.
  * File originals kept for revert (`SNAPSHOTS_DIR_NAME`) are never part of the journal.
  */
 

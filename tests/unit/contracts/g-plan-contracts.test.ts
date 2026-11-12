@@ -40,6 +40,7 @@ import {
   PLAN_STATUSES,
   POLICY_DENIAL_CODES,
   QUICK_TASK_WORKFLOW,
+  QUICK_WORKFLOW_ARGUMENT,
   RESULT_FILE_NAME,
   REVERT_ACTIONS,
   REVERT_RECORD_FILE_NAME,
@@ -49,6 +50,8 @@ import {
   REVIEW_VERDICTS,
   RUN_EXIT_CODES,
   RUN_REASONS,
+  RUN_REASONS_BY_STATUS,
+  isReasonOfStatus,
   RUNS_DIR_NAME,
   SNAPSHOTS_DIR_NAME,
   STATE_DIR_NAME,
@@ -61,9 +64,14 @@ import {
 } from "../../../src/contracts/index.js";
 import type {
   ApplyJournalEvent,
+  ApplyResult,
+  ApplySummaryContext,
+  CreatePlanExecutor,
+  HumanOutput,
   EngineResult,
   JournalEvent,
   ModelRequest,
+  ReviewRecord,
   RunReasonByStatus,
   StoredPlan,
   VerifierConfig,
@@ -89,6 +97,23 @@ type ConfiguredInventory = Extract<VerifierConfig["kind"], "inventory">;
 const inventoryNotConfigurable: [ConfiguredInventory] extends [never] ? true : false = true;
 /** A model request without workflow tools is still a valid request (legacy shape). */
 const legacyRequest: ModelRequest = { system: "" as ModelRequest["system"], messages: [], tools: ["read_file"] };
+/** The renderer's apply methods take the apply records and result; optional until N-C adds them. */
+const renderer: Pick<HumanOutput, "applyProgressLine" | "applySummary"> = {
+  applyProgressLine: (event: ApplyJournalEvent) => (event.type === "file_moved" ? "moved\n" : null),
+  applySummary: (_result: ApplyResult, context: ApplySummaryContext) => `${context.workspaceForm}\n`,
+};
+const noRenderer: Pick<HumanOutput, "applyProgressLine" | "applySummary"> = {};
+void [renderer, noRenderer];
+/** G-C's factory shape: an executor is made from the workspace, its real root and the apply run id. */
+const makeExecutor: CreatePlanExecutor = ({ workspace, workspaceRoot, runId }) => {
+  void [workspace, workspaceRoot, runId];
+  return { check: async () => null, apply: async () => ({ ok: false, problem: "io_error" }) };
+};
+void makeExecutor;
+/** R-4 L-4: a review note is masked text; a plain string does not type-check as one. */
+// @ts-expect-error a raw note cannot be stored
+const rawNote: ReviewRecord["note"] = "typed by a person" as string;
+void rawNote;
 /** A result as phase 3 wrote it still type-checks: `plan` and `review` are optional. */
 const legacyResult: EngineResult = {
   schemaVersion: 1,
@@ -119,6 +144,26 @@ describe("G-A run reasons and exit codes", () => {
     assert.ok(unique(RUN_REASONS));
     assert.deepEqual([...TERMINAL_RUN_STATUSES], ["done", "failed", "needs-input", "cancelled", "budget-exhausted"]);
     assert.deepEqual(RUN_EXIT_CODES, { done: 0, failed: 1, "needs-input": 3, "budget-exhausted": 4, cancelled: 5 });
+  });
+
+  test("DR-16: one table lists every reason under exactly one status, the same reasons as RUN_REASONS", () => {
+    assert.deepEqual(Object.keys(RUN_REASONS_BY_STATUS).sort(), [...TERMINAL_RUN_STATUSES].sort());
+    const listed = Object.values(RUN_REASONS_BY_STATUS).flat() as string[];
+    assert.ok(unique(listed), "no reason under two statuses");
+    assert.deepEqual([...listed].sort(), [...RUN_REASONS].sort());
+    assert.deepEqual(RUN_REASONS_BY_STATUS["needs-input"].filter((reason) => reason === "plan_pending" || reason === "awaiting_review"), [
+      "plan_pending",
+      "awaiting_review",
+    ]);
+    assert.ok(RUN_REASONS_BY_STATUS.failed.includes("plan_stale") && RUN_REASONS_BY_STATUS.failed.includes("apply_incomplete"));
+  });
+
+  test("DR-16: isReasonOfStatus answers from the table", () => {
+    assert.equal(isReasonOfStatus("needs-input", "plan_pending"), true);
+    assert.equal(isReasonOfStatus("done", "plan_pending"), false);
+    assert.equal(isReasonOfStatus("failed", "verified"), false);
+    assert.equal(isReasonOfStatus("done", "verified"), true);
+    assert.equal(isReasonOfStatus("cancelled", "toString"), false);
   });
 
   test("the new CLI errors are input errors (exit code 2)", () => {
@@ -159,6 +204,35 @@ describe("G-A codes and the message catalog", () => {
     assert.ok(unique(MESSAGE_IDS));
   });
 
+  test("apply runs, plan runs and review have their messages; approval channels and item problems are listed ids", () => {
+    const ids = new Set<string>(MESSAGE_IDS);
+    for (const channel of APPROVAL_CHANNELS) assert.ok(ids.has(`approval.${channel}`), channel);
+    for (const problem of PLAN_ITEM_PROBLEMS) assert.ok(ids.has(`plan.problem.${problem}`), problem);
+    const expected: Record<string, Record<string, string>> = {
+      "summary.form.task": {},
+      "summary.form.given": {},
+      "summary.form.current": {},
+      "summary.plan_ready": { actions: "count" },
+      "summary.next_plan": { form: "text", runId: "runId" },
+      "summary.next_apply": { form: "text", runId: "runId" },
+      "summary.review_checklist": { count: "count" },
+      "summary.next_review": { form: "text", runId: "runId" },
+      "summary.apply_actions": { applied: "count", total: "count" },
+      "summary.apply_plan_run": { runId: "runId" },
+      "progress.apply_started": { actions: "count", approval: "text" },
+      "progress.plan_checked": { count: "count" },
+      "progress.plan_item_problem": { number: "count", problem: "text" },
+      "progress.inventory_limit": {},
+      "progress.file_moved": { number: "count" },
+      "progress.file_discarded": { number: "count" },
+      "progress.plan_item_failed": { number: "count", problem: "text" },
+    };
+    for (const [id, params] of Object.entries(expected)) {
+      assert.ok(ids.has(id), id);
+      assert.deepEqual(FIXED_MESSAGES[id as keyof typeof FIXED_MESSAGES], params, id);
+    }
+  });
+
   test("every revert action has its fixed message without parameters", () => {
     assert.deepEqual([...REVERT_ACTIONS], ["restored", "deleted", "moved_back", "restored_from_discard"]);
     for (const action of REVERT_ACTIONS) {
@@ -175,6 +249,11 @@ describe("G-A plan contract", () => {
   test("plan modes are P0 only; P1's run mode is not part of the contract", () => {
     assert.deepEqual([...PLAN_MODES], ["none", "apply"]);
     assert.deepEqual([...PLAN_ACTION_KINDS], ["move", "discard"]);
+  });
+
+  test("DR-18 (b): a move the file system cannot make without risk of replacing a file has its own problem code", () => {
+    assert.ok((PLAN_ITEM_PROBLEMS as readonly string[]).includes("unsafe_move"));
+    assert.ok((MESSAGE_IDS as readonly string[]).includes("plan.problem.unsafe_move"));
   });
 
   test("problem and channel lists have no duplicates", () => {
@@ -219,6 +298,10 @@ describe("G-A workflow ids", () => {
     assert.ok(unique(BUILTIN_WORKFLOW_IDS));
     assert.ok((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(QUICK_TASK_WORKFLOW));
     assert.deepEqual([...COMPLETION_MODES], ["verifiers", "human_review"]);
+  });
+
+  test("DR-2: the quick form names a definition with --workflow", () => {
+    assert.equal(QUICK_WORKFLOW_ARGUMENT, "--workflow");
   });
 
   test("no new task or config field name reads as a key field (S-6)", () => {

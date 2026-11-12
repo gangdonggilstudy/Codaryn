@@ -345,8 +345,10 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```ts
 changes(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
 
-interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[]; applyRun?: ChangesApplyRun }
+interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[]; applyRun?: ChangesApplyRun; recordsChanged?: true }
 // U-16 (UXM-4): 적용 실행일 때만. 그 실행이 적용한 계획 실행과 적용한 동작 수(실행 목록의 판정). 이동·폐기는 계획의 동작이라 files는 비어 있다. 결과가 아직 없으면 없다.
+// U-43 (DR-38): 기록 변경 표시가 있는 실행일 때만 true. store의 hasRecordsChangedMark(report·revert와 같은 판정)로 정하고, 확인하지 못한 표시도 표시로 센다(fail closed).
+//   그런 실행은 store가 shown 기록을 주지 않으므로 파일 글 없이 경로와 상태만 있다(masking_unverified). 표시가 그 까닭을 알린다. CLI changes --json은 이 출력을 그대로 찍는다.
 interface ChangesApplyRun { planRunId: RunId; actions: number }
 interface ChangedFileView {
   path: MaskedText;                    // 기록의 경로

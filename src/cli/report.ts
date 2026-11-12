@@ -503,7 +503,8 @@ function renderReportText(report: RunReportOutput, failedToolCalls: number): str
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
-  out.push(`- Task: ${code(journal.taskId)} (workflow ${code(journal.workflow)})`);
+  // DR-50 (U-58): the words for people; the JSON keeps its field `workflow`.
+  out.push(`- Task: ${code(journal.taskId)} (task type ${code(journal.workflow)})`);
   out.push(
     `- Provider: ${code(journal.provider)}${journal.provider === "scripted" ? " (scripted model; no API was called)" : ""}`,
   );

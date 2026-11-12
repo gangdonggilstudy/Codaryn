@@ -6,8 +6,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { localeLanguage, parseMessageLanguage, runtimeLocale, selectMessageLanguage } from "../../../src/i18n/index.js";
+import { explainMessageLanguage, localeLanguage, parseMessageLanguage, runtimeLocale, selectMessageLanguage } from "../../../src/i18n/index.js";
 import type { MessageLanguageInput } from "../../../src/contracts/index.js";
+import { LANGUAGE_SOURCES } from "../../../src/contracts/index.js";
 
 function select(over: Partial<MessageLanguageInput>): string {
   return selectMessageLanguage({ env: null, config: null, osLocale: null, ...over });
@@ -52,6 +53,44 @@ describe("i18n language: precedence", () => {
       for (const osLocale of probes) {
         const language = select({ env, osLocale });
         assert.ok(language === "ko" || language === "en", language);
+      }
+    }
+  });
+});
+
+describe("i18n language: explainMessageLanguage (N-20)", () => {
+  function explain(over: Partial<MessageLanguageInput>) {
+    return explainMessageLanguage({ env: null, config: null, osLocale: null, ...over });
+  }
+
+  test("names the rule that decided", () => {
+    assert.deepEqual(explain({ env: "ko", config: "en", osLocale: "en-US" }), { language: "ko", source: "env", envIgnored: false });
+    assert.deepEqual(explain({ config: "en", osLocale: "ko-KR" }), { language: "en", source: "config", envIgnored: false });
+    assert.deepEqual(explain({ osLocale: "ko-KR" }), { language: "ko", source: "os", envIgnored: false });
+    assert.deepEqual(explain({ osLocale: "ja-JP" }), { language: "en", source: "os", envIgnored: false });
+    assert.deepEqual(explain({}), { language: "en", source: "default", envIgnored: false });
+    assert.deepEqual(explain({ osLocale: "und" }), { language: "en", source: "default", envIgnored: false });
+    assert.deepEqual(explain({ osLocale: "C" }), { language: "en", source: "default", envIgnored: false });
+  });
+
+  test("envIgnored is true only for a CODARYN_LANG that is set and neither ko nor en", () => {
+    assert.equal(explain({ env: "probe-fr", config: "ko" }).envIgnored, true);
+    assert.equal(explain({ env: "probe-fr", config: "ko" }).source, "config");
+    for (const env of [null, "", "   ", "ko", " EN "]) assert.equal(explain({ env }).envIgnored, false, String(env));
+  });
+
+  test("agrees with selectMessageLanguage and never carries an input value", () => {
+    const values = [null, "", "ko", "EN", "fr", "probe-value", "ko-KR"];
+    for (const env of values) {
+      for (const config of [null, "ko", "en"] as const) {
+        for (const osLocale of [null, "ko-KR", "en-US", "und", "probe-locale"]) {
+          const input = { env, config, osLocale };
+          const choice = explainMessageLanguage(input);
+          assert.equal(choice.language, selectMessageLanguage(input));
+          assert.ok((LANGUAGE_SOURCES as readonly string[]).includes(choice.source));
+          assert.deepEqual(Object.keys(choice).sort(), ["envIgnored", "language", "source"]);
+          assert.ok(!JSON.stringify(choice).includes("probe"));
+        }
       }
     }
   });

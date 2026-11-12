@@ -6,10 +6,11 @@
  * Order (security checks S-1 to S-9 from `./security`):
  *  1. arguments; every path given on the command line must be a local path (S-5)
  *  2. `--vars-file` (T-15): read, reject a BOM, load; values it newly set become secrets (S-4)
- *  3. current key; CODARYN_CONFIG must be a local path (S-5); `--goal` must not hold a key (S-8)
+ *  3. current key; the config file: `--config`, CODARYN_CONFIG (a local path, S-5) or the default
+ *     location (N-1); `--goal` or the one-line goal (N-9) must not hold a key (S-8)
  *  4. config and task files: read, key check on the raw text, parse, key check on the parsed
  *     value with a depth limit (S-6). A key stops the run before anything else is checked
- *  5. validate the config (S-3, S-7, S-9), then the task (S-3, S-5, S-7)
+ *  5. validate the config (S-3, S-7, S-9), apply `--profile` (N-8), then the task (S-3, S-5, S-7)
  *  6. the workspace exists and is apart from the CLI's install directory (U-3); the env, config,
  *     task, script and cancel files are outside it (S-1); `integrity.paths` exist outside it (U-1)
  *  7. secret values: secretEnv (S-3 messages), the key in every run (S-2), env file values (S-4)
@@ -17,12 +18,7 @@
  */
 
 import path from "node:path";
-import {
-  ANTHROPIC_API_KEY_ENV,
-  CLI_ERROR_EXIT_CODES,
-  CODARYN_CONFIG_ENV,
-  RESULT_SCHEMA_VERSION,
-} from "../contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, LEGACY_WORKFLOW_SETTINGS, RESULT_SCHEMA_VERSION, toSchemaFieldPath } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   CliErrorCode,
@@ -31,17 +27,34 @@ import type {
   Clock,
   CodarynConfig,
   CreateAnthropicProvider,
+  DefaultConfigDisplay,
+  DefaultConfigLocation,
   EngineResult,
+  InputDiagnostic,
+  InputDiagnosticFile,
   Journal,
+  MessageLanguage,
+  ResolvedTaskSpec,
   ModelProvider,
   PrivacyGateway,
+  HumanOutput,
+  MessageCatalog,
+  RunSummaryContext,
   RunTask,
+  WorkflowDefinition,
+  WorkflowProblem,
+  WorkflowSettings,
 } from "../contracts/index.js";
+import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
+import { cleanText } from "./text-safety.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
+import type { RunArgs } from "./args.js";
 import type { Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
+import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
+import { jsonSyntaxPosition } from "./json-position.js";
 import { anthropicProviderFactory } from "./provider.js";
 import { createRunId } from "./run-id.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
@@ -58,6 +71,7 @@ import type { PathRelation, WorkspaceLocation } from "./security/index.js";
 import { envValue, resolveAnthropicSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
+import type { InputErrorPosition } from "./task.js";
 
 export interface CliEnvironment {
   readonly argv: readonly string[];
@@ -96,16 +110,81 @@ export interface CliEnvironment {
   readonly relatePaths?: (target: string, base: string) => Promise<PathRelation>;
   /** U-8: writes one progress line (with its line feed) to stderr. Absent or `--quiet`: no progress. */
   readonly writeProgress?: (line: string) => void;
+  /**
+   * N-1: the default config location (`findDefaultConfigLocation` in the real CLI), read when
+   * neither `--config` nor CODARYN_CONFIG is given and a file exists there. Absent or null: none.
+   */
+  readonly defaultConfig?: DefaultConfigLocation | null;
+  /**
+   * N-4, N-5: the human renderer and the catalog for the config file's language (null when it has
+   * none). Called once the config is read. Absent: English progress lines and no end summary.
+   */
+  readonly human?: (configLanguage: MessageLanguage | null) => { readonly output: HumanOutput; readonly messages: MessageCatalog };
+}
+
+/**
+ * What the human-readable output needs besides the output itself (N-4, N-5, N-17). Holds no typed
+ * or file value: `summary` is exactly the contract's RunSummaryContext.
+ */
+export interface RunOutcomeInfo {
+  /** The valid config file's `language`, or null (N-4). */
+  readonly configLanguage: MessageLanguage | null;
+  readonly summary: RunSummaryContext;
+  /** `--quiet`. */
+  readonly quiet: boolean;
+}
+
+/** Filled while a run is prepared and while it runs. */
+export interface RunNotes {
+  configLanguage: MessageLanguage | null;
+  configDefault: DefaultConfigDisplay | null;
+  /** N-17: `tool_decision` records with `allowed: false`, as ReportJournalSummary counts them. */
+  deniedToolCalls: number;
+  /** N-23: the denied calls whose permission is `command`. */
+  deniedCommandCalls: number;
 }
 
 export interface CliRunOutcome {
   readonly output: CliOutput;
   readonly exitCode: number;
+  /** Absent when the arguments could not be parsed. */
+  readonly info?: RunOutcomeInfo;
 }
 
-function error(code: CliErrorCode, message: string): { output: CliErrorOutput; exitCode: number } {
+function error(code: CliErrorCode, message: string, diagnostic?: InputDiagnostic): { output: CliErrorOutput; exitCode: number } {
   const exitCode = CLI_ERROR_EXIT_CODES[code];
-  return { output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message }, exitCode };
+  return {
+    output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message, ...(diagnostic === undefined ? {} : { diagnostic }) },
+    exitCode,
+  };
+}
+
+/**
+ * N-15: a validator's position as an InputDiagnostic, or undefined when it is not a plain schema
+ * field path (then nothing about the position is printed).
+ */
+export function positionDiagnostic(file: InputDiagnosticFile, position: InputErrorPosition | undefined): InputDiagnostic | undefined {
+  if (position === undefined) return undefined;
+  const field = toSchemaFieldPath(position.field);
+  if (field === null) return undefined;
+  if (position.code !== "unknown_field") return { code: position.code, file, field, line: null, column: null };
+  const suggestion = position.suggestion === undefined || position.suggestion === null ? null : toSchemaFieldPath(position.suggestion);
+  return { code: "unknown_field", file, field, line: null, column: null, suggestion };
+}
+
+/** N-15: the message and diagnostic for a file JSON.parse rejected; the parser's own text is never used. */
+export function jsonSyntaxError(label: string, file: InputDiagnosticFile, text: string): { message: string; diagnostic: InputDiagnostic } {
+  const at = jsonSyntaxPosition(text);
+  return {
+    message: `the ${label} cannot be read as JSON${at === null ? "" : ` (line ${at.line}, column ${at.column})`}`,
+    diagnostic: { code: "json_syntax", file, field: null, line: at?.line ?? null, column: at?.column ?? null },
+  };
+}
+
+/** N-15: a message that starts with a schema field path (the script parser's messages do). */
+function headDiagnostic(file: InputDiagnosticFile, message: string): InputDiagnostic | undefined {
+  const field = toSchemaFieldPath(message.split(" ", 1)[0] ?? "");
+  return field === null ? undefined : { code: "invalid_value", file, field, line: null, column: null };
 }
 
 /** One CliErrorOutput and its exit code. The message must not contain secrets or file contents. */
@@ -123,21 +202,86 @@ function isModelNotFound(message: string): boolean {
   return message.startsWith("HTTP 404");
 }
 
-function withModelHint(result: EngineResult, privacy: PrivacyGateway, write: ((line: string) => void) | undefined): EngineResult {
+function withModelHint(
+  result: EngineResult,
+  privacy: PrivacyGateway,
+  write: ((line: string) => void) | undefined,
+  /** N-4: the progress line in the chosen language; the notice in the result stays English. */
+  progressText: string = MODEL_NOT_FOUND_HINT,
+): EngineResult {
   const masked = privacy.mask(MODEL_NOT_FOUND_HINT);
   if (!masked.ok) return result;
-  if (write !== undefined) {
-    try {
-      write(`${PROGRESS_PREFIX}${masked.text}\n`);
-    } catch {
-      // Progress is best effort.
-    }
-  }
+  if (write !== undefined) writeMasked(write, privacy, progressText);
   return { ...result, notices: [...result.notices, masked.text] };
 }
 
+/** G-A: what each workflow problem means, after the field position (never a value). */
+const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
+  unknown_workflow: "names no built-in workflow and no workflows entry of the config file",
+  tool_not_allowed: "names a tool the workflow definition does not offer (tools only narrow)",
+  plan_weakened: 'cannot be "none" under a workflow with plan "apply"',
+  commands_not_allowed: "must be empty: the workflow allows no command",
+  review_without_checklist: 'is required with completion "human_review"',
+  checklist_without_review: 'is only allowed with completion "human_review"',
+  instructions_too_long: "is longer than the limit",
+  checklist_too_long: "must have 1 to the maximum number of non-blank lines within the length limit",
+};
+
+/**
+ * G-A: the config as a task sees it when a workflow definition applies: the definition's limits
+ * under the config's (and so under the profile's); in the quick form its policy and verifiers
+ * under the config's too.
+ */
+function underDefinition(config: CodarynConfig | null, definition: WorkflowDefinition, quick: boolean): CodarynConfig {
+  const base: CodarynConfig = config ?? { schemaVersion: 1 };
+  const limits = definition.limits === undefined ? base.limits : { ...definition.limits, ...(base.limits ?? {}) };
+  const policy = quick ? (base.policy ?? definition.policy) : base.policy;
+  const verifiers = quick ? (base.verifiers ?? definition.verifiers) : base.verifiers;
+  return {
+    ...base,
+    ...(limits === undefined ? {} : { limits }),
+    ...(policy === undefined ? {} : { policy }),
+    ...(verifiers === undefined ? {} : { verifiers }),
+  };
+}
+
+/**
+ * G-A: the resolved task carries every workflow field when a workflow applies; a task with no
+ * workflow keeps none of them, so it runs exactly as before stage 4 (GT-U14).
+ */
+function withWorkflow(task: ResolvedTaskSpec, workflowRef: string | null, settings: WorkflowSettings): ResolvedTaskSpec {
+  if (workflowRef === null && settings === LEGACY_WORKFLOW_SETTINGS) return task;
+  const { humanReview: _drop, ...rest } = task;
+  return {
+    ...rest,
+    ...(workflowRef === null ? {} : { workflowRef }),
+    tools: settings.tools,
+    instructions: settings.instructions,
+    plan: settings.plan,
+    completion: settings.completion,
+    ...(settings.humanReview === null ? {} : { humanReview: settings.humanReview }),
+  };
+}
+
+/** Writes one masked progress line; best effort. */
+function writeMasked(write: (line: string) => void, privacy: PrivacyGateway, text: string): void {
+  const masked = privacy.mask(`${PROGRESS_PREFIX}${text}`);
+  if (!masked.ok) return;
+  try {
+    write(`${masked.text}\n`);
+  } catch {
+    // Progress is best effort.
+  }
+}
+
+/** Adds one masked notice to the result (and so to result.json). */
+function withNotice(result: EngineResult, privacy: PrivacyGateway, text: string): EngineResult {
+  const masked = privacy.mask(text);
+  return masked.ok ? { ...result, notices: [...result.notices, masked.text] } : result;
+}
+
 /** Task, config and script files may start with a UTF-8 byte order mark (common on Windows). */
-async function readText(io: CliEnvironment, file: string): Promise<string | null> {
+async function readText(io: Pick<CliEnvironment, "readFile">, file: string): Promise<string | null> {
   try {
     return (await io.readFile(file)).replace(/^﻿/, "");
   } catch {
@@ -160,6 +304,11 @@ function scrub(message: string, secrets: readonly string[]): string {
 
 const KEY_HINT = `keys are read only from the ${ANTHROPIC_API_KEY_ENV} environment variable`;
 
+/** N-1: shown in the progress lines and the result's notices when the default location was used. */
+export function defaultConfigNotice(display: string): string {
+  return `settings were read from the default config file location ${display}`;
+}
+
 /** A file read before the run, with where it came from and the error code that belongs to it. */
 interface InputFile {
   readonly label: string;
@@ -173,7 +322,66 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const parsed = parseArgs(io.argv);
   if (!parsed.ok) return error("invalid_arguments", parsed.message);
   const args = parsed.args;
+  const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0 };
+  const outcome = await runParsed(io, args, notes);
+  return { ...outcome, info: { configLanguage: notes.configLanguage, summary: summaryContext(args, notes), quiet: args.quiet } };
+}
 
+/** N-5, N-17, N-23: what the end summary needs; no typed or file value. */
+function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
+  return {
+    workspaceForm: args.input.kind === "task" ? "task" : args.input.oneLine ? "current" : "given",
+    configDefault: notes.configDefault,
+    profileApplied: args.profile !== null,
+    deniedToolCalls: notes.deniedToolCalls,
+    deniedCommandCalls: notes.deniedCommandCalls,
+    policySource: args.input.kind === "task" ? "task" : "config",
+  };
+}
+
+/** Writes human text (several lines) masked with the run's gateway and cleaned; best effort. */
+function writeHuman(write: (line: string) => void, privacy: PrivacyGateway, text: string): void {
+  if (text.length === 0) return;
+  const masked = privacy.mask(text);
+  if (!masked.ok) return;
+  try {
+    write(`${cleanText(masked.text, true).replace(/\t/g, " ").replace(/\n?$/, "\n")}`);
+  } catch {
+    // Human output is best effort.
+  }
+}
+
+/** What `prepareTask` reads besides the arguments: the parts of CliEnvironment steps 1 to 7 use. */
+export type PrepareEnvironment = Pick<
+  CliEnvironment,
+  "env" | "cwd" | "readFile" | "isDirectory" | "loadEnvFile" | "locateInWorkspace" | "relatePaths" | "installDir" | "defaultConfig"
+>;
+
+/** A task ready to run, plan, apply or review: steps 1 to 7 passed. */
+export interface PreparedTask {
+  readonly task: ResolvedTaskSpec;
+  readonly config: CodarynConfig | null;
+  /** Every registered secret value (S-2 to S-4). */
+  readonly secrets: readonly string[];
+  readonly integrityPaths: readonly string[];
+  readonly defaultDisplay: DefaultConfigDisplay | null;
+}
+
+/**
+ * Steps 1 to 7 (arguments, variable file, key, config and task files, validation, workspace,
+ * secrets), shared by `run`, `plan`, `apply` and `review` (DR-17): each registers the same
+ * secrets and resolves the same task. An error outcome, or the prepared task.
+ */
+export async function prepareTask(
+  io: PrepareEnvironment,
+  args: RunArgs,
+  notes: RunNotes,
+  /**
+   * `secrets: false` (review without a note, R-4 L-4): the secretEnv variables are not read, so a
+   * missing one does not stop the command. The key and the variable file's values are still kept.
+   */
+  options: { readonly secrets?: boolean } = {},
+): Promise<CliRunOutcome | { readonly prepared: PreparedTask }> {
   // 1. S-5: nothing given on the command line may reach another machine or a device.
   const argumentPaths: [string | null, CliErrorCode, string][] = [
     [args.input.kind === "task" ? args.input.taskPath : null, "invalid_task", "--task"],
@@ -186,6 +394,20 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     if (given === null) continue;
     const problem = localPathProblem(given, io.cwd);
     if (problem !== null) return error(code, `the path given by ${option} ${problem}`);
+  }
+
+  // U-3, review R-6 low 2: the quick form names its workspace on the command line, so the install
+  // directory is refused before any file is read; otherwise a missing config would be reported
+  // first. A workspace that cannot be resolved here is judged with the task later.
+  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
+  if (args.input.kind === "quick" && io.installDir !== undefined && io.installDir !== null) {
+    const relation = await relate(path.resolve(io.cwd, args.input.workspace), io.installDir);
+    if (relation === "same" || relation === "inside" || relation === "contains") {
+      return error(
+        "workspace_is_install_dir",
+        "the workspace is the CLI's install directory, lies inside it or contains it; use a separate candidate directory",
+      );
+    }
   }
 
   // 2. The env file. S-4: values it newly sets are registered as secrets later.
@@ -212,25 +434,37 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     envSecrets = selectEnvFileSecrets(before, { ...io.env });
   }
 
-  // 3. The current key, the config path from the environment, and the goal (S-5, S-8).
+  // 3. The current key, the config file (N-1: --config, CODARYN_CONFIG, the default location), the goal (S-5, S-8).
   const currentKey = envValue(io.env, ANTHROPIC_API_KEY_ENV);
-  const configFromEnv = args.configPath === null ? envValue(io.env, CODARYN_CONFIG_ENV) : null;
-  if (configFromEnv !== null) {
-    const problem = localPathProblem(configFromEnv, io.cwd);
-    if (problem !== null) return error("invalid_config", `the path given by ${CODARYN_CONFIG_ENV} ${problem}`);
-  }
+  const chosen = chooseConfigFile({ argument: args.configPath, env: io.env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
+  if (!chosen.ok) return error("invalid_config", chosen.message);
   if (args.input.kind === "quick" && goalHoldsKey(args.input.goal, currentKey)) {
     return error("key_in_file", `the goal contains a key value; ${KEY_HINT}`);
   }
 
   // 4. Read both files, then look for a key in each before anything else is judged (C-1, S-6).
   const files: InputFile[] = [];
-  const configSource = args.configPath ?? configFromEnv;
-  if (configSource !== null) {
-    const configPath = path.resolve(io.cwd, configSource);
-    const text = await readText(io, configPath);
-    if (text === null) return error("invalid_config", "the config file cannot be read as JSON");
-    files.push({ label: "config file", path: configPath, code: "invalid_config", text });
+  const candidate = chosen.candidate;
+  let defaultDisplay: DefaultConfigDisplay | null = null;
+  if (candidate !== null) {
+    let text: string | null = null;
+    try {
+      text = (await io.readFile(candidate.path)).replace(/^\uFEFF/, "");
+    } catch (failure) {
+      // N-1: no file at the default location means no config file, as before. Anything else stops.
+      if (!(candidate.optional && isMissingFile(failure))) {
+        return error(
+          "invalid_config",
+          candidate.source === "default"
+            ? `the config file at the default location ${candidate.display} cannot be read`
+            : "the config file cannot be read as JSON",
+        );
+      }
+    }
+    if (text !== null) {
+      files.push({ label: "config file", path: candidate.path, code: "invalid_config", text });
+      if (candidate.source === "default") defaultDisplay = io.defaultConfig?.display ?? null;
+    }
   }
   if (args.input.kind === "task") {
     const taskPath = path.resolve(io.cwd, args.input.taskPath);
@@ -241,9 +475,13 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   for (const file of files) {
     if (rawTextHoldsKey(file.text, currentKey)) return error("key_in_file", `the ${file.label} contains a key value; ${KEY_HINT}`);
   }
+  const fileKind = (code: "invalid_config" | "invalid_task"): InputDiagnosticFile => (code === "invalid_config" ? "config" : "task");
   for (const file of files) {
     const json = parseJson(file.text);
-    if (!json.ok) return error(file.code, `the ${file.label} cannot be read as JSON`);
+    if (!json.ok) {
+      const syntax = jsonSyntaxError(file.label, fileKind(file.code), file.text);
+      return error(file.code, syntax.message, syntax.diagnostic);
+    }
     file.value = json.value;
   }
   for (const file of files) {
@@ -252,28 +490,55 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
       return error("key_in_file", `the ${file.label} has a key field or key value at ${found.location}; ${KEY_HINT}`);
     }
     if (found.kind === "too_deep") {
-      return error(file.code, `the ${file.label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`);
+      return error(file.code, `the ${file.label} is nested more than ${MAX_KEY_SCAN_DEPTH} levels deep`, {
+        code: "too_deep",
+        file: fileKind(file.code),
+        field: null,
+        line: null,
+        column: null,
+      });
     }
   }
   const configFile = files.find((file) => file.code === "invalid_config") ?? null;
   const taskFile = files.find((file) => file.code === "invalid_task") ?? null;
 
-  // 5. Validate the config, then the task.
+  // 5. Validate the config, apply --profile (N-8), then the task.
   let config: CodarynConfig | null = null;
   if (configFile !== null) {
     const outcome = parseConfig(configFile.value);
-    if (!outcome.ok) return error("invalid_config", outcome.message);
+    if (!outcome.ok) return error("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
     config = outcome.config;
+    notes.configLanguage = config.language ?? null;
+    notes.configDefault = defaultDisplay;
   }
+  let profileWorkflowRef: string | null = null;
+  if (args.profile !== null) {
+    profileWorkflowRef = (config?.profiles ?? {})[args.profile]?.workflowRef ?? null;
+    const selected = selectProfile(config, args.profile);
+    if (!selected.ok) return error("invalid_config", selected.message);
+    config = selected.config;
+  }
+
+  // G-A (GT-D1): the workflow definition named by the task's workflowRef, --workflow or the
+  // profile. Its limits lie under the config's; in the quick form its policy and verifiers too.
+  const definitions = workflowDefinitions(config?.workflows);
+  const rawTaskRef = taskFile === null ? undefined : (taskFile.value as { workflowRef?: unknown } | null)?.workflowRef;
+  const requestedRef = (typeof rawTaskRef === "string" ? rawTaskRef : null) ?? args.workflow ?? profileWorkflowRef;
+  const definition = requestedRef !== null && Object.hasOwn(definitions, requestedRef) ? definitions[requestedRef] : undefined;
+  const taskConfig = definition === undefined ? config : underDefinition(config, definition, taskFile === null);
 
   const taskOutcome =
     taskFile !== null
-      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: config?.limits })
+      ? parseTask(taskFile.value, path.dirname(taskFile.path), { limits: taskConfig?.limits })
       : args.input.kind === "quick"
-        ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config })
+        ? buildQuickTask({ workspace: args.input.workspace, goal: args.input.goal, cwd: io.cwd, config: taskConfig, workflowRef: args.workflow })
         : null;
   if (taskOutcome === null) return error("internal_error", "no task input");
-  if (!taskOutcome.ok) return error(taskOutcome.code, taskOutcome.message);
+  if (!taskOutcome.ok) {
+    // A task file's own fields are "task"; limits bounded by the config file and the quick form are "config".
+    const file: InputDiagnosticFile = taskFile !== null && taskOutcome.code === "invalid_task" ? "task" : "config";
+    return error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+  }
 
   // Where each secret name came from, for S-3 messages that give a position, never a name.
   const secretSources: { readonly name: string; readonly field: string; readonly index: number }[] = [];
@@ -284,13 +549,31 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
       if (!secretSources.some((source) => source.name === name)) secretSources.push({ name, field: "secretEnv", index });
     });
   }
-  const task = withConfigSecrets(taskOutcome.task, config);
+  // G-A: resolve the workflow settings under the definition's ceilings (resolveWorkflow).
+  const parsed = taskOutcome.task;
+  const resolved = resolveWorkflow({
+    definitions,
+    task: {
+      ...(parsed.workflowRef === undefined ? {} : { workflowRef: parsed.workflowRef }),
+      ...(parsed.tools === undefined ? {} : { tools: parsed.tools }),
+      ...(parsed.plan === undefined ? {} : { plan: parsed.plan }),
+      ...(parsed.completion === undefined ? {} : { completion: parsed.completion }),
+      ...(parsed.humanReview === undefined ? {} : { humanReview: parsed.humanReview }),
+    },
+    profileWorkflowRef,
+    commandRules: parsed.policy.commands.length,
+  });
+  if (!resolved.ok) {
+    const fromConfig = taskFile === null || resolved.field.startsWith("profiles") || resolved.field.startsWith("workflows");
+    const file: InputDiagnosticFile = fromConfig ? "config" : "task";
+    return error(fromConfig ? "invalid_config" : "invalid_task", `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`, positionDiagnostic(file, { code: "invalid_value", field: resolved.field }));
+  }
+  const task = withConfigSecrets(withWorkflow(parsed, resolved.workflowRef, resolved.settings), config);
 
   // 6. The workspace, and S-1: no file that shapes this or a later run may lie inside it.
   if (!(await io.isDirectory(task.workspaceRoot))) {
     return error("workspace_not_found", "workspaceRoot is not an existing directory");
   }
-  const relate = io.relatePaths ?? ((target: string, base: string) => relateRealPaths(target, base));
   // U-3: the running CLI must not work on its own installation, by real paths.
   if (io.installDir !== undefined) {
     const relation = io.installDir === null ? "unknown" : await relate(task.workspaceRoot, io.installDir);
@@ -333,7 +616,7 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   const addSecret = (value: string): void => {
     if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
   };
-  for (const source of secretSources) {
+  for (const source of options.secrets === false ? [] : secretSources) {
     const value = io.env[source.name];
     if (value === undefined || value.length === 0) {
       return error("secret_env_missing", secretEnvNotSetMessage(source.field, source.index));
@@ -345,6 +628,18 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
   if (currentKey !== null) addSecret(currentKey);
   // S-4: what the env file set, so a value read back from a file or an output is masked too.
   envSecrets.forEach(addSecret);
+
+  return { prepared: { task, config, secrets, integrityPaths, defaultDisplay } };
+}
+
+async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Promise<CliRunOutcome> {
+  const ready = await prepareTask(io, args, notes);
+  if (!("prepared" in ready)) return ready;
+  const { task, config, integrityPaths, defaultDisplay } = ready.prepared;
+  const secrets = [...ready.prepared.secrets];
+  const addSecret = (value: string): void => {
+    if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
+  };
 
   // 8. The model.
   let model: ModelProvider;
@@ -365,10 +660,14 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
     }
   } else {
     const scriptText = await readText(io, task.model.scriptPath);
-    const scriptJson = scriptText === null ? null : parseJson(scriptText);
-    if (scriptJson === null || !scriptJson.ok) return error("invalid_script", "the script file cannot be read as JSON");
+    if (scriptText === null) return error("invalid_script", "the script file cannot be read as JSON");
+    const scriptJson = parseJson(scriptText);
+    if (!scriptJson.ok) {
+      const syntax = jsonSyntaxError("script file", "script", scriptText);
+      return error("invalid_script", syntax.message, syntax.diagnostic);
+    }
     const script = parseScript(scriptJson.value);
-    if (!script.ok) return error("invalid_script", script.message);
+    if (!script.ok) return error("invalid_script", script.message, headDiagnostic("script", script.message));
     model = createScriptedProvider(script.script);
   }
 
@@ -384,20 +683,66 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
       async append(event) {
         await recorded.append(event);
         if (event.type === "model_error" && isModelNotFound(event.message)) modelNotFound = true;
+        if (event.type === "tool_decision" && !event.allowed) {
+          notes.deniedToolCalls += 1;
+          if (event.permission === "command") notes.deniedCommandCalls += 1;
+        }
       },
       close: () => recorded.close(),
     };
     // U-8: progress lines follow the journal; they start only once the run has started.
     const write = args.quiet ? undefined : io.writeProgress;
     const privacy = assembled.deps.privacy;
-    const deps = { ...assembled.deps, journal: write === undefined ? watched : withProgress(watched, privacy, write) };
+    // N-4, N-5: the human renderer in the chosen language (the config's language is known now).
+    let human: { readonly output: HumanOutput; readonly messages: MessageCatalog } | undefined;
+    try {
+      human = write === undefined ? undefined : io.human?.(notes.configLanguage);
+    } catch {
+      human = undefined;
+    }
+    let announced = defaultDisplay === null;
+    const progressed =
+      write === undefined ? watched : withProgress(watched, privacy, write, human === undefined ? undefined : (event) => human.output.progressLine(event));
+    // N-1: say once, right after the run started, that the default config location was used.
+    const journal: Journal =
+      announced || write === undefined
+        ? progressed
+        : {
+            async append(event) {
+              await progressed.append(event);
+              if (!announced && event.type === "run_started") {
+                announced = true;
+                writeMasked(
+                  write,
+                  privacy,
+                  human !== undefined && defaultDisplay !== null
+                    ? human.messages.format("progress.config_default", { location: defaultDisplay })
+                    : defaultConfigNotice(defaultDisplay ?? ""),
+                );
+              }
+            },
+            close: () => progressed.close(),
+          };
+    const deps = { ...assembled.deps, journal };
     let result: EngineResult | null = null;
     try {
       const ended = await (io.runTask ?? engineRunTask)(deps);
-      result = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write) : ended;
+      const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
+      const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
+      result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));
     } finally {
       // Releases the workspace lock even when the run threw.
       await assembled.finish(result);
+    }
+    // N-5: the end summary on stderr, after the lock is released.
+    if (write !== undefined && human !== undefined) {
+      let summary = "";
+      try {
+        summary = human.output.runSummary(result, summaryContext(args, notes));
+      } catch {
+        summary = "";
+      }
+      writeHuman(write, privacy, summary);
     }
     return { output: result, exitCode: result.exitCode };
   } catch {

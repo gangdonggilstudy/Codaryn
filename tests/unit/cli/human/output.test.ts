@@ -57,6 +57,8 @@ const KIND_CHECKS: Record<string, (value: unknown, produced: Set<string>) => boo
   runId: (value) => typeof value === "string" && toRunId(value) !== null,
   text: (value, produced) => typeof value === "string" && produced.has(value),
   location: (value) => [...Object.values(DEFAULT_CONFIG_DISPLAY), "--config", "CODARYN_CONFIG"].includes(value as string),
+  seconds: (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && Math.abs(value * 10 - Math.round(value * 10)) < 1e-6,
+  language: (value) => value === "ko" || value === "en",
 };
 
 /** A catalog that checks every call against the contract and renders `[id k=v]`. `words` overrides some ids. */
@@ -113,7 +115,7 @@ function result(extra: Partial<EngineResult> = {}): EngineResult {
   };
 }
 
-const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0 };
+const CONTEXT: RunSummaryContext = { workspaceForm: "given", configDefault: null, profileApplied: false, deniedToolCalls: 0, deniedCommandCalls: 0, policySource: "config" };
 
 describe("HumanOutput.error (N-5, N-15)", () => {
   test("what, the diagnostic, how to fix and the code; the English message is not shown", () => {
@@ -124,7 +126,7 @@ describe("HumanOutput.error (N-5, N-15)", () => {
       text,
       [
         "codaryn: [error.label] — [error.invalid_config.what] (invalid_config)",
-        "  [diagnostic.file.config]: [diagnostic.json_syntax line=3 column=14]",
+        "  [diagnostic.file.config] — [diagnostic.json_syntax line=3 column=14]",
         "  [error.fix_label]: [error.invalid_config.fix]",
         "  [error.doctor_hint]",
         "",
@@ -138,7 +140,7 @@ describe("HumanOutput.error (N-5, N-15)", () => {
     const suggest = human.error(
       error("invalid_task", { diagnostic: { code: "unknown_field", file: "task", field: field("limits"), line: null, column: null, suggestion: field("maxModelTurns") } }),
     );
-    assert.ok(suggest.includes("  [diagnostic.file.task]: [diagnostic.unknown_field_suggest field=limits suggestion=maxModelTurns]\n"));
+    assert.ok(suggest.includes("  [diagnostic.file.task] — [diagnostic.unknown_field_suggest field=limits suggestion=maxModelTurns]\n"));
     const plain = human.error(error("invalid_task", { diagnostic: { code: "missing_field", file: "task", field: field("policy.commands[2].executable"), line: null, column: null } }));
     assert.ok(plain.includes("[diagnostic.missing_field field=policy.commands[2].executable]"));
   });
@@ -156,6 +158,17 @@ describe("HumanOutput.error (N-5, N-15)", () => {
     assert.equal(noLine.includes("diagnostic"), false);
   });
 
+  test("N-23(f): a position that falls back to the file root drops the suggestion made for the original position", () => {
+    const text = createHumanOutput(strictCatalog()).error(
+      error("invalid_config", {
+        diagnostic: { code: "unknown_field", file: "config", field: "profiles.hunter2" as SchemaFieldPath, line: null, column: null, suggestion: field("limits") },
+      }),
+    );
+    assert.ok(text.includes("  [diagnostic.file.config] — [diagnostic.unknown_field field=config]\n"), text);
+    assert.equal(text.includes("suggestion"), false);
+    assert.equal(text.includes("hunter2"), false);
+  });
+
   test("doctor is suggested only where it can check the cause; an unknown code shows only the label", () => {
     const human = createHumanOutput(strictCatalog());
     assert.equal(human.error(error("run_not_found")).includes("error.doctor_hint"), false);
@@ -171,9 +184,11 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
       text,
       [
         "── [summary.result status=[status.done] reason=[reason.verified]] (done/verified) ──",
-        "[summary.verifiers passed=2 total=2] · [summary.changes count=2] · [summary.usage turns=4 toolCalls=2 durationMs=78]",
+        "[summary.verifiers passed=2 total=2]",
+        "[summary.changes count=2]",
         "  README.md ([progress.file_changed])",
         "  docs/new.md ([progress.file_created])",
+        "[summary.usage turns=4 toolCalls=2 seconds=0.1]",
         "[advice.verified]",
         `[summary.run_id runId=${RUN}]`,
         `[summary.next_report runId=${RUN}]`,
@@ -190,8 +205,10 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
       configDefault: "%APPDATA%\\Codaryn\\config.json",
       profileApplied: true,
       deniedToolCalls: 3,
+      deniedCommandCalls: 1,
+      policySource: "config",
     });
-    assert.ok(text.includes("[summary.no_verifiers] · [summary.changes count=0] · [summary.denied count=3] · "));
+    assert.ok(text.includes("[summary.no_verifiers]\n[summary.changes count=0]\n[summary.denied count=3]\n[summary.denied_hint]\n[summary.usage "));
     assert.equal(text.split("[summary.denied_hint]").length, 2, "the hint once");
     assert.ok(text.includes("[summary.config_default location=%APPDATA%\\Codaryn\\config.json]"));
     assert.ok(text.includes("[summary.profile_applied]"));
@@ -199,6 +216,41 @@ describe("HumanOutput.runSummary (N-5, N-17)", () => {
     assert.equal(text.includes("next_revert"), false, "nothing to revert without changes");
     const none = createHumanOutput(strictCatalog()).runSummary(result(), CONTEXT);
     assert.equal(none.includes("summary.denied"), false);
+  });
+
+  test("N-23(d): changed files are counted by distinct path, one line per path, as the first record says", () => {
+    const changes = [
+      { path: masked("summary.md"), previousHash: null, newHash: "c".repeat(64), created: true },
+      { path: masked("summary.md"), previousHash: "c".repeat(64), newHash: "d".repeat(64), created: false },
+      { path: masked("README.md"), previousHash: "a".repeat(64), newHash: "b".repeat(64), created: false },
+      { path: masked("summary.md"), previousHash: "d".repeat(64), newHash: "e".repeat(64), created: false },
+    ];
+    const text = createHumanOutput(strictCatalog()).runSummary(result({ changes }), CONTEXT);
+    assert.ok(text.includes("[summary.changes count=2]\n  summary.md ([progress.file_created])\n  README.md ([progress.file_changed])\n"), text);
+    assert.equal(text.split("summary.md").length, 2, "one line for summary.md");
+  });
+
+  test("N-23(e): the hint to allow a command comes only with command denials, and points at the task file for a task run", () => {
+    const human = createHumanOutput(strictCatalog());
+    const pathOnly = human.runSummary(result(), { ...CONTEXT, deniedToolCalls: 2, deniedCommandCalls: 0 });
+    assert.ok(pathOnly.includes("[summary.denied count=2]\n"));
+    assert.equal(pathOnly.includes("denied_hint"), false, "no command was denied");
+    const task = human.runSummary(result(), { ...CONTEXT, workspaceForm: "task", policySource: "task", deniedToolCalls: 2, deniedCommandCalls: 1 });
+    assert.ok(task.includes("[summary.denied count=2]\n[summary.denied_hint_task]\n"), task);
+    assert.equal(task.includes("[summary.denied_hint]"), false);
+    const config = human.runSummary(result(), { ...CONTEXT, deniedToolCalls: 1, deniedCommandCalls: 1 });
+    assert.ok(config.includes("[summary.denied count=1]\n[summary.denied_hint]\n"));
+  });
+
+  test("N-20: usage is given in seconds with one decimal, rounded from milliseconds", () => {
+    const human = createHumanOutput(strictCatalog());
+    const usage = (durationMs: number): string =>
+      human.runSummary(result({ usage: { modelTurns: 1, toolCalls: 0, inputTokens: null, outputTokens: null, durationMs } }), CONTEXT).split("\n").find((line) => line.startsWith("[summary.usage")) ?? "";
+    assert.equal(usage(0), "[summary.usage turns=1 toolCalls=0 seconds=0]");
+    assert.equal(usage(4210), "[summary.usage turns=1 toolCalls=0 seconds=4.2]");
+    assert.equal(usage(4250), "[summary.usage turns=1 toolCalls=0 seconds=4.3]");
+    assert.equal(usage(700), "[summary.usage turns=1 toolCalls=0 seconds=0.7]");
+    assert.equal(usage(123456), "[summary.usage turns=1 toolCalls=0 seconds=123.5]");
   });
 
   test("paths are cleaned and cut, long lists are counted, and a bad run id shows no command", () => {
@@ -232,7 +284,9 @@ describe("HumanOutput.progressLine (N-5, N-14)", () => {
         { type: "tool_decision", callId: "c", tool: "run_command", stage: "policy_effective", allowed: false, permission: "command", code: "command_not_allowed" },
         "[progress.tool_denied tool=[tool.run_command] permission=command code=command_not_allowed]",
       ],
-      [{ type: "tool_decision", callId: "c", tool: SECRET, stage: "validate", allowed: false, permission: null, code: "unknown_tool" }, "[progress.unknown_tool] (check/unknown_tool)"],
+      [{ type: "tool_decision", callId: "c", tool: SECRET, stage: "validate", allowed: false, permission: null, code: "unknown_tool" }, "[progress.tool_rejected tool=[progress.unknown_tool] code=unknown_tool]"],
+      [{ type: "tool_decision", callId: "c", tool: "write_file", stage: "validate", allowed: false, permission: null, code: "invalid_args" }, "[progress.tool_rejected tool=[tool.write_file] code=invalid_args]"],
+      [{ type: "tool_decision", callId: "c", tool: "write_file", stage: "validate", allowed: false, permission: null, code: null }, "[tool.write_file] (check/none)"],
       [{ type: "file_changed", callId: "c", path: masked("notes.txt"), previousHash: null, newHash: "c".repeat(64), created: true }, "[progress.file_created] notes.txt"],
       [verifier(`v-${SECRET}`, "fail"), "[progress.verifier number=1 outcome=[outcome.fail]] (fail)"],
       [verifier("other", "pass"), "[progress.verifier number=2 outcome=[outcome.pass]] (pass)"],
@@ -248,6 +302,29 @@ describe("HumanOutput.progressLine (N-5, N-14)", () => {
       [{ type: "tool_result", result: { callId: "c", ok: true } as never }, null],
     ];
     for (const [event, expected] of events) assert.equal(human.progressLine(event), expected, event.type);
+  });
+
+  test("N-23(h): a key shape split by a control character in a recorded path is hidden", () => {
+    const line = createHumanOutput(strictCatalog()).progressLine({
+      type: "file_changed",
+      callId: "c",
+      path: masked(`sk-ant-AB\u0007CDEFGHIJKLMNOPQRSTUVWXYZ012345.md`),
+      previousHash: null,
+      newHash: "c".repeat(64),
+      created: true,
+    });
+    assert.equal(line, "[progress.file_created] [key].md");
+  });
+
+  test("DR-16: a G-A reason is rendered by the contract's table of reasons per status", () => {
+    const human = createHumanOutput(strictCatalog());
+    assert.equal(
+      human.progressLine({ type: "run_finished", status: "needs-input", reason: "plan_pending", usage: { modelTurns: 1, toolCalls: 0, inputTokens: null, outputTokens: null, durationMs: 1 } }),
+      "[progress.finished status=[status.needs-input] reason=plan_pending]",
+    );
+    const summary = human.runSummary(result({ status: "failed", reason: "apply_incomplete", exitCode: 1 }), CONTEXT);
+    assert.ok(summary.startsWith("── [summary.result status=[status.failed] reason=[reason.apply_incomplete]] (failed/apply_incomplete) ──\n"), summary);
+    assert.ok(summary.includes("[advice.apply_incomplete]"));
   });
 
   test("records with values outside their lists give no line instead of passing them on", () => {
@@ -279,8 +356,8 @@ describe("HumanOutput.revertSummary (N-7)", () => {
       text,
       [
         "codaryn: [revert.done_title count=1] (partial)",
-        "[revert.skipped_title count=2]",
         "  README.md — [revert.action.restored]",
+        "[revert.skipped_title count=2]",
         "  notes.txt — [revert.skip.changed_since_run] (changed_since_run)",
         "  ? — [revert.skip.missing_record] (missing_record)",
         "",
@@ -305,6 +382,93 @@ describe("HumanOutput.revertSummary (N-7)", () => {
     );
   });
 
+  test("DR-25: files moved back unsafely with consent are counted after the reverted list", () => {
+    const text = createHumanOutput(strictCatalog()).revertSummary(
+      output({
+        status: "complete",
+        exitCode: 0,
+        skipped: [],
+        reverted: [
+          { path: "inbox/a.txt", action: "moved_back", from: "docs/a.txt", unsafe: true },
+          { path: "inbox/b.log", action: "restored_from_discard", unsafe: true },
+          { path: "inbox/c.txt", action: "moved_back", from: "docs/c.txt" },
+        ],
+      }),
+    );
+    assert.equal(
+      text,
+      [
+        "codaryn: [revert.done_title count=3] (complete)",
+        "  inbox/a.txt — [revert.action.moved_back]",
+        "  inbox/b.log — [revert.action.restored_from_discard]",
+        "  inbox/c.txt — [revert.action.moved_back]",
+        "[revert.unsafe_moved count=2]",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("DR-25: files skipped as unsafe_move end with the command that reverts again with consent", () => {
+    const text = createHumanOutput(strictCatalog()).revertSummary(output({ reverted: [], skipped: [{ path: "inbox/a.txt", reason: "unsafe_move" }] }));
+    assert.equal(
+      text,
+      [
+        "codaryn: [revert.done_title count=0] (partial)",
+        "[revert.skipped_title count=1]",
+        "  inbox/a.txt — [revert.skip.unsafe_move] (unsafe_move)",
+        `[summary.next_revert_unsafe runId=${RUN}]`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("DR-25: a dry run that lists moves says it did not check the drive, and never counts unsafe moves", () => {
+    const listed = [{ path: "inbox/a.txt", action: "moved_back" as const, from: "docs/a.txt", unsafe: true as const }];
+    const human = createHumanOutput(strictCatalog());
+    assert.equal(
+      human.revertSummary(output({ dryRun: true, status: "complete", exitCode: 0, skipped: [], moveSafetyUnchecked: true, reverted: listed })),
+      ["codaryn: [revert.dry_run_title count=1] (complete)", "  inbox/a.txt — [revert.action.moved_back]", "[revert.dry_run_move_unchecked]", "[revert.dry_run_next]", ""].join("\n"),
+    );
+    assert.equal(
+      human.revertSummary(output({ dryRun: true, status: "complete", exitCode: 0, skipped: [] })).includes("dry_run_move_unchecked"),
+      false,
+      "only when the output says so",
+    );
+  });
+
+  test("N-24(c): an impossible date such as 2026-02-30 shows no time", () => {
+    const human = createHumanOutput(strictCatalog());
+    const revertText = human.revertSummary(output({ revertedBefore: { at: "2026-02-30T00:00:00Z", status: "complete" } }));
+    assert.ok(revertText.includes("[revert.reverted_before] (complete)\n"), revertText);
+    const runs = human.runsText({
+      schemaVersion: 1,
+      kind: "runs",
+      status: "listed",
+      exitCode: 0,
+      omitted: 0,
+      runs: [{ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: null, reason: null, changes: null, reverted: null, revertRecordDamaged: false }],
+    });
+    assert.equal(runs.includes("2026-03-02"), false, runs);
+    assert.ok(runs.split("\n")[1]?.includes("  ?  "), runs);
+  });
+
+  test("G-A: moves and discards put back are named; original_path_taken and already_reverted are skip reasons", () => {
+    const text = createHumanOutput(strictCatalog()).revertSummary(
+      output({
+        reverted: [
+          { path: "a.md", action: "moved_back" },
+          { path: "b.md", action: "restored_from_discard" },
+        ],
+        skipped: [
+          { path: "c.md", reason: "original_path_taken" },
+          { path: "d.md", reason: "already_reverted" },
+        ],
+      }),
+    );
+    assert.ok(text.includes("  a.md — [revert.action.moved_back]\n  b.md — [revert.action.restored_from_discard]\n"), text);
+    assert.ok(text.includes("  c.md — [revert.skip.original_path_taken] (original_path_taken)\n  d.md — [revert.skip.already_reverted] (already_reverted)\n"), text);
+  });
+
   test("an earlier revert with a time of another shape shows no time", () => {
     const text = createHumanOutput(strictCatalog()).revertSummary(output({ revertedBefore: { at: `${SECRET}`, status: "partial" } }));
     assert.ok(text.includes("[revert.reverted_before] (partial)\n"));
@@ -312,8 +476,30 @@ describe("HumanOutput.revertSummary (N-7)", () => {
   });
 });
 
+describe("HumanOutput.latestChosen (N-23 b)", () => {
+  test("names the chosen run and its start time in local time", () => {
+    const startedAt = "2026-11-12T03:04:05.000Z";
+    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt, taskId: `t-${SECRET}`.slice(0, 40), status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false });
+    assert.equal(text, `codaryn: [latest.chosen runId=${RUN}] ([runs.column.started] ${formatLocalTime(Date.parse(startedAt))})\n`);
+    assert.equal(text.includes(SECRET), false);
+  });
+
+  test("an impossible start time is left out", () => {
+    const text = createHumanOutput(strictCatalog()).latestChosen({ state: "checked", runId: RUN, startedAt: "2026-02-30T00:00:00Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: false });
+    assert.equal(text, `codaryn: [latest.chosen runId=${RUN}]\n`);
+  });
+});
+
 describe("HumanOutput.runsText (N-7, N-16)", () => {
   const listed = (runs: RunsOutput["runs"], omitted = 0): RunsOutput => ({ schemaVersion: 1, kind: "runs", status: "listed", exitCode: 0, runs, omitted });
+
+  test("N-23(g): a run whose revert record failed its checks is marked apart, not as damaged", () => {
+    const text = createHumanOutput(strictCatalog()).runsText(
+      listed([{ state: "checked", runId: RUN, startedAt: "2026-01-02T03:04:05.000Z", taskId: "t", status: "done", reason: "verified", changes: 1, reverted: null, revertRecordDamaged: true }]),
+    );
+    assert.ok(text.split("\n")[1]?.endsWith("[status.done] (done/verified) · [runs.revert_record_damaged]"), text);
+    assert.equal(text.includes("[runs.damaged]"), false);
+  });
 
   test("an empty list says so", () => {
     assert.equal(createHumanOutput(strictCatalog()).runsText(listed([])), "[runs.empty]\n");
@@ -325,8 +511,8 @@ describe("HumanOutput.runsText (N-7, N-16)", () => {
     const text = createHumanOutput(catalog).runsText(
       listed(
         [
-          { state: "checked", runId: RUN, startedAt, taskId: `task-${SECRET}`, status: "done", reason: "verified", changes: 2, reverted: { at: startedAt, status: "complete" } },
-          { state: "checked", runId: runId("20261112T030400Z-00000000"), startedAt, taskId: "t", status: null, reason: null, changes: null, reverted: null },
+          { state: "checked", runId: RUN, startedAt, taskId: `task-${SECRET}`, status: "done", reason: "verified", changes: 2, reverted: { at: startedAt, status: "complete" }, revertRecordDamaged: false },
+          { state: "checked", runId: runId("20261112T030400Z-00000000"), startedAt, taskId: "t", status: null, reason: null, changes: null, reverted: null, revertRecordDamaged: false },
           { state: "damaged", runId: runId("20261112T030300Z-ffffffff") },
         ],
         4,

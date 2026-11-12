@@ -22,6 +22,7 @@ import type {
   MaskedText,
   ModelsOutput,
   PermissionKind,
+  PolicyNarrowingKind,
   ReportOutput,
   RevertOutput,
   RunsOutput,
@@ -149,8 +150,22 @@ export interface SettingsChangeProposal {
   readonly changes: readonly SettingsFieldChange[];
   /** Changes that let runs do more. Empty: nothing to confirm. */
   readonly widening: readonly SettingsWidening[];
+  /** DR-41: what each workflow's own rules would leave out of the new config's policy. See WorkflowPolicyNarrowing. */
+  readonly policyNarrowings: readonly WorkflowPolicyNarrowing[];
   /** The new config as parsed. */
   readonly config: CodarynConfig;
+}
+
+/**
+ * DR-41: a workflow whose own policy leaves part of the config's policy out of its quick runs
+ * (workflowPolicyNarrowings: a command rule dropped or kept in part, a plan action kind, path token
+ * restoring). Kinds and counts only, never a rule, a command or a path. Built-in workflows first,
+ * then the config's, as workflowDefinitions orders them.
+ */
+export interface WorkflowPolicyNarrowing {
+  readonly workflow: string;
+  readonly kind: PolicyNarrowingKind;
+  readonly count: number;
 }
 
 export interface SettingsWritten {
@@ -198,6 +213,8 @@ export interface SettingsView {
    * else anthropic; ANTHROPIC_API_KEY or OPENAI_API_KEY). Never its value (C-1).
    */
   readonly keyAvailable: boolean;
+  /** DR-41: what each workflow's own rules leave out of this config's policy. See WorkflowPolicyNarrowing. */
+  readonly policyNarrowings: readonly WorkflowPolicyNarrowing[];
 }
 
 /** The settings of one run, as `codaryn run` takes them. */

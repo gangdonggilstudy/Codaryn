@@ -71,6 +71,7 @@ export type {
   SettingsWidening,
   SettingsWritten,
   SettingsView,
+  WorkflowPolicyNarrowing,
   StartOutcome,
   StartRunRequest,
   RevertConsentRequest,

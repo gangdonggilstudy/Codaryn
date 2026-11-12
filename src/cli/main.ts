@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { CODARYN_LANG_ENV, DOCTOR_HINT_ERROR_CODES } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
-import { listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
+import { inspectRun, listRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
@@ -176,6 +176,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           readRecord: readRevertRecord,
           writeRecord: writeRevertRecord,
           announceLatest,
+          // N-26: the store judges one run as the run list does.
+          isDamaged: async (workspaceRoot, runId) => (await inspectRun(workspaceRoot, runId)) === "damaged",
         }),
       });
       if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));

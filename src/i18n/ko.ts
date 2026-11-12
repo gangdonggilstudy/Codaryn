@@ -11,6 +11,8 @@ export const KO_MESSAGES: MessageTexts = {
   "error.label": "오류",
   "error.fix_label": "고치는 법",
   "error.doctor_hint": "점검: codaryn doctor",
+  "error.hint.quick_form_needs_task":
+    "plan, apply, review의 간편 형식(--workspace)은 한도를 포함한 실행 설정을 설정 파일에서 읽습니다. 대신 계획 실행의 task를 --task로 주세요. task는 자기 설정과 비밀 값을 함께 가져옵니다.",
 
   "diagnostic.json_syntax": "JSON 문법 오류: {line}줄 {column}열",
   "diagnostic.unknown_field": "{field}에 모르는 필드가 있습니다(이름은 표시하지 않습니다)",
@@ -89,6 +91,8 @@ export const KO_MESSAGES: MessageTexts = {
   "revert.dry_run_next": "실행하려면 --dry-run 없이 다시 실행하세요.",
   "revert.reverted_before": "이 실행은 이미 되돌린 적이 있습니다. 그래서 파일이 실행 뒤에 바뀐 것으로 보일 수 있습니다.",
   "revert.unsafe_moved": "동의를 받아, 덮어쓸 위험이 있는 방식으로 되돌려 옮긴 파일: {count}개",
+  "revert.parked":
+    "되돌리기가 옮겨 두었다가 제자리에 돌려놓지 못해 .codaryn/parked/에 남긴 파일: {count}개. 직접 제자리로 옮기거나 지우세요. 저절로 지워지지 않습니다.",
   "revert.dry_run_move_unchecked": "미리보기는 이 드라이브가 덮어쓰지 않고 되돌려 옮길 수 있는지 확인하지 않았습니다. 실제 되돌리기가 확인하고, 동의가 없으면 그런 파일은 건너뜁니다.",
 
   "runs.column.run_id": "실행 id",
@@ -246,6 +250,8 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.unreadable": "작업 공간 잠금 파일(.codaryn/lock.json)을 읽을 수 없습니다",
   "doctor.lock.reclaim_left":
     "잠금 회수 파일(.codaryn/lock.json.reclaim)이 남아 있어, 끝난 프로세스가 남긴 잠금을 회수하지 못합니다. 이 작업 공간에서 실행 중인 Codaryn이 없으면 그 파일을 지우세요",
+  "doctor.lock.parked_left":
+    "되돌리기가 제자리에 돌려놓지 못한 파일 {count}개가 .codaryn/parked/에 남아 있습니다. 저절로 지워지지 않으니 직접 제자리로 옮기거나 지우세요",
   "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",

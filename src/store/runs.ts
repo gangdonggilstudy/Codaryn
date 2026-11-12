@@ -22,6 +22,7 @@ import {
   JOURNAL_FILE_NAME,
   MAX_REPORT_FILE_BYTES,
   MODEL_PROVIDER_NAMES,
+  PROFILE_NAME_PATTERN_SOURCE,
   RESULT_FILE_NAME,
   REVERT_RECORD_FILE_NAME,
   CONTENT_HASH_PATTERN_SOURCE,
@@ -31,6 +32,7 @@ import {
   STATE_DIR_NAME,
   TASK_ID_PATTERN_SOURCE,
   TERMINAL_RUN_STATUSES,
+  WORKFLOW_ID_PATTERN_SOURCE,
   isReasonOfStatus,
   toRunId,
 } from "../contracts/index.js";
@@ -147,10 +149,19 @@ function parseObject(text: string): Obj {
  * run (G-A) with `apply_started`, which also names the plan run and the approved digest.
  */
 type FirstRecord =
-  | { readonly kind: "run"; readonly startedAt: string; readonly taskId: string }
+  | { readonly kind: "run"; readonly startedAt: string; readonly taskId: string; readonly profile: string | null; readonly workflowRef: string | null }
   | { readonly kind: "apply"; readonly startedAt: string; readonly taskId: string; readonly planRunId: string; readonly digest: string };
 
 const APPROVALS: readonly string[] = APPROVAL_CHANNELS;
+const PROFILE_NAME = new RegExp(PROFILE_NAME_PATTERN_SOURCE);
+const WORKFLOW_ID = new RegExp(WORKFLOW_ID_PATTERN_SOURCE);
+
+/** DR-37 (d): a recorded name, null when none (absent or null) is recorded; anything else is damage. */
+function recordedName(value: unknown, pattern: RegExp): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !pattern.test(value)) unreadable();
+  return value;
+}
 
 
 /**
@@ -180,7 +191,9 @@ async function firstRecord(file: string, runId: string): Promise<FirstRecord> {
   if (startedAt === null) unreadable();
   if (record["type"] === "run_started") {
     if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
-    return { kind: "run", startedAt, taskId: taskId as string };
+    const profile = recordedName(record["profile"], PROFILE_NAME);
+    const workflowRef = recordedName(record["workflowRef"], WORKFLOW_ID);
+    return { kind: "run", startedAt, taskId: taskId as string, profile, workflowRef };
   }
   if (record["type"] !== "apply_started") unreadable();
   const { planRunId, digest, approval, actions, maxDurationMs } = record;
@@ -336,6 +349,9 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
     kind: first.kind,
     ...(first.kind === "apply" ? { planRunId: first.planRunId as RunId } : {}),
     startedAt,
+    // DR-37 (d): the run's profile and workflow definition; an apply run's plan run has them.
+    profile: first.kind === "run" ? first.profile : null,
+    workflowRef: first.kind === "run" ? first.workflowRef : null,
     taskId,
     status,
     reason,

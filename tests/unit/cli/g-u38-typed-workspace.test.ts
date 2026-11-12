@@ -4,7 +4,8 @@
  * was given with `--workspace`, as `toShownWorkspace` makes it after the command's own masking:
  * - run: RunSummaryContext.workspaceShown, with workspaceForm "given" only (the run's privacy gateway)
  * - apply: ApplySummaryContext.workspaceShown, with the quick form (the apply's privacy gateway)
- * - revert: RevertSummaryContext.workspaceShown (key shapes only: revert knows no registered value)
+ * - revert: none (review R-70 L-1, PM): revert knows no registered value, so its consent hint always
+ *   says <workspace>.
  * Absent when toShownWorkspace gives null (masked, a character that cannot stand in quotes, too
  * long), so the hint says `<workspace>` as before. Never in the JSON. Stand-in renderers record the
  * context; nothing is sent.
@@ -127,7 +128,7 @@ describe("U-38: run gives its end summary the typed --workspace", () => {
 /** RevertCliOutcome.summary (U-38): the context for the revert summary. */
 const summaryOf = (outcome: object): unknown => (outcome as { summary?: unknown }).summary;
 
-describe("U-38: revert gives its summary the typed --workspace, key shapes masked", () => {
+describe("U-38 (R-70 L-1): revert gives its summary no typed --workspace", () => {
   async function reverted(typed: string): Promise<Awaited<ReturnType<typeof runRevert>>> {
     const base = await mkdtemp(path.join(tmpdir(), "codaryn-g-u38-revert-"));
     temporaryDirs.push(base);
@@ -140,9 +141,9 @@ describe("U-38: revert gives its summary the typed --workspace, key shapes maske
     return outcome;
   }
 
-  test("the typed path in double quotes; not in the JSON", async () => {
+  test("a plain path: no context, so the consent hint says <workspace>; not in the JSON", async () => {
     const outcome = await reverted("work");
-    assert.deepEqual(summaryOf(outcome), { workspaceShown: '"work"' });
+    assert.equal(summaryOf(outcome), undefined);
     assert.equal(JSON.stringify(outcome.output).includes("workspaceShown"), false);
   });
 

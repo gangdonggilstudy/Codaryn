@@ -234,11 +234,15 @@ export interface RunObserver {
 
 ### 5.5 되돌리기 [구현 A-1]
 
-- `revert({ workspace, runId, dryRun? })` → `RevertOutput` [구현 DR-14]. CLI의 `runRevert`와 `createRevertCommand`를 `main.ts`와 같은 선택(미리보기, `latest`, 손상 판정 N-26, 잠금 안의 되돌리기 기록)으로 부른다. 앱 계층에 되돌리기 규칙의 사본은 없다.
+- `revert({ workspace, runId, dryRun?, unsafeMoveConsent? })` → `RevertOutput` [구현 DR-14, DR-25 `ec1914d`]. CLI의 `runRevert`와 `createRevertCommand`를 `main.ts`와 같은 선택(미리보기, `latest`, 한 실행 판정 N-26·N-27 (a), 잠금 안의 되돌리기 기록)으로 부른다. 앱 계층에 되돌리기 규칙의 사본은 없다.
+- DR-25: 하드 링크가 없는 드라이브에서 되돌릴 파일이 `unsafe_move`로 건너뛰어지면, GUI가 사람에게 따로 동의를 받는다. 동의하면 `unsafeMoveConsent: { runId }`로 다시 부른다.
+  - 앱 계층은 CLI의 `AdapterRevert`로 `adapter` 경로의 동의만 넘긴다(`revertConsentOf`).
+  - 미리보기와 함께, `latest`로, 다른 실행 id로 온 동의는 실행 전에 `invalid_arguments`다.
+  - 되돌리기 기록(`revert.json`)에 경로 `adapter`가 남는다. 앱 계층의 되돌리기에는 터미널 질문이 없다.
 - 사람 확인은 두 번 호출이다: `dryRun: true` → 사람 확인 → `dryRun: false`. 미리보기는 잠금도 기록도 만들지 않는다. 두 호출 사이에 파일이 바뀌면 두 번째 호출이 해시 비교로 건너뛴다. 미리보기는 약속이 아니다.
 - 적용 실행의 되돌리기(이동 되돌림, 보관함 복원)는 같은 함수가 적용 runId로 한다(GT 6.4절 7, DR-9).
 
-### 5.6 계획 확인·적용·사람 확인 [가정 G-A] (DR-1, DR-2)
+### 5.6 계획 확인·적용·사람 확인 [적용 구현 `ec1914d`, 계획 보기·사람 확인은 남음] (DR-1, DR-2)
 
 계획 승인은 실행 사이의 확인 하나다(GT-D4, DR-1). 실행 중 질문(5.9)으로 묻지 않는다.
 
@@ -261,7 +265,7 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```
 
 - 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
-- G-A 타입은 G-A가 main에 들어오기 전까지 `src/app/general-tasks.ts`가 같은 이름과 모양으로 되풀이한다(`f53fb16`, `720aa5a`, DR-21의 `d32aae2` 기준). 들어오면 그 파일만 계약의 re-export로 바꾼다.
+- G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 
 흐름
@@ -282,11 +286,16 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
      - 경로는 언제나 `adapter`다. GUI가 다른 경로(`cli-tty`, `cli-flag`)를 댈 수 없다.
      - 다이제스트가 64자리 소문자 16진수가 아니거나, 적용하는 계획(`digest`, 12자 이상 앞부분)과 다르면 실행 전에 `invalid_arguments`로 거부한다. 엔진도 다른 계획의 동의를 없는 것으로 본다.
    - task·설정·프로필·계획·모델은 동의를 줄 수 없다. 요청의 이 필드 말고 다른 통로는 없다.
-   - G-F의 `runApply`는 아직 승인 경로를 `cli-flag`·`cli-tty`로만 정하고 동의 인자를 받지 않는다.
-   - PM 결정(A-4 질문 1): CLI의 적용 함수에 `adapter` 승인 경로와 DR-21 동의를 주입받는 자리를 둔다(CLI 담당). 앱 계층은 지금처럼 그 CLI 함수를 부른다. 보안 검사는 한 벌로 유지한다(AC-D16). 범용 작업 묶음이 main에 들어온 뒤 붙인다.
+   - PM 결정(A-4 질문 1): CLI의 적용 함수에 `adapter` 승인 경로와 DR-21 동의를 주입받는 자리(`AdapterApply`)를 두고, 앱 계층은 그 CLI 함수를 부른다(AC-D16).
+   - 구현(`ec1914d`): `applyPlan`은 `runApply`를 `AdapterApply`와 함께 부른다. 기록되는 승인은 `adapter`이고, 동의는 요청의 것만 쓴다.
+   - 엔진 함수는 같은 `applyPlan`이다. 그 기록만 감싸 이벤트를 만든다.
+     - 핸들이 첫 이벤트보다 먼저 온다.
+     - `seq`는 저장된 줄 번호와 같다.
+     - `plan_item_started`(R-9 I-4)는 저장되지만 이벤트로 보내지 않는다. 그 번호는 비어 있다.
 6. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
 
-- 앱 계층에는 이 세 함수가 아직 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-F)이 범용 작업 묶음과 함께 main에 들어온 뒤 붙인다(G-F는 `claude/workspace-policy`에 있다). 타입은 G-A의 것을 쓴다.
+- `applyPlan`은 있다. `plan`과 `review`는 아직 없다. CLI의 `runPlan`·`runReview`를 같은 방식으로 감싸면 된다.
+- 남은 차이(CLI 담당): `runApply`가 검증기 명령 실행기를 `parentEnv` 없이 만든다. 그래서 앱 계층의 적용에서는 DR-4(부모 환경 = 실행의 환경 사본)가 지켜지지 않는다. 실행(`startRun`)은 앱 계층의 조립으로 지킨다.
 - (DR-20으로 추진하지 않음) VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 만들어 두었다(`vscode/src/core/args.ts`, 참고용).
 
 ### 5.7 변경 비교 [구현 A-1] (DR-7)

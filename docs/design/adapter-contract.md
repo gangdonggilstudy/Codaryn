@@ -8,7 +8,7 @@ CLI, VS Code 확장, 독립 GUI가 엔진을 부르는 공통 계약을 설계�
 
 - 기준: 설계는 main `b386166`(2026-11-12)에서 썼다. 작업 지시: [단계 4·5 설계 작업 지시](../work-orders/phase-4-5-design.md) P5-A.
 - 이 판은 [설계 교차 검토 R-1](../reviews/2026-11-12-r1-review-stage-4-5-designs.md) 뒤 PM 결정 DR-1~DR-4, DR-7, DR-8(main `f39593f`)과 DR-10, DR-12(main `2fcc85b`)를 반영했다.
-- 앱 계층 구현 A-1(`f1e796b`, `850626e`)의 상태도 반영했다.
+- 앱 계층 구현 A-1(`f1e796b`, `850626e`)과 R-4 뒤 결정 DR-15(이벤트), DR-17(task 형식과 G-A 타입), DR-14(실행 목록·`latest`·되돌리기 미리보기·`changes` 명령)의 구현(`1c86ec6`, `9235368`, `ebf3a64`, `0bc6bad`) 상태도 반영했다.
 - 입력: [아키텍처](../architecture.md) 1·2·4·9절, [설계 결정](../decisions.md) M-2·M-9·M-11, [CLI 계약](../cli-contract.md) 2·8절, [UX 설계](ux-design.md) UX-D1·UX-D2, [사용성 개선 지시](../work-orders/phase-4-usability.md) N-5·N-7·N-11·N-13, [범용 작업](general-tasks.md) 4·6·7·8절.
 - `src/contracts`는 바꾸지 않았다. 계약 변경은 제안이며 역할 1(계약 담당)이 만든다. 앱 계층의 타입은 그때까지 `src/app/types.ts`에 둔다.
 - 실제 API는 호출하지 않았다. A-1의 시험은 대본 모델과 가짜 값만 쓴다.
@@ -184,20 +184,23 @@ export interface RunObserver {
 ```
 
 보장
-1. 레코드 이벤트는 그 줄을 운영체제에 넘긴 뒤에 보낸다(`Journal.append` 계약). 받은 이벤트는 모두 journal에 있다.
-2. `seq`는 1부터 하나씩 커진다. 빠진 번호로 유실을 알 수 있다.
+1. **이벤트는 엔진이 기록에 넘긴 메모리의 사건으로 만든다(DR-15, R-4 H-1).** journal 파일을 다시 읽지 않는다.
+   - 실행 중 허용된 명령(검증기 포함)은 상태 디렉터리의 journal 파일에 줄을 더할 수 있다. 그런 줄은 이벤트가 되지 않는다. 재현 시험이 있다(`tests/unit/app/r4-events.test.ts`).
+   - 이벤트는 그 기록을 journal이 저장한 뒤(`append`가 끝난 뒤)에만 보낸다.
+2. `seq`는 앱 계층이 1부터 센다. 새 실행의 journal을 store가 매기는 번호와 같다. `at`은 같은 시계로 읽는다(store의 줄과 몇 ms 다를 수 있다). 빠진 번호는 가릴 수 없어 보내지 않은 기록이다.
 3. 엔진이 끝까지 가면 마지막 레코드는 `run_finished`이고, `done`은 그 뒤에 풀린다.
    - 첫 레코드가 `run_started`라는 보장은 없다(2절).
    - 시작은 `handle.runId`로, 끝은 `done`으로 안다. `run_finished`를 끝으로 쓰지 않는다. 그 직후에는 result.json이 아직 없을 수 있다(R-1 L-3).
 4. 관찰자의 예외와 느림은 실행 결과를 바꾸지 않는다.
-5. **기록이 가리지 않는 필드는 다시 가린다(R-1 L-1).** 모델이 준 도구 이름과 호출 id는 기록에 그대로 있다.
-   - 이벤트로 내기 전에 내장 도구가 아닌 이름은 `(unknown tool)`로 바꾸고, 호출 id는 실행의 가림 게이트로 다시 가린다. CLI 진행 줄과 같은 규칙이다.
-   - 대상: `tool_decision`, `tool_result`, `file_changed`, `model_response`, 그리고 `model_request` 안의 이전 호출·결과.
-   - 그 밖의 필드는 저장된 그대로다. 근본 수정(기록할 때 가림)은 엔진·계약 변경이다(10절 AC-D15).
+5. **모든 글 필드를 실행의 게이트로 다시 가린다(DR-15).** 같은 게이트로 이미 가린 글은 그대로 남는다(멱등).
+   - 그 전에 내장 도구가 아닌 이름은 `(unknown tool)`로 바꾼다(R-1 L-1). 대상은 `tool_decision`, `tool_result`, `model_response`와 `model_request` 안의 이전 호출·결과다.
+   - 가릴 수 없는 글이 하나라도 있으면 그 이벤트는 보내지 않는다(`seq`가 비어 보인다).
+   - 엔진도 목록 밖 도구 이름과 안전하지 않은 호출 id를 기록할 때 바꾼다(AC-D15, G-A 브랜치 `0824dde`). 앱 계층의 다시 가림은 그 뒤에도 남긴다(DR-13).
 6. 글에는 제어 문자가 있을 수 있다. 화면에 내기 전에 어댑터가 정리한다(`src/cli/text-safety.ts:25`와 같은 규칙).
 7. 사람용 문장은 이벤트에 없다. 어댑터가 N-4 문구 카탈로그로 만든다.
 
-- 지금은 `Journal.append`가 레코드를 돌려주지 않는다(AC-D3 미구현). 그래서 앱 계층은 append가 끝난 뒤 journal 파일에 새로 붙은 줄을 읽어 이벤트를 만든다. 저장된 줄과 같지만 이벤트마다 읽기가 한 번 든다.
+- 첫 판(A-1 `f1e796b`~`6aa3f44`)은 append 뒤 journal 파일에 새로 붙은 줄을 읽어 이벤트를 만들었다. 끼워 넣은 줄이 가리지 않은 채 관찰자에게 갔다(R-4 H-1, 재현됨). `1c86ec6`에서 위 1·2·5로 고쳤다.
+- AC-D3(`append`가 저장한 기록을 돌려줌)가 생기면 `seq`·`at`을 그 값으로 바꾼다. 다시 가림은 그대로 둔다.
 - 이벤트 내용 전체(모델 요청·응답·도구 결과 포함)를 보낸다. 무엇을 보여 줄지는 어댑터가 고른다.
 
 ### 5.3 취소 [구현 A-1]
@@ -220,12 +223,16 @@ export interface RunObserver {
 - Markdown 글은 어댑터의 표시 몫이다. CLI의 `renderReport`는 기록에서 온 글을 모두 인라인 코드나 코드 블록에 넣는다(`report.ts:350-437`).
   - 그래서 Markdown으로 열어도 원격 이미지 같은 주입이 없다(R-1 I-6).
   - VS Code가 보고서를 Markdown 문서로 여는 근거이므로, 이 성질을 바꾸지 않는다.
-- 실행 목록(`listRuns`), `"latest"`: N-7(N-C)은 main에 들어왔다(`5d79178`, `5bc8db8`). 앱 계층에는 다음 단위로 더한다(A-1 보고서).
+- `report`와 `revert`의 run id 자리에 `"latest"`를 쓸 수 있다(N-7). 보고서는 CLI의 `runReport`가 store의 `listRuns`로 고른다.
+- `listRuns({ workspace, limit? })` → `RunsOutput`, `resolveRun({ workspace, run })` → `{ runId, latest, startedAt, damaged }` [구현 DR-14].
+  - 어떤 실행이 손상인지, `latest`가 어느 실행인지는 store와 CLI(`listRuns`, `latestRunId`, `resolveRunRef`)가 정한다(N-18, N-23, N-26). 앱 계층은 고르지 않는다.
+  - `resolveRun`은 `--run latest`가 고른 실행과 시작 시각을 행동 전에 보이게 한다(N-23 b).
+  - `runs --json`처럼 키 모양과 지금 키를 가린다(N-23 a).
 
 ### 5.5 되돌리기 [구현 A-1]
 
-- `revert({ workspace, runId })` → `RevertOutput`. 잠금, 해시가 같은 파일만 되돌림(R-7), `partial` 판정은 지금과 같다.
-- `dryRun`(N-7)은 main에 들어왔다. 앱 계층에는 `listRuns`와 함께 다음 단위로 더한다. 사람 확인은 두 번 호출이다: `dryRun: true` → 사람 확인 → `dryRun: false`. 두 호출 사이에 파일이 바뀌면 두 번째 호출이 해시 비교로 건너뛴다. 미리보기는 약속이 아니다.
+- `revert({ workspace, runId, dryRun? })` → `RevertOutput` [구현 DR-14]. CLI의 `runRevert`와 `createRevertCommand`를 `main.ts`와 같은 선택(미리보기, `latest`, 손상 판정 N-26, 잠금 안의 되돌리기 기록)으로 부른다. 앱 계층에 되돌리기 규칙의 사본은 없다.
+- 사람 확인은 두 번 호출이다: `dryRun: true` → 사람 확인 → `dryRun: false`. 미리보기는 잠금도 기록도 만들지 않는다. 두 호출 사이에 파일이 바뀌면 두 번째 호출이 해시 비교로 건너뛴다. 미리보기는 약속이 아니다.
 - 적용 실행의 되돌리기(이동 되돌림, 보관함 복원)는 같은 함수가 적용 runId로 한다(GT 6.4절 7, DR-9).
 
 ### 5.6 계획 확인·적용·사람 확인 [가정 G-A] (DR-1, DR-2)
@@ -233,23 +240,25 @@ export interface RunObserver {
 계획 승인은 실행 사이의 확인 하나다(GT-D4, DR-1). 실행 중 질문(5.9)으로 묻지 않는다.
 
 ```ts
+// DR-17: plan·apply·review·changes는 G-A의 task 형식을 받는다(목표와 모델이 필요 없다)
+interface TaskForm {
+  input: { kind: "task"; taskPath: string } | { kind: "workspace"; workspace: string };
+  configPath: string | null; varsFile: string | null; profile: string | null;
+}
 // CodarynApp의 선택 함수. 범용 작업 명령이 생기면 채운다. 어댑터는 있는지 보고 화면을 연다.
-plan?(request: { workspace: string; runId: string }): Promise<AppCallOutcome<PlanView>>;
-applyPlan?(request: ApplyPlanRequest, observer?: RunObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
-review?(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutputView>>;
+plan?(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
+applyPlan?(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null },
+           observer?: ApplyObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
+review?(request: { settings: TaskForm; runId: string; decision: "accept" | "reject"; note: string | null }): Promise<AppCallOutcome<ReviewOutput>>;
 
-// 아래는 G-A(f53fb16)의 PlanOutput, ApplyResult, ReviewOutput과 같은 필드 이름이다
-interface PlanView { kind: "plan"; runId: string; status: "pending" | "applied"; digest: string;
-                     actions: readonly PlanActionView[]; inventoryLimitReached: boolean; appliedBy: { runId: string; at: string } | null }
-interface ApplyPlanRequest { settings: StartRunRequest; planRunId: string; digest: string }  // 다이제스트 또는 앞 12자 이상
-interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutcome<ApplyResultView>> }
-interface ReviewRequest { workspace: string; runId: string; decision: "accept" | "reject"; note: string | null }
-interface ReviewOutputView { kind: "review"; runId: string; verdict: "accepted" | "rejected"; checklist: readonly MaskedText[]; replaced: boolean }
+// PlanOutput, ApplyResult, ApplyJournalRecord, ReviewOutput은 G-A 계약의 타입 그대로다(DR-17)
+type ApplyEvent = { kind: "record"; record: ApplyJournalRecord } | { kind: "notice"; text: MaskedText };
+interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutcome<ApplyResult>> }
 ```
 
-- G-A 계약 커밋 `f53fb16`은 읽어서 이름과 필드를 맞췄다. 이 브랜치에 병합하지는 않았다.
-  - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다(문구 카탈로그에 새 키가 없음).
-  - G-A가 main에 들어오면 이 가정 타입을 그 타입의 import로 바꾼다.
+- 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
+- G-A 타입은 G-A가 main에 들어오기 전까지 `src/app/general-tasks.ts`가 같은 이름과 모양으로 되풀이한다(`f53fb16`, `720aa5a` 기준). 들어오면 그 파일만 계약의 re-export로 바꾼다.
+  - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 
 흐름
 1. 실행이 `needs-input`/`plan_pending`(종료 3)으로 끝난다. 작업 공간은 바뀌지 않는다.
@@ -264,16 +273,17 @@ interface ReviewOutputView { kind: "review"; runId: string; verdict: "accepted" 
    - 적용 취소의 끝 상태(`cancelled`와 그때까지 옮긴 목록, `revert` 안내)는 G-A가 정한다(R-1 L-7).
 5. 실행이 `needs-input`/`awaiting_review`로 끝나면 어댑터는 확인 목록과 승인·반려를 보여 주고 `review`를 부른다(GT-D6). 판정은 `review.json`에 남고 결과의 끝 상태는 바꾸지 않는다.
 
-- A-1에는 이 세 함수가 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-E)이 아직 없기 때문이다. 타입만 `src/app/types.ts`에 가정으로 두었다.
+- 앱 계층에는 이 세 함수가 아직 없다. CLI의 `plan`, `apply`, `review` 명령과 엔진(G-B~G-F)이 없기 때문이다. 타입은 G-A의 것을 쓴다.
+- VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 이미 만든다(`vscode/src/core/args.ts`).
 
 ### 5.7 변경 비교 [구현 A-1] (DR-7)
 
 두 어댑터 모두 **다시 가린 비교만** 보여 준다. 비교 내용은 앱 함수(그리고 CLI 명령, 9절)가 내준다. 어댑터는 스냅샷을 직접 읽지 않는다.
 
 ```ts
-changes(request: { run: StartRunRequest; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;
+changes(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<ChangesOutput>>;  // runId: id 또는 "latest"
 
-interface ChangesOutput { kind: "changes"; runId: string; masking: "current_secrets"; files: readonly ChangedFileView[] }
+interface ChangesOutput { schemaVersion: 1; kind: "changes"; runId: string; exitCode: 0; masking: "current_secrets"; files: readonly ChangedFileView[] }
 interface ChangedFileView {
   path: MaskedText;                    // 기록의 경로
   created: boolean;                    // 실행이 만든 파일(원본 없음)
@@ -295,7 +305,11 @@ interface ChangedFileView {
   - 기록의 경로에 토큰이 있으면 파일을 찾을 수 없어 `masked_path`다.
 - **지금 파일.** 작업 공간 계층으로 읽는다(링크 해석, 루트·상태 디렉터리 검사). 해시로 `as_run_left`·`changed_since_run`을 가른다.
 - 가림이 하나라도 실패하면 그 파일의 글을 내지 않는다(`mask_failed`). 경로를 가릴 수 없으면 호출 전체가 `internal_error`다.
-- A-1의 스냅샷 읽기는 store가 문서로 밝힌 형식을 같은 규칙으로 읽는 임시 구현이다. store가 읽기 함수를 내보내면 바꾼다(7절 이행 4).
+- 스냅샷 파일이 일반 파일이 아니면(링크 등) 따라가지 않고 `snapshot_missing`이다(R-4 L-3).
+- A-1의 스냅샷 읽기는 store가 문서로 밝힌 형식을 같은 규칙으로 읽는 임시 구현이다. store가 읽기 함수를 내보내면 바꾼다(DR-14, N-25 뒤).
+- 요청은 task 형식이다(DR-17). 작업 공간 형식이면 앱 계층이 고정 문구 목표(`PROBE_GOAL`)로 CLI의 간편 형식을 부른다. 목표는 비밀을 정하지 않는다.
+- 한계(R-4 L-3): anthropic task는 키·모델·출력 상한이 지금 풀려야 한다(`provider_not_configured`). 네트워크가 필요 없는 비교에도 그렇다. 이행 2에서 비밀 등록 단계를 따로 부를 수 있게 되면 없어진다.
+- CLI 명령 `codaryn changes (--task <f> | --workspace <d> [--profile <p>]) [--config] [--vars-file] --run <id|latest> [--json]`이 이 함수를 부른다(`src/cli/changes.ts`, DR-14). `--json`은 `ChangesOutput` 한 줄, 글 형식은 파일마다 상태와 바뀐 구간(`-`/`+`)이다. `main.ts` 연결과 도움말·계약은 N-A 몫이다.
 
 ### 5.8 점검과 모델 목록
 
@@ -401,10 +415,10 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 타입이 `src/app/types.ts`에 있다. 옮기기는 역할 1 몫 |
 | 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 조립은 앱 계층의 것이 생겼다(DR-4). 실행 전 검사는 아직 `runCli` 호출 |
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 앱 계층 쪽은 됨(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않음 |
-| 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | `report`, `revert`, `changes`는 앱 함수가 있다. N-7(`runs`, `--dry-run`, `latest`)은 main에 있고 앱 함수는 다음 단위 |
+| 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 앱 함수: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI `changes` 명령은 `src/cli/changes.ts`(연결은 N-A). store의 스냅샷 읽기는 N-C 몫 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | `doctor` 감싸기만 있다 |
 | 6 줄 프로토콜 | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/events.ts`(신규), `src/contracts/**` | 없음 |
-| 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 타입만(가정 G-A) |
+| 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 타입은 G-A의 것(`src/app/general-tasks.ts`가 되풀이, DR-17). 함수는 G-B~G-F 뒤 |
 | 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 단계 5 시작(DR-3) |
 
 - 순서 제약: N-A(`claude/workspace-policy`)가 `src/cli/run.ts`를 고치는 중이다. 이행 2는 N-A 병합 뒤에 시작한다.
@@ -412,12 +426,13 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 
 ## 8. 시험 계획
 
-유닛(`tests/unit/app/`, 대본 모델과 임시 디렉터리) [구현 A-1, 29건]
+유닛(`tests/unit/app/` 38건, `tests/unit/cli/changes.test.ts` 7건, `tests/unit/vscode/` 11건; 대본 모델과 임시 디렉터리) [구현]
 
 | 대상 | 시험 |
 | --- | --- |
 | 시작 | 핸들이 첫 이벤트·엔진 시작보다 먼저 온다. 실행 전 오류는 이벤트도 실행 디렉터리도 없다. 잠긴 작업 공간은 `workspace_locked`, 다른 작업 공간은 병행 |
-| 이벤트 | 레코드 이벤트 = journal 줄(순서·내용). 던지는 관찰자는 결과를 바꾸지 않는다. 모델이 준 이름·id에 든 비밀이 이벤트에 없고 모르는 도구는 `(unknown tool)`이다(L-1). Y-4 안내는 마지막 레코드 뒤 `notice` |
+| 이벤트 | 엔진의 기록과 같다(`at` 제외, 순서·내용). 실행 중 명령이 journal에 끼워 넣은 줄(등록 비밀 원문, 위조한 `run_finished`)은 이벤트가 되지 않는다(DR-15, 고치기 전 실패 확인). 던지는 관찰자는 결과를 바꾸지 않는다. 모델이 준 이름·id에 든 비밀이 이벤트에 없고 모르는 도구는 `(unknown tool)`이다(L-1). Y-4 안내는 마지막 레코드 뒤 `notice` |
+| 실행 목록·latest·되돌리기(DR-14) | store가 고른 `latest`와 시작 시각, 목록 순서와 한도, `latest` 이름의 디렉터리면 모호함, 미리보기는 아무것도 바꾸지 않고 기록도 없음, 되돌리기는 기록을 남기고 목록에 표시, 다시 되돌리면 `revertedBefore`, 잠긴 작업 공간에서 되돌리기 거부·미리보기 허용 |
 | 취소 | `cancelled`·종료 5·변경 유지, 끝난 뒤 무효, 요청의 취소 파일 |
 | 결과·오류 | `done`이 풀리면 result.json이 있고 잠금이 없다. 시작 뒤 내부 예외는 `internal_error`와 잠금 해제(예외 문구 미노출). 모든 오류 코드의 종료 코드·형태와 양방향 변환 |
 | 환경(DR-4) | 사본·`lookupEnv`의 대소문자 규칙, 변수 파일 해석이 `process.loadEnvFile`과 같음, 호출자의 env와 `process.env`가 바뀌지 않음, 소문자 `secretEnv`가 Windows 규칙에서 찾아지고 가려짐(다른 OS 규칙에서는 `secret_env_missing`), 변수 파일의 `LANG`이 자식 명령에 감 |

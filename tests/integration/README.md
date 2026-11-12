@@ -16,7 +16,7 @@
 | `y01` | 모델 목록 |
 | `n01`~`n05` | 사용성 |
 | `n06`~`n09` | 범용 작업 |
-| `o00`(`o01`~`o04`는 어댑터 뒤) | OpenAI 모의 API |
+| `o00`, `o05`(`o01`~`o04`는 CLI 연결 뒤) | OpenAI 모의 API |
 
 ## 수용 기준 대응
 
@@ -198,9 +198,22 @@
 - task 파일은 `policy`와 `verifiers`를 반드시 적으므로 정의의 정책·검증기 기본값은 간편 형식에만 쓰인다. 그래서 organize task는 `planActions`를 직접 적는다(`writeOrganizeTask`).
 - 하드 링크가 없는 볼륨에서의 동의 없는 이동 중단(DR-21, `consent_required`)은 이 기계(NTFS)에서 재현할 수 없어 통합 사례로 두지 않는다. 읽기 전용 원본도 정상 이동됨을 확인했다. 도구·store 유닛이 맡는다.
 
-## OpenAI 모의 API (`o00`~, 두 번째 제공자 SP-5 준비)
+## OpenAI 모의 API (`o00`, `o05`, 두 번째 제공자 SP-5)
 
-[두 번째 제공자 설계](../../docs/design/second-provider.md)와 [사실 확인](../../docs/design/second-provider-facts.md)(C-1~C-15)을 따른 가짜 Responses API(`tests/support/fake-openai.ts`)와 값(`tests/fixtures/openai.ts`)이다. **모의 API 검증이며 실제 API 검증이 아니다.** 어댑터(SP-5)가 올라오면 `o01`~`o04`(실행·설정·오류·모델 목록, 사례 목록은 PM이 받은 설계 OI-01~OI-51)를 붙인다.
+[두 번째 제공자 설계](../../docs/design/second-provider.md)와 [사실 확인](../../docs/design/second-provider-facts.md)(C-1~C-15)을 따른 가짜 Responses API(`tests/support/fake-openai.ts`)와 값(`tests/fixtures/openai.ts`)이다. **모의 API 검증이며 실제 API 검증이 아니다.** CLI 연결(SP-6)이 올라오면 `o01`~`o04`(실행·설정·오류·모델 목록, 사례 목록은 PM이 받은 설계 OI-01~OI-51)를 붙인다.
+
+`o05`는 CLI 없이 어댑터(`src/model/openai`)를 가짜 서버에 직접 붙인다. 어댑터는 Node의 `fetch`로 보내고, 재시도 대기만 기록용으로 주입한다(한 사례는 실제로 기다리고 서버 쪽 간격을 잰다). 엔진처럼 `complete`를 부른다: 호출을 엔진의 id로 되읽고(AC-D15가 바꾼 id), 도구 결과로 답한다.
+
+| 사례 | 판정 근거 |
+| --- | --- |
+| 한 번의 도구 호출 왕복 | 규칙 밖 `call_id`가 그대로 엔진에 오고, 엔진 id(`codaryn-call-1`)로 되읽어도 원래 `call_id`로 답한다. 추론 항목이 같은 JSON으로 돌아가고 엔진 결과에는 개수만 있다. 사용량은 캐시·추론 토큰을 더하지 않는다. 사슬·규약 위반 0, 키는 Bearer에만 |
+| 할당량 소진 6가지 | `quota_exhausted`, HTTP 429, 요청 1건씩, 재시도 대기 없음 |
+| 빈도 한도 | 3번 모두 429면 `rate_limited`이고 요청 3건의 본문이 같다. 코드 없는 429 뒤 회복, `Retry-After: 3`이면 대기 3초 이상, 실제 대기에서 서버가 본 간격 1초 이상, 503 `overloaded` |
+| 출력 한도 잘림 | `incomplete`/`max_output_tokens`는 `length`. `content_filter`는 "declined" 고정 문구, `max_messages`는 이유만 인용, 재시도 없음 |
+| 거부·실패·오류 문구 | 거부 글 없이 고정 문구, `failed`는 code만, 400 문구에서 키·`sk-` 모양 제거와 300자 이하 |
+| 모델 목록 | `GET {주소}/models` 한 번(질의 없음), API 순서, `displayName` = id, `createdAt` RFC 3339, 한도 null. 401 `auth_failed`(재시도 없음) |
+
+빌드 산출물의 어댑터에 결함 셋(`store: true`, 추론 항목 빼기, 엔진 id로 답하기)을 넣으면 `o05`가 실패함을 확인했다.
 
 - 가짜 서버
   - `POST /v1/responses`와 `GET /v1/models`만 받는다. CLI 설정의 주소는 `<url>/v1`이다(`baseUrl`).

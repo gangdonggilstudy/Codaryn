@@ -119,15 +119,18 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
 }
 
 /**
- * DR-41 (A-8, F-5): the effective policy where a workflow definition's own policy meets the policy
- * the person configured (the quick form: the profile's, else the config's). Adding settings never
- * loosens a definition's rules. Pure.
+ * DR-41 (A-8, F-5): the effective policy wherever a workflow definition applies and another policy
+ * is given: in the quick form the profile's, else the config's; in a task file that names a workflow
+ * (`workflowRef`), the task's own policy (PM, after 27afb01). A definition's rules are its safety
+ * rules, so no policy, however given, loosens them. A task naming no workflow keeps its policy as
+ * it is. Pure.
  * - Either absent: the other, as before.
  * - protectedPaths: both lists (union), the definition's first, each entry once.
  * - commands: only command lines both allow (the intersection of the two allow lists, rule by rule).
- *   Under a definition that allows no command (`allowCommands: false`, organize) every configured
- *   rule is dropped, so the run is not refused for them (commands_not_allowed stays for rules the
- *   task states itself).
+ *   Under a definition that allows no command (`allowCommands: false`, organize) every given rule
+ *   is dropped. A task file's own rules there are still refused first (`commands_not_allowed`,
+ *   GT-D10: ResolveWorkflowInput.commandRules counts the task's rules before the merge); the
+ *   profile's or config's are dropped.
  * - planActions: the configured policy narrows the definition's when it states planActions (only
  *   kinds both list stay); when it does not state them it leaves the definition's as they are, so a
  *   general policy that only adds a protected path does not take organize's move and discard away.
@@ -170,9 +173,9 @@ export function mergeWorkflowPolicy(definition: PolicyConfig | undefined, config
  * - allowCommands: default true. false (organize) means the effective policy may have no command
  *   rule; one is `invalid_task` or `invalid_config` (GT-D10). `run_command` is then not offered.
  * - policy, verifiers, limits: defaults, laid under a profile's and the task's own values as
- *   `ResolveWorkflow` says. Limits follow S-7 like the config's own. DR-41: in the quick form the
- *   definition's policy is merged with the profile's or the config's (mergeWorkflowPolicy), not
- *   replaced by it.
+ *   `ResolveWorkflow` says. Limits follow S-7 like the config's own. DR-41: its policy is merged
+ *   with the profile's or the config's (quick form) or the task file's own (mergeWorkflowPolicy),
+ *   never replaced by it.
  */
 export interface WorkflowDefinition {
   /** Display only. */

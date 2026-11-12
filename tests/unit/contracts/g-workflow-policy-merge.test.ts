@@ -1,7 +1,9 @@
 /**
- * DR-41 (A-8, F-5): a configured policy is merged with a workflow definition's own policy instead of
- * replacing it. The reproduction cases are the app layer's (A-8 section 4); "today" is the quick
- * form's rule before DR-41, `configured ?? definition` (src/cli/run.ts).
+ * DR-41 (A-8, F-5): a given policy is merged with a workflow definition's own policy instead of
+ * replacing it, in the quick form (the profile's or config's) and in a task file that names a
+ * workflow (the task's own, PM after 27afb01). The reproduction cases are the app layer's (A-8
+ * section 4); "today" is the quick form's rule before DR-41, `configured ?? definition`
+ * (src/cli/run.ts); a task file's own policy replaced the definition's entirely.
  */
 
 import assert from "node:assert/strict";
@@ -57,6 +59,12 @@ describe("DR-41: a configured policy never loosens a workflow definition's own r
     const configured: PolicyConfig = { ...base, commands: [rule("npm", ["test"], true)] };
     assert.equal(today(ORGANIZE, configured)?.commands.length, 1, "today: the rule reaches organize (commands_not_allowed)");
     assert.deepEqual(mergeWorkflowPolicy(ORGANIZE, configured)?.commands, []);
+  });
+
+  test("a task file naming organize with its own policy cannot take organize's rules away either", () => {
+    const taskPolicy: PolicyConfig = { ...base, restorePathTokens: true, planActions: ["move", "discard"], protectedPaths: ["src"] };
+    const merged = mergeWorkflowPolicy(ORGANIZE, taskPolicy);
+    assert.deepEqual([merged?.planActions, merged?.protectedPaths, merged?.restorePathTokens, merged?.commands], [["move", "discard"], ["src"], false, []]);
   });
 
   test("restoring path tokens only when both allow it; either side absent gives the other as before", () => {

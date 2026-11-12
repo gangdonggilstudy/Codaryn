@@ -247,8 +247,12 @@ export const INIT_QUESTION_DEFAULTS = {
   protected_suggest: "yes",
 } as const;
 
-/** N-21: commands with a help text. */
-export const HELP_COMMANDS = ["run", "revert", "report", "doctor", "models", "init", "runs"] as const;
+/**
+ * N-21: commands with a help text. U-35 (UXM-7): plan, apply, review, changes and cleanup join, so
+ * their help says what they do, their options and their exit codes in the chosen language, as the
+ * others do (they were a usage line and one fixed English sentence before).
+ */
+export const HELP_COMMANDS = ["run", "revert", "report", "doctor", "models", "init", "runs", "plan", "apply", "review", "changes", "cleanup"] as const;
 export type HelpCommand = (typeof HELP_COMMANDS)[number];
 
 /** N-21: options described in the help texts (`--dry-run` is `dry_run`). */
@@ -270,6 +274,31 @@ export const HELP_OPTIONS = [
   "provider",
   // DR-21, DR-25: `--allow-unsafe-move` of `apply` and `revert` (UNSAFE_MOVE_CONSENT_ARGUMENT).
   "allow_unsafe_move",
+  // U-35 (UXM-7): the options of plan, apply, review, changes and cleanup that no help described.
+  // The others they take (`--task`, `--workspace`, `--profile`, `--config`, `--vars-file`,
+  // `--run`, `--json`, `--cancel-file`, `--quiet`, `--allow-unsafe-move`) keep their ids.
+  // `apply --digest <first 12+ hex>`: the digest the person approved (MIN_PLAN_DIGEST_PREFIX).
+  "digest",
+  // `apply --run <runId>`: the plan run whose plan is applied. Not `run`, whose text offers
+  // `latest`: apply never takes it.
+  "plan_run",
+  // `review --accept`, `review --reject` (one of the two), `review --note <text>`.
+  "accept",
+  "reject",
+  "note",
+  // cleanup's selection (DR-39, DR-44): `--older-than <days>`, `--run <id>[,<id>...]` (run ids
+  // only, never `latest`: not `run`), `--reverted`, `--discarded-older-than <days>`,
+  // `--discarded-run <id>[,<id>...]`.
+  "older_than",
+  "run_ids",
+  "reverted",
+  "discarded_older_than",
+  "discarded_run",
+  // cleanup's confirmations: `--confirm <first 12+ hex of the digest>`, and besides it
+  // `--include-not-reverted` and `--delete-discarded`, which each ask for their own consent.
+  "confirm",
+  "include_not_reverted",
+  "delete_discarded",
 ] as const;
 export type HelpOption = (typeof HELP_OPTIONS)[number];
 

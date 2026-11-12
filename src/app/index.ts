@@ -6,6 +6,11 @@ export { PROBE_GOAL, createCodarynApp, runArguments, runRequestOf } from "./app.
 export type { AppHooks } from "./app.js";
 export { copyEnvironment, createNodeAppEnvironment, loadVarsInto, lookupEnv, readVarsFileSync } from "./environment.js";
 export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } from "./errors.js";
+export { CONNECTED_MODEL_PROVIDERS, modelsArguments } from "./models.js";
+export { initArguments, suggestionsFor } from "./init.js";
+export { changesOf, digestOf, wideningOf } from "./settings-change.js";
+export { unsafeMoveConsentOf } from "./consent.js";
+export { profileWorkflowsOf } from "./settings.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export type {
   AppliedActionRecord,
@@ -29,6 +34,7 @@ export type {
   ApplyHandle,
   ApplyObserver,
   ApplyPlanRequest,
+  ApplySettingsChangeRequest,
   ChangedFileUnavailable,
   ChangedFileView,
   ChangesOutput,
@@ -36,9 +42,12 @@ export type {
   CodarynApp,
   ConfirmAnswer,
   ConfirmRequest,
+  CreateSettingsRequest,
   DoctorRequest,
+  ListModelsRequest,
   ListRunsRequest,
   PlanRequest,
+  ReadSettingsRequest,
   ReportRequest,
   ResolvedRun,
   ResolveRunRequest,
@@ -48,7 +57,17 @@ export type {
   RunHandle,
   RunObserver,
   RunOutcome,
+  SelectModelRequest,
+  SettingsChangeProposal,
+  SettingsChangeRequest,
+  SettingsFieldChange,
+  SettingsSuggestions,
+  SettingsSuggestionsRequest,
+  SettingsWidening,
+  SettingsWritten,
+  SettingsView,
   StartOutcome,
   StartRunRequest,
   TaskForm,
+  UnsafeMoveConsentRequest,
 } from "./types.js";

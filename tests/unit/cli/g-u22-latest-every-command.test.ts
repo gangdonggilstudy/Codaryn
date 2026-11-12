@@ -131,7 +131,6 @@ describe("U-22 (R-51 M-2): --run latest while the newest run is going, after a f
 
   test(
     "changes (through the app layer)",
-    { todo: "R-51 M-2: the app layer's runIdOf (src/app/runs.ts, app layer) or the run list's resolveRunRef (src/cli/runs.ts, output owner N-C) still has the old rule; either calls resolveRunReference with STORE_RUN_REFERENCE_DEPS" },
     async () => {
       const { base, release } = await workspace();
       try {

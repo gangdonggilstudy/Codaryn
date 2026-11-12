@@ -133,7 +133,7 @@ describe("DR-7: changes", () => {
     return (outcome as { output: ChangesOutput }).output;
   }
 
-  test("gives the original and the current text of each changed file, masked with the current secrets", async () => {
+  test("lists each changed file with its state; no text while the run keeps no record of its masking (R-11)", async () => {
     const { base, runId, app } = await changedRun();
     const view = output(await app.changes({ settings: taskForm(base), runId }));
     assert.deepEqual([view.kind, view.runId, view.masking], ["changes", runId, "current_secrets"]);
@@ -141,10 +141,8 @@ describe("DR-7: changes", () => {
 
     const [readme, notes] = view.files;
     assert.equal(view.files.length, 2);
-    assert.deepEqual([readme?.path, readme?.created, readme?.state, readme?.unavailable], ["README.md", false, "as_run_left", null]);
-    assert.ok(readme?.before?.startsWith("# Title\nkey ") === true && readme.before.includes("CODARYN_SECRET"), readme?.before ?? "");
-    assert.ok(readme?.after?.includes("added line") === true);
-    assert.deepEqual(notes, { path: "NOTES.md", created: true, state: "as_run_left", before: null, after: "# Notes\n", unavailable: null });
+    assert.deepEqual(readme, { path: "README.md", created: false, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" });
+    assert.deepEqual(notes, { path: "NOTES.md", created: true, state: "as_run_left", before: null, after: null, unavailable: "masking_unverified" });
   });
 
   test("reports later edits and removals, and reads only: no run, no lock", async () => {
@@ -155,8 +153,8 @@ describe("DR-7: changes", () => {
 
     const view = output(await app.changes({ settings: taskForm(base), runId }));
     const [readme, notes] = view.files;
-    assert.deepEqual([readme?.state, readme?.after, readme?.before === null], ["missing", null, false]);
-    assert.deepEqual([notes?.state, notes?.after], ["changed_since_run", "# Notes\nedited later\n"]);
+    assert.deepEqual([readme?.state, readme?.before, readme?.after, readme?.unavailable], ["missing", null, null, "masking_unverified"]);
+    assert.deepEqual([notes?.state, notes?.after, notes?.unavailable], ["changed_since_run", null, "masking_unverified"]);
 
     assert.deepEqual(await readdir(path.join(base, "work", ".codaryn", "runs")), runs, "the secrets probe made no run");
     assert.equal(await exists(path.join(base, "work", ".codaryn", "lock.json")), false);

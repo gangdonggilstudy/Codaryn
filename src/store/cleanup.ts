@@ -599,6 +599,8 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
           } catch {
             back = false;
           }
+          // U-13: a discarded-files folder that stays aside still holds the run's discarded files.
+          if (!back && item.target === "discarded") discardedPartlyLeft.add(item.runId);
           keepApply(back ? "io_error" : "partly_removed");
           continue;
         }

@@ -11,11 +11,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { ANTHROPIC_API_KEY_ENV, OPENAI_API_KEY_ENV } from "../../../src/contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, MIN_OTHER_PROVIDER_KEY_LENGTH, OPENAI_API_KEY_ENV } from "../../../src/contracts/index.js";
 import { assembleRun } from "../../../src/cli/assemble.js";
 import { runCli } from "../../../src/cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/cli/security/index.js";
-import { MIN_OTHER_KEY_SECRET_LENGTH, runKeySecrets } from "../../../src/cli/settings.js";
+import { runKeySecrets } from "../../../src/cli/settings.js";
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -90,7 +90,7 @@ describe("DR-34 (b): which key values a run registers", () => {
   });
 
   test("a long value of a key the run does not use is still a secret (SP-2)", async () => {
-    assert.ok(long.length >= MIN_OTHER_KEY_SECRET_LENGTH);
+    assert.ok(long.length >= MIN_OTHER_PROVIDER_KEY_LENGTH);
     const { state } = await scriptedRead(`token ${long}\n`, { [OPENAI_API_KEY_ENV]: long });
     assert.equal(state.includes(long), false);
   });
@@ -100,9 +100,9 @@ describe("DR-34 (b): which key values a run registers", () => {
     assert.deepEqual(runKeySecrets(env, "anthropic"), ["short-own"]);
     assert.deepEqual(runKeySecrets(env, "openai"), ["x"]);
     assert.deepEqual(runKeySecrets(env, "scripted"), []);
-    const nineteen = "a".repeat(MIN_OTHER_KEY_SECRET_LENGTH - 1);
-    const twenty = "b".repeat(MIN_OTHER_KEY_SECRET_LENGTH);
+    const nineteen = "a".repeat(MIN_OTHER_PROVIDER_KEY_LENGTH - 1);
+    const twenty = "b".repeat(MIN_OTHER_PROVIDER_KEY_LENGTH);
     assert.deepEqual(runKeySecrets({ [ANTHROPIC_API_KEY_ENV]: nineteen, [OPENAI_API_KEY_ENV]: twenty }, "scripted"), [twenty]);
-    assert.equal(MIN_OTHER_KEY_SECRET_LENGTH, 20);
+    assert.equal(MIN_OTHER_PROVIDER_KEY_LENGTH, 20);
   });
 });

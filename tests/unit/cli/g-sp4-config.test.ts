@@ -16,6 +16,8 @@ import {
   ANTHROPIC_API_KEY_ENV,
   CODARYN_API_BASE_URL_ENV,
   CODARYN_MODEL_ENV,
+  CODARYN_OPENAI_API_BASE_URL_ENV,
+  CODARYN_OPENAI_MODEL_ENV,
   DEFAULT_OPENAI_API_BASE_URL,
   OPENAI_API_KEY_ENV,
 } from "../../../src/contracts/index.js";
@@ -141,7 +143,7 @@ describe("SP-4: the settings resolve for the chosen provider", () => {
   test("each provider has its own model and address variables, checked with its address rule (DR-34 (a))", () => {
     // DR-34 (a) replaced SP-4's "the variables apply to the chosen provider": CODARYN_MODEL and
     // CODARYN_API_BASE_URL are anthropic's, OpenAI has CODARYN_OPENAI_MODEL and CODARYN_OPENAI_API_BASE_URL.
-    const withEnv = { ...env, CODARYN_OPENAI_MODEL: "env-model", CODARYN_OPENAI_API_BASE_URL: "https://proxy.example/v1" };
+    const withEnv = { ...env, [CODARYN_OPENAI_MODEL_ENV]: "env-model", [CODARYN_OPENAI_API_BASE_URL_ENV]: "https://proxy.example/v1" };
     const openai = resolveApiSettings({ provider: "openai" }, withEnv, both);
     assert.ok(openai.ok, openai.ok ? "" : openai.message);
     assert.deepEqual([openai.settings.model, openai.settings.apiBaseUrl], ["env-model", "https://proxy.example/v1"]);

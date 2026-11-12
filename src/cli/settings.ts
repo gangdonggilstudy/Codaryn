@@ -10,6 +10,7 @@ import {
   CODARYN_MODEL_ENV,
   DEFAULT_MAX_RETRIES,
   DEFAULT_REQUEST_TIMEOUT_MS,
+  MIN_OTHER_PROVIDER_KEY_LENGTH,
   MODEL_PLACEHOLDER_PATTERN_SOURCE,
 } from "../contracts/index.js";
 import type {
@@ -23,7 +24,7 @@ import type {
   ProviderSettings,
   ResolvedApiSettings,
 } from "../contracts/index.js";
-import { PROVIDER_SETTING_ENVS, normalizeApiBaseUrlStrict } from "./security/index.js";
+import { normalizeApiBaseUrlStrict } from "./security/index.js";
 
 export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -43,22 +44,17 @@ export function knownKeyValues(env: SettingsEnvironment): string[] {
 }
 
 /**
- * DR-34 (b) (review R-20 M-2): a key variable the run does not use is a secret only from this many
- * characters. A placeholder such as EMPTY, ollama or x, left for a local OpenAI-compatible server,
- * would otherwise mask ordinary words and break an unrelated run; real keys are much longer.
- */
-export const MIN_OTHER_KEY_SECRET_LENGTH = 20;
-
-/**
  * S-2, SP-2, DR-34 (b): the key values a run registers as secrets. The run's own provider's key as
  * it is set (any length, as before); every other known key (API_KEY_ENVS) only from
- * MIN_OTHER_KEY_SECRET_LENGTH characters. A scripted run uses no key, so every key is another's.
+ * MIN_OTHER_PROVIDER_KEY_LENGTH characters (the contract's, DR-34 (b)), so a placeholder such as
+ * EMPTY, ollama or x cannot break an unrelated run. A scripted run uses no key, so every key is
+ * another's.
  */
 export function runKeySecrets(env: SettingsEnvironment, provider: ModelProviderName): string[] {
   const own = provider === "scripted" ? null : API_PROVIDERS[provider].keyEnv;
   return API_KEY_ENVS.flatMap((name) => {
     const value = envValue(env, name);
-    return value !== null && (name === own || value.length >= MIN_OTHER_KEY_SECRET_LENGTH) ? [value] : [];
+    return value !== null && (name === own || value.length >= MIN_OTHER_PROVIDER_KEY_LENGTH) ? [value] : [];
   });
 }
 
@@ -117,7 +113,7 @@ export function resolveModelId(
   config: CodarynConfig | null,
   provider: ApiProviderName = "anthropic",
 ): string | null {
-  return realModel(taskModel) ?? realModel(envValue(env, PROVIDER_SETTING_ENVS[provider].model)) ?? realModel(providerSettingsOf(config, provider).model);
+  return realModel(taskModel) ?? realModel(envValue(env, API_PROVIDERS[provider].modelEnv)) ?? realModel(providerSettingsOf(config, provider).model);
 }
 
 /** N-3: whether some level holds a placeholder (for the message when no model is left). */
@@ -127,7 +123,7 @@ export function modelPlaceholderSeen(
   config: CodarynConfig | null,
   provider: ApiProviderName = "anthropic",
 ): boolean {
-  const fromEnv = env[PROVIDER_SETTING_ENVS[provider].model];
+  const fromEnv = env[API_PROVIDERS[provider].modelEnv];
   return [taskModel, fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv, providerSettingsOf(config, provider).model].some(
     (value) => value !== undefined && isModelPlaceholder(value),
   );
@@ -136,7 +132,7 @@ export function modelPlaceholderSeen(
 /**
  * Message part for a missing model; mentions a placeholder when one was found (N-3). `configField`
  * is where the config holds it (configFieldOf; `model` for anthropic's top-level field), `modelEnv`
- * the provider's model variable (PROVIDER_SETTING_ENVS).
+ * the provider's model variable (API_PROVIDERS modelEnv).
  */
 export function missingModelText(placeholder: boolean, configField = "model", modelEnv: string = CODARYN_MODEL_ENV): string {
   const base = `the model (task model.model, ${modelEnv} or config ${configField})`;
@@ -154,7 +150,7 @@ export function missingOutputCapText(configField = "maxOutputTokens"): string {
  * - model: task `model.model` → the provider's model variable → the provider's config `model`
  * - maxOutputTokens: task `model.maxOutputTokens` → the provider's config `maxOutputTokens`
  * - apiBaseUrl: the provider's address variable → the provider's config `apiBaseUrl` → its default
- *   address (PROVIDER_SETTING_ENVS: CODARYN_API_BASE_URL is anthropic's only)
+ *   address (API_PROVIDERS baseUrlEnv: CODARYN_API_BASE_URL is anthropic's only)
  * - requestTimeoutMs, maxRetries: the provider's config → defaults
  * The provider's config is `providers.<name>`, for anthropic also the top-level fields
  * (providerSettingsOf). A missing key, model or output cap is `provider_not_configured`.
@@ -170,7 +166,7 @@ export function resolveApiSettings(model: ApiModelConfig, env: SettingsEnvironme
   if (apiKey === null) missing.push(keyEnv);
   if (modelId === null) {
     missing.push(
-      missingModelText(modelPlaceholderSeen(model.model, env, config, provider), configFieldOf(config, provider, "model"), PROVIDER_SETTING_ENVS[provider].model),
+      missingModelText(modelPlaceholderSeen(model.model, env, config, provider), configFieldOf(config, provider, "model"), API_PROVIDERS[provider].modelEnv),
     );
   }
   if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
@@ -199,7 +195,7 @@ export type ResolveConnectionOutcome =
 /**
  * The key, API address, request time limit and retries: the part of the settings `run` and
  * `codaryn models` (Y-2) share, for `provider` (default anthropic). apiBaseUrl: the provider's own
- * address variable (DR-34 (a), PROVIDER_SETTING_ENVS; S-9 strict rule with the provider's path rule)
+ * address variable (DR-34 (a), API_PROVIDERS baseUrlEnv; S-9 strict rule with the provider's path rule)
  * → the provider's config `apiBaseUrl` → its default address.
  * requestTimeoutMs, maxRetries: the provider's config → defaults.
  */
@@ -211,7 +207,7 @@ export function resolveConnection(
 ): ResolveConnectionOutcome {
   const spec = API_PROVIDERS[provider];
   const own = providerSettingsOf(config, provider);
-  const variable = PROVIDER_SETTING_ENVS[provider].apiBaseUrl;
+  const variable = API_PROVIDERS[provider].baseUrlEnv;
   const fromEnv = envValue(env, variable);
   let apiBaseUrl: string;
   if (fromEnv !== null) {
@@ -244,7 +240,7 @@ export function keyDestination(
   provider: ApiProviderName,
 ): { readonly origin: string; readonly source: string } | null {
   const spec = API_PROVIDERS[provider];
-  const variable = PROVIDER_SETTING_ENVS[provider].apiBaseUrl;
+  const variable = API_PROVIDERS[provider].baseUrlEnv;
   const fromEnv = envValue(env, variable);
   if (fromEnv !== null) {
     const normalized = normalizeApiBaseUrlStrict(fromEnv, variable, spec.baseUrlPath);

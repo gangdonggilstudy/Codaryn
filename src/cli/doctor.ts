@@ -58,7 +58,6 @@ import {
   checkLocalPathSyntax,
   findKeyInJson,
   normalizeApiBaseUrlStrict,
-  PROVIDER_SETTING_ENVS,
   rawTextHoldsKey,
 } from "./security/index.js";
 import type { PathRelation, WorkspaceLocation } from "./security/index.js";
@@ -603,7 +602,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       const destination = keyDestination(env, config, provider);
       const where =
         destination === null
-          ? `its address in ${PROVIDER_SETTING_ENVS[provider].apiBaseUrl} is not valid (see the model check), so nothing is sent`
+          ? `its address in ${API_PROVIDERS[provider].baseUrlEnv} is not valid (see the model check), so nothing is sent`
           : `${provider} requests send it only to ${destination.origin} (${destination.source})`;
       set("api_key", "ok", `${keyEnv} is set; ${where}`, { id: "doctor.api_key.ok", params: { keyEnv } });
     } else {
@@ -633,12 +632,12 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     const missing: string[] = [];
     if (modelId === null) {
       missing.push(
-        missingModelText(modelPlaceholderSeen(fromTask?.model, env, config, provider), configFieldOf(config, provider, "model"), PROVIDER_SETTING_ENVS[provider].model),
+        missingModelText(modelPlaceholderSeen(fromTask?.model, env, config, provider), configFieldOf(config, provider, "model"), API_PROVIDERS[provider].modelEnv),
       );
     }
     if (maxOutputTokens === null) missing.push(missingOutputCapText(configFieldOf(config, provider, "maxOutputTokens")));
     // DR-34 (a): the provider's own address variable.
-    const baseUrlEnv = PROVIDER_SETTING_ENVS[provider].apiBaseUrl;
+    const baseUrlEnv = API_PROVIDERS[provider].baseUrlEnv;
     const baseUrl = envValue(env, baseUrlEnv);
     const baseUrlProblem = baseUrl === null ? null : normalizeApiBaseUrlStrict(baseUrl, baseUrlEnv, API_PROVIDERS[provider].baseUrlPath);
     const placeholder = modelPlaceholderSeen(fromTask?.model, env, config, provider);

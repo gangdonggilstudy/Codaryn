@@ -17,6 +17,8 @@ import {
   ANTHROPIC_API_KEY_ENV,
   CODARYN_API_BASE_URL_ENV,
   CODARYN_MODEL_ENV,
+  CODARYN_OPENAI_API_BASE_URL_ENV,
+  CODARYN_OPENAI_MODEL_ENV,
   DEFAULT_ANTHROPIC_API_BASE_URL,
   DEFAULT_OPENAI_API_BASE_URL,
   OPENAI_API_KEY_ENV,
@@ -34,8 +36,8 @@ after(async () => {
   for (const dir of temporaryDirs) await rm(dir, { recursive: true, force: true });
 });
 
-const OPENAI_MODEL_ENV = "CODARYN_OPENAI_MODEL";
-const OPENAI_BASE_URL_ENV = "CODARYN_OPENAI_API_BASE_URL";
+const OPENAI_MODEL_ENV = CODARYN_OPENAI_MODEL_ENV;
+const OPENAI_BASE_URL_ENV = CODARYN_OPENAI_API_BASE_URL_ENV;
 const ANTHROPIC_VALUE = ["fake", "dr34", "anthropic", "value", "0001"].join("-");
 const OPENAI_VALUE = ["fake", "dr34", "openai", "value", "0001"].join("-");
 const KEYS = { [ANTHROPIC_API_KEY_ENV]: ANTHROPIC_VALUE, [OPENAI_API_KEY_ENV]: OPENAI_VALUE };

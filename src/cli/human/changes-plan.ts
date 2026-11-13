@@ -30,9 +30,11 @@ import { displayWidth, formatLocalTime, quoteModelText } from "./format.js";
 
 /**
  * Where the plan run's masking took a value out of the summary. The stored summary holds only the
- * visible parts (MaskedParts: no token, no secret value), so the view joins them at this mark.
+ * visible parts (MaskedParts: no token, no secret value), so the view joins them at this mark. PM: the
+ * engine's own mark for these gaps (APPROVED_SUMMARY_GAP), so that the summary a person sees and the
+ * text the run that carries the plan out is given are the same to the letter.
  */
-export const SUMMARY_HIDDEN_MARKER = "[secret]";
+export const SUMMARY_HIDDEN_MARKER = "[masked]";
 
 /** The summary's visible parts as one text, SUMMARY_HIDDEN_MARKER where the plan run took a value out. */
 export function changesPlanSummaryText(parts: MaskedParts): string {

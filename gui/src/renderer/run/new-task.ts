@@ -15,6 +15,7 @@ import { errorText, startErrorText } from "../i18n/catalog.js";
 import { asSettings, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { withMoves } from "../shell/error-move.js";
 import type { Screen } from "../shell/shell.js";
 import { GOAL_LIMIT } from "./run-model.js";
 import type { RunModel } from "./run-model.js";
@@ -27,6 +28,8 @@ export interface NewTaskDeps {
   readonly open: () => void;
   /** Goes to the run screen once the run has started. */
   readonly showRun: () => void;
+  /** U-271 (3.12): another screen, for an error whose fix is done there (error-move.ts). */
+  readonly showScreen?: (screen: string) => void;
   /** R21b-L-1: the form of a run that started, as the workspace's last one. */
   readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
   /** U-68 (3.2): another process holds the open workspace's lock (the run button is off while it does), and a watcher slot. */
@@ -138,8 +141,8 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         advanced.append(el("summary", t.format("task.advanced")), el("p", t.format("task.advancedText")));
 
         const message = el("div", undefined, { id: "task-message", role: "alert" });
-        if (!reply.ok) message.append(el("p", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`));
-        if (run.startError !== null) message.append(el("p", startErrorText(t, run.startError, run.startHint), { "data-error": run.startError, ...(run.startHint === null ? {} : { "data-hint": run.startHint }) }));
+        if (!reply.ok) message.append(withMoves(el("p", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`), t, reply.code, deps.showScreen, "newtask"));
+        if (run.startError !== null) message.append(withMoves(el("p", startErrorText(t, run.startError, run.startHint), { "data-error": run.startError, ...(run.startHint === null ? {} : { "data-hint": run.startHint }) }), t, run.startError, deps.showScreen, "newtask"));
 
         const start = (): void => {
           const text = goal.value;

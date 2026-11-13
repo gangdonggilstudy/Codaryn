@@ -23,6 +23,7 @@ import { errorText } from "../i18n/catalog.js";
 import { asCopy, asModels, asProposal, asSelectModel, asSettings, asWritten } from "../api.js";
 import type { CodarynApi } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { withMoves } from "../shell/error-move.js";
 import type { Screen } from "../shell/shell.js";
 import type { PolicyNarrowingView, ProfileView, SettingsPrivateDataView, SettingsRules, SettingsView } from "../../shared/ipc.js";
 import { keyHowLine } from "./key-how.js";
@@ -35,9 +36,11 @@ export interface SettingsDeps {
   readonly announce: (text: string) => void;
   /** U-69 (11): a change was written; the window looks again at its language (a new one redraws it at once). */
   readonly languageChanged?: () => void;
+  /** U-271 (3.12): another screen, for an error whose fix is done there (error-move.ts). */
+  readonly showScreen?: (screen: string) => void;
 }
 
-function errorBox(t: Texts, code: string): HTMLElement {
+function errorBoxOf(t: Texts, code: string): HTMLElement {
   const box = el("div", undefined, { role: "alert", class: "error", "data-error": code });
   box.append(el("p", errorText(t, code)), el("p", t.format("error.code", { code }), { class: "code", lang: "en" }));
   return box;
@@ -360,6 +363,8 @@ function general(t: Texts, view: SettingsView, language: "ko" | "en", propose?: 
 }
 
 export function settingsScreen(deps: SettingsDeps): Screen {
+  // U-271 (3.12): this screen's error cards, with a button to the screen an error's fix is on.
+  const errorBox = (t: Texts, code: string): HTMLElement => withMoves(errorBoxOf(t, code), t, code, deps.showScreen, "settings");
   const { texts: t, api } = deps;
   let written: string | null = null;
   const screen: Screen = {

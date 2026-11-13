@@ -158,6 +158,7 @@ async function start(): Promise<void> {
         current: () => current,
         open: openWorkspace,
         showRun: () => shell?.show("run"),
+        showScreen: (id) => shell?.show(id),
         // R21b-L-1: the main process remembers it too; this keeps the open workspace's copy current.
         rememberForm: (form) => {
           if (current !== null) current = { ...current, lastForm: form };
@@ -172,7 +173,7 @@ async function start(): Promise<void> {
         },
       }),
     );
-    const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
+    const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run"), showScreen: (id) => shell?.show(id) });
     /** `formKnown` false: the run's form is unknown (started elsewhere); its plan is shown, not applied. */
     const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true, recordsChanged = false): void => {
       plan.choose(runId, profile, workflow, formKnown, recordsChanged);
@@ -197,14 +198,14 @@ async function start(): Promise<void> {
       shell?.show("runs");
     };
     const openSettings = (): void => shell?.show("settings");
-    frame.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport, openRevert, openSettings }));
+    frame.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport, openRevert, openSettings, showScreen: (id) => shell?.show(id) }));
     frame.add(plan);
     frame.add(changes);
     frame.add(report);
     frame.add(runs);
     frame.add(cleanupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
     frame.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
-    frame.add(settingsScreen({ texts, api, language, announce: (text) => shell?.announce(text), languageChanged: () => void relanguage() }));
+    frame.add(settingsScreen({ texts, api, language, announce: (text) => shell?.announce(text), languageChanged: () => void relanguage(), showScreen: (id) => shell?.show(id) }));
     frame.add(setupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text), show: (id) => shell?.show(id) }));
     frame.add(text);
     // U-67 (3.13): the palette's fixed commands (nothing is built from a model's text or a file name).

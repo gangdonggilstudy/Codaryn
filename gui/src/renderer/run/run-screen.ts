@@ -14,6 +14,7 @@ import { asRuns, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { actionLine } from "../plan/plan-screen.js";
 import { button, el } from "../shell/dom.js";
+import { withMoves } from "../shell/error-move.js";
 import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localTime } from "./run-model.js";
@@ -39,6 +40,8 @@ export interface RunScreenDeps {
   readonly openRevert?: (runId: string) => void;
   /** U-61 (3.12): the settings screen, where the limits are (3.10). */
   readonly openSettings?: () => void;
+  /** U-271 (3.12): another screen, for an error whose fix is done there (error-move.ts). */
+  readonly showScreen?: (screen: string) => void;
 }
 
 /** GU-5: what follows a result: the plan, the DR-21 consent question, the applied actions, a review. */
@@ -89,7 +92,7 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView, formKno
           if (started.ok) run.started(started.runId, Date.now());
           else {
             run.failedToStart(started.code);
-            message.replaceChildren(el("p", `${errorText(t, started.code)} ${t.format("error.code", { code: started.code })}`, { "data-error": started.code }));
+            message.replaceChildren(withMoves(el("p", `${errorText(t, started.code)} ${t.format("error.code", { code: started.code })}`, { "data-error": started.code }), t, started.code, deps.showScreen, "run"));
           }
         })();
       }, { id: "run-consent" });
@@ -318,12 +321,12 @@ export function runScreen(deps: RunScreenDeps): Screen {
         lastPhase = phase;
         end.replaceChildren();
         if (phase === "idle" && run.startError !== null) {
-          end.append(el("div", startErrorText(t, run.startError, run.startHint), { role: "alert", class: "error", "data-error": run.startError, ...(run.startHint === null ? {} : { "data-hint": run.startHint }) }));
+          end.append(withMoves(el("div", startErrorText(t, run.startError, run.startHint), { role: "alert", class: "error", "data-error": run.startError, ...(run.startHint === null ? {} : { "data-hint": run.startHint }) }), t, run.startError, deps.showScreen, "run"));
         }
         if (phase === "idle" && run.startError === null && run.done === null) end.append(el("p", t.format("run.none")));
         if (phase === "done" && run.done !== null) {
           if (run.done.ok) end.append(resultView(t, api, run.done.result, run.done.labels), ...(run.last?.taskFile === true ? taskRunSteps(t, deps, run.done.result) : nextSteps(t, deps, run.done.result)));
-          else end.append(el("div", `${errorText(t, run.done.code)} ${t.format("error.code", { code: run.done.code })}`, { role: "alert", class: "error", "data-error": run.done.code }));
+          else end.append(withMoves(el("div", `${errorText(t, run.done.code)} ${t.format("error.code", { code: run.done.code })}`, { role: "alert", class: "error", "data-error": run.done.code }), t, run.done.code, deps.showScreen, "run"));
         }
         if (phase === "idle" || phase === "done") end.append(button(t.format("run.again"), deps.newTask, { id: "run-again" }));
         root.setAttribute("data-run-phase", phase);

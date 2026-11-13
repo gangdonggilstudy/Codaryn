@@ -215,6 +215,33 @@ startGui({
         "(() => { const tree = document.querySelector('.tree'); const first = tree.querySelector('[tabindex=\"0\"]'); first.focus(); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); const last = document.activeElement?.getAttribute('data-key'); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); return { moved: last !== null && last !== document.activeElement?.getAttribute('data-key'), inTree: tree.contains(document.activeElement) }; })()",
       );
       results["treeText"] = await js("document.querySelector('.tree')?.textContent ?? ''");
+      // U-103 (G-list, 3.3): the tree is the app layer's list. The key-shaped name comes masked without an
+      // id; a plain entry's path is copied by its id (the main process resolves it), nothing else.
+      results["treeCopyPath"] = await (async () => {
+        const handleText = JSON.stringify(second.ok ? second.handle : "");
+        type Listed = { ok: boolean; entries?: { id: string | null; name: string; masked: boolean }[] };
+        const top = (await js(`window.codaryn.tree(${handleText}, null, 0)`)) as Listed;
+        const idOf = (list: Listed, name: string): string => list.entries?.find((entry) => entry.name === name)?.id ?? "";
+        const sub = (await js(`window.codaryn.tree(${handleText}, ${JSON.stringify(idOf(top, "sub"))}, 0)`)) as Listed;
+        const copy = (workspace: string, node: string): Promise<unknown> => js(`window.codaryn.copyPath(${workspace}, ${JSON.stringify(node)}).then((r) => (r.ok ? "copied" : r.code))`);
+        const before = copied.length;
+        const result = {
+          masked: top.entries?.filter((entry) => entry.masked).map((entry) => entry.id) ?? "none",
+          top: await copy(handleText, idOf(top, "a.txt")),
+          nested: await copy(handleText, idOf(sub, "b.txt")),
+          unknown: await copy(handleText, "0".repeat(32)),
+          pathString: await copy(handleText, "sub/b.txt"),
+          otherWorkspace: await copy(JSON.stringify("f".repeat(32)), idOf(top, "a.txt")),
+          button: await (async () => {
+            await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.trim().endsWith('a.txt'))?.click(); true");
+            await js("document.getElementById('tree-copy-path')?.click(); true");
+            return waitFor("document.getElementById('tree-copy-status')?.getAttribute('data-copied') ?? null");
+          })(),
+          texts: [] as string[],
+        };
+        result.texts = copied.slice(before);
+        return result;
+      })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
@@ -400,7 +427,6 @@ startGui({
           words: await code("window.codaryn.copyText('any text at all')"),
           digestUpper: await code("window.codaryn.copyText('0123456789AB')"),
           lineBreak: await code("window.codaryn.copyText('a\\nb')"),
-          noPathCopy: await js("typeof window.codaryn.copyPath"),
           written: copied.length - before,
         };
       })();
@@ -413,6 +439,17 @@ startGui({
           return waitFor("(() => { const p = document.getElementById('revert-panel')?.getAttribute('data-preview'); return p && p !== 'loading' ? p : null; })()", 30_000);
         })(),
         title: await js("document.getElementById('revert-title')?.textContent ?? null"),
+      };
+      // U-65 (3.3): the run ended, so the tree was read again and marks the file the run made; choosing it opens the comparison there.
+      results["treeMarks"] = {
+        made: await waitFor("document.querySelector('.tree [data-change=\"created\"] .name')?.textContent ?? null", 20_000),
+        note: await js(`document.getElementById('tree-marks-text')?.textContent?.includes(${JSON.stringify((results["runResult"] as { runId?: string } | null)?.runId ?? "?")}) === true`),
+      };
+      await js("document.querySelector('.tree [data-change=\"created\"]')?.click(); true");
+      results["treeOpensChange"] = {
+        ready: await waitFor("(() => { const r = document.getElementById('changes')?.getAttribute('data-changes-ready'); return r && r !== 'none' ? r : null; })()"),
+        focus: await js("document.getElementById('changes')?.getAttribute('data-focus-file') ?? null"),
+        focused: await js("document.activeElement?.querySelector('.path')?.textContent ?? null"),
       };
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
@@ -823,6 +860,14 @@ startGui({
         }
       })();
       results["setupText"] = await js("document.getElementById('work')?.textContent ?? ''");
+      // U-65 (3.3): setup made package.json a protected path; F5 in the file panel reads the tree again and marks it.
+      const protectedBefore = await js("document.querySelectorAll('.tree [data-protected]').length");
+      await js("document.querySelector('.tree')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', bubbles: true })); true");
+      results["treeProtected"] = {
+        before: protectedBefore,
+        marked: await waitFor("[...document.querySelectorAll('.tree [data-protected=\"true\"] .name')].map((n) => n.textContent).join(',') || null", 20_000),
+        note: await js("document.getElementById('tree-protected-note')?.hasAttribute('hidden') === false"),
+      };
 
       // U-63 (3.5, GUI-D8): a task file's run. Its model is the scripted one (no request to the fake
       // API). The dialogs are answered by the test; no path reaches the page. A dialog closed without a
@@ -908,6 +953,29 @@ startGui({
       results["sockets"] = sockets([...pids]);
       // PM (a): the engine host's test transport refused no request to another machine in steps 1 to 7.
       results["transportRefused"] = "host" in state ? transportOf(await state.host.call("transport", {}, 10_000)) : state.failure;
+
+      // U-64 (3.12, 4.4): the engine host ends (closed through its own handle, G-7). The window shows its
+      // card, calls fail meanwhile, nothing restarts on its own, and the card's button starts a new host.
+      const endedState = await host();
+      const oldPid = "host" in endedState ? endedState.host.pid : undefined;
+      if ("host" in endedState) await endedState.host.close();
+      const engineCard = await waitFor("document.getElementById('engine-ended')?.hasAttribute('hidden') === false ? 'shown' : null", 20_000);
+      const whileEnded = await js("window.codaryn.doctor(null).then((r) => (r.ok ? 'ok' : r.code))");
+      await sleep(500);
+      const stillEnded = await js("document.getElementById('status-engine')?.getAttribute('data-engine') ?? null");
+      await js("document.getElementById('engine-restart')?.click(); true");
+      const engineReady = await waitFor("document.getElementById('status-engine')?.getAttribute('data-engine') === 'ready' ? 'ready' : null", 30_000);
+      const restartedState = await host();
+      results["engineRestart"] = {
+        card: engineCard,
+        whileEnded,
+        stillEnded,
+        ready: engineReady,
+        newHost: "host" in restartedState && restartedState.host.pid !== undefined && restartedState.host.pid !== oldPid,
+        cardHidden: await js("document.getElementById('engine-ended')?.hasAttribute('hidden') === true"),
+        doctorAfter: await js("window.codaryn.doctor(null).then((r) => (r.ok ? 'ok' : r.code))"),
+        again: await js("window.codaryn.restartEngine().then((r) => (r.ok ? 'restarted' : r.code))"),
+      };
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.

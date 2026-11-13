@@ -134,6 +134,16 @@ button:focus-visible,
   text-decoration: underline;
 }
 
+/* U-65: what the marked run did, and protected entries; words, not colour alone. */
+.tree .tree-marks {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.tree [data-change] .name {
+  font-weight: 600;
+}
+
 .recent {
   list-style: none;
   padding: 0;

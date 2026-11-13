@@ -25,6 +25,7 @@ import type {
   RunDonePayload,
   PlanApplyView,
   CopyReply,
+  RestartReply,
   RunListItem,
   RunsReply,
   RunEventsPayload,
@@ -53,6 +54,8 @@ export interface CodarynApi {
   reveal(workspace: string, node: string): Promise<unknown>;
   /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
   copyText(text: string): Promise<unknown>;
+  /** U-103 (3.3): copies a tree entry's relative path, by its id (the main process resolves and checks it). */
+  copyPath(workspace: string, node: string): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;
@@ -68,6 +71,10 @@ export interface CodarynApi {
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
   onRunDone(listener: (payload: unknown) => void): void;
+  /** U-64: starts the engine again after it ended. */
+  restartEngine(): Promise<unknown>;
+  /** U-64: the engine's state when it changes ("ready", or an error code). */
+  onEngineState(listener: (payload: unknown) => void): void;
   listRuns(workspace: string): Promise<unknown>;
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;
@@ -152,7 +159,7 @@ export function asTree(value: unknown): TreeReply {
       return { ok: false, code: "host_error" };
     }
     const id = entry["id"];
-    views.push({ id: str(id) && HEX.test(id) ? id : null, name: entry["name"], kind: entry["kind"] as TreeEntryView["kind"], masked: entry["masked"] });
+    views.push({ id: str(id) && HEX.test(id) ? id : null, name: entry["name"], kind: entry["kind"] as TreeEntryView["kind"], masked: entry["masked"], protected: entry["protected"] === true });
   }
   return { ok: true, entries: views, total, offset, nextOffset };
 }
@@ -393,6 +400,17 @@ export function asPlan(value: unknown): PlanReply {
   if (!str(view["runId"]) || !str(view["digest"]) || !Array.isArray(view["actions"]) || (view["status"] !== "pending" && view["status"] !== "applied")) return failed(value);
   const approval = str(value["approval"]) && HEX.test(value["approval"]) ? value["approval"] : null;
   return { ok: true, view: view as unknown as PlanView, approval };
+}
+
+/** U-64: the answer to restartEngine. */
+export function asRestart(value: unknown): RestartReply {
+  return isObj(value) && value["ok"] === true ? { ok: true } : failed(value);
+}
+
+/** U-64: an engine state event: "ready", or an error code; null when it does not fit. */
+export function asEngineState(value: unknown): string | null {
+  const state = isObj(value) ? value["state"] : null;
+  return typeof state === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(state) ? state : null;
 }
 
 /** U-62: a copy's answer. */

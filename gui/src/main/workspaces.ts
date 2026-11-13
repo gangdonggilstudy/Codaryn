@@ -147,14 +147,19 @@ export class Workspaces {
     for (const entry of entries) {
       if (typeof entry !== "object" || entry === null) return { ok: false, code: "host_error" };
       const { name, shown, kind, masked } = entry as Record<string, unknown>;
-      if (typeof name !== "string" || typeof shown !== "string" || typeof masked !== "boolean") return { ok: false, code: "host_error" };
+      // U-65: the app layer's protected mark (the effective policy's protected paths) is passed on as true or false.
+      const marked = (entry as Record<string, unknown>)["protected"] ?? false;
+      if (typeof shown !== "string" || typeof masked !== "boolean" || typeof marked !== "boolean") return { ok: false, code: "host_error" };
+      // U-103 (U-89): a masked entry has no real name (the app layer keeps it); a plain entry's name is what is shown.
+      if (masked ? name !== null : typeof name !== "string" || name === "" || name !== shown) return { ok: false, code: "host_error" };
       if (typeof kind !== "string" || !(KINDS as readonly string[]).includes(kind)) return { ok: false, code: "host_error" };
       const openable = !masked && (kind === "dir" || kind === "file");
       views.push({
-        id: openable ? this.treeIds.issue(handle, childPath(dir, name)) : null,
-        name: masked && shown === name ? "" : shown,
+        id: openable ? this.treeIds.issue(handle, childPath(dir, name as string)) : null,
+        name: shown,
         kind: kind as TreeKind,
         masked,
+        protected: marked,
       });
     }
     return { ok: true, entries: views, total, offset, nextOffset };

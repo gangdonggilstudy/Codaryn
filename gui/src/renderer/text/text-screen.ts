@@ -17,6 +17,8 @@
  * - Codex V-5 M-2: a save's reply belongs to the view that sent it. Opening another file, reading
  *   again, leaving or discarding makes a new view; a reply that comes later for an earlier view
  *   changes nothing on the current one (its text, its unsaved mark, what the main process is told).
+ * - Codex V-5b M-3: a read reply is the same: one that comes back after a newer read began is dropped,
+ *   so the text shown is always the newest read's and its saves complete there.
  * - A wrap switch (on by default, as the changes view). With wrapping off, line numbers stand beside
  *   the text (hidden from screen readers); the cursor's line and the line count are in the status line.
  */
@@ -202,6 +204,9 @@ export function textScreen(deps: TextDeps): TextScreen {
         view.setAttribute("data-text-ready", "loading");
         body.replaceChildren(el("p", t.format("runs.loading")));
         const reply = asText(await api.openText(workspace.handle, chosen.node));
+        // V-5b M-3: a read that comes back after a newer one began (read again, another file) is dropped;
+        // only the newest read builds the text, so its saves are the current view's.
+        if (mine !== current) return;
         if (!reply.ok) {
           body.replaceChildren(el("div", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { role: "alert", class: "error", "data-error": reply.code }));
           view.setAttribute("data-text-ready", "error");
@@ -284,9 +289,9 @@ export function textScreen(deps: TextDeps): TextScreen {
           result.replaceChildren(el("p", t.format("text.saving")));
           const text = area.value;
           const reply = asSaveText(await api.saveText(token, text));
+          saving = false;
           // V-5 M-2: the person moved on (another file, read again, left): this reply is not the current view's.
           if (mine !== current) return;
-          saving = false;
           if (!reply.ok) {
             result.replaceChildren(el("p", reply.code === "cancelled" ? t.format("text.saveCancelled") : `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { class: reply.code === "cancelled" ? "notice" : "error", "data-save": reply.code }));
           } else if (reply.saved) {

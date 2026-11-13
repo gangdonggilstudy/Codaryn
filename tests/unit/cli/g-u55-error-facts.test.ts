@@ -156,8 +156,9 @@ describe("U-55: report --json carries the model error that ended a run", () => {
     const { dir, result } = await exhausted();
     const file = resultFile(dir, result.runId);
     const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
-    await writeFile(file, JSON.stringify({ ...stored, modelError: { kind: "api_error", turn: 2 } }), "utf8");
-    assert.deepEqual((await report(dir, result.runId)).json.result?.modelError, { kind: "api_error", turn: 2 });
+    // The run made one model turn (U-88: modelError.turn is at most usage.modelTurns).
+    await writeFile(file, JSON.stringify({ ...stored, modelError: { kind: "api_error", turn: 1 } }), "utf8");
+    assert.deepEqual((await report(dir, result.runId)).json.result?.modelError, { kind: "api_error", turn: 1 });
     for (const bad of [{ kind: "nosuch", turn: 1 }, { kind: "api_error", turn: 0 }, { kind: "api_error", turn: 1, retryable: "yes" }, "api_error", null]) {
       await writeFile(file, JSON.stringify({ ...stored, modelError: bad }), "utf8");
       const { exitCode, json } = await report(dir, result.runId);

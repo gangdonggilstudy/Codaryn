@@ -167,6 +167,8 @@ export interface DoctorCheckView {
   readonly status: DoctorCheckStatusView;
   /** Fixed English text from the engine (DoctorCheck.message): never a value from a file or the environment. */
   readonly message: string;
+  /** U-68: the check's catalog message id (DoctorCheck.text.id, e.g. "doctor.lock.held"), when it has one; never its parameters. */
+  readonly textId?: string;
 }
 
 export interface DoctorView {
@@ -178,6 +180,9 @@ export interface DoctorView {
  * The parts of a DoctorOutput (src/contracts/commands.ts) the window shows, checked field by
  * field. Anything else in the output is not passed on. Null when the shape does not fit.
  */
+/** U-68: a doctor check's message id, as the catalog names them (doctor.<check>.<outcome>). */
+const DOCTOR_TEXT_ID = /^doctor(\.[a-z0-9_]{1,40}){1,3}$/;
+
 export function toDoctorView(output: unknown): DoctorView | null {
   if (!isObj(output) || output["kind"] !== "doctor") return null;
   const status = output["status"];
@@ -191,7 +196,9 @@ export function toDoctorView(output: unknown): DoctorView | null {
     if (typeof id !== "string" || !CHECK_ID.test(id)) return null;
     if (typeof checkStatus !== "string" || !(DOCTOR_CHECK_STATUSES as readonly string[]).includes(checkStatus)) return null;
     if (typeof message !== "string") return null;
-    views.push({ id, status: checkStatus as DoctorCheckStatusView, message: message.slice(0, MAX_MESSAGE) });
+    const text = check["text"];
+    const textId = isObj(text) && typeof text["id"] === "string" && DOCTOR_TEXT_ID.test(text["id"]) ? text["id"] : null;
+    views.push({ id, status: checkStatus as DoctorCheckStatusView, message: message.slice(0, MAX_MESSAGE), ...(textId === null ? {} : { textId }) });
   }
   return { status: status as DoctorStatusView, checks: views };
 }

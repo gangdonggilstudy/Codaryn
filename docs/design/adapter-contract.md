@@ -614,6 +614,17 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 좁히기: 항목을 뺌, 같은 항목을 다른 순서나 표기로, 목록이 없던 자리에 새로 둠(한정 없음보다 어디서나 좁다), 빈 목록.
       - 처음 판(ba7cec7)은 글자로 더 덮는 항목만 넓히기로 보았다. 예전 항목 안의 항목을 좁히기로 본 것을 V-8로 고쳤다.
       - 설정 파서는 U-182(병합 `a1d5c65`)부터 이 필드를 받는다(설정 파일, 프로필, 작업 종류 정의의 `policy.writablePaths`). U-183이 쓰일 때는 판정이 파서보다 먼저였다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다. GUI의 설정 화면에는 이 필드를 고치는 편집이 없고, 넓히기 확인 대화상자는 두 종류에 이름을 붙인다(U-192, 병합 `111e25d`).
+    - U-204(DR-69 묶음 A, A-7, R-7): 읽기 제외 경로(`unreadablePaths`)를 빼는 것과 묶음 최소 크기 k(`minGroupSize`)를 낮추는 것.
+      - 읽기 제외 목록은 거부 목록이고 더하기만 한다. 설정·적용한 프로필·작업 종류 정의·과제 파일의 항목이 합집합으로 걸린다(계약 `PolicyConfig.unreadablePaths`, `mergeWorkflowPolicy`). 관문은 항목을 글자와 실경로 둘 다로 본다(보호 경로의 규칙).
+      - 예전 항목이 새 목록에 없으면 `unreadable_path_removed`다. 필드는 그 목록(`policy.unreadablePaths`, `profiles.<이름>.policy.unreadablePaths`, `workflows.<id>.policy.unreadablePaths`)이고 한 번만 준다. 항목을 뺌, 목록을 비움, 목록이나 프로필의 정책이 없어짐이 여기에 든다.
+        - 같은 항목인지는 글자 그대로이거나 관문의 판정(`compilePathSet`의 `exact`)으로 본다. 그래서 `data/private`와 `data/private/`는 같다.
+        - 더 넓은 항목으로 바꾼 것(`data/private` → `data`)도 넓히기다. 관문은 거부 항목을 실경로로도 풀어 보므로, `data/private`가 다른 곳을 가리키는 링크나 정션이면 그 대상을 막고 있었다. `data`는 그 대상을 덮지 않는다. 목록은 모든 작업 공간에서 쓰이므로 설정을 바꾸는 때 확인할 수 없고, 확인할 수 없으면 넓히기다(V-8 M-1과 같은 까닭).
+        - 프로필이나 정의의 목록에서 뺀 항목을 설정의 **새** 목록이 아직 갖고 있으면 넓히기가 아니다. 그 실행은 설정의 항목을 그대로 받는다. 적용할 프로필은 설정을 바꾸는 때 알 수 없으므로, 정의의 목록은 설정의 목록만 빼고 본다.
+      - k는 5 아래로 내려가지 않는다(DR-70, U-197의 V-12 M-1 고침). 실행의 k는 5와 설정·프로필·정의·과제 파일의 값 가운데 가장 큰 것이다(`effectiveMinGroupSize`). 그래서 어느 출처도 올리기만 한다.
+        - 설정의 k가 실제로 낮아지면 `min_group_size_lowered`(`policy.minGroupSize`)다. 5보다 큰 값을 지운 것(5로 돌아감)도 든다. 5 아래 값(파서가 거부함)은 5로 센다.
+        - 프로필이나 정의 자기 k(`profiles.<이름>.policy.minGroupSize`, `workflows.<id>.policy.minGroupSize`)는 전과 후를 모두 설정의 **새** 값과 함께 견준다. 그래서 설정의 k가 바뀐 것은 설정 자리에서 한 번만 말한다. 설정의 값(또는 5) 이하이던 값은 아무것도 올리지 않았으므로 지워도 넓히기가 아니다.
+      - 좁히기: 항목을 더함, 목록을 새로 둠, 같은 항목을 다른 순서나 표기로, k를 올림.
+      - 아직 파서는 두 필드를 받지 않는다(A-6까지). 판정이 먼저 안다. GUI는 모르는 넓히기 종류가 든 제안을 `unknown_widening`으로 거부하므로, GUI가 두 종류를 알기 전까지도 열리지 않고 닫힌다. 시험은 `tests/unit/app/u204-unreadable-k-widening.test.ts`다.
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
       - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).

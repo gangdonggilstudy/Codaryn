@@ -57,6 +57,12 @@ export interface CommandRunner {
 export interface VerifierRunnerOptions {
   readonly workspace: Workspace;
   readonly commandRunner: CommandRunner;
+  /**
+   * U-223 (bundle A, A-7, R-6): the run's unreadable paths, every source united
+   * (ResolvedTaskSpec.unreadablePaths). data_checks writes no number read from a source under them.
+   * Absent: none. The CLI's and the app's assembly pass it once a parser takes the field (A-6).
+   */
+  readonly unreadablePaths?: readonly string[];
 }
 
 function errorMessage(error: unknown): string {
@@ -269,7 +275,7 @@ async function runFileRulesVerifier(
 }
 
 export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRunner {
-  const { workspace, commandRunner } = options;
+  const { workspace, commandRunner, unreadablePaths } = options;
   return {
     async run(config: VerifierConfig, signal: AbortSignal): Promise<RawVerifierResult> {
       try {
@@ -280,7 +286,7 @@ export function createVerifierRunner(options: VerifierRunnerOptions): VerifierRu
           return await runFileRulesVerifier(config, workspace, signal);
         }
         if (config.kind === "data_checks") {
-          return await runDataChecksVerifier(config, workspace, signal);
+          return await runDataChecksVerifier(config, workspace, signal, unreadablePaths === undefined ? {} : { unreadablePaths });
         }
       } catch (error) {
         return createRawVerifierResult({

@@ -47,8 +47,12 @@ export const MAX_WORKFLOWS = 32;
  *   with query_table (query.ts, A-6)
  * - organize: read_file, search_files, inspect_files, propose_plan; `plan: "apply"`; no command
  *   rules allowed (GT-D10)
+ * - analyze-private (U-210, bundle A P-1; ANALYZE_PRIVATE_WORKFLOW_ID): read_file, search_files,
+ *   query_table, write_file; no command rules allowed; `human_review` with analyze's items and
+ *   PRIVATE_REVIEW_ITEM (P-3). Resolved only when the run has an unreadable path
+ *   (`unreadable_paths_required`). U-210 (P-2): analyze offers query_table as well.
  */
-export const BUILTIN_WORKFLOW_IDS = ["general", "code", "document", "analyze", "organize"] as const;
+export const BUILTIN_WORKFLOW_IDS = ["general", "code", "document", "analyze", "organize", "analyze-private"] as const;
 export type BuiltinWorkflowId = (typeof BUILTIN_WORKFLOW_IDS)[number];
 
 /**
@@ -342,6 +346,10 @@ export interface WorkflowDefinition {
  *   field: `tools` when the task's list leaves out a plan tool the definition offers; `plan` when
  *   the task sets the mode under a definition (or the legacy settings) without the tool; otherwise
  *   `workflows.tools`, the definition's own list.
+ * - U-210 (bundle A, A-6; PRIVATE_DATA_WORKFLOW_PROBLEMS, query.ts): unreadable_with_commands, a command
+ *   rule or a `command` verifier while the run has unreadable paths (R-5; the CLI finds it with
+ *   privateDataProblem, at the definition's, the given or the merged place); unreadable_paths_required,
+ *   `analyze-private` while the run has none (P-1; field `policy.unreadablePaths`)
  */
 export const WORKFLOW_PROBLEMS = [
   "unknown_workflow",
@@ -353,6 +361,8 @@ export const WORKFLOW_PROBLEMS = [
   "instructions_too_long",
   "checklist_too_long",
   "plan_tool_missing",
+  "unreadable_with_commands",
+  "unreadable_paths_required",
 ] as const;
 export type WorkflowProblem = (typeof WORKFLOW_PROBLEMS)[number];
 
@@ -375,6 +385,11 @@ export interface ResolveWorkflowInput {
   readonly profileWorkflowRef: string | null;
   /** Number of command rules in the effective policy, for `allowCommands: false`. */
   readonly commandRules: number;
+  /**
+   * U-210 (bundle A, P-1): the run's unreadable paths, every source's united
+   * (ResolvedTaskSpec.unreadablePaths), for `analyze-private`. Absent or empty: none.
+   */
+  readonly unreadablePaths?: readonly string[];
 }
 
 export type ResolveWorkflowOutcome =

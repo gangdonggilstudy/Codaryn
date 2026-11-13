@@ -65,7 +65,6 @@ import type {
   StoredPlan,
 } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan } from "../engine/index.js";
-import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
@@ -104,6 +103,7 @@ import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
+import { runGuards } from "./unreadable.js";
 import { FINAL_MESSAGE_MAX_LINES, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
 import type { LoadedChangesPlan } from "./human/index.js";
 
@@ -772,7 +772,10 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         parentEnv: (io.parentEnv ?? io.env) as NodeJS.ProcessEnv,
         ...(io.platform === undefined ? {} : { platform: io.platform }),
       });
-      const protectedPaths = task.policy.protectedPaths ?? [];
+      // U-210 (U-203, R-3; R-108 H-1): the apply's task's unreadable paths, for its gate, its checks and
+      // its integrity checks (watched as the protected ones are), from one place (runGuards).
+      const guards = runGuards(task, workspace);
+      const protectedPaths = guards.protectedPaths;
       const integrity =
         protectedPaths.length > 0 || prepared.integrityPaths.length > 0
           ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
@@ -806,12 +809,14 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
         // U-182 (DR-69 B-4): the apply's task's writable lists judge each action's writes, as the
         // plan run's gate judged them when the plan was proposed (DR-5: the apply's own policy).
-        policy: createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) }),
+        // U-210 (bundle A, A-6): and its unreadable paths, under which no action moves or discards a file.
+        policy: guards.gate(),
         planActions: task.policy.planActions ?? [],
         // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
         discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
         privacy,
-        verifiers: createVerifierRunner({ workspace, commandRunner }),
+        // U-210 (R-6; U-223): the apply's checks keep the numbers of unreadable sources out, as a run's do.
+        verifiers: createVerifierRunner({ workspace, commandRunner, ...guards.verifiers }),
         // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
         inventory: (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }),
         journal,

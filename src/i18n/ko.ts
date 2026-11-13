@@ -67,6 +67,11 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.denied_not_writable": "writablePaths에 없는 파일이라 거부된 쓰기: {count}건",
   "summary.denied_not_writable_hint":
     "그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록에 그 파일이 있어야 합니다.",
+  // U-207 (묶음 A; nb-i18n이 다듬을 초안).
+  "summary.denied_unreadable": "읽기 제외 파일이라 거부된 호출: {count}건",
+  "summary.denied_unreadable_hint":
+    "그 파일들은 일부러 에이전트가 읽지 못하게 한 것입니다(unreadablePaths). 에이전트는 query_table로 그 표를 집계할 수는 있습니다. 읽게 하려면 그 항목을 정한 곳의 unreadablePaths에서 빼세요.",
+  "summary.groups_hidden": "표 결과 {results}건에서 {k}행 미만의 묶음을 뺐습니다. 에이전트는 그런 묶음의 개수만 받았습니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.confirm_denied.user": "확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",
@@ -96,6 +101,8 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.next_plan": "계획 보기: codaryn plan {form} --run {runId}",
   "summary.next_apply": "승인해 적용: codaryn apply {form} --run {runId} --digest <다이제스트>",
   "summary.review_checklist": "확인할 항목 {count}개:",
+  // U-207 (P-3; nb-i18n이 다듬을 초안): analyze-private가 더하는 항목(PRIVATE_REVIEW_ITEM).
+  "review.item.no_identifying_values": "결과 표와 보고서에 한 사람을 알아볼 수 있는 값이 없다.",
   "summary.next_review": "판정 기록: codaryn review {form} --run {runId} --accept 또는 --reject",
   "summary.apply_actions": "적용한 동작: {total}개 중 {applied}개",
   "summary.apply_plan_run": "계획 실행: {runId}",
@@ -144,6 +151,10 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — 거부 ({permission}/{code})",
   "progress.tool_rejected": "{tool} — 호출 검사에서 거부 ({code})",
   "progress.tool_failed": "{tool} — 실패 ({code})",
+  // U-207 (묶음 A; nb-i18n이 다듬을 초안): 표 집계가 무엇을 물었는지만. 경로·열·값은 없음.
+  "progress.query_table": "표 집계: 묶음 열 {groupColumns}개",
+  "progress.query_table_whole": "표 집계: 표 전체",
+  "progress.query_table_describe": "표 모양 확인: 열과 개수",
   "progress.confirmation_allowed": "권한 확인 — 사람이 이번 호출에만 허용함",
   "progress.confirmation_denied.user": "권한 확인 — 사람이 거부함",
   "progress.confirmation_denied.default": "권한 확인 — 기본값으로 거부함(답이 없었거나, 물을 수 없었거나, 시간 한도에 닿음)",
@@ -493,6 +504,9 @@ export const KO_MESSAGES: MessageTexts = {
     "writablePaths가 파일 도구를 제한하는데 명령 규칙이 {count}개 있습니다. writablePaths는 명령을 묶지 않아, 허용한 명령은 그 밖의 파일에도 쓸 수 있습니다",
   "doctor.commands.plan_run_with_commands":
     "계획 방식이 \"run\"인데 명령 규칙이 {count}개 있습니다. 승인한 파일은 파일 도구만 묶어, 허용한 명령은 계획 밖의 파일에도 쓸 수 있습니다",
+  // U-210 (묶음 A, R-5; nb-i18n이 다듬을 초안).
+  "doctor.commands.unreadable_with_commands":
+    "unreadablePaths가 있는데 명령 규칙과 명령 검증기가 {count}개 있습니다. 명령은 어떤 파일이든 읽을 수 있어 에이전트에게서 감춘 파일도 읽을 수 있으므로, 실행이 거부합니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",

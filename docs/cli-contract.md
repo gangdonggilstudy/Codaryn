@@ -624,6 +624,40 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
 - **계획 run:** run 계획을 수행하는 실행은 엔진이 승인된 파일 목록을 목록 하나(`plan` 원천, 정확히 그 파일)로 더해 판정한다(U-187, `approvedPlanWritablePathSets`). doctor는 `plan: "run"`과 명령 규칙이 함께 있어도 경고한다(18.4, B-8).
 
+### 13.2 읽기 제외 경로 `unreadablePaths`와 묶음 크기 k (U-210, 묶음 A A-6; R-1~R-5, Q-4, DR-70)
+
+- **무엇:** `policy.unreadablePaths`는 모델이 읽거나 목록으로 보거나 바꾸지 못하는 경로 접두 목록이다. 그 아래의 표는 `query_table`만 집계한다(접근 `aggregate`, U-208).
+- **형식(R-1):** 보호 경로(13절)와 같은 형식이고 같은 검사(`checkProtectedPaths`)를 쓴다. 잘못된 항목은 `policy.unreadablePaths[i]`처럼 자리만 말한다. 판정도 보호 경로와 같다. 글자를 먼저 보고 그다음 실경로를 보며(U-203), 쓸 수 없는 항목은 모두를 덮는다(fail closed).
+- **둘 수 있는 곳:** task 파일, 설정 파일, 프로필, 설정 파일의 작업 종류 정의. 넷 모두 `policy` 안이다.
+- **더하기만 한다(R-2).**
+  - 실행의 목록(`ResolvedTaskSpec.unreadablePaths`)은 원천마다의 항목을 합친 것이다. 순서는 config, profile, definition, task이고 항목마다 한 번이다(`unreadablePathsOf`, `src/cli/unreadable.ts`).
+  - 설정 파일 자신의 항목과 프로필의 항목은 task 파일로 실행할 때도 걸린다. 그래서 task 파일 하나로 설정의 읽기 제외를 뺄 수 없다.
+  - 아무 원천에도 없으면 필드가 없고 실행은 전과 같다.
+  - `task.policy.unreadablePaths`는 한 원천의 목록이다. 실행이 쓰는 것은 합친 목록이다(검토 R-102 M-1).
+- **k(`policy.minGroupSize`, Q-4, DR-70):**
+  - 5부터 1,000까지의 정수다(`MIN_GROUP_SIZE_LIMITS`). 설정 파일도 5 아래로 둘 수 없다. 틀린 값은 `policy.minGroupSize must be a whole number from 5 to 1000`이다.
+  - 실행의 k(`ResolvedTaskSpec.minGroupSize`)는 원천들이 정한 값 가운데 가장 큰 것이다(`effectiveMinGroupSize`). 어느 원천도 낮추지 못한다.
+  - 아무 원천도 정하지 않으면 필드가 없고 `query_table`은 기본값 5(`DEFAULT_MIN_GROUP_SIZE`)를 쓴다.
+  - 조립이 실행의 k를 도구 실행기에 넘긴다(`ToolRunnerOptions.minGroupSize`, U-210 둘째 몫). k는 읽기 제외 아래의 표에만 걸린다. 다른 표는 다섯 연산을 모두 쓰고 묶음을 모두 준다(k 1).
+- **거는 곳**
+  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`, U-223: `data_checks`의 근거에 그 아래 원본에서 읽은 수를 쓰지 않는다).
+  - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
+  - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
+- **명령 금지(R-5)**
+  - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
+  - 해석 단계에서, 기록과 모델 요청 전에 거부한다. 보는 순서는 작업 종류 정의 자신의 것(`workflows.policy.commands`, `workflows.verifiers[i]`, `invalid_config`), 그다음 준 것(task 파일이면 `invalid_task`, 간편 형식이면 설정·프로필의 것으로 `invalid_config`), 끝으로 합친 것이다.
+  - 메시지는 `<자리> must be empty while unreadablePaths is set: …`(명령 규칙) 또는 `<자리> cannot be a command verifier while unreadablePaths is set: …`(검증기)다.
+  - doctor의 `commands` 점검은 실행의 목록(위와 같이 합친 것)과 명령 규칙이나 명령 검증기가 함께 있으면 `fail`이다. 문구는 `doctor.commands.unreadable_with_commands`이고 `count`는 명령 규칙과 명령 검증기의 수다. 명령은 찾아보지 않는다.
+- **사람에게 알리는 것(U-207의 줄)**
+  - 실행이 센다(`notePrivateData`). 끝 요약은 `unreadable_path`로 거부된 호출 수(`summary.denied_unreadable`)와 사람이 할 수 있는 일(`summary.denied_unreadable_hint`)을 말한다(`RunSummaryContext.deniedUnreadable`).
+  - `query_table` 결과가 k 미만 묶음을 뺐으면 `summary.groups_hidden`이다(`hiddenGroups`: 결과 수와 가장 큰 k). 둘 다 0이면 필드도 줄도 없다.
+  - 진행 줄은 무엇을 물었는지만 말한다(`progress.query_table`, `_whole`, `_describe`와 연산 코드, U-207). 경로, 열 이름, 묶음 키, 행 수, 집계 값은 없다.
+- **끝에서 끝까지(U-210 둘째 몫의 시험):** 실제 CLI를 대본 모델과 127.0.0.1의 모의 Anthropic API로 돌린다. 표의 칸마다 실행 때 만든 표지를 두고, 행의 표지와 k 미만 묶음의 키가 도구 결과, 기록(`.codaryn` 아래 전부), 모델 요청 본문, 사람용 출력(stdout, stderr) 어디에도 없음을 확인한다. k 이상 묶음의 키, 열 이름, 수는 모델에게 간다.
+- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
+- **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).
+- **`data_checks`의 근거(R-6, U-223):** 원본이 읽기 제외 아래면 근거에 다시 계산한 수, 칸 수, 뺀 행 수를 쓰지 않고 "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다. 판정은 같다. 그래서 재수정이 작은 묶음의 값을 모델에게 실어 가지 못한다. 실제 CLI의 실행과 이동 계획 적용에서 시험한다(`g-u210-verifier-unreadable`).
+- **아직 없는 것:** 앱 계층의 연결과 설정 넓히기(R-7, p5a), GUI의 읽기 제외 편집과 `analyze-private` 안내(P-4, p5u-gui).
+
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 
 ### 스냅샷 (`ChangeRecorder`)
@@ -1056,6 +1090,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 문구는 `doctor.commands.extra_args_with_plan`이다.
 - **doctor `commands` 점검(U-182, B-8)**: 쓰기 허용 목록(`writablePaths`, 13.1)과 명령 규칙이 함께 있으면 `warn`이다(`doctor.commands.writable_with_commands`). 앞의 경고나 다른 문제가 있으면 그 글을 두고 이 문구를 `notes`에, 메시지 뒤에 붙인다.
 - **doctor `commands` 점검(U-195, B-8)**: 계획 방식 `run`(task의 `plan`, 없으면 정의의 것)과 명령 규칙이 함께 있어도 `warn`이다(`doctor.commands.plan_run_with_commands`). 승인한 파일은 파일 도구만 묶는다. 쓰기 목록의 경고와 함께면 그것이 글이고 이것은 `notes`다.
+- **doctor `commands` 점검(U-210, R-5)**: 읽기 제외(13.2)와 명령 규칙이나 명령 검증기가 함께 있으면 실행이 거부하므로 `fail`이다(`doctor.commands.unreadable_with_commands`). 명령은 찾아보지 않는다.
 
 ### 17.7 오류 코드 추가
 
@@ -1074,15 +1109,23 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   3. 프로필의 `workflowRef`
 - 셋 다 없으면 단계 1~3의 실행과 같다(작업 종류 설정 없음).
 - 간편 형식에서는 `--workflow`의 id가 이름표(`workflow`)도 된다.
-- 내장 작업 종류 다섯 개는 `src/workflows`에 있다. 설정 파일의 `workflows`는 새 id만 정의할 수 있고, 내장 id를 다시 정의하면 거부된다.
+- 내장 작업 종류 여섯 개는 `src/workflows`에 있다. 설정 파일의 `workflows`는 새 id만 정의할 수 있고, 내장 id를 다시 정의하면 거부된다(U-210부터 `analyze-private`도).
 
   | id | 도구 | 계획 | 완료 |
   | --- | --- | --- | --- |
   | `general` | 전체 | 없음 | 검증기 |
   | `code` | 전체 | 없음 | 검증기 |
   | `document` | 읽기·찾기·쓰기 | 없음 | 검증기 |
-  | `analyze` | 읽기·찾기·쓰기 | 없음 | 사람 검토(확인 목록 2개) |
+  | `analyze` | 읽기·찾기·`query_table`·쓰기 | 없음 | 사람 검토(확인 목록 2개) |
   | `organize` | 읽기·찾기·`inspect_files`·`propose_plan` | `apply`, 명령 금지 | 계획 승인 |
+  | `analyze-private` | 읽기·찾기·`query_table`·쓰기 | 없음, 명령 금지 | 사람 검토(확인 목록 3개) |
+
+  - U-210(묶음 A P-2): `analyze`의 `query_table`은 큰 표를 다루기 위한 것이다. k는 읽기 제외 표에만 걸리므로 일반 분석은 묶음을 모두 받는다.
+  - U-210(묶음 A P-1, P-3; GT-D8 (b), DR-23): `analyze-private`는 개인정보가 든 표를 읽기 제외(13.2) 아래에 두고 `query_table`의 집계로만 분석한다.
+    - 지시문은 "The input tables are not readable. Use query_table for every number. Write only the result table and the report the goal names. Do not write values that identify a person."이다.
+    - 확인 목록은 `analyze`의 둘과 `PRIVATE_REVIEW_ITEM`이다. 사람용 출력은 그 항목을 고른 언어로 보인다(U-207, `review.item.no_identifying_values`).
+    - 읽기·찾기는 읽기 제외 밖의 파일(지시 문서, 결과 파일)을 위해 남는다. 그 아래는 게이트와 목록 거르기가 막는다(U-203).
+    - 명령을 허용하지 않는다(`allowCommands: false`, R-5). 정의에 정책은 없으므로 주어진 정책의 명령 규칙은 `commands_not_allowed`나 R-5로 거부된다.
 
 - 해석 규칙(`resolveWorkflow`)
   - 도구는 작업 종류가 허용한 것 안에서만 좁힐 수 있다.
@@ -1095,6 +1138,11 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - `allowCommands: false`인 작업 종류에서는 `policy.commands`를 쓸 수 없다.
     - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
   - 사람 검토 작업 종류에는 확인 목록이 있어야 한다.
+  - U-210(묶음 A, R-5): 실행에 읽기 제외(13.2)가 있으면 명령 규칙과 `command` 검증기를 둘 수 없다. 해석 뒤 기록 전에 그 자리를 말하며 거부한다. 문제 코드는 `WORKFLOW_PROBLEMS`의 `unreadable_with_commands`다.
+  - U-210(묶음 A, P-1): `analyze-private`는 실행의 읽기 제외(13.2의 합친 목록)가 비면 해석에서 거부한다(`unreadable_paths_required`, `ResolveWorkflowInput.unreadablePaths`). 기록과 모델 요청 전이다.
+    - task 파일 실행은 `invalid_task`, 간편 형식과 프로필은 `invalid_config`이고, 진단의 자리는 `policy.unreadablePaths`다.
+    - 글은 `policy.unreadablePaths must not be empty under the analyze-private task type: put the folder of the tables with personal data in it (the task file, the config file or a profile)`이다.
+    - doctor도 같은 판정으로 `fail`이다. task 파일이면 `task_file` 점검(`doctor.task_file.invalid`), task 파일 없이 프로필이 가리키면 `config_file` 점검(`doctor.config_file.invalid`)이고, 자리는 `policy.unreadablePaths`다. 새 문구 id는 없다.
 - 정의의 `limits`는 기본값이다(검토 R-11 L-1).
   - task 파일이 비운 칸을 채우고, 설정 파일의 값보다 크면 그 값까지만 쓴다.
   - 상한은 설정 파일만 정한다(S-7). 정의 값이 상한이 되지는 않는다.

@@ -68,6 +68,11 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.denied_not_writable": "Writes denied because the file is not in writablePaths: {count}",
   "summary.denied_not_writable_hint":
     "To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
+  // U-207 (bundle A; drafts for nb-i18n).
+  "summary.denied_unreadable": "Calls refused at files this task may not read: {count}",
+  "summary.denied_unreadable_hint":
+    "Those files are kept from the agent on purpose (unreadablePaths); it can still aggregate their tables with query_table. To let it read them, take the entry out of unreadablePaths where it was set.",
+  "summary.groups_hidden": "Groups of fewer than {k} rows were left out of {results} table result(s); the agent got only how many there were.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",
@@ -97,6 +102,8 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.next_plan": "Plan: codaryn plan {form} --run {runId}",
   "summary.next_apply": "Apply after approval: codaryn apply {form} --run {runId} --digest <digest>",
   "summary.review_checklist": "Items to check: {count}",
+  // U-207 (P-3; draft for nb-i18n): analyze-private's item (PRIVATE_REVIEW_ITEM).
+  "review.item.no_identifying_values": "No value in the result table or the report can identify a person.",
   "summary.next_review": "Record a verdict: codaryn review {form} --run {runId} --accept or --reject",
   "summary.apply_actions": "Actions applied: {applied} of {total}",
   "summary.apply_plan_run": "Plan run: {runId}",
@@ -145,6 +152,10 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — denied ({permission}/{code})",
   "progress.tool_rejected": "{tool} — rejected by a check of the call ({code})",
   "progress.tool_failed": "{tool} — failed ({code})",
+  // U-207 (bundle A; drafts for nb-i18n): what a table query asked, never a path, column or value.
+  "progress.query_table": "Table aggregated by {groupColumns} column(s)",
+  "progress.query_table_whole": "Table aggregated as a whole",
+  "progress.query_table_describe": "Table described: its columns and counts",
   "progress.confirmation_allowed": "permission question — allowed by the person, for this call only",
   "progress.confirmation_denied.user": "permission question — denied by the person",
   "progress.confirmation_denied.default": "permission question — denied by default (no answer, could not ask, or time ran out)",
@@ -494,6 +505,9 @@ export const EN_MESSAGES: MessageTexts = {
     "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
   "doctor.commands.plan_run_with_commands":
     "command rules with plan \"run\": {count}; the approved files bind the file tools only, so an allowed command can write files outside the plan",
+  // U-210 (bundle A, R-5), draft for nb-i18n.
+  "doctor.commands.unreadable_with_commands":
+    "command rules and command checks while unreadablePaths is set: {count}; a run refuses them, since a command can read any file, the ones kept from the agent too",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",
   "doctor.workflow_policy.commands_narrowed": "a run of this task type narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this task type leaves out plan actions of the configured policy: {count}",

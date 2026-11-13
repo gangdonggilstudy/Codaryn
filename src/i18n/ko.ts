@@ -11,7 +11,7 @@ export const KO_MESSAGES: MessageTexts = {
   "error.label": "오류",
   "error.fix_label": "고치는 법",
   "error.doctor_hint": "점검: codaryn doctor",
-  // U-228 (nb-i18n이 다듬을 초안).
+  // U-228.
   "error.run_not_plan.other_kind": "그 실행의 계획은 apply에 준 task가 수행하는 종류가 아닙니다",
   "error.hint.quick_form_needs_task":
     "plan, apply, review의 간편 형식(--workspace)은 한도를 포함한 실행 설정을 설정 파일에서 읽습니다. 대신 계획 실행의 task를 --task로 주세요. task는 자기 설정과 가릴 값을 함께 가져옵니다.",
@@ -29,10 +29,10 @@ export const KO_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "설정 파일에 --profile 옵션으로 준 이름의 프로필이 없습니다. 설정 파일의 프로필 이름을 확인하세요.",
   "error.hint.task_type_not_found": "준 작업 종류(--workflow 옵션이나 task 파일)가 기본으로 있는 것도 아니고 설정 파일에 정의된 것도 아닙니다. 이름을 확인하세요.",
   "error.hint.config_missing": "설정 파일이 아직 없습니다(기본 위치에 없음). codaryn init으로 만드세요.",
-  // U-228 (nb-i18n이 다듬을 초안).
+  // U-228.
   "error.hint.plan_kind_differs":
     "계획을 만든 실행과 같은 작업 지정을 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
-  // U-210 (R-110 M-1; nb-i18n이 다듬을 초안).
+  // U-210 (R-110 M-1).
   "error.hint.unreadable_paths_required":
     "analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. 개인정보가 든 표의 폴더를 task 파일, 설정 파일, 프로필 가운데 한 곳의 policy.unreadablePaths에 넣으세요.",
   "error.hint.unreadable_with_commands":
@@ -67,17 +67,17 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.changes": "바뀐 파일: {count}개",
   "summary.denied": "거부된 호출: {count}건",
   "summary.failed": "실패한 호출: {count}건",
-  // U-198 (nb-i18n이 다듬을 초안): 실행이 쓸 수 있는 파일 밖의 쓰기.
+  // U-198: 실행이 쓸 수 있는 파일 밖의 쓰기.
   "summary.denied_not_planned": "승인한 계획에 없는 파일이라 거부된 쓰기: {count}건",
   "summary.denied_not_planned_hint": "다른 파일을 바꾸려면 그 파일을 담은 새 계획을 만들어 승인하세요.",
   "summary.denied_not_writable": "writablePaths에 없는 파일이라 거부된 쓰기: {count}건",
   "summary.denied_not_writable_hint":
     "그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록에 그 파일이 있어야 합니다.",
-  // U-207 (묶음 A; nb-i18n이 다듬을 초안).
+  // U-207 (묶음 A).
   "summary.denied_unreadable": "읽기 제외 경로라 거부된 호출: {count}건",
   "summary.denied_unreadable_hint":
     "그 경로는 일부러 에이전트가 읽지 못하게 했습니다(unreadablePaths). query_table 도구가 있는 작업 종류라면 그 아래의 표를 집계할 수 있습니다. 읽게 하려면 그 항목을 정한 곳의 unreadablePaths에서 빼세요.",
-  // U-210 (R-108 L-2; nb-i18n이 다듬을 초안): 묶음 전체, 또는 k칸 미만으로 셈한 값.
+  // U-210 (R-108 L-2): 묶음 전체, 또는 k칸 미만으로 셈한 값.
   "summary.groups_hidden":
     "{k}행 미만인 묶음이나 그보다 적은 칸으로 셈한 값을 표 결과 {results}건에서 뺐습니다. 에이전트는 그 묶음도 그 값도 받지 않았고, 뺀 묶음의 개수와 어느 값이 비었는지만 받았습니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
@@ -104,12 +104,12 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.form.typed": "--workspace {workspace}",
   "summary.form.current": "--workspace .",
   "summary.plan_ready": "계획을 만들었습니다: 동작 {actions}개. 아무것도 바꾸지 않았고 승인을 기다립니다.",
-  // U-221 (nb-i18n이 다듬을 초안): 실행 계획의 것, 계획 보기가 세는 대로.
+  // U-221: 실행 계획의 것, 계획 보기가 세는 대로.
   "summary.plan_ready_changes": "계획을 만들었습니다: 쓸 파일 {count}개. 아무것도 바꾸지 않았고 승인을 기다립니다.",
   "summary.next_plan": "계획 보기: codaryn plan {form} --run {runId}",
   "summary.next_apply": "승인해 적용: codaryn apply {form} --run {runId} --digest <다이제스트>",
   "summary.review_checklist": "확인할 항목 {count}개:",
-  // U-207 (P-3; nb-i18n이 다듬을 초안): analyze-private가 더하는 항목(PRIVATE_REVIEW_ITEM).
+  // U-207 (P-3): analyze-private가 더하는 항목(PRIVATE_REVIEW_ITEM).
   "review.item.no_identifying_values": "결과 표와 보고서에 한 사람을 알아볼 수 있는 값이 없습니다.",
   "summary.next_review": "판정 기록: codaryn review {form} --run {runId} --accept 또는 --reject",
   "summary.apply_actions": "적용한 동작: {total}개 중 {applied}개",
@@ -125,19 +125,19 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "작업 공간의 파일이 인벤토리 검사가 셀 수 있는 것보다 많습니다. 적용하면 plan_stale로 멈추고 아무것도 옮기지 않습니다.",
   "plan.applied_by": "적용 실행 {runId}에서 적용함",
   "plan.next_apply": "적용하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
-  // U-191 (nb-i18n이 다듬을 초안): 실행 계획(뒤 실행이 쓸 파일)의 계획 보기.
+  // U-191: 실행 계획(뒤 실행이 쓸 파일)의 계획 보기.
   "plan.changes.heading": "실행 {runId}의 계획: 쓸 파일 {count}개, {status}",
   "plan.change.create": "생성",
   "plan.change.modify": "수정",
   "plan.changes.summary_label": "계획 실행이 쓴 계획 요약(모델이 쓴 말로 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨)",
   "plan.changes.next_apply": "이 변경을 할 실행을 시작하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
-  // U-221 (nb-i18n이 다듬을 초안): 수행된 실행 계획, report와 같은 말로.
+  // U-221: 수행된 실행 계획, report와 같은 말로.
   "plan.changes.status_carried_out": "수행됨",
   "plan.changes.carried_by": "실행 {runId}에서 수행함",
   "plan.changes.digest_guarantee":
     "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 요약을 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
   "apply.question": "이 계획을 적용할까요?",
-  // U-198 (nb-i18n이 다듬을 초안): 실행 계획의 apply 질문.
+  // U-198: 실행 계획의 apply 질문.
   "apply.changes.what": "승인하면 파일 도구가 이 파일 {count}개에만 쓸 수 있는 실행이 시작됩니다.",
   "apply.changes.summary_note": "위의 요약은 모델이 쓴 작업 설명이며 계획과 함께 승인됩니다. 목표나 새 지시가 아니며, 실행이 그 설명대로 하는지는 아무것도 확인하지 않습니다. 강제되는 것은 파일 목록뿐입니다.",
   "apply.changes.commands_note": "이 작업은 명령도 허용하며, 정책이 허용한 명령은 이 파일들에 묶이지 않습니다.",
@@ -159,7 +159,7 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — 거부 ({permission}/{code})",
   "progress.tool_rejected": "{tool} — 호출 검사에서 거부 ({code})",
   "progress.tool_failed": "{tool} — 실패 ({code})",
-  // U-207 (묶음 A; nb-i18n이 다듬을 초안): 표 집계가 무엇을 물었는지만. 경로·열·값은 없음.
+  // U-207 (묶음 A): 표 집계가 무엇을 물었는지만. 경로·열·값은 없음.
   "progress.query_table": "표 집계 — 묶음 열 {groupColumns}개",
   "progress.query_table_whole": "표 집계 — 표 전체",
   "progress.query_table_describe": "표 집계 — 표 모양만(열과 개수)",
@@ -247,7 +247,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "runs.column.run_id": "실행 id (UTC)",
   "runs.column.started": "시작",
-  // U-139 (UXM-23, nb-i18n이 다듬을 초안): runs 표의 시작 열 머리.
+  // U-139 (UXM-23): runs 표의 시작 열 머리.
   "runs.column.started_local": "시작 (지역 시간)",
   "runs.column.status": "결과",
   "runs.column.changes": "변경",
@@ -258,25 +258,25 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.damaged": "손상(기록을 확인할 수 없음)",
   "runs.revert_record_damaged": "되돌리기 기록 손상(실행 기록은 정상)",
   "runs.records_changed": "기록 변경됨",
-  // U-157 (UXM-18, nb-i18n이 다듬을 초안): runs 표 아래에서 표시를 설명하는 줄.
+  // U-157 (UXM-18): runs 표 아래에서 표시를 설명하는 줄.
   "runs.records_changed_note": "기록 변경됨: 실행이 아닌 것이 그 실행의 기록을 바꿨습니다",
   "runs.plan_applied": "계획 적용됨(적용 실행 {runId})",
   "runs.plan_apply_unfinished": "계획 적용이 끝나지 않음(적용 실행 {runId}, {reason})",
   "runs.plan_applying": "계획 적용 중이거나 적용이 멈춤(적용 실행 {runId}, 결과 없음)",
   "runs.plan_apply_reverted": "계획을 적용했다가 되돌림(적용 실행 {runId})",
-  // U-221 (nb-i18n이 다듬을 초안): 실행 계획을 만든 실행의 줄, 그 계획을 수행한 실행에 따라.
+  // U-221: 실행 계획을 만든 실행의 줄, 그 계획을 수행한 실행에 따라.
   "runs.plan_carried_out": "계획 수행됨(실행 {runId})",
   "runs.plan_carried_ended": "계획 수행됨(실행 {runId}, 끝남: {reason})",
   "runs.plan_carrying": "계획 수행 중이거나 그 실행이 멈춤(실행 {runId}, 결과 없음)",
   "runs.plan_carried_reverted": "계획을 수행했다가 되돌림(실행 {runId})",
   "runs.plan_apply_missing": "적용 실행 {runId}의 기록 없음(지웠거나 확인할 수 없음)",
-  // U-129 (PM 초안, nb-i18n 확인): 적용 실행의 변경 칸, 결과 칸의 사람 판정.
+  // U-129 (PM): 적용 실행의 변경 칸, 결과 칸의 사람 판정.
   "runs.apply_actions": "동작 {count}개",
   "runs.apply_action_one": "동작 1개",
   "runs.review": "검토: {verdict}",
-  // U-139 (UXM-5, nb-i18n이 다듬을 초안): 적용 실행이 적용한 계획 실행.
+  // U-139 (UXM-5): 적용 실행이 적용한 계획 실행.
   "runs.apply_of": "실행 {runId}의 계획 적용",
-  // U-198 (nb-i18n이 다듬을 초안): 실행 계획을 실행한 실행.
+  // U-198: 실행 계획을 실행한 실행.
   "runs.carried_plan": "실행 {runId}의 계획 수행",
   "report.records_changed": "이 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 보고서가 실제로 일어난 일과 다를 수 있습니다.",
   "report.final_message": "에이전트의 마지막 답입니다. 에이전트의 말이며 검증된 사실이 아닙니다.",
@@ -432,7 +432,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.config_file.too_deep": "설정 파일({location})이 너무 깊게 중첩되어 있습니다",
   "doctor.config_file.invalid": "설정 파일({location})의 {field} 값이 올바르지 않습니다(값은 표시하지 않습니다)",
   "doctor.config_file.invalid_unlocated": "설정 파일({location})의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
-  // U-228 (nb-i18n이 다듬을 초안).
+  // U-228.
   "doctor.config_file.plan_tool_missing":
     "설정 파일({location})에 계획 방식에 맞는 계획 도구가 없는 작업 종류가 있습니다(계획 방식 \"run\"에는 propose_changes 도구, \"apply\"에는 propose_plan 도구가 필요합니다). 실행은 이를 거부합니다",
   "doctor.task_file.unreadable": "task 파일을 읽을 수 없습니다",
@@ -441,7 +441,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.task_file.too_deep": "task 파일이 너무 깊게 중첩되어 있습니다",
   "doctor.task_file.invalid": "task 파일의 {field} 값이 올바르지 않습니다(값은 표시하지 않습니다)",
   "doctor.task_file.invalid_unlocated": "task 파일의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
-  // U-228 (nb-i18n이 다듬을 초안).
+  // U-228.
   "doctor.task_file.plan_tool_missing":
     "task의 계획 방식에 맞는 계획 도구가 도구 목록에 없습니다(계획 방식 \"run\"에는 propose_changes 도구, \"apply\"에는 propose_plan 도구가 필요합니다). 실행은 이 task를 거부합니다",
   "doctor.task_file.valid": "task 파일이 올바릅니다",
@@ -512,8 +512,8 @@ export const KO_MESSAGES: MessageTexts = {
     "writablePaths가 파일 도구를 제한하는데 명령 규칙이 {count}개 있습니다. writablePaths는 명령을 묶지 않아, 허용한 명령은 그 밖의 파일에도 쓸 수 있습니다",
   "doctor.commands.plan_run_with_commands":
     "계획 방식이 \"run\"인데 명령 규칙이 {count}개 있습니다. 승인한 파일은 파일 도구만 묶어, 허용한 명령은 계획 밖의 파일에도 쓸 수 있습니다",
-  // U-210 (묶음 A, R-5; nb-i18n이 다듬을 초안).
-  // U-210 (R-110 M-1; nb-i18n이 다듬을 초안).
+  // U-210 (묶음 A, R-5).
+  // U-210 (R-110 M-1).
   "doctor.private_data.unreadable_paths_required":
     "analyze-private 작업 종류에는 policy.unreadablePaths 항목(개인정보가 든 표의 폴더)이 하나 이상 있어야 합니다. task 파일, 설정 파일, 프로필 가운데 한 곳에 두세요",
   "doctor.private_data.min_group_size_range": "policy.minGroupSize(읽기 제외 표의 집계가 보여 주는 가장 작은 묶음)는 5부터 1000까지의 정수입니다",
@@ -661,9 +661,9 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.run_command": "명령 실행",
   "tool.inspect_files": "파일 목록 보기",
   "tool.propose_plan": "계획 제안",
-  // U-180 (DR-69 B-3), nb-i18n 이 다듬을 초안.
+  // U-180 (DR-69 B-3).
   "tool.propose_changes": "바꿀 파일 제안",
-  // U-208 (묶음 A), nb-i18n 이 다듬을 초안.
+  // U-208 (묶음 A).
   "tool.query_table": "표 집계",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",

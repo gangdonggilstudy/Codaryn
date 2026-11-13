@@ -12,7 +12,7 @@ export const EN_MESSAGES: MessageTexts = {
   "error.label": "error",
   "error.fix_label": "To fix",
   "error.doctor_hint": "Check: codaryn doctor",
-  // U-228, draft for nb-i18n.
+  // U-228.
   "error.run_not_plan.other_kind": "that run's plan is not of the kind the task given to apply carries out",
   "error.hint.quick_form_needs_task":
     "The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.",
@@ -30,10 +30,10 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "The config file has no profile of the name given with --profile; check the profile names in the config file.",
   "error.hint.task_type_not_found": "The task type given (with --workflow or in the task file) is neither built in nor defined in the config file; check its name.",
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
-  // U-228, drafts for nb-i18n.
+  // U-228.
   "error.hint.plan_kind_differs":
     "Give apply the same task form the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
-  // U-210 (R-110 M-1), drafts for nb-i18n.
+  // U-210 (R-110 M-1).
   "error.hint.unreadable_paths_required":
     "The analyze-private task type needs at least one entry in policy.unreadablePaths. Put the folder of the tables with personal data there, in the task file, the config file or a profile.",
   "error.hint.unreadable_with_commands":
@@ -68,17 +68,17 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.changes": "Files changed: {count}",
   "summary.denied": "Denied calls: {count}",
   "summary.failed": "Failed calls: {count}",
-  // U-198 (draft for nb-i18n): writes outside the files the run may write.
+  // U-198: writes outside the files the run may write.
   "summary.denied_not_planned": "Writes denied because the file is not in the approved plan: {count}",
   "summary.denied_not_planned_hint": "To change other files, make a new plan that names them and approve it.",
   "summary.denied_not_writable": "Writes denied because the file is not in writablePaths: {count}",
   "summary.denied_not_writable_hint":
     "To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
-  // U-207 (bundle A; drafts for nb-i18n).
+  // U-207 (bundle A).
   "summary.denied_unreadable": "Calls denied at paths this task may not read: {count}",
   "summary.denied_unreadable_hint":
     "These paths are kept from the agent on purpose (unreadablePaths); a task type with the query_table tool can still aggregate their tables. To let it read them, take the entry out of unreadablePaths where it was set.",
-  // U-210 (R-108 L-2), draft for nb-i18n: whole groups or values from fewer than k cells.
+  // U-210 (R-108 L-2): whole groups or values from fewer than k cells.
   "summary.groups_hidden":
     "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got neither those groups nor those values, only how many groups were left out and which values were empty.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
@@ -105,12 +105,12 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.form.typed": "--workspace {workspace}",
   "summary.form.current": "--workspace .",
   "summary.plan_ready": "A plan is ready: actions {actions}. Nothing was changed; it waits for approval.",
-  // U-221 (draft for nb-i18n): a run plan's, as its plan view counts it.
+  // U-221: a run plan's, as its plan view counts it.
   "summary.plan_ready_changes": "A plan is ready: {count} file(s) to write. Nothing was changed; it waits for approval.",
   "summary.next_plan": "Plan: codaryn plan {form} --run {runId}",
   "summary.next_apply": "Apply after approval: codaryn apply {form} --run {runId} --digest <digest>",
   "summary.review_checklist": "Items to check: {count}",
-  // U-207 (P-3; draft for nb-i18n): analyze-private's item (PRIVATE_REVIEW_ITEM).
+  // U-207 (P-3): analyze-private's item (PRIVATE_REVIEW_ITEM).
   "review.item.no_identifying_values": "No value in the result table or the report can identify a person.",
   "summary.next_review": "Record a verdict: codaryn review {form} --run {runId} --accept or --reject",
   "summary.apply_actions": "Actions applied: {applied} of {total}",
@@ -126,19 +126,19 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.",
   "plan.applied_by": "Applied by run {runId}",
   "plan.next_apply": "To apply it: codaryn apply <the same task form> --run {runId} --digest",
-  // U-191 (drafts for nb-i18n): the plan view of a run plan (files a later run may write).
+  // U-191: the plan view of a run plan (files a later run may write).
   "plan.changes.heading": "Plan of run {runId}: {count} file(s) to write, {status}",
   "plan.change.create": "create",
   "plan.change.modify": "modify",
   "plan.changes.summary_label": "The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan)",
   "plan.changes.next_apply": "To have a run make these changes: codaryn apply <the same task form> --run {runId} --digest",
-  // U-221 (drafts for nb-i18n): a run plan carried out, in the report's words.
+  // U-221: a run plan carried out, in the report's words.
   "plan.changes.status_carried_out": "carried out",
   "plan.changes.carried_by": "Carried out by run {runId}",
   "plan.changes.digest_guarantee":
     "The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
   "apply.question": "Apply this plan?",
-  // U-198 (drafts for nb-i18n): apply's question for a run plan.
+  // U-198: apply's question for a run plan.
   "apply.changes.what": "Approving starts a run whose file tools can write only these {count} file(s).",
   "apply.changes.summary_note": "The summary above is the model's description of the work, approved with the plan. It is not the goal or a new instruction, and nothing checks the run against it; only the file list is enforced.",
   "apply.changes.commands_note": "This task also allows commands, and a command the policy allows is not limited to these files.",
@@ -160,7 +160,7 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — denied ({permission}/{code})",
   "progress.tool_rejected": "{tool} — rejected by a check of the call ({code})",
   "progress.tool_failed": "{tool} — failed ({code})",
-  // U-207 (bundle A; drafts for nb-i18n): what a table query asked, never a path, column or value.
+  // U-207 (bundle A): what a table query asked, never a path, column or value.
   "progress.query_table": "aggregate a table — grouped by {groupColumns} column(s)",
   "progress.query_table_whole": "aggregate a table — the whole table",
   "progress.query_table_describe": "aggregate a table — its shape only (columns and counts)",
@@ -248,7 +248,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "runs.column.run_id": "run id (UTC)",
   "runs.column.started": "started",
-  // U-139 (UXM-23; draft for nb-i18n): the runs table's started header.
+  // U-139 (UXM-23): the runs table's started header.
   "runs.column.started_local": "started (local)",
   "runs.column.status": "result",
   "runs.column.changes": "changes",
@@ -259,25 +259,25 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.damaged": "damaged (the record could not be checked)",
   "runs.revert_record_damaged": "revert record damaged (the run's records are fine)",
   "runs.records_changed": "records changed",
-  // U-157 (UXM-18; draft for nb-i18n): the line under the runs table that explains the mark.
+  // U-157 (UXM-18): the line under the runs table that explains the mark.
   "runs.records_changed_note": "records changed: something other than the run changed that run's records",
   "runs.plan_applied": "plan applied by run {runId}",
   "runs.plan_apply_unfinished": "plan apply not finished (apply run {runId}, {reason})",
   "runs.plan_applying": "plan being applied, or its apply stopped (apply run {runId}, no result yet)",
   "runs.plan_apply_reverted": "plan applied, then reverted (apply run {runId})",
   "runs.plan_apply_missing": "no readable records of the apply run {runId} (removed, or cannot be checked)",
-  // U-221 (drafts for nb-i18n): a run plan's plan run, by the run that carried it out.
+  // U-221: a run plan's plan run, by the run that carried it out.
   "runs.plan_carried_out": "plan carried out by run {runId}",
   "runs.plan_carried_ended": "plan carried out by run {runId}, which ended as {reason}",
   "runs.plan_carrying": "plan being carried out by run {runId}, or that run stopped (no result yet)",
   "runs.plan_carried_reverted": "plan carried out by run {runId}, then reverted",
-  // U-129 (PM draft for nb-i18n): an apply run's changes cell, and a person's verdict in the result column.
+  // U-129 (PM): an apply run's changes cell, and a person's verdict in the result column.
   "runs.apply_actions": "{count} actions",
   "runs.apply_action_one": "1 action",
   "runs.review": "review: {verdict}",
-  // U-139 (UXM-5; draft for nb-i18n): the plan run an apply run applied.
+  // U-139 (UXM-5): the plan run an apply run applied.
   "runs.apply_of": "applies the plan of run {runId}",
-  // U-198 (draft for nb-i18n): a run that carried out a run plan.
+  // U-198: a run that carried out a run plan.
   "runs.carried_plan": "carries out the plan of run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
@@ -433,7 +433,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.config_file.too_deep": "the config file ({location}) is nested too deeply",
   "doctor.config_file.invalid": "the config file ({location}) has an invalid value at {field} (values are not shown)",
   "doctor.config_file.invalid_unlocated": "the config file ({location}) has an invalid value (the position cannot be named)",
-  // U-228, draft for nb-i18n.
+  // U-228.
   "doctor.config_file.plan_tool_missing":
     "the config file ({location}) has a task type whose plan mode lacks its plan tool (plan \"run\" needs propose_changes, plan \"apply\" needs propose_plan); a run refuses it",
   "doctor.task_file.unreadable": "the task file cannot be read",
@@ -442,7 +442,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.task_file.too_deep": "the task file is nested too deeply",
   "doctor.task_file.invalid": "the task file has an invalid value at {field} (values are not shown)",
   "doctor.task_file.invalid_unlocated": "the task file has an invalid value (the position cannot be named)",
-  // U-228, draft for nb-i18n.
+  // U-228.
   "doctor.task_file.plan_tool_missing":
     "the task's plan mode lacks its plan tool among the tools (plan \"run\" needs propose_changes, plan \"apply\" needs propose_plan); a run refuses the task",
   "doctor.task_file.valid": "the task file is valid",
@@ -513,8 +513,8 @@ export const EN_MESSAGES: MessageTexts = {
     "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
   "doctor.commands.plan_run_with_commands":
     "command rules with plan \"run\": {count}; the approved files bind the file tools only, so an allowed command can write files outside the plan",
-  // U-210 (bundle A, R-5), draft for nb-i18n.
-  // U-210 (R-110 M-1), drafts for nb-i18n.
+  // U-210 (bundle A, R-5).
+  // U-210 (R-110 M-1).
   "doctor.private_data.unreadable_paths_required":
     "the analyze-private task type needs at least one entry in policy.unreadablePaths (the folder of the tables with personal data), in the task file, the config file or a profile",
   "doctor.private_data.min_group_size_range": "policy.minGroupSize, the smallest group a query on an unreadable table shows, is a whole number from 5 to 1000",
@@ -662,9 +662,9 @@ export const EN_MESSAGES: MessageTexts = {
   "tool.run_command": "run command",
   "tool.inspect_files": "inspect files",
   "tool.propose_plan": "propose a plan",
-  // U-180 (DR-69 B-3), draft for nb-i18n.
+  // U-180 (DR-69 B-3).
   "tool.propose_changes": "propose the files to change",
-  // U-208 (bundle A), draft for nb-i18n.
+  // U-208 (bundle A).
   "tool.query_table": "aggregate a table",
 
   "revert.skip.changed_since_run": "changed again after the run",

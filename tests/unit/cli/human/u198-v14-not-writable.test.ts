@@ -3,7 +3,8 @@
  * path_not_writable apart by why, each with its own advice:
  * - RunSummaryContext.deniedNotPlanned: not one of the files the carried-out plan approved; to change
  *   others, make a new plan that names them and approve it (never "add it to writablePaths");
- * - RunSummaryContext.deniedNotWritable: outside the settings' writablePaths; add the file to every list.
+ * - RunSummaryContext.deniedNotWritable: outside the settings' writablePaths. U-221: its count only; the
+ *   advice (add the file to every list) is the CLI's progress line, written right before the summary.
  * Both right after the denied calls, the plan's first. Absent: no line, the summary as without them.
  * Drafts for na-core (U-195), which passes the counts. Both languages with the real catalog. Fake values only.
  */
@@ -40,19 +41,20 @@ for (const language of MESSAGE_LANGUAGES) {
       assert.ok(!all.includes(t("summary.denied_not_writable_hint")), "no writablePaths advice for a write outside the plan");
     });
 
-    test("outside the settings' writablePaths: its count, then add the file to every list", () => {
+    test("outside the settings' writablePaths: its count; the advice is the progress line's (U-221)", () => {
       const lines = afterDenied(summaryOf(context({ deniedToolCalls: 2, deniedNotWritable: 2 })), 2);
-      assert.deepEqual(lines.slice(0, 2), [t("summary.denied_not_writable", { count: 2 }), t("summary.denied_not_writable_hint")]);
+      assert.equal(lines[0], t("summary.denied_not_writable", { count: 2 }));
+      assert.ok(!lines.join("\n").includes(t("summary.denied_not_writable_hint")), lines.join("\n"));
     });
 
-    test("both: the plan's first, each with its own advice", () => {
+    test("both: the plan's first with its advice, then the writablePaths count (U-221: no advice of its own)", () => {
       const lines = afterDenied(summaryOf(context({ deniedToolCalls: 5, deniedNotPlanned: 3, deniedNotWritable: 2 })), 5);
-      assert.deepEqual(lines.slice(0, 4), [
+      assert.deepEqual(lines.slice(0, 3), [
         t("summary.denied_not_planned", { count: 3 }),
         t("summary.denied_not_planned_hint"),
         t("summary.denied_not_writable", { count: 2 }),
-        t("summary.denied_not_writable_hint"),
       ]);
+      assert.ok(!lines.join("\n").includes(t("summary.denied_not_writable_hint")), lines.join("\n"));
     });
 
     test("absent, 0 or not counts: no line, and the summary is the one without the fields", () => {

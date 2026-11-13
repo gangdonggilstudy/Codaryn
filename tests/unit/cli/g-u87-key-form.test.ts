@@ -5,7 +5,7 @@
  *   read does not change). Pinned here: no request leaves, the key value is nowhere (stdout,
  *   stderr, the state directory), and the result carries modelError not_configured at turn 1.
  * - doctor (PM 2): the key check fails when the key is set but unusable, with the reason and never
- *   the value. Todo until the contract has its text id (requested from p4g-general).
+ *   the value (doctor.api_key.unusable).
  * The real CLI under the net guard; the provider address is a counting server on 127.0.0.1;
  * the default config location is a test folder. Fake values only.
  */
@@ -120,13 +120,14 @@ describe("U-87: a key of the wrong form", () => {
       for (const printed of [run.stdout, run.stderr, state]) assert.equal(printed.includes(key), false, "the key value is never written");
     });
 
-    test(`doctor (key with ${name}): the key check fails with its reason, never the value`, { todo: "U-87: waits for the contract's doctor text id for an unusable key (requested from p4g-general)" }, async () => {
+    test(`doctor (key with ${name}): the key check fails with its reason, never the value`, async () => {
       const box = await setup(key);
       const doctor = box.cli(["doctor", "--task", "task.json", "--json"]);
       const output = JSON.parse(doctor.stdout) as DoctorOutput;
       const check = output.checks.find((entry) => entry.id === "api_key");
       assert.equal(check?.status, "fail", JSON.stringify(check));
       assert.match(check?.message ?? "", /printable ASCII/);
+      assert.deepEqual(check?.text, { id: "doctor.api_key.unusable", params: { keyEnv: "ANTHROPIC_API_KEY" } });
       assert.equal(doctor.stdout.includes(key) || doctor.stderr.includes(key), false, "the key value is never printed");
       assert.equal(requests, 0, "doctor sends nothing");
     });

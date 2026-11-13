@@ -8,7 +8,7 @@
  * (ALL_TOOL_NAMES). A name in no tool list still reads "(unknown tool)" and nothing else changes: the
  * strings are masked as before, so a name that carries a secret shows neither the secret nor itself.
  * The same function shapes the run events page of a past run (listRunEvents).
- * Reproduced first (todo until the limit knew the task-type tools). Scripted model, temporary folders,
+ * Reproduced first (e6b726d, todo until the limit knew the task-type tools). Scripted model, temporary folders,
  * fake values only.
  */
 
@@ -21,7 +21,6 @@ import type { JournalRecord } from "../../../src/contracts/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { PLAN_TASK, appEnvironment, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-250 (P-2): the events' tool name limit is every tool a run can be offered" };
 const FAKE_SECRET = "fake-u250-SECRET-value";
 const at = new Date().toISOString();
 
@@ -64,7 +63,7 @@ const privacy = createPrivacyGateway({ secrets: [FAKE_SECRET] });
 
 describe("U-250 (P-2): the tool names a run event repeats", () => {
   for (const name of WORKFLOW_TOOL_NAMES) {
-    test(`${name} is named in every record kind that repeats a tool name`, TODO, () => {
+    test(`${name} is named in every record kind that repeats a tool name`, () => {
       for (const record of recordsNaming(name)) {
         const shown = sanitizeRecord(record, privacy);
         assert.ok(namesIn(shown).length > 0, record.type);
@@ -102,7 +101,7 @@ describe("U-250 (P-2): through the app", () => {
   }
   const decisionTools = (records: readonly Record<string, unknown>[]): unknown[] => records.filter((record) => record["type"] === "tool_decision").map((record) => record["tool"]);
 
-  test("an organize run's events name inspect_files and propose_plan", TODO, async () => {
+  test("an organize run's events name inspect_files and propose_plan", async () => {
     const run = await organizeRun();
     const records = run.events.flatMap((event) => (event.kind === "record" ? [event.record as unknown as Record<string, unknown>] : []));
     assert.deepEqual(decisionTools(records), ["inspect_files", "propose_plan"]);
@@ -110,7 +109,7 @@ describe("U-250 (P-2): through the app", () => {
     assert.deepEqual(responses, ["inspect_files", "propose_plan"]);
   });
 
-  test("the run events page of that run names them too", TODO, async () => {
+  test("the run events page of that run names them too", async () => {
     const run = await organizeRun();
     const app = createCodarynApp(await appEnvironment(run.base));
     const page = (await app.listRunEvents({ settings: taskForm(run.base), runId: run.runId, offset: 0, types: ["tool_decision"] })) as AppCallOutcome<{ records: Record<string, unknown>[] }>;

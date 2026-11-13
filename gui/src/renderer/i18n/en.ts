@@ -683,7 +683,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "report.deniedKind.command": "Not in the allowed commands, arguments not allowed: to allow a command, add a rule in Settings › Permission rules for a run from the config file, or to policy.commands in the task file for a run of one. Fixing its arguments as well is recommended.",
   "report.deniedKind.notWritable": "Not among the files this task may write: to allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it. For a run that carried out an approved plan, make a new plan that names the file and approve it.",
   "report.deniedKind.unreadable": "A path this task may not read: such paths are kept from the agent on purpose (unreadablePaths). To let it read them, take the entry out of unreadablePaths where it was set (for the config file, Settings › Personal data (unreadable paths)).",
-  "report.deniedKind.protected": "Protected path: such paths are kept from changes on purpose (protectedPaths), and a command rule does not open them. To let a run change one, take it out of the protected paths (a widening, asked first).",
+  "report.deniedKind.protected": "Protected path: file tools are kept from writing such paths on purpose (protectedPaths), and a command rule does not open them. To let file tools write one, take it out of the protected paths (a widening, asked first).",
   "report.deniedKind.fixed": "Path outside the workspace, the run record folder (.codaryn): no rule opens these.",
   "report.deniedSettings": "Open Settings › Permission rules",
   "report.noVerdict": "No verdict by a person.",

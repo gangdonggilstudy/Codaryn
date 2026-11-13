@@ -724,7 +724,9 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         maxDurationMs: task.limits.maxDurationMs,
         verifierConfigs: task.verifiers,
         executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
-        policy: createPolicyGate({ config: task.policy, workspace }),
+        // U-182 (DR-69 B-4): the apply's task's writable lists judge each action's writes, as the
+        // plan run's gate judged them when the plan was proposed (DR-5: the apply's own policy).
+        policy: createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) }),
         planActions: task.policy.planActions ?? [],
         // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
         discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),

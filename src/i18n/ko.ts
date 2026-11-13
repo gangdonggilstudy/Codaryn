@@ -127,6 +127,8 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.integrity_changed": "보호 대상 확인 — {count}개가 바뀌었거나 확인할 수 없음 ({phase})",
   "progress.finished": "끝 — {status} ({reason})",
   "progress.model_not_found": "모델을 찾지 못했습니다(HTTP 404). codaryn models로 키가 쓸 수 있는 모델을 보세요.",
+  "progress.not_writable_hint":
+    "writablePaths에 없는 파일이라 거부된 쓰기: {count}건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
   "progress.unknown_tool": "(모르는 도구)",
   "progress.apply_started": "적용 시작 — 동작 {actions}개, {approval}",
   "progress.plan_checked": "적용 전 점검 — 문제 {count}개",
@@ -443,6 +445,8 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.commands.none": "허용한 명령도 명령 검증기도 없습니다",
   "doctor.commands.extra_args_with_plan":
     "추가 인수를 받는 명령 규칙 {count}개가 계획 동작(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
+  "doctor.commands.writable_with_commands":
+    "writablePaths가 파일 도구를 제한하는 중에 명령 규칙 {count}개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",

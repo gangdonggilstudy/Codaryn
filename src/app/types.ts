@@ -8,6 +8,7 @@
  */
 
 import type {
+  ApplyJournalEventType,
   ChangesApplyRun,
   CliErrorCategory,
   CliErrorCode,
@@ -20,6 +21,7 @@ import type {
   InputDiagnostic,
   DoctorOutput,
   EngineResult,
+  JournalEventType,
   JournalRecord,
   MaskedText,
   ModelsOutput,
@@ -611,6 +613,56 @@ export type WorkspaceDirListing =
     }
   | { readonly kind: "workspace_dir"; readonly status: "not_found" | "not_dir" | "too_large" | "refused" | "unreadable" };
 
+/** U-90: a record type a run's journal (JournalEventType) or an apply's (ApplyJournalEventType) shows; RUN_EVENT_TYPES lists them. */
+export type RunEventType = JournalEventType | ApplyJournalEventType;
+
+/** U-90 (GUI 3.7, adapter-contract 5.13): one page of a run's stored records. */
+export interface ListRunEventsRequest {
+  /** The workspace and the values registered now, which mask the records again (DR-17, U-17). */
+  readonly settings: TaskForm;
+  /** A run id from the run list; "latest" is not taken. */
+  readonly runId: string;
+  /** From 0: the previous page's `nextOffset` (a place among the records that pass, not a `seq`). */
+  readonly offset: number;
+  /** 1 to MAX_RUN_EVENTS_PAGE (1,000); RUN_EVENTS_PAGE_SIZE (200) when left out. */
+  readonly limit?: number;
+  /** Only these record types; all when left out. Not empty, names from RUN_EVENT_TYPES only. */
+  readonly types?: readonly RunEventType[];
+}
+
+/**
+ * U-90: a stored record as given: checked for its `seq`, `at`, `runId` and `type` and for plain
+ * field names, every string masked again. Its other fields are as the journal holds them, so an
+ * adapter reads them as it would any outside data (a line a command wrote can have the right shape).
+ */
+export interface StoredRunRecord {
+  readonly seq: number;
+  readonly at: string;
+  readonly runId: string;
+  readonly type: RunEventType;
+  readonly [field: string]: unknown;
+}
+
+export interface RunEventsPage {
+  readonly kind: "run_events";
+  readonly runId: string;
+  /** By the journal's first record (DR-12): `run_started` or `apply_started`. */
+  readonly runKind: "run" | "apply";
+  /** "incomplete": the run has no result.json (still going, or stopped without one). */
+  readonly status: "complete" | "incomplete";
+  /** DR-38: the run has a records-changed mark (one that cannot be checked counts). Absent: none. */
+  readonly recordsChanged?: true;
+  /** Masked with the values registered now, not with the run's table; tokens are never restored. */
+  readonly masking: "current_secrets";
+  readonly records: readonly StoredRunRecord[];
+  /** The records that pass the checks and the filter. */
+  readonly total: number;
+  /** Lines of the whole journal left out: not of this run's shape, or not maskable. */
+  readonly skipped: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+}
+
 /** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */
 export interface PlanRequest {
   readonly settings: TaskForm;
@@ -713,6 +765,8 @@ export interface CodarynApp {
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
   /** U-89 (GUI 3.3): one directory of the workspace, masked, links never followed. Reads only. */
   listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>>;
+  /** U-90 (GUI 3.7): one page of a run's stored records, checked line by line and masked again (adapter-contract 5.13). */
+  listRunEvents(request: ListRunEventsRequest): Promise<AppCallOutcome<RunEventsPage>>;
   /**
    * DR-1, DR-17: the plan screen after a `needs-input`/`plan_pending` result, the apply with the
    * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.

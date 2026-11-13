@@ -9,10 +9,11 @@
  *   record is masked again (tool names limited, every string through the current gateway and the
  *   key values set now); a record that cannot be masked, or that holds a field name the masking
  *   would change, is skipped too.
- * - Pages of at most 1,000 records (200 by default), cut before 2 MiB of JSON; a type filter.
+ * - Pages of at most 1,000 records (200 by default), cut before 2 MiB of JSON (a larger record
+ *   comes alone); a type filter.
  * - Reads only: no lock, no records.
- * Reproduced first (todo until the app layer gives it). Scripted model, temporary folders, fake
- * values only.
+ * Reproduced first (11dcbbf, todo until the app layer gave it). Scripted model, temporary folders,
+ * fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -20,39 +21,23 @@ import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { RECORDS_CHANGED_FILE_NAME } from "../../../src/contracts/index.js";
-import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppCallOutcome, ApplyEvent, CodarynApp, RunEvent, TaskForm } from "../../../src/app/index.js";
+import { MAX_RUN_EVENTS_PAGE_BYTES, createCodarynApp, listRunEventsIn } from "../../../src/app/index.js";
+import type { AppCallOutcome, ApplyEvent, CodarynApp, ListRunEventsRequest, RunEvent, RunEventsPage, TaskForm } from "../../../src/app/index.js";
+import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { isRunTimestamp } from "../../../src/store/index.js";
 import { FAKE_SECRET, SECRET_ENV, WRITE_NOTES, appEnvironment, exists, plannedRun, readJournal, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-90: the app layer has no listRunEvents yet" };
-
-type StoredRecord = Readonly<Record<string, unknown>> & { readonly seq: number; readonly at: string; readonly runId: string; readonly type: string };
-type Page = {
-  readonly kind: "run_events";
-  readonly runId: string;
-  readonly runKind: string;
-  readonly status: string;
-  readonly recordsChanged?: true;
-  readonly masking: string;
-  readonly records: readonly StoredRecord[];
-  readonly total: number;
-  readonly skipped: number;
-  readonly offset: number;
-  readonly nextOffset: number | null;
-};
+type Page = RunEventsPage;
 type Request = { readonly settings: TaskForm; readonly runId: string; readonly offset: number; readonly limit?: number; readonly types?: readonly string[] };
-type ListFn = (request: Request) => Promise<AppCallOutcome<Page>>;
 
 /** Not registered by the run; registered by a later reading in one test. */
 const OTHER_SECRET = "other-fake-APP-VALUE-0099";
 const NO_RUN = "20200101T000000Z-00000000";
+/** A key-shaped text, built here so no source holds one (G-10). */
+const KEY_SHAPED = ["sk", "ant", "api03", "FAKE".repeat(20)].join("-");
 
-function list(app: CodarynApp): ListFn {
-  const fn = (app as unknown as Record<string, unknown>)["listRunEvents"];
-  assert.equal(typeof fn, "function", "the app layer gives listRunEvents");
-  return (fn as ListFn).bind(app);
-}
+/** The app's listRunEvents, called as an adapter calls it; a test may hand it what an adapter must not. */
+const list = (app: CodarynApp) => (request: Request) => app.listRunEvents(request as ListRunEventsRequest);
 
 function ok(outcome: AppCallOutcome<Page>): Page {
   assert.equal(outcome.ok, true, JSON.stringify(outcome).slice(0, 2000));
@@ -95,7 +80,7 @@ function modelError(runId: string, seq: number, message: string, extra: Record<s
 }
 
 describe("U-90: listRunEvents gives a run's stored records, checked line by line and masked again", () => {
-  test("a finished run: its records are the events it delivered (but `at`), under their numbers", TODO, async () => {
+  test("a finished run: its records are the events it delivered (but `at`), under their numbers", async () => {
     const run = await finishedRun();
     const page = ok(await list(run.app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 }));
     assert.deepEqual(
@@ -108,7 +93,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.ok(page.records.every((record) => isRunTimestamp(record.at)), "every record has its stored time");
   });
 
-  test("lines that do not fit are left out and counted; a fitting line after them is given, masked", TODO, async () => {
+  test("lines that do not fit are left out and counted; a fitting line after them is given, masked", async () => {
     const run = await finishedRun();
     const last = (await readJournal(run.base, run.runId)).length;
     const next = last + 1;
@@ -125,19 +110,21 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
         { ...modelError(run.runId, next, "an apply record in a run"), type: "plan_item_failed", index: 0, problem: "source_missing" },
         modelError(run.runId, next, "a field named after the secret", { [FAKE_SECRET]: 1 }),
         modelError(run.runId, next, `leak ${FAKE_SECRET}`),
+        modelError(run.runId, next + 1, `key ${KEY_SHAPED}`),
       ],
       "{\"seq\":",
     );
     const page = ok(await list(run.app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 }));
     assert.equal(page.skipped, 9, "eight lines and the unfinished tail of a finished run");
-    assert.equal(page.total, next);
-    const given = page.records.at(-1);
+    assert.equal(page.total, next + 1);
+    const given = page.records.at(-2);
     assert.deepEqual([given?.seq, given?.type], [next, "model_error"]);
     assert.match(String(given?.["message"]), /^leak /);
     assert.equal(JSON.stringify(page).includes(FAKE_SECRET), false, "the registered value is masked, in values and field names");
+    assert.deepEqual([page.records.at(-1)?.seq, JSON.stringify(page).includes(KEY_SHAPED)], [next + 1, false], "a key shape is hidden");
   });
 
-  test("the values registered now mask the records, whatever the run registered", TODO, async () => {
+  test("the values registered now mask the records, whatever the run registered", async () => {
     const run = await finishedRun([WRITE_NOTES, { text: `done ${OTHER_SECRET}` }]);
     const before = ok(await list(run.app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 }));
     assert.equal(JSON.stringify(before).includes(OTHER_SECRET), true, "the run did not register it");
@@ -147,7 +134,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.equal(now.total, before.total);
   });
 
-  test("an apply run: its records as its events gave them, start records left out, numbers kept", TODO, async () => {
+  test("an apply run: its records as its events gave them, start records left out, numbers kept", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const events: ApplyEvent[] = [];
     const started = await app.applyPlan(
@@ -160,11 +147,11 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.deepEqual([page.runKind, page.status, page.skipped], ["apply", "complete", 0]);
     const delivered = events.flatMap((event) => (event.kind === "record" ? [event.record] : []));
     assert.deepEqual(page.records.map(withoutAt), delivered.map(withoutAt));
-    assert.equal(page.records.some((record) => record.type === "plan_item_started"), false);
+    assert.equal(page.records.some((record) => (record.type as string) === "plan_item_started"), false);
     assert.ok((await readFile(journalFile(base, started.handle.runId), "utf8")).includes("plan_item_started"), "it is stored");
   });
 
-  test("a records-changed mark: recordsChanged, and the records are still given", TODO, async () => {
+  test("a records-changed mark: recordsChanged, and the records are still given", async () => {
     const run = await finishedRun();
     await writeFile(path.join(runDir(run.base, run.runId), RECORDS_CHANGED_FILE_NAME), "{}", "utf8");
     const page = ok(await list(run.app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 }));
@@ -172,7 +159,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.equal(page.total, run.events.length);
   });
 
-  test("a run that is still going (no result.json): incomplete, its unfinished last line left out uncounted", TODO, async () => {
+  test("a run that is still going (no result.json): incomplete, its unfinished last line left out uncounted", async () => {
     const run = await finishedRun();
     await rm(path.join(runDir(run.base, run.runId), "result.json"));
     await appendFile(journalFile(run.base, run.runId), "{\"seq\":", "utf8");
@@ -180,7 +167,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.deepEqual([page.status, page.skipped, page.total], ["incomplete", 0, run.events.length]);
   });
 
-  test("no such run, a damaged run, and arguments that do not fit", TODO, async () => {
+  test("no such run, a damaged run, and arguments that do not fit", async () => {
     const run = await finishedRun();
     const form = taskForm(run.base);
     assert.equal(code(await list(run.app)({ settings: form, runId: NO_RUN, offset: 0 })), "run_not_found");
@@ -202,7 +189,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.equal(code(await list(run.app)({ settings: form, runId: run.runId, offset: 0 })), "invalid_run_record");
   });
 
-  test("a type filter and pages; an offset past the end is an empty page", TODO, async () => {
+  test("a type filter and pages; an offset past the end is an empty page", async () => {
     const run = await finishedRun();
     const form = taskForm(run.base);
     const stored = await readJournal(run.base, run.runId);
@@ -220,27 +207,40 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.deepEqual([past.records.length, past.nextOffset, past.total], [0, null, stored.length]);
   });
 
-  test("a page is cut before 2 MiB of JSON; a larger record comes alone", TODO, async () => {
+  test("a page is cut before 2 MiB of JSON", async () => {
     const run = await finishedRun();
     const last = (await readJournal(run.base, run.runId)).length;
-    const big = "x".repeat(900 * 1024);
-    await append(run.base, run.runId, [
-      modelError(run.runId, last + 1, big),
-      modelError(run.runId, last + 2, big),
-      modelError(run.runId, last + 3, big),
-      modelError(run.runId, last + 4, "y".repeat(2560 * 1024)),
-    ]);
+    // Two records of 1.1 MiB: either fits a page alone, both do not.
+    const big = "x".repeat(1126 * 1024);
+    await append(run.base, run.runId, [modelError(run.runId, last + 1, big), modelError(run.runId, last + 2, big)]);
     const form = taskForm(run.base);
+    const first = ok(await list(run.app)({ settings: form, runId: run.runId, offset: 0, limit: 1000, types: ["model_error"] }));
+    assert.deepEqual([MAX_RUN_EVENTS_PAGE_BYTES, first.records.length, first.nextOffset, first.total], [2 * 1024 * 1024, 1, 1, 2]);
+    const second = ok(await list(run.app)({ settings: form, runId: run.runId, offset: 1, limit: 1000, types: ["model_error"] }));
+    assert.deepEqual([second.records.length, second.nextOffset], [1, null]);
+  });
+
+  test("the cut, at a smaller size: records up to the size, and a larger record alone", async () => {
+    const run = await finishedRun();
+    const last = (await readJournal(run.base, run.runId)).length;
+    const small = "x".repeat(1000);
+    await append(run.base, run.runId, [
+      modelError(run.runId, last + 1, small),
+      modelError(run.runId, last + 2, small),
+      modelError(run.runId, last + 3, small),
+      modelError(run.runId, last + 4, "y".repeat(5000)),
+    ]);
+    const source = { workspaceRoot: path.join(run.base, "work"), privacy: createPrivacyGateway({ secrets: [FAKE_SECRET] }), keys: [] };
     const sizes: number[] = [];
     for (let offset: number | null = 0; offset !== null; ) {
-      const page = ok(await list(run.app)({ settings: form, runId: run.runId, offset, limit: 1000, types: ["model_error"] }));
+      const page = ok(await listRunEventsIn(source, run.runId, offset, 1000, new Set(["model_error"]), { maxPageBytes: 2500 }));
       sizes.push(page.records.length);
       offset = page.nextOffset;
     }
     assert.deepEqual(sizes, [2, 1, 1]);
   });
 
-  test("reads only: no lock, and the journal is as it was", TODO, async () => {
+  test("reads only: no lock, and the journal is as it was", async () => {
     const run = await finishedRun();
     const before = await readFile(journalFile(run.base, run.runId), "utf8");
     ok(await list(run.app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 }));
@@ -248,7 +248,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.equal(await exists(path.join(run.base, "work", ".codaryn", "lock.json")), false);
   });
 
-  test("settings that do not resolve give their error and nothing is read", TODO, async () => {
+  test("settings that do not resolve give their error and nothing is read", async () => {
     const run = await finishedRun();
     const app = createCodarynApp(await appEnvironment(run.base, { env: {} }));
     assert.equal(code(await list(app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 })), "secret_env_missing");

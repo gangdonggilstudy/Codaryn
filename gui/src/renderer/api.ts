@@ -58,6 +58,8 @@ export interface CodarynApi {
   copyPath(workspace: string, node: string): Promise<unknown>;
   /** U-69 (3.10): shows the config file in the file manager (the main process has its path; the page does not). */
   revealConfig(): Promise<unknown>;
+  /** U-70 (4.5): keeps the screen shown or the file panel's width (the main process checks both). */
+  saveUi(change: { readonly screen?: string; readonly treeWidth?: number }): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;
@@ -129,6 +131,18 @@ export function asInfo(value: unknown): InfoView {
     language: info["language"] === "ko" ? "ko" : "en",
     engine: str(info["engine"]) ? info["engine"] : "host_error",
     initialWorkspace: asWorkspace(info["initialWorkspace"]),
+    ui: asUi(info["ui"]),
+  };
+}
+
+/** U-70: the remembered screen (a plain id) and file panel width (160 to 800), each dropped when it does not fit. */
+function asUi(value: unknown): { readonly screen: string | null; readonly treeWidth: number | null } {
+  const ui = isObj(value) ? value : {};
+  const screen = ui["screen"];
+  const width = ui["treeWidth"];
+  return {
+    screen: str(screen) && /^[a-z]{1,20}$/.test(screen) ? screen : null,
+    treeWidth: typeof width === "number" && Number.isSafeInteger(width) && width >= 160 && width <= 800 ? width : null,
   };
 }
 

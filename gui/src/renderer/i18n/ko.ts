@@ -10,6 +10,7 @@ export const KO = {
   "nav.home": "작업 공간",
   "nav.checks": "점검",
   "region.files": "파일",
+  "region.splitter": "파일 영역 너비(왼쪽·오른쪽 화살표로 바꿈)",
   "region.main": "작업 영역",
   "region.status": "상태",
   "status.engineReady": "엔진 준비됨",

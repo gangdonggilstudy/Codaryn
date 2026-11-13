@@ -4,6 +4,9 @@
  * Keys: F6 moves between the regions, Ctrl+O opens a workspace, Ctrl+1 and Ctrl+2 switch screens.
  * U-67 (3.13): Ctrl+Shift+P opens the command palette, Ctrl+N the new task, Ctrl+comma the settings,
  * and F5 reads again (a panel that read again itself already took its F5). No single key cancels.
+ * U-70 (3.1, 4.5): a separator between the file panel and the work area sets the panel's width, by
+ * the pointer or by Left/Right (16 pixels) and Home/End; the width and the screen shown are told to
+ * the handlers, which keep them.
  */
 
 import type { Texts, TextId } from "../i18n/catalog.js";
@@ -16,8 +19,22 @@ export interface Screen {
   show(root: HTMLElement): void;
 }
 
+/** U-70: the file panel's width range in CSS pixels (the main process checks the same, TREE_WIDTH_MIN/MAX). */
+export const TREE_WIDTH_MIN = 160;
+export const TREE_WIDTH_MAX = 800;
+const TREE_WIDTH_STEP = 16;
+/** The panel's width before one is chosen (as the layout's 18rem). */
+const TREE_WIDTH_DEFAULT = 288;
+
+export function clampTreeWidth(width: number): number {
+  return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, Math.round(width)));
+}
+
 export interface ShellHandlers {
   readonly openWorkspace: () => void;
+  /** U-70 (4.5): a width chosen with the separator, and the screen shown (to keep them). */
+  readonly treeWidth?: (width: number) => void;
+  readonly shown?: (screen: string) => void;
   /** U-67 (3.13): the command palette, the new task, the settings, and reading again (F5). */
   readonly palette?: () => void;
   readonly newTask?: () => void;
@@ -39,6 +56,18 @@ export class Shell {
   private readonly screens: Screen[] = [];
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private current: string | null = null;
+  /** U-70: the file panel and the work area, with the separator between them. */
+  private readonly body = el("div", undefined, { id: "body" });
+  private readonly splitter = el("div", undefined, {
+    id: "splitter",
+    role: "separator",
+    tabindex: "0",
+    "aria-orientation": "vertical",
+    "aria-controls": "files",
+    "aria-valuemin": String(TREE_WIDTH_MIN),
+    "aria-valuemax": String(TREE_WIDTH_MAX),
+  });
+  private width: number | null = null;
   /** U-69: the document's key listener, taken away when the frame is built again in another language. */
   private readonly keyListener = (event: KeyboardEvent): void => this.onKey(event);
 
@@ -57,9 +86,11 @@ export class Shell {
     const footer = el("footer", undefined, { id: "status", "aria-label": t.format("region.status") });
     footer.append(this.statusEngine, this.statusWorkspace, this.statusRun, el("span", t.format("status.language"), { lang: t.language }));
     this.statusRun.addEventListener("click", () => this.show("run"));
-    const body = el("div", undefined, { id: "body" });
-    body.append(this.filePanel, this.work);
-    root.replaceChildren(header, this.engineCard, body, footer, this.announcer);
+    this.splitter.setAttribute("aria-label", t.format("region.splitter"));
+    this.splitter.addEventListener("keydown", (event) => this.onSplitterKey(event));
+    this.listenToPointer();
+    this.body.append(this.filePanel, this.splitter, this.work);
+    root.replaceChildren(header, this.engineCard, this.body, footer, this.announcer);
     document.addEventListener("keydown", this.keyListener);
   }
 
@@ -86,6 +117,58 @@ export class Shell {
     }
     this.work.setAttribute("data-screen", id);
     screen.show(this.work);
+    this.handlers.shown?.(id);
+  }
+
+  /** U-70: the file panel's width in CSS pixels (clamped), or null for the layout's own. */
+  setTreeWidth(width: number | null): void {
+    this.width = width === null ? null : clampTreeWidth(width);
+    this.body.style.setProperty("--tree-width", this.width === null ? "" : `${this.width}px`);
+    if (this.width === null) this.splitter.removeAttribute("aria-valuenow");
+    else this.splitter.setAttribute("aria-valuenow", String(this.width));
+  }
+
+  private currentWidth(): number {
+    if (this.width !== null) return this.width;
+    const measured = typeof this.filePanel.getBoundingClientRect === "function" ? this.filePanel.getBoundingClientRect().width : 0;
+    return measured > 0 ? measured : TREE_WIDTH_DEFAULT;
+  }
+
+  private onSplitterKey(event: KeyboardEvent): void {
+    const keys: Record<string, (width: number) => number> = {
+      ArrowLeft: (width) => width - TREE_WIDTH_STEP,
+      ArrowRight: (width) => width + TREE_WIDTH_STEP,
+      Home: () => TREE_WIDTH_MIN,
+      End: () => TREE_WIDTH_MAX,
+    };
+    const next = keys[event.key];
+    if (next === undefined || event.ctrlKey || event.altKey || event.metaKey) return;
+    event.preventDefault();
+    this.setTreeWidth(next(this.currentWidth()));
+    if (this.width !== null) this.handlers.treeWidth?.(this.width);
+  }
+
+  /** U-70: dragging the separator; the width is kept when the pointer lets go. */
+  private listenToPointer(): void {
+    let start: { readonly x: number; readonly width: number } | null = null;
+    this.splitter.addEventListener("pointerdown", (event) => {
+      start = { x: event.clientX, width: this.currentWidth() };
+      try {
+        this.splitter.setPointerCapture(event.pointerId);
+      } catch {
+        // A pointer the browser does not know (a test's) is followed without capture.
+      }
+    });
+    this.splitter.addEventListener("pointermove", (event) => {
+      if (start !== null) this.setTreeWidth(start.width + event.clientX - start.x);
+    });
+    const end = (): void => {
+      if (start === null) return;
+      start = null;
+      if (this.width !== null) this.handlers.treeWidth?.(this.width);
+    };
+    this.splitter.addEventListener("pointerup", end);
+    this.splitter.addEventListener("pointercancel", end);
   }
 
   /** Shows the current screen again (after the workspace changed). */

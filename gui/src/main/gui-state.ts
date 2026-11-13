@@ -6,12 +6,15 @@
  * made with). It never holds permissions, keys, secrets, goals or model output, and it has no
  * effect on what a run may do. A file that cannot be read or does not fit is ignored (empty state);
  * an entry that does not fit is dropped.
+ * U-70 (4.5): also the window's size and place, whether it was maximized, the last screen and the
+ * file panel's width; a value that does not fit is dropped on its own.
  */
 
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, win32 } from "node:path";
 import { isLocalPathSyntax } from "./node-path.js";
+import { SCREEN_ID, TREE_WIDTH_MAX, TREE_WIDTH_MIN } from "../shared/ipc.js";
 
 export const GUI_STATE_FILE_NAME = "gui-state.json";
 export const MAX_RECENT = 20;
@@ -43,9 +46,55 @@ export interface WorkspaceMemory {
   readonly runs: readonly RememberedRun[];
 }
 
+export interface WindowBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** U-70 (4.5): how the window was left. */
+export interface WindowMemory {
+  /** Its size and place when not maximized, in screen pixels, or null. */
+  readonly bounds: WindowBounds | null;
+  readonly maximized: boolean;
+  /** The last screen shown (a screen id; the window takes only the ones it restores). */
+  readonly screen: string | null;
+  /** The file panel's width in CSS pixels (TREE_WIDTH_MIN to TREE_WIDTH_MAX), or null (the default). */
+  readonly treeWidth: number | null;
+}
+
+export const EMPTY_WINDOW: WindowMemory = { bounds: null, maximized: false, screen: null, treeWidth: null };
+const MIN_SIZE = 200;
+const MAX_SIZE = 20_000;
+const MAX_PLACE = 50_000;
+
+const whole = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+
+/** U-70: the window memory of the file, each part checked on its own. */
+export function windowOf(value: unknown): WindowMemory {
+  if (typeof value !== "object" || value === null) return EMPTY_WINDOW;
+  const record = value as Record<string, unknown>;
+  const b = record["bounds"];
+  const bounds =
+    typeof b === "object" && b !== null && whole((b as Record<string, unknown>)["x"], -MAX_PLACE, MAX_PLACE) && whole((b as Record<string, unknown>)["y"], -MAX_PLACE, MAX_PLACE) && whole((b as Record<string, unknown>)["width"], MIN_SIZE, MAX_SIZE) && whole((b as Record<string, unknown>)["height"], MIN_SIZE, MAX_SIZE)
+      ? { x: (b as WindowBounds).x, y: (b as WindowBounds).y, width: (b as WindowBounds).width, height: (b as WindowBounds).height }
+      : null;
+  const screen = record["screen"];
+  const treeWidth = record["treeWidth"];
+  return {
+    bounds,
+    maximized: record["maximized"] === true,
+    screen: typeof screen === "string" && SCREEN_ID.test(screen) ? screen : null,
+    treeWidth: whole(treeWidth, TREE_WIDTH_MIN, TREE_WIDTH_MAX) ? treeWidth : null,
+  };
+}
+
 export interface GuiState {
   readonly recentWorkspaces: readonly RecentWorkspace[];
   readonly workspaceMemory: readonly WorkspaceMemory[];
+  /** U-70: absent in files from before. */
+  readonly window?: WindowMemory;
 }
 
 export const EMPTY_STATE: GuiState = { recentWorkspaces: [], workspaceMemory: [] };
@@ -142,7 +191,8 @@ export function parseGuiState(text: string, platform: NodeJS.Platform): GuiState
     memory.push(entry);
     if (memory.length >= MAX_REMEMBERED_WORKSPACES) break;
   }
-  return { recentWorkspaces: kept, workspaceMemory: memory };
+  const window = (value as Record<string, unknown>)["window"];
+  return { recentWorkspaces: kept, workspaceMemory: memory, ...(window === undefined ? {} : { window: windowOf(window) }) };
 }
 
 export async function readGuiState(file: string, platform: NodeJS.Platform): Promise<GuiState> {
@@ -158,7 +208,7 @@ export async function readGuiState(file: string, platform: NodeJS.Platform): Pro
 export async function writeGuiState(file: string, state: GuiState): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const temporary = `${file}.${randomBytes(6).toString("hex")}.tmp`;
-  const text = `${JSON.stringify({ schemaVersion: 1, recentWorkspaces: state.recentWorkspaces, workspaceMemory: state.workspaceMemory }, null, 2)}\n`;
+  const text = `${JSON.stringify({ schemaVersion: 1, recentWorkspaces: state.recentWorkspaces, workspaceMemory: state.workspaceMemory, ...(state.window === undefined ? {} : { window: state.window }) }, null, 2)}\n`;
   try {
     await writeFile(temporary, text, { encoding: "utf8", flag: "wx" });
     await rename(temporary, file);

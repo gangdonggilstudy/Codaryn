@@ -805,7 +805,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
         discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),
         privacy,
-        verifiers: createVerifierRunner({ workspace, commandRunner }),
+        // U-210 (R-6; U-223): the apply's checks keep the numbers of unreadable sources out, as a run's do.
+        verifiers: createVerifierRunner({ workspace, commandRunner, ...(task.unreadablePaths === undefined ? {} : { unreadablePaths: task.unreadablePaths }) }),
         // R-13 L-3: the listing stops when the apply is cancelled (it can take long near DR-6's limit).
         inventory: (io.createInventoryChecker ?? createInventoryChecker)({ workspaceRoot, signal: cancel.signal }),
         journal,

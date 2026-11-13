@@ -69,7 +69,12 @@ describe("U-210: the verifier runner gets the run's unreadable paths (U-223, R-6
     const sb = createSandbox(t);
     writeWorkspaceFile(sb, "private/sales.csv", SOURCE);
     const steps = [toolStep("write_file", createFileArgs("out/summary.csv", WRONG_SUMMARY)), textStep("done"), textStep("done again"), textStep("done at last"), textStep("still done")];
-    const task = writeGeneralTask(sb, { id: "u210-verify", fields: { workflowRef: "analyze-private" }, policy: { unreadablePaths: ["private"] }, verifiers: [totalsCheck("private/sales.csv")] }, steps);
+    // One repair (the default is none), so the failed check goes back to the model.
+    const task = writeGeneralTask(
+      sb,
+      { id: "u210-verify", fields: { workflowRef: "analyze-private" }, policy: { unreadablePaths: ["private"] }, verifiers: [totalsCheck("private/sales.csv")], limits: { maxRepairAttempts: 1 } },
+      steps,
+    );
     const ran = await runGuarded(sb, ["run", "--task", task], cliEnv());
     const output = json(ran);
     assert.equal(output["kind"], "run", ran.stdout);

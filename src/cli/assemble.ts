@@ -465,7 +465,9 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
     // U-210 (bundle A, Q-4): the run's k for query_table on an unreadable table; absent, the runner's 5.
     const minGroupSize = task.minGroupSize === undefined ? {} : { minGroupSize: task.minGroupSize };
     const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder, ...unreadable, ...minGroupSize });
-    const verifiers = createVerifierRunner({ workspace, commandRunner });
+    // U-210 (bundle A, A-7, R-6; U-223): data_checks writes no number read from a source under the
+    // run's unreadable paths, so a repair cannot carry a small group's value to the model.
+    const verifiers = createVerifierRunner({ workspace, commandRunner, ...unreadable });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep
     // the phase 2 journal. The engine checks at run start and around each verification round.
     // U-203 (R-3): the unreadable paths are watched as the protected ones are.

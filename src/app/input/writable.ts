@@ -3,7 +3,7 @@
  * Shared by the task's preparation (run.ts) and doctor, so both see the same lists.
  */
 
-import type { CodarynConfig, PolicyConfig, WorkflowDefinition, WritablePathSet, WritablePathSource } from "../contracts/index.js";
+import type { CodarynConfig, PolicyConfig, WorkflowDefinition, WritablePathSet, WritablePathSource } from "../../contracts/index.js";
 
 export interface WritableSources {
   /** The config file as parsed, before `--profile` is applied (its own `policy`). */

@@ -13,7 +13,7 @@ import {
   MIN_OTHER_PROVIDER_KEY_LENGTH,
   MODEL_PLACEHOLDER_PATTERN_SOURCE,
   toSchemaFieldPath,
-} from "../contracts/index.js";
+} from "../../contracts/index.js";
 import type {
   ApiBaseUrlEnv,
   ApiModelConfig,
@@ -26,8 +26,8 @@ import type {
   ProviderSettingMissing,
   ProviderSettings,
   ResolvedApiSettings,
-} from "../contracts/index.js";
-import { normalizeApiBaseUrlStrict } from "../app/input/security/index.js";
+} from "../../contracts/index.js";
+import { normalizeApiBaseUrlStrict } from "./security/index.js";
 
 export type SettingsEnvironment = Readonly<Record<string, string | undefined>>;
 

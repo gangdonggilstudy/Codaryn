@@ -79,9 +79,9 @@ import type { CommandOutcome } from "./guard.js";
 import { RUN_ID_PATTERN } from "./args.js";
 import type { ArgsFailure } from "./args.js";
 import { argumentsError, cliError } from "./run.js";
-import { knownKeyValues } from "./settings.js";
-import type { SettingsEnvironment } from "./settings.js";
-import { localPathProblem } from "./task.js";
+import { knownKeyValues } from "../app/input/settings.js";
+import type { SettingsEnvironment } from "../app/input/settings.js";
+import { localPathProblem } from "../app/input/task.js";
 import { hideKeys } from "../app/input/text-safety.js";
 
 const realpathNative = promisify(realpathCallback.native);

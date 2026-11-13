@@ -15,15 +15,15 @@ import {
   DEFAULT_CONFIG_DISPLAY,
   DEFAULT_CONFIG_FILE_NAME,
   PROFILE_NAME_PATTERN_SOURCE,
-} from "../contracts/index.js";
+} from "../../contracts/index.js";
 import type {
   CodarynConfig,
   ConfigLocationDisplay,
   ConfigSource,
   DefaultConfigLocation,
   FindDefaultConfigLocation,
-} from "../contracts/index.js";
-import { checkLocalPathSyntax } from "../app/input/security/index.js";
+} from "../../contracts/index.js";
+import { checkLocalPathSyntax } from "./security/index.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";

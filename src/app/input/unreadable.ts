@@ -5,9 +5,9 @@
  * place that gives them to the parts of a run that judge or read (runGuards).
  */
 
-import { ANALYZE_PRIVATE_WORKFLOW_ID, effectiveMinGroupSize, integrityPathsOf, unreadablePathsOf } from "../contracts/index.js";
-import type { PolicyConfig, PolicyGate, ResolvedTaskSpec, WritablePathSet, Workspace } from "../contracts/index.js";
-import { createPolicyGate } from "../policy/index.js";
+import { ANALYZE_PRIVATE_WORKFLOW_ID, effectiveMinGroupSize, integrityPathsOf, unreadablePathsOf } from "../../contracts/index.js";
+import type { PolicyConfig, PolicyGate, ResolvedTaskSpec, WritablePathSet, Workspace } from "../../contracts/index.js";
+import { createPolicyGate } from "../../policy/index.js";
 import type { WritableSources } from "./writable.js";
 
 /**

@@ -30,7 +30,7 @@ import { assembleRun, createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runChanges } from "./changes.js";
 import { runCleanup } from "./cleanup.js";
-import { defaultLocationRefused, findDefaultConfigLocation } from "./config-file.js";
+import { defaultLocationRefused, findDefaultConfigLocation } from "../app/input/config-file.js";
 import { runDoctor } from "./doctor.js";
 import { runGuardedCommand, stdoutText } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
@@ -48,7 +48,7 @@ import { runCli } from "./run.js";
 import type { CliEnvironment } from "./run.js";
 import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "../app/input/security/index.js";
-import { envValue, knownKeyValues } from "./settings.js";
+import { envValue, knownKeyValues } from "../app/input/settings.js";
 import { cleanText, hideKeys } from "../app/input/text-safety.js";
 import { askLine as readLine } from "./terminal.js";
 // N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).

@@ -16,7 +16,7 @@ import {
   QUICK_TASK_WORKFLOW,
   TASK_ID_PATTERN_SOURCE,
   TASK_SCHEMA_VERSION,
-} from "../contracts/index.js";
+} from "../../contracts/index.js";
 import type {
   ApiModelConfig,
   ApiProviderName,
@@ -35,8 +35,8 @@ import type {
   ProtectedPathProblemReason,
   ResolvedTaskSpec,
   VerifierConfig,
-} from "../contracts/index.js";
-import { toSchemaFieldPath } from "../contracts/index.js";
+} from "../../contracts/index.js";
+import { toSchemaFieldPath } from "../../contracts/index.js";
 import {
   AGGREGATE_OPS,
   ALL_TOOL_NAMES,
@@ -51,7 +51,7 @@ import {
   PLAN_MODES,
   TABLE_FORMATS,
   WORKFLOW_ID_PATTERN_SOURCE,
-} from "../contracts/index.js";
+} from "../../contracts/index.js";
 import type {
   AggregateOp,
   AnyToolName,
@@ -64,9 +64,9 @@ import type {
   RowCountRule,
   TableFormat,
   TableRef,
-} from "../contracts/index.js";
-import { checkProtectedPaths } from "../policy/index.js";
-import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "../app/input/security/index.js";
+} from "../../contracts/index.js";
+import { checkProtectedPaths } from "../../policy/index.js";
+import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "./security/index.js";
 
 /** `invalid_config` when the config file caused the failure (S-7 bounds, quick form). */
 export type TaskErrorCode = "invalid_task" | "invalid_config";

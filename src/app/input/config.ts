@@ -19,7 +19,7 @@ import {
   MAX_WORKFLOWS,
   MAX_WORKFLOW_INSTRUCTIONS_CHARS,
   WORKFLOW_ID_PATTERN_SOURCE,
-} from "../contracts/index.js";
+} from "../../contracts/index.js";
 import type {
   ApiProviderName,
   CliErrorHint,
@@ -30,8 +30,8 @@ import type {
   MessageLanguage,
   ProviderSettings,
   WorkflowDefinition,
-} from "../contracts/index.js";
-import { checkLocalPathSyntax, checkTimerMs, normalizeApiBaseUrlStrict } from "../app/input/security/index.js";
+} from "../../contracts/index.js";
+import { checkLocalPathSyntax, checkTimerMs, normalizeApiBaseUrlStrict } from "./security/index.js";
 import {
   InputError,
   fail,

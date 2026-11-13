@@ -157,7 +157,7 @@ export interface AppHooks {
   readonly cleanupOperations?: CleanupOperations;
   /** U-91: the check's executor file operations, probe removal and lock release. Tests give ones that fail. */
   readonly applyCheck?: ApplyCheckOperations;
-  /** U-172: writeWorkspaceText's lock release. Tests give one that fails. */
+  /** U-172: writeWorkspaceText's lock release, and a pause at each check (V-1's races). Tests only. */
   readonly workspaceText?: WorkspaceTextOperations;
 }
 
@@ -461,7 +461,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     try {
       const ready = await workspaceTextSource(request.settings);
       if (!ready.ok) return ready;
-      return await readWorkspaceTextIn(ready.source, checked.path);
+      return await readWorkspaceTextIn(ready.source, checked.path, hooks.workspaceText);
     } catch {
       return { ok: false, error: appError("internal_error", "the file could not be read") };
     }

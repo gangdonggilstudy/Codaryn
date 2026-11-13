@@ -105,6 +105,10 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — 거부 ({permission}/{code})",
   "progress.tool_rejected": "{tool} — 호출 검사에서 거부 ({code})",
   "progress.tool_failed": "{tool} — 실패 ({code})",
+  "progress.confirmation_allowed": "권한 확인 — 사람이 이번 호출에만 허용함",
+  "progress.confirmation_denied.user": "권한 확인 — 사람이 거부함",
+  "progress.confirmation_denied.default": "권한 확인 — 기본값으로 거부함(답이 없었거나, 물을 수 없었거나, 기다리는 동안 시간 한도에 닿음)",
+  "progress.confirmation_denied.cancelled": "권한 확인 — 기다리는 동안 실행이 취소되어 거부함",
   "progress.command_exited": "명령 실행됨 — 종료 코드 {exitCode}",
   "progress.command_timed_out": "명령 실행됨 — 제한 시간이 지나 멈춤",
   "progress.file_created": "파일 만듦",
@@ -232,6 +236,7 @@ export const KO_MESSAGES: MessageTexts = {
 
   "prompt.yes_no_default_yes": "[Y/n] (Enter: 예)",
   "prompt.yes_no_default_no": "[y/N] (y·예·네: 예, Enter: 아니오)",
+  "confirm.question.command": "명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다. 보이는 것은 실행 파일 이름과 인자 개수({count}개)뿐이며, 인자 자체는 보이지 않습니다. 실행 파일",
 
   "language.chosen": "메시지 언어 {language}, 정한 곳: {source}",
   "language.env_ignored": "CODARYN_LANG 값이 ko나 en이 아니어서 무시했습니다.",
@@ -550,6 +555,7 @@ export const KO_MESSAGES: MessageTexts = {
   "denial.network_denied": "네트워크 허용 안 됨",
   "denial.destructive_denied": "파괴적 동작 허용 안 됨",
   "denial.restore_denied": "가림 복원 허용 안 됨",
+  "denial.confirmation_required": "실행 중 사람이 허용하지 않음",
   "denial.protected_path": "보호 경로",
   "denial.plan_action_not_allowed": "허용하지 않은 계획 동작",
   "denial.unknown_tool": "모르는 도구",

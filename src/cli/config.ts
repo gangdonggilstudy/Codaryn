@@ -209,7 +209,8 @@ function parseProfiles(value: unknown, topLimits: Partial<Limits> | undefined): 
     const rec = record((value as Rec)[name], at, ["provider", "policy", "verifiers", "limits", "workflowRef"]);
     // SP-D10: the quick form's provider with this profile.
     const provider = rec["provider"] === undefined ? undefined : parseProviderName(rec["provider"], `${at}.provider`);
-    const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"]));
+    // U-109: the user's settings, so its command rules may ask before running.
+    const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"], "settings"));
     const verifiers = rec["verifiers"] === undefined ? undefined : prefixed(at, () => parseVerifiers(rec["verifiers"]));
     const limits = rec["limits"] === undefined ? undefined : prefixed(at, () => parsePartialLimits(rec["limits"]));
     // G-A: the definition this profile uses when the task names none.
@@ -268,7 +269,8 @@ function parseWorkflows(value: unknown): { [id: string]: WorkflowDefinition } {
     if ((completion === "human_review") !== (humanReview !== undefined)) {
       fail(`${at}.humanReview is required with completion "human_review" and not allowed otherwise`);
     }
-    const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"]));
+    // U-109: a definition's command rules never ask (confirm is an unknown field here).
+    const policy = rec["policy"] === undefined ? undefined : prefixed(at, () => parsePolicy(rec["policy"], "definition"));
     if (allowCommands === false && (policy?.commands.length ?? 0) > 0) fail(`${at}.policy.commands must be empty with allowCommands false`);
     workflows[id] = {
       ...(label === undefined ? {} : { label }),
@@ -314,7 +316,8 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
     const requestTimeoutMs = parseRequestTimeout(rec["requestTimeoutMs"]);
     const maxRetries = parseMaxRetries(rec["maxRetries"]);
     const limits = rec["limits"] === undefined ? undefined : parsePartialLimits(rec["limits"]);
-    const policy = rec["policy"] === undefined ? undefined : parsePolicy(rec["policy"]);
+    // U-109: the user's settings, so its command rules may ask before running.
+    const policy = rec["policy"] === undefined ? undefined : parsePolicy(rec["policy"], "settings");
     const verifiers = rec["verifiers"] === undefined ? undefined : parseVerifiers(rec["verifiers"]);
     const secretEnv = rec["secretEnv"] === undefined ? undefined : parseSecretEnv(rec["secretEnv"], "secretEnv");
     const integrity = rec["integrity"] === undefined ? undefined : parseIntegrity(rec["integrity"]);

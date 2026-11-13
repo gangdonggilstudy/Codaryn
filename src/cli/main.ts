@@ -20,7 +20,6 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { CODARYN_LANG_ENV } from "../contracts/index.js";
 import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } from "../contracts/index.js";
@@ -50,6 +49,7 @@ import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
 import { envValue, knownKeyValues } from "./settings.js";
 import { cleanText, hideKeys } from "./text-safety.js";
+import { askLine as readLine } from "./terminal.js";
 // N-D 4.4: the explained error with the lock hint (kept apart from the command imports above).
 import { explainedErrorText } from "./error-text.js";
 
@@ -85,15 +85,12 @@ const readText = (file: string): Promise<string> => readFile(file, "utf8");
 const currentKey = (): string[] => knownKeyValues(process.env);
 
 /** One line typed at the terminal, or null when the input ends first. `output` shows the question. */
-async function askLine(question: string, output: NodeJS.WritableStream = process.stdout): Promise<string | null> {
-  const prompt = createInterface({ input: process.stdin, output });
-  try {
-    return await prompt.question(question);
-  } catch {
-    return null;
-  } finally {
-    prompt.close();
-  }
+/**
+ * One line from standard input after `question` on `output`; null at the end of input (U-110:
+ * Ctrl+D or Ctrl+Z no longer leaves the question waiting) or when `signal` aborts.
+ */
+function askLine(question: string, output: NodeJS.WritableStream = process.stdout, signal?: AbortSignal): Promise<string | null> {
+  return readLine(question, { input: process.stdin, output }, signal);
 }
 
 // A closed stderr (EPIPE) must not end a run: human output is best effort.
@@ -341,6 +338,11 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         writeProgress: (line) => {
           process.stderr.write(line);
         },
+        // U-110 (B-5): the permission question, on stderr, only when standard input and stderr are
+        // terminals; keys hidden and control characters replaced as in other human text.
+        ...(process.stdin.isTTY === true && process.stderr.isTTY === true
+          ? { ask: (question: string, signal: AbortSignal) => askLine(cleanText(hideKeys(question, currentKey()), true).replace(/\t/g, " "), process.stderr, signal) }
+          : {}),
         cancelSignal: (cancelFile) =>
           createCancelSource({
             cancelFile,

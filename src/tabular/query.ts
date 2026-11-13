@@ -43,9 +43,10 @@ export interface TableQuery {
   /**
    * U-277 (Codex V-28 M1, V-28b): "refuse" (the default): a numeric operation's cell that is not a
    * number is `not_number` at the first such data row, as below. "skip", for a table under
-   * unreadablePaths: no such cell is a problem; each is left out as an empty cell is, so whether the
-   * query is refused never turns on a cell's type (query.ts in the contracts), and the outcome's
-   * `tallies` give, per group and operation, the cells that went into the value (V-19's fewCells).
+   * unreadablePaths: no such cell is a problem; each is left out as an empty cell is, so no refusal
+   * turns on whether a cell is a number (the other problems keep their rules: query.ts in the
+   * contracts, U-283), and the outcome's `tallies` give, per group and operation, the cells that
+   * went into the value (V-19's fewCells).
    */
   readonly nonNumbers?: "refuse" | "skip";
 }

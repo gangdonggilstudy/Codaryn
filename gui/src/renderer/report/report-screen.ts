@@ -38,8 +38,8 @@ export interface ReportDeps {
 type RunForm = { readonly profile: string | null; readonly workflow: string | null };
 
 export interface ReportScreen extends Screen {
-  /** The run to show, and its form (R21b-L-1: the run's own, never another run's). */
-  choose(runId: string, form?: RunForm | null): void;
+  /** The run to show, and its form (R21b-L-1: the run's own, never another run's); U-61: the tab to open first (the summary when absent or unknown). */
+  choose(runId: string, form?: RunForm | null, tab?: string | null): void;
 }
 
 function word(t: Texts, prefix: string, value: string): string {
@@ -197,12 +197,14 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
   const { texts: t, api } = deps;
   let chosen: string | null = null;
   let chosenForm: RunForm | null = null;
+  let chosenTab: string | null = null;
   return {
     id: "report",
     title: "nav.report",
-    choose(runId, form = null) {
+    choose(runId, form = null, tab = null) {
       chosen = runId;
       chosenForm = form;
+      chosenTab = tab;
     },
     show(root) {
       const workspace = deps.current();
@@ -215,6 +217,7 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
       }
       const runId = chosen;
       const form = chosenForm;
+      const firstTab = chosenTab;
       void (async () => {
         body.replaceChildren(el("p", t.format("runs.loading")));
         const reply = asReport(await api.report(workspace.handle, runId));
@@ -253,7 +256,7 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
         // UXM-14, DR-38: as the CLI's report warns; U-32: above the tabs, as every tab is the records' content.
         const warning = reply.view.recordsChanged === true ? [el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" })] : [];
         body.replaceChildren(...warning, bar, panel, ...saveReportButton(t, api, workspace, runId, "report-save"));
-        select(0);
+        select(Math.max(0, tabs.findIndex((tab) => tab.id === firstTab)));
         body.setAttribute("data-report-ready", reply.view.kind);
       })();
     },

@@ -374,6 +374,16 @@ startGui({
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;
       pretendInactive = false;
+      // U-61 (3.12): the first run changed a file, so its result offers the revert preview, opened on the run list.
+      results["revertFromResult"] = {
+        runId: (results["runResult"] as { runId?: string } | null)?.runId ?? null,
+        offered: await js("document.getElementById('run-revert-preview') !== null"),
+        preview: await (async () => {
+          await js("document.getElementById('run-revert-preview')?.click(); true");
+          return waitFor("(() => { const p = document.getElementById('revert-panel')?.getAttribute('data-preview'); return p && p !== 'loading' ? p : null; })()", 30_000);
+        })(),
+        title: await js("document.getElementById('revert-title')?.textContent ?? null"),
+      };
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
       // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging
@@ -472,6 +482,12 @@ startGui({
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
       results["applyMoved"] = { from: existsSync(join(SECOND, "sub", "b.txt")), to: existsSync(join(SECOND, "moved", "b.txt")) };
+      // U-61 (U-16): the run list tells of both plans' applies, by the contract's rule.
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["planApplyInList"] = await js(
+        `[${JSON.stringify(directRunId)}, ${JSON.stringify(planRunId)}].map((id) => document.querySelector('[data-run="' + id + '"] [data-plan-apply]')?.getAttribute('data-plan-apply') ?? null)`,
+      );
       // The forms are in gui-state.json, which the next start reads (newest first; applies are not remembered).
       results["stateForms"] = (() => {
         try {

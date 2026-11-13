@@ -1120,6 +1120,18 @@ const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
 const WORD = /^[a-z][a-z_-]{0,39}$/;
 export const REVERT_ACTIONS = ["restored", "deleted", "moved_back", "restored_from_discard"] as const;
 
+/**
+ * U-61 (U-16, R-55): what became of a plan run's apply, by the contract's one rule
+ * (planApplyStateOf in src/contracts/commands.ts, PLAN_APPLY_STATES there; a unit test compares).
+ */
+export const PLAN_APPLY_STATES = ["applied", "unfinished", "applying", "reverted", "record_missing"] as const;
+export interface PlanApplyView {
+  readonly state: (typeof PLAN_APPLY_STATES)[number];
+  readonly applyRunId: string;
+  /** The apply run's reason, for "unfinished"; null otherwise or when it has none. */
+  readonly reason: string | null;
+}
+
 /** GU-4 (3.8): one row of the run list. A damaged run has its id only. */
 export type RunListItem =
   | {
@@ -1135,6 +1147,8 @@ export type RunListItem =
       readonly revertRecordDamaged: boolean;
       /** UXM-14, DR-38: the run has a records-changed mark; its records are not to be trusted. */
       readonly recordsChanged?: boolean;
+      /** U-61 (U-16): for a plan run an apply claimed, what became of that apply; null otherwise. */
+      readonly planApply?: PlanApplyView | null;
       /**
        * R21b-L-1: the task form the run was started with, when this app started it (the main process
        * remembers it). Null: unknown (started elsewhere), so a plan of it is shown but not applied here.
@@ -1150,6 +1164,15 @@ const revertedMark = (value: unknown): { at: string; status: "complete" | "parti
   if (!isObj(value) || typeof value["at"] !== "string" || !TIME.test(value["at"]) || (value["status"] !== "complete" && value["status"] !== "partial")) return undefined;
   return { at: value["at"], status: value["status"] };
 };
+
+/** U-61: a row's plan apply state as the engine host gives it: null when absent, "bad" when it does not fit. */
+function planApplyOf(value: unknown): PlanApplyView | null | "bad" {
+  if (value === undefined || value === null) return null;
+  if (!isObj(value) || !hasOnlyKeys(value, ["state", "applyRunId", "reason"])) return "bad";
+  const { state, applyRunId, reason } = value;
+  if (typeof state !== "string" || !(PLAN_APPLY_STATES as readonly string[]).includes(state) || !isRunId(applyRunId) || !(reason === null || (typeof reason === "string" && WORD.test(reason)))) return "bad";
+  return { state: state as PlanApplyView["state"], applyRunId, reason };
+}
 
 /** The engine host's run list, checked field by field. */
 export function toRunsReply(value: unknown): RunsReply {
@@ -1171,7 +1194,9 @@ export function toRunsReply(value: unknown): RunsReply {
     if (run["state"] !== "checked" || (kind !== "run" && kind !== "apply") || !(startedAt === null || (typeof startedAt === "string" && TIME.test(startedAt)))) return fail;
     if (!shortText(taskId) || !(status === null || (typeof status === "string" && WORD.test(status))) || !(reason === null || (typeof reason === "string" && WORD.test(reason)))) return fail;
     if (!(changes === null || count(changes)) || reverted === undefined || typeof revertRecordDamaged !== "boolean") return fail;
-    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged });
+    const planApply = planApplyOf(run["planApply"]);
+    if (planApply === "bad") return fail;
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply });
   }
   return { ok: true, runs: items, omitted };
 }

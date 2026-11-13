@@ -91,6 +91,18 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         };
         describe();
         profile.input.addEventListener("change", describe);
+        // U-61 (3.2, DR-23, GT-D8): data analysis sends the tables' rows as they are; said only as it is
+        // (usage 18.7). Shown when the chosen task type, or the chosen profile's, is analyze.
+        const analyze = el("p", t.format("task.analyzeNotice"), { id: "task-analyze-notice", class: "notice", hidden: "" });
+        const describeTaskType = (): void => {
+          const chosen = view?.profiles.find((item) => item.name === profile.input.value);
+          const taskType = workflow.input.value !== "" ? workflow.input.value : (chosen?.workflowRef ?? null);
+          if (taskType === "analyze") analyze.removeAttribute("hidden");
+          else analyze.setAttribute("hidden", "");
+        };
+        describeTaskType();
+        workflow.input.addEventListener("change", describeTaskType);
+        profile.input.addEventListener("change", describeTaskType);
         const advanced = el("details", undefined, { id: "task-advanced" });
         advanced.append(el("summary", t.format("task.advanced")), el("p", t.format("task.advancedText")));
 
@@ -130,7 +142,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
             start();
           }
         });
-        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, advanced, message, runButton);
+        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, advanced, message, runButton);
         body.setAttribute("data-newtask-ready", reply.ok ? "ok" : "error");
       })();
     },

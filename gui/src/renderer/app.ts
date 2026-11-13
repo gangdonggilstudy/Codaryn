@@ -95,16 +95,23 @@ async function start(): Promise<void> {
     shell?.show("changes");
   };
   const report = reportScreen({ texts, api, current: () => current, openChanges: (runId, form) => openChanges(runId, form?.profile ?? null, form?.workflow ?? null) });
-  /** The report of a run, with the run's own form (for its changes view). */
-  const openReport = (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null): void => {
-    report.choose(runId, form);
+  /** The report of a run, with the run's own form (for its changes view); U-61: and the tab to open first. */
+  const openReport = (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null, tab: string | null = null): void => {
+    report.choose(runId, form, tab);
     shell?.show("report");
   };
-  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport }));
+  const runs = runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges, openReport });
+  // U-61 (3.12): a result's next steps: the run list with that run's revert preview, and the settings' limits.
+  const openRevert = (runId: string): void => {
+    runs.choosePreview(runId);
+    shell?.show("runs");
+  };
+  const openSettings = (): void => shell?.show("settings");
+  shell.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport, openRevert, openSettings }));
   shell.add(plan);
   shell.add(changes);
   shell.add(report);
-  shell.add(runsScreen({ texts, api, current: () => current, open: openWorkspace, announce: (text) => shell?.announce(text), openPlan, openChanges, openReport }));
+  shell.add(runs);
   shell.add(cleanupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));

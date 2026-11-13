@@ -23,6 +23,7 @@ import type {
   RevertReply,
   RevertView,
   RunDonePayload,
+  PlanApplyView,
   RunListItem,
   RunsReply,
   RunEventsPayload,
@@ -334,6 +335,14 @@ export function asRunDone(value: unknown): RunDonePayload | null {
 }
 
 /** GU-4: the run list. Rows that do not fit are left out. */
+/** U-61: a row's plan apply state (the main process checked it; the window takes the known states only). */
+function asPlanApply(value: unknown): PlanApplyView | null {
+  if (!isObj(value) || !str(value["applyRunId"]) || !RUN_ID.test(value["applyRunId"])) return null;
+  const state = value["state"];
+  if (state !== "applied" && state !== "unfinished" && state !== "applying" && state !== "reverted" && state !== "record_missing") return null;
+  return { state, applyRunId: value["applyRunId"], reason: str(value["reason"]) ? value["reason"] : null };
+}
+
 export function asRuns(value: unknown): RunsReply {
   if (!isObj(value) || value["ok"] !== true || !Array.isArray(value["runs"])) return failed(value);
   const runs: RunListItem[] = value["runs"].flatMap((run: unknown): RunListItem[] => {
@@ -354,6 +363,7 @@ export function asRuns(value: unknown): RunsReply {
         reverted,
         revertRecordDamaged: run["revertRecordDamaged"] === true,
         recordsChanged: run["recordsChanged"] === true,
+        planApply: asPlanApply(run["planApply"]),
         form: asForm(run["form"]),
       },
     ];

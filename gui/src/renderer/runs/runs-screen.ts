@@ -75,7 +75,8 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   const facts = [
     run.startedAt === null ? "" : localDateTime(run.startedAt),
     word(t, "runkind", run.kind),
-    run.status === null ? t.format("runstatus.none") : word(t, "runstatus", run.status),
+    // U-271 (C-27): a run without a result says where it is, in the CLI's runs words.
+    run.status === null ? t.format(run.phase === "running" ? "runs.phase.running" : run.phase === "no_result" ? "runs.phase.no_result" : "runs.phase.unknown") : word(t, "runstatus", run.status),
     run.changes === null ? t.format("runs.changesUnknown") : t.format("runs.changes", { count: String(run.changes) }),
   ];
   item.setAttribute("data-status", run.status ?? "none");

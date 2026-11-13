@@ -1610,6 +1610,8 @@ export type RunListItem =
       readonly recordsChanged?: boolean;
       /** U-61 (U-16): for a plan run an apply claimed, what became of that apply; null otherwise. */
       readonly planApply?: PlanApplyView | null;
+      /** U-271 (C-27, U-155): a run without a result: still going, or stopped without one; null otherwise or unknown. */
+      readonly phase?: "running" | "no_result" | null;
       /**
        * U-244 (the CLI's runs.apply_of, runs.carried_plan): the plan run this run applied (an apply run) or
        * carried out (a run that carried out a changes plan); null or absent for any other run.
@@ -1665,7 +1667,9 @@ export function toRunsReply(value: unknown): RunsReply {
     if (planApply === "bad") return fail;
     const planRunId = run["planRunId"] ?? null;
     if (!(planRunId === null || isRunId(planRunId)) || planRunId === run["runId"]) return fail;
-    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply, planRunId });
+    const phase = run["phase"] ?? null;
+    if (!(phase === null || ((phase === "running" || phase === "no_result") && status === null))) return fail;
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply, planRunId, phase });
   }
   return { ok: true, runs: items, omitted };
 }

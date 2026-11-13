@@ -28,6 +28,7 @@ import {
   MAX_QUERY_COUNTED_GROUPS,
   MAX_QUERY_RESULT_GROUPS,
   MAX_QUERY_TABLE_BYTES,
+  QUERY_TABLE_PROBLEM_HINTS,
   UNREADABLE_TABLE_OPS,
   asRawText,
   minGroupSizeFor,
@@ -66,9 +67,13 @@ function fail(code: ToolErrorCode, message: string): Failure {
   return { ok: false, code, message: asRawText(message) };
 }
 
-/** `invalid_table`: the problem and where (a row, a line or an argument), never a cell or a name. */
+/**
+ * `invalid_table`: the problem and where (a row, a line or an argument), never a cell or a name, then
+ * the problem's own hint (U-261, QUERY_TABLE_PROBLEM_HINTS).
+ */
 function rejected(problem: QueryTableProblem, where?: string): Failure {
-  return fail("invalid_table", where === undefined ? `table rejected: ${problem}` : `table rejected: ${problem} at ${where}`);
+  const told = where === undefined ? `table rejected: ${problem}` : `table rejected: ${problem} at ${where}`;
+  return fail("invalid_table", `${told}. ${QUERY_TABLE_PROBLEM_HINTS[problem]}`);
 }
 
 const FORMATS_BY_EXTENSION: { readonly [extension: string]: TableFormat } = { ".csv": "csv", ".tsv": "tsv", ".jsonl": "jsonl" };
@@ -135,23 +140,27 @@ async function readChunks<T>(
   }
 }
 
-/** The failure of a table that cannot be read at all: its code and the line, never its text. */
-function readFailure(failure: TableReadFailure): Failure {
+/**
+ * The failure of a table that cannot be read at all: its code and the line, never its text. U-261:
+ * under unreadablePaths not the line either (nothing of a single row, DR-70).
+ */
+function readFailure(failure: TableReadFailure, unreadable: boolean): Failure {
   if (failure.problem === "not_text") return rejected("not_text");
   const { code, line } = failure.table;
-  return rejected("not_table", line === null ? `(${code})` : `line ${line} (${code})`);
+  return rejected("not_table", line === null || unreadable ? `(${code})` : `line ${line} (${code})`);
 }
 
-function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>): Failure {
+/** U-261: under unreadablePaths a not_number names the operation, not the data row. */
+function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>, unreadable: boolean): Failure {
   switch (outcome.problem) {
     case "not_text":
     case "not_table":
-      return readFailure(outcome);
+      return readFailure(outcome, unreadable);
     case "unknown_column":
     case "duplicate_column":
       return rejected(outcome.problem, outcome.field === "groupBy" ? `groupBy[${outcome.index}]` : `operations[${outcome.index}].column`);
     case "not_number":
-      return rejected("not_number", `data row ${outcome.dataRow}, operations[${outcome.operation}]`);
+      return rejected("not_number", unreadable ? `operations[${outcome.operation}]` : `data row ${outcome.dataRow}, operations[${outcome.operation}]`);
     case "too_many_groups":
       return fail("too_many_groups", `the query counts more than ${MAX_QUERY_COUNTED_GROUPS} groups`);
   }
@@ -246,7 +255,7 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
 
   if (args.describe === true) {
     const shape = outcome as TableShapeOutcome;
-    if (!shape.ok) return readFailure(shape);
+    if (!shape.ok) return readFailure(shape, unreadable);
     const shown = shownShape(shape.columns, shape.rows, k);
     return { ok: true, payload: { kind: "describe", columns: shown.columns, rows: shown.rows, minGroupSize: k } };
   }
@@ -254,7 +263,7 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
   // query.ts: a groupBy name given twice is `duplicate_column` at its second place, after the table's
   // problems and the first place's own (src/tabular leaves this to the tool).
   if (duplicateGroupBy(args.groupBy ?? []) && !problemBefore(result, 1)) return rejected("duplicate_column", "groupBy[1]");
-  if (!result.ok) return queryFailure(result);
+  if (!result.ok) return queryFailure(result, unreadable);
   // DR-70: only the groups of at least k rows; the others merged into their number. V-19: in those,
   // only the values of at least k cells.
   const shown = shownGroups(result.groups, k);

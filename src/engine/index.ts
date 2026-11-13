@@ -64,6 +64,7 @@ import {
   WORKFLOW_TOOL_NAMES,
   REFUSAL_HINTS,
   TOOL_FAILURE_HINTS,
+  QUERY_TABLE_PROBLEM_HINTS,
   asRawText,
   failedToolContent,
   safeModelText,
@@ -264,6 +265,8 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   ...Object.values(REFUSAL_HINTS),
   // U-50 (AXM-6): the hint after a tool runner's failure.
   ...(Object.values(TOOL_FAILURE_HINTS) as string[]),
+  // U-261: query_table's hints for each problem of a table (its invalid_table message ends with one).
+  ...new Set(Object.values(QUERY_TABLE_PROBLEM_HINTS)),
   ...FAILED_CONTENT_PARTS,
   WRITE_NOT_APPLIED_MESSAGE,
   VERIFIER_NOT_RUN_EVIDENCE,

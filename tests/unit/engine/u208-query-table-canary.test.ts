@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
+import { QUERY_TABLE_PROBLEM_HINTS } from "../../../src/contracts/index.js";
 import type { EngineDeps, JsonObject, PolicyConfig, ToolCall, ToolResult, Workspace } from "../../../src/contracts/index.js";
 import { runTask } from "../../../src/engine/index.js";
 import { argsProblemText, workflowToolArgsProblem } from "../../../src/engine/validate-args.js";
@@ -187,8 +188,12 @@ describe("U-208: the canary - only DR-70's four reach the model, the journal and
   test("min is refused, a text column summed fails by its row, read_file is denied and the search finds nothing", () => {
     assert.equal(resultOf("q4").errorCode, "invalid_table");
     assert.match(String(resultOf("q4").content), /op_not_allowed at operations\[0\]\.op/);
+    // U-261: the refused operation's own hint, not the columns' one.
+    assert.ok(String(resultOf("q4").content).endsWith(QUERY_TABLE_PROBLEM_HINTS.op_not_allowed), String(resultOf("q4").content));
     assert.equal(resultOf("q5").errorCode, "invalid_table");
-    assert.match(String(resultOf("q5").content), /not_number at data row 1, operations\[0\]/);
+    // U-261: under unreadablePaths the message names the operation, never a data row.
+    assert.match(String(resultOf("q5").content), /not_number at operations\[0\]\. /);
+    assert.doesNotMatch(String(resultOf("q5").content), /data row/);
     const denial = outcome.journal.ofType("tool_decision").find((event) => event.callId === "r1" && !event.allowed);
     assert.equal(denial?.code, "unreadable_path");
     const search = JSON.parse(String(resultOf("s1").content)) as { entries: unknown[]; withheld?: true };

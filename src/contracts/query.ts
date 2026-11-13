@@ -214,6 +214,25 @@ export const QUERY_TABLE_PROBLEMS = ["not_text", "not_table", "unknown_column", 
 export type QueryTableProblem = (typeof QUERY_TABLE_PROBLEMS)[number];
 
 /**
+ * U-261 (nd-docs' F-3; texts drafted by nb-i18n, U-260): what to do about each problem, the hint
+ * query_table puts after its `invalid_table` message (`table rejected: <problem>[ at <place>]. <hint>`).
+ * One code has seven causes, so the code's one hint (TOOL_FAILURE_HINTS) fitted only some: asking a
+ * table under unreadablePaths for max was told to look at the columns. Model-bound fixed texts
+ * (FIXED_MODEL_TEXTS): nothing read from the table or the call in them.
+ * Under unreadablePaths a message also leaves out the data row and the line it names elsewhere, so
+ * nothing of a single row reaches the model (DR-70); the operation's index stays.
+ */
+export const QUERY_TABLE_PROBLEM_HINTS: { readonly [P in QueryTableProblem]: string } = {
+  not_text: "The file is not UTF-8 text, so it cannot be read as a table.",
+  not_table: "The file cannot be read as a table of its format at the place named; set format if the name's extension is wrong.",
+  unknown_column: "Call query_table with describe set to true to see the table's columns, then query only those.",
+  duplicate_column: "Call query_table with describe set to true to see the table's columns, then query only those.",
+  not_number: "Sum, mean, min and max need a column of numbers; describe shows how many cells of each column read as numbers.",
+  op_not_allowed: "A table under unreadablePaths takes only count, sum and mean; ask for those.",
+  after_not_found: "That after value did not come from this table's results; query again without after.",
+};
+
+/**
  * DR-70, Q-4: the one rule for what of the computed groups may be given: the groups of at least
  * `minGroupSize` rows, in their order; the others merged into their number only. Pure.
  */

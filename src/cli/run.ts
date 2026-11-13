@@ -61,6 +61,7 @@ import type {
   PrivacyGateway,
   HumanOutput,
   MessageCatalog,
+  PlanMode,
   PolicyNarrowing,
   RunApprovedPlan,
   RunSummaryContext,
@@ -357,6 +358,16 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
   instructions_too_long: "is longer than the limit",
   checklist_too_long: "must have 1 to the maximum number of non-blank lines within the length limit",
 };
+
+/**
+ * U-195 (U-177's note): plan_weakened names the task's and the definition's plan modes (U-180: a task
+ * keeps a definition's "apply" or "run", or sets one under "none"). A definition's "apply" and a
+ * task's "none" give WORKFLOW_PROBLEM_TEXT's text, as before.
+ */
+function planWeakenedText(taskPlan: PlanMode | undefined, definitionPlan: PlanMode | undefined): string {
+  if (taskPlan === undefined || definitionPlan === undefined) return WORKFLOW_PROBLEM_TEXT.plan_weakened;
+  return `cannot be "${taskPlan}" under a workflow with plan "${definitionPlan}"`;
+}
 
 /**
  * G-A: the config as a task sees it when a workflow definition applies: the definition's limits
@@ -745,7 +756,7 @@ export async function prepareTask(
     const file: InputDiagnosticFile = fromConfig ? "config" : "task";
     const workflowError = error(
       fromConfig ? "invalid_config" : "invalid_task",
-      `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`,
+      `${resolved.field} ${resolved.problem === "plan_weakened" ? planWeakenedText(parsed.plan, definition?.plan) : WORKFLOW_PROBLEM_TEXT[resolved.problem]}`,
       positionDiagnostic(file, { code: "invalid_value", field: resolved.field }),
     );
     // U-37: a task type neither built in nor in the config's workflows.
@@ -933,6 +944,24 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
     if (approved !== undefined && parts === undefined) {
       await assembled.finish(null);
       return error("internal_error", "this build cannot carry out a run plan; nothing was sent or written");
+    }
+    // U-195 (PM, as an apply of a plan of moves, U-1): the plan run's records-changed mark again, now
+    // that the lock is held: a mark written since apply's own look stops the run before anything is
+    // recorded, sent or written. A look that cannot be made counts as a mark (fail closed).
+    if (approved !== undefined && parts !== undefined) {
+      let marked: boolean;
+      try {
+        marked = await parts.planRecordsChanged();
+      } catch {
+        marked = true;
+      }
+      if (marked) {
+        await assembled.finish(null);
+        return error(
+          "plan_records_changed",
+          "the plan run's records were changed by something other than the run (a records-changed mark), found under the workspace lock; its plan may not be the one approved, so nothing was recorded, sent or written. Make the plan again with a new codaryn run",
+        );
+      }
     }
     const recorded = assembled.deps.journal;
     // U-18: the calls allowed and then failed, counted as the records are written.

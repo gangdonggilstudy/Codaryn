@@ -72,12 +72,15 @@ export interface AssemblyInput {
  * - markApplied: the recorders' claim of the plan (RunRecorders.markApplied, with planRunId).
  * - fileNow: the tools' probe of a planned file (B-6).
  * - planRecordsUnchecked: the store's question for the plan run, with this run as the apply run.
+ * - planRecordsChanged: the store's records-changed mark of the plan run (hasRecordsChangedMark), which
+ *   the CLI asks under the lock before the engine starts, as an apply of a plan of moves does (U-1).
  */
 export interface ApprovedPlanParts {
   policyFor(writablePathSets: readonly WritablePathSet[]): PolicyGate;
   markApplied(): Promise<"marked" | "already_applied">;
   readonly fileNow: PlannedFileProbe;
   planRecordsUnchecked(): Promise<boolean>;
+  planRecordsChanged(): Promise<boolean>;
 }
 
 export type AssemblyOutcome =
@@ -474,6 +477,7 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
         markApplied: () => markApplied(),
         fileNow: createPlannedFileProbe({ workspace }),
         planRecordsUnchecked: () => stateUncheckedSince({ workspaceRoot, planRunId, applyRunId: runId }),
+        planRecordsChanged: () => hasRecordsChangedMark(workspaceRoot, planRunId),
       };
     }
     hooks.onAssembled?.({ privacy, workspaceRoot });

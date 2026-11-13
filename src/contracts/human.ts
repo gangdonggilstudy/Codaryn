@@ -1065,6 +1065,10 @@ export const FIXED_MESSAGES = {
   // a command can write files outside them. A warning in the `commands` check, or one of its notes
   // when the check says something else (no new check id).
   "doctor.commands.writable_with_commands": { count: "count" },
+  // U-195 (DR-69 B-8): `{count}` command rules while the task's plan mode is "run": the approved files
+  // bind the file tools only, so such a command can write outside the plan. As the line above (a
+  // warning of the `commands` check, or one of its notes).
+  "doctor.commands.plan_run_with_commands": { count: "count" },
   // DR-41: notes of the `commands` check (DoctorCheck.notes): what the task type's own rules left out
   // of the configured policy (workflowPolicyNarrowings). Counts only.
   "doctor.workflow_policy.commands_dropped": { count: "count" },

@@ -41,13 +41,24 @@ export interface ChangesPlanView {
   readonly files: readonly { readonly path: string }[];
 }
 
-/** The view of the run plan of `runId` (checked by the caller to be a run plan). */
-export async function changesPlanViewIn(source: { readonly workspaceRoot: string; readonly privacy: Pick<PrivacyGateway, "mask"> }, runId: string): Promise<AppCallOutcome<ChangesPlanView>> {
+/**
+ * The view of the run plan of `runId` (checked by the caller to be a run plan). Review R-103 M-1:
+ * `keys` is every API key value set now (knownKeyValues), so changesPlanOutput hides the current
+ * key in the summary besides key shapes and control characters, as a plan of mode apply's summary
+ * is hidden in the output itself (R-49 R49-M1): the GUI and its approval screen get it so.
+ */
+export async function changesPlanViewIn(
+  source: { readonly workspaceRoot: string; readonly privacy: Pick<PrivacyGateway, "mask">; readonly keys: readonly string[] },
+  runId: string,
+): Promise<AppCallOutcome<ChangesPlanView>> {
   const loaded = await loadAnyPlan({ workspaceRoot: source.workspaceRoot, runId });
   if (!loaded.ok) return { ok: false, error: appError(loaded.code, `the plan of run ${runId} cannot be shown (${loaded.code})`) };
   if (loaded.plan.kind !== "changes") return { ok: false, error: appError("internal_error", "the plan is not a run plan") };
   const recordsChanged = await hasRecordsChangedMark(source.workspaceRoot, runId);
-  const view = changesPlanOutput({ plan: loaded.plan, digest: loaded.digest, applied: loaded.applied }, source.privacy, recordsChanged ? { recordsChanged } : {});
+  const view = changesPlanOutput({ plan: loaded.plan, digest: loaded.digest, applied: loaded.applied }, source.privacy, {
+    ...(recordsChanged ? { recordsChanged } : {}),
+    currentKey: source.keys,
+  });
   if (!view.ok) {
     return {
       ok: false,

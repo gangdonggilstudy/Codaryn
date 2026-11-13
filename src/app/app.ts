@@ -911,7 +911,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    * the run will have (checkChangesPlanFiles). No lock, no probe, no move: those fields are empty.
    */
   async function checkRunPlan(
-    probe: { readonly secrets: readonly string[]; readonly task: ResolvedTaskSpec },
+    probe: { readonly secrets: readonly string[]; readonly keys: readonly string[]; readonly task: ResolvedTaskSpec },
     workspaceRoot: string,
     planRunId: string,
     digest: string,
@@ -919,7 +919,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     if (workflowSettingsOf(probe.task).plan !== "run") {
       return { ok: false, error: appError("run_not_plan", 'the plan is a run plan: the task given to the check must resolve to a workflow with plan "run"; nothing was checked') };
     }
-    const view = await changesPlanViewIn({ workspaceRoot, privacy: createPrivacyGateway({ secrets: probe.secrets }) }, planRunId);
+    const view = await changesPlanViewIn({ workspaceRoot, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys }, planRunId);
     if (!view.ok) return view;
     const shown = view.output.output;
     if (shown.appliedBy !== null) return { ok: false, error: appError("plan_already_applied", "that plan was already carried out; nothing was checked") };
@@ -958,7 +958,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     if (!root.ok) return null;
     const runId = await runIdOf(root.value, request.runId);
     if (!runId.ok || (await storedPlanKindOf(root.value, runId.value)) !== "changes") return null;
-    const view = await changesPlanViewIn({ workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }) }, runId.value);
+    const view = await changesPlanViewIn({ workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys }, runId.value);
     return view.ok ? { ok: true, output: view.output.output } : view;
   }
 

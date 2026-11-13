@@ -8,7 +8,7 @@
  *   run does not register it as a secret and only the key hiding takes it out.
  * - The root is nc-human's changesPlanOutput (U-191: it masked the summary with the registered
  *   secrets only); it takes the current keys, and the app's view (changesPlanViewIn) gives them.
- * Reproduced first (todo until the view hides them). Temporary folders, fake values only.
+ * Reproduced first (6777b41, todo until the view hid them). Temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,6 @@ import { maskedParts } from "../../../src/contracts/index.js";
 import { createPlanRecorder } from "../../../src/store/index.js";
 import { FAKE_SECRET, SECRET_ENV, appEnvironment, setupRun, taskForm } from "./support.js";
 
-const TODO = { todo: "R-103 M-1: the app's plan view does not hide keys or control characters in a run plan's summary yet" };
 const PLAN_RUN = "20261101T120000Z-0a1b2c3d";
 /** Key shaped (sk-ant-…), fake; built from parts. */
 const KEY_SHAPED = ["sk", "ant", "api03", "FAKE".repeat(20)].join("-");
@@ -48,7 +47,7 @@ async function storeRunPlan(base: string, summary: string): Promise<void> {
   await writeFile(path.join(dir, "result.json"), `${JSON.stringify(result)}\n`);
 }
 
-test("R-103 M-1: plan() gives a run plan's summary with keys, the current key and control characters hidden", TODO, async () => {
+test("R-103 M-1: plan() gives a run plan's summary with keys, the current key and control characters hidden", async () => {
   const base = await setupRun({}, {}, []);
   await storeRunPlan(base, `  Use ${KEY_SHAPED} and ${CURRENT_KEY} here${BEL} and go  `);
   const app = createCodarynApp(await appEnvironment(base, { env: { [SECRET_ENV]: FAKE_SECRET, ANTHROPIC_API_KEY: CURRENT_KEY } }));
@@ -62,7 +61,7 @@ test("R-103 M-1: plan() gives a run plan's summary with keys, the current key an
   assert.equal(summary, "Use [key] and [key] here? and go", "as a plan of mode apply's summary (planSummary): hidden, cleaned, trimmed");
 });
 
-test("R-103 M-1: without a current key set, a key shape is still hidden", TODO, async () => {
+test("R-103 M-1: without a current key set, a key shape is still hidden", async () => {
   const base = await setupRun({}, {}, []);
   await storeRunPlan(base, `Use ${KEY_SHAPED} here`);
   const app = createCodarynApp(await appEnvironment(base));

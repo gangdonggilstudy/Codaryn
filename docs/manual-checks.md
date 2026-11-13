@@ -1517,7 +1517,7 @@ node dist/src/cli/main.js report --workspace $sl\workspace --run latest | Select
 
 **다르면 볼 곳**
 - 앱 계층의 목록: `src/app/` 아래 `listWorkspaceDir`
-- 파일 도구의 경로 검사: `src/cli/security/`, `src/tools/`
+- 파일 도구의 경로 검사: `src/app/input/security/`, `src/tools/`
 - [CLI 계약](cli-contract.md) 경로 규칙
 
 **관련**: R-78, R-82, U-89, U-103
@@ -1877,7 +1877,7 @@ node dist/src/cli/main.js report --workspace "$cs/workspace" --run latest
 - Linux(대소문자를 가리는 ext4)에서는 `NOTES.md`가 다른 파일이다. 그래서 쓰기가 되고 `notes.md`는 그대로인 것이 정상이다.
 
 **다르면 볼 곳**
-- 보호 경로 비교: `src/cli/security/`, `src/policy/`
+- 보호 경로 비교: `src/app/input/security/`, `src/policy/`
 - [사용 안내](usage.md) 13절 "보호 경로"
 
 **관련**: 설계 조사 5.4, 사용 안내 13절

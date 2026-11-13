@@ -2535,6 +2535,7 @@ error (policy_denied): denied by policy: path/unreadable_path. Files here may no
 {"kind":"groups","groupBy":["region","team"],"operations":[{"op":"sum","column":"amount"}],"groups":[{"keys":["east","team-alpha"],"rows":6,"values":[315]},{"keys":["north","team-alpha"],"rows":5,"values":[500]}],"suppressedGroups":4,"next":null,"minGroupSize":5}
 ```
 
+- 수가 아닌 칸: 읽기 제외 아래 표에서는 질의가 그런 칸 때문에 거부되지 않는다. 합과 평균에서는 빈 칸처럼 빠지고, count는 센다(U-277). 이 예시 표에는 그런 칸이 없다.
 - max(거부):
 
 ```
@@ -2614,6 +2615,7 @@ error (policy_denied): denied by policy: path/unreadable_path. Files here may no
 
 - **여러 질의의 차(제안서 Q-8):** 위 3의 결과만으로도 north의 합 800에서 north·team-alpha의 합 500을 빼면, north·team-beta 한 사람의 금액 300이 나온다. 질의 횟수에는 한도가 없다. 막으려면 잡음이 필요하고 범위 밖이다. k는 작은 묶음이 실수로 드러나는 것을 줄이는 완화책이다.
 - **빠졌다는 사실은 간다:** `null`과 `fewCells`, `suppressedGroups`는 값을 만든 칸이나 묶음의 행이 k 미만이라는 것과 숨긴 묶음의 수를 알린다.
+- **수가 아닌 칸(U-277):** 합 ÷ 평균은 묶음의 수의 개수다. 그래서 count와 비교하면 수가 아닌 칸의 수가 나온다. `describe`의 칸 수에서 보인 묶음의 몫을 빼면 나머지 행들의 칸 종류가 나오고, 나머지가 한 행이면 그 칸이 비었는지, 수인지, 둘 다 아닌지가 나온다. 확인(main `8fc49df`의 실제 CLI, 대본 모델: 예시 표의 north 한 칸을 `n/a`로 바꾸자 north의 합은 720(80이 빠짐), 개수는 6, 평균은 144였고 거부는 없었다. `describe`의 `amount`는 비지 않은 칸 18, 수로 읽히는 칸 17이었다). 자세한 것은 [민감정보 처리](privacy.md) 13절이다.
 - **키와 열 이름:** 5행 이상이 함께 가진 키(예: 지역 이름)는 칸 값이지만 모델에게 간다(DR-70). 열 이름은 늘 간다. 사람마다 열이 하나인 교차표처럼 열 이름이 개인정보인 표는 행과 열을 바꿔 둔다.
 - **목표와 결과 파일:** 목표와 작업 종류의 지시문은 그대로 모델에 간다. 목표에 개인정보를 적지 않는다. 모델이 쓴 결과 표와 보고서는 사람 확인의 셋째 항목으로 사람이 본다.
 - **사람의 화면과 되돌리기:** 변경 보기와 GUI의 파일 보기에는 읽기 제외 아래 파일도 보인다. `revert`는 지금의 읽기 제외를 보지 않는다([민감정보 처리](privacy.md) 13절).

@@ -20,15 +20,15 @@
 
 | 기능 | 구현 위치 | 결정 | 유닛 | 통합 | 상태 |
 | --- | --- | --- | --- | --- | --- |
-| 명령 분기, 도움말, 버전, 최상위 예외 | `cli/main`, `cli/args`, `cli/help`, `cli/install`, `cli/guard` | C-8, S-6, U-7(단계 3), W-5 | `cli/cli`, `cli/k-cli`, `contracts/w5-doctor-usage` | `k02-commands`, `a09-a10-status-provider` | 구현 |
+| 명령 분기, 도움말, 버전, 최상위 예외 | `cli/main`, `cli/args`, `cli/help`, `app/input/install`, `cli/guard` | C-8, S-6, U-7(단계 3), W-5 | `cli/cli`, `cli/k-cli`, `contracts/w5-doctor-usage` | `k02-commands`, `a09-a10-status-provider` | 구현 |
 | `--env-file`·`--env-file-if-exists` 거부 | `cli/args` | T-15, V-3 | `cli/v3`, `cli/t-fixes` | `m02-fake-api-settings` | 구현 |
 | 설정 파일, 모델·주소·시간·재시도 해석, 간편 형식 | `cli/config`, `cli/settings`, `cli/task`, `cli/run` | C-1~C-6, C-8, S-7, S-9 | `cli/config`, `cli/anthropic-wire`, `cli/security/limits`, `cli/security/url` | `m01-fake-api-runs`, `m02-fake-api-settings` | 구현 |
-| 변수 파일(`--vars-file`) | `cli/run`, `cli/main`, `cli/security/env` | C-2, S-4, T-15 | `cli/security/env`, `cli/config` | `m02-fake-api-settings`, `s01-security-regress` | 구현 |
-| 키 검사(설정·task 원문과 값, `--goal`) | `cli/security/keys`, `cli/run` | C-1, S-6, S-8, T-14 | `cli/security/keys`, `cli/sc-regress` | `m02-fake-api-settings`, `s01-security-regress` | 구현 |
-| 경로 검사(UNC·장치, 작업 공간 밖 파일, 취소 파일, 실행 파일·cwd) | `cli/security/paths`, `cli/task`, `cli/run`, `cli/revert` | S-1, S-5, T-12, T-14, X-1 | `cli/security/paths`, `cli/t-fixes`, `cli/x-cli` | `s01-security-regress`, `t01-fix-regress` | 구현 |
-| 한도 상한과 절대 상한, `maxOutputTokens` 상한 | `cli/security/limits`, `cli/task` | C-6, S-7, T-14 | `cli/security/limits`, `cli/t-fixes` | `m02-fake-api-settings` | 구현 |
-| 설치 위치 거부 | `cli/install`, `cli/run`, `cli/security/paths` | U-3(단계 3) | `cli/k-cli` | `k02-commands` | 구현 |
-| 비밀 등록(secretEnv, 환경의 키, 변수 파일 값) | `cli/run`, `cli/security/env` | S-2, S-3, S-4 | `cli/security/env`, `cli/sc-regress`, `cli/config` | `s01-security-regress`, `m01-fake-api-runs` | 구현 |
+| 변수 파일(`--vars-file`) | `cli/run`, `cli/main`, `app/input/security/env` | C-2, S-4, T-15 | `cli/security/env`, `cli/config` | `m02-fake-api-settings`, `s01-security-regress` | 구현 |
+| 키 검사(설정·task 원문과 값, `--goal`) | `app/input/security/keys`, `cli/run` | C-1, S-6, S-8, T-14 | `cli/security/keys`, `cli/sc-regress` | `m02-fake-api-settings`, `s01-security-regress` | 구현 |
+| 경로 검사(UNC·장치, 작업 공간 밖 파일, 취소 파일, 실행 파일·cwd) | `app/input/security/paths`, `cli/task`, `cli/run`, `cli/revert` | S-1, S-5, T-12, T-14, X-1 | `cli/security/paths`, `cli/t-fixes`, `cli/x-cli` | `s01-security-regress`, `t01-fix-regress` | 구현 |
+| 한도 상한과 절대 상한, `maxOutputTokens` 상한 | `app/input/security/limits`, `cli/task` | C-6, S-7, T-14 | `cli/security/limits`, `cli/t-fixes` | `m02-fake-api-settings` | 구현 |
+| 설치 위치 거부 | `app/input/install`, `cli/run`, `app/input/security/paths` | U-3(단계 3) | `cli/k-cli` | `k02-commands` | 구현 |
+| 비밀 등록(secretEnv, 환경의 키, 변수 파일 값) | `cli/run`, `app/input/security/env` | S-2, S-3, S-4 | `cli/security/env`, `cli/sc-regress`, `cli/config` | `s01-security-regress`, `m01-fake-api-runs` | 구현 |
 | 취소(신호, 취소 파일) | `cli/cancel`, `cli/run`, `engine/index` | P-2, T-12 | `cli/cli`, `cli/t-fixes`, `engine/run-task`(EN-05) | `a08-limits-cancel`, `p01-repair-loop`(F5-h) | 구현 |
 | 진행 표시(stderr, `--quiet`) | `cli/progress`, `cli/run` | U-8(단계 3) | `cli/k-cli` | `k02-commands` | 구현 |
 | `codaryn models`(목록, 선택, 404 안내) | 없음 | Y-1~Y-5 | 없음 | 없음 | 결정만 |

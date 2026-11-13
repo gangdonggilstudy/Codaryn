@@ -62,7 +62,7 @@
 | 모듈 | 책임 | 알지 못해야 하는 것 | 상태 |
 | --- | --- | --- | --- |
 | `contracts` | 모듈 사이의 타입·상수·한도(계약). 역할 1(계약 담당)만 바꾼다 | 구현 | 구현 |
-| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(`cli/security`), 조립(`assemble.ts`), 5절의 명령, 사람용 출력(`cli/human`), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 연결되지 않았던 줄 프로토콜 코드 `cli/protocol`은 지웠다(DR-20, DR-66, U-81) |
+| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(C-3a부터 `app/input/security`에 있다), 조립(`assemble.ts`), 5절의 명령, 사람용 출력(`cli/human`), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 연결되지 않았던 줄 프로토콜 코드 `cli/protocol`은 지웠다(DR-20, DR-66, U-81) |
 | `engine` | 상태 기계, 모델↔도구 반복, 한도, 가림 적용 순서, 검증 회차, 재수정 판단, 무결성·상태 디렉터리 점검 시점(DR-38), 에이전트의 마지막 답(`final-message.ts`, DR-47), 승인한 계획의 적용(`apply.ts`, GT-D4) | 파일 시스템, Git, 테스트 러너, 제공자 형식 | 구현 |
 | `model` | 제공자 중립 `complete`·모델 목록. `anthropic`(Messages API), `openai`(Responses API, DR-31), 두 제공자가 함께 쓰는 전송 `http`, 대본 제공자 `scripted.ts` | 파일 시스템, 정책 | 구현. 실제 API 미확인 |
 | `tools` | 내장 도구 네 개(`read_file`, `search_files`, `write_file`, `run_command`), 작업 종류 도구 두 개(`inspect_files`, `propose_plan`, `workflow-tools.ts`), 명령 실행기(`command-runner.ts`, Windows 실행 `windows-launch.ts`), 계획 적용기(`plan-executor.ts`, `plan-files.ts`) | 모델 제공자 | 구현 |
@@ -71,7 +71,7 @@
 | `verify` | 검증기 `command`, `file_rules`, `data_checks`(`tabular`을 쓴다)와 적용 실행마다 만드는 `inventory`(설정할 수 없다). 무결성 목록(`integrity.ts`) | 수정 방법 | 구현 |
 | `store` | journal(가림본 기록), result.json, 작업 공간 잠금(`lock.ts`), 스냅샷과 되돌리기(`changes.ts`, 적용 실행은 `apply-revert.ts`), 계획과 적용 표시(`plan.ts`), 폐기 보관함(`discarded.ts`), 사람 확인(`review.ts`), 실행 목록(`runs.ts`), 정리(`cleanup.ts`), 상태 디렉터리 점검(`state-guard.ts`)과 기록 변경 표시(`marks.ts`, DR-38), 계획 뒤 점검하지 못한 실행 찾기(`unchecked.ts`, U-29) | 모델 제공자 | 구현 |
 | `workspace` | 허용 루트 안의 경로 해석(링크·8.3 이름 해석), 텍스트 읽기, 원자적 쓰기, 목록 | 정책 판단 | 구현 |
-| `app` | 어댑터 공통 계층. `startRun`(이벤트, 취소, 결과 저장), `report`·`reportMarkdown`·`revert`·`listRuns`·`resolveRun`, 정리(`stateSummary`, `previewCleanup`, `applyCleanup`), `doctor`, 설정(`readSettings`, `createSettings`, 설정 변경 제안·적용), `listModels`·`selectModel`, `changes`, `plan`·`applyPlan`·`review`(`src/app/types.ts`의 `CodarynApp`, 코드 기준) | 어댑터의 화면과 인자 형식, 프로세스 전역(`process.env`, 신호, stdout) | 일부. GUI가 쓴다. CLI는 `changes`만 거친다. 여러 함수가 안에서 `src/cli` 함수를 감싼다(AC-D16) |
+| `app` | 어댑터 공통 계층. 실행 전 입력 검사(`app/input`: 보안 검사, 글 정리, 설치 위치, 실행 id, 사람용 글 꼴. C-3a)도 여기에 있고 CLI가 가져다 쓴다. `startRun`(이벤트, 취소, 결과 저장), `report`·`reportMarkdown`·`revert`·`listRuns`·`resolveRun`, 정리(`stateSummary`, `previewCleanup`, `applyCleanup`), `doctor`, 설정(`readSettings`, `createSettings`, 설정 변경 제안·적용), `listModels`·`selectModel`, `changes`, `plan`·`applyPlan`·`review`(`src/app/types.ts`의 `CodarynApp`, 코드 기준) | 어댑터의 화면과 인자 형식, 프로세스 전역(`process.env`, 신호, stdout) | 일부. GUI가 쓴다. CLI는 `changes`만 거친다. 여러 함수가 안에서 `src/cli` 함수를 감싼다(AC-D16) |
 | `i18n` | 사람용 고정 문구 카탈로그(ko, en)와 언어 선택(N-4) | 파일·환경의 값 | 구현. CLI와 GUI 엔진 호스트가 쓴다 |
 | `workflows` | 내장 작업 종류 정의 다섯 개(`general`, `code`, `document`, `analyze`, `organize`). 로직 없는 데이터 상수([범용 작업](design/general-tasks.md) 4절) | 실행 논리 | 구현 |
 | `tabular` | 표(CSV, TSV, JSON Lines) 해석과 집계. 순수 함수. 표를 조각 단위로 읽는다(U-202) | 파일 시스템, 모델 | 구현. `data_checks` 검증기와 `query_table` 도구(U-208)가 쓴다 |
@@ -512,7 +512,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
 | --- | --- | --- | --- |
 | A-1 | 키 형식 검사(S-11)를 실행 전 단계로 올릴지. 지금은 잠금·journal을 만든 뒤 실패한다 | 올린다. run 사전 단계와 doctor에서 같은 함수로 검사해 실행 디렉터리를 만들지 않는다 | 없음. 검사는 제공자 안에 있다(코드 기준) |
 | A-2 | 무결성 계약에 `run_end` 단계를 둘지. W-1 종료 점검이 `before_verify`/`after_verify` 이름으로 기록돼 report에서 구분되지 않는다 | 둔다(계약 담당). 기록 해석이 명확해진다 | 없음. `INTEGRITY_PHASES`에 `run_end`가 없다(상태 디렉터리 점검에는 있다) |
-| A-3 | 계약 주석 `src/contracts/integrity.ts`의 링크 설명이 W-2 구현과 다르다 | 계약 담당이 주석을 W-2에 맞춘다 | 없음 |
+| A-3 | 계약 주석 `src/contracts/integrity.ts`의 링크 설명이 W-2 구현과 다르다 | 계약 담당이 주석을 W-2에 맞춘다 | 해소(U-275) |
 | A-4 | `anthropic-workspace-id` 헤더. 작업공간에 묶이지 않은 키에는 필요하다는 외부 문서 확인(decisions.md 4절)이 있다 | 실제 호출 점검에서 필요 여부를 보고, 필요하면 설정 필드로 추가한다 | 확인 불가(실제 API 필요) |
 | A-5 | 스냅샷 수명. 자동 삭제가 없고 평문이다(R-8) | report와 doctor에 크기·위치 안내를 넣고, 정리 명령은 UX 설계와 함께 정한다. 폐기 보관함은 실행 기록과 따로 정리한다(DR-9) | 일부. `cleanup`은 있다. report·doctor의 크기·위치 안내는 없다 |
 | A-6 | 잠금의 pid 재사용 오판(W-4 조사) | 잠금에 프로세스 시작 시각을 더한다 | 해소(N-25 (b), 9절) |

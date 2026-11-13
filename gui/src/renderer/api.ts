@@ -43,6 +43,12 @@ import type {
   TreeReply,
   RunEventsReply,
   PlanCheckReply,
+  TextReadOnlyReason,
+  TextNotOpened,
+  TextReply,
+  SaveTextReply,
+  TextProblem,
+  TextSaveRefusal,
 } from "../shared/ipc.js";
 import type { CleanupPlanView, CleanupResultView, StateSummaryView } from "../shared/cleanup.js";
 
@@ -54,6 +60,12 @@ export interface CodarynApi {
   forgetRecent(id: string): Promise<unknown>;
   tree(workspace: string, node: string | null, offset: number): Promise<unknown>;
   reveal(workspace: string, node: string): Promise<unknown>;
+  /** U-174 (DR-72, 3.14): the text view of a tree or changes entry, by its id (the main process resolves and checks it). */
+  openText(workspace: string, node: string): Promise<unknown>;
+  /** U-184 (DR-72, 3.14): saves the text view's text with its edit token (the main process asks once per opened file and the app layer judges). */
+  saveText(token: string, text: string): Promise<unknown>;
+  /** U-184: tells the main process whether the text view holds an unsaved edit (closing the window asks then). */
+  textDirty(dirty: boolean): Promise<unknown>;
   /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
   copyText(text: string): Promise<unknown>;
   /** U-103 (3.3): copies a tree entry's relative path, by its id (the main process resolves and checks it). */
@@ -186,6 +198,61 @@ export function asTree(value: unknown): TreeReply {
     views.push({ id: str(id) && HEX.test(id) ? id : null, name: entry["name"], kind: entry["kind"] as TreeEntryView["kind"], masked: entry["masked"], protected: entry["protected"] === true });
   }
   return { ok: true, entries: views, total, offset, nextOffset };
+}
+
+/**
+ * U-174: the text view's reply (the main process checked it already). The page loads nothing from
+ * outside its directory, so the known reasons are repeated here; one it does not know is dropped and
+ * the file counts as not editable.
+ */
+const TEXT_REASONS: readonly string[] = ["masked", "control_characters", "mixed_line_endings", "protected", "settings_file", "read_only", "hard_link", "workspace_locked"];
+const TEXT_NOT_OPENED: readonly string[] = ["not_found", "not_file", "refused", "too_large", "not_text", "unreadable", "mask_failed"];
+
+export function asText(value: unknown): TextReply {
+  if (!isObj(value) || value["ok"] !== true) return failed(value);
+  if (value["opened"] === false) return str(value["reason"]) && TEXT_NOT_OPENED.includes(value["reason"]) ? { ok: true, opened: false, reason: value["reason"] as TextNotOpened } : { ok: false, code: "host_error" };
+  const { text, lines } = value;
+  if (value["opened"] !== true || !str(text) || typeof lines !== "number" || !Number.isSafeInteger(lines) || lines < 1) return { ok: false, code: "host_error" };
+  const given: unknown[] = Array.isArray(value["readOnlyReasons"]) ? value["readOnlyReasons"] : [];
+  const reasons = given.filter((reason: unknown): reason is TextReadOnlyReason => str(reason) && TEXT_REASONS.includes(reason));
+  const masked = value["masked"] === true;
+  return {
+    ok: true,
+    opened: true,
+    text,
+    masked,
+    protected: value["protected"] === true,
+    editable: value["editable"] === true && given.length === 0 && !masked && str(value["editToken"]) && HEX.test(value["editToken"]),
+    readOnlyReasons: reasons,
+    lines,
+    editToken: str(value["editToken"]) && HEX.test(value["editToken"]) ? value["editToken"] : null,
+  };
+}
+
+const TEXT_PROBLEMS: readonly string[] = ["masked", "control_characters", "too_large"];
+const SAVE_REFUSALS: readonly string[] = ["conflict", "workspace_locked", "not_editable", "text_refused", "path_changed", "write_failed", ...TEXT_NOT_OPENED];
+
+/** U-184: a save's reply (the main process checked it already); unknown reasons or problems are dropped. */
+export function asSaveText(value: unknown): SaveTextReply {
+  if (!isObj(value) || value["ok"] !== true) return failed(value);
+  const lockLeft = value["lockLeft"] === true;
+  if (value["saved"] === true) {
+    const token = value["editToken"];
+    // V-5 M-1: a write that ended after its token was dropped is saved with no next token.
+    if (token === null) return { ok: true, saved: true, unchanged: value["unchanged"] === true, lockLeft, editToken: null };
+    return str(token) && HEX.test(token) ? { ok: true, saved: true, unchanged: value["unchanged"] === true, lockLeft, editToken: token } : { ok: false, code: "host_error" };
+  }
+  const status = value["status"];
+  if (value["saved"] !== false || !str(status) || !SAVE_REFUSALS.includes(status)) return { ok: false, code: "host_error" };
+  const list = (field: string, known: readonly string[]): string[] => (Array.isArray(value[field]) ? (value[field] as unknown[]).filter((item): item is string => str(item) && known.includes(item)) : []);
+  return {
+    ok: true,
+    saved: false,
+    status: status as TextSaveRefusal,
+    readOnlyReasons: list("readOnlyReasons", TEXT_REASONS) as TextReadOnlyReason[],
+    textProblems: list("textProblems", TEXT_PROBLEMS) as TextProblem[],
+    lockLeft,
+  };
 }
 
 export function asDoctor(value: unknown): DoctorReply {
@@ -422,6 +489,8 @@ export function asPlan(value: unknown): PlanReply {
   if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
   const view = value["view"];
   if (!str(view["runId"]) || !str(view["digest"]) || !Array.isArray(view["actions"]) || (view["status"] !== "pending" && view["status"] !== "applied")) return failed(value);
+  // U-206: a run plan names its kind and lists its files (the main process checked each).
+  if (view["planKind"] !== undefined && (view["planKind"] !== "changes" || !Array.isArray(view["files"]))) return failed(value);
   const approval = str(value["approval"]) && HEX.test(value["approval"]) ? value["approval"] : null;
   return { ok: true, view: view as unknown as PlanView, approval };
 }
@@ -476,6 +545,7 @@ export function asPlanCheck(value: unknown): PlanCheckReply {
   const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
   return {
     ok: true,
+    ...(value["planKind"] === "changes" ? { planKind: "changes" as const } : {}),
     problems: value["problems"].flatMap((item: unknown) => (isObj(item) && typeof item["index"] === "number" && str(item["problem"]) ? [{ index: n(item["index"]), problem: item["problem"] }] : [])),
     unsafeMoves: value["unsafeMoves"].filter((index: unknown): index is number => typeof index === "number" && Number.isSafeInteger(index) && index >= 0),
     inventoryLimitReached: value["inventoryLimitReached"] === true,

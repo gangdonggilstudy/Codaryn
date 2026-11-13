@@ -123,7 +123,8 @@ test("G-C propose_plan: stores the checked actions with source hashes and change
       { planRecorder },
     );
     assert.equal(outcome.ok, true, JSON.stringify(outcome));
-    if (!outcome.ok || !("digest" in outcome.payload)) return;
+    // U-180: "actions" tells propose_plan's payload from propose_changes's (files).
+    if (!outcome.ok || !("actions" in outcome.payload)) return;
     const expected: ResolvedPlanAction[] = [
       { kind: "move", from: "a.txt", to: "2023/a.txt", sha256: sha("alpha") },
       { kind: "discard", path: "b.txt", sha256: sha("bravo") },

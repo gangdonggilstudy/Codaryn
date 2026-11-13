@@ -23,6 +23,7 @@ import type {
   ToolRequirements,
   WritablePathSet,
 } from "../contracts/index.js";
+import { noteJudged } from "../workspace/judged.js";
 import { lexicalCheck } from "../workspace/lexical.js";
 import { compilePathSet } from "./path-set.js";
 import type { PathSet } from "./path-set.js";
@@ -36,6 +37,13 @@ export { checkProtectedPaths } from "./protected.js";
  */
 export { compileProtectedPaths } from "./protected.js";
 export type { ProtectedPaths } from "./protected.js";
+/**
+ * U-187 (p5a request): the path set matcher itself (path-set.ts), for a caller that judges a list of
+ * workspace paths with the gate's rule, not a copy: `prefix` or `exact`, a deny list (`covers`) or an
+ * allow list (`misses`, an entry allows only once its real path was found).
+ */
+export { checkPathSetFormat, compilePathSet } from "./path-set.js";
+export type { PathSet, PathSetOptions } from "./path-set.js";
 
 type Denial = Extract<PolicyDecision, { allowed: false }>;
 
@@ -120,7 +128,10 @@ function matchesRule(rule: CommandRule, args: readonly string[]): boolean {
  * entry covers nothing.
  */
 function compileWritablePathSets(sets: readonly WritablePathSet[] | undefined): readonly PathSet[] {
-  return (sets ?? []).map((set) => compilePathSet(set.entries, { match: set.source === "plan" ? "exact" : "prefix", onUnusable: "misses" }));
+  // Review V-11 H-1: the plan's entries are effective paths; they cover only themselves, unlinked.
+  return (sets ?? []).map((set) =>
+    compilePathSet(set.entries, set.source === "plan" ? { match: "exact", onUnusable: "misses", entryLinks: "refuse" } : { match: "prefix", onUnusable: "misses" }),
+  );
 }
 
 export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets }) => {
@@ -235,6 +246,8 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writable
           denials.push(deny("restore", "restore_denied"));
         } else {
           const outcome = await workspace.resolve(value, access);
+          // U-189 (T-1): the real path judged here; the tool, resolving the argument again, must land on it.
+          if (outcome.ok) noteJudged(workspace, value, access, outcome.path);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
           } else if (access === "write" && (await protectedPaths.coversEffective(outcome.path.relative, workspace))) {

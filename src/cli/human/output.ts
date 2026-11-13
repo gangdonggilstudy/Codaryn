@@ -66,6 +66,7 @@ import type {
   ModelProviderName,
   PlanApplyState,
   RevertOutput,
+  RevertSummaryContext,
   RunId,
   RunListEntry,
   RunReason,
@@ -137,6 +138,15 @@ function moreLine(count: number): string {
  */
 function withCode(title: string, code: string): string {
   return title.endsWith(":") ? `${title.slice(0, -1)} (${code}):` : `${title} (${code})`;
+}
+
+/**
+ * U-201 (U-176, U-193): the line after a run, an apply, a revert or a cleanup that finished but could
+ * not release the workspace lock (`lockLeft` true in its summary context or CleanupOutcome):
+ * `lock.release_failed`, which names no path (doctor's lock line names the file). Null otherwise.
+ */
+export function lockReleaseFailedLine(lockLeft: unknown, messages: MessageCatalog): string | null {
+  return lockLeft === true ? messages.format("lock.release_failed") : null;
 }
 
 /**
@@ -213,6 +223,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       return isCount(narrowing.count, 1) ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
     });
   /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
+  /** U-201: lock.release_failed when a summary's context says the lock was left. */
+  const lockLines = (lockLeft: unknown): string[] => {
+    const line = lockReleaseFailedLine(lockLeft, catalog);
+    return line === null ? [] : [line];
+  };
   const integritySummary = (): string[] =>
     integrityChecks > 0 && integrityChanged === 0 ? [catalog.format("summary.integrity_unchanged", { count: integrityChecks })] : [];
 
@@ -440,6 +455,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // G-A: a plan waiting for approval says so first.
       const planReady = pair?.reason === "plan_pending" && result.plan !== undefined && isCount(result.plan.actions);
       if (planReady && result.plan !== undefined) out.push(catalog.format("summary.plan_ready", { actions: result.plan.actions }));
+      // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run (EngineResult.planRunId),
+      // as an apply's summary does; absent in every other run, so no other summary changes.
+      const carried: unknown = result.planRunId;
+      const carriedPlan = typeof carried === "string" ? toRunId(carried) : null;
+      if (carriedPlan !== null) out.push(catalog.format("summary.apply_plan_run", { runId: carriedPlan }));
       // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
@@ -473,6 +493,13 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // U-198 (B-4, V-14 L-1): of those, the writes refused as not writable, by why, each with its own
+      // advice: not one of the carried-out plan's files (make a new plan), then outside the settings'
+      // writablePaths (add the file). The fields are optional: absent is 0, no line.
+      const notPlanned = isCount(context.deniedNotPlanned) ? context.deniedNotPlanned : 0;
+      if (notPlanned > 0) out.push(catalog.format("summary.denied_not_planned", { count: notPlanned }), catalog.format("summary.denied_not_planned_hint"));
+      const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
+      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }), catalog.format("summary.denied_not_writable_hint"));
       // U-207 (bundle A, R-8): of those, the calls refused at a path this task may not read, and once
       // what a person can do about it. Optional: absent is 0, no line.
       const unreadable = isCount(context.deniedUnreadable) ? context.deniedUnreadable : 0;
@@ -539,6 +566,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         }
       }
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
+      // U-201: the run finished but its lock could not be released (RunSummaryContext.lockLeft).
+      out.push(...lockLines(context.lockLeft));
 
       const here = context.workspaceForm === "current";
       // DR-51 (U-38): the typed workspace in the hints, with workspaceForm "given" only.
@@ -683,7 +712,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
     // R-70 L-1 (PM): revert knows no registered values, so its hints never show a typed workspace,
     // whatever context a caller gives (RevertSummaryContext is not read): `<workspace>` always.
-    revertSummary(output: RevertOutput): string {
+    revertSummary(output: RevertOutput, context?: RevertSummaryContext): string {
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
       const title = output.dryRun === true ? "revert.dry_run_title" : "revert.done_title";
@@ -723,6 +752,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         const status = isOneOf(before.status, ["complete", "partial"] as const) ? before.status : null;
         if (status !== null) out.push(`${catalog.format("revert.reverted_before")} (${status}${time === null ? "" : `, ${time}`})`);
       }
+      // U-201: the revert finished but its lock could not be released (RevertSummaryContext.lockLeft).
+      out.push(...lockLines(context?.lockLeft));
       // DR-25: files skipped as unsafe_move go back on a revert with the person's consent.
       const revertedRun = toRunId(String(output.runId));
       if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
@@ -785,6 +816,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
         const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
         if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
+        // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run in the same place
+        // (RunListEntry.planRunId on a run that is not an apply run; absent on every other run).
+        const carriedPlan = entry.kind !== "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
+        if (carriedPlan !== null) status += ` · ${catalog.format("runs.carried_plan", { runId: carriedPlan })}`;
         // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
         // review.json); the time is in the JSON only. Before the marks of what came after the run.
         const review: unknown = entry.review;
@@ -927,6 +962,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         if (!kinds.includes(kind)) continue;
         out.push(kind === "plan_records_unchecked" && cause !== null ? catalog.format(`apply.notice.plan_records_unchecked.${cause}`) : catalog.format(`apply.notice.${kind}`));
       }
+      // U-201: the apply finished but its lock could not be released (ApplySummaryContext.lockLeft).
+      out.push(...lockLines(context.lockLeft));
       // DR-51 (U-38): the typed workspace in the hints, with workspaceForm "given" only.
       const workspace = givenWorkspace(context);
       out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0, workspace));

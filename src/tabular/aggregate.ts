@@ -42,40 +42,73 @@ export type AggregateOutcome =
   /** `sum` or `mean` whose computation left a double's range: there is no value to compare. */
   | { readonly ok: false; readonly problem: "out_of_range" };
 
-/** Neumaier's compensated sum. */
-function compensatedSum(values: readonly number[]): number {
-  let sum = 0;
-  let compensation = 0;
-  for (const value of values) {
-    const total = sum + value;
-    compensation += Math.abs(sum) >= Math.abs(value) ? sum - total + value : value - total + sum;
-    sum = total;
+/**
+ * U-202 (bundle A, A-2): one aggregate taken a cell at a time, so a table read in pieces needs no
+ * column in memory. The same arithmetic in the same order as over a whole column: Neumaier's
+ * compensated sum, min and max from the first number on, and the first cell that is not a number
+ * decides (the cells after it are not looked at).
+ */
+export class RunningAggregate {
+  /** Non-empty cells. */
+  private present = 0;
+  /** Numbers taken (sum, min, max, mean). */
+  private numbers = 0;
+  private notNumberAt: number | null = null;
+  private sum = 0;
+  private compensation = 0;
+  private extreme = 0;
+
+  constructor(readonly op: AggregateOp) {}
+
+  add(cell: string, dataRow: number): void {
+    if (cell.length === 0) return;
+    this.present += 1;
+    if (this.op === "count" || this.notNumberAt !== null) return;
+    const value = parseNumber(cell);
+    if (value === null) {
+      this.notNumberAt = dataRow;
+      return;
+    }
+    this.numbers += 1;
+    switch (this.op) {
+      case "sum":
+      case "mean": {
+        const total = this.sum + value;
+        this.compensation += Math.abs(this.sum) >= Math.abs(value) ? this.sum - total + value : value - total + this.sum;
+        this.sum = total;
+        break;
+      }
+      case "min":
+        this.extreme = this.numbers === 1 ? value : Math.min(this.extreme, value);
+        break;
+      case "max":
+        this.extreme = this.numbers === 1 ? value : Math.max(this.extreme, value);
+        break;
+    }
   }
-  return sum + compensation;
+
+  result(): AggregateOutcome {
+    if (this.op === "count") return { ok: true, value: this.present, values: this.present };
+    if (this.notNumberAt !== null) return { ok: false, problem: "not_a_number", dataRow: this.notNumberAt };
+    if (this.numbers === 0) return { ok: false, problem: "no_values" };
+    switch (this.op) {
+      case "sum":
+      case "mean": {
+        const sum = this.sum + this.compensation;
+        const value = this.op === "sum" ? sum : sum / this.numbers;
+        return Number.isFinite(value) ? { ok: true, value, values: this.numbers } : { ok: false, problem: "out_of_range" };
+      }
+      case "min":
+      case "max":
+        return { ok: true, value: this.extreme, values: this.numbers };
+    }
+  }
 }
 
 export function aggregate(cells: readonly CellAt[], op: AggregateOp): AggregateOutcome {
-  const present = cells.filter((item) => item.cell.length > 0);
-  if (op === "count") return { ok: true, value: present.length, values: present.length };
-  const numbers: number[] = [];
-  for (const item of present) {
-    const value = parseNumber(item.cell);
-    if (value === null) return { ok: false, problem: "not_a_number", dataRow: item.dataRow };
-    numbers.push(value);
-  }
-  if (numbers.length === 0) return { ok: false, problem: "no_values" };
-  switch (op) {
-    case "sum":
-    case "mean": {
-      const sum = compensatedSum(numbers);
-      const value = op === "sum" ? sum : sum / numbers.length;
-      return Number.isFinite(value) ? { ok: true, value, values: numbers.length } : { ok: false, problem: "out_of_range" };
-    }
-    case "min":
-      return { ok: true, value: numbers.reduce((a, b) => Math.min(a, b)), values: numbers.length };
-    case "max":
-      return { ok: true, value: numbers.reduce((a, b) => Math.max(a, b)), values: numbers.length };
-  }
+  const running = new RunningAggregate(op);
+  for (const item of cells) running.add(item.cell, item.dataRow);
+  return running.result();
 }
 
 /** One column's cells with their data rows. */

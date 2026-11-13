@@ -1,6 +1,6 @@
 # Codaryn 아키텍처
 
-상태: 2026-11-13, main `f8fb993` 기준. 아래 두 목록은 main `3aca6b5`에서 다시 확인했다(실행 중 권한 확인은 `cd1cace`, U-147. Markdown 규칙은 U-165. GUI의 권한 대화상자는 main `07cd600`, U-179. 앱 계층의 작업 공간 글 읽기·쓰기는 main `5ee11a1`, U-188). 본문의 다른 절은 `f8fb993` 기준 그대로다.
+상태: 2026-11-13, main `f8fb993` 기준. 아래 두 목록은 main `3aca6b5`에서 다시 확인했다(실행 중 권한 확인은 `cd1cace`, U-147. Markdown 규칙은 U-165. GUI의 권한 대화상자는 main `07cd600`, U-179. 앱 계층의 작업 공간 글 읽기·쓰기는 main `5ee11a1`, U-188. 쓰기 허용 경로는 main `c83ec5b`, U-200. GUI의 파일 보기는 main `c0afedb`, U-209. 묶음 A·B의 "없는 것"은 main `79e1a3f`, U-214). 본문의 다른 절은 `f8fb993` 기준 그대로다.
 - **main에 있는 것:**
   - 단계 0 설계(2026-11-12 Codex 채택)를 바탕으로 한 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 기구와 `codaryn models`
   - 두 번째 제공자 OpenAI(DR-31)와 두 제공자가 함께 쓰는 전송 `src/model/http`
@@ -8,10 +8,18 @@
   - 단계 4 범용 작업의 P0, 앱 계층 `src/app`, 독립 GUI `gui/`(DR-20, DR-26)
   - 단계 4 P1 묶음 가운데 Markdown 규칙 `markdown_headings`, `markdown_links`(`file_rules`, U-116 `4df5be8`)
   - 실행 중 권한 확인(판정 `ask`, DR-3). 설정 파일과 프로필의 명령 규칙에 둔 `confirm: true`만 질문을 만든다. CLI의 `run`은 터미널에서만 묻고, 물을 수 없으면 거부한다(U-74, U-108~U-110, U-137. 3절, main `cd1cace`). GUI는 메인 프로세스의 OS 대화상자로 묻고 기본과 Esc는 거부다(U-124, 병합 `aa723d2`, [독립 GUI 설계](design/standalone-gui.md) 3.6)
-  - 앱 계층의 작업 공간 텍스트 파일 읽기·쓰기 `readWorkspaceText`·`writeWorkspaceText`(`src/app/workspace-text.ts`, U-172, 병합 `b25edb1`, AC 5.15, DR-72 (나)). 앱 계층의 함수만 있고, 지금 CLI와 GUI는 이 함수를 부르지 않는다(코드 기준). 폴더 바꿔치기로 남은 틈은 알려진 한계다(DR-73, [privacy.md](privacy.md) 13절)
+  - 앱 계층의 작업 공간 텍스트 파일 읽기·쓰기 `readWorkspaceText`·`writeWorkspaceText`(`src/app/workspace-text.ts`, U-172, 병합 `b25edb1`, AC 5.15, DR-72 (나)). 폴더 바꿔치기로 남은 틈은 알려진 한계다(DR-73, [privacy.md](privacy.md) 13절)
+  - GUI의 파일 보기(텍스트 보기와 고치기, DR-72): 위 함수로 연다. 가리면 글이 달라지는 파일과 보호 경로 등은 읽기 전용이고, 저장은 연 파일마다 첫 저장에 메인의 OS 확인을 거치며 실행 기록에 들지 않는다(U-174·U-184·U-192, 병합 `111e25d`, [독립 GUI 설계](design/standalone-gui.md) 3.14, [사용 안내](usage.md) 19절). CLI는 이 함수를 부르지 않는다(코드 기준)
+  - 단계 4 P1 묶음 B의 쓰기 허용 경로 `writablePaths`(DR-69, U-182·U-186·U-183, 병합 `a1d5c65`). task 파일, 설정 파일, 프로필, 작업 종류 정의의 `policy`에 두고, 목록마다 따로 남아 쓰기는 모든 목록이 덮어야 한다(좁히기만). CLI와 앱 계층의 실행·적용 게이트가 판정한다(`path/path_not_writable`). 명령은 묶지 않는다. 7절 "쓰기 허용 경로", [사용 안내](usage.md) 13절
 - **없는 것:**
-  - 단계 4 P1 묶음 A(`query_table`, 읽기 제외 경로, `analyze-private`, DR-69·DR-70)
-  - 단계 4 P1 묶음 B의 계획 실행(`plan: "run"`, DR-69). 계약만 있고 실행하는 것이 없다(U-170, U-175, U-177, 병합 `a2f67c1`): `PLAN_MODES`의 `run`, 도구 정의 `propose_changes`(`ProposeChangesArgs`, 파일 `MAX_PLANNED_FILES` 100개), 저장할 변경 계획 `StoredChangesPlan`(`kind: "changes"`), 결과의 `plan.kind: "changes"`·`planRunId`·`planDigest`. 엔진에는 그 도구가 없고, CLI는 `plan: "run"`을 모델 요청 전에 거부한다(`plan_run_not_available`, 사용 안내 18.1절)
+  - 단계 4 P1 묶음 A(`query_table`, 읽기 제외 경로, `analyze-private`, DR-69·DR-70). 계약과 바탕 코드만 main에 있고, 그것을 쓰는 파서·게이트·도구는 없다(코드 기준, main `79e1a3f`).
+    - 계약에만 있는 것(U-197, 병합 `aa063c9`): `query_table`의 도구 정의·인자·결과 형식·상한(`src/contracts/query.ts`의 `MAX_QUERY_*`), k(`DEFAULT_MIN_GROUP_SIZE` 5, `MIN_GROUP_SIZE_LIMITS` 5~1000, `effectiveMinGroupSize`. 설정 파일을 포함해 어느 원천도 5 아래로 내리지 못한다, Codex V-12 뒤 PM 판단), 숨김 규칙 `shownGroups`·`shownShape`, 이어 읽기 커서(`QUERY_CURSOR_PATTERN_SOURCE`), 읽기 제외의 필드(`PolicyConfig.unreadablePaths`·`minGroupSize`, `ResolvedTaskSpec.unreadablePaths`·`minGroupSize`, `PolicyGateOptions.unreadablePaths`), 경로 접근 `aggregate`, 도구 오류 `too_many_groups`·`invalid_table`, `analyze-private`의 id와 문제 코드.
+    - 바탕 코드(U-202, 같은 병합): `src/tabular`의 조각 단위 표 읽기(`scanTable`)와 `query_table`용 집계(`queryTable`, `tableShape`). `data_checks`는 조각 단위 읽기를 쓴다(판정과 근거 글은 전과 같고 상한은 16 MiB 그대로). `queryTable`·`tableShape`는 아직 어떤 도구도 부르지 않는다.
+    - 없는 것: `query_table`은 `WORKFLOW_TOOL_NAMES`에 없다. 설정·task 파서는 `unreadablePaths`·`minGroupSize`를 받지 않는다. 게이트는 읽기 제외를 판정하지 않는다. `analyze-private`는 내장 작업 종류(`BUILTIN_WORKFLOW_IDS`)가 아니다.
+  - 단계 4 P1 묶음 B의 계획 실행(`plan: "run"`, DR-69). 사용자에게 닿는 길이 없다(코드 기준).
+    - 계약(U-170, U-175, U-177, 병합 `a2f67c1`): `PLAN_MODES`의 `run`, 도구 정의 `propose_changes`(`ProposeChangesArgs`, 파일 `MAX_PLANNED_FILES` 100개), 저장할 변경 계획 `StoredChangesPlan`(`kind: "changes"`), 결과의 `plan.kind: "changes"`·`planRunId`·`planDigest`.
+    - 엔진과 저장(U-180, U-187, U-181, 병합 `283e6cd`): 도구 `propose_changes`가 변경 계획을 저장하고, 엔진의 `runApprovedPlan`이 승인된 계획을 낡음 점검 뒤 `writablePaths` 안에서 실행한다.
+    - 그러나 CLI는 `plan: "run"`을 모델 요청 전에 거부하고(`plan_run_not_available`, 사용 안내 18.1절), CLI와 앱 계층 어디서도 `runApprovedPlan`을 부르지 않는다.
   - CLI의 앱 계층 이행(CLI에서 앱 계층을 거치는 명령은 `changes`뿐이다). 기능 뒤에 직렬로 한다(DR-65)
   - 줄 프로토콜의 CLI 연결과 VS Code 확장(DR-20으로 만들지 않는다). 남아 있던 코드는 지웠다(DR-66, U-81)
   - GUI 설치 패키지(GU-9). 기능이 끝난 뒤 다시 묻는다(DR-67)
@@ -72,7 +80,7 @@
 | `app` | 어댑터 공통 계층. `startRun`(이벤트, 취소, 결과 저장), `report`·`reportMarkdown`·`revert`·`listRuns`·`resolveRun`, 정리(`stateSummary`, `previewCleanup`, `applyCleanup`), `doctor`, 설정(`readSettings`, `createSettings`, 설정 변경 제안·적용), `listModels`·`selectModel`, `changes`, `plan`·`applyPlan`·`review`(`src/app/types.ts`의 `CodarynApp`, 코드 기준) | 어댑터의 화면과 인자 형식, 프로세스 전역(`process.env`, 신호, stdout) | 일부. GUI가 쓴다. CLI는 `changes`만 거친다. 여러 함수가 안에서 `src/cli` 함수를 감싼다(AC-D16) |
 | `i18n` | 사람용 고정 문구 카탈로그(ko, en)와 언어 선택(N-4) | 파일·환경의 값 | 구현. CLI와 GUI 엔진 호스트가 쓴다 |
 | `workflows` | 내장 작업 종류 정의 다섯 개(`general`, `code`, `document`, `analyze`, `organize`). 로직 없는 데이터 상수([범용 작업](design/general-tasks.md) 4절) | 실행 논리 | 구현 |
-| `tabular` | 표(CSV, TSV, JSON Lines) 해석과 집계. 순수 함수 | 파일 시스템, 모델 | 일부. `data_checks` 검증기가 쓴다. `query_table` 도구는 없다(P1) |
+| `tabular` | 표(CSV, TSV, JSON Lines) 해석과 집계. 순수 함수. 표를 조각 단위로 읽는다(U-202) | 파일 시스템, 모델 | 일부. `data_checks` 검증기가 쓴다. `query_table`용 집계(`queryTable`, `tableShape`)는 있지만 그 도구가 없다(P1 묶음 A, 위 "없는 것") |
 
 - 의존 방향
   - 엔진은 `contracts`만 import한다(코드 기준). `cli/assemble.ts`와 `app/assemble.ts`가 모듈을 만들어 `EngineDeps`로 엔진에 넣는다. **구현**
@@ -388,6 +396,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
   - 어댑터 이벤트는 가림본이다. 화면에 내기 전에 어댑터가 제어 문자를 정리한다(AC 5.2).
   - 모델이 준 도구 이름과 호출 id는 엔진이 기록할 때 제한한다(AC-D15, 4.3). **구현**
   - 변경 비교는 다시 가린 비교만 보인다. CLI와 GUI가 같다(DR-7). 스냅샷 원문을 어댑터 화면이나 편집기로 열지 않는다.
+  - GUI의 파일 보기(DR-72, U-174·U-184)는 앱 계층이 지금 가린 글만 그린다. 가리면 글이 달라지는 파일은 읽기 전용이라, 고칠 수 있는 파일은 화면의 글과 파일의 글이 같다. 등록 값이나 키 모양이 든 새 글은 저장하지 않는다(`text_refused`). 화면은 경로를 보내지 않고 메인이 준 항목 id와 편집 토큰만 쓴다. 코드 기준.
   - 계획 보기도 다시 가린 표기가 저장된 것과 같을 때만 보인다(DR-28).
   - 자료 분석(`analyze`)은 원자료 행을 모델로 보낸다. 가림은 등록한 비밀 값에만 적용된다. 그래서 개인정보가 든 자료는 집계 도구(P1) 전에는 다루지 않는다(GT-D8 (b), 사용자 확정 DR-23). P1의 `query_table`과 `analyze-private`는 없다.
   - 확인 질문의 글은 화면에 보이려고 복원하지 않는다(AC 5.7). 확인 질문 자체가 아직 없다(DR-3).
@@ -413,6 +422,15 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
 - 항목이 링크이면 그 실경로도 보호한다. 실경로가 작업 공간 밖이면 모든 쓰기를 거부한다(T-13).
 - 형식 검사는 CLI와 게이트가 같은 함수를 쓴다.
 - 명령이 바꾸는 것은 막지 못하므로 무결성 확인(8절)이 사후 탐지로 보완한다.
+
+**쓰기 허용 경로(`writablePaths`, `src/policy/path-set.ts`, DR-69).** U-182·U-186·U-183, 병합 `a1d5c65`. 계약은 [cli-contract.md](cli-contract.md) 13.1이다.
+- `policy.writablePaths`가 있으면 파일 도구의 쓰기와 계획 동작은 목록 안이어야 한다. 밖이면 권한 `path`, 코드 `path_not_writable`로 거부한다. 읽기와 검색은 막지 않는다.
+- 목록은 원천마다 따로 남는다(`writablePathSets`: 설정, 프로필, 작업 종류 정의, task). 하나로 합치지 않는다. 링크를 풀면 글자로 만든 교집합이 원래 목록보다 넓어질 수 있기 때문이다. 설정과 프로필의 목록은 task 파일 실행에도 걸린다.
+- 판정은 링크를 푼 경로로 하고, 쓸 수 없는 항목은 아무것도 덮지 않는다(fail closed). 보호 경로가 먼저 보고된다.
+- 실행(`assembleRun`)과 적용(`runApply`)의 게이트, 앱 계층의 조립과 적용 점검(U-186)이 같은 목록을 받는다.
+- 명령은 묶지 않는다(B-8). 그래서 보호 경로처럼 실수 방지 수준이다. 목록과 명령 규칙이 함께 있으면 `doctor`가 주의를 낸다.
+- 앱 계층의 설정 변경은 목록에 없던 항목(옛 항목 안의 항목도)과 목록 삭제를 넓히기로 본다(U-183, Codex V-8). GUI의 설정 화면에는 이 목록을 고치는 편집이 없고, 넓히기 확인 대화상자는 두 종류에 이름을 붙인다(U-192, 병합 `111e25d`. 코드 기준).
+- 게이트가 판정한 실경로와 도구가 다시 푼 실경로가 다르면 그 호출은 아무것도 하지 않는다(U-189, `policy_denied`). 그러나 도구가 경로를 푼 뒤의 폴더 바꿔치기는 쓰기에서 닫지 못한다(DR-73, [cli-contract.md](cli-contract.md) 10절, [privacy.md](privacy.md) 13절).
 
 **상태 디렉터리(DR-38).**
 - 파일 도구는 상태 디렉터리를 쓸 수 없지만, 허용된 명령, 명령 검증기, 그들이 남긴 자식은 쓸 수 있다.
@@ -470,7 +488,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
 
 ## 10. 범위와 남은 위험
 
-- **범용 계약**: 코딩, 작은 문서 작업(통합 `a02`), 파일 정리(`n06`), 자료 분석(`n07`), 등록만으로 작업 종류 추가(`n08`)로 확인했다. 엔진 변경은 GT-E1~GT-E5 한 번이다. P1 묶음은 없다.
+- **범용 계약**: 코딩, 작은 문서 작업(통합 `a02`), 파일 정리(`n06`), 자료 분석(`n07`), 등록만으로 작업 종류 추가(`n08`)로 확인했다. 엔진 변경은 GT-E1~GT-E5 한 번이다. P1 묶음 가운데 Markdown 규칙과 `writablePaths`는 쓰이고, 묶음 A와 묶음 B의 계획 실행은 사용자에게 닿지 않는다(위 "없는 것").
 - **민감정보**
   - 등록한 값과 정해진 변형만 정확 일치로 가린다. 다른 인코딩(UTF-16 등)이나 임의 변환은 놓친다.
   - 모델이 실행한 코드는 원문을 읽고 변환해 내보낼 수 있다.
@@ -481,6 +499,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
   - 독립 GUI는 구현했다(DR-20, DR-26). 남은 설계 항목은 GUI 대조 조사(DR-63)의 순서로 U-60~U-70에서 한다.
   - 설치 패키지와 코드 서명은 없다(GU-9). 새 개발 의존성과 내려받기는 지금 승인하지 않았고, 기능이 끝난 뒤 다시 묻는다(DR-67).
   - 어댑터는 같은 엔진을 쓰므로 위의 민감정보·격리 한계를 그대로 가진다.
+  - 파일 보기(DR-72)는 병합 `111e25d`에 있다. 저장하지 않은 글이 있을 때의 창 닫기, 실제 OS 대화상자, 실제 한글 입력기는 자동 시험이 닿지 않아 [수동 점검](manual-checks.md) M-3.12~M-3.17이 맡는다(U-205).
   - VS Code 확장은 만들지 않는다(DR-20).
 
 ## 11. 결정 필요

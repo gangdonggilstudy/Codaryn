@@ -182,7 +182,7 @@ export interface RunHandle {
   cancel(): void;                  // 여러 번 불러도 된다. 끝난 뒤에는 효과가 없다
   readonly done: Promise<RunOutcome>;  // reject하지 않는다. result.json 저장과 잠금 해제 뒤에 풀린다
 }
-export type RunOutcome = { ok: true; result: EngineResult } | { ok: false; error: AppError };  // 시작 뒤 내부 예외만 오류
+export type RunOutcome = { ok: true; result: EngineResult; lockLeft?: true } | { ok: false; error: AppError };  // 시작 뒤 내부 예외만 오류
 export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error: AppError };
 ```
 
@@ -194,6 +194,11 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
 - `workflowRef`는 간편 형식의 `--workflow`로 넘긴다. task 파일은 자기 `workflowRef`를 쓰고, 둘을 함께 주면 CLI가 거부한다(R-14 I-4로 고침: 묶음 병합 뒤 CLI가 `--workflow`를 받는다).
 - 한 작업 공간에 실행 하나(잠금, P-4)는 그대로다. 한 프로세스가 서로 다른 작업 공간의 실행 여럿을 가질 수 있다(시험함).
 - U-186(DR-69 B-4, U-182 뒤): 앱 계층의 실행 조립(`src/app/assemble.ts`)도 task의 쓰기 경로 목록(`ResolvedTaskSpec.writablePathSets`, CLI의 `prepareTask`가 만듦)을 정책 관문에 준다. CLI의 실행과 같다. 그래서 GUI 실행에서도 목록 밖의 파일 도구 쓰기는 `path/path_not_writable`로 거부된다. task 파일의 목록과, task 파일 실행에 걸리는 설정 파일의 목록이 모두 그렇다(시험 `tests/unit/app/u186-writable-paths-app.test.ts`).
+- U-193(U-176 뒤): 실행 끝에 잠금을 풀지 못하면(store의 짧은 다시 시도 뒤 던짐, 또는 `false`) 실행 결과는 그대로이고, `done`의 `RunOutcome`에 `lockLeft: true`가 붙는다.
+  - 결과는 먼저 `result.json`에 쓴 그것이다. 결과 JSON의 기존 필드는 바뀌지 않는다.
+  - 전에는 이 경우 결과가 있는데도 `internal_error`였다.
+  - 잠금은 이 프로세스가 사는 동안 남는다. GUI는 엔진이 같은 프로세스라, 앱을 닫을 때까지 이 작업 공간의 다음 시작이 `workspace_locked`다. 앱이 끝나면 다른 프로세스의 다음 실행이 오래된 잠금으로 거둔다.
+  - 사람용 글은 `lock.release_failed`(문구 id 초안, nc-human의 제안 글)다.
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 
@@ -277,6 +282,7 @@ export interface RunObserver {
     - DR-44 (a): 되돌리지 않았거나 일부만 되돌린 실행의 기록은 `includeNotReverted: true`일 때만 지운다. 아니면 `not_reverted_not_confirmed`로 남는다. 막지는 않는다. 미리보기의 `plan.totals.runs.notReverted`가 그 수다.
     - DR-44 (b)~(d): store의 경고(`partly_reverted`, 보관함이 남을 수 있을 때의 `discarded_left`, `leftover`), 남은 폴더 항목(target `leftover`, `leftoverId`), 남긴 까닭(`partly_removed`, `used_by_kept_apply`)을 그대로 넘긴다. 다 지우지 못한 것은 지웠다고 하지 않는다.
     - R-34b P-1: 기록을 확인할 수 없는(손상된) 실행은 `records_unreadable`이고, 되돌리지 않은 실행과 같이 `includeNotReverted`가 있어야 지운다.
+    - U-193(U-176 뒤): 계약 `CleanupOutcome`의 ok 쪽에 `lockLeft?: boolean`이 있다(이 단위가 초안, p4g 확인). 정리는 끝났지만 잠금을 풀지 못했으면 `true`이고 상태는 바뀌지 않는다. 앱은 store가 준 값을 그대로 넘긴다. store가 채우는 일(지금의 `.catch(() => false)` 대신)은 nc-human 몫이라, 그 전에는 나오지 않는다(시험은 todo로 둠). 사람용 글은 `lock.release_failed`.
     - R-34b P-2: 정리가 남긴 표지(`cleanup-leftover.json`)가 없는 `cleanup-<16 hex>` 폴더는 지울 항목이 아니다. 요약의 `unknownFolders`로 보이기만 한다.
     - U-13 (UXM-1): 폐기 보관함에 파일이 남아 있는 적용 실행의 기록은, 그 보관함을 함께 지우기로 확인하지 않는 한(`discarded: true`이고 그 보관함도 고른 경우) 지우지 않는다. 그 실행은 `kept`에 `discarded_left`로 남고, 그 계획 실행은 `used_by_kept_apply`로 남는다. 나머지는 지운다. 앱 계층은 이 결과를 그대로 넘긴다.
     - U-22 (DR-48, AXM-3): 실행한 정리의 결과는 `status`(계약의 `cleanupStatusOf`: `removed`, `nothing_removed`, `partly_failed`)를 갖고, `outcome.ok`는 CLI의 JSON처럼 `removed`일 때만 참이다. 확인한 다이제스트가 계획의 것이 아니면 `cleanup_plan_changed`, 다른 작업이 잠금을 잡고 있으면 `workspace_locked`이고, 둘 다 결과가 아니라 호출 오류다. 거꾸로, 아무것도 지우지 못한 정리(`nothing_removed`)와 일부 실패한 정리(`partly_failed`)는 호출 오류가 아니라 결과다(호출은 `ok: true`, `outcome.ok`만 거짓이며 `removed`·`kept`와 이유가 있다, R-51 M-1). 어댑터는 `status`를 읽는다.
@@ -306,7 +312,7 @@ interface TaskForm {
   workflowRef: string | null;   // R-14 L-3 (52400ab): 간편 형식의 --workflow. task 파일과 함께 주면 CLI가 거부한다
 }
 // CodarynApp의 필수 함수(PM 결정, A-5 질문 1). 범용 작업 명령이 main에 들어온 뒤 언제나 있다.
-plan(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
+plan(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<AnyPlanOutput>>;  // U-196: PlanOutput | ChangesPlanOutput
 applyPlan(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null;
                      unsafeMoveConsent: { digest: string } | null },   // DR-21, 59dc39a
           observer?: ApplyObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
@@ -318,6 +324,15 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```
 
 - 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
+- U-196(DR-69 B-3, B-4): `plan`은 이제 `AnyPlanOutput`을 준다. 실행 계획(`plan.json`의 `kind: "changes"`, store의 `loadAnyPlan`)은 `ChangesPlanOutput`(`planKind: "changes"`)이다. 적용 계획은 지금처럼 `PlanOutput`이다.
+  - 실행 계획 보기는 nc-human의 `changesPlanOutput`(U-191)을 쓴다(`src/app/changes-plan.ts`).
+    - 계획 파일마다 지금 등록한 비밀로 다시 가리고, 계획 실행 때의 보이는 조각과 다르면 `plan_secrets_differ`이며 아무것도 보이지 않는다(DR-28).
+    - 요약, 다이제스트, `pending`·`applied`(`applied.json`), 기록 변경 표시를 준다.
+    - R-103 M-1: 요약은 출력 객체 자체에 가린 꼴로 든다. 앱은 지금 설정된 모든 API 키 값(`knownKeyValues`, 앱의 환경 사본에서)을 `changesPlanOutput`의 `currentKey`로 넘긴다. 그래서 등록 비밀에 더해 현재 키·키 모양·제어 문자가 가려지고 앞뒤 공백이 잘린다. 적용 계획의 요약(R-49 R49-M1)과 같고, GUI와 승인 화면이 같은 글을 받는다. 시험은 `tests/unit/app/u196-r103-summary-keys.test.ts`다.
+  - 계획 모드는 묻지 않는다(보기는 비밀과 작업 공간만 정한다, DR-17). `latest`도 다른 계획처럼 푼다.
+  - PM (가), AC-D16: CLI의 `plan`·`apply`가 종류로 나누는 것은 na-core의 U-195다. CLI의 `plan`이 실행 계획을 보이게 되면 앱은 그것을 받아 쓰고 이 보기는 없앤다.
+  - 저장 꼴에는 얇게 기댄다(Codex V-11의 고침으로 바뀔 수 있음): `kind`, 관문용 파일 경로, 그리고 읽은 계획을 통째로 `changesPlanOutput`에 넘기는 것뿐이다.
+  - 실행 계획의 적용(앱 `applyPlan`의 종류 나눔)은 CLI의 `runApply`가 나누면 그 길에 앱의 고리(이벤트 관찰자, 취소, 승인 `adapter`)를 넘긴다. 실행할 goal은 계획을 만든 실행의 goal이다. 읽을 수 없으면 시작하지 않는다(PM). 그 연결은 U-195 뒤의 앱 단위다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 
@@ -561,7 +576,7 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 같은 항목인지는 정책 관문의 판정(`compilePathSet`의 `exact`: 조각 단위, Windows에서 대소문자 무시와 `\`, 끝의 `/`와 `./`는 없는 것)으로 본다. 쓸 수 없는 예전 목록은 어느 항목과도 같지 않다.
       - 좁히기: 항목을 뺌, 같은 항목을 다른 순서나 표기로, 목록이 없던 자리에 새로 둠(한정 없음보다 어디서나 좁다), 빈 목록.
       - 처음 판(ba7cec7)은 글자로 더 덮는 항목만 넓히기로 보았다. 예전 항목 안의 항목을 좁히기로 본 것을 V-8로 고쳤다.
-      - 아직 설정 파서는 이 필드를 받지 않는다(`unknown_field`, B-4까지). 판정이 먼저 안다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다.
+      - 설정 파서는 U-182(병합 `a1d5c65`)부터 이 필드를 받는다(설정 파일, 프로필, 작업 종류 정의의 `policy.writablePaths`). U-183이 쓰일 때는 판정이 파서보다 먼저였다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다. GUI의 설정 화면에는 이 필드를 고치는 편집이 없고, 넓히기 확인 대화상자는 두 종류에 이름을 붙인다(U-192, 병합 `111e25d`).
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
       - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).
@@ -719,6 +734,7 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.
   - 끝나기 전에, 실행기가 거두지 못한 이 프로세스의 시험 링크를 찾아 지운다. 대상은 점검 전에 없던 이름이고, 일반 파일만이다.
   - 그래도 남은 시험 링크의 수는 `probesLeft`, 풀지 못한 잠금은 `lockLeft: true`로 알린다. 숨기지 않는다. 잠금 풀기는 한 번 더 해 본다.
+    - U-193: store가 `false`(이미 이 점검의 잠금이 아님)를 주는 풀기도 풀지 못한 것으로 친다(V-1 L-1과 같은 규칙). 점검이 ok여도 `lockLeft`는 결과에 늘 있다.
   - R-81 L1: 점검하기 전에, 잠금 아래에서 상태 디렉터리와 계획의 원본 폴더에 있는 시험 링크 이름(`.codaryn-link-probe-<pid>-…`, 어느 프로세스의 것이든)을 모두 지운다. 일반 파일만이다.
     - 점검과 적용은 이 잠금을 쥐어야 시험 링크를 만든다. 그래서 그런 이름은 만들고 지우기 사이에 끝난 프로세스가 남긴 것이거나, 앞선 점검이 남았다고 알린 것이다.
     - 시험 링크는 언제나 다른 파일의 두 번째 이름이다. 그래서 하드 링크 수(nlink)가 2 이상인 일반 파일만 지운다. 그 이름의 유일한 파일(nlink 1)은 지우면 내용이 사라지므로 지우지 않고 `probesLeft`로 센다. **점검은 사람의 파일 내용을 없애지 않는다**(시험).
@@ -727,6 +743,17 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
 - **남기지 않는다.** 실행 디렉터리, journal, `plan_checked` 기록, 적용 표시(`markApplied`)를 만들지 않는다. 계획은 그대로 다음 적용을 기다린다.
 - **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.
 - **동의도 약속도 아니다.** 점검 결과는 DR-21 동의를 만들지 않는다. 동의는 지금처럼 사람의 입력으로만 만들어 `applyPlan`의 `unsafeMoveConsent`로 간다. 적용은 사전 점검을 다시 하므로, 그 사이에 파일이 바뀌면 `plan_stale`로 끝난다.
+- **읽을 수 없는 계획(R-103 L-1).** 종류를 가르기 전에 store의 `loadAnyPlan`으로 계획을 읽는다(`storedPlanKindOf`). 읽을 수 없으면 그 코드(`run_not_found`, `run_not_plan`, `plan_run_missing`, `invalid_run_record`, 읽다가 예외면 `internal_error`)를 먼저 주고 아무것도 점검하지 않는다.
+  - 계획 보기도 같은 store로 읽어 같은 코드를 준다. 그래서 적용 task의 결과는 전과 같다.
+  - 고치기 전에는 읽을 수 없는 계획을 적용 계획으로 여겼다. 그래서 `plan: "apply"`로 풀리지 않는 task는 원인 대신 task에 관한 `run_not_plan`을 받았다. 시험은 `tests/unit/app/u196-r103-l1-plan-kind.test.ts`다.
+- **실행 계획(U-196, DR-69 B-3, B-4).** `plan.json`이 `kind: "changes"`이면 다음처럼 본다(`src/app/changes-plan.ts`).
+  - 점검 task가 `plan: "run"`으로 풀려야 한다. 아니면 `run_not_plan`이고 문구가 그렇게 말한다. B-4가 열기 전에는 어떤 설정도 그렇게 풀리지 않는다(U-177).
+  - 그다음 보기의 거부를 적용 계획과 같게 본다: DR-28 `plan_secrets_differ`, 이미 수행됨 `plan_already_applied`, 기록 변경 표시, 다이제스트.
+  - 계획 파일마다, 그 계획을 수행할 실행의 관문이 쓰기로 거부하는지 본다(`checkChangesPlanFiles`).
+    - 관문은 task의 정책·쓰기 경로 목록에 계획 파일 목록을 하나 더한 것이다(`approvedPlanWritablePathSets`와 같음). `PLANNED_FILE_DESCRIPTOR`로 글자와 실경로를 모두 본다.
+    - 이는 엔진이 첫 모델 요청 전에 하는 판정이다. 거부된 파일은 그 순번으로 `problems`에 `denied`로 담긴다.
+  - 파일이 계획 때와 같은지(낡음, `plannedFileStale`)는 엔진이 실행 직전에 읽어 본다. 여기서 보면 그 사이에 바뀔 수 있는 것을 말할 뿐이라 보지 않는다(PM).
+  - 잠금, 시험 링크, 이동이 없다. 결과에는 `planKind: "changes"`가 붙고 `unsafeMoves` `[]`, `inventoryLimitReached` false, `probesLeft`·`probesRemoved` 0, `lockLeft` false다. 기존 `PlanCheck` 꼴에 표지 하나만 더했다.
 
 ### 5.15 작업 공간 텍스트 파일 읽기·쓰기 [구현 U-172] (DR-72 (나), text-editing-ux 5)
 

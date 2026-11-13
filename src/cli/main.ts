@@ -45,6 +45,7 @@ import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { runReport } from "./report.js";
 import { runRevert } from "./revert.js";
 import { runCli } from "./run.js";
+import type { CliEnvironment } from "./run.js";
 import { runRuns } from "./runs.js";
 import { locateInWorkspace, relateRealPaths } from "./security/index.js";
 import { envValue, knownKeyValues } from "./settings.js";
@@ -268,6 +269,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         await runApply({
           ...shared,
           messages: human.messages,
+          // U-195: a run plan's apply is a model run with run's environment.
+          run: runEnvironment(argv),
           human: human.output,
           writeProgress: (line) => writeHuman(line),
           // 6.4 1: at a terminal without --digest the plan is shown and a [y/N] question asked on stderr.
@@ -358,50 +361,59 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
       );
     default: {
       ranRun = true;
-      const outcome = await runCli({
-        argv,
-        env: process.env,
-        cwd: process.cwd(),
-        readFile: readText,
-        isDirectory,
-        // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
-        loadEnvFile: (file) => process.loadEnvFile(file),
-        // S-1: real paths, so links and 8.3 names cannot hide a file inside the workspace.
-        locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),
-        clock,
-        randomBytes: random,
-        assemble: assembleRun,
-        installDir,
-        relatePaths: (target, base) => relateRealPaths(target, base),
-        defaultConfig,
-        human: humanFor,
-        writeProgress: (line) => {
-          process.stderr.write(line);
-        },
-        // U-110 (B-5): the permission question, on stderr, only when standard input and stderr are
-        // terminals; keys hidden and control characters replaced as in other human text.
-        ...(process.stdin.isTTY === true && process.stderr.isTTY === true
-          ? {
-              // R-88 M2: Ctrl+C at the question cancels the run the CLI's own way (as SIGINT, cancel.ts):
-              // the engine's signal ends the question and records it as cancelled.
-              ask: (question: string, signal: AbortSignal) =>
-                askLine(cleanText(hideKeys(question, currentKey()), true).replace(/\t/g, " "), process.stderr, signal, () => {
-                  process.emit("SIGINT");
-                }),
-            }
-          : {}),
-        cancelSignal: (cancelFile) =>
-          createCancelSource({
-            cancelFile,
-            fileExists: (file) => existsSync(file),
-            onSignal: (name, handler) => {
-              process.on(name, handler);
-              return () => process.off(name, handler);
-            },
-          }),
-      });
+      const outcome = await runCli(runEnvironment(argv));
       return { outcome, configLanguage: outcome.info?.configLanguage ?? null };
     }
+  }
+
+  /**
+   * `codaryn run`'s environment. U-195 (DR-69 B-4): also what `codaryn apply` carries out a run plan
+   * with (ApplyCommandEnvironment.run): the provider, the assembly, the progress lines and the end
+   * summary are a run's.
+   */
+  function runEnvironment(args: readonly string[]): CliEnvironment {
+    return {
+      argv: args,
+      env: process.env,
+      cwd: process.cwd(),
+      readFile: readText,
+      isDirectory,
+      // C-2, T-15: only when --vars-file is given. Variables already set in the environment win.
+      loadEnvFile: (file) => process.loadEnvFile(file),
+      // S-1: real paths, so links and 8.3 names cannot hide a file inside the workspace.
+      locateInWorkspace: (file, workspaceRoot) => locateInWorkspace(file, workspaceRoot),
+      clock,
+      randomBytes: random,
+      assemble: assembleRun,
+      installDir,
+      relatePaths: (target, base) => relateRealPaths(target, base),
+      defaultConfig,
+      human: humanFor,
+      writeProgress: (line) => {
+        process.stderr.write(line);
+      },
+      // U-110 (B-5): the permission question, on stderr, only when standard input and stderr are
+      // terminals; keys hidden and control characters replaced as in other human text.
+      ...(process.stdin.isTTY === true && process.stderr.isTTY === true
+        ? {
+            // R-88 M2: Ctrl+C at the question cancels the run the CLI's own way (as SIGINT, cancel.ts):
+            // the engine's signal ends the question and records it as cancelled.
+            ask: (question: string, signal: AbortSignal) =>
+              askLine(cleanText(hideKeys(question, currentKey()), true).replace(/\t/g, " "), process.stderr, signal, () => {
+                process.emit("SIGINT");
+              }),
+          }
+        : {}),
+      cancelSignal: (cancelFile) =>
+        createCancelSource({
+          cancelFile,
+          fileExists: (file) => existsSync(file),
+          onSignal: (name, handler) => {
+            process.on(name, handler);
+            return () => process.off(name, handler);
+          },
+        }),
+    };
   }
 }
 

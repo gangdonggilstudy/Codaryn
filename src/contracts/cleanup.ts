@@ -343,7 +343,8 @@ export type CleanupOutcome =
       readonly kept: readonly (CleanupItemRef & { readonly reason: CleanupKeptReason })[];
       readonly totals: CleanupPlan["totals"];
       /**
-       * U-193 (U-176's hand-off; drafted by p5a for this unit, p4g to confirm): true when the cleanup
+       * U-193 (U-176's hand-off; drafted by p5a, confirmed by the contract, U-219; the store fills it,
+       * U-201): true when the cleanup
        * finished but the workspace lock could not be released (the release threw after its retries,
        * or answered false). The cleanup's status does not change. Absent: released.
        */

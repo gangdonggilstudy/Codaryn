@@ -7,7 +7,8 @@
  *   are allowed (B-8), then the question.
  * - The end summary: which plan run it carried out (EngineResult.planRunId, `summary.apply_plan_run`),
  *   and the writes refused as outside the files it may write (RunSummaryContext.deniedNotWritable).
- * - The runs table: the carrying run's row names that plan run; the plan run's row reads as applied by it.
+ * - The runs table: the carrying run's row names that plan run; the plan run's row reads as carried out
+ *   by it (U-221: in the report's words; it read as applied by it before).
  * Every other output is as before: the new lines come only from fields no earlier output has. Both
  * languages with the real catalog. Fake values only.
  */
@@ -119,14 +120,14 @@ for (const language of MESSAGE_LANGUAGES) {
   describe(`U-198 (${language}): the runs table`, () => {
     const runsOf = (runs: RunListEntry[]): string[] => createHumanOutput(catalog).runsText({ schemaVersion: 1, kind: "runs", runs, omitted: 0 } as unknown as RunsOutput).trimEnd().split("\n");
 
-    test("the carrying run names the plan run; the plan run reads as applied by it; an ordinary run is as before", () => {
+    test("the carrying run names the plan run; the plan run reads as carried out by it (U-221); an ordinary run is as before", () => {
       const plan = entry(PLAN, { status: "needs-input", reason: "plan_pending", changes: 0, appliedBy: { runId: CARRY, at: "2026-11-13T13:00:05.000Z" } });
       const carry = entry(CARRY, { planRunId: PLAN });
       const other = entry(OTHER, {});
       const lines = runsOf([other, carry, plan]);
       const row = (runId: string): string => lines.find((line) => line.startsWith(runId)) ?? "";
       assert.ok(row(CARRY).endsWith(`${t("status.done")} (done/verified) · ${t("runs.carried_plan", { runId: PLAN })}`), row(CARRY));
-      assert.ok(row(PLAN).includes(t("runs.plan_applied", { runId: CARRY })), row(PLAN));
+      assert.ok(row(PLAN).includes(t("runs.plan_carried_out", { runId: CARRY })), row(PLAN));
       assert.ok(row(OTHER).endsWith(`${t("status.done")} (done/verified)`), row(OTHER));
       // Without the carrying run's planRunId the table is the one before this unit: the plan's apply reads as missing.
       const before = runsOf([other, entry(CARRY, {}), plan]);

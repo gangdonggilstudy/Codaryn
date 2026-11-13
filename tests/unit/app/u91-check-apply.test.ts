@@ -104,7 +104,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.deepEqual([view.status, view.appliedBy], ["pending", null]);
     const started = await app.applyPlan({ settings: taskForm(base), planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));
-    ok<ApplyResult>(await started.handle.done);
+    ok<ApplyResult>((await started.handle.done) as AppCallOutcome<ApplyResult>);
     assert.equal(existsSync(path.join(work, "sorted", "a.txt")), true, "the apply after the check moved the file");
   });
 
@@ -128,7 +128,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.deepEqual(checked.unsafeMoves, []);
     const started = await run.app.applyPlan({ settings: run.movesOnly, planRunId: run.planRunId, digest: run.digest, cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));
-    const applied = ok<ApplyResult>(await started.handle.done);
+    const applied = ok<ApplyResult>((await started.handle.done) as AppCallOutcome<ApplyResult>);
     assert.equal(applied.reason, "plan_stale");
     const record = (await readJournal(run.base, started.handle.runId)).find((line) => (line.type as string) === "plan_checked") as unknown as Record<string, unknown>;
     assert.deepEqual([record["problems"], record["unsafeMoves"], record["inventoryLimitReached"]], [checked.problems, checked.unsafeMoves, checked.inventoryLimitReached]);

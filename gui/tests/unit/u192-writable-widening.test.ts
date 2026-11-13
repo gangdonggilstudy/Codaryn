@@ -25,7 +25,8 @@ test("U-192: the two writable-path widenings are known, named in both languages,
     assert.equal(unnamedWidening([{ kind }]), false, `${kind} is not unknown_widening any more`);
     assert.ok(`widen.${kind}` in KO && `widen.${kind}` in EN, kind);
   }
-  assert.equal(widenText("ko", "writable_path_added", "policy.writablePaths[1]"), "- 쓰기 허용 경로 넓힘 (policy.writablePaths[1])");
+  // U-240 (nb-i18n U-239 #6): "더함", as the English "added" and the other widenings' names.
+  assert.equal(widenText("ko", "writable_path_added", "policy.writablePaths[1]"), "- 쓰기 허용 경로 더함 (policy.writablePaths[1])");
   assert.equal(widenText("en", "writable_paths_unlimited", "profiles.doc.policy.writablePaths"), "- the writable paths limit removed (file tools may write anywhere in the workspace) (profiles.doc.policy.writablePaths)");
   assert.equal(unnamedWidening([{ kind: "writable_path_added" }, { kind: "made_up" }]), true, "an unknown kind is still refused");
 });

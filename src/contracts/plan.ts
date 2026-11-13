@@ -41,7 +41,7 @@ import type { Clock, RunReason, RunReasonByStatus, RunUsage, TerminalRunStatus }
 import type { IntegrityChecker } from "./integrity.js";
 import type { StateGuard } from "./state.js";
 import type { JournalEvent } from "./journal.js";
-import type { PolicyGate } from "./policy.js";
+import type { PolicyDecision, PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import { PRIVACY_TOKEN_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, MaskedText } from "./text.js";
@@ -578,11 +578,28 @@ export interface ApprovedChangesPlan {
  * U-187 (DR-69 B-4, B-5): the writable lists of a run that carries out `plan`: the task's lists
  * (ResolvedTaskSpec.writablePathSets), then the plan's files as one more list (source `plan`, each
  * entry exactly that file), so a write must be both a planned file and inside every policy list.
- * Pure.
+ * Pure. U-219: it reads the files' paths only, so a caller that holds just those (the app layer's
+ * check before the approval) builds the same lists.
  */
-export function approvedPlanWritablePathSets(sets: readonly WritablePathSet[] | undefined, plan: StoredChangesPlan): readonly WritablePathSet[] {
+export function approvedPlanWritablePathSets(
+  sets: readonly WritablePathSet[] | undefined,
+  plan: { readonly files: readonly { readonly path: string }[] },
+): readonly WritablePathSet[] {
   return [...(sets ?? []), { source: "plan", entries: plan.files.map((file) => file.path) }];
 }
+
+/**
+ * U-219 (p5a's request): how the gate of a run that carries out an approved `run` plan judges one
+ * planned file before its first model request (U-187, B-6): a write of `path` with
+ * PLANNED_FILE_DESCRIPTOR (call id `approved-plan`), the requested decision and, only when it
+ * allows, the effective one (the text, then the real path). `policy` is that run's gate: the task's
+ * policy with approvedPlanWritablePathSets. The engine's check calls this function (src/engine
+ * `judgePlannedFile`), given out as PreflightPlan is so the app layer's check before the approval can
+ * call the same one. Codex V-21: the app does not yet; checkChangesPlanFiles still builds the lists
+ * and asks the gate in its own lines (call id `plan-check`), the same judgement, until p5a connects
+ * it (U-229). The file's staleness (plannedFileStale) is not in it; a gate that throws rejects it.
+ */
+export type JudgePlannedFile = (policy: PolicyGate, path: string) => Promise<PolicyDecision>;
 
 /**
  * How the person approved the plan. Recorded in `apply_started`; never who.

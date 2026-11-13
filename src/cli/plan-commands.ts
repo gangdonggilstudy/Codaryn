@@ -96,7 +96,7 @@ import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
-import { argumentsError, cliError, prepareTask, runPrepared } from "./run.js";
+import { argumentsError, cliError, prepareTask, runPrepared, withHint } from "./run.js";
 import type { CliEnvironment, PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
@@ -104,7 +104,7 @@ import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
-import { FINAL_MESSAGE_MAX_LINES, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
+import { FINAL_MESSAGE_MAX_LINES, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
 import type { LoadedChangesPlan } from "./human/index.js";
 
 /** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
@@ -652,13 +652,27 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   // U-195 (DR-69 B-3, B-4): a task resolved to plan "run" carries out a run plan with a model run.
   if (mode === "run") return applyChangesPlan(io, args, ready.value);
   if (mode !== "apply") {
-    return cliError("run_not_plan", 'the task given to apply does not resolve to a workflow with plan "apply"; nothing was moved');
+    // U-228: a task with no plan mode. When the run has a plan, the message names its kind and the
+    // person is told to give the task the plan run used (plan_kind_differs); else as before.
+    const any = await loadAny(io, ready.value);
+    if (any.ok) {
+      const made = any.plan.kind === "changes" ? 'a plan of files to write (plan "run")' : 'a plan of moves and discards (plan "apply")';
+      return withHint(
+        cliError("run_not_plan", `that run made ${made}, but the task given to apply resolves to no plan mode; give the task the plan run used; nothing was moved or run`),
+        "plan_kind_differs",
+      );
+    }
+    return cliError("run_not_plan", 'the task given to apply resolves to no plan mode (neither plan "apply" nor plan "run"); nothing was moved or run');
   }
   const loaded = await loadAny(io, ready.value);
   if (loaded.ok && loaded.plan.kind === "changes") {
-    return cliError(
-      "run_not_plan",
-      'that run made a plan of files to write (plan "run"), but the task given to apply resolves to plan "apply"; give the task the plan run used; nothing was moved',
+    // U-228: the run has a plan, of the other kind (plan_kind_differs); the message as before.
+    return withHint(
+      cliError(
+        "run_not_plan",
+        'that run made a plan of files to write (plan "run"), but the task given to apply resolves to plan "apply"; give the task the plan run used; nothing was moved',
+      ),
+      "plan_kind_differs",
     );
   }
   const shown = await loadShown(io, ready.value, false, loaded as LoadPlanOutcome);
@@ -745,6 +759,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
     let result: ApplyResult;
     let unsafeMoves = 0;
+    /** U-220: the apply's lock could not be released at its end (told in its summary). */
+    let lockLeft = false;
     try {
       const workspace = await createWorkspace({ root: workspaceRoot });
       const privacy = shown.privacy;
@@ -824,7 +840,9 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         outcome: cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done"),
       };
     } finally {
-      await releaseLock({ workspaceRoot, runId });
+      // U-220 (U-176, U-201): a release that throws after its retries, or answers false, leaves the
+      // lock; the apply's result and exit code stay and its summary says so, never internal_error.
+      lockLeft = !(await releaseLock({ workspaceRoot, runId }).then((value) => value === true, () => false));
       cancel.dispose();
     }
     if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
@@ -835,7 +853,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         const typed = input.kind === "quick" ? input.workspace : null;
         const typedMasked = typed === null ? null : shown.privacy.mask(typed);
         const workspaceShown = typed === null || typedMasked === null ? null : toShownWorkspace(typed, typedMasked.ok ? typedMasked.text : null);
-        const summary = io.human.applySummary(result, { workspaceForm: form, ...(workspaceShown === null ? {} : { workspaceShown }) });
+        const summary = io.human.applySummary(result, { workspaceForm: form, ...(workspaceShown === null ? {} : { workspaceShown }), ...(lockLeft ? { lockLeft: true } : {}) });
         const masked = shown.privacy.mask(summary);
         if (masked.ok) io.writeProgress(cleanText(masked.text, true));
       } catch {
@@ -911,9 +929,13 @@ export async function applyChangesPlan(io: ApplyCommandEnvironment, args: ApplyA
   const loaded = await loadAny(io, value);
   if (!loaded.ok) return cliError(loaded.code, LOAD_MESSAGES[loaded.code]);
   if (loaded.plan.kind !== "changes") {
-    return cliError(
-      "run_not_plan",
-      'that run made a plan of moves and discards (plan "apply"), but the task given to apply resolves to plan "run"; give the task the plan run used; nothing was run',
+    // U-228: the run has a plan, of the other kind (plan_kind_differs); the message as before.
+    return withHint(
+      cliError(
+        "run_not_plan",
+        'that run made a plan of moves and discards (plan "apply"), but the task given to apply resolves to plan "run"; give the task the plan run used; nothing was run',
+      ),
+      "plan_kind_differs",
     );
   }
   const plan = loaded.plan;
@@ -951,10 +973,14 @@ export async function applyChangesPlan(io: ApplyCommandEnvironment, args: ApplyA
     if (!loaded.digest.startsWith(args.digest)) return cliError("plan_not_approved", "--digest does not match the plan's digest; nothing was run. `codaryn plan` shows it");
     approval = adapter === undefined ? "cli-flag" : "adapter";
   } else if (ask !== undefined) {
+    // U-228 (U-198's texts): after the plan's view, what approving starts (a run whose file tools write
+    // only these files; the summary's note; the commands' note when commands are allowed), then the
+    // question of a run plan, not the moves plan's apply.question.
     const question = [
       renderChangesPlan(view.output, knownKeyValues(io.env), io.messages).trimEnd(),
       ...(otherTask === null ? [] : [otherTask]),
-      applyQuestion(io.messages),
+      changesApprovalText(view.output, { commandsAllowed: value.prepared.task.policy.commands.length > 0 }, io.messages).trimEnd(),
+      changesApplyQuestion(io.messages),
     ].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was run");

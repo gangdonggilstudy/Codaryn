@@ -5,6 +5,8 @@
 
 import { MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS, MAX_PLANNED_FILES, PLANNED_FILE_CHANGES } from "./plan.js";
 import type { PlanActionKind, PlanMode, ProposeChangesArgs, ProposeChangesPayload, ProposePlanArgs, ProposePlanPayload } from "./plan.js";
+import { QUERY_TABLE_DEFINITION, QUERY_TABLE_DESCRIPTOR } from "./query.js";
+import type { QueryTableArgs, QueryTablePayload } from "./query.js";
 import { CONTENT_HASH_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, JsonObject, MaskedText, RawText } from "./text.js";
 
@@ -87,6 +89,12 @@ export interface SearchFilesPayload {
   /** Sorted by path in code unit order. */
   readonly entries: readonly SearchEntry[];
   readonly truncated: boolean;
+  /**
+   * U-203 (bundle A, R-3, R-4): true when an unreadable path (PolicyConfig.unreadablePaths) lies in
+   * the searched folder, whose entries are left out, names included. It follows the policy's entries
+   * alone, never what exists there. Absent otherwise.
+   */
+  readonly withheld?: true;
 }
 
 export interface WriteFilePayload {
@@ -496,7 +504,8 @@ export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
  * `ModelRequest.workflowTools` and runs them with `ToolRunner.executeWorkflowTool`. U-180 (DR-69
  * B-3): `propose_changes`, the plan tool of plan mode `run`.
  */
-export const WORKFLOW_TOOL_NAMES = ["inspect_files", "propose_plan", "propose_changes"] as const;
+// U-208 (bundle A, A-5): query_table, the read-only aggregate tool (query.ts).
+export const WORKFLOW_TOOL_NAMES = ["inspect_files", "propose_plan", "propose_changes", "query_table"] as const;
 export type WorkflowToolName = (typeof WORKFLOW_TOOL_NAMES)[number];
 
 /** Every tool name a task's `tools` may list: the built-in ones first, in TOOL_NAMES order. */
@@ -537,18 +546,22 @@ export interface InspectFilesPayload {
   readonly next: string | null;
   /** True when `hash` was asked and some files were left without `sha256` (byte budget). */
   readonly hashesIncomplete: boolean;
+  /** U-203 (R-3, R-4): as SearchFilesPayload.withheld; entries under unreadable paths are not listed, hashed or paged. */
+  readonly withheld?: true;
 }
 
 export interface WorkflowToolArgsByName {
   readonly inspect_files: InspectFilesArgs;
   readonly propose_plan: ProposePlanArgs;
   readonly propose_changes: ProposeChangesArgs;
+  readonly query_table: QueryTableArgs;
 }
 
 export interface WorkflowToolPayloadByName {
   readonly inspect_files: InspectFilesPayload;
   readonly propose_plan: ProposePlanPayload;
   readonly propose_changes: ProposeChangesPayload;
+  readonly query_table: QueryTablePayload;
 }
 
 export type WorkflowToolPayload = WorkflowToolPayloadByName[WorkflowToolName];
@@ -657,6 +670,7 @@ export const WORKFLOW_TOOLS: { readonly [N in WorkflowToolName]: ToolDescriptor 
     planMode: "apply",
   },
   propose_changes: PROPOSE_CHANGES_DESCRIPTOR,
+  query_table: QUERY_TABLE_DESCRIPTOR,
 };
 
 /** Every descriptor by name, built-in and task type tools. */
@@ -730,6 +744,7 @@ export const WORKFLOW_TOOL_DEFINITIONS: { readonly [N in WorkflowToolName]: Tool
     },
   },
   propose_changes: PROPOSE_CHANGES_DEFINITION,
+  query_table: QUERY_TABLE_DEFINITION,
 };
 
 /** Every definition by name, built-in and task type tools. */

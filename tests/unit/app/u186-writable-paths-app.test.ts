@@ -101,7 +101,7 @@ describe("U-186: the apply task's list in the app's preflight check and apply", 
     assert.ok(started.ok, JSON.stringify(started));
     const done = await started.handle.done;
     assert.ok(done.ok, JSON.stringify(done));
-    const result: ApplyResult = done.output;
+    const result = done.output as ApplyResult;
     assert.deepEqual([result.status, result.reason], ["failed", "plan_stale"]);
     assert.equal(await exists(path.join(p.base, "work", "a.txt")), true, "nothing moved");
     assert.equal(await exists(path.join(p.base, "work", "sorted", "a.txt")), false);

@@ -17,6 +17,7 @@
     - U-137: 질문에서 끝난 실행도 그 호출의 거부를 기록한다.
     - U-136: 거부 요약 문구를 줄였다.
   - GUI의 권한 대화상자(U-124)는 main `b249171`에서 M-3.11로 넣었다(U-185, nd-docs가 이 단위에 한해 고침).
+  - 계획 실행(묶음 B-4)은 main `13ea1ac`에서 7절로 넣었다(U-217). 자동 시험은 `tests/integration/n15-plan-run.test.ts`다.
 - 출처
   - `docs/reviews/2026-11-13-*.md`의 '검사하지 않은 범위'와 'PM 판단' 절
   - `docs/pm-status.md`의 '확인하지 않은 범위'
@@ -111,6 +112,10 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-6.2 | 탐색기 주소창의 `%APPDATA%` 표기 | 없음 | — | UXM-20 |
 | M-6.3 | GUI에서 `writablePaths` 밖 쓰기가 거부될 때 보이는 것 | 없음 | — | U-182, U-186, U-194 |
 | M-6.4 | 실제 모델이 `writablePaths` 거부를 받은 뒤 하는 일 | **필요** | — | U-175, U-182, U-194 |
+| M-7.1 | 바꾸기 계획(`plan: "run"`)의 `apply` 질문과 수행 실행의 끝 요약 | 없음 | — | U-195, U-198, DR-69 |
+| M-7.2 | 실제 모델로 계획 실행 끝에서 끝까지: 계획, 승인, 수행, 계획 밖 쓰기 거부 뒤의 행동, 되돌리기 | **필요** | — | U-187, U-195, U-198, DR-69 |
+| M-7.3 | 계획을 수행하는 실행을 Ctrl+C로 멈췄을 때 | **필요** | — | U-187, DR-69 B-7 |
+| M-7.4 | GUI 계획 화면의 실행 계획: 파일 목록, 설명, 꺼진 적용 단추와 까닭, 점검 | 없음 | NVDA는 선택 | U-206, U-196 |
 
 ---
 
@@ -1996,7 +2001,7 @@ node dist/src/cli/main.js run --task $wp\task.json     # 저장소 루트에서.
 
 **기대 결과**
 - `out\ok.txt`만 생기고 `README.md`는 생기지 않는다(시험 기준).
-- 진행 표시에 그 쓰기가 거부됐다고 나올 것이다. 거부 사유 글은 공용 문구 표의 "쓰기를 허용한 파일 밖"(영어 `not among the files this task may write`)일 것이다. 보이는 글을 그대로 적는다.
+- 진행 표시에 그 쓰기가 거부됐다고 나올 것이다. 거부 사유 글은 공용 문구 표의 "쓰기 허용 경로 밖"(영어 `not among the files this task may write`)일 것이다. 보이는 글을 그대로 적는다.
 - 파일을 허용하는 법(위 CLI 줄과 같은 뜻)이 GUI 어디에 보이는지, 보이지 않는지 적는다. 보이지 않으면 담당이 정할 일이다.
 
 **다르면 볼 곳**
@@ -2034,6 +2039,293 @@ node dist/src/cli/main.js report --workspace $ws --run latest
 - [CLI 계약](cli-contract.md) 13.1
 
 **관련**: U-175, U-182, U-194
+
+---
+
+## 7. 계획 실행 (`plan: "run"`)
+
+**공통 사항**
+- 작업 종류의 `plan`이 `"run"`이면 실행은 파일을 바꾸지 않고 바꿀 파일의 계획(바꾸기 계획)을 내고 멈춘다(`plan_pending`).
+- 계획 실행 동안 모델에게는 쓰기 도구가 주어지지 않는다. 불러도 `unknown_tool`로 거절된다.
+- `apply`가 계획을 승인받으면 새 실행이 그 계획을 수행한다.
+  - 계획 실행의 목표를 받는다.
+  - 계획에 든 파일만 쓸 수 있고, 계획은 한 번만 수행된다.
+  - 승인 뒤 파일이 바뀌었거나 그 길 위에 링크가 생겼으면, 첫 모델 요청 전에 `failed`/`plan_stale`로 끝난다.
+- 자동 시험은 대본 모델로 실제 CLI를 돌린다(`tests/integration/n15-plan-run.test.ts`). 그 밖의 것은 사람이 본다.
+  - 실제 터미널의 질문
+  - 실제 모델이 계획을 내고 수행하는 모습
+  - GUI 화면
+
+**대본 계획 실행 준비**(M-7.1, M-7.4가 쓴다)
+- 키 없이 한다. 작업 종류 `rewrite`를 설정 파일에 정의한다.
+- 대본 둘을 둔다. 계획을 내는 것과 수행하는 것이다.
+- 수행 대본은 계획 밖 파일(`notes.txt`)을 한 번 쓰려 한 뒤, 계획의 두 파일을 쓴다.
+
+```powershell
+$pr = "$m\plan-run"
+New-Item -ItemType Directory -Force "$pr\workspace\docs" | Out-Null
+[IO.File]::WriteAllText("$pr\workspace\docs\guide.md", "old guide`n")
+[IO.File]::WriteAllText("$pr\config.json", @'
+{
+  "schemaVersion": 1,
+  "limits": { "maxModelTurns": 8, "maxToolCalls": 24, "maxTotalTokens": 200000, "maxDurationMs": 60000 },
+  "workflows": { "rewrite": { "tools": ["read_file", "search_files", "write_file", "propose_changes"], "plan": "run" } }
+}
+'@)
+[IO.File]::WriteAllText("$pr\task.json", @'
+{
+  "schemaVersion": 1, "id": "manual-plan-run", "goal": "Rewrite docs/guide.md and add docs/new.md.", "workflow": "general", "workflowRef": "rewrite",
+  "workspaceRoot": "./workspace",
+  "model": { "provider": "scripted", "scriptPath": "./script.json" },
+  "policy": { "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false },
+  "privacy": { "secretEnv": [] },
+  "limits": { "maxModelTurns": 8, "maxToolCalls": 24, "maxTotalTokens": 1000, "maxDurationMs": 60000 },
+  "verifiers": [{ "id": "guide", "kind": "file_rules", "rules": [{ "type": "contains", "path": "docs/guide.md", "text": "new guide" }, { "type": "exists", "path": "docs/new.md" }] }]
+}
+'@)
+[IO.File]::WriteAllText("$pr\plan-script.json", @'
+{ "schemaVersion": 1, "steps": [
+  { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/guide.md" } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "toolCalls": [{ "name": "propose_changes", "args": { "summary": "Rewrite the guide and add a new page.", "files": [{ "path": "docs/guide.md", "change": "modify" }, { "path": "docs/new.md", "change": "create" }] } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "text": "not asked", "usage": { "inputTokens": 0, "outputTokens": 0 } } ] }
+'@)
+[IO.File]::WriteAllText("$pr\carry-script.json", @'
+{ "schemaVersion": 1, "steps": [
+  { "toolCalls": [{ "name": "write_file", "args": { "path": "notes.txt", "expectedHash": null, "change": { "kind": "replace_all", "content": "not planned\n" } } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "toolCalls": [{ "name": "write_file", "args": { "path": "docs/guide.md", "expectedHash": "919baa8f37690aee6bf6b6b9aea7976dc97c216e7048172f11db9f46d0c99cf2", "change": { "kind": "replace_all", "content": "new guide\n" } } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "toolCalls": [{ "name": "write_file", "args": { "path": "docs/new.md", "expectedHash": null, "change": { "kind": "replace_all", "content": "new page\n" } } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "text": "complete", "usage": { "inputTokens": 0, "outputTokens": 0 } } ] }
+'@)
+Copy-Item "$pr\plan-script.json" "$pr\script.json" -Force
+node dist/src/cli/main.js run --task $pr\task.json --config $pr\config.json      # 계획 실행. 종료 3
+$plan = "<끝 요약의 Run id>"
+node dist/src/cli/main.js plan --task $pr\task.json --config $pr\config.json --run $plan
+```
+
+- `expectedHash`는 `old guide` 한 줄(LF)의 SHA-256이다. 파일 글을 바꾸면 대본의 해시도 바꿔야 한다.
+- 계획을 다시 만들려면 `$pr`를 지우고 위를 처음부터 한다. 계획은 한 번만 수행된다.
+
+### M-7.1 바꾸기 계획의 `apply` 질문과 수행 실행의 끝 요약 (키 없음)
+
+**확인할 것**
+- `--digest` 없는 `apply`가 실제 터미널에서 바꾸기 계획을 보여 주고 `Apply this plan? [y/N]`을 묻는지
+- 답에 맞게 거절하거나 수행하는지
+- 수행 실행의 끝 요약이 계획 밖 쓰기를 따로 세고, 새 계획을 만들라고 안내하는지
+
+**여기서 못 한 까닭**
+- 질문은 stdin과 stderr가 터미널일 때만 나온다.
+- 자동 시험은 `--digest`로만 승인했다(n15). 바꾸기 계획의 질문은 흉내 낸 터미널의 단위 시험뿐이다.
+
+**준비**: 위의 "대본 계획 실행 준비"를 하고 `$plan`을 적는다.
+
+**순서**
+- 적용하지 않는 답을 먼저 한다. `y`는 맨 마지막이다.
+- 수행할 때 쓰는 것은 수행 대본이므로 먼저 바꿔 둔다.
+
+```powershell
+Copy-Item "$pr\carry-script.json" "$pr\script.json" -Force
+node dist/src/cli/main.js apply --task $pr\task.json --config $pr\config.json --run $plan     # --digest 없이
+$LASTEXITCODE
+Get-ChildItem -Recurse $pr\workspace -Exclude .codaryn | Select-Object FullName               # 파일이 그대로인지
+```
+
+1. Enter만 친다.
+2. `n`을 치고 Enter를 친다.
+3. Ctrl+C를 친다.
+4. `y`를 치고 Enter를 친다.
+5. 4 뒤에 같은 `apply`를 한 번 더 친다.
+
+**기대 결과**
+- 질문 전에 `plan`과 같은 보기가 나온다.
+  - 첫 줄은 `Plan of run <id>: 2 file(s) to write, pending`이다.
+  - 다이제스트, `1. modify  docs/guide.md`, `2. create  docs/new.md`가 나온다.
+  - 그 뒤 `The plan's summary, written by the plan run (… approved with the plan):` 아래에 `| Rewrite the guide and add a new page.`가 나온다.
+  - 마지막 줄이 `Apply this plan? [y/N]`이다.
+- 1·2: `plan_not_approved`, 종료 2다. 파일은 그대로이고 `notes.txt`도 없다.
+- 3: M-1.1의 5와 같을 것이다(코드 기준, 같은 질문 함수). `Stopped with Ctrl+C. …` 한 줄, 종료 5, 파일은 그대로다. 다르면 화면 글을 적는다.
+- 4: 수행 실행이 돈다(대본, 마른 실행으로 확인한 출력).
+  - 진행 줄에 `write file — denied (path/path_not_writable)`이 한 번, `changed docs/guide.md`, `created docs/new.md`가 나온다.
+  - 결과는 `done/verified`, 종료 0이다.
+  - 끝 요약에 다음 줄들이 있다.
+    - `Plan run: <계획 실행 id>`
+    - `Denied calls: 1`
+    - `Writes denied because the file is not in the approved plan: 1`
+    - `To change other files, make a new plan that names them and approve it.`
+  - `writablePaths`를 넓히라는 줄(`Writes denied because the file is not in writablePaths …`)은 없다.
+  - `notes.txt`는 생기지 않는다.
+- 5: 묻지 않고 `plan_already_applied`, 종료 2다.
+- 모든 경우: 명령이 끝나면 프롬프트가 바로 돌아온다. 콘솔에는 결과 JSON 줄이 나오지 않는다.
+- 덧붙여 계획 실행의 끝 요약을 적는다(U-217 보고 F-1, U-221에서 계획 보기와 같은 말로 고침).
+  - 끝 요약의 계획 줄은 `A plan is ready: 2 file(s) to write. Nothing was changed; it waits for approval.`이다.
+  - 설명의 꼬리표는 `plan` 보기와 같은 `The plan's summary, written by the plan run (… approved with the plan):`이다.
+  - 다르면 그 두 줄을 적는다.
+
+**다르면 볼 곳**
+- 바꾸기 계획의 승인과 수행: `src/cli/plan-commands.ts`(`applyChangesPlan`)
+- 보기: `src/cli/human/changes-plan.ts`
+- 끝 요약: `src/cli/human/output.ts`(`runSummary`), `src/cli/run.ts`(`deniedNotPlanned`)
+- 문구: `src/i18n/en.ts`·`ko.ts`(`plan.changes.*`, `summary.denied_not_planned*`)
+
+**관련**: U-191, U-195, U-198, DR-69, Codex V-14 L-1
+
+### M-7.2 실제 모델로 계획 실행 끝에서 끝까지 (키 필요)
+
+**확인할 것**
+- 실제 모델이 쓰기 대신 바꾸기 계획(`propose_changes`)을 내는지
+- 그 계획과 설명이 사람이 읽고 승인하기에 알맞은지
+- 승인 뒤 수행 실행이 계획 실행의 목표와 계획의 설명을 따라 계획의 파일만 쓰는지
+- 계획 밖 파일을 쓰려다 거부되면 무엇을 하는지
+
+**여기서 못 한 까닭**
+- 자동 시험과 Codex V-14는 대본 모델이다. 계획 설명을 얼마나 충실히 수행하는지는 판단하지 않았다.
+- 계획 밖 쓰기 거부의 힌트(`REFUSAL_HINTS.path_not_writable`, "This task may write only certain files …")를 실제 모델이 어떻게 받아들이는지도 실제 API가 있어야 한다.
+
+**준비**
+- 키를 사용자 환경 변수에 둔다(0절).
+- `<모델 ID>`는 `models`로 확인한 실제 ID로 바꾼다.
+- 아래 task 파일은 키 없이 `doctor`로 형식을 확인했다(main `13ea1ac`). 키가 없으면 `API key`만 `failed`다.
+
+```powershell
+$rp = "$m\plan-run-live"
+New-Item -ItemType Directory -Force "$rp\workspace\docs" | Out-Null
+[IO.File]::WriteAllText("$rp\workspace\docs\guide.md", "# Guide`n`nInstall with npm ci.`n")
+[IO.File]::WriteAllText("$rp\workspace\README.md", "# Demo`n")
+[IO.File]::WriteAllText("$rp\config.json", @'
+{
+  "schemaVersion": 1,
+  "workflows": { "rewrite": { "tools": ["read_file", "search_files", "write_file", "propose_changes"], "plan": "run" } }
+}
+'@)
+[IO.File]::WriteAllText("$rp\task.json", @'
+{
+  "schemaVersion": 1, "id": "manual-plan-run-live", "workflow": "general", "workflowRef": "rewrite",
+  "goal": "docs/guide.md에 '## 문제 해결' 절을 더하고, 자주 묻는 질문 세 개를 담은 docs/faq.md를 새로 만든다. README.md는 바꾸지 않는다.",
+  "workspaceRoot": "./workspace",
+  "model": { "provider": "anthropic", "model": "<모델 ID>", "maxOutputTokens": 2048 },
+  "policy": { "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false },
+  "privacy": { "secretEnv": [] },
+  "limits": { "maxModelTurns": 8, "maxToolCalls": 16, "maxTotalTokens": 60000, "maxDurationMs": 300000 },
+  "verifiers": [{ "id": "docs", "kind": "file_rules", "rules": [{ "type": "contains", "path": "docs/guide.md", "text": "## 문제 해결" }, { "type": "exists", "path": "docs/faq.md" }] }]
+}
+'@)
+node dist/src/cli/main.js doctor --task $rp\task.json --config $rp\config.json
+```
+
+**순서**: 실행 두 번으로, 합쳐 모델 턴 16번, 토큰 120,000 이하다.
+
+```powershell
+node dist/src/cli/main.js run --task $rp\task.json --config $rp\config.json         # 계획 실행
+$plan = "<끝 요약의 Run id>"
+node dist/src/cli/main.js plan --task $rp\task.json --config $rp\config.json --run $plan
+node dist/src/cli/main.js apply --task $rp\task.json --config $rp\config.json --run $plan --digest <다이제스트 앞 12자>
+node dist/src/cli/main.js report --workspace $rp\workspace --run latest
+node dist/src/cli/main.js changes --task $rp\task.json --config $rp\config.json --run latest
+node dist/src/cli/main.js revert --workspace $rp\workspace --run latest
+```
+
+**기대 결과**
+- 계획 실행
+  - `needs-input`/`plan_pending`, 종료 3이다. 파일은 하나도 바뀌지 않는다.
+  - 모델이 쓰기를 부르면 `unknown_tool`로 거절된다. 그랬는지 적는다.
+  - 계획을 내지 않고 끝났으면 그 끝 요약을 적고 다시 한다.
+- 계획 보기
+  - 파일이 `modify  docs/guide.md`와 `create  docs/faq.md` 둘인지 적는다. `README.md`가 들었으면 적는다(목표가 막은 파일).
+  - 설명이 무엇을 바꿀지 사람이 판단할 만큼 구체적인지 적는다. 정해진 기대는 없다.
+- 수행 실행
+  - 계획 밖 파일(예: `README.md`)을 쓰려 했는지, 거부(`path_not_writable`) 뒤에 무엇을 했는지 적는다. 되풀이했는지, 계획의 파일로 돌아갔는지, 할 수 없다고 끝냈는지다.
+  - 끝 요약에 계획 밖 쓰기가 있었으면 `Writes denied because the file is not in the approved plan: <n>`과 새 계획 안내가 있다.
+  - 결과(`done/verified`이면 좋다)와 쓴 파일을 적는다. 계획의 두 파일 밖은 바뀌지 않는다(시험 기준).
+  - `report`에 계획 실행 id와 다이제스트가 있다. `changes`에 두 파일의 전후가 있다.
+- `revert`는 `complete`이고, `docs/guide.md`가 처음 글로 돌아오고 `docs/faq.md`가 없어진다.
+- 모든 경우: 키 값이 화면, `report`, `changes`에 나오지 않는다.
+
+**다르면 볼 곳**
+- 계획 실행의 끝과 보기: `src/engine/index.ts`(`handleChangesCall`), `src/cli/human/changes-plan.ts`
+- 수행 실행의 시스템 글(승인한 계획과 설명): `src/engine/index.ts`(`APPROVED_PLAN_LABEL` 둘레)
+- 계약: [CLI 계약](cli-contract.md)의 계획 절, DR-69
+
+**관련**: U-180, U-187, U-191, U-195, U-198, DR-69
+
+### M-7.3 계획을 수행하는 실행을 Ctrl+C로 멈췄을 때 (키 필요)
+
+**확인할 것**: 수행 실행을 모델이 일하는 도중에 Ctrl+C로 멈추면 다음이 맞는지
+- 실행이 취소로 끝나는지
+- 계획은 이미 쓰인 것으로 남는지
+- 그때까지 쓴 것은 `revert`로 되돌릴 수 있는지
+
+**여기서 못 한 까닭**
+- 대본 모델의 수행은 너무 빨라 손으로 멈출 수 없다.
+- 계획을 쓰인 것으로 표시하는 일(`applied.json`)은 첫 모델 요청 전에 일어난다(코드 기준, U-187). 멈춘 뒤의 모습은 사람이 보는 것이 맞다.
+
+**준비**: M-7.2를 처음부터 다시 만든다(`$rp`를 지우고 준비를 다시 한다). 계획 실행과 `plan`까지 한다.
+
+**순서**
+1. `apply … --digest <앞 12자>`를 친다. 진행 줄에 `turn 2`쯤이 보이면 Ctrl+C를 친다.
+2. 다음 명령들을 친다.
+
+```powershell
+$LASTEXITCODE
+node dist/src/cli/main.js plan --task $rp\task.json --config $rp\config.json --run $plan --json
+node dist/src/cli/main.js apply --task $rp\task.json --config $rp\config.json --run $plan --digest <앞 12자>
+node dist/src/cli/main.js revert --workspace $rp\workspace --run latest
+```
+
+**기대 결과**(코드를 읽어 낸 기대다)
+- 1: `Stopped with Ctrl+C. …`, 실행은 `cancelled`, 종료 5다.
+- `plan --json`의 `status`가 `applied`이고, `appliedBy.runId`가 멈춘 실행이다.
+- 다시 한 `apply`는 묻지 않고 `plan_already_applied`, 종료 2다. 계속하려면 계획을 새로 만든다.
+- 멈춘 실행이 쓴 것이 있으면 `revert`가 되돌린다. 쓴 것이 없으면 그렇다고 나온다. 무엇이 나왔는지 적는다.
+- 다르면, 특히 계획이 `pending`으로 남거나 다시 수행되면 화면 글을 그대로 보낸다.
+
+**다르면 볼 곳**
+- 계획을 쓰인 것으로 표시하는 일: `src/engine/index.ts`(`checkApprovedPlan`)
+- 취소: `src/cli/cancel.ts`
+
+**관련**: U-187, U-195, DR-69 B-7
+
+### M-7.4 GUI 계획 화면의 실행 계획 (키 없음)
+
+**확인할 것**: CLI로 만든 바꾸기 계획을 GUI의 계획 화면에서 열 때 다음이 보이는지
+- 파일 목록(생성·수정)과 모델의 설명이 보이는지
+- 적용 단추가 꺼져 있고 그 까닭이 보이는지
+- 점검이 수행 실행이 쓸 수 없는 파일을 알려 주는지
+- 화면 낭독기가 그것들을 읽는지
+
+**여기서 못 한 까닭**
+- 화면은 GUI 단위 시험이 DOM으로 확인했다(U-206).
+- 실제 창의 모양, 꺼진 단추의 까닭 읽기, 화면 낭독기는 사람이 봐야 한다.
+
+**준비**
+- "대본 계획 실행 준비"로 계획을 하나 만들고, `apply`는 하지 않는다.
+- 점검을 보려면 사본을 하나 더 만든다.
+  - `$pr2`로 같은 준비를 한다.
+  - 계획 실행 뒤 `$pr2\task.json`의 `policy`에 `"writablePaths": ["docs/guide.md"]`를 더한다.
+  - 그러면 `docs/new.md`는 수행 실행이 쓸 수 없다.
+
+**순서**
+1. GUI를 띄우고(3절의 공통 준비) `$pr\workspace`를 연다.
+2. 계획 화면에서 그 계획 실행을 고른다.
+3. `$pr2`로 같은 것을 한다.
+4. (선택) NVDA나 내레이터를 켜고 같은 화면을 읽는다(M-3.4).
+
+**기대 결과**(코드와 GUI 문구 기준)
+- 요약 줄이 `Run plan: 1 files to create · 1 files to modify · digest <앞 12자>`다(한국어 `실행 계획: 생성할 파일 1개 · 수정할 파일 1개 · …`).
+- 목록이 `modify: docs/guide.md`, `create: docs/new.md`다.
+- 설명이 `The plan you approve: …` 꼬리표 아래에 나온다. 설명이 승인에 함께 묶인다고 말한다.
+- 적용 단추는 꺼져 있다. 그 아래에 `A run plan cannot be carried out from this app yet. …`(한국어 `실행 계획은 아직 이 앱에서 수행할 수 없습니다. …`)가 있다.
+- 점검
+  - `$pr`: 문제가 없다는 글이 나온다. 보이는 글을 적는다.
+  - `$pr2`: 쓸 수 없는 파일 1개를 알린다.
+  - 점검이 "확인 중"에서 끝나지 않으면 그렇다고 적는다.
+- 4: 꺼진 단추를 읽을 때 그 까닭(위 문장)이 함께 읽히는지 적는다(`aria-describedby`).
+- 화면 어디에서도 계획이 수행되지 않는다. 작업 공간의 파일은 그대로다.
+
+**다르면 볼 곳**
+- `gui/src/renderer/plan/plan-screen.ts`
+- `gui/src/engine-host/plans.ts`·`plan-check.ts`
+- 문구: `gui/src/renderer/i18n/en.ts`·`ko.ts`(`plan.run*`, `plancheck.deniedFiles`)
+
+**관련**: U-196, U-206, DR-69 B-3
 
 ---
 

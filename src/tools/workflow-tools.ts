@@ -60,8 +60,9 @@ import {
   pathKey,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
+import type { PathSet, PathSetSnapshot } from "../policy/path-set.js";
 import { nodeFileLayer } from "../workspace/file-layer.js";
-import { FolderWatch, retried, sameChain, walkChain } from "../workspace/guard.js";
+import { FolderWatch, retried, retryDeadline, sameChain, walkChain } from "../workspace/guard.js";
 import { takeJudged } from "../workspace/judged.js";
 
 /**
@@ -100,6 +101,8 @@ export interface WorkflowToolDeps {
   readonly planRecorder?: PlanRecorder;
   readonly fileOps: PlanFileOps;
   readonly platform: NodeJS.Platform;
+  /** U-203 (R-3, R-4): the run's unreadable paths (ToolRunnerOptions.unreadablePaths); inspect_files leaves them out. */
+  readonly unreadable?: PathSet;
 }
 
 interface WalkedEntry {
@@ -111,8 +114,11 @@ interface WalkedEntry {
 /**
  * Every file and directory under `dir`, sorted by root-relative path. Links and other special
  * entries are skipped and never followed. The state directory is never entered.
+ * U-203 (Codex V-13 M-1): what `hidden` covers (the run's unreadable paths) is skipped before it is
+ * counted, and a folder it covers is never read, so the limit and the outcome do not depend on what
+ * exists there.
  */
-async function walk(root: string, dir: string, signal: AbortSignal, watch: FolderWatch): Promise<WalkedEntry[] | Failure | "changed"> {
+async function walk(root: string, dir: string, signal: AbortSignal, watch: FolderWatch, hidden: PathSetSnapshot | null): Promise<WalkedEntry[] | Failure | "changed"> {
   const found: WalkedEntry[] = [];
   const pending: string[] = [dir];
   while (pending.length > 0) {
@@ -131,6 +137,7 @@ async function walk(root: string, dir: string, signal: AbortSignal, watch: Folde
       if (current === root && isStateDirSegment(child.name)) continue;
       const absolute = path.join(current, child.name);
       const relative = toRelative(root, absolute);
+      if (hidden !== null && hidden.covers(relative)) continue;
       if (child.isDirectory()) {
         found.push({ relative, absolute, kind: "dir" });
         pending.push(absolute);
@@ -195,7 +202,8 @@ export async function inspectFiles(
     return fail(isMissing(error) ? "not_found" : "io_error", "cannot read directory");
   }
   // U-189 (P-1, Codex V-10): names, sizes, times and hashes come only from folders that stayed the
-  // ones checked (guard.ts); a change seen is tried again, still seen it is io_error.
+  // ones checked (guard.ts); a change seen is tried again, still seen it is io_error. U-213: the tries
+  // are limited in time too (a large tree), and the run's signal ends the waits between them.
   const outcome = await retried(async () => {
     const first = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
     if (!first.ok) return first.code === "changed" ? "changed" : fail(first.code === "not_found" ? "not_found" : "io_error", "cannot read directory");
@@ -206,16 +214,23 @@ export async function inspectFiles(
     const second = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
     if (!second.ok || !sameChain(first.seen, second.seen) || !(await watch.unchanged())) return "changed";
     return result;
-  });
+  }, { signal, until: retryDeadline() });
+  if (outcome === "changed" && signal.aborted) return fail("cancelled", "inspect_files cancelled");
   return outcome === "changed" ? fail("io_error", "the folders changed while they were read; nothing was given") : outcome;
 }
 
 /** One pass of inspect_files over the checked folder `dir`, every folder read kept in `watch`. */
 async function inspectOnce(deps: WorkflowToolDeps, args: InspectFilesArgs, signal: AbortSignal, dir: string, watch: FolderWatch): Promise<RawWorkflowToolOutcome | "changed"> {
   const { workspace, privacy } = deps;
-  const walked = await walk(workspace.root, dir, signal, watch);
+  // U-203 (R-3, R-4): the walk leaves out every entry under the run's unreadable paths, by its text or
+  // its real path, before anything is counted, hashed or paged (so `next` never names one).
+  // `withheld` says an unreadable entry lies in the walked folder: it depends on the entries alone,
+  // never on what exists there.
+  const hidden = deps.unreadable === undefined ? null : await deps.unreadable.snapshot(workspace);
+  const walked = await walk(workspace.root, dir, signal, watch, hidden);
   if (walked === "changed") return "changed";
   if (!Array.isArray(walked)) return walked;
+  const withheld = hidden !== null && hidden.within(toRelative(workspace.root, dir) || ".");
 
   let start = 0;
   if (args.after !== undefined) {
@@ -272,7 +287,7 @@ async function inspectOnce(deps: WorkflowToolDeps, args: InspectFilesArgs, signa
   }
   const last = entries[entries.length - 1];
   const next = index < walked.length && last !== undefined ? last.path : null;
-  return { ok: true, payload: { entries, next, hashesIncomplete } };
+  return { ok: true, payload: { entries, next, hashesIncomplete, ...(withheld ? { withheld: true as const } : {}) } };
 }
 
 interface CheckedAction {

@@ -489,6 +489,8 @@ export function asPlan(value: unknown): PlanReply {
   if (!isObj(value) || value["ok"] !== true || !isObj(value["view"])) return failed(value);
   const view = value["view"];
   if (!str(view["runId"]) || !str(view["digest"]) || !Array.isArray(view["actions"]) || (view["status"] !== "pending" && view["status"] !== "applied")) return failed(value);
+  // U-206: a run plan names its kind and lists its files (the main process checked each).
+  if (view["planKind"] !== undefined && (view["planKind"] !== "changes" || !Array.isArray(view["files"]))) return failed(value);
   const approval = str(value["approval"]) && HEX.test(value["approval"]) ? value["approval"] : null;
   return { ok: true, view: view as unknown as PlanView, approval };
 }
@@ -543,6 +545,7 @@ export function asPlanCheck(value: unknown): PlanCheckReply {
   const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
   return {
     ok: true,
+    ...(value["planKind"] === "changes" ? { planKind: "changes" as const } : {}),
     problems: value["problems"].flatMap((item: unknown) => (isObj(item) && typeof item["index"] === "number" && str(item["problem"]) ? [{ index: n(item["index"]), problem: item["problem"] }] : [])),
     unsafeMoves: value["unsafeMoves"].filter((index: unknown): index is number => typeof index === "number" && Number.isSafeInteger(index) && index >= 0),
     inventoryLimitReached: value["inventoryLimitReached"] === true,

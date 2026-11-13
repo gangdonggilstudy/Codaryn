@@ -11,7 +11,9 @@ const { contextBridge, ipcRenderer } = electron;
 
 const CHANNELS = {
   info: "codaryn:app:info",
+  restartEngine: "codaryn:app:restartengine",
   copyText: "codaryn:app:copy",
+  copyPath: "codaryn:workspace:copypath",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -48,6 +50,7 @@ const EVENTS = {
   workspaceOpened: "codaryn:event:workspaceopened",
   runEvents: "codaryn:event:runevents",
   runDone: "codaryn:event:rundone",
+  engineState: "codaryn:event:enginestate",
 } as const;
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
@@ -73,9 +76,12 @@ let runEventsListener: ((payload: unknown) => void) | null = null;
 let runDoneListener: ((payload: unknown) => void) | null = null;
 ipcRenderer.on(EVENTS.runEvents, (_event, payload: unknown) => runEventsListener?.(plain(payload)));
 ipcRenderer.on(EVENTS.runDone, (_event, payload: unknown) => runDoneListener?.(plain(payload)));
+let engineListener: ((payload: unknown) => void) | null = null;
+ipcRenderer.on(EVENTS.engineState, (_event, payload: unknown) => engineListener?.(plain(payload)));
 
 const api = Object.freeze({
   info: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.info),
+  restartEngine: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.restartEngine),
   openFolder: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.openFolder),
   recent: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.recent),
   openRecent: (id: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.openRecent, text(id)),
@@ -84,6 +90,7 @@ const api = Object.freeze({
     ipcRenderer.invoke(CHANNELS.tree, { workspace: text(workspace), node: text(node), offset: count(offset) }),
   reveal: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.reveal, { workspace: text(workspace), node: text(node) }),
   copyText: (value: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyText, { text: text(value) }),
+  copyPath: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyPath, { workspace: text(workspace), node: text(node) }),
   doctor: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.doctor, { workspace: text(workspace) }),
   settings: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.settings),
   listModels: (provider: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listModels, { provider: text(provider) }),
@@ -124,6 +131,10 @@ const api = Object.freeze({
   },
   onRunDone: (listener: unknown): void => {
     runDoneListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;
+  },
+  /** U-64: the engine's state when it changes (one listener at a time). */
+  onEngineState: (listener: unknown): void => {
+    engineListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;
   },
   /** One listener at a time; a new one replaces the old. */
   onWorkspaceOpened: (listener: unknown): void => {

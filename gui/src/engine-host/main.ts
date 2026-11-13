@@ -18,9 +18,9 @@ import { serve } from "./host.js";
 import net from "node:net";
 import { guardSockets, loopbackOnlyFetch } from "./transport.js";
 import type { HostApp, HostMessages } from "./host.js";
+import { taskForm } from "./runs.js";
 import type { RunItemOf } from "./runs.js";
 import { createTreeLister } from "./tree.js";
-import type { TreeEngine } from "./tree.js";
 import { modelTextOf } from "./model-text.js";
 import type { ModelText, ModelTextRows } from "./model-text.js";
 import { MAX_PLAN_SUMMARY_ROWS } from "../shared/ipc.js";
@@ -50,10 +50,6 @@ interface EngineAppModule {
   /** U-48 (U-42): a model's text as the CLI draws it, and its rows (model-text.ts). */
   readonly modelTextRows?: unknown;
   readonly MODEL_TEXT_MAX_ROWS?: unknown;
-}
-
-interface EngineWorkspaceModule {
-  createWorkspace: TreeEngine["createWorkspace"];
 }
 
 interface EngineTextSafetyModule {
@@ -115,7 +111,7 @@ function parseArgs(argv: readonly string[]): { readonly engineDir: string; reado
   const loopbackOnly = argv.length === 4 && argv[2] === "--transport" && argv[3] === "loopback-only";
   if ((argv.length !== 2 && !loopbackOnly) || argv[0] !== "--engine-dir") return null;
   const dir = argv[1] as string;
-  const needed = [["app", "index.js"], ["i18n", "index.js"], ["workspace", "index.js"], ["cli", "text-safety.js"], ["cli", "human", "output.js"], ["contracts", "index.js"]];
+  const needed = [["app", "index.js"], ["i18n", "index.js"], ["cli", "text-safety.js"], ["cli", "human", "output.js"], ["contracts", "index.js"]];
   return isAbsolute(dir) && needed.every((parts) => existsSync(join(dir, ...parts))) ? { engineDir: dir, loopbackOnly } : null;
 }
 
@@ -144,10 +140,9 @@ async function main(): Promise<number> {
   const engineDir = args.engineDir;
   const appModule = await load<EngineAppModule>(join(engineDir, "app", "index.js"), ["createNodeAppEnvironment", "createCodarynApp"]);
   const i18n = await load<EngineI18nModule>(join(engineDir, "i18n", "index.js"), ["selectMessageLanguage", "createMessageCatalog"]);
-  const workspaceModule = await load<EngineWorkspaceModule>(join(engineDir, "workspace", "index.js"), ["createWorkspace"]);
   const textSafety = await load<EngineTextSafetyModule>(join(engineDir, "cli", "text-safety.js"), ["cleanText", "hideKeys"]);
   const humanModule = await load<EngineHumanModule>(join(engineDir, "cli", "human", "output.js"), ["createHumanOutput"]);
-  if (appModule === null || i18n === null || workspaceModule === null || textSafety === null || humanModule === null) {
+  if (appModule === null || i18n === null || textSafety === null || humanModule === null) {
     log("codaryn engine host: the engine modules could not be loaded");
     return 2;
   }
@@ -231,13 +226,9 @@ async function main(): Promise<number> {
   const shown = (text: string): string => hideAllKeys(textSafety.cleanText(text));
   // DR-29: a file text keeps its lines (CRLF read as LF, CR never shown) for the comparison view.
   const shownText = (text: string): string => hideAllKeys(textSafety.cleanText(text.replace(/\r\n/g, "\n"), true));
-  const tree = createTreeLister({
-    createWorkspace: (options) => workspaceModule.createWorkspace(options),
-    cleanText: (text) => textSafety.cleanText(text),
-    hideKeys: (text) => hideAllKeys(text),
-    currentKey: () => null,
-    platform: process.platform,
-  });
+  // U-103 (G-list): the file tree is the app layer's listWorkspaceDir, with the open workspace and the
+  // config file's defaults (no profile, no task type).
+  const tree = createTreeLister(app, (workspace) => taskForm(workspace, null, null));
   writeLine(encodeLine({ v: 1, type: "ready", node }));
   process.stdin.setEncoding("utf8");
   const itemsIn = (language: "ko" | "en"): RunItemOf => runItems(humanModule.createHumanOutput(i18n.createMessageCatalog(language)), shown);

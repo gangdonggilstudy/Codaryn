@@ -17,6 +17,19 @@
 | `n01`~`n05` | 사용성 |
 | `n06`~`n09` | 범용 작업 |
 | `o00`~`o05` | OpenAI 모의 API |
+| `c01` | GUI 계약 층(U-112): 같은 대본을 CLI와 앱 계층(GUI 엔진 호스트의 길)으로 돌려 결과와 기록 비교 |
+
+## GUI 계약 층 (`c01-cli-app-contract`, U-112)
+
+설계 `docs/design/standalone-gui.md` 8.3·12절의 계약 시험이다. 사례마다 같은 task 파일, 대본, 작업 공간 파일, 환경으로 샌드박스를 둘 만든다. 하나는 CLI 프로세스(`run --task --json`, `apply --task --run --digest`)로, 다른 하나는 GUI 엔진 호스트처럼 만든 앱(`createCodarynApp(createNodeAppEnvironment())`)의 `startRun`·`applyPlan`으로 돌린다. `EngineResult`(`ApplyResult`)와 `journal.jsonl`(사건 종류와 순서, 가림본을 포함한 모든 필드)이 같아야 한다.
+
+- 정규화는 어느 두 실행이든 다른 값만 한다.
+  - 실행 id와 계획 다이제스트: 다이제스트는 실행 id를 담은 `plan.json`의 SHA-256이다. 그래서 두 `plan.json`이 실행 id만 빼고 같은 바이트인지를 먼저 본다.
+  - 가림 토큰: 계약상 실행마다 무작위다. 처음 나온 순서대로 이름을 붙여, 같은 토큰이 같은 자리에 있는지는 계속 본다.
+  - 시각(기록의 `at`, 도구 결과 안의 파일 시각), `durationMs`, 샌드박스 폴더.
+- apply 기록의 `approval`은 통로 이름이다(`cli-flag`, `adapter`). 양쪽 값을 따로 확인한 뒤 비교에서 뺀다.
+- 사례: 문서 실행(등록한 비밀을 읽고 가림), 거부가 있는 실행(허용되지 않은 명령, 작업 공간 밖 쓰기, 보호 경로 쓰기), 재수정이 있는 실행, 계획 실행 → apply, 모델 오류로 끝난 실행(대본이 다함).
+- 어긋남이 나오면 고치지 않고 그 사례를 todo로 두고 무엇이 다른지 보고한다(PM). 처음 작성 때(main `5c931d1`)는 어긋남이 없었다.
 
 ## 수용 기준 대응
 

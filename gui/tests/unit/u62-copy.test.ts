@@ -3,8 +3,8 @@
  * The page never writes the clipboard; it asks the main process, which copies only the two things
  * the window copies: a run id (the result, the run list, the report) and a digest's first 12
  * characters (the plan). Anything else is refused, so the page cannot put other text on the
- * clipboard. A path is not copied (PM, after R-73 M1): the temporary tree does not mask the
- * registered secrets; it comes back once the tree is the app layer's workspace list (G-list).
+ * clipboard. A path is not copied through copyText (PM, after R-73 M1); since the tree is the app
+ * layer's workspace list (U-103, G-list) a tree entry's path has its own call, copyPath, by the entry's id.
  */
 
 import assert from "node:assert/strict";
@@ -28,7 +28,7 @@ test("U-62: the main process copies a run id or a digest's first 12 characters, 
   assert.equal(parseCopyArgs({ text: RUN }), RUN);
   assert.equal(parseCopyArgs({ text: RUN, path: "C:/x" }), null, "nothing else rides along");
   assert.equal(parseCopyArgs(RUN), null);
-  assert.equal("copyPath" in IPC_CHANNELS, false, "no path is copied (R-73 M1)");
+  assert.equal(IPC_CHANNELS.copyPath, "codaryn:workspace:copypath", "U-103: a path only through its own call, by an entry's id");
 });
 
 test("U-62: a copy button asks the main process and says what came of it", async () => {

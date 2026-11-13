@@ -239,7 +239,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -279,6 +279,13 @@ const expected = [
   ["checksShown", (v) => typeof v === "number" && v >= 5],
   ["url", (v) => v === "app://codaryn/index.html"],
   ["renderer", (v) => v.process === "undefined" && v.require === "undefined" && v.ipcRenderer === "undefined" && v.module === "undefined" && v.api === API],
+  // U-103 (G-list, 3.3): the masked name has no id; plain paths copied by id, top and nested; other ids, a path string and another workspace refused.
+  [
+    "treeCopyPath",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({ masked: [null], top: "copied", nested: "copied", unknown: "unknown_entry", pathString: "invalid_args", otherWorkspace: "unknown_workspace", button: "ok", texts: ["a.txt", "sub/b.txt", "a.txt"] }),
+  ],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],
@@ -360,6 +367,18 @@ const expected = [
   ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
+  // U-65 (3.3): after the run, the tree marks the file it made; choosing it opens its comparison at that file.
+  ["treeMarks", (v) => v?.made === "made.txt" && v.note === true],
+  ["treeOpensChange", (v) => JSON.stringify(v) === JSON.stringify({ ready: "1", focus: "0", focused: "made.txt" })],
+  // U-65: F5 reads the tree again; the protected path setup added is marked, with its note.
+  ["treeProtected", (v) => JSON.stringify(v) === JSON.stringify({ before: 0, marked: "package.json", note: true })],
+  // U-64 (3.12, 4.4): the engine ended: its card, calls fail, no restart on its own; the button starts a new host; no second restart while it runs.
+  [
+    "engineRestart",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({ card: "shown", whileEnded: "adapter_host_exited", stillEnded: "adapter_host_exited", ready: "ready", newHost: true, cardHidden: true, doctorAfter: "ok", again: "engine_running" }),
+  ],
   // U-63 (3.5, GUI-D8): a task file's run with a variables file, its next steps in the open workspace; a closed dialog and a task file inside its workspace start nothing.
   [
     "taskFileRun",
@@ -382,7 +401,7 @@ const expected = [
     "copyRefused",
     (v) =>
       JSON.stringify(v) ===
-      JSON.stringify({ keyShape: "invalid_args", keyValue: "invalid_args", path: "invalid_args", words: "invalid_args", digestUpper: "invalid_args", lineBreak: "invalid_args", noPathCopy: "undefined", written: 0 }),
+      JSON.stringify({ keyShape: "invalid_args", keyValue: "invalid_args", path: "invalid_args", words: "invalid_args", digestUpper: "invalid_args", lineBreak: "invalid_args", written: 0 }),
   ],
   ["copyDigest", (v) => v !== null && v.status === "ok" && typeof v.copied === "string" && /^[0-9a-f]{12}$/.test(v.copied) && v.summary.includes(v.copied)],
   // U-61 (3.12): a result that changed files offers the revert preview; it opens on the run list.

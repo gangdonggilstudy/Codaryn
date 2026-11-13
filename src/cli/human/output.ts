@@ -19,6 +19,7 @@ import {
   API_MODEL_ENVS,
   APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
+  CONFIRMATION_BY,
   CLI_ERROR_EXIT_CODES,
   CLI_ERROR_HINT_DETAIL,
   MAX_FINAL_MESSAGE_CHARS,
@@ -148,10 +149,45 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
    * one per language). What it remembers of one (the verifier numbers, the denied calls) starts
    * again at the next one's start record: call ids are unique within a run only.
    */
+  // U-104 (U-99b): this run's protected-material checks: how many, how many found a change, and
+  // whether the first one that found nothing was shown (the later ones are folded).
+  let integrityChecks = 0;
+  let integrityChanged = 0;
+  let integrityUnchangedShown = false;
   const startAgain = (): void => {
     verifierNumbers.clear();
     deniedCalls.clear();
+    integrityChecks = 0;
+    integrityChanged = 0;
+    integrityUnchangedShown = false;
   };
+  /**
+   * U-110 (R-85 M1): RunSummaryContext.confirmationDenied as summary lines, in CONFIRMATION_BY order,
+   * and how many calls they cover. `default` is `unanswered` where this run could ask (couldAsk) and
+   * `unasked` where it could not. A field that is not an object, or a count that is not a whole number
+   * of 0 or more, counts as none: the summary is then the one without it.
+   */
+  const confirmationDenials = (given: unknown): { readonly lines: readonly string[]; readonly total: number } => {
+    if (typeof given !== "object" || given === null) return { lines: [], total: 0 };
+    const field = given as { readonly user?: unknown; readonly default?: unknown; readonly cancelled?: unknown; readonly couldAsk?: unknown };
+    const ids = {
+      user: "summary.confirm_denied.user",
+      default: field.couldAsk === true ? "summary.confirm_denied.unanswered" : "summary.confirm_denied.unasked",
+      cancelled: "summary.confirm_denied.cancelled",
+    } as const;
+    const lines: string[] = [];
+    let total = 0;
+    for (const by of CONFIRMATION_BY) {
+      const count = field[by];
+      if (!isCount(count, 1)) continue;
+      lines.push(catalog.format(ids[by], { count }));
+      total += count;
+    }
+    return { lines, total };
+  };
+  /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
+  const integritySummary = (): string[] =>
+    integrityChecks > 0 && integrityChanged === 0 ? [catalog.format("summary.integrity_unchanged", { count: integrityChecks })] : [];
 
   // G-A: the workflow tools (inspect_files, propose_plan) have names for people too (ALL_TOOL_NAMES).
   const toolText = (name: string): CatalogText =>
@@ -380,6 +416,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             : catalog.format("summary.verifiers", { passed, total: verifiers.length }),
         );
       }
+      // U-104: the protected-material checks that found nothing, folded in the progress lines.
+      out.push(...integritySummary());
       // N-23(d): files, not change records. A path's first record says whether the run created it.
       const files = new Map<string, boolean>();
       for (const change of changes) {
@@ -399,9 +437,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
       if (failed > 0) out.push(catalog.format("summary.failed", { count: failed }));
+      // U-110 (R-85 M1): the calls denied after a permission question. Their rule is there and asks
+      // first, so each says what became of the question instead of the add-a-rule hint.
+      const asked = confirmationDenials(context.confirmationDenied);
+      out.push(...asked.lines);
       // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
-      // it points where the run's policy came from.
-      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
+      // it points where the run's policy came from. U-110: only for the denied command calls that did
+      // not follow a question (they are among deniedCommandCalls); a plain rule for a command that asks
+      // first would let it run without the question.
+      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > asked.total) {
         out.push(catalog.format(context.policySource === "task" ? "summary.denied_hint_task" : "summary.denied_hint"));
       }
       const usage = result.usage;
@@ -532,11 +576,16 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         case "integrity_checked":
           if (!isOneOf(event.phase, INTEGRITY_PHASES) || !Array.isArray(event.changed)) {
             line = null;
+          } else if (event.changed.length > 0) {
+            // A check that found a change is never folded.
+            integrityChecks += 1;
+            integrityChanged += 1;
+            line = catalog.format("progress.integrity_changed", { phase: event.phase, count: event.changed.length });
           } else {
-            line =
-              event.changed.length === 0
-                ? catalog.format("progress.integrity_unchanged", { phase: event.phase })
-                : catalog.format("progress.integrity_changed", { phase: event.phase, count: event.changed.length });
+            // U-104: the first check that found nothing is shown, later ones are folded into the summary.
+            integrityChecks += 1;
+            line = integrityUnchangedShown ? null : catalog.format("progress.integrity_unchanged", { phase: event.phase });
+            integrityUnchangedShown = true;
           }
           break;
         case "state_checked":
@@ -556,6 +605,17 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = typeof told === "object" && told !== null ? resultLine(told) : null;
           break;
         }
+        // U-110 (R-85 M1): the permission question (U-74). The question itself has no progress line: at
+        // a terminal the CLI asks it on stderr. Its answer has one: allowed for this call once, or denied
+        // by the person, by default (no answer, nobody to ask, or the time limit) or as cancelled.
+        case "confirmation_requested":
+          line = null;
+          break;
+        case "confirmation_answered":
+          if (event.decision === "allow_once" && event.by === "user") line = catalog.format("progress.confirmation_allowed");
+          else if (event.decision === "deny" && isOneOf(event.by, CONFIRMATION_BY)) line = catalog.format(`progress.confirmation_denied.${event.by}`);
+          else line = null;
+          break;
         case "model_response":
           line = null;
           break;
@@ -771,6 +831,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (verifiers.length > 0) {
         out.push(catalog.format("summary.verifiers", { passed: verifiers.filter((verifier) => verifier.outcome === "pass").length, total: verifiers.length }));
       }
+      // U-104: the protected-material checks that found nothing, folded in the progress lines.
+      out.push(...integritySummary());
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
       // U-8: what the apply tells besides its status (ApplyResult.noticeKinds), each kind once.
       // U-33 (R-56 Q-1 (a)): plan_records_unchecked by its cause. With a cause of the contract (every

@@ -27,6 +27,8 @@ export class Shell {
   /** GU-3: the run that goes on (a button to its screen), hidden when there is none. */
   private readonly statusRun = el("button", undefined, { id: "status-run", type: "button", hidden: "" });
   private readonly announcer = el("p", undefined, { class: "visually-hidden", "aria-live": "polite", role: "status" });
+  /** U-64 (3.12, 4.4): the card shown when the engine has ended, with its restart button. */
+  private readonly engineCard = el("div", undefined, { id: "engine-ended", role: "alert", class: "error", hidden: "" });
   private readonly screens: Screen[] = [];
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private current: string | null = null;
@@ -48,7 +50,7 @@ export class Shell {
     this.statusRun.addEventListener("click", () => this.show("run"));
     const body = el("div", undefined, { id: "body" });
     body.append(this.filePanel, this.work);
-    root.replaceChildren(header, body, footer, this.announcer);
+    root.replaceChildren(header, this.engineCard, body, footer, this.announcer);
     document.addEventListener("keydown", (event) => this.onKey(event));
   }
 
@@ -84,6 +86,40 @@ export class Shell {
   setEngine(code: string): void {
     this.statusEngine.textContent = code === "ready" ? this.texts.format("status.engineReady") : this.texts.format("status.engineError", { code });
     this.statusEngine.setAttribute("data-engine", code);
+  }
+
+  /**
+   * U-64 (3.12, 4.4): the engine is not there (it ended, or did not start). Says that a run going on
+   * has an unknown end (the run list tells it), and offers to start the engine again; `restart`
+   * answers "ready" or a code. Nothing restarts on its own.
+   */
+  engineEnded(code: string, restart: () => Promise<string>): void {
+    this.setEngine(code);
+    const message = el("p", this.texts.format("engine.ended", { code }), { id: "engine-ended-text" });
+    const again = button(this.texts.format("engine.restart"), () => {
+      again.setAttribute("disabled", "");
+      void (async () => {
+        const result = await restart();
+        if (result === "ready") {
+          this.engineReady();
+          return;
+        }
+        message.textContent = this.texts.format("engine.restartFailed", { code: result });
+        this.engineCard.setAttribute("data-restart", result);
+        again.removeAttribute("disabled");
+      })();
+    }, { id: "engine-restart" });
+    this.engineCard.replaceChildren(message, again);
+    this.engineCard.removeAttribute("hidden");
+    this.engineCard.removeAttribute("data-restart");
+  }
+
+  /** U-64: the engine is ready (again): the card goes. */
+  engineReady(): void {
+    this.setEngine("ready");
+    this.engineCard.setAttribute("hidden", "");
+    this.engineCard.replaceChildren();
+    this.refresh();
   }
 
   setWorkspace(name: string | null): void {

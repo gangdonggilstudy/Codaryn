@@ -1,141 +1,100 @@
 /**
- * GU-2: one directory of the workspace for the read-only file tree (docs/design/standalone-gui.md
- * 3.3). Interim: the app layer has no workspace listing function yet (design 5, "작업 공간 목록"),
- * so the engine host lists with the engine's own rules. When the app layer gains one, this file is
- * replaced by a call to it.
+ * GU-2, U-103 (G-list; docs/design/standalone-gui.md 3.3, adapter-contract 5.12): one directory of
+ * the workspace for the read-only file tree, from the app layer's `listWorkspaceDir` (U-89). The
+ * engine host reads no directory itself any more (GU-2's interim listing is gone).
  *
- * - The directory is resolved by the engine's `Workspace.resolve` (inside the root, not the state
- *   directory, no invalid names), then listed one level deep. Nothing is followed: a link or
- *   junction is listed as `link`.
- * - Names are shown as the CLI shows recorded text: key shapes and the current key hidden
- *   (`hideKeys`). A name with a control character is not shown at all. Either way the entry is
- *   `masked`; the main process gives it no id, so it cannot be opened. Secrets registered in the
- *   settings (`secretEnv`) are not masked here; that needs the app layer's function.
- * - Directories come first, then the rest, each in a fixed order. Pages of TREE_PAGE_SIZE.
+ * - The app layer checks the directory (plain relative segments), resolves it by the engine's
+ *   workspace rules, looks at every segment with lstat and follows no link or junction; the root's
+ *   `.codaryn` is `state`. It shows names masked: control characters, key shapes, every key value set
+ *   now and the values the settings register now (`secretEnv`). A masked entry has no real name
+ *   (`name: null`): the main process never learns it, so it cannot be opened, listed or copied.
+ * - The form is the open workspace with the config file's defaults (no profile, no task type), as a
+ *   quick run without a profile: its registered values mask, its protected paths mark `protected`.
+ * - Only the fields below are passed on, each checked; a value that does not fit is host_error.
+ *   A status other than `listed` comes back as its own code (not_found, not_dir, too_large, refused,
+ *   unreadable); an app error as its code.
  */
 
-import { lstat, readdir } from "node:fs/promises";
+import type { HostTaskForm } from "./runs.js";
 
+/** At most this many entries come in one page (the app layer's WORKSPACE_PAGE_SIZE). */
 export const TREE_PAGE_SIZE = 500;
-/** A directory with more entries is refused (`too_large`) rather than listed in part. */
-export const MAX_TREE_ENTRIES = 100_000;
-const MAX_DEPTH = 64;
-const MAX_SEGMENT = 255;
-const STATE_DIR_NAME = ".codaryn";
+const MAX_SHOWN_CHARS = 4096;
+const KINDS = ["dir", "file", "link", "state", "other"] as const;
+const STATUSES = ["not_found", "not_dir", "too_large", "refused", "unreadable"] as const;
+const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
-/** The parts of the engine's Workspace (src/contracts/workspace.ts) used here. */
-export interface TreeWorkspace {
-  readonly root: string;
-  resolve(
-    path: string,
-    access: "read",
-  ): Promise<{ readonly ok: true; readonly path: { readonly absolute: string; readonly relative: string } } | { readonly ok: false; readonly code: string }>;
-}
-
-export interface TreeEngine {
-  /** `createWorkspace` from src/workspace. */
-  createWorkspace(options: { readonly root: string }): Promise<TreeWorkspace>;
-  /** `cleanText` and `hideKeys` from src/cli/text-safety. */
-  cleanText(text: string): string;
-  hideKeys(text: string, currentKey: string | null): string;
-  /** The current API key for `hideKeys`, or null. */
-  currentKey(): string | null;
-  readonly platform: NodeJS.Platform;
-}
-
-export type TreeEntryKind = "dir" | "file" | "link" | "state" | "other";
+export type TreeEntryKind = (typeof KINDS)[number];
 
 export interface TreeEntry {
-  /** The real name. The main process keeps it to build child paths; it never reaches the window. */
-  readonly name: string;
+  /** The real name, for the main process's child paths only; null for a masked entry (never known here). */
+  readonly name: string | null;
   /** The name as shown; "" when it cannot be shown at all. */
   readonly shown: string;
   readonly kind: TreeEntryKind;
   readonly masked: boolean;
+  /** The effective policy's protected paths cover it (U-65 shows it). */
+  readonly protected: boolean;
 }
 
 export type TreeResult =
   | { readonly ok: true; readonly entries: readonly TreeEntry[]; readonly total: number; readonly offset: number; readonly nextOffset: number | null }
-  | { readonly ok: false; readonly code: "invalid_path" | "outside_root" | "state_dir" | "not_found" | "not_dir" | "too_large" | "io_error" };
+  | { readonly ok: false; readonly code: string };
 
-/** A relative directory as the main process sends it: "" for the root, else `/`-separated plain segments. */
-export function isTreeDir(dir: string): boolean {
-  if (dir === "") return true;
-  const segments = dir.split("/");
-  if (segments.length > MAX_DEPTH) return false;
-  return segments.every(
-    (segment) => segment.length > 0 && segment.length <= MAX_SEGMENT && segment !== "." && segment !== ".." && !/[\\:\u0000-\u001f]/.test(segment),
-  );
+type Obj = Record<string, unknown>;
+const isObj = (value: unknown): value is Obj => typeof value === "object" && value !== null && !Array.isArray(value);
+const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const HOST_ERROR = { ok: false, code: "host_error" } as const;
+
+/** One entry of the app layer's listing, or null when it does not fit (masked ⇔ no name; a plain entry's name is what is shown). */
+function entryOf(value: unknown): TreeEntry | null {
+  if (!isObj(value)) return null;
+  const { name, shown, kind, masked } = value;
+  const marked = value["protected"];
+  if (typeof shown !== "string" || shown.length > MAX_SHOWN_CHARS || typeof masked !== "boolean" || typeof marked !== "boolean") return null;
+  if (typeof kind !== "string" || !(KINDS as readonly string[]).includes(kind)) return null;
+  if (masked ? name !== null : typeof name !== "string" || name === "" || name !== shown) return null;
+  return { name: masked ? null : (name as string), shown, kind: kind as TreeEntryKind, masked, protected: marked };
 }
 
-const ORDER = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
-
-function rank(kind: TreeEntryKind): number {
-  return kind === "dir" || kind === "state" ? 0 : 1;
+/** `listWorkspaceDir`'s outcome as the host's tree value. */
+export function treeValue(outcome: unknown): TreeResult {
+  if (!isObj(outcome)) return HOST_ERROR;
+  if (outcome["ok"] !== true) {
+    const code = isObj(outcome["error"]) ? outcome["error"]["code"] : undefined;
+    return { ok: false, code: typeof code === "string" && CODE.test(code) ? code : "host_error" };
+  }
+  const output = outcome["output"];
+  if (!isObj(output) || output["kind"] !== "workspace_dir") return HOST_ERROR;
+  const status = output["status"];
+  if (typeof status === "string" && (STATUSES as readonly string[]).includes(status)) return { ok: false, code: status };
+  if (status !== "listed" || output["masking"] !== "current_secrets") return HOST_ERROR;
+  const { entries, total, offset, nextOffset } = output;
+  if (!Array.isArray(entries) || entries.length > TREE_PAGE_SIZE || !count(total) || !count(offset) || !(nextOffset === null || count(nextOffset))) return HOST_ERROR;
+  const out: TreeEntry[] = [];
+  for (const item of entries) {
+    const entry = entryOf(item);
+    if (entry === null) return HOST_ERROR;
+    out.push(entry);
+  }
+  return { ok: true, entries: out, total, offset, nextOffset };
 }
 
-export function createTreeLister(engine: TreeEngine): (request: { readonly workspace: string; readonly dir: string; readonly offset: number }) => Promise<TreeResult> {
-  const workspaces = new Map<string, Promise<TreeWorkspace>>();
+/** The part of the app layer the tree calls. */
+export interface TreeApp {
+  listWorkspaceDir(request: { readonly settings: HostTaskForm; readonly dir: string; readonly offset: number }): Promise<unknown>;
+}
 
-  function workspaceFor(root: string): Promise<TreeWorkspace> {
-    let found = workspaces.get(root);
-    if (found === undefined) {
-      if (workspaces.size >= 16) {
-        const oldest = workspaces.keys().next().value;
-        if (oldest !== undefined) workspaces.delete(oldest);
-      }
-      found = engine.createWorkspace({ root });
-      // A failed creation is not kept: the folder may exist next time.
-      found.catch(() => workspaces.delete(root));
-      workspaces.set(root, found);
-    }
-    return found;
-  }
-
-  function show(name: string): { shown: string; masked: boolean } {
-    if (engine.cleanText(name) !== name) return { shown: "", masked: true };
-    const shown = engine.hideKeys(name, engine.currentKey());
-    return { shown, masked: shown !== name };
-  }
-
-  return async function list(request) {
-    if (!isTreeDir(request.dir)) return { ok: false, code: "invalid_path" };
-    let absolute: string;
-    let atRoot: boolean;
+/** The host's tree call: the app layer lists `dir` of the workspace with the form `formOf` gives. */
+export function createTreeLister(
+  app: TreeApp,
+  formOf: (workspace: string) => HostTaskForm,
+): (request: { readonly workspace: string; readonly dir: string; readonly offset: number }) => Promise<TreeResult> {
+  return async (request) => {
     try {
-      const workspace = await workspaceFor(request.workspace);
-      const resolved = await workspace.resolve(request.dir === "" ? "." : request.dir, "read");
-      if (!resolved.ok) {
-        const code = resolved.code;
-        return { ok: false, code: code === "outside_root" || code === "state_dir" ? code : "invalid_path" };
-      }
-      absolute = resolved.path.absolute;
-      atRoot = resolved.path.relative === ".";
-      if (!(await lstat(absolute)).isDirectory()) return { ok: false, code: "not_dir" };
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      return { ok: false, code: code === "ENOENT" || code === "ENOTDIR" ? "not_found" : "io_error" };
-    }
-    let dirents;
-    try {
-      dirents = await readdir(absolute, { withFileTypes: true });
+      return treeValue(await app.listWorkspaceDir({ settings: formOf(request.workspace), dir: request.dir, offset: request.offset }));
     } catch {
-      return { ok: false, code: "io_error" };
+      return HOST_ERROR;
     }
-    if (dirents.length > MAX_TREE_ENTRIES) return { ok: false, code: "too_large" };
-    const sameName = (a: string, b: string): boolean => (engine.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
-    const entries: TreeEntry[] = dirents.map((dirent) => {
-      let kind: TreeEntryKind;
-      if (atRoot && sameName(dirent.name, STATE_DIR_NAME)) kind = "state";
-      else if (dirent.isSymbolicLink()) kind = "link";
-      else if (dirent.isDirectory()) kind = "dir";
-      else if (dirent.isFile()) kind = "file";
-      else kind = "other";
-      return { name: dirent.name, kind, ...show(dirent.name) };
-    });
-    entries.sort((a, b) => rank(a.kind) - rank(b.kind) || ORDER.compare(a.name, b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    const offset = Math.min(request.offset, entries.length);
-    const end = offset + TREE_PAGE_SIZE;
-    return { ok: true, entries: entries.slice(offset, end), total: entries.length, offset, nextOffset: end < entries.length ? end : null };
   };
 }

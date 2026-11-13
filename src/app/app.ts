@@ -30,10 +30,12 @@ import type {
   ModelsOutput,
   PrivacyGateway,
   ReportOutput,
+  ResolvedTaskSpec,
   RevertOutput,
   RunTask,
   RunsOutput,
 } from "../contracts/index.js";
+import { workflowSettingsOf } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
@@ -64,9 +66,13 @@ import { createAppAssemble } from "./assemble.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
+import { listRunEventsIn, runEventsArguments } from "./run-events.js";
+import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
+import type { ApplyCheckOperations } from "./check-apply.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
+import { confirmThrough } from "./permission.js";
 import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
 import { applyCleanupIn, previewCleanupIn, stateSummaryIn } from "./cleanup.js";
@@ -80,7 +86,9 @@ import type {
   ApplyHandle,
   ApplyObserver,
   ApplyPlanRequest,
+  CheckApplyRequest,
   ChangesOutput,
+  PlanCheck,
   PlanRequest,
   ReviewRequest,
   ChangesRequest,
@@ -90,6 +98,7 @@ import type {
   ApplyCleanupRequest,
   CleanupPreviewRequest,
   ListRunsRequest,
+  ListRunEventsRequest,
   ListWorkspaceDirRequest,
   StateSummaryRequest,
   ApplySettingsChangeRequest,
@@ -108,6 +117,7 @@ import type {
   ResolvedRun,
   ResolveRunRequest,
   RevertRequest,
+  RunEventsPage,
   RunHandle,
   RunObserver,
   RunOutcome,
@@ -138,6 +148,8 @@ export interface AppHooks {
   readonly writeConfig?: ModelsEnvironment["writeConfig"];
   /** The store's cleanup operations (its removal, its mark writer). Tests give a removal that refuses. */
   readonly cleanupOperations?: CleanupOperations;
+  /** U-91: the check's executor file operations, probe removal and lock release. Tests give ones that fail. */
+  readonly applyCheck?: ApplyCheckOperations;
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -263,7 +275,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       // DR-15: events from the records the engine appends, in memory, masked again with this gateway.
       const journal = journalWithEvents(assembled.deps.journal, input.runId, observer, privacy, input.clock);
       reportStart({ runId: input.runId, workspaceRoot });
-      return { ...assembled, deps: { ...assembled.deps, journal } };
+      // U-108 (B-4, DR-3): the engine's permission questions go to the observer (permission.ts).
+      return { ...assembled, deps: { ...assembled.deps, journal, confirm: confirmThrough(observer) } };
     };
 
     const runTask: RunTask = async (deps) => {
@@ -327,7 +340,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    * own steps 1 to 7 (prepareTask), the ones `run`, `plan`, `apply` and `review` share, so the
    * secrets are the ones a run with these settings registers now. U-17 (DR-46): as a command that
    * runs nothing (`readOnly`), so the quick form needs no key, model or run limits. No lock,
-   * journal or file is made and nothing is sent. Used by `changes` and `listWorkspaceDir`. U-89: also
+   * journal or file is made and nothing is sent. Used by `changes`, `listWorkspaceDir` and `listRunEvents`. U-89: also
    * the effective policy's protected paths and every API key value set now (with the variables file).
    */
   async function readingSecrets(
@@ -339,6 +352,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         readonly workspaceRoot: string;
         readonly protectedPaths: readonly string[] | undefined;
         readonly keys: readonly string[];
+        readonly task: ResolvedTaskSpec;
       }
     | { readonly ok: false; readonly error: AppError }
   > {
@@ -374,6 +388,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       workspaceRoot: ready.prepared.task.workspaceRoot,
       protectedPaths: ready.prepared.task.policy.protectedPaths,
       keys: knownKeyValues(env),
+      task: ready.prepared.task,
     };
   }
 
@@ -405,6 +420,23 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return await listWorkspaceDirIn(source, checked.dir, checked.offset, checked.limit);
     } catch {
       return { ok: false, error: appError("internal_error", "the directory could not be listed") };
+    }
+  }
+
+  /** U-90 (GUI 3.7, adapter-contract 5.13): one page of a run's stored records (run-events.ts). */
+  async function listRunEvents(request: ListRunEventsRequest): Promise<AppCallOutcome<RunEventsPage>> {
+    // The request first: nothing is read for one that does not fit.
+    const checked = runEventsArguments(request);
+    if (!checked.ok) return checked;
+    try {
+      const probe = await readingSecrets(request.settings);
+      if (!probe.ok) return probe;
+      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!root.ok) return root;
+      const source = { workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys };
+      return await listRunEventsIn(source, checked.runId, checked.offset, checked.limit, checked.types);
+    } catch {
+      return { ok: false, error: appError("internal_error", "the run's records could not be listed") };
     }
   }
 
@@ -748,6 +780,49 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     return { ok: true, handle };
   }
 
+  /**
+   * U-91 (GUI 3.9, DR-21, adapter-contract 5.14): the apply's preflight for a pending plan, under
+   * the workspace lock, with nothing moved or recorded (check-apply.ts). The refusals first, as
+   * `apply` makes them: the apply task's plan setting, the plan view's own (run, plan, DR-28), the
+   * plan already applied, a records-changed mark, the digest.
+   */
+  async function checkApply(request: CheckApplyRequest): Promise<AppCallOutcome<PlanCheck>> {
+    const checked = checkApplyArguments(request);
+    if (!checked.ok) return checked;
+    try {
+      const probe = await readingSecrets(request.settings);
+      if (!probe.ok) return probe;
+      if (workflowSettingsOf(probe.task).plan !== "apply") {
+        return { ok: false, error: appError("run_not_plan", 'the task given to the check does not resolve to a workflow with plan "apply"; nothing was checked') };
+      }
+      const view = await plan({ settings: request.settings, runId: checked.planRunId });
+      if (!view.ok) return view;
+      if (view.output.appliedBy !== null) return { ok: false, error: appError("plan_already_applied", "that plan was already applied; nothing was checked") };
+      if (view.output.recordsChanged === true) {
+        return { ok: false, error: appError("plan_records_changed", "the plan run's records were changed by something other than the run, so its plan may not be the one shown; nothing was checked") };
+      }
+      if (!view.output.digest.startsWith(checked.digest)) {
+        return { ok: false, error: appError("plan_not_approved", "the digest does not match the plan's digest; nothing was checked") };
+      }
+      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!root.ok) return root;
+      return await checkApplyIn(
+        {
+          workspaceRoot: root.value,
+          task: probe.task,
+          planRunId: checked.planRunId,
+          digest: view.output.digest,
+          inventoryLimitReached: view.output.inventoryLimitReached,
+          clock: environment.clock,
+          randomBytes: environment.randomBytes,
+        },
+        hooks.applyCheck,
+      );
+    } catch {
+      return { ok: false, error: appError("internal_error", "the plan could not be checked; nothing was moved") };
+    }
+  }
+
   return {
     startRun,
     report,
@@ -761,6 +836,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     doctor,
     changes,
     listWorkspaceDir,
+    listRunEvents,
     listModels,
     selectModel,
     readSettings,
@@ -770,6 +846,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     applySettingsChange,
     plan,
     applyPlan,
+    checkApply,
     review,
   };
 }

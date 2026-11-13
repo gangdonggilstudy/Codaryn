@@ -153,6 +153,31 @@ export function startGui(options: GuiOptions): void {
   let window: BrowserWindow | null = null;
   let hostState: Promise<{ readonly host: EngineHost } | { readonly failure: string }> = Promise.resolve({ failure: "host_starting" });
   let currentHost: EngineHost | null = null;
+  /** U-64: tells the window the engine's state ("ready" or why not). */
+  const tellEngine = (state: string): void => {
+    if (window !== null && !window.isDestroyed()) window.webContents.send(IPC_EVENTS.engineState, { state });
+  };
+  /**
+   * Starts the engine host (at the start, and again when the person asks after it ended, U-64). When
+   * it ends, calls fail with adapter_host_exited, a run going on ends unknown, and the window is told;
+   * it is not started again on its own (4.4).
+   */
+  const launchHost = (): void => {
+    hostState = startHost(options).then((outcome) => {
+      if (!outcome.ok) return { failure: outcome.failure };
+      currentHost = outcome.host;
+      let state: { readonly host: EngineHost } | { readonly failure: string } = { host: outcome.host };
+      outcome.host.onRunMessage((message) => void runs.receive(message));
+      outcome.host.onExit(() => {
+        state = { failure: "adapter_host_exited" };
+        hostState = Promise.resolve(state);
+        runs.hostExited();
+        if (!closingHost) tellEngine("adapter_host_exited");
+      });
+      return state;
+    });
+  };
+  let restarting = false;
   const workspaces = new Workspaces({
     stateFile: options.stateFile === undefined ? defaultStateFile() : options.stateFile,
     platform: process.platform,
@@ -247,18 +272,7 @@ export function startGui(options: GuiOptions): void {
     secureSession(ses);
     handleAppProtocol(ses, join(options.guiRoot, "build", "src", "renderer"));
 
-    hostState = startHost(options).then((outcome) => {
-      if (!outcome.ok) return { failure: outcome.failure };
-      currentHost = outcome.host;
-      let state: { readonly host: EngineHost } | { readonly failure: string } = { host: outcome.host };
-      outcome.host.onRunMessage((message) => void runs.receive(message));
-      outcome.host.onExit(() => {
-        state = { failure: "adapter_host_exited" };
-        hostState = Promise.resolve(state);
-        runs.hostExited();
-      });
-      return state;
-    });
+    launchHost();
     const startFolder = folderArgument(process.argv, app.isPackaged, process.cwd(), process.platform);
     if (startFolder !== null) {
       const opened = await workspaces.open(startFolder);
@@ -266,6 +280,23 @@ export function startGui(options: GuiOptions): void {
     }
     registerIpc({
       window: () => window,
+      // U-64 (3.12, 4.4): only after the engine host ended (or never started); never while one runs or the app quits.
+      restartEngine: async () => {
+        if (closingHost) return { ok: false, code: "app_closing" };
+        if (restarting) return { ok: false, code: "engine_starting" };
+        const before = await hostState;
+        if ("host" in before && !before.host.exited) return { ok: false, code: "engine_running" };
+        restarting = true;
+        try {
+          launchHost();
+          const after = await hostState;
+          if (!("host" in after)) return { ok: false, code: after.failure };
+          tellEngine("ready");
+          return { ok: true };
+        } finally {
+          restarting = false;
+        }
+      },
       writeClipboard: options.writeClipboard ?? ((text) => clipboard.writeText(text)),
       host: () => hostState,
       workspaces,

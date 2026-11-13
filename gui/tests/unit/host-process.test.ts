@@ -104,14 +104,8 @@ export function createCodarynApp() { return { async doctor(request) { ${doctorBo
 export function createMessageCatalog(language) { return { format(id) { if (id === "needs.params") throw new Error("x"); return language + ":" + id; } }; }
 `,
   );
-  // GU-2: the host also loads the workspace rules and the text safety helpers for the file tree.
-  await fs.mkdir(path.join(engine, "workspace"), { recursive: true });
+  // The host also loads the text safety helpers. U-103: no workspace module any more (the tree is the app layer's).
   await fs.mkdir(path.join(engine, "cli"), { recursive: true });
-  await fs.writeFile(
-    path.join(engine, "workspace", "index.js"),
-    `export async function createWorkspace(options) { return { root: options.root, async resolve() { return { ok: false, code: "invalid_path" }; } }; }
-`,
-  );
   await fs.writeFile(
     path.join(engine, "cli", "text-safety.js"),
     `export function cleanText(text) { return text; }
@@ -219,16 +213,19 @@ test("host process (R21-I-2): the value of every provider's key variable is hidd
     const keyEnvs = Object.values(contracts.API_PROVIDERS).map((spec) => spec.keyEnv);
     const other = keyEnvs.find((name) => name !== "ANTHROPIC_API_KEY");
     assert.ok(other !== undefined, "the contract names a second provider's key variable");
-    const host = await started(options(dir, { env: { ...testEnv(dir), [other]: value } }));
+    // U-103: the tree is the app layer's list, which reads the settings: a config file that exists.
+    const config = path.join(dir, "config.json");
+    await fs.writeFile(config, JSON.stringify({ schemaVersion: 1 }));
+    const host = await started(options(dir, { env: { ...testEnv(dir), CODARYN_CONFIG: config, [other]: value } }));
     try {
       const answer = await host.call("tree", { workspace: await fs.realpath(workspace), dir: "", offset: 0 }, 10_000);
       assert.equal(answer.ok, true, JSON.stringify(answer));
-      // The real name stays in the main process (for ids); the window gets `shown` only (3.3).
-      const entries = (answer as { value: { entries: { name: string; shown: string; masked: boolean }[] } }).value.entries;
-      const entry = entries.find((item) => item.name.includes(value));
+      // U-103 (U-89): a masked entry comes without its real name; the window gets `shown` only (3.3).
+      const entries = (answer as { value: { entries?: { name: string | null; shown: string; masked: boolean }[] } }).value.entries ?? [];
+      const entry = entries.find((item) => item.masked);
       assert.ok(entry !== undefined);
-      assert.equal(entry.shown.includes(value), false, "the shown name hides the value");
-      assert.equal(entry.masked, true);
+      assert.equal(entry.name, null);
+      assert.equal(JSON.stringify(answer).includes(value), false, "the answer does not hold the value");
     } finally {
       await closeChecked(host);
     }
@@ -255,9 +252,11 @@ test("host process (PM, R-21): the value of every key variable the contract know
       try {
         const tree = await host.call("tree", { workspace: await fs.realpath(workspace), dir: "", offset: 0 }, 10_000);
         assert.equal(tree.ok, true, JSON.stringify(tree));
-        const entry = (tree as { value: { entries: { name: string; shown: string }[] } }).value.entries.find((item) => item.name.includes(value));
-        assert.ok(entry !== undefined);
-        assert.equal(entry.shown.includes(value), false, `${name}: the shown name hides the value`);
+        // U-103: the app layer lists with the name masked (no real name), or refuses the config holding
+        // the value (key_in_file); either way the value never comes back.
+        const listing = (tree as { value: { ok: boolean; code?: string; entries?: { name: string | null; masked: boolean }[] } }).value;
+        assert.ok(listing.ok ? listing.entries?.some((item) => item.masked && item.name === null) === true : listing.code === "key_in_file", `${name}: ${JSON.stringify(listing).slice(0, 200)}`);
+        assert.equal(JSON.stringify(tree).includes(value), false, `${name}: the tree answer does not hold the value`);
         const settings = await host.call("settings", {}, 10_000);
         assert.equal(settings.ok, true, JSON.stringify(settings));
         const text = JSON.stringify((settings as { value: unknown }).value);

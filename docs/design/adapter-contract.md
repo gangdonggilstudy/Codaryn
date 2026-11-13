@@ -438,47 +438,52 @@ interface ChangedFileView {
   - 고르기는 목록에 있는 id만 그 제공자의 모델 자리에 쓰고 다른 필드는 바꾸지 않는다. anthropic은 최상위 `model`(설정에 `providers.anthropic`이 있으면 그곳), 다른 제공자는 `providers.<이름>.model`이다.
   - 실행은 요청에 제공자를 두지 않는다. CLI `run`과 같이 task의 `model.provider`, 아니면 설정의 `provider`를 따른다(시험: `tests/unit/app/provider.test.ts`).
 
-### 5.9 권한 확인 질문 [제안, 단계 5 시작에 구현] (DR-1, DR-3)
+### 5.9 권한 확인 질문 [구현: 계약·정책·엔진 U-74, 엔진 견고함 U-106, 앱 계층 U-108] (DR-1, DR-3)
 
-실행 중 질문은 **권한 확인 하나**다. 계획 승인은 5.6이다.
+실행 중 질문은 **권한 확인 하나**다. 계획 승인은 5.6이다. 타입은 계약의 것이다(`src/contracts/policy.ts`). 앱 계층은 다시 내보낸다(`src/app/types.ts`). 앱 계층의 중계는 `src/app/permission.ts`, 시험은 `tests/unit/app/u108-confirm-relay.test.ts`다.
 
 ```ts
-export interface ConfirmRequest {
+export interface ConfirmRequest {              // 계약 U-74
   readonly kind: "permission";
-  readonly id: string;
+  readonly id: string;                         // q1, q2, ... (CONFIRM_ID_PATTERN_SOURCE)
   readonly callId: string;
   readonly tool: ToolName;
   readonly permission: PermissionKind;
-  readonly subject: MaskedText;   // 실효 인자의 가림본 요약. 고정 문구와 가린 값만
+  readonly subject: MaskedText;                // 호출의 실행 파일, 가리고 화면에 안전하게(U-106)
+  readonly argumentCount: number;              // 인자 수. 인자 글은 담지 않는다
 }
-export type ConfirmAnswer =
-  | { readonly decision: "allow_once" }
-  | { readonly decision: "deny" }
-  | { readonly decision: "dismissed" };  // 답하지 않고 닫음: 기본값(거부)으로 기록
+export type ConfirmAnswer = { readonly decision: "allow_once" | "deny" | "dismissed" };
+// RunObserver
+confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 ```
 
 의미 (어댑터 공통, DR-3)
 1. **질문을 만들 수 있는 것은 사용자 설정과 프로필뿐이다.**
-   - task 파일은 질문을 만들 수 없다(M-9). task 형식은 자기 `policy`를 가지므로(`src/contracts/config.ts:32`) 이를 구분해야 한다.
-   - "확인 후 허용" 표시(GT의 `confirm: true` 등)는 사용자 설정·프로필에서 온 규칙에만 붙을 수 있다. 설정이 거부한 것은 묻지 않고 거부한다.
-2. **물을 수 없으면 거부다.** `confirm`이 없거나, 터미널이 아니거나, 답할 수 없으면 묻지 않고 거부하고 `by: "default"`로 기록한다.
-   - 확인 통로(`confirm`)를 주지 않은 실행은 앱 계층이 스스로 그 거부를 기록한다(DR-10).
-   - 어댑터가 물을 수 없어 거부할 때는 `deny`가 아니라 `dismissed`로 답한다. 그래서 사람이 고른 거부(`by: "user"`)와 기록이 구분된다.
-3. **답은 그 한 번에만 쓴다.** `allow_once`는 그 호출 하나를 허용한다. "항상 허용"은 없다.
-4. **답을 받은 뒤 실효 인자 검사를 다시 한다.** 기다리는 동안 작업 공간이 바뀔 수 있다(남은 자손 프로세스가 링크를 바꾸는 등). 그래서 정책 2차 판정(`engine/index.ts:456`)을 답 뒤에 다시 하고 통과해야 실행한다.
-5. **시간.** 기다리는 시간도 `maxDurationMs`에 든다(AC-D6). 한도에 닿으면 질문이 끊기고 `budget-exhausted`/`max_duration`이다.
-6. **취소.** 기다리는 중 취소면 `by: "cancelled"`, 실행은 `cancelled`다.
-7. **기록.** 새 사건 두 개로 남긴다(DR-3).
-   - `confirmation_requested { id, kind: "permission", subject }`
-   - `confirmation_answered { id, decision, by: "user" | "default" | "cancelled" }`
-   - `dismissed`는 `decision: "deny", by: "default"`로 기록한다.
-- 질문 글은 가림본이다. 화면을 위해 복원하지 않는다.
-- 구현은 단계 5 시작이다(DR-3). 지금(86a9470)은 계약·정책·엔진·앱 계층·CLI·GUI 어디에도 없다. `RunObserver.confirm`은 타입만 있고 불리지 않는다.
-- PM 결정(2026-11-13, 설계 차이 조사 질문 2): 문서 정리(A) 다음에 이것을 구현한다. 단위는 조사 B의 순서다.
-  - B-1 계약
-  - B-2 정책, B-3 엔진
-  - B-4 앱 계층(계약 B-1 뒤), B-5 CLI 터미널 질문
-  - B-6 GUI 대화상자
+   - `confirm: true`는 설정 파일과 프로필의 명령 규칙에만 있다(`ConfirmableCommandRule`, U-74). task 파일과 작업 종류 정의의 규칙에는 그 필드가 없어 스키마가 거부한다(M-9).
+   - 정책 관문은 `confirm` 없는 규칙 하나라도 그 호출을 허용하면 묻지 않고 허용한다. `confirm` 규칙만 허용할 때 2차 판정이 표시를 준다. 설정이 거부한 것은 묻지 않고 거부한다.
+   - 아직 설정 파일은 `confirm`을 받지 않는다(U-74). 넓히기 판정은 이미 `confirm_removed`를 안다(U-107, 5.11).
+2. **앱 계층의 중계(U-108).** `startRun`의 조립이 `EngineDeps.confirm`을 관찰자의 `confirm`에 잇는다.
+   - 요청은 엔진이 만든 계약의 `ConfirmRequest` 그대로다. 실행의 `signal`도 그대로 넘긴다. 실행이 취소되거나 시간이 다하면 끊기고, 엔진은 그때 기다림을 멈춘다(엔진이 신호와 경주한다).
+   - **답이 아닌 것은 모두 `dismissed`다.**
+     - 관찰자가 없거나 `confirm`이 없다.
+     - `confirm`이 바로 던지거나 나중에 거부된다.
+     - 답이 객체가 아니다.
+     - `decision`이 자기 데이터 속성이 아니다(getter, 프로토타입).
+     - `decision`이 `allow_once`·`deny`·`dismissed`가 아니다.
+   - `decision`은 한 번만 읽고 getter는 부르지 않는다. 엔진에는 앱 계층이 새로 만든 객체를 넘긴다. 엔진도 다시 한 번만 읽는다(U-106).
+3. **물을 수 없으면 거부다.** `dismissed`는 `deny`이고 `by: "default"`로 기록한다. 그래서 사람이 고른 거부(`by: "user"`)와 구분된다(DR-10).
+   - 어댑터가 물을 수 없어 거부할 때는 `deny`가 아니라 `dismissed`로 답한다.
+4. **답은 그 한 번에만 쓴다.** `allow_once`는 그 호출 하나를 허용한다. "항상 허용"은 없다.
+5. **답을 받은 뒤 실효 인자 검사를 다시 한다.** 기다리는 동안 작업 공간이 바뀔 수 있다. 그래서 엔진이 정책 2차 판정을 답 뒤에 다시 하고, 허용이나 같은 표시일 때만 실행한다.
+6. **시간.** 기다리는 시간도 `maxDurationMs`에 든다(AC-D6). 한도에 닿으면 질문이 끊기고 `by: "default"`, 실행은 `budget-exhausted`/`max_duration`이다.
+7. **취소.** 기다리는 중 취소면 `by: "cancelled"`, 실행은 `cancelled`다. `confirm`이 받은 신호도 끊긴다(시험).
+8. **기록과 이벤트.** 새 사건 두 개로 남긴다(DR-3).
+   - `confirmation_requested { id, kind: "permission", callId, tool, permission, subject, argumentCount }`는 묻기 전에 남긴다.
+   - `confirmation_answered { id, decision: "allow_once" | "deny", by: "user" | "default" | "cancelled" }`
+   - 둘 다 실행 이벤트로 관찰자에게 간다(DR-15). 순서는 `confirmation_requested` 이벤트 → `confirm` 부름 → `confirmation_answered` 이벤트다(시험).
+   - 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다.
+- 질문 글은 가림본이다. 화면을 위해 복원하지 않는다. `subject`는 엔진이 이미 제어·보이지 않는 문자를 빼고 키 모양을 가렸다(U-106). 실행 사건 목록(5.13)은 그래도 다른 글처럼 다시 가리고 정리한다.
+- 남은 단위: B-5 CLI 터미널 질문, B-6 GUI 대화상자. 통로 단위의 시험에 "기다리는 동안 프로세스가 산다"를 넣는다(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다).
 
 ### 5.10 오류 모델 [구현 A-1]
 
@@ -537,7 +542,10 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 묻는 규칙(U-74 `confirm: true`)을 새로 더해도 명령 추가다. 사람이 허락하면 전에 못 하던 호출을 하게 된다.
     - U-107(R-79 F-1): 묻던 명령을 묻지 않고 허용(`confirm_removed`). 규칙에서 `confirm`을 빼거나, 묻는 규칙과 같은 호출을 맞추는 `confirm` 없는 규칙을 더한 경우다. 정책 관문은 `confirm` 없는 규칙 하나라도 맞으면 묻지 않고 허용하기 때문이다.
       - 규칙이 묻게 되는 변경은 좁히기다.
-      - 프로필의 규칙도 같다. `profile_changed`에 더해 `confirm_removed`(`profiles.<이름>.policy.commands[i]`)를 준다.
+      - 프로필의 규칙도 같다. `profile_changed`에 더해 그 프로필 안의 항목(`profiles.<이름>.policy.commands[i]`)을 준다.
+        - U-117(R-85 L1): 바뀐 뒤 자기 정책을 가진 프로필은, 그 프로필의 실행이 전에 쓰던 명령과 견준다. 전에 자기 정책이 있었으면 그것이고, 없었으면 설정의 정책이다(정책 없는 프로필은 설정의 정책으로 돈다).
+        - 묻던 명령이 묻지 않게 되면 `confirm_removed`, 새 명령이면 `command_added`(추가 인자면 `extra_args_allowed`도)다.
+        - 바뀐 뒤 자기 정책이 없는 프로필(설정의 정책으로 돌게 됨)은 `profile_changed`만 준다.
       - 작업 종류의 합친 규칙은 설정 규칙의 `confirm`을 이어받으므로, 설정 쪽 항목 하나로 말한다.
     - 한도 올림·없앰
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거
@@ -607,6 +615,102 @@ listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirLi
   - 쪽은 `offset`부터 `limit`개다. `total`은 디렉터리 전체 수, 끝 쪽의 `nextOffset`은 `null`이다. 끝을 넘은 `offset`은 빈 쪽이다.
 - **읽기 결과는 호출 오류가 아니다.** `not_found`(없음, 또는 도중이 파일), `not_dir`(마지막이 파일), `unreadable`(그 밖의 읽기 오류)은 `ok: true`의 상태다. 작업 공간 자체가 없으면 `workspace_not_found`다.
 - **한계.** 읽는 동안 디렉터리가 바뀌면 쪽 사이에 항목이 빠지거나 겹칠 수 있다. 쪽은 매번 새로 읽는다.
+
+### 5.13 실행 사건 목록 [구현 U-90, R-80 반영] (standalone-gui 3.7 "기록" 탭)
+
+끝난 실행이나 도는 중인 실행의 저장된 레코드를 쪽으로 준다. 읽기만 한다: 잠금·기록을 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/run-events.ts`, 시험은 `tests/unit/app/u90-run-events.test.ts`와 `r80-run-events.test.ts`다.
+
+```ts
+listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEventsPage
+  // { kind: "run_events", runId, runKind: "run" | "apply", status: "complete" | "incomplete" | "damaged", recordsChanged?: true,
+  //   masking: "current_secrets", records: StoredRunRecord[], total, skipped, missing, offset, nextOffset }
+  // StoredRunRecord: { seq, at, runId, type: RunEventType, [field]: unknown }
+```
+
+- **설정.** `changes`(5.7)와 같은 읽기 준비로 작업 공간과 지금 등록한 비밀을 얻는다. 설정이 풀리지 않으면 그 오류이고 아무것도 읽지 않는다.
+- **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
+  - `runId`: 실행 id 꼴. `"latest"`는 받지 않는다(실행 목록의 id를 쓴다).
+  - `offset`: 0 이상의 정수. 검사를 지난 레코드 사이의 자리이고 `seq`가 아니다.
+  - `limit`: 1~1,000(`MAX_RUN_EVENTS_PAGE`). 없으면 200(`RUN_EVENTS_PAGE_SIZE`)이다.
+  - `types`: 비지 않은 목록, `RUN_EVENT_TYPES`의 이름만. 없으면 모든 종류다.
+- **실행 판정이 먼저다.** store의 `inspectRun`으로 실행 목록·`report`·`changes`와 같이 판정한다(R-14 L-1).
+  - 정확히 그 이름의 항목이 없으면 `run_not_found`다.
+  - 손상이면 `invalid_run_record`이고 아무것도 보이지 않는다.
+  - journal이나 result.json이 일반 파일이 아니거나 `MAX_REPORT_FILE_BYTES`를 넘어도 `invalid_run_record`다.
+- **줄은 번호로 본다.** 실행 중 허용된 명령이 journal에 줄을 더할 수 있다(R-4 H-1). 줄 하나가 빠져도 그 뒤의 진짜 레코드를 잃지 않게, 각 줄을 번호로 판정한다(R-80 M-1, PM 결정 가·나·다).
+  - **이 실행의 줄**은 JSON 객체(배열 아님)이고, `runId`가 그 실행이고, `seq`가 1 이상의 정수다. 아닌 줄(깨진 줄, 다른 실행의 줄, 번호 없는 줄)은 `skipped`로 세고 journal이 손상이다.
+  - **같은 번호를 두 줄 이상이 주면** 어느 쪽도 진짜로 고르지 않는다. 모두 빼고(`skipped`) 그 번호를 빠짐(`missing`)으로 센다. journal은 손상이다. 그래서 꼴이 맞는 위조 줄이 진짜 줄을 밀어내지 못한다.
+  - **제자리의 줄**(기대하는 번호)은 주든 안 주든 번호를 센다(가). 그래서 그 뒤의 레코드가 이어진다. 다음을 모두 만족하면 주고, 아니면 `skipped`로 센다(손상은 아니다).
+    - `at`이 실제 시각이다(store의 `isRunTimestamp`).
+    - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
+      - U-74의 실행 중 질문과 답(`confirmation_requested`, `confirmation_answered`)도 모델 실행의 종류다. 질문의 `subject`는 엔진이 이미 안전하게 만든 글이지만(U-106) 다른 글과 같이 가리고 정리한다. 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다(실행 이벤트도 같다).
+    - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 그래서 비밀을 필드 이름에 담은 줄, 그리고 필드 이름과 같은 값을 지금 등록했을 때(`text`, `turn` 등) 그 필드가 든 레코드가 빠진다. 그 뒤는 이어진다.
+    - 가릴 수 있다.
+  - **기대보다 큰 번호**를 만나면 거기서 다시 맞춘다(나). 그 사이 번호는 빠짐이고 journal은 손상이다. **기대보다 작은 번호**(순서가 뒤바뀐 줄)는 빼고 손상으로 본다.
+  - 종류마다의 필드는 하나하나 검사하지 않는다. 대신 모든 글을 가리고 정리한다. 어댑터는 필드를 바깥 자료처럼 읽는다(`StoredRunRecord`의 다른 필드는 `unknown`). 번호 자리에 맞는 위조 줄(진짜 줄이 없는 번호)은 가린 채 보일 수 있다. 실행 중에 바뀐 것은 보통 기록 변경 표시가 있다(아래).
+- **적용의 시작 레코드.** `plan_item_started`(R-9 I-4)는 받되(번호를 셈) 주지 않는다. 적용 이벤트와 같다.
+- **다시 가림.** 이벤트와 같다(DR-15).
+  - 모델 실행은 `sanitizeRecord`(도구 이름 제한 `(unknown tool)`)를, 적용은 `maskStrings`를 지금 등록한 값의 게이트웨이로 거친다.
+  - 그다음 키 모양과 지금 설정된 모든 키 값을 가린다(`hideKeysInStrings`, `knownKeyValues`).
+  - 가릴 수 없는 레코드는 빼고 `skipped`로 센다. 토큰은 복원하지 않는다. 실행 때 등록하지 않았던 값도 지금 등록했으면 가려진다.
+- **글을 정리한다**(R-80 L-1). 가린 뒤에 모든 문자열을 정리해 준다. 계약이 모르는 필드의 값도 같다(필드 이름은 이미 평범한 낱말이다).
+  - CR LF는 LF로 바꾼다.
+  - 제어 문자와 양방향 문자는 `cleanText`로 `?`가 된다. 줄바꿈(LF)과 탭은 남는다.
+  - 기본 무시 문자(`\p{Default_Ignorable_Code_Point}`: 영폭 공백·연결자, BOM, 소프트 하이픈, 이체 선택자 등)도 `?`가 된다. 그래서 이모지의 연결자와 이체 선택자도 `?`로 보인다.
+  - 가린 뒤에 정리하므로, 그런 문자로 끊긴 값이나 키도 먼저 찾는다(5.12와 같은 순서).
+- **상태.**
+  - `damaged`(R-80 M-1 다): 위에서 journal이 손상이거나, `report`의 읽기(`summarizeJournal`·`readResult`, 적용은 `summarizeApplyJournal`·`readApplyResult`)가 journal이나 result.json을 거부했다. 받은 레코드와 `missing`을 함께 준다.
+    - 그래서 `report`가 `invalid_run_record`로 거부하는 사본에서 이 함수가 `complete`라고 하지 않는다(시험이 같은 사본에 `report`를 불러 본다).
+    - 끝난 실행의 끝나지 않은 마지막 줄도 손상이다(`report`와 같다).
+  - `missing`: 어느 한 줄도 주지 않는 번호의 수다(빈 번호, 두 줄이 준 번호). 손상이 아니면 0이다.
+  - result.json이 없으면 `incomplete`다(도는 중이거나 그것 없이 멈춤). 이때 끝나지 않은 마지막 줄은 세지 않고 뺀다. 그 밖의 손상은 `incomplete`보다 `damaged`가 먼저다.
+  - 둘 다 아니면 `complete`다. 제자리 줄을 거른 것만으로는 손상이 아니다. 빠진 수는 `skipped`가 말한다.
+  - 기록 변경 표시가 있으면 `recordsChanged: true`다(store의 `hasRecordsChangedMark`, 확인하지 못해도 표시로 셈, DR-38). 레코드는 그래도 준다(`report`와 같음).
+- **쪽.** 검사와 필터를 지난 레코드에서 `offset`부터 `limit`개를 주되, 레코드 JSON이 2 MiB(`MAX_RUN_EVENTS_PAGE_BYTES`, UTF-8)에 이르기 전에 끊는다. 그보다 큰 레코드는 혼자 한 쪽이 되므로 쪽은 늘 나아간다. `total`과 `skipped`는 쪽마다 journal 전체로 센다.
+- **한계.**
+  - 쪽마다 journal 전체를 다시 읽고 가린다. 이 기계에서 가리기는 MiB당 약 0.1초, 키 가리기는 약 0.2초였다. 큰 journal이면 쪽마다 그만큼 걸린다. R-80 검토에서 40 MiB journal은 쪽마다 약 6.3초였다.
+  - 기대보다 훨씬 큰 번호를 단 위조 줄이 앞에 있으면, 그 뒤의 진짜 줄은 작은 번호라 빠진다. 이때 상태는 `damaged`이고 `missing`이 그만큼 크다. 조용히 일부만 주지는 않는다.
+  - `total`은 같은 `types` 거름에서 쪽마다 같다(R-80 I-4).
+  - 등록 값 가리기의 한계는 5.7과 같다(지금 등록한 값만 가린다).
+
+### 5.14 적용 전 점검 [구현 U-91] (standalone-gui 3.9, DR-21)
+
+계획 화면이 첫 적용 전에 "적용할 수 없는 행동"과 "동의가 필요한 이동"을 보이게 한다. 지금은 첫 적용이 `consent_required`로 끝난 뒤에야 안다. 아무것도 옮기거나 기록하지 않는다. 코드는 `src/app/check-apply.ts`, 시험은 `tests/unit/app/u91-check-apply.test.ts`다.
+
+```ts
+checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
+  // { kind: "plan_check", planRunId, digest, checkedAt, problems: { index, problem }[], unsafeMoves: number[],
+  //   inventoryLimitReached, probesLeft, probesRemoved, lockLeft }
+```
+
+- **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
+  - `planRunId`: 실행 id 꼴, `"latest"`는 받지 않는다(보인 계획의 id).
+  - `digest`: 보인 계획의 다이제스트나 그 앞 12자(`MIN_PLAN_DIGEST_PREFIX`) 이상, 소문자 16진.
+- **거부는 적용의 것이다.** 아래 순서로 본다. 여러 개에 걸리면 적용과 코드가 다를 수 있다(적용은 실행 판정을 작업 종류보다 먼저 본다).
+  1. 설정(`readingSecrets`)과 그 오류
+  2. 적용 task가 `plan: "apply"`로 풀리지 않으면 `run_not_plan`
+  3. 계획 보기(`plan`, CLI의 runPlan)의 오류: `run_not_found`, `invalid_run_record`, `run_not_plan`, `plan_run_missing`, `plan_secrets_differ`(DR-28)
+  4. 이미 적용됨 `plan_already_applied`, 기록 변경 표시 `plan_records_changed`, 다이제스트가 다르면 `plan_not_approved`
+  5. store의 `loadPlan`으로 계획을 다시 읽어 경로를 얻는다. 보기가 판정한 계획(같은 다이제스트, 적용 안 됨)이어야 한다.
+  6. 잠금. 다른 작업이 잡고 있으면 `workspace_locked`다(재시도 가능).
+- **판정은 적용 사전 점검의 것이다.** 적용 task의 설정으로 행동마다 본다.
+  - 적용 task의 `planActions`와 정책 관문(`createPolicyGate`, `PLAN_ACTION_DESCRIPTORS`, 경로를 풀기 전과 후). 아니면 `denied`다.
+    - 엔진은 이 부름을 `applyPlan` 안에 둔다. 엔진이 `preflightPlan`으로 내보내기 전까지(조사 3-a) 앱 계층이 같은 방식으로 부른다.
+    - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
+  - 그다음 tools의 `createPlanExecutor`의 `check`를 그대로 부른다: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
+  - 인벤토리 상한(DR-6)은 계획 보기가 센 것이다(같은 `createInventoryChecker`).
+- **잠금과 시험 링크를 거둔다.**
+  - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.
+  - 끝나기 전에, 실행기가 거두지 못한 이 프로세스의 시험 링크를 찾아 지운다. 대상은 점검 전에 없던 이름이고, 일반 파일만이다.
+  - 그래도 남은 시험 링크의 수는 `probesLeft`, 풀지 못한 잠금은 `lockLeft: true`로 알린다. 숨기지 않는다. 잠금 풀기는 한 번 더 해 본다.
+  - R-81 L1: 점검하기 전에, 잠금 아래에서 상태 디렉터리와 계획의 원본 폴더에 있는 시험 링크 이름(`.codaryn-link-probe-<pid>-…`, 어느 프로세스의 것이든)을 모두 지운다. 일반 파일만이다.
+    - 점검과 적용은 이 잠금을 쥐어야 시험 링크를 만든다. 그래서 그런 이름은 만들고 지우기 사이에 끝난 프로세스가 남긴 것이거나, 앞선 점검이 남았다고 알린 것이다.
+    - 시험 링크는 언제나 다른 파일의 두 번째 이름이다. 그래서 하드 링크 수(nlink)가 2 이상인 일반 파일만 지운다. 그 이름의 유일한 파일(nlink 1)은 지우면 내용이 사라지므로 지우지 않고 `probesLeft`로 센다. **점검은 사람의 파일 내용을 없애지 않는다**(시험).
+    - 지운 수는 `probesRemoved`로 알리고, 지우지 못한 것은 `probesLeft`에 더한다.
+  - 점검이 도중에 실패하면 `internal_error`이고, 남긴 것이 있으면 문구가 그렇다고 말한다.
+- **남기지 않는다.** 실행 디렉터리, journal, `plan_checked` 기록, 적용 표시(`markApplied`)를 만들지 않는다. 계획은 그대로 다음 적용을 기다린다.
+- **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.
+- **동의도 약속도 아니다.** 점검 결과는 DR-21 동의를 만들지 않는다. 동의는 지금처럼 사람의 입력으로만 만들어 `applyPlan`의 `unsafeMoveConsent`로 간다. 적용은 사전 점검을 다시 하므로, 그 사이에 파일이 바뀌면 `plan_stale`로 끝난다.
 
 ## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
 
@@ -710,6 +814,8 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 조립 | 보호 경로가 있으면 무결성 점검 사건이 그대로 온다 |
 | 읽기 명령 | `report`(complete, `run_not_found`), `revert`, `doctor`(점검 id마다 하나: 지금 18개, `DOCTOR_CHECK_IDS`. 설계 당시 12개, W-5) |
 | 작업 공간 목록(5.12) | 종류·순서·보호·`state`, 등록 값·키 모양·제어 문자 이름이 가려지고 `name: null`, 링크·junction과 그 안의 경로는 `refused`, `not_found`·`not_dir`, 맞지 않는 인자, 500개씩의 쪽과 숫자 순서, 상한을 넘으면 `too_large`, 상태 디렉터리를 만들지 않음, 설정 오류 |
+| 실행 사건 목록(5.13) | 끝난 실행의 레코드가 그 실행의 이벤트와 같음(`at` 제외), 꼴이 맞지 않는 줄(JSON 아님, 배열, 다른 실행, 다음 번호 아님, 시각 아님, 모르는 종류, 다른 실행 종류의 종류, 비밀을 담은 필드 이름, 끝나지 않은 꼬리)이 빠지고 셈, 그 뒤 맞는 줄은 가려서 줌, 지금 등록한 값과 키 모양을 가림, 적용 실행(시작 레코드 빠짐, 번호 유지), 기록 변경 표시, 도는 중(`incomplete`), 없음·손상·맞지 않는 인자, 종류 필터와 쪽, 2 MiB 끊기와 큰 레코드 혼자, 잠금 없음·journal 그대로, 설정 오류 |
+| 적용 전 점검(5.14) | 적용할 수 있는 계획에서 아무것도 남거나 바뀌지 않고(작업 공간 전체 비교) 그 뒤 적용이 됨, 실제 적용의 `plan_checked`와 행동마다 같음(`source_changed`, `destination_exists`, `denied`), 하드 링크 없음의 `unsafeMoves`, 실행기가 거두지 못한 시험 링크를 거둠, 거두지 못한 것은 `probesLeft`, 점검 중 잠금과 잡힌 잠금의 `workspace_locked`, 풀지 못한 잠금은 `lockLeft`, 적용의 거부(인자, 다이제스트, 없음, 작업 종류, DR-28, 기록 변경, 이미 적용, 적용 실행), 설정 오류 |
 
 - 시험의 힘을 변이로 확인했다. 아래 셋은 각각 관련 시험이 실패했고, 되돌린 뒤 통과했다.
   - 변수 파일을 사본 대신 호출자 env에 적재

@@ -146,9 +146,10 @@ test("workspaces: the tree answer gets ids for plain entries only; real names st
       { name: "b.txt", shown: "b.txt", kind: "file", masked: false },
       { name: "deeper", shown: "deeper", kind: "dir", masked: false },
       { name: "link", shown: "link", kind: "link", masked: false },
-      { name: "sk-real-name", shown: "[key]", kind: "dir", masked: true },
-      { name: "a\u0007b", shown: "", kind: "file", masked: true },
-      { name: "cheat", shown: "cheat", kind: "file", masked: true },
+      // U-103 (U-89): a masked entry comes without its real name.
+      { name: null, shown: "[key]", kind: "dir", masked: true },
+      { name: null, shown: "", kind: "file", masked: true },
+      { name: null, shown: "cheat", kind: "file", masked: true },
     ],
     total: 6,
     offset: 0,
@@ -164,15 +165,24 @@ test("workspaces: the tree answer gets ids for plain entries only; real names st
       ["link", "link", false],
       ["[key]", "dir", false],
       ["", "file", false],
-      ["", "file", false],
+      ["cheat", "file", false],
     ],
   );
-  assert.doesNotMatch(JSON.stringify(reply), /sk-real-name|\u0007/);
   const deeper = reply.entries[1]?.id ?? "";
   assert.equal(workspaces.treeDir(HANDLE, deeper), "sub/deeper");
   assert.equal(workspaces.treeDir("f".repeat(32), deeper), null, "an id belongs to its workspace");
   assert.equal(workspaces.treeDir(HANDLE, null), "");
-  for (const bad of [null, "text", { ok: true, entries: "x", total: 0, offset: 0, nextOffset: null }, { ok: true, entries: [{ name: 1 }], total: 1, offset: 0, nextOffset: null }]) {
+  // U-103: a masked entry with a name, a plain one without, or one whose name is not what is shown: host_error.
+  const one = (entry: unknown): unknown => ({ ok: true, entries: [entry], total: 1, offset: 0, nextOffset: null });
+  for (const bad of [
+    null,
+    "text",
+    { ok: true, entries: "x", total: 0, offset: 0, nextOffset: null },
+    { ok: true, entries: [{ name: 1 }], total: 1, offset: 0, nextOffset: null },
+    one({ name: "sk-real-name", shown: "[key]", kind: "dir", masked: true }),
+    one({ name: null, shown: "a", kind: "file", masked: false }),
+    one({ name: "real", shown: "shown", kind: "file", masked: false }),
+  ]) {
     assert.deepEqual(workspaces.treeReply(HANDLE, "", bad), { ok: false, code: "host_error" });
   }
   assert.deepEqual(workspaces.treeReply(HANDLE, "", { ok: false, code: "outside_root" }), { ok: false, code: "outside_root" });

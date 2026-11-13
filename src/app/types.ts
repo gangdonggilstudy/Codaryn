@@ -8,18 +8,23 @@
  */
 
 import type {
+  ApplyJournalEventType,
   ChangesApplyRun,
+  ContentHash,
   CliErrorCategory,
   CliErrorCode,
   Clock,
   CodarynConfig,
   CommandRule,
+  ConfirmAnswer,
+  ConfirmRequest,
   InitOutput,
   InitSuggestedCommand,
   InitSuggestedProtectedPath,
   InputDiagnostic,
   DoctorOutput,
   EngineResult,
+  JournalEventType,
   JournalRecord,
   MaskedText,
   ModelsOutput,
@@ -29,6 +34,7 @@ import type {
   CleanupSelection,
   CleanupStatus,
   PermissionKind,
+  PlanItemProblem,
   PolicyNarrowingKind,
   StateSummary,
   ReportOutput,
@@ -270,31 +276,23 @@ export type RunEvent =
 /**
  * DR-1, DR-3: questions during a run are permission questions only. Plan approval is a step
  * between runs (`plan`, `applyPlan`). Only the user's settings and profiles can make a permission
- * ask (never a task file, M-9); after an answer the effective arguments are judged again. The
- * engine asks from the start of stage 5; until then `RunObserver.confirm` is never called.
+ * ask (never a task file, M-9); after an answer the effective arguments are judged again.
+ * U-108: the contract's types (src/contracts/policy.ts, U-74): the request has fixed fields, the
+ * masked executable made safe for a screen (U-106) and the number of arguments, never the
+ * arguments; the answer is allow_once, deny or dismissed (closed without answering, recorded as
+ * deny by `default`).
  */
-export interface ConfirmRequest {
-  readonly kind: "permission";
-  readonly id: string;
-  readonly callId: string;
-  readonly tool: ToolName;
-  readonly permission: PermissionKind;
-  /** The effective arguments, masked: fixed text and masked values only. */
-  readonly subject: MaskedText;
-}
-
-export type ConfirmAnswer =
-  | { readonly decision: "allow_once" }
-  | { readonly decision: "deny" }
-  /** The person closed the question without answering. Recorded as the default (`by: "default"`), a denial. */
-  | { readonly decision: "dismissed" };
+export type { ConfirmAnswer, ConfirmRequest };
 
 export interface RunObserver {
   /** Called synchronously for each event. Exceptions are ignored and never change the run. */
   onEvent?(event: RunEvent): void;
   /**
-   * Stage 5 (DR-3). Not called yet. When it is absent the app layer itself records each question
-   * as denied with `by: "default"`, so a denial no person gave is never recorded as theirs (DR-10).
+   * U-108 (B-4, DR-3): asked for each permission question of the run, after the
+   * `confirmation_requested` event and before `confirmation_answered` (permission.ts). `signal`
+   * aborts when the run is cancelled or its time is up; the run stops waiting then. Absent, a
+   * throw, or an answer that is not one of the decisions (read once, as an own data property) is
+   * `dismissed`: recorded as deny by `default`, never as the person's (DR-10).
    */
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 }
@@ -616,6 +614,102 @@ export type WorkspaceDirListing =
     }
   | { readonly kind: "workspace_dir"; readonly status: "not_found" | "not_dir" | "too_large" | "refused" | "unreadable" };
 
+/** U-90: a record type a run's journal (JournalEventType) or an apply's (ApplyJournalEventType) shows; RUN_EVENT_TYPES lists them. */
+export type RunEventType = JournalEventType | ApplyJournalEventType;
+
+/** U-90 (GUI 3.7, adapter-contract 5.13): one page of a run's stored records. */
+export interface ListRunEventsRequest {
+  /** The workspace and the values registered now, which mask the records again (DR-17, U-17). */
+  readonly settings: TaskForm;
+  /** A run id from the run list; "latest" is not taken. */
+  readonly runId: string;
+  /** From 0: the previous page's `nextOffset` (a place among the records that pass, not a `seq`). */
+  readonly offset: number;
+  /** 1 to MAX_RUN_EVENTS_PAGE (1,000); RUN_EVENTS_PAGE_SIZE (200) when left out. */
+  readonly limit?: number;
+  /** Only these record types; all when left out. Not empty, names from RUN_EVENT_TYPES only. */
+  readonly types?: readonly RunEventType[];
+}
+
+/**
+ * U-90: a stored record as given: checked for its `seq`, `at`, `runId` and `type` and for plain
+ * field names, every string masked again. Its other fields are as the journal holds them, so an
+ * adapter reads them as it would any outside data (a line a command wrote can have the right shape).
+ */
+export interface StoredRunRecord {
+  readonly seq: number;
+  readonly at: string;
+  readonly runId: string;
+  readonly type: RunEventType;
+  readonly [field: string]: unknown;
+}
+
+export interface RunEventsPage {
+  readonly kind: "run_events";
+  readonly runId: string;
+  /** By the journal's first record (DR-12): `run_started` or `apply_started`. */
+  readonly runKind: "run" | "apply";
+  /**
+   * "incomplete": the run has no result.json (still going, or stopped without one). R-80 M-1:
+   * "damaged": a line is broken or not this run's, a number is missing or given twice, or `report`
+   * refuses the journal or result.json; the records taken are given, with `missing`.
+   */
+  readonly status: "complete" | "incomplete" | "damaged";
+  /** DR-38: the run has a records-changed mark (one that cannot be checked counts). Absent: none. */
+  readonly recordsChanged?: true;
+  /** Masked with the values registered now, not with the run's table; tokens are never restored. */
+  readonly masking: "current_secrets";
+  readonly records: readonly StoredRunRecord[];
+  /** The records that pass the checks and the filter. */
+  readonly total: number;
+  /** Lines of the whole journal left out: not of this run's shape, or not maskable. */
+  readonly skipped: number;
+  /** R-80 M-1: record numbers no single line gives (a gap, or a number two lines give); 0 when none. */
+  readonly missing: number;
+  readonly offset: number;
+  readonly nextOffset: number | null;
+}
+
+/** U-91 (GUI 3.9, DR-21, adapter-contract 5.14): a pending plan checked before it is applied. */
+export interface CheckApplyRequest {
+  /** The apply's settings (DR-5, DR-12): its policy and planActions judge the actions. */
+  readonly settings: TaskForm;
+  /** The plan run, by its own id ("latest" is not taken). */
+  readonly planRunId: string;
+  /** The digest of the plan shown, or its first MIN_PLAN_DIGEST_PREFIX (12) or more characters. Another plan is plan_not_approved. */
+  readonly digest: string;
+}
+
+/**
+ * U-91: what the apply's preflight would find now. Indexes, codes and counts only: the paths are the
+ * plan view's (masked), matched by index. Not a consent (DR-21) and not a promise: the apply checks
+ * again, and a file changed in between ends it as plan_stale.
+ */
+export interface PlanCheck {
+  readonly kind: "plan_check";
+  readonly planRunId: string;
+  /** The full digest of the plan checked. */
+  readonly digest: ContentHash;
+  /** When it was checked (ISO 8601 UTC). */
+  readonly checkedAt: string;
+  /** Actions that cannot be applied (0-based index), judged as the apply's plan_checked.problems. */
+  readonly problems: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
+  /** DR-21: actions that could only be made unsafely (no hard links there); the apply needs the person's consent for them. */
+  readonly unsafeMoves: readonly number[];
+  /** DR-6: the workspace has more files than the inventory lists, so the apply could not be verified. */
+  readonly inventoryLimitReached: boolean;
+  /** Hard link probes this check could not take back (normally 0), earlier ones it found included: each is a second name of a source file. */
+  readonly probesLeft: number;
+  /**
+   * R-81 L1: probes an ended check or apply had left (in the state directory or the plan's source
+   * folders), removed by this check. Only a second name of another file (nlink 2 or more) is removed;
+   * a file of a probe name that is the only name of its content is kept and counted in `probesLeft`.
+   */
+  readonly probesRemoved: number;
+  /** True when the workspace lock this check took could not be released: runs are refused until it is. */
+  readonly lockLeft: boolean;
+}
+
 /** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */
 export interface PlanRequest {
   readonly settings: TaskForm;
@@ -718,6 +812,10 @@ export interface CodarynApp {
   changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
   /** U-89 (GUI 3.3): one directory of the workspace, masked, links never followed. Reads only. */
   listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>>;
+  /** U-90 (GUI 3.7): one page of a run's stored records, checked line by line and masked again (adapter-contract 5.13). */
+  listRunEvents(request: ListRunEventsRequest): Promise<AppCallOutcome<RunEventsPage>>;
+  /** U-91 (GUI 3.9, DR-21): the apply's preflight for a pending plan, under the lock; nothing moved or recorded (adapter-contract 5.14). */
+  checkApply(request: CheckApplyRequest): Promise<AppCallOutcome<PlanCheck>>;
   /**
    * DR-1, DR-17: the plan screen after a `needs-input`/`plan_pending` result, the apply with the
    * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.

@@ -97,8 +97,8 @@ export type JournalEvent =
   | { readonly type: "tool_result"; readonly result: ToolResult }
   /**
    * U-74 (DR-3): a permission question, recorded before it is asked, also when nobody can be asked
-   * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable and a count; no
-   * argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
+   * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable (key shapes hidden,
+   * U-106) and a count; no argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
    */
   | {
       readonly type: "confirmation_requested";
@@ -160,6 +160,32 @@ export type JournalEvent =
     };
 
 export type JournalEventType = JournalEvent["type"];
+
+/**
+ * U-105 (app layer U-90): every JournalEventType at run time, for readers of stored lines that must
+ * tell a known record type from another string (the app layer's run event list). The table names
+ * each type once; `satisfies` makes a type added to JournalEvent fail to compile until it is listed
+ * here, and a name that is not a type fail as well. Order: as in JournalEvent.
+ */
+const JOURNAL_EVENT_TYPE_TABLE = {
+  run_started: true,
+  model_request: true,
+  model_response: true,
+  model_error: true,
+  tool_decision: true,
+  tool_result: true,
+  confirmation_requested: true,
+  confirmation_answered: true,
+  file_changed: true,
+  verifier_result: true,
+  repair_started: true,
+  integrity_checked: true,
+  state_checked: true,
+  run_finished: true,
+} as const satisfies Record<JournalEventType, true>;
+
+/** U-105: the record types of a run journal (JournalEventType), in JournalEvent's order. */
+export const JOURNAL_EVENT_TYPES: readonly JournalEventType[] = Object.keys(JOURNAL_EVENT_TYPE_TABLE) as JournalEventType[];
 
 /** A stored line: the event plus fields the journal adds. */
 export type JournalRecord = JournalEvent & {

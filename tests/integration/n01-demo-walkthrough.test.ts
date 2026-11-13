@@ -157,6 +157,11 @@ test("N-E 체험 예시: 사본에서 doctor → run → runs → report → rev
     documented("stderr에는 진행 줄과 끝 요약이 나온다");
     assertSameLines(progressLines(run), documentedBlock("run", (block) => block.startsWith("codaryn: run started")), "the run's stderr");
     assert.ok(run.stderr.includes(`Run id: ${result.runId}`), "the summary names this run");
+    // U-104: of the five protected-material checks that found nothing, only the first is a progress
+    // line; the end summary counts all five.
+    documented("바뀐 것이 없으면 진행 줄에는 첫 확인만 나오고");
+    assert.equal(progressLines(run).filter((line) => line.startsWith("codaryn: protected material check")).length, 1);
+    assert.ok(progressLines(run).includes(documented("Protected material checks that found no change: 5")), "the summary counts the checks");
 
     documented("stdout의 JSON은 `status` `done`, `reason` `verified`, `exitCode` 0이다");
     assert.equal(result.status, "done");

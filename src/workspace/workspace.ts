@@ -23,6 +23,7 @@ import path from "node:path";
 import { MAX_READ_BYTES, MAX_SEARCH_ENTRIES, asRawText } from "../contracts/index.js";
 import type {
   ContentHash,
+  GuardedCallOptions,
   ListEntry,
   ListOutcome,
   PathAccess,
@@ -35,7 +36,7 @@ import type {
   WriteTextRequest,
 } from "../contracts/index.js";
 import type { FileLayer } from "./file-layer.js";
-import { FolderWatch, retried, sameChain, sameId, walkChain } from "./guard.js";
+import { FolderWatch, retried, retryDeadline, sameChain, sameId, walkChain } from "./guard.js";
 import { classifyAgainstRoot, isStateDirName, isValidPathInput } from "./lexical.js";
 
 function errorCode(error: unknown): string | undefined {
@@ -127,7 +128,7 @@ export async function createWorkspaceWithFileLayer(
    * the real path walked again the same (guard.ts: folders unchanged too, so a swap undone is seen).
    * A change seen is tried again (retried); still seen, it is io_error.
    */
-  async function readChecked(target: ResolvedPath): Promise<{ readonly ok: true; readonly bytes: Uint8Array } | { readonly ok: false; readonly code: ReadFailure }> {
+  async function readChecked(target: ResolvedPath, options: GuardedCallOptions = {}): Promise<{ readonly ok: true; readonly bytes: Uint8Array } | { readonly ok: false; readonly code: ReadFailure }> {
     const attempt = async (): Promise<{ readonly bytes: Uint8Array } | ReadFailure | "changed"> => {
       const first = await walkChain(files.lstatId, root, target.relative);
       if (!first.ok) return first.code;
@@ -156,16 +157,17 @@ export async function createWorkspaceWithFileLayer(
         await handle.close().catch(() => undefined);
       }
     };
-    const outcome = await retried(attempt);
+    // U-213: the run's signal ends the waits between tries; a caller's time limit (a search's) ends the tries.
+    const outcome = await retried(attempt, { signal: options.signal, until: options.retryUntil });
     if (outcome === "changed") return { ok: false, code: "io_error" };
     return typeof outcome === "string" ? { ok: false, code: outcome } : { ok: true, bytes: outcome.bytes };
   }
 
-  async function readText(target: ResolvedPath): Promise<ReadTextOutcome> {
+  async function readText(target: ResolvedPath, options?: GuardedCallOptions): Promise<ReadTextOutcome> {
     if (!issued.has(target)) {
       return { ok: false, code: "io_error" };
     }
-    const read = await readChecked(target);
+    const read = await readChecked(target, options);
     if (!read.ok) {
       return { ok: false, code: read.code };
     }
@@ -195,11 +197,12 @@ export async function createWorkspaceWithFileLayer(
    * (guard.ts). A change seen is tried again (retried); still seen, it is io_error, and no name read
    * through a swapped folder is given.
    */
-  async function list(dir: ResolvedPath): Promise<ListOutcome> {
+  async function list(dir: ResolvedPath, options?: GuardedCallOptions): Promise<ListOutcome> {
     if (!issued.has(dir)) {
       return { ok: false, code: "io_error" };
     }
-    const outcome = await retried(() => listOnce(dir));
+    // U-213: a listing's tries are limited in time too (a large tree), by the caller's time or 2 s from now.
+    const outcome = await retried(() => listOnce(dir), { signal: options?.signal, until: options?.retryUntil ?? retryDeadline() });
     return outcome === "changed" ? { ok: false, code: "io_error" } : outcome;
   }
 

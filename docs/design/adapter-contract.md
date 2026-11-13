@@ -438,47 +438,52 @@ interface ChangedFileView {
   - 고르기는 목록에 있는 id만 그 제공자의 모델 자리에 쓰고 다른 필드는 바꾸지 않는다. anthropic은 최상위 `model`(설정에 `providers.anthropic`이 있으면 그곳), 다른 제공자는 `providers.<이름>.model`이다.
   - 실행은 요청에 제공자를 두지 않는다. CLI `run`과 같이 task의 `model.provider`, 아니면 설정의 `provider`를 따른다(시험: `tests/unit/app/provider.test.ts`).
 
-### 5.9 권한 확인 질문 [제안, 단계 5 시작에 구현] (DR-1, DR-3)
+### 5.9 권한 확인 질문 [구현: 계약·정책·엔진 U-74, 엔진 견고함 U-106, 앱 계층 U-108] (DR-1, DR-3)
 
-실행 중 질문은 **권한 확인 하나**다. 계획 승인은 5.6이다.
+실행 중 질문은 **권한 확인 하나**다. 계획 승인은 5.6이다. 타입은 계약의 것이다(`src/contracts/policy.ts`). 앱 계층은 다시 내보낸다(`src/app/types.ts`). 앱 계층의 중계는 `src/app/permission.ts`, 시험은 `tests/unit/app/u108-confirm-relay.test.ts`다.
 
 ```ts
-export interface ConfirmRequest {
+export interface ConfirmRequest {              // 계약 U-74
   readonly kind: "permission";
-  readonly id: string;
+  readonly id: string;                         // q1, q2, ... (CONFIRM_ID_PATTERN_SOURCE)
   readonly callId: string;
   readonly tool: ToolName;
   readonly permission: PermissionKind;
-  readonly subject: MaskedText;   // 실효 인자의 가림본 요약. 고정 문구와 가린 값만
+  readonly subject: MaskedText;                // 호출의 실행 파일, 가리고 화면에 안전하게(U-106)
+  readonly argumentCount: number;              // 인자 수. 인자 글은 담지 않는다
 }
-export type ConfirmAnswer =
-  | { readonly decision: "allow_once" }
-  | { readonly decision: "deny" }
-  | { readonly decision: "dismissed" };  // 답하지 않고 닫음: 기본값(거부)으로 기록
+export type ConfirmAnswer = { readonly decision: "allow_once" | "deny" | "dismissed" };
+// RunObserver
+confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 ```
 
 의미 (어댑터 공통, DR-3)
 1. **질문을 만들 수 있는 것은 사용자 설정과 프로필뿐이다.**
-   - task 파일은 질문을 만들 수 없다(M-9). task 형식은 자기 `policy`를 가지므로(`src/contracts/config.ts:32`) 이를 구분해야 한다.
-   - "확인 후 허용" 표시(GT의 `confirm: true` 등)는 사용자 설정·프로필에서 온 규칙에만 붙을 수 있다. 설정이 거부한 것은 묻지 않고 거부한다.
-2. **물을 수 없으면 거부다.** `confirm`이 없거나, 터미널이 아니거나, 답할 수 없으면 묻지 않고 거부하고 `by: "default"`로 기록한다.
-   - 확인 통로(`confirm`)를 주지 않은 실행은 앱 계층이 스스로 그 거부를 기록한다(DR-10).
-   - 어댑터가 물을 수 없어 거부할 때는 `deny`가 아니라 `dismissed`로 답한다. 그래서 사람이 고른 거부(`by: "user"`)와 기록이 구분된다.
-3. **답은 그 한 번에만 쓴다.** `allow_once`는 그 호출 하나를 허용한다. "항상 허용"은 없다.
-4. **답을 받은 뒤 실효 인자 검사를 다시 한다.** 기다리는 동안 작업 공간이 바뀔 수 있다(남은 자손 프로세스가 링크를 바꾸는 등). 그래서 정책 2차 판정(`engine/index.ts:456`)을 답 뒤에 다시 하고 통과해야 실행한다.
-5. **시간.** 기다리는 시간도 `maxDurationMs`에 든다(AC-D6). 한도에 닿으면 질문이 끊기고 `budget-exhausted`/`max_duration`이다.
-6. **취소.** 기다리는 중 취소면 `by: "cancelled"`, 실행은 `cancelled`다.
-7. **기록.** 새 사건 두 개로 남긴다(DR-3).
-   - `confirmation_requested { id, kind: "permission", subject }`
-   - `confirmation_answered { id, decision, by: "user" | "default" | "cancelled" }`
-   - `dismissed`는 `decision: "deny", by: "default"`로 기록한다.
-- 질문 글은 가림본이다. 화면을 위해 복원하지 않는다.
-- 구현은 단계 5 시작이다(DR-3). 지금(86a9470)은 계약·정책·엔진·앱 계층·CLI·GUI 어디에도 없다. `RunObserver.confirm`은 타입만 있고 불리지 않는다.
-- PM 결정(2026-11-13, 설계 차이 조사 질문 2): 문서 정리(A) 다음에 이것을 구현한다. 단위는 조사 B의 순서다.
-  - B-1 계약
-  - B-2 정책, B-3 엔진
-  - B-4 앱 계층(계약 B-1 뒤), B-5 CLI 터미널 질문
-  - B-6 GUI 대화상자
+   - `confirm: true`는 설정 파일과 프로필의 명령 규칙에만 있다(`ConfirmableCommandRule`, U-74). task 파일과 작업 종류 정의의 규칙에는 그 필드가 없어 스키마가 거부한다(M-9).
+   - 정책 관문은 `confirm` 없는 규칙 하나라도 그 호출을 허용하면 묻지 않고 허용한다. `confirm` 규칙만 허용할 때 2차 판정이 표시를 준다. 설정이 거부한 것은 묻지 않고 거부한다.
+   - 아직 설정 파일은 `confirm`을 받지 않는다(U-74). 넓히기 판정은 이미 `confirm_removed`를 안다(U-107, 5.11).
+2. **앱 계층의 중계(U-108).** `startRun`의 조립이 `EngineDeps.confirm`을 관찰자의 `confirm`에 잇는다.
+   - 요청은 엔진이 만든 계약의 `ConfirmRequest` 그대로다. 실행의 `signal`도 그대로 넘긴다. 실행이 취소되거나 시간이 다하면 끊기고, 엔진은 그때 기다림을 멈춘다(엔진이 신호와 경주한다).
+   - **답이 아닌 것은 모두 `dismissed`다.**
+     - 관찰자가 없거나 `confirm`이 없다.
+     - `confirm`이 바로 던지거나 나중에 거부된다.
+     - 답이 객체가 아니다.
+     - `decision`이 자기 데이터 속성이 아니다(getter, 프로토타입).
+     - `decision`이 `allow_once`·`deny`·`dismissed`가 아니다.
+   - `decision`은 한 번만 읽고 getter는 부르지 않는다. 엔진에는 앱 계층이 새로 만든 객체를 넘긴다. 엔진도 다시 한 번만 읽는다(U-106).
+3. **물을 수 없으면 거부다.** `dismissed`는 `deny`이고 `by: "default"`로 기록한다. 그래서 사람이 고른 거부(`by: "user"`)와 구분된다(DR-10).
+   - 어댑터가 물을 수 없어 거부할 때는 `deny`가 아니라 `dismissed`로 답한다.
+4. **답은 그 한 번에만 쓴다.** `allow_once`는 그 호출 하나를 허용한다. "항상 허용"은 없다.
+5. **답을 받은 뒤 실효 인자 검사를 다시 한다.** 기다리는 동안 작업 공간이 바뀔 수 있다. 그래서 엔진이 정책 2차 판정을 답 뒤에 다시 하고, 허용이나 같은 표시일 때만 실행한다.
+6. **시간.** 기다리는 시간도 `maxDurationMs`에 든다(AC-D6). 한도에 닿으면 질문이 끊기고 `by: "default"`, 실행은 `budget-exhausted`/`max_duration`이다.
+7. **취소.** 기다리는 중 취소면 `by: "cancelled"`, 실행은 `cancelled`다. `confirm`이 받은 신호도 끊긴다(시험).
+8. **기록과 이벤트.** 새 사건 두 개로 남긴다(DR-3).
+   - `confirmation_requested { id, kind: "permission", callId, tool, permission, subject, argumentCount }`는 묻기 전에 남긴다.
+   - `confirmation_answered { id, decision: "allow_once" | "deny", by: "user" | "default" | "cancelled" }`
+   - 둘 다 실행 이벤트로 관찰자에게 간다(DR-15). 순서는 `confirmation_requested` 이벤트 → `confirm` 부름 → `confirmation_answered` 이벤트다(시험).
+   - 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다.
+- 질문 글은 가림본이다. 화면을 위해 복원하지 않는다. `subject`는 엔진이 이미 제어·보이지 않는 문자를 빼고 키 모양을 가렸다(U-106). 실행 사건 목록(5.13)은 그래도 다른 글처럼 다시 가리고 정리한다.
+- 남은 단위: B-5 CLI 터미널 질문, B-6 GUI 대화상자. 통로 단위의 시험에 "기다리는 동안 프로세스가 산다"를 넣는다(R-79 I-1: 엔진의 시간 한도 타이머는 `unref()`다).
 
 ### 5.10 오류 모델 [구현 A-1]
 
@@ -537,7 +542,10 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 묻는 규칙(U-74 `confirm: true`)을 새로 더해도 명령 추가다. 사람이 허락하면 전에 못 하던 호출을 하게 된다.
     - U-107(R-79 F-1): 묻던 명령을 묻지 않고 허용(`confirm_removed`). 규칙에서 `confirm`을 빼거나, 묻는 규칙과 같은 호출을 맞추는 `confirm` 없는 규칙을 더한 경우다. 정책 관문은 `confirm` 없는 규칙 하나라도 맞으면 묻지 않고 허용하기 때문이다.
       - 규칙이 묻게 되는 변경은 좁히기다.
-      - 프로필의 규칙도 같다. `profile_changed`에 더해 `confirm_removed`(`profiles.<이름>.policy.commands[i]`)를 준다.
+      - 프로필의 규칙도 같다. `profile_changed`에 더해 그 프로필 안의 항목(`profiles.<이름>.policy.commands[i]`)을 준다.
+        - U-117(R-85 L1): 바뀐 뒤 자기 정책을 가진 프로필은, 그 프로필의 실행이 전에 쓰던 명령과 견준다. 전에 자기 정책이 있었으면 그것이고, 없었으면 설정의 정책이다(정책 없는 프로필은 설정의 정책으로 돈다).
+        - 묻던 명령이 묻지 않게 되면 `confirm_removed`, 새 명령이면 `command_added`(추가 인자면 `extra_args_allowed`도)다.
+        - 바뀐 뒤 자기 정책이 없는 프로필(설정의 정책으로 돌게 됨)은 `profile_changed`만 준다.
       - 작업 종류의 합친 규칙은 설정 규칙의 `confirm`을 이어받으므로, 설정 쪽 항목 하나로 말한다.
     - 한도 올림·없앰
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거
@@ -634,7 +642,7 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - **같은 번호를 두 줄 이상이 주면** 어느 쪽도 진짜로 고르지 않는다. 모두 빼고(`skipped`) 그 번호를 빠짐(`missing`)으로 센다. journal은 손상이다. 그래서 꼴이 맞는 위조 줄이 진짜 줄을 밀어내지 못한다.
   - **제자리의 줄**(기대하는 번호)은 주든 안 주든 번호를 센다(가). 그래서 그 뒤의 레코드가 이어진다. 다음을 모두 만족하면 주고, 아니면 `skipped`로 센다(손상은 아니다).
     - `at`이 실제 시각이다(store의 `isRunTimestamp`).
-    - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
+    - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름). U-111: 목록은 계약의 것(`JOURNAL_EVENT_TYPES`, `APPLY_JOURNAL_EVENT_TYPES`, U-105)을 그대로 쓴다.
       - U-74의 실행 중 질문과 답(`confirmation_requested`, `confirmation_answered`)도 모델 실행의 종류다. 질문의 `subject`는 엔진이 이미 안전하게 만든 글이지만(U-106) 다른 글과 같이 가리고 정리한다. 질문의 `tool`도 `tool_decision`처럼 내장 도구 이름이 아니면 `(unknown tool)`이다(실행 이벤트도 같다).
     - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 그래서 비밀을 필드 이름에 담은 줄, 그리고 필드 이름과 같은 값을 지금 등록했을 때(`text`, `turn` 등) 그 필드가 든 레코드가 빠진다. 그 뒤는 이어진다.
     - 가릴 수 있다.
@@ -650,6 +658,11 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - 제어 문자와 양방향 문자는 `cleanText`로 `?`가 된다. 줄바꿈(LF)과 탭은 남는다.
   - 기본 무시 문자(`\p{Default_Ignorable_Code_Point}`: 영폭 공백·연결자, BOM, 소프트 하이픈, 이체 선택자 등)도 `?`가 된다. 그래서 이모지의 연결자와 이체 선택자도 `?`로 보인다.
   - 가린 뒤에 정리하므로, 그런 문자로 끊긴 값이나 키도 먼저 찾는다(5.12와 같은 순서).
+  - **JSON 글의 안쪽**(U-121, R-80b L-1). 도구 결과의 `content`와 도구 호출의 `argsJson`은 JSON 글이다(어느 깊이든: `tool_result.result`, `model_request`의 도구·어시스턴트 메시지, `model_response.toolCalls`).
+    - 그런 문자열은 풀어서, 안쪽의 모든 문자열과 필드 이름을 같은 게이트웨이로 가리고, 키 모양과 지금의 키 값을 가리고, 위와 같이 정리한 뒤 JSON으로 다시 쓴다. 그래서 풀어 보이는 어댑터도 정리된 글을 받는다.
+    - JSON 이스케이프(`\uXXXX`)로 등록 값을 적은 글은 바깥 글에서 가리기가 보지 못한다. 안쪽에서 다시 가리므로 응답에 나오지 않는다(시험).
+    - JSON이 아닌 글(실패한 도구 결과의 문구 등)은 정리한 문자열 그대로다. 안쪽을 가릴 수 없는 레코드는 빼고 `skipped`로 센다.
+    - 다시 쓴 JSON은 엔진이 쓴 압축 꼴과 같다(실행 이벤트와 같음을 보는 시험이 그대로 통과한다). 다만 들여쓰기가 있던 JSON 글은 압축 꼴이 된다.
 - **상태.**
   - `damaged`(R-80 M-1 다): 위에서 journal이 손상이거나, `report`의 읽기(`summarizeJournal`·`readResult`, 적용은 `summarizeApplyJournal`·`readApplyResult`)가 journal이나 result.json을 거부했다. 받은 레코드와 `missing`을 함께 준다.
     - 그래서 `report`가 `invalid_run_record`로 거부하는 사본에서 이 함수가 `complete`라고 하지 않는다(시험이 같은 사본에 `report`를 불러 본다).
@@ -685,11 +698,10 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   4. 이미 적용됨 `plan_already_applied`, 기록 변경 표시 `plan_records_changed`, 다이제스트가 다르면 `plan_not_approved`
   5. store의 `loadPlan`으로 계획을 다시 읽어 경로를 얻는다. 보기가 판정한 계획(같은 다이제스트, 적용 안 됨)이어야 한다.
   6. 잠금. 다른 작업이 잡고 있으면 `workspace_locked`다(재시도 가능).
-- **판정은 적용 사전 점검의 것이다.** 적용 task의 설정으로 행동마다 본다.
+- **판정은 적용 사전 점검의 것이다.** U-111: 엔진의 `preflightPlan`(U-105)을 그대로 부른다. `applyPlan`이 부르는 바로 그 고리라 판정을 복사하지 않는다. 적용 task의 설정으로 행동마다 본다.
   - 적용 task의 `planActions`와 정책 관문(`createPolicyGate`, `PLAN_ACTION_DESCRIPTORS`, 경로를 풀기 전과 후). 아니면 `denied`다.
-    - 엔진은 이 부름을 `applyPlan` 안에 둔다. 엔진이 `preflightPlan`으로 내보내기 전까지(조사 3-a) 앱 계층이 같은 방식으로 부른다.
-    - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
-  - 그다음 tools의 `createPlanExecutor`의 `check`를 그대로 부른다: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
+  - 그다음 tools의 `createPlanExecutor`의 `check`: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
+  - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
   - 인벤토리 상한(DR-6)은 계획 보기가 센 것이다(같은 `createInventoryChecker`).
 - **잠금과 시험 링크를 거둔다.**
   - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.

@@ -31,6 +31,11 @@
  *   names limited), an apply's with `maskStrings`, both with the gateway of the values the settings
  *   register now; then the key shapes and every key value set now (`hideKeysInStrings`). A record
  *   that cannot be masked is skipped. Tokens are never restored.
+ * - U-121 (R-80b L-1): a tool result's `content` and a tool call's `argsJson` are JSON text. Such a
+ *   string is parsed, and every inner string and field name is masked with the same gateway, key
+ *   shapes hidden and cleaned (below), then written as JSON again: an adapter that parses it gets
+ *   clean text, and a JSON escape cannot spell a value the masking did not see in the escaped text.
+ *   Text that is no JSON stays a string. A record whose inner strings cannot be masked is skipped.
  * - R-80 L-1: then every string is cleaned: CR LF as LF, control and bidirectional characters
  *   (`cleanText`, line feeds and tabs kept) and default ignorable characters shown as "?", the
  *   values of fields the contract does not know too (field names are plain words already).
@@ -46,8 +51,8 @@
 
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
-import { JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { ApplyJournalEventType, JournalEventType, JournalRecord, PrivacyGateway } from "../contracts/index.js";
+import { APPLY_JOURNAL_EVENT_TYPES, JOURNAL_EVENT_TYPES, JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
+import type { ApplyJournalEntryType, JournalRecord, PrivacyGateway } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { readApplyResult, readResult, summarizeApplyJournal, summarizeJournal } from "../cli/report.js";
 import { REPLACEMENT, cleanText, hideKeys, hideKeysInStrings } from "../cli/text-safety.js";
@@ -72,43 +77,17 @@ const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
 const CR_LF = /\r\n/g;
 
-/** A model run's record types; the compiler checks the list against the contract's union. */
-const RUN_TYPES = {
-  run_started: true,
-  model_request: true,
-  model_response: true,
-  model_error: true,
-  tool_decision: true,
-  tool_result: true,
-  // U-74 (DR-3): the in-run permission question and its answer; cleaned and masked as every record is.
-  confirmation_requested: true,
-  confirmation_answered: true,
-  file_changed: true,
-  verifier_result: true,
-  repair_started: true,
-  integrity_checked: true,
-  state_checked: true,
-  run_finished: true,
-} as const satisfies Record<JournalEventType, true>;
+/**
+ * The record types of each kind of journal: the contract's lists (U-105, JOURNAL_EVENT_TYPES and
+ * APPLY_JOURNAL_EVENT_TYPES), so a type added to the contract is listed here with it. An apply's
+ * `plan_item_started` (the one type of APPLY_JOURNAL_ENTRY_TYPES that is not shown) is taken but not given.
+ */
+const RUN_TYPES: ReadonlySet<string> = new Set<string>(JOURNAL_EVENT_TYPES);
+const APPLY_TYPES: ReadonlySet<string> = new Set<string>(APPLY_JOURNAL_EVENT_TYPES);
+const PLAN_ITEM_STARTED: ApplyJournalEntryType = "plan_item_started";
 
-/** An apply's shown record types; `plan_item_started` is taken but not given. */
-const APPLY_TYPES = {
-  apply_started: true,
-  plan_checked: true,
-  file_moved: true,
-  file_discarded: true,
-  plan_item_failed: true,
-  verifier_result: true,
-  integrity_checked: true,
-  state_checked: true,
-  run_finished: true,
-} as const satisfies Record<ApplyJournalEventType, true>;
-const PLAN_ITEM_STARTED = "plan_item_started";
-
-/** Every record type a page can give, for the request's filter. */
-export const RUN_EVENT_TYPES: readonly RunEventType[] = [...new Set<RunEventType>([...(Object.keys(RUN_TYPES) as JournalEventType[]), ...(Object.keys(APPLY_TYPES) as ApplyJournalEventType[])])];
-
-const isOwn = (table: object, key: string): boolean => Object.prototype.hasOwnProperty.call(table, key);
+/** Every record type a page can give, for the request's filter: a model run's, then an apply's others. */
+export const RUN_EVENT_TYPES: readonly RunEventType[] = [...new Set<RunEventType>([...JOURNAL_EVENT_TYPES, ...APPLY_JOURNAL_EVENT_TYPES])];
 
 /** The request's run, page and filter, checked before anything is read. */
 export function runEventsArguments(
@@ -188,6 +167,62 @@ function cleanStrings<T>(value: T): T {
   return walk(value) as T;
 }
 
+/** One string as a person's screen gets it: masked, key shapes and the key values set now hidden, cleaned. Null when it cannot be masked. */
+function shownString(text: string, source: RunEventsSource): string | null {
+  const masked = source.privacy.mask(text);
+  if (!masked.ok) return null;
+  return cleanStrings(hideKeys(masked.text, source.keys));
+}
+
+/**
+ * U-121: JSON text with every inner string and field name masked, key shapes hidden and cleaned, as
+ * JSON again; `text` itself when it is no JSON. Null when an inner string cannot be masked (or the
+ * value is too deep to walk).
+ */
+function shownJsonText(text: string, source: RunEventsSource): string | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  const walk = (item: unknown): unknown => {
+    if (typeof item === "string") {
+      const shown = shownString(item, source);
+      if (shown === null) throw new Error("not maskable");
+      return shown;
+    }
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item === "object" && item !== null) return Object.fromEntries(Object.entries(item).map(([key, child]) => [walk(key), walk(child)]));
+    return item;
+  };
+  try {
+    return JSON.stringify(walk(value));
+  } catch {
+    return null;
+  }
+}
+
+/** U-121: `record` with its JSON texts (a tool result's `content`, a tool call's `argsJson`, at any depth) shown as shownJsonText makes them. */
+function withShownJsonTexts(record: StoredRunRecord, source: RunEventsSource): StoredRunRecord | null {
+  let failed = false;
+  const shown = (text: string): string => {
+    const value = shownJsonText(text, source);
+    if (value === null) failed = true;
+    return value ?? text;
+  };
+  const walk = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item !== "object" || item === null) return item;
+    const out: Record<string, unknown> = Object.fromEntries(Object.entries(item).map(([key, child]) => [key, walk(child)]));
+    if (typeof out["argsJson"] === "string") out["argsJson"] = shown(out["argsJson"]);
+    if (typeof out["callId"] === "string" && typeof out["ok"] === "boolean" && typeof out["content"] === "string") out["content"] = shown(out["content"]);
+    return out;
+  };
+  const value = walk(record) as StoredRunRecord;
+  return failed ? null : value;
+}
+
 /** A line of this run (a JSON object with this run's id and a whole number from 1), or what else it is. */
 function ownLine(line: string, runId: string): { readonly record: Record<string, unknown>; readonly seq: number } | "other" {
   let value: unknown;
@@ -211,13 +246,16 @@ function readRecord(record: Record<string, unknown>, runKind: "run" | "apply", s
   if (!isRunTimestamp(record["at"]) || typeof type !== "string") return { kind: "skipped" };
   const table = runKind === "run" ? RUN_TYPES : APPLY_TYPES;
   const taken = runKind === "apply" && type === PLAN_ITEM_STARTED;
-  if (!taken && !isOwn(table, type)) return { kind: "skipped" };
+  if (!taken && !table.has(type)) return { kind: "skipped" };
   try {
     if (!plainFields(record, source.privacy, source.keys)) return { kind: "skipped" };
     if (taken) return { kind: "taken" };
     const masked = runKind === "run" ? sanitizeRecord(record as unknown as JournalRecord, source.privacy) : maskStrings(record, source.privacy);
     if (masked === null) return { kind: "skipped" };
-    return { kind: "record", record: cleanStrings(hideKeysInStrings(masked as unknown as StoredRunRecord, source.keys)) };
+    // U-121: the JSON texts inside, masked and cleaned through, before the record's own strings are cleaned.
+    const inner = withShownJsonTexts(hideKeysInStrings(masked as unknown as StoredRunRecord, source.keys), source);
+    if (inner === null) return { kind: "skipped" };
+    return { kind: "record", record: cleanStrings(inner) };
   } catch {
     // A record whose fields do not fit what the masking walks through is not given.
     return { kind: "skipped" };

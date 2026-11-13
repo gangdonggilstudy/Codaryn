@@ -203,12 +203,16 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   }
   if (quickProvider(before) !== quickProvider(after)) found.push({ kind: "provider_changed", field: "provider" });
   if (!same(before.profiles, after.profiles)) found.push({ kind: "profile_changed", field: "profiles" });
-  // U-107 (R-79 F-1): a profile's command that asked and no longer asks is named too, besides
-  // profile_changed (which every profile change gives).
+  // U-107 (R-79 F-1), U-117 (R-85 L1): a profile's own command rules, besides profile_changed (which
+  // every profile change gives), compared with the commands its runs had before: its own policy, or
+  // the config's when it had none (a profile without a policy runs with the config's, config-file.ts
+  // `profile.policy ?? config.policy`). A question gone is confirm_removed, a new command
+  // command_added. A profile left without a policy of its own runs with the config's policy; that
+  // change is profile_changed only (the config's entries judge the config's policy itself).
   for (const [name, profile] of Object.entries(after.profiles ?? {})) {
     const old = before.profiles?.[name];
-    if (old === undefined) continue;
-    found.push(...commandWidening(old.policy?.commands ?? [], profile.policy?.commands ?? [], `profiles.${name}.`).filter((item) => item.kind === "confirm_removed"));
+    if (old === undefined || profile.policy === undefined) continue;
+    found.push(...commandWidening((old.policy ?? before.policy)?.commands ?? [], profile.policy.commands ?? [], `profiles.${name}.`));
   }
   // Review R-27 I4: a profile's own provider wins for its quick runs (SP-D10), so a profile that now
   // sends them to another provider says so, besides profile_changed.

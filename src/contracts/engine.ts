@@ -70,6 +70,9 @@ export interface RunReasonByStatus {
    * action that no longer fits or that the policy denies, the workspace is beyond the inventory
    * limit (DR-6), or the plan was already applied; nothing was moved. apply_incomplete: an action
    * failed while applying; the earlier ones stay done and `codaryn revert` undoes them.
+   * P1 (DR-69, B-6): plan_stale also ends a run that carries out an approved `run` plan when a
+   * planned file no longer fits (plannedFileStale) or the plan was already carried out (B-7), before
+   * its first model request; nothing was written.
    */
   /**
    * state_changed (DR-38): the run's records or the rest of the state directory changed during the
@@ -433,9 +436,16 @@ export interface EngineResult {
   /**
    * G-A: present with reason `plan_pending` only. The stored plan's digest, the one value both
    * `codaryn apply --digest` and the app layer's `applyPlan(runId, digest)` take (DR-1), and its
-   * number of actions.
+   * number of actions. P1 (B-1): for a `run` plan (StoredChangesPlan), `actions` is its number of files.
    */
   readonly plan?: { readonly digest: ContentHash; readonly actions: number };
+  /**
+   * P1 (DR-69, B-3): present together in a run that carries out an approved `run` plan: the plan
+   * run's id and the approved digest, as `run_started` records them. Absent in every other run, so
+   * no result written before has them.
+   */
+  readonly planRunId?: string;
+  readonly planDigest?: ContentHash;
   /**
    * U-59 (AXM-15): with `plan`, the agent's description of that plan: the `summary` of the
    * propose_plan call that stored it (ProposePlanArgs.summary), masked by the run's gateway and made

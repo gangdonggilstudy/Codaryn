@@ -43,7 +43,10 @@ export interface TaskSpec {
   readonly workflowRef?: string;
   /** G-A: narrows the definition's tools (never widens them). See WorkflowSettings. */
   readonly tools?: readonly AnyToolName[];
-  /** G-A: "apply" may strengthen a definition's "none", never the reverse. See plan.ts. */
+  /**
+   * G-A: "apply" may strengthen a definition's "none", never the reverse. See plan.ts. U-170 (B-1):
+   * "run" likewise; a definition's "apply" or "run" never becomes "none" (`plan_weakened`).
+   */
   readonly plan?: PlanMode;
   /** G-A: see COMPLETION_MODES. */
   readonly completion?: CompletionMode;

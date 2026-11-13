@@ -3,8 +3,8 @@
  * Requirements are fixed here in code. A model, a task or a project file cannot lower them.
  */
 
-import { MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS } from "./plan.js";
-import type { PlanActionKind, ProposePlanArgs, ProposePlanPayload } from "./plan.js";
+import { MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS, MAX_PLANNED_FILES, PLANNED_FILE_CHANGES } from "./plan.js";
+import type { PlanActionKind, PlanMode, ProposePlanArgs, ProposePlanPayload } from "./plan.js";
 import { CONTENT_HASH_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, JsonObject, MaskedText, RawText } from "./text.js";
 
@@ -271,6 +271,12 @@ export interface ToolDescriptor {
    * (`propose_plan`). The engine acts on this property, never on a tool name.
    */
   readonly endsRun?: "plan";
+  /**
+   * P1 (DR-69, B-1): with `endsRun: "plan"`, the plan mode whose plan run offers this tool
+   * (`propose_plan`: apply, `propose_changes`: run). A plan run offers the read tools and the plan
+   * tool of its own mode only, so a plan of one mode is never stored in a run of the other.
+   */
+  readonly planMode?: Exclude<PlanMode, "none">;
 }
 
 export const BUILTIN_TOOLS: { readonly [N in ToolName]: ToolDescriptor & { readonly name: N } } = {
@@ -571,6 +577,7 @@ export const WORKFLOW_TOOLS: { readonly [N in WorkflowToolName]: ToolDescriptor 
     restoreFields: [],
     documentFields: [],
     endsRun: "plan",
+    planMode: "apply",
   },
 };
 
@@ -643,6 +650,66 @@ export const WORKFLOW_TOOL_DEFINITIONS: { readonly [N in WorkflowToolName]: Tool
       required: ["summary", "actions"],
       additionalProperties: false,
     },
+  },
+};
+
+/**
+ * P1 (DR-69, B-1): the plan tool of plan mode `run`: the files a later model run may write, and a
+ * summary of what it will do (ProposeChangesArgs, plan.ts). Not a task type tool yet: it joins
+ * WORKFLOW_TOOL_NAMES (and with it a task's `tools`, the runner and the definitions' lists) in the
+ * unit that carries it out (B-3), so no task can list it before it runs. Its descriptor and its
+ * definition are fixed here already.
+ */
+export const PROPOSE_CHANGES_TOOL_NAME = "propose_changes";
+
+/**
+ * Requirements of `propose_changes`, as `propose_plan`'s: no path of its own (each file is judged
+ * with PLANNED_FILE_DESCRIPTOR, plan.ts). It writes plan.json, so its display class is not "read"
+ * and a call whose outcome is unknown is not retried.
+ */
+export const PROPOSE_CHANGES_DESCRIPTOR: ToolDescriptor & { readonly name: typeof PROPOSE_CHANGES_TOOL_NAME } = {
+  name: PROPOSE_CHANGES_TOOL_NAME,
+  displayClass: "write-local",
+  requires: {
+    paths: [],
+    command: false,
+    network: false,
+    destructive: false,
+  },
+  restoreFields: [],
+  documentFields: [],
+  endsRun: "plan",
+  planMode: "run",
+};
+
+/** What a provider tells the model about `propose_changes`. Fixed text, as TOOL_DEFINITIONS. */
+export const PROPOSE_CHANGES_DEFINITION: ToolDefinition = {
+  description:
+    "Propose, once, the complete list of files you will change and a summary of what you will do. " +
+    "Nothing is changed now: a person reviews the list and the summary, and a later run may write " +
+    "only these files, following the summary. create is a new file at a path that must not exist " +
+    "yet. modify is an existing regular file. List files, not directories. After this call the run ends.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      summary: { type: "string", minLength: 1, maxLength: MAX_PLAN_SUMMARY_CHARS },
+      files: {
+        type: "array",
+        minItems: 1,
+        maxItems: MAX_PLANNED_FILES,
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string", minLength: 1, description: "File path relative to the workspace root." },
+            change: { type: "string", enum: [...PLANNED_FILE_CHANGES] },
+          },
+          required: ["path", "change"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["summary", "files"],
+    additionalProperties: false,
   },
 };
 

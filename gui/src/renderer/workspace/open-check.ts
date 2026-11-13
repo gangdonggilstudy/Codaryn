@@ -80,8 +80,9 @@ export class OpenCheck {
     // Only an answer frees a held lock: a check that is still going or failed keeps it (V-27 L-1).
     const stillHeld = heldFor(this.state, handle);
     this.set(stillHeld ? { phase: "checking", handle, lockHeld: true } : { phase: "checking", handle });
-    // R-111b M-1: own work going on when the check starts, or started before its answer, may be what it saw.
-    const startedBefore = this.own.started();
+    // R-111b M-1, U-271 (R-111c L-1): this window's own work in this workspace going on when the check
+    // starts, or at some time before its answer, may be what it saw (not a call refused for the lock).
+    const since = this.own.mark();
     const busyBefore = this.own.busy(handle);
     let reply: DoctorReply;
     try {
@@ -91,7 +92,7 @@ export class OpenCheck {
       reply = { ok: false, code: "host_error" };
     }
     if (generation !== this.generation) return;
-    const ownWork = busyBefore || this.own.busy(handle) || this.own.started() !== startedBefore;
+    const ownWork = busyBefore || this.own.busy(handle) || this.own.overlapped(handle, since);
     if (reply.ok) this.set({ phase: "done", handle, reply, lockHeld: lockHeld(reply), byOther: !ownWork });
     else this.set(stillHeld ? { phase: "error", handle, code: reply.code, lockHeld: true } : { phase: "error", handle, code: reply.code });
   }

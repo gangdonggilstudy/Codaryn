@@ -33,8 +33,9 @@ import { OwnLockCalls } from "./workspace/own-lock.js";
 async function start(): Promise<void> {
   const root = document.getElementById("app");
   if (root === null) return;
-  // R-111b M-1: the window's calls that take a workspace lock are counted while they go on (OwnLockCalls).
-  const ownLock = new OwnLockCalls();
+  // R-111b M-1: the window's calls that take a workspace lock are kept while they go on (OwnLockCalls);
+  // U-271 (R-111c L-1): with the workspace each acts on (a token's call: the one open when it is made).
+  const ownLock = new OwnLockCalls(() => current?.handle ?? null);
   const api = ownLock.track(window.codaryn);
   const info = asInfo(await api.info());
   let language = info.language;
@@ -55,10 +56,13 @@ async function start(): Promise<void> {
 
   // U-68 (3.2): the checks when a workspace opens (again when a run ends and on F5).
   // R-111b (a), M-1: a held lock seen while this window's own work may have held it (its run in that
-  // workspace, or a locking call during the check) is its own.
+  // workspace, or a locking call in that workspace during the check) is its own. U-271 (R-111c L-1): a run
+  // holds the lock once its start answered (running, cancelling); the start call itself is kept, so one
+  // refused for the lock does not count.
   const openCheck = new OpenCheck(api, {
-    busy: (handle) => (runWorkspace === handle && run.phase !== "idle" && run.phase !== "done") || ownLock.inFlight > 0,
-    started: () => ownLock.started,
+    busy: (handle) => runWorkspace === handle && (run.phase === "running" || run.phase === "cancelling"),
+    mark: () => ownLock.mark(),
+    overlapped: (handle, since) => ownLock.overlapped(handle, since),
   });
   const setWorkspace = (workspace: Workspace): void => {
     current = workspace;

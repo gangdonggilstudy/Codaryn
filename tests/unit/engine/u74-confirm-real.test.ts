@@ -59,7 +59,7 @@ describe("U-74: a confirm rule of the user's settings, end to end with the real 
   test("allowed once: it runs and exits 0", async () => {
     const outcome = await run(asked, async () => ({ decision: "allow_once" }));
     assert.deepEqual(outcome.answered, [["allow_once", "user"]]);
-    assert.equal(outcome.result?.ok, true, outcome.result?.content);
+    assert.equal(outcome.result?.ok, true, outcome.result?.content ?? "no tool result");
     assert.match(outcome.result?.content ?? "", /"exitCode":0/);
   });
 

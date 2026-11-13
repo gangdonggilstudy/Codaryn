@@ -43,6 +43,8 @@ function lockedMessage(holder: LockInfo | null): string {
  * process lives, and a later run of another process finds it stale once it has ended.
  * U-211: a release that threw is tried again a few seconds later (retryLockRelease, `lockRetry`),
  * for this run's lock only; an answer of false (the lock is not this run's) is not.
+ * U-229 (after U-220): finish then also resolves with `{ lockLeft: true }`, as the CLI's assembly
+ * does, and with nothing when it released the lock.
  * U-218 (DR-69 B-4): with AssemblyInput.planRunId (a run that carries out an approved run plan), the
  * outcome has `approvedPlan` as the CLI's assembly gives it (U-195): the gate for the given writable
  * lists, the recorders' claim of the plan, the planned file probe and the store's two questions about
@@ -128,11 +130,11 @@ export function createAppAssemble(
         deps,
         ...(approvedPlan === undefined ? {} : { approvedPlan }),
         async finish(result) {
+          let released = false;
           try {
             if (result !== null) await writeResult(workspaceRoot, result);
           } finally {
             // U-193: a lock left is told, never a reason to lose the run's result.
-            let released = false;
             let threw = false;
             try {
               released = (await releaseLock({ workspaceRoot, runId })) === true;
@@ -143,6 +145,8 @@ export function createAppAssemble(
             // U-211: the file may be held a moment longer than the store's retries; tried again later.
             if (threw) void retryLockRelease({ workspaceRoot, runId }, lockRetry);
           }
+          // U-229 (U-220's contract): the CLI reads a lock left from finish (its end summary).
+          return released ? undefined : { lockLeft: true as const };
         },
       };
     } catch (error) {

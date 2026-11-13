@@ -8,7 +8,7 @@
  * Here the app's assembly is called as the CLI calls it; the release fails in the two ways U-220
  * names: the lock is no longer this run's (release answers false), and the removal of lock.json fails
  * with EBUSY past the store's retries (injected only there, as U-220's tests do), after which U-211's
- * later try releases it. Reproduced first (todo until the app's finish gave the marker).
+ * later try releases it. Reproduced first (4200131, todo until the app's finish gave the marker).
  * Temporary folders, the real store, fake values only.
  */
 
@@ -24,8 +24,6 @@ import { createAppAssemble } from "../../../src/app/assemble.js";
 import { parseTask } from "../../../src/cli/task.js";
 import type { EngineResult, ModelProvider } from "../../../src/contracts/index.js";
 import { releaseLock } from "../../../src/store/index.js";
-
-const TODO = { todo: "U-229: the app's finish resolves with the lockLeft marker (U-220)" };
 
 const temporaryDirs: string[] = [];
 after(async () => {
@@ -120,7 +118,7 @@ describe("U-229: the app's finish says whether it released the lock (U-220's con
     assert.equal(existsSync(run.lockFile), false);
   });
 
-  test("a release that answers false (the lock is no longer this run's): { lockLeft: true }, told once", TODO, async () => {
+  test("a release that answers false (the lock is no longer this run's): { lockLeft: true }, told once", async () => {
     const run = await assembled("u229-not-held");
     // Another run of this process took the lock over; the release of this run's id answers false.
     const held = JSON.parse(readFileSync(run.lockFile, "utf8")) as Record<string, unknown>;
@@ -134,7 +132,7 @@ describe("U-229: the app's finish says whether it released the lock (U-220's con
     }
   });
 
-  test("a release that throws past the store's retries: { lockLeft: true }, the result stored, a later try releases it", TODO, async () => {
+  test("a release that throws past the store's retries: { lockLeft: true }, the result stored, a later try releases it", async () => {
     let ended: string | null = null;
     const run = await assembled("u229-busy", { delaysMs: [300], onEnd: (end) => (ended = end) });
     const result = { kind: "run", runId: run.runId } as unknown as EngineResult;

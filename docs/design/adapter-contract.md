@@ -203,6 +203,8 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
     - 그 실행의 잠금만 다룬다. 매번 store의 `releaseLock`을 같은 작업 공간과 같은 실행 id로 부르고, store는 이 프로세스와 그 id가 쥔 잠금만 지운다. 그 사이 다른 실행이 잡은 잠금이나 이미 없어진 잠금은 `false`이고, 그러면 곧 멈춘다. `false`로 끝난 풀기(이미 이 실행의 잠금이 아님)는 다시 풀지 않는다.
     - 결과는 더 알리지 않는다. `lockLeft: true`는 실행이 끝난 때의 사실이고 그대로다. 나중의 풀기가 지웠는지는 다음 시작이 거부되지 않는 것으로 드러난다.
   - 사람용 글은 `lock.release_failed`(문구 id 초안, nc-human의 제안 글)다.
+  - U-229(nc-human의 U-220 뒤): CLI의 조립 약속(`AssemblyOutcome.finish`)이 바뀌었다. 잠금을 풀지 못하면 `finish`는 던지지 않고 `{ lockLeft: true }`로 끝나고, 아무것도 주지 않으면 풀었다는 뜻이다. 앱의 조립도 그 표시를 준다. 앱의 답(`RunOutcome.lockLeft`)은 그대로이고, 표시는 CLI가 자기 끝 요약을 쓸 때 읽는다(시험 `tests/unit/app/u229-finish-lock-left.test.ts`).
+    - 이동 계획의 적용은 CLI의 `runApply`가 잠금을 직접 잡고 푼다. U-220 뒤로는 풀지 못해도 적용 결과가 남지만(전에는 `internal_error`), 잠금이 남았다는 것은 CLI의 끝 요약에만 있고 `runApply`의 답에는 없다. 그래서 앱은 그것을 알지 못하고 `ApplyOutcome`에 `lockLeft`가 없다. CLI가 답에 실어 주면(nc-human에 바람) 앱이 실행처럼 알리고 다시 풀어 본다.
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 

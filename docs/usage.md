@@ -381,6 +381,8 @@ run id                     started              changes  result
 
 - `demo/`: 키 없는 체험(3절). scripted 대본, task, 작업 공간.
 - `organize-demo/`: 키 없는 파일 정리 체험(18.2절). 계획 실행 → 승인과 적용 → 되돌리기.
+- `analyze-demo/`: 키 없는 자료 분석 체험(18.9절). 합성 표 하나, `data_checks` 검증기, 재수정 1회, 사람 확인.
+- `workflow-demo/`: 사용자 정의 작업 종류 체험(18.10절). 설정 파일의 `workflows`에 정의 하나, 그것을 고르는 task.
 - `config.example.json`: 모델 자리표시자, 보수적 한도와 재수정 한도, `node --test` 규칙, `test`·`tests` 보호, 테스트 검증기.
 - `doc-task.json`: `workspaces/notes/README.md`에 절 추가, `file_rules` 검증기, 재수정 1회.
 - `code-task.json`: `workspaces/calc`의 실패하는 테스트 수정, `sum.test.mjs` 보호, 재수정 2회.
@@ -1638,3 +1640,208 @@ Nothing was removed. To remove all of the above but what is kept, run the same c
 - 한국어 출력은 묶음 머리 줄, 항목의 종류와 크기, 끝 줄까지 한국어다(U-34, U-86). main `bc3305d`의 위 미리보기에서는 `--confirm 옵션만으로 지우는 것: 1개(15671바이트)`, `- 실행 기록 <실행 id>: 파일 5개, 15671바이트`, `아무것도 지우지 않았습니다. 다른 옵션이 필요 없는 것만 지우려면 같은 명령에 다음을 붙여 다시 실행하세요: --confirm <앞 12자>`였다. 넷째 묶음의 머리 줄은 `--include-not-reverted 옵션과 --delete-discarded 옵션을 둘 다 주어야 지우는 것: …`이다.
 - 확인 범위: 위 미리보기와 확인 결과(네 옵션 조합), 고르지 않은 요약은 main `bc3305d`의 실제 CLI다. `status`와 종료 코드(`removed`, `nothing_removed`, 지우기 거부 ACL로 만든 `partly_failed`, 틀리거나 낡은 다이제스트의 `cleanup_plan_changed`)는 U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)에서 확인했고, U-86은 확인 뒤의 출력과 `--json`을 바꾸지 않았다(검토 R-76, R-76b). 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
 - **계획 실행의 기록**은 그 계획의 적용 실행을 되돌리는 데 필요하다. 손으로 지우면 그 적용은 되돌릴 수 없다(`revert`는 `plan_run_missing`, 종료 2). 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.
+
+### 18.9 키 없이 체험하기: 자료 분석
+
+[`examples/analyze-demo/`](../examples/analyze-demo)는 키 없이 `analyze` 작업 종류를 끝까지 보는 예시다. 합성 판매 표 `sales.csv`(지역, 품목, 금액 여섯 줄)의 금액을 지역별로 더해 `summary.csv`와 `report.md`를 만든다. 대본은 처음에 east의 합계를 틀리게 쓰고, `data_checks` 검증기가 그것을 잡아 재수정 한 번으로 고친다. 검증을 통과하면 `done`이 아니라 사람 확인을 기다린다(18.6절).
+
+```powershell
+# 저장소 루트에서, 2절의 빌드를 마친 뒤. 복사본은 저장소 밖이어야 한다
+$an = "$HOME\codaryn-analyze-demo"
+Copy-Item -Recurse examples\analyze-demo $an
+node dist/src/cli/main.js doctor --task $an\task.json
+node dist/src/cli/main.js run --task $an\task.json
+node dist/src/cli/main.js report --workspace $an\workspace --run latest
+node dist/src/cli/main.js review --task $an\task.json --run latest --accept --note checked-by-hand
+node dist/src/cli/main.js runs --workspace $an\workspace
+```
+
+- `doctor`는 모든 항목이 `ok`나 `skipped`이고 종료 0이다. 키도 설정 파일도 필요 없다.
+- **검증기 둘**(`task.json`):
+  - `data_checks`(`summary-table`): `summary.csv`의 열이 정확히 `region`, `total`이고 데이터 행이 3개인지(`table_shape`), `sales.csv`의 `amount`를 `region`별로 더한 값이 `summary.csv`의 `total`과 같은지(`aggregate_match`, 열쇠 열 `region`).
+  - `file_rules`(`report`): `report.md`가 있고 `# 지역별 판매 합계`를 담는지.
+  - `sales.csv`는 보호 경로다(`protectedPaths`). 재수정은 1회까지다(`maxRepairAttempts: 1`).
+
+**run:** stderr의 실제 출력이다(main `28696fa`, `CODARYN_LANG=en`). 실행 id와 시간은 실행마다 다르다. 종료 코드는 3(`needs-input`)이다.
+
+```
+codaryn: run started — provider scripted
+codaryn: protected material check — unchanged (run_start)
+codaryn: turn 1
+codaryn: read file — allowed (read_file)
+codaryn: turn 2
+codaryn: write file — allowed (write_file)
+codaryn: created summary.csv
+codaryn: turn 3
+codaryn: write file — allowed (write_file)
+codaryn: created report.md
+codaryn: turn 4
+codaryn: check #1 — not passed (fail)
+codaryn: check #2 — passed (pass)
+codaryn: repair 1 — checks not passed: 1
+codaryn: turn 5
+codaryn: write file — allowed (write_file)
+codaryn: changed summary.csv
+codaryn: turn 6
+codaryn: check #1 — passed (pass)
+codaryn: check #2 — passed (pass)
+codaryn: finished — needs input (awaiting_review)
+── Result: needs input — waiting for a person's review (needs-input/awaiting_review) ──
+Checks passed: 2 of 2 (within the configured checks)
+Protected material checks that found no change: 5
+Files changed: 2
+  summary.csv (created)
+  report.md (created)
+Usage: model turns 6 · tool calls 4 · 0.1 s
+The agent's last message (the agent's own words, not a verified fact):
+  | east의 합계를 85로 고쳤다.
+Look at the result and record a verdict with codaryn review.
+Run id: 20261113T025019Z-d83b9b61
+Report: codaryn report --workspace <workspace> --run 20261113T025019Z-d83b9b61
+Revert: codaryn revert --workspace <workspace> --run 20261113T025019Z-d83b9b61
+Items to check: 2
+  - The report's interpretation matches the result table.
+  - No input data the goal names is missing from the analysis.
+Record a verdict: codaryn review --task <task.json> --run 20261113T025019Z-d83b9b61 --accept or --reject
+```
+
+- `check #1 — not passed (fail)`: 첫 회차의 `data_checks`다. 그 근거는 진행 줄에 나오지 않고 기록(`journal.jsonl`의 첫 `verifier_result`)에 있다. 그 근거가 가린 뒤 재수정 메시지로 모델에 간다(9절). 실제 근거:
+
+  ```
+  held: table "summary.csv" (csv) has exactly the columns ["region", "total"] and has exactly 3 data rows (columns as required; 3 data rows)
+  not held: sum of "amount" in "sales.csv" (csv) grouped by "region" matches "total" in "summary.csv" (csv) (key column "region") within absolute 1e-9, relative 1e-9 (target data row 3 (group first seen at source data row 5): recomputed 85, found 80)
+  ```
+
+  - 근거는 열 이름, 행 번호, 비교한 두 수만 말한다. 표의 다른 칸 값은 담지 않는다([민감정보 처리](privacy.md) 15절).
+- `Items to check`: 내장 `analyze`의 확인 항목이다. 고정된 영어 글이라 한국어 설정에서도 영어로 나온다(16절 "출력 언어").
+- 고친 뒤 `summary.csv`는 `region,total` / `north,150` / `south,125` / `east,85`다.
+- 한국어(`CODARYN_LANG=ko`) 끝 요약의 마지막 줄들은 `결과를 확인하고 codaryn review로 판정을 기록하세요.`, `확인할 항목 2개:`, `판정 기록: codaryn review --task <task.json> --run <id> --accept 또는 --reject`다.
+
+**report:** `--run latest`가 고른 실행의 보고서다. 검증 절과 사람 확인 절(판정 전):
+
+```
+## Verification
+
+- verifier 1 (data_checks): **pass**
+  - checked: `table "summary.csv" (csv) has exactly the columns ["region", "total"] and has exactly 3 data rows`
+  - checked: `sum of "amount" in "sales.csv" (csv) grouped by "region" matches "total" in "summary.csv" (csv) (key column "region") within absolute 1e-9, relative 1e-9`
+- verifier 2 (file_rules): **pass**
+  - checked: `"report.md" exists`
+  - checked: `"report.md" contains the literal text "# 지역별 판매 합계"`
+
+Repairs started: 1.
+
+## Review checklist
+
+The run waits for a person's verdict (`codaryn review --run 20261113T025019Z-d83b9b61 --accept | --reject`).
+- `The report's interpretation matches the result table.`
+- `No input data the goal names is missing from the analysis.`
+
+No verdict yet.
+```
+
+- 보고서의 "Not checked" 절은 `data_checks`가 확인하지 않는 것(방법, 해석, 글 속의 숫자, 표의 읽기 규칙)을 검증기마다 적는다.
+
+**review:** 결과 표와 보고서를 직접 본 뒤 판정을 기록한다. stdout(종료 0):
+
+```
+Review of run 20261113T025019Z-d83b9b61: accepted.
+  1. The report's interpretation matches the result table.
+  2. No input data the goal names is missing from the analysis.
+The run's result and records are unchanged; `codaryn report` shows the verdict.
+```
+
+- 판정은 `review.json`에만 남는다. 실행의 상태는 그대로 `needs-input`/`awaiting_review`이고, `runs`도 그렇게 보인다:
+
+  ```
+  run id                     started              changes  result
+  20261113T025019Z-d83b9b61  2026-11-13 11:50:19  2        needs input (needs-input/awaiting_review)
+  ```
+
+- 판정 뒤 보고서의 사람 확인 절 끝은 `No verdict yet.` 대신 ``Verdict: **accepted** (`2026-11-13T02:50:19.833Z`), note: `checked-by-hand` ``다.
+- 한국어 `review` 출력의 첫 줄은 `실행 <id>의 검토: 받아들임.`이다.
+- 자기 표로 해 볼 때는 `task.json`의 목표와 검증기 경로·열 이름을 바꾸고, 실제 모델 설정(4절)으로 돌린다. 개인정보가 든 표는 쓰지 않는다(18.7절).
+- 확인 범위: 위 출력은 main `28696fa`의 실제 CLI를 저장소 밖의 복사본에서 돌린 것이다(키 없음, 대본 모델).
+
+### 18.10 사용자 정의 작업 종류 체험
+
+[`examples/workflow-demo/`](../examples/workflow-demo)는 설정 파일에 작업 종류 하나를 정의하고(18.1절 "사용자 정의 작업 종류") task가 그것을 고르는 예시다. 키 없이 대본 모델로 돈다.
+
+`config.json`(설정 파일, 작업 공간 밖)의 정의:
+
+```json
+"release-notes": {
+  "label": "Release notes",
+  "tools": ["read_file", "write_file"],
+  "instructions": "CHANGES.txt의 줄을 읽어 RELEASE-NOTES.md를 쓴다. add: 줄은 ## 더한 것, fix: 줄은 ## 고친 것 아래에 둔다. CHANGES.txt는 바꾸지 않는다.",
+  "policy": { "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false, "protectedPaths": ["CHANGES.txt"] },
+  "verifiers": [
+    { "id": "notes", "kind": "file_rules", "rules": [
+      { "type": "exists", "path": "RELEASE-NOTES.md" },
+      { "type": "contains", "path": "RELEASE-NOTES.md", "text": "## 더한 것" },
+      { "type": "contains", "path": "RELEASE-NOTES.md", "text": "## 고친 것" }
+    ] }
+  ],
+  "limits": { "maxModelTurns": 6, "maxToolCalls": 6 }
+}
+```
+
+- 위는 `"workflows": { … }` 안의 한 항목을 줄여 옮긴 것이다(파일은 줄마다 펼쳐 썼다).
+- `task.json`은 `"workflowRef": "release-notes"`로 이 정의를 고른다. task 자신의 `verifiers`는 비어 있다. 정의의 검증기는 늘 돈다(DR-43 (a)).
+- 이 정의의 도구는 `read_file`과 `write_file`뿐이다. 모델에는 이 둘만 보이고, 다른 도구를 부르면 거부된다.
+- 지시문(`instructions`)은 고정 시스템 글 뒤에 붙어(가린 뒤) 모델에 간다.
+
+```powershell
+$wf = "$HOME\codaryn-workflow-demo"
+Copy-Item -Recurse examples\workflow-demo $wf
+node dist/src/cli/main.js doctor --task $wf\task.json --config $wf\config.json
+node dist/src/cli/main.js run --task $wf\task.json --config $wf\config.json
+node dist/src/cli/main.js report --workspace $wf\workspace --run latest
+```
+
+**run:** stderr의 실제 출력이다(main `28696fa`, `CODARYN_LANG=en`, 종료 0):
+
+```
+codaryn: run started — provider scripted
+codaryn: protected material check — unchanged (run_start)
+codaryn: turn 1
+codaryn: search files — rejected by a check of the call (unknown_tool)
+codaryn: turn 2
+codaryn: read file — allowed (read_file)
+codaryn: turn 3
+codaryn: write file — allowed (write_file)
+codaryn: created RELEASE-NOTES.md
+codaryn: turn 4
+codaryn: check #1 — passed (pass)
+codaryn: finished — done (verified)
+── Result: done — every configured check passed (done/verified) ──
+Checks passed: 1 of 1 (within the configured checks)
+Protected material checks that found no change: 3
+Files changed: 1
+  RELEASE-NOTES.md (created)
+Denied calls: 1
+Usage: model turns 4 · tool calls 2 · 0.1 s
+The agent's last message (the agent's own words, not a verified fact):
+  | RELEASE-NOTES.md를 썼다.
+Read the report, and revert if needed.
+Run id: 20261113T025137Z-78bbf85d
+Report: codaryn report --workspace <workspace> --run 20261113T025137Z-78bbf85d
+Revert: codaryn revert --workspace <workspace> --run 20261113T025137Z-78bbf85d
+```
+
+- `search files — rejected by a check of the call (unknown_tool)`: 대본이 정의에 없는 `search_files`를 불렀다. 작업 종류의 도구 밖이라 실행하지 않았고, 거부는 실행을 끝내지 않고 모델에 돌아간다. 한국어는 `파일 검색 — 호출 검사에서 거부 (unknown_tool)`이다.
+- `check #1`: 정의의 검증기 `notes`다. task에는 검증기가 없지만 정의의 것이 돌았다.
+- `doctor`는 `[ok]      config file               the config file given by --config is valid`를 포함해 모두 `ok`나 `skipped`이고 종료 0이다.
+- `report`의 머리에 `` - Task: `workflow-demo` (task type `release-notes`) ``가 나온다.
+- **설정 파일을 빼면** 작업 종류를 찾지 못한다. `run --task $wf\task.json`(`--config` 없음)은 종료 2이고 stderr는 다음과 같다:
+
+  ```
+  codaryn: error — the task file cannot be read or has an invalid value (invalid_task)
+    To fix: Check that the file given with --task exists and is outside the workspace. If a field is named, fix that field. codaryn doctor --task <file> checks it.
+    Check: codaryn doctor
+    The task type given (with --workflow or in the task file) is neither built in nor defined in the config file; check its name.
+  ```
+
+- **task는 정의의 도구를 줄이기만 한다.** task에 `"tools": ["read_file", "write_file", "run_command"]`를 더하면 실행 전에 `invalid_task`(종료 2)이고, stdout JSON의 `message`는 `tools[2] names a tool the workflow definition does not offer (tools only narrow)`다.
+- 간편 형식에서는 `--workflow release-notes`로 고른다. 그때는 모델·키·한도도 설정 파일에서 오므로 실제 모델 설정(4절)이 필요하다. 이 예시는 task 파일 형식만 보인다.
+- 확인 범위: 위 출력은 main `28696fa`의 실제 CLI를 저장소 밖의 복사본에서 돌린 것이다(키 없음, 대본 모델).

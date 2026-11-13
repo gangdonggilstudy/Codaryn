@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "sales.csv"
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "summary.csv",
+            "expectedHash": null,
+            "change": {
+              "kind": "replace_all",
+              "content": "region,total\nnorth,150\nsouth,125\neast,80\n"
+            }
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "report.md",
+            "expectedHash": null,
+            "change": {
+              "kind": "replace_all",
+              "content": "# 지역별 판매 합계\n\n| 지역 | 합계 |\n| --- | --- |\n| north | 150 |\n| south | 125 |\n| east | 85 |\n\n`sales.csv`의 `amount`를 `region`별로 더했다. 결과 표는 `summary.csv`에 있다.\n"
+            }
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "text": "summary.csv와 report.md를 만들었다.",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "summary.csv",
+            "expectedHash": "0927ebaaef83bd377c1fcb1f6364f8f40b0aea3fedeb744bb8923f6530522058",
+            "change": {
+              "kind": "replace_all",
+              "content": "region,total\nnorth,150\nsouth,125\neast,85\n"
+            }
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "text": "east의 합계를 85로 고쳤다.",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    }
+  ]
+}

@@ -183,7 +183,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 실행 전 오류 `CliErrorOutput`: `schemaVersion`, `kind:"error"`, `code`, `exitCode`, `message`.
 - 상태별 종료 코드(`RUN_EXIT_CODES`): `done` 0, `failed` 1, `needs-input` 3, `budget-exhausted` 4, `cancelled` 5.
 - 되돌리기 종료 코드(`REVERT_EXIT_CODES`): `complete` 0, `partial` 3.
-- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`, `plan_secrets_differ`(DR-28), `plan_run_missing`(R-9c C-1)(모두 2)가 더해졌다. 그 뒤 `run_in_progress` 6(U-22, DR-48, 17.3의 `--run latest`), `plan_records_changed` 2(U-1, 18.4의 `apply`), `cleanup_plan_changed` 2(U-22, DR-48, 18.13)가 더해졌다(main `1e54ca9`의 실제 CLI로 세 종료 코드를 확인했다).
+- 실행 전 오류(`CLI_ERROR_EXIT_CODES`): `invalid_arguments`·`invalid_task`·`invalid_config`·`key_in_file`·`invalid_script`·`secret_env_missing`·`workspace_not_found`·`run_not_found`·`invalid_run_record` 2, `workspace_locked` 6, `provider_not_configured`·`provider_not_implemented` 7, `internal_error` 70. 단계 3에서 `workspace_is_install_dir` 2가 더해졌다(15절). 모델 목록(16절)에서 `model_list_failed` 8, `config_write_failed` 2가 더해졌다. `init`(17절)에서 `config_exists` 2가 더해졌다. 범용 작업 명령(18절)에서 `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`, `plan_secrets_differ`(DR-28), `plan_run_missing`(R-9c C-1)(모두 2)가 더해졌다. 그 뒤 `run_in_progress` 6(U-22, DR-48, 17.3의 `--run latest`), `plan_records_changed` 2(U-1, 18.4의 `apply`), `cleanup_plan_changed` 2(U-22, DR-48, 18.13)가 더해졌다(main `1e54ca9`의 실제 CLI로 세 종료 코드를 확인했다). 이 문장은 코드가 생긴 내력이고, 지금의 코드 전체와 부류·다시 시도 여부·힌트는 8.3의 표다.
 - 모델 오류(`MODEL_ERROR_KINDS`)는 취소 때문이 아니면 실행을 `failed`/`model_error`로 끝내며 기록의 `model_error.kind`에 남는다. 1b에서 `auth_failed`, `rate_limited`, `overloaded`, `timeout`, `api_error`가 추가되었다.
 - 상태 전이는 `RUN_TRANSITIONS`, 이유는 `RunReasonByStatus`를 따른다. 상태별 이유 목록은 `RUN_REASONS_BY_STATUS` 하나이고(`isReasonOfStatus`, DR-16), 읽는 쪽이 자기 목록을 두지 않는다(18.7). G-A가 `failed`에 `plan_stale`·`apply_incomplete`를, `needs-input`에 `plan_pending`·`awaiting_review`·`consent_required`를 더했다. 적용 실행은 그 부분집합 `APPLY_REASONS_BY_STATUS`를 쓴다. 모델의 완료 선언만으로 `done`이 되지 않는다. 검증기가 없으면 `needs-input`/`no_verifier`다. 재수정은 `verifying → running`이다. `failed`의 이유에 `repeated_failure`가 더해졌다(12절).
 - 상태 디렉터리는 `<workspaceRoot>/.codaryn/`이다. 도구는 이 안을 읽기, 목록, 쓰기, 실행 위치로 쓸 수 없다(`state_dir`).
@@ -240,7 +240,8 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - 프로그램이 기록(journal)을 읽지 않고도, 같은 명령을 나중에 다시 해도 될지 가르게 한다. 필드를 더하기만 한다(DR-48).
 - **오류 JSON(`CliErrorOutput`)**: CLI가 만드는 모든 오류에 `category`와 `retryable`이 붙는다(`cliErrorFacts`). 순서는 `message`(그리고 `diagnostic`) 뒤다.
   - `category`: `input`(준 것을 고쳐야 함), `state`(작업 공간이나 기록이 명령이 바라는 상태가 아님), `environment`(키·설정이 없음, 제공자, 모델 목록 실패, 설정 파일을 쓰지 못함), `internal`(Codaryn 자신의 실패). 코드마다 하나다(`CLI_ERROR_CATEGORY`).
-  - `retryable`: 그대로 다시 해도 나중에 될 수 있으면 true. `workspace_locked`, `run_in_progress`만 true다(잠금이나 실행이 끝나면 됨). 나머지는 false다(`CLI_ERROR_RETRYABLE`). `cleanup_plan_changed`는 새 미리보기가 먼저라 false, `internal_error`는 무턱대고 되풀이하지 않게 false다.
+  - `retryable`: 그대로 다시 해도 나중에 될 수 있으면 true. `workspace_locked`, `run_in_progress`만 true다(잠금이나 실행이 끝나면 됨). `model_list_failed`(아래)와 `config_write_failed` 말고 나머지는 false다(`CLI_ERROR_RETRYABLE`). `cleanup_plan_changed`는 새 미리보기가 먼저라 false, `internal_error`는 무턱대고 되풀이하지 않게 false다.
+  - `config_write_failed`에는 `retryable`이 **없다**(U-82, 검토 R-71 L1). 시스템이 거부한 이름이나 없는 드라이브와, 다른 프로그램이 쥔 파일이나 가득 찬 디스크가 같은 코드와 문구로 나와 가를 수 없다.
   - `model_list_failed`의 `retryable`은 목록 요청의 실패로 정한다(`modelErrorRetryable`, 아래). 목록 함수가 던졌거나 판정할 수 없으면(HTTP 상태가 없는 `api_error`) `retryable`이 **없다**.
 - **실행 결과(`EngineResult.modelError`)**: 모델 오류가 실행을 끝냈을 때만 `{kind, turn, retryable?}`이 있다(reason `model_error`). `run`의 stdout, `result.json`, `report --json`의 `result`에 같다.
   - `kind`: 모델 오류 종류(`MODEL_ERROR_KINDS`). `turn`: 실패한 요청의 모델 턴(1부터, journal의 `model_error.turn`과 같음).
@@ -251,6 +252,70 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - **없으면 알 수 없음**: `retryable`이 없는 것은 "다시 하면 안 된다"가 아니라 "알 수 없다"는 뜻이다(HTTP 상태가 없는 `api_error`, 던진 목록 함수, U-55 전의 출력). 프로그램은 없음을 false로 읽지 않는다. `category`가 없는 오류도 U-55 전의 출력이다.
 - true는 나중에 될 수 있다는 뜻이지 된다는 약속이 아니다. 제공자 어댑터는 이미 할 수 있는 만큼 다시 시도했다(`maxRetries`, `Retry-After`).
 - 고정 값(SP-0)은 바뀌지 않았다.
+
+### 8.3 오류 코드와 힌트 한 곳 (U-166, AXM-11)
+
+- 오류 JSON(`CliErrorOutput`)의 `code`와 `hint`에 올 수 있는 값을 여기 한 곳에 둔다. 8절과 15~18절의 "더해졌다"는 값이 생긴 내력이다. 값의 원천은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES`, `CLI_ERROR_CATEGORY`, `CLI_ERROR_RETRYABLE`, `ALL_CLI_ERROR_HINTS`이고, 유닛 시험(`tests/unit/cli/g-u166-axm-cli.test.ts`)이 아래 두 표와 그 상수가 같은지 본다.
+- **더하기만 한다.** `code`와 `hint`의 값은 지우거나 뜻을 바꾸지 않고 더하기만 한다. 기존 JSON을 깨는 변경은 DR-48이 두 곳(정리 명령의 JSON, 도는 실행의 조회)에만 허용했고 U-22가 그것을 했다. 코드로는 `cleanup_plan_changed`와 `run_in_progress`가 더해졌다.
+- **분기는 필드로 한다.** 프로그램은 `code`, `category`, `retryable`(8.2), `hint`, `diagnostic.code`(17.5)로 가른다. `message`는 사람이 읽는 영어 설명이고 같은 `code`에서도 경우마다 다르다(예: `invalid_arguments`는 사용법 전체를 담는다).
+- 사람용 오류(stderr)는 `code`의 `error.<code>.what`·`error.<code>.fix`를 쓰고, `hint`가 있으면 `error.hint.<hint>` 한 줄을 더한다(17.4, U-37).
+- 종료 코드는 `code`가 정한다. 실행이 시작된 뒤의 끝(`run`의 상태, `revert`의 `partial`)은 이 표가 아니라 8절의 `RUN_EXIT_CODES`·`REVERT_EXIT_CODES`다.
+
+| `code` | 종료 | `category` | `retryable` | 언제(나오는 명령) |
+| --- | --- | --- | --- | --- |
+| `invalid_arguments` | 2 | `input` | `false` | 명령줄 인자가 틀림(모르는 명령·옵션, 빠진 값, 함께 쓸 수 없는 옵션, run id·다이제스트의 꼴). 모든 명령 |
+| `invalid_task` | 2 | `input` | `false` | task 파일을 읽을 수 없거나 값이 틀림. `--task`를 받는 명령 |
+| `invalid_config` | 2 | `input` | `false` | 설정 파일이나 변수 파일을 읽을 수 없거나 값이 틀림, 또는 실행에 필요한 설정이 없음 |
+| `key_in_file` | 2 | `input` | `false` | task·설정 파일이나 `--goal`에 키 필드나 키 값이 있음(11절 "키 거부") |
+| `invalid_script` | 2 | `input` | `false` | scripted 모델 파일이 틀림(4절) |
+| `secret_env_missing` | 2 | `environment` | `false` | task의 `secretEnv`가 이름 붙인 환경 변수가 없음 |
+| `workspace_not_found` | 2 | `input` | `false` | 작업 공간 디렉터리가 없음 |
+| `workspace_is_install_dir` | 2 | `input` | `false` | 작업 공간이 CLI의 설치 디렉터리이거나, 그 안에 있거나, 그것을 담음(15절 U-3) |
+| `workspace_locked` | 6 | `state` | `true` | 다른 Codaryn 프로세스(실행, 되돌리기, 적용, 검토, 정리)가 작업 공간 잠금을 쥠 |
+| `run_in_progress` | 6 | `state` | `true` | `--run latest`의 최신 실행이 아직 결과 없이 도는 중(`report`, `changes`, `revert`, 17.3) |
+| `provider_not_configured` | 7 | `environment` | `false` | 제공자의 키·모델·출력 한도 가운데 정해지지 않은 것이 있음 |
+| `provider_not_implemented` | 7 | `environment` | `false` | 그 제공자가 이 판에 없음 |
+| `model_list_failed` | 8 | `environment` | 목록 요청의 실패로 정함(판정할 수 없으면 없음, 8.2) | `models`: 모델 목록 요청이 실패함(16절) |
+| `config_write_failed` | 2 | `environment` | 없음(알 수 없음, 8.2) | `models --use`, `init`: 설정 파일을 쓰지 못했고 파일은 그대로임 |
+| `config_exists` | 2 | `state` | `false` | `init`: 쓸 자리에 파일이 이미 있음 |
+| `run_not_found` | 2 | `state` | `false` | 그 run id의 기록이 없음, 또는 `--run latest`가 고를 실행이 없음 |
+| `invalid_run_record` | 2 | `state` | `false` | 실행 기록을 읽을 수 없거나 손상됨 |
+| `plan_run_missing` | 2 | `state` | `false` | `plan`·`apply`: 계획 실행의 `plan.json`이 없음. `revert`(적용 실행): 그 적용이 쓴 계획 실행이나 그 `plan.json`이 없음 |
+| `run_not_plan` | 2 | `input` | `false` | `plan`·`apply`: 계획을 만든 실행이 아님, 또는 `apply`에 준 task가 `plan: "apply"`가 아님 |
+| `plan_not_approved` | 2 | `input` | `false` | `apply`: 승인 없음(`--digest`가 없거나 짧거나 맞지 않음, 터미널의 답이 아니오) |
+| `plan_already_applied` | 2 | `state` | `false` | `apply`: 그 계획은 이미 적용됨 |
+| `plan_secrets_differ` | 2 | `input` | `false` | `plan`·`apply`: 지금 등록된 비밀이 계획의 경로를 계획 실행과 다르게 가림(DR-28) |
+| `cleanup_plan_changed` | 2 | `state` | `false` | `cleanup --confirm`: 확인한 다이제스트가 다시 지은 정리 계획의 것이 아님(18.13) |
+| `plan_records_changed` | 2 | `state` | `false` | `apply`: 계획 실행에 기록 변경 표시가 있음(18.12) |
+| `run_not_awaiting_review` | 2 | `state` | `false` | `review`: 사람의 검토를 기다리는 실행이 아님 |
+| `internal_error` | 70 | `internal` | `false` | Codaryn 자신의 예상하지 못한 실패. 최상위가 잡아 이 한 줄로 바꾼다(8절) |
+
+- 힌트(`hint`, U-37 등)는 원인을 아는 오류에만 하나 붙는다. "사람용 줄의 값"은 사람용 오류의 그 줄에만 쓰이고 JSON 줄에는 없다(`CLI_ERROR_HINT_DETAIL`은 심벌 키라 JSON에 실리지 않는다). JSON의 `hint`는 이름뿐이다.
+
+| `hint` | 함께 나오는 `code` | 사람용 줄의 값 | 뜻 |
+| --- | --- | --- | --- |
+| `quick_form_needs_task` | `invalid_config` | — | `plan`·`apply`·`review`의 간편 형식(`--workspace`)이 설정 파일의 실행 설정에서 실패함. 계획 실행의 task를 `--task`로 주면 그 설정과 비밀을 쓴다 |
+| `unknown_command` | `invalid_arguments` | — | 명령 단어가 없거나 Codaryn 명령이 아님(`help` 뒤의 단어도) |
+| `workspace_goal_together` | `invalid_arguments` | — | 간편 형식에는 `--workspace`와 `--goal`이 함께 있어야 함 |
+| `apply_needs_run_id` | `invalid_arguments` | — | `apply`는 계획 실행의 id를 받음(`latest`는 받지 않음) |
+| `digest_form` | `invalid_arguments` | — | `--digest`나 `cleanup`의 `--confirm`은 `MIN_PLAN_DIGEST_PREFIX`자 이상 64자 이하의 소문자 16진수 |
+| `review_needs_verdict` | `invalid_arguments` | — | `review`에 `--accept`나 `--reject`가 없음 |
+| `run_id_form` | `invalid_arguments` | — | `--run`은 run id나 `latest`를 받음 |
+| `version_no_json` | `invalid_arguments` | — | `--version`은 다른 인자를 받지 않음 |
+| `task_file_unreadable` | `invalid_task` | — | `--task`로 준 파일을 읽을 수 없음(없음, 파일이 아님, 읽을 수 없음) |
+| `input_too_large` | `invalid_task`, `invalid_config` | — | 입력 파일이 크기 한도를 넘음 |
+| `input_inside_workspace` | `invalid_task`, `invalid_config` | — | task·설정·변수 파일이 작업 공간 안에 있거나 그 자리를 확인할 수 없음 |
+| `profile_needs_config` | `invalid_config` | — | `--profile`에는 설정 파일이 있어야 함 |
+| `profile_not_found` | `invalid_config` | — | 설정 파일에 그 이름의 프로필이 없음 |
+| `task_type_not_found` | `invalid_config`, `invalid_task` | — | `workflowRef`나 `--workflow`가 이름 붙인 작업 종류가 내장에도 설정의 `workflows`에도 없음(task 파일이 이름 붙였으면 `invalid_task`) |
+| `key_in_goal` | `key_in_file` | — | `--goal`에 키 값이 있음 |
+| `key_in_task` | `key_in_file` | — | task 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
+| `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
+| `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
+| `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
+| `key_field_in_task` | `key_in_file` | `field`: 필드 자리 | task 파일의 그 필드에 키 필드나 키 값이 있음 |
+| `key_field_in_config` | `key_in_file` | `field`: 필드 자리 | 설정 파일의 그 필드에 키 필드나 키 값이 있음 |
+| `provider_settings_missing` | `provider_not_configured` | `missing`: 빠진 설정마다 한 줄(키, 모델, 출력 한도) | 제공자 설정 가운데 빠진 것 |
 
 ## 9. 계약 변경 절차
 

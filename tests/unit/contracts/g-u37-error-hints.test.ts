@@ -45,6 +45,8 @@ const PLAIN = [
   "key_in_goal",
   "key_in_task",
   "key_in_config",
+  // U-115 (UXM-9, PM: in na-core's branch for p4g-general to confirm): no config file at all.
+  "config_missing",
 ];
 const DETAILED: { readonly [hint: string]: { readonly [param: string]: string } } = {
   unknown_option: { position: "count" },

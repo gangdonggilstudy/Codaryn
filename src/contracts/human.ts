@@ -485,6 +485,15 @@ export const FIXED_MESSAGES = {
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
+  // U-110 (review R-85 M1): RunSummaryContext.confirmationDenied, in place of the add-a-rule hint for
+  // those calls (the rule is there; it asks before running): `{count}` calls denied by the person
+  // (`user`), with no answer where this run could not ask (`unasked`: standard input or stderr not a
+  // terminal, or --quiet) or where the question went unanswered (`unanswered`: the input ended, or
+  // the time limit ended the wait), or because the run was cancelled while it waited (`cancelled`).
+  "summary.confirm_denied.user": { count: "count" },
+  "summary.confirm_denied.unasked": { count: "count" },
+  "summary.confirm_denied.unanswered": { count: "count" },
+  "summary.confirm_denied.cancelled": { count: "count" },
   "summary.usage": { turns: "count", toolCalls: "count", seconds: "seconds" },
   "summary.run_id": { runId: "runId" },
   // DR-52 (AXM-17): EngineResult.masking, counts only: `{registered}` values registered for masking,
@@ -830,6 +839,9 @@ export const FIXED_MESSAGES = {
   // Yes/no prompts (N-20): the hint shows the default answer, as INIT_QUESTION_DEFAULTS says.
   "prompt.yes_no_default_yes": {},
   "prompt.yes_no_default_no": {},
+  // U-110 (review R-88 M2): Ctrl+C at a question of apply, revert, models or init: the command stops
+  // there (exit code 5) without changing anything more. A run's question is cancelled as the run.
+  "prompt.interrupted": {},
 
   // Language (N-20): where it came from is `language.source.<source>`.
   "language.chosen": { language: "language", source: "text" },
@@ -843,6 +855,31 @@ export const FIXED_MESSAGES = {
   "help.contract": {},
   "help.options_heading": {},
   "help.exit_heading": {},
+  // U-115 (UXM-9): the short help at a terminal (`codaryn`, `codaryn --help`): help.intro, then
+  // help.first_steps and first_use.try_without_key, help.commands_heading with one help.summary.<command>
+  // per command in the first-use order, then help.more, help.key, help.output, help.contract. Not
+  // at a terminal the full help is as before. U-132 (review R-91 L-2): each line within 100 columns:
+  // help.first_steps is the heading and help.first_steps_commands the commands on the next line
+  // (indented two); help.version follows help.more on its own line.
+  "help.first_steps": {},
+  "help.first_steps_commands": {},
+  "help.more": {},
+  "help.version": {},
+  "help.summary.init": {},
+  "help.summary.doctor": {},
+  "help.summary.models": {},
+  "help.summary.run": {},
+  "help.summary.runs": {},
+  "help.summary.report": {},
+  "help.summary.changes": {},
+  "help.summary.revert": {},
+  "help.summary.plan": {},
+  "help.summary.apply": {},
+  "help.summary.review": {},
+  "help.summary.cleanup": {},
+  // U-115: the way to try the flow without a key (docs/usage.md section 3), at a terminal: after
+  // the short help, doctor's next steps, init's text and a run's provider_not_configured error.
+  "first_use.try_without_key": {},
 
   // doctor (N-21): one id per outcome; the check id and its status word come from listed ids.
   // A DoctorCheck's `text` is in the JSON, so doctor ids never take `text` (catalog output).
@@ -892,6 +929,30 @@ export const FIXED_MESSAGES = {
   // can carry (S-11: printable ASCII 0x21-0x7E, no space); the check fails. Never the value, its
   // length or which character.
   "doctor.api_key.unusable": { keyEnv: "keyEnv" },
+  // U-115 (UXM-9): at a terminal, after doctor's closing line: what is not set up yet and what to do
+  // next, numbered in a fixed order (doctor.next.heading, then .init or .config_fix, .key or
+  // .key_unusable, .model or .model_after_key, .other, .warnings, and .again), from the checks' texts;
+  // with nothing to do, .ready (or .ready_task when doctor was given --task). The check lines and
+  // doctor --json are as before; not at a terminal nothing is added.
+  // U-132 (review R-91): .init_with_config in place of .init where there is no default config
+  // location at all (L-1: init needs --config there); .model_after_key_fix after a key that cannot
+  // be sent (L-4); .ready says the run works in the folder it starts in, and .ready_workspace is the
+  // quick form for doctor given --workspace (L-3). Every line within 100 columns with its number (L-2).
+  "doctor.next.heading": {},
+  "doctor.next.init": {},
+  "doctor.next.init_with_config": {},
+  "doctor.next.config_fix": {},
+  "doctor.next.key": { keyEnv: "keyEnv" },
+  "doctor.next.key_unusable": { keyEnv: "keyEnv" },
+  "doctor.next.model": {},
+  "doctor.next.model_after_key": {},
+  "doctor.next.model_after_key_fix": {},
+  "doctor.next.other": { count: "count" },
+  "doctor.next.warnings": { count: "count" },
+  "doctor.next.again": {},
+  "doctor.next.ready": {},
+  "doctor.next.ready_workspace": {},
+  "doctor.next.ready_task": {},
   // DR-36 (b), DR-34 (a): the key is set and where `{provider}` requests send it: `{origin}`, set by
   // the provider's address variable `{variable}`, by the config field `{field}`, or the default.
   "doctor.api_key.sends_to_env": { keyEnv: "keyEnv", provider: "provider", origin: "apiOrigin", variable: "settingEnv" },
@@ -1158,6 +1219,12 @@ export type DoctorText = {
  * - policySource (N-23): where the run's policy came from, so the denied-call hint points there:
  *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
  *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
+ * - confirmationDenied (U-110, review R-85 M1): the calls denied after a permission question
+ *   (`confirmation_answered` with `deny`), by ConfirmationBy, and `couldAsk`: whether this run had a
+ *   way to ask (the CLI gave the engine its terminal question). Absent when there was none. They are
+ *   among deniedCommandCalls; the add-a-rule hint is for the other denied command calls only, and
+ *   each count above 0 has its line: `summary.confirm_denied.user`, `.cancelled`, and for `default`
+ *   `.unanswered` when couldAsk, else `.unasked`.
  * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
  *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
  *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the
@@ -1174,6 +1241,7 @@ export interface RunSummaryContext {
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
+  readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number; readonly couldAsk: boolean };
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
 }

@@ -14,7 +14,7 @@ export const MAX_LINE_CHARS = 8 * 1024 * 1024;
 export const MIN_NODE_MAJOR = 26;
 
 /** Calls the engine host answers. Each later unit adds the app layer functions it needs. */
-export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes", "report", "proposeSettings", "applySettings", "transport", "stateSummary", "previewCleanup", "applyCleanup", "reportMarkdown", "createSettings", "settingsSuggestions", "startTaskRun", "configFile"] as const;
+export const HOST_CALLS = ["doctor", "messages", "tree", "settings", "listModels", "selectModel", "startRun", "cancelRun", "listRuns", "revert", "plan", "applyPlan", "review", "changes", "report", "proposeSettings", "applySettings", "transport", "stateSummary", "previewCleanup", "applyCleanup", "reportMarkdown", "createSettings", "settingsSuggestions", "startTaskRun", "configFile", "runEvents", "checkPlan"] as const;
 export type HostCall = (typeof HOST_CALLS)[number];
 
 export interface HostRequest {
@@ -82,7 +82,8 @@ export type HostMessage = HostReady | HostResponse | HostRunMessage;
 
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-function parseRunItems(value: unknown): HostRunItem[] | null {
+/** Run items as the engine host gives them (also, U-118, a page of a run's stored records). */
+export function parseRunItems(value: unknown): HostRunItem[] | null {
   if (!Array.isArray(value) || value.length > MAX_RUN_ITEMS) return null;
   const items: HostRunItem[] = [];
   for (const item of value) {

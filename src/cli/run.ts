@@ -67,6 +67,9 @@ import type {
 import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText } from "./text-safety.js";
+import { createMessageCatalog } from "../i18n/index.js";
+import { terminalConfirm } from "./confirm.js";
+import type { AskLine } from "./confirm.js";
 import { runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
@@ -134,6 +137,12 @@ export interface CliEnvironment {
   /** Cancellation for the run. Created from the parsed arguments. */
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
   /**
+   * U-110 (B-5): asks one line at a terminal. The real CLI gives it only when standard input and
+   * stderr are terminals. Absent, or with --quiet: the permission question is not asked (denied by
+   * default, DR-10).
+   */
+  readonly ask?: AskLine;
+  /**
    * U-3: the running CLI's package root (`findInstall` in the real CLI, which always sets it).
    * Undefined: not checked (in-process tests). Null: it could not be found, so every run is refused.
    */
@@ -178,6 +187,10 @@ export interface RunNotes {
   workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
   failedToolCalls: number;
+  /** U-110 (R-85 M1): `confirmation_answered` records with `deny`, by who decided; absent while there is none. */
+  confirmationDenied?: { user: number; default: number; cancelled: number };
+  /** U-110: whether this run gave the engine a way to ask (the terminal question). */
+  couldAsk?: boolean;
 }
 
 export interface CliRunOutcome {
@@ -419,6 +432,8 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     deniedToolCalls: notes.deniedToolCalls,
     deniedCommandCalls: notes.deniedCommandCalls,
     failedToolCalls: notes.failedToolCalls,
+    // U-110 (R-85 M1): the denials after a permission question, so the hint is not to add a rule.
+    ...(notes.confirmationDenied === undefined ? {} : { confirmationDenied: { ...notes.confirmationDenied, couldAsk: notes.couldAsk === true } }),
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -535,6 +550,8 @@ export async function prepareTask(
   const files: InputFile[] = [];
   const candidate = chosen.candidate;
   let defaultDisplay: DefaultConfigDisplay | null = null;
+  // U-115 (UXM-9): no file at the default location (nor --config, nor CODARYN_CONFIG).
+  let noConfigYet = false;
   if (candidate !== null) {
     let text: string | null = null;
     try {
@@ -549,6 +566,7 @@ export async function prepareTask(
             : "the config file cannot be read as JSON",
         );
       }
+      noConfigYet = candidate.source === "default";
     }
     if (text !== null) {
       // DR-40 (b): a file over the cap is refused before any check reads it.
@@ -642,7 +660,10 @@ export async function prepareTask(
   if (!taskOutcome.ok) {
     // A task file's own fields are "task"; limits bounded by the config file and the quick form are "config".
     const file: InputDiagnosticFile = taskFile !== null && taskOutcome.code === "invalid_task" ? "task" : "config";
-    return error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+    const failed = error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+    // U-115 (UXM-9, U-37): the quick form's settings were missing because there is no config file
+    // yet; the person is told so (codaryn init). The message, the code and the exit code are as before.
+    return noConfigYet && taskFile === null && configFile === null && taskOutcome.code === "invalid_config" ? withHint(failed, "config_missing") : failed;
   }
 
   // Where each secret name came from, for S-3 messages that give a position, never a name.
@@ -831,6 +852,10 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;
         }
+        if (event.type === "confirmation_answered" && event.decision === "deny" && (event.by === "user" || event.by === "default" || event.by === "cancelled")) {
+          const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
+          denied[event.by] += 1;
+        }
       },
       close: () => recorded.close(),
     };
@@ -879,7 +904,19 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
             },
             close: () => progressed.close(),
           };
-    const deps = { ...assembled.deps, journal };
+    // U-110 (B-5): at a terminal and without --quiet, the engine's permission question is asked on
+    // stderr in the chosen language (English when no renderer is given).
+    let questions: MessageCatalog | undefined;
+    if (!args.quiet && io.ask !== undefined) {
+      try {
+        questions = human?.messages ?? io.human?.(notes.configLanguage).messages;
+      } catch {
+        questions = undefined;
+      }
+    }
+    const confirm = args.quiet || io.ask === undefined ? undefined : terminalConfirm(io.ask, questions ?? createMessageCatalog("en"));
+    notes.couldAsk = confirm !== undefined;
+    const deps = { ...assembled.deps, journal, ...(confirm === undefined ? {} : { confirm }) };
     let result: EngineResult | null = null;
     try {
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.

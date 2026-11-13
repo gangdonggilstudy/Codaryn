@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -638,6 +638,8 @@ startGui({
       await taskWith("organize", "a.txt를 moved 폴더로 옮긴다");
       const directRunId = await newResult(beforeDirect);
       await js("document.getElementById('run-view-plan')?.click(); true");
+      // U-119: the apply waits for the check before an apply.
+      const planCheckReady = (): Promise<unknown> => waitFor("(() => { const c = document.getElementById('plan-check')?.getAttribute('data-check'); return c && c !== 'checking' ? c : null; })()", 60_000);
       results["directPlanShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
       // U-62 (3.9): the digest's first 12 characters, as the plan shows them.
       await js("document.getElementById('plan-copy-digest')?.click(); true");
@@ -651,6 +653,7 @@ startGui({
       results["planAgentWords"] = await js(
         "(() => { const ids = [...(document.getElementById('plan')?.children ?? [])].map((c) => c.id); return { label: document.querySelector('#plan-agent-words .notice')?.textContent ?? null, text: document.getElementById('plan-agent-words-text')?.textContent ?? null, afterActions: ids.indexOf('plan-actions') >= 0 && ids.indexOf('plan-actions') < ids.indexOf('plan-agent-words') }; })()",
       );
+      await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
       await newResult(directRunId);
       results["applyByWorkflow"] = await js(
@@ -678,6 +681,13 @@ startGui({
       results["consentUnasked"] = await js(
         `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(planRunId)}, 'tidy').then((r) => window.codaryn.applyPlan(r.approval, true))`,
       );
+      // U-119 (3.9, DR-21): the check before the apply: clean on this drive, no consent needed, nothing left; a forged token is refused.
+      results["planCheck"] = {
+        state: await planCheckReady(),
+        rows: await js("document.querySelectorAll('#plan-actions [data-problem], #plan-actions [data-unsafe]').length"),
+        left: await js("document.querySelectorAll('#plan-check-probes-left, #plan-check-lock-left').length"),
+        forged: await js(`window.codaryn.checkPlan(${JSON.stringify("0".repeat(32))}).then((r) => (r.ok ? 'checked' : r.code))`),
+      };
       await js("document.getElementById('plan-apply')?.click(); true");
       await newResult(planRunId);
       results["applyDone"] = await js(
@@ -888,6 +898,7 @@ startGui({
       await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
       await js("document.getElementById('run-view-plan')?.click(); true");
       await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' && document.getElementById('plan-apply') !== null ? r : null; })()");
+      await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
       const discardApplyId = String(await newResult(discardPlanId));
       const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);
@@ -1047,6 +1058,28 @@ startGui({
       results["reviewTaskRun"] = await js(`window.codaryn.review(${taskHandle}, ${JSON.stringify(taskRunId)}, null, null, 'accept', null).then((r) => (r.ok ? 'recorded' : r.code))`);
 
       // 6. What the page can and cannot do.
+      // U-118 (3.7): the analyze run's records tab (the progress list's lines, its filter, its records-changed
+      // mark); then, with a broken line added to its journal (after every step that reads it), the page is damaged.
+      results["recordsTab"] = await (async () => {
+        await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+        await js(`document.querySelector('[data-report="${analyzeRunId}"]')?.click(); true`);
+        await waitFor("(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? r : null; })()");
+        await js("document.getElementById('report-tab-log')?.click(); true");
+        const ready = await waitFor("(() => { const r = document.getElementById('report-log')?.getAttribute('data-log-ready'); return r && r !== 'loading' ? r : null; })()");
+        const lines = Number(await js("document.querySelectorAll('#report-log li[data-kind]').length"));
+        await js("(() => { const s = document.getElementById('report-log-filter'); if (!s) return false; s.value = 'checks'; s.dispatchEvent(new Event('change')); return true; })()");
+        const kinds = (await js("[...document.querySelectorAll('#report-log li[data-kind]')].map((li) => li.getAttribute('data-kind'))")) as string[];
+        const checks = kinds.length > 0 && kinds.length < lines && kinds.every((kind) => kind === "verifier_result" || kind === "integrity_checked");
+        const recordsNote = await js("document.getElementById('report-log-records-changed') !== null");
+        const notes = await js("document.getElementById('report-log-notes')?.children.length ?? -1");
+        appendFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "journal.jsonl"), "{not a record\n");
+        const damaged = await js(
+          `window.codaryn.runEvents(${JSON.stringify(secondHandle)}, ${JSON.stringify(analyzeRunId)}, null, null, 0).then((r) => (r.ok ? { status: r.status, skipped: r.skipped, missing: r.missing, lines: r.items.length > 0 } : r.code), (e) => 'threw: ' + String(e && e.message))`,
+        );
+        const tab = await js("[document.getElementById('report')?.getAttribute('data-report-ready') ?? null, document.getElementById('report-tab-log') !== null, document.getElementById('report-log-notes')?.textContent ?? null]");
+        return { ready, lines: lines > 0, checks, notes, recordsNote, damaged, ...(ready === "complete" ? {} : { tab }) };
+      })();
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",
       );

@@ -41,6 +41,8 @@ import type {
   SettingsWrittenReply,
   TreeEntryView,
   TreeReply,
+  RunEventsReply,
+  PlanCheckReply,
 } from "../shared/ipc.js";
 import type { CleanupPlanView, CleanupResultView, StateSummaryView } from "../shared/cleanup.js";
 
@@ -91,6 +93,10 @@ export interface CodarynApi {
   applyPlan(approval: string, askConsent: boolean): Promise<unknown>;
   review(workspace: string, runId: string, profile: string | null, workflow: string | null, decision: "accept" | "reject", note: string | null): Promise<unknown>;
   changes(workspace: string, runId: string, profile: string | null, workflow: string | null): Promise<unknown>;
+  /** U-119 (3.9): the check before an apply of the plan a view showed, by its approval token. */
+  checkPlan(approval: string): Promise<unknown>;
+  /** U-118 (3.7): one page of a run's records as the progress list's lines. */
+  runEvents(workspace: string, runId: string, profile: string | null, workflow: string | null, offset: number): Promise<unknown>;
   onWorkspaceOpened(listener: (payload: unknown) => void): void;
 }
 
@@ -460,6 +466,45 @@ export function asChanges(value: unknown): ChangesReply {
       : [],
   );
   return { ok: true, runId: value["runId"], recordsChanged: value["recordsChanged"] === true, files };
+}
+
+/** U-119: the check before an apply (the main process checked it already). */
+export function asPlanCheck(value: unknown): PlanCheckReply {
+  if (!isObj(value) || value["ok"] !== true || !Array.isArray(value["problems"]) || !Array.isArray(value["unsafeMoves"])) return failed(value);
+  const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  return {
+    ok: true,
+    problems: value["problems"].flatMap((item: unknown) => (isObj(item) && typeof item["index"] === "number" && str(item["problem"]) ? [{ index: n(item["index"]), problem: item["problem"] }] : [])),
+    unsafeMoves: value["unsafeMoves"].filter((index: unknown): index is number => typeof index === "number" && Number.isSafeInteger(index) && index >= 0),
+    inventoryLimitReached: value["inventoryLimitReached"] === true,
+    probesLeft: n(value["probesLeft"]),
+    probesRemoved: n(value["probesRemoved"]),
+    lockLeft: value["lockLeft"] === true,
+  };
+}
+
+/** U-118: a page of a run's records (the main process checked it already). Items that do not fit are left out. */
+export function asRunEventsPage(value: unknown): RunEventsReply {
+  if (!isObj(value) || value["ok"] !== true || !str(value["runId"]) || !Array.isArray(value["items"])) return failed(value);
+  const status = value["status"];
+  if (status !== "complete" && status !== "incomplete" && status !== "damaged") return failed(value);
+  const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+  const items = value["items"].flatMap((item: unknown) => (isObj(item) && str(item["kind"]) && str(item["text"]) ? [{ at: str(item["at"]) ? item["at"] : null, kind: item["kind"], text: item["text"] }] : []));
+  const next = value["nextOffset"];
+  return {
+    ok: true,
+    runId: value["runId"],
+    runKind: value["runKind"] === "apply" ? "apply" : "run",
+    status,
+    recordsChanged: value["recordsChanged"] === true,
+    items,
+    records: n(value["records"]),
+    total: n(value["total"]),
+    skipped: n(value["skipped"]),
+    missing: n(value["missing"]),
+    offset: n(value["offset"]),
+    nextOffset: typeof next === "number" && Number.isSafeInteger(next) && next >= 0 ? next : null,
+  };
 }
 
 /** GU-3: a run's report (the main process checked it already). */

@@ -113,11 +113,25 @@ function line(messages: MessageCatalog, id: MessageId): string {
   return id;
 }
 
-/** The help text. Without a catalog, English. */
-export function helpText(command: CommandName | null, catalog: MessageCatalog = createMessageCatalog("en")): string {
+/** U-115 (UXM-9): the short help's commands, in the order a first-time person uses them. */
+const FIRST_USE_ORDER: readonly HelpCommand[] = ["init", "doctor", "models", "run", "runs", "report", "changes", "revert", "plan", "apply", "review", "cleanup"];
+
+/**
+ * The help text. Without a catalog, English. U-115 (UXM-9): `terminal` (stdout is a terminal) turns
+ * the general help into the short one: the first steps, the way to try without a key, one line per
+ * command in the first-use order, and where each command's usage is. Not at a terminal, and each
+ * command's own help, as before.
+ */
+export function helpText(command: CommandName | null, catalog: MessageCatalog = createMessageCatalog("en"), options: { readonly terminal?: boolean } = {}): string {
   const messages = { format: (id: MessageId) => line(catalog, id) };
   const lines: string[] = [];
-  if (command === null) {
+  if (command === null && options.terminal === true) {
+    const width = Math.max(...FIRST_USE_ORDER.map((name) => name.length));
+    // U-132 (R-91 L-2): the first steps as a heading and an indented command line, each within 100 columns.
+    lines.push(messages.format("help.intro"), "", messages.format("help.first_steps"), `  ${messages.format("help.first_steps_commands")}`, messages.format("first_use.try_without_key"), "", messages.format("help.commands_heading"));
+    for (const name of FIRST_USE_ORDER) lines.push(`  ${name.padEnd(width)}  ${messages.format(`help.summary.${name}`)}`);
+    lines.push("", messages.format("help.more"), messages.format("help.version"), messages.format("help.key"), messages.format("help.output"), messages.format("help.contract"));
+  } else if (command === null) {
     lines.push(messages.format("help.intro"), "", messages.format("help.commands_heading"));
     for (const name of COMMANDS) lines.push(`  ${USAGES[name]}`);
     lines.push("  codaryn --help | codaryn help <command> | codaryn <command> --help", "  codaryn --version", "");

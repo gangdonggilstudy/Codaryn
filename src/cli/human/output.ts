@@ -19,6 +19,7 @@ import {
   API_MODEL_ENVS,
   APPLY_NOTICE_KINDS,
   APPROVAL_CHANNELS,
+  CONFIRMATION_BY,
   CLI_ERROR_EXIT_CODES,
   CLI_ERROR_HINT_DETAIL,
   MAX_FINAL_MESSAGE_CHARS,
@@ -160,6 +161,30 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     integrityChecks = 0;
     integrityChanged = 0;
     integrityUnchangedShown = false;
+  };
+  /**
+   * U-110 (R-85 M1): RunSummaryContext.confirmationDenied as summary lines, in CONFIRMATION_BY order,
+   * and how many calls they cover. `default` is `unanswered` where this run could ask (couldAsk) and
+   * `unasked` where it could not. A field that is not an object, or a count that is not a whole number
+   * of 0 or more, counts as none: the summary is then the one without it.
+   */
+  const confirmationDenials = (given: unknown): { readonly lines: readonly string[]; readonly total: number } => {
+    if (typeof given !== "object" || given === null) return { lines: [], total: 0 };
+    const field = given as { readonly user?: unknown; readonly default?: unknown; readonly cancelled?: unknown; readonly couldAsk?: unknown };
+    const ids = {
+      user: "summary.confirm_denied.user",
+      default: field.couldAsk === true ? "summary.confirm_denied.unanswered" : "summary.confirm_denied.unasked",
+      cancelled: "summary.confirm_denied.cancelled",
+    } as const;
+    const lines: string[] = [];
+    let total = 0;
+    for (const by of CONFIRMATION_BY) {
+      const count = field[by];
+      if (!isCount(count, 1)) continue;
+      lines.push(catalog.format(ids[by], { count }));
+      total += count;
+    }
+    return { lines, total };
   };
   /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
   const integritySummary = (): string[] =>
@@ -413,9 +438,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
       if (failed > 0) out.push(catalog.format("summary.failed", { count: failed }));
+      // U-110 (R-85 M1): the calls denied after a permission question. Their rule is there and asks
+      // first, so each says what became of the question instead of the add-a-rule hint.
+      const asked = confirmationDenials(context.confirmationDenied);
+      out.push(...asked.lines);
       // N-23(e): the hint is about allowing a command, so it comes only with command denials, and
-      // it points where the run's policy came from.
-      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > 0) {
+      // it points where the run's policy came from. U-110: only for the denied command calls that did
+      // not follow a question (they are among deniedCommandCalls); a plain rule for a command that asks
+      // first would let it run without the question.
+      if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > asked.total) {
         out.push(catalog.format(context.policySource === "task" ? "summary.denied_hint_task" : "summary.denied_hint"));
       }
       const usage = result.usage;
@@ -575,6 +606,17 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = typeof told === "object" && told !== null ? resultLine(told) : null;
           break;
         }
+        // U-110 (R-85 M1): the permission question (U-74). The question itself has no progress line: at
+        // a terminal the CLI asks it on stderr. Its answer has one: allowed for this call once, or denied
+        // by the person, by default (no answer, nobody to ask, or the time limit) or as cancelled.
+        case "confirmation_requested":
+          line = null;
+          break;
+        case "confirmation_answered":
+          if (event.decision === "allow_once" && event.by === "user") line = catalog.format("progress.confirmation_allowed");
+          else if (event.decision === "deny" && isOneOf(event.by, CONFIRMATION_BY)) line = catalog.format(`progress.confirmation_denied.${event.by}`);
+          else line = null;
+          break;
         case "model_response":
           line = null;
           break;

@@ -58,7 +58,9 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCopyArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange } from "../shared/ipc.js";
+import { copyablePath, parseCheckPlanArgs, toPlanCheckReply, parseCopyArgs, parseRunEventsArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
+import type { PlanCheckReply, RunEventsReply } from "../shared/ipc.js";
+import { parseRunItems } from "../shared/protocol.js";
 import type { UiMemoryView } from "../shared/ipc.js";
 import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
@@ -79,6 +81,8 @@ const MODELS_TIMEOUT_MS = 120_000;
 const START_TIMEOUT_MS = 120_000;
 const CANCEL_TIMEOUT_MS = 10_000;
 const RUNS_TIMEOUT_MS = 30_000;
+/** U-119: the check hashes the plan's source files; a large plan takes longer than a listing. */
+const PLAN_CHECK_TIMEOUT_MS = 120_000;
 /** A revert waits for the workspace lock and moves files back; its preview only reads. */
 const REVERT_TIMEOUT_MS = 120_000;
 
@@ -696,6 +700,47 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   // DR-7, DR-29 (3.4): a run's changed files, by path and state only. It reads; it changes nothing.
+  /**
+   * U-119 (3.9, DR-21): checks the plan a plan view showed before it is applied, by that view's
+   * approval token (looked at, not used: the apply still takes it, and the person's OS confirmation).
+   * The check moves and records nothing; the plan, its form and its digest are the token's.
+   */
+  handle(IPC_CHANNELS.checkPlan, async (args): Promise<PlanCheckReply> => {
+    const token = args.length === 1 ? parseCheckPlanArgs(args[0]) : null;
+    if (token === null) return { ok: false, code: "invalid_args" };
+    const approval = deps.approvals.get(token);
+    if (approval === null) return { ok: false, code: "unknown_plan" };
+    const root = workspaces.path(approval.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call(
+      "checkPlan",
+      { workspace: root, profile: approval.profile, workflowRef: approval.workflowRef, planRunId: approval.planRunId, digest: approval.digest },
+      PLAN_CHECK_TIMEOUT_MS,
+    );
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toPlanCheckReply(response.value, approval.planRunId, approval.digest, approval.moves + approval.discards);
+  });
+
+  // U-118 (3.7): one page of a run's records, as the progress list's lines, in the window's language.
+  handle(IPC_CHANNELS.runEvents, async (args): Promise<RunEventsReply> => {
+    const parsed = args.length === 1 ? parseRunEventsArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call(
+      "runEvents",
+      { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId, offset: parsed.offset, language: language === "ko" ? "ko" : "en" },
+      RUNS_TIMEOUT_MS,
+    );
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const reply = toRunEventsReply(response.value, parseRunItems);
+    return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
+  });
+
   handle(IPC_CHANNELS.changes, async (args): Promise<ChangesReply> => {
     const parsed = args.length === 1 ? parsePlanArgs(args[0]) : null;
     if (parsed === null) return { ok: false, code: "invalid_args" };

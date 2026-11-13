@@ -624,7 +624,8 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
   const lockId = `cleanup-${randomBytes(4).toString("hex")}`;
   const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: { now: () => Date.now() } });
   if (!lock.ok) return { ok: false, code: "workspace_locked" };
-  try {
+  /** The cleanup itself, under the lock. */
+  const underLock = async (): Promise<Awaited<ReturnType<ApplyCleanup>>> => {
     const { plan, prints, facts } = await makePlan(workspaceRoot, selection, now);
     if (plan.digest !== confirmation.digest) return { ok: false, code: "plan_changed" };
     const removed: (CleanupItemRef & { size: StateSize; warnings: readonly CleanupWarningCode[] })[] = [];
@@ -751,7 +752,16 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
       void errorCode(error);
     }
     return { ok: true, removed: removed.map(({ warnings: _warnings, ...entry }) => entry), kept, totals };
-  } finally {
+  };
+  let outcome: Awaited<ReturnType<ApplyCleanup>>;
+  try {
+    outcome = await underLock();
+  } catch (error) {
     await releaseLock({ workspaceRoot, runId: lockId }).catch(() => false);
+    throw error;
   }
+  // U-201 (U-176's hand-off, CleanupOutcome.lockLeft): a release that throws after its retries, or
+  // answers false, leaves the lock. A finished cleanup says so; its status and lists stay.
+  const released = await releaseLock({ workspaceRoot, runId: lockId }).catch(() => false);
+  return outcome.ok && !released ? { ...outcome, lockLeft: true } : outcome;
 }

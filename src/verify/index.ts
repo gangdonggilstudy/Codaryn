@@ -206,7 +206,12 @@ async function checkRule(rule: FileRule, workspace: Workspace, signal: AbortSign
     return { state: held ? "held" : "not_held", note: present ? "present" : "not present" };
   }
 
-  const read = await workspace.readText(resolved.path);
+  // U-238 (ne-verify R-107 O-1): the run's signal ends the read's waits between tries (U-213), as the
+  // read tools' do; a read the signal cut short says so instead of a read failure.
+  const read = await workspace.readText(resolved.path, { signal });
+  if (!read.ok && read.code === "io_error" && signal.aborted) {
+    return { state: "undecided", note: "cancelled while this rule was checked" };
+  }
   if (!read.ok) {
     // A missing file cannot contain required text. For not_contains it stays undecided:
     // reporting "held" for a file that was never read would be a false pass.

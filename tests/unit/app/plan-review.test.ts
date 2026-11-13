@@ -33,7 +33,7 @@ describe("plan", () => {
 
     const started = await app.applyPlan({ settings: taskForm(base), planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));
-    const applied = ok<ApplyResult>(await started.handle.done);
+    const applied = ok<ApplyResult>((await started.handle.done) as AppCallOutcome<ApplyResult>);
     const after = ok(await app.plan({ settings: taskForm(base), runId: plan.runId })) as PlanOutput;
     assert.deepEqual([after.status, after.appliedBy?.runId], ["applied", applied.runId]);
   });

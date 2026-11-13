@@ -2001,7 +2001,7 @@ node dist/src/cli/main.js run --task $wp\task.json     # 저장소 루트에서.
 
 **기대 결과**
 - `out\ok.txt`만 생기고 `README.md`는 생기지 않는다(시험 기준).
-- 진행 표시에 그 쓰기가 거부됐다고 나올 것이다. 거부 사유 글은 공용 문구 표의 "쓰기를 허용한 파일 밖"(영어 `not among the files this task may write`)일 것이다. 보이는 글을 그대로 적는다.
+- 진행 표시에 그 쓰기가 거부됐다고 나올 것이다. 거부 사유 글은 공용 문구 표의 "쓰기 허용 경로 밖"(영어 `not among the files this task may write`)일 것이다. 보이는 글을 그대로 적는다.
 - 파일을 허용하는 법(위 CLI 줄과 같은 뜻)이 GUI 어디에 보이는지, 보이지 않는지 적는다. 보이지 않으면 담당이 정할 일이다.
 
 **다르면 볼 곳**

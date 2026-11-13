@@ -39,7 +39,7 @@ import {
   maskedParts,
   maskedPartsEncoding,
 } from "../contracts/index.js";
-import type { ChangeNow, ChangesApplyRun, ContentHash, ListRuns, MaskedText, PrivacyGateway, ReadRunOriginals, RunOriginal } from "../contracts/index.js";
+import type { ChangeNow, ChangesApplyRun, ContentHash, ListRuns, MaskedText, PrivacyGateway, ReadRunOriginals, RunOriginal, Workspace } from "../contracts/index.js";
 import { RevertRunError, hasRecordsChangedMark, inspectRun, listRuns, readRunOriginals } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -63,6 +63,14 @@ export interface ReadChangesDeps {
   readonly listRuns?: ListRuns;
   /** U-43: the store's records-changed mark check (hasRecordsChangedMark). */
   readonly recordsChanged?: (workspaceRoot: string, runId: string) => Promise<boolean>;
+  /**
+   * U-234 (R-107 O-1): the caller's signal, given to every read of a current file. Since U-213 a read
+   * in a burst of changes waits between its tries (GUARD_PAUSES_MS); an aborted signal ends the wait
+   * and starts no try more, and the file is then unreadable, as a read whose tries ran out.
+   */
+  readonly signal?: AbortSignal;
+  /** Tests only: the workspace of `root` (createWorkspace when absent). */
+  readonly createWorkspace?: (root: string) => Promise<Workspace>;
 }
 
 /**
@@ -93,7 +101,7 @@ export async function readChanges(
   }
   let workspace;
   try {
-    workspace = await createWorkspace({ root: workspaceRoot });
+    workspace = await (deps.createWorkspace ?? ((root: string) => createWorkspace({ root })))(workspaceRoot);
   } catch {
     return { ok: false, error: appError("workspace_not_found", "the workspace is not an existing directory") };
   }
@@ -157,7 +165,8 @@ export async function readChanges(
     let unavailable: ChangedFileUnavailable | null = null;
     const resolved = await workspace.resolve(change.path, "read");
     if (resolved.ok) {
-      const read = await workspace.readText(resolved.path);
+      // U-234 (R-107 O-1): the caller's signal ends the waits of a read in a burst (U-213).
+      const read = await workspace.readText(resolved.path, deps.signal === undefined ? undefined : { signal: deps.signal });
       if (read.ok) {
         state = read.snapshot.hash === change.after ? "as_run_left" : "changed_since_run";
         currentText = read.snapshot.text;

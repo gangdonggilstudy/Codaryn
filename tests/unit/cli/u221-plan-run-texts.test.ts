@@ -44,6 +44,8 @@ const say = (catalog: MessageCatalog, id: string, params: object = {}): string =
 const en = createMessageCatalog("en");
 const ADVICE = "add it to writablePaths";
 const occurrences = (text: string, part: string): number => text.split(part).length - 1;
+/** A whole line of the output (the end summary's lines; progress lines start with "codaryn: "). */
+const hasLine = (text: string, line: string): boolean => text.split(/\r?\n/).includes(line);
 
 interface Planned {
   readonly form: readonly string[];
@@ -112,7 +114,7 @@ describe("U-221 (3): the writablePaths advice once", () => {
     const { made } = await makePlan(createSandbox(t), [outside], { writablePaths: ["docs"] });
     assert.equal(occurrences(made.stderr, ADVICE), 1, made.stderr);
     assert.ok(made.stderr.includes(say(en, "progress.not_writable_hint", { count: 1 })), made.stderr);
-    assert.ok(made.stderr.includes(say(en, "summary.denied_not_writable", { count: 1 })), made.stderr);
+    assert.ok(hasLine(made.stderr, say(en, "summary.denied_not_writable", { count: 1 })), made.stderr);
   });
 
   test("a run without a plan, a write outside writablePaths: the advice once", { timeout: 60_000 }, async (t) => {
@@ -122,7 +124,7 @@ describe("U-221 (3): the writablePaths advice once", () => {
     const ran = await runGuarded(sb, ["run", "--task", task], cliEnv({ extra: { CODARYN_LANG: "en" } }));
     assert.equal(json(ran)["kind"], "run", ran.stdout);
     assert.equal(occurrences(ran.stderr, ADVICE), 1, ran.stderr);
-    assert.ok(ran.stderr.includes(say(en, "summary.denied_not_writable", { count: 1 })), ran.stderr);
+    assert.ok(hasLine(ran.stderr, say(en, "summary.denied_not_writable", { count: 1 })), ran.stderr);
     assert.equal(readdirSync(sb.workspace).includes("b.txt"), false);
   });
 });

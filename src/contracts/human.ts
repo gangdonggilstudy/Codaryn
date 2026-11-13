@@ -484,9 +484,10 @@ export const FIXED_MESSAGES = {
   // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
   // hint lines come after both).
   "summary.failed": { count: "count" },
-  // U-198 (DR-69 B-4, Codex V-14 L-1; drafts for nb-i18n): the writes refused as path_not_writable, by
-  // why (RunSummaryContext.deniedNotPlanned, deniedNotWritable), each right after summary.denied when
-  // above 0 and followed by its own advice: not one of the files the carried-out plan approved (to
+  // U-198 (DR-69 B-4, Codex V-14 L-1; the ids, their counts and order confirmed by the contract,
+  // U-219; the words are drafts for nb-i18n): the writes refused as path_not_writable, by the kind
+  // of run (RunSummaryContext.deniedNotPlanned, deniedNotWritable), each right after summary.denied
+  // when above 0 and followed by its own advice: not one of the files the carried-out plan approved (to
   // change others, make a new plan that names them and approve it), or outside the writablePaths of
   // the settings (add the file to every list). The plan's first.
   "summary.denied_not_planned": { count: "count" },
@@ -589,14 +590,16 @@ export const FIXED_MESSAGES = {
   "plan.inventory_limit": {},
   "plan.applied_by": { runId: "runId" },
   "plan.next_apply": { runId: "runId" },
-  // U-191 (DR-69 B-1, B-3; drafts for nb-i18n): the plan view of a `run` plan (ChangesPlanOutput),
+  // U-191 (DR-69 B-1, B-3; the ids confirmed by the contract, U-219; the words are drafts for
+  // nb-i18n): the plan view of a `run` plan (ChangesPlanOutput),
   // beside the lines above, which it shares (records_changed, cannot_apply, digest_label,
   // plan.status.<status>, applied_by).
   // - plan.changes.heading: as plan.heading, `{count}` the planned files.
   // - plan.change.create, plan.change.modify: each planned file's change, before its masked path.
-  // - plan.changes.summary_label: before the summary: the plan run's description of the work, approved
-  //   with the plan (it is under the digest, R-99 L-1), not the goal or new instructions (PM; the
-  //   engine's own label says so to the later run); the summary follows as the model's words.
+  // - plan.changes.summary_label: before the summary, when it has text: the plan run's description
+  //   of the work, approved with the plan (it is under the digest, R-99 L-1), not the goal or new
+  //   instructions (PM; the engine's own label says so to the later run); the summary follows as the
+  //   model's words.
   // - plan.changes.next_apply ({runId}: the plan run) while pending and not marked: as
   //   plan.next_apply, the digest's first characters after it.
   // - plan.changes.digest_guarantee: last (the digest names the files, the contents of the files to
@@ -614,12 +617,14 @@ export const FIXED_MESSAGES = {
   "plan.changes.status_carried_out": {},
   "plan.changes.carried_by": { runId: "runId" },
   "apply.question": {},
-  // U-198 (DR-69 B-3, B-8; drafts for nb-i18n): apply's terminal question for a `run` plan, after its
-  // plan view (renderChangesPlan): what approving starts (a run whose file tools write only these
-  // {count} files), that the summary is the model's description of the work, approved with the plan
-  // and not the goal or a new instruction, and that only the files are enforced, a line when the
-  // run's policy allows commands (a command is not bound to the
-  // files, B-8), then apply.changes_question and `prompt.yes_no_default_no`.
+  // U-198 (DR-69 B-3, B-8; the ids confirmed by the contract, U-219; the words are drafts for
+  // nb-i18n): apply's terminal question for a `run` plan, after its plan view (renderChangesPlan):
+  // what approving starts (apply.changes.what: a run whose file tools write only these {count}
+  // files), when the view shows a summary that it is the model's description of the work, approved
+  // with the plan and not the goal or a new instruction, and that only the files are enforced
+  // (apply.changes.summary_note), a line when the run's policy allows commands (a command is not
+  // bound to the files, B-8; apply.changes.commands_note), then apply.changes_question and
+  // `prompt.yes_no_default_no`.
   "apply.changes.what": { count: "count" },
   "apply.changes.summary_note": {},
   "apply.changes.commands_note": {},
@@ -839,12 +844,14 @@ export const FIXED_MESSAGES = {
   // U-129 (2), AXM-21: added to the result column of a run with RunListEntry.review: `{verdict}` is
   // `review.verdict.<verdict>`, as review.recorded writes it.
   "runs.review": { verdict: "text" },
-  // U-139 (UXM-5, PM; a draft for p4g-general and nb-i18n): added to an apply run's result column
-  // right after its status words: the plan run it applied (RunListEntry.planRunId), so the row says
-  // which plan it is the apply of, as the plan run's row names its apply run (runs.plan_applied).
+  // U-139 (UXM-5, PM; the id confirmed by the contract, U-219; the words a draft for nb-i18n): added
+  // to an apply run's result column right after its status words: the plan run it applied
+  // (RunListEntry.planRunId), so the row says which plan it is the apply of, as the plan run's row
+  // names its apply run (runs.plan_applied).
   "runs.apply_of": { runId: "runId" },
-  // U-198 (DR-69 B-3; draft for nb-i18n): a run that carried out a `run` plan (RunListEntry.planRunId
-  // on a `kind: "run"` entry) names that plan run after its status words, as runs.apply_of does.
+  // U-198 (DR-69 B-3; the id confirmed by the contract, U-219; the words a draft for nb-i18n): a run
+  // that carried out a `run` plan (RunListEntry.planRunId on a `kind: "run"` entry) names that plan
+  // run after its status words, as runs.apply_of does.
   "runs.carried_plan": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
@@ -1153,7 +1160,8 @@ export const FIXED_MESSAGES = {
   "lock.remove_hint": {},
   // U-193 (after U-176): a run, a check or a cleanup finished but the workspace lock could not be
   // released (RunOutcome.lockLeft, PlanCheck.lockLeft, CleanupOutcome.lockLeft). No path: the
-  // doctor's lock line names the file. Draft by p5a from nc-human's line (p4g, nb-i18n to confirm).
+  // doctor's lock line names the file. Drafted by p5a from nc-human's line; the id confirmed by the
+  // contract (U-219), the words for nb-i18n to confirm.
   // U-201: the run, apply and revert summaries say it when their context's `lockLeft` is true
   // (RunSummaryContext, ApplySummaryContext, RevertSummaryContext), right before their next commands.
   "lock.release_failed": {},
@@ -1380,17 +1388,21 @@ export interface RunSummaryContext {
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
   /**
-   * U-198 (DR-69 B-4, Codex V-14 L-1; drafts for na-core, U-195): the denied writes of this run whose
-   * code is `path_not_writable` (`tool_decision` with `allowed: false`), by why, each write once:
-   * - deniedNotPlanned: in a run that carries out a `run` plan, a write the plan's own list
-   *   (WritablePathSet source `plan`) does not cover, whatever the other lists say;
-   *   `summary.denied_not_planned`, then `summary.denied_not_planned_hint` (make a new plan);
-   * - deniedNotWritable: any other such write: a list of the settings (config file, profile, task
-   *   type, task file) does not cover it; `summary.denied_not_writable`. U-221: without its advice,
-   *   which the CLI's progress line (progress.not_writable_hint) gives right before the summary.
-   * Among deniedToolCalls; right after `summary.denied`, the plan's first. Optional: absent counts as
-   * 0, no line. `tool_decision` names only the code, so a caller tells the two apart by which list
-   * refused the write (the unit's report: the gate's part).
+   * U-198 (DR-69 B-4, Codex V-14 L-1), confirmed by the contract (U-219) as na-core's U-195 fills
+   * them: the denials of this run whose code is `path_not_writable` (`tool_decision` with
+   * `allowed: false`), each such decision once, by the kind of run:
+   * - deniedNotPlanned: every one in a run that carries out a `run` plan. Before its first model
+   *   request the engine judged each planned file at the same gate (judgePlannedFile) and ended the
+   *   run as plan_stale on a denial, so a write refused later is one outside the plan's files (or,
+   *   rarely, a planned file whose path now leads elsewhere); `summary.denied_not_planned`, then
+   *   `summary.denied_not_planned_hint` (make a new plan that names the file);
+   * - deniedNotWritable: every one in any other run: a list of the settings (config file, profile,
+   *   task type, task file) does not cover the write; `summary.denied_not_writable`. U-221: without
+   *   `summary.denied_not_writable_hint` (kept in the catalogs), since the CLI's progress line
+   *   (progress.not_writable_hint) gives that advice right before the summary.
+   * `tool_decision` names only the code, so the kind of run tells them apart, never which list
+   * refused; in one run at most one of the two is above 0. Among deniedToolCalls; right after
+   * `summary.denied`, the plan's first. Optional: absent counts as 0, no line.
    */
   readonly deniedNotPlanned?: number;
   readonly deniedNotWritable?: number;
@@ -1399,10 +1411,12 @@ export interface RunSummaryContext {
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
   /**
-   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
-   * released (the release threw after its retries, or answered false). The summary then says
-   * `lock.release_failed` right before its next commands; the result and its exit code are the
-   * command's own. Absent or false: released, no line.
+   * U-201 (U-176, U-193; confirmed by the contract, U-219): the command finished but the workspace
+   * lock could not be released (the release threw after its retries, or answered false). The summary
+   * then says `lock.release_failed` right before its next commands; the result and its exit code are
+   * the command's own. Absent or false: released, no line. The renderer draws it (nc-human); the CLI
+   * does not fill it yet (na-core, U-201's hand-off), so it is absent until then. As in
+   * ApplySummaryContext and RevertSummaryContext.
    */
   readonly lockLeft?: boolean;
 }
@@ -1499,10 +1513,8 @@ export interface ApplySummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
   readonly workspaceShown?: ShownWorkspace;
   /**
-   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
-   * released (the release threw after its retries, or answered false). The summary then says
-   * `lock.release_failed` right before its next commands; the result and its exit code are the
-   * command's own. Absent or false: released, no line.
+   * U-201 (U-176, U-193; confirmed by the contract, U-219): as RunSummaryContext.lockLeft. The
+   * renderer draws it; the CLI does not fill it yet (na-core).
    */
   readonly lockLeft?: boolean;
 }
@@ -1515,10 +1527,8 @@ export interface ApplySummaryContext {
 export interface RevertSummaryContext {
   readonly workspaceShown?: ShownWorkspace;
   /**
-   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
-   * released (the release threw after its retries, or answered false). The summary then says
-   * `lock.release_failed` right before its next commands; the result and its exit code are the
-   * command's own. Absent or false: released, no line.
+   * U-201 (U-176, U-193; confirmed by the contract, U-219): as RunSummaryContext.lockLeft. The
+   * renderer draws it; the CLI does not fill it yet (na-core).
    */
   readonly lockLeft?: boolean;
 }

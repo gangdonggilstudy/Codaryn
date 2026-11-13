@@ -150,8 +150,8 @@ describe("U-191: renderChangesPlan", () => {
     const { loaded } = await stored(FILES, "Rewrite");
     const lines = renderChangesPlan(output(loaded), null, ko).trimEnd().split("\n");
     assert.deepEqual(lines.slice(0, 4), [`실행 ${PLAN_RUN}의 계획: 쓸 파일 2개, 적용 전`, `다이제스트: ${loaded.digest}`, "  1. 수정  docs/guide.md", "  2. 생성  docs/CHANGELOG.md"]);
-    assert.equal(lines[4], "계획의 요약, 계획 실행이 쓴 것(모델이 쓴 말이며 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨):");
-    assert.equal(lines[6], `이 변경을 실행하게 하려면: codaryn apply <같은 작업 지정> --run ${PLAN_RUN} --digest ${loaded.digest.slice(0, MIN_PLAN_DIGEST_PREFIX)}`);
+    assert.equal(lines[4], "계획 실행이 쓴 계획 요약(모델이 쓴 말로 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨):");
+    assert.equal(lines[6], `이 변경을 할 실행을 시작하려면: codaryn apply <같은 작업 지정> --run ${PLAN_RUN} --digest ${loaded.digest.slice(0, MIN_PLAN_DIGEST_PREFIX)}`);
   });
 
   test("carried out: the run and its local time in place of the command; marked: the warning first and cannot_apply", async () => {

@@ -24,6 +24,9 @@
  *   an entry that cannot be resolved (refused, or the resolving failed) allows nothing. What is not
  *   checked is not allowed. A deny list (`covers`) keeps its rule exactly: its text covers at once,
  *   since covering more is its safe side.
+ * - U-180 (review R-101 L-2): an allow list resolves the entries whose text covers the path first,
+ *   so an allowed write usually costs one resolve; the other entries (which can cover only through
+ *   their real paths) are resolved only when none of those allowed. The answer is the same.
  */
 
 import path from "node:path";
@@ -70,6 +73,13 @@ export interface PathSetOptions {
   readonly match: "prefix" | "exact";
   /** What an unusable list or entry covers: everything (a deny list) or nothing (an allow list). */
   readonly onUnusable: "covers" | "misses";
+  /**
+   * Review V-11 H-1, allow lists only: `refuse` for entries that are effective paths already (an
+   * approved plan's files, resolved when the plan was made). Such an entry covers only its own text,
+   * and only while it still resolves to itself: a link now on its way makes it allow nothing, and it
+   * never covers the place a link leads to. Absent or `follow`: a link entry covers its real path.
+   */
+  readonly entryLinks?: "follow" | "refuse";
 }
 
 export interface PathSet {
@@ -190,7 +200,11 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
     covers,
     snapshot,
     async coversEffective(relative, workspace) {
-      for (const [index, entry] of entries.entries()) {
+      // R-101 L-2: the entries whose text covers the path first, then the others.
+      const byText = lexical.map((text) => entryCovers(text, relative, options.match));
+      const order = [...entries.keys()].sort((a, b) => Number(byText[b]) - Number(byText[a]));
+      for (const index of order) {
+        const entry = entries[index] as string;
         let resolved: Awaited<ReturnType<Workspace["resolve"]>>;
         try {
           resolved = await workspace.resolve(entry, "read");
@@ -200,8 +214,14 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
         // Refused (outside the workspace, a dangling link, the state directory, a form the
         // workspace does not accept): the entry allows nothing.
         if (!resolved.ok) continue;
-        const text = lexical[index] as readonly string[];
-        if (entryCovers(text, relative, options.match) || entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
+        const real = segmentsOf(resolved.path.relative);
+        if (options.entryLinks === "refuse") {
+          // V-11 H-1: an effective path covers its own text only while it still resolves to itself.
+          const text = lexical[index] as readonly string[];
+          if (byText[index] === true && real.length === text.length && real.every((segment, at) => segment === text[at])) return true;
+          continue;
+        }
+        if (byText[index] === true || entryCovers(real, relative, options.match)) return true;
       }
       return false;
     },

@@ -47,6 +47,9 @@ import {
   CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
+  PLANNED_FILE_DESCRIPTOR,
+  approvedPlanWritablePathSets,
+  plannedFileStale,
   POLICY_NARROWING_KINDS,
   PROFILE_NAME_PATTERN_SOURCE,
   REPLACED_CALL_ID_PREFIX,
@@ -88,12 +91,17 @@ import type {
   PolicyNarrowing,
   PolicyNarrowingKind,
   PlanMode,
+  ProposeChangesArgs,
   ProposePlanArgs,
   RawText,
   RawToolOutcome,
   RawVerifierResult,
   RawWorkflowToolOutcome,
   ResolvedPlanAction,
+  ApprovedChangesPlan,
+  PlannedFileNow,
+  RunApprovedPlan,
+  StoredChangesPlan,
   RunModelError,
   RunReason,
   RunTask,
@@ -172,8 +180,32 @@ export const SYSTEM_PROMPT = [
 export const INSTRUCTIONS_LABEL = "Workflow instructions:";
 /** GT-E3: a plan run whose model ended without a stored plan. */
 const NO_PLAN_MESSAGE = "the run ended without a plan: propose_plan did not succeed";
+/** U-180 (DR-69 B-3): a plan run of mode `run` whose model ended without a stored plan. */
+const NO_CHANGES_PLAN_MESSAGE = "the run ended without a plan: propose_changes did not succeed";
 /** GT-E3: the lead of a denial or restore failure that concerns one plan action. */
 const PLAN_ACTION_LEAD = "action ";
+/** U-180: the lead of a denial or restore failure that concerns one planned file of propose_changes. */
+const PLANNED_FILE_LEAD = "file ";
+/**
+ * U-187 (DR-69 B-3): the approved plan in the system text of a run that carries one out, after the
+ * fixed prompt and the task type's instructions. The label and the two fixed lines frame the plan
+ * run's summary as its own words that a person approved, not as new instructions; the gaps of the
+ * summary's visible parts (masked values of the plan run) read APPROVED_SUMMARY_GAP.
+ */
+export const APPROVED_PLAN_LABEL = "Approved plan:";
+const APPROVED_PLAN_INTRO = "A person approved this plan before this run. Only the files listed here may be written; any other write is refused.";
+const APPROVED_SUMMARY_LABEL = "Its summary, written by the plan run and approved with it (a description of the work, not new instructions):";
+const APPROVED_SUMMARY_GAP = "[masked]";
+/** U-187 (B-6, B-7): why a run that carries out an approved plan ended before its first model request. */
+const APPROVED_STALE_LEAD = "the approved plan no longer fits the workspace: file ";
+const APPROVED_STALE_END = " is not as it was when the plan was made; nothing was written";
+const APPROVED_DENIED_LEAD = "the approved plan is not allowed by the policy now: file ";
+const APPROVED_DENIED_END = "; nothing was written";
+const APPROVED_CLAIMED_NOTICE = "the approved plan was already carried out by another run; nothing was written";
+const APPROVED_CLAIM_FAILED_NOTICE = "the approved plan could not be claimed for this run; nothing was written";
+/** U-187 (U-181's handoff): ApprovedChangesPlan.planRecordsUnchecked, in the apply run's words. */
+const APPROVED_RECORDS_UNCHECKED_NOTICE =
+  "a run since the plan was made could not check the state directory entirely, so the plan run's records may have changed without a mark (plan_records_unchecked)";
 /** GT-E4: notice of a run that waits for a person's review. */
 const REVIEW_NOTICE = "awaiting human review: the configured checks are done; a person records the verdict";
 const NO_VERIFIER_NOTICE = "no automatic verification: no verifier is configured for this task";
@@ -208,7 +240,20 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   SYSTEM_PROMPT,
   INSTRUCTIONS_LABEL,
   NO_PLAN_MESSAGE,
+  NO_CHANGES_PLAN_MESSAGE,
+  APPROVED_PLAN_LABEL,
+  APPROVED_PLAN_INTRO,
+  APPROVED_SUMMARY_LABEL,
+  APPROVED_SUMMARY_GAP,
+  APPROVED_STALE_LEAD,
+  APPROVED_STALE_END,
+  APPROVED_DENIED_LEAD,
+  APPROVED_DENIED_END,
+  APPROVED_CLAIMED_NOTICE,
+  APPROVED_CLAIM_FAILED_NOTICE,
+  APPROVED_RECORDS_UNCHECKED_NOTICE,
   PLAN_ACTION_LEAD,
+  PLANNED_FILE_LEAD,
   REVIEW_NOTICE,
   NO_VERIFIER_NOTICE,
   UNKNOWN_TOOL_LEAD,
@@ -273,6 +318,8 @@ const PROTECTED_CHANGED: End = { status: "needs-input", reason: "protected_chang
 const STATE_CHANGED: End = { status: "failed", reason: "state_changed" };
 const codeUnitOrder = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const PLAN_PENDING: End = { status: "needs-input", reason: "plan_pending" };
+/** U-187 (B-6, B-7): a run that carries out an approved plan which no longer fits, or was carried out. */
+const PLAN_STALE: End = { status: "failed", reason: "plan_stale" };
 const AWAITING_REVIEW: End = { status: "needs-input", reason: "awaiting_review" };
 const NO_PLAN: End = { status: "failed", reason: "model_error" };
 
@@ -315,6 +362,8 @@ export function offeredTools(tools: readonly AnyToolName[], plan: PlanMode): rea
 interface ProposedPlan {
   readonly digest: ContentHash;
   readonly actions: number;
+  /** U-180 (R-99 M-3): a `run` plan, whose `actions` counts its files. */
+  readonly kind?: "changes";
 }
 
 /**
@@ -339,13 +388,32 @@ function isProposedPlan(payload: unknown): payload is { readonly digest: Content
   return typeof value.digest === "string" && Array.isArray(value.actions);
 }
 
-export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> => {
+/**
+ * U-187 (B-3): the approved plan as the system text gives it: the label, the fixed lines, each file
+ * with its change, and the summary (`summary`: its visible parts joined with the gap marker, made
+ * safe by the caller).
+ */
+function approvedPlanText(plan: StoredChangesPlan, summary: string): string {
+  const files = plan.files.map((file) => `- ${file.change} ${file.path}`).join("\n");
+  return `${APPROVED_PLAN_LABEL}\n${APPROVED_PLAN_INTRO}\n${files}\n${APPROVED_SUMMARY_LABEL}\n${summary}`;
+}
+
+/** U-180: what `propose_changes` returns when it stored the plan (ProposeChangesPayload). */
+function isProposedChanges(payload: unknown): payload is { readonly digest: ContentHash; readonly files: readonly unknown[] } {
+  if (typeof payload !== "object" || payload === null) return false;
+  const value = payload as { digest?: unknown; files?: unknown };
+  return typeof value.digest === "string" && Array.isArray(value.files);
+}
+
+/** GT-E1 to GT-E4 and, with `approved` (U-187), a run that carries out an approved `run` plan. */
+async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): Promise<EngineResult> {
   const { task, runId, model, privacy, policy, tools, verifiers, journal, clock, signal, integrity } = deps;
   const limits = task.limits;
   // GT-E1 to GT-E4: everything a task type changes comes from the task's explicit settings.
   // A task without them gets the legacy settings, so its requests, records and result stay as before.
   const settings = workflowSettingsOf(task);
-  const offered = offeredTools(settings.tools, settings.plan);
+  // U-187 (B-3): a run that carries out an approved plan has no plan step of its own.
+  const offered = offeredTools(settings.tools, approved === null ? settings.plan : "none");
   const offeredBuiltin = offered.filter(isToolName);
   const offeredWorkflow = offered.filter(isWorkflowToolName);
   /** GT-E3: set when `propose_plan` stored a plan; the run then ends as plan_pending. */
@@ -954,11 +1022,98 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     return result;
   };
 
+  /**
+   * U-180 (DR-69 B-1, B-3): `propose_changes`, the plan tool of plan mode `run` (its descriptor's
+   * `planMode`). Every planned file is judged on its own with PLANNED_FILE_DESCRIPTOR, as a plan
+   * action is: the policy gate before restoration, permitted restoration of its path, and the gate on
+   * the effective path, so a protected path, one outside the run's writable lists, the state
+   * directory or a path outside the workspace denies the call. The model gets the reason (the file's
+   * index, never its path) and may propose again. When the tool stored the plan, the run ends as
+   * plan_pending after this call, with EngineResult.plan of kind "changes".
+   */
+  const handleChangesCall = async (call: ToolCall, args: ProposeChangesArgs, descriptor: ToolDescriptor): Promise<ToolResult | End> => {
+    const effectiveFiles: JsonObject[] = [];
+    for (const [index, file] of args.files.entries()) {
+      const fileArgs: JsonObject = { path: file.path };
+      const denyFile = async (
+        stage: "policy_requested" | "policy_effective",
+        decision: Extract<PolicyDecision, { allowed: false }>,
+      ): Promise<ToolResult | End> => {
+        await record({
+          type: "tool_decision",
+          callId: call.id,
+          tool: call.name,
+          stage,
+          allowed: false,
+          permission: decision.permission,
+          code: decision.code,
+        });
+        return errorResult(
+          call,
+          "policy_denied",
+          `denied by policy: ${PLANNED_FILE_LEAD}${index}: ${decision.permission}/${decision.code}. ${REFUSAL_HINTS[decision.code]}`,
+        );
+      };
+      const synthetic: ToolCall = { id: call.id, name: PLANNED_FILE_DESCRIPTOR.name, args: fileArgs };
+      const requested = policy.checkRequested(synthetic, PLANNED_FILE_DESCRIPTOR);
+      if (!requested.allowed) return denyFile("policy_requested", requested);
+      const resolved = privacy.resolveToolArgs({
+        args: fileArgs,
+        restoreFields: policy.restorableFields(PLANNED_FILE_DESCRIPTOR),
+        documentFields: [],
+      });
+      if (!resolved.ok) {
+        await record({
+          type: "tool_decision",
+          callId: call.id,
+          tool: call.name,
+          stage: "restore",
+          allowed: false,
+          permission: "restore",
+          code: resolved.code,
+        });
+        return errorResult(call, resolved.code, `token not usable in field: ${PLANNED_FILE_LEAD}${index}: ${resolved.field}. ${REFUSAL_HINTS[resolved.code]}`);
+      }
+      const checked = await policy.checkEffective({ id: call.id, name: PLANNED_FILE_DESCRIPTOR.name, args: resolved.args }, PLANNED_FILE_DESCRIPTOR);
+      if (!checked.allowed) return denyFile("policy_effective", checked);
+      effectiveFiles.push({ ...resolved.args, change: file.change });
+    }
+    const effectiveInput = { summary: args.summary, files: effectiveFiles };
+    const effectiveArgs = validateWorkflowToolArgs("propose_changes", effectiveInput);
+    if (effectiveArgs === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_changes", effectiveInput));
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: call.name,
+      stage: "policy_effective",
+      allowed: true,
+      permission: null,
+      code: null,
+    });
+    toolCalls += 1;
+    const outcome = await executeWorkflow({ id: call.id, name: "propose_changes", args: effectiveArgs }, descriptor);
+    if (isEnd(outcome)) return outcome;
+    const result = await finishWorkflowCall(call, "propose_changes", outcome);
+    if (isEnd(result) || !outcome.ok) return result;
+    if (!isProposedChanges(outcome.payload)) return UNKNOWN_OUTCOME;
+    proposedPlan = { digest: outcome.payload.digest, actions: outcome.payload.files.length, kind: "changes" };
+    // As propose_plan's (U-59): the summary, masked and made safe as the last message, for the result.
+    const maskedSummary = mask(args.summary);
+    planSummary = maskedSummary === null ? null : (finalMessageOf(maskedSummary, (text) => privacy.mask(text))?.text ?? null);
+    return result;
+  };
+
   /** GT-E1: a task type tool call. Same order as a built-in call: validate, check, restore, check, run. */
   const handleWorkflowCall = async (call: ToolCall, name: WorkflowToolName): Promise<ToolResult | End> => {
     // A runner that cannot run task type tools answers them as unknown (contract ToolRunner).
     if (tools.executeWorkflowTool === undefined) return unknownTool(call);
     const descriptor = WORKFLOW_TOOLS[name];
+    // U-180: the plan tool of mode run, chosen by the descriptor's planMode (never by the name).
+    if (descriptor.endsRun === "plan" && descriptor.planMode === "run") {
+      const args = validateWorkflowToolArgs("propose_changes", call.args);
+      if (args === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_changes", call.args));
+      return handleChangesCall(call, args, descriptor);
+    }
     if (descriptor.endsRun === "plan") {
       const args = validateWorkflowToolArgs("propose_plan", call.args);
       if (args === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_plan", call.args));
@@ -1140,10 +1295,19 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   const start = async (): Promise<MaskedText | End> => {
     // GT-E2: a task type's instructions follow the fixed prompt under a fixed label, masked as one text.
     const instructions = settings.instructions;
-    const systemText =
+    const baseText =
       instructions === null || instructions.trim().length === 0
         ? SYSTEM_PROMPT
         : `${SYSTEM_PROMPT}\n\n${INSTRUCTIONS_LABEL}\n${instructions}`;
+    // U-187 (B-3): the approved plan follows, masked with the rest by this run's gateway. Review
+    // V-7 M-1: its summary made safe once more as the last message is (safeModelText: key shapes
+    // hidden too), whatever the stored plan holds; masking that fails ends the run (fail closed).
+    let systemText = baseText;
+    if (approved !== null) {
+      const summary = safeModelText(approved.plan.summary.join(APPROVED_SUMMARY_GAP), (text) => privacy.mask(text));
+      if (summary === null) return MASKING_FAILED;
+      systemText = `${baseText}\n\n${approvedPlanText(approved.plan, summary)}`;
+    }
     const system = mask(systemText);
     const goal = mask(task.goal);
     const workflow = mask(task.workflow);
@@ -1189,6 +1353,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       ...workflowFields,
       ...(profile === null ? {} : { profile }),
       ...(policyNarrowings.length === 0 ? {} : { policyNarrowings }),
+      ...(approved === null ? {} : { planRunId: approved.planRunId, planDigest: approved.digest, approval: approved.approval }),
     });
     state.transition("running");
     messages.push({ role: "user", content: goal });
@@ -1455,9 +1620,68 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     return null;
   };
 
+  /** Ends the run before its first model request with a notice (masked); null when it cannot be masked. */
+  const staleWith = (text: string): End => {
+    const masked = mask(text);
+    if (masked !== null) notices.push(masked);
+    return PLAN_STALE;
+  };
+
+  /**
+   * U-187 (B-6, B-7): before the first model request of a run that carries out an approved plan,
+   * every planned file as it is now (fail closed), then the gate on it as a write, then the claim.
+   */
+  const checkApprovedPlan = async (plan: ApprovedChangesPlan): Promise<End | null> => {
+    for (const [index, file] of plan.plan.files.entries()) {
+      let now: PlannedFileNow;
+      try {
+        now = await plan.fileNow(file, signal);
+      } catch {
+        now = { kind: "other" };
+      }
+      const stop = interrupted();
+      if (stop !== null) return stop;
+      if (plannedFileStale(file, now)) return staleWith(`${APPROVED_STALE_LEAD}${index}${APPROVED_STALE_END}`);
+      const fileCall = { id: "approved-plan", name: PLANNED_FILE_DESCRIPTOR.name, args: { path: file.path } };
+      const requested = policy.checkRequested(fileCall, PLANNED_FILE_DESCRIPTOR);
+      const decision = requested.allowed ? await policy.checkEffective(fileCall, PLANNED_FILE_DESCRIPTOR) : requested;
+      if (!decision.allowed) return staleWith(`${APPROVED_DENIED_LEAD}${index}: ${decision.permission}/${decision.code}${APPROVED_DENIED_END}`);
+    }
+    const stop = interrupted();
+    if (stop !== null) return stop;
+    let claimed: "marked" | "already_applied";
+    try {
+      claimed = await plan.markApplied();
+    } catch {
+      return staleWith(APPROVED_CLAIM_FAILED_NOTICE);
+    }
+    if (claimed !== "marked") return staleWith(APPROVED_CLAIMED_NOTICE);
+    // U-181's handoff: as an apply run, whether a run since the plan could not check the records;
+    // told once, the run goes on. A question that cannot be answered counts as unchecked.
+    if (plan.planRecordsUnchecked !== undefined) {
+      let unchecked: boolean;
+      try {
+        unchecked = (await plan.planRecordsUnchecked()) === true;
+      } catch {
+        unchecked = true;
+      }
+      if (unchecked) {
+        const masked = mask(APPROVED_RECORDS_UNCHECKED_NOTICE);
+        if (masked !== null) notices.push(masked);
+      }
+    }
+    return null;
+  };
+
   const runLoop = async (): Promise<End> => {
     const system = await start();
     if (typeof system !== "string") return system;
+    // U-187 (B-6, B-7): checked and claimed before the baselines, so the claim (applied.json in the
+    // plan run's records) is not a change the state checks see during this run.
+    if (approved !== null) {
+      const blocked = await checkApprovedPlan(approved);
+      if (blocked !== null) return blocked;
+    }
     // U-1: the baseline, after run_started and before the first model request.
     const unchecked = await checkPoint("run_start");
     if (unchecked !== null) return unchecked;
@@ -1468,9 +1692,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       const conversed = await converse(system);
       if (conversed !== null) return conversed;
       // GT-E3: a plan run is verified only after its plan is applied (an apply run). A model that
-      // ends without a stored plan has not done what a plan run asks for. U-170: `run` too.
-      if (settings.plan !== "none") {
-        const message = mask(NO_PLAN_MESSAGE);
+      // ends without a stored plan has not done what a plan run asks for. U-170: `run` too. U-187:
+      // a run that carries out an approved plan is verified as any run.
+      if (approved === null && settings.plan !== "none") {
+        const message = mask(settings.plan === "run" ? NO_CHANGES_PLAN_MESSAGE : NO_PLAN_MESSAGE);
         if (message !== null) {
           notices.push(message);
           await record({ type: "model_error", turn: modelTurns, kind: "malformed_response", message });
@@ -1534,9 +1759,25 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),
       // U-55 (AXM-9): only when a model error ended the run (not masking that failed).
       ...(end.reason === "model_error" && endingModelError !== null ? { modelError: endingModelError } : {}),
+      // U-187 (B-3): a run that carries out an approved plan names it.
+      ...(approved === null ? {} : { planRunId: approved.planRunId, planDigest: approved.digest }),
     };
   } finally {
     clearTimeout(timer);
     await journal.close();
   }
+}
+
+export const runTask: RunTask = (deps: EngineDeps): Promise<EngineResult> => runWith(deps, null);
+
+/**
+ * U-187 (DR-69 B-3, B-4, B-6, B-7): carries out an approved `run` plan (ApprovedPlanRunDeps). The
+ * engine makes the gate itself, with the task's writable lists and the plan's files as one more list
+ * (approvedPlanWritablePathSets), then runs as runTask does with the checks, the claim and the
+ * system text the contract names.
+ */
+export const runApprovedPlan: RunApprovedPlan = (deps) => {
+  const { approved, policyFor, ...rest } = deps;
+  const policy = policyFor(approvedPlanWritablePathSets(rest.task.writablePathSets, approved.plan));
+  return runWith({ ...rest, policy }, approved);
 };

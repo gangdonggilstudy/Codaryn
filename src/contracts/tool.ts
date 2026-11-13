@@ -4,7 +4,7 @@
  */
 
 import { MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS, MAX_PLANNED_FILES, PLANNED_FILE_CHANGES } from "./plan.js";
-import type { PlanActionKind, PlanMode, ProposePlanArgs, ProposePlanPayload } from "./plan.js";
+import type { PlanActionKind, PlanMode, ProposeChangesArgs, ProposeChangesPayload, ProposePlanArgs, ProposePlanPayload } from "./plan.js";
 import { CONTENT_HASH_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, JsonObject, MaskedText, RawText } from "./text.js";
 
@@ -499,9 +499,10 @@ export const TOOL_DEFINITIONS: { readonly [N in ToolName]: ToolDefinition } = {
  * TOOL_NAMES, so a task without task type settings never sees them and everything keyed by
  * ToolName (the engine's dispatch, TOOL_DEFINITIONS, `ModelRequest.tools`) is unchanged.
  * A task lists them in `tools` (WorkflowSettings); the engine offers them through
- * `ModelRequest.workflowTools` and runs them with `ToolRunner.executeWorkflowTool`.
+ * `ModelRequest.workflowTools` and runs them with `ToolRunner.executeWorkflowTool`. U-180 (DR-69
+ * B-3): `propose_changes`, the plan tool of plan mode `run`.
  */
-export const WORKFLOW_TOOL_NAMES = ["inspect_files", "propose_plan"] as const;
+export const WORKFLOW_TOOL_NAMES = ["inspect_files", "propose_plan", "propose_changes"] as const;
 export type WorkflowToolName = (typeof WORKFLOW_TOOL_NAMES)[number];
 
 /** Every tool name a task's `tools` may list: the built-in ones first, in TOOL_NAMES order. */
@@ -549,11 +550,13 @@ export interface InspectFilesPayload {
 export interface WorkflowToolArgsByName {
   readonly inspect_files: InspectFilesArgs;
   readonly propose_plan: ProposePlanArgs;
+  readonly propose_changes: ProposeChangesArgs;
 }
 
 export interface WorkflowToolPayloadByName {
   readonly inspect_files: InspectFilesPayload;
   readonly propose_plan: ProposePlanPayload;
+  readonly propose_changes: ProposeChangesPayload;
 }
 
 export type WorkflowToolPayload = WorkflowToolPayloadByName[WorkflowToolName];
@@ -570,6 +573,64 @@ export type EffectiveWorkflowToolCall = {
 export type RawWorkflowToolOutcome =
   | { readonly ok: true; readonly payload: WorkflowToolPayload }
   | { readonly ok: false; readonly code: ToolErrorCode; readonly message: RawText };
+
+/**
+ * P1 (DR-69, B-1): the plan tool of plan mode `run`: the files a later model run may write, and a
+ * summary of what it will do (ProposeChangesArgs, plan.ts). U-180 (B-3): a task type tool since
+ * the runner carries it out (WORKFLOW_TOOL_NAMES); only a plan run of mode `run` offers it.
+ */
+export const PROPOSE_CHANGES_TOOL_NAME = "propose_changes";
+
+/**
+ * Requirements of `propose_changes`, as `propose_plan`'s: no path of its own (each file is judged
+ * with PLANNED_FILE_DESCRIPTOR, plan.ts). It writes plan.json, so its display class is not "read"
+ * and a call whose outcome is unknown is not retried.
+ */
+export const PROPOSE_CHANGES_DESCRIPTOR: ToolDescriptor & { readonly name: typeof PROPOSE_CHANGES_TOOL_NAME } = {
+  name: PROPOSE_CHANGES_TOOL_NAME,
+  displayClass: "write-local",
+  requires: {
+    paths: [],
+    command: false,
+    network: false,
+    destructive: false,
+  },
+  restoreFields: [],
+  documentFields: [],
+  endsRun: "plan",
+  planMode: "run",
+};
+
+/** What a provider tells the model about `propose_changes`. Fixed text, as TOOL_DEFINITIONS. */
+export const PROPOSE_CHANGES_DEFINITION: ToolDefinition = {
+  description:
+    "Propose, once, the complete list of files you will change and a summary of what you will do. " +
+    "Nothing is changed now: a person reviews the list and the summary, and a later run may write " +
+    "only these files, following the summary. create is a new file at a path that must not exist " +
+    "yet. modify is an existing regular file. List files, not directories. After this call the run ends.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      summary: { type: "string", minLength: 1, maxLength: MAX_PLAN_SUMMARY_CHARS },
+      files: {
+        type: "array",
+        minItems: 1,
+        maxItems: MAX_PLANNED_FILES,
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string", minLength: 1, description: "File path relative to the workspace root." },
+            change: { type: "string", enum: [...PLANNED_FILE_CHANGES] },
+          },
+          required: ["path", "change"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["summary", "files"],
+    additionalProperties: false,
+  },
+};
 
 /**
  * Requirements of the task type tools. `propose_plan` declares no path itself: each action is
@@ -603,6 +664,7 @@ export const WORKFLOW_TOOLS: { readonly [N in WorkflowToolName]: ToolDescriptor 
     endsRun: "plan",
     planMode: "apply",
   },
+  propose_changes: PROPOSE_CHANGES_DESCRIPTOR,
 };
 
 /** Every descriptor by name, built-in and task type tools. */
@@ -675,66 +737,7 @@ export const WORKFLOW_TOOL_DEFINITIONS: { readonly [N in WorkflowToolName]: Tool
       additionalProperties: false,
     },
   },
-};
-
-/**
- * P1 (DR-69, B-1): the plan tool of plan mode `run`: the files a later model run may write, and a
- * summary of what it will do (ProposeChangesArgs, plan.ts). Not a task type tool yet: it joins
- * WORKFLOW_TOOL_NAMES (and with it a task's `tools`, the runner and the definitions' lists) in the
- * unit that carries it out (B-3), so no task can list it before it runs. Its descriptor and its
- * definition are fixed here already.
- */
-export const PROPOSE_CHANGES_TOOL_NAME = "propose_changes";
-
-/**
- * Requirements of `propose_changes`, as `propose_plan`'s: no path of its own (each file is judged
- * with PLANNED_FILE_DESCRIPTOR, plan.ts). It writes plan.json, so its display class is not "read"
- * and a call whose outcome is unknown is not retried.
- */
-export const PROPOSE_CHANGES_DESCRIPTOR: ToolDescriptor & { readonly name: typeof PROPOSE_CHANGES_TOOL_NAME } = {
-  name: PROPOSE_CHANGES_TOOL_NAME,
-  displayClass: "write-local",
-  requires: {
-    paths: [],
-    command: false,
-    network: false,
-    destructive: false,
-  },
-  restoreFields: [],
-  documentFields: [],
-  endsRun: "plan",
-  planMode: "run",
-};
-
-/** What a provider tells the model about `propose_changes`. Fixed text, as TOOL_DEFINITIONS. */
-export const PROPOSE_CHANGES_DEFINITION: ToolDefinition = {
-  description:
-    "Propose, once, the complete list of files you will change and a summary of what you will do. " +
-    "Nothing is changed now: a person reviews the list and the summary, and a later run may write " +
-    "only these files, following the summary. create is a new file at a path that must not exist " +
-    "yet. modify is an existing regular file. List files, not directories. After this call the run ends.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      summary: { type: "string", minLength: 1, maxLength: MAX_PLAN_SUMMARY_CHARS },
-      files: {
-        type: "array",
-        minItems: 1,
-        maxItems: MAX_PLANNED_FILES,
-        items: {
-          type: "object",
-          properties: {
-            path: { type: "string", minLength: 1, description: "File path relative to the workspace root." },
-            change: { type: "string", enum: [...PLANNED_FILE_CHANGES] },
-          },
-          required: ["path", "change"],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ["summary", "files"],
-    additionalProperties: false,
-  },
+  propose_changes: PROPOSE_CHANGES_DEFINITION,
 };
 
 /** Every definition by name, built-in and task type tools. */

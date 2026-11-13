@@ -478,6 +478,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.parked_left":
     "되돌리기가 제자리에 돌려놓지 못한 파일 {count}개가 .codaryn/parked/에 남아 있습니다. 저절로 지워지지 않으니 직접 제자리로 옮기거나 지우세요",
   "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
+  "lock.release_failed": "작업 공간 잠금을 풀지 못했습니다. Codaryn을 모두 닫으면 다음 실행이 정리합니다. 그 전에 실행이 막히면 codaryn doctor로 확인하세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
   "error.invalid_arguments.fix": "codaryn help <명령>으로 그 명령의 사용법을, codaryn --help로 명령 목록을 확인하세요.",
@@ -524,8 +525,9 @@ export const KO_MESSAGES: MessageTexts = {
   "error.plan_already_applied.fix": "codaryn report로 결과를 보고, 다시 하려면 되돌린 뒤 codaryn run으로 새 계획을 만드세요.",
   "error.plan_secrets_differ.what": "지금 등록된 가릴 값이 계획 실행 때와 다르게 계획의 경로를 가려, 아무것도 보여 주거나 바꾸지 않았습니다",
   "error.plan_secrets_differ.fix": "계획 실행 때와 같은 작업 지정 방식(따라서 같은 가릴 값)으로 다시 하거나, 계획을 새로 만드세요.",
-  "error.plan_run_missing.what": "이 적용이 쓴 계획 실행의 기록(plan.json)이 없어, 아무것도 바꾸지 않았습니다",
-  "error.plan_run_missing.fix": "적용을 되돌리려면 그 계획 실행을 남겨 두어야 합니다. 지운 실행 폴더가 있으면 되살리세요.",
+  "error.plan_run_missing.what": "계획 실행의 기록(plan.json)이 없어 아무것도 바꾸지 않았습니다",
+  "error.plan_run_missing.fix":
+    "계획을 보거나 적용하려면 codaryn run으로 계획을 다시 만드세요. 적용을 되돌리려면 그 계획 실행이 있어야 하니, 지웠다면 그 실행 폴더를 되살리세요.",
   "error.plan_records_changed.what": "계획 실행에 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔 그 계획이 읽은 것과 다를 수 있어, 아무것도 묻거나 바꾸지 않았습니다",
   "error.plan_records_changed.fix": "codaryn run을 새로 실행해 계획을 다시 만들고(codaryn plan은 계획을 보여 주기만 합니다), 새 계획을 확인한 뒤 그것을 적용하세요. 표시가 있는 실행은 무슨 일이 있었는지의 증거로 남겨 두세요.",
   "error.run_not_awaiting_review.what": "그 실행은 사람의 검토를 기다리는 상태가 아닙니다. 아무것도 쓰지 않았습니다",
@@ -587,6 +589,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.run_command": "명령 실행",
   "tool.inspect_files": "파일 목록 보기",
   "tool.propose_plan": "계획 제안",
+  // U-180 (DR-69 B-3), nb-i18n 이 다듬을 초안.
+  "tool.propose_changes": "바꿀 파일 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

@@ -1084,6 +1084,12 @@ export const FIXED_MESSAGES = {
   // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
   // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
+  // U-193 (after U-176): a run, a check or a cleanup finished but the workspace lock could not be
+  // released (RunOutcome.lockLeft, PlanCheck.lockLeft, CleanupOutcome.lockLeft). No path: the
+  // doctor's lock line names the file. Draft by p5a from nc-human's line (p4g, nb-i18n to confirm).
+  // U-201: the run, apply and revert summaries say it when their context's `lockLeft` is true
+  // (RunSummaryContext, ApplySummaryContext, RevertSummaryContext), right before their next commands.
+  "lock.release_failed": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;
@@ -1310,6 +1316,13 @@ export interface RunSummaryContext {
   readonly policyNarrowings?: readonly PolicyNarrowing[];
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /**
@@ -1403,6 +1416,13 @@ export interface HumanOutput {
 export interface ApplySummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /**
@@ -1412,6 +1432,13 @@ export interface ApplySummaryContext {
  */
 export interface RevertSummaryContext {
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

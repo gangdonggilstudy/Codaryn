@@ -58,6 +58,15 @@ const KO = {
   "permission.deny": "거부",
   "revertConsent.agree": "이번 되돌리기에 동의",
   "revertConsent.keep": "동의하지 않음",
+  // U-184 (3.14, principle 6): the first save of a file opened in the text view, and closing with an unsaved edit.
+  "textSave.message": "파일 보기에서 연 파일에 고친 글을 저장할까요?",
+  "textSave.detail": "저장은 실행 기록에 남지 않고, Codaryn의 되돌리기로 되돌릴 수 없습니다. 실행이 바꾼 파일이면 그 실행을 되돌릴 때 이 파일은 건너뜁니다. 이 파일을 다시 열기 전까지는 다음 저장에서 묻지 않습니다.",
+  "textSave.confirm": "저장",
+  "textSave.keep": "저장하지 않음",
+  "textClose.message": "파일 보기에 저장하지 않은 고친 글이 있습니다. 버리고 닫을까요?",
+  "textClose.detail": "닫으면 고친 글은 사라집니다. 저장하려면 취소하고 파일 보기에서 저장하세요.",
+  "textClose.discard": "버리고 닫기",
+  "textClose.keep": "취소",
   "widen.message": "이 설정 변경은 실행이 할 수 있는 일을 넓힙니다. 설정 파일에 쓸까요?",
   "widen.confirm": "쓰기",
   "widen.keep": "쓰지 않음",
@@ -113,6 +122,15 @@ const EN: { readonly [K in keyof typeof KO]: string } = {
   "permission.deny": "Deny",
   "revertConsent.agree": "Agree for this revert",
   "revertConsent.keep": "Do not agree",
+  // U-184 (3.14, principle 6): the first save of a file opened in the text view, and closing with an unsaved edit.
+  "textSave.message": "Save your edits to the file opened in the file view?",
+  "textSave.detail": "The save goes into no run record, and Codaryn's revert cannot undo it. If a run changed this file, reverting that run skips this file. Until the file is opened again, later saves do not ask.",
+  "textSave.confirm": "Save",
+  "textSave.keep": "Do not save",
+  "textClose.message": "The file view has edits that are not saved. Discard them and close?",
+  "textClose.detail": "Closing loses the edits. To keep them, cancel and save in the file view.",
+  "textClose.discard": "Discard and close",
+  "textClose.keep": "Cancel",
   "widen.message": "This settings change lets runs do more. Write it to the config file?",
   "widen.confirm": "Write",
   "widen.keep": "Do not write",
@@ -146,6 +164,9 @@ export const WIDENING_KINDS = [
   "profile_changed",
   "workflow_changed",
   "confirm_removed",
+  // U-192 (U-183, DR-69 B-4): a list of writable paths widened, or gone (no limit again).
+  "writable_path_added",
+  "writable_paths_unlimited",
   "other",
 ] as const;
 
@@ -197,6 +218,8 @@ const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   profile_changed: "프로필 바꿈",
   workflow_changed: "작업 종류 정의 바꿈",
   confirm_removed: "묻던 명령을 묻지 않고 허용",
+  writable_path_added: "쓰기 허용 경로 넓힘",
+  writable_paths_unlimited: "쓰기 허용 경로 제한 없앰(파일 도구가 작업 공간 어디든 씀)",
   other: "그 밖의 넓히기",
 };
 
@@ -216,6 +239,8 @@ const WIDEN_EN: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   profile_changed: "a profile changed",
   workflow_changed: "a task type definition changed",
   confirm_removed: "a command that was asked about runs without asking",
+  writable_path_added: "a writable path added",
+  writable_paths_unlimited: "the writable paths limit removed (file tools may write anywhere in the workspace)",
   other: "another widening",
 };
 

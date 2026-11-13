@@ -151,10 +151,20 @@ function parseObject(text: string): Obj {
 
 /**
  * DR-12: what the journal's first record says. A model run starts with `run_started`, an apply
- * run (G-A) with `apply_started`, which also names the plan run and the approved digest.
+ * run (G-A) with `apply_started`, which also names the plan run and the approved digest. U-181
+ * (DR-69 B-3): a model run that carries out an approved `run` plan names them in `run_started` too
+ * (planRunId, planDigest); null for any other model run.
  */
 type FirstRecord =
-  | { readonly kind: "run"; readonly startedAt: string; readonly taskId: string; readonly profile: string | null; readonly workflowRef: string | null }
+  | {
+      readonly kind: "run";
+      readonly startedAt: string;
+      readonly taskId: string;
+      readonly profile: string | null;
+      readonly workflowRef: string | null;
+      readonly planRunId: string | null;
+      readonly planDigest: string | null;
+    }
   | { readonly kind: "apply"; readonly startedAt: string; readonly taskId: string; readonly planRunId: string; readonly digest: string };
 
 const APPROVALS: readonly string[] = APPROVAL_CHANNELS;
@@ -168,6 +178,21 @@ function recordedName(value: unknown, pattern: RegExp): string | null {
   return value;
 }
 
+
+/**
+ * U-181 (journal.ts `run_started`, B-3): the plan a model run carries out, when its first record
+ * names one: the plan run, the approved digest and how the person approved it, all three or none.
+ * One without the others, or one that does not pass apply_started's checks (another run's id, a
+ * SHA-256, an approval channel), makes the run damaged. Null for a run that names none.
+ */
+function carriedPlanOf(record: Obj, runId: string): { readonly planRunId: string; readonly planDigest: string } | null {
+  const { planRunId, planDigest, approval } = record;
+  if (planRunId === undefined && planDigest === undefined && approval === undefined) return null;
+  if (typeof planRunId !== "string" || toRunId(planRunId) === null || planRunId === runId) unreadable();
+  if (typeof planDigest !== "string" || !HASH.test(planDigest)) unreadable();
+  if (typeof approval !== "string" || !APPROVALS.includes(approval)) unreadable();
+  return { planRunId, planDigest };
+}
 
 /**
  * The journal's first record. A first line that is not complete (still being written) or is not
@@ -198,7 +223,8 @@ async function firstRecord(file: string, runId: string): Promise<FirstRecord> {
     if (typeof record["provider"] !== "string" || !PROVIDERS.includes(record["provider"])) unreadable();
     const profile = recordedName(record["profile"], PROFILE_NAME);
     const workflowRef = recordedName(record["workflowRef"], WORKFLOW_ID);
-    return { kind: "run", startedAt, taskId: taskId as string, profile, workflowRef };
+    const carried = carriedPlanOf(record, runId);
+    return { kind: "run", startedAt, taskId: taskId as string, profile, workflowRef, planRunId: carried?.planRunId ?? null, planDigest: carried?.planDigest ?? null };
   }
   if (record["type"] !== "apply_started") unreadable();
   const { planRunId, digest, approval, actions, maxDurationMs } = record;
@@ -247,6 +273,13 @@ async function resultOf(
     return { status: status as TerminalRunStatus, reason: reason as RunReason, changes: applied.length };
   }
   if (typeof result["provider"] !== "string" || !PROVIDERS.includes(result["provider"])) unreadable();
+  // U-181 (EngineResult.planRunId, planDigest): present together exactly in a run whose
+  // run_started names a plan, and then the same plan run and digest; absent in every other run.
+  if (first.planRunId !== null) {
+    if (result["planRunId"] !== first.planRunId || result["planDigest"] !== first.planDigest) unreadable();
+  } else if (Object.hasOwn(result, "planRunId") || Object.hasOwn(result, "planDigest")) {
+    unreadable();
+  }
   const changes = result["changes"];
   if (!Array.isArray(changes) || !changes.every(isChangeRecord)) unreadable();
   // N-D 5: files, not change records, as the end-of-run summary counts them (N-23 d).
@@ -373,9 +406,10 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
   return {
     state: "checked",
     runId,
-    // G-A: a model run or an apply run (DR-12), and the plan run an apply applied.
+    // G-A: a model run or an apply run (DR-12), and the plan run an apply applied. U-181 (B-3): also
+    // the plan run a model run carried out; absent for any other model run, as before.
     kind: first.kind,
-    ...(first.kind === "apply" ? { planRunId: first.planRunId as RunId } : {}),
+    ...(first.planRunId !== null ? { planRunId: first.planRunId as RunId } : {}),
     startedAt,
     // DR-37 (d): the run's profile and workflow definition; an apply run's plan run has them.
     profile: first.kind === "run" ? first.profile : null,

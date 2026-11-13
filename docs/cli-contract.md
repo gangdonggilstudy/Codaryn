@@ -620,7 +620,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 그 점검이 다른 경고나 문제를 말하면 그 글을 두고 이 문구를 `notes`에 붙인다. 명령 검증기는 세지 않는다.
 - **사람과 모델에게 알리는 것**
   - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
-  - 끝 요약에는 그 거부 수와 안내가 `summary.denied` 바로 뒤에 있다(U-198의 `summary.denied_not_writable`과 `summary.denied_not_writable_hint`; CLI가 `RunSummaryContext.deniedNotWritable`로 넘긴다, Codex V-14 L-1).
+  - 끝 요약에는 그 거부 수만 `summary.denied` 바로 뒤에 있다(U-198의 `summary.denied_not_writable`; CLI가 `RunSummaryContext.deniedNotWritable`로 넘긴다, Codex V-14 L-1).
+    - 파일을 허용하는 법은 위의 진행 줄이 한 번 말한다. 끝 요약의 안내 줄(`summary.denied_not_writable_hint`)은 U-221이 뺐다. 같은 글이 두 번 나오던 것이다. 문구는 카탈로그에 남아 있고 U-227이 글을 확정했다.
   - run 계획을 수행한 실행이면 그 거부는 계획 밖 쓰기로 센다(`deniedNotPlanned`, 18.4). 그때는 위의 진행 줄을 내지 않는다.
   - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
 - **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).

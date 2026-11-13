@@ -2,7 +2,8 @@
  * U-8: one progress line on stderr per notable journal record, while the run goes on.
  * Lines are built from the masked records only, masked again with the run's privacy gateway and
  * cleaned of control characters, so neither a secret nor a model-written name reaches the
- * terminal as is. Tool names outside the built-in set are not shown. A failing write is ignored:
+ * terminal as is. Tool names outside every tool list are not shown (U-267: the task type tools are
+ * named, ALL_TOOL_NAMES, as the renderer names them). A failing write is ignored:
  * progress never changes the run. stdout keeps its single JSON line.
  * DR-43 (b), review R-31 L-1: a record may give several lines; the run's start names, one line
  * each, what the task type's rules left out of the given policy (run_started.policyNarrowings).
@@ -10,7 +11,7 @@
  * renderer does: a failed call, and a command that exited with a code other than 0 or timed out.
  */
 
-import { TOOL_NAMES } from "../contracts/index.js";
+import { ALL_TOOL_NAMES } from "../contracts/index.js";
 import type { Journal, JournalEvent, PrivacyGateway } from "../contracts/index.js";
 import { createFailedCalls } from "./failed-calls.js";
 import { cleanText, safeToken } from "./text-safety.js";
@@ -20,8 +21,9 @@ export const PROGRESS_PREFIX = "codaryn: ";
 /** Longest path shown in a progress line, in characters. */
 const MAX_SHOWN_PATH = 200;
 
+/** A tool a task may list (built-in or task type), else "(unknown tool)": a model-written name is never shown. */
 function toolName(name: string): string {
-  return (TOOL_NAMES as readonly string[]).includes(name) ? name : "(unknown tool)";
+  return (ALL_TOOL_NAMES as readonly string[]).includes(name) ? name : "(unknown tool)";
 }
 
 function shownPath(text: string): string {

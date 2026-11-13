@@ -162,10 +162,12 @@ describe("U-182 on the real CLI: a write must be covered by every list", () => {
     assert.equal(made.reason, "plan_pending");
     writeOrganizeTask(sb, "u182-organize", organizeScript(), { writablePaths: ["inbox", "docs", "images"] });
     const applied = await runGuarded(sb, ["apply", "--task", open, "--run", made.runId, "--digest", made.plan.digest.slice(0, 12)], cliEnv());
-    const outcome = JSON.parse(applied.stdout.trim()) as { kind: string; runId: string; status: string };
+    const outcome = JSON.parse(applied.stdout.trim()) as { kind: string; runId: string; status: string; reason: string };
     assert.equal(outcome.kind, "apply", applied.stdout);
-    assert.notEqual(outcome.status, "done", applied.stdout);
-    assert.ok(journal(outcome.runId).includes("path_not_writable"), "the apply's gate denied it as not writable");
+    assert.equal(`${outcome.status}/${outcome.reason}`, "failed/plan_stale", applied.stdout);
+    // The preflight refuses action #2 (inbox/budget.csv -> data/budget.csv) under the apply's lists.
+    const checked = journal(outcome.runId).split("\n").find((line) => line.includes('"type":"plan_checked"')) ?? "";
+    assert.deepEqual((JSON.parse(checked) as { problems: unknown }).problems, [{ index: 1, problem: "denied" }]);
     assert.equal(existsSync(path.join(sb.workspace, "data", "budget.csv")), false, "nothing moved into data/");
     assert.ok(existsSync(path.join(sb.workspace, "inbox", "budget.csv")), "the source stays");
   });

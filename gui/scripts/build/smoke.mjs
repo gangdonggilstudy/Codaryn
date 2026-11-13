@@ -237,7 +237,8 @@ const U13_DIALOGS = [
 ];
 /** U-22 (5j3, Windows only): the cleanup of the analyze run's records while one of its files is held open. */
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
+// U-62: copyPath and copyText joined the page's functions (the main process checks both).
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };

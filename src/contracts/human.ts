@@ -494,7 +494,8 @@ export const FIXED_MESSAGES = {
   "summary.denied_not_writable": { count: "count" },
   "summary.denied_not_writable_hint": {},
   // U-207 (bundle A, R-3, R-8; drafts for nb-i18n): RunSummaryContext.deniedUnreadable, the calls refused
-  // at a path this task may not read (unreadable_path), right after summary.denied, then once what a
+  // at a path this task may not read (unreadable_path), after summary.denied and the not-writable
+  // lines (summary.denied_not_planned, summary.denied_not_writable, each with its advice), then once what a
   // person can do (the files are kept from the agent on purpose; query_table may still aggregate
   // their tables; to let it read them, take the entry out of unreadablePaths where it was set).
   "summary.denied_unreadable": { count: "count" },
@@ -1402,14 +1403,16 @@ export interface RunSummaryContext {
   readonly deniedNotPlanned?: number;
   readonly deniedNotWritable?: number;
   /**
-   * U-207 (bundle A, R-3, R-8; draft for na-core): the denied calls of this run whose code is
-   * `unreadable_path` (`tool_decision` with `allowed: false`). Among deniedToolCalls.
-   * `summary.denied_unreadable` right after `summary.denied`, then `summary.denied_unreadable_hint`,
-   * when above 0. Optional: absent counts as 0, no line.
+   * U-207 (bundle A, R-3, R-8; draft for na-core, which counts it in U-210): the denied calls of this
+   * run whose code is `unreadable_path` (`tool_decision` with `allowed: false`). Among
+   * deniedToolCalls. `summary.denied_unreadable`, then `summary.denied_unreadable_hint`, when above 0,
+   * after `summary.denied` and the not-writable lines (deniedNotPlanned, deniedNotWritable).
+   * Optional: absent counts as 0, no line.
    */
   readonly deniedUnreadable?: number;
   /**
-   * U-207 (DR-70, Q-4; draft for na-core): the query_table results of this run that left out groups
+   * U-207 (DR-70, Q-4; draft for na-core, which counts it in U-210): the query_table results of this
+   * run that left out groups
    * of fewer than k rows (`tool_result` of query_table, ok, whose payload has suppressedGroups above
    * 0; queryTableFacts reads it), and the k they applied (the largest when they differ).
    * `summary.groups_hidden` when `results` is above 0. Counts only. Optional: absent, no line.

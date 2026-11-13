@@ -501,7 +501,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
       if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }), catalog.format("summary.denied_not_writable_hint"));
       // U-207 (bundle A, R-8): of those, the calls refused at a path this task may not read, and once
-      // what a person can do about it. Optional: absent is 0, no line.
+      // what a person can do about it, after the not-writable lines. Optional: absent is 0, no line.
       const unreadable = isCount(context.deniedUnreadable) ? context.deniedUnreadable : 0;
       if (unreadable > 0) out.push(catalog.format("summary.denied_unreadable", { count: unreadable }), catalog.format("summary.denied_unreadable_hint"));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.

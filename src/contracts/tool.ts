@@ -87,6 +87,12 @@ export interface SearchFilesPayload {
   /** Sorted by path in code unit order. */
   readonly entries: readonly SearchEntry[];
   readonly truncated: boolean;
+  /**
+   * U-203 (bundle A, R-3, R-4): true when an unreadable path (PolicyConfig.unreadablePaths) lies in
+   * the searched folder, whose entries are left out, names included. It follows the policy's entries
+   * alone, never what exists there. Absent otherwise.
+   */
+  readonly withheld?: true;
 }
 
 export interface WriteFilePayload {
@@ -176,6 +182,13 @@ export const TOOL_ERROR_CODES = [
   "io_error",
   /** G-A: `propose_plan` refused the plan (PLAN_PROBLEMS). The message names the action index and the code. */
   "invalid_plan",
+  /** U-197 (bundle A, Q-5): `query_table` counted more than MAX_QUERY_COUNTED_GROUPS groups. */
+  "too_many_groups",
+  /**
+   * U-197 (bundle A): `query_table` refused the table (QUERY_TABLE_PROBLEMS). The message names the
+   * code and a row or line number, never a cell's text.
+   */
+  "invalid_table",
 ] as const;
 export type ToolErrorCode = (typeof TOOL_ERROR_CODES)[number];
 
@@ -206,6 +219,10 @@ export const TOOL_FAILURE_HINTS: { readonly [C in ToolErrorCode]?: string } = {
   protected_span_violation: "A line that holds a protected placeholder must stay exactly as it is; change other lines only.",
   invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
   masking_failed: "The result could not be masked, so none of it is shown.",
+  // U-197 (bundle A, Q-5): query_table.
+  too_many_groups: "Group by columns with fewer distinct values, or by fewer columns.",
+  // R-102 L-5: an unknown or doubled column is the usual cause; describe shows the columns.
+  invalid_table: "Call query_table with describe set to true to see the table's columns, then query only those.",
 };
 
 /**
@@ -242,7 +259,12 @@ export interface ToolResult {
 /** Display label only. It never decides whether a call is allowed. */
 export type DisplayClass = "read" | "write-local" | "exec" | "external";
 
-export type PathAccess = "read" | "write" | "cwd";
+/**
+ * How a tool uses a path field. U-197 (bundle A, R-3): `aggregate` is a read of a table that gives
+ * the model aggregates only (query_table, query.ts): the gate allows it under unreadablePaths, where
+ * it refuses `read` (A-3); elsewhere it is judged as `read`.
+ */
+export type PathAccess = "read" | "write" | "cwd" | "aggregate";
 
 export interface ToolRequirements {
   /** Argument fields that hold a path, and how the tool uses each one. */
@@ -521,6 +543,8 @@ export interface InspectFilesPayload {
   readonly next: string | null;
   /** True when `hash` was asked and some files were left without `sha256` (byte budget). */
   readonly hashesIncomplete: boolean;
+  /** U-203 (R-3, R-4): as SearchFilesPayload.withheld; entries under unreadable paths are not listed, hashed or paged. */
+  readonly withheld?: true;
 }
 
 export interface WorkflowToolArgsByName {

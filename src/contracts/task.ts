@@ -93,6 +93,21 @@ export interface ResolvedTaskSpec extends TaskSpec {
    * plan adds the plan's files as one more list (approvedPlanWritablePathSets, U-187).
    */
   readonly writablePathSets?: readonly WritablePathSet[];
+  /**
+   * P1 bundle A (review R-102 M-1; R-2): the run's unreadable paths: every source's entries united
+   * (unreadablePathsOf over the config file, the applied profile, the task type definition and the
+   * task file; the config file's own also in a task file's run, and also under a profile). The gate
+   * (PolicyGateOptions.unreadablePaths) and the listing tools (the tool runner's unreadablePaths)
+   * read this, not `policy.unreadablePaths`, which is one source's list. Absent: none. Set by the CLI
+   * and the app (A-6).
+   */
+  readonly unreadablePaths?: readonly string[];
+  /**
+   * P1 bundle A (review R-102 M-1; Q-4, DR-70): the run's k, effectiveMinGroupSize over every source
+   * (5 to 1000). query_table reads this, not `policy.minGroupSize`. Absent: DEFAULT_MIN_GROUP_SIZE.
+   * Set by the CLI and the app (A-6).
+   */
+  readonly minGroupSize?: number;
 }
 
 /**
@@ -181,6 +196,33 @@ export interface PolicyConfig {
    * an apply run, after a person approved the plan's digest.
    */
   readonly planActions?: readonly PlanActionKind[];
+  /**
+   * P1 bundle A (U-197; DR-69, DR-70; proposal R-1 to R-5, R-8): workspace-relative paths whose
+   * files the model may not read, list or change; only `query_table` aggregates their tables (the
+   * access `aggregate`), and gives what DR-70 allows (query.ts). Format and matching are
+   * protectedPaths' (checkProtectedPaths; judged on the text, then on the real path, a link entry
+   * covering its target; compilePathSet with `onUnusable: "covers"`: a deny list fails closed).
+   * - Only adds: the config file, the applied profile, a task type definition and the task file may
+   *   each add entries (the union) and none takes one away. The config file's entries apply also to
+   *   a run of a task file, whose own policy otherwise replaces the config's (R-2).
+   * - read_file is refused (`unreadable_path`); search_files and inspect_files are refused at such
+   *   a path and leave the entries under it out of their results, names included (R-4); writes are
+   *   refused too (it is a protected path as well); the integrity checks watch it.
+   * - With any entry, no command rule and no `command` verifier may be set
+   *   (PRIVATE_DATA_WORKFLOW_PROBLEMS `unreadable_with_commands`, R-5).
+   * - An entry that does not exist or holds nothing is judged the same way: no error tells it.
+   * - One source's list: the run reads ResolvedTaskSpec.unreadablePaths, every source united (R-102 M-1).
+   * - Not read yet: the parsers refuse the field (A-6) and the gate does not judge it (A-3).
+   */
+  readonly unreadablePaths?: readonly string[];
+  /**
+   * P1 bundle A (U-197; Q-4): the group size k for tables under unreadablePaths: groups of fewer
+   * rows are not shown (query.ts, DR-70). A whole number within MIN_GROUP_SIZE_LIMITS (5 to 1000, R-102
+   * L-3, V-12 M-1): no source lowers k below 5 (DR-70); each can only raise it
+   * (effectiveMinGroupSize). The run reads ResolvedTaskSpec.minGroupSize. Not read yet: the parsers
+   * refuse it (A-6).
+   */
+  readonly minGroupSize?: number;
   /**
    * P1 (DR-69, B-4): workspace-relative paths that file tools may write; they may write nothing
    * else. The format, the matching and the platform rules are protectedPaths' (checkProtectedPaths;

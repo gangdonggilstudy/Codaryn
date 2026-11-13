@@ -19,6 +19,12 @@ export interface PlanApproval {
   readonly digest: string;
   readonly moves: number;
   readonly discards: number;
+  /**
+   * U-206 (U-196): a run plan's approval: its check is indexed by its files. Its apply is not this
+   * app's yet (the app layer's apply of a run plan comes with U-195): the main process refuses it.
+   */
+  readonly planKind?: "changes";
+  readonly files?: number;
   /** The last apply of this plan ended as `consent_required`. */
   readonly consentRequired: boolean;
 }

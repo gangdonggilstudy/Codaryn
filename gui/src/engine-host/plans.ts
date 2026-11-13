@@ -49,6 +49,7 @@ export function planValue(outcome: unknown, shown: Shown, modelText?: ModelText)
   const summary = marked ? null : summaryRows(output["summary"], shown, modelText);
   const digest = output["digest"];
   if (typeof digest !== "string" || !DIGEST.test(digest)) return { ok: false, code: "host_error" };
+  if (output["planKind"] === "changes") return changesPlanValue(output, digest, marked, summary, shown);
   const actions: Obj[] = [];
   for (const action of Array.isArray(output["actions"]) ? output["actions"].slice(0, MAX_ACTIONS) : []) {
     if (!isObj(action)) continue;
@@ -63,6 +64,37 @@ export function planValue(outcome: unknown, shown: Shown, modelText?: ModelText)
     digest,
     actions,
     inventoryLimitReached: output["inventoryLimitReached"] === true,
+    appliedBy: isObj(applied) && typeof applied["runId"] === "string" && RUN_ID.test(applied["runId"]) && typeof applied["at"] === "string" ? { runId: applied["runId"], at: applied["at"] } : null,
+    ...(marked ? { recordsChanged: true } : {}),
+    ...(summary === null ? {} : { summary }),
+  };
+}
+
+/**
+ * U-206 (U-196, DR-69 B-3): a run plan (ChangesPlanOutput, `planKind: "changes"`): the files a later
+ * run will make or change, each path masked by the app layer and passed through `shown` here, and
+ * whether it makes or changes it. The summary is part of what is approved (it is in plan.json and
+ * the digest) and passes the model text rows as an apply plan's does. A file that does not fit makes
+ * the whole value host_error: a plan shown with a file left out would not be the plan approved.
+ */
+function changesPlanValue(output: Obj, digest: string, marked: boolean, summary: string[] | null, shown: Shown): Obj | HostFailure {
+  const given = output["files"];
+  if (!Array.isArray(given) || given.length > MAX_ACTIONS) return { ok: false, code: "host_error" };
+  const files: Obj[] = [];
+  for (const file of given) {
+    if (!isObj(file) || typeof file["path"] !== "string" || (file["change"] !== "create" && file["change"] !== "modify")) return { ok: false, code: "host_error" };
+    files.push({ path: shown(file["path"]), change: file["change"] });
+  }
+  const applied = output["appliedBy"];
+  return {
+    ok: true,
+    planKind: "changes",
+    runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
+    status: output["status"] === "applied" ? "applied" : "pending",
+    digest,
+    actions: [],
+    files,
+    inventoryLimitReached: false,
     appliedBy: isObj(applied) && typeof applied["runId"] === "string" && RUN_ID.test(applied["runId"]) && typeof applied["at"] === "string" ? { runId: applied["runId"], at: applied["at"] } : null,
     ...(marked ? { recordsChanged: true } : {}),
     ...(summary === null ? {} : { summary }),

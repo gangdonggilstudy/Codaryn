@@ -272,6 +272,51 @@ button:focus-visible,
   outline: 2px solid #1a5fb4;
   outline-offset: -2px;
 }
+/* U-67 (3.13): the command palette, over the window near its top. */
+#palette {
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(36rem, 90vw);
+  background: Canvas;
+  color: CanvasText;
+  border: 1px solid #888;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
+  padding: 0.5rem;
+  z-index: 10;
+}
+#palette input {
+  width: 100%;
+  box-sizing: border-box;
+}
+#palette-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+#palette-list li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  cursor: default;
+}
+#palette-list li[aria-selected="true"] {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+#palette-list li[aria-disabled="true"] {
+  opacity: 0.6;
+}
+#palette-list .palette-keys,
+#palette-list .palette-note {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
 /* U-66 (3.4): side by side (before | now), and long lines kept on one line when wrapping is off. */
 .changes-view {
   display: flex;

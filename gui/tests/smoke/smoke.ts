@@ -247,6 +247,37 @@ startGui({
         result.texts = copied.slice(before);
         return result;
       })();
+      // U-67 (3.13, 10): the command palette, the shortcuts, F5 and the tree's first-letter jump.
+      results["keys"] = await (async () => {
+        const press = (target: string, key: string, ctrl = false, shift = false): Promise<unknown> =>
+          js(`(() => { const t = ${target}; if (!t) return false; t.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true })); return true; })()`);
+        const commandsShown = "[...document.querySelectorAll('#palette-list [data-command]')].map((li) => li.getAttribute('data-command'))";
+        await press("document", "P", true, true);
+        const opened = await js("document.getElementById('palette')?.hasAttribute('hidden') === false && document.activeElement?.id === 'palette-input'");
+        const listed = await js(commandsShown);
+        const cancel = await js("document.querySelector('#palette-list [data-command=\"cancel\"]')?.getAttribute('aria-disabled') ?? null");
+        await js("(() => { const name = document.querySelector('#palette-list [data-command=\"checks\"] .palette-name')?.textContent ?? ''; const input = document.getElementById('palette-input'); input.value = name; input.dispatchEvent(new Event('input')); return true; })()");
+        const filtered = await js(commandsShown);
+        await press("document.getElementById('palette-input')", "Enter");
+        const ran = await js("[document.getElementById('palette')?.hasAttribute('hidden'), document.getElementById('work')?.getAttribute('data-screen')]");
+        await js("document.querySelector('[data-screen=\"runs\"]')?.focus(); true");
+        await press("document", "P", true, true);
+        await press("document.getElementById('palette-input')", "Escape");
+        const escaped = await js("document.getElementById('palette')?.hasAttribute('hidden') === true && document.activeElement?.getAttribute('data-screen') === 'runs'");
+        await press("document", "n", true);
+        const newTask = await js("document.getElementById('work')?.getAttribute('data-screen')");
+        await press("document", ",", true);
+        const settings = await js("document.getElementById('work')?.getAttribute('data-screen')");
+        await js("document.querySelector('.tree')?.removeAttribute('data-tree-ready'); true");
+        await press("document.body", "F5");
+        const refreshed = await waitFor("document.querySelector('.tree')?.getAttribute('data-tree-ready') ?? null", 20_000);
+        await waitFor("[...document.querySelectorAll('.tree [data-key]')].some((li) => li.textContent.includes('b.txt')) ? 'ok' : null", 20_000);
+        await js("document.querySelector('.tree [tabindex=\"0\"]')?.focus(); true");
+        const from = await js("document.activeElement?.querySelector('.name')?.textContent ?? null");
+        await press("document.querySelector('.tree')", "s");
+        const jumped = await js("document.activeElement?.querySelector('.name')?.textContent ?? null");
+        return { opened, listed, cancel, filtered, ran, escaped, newTask, settings, refreshed, jump: [from === "sub" ? "same" : "moved", jumped] };
+      })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");

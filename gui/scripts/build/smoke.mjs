@@ -286,6 +286,24 @@ const expected = [
       JSON.stringify(v) ===
       JSON.stringify({ masked: [null], top: "copied", nested: "copied", unknown: "unknown_entry", pathString: "invalid_args", otherWorkspace: "unknown_workspace", button: "ok", texts: ["a.txt", "sub/b.txt", "a.txt"] }),
   ],
+  // U-67 (3.13, 10): the palette's fixed list (cancel not available with no run), found by name and run, Escape gives the focus back; Ctrl+N, Ctrl+comma, F5 and the first-letter jump.
+  [
+    "keys",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        opened: true,
+        listed: ["newtask", "taskfile", "open", "recent", "runs", "changes", "revert", "checks", "model", "language", "cancel", "settings", "refresh"],
+        cancel: "true",
+        filtered: ["checks"],
+        ran: [true, "checks"],
+        escaped: true,
+        newTask: "newtask",
+        settings: "settings",
+        refreshed: "ok",
+        jump: ["moved", "sub"],
+      }),
+  ],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],

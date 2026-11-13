@@ -9,6 +9,8 @@ import type { Workspace } from "./api.js";
 import { checksScreen } from "./checks/checks.js";
 import { textsFor } from "./i18n/catalog.js";
 import { Shell } from "./shell/shell.js";
+import { Palette } from "./shell/palette.js";
+import type { Command } from "./shell/palette.js";
 import { newTaskScreen } from "./run/new-task.js";
 import { RunModel, clock } from "./run/run-model.js";
 import { runScreen } from "./run/run-screen.js";
@@ -66,7 +68,21 @@ async function start(): Promise<void> {
     return code;
   };
 
-  shell = new Shell(texts, { openWorkspace });
+  // U-67 (3.13): the palette and the shortcuts; F5 reads the tree again and redraws a screen without a form.
+  let palette: Palette | null = null;
+  const REDRAWN_ON_F5 = new Set(["home", "runs", "checks", "changes", "report", "plan", "cleanup", "settings"]);
+  const readAgain = (): void => {
+    tree?.refresh();
+    const id = shell?.currentScreen ?? null;
+    if (id !== null && REDRAWN_ON_F5.has(id)) shell?.refresh();
+  };
+  shell = new Shell(texts, {
+    openWorkspace,
+    palette: () => palette?.open(),
+    newTask: () => shell?.show("newtask"),
+    settings: () => shell?.show("settings"),
+    refresh: readAgain,
+  });
   shell.mount(root);
   // U-65: a changed file chosen in the tree opens its run's comparison at that file.
   tree = new TreeView(texts, api, shell.filePanel, { openChange: (marked, path) => openChanges(marked.runId, marked.profile, marked.workflow, path) });
@@ -120,6 +136,43 @@ async function start(): Promise<void> {
   shell.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.add(setupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text), show: (id) => shell?.show(id) }));
+  // U-67 (3.13): the palette's fixed commands (nothing is built from a model's text or a file name).
+  const runGoing = (): boolean => run.phase !== "idle" && run.phase !== "done";
+  const commands = (): Command[] => [
+    { id: "newtask", label: texts.format("cmd.newTask"), keys: "Ctrl+N", run: () => shell?.show("newtask") },
+    {
+      id: "taskfile",
+      label: texts.format("cmd.taskFile"),
+      keys: null,
+      run: () => {
+        shell?.show("newtask");
+        document.getElementById("task-run-file")?.click();
+      },
+    },
+    { id: "open", label: texts.format("cmd.openWorkspace"), keys: "Ctrl+O", run: openWorkspace },
+    { id: "recent", label: texts.format("cmd.recent"), keys: null, run: () => shell?.show("home") },
+    { id: "runs", label: texts.format("cmd.runs"), keys: null, run: () => shell?.show("runs") },
+    { id: "changes", label: texts.format("cmd.changes"), keys: null, run: () => shell?.show("changes") },
+    { id: "revert", label: texts.format("cmd.revert"), keys: null, run: () => shell?.show("runs") },
+    { id: "checks", label: texts.format("cmd.checks"), keys: null, run: () => shell?.show("checks") },
+    { id: "model", label: texts.format("cmd.model"), keys: null, run: () => shell?.show("settings") },
+    { id: "language", label: texts.format("cmd.language"), keys: null, run: () => shell?.show("settings") },
+    {
+      id: "cancel",
+      label: texts.format("cmd.cancel"),
+      keys: null,
+      available: runGoing,
+      // The run screen's own question follows (its default is to keep running).
+      run: () => {
+        shell?.show("run");
+        document.getElementById("run-cancel")?.click();
+      },
+    },
+    { id: "settings", label: texts.format("cmd.settings"), keys: "Ctrl+,", run: () => shell?.show("settings") },
+    { id: "refresh", label: texts.format("cmd.refresh"), keys: "F5", run: readAgain },
+  ];
+  palette = new Palette(texts, commands);
+  root.append(palette.element);
   shell.setEngine(info.engine);
   // U-64 (3.12, 4.4): when the engine ended (or did not start), its card and the restart button.
   const restartEngine = async (): Promise<string> => {

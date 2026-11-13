@@ -2,6 +2,8 @@
  * GU-2: the window frame (docs/design/standalone-gui.md 3.1): a header with the screen buttons, the
  * file panel, the work area and the status bar. Screens register here; one is shown at a time.
  * Keys: F6 moves between the regions, Ctrl+O opens a workspace, Ctrl+1 and Ctrl+2 switch screens.
+ * U-67 (3.13): Ctrl+Shift+P opens the command palette, Ctrl+N the new task, Ctrl+comma the settings,
+ * and F5 reads again (a panel that read again itself already took its F5). No single key cancels.
  */
 
 import type { Texts, TextId } from "../i18n/catalog.js";
@@ -16,6 +18,11 @@ export interface Screen {
 
 export interface ShellHandlers {
   readonly openWorkspace: () => void;
+  /** U-67 (3.13): the command palette, the new task, the settings, and reading again (F5). */
+  readonly palette?: () => void;
+  readonly newTask?: () => void;
+  readonly settings?: () => void;
+  readonly refresh?: () => void;
 }
 
 export class Shell {
@@ -144,6 +151,17 @@ export class Shell {
   }
 
   private onKey(event: KeyboardEvent): void {
+    if (event.key === "F5" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      this.handlers.refresh?.();
+      return;
+    }
+    if (event.ctrlKey && event.shiftKey && !event.altKey && (event.key === "P" || event.key === "p")) {
+      event.preventDefault();
+      this.handlers.palette?.();
+      return;
+    }
     if (event.key === "F6") {
       event.preventDefault();
       const regions: HTMLElement[] = [this.nav.querySelector("button") ?? this.nav, this.filePanel, this.work];
@@ -158,6 +176,16 @@ export class Shell {
       if (event.key === "o" || event.key === "O") {
         event.preventDefault();
         this.handlers.openWorkspace();
+        return;
+      }
+      if ((event.key === "n" || event.key === "N") && this.handlers.newTask !== undefined) {
+        event.preventDefault();
+        this.handlers.newTask();
+        return;
+      }
+      if (event.key === "," && this.handlers.settings !== undefined) {
+        event.preventDefault();
+        this.handlers.settings();
         return;
       }
       const number = Number(event.key);

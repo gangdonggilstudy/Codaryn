@@ -14,7 +14,7 @@
  *   on the new base (the config's own change is said once, at the config).
  * - Adding an entry and raising k narrow.
  * The parsers still refuse both fields until A-6, so the judgment is called directly.
- * Reproduced first (todo until the judgment knows the fields). Fake values only.
+ * Reproduced first (todo until the judgment knew the fields). Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -22,7 +22,6 @@ import { describe, test } from "node:test";
 import type { CodarynConfig } from "../../../src/contracts/index.js";
 import { wideningOf } from "../../../src/app/index.js";
 
-const TODO = { todo: "U-204: the widening judgment does not know unreadablePaths or minGroupSize yet" };
 const POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false } as const;
 const BASE = { schemaVersion: 1, model: "fake-model-a", maxOutputTokens: 64 } as unknown as CodarynConfig;
 type Workflow = NonNullable<CodarynConfig["workflows"]>[string];
@@ -34,13 +33,13 @@ const kinds = (before: CodarynConfig, after: CodarynConfig): string[] => widenin
 const config = (before: Extra, after: Extra): string[] => kinds(withPolicy(before), withPolicy(after));
 
 describe("U-204: the config's unreadablePaths", () => {
-  test("an entry taken away is a widening, said at the list; the list gone too", TODO, () => {
+  test("an entry taken away is a widening, said at the list; the list gone too", () => {
     assert.deepEqual(config({ unreadablePaths: ["data/private"] }, { unreadablePaths: [] }), ["unreadable_path_removed policy.unreadablePaths"]);
     assert.deepEqual(config({ unreadablePaths: ["data/private"] }, {}), ["unreadable_path_removed policy.unreadablePaths"]);
     assert.deepEqual(config({ unreadablePaths: ["a", "b"] }, { unreadablePaths: ["b"] }), ["unreadable_path_removed policy.unreadablePaths"]);
   });
 
-  test("an entry replaced by a broader one is a widening too: a link under the old one can lead elsewhere", TODO, () => {
+  test("an entry replaced by a broader one is a widening too: a link under the old one can lead elsewhere", () => {
     assert.deepEqual(config({ unreadablePaths: ["data/private"] }, { unreadablePaths: ["data"] }), ["unreadable_path_removed policy.unreadablePaths"]);
   });
 
@@ -53,7 +52,7 @@ describe("U-204: the config's unreadablePaths", () => {
 });
 
 describe("U-204: the config's group size k", () => {
-  test("a lower effective k is a widening: set lower, lowered, or taken away above the default", TODO, () => {
+  test("a lower effective k is a widening: set lower, lowered, or taken away above the default", () => {
     assert.deepEqual(config({}, { minGroupSize: 3 }), ["min_group_size_lowered policy.minGroupSize"], "from the default 5");
     assert.deepEqual(config({ minGroupSize: 10 }, { minGroupSize: 8 }), ["min_group_size_lowered policy.minGroupSize"]);
     assert.deepEqual(config({ minGroupSize: 10 }, {}), ["min_group_size_lowered policy.minGroupSize"], "back to the default 5");
@@ -71,7 +70,7 @@ describe("U-204: a profile's and a workflow's own entries and raise", () => {
   const profile = (extra: Extra | undefined) => ({ docs: extra === undefined ? {} : { policy: policyWith(extra) } });
   const docs = (extra: Extra): Workflow => ({ label: "Docs", tools: ["read_file", "query_table"], policy: policyWith(extra) }) as unknown as Workflow;
 
-  test("a profile's entry taken away is said for it, unless the config's new list still has it", TODO, () => {
+  test("a profile's entry taken away is said for it, unless the config's new list still has it", () => {
     assert.deepEqual(kinds(withPolicy({}, { profiles: profile({ unreadablePaths: ["p"] }) }), withPolicy({}, { profiles: profile({ unreadablePaths: [] }) })), [
       "profile_changed profiles",
       "unreadable_path_removed profiles.docs.policy.unreadablePaths",
@@ -83,7 +82,7 @@ describe("U-204: a profile's and a workflow's own entries and raise", () => {
     assert.deepEqual(kinds(withPolicy({ unreadablePaths: ["c"] }, { profiles: profile({ unreadablePaths: ["c"] }) }), withPolicy({ unreadablePaths: ["c"] }, { profiles: profile({ unreadablePaths: [] }) })), ["profile_changed profiles"]);
   });
 
-  test("a profile's raise lowered is said for it; the config's base change is said once, at the config", TODO, () => {
+  test("a profile's raise lowered is said for it; the config's base change is said once, at the config", () => {
     assert.deepEqual(kinds(withPolicy({}, { profiles: profile({ minGroupSize: 10 }) }), withPolicy({}, { profiles: profile({ minGroupSize: 7 }) })), [
       "profile_changed profiles",
       "min_group_size_lowered profiles.docs.policy.minGroupSize",
@@ -96,7 +95,7 @@ describe("U-204: a profile's and a workflow's own entries and raise", () => {
     assert.deepEqual(kinds(withPolicy({ minGroupSize: 10 }, { profiles: profile({ minGroupSize: 8 }) }), withPolicy({}, { profiles: profile({ minGroupSize: 8 }) })), ["min_group_size_lowered policy.minGroupSize"]);
   });
 
-  test("a workflow definition's own entries and raise, as a profile's", TODO, () => {
+  test("a workflow definition's own entries and raise, as a profile's", () => {
     assert.deepEqual(kinds(withPolicy({}, { workflows: { docs: docs({ unreadablePaths: ["w"] }) } }), withPolicy({}, { workflows: { docs: docs({}) } })), [
       "workflow_changed workflows",
       "unreadable_path_removed workflows.docs.policy.unreadablePaths",

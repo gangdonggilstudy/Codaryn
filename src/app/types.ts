@@ -168,7 +168,20 @@ export interface SettingsWidening {
      */
     | "writable_path_added"
     /** U-183 (DR-69 B-4): a list of writable paths is gone, so that limit is lifted (no limit). The field is the list. */
-    | "writable_paths_unlimited";
+    | "writable_paths_unlimited"
+    /**
+     * U-204 (DR-69 bundle A, A-7, R-7): a list of unreadable paths (the config's
+     * `policy.unreadablePaths`, a profile's, a workflow definition's) no longer has an entry it had,
+     * by the gate's matching: removed, replaced by a broader one, the list gone or emptied. A
+     * profile's or a definition's entry the config's new list still has is not one. The field is the list.
+     */
+    | "unreadable_path_removed"
+    /**
+     * U-204 (A-7, R-7, Q-4): a lower group size k: the config's (`policy.minGroupSize`, the default 5
+     * when it sets none), or a profile's or a workflow definition's own raise judged on the config's
+     * new k. The field is the `minGroupSize` that changed.
+     */
+    | "min_group_size_lowered";
   /** Where: a field path such as "policy.commands[2]". Never a value. */
   readonly field: string;
 }

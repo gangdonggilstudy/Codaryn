@@ -17,12 +17,14 @@
  * address (top-level or a provider's, GUI F-3), another provider for quick runs (F-3), a profile or
  * workflow definition changed, U-183 (DR-69 B-4): a list of writable paths with an entry it did not
  * have (V-8 M-1: even one inside an old entry, which a link can point elsewhere), or that is gone
- * (no limit). Narrowing changes need no confirmation.
+ * (no limit). U-204 (DR-69 bundle A, A-7, R-7): a list of unreadable paths without an entry it had,
+ * or a lower group size k (the config's, or a profile's or a workflow's own raise). Narrowing
+ * changes need no confirmation.
  * The new text is the config as formatted JSON; the file's own formatting is not kept.
  */
 
 import { createHash } from "node:crypto";
-import { API_PROVIDERS, API_PROVIDER_NAMES, mergeWorkflowPolicy, mergeWorkflowVerifiers } from "../contracts/index.js";
+import { API_PROVIDERS, API_PROVIDER_NAMES, effectiveMinGroupSize, mergeWorkflowPolicy, mergeWorkflowVerifiers } from "../contracts/index.js";
 import type { ApiProviderName, CodarynConfig, CommandRule, ConfirmableCommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
 import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
@@ -137,6 +139,48 @@ function writableWidening(before: readonly string[] | undefined, after: readonly
   return found;
 }
 
+/**
+ * U-204 (DR-69 bundle A, A-7, R-7): one list of unreadable paths, `field` naming it. A deny list
+ * that only adds up: a run is refused under every entry of the config's, the applied profile's, the
+ * workflow definition's and the task file's lists (the union), an entry judged on its text and on
+ * its real path (protectedPaths' rule, compilePathSet `onUnusable: "covers"`).
+ * - An old entry the new list does not have, by its text or by the gate's matching (compilePathSet
+ *   `exact`: whole segments, `\` too and ignoring case on Windows, a trailing `/` or `./` left out),
+ *   and `kept` does not have either: `unreadable_path_removed` at the list, once. `kept` is the
+ *   config's new list for a profile's or a definition's list: their runs keep its entries.
+ * - That holds where a broader entry now stands (`a/b` -> `a`): the gate resolves a deny entry to
+ *   its real path, so where `a/b` is a link or junction it denied a target `a` does not cover. These
+ *   lists are used in every workspace, each with its own links, so that cannot be checked when the
+ *   settings change: what cannot be checked is a widening (as V-8 M-1 for writable paths).
+ * - The list gone or empty takes all its entries away.
+ * - Narrowing: an entry added, a new list, the same entries in another order or spelling. (A new
+ *   list the gate cannot use covers everything, but the old entries it does not have by text are
+ *   still named: the parsers refuse such a list.)
+ */
+function unreadableWidening(
+  before: readonly string[] | undefined,
+  after: readonly string[] | undefined,
+  field: string,
+  kept: readonly string[] = [],
+): SettingsWidening[] {
+  if (before === undefined || before.length === 0) return [];
+  const textual = new Set<unknown>([...(after ?? []), ...kept]);
+  const sets = [after ?? [], kept].map((list) => compilePathSet(list, { match: "exact", onUnusable: "misses" }));
+  const stays = (entry: unknown): boolean => textual.has(entry) || (typeof entry === "string" && sets.some((set) => set.covers(asRelative(entry))));
+  return before.every(stays) ? [] : [{ kind: "unreadable_path_removed", field }];
+}
+
+/**
+ * U-204 (A-7, R-7, Q-4): a profile's or a workflow definition's own k, which can only raise the
+ * config's (effectiveMinGroupSize). Both sides are judged on the config's new value, so a change of
+ * the config's own k is said once, at the config: `min_group_size_lowered` at `field` when the runs
+ * it applies to would now have a lower k by this source's change alone. A raise below the base
+ * raised nothing, so removing it lowers nothing.
+ */
+function ownRaiseLowered(base: number | undefined, before: number | undefined, after: number | undefined, field: string): SettingsWidening[] {
+  return effectiveMinGroupSize(base, [after]) < effectiveMinGroupSize(base, [before]) ? [{ kind: "min_group_size_lowered", field }] : [];
+}
+
 /** The policy checks of the judgment for one set of rules; `prefix` names whose (e.g. "workflows.docs."). */
 function policyWidening(before: PolicyRules, after: PolicyRules, prefix: string): SettingsWidening[] {
   const found: SettingsWidening[] = [...commandWidening(before?.commands ?? [], after?.commands ?? [], prefix)];
@@ -229,6 +273,12 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     if (!oldActions.has(action)) found.push({ kind: "plan_action_allowed", field: "policy.planActions" });
   }
   found.push(...writableWidening(before.policy?.writablePaths, after.policy?.writablePaths, "policy.writablePaths"));
+  // U-204 (A-7, R-7): the config's unreadable paths, and its k (DEFAULT_MIN_GROUP_SIZE when it sets
+  // none, Q-4): lower is a widening, so is a value above the default taken away.
+  found.push(...unreadableWidening(before.policy?.unreadablePaths, after.policy?.unreadablePaths, "policy.unreadablePaths"));
+  if (effectiveMinGroupSize(after.policy?.minGroupSize, []) < effectiveMinGroupSize(before.policy?.minGroupSize, [])) {
+    found.push({ kind: "min_group_size_lowered", field: "policy.minGroupSize" });
+  }
   // GUI F-3, review R-27 I1: where the workspace's text and a provider's key go, as a run reads it
   // (src/cli/settings.ts resolveConnection): each API provider's address in the config (top-level
   // apiBaseUrl, or providers.<name>.apiBaseUrl when that entry is there), else its default. The
@@ -261,6 +311,10 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     const profile = after.profiles?.[name];
     if (profile === undefined) continue;
     found.push(...writableWidening(old.policy?.writablePaths, profile.policy?.writablePaths, `profiles.${name}.policy.writablePaths`));
+    // U-204 (A-7): a profile's unreadable paths add to the config's and its k only raises it, so
+    // what it takes away is judged with the config's new list and new k.
+    found.push(...unreadableWidening(old.policy?.unreadablePaths, profile.policy?.unreadablePaths, `profiles.${name}.policy.unreadablePaths`, after.policy?.unreadablePaths));
+    found.push(...ownRaiseLowered(after.policy?.minGroupSize, old.policy?.minGroupSize, profile.policy?.minGroupSize, `profiles.${name}.policy.minGroupSize`));
   }
   // Review R-27 I4: a profile's own provider wins for its quick runs (SP-D10), so a profile that now
   // sends them to another provider says so, besides profile_changed.
@@ -283,7 +337,12 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   const definitionsAfter = workflowDefinitions(after.workflows);
   for (const [id, was] of Object.entries(workflowDefinitions(before.workflows))) {
     const is = definitionsAfter[id];
-    if (is !== undefined) found.push(...writableWidening(was.policy?.writablePaths, is.policy?.writablePaths, `workflows.${id}.policy.writablePaths`));
+    if (is === undefined) continue;
+    found.push(...writableWidening(was.policy?.writablePaths, is.policy?.writablePaths, `workflows.${id}.policy.writablePaths`));
+    // U-204 (A-7): mergeWorkflowPolicy joins the definition's unreadable paths with the config's and
+    // takes the larger k, so the definition's own are judged as a profile's.
+    found.push(...unreadableWidening(was.policy?.unreadablePaths, is.policy?.unreadablePaths, `workflows.${id}.policy.unreadablePaths`, after.policy?.unreadablePaths));
+    found.push(...ownRaiseLowered(after.policy?.minGroupSize, was.policy?.minGroupSize, is.policy?.minGroupSize, `workflows.${id}.policy.minGroupSize`));
   }
   // One entry per kind and field.
   const seen = new Set<string>();

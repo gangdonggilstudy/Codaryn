@@ -560,6 +560,39 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
   - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.
 
+### 5.12 작업 공간 목록 [구현 U-89] (standalone-gui 3.3)
+
+GUI의 파일 나무가 쓴다. 작업 공간의 한 디렉터리를 한 단계만 준다. 읽기만 한다: 잠금·기록·실행 디렉터리를 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/workspace-dir.ts`, 시험은 `tests/unit/app/u89-workspace-dir.test.ts`다.
+
+```ts
+listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirListing
+  // { kind: "workspace_dir", status: "listed", masking: "current_secrets", entries, total, offset, nextOffset }
+  // 또는 { kind: "workspace_dir", status: "refused" | "not_found" | "not_dir" | "too_large" | "unreadable" }
+  // entries: { name: string | null, shown, kind: "dir" | "file" | "link" | "state" | "other", masked, protected }[]
+```
+
+- **설정.** `changes`(5.7)와 같은 읽기 준비(`prepareTask`의 1~7단계, 실행하지 않는 명령)로 작업 공간, 지금 등록한 비밀, 효력 있는 정책의 보호 경로를 얻는다. 설정이 풀리지 않으면 그 오류(예: `secret_env_missing`)이고 아무것도 읽지 않는다.
+- **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
+  - `dir`: 뿌리는 `""`, 그 밖은 `/`로 이은 상대 조각. 빈 조각, `.`, `..`, `\`, `:`, 제어 문자는 안 된다. 조각마다 255자, 깊이 64까지다.
+  - `offset`: 0 이상의 정수. 앞 쪽의 `nextOffset`을 넘긴다.
+  - `limit`: 1~500(`WORKSPACE_PAGE_SIZE`). 없으면 500이다.
+- **링크를 따라가지 않는다.**
+  - 경로는 먼저 엔진의 작업 공간 규칙(`Workspace.resolve`)을 거친다. 뿌리 밖, 상태 디렉터리(`.codaryn`), 규칙이 거부하는 이름은 `refused`다.
+  - 이어서 경로의 조각마다 `lstat`으로 본다. 도중에 링크나 junction이 있으면 `refused`다. 그 안의 경로도 마찬가지다.
+  - 항목은 자기 종류로 읽는다(`readdir`의 `withFileTypes`, 링크를 따라가지 않음). 링크·junction은 `link`, 뿌리의 `.codaryn`은 `state`이고 둘 다 다시 펼치지 않는다.
+- **이름은 가려서 준다.**
+  - 제어 문자(C0, DEL, C1)가 든 이름은 아예 보이지 않는다(`shown: ""`).
+  - 그 밖은 `cleanText`, 키 모양과 지금 설정된 모든 API 키 값(`hideKeys`, `knownKeyValues`), 지금 등록한 값(게이트웨이의 `mask`, AC-D14) 순서로 가린다. 가리기가 실패하면 `""`이다.
+  - `shown`이 원래 이름과 다르면 `masked: true`이고 `name`은 `null`이다. **가린 항목의 원래 이름은 앱 계층 밖으로 나가지 않는다.** 그래서 어댑터는 그 항목을 열거나 고를 수 없다.
+  - `name`은 어댑터가 아래 경로를 만들 때만 쓴다. 보여 줄 때는 `shown`을 쓴다.
+- **보호.** `protected`는 효력 있는 정책의 보호 경로가 항목의 상대 경로를 덮는지다(정책의 `compileProtectedPaths`, 정책이 경로를 판정하는 그대로 글자 기준).
+- **크기와 순서.**
+  - 항목이 `MAX_WORKSPACE_DIR_ENTRIES`(100,000)를 넘으면 `too_large`다. 일부만 주지 않는다.
+  - 디렉터리(`dir`, `state`)가 먼저, 그다음 나머지다. 각 묶음은 숫자를 아는 정렬(`Intl.Collator("en", { numeric, sensitivity: "base" })`) 뒤 코드 포인트 순서로 정한다. 같은 디렉터리는 같은 순서다.
+  - 쪽은 `offset`부터 `limit`개다. `total`은 디렉터리 전체 수, 끝 쪽의 `nextOffset`은 `null`이다. 끝을 넘은 `offset`은 빈 쪽이다.
+- **읽기 결과는 호출 오류가 아니다.** `not_found`(없음, 또는 도중이 파일), `not_dir`(마지막이 파일), `unreadable`(그 밖의 읽기 오류)은 `ok: true`의 상태다. 작업 공간 자체가 없으면 `workspace_not_found`다.
+- **한계.** 읽는 동안 디렉터리가 바뀌면 쪽 사이에 항목이 빠지거나 겹칠 수 있다. 쪽은 매번 새로 읽는다.
+
 ## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
 
 > 사용자 결정 DR-20으로 이 절은 추진하지 않는다. GUI는 같은 프로세스 어댑터(엔진 전용 프로세스)로 5절 함수를 직접 부른다. 아래는 결정 전의 설계와 구현 기록으로 남긴다.
@@ -661,6 +694,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 비교(DR-7) | 원본·지금 내용이 지금 등록한 비밀로 가려짐, 나중 편집·삭제의 상태, 실행·잠금을 만들지 않음, 설정이 풀리지 않으면 그 오류 |
 | 조립 | 보호 경로가 있으면 무결성 점검 사건이 그대로 온다 |
 | 읽기 명령 | `report`(complete, `run_not_found`), `revert`, `doctor`(점검 id마다 하나: 지금 18개, `DOCTOR_CHECK_IDS`. 설계 당시 12개, W-5) |
+| 작업 공간 목록(5.12) | 종류·순서·보호·`state`, 등록 값·키 모양·제어 문자 이름이 가려지고 `name: null`, 링크·junction과 그 안의 경로는 `refused`, `not_found`·`not_dir`, 맞지 않는 인자, 500개씩의 쪽과 숫자 순서, 상한을 넘으면 `too_large`, 상태 디렉터리를 만들지 않음, 설정 오류 |
 
 - 시험의 힘을 변이로 확인했다. 아래 셋은 각각 관련 시험이 실패했고, 되돌린 뒤 통과했다.
   - 변수 파일을 사본 대신 호출자 env에 적재

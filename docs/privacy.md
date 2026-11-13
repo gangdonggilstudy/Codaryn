@@ -116,7 +116,7 @@
 | 모델 응답 문장, 도구 호출 인자 반향 | 가린 뒤 기록하고 다음 요청에 |
 | 도구 결과 | 구조의 문자열마다 가리고, 직렬화한 JSON을 한 번 더 가린다(이미 이스케이프된 가릴 값 대비) |
 | `query_table` 결과 | 다른 도구 결과와 같이 가린다. 열 이름과 묶음 키도 등록 값이면 토큰이 된다. 읽기 제외 아래 표의 결과는 그 전에 15절의 규칙으로 줄어 있다(코드 기준, `src/contracts/query.ts`) |
-| 검증기 근거·확인 항목·한계 | 가린 뒤 자른다(6절). 원본이나 대상이 읽기 제외 아래인 `data_checks` 근거에는 그 표에서 읽은 수를 쓰지 않는다(U-223). `query_table`이 주지 않는 값과 대상이 읽기 제외 아래인 규칙은 맞대지 않는다(U-258, 13절) |
+| 검증기 근거·확인 항목·한계 | 가린 뒤 자른다(6절). 원본이나 대상이 읽기 제외 아래인 `data_checks` 근거에는 그 표에서 읽은 수를 쓰지 않는다(U-223). `query_table`이 주지 않는 값과 대상이 읽기 제외 아래인 규칙은 맞대지 않는다(U-258, 13절). `file_rules`도 읽기 제외 아래 파일을 보는 규칙은 맞대지 않는다(U-276, 13절) |
 | 재수정 메시지 | 기록된 근거로 만들고 다시 가린다 |
 | 무결성 변경 경로 | 경로마다 가려 기록과 결과의 `protectedChanged`에 넣는다 |
 | journal, result.json | 가림본 필드만 받는다(`src/store`) |
@@ -371,6 +371,11 @@ OpenAI의 Responses API(`POST /v1/responses`)를 쓴다. Anthropic과 다른 점
     - 그런 규칙은 "결정 못 함"(undecided)이고, 원본 쪽 근거는 `not compared: query_table does not give this value to the model`이라 말한다. 검증의 한계 목록에 "N of M rules were not compared …"가 붙고 검증 결과는 통과가 아니다(맞대지 않은 규칙만 있으면 inconclusive). 보고서의 근거와 "Not checked"에서 사람이 본다.
     - 확인(U-258의 실제 CLI): 위 일곱 규칙 가운데 bonus 합과 max는 맞대지 않았고, 한계 목록에 `2 of 7 rules were not compared`가 있었다. 모델 요청에서 찾은 것은 앞의 확인과 같이 0건이었다.
     - k는 실행의 것이다. 설정 파일 등에서 k를 올리면 검증기도 그 k로 맞댄다(U-258).
+  - **파일 규칙도 맞대지 않는다(U-276, Codex V-28 H1):** `file_rules`의 규칙이 읽기 제외 아래 파일을 보면, 그 파일이 무엇을 담든 있든 없든 맞대지 않는다. `exists`, `absent`, `contains`, `not_contains`, Markdown 규칙이 모두 그렇다. 문서가 그 아래로 링크하는 `markdown_links`도 같다. 판정은 실경로로 한다.
+    - 그런 규칙은 "결정 못 함"(undecided)이고 근거는 `not compared: a verdict on a file under unreadable paths would tell the model about it`이다. 한계 목록에 "N of M rules were not compared: a file they check is under unreadable paths …"가 붙는다.
+    - 까닭: 판정이 재수정 요청으로 모델에게 가므로, 예를 들어 `contains`의 맞음·틀림이 숨긴 행에 대한 추측이 맞는지를 알려 준다.
+    - 확인: 시험 `u276-file-rules-repair`가 Codex V-28의 재현을 실제 CLI(대본 모델)로 돈다. 설정 파일에만 읽기 제외를 두고 `private/data.csv`의 한 행을 `HIDDEN,73`과 `HIDDEN,74`로 바꿔 돌리면, 두 재수정 요청의 글이 같고 "text found"도 "text not found"도 없다.
+  - **다른 검증기(코드 기준, U-276에서 훑음):** 명령 검증기는 읽기 제외와 함께 둘 수 없다(R-5). `data_checks`는 위와 같다. 이동 계획 적용의 파일 목록 확인(`inventory`)은 적용에서만 돌고, 적용에는 모델이 없다. 무결성 확인(보호 경로와 읽기 제외 경로의 해시)이 바뀜을 찾으면 재수정 없이 실행을 끝낸다(`protected_changed`). 그래서 이 둘의 결과는 모델에게 가지 않는다.
   - **명령:** 읽기 제외가 있는 실행은 명령을 쓸 수 없다(15절). 명령이 없으니 이 절 위의 "실행된 명령" 한계는 그 실행에 걸리지 않는다.
   - **GUI 설정:** 설정 화면에는 읽기 제외를 고치는 편집이 없다. 설정 파일을 손으로 고친다. GUI의 설정 변경 확인은 항목을 빼거나 k를 낮추는 것을 넓히기로 묻는다(U-204, U-212, [어댑터 계약](design/adapter-contract.md) 5.11).
   - **확인 범위:** 읽기 제외가 걸린 확인은 대본 모델과 127.0.0.1의 모의 API(Anthropic, OpenAI)뿐이다. 실제 Anthropic·OpenAI API로는 확인하지 않았다.

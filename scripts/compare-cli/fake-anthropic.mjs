@@ -3,11 +3,15 @@
 // provider, never the scripted model). It answers POST /v1/messages with the next scripted reply
 // (content blocks) as one JSON message, and records every request (method, path, body) for the
 // comparison. Used with a fake key and the tests' network fence; nothing else is reached.
+// U-167: with `models`, GET /v1/models answers them as one page (`codaryn models`).
 
 import { createServer } from "node:http";
 
-/** Starts the server with `replies` (each a list of content blocks) on a free loopback port. */
-export async function startFakeAnthropic(replies) {
+/**
+ * Starts the server with `replies` (each a list of content blocks) on a free loopback port; with
+ * `models` (API model objects) it lists them too.
+ */
+export async function startFakeAnthropic(replies, { models } = {}) {
   const requests = [];
   let answered = 0;
   const server = createServer((request, response) => {
@@ -20,6 +24,10 @@ export async function startFakeAnthropic(replies) {
         response.writeHead(status, { "content-type": "application/json", "request-id": `req_fake_${requests.length}` });
         response.end(JSON.stringify(value));
       };
+      if (models !== undefined && request.method === "GET" && (request.url ?? "").split("?")[0] === "/v1/models") {
+        send(200, { data: models, has_more: false, first_id: models[0]?.id ?? null, last_id: models.at(-1)?.id ?? null });
+        return;
+      }
       if (request.method !== "POST" || request.url !== "/v1/messages") {
         send(404, { type: "error", error: { type: "not_found_error", message: "not found" } });
         return;

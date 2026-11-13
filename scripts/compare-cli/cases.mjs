@@ -6,8 +6,9 @@
 // CLI chose. `terminal` names the streams that look like a terminal (an imitation, see the tool);
 // `answers` are typed one by one at the questions.
 // Models are scripted, except in the cases with `api` (a permission question needs a config's rule,
-// and a config's runs use an API provider): those get a fake Anthropic API on 127.0.0.1 and
-// FAKE_API_KEY. An address in any other config is a closed loopback port.
+// and a config's runs use an API provider; `codaryn models` lists the API's models, U-167): those
+// get a fake Anthropic API on 127.0.0.1 and FAKE_API_KEY. An address in any other config is a
+// closed loopback port.
 // Fake values only; a key-shaped text is built at run time, never written in this file.
 
 import { createHash } from "node:crypto";
@@ -112,6 +113,50 @@ function permissionSetup(dir, { api }) {
   });
 }
 const PERMISSION_RUN = ["run", "--config", "config.json", "--workspace", "work", "--goal", "Run the two checks."];
+
+/**
+ * U-167: the models the fake API lists for `codaryn models`, as API model objects: two with every
+ * field, one with a Korean name and no token limits (shown as missing).
+ */
+const FAKE_MODELS = [
+  { type: "model", id: "fake-model-a", display_name: "Fake Model A", created_at: "2026-01-02T00:00:00Z", max_input_tokens: 200000, max_tokens: 64000 },
+  { type: "model", id: "fake-model-b", display_name: "Fake Model B", created_at: "2026-01-01T00:00:00Z", max_input_tokens: 100000, max_tokens: 8192 },
+  { type: "model", id: "fake-model-c", display_name: "모의 모델 C", created_at: "2025-12-01T00:00:00Z" },
+];
+/** A config with the fake API's address and a current model that the list has (marked in the table). */
+function modelsSetup(dir, { api }) {
+  write(dir, "config.json", { schemaVersion: 1, model: "fake-model-b", apiBaseUrl: api });
+}
+const models = (...more) => ({ args: ["models", "--config", "config.json", ...more] });
+
+/**
+ * U-167 (R-94 I1): an analyze run that ends waiting for a person's review, having written two
+ * files (so a reject has something to revert).
+ */
+function analyzeSetup(dir) {
+  write(dir, "work/data/sales.csv", "region,amount\nnorth,10\nsouth,5\nnorth,2.5\n");
+  write(dir, "task.json", task({ id: "compare-analyze", workflow: "analyze", workflowRef: "analyze", goal: "Total the sales by region.", verifiers: [{ id: "report", kind: "file_rules", rules: [{ type: "contains", path: "out/report.md", text: "# Sales" }] }] }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [
+      { toolCalls: [{ name: "read_file", args: { path: "data/sales.csv" } }] },
+      { toolCalls: [writeFile("out/summary.csv", "region,total\nnorth,12.5\nsouth,5\n")] },
+      { toolCalls: [writeFile("out/report.md", "# Sales\n\n- north sold most (12.5).\n")] },
+      { text: "The analysis is written." },
+    ],
+  });
+}
+/** U-167 (R-94 I1): the plan of planSetup, and a config for applying it in the quick form (another task id). */
+function otherTaskSetup(dir) {
+  planSetup(dir);
+  write(dir, "quick-config.json", {
+    schemaVersion: 1,
+    limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 10000, maxDurationMs: 60000 },
+    policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move", "discard"] },
+  });
+}
+const digestOf = (step) => (ctx) => String(ctx.json(step)?.plan?.digest ?? "none").slice(0, 12);
+const QUICK_APPLY = ["apply", "--workspace", "work", "--workflow", "organize", "--config", "quick-config.json"];
 
 export const CASES = [
   {
@@ -309,5 +354,65 @@ export const CASES = [
     api: { replies: permissionReplies() },
     setup: permissionSetup,
     steps: [{ args: PERMISSION_RUN, terminal: ASKED, answers: [CTRL_C] }, report("latest")],
+  },
+  // U-167: codaryn models against the fake API's list: the table, --use by number and by id (the
+  // config file it writes is compared too), the JSON, and the number asked at a terminal.
+  {
+    name: "models-list-use",
+    api: { replies: [], models: FAKE_MODELS },
+    setup: modelsSetup,
+    steps: [models(), models("--json"), models("--use", "1"), models("--use", "fake-model-c", "--json"), models(), models("--use", "9")],
+  },
+  {
+    name: "models-list-use-ko",
+    lang: "ko",
+    api: { replies: [], models: FAKE_MODELS },
+    setup: modelsSetup,
+    steps: [models(), models("--use", "1"), models()],
+  },
+  {
+    name: "terminal-models",
+    api: { replies: [], models: FAKE_MODELS },
+    setup: modelsSetup,
+    steps: [
+      { ...models(), terminal: ASKED, answers: ["1"] },
+      { ...models(), terminal: ASKED, answers: ["fake-model-c"], lang: "ko" },
+      { ...models(), terminal: ASKED, answers: [""] },
+      { ...models(), terminal: ASKED, answers: [""], lang: "ko" },
+    ],
+  },
+  // U-167 (R-94 I1): the cases U-131's five texts pass through (cli-contract 18.18).
+  // N2 and N4: a plan run's changes before and after its apply, and its report after.
+  {
+    name: "handoff-plan-applied",
+    setup: planSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["changes", "--task", "task.json", "--run", runIdOf(0)(ctx)] }),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      (ctx) => ({ args: ["changes", "--task", "task.json", "--run", runIdOf(0)(ctx)] }),
+      (ctx) => report(runIdOf(0)(ctx)),
+    ],
+  },
+  // N1 and N3: an analyze run's report before a verdict, the reject with its revert line, the report after.
+  {
+    name: "handoff-review-reject",
+    setup: analyzeSetup,
+    steps: [
+      run(),
+      (ctx) => report(runIdOf(0)(ctx)),
+      (ctx) => ({ args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--reject"] }),
+      (ctx) => report(runIdOf(0)(ctx)),
+    ],
+  },
+  // N5: a plan made with a task file, applied in the quick form: at a terminal (declined), then with --digest.
+  {
+    name: "handoff-other-task",
+    setup: otherTaskSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["n"] }),
+      (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+    ],
   },
 ];

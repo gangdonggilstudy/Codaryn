@@ -835,6 +835,27 @@ export const FIXED_MESSAGES = {
   "help.contract": {},
   "help.options_heading": {},
   "help.exit_heading": {},
+  // U-115 (UXM-9): the short help at a terminal (`codaryn`, `codaryn --help`): help.intro, then
+  // help.first_steps and first_use.try_without_key, help.commands_heading with one help.summary.<command>
+  // per command in the first-use order, then help.more, help.key, help.output, help.contract. Not
+  // at a terminal the full help is as before.
+  "help.first_steps": {},
+  "help.more": {},
+  "help.summary.init": {},
+  "help.summary.doctor": {},
+  "help.summary.models": {},
+  "help.summary.run": {},
+  "help.summary.runs": {},
+  "help.summary.report": {},
+  "help.summary.changes": {},
+  "help.summary.revert": {},
+  "help.summary.plan": {},
+  "help.summary.apply": {},
+  "help.summary.review": {},
+  "help.summary.cleanup": {},
+  // U-115: the way to try the flow without a key (docs/usage.md section 3), at a terminal: after
+  // the short help, doctor's next steps, init's text and a run's provider_not_configured error.
+  "first_use.try_without_key": {},
 
   // doctor (N-21): one id per outcome; the check id and its status word come from listed ids.
   // A DoctorCheck's `text` is in the JSON, so doctor ids never take `text` (catalog output).
@@ -884,6 +905,23 @@ export const FIXED_MESSAGES = {
   // can carry (S-11: printable ASCII 0x21-0x7E, no space); the check fails. Never the value, its
   // length or which character.
   "doctor.api_key.unusable": { keyEnv: "keyEnv" },
+  // U-115 (UXM-9): at a terminal, after doctor's closing line: what is not set up yet and what to do
+  // next, numbered in a fixed order (doctor.next.heading, then .init or .config_fix, .key or
+  // .key_unusable, .model or .model_after_key, .other, .warnings, and .again), from the checks' texts;
+  // with nothing to do, .ready (or .ready_task when doctor was given --task). The check lines and
+  // doctor --json are as before; not at a terminal nothing is added.
+  "doctor.next.heading": {},
+  "doctor.next.init": {},
+  "doctor.next.config_fix": {},
+  "doctor.next.key": { keyEnv: "keyEnv" },
+  "doctor.next.key_unusable": { keyEnv: "keyEnv" },
+  "doctor.next.model": {},
+  "doctor.next.model_after_key": {},
+  "doctor.next.other": { count: "count" },
+  "doctor.next.warnings": { count: "count" },
+  "doctor.next.again": {},
+  "doctor.next.ready": {},
+  "doctor.next.ready_task": {},
   // DR-36 (b), DR-34 (a): the key is set and where `{provider}` requests send it: `{origin}`, set by
   // the provider's address variable `{variable}`, by the config field `{field}`, or the default.
   "doctor.api_key.sends_to_env": { keyEnv: "keyEnv", provider: "provider", origin: "apiOrigin", variable: "settingEnv" },

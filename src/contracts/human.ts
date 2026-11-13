@@ -472,6 +472,11 @@ export const FIXED_MESSAGES = {
   "summary.result": { status: "text", reason: "text" },
   "summary.verifiers": { passed: "count", total: "count" },
   "summary.no_verifiers": {},
+  // U-104 (U-99b: UXM-18, AXM-20; PM): after the verifiers line of a run's or an apply's summary, when
+  // its protected material was checked and no check found a change: how many checks there were. The
+  // progress lines show the first check that found nothing and fold the later ones; a check that
+  // found a change is always its own line. The count is the renderer's, of the records it drew.
+  "summary.integrity_unchanged": { count: "count" },
   "summary.changes": { count: "count" },
   "summary.denied": { count: "count" },
   // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its

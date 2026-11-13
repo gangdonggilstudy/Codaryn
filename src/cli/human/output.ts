@@ -471,10 +471,13 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
-      // U-198 (B-4): of those, the writes no writable list of the run covers (outside a carried plan's
-      // approved files). The field is optional: absent is 0, no line.
+      // U-198 (B-4, V-14 L-1): of those, the writes refused as not writable, by why, each with its own
+      // advice: not one of the carried-out plan's files (make a new plan), then outside the settings'
+      // writablePaths (add the file). The fields are optional: absent is 0, no line.
+      const notPlanned = isCount(context.deniedNotPlanned) ? context.deniedNotPlanned : 0;
+      if (notPlanned > 0) out.push(catalog.format("summary.denied_not_planned", { count: notPlanned }), catalog.format("summary.denied_not_planned_hint"));
       const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
-      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }));
+      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }), catalog.format("summary.denied_not_writable_hint"));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
       // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;

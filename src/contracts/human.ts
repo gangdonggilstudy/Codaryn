@@ -484,10 +484,15 @@ export const FIXED_MESSAGES = {
   // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
   // hint lines come after both).
   "summary.failed": { count: "count" },
-  // U-198 (DR-69 B-4; draft for nb-i18n): RunSummaryContext.deniedNotWritable, the denied writes no
-  // writable list of the run covers (path_not_writable); for a run that carries out a `run` plan,
-  // the writes outside its approved files. Right after summary.denied when above 0.
+  // U-198 (DR-69 B-4, Codex V-14 L-1; drafts for nb-i18n): the writes refused as path_not_writable, by
+  // why (RunSummaryContext.deniedNotPlanned, deniedNotWritable), each right after summary.denied when
+  // above 0 and followed by its own advice: not one of the files the carried-out plan approved (to
+  // change others, make a new plan that names them and approve it), or outside the writablePaths of
+  // the settings (add the file to every list). The plan's first.
+  "summary.denied_not_planned": { count: "count" },
+  "summary.denied_not_planned_hint": {},
   "summary.denied_not_writable": { count: "count" },
+  "summary.denied_not_writable_hint": {},
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
@@ -1349,12 +1354,19 @@ export interface RunSummaryContext {
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
   /**
-   * U-198 (DR-69 B-4; draft for na-core, U-195): the denied calls of this run whose code is
-   * `path_not_writable` (`tool_decision` with `allowed: false`): writes that a writable list of the
-   * run does not cover; in a run that carries out a `run` plan, writes outside the approved files.
-   * They are among deniedToolCalls. `summary.denied_not_writable` right after `summary.denied` when
-   * above 0. Optional: absent counts as 0, no line.
+   * U-198 (DR-69 B-4, Codex V-14 L-1; drafts for na-core, U-195): the denied writes of this run whose
+   * code is `path_not_writable` (`tool_decision` with `allowed: false`), by why, each write once:
+   * - deniedNotPlanned: in a run that carries out a `run` plan, a write the plan's own list
+   *   (WritablePathSet source `plan`) does not cover, whatever the other lists say;
+   *   `summary.denied_not_planned`, then `summary.denied_not_planned_hint` (make a new plan);
+   * - deniedNotWritable: any other such write: a list of the settings (config file, profile, task
+   *   type, task file) does not cover it; `summary.denied_not_writable`, then
+   *   `summary.denied_not_writable_hint` (add the file to writablePaths).
+   * Among deniedToolCalls; right after `summary.denied`, the plan's first. Optional: absent counts as
+   * 0, no line. `tool_decision` names only the code, so a caller tells the two apart by which list
+   * refused the write (the unit's report: the gate's part).
    */
+  readonly deniedNotPlanned?: number;
   readonly deniedNotWritable?: number;
   readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number; readonly couldAsk: boolean };
   readonly policyNarrowings?: readonly PolicyNarrowing[];

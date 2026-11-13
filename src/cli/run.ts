@@ -78,7 +78,7 @@ import type {
 } from "../contracts/index.js";
 import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
-import { cleanText } from "./text-safety.js";
+import { cleanText } from "../app/input/text-safety.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { terminalConfirm } from "./confirm.js";
 import type { AskLine } from "./confirm.js";
@@ -91,7 +91,7 @@ import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
-import { createRunId } from "./run-id.js";
+import { createRunId } from "../app/input/run-id.js";
 import { createFailedCalls } from "./failed-calls.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import {
@@ -106,8 +106,8 @@ import {
   relateRealPaths,
   secretEnvNotSetMessage,
   selectEnvFileSecrets,
-} from "./security/index.js";
-import type { PathRelation, WorkspaceLocation } from "./security/index.js";
+} from "../app/input/security/index.js";
+import type { PathRelation, WorkspaceLocation } from "../app/input/security/index.js";
 import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
 import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";

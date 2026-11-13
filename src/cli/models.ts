@@ -60,12 +60,12 @@ import {
   inputFileTooLargeMessage,
   rawTextHoldsKey,
   selectEnvFileSecrets,
-} from "./security/index.js";
+} from "../app/input/security/index.js";
 import { configFieldOf, envValue, knownKeyValues, providerSettingsOf, realModel, resolveListSettings } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { isApiProviderName, localPathProblem, quickProvider, quotedChoices } from "./task.js";
 import { displayWidth, padEnd, padStart } from "./human/index.js";
-import { cleanText, hideKeys } from "./text-safety.js";
+import { cleanText, hideKeys } from "../app/input/text-safety.js";
 
 const LF = String.fromCharCode(10);
 const CR = String.fromCharCode(13);

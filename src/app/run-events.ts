@@ -7,21 +7,35 @@
  *   `invalid_run_record` and nothing of it is shown. A journal or result.json that is not a regular
  *   file, or is larger than MAX_REPORT_FILE_BYTES, is `invalid_run_record` too.
  * - The journal is read after the run, and commands allowed during a run can append lines to it
- *   (R-4 H-1). So a line is a record only when it is a JSON object of this run (`runId`), with the
- *   next number (`seq`, one more than the last record taken), a real time (`at`, the store's
- *   `isRunTimestamp`), a type of the run's kind (a model run's JournalEventType, an apply's
- *   ApplyJournalEventType), field names that are plain words the masking leaves as they are, and at
- *   most MAX_RECORD_DEPTH levels. Anything else is counted in `skipped` and not given. The fields
- *   of each type are not checked one by one; everything in a record is masked instead, and an
- *   adapter reads the fields as outside data.
+ *   (R-4 H-1). Each line is judged by its number (review R-80 M-1, PM's decisions):
+ *   - A line of this run is a JSON object with this run's `runId` and a whole `seq` from 1. Any
+ *     other line (broken, an array, another run's, no number) is skipped and the journal damaged.
+ *   - A number given by two lines or more: neither is given (none is chosen as the real one), the
+ *     number counts as missing, the journal is damaged.
+ *   - A line at its place (the expected `seq`) counts, given or not, so the records after it
+ *     follow. It is given when it has a real time (`at`, the store's `isRunTimestamp`), a type of
+ *     the run's kind (a model run's JournalEventType, an apply's ApplyJournalEventType), field
+ *     names that are plain words the masking leaves as they are, at most MAX_RECORD_DEPTH levels,
+ *     and can be masked; else it is skipped (a registered value equal to a field name, say).
+ *   - A larger number than expected: taken up from there; the numbers between are missing and
+ *     the journal damaged. A smaller one (out of order) is skipped and the journal damaged.
+ *   - The fields of each type are not checked one by one; everything in a record is masked and
+ *     cleaned instead, and an adapter reads the fields as outside data.
+ * - `status` is "damaged" when anything above damaged the journal, or when `report`'s own reading
+ *   of the journal and result.json (summarizeJournal, readResult; their apply forms) refuses it, so
+ *   a journal `report` refuses (invalid_run_record) is never "complete" here. The records taken and
+ *   `missing` are given with it.
  * - An apply's `plan_item_started` (R-9 I-4) is taken (its number counts) but not given, as its
  *   events leave it out.
  * - Every record is masked again as an event is (DR-15): a model run's with `sanitizeRecord` (tool
  *   names limited), an apply's with `maskStrings`, both with the gateway of the values the settings
  *   register now; then the key shapes and every key value set now (`hideKeysInStrings`). A record
  *   that cannot be masked is skipped. Tokens are never restored.
+ * - R-80 L-1: then every string is cleaned: CR LF as LF, control and bidirectional characters
+ *   (`cleanText`, line feeds and tabs kept) and default ignorable characters shown as "?", the
+ *   values of fields the contract does not know too (field names are plain words already).
  * - The unfinished last line of a run that is still going (no result.json) is left out uncounted;
- *   for a finished run it is counted in `skipped`.
+ *   for a finished run it is counted in `skipped` and the journal is damaged.
  * - DR-38: a records-changed mark gives `recordsChanged: true` (the store's hasRecordsChangedMark;
  *   one that cannot be checked counts). The records are given all the same, as `report` shows them.
  * - Pages of at most MAX_RUN_EVENTS_PAGE records, cut before MAX_RUN_EVENTS_PAGE_BYTES of JSON; a
@@ -35,7 +49,8 @@ import path from "node:path";
 import { JOURNAL_FILE_NAME, MAX_REPORT_FILE_BYTES, RESULT_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
 import type { ApplyJournalEventType, JournalEventType, JournalRecord, PrivacyGateway } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
-import { hideKeys, hideKeysInStrings } from "../cli/text-safety.js";
+import { readApplyResult, readResult, summarizeApplyJournal, summarizeJournal } from "../cli/report.js";
+import { REPLACEMENT, cleanText, hideKeys, hideKeysInStrings } from "../cli/text-safety.js";
 import { hasRecordsChangedMark, inspectRun, isRunTimestamp } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -53,6 +68,9 @@ export const MAX_RUN_EVENTS_PAGE_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_DEPTH = 64;
 /** The contract's field names are plain camel-case words. */
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
+/** R-80 L-1: invisible characters (zero width space and joiners, BOM, soft hyphen, fillers), shown as REPLACEMENT. */
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
+const CR_LF = /\r\n/g;
 
 /** A model run's record types; the compiler checks the list against the contract's union. */
 const RUN_TYPES = {
@@ -156,20 +174,38 @@ function plainFields(value: unknown, privacy: PrivacyGateway, keys: readonly str
   return true;
 }
 
-type Line = { readonly kind: "record"; readonly record: StoredRunRecord } | { readonly kind: "taken" } | { readonly kind: "skipped" };
+/** R-80 L-1: every string of `value` cleaned for a person's screen; field names are plain words already. */
+function cleanStrings<T>(value: T): T {
+  const walk = (item: unknown): unknown => {
+    if (typeof item === "string") return cleanText(item.replace(CR_LF, "\n"), true).replace(INVISIBLE, REPLACEMENT);
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item === "object" && item !== null) return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, walk(child)]));
+    return item;
+  };
+  return walk(value) as T;
+}
 
-/** One complete line: the record to give, a record taken but not given, or a line skipped. */
-function readLine(line: string, expectedSeq: number, runId: string, runKind: "run" | "apply", source: RunEventsSource): Line {
+/** A line of this run (a JSON object with this run's id and a whole number from 1), or what else it is. */
+function ownLine(line: string, runId: string): { readonly record: Record<string, unknown>; readonly seq: number } | "other" {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch {
-    return { kind: "skipped" };
+    return "other";
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return { kind: "skipped" };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "other";
   const record = value as Record<string, unknown>;
+  const seq = record["seq"];
+  if (record["runId"] !== runId || typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) return "other";
+  return { record, seq };
+}
+
+type Line = { readonly kind: "record"; readonly record: StoredRunRecord } | { readonly kind: "taken" } | { readonly kind: "skipped" };
+
+/** A line at its place: the record to give, a record taken but not given, or one skipped. */
+function readRecord(record: Record<string, unknown>, runKind: "run" | "apply", source: RunEventsSource): Line {
   const type = record["type"];
-  if (record["runId"] !== runId || record["seq"] !== expectedSeq || !isRunTimestamp(record["at"]) || typeof type !== "string") return { kind: "skipped" };
+  if (!isRunTimestamp(record["at"]) || typeof type !== "string") return { kind: "skipped" };
   const table = runKind === "run" ? RUN_TYPES : APPLY_TYPES;
   const taken = runKind === "apply" && type === PLAN_ITEM_STARTED;
   if (!taken && !isOwn(table, type)) return { kind: "skipped" };
@@ -178,7 +214,7 @@ function readLine(line: string, expectedSeq: number, runId: string, runKind: "ru
     if (taken) return { kind: "taken" };
     const masked = runKind === "run" ? sanitizeRecord(record as unknown as JournalRecord, source.privacy) : maskStrings(record, source.privacy);
     if (masked === null) return { kind: "skipped" };
-    return { kind: "record", record: hideKeysInStrings(masked as unknown as StoredRunRecord, source.keys) };
+    return { kind: "record", record: cleanStrings(hideKeysInStrings(masked as unknown as StoredRunRecord, source.keys)) };
   } catch {
     // A record whose fields do not fit what the masking walks through is not given.
     return { kind: "skipped" };
@@ -246,17 +282,61 @@ export async function listRunEventsIn(
     }
   })();
 
+  // R-80 M-1: each line by its number; a number two lines give is given by neither.
+  const parsed = lines.map((line) => ownLine(line, runId));
+  const given = new Map<number, number>();
+  for (const item of parsed) if (item !== "other") given.set(item.seq, (given.get(item.seq) ?? 0) + 1);
   const passed: StoredRunRecord[] = [];
-  let skipped = complete && tail.length > 0 ? 1 : 0;
+  let damaged = complete && tail.length > 0;
+  let skipped = damaged ? 1 : 0;
   let expectedSeq = 1;
-  for (const line of lines) {
-    const read = readLine(line, expectedSeq, runId, runKind, source);
+  /** Lines taken at their place, given or not, and the highest number seen at a place or doubled. */
+  let placed = 0;
+  let highest = 0;
+  for (const item of parsed) {
+    if (item === "other") {
+      skipped += 1;
+      damaged = true;
+      continue;
+    }
+    if ((given.get(item.seq) ?? 0) > 1) {
+      skipped += 1;
+      damaged = true;
+      highest = Math.max(highest, item.seq);
+      continue;
+    }
+    if (item.seq < expectedSeq) {
+      skipped += 1;
+      damaged = true;
+      continue;
+    }
+    // A larger number: taken up from here; the numbers between are missing.
+    if (item.seq > expectedSeq) damaged = true;
+    expectedSeq = item.seq + 1;
+    placed += 1;
+    highest = Math.max(highest, item.seq);
+    const read = readRecord(item.record, runKind, source);
     if (read.kind === "skipped") {
       skipped += 1;
       continue;
     }
-    expectedSeq += 1;
     if (read.kind === "record" && (types === null || types.has(read.record.type))) passed.push(read.record);
+  }
+  const missing = highest - placed;
+  // A journal report refuses (invalid_run_record) is never complete here: report's own reading.
+  if (!damaged) {
+    try {
+      const resultText = complete ? await readFile(path.join(dir, RESULT_FILE_NAME), "utf8") : null;
+      if (runKind === "apply") {
+        const summary = summarizeApplyJournal(text, runId, complete);
+        if (resultText !== null) readApplyResult(resultText, runId, summary);
+      } else {
+        const summary = summarizeJournal(text, runId, complete);
+        if (resultText !== null) readResult(resultText, runId, summary.taskId);
+      }
+    } catch {
+      damaged = true;
+    }
   }
 
   const start = Math.min(offset, passed.length);
@@ -276,12 +356,13 @@ export async function listRunEventsIn(
       kind: "run_events",
       runId,
       runKind,
-      status: complete ? "complete" : "incomplete",
+      status: damaged ? "damaged" : complete ? "complete" : "incomplete",
       ...(recordsChanged ? { recordsChanged: true as const } : {}),
       masking: "current_secrets",
       records,
       total: passed.length,
       skipped,
+      missing,
       offset: start,
       nextOffset: end < passed.length ? end : null,
     },

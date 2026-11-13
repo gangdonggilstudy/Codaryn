@@ -648,8 +648,12 @@ export interface RunEventsPage {
   readonly runId: string;
   /** By the journal's first record (DR-12): `run_started` or `apply_started`. */
   readonly runKind: "run" | "apply";
-  /** "incomplete": the run has no result.json (still going, or stopped without one). */
-  readonly status: "complete" | "incomplete";
+  /**
+   * "incomplete": the run has no result.json (still going, or stopped without one). R-80 M-1:
+   * "damaged": a line is broken or not this run's, a number is missing or given twice, or `report`
+   * refuses the journal or result.json; the records taken are given, with `missing`.
+   */
+  readonly status: "complete" | "incomplete" | "damaged";
   /** DR-38: the run has a records-changed mark (one that cannot be checked counts). Absent: none. */
   readonly recordsChanged?: true;
   /** Masked with the values registered now, not with the run's table; tokens are never restored. */
@@ -659,6 +663,8 @@ export interface RunEventsPage {
   readonly total: number;
   /** Lines of the whole journal left out: not of this run's shape, or not maskable. */
   readonly skipped: number;
+  /** R-80 M-1: record numbers no single line gives (a gap, or a number two lines give); 0 when none. */
+  readonly missing: number;
   readonly offset: number;
   readonly nextOffset: number | null;
 }

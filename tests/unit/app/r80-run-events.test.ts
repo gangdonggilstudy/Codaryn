@@ -11,7 +11,7 @@
  *       never "complete" here.
  * - L-1: every string is cleaned in the app layer (control, bidirectional and invisible characters
  *   shown as "?", line feeds and tabs kept, CR LF as LF), the values of unknown fields too.
- * Reproduced first (todo until fixed). Scripted model, temporary folders, fake values only.
+ * Reproduced first (200f4ba, todo until fixed). Scripted model, temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -22,9 +22,7 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CodarynApp, RunEventsPage } from "../../../src/app/index.js";
 import { SECRET_ENV, WRITE_NOTES, appEnvironment, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "R-80: a gap, a broken or a doubled line still reads complete; strings are not cleaned" };
-
-type Page = RunEventsPage & { readonly missing?: number };
+type Page = RunEventsPage;
 
 function ok(outcome: AppCallOutcome<RunEventsPage>): Page {
   assert.equal(outcome.ok, true, JSON.stringify(outcome).slice(0, 2000));
@@ -62,7 +60,7 @@ async function reportCode(run: { base: string; app: CodarynApp; runId: string })
 }
 
 describe("R-80 M-1: a record left out does not take the records after it, and damage is told", () => {
-  test("seq 2 broken: the records after it are given; damaged, one missing (report refuses it too)", TODO, async () => {
+  test("seq 2 broken: the records after it are given; damaged, one missing (report refuses it too)", async () => {
     const run = await finishedRun();
     const all = await lines(run.journal);
     await rewrite(run.journal, [all[0] as string, "{ broken", ...all.slice(2)]);
@@ -71,7 +69,7 @@ describe("R-80 M-1: a record left out does not take the records after it, and da
     assert.equal(await reportCode(run), "invalid_run_record");
   });
 
-  test("seq 2 deleted: the records after it are given; damaged, one missing", TODO, async () => {
+  test("seq 2 deleted: the records after it are given; damaged, one missing", async () => {
     const run = await finishedRun();
     const all = await lines(run.journal);
     await rewrite(run.journal, [all[0] as string, ...all.slice(2)]);
@@ -80,7 +78,7 @@ describe("R-80 M-1: a record left out does not take the records after it, and da
     assert.equal(await reportCode(run), "invalid_run_record");
   });
 
-  test("a forged line with the number of a real one: neither is given, the number is missing; damaged", TODO, async () => {
+  test("a forged line with the number of a real one: neither is given, the number is missing; damaged", async () => {
     const run = await finishedRun();
     const all = await lines(run.journal);
     const real = JSON.parse(all[2] as string) as { seq: number; at: string };
@@ -92,7 +90,18 @@ describe("R-80 M-1: a record left out does not take the records after it, and da
     assert.equal(await reportCode(run), "invalid_run_record");
   });
 
-  test("a real line filtered for a field name (bad key) still counts: the records after it follow; complete", TODO, async () => {
+  test("a line at its place whose fields report refuses: damaged, as report refuses the journal", async () => {
+    const run = await finishedRun();
+    const all = await lines(run.journal);
+    const usage = { modelTurns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
+    await appendFile(run.journal, `${JSON.stringify({ seq: all.length + 1, at: new Date().toISOString(), runId: run.runId, type: "run_finished", status: "nonsense", reason: "nonsense", usage })}
+`, "utf8");
+    const page = await list(run);
+    assert.deepEqual([page.status, page.missing], ["damaged", 0]);
+    assert.equal(await reportCode(run), "invalid_run_record");
+  });
+
+  test("a real line filtered for a field name (bad key) still counts: the records after it follow; complete", async () => {
     const run = await finishedRun();
     const all = await lines(run.journal);
     const fifth = { ...(JSON.parse(all[4] as string) as Record<string, unknown>), "bad key": 1 };
@@ -102,7 +111,7 @@ describe("R-80 M-1: a record left out does not take the records after it, and da
     assert.equal(await reportCode(run), "ok", "report takes this journal");
   });
 
-  test("registered values equal to field names (text, turn): those records are left out, the rest follow", TODO, async () => {
+  test("registered values equal to field names (text, turn): those records are left out, the rest follow", async () => {
     const run = await finishedRun();
     const all = await lines(run.journal);
     for (const value of ["text", "turn"]) {
@@ -139,7 +148,7 @@ function strings(value: unknown): string[] {
 }
 
 describe("R-80 L-1: strings are cleaned in the app layer, unknown fields too", () => {
-  test("control, bidirectional and invisible characters show as ?; line feeds and tabs stay; CR LF is LF", TODO, async () => {
+  test("control, bidirectional and invisible characters show as ?; line feeds and tabs stay; CR LF is LF", async () => {
     const text = `done ${BEL} ${ESC}[31mred ${SOH} ${RLO}abc ${ZWSP}x${CR}\nline2\tz`;
     const run = await finishedRun([WRITE_NOTES, { text }]);
     const all = await lines(run.journal);

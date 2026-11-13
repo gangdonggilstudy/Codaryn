@@ -1,8 +1,7 @@
 /**
  * U-62 (docs/design/standalone-gui.md 6.4, 2 principle 4): a copy button and its status. The page
- * never writes the clipboard: it asks the main process, which checks the text (one line, length, no
- * control or invisible character) and has the engine host check it for key shapes and key values
- * before it copies. The status says copied, or the code of why not.
+ * never writes the clipboard: it asks the main process, which copies a run id or a digest's first 12
+ * characters only (R-73). The status says copied, or the code of why not.
  */
 
 import type { Texts } from "../i18n/catalog.js";

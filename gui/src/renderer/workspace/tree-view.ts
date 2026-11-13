@@ -5,7 +5,7 @@
  */
 
 import type { Texts } from "../i18n/catalog.js";
-import { asCopy, asTree } from "../api.js";
+import { asTree } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import { TreeModel, isExpandable } from "./tree-model.js";
@@ -18,9 +18,6 @@ export class TreeView {
   private focusKey: string | null = null;
   private readonly list = el("ul", undefined, { role: "tree", class: "tree" });
   private readonly reveal: HTMLButtonElement;
-  /** U-62 (3.3): copies the focused entry's relative path (by its id; the main process resolves it). */
-  private readonly copyPath: HTMLButtonElement;
-  private readonly copyStatus: HTMLElement;
   private readonly note: HTMLParagraphElement;
 
   constructor(
@@ -29,13 +26,11 @@ export class TreeView {
     private readonly panel: HTMLElement,
   ) {
     this.reveal = button(texts.format("tree.reveal"), () => void this.revealFocused(), { id: "tree-reveal", disabled: "" });
-    this.copyPath = button(texts.format("copy.path"), () => void this.copyFocused(), { id: "tree-copy-path", class: "copy", disabled: "" });
-    this.copyStatus = el("span", undefined, { role: "status", class: "copy-status", id: "tree-copy-status" });
     this.note = el("p", texts.format("tree.empty"), { class: "tree-note" });
     this.list.setAttribute("aria-label", texts.format("tree.label"));
     this.list.addEventListener("keydown", (event) => this.onKey(event));
     const head = el("div", undefined, { class: "panel-head" });
-    head.append(el("h2", texts.format("region.files"), { id: "files-title" }), this.reveal, this.copyPath, this.copyStatus);
+    head.append(el("h2", texts.format("region.files"), { id: "files-title" }), this.reveal);
     panel.replaceChildren(head, this.note, this.list);
   }
 
@@ -117,11 +112,8 @@ export class TreeView {
     });
     this.list.replaceChildren(...items);
     const focused = this.focusedNode();
-    const entry = focused !== null && focused.id !== null && (focused.kind === "file" || focused.kind === "dir");
-    for (const control of [this.reveal, this.copyPath]) {
-      if (entry) control.removeAttribute("disabled");
-      else control.setAttribute("disabled", "");
-    }
+    if (focused !== null && focused.id !== null && (focused.kind === "file" || focused.kind === "dir")) this.reveal.removeAttribute("disabled");
+    else this.reveal.setAttribute("disabled", "");
     if (hadFocus) this.focusRow();
   }
 
@@ -156,14 +148,6 @@ export class TreeView {
     this.render();
     this.focusRow();
     void this.run(result.action);
-  }
-
-  private async copyFocused(): Promise<void> {
-    const node = this.focusedNode();
-    if (this.workspace === null || node === null || node.id === null) return;
-    const reply = asCopy(await this.api.copyPath(this.workspace.handle, node.id));
-    this.copyStatus.textContent = reply.ok ? this.texts.format("copy.done") : this.texts.format("copy.failed", { code: reply.code });
-    this.copyStatus.setAttribute("data-copied", reply.ok ? "ok" : reply.code);
   }
 
   private async revealFocused(): Promise<void> {

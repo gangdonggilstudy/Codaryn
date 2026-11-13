@@ -96,6 +96,8 @@ export class FakeElement {
 const fakeDocument = {
   activeElement: null as FakeElement | null,
   createElement: (tag: string): FakeElement => new FakeElement(tag),
+  /** Document-wide listeners (the shell's keys) are not run by these tests. */
+  addEventListener: (): void => undefined,
 };
 
 /** Puts the stand-in in place of `document`; returns a function that takes it away again. */

@@ -909,6 +909,29 @@ startGui({
       // PM (a): the engine host's test transport refused no request to another machine in steps 1 to 7.
       results["transportRefused"] = "host" in state ? transportOf(await state.host.call("transport", {}, 10_000)) : state.failure;
 
+      // U-64 (3.12, 4.4): the engine host ends (closed through its own handle, G-7). The window shows its
+      // card, calls fail meanwhile, nothing restarts on its own, and the card's button starts a new host.
+      const endedState = await host();
+      const oldPid = "host" in endedState ? endedState.host.pid : undefined;
+      if ("host" in endedState) await endedState.host.close();
+      const engineCard = await waitFor("document.getElementById('engine-ended')?.hasAttribute('hidden') === false ? 'shown' : null", 20_000);
+      const whileEnded = await js("window.codaryn.doctor(null).then((r) => (r.ok ? 'ok' : r.code))");
+      await sleep(500);
+      const stillEnded = await js("document.getElementById('status-engine')?.getAttribute('data-engine') ?? null");
+      await js("document.getElementById('engine-restart')?.click(); true");
+      const engineReady = await waitFor("document.getElementById('status-engine')?.getAttribute('data-engine') === 'ready' ? 'ready' : null", 30_000);
+      const restartedState = await host();
+      results["engineRestart"] = {
+        card: engineCard,
+        whileEnded,
+        stillEnded,
+        ready: engineReady,
+        newHost: "host" in restartedState && restartedState.host.pid !== undefined && restartedState.host.pid !== oldPid,
+        cardHidden: await js("document.getElementById('engine-ended')?.hasAttribute('hidden') === true"),
+        doctorAfter: await js("window.codaryn.doctor(null).then((r) => (r.ok ? 'ok' : r.code))"),
+        again: await js("window.codaryn.restartEngine().then((r) => (r.ok ? 'restarted' : r.code))"),
+      };
+
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");

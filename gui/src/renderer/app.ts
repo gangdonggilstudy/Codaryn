@@ -4,7 +4,7 @@
  * `window.codaryn` (the preload) and to nothing else.
  */
 
-import { asInfo, asOpen, asRunDone, asRunEvents, asSettings } from "./api.js";
+import { asEngineState, asInfo, asOpen, asRestart, asRunDone, asRunEvents, asSettings } from "./api.js";
 import type { Workspace } from "./api.js";
 import { checksScreen } from "./checks/checks.js";
 import { textsFor } from "./i18n/catalog.js";
@@ -117,6 +117,18 @@ async function start(): Promise<void> {
   shell.add(settingsScreen({ texts, api, language: info.language, announce: (text) => shell?.announce(text) }));
   shell.add(setupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text), show: (id) => shell?.show(id) }));
   shell.setEngine(info.engine);
+  // U-64 (3.12, 4.4): when the engine ended (or did not start), its card and the restart button.
+  const restartEngine = async (): Promise<string> => {
+    const reply = asRestart(await api.restartEngine());
+    return reply.ok ? "ready" : reply.code;
+  };
+  if (info.engine !== "ready") shell.engineEnded(info.engine, restartEngine);
+  api.onEngineState((payload) => {
+    const state = asEngineState(payload);
+    if (state === null) return;
+    if (state === "ready") shell?.engineReady();
+    else shell?.engineEnded(state, restartEngine);
+  });
   shell.setWorkspace(null);
   shell.show("home");
   // U-11 (3.11): the first start (no config file at the default location yet) begins with the guide.

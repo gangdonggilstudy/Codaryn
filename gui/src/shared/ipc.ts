@@ -9,6 +9,7 @@
 
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",
+  restartEngine: "codaryn:app:restartengine",
   copyText: "codaryn:app:copy",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
@@ -50,6 +51,7 @@ export const IPC_EVENTS = {
   workspaceOpened: "codaryn:event:workspaceopened",
   runEvents: "codaryn:event:runevents",
   runDone: "codaryn:event:rundone",
+  engineState: "codaryn:event:enginestate",
 } as const;
 
 /** A workspace handle the main process issued: 128 random bits as lowercase hex. */
@@ -123,6 +125,10 @@ export function parseCopyArgs(value: unknown): string | null {
 }
 
 export type CopyReply = { readonly ok: true } | { readonly ok: false; readonly code: string };
+
+/** U-64 (3.12, 4.4): the answer to restartEngine: the new engine host is ready, or why not. */
+export type RestartReply = { readonly ok: true } | { readonly ok: false; readonly code: string };
+
 
 /** A call that takes no arguments gets `undefined` from `ipcRenderer.invoke(channel)`. */
 export function isNoArgs(args: readonly unknown[]): boolean {

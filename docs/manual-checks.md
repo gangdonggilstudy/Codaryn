@@ -10,7 +10,13 @@
 - 다른 OS 기계가 없다.
 
 **기준과 출처**
-- 기준은 main `845ba8c`(2026-11-13)다.
+- 기준은 main `cd1cace`(2026-11-13)다.
+  - 처음 판은 `845ba8c`에서 썼다.
+  - 다음 단위 뒤의 기대 결과로 고쳤다.
+    - U-141: 질문이 줄 없이 끝나면 그 줄을 끝낸다.
+    - U-137: 질문에서 끝난 실행도 그 호출의 거부를 기록한다.
+    - U-136: 거부 요약 문구를 줄였다.
+  - GUI의 권한 대화상자(U-124)는 아직 main에 없어 넣지 않았다.
 - 출처
   - `docs/reviews/2026-11-13-*.md`의 '검사하지 않은 범위'와 'PM 판단' 절
   - `docs/pm-status.md`의 '확인하지 않은 범위'
@@ -63,12 +69,12 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 
 | 번호 | 확인할 것 | 키 | 장치·권한 | 관련 |
 | --- | --- | --- | --- | --- |
-| M-1.1 | `apply` 질문의 y·n·Enter·Ctrl+C·Ctrl+D·Ctrl+Z | 없음 | — | U-36, R-85, R-88 |
-| M-1.2 | `init` 질문과 Ctrl+C·Ctrl+D·Ctrl+Z | 없음 | — | U-26, R-88 |
+| M-1.1 | `apply` 질문의 y·n·Enter·Ctrl+C·Ctrl+D·Ctrl+Z | 없음 | — | U-36, R-85, R-88, U-141 |
+| M-1.2 | `init` 질문과 Ctrl+C·Ctrl+D·Ctrl+Z | 없음 | — | U-26, R-88, U-141 |
 | M-1.3 | 터미널의 JSON 줄 숨김, stderr만 돌렸을 때, 한국어 표시 | 없음 | — | DR-56, U-45, R-58 |
 | M-1.4 | Git Bash(mintty)에서의 출력과 질문 | 없음 | Git for Windows | R-58 R58-I5 |
-| M-1.5 | `run`의 권한 질문 | **필요** | — | U-109, U-110, R-85, R-88, R-88b |
-| M-1.6 | `models`의 표와 번호 질문 | **필요** | — | U-35, 사용 안내 4절 |
+| M-1.5 | `run`의 권한 질문 | **필요** | — | U-109, U-110, R-85, R-88, R-88b, U-137, U-141 |
+| M-1.6 | `models`의 표와 번호 질문 | **필요** | — | U-35, U-141, 사용 안내 4절 |
 | M-2.1 | 실제 Anthropic 점검(`tests/live`) | **필요** | — | U-101, 설계 조사 A-4 |
 | M-2.2 | 실제 OpenAI 점검(`tests/live`) | **필요** | — | U-101, 사실 C-11 |
 | M-3.1 | GUI 창 띄우기와 기본 흐름, OS 알림 | 없음 | — | GU-1~GU-6, U-63 |
@@ -117,6 +123,7 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 **여기서 못 한 까닭**
 - 질문은 stdin과 stderr가 터미널일 때만 나온다.
 - 시험은 파이프에 바이트를 넣었다(Ctrl+C는 0x03, Ctrl+D는 0x04). 실제 콘솔의 키 입력, Windows의 Ctrl+Z, 한글 입력기의 `예`·`네`는 재현하지 않았다.
+- 질문이 줄 없이 끝날 때 그 줄을 끝내는 것(U-141)도 흉내 낸 터미널로만 시험했다(`tests/unit/cli/g-u141-question-newline.test.ts`).
 
 **준비**: 키 없는 파일 정리 예시를 복사해 계획 실행을 만든다([사용 안내](usage.md) 18.2).
 
@@ -161,17 +168,19 @@ Get-ChildItem $org\workspace\inbox | Select-Object Name                # 파일 
   - 실제 콘솔에서는 확인하지 않았다.
 - 5: stderr에 `Stopped with Ctrl+C. Nothing more was changed.` 한 줄, 종료 5다. 아무것도 옮기지 않는다.
 - 6: 적용한다. 끝 요약에 동작 3개 모두 적용됐다고 나오고 종료 0이다. `inbox`에는 파일이 남지 않는다.
+- 3·5(줄 없이 닫은 질문): 다음 글은 질문 줄 끝에 붙지 않고 새 줄에서 시작한다(U-141). 3이면 오류 설명, 5이면 `Stopped with Ctrl+C. …`다.
+  - 1·2·4·6은 친 줄이 질문 줄을 끝낸다.
 - 모든 경우
   - 명령이 끝나면 프롬프트가 바로 돌아온다. 키를 한 번 더 누를 필요가 없다(R-88 L1 수정).
   - 콘솔에서는 결과 JSON 줄이 나오지 않는다(M-1.3).
 
 **다르면 볼 곳**
-- 질문과 답 읽기: `src/cli/terminal.ts`(`askLine`)
+- 질문과 답 읽기, 줄 없이 끝난 질문의 줄 끝: `src/cli/terminal.ts`(`askLine`)
 - 적용 승인: `src/cli/plan-commands.ts`
 - 문구: `src/i18n/en.ts`·`ko.ts`(`apply.question`, `prompt.interrupted`)
 - 계약: [CLI 계약](cli-contract.md) 18.17
 
-**관련**: U-36, R-85, R-88(M2·L1·L2·I3), R-88b
+**관련**: U-36, R-85, R-88(M2·L1·L2·I3), R-88b(I1), U-141
 
 ### M-1.2 `init` 질문 (키 없음)
 
@@ -213,14 +222,16 @@ Test-Path $cfg
 - 5: 제공자 질문은 기본값(anthropic)으로 넘어간다. 질문을 끝까지 마치면 파일을 만들고 종료 0이다(R-88 I2).
   - 모델은 자리표시자(`<model id>`)다. stdout의 키 안내는 `ANTHROPIC_API_KEY`를 말한다.
 - 6: 코드를 읽어 낸 기대다. Ctrl+Z가 무시되면 Enter, 곧 첫 질문의 기본값 "예"로 진행한다.
+- 1·2·4·5(줄 없이 닫은 질문): 다음 글은 질문 줄 끝에 붙지 않고 새 줄에서 시작한다(U-141).
+  - 1은 `Nothing was created.`, 2·4는 `Stopped with Ctrl+C. …`, 5는 다음 질문이다.
 - 모든 경우 명령이 끝나면 프롬프트가 바로 돌아온다.
 
 **다르면 볼 곳**
 - `src/cli/init.ts`
-- `src/cli/terminal.ts`
+- `src/cli/terminal.ts`(줄 없이 끝난 질문의 줄 끝)
 - 문구: `src/i18n/en.ts`(`init.confirm_create`, `init.declined`)
 
-**관련**: U-26, R-74, R-88(I2·I3)
+**관련**: U-26, R-74, R-88(I2·I3), U-141
 
 ### M-1.3 터미널의 JSON 줄 숨김과 stderr만 돌렸을 때 (키 없음)
 
@@ -377,19 +388,33 @@ $LASTEXITCODE
 4. Ctrl+C를 친다.
 5. Ctrl+Z를 치고 Enter를 친다(Windows).
 6. 끝에 `--quiet`을 붙여 다시 실행한다.
+7. (선택, 3분 걸림) 질문에 답하지 않고 설정의 시간 한도(`maxDurationMs` 180000)가 지나기를 기다린다.
+
+4와 7 뒤에는 보고서도 본다.
+
+```powershell
+node dist/src/cli/main.js report --workspace $ws --run latest | Select-String "Tool calls|Denied"
+```
 
 **기대 결과**
 - 질문은 stderr에 한 줄이다. 영어면 끝이 `… Executable: node [y/N]`이다. 인자 자체는 보이지 않고 인자 개수(1)만 글에 든다.
 - 1: 진행 줄 `permission question — allowed by the person, for this call only`가 나오고 명령이 돈다.
 - 2: 진행 줄 `permission question — denied by the person`이 나온다.
-  - 끝 요약에 `Denied by the person: 1 call(s) to a command whose rule asks before it runs.`가 있다.
+  - 끝 요약에 `Denied by the person: 1 call(s) whose rule asks first.`가 있다.
   - 그 호출에 대해 '규칙을 더하라'는 안내는 없다.
-- 3: 진행 줄 `permission question — denied by default (…)`가 나오고, 끝 요약에 `Denied with no answer: 1 call(s) …`가 있다.
-- 4: 진행 줄 `permission question — denied: the run was cancelled while it waited`가 나온다.
+- 3: 진행 줄 `permission question — denied by default (…)`가 나온다.
+  - 끝 요약에 `Denied with no answer: 1 call(s) whose rule asks first (…)`가 있다.
+  - 그 진행 줄은 질문 줄 끝에 붙지 않고 새 줄에서 시작한다(U-141).
+- 4: 진행 줄 `permission question — denied: the run was cancelled while it waited`가 새 줄에서 나온다(U-141).
   - 실행은 `cancelled`, 종료 5다. 모델을 다시 부르지 않는다.
-  - 끝 요약에 `Denied because the run was cancelled while it waited: 1 call(s) …`가 있다.
+  - 끝 요약에 `Denied because the run was cancelled while it waited: 1 call(s) whose rule asks first.`가 있다.
+  - 실행이 질문에서 끝났어도 그 호출의 거부가 기록된다(U-137). 그래서 끝 요약에 `Denied calls: 1`이 있다. 보고서의 `Tool calls:` 줄도 `(denied: 1…)`이다.
 - 5: 코드를 읽어 낸 기대다(R-88 I3). 2와 같다(`denied by the person`).
 - 6: 묻지 않는다. stdout에 JSON 한 줄만 나오고, 그 호출은 묻지 못한 거부다.
+- 7: 실행은 `budget-exhausted`/`max_duration`, 종료 4다.
+  - 진행 줄은 `permission question — denied by default (…)`다.
+  - 끝 요약에 `Denied with no answer: 1 call(s) whose rule asks first (the input ended or time ran out).`가 있다.
+  - 4와 같이 그 호출의 거부가 기록되어 `Denied calls: 1`이다(U-137).
 - 모든 경우
   - 실행이 끝나면 프롬프트가 바로 돌아온다.
   - 키 값이 화면이나 `report`에 나오지 않는다.
@@ -399,12 +424,13 @@ $LASTEXITCODE
 
 **다르면 볼 곳**
 - 질문 통로: `src/cli/confirm.ts`
-- 한 줄 읽기: `src/cli/terminal.ts`
+- 한 줄 읽기와 줄 끝: `src/cli/terminal.ts`
 - 취소: `src/cli/cancel.ts`
+- 질문에서 끝난 실행의 거부 기록: `src/engine/index.ts`(U-137)
 - 문구: `src/i18n/en.ts`(`confirm.question.command`, `progress.confirmation_*`, `summary.confirm_denied.*`)
 - 계약: [CLI 계약](cli-contract.md) 18.16·18.17
 
-**관련**: U-74, U-109, U-110, R-79, R-85(M1), R-88(M2·L1·I3), R-88b, U-137
+**관련**: U-74, U-109, U-110, R-79, R-85(M1), R-88(M2·L1·I3), R-88b(I1·L1), U-136, U-137, U-141
 
 ### M-1.6 `models`의 표와 번호 질문 (키 필요)
 
@@ -436,7 +462,7 @@ Select-String -Path $cfg -Pattern '"model"'
 **기대 결과**
 - 표에 번호, id, 이름, 입력·출력 토큰 상한이 있다. 지금 쓰는 모델에 `*`가 붙는다.
 - Enter: 아무것도 쓰지 않는다.
-- Ctrl+C: `Stopped with Ctrl+C. Nothing more was changed.`, 종료 5다.
+- Ctrl+C: `Stopped with Ctrl+C. Nothing more was changed.`, 종료 5다. 그 줄은 질문 줄 끝에 붙지 않고 새 줄에서 시작한다(U-141).
 - 번호: 설정의 `model` 한 곳만 그 id로 바뀐다.
 - 한국어 표의 머리와 안내가 한국어다(예전 판에서는 영어였다). 어느 쪽이었는지 적는다.
 

@@ -93,7 +93,7 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
     assert.ok(page.records.every((record) => isRunTimestamp(record.at)), "every record has its stored time");
   });
 
-  test("lines that do not fit are left out and counted; a fitting line after them is given, masked", async () => {
+  test("lines that are not this run's are left out and the journal is damaged; a line at its place counts, given or not", async () => {
     const run = await finishedRun();
     const last = (await readJournal(run.base, run.runId)).length;
     const next = last + 1;
@@ -101,27 +101,31 @@ describe("U-90: listRunEvents gives a run's stored records, checked line by line
       run.base,
       run.runId,
       [
+        // Not lines of this run (R-80 M-1: each damages the journal).
         "not json",
         [1, 2],
         modelError(NO_RUN, next, "another run"),
-        modelError(run.runId, 1, "not the next number"),
+        modelError(run.runId, 0, "no number from 1"),
+        // Lines at their places that are not given: their numbers count, so the lines after follow.
         { ...modelError(run.runId, next, "no real time"), at: "yesterday" },
-        { ...modelError(run.runId, next, "unknown type"), type: "made_up" },
-        { ...modelError(run.runId, next, "an apply record in a run"), type: "plan_item_failed", index: 0, problem: "source_missing" },
-        modelError(run.runId, next, "a field named after the secret", { [FAKE_SECRET]: 1 }),
-        modelError(run.runId, next, `leak ${FAKE_SECRET}`),
-        modelError(run.runId, next + 1, `key ${KEY_SHAPED}`),
+        { ...modelError(run.runId, next + 1, "unknown type"), type: "made_up" },
+        { ...modelError(run.runId, next + 2, "an apply record in a run"), type: "plan_item_failed", index: 0, problem: "source_missing" },
+        modelError(run.runId, next + 3, "a field named after the secret", { [FAKE_SECRET]: 1 }),
+        // Given, masked.
+        modelError(run.runId, next + 4, `leak ${FAKE_SECRET}`),
+        modelError(run.runId, next + 5, `key ${KEY_SHAPED}`),
       ],
       "{\"seq\":",
     );
     const page = ok(await list(run.app)({ settings: taskForm(run.base), runId: run.runId, offset: 0 }));
-    assert.equal(page.skipped, 9, "eight lines and the unfinished tail of a finished run");
-    assert.equal(page.total, next + 1);
+    assert.deepEqual([page.status, page.missing], ["damaged", 0]);
+    assert.equal(page.skipped, 9, "four lines not this run's, four at their places not given, the unfinished tail of a finished run");
+    assert.equal(page.total, last + 2);
     const given = page.records.at(-2);
-    assert.deepEqual([given?.seq, given?.type], [next, "model_error"]);
+    assert.deepEqual([given?.seq, given?.type], [next + 4, "model_error"]);
     assert.match(String(given?.["message"]), /^leak /);
     assert.equal(JSON.stringify(page).includes(FAKE_SECRET), false, "the registered value is masked, in values and field names");
-    assert.deepEqual([page.records.at(-1)?.seq, JSON.stringify(page).includes(KEY_SHAPED)], [next + 1, false], "a key shape is hidden");
+    assert.deepEqual([page.records.at(-1)?.seq, JSON.stringify(page).includes(KEY_SHAPED)], [next + 5, false], "a key shape is hidden");
   });
 
   test("the values registered now mask the records, whatever the run registered", async () => {

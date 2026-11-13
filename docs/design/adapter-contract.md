@@ -593,14 +593,14 @@ listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirLi
 - **읽기 결과는 호출 오류가 아니다.** `not_found`(없음, 또는 도중이 파일), `not_dir`(마지막이 파일), `unreadable`(그 밖의 읽기 오류)은 `ok: true`의 상태다. 작업 공간 자체가 없으면 `workspace_not_found`다.
 - **한계.** 읽는 동안 디렉터리가 바뀌면 쪽 사이에 항목이 빠지거나 겹칠 수 있다. 쪽은 매번 새로 읽는다.
 
-### 5.13 실행 사건 목록 [구현 U-90] (standalone-gui 3.7 "기록" 탭)
+### 5.13 실행 사건 목록 [구현 U-90, R-80 반영] (standalone-gui 3.7 "기록" 탭)
 
-끝난 실행이나 도는 중인 실행의 저장된 레코드를 쪽으로 준다. 읽기만 한다: 잠금·기록을 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/run-events.ts`, 시험은 `tests/unit/app/u90-run-events.test.ts`다.
+끝난 실행이나 도는 중인 실행의 저장된 레코드를 쪽으로 준다. 읽기만 한다: 잠금·기록을 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/run-events.ts`, 시험은 `tests/unit/app/u90-run-events.test.ts`와 `r80-run-events.test.ts`다.
 
 ```ts
 listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEventsPage
-  // { kind: "run_events", runId, runKind: "run" | "apply", status: "complete" | "incomplete", recordsChanged?: true,
-  //   masking: "current_secrets", records: StoredRunRecord[], total, skipped, offset, nextOffset }
+  // { kind: "run_events", runId, runKind: "run" | "apply", status: "complete" | "incomplete" | "damaged", recordsChanged?: true,
+  //   masking: "current_secrets", records: StoredRunRecord[], total, skipped, missing, offset, nextOffset }
   // StoredRunRecord: { seq, at, runId, type: RunEventType, [field]: unknown }
 ```
 
@@ -614,25 +614,39 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - 정확히 그 이름의 항목이 없으면 `run_not_found`다.
   - 손상이면 `invalid_run_record`이고 아무것도 보이지 않는다.
   - journal이나 result.json이 일반 파일이 아니거나 `MAX_REPORT_FILE_BYTES`를 넘어도 `invalid_run_record`다.
-- **줄마다 꼴을 본다.** 실행 중 허용된 명령이 journal에 줄을 더할 수 있다(R-4 H-1). 그래서 다음을 모두 만족하는 줄만 레코드로 준다. 아닌 줄은 `skipped`로 세고 주지 않는다.
-  - JSON 객체다(배열 아님).
-  - `runId`가 그 실행이다.
-  - `seq`가 마지막으로 받은 레코드의 다음 수다(1부터). 그래서 끼워 넣은 줄 뒤의 진짜 줄도 받는다.
-  - `at`이 실제 시각이다(store의 `isRunTimestamp`).
-  - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
-  - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 비밀을 필드 이름에 담은 줄이 빠진다.
-  - 종류마다의 필드는 하나하나 검사하지 않는다. 대신 모든 글을 가리고, 어댑터는 필드를 바깥 자료처럼 읽는다(`StoredRunRecord`의 다른 필드는 `unknown`). 꼴이 맞는 위조 줄은 가린 채 보일 수 있다. 그런 실행은 보통 기록 변경 표시가 있다(아래).
+- **줄은 번호로 본다.** 실행 중 허용된 명령이 journal에 줄을 더할 수 있다(R-4 H-1). 줄 하나가 빠져도 그 뒤의 진짜 레코드를 잃지 않게, 각 줄을 번호로 판정한다(R-80 M-1, PM 결정 가·나·다).
+  - **이 실행의 줄**은 JSON 객체(배열 아님)이고, `runId`가 그 실행이고, `seq`가 1 이상의 정수다. 아닌 줄(깨진 줄, 다른 실행의 줄, 번호 없는 줄)은 `skipped`로 세고 journal이 손상이다.
+  - **같은 번호를 두 줄 이상이 주면** 어느 쪽도 진짜로 고르지 않는다. 모두 빼고(`skipped`) 그 번호를 빠짐(`missing`)으로 센다. journal은 손상이다. 그래서 꼴이 맞는 위조 줄이 진짜 줄을 밀어내지 못한다.
+  - **제자리의 줄**(기대하는 번호)은 주든 안 주든 번호를 센다(가). 그래서 그 뒤의 레코드가 이어진다. 다음을 모두 만족하면 주고, 아니면 `skipped`로 센다(손상은 아니다).
+    - `at`이 실제 시각이다(store의 `isRunTimestamp`).
+    - `type`이 그 실행 종류의 것이다. 모델 실행은 `JournalEventType`, 적용은 `ApplyJournalEventType`이다(DR-12, 첫 레코드로 가름).
+    - 모든 단계의 필드 이름이 낙타 꼴의 평범한 낱말이고 가리기가 바꾸지 않는다. 깊이는 64까지다. 그래서 비밀을 필드 이름에 담은 줄, 그리고 필드 이름과 같은 값을 지금 등록했을 때(`text`, `turn` 등) 그 필드가 든 레코드가 빠진다. 그 뒤는 이어진다.
+    - 가릴 수 있다.
+  - **기대보다 큰 번호**를 만나면 거기서 다시 맞춘다(나). 그 사이 번호는 빠짐이고 journal은 손상이다. **기대보다 작은 번호**(순서가 뒤바뀐 줄)는 빼고 손상으로 본다.
+  - 종류마다의 필드는 하나하나 검사하지 않는다. 대신 모든 글을 가리고 정리한다. 어댑터는 필드를 바깥 자료처럼 읽는다(`StoredRunRecord`의 다른 필드는 `unknown`). 번호 자리에 맞는 위조 줄(진짜 줄이 없는 번호)은 가린 채 보일 수 있다. 실행 중에 바뀐 것은 보통 기록 변경 표시가 있다(아래).
 - **적용의 시작 레코드.** `plan_item_started`(R-9 I-4)는 받되(번호를 셈) 주지 않는다. 적용 이벤트와 같다.
 - **다시 가림.** 이벤트와 같다(DR-15).
   - 모델 실행은 `sanitizeRecord`(도구 이름 제한 `(unknown tool)`)를, 적용은 `maskStrings`를 지금 등록한 값의 게이트웨이로 거친다.
   - 그다음 키 모양과 지금 설정된 모든 키 값을 가린다(`hideKeysInStrings`, `knownKeyValues`).
   - 가릴 수 없는 레코드는 빼고 `skipped`로 센다. 토큰은 복원하지 않는다. 실행 때 등록하지 않았던 값도 지금 등록했으면 가려진다.
+- **글을 정리한다**(R-80 L-1). 가린 뒤에 모든 문자열을 정리해 준다. 계약이 모르는 필드의 값도 같다(필드 이름은 이미 평범한 낱말이다).
+  - CR LF는 LF로 바꾼다.
+  - 제어 문자와 양방향 문자는 `cleanText`로 `?`가 된다. 줄바꿈(LF)과 탭은 남는다.
+  - 기본 무시 문자(`\p{Default_Ignorable_Code_Point}`: 영폭 공백·연결자, BOM, 소프트 하이픈, 이체 선택자 등)도 `?`가 된다. 그래서 이모지의 연결자와 이체 선택자도 `?`로 보인다.
+  - 가린 뒤에 정리하므로, 그런 문자로 끊긴 값이나 키도 먼저 찾는다(5.12와 같은 순서).
 - **상태.**
-  - result.json이 없으면 `incomplete`다(도는 중이거나 그것 없이 멈춤). 이때 끝나지 않은 마지막 줄은 세지 않고 뺀다. `complete`이면 그 줄은 `skipped`로 센다.
+  - `damaged`(R-80 M-1 다): 위에서 journal이 손상이거나, `report`의 읽기(`summarizeJournal`·`readResult`, 적용은 `summarizeApplyJournal`·`readApplyResult`)가 journal이나 result.json을 거부했다. 받은 레코드와 `missing`을 함께 준다.
+    - 그래서 `report`가 `invalid_run_record`로 거부하는 사본에서 이 함수가 `complete`라고 하지 않는다(시험이 같은 사본에 `report`를 불러 본다).
+    - 끝난 실행의 끝나지 않은 마지막 줄도 손상이다(`report`와 같다).
+  - `missing`: 어느 한 줄도 주지 않는 번호의 수다(빈 번호, 두 줄이 준 번호). 손상이 아니면 0이다.
+  - result.json이 없으면 `incomplete`다(도는 중이거나 그것 없이 멈춤). 이때 끝나지 않은 마지막 줄은 세지 않고 뺀다. 그 밖의 손상은 `incomplete`보다 `damaged`가 먼저다.
+  - 둘 다 아니면 `complete`다. 제자리 줄을 거른 것만으로는 손상이 아니다. 빠진 수는 `skipped`가 말한다.
   - 기록 변경 표시가 있으면 `recordsChanged: true`다(store의 `hasRecordsChangedMark`, 확인하지 못해도 표시로 셈, DR-38). 레코드는 그래도 준다(`report`와 같음).
 - **쪽.** 검사와 필터를 지난 레코드에서 `offset`부터 `limit`개를 주되, 레코드 JSON이 2 MiB(`MAX_RUN_EVENTS_PAGE_BYTES`, UTF-8)에 이르기 전에 끊는다. 그보다 큰 레코드는 혼자 한 쪽이 되므로 쪽은 늘 나아간다. `total`과 `skipped`는 쪽마다 journal 전체로 센다.
 - **한계.**
-  - 쪽마다 journal 전체를 다시 읽고 가린다. 이 기계에서 가리기는 MiB당 약 0.1초, 키 가리기는 약 0.2초였다. 큰 journal이면 쪽마다 그만큼 걸린다.
+  - 쪽마다 journal 전체를 다시 읽고 가린다. 이 기계에서 가리기는 MiB당 약 0.1초, 키 가리기는 약 0.2초였다. 큰 journal이면 쪽마다 그만큼 걸린다. R-80 검토에서 40 MiB journal은 쪽마다 약 6.3초였다.
+  - 기대보다 훨씬 큰 번호를 단 위조 줄이 앞에 있으면, 그 뒤의 진짜 줄은 작은 번호라 빠진다. 이때 상태는 `damaged`이고 `missing`이 그만큼 크다. 조용히 일부만 주지는 않는다.
+  - `total`은 같은 `types` 거름에서 쪽마다 같다(R-80 I-4).
   - 등록 값 가리기의 한계는 5.7과 같다(지금 등록한 값만 가린다).
 
 ### 5.14 적용 전 점검 [구현 U-91] (standalone-gui 3.9, DR-21)

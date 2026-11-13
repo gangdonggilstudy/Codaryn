@@ -10,7 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { BrowserWindow, Menu, Notification, app, dialog, session } from "electron";
+import { BrowserWindow, Menu, Notification, app, clipboard, dialog, session } from "electron";
 import type { MessageBoxOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
@@ -63,6 +63,8 @@ export interface GuiOptions {
   readonly answerSaveDialog?: (name: string) => Promise<string | null>;
   /** Smoke tests only: receives the OS end notification instead of the OS (3.6). */
   readonly notify?: (notice: { readonly title: string; readonly body: string }) => void;
+  /** Smoke tests only: receives what would be copied instead of the OS clipboard (U-62). */
+  readonly writeClipboard?: (text: string) => void;
   /** Smoke tests only: whether the window counts as active (focus cannot be taken away reliably in a test). */
   readonly windowActive?: () => boolean;
 }
@@ -262,6 +264,7 @@ export function startGui(options: GuiOptions): void {
     }
     registerIpc({
       window: () => window,
+      writeClipboard: options.writeClipboard ?? ((text) => clipboard.writeText(text)),
       host: () => hostState,
       workspaces,
       osLocale: () => app.getLocale(),

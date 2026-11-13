@@ -9,6 +9,7 @@
 
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",
+  copyText: "codaryn:app:copy",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -100,6 +101,27 @@ export function parseRevealArgs(value: unknown): { readonly workspace: string; r
   const { workspace, node } = value;
   return isHandle(workspace) && isHandle(node) ? { workspace, node } : null;
 }
+
+/**
+ * U-62 (6.4, 2 principle 4; review R-73 M1, L1, PM decision): the main process copies only the two
+ * things the window copies: a run id, or a digest's first 12 characters (lowercase hexadecimal, what
+ * the CLI's apply --digest takes). Anything else is refused (invalid_args), so the page cannot put
+ * other text on the clipboard. A path is not copied until the tree comes from the app layer's
+ * workspace list, which masks the registered secrets as well (G-list).
+ */
+const DIGEST_START = /^[0-9a-f]{12}$/;
+
+/** The value to copy, or null when it is neither a run id nor a digest's first 12 characters. */
+export function copyableValue(value: unknown): string | null {
+  return isRunId(value) || (typeof value === "string" && DIGEST_START.test(value)) ? value : null;
+}
+
+/** `copyText` arguments: `{text}` only. */
+export function parseCopyArgs(value: unknown): string | null {
+  return isObj(value) && hasOnlyKeys(value, ["text"]) ? copyableValue(value["text"]) : null;
+}
+
+export type CopyReply = { readonly ok: true } | { readonly ok: false; readonly code: string };
 
 /** A call that takes no arguments gets `undefined` from `ipcRenderer.invoke(channel)`. */
 export function isNoArgs(args: readonly unknown[]): boolean {

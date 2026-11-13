@@ -120,6 +120,9 @@ const results: Record<string, unknown> = {};
 const SAVED_REPORTS = join(GUI, "build", "smoke-report");
 const savedReports: string[] = [];
 const notices: { readonly title: string; readonly body: string }[] = [];
+/** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
+const copied: string[] = [];
+const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
 let pretendInactive = false;
 /** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
 const transportOf = (response: { readonly ok: boolean; readonly value?: unknown; readonly error?: { readonly code: string } }): unknown => (response.ok ? response.value : response.error?.code);
@@ -145,6 +148,9 @@ startGui({
     return join(SAVED_REPORTS, name);
   },
   // U-5 (3.6): the OS end notifications, kept instead of shown.
+  writeClipboard: (text) => {
+    copied.push(text);
+  },
   notify: (notice) => {
     notices.push(notice);
   },
@@ -374,6 +380,27 @@ startGui({
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;
       pretendInactive = false;
+      // U-62 (6.4, R-73): the run id through the main process; anything but a run id or a digest's first 12 is refused, nothing written.
+      await js("document.getElementById('run-copy-id')?.click(); true");
+      results["copyRunId"] = {
+        status: await waitFor("document.querySelector('#run-copy-id + .copy-status')?.getAttribute('data-copied') ?? null"),
+        copied: copied.at(-1) ?? null,
+        runId: (results["runResult"] as { runId?: string } | null)?.runId ?? null,
+      };
+      results["copyRefused"] = await (async () => {
+        const before = copied.length;
+        const code = (call: string): Promise<unknown> => js(`${call}.then((reply) => reply.ok === true ? "copied" : reply.code)`);
+        return {
+          keyShape: await code(`window.codaryn.copyText(${JSON.stringify(COPY_KEY_SHAPED)})`),
+          keyValue: await code(`window.codaryn.copyText(${JSON.stringify(process.env["ANTHROPIC_API_KEY"] ?? "")})`),
+          path: await code("window.codaryn.copyText('sub/b.txt')"),
+          words: await code("window.codaryn.copyText('any text at all')"),
+          digestUpper: await code("window.codaryn.copyText('0123456789AB')"),
+          lineBreak: await code("window.codaryn.copyText('a\\nb')"),
+          noPathCopy: await js("typeof window.codaryn.copyPath"),
+          written: copied.length - before,
+        };
+      })();
       // U-61 (3.12): the first run changed a file, so its result offers the revert preview, opened on the run list.
       results["revertFromResult"] = {
         runId: (results["runResult"] as { runId?: string } | null)?.runId ?? null,
@@ -444,6 +471,13 @@ startGui({
       const directRunId = await newResult(beforeDirect);
       await js("document.getElementById('run-view-plan')?.click(); true");
       results["directPlanShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      // U-62 (3.9): the digest's first 12 characters, as the plan shows them.
+      await js("document.getElementById('plan-copy-digest')?.click(); true");
+      results["copyDigest"] = {
+        status: await waitFor("document.querySelector('#plan-copy-digest + .copy-status')?.getAttribute('data-copied') ?? null"),
+        copied: copied.at(-1) ?? null,
+        summary: await js("document.getElementById('plan-summary')?.textContent ?? ''"),
+      };
       // U-32 (U-14 AXM-15): the model's summary under the agent's-words label, after the actions,
       // drawn by the engine's quoteModelText.
       results["planAgentWords"] = await js(

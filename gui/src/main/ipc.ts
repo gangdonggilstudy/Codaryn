@@ -57,6 +57,8 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
+import { parseCopyArgs } from "../shared/ipc.js";
+import type { CopyReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
 import type { CreateSettingsReply, SuggestionsReply } from "../shared/ipc.js";
@@ -125,6 +127,8 @@ export interface IpcDeps {
   readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
   /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
   readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
+  /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
+  readonly writeClipboard: (text: string) => void;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -229,6 +233,17 @@ export function registerIpc(deps: IpcDeps): void {
     // Shows the entry selected in the file manager. Nothing is opened or run.
     shell.showItemInFolder(target);
     return true;
+  });
+
+  /**
+   * U-62 (6.4; R-73 M1, L1): copies a run id or a digest's first 12 characters only (parseCopyArgs);
+   * anything else is invalid_args. Nothing else reaches the clipboard; the page cannot read it.
+   */
+  handle(IPC_CHANNELS.copyText, async (args): Promise<CopyReply> => {
+    const text = args.length === 1 ? parseCopyArgs(args[0]) : null;
+    if (text === null) return { ok: false, code: "invalid_args" };
+    deps.writeClipboard(text);
+    return { ok: true };
   });
 
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {

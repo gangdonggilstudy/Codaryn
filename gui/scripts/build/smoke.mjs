@@ -237,7 +237,8 @@ const U13_DIALOGS = [
 ];
 /** U-22 (5j3, Windows only): the cleanup of the analyze run's records while one of its files is held open. */
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
+// U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -358,6 +359,15 @@ const expected = [
   ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
+  // U-62 (6.4, R-73): copies go through the main process: a run id or a digest's first 12, nothing else.
+  ["copyRunId", (v) => v !== null && v.status === "ok" && typeof v.runId === "string" && v.copied === v.runId],
+  [
+    "copyRefused",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({ keyShape: "invalid_args", keyValue: "invalid_args", path: "invalid_args", words: "invalid_args", digestUpper: "invalid_args", lineBreak: "invalid_args", noPathCopy: "undefined", written: 0 }),
+  ],
+  ["copyDigest", (v) => v !== null && v.status === "ok" && typeof v.copied === "string" && /^[0-9a-f]{12}$/.test(v.copied) && v.summary.includes(v.copied)],
   // U-61 (3.12): a result that changed files offers the revert preview; it opens on the run list.
   ["revertFromResult", (v) => v !== null && v.offered === true && v.preview === "1" && typeof v.title === "string" && typeof v.runId === "string" && v.title.includes(v.runId)],
   ["cancelReady", (v) => v === "ready"],

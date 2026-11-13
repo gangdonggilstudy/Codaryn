@@ -631,6 +631,8 @@ export const EN_MESSAGES: MessageTexts = {
   "denial.confirmation_required": "not allowed by the person during the run",
   "denial.protected_path": "protected path",
   "denial.plan_action_not_allowed": "plan action not allowed",
+  // U-175 (DR-69 B-2), draft: a write outside the files the task may write.
+  "denial.path_not_writable": "not among the files this task may write",
   "denial.unknown_tool": "unknown tool",
   "denial.invalid_args": "invalid arguments",
   "denial.policy_denied": "denied by the permissions",

@@ -16,7 +16,7 @@ import type { ConfirmationBy, ConfirmationDecision, PermissionKind, PolicyDenial
 import type { ToolErrorCode, ToolResult } from "./tool.js";
 import type { VerifierResult } from "./verify.js";
 import type { RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
-import type { PlanMode } from "./plan.js";
+import type { ApprovalChannel, PlanMode } from "./plan.js";
 import type { AnyToolName } from "./tool.js";
 import type { CompletionMode, PolicyNarrowing } from "./workflow.js";
 
@@ -60,6 +60,14 @@ export type JournalEvent =
       readonly tools?: readonly AnyToolName[];
       readonly plan?: PlanMode;
       readonly completion?: CompletionMode;
+      /**
+       * P1 (DR-69, B-3): in a run that carries out an approved `run` plan, all three: the plan run,
+       * the approved digest and how the person approved it (as `apply_started.approval`). Absent in
+       * every other run and in every journal written before.
+       */
+      readonly planRunId?: string;
+      readonly planDigest?: ContentHash;
+      readonly approval?: ApprovalChannel;
     }
   | {
       readonly type: "model_request";

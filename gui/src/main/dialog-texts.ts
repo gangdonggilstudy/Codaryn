@@ -54,7 +54,7 @@ const KO = {
   "permission.title": "권한 확인",
   "permission.message": "명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다.",
   "permission.detail": "보이는 것은 실행 파일 이름과 인자 개수({count}개)뿐이며, 인자 자체는 보이지 않습니다.\n실행 파일: {subject}",
-  "permission.allowOnce": "이번 호출만 허용",
+  "permission.allowOnce": "이번 호출에만 허용",
   "permission.deny": "거부",
   "revertConsent.agree": "이번 되돌리기에 동의",
   "revertConsent.keep": "동의하지 않음",

@@ -174,7 +174,8 @@ test("U-48 (2): the changes screen of a marked run has the warning first, and ea
 test("U-48 (2): the changes warning uses the words of the run list, the plan and the report, in both languages", () => {
   for (const key of ["runs.recordsChanged", "plan.recordsChanged", "report.recordsChanged", "changes.recordsChanged", "changes.unverifiedMarked"] as const) {
     assert.match(EN[key], /outside the run/, `en ${key}`);
-    assert.match(KO[key], /실행 밖/, `ko ${key}`);
+    // U-163: the CLI's words for the mark (기록 변경됨, 기록 변경 표시), no longer 실행 밖.
+    assert.match(KO[key], /기록 변경/, `ko ${key}`);
   }
   // As the CLI's changes.records_changed: no file text, paths and states only.
   assert.match(EN["changes.recordsChanged"], /no file text is shown; only paths and states/);

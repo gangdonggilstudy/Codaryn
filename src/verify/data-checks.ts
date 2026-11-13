@@ -47,6 +47,10 @@
  * cells (its count too, and a group whose cells are all empty) is left out like a hidden group. Such a
  * rule is undecided (NOT_GIVEN_NOTE), and the verifier's limits count the rules not compared, so a
  * check of such rules alone is inconclusive and says how many.
+ *
+ * U-258 (PM, after the report): a rule whose checked table (an aggregate's target, a table_shape
+ * table) is under unreadable paths is not compared either, whatever it checks and whether the file is
+ * there (NOT_JUDGED_NOTE): the model cannot write such a table, and a verdict would tell it about it.
  */
 
 import fs from "node:fs/promises";
@@ -99,9 +103,12 @@ const undecided = (note: string): Verdict => ({ state: "undecided", note });
 export const NOT_GIVEN_NOTE = "not compared: query_table does not give this value to the model";
 /** U-258: the verifier's limit when rules were not compared. */
 export function notComparedLimit(count: number, rules: number): string {
-  return `${count} of ${rules} rules were not compared: their source is under unreadable paths, and query_table does not give the model the values they check`;
+  return `${count} of ${rules} rules were not compared: a table they check is under unreadable paths, and a verdict would tell the model what query_table does not give it`;
 }
 const notCompared = (rest = ""): Verdict => ({ state: "undecided", note: `${NOT_GIVEN_NOTE}${rest}`, notCompared: true });
+/** U-258 (PM): why a rule whose checked table is under unreadable paths is not compared (the target's note follows it). */
+export const NOT_JUDGED_NOTE = "not compared: a verdict on a table under unreadable paths would tell the model about it";
+const notJudged = (): Verdict => ({ state: "undecided", note: NOT_JUDGED_NOTE, notCompared: true });
 
 function shownName(name: string): string {
   const literal = JSON.stringify(name);
@@ -145,7 +152,8 @@ export const UNREADABLE_SOURCE_NOTE = "the source is under unreadable paths, so 
 /**
  * U-223 (PM, after R-6): the same for a target under unreadable paths (an aggregate's `target`, a
  * `table_shape` table): no cell value read from it (the found number, nor a recomputed number that
- * agreed with it) and no row or group count of it. Row numbers are still named.
+ * agreed with it) and no row or group count of it. U-258 (PM): a rule over such a table is not
+ * compared at all; this note follows its NOT_JUDGED_NOTE.
  */
 export const UNREADABLE_TARGET_NOTE = "the target is under unreadable paths, so no cell value or row count read from it is written";
 
@@ -458,15 +466,14 @@ async function checkShape(
   if (match !== "exact" && match !== "includes") return undecided('the rule is not valid: columnsMatch must be "exact" or "includes"');
 
   const loaded = await loadTable(rule.table, workspace, reading);
+  // U-258 (PM): a table under unreadable paths is not judged, not even whether it is there.
+  if (await isUnreadable(loaded, workspace, reading)) return withUnreadableNotes(notJudged(), { source: false, target: true });
   if (!loaded.ok) return loadVerdict("target", rule.table, loaded);
   const table = loaded;
   const problems = new Problems();
   const notes: string[] = [];
   /** U-223 (R-6): the `rows.sameAs` table is under unreadable paths: its row count is not written. */
   let hiddenSource = false;
-  /** U-223 (PM): the checked table is under unreadable paths: its row count is not written. */
-  const hiddenTable = await isUnreadable(table, workspace, reading);
-  const shownRange = (rule: RowCountRule): string => `the data rows do not fit: expected ${describeRows(rule)}`;
 
   if (rule.columns !== undefined) {
     const expected = rule.columns;
@@ -487,8 +494,7 @@ async function checkShape(
     const count = table.rows;
     if (rows.equals !== undefined) {
       if (!isCount(rows.equals)) return undecided("the rule is not valid: rows.equals must be a whole number");
-      if (count === rows.equals) notes.push(hiddenTable ? "data rows as required" : `${count} data rows`);
-      else if (hiddenTable) problems.add(shownRange({ equals: rows.equals }));
+      if (count === rows.equals) notes.push(`${count} data rows`);
       else problems.add(`${count} data rows, expected ${rows.equals}`);
     } else if (rows.sameAs !== undefined) {
       if (!isTableRef(rows.sameAs)) return undecided("the rule is not valid: rows.sameAs needs a path and a format");
@@ -501,14 +507,12 @@ async function checkShape(
         const rest = problems.size > 0 ? null : notes.length > 0 ? `; ${notes.join("; ")}` : "";
         if (rest === null) {
           problems.add("the row count is not compared: query_table does not give it to the model");
-          return withUnreadableNotes(notHeld(problems.text()), { source: true, target: hiddenTable });
+          return withUnreadableNotes(notHeld(problems.text()), { source: true, target: false });
         }
-        return withUnreadableNotes(notCompared(rest), { source: true, target: hiddenTable });
+        return withUnreadableNotes(notCompared(rest), { source: true, target: false });
       }
       const as = describeTable(rows.sameAs);
-      if (count === expected) notes.push(hiddenTable ? `as many data rows as ${as}` : `${count} data rows, as ${as}`);
-      else if (hiddenTable && hiddenSource) problems.add(`not as many data rows as ${as}`);
-      else if (hiddenTable) problems.add(`the data rows do not fit: expected ${expected} as ${as}`);
+      if (count === expected) notes.push(`${count} data rows, as ${as}`);
       else if (hiddenSource) problems.add(`${count} data rows, not as many as ${as}`);
       else problems.add(`${count} data rows, expected ${expected} as ${as}`);
     } else {
@@ -518,14 +522,13 @@ async function checkShape(
       const min = rows.min as number | undefined;
       const max = rows.max as number | undefined;
       const range = { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
-      if ((min === undefined || count >= min) && (max === undefined || count <= max)) notes.push(hiddenTable ? "data rows as required" : `${count} data rows`);
-      else if (hiddenTable) problems.add(shownRange(range));
+      if ((min === undefined || count >= min) && (max === undefined || count <= max)) notes.push(`${count} data rows`);
       else problems.add(`${count} data rows, expected ${describeRows(range)}`);
     }
   }
 
   const verdict = problems.size > 0 ? notHeld(problems.text()) : held(notes.length > 0 ? notes.join("; ") : "the table parses");
-  return withUnreadableNotes(verdict, { source: hiddenSource, target: hiddenTable });
+  return withUnreadableNotes(verdict, { source: hiddenSource, target: false });
 }
 
 /**
@@ -561,11 +564,10 @@ function compareValue(
     return false;
   }
   if (withinTolerance(recomputed, found, tolerance)) return true;
-  // U-223 (R-6): neither number for a source under unreadable paths, only where it did not match;
-  // for a target under them (PM) not its own number: the recomputed one comes from a readable source.
+  // U-223 (R-6): neither number for a source under unreadable paths, only where it did not match. A
+  // target under them is not compared at all (U-258), so it does not come here.
   const where = `target data row ${targetRow} of column ${shownName(targetColumn)} does not match${label}`;
   if (hidden.source) problems.add(where);
-  else if (hidden.target) problems.add(`${where}: recomputed ${recomputed}`);
   else problems.add(`target data row ${targetRow}${label}: recomputed ${recomputed}, found ${found}`);
   return false;
 }
@@ -598,8 +600,10 @@ async function checkAggregate(
   const finish = (verdict: Verdict): Verdict => withUnreadableNotes(verdict, hidden);
   const targetTally = new TargetTally(rule.targetColumn, grouped ? (rule.targetKeyColumn as string) : null);
   const target = await loadTable(rule.target, workspace, reading, targetTally);
-  if (!target.ok) return finish(loadVerdict("target", rule.target, target));
   hidden.target = await isUnreadable(target, workspace, reading);
+  // U-258 (PM): a target under unreadable paths is not judged, not even whether it is there.
+  if (hidden.target) return finish(notJudged());
+  if (!target.ok) return finish(loadVerdict("target", rule.target, target));
   // U-258: query_table does not give min or max of an unreadable table (Q-2), so neither does this rule.
   if (hidden.source && (op === "min" || op === "max")) return finish(notCompared());
 
@@ -616,11 +620,11 @@ async function checkAggregate(
     const outcome = sourceTally.total.result();
     if (hidden.source && (outcome.ok ? outcome.values < k : outcome.problem === "no_values")) return finish(notCompared());
     if (!outcome.ok) return finish(sourceProblem(outcome, rule.column, "", hidden.source));
-    if (target.rows !== 1) return finish(notHeld(hidden.target ? "target does not have exactly 1 data row" : `target has ${target.rows} data rows; expected exactly 1`));
+    if (target.rows !== 1) return finish(notHeld(`target has ${target.rows} data rows; expected exactly 1`));
     const cell = targetTally.firstCell;
     if (compareValue(outcome.value, cell, 1, rule.targetColumn, tolerance, problems, "", hidden)) {
       // The recomputed number agrees with the target's own: written for neither hidden table.
-      return finish(held(hidden.source || hidden.target ? "target data row 1 agrees" : `recomputed ${outcome.value} from ${outcome.values} cells; target data row 1 agrees`));
+      return finish(held(hidden.source ? "target data row 1 agrees" : `recomputed ${outcome.value} from ${outcome.values} cells; target data row 1 agrees`));
     }
     return finish(notHeld(problems.text()));
   }
@@ -682,9 +686,7 @@ async function checkAggregate(
     let strange = 0;
     // A group shown with its value left out is no stranger: its key was given; its row is not compared.
     for (const [key, { rows }] of targetRows) if (!shownKeys.has(key)) strange += rows.length;
-    // A target under unreadable paths too gives no count of its rows (U-223, PM).
-    if (strange > 0 && hidden.target) problems.add(`the target has rows whose key is not one of the source's groups of at least ${k} rows`);
-    else if (strange > 0) {
+    if (strange > 0) {
       problems.add(`${strange} target data ${strange === 1 ? "row has" : "rows have"} a key that is not one of the source's groups of at least ${k} rows`);
     }
   } else {
@@ -703,7 +705,7 @@ async function checkAggregate(
   // U-258: nothing compared and nothing wrong is no pass.
   if (hidden.source && computed.size === 0) return finish(notCompared(`${skipped}${leftOut}`));
   // How many groups agreed is how many rows the target has.
-  return finish(held(hidden.target ? `the groups agree${skipped}${leftOut}` : `${agreed} groups agree${skipped}${leftOut}`));
+  return finish(held(`${agreed} groups agree${skipped}${leftOut}`));
 }
 
 async function checkRule(rule: DataRule, workspace: Workspace, reading: Reading): Promise<Verdict> {

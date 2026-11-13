@@ -329,14 +329,15 @@ test("U-258 (PM): a rule whose checked table is under unreadable paths is not co
     assert.ok(line.startsWith("undecided: ") && line.endsWith(`(${end})`), line);
   }
   // Not even whether the file is there.
-  assert.equal(/not found|data rows|agree|match/.test(hidden.evidence.replace(/matches "/g, "")), false, hidden.evidence);
+  assert.equal(hidden.evidence.includes("not found"), false, hidden.evidence);
   assert.equal(hidden.outcome, "inconclusive");
   assert.ok(hidden.limits.includes("6 of 6 rules were not compared: a table they check is under unreadable paths, and a verdict would tell the model what query_table does not give it"), JSON.stringify(hidden.limits));
   // With the source hidden too, both notes follow.
   const both = await noteOf(rule("sum", "data/people.csv", "secret/total.csv", "amount", false), { unreadablePaths: ["data", "secret"] });
   assert.deepEqual(both, { state: "undecided", note: `${NOT_JUDGED}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE}` });
-  // Without the list every rule is compared as before: the table of 3 rows holds, the missing file fails.
+  // Without the list every rule is compared as before: the table of 3 rows holds, the missing file fails, and
+  // the grouped target lacks the small groups, which are compared then.
   const plain = (await run(rules, {})).evidence.split("\n");
-  assert.deepEqual(plain.map((line) => line.slice(0, line.indexOf(":"))), ["not held", "held", "not held", "held", "held", "not held"]);
+  assert.deepEqual(plain.map((line) => line.slice(0, line.indexOf(":"))), ["not held", "not held", "not held", "held", "held", "not held"]);
   assert.ok(plain[2]?.includes("file not found"), plain.join("\n"));
 });

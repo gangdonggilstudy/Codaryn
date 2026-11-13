@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 import type { DataChecksVerifierConfig, DataRule, RawVerifierResult, TableRef, Workspace } from "../../../src/contracts/index.js";
-import { UNREADABLE_SOURCE_NOTE, UNREADABLE_TARGET_NOTE, notComparedLimit, runDataChecksVerifier } from "../../../src/verify/data-checks.js";
+import { NOT_JUDGED_NOTE, UNREADABLE_SOURCE_NOTE, UNREADABLE_TARGET_NOTE, notComparedLimit, runDataChecksVerifier } from "../../../src/verify/data-checks.js";
 import type { DataChecksOptions } from "../../../src/verify/data-checks.js";
 import { createVerifierRunner } from "../../../src/verify/index.js";
 import type { CommandRunner } from "../../../src/verify/index.js";
@@ -147,17 +147,22 @@ test("U-223: a source under unreadable paths keeps every verdict and gives no nu
     const plain = await run(rules);
     const hidden = await run(rules, { unreadablePaths });
     const label = `${source} under ${JSON.stringify(unreadablePaths)}`;
-    assert.deepEqual(verdicts(hidden), hiddenVerdicts(plain), label);
-    assert.equal(hidden.outcome, plain.outcome, label);
+    // U-258 (PM): with "." every target is under the list too, so no rule is compared.
+    const everything = unreadablePaths[0] === ".";
+    assert.deepEqual(verdicts(hidden), everything ? rules.map(() => "undecided") : hiddenVerdicts(plain), label);
+    assert.equal(hidden.outcome, everything ? "inconclusive" : plain.outcome, label);
     assert.deepEqual(hidden.checked, plain.checked, label);
-    assert.deepEqual(hidden.limits, [...plain.limits, notComparedLimit(1, rules.length)], label);
+    assert.deepEqual(hidden.limits, [...plain.limits, notComparedLimit(everything ? rules.length : 1, rules.length)], label);
     const numbers = sourceNumbers(plain);
     assert.ok(numbers.length >= 6, `${label}: the plain evidence shows the source's numbers (${numbers.join(", ")})`);
     for (const number of numbers) assert.equal(hidden.evidence.includes(number), false, `${label}: ${number} is in ${hidden.evidence}`);
     assert.equal(/recomputed|found -?[0-9]/.test(hidden.evidence), false, label);
-    // With "." the targets are under the list too: their note follows the source's.
-    const end = unreadablePaths[0] === "." ? `${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE})` : `${UNREADABLE_SOURCE_NOTE})`;
-    for (const line of hidden.evidence.split("\n")) assert.ok(line.endsWith(end), `${label}: ${line}`);
+    // With "." the targets are under the list too: their note follows the source's; a table_shape rule
+    // (7, 8) reads no source once its own table is not judged.
+    for (const [index, line] of hidden.evidence.split("\n").entries()) {
+      const end = !everything ? `${UNREADABLE_SOURCE_NOTE})` : [7, 8].includes(index) ? `(${NOT_JUDGED_NOTE}; ${UNREADABLE_TARGET_NOTE})` : `(${NOT_JUDGED_NOTE}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE})`;
+      assert.ok(line.endsWith(end), `${label}: ${line}`);
+    }
   }
 });
 
@@ -192,7 +197,8 @@ test("U-223: a value that is not a usable list covers everything, as at the gate
   const plain = await run(rules);
   for (const value of ["data", [""], ["../outside"], [5]] as unknown[]) {
     const hidden = await run(rules, { unreadablePaths: value as readonly string[] });
-    assert.deepEqual(verdicts(hidden), hiddenVerdicts(plain), JSON.stringify(value));
+    // U-258 (PM): it covers the targets too, so no rule is compared.
+    assert.deepEqual(verdicts(hidden), rules.map(() => "undecided"), JSON.stringify(value));
     assert.equal(hidden.evidence.includes("recomputed"), false, JSON.stringify(value));
     assert.ok(hidden.evidence.includes(UNREADABLE_SOURCE_NOTE), JSON.stringify(value));
   }
@@ -247,56 +253,29 @@ test("U-223 (PM): targets under no unreadable path read as before, letter for le
   assert.deepEqual(await run(rules, { unreadablePaths: ["other"] }), before);
 });
 
-test("U-223 (PM): a target or a table_shape table under unreadable paths keeps every verdict and gives none of its cells or counts", async () => {
+test("U-223 (PM), U-258 (PM): a rule whose target or table_shape table is under unreadable paths is not compared and gives none of its cells or counts", async () => {
   const rules = targetRules("data/sales.csv");
   const plain = await run(rules);
   const hidden = await run(rules, { unreadablePaths: ["secret-out"] });
-  assert.deepEqual(verdicts(hidden), verdicts(plain));
-  assert.equal(hidden.outcome, plain.outcome);
+  // U-258 (PM): a verdict on a table the model cannot write would tell it about the table.
+  assert.deepEqual(verdicts(hidden), rules.map(() => "undecided"));
+  assert.equal(hidden.outcome, "inconclusive");
   assert.deepEqual(hidden.checked, plain.checked);
-  assert.deepEqual(hidden.limits, plain.limits);
+  assert.deepEqual(hidden.limits, [...plain.limits, notComparedLimit(rules.length, rules.length)]);
   // The plain evidence names the targets' own numbers; the hidden one does not.
   for (const cell of ["9876.5432", "3333.3333", "6666.6666"]) assert.ok(plain.evidence.includes(cell), cell);
   for (const cell of ["9876.5432", "3333.3333", "6666.6666", "5555.5555"]) assert.equal(hidden.evidence.includes(cell), false, cell);
-  assert.equal(/found|target has [0-9]+ data rows|[0-9]+ groups agree|\b6 data rows/.test(hidden.evidence), false, hidden.evidence);
-  for (const line of hidden.evidence.split("\n")) assert.ok(line.endsWith(`${UNREADABLE_TARGET_NOTE})`), line);
-  const lines = hidden.evidence.split("\n");
-  const sales = '"data/sales.csv" (csv)';
-  const tolerance = "within absolute 1e-9, relative 1e-9";
-  assert.ok((lines[0] as string).endsWith(`; ${UNREADABLE_TARGET_NOTE})`), lines[0] as string);
-  assert.match(lines[0] as string, /\(target data row 1 of column "total" does not match: recomputed [0-9.]+; the target is under/);
-  assert.equal(lines[1], `held: sum of "amount" in ${sales} matches "total" in "secret-out/total-right.csv" (csv) ${tolerance} (target data row 1 agrees; ${UNREADABLE_TARGET_NOTE})`);
-  assert.equal(lines[2], `not held: sum of "amount" in ${sales} matches "total" in "secret-out/total-two.csv" (csv) ${tolerance} (target does not have exactly 1 data row; ${UNREADABLE_TARGET_NOTE})`);
-  assert.match(lines[3] as string, /\(target data row 1 of column "sum" does not match \(group first seen at source data row 1\): recomputed [0-9.]+; target data row 3 of column "sum" does not match \(group first seen at source data row 5\): recomputed [0-9.]+; 1 source rows without a group value left out; /);
-  assert.equal(
-    lines[4],
-    `held: sum of "amount" in ${sales} grouped by "region" matches "sum" in "secret-out/by-region-right.csv" (csv) (key column "region") ${tolerance} (the groups agree; 1 source rows without a group value left out; ${UNREADABLE_TARGET_NOTE})`,
-  );
-  assert.equal(lines[5], `not held: table "secret-out/rows-six.csv" (csv) has exactly 7 data rows (the data rows do not fit: expected exactly 7 data rows; ${UNREADABLE_TARGET_NOTE})`);
-  assert.equal(lines[6], `held: table "secret-out/rows-seven.csv" (csv) has at least 1 and at most 9 data rows (data rows as required; ${UNREADABLE_TARGET_NOTE})`);
-  assert.equal(lines[7], `not held: table "secret-out/rows-six.csv" (csv) has as many data rows as ${sales} (the data rows do not fit: expected 7 as ${sales}; ${UNREADABLE_TARGET_NOTE})`);
-  assert.equal(lines[8], `held: table "secret-out/rows-seven.csv" (csv) has as many data rows as ${sales} (as many data rows as ${sales}; ${UNREADABLE_TARGET_NOTE})`);
-  assert.equal(lines[9], `not held: table "secret-out/rows-six.csv" (csv) has at least 7 data rows (the data rows do not fit: expected at least 7 data rows; ${UNREADABLE_TARGET_NOTE})`);
+  for (const line of hidden.evidence.split("\n")) assert.ok(line.endsWith(`(${NOT_JUDGED_NOTE}; ${UNREADABLE_TARGET_NOTE})`), line);
 });
 
-test("U-223 (PM): a source and a target both under unreadable paths give neither's numbers and both notes", async () => {
+test("U-223 (PM), U-258 (PM): a source and a target both under unreadable paths: not compared, neither's numbers, both notes", async () => {
   const rules = targetRules("data/sales.csv");
-  const plain = await run(rules);
   const hidden = await run(rules, { unreadablePaths: ["data", "secret-out"] });
-  // U-258 (F-1): every group of this source has fewer than 5 rows, so none is compared and the right
-  // target (rule 4) fails like any target whose keys are not groups of at least k rows.
-  assert.deepEqual(verdicts(hidden), verdicts(plain).map((verdict, index) => (index === 4 ? "not held" : verdict)));
-  assert.ok(
-    hidden.evidence.split("\n")[4]?.includes(
-      "(the target has rows whose key is not one of the source's groups of at least 5 rows; source rows without a group value left out; the source's groups of fewer than 5 rows are not compared;",
-    ),
-    hidden.evidence,
-  );
+  assert.deepEqual(verdicts(hidden), rules.map(() => "undecided"));
   assert.equal(/recomputed|found|[0-9]+ source rows|expected 7 as/.test(hidden.evidence), false, hidden.evidence);
-  // Rules 5, 6 and 9 count rows against the rule's own numbers: no source, so the target's note only.
+  // Rules 5 to 9 are table_shape rules: their own table is not judged, so no source is read for them.
   for (const [index, line] of hidden.evidence.split("\n").entries()) {
-    const end = [5, 6, 9].includes(index) ? `; ${UNREADABLE_TARGET_NOTE})` : `; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE})`;
+    const end = index >= 5 ? `(${NOT_JUDGED_NOTE}; ${UNREADABLE_TARGET_NOTE})` : `(${NOT_JUDGED_NOTE}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE})`;
     assert.ok(line.endsWith(end), line);
   }
-  assert.ok(hidden.evidence.includes(`(not as many data rows as "data/sales.csv" (csv); ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE})`));
 });

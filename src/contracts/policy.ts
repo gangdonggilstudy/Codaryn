@@ -115,7 +115,9 @@ export type ConfirmationBy = (typeof CONFIRMATION_BY)[number];
  * cancelled or its time is up; the engine treats a throw or an answer that is not one of
  * CONFIRM_ANSWER_DECISIONS as `dismissed`. U-106 (R-79 L-3): the engine reads the answer's
  * `decision` once, right after it came, and only as an own property: a read that throws or a
- * `decision` on the prototype is `dismissed` too.
+ * `decision` on the prototype is `dismissed` too. U-120 (R-86 L-1): `request` is a frozen copy of
+ * the engine's question (a change in place throws in strict mode); the records are written from the
+ * engine's own question, so nothing an asker does to it reaches the journal.
  */
 export type ConfirmPermission = (request: ConfirmRequest, signal: AbortSignal) => Promise<ConfirmAnswer>;
 

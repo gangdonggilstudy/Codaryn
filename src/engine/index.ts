@@ -683,6 +683,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       argumentCount: Array.isArray(args.args) ? args.args.length : 0,
     };
     await record({ type: "confirmation_requested", ...request });
+    // U-120 (R-86 L-1): the asker gets a frozen copy, and the answer record takes the id from the
+    // engine's own question, so a changed copy changes no record.
+    const { id } = request;
+    const asked: ConfirmRequest = Object.freeze({ ...request });
     let decision: ConfirmAnswer["decision"] = "dismissed";
     const ask = deps.confirm;
     if (ask !== undefined && !runSignal.aborted) {
@@ -693,7 +697,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       });
       try {
         // U-106 (R-79 L-3): the answer is read once, right after it came (answerDecision).
-        decision = answerDecision(await Promise.race([ask(request, runSignal), ended]));
+        decision = answerDecision(await Promise.race([ask(asked, runSignal), ended]));
       } catch {
         decision = "dismissed";
       } finally {
@@ -702,7 +706,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       }
     }
     const answered = async (decision: ConfirmationDecision, by: ConfirmationBy): Promise<void> => {
-      await record({ type: "confirmation_answered", id: request.id, decision, by });
+      await record({ type: "confirmation_answered", id, decision, by });
     };
     const stop = interrupted();
     if (stop !== null) {

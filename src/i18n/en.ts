@@ -459,6 +459,9 @@ export const EN_MESSAGES: MessageTexts = {
     "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
   "doctor.commands.writable_with_commands":
     "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
+  // U-210 (bundle A, R-5), draft for nb-i18n.
+  "doctor.commands.unreadable_with_commands":
+    "command rules and command checks while unreadablePaths is set: {count}; a run refuses them, since a command can read any file, the ones kept from the agent too",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",
   "doctor.workflow_policy.commands_narrowed": "a run of this task type narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this task type leaves out plan actions of the configured policy: {count}",

@@ -28,6 +28,7 @@ import {
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
+  integrityPathsOf,
   planActionShownMatches,
   toRunId,
   toShownWorkspace,
@@ -692,7 +693,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         parentEnv: (io.parentEnv ?? io.env) as NodeJS.ProcessEnv,
         ...(io.platform === undefined ? {} : { platform: io.platform }),
       });
-      const protectedPaths = task.policy.protectedPaths ?? [];
+      // U-210 (U-203, R-3): the apply's task's unreadable paths are watched as the protected ones are.
+      const protectedPaths = integrityPathsOf(task.policy.protectedPaths, task.unreadablePaths);
       const integrity =
         protectedPaths.length > 0 || prepared.integrityPaths.length > 0
           ? createIntegrityChecker({ workspace, protectedPaths, externalPaths: prepared.integrityPaths })
@@ -726,7 +728,13 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         executor: createPlanExecutor({ workspace, workspaceRoot, runId }),
         // U-182 (DR-69 B-4): the apply's task's writable lists judge each action's writes, as the
         // plan run's gate judged them when the plan was proposed (DR-5: the apply's own policy).
-        policy: createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) }),
+        // U-210 (bundle A, A-6): and its unreadable paths, under which no action moves or discards a file.
+        policy: createPolicyGate({
+          config: task.policy,
+          workspace,
+          ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }),
+          ...(task.unreadablePaths === undefined ? {} : { unreadablePaths: task.unreadablePaths }),
+        }),
         planActions: task.policy.planActions ?? [],
         // DR-9: discarded files go to .codaryn/discarded/<apply runId>/, outside the run directories.
         discardedRoot: await prepareDiscardedRoot(workspaceRoot, runId),

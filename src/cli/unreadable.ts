@@ -1,0 +1,38 @@
+/**
+ * U-210 (P1 bundle A, A-6; R-2, Q-4, review R-102 M-1): the run's unreadable paths and its group size
+ * k (ResolvedTaskSpec.unreadablePaths, .minGroupSize), from every source a run has. Shared by the
+ * task's preparation (run.ts) and doctor, so both see the same list.
+ */
+
+import { effectiveMinGroupSize, unreadablePathsOf } from "../contracts/index.js";
+import type { PolicyConfig } from "../contracts/index.js";
+import type { WritableSources } from "./writable.js";
+
+/**
+ * The sources' policies in the contract's order (unreadablePathsOf): the config file's own policy,
+ * the applied profile's, the task type definition's, the task file's. The config file's and the
+ * profile's count under a task file too, whose own policy otherwise replaces the config's (R-2).
+ */
+function policiesOf(sources: WritableSources): readonly (PolicyConfig | undefined)[] {
+  return [
+    sources.config?.policy,
+    sources.profile === null ? undefined : sources.config?.profiles?.[sources.profile]?.policy,
+    sources.definition?.policy,
+    sources.taskFilePolicy ?? undefined,
+  ];
+}
+
+/** Every source's unreadable entries united, each once, in that order; empty when no source states any. */
+export function runUnreadablePaths(sources: WritableSources): readonly string[] {
+  return unreadablePathsOf(policiesOf(sources).map((policy) => policy?.unreadablePaths));
+}
+
+/**
+ * The run's k when any source states one: the largest of them, never below 5
+ * (effectiveMinGroupSize, the config file's as the base). Undefined when none does, which the run
+ * reads as DEFAULT_MIN_GROUP_SIZE, so a task without one is as before.
+ */
+export function runMinGroupSize(sources: WritableSources): number | undefined {
+  const [configured, ...raises] = policiesOf(sources).map((policy) => policy?.minGroupSize);
+  return configured === undefined && raises.every((value) => value === undefined) ? undefined : effectiveMinGroupSize(configured, raises);
+}

@@ -210,6 +210,9 @@ export const SCHEMA_FIELD_NAMES = [
   "protectedPaths",
   // U-182 (DR-69 B-4, review R-99 L-3; in na-core's unit by PM decision): `policy.writablePaths`.
   "writablePaths",
+  // U-210 (bundle A, A-6; in na-core's unit): `policy.unreadablePaths` and `policy.minGroupSize`.
+  "unreadablePaths",
+  "minGroupSize",
   "privacy",
   "secretEnv",
   "limits",
@@ -1067,6 +1070,10 @@ export const FIXED_MESSAGES = {
   // a command can write files outside them. A warning in the `commands` check, or one of its notes
   // when the check says something else (no new check id).
   "doctor.commands.writable_with_commands": { count: "count" },
+  // U-210 (bundle A, R-5; draft for nb-i18n): `{count}` command rules and command verifiers while the
+  // run has unreadable paths (every source's policy.unreadablePaths). A run refuses them (a command
+  // can read any file), so the `commands` check fails with this text (no new check id).
+  "doctor.commands.unreadable_with_commands": { count: "count" },
   // DR-41: notes of the `commands` check (DoctorCheck.notes): what the task type's own rules left out
   // of the configured policy (workflowPolicyNarrowings). Counts only.
   "doctor.workflow_policy.commands_dropped": { count: "count" },

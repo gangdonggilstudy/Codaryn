@@ -458,6 +458,9 @@ export const KO_MESSAGES: MessageTexts = {
     "추가 인수를 받는 명령 규칙 {count}개가 계획 동작(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
   "doctor.commands.writable_with_commands":
     "writablePaths가 파일 도구를 제한하는 중에 명령 규칙 {count}개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다",
+  // U-210 (묶음 A, R-5; nb-i18n이 다듬을 초안).
+  "doctor.commands.unreadable_with_commands":
+    "unreadablePaths가 있는데 명령 규칙과 명령 검증기가 {count}개 있습니다. 명령은 어떤 파일이든 읽을 수 있어 에이전트에게서 감춘 파일도 읽을 수 있으므로, 실행이 거부합니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",

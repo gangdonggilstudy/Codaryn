@@ -93,6 +93,7 @@ import type { InputErrorPosition } from "./task.js";
 import { displayWidth, padEnd } from "./human/index.js";
 import { hideKeys } from "./text-safety.js";
 import { writablePathSetsOf } from "./writable.js";
+import { runUnreadablePaths } from "./unreadable.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
 export const MODELS_HINT = "`codaryn models` lists the models the key can use";
@@ -942,6 +943,17 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("commands", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (commandEntries.length === 0) {
     set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" }, policyNotes);
+  } else if (runUnreadablePaths({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: task?.policy ?? null }).length > 0) {
+    // U-210 (bundle A, R-5): the run's unreadable paths (as run.ts unites them) with command rules or
+    // command verifiers: a run refuses to start, so the check fails without running the commands.
+    const count = commandEntries.length;
+    set(
+      "commands",
+      "fail",
+      `command rules and command checks while unreadablePaths is set: ${count}; a run refuses them, since a command can read any file, the ones kept from the agent too`,
+      { id: "doctor.commands.unreadable_with_commands", params: { count } },
+      policyNotes,
+    );
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
     // U-182 (DR-69 B-8): writable lists bind the file tools only; an allowed command can write

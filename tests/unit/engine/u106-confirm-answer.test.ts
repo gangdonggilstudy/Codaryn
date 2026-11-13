@@ -1,18 +1,24 @@
 /**
- * U-106 (security review R-79 L-3), on U-74's permission question.
+ * U-106 (security review R-79 L-3 and L-2), on U-74's permission question.
  * - L-3: the engine reads the answer once, right after it came, inside a try, and only an own
  *   `decision` counts. A read that throws, a prototype's `decision` (an IPC value copied with
  *   Object.assign can bring one through `__proto__`) or a wrong shape is `dismissed`: deny, by
  *   default; the run still records the answer and ends normally. A getter is read once, so it
  *   cannot pass the check with one value and decide with another.
+ * - L-2: the question's `subject` is text a screen shows as it is, so the engine hides key shapes
+ *   in it as it does for the final message (safeModelText: HIDDEN_KEY_MARKER), besides masking
+ *   registered values. The question, `confirmation_requested` and the request handed to the asker
+ *   carry the same text. A plain name stays as it was.
+ * Key-shaped values are built at run time from parts; none is a real key.
  */
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
+import { HIDDEN_KEY_MARKER } from "../../../src/contracts/index.js";
 import type { ConfirmAnswer, ConfirmPermission, ConfirmRequest, PolicyDecision, ToolCall } from "../../../src/contracts/index.js";
 import { runTask } from "../../../src/engine/index.js";
-import { FakePolicy, finalAnswer, harness, response } from "./fakes.js";
+import { FAKE_SECRET, FAKE_TOKEN, FakePolicy, finalAnswer, harness, response } from "./fakes.js";
 
 const MARK: PolicyDecision = { allowed: false, permission: "command", code: "confirmation_required", confirm: true };
 const command = (executable = "npm"): ToolCall => ({ id: "c1", name: "run_command", args: { executable, args: ["test"] } });
@@ -107,5 +113,29 @@ describe("U-106 L-3: the answer is read once, own property only", () => {
     assert.equal(denied.executed, 0);
     const parsed = await asked(async () => JSON.parse('{"decision":"allow_once"}') as ConfirmAnswer);
     assert.deepEqual(parsed.answered, [["allow_once", "user"]], "an IPC value with its own decision");
+  });
+});
+
+describe("U-106 L-2: the question's subject hides key shapes, as the final message does", () => {
+  const keyShape = (): string => ["sk", "ant", "api03", "U106fakeVALUEfakeVALUEfakeVALUE0123"].join("-");
+
+  test("a key shape in the executable is hidden in the question, its record and the request asked", async () => {
+    const shape = keyShape();
+    const run = await asked(async () => ({ decision: "deny" }), `/opt/${shape}/bin/tool`);
+    const subject = run.requested[0]?.subject ?? "";
+    assert.equal(subject.includes(shape), false);
+    assert.equal(subject, `/opt/${HIDDEN_KEY_MARKER}/bin/tool`);
+    assert.equal(run.seen[0]?.subject, subject, "the asker gets the same text");
+    assert.equal(JSON.stringify([run.requested, run.seen]).includes(shape), false);
+  });
+
+  test("a registered value is still masked, and a plain name stays as it was", async () => {
+    const registered = await asked(async () => ({ decision: "deny" }), `/opt/${FAKE_SECRET}/tool`);
+    assert.equal(registered.requested[0]?.subject, `/opt/${FAKE_TOKEN}/tool`);
+    for (const plain of ["npm", "C:\\Program Files\\nodejs\\node.exe", "/usr/bin/python3", "도구 폴더/run.sh"]) {
+      const run = await asked(async () => ({ decision: "deny" }), plain);
+      assert.equal(run.requested[0]?.subject, plain);
+      assert.equal(run.seen[0]?.subject, plain);
+    }
   });
 });

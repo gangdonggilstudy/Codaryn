@@ -79,7 +79,9 @@ export const CONFIRM_ID_PATTERN_SOURCE = "^q[1-9][0-9]{0,5}$";
  * question. Fixed fields only: `subject` is the call's executable as the gateway masks it (the same
  * text as the user's rule, which matches it exactly) and `argumentCount` the number of its
  * arguments. The arguments themselves are the model's text and are never in it. Not restored for
- * display.
+ * display. U-106 (R-79 L-2): a screen shows `subject` as it is, so the engine makes it safe as the
+ * final message (safeModelText): control and invisible characters other than LF and TAB left out,
+ * masked, key shapes hidden as HIDDEN_KEY_MARKER. Renderers need not hide keys in it again.
  */
 export interface ConfirmRequest {
   readonly kind: "permission";

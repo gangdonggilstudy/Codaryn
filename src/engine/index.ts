@@ -61,6 +61,7 @@ import {
   TOOL_FAILURE_HINTS,
   asRawText,
   failedToolContent,
+  safeModelText,
   toolFailureMessage,
   workflowSettingsOf,
 } from "../contracts/index.js";
@@ -640,6 +641,16 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   /** U-74: the number of the last permission question of this run (ConfirmRequest.id `q<k>`). */
   let confirmations = 0;
 
+  /** U-106: text a screen shows as it is (safeModelText with the run's gateway); null when masking fails. */
+  const shownText = (text: string): MaskedText | null => {
+    try {
+      const shown = safeModelText(text, (one) => privacy.mask(one));
+      return shown === null ? null : (shown as MaskedText);
+    } catch {
+      return null;
+    }
+  };
+
   /**
    * U-74 B-3 (DR-3, DR-10): the second check gave the confirm mark. Records the question (fixed
    * fields, the masked executable, the number of arguments; never the arguments), asks
@@ -656,7 +667,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     mark: Extract<PolicyDecision, { allowed: false }>,
   ): Promise<PolicyDecision | End> => {
     const args = effective.args as { readonly executable?: unknown; readonly args?: unknown };
-    const subject = mask(typeof args.executable === "string" ? args.executable : "");
+    // U-106 (R-79 L-2): a screen shows the subject as it is, so it is made safe as the final message
+    // is (safeModelText): masked by the gateway and its key shapes hidden. Null fails closed.
+    const subject = shownText(typeof args.executable === "string" ? args.executable : "");
     if (subject === null) return MASKING_FAILED;
     confirmations += 1;
     const request: ConfirmRequest = {

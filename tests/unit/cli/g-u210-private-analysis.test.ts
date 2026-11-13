@@ -9,7 +9,8 @@
  *   a person's review whose checklist is analyze's two items and PRIVATE_REVIEW_ITEM (P-1, P-3);
  * - it is refused at resolution when the run has no unreadable path (unreadable_paths_required, a
  *   WORKFLOW_PROBLEMS entry now, as is unreadable_with_commands), naming policy.unreadablePaths, with
- *   nothing recorded; doctor fails the task file's check where a run would refuse;
+ *   nothing recorded; doctor fails the task file's check, or the config file's for a profile, where a
+ *   run would refuse;
  * - `analyze` offers query_table too, with k only for unreadable tables (P-2);
  * - parser to effective k to gate and tool to human output: with the scripted model and with a fake
  *   Anthropic API on 127.0.0.1, every cell of the table holds its own marker, and no marker of a row,
@@ -182,6 +183,25 @@ describe("U-210: analyze-private without an unreadable path is refused before th
     assert.match(bare.message, /^policy\.unreadablePaths must not be empty under the analyze-private task type/);
     assert.deepEqual(bare.text, { id: "doctor.task_file.invalid", params: { field: "policy.unreadablePaths" } });
     const listed = await checkOf(writeConfigFile(sb, { schemaVersion: 1, limits: LIMITS, policy: { ...POLICY, unreadablePaths: ["private"] } }, "listed.json"));
+    assert.equal(listed.status, "ok", JSON.stringify(listed));
+  });
+
+  test("doctor: a profile naming analyze-private fails the config file's check without a list; with the profile's it is valid", { timeout: 60_000 }, async (t) => {
+    const sb = createSandbox(t);
+    workspace(sb);
+    const configCheck = async (profile: JsonObject): Promise<{ status: string; message: string; text?: { id: string; params?: Record<string, unknown> } }> => {
+      const config = writeConfigFile(sb, { schemaVersion: 1, model: "fake-model-id", maxOutputTokens: 1000, limits: LIMITS, policy: POLICY, profiles: { private: profile } }, "p.json");
+      const ran = await runGuarded(sb, ["doctor", "--workspace", sb.workspace, "--profile", "private", "--config", config, "--json"], cliEnv({ fakeApiKey: FAKE_API_KEY }));
+      const checks = (JSON.parse(ran.stdout) as { checks: { id: string; status: string; message: string; text?: { id: string } }[] }).checks;
+      const found = checks.find((check) => check.id === "config_file");
+      assert.ok(found !== undefined, ran.stdout);
+      return found;
+    };
+    const bare = await configCheck({ workflowRef: PRIVATE_ID });
+    assert.equal(bare.status, "fail", JSON.stringify(bare));
+    assert.match(bare.message, /^policy.unreadablePaths must not be empty under the analyze-private task type/);
+    assert.deepEqual([bare.text?.id, bare.text?.params?.["field"]], ["doctor.config_file.invalid", "policy.unreadablePaths"]);
+    const listed = await configCheck({ workflowRef: PRIVATE_ID, policy: { ...POLICY, unreadablePaths: ["private"] } });
     assert.equal(listed.status, "ok", JSON.stringify(listed));
   });
 });

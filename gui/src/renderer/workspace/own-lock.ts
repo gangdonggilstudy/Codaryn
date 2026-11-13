@@ -8,6 +8,11 @@
  * refused for the lock (`workspace_locked`) does not: that answer says the window did not hold it. Before,
  * a text save in another workspace, or a review refused because of the very lock another process held,
  * made that lock look like the window's own.
+ *
+ * U-294 (R-113 L-1): a call says it was refused for the lock in one of two shapes. Most give
+ * `{ ok: false, code: "workspace_locked" }`; a text save gives SaveTextReply's
+ * `{ ok: true, saved: false, status: "workspace_locked" }`. U-271 knew only the first, so a text save
+ * refused for the lock still counted as the window's own work.
  */
 
 import type { CodarynApi } from "../api.js";
@@ -48,9 +53,14 @@ interface CallMark {
   refusedForLock: boolean;
 }
 
-/** A reply that says the call was refused because the workspace's lock is held (by someone else). */
+/**
+ * A reply that says the call was refused because the workspace's lock is held (by someone else): an
+ * error with that code, or a text save not saved with that status (SaveTextReply).
+ */
 function refusedForLock(reply: unknown): boolean {
-  return typeof reply === "object" && reply !== null && (reply as { ok?: unknown }).ok === false && (reply as { code?: unknown }).code === "workspace_locked";
+  if (typeof reply !== "object" || reply === null) return false;
+  const { ok, code, saved, status } = reply as { ok?: unknown; code?: unknown; saved?: unknown; status?: unknown };
+  return (ok === false && code === "workspace_locked") || (ok === true && saved === false && status === "workspace_locked");
 }
 
 /** Keeps the window's locking calls: the workspace each acts on, and when and how it ended. */

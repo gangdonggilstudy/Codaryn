@@ -610,6 +610,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 그 점검이 다른 경고나 문제를 말하면 그 글을 두고 이 문구를 `notes`에 붙인다. 명령 검증기는 세지 않는다.
 - **사람과 모델에게 알리는 것**
   - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
+  - 끝 요약에는 그 거부 수의 줄이 `summary.denied` 바로 뒤에 있다(U-198의 `summary.denied_not_writable`; CLI가 `RunSummaryContext.deniedNotWritable`로 넘긴다, Codex V-14 L-1).
+  - run 계획을 수행한 실행이면 진행 줄은 계획의 안내다(`progress.not_in_plan_hint`, 18.4).
   - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
 - **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
 - **계획 run:** run 계획을 수행하는 실행은 엔진이 승인된 파일 목록을 목록 하나(`plan` 원천, 정확히 그 파일)로 더해 판정한다(U-187, `approvedPlanWritablePathSets`). doctor는 `plan: "run"`과 명령 규칙이 함께 있어도 경고한다(18.4, B-8).
@@ -1184,6 +1186,8 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - **잠금 아래 다시 봄(PM, 이동 계획의 U-1과 같게):** 조립이 잠금을 잡은 뒤 엔진이 시작하기 전에 계획 실행의 기록 변경 표시를 다시 본다. 표시가 있거나 볼 수 없으면 `plan_records_changed`이고, 기록·요청·쓰기·claim 없이 잠금을 놓는다.
   - **goal:** 계획을 만든 실행의 goal이다. 그 실행 journal의 첫 모델 요청의 user 메시지(그 실행이 가린 글)이고, task 형식과 상관없다. 모델의 요약은 goal이 아니라 엔진이 시스템 글에 승인된 계획으로 넣는다.
   - 출력은 그 실행의 `CliOutput`(`EngineResult`)이고 `planRunId`와 `planDigest`가 있다. 진행 줄, 끝 요약, `result.json`, 되돌리기(`codaryn revert --run <그 실행>`)는 실행과 같다.
+  - **거부된 쓰기의 안내(Codex V-14 L-1):** 이 실행에서 `path_not_writable`로 거부된 쓰기는 모두 계획 밖 파일이다. 엔진이 모델 전에 계획 파일마다 게이트를 보고, 쓰기 목록이 계획 파일을 빼면 `failed`/`plan_stale`로 끝내기 때문이다(U-187). writablePaths를 넓혀도 허용되지 않으므로, 끝의 진행 줄은 writablePaths 안내 대신 `progress.not_in_plan_hint`(다른 파일을 바꾸려면 새 계획을 만들어 승인한다)이다. 끝 요약의 거부 수 줄은 13.1과 같다.
+  - **알려진 한계(Codex V-14 M-1, PM 판단):** 계획은 그것을 만든 작업 공간을 담지 않는다. 계획 기록(`.codaryn`)을 다른 작업 공간에 복사하면 그 작업 공간에서 원래 다이제스트로 승인되고 실행된다. 이동 계획도 같다. 사람이 그 작업 공간을 지정해 다이제스트로 승인해야 하므로 고치지 않는다. 기록 없는 작업 공간에 실행 id만 주면 `run_not_found`다.
   - 앱 계층은 같은 `runApply`에 앱의 고리만 넘긴다(p5a U-196). 조립은 `createAssemble(hooks)` 하나이고, 고리는 명령의 부모 환경·플랫폼(DR-4)과 `onAssembled`다.
 - 검증기 명령의 부모 환경(DR-4): `runApply`는 받은 환경(`parentEnv`, 없으면 `env`)을 명령 실행기에 넘기고 `CHILD_ENV_ALLOWLIST`로 거른다. 앱 계층은 변수 파일을 읽어 넣은 실행의 환경 사본을 넘긴다. CLI 자기 프로세스에서는 `process.env`다.
 

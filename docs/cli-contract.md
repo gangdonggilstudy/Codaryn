@@ -86,7 +86,10 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 - `policy.protectedPaths`는 선택이다(13절).
 - 파일 형식은 `TaskSpec`, CLI가 해석해 엔진에 넘기는 형은 `ResolvedTaskSpec`(경로는 절대 경로, 한도 여섯 개가 모두 정해짐)이다. `EngineDeps.task`는 `ResolvedTaskSpec`이다.
 - task 파일과 설정 파일은 UTF-8이며 BOM이 있어도 읽는다.
-- 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`) 두 종류다. `timeoutMs`는 1~2,147,483,647ms다(S-7). 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
+- 검증기는 `command`(`executable`, `args`, 선택 `cwd`·`timeoutMs`·`expectExitCode`)와 `file_rules`(`exists`, `absent`, `contains`, `not_contains`, `markdown_headings`, `markdown_links`) 두 종류다. `timeoutMs`는 1~2,147,483,647ms다(S-7). 결과에는 `outcome`(pass/fail/inconclusive), `evidence`, `checked`, `limits`가 있다.
+  - U-116(P1 묶음 C, 계약 `MarkdownFileRule`): `markdown_headings`는 `path`, `headings`(1~`MAX_MARKDOWN_RULE_HEADINGS` 50개; 항목마다 `text`는 앞뒤 공백을 뗀 뒤 1~`MAX_MARKDOWN_HEADING_CHARS` 200자(코드 포인트)이고 뗀 글로 저장, 선택 `level`은 1~6 정수), 선택 `order`(`any` 기본, `in_order`)만 받는다. `markdown_links`는 `path`만 받는다. 그 밖의 필드나 값은 `invalid_task`(설정의 검증기면 `invalid_config`)다.
+  - 이 오류의 진단(`diagnostic.field`)은 그 규칙(`verifiers[i].rules[j]`)을 가리킨다. 메시지는 정확한 자리(`…headings[k].text` 등)를 말한다. `headings`·`level`·`order`가 계약의 `SCHEMA_FIELD_NAMES`에 아직 없어서다.
+  - 파일을 읽고 판정하는 것은 검증기다(제목은 ATX·Setext를 앞뒤 공백과 닫는 `#`를 뗀 글자로 정확히 비교, 링크는 상대 경로의 대상이 작업 공간 안에 있는지, 파일 1 MiB까지, 네트워크 없음). CLI는 모양만 검사한다.
 
 ## 4. scripted 모델 파일 (`ScriptedModelScript`)
 

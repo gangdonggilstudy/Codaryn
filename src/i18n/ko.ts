@@ -71,7 +71,9 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.denied_unreadable": "읽기 제외 파일이라 거부된 호출: {count}건",
   "summary.denied_unreadable_hint":
     "그 파일들은 일부러 에이전트가 읽지 못하게 한 것입니다(unreadablePaths). 에이전트는 query_table로 그 표를 집계할 수는 있습니다. 읽게 하려면 그 항목을 정한 곳의 unreadablePaths에서 빼세요.",
-  "summary.groups_hidden": "표 결과 {results}건에서 {k}행 미만의 묶음을 뺐습니다. 에이전트는 그런 묶음의 개수만 받았습니다.",
+  // U-210 (R-108 L-2; nb-i18n이 다듬을 초안): 묶음 전체, 또는 k칸 미만으로 셈한 값.
+  "summary.groups_hidden":
+    "표 결과 {results}건에서 {k}행 미만의 묶음이나 {k}칸 미만으로 셈한 값을 뺐습니다. 에이전트는 뺀 묶음의 개수만 받았습니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.confirm_denied.user": "확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",

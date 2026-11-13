@@ -235,7 +235,8 @@ export function notePrivateData(notes: RunNotes, event: JournalEvent): void {
   if (event.type === "tool_decision" && !event.allowed && event.code === "unreadable_path") notes.deniedUnreadable = (notes.deniedUnreadable ?? 0) + 1;
   if (event.type !== "tool_result") return;
   const facts = queryTableFacts(event.result);
-  if (facts === null || facts.kind !== "groups" || facts.suppressedGroups === 0) return;
+  // R-108 L-2: a result that left out whole groups, or values from fewer than k cells (V-19), counts.
+  if (facts === null || facts.kind !== "groups" || (facts.suppressedGroups === 0 && (facts.hiddenValues ?? 0) === 0)) return;
   const hidden = notes.hiddenGroups;
   notes.hiddenGroups = { results: (hidden?.results ?? 0) + 1, minGroupSize: Math.max(hidden?.minGroupSize ?? 0, facts.minGroupSize) };
 }

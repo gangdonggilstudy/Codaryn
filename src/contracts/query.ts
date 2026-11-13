@@ -18,8 +18,10 @@
  *
  * U-208 (A-5): a task type tool (WORKFLOW_TOOL_NAMES); the tool runner reads the table in pieces
  * (src/tabular, U-202) and applies k, the operations of unreadable tables and the pages here.
- * U-210 (A-6): the parsers take `unreadablePaths` and `minGroupSize`, the CLI fills the run's list
- * and k and gives them to the gate and the tool runner, and `analyze-private` is built in.
+ * U-210 (A-6): the parsers take `unreadablePaths` and `minGroupSize`, `analyze-private` is built
+ * in, and the CLI fills the run's list and k and gives them, from one place (runGuards, review R-108
+ * H-1), to the gate of every run (a carried-out plan's too) and of a plan of moves' apply, the tool
+ * runner, the verifier runner (U-223) and the integrity checks. Not yet: the app's assembly (p5a).
  *
  * Codex V-19 (DR-70, PM): "held by at least k rows together" binds the cells that went into each
  * number too, not only the rows of its group. On a table under unreadablePaths (k at least 5; a

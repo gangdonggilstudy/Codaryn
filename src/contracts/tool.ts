@@ -215,6 +215,8 @@ export const TOOL_FAILURE_HINTS: { readonly [C in ToolErrorCode]?: string } = {
   masking_failed: "The result could not be masked, so none of it is shown.",
   // U-197 (bundle A, Q-5): query_table.
   too_many_groups: "Group by columns with fewer distinct values, or by fewer columns.",
+  // R-102 L-5: an unknown or doubled column is the usual cause; describe shows the columns.
+  invalid_table: "Call query_table with describe set to true to see the table's columns, then query only those.",
 };
 
 /**

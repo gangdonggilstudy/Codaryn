@@ -12,8 +12,8 @@
  */
 
 import { MAX_FINAL_MESSAGE_CHARS, maskingOf } from "../shared/ipc.js";
-import { encodeLine } from "../shared/protocol.js";
-import type { HostRunItem } from "../shared/protocol.js";
+import { encodeLine, parseQuestion } from "../shared/protocol.js";
+import type { HostRunItem, PermissionQuestion } from "../shared/protocol.js";
 import { failureOf } from "./settings.js";
 import type { HostFailure, Shown } from "./settings.js";
 
@@ -40,7 +40,7 @@ export interface HostApplyRequest {
 }
 
 export interface RunsDeps {
-  readonly startRun: (request: HostStartRunRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
+  readonly startRun: (request: HostStartRunRequest, observer: RunObserverOf) => Promise<unknown>;
   /** GU-5: the app layer's applyPlan (ApplyPlanRequest); absent before the general task commands. */
   readonly applyPlan?: (request: HostApplyRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
   readonly itemOf: RunItemOf;
@@ -123,6 +123,25 @@ interface Running {
   timer: ReturnType<typeof setTimeout> | null;
   turns: number;
   tools: number;
+  /** U-124: the questions asked now, by id: how each is answered. */
+  readonly questions: Map<string, (decision: "allow_once" | "deny" | "dismissed") => void>;
+}
+
+/** The observer a run gets: its events, and (U-124, a run only) its permission questions. */
+export interface RunObserverOf {
+  onEvent(event: unknown): void;
+  confirm?(request: unknown, signal: AbortSignal): Promise<{ readonly decision: "allow_once" | "deny" | "dismissed" }>;
+}
+
+/**
+ * U-124 (adapter-contract 5.9): the engine's question as the main process may see it: the command
+ * permission only, the masked executable hidden again (key shapes, key values; `shown`) and the
+ * number of arguments. Null (the run gets dismissed) for anything else.
+ */
+export function questionOf(request: unknown, shown: Shown): PermissionQuestion | null {
+  if (!isObj(request) || request["kind"] !== "permission") return null;
+  const subject = typeof request["subject"] === "string" ? shown(request["subject"]) : null;
+  return parseQuestion({ id: request["id"], callId: request["callId"], tool: request["tool"], permission: request["permission"], subject, argumentCount: request["argumentCount"] });
 }
 
 export interface RunRegistry {
@@ -135,6 +154,8 @@ export interface RunRegistry {
    */
   startApply(args: { readonly workspace: string; readonly profile: string | null; readonly workflowRef: string | null; readonly planRunId: string; readonly digest: string; readonly consent: boolean }): Promise<Obj | HostFailure>;
   cancel(token: string): boolean;
+  /** U-124: the person's answer the main process got for a question of the run; false when it is no longer asked. */
+  answer(token: string, id: string, decision: "allow_once" | "deny" | "dismissed"): boolean;
   cancelAll(): void;
   readonly size: number;
 }
@@ -211,12 +232,15 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
 
   /** Starts through `begin` and tracks the run; `resultOf` turns its end into the done value. */
   async function launch(
-    begin: (observer: { onEvent(event: unknown): void }) => Promise<unknown>,
+    begin: (observer: RunObserverOf) => Promise<unknown>,
     resultOf: (done: unknown, unsafeMoves: number | null) => Obj | HostFailure,
+    asks = false,
   ): Promise<Obj | HostFailure> {
     {
       const token = deps.token();
-      const run: Running = { cancel: () => undefined, pending: [], dropped: false, open: false, timer: null, turns: 0, tools: 0 };
+      // U-124 (3.6, DR-3): how this run's questions ended, from its own records (for the result's lines).
+      const tally = { allowed: 0, user: 0, default: 0, cancelled: 0 };
+      const run: Running = { cancel: () => undefined, pending: [], dropped: false, open: false, timer: null, turns: 0, tools: 0, questions: new Map() };
       let lastSeq = 0;
       let unsafeMoves: number | null = null;
       const observer = {
@@ -229,6 +253,11 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             if (record["type"] === "model_request") run.turns += 1;
             if (record["type"] === "tool_result") run.tools += 1;
             if (record["type"] === "plan_checked") unsafeMoves = Array.isArray(record["unsafeMoves"]) ? record["unsafeMoves"].length : 0;
+            if (record["type"] === "confirmation_answered") {
+              const by = record["by"];
+              if (record["decision"] === "allow_once") tally.allowed += 1;
+              else if (by === "user" || by === "default" || by === "cancelled") tally[by] += 1;
+            }
           }
           let item: HostRunItem | null = null;
           try {
@@ -245,6 +274,30 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
           }
           later(token, run);
         },
+        // U-124 (3.6, DR-3, adapter-contract 5.9): a question goes to the main process, whose OS dialog
+        // asks; its answer comes back by answerQuestion. The run's signal ends it (dismissed; the engine
+        // records cancelled or default). Anything but the command permission is not asked (dismissed).
+        ...(asks
+          ? {
+              confirm: (request: unknown, signal: AbortSignal): Promise<{ readonly decision: "allow_once" | "deny" | "dismissed" }> => {
+                const question = questionOf(request, deps.shown);
+                if (question === null || signal.aborted) return Promise.resolve({ decision: "dismissed" });
+                return new Promise((resolve) => {
+                  const end = (): void => {
+                    if (!run.questions.delete(question.id)) return;
+                    resolve({ decision: "dismissed" });
+                    deps.write(encodeLine({ v: 1, type: "questionEnded", run: token, id: question.id }));
+                  };
+                  run.questions.set(question.id, (decision) => {
+                    signal.removeEventListener("abort", end);
+                    resolve({ decision });
+                  });
+                  signal.addEventListener("abort", end, { once: true });
+                  deps.write(encodeLine({ v: 1, type: "question", run: token, question }));
+                });
+              },
+            }
+          : {}),
       };
       const outcome = await begin(observer);
       const handle = isObj(outcome) && outcome["ok"] === true && isObj(outcome["handle"]) ? outcome["handle"] : null;
@@ -265,7 +318,11 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             run.open = false;
             runs.delete(token);
             try {
-              deps.write(encodeLine({ v: 1, type: "done", run: token, outcome: resultOf(done, unsafeMoves) }));
+              const value = resultOf(done, unsafeMoves);
+              const asked = tally.allowed + tally.user + tally.default + tally.cancelled > 0;
+              const result = (value as Obj)["result"];
+              const outcome = asked && value["ok"] === true && isObj(result) ? { ...value, result: { ...result, confirmations: tally } } : value;
+              deps.write(encodeLine({ v: 1, type: "done", run: token, outcome }));
             } catch {
               deps.write(encodeLine({ v: 1, type: "done", run: token, outcome: { ok: false, code: "host_error" } }));
             }
@@ -290,6 +347,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             observer,
           ),
         (done) => runResultValue(done, deps.shown, deps.shownText),
+        true,
       );
     },
 
@@ -297,6 +355,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
       return launch(
         (observer) => deps.startRun({ input: { kind: "task", taskPath: args.taskPath }, configPath: null, varsFile: args.varsFile, profile: null, workflowRef: null, cancelFile: null }, observer),
         (done) => runResultValue(done, deps.shown, deps.shownText),
+        true,
       );
     },
 
@@ -324,6 +383,15 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
       const run = runs.get(token);
       if (run === undefined) return false;
       run.cancel();
+      return true;
+    },
+
+    answer(token, id, decision) {
+      const run = runs.get(token);
+      const settle = run?.questions.get(id);
+      if (run === undefined || settle === undefined) return false;
+      run.questions.delete(id);
+      settle(decision);
       return true;
     },
 

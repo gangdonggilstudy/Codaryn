@@ -5,7 +5,7 @@
  */
 
 import { isAbsolute } from "node:path";
-import { CHANNEL_ERRORS, LineDecoder, encodeLine, parseRequest } from "../shared/protocol.js";
+import { CHANNEL_ERRORS, LineDecoder, QUESTION_ID_PATTERN, encodeLine, parseRequest } from "../shared/protocol.js";
 import type { HostCall, HostError, HostResponse } from "../shared/protocol.js";
 import { revertValue, runsValue } from "./history.js";
 import type { PlanApplyOf } from "./history.js";
@@ -460,6 +460,14 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         if (typeof runId !== "string" || !RUN_ID.test(runId) || (decision !== "accept" && decision !== "reject")) throw new ArgsError();
         if (note !== null && (typeof note !== "string" || note.length > MAX_NOTE_CHARS)) throw new ArgsError();
         return reviewValue(await deps.app.review({ settings: taskForm(workspace, profile, workflowRef), runId, decision, note }));
+      }
+      case "answerQuestion": {
+        // U-124 (3.6, DR-3): the answer the main process's OS dialog got for a question of a run.
+        if (!isObj(args) || !onlyKeys(args, ["run", "id", "decision"])) throw new ArgsError();
+        const { run: token, id, decision } = args;
+        if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || typeof id !== "string" || !QUESTION_ID_PATTERN.test(id)) throw new ArgsError();
+        if (decision !== "allow_once" && decision !== "deny" && decision !== "dismissed") throw new ArgsError();
+        return { ok: runs.answer(token, id, decision) };
       }
       case "cancelRun": {
         if (!isObj(args) || !onlyKeys(args, ["run"]) || typeof args["run"] !== "string" || !/^[0-9a-f]{32}$/.test(args["run"])) throw new ArgsError();

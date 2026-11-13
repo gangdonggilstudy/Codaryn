@@ -779,6 +779,8 @@ export interface RunResultView {
   readonly finalMessage?: FinalMessageView | null;
   /** U-40 (DR-52): the masking counts; null when there are none or they are not counts. */
   readonly masking?: MaskingView | null;
+  /** U-124: how the run's permission questions ended (counts), or null/absent when none was asked. */
+  readonly confirmations?: ConfirmationsView | null;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -873,8 +875,29 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       finalMessage,
       // U-40: counts only; anything else is not shown (no line), the rest of the result stays.
       masking: maskingOf(result["masking"]),
+      // U-124: how the run's permission questions ended, counts only; anything else gives no lines.
+      confirmations: confirmationsOf(result["confirmations"]),
     },
   };
+}
+
+/**
+ * U-124 (3.6, DR-3, DR-10): how a run's permission questions ended, from its own records: allowed
+ * for one call, and denied by the person, by default (no answer: the dialog could not be shown, or
+ * the time limit ended the wait) or because the run was cancelled while it waited.
+ */
+export interface ConfirmationsView {
+  readonly allowed: number;
+  readonly user: number;
+  readonly default: number;
+  readonly cancelled: number;
+}
+
+export function confirmationsOf(value: unknown): ConfirmationsView | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["allowed", "user", "default", "cancelled"])) return null;
+  const { allowed, user, cancelled } = value;
+  const byDefault = value["default"];
+  return count(allowed) && count(user) && count(byDefault) && count(cancelled) ? { allowed, user, default: byDefault, cancelled } : null;
 }
 
 const nameOrNull = (value: unknown): value is string | null => value === null || (typeof value === "string" && NAME.test(value));

@@ -5,6 +5,9 @@
  * - Phases: idle → starting (startRun is checking; nothing to cancel yet, AC 5.3) → running →
  *   cancelling (asked) → done. A start that fails goes back to idle with its error code.
  * - Items and counts are taken only for the run that goes on (its run id).
+ * - U-144: the main process sends a run's progress and end once the run began, which may be before
+ *   the window has startRun's answer (the main process writes gui-state first). While starting, they
+ *   are kept (a bounded number) and taken when the answer names their run id; the others are dropped.
  * - A "gap" item (records went missing) is kept once: the window says the report has them all.
  * - The goal text is kept for this app session only, to run again (GUI-D11); it is never saved.
  */
@@ -28,6 +31,12 @@ export const FINAL_MESSAGE_LIMIT = 2000;
 
 /** Most items kept in the window; older ones are dropped first (the report keeps every record). */
 export const MAX_KEPT_ITEMS = 5000;
+
+/**
+ * U-144: most progress messages kept while startRun has not answered (the engine host sends one per
+ * 100 ms at most, so ten seconds of them). More are dropped and the run's progress marks a gap.
+ */
+export const MAX_EARLY_EVENTS = 100;
 
 const FILTER_KINDS: Readonly<Record<Exclude<RunFilter, "all">, readonly string[]>> = {
   denied: ["tool_denied"],
@@ -65,6 +74,10 @@ export class RunModel {
   /** GU-5: the approval token of the plan the last apply came from (to be asked for the DR-21 consent). */
   approval: string | null = null;
   private readonly listeners = new Set<() => void>();
+  /** U-144: progress and the end that came while starting, before startRun answered with the run id. */
+  private early: RunEventsPayload[] = [];
+  private earlyLost = false;
+  private earlyDone: RunDonePayload | null = null;
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -102,6 +115,7 @@ export class RunModel {
     this.gap = false;
     this.done = null;
     this.startError = null;
+    this.forgetEarly();
     this.changed();
     return true;
   }
@@ -121,6 +135,15 @@ export class RunModel {
     this.phase = "running";
     this.runId = runId;
     this.startedAt = now;
+    // U-144: what came before this answer, of this run only, in the order it came.
+    for (const payload of this.early) if (payload.runId === runId) this.take(payload);
+    if (this.earlyLost) this.gap = true;
+    const done = this.earlyDone;
+    this.forgetEarly();
+    if (done !== null && done.runId === runId) {
+      this.phase = "done";
+      this.done = done;
+    }
     this.changed();
   }
 
@@ -128,7 +151,14 @@ export class RunModel {
     if (this.phase !== "starting") return;
     this.phase = "idle";
     this.startError = code;
+    this.forgetEarly();
     this.changed();
+  }
+
+  private forgetEarly(): void {
+    this.early = [];
+    this.earlyLost = false;
+    this.earlyDone = null;
   }
 
   cancelling(): void {
@@ -146,7 +176,18 @@ export class RunModel {
   }
 
   events(payload: RunEventsPayload): void {
+    if (this.phase === "starting") {
+      // U-144: kept until startRun answers with the run id (a run that is not that one is dropped then).
+      if (this.early.length < MAX_EARLY_EVENTS) this.early.push(payload);
+      else this.earlyLost = true;
+      return;
+    }
     if (this.runId === null || payload.runId !== this.runId || (this.phase !== "running" && this.phase !== "cancelling")) return;
+    this.take(payload);
+    this.changed();
+  }
+
+  private take(payload: RunEventsPayload): void {
     for (const item of payload.items) {
       if (item.kind === "gap") {
         this.gap = true;
@@ -159,10 +200,14 @@ export class RunModel {
       this.gap = true;
     }
     this.counts = { ...payload.counts };
-    this.changed();
   }
 
   finished(payload: RunDonePayload): void {
+    if (this.phase === "starting") {
+      // U-144: a run that ended before startRun answered (its result is shown when the answer comes).
+      this.earlyDone = payload;
+      return;
+    }
     if (this.runId === null || payload.runId !== this.runId || this.phase === "done") return;
     this.phase = "done";
     this.done = payload;

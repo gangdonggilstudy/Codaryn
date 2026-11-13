@@ -56,6 +56,8 @@ const closeFake = [];
 // analyze run's call with it, later in the same window, fails (not_found) and must still get its line.
 // No model request is added: the two calls ride in replies the runs already had.
 const U54_ID = "bad id";
+// U-124 (3.6, DR-3): the command the profile "ask" asks about before it runs (its rule has confirm: true).
+const ASK_SCRIPT = "require('fs').appendFileSync('asked.txt', 'x')";
 const steps = [
   fakeApi.replyTools([
     fakeApi.toolUse("toolu_smoke_1", "write_file", { path: "made.txt", expectedHash: null, change: { kind: "replace_all", content: "made by the smoke run\n" } }),
@@ -73,6 +75,10 @@ const steps = [
   fakeApi.replyText("analysis written"),
   // U-13: a plan run that discards a file; its apply's discarded files stay through a cleanup.
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_c", "propose_plan", { summary: "discard sub/deeper/c.txt", actions: [{ kind: "discard", path: "sub/deeper/c.txt" }] })]),
+  // U-124: a run with the profile "ask": the same asked-about command twice (allowed once, then denied), then its end.
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_ask_1", "run_command", { executable: process.execPath, args: ["-e", ASK_SCRIPT] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_ask_2", "run_command", { executable: process.execPath, args: ["-e", ASK_SCRIPT] })]),
+  fakeApi.replyText("asked"),
   { kind: "hang" },
 ];
 const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
@@ -92,7 +98,12 @@ writeFileSync(
     requestTimeoutMs: 20000,
     maxRetries: 0,
     limits: { maxModelTurns: 6, maxToolCalls: 10, maxTotalTokens: 100000, maxDurationMs: 120000 },
-    profiles: { doc: { limits: { maxModelTurns: 5 } }, tidy: { workflowRef: "organize" } },
+    profiles: {
+      doc: { limits: { maxModelTurns: 5 } },
+      tidy: { workflowRef: "organize" },
+      // U-124: a command rule that asks before each call (confirm: true, the user's settings only).
+      ask: { policy: { commands: [{ executable: process.execPath, argsPrefix: ["-e", ASK_SCRIPT], allowExtraArgs: false, confirm: true }], network: "deny", destructive: "deny", restorePathTokens: false } },
+    },
   }),
 );
 
@@ -318,6 +329,22 @@ const expected = [
   ["treeIdsDropped", (v) => JSON.stringify(v) === JSON.stringify({ taken: true, old: "unknown_entry", fresh: "copied", reread: "ok" })],
   // U-123: no run start met an off button (if one did, its reason is shown here).
   ["startsBlocked", (v) => Array.isArray(v) && v.length === 0],
+  // U-124 (3.6, DR-3): two questions (the masked executable and the argument count only), the first allowed once (the command ran once), the second denied; the result's lines; the page has no way to answer.
+  [
+    "permissionQuestion",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        questions: [
+          { id: "q1", tool: "run_command", permission: "command", subject: process.execPath.split(/[\\/]/).pop(), argumentCount: 2 },
+          { id: "q2", tool: "run_command", permission: "command", subject: process.execPath.split(/[\\/]/).pop(), argumentCount: 2 },
+        ],
+        ran: "x",
+        lines: ["run-question-allowed", "run-question-user"],
+        pageCanAnswer: false,
+        ended: true,
+      }),
+  ],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],
@@ -332,7 +359,8 @@ const expected = [
   ["settingsReady", (v) => v === "ok"],
   // N-14: a file the environment names is shown by the variable name, not its path.
   ["settingsFile", (v) => v.source === "environment" && typeof v.text === "string" && v.text.includes("CODARYN_CONFIG") && !v.text.includes("smoke-config")],
-  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy"])],
+  // U-124: the profile "ask" has a confirm rule.
+  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy", "ask"])],
   ["settingsKey", (v) => v === "available"],
   ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(api.url)],
   ["modelsBeforeAsking", (v) => v === 0],
@@ -383,8 +411,8 @@ const expected = [
   // Models are listed (GET), runs ask for answers (POST); every request carries the fake key only.
   [
     "apiRequests",
-    // U-13's plan run (5j2) asks once more: 8 before it.
-    (v) => v.models >= 2 && v.messages === 9 && v.other.length === 0 && v.allFakeKey === true,
+    // U-13's plan run (5j2) asks once more: 8 before it. U-124's run with the profile "ask" asks three times more.
+    (v) => v.models >= 2 && v.messages === 12 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -813,9 +841,22 @@ if (life === null || typeof life.hostPid !== "number") {
   if (!gone) process.kill(life.hostPid);
 }
 await sleep(1_000);
-rmSync(lifeFile, { force: true });
-rmSync(sandboxAppData, { recursive: true, force: true });
-rmSync(join(gui, "build", "life-profile"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+// U-144: the last cleanup is not a check. Electron's own child processes of the killed main process
+// (not this script's to end, G-7) may still hold files of the life profile a while on a busy machine;
+// what they hold is left for the next run and named, and the script still gives its count (EPERM had
+// ended it here before the count).
+const leftBehind = [];
+const cleanUp = (target, options = {}) => {
+  try {
+    rmSync(target, { recursive: true, force: true, ...options });
+  } catch (error) {
+    leftBehind.push(`${basename(target)} (${error?.code ?? "error"})`);
+  }
+};
+cleanUp(lifeFile);
+cleanUp(sandboxAppData);
+cleanUp(join(gui, "build", "life-profile"), { maxRetries: 10, retryDelay: 200 });
+if (leftBehind.length > 0) process.stdout.write(`left for the next run: ${leftBehind.join(", ")}\n`);
 
 const total = expected.length + 1 + switchChecks + lifeChecks;
 // U-51: how the request count reached the app (not a check): whole replacements, and the writes a read

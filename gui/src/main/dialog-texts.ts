@@ -26,7 +26,7 @@ const KO = {
   "apply.form": "적용할 형식: 프로필 {profile} · 작업 종류 {workflow}",
   "apply.formDefault": "(설정의 기본)",
   "cleanup.message": "정리할까요? 실행 기록 {runs}개({runSize}), 폐기 보관함 {discarded}개, 남은 폴더 {leftovers}개 (다이제스트 {digest})",
-  "cleanup.detail": "미리보기에서 본 것만 지웁니다. 그사이 바뀐 항목은 남깁니다. 되돌리기가 제자리에 두지 못한 파일은 지우지 않습니다.",
+  "cleanup.detail": "미리보기에서 본 것만 지웁니다. 그사이 바뀐 항목은 남깁니다. 되돌리기가 제자리에 돌려놓지 못한 파일은 지우지 않습니다.",
   "cleanup.discardedLeft": "적용 실행 {count}개는 폐기 보관함에 파일이 있습니다. 같은 정리에서 그 파일도 함께 지우지 않으면 그 실행의 기록은 남깁니다. 파일의 원래 이름과 자리는 이 기록에만 있습니다.",
   "cleanup.confirm": "정리",
   "cleanup.keep": "정리하지 않음",

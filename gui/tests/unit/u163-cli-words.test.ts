@@ -55,8 +55,12 @@ test("U-163 (1, 2): the review is 검토 and its verdicts 받아들임 / 거절�
 });
 
 test("U-163 (3): a check that did not pass is 미통과, as the CLI says; 실패 stays the run's status", async () => {
-  const { ko } = await cli();
+  const { en, ko } = await cli();
   assert.equal(KO["outcome.fail"], ko["outcome.fail"]);
+  // R-98 M-1: in English too, "not passed" apart from the run's "failed".
+  assert.equal(EN["outcome.fail"], en["outcome.fail"]);
+  assert.equal(EN["outcome.fail"], "not passed");
+  assert.notEqual(EN["outcome.fail"], EN["runstatus.failed"]);
   assert.equal(KO["outcome.fail"], "미통과");
   assert.equal(KO["runstatus.failed"], "실패");
   assert.notEqual(KO["outcome.fail"], KO["runstatus.failed"]);
@@ -83,7 +87,7 @@ test("U-163 (4): the records-changed mark is changed by something other than the
 });
 
 test("U-163 (5, 7-14): 가릴 값, 작업 지정 방식, 한도, 확인, 앞선 정리, 일반 폴더, 돌려놓지 못한, 실행을 시작할 때, 손상", async () => {
-  const { ko } = await cli();
+  const { en, ko } = await cli();
   assert.match(KO["home.notice"], /등록한 가릴 값뿐/);
   assert.match(KO["settings.providerNotice"], /\(가릴 값은 가린 채\)/);
   for (const id of ["error.form_unknown", "report.reviewCli", "plan.formUnknown"] as const) {
@@ -102,6 +106,23 @@ test("U-163 (5, 7-14): 가릴 값, 작업 지정 방식, 한도, 확인, 앞선 
   assert.equal(KO["phase.after_verify"], "검증 뒤");
   assert.ok(KO["runs.damaged"].startsWith("손상"));
   assert.equal(KO["runs.damaged"], ko["runs.damaged"]);
+  // R-98 L-1: the discarded files' deletion is confirmed in every cleanup line, never agreed to (동의 is DR-25's).
+  for (const id of ["cleanup.kept.not_confirmed", "cleanup.kept.discarded_left"] as const) {
+    assert.doesNotMatch(KO[id], /동의/, `ko ${id}`);
+    assert.doesNotMatch(EN[id], /agree/, `en ${id}`);
+  }
+  assert.match(KO["cleanup.kept.discarded_left"], /지우기를 확인하세요/);
+  // R-98 L-2: the main process's cleanup dialog says 돌려놓지 못한, as the screen does.
+  assert.match(DIALOG_TEXTS.ko["cleanup.detail"], /제자리에 돌려놓지 못한/);
+  assert.doesNotMatch(DIALOG_TEXTS.ko["cleanup.detail"], /두지 못한/);
+  // R-98 L-3: the CLI's English for a damaged run, the phases and the task form.
+  assert.equal(EN["runs.damaged"], en["runs.damaged"]);
+  for (const id of ["phase.run_start", "phase.before_verify", "phase.after_verify"] as const) {
+    assert.equal(EN[id], en[id], `en ${id}`);
+    assert.equal(KO[id], ko[id], `ko ${id}`);
+  }
+  for (const [id, text] of Object.entries(EN)) assert.doesNotMatch(text, /task part/, `en ${id}: the task form, as the CLI says`);
+  assert.match(EN["report.reviewCli"], /task form/);
   for (const [id, text] of Object.entries(KO)) assert.doesNotMatch(text, /지난 정리|보통 폴더|제한 없음|가린 값 제외/, `ko ${id}`);
 });
 

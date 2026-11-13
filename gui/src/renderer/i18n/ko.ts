@@ -546,7 +546,7 @@ export const KO = {
   "cleanup.result.partlyRemoved": "다 지우지 못한 것은 지웠다고 보지 않습니다. 남은 부분은 다음 정리 계획에 남은 폴더로 나옵니다.",
   "cleanup.kept.not_confirmed": "폐기 보관함 지우기를 확인하지 않아 남김",
   "cleanup.kept.not_reverted_not_confirmed": "되돌리지 않은 실행이라 남김(질문에 남김을 고름)",
-  "cleanup.kept.discarded_left": "폐기 보관함에 파일이 남아 남김(파일의 원래 이름과 자리는 이 기록에만 있음). 지우려면 그 적용을 먼저 되돌리거나, 그 폐기 보관함도 골라 지우기에 동의하세요",
+  "cleanup.kept.discarded_left": "폐기 보관함에 파일이 남아 남김(파일의 원래 이름과 자리는 이 기록에만 있음). 지우려면 그 적용을 먼저 되돌리거나, 그 폐기 보관함도 골라 지우기를 확인하세요",
   "cleanup.kept.used_by_kept_apply": "남긴 적용 실행이 쓰는 계획이라 남김",
   "cleanup.kept.changed": "미리보기 뒤에 바뀌어 남김",
   "cleanup.kept.not_plain_directory": "일반 폴더가 아니어서 남김",

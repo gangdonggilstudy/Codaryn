@@ -2,9 +2,10 @@
 // Run: node --test scripts/compare-cli/compare-cli-boards.test.mjs
 // - normalization and line diff on their own (fast);
 // - two real builds of HEAD (git archive, built in a temporary folder): the same build compared
-//   with itself over every case has no difference, and a build with one catalog line changed
-//   (the English "turn {turn}" progress line) is found exactly there: the English run's stderr
-//   lines that use it, and nothing else (the Korean case is the same).
+//   with itself over every case (terminal ones too) has no difference, and a build with two
+//   catalog lines changed (the English "turn {turn}" progress line and the apply question) is found
+//   exactly there: the English run's stderr lines that use the first, the terminal apply's question
+//   line (U-135), and nothing else (the Korean case and the apply with --digest are the same).
 // Scripted models only; nothing leaves the machine. The temporary folder is removed at the end.
 
 import assert from "node:assert/strict";
@@ -94,7 +95,7 @@ describe("two real builds of HEAD", () => {
     assert.ok(results.every((result) => result.artifacts > 0));
   });
 
-  test("a build with one catalog line changed: that line is found, in the English case only", { timeout: 900_000 }, async () => {
+  test("a build with catalog lines changed: each is found where it shows, a terminal question too", { timeout: 900_000 }, async () => {
     assert.ok(base !== undefined, "the first test made the base build");
     const head = await prepareBoard({
       commit: "HEAD",
@@ -102,15 +103,33 @@ describe("two real builds of HEAD", () => {
       alter: (dir) => {
         const file = path.join(dir, "src", "i18n", "en.ts");
         const before = readFileSync(file, "utf8");
-        const changed = before.replace('"progress.turn": "turn {turn}"', '"progress.turn": "round {turn}"');
-        assert.notEqual(changed, before, "the catalog line to change is there");
+        const turned = before.replace('"progress.turn": "turn {turn}"', '"progress.turn": "round {turn}"');
+        assert.notEqual(turned, before, "the progress line to change is there");
+        // U-135: the apply question, which only the terminal case shows.
+        const changed = turned.replace('"apply.question": "Apply this plan?"', '"apply.question": "Apply the plan?"');
+        assert.notEqual(changed, turned, "the question to change is there");
         writeFileSync(file, changed, "utf8");
       },
     });
-    const cases = CASES.filter((spec) => spec.name === "document-run" || spec.name === "document-run-ko");
+    const names = ["document-run", "document-run-ko", "plan-apply", "terminal-apply-yes"];
+    const cases = CASES.filter((spec) => names.includes(spec.name));
     const results = await compareBuilds({ base, head, cases, caseDir: path.join(work, "case") });
     const byName = new Map(results.map((result) => [result.name, result]));
     assert.deepEqual(byName.get("document-run-ko")?.differences, [], "the Korean case does not use the English line");
+    // Both apply cases' plan runs show the turn line; only the terminal apply asks its question.
+    const turnLinesOnly = (difference) => difference.lines.every((line) => /codaryn: turn \d+$/.test(line.base) && /codaryn: round \d+$/.test(line.head));
+    const planRun = "step 1: codaryn run --task task.json | stderr";
+    const digested = byName.get("plan-apply")?.differences ?? [];
+    assert.deepEqual(digested.map((item) => item.key), [planRun], "an apply with --digest asks nothing");
+    assert.ok(turnLinesOnly(digested[0]));
+    const asked = byName.get("terminal-apply-yes")?.differences ?? [];
+    assert.deepEqual(asked.map((item) => item.key), [planRun, 'step 2: codaryn apply --task task.json --run <RUN-1> [terminal: stdin,stdout,stderr answers ["y"]] | stderr']);
+    assert.ok(turnLinesOnly(asked[0]));
+    assert.ok((asked[1]?.lines ?? []).length > 0);
+    for (const line of asked[1]?.lines ?? []) {
+      assert.match(line.base, /Apply this plan\?/);
+      assert.match(line.head, /Apply the plan\?/);
+    }
     const differences = byName.get("document-run")?.differences ?? [];
     assert.deepEqual(differences.map((item) => item.key), ["step 1: codaryn run --task task.json | stderr"]);
     const lines = differences[0]?.lines ?? [];

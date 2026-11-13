@@ -70,6 +70,8 @@ function profileItem(t: Texts, profile: ProfileView): HTMLElement {
 /** The limits a config file may set (the main process and the engine host check the same list). */
 const LIMIT_KEYS = ["maxModelTurns", "maxToolCalls", "maxTotalTokens", "maxDurationMs", "maxRepairAttempts", "maxSameFailures"] as const;
 const MAX_LIMIT = 1_000_000_000;
+/** U-93: the largest output cap (the contract's MAX_OUTPUT_TOKENS_LIMIT; the page loads no engine, a unit test compares). */
+export const MAX_OUTPUT_CAP = 200_000;
 
 type Edit = Readonly<Record<string, unknown>>;
 type Propose = (edit: Edit) => void;
@@ -207,7 +209,7 @@ function providerInUse(view: SettingsView): string | null {
   return view.provider ?? view.defaultProvider;
 }
 
-function providerSection(t: Texts, view: SettingsView, propose: Propose | null): HTMLElement {
+function providerSection(t: Texts, view: SettingsView, propose: Propose | null, warn: (code: string) => void = () => undefined): HTMLElement {
   const box = section("settings-provider", t.format("settings.provider"));
   const inUse = providerInUse(view);
   box.append(
@@ -237,12 +239,13 @@ function providerSection(t: Texts, view: SettingsView, propose: Propose | null):
     if (!provider.listable) facts.append(el("li", t.format("settings.providerNoList", { provider: provider.name }), { "data-no-list": provider.name }));
     row.append(facts);
     if (propose !== null) {
-      const input = el("input", undefined, { type: "number", min: "1", max: String(MAX_LIMIT), step: "1", id: `settings-output-cap-${provider.name}`, "aria-label": t.format("settings.outputCapInput", { provider: provider.name }) });
+      // U-93 (R-73, U-80 L1): the contract's largest cap; out of range or empty says so, as the limits do.
+      const input = el("input", undefined, { type: "number", min: "1", max: String(MAX_OUTPUT_CAP), step: "1", id: `settings-output-cap-${provider.name}`, "aria-label": t.format("settings.outputCapInput", { provider: provider.name }) });
       row.append(
         input,
         button(t.format("settings.limitSet"), () => {
           const n = Number(input.value);
-          if (input.value.trim() === "" || !Number.isSafeInteger(n) || n < 1 || n > MAX_LIMIT) return;
+          if (input.value.trim() === "" || !Number.isSafeInteger(n) || n < 1 || n > MAX_OUTPUT_CAP) return warn("bad_number");
           propose({ op: "outputCap", provider: provider.name, value: n });
         }, { "data-output-cap-set": provider.name }),
       );
@@ -462,7 +465,7 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         key.append(el("p", t.format("settings.keyHow")));
 
         const editable = view.file !== null && view.file.exists;
-        const sections = [general(t, view, deps.language, propose), providerSection(t, view, editable ? propose : null), model, profiles, workflows];
+        const sections = [general(t, view, deps.language, propose), providerSection(t, view, editable ? propose : null, warn), model, profiles, workflows];
         if (editable) sections.push(rulesSection(t, view.rules, view.policyNarrowings, propose, warn), secretsSection(t, view.rules, propose, warn));
         else sections.push(el("p", t.format("settings.createFirst"), { class: "notice", id: "settings-create-first" }));
         body.replaceChildren(proposal, ...sections, key);

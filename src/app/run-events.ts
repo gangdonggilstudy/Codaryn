@@ -80,6 +80,9 @@ const RUN_TYPES = {
   model_error: true,
   tool_decision: true,
   tool_result: true,
+  // U-74 (DR-3): the in-run permission question and its answer; cleaned and masked as every record is.
+  confirmation_requested: true,
+  confirmation_answered: true,
   file_changed: true,
   verifier_result: true,
   repair_started: true,

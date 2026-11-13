@@ -100,7 +100,8 @@ describe("DR-39: cleaning up run records and discarded files", () => {
   });
 
   test("message ids: the fixed texts and one per code", () => {
-    assert.deepEqual(FIXED_MESSAGES["cleanup.confirm.discarded"], { files: "count", bytes: "count" });
+    // U-86: the discarded files' preview line is the --delete-discarded group (g-u86-cleanup-preview).
+    assert.deepEqual(FIXED_MESSAGES["cleanup.group.delete_discarded"], { count: "count", files: "count", bytes: "count" });
     assert.deepEqual(FIXED_MESSAGES["cleanup.summary.parked"], { files: "count", bytes: "count" });
     const ids = MESSAGE_IDS as readonly string[];
     for (const code of CLEANUP_BLOCK_CODES) assert.ok(ids.includes(`cleanup.blocked.${code}`), code);
@@ -130,8 +131,8 @@ describe("DR-44 (R-34): what a person sees is what happens, and no way back is l
     const confirmation: CleanupConfirmation = { digest, discarded: true, includeNotReverted: false };
     const kept: CleanupOutcome = { ok: true, removed: [], kept: [{ target: "run", runId, reason: "not_reverted_not_confirmed" }], totals: emptyTotals };
     assert.ok(confirmation && kept.ok);
-    // The confirmation header says how many of the run records are such runs.
-    assert.deepEqual(FIXED_MESSAGES["cleanup.confirm.not_reverted"], { count: "count" });
+    // U-86: the preview's --include-not-reverted group counts such runs (g-u86-cleanup-preview).
+    assert.deepEqual(FIXED_MESSAGES["cleanup.group.include_not_reverted"], { count: "count", bytes: "count" });
   });
 
   test("(a) a plan run whose apply run is kept is kept too, or that apply could no longer be reverted", () => {
@@ -179,7 +180,6 @@ describe("DR-44 (R-34): what a person sees is what happens, and no way back is l
     const summary: Pick<StateSummary, "leftovers"> = { leftovers: { count: 1, files: 1, bytes: 120 } };
     assert.ok(removed.ok && logged.leftovers?.count === 1 && summary.leftovers.count === 1);
     assert.deepEqual(FIXED_MESSAGES["cleanup.summary.leftovers"], { count: "count", bytes: "count" });
-    assert.deepEqual(FIXED_MESSAGES["cleanup.confirm.leftovers"], { count: "count", bytes: "count" });
     assert.deepEqual(FIXED_MESSAGES["cleanup.done_leftovers"], { count: "count", bytes: "count" });
   });
 });

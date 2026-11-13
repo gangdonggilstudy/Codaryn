@@ -11,7 +11,7 @@ import type { StateGuard } from "./state.js";
 import type { Journal } from "./journal.js";
 import type { ModelErrorKind, ModelProvider } from "./model.js";
 import { modelErrorRetryable } from "./model.js";
-import type { PolicyGate } from "./policy.js";
+import type { ConfirmPermission, PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
@@ -315,9 +315,11 @@ export const CLI_ERROR_CATEGORY: { readonly [C in CliErrorCode]: CliErrorCategor
  * U-55: whether the same command may succeed later, unchanged. Only a lock or a run that ends lets
  * it (workspace_locked, run_in_progress; a dead lock is reclaimed). cleanup_plan_changed needs a new
  * preview first, so it is false; internal_error is false so a program does not repeat it blindly.
- * model_list_failed goes by the listing's model error (cliErrorFacts).
+ * model_list_failed goes by the listing's model error (cliErrorFacts). U-82 (review R-71 L1):
+ * config_write_failed has no entry, so no `retryable` (unknown): a name the system refuses or a
+ * missing drive and a file another program holds or a full disk give the same code and message.
  */
-export const CLI_ERROR_RETRYABLE: { readonly [C in Exclude<CliErrorCode, "model_list_failed">]: boolean } = {
+export const CLI_ERROR_RETRYABLE: { readonly [C in Exclude<CliErrorCode, "model_list_failed" | "config_write_failed">]: boolean } = {
   invalid_arguments: false,
   invalid_task: false,
   invalid_config: false,
@@ -330,7 +332,6 @@ export const CLI_ERROR_RETRYABLE: { readonly [C in Exclude<CliErrorCode, "model_
   run_in_progress: true,
   provider_not_configured: false,
   provider_not_implemented: false,
-  config_write_failed: false,
   config_exists: false,
   run_not_found: false,
   invalid_run_record: false,
@@ -347,20 +348,23 @@ export const CLI_ERROR_RETRYABLE: { readonly [C in Exclude<CliErrorCode, "model_
 
 /**
  * U-55: `category` and `retryable` of a CLI error, to spread into its CliErrorOutput. For
- * model_list_failed, `modelError` is the listing's failure (ListModelsOutcome's kind and
- * httpStatus); without it, or when modelErrorRetryable cannot tell, `retryable` is left out.
+ * model_list_failed, `modelError` is the listing's failure (ListModelsOutcome's kind, httpStatus and,
+ * U-82, its own `retryable`, which comes first); without it, or when modelErrorRetryable cannot
+ * tell, `retryable` is left out. config_write_failed has none either (R-71 L1).
  */
 export function cliErrorFacts(
   code: CliErrorCode,
-  modelError?: { readonly kind: ModelErrorKind; readonly httpStatus?: number },
+  modelError?: { readonly kind: ModelErrorKind; readonly httpStatus?: number; readonly retryable?: boolean },
 ): { readonly category: CliErrorCategory; readonly retryable?: boolean } {
   const category = CLI_ERROR_CATEGORY[code];
   const retryable =
     code === "model_list_failed"
       ? modelError === undefined
         ? undefined
-        : modelErrorRetryable(modelError.kind, modelError.httpStatus)
-      : CLI_ERROR_RETRYABLE[code];
+        : modelErrorRetryable(modelError.kind, modelError.httpStatus, modelError.retryable)
+      : code === "config_write_failed"
+        ? undefined
+        : CLI_ERROR_RETRYABLE[code];
   return retryable === undefined ? { category } : { category, retryable };
 }
 
@@ -759,6 +763,12 @@ export interface EngineDeps {
    * recorded and the run goes on. Integrity checks and state checks at the same moment both run.
    */
   readonly stateGuard?: StateGuard;
+  /**
+   * U-74 (DR-3, DR-10): asks a person about a call a `confirm: true` rule allows (PolicyDecision
+   * `confirm`). Absent: nobody is asked and such a call is denied, recorded `by: "default"`. The wait
+   * counts in maxDurationMs.
+   */
+  readonly confirm?: ConfirmPermission;
 }
 
 /** Signature of `runTask`, exported by `src/engine/index.ts`. */

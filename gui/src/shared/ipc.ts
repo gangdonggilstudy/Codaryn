@@ -9,6 +9,7 @@
 
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",
+  copyText: "codaryn:app:copy",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -20,6 +21,7 @@ export const IPC_CHANNELS = {
   listModels: "codaryn:models:list",
   selectModel: "codaryn:models:select",
   startRun: "codaryn:run:start",
+  startTaskRun: "codaryn:run:starttask",
   cancelRun: "codaryn:run:cancel",
   listRuns: "codaryn:runs:list",
   previewRevert: "codaryn:runs:previewrevert",
@@ -100,6 +102,27 @@ export function parseRevealArgs(value: unknown): { readonly workspace: string; r
   const { workspace, node } = value;
   return isHandle(workspace) && isHandle(node) ? { workspace, node } : null;
 }
+
+/**
+ * U-62 (6.4, 2 principle 4; review R-73 M1, L1, PM decision): the main process copies only the two
+ * things the window copies: a run id, or a digest's first 12 characters (lowercase hexadecimal, what
+ * the CLI's apply --digest takes). Anything else is refused (invalid_args), so the page cannot put
+ * other text on the clipboard. A path is not copied until the tree comes from the app layer's
+ * workspace list, which masks the registered secrets as well (G-list).
+ */
+const DIGEST_START = /^[0-9a-f]{12}$/;
+
+/** The value to copy, or null when it is neither a run id nor a digest's first 12 characters. */
+export function copyableValue(value: unknown): string | null {
+  return isRunId(value) || (typeof value === "string" && DIGEST_START.test(value)) ? value : null;
+}
+
+/** `copyText` arguments: `{text}` only. */
+export function parseCopyArgs(value: unknown): string | null {
+  return isObj(value) && hasOnlyKeys(value, ["text"]) ? copyableValue(value["text"]) : null;
+}
+
+export type CopyReply = { readonly ok: true } | { readonly ok: false; readonly code: string };
 
 /** A call that takes no arguments gets `undefined` from `ipcRenderer.invoke(channel)`. */
 export function isNoArgs(args: readonly unknown[]): boolean {
@@ -571,6 +594,17 @@ export const MAX_GOAL_CHARS = 20_000;
 const NAME = /^[^\u0000-\u001f\u007f]{1,200}$/;
 
 /** `startRun` arguments: the workspace handle, the goal, and the profile and task kind chosen, or null. */
+/**
+ * U-63 (3.5, GUI-D8): `startTaskRun` arguments: the open workspace and whether to choose a variables
+ * file too. No path: the main process's OS dialogs choose the task file (and the variables file),
+ * and neither path is kept or sent to the page.
+ */
+export function parseStartTaskArgs(value: unknown): { readonly workspace: string; readonly withVars: boolean } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "withVars"])) return null;
+  const { workspace, withVars } = value;
+  return isHandle(workspace) && typeof withVars === "boolean" ? { workspace, withVars } : null;
+}
+
 export function parseStartRunArgs(value: unknown): { readonly workspace: string; readonly goal: string; readonly profile: string | null; readonly workflow: string | null } | null {
   if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "goal", "profile", "workflow"])) return null;
   const { workspace, goal } = value;

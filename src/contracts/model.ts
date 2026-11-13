@@ -103,8 +103,11 @@ export type ModelErrorKind = (typeof MODEL_ERROR_KINDS)[number];
  * - undefined, unknown: api_error without an HTTP status. A connection failure (which the transport
  *   retries) and a TLS failure, a refused request format, a refusal or a failed response (which it
  *   does not) look the same in a ModelOutcome. Absent means unknown, never false.
+ * U-82 (DR-68): `verdict`, the outcome's own `retryable` (the transport's or the adapter's), comes
+ * first when it is given; the rule above is for outcomes without one.
  */
-export function modelErrorRetryable(kind: ModelErrorKind, httpStatus?: number): boolean | undefined {
+export function modelErrorRetryable(kind: ModelErrorKind, httpStatus?: number, verdict?: boolean): boolean | undefined {
+  if (verdict !== undefined) return verdict;
   switch (kind) {
     case "rate_limited":
     case "overloaded":
@@ -131,6 +134,17 @@ export type ModelOutcome =
        * fill it from SP-3 on; until then it is absent.
        */
       readonly httpStatus?: number;
+      /**
+       * U-82 (DR-68): whether trying again later can help, as the adapter knows it: the transport's
+       * verdict on its last attempt for what it sent (src/model/http: 429, 503 and 529, 408, 409,
+       * 5xx, a timeout, a refused or reset connection yes; others no), and the adapter's own where
+       * it is plain (a malformed response, a refusal, an unusable key, a request it could not build:
+       * no). Absent where it is not known (an unexpected failure, a cancel, a response the provider
+       * says failed, was cancelled or is incomplete, and, review R-75 L2, a transport failure of no
+       * known kind, which the transport does not retry out of care) and from a provider that does not
+       * say (the scripted one). Absent means unknown, never false.
+       */
+      readonly retryable?: boolean;
     };
 
 export interface ModelProvider {
@@ -206,7 +220,8 @@ export type AnthropicListSettings = ListModelsSettings;
 export type ListModelsOutcome =
   | { readonly ok: true; readonly models: readonly ModelInfo[] }
   /** Same kinds as a model request (`auth_failed`, `rate_limited`, `timeout`, `aborted`, ...). */
-  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number };
+  /** U-82: `retryable` as on a ModelOutcome failure. */
+  | { readonly ok: false; readonly kind: ModelErrorKind; readonly message: string; readonly httpStatus?: number; readonly retryable?: boolean };
 
 /**
  * SP-1: what every API provider's model listing looks like (the Anthropic one is below). SP-5:

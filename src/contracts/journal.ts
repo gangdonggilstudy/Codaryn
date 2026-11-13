@@ -12,7 +12,7 @@ import type { StateCheckPhase } from "./state.js";
 import type { Limits, ModelProviderName } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ModelMessage, ModelStop, ModelUsage, MaskedToolCall } from "./model.js";
-import type { PermissionKind, PolicyDenialCode } from "./policy.js";
+import type { ConfirmationBy, ConfirmationDecision, PermissionKind, PolicyDenialCode } from "./policy.js";
 import type { ToolErrorCode, ToolResult } from "./tool.js";
 import type { VerifierResult } from "./verify.js";
 import type { RunReason, RunUsage, TerminalRunStatus } from "./engine.js";
@@ -95,6 +95,23 @@ export type JournalEvent =
       readonly code: PolicyDenialCode | ToolErrorCode | null;
     }
   | { readonly type: "tool_result"; readonly result: ToolResult }
+  /**
+   * U-74 (DR-3): a permission question, recorded before it is asked, also when nobody can be asked
+   * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable (key shapes hidden,
+   * U-106) and a count; no argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
+   */
+  | {
+      readonly type: "confirmation_requested";
+      readonly id: string;
+      readonly kind: "permission";
+      readonly callId: string;
+      readonly tool: string;
+      readonly permission: PermissionKind;
+      readonly subject: MaskedText;
+      readonly argumentCount: number;
+    }
+  /** U-74: the answer. `dismissed` is recorded as `deny` by `default` (ConfirmationBy). */
+  | { readonly type: "confirmation_answered"; readonly id: string; readonly decision: ConfirmationDecision; readonly by: ConfirmationBy }
   | {
       readonly type: "file_changed";
       readonly callId: string;

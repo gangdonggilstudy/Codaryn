@@ -52,9 +52,12 @@ describe("U-55: every CLI error has a category and, where it can be told, retrya
   });
 
   test("only a run or lock that ends lets the same command succeed; a model listing goes by its error", () => {
-    const yes = CODES.filter((code) => code !== "model_list_failed" && CLI_ERROR_RETRYABLE[code as Exclude<CliErrorCode, "model_list_failed">]);
+    type Tabled = Exclude<CliErrorCode, "model_list_failed" | "config_write_failed">;
+    const yes = CODES.filter((code) => Object.hasOwn(CLI_ERROR_RETRYABLE, code) && CLI_ERROR_RETRYABLE[code as Tabled]);
     assert.deepEqual(yes.sort(), ["run_in_progress", "workspace_locked"]);
     assert.equal(Object.hasOwn(CLI_ERROR_RETRYABLE, "model_list_failed"), false);
+    // U-82 (review R-71 L1): config_write_failed cannot be told apart, so it has no entry (unknown).
+    assert.equal(Object.hasOwn(CLI_ERROR_RETRYABLE, "config_write_failed"), false);
     assert.deepEqual(cliErrorFacts("model_list_failed", { kind: "rate_limited", httpStatus: 429 }), { category: "environment", retryable: true });
     assert.deepEqual(cliErrorFacts("model_list_failed", { kind: "auth_failed", httpStatus: 401 }), { category: "environment", retryable: false });
     assert.deepEqual(cliErrorFacts("model_list_failed", { kind: "api_error" }), { category: "environment" }, "unknown: left out");

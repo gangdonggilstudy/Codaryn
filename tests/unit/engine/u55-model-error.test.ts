@@ -47,6 +47,15 @@ describe("U-55: a run that a model error ended says what kind, at which turn, an
     assert.equal(Object.hasOwn(result.modelError as object, "retryable"), false);
   });
 
+  test("U-82 (DR-68): the outcome's own verdict comes first, so a refused connection is told as retryable", async () => {
+    const refused: ModelOutcome = { ok: false, kind: "api_error", message: "network error: connection failed (ECONNREFUSED)", retryable: true };
+    const tls: ModelOutcome = { ok: false, kind: "api_error", message: "network error: TLS connection failed", retryable: false };
+    assert.deepEqual((await runTask(harness({ steps: [() => refused] }).deps)).modelError, { kind: "api_error", turn: 1, retryable: true });
+    assert.deepEqual((await runTask(harness({ steps: [() => tls] }).deps)).modelError, { kind: "api_error", turn: 1, retryable: false });
+    const overruled: ModelOutcome = { ok: false, kind: "api_error", message: "x", httpStatus: 500, retryable: false };
+    assert.deepEqual((await runTask(harness({ steps: [() => overruled] }).deps)).modelError, { kind: "api_error", turn: 1, retryable: false });
+  });
+
   test("a malformed response and a plan run without a plan are malformed_response, not retryable", async () => {
     const malformed = harness({ steps: [() => response([], { stop: "length" })] });
     assert.deepEqual((await runTask(malformed.deps)).modelError, { kind: "malformed_response", turn: 1, retryable: false });

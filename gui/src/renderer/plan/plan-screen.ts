@@ -19,6 +19,7 @@ import { errorText } from "../i18n/catalog.js";
 import { asPlan, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { copyControl } from "../shell/copy.js";
 import type { Screen } from "../shell/shell.js";
 import type { PlanActionView } from "../../shared/ipc.js";
 import { localDateTime } from "../run/run-model.js";
@@ -96,7 +97,8 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         const parts: HTMLElement[] = [];
         // As the CLI's plan: a marked plan run's warning comes before anything of the plan.
         if (marked) parts.push(el("p", t.format("plan.recordsChanged"), { class: "notice", id: "plan-records-changed" }));
-        parts.push(summary, el("p", t.format("plan.runId", { runId: view.runId }), { lang: "en" }), list);
+        // U-62 (3.9): the digest's first 12 characters, the part the CLI's apply takes, can be copied.
+        parts.push(summary, copyControl(t, t.format("copy.digest"), () => api.copyText(view.digest.slice(0, 12)), { id: "plan-copy-digest" }), el("p", t.format("plan.runId", { runId: view.runId }), { lang: "en" }), list);
         // U-32 (U-14 AXM-15): the model's summary under the label that says whose words they are and
         // that they are not what is approved; rows as the engine drew them. None for a marked plan run.
         if (!marked && view.summary !== undefined && view.summary.length > 0) {

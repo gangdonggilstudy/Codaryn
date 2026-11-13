@@ -849,6 +849,10 @@ export const FIXED_MESSAGES = {
   // SP-D12: the chosen provider and its key variable.
   "doctor.api_key.ok": { keyEnv: "keyEnv" },
   "doctor.api_key.missing": { keyEnv: "keyEnv", provider: "provider" },
+  // U-87 (design gap C-12, architecture.md A-1; PM): the key is set but not of the form a request
+  // can carry (S-11: printable ASCII 0x21-0x7E, no space); the check fails. Never the value, its
+  // length or which character.
+  "doctor.api_key.unusable": { keyEnv: "keyEnv" },
   // DR-36 (b), DR-34 (a): the key is set and where `{provider}` requests send it: `{origin}`, set by
   // the provider's address variable `{variable}`, by the config field `{field}`, or the default.
   "doctor.api_key.sends_to_env": { keyEnv: "keyEnv", provider: "provider", origin: "apiOrigin", variable: "settingEnv" },

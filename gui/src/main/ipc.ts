@@ -49,6 +49,7 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
+import { reviewTarget } from "./history.js";
 import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply, SettingsProposalReply, SettingsWrittenReply } from "../shared/ipc.js";
 import { parseSettingsEdit } from "../shared/settings-edit.js";
 import { cleanupQuestions } from "../shared/cleanup.js";
@@ -57,6 +58,8 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
+import { parseCopyArgs, parseStartTaskArgs } from "../shared/ipc.js";
+import type { CopyReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
 import type { CreateSettingsReply, SuggestionsReply } from "../shared/ipc.js";
@@ -125,6 +128,10 @@ export interface IpcDeps {
   readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
   /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
   readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
+  /** U-63 (3.5, GUI-D8): the OS open dialog for the task file or the variables file (null: cancelled). Never kept. */
+  readonly chooseOpenFile: (kind: "task" | "vars") => Promise<string | null>;
+  /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
+  readonly writeClipboard: (text: string) => void;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -229,6 +236,17 @@ export function registerIpc(deps: IpcDeps): void {
     // Shows the entry selected in the file manager. Nothing is opened or run.
     shell.showItemInFolder(target);
     return true;
+  });
+
+  /**
+   * U-62 (6.4; R-73 M1, L1): copies a run id or a digest's first 12 characters only (parseCopyArgs);
+   * anything else is invalid_args. Nothing else reaches the clipboard; the page cannot read it.
+   */
+  handle(IPC_CHANNELS.copyText, async (args): Promise<CopyReply> => {
+    const text = args.length === 1 ? parseCopyArgs(args[0]) : null;
+    if (text === null) return { ok: false, code: "invalid_args" };
+    deps.writeClipboard(text);
+    return { ok: true };
   });
 
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {
@@ -445,6 +463,41 @@ export function registerIpc(deps: IpcDeps): void {
       deps.runs.begin(token, runId);
       // R21b-L-1: the run's form, so its plan, changes and report open with it later (also after a restart).
       await workspaces.rememberRun(parsed.workspace, runId, { profile: parsed.profile, workflow: parsed.workflow });
+      // U-92: the person sees this run's result, so its review is one they were shown.
+      deps.history.noteStarted(parsed.workspace, runId);
+      return { ok: true, runId };
+    } finally {
+      starting = false;
+    }
+  });
+
+  /**
+   * U-63 (3.5, GUI-D8): a run of a task file the person chooses in the OS dialog, with a variables
+   * file chosen the same way when asked for. The paths go to the engine host only: not to the page,
+   * not into gui-state.json (the run's form is not remembered, so its plan is shown, not applied
+   * here). The app layer refuses a task file inside its workspace (S-1), as the CLI's run does.
+   */
+  handle(IPC_CHANNELS.startTaskRun, async (args): Promise<StartRunReply> => {
+    const parsed = args.length === 1 ? parseStartTaskArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (workspaces.path(parsed.workspace) === null) return { ok: false, code: "unknown_workspace" };
+    starting = true;
+    try {
+      const taskPath = await deps.chooseOpenFile("task");
+      if (taskPath === null) return { ok: false, code: "cancelled" };
+      const varsFile = parsed.withVars ? await deps.chooseOpenFile("vars") : null;
+      if (parsed.withVars && varsFile === null) return { ok: false, code: "cancelled" };
+      const state = await deps.host();
+      if (!("host" in state)) return { ok: false, code: state.failure };
+      const response = await state.host.call("startTaskRun", { taskPath, varsFile, language }, START_TIMEOUT_MS);
+      if (!response.ok) return { ok: false, code: response.error.code };
+      const value = response.value as Record<string, unknown> | null;
+      if (typeof value !== "object" || value === null || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+      const token = value["run"];
+      const runId = value["runId"];
+      if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
+      deps.runs.begin(token, runId);
       return { ok: true, runId };
     } finally {
       starting = false;
@@ -626,9 +679,12 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const root = workspaces.path(parsed.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
+    // U-92 (R-73, U-79 L1): a run the person was shown, with the form this app remembers for it (the page's is not used).
+    const target = reviewTarget(deps.history.wasListed(parsed.workspace, parsed.runId), (await workspaces.runForms(parsed.workspace)).get(parsed.runId));
+    if (!target.ok) return { ok: false, code: target.code };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("review", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
+    const response = await state.host.call("review", { workspace: root, profile: target.form.profile, workflowRef: target.form.workflow, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return toReviewReply(response.value);
   });

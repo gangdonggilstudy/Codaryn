@@ -24,6 +24,7 @@ import type {
   RevertView,
   RunDonePayload,
   PlanApplyView,
+  CopyReply,
   RunListItem,
   RunsReply,
   RunEventsPayload,
@@ -50,6 +51,8 @@ export interface CodarynApi {
   forgetRecent(id: string): Promise<unknown>;
   tree(workspace: string, node: string | null, offset: number): Promise<unknown>;
   reveal(workspace: string, node: string): Promise<unknown>;
+  /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
+  copyText(text: string): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;
@@ -60,6 +63,8 @@ export interface CodarynApi {
   previewCleanup(workspace: string, selection: Readonly<Record<string, unknown>>): Promise<unknown>;
   applyCleanup(token: string): Promise<unknown>;
   startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
+  /** U-63: a run of a task file the main process's OS dialog chooses (and a variables file when `withVars`). */
+  startTaskRun(workspace: string, withVars: boolean): Promise<unknown>;
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
   onRunDone(listener: (payload: unknown) => void): void;
@@ -388,6 +393,11 @@ export function asPlan(value: unknown): PlanReply {
   if (!str(view["runId"]) || !str(view["digest"]) || !Array.isArray(view["actions"]) || (view["status"] !== "pending" && view["status"] !== "applied")) return failed(value);
   const approval = str(value["approval"]) && HEX.test(value["approval"]) ? value["approval"] : null;
   return { ok: true, view: view as unknown as PlanView, approval };
+}
+
+/** U-62: a copy's answer. */
+export function asCopy(value: unknown): CopyReply {
+  return isObj(value) && value["ok"] === true ? { ok: true } : failed(value);
 }
 
 /** GU-5: a recorded review. */

@@ -51,6 +51,8 @@ import type {
 } from "../contracts/index.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { parseScript } from "../model/index.js";
+// U-87: the transport's own key rule (S-11), as provider.ts takes the providers from this module.
+import { isUsableApiKey } from "../model/anthropic/index.js";
 import { buildChildEnv, planWindowsLaunch } from "../tools/index.js";
 import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -668,7 +670,17 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     // The chosen provider's own key variable (API_PROVIDERS, SP-D12); the other known keys do not
     // count (SP-2 only hides them).
     const keyEnv = API_PROVIDERS[provider].keyEnv;
-    if (envValue(env, keyEnv) !== null) {
+    const key = envValue(env, keyEnv);
+    if (key !== null && !isUsableApiKey(key)) {
+      // U-87 (C-12, PM): a key a request cannot carry. The run sends nothing and ends as a run
+      // result (model_error, not_configured); doctor says so first. The reason only, never the value.
+      set(
+        "api_key",
+        "fail",
+        `${keyEnv} is set but holds a character other than printable ASCII (0x21-0x7E, no spaces); it cannot be sent, so an ${provider} run sends nothing and ends with model_error (not_configured)`,
+        { id: "doctor.api_key.unusable", params: { keyEnv } },
+      );
+    } else if (key !== null) {
       // DR-34 (a), DR-36 (b): say where the key goes (the origin of the address, never its path) and
       // where that address is set, in the message and as the catalog text.
       const destination = keyDestination(env, config, provider);

@@ -11,8 +11,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { startGui } from "../../src/main/app.js";
@@ -21,6 +21,8 @@ const GUI = fileURLToPath(new URL("../../../", import.meta.url));
 const RESULT = join(GUI, "build", "smoke-result.json");
 const STATE = join(GUI, "build", "smoke-state", "gui-state.json");
 const SECOND = process.env["CODARYN_SMOKE_SECOND"] ?? "";
+/** U-206: a run plan's run folder that smoke.mjs wrote as the store does, copied into SECOND before step 8. */
+const RUN_PLAN = process.env["CODARYN_SMOKE_RUN_PLAN"] ?? "";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 /** R29-L1: the model requests the fake API has received so far (the smoke script's count file); -1 when unread. */
@@ -1336,6 +1338,27 @@ startGui({
           pageCanAnswer: await js("Object.keys(window.codaryn).some((name) => /answer|permission|question/i.test(name))"),
           ended: typeof ended === "string" && ended !== "timeout",
         };
+      })();
+
+      // U-206 (U-196, DR-69 B-3): a run plan, copied in after every step that lists this workspace's runs,
+      // opened from the run list. The window shows its files and summary and keeps apply off; through the
+      // page's own API, the main process refuses its apply before any dialog and passes the check's code on.
+      results["runPlan"] = await (async () => {
+        if (RUN_PLAN === "") return null;
+        const runId = basename(RUN_PLAN);
+        cpSync(RUN_PLAN, join(SECOND, ".codaryn", "runs", runId), { recursive: true });
+        const asked = dialogs.length;
+        await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+        await js(`document.querySelector('[data-plan="${runId}"]')?.click(); true`);
+        const shown = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+        const screen = (await js(
+          "({ files: [...document.querySelectorAll('#plan-files li')].map((li) => [li.getAttribute('data-change'), li.textContent.split(': ').pop()]), kind: document.getElementById('plan-summary')?.getAttribute('data-plan-kind') ?? null, approved: document.getElementById('plan-agent-words')?.getAttribute('data-approved') ?? null, words: document.getElementById('plan-agent-words-text')?.textContent ?? null, moves: document.getElementById('plan-actions') !== null, applyOff: document.getElementById('plan-apply')?.hasAttribute('disabled') ?? null, why: document.getElementById('plan-run-apply-unavailable') !== null, check: document.getElementById('plan-check') !== null })",
+        )) as Record<string, unknown>;
+        const viaApi = (await js(
+          `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(runId)}, null, null).then(async (r) => { if (!r.ok) return { plan: r.code }; const apply = await window.codaryn.applyPlan(r.approval, false); const consent = await window.codaryn.applyPlan(r.approval, true); const checked = await window.codaryn.checkPlan(r.approval); return { planKind: r.view.planKind ?? null, fileCount: (r.view.files ?? []).length, digest: r.view.digest, approval: typeof r.approval, apply: apply.ok ? 'started' : apply.code, consent: consent.ok ? 'started' : consent.code, checked: checked.ok ? 'checked' : checked.code }; })`,
+        )) as Record<string, unknown>;
+        return { shown, ...screen, ...viaApi, dialogs: dialogs.length - asked };
       })();
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),

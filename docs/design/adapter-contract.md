@@ -312,7 +312,7 @@ interface TaskForm {
   workflowRef: string | null;   // R-14 L-3 (52400ab): 간편 형식의 --workflow. task 파일과 함께 주면 CLI가 거부한다
 }
 // CodarynApp의 필수 함수(PM 결정, A-5 질문 1). 범용 작업 명령이 main에 들어온 뒤 언제나 있다.
-plan(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<PlanOutput>>;
+plan(request: { settings: TaskForm; runId: string }): Promise<AppCallOutcome<AnyPlanOutput>>;  // U-196: PlanOutput | ChangesPlanOutput
 applyPlan(request: { settings: TaskForm; planRunId: string; digest: string; cancelFile: string | null;
                      unsafeMoveConsent: { digest: string } | null },   // DR-21, 59dc39a
           observer?: ApplyObserver): Promise<{ ok: true; handle: ApplyHandle } | { ok: false; error: AppError }>;
@@ -324,6 +324,15 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
 ```
 
 - 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
+- U-196(DR-69 B-3, B-4): `plan`은 이제 `AnyPlanOutput`을 준다. 실행 계획(`plan.json`의 `kind: "changes"`, store의 `loadAnyPlan`)은 `ChangesPlanOutput`(`planKind: "changes"`)이다. 적용 계획은 지금처럼 `PlanOutput`이다.
+  - 실행 계획 보기는 nc-human의 `changesPlanOutput`(U-191)을 쓴다(`src/app/changes-plan.ts`).
+    - 계획 파일마다 지금 등록한 비밀로 다시 가리고, 계획 실행 때의 보이는 조각과 다르면 `plan_secrets_differ`이며 아무것도 보이지 않는다(DR-28).
+    - 요약, 다이제스트, `pending`·`applied`(`applied.json`), 기록 변경 표시를 준다.
+    - R-103 M-1: 요약은 출력 객체 자체에 가린 꼴로 든다. 앱은 지금 설정된 모든 API 키 값(`knownKeyValues`, 앱의 환경 사본에서)을 `changesPlanOutput`의 `currentKey`로 넘긴다. 그래서 등록 비밀에 더해 현재 키·키 모양·제어 문자가 가려지고 앞뒤 공백이 잘린다. 적용 계획의 요약(R-49 R49-M1)과 같고, GUI와 승인 화면이 같은 글을 받는다. 시험은 `tests/unit/app/u196-r103-summary-keys.test.ts`다.
+  - 계획 모드는 묻지 않는다(보기는 비밀과 작업 공간만 정한다, DR-17). `latest`도 다른 계획처럼 푼다.
+  - PM (가), AC-D16: CLI의 `plan`·`apply`가 종류로 나누는 것은 na-core의 U-195다. CLI의 `plan`이 실행 계획을 보이게 되면 앱은 그것을 받아 쓰고 이 보기는 없앤다.
+  - 저장 꼴에는 얇게 기댄다(Codex V-11의 고침으로 바뀔 수 있음): `kind`, 관문용 파일 경로, 그리고 읽은 계획을 통째로 `changesPlanOutput`에 넘기는 것뿐이다.
+  - 실행 계획의 적용(앱 `applyPlan`의 종류 나눔)은 CLI의 `runApply`가 나누면 그 길에 앱의 고리(이벤트 관찰자, 취소, 승인 `adapter`)를 넘긴다. 실행할 goal은 계획을 만든 실행의 goal이다. 읽을 수 없으면 시작하지 않는다(PM). 그 연결은 U-195 뒤의 앱 단위다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 
@@ -567,7 +576,7 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 같은 항목인지는 정책 관문의 판정(`compilePathSet`의 `exact`: 조각 단위, Windows에서 대소문자 무시와 `\`, 끝의 `/`와 `./`는 없는 것)으로 본다. 쓸 수 없는 예전 목록은 어느 항목과도 같지 않다.
       - 좁히기: 항목을 뺌, 같은 항목을 다른 순서나 표기로, 목록이 없던 자리에 새로 둠(한정 없음보다 어디서나 좁다), 빈 목록.
       - 처음 판(ba7cec7)은 글자로 더 덮는 항목만 넓히기로 보았다. 예전 항목 안의 항목을 좁히기로 본 것을 V-8로 고쳤다.
-      - 아직 설정 파서는 이 필드를 받지 않는다(`unknown_field`, B-4까지). 판정이 먼저 안다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다.
+      - 설정 파서는 U-182(병합 `a1d5c65`)부터 이 필드를 받는다(설정 파일, 프로필, 작업 종류 정의의 `policy.writablePaths`). U-183이 쓰일 때는 판정이 파서보다 먼저였다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다. GUI의 설정 화면에는 이 필드를 고치는 편집이 없고, 넓히기 확인 대화상자는 두 종류에 이름을 붙인다(U-192, 병합 `111e25d`).
     - U-204(DR-69 묶음 A, A-7, R-7): 읽기 제외 경로(`unreadablePaths`)를 빼는 것과 묶음 최소 크기 k(`minGroupSize`)를 낮추는 것.
       - 읽기 제외 목록은 거부 목록이고 더하기만 한다. 설정·적용한 프로필·작업 종류 정의·과제 파일의 항목이 합집합으로 걸린다(계약 `PolicyConfig.unreadablePaths`, `mergeWorkflowPolicy`). 관문은 항목을 글자와 실경로 둘 다로 본다(보호 경로의 규칙).
       - 예전 항목이 새 목록에 없으면 `unreadable_path_removed`다. 필드는 그 목록(`policy.unreadablePaths`, `profiles.<이름>.policy.unreadablePaths`, `workflows.<id>.policy.unreadablePaths`)이고 한 번만 준다. 항목을 뺌, 목록을 비움, 목록이나 프로필의 정책이 없어짐이 여기에 든다.
@@ -745,6 +754,17 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
 - **남기지 않는다.** 실행 디렉터리, journal, `plan_checked` 기록, 적용 표시(`markApplied`)를 만들지 않는다. 계획은 그대로 다음 적용을 기다린다.
 - **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.
 - **동의도 약속도 아니다.** 점검 결과는 DR-21 동의를 만들지 않는다. 동의는 지금처럼 사람의 입력으로만 만들어 `applyPlan`의 `unsafeMoveConsent`로 간다. 적용은 사전 점검을 다시 하므로, 그 사이에 파일이 바뀌면 `plan_stale`로 끝난다.
+- **읽을 수 없는 계획(R-103 L-1).** 종류를 가르기 전에 store의 `loadAnyPlan`으로 계획을 읽는다(`storedPlanKindOf`). 읽을 수 없으면 그 코드(`run_not_found`, `run_not_plan`, `plan_run_missing`, `invalid_run_record`, 읽다가 예외면 `internal_error`)를 먼저 주고 아무것도 점검하지 않는다.
+  - 계획 보기도 같은 store로 읽어 같은 코드를 준다. 그래서 적용 task의 결과는 전과 같다.
+  - 고치기 전에는 읽을 수 없는 계획을 적용 계획으로 여겼다. 그래서 `plan: "apply"`로 풀리지 않는 task는 원인 대신 task에 관한 `run_not_plan`을 받았다. 시험은 `tests/unit/app/u196-r103-l1-plan-kind.test.ts`다.
+- **실행 계획(U-196, DR-69 B-3, B-4).** `plan.json`이 `kind: "changes"`이면 다음처럼 본다(`src/app/changes-plan.ts`).
+  - 점검 task가 `plan: "run"`으로 풀려야 한다. 아니면 `run_not_plan`이고 문구가 그렇게 말한다. B-4가 열기 전에는 어떤 설정도 그렇게 풀리지 않는다(U-177).
+  - 그다음 보기의 거부를 적용 계획과 같게 본다: DR-28 `plan_secrets_differ`, 이미 수행됨 `plan_already_applied`, 기록 변경 표시, 다이제스트.
+  - 계획 파일마다, 그 계획을 수행할 실행의 관문이 쓰기로 거부하는지 본다(`checkChangesPlanFiles`).
+    - 관문은 task의 정책·쓰기 경로 목록에 계획 파일 목록을 하나 더한 것이다(`approvedPlanWritablePathSets`와 같음). `PLANNED_FILE_DESCRIPTOR`로 글자와 실경로를 모두 본다.
+    - 이는 엔진이 첫 모델 요청 전에 하는 판정이다. 거부된 파일은 그 순번으로 `problems`에 `denied`로 담긴다.
+  - 파일이 계획 때와 같은지(낡음, `plannedFileStale`)는 엔진이 실행 직전에 읽어 본다. 여기서 보면 그 사이에 바뀔 수 있는 것을 말할 뿐이라 보지 않는다(PM).
+  - 잠금, 시험 링크, 이동이 없다. 결과에는 `planKind: "changes"`가 붙고 `unsafeMoves` `[]`, `inventoryLimitReached` false, `probesLeft`·`probesRemoved` 0, `lockLeft` false다. 기존 `PlanCheck` 꼴에 표지 하나만 더했다.
 
 ### 5.15 작업 공간 텍스트 파일 읽기·쓰기 [구현 U-172] (DR-72 (나), text-editing-ux 5)
 

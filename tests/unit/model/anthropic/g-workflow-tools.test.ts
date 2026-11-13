@@ -129,6 +129,7 @@ function legacyRun(): { deps: EngineDeps; bodies: string[]; events: JournalEvent
     journal: {
       append: async (event) => {
         events.push(event);
+        return { seq: events.length, at: new Date(0).toISOString(), runId: "model-run", ...event };
       },
       close: async () => {},
     },

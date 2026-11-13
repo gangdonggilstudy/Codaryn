@@ -39,7 +39,7 @@ const STARTED = {
 
 async function written(render?: (event: JournalEvent) => string | readonly string[] | null): Promise<string[]> {
   const lines: string[] = [];
-  const journal = { append: async () => {}, close: async () => {} };
+  const journal = { append: async (event: JournalEvent) => ({ seq: 1, at: "1970-01-01T00:00:00.000Z", runId: "progress-run", ...event }), close: async () => {} };
   const progress = withProgress(journal, createPrivacyGateway({ secrets: [] }), (line) => lines.push(line), render);
   await progress.append(STARTED);
   return lines;
@@ -57,7 +57,7 @@ describe("DR-43 (b): the run's start names what the workflow's rules left out", 
 
   test("no narrowing: only the start line, as before", async () => {
     const lines: string[] = [];
-    const progress = withProgress({ append: async () => {}, close: async () => {} }, createPrivacyGateway({ secrets: [] }), (line) => lines.push(line));
+    const progress = withProgress({ append: async (event: JournalEvent) => ({ seq: 1, at: "1970-01-01T00:00:00.000Z", runId: "progress-run", ...event }), close: async () => {} }, createPrivacyGateway({ secrets: [] }), (line) => lines.push(line));
     await progress.append({ ...(STARTED as object), policyNarrowings: undefined } as unknown as JournalEvent);
     assert.equal(lines.length, 1);
   });
@@ -65,7 +65,7 @@ describe("DR-43 (b): the run's start names what the workflow's rules left out", 
   test("a renderer may give several lines for one record; each is written and masked on its own", async () => {
     const secret = ["fake", "dr43", "secret", "value"].join("-");
     const lines: string[] = [];
-    const progress = withProgress({ append: async () => {}, close: async () => {} }, createPrivacyGateway({ secrets: [secret] }), (line) => lines.push(line), () => ["first", `second ${secret}`]);
+    const progress = withProgress({ append: async (event: JournalEvent) => ({ seq: 1, at: "1970-01-01T00:00:00.000Z", runId: "progress-run", ...event }), close: async () => {} }, createPrivacyGateway({ secrets: [secret] }), (line) => lines.push(line), () => ["first", `second ${secret}`]);
     await progress.append(STARTED);
     assert.equal(lines.length, 2);
     assert.equal(lines[0], `${PROGRESS_PREFIX}first\n`);

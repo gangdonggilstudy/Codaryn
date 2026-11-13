@@ -285,7 +285,13 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         const file = await workspace.resolve(entry.relative, "read");
         if (!file.ok) continue;
         const read = await workspace.readText(file.path);
-        if (!read.ok) continue;
+        if (!read.ok) {
+          // U-189 (Codex V-10b): a file that could not be read (io_error: the read saw its folders change on
+          // every try, or another I/O failure) may hold the text: the result is not complete, and says so.
+          // A file that is not text, too large or gone since the listing holds no searchable text now.
+          if (read.code === "io_error") truncated = true;
+          continue;
+        }
         const raw: string = read.snapshot.text;
         const masked = maskText(raw.startsWith(BOM) ? raw.slice(BOM.length) : raw);
         if (masked === null) return fail("masking_failed", "masking a file failed");

@@ -38,7 +38,7 @@ import type { Clock, ContentHash, PlanItemProblem, ResolvedPlanAction, ResolvedT
 import { RUN_ID_PATTERN } from "../contracts/index.js";
 import { createRunId } from "./input/run-id.js";
 import { preflightPlan } from "../engine/index.js";
-import { runGuards } from "../cli/unreadable.js";
+import { runGuards } from "./input/unreadable.js";
 import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
 import { createPlanExecutor } from "../tools/index.js";
 import type { PlanFileOps } from "../tools/index.js";

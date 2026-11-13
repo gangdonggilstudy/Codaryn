@@ -45,7 +45,7 @@ import type {
   WritablePathSet,
 } from "../contracts/index.js";
 import { resolveRunReference } from "./run-ref.js";
-import { runGuards } from "./unreadable.js";
+import { runGuards } from "../app/input/unreadable.js";
 import type { CheckedRun } from "./run-ref.js";
 
 export interface AssemblyInput {

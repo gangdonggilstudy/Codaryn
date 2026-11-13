@@ -87,8 +87,8 @@ import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
 import type { RunArgs } from "./args.js";
 import type { ApprovedPlanParts, Assemble } from "./assemble.js";
-import { parseConfig } from "./config.js";
-import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
+import { parseConfig } from "../app/input/config.js";
+import { chooseConfigFile, isMissingFile, selectProfile } from "../app/input/config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "../app/input/run-id.js";
@@ -108,12 +108,12 @@ import {
   selectEnvFileSecrets,
 } from "../app/input/security/index.js";
 import type { PathRelation, WorkspaceLocation } from "../app/input/security/index.js";
-import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "./settings.js";
-import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
-import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
-import type { InputErrorPosition } from "./task.js";
-import { writablePathSetsOf } from "./writable.js";
-import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "./unreadable.js";
+import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "../app/input/settings.js";
+import type { SettingsEnvironment, SettingsFailure } from "../app/input/settings.js";
+import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "../app/input/task.js";
+import type { InputErrorPosition } from "../app/input/task.js";
+import { writablePathSetsOf } from "../app/input/writable.js";
+import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "../app/input/unreadable.js";
 import { queryTableFacts } from "./human/index.js";
 
 export interface CliEnvironment {

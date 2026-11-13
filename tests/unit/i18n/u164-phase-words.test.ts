@@ -31,3 +31,22 @@ describe("U-164: the phase words", () => {
     assert.equal(ko.format("progress.integrity_unchanged", { phase: "after_verify" }), "보호 대상 확인 — 바뀌지 않음 (after_verify)");
   });
 });
+
+describe("U-164 (PM, second part): path tokens and the task form in Korean, as the GUI says them", () => {
+  test("restoring path tokens is 경로의 가린 값 되살리기, on the start line and in doctor", () => {
+    const { ko, en } = MESSAGE_TEXTS;
+    assert.equal(ko["progress.workflow_policy.restore_path_tokens_off"], "작업 종류 자체 규칙 때문에, 설정한 정책이 허용한 경로의 가린 값 되살리기를 끕니다");
+    assert.equal(ko["doctor.workflow_policy.restore_path_tokens_off"], "이 작업 종류로 실행하면, 설정한 정책이 허용해도 경로의 가린 값을 되살리지 않습니다");
+    assert.ok(!Object.values(ko).some((text) => /경로 토큰/.test(text)), "no 경로 토큰 left");
+    // The English keeps "path tokens" (docs/usage.md and the progress tests quote it).
+    assert.ok(en["progress.workflow_policy.restore_path_tokens_off"].includes("restoring path tokens"));
+  });
+
+  test("the task form is 작업 지정: the command to apply a plan names <같은 작업 지정>", () => {
+    const { ko, en } = MESSAGE_TEXTS;
+    assert.equal(ko["plan.next_apply"], "적용하려면: codaryn apply <같은 작업 지정> --run {runId} --digest");
+    assert.ok(ko["error.plan_secrets_differ.fix"].includes("같은 작업 지정 방식"));
+    assert.ok(!Object.values(ko).some((text) => /task 형식/.test(text)), "no task 형식 left");
+    assert.equal(en["plan.next_apply"], "To apply it: codaryn apply <the same task form> --run {runId} --digest");
+  });
+});

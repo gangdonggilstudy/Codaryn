@@ -1253,7 +1253,7 @@ node --test dist/tests/live/openai-live.js
     codaryn: run started — provider scripted · the task type's own rules turn off restoring path tokens, which the configured policy allows · the task type's own checks leave out checks given in the config or task with the same id: 1
     ```
 
-    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다 · 작업 종류 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
+    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류 자체 규칙 때문에, 설정한 정책이 허용한 경로의 가린 값 되살리기를 끕니다 · 작업 종류 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
   - 검증기(결정 DR-43 (a)): 작업 종류 정의의 검증기는 늘 실행된다. 설정·프로필·task의 검증기는 그 뒤에 더해지고, 정의의 검증기와 id가 같은 것만 빠진다(정의의 것이 판정한다). 빈 목록(`[]`)도 정의의 검증기를 지우지 않는다. id가 같은데 내용이 다른 검증기가 빠지면 `doctor`가 `a run of this task type leaves out checks given in the config or task with the same id as its own: 1`처럼 알리고, `run_started`에 `verifiers_dropped`가 남는다.
     - 확인(main `6df2eae`): 설정의 작업 종류 `notes`에 검증기 `has-summary`(`summary.md`가 있다)를 두고, task 파일이 `workflowRef: "notes"`로 같은 id를 더 느슨하게(`a.txt`가 있다) 적고 `a-kept`를 더하면, `has-summary`(정의의 것)와 `a-kept`가 실행됐다. `doctor --task`가 위 줄을 냈다.
 - **한도:** 작업 종류 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
@@ -1357,7 +1357,7 @@ The digest names exactly these actions and the contents the plan's files had whe
     3. 폐기  inbox/old-draft.tmp  (지울 때까지 폐기 보관함 .codaryn/discarded/에 남음)
   에이전트의 설명(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상이 아님):
     | 사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다
-  적용하려면: codaryn apply <같은 task 형식> --run 20261112T235113Z-bcb77c7d --digest 55c7dc68225a
+  적용하려면: codaryn apply <같은 작업 지정> --run 20261112T235113Z-bcb77c7d --digest 55c7dc68225a
   ```
 
   - 그 아래 끝 문장도 한국어다(`다이제스트는 바로 이 동작들과, …`).

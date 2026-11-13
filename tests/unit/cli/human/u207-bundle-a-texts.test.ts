@@ -113,6 +113,19 @@ for (const language of MESSAGE_LANGUAGES) {
       assert.deepEqual(lines.slice(at + 1, at + 3), [t("summary.denied_unreadable", { count: 2 }), t("summary.denied_unreadable_hint")]);
     });
 
+    test("with writes refused as not writable too (U-198): their lines first, then the unreadable ones, each with its advice", () => {
+      const lines = summaryOf(result(), context({ deniedToolCalls: 6, deniedNotPlanned: 1, deniedNotWritable: 2, deniedUnreadable: 3 }));
+      const at = lines.indexOf(t("summary.denied", { count: 6 }));
+      assert.deepEqual(lines.slice(at + 1, at + 7), [
+        t("summary.denied_not_planned", { count: 1 }),
+        t("summary.denied_not_planned_hint"),
+        t("summary.denied_not_writable", { count: 2 }),
+        t("summary.denied_not_writable_hint"),
+        t("summary.denied_unreadable", { count: 3 }),
+        t("summary.denied_unreadable_hint"),
+      ]);
+    });
+
     test("groups hidden for fewer than k rows: one line with the number of results and k, before the usage", () => {
       const lines = summaryOf(result(), context({ hiddenGroups: { results: 3, minGroupSize: 5 } }));
       const at = lines.indexOf(t("summary.groups_hidden", { results: 3, k: 5 }));

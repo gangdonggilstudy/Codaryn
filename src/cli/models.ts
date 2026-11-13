@@ -51,7 +51,7 @@ import { parseConfig } from "../app/input/config.js";
 import { chooseConfigFile } from "../app/input/config-file.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { argumentsError, cliError, jsonSyntaxError, positionDiagnostic, settingsError, withHint } from "./run.js";
+import { argumentsError, cliError, jsonSyntaxError, positionDiagnostic, settingsError, withHint } from "../app/prepare.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   findKeyInJson,

@@ -300,6 +300,35 @@ const cleanupDigestOf = (step) => (ctx) => String(ctx.json(step)?.plan?.digest ?
 const OLDER = ["--older-than", "0"];
 const DISCARDED_OLDER = ["--discarded-older-than", "0"];
 
+/**
+ * U-287 (C-5's cases): the files of prepare-checks. A quick run's config names a closed loopback
+ * address, so a step that passed every pre-run check would stop at the missing key.
+ */
+const QUICK_CONFIG = {
+  schemaVersion: 1,
+  model: "fake-model",
+  maxOutputTokens: 64,
+  apiBaseUrl: CLOSED_LOOPBACK,
+  limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 1000, maxDurationMs: 60000 },
+};
+const PREPARE_FILES = {
+  "big-task.json": `{ "schemaVersion": 1, "pad": "${"x".repeat(1024 * 1024)}" }\n`,
+  "syntax-task.json": '{\n  "schemaVersion": 1,\n  "id": \n}\n',
+  "deep-task.json": `${"[".repeat(70)}${"]".repeat(70)}\n`,
+  "keyfield-config.json": { schemaVersion: 1, apiKey: "placeholder" },
+  "k-task.json": task({ policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, minGroupSize: 3 } }),
+  "k-config.json": { schemaVersion: 1, policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, minGroupSize: 2 } },
+  "quick-config.json": QUICK_CONFIG,
+  "weakened-task.json": task({ workflowRef: "organize", plan: "none" }),
+  "no-plan-tool-task.json": task({ workflowRef: "organize", tools: ["read_file"] }),
+  "work/inside-config.json": { schemaVersion: 1 },
+  "inside-script-task.json": task({ model: { provider: "scripted", scriptPath: "./work/script.json" } }),
+  "work/script.json": { schemaVersion: 1, steps: [{ text: "done" }] },
+  "secret-quick-config.json": { ...QUICK_CONFIG, secretEnv: ["CMP_QUICK_MISSING"] },
+  "bare-config.json": { schemaVersion: 1 },
+  "secret-task.json": task({ privacy: { secretEnv: ["CMP_MISSING"] } }),
+};
+
 export const CASES = [
   {
     name: "document-run",
@@ -521,6 +550,64 @@ export const CASES = [
       )(dir);
     },
     steps: [run("--config", "writable-config.json"), report("latest"), report("latest", "--json"), { ...run("--config", "writable-config.json"), lang: "ko" }],
+  },
+  // U-287 (the CLI migration's C-5: prepareTask, the run's steps 1 to 7, moves to the app layer): the
+  // pre-run checks of every step that no other case reaches, in their order (adapter-contract 7.1), in
+  // text and JSON. Paths (a device path, an unreadable variables file and config file, CODARYN_CONFIG),
+  // the files (over the size cap, JSON syntax, nested too deep, a key field in the config), the parsers'
+  // hints (k below 5 in a task and a config), no config yet, the task type's problems (unknown,
+  // plan weakened, plan tool missing), files inside the workspace (config, script, cancel file),
+  // integrity.paths, the quick form's secretEnv, and the read-only quick form and a review that do not
+  // need what a run needs. The ones with a hint again in Korean.
+  {
+    name: "prepare-checks",
+    setup: documentSetup(DOCUMENT_STEPS, {}, PREPARE_FILES),
+    steps: [
+      { args: ["run", "--task", "task.json", "--vars-file", "NUL"] },
+      { args: ["run", "--task", "task.json", "--vars-file", "missing.env"] },
+      { args: ["run", "--task", "task.json", "--config", "missing-config.json"] },
+      { args: ["run", "--task", "task.json"], env: { CODARYN_CONFIG: "NUL" } },
+      { args: ["run", "--task", "big-task.json"] },
+      { args: ["run", "--task", "syntax-task.json"] },
+      { args: ["run", "--task", "deep-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "keyfield-config.json"] },
+      { args: ["run", "--task", "k-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "k-config.json"] },
+      { args: ["run", "--workspace", "work", "--goal", "Summarize the notes."] },
+      { args: ["run", "--workspace", "work", "--goal", "Summarize the notes.", "--config", "quick-config.json", "--workflow", "nope"] },
+      { args: ["run", "--task", "weakened-task.json"] },
+      { args: ["run", "--task", "no-plan-tool-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "work/inside-config.json"] },
+      { args: ["run", "--task", "inside-script-task.json"] },
+      { args: ["run", "--task", "task.json", "--cancel-file", "work/cancel"] },
+      // integrity.paths are absolute, so these configs are written in the case's own folder.
+      (ctx) => {
+        write(ctx.dir, "integrity-missing-config.json", { schemaVersion: 1, integrity: { paths: [path.join(ctx.dir, "no-such-folder")] } });
+        return { args: ["run", "--task", "task.json", "--config", "integrity-missing-config.json"] };
+      },
+      (ctx) => {
+        write(ctx.dir, "integrity-inside-config.json", { schemaVersion: 1, integrity: { paths: [path.join(ctx.dir, "work")] } });
+        return { args: ["run", "--task", "task.json", "--config", "integrity-inside-config.json"] };
+      },
+      { args: ["run", "--workspace", "work", "--goal", "Summarize the notes.", "--config", "secret-quick-config.json"] },
+      { args: ["run", "--workspace", "work", "--goal", "Summarize the notes.", "--config", "bare-config.json"] },
+      { args: ["plan", "--workspace", "work", "--workflow", "organize", "--config", "bare-config.json", "--run", NO_RUN] },
+      { args: ["review", "--task", "secret-task.json", "--run", NO_RUN, "--reject"] },
+    ],
+  },
+  {
+    name: "prepare-checks-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, PREPARE_FILES),
+    steps: [
+      { args: ["run", "--task", "big-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "keyfield-config.json"] },
+      { args: ["run", "--task", "k-task.json"] },
+      { args: ["run", "--workspace", "work", "--goal", "Summarize the notes."] },
+      { args: ["run", "--workspace", "work", "--goal", "Summarize the notes.", "--config", "quick-config.json", "--workflow", "nope"] },
+      { args: ["run", "--task", "no-plan-tool-task.json"] },
+      { args: ["run", "--task", "task.json", "--config", "work/inside-config.json"] },
+    ],
   },
   // U-135: terminal cases (imitated: see the tool).
   {

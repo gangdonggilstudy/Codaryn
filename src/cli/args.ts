@@ -26,6 +26,10 @@ import {
 } from "../contracts/index.js";
 import type { CliErrorHint, DetailedCliErrorHint } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../contracts/index.js";
+import type { RunArgs, RunInput } from "../app/prepare.js";
+
+// U-287 (CLI migration C-5): the run's parsed arguments are the app layer's type now (src/app/prepare.ts).
+export type { RunArgs, RunInput } from "../app/prepare.js";
 
 /**
  * A parse failure. U-37 (UXM-2, DR-57): `hint` names its reason for the human error (CliErrorOutput.hint);
@@ -37,31 +41,6 @@ export interface ArgsFailure {
   readonly message: string;
   readonly hint?: CliErrorHint | DetailedCliErrorHint;
   readonly position?: number;
-}
-
-/**
- * Where the task comes from: a task file, or the quick form built from the config file.
- * `oneLine` (N-9): the goal was given as the positional argument and `workspace` is the current
- * directory (".").
- */
-export type RunInput =
-  | { readonly kind: "task"; readonly taskPath: string }
-  | { readonly kind: "quick"; readonly workspace: string; readonly goal: string; readonly oneLine: boolean };
-
-export interface RunArgs {
-  readonly command: "run";
-  readonly input: RunInput;
-  /** `--config`. When null, CODARYN_CONFIG may name the file. */
-  readonly configPath: string | null;
-  /** `--vars-file`: variables to load. Read only when given (C-2, T-15). */
-  readonly varsFile: string | null;
-  readonly cancelFile: string | null;
-  /** `--quiet` (U-8, N-5): no human-readable output on stderr. */
-  readonly quiet: boolean;
-  /** `--profile` (N-8): a profile name from the config file. */
-  readonly profile: string | null;
-  /** `--workflow` (G-A, DR-2): the quick form's workflow definition id. Absent for a task file. */
-  readonly workflow: string | null;
 }
 
 export type ParseArgsOutcome =

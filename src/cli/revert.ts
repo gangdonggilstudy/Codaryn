@@ -11,7 +11,7 @@ import type { CliErrorOutput, Clock, MessageCatalog, PlanApplyState, RevertOutpu
 import { parseRevertArgs } from "./args.js";
 import { revertStatus } from "./assemble.js";
 import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
-import { argumentsError, cliError } from "./run.js";
+import { argumentsError, cliError } from "../app/prepare.js";
 import { createRunId } from "../app/input/run-id.js";
 import { localPathProblem } from "../app/input/task.js";
 

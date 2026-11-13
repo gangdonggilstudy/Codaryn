@@ -60,10 +60,10 @@ import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { parseDoctorArgs } from "./args.js";
 import { parseConfig } from "../app/input/config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "../app/input/config-file.js";
-import { jsonSyntaxPosition } from "./json-position.js";
+import { jsonSyntaxPosition } from "../app/input/json-position.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { argumentsError, cliError, workflowProblemText } from "./run.js";
+import { argumentsError, cliError, workflowProblemText } from "../app/prepare.js";
 import {
   MAX_KEY_SCAN_DEPTH,
   checkLocalPathSyntax,

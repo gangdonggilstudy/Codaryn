@@ -1644,7 +1644,8 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
       const stop = interrupted();
       if (stop !== null) return stop;
       if (plannedFileStale(file, now)) return staleWith(`${APPROVED_STALE_LEAD}${index}${APPROVED_STALE_END}`);
-      // U-219: the one judgement the app layer's check before the approval shares (judgePlannedFile).
+      // U-219: judgePlannedFile, given out for the app layer's check before the approval;
+      // Codex V-21: the app still has its own lines until p5a connects it (U-229).
       const decision = await judgePlannedFile(policy, file.path);
       if (!decision.allowed) return staleWith(`${APPROVED_DENIED_LEAD}${index}: ${decision.permission}/${decision.code}${APPROVED_DENIED_END}`);
     }

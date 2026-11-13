@@ -12,11 +12,17 @@
  *   no summary, and in place of the apply button that a new run makes a new plan (the main process
  *   gives it no approval token). The model's summary is shown under the label that says it is the
  *   agent's words and not what is approved (rows drawn as the CLI draws them, by the app layer's modelTextRows).
+ * - U-119 (DR-21, adapter-contract 5.14): before an apply can be asked for, the app layer's check of
+ *   the plan the main process showed (by its approval token): actions that cannot be applied are
+ *   marked on their rows, moves that would need the DR-21 consent are counted and marked, and what the
+ *   check could not take back (probe links, the lock) is said. The check is no approval: the apply
+ *   still takes the token and the person's OS confirmation. The apply button waits for the check
+ *   (which holds the workspace lock a moment).
  */
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
-import { asPlan, asStartRun } from "../api.js";
+import { asPlan, asPlanCheck, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import { copyControl } from "../shell/copy.js";
@@ -60,6 +66,42 @@ export function applyCommands(t: Texts, runId: string, digest: string): string[]
   ];
 }
 
+/**
+ * U-119 (3.9, DR-21): what the check found, in words, with the plan view's rows marked by index:
+ * actions that cannot be applied (and that a new run makes a new plan), moves that need the DR-21
+ * consent at the apply, probes and a lock the check could not take back, and that it is no approval.
+ */
+export function planCheckParts(t: Texts, result: ReturnType<typeof asPlanCheck>, rows: readonly HTMLElement[]): HTMLElement[] {
+  if (!result.ok) {
+    return [
+      el("p", `${t.format("plancheck.failed", { code: result.code })} ${errorText(t, result.code)}`, { role: "alert", class: "error", "data-error": result.code }),
+      el("p", t.format("plancheck.notApproval"), { class: "notice" }),
+    ];
+  }
+  const parts: HTMLElement[] = [];
+  for (const { index, problem } of result.problems) {
+    const row = rows[index];
+    if (row === undefined) continue;
+    row.setAttribute("data-problem", problem);
+    const id = `plancheck.problem.${problem}`;
+    row.append(el("span", ` — ${t.has(id) ? t.format(id) : problem}`, { class: "plan-problem" }));
+  }
+  for (const index of result.unsafeMoves) {
+    const row = rows[index];
+    if (row === undefined) continue;
+    row.setAttribute("data-unsafe", "true");
+    row.append(el("span", ` — ${t.format("plancheck.unsafeRow")}`, { class: "plan-unsafe" }));
+  }
+  if (result.problems.length > 0) parts.push(el("p", t.format("plancheck.problems", { count: String(result.problems.length) }), { role: "alert", id: "plan-check-problems" }));
+  if (result.unsafeMoves.length > 0) parts.push(el("p", t.format("plancheck.unsafe", { count: String(result.unsafeMoves.length) }), { class: "notice", id: "plan-check-unsafe" }));
+  if (result.problems.length === 0 && result.unsafeMoves.length === 0) parts.push(el("p", t.format("plancheck.clean"), { id: "plan-check-clean" }));
+  if (result.probesRemoved > 0) parts.push(el("p", t.format("plancheck.probesRemoved", { count: String(result.probesRemoved) }), { class: "notice", id: "plan-check-probes-removed" }));
+  if (result.probesLeft > 0) parts.push(el("p", t.format("plancheck.probesLeft", { count: String(result.probesLeft) }), { role: "alert", class: "error", id: "plan-check-probes-left" }));
+  if (result.lockLeft) parts.push(el("p", t.format("plancheck.lockLeft"), { role: "alert", class: "error", id: "plan-check-lock-left" }));
+  parts.push(el("p", t.format("plancheck.notApproval"), { class: "notice" }));
+  return parts;
+}
+
 export function planScreen(deps: PlanDeps): PlanScreen {
   const { texts: t, api, run } = deps;
   let chosen: { runId: string; profile: string | null; workflow: string | null; formKnown: boolean; recordsChanged: boolean } | null = null;
@@ -93,7 +135,8 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         const moves = view.actions.filter((action) => action.kind === "move").length;
         const summary = el("p", t.format("plan.summary", { moves: String(moves), discards: String(view.actions.length - moves), digest: view.digest.slice(0, 12) }), { id: "plan-summary" });
         const list = el("ul", undefined, { id: "plan-actions" });
-        for (const action of view.actions) list.append(el("li", actionLine(t, action), { "data-kind": action.kind }));
+        const rows = view.actions.map((action, index) => el("li", actionLine(t, action), { "data-kind": action.kind, "data-index": String(index) }));
+        list.append(...rows);
         const parts: HTMLElement[] = [];
         // As the CLI's plan: a marked plan run's warning comes before anything of the plan.
         if (marked) parts.push(el("p", t.format("plan.recordsChanged"), { class: "notice", id: "plan-records-changed" }));
@@ -144,7 +187,17 @@ export function planScreen(deps: PlanDeps): PlanScreen {
               }
             })();
           }, { id: "plan-apply" });
-          parts.push(apply);
+          // U-119: the check first; the apply waits for its answer (the check holds the lock a moment).
+          apply.setAttribute("disabled", "");
+          const check = el("section", undefined, { id: "plan-check", "aria-labelledby": "plan-check-title", "data-check": "checking" });
+          check.append(el("h3", t.format("plancheck.title"), { id: "plan-check-title" }), el("p", t.format("plancheck.checking")));
+          parts.push(check, apply);
+          void (async () => {
+            const result = asPlanCheck(await api.checkPlan(approval));
+            check.replaceChildren(el("h3", t.format("plancheck.title"), { id: "plan-check-title" }), ...planCheckParts(t, result, rows));
+            check.setAttribute("data-check", !result.ok ? "error" : result.problems.length > 0 ? "problems" : result.unsafeMoves.length > 0 ? "unsafe" : "clean");
+            apply.removeAttribute("disabled");
+          })();
         }
         parts.push(message);
         body.replaceChildren(...parts);

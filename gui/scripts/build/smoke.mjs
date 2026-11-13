@@ -239,7 +239,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -312,6 +312,8 @@ const expected = [
   ["windowState", (v) => JSON.stringify(v) === JSON.stringify({ min: 160, step: 16, dragged: 100, panel: true, saved: { screen: "checks", treeWidth: 276 } })],
   // U-118 (3.7): the records tab shows the analyze run's lines (complete), the checks filter keeps checks only, its records-changed mark is the one note; a broken journal line makes the page damaged.
   ["recordsTab", (v) => JSON.stringify(v) === JSON.stringify({ ready: "complete", lines: true, checks: true, notes: 1, recordsNote: true, damaged: { status: "damaged", skipped: 1, missing: 0, lines: true } })],
+  // U-119 (3.9, DR-21): the check before the apply of B's plan: clean, no row marked, nothing left behind; a forged token is unknown_plan.
+  ["planCheck", (v) => JSON.stringify(v) === JSON.stringify({ state: "clean", rows: 0, left: 0, forged: "unknown_plan" })],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],

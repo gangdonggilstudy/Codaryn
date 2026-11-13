@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   revealConfig: "codaryn:settings:revealconfig",
   saveUi: "codaryn:app:saveui",
   runEvents: "codaryn:runs:events",
+  checkPlan: "codaryn:plan:check",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -881,6 +882,45 @@ const nameOrNull = (value: unknown): value is string | null => value === null ||
  * GU-5: `plan` and `changes` arguments: the workspace, the run chosen, and the profile and task kind
  * of its task form (DR-17, DR-28; R-14 L-3: the task kind the run was started with).
  */
+/**
+ * U-119 (3.9, DR-21, adapter-contract 5.14): the check before an apply, for the plan the main process
+ * showed: indexes of the plan view's actions, codes and counts; no path. It is no consent and no
+ * approval. `probesLeft`, `probesRemoved` and `lockLeft` say what the check could not take back.
+ */
+export type PlanCheckReply =
+  | {
+      readonly ok: true;
+      readonly problems: readonly { readonly index: number; readonly problem: string }[];
+      readonly unsafeMoves: readonly number[];
+      readonly inventoryLimitReached: boolean;
+      readonly probesLeft: number;
+      readonly probesRemoved: number;
+      readonly lockLeft: boolean;
+    }
+  | { readonly ok: false; readonly code: string };
+
+/** `checkPlan` arguments: the plan view's approval token only (the main process knows its plan and digest). */
+export function parseCheckPlanArgs(value: unknown): string | null {
+  return isObj(value) && hasOnlyKeys(value, ["approval"]) && isHandle(value["approval"]) ? value["approval"] : null;
+}
+
+/** The engine host's check of the plan `planRunId` with `digest`, checked field by field; another plan's is host_error. */
+export function toPlanCheckReply(value: unknown, planRunId: string, digest: string, actions: number): PlanCheckReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { problems, unsafeMoves, inventoryLimitReached, probesLeft, probesRemoved, lockLeft } = value;
+  if (value["planRunId"] !== planRunId || value["digest"] !== digest) return fail;
+  if (!Array.isArray(problems) || !Array.isArray(unsafeMoves) || typeof inventoryLimitReached !== "boolean" || !count(probesLeft) || !count(probesRemoved) || typeof lockLeft !== "boolean") return fail;
+  const index = (n: unknown): n is number => count(n) && n < actions;
+  const found: { index: number; problem: string }[] = [];
+  for (const item of problems) {
+    if (!isObj(item) || !index(item["index"]) || typeof item["problem"] !== "string" || !ERROR_CODE.test(item["problem"])) return fail;
+    found.push({ index: item["index"], problem: item["problem"] });
+  }
+  if (!unsafeMoves.every(index)) return fail;
+  return { ok: true, problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
+}
+
 /** U-118: `runEvents` arguments: the run, its form, and the page's offset. */
 export function parseRunEventsArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly workflow: string | null; readonly offset: number } | null {
   if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "workflow", "offset"])) return null;

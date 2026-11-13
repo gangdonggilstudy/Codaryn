@@ -9,7 +9,7 @@
  * - checkApply: a plan action outside the apply task's list is `denied`, as the apply itself finds.
  * - applyPlan through the app already went through the CLI's apply (runApply), whose gate U-182 gave
  *   the lists: kept as a guard.
- * Reproduced first (todo until the app layer's gates get the lists). Scripted model, temporary folders.
+ * Reproduced first (394adf9, todo until the app layer's gates got the lists). Scripted model, temporary folders.
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,6 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { ApplyResult, PlanCheck } from "../../../src/app/index.js";
 import { PLAN_TASK, SECRET_ENV, appEnvironment, exists, plannedRun, readJournal, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-186: the app layer's gates do not get the writable path lists" };
 const POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false } as const;
 
 /** Each path written in turn as a new file, then the end. */
@@ -40,7 +39,7 @@ async function runThroughApp(base: string, configPath: string | null = null): Pr
 }
 
 describe("U-186: a run through the app layer keeps to the writable path lists", () => {
-  test("the task file's list: a write outside it is path_not_writable, nothing is made there", TODO, async () => {
+  test("the task file's list: a write outside it is path_not_writable, nothing is made there", async () => {
     const base = await setupRun({}, { policy: { ...POLICY, writablePaths: ["out"] }, verifiers: [] }, writes("out/ok.md", "elsewhere.md"));
     const decisions = await runThroughApp(base);
     assert.deepEqual(decisions, ["allowed", "path/path_not_writable"]);
@@ -48,7 +47,7 @@ describe("U-186: a run through the app layer keeps to the writable path lists", 
     assert.equal(await exists(path.join(base, "work", "elsewhere.md")), false, "nothing written outside the list");
   });
 
-  test("the config file's list applies under a task file run too", TODO, async () => {
+  test("the config file's list applies under a task file run too", async () => {
     const base = await setupRun({}, { verifiers: [] }, writes("out/ok.md", "elsewhere.md"));
     const config = path.join(base, "config.json");
     await writeFile(config, JSON.stringify({ schemaVersion: 1, policy: { ...POLICY, writablePaths: ["out"] } }), "utf8");
@@ -57,7 +56,7 @@ describe("U-186: a run through the app layer keeps to the writable path lists", 
     assert.equal(await exists(path.join(base, "work", "elsewhere.md")), false);
   });
 
-  test("an empty list: every file tool write is denied", TODO, async () => {
+  test("an empty list: every file tool write is denied", async () => {
     const base = await setupRun({}, { policy: { ...POLICY, writablePaths: [] }, verifiers: [] }, writes("out/ok.md"));
     assert.deepEqual(await runThroughApp(base), ["path/path_not_writable"]);
     assert.equal(await exists(path.join(base, "work", "out", "ok.md")), false);
@@ -80,7 +79,7 @@ describe("U-186: the apply task's list in the app's preflight check and apply", 
     return { ...planned, settings: taskForm(planned.base, { input: { kind: "task", taskPath: applyTask } }) };
   }
 
-  test("checkApply: a move outside the apply task's list is denied", TODO, async () => {
+  test("checkApply: a move outside the apply task's list is denied", async () => {
     const p = await planAndApplyTask(["inbox"]);
     const outcome = await p.app.checkApply({ settings: p.settings, planRunId: p.plan.runId, digest: p.digest });
     assert.ok(outcome.ok, JSON.stringify(outcome));

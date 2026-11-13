@@ -193,6 +193,7 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
   - 관문이 없어도 처음 시험은 journal I/O 순서 때문에 통과했다. 그래서 시점 시험을 따로 두었다.
 - `workflowRef`는 간편 형식의 `--workflow`로 넘긴다. task 파일은 자기 `workflowRef`를 쓰고, 둘을 함께 주면 CLI가 거부한다(R-14 I-4로 고침: 묶음 병합 뒤 CLI가 `--workflow`를 받는다).
 - 한 작업 공간에 실행 하나(잠금, P-4)는 그대로다. 한 프로세스가 서로 다른 작업 공간의 실행 여럿을 가질 수 있다(시험함).
+- U-186(DR-69 B-4, U-182 뒤): 앱 계층의 실행 조립(`src/app/assemble.ts`)도 task의 쓰기 경로 목록(`ResolvedTaskSpec.writablePathSets`, CLI의 `prepareTask`가 만듦)을 정책 관문에 준다. CLI의 실행과 같다. 그래서 GUI 실행에서도 목록 밖의 파일 도구 쓰기는 `path/path_not_writable`로 거부된다. task 파일의 목록과, task 파일 실행에 걸리는 설정 파일의 목록이 모두 그렇다(시험 `tests/unit/app/u186-writable-paths-app.test.ts`).
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 
@@ -700,6 +701,7 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   6. 잠금. 다른 작업이 잡고 있으면 `workspace_locked`다(재시도 가능).
 - **판정은 적용 사전 점검의 것이다.** U-111: 엔진의 `preflightPlan`(U-105)을 그대로 부른다. `applyPlan`이 부르는 바로 그 고리라 판정을 복사하지 않는다. 적용 task의 설정으로 행동마다 본다.
   - 적용 task의 `planActions`와 정책 관문(`createPolicyGate`, `PLAN_ACTION_DESCRIPTORS`, 경로를 풀기 전과 후). 아니면 `denied`다.
+    - U-186: 관문은 적용 task의 쓰기 경로 목록(`writablePathSets`)도 받는다. 적용(CLI `runApply`의 관문, U-182)과 같다. 그래서 목록 밖의 동작은 점검에서도 `denied`다.
   - 그다음 tools의 `createPlanExecutor`의 `check`: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
   - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
   - 인벤토리 상한(DR-6)은 계획 보기가 센 것이다(같은 `createInventoryChecker`).

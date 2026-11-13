@@ -10,15 +10,13 @@
  * - Narrowing (no confirmation): an entry removed, a narrower prefix, an entry already covered, a
  *   list newly set where there was none.
  * The config parser still refuses the field until B-4, so the judgment is called directly.
- * Reproduced first (todo until the judgment knows the field). Fake values only.
+ * Reproduced first (8648107, todo until the judgment knew the field). Fake values only.
  */
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CodarynConfig } from "../../../src/contracts/index.js";
 import { wideningOf } from "../../../src/app/index.js";
-
-const TODO = { todo: "U-183: the widening judgment does not know writablePaths yet" };
 
 const POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false } as const;
 const BASE = { schemaVersion: 1, model: "fake-model-a", maxOutputTokens: 64 } as unknown as CodarynConfig;
@@ -32,12 +30,12 @@ const kinds = (before: CodarynConfig, after: CodarynConfig): string[] => widenin
 const config = (before: readonly string[] | undefined, after: readonly string[] | undefined): string[] => kinds(withPaths(before), withPaths(after));
 
 describe("U-183: the config's writablePaths in the widening judgment", () => {
-  test("the list removed: back to no limit, a widening", TODO, () => {
+  test("the list removed: back to no limit, a widening", () => {
     assert.deepEqual(config(["out"], undefined), ["writable_paths_unlimited policy.writablePaths"]);
     assert.deepEqual(config([], undefined), ["writable_paths_unlimited policy.writablePaths"], "from no writes at all");
   });
 
-  test("an entry that covers more: added, a broader prefix, the root; named at the entry", TODO, () => {
+  test("an entry that covers more: added, a broader prefix, the root; named at the entry", () => {
     assert.deepEqual(config(["out"], ["out", "docs"]), ["writable_path_added policy.writablePaths[1]"]);
     assert.deepEqual(config(["out/reports"], ["out"]), ["writable_path_added policy.writablePaths[0]"]);
     assert.deepEqual(config(["out"], ["."]), ["writable_path_added policy.writablePaths[0]"]);
@@ -58,7 +56,7 @@ describe("U-183: the config's writablePaths in the widening judgment", () => {
     assert.deepEqual(config(["out"], ["out/"]), [], "a trailing slash is the same entry");
   });
 
-  test("the gate's matching: whole segments; case and backslashes as the platform has them", TODO, () => {
+  test("the gate's matching: whole segments; case and backslashes as the platform has them", () => {
     assert.deepEqual(config(["out"], ["output"]), ["writable_path_added policy.writablePaths[0]"], "not a prefix by letters");
     assert.deepEqual(config(["out"], ["OUT/reports"]), WINDOWS ? [] : ["writable_path_added policy.writablePaths[0]"]);
     if (WINDOWS) assert.deepEqual(config(["out"], ["out\\reports"]), []);
@@ -68,7 +66,7 @@ describe("U-183: the config's writablePaths in the widening judgment", () => {
 describe("U-183: a profile's and a workflow's own writablePaths", () => {
   const profile = (writable: readonly string[] | undefined, own = true) => ({ docs: own ? { policy: { ...POLICY, ...(writable === undefined ? {} : { writablePaths: writable }) } } : {} });
 
-  test("a profile's list removed or widened is said for that profile, besides profile_changed", TODO, () => {
+  test("a profile's list removed or widened is said for that profile, besides profile_changed", () => {
     assert.deepEqual(kinds(withPaths(undefined, { profiles: profile(["out"]) }), withPaths(undefined, { profiles: profile(undefined) })), [
       "profile_changed profiles",
       "writable_paths_unlimited profiles.docs.policy.writablePaths",
@@ -83,13 +81,13 @@ describe("U-183: a profile's and a workflow's own writablePaths", () => {
     ]);
   });
 
-  test("a profile's list narrowed or new is profile_changed only; the config's list judges itself", TODO, () => {
+  test("a profile's list narrowed or new is profile_changed only; the config's list judges itself", () => {
     assert.deepEqual(kinds(withPaths(undefined, { profiles: profile(undefined) }), withPaths(undefined, { profiles: profile(["out"]) })), ["profile_changed profiles"]);
     assert.deepEqual(kinds(withPaths(undefined, { profiles: profile(["out", "docs"]) }), withPaths(undefined, { profiles: profile(["out"]) })), ["profile_changed profiles"]);
     assert.deepEqual(kinds(withPaths(["out"], { profiles: profile(["out"]) }), withPaths(undefined, { profiles: profile(["out"]) })), ["writable_paths_unlimited policy.writablePaths"]);
   });
 
-  test("a workflow definition's list is its own: widened or removed is said for that workflow", TODO, () => {
+  test("a workflow definition's list is its own: widened or removed is said for that workflow", () => {
     const docs = (writable: readonly string[] | undefined): Workflow =>
       ({ label: "Docs", tools: ["read_file", "write_file"], policy: { ...POLICY, ...(writable === undefined ? {} : { writablePaths: writable }) } }) as unknown as Workflow;
     assert.deepEqual(kinds(withPaths(undefined, { workflows: { docs: docs(["out"]) } }), withPaths(undefined, { workflows: { docs: docs(["out", "docs"]) } })), [

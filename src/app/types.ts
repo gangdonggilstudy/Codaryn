@@ -160,7 +160,15 @@ export interface SettingsWidening {
     /** GUI F-3: quick runs use another provider (`provider`), so the workspace's text goes to another API. */
     | "provider_changed"
     | "profile_changed"
-    | "workflow_changed";
+    | "workflow_changed"
+    /**
+     * U-183 (DR-69 B-4): an entry of a list of writable paths (the config's `policy.writablePaths`,
+     * a profile's, a workflow definition's) covers a path that list did not cover: an entry added, a
+     * broader prefix, the root. The field is the entry (`…writablePaths[i]`).
+     */
+    | "writable_path_added"
+    /** U-183 (DR-69 B-4): a list of writable paths is gone, so that limit is lifted (no limit). The field is the list. */
+    | "writable_paths_unlimited";
   /** Where: a field path such as "policy.commands[2]". Never a value. */
   readonly field: string;
 }

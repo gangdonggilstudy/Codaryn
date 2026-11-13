@@ -551,6 +551,12 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거
     - 명령 검증기 추가·변경(R-14 L-2, `b30bbce`): 실행마다 사람의 권한으로 돈다. 파일 규칙 검증기 추가는 넓히기가 아니다
     - 경로 토큰 복원, 계획 동작 허용
+    - U-183(DR-69 B-4): 쓸 수 있는 경로(`writablePaths`)를 넓힌다. 없으면 한정이 없고, 목록은 허용 목록이다(항목이 자기와 그 아래를 덮음). 설정·프로필·작업 종류 정의의 목록은 따로따로이고, 실행의 쓰기는 모든 목록에 들어야 한다. 그래서 목록마다 그 자리에서 판정한다.
+      - 목록이 없어짐(한정 없음으로 돌아감): `writable_paths_unlimited`(`policy.writablePaths`, `profiles.<이름>.policy.writablePaths`, `workflows.<id>.policy.writablePaths`). 프로필의 정책이 없어져도 그 프로필의 목록이 없어진 것이다.
+      - 예전 목록이 덮지 않던 경로를 덮는 항목: `writable_path_added`(그 항목 `…writablePaths[i]`). 항목을 더함, 더 넓은 접두사로 바꿈, 뿌리(`.`), 빈 목록(쓰기 없음)에 항목을 둠이 여기에 든다.
+      - 덮는지는 정책 관문의 판정(`compilePathSet`의 `prefix`: 조각 단위, Windows에서 대소문자 무시, 쓸 수 없는 예전 목록은 아무것도 덮지 않음)으로 본다. 설정 파일의 글을 견주며, 링크의 실경로는 풀지 않는다.
+      - 좁히기: 항목을 뺌, 더 좁은 접두사, 예전 항목 안의 항목, 목록이 없던 자리에 새로 둠, 빈 목록.
+      - 아직 설정 파서는 이 필드를 받지 않는다(`unknown_field`, B-4까지). 판정이 먼저 안다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`다.
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
       - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).

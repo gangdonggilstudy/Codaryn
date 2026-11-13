@@ -176,10 +176,11 @@ function describeRule(rule: FileRule): string {
 
 const isMarkdownRule = (rule: FileRule): rule is MarkdownFileRule => (MARKDOWN_RULE_TYPES as readonly string[]).includes(rule.type);
 
-async function checkRule(rule: FileRule, workspace: Workspace): Promise<RuleVerdict> {
-  // U-116: the Markdown rules read their file themselves (up to MAX_MARKDOWN_RULE_FILE_BYTES).
-  if (rule.type === "markdown_headings") return checkMarkdownHeadings(rule, workspace);
-  if (rule.type === "markdown_links") return checkMarkdownLinks(rule, workspace);
+async function checkRule(rule: FileRule, workspace: Workspace, signal: AbortSignal): Promise<RuleVerdict> {
+  // U-116: the Markdown rules read their file themselves (up to MAX_MARKDOWN_RULE_FILE_BYTES); they
+  // look at the signal between their long steps (R-89 M-1, L-2).
+  if (rule.type === "markdown_headings") return checkMarkdownHeadings(rule, workspace, { signal });
+  if (rule.type === "markdown_links") return checkMarkdownLinks(rule, workspace, { signal });
   const resolved = await workspace.resolve(rule.path, "read");
   if (!resolved.ok) return { state: "undecided", note: `path rejected (${resolved.code})` };
 
@@ -242,7 +243,7 @@ async function runFileRulesVerifier(
       verdict = { state: "undecided", note: "cancelled before this rule was checked" };
     } else {
       try {
-        verdict = await checkRule(rule, workspace);
+        verdict = await checkRule(rule, workspace, signal);
       } catch (error) {
         verdict = { state: "undecided", note: `check failed: ${errorMessage(error)}` };
       }

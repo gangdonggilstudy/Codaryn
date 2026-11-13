@@ -107,3 +107,36 @@ describe("U-136: the drafted texts, final", () => {
     assert.equal(MESSAGE_TEXTS.ko["cleanup.no_selection"], "고르는 옵션을 주지 않아 아무것도 고르지 않았습니다. 고르는 옵션을 주어 미리 보세요. 예:");
   });
 });
+
+describe("U-136 (PM, second part): UXM-22, UXM-18, U-129's cells, help.output", () => {
+  test("UXM-22: applying a plan again says to make a new plan with run, after a revert, in 100 columns", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    assert.equal(en["error.plan_already_applied.fix"], "See codaryn report. To do it again, revert it, then make a new plan with codaryn run.");
+    assert.equal(ko["error.plan_already_applied.fix"], "codaryn report로 결과를 보고, 다시 하려면 되돌린 뒤 codaryn run으로 새 계획을 만드세요.");
+    assert.ok(columns(`  To fix: ${en["error.plan_already_applied.fix"]}`) <= 100);
+    assert.ok(columns(`  고치는 법: ${ko["error.plan_already_applied.fix"]}`) <= 100);
+  });
+
+  test("UXM-18: the runs mark for changed records is short in both languages (its explanation is report's)", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    assert.equal(en["runs.records_changed"], "records changed (not by the run)");
+    assert.equal(ko["runs.records_changed"], "기록 변경됨(실행이 아닌 것이 바꿈)");
+    for (const text of [en["runs.records_changed"], ko["runs.records_changed"]]) assert.ok(columns(text) <= 40, text);
+  });
+
+  test("U-129: an apply run's changes cell counts actions, and the verdict reads as review, in both languages", () => {
+    const { en, ko } = MESSAGE_TEXTS;
+    // The PM's cells, pinned by U-129's own test (a counter 개 would change them; the report proposes it).
+    assert.equal(ko["runs.apply_actions"], "동작 {count}");
+    assert.equal(ko["runs.apply_action_one"], "동작 1");
+    assert.equal(en["runs.apply_actions"], "{count} actions");
+    assert.equal(en["runs.apply_action_one"], "1 action");
+    assert.equal(en["runs.review"], "review: {verdict}");
+    assert.equal(ko["runs.review"], "검토: {verdict}");
+  });
+
+  test("help.output: no particle that changes with the last sound after --quiet", () => {
+    assert.ok(MESSAGE_TEXTS.ko["help.output"].includes("--quiet 옵션을 주면 "));
+    for (const text of Object.values(MESSAGE_TEXTS.ko)) assert.ok(!/--quiet(이면|면)(?![a-z-])/.test(text), text);
+  });
+});

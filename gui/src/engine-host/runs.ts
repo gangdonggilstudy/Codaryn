@@ -116,6 +116,8 @@ export function runResultValue(outcome: unknown, shown: Shown, shownText: Shown 
       finalMessage: finalMessageValue(result["finalMessage"], shownText),
       // U-40 (DR-52): the masking counts, two counts only; null when none or not counts.
       masking: maskingOf(result["masking"]),
+      // U-226 (R-109, U-193): the run's workspace lock could not be released at its end; told, never hidden.
+      ...(outcome["lockLeft"] === true ? { lockLeft: true } : {}),
     },
   };
 }
@@ -192,7 +194,7 @@ export function taskForm(workspace: string, profile: string | null, workflowRef:
 export function applyResultValue(outcome: unknown, shown: Shown, unsafeMoves: number | null): Obj | HostFailure {
   if (!isObj(outcome) || outcome["ok"] !== true || !isObj(outcome["output"])) return failureOf(outcome);
   const output = outcome["output"];
-  const base = runResultValue({ ok: true, result: { ...output, changes: [], plan: undefined, review: undefined } }, shown);
+  const base = runResultValue({ ok: true, result: { ...output, changes: [], plan: undefined, review: undefined }, lockLeft: outcome["lockLeft"] }, shown);
   if (base["ok"] !== true) return base as HostFailure;
   const applied = Array.isArray(output["applied"]) ? output["applied"].slice(0, MAX_LIST) : [];
   return {
@@ -225,7 +227,7 @@ export function applyResultValue(outcome: unknown, shown: Shown, unsafeMoves: nu
 export function applyOutcomeValue(outcome: unknown, shown: Shown, shownText: Shown | undefined, unsafeMoves: number | null, deniedNotPlanned: number): Obj | HostFailure {
   const output = isObj(outcome) && outcome["ok"] === true && isObj(outcome["output"]) ? outcome["output"] : null;
   if (output === null || output["kind"] !== "run") return applyResultValue(outcome, shown, unsafeMoves);
-  const base = runResultValue({ ok: true, result: output }, shown, shownText);
+  const base = runResultValue({ ok: true, result: output, lockLeft: (outcome as Obj)["lockLeft"] }, shown, shownText);
   if (base["ok"] !== true) return base;
   const planRunId = isRunId(output["planRunId"]) ? output["planRunId"] : null;
   if (planRunId === null) return { ok: false, code: "host_error" };

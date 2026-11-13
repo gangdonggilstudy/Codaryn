@@ -445,11 +445,21 @@ export function startGui(options: GuiOptions): void {
       // 3.9: "do not apply" is the default; the digest's first 12 characters and the counts are shown.
       confirmApply: async (approval) => {
         const buttons = [dialogText(language, "apply.confirm"), dialogText(language, "apply.keep")];
-        // U-226 (U-218): a run plan's apply starts a run: its number of files, and that its summary is
-        // the model's words, after the form it is applied with. "Do not apply" stays the default.
+        // U-226 (U-218): a run plan's apply starts a run. After the form it is applied with, what the CLI's
+        // approval text says (R-109): the run's file tools write only these files; the summary is approved
+        // with the plan, is not the goal or a new instruction, and nothing checks the run against it; an
+        // allowed command is not bound to the files (said as a condition: the dialog does not know the
+        // policy). Then a stale plan's end. "Do not apply" stays the default.
         if (approval.planKind === "changes") {
-          const values = { files: approval.files ?? 0, digest: approval.digest.slice(0, 12) };
-          const detail = `${applyFormText(language, approval.profile, approval.workflowRef)}\n${dialogText(language, "applyRun.detail")}`;
+          const files = approval.files ?? 0;
+          const values = { files, digest: approval.digest.slice(0, 12) };
+          const detail = [
+            applyFormText(language, approval.profile, approval.workflowRef),
+            dialogText(language, "applyRun.what", { files }),
+            dialogText(language, "applyRun.summaryNote"),
+            dialogText(language, "applyRun.commandsNote"),
+            dialogText(language, "applyRun.stale"),
+          ].join("\n");
           return (await ask("applyRun.message", { type: "question", title: dialogText(language, "closeRun.title"), detail, buttons, defaultId: 1, cancelId: 1, noLink: true }, values)) === 0;
         }
         const values = { moves: approval.moves, discards: approval.discards, digest: approval.digest.slice(0, 12) };

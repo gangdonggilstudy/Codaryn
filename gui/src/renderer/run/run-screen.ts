@@ -210,6 +210,8 @@ function resultView(t: Texts, api: CodarynApi, result: RunResultView, labels: { 
     const counted = String(result.plan.actions ?? "-");
     box.append(el("p", result.plan.kind === "changes" ? t.format("run.planChanges", { count: counted, digest }) : t.format("run.plan", { actions: counted, digest }), { id: "run-plan" }));
   }
+  // U-226 (R-109, U-193): the workspace lock was left; said as the CLI's end summary does (no retry is promised).
+  if (result.lockLeft === true) box.append(el("p", t.format("run.lockLeft"), { role: "alert", class: "error", id: "run-lock-left" }));
   // U-226 (U-218): a run that carried out a run plan: whose plan, and (the CLI's end summary) its writes
   // refused because the approved plan does not name the file, with how to change other files.
   if (result.kind === "run" && result.planRunId !== null) {

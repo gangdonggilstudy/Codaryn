@@ -790,6 +790,8 @@ export interface RunResultView {
    * refused because the approved plan does not name the file (path_not_writable). Absent otherwise.
    */
   readonly deniedNotPlanned?: number;
+  /** U-226 (R-109, U-193): the run's (or apply's) workspace lock could not be released at its end. */
+  readonly lockLeft?: true;
 }
 
 /** A plan action as the window shows it: a move from → to, or a discard of `from` (to the discard box). */
@@ -860,6 +862,8 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   // U-226: only a run that carried out a plan has the count of its writes outside the plan.
   const deniedNotPlanned = result["deniedNotPlanned"];
   if (deniedNotPlanned !== undefined && (!count(deniedNotPlanned) || kind !== "run" || planRunId === null)) return fail;
+  const lockLeft = result["lockLeft"];
+  if (lockLeft !== undefined && lockLeft !== true) return fail;
   const finalMessage = toFinalMessage(result["finalMessage"]);
   if (finalMessage === "bad") return fail;
   return {
@@ -892,6 +896,7 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
       // U-124: how the run's permission questions ended, counts only; anything else gives no lines.
       confirmations: confirmationsOf(result["confirmations"]),
       ...(deniedNotPlanned === undefined ? {} : { deniedNotPlanned }),
+      ...(lockLeft === true ? { lockLeft } : {}),
     },
   };
 }

@@ -111,10 +111,11 @@ test("U-226: the engine host gives a run plan's apply a run's events and questio
   const done = written.find((m) => m.type === "done") as { outcome: { ok: boolean; result: Record<string, unknown> } };
   assert.equal(done.outcome.ok, true);
   assert.deepEqual([done.outcome.result["planRunId"], done.outcome.result["deniedNotPlanned"], done.outcome.result["kind"]], [PLAN, 2, undefined], "a run's result: the plan run and its two writes outside the plan");
-  assert.equal(JSON.stringify(done.outcome).includes("lockLeft"), false, "the lock's state is not a run result's field here");
+  // R-109: the lock the run could not release is told with the result.
+  assert.equal(done.outcome.result["lockLeft"], true);
   const view = toRunResultView(done.outcome);
   assert.ok(view.ok, JSON.stringify(view));
-  if (view.ok) assert.deepEqual([view.result.kind, view.result.planRunId, view.result.deniedNotPlanned, view.result.changes], ["run", PLAN, 2, [{ path: "docs/new.md", created: true }]]);
+  if (view.ok) assert.deepEqual([view.result.kind, view.result.planRunId, view.result.deniedNotPlanned, view.result.changes, view.result.lockLeft], ["run", PLAN, 2, [{ path: "docs/new.md", created: true }], true]);
 });
 
 test("U-226: a plan of moves still ends as an apply; a run's end without a plan run id is host_error", () => {
@@ -266,13 +267,27 @@ test("U-226: the plan screen applies a run plan once its check answered: the mai
 });
 
 test("U-226: the words: the main process's dialog names the files and the summary as the model's; the run's words are the CLI's", { skip: !BUILT && "the engine is not built (npm run build in the root)" }, async () => {
-  for (const [language, words] of [["ko", /모델이 쓴 글/], ["en", /words of the model/]] as const) {
-    const dialog = DIALOG_TEXTS[language] as Readonly<Record<string, string>>;
-    assert.ok(dialog["applyRun.message"]?.includes("{files}") && dialog["applyRun.message"]?.includes("{digest}"), language);
-    assert.match(dialog["applyRun.detail"] ?? "", words, language);
-  }
   const ko = (await import(pathToFileURL(path.join(DIST, "i18n", "ko.js")).href)) as { KO_MESSAGES: Record<string, string> };
   const en = (await import(pathToFileURL(path.join(DIST, "i18n", "en.js")).href)) as { EN_MESSAGES: Record<string, string> };
+  // R-109 (L-1, M-1): the dialog says what the CLI's approval text says (changesApprovalText), in the
+  // same words where it can: the file tools and their files, the summary's three points ("above" is the
+  // plan's: the dialog shows no summary), and the commands note as a condition (the policy is unknown here).
+  const cli = { ko: ko.KO_MESSAGES, en: en.EN_MESSAGES };
+  for (const [language, above, plans, condition] of [
+    ["ko", "위의 요약은", "계획의 요약은", /^작업이 명령도 허용하면/],
+    ["en", "The summary above is", "The plan's summary is", /^If the task also allows commands/],
+  ] as const) {
+    const dialog = DIALOG_TEXTS[language] as Readonly<Record<string, string>>;
+    const catalog = cli[language];
+    assert.ok(dialog["applyRun.message"]?.includes("{files}") && dialog["applyRun.message"]?.includes("{digest}"), language);
+    assert.equal(dialog["applyRun.what"]?.replace("{files}", "{count}"), catalog["apply.changes.what"], `${language} what`);
+    assert.equal(dialog["applyRun.summaryNote"], catalog["apply.changes.summary_note"]?.replace(above, plans), `${language} summary`);
+    assert.match(dialog["applyRun.commandsNote"] ?? "", condition, `${language} commands`);
+    assert.equal("applyRun.detail" in dialog, false);
+  }
+  // R-109 (L-2): the plan screen calls it the summary, with the CLI's label.
+  assert.equal(KO["plan.runSummaryLabel"], ko.KO_MESSAGES["plan.changes.summary_label"]);
+  assert.equal(EN["plan.runSummaryLabel"], en.EN_MESSAGES["plan.changes.summary_label"]);
   assert.equal(KO["run.deniedNotPlanned"], ko.KO_MESSAGES["summary.denied_not_planned"]);
   assert.equal(EN["run.deniedNotPlanned"], en.EN_MESSAGES["summary.denied_not_planned"]);
   assert.equal(KO["run.deniedNotPlannedHint"], ko.KO_MESSAGES["summary.denied_not_planned_hint"]);
@@ -367,5 +382,30 @@ test("U-226 (U-221): a carried-out run plan's screen names the run that carried 
   } finally {
     for (const root of shownRoots) root.replaceChildren();
     restore2();
+  }
+});
+
+test("U-226 (R-109): a lock left at the end of a run, an apply or a carrying run is told on the result, and nothing is promised", async () => {
+  const run = runResultValue({ ok: true, result: { ...carried().output, planRunId: undefined, planDigest: undefined }, lockLeft: true }, same) as { ok: true; result: Record<string, unknown> };
+  assert.equal(run.result["lockLeft"], true, "a run's");
+  const plain = runResultValue({ ok: true, result: { ...carried().output, planRunId: undefined, planDigest: undefined } }, same) as { ok: true; result: Record<string, unknown> };
+  assert.equal("lockLeft" in plain.result, false, "absent when released");
+  const moves = { ok: true, lockLeft: true, output: { schemaVersion: 1, kind: "apply", runId: CARRY, planRunId: PLAN, status: "done", reason: "applied", exitCode: 0, applied: [], usage: {}, notices: [] } };
+  assert.equal((applyOutcomeValue(moves, same, undefined, 0, 0) as { result: Record<string, unknown> }).result["lockLeft"], true, "an apply's, when the app gives it");
+  assert.equal(toRunResultView({ ok: true, result: { ...run.result, lockLeft: false } }).ok, false, "only true");
+  const restore = installFakeDom();
+  try {
+    for (const language of ["ko", "en"] as const) {
+      const texts = language === "ko" ? KO : EN;
+      const left = await resultScreen(language, viewOf({ lockLeft: true }));
+      assert.equal(byId(left, "run-lock-left")?.textContent, texts["run.lockLeft"]);
+      assert.equal(byId(left, "run-lock-left")?.getAttribute("role"), "alert");
+      assert.doesNotMatch(texts["run.lockLeft"], language === "ko" ? /다시 풀|초/ : /again|seconds/, "no retry is promised");
+      const released = await resultScreen(language, viewOf({}));
+      assert.equal(byId(released, "run-lock-left"), undefined);
+    }
+  } finally {
+    for (const root of shownRoots) root.replaceChildren();
+    restore();
   }
 });

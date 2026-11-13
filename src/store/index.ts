@@ -19,7 +19,7 @@ export type { OriginalUnavailable, RevertRunErrorCode, RunOriginal } from "./cha
 export { RUN_START_TOLERANCE_MS, RunListError, inspectRun, isRunTimestamp, isStoredRunId, latestRun, latestRunId, listRuns, listRunsAt, readRevertRecord, runIdSecond, writeRevertRecord } from "./runs.js";
 export type { RunInspection } from "./runs.js";
 export { PROCESS_START_TOLERANCE_MS, acquireLock, inspectLock, linuxProcessIdentity, lockHolderAlive, nodeLockFileSystem, parseProcStartTicks, processStartTime, releaseLock } from "./lock.js";
-export { canonicalActions, createPlanRecorder, isWorkspaceRelativePath, loadPlan, markPlanApplied } from "./plan.js";
+export { canonicalActions, canonicalPlannedFiles, createPlanRecorder, isWorkspaceRelativePath, loadAnyPlan, loadPlan, markPlanApplied } from "./plan.js";
 export type { MarkPlanAppliedRequest } from "./plan.js";
 export { readReviewRecord, writeReviewRecord } from "./review.js";
 export { discardedRootPath, prepareDiscardedRoot } from "./discarded.js";
@@ -64,6 +64,7 @@ export async function writeResult(workspaceRoot: string, result: EngineResult): 
 }
 export { listParkedFiles } from "./apply-revert.js";
 export { createApplyRecorders, createRunRecorders } from "./state-guard.js";
+export type { PlanCarryingRecorders, PlanCarryingRecordersOptions } from "./state-guard.js";
 export { hasRecordsChangedMark } from "./marks.js";
 export { stateUncheckedSince } from "./unchecked.js";
 export { applyCleanup, applyCleanupWith, planCleanup, summarizeState } from "./cleanup.js";

@@ -1192,7 +1192,7 @@ node --test dist/tests/live/openai-live.js
 - **큰 작업 공간의 파일 목록:** 작업 공간의 파일 목록(상한 10만 개)을 `plan`은 한 번, `apply --digest`는 두 번(동작 앞뒤) 만든다. 터미널 질문으로 승인하면 계획을 보이기 전에 한 번 더 만든다(코드 기준, 터미널 대화는 확인하지 않았다). 파일이 아주 많으면 시간이 걸린다. 목록을 만드는 중의 취소는 목록이 끝나기를 기다리지 않는다. 파일 5만 개(목록 하나에 약 0.5초)에서 첫 목록 중에 취소 파일을 만들자 약 0.1초 뒤 `cancelled`로 끝났고 아무것도 옮기지 않았다(main `3e36b1b`).
 - **보호 경로:** 파일 도구만 막는다. 명령으로 고치는 것은 막지 못하고, 무결성 확인은 사후 탐지다. 두 확인 사이에 바뀌었다가 다음 확인 전에 되돌려진 변경은 탐지하지 못한다.
 - **되돌리기:** 명령이 바꾼 파일은 대상이 아니다. 실행 중 다른 프로그램이 같은 파일을 바꾸면 스냅샷이 실제 실행 전 상태와 다를 수 있다.
-- **실행 계획(18.11절 "알려진 한계"):** 계획 기록을 다른 작업 공간에 복사하면 거기서 원래 다이제스트로 수행된다(DR-74 (4), Codex V-14 M-1). 요약은 강제되지 않고 허용한 명령은 승인한 파일에 묶이지 않는다. `propose_changes`가 없는 작업 종류는 실행 전에 거부되지만 `doctor`는 알리지 않는다. 터미널의 승인 질문은 아직 이동 계획의 글이다.
+- **실행 계획(18.11절 "알려진 한계"):** 계획 기록을 다른 작업 공간에 복사하면 거기서 원래 다이제스트로 수행된다(DR-74 (4), Codex V-14 M-1). 요약은 강제되지 않고 허용한 명령은 승인한 파일에 묶이지 않는다. 계획 파일이 `writablePaths` 밖이라 계획 없이 끝난 계획 실행은 `model_error`이고 끝 요약이 모델 설정 점검을 권한다.
 - **같은 실패 판정:** 숫자만 바뀌는 진전(실패 3건 → 1건)도 같은 실패로 보아 `maxSameFailures`에서 멈춘다. 임시 경로처럼 숫자가 아닌 내용이 매번 바뀌면 다른 실패로 보아 `maxRepairAttempts`와 예산 한도만 반복을 멈춘다.
 - **가림의 빈틈:** 12절 목록 밖의 변형, 다른 값과 함께 인코딩된 Base64, UTF-16·CP949 출력은 가려지지 않는다. 출력 끝에서 4096바이트보다 긴 변형이 잘리면 일부가 남을 수 있다. 아주 짧은 가릴 값이나 변수 파일의 흔한 값(예: `postgres`)은 엉뚱한 곳까지 가릴 수 있다.
 - **파일 해시 노출:** 파일 해시가 모델과 기록에 남는다. 짧은 비밀이 든 파일은 추측 검증이 가능하다.
@@ -1374,8 +1374,8 @@ node --test dist/tests/live/openai-live.js
 - task의 `workflow`는 표시용 이름표일 뿐이다. `"workflow": "organize"`만 쓰고 `workflowRef`가 없으면 예전 방식으로 실행되고 계획 도구가 없다.
 - **사용자 정의 작업 종류:** 설정 파일의 `workflows`에 `"<id>": { 정의 }`로 둔다. 내장 id는 다시 정의할 수 없다.
   - 필드: `label`, `tools`, `instructions`, `plan`(`none`·`apply`·`run`), `completion`(`verifiers`·`human_review`), `humanReview`(`checklist`), `allowCommands`, `policy`, `verifiers`, `limits`
-  - **`plan: "run"`(실행 계획)은 18.11절이다.** 그 정의의 `tools`에는 계획 도구 `propose_changes`가 있어야 한다. 내장 작업 종류에는 그 도구를 둔 것이 없다. U-177이 막던 거부는 B-4(병합 `2ef6b48`)로 없어졌다.
-  - 틀린 값(예: `"later"`)은 `plan must be one of none, apply, run`이다(`invalid_task`, main `07b4124`의 실제 CLI). 계획 방식이 `run`인데 도구에 `propose_changes`가 없으면 모델 요청 전에 거부한다(정의는 `invalid_config`, task 파일의 `plan`은 `invalid_task`, 18.11절 "준비").
+  - **`plan: "run"`(실행 계획)은 18.11절이다.** 그 정의의 `tools`에는 계획 도구 `propose_changes`가 있어야 한다. 내장 작업 종류에는 그 도구를 둔 것이 없다.
+  - 틀린 값(예: `"later"`)은 `plan must be one of none, apply, run`이다(`invalid_task`, main `529fcea`의 실제 CLI). 계획 방식이 `run`인데 도구에 `propose_changes`가 없으면 모델 요청 전에 거부하고(정의는 `invalid_config`, task 파일의 `plan`은 `invalid_task`), `doctor`는 그 파일을 실패로 알린다(18.11절 "준비").
   - 정의는 사용자 설정 파일에만 있다. task 파일은 작업 종류를 정의할 수 없고, 작업 공간 안의 파일로는 바꿀 수 없다(5절).
 - **task가 바꿀 수 있는 범위**(넘으면 `invalid_task`, 간편 형식·프로필의 값이면 `invalid_config`):
   - `tools`는 작업 종류가 주는 도구 안에서 줄이기만 한다.
@@ -1633,7 +1633,7 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
   - `--json`은 `kind:"plan"` 한 줄이다(`digest`, `actions`, `appliedBy`, `inventoryLimitReached`, 요약이 있으면 `summary`, 표시가 있으면 `recordsChanged: true`).
 - **승인**(둘 다 없으면 `plan_not_approved`, 종료 2, 아무것도 옮기지 않음):
   - `--digest`에 다이제스트 앞 12~64자(소문자 16진수)를 준다. 그 계획의 다이제스트와 맞아야 한다.
-  - stdin과 stderr가 모두 터미널이고 `--digest`가 없으면, 계획을 보이고 `Apply this plan? [y/N]`을 묻는다. 기본은 아니오다.
+  - stdin과 stderr가 모두 터미널이고 `--digest`가 없으면, 계획을 보이고 `Apply this plan? [y/N]`을 묻는다. 기본은 아니오다. 실행 계획은 질문이 다르다(`Start the run that makes these changes? [y/N]`, 18.11절).
   - 다이제스트는 계획 실행의 끝 요약에 나온 값을 쓴다. 상태 디렉터리는 허용 명령이 바꿀 수 있으므로, `plan`에서 본 다이제스트가 그 값과 같은지 확인하고 승인한다.
 - **같은 가릴 값으로 한다:** 계획 파일은 계획 실행이 가린 표기를 동작마다 함께 담는다(가릴 값이나 그 해시는 담지 않는다). `plan`·`apply`는 지금 명령이 등록한 가릴 값으로 다시 가린 결과가 그 표기와 같을 때만 진행한다.
   - 다르면 계획을 읽은 직후 `plan_secrets_differ`(종료 2)로 끝난다. 아무것도 보이거나 묻거나 기록하거나 옮기지 않고, 적용 실행도 만들지 않는다. `--allow-unsafe-move`를 줘도 같다. 실제 출력(stderr):
@@ -2096,7 +2096,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261113T025137Z-78bbf85d
 - **이동 계획과 다른 점:** 수행이 적용기가 아니라 모델 실행이다. 검증기는 계획을 수행한 실행에서 돈다. 되돌리기는 보통 실행과 같다(`revert --run <계획을 수행한 실행>`).
 - **강제되는 것:** 파일 목록(그리고 `writablePaths`, 13절). 계획 뒤에 계획이나 그 파일이 바뀌면 첫 모델 요청 전에 멈춘다.
 - **강제되지 않는 것:** 요약은 모델이 쓴 작업 설명이다. 다이제스트에 묶여 계획과 함께 승인되지만, 실행이 그 설명대로 하는지는 아무것도 확인하지 않는다. 허용한 명령도 이 파일들에 묶이지 않는다(아래 "명령 규칙").
-- **확인:** 아래 출력은 모두 main `07b4124`의 실제 CLI를 저장소 밖 임시 폴더에서 대본 모델로 돌린 것이다(키 없음, `CODARYN_LANG=en`). 모델이 받은 글을 루프백(127.0.0.1)의 가짜 Anthropic 서버로 보는 것은 시험 `tests/unit/cli/g-u195-run-plan-cli.test.ts`의 몫이다.
+- **확인:** 아래 출력은 모두 main `529fcea`의 실제 CLI를 저장소 밖 임시 폴더에서 대본 모델로 돌린 것이다(키 없음, `CODARYN_LANG=en`). 모델이 받은 글을 루프백(127.0.0.1)의 가짜 Anthropic 서버로 보는 것은 시험 `tests/unit/cli/g-u195-run-plan-cli.test.ts`의 몫이다.
 
 **준비: 작업 종류 정의.** 내장 작업 종류에는 계획 도구 `propose_changes`를 둔 것이 없다. 설정 파일의 `workflows`에 정의를 두고 task의 `workflowRef`(또는 간편 형식의 `--workflow`)로 고른다(18.1절 "사용자 정의 작업 종류").
 
@@ -2112,7 +2112,18 @@ Revert: codaryn revert --workspace <workspace> --run 20261113T025137Z-78bbf85d
 ```
 
 - task 파일은 `"workflowRef": "rewrite"`로 이 정의를 고르고, 목표는 `"Rewrite docs/guide.md for new users and add docs/new.md."`, 검증기는 `file_rules` 하나(`docs/guide.md`에 `new guide`가 있는지)다. 작업 공간에는 `README.md`와 `docs/guide.md`(`old guide`)가 있다.
-- 계획 도구가 없으면 모델 요청 전에 거부한다. 정의의 `tools`에 `propose_changes`가 없으면 그 정의를 고른 실행은 `invalid_config`(`message`: "workflows.tools leaves out the plan tool of the plan mode: \"apply\" needs propose_plan and \"run\" needs propose_changes among the tools")이고, `workflowRef` 없이 task에 `plan: "run"`만 두면 `invalid_task`(`message`: "plan leaves out the plan tool of the plan mode: \"apply\" needs propose_plan and \"run\" needs propose_changes among the tools")다. `doctor`는 둘 다 미리 알리지 않는다(설정 파일과 task 파일이 `ok`).
+- 계획 도구가 없으면 모델 요청 전에 거부한다. 정의의 `tools`에 `propose_changes`가 없으면 그 정의를 고른 실행은 `invalid_config`(`message`: "workflows.tools leaves out the plan tool of the plan mode: \"apply\" needs propose_plan and \"run\" needs propose_changes among the tools")이고, `workflowRef` 없이 task에 `plan: "run"`만 두면 `invalid_task`(`message`: "plan leaves out the plan tool of the plan mode: \"apply\" needs propose_plan and \"run\" needs propose_changes among the tools")다. 사람용 오류의 끝에는 고치는 법이 한 줄 붙는다(JSON의 `hint`: "plan_tool_missing", U-228):
+
+```
+  A task type with plan "run" needs propose_changes among its tools, and one with plan "apply" needs propose_plan. Add the tool to the task type's tools (and to the task's own tools if it lists them), or leave the plan mode out.
+```
+
+- `doctor`는 그런 정의를 설정 파일 항목에서, `workflowRef` 없는 task의 `plan: "run"`을 task 파일 항목에서 실패로 알린다(종료 1):
+
+```
+[failed]  config file               the config file (--config) has a task type whose plan mode lacks its plan tool (plan "run" needs propose_changes, plan "apply" needs propose_plan); a run refuses it
+[failed]  task file                 the task's plan mode lacks its plan tool among the tools (plan "run" needs propose_changes, plan "apply" needs propose_plan); a run refuses the task
+```
 - task가 정의의 방식을 바꾸려 하면 실행 전에 거부한다(`invalid_task`): `plan: "none"`이면 "plan cannot be \"none\" under a workflow with plan \"run\"", `plan: "apply"`면 "plan cannot be \"apply\" under a workflow with plan \"run\""다. 틀린 값(`"later"`)은 "plan must be one of none, apply, run"다.
 
 **1. 계획 만들기(`run`).** 대본은 `docs/guide.md`를 읽고 `propose_changes`로 두 파일(고칠 `docs/guide.md`, 만들 `docs/new.md`)과 요약을 낸다. 파일은 바뀌지 않는다(종료 3).
@@ -2132,27 +2143,27 @@ The plan's summary, written by the plan run (the model's own words, not checked;
   | Rewrite docs/guide.md for new users and add docs/new.md with a short
   | start page.
 Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.
-Run id: 20261113T134758Z-6d77007e
-Report: codaryn report --workspace <workspace> --run 20261113T134758Z-6d77007e
-Plan: codaryn plan --task <task.json> --run 20261113T134758Z-6d77007e
-Apply after approval: codaryn apply --task <task.json> --run 20261113T134758Z-6d77007e --digest <digest>
-  d77697e5bc955162006c997b490b93bc6cbac65416362487be3127605a1d2bc7
+Run id: 20261113T141025Z-be5b1e51
+Report: codaryn report --workspace <workspace> --run 20261113T141025Z-be5b1e51
+Plan: codaryn plan --task <task.json> --run 20261113T141025Z-be5b1e51
+Apply after approval: codaryn apply --task <task.json> --run 20261113T141025Z-be5b1e51 --digest <digest>
+  5fd9a78f0ce156e81085cb78d73101497f2a356ad36d92c5a75a30b21a81bef2
 ```
 
-- stdout JSON의 `plan`은 {"digest":"d77697e5bc955162006c997b490b93bc6cbac65416362487be3127605a1d2bc7","actions":2,"kind":"changes"}이고 `planSummary`가 요약이다.
+- stdout JSON의 `plan`은 {"digest":"5fd9a78f0ce156e81085cb78d73101497f2a356ad36d92c5a75a30b21a81bef2","actions":2,"kind":"changes"}이고 `planSummary`가 요약이다.
 - 끝 요약은 쓸 파일 수와, 계획 보기와 같은 요약 표지를 쓴다. 요약은 다이제스트에 묶여 계획과 함께 승인된다.
 
 **2. 계획 보기(`plan`).**
 
 ```
-Plan of run 20261113T134758Z-6d77007e: 2 file(s) to write, pending
-Digest: d77697e5bc955162006c997b490b93bc6cbac65416362487be3127605a1d2bc7
+Plan of run 20261113T141025Z-be5b1e51: 2 file(s) to write, pending
+Digest: 5fd9a78f0ce156e81085cb78d73101497f2a356ad36d92c5a75a30b21a81bef2
   1. modify  docs/guide.md
   2. create  docs/new.md
 The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan):
   | Rewrite docs/guide.md for new users and add docs/new.md with a short
   | start page.
-To have a run make these changes: codaryn apply <the same task form> --run 20261113T134758Z-6d77007e --digest d77697e5bc95
+To have a run make these changes: codaryn apply <the same task form> --run 20261113T141025Z-be5b1e51 --digest 5fd9a78f0ce1
 The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.
 ```
 
@@ -2166,7 +2177,15 @@ codaryn: error — the plan was not approved, so nothing was changed (plan_not_a
   To fix: Read the plan with codaryn plan; to approve it, give codaryn apply --digest <at least the first 12 characters of the plan digest>.
 ```
 
-- 터미널에서 `--digest` 없이 `apply`하면 위의 계획 보기를 보인 뒤 `Apply this plan? [y/N]`을 묻는다. `n`으로 답하자 위와 같은 `plan_not_approved`였다(표준 입력·출력·오류가 터미널인 것처럼 흉내 내어 확인).
+- 터미널에서 `--digest` 없이 `apply`하면 위의 계획 보기를 보인 뒤 실행 계획의 질문을 한다(U-228). `n`으로 답하자 위와 같은 `plan_not_approved`였다(표준 입력·출력·오류가 터미널인 것처럼 흉내 내어 확인):
+
+```
+Approving starts a run whose file tools can write only these 2 file(s).
+The summary above is the model's description of the work, approved with the plan. It is not the goal or a new instruction, and nothing checks the run against it; only the file list is enforced.
+Start the run that makes these changes? [y/N] n
+```
+
+- 명령을 허용한 task(아래 8의 명령 규칙)에서는 질문 바로 앞에 `This task also allows commands, and a command the policy allows is not limited to these files.`가 더 붙는다.
 - `--digest <앞 12자 이상>`으로 승인하면 계획을 수행하는 실행이 시작된다. 이번 대본은 승인된 두 파일을 쓴 뒤 계획에 없는 `docs/extra.md`도 쓰려 한다.
 
 ```
@@ -2183,7 +2202,7 @@ codaryn: turn 4
 codaryn: check #1 — passed (pass)
 codaryn: finished — done (verified)
 ── Result: done — every configured check passed (done/verified) ──
-Plan run: 20261113T134758Z-6d77007e
+Plan run: 20261113T141025Z-be5b1e51
 Checks passed: 1 of 1 (within the configured checks)
 Files changed: 2
   docs/guide.md (changed)
@@ -2195,12 +2214,12 @@ Usage: model turns 4 · tool calls 2 · 0.1 s
 The agent's last message (the agent's own words, not a verified fact):
   | done
 Read the report, and revert if needed.
-Run id: 20261113T134800Z-6764fa36
-Report: codaryn report --workspace <workspace> --run 20261113T134800Z-6764fa36
-Revert: codaryn revert --workspace <workspace> --run 20261113T134800Z-6764fa36
+Run id: 20261113T141026Z-57a6e873
+Report: codaryn report --workspace <workspace> --run 20261113T141026Z-57a6e873
+Revert: codaryn revert --workspace <workspace> --run 20261113T141026Z-57a6e873
 ```
 
-- stdout JSON은 그 실행의 결과다(`kind: "run"`). `planRunId`는 "20261113T134758Z-6d77007e", `planDigest`는 계획의 다이제스트다. 이동 계획의 `apply`처럼 `ApplyResult`가 아니다.
+- stdout JSON은 그 실행의 결과다(`kind: "run"`). `planRunId`는 "20261113T141025Z-be5b1e51", `planDigest`는 계획의 다이제스트다. 이동 계획의 `apply`처럼 `ApplyResult`가 아니다.
 - 계획을 수행한 실행의 목표는 계획을 만든 실행의 목표(사람이 준 글)다. 요약은 목표가 아니라 시스템 글의 승인된 계획 아래에 들어간다(DR-74 (2)). 이번 실행의 첫 모델 요청에서 확인한 시스템 글의 그 부분:
 
 ```
@@ -2217,22 +2236,22 @@ Rewrite docs/guide.md for new users and add docs/new.md with a short start page.
 
 ```
 run id (UTC)               started (local)      changes  result
-20261113T134800Z-6764fa36  2026-11-13 22:48:00  2        done (done/verified) · carries out the plan of run 20261113T134758Z-6d77007e
-20261113T134758Z-6d77007e  2026-11-13 22:47:58  0        plan carried out by run 20261113T134800Z-6764fa36 (needs-input/plan_pending)
+20261113T141026Z-57a6e873  2026-11-13 23:10:26  2        done (done/verified) · carries out the plan of run 20261113T141025Z-be5b1e51
+20261113T141025Z-be5b1e51  2026-11-13 23:10:25  0        plan carried out by run 20261113T141026Z-57a6e873 (needs-input/plan_pending)
 ```
 
 - `report --run <계획을 수행한 실행>`의 줄과, 계획을 만든 실행의 `report`의 줄(차례로). `report --json`의 `result`도 `planRunId`·`planDigest`를 옮긴다.
 
 ```
-- Plan run: `20261113T134758Z-6d77007e`, digest `d77697e5bc955162006c997b490b93bc6cbac65416362487be3127605a1d2bc7` (this run carried out its approved plan)
-- Plan: 2 file(s) to write, carried out by run `20261113T134800Z-6764fa36` (its report: `codaryn report --run 20261113T134800Z-6764fa36`).
+- Plan run: `20261113T141025Z-be5b1e51`, digest `5fd9a78f0ce156e81085cb78d73101497f2a356ad36d92c5a75a30b21a81bef2` (this run carried out its approved plan)
+- Plan: 2 file(s) to write, carried out by run `20261113T141026Z-57a6e873` (its report: `codaryn report --run 20261113T141026Z-57a6e873`).
 ```
 
 - `plan`을 다시 보면 머리와 끝 줄이 이렇다:
 
 ```
-Plan of run 20261113T134758Z-6d77007e: 2 file(s) to write, carried out
-Carried out by run 20261113T134800Z-6764fa36 (2026-11-13 22:48:00)
+Plan of run 20261113T141025Z-be5b1e51: 2 file(s) to write, carried out
+Carried out by run 20261113T141026Z-57a6e873 (2026-11-13 23:10:26)
 ```
 
 - 되돌리기는 보통 실행과 같다(11절). 미리보기:
@@ -2259,13 +2278,13 @@ codaryn: error — this plan was already applied, so nothing was changed (plan_a
 codaryn: run started — provider scripted
 codaryn: finished — failed (plan_stale)
 ── Result: failed — the plan no longer fits the workspace, so nothing was applied (failed/plan_stale) ──
-Plan run: 20261113T134802Z-ba720bae
+Plan run: 20261113T141027Z-120f58cc
 Checks: none configured
 Files changed: 0
 Usage: model turns 0 · tool calls 0 · 0 s
 Check the workspace, then run the same task again to make a new plan.
-Run id: 20261113T134802Z-cce27bd6
-Report: codaryn report --workspace <workspace> --run 20261113T134802Z-cce27bd6
+Run id: 20261113T141028Z-cc6acdec
+Report: codaryn report --workspace <workspace> --run 20261113T141028Z-cc6acdec
 ```
 
 - 결과의 `notices`: `["the approved plan no longer fits the workspace: file 0 is not as it was when the plan was made; nothing was written"]`
@@ -2297,8 +2316,8 @@ Usage: model turns 3 · tool calls 1 · 0 s
 The agent's last message (the agent's own words, not a verified fact):
   | The plan is ready.
 Check with codaryn doctor and codaryn models, then try again later.
-Run id: 20261113T134804Z-210cbfc3
-Report: codaryn report --workspace <workspace> --run 20261113T134804Z-210cbfc3
+Run id: 20261113T141029Z-58b21c7e
+Report: codaryn report --workspace <workspace> --run 20261113T141029Z-58b21c7e
 ```
 
   모델은 도구 결과로 `error (policy_denied): denied by policy: file 0: path/path_not_writable. …`를 받는다. 이 실행은 계획을 만드는 실행이라 `writablePaths` 안내가 나온다(안내는 진행 줄에 한 번이고, 끝 요약은 거부 수만 센다). `model_error`의 마지막 줄 `Check with codaryn doctor and codaryn models, then try again later.`는 이 경우에 맞지 않는다(아래 "알려진 한계").
@@ -2326,10 +2345,7 @@ Report: codaryn report --workspace <workspace> --run 20261113T134804Z-210cbfc3
   - 확인: 작업 공간을 기록(`.codaryn`)째 `ws2`로 복사하고, `workspaceRoot`만 `./ws2`로 바꾼 task로 같은 계획 id와 다이제스트를 `apply`하자, `ws2`에서 수행됐다(`── Result: done — every configured check passed (done/verified) ──`). 원래 `ws`에서 그 계획은 여전히 `pending`이었다.
   - 사람이 그 작업 공간을 지정해 다이제스트로 승인해야 하므로 고치지 않는다. 계획에 작업 공간을 묶으면 폴더를 옮길 때 승인을 기다리는 계획이 깨진다. 이동 계획도 같다. 기록 없는 작업 공간에 실행 id만 주면 `run_not_found`다(cli-contract 18.4).
 - **요약과 명령:** 요약은 강제되지 않고, 허용한 명령은 승인한 파일에 묶이지 않는다(위 8).
-- **`propose_changes`가 없는 작업 종류:** 실행 전에 거부되지만 `doctor`는 알리지 않는다(위 "준비").
-- **사람용 글의 어긋남(main `07b4124`):**
-  - 터미널의 승인 질문은 이동 계획과 같은 `Apply this plan? [y/N]`이다. 실행 계획용 질문 글(파일 도구가 이 파일들에만 쓰는 실행을 시작한다는 것, 요약이 강제되지 않는다는 것, 명령의 알림)은 카탈로그에 있지만 CLI가 아직 쓰지 않는다(cli-contract 18.9).
-  - 계획 없이 끝난 계획 실행(위 7, 계획 파일이 `writablePaths` 밖)은 `failed`/`model_error`이고, 끝 요약의 마지막 안내가 모델 설정 점검이다.
+- **계획 없이 끝난 계획 실행(위 7, 계획 파일이 `writablePaths` 밖):** `failed`/`model_error`이고, 끝 요약의 마지막 안내가 모델 설정 점검이다(main `529fcea`, cli-contract 18.9).
 - 검증기 없는 task에서 계획을 수행한 실행은 일을 하고도 `needs-input`/`no_verifier`로 끝난다. 그때 `runs`는 계획을 만든 실행을 `plan carried out by run …, which ended as no_verifier`라 부르고, `plan`은 그 계획을 `carried out`, `report`는 `carried out by run …, which ended as no_verifier`라 부른다(U-221).
 - **쓰기의 폴더 바꿔치기(DR-73):** 계획을 수행한 실행의 `write_file`은 도구가 경로를 푼 뒤의 바꿔치기를 닫지 못한다(16절). 승인 뒤 계획 파일의 길 위에 생긴 링크는 시작 전에 낡음으로 본다(위 6).
 

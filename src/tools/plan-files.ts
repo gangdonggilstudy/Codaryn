@@ -384,8 +384,15 @@ function probeName(): string {
  * back at once. "unsupported" only for the codes that mean "no hard links here"; any other failure
  * is "unknown" and the apply decides on the move itself. A probe that cannot be taken back stays
  * as a second name of the same file; it is reported as "unknown".
+ * U-105: `onLeft`, when given, is called once for such a probe (the removal failed, and not because
+ * the probe was already gone), so the executor can count it. The answer is the same either way.
  */
-export async function probeHardLink(source: string, dir: string, ops: PlanFileOps): Promise<"supported" | "unsupported" | "unknown"> {
+export async function probeHardLink(
+  source: string,
+  dir: string,
+  ops: PlanFileOps,
+  onLeft?: () => void,
+): Promise<"supported" | "unsupported" | "unknown"> {
   const probe = path.join(dir, probeName());
   try {
     await ops.link(source, probe);
@@ -395,7 +402,8 @@ export async function probeHardLink(source: string, dir: string, ops: PlanFileOp
   try {
     await ops.unlink(probe);
     return "supported";
-  } catch {
+  } catch (error) {
+    if (!isMissing(error)) onLeft?.();
     return "unknown";
   }
 }

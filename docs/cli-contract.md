@@ -1436,7 +1436,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   | openai | `CODARYN_OPENAI_MODEL` | `CODARYN_OPENAI_API_BASE_URL` |
 
   - `CODARYN_MODEL`, `CODARYN_API_BASE_URL`은 SP-4 전과 같이 anthropic 전용이다. SP-4에서 "고른 제공자에 적용"이라 했던 규칙은 이것으로 바뀌었다. 그래서 한 제공자용 값이 다른 제공자로 가지 않는다(R-19 I-4도 해소).
-  - OpenAI 변수 이름은 계약 담당이 상수로 낼 때까지 입력 층(`PROVIDER_SETTING_ENVS`, `src/app/input/security/env.ts`, 이행 C-3a에서 `src/cli/security/`에서 옮김)에 적어 둔다.
+  - 변수 이름은 계약의 상수다. 제공자 표 `API_PROVIDERS`의 `modelEnv`·`baseUrlEnv`이고(`CODARYN_OPENAI_MODEL_ENV`, `CODARYN_OPENAI_API_BASE_URL_ENV`, 목록 `API_MODEL_ENVS`·`API_BASE_URL_ENVS`, `src/contracts/config.ts`), 입력 층(`src/app/input/security/env.ts`, 이행 C-3a에서 `src/cli/security/`에서 옮김)은 그 표에서 읽는다(DR-34, `687e8f3`). U-273: 예전 글이 가리키던 `PROVIDER_SETTING_ENVS`는 없다.
   - 변수 파일이 새로 설정한 이 네 변수의 값은 가릴 값으로 등록하지 않는다(설정 값이다).
 - 빠진 키·모델·출력 토큰은 `provider_not_configured`이고, 글은 그 제공자의 키 변수와 설정 위치(`providers.openai.model` 등)를 적는다.
 - `resolveAnthropicSettings`, `resolveListSettings`, `resolveConnection`은 예전 이름과 인자로 남는다. 제공자를 주지 않으면 anthropic이고, 결과는 SP-4 전과 같다(고정 시험 SP-0 P-7).

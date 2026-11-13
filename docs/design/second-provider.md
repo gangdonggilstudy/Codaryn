@@ -1,6 +1,6 @@
 # 두 번째 API 제공자 설계 (Codex = OpenAI, DR-22)
 
-- 상태: PM이 OpenAI 쪽 사실을 확인하고([사실 확인 문서](second-provider-facts.md)) 결정 DR-31로 채택했다. 이 문서는 그 사실과 결정에 맞춰 고쳤다. 구현은 9절 순서로 진행 중이다.
+- 상태: PM이 OpenAI 쪽 사실을 확인하고([사실 확인 문서](second-provider-facts.md)) 결정 DR-31로 채택했다. 이 문서는 그 사실과 결정에 맞춰 고쳤다. 구현은 9절 순서로 했다. SP-0~SP-6은 main에 병합됐다(병합 `c20c51d`, 2026-11-12). SP-7의 실제 점검 스크립트는 있지만 실제 API로 돌린 기록은 없다(U-101 `c5325b0`). 9절의 상태 칸은 main `6ef6e3a`에서 다시 맞췄다(U-273).
 - 기준: main `b05da45`(범용 작업 묶음 병합 뒤). [코드] 표기는 이 트리에서 확인한 것이다.
 - 바탕: 제공자 중립 조사(65항목, w3:p9 보고서 `report-provider-neutrality.md`, main `8d17daf` 기준). 줄 번호는 이 문서에서 다시 확인했다.
 - 표기: [코드] 코드를 읽어 확인함, [확인] 사실 확인 문서에서 확인된 OpenAI 쪽 사실, [미확인] 공식 문서에서 찾지 못한 것(추측하지 않는다), [제안] 이 문서의 안. 결정 번호는 SP-Dn이고, PM 결정은 DR-31이다.
@@ -373,12 +373,12 @@ export type ModelOutcome =
 | --- | --- | --- | --- | --- |
 | SP-0 | 고정 시험 P-1~P-6을 지금 main에 넣는다(P-7·P-8은 SP-4·SP-6에서 CLI와 함께) | 제공자(w3:p9) | 끝남 `1001e0a` | 고정 시험 통과, 제품 코드 변경 없음 |
 | SP-1 | 계약: 제공자 표(anthropic만), 이름 목록 상수, `ResolvedApiSettings`와 별칭, `ModelOutcome.httpStatus`, 사용량·오류 종류 주석 | 계약(w3:p9) | 끝남 `ecc8466`. 손으로 적은 목록 4곳(`src/cli/human/output.ts:73`, `src/cli/report.ts:111`, `src/i18n/params.ts:41`, `src/store/runs.ts:50`)은 각 담당이 `MODEL_PROVIDER_NAMES`로 바꾼다 | typecheck, 고정 시험 그대로 |
-| SP-2 | 보안: S-2 일반화(`API_KEY_ENVS` 모두 등록), 키 모양 목록 사용(keys, text-safety, i18n params, 출력 정리), 커밋 훅 | CLI(w3:p2), N-B(w3:p5), 제공자(w3:p9), 훅은 PM | 대기. openai 키 변수 이름은 [확인]. 모양은 실행 거부용 두 모양과 출력 가림용 느슨한 모양(4.3, DR-32 (a), DR-33). 다른 제공자의 키 값은 20자 이상일 때만 등록(DR-34 (b)) | 두 키가 있을 때 둘 다 가려지는 재현 시험, 고정 시험 그대로, 보안 교차 검토 |
-| SP-3 | 공용 HTTP 모듈 분리, anthropic 어댑터를 그 위로, `httpStatus` 채움. CLI Y-4가 `httpStatus`를 본다 | 제공자(w3:p9). Y-4는 CLI | 아니오 | 고정 시험 그대로, 공용 모듈 유닛, 교차 검토 |
-| SP-4 | 설정·task 스키마(`provider`, `providers`), 해석기 일반화, 간편 형식·프로필·환경 변수 적용, cli-contract 개정 | 계약(w3:p9), CLI(w3:p2), 문서(N-A) | 아니오(openai 항목 값은 SP-5) | P-7 그대로, 새 스키마 유닛, 하위 호환 시험 |
-| SP-5 | openai 어댑터(Responses API, 가짜 전송 유닛 → 가짜 서버 통합), 표에 openai 항목, 모델 목록, `quota_exhausted` 종류(문구는 N-B), 추론 항목 개수 기록의 계약 | 제공자(w3:p9), 통합(G-G w3:p4) | 사실 확인됨(11절) | 어댑터 유닛, 가짜 서버 통합, 공용 불변식 시험. 실제 API 호출 없음 |
-| SP-6 | 연결: CLI(`models --provider`, doctor, init, run, report, runs, human), 앱 계층 교체점, 문구, 문서 M1~M14, GUI 설정 | CLI, A-1(w3:pA), N-B, N-A, GUI(w3:pB) | 일부 | 통합 회귀, 교차 검토 |
-| SP-7 | 실제 점검 스크립트(사용자 실행) | 제공자(w3:p9), 실행은 사용자 | 예 | 사용자 실행 기록 |
+| SP-2 | 보안: S-2 일반화(`API_KEY_ENVS` 모두 등록), 키 모양 목록 사용(keys, text-safety, i18n params, 출력 정리), 커밋 훅 | CLI(w3:p2), N-B(w3:p5), 제공자(w3:p9), 훅은 PM | 끝남(SP-0~SP-6 병합 `c20c51d`) | 두 키가 있을 때 둘 다 가려지는 재현 시험, 고정 시험 그대로, 보안 교차 검토 |
+| SP-3 | 공용 HTTP 모듈 분리, anthropic 어댑터를 그 위로, `httpStatus` 채움. CLI Y-4가 `httpStatus`를 본다 | 제공자(w3:p9). Y-4는 CLI | 끝남(병합 `c20c51d`) | 고정 시험 그대로, 공용 모듈 유닛, 교차 검토 |
+| SP-4 | 설정·task 스키마(`provider`, `providers`), 해석기 일반화, 간편 형식·프로필·환경 변수 적용, cli-contract 개정 | 계약(w3:p9), CLI(w3:p2), 문서(N-A) | 끝남(병합 `c20c51d`) | P-7 그대로, 새 스키마 유닛, 하위 호환 시험 |
+| SP-5 | openai 어댑터(Responses API, 가짜 전송 유닛 → 가짜 서버 통합), 표에 openai 항목, 모델 목록, `quota_exhausted` 종류(문구는 N-B), 추론 항목 개수 기록의 계약 | 제공자(w3:p9), 통합(G-G w3:p4) | 끝남(병합 `c20c51d`) | 어댑터 유닛, 가짜 서버 통합, 공용 불변식 시험. 실제 API 호출 없음 |
+| SP-6 | 연결: CLI(`models --provider`, doctor, init, run, report, runs, human), 앱 계층 교체점, 문구, 문서 M1~M14, GUI 설정 | CLI, A-1(w3:pA), N-B, N-A, GUI(w3:pB) | 끝남(병합 `c20c51d`). 그 뒤의 문서·화면 손질은 각 단위에서 | 통합 회귀, 교차 검토 |
+| SP-7 | 실제 점검 스크립트(사용자 실행) | 제공자(w3:p9), 실행은 사용자 | 스크립트 있음(`tests/live/openai-live.ts`, U-101 `c5325b0`). 실제 API로는 돌리지 않았다(사용자 실행) | 사용자 실행 기록 |
 
 - 의존: SP-0 → SP-1 → (SP-2, SP-3 함께 가능) → SP-4 → SP-5 → SP-6 → SP-7.
 - 단위마다 main 기준의 작은 커밋으로 만들고, 매 단위에서 SP-0 고정 시험이 그대로 통과해야 한다(DR-31).

@@ -371,6 +371,7 @@ codaryn: finished — needs input (no_verifier)
 **보내는 것과 남기는 것:**
 - 키는 `Authorization` 헤더에만 들어간다. 요청 본문과 기록에는 없다.
 - 요청마다 `store: false`로 OpenAI 쪽 응답 저장을 끈다. 그래서 다음 요청에 앞 응답의 항목(추론 항목 포함)을 다시 보낸다. 추론 항목은 암호문이라 Codaryn의 가림이 볼 수 없다. 자세한 것은 [민감정보 처리](privacy.md) "OpenAI 제공자"다.
+- **OpenAI 쪽 보존([사실 확인](design/second-provider-facts.md) C-14):** API로 보낸 자료는 기본으로 학습에 쓰이지 않는다. 남용 감시 기록은 최대 30일 남는다. 보존 없음(ZDR)은 OpenAI의 사전 승인이 필요하다. Codaryn이 끄는 것은 응답 저장(`store: false`)뿐이다([민감정보 처리](privacy.md) 10절). Anthropic 쪽 보존은 이 문서가 확인하지 않았다. 제공자의 약관을 본다.
 - 실행 기록에는 추론 항목의 개수만 남는다(`model_response`의 `reasoningItems`).
 - 키가 거부되면(401·403) 제공자의 문구를 옮기지 않고 고정 문구와 요청 id만 남긴다. 예: `HTTP 401: the key or its access was refused; the provider's message is not shown (request req_fake_1)`.
 - 할당량 소진(429 중 `insufficient_quota`나 과금 코드)은 다시 시도하지 않는다.
@@ -455,7 +456,40 @@ run id (UTC)               started (local)      changes  result
 - **절대 상한(코드):** 턴 1000, 도구 호출 5000, 총 토큰 50,000,000, 실행 시간 86,400,000ms(24시간), `maxRepairAttempts` 20, `maxSameFailures` 10. 넘으면 그 값을 적은 파일의 오류다.
 - 다른 시간 값(`requestTimeoutMs`, 검증기 `timeoutMs`)은 2,147,483,647ms 이하다. 모델이 `run_command`에 주는 `timeoutMs`는 600000ms 이하이며, 넘으면 그 호출이 `invalid_args`로 거부된다.
 
-**검증기(`verifiers`):** `command`(`executable`, `args`, 선택 `cwd`, `timeoutMs` 기본 60000, `expectExitCode` 기본 0), `file_rules`(`exists`, `absent`, `contains`, `not_contains`), 표를 확인하는 `data_checks`(18.6절). 모든 검증기가 통과해야 `done`이다. 모델의 완료 선언만으로는 성공하지 않고, 검증기가 없으면 `needs-input`으로 끝난다.
+**검증기(`verifiers`):** `command`(`executable`, `args`, 선택 `cwd`, `timeoutMs` 기본 60000, `expectExitCode` 기본 0), `file_rules`(`exists`, `absent`, `contains`, `not_contains`), 표를 확인하는 `data_checks`(아래 "자료 검증기의 규칙"). 모든 검증기가 통과해야 `done`이다. 모델의 완료 선언만으로는 성공하지 않고, 검증기가 없으면 `needs-input`으로 끝난다.
+
+**자료 검증기의 규칙(`data_checks`):** 작업 공간의 표를 글자 그대로 확인한다. 형식은 `src/contracts/verify.ts`의 `DataChecksVerifierConfig`이고, 아래는 그것을 옮긴 것이다(코드 기준).
+
+```json
+{
+  "id": "summary-table",
+  "kind": "data_checks",
+  "rules": [
+    { "type": "table_shape", "table": { "path": "summary.csv", "format": "csv" },
+      "columns": ["region", "total"], "rows": { "equals": 3 } },
+    { "type": "aggregate_match", "source": { "path": "sales.csv", "format": "csv" },
+      "column": "amount", "op": "sum", "groupBy": "region",
+      "target": { "path": "summary.csv", "format": "csv" },
+      "targetColumn": "total", "targetKeyColumn": "region" }
+  ]
+}
+```
+
+- 규칙은 하나 이상이다. 비면 task를 읽을 때 거부된다(`invalid_task`, `verifiers[0].rules must be a non-empty array`).
+- **표:** `{ "path": 작업 공간 기준 경로, "format": "csv" | "tsv" | "jsonl" }`. UTF-8 글이고 16 MiB까지다(16절).
+  - `csv`와 `tsv`는 첫 행이 머리 행이다. `csv`는 RFC 4180의 따옴표를 따른다. `jsonl`은 줄마다 JSON 객체 하나이고, 그 키가 열이다.
+  - 수는 `-?숫자[.숫자][e|E[+|-]숫자]` 꼴만이다. 수가 필요한 열에서 그 밖의 칸은 수가 아니다. 빈 칸은 모든 연산이 건너뛴다.
+- **`table_shape`:** `table`의 열과 데이터 행 수(머리 행 빼고)를 본다. 둘 다 없으면 표가 해석되는지만 본다.
+  - `columns`: 열 이름 목록. `columnsMatch`가 `"exact"`(기본)면 같은 이름이 같은 순서로, `"includes"`면 적어도 이 이름들이 있어야 한다.
+  - `rows`: `{ "equals": n }`, `{ "min": a, "max": b }`(하나만 써도 된다), `{ "sameAs": 표 }`(다른 표와 같은 행 수) 가운데 하나다.
+- **`aggregate_match`:** `source` 표의 `column`에 `op`를 계산해 `target` 표의 `targetColumn`과 맞댄다.
+  - `op`: `sum`, `count`(빈 칸이 아닌 칸의 수), `min`, `max`, `mean`.
+  - `groupBy`를 주면 그 열의 값마다 묶고, `targetKeyColumn`이 대상 표의 묶음 열이다(둘은 함께만 쓴다). 대상은 묶음마다 정확히 한 행이고 다른 행이 없어야 한다. 묶음 값은 글자 그대로 비교하고, 묶음 칸이 빈 원본 행은 뺀다.
+  - `groupBy`가 없으면 대상 표는 데이터 행이 정확히 하나다.
+  - `tolerance`: `{ "absolute": …, "relative": … }`, 기본 둘 다 `1e-9`. 두 수는 `|a - b| <= max(absolute, relative × max(|a|, |b|))`이면 같다.
+- **결과의 뜻:** 원본(`source`, `rows.sameAs`의 표)을 읽거나 해석할 수 없거나 수가 아닌 칸이 있으면 `inconclusive`다(모델이 입력을 고칠 수 없다). 대상(`target`, `table_shape`의 `table`)이 없거나 해석되지 않거나 열·행이 맞지 않거나 값이 다르면 `fail`이다(모델이 고칠 수 있다). 경로 거부, 읽기 오류, 잘못된 규칙은 어느 쪽이든 `inconclusive`다.
+- **근거:** 열 이름, 데이터 행 번호(1부터, 머리 행 빼고), 비교한 두 수를 적는다. 그 밖의 칸 값은 적지 않는다. 재수정을 켜면 근거가 가린 뒤 모델에 간다. 원본이나 대상이 읽기 제외 경로 아래일 때 근거와 판정이 어떻게 달라지는지는 [민감정보 처리](privacy.md) 13·15절이다.
+- **확인하지 않는 것:** 적은 모양과 집계뿐이다. 방법, 해석, 글 속의 숫자는 확인하지 않는다. 보고서의 "Not checked"와 16절에 같은 한계가 있다. 18.9절의 예시가 이 두 규칙을 쓴다.
 
 **오류 위치:** 설정·task·대본 파일의 오류는 어느 파일의 어느 필드인지, JSON 문법 오류는 줄과 열을 알려 준다. 값은 보이지 않는다. stdout JSON의 `diagnostic`(`code`, `file`, `field`, `line`, `column`)에도 같은 위치가 있다. 실제 출력(stderr):
 
@@ -1189,6 +1223,13 @@ node --test dist/tests/live/openai-live.js
 - **자료 검증(`data_checks`):** 판단 불가(`inconclusive`)가 되는 경우가 둘 있다. 검증 결과의 한계 목록에도 같은 내용이 나온다.
   - 열이나, 묶은 규칙의 묶음 하나라도 값이 모두 비어 있으면 sum·min·max·mean 규칙
   - 더해 가는 합이 double 범위를 넘으면 sum·mean 규칙. 넘는지는 행 순서에 달렸다. 같은 값 `1e308, -1e308, 1e308`은 검사되고 `1e308, 1e308, -1e308`은 판단 불가다.
+- **표 크기(Q-7 실측):** `data_checks`는 16 MiB(`MAX_DATA_TABLE_BYTES`)까지 읽는다. 더 큰 원본은 읽기 전에 `inconclusive`, 더 큰 대상은 `fail`이다. `query_table`은 64 MiB(`MAX_QUERY_TABLE_BYTES`)까지다. 상한은 바꾸지 않았다. 맞출지는 사용자 질문으로 남아 있다(DR-74 (6)).
+  - 잰 곳: main `6ef6e3a`의 빌드를 스크립트로 불렀다. 합성 CSV(열 넷), Windows 11, Ryzen 9 7940HX(32 스레드), 메모리 47 GiB, Node 26.13.1이다. 측정마다 새 프로세스였고, 세 번의 가운데 값이다. 다른 작업이 함께 도는 기계라 시간은 어림이다.
+  - 메모리는 프로세스의 최대 상주 메모리다. 모듈만 불러 둔 프로세스가 64 MiB였다.
+  - 묶음 키 100개인 표: `data_checks`의 묶음 합은 16 MB(28.8만 행)에서 0.15초·70 MiB, 64 MB(115만 행)에서 0.45초·77 MiB였다. 묶지 않은 합과 `table_shape`는 그보다 빠르고 메모리는 같았다. `query_table`의 묶음 합·개수·평균은 16 MB에서 0.14초·73 MiB, 64 MB에서 0.53초·78 MiB였다.
+  - 묶음 키 1만 개인 표: `data_checks`는 16 MB에서 0.23초·81 MiB, 64 MB에서 1.1초·85 MiB, `query_table`은 0.20초·88 MiB와 0.69초·102 MiB였다.
+  - 키가 행마다 다른 표(가장 나쁜 경우): `data_checks`는 묶음 수에 상한이 없어 16 MB(27만 묶음)에서 0.37초·303 MiB, 64 MB(107만 묶음)에서 1.6초·822 MiB였다. `query_table`은 1만 묶음을 넘으면 `too_many_groups`로 멈추어 0.18초·101 MiB와 0.68초·162 MiB였다. 그래서 `data_checks`의 상한을 64 MiB로 올리면, 키가 거의 다 다른 열로 묶을 때 메모리가 약 0.8 GiB까지 든다.
+  - 64 MB 표를 지금의 16 MiB 상한으로 읽게 하면 읽기 전에 거부되어 2 ms였다.
 - **큰 작업 공간의 파일 목록:** 작업 공간의 파일 목록(상한 10만 개)을 `plan`은 한 번, `apply --digest`는 두 번(동작 앞뒤) 만든다. 터미널 질문으로 승인하면 계획을 보이기 전에 한 번 더 만든다(코드 기준, 터미널 대화는 확인하지 않았다). 파일이 아주 많으면 시간이 걸린다. 목록을 만드는 중의 취소는 목록이 끝나기를 기다리지 않는다. 파일 5만 개(목록 하나에 약 0.5초)에서 첫 목록 중에 취소 파일을 만들자 약 0.1초 뒤 `cancelled`로 끝났고 아무것도 옮기지 않았다(main `3e36b1b`).
 - **보호 경로:** 파일 도구만 막는다. 명령으로 고치는 것은 막지 못하고, 무결성 확인은 사후 탐지다. 두 확인 사이에 바뀌었다가 다음 확인 전에 되돌려진 변경은 탐지하지 못한다.
 - **되돌리기:** 명령이 바꾼 파일은 대상이 아니다. 실행 중 다른 프로그램이 같은 파일을 바꾸면 스냅샷이 실제 실행 전 상태와 다를 수 있다.
@@ -1762,7 +1803,7 @@ node dist/src/cli/main.js review --task <task.json> --run <실행 id> --reject
 - `report`의 `Review checklist` 절이 확인 항목과 판정을 보여 준다. 판정 전에는 `No verdict yet.`, 판정 뒤에는 예를 들어 `Verdict: **rejected** (`2026-11-12T05:58:15.969Z`)`이고, 그 뒤에 판정을 바꾸는 명령 줄(`A later review replaces it: …`)이 붙는다(18.9절). 판정은 그 실행의 `review.json`에 있다.
 - 확인 항목은 작업 종류가 정한다. task의 `humanReview.checklist`로 바꿀 수 있다.
 - 사람 확인은 사람의 판단을 기록할 뿐이다. 보고서의 해석이나 분석 방법을 Codaryn이 확인하지는 않는다.
-- 결과 표의 형태와 집계는 `data_checks` 검증기로 확인한다(규칙은 [CLI·공통 계약](cli-contract.md)과 `src/contracts/verify.ts`).
+- 결과 표의 형태와 집계는 `data_checks` 검증기로 확인한다(규칙은 6절 "자료 검증기의 규칙").
 
 ### 18.7 개인정보가 든 자료는 다루지 않는다
 

@@ -157,7 +157,7 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.action.moved_back": "moved back to where it was",
   "revert.action.restored_from_discard": "restored from the discarded-files folder",
   "revert.dry_run_next": "Run again without --dry-run to revert.",
-  "revert.reverted_before": "This run was already reverted before, so its files may show as changed since the run.",
+  "revert.reverted_before": "Files already as before the run are skipped; it was reverted before",
   "revert.plan_only": "This run only made a plan and changed no file itself, so it has nothing of its own to put back and it is not marked as reverted.",
   "revert.plan_revert_apply": "To undo the changes of its plan, revert the run that applied it (--run {runId}).",
   "revert.plan_applying": "The run that applies its plan ({runId}) has no result yet: it is still going, or it stopped. Look at that run before you revert anything.",

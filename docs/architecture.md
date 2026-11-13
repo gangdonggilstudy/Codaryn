@@ -1,6 +1,6 @@
 # Codaryn 아키텍처
 
-상태: 2026-11-13, main `f8fb993` 기준. 아래 두 목록은 main `3aca6b5`에서 다시 확인했다(실행 중 권한 확인은 `cd1cace`, U-147. Markdown 규칙은 U-165. GUI의 권한 대화상자는 main `07cd600`, U-179). 본문의 다른 절은 `f8fb993` 기준 그대로다.
+상태: 2026-11-13, main `f8fb993` 기준. 아래 두 목록은 main `3aca6b5`에서 다시 확인했다(실행 중 권한 확인은 `cd1cace`, U-147. Markdown 규칙은 U-165. GUI의 권한 대화상자는 main `07cd600`, U-179. 앱 계층의 작업 공간 글 읽기·쓰기는 main `5ee11a1`, U-188). 본문의 다른 절은 `f8fb993` 기준 그대로다.
 - **main에 있는 것:**
   - 단계 0 설계(2026-11-12 Codex 채택)를 바탕으로 한 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 기구와 `codaryn models`
   - 두 번째 제공자 OpenAI(DR-31)와 두 제공자가 함께 쓰는 전송 `src/model/http`
@@ -8,6 +8,7 @@
   - 단계 4 범용 작업의 P0, 앱 계층 `src/app`, 독립 GUI `gui/`(DR-20, DR-26)
   - 단계 4 P1 묶음 가운데 Markdown 규칙 `markdown_headings`, `markdown_links`(`file_rules`, U-116 `4df5be8`)
   - 실행 중 권한 확인(판정 `ask`, DR-3). 설정 파일과 프로필의 명령 규칙에 둔 `confirm: true`만 질문을 만든다. CLI의 `run`은 터미널에서만 묻고, 물을 수 없으면 거부한다(U-74, U-108~U-110, U-137. 3절, main `cd1cace`). GUI는 메인 프로세스의 OS 대화상자로 묻고 기본과 Esc는 거부다(U-124, 병합 `aa723d2`, [독립 GUI 설계](design/standalone-gui.md) 3.6)
+  - 앱 계층의 작업 공간 텍스트 파일 읽기·쓰기 `readWorkspaceText`·`writeWorkspaceText`(`src/app/workspace-text.ts`, U-172, 병합 `b25edb1`, AC 5.15, DR-72 (나)). 앱 계층의 함수만 있고, 지금 CLI와 GUI는 이 함수를 부르지 않는다(코드 기준). 폴더 바꿔치기로 남은 틈은 알려진 한계다(DR-73, [privacy.md](privacy.md) 13절)
 - **없는 것:**
   - 단계 4 P1 묶음 A(`query_table`, 읽기 제외 경로, `analyze-private`, DR-69·DR-70)
   - 단계 4 P1 묶음 B의 계획 실행(`plan: "run"`, DR-69). 계약만 있고 실행하는 것이 없다(U-170, U-175, U-177, 병합 `a2f67c1`): `PLAN_MODES`의 `run`, 도구 정의 `propose_changes`(`ProposeChangesArgs`, 파일 `MAX_PLANNED_FILES` 100개), 저장할 변경 계획 `StoredChangesPlan`(`kind: "changes"`), 결과의 `plan.kind: "changes"`·`planRunId`·`planDigest`. 엔진에는 그 도구가 없고, CLI는 `plan: "run"`을 모델 요청 전에 거부한다(`plan_run_not_available`, 사용 안내 18.1절)

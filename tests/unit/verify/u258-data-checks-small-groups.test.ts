@@ -12,6 +12,12 @@
  *   gave a hidden group's place in the table to the model in a repair), nor a hidden key, value or
  *   row count; a cell that is not a number in the source is named without its row, and one in a
  *   hidden group does not decide the rule.
+ * - PM, after the scan of the repair messages: a rule over a value query_table does not give the model
+ *   (min or max, a value of fewer than k cells and that group's count, the whole of a table under k
+ *   rows, the row count of such a table, a group whose cells are all empty) is not compared: no verdict
+ *   for or against goes to the model. Such a rule is undecided and says why; within a grouped rule
+ *   such groups are left out like the hidden ones. The verifier's limits count the rules not compared,
+ *   so a check of such rules only does not read as passed.
  * - Without unreadable paths the evidence is as before (the frozen copy's tests stay).
  * Temporary folder, synthetic values only.
  */
@@ -78,6 +84,14 @@ before(async () => {
     "out/total.csv": "total\n1\n",
     // A quote inside an unquoted field on data row 4 (line 5): the source does not parse.
     "data/broken.csv": "region,amount\nharbor,1.5\nmeadow,2.5\nsummit,3.5\nval\"ley,4.5\n",
+    // bonus: harbor (6 rows) has 3 cells, meadow (5 rows) all 5, summit (4 rows) 2; one with harbor's all empty.
+    "data/bonus.csv": "region,bonus\nharbor,1.5\nharbor,\nharbor,2.5\nharbor,\nharbor,3.5\nharbor,\nmeadow,4.25\nmeadow,5.25\nmeadow,6.25\nmeadow,7.25\nmeadow,8.25\nsummit,9.5\nsummit,\nsummit,10.5\nsummit,\n",
+    "data/bonus-empty.csv": "region,bonus\nharbor,\nharbor,\nharbor,\nharbor,\nharbor,\nharbor,\nmeadow,4.25\nmeadow,5.25\nmeadow,6.25\nmeadow,7.25\nmeadow,8.25\n",
+    "data/bonus-few.csv": "region,bonus\nharbor,1.5\nharbor,\nharbor,\nharbor,\nharbor,\nharbor,\nmeadow,4.25\nmeadow,\nmeadow,\nmeadow,\nmeadow,\n",
+    "data/small.csv": "region,amount\nharbor,1.25\nmeadow,2.25\nsummit,3.25\n",
+    "out/bonus.csv": "region,sum\nharbor,999\nmeadow,31.25\n",
+    "out/bonus-count.csv": "region,sum\nharbor,3\nmeadow,5\n",
+    "out/three.csv": "k\n1\n2\n3\n",
     // A target under the unreadable folder too: no count of its rows is written (U-223, PM).
     "data/target-with-hidden.csv": `region,sum\nharbor,${harbor}\nmeadow,${meadow}\nsummit,1\nvalley,2\n`,
   };
@@ -209,4 +223,81 @@ test("U-258: without unreadable paths every group is compared and named as befor
   const hiddenCell = await noteOf(byRegion("out/shown-right.csv", "data/bad-hidden.csv"), {});
   assert.equal(hiddenCell.state, "undecided");
   assert.ok(hiddenCell.note.includes("source data row 8"), hiddenCell.note);
+});
+
+const NOT_GIVEN = "not compared: query_table does not give this value to the model";
+const FEW_CELLS = "the source's groups whose value comes from fewer than 5 cells are not compared";
+const rule = (op: "sum" | "count" | "mean" | "min" | "max", source: string, target: string, column = "amount", grouped = true): DataRule => ({
+  type: "aggregate_match",
+  source: csv(source),
+  column,
+  op,
+  target: csv(target),
+  targetColumn: grouped ? "sum" : "total",
+  ...(grouped ? { groupBy: "region", targetKeyColumn: "region" } : {}),
+});
+
+test("U-258 (PM): min and max of an unreadable source are not compared, grouped or not", async () => {
+  for (const op of ["min", "max"] as const) {
+    for (const grouped of [true, false]) {
+      const hidden = await noteOf(rule(op, "data/people.csv", grouped ? "out/shown-right.csv" : "out/total.csv", "amount", grouped));
+      assert.deepEqual(hidden, { state: "undecided", note: `${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE}` }, `${op} ${grouped}`);
+      // Without the list they are compared as before.
+      assert.equal((await noteOf(rule(op, "data/people.csv", grouped ? "out/shown-right.csv" : "out/total.csv", "amount", grouped), {})).state, "not held");
+    }
+  }
+});
+
+test("U-258 (PM): a group whose value comes from fewer than k cells is left out, its count too, and so is one with only empty cells", async () => {
+  // harbor's 3 bonus cells: its sum (999, wrong) is not compared; meadow's 5 are.
+  const sum = await noteOf(rule("sum", "data/bonus.csv", "out/bonus.csv", "bonus"));
+  assert.deepEqual(sum, { state: "held", note: `1 groups agree; ${NOT_COMPARED}; ${FEW_CELLS}; ${UNREADABLE_SOURCE_NOTE}` });
+  const count = await noteOf(rule("count", "data/bonus.csv", "out/bonus-count.csv", "bonus"));
+  assert.deepEqual(count, { state: "held", note: `1 groups agree; ${NOT_COMPARED}; ${FEW_CELLS}; ${UNREADABLE_SOURCE_NOTE}` });
+  // A group of only empty cells no longer makes the whole rule undecided (that told it exists).
+  const empty = await noteOf(rule("sum", "data/bonus-empty.csv", "out/bonus.csv", "bonus"));
+  assert.deepEqual(empty, { state: "held", note: `1 groups agree; ${FEW_CELLS}; ${UNREADABLE_SOURCE_NOTE}` });
+  // Nothing left to compare: undecided, not held and not failed.
+  const none = await noteOf(rule("sum", "data/bonus-few.csv", "out/bonus.csv", "bonus"));
+  assert.deepEqual(none, { state: "undecided", note: `${NOT_GIVEN}; ${FEW_CELLS}; ${UNREADABLE_SOURCE_NOTE}` });
+  for (const result of [sum, count, empty, none]) assertNothingHidden(result.note);
+  // Without the list harbor's wrong sum fails and the empty group leaves the rule undecided, as before.
+  assert.equal((await noteOf(rule("sum", "data/bonus.csv", "out/bonus.csv", "bonus"), {})).state, "not held");
+  assert.equal((await noteOf(rule("sum", "data/bonus-empty.csv", "out/bonus.csv", "bonus"), {})).state, "undecided");
+});
+
+test("U-258 (PM): the whole of a table under k rows or of fewer than k cells is not compared", async () => {
+  const small = await noteOf(rule("sum", "data/small.csv", "out/total.csv", "amount", false));
+  assert.deepEqual(small, { state: "undecided", note: `${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE}` });
+  const few = await noteOf(rule("sum", "data/bonus-few.csv", "out/total.csv", "bonus", false));
+  assert.deepEqual(few, { state: "undecided", note: `${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE}` });
+  const empty = await noteOf(rule("count", "data/bonus-empty.csv", "out/total.csv", "bonus", false));
+  // 11 rows and 5 cells (meadow's): compared, and the total of 1 fails.
+  assert.equal(empty.state, "not held", empty.note);
+  // A table of at least k rows and cells is compared as before (the wrong total fails).
+  assert.equal((await noteOf(rule("sum", "data/people.csv", "out/total.csv", "amount", false))).state, "not held");
+  assert.equal((await noteOf(rule("sum", "data/small.csv", "out/total.csv", "amount", false), {})).state, "not held");
+});
+
+test("U-258 (PM): the row count of a table under k rows is not compared (rows.sameAs)", async () => {
+  const shape = (source: string): DataRule => ({ type: "table_shape", table: csv("out/three.csv"), rows: { sameAs: csv(source) } });
+  const small = (await run([shape("data/small.csv")])).evidence;
+  assert.equal(small, `undecided: table "out/three.csv" (csv) has as many data rows as "data/small.csv" (csv) (${NOT_GIVEN}; ${UNREADABLE_SOURCE_NOTE})`);
+  // 16 rows: compared, the target's own count written as before.
+  const people = (await run([shape("data/people.csv")])).evidence;
+  assert.ok(people.startsWith("not held: ") && people.includes("3 data rows, not as many as"), people);
+  // Without the list the small table is compared (it has 3 rows like the target).
+  assert.ok((await run([shape("data/small.csv")], {})).evidence.startsWith("held: "));
+});
+
+test("U-258 (PM): the limits count the rules not compared, so such a check never reads as passed", async () => {
+  const mixed = await run([byRegion("out/shown-right.csv"), rule("max", "data/people.csv", "out/shown-right.csv"), rule("sum", "data/small.csv", "out/total.csv", "amount", false)]);
+  assert.equal(mixed.outcome, "inconclusive");
+  assert.ok(mixed.limits.includes("2 of 3 rules were not compared: their source is under unreadable paths, and query_table does not give the model the values they check"), JSON.stringify(mixed.limits));
+  const only = await run([rule("min", "data/people.csv", "out/shown-right.csv")]);
+  assert.equal(only.outcome, "inconclusive");
+  assert.ok(only.limits.includes("1 of 1 rules were not compared: their source is under unreadable paths, and query_table does not give the model the values they check"), JSON.stringify(only.limits));
+  // A check whose rules are all compared has the limits of before.
+  const compared = await run([byRegion("out/shown-right.csv")]);
+  assert.equal(compared.limits.some((line) => line.includes("not compared")), false, JSON.stringify(compared.limits));
 });

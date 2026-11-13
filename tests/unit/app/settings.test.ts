@@ -48,6 +48,8 @@ describe("readSettings", () => {
       keyAvailable: true,
       // DR-41: no configured policy, so no workflow leaves anything out.
       policyNarrowings: [],
+      // U-215 (bundle A): no unreadable path, k 5 from no value, and the values k may take.
+      privateData: { unreadablePaths: [], minGroupSize: { configured: null, effective: 5, min: 5, max: 1000 } },
     });
     assert.equal(JSON.stringify(view).includes(FAKE_KEY), false);
   });

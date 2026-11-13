@@ -16,7 +16,7 @@
  * call one function instead (A-4 report).
  */
 
-import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, workflowPolicyNarrowings, workflowVerifierNarrowings } from "../contracts/index.js";
+import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, MIN_GROUP_SIZE_LIMITS, effectiveMinGroupSize, workflowPolicyNarrowings, workflowVerifierNarrowings } from "../contracts/index.js";
 import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
@@ -27,7 +27,7 @@ import { envValue, knownKeyValues } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
 import { appError } from "./errors.js";
 import { workflowDefinitions } from "../workflows/index.js";
-import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsView, WorkflowPolicyNarrowing } from "./types.js";
+import type { AppCallOutcome, AppError, ReadSettingsRequest, SettingsPrivateData, SettingsView, WorkflowPolicyNarrowing } from "./types.js";
 
 /** SP-2: every API provider's key, as the CLI's `models` says it. */
 const KEY_HINT = `keys are read only from environment variables (${API_KEY_ENVS.join(", ")})`;
@@ -129,6 +129,24 @@ export function policyNarrowingsOf(config: CodarynConfig | null): WorkflowPolicy
   );
 }
 
+/**
+ * U-215 (DR-69 bundle A): the config's unreadable paths and group size k for the settings screen
+ * (SettingsPrivateData). No config: none and k from no value. Pure.
+ */
+export function privateDataOf(config: CodarynConfig | null): SettingsPrivateData {
+  const policy = config?.policy;
+  const configured = policy?.minGroupSize ?? null;
+  return {
+    unreadablePaths: [...(policy?.unreadablePaths ?? [])],
+    minGroupSize: {
+      configured,
+      effective: effectiveMinGroupSize(configured ?? undefined, []),
+      min: MIN_GROUP_SIZE_LIMITS.min,
+      max: MIN_GROUP_SIZE_LIMITS.max,
+    },
+  };
+}
+
 /** Each profile with the workflow it uses when the task names none, in the file's order. Pure. */
 export function profileWorkflowsOf(config: CodarynConfig | null): { readonly profile: string; readonly workflowRef: string | null }[] {
   return Object.entries(config?.profiles ?? {}).map(([profile, entry]) => ({ profile, workflowRef: entry.workflowRef ?? null }));
@@ -151,6 +169,8 @@ export async function readSettingsIn(io: SettingsIo, request: ReadSettingsReques
       // SP-6: the key of the provider a quick run would use (the config's `provider`, else anthropic).
       keyAvailable: envValue(io.env, API_PROVIDERS[quickProvider(config)].keyEnv) !== null,
       policyNarrowings: policyNarrowingsOf(config),
+      // U-215 (bundle A): what the settings screen shows of unreadable paths and k.
+      privateData: privateDataOf(config),
     },
   };
 }

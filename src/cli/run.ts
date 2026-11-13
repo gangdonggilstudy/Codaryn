@@ -535,6 +535,8 @@ export async function prepareTask(
   const files: InputFile[] = [];
   const candidate = chosen.candidate;
   let defaultDisplay: DefaultConfigDisplay | null = null;
+  // U-115 (UXM-9): no file at the default location (nor --config, nor CODARYN_CONFIG).
+  let noConfigYet = false;
   if (candidate !== null) {
     let text: string | null = null;
     try {
@@ -549,6 +551,7 @@ export async function prepareTask(
             : "the config file cannot be read as JSON",
         );
       }
+      noConfigYet = candidate.source === "default";
     }
     if (text !== null) {
       // DR-40 (b): a file over the cap is refused before any check reads it.
@@ -642,7 +645,10 @@ export async function prepareTask(
   if (!taskOutcome.ok) {
     // A task file's own fields are "task"; limits bounded by the config file and the quick form are "config".
     const file: InputDiagnosticFile = taskFile !== null && taskOutcome.code === "invalid_task" ? "task" : "config";
-    return error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+    const failed = error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+    // U-115 (UXM-9, U-37): the quick form's settings were missing because there is no config file
+    // yet; the person is told so (codaryn init). The message, the code and the exit code are as before.
+    return noConfigYet && taskFile === null && configFile === null && taskOutcome.code === "invalid_config" ? withHint(failed, "config_missing") : failed;
   }
 
   // Where each secret name came from, for S-3 messages that give a position, never a name.

@@ -41,7 +41,7 @@ import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
-import { inspectFiles, proposePlan } from "./workflow-tools.js";
+import { inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { CountingPlanExecutor, PlanExecutorDeps } from "./plan-executor.js";
@@ -503,6 +503,8 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
             return await inspectFiles(workflowDeps, call.args, signal);
           case "propose_plan":
             return await proposePlan(workflowDeps, call.args, signal);
+          case "propose_changes":
+            return await proposeChanges(workflowDeps, call.args, signal);
         }
       } catch {
         // No error detail: it could carry raw file text or paths.

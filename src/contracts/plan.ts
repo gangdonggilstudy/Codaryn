@@ -32,9 +32,9 @@
  * who can write the workspace's state directory (allowed commands can, T-11).
  *
  * P1 (DR-69, proposal B-1 to B-8): plan mode "run": a person approves the files a model may write,
- * then a later model run writes those files only. Its contract starts at PLANNED_FILE_CHANGES. It
- * is not carried out yet: no tool stores such a plan and nothing reads one
- * (PROPOSE_CHANGES_TOOL_NAME, tool.ts).
+ * then a later model run writes those files only. Its contract starts at PLANNED_FILE_CHANGES.
+ * U-180 (B-3): the `propose_changes` tool stores such a plan (PlanRecorder.saveChangesPlan); the
+ * run that carries one out follows with the next unit, and the CLI and the app with B-4.
  */
 
 import type { Clock, RunReason, RunReasonByStatus, RunUsage, TerminalRunStatus } from "./engine.js";
@@ -54,8 +54,8 @@ import type { InventoryChecker, InventoryManifest, VerifierConfig, VerifierResul
  * moves and discards that an apply run carries out without a model (above). `run` (P1, DR-69,
  * B-1): a person approves the files a model may write (StoredChangesPlan), and a later model run
  * writes those files only. A plan run offers the read tools and its own mode's plan tool
- * (ToolDescriptor.planMode). Until `propose_changes` is offered (B-3), a `run` plan run has no plan
- * tool: it reads, ends without a plan (`failed`/`model_error`) and writes nothing.
+ * (ToolDescriptor.planMode): `propose_changes` (U-180, B-3) for `run`. A plan run whose task does
+ * not list it reads, ends without a plan (`failed`/`model_error`) and writes nothing.
  */
 export const PLAN_MODES = ["none", "apply", "run"] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];

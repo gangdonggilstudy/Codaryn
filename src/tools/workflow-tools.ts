@@ -1,7 +1,9 @@
 /**
  * The workflow tools `inspect_files` and `propose_plan` (G-C). Design: docs/design/general-tasks.md
  * 5.3 and 6.3. Contracts: InspectFilesArgs/InspectFilesPayload (tool.ts), ProposePlanArgs,
- * ProposePlanPayload, PLAN_PROBLEMS, PlanRecorder (plan.ts).
+ * ProposePlanPayload, PLAN_PROBLEMS, PlanRecorder (plan.ts). U-180 (DR-69 B-1, B-3):
+ * `propose_changes` (ProposeChangesArgs, ProposeChangesPayload, CHANGES_PLAN_PROBLEMS), which writes
+ * only plan.json of a `run` plan, through PlanRecorder.saveChangesPlan.
  *
  * Both return raw local text, like the built-in tools: the engine masks every result before it is
  * recorded or sent. Neither changes a workspace file. `propose_plan` writes only plan.json, through
@@ -20,11 +22,14 @@ import {
   MAX_PLAN_ACTIONS,
   CONTENT_HASH_PATTERN_SOURCE,
   MAX_PLAN_SOURCE_BYTES,
+  MAX_PLANNED_FILES,
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
+  maskedParts,
   planActionShown,
 } from "../contracts/index.js";
 import type {
+  ChangesPlanProblem,
   InspectEntry,
   InspectFilesArgs,
   MaskedPlanAction,
@@ -32,11 +37,14 @@ import type {
   PlanProblem,
   PlanRecorder,
   PrivacyGateway,
+  ProposeChangesArgs,
   ProposePlanArgs,
   RawWorkflowToolOutcome,
   ResolvedPath,
   ResolvedPlanAction,
+  ResolvedPlannedFile,
   StoredPlanAction,
+  StoredPlannedFile,
   ToolErrorCode,
   Workspace,
 } from "../contracts/index.js";
@@ -408,4 +416,143 @@ export async function proposePlan(
     return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
   }
   return { ok: true, payload: { digest, actions } };
+}
+
+function invalidChanges(index: number | null, problem: ChangesPlanProblem): Failure {
+  // As invalidPlan: the file index and the code, never a path (plan.ts).
+  return fail("invalid_plan", index === null ? `plan rejected: ${problem}` : `plan rejected: file ${index}: ${problem}`);
+}
+
+interface CheckedFile {
+  readonly path: ResolvedPath;
+  readonly change: "create" | "modify";
+  /** For `modify`: the file as it was checked, so the hash is of that file. */
+  readonly identity: FileIdentity | null;
+}
+
+/**
+ * U-180 (B-1, B-5): checks a `run` plan's files (CHANGES_PLAN_PROBLEMS). The first problem by file
+ * order rejects the whole plan. Files only: a `modify` path must be a regular file now (not a link,
+ * not a directory), a `create` path must hold nothing (not even a dangling link) with every existing
+ * parent a directory, and no create may lie under another planned file. Nothing is written.
+ */
+async function checkChanges(
+  deps: WorkflowToolDeps,
+  files: ProposeChangesArgs["files"],
+  signal: AbortSignal,
+): Promise<CheckedFile[] | Failure> {
+  const { workspace, fileOps, platform } = deps;
+  if (files.length === 0) return invalidChanges(null, "empty");
+  if (files.length > MAX_PLANNED_FILES) return invalidChanges(null, "too_many");
+
+  const resolved: ResolvedPath[] = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const given = (files[index] as ProposeChangesArgs["files"][number]).path;
+    if (typeof given !== "string") return fail("invalid_args", `file ${index}: path must be a string`);
+    const where = await workspace.resolve(given, "write");
+    if (!where.ok) return fail("policy_denied", `file ${index}: path rejected by workspace: ${where.code}`);
+    resolved.push(where.path);
+  }
+  const key = (p: ResolvedPath): string => pathKey(p.relative, platform);
+  const allPaths = new Set(resolved.map(key));
+  const seen = new Set<string>();
+  const checked: CheckedFile[] = [];
+  let totalBytes = 0n;
+
+  for (let index = 0; index < files.length; index += 1) {
+    if (signal.aborted) return fail("cancelled", "propose_changes cancelled");
+    const file = files[index] as ProposeChangesArgs["files"][number];
+    const where = resolved[index] as ResolvedPath;
+    const fileKey = key(where);
+    if (seen.has(fileKey)) return invalidChanges(index, "duplicate_path");
+    seen.add(fileKey);
+    // A planned file inside another planned file would need that file to be a directory.
+    const parents = where.relative.split("/").slice(0, -1);
+    for (let depth = 1; depth <= parents.length; depth += 1) {
+      if (allPaths.has(pathKey(parents.slice(0, depth).join("/"), platform))) return invalidChanges(index, "parent_not_dir");
+    }
+    if (file.change === "modify") {
+      const now = await inspectSource(workspace, file.path, fileOps);
+      if (!now.ok) {
+        if (now.problem === "denied") return fail("policy_denied", `file ${index}: path rejected by workspace`);
+        if (now.problem === "io_error") return fail("io_error", `file ${index}: cannot read the file`);
+        return invalidChanges(index, now.problem === "source_missing" ? "file_missing" : "not_file");
+      }
+      totalBytes += now.identity.size;
+      if (totalBytes > BigInt(MAX_PLAN_SOURCE_BYTES)) return invalidChanges(index, "too_large");
+      checked.push({ path: now.path, change: "modify", identity: now.identity });
+    } else if (file.change === "create") {
+      const now = await inspectDestination(workspace, file.path, fileOps);
+      if (!now.ok) {
+        if (now.problem === "denied") return fail("policy_denied", `file ${index}: path rejected by workspace`);
+        if (now.problem === "io_error") return fail("io_error", `file ${index}: cannot check the path`);
+        return invalidChanges(index, now.problem === "destination_exists" ? "file_exists" : "parent_not_dir");
+      }
+      checked.push({ path: now.path, change: "create", identity: null });
+    } else {
+      return fail("invalid_args", `file ${index}: unknown change`);
+    }
+  }
+  return checked;
+}
+
+/**
+ * U-180 (DR-69 B-1, B-3): `propose_changes`. Checks the files, hashes every `modify` file (the model
+ * never supplies a hash), and stores plan.json of a `run` plan through PlanRecorder.saveChangesPlan:
+ * the summary and each path as this run's own gateway masks them, as visible parts (MaskedParts: no
+ * privacy token, no secret value). The summary is stored under the digest (R-99 L-1). Without a
+ * recorder that can store such a plan, or when a text cannot be masked, nothing is stored
+ * (`io_error`).
+ */
+export async function proposeChanges(
+  deps: WorkflowToolDeps,
+  args: ProposeChangesArgs,
+  signal: AbortSignal,
+): Promise<RawWorkflowToolOutcome> {
+  if (!Array.isArray(args.files)) return fail("invalid_args", "files must be an array");
+  const checked = await checkChanges(deps, args.files, signal);
+  if (!Array.isArray(checked)) return checked;
+
+  const files: ResolvedPlannedFile[] = [];
+  for (let index = 0; index < checked.length; index += 1) {
+    const item = checked[index] as CheckedFile;
+    if (item.change === "create" || item.identity === null) {
+      files.push({ path: item.path.relative, change: "create", sha256: null });
+      continue;
+    }
+    const hashed = await hashFile(item.path.absolute, { expected: item.identity, signal });
+    if (!hashed.ok) {
+      if (hashed.reason === "aborted") return fail("cancelled", "propose_changes cancelled");
+      if (hashed.reason === "missing") return invalidChanges(index, "file_missing");
+      if (hashed.reason === "changed") return invalidChanges(index, "not_file");
+      return fail("io_error", `file ${index}: cannot read the file`);
+    }
+    files.push({ path: item.path.relative, change: "modify", sha256: hashed.hash });
+  }
+
+  if (signal.aborted) return fail("cancelled", "propose_changes cancelled");
+  const recorder = deps.planRecorder;
+  if (recorder === undefined || typeof recorder.saveChangesPlan !== "function") {
+    return fail("io_error", "no plan store for this kind of plan is available; nothing was stored");
+  }
+  const summary = typeof args.summary === "string" ? deps.privacy.mask(args.summary) : null;
+  if (summary === null || !summary.ok) return fail("io_error", "masking the summary failed; nothing was stored");
+  const stored: StoredPlannedFile[] = [];
+  for (const file of files) {
+    const masked = deps.privacy.mask(file.path);
+    if (!masked.ok) return fail("io_error", "masking a plan path failed; nothing was stored");
+    stored.push({ ...file, shown: maskedParts(masked.text) });
+  }
+  let digest: string;
+  try {
+    digest = await recorder.saveChangesPlan({ summary: maskedParts(summary.text), files: stored });
+  } catch {
+    // No detail: it could carry raw paths.
+    return fail("io_error", "storing the plan failed; no plan exists");
+  }
+  // R-5 I-4, as propose_plan: only a SHA-256 in the contract's form can be approved.
+  if (typeof digest !== "string" || !DIGEST_PATTERN.test(digest)) {
+    return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
+  }
+  return { ok: true, payload: { digest, files } };
 }

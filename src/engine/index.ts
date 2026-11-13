@@ -47,6 +47,7 @@ import {
   CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
+  PLANNED_FILE_DESCRIPTOR,
   POLICY_NARROWING_KINDS,
   PROFILE_NAME_PATTERN_SOURCE,
   REPLACED_CALL_ID_PREFIX,
@@ -88,6 +89,7 @@ import type {
   PolicyNarrowing,
   PolicyNarrowingKind,
   PlanMode,
+  ProposeChangesArgs,
   ProposePlanArgs,
   RawText,
   RawToolOutcome,
@@ -172,8 +174,12 @@ export const SYSTEM_PROMPT = [
 export const INSTRUCTIONS_LABEL = "Workflow instructions:";
 /** GT-E3: a plan run whose model ended without a stored plan. */
 const NO_PLAN_MESSAGE = "the run ended without a plan: propose_plan did not succeed";
+/** U-180 (DR-69 B-3): a plan run of mode `run` whose model ended without a stored plan. */
+const NO_CHANGES_PLAN_MESSAGE = "the run ended without a plan: propose_changes did not succeed";
 /** GT-E3: the lead of a denial or restore failure that concerns one plan action. */
 const PLAN_ACTION_LEAD = "action ";
+/** U-180: the lead of a denial or restore failure that concerns one planned file of propose_changes. */
+const PLANNED_FILE_LEAD = "file ";
 /** GT-E4: notice of a run that waits for a person's review. */
 const REVIEW_NOTICE = "awaiting human review: the configured checks are done; a person records the verdict";
 const NO_VERIFIER_NOTICE = "no automatic verification: no verifier is configured for this task";
@@ -208,7 +214,9 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   SYSTEM_PROMPT,
   INSTRUCTIONS_LABEL,
   NO_PLAN_MESSAGE,
+  NO_CHANGES_PLAN_MESSAGE,
   PLAN_ACTION_LEAD,
+  PLANNED_FILE_LEAD,
   REVIEW_NOTICE,
   NO_VERIFIER_NOTICE,
   UNKNOWN_TOOL_LEAD,
@@ -315,6 +323,8 @@ export function offeredTools(tools: readonly AnyToolName[], plan: PlanMode): rea
 interface ProposedPlan {
   readonly digest: ContentHash;
   readonly actions: number;
+  /** U-180 (R-99 M-3): a `run` plan, whose `actions` counts its files. */
+  readonly kind?: "changes";
 }
 
 /**
@@ -337,6 +347,13 @@ function isProposedPlan(payload: unknown): payload is { readonly digest: Content
   if (typeof payload !== "object" || payload === null) return false;
   const value = payload as { digest?: unknown; actions?: unknown };
   return typeof value.digest === "string" && Array.isArray(value.actions);
+}
+
+/** U-180: what `propose_changes` returns when it stored the plan (ProposeChangesPayload). */
+function isProposedChanges(payload: unknown): payload is { readonly digest: ContentHash; readonly files: readonly unknown[] } {
+  if (typeof payload !== "object" || payload === null) return false;
+  const value = payload as { digest?: unknown; files?: unknown };
+  return typeof value.digest === "string" && Array.isArray(value.files);
 }
 
 export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> => {
@@ -954,11 +971,98 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     return result;
   };
 
+  /**
+   * U-180 (DR-69 B-1, B-3): `propose_changes`, the plan tool of plan mode `run` (its descriptor's
+   * `planMode`). Every planned file is judged on its own with PLANNED_FILE_DESCRIPTOR, as a plan
+   * action is: the policy gate before restoration, permitted restoration of its path, and the gate on
+   * the effective path, so a protected path, one outside the run's writable lists, the state
+   * directory or a path outside the workspace denies the call. The model gets the reason (the file's
+   * index, never its path) and may propose again. When the tool stored the plan, the run ends as
+   * plan_pending after this call, with EngineResult.plan of kind "changes".
+   */
+  const handleChangesCall = async (call: ToolCall, args: ProposeChangesArgs, descriptor: ToolDescriptor): Promise<ToolResult | End> => {
+    const effectiveFiles: JsonObject[] = [];
+    for (const [index, file] of args.files.entries()) {
+      const fileArgs: JsonObject = { path: file.path };
+      const denyFile = async (
+        stage: "policy_requested" | "policy_effective",
+        decision: Extract<PolicyDecision, { allowed: false }>,
+      ): Promise<ToolResult | End> => {
+        await record({
+          type: "tool_decision",
+          callId: call.id,
+          tool: call.name,
+          stage,
+          allowed: false,
+          permission: decision.permission,
+          code: decision.code,
+        });
+        return errorResult(
+          call,
+          "policy_denied",
+          `denied by policy: ${PLANNED_FILE_LEAD}${index}: ${decision.permission}/${decision.code}. ${REFUSAL_HINTS[decision.code]}`,
+        );
+      };
+      const synthetic: ToolCall = { id: call.id, name: PLANNED_FILE_DESCRIPTOR.name, args: fileArgs };
+      const requested = policy.checkRequested(synthetic, PLANNED_FILE_DESCRIPTOR);
+      if (!requested.allowed) return denyFile("policy_requested", requested);
+      const resolved = privacy.resolveToolArgs({
+        args: fileArgs,
+        restoreFields: policy.restorableFields(PLANNED_FILE_DESCRIPTOR),
+        documentFields: [],
+      });
+      if (!resolved.ok) {
+        await record({
+          type: "tool_decision",
+          callId: call.id,
+          tool: call.name,
+          stage: "restore",
+          allowed: false,
+          permission: "restore",
+          code: resolved.code,
+        });
+        return errorResult(call, resolved.code, `token not usable in field: ${PLANNED_FILE_LEAD}${index}: ${resolved.field}. ${REFUSAL_HINTS[resolved.code]}`);
+      }
+      const checked = await policy.checkEffective({ id: call.id, name: PLANNED_FILE_DESCRIPTOR.name, args: resolved.args }, PLANNED_FILE_DESCRIPTOR);
+      if (!checked.allowed) return denyFile("policy_effective", checked);
+      effectiveFiles.push({ ...resolved.args, change: file.change });
+    }
+    const effectiveInput = { summary: args.summary, files: effectiveFiles };
+    const effectiveArgs = validateWorkflowToolArgs("propose_changes", effectiveInput);
+    if (effectiveArgs === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_changes", effectiveInput));
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: call.name,
+      stage: "policy_effective",
+      allowed: true,
+      permission: null,
+      code: null,
+    });
+    toolCalls += 1;
+    const outcome = await executeWorkflow({ id: call.id, name: "propose_changes", args: effectiveArgs }, descriptor);
+    if (isEnd(outcome)) return outcome;
+    const result = await finishWorkflowCall(call, "propose_changes", outcome);
+    if (isEnd(result) || !outcome.ok) return result;
+    if (!isProposedChanges(outcome.payload)) return UNKNOWN_OUTCOME;
+    proposedPlan = { digest: outcome.payload.digest, actions: outcome.payload.files.length, kind: "changes" };
+    // As propose_plan's (U-59): the summary, masked and made safe as the last message, for the result.
+    const maskedSummary = mask(args.summary);
+    planSummary = maskedSummary === null ? null : (finalMessageOf(maskedSummary, (text) => privacy.mask(text))?.text ?? null);
+    return result;
+  };
+
   /** GT-E1: a task type tool call. Same order as a built-in call: validate, check, restore, check, run. */
   const handleWorkflowCall = async (call: ToolCall, name: WorkflowToolName): Promise<ToolResult | End> => {
     // A runner that cannot run task type tools answers them as unknown (contract ToolRunner).
     if (tools.executeWorkflowTool === undefined) return unknownTool(call);
     const descriptor = WORKFLOW_TOOLS[name];
+    // U-180: the plan tool of mode run, chosen by the descriptor's planMode (never by the name).
+    if (descriptor.endsRun === "plan" && descriptor.planMode === "run") {
+      const args = validateWorkflowToolArgs("propose_changes", call.args);
+      if (args === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_changes", call.args));
+      return handleChangesCall(call, args, descriptor);
+    }
     if (descriptor.endsRun === "plan") {
       const args = validateWorkflowToolArgs("propose_plan", call.args);
       if (args === null) return invalidArgsOf(call, workflowToolArgsProblem("propose_plan", call.args));
@@ -1470,7 +1574,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       // GT-E3: a plan run is verified only after its plan is applied (an apply run). A model that
       // ends without a stored plan has not done what a plan run asks for. U-170: `run` too.
       if (settings.plan !== "none") {
-        const message = mask(NO_PLAN_MESSAGE);
+        const message = mask(settings.plan === "run" ? NO_CHANGES_PLAN_MESSAGE : NO_PLAN_MESSAGE);
         if (message !== null) {
           notices.push(message);
           await record({ type: "model_error", turn: modelTurns, kind: "malformed_response", message });

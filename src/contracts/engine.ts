@@ -11,7 +11,7 @@ import type { StateGuard } from "./state.js";
 import type { Journal } from "./journal.js";
 import type { ModelErrorKind, ModelProvider } from "./model.js";
 import { modelErrorRetryable } from "./model.js";
-import type { PolicyGate } from "./policy.js";
+import type { ConfirmPermission, PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
@@ -763,6 +763,12 @@ export interface EngineDeps {
    * recorded and the run goes on. Integrity checks and state checks at the same moment both run.
    */
   readonly stateGuard?: StateGuard;
+  /**
+   * U-74 (DR-3, DR-10): asks a person about a call a `confirm: true` rule allows (PolicyDecision
+   * `confirm`). Absent: nobody is asked and such a call is denied, recorded `by: "default"`. The wait
+   * counts in maxDurationMs.
+   */
+  readonly confirm?: ConfirmPermission;
 }
 
 /** Signature of `runTask`, exported by `src/engine/index.ts`. */

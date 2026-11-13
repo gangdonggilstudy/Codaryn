@@ -22,6 +22,8 @@ export type { WorkspaceDirOptions, WorkspaceDirSource } from "./workspace-dir.js
 export { MAX_RUN_EVENTS_PAGE, MAX_RUN_EVENTS_PAGE_BYTES, RUN_EVENTS_PAGE_SIZE, RUN_EVENT_TYPES, listRunEventsIn, runEventsArguments } from "./run-events.js";
 export type { RunEventsDeps, RunEventsSource } from "./run-events.js";
 export { checkApplyArguments, checkApplyIn } from "./check-apply.js";
+export { changesPlanViewIn, checkChangesPlanFiles, storedPlanKindOf } from "./changes-plan.js";
+export type { ChangesPlanCheckSource, ChangesPlanView } from "./changes-plan.js";
 export { MAX_WORKSPACE_TEXT_BYTES, isWorkspaceFile, readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
 export type { WorkspaceTextOperations, WorkspaceTextSource, WorkspaceTextStage, WorkspaceTextWriteSource } from "./workspace-text.js";
 export type { ApplyCheckOperations, ApplyCheckSource } from "./check-apply.js";

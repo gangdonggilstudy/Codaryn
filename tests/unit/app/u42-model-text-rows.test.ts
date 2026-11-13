@@ -37,7 +37,7 @@ async function planWith(summary: string): Promise<PlanOutput> {
   const shown = await run.app.plan({ settings: taskForm(run.base), runId: run.plan.runId });
   assert.ok(shown.ok, JSON.stringify(shown));
   assert.equal(typeof shown.output.summary, "string");
-  return shown.output;
+  return shown.output as PlanOutput;
 }
 
 // 409 characters, within the tool's 500 (MAX_PLAN_SUMMARY_CHARS).

@@ -6,7 +6,7 @@
  * an unknown key among them, is never put in the text.
  */
 
-import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS, MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS } from "../contracts/index.js";
+import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS, MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS, MAX_PLANNED_FILES } from "../contracts/index.js";
 import type {
   JsonObject,
   JsonValue,
@@ -41,6 +41,10 @@ export const ARGS_RULES = {
   actions: `required: a list of 1 to ${MAX_PLAN_ACTIONS} actions`,
   action: 'required: an object with kind "move" or "discard"',
   actionKind: 'must be "move" or "discard"',
+  // U-180 (DR-69 B-1): propose_changes.
+  files: `required: a list of 1 to ${MAX_PLANNED_FILES} files`,
+  file: 'required: an object with a path and change "create" or "modify"',
+  fileChange: 'must be "create" or "modify"',
 } as const;
 
 /** The lead of the message an argument problem gives the model. */
@@ -141,6 +145,14 @@ function planActionProblem(action: JsonValue | undefined, field: string): ArgsPr
   return { field: `${field}.kind`, rule: ARGS_RULES.actionKind };
 }
 
+/** U-180: one planned file of propose_changes: a path and create or modify, nothing else. */
+function plannedFileProblem(file: JsonValue | undefined, field: string): ArgsProblem | null {
+  if (!isObject(file)) return { field, rule: ARGS_RULES.file };
+  const problem = unknownKeys(file, ["path", "change"], field) ?? nonEmpty(file, "path", field);
+  if (problem !== null) return problem;
+  return file["change"] === "create" || file["change"] === "modify" ? null : { field: `${field}.change`, rule: ARGS_RULES.fileChange };
+}
+
 /**
  * G-B: the shapes WORKFLOW_TOOL_DEFINITIONS describe. Structure only, as for the built-in tools.
  * U-15 (AXM-5): the first problem, or null when they fit.
@@ -162,6 +174,19 @@ export function workflowToolArgsProblem(name: WorkflowToolName, args: JsonObject
       if (!Array.isArray(actions) || actions.length < 1 || actions.length > MAX_PLAN_ACTIONS) return { field: "actions", rule: ARGS_RULES.actions };
       for (const [index, action] of actions.entries()) {
         const found = planActionProblem(action, `actions[${index}]`);
+        if (found !== null) return found;
+      }
+      return null;
+    }
+    case "propose_changes": {
+      const problem = unknownKeys(args, ["summary", "files"], "");
+      if (problem !== null) return problem;
+      const summary = args["summary"];
+      if (!isNonEmptyString(summary) || summary.length > MAX_PLAN_SUMMARY_CHARS) return { field: "summary", rule: ARGS_RULES.summary };
+      const files = args["files"];
+      if (!Array.isArray(files) || files.length < 1 || files.length > MAX_PLANNED_FILES) return { field: "files", rule: ARGS_RULES.files };
+      for (const [index, file] of files.entries()) {
+        const found = plannedFileProblem(file, `files[${index}]`);
         if (found !== null) return found;
       }
       return null;

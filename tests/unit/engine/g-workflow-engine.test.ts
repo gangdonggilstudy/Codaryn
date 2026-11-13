@@ -78,6 +78,18 @@ function storedPlan(call: EffectiveWorkflowToolCall): RawWorkflowToolOutcome {
       payload: { entries: [{ path: `photos/${FAKE_SECRET}.jpg`, kind: "file", size: 3, modifiedAt: null }], next: null, hashesIncomplete: false },
     };
   }
+  if (call.name === "propose_changes") {
+    // U-180: the run plan's tool: a create holds no hash, a modify gets one.
+    return {
+      ok: true,
+      payload: {
+        digest: HASH_A,
+        files: call.args.files.map((file) =>
+          file.change === "create" ? { path: file.path, change: "create" as const, sha256: null } : { path: file.path, change: "modify" as const, sha256: HASH_B },
+        ),
+      },
+    };
+  }
   return {
     ok: true,
     payload: {

@@ -16,16 +16,16 @@
 
 import type { CleanupConfirmation, CleanupOutput, CleanupPlan, CleanupSelection, CleanupStatus, StateSummary } from "./cleanup.js";
 import type { ChangesApplyRun, DoctorOutput, InitOutput, ModelsOutput, ReportOutput, RunsOutput } from "./commands.js";
-import type { CodarynConfig } from "./config.js";
+import type { CodarynConfig, DefaultConfigDisplay } from "./config.js";
 import type { CliErrorCategory, CliErrorCode, Clock, EngineResult, InputDiagnostic, RevertOutput } from "./engine.js";
-import type { InitSuggestedCommand, InitSuggestedProtectedPath } from "./human.js";
+import type { InitSuggestedCommand, InitSuggestedProtectedPath, MessageLanguage } from "./human.js";
 import type { JournalEventType, JournalRecord } from "./journal.js";
 import type { AnyPlanOutput, ApplyJournalEventType, ApplyJournalRecord, ApplyResult, PlanItemProblem, PlanOutput } from "./plan.js";
 import type { ConfirmAnswer, ConfirmRequest, PermissionKind } from "./policy.js";
 import type { CommandRule } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolName } from "./tool.js";
-import type { PolicyNarrowingKind, ReviewOutput } from "./workflow.js";
+import type { PolicyNarrowing, PolicyNarrowingKind, ReviewOutput } from "./workflow.js";
 
 /** Process facts an adapter hands to the app layer. The app layer never touches process globals. */
 export interface AppEnvironment {
@@ -61,6 +61,15 @@ export interface AppEnvironment {
   readonly homeDir?: string | null;
   /** N-4, N-20: the operating system's locale, for `doctor`'s language check. Absent: not known. */
   readonly osLocale?: string | null;
+  /**
+   * C-6a (P-2): registers a handler for a process signal and returns its remover (as the CLI's
+   * cancel source takes it). The app registers SIGINT and SIGTERM when a run's cancel source is made,
+   * right before the assembly as the CLI does, and removes them when the run ends; either signal
+   * then cancels that run. Not during the checks before it: the process ends as Node's default
+   * there. Absent (the GUI's engine host): no handler; RunHandle.cancel and the cancel file cancel.
+   * The app layer still never touches the process itself.
+   */
+  readonly onSignal?: (name: "SIGINT" | "SIGTERM", handler: () => void) => () => void;
 }
 
 /** One error that stopped a call before anything changed, or an internal error after a start. */
@@ -323,6 +332,38 @@ export interface RunObserver {
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 }
 
+/**
+ * C-6a (the CLI migration, PM): the end summary's counts of one run, counted by the app layer from
+ * each record as the engine appended it: the CLI's RunNotes counting (src/cli/run.ts `watched` and
+ * notePrivateData), moved letter for letter, never from the events, which mask every string again
+ * (DR-15) and so could miss a closed word that a registered value matched. Each field has the
+ * meaning, the rule and the "absent" of RunSummaryContext's field of the same name
+ * (contracts/human.ts); an adapter builds its end summary from them and its own facts (how the
+ * workspace was given, the profile, whether it could ask). Counts and closed words only: no path,
+ * no value, no rule. Not in the result, result.json or any record, and `codaryn run --json` prints
+ * the result alone (u290 test).
+ */
+export interface RunTally {
+  /** N-17: `tool_decision` records with `allowed: false`. */
+  readonly deniedToolCalls: number;
+  /** N-23: those whose permission is `command`. */
+  readonly deniedCommandCalls: number;
+  /** U-18 (AXM-4): calls allowed and then failed, by the failed-call rule (failed-calls.ts). */
+  readonly failedToolCalls: number;
+  /** U-195, U-198: denials with code `path_not_writable` in a run that carries out no plan. Absent while there is none. */
+  readonly deniedNotWritable?: number;
+  /** U-195, U-198: such denials in a run that carries out a run plan (step C-6b's apply). Absent while there is none. */
+  readonly deniedNotPlanned?: number;
+  /** U-210: denials with code `unreadable_path`. Absent while there is none. */
+  readonly deniedUnreadable?: number;
+  /** U-110: `confirmation_answered` records with `deny`, by who decided. Absent while there is none. */
+  readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number };
+  /** U-148: `run_started.policyNarrowings` as recorded. Absent when it has none. */
+  readonly policyNarrowings?: readonly PolicyNarrowing[];
+  /** U-210, R-108 L-2: query_table results that hid groups or values, and the largest k they applied. Absent while there is none. */
+  readonly hiddenGroups?: { readonly results: number; readonly minGroupSize: number };
+}
+
 export type RunOutcome =
   | {
       readonly ok: true;
@@ -335,8 +376,20 @@ export type RunOutcome =
        * of another process then finds it stale. Absent: released. Message: lock.release_failed.
        */
       readonly lockLeft?: true;
+      /**
+       * C-6a: the run's end summary counts (RunTally), beside the result, never in it. Given by the
+       * app's own run lifecycle (the migration's next step); absent until then, when the contract
+       * makes it required.
+       */
+      readonly tally?: RunTally;
+      /**
+       * C-6a, Y-4: the run ended as model_error after the provider answered 404 for the model; the
+       * result's notices then hold the English hint. The adapter says its own line before its end
+       * summary (the CLI: progress.model_not_found, in the chosen language). Absent otherwise.
+       */
+      readonly modelNotFound?: true;
     }
-  /** An internal error after the start (`internal_error`). The lock is released. */
+  /** An internal error after the start (`internal_error`). The lock is released. There is no tally: no end summary is written. */
   | { readonly ok: false; readonly error: AppError };
 
 export interface RunHandle {
@@ -344,6 +397,31 @@ export interface RunHandle {
   readonly runId: string;
   /** Real path of the workspace root, as the run's assembly resolved it. */
   readonly workspaceRoot: string;
+  /**
+   * C-6a, N-4: the config's `language`, known before the first event, for the adapter's renderer and
+   * its questions; null when the config sets none (the adapter then picks as it does without one).
+   * Given by the app's own run lifecycle (the migration's next step); absent until then, when the
+   * contract makes it required.
+   */
+  readonly configLanguage?: MessageLanguage | null;
+  /**
+   * C-6a, N-1: the fixed display form of the default config location (DEFAULT_CONFIG_DISPLAY, N-14:
+   * no variable expanded, no user name) when the run's config came from it; null otherwise. The app
+   * still puts its English notice in the result at the end; the CLI says its own line right after
+   * `run_started`. Absent until the app's own run lifecycle gives it, as configLanguage.
+   */
+  readonly defaultConfig?: DefaultConfigDisplay | null;
+  /**
+   * C-6a: the run's own masking (its privacy gateway, with the values the run registered, DR-17), for
+   * the text an adapter shows people besides the events: the CLI's progress lines, its default
+   * config and Y-4 lines, its end summary and DR-51's shown workspace, which the CLI masks so now.
+   * Before, during and after the run. Null when the text cannot be masked: write nothing then.
+   * Never for what goes to a model or into a record. It gives the masked form of the text passed in
+   * only, never a value; an adapter could test a guess with it, but it gave the settings the values
+   * come from. A window could not: an engine host never hands it to a window or over IPC. Absent
+   * until the app's own run lifecycle gives it, as configLanguage.
+   */
+  readonly mask?: (text: string) => MaskedText | null;
   /** Idempotent. After the run ended it does nothing. */
   cancel(): void;
   /** Never rejects. Resolves after result.json was written and the workspace lock released. */
@@ -352,7 +430,16 @@ export interface RunHandle {
 
 export type StartOutcome =
   | { readonly ok: true; readonly handle: RunHandle }
-  | { readonly ok: false; readonly error: AppError };
+  | {
+      readonly ok: false;
+      readonly error: AppError;
+      /**
+       * C-6a: the config's `language` when the refusal came after the config was read and it sets
+       * one, so the adapter explains the error in it (the CLI's main.ts); absent otherwise. Beside the
+       * error, not in AppError, so no error JSON carries it.
+       */
+      readonly configLanguage?: MessageLanguage;
+    };
 
 export type AppCallOutcome<T> = { readonly ok: true; readonly output: T } | { readonly ok: false; readonly error: AppError };
 

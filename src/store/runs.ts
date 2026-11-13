@@ -44,10 +44,12 @@ import type {
   RunListing,
   RunReason,
   RunId,
+  ReviewVerdict,
   TerminalRunStatus,
 } from "../contracts/index.js";
 import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 import { recordsChangedMarkIn } from "./marks.js";
+import { reviewRecordIn } from "./review.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -386,7 +388,25 @@ async function readEntry(dir: string, runId: RunId, now: number): Promise<Checke
     ...((await recordsChangedMarkIn(dir)) ? { recordsChanged: true } : {}),
     // U-16 (UXM-5): a plan run whose plan an apply claimed. Left out otherwise.
     ...(await appliedByOf(dir, runId, first.kind, reason)),
+    // U-129 (AXM-21): a run that waited for review and has a person's verdict. Left out otherwise.
+    ...(await reviewOf(dir, runId, first.kind, reason)),
   };
+}
+
+/**
+ * U-129 (AXM-21, PM): `review` for a model run that ended `awaiting_review` and has a person's verdict:
+ * the verdict and its time from review.json, read with the checks report uses (reviewRecordIn). No
+ * record, or one that cannot be read or checked: left out, and the run stays checked (report reads it
+ * itself). The note is not listed.
+ */
+async function reviewOf(dir: string, runId: RunId, kind: "run" | "apply", reason: RunReason | null): Promise<{ review?: { verdict: ReviewVerdict; at: string } }> {
+  if (kind !== "run" || reason !== "awaiting_review") return {};
+  try {
+    const record = await reviewRecordIn(dir, runId);
+    return record === null ? {} : { review: { verdict: record.verdict, at: record.at } };
+  } catch {
+    return {};
+  }
 }
 
 /** U-16: `appliedBy` for a plan run (a model run that ended plan_pending) whose plan was applied. */

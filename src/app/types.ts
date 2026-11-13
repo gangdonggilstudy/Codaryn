@@ -261,6 +261,28 @@ export interface SettingsView {
   readonly keyAvailable: boolean;
   /** DR-41: what each workflow's own rules leave out of this config's policy. See WorkflowPolicyNarrowing. */
   readonly policyNarrowings: readonly WorkflowPolicyNarrowing[];
+  /** U-215 (DR-69 bundle A): the config's unreadable paths and group size k, for the settings screen. See SettingsPrivateData. */
+  readonly privateData: SettingsPrivateData;
+}
+
+/**
+ * U-215 (DR-69 bundle A, DR-70): the config's own private data settings, as the settings screen shows
+ * and changes them (an edit applied to the config, then proposeSettingsChange, which judges taking an
+ * entry away and lowering k as widenings, U-204). From the config's `policy` only: a profile's, a
+ * workflow definition's and a task file's own entries and k are not here.
+ */
+export interface SettingsPrivateData {
+  /** The config's `policy.unreadablePaths`, in the file's order; empty when it has none. */
+  readonly unreadablePaths: readonly string[];
+  readonly minGroupSize: {
+    /** The config's `policy.minGroupSize`, or null when it sets none. */
+    readonly configured: number | null;
+    /** What a run gets from the config alone (effectiveMinGroupSize: never below 5); a profile, a definition or a task file may raise it. */
+    readonly effective: number;
+    /** The values any source may set (MIN_GROUP_SIZE_LIMITS: whole numbers), so the window needs no copy of the contract's numbers. */
+    readonly min: number;
+    readonly max: number;
+  };
 }
 
 /** The settings of one run, as `codaryn run` takes them. */

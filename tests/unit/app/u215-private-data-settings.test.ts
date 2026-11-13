@@ -11,7 +11,7 @@
  *   entry away or lowering k widens and is written only once the person confirmed it.
  * - The parsers refuse both fields until U-210, so the cases that read or write a config file that
  *   holds them are todo until then; privateDataOf is tested on configs built here.
- * Reproduced first (todo until the view gives them). Temporary folders, fake values only.
+ * Reproduced first (1ff75f3, todo until the view gave them). Temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -25,7 +25,6 @@ import { ANTHROPIC_API_KEY_ENV } from "../../../src/contracts/index.js";
 import type { CodarynConfig } from "../../../src/contracts/index.js";
 import { appEnvironment, tempDir } from "./support.js";
 
-const TODO_VIEW = { todo: "U-215: readSettings does not give the private data settings yet" };
 const TODO_PARSER = { todo: "U-210: the config parser refuses unreadablePaths and minGroupSize until then" };
 const FAKE_KEY = "fake-private-key-value-0215";
 
@@ -60,12 +59,12 @@ const withPolicy = (base: Record<string, unknown>, extra: Record<string, unknown
 const widening = (proposal: SettingsChangeProposal): string[] => proposal.widening.map((item) => `${item.kind} ${item.field}`);
 
 describe("U-215: readSettings gives the private data settings", () => {
-  test("a config without them: no unreadable path, k 5 from no value, the values k may take", TODO_VIEW, async () => {
+  test("a config without them: no unreadable path, k 5 from no value, the values k may take", async () => {
     const { app, config } = await setup();
     assert.deepEqual(privateDataIn(ok(await app.readSettings({ configPath: config }))), NONE);
   });
 
-  test("privateDataOf: the config's list in its order and k; a value below 5 gives 5; no config gives none", TODO_VIEW, () => {
+  test("privateDataOf: the config's list in its order and k; a value below 5 gives 5; no config gives none", () => {
     const config = (policy: Record<string, unknown>): CodarynConfig =>
       ({ schemaVersion: 1, model: "fake-model-a", maxOutputTokens: 64, policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, ...policy } }) as unknown as CodarynConfig;
     assert.deepEqual(privateDataOf(config({ unreadablePaths: ["hr", "data/private"], minGroupSize: 8 })), {
@@ -128,13 +127,21 @@ describe("U-215: changing them through a proposal", () => {
     assert.deepEqual(widening(atFive), []);
   });
 
-  test("a k outside 5 to 1000 or not whole, and an entry the gate cannot use: invalid_config, nothing written", TODO_PARSER, async () => {
+  test("a k outside 5 to 1000 or not whole, and an entry the gate cannot use: invalid_config at that field, nothing written", TODO_PARSER, async () => {
     const { app, config, current } = await setup();
     const base = await current();
     const before = await readFile(config, "utf8");
-    for (const extra of [{ minGroupSize: 3 }, { minGroupSize: 1001 }, { minGroupSize: 7.5 }, { unreadablePaths: ["../outside"] }]) {
+    const cases = [
+      [{ minGroupSize: 3 }, "policy.minGroupSize"],
+      [{ minGroupSize: 1001 }, "policy.minGroupSize"],
+      [{ minGroupSize: 7.5 }, "policy.minGroupSize"],
+      [{ unreadablePaths: ["../outside"] }, "policy.unreadablePaths[0]"],
+    ] as const;
+    for (const [extra, field] of cases) {
       const next = withPolicy(base, extra);
-      assert.equal(code(await app.proposeSettingsChange({ configPath: config, next })), "invalid_config", JSON.stringify(extra));
+      const proposed = await app.proposeSettingsChange({ configPath: config, next });
+      assert.equal(code(proposed), "invalid_config", JSON.stringify(extra));
+      assert.equal((proposed as { error: { diagnostic?: { field?: string } } }).error.diagnostic?.field, field, JSON.stringify(extra));
       assert.equal(code(await app.applySettingsChange({ configPath: config, next, baseDigest: "0".repeat(64), confirmWidening: true })), "invalid_config", JSON.stringify(extra));
     }
     assert.equal(await readFile(config, "utf8"), before);

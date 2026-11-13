@@ -520,6 +520,7 @@ GUI의 첫 실행 마법사와 설정 화면이 쓴다. 파일을 고르는 규�
 readSettings({ configPath }) → SettingsView               // a86cd12
   // file: 출처(argument·environment·default), 경로, 표시 이름, 있는지 / config / profiles / workflows / keyAvailable / policyNarrowings(DR-41)
   // builtinWorkflows: G-A BUILTIN_WORKFLOW_IDS (설정 파일 없이도) / profileWorkflows: 프로필마다 { profile, workflowRef | null }   // 59dc39a
+  // privateData: { unreadablePaths, minGroupSize: { configured | null, effective, min, max } }   // U-215, 묶음 A
 createSettings({ configPath, workspace }) → InitOutput     // b015c9f, `init --json` 그대로(질문 없음)
 settingsSuggestions({ workspace }) → { commands: { shown, rule }[], protectedPaths }   // b015c9f
 proposeSettingsChange({ configPath, next }) → { baseDigest, digest, changes, widening, policyNarrowings, config }   // c1957d8, DR-41
@@ -537,6 +538,12 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   6. `parseConfig`. 필드 위치를 준다(N-6).
   - 키 검사(3, 5)는 지금 설정된 모든 API 제공자의 키 값으로 한다(SP-2, CLI의 `knownKeyValues`). 그래서 OpenAI 키 값이 든 설정 파일도 읽기와 변경 제안·적용에서 `key_in_file`로 거부된다.
   - `keyAvailable`은 간편 실행이 쓸 제공자(설정의 `provider`, 없으면 anthropic)의 키가 있는지다. 값은 주지 않는다.
+  - U-215(DR-69 묶음 A): `privateData`는 설정 화면이 읽기 제외 경로와 묶음 최소 크기 k를 보이고 고치는 데 쓴다(`privateDataOf`).
+    - `unreadablePaths`는 설정의 `policy.unreadablePaths`를 파일 순서 그대로 준다. 없으면 빈 목록이다.
+    - `minGroupSize`의 `configured`는 설정의 값이고 없으면 null이다. `effective`는 설정만으로 실행이 받는 k다(`effectiveMinGroupSize`, 5 아래 없음). 프로필·정의·과제 파일은 이것을 올릴 수 있다. `min`·`max`는 어느 출처든 둘 수 있는 값(`MIN_GROUP_SIZE_LIMITS`, 정수)이다. 그래서 창이 계약의 수를 베껴 둘 필요가 없다.
+    - 설정의 정책만 본다. 프로필·정의·과제 파일의 자기 항목과 k는 여기 없다.
+    - GUI는 보호 경로처럼 고친다. 편집을 설정에 적용한 뒤 새 설정 전체로 제안을 받는다. 판정은 U-204다: 항목을 더하거나 k를 올리면 좁히기라 묻지 않고 쓴다. 항목을 빼거나 k를 내리면 넓히기라 사람이 확인해야 쓴다.
+    - 파서는 두 필드를 na-core의 U-210까지 거부한다. 그래서 두 필드를 담은 설정 파일을 읽고 쓰는 시험은 그때까지 todo다(`tests/unit/app/u215-private-data-settings.test.ts`). U-210과 합친 임시 판에서는 모두 통과했다.
   - `listRuns`의 출력도 모든 API 제공자의 키 값을 가린다(CLI `runs`와 같다). 시험은 `tests/unit/app/provider-keys.test.ts`다.
 - **만들기.**
   - CLI `init`을 `--json`, 질문 없이 부른다. 그래서 기본값만 쓴다: 모델 자리표시자, 기본 한도, 모두 거부하는 정책.

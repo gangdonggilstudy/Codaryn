@@ -54,6 +54,7 @@ export type {
   ApplyObserver,
   ApplyOutcome,
   ApplyPlanRequest,
+  RevertCallOutcome,
   ApplySettingsChangeRequest,
   ChangedFileUnavailable,
   ChangedFileView,

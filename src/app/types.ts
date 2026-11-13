@@ -339,6 +339,13 @@ export type StartOutcome =
 
 export type AppCallOutcome<T> = { readonly ok: true; readonly output: T } | { readonly ok: false; readonly error: AppError };
 
+/**
+ * U-229 (R-106 L-1, after U-220): a revert's outcome. `lockLeft: true` when the revert finished but
+ * its workspace lock could not be released (the CLI's RevertCliOutcome.lockLeft); the output is the
+ * revert's own, as when the lock was released. Absent: released.
+ */
+export type RevertCallOutcome = { readonly ok: true; readonly output: RevertOutput; readonly lockLeft?: true } | { readonly ok: false; readonly error: AppError };
+
 export interface ReportRequest {
   readonly workspace: string;
   /** A run id or "latest" (N-7). */
@@ -963,8 +970,8 @@ export interface CodarynApp {
   report(request: ReportRequest): Promise<AppCallOutcome<ReportOutput>>;
   /** `codaryn report` without `--json`: the same report as Markdown, for saving (GU-3). See ReportMarkdown. */
   reportMarkdown(request: ReportRequest): Promise<AppCallOutcome<ReportMarkdown>>;
-  /** `codaryn revert [--dry-run]` (run id or "latest"). See RevertRequest. */
-  revert(request: RevertRequest): Promise<AppCallOutcome<RevertOutput>>;
+  /** `codaryn revert [--dry-run]` (run id or "latest"). See RevertRequest; U-229: lockLeft, RevertCallOutcome. */
+  revert(request: RevertRequest): Promise<RevertCallOutcome>;
   /** N-7: `codaryn runs --json`. Reads only. */
   listRuns(request: ListRunsRequest): Promise<AppCallOutcome<RunsOutput>>;
   /** N-7, N-23(b): the run a reference names and its start time. Reads only. */

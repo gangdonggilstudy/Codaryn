@@ -202,7 +202,17 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
     - 기다림은 `LOCK_RELEASE_RETRY_DELAYS_MS`(2초, 8초: 두 번, 모두 10초)다. 타이머는 프로세스를 붙잡지 않는다(`unref`). 그 사이에 앱이 닫히면 그대로 닫힌다.
     - 그 실행의 잠금만 다룬다. 매번 store의 `releaseLock`을 같은 작업 공간과 같은 실행 id로 부르고, store는 이 프로세스와 그 id가 쥔 잠금만 지운다. 그 사이 다른 실행이 잡은 잠금이나 이미 없어진 잠금은 `false`이고, 그러면 곧 멈춘다. `false`로 끝난 풀기(이미 이 실행의 잠금이 아님)는 다시 풀지 않는다.
     - 결과는 더 알리지 않는다. `lockLeft: true`는 실행이 끝난 때의 사실이고 그대로다. 나중의 풀기가 지웠는지는 다음 시작이 거부되지 않는 것으로 드러난다.
+    - Codex V-17 H-1: store의 풀기는 "잠금을 읽어 이 프로세스와 그 id인지 확인한다"와 "파일을 지운다"가 한 걸음이 아니다. 그래서 한 잠금을 동시에 둘이 풀면 다음 소유자의 잠금이 지워질 수 있었다. 차례는 이렇다: 하나가 확인한다, 다른 하나가 지운다, 다음 실행이 작업 공간을 잡는다, 처음 것이 지운다. 이제 앱이 쥔 잠금의 풀기는 모두 `releaseOwnLock`을 거쳐 잠금마다(작업 공간과 id) 한 줄로 선다. 실행의 끝, 점검, 쓰기, 나중의 풀기가 모두 그렇다.
+      - 한 잠금의 풀기가 도는 동안 온 요청은 그것을 기다려 같은 답을 받는다.
+      - 나중의 풀기는 그 잠금의 앞선 풀기가 완전히 끝난 뒤에만 시도한다. 이미 어떤 풀기가 답했으면(지웠음, 또는 이 id의 잠금이 아님) store에 다시 묻지 않고 그 답으로 끝난다. 그래서 기다리는 사이 온 풀기 요청과 합쳐진다.
+      - 한 잠금의 나중 풀기는 한 벌뿐이다. 그것이 남아 있는 동안 다시 부르면 같은 것을 받는다.
+      - 시험 `tests/unit/app/u211-v17-release-race.test.ts`에 Codex의 재현을 옮겼다. 다음 소유자 셋(이 프로세스의 다음 실행, 다른 id의 자식 프로세스, 같은 id 문자열의 자식 프로세스)을 모두 다룬다.
+    - 다른 프로세스와 겹치는 길: 다른 프로세스는 이 프로세스가 사는 동안 이 프로세스의 잠금을 지우지 않는다. 그쪽의 풀기는 pid를 확인해 `false`로 끝난다. 거두기(reclaim)는 쥔 쪽이 끝났다고 판정된 잠금만 다루는데, 쥔 쪽이 바로 지금 풀고 있는 이 프로세스라 살아 있다. 남는 것은 store 자체의 확인과 지우기 사이 틈이다. 그 틈에 사람이나 다른 프로그램이 `lock.json`을 손으로 지우고 다음 실행이 잡으면 그 잠금이 지워진다. 이 틈은 실행 끝의 첫 풀기에도 똑같이 있다. 나중의 풀기를 빼도 없어지지 않고, 나중의 풀기는 그런 틈을 많아야 두 번 더할 뿐이다. 이 틈을 없애는 일은 store의 몫이다.
   - 사람용 글은 `lock.release_failed`(문구 id 초안, nc-human의 제안 글)다.
+  - U-229(nc-human의 U-220 뒤): CLI의 조립 약속(`AssemblyOutcome.finish`)이 바뀌었다. 잠금을 풀지 못하면 `finish`는 던지지 않고 `{ lockLeft: true }`로 끝나고, 아무것도 주지 않으면 풀었다는 뜻이다. 앱의 조립도 그 표시를 준다. 앱의 답(`RunOutcome.lockLeft`)은 그대로이고, 표시는 CLI가 자기 끝 요약을 쓸 때 읽는다(시험 `tests/unit/app/u229-finish-lock-left.test.ts`).
+    - 이동 계획의 적용은 CLI의 `runApply`가 잠금을 직접 잡고 푼다. U-220 뒤로는 풀지 못해도 적용 결과가 남지만(전에는 `internal_error`), 잠금이 남았다는 것은 CLI의 끝 요약에만 있고 `runApply`의 답에는 없다. 그래서 앱은 그것을 알지 못하고 `ApplyOutcome`에 `lockLeft`가 없다. CLI가 답에 실어 주면(nc-human에 바람) 앱이 실행처럼 알리고 다시 풀어 본다.
+    - 되돌리기는 다르다. CLI의 답(`RevertCliOutcome.lockLeft`, U-220)에 실리므로 앱이 `revert`의 답에 `lockLeft: true`로 옮긴다(5.5, R-106 L-1). 잠금은 CLI의 것이고 그 id를 앱이 모르므로, 나중의 풀기는 하지 않는다.
+    - R-106 I-5: 앱의 조립이 잠금을 잡은 뒤 실패하고 그 뒤의 풀기마저 던지면, 전에는 풀기의 오류가 조립 자신의 오류를 덮고 나중의 풀기도 없었다. 이제는 조립의 오류를 그대로 던지고(U-220 뒤 CLI의 조립과 같음), 풀기는 그 잠금의 줄을 거쳐 나중에 다시 해 본다(U-211). 시험 `tests/unit/app/u229-r106-lock-left.test.ts`.
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 
@@ -297,6 +307,7 @@ export interface RunObserver {
 ### 5.5 되돌리기 [구현 A-1]
 
 - `revert({ workspace, runId, dryRun?, unsafeMoveConsent? })` → `RevertOutput` [구현 DR-14, DR-25 `ec1914d`]. CLI의 `runRevert`와 `createRevertCommand`를 `main.ts`와 같은 선택(미리보기, `latest`, 한 실행 판정 N-26·N-27 (a), 잠금 안의 되돌리기 기록)으로 부른다. 앱 계층에 되돌리기 규칙의 사본은 없다.
+- U-229(R-106 L-1, U-220 뒤): 답은 `RevertCallOutcome`이다. 되돌리기를 마쳤는데 잠금을 풀지 못했으면 `output` 옆에 `lockLeft: true`가 붙는다. 출력은 풀었을 때와 같다. 전에는(U-220 앞) 이 경우가 `internal_error`였고, U-220 뒤 U-229 앞에는 아무 말 없이 성공이었다. 잠금은 이 프로세스가 사는 동안 남는다(5.1).
 - DR-25: 하드 링크가 없는 드라이브에서 되돌릴 파일이 `unsafe_move`로 건너뛰어지면, GUI가 사람에게 따로 동의를 받는다. 동의하면 `unsafeMoveConsent: { runId }`로 다시 부른다.
   - 앱 계층은 CLI의 `AdapterRevert`로 `adapter` 경로의 동의만 넘긴다(`revertConsentOf`).
   - 미리보기와 함께, `latest`로, 다른 실행 id로 온 동의는 실행 전에 `invalid_arguments`다.

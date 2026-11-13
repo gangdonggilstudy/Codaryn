@@ -77,7 +77,7 @@ import { cleanText, hideKeys } from "../cli/text-safety.js";
 import { createRunId } from "../cli/run-id.js";
 import { compileProtectedPaths } from "../policy/index.js";
 import { acquireLock, inspectLock, releaseLock as storeReleaseLock } from "../store/index.js";
-import { retryLockRelease } from "./lock-retry.js";
+import { releaseOwnLock, retryLockRelease } from "./lock-retry.js";
 import type { LockRetryOptions } from "./lock-retry.js";
 import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
@@ -451,7 +451,8 @@ export async function writeWorkspaceTextIn(
   let threw = false;
   for (let attempt = 0; attempt < 2 && !released; attempt += 1) {
     try {
-      released = (await release({ workspaceRoot: workspace.root, runId: lockId })) === true;
+      // V-17 H-1: through the queue of this lock, never beside its later tries.
+      released = (await releaseOwnLock({ workspaceRoot: workspace.root, runId: lockId }, release)) === true;
       threw = false;
     } catch {
       released = false;

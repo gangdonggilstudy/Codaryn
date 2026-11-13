@@ -32,9 +32,8 @@ const SIGNAL_STOP = /cancelled (while|before)/;
 
 /**
  * A: a level-1 heading, then one paragraph of 110 lines of 9,000 `[` each, then a level-2 heading
- * and one link to an existing target. The lines stay under the contract's MAX_MARKDOWN_LINE_CHARS
- * (10,000; the reader's own bound is 100,000, review R-89b), so the document is read whichever
- * bound applies.
+ * and one link to an existing target. The lines stay under MAX_MARKDOWN_LINE_CHARS (100,000 since
+ * U-143; the contract said 10,000 before it, review R-89b), so the case does not hang on that bound.
  */
 const BRACKET_LINE = "[".repeat(9_000);
 const DOC_A = ["# 큰 문서", "", ...Array.from({ length: 110 }, () => BRACKET_LINE), "", "## 끝", "", "[처음으로](doc.md)", ""].join("\n");

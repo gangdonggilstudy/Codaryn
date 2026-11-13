@@ -322,7 +322,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (!assembled.ok || assembledRun === null) return assembled;
       const { privacy, workspaceRoot } = assembledRun;
       // DR-15: events from the records the engine appends, in memory, masked again with this gateway.
-      const journal = journalWithEvents(assembled.deps.journal, input.runId, observer, privacy, input.clock);
+      const journal = journalWithEvents(assembled.deps.journal, observer, privacy);
       reportStart({ runId: input.runId, workspaceRoot });
       // U-108 (B-4, DR-3): the engine's permission questions go to the observer (permission.ts).
       return { ...assembled, deps: { ...assembled.deps, journal, confirm: confirmThrough(observer) } };
@@ -879,7 +879,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       openMoves = resolve;
     });
     const wrapped: ApplyPlan = async (deps) => {
-      const journal = applyJournalWithEvents(deps.journal, deps.runId, observer, deps.privacy, deps.clock);
+      const journal = applyJournalWithEvents(deps.journal, observer, deps.privacy);
       reportMoves(deps.runId);
       await movesGate;
       await nextMacrotask();

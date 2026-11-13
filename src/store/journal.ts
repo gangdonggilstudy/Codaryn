@@ -22,16 +22,21 @@ export interface JournalOptions {
   readonly clock: Clock;
 }
 
+/** A stored line: the event with the journal's own fields before it (AC-D3). */
+export type StoredLine<E> = E & { readonly seq: number; readonly at: string; readonly runId: string };
+
 /**
  * Each line is `{seq, at, runId, ...event}` followed by LF. The file is opened in append mode on the
- * first record. An existing journal of the same run is continued, never rewritten.
+ * first record. An existing journal of the same run is continued, never rewritten. AC-D3 (the CLI
+ * migration's C-2, U-262): `append` resolves with that record, when it resolved before (after the
+ * line is written, noted and passed to afterAppend), so the state guard's notes come first as they did.
  */
 export function appendOnlyJournal<E extends { readonly type: string }>(
   options: JournalOptions,
   notes?: RunWriteNotes,
   /** DR-38: called after each record is appended and noted (an apply notes the file a record names). */
   afterAppend?: (event: E) => Promise<void>,
-): { append(event: E): Promise<void>; close(): Promise<void> } {
+): { append(event: E): Promise<StoredLine<E>>; close(): Promise<void> } {
   const { workspaceRoot, runId, clock } = options;
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
@@ -64,14 +69,17 @@ export function appendOnlyJournal<E extends { readonly type: string }>(
     return open(file, "a");
   }
 
-  function enqueue(task: () => Promise<void>): Promise<void> {
+  function enqueue<T>(task: () => Promise<T>): Promise<T> {
     const next = queue.then(task);
-    queue = next.catch(() => undefined);
+    queue = next.then(
+      () => undefined,
+      () => undefined,
+    );
     return next;
   }
 
   return {
-    append(event: E): Promise<void> {
+    append(event: E): Promise<StoredLine<E>> {
       return enqueue(async () => {
         if (closed) throw new Error("journal is closed");
         handle ??= await openForAppend();
@@ -80,7 +88,7 @@ export function appendOnlyJournal<E extends { readonly type: string }>(
           at: new Date(clock.now()).toISOString(),
           runId,
           ...event,
-        };
+        } as StoredLine<E>;
         const line = `${JSON.stringify(record)}\n`;
         await handle.appendFile(line, "utf8");
         seq += 1;
@@ -88,6 +96,7 @@ export function appendOnlyJournal<E extends { readonly type: string }>(
         expectedSize += Buffer.byteLength(line, "utf8");
         if (notes !== undefined) await notes.file(file, { sha256: expected.copy().digest("hex"), size: expectedSize });
         if (afterAppend !== undefined) await afterAppend(event);
+        return record;
       });
     },
     close(): Promise<void> {

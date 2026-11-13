@@ -4,9 +4,9 @@
  * commands allowed during a run can append lines to it (R-4 H-1), and such a line must not reach
  * an observer.
  *
- * - `seq` counts the stored records from 1, as the store numbers a new run's journal.
- * - `at` is read from the run's clock when the record was stored. The store reads the same clock
- *   for its own line, so the two can differ by the time between the readings.
+ * - `seq` and `at` are the stored record's own (AC-D3, the CLI migration's C-2, U-262): the journal
+ *   resolves with the record as it wrote it, so an event and its stored line are the same record.
+ *   Before, the app counted `seq` itself and read `at` from the run's clock a moment after the store.
  * - Every string in the record is masked again with the run's gateway (masking text that gateway
  *   already masked leaves it as it is). A tool name in no tool list reads "(unknown tool)" first
  *   (R-1 L-1). U-250 (the migration plan's P-2, R-80 I-1): the list is every tool a run can be
@@ -16,7 +16,7 @@
  */
 
 import { ALL_TOOL_NAMES } from "../contracts/index.js";
-import type { Clock, Journal, JournalRecord, MaskedToolCall, ModelMessage, PrivacyGateway, ToolResult } from "../contracts/index.js";
+import type { Journal, JournalRecord, MaskedToolCall, ModelMessage, PrivacyGateway, ToolResult } from "../contracts/index.js";
 import type { RunEvent, RunObserver } from "./types.js";
 
 export const UNKNOWN_TOOL_NAME = "(unknown tool)";
@@ -93,22 +93,14 @@ export function maskStrings<T>(value: T, privacy: PrivacyGateway): T | null {
  * Wraps the run's journal so that each record the engine appends is delivered to `observer` once
  * the journal stored it. Without an `onEvent` the journal is returned as it is.
  */
-export function journalWithEvents(
-  journal: Journal,
-  runId: string,
-  observer: RunObserver | undefined,
-  privacy: PrivacyGateway,
-  clock: Clock,
-): Journal {
+export function journalWithEvents(journal: Journal, observer: RunObserver | undefined, privacy: PrivacyGateway): Journal {
   if (observer?.onEvent === undefined) return journal;
-  let seq = 0;
   return {
     async append(event) {
-      await journal.append(event);
-      seq += 1;
-      const record = { seq, at: new Date(clock.now()).toISOString(), runId, ...event } as JournalRecord;
+      const record = await journal.append(event);
       const shown = sanitizeRecord(record, privacy);
       if (shown !== null) deliver(observer, { kind: "record", record: shown });
+      return record;
     },
     close: () => journal.close(),
   };

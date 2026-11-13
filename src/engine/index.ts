@@ -83,6 +83,7 @@ import type {
   IntegrityManifest,
   IntegrityPhase,
   JournalEvent,
+  JournalRecord,
   JsonObject,
   MaskedText,
   MaskedToolCall,
@@ -562,7 +563,8 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
     return null;
   };
 
-  const record = (event: JournalEvent): Promise<void> => journal.append(event);
+  // AC-D3 (C-2): the journal resolves with the stored record; the engine needs only that it was stored.
+  const record = (event: JournalEvent): Promise<JournalRecord> => journal.append(event);
 
   /**
    * One integrity check (U-1, U-2): capture, compare with the run_start baseline, record the

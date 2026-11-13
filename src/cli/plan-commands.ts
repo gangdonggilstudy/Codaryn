@@ -1026,12 +1026,12 @@ function observeApply(
   const render = write === undefined || human?.applyProgressLine === undefined ? undefined : human.applyProgressLine.bind(human);
   return {
     async append(event: ApplyJournalEntry) {
-      await journal.append(event);
+      const stored = await journal.append(event);
       // R-9 I-4: a start record is stored for the revert only. It is not a shown record
       // (ApplyJournalEvent): neither the observer nor the renderer gets it.
-      if (event.type === "plan_item_started") return;
+      if (event.type === "plan_item_started") return stored;
       observe(event);
-      if (write === undefined) return;
+      if (write === undefined) return stored;
       const lines: string[] = [];
       try {
         const line = render === undefined ? null : render(event);
@@ -1049,6 +1049,7 @@ function observeApply(
           // Progress is best effort.
         }
       }
+      return stored;
     },
     close: () => journal.close(),
   };

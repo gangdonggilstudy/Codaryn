@@ -6,6 +6,9 @@
  * gui/tests/unit/node-path-parity.test.ts stopped running. Plan A (PM, after U-267): every old path
  * that something loads keeps a re-export. This test names each path the GUI and the engine host load
  * from dist/src/cli and the names they take from it, and checks the build has them.
+ * U-282 (C-3b): and every old path the migration keeps as a re-export (plan A), with names the tests
+ * and the pinned file (tests/unit/cli/sp0-pins.ts) take from it, so a later step cannot drop one
+ * unseen. The PM decides after C-11 whether to clear them.
  */
 
 import assert from "node:assert/strict";
@@ -32,6 +35,35 @@ describe("U-280: the modules the GUI loads by path from the root build are there
     test(`dist/src/cli/${file} (${by})`, async () => {
       const full = path.join(CLI_DIR, ...file.split("/"));
       assert.ok(existsSync(full), `${file} is missing from the build; a re-export at the old path keeps it (plan A)`);
+      const loaded = (await import(pathToFileURL(full).href)) as Record<string, unknown>;
+      for (const name of names) assert.notEqual(loaded[name], undefined, `${file} gives ${name}`);
+    });
+  }
+});
+
+/** The old paths the CLI migration keeps as re-exports (plan A), by step, and names taken from each. */
+const KEPT: readonly { readonly file: string; readonly names: readonly string[]; readonly step: string }[] = [
+  { file: "security/index.js", names: ["locateInWorkspace", "relateRealPaths", "findKeyInJson"], step: "C-3a" },
+  { file: "security/keys.js", names: ["findKeyInJson"], step: "C-3a" },
+  { file: "security/paths.js", names: ["checkLocalPathSyntax"], step: "C-3a" },
+  { file: "text-safety.js", names: ["cleanText", "hideKeys", "hideKeysInStrings"], step: "C-3a" },
+  { file: "install.js", names: ["findInstall"], step: "C-3a" },
+  { file: "run-id.js", names: ["createRunId"], step: "C-3a" },
+  { file: "human/format.js", names: ["quoteModelText", "MODEL_TEXT_PREFIX"], step: "C-3a" },
+  { file: "args.js", names: ["RUN_ID_PATTERN"], step: "C-3a (a name in a file that stays)" },
+  { file: "human/output.js", names: ["FINAL_MESSAGE_MAX_LINES"], step: "C-3a (a name in a file that stays)" },
+  { file: "settings.js", names: ["resolveAnthropicSettings", "resolveConnection", "resolveListSettings", "knownKeyValues"], step: "C-3b" },
+  { file: "task.js", names: ["parseTask", "quickProvider"], step: "C-3b" },
+  { file: "config.js", names: ["parseConfig"], step: "C-3b" },
+  { file: "config-file.js", names: ["chooseConfigFile"], step: "C-3b" },
+  { file: "unreadable.js", names: ["runGuards", "runUnreadablePaths", "runMinGroupSize"], step: "C-3b" },
+];
+
+describe("U-282: the old paths the CLI migration keeps as re-exports are there (plan A)", () => {
+  for (const { file, names, step } of KEPT) {
+    test(`dist/src/cli/${file} (${step})`, async () => {
+      const full = path.join(CLI_DIR, ...file.split("/"));
+      assert.ok(existsSync(full), `${file} is missing from the build; plan A keeps a re-export at the old path`);
       const loaded = (await import(pathToFileURL(full).href)) as Record<string, unknown>;
       for (const name of names) assert.notEqual(loaded[name], undefined, `${file} gives ${name}`);
     });

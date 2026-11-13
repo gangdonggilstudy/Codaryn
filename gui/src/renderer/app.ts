@@ -185,7 +185,7 @@ async function start(): Promise<void> {
       changes.choose(runId, profile, workflow, file);
       shell?.show("changes");
     };
-    const report = reportScreen({ texts, api, current: () => current, openChanges: (runId, form) => openChanges(runId, form?.profile ?? null, form?.workflow ?? null) });
+    const report = reportScreen({ texts, api, current: () => current, openChanges: (runId, form) => openChanges(runId, form?.profile ?? null, form?.workflow ?? null), openSettings: () => shell?.show("settings") });
     /** The report of a run, with the run's own form (for its changes view); U-61: and the tab to open first. */
     const openReport = (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null, tab: string | null = null): void => {
       report.choose(runId, form, tab);

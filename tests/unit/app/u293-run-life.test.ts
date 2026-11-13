@@ -18,8 +18,8 @@
  * - the HTTP 404 hint (modelNotFound beside the result) and a cancel through the app's onSignal hook,
  *   which is attached when the cancel source is made (never during the pre-run checks) and detached at
  *   the end.
- * Reproduced first (todo until the app runs its own life). Temporary folders, scripted models and a
- * fake provider, fake values only; nothing is sent.
+ * Reproduced first (36d83f7, todo until the app ran its own life). Temporary folders, scripted models
+ * and a fake provider, fake values only; nothing is sent.
  */
 
 import assert from "node:assert/strict";
@@ -28,9 +28,8 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppError, AppHooks, RunHandle, RunObserver, StartOutcome, StartRunRequest } from "../../../src/app/index.js";
-import * as appErrors from "../../../src/app/errors.js";
-import { appError, fromCliError } from "../../../src/app/errors.js";
+import type { AppEnvironment, AppError, AppHooks, RunHandle, RunObserver, StartOutcome, StartRunRequest } from "../../../src/app/index.js";
+import { appError, fromCliError, runErrorOutput } from "../../../src/app/errors.js";
 import { findDefaultConfigLocation } from "../../../src/app/input/config-file.js";
 import { locateInWorkspace, relateRealPaths } from "../../../src/app/input/security/index.js";
 import { cleanText } from "../../../src/app/input/text-safety.js";
@@ -51,21 +50,6 @@ import {
 import type { CliErrorCode, CliErrorOutput, EngineResult, InputDiagnostic, JournalEvent, JournalRecord, MaskedText, MessageLanguage, ModelProvider } from "../../../src/contracts/index.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
 import { FAKE_SECRET, NOTES_RULE, SECRET_ENV, WRITE_NOTES, appEnvironment, readJournal, setupRun, taskRequest } from "./support.js";
-
-/** What this unit gives beside the contract's types (src/app/types.ts), read through these shapes. */
-interface HandleFacts {
-  readonly configLanguage?: MessageLanguage | null;
-  readonly defaultConfig?: string | null;
-  readonly mask?: (text: string) => MaskedText | null;
-}
-interface Tally {
-  readonly deniedToolCalls: number;
-  readonly deniedCommandCalls: number;
-  readonly failedToolCalls: number;
-  readonly [count: string]: unknown;
-}
-type RunErrorOutput = (error: AppError) => CliErrorOutput;
-const runErrorOutput = (appErrors as unknown as { readonly runErrorOutput?: RunErrorOutput }).runErrorOutput;
 
 const FAKE_KEY = "fake-u293-key-value-0029";
 const TOKEN = new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE, "g");
@@ -136,7 +120,7 @@ function drawing(language: MessageLanguage): { readonly observer: RunObserver; r
       if (event.kind === "record") order.push(`event ${event.record.seq}`);
     },
   };
-  return { observer, lines, order, stored, attach: (handle) => (mask = (handle as RunHandle & HandleFacts).mask) };
+  return { observer, lines, order, stored, attach: (handle) => (mask = handle.mask) };
 }
 
 /** Privacy tokens are random per run: each named by the order it first appears, as c01 does. */
@@ -150,8 +134,8 @@ function started(outcome: StartOutcome): RunHandle {
   return (outcome as { handle: RunHandle }).handle;
 }
 
-async function appRun(base: string, request: StartRunRequest, env: Record<string, string>, observer?: RunObserver & { attach?: (handle: RunHandle) => void }, hooks: Record<string, unknown> = {}) {
-  const app = createCodarynApp(await appEnvironment(base, { env: { ...env } }), hooksWith(hooks));
+async function appRun(base: string, request: StartRunRequest, env: Record<string, string>, observer?: RunObserver & { attach?: (handle: RunHandle) => void }, hooks: Record<string, unknown> = {}, more: Partial<AppEnvironment> = {}) {
+  const app = createCodarynApp(await appEnvironment(base, { env: { ...env }, ...more }), hooksWith(hooks));
   const outcome = await app.startRun(request, observer);
   if (outcome.ok) observer?.attach?.(outcome.handle);
   return outcome;
@@ -204,15 +188,13 @@ const CLOSED_TASK = {
 };
 const CLOSED_STEPS = [{ toolCalls: [{ name: "write_file", args: { path: "other.md", expectedHash: null, change: { kind: "replace_all", content: "x\n" } } }] }, WRITE_NOTES, { text: "done" }];
 
-const TODO = "U-293: the app runs its own life (reproduced first)";
-
 describe("U-293: the app layer's own run life, against the CLI's", () => {
   for (const [what, files, task, steps] of [
     ["denials (command, outside, not writable) and a failed call", {}, DENIALS_TASK, DENIALS_STEPS],
     ["a read under the unreadable paths and a table that hid a small group", { "private/people.csv": `${PEOPLE_CSV}\n` }, PRIVATE_TASK, PRIVATE_STEPS],
     ["registered values inside closed words", { "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS],
   ] as const) {
-    test(`tally: the end summary's counts equal runCli's (${what})`, { todo: TODO }, async () => {
+    test(`tally: the end summary's counts equal runCli's (${what})`, async () => {
       const env = task === CLOSED_TASK ? CLOSED_ENV : ENV;
       const bases = await pair(files, task, steps);
       const cli = await runCli(cliIo(bases.cli, taskArgv(bases.cli), env, "en").io);
@@ -220,7 +202,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
       const handle = started(await appRun(bases.app, taskRequest(bases.app), env));
       const done = await handle.done;
       assert.ok(done.ok, JSON.stringify(done));
-      const tally = (done as { tally?: Tally }).tally;
+      const tally = done.tally;
       assert.ok(tally !== undefined, "the app gives the counts beside the result");
       assert.deepEqual({ ...tally }, countsOf(cli));
       assert.ok(tally.deniedToolCalls + tally.failedToolCalls > 0, "the case counts something");
@@ -228,7 +210,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
   }
 
   for (const language of ["en", "ko"] as const) {
-    test(`progress lines: the stored records drawn and masked with handle.mask are runCli's lines, registered values inside closed words too (${language})`, { todo: TODO }, async () => {
+    test(`progress lines: the stored records drawn and masked with handle.mask are runCli's lines, registered values inside closed words too (${language})`, async () => {
       const bases = await pair({ "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS);
       const cli = cliIo(bases.cli, taskArgv(bases.cli), CLOSED_ENV, language);
       assert.equal((await runCli(cli.io)).output.kind, "run");
@@ -245,7 +227,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     });
   }
 
-  test("onStoredRecord: every record as stored, right after it was stored and before onEvent's copy", { todo: TODO }, async () => {
+  test("onStoredRecord: every record as stored, right after it was stored and before onEvent's copy", async () => {
     const base = await setupRun({ "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS);
     const drawn = drawing("en");
     const handle = started(await appRun(base, taskRequest(base), CLOSED_ENV, { ...drawn.observer, attach: drawn.attach }));
@@ -257,7 +239,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     assert.deepEqual(drawn.order, expected);
   });
 
-  test("the handle: the config's language and the default config location as runCli's notes have them, and the run's mask", { todo: TODO }, async () => {
+  test("the handle: the config's language and the default config location as runCli's notes have them, and the run's mask", async () => {
     const appData = (base: string) => path.join(base, "appdata");
     const env = (base: string): Record<string, string> => ({ ...ENV, APPDATA: appData(base), XDG_CONFIG_HOME: appData(base) });
     const bases = await pair({}, {}, [WRITE_NOTES, { text: "done" }], async (base) => {
@@ -269,7 +251,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     const cli = await runCli(cliIo(bases.cli, taskArgv(bases.cli), env(bases.cli), "ko", { defaultConfig: findDefaultConfigLocation(process.platform, env(bases.cli), null) }).io);
     assert.equal(cli.output.kind, "run", JSON.stringify(cli.output));
     const handle = started(await appRun(bases.app, taskRequest(bases.app), env(bases.app)));
-    const facts = handle as RunHandle & HandleFacts;
+    const facts = handle;
     assert.deepEqual([facts.configLanguage, facts.defaultConfig], [cli.info?.configLanguage, cli.info?.summary.configDefault]);
     assert.deepEqual([facts.configLanguage, typeof facts.defaultConfig], ["ko", "string"]);
     const masked = facts.mask?.(`token: ${FAKE_SECRET}`) ?? null;
@@ -286,7 +268,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     ["a workspace another live process holds", {}, async (base: string) => (await mkdir(path.join(base, "work", ".codaryn"), { recursive: true }), lockOf(base)), true],
     ["a task file with a JSON syntax error", {}, async (base: string) => writeFile(path.join(base, "task.json"), '{ "schemaVersion": 1, "id": ', "utf8"), true],
   ] as const) {
-    test(`a refusal: the app's error is runCli's JSON line (runErrorOutput) and gives the config's language (${what})`, { todo: TODO }, async () => {
+    test(`a refusal: the app's error is runCli's JSON line (runErrorOutput) and gives the config's language (${what})`, async () => {
       const bases = await pair({}, task, [{ text: "done" }], async (base) => {
         await more(base);
         await writeFile(path.join(base, "ko-config.json"), JSON.stringify({ schemaVersion: 1, language: "ko" }), "utf8");
@@ -296,9 +278,8 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
       assert.equal(cli.output.kind, "error", JSON.stringify(cli.output));
       const outcome = await appRun(bases.app, taskRequest(bases.app, { configPath: withConfig ? path.join(bases.app, "ko-config.json") : null }), ENV);
       assert.equal(outcome.ok, false, JSON.stringify(outcome));
-      const failure = outcome as { error: AppError; configLanguage?: MessageLanguage | null };
-      assert.equal(failure.configLanguage, cli.info?.configLanguage, "the config's language beside the refusal");
-      assert.ok(runErrorOutput !== undefined, "runErrorOutput");
+      const failure = outcome as { error: AppError; configLanguage?: MessageLanguage };
+      assert.equal(failure.configLanguage ?? null, cli.info?.configLanguage, "the config's language beside the refusal (absent when the config gave none)");
       const printed = runErrorOutput(failure.error);
       const at = (text: string, base: string) => text.split(base).join("<BASE>").split(base.split("\\").join("\\\\")).join("<BASE>");
       assert.equal(at(JSON.stringify(printed), bases.app), at(JSON.stringify(cli.output), bases.cli));
@@ -307,8 +288,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     });
   }
 
-  test("runErrorOutput is fromCliError's exact inverse for every error the CLI makes, and gives an app-made error the CLI's form", { todo: TODO }, () => {
-    assert.ok(runErrorOutput !== undefined, "runErrorOutput");
+  test("runErrorOutput is fromCliError's exact inverse for every error the CLI makes, and gives an app-made error the CLI's form", () => {
     const diagnostics: (InputDiagnostic | undefined)[] = [undefined, { code: "json_syntax", file: "config", field: null, line: 1, column: 2 }];
     let checked = 0;
     for (const code of Object.keys(CLI_ERROR_EXIT_CODES) as CliErrorCode[]) {
@@ -329,7 +309,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     assert.ok(checked > 100, String(checked));
   });
 
-  test("modelNotFound: a request answered with HTTP 404 gives the hint's notice as runCli does, and modelNotFound beside the result", { todo: TODO }, async () => {
+  test("modelNotFound: a request answered with HTTP 404 gives the hint's notice as runCli does, and modelNotFound beside the result", async () => {
     const task = { model: { provider: "anthropic", model: "fake-model-gone", maxOutputTokens: 100 }, limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: 1000, maxDurationMs: 60_000 } };
     const provider: ModelProvider = { name: "anthropic", complete: async () => ({ ok: false, kind: "api_error", message: "HTTP 404 not_found_error", httpStatus: 404 }) };
     const env = { ...ENV, [ANTHROPIC_API_KEY_ENV]: FAKE_KEY };
@@ -340,14 +320,14 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     const done = await handle.done;
     assert.ok(done.ok, JSON.stringify(done));
     assert.deepEqual(done.result.notices, (cli.output as EngineResult).notices);
-    assert.equal((done as { modelNotFound?: unknown }).modelNotFound, true);
+    assert.equal(done.modelNotFound, true);
     const scripted = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const plain = await started(await appRun(scripted, taskRequest(scripted), ENV)).done;
-    assert.ok(plain.ok && (plain as { tally?: unknown }).tally !== undefined, "the outcome has its counts");
+    assert.ok(plain.ok && plain.tally !== undefined, "the outcome has its counts");
     assert.equal("modelNotFound" in plain, false, "absent when no request was answered with 404");
   });
 
-  test("onSignal: attached when the cancel source is made, never during the pre-run checks, detached at the end; its handler cancels the run", { todo: TODO }, async () => {
+  test("onSignal: attached when the cancel source is made, never during the pre-run checks, detached at the end; its handler cancels the run", async () => {
     const calls: string[] = [];
     const handlers = new Map<string, () => void>();
     const onSignal = (name: "SIGINT" | "SIGTERM", handler: () => void) => {
@@ -358,12 +338,12 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     const refused = await setupRun({}, { model: { provider: "scripted", scriptPath: "./no-such-script.json" } }, []);
     const bad = await setupRun({}, {}, []);
     await writeFile(path.join(bad, "task.json"), "{ not json", "utf8");
-    assert.equal((await appRun(bad, taskRequest(bad), ENV, undefined, { onSignal })).ok, false);
+    assert.equal((await appRun(bad, taskRequest(bad), ENV, undefined, {}, { onSignal })).ok, false);
     assert.deepEqual(calls, [], "a refusal in the pre-run checks attaches nothing");
-    assert.equal((await appRun(refused, taskRequest(refused), ENV, undefined, { onSignal })).ok, false);
+    assert.equal((await appRun(refused, taskRequest(refused), ENV, undefined, {}, { onSignal })).ok, false);
     assert.deepEqual(calls, [], "nor does a script refused at step 8, before the cancel source");
     const base = await setupRun({}, {}, [{ text: "waiting", delayMs: 30_000 }, { text: "done" }]);
-    const handle = started(await appRun(base, taskRequest(base), ENV, undefined, { onSignal }));
+    const handle = started(await appRun(base, taskRequest(base), ENV, undefined, {}, { onSignal }));
     assert.deepEqual(calls, ["on SIGINT", "on SIGTERM"], "attached before the handle came, as the CLI's are before its assembly");
     handlers.get("SIGINT")?.();
     const done = await handle.done;

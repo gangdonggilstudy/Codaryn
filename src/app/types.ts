@@ -26,6 +26,7 @@ export type {
   ConfirmRequest,
   RunObserver,
   RunOutcome,
+  RunTally,
   RunHandle,
   StartOutcome,
   AppCallOutcome,

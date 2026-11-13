@@ -14,7 +14,7 @@ import type { Limits, ModelProviderName } from "./task.js";
 import type { ApplyResult, ApprovalChannel, PlanItemProblem } from "./plan.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { VerifierResult } from "./verify.js";
-import type { ReviewRecord } from "./workflow.js";
+import type { ReviewRecord, ReviewVerdict } from "./workflow.js";
 
 /**
  * `codaryn report --workspace <dir> --run <runId> [--json]` reads
@@ -445,7 +445,8 @@ export type RunListEntry =
       /**
        * Number of distinct files changed: the distinct `path`s of result.json's `changes`, as the
        * end-of-run summary counts them (N-23 d, N-D 5). An apply run: the number of `applied`
-       * actions. Null without result.json.
+       * actions. Null without result.json. U-129: the human table says an apply run's number is
+       * actions (`runs.apply_action_one` for one, else `runs.apply_actions`); the JSON is unchanged.
        */
       readonly changes: number | null;
       /** The last revert of this run, from its revert record; null when never reverted. */
@@ -460,6 +461,17 @@ export type RunListEntry =
        * could not be read or checked. Absent means false (lists built before DR-38).
        */
       readonly recordsChanged?: boolean;
+      /**
+       * U-129 (AXM-21): the person's verdict on a run that ended as `needs-input`/`awaiting_review`,
+       * from its review.json read with the same checks as `report` (the store's readReviewRecord: a
+       * record of this run, `at` a run timestamp, a known verdict, a note within its limits): the
+       * verdict and its time, never the note (that is report's). Absent when the run did not end
+       * awaiting review, has no verdict yet, or its record cannot be read or fails the checks (the
+       * list never fails for it), and in lists built before U-129. The human table adds
+       * `runs.review` (`{verdict}`: `review.verdict.<verdict>`) to the run's result column; it shows
+       * no time (the JSON has `at`).
+       */
+      readonly review?: { readonly verdict: ReviewVerdict; readonly at: string };
     }
   | { readonly state: "damaged"; readonly runId: RunId };
 

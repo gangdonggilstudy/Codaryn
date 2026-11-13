@@ -127,6 +127,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 | `run_command` | `executable`, `args`, 선택 `cwd`, `timeoutMs` | `exitCode`, `stdout`, `stderr`, `timedOut`, `truncated` |
 
 - `change`는 `{kind:"replace_all", content}` 또는 `{kind:"replace_text", oldText, newText}`다.
+- DR-72(U-173): `write_file`이 남길 파일이 디스크 바이트(UTF-8, BOM 포함)로 `MAX_WRITE_BYTES`(16 MiB)를 넘으면 `too_large`다. 원본을 남기지 않고 아무것도 쓰지 않는다. 읽기 상한 `MAX_READ_BYTES`(256 KiB)와 따로 둔다. 검증기는 그보다 큰 문서·표를 읽기 때문이다(`MAX_MARKDOWN_RULE_FILE_BYTES`, `MAX_DATA_TABLE_BYTES`). 그래서 256 KiB보다 크게 쓴 파일은 지금처럼 `read_file`·`write_file`이 다시 읽지 못한다. 도구 정의(`TOOL_DEFINITIONS`)는 바뀌지 않는다.
 - 요구 권한, 복원 가능 필드, 문서 필드는 `BUILTIN_TOOLS`에 고정되어 있다. 모델과 task가 낮출 수 없다. 오류 코드는 `TOOL_ERROR_CODES`, 상한은 `MAX_READ_BYTES` 등 `tool.ts`의 상수를 쓴다. 자식 프로세스 환경은 `CHILD_ENV_ALLOWLIST`만 전달한다.
 - 거부된 호출은 실행을 끝내지 않는다. `ok:false`인 `ToolResult`로 모델에 돌아간다.
 - 제공자가 모델에 보내는 도구 설명과 입력 JSON Schema는 `TOOL_DEFINITIONS`다. mask를 거치지 않는 고정 문장이므로 토큰 표식을 쓰지 않는다. 스키마는 엔진의 인자 형식 검증과 같은 필드를 가진다(`tests/unit/contracts`가 확인).

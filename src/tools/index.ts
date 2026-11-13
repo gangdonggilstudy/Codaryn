@@ -10,6 +10,7 @@ import {
   MAX_COMMAND_OUTPUT_BYTES,
   MAX_SEARCH_ENTRIES,
   MAX_SEARCH_MATCHES_PER_FILE,
+  MAX_WRITE_BYTES,
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
   maskedParts,
@@ -378,6 +379,14 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     });
     if (!rebuilt.ok) return fail(rebuilt.code, `change rejected: ${rebuilt.code}`);
 
+    // 4a. DR-72 (U-173): the file this write leaves, BOM put back, as its bytes on disk. Over
+    //     MAX_WRITE_BYTES it is not written: too_large, with no original kept and nothing written.
+    const nextText: string = rebuilt.text;
+    const finalText = hadBom && !nextText.startsWith(BOM) ? BOM + nextText : nextText;
+    if (Buffer.byteLength(finalText, "utf8") > MAX_WRITE_BYTES) {
+      return fail("too_large", `the file would be larger than ${MAX_WRITE_BYTES} bytes; nothing was written`);
+    }
+
     // 5. Every check passed. Keep the original for revert; without it, do not write.
     //    DR-29, DR-32 (c): with it, how this run masks it (null for a new file). When masking fails
     //    no digest is given, and the comparison view will show no text for this path.
@@ -392,9 +401,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
       }
     }
 
-    // 6. Put the BOM back and write with the version check.
-    const nextText: string = rebuilt.text;
-    const finalText = hadBom && !nextText.startsWith(BOM) ? BOM + nextText : nextText;
+    // 6. Write with the version check (the BOM was put back in 4a).
     const written = await workspace.writeText({
       path: resolved.path,
       expectedHash: args.expectedHash,

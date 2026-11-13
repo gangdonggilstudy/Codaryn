@@ -425,3 +425,41 @@ button:focus-visible,
   padding-left: 0.6rem;
   margin: 0.4rem 0;
 }
+
+/* U-174 (DR-72, 3.14): the read-only text view. Line numbers stand beside the text only with wrapping off. */
+.text-frame {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #c8c8c8;
+  margin: 0.5rem 0;
+}
+.text-lines {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  text-align: right;
+  color: #666;
+  overflow: hidden;
+  user-select: none;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.text-content {
+  flex: 1;
+  min-height: 24rem;
+  border: 0;
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  tab-size: 4;
+}
+@media (prefers-color-scheme: dark) {
+  .text-frame {
+    border-color: #555;
+  }
+  .text-lines {
+    color: #aaa;
+  }
+}

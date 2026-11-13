@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -256,6 +256,52 @@ startGui({
         result.texts = copied.slice(before);
         return result;
       })();
+      // U-174 (DR-72, 3.14): the text view. The files are made for this check and removed after it, so
+      // the tree the later checks read is the one they expect.
+      results["textView"] = await (async () => {
+        const dir = join(SECOND, "texts");
+        mkdirSync(dir, { recursive: true });
+        // A key shape, written in parts so no key-shaped text sits in the source.
+        const keyShaped = ["sk", "ant", "TEXT".repeat(10)].join("-");
+        writeFileSync(join(dir, "plain.txt"), "line one\r\nline two\r\n");
+        writeFileSync(join(dir, "key.txt"), `token = ${keyShaped}\n`);
+        writeFileSync(join(dir, "big.txt"), "x".repeat(300_000));
+        writeFileSync(join(dir, "binary.dat"), Buffer.from([0x41, 0x00, 0x42]));
+        try {
+          const handleText = JSON.stringify(second.ok ? second.handle : "");
+          type Listed = { ok: boolean; entries?: { id: string | null; name: string }[] };
+          const top = (await js(`window.codaryn.tree(${handleText}, null, 0)`)) as Listed;
+          const textsId = top.entries?.find((entry) => entry.name === "texts")?.id ?? "";
+          const listed = (await js(`window.codaryn.tree(${handleText}, ${JSON.stringify(textsId)}, 0)`)) as Listed;
+          const idOf = (name: string): string => listed.entries?.find((entry) => entry.name === name)?.id ?? "";
+          type Reply = { ok: boolean; opened?: boolean; text?: string; masked?: boolean; editable?: boolean; readOnlyReasons?: string[]; lines?: number; reason?: string; code?: string };
+          const open = async (node: string): Promise<Reply> => (await js(`window.codaryn.openText(${handleText}, ${JSON.stringify(node)})`)) as Reply;
+          const plain = await open(idOf("plain.txt"));
+          const key = await open(idOf("key.txt"));
+          const statusOf = (reply: Reply): string => (reply.ok ? (reply.opened === false ? (reply.reason ?? "") : "opened") : (reply.code ?? ""));
+          const ui = await (async () => {
+            await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.trim().endsWith('a.txt'))?.click(); true");
+            await js("document.getElementById('tree-open')?.click(); true");
+            const ready = await waitFor("(() => { const r = document.getElementById('text')?.getAttribute('data-text-ready'); return r === 'opened' || r === 'not_opened' || r === 'error' ? r : null; })()");
+            const area = (await js("(() => { const a = document.getElementById('text-content'); return a === null ? null : { value: a.value, readOnly: a.readOnly }; })()")) as { value: string; readOnly: boolean } | null;
+            await js("document.getElementById('text-close')?.click(); true");
+            const back = await js("document.getElementById('work')?.getAttribute('data-screen') ?? null");
+            return { ready, value: area?.value ?? null, readOnly: area?.readOnly ?? null, back };
+          })();
+          return {
+            plain: { opened: plain.opened, text: plain.text, masked: plain.masked, editable: plain.editable, reasons: plain.readOnlyReasons, lines: plain.lines },
+            key: { opened: key.opened, masked: key.masked, editable: key.editable, firstReason: key.readOnlyReasons?.[0] ?? null, keyShown: (key.text ?? "").includes(keyShaped) },
+            big: statusOf(await open(idOf("big.txt"))),
+            binary: statusOf(await open(idOf("binary.dat"))),
+            unknown: statusOf(await open("0".repeat(32))),
+            pathString: statusOf((await js(`window.codaryn.openText(${handleText}, "texts/plain.txt")`)) as Reply),
+            ui,
+          };
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      })();
+
       // U-67 (3.13, 10): the command palette, the shortcuts, F5 and the tree's first-letter jump.
       results["keys"] = await (async () => {
         const press = (target: string, key: string, ctrl = false, shift = false): Promise<unknown> =>

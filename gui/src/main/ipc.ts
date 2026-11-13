@@ -39,6 +39,7 @@ import {
   toRevertView,
   toRunsReply,
   parseTreeArgs,
+  toTextReply,
   isRunId,
   toDoctorView,
   toHostModelList,
@@ -46,7 +47,7 @@ import {
   toSettingsView,
   hostCodeOf,
 } from "../shared/ipc.js";
-import type { DoctorReply, InfoView, ModelsReply, OpenFolderReply, OpenReply, RecentView, SelectModelReply, SettingsReply, SettingsView, TreeReply } from "../shared/ipc.js";
+import type { DoctorReply, InfoView, ModelsReply, OpenFolderReply, OpenReply, RecentView, SelectModelReply, SettingsReply, SettingsView, TextReply, TreeReply } from "../shared/ipc.js";
 import { isAppUrl } from "./app-url.js";
 import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
@@ -77,6 +78,8 @@ import type { Workspaces } from "./workspaces.js";
 const DOCTOR_TIMEOUT_MS = 60_000;
 const MESSAGES_TIMEOUT_MS = 10_000;
 const TREE_TIMEOUT_MS = 30_000;
+/** U-174: one text file (at most 256 KiB) read and masked. */
+const TEXT_TIMEOUT_MS = 30_000;
 const SETTINGS_TIMEOUT_MS = 30_000;
 /** Listing and choosing a model ask the provider's API (Y-2): the request time limit and retries fit in this. */
 const MODELS_TIMEOUT_MS = 120_000;
@@ -240,6 +243,26 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("tree", { workspace: root, dir, offset: parsed.offset }, TREE_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return workspaces.treeReply(parsed.workspace, dir, response.value);
+  });
+
+  /**
+   * U-174 (DR-72, 3.14): the text view of one entry, by the id the main process gave in a tree listing
+   * or a changes reply (the page names no path). The app layer opens it (regular UTF-8 files up to
+   * 256 KiB, no link, not the state directory) and masks it; the reply is checked (toTextReply). The
+   * digest, line ending and byte order mark stay here (the edit unit binds them to its token).
+   */
+  handle(IPC_CHANNELS.openText, async (args): Promise<TextReply> => {
+    const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const rel = workspaces.treeIds.resolve(parsed.workspace, parsed.node);
+    if (rel === null) return { ok: false, code: "unknown_entry" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("readText", { workspace: root, path: rel }, TEXT_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    return toTextReply(response.value);
   });
 
   /**

@@ -43,6 +43,9 @@ import type {
   TreeReply,
   RunEventsReply,
   PlanCheckReply,
+  TextReadOnlyReason,
+  TextNotOpened,
+  TextReply,
 } from "../shared/ipc.js";
 import type { CleanupPlanView, CleanupResultView, StateSummaryView } from "../shared/cleanup.js";
 
@@ -54,6 +57,8 @@ export interface CodarynApi {
   forgetRecent(id: string): Promise<unknown>;
   tree(workspace: string, node: string | null, offset: number): Promise<unknown>;
   reveal(workspace: string, node: string): Promise<unknown>;
+  /** U-174 (DR-72, 3.14): the text view of a tree or changes entry, by its id (the main process resolves and checks it). */
+  openText(workspace: string, node: string): Promise<unknown>;
   /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
   copyText(text: string): Promise<unknown>;
   /** U-103 (3.3): copies a tree entry's relative path, by its id (the main process resolves and checks it). */
@@ -186,6 +191,34 @@ export function asTree(value: unknown): TreeReply {
     views.push({ id: str(id) && HEX.test(id) ? id : null, name: entry["name"], kind: entry["kind"] as TreeEntryView["kind"], masked: entry["masked"], protected: entry["protected"] === true });
   }
   return { ok: true, entries: views, total, offset, nextOffset };
+}
+
+/**
+ * U-174: the text view's reply (the main process checked it already). The page loads nothing from
+ * outside its directory, so the known reasons are repeated here; one it does not know is dropped and
+ * the file counts as not editable.
+ */
+const TEXT_REASONS: readonly string[] = ["masked", "control_characters", "mixed_line_endings", "protected", "settings_file", "read_only", "hard_link", "workspace_locked"];
+const TEXT_NOT_OPENED: readonly string[] = ["not_found", "not_file", "refused", "too_large", "not_text", "unreadable", "mask_failed"];
+
+export function asText(value: unknown): TextReply {
+  if (!isObj(value) || value["ok"] !== true) return failed(value);
+  if (value["opened"] === false) return str(value["reason"]) && TEXT_NOT_OPENED.includes(value["reason"]) ? { ok: true, opened: false, reason: value["reason"] as TextNotOpened } : { ok: false, code: "host_error" };
+  const { text, lines } = value;
+  if (value["opened"] !== true || !str(text) || typeof lines !== "number" || !Number.isSafeInteger(lines) || lines < 1) return { ok: false, code: "host_error" };
+  const given: unknown[] = Array.isArray(value["readOnlyReasons"]) ? value["readOnlyReasons"] : [];
+  const reasons = given.filter((reason: unknown): reason is TextReadOnlyReason => str(reason) && TEXT_REASONS.includes(reason));
+  const masked = value["masked"] === true;
+  return {
+    ok: true,
+    opened: true,
+    text,
+    masked,
+    protected: value["protected"] === true,
+    editable: value["editable"] === true && given.length === 0 && !masked,
+    readOnlyReasons: reasons,
+    lines,
+  };
 }
 
 export function asDoctor(value: unknown): DoctorReply {

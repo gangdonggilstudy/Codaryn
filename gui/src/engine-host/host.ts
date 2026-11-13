@@ -22,6 +22,7 @@ import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import { reportMarkdownValue } from "./report.js";
 import { runEventsValue } from "./run-events.js";
 import { planCheckValue } from "./plan-check.js";
+import { textValue } from "./text.js";
 import { initValue, suggestionsValue } from "./setup.js";
 import type { Shown } from "./settings.js";
 import type { ModelText } from "./model-text.js";
@@ -66,6 +67,8 @@ export interface HostApp {
   checkApply(request: { readonly settings: HostTaskForm; readonly planRunId: string; readonly digest: string }): Promise<unknown>;
   /** U-118 (U-90, adapter-contract 5.13): one page of a run's stored records (run-events.ts). */
   listRunEvents(request: { readonly settings: HostTaskForm; readonly runId: string; readonly offset: number }): Promise<unknown>;
+  /** U-174 (U-172, adapter-contract 5.15): a workspace text file for the text view (text.ts). */
+  readWorkspaceText(request: { readonly settings: HostTaskForm; readonly path: string }): Promise<unknown>;
   /** U-103 (U-89, adapter-contract 5.12): one directory of the workspace for the file tree (tree.ts). */
   listWorkspaceDir(request: { readonly settings: HostTaskForm; readonly dir: string; readonly offset: number }): Promise<unknown>;
   /** U-11 (3.11): the config file with the defaults (init without questions), and init's fixed suggestions for a workspace. */
@@ -287,6 +290,14 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       }
       case "tree":
         return deps.tree(treeArgs(args));
+      case "readText": {
+        // U-174 (DR-72, 3.14): one file, with the tree's form (the config file's defaults), masked as the tree's names are.
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "path"]);
+        const path = args["path"];
+        if (typeof path !== "string" || path === "" || path.length > MAX_PATH_CHARS || path.includes("\0")) throw new ArgsError();
+        return textValue(await deps.app.readWorkspaceText({ settings: taskForm(workspace, null, null), path }), shownText);
+      }
       case "configFile":
         // U-69: for the main process only (show the config file in the folder).
         noArgs(args);

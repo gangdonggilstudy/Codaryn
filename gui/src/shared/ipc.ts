@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   saveUi: "codaryn:app:saveui",
   runEvents: "codaryn:runs:events",
   checkPlan: "codaryn:plan:check",
+  openText: "codaryn:workspace:opentext",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -943,6 +944,62 @@ export function toPlanCheckReply(value: unknown, planRunId: string, digest: stri
   }
   if (!unsafeMoves.every(index)) return fail;
   return { ok: true, problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
+}
+
+/**
+ * U-174 (DR-72, standalone-gui 3.14, adapter-contract 5.15): the text view of one workspace file.
+ * The text is the app layer's (masked with the values registered now, key values and key shapes
+ * hidden, control characters replaced; LF line breaks); it reaches the page through the textarea's
+ * value only. A file not opened has no text, only why. The digest, line ending and byte order mark
+ * stay out of the page (the edit unit binds them to its token in the main process).
+ */
+export const TEXT_READ_ONLY_REASONS = ["masked", "control_characters", "mixed_line_endings", "protected", "settings_file", "read_only", "hard_link", "workspace_locked"] as const;
+export type TextReadOnlyReason = (typeof TEXT_READ_ONLY_REASONS)[number];
+export const TEXT_NOT_OPENED = ["not_found", "not_file", "refused", "too_large", "not_text", "unreadable", "mask_failed"] as const;
+export type TextNotOpened = (typeof TEXT_NOT_OPENED)[number];
+/** The longest text the view takes in UTF-16 units: a file of MAX_READ_BYTES (256 KiB) UTF-8 bytes has no more. */
+export const MAX_TEXT_CHARS = 262_144;
+/** What the app layer replaced already; a text with one of these did not come from it (host_error). */
+const UNSHOWN_TEXT_CHAR = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028-\u202E\u2066-\u2069]/;
+
+export type TextReply =
+  | {
+      readonly ok: true;
+      readonly opened: true;
+      readonly text: string;
+      /** Masking changed the text: what is shown is not the file's text. */
+      readonly masked: boolean;
+      readonly protected: boolean;
+      /** Whether the edit unit may let the person change it; the reasons why not, in the app layer's order. */
+      readonly editable: boolean;
+      readonly readOnlyReasons: readonly TextReadOnlyReason[];
+      readonly lines: number;
+    }
+  | { readonly ok: true; readonly opened: false; readonly reason: TextNotOpened }
+  | { readonly ok: false; readonly code: string };
+
+/** The engine host's text value, checked field by field; nothing else reaches the page. */
+export function toTextReply(value: unknown): TextReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  if (value["status"] !== "opened") {
+    const reason = value["status"];
+    return typeof reason === "string" && (TEXT_NOT_OPENED as readonly string[]).includes(reason) && hasOnlyKeys(value, ["ok", "status"]) ? { ok: true, opened: false, reason: reason as TextNotOpened } : fail;
+  }
+  const { text, masked, editable, readOnlyReasons, digest, lineEnding, bom, bytes } = value;
+  const marked = value["protected"];
+  if (typeof text !== "string" || text.length > MAX_TEXT_CHARS || UNSHOWN_TEXT_CHAR.test(text)) return fail;
+  if (typeof masked !== "boolean" || typeof marked !== "boolean" || typeof editable !== "boolean" || typeof bom !== "boolean") return fail;
+  if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest) || !["lf", "crlf", "none", "mixed"].includes(lineEnding as string) || !count(bytes) || bytes > MAX_TEXT_CHARS) return fail;
+  if (!Array.isArray(readOnlyReasons) || readOnlyReasons.length > TEXT_READ_ONLY_REASONS.length) return fail;
+  const reasons: TextReadOnlyReason[] = [];
+  for (const reason of readOnlyReasons) {
+    if (typeof reason !== "string" || !(TEXT_READ_ONLY_REASONS as readonly string[]).includes(reason) || reasons.includes(reason as TextReadOnlyReason)) return fail;
+    reasons.push(reason as TextReadOnlyReason);
+  }
+  // Editable exactly when nothing keeps it read only; masked text is never editable.
+  if (editable !== (reasons.length === 0) || (masked && !reasons.includes("masked"))) return fail;
+  return { ok: true, opened: true, text, masked, protected: marked, editable, readOnlyReasons: reasons, lines: text === "" ? 1 : text.split("\n").length };
 }
 
 /** U-118: `runEvents` arguments: the run, its form, and the page's offset. */

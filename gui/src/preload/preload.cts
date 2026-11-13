@@ -18,6 +18,7 @@ const CHANNELS = {
   saveUi: "codaryn:app:saveui",
   runEvents: "codaryn:runs:events",
   checkPlan: "codaryn:plan:check",
+  openText: "codaryn:workspace:opentext",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -96,6 +97,8 @@ const api = Object.freeze({
   tree: (workspace: unknown, node: unknown, offset: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.tree, { workspace: text(workspace), node: text(node), offset: count(offset) }),
   reveal: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.reveal, { workspace: text(workspace), node: text(node) }),
+  // U-174 (DR-72, 3.14): the text view of a tree or changes entry, by its id (the page names no path).
+  openText: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.openText, { workspace: text(workspace), node: text(node) }),
   copyText: (value: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyText, { text: text(value) }),
   copyPath: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyPath, { workspace: text(workspace), node: text(node) }),
   revealConfig: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revealConfig),

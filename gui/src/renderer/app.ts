@@ -20,6 +20,7 @@ import { runScreen } from "./run/run-screen.js";
 import { runsScreen } from "./runs/runs-screen.js";
 import { planScreen } from "./plan/plan-screen.js";
 import { changesScreen } from "./changes/changes-screen.js";
+import { textScreen } from "./text/text-screen.js";
 import { reportScreen } from "./report/report-screen.js";
 import { cleanupScreen } from "./runs/cleanup-screen.js";
 import { setupScreen } from "./setup/setup-screen.js";
@@ -83,7 +84,7 @@ async function start(): Promise<void> {
   };
 
   // U-67 (3.13): F5 reads the tree again and redraws a screen without a form.
-  const REDRAWN_ON_F5 = new Set(["home", "runs", "checks", "changes", "report", "plan", "cleanup", "settings"]);
+  const REDRAWN_ON_F5 = new Set(["home", "runs", "checks", "changes", "report", "plan", "cleanup", "settings", "text"]);
   const readAgain = (): void => {
     tree?.refresh();
     void openCheck.run(current);
@@ -124,8 +125,17 @@ async function start(): Promise<void> {
     });
     shell = frame;
     frame.mount(root);
+    // U-174 (DR-72, 3.14): the read-only text view of a tree or changes entry, by the main process's id.
+    const text = textScreen({ texts, api, current: () => current, back: (id) => shell?.show(id) });
+    const openText = (node: string, name: string, from: string): void => {
+      text.choose({ node, name }, from);
+      shell?.show("text");
+    };
     // U-65: a changed file chosen in the tree opens its run's comparison at that file.
-    tree = new TreeView(texts, api, frame.filePanel, { openChange: (marked, path) => openChanges(marked.runId, marked.profile, marked.workflow, path) });
+    tree = new TreeView(texts, api, frame.filePanel, {
+      openChange: (marked, path) => openChanges(marked.runId, marked.profile, marked.workflow, path),
+      openText: (node, name) => openText(node, name, savedScreen ?? "home"),
+    });
     frame.add(
       homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError, openCheck: { check: openCheck, ownRun: ownRunHere, showChecks: () => shell?.show("checks") } }),
     );
@@ -151,7 +161,7 @@ async function start(): Promise<void> {
       shell?.show("plan");
     };
     // U-65: the files a changes view loaded are the tree's marks.
-    const changes = changesScreen({ texts, api, current: () => current, loaded: (marked, files) => tree?.markRun(marked, files) });
+    const changes = changesScreen({ texts, api, current: () => current, loaded: (marked, files) => tree?.markRun(marked, files), openText: (node, name) => openText(node, name, "changes") });
     const openChanges = (runId: string, profile: string | null, workflow: string | null, file: string | null = null): void => {
       changes.choose(runId, profile, workflow, file);
       shell?.show("changes");
@@ -178,6 +188,7 @@ async function start(): Promise<void> {
     frame.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
     frame.add(settingsScreen({ texts, api, language, announce: (text) => shell?.announce(text), languageChanged: () => void relanguage() }));
     frame.add(setupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text), show: (id) => shell?.show(id) }));
+    frame.add(text);
     // U-67 (3.13): the palette's fixed commands (nothing is built from a model's text or a file name).
     const commands = (): Command[] => [
       { id: "newtask", label: texts.format("cmd.newTask"), keys: "Ctrl+N", run: () => shell?.show("newtask") },

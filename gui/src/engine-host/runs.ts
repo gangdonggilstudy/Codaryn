@@ -63,6 +63,13 @@ export const RUN_FLUSH_MS = 100;
  * U-271 (R-112 L-1): in an apply of a plan of moves the app layer stores `plan_item_started` right before
  * each action (R-9 I-4, PlanItemStartedEvent) and does not give it, so the action's own record (one of
  * these, src/engine/apply.ts) comes two numbers after the record before it. That number is known: no gap.
+ *
+ * U-294 (R-113 I-2): this rests on the engine's order, not on anything the app layer says: the engine
+ * writes nothing between an action's plan_item_started and that action's own record (src/engine/apply.ts,
+ * the actions loop), so a skip of exactly one before such a record is that start record. A record really
+ * missing there makes the skip larger, and stays a gap. When that order changes (the migration's step
+ * C-7b moves the apply into the app layer), look at this rule again; better, the app layer would say with
+ * each record how many stored ones before it it did not give, and this rule would go.
  */
 const AFTER_ITEM_STARTED: ReadonlySet<unknown> = new Set(["file_moved", "file_discarded", "plan_item_failed"]);
 

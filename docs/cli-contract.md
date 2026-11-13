@@ -762,6 +762,7 @@ codaryn models [--config <config.json>] [--vars-file <경로>] [--json] [--use <
   - 키가 없으면 `provider_not_configured`(종료 7)이고 아무것도 보내지 않는다.
 - 출력:
   - 기본은 번호가 붙은 표다. `--json`이면 `ModelsOutput` 한 줄이다.
+  - U-156(nb-i18n의 E 묶음): 표의 열 머리, 목록·현재 모델·기록·덮어씀 줄, `--use` 질문은 고른 언어의 카탈로그 글(`models.*`)이다. 모델 id와 이름 같은 바깥 값과 `: `, `* `는 그리는 쪽이 붙인다. `  #` 열 머리는 낱말이 아니라 그대로다. 영어는 U-156 전과 글자까지 같다(SP-0 고정). 열은 터미널 칸(U-127)으로 맞추므로 한국어 머리도 줄이 맞는다. JSON은 그대로다.
   - `ModelsOutput`의 필드: `schemaVersion`, `kind:"models"`, `status`(`listed`/`selected`), `exitCode`, `models`(`number`가 붙은 `ModelInfo`), `current`, `selected`
   - `current`: 지금 실행이 쓸 모델(`CODARYN_MODEL`, 없으면 설정 파일 `model`), 그 출처, 그 모델이 목록에 있는지
   - `selected`: 쓴 모델, 설정 파일을 새로 만들었는지, `CODARYN_MODEL`이 덮어쓰는지

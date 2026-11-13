@@ -15,7 +15,8 @@
  *    after a failed one, so a cancel ends the apply as cancelled even when the executor reports
  *    io_error for it. Done actions stay and are listed; `codaryn revert` undoes them.
  * 5. The inventory check first, then the task's verifiers; integrity checks around them.
- * 6. `run_finished` and the ApplyResult.
+ * 6. `run_finished` and the ApplyResult. U-158 (GT-D14): with `foldersLeftEmpty` when the actions left
+ *    folders without files (by the two inventories, foldersLeftEmptyOf); the folders stay.
  *
  * Every text bound for the journal or the result is masked first. An action whose paths cannot be
  * masked is not applied (nothing is moved that could not be recorded).
@@ -29,6 +30,7 @@ import {
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
   asRawText,
+  foldersLeftEmptyOf,
   planActionShownMatches,
 } from "../contracts/index.js";
 import type {
@@ -182,6 +184,9 @@ export const applyPlan: ApplyPlan = async (deps) => {
   // U-16: the plan run ran with another task than this apply's.
   let taskDiffers = false;
   let baseline: IntegrityManifest | null = null;
+  /** U-158 (GT-D14): the inventories before and after the actions, for ApplyResult.foldersLeftEmpty. */
+  let inventoryBefore: InventoryManifest | null = null;
+  let inventoryAfter: InventoryManifest | null = null;
   /** Whether actions or verifiers ran since the last integrity check (W-1 for apply runs). */
   let sinceCheck = false;
 
@@ -412,6 +417,7 @@ export const applyPlan: ApplyPlan = async (deps) => {
     let before: InventoryManifest;
     try {
       before = await inventory.capture();
+      inventoryBefore = before;
     } catch {
       // R18-M1: a listing given the cancel signal stops with an AbortError. A cancel (or the
       // duration limit) is not a failed listing: nothing was claimed, so the plan can be applied again.
@@ -507,6 +513,7 @@ export const applyPlan: ApplyPlan = async (deps) => {
     let inventoryRaw: RawVerifierResult;
     try {
       const after = await inventory.capture();
+      inventoryAfter = after;
       inventoryRaw = await inventory.check({ before, after, applied: appliedRaw, discardedRoot });
     } catch {
       inventoryRaw = notRun(INVENTORY_VERIFIER_ID, "inventory");
@@ -553,6 +560,9 @@ export const applyPlan: ApplyPlan = async (deps) => {
     await journal.append({ type: "run_finished", status: end.status, reason: end.reason, usage });
     const told: { readonly [K in ApplyNoticeKind]: boolean } = { plan_records_unchecked: planUnchecked || cause !== null, plan_task_differs: taskDiffers };
     const noticeKinds = APPLY_NOTICE_KINDS.filter((kind) => told[kind]);
+    // U-158 (GT-D14): the folders the actions left without files stay; the result tells how many.
+    // Only when both inventories were taken (a stop before the second one leaves it out).
+    const foldersLeftEmpty = inventoryBefore !== null && inventoryAfter !== null ? foldersLeftEmptyOf(inventoryBefore, inventoryAfter, appliedRaw) : null;
     const result: ApplyResult = {
       schemaVersion: 1,
       kind: "apply",
@@ -572,6 +582,7 @@ export const applyPlan: ApplyPlan = async (deps) => {
       ...(stateChanged !== undefined ? { stateChanged } : {}),
       ...(noticeKinds.length > 0 ? { noticeKinds } : {}),
       ...(cause !== null ? { planRecordsUncheckedCause: cause } : {}),
+      ...(foldersLeftEmpty !== null && foldersLeftEmpty > 0 ? { foldersLeftEmpty } : {}),
     };
     return result;
   } finally {

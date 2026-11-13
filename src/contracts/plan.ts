@@ -823,8 +823,9 @@ export interface ApplyResult {
    * which stay in place (removing a folder is not an action: GT-D14 tells and keeps them). See
    * foldersLeftEmptyOf for the count. Absent when it is 0, when the apply stopped before its
    * inventory after the actions, when either inventory reached MAX_INVENTORY_FILES (it cannot be
-   * told), and in results before U-155. A count only, never a path. No apply sets it yet (the engine
-   * and the human line follow), so ApplyResult is unchanged until then.
+   * told), and in results before U-155. A count only, never a path. U-158: `applyPlan` sets it
+   * from its inventories before and after the actions; the human line (`apply.folders_left_empty`)
+   * follows with the renderer.
    */
   readonly foldersLeftEmpty?: number;
 }

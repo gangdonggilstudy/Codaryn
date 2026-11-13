@@ -13,11 +13,11 @@
 // machine. The temporary folder is removed at the end.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { compareBuilds, prepareBoard, reportOf } from "../compare-cli-boards.mjs";
+import { compareBuilds, main, prepareBoard, reportOf } from "../compare-cli-boards.mjs";
 import { CASES } from "./cases.mjs";
 import { compareSides, diffLines, normalizeSide, pathForms } from "./normalize.mjs";
 
@@ -245,6 +245,26 @@ describe("two real builds of HEAD", () => {
     const lines = results.flatMap((result) => result.differences.flatMap((item) => item.lines.map((line) => line.head)));
     for (const word of ["overrides it", "applied in run", "Undo: ", "made only", "has the moves", "came from another", "put into", "고를 수 있는", "Saved"]) {
       assert.ok(lines.some((line) => line.includes(word)), `seen: ${word}`);
+    }
+  });
+});
+
+describe("the command line", () => {
+  // U-167: --work given as a relative folder (as ne-verify's report-main-health writes it) was
+  // joined to the build folder twice, so the build could not find tsc and the tool stopped (exit 2).
+  test("U-167: a relative --work folder: both builds and a case compare, no difference", { timeout: 900_000, todo: "U-167" }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "codaryn-compare-relative-"));
+    const before = process.cwd();
+    try {
+      process.chdir(work);
+      const code = await main(["--base", "HEAD", "--head", "HEAD", "--cases", "read-commands", "--work", "relative-work", "--out", "report.md"]);
+      const report = readFileSync(path.join(work, "report.md"), "utf8");
+      assert.equal(code, 0, report);
+      assert.match(report, /- cases: 1, with differences: 0/);
+      assert.equal(existsSync(path.join(work, "relative-work")), false, "the work folder is removed at the end");
+    } finally {
+      process.chdir(before);
+      rmSync(work, { recursive: true, force: true });
     }
   });
 });

@@ -55,6 +55,11 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.changes": "Files changed: {count}",
   "summary.denied": "Denied calls: {count}",
   "summary.failed": "Failed calls: {count}",
+  // U-207 (bundle A; drafts for nb-i18n).
+  "summary.denied_unreadable": "Calls refused at files this task may not read: {count}",
+  "summary.denied_unreadable_hint":
+    "Those files are kept from the agent on purpose (unreadablePaths); it can still aggregate their tables with query_table. To let it read them, take the entry out of unreadablePaths where it was set.",
+  "summary.groups_hidden": "Groups of fewer than {k} rows were left out of {results} table result(s); the agent got only how many there were.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",
@@ -82,6 +87,8 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.next_plan": "Plan: codaryn plan {form} --run {runId}",
   "summary.next_apply": "Apply after approval: codaryn apply {form} --run {runId} --digest <digest>",
   "summary.review_checklist": "Items to check: {count}",
+  // U-207 (P-3; draft for nb-i18n): analyze-private's item (PRIVATE_REVIEW_ITEM).
+  "review.item.no_identifying_values": "No value in the result table or the report can identify a person.",
   "summary.next_review": "Record a verdict: codaryn review {form} --run {runId} --accept or --reject",
   "summary.apply_actions": "Actions applied: {applied} of {total}",
   "summary.apply_plan_run": "Plan run: {runId}",
@@ -114,6 +121,10 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — denied ({permission}/{code})",
   "progress.tool_rejected": "{tool} — rejected by a check of the call ({code})",
   "progress.tool_failed": "{tool} — failed ({code})",
+  // U-207 (bundle A; drafts for nb-i18n): what a table query asked, never a path, column or value.
+  "progress.query_table": "Table aggregated by {groupColumns} column(s)",
+  "progress.query_table_whole": "Table aggregated as a whole",
+  "progress.query_table_describe": "Table described: its columns and counts",
   "progress.confirmation_allowed": "permission question — allowed by the person, for this call only",
   "progress.confirmation_denied.user": "permission question — denied by the person",
   "progress.confirmation_denied.default": "permission question — denied by default (no answer, could not ask, or time ran out)",

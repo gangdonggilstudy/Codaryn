@@ -3,7 +3,19 @@
  * stdout, left out with `--quiet`. main.ts and run.ts connect it (N-A).
  */
 
-export { FINAL_MESSAGE_MAX_LINES, HIDDEN_PATH, HUMAN_PREFIX, REVERT_MAX_LISTED, SUMMARY_MAX_PATHS, createHumanOutput, lockReleaseFailedLine } from "./output.js";
+export {
+  FINAL_MESSAGE_MAX_LINES,
+  HIDDEN_PATH,
+  HUMAN_PREFIX,
+  REVERT_MAX_LISTED,
+  SUMMARY_MAX_PATHS,
+  builtinReviewItemText,
+  createHumanOutput,
+  lockReleaseFailedLine,
+} from "./output.js";
+// U-207 (bundle A): what a person may be told of a query_table result (for the CLI's run too).
+export { queryTableFacts } from "./query-table.js";
+export type { QueryTableFacts } from "./query-table.js";
 export { TOP_LEVEL_POSITION, closestKnownName, fieldPath, isFieldName } from "./fields.js";
 export type { FieldSegment } from "./fields.js";
 export { jsonSyntaxErrorOffset, jsonSyntaxErrorPosition, positionOf } from "./json-position.js";

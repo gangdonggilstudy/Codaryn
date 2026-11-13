@@ -25,7 +25,7 @@ import type {
 } from "../../../src/contracts/index.js";
 
 describe("U-105: the journals' record types at run time", () => {
-  test("a run journal: the twelve JournalEvent types, in the union's order", () => {
+  test("a run journal: the fourteen JournalEvent types (U-74's two included), in the union's order", () => {
     const expected: readonly JournalEventType[] = [
       "run_started",
       "model_request",
@@ -33,6 +33,8 @@ describe("U-105: the journals' record types at run time", () => {
       "model_error",
       "tool_decision",
       "tool_result",
+      "confirmation_requested",
+      "confirmation_answered",
       "file_changed",
       "verifier_result",
       "repair_started",

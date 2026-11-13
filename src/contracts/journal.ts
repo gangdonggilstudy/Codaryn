@@ -174,6 +174,8 @@ const JOURNAL_EVENT_TYPE_TABLE = {
   model_error: true,
   tool_decision: true,
   tool_result: true,
+  confirmation_requested: true,
+  confirmation_answered: true,
   file_changed: true,
   verifier_result: true,
   repair_started: true,

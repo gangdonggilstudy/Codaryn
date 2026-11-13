@@ -261,4 +261,18 @@ describe("U-105: the records the engine writes carry a type of the contract's li
     assert.ok(types.includes("tool_result") && types.includes("run_finished"));
     for (const type of types) assert.ok(known.includes(type), type);
   });
+
+  test("a run journal with a permission question (U-74's two records)", async () => {
+    const mark: PolicyDecision = { allowed: false, permission: "command", code: "confirmation_required", confirm: true };
+    let checks = 0;
+    const policy = new FakePolicy({ effective: () => (checks++ === 0 ? mark : { allowed: true }) });
+    const call = { id: "c1", name: "run_command", args: { executable: "npm", args: ["test"] } };
+    const h = harness({ steps: [() => response([call]), () => finalAnswer()], policy });
+    h.deps = { ...h.deps, confirm: async () => ({ decision: "allow_once" }) };
+    await runTask(h.deps);
+    const known: readonly string[] = JOURNAL_EVENT_TYPES;
+    const types = h.journal.events.map((event) => event.type);
+    assert.ok(types.includes("confirmation_requested") && types.includes("confirmation_answered"));
+    for (const type of types) assert.ok(known.includes(type), type);
+  });
 });

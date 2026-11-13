@@ -508,12 +508,17 @@ const PHASE_LABEL: { readonly [P in IntegrityPhase]: string } = {
   after_verify: "after verification",
 };
 
-/** What a run report never covers. Each verifier's own limits are listed with it. */
+/**
+ * What a run report never covers. Each verifier's own limits are listed with it. U-166 (AXM-17):
+ * what masking leaves out, as privacy.md 13 says; no count (DR-52 keeps the counts out of the text).
+ * An apply run sends nothing to a model, so its list (APPLY_REPORT_FIXED_LIMITS) has no such line.
+ */
 export const REPORT_FIXED_LIMITS: readonly string[] = [
   "A pass means the configured verifiers passed. It is not a review of the change.",
   "The change list holds file tool writes only. Commands allowed by the policy may have changed other files.",
   "There is no OS isolation: allowed commands ran with the user's rights and could reach the network.",
   "This report reads the run's own records. Commands allowed during the run could have changed them.",
+  "Masking hides only the values registered for this run and the forms of them it looks for. A secret that was not registered, another form of a value or text in another encoding (such as UTF-16) is not masked.",
 ];
 
 /** `failedToolCalls` (U-18): the journal's failed calls (failedCallsIn), told in the text only. */

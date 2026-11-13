@@ -740,6 +740,14 @@ export interface ToolRunner {
 }
 
 export const MAX_READ_BYTES = 262_144;
+/**
+ * DR-72 (U-173): the largest file write_file leaves, as its bytes on disk (UTF-8, a byte order
+ * mark included). Over it the call is too_large and nothing is written. It is apart from
+ * MAX_READ_BYTES on purpose: agents write documents and data tables that the verifiers read up to
+ * MAX_MARKDOWN_RULE_FILE_BYTES and MAX_DATA_TABLE_BYTES (16 MiB, src/contracts/verify.ts), larger
+ * than read_file and write_file can read again. A unit test keeps it at least those two.
+ */
+export const MAX_WRITE_BYTES = 16 * 1024 * 1024;
 export const MAX_SEARCH_ENTRIES = 500;
 export const MAX_SEARCH_MATCHES_PER_FILE = 20;
 export const MAX_COMMAND_OUTPUT_BYTES = 65_536;

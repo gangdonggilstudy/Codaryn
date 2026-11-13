@@ -36,6 +36,8 @@ import type {
   PlanActionArgs,
   PlanProblem,
   PlanRecorder,
+  PlannedFileNow,
+  PlannedFileProbe,
   PrivacyGateway,
   ProposeChangesArgs,
   ProposePlanArgs,
@@ -555,4 +557,31 @@ export async function proposeChanges(
     return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
   }
   return { ok: true, payload: { digest, files } };
+}
+
+/**
+ * U-187 (DR-69 B-6): the PlannedFileProbe for a workspace (contract plan.ts): what is at a planned
+ * file's path now, with propose_changes' own checks. `create`: `missing` when nothing is at the path
+ * and its existing parents are folders (inspectDestination), else `other`. `modify`: `file` with the
+ * SHA-256 of the regular file the path names, its last name not a link (inspectSource, hashFile),
+ * `missing` when it is gone, else `other`. A check that fails, a path the workspace refuses and a
+ * cancel answer `other` (fail closed: plannedFileStale takes it as stale). Reads only.
+ */
+export function createPlannedFileProbe(options: { readonly workspace: Workspace; readonly fileOps: PlanFileOps }): PlannedFileProbe {
+  const { workspace, fileOps } = options;
+  return async (file, signal): Promise<PlannedFileNow> => {
+    try {
+      if (file.change === "create") {
+        const now = await inspectDestination(workspace, file.path, fileOps);
+        return now.ok ? { kind: "missing" } : { kind: "other" };
+      }
+      const now = await inspectSource(workspace, file.path, fileOps);
+      if (!now.ok) return now.problem === "source_missing" ? { kind: "missing" } : { kind: "other" };
+      const hashed = await hashFile(now.path.absolute, { expected: now.identity, signal });
+      if (hashed.ok) return { kind: "file", sha256: hashed.hash };
+      return hashed.reason === "missing" ? { kind: "missing" } : { kind: "other" };
+    } catch {
+      return { kind: "other" };
+    }
+  };
 }

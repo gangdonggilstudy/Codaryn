@@ -33,6 +33,7 @@ import type {
   SearchMatch,
   ToolErrorCode,
   ToolRunner,
+  PlannedFileProbe,
   Workspace,
   WriteFileArgs,
 } from "../contracts/index.js";
@@ -41,11 +42,19 @@ import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
-import { inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
+import { createPlannedFileProbe as plannedFileProbeFor, inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { CountingPlanExecutor, PlanExecutorDeps } from "./plan-executor.js";
 export { MAX_INSPECT_WALK_ENTRIES } from "./workflow-tools.js";
+
+/**
+ * U-187 (DR-69 B-6): the PlannedFileProbe for a workspace, for ApprovedChangesPlan.fileNow (the
+ * caller of runApprovedPlan wires it). Node's file operations unless `fileOps` replaces some.
+ */
+export function createPlannedFileProbe(options: { readonly workspace: Workspace; readonly fileOps?: Partial<PlanFileOps> }): PlannedFileProbe {
+  return plannedFileProbeFor({ workspace: options.workspace, fileOps: { ...nodePlanFileOps, ...options.fileOps } });
+}
 export { HARD_LINK_UNAVAILABLE_PROBLEM } from "./plan-files.js";
 export type { PlanFileOps } from "./plan-files.js";
 

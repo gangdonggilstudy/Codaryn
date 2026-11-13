@@ -45,6 +45,7 @@ import type { PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
 import { PRIVACY_TOKEN_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, MaskedText } from "./text.js";
+import type { WritablePathSet } from "./task.js";
 import type { ToolDescriptor } from "./tool.js";
 import type { Workspace } from "./workspace.js";
 import type { InventoryChecker, InventoryManifest, VerifierConfig, VerifierResult, VerifierRunner } from "./verify.js";
@@ -524,6 +525,43 @@ export type PlannedFileNow =
 export function plannedFileStale(file: ResolvedPlannedFile, now: PlannedFileNow): boolean {
   if (file.change === "create") return now.kind !== "missing";
   return now.kind !== "file" || now.sha256 !== file.sha256;
+}
+
+/**
+ * U-187 (DR-69 B-6): what the workspace holds at a planned file's path now, for the check before a
+ * run carries the plan out. For `create`: `missing` while nothing is at the path and its existing
+ * parents are folders, `other` for anything else (a dangling link too). For `modify`: `file` with its
+ * SHA-256 when the path names a regular file (its last name not a link), `missing` when it is gone,
+ * `other` otherwise. A check that cannot be made answers `other`, which plannedFileStale takes as
+ * stale (fail closed). tools' `createPlannedFileProbe` makes it for a workspace.
+ */
+export type PlannedFileProbe = (file: ResolvedPlannedFile, signal: AbortSignal) => Promise<PlannedFileNow>;
+
+/**
+ * U-187 (DR-69 B-3, B-6, B-7): an approved `run` plan as the engine carries it out
+ * (RunApprovedPlan, engine.ts). The caller (B-4: the CLI's and the app's `apply`) loaded it with
+ * LoadAnyPlan, checked that the person approved this digest (DR-1) and resolved the task to
+ * `plan: "run"`, as an apply run's caller does for `apply`.
+ */
+export interface ApprovedChangesPlan {
+  readonly planRunId: string;
+  /** The approved digest, the SHA-256 of the bytes `plan` was read from. */
+  readonly digest: ContentHash;
+  readonly approval: ApprovalChannel;
+  readonly plan: StoredChangesPlan;
+  readonly fileNow: PlannedFileProbe;
+  /** As ApplyDeps.markApplied: writes PLAN_APPLIED_FILE_NAME exclusively; "already_applied" when it exists. */
+  markApplied(): Promise<"marked" | "already_applied">;
+}
+
+/**
+ * U-187 (DR-69 B-4, B-5): the writable lists of a run that carries out `plan`: the task's lists
+ * (ResolvedTaskSpec.writablePathSets), then the plan's files as one more list (source `plan`, each
+ * entry exactly that file), so a write must be both a planned file and inside every policy list.
+ * Pure.
+ */
+export function approvedPlanWritablePathSets(sets: readonly WritablePathSet[] | undefined, plan: StoredChangesPlan): readonly WritablePathSet[] {
+  return [...(sets ?? []), { source: "plan", entries: plan.files.map((file) => file.path) }];
 }
 
 /**

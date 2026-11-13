@@ -170,7 +170,7 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.nothing_removed": "아무것도 지우지 않았습니다.",
   "cleanup.group.confirm": "--confirm 옵션만으로 지우는 것: {count}개({bytes}바이트)",
   "cleanup.group.include_not_reverted": "--include-not-reverted 옵션도 주어야 지우는 것: {count}개({bytes}바이트). 되돌리지 않았거나, 일부만 되돌렸거나, 기록을 확인할 수 없는 실행입니다. 이 기록은 따로 확인해야 지우며, 지우면 그 실행을 더는 되돌릴 수 없고 손으로 되살릴 수도 없습니다.",
-  "cleanup.group.delete_discarded": "--delete-discarded 옵션도 주어야 지우는 폐기 보관함: 폴더 {count}개, 파일 {files}개({bytes}바이트). 사람의 파일이며 되살릴 수 없습니다.",
+  "cleanup.group.delete_discarded": "--delete-discarded 옵션도 주어야 지우는 것: {count}개(파일 {files}개, {bytes}바이트). 폐기 보관함의 파일이 들어 있습니다. 그 파일은 사람의 파일이며 되살릴 수 없습니다.",
   "cleanup.group.kept": "이 선택에서는 무엇을 확인해도 남는 것: {count}개. 적용 실행의 기록은 같은 정리에서 그 폐기 보관함 폴더를 골라 함께 지우거나(--delete-discarded) 그 적용을 먼저 되돌리면 지워집니다. 그 파일이 무엇이었는지는 이 기록에만 있습니다. 계획 실행은 그 적용 실행과 함께 지워집니다.",
   "cleanup.command.confirm": "아무것도 지우지 않았습니다. 다른 옵션이 필요 없는 것만 지우려면 같은 명령에 다음을 붙여 다시 실행하세요:",
   "cleanup.command.all": "아무것도 지우지 않았습니다. 남는 것을 뺀 위의 모든 것을 지우려면 같은 명령에 다음을 붙여 다시 실행하세요:",

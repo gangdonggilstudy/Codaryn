@@ -171,7 +171,7 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.nothing_removed": "Nothing was removed.",
   "cleanup.group.confirm": "Removed with --confirm alone: {count} ({bytes} bytes)",
   "cleanup.group.include_not_reverted": "Removed only with --include-not-reverted besides: {count} ({bytes} bytes). These are runs not reverted, only partly reverted, or whose records cannot be checked. Their records go only with a confirmation of their own; without them those runs can no longer be reverted or put back by hand.",
-  "cleanup.group.delete_discarded": "Deleted only with --delete-discarded besides: {count} discarded-files folder(s), {files} file(s) ({bytes} bytes). They are people's own files and cannot be put back.",
+  "cleanup.group.delete_discarded": "Removed only with --delete-discarded besides: {count} ({files} file(s), {bytes} bytes), people's discarded files among them. They are people's own files and cannot be put back.",
   "cleanup.group.kept": "Kept in this selection, whatever is confirmed: {count}. An apply run's records go once its discarded files are deleted in the same cleanup (with their folders selected and --delete-discarded) or the apply is reverted first; only the records say what the files were. A plan run goes with its apply run.",
   "cleanup.command.confirm": "Nothing was removed. To remove what needs no other option, run the same command with",
   "cleanup.command.all": "Nothing was removed. To remove all of the above but what is kept, run the same command with",

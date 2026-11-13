@@ -59,7 +59,10 @@ describe("U-86: the cleanup preview grouped by what must be given", () => {
     }
     const en = createMessageCatalog("en");
     assert.equal(en.format("cleanup.group.confirm", { count: 3, bytes: 4096 }), "Removed with --confirm alone: 3 (4096 bytes)");
-    assert.ok(en.format("cleanup.group.delete_discarded", { count: 1, files: 2, bytes: 30 }).startsWith("Deleted only with --delete-discarded besides: 1 discarded-files folder(s), 2 file(s) (30 bytes)."));
+    // `{count}` is every item of the group: run records that go with their discarded files, and the
+    // discarded-files folders themselves (seen in the combined preview), not folders alone.
+    assert.ok(en.format("cleanup.group.delete_discarded", { count: 3, files: 7, bytes: 30 }).startsWith("Removed only with --delete-discarded besides: 3 (7 file(s), 30 bytes), people's discarded files among them."));
+    assert.ok(!/folder\(s\)|폴더 \{count\}/.test(MESSAGE_TEXTS.en["cleanup.group.delete_discarded"] + MESSAGE_TEXTS.ko["cleanup.group.delete_discarded"]));
   });
 
   test("the two commands say nothing was removed and lead into the options, which the renderer adds", () => {

@@ -28,6 +28,9 @@
  * title). Beyond that, a line longer than MAX_MARKDOWN_LINE_CHARS, or (for the links rule) brackets
  * nested deeper than MAX_MARKDOWN_BRACKET_DEPTH, leave the rule undecided with the reason in its
  * evidence; it does not fail. Between the long steps the rules look at the run's signal.
+ * U-160: the two bounds and every note the contract names (markdownLineTooLongNote,
+ * markdownBracketsTooDeepNote, MARKDOWN_EVIDENCE_LEADS) come from src/contracts/verify.ts; this
+ * module has no copy of its own.
  *
  * A target is judged on its text before anything on disk is looked at (M-3): one with a scheme
  * (`[A-Za-z][A-Za-z0-9+.-]*:`, a drive letter included), empty, or only an anchor is not checked;
@@ -43,20 +46,20 @@ import { constants as fsConstants } from "node:fs";
 import * as fs from "node:fs/promises";
 import path from "node:path";
 
-import { MARKDOWN_EVIDENCE_LEADS, MAX_MARKDOWN_RULE_FILE_BYTES, markdownEvidenceList } from "../contracts/index.js";
+import {
+  MARKDOWN_EVIDENCE_LEADS,
+  MAX_MARKDOWN_BRACKET_DEPTH,
+  MAX_MARKDOWN_LINE_CHARS,
+  MAX_MARKDOWN_RULE_FILE_BYTES,
+  markdownBracketsTooDeepNote,
+  markdownEvidenceList,
+  markdownLineTooLongNote,
+} from "../contracts/index.js";
 import type { MarkdownEvidenceItem, MarkdownHeading, MarkdownHeadingsRule, MarkdownLinksRule, Workspace } from "../contracts/index.js";
 
-/**
- * R-89 M-1 (PM decision): the longest line the reader interprets, in UTF-16 code units. A longer line
- * outside fenced code and HTML blocks leaves the rule undecided. The reader is linear, so this is a
- * backstop; it is high enough for an image given as a `data:` URI on one line.
- */
-export const MAX_MARKDOWN_LINE_CHARS = 100_000;
-/**
- * R-89 M-1 (PM decision): the deepest nesting of matched `[` `]` pairs in one block. Deeper leaves a
- * `markdown_links` rule undecided; `markdown_headings` does not read brackets.
- */
-export const MAX_MARKDOWN_BRACKET_DEPTH = 32;
+/** The contract's reader bounds (R-89 M-1, U-143), exported here as well for this module's readers. */
+export { MAX_MARKDOWN_BRACKET_DEPTH, MAX_MARKDOWN_LINE_CHARS };
+
 /** CommonMark's (and cmark's) bound on nested unescaped parentheses in a link destination. */
 const MAX_DESTINATION_PARENS = 32;
 
@@ -349,7 +352,7 @@ export function readMarkdown(text: string, options: MarkdownReadOptions = {}): M
       continue;
     }
     if (line.length > MAX_MARKDOWN_LINE_CHARS) {
-      state.unread = `line ${lineNumber} is longer than ${MAX_MARKDOWN_LINE_CHARS} characters, not read`;
+      state.unread = markdownLineTooLongNote(lineNumber);
       break;
     }
     const open = fenceOpen(line, inList);
@@ -586,7 +589,7 @@ function readInlineLinks(text: string, firstLine: number, links: DocumentLink[])
     while (enclosingPairs.length > 0 && (enclosingPairs[enclosingPairs.length - 1] as number) < opener) enclosingPairs.pop();
     enclosingPairs.push(close);
     if (enclosingPairs.length > MAX_MARKDOWN_BRACKET_DEPTH) {
-      return `brackets nested deeper than ${MAX_MARKDOWN_BRACKET_DEPTH} levels at line ${lineAt(opener)}, not read`;
+      return markdownBracketsTooDeepNote(lineAt(opener));
     }
   }
 
@@ -709,7 +712,7 @@ export async function loadMarkdown(rulePath: string, workspace: Workspace, maxBy
     // The decoder drops a leading byte order mark.
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return { ok: false, missing: false, note: "not UTF-8 text" };
+    return { ok: false, missing: false, note: MARKDOWN_EVIDENCE_LEADS.notUtf8 };
   }
   return { ok: true, text, relative: resolved.path.relative };
 }
@@ -733,8 +736,8 @@ const unreadable = (loaded: Extract<LoadedMarkdown, { ok: false }>): MarkdownVer
   loaded.missing ? { state: "not_held", note: loaded.note } : { state: "undecided", note: loaded.note };
 
 /** The notes of a rule the run's signal stopped (undecided, as the runner's "cancelled before ..."). */
-const CANCELLED_BEFORE_READING: MarkdownVerdict = { state: "undecided", note: "cancelled before the document was read" };
-const CANCELLED_WHILE_CHECKING: MarkdownVerdict = { state: "undecided", note: "cancelled while the link targets were checked" };
+const CANCELLED_BEFORE_READING: MarkdownVerdict = { state: "undecided", note: MARKDOWN_EVIDENCE_LEADS.cancelledBeforeReading };
+const CANCELLED_WHILE_CHECKING: MarkdownVerdict = { state: "undecided", note: MARKDOWN_EVIDENCE_LEADS.cancelledWhileChecking };
 /** Read each time: the signal changes while the rule waits. */
 const stopped = (signal: AbortSignal | undefined): boolean => signal?.aborted === true;
 
@@ -827,6 +830,6 @@ export async function checkMarkdownLinks(rule: MarkdownLinksRule, workspace: Wor
     else if (look.kind === "unsure") unsure.push({ text: link.target, detail: `line ${link.line}, ${look.code}` });
   }
   if (broken.length > 0) return { state: "not_held", note: `${MARKDOWN_EVIDENCE_LEADS.brokenLinks}: ${markdownEvidenceList(broken)}` };
-  if (unsure.length > 0) return { state: "undecided", note: `targets that could not be looked at: ${markdownEvidenceList(unsure)}` };
+  if (unsure.length > 0) return { state: "undecided", note: `${MARKDOWN_EVIDENCE_LEADS.targetsUnchecked}: ${markdownEvidenceList(unsure)}` };
   return { state: "held", note: MARKDOWN_EVIDENCE_LEADS.held };
 }

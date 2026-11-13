@@ -22,6 +22,12 @@ const KEPT_WARNINGS = {
     "cleanup.group.delete_discarded": ["They are people's own files and cannot be put back."],
     // cleanup.next.discarded_left
     "cleanup.group.kept": ["deleted in the same cleanup", "or the apply is reverted first; only the records say what the files were."],
+    // R-76 M-1 (PM): both warnings, word for word.
+    "cleanup.group.both": [
+      "runs not reverted, only partly reverted, or whose records cannot be checked",
+      "Their records go only with a confirmation of their own; without them those runs can no longer be reverted or put back by hand.",
+      "They are people's own files and cannot be put back.",
+    ],
   },
   ko: {
     "cleanup.group.include_not_reverted": [
@@ -30,11 +36,23 @@ const KEPT_WARNINGS = {
     ],
     "cleanup.group.delete_discarded": ["사람의 파일이며 되살릴 수 없습니다."],
     "cleanup.group.kept": ["같은 정리에서", "그 적용을 먼저 되돌리면", "그 파일이 무엇이었는지는 이 기록에만 있습니다."],
+    "cleanup.group.both": [
+      "되돌리지 않았거나, 일부만 되돌렸거나, 기록을 확인할 수 없는 실행",
+      "이 기록은 따로 확인해야 지우며, 지우면 그 실행을 더는 되돌릴 수 없고 손으로 되살릴 수도 없습니다.",
+      "사람의 파일이며 되살릴 수 없습니다.",
+    ],
   },
 } as const;
 
 const LANGUAGES = ["en", "ko"] as const;
-const GROUPS = ["cleanup.group.confirm", "cleanup.group.include_not_reverted", "cleanup.group.delete_discarded", "cleanup.group.kept"] as const;
+const GROUPS = [
+  "cleanup.group.confirm",
+  "cleanup.group.include_not_reverted",
+  "cleanup.group.delete_discarded",
+  "cleanup.group.both",
+  "cleanup.group.kept",
+  "cleanup.group.blocked",
+] as const;
 const COMMANDS = ["cleanup.command.confirm", "cleanup.command.all"] as const;
 
 describe("U-86: the cleanup preview grouped by what must be given", () => {
@@ -53,6 +71,12 @@ describe("U-86: the cleanup preview grouped by what must be given", () => {
       assert.ok(t["cleanup.group.confirm"].includes("--confirm"), language);
       assert.ok(t["cleanup.group.include_not_reverted"].includes("--include-not-reverted"), language);
       assert.ok(t["cleanup.group.delete_discarded"].includes("--delete-discarded"), language);
+      // R-76 M-1: the group that needs both flags names both; the --delete-discarded group alone does
+      // not promise what only both remove.
+      assert.ok(t["cleanup.group.both"].includes("--include-not-reverted") && t["cleanup.group.both"].includes("--delete-discarded"), language);
+      assert.ok(!t["cleanup.group.delete_discarded"].includes("--include-not-reverted"), language);
+      // R-76 L-1: the blocked items have their own header: they cannot be removed in this cleanup.
+      assert.match(t["cleanup.group.blocked"], language === "en" ? /^Cannot be removed in this cleanup: \{count\}\./ : /^이 정리에서 지울 수 없는 것: \{count\}개\./);
       // The kept group: no confirmation removes them in this selection.
       assert.match(t["cleanup.group.kept"], language === "en" ? /^Kept in this selection, whatever is confirmed: \{count\}\./ : /^이 선택에서는 무엇을 확인해도 남는 것: \{count\}개\./);
       for (const id of GROUPS) assert.ok(!/\?|까요|습니까/.test(t[id]), `${language} ${id}`);

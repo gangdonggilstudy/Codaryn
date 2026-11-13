@@ -3,7 +3,7 @@
  * Order per call: checkRequested -> restore permitted fields -> checkEffective -> execute.
  */
 
-import type { ConfirmablePolicyConfig } from "./task.js";
+import type { ConfirmablePolicyConfig, WritablePathSet } from "./task.js";
 import type { JsonObject, MaskedText } from "./text.js";
 import type { EffectiveToolCall, EffectiveWorkflowToolCall, ToolCall, ToolDescriptor, ToolName } from "./tool.js";
 import type { Workspace } from "./workspace.js";
@@ -155,6 +155,13 @@ export interface PolicyGateOptions {
   /** U-74: command rules may carry `confirm` (ConfirmableCommandRule). */
   readonly config: ConfirmablePolicyConfig;
   readonly workspace: Workspace;
+  /**
+   * P1 (DR-69, B-2, B-4): ResolvedTaskSpec.writablePathSets. The gate denies a file tool's write that
+   * one of the lists does not cover, judged as protectedPaths are (the text first, then the real
+   * path). Absent or empty: no such limit. Not judged yet: the policy unit (B-2) adds the judgment
+   * and its denial code.
+   */
+  readonly writablePathSets?: readonly WritablePathSet[];
 }
 
 /** Signature of `createPolicyGate`, exported by `src/policy/index.ts`. */

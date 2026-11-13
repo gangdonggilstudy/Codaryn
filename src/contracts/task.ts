@@ -83,6 +83,30 @@ export interface ResolvedTaskSpec extends TaskSpec {
    * applied. The engine records it in `run_started`; it changes nothing else.
    */
   readonly profile?: string;
+  /**
+   * P1 (DR-69, B-4): every list of writable paths the run must satisfy, in WRITABLE_PATH_SOURCES
+   * order, each source once: a file tool may write a path only when every list covers it (the
+   * intersection, PolicyConfig.writablePaths). Absent or empty: no such limit. The policy gate
+   * judges it (PolicyGateOptions.writablePathSets), never the merged `policy.writablePaths`:
+   * mergeWorkflowPolicy does not combine the lists. Not set yet: the CLI and the app set it with B-4.
+   */
+  readonly writablePathSets?: readonly WritablePathSet[];
+}
+
+/**
+ * P1 (DR-69, B-4): where a list of writable paths came from. config, profile, definition, task: a
+ * policy's `writablePaths` (the config file's, the applied profile's, the task type definition's,
+ * the task file's); an entry covers itself and everything below it. plan: the files of the approved
+ * `run` plan the run carries out (B-3); an entry covers exactly that file, nothing below it (B-5).
+ */
+export const WRITABLE_PATH_SOURCES = ["config", "profile", "definition", "task", "plan"] as const;
+export type WritablePathSource = (typeof WRITABLE_PATH_SOURCES)[number];
+
+/** B-4: one list of writable paths (ResolvedTaskSpec.writablePathSets). */
+export interface WritablePathSet {
+  readonly source: WritablePathSource;
+  /** As the source gave them, format checked (checkProtectedPaths); for `plan`, the plan's resolved paths. */
+  readonly entries: readonly string[];
 }
 
 /** SP-1: the names in MODEL_PROVIDER_NAMES (config.ts). */
@@ -155,6 +179,22 @@ export interface PolicyConfig {
    * an apply run, after a person approved the plan's digest.
    */
   readonly planActions?: readonly PlanActionKind[];
+  /**
+   * P1 (DR-69, B-4): workspace-relative paths that file tools may write; they may write nothing
+   * else. The format, the matching and the platform rules are protectedPaths' (checkProtectedPaths;
+   * whole `/` separated segments, an entry covers itself and everything below it; judged on the
+   * text, then on the real path, and an entry that is a link covers its real path; on Windows
+   * ignoring case). It is an allow list, so an unusable entry covers nothing (fail closed).
+   * - Absent: no such limit. Present and empty: no file tool may write.
+   * - Only narrows: each source that states it (the config file, the applied profile, the task type
+   *   definition, the task file) is one more list, and a write must be covered by every list
+   *   (ResolvedTaskSpec.writablePathSets). A task file can narrow the user's settings, never widen them.
+   * - Protected paths and the other denials still apply under it.
+   * - It guards the file tools only (B-8): a command the policy allows can write wherever it can.
+   * - Not read yet: the parsers refuse the field (`unknown_field`) and the gate does not judge it
+   *   until the policy unit (B-2) and the CLI and the app (B-4).
+   */
+  readonly writablePaths?: readonly string[];
 }
 
 export interface CommandRule {

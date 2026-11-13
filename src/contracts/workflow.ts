@@ -142,6 +142,9 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
  * - restorePathTokens: true only when both allow it. network, destructive: "deny".
  * - U-74: a configured rule's `confirm: true` stays on every rule its intersection gives, so a
  *   definition never turns a question into a plain allow. A definition's rules cannot ask.
+ * - writablePaths (P1, B-4): not combined here. Each source's list stays its own list in
+ *   ResolvedTaskSpec.writablePathSets, and a write must be covered by all of them; the merged
+ *   policy's `writablePaths` is not what the gate reads.
  */
 export function mergeWorkflowPolicy(
   definition: PolicyConfig | undefined,

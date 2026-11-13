@@ -69,6 +69,7 @@ import type {
   SummarizeState,
 } from "../contracts/index.js";
 import { createMessageCatalog } from "../i18n/index.js";
+import { lockReleaseFailedLine } from "./human/index.js";
 import { applyCleanup as storeApplyCleanup, planCleanup as storePlanCleanup, summarizeState as storeSummarizeState } from "../store/index.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
@@ -318,6 +319,9 @@ function groupOf(fate: CleanupItemFate): Group {
  * The person's text: the catalog's lines (cleanup.*) and the item names and sizes. U-86 (UXM-10):
  * the preview groups the items by what must be given for each to go; `selected` (default true):
  * whether a selection option was given, without which it offers example commands.
+ * U-257 (U-201): a confirmed cleanup that finished but could not release the workspace lock
+ * (CleanupOutcome.lockLeft, in the JSON since U-201) ends with lock.release_failed
+ * (lockReleaseFailedLine), as a run's, an apply's and a revert's summaries do; never otherwise.
  */
 export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, options: { readonly selected?: boolean } = {}): string {
   const out: string[] = [];
@@ -343,6 +347,9 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, o
     const discardedLeft = kept.filter((item) => item.target === "run" && item.reason === "discarded_left").length;
     if (discardedLeft > 0) out.push(messages.format("cleanup.done_discarded_left", { count: discardedLeft }));
     for (const item of kept) out.push(`- ${targetName(item.target)} ${itemName(item)}: ${keptText(item.reason)}`);
+    // U-257: the lock this cleanup could not release, last; only then, so every other text is as before.
+    const lockLine = lockReleaseFailedLine(output.outcome.lockLeft, messages);
+    if (lockLine !== null) out.push(lockLine);
     return `${out.join("\n")}\n`;
   }
 

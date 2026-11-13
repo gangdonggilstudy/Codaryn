@@ -1000,4 +1000,22 @@ export const CASES = [
       },
     ],
   },
+  // U-289, nc-human's T-3 (U-291 pins it in tests/unit/cli/u291-real-cli-pins.test.ts): registered
+  // values that lie inside a closed word of the records, a write's denial code (path_not_writable)
+  // and a protection check's phase (before_verify). Today the renderer chooses each line by the
+  // stored record's words and the CLI masks the line it drew: "path/path_[token]", and three folded
+  // unchanged checks. Lines drawn from records masked again would differ here ("path/?", two).
+  ...["", "-ko"].map((suffix) => ({
+    name: `secret-in-closed-word${suffix}`,
+    ...(suffix === "-ko" ? { lang: "ko" } : {}),
+    env: { CMP_CLOSED_A: "not_writable", CMP_CLOSED_B: "before_verify" },
+    setup: documentSetup(
+      [{ toolCalls: [writeFile("other.md", "x\n")] }, { toolCalls: [writeFile("summary.md", SUMMARY)] }, { text: "The summary is written." }],
+      {
+        policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, writablePaths: ["summary.md"], protectedPaths: ["notes.md"] },
+        privacy: { secretEnv: ["CMP_CLOSED_A", "CMP_CLOSED_B"] },
+      },
+    ),
+    steps: [run(), report("latest", "--json")],
+  })),
 ];

@@ -715,8 +715,13 @@ export type WorkspaceTextProblem =
  * - `workspace_locked`: a run, apply or revert holds the workspace; nothing was judged or written.
  * - `not_editable`: judged again now, it cannot be edited here (`readOnlyReasons`).
  * - `text_refused`: the new text cannot be written (`textProblems`).
- * - `not_found` .. `mask_failed`: as readWorkspaceText's; `write_failed`: the write did not happen.
- * Nothing goes into the run records. `lockLeft`: the lock could not be taken back (told, never hidden).
+ * - `not_found` .. `mask_failed`: as readWorkspaceText's (`refused` also when a folder on the path
+ *   changed during the write's checks; nothing was written); `write_failed`: the write did not happen.
+ * - `path_changed` (V-1 H-1): right after the rename a folder on the path is not the one opened, or
+ *   the file there is not the one written. A swap in the instant before the rename cannot be
+ *   prevented (no rename by folder handle in Node); it is told: where the text went cannot be said.
+ * Nothing goes into the run records. `lockLeft`: the lock could not be taken back, the release failed
+ * or answered false (told, never hidden).
  */
 export interface WorkspaceTextWritten {
   readonly kind: "workspace_text_write";
@@ -734,7 +739,8 @@ export interface WorkspaceTextWritten {
     | "not_text"
     | "unreadable"
     | "mask_failed"
-    | "write_failed";
+    | "write_failed"
+    | "path_changed";
   readonly path: string;
   /** `written` and `unchanged`: the file's digest now. Null otherwise. */
   readonly digest: ContentHash | null;

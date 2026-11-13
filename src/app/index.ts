@@ -23,7 +23,7 @@ export { MAX_RUN_EVENTS_PAGE, MAX_RUN_EVENTS_PAGE_BYTES, RUN_EVENTS_PAGE_SIZE, R
 export type { RunEventsDeps, RunEventsSource } from "./run-events.js";
 export { checkApplyArguments, checkApplyIn } from "./check-apply.js";
 export { MAX_WORKSPACE_TEXT_BYTES, isWorkspaceFile, readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
-export type { WorkspaceTextOperations, WorkspaceTextSource, WorkspaceTextWriteSource } from "./workspace-text.js";
+export type { WorkspaceTextOperations, WorkspaceTextSource, WorkspaceTextStage, WorkspaceTextWriteSource } from "./workspace-text.js";
 export type { ApplyCheckOperations, ApplyCheckSource } from "./check-apply.js";
 export type {
   AppliedActionRecord,

@@ -3,7 +3,10 @@
  * The config file is the one named by `--config`, else by CODARYN_CONFIG, else the file at the
  * default location (N-1, `DefaultConfigLocation`) when it exists. Nothing else is read: the
  * workspace is never searched (C-3 as amended by N-1).
- * It holds settings and defaults, never an API key. The key comes only from ANTHROPIC_API_KEY.
+ * It holds settings and defaults, never an API key. The key comes only from the chosen provider's
+ * key variable (API_PROVIDERS[provider].keyEnv: ANTHROPIC_API_KEY or OPENAI_API_KEY), in the
+ * environment or in a variables file named with `--vars-file` (U-143: this said ANTHROPIC_API_KEY
+ * only, from before the second provider, SP-2).
  */
 
 import type { MessageLanguage } from "./human.js";

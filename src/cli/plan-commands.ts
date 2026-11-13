@@ -75,6 +75,7 @@ import {
   listRuns as storeListRuns,
   loadPlan as storeLoadPlan,
   readReviewRecord,
+  readRevertRecord,
   releaseLock,
   writeResult,
   writeReviewRecord,
@@ -995,8 +996,11 @@ export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutc
   };
   if (args.json) return { output, exitCode: output.exitCode };
   // U-131 (N3): a rejected run that changed files: how to undo them, with the workspace as typed.
+  // U-153 (R-94 I2): not when its changes were already reverted completely (the command would only
+  // end as already_reverted). A record that cannot be read counts as none: the line is given.
   let revert: { readonly workspaceShown: ShownWorkspace | null } | undefined;
-  if (args.verdict === "rejected" && review.changedFiles > 0) {
+  const revertedFully = args.verdict === "rejected" && review.changedFiles > 0 && (await readRevertRecord(workspaceRoot, runId).catch(() => null))?.status === "complete";
+  if (args.verdict === "rejected" && review.changedFiles > 0 && !revertedFully) {
     const typed = args.form.input.kind === "quick" ? args.form.input.workspace : null;
     const masked = typed === null ? null : createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(typed);
     revert = { workspaceShown: typed === null || masked === null ? null : toShownWorkspace(typed, masked.ok ? masked.text : null) };

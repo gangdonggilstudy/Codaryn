@@ -239,7 +239,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onTreeReset,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -314,6 +314,10 @@ const expected = [
   ["recordsTab", (v) => JSON.stringify(v) === JSON.stringify({ ready: "complete", lines: true, checks: true, notes: 1, recordsNote: true, damaged: { status: "damaged", skipped: 1, missing: 0, lines: true } })],
   // U-119 (3.9, DR-21): the check before the apply of B's plan: clean, no row marked, nothing left behind; a forged token is unknown_plan.
   ["planCheck", (v) => JSON.stringify(v) === JSON.stringify({ state: "clean", rows: 0, left: 0, forged: "unknown_plan" })],
+  // U-123 (R-82 U-103 L1): a tree id taken before the settings writes is refused after them; a fresh one works; the tree was read again.
+  ["treeIdsDropped", (v) => JSON.stringify(v) === JSON.stringify({ taken: true, old: "unknown_entry", fresh: "copied", reread: "ok" })],
+  // U-123: no run start met an off button (if one did, its reason is shown here).
+  ["startsBlocked", (v) => Array.isArray(v) && v.length === 0],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],
@@ -406,7 +410,8 @@ const expected = [
   ],
   ["treeOpensChange", (v) => JSON.stringify(v) === JSON.stringify({ ready: "1", focus: "0", focused: "made.txt" })],
   // U-65: F5 reads the tree again; the protected path setup added is marked, with its note.
-  ["treeProtected", (v) => JSON.stringify(v) === JSON.stringify({ before: 0, marked: "package.json", note: true })],
+  // U-123 (R-82 U-103 L1): the setup's settings write already made the window read its tree again, so the mark is there before F5; F5 keeps it.
+  ["treeProtected", (v) => JSON.stringify(v) === JSON.stringify({ before: 1, marked: "package.json", note: true })],
   // U-64 (3.12, 4.4): the engine ended: its card, calls fail, no restart on its own; the button starts a new host; no second restart while it runs.
   [
     "engineRestart",

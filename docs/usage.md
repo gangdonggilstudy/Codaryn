@@ -1233,6 +1233,8 @@ codaryn: finished — needs input (plan_pending)
 A plan is ready: actions 3. Nothing was changed; it waits for approval.
 Files changed: 0
 Usage: model turns 2 · tool calls 2 · 0 s
+The agent's description (the model's own words, not checked, and not what you approve):
+  | 사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다
 Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.
 Run id: 20261112T200120Z-c27683db
 Report: codaryn report --workspace <workspace> --run 20261112T200120Z-c27683db

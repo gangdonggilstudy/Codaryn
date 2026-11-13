@@ -484,6 +484,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
+      // U-152 (AXM-15): a plan run shows the agent's description of its plan (EngineResult.planSummary,
+      // U-59) where another run shows its last message: under the plan view's label (plan.summary_label),
+      // quoted rows as the plan view draws them. The model's own words, not checked and not what a person
+      // approves (not in plan.json or the digest).
+      const planSummary: unknown = result.planSummary;
+      if (planReady && typeof planSummary === "string") {
+        const rows = quoteModelText(planSummary, FINAL_MESSAGE_MAX_LINES);
+        if (rows.length > 0) out.push(`${catalog.format("plan.summary_label")}:`, ...rows);
+      }
       // DR-47 (AXM-1): the agent's last message, after the facts and before the advice. It is the
       // agent's own words: under its label, each line set apart; not for a plan run.
       const final: unknown = result.finalMessage;

@@ -615,6 +615,35 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
 - **계획 run:** `plan: "run"`은 B-4 전까지 거부된다(18.1, U-177). 승인된 계획의 파일 목록(`plan` 원천)은 B-3이 더한다.
 
+### 13.2 읽기 제외 경로 `unreadablePaths`와 묶음 크기 k (U-210, 묶음 A A-6; R-1~R-5, Q-4, DR-70)
+
+- **무엇:** `policy.unreadablePaths`는 모델이 읽거나 목록으로 보거나 바꾸지 못하는 경로 접두 목록이다. 그 아래의 표는 `query_table`만 집계한다(접근 `aggregate`). 그 도구는 U-208이 만든다.
+- **형식(R-1):** 보호 경로(13절)와 같은 형식이고 같은 검사(`checkProtectedPaths`)를 쓴다. 잘못된 항목은 `policy.unreadablePaths[i]`처럼 자리만 말한다. 판정도 보호 경로와 같다. 글자를 먼저 보고 그다음 실경로를 보며(U-203), 쓸 수 없는 항목은 모두를 덮는다(fail closed).
+- **둘 수 있는 곳:** task 파일, 설정 파일, 프로필, 설정 파일의 작업 종류 정의. 넷 모두 `policy` 안이다.
+- **더하기만 한다(R-2).**
+  - 실행의 목록(`ResolvedTaskSpec.unreadablePaths`)은 원천마다의 항목을 합친 것이다. 순서는 config, profile, definition, task이고 항목마다 한 번이다(`unreadablePathsOf`, `src/cli/unreadable.ts`).
+  - 설정 파일 자신의 항목과 프로필의 항목은 task 파일로 실행할 때도 걸린다. 그래서 task 파일 하나로 설정의 읽기 제외를 뺄 수 없다.
+  - 아무 원천에도 없으면 필드가 없고 실행은 전과 같다.
+  - `task.policy.unreadablePaths`는 한 원천의 목록이다. 실행이 쓰는 것은 합친 목록이다(검토 R-102 M-1).
+- **k(`policy.minGroupSize`, Q-4, DR-70):**
+  - 5부터 1,000까지의 정수다(`MIN_GROUP_SIZE_LIMITS`). 설정 파일도 5 아래로 둘 수 없다. 틀린 값은 `policy.minGroupSize must be a whole number from 5 to 1000`이다.
+  - 실행의 k(`ResolvedTaskSpec.minGroupSize`)는 원천들이 정한 값 가운데 가장 큰 것이다(`effectiveMinGroupSize`). 어느 원천도 낮추지 못한다.
+  - 아무 원천도 정하지 않으면 필드가 없고 `query_table`은 기본값 5(`DEFAULT_MIN_GROUP_SIZE`)를 쓴다.
+- **거는 곳**
+  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께).
+  - 이동 계획의 적용: 적용 task의 목록을 게이트와 무결성 확인에 건다.
+  - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
+- **명령 금지(R-5)**
+  - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
+  - 해석 단계에서, 기록과 모델 요청 전에 거부한다. 보는 순서는 작업 종류 정의 자신의 것(`workflows.policy.commands`, `workflows.verifiers[i]`, `invalid_config`), 그다음 준 것(task 파일이면 `invalid_task`, 간편 형식이면 설정·프로필의 것으로 `invalid_config`), 끝으로 합친 것이다.
+  - 메시지는 `<자리> must be empty while unreadablePaths is set: …`(명령 규칙) 또는 `<자리> cannot be a command verifier while unreadablePaths is set: …`(검증기)다.
+  - doctor의 `commands` 점검은 실행의 목록(위와 같이 합친 것)과 명령 규칙이나 명령 검증기가 함께 있으면 `fail`이다. 문구는 `doctor.commands.unreadable_with_commands`이고 `count`는 명령 규칙과 명령 검증기의 수다. 명령은 찾아보지 않는다.
+- **사람에게 알리는 것(U-207의 줄)**
+  - 실행이 센다(`notePrivateData`). 끝 요약은 `unreadable_path`로 거부된 호출 수(`summary.denied_unreadable`)와 사람이 할 수 있는 일(`summary.denied_unreadable_hint`)을 말한다(`RunSummaryContext.deniedUnreadable`).
+  - `query_table` 결과가 k 미만 묶음을 뺐으면 `summary.groups_hidden`이다(`hiddenGroups`: 결과 수와 가장 큰 k). 둘 다 0이면 필드도 줄도 없다.
+- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
+- **아직 없는 것:** `query_table` 도구(U-208), `analyze-private` 작업 종류와 `analyze`의 `query_table`(U-210 둘째 몫).
+
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 
 ### 스냅샷 (`ChangeRecorder`)
@@ -1045,6 +1074,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
     - `lock.remove_hint` 문구도 reclaim 파일을 가리킨다(N-B 문구).
 - **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 문구는 `doctor.commands.extra_args_with_plan`이다.
 - **doctor `commands` 점검(U-182, B-8)**: 쓰기 허용 목록(`writablePaths`, 13.1)과 명령 규칙이 함께 있으면 `warn`이다(`doctor.commands.writable_with_commands`). 앞의 경고나 다른 문제가 있으면 그 글을 두고 이 문구를 `notes`에, 메시지 뒤에 붙인다.
+- **doctor `commands` 점검(U-210, R-5)**: 읽기 제외(13.2)와 명령 규칙이나 명령 검증기가 함께 있으면 실행이 거부하므로 `fail`이다(`doctor.commands.unreadable_with_commands`). 명령은 찾아보지 않는다.
 
 ### 17.7 오류 코드 추가
 
@@ -1083,6 +1113,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
   - `allowCommands: false`인 작업 종류에서는 `policy.commands`를 쓸 수 없다.
     - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
   - 사람 검토 작업 종류에는 확인 목록이 있어야 한다.
+  - U-210(묶음 A, R-5): 실행에 읽기 제외(13.2)가 있으면 명령 규칙과 `command` 검증기를 둘 수 없다. 해석 뒤 기록 전에 그 자리를 말하며 거부한다.
 - 정의의 `limits`는 기본값이다(검토 R-11 L-1).
   - task 파일이 비운 칸을 채우고, 설정 파일의 값보다 크면 그 값까지만 쓴다.
   - 상한은 설정 파일만 정한다(S-7). 정의 값이 상한이 되지는 않는다.

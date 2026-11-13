@@ -200,11 +200,15 @@ test(`${MOCK_LABEL} U-232: an OpenAI run that reads a private table openly - fou
   assert.deepEqual(csvStrays, [], describeFindings(csvStrays));
 });
 
-test("U-232: a scripted run - the journals' model_request records are the model channel", { timeout: 60_000 }, async (t) => {
+test("U-232: a scripted run - the journals' model_request records are the model channel, the model's own turns left out (U-236)", { timeout: 60_000 }, async (t) => {
   const sb = createSandbox(t);
   const canary = writePrivateWorkspace(sb);
   const tsv = tableOf(canary, "tsv");
-  const task = writeGeneralTask(sb, { id: "u232-scripted", verifiers: [{ id: "guide", kind: "file_rules", rules: [{ type: "exists", path: "public/guide.md" }] }] }, [toolStep("read_file", { path: tsv.path }), textStep("read")]);
+  // U-236: the model's own text and calls come back in the next model_request's newMessages (role
+  // assistant); a marker there is the model's, not one Codaryn sent.
+  const echoed = tableOf(canary, "jsonl").table.rows[2]?.contact ?? "";
+  const reading = { ...toolStep("read_file", { path: tsv.path }), text: `Reading the table (${echoed}).` };
+  const task = writeGeneralTask(sb, { id: "u232-scripted", verifiers: [{ id: "guide", kind: "file_rules", rules: [{ type: "exists", path: "public/guide.md" }] }] }, [reading, textStep("read")]);
   const run = await runGuarded(sb, ["run", "--task", task], cliEnv());
   assert.deepEqual([expectRunResult(run).status, expectRunResult(run).reason], ["done", "verified"], run.stderr);
   const findings = findCanary(canarySources({ workspace: sb.workspace, runs: { run }, scripted: true }), canary);
@@ -212,6 +216,8 @@ test("U-232: a scripted run - the journals' model_request records are the model 
   assert.deepEqual(foundIn(findings, "model", sent), sent);
   assert.ok(findings.filter((finding) => finding.channel === "model").every((finding) => finding.source.includes("model_request")));
   assert.deepEqual(foundIn(findings, "output", sent), [], "a tool result is not printed");
+  assert.deepEqual(foundIn(findings, "model", [echoed]), [], "the model's own words are not what Codaryn sent");
+  assert.deepEqual(foundIn(findings, "records", [echoed]), [echoed], "they are recorded");
 });
 
 test(`${MOCK_LABEL} U-232: a run that never touches the private folder - nothing is found in any channel`, { timeout: 90_000 }, async (t) => {

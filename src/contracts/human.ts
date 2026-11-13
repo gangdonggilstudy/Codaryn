@@ -733,6 +733,9 @@ export const FIXED_MESSAGES = {
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
   "runs.column.started": {},
+  // U-139 (UXM-23, PM): the runs table's started column header, which says the time is local (the run
+  // id header says UTC). runs.column.started stays the word of latestChosen's "(started <time>)".
+  "runs.column.started_local": {},
   "runs.column.status": {},
   "runs.column.changes": {},
   "runs.empty": {},
@@ -760,6 +763,10 @@ export const FIXED_MESSAGES = {
   // U-129 (2), AXM-21: added to the result column of a run with RunListEntry.review: `{verdict}` is
   // `review.verdict.<verdict>`, as review.recorded writes it.
   "runs.review": { verdict: "text" },
+  // U-139 (UXM-5, PM; a draft for p4g-general and nb-i18n): added to an apply run's result column
+  // right after its status words: the plan run it applied (RunListEntry.planRunId), so the row says
+  // which plan it is the apply of, as the plan run's row names its apply run (runs.plan_applied).
+  "runs.apply_of": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},

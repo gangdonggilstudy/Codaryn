@@ -90,6 +90,16 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
   - U-116(P1 묶음 C, 계약 `MarkdownFileRule`): `markdown_headings`는 `path`, `headings`(1~`MAX_MARKDOWN_RULE_HEADINGS` 50개; 항목마다 `text`는 앞뒤 공백을 뗀 뒤 1~`MAX_MARKDOWN_HEADING_CHARS` 200자(코드 포인트)이고 뗀 글로 저장, 선택 `level`은 1~6 정수), 선택 `order`(`any` 기본, `in_order`)만 받는다. `markdown_links`는 `path`만 받는다. 그 밖의 필드나 값은 `invalid_task`(설정의 검증기면 `invalid_config`)다.
   - 이 오류의 진단(`diagnostic.field`)은 그 규칙(`verifiers[i].rules[j]`)을 가리킨다. 메시지는 정확한 자리(`…headings[k].text` 등)를 말한다. `headings`·`level`·`order`가 계약의 `SCHEMA_FIELD_NAMES`에 아직 없어서다.
   - 파일을 읽고 판정하는 것은 검증기다(제목은 ATX·Setext를 앞뒤 공백과 닫는 `#`를 뗀 글자로 정확히 비교, 링크는 상대 경로의 대상이 작업 공간 안에 있는지, 파일 1 MiB까지, 네트워크 없음). CLI는 모양만 검사한다.
+  - 읽는 규칙과 한계(U-150, main의 `src/verify/markdown.ts`대로; R-89의 고침 U-116):
+    - 줄 끝은 LF, CR LF, 홀로 있는 CR이다(CommonMark). 앞의 BOM은 버린다.
+    - 펜스 코드(``` 또는 ~~~)는 통째로, 블록 안의 코드 스팬도 건너뛴다. 들여 쓴 코드 블록은 알아보지 않고 보통 글로 읽는다.
+    - HTML은 CommonMark의 HTML 블록 일곱 가지와 블록 안의 HTML 주석(`<!-- … -->`)을 건너뛴다. 그 안의 것은 제목도 링크도 아니다. 일곱 가지: `<script`·`<pre`·`<style`·`<textarea`부터 그 닫는 태그까지, `<!--`부터 `-->`까지, `<?`부터 `?>`까지, `<!X`부터 `>`까지, `<![CDATA[`부터 `]]>`까지, 블록 수준 태그나 한 줄을 차지한 여는·닫는 태그부터 다음 빈 줄까지. 그 밖의 인라인 HTML은 글로 읽는다.
+    - 링크 대상의 괄호는 CommonMark처럼 32단까지다. 괄호로 싼 제목 안에 탈출하지 않은 `(`가 있으면 링크가 아니다.
+    - 상한 둘(R-89 M-1, PM 결정)을 넘으면 그 규칙은 실패가 아니라 판정 불가(검증기 결과 `inconclusive`)다. 근거에 까닭을 적는다.
+      - 줄: `MAX_MARKDOWN_LINE_CHARS`(100,000자, UTF-16 단위)보다 긴 줄. 두 규칙 모두 판정 불가다(`line N is longer than 100000 characters, not read`). 펜스 코드와 HTML 블록 안의 줄은 해석하지 않으므로 세지 않는다.
+      - 대괄호: 한 블록에서 짝이 맞은 `[` `]`의 중첩이 `MAX_MARKDOWN_BRACKET_DEPTH`(32)보다 깊으면 `markdown_links`만 판정 불가다(`brackets nested deeper than 32 levels at line N, not read`). `markdown_headings`는 대괄호를 읽지 않으므로 같은 문서에서도 판정한다. 짝 없는 `[`(예: 구간 표기 `[0, 1)`)는 글이라 세지 않는다.
+      - 두 상수는 지금 `src/verify/markdown.ts`에 있다. 계약으로 옮길지는 p4g-general이 정한다.
+    - 실행의 신호(취소, 시간 한도)로 멈추면 그 규칙은 판정 불가다: 문서를 읽기 전이면 `cancelled before the document was read`, 대상을 보는 중이면 `cancelled while the link targets were checked`.
 
 ## 4. scripted 모델 파일 (`ScriptedModelScript`)
 

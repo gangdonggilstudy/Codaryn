@@ -53,10 +53,11 @@ describe("U-129 (1): an apply run's changes cell says the number is actions", ()
     assert.equal(rowsOf(standIn, apply(null, { status: null, reason: null }))[0]?.[2], "-");
   });
 
-  test("the rest of the apply row is as before (its status words)", () => {
+  test("the rest of the apply row is as before (its status words first)", () => {
     const [row] = rowsOf(standIn, apply(7));
     assert.equal(row?.[0], APPLY);
-    assert.equal(row?.[3], `${asText(real)("status.done")} (done/verified)`);
+    // U-139 (UXM-5) adds the plan run after the status words (u139-runs-apply-plan.test.ts).
+    assert.ok(row?.[3]?.startsWith(`${asText(real)("status.done")} (done/verified) · `), String(row?.[3]));
   });
 });
 
@@ -87,9 +88,9 @@ describe("U-129 with the real catalog", () => {
     const catalog = createMessageCatalog("en");
     assert.deepEqual([rowsOf(catalog, apply(7))[0]?.[2], rowsOf(catalog, apply(1))[0]?.[2]], ["7 actions", "1 action"]);
   });
-  test("ko: '동작 7' and '동작 1' (PM)", { skip }, () => {
+  test("ko: '동작 7개' and '동작 1개' (PM, U-145)", { skip }, () => {
     const catalog = createMessageCatalog("ko");
-    assert.deepEqual([rowsOf(catalog, apply(7))[0]?.[2], rowsOf(catalog, apply(1))[0]?.[2]], ["동작 7", "동작 1"]);
+    assert.deepEqual([rowsOf(catalog, apply(7))[0]?.[2], rowsOf(catalog, apply(1))[0]?.[2]], ["동작 7개", "동작 1개"]);
   });
   for (const language of MESSAGE_LANGUAGES) {
     test(`${language}: the verdict's line is the catalog's, with the verdict's own word`, { skip }, () => {

@@ -157,7 +157,7 @@ export const EN_MESSAGES: MessageTexts = {
   "revert.action.moved_back": "moved back to where it was",
   "revert.action.restored_from_discard": "restored from the discarded-files folder",
   "revert.dry_run_next": "Run again without --dry-run to revert.",
-  "revert.reverted_before": "This run was already reverted before, so its files may show as changed since the run.",
+  "revert.reverted_before": "Files already as before the run are skipped; it was reverted before",
   "revert.plan_only": "This run only made a plan and changed no file itself, so it has nothing of its own to put back and it is not marked as reverted.",
   "revert.plan_revert_apply": "To undo the changes of its plan, revert the run that applied it (--run {runId}).",
   "revert.plan_applying": "The run that applies its plan ({runId}) has no result yet: it is still going, or it stopped. Look at that run before you revert anything.",
@@ -192,8 +192,10 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.example.reverted": "runs reverted entirely: codaryn cleanup --workspace <workspace> --reverted",
   "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
-  "runs.column.run_id": "run id",
+  "runs.column.run_id": "run id (UTC)",
   "runs.column.started": "started",
+  // U-139 (UXM-23; draft for nb-i18n): the runs table's started header.
+  "runs.column.started_local": "started (local)",
   "runs.column.status": "result",
   "runs.column.changes": "changes",
   "runs.empty": "This workspace has no runs.",
@@ -210,6 +212,8 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.apply_actions": "{count} actions",
   "runs.apply_action_one": "1 action",
   "runs.review": "review: {verdict}",
+  // U-139 (UXM-5; draft for nb-i18n): the plan run an apply run applied.
+  "runs.apply_of": "apply of the plan of run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",

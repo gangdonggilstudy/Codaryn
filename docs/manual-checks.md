@@ -93,6 +93,7 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-4.3 | 두 볼륨 사이 이동 | 없음 | 두 번째 볼륨 | 설계 조사 5.4 |
 | M-4.4 | 심볼릭 링크 | 없음 | 개발자 모드 또는 관리자 | R-78, R-82 |
 | M-4.5 | OneDrive 자리표시 파일, 매핑한 네트워크 드라이브(참고) | 없음 | OneDrive 또는 공유 폴더 | R-78 |
+| M-4.6 | GUI에서 잠금 파일을 다른 프로그램이 쥐었을 때(잠깐·오래) | 없음 | Windows | U-176, U-194, 보고 smoke-flake |
 | M-5.1 | macOS·Linux의 빌드와 자동 시험 | 없음 | 그 OS의 기계 | 설계 9절 |
 | M-5.2 | macOS·Linux의 기본 설정 위치와 `init` | 없음 | 위와 같음 | N-1 |
 | M-5.3 | macOS·Linux의 키 없는 체험 | 없음 | 위와 같음 | 사용 안내 3·18절 |
@@ -102,6 +103,8 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-5.7 | macOS의 대소문자를 가리지 않는 파일 시스템과 보호 경로 | 없음 | macOS | 설계 조사 5.4 |
 | M-6.1 | 실제 `npm`(`.cmd`)으로 명령과 검증기 실행 | 없음 | — | 사용 안내 13절 |
 | M-6.2 | 탐색기 주소창의 `%APPDATA%` 표기 | 없음 | — | UXM-20 |
+| M-6.3 | GUI에서 `writablePaths` 밖 쓰기가 거부될 때 보이는 것 | 없음 | — | U-182, U-186, U-194 |
+| M-6.4 | 실제 모델이 `writablePaths` 거부를 받은 뒤 하는 일 | **필요** | — | U-175, U-182, U-194 |
 
 ---
 
@@ -1303,6 +1306,58 @@ node dist/src/cli/main.js doctor --workspace "<그 폴더>"
 
 **관련**: R-78
 
+### M-4.6 GUI에서 잠금 파일을 다른 프로그램이 쥐었을 때 (키 없음, Windows)
+
+**확인할 것**: 실행이 끝나 잠금을 풀려는 순간 다른 프로그램이 `.codaryn\lock.json`을 지우기 공유 없이 열고 있을 때 GUI에 무엇이 보이고 그 뒤 실행을 시작할 수 있는지
+- 잠깐(0.1초) 쥘 때: 풀기가 다시 시도해(모두 775ms) 실행이 정상으로 끝나는지
+- 오래(5초) 쥘 때: 끝에 무엇이 보이는지, 다음 시작이 막히는지, 앱을 다시 띄우면 풀리는지
+
+**여기서 못 한 까닭**
+- CLI는 `tests/integration/n13-lock-release.test.ts`가 확인한다(U-194).
+  - 잠깐 쥐면 `done`이다.
+  - 오래 쥐면 실행 기록은 완전하지만 CLI는 `internal_error`(종료 70)로 끝난다.
+  - 그 잠금은 끝난 CLI의 pid라 죽은 잠금이 되고, 다음 실행이 거둔다.
+- GUI는 다르다. 엔진 호스트가 앱이 켜진 동안 살아 있다. 그래서 남은 잠금이 살아 있는 잠금으로 판정되어, 앱을 다시 띄울 때까지 다음 시작이 막힐 것이다(U-176, 코드 기준).
+- 연기 시험은 이것을 강제로만 재현했다(보고 smoke-flake). 실제 백신·색인기가 이렇게 여는지는 이 환경에서 만들 수 없다.
+
+**준비**
+- M-3.1의 GUI와 체험 예시(`$gdemo`)를 쓴다.
+- 아래 스크립트를 PowerShell 창 하나에 붙여 둔다. `$ws`는 GUI로 연 작업 공간, `$hold`는 결과가 생긴 뒤 쥘 시간(ms)이다.
+- 이 스크립트는 `lock.json`이 생길 때까지 쉬지 않고 확인하므로, 그동안 CPU 하나를 쓴다.
+
+```powershell
+$ws = "$HOME\codaryn-demo-gui\workspace"
+$hold = 5000                     # 잠깐이면 100, 오래면 5000
+$lock = Join-Path $ws ".codaryn\lock.json"; $runs = Join-Path $ws ".codaryn\runs"
+$count = { if ([IO.Directory]::Exists($runs)) { @([IO.Directory]::GetFiles($runs, "result.json", "AllDirectories")).Count } else { 0 } }
+$before = & $count
+"lock.json을 기다립니다. 이제 GUI에서 실행을 시작하세요."
+$f = $null; while ($f -eq $null) { if ([IO.File]::Exists($lock)) { try { $f = [IO.File]::Open($lock, "Open", "Read", "Read") } catch {} } }
+while ((& $count) -le $before) { Start-Sleep -Milliseconds 5 }
+Start-Sleep -Milliseconds $hold
+$f.Close(); "놓았습니다."
+```
+
+**순서**
+1. `$hold = 100`으로 스크립트를 돌린다. GUI에서 `$gdemo\task.json`을 task 파일로 실행한다. "놓았습니다."가 나오면 결과를 본다. 새 작업을 하나 더 실행한다.
+2. `$hold = 5000`으로 다시 돌리고 같은 실행을 한다. 끝에 보이는 것을 적는다. 그 뒤 새 작업을 실행해 본다.
+3. 앱을 닫고 다시 띄운 뒤 새 작업을 실행한다.
+
+**기대 결과**(1은 시험 기준, 2·3은 코드 기준)
+- 1: 실행이 정상으로 끝나고, 다음 실행도 시작된다. `.codaryn\lock.json`은 남지 않는다.
+- 2
+  - 실행이 바꾼 파일과 기록은 남는다. 끝에는 오류(내부 오류)가 보일 것이다.
+  - 그 뒤 시작은 "다른 실행이나 되돌리기가 작업 공간을 쓰는 중입니다"(`workspace_locked`)로 막힐 것이다. `lock.json`의 pid는 엔진 호스트의 것이다.
+- 3: 다시 띄운 뒤에는 남은 잠금이 죽은 잠금이 되어 다음 실행이 거두고 시작된다.
+- 끝의 오류가 "실행은 끝났고 잠금만 남았다"를 말하는지, 그냥 내부 오류로만 보이는지 적는다. CLI는 지금 내부 오류로만 말한다.
+
+**다르면 볼 곳**
+- `src/store/lock.ts`(`releaseLock`, `RELEASE_RETRY_DELAYS_MS`)
+- `src/app/assemble.ts`(실행의 풀기)
+- 보고 `report-smoke-flake.md`
+
+**관련**: U-176, U-178, U-194
+
 ---
 
 ## 5. 다른 OS (macOS, Linux)
@@ -1654,6 +1709,92 @@ node dist/src/cli/main.js report --workspace $np\workspace --run latest
 **다르면 볼 곳**: [사용 안내](usage.md) 4절 "기본 설정 만들기"
 
 **관련**: UXM-20
+
+### M-6.3 GUI에서 `writablePaths` 밖 쓰기가 거부될 때 보이는 것 (키 없음)
+
+**확인할 것**: task 파일의 `writablePaths` 밖에 쓰는 실행을 GUI로 돌릴 때 다음이 보이는지
+- 진행 표시가 그 쓰기를 무엇으로 거부했다고 말하는지
+- 파일을 허용하는 법을 알려 주는지
+
+**여기서 못 한 까닭**
+- 앱 계층이 목록을 거는 것은 통합 시험이 확인한다(`tests/integration/n12-writable-paths.test.ts`, CLI와 앱이 같은 결정을 함).
+- 하지만 화면에 무엇이 보이는지는 사람이 봐야 한다.
+- CLI는 끝에 "그 파일을 허용하려면 writablePaths를 둔 모든 곳에 더하세요" 줄(`progress.not_writable_hint`)을 낸다.
+  - 이 줄은 CLI의 `run`만 낸다(`src/cli/run.ts`).
+  - GUI는 엔진 호스트를 거치므로 이 줄이 없을 것이다(코드 기준).
+
+**준비**: 쓰기를 `out` 아래로만 허용하고, 그 밖에 하나를 쓰는 대본 task를 만든다.
+
+```powershell
+$wp = "$m\writable"
+New-Item -ItemType Directory -Force "$wp\workspace" | Out-Null
+[IO.File]::WriteAllText("$wp\task.json", @'
+{
+  "schemaVersion": 1, "id": "manual-writable", "goal": "write two files", "workflow": "document", "workspaceRoot": "./workspace",
+  "model": { "provider": "scripted", "scriptPath": "./script.json" },
+  "policy": { "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false, "writablePaths": ["out"] },
+  "privacy": { "secretEnv": [] },
+  "limits": { "maxModelTurns": 4, "maxToolCalls": 4, "maxTotalTokens": 1000, "maxDurationMs": 60000 },
+  "verifiers": []
+}
+'@)
+[IO.File]::WriteAllText("$wp\script.json", @'
+{ "schemaVersion": 1, "steps": [
+  { "toolCalls": [{ "name": "write_file", "args": { "path": "out/ok.txt", "expectedHash": null, "change": { "kind": "replace_all", "content": "ok\n" } } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "toolCalls": [{ "name": "write_file", "args": { "path": "README.md", "expectedHash": null, "change": { "kind": "replace_all", "content": "no\n" } } }], "usage": { "inputTokens": 0, "outputTokens": 0 } },
+  { "text": "done", "usage": { "inputTokens": 0, "outputTokens": 0 } } ] }
+'@)
+node dist/src/cli/main.js run --task $wp\task.json     # 저장소 루트에서. CLI가 보이는 것(비교용)
+```
+
+**순서**
+1. 위의 CLI 실행에서 stderr 끝의 줄을 적는다.
+   - 영어면 `Writes denied because the file is not in writablePaths: 1. …`
+   - 한국어면 `writablePaths에 없는 파일이라 거부된 쓰기: 1건. …`
+2. 사본을 하나 더 만든다(`$wp2`, 같은 파일).
+3. GUI에서 그 작업 공간을 열고, `$wp2\task.json`을 task 파일로 실행한다.
+4. 실행 화면의 진행 표시(전체, "거부만")와 결과, 보고서를 본다.
+
+**기대 결과**
+- `out\ok.txt`만 생기고 `README.md`는 생기지 않는다(시험 기준).
+- 진행 표시에 그 쓰기가 거부됐다고 나올 것이다. 거부 사유 글은 공용 문구 표의 "쓰기를 허용한 파일 밖"(영어 `not among the files this task may write`)일 것이다. 보이는 글을 그대로 적는다.
+- 파일을 허용하는 법(위 CLI 줄과 같은 뜻)이 GUI 어디에 보이는지, 보이지 않는지 적는다. 보이지 않으면 담당이 정할 일이다.
+
+**다르면 볼 곳**
+- `src/i18n/ko.ts`(`denial.path_not_writable`, `progress.not_writable_hint`)
+- `gui/src/renderer/run/`
+
+**관련**: U-182, U-186, U-194
+
+### M-6.4 실제 모델이 `writablePaths` 거부를 받은 뒤 하는 일 (키 필요)
+
+**확인할 것**: 실제 모델이 `path_not_writable` 거부와 그 힌트(계약의 `REFUSAL_HINTS.path_not_writable`)를 받은 뒤 다음을 하는지
+- 같은 쓰기를 되풀이하지 않는지
+- 허용된 곳에 쓰거나, 사람에게 알리는지
+
+**여기서 못 한 까닭**: 힌트가 모델에게 가는 것은 가짜 API로 확인했다(n12). 실제 모델이 그것을 어떻게 받아들이는지는 실제 API가 있어야 한다.
+
+**준비**
+- M-1.5의 설정 파일(`$cfg`)에 `"writablePaths": ["out"]`을 `policy` 안에 더한다.
+- 연습용 작업 공간(`$ws`)을 쓴다.
+
+**순서**
+
+```powershell
+node dist/src/cli/main.js run --config $cfg --workspace $ws --goal "README.md 끝에 '## 점검' 절을 더한다."
+node dist/src/cli/main.js report --workspace $ws --run latest
+```
+
+**기대 결과**
+- `README.md` 쓰기는 거부되고(`path_not_writable`), 끝에 허용하는 법을 말하는 줄이 나온다.
+- 모델의 다음 행동을 적는다: 같은 쓰기를 되풀이하는지, `out` 아래에 쓰는지, 할 수 없다고 끝내는지. 정해진 기대는 없다.
+- 키 값은 화면과 보고서에 나오지 않는다.
+
+**다르면 볼 곳**
+- `src/contracts/`의 `REFUSAL_HINTS`
+- [CLI 계약](cli-contract.md) 13.1
+
+**관련**: U-175, U-182, U-194
 
 ---
 

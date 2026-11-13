@@ -484,6 +484,10 @@ export const FIXED_MESSAGES = {
   // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
   // hint lines come after both).
   "summary.failed": { count: "count" },
+  // U-198 (DR-69 B-4; draft for nb-i18n): RunSummaryContext.deniedNotWritable, the denied writes no
+  // writable list of the run covers (path_not_writable); for a run that carries out a `run` plan,
+  // the writes outside its approved files. Right after summary.denied when above 0.
+  "summary.denied_not_writable": { count: "count" },
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
@@ -593,6 +597,15 @@ export const FIXED_MESSAGES = {
   "plan.changes.next_apply": { runId: "runId" },
   "plan.changes.digest_guarantee": {},
   "apply.question": {},
+  // U-198 (DR-69 B-3, B-8; drafts for nb-i18n): apply's terminal question for a `run` plan, after its
+  // plan view (renderChangesPlan): what approving starts (a run whose file tools write only these
+  // {count} files), that the summary is the model's words the run is told and that only the files
+  // are enforced, a line when the run's policy allows commands (a command is not bound to the
+  // files, B-8), then apply.changes_question and `prompt.yes_no_default_no`.
+  "apply.changes.what": { count: "count" },
+  "apply.changes.summary_note": {},
+  "apply.changes.commands_note": {},
+  "apply.changes_question": {},
   "apply.unsafe_move_question": { count: "count" },
   "review.recorded": { runId: "runId", verdict: "text" },
   "review.recorded_replaced": { runId: "runId", verdict: "text" },
@@ -801,6 +814,9 @@ export const FIXED_MESSAGES = {
   // right after its status words: the plan run it applied (RunListEntry.planRunId), so the row says
   // which plan it is the apply of, as the plan run's row names its apply run (runs.plan_applied).
   "runs.apply_of": { runId: "runId" },
+  // U-198 (DR-69 B-3; draft for nb-i18n): a run that carried out a `run` plan (RunListEntry.planRunId
+  // on a `kind: "run"` entry) names that plan run after its status words, as runs.apply_of does.
+  "runs.carried_plan": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},
@@ -1102,6 +1118,12 @@ export const FIXED_MESSAGES = {
   // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
   // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
+  // U-193 (after U-176): a run, a check or a cleanup finished but the workspace lock could not be
+  // released (RunOutcome.lockLeft, PlanCheck.lockLeft, CleanupOutcome.lockLeft). No path: the
+  // doctor's lock line names the file. Draft by p5a from nc-human's line (p4g, nb-i18n to confirm).
+  // U-201: the run, apply and revert summaries say it when their context's `lockLeft` is true
+  // (RunSummaryContext, ApplySummaryContext, RevertSummaryContext), right before their next commands.
+  "lock.release_failed": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;
@@ -1324,10 +1346,25 @@ export interface RunSummaryContext {
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
+  /**
+   * U-198 (DR-69 B-4; draft for na-core, U-195): the denied calls of this run whose code is
+   * `path_not_writable` (`tool_decision` with `allowed: false`): writes that a writable list of the
+   * run does not cover; in a run that carries out a `run` plan, writes outside the approved files.
+   * They are among deniedToolCalls. `summary.denied_not_writable` right after `summary.denied` when
+   * above 0. Optional: absent counts as 0, no line.
+   */
+  readonly deniedNotWritable?: number;
   readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number; readonly couldAsk: boolean };
   readonly policyNarrowings?: readonly PolicyNarrowing[];
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /**
@@ -1421,6 +1458,13 @@ export interface HumanOutput {
 export interface ApplySummaryContext {
   readonly workspaceForm: "current" | "given" | "task";
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /**
@@ -1430,6 +1474,13 @@ export interface ApplySummaryContext {
  */
 export interface RevertSummaryContext {
   readonly workspaceShown?: ShownWorkspace;
+  /**
+   * U-201 (U-176, U-193; draft for na-core): the command finished but the workspace lock could not be
+   * released (the release threw after its retries, or answered false). The summary then says
+   * `lock.release_failed` right before its next commands; the result and its exit code are the
+   * command's own. Absent or false: released, no line.
+   */
+  readonly lockLeft?: boolean;
 }
 
 /** Signature of `createHumanOutput`, exported by `src/cli/human/index.ts`. One renderer per command. */

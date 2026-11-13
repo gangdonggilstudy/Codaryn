@@ -6,7 +6,9 @@
  *   list that does not exist yet.
  * - When the new file's parent is a link that leads outside the workspace, the entry cannot be
  *   resolved (it allows nothing) and the write itself is refused at its own resolve (outside_root).
- * - A parent link that stays inside covers the real place, as any link entry does.
+ * - U-187 (review V-11 H-1): a plan's entry is an effective path (propose_changes stores the path
+ *   with links resolved), so an entry with a link on its way now, inside or out, allows nothing; it
+ *   never covers where the link leads. (Before V-11 an inside link covered the real place.)
  * - R-101 L-2: the entries whose text covers the write are resolved first, so an allowed write
  *   costs one resolve of an entry; a refused one resolves them all.
  */
@@ -109,11 +111,11 @@ describe("U-180: creating a file that does not exist yet under a writable list",
     assert.deepEqual(await writeVerdict(workspace, [{ source: "plan", entries: ["link-out/new.md"] }], "link-out/new.md"), OUTSIDE);
   });
 
-  test("its parent a link that stays inside: the real place is covered, as with any link entry", { skip: !links && "no junctions here" }, async () => {
+  test("U-187 (V-11 H-1): its parent a link that stays inside: the plan's entry allows nothing", { skip: !links && "no junctions here" }, async () => {
     const sets: WritablePathSet[] = [{ source: "plan", entries: ["link-in/new.ts"] }];
-    assert.deepEqual(await writeVerdict(workspace, sets, "link-in/new.ts"), ALLOW);
-    assert.deepEqual(await writeVerdict(workspace, sets, "src/new.ts"), ALLOW, "the same file by its real path");
-    assert.deepEqual(await writeVerdict(workspace, sets, "src/other.ts"), NOT_WRITABLE);
+    assert.deepEqual(await writeVerdict(workspace, sets, "link-in/new.ts"), NOT_WRITABLE, "it resolves to src/new.ts, not to itself");
+    assert.deepEqual(await writeVerdict(workspace, sets, "src/new.ts"), NOT_WRITABLE, "the link's target is not the approved path");
+    assert.deepEqual(await writeVerdict(workspace, [{ source: "plan", entries: ["src/new.ts"] }], "link-in/new.ts"), ALLOW, "the effective path itself, reached through the link");
   });
 });
 

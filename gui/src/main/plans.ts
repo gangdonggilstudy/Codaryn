@@ -20,8 +20,8 @@ export interface PlanApproval {
   readonly moves: number;
   readonly discards: number;
   /**
-   * U-206 (U-196): a run plan's approval: its check is indexed by its files. Its apply is not this
-   * app's yet (the app layer's apply of a run plan comes with U-195): the main process refuses it.
+   * U-206 (U-196): a run plan's approval: its check is indexed by its files. U-226 (U-218): its apply
+   * dialog names their number; its apply is a run that carries the plan out.
    */
   readonly planKind?: "changes";
   readonly files?: number;

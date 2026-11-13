@@ -104,7 +104,9 @@ test("U-124: the engine host sends the question, takes the main process's answer
   assert.equal(confirmationsOf({ allowed: 1, user: 1, default: 1, cancelled: 1, note: "x" }), null);
   const apply = harness();
   await apply.registry.startApply({ workspace: "C:\\ws", profile: null, workflowRef: null, planRunId: "20261113T130000Z-0000a119", digest: "ab".repeat(32), consent: false });
-  assert.equal(apply.observer()?.confirm, undefined, "an apply asks nothing");
+  // U-226 (U-218): a run plan's apply is a model run that asks as a run does (a plan of moves never asks).
+  assert.equal(typeof apply.observer()?.confirm, "function", "an apply's run may ask");
+  assert.equal(typeof (apply.observer() as { onRunEvent?: unknown } | null)?.onRunEvent, "function", "and gives its run events");
 });
 
 test("U-124: the host checks the answer call", async () => {

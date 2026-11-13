@@ -198,7 +198,14 @@ export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error:
   - 결과는 먼저 `result.json`에 쓴 그것이다. 결과 JSON의 기존 필드는 바뀌지 않는다.
   - 전에는 이 경우 결과가 있는데도 `internal_error`였다.
   - 잠금은 이 프로세스가 사는 동안 남는다. GUI는 엔진이 같은 프로세스라, 앱을 닫을 때까지 이 작업 공간의 다음 시작이 `workspace_locked`다. 앱이 끝나면 다른 프로세스의 다음 실행이 오래된 잠금으로 거둔다.
+  - 앱은 풀지 못한 잠금을 나중에 다시 풀어 보지 않는다. 알리기(`lockLeft`)만 한다.
+    - U-211이 넣으려던 "몇 초 뒤 다시 풀기"는 뺐다(PM 결정, Codex V-17 H-1과 V-17b). store의 풀기는 "잠금을 읽어 이 프로세스와 그 id인지 확인한다"와 "파일을 지운다"가 한 걸음이 아니다. 그래서 나중의 풀기가 확인한 뒤 지우기 전에 같은 잠금을 다른 길(store를 바로 부르는 풀기, 또는 사람이나 다른 프로그램이 지움)로 지우고 다음 실행이 잡으면, 나중의 풀기가 다음 소유자의 잠금을 지울 수 있다. 앱 안의 줄 세우기로는 앱 밖의 길을 막지 못한다. 안전이 먼저라 다시 풀기를 하지 않는다.
+    - 그래서 GUI 글에도 "곧 다시 풀어 봅니다" 같은 약속을 넣지 않는다.
   - 사람용 글은 `lock.release_failed`(문구 id 초안, nc-human의 제안 글)다.
+  - U-229(nc-human의 U-220 뒤): CLI의 조립 약속(`AssemblyOutcome.finish`)이 바뀌었다. 잠금을 풀지 못하면 `finish`는 던지지 않고 `{ lockLeft: true }`로 끝나고, 아무것도 주지 않으면 풀었다는 뜻이다. 앱의 조립도 그 표시를 준다. 앱의 답(`RunOutcome.lockLeft`)은 그대로이고, 표시는 CLI가 자기 끝 요약을 쓸 때 읽는다(시험 `tests/unit/app/u229-finish-lock-left.test.ts`).
+    - 이동 계획의 적용은 CLI의 `runApply`가 잠금을 직접 잡고 푼다. U-220 뒤로는 풀지 못해도 적용 결과가 남지만(전에는 `internal_error`), 잠금이 남았다는 것은 CLI의 끝 요약에만 있고 `runApply`의 답에는 없다. 그래서 앱은 그것을 알지 못하고 `ApplyOutcome`에 `lockLeft`가 없다. CLI가 답에 실어 주면(nc-human에 바람) 앱이 실행처럼 알린다.
+    - 되돌리기는 다르다. CLI의 답(`RevertCliOutcome.lockLeft`, U-220)에 실리므로 앱이 `revert`의 답에 `lockLeft: true`로 옮긴다(5.5, R-106 L-1).
+    - R-106 I-5: 앱의 조립이 잠금을 잡은 뒤 실패하고 그 뒤의 풀기마저 던지면, 전에는 풀기의 오류가 조립 자신의 오류를 덮었다. 이제는 조립의 오류를 그대로 던진다(U-220 뒤 CLI의 조립과 같음). 잠금은 남는다. 시험 `tests/unit/app/u229-r106-lock-left.test.ts`.
 
 ### 5.2 진행 이벤트 구독 [구현 A-1]
 
@@ -293,6 +300,7 @@ export interface RunObserver {
 ### 5.5 되돌리기 [구현 A-1]
 
 - `revert({ workspace, runId, dryRun?, unsafeMoveConsent? })` → `RevertOutput` [구현 DR-14, DR-25 `ec1914d`]. CLI의 `runRevert`와 `createRevertCommand`를 `main.ts`와 같은 선택(미리보기, `latest`, 한 실행 판정 N-26·N-27 (a), 잠금 안의 되돌리기 기록)으로 부른다. 앱 계층에 되돌리기 규칙의 사본은 없다.
+- U-229(R-106 L-1, U-220 뒤): 답은 `RevertCallOutcome`이다. 되돌리기를 마쳤는데 잠금을 풀지 못했으면 `output` 옆에 `lockLeft: true`가 붙는다. 출력은 풀었을 때와 같다. 전에는(U-220 앞) 이 경우가 `internal_error`였고, U-220 뒤 U-229 앞에는 아무 말 없이 성공이었다. 잠금은 이 프로세스가 사는 동안 남는다(5.1).
 - DR-25: 하드 링크가 없는 드라이브에서 되돌릴 파일이 `unsafe_move`로 건너뛰어지면, GUI가 사람에게 따로 동의를 받는다. 동의하면 `unsafeMoveConsent: { runId }`로 다시 부른다.
   - 앱 계층은 CLI의 `AdapterRevert`로 `adapter` 경로의 동의만 넘긴다(`revertConsentOf`).
   - 미리보기와 함께, `latest`로, 다른 실행 id로 온 동의는 실행 전에 `invalid_arguments`다.
@@ -320,7 +328,16 @@ review(request: { settings: TaskForm; runId: string; decision: "accept" | "rejec
 
 // PlanOutput, ApplyResult, ApplyJournalRecord, ReviewOutput은 G-A 계약의 타입 그대로다(DR-17)
 type ApplyEvent = { kind: "record"; record: ApplyJournalRecord } | { kind: "notice"; text: MaskedText };
-interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutcome<ApplyResult>> }
+interface ApplyHandle { runId: string; cancel(): void; done: Promise<ApplyOutcome> }   // U-218
+type ApplyOutcome =
+  | { ok: true; output: ApplyResult }                              // 이동 계획(plan "apply")
+  | { ok: true; output: EngineResult; lockLeft?: true }            // U-218: 실행 계획(plan "run")을 수행한 실행
+  | { ok: false; error: AppError };
+interface ApplyObserver {
+  onEvent?(event: ApplyEvent): void;                               // 이동 계획의 적용 기록
+  onRunEvent?(event: RunEvent): void;                              // U-218: 실행 계획을 수행하는 실행의 이벤트
+  confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;   // U-218: 그 실행의 권한 질문
+}
 ```
 
 - 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
@@ -332,7 +349,18 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
   - 계획 모드는 묻지 않는다(보기는 비밀과 작업 공간만 정한다, DR-17). `latest`도 다른 계획처럼 푼다.
   - PM (가), AC-D16: CLI의 `plan`·`apply`가 종류로 나누는 것은 na-core의 U-195다. CLI의 `plan`이 실행 계획을 보이게 되면 앱은 그것을 받아 쓰고 이 보기는 없앤다.
   - 저장 꼴에는 얇게 기댄다(Codex V-11의 고침으로 바뀔 수 있음): `kind`, 관문용 파일 경로, 그리고 읽은 계획을 통째로 `changesPlanOutput`에 넘기는 것뿐이다.
-  - 실행 계획의 적용(앱 `applyPlan`의 종류 나눔)은 CLI의 `runApply`가 나누면 그 길에 앱의 고리(이벤트 관찰자, 취소, 승인 `adapter`)를 넘긴다. 실행할 goal은 계획을 만든 실행의 goal이다. 읽을 수 없으면 시작하지 않는다(PM). 그 연결은 U-195 뒤의 앱 단위다.
+- U-218(DR-69 B-4, U-195 뒤): `applyPlan`이 실행 계획을 수행한다. CLI의 `runApply`가 과제의 plan 설정으로 나눈다(AC-D16). 앱은 나누지 않고 두 길의 고리를 다 넘긴다.
+  - plan "run": CLI의 `applyChangesPlan`이 승인(`--digest`, 앱이면 `adapter`)을 보고, 계획을 만든 실행의 goal로 모델 실행을 돌린다(`runPrepared`, 승인된 계획). 그 goal을 읽을 수 없으면 시작하지 않는다(PM, DR-74).
+  - 앱은 그 `run` 환경에 `startRun`과 같은 고리를 준다(`appRunHooks`, `startRun`과 함께 쓴다).
+    - 조립(`createAppAssemble`): 기록에서 만든 이벤트(DR-15)는 `observer.onRunEvent`로, 권한 질문(U-108)은 `observer.confirm`으로 간다. 풀지 못한 잠금은 `lockLeft`(U-193)로 알린다.
+    - 승인된 계획의 부품(`approvedPlan`)을 CLI의 조립(U-195)과 같게 준다: 쓰기 목록을 받는 관문, 계획 차지(`markApplied`), 계획 파일 살피기, 계획 실행 기록에 대한 store의 두 물음. 없으면 CLI가 수행을 거부한다.
+    - 시작 게이트: 핸들(수행하는 새 실행의 id)이 첫 이벤트와 엔진 시작보다 먼저다. 취소는 `handle.cancel()` 하나다.
+    - 환경은 적용의 사본 그대로다. 그래서 변수 파일 값이 그 실행의 명령과 검증기에 간다(DR-4, U-71과 같음).
+  - 결과(`ApplyOutcome`)는 그 실행의 `EngineResult`다(`kind: "run"`, `planRunId`, `planDigest`). 실행의 `run_started` 기록에 `approval: "adapter"`가 남는다.
+  - 이동 동의(`unsafeMoveConsent`)는 이동 계획의 것이라, 실행 계획에 주면 CLI가 `invalid_arguments`로 거부한다. plan "run"으로 풀리지 않는 과제 형식은 `run_not_plan`이고, 다이제스트가 다르면 `plan_not_approved`, 이미 수행했으면 `plan_already_applied`다.
+  - 이동 계획(plan "apply")은 전과 같다. 이벤트는 `observer.onEvent`로 간다.
+  - 시험은 `tests/unit/app/u218-run-plan-apply.test.ts`(11건)다. 이동 계획만 다루는 기존 시험은 `done`을 이동 계획의 꼴로 좁혔다.
+  - 게이트를 빼는 변이는 시험이 가르지 못한다. CLI가 조립과 엔진 사이에 파일을 읽으므로(계획 실행의 기록 변경 표시 등), 게이트가 없어도 핸들이 먼저 나간다. `startRun`의 게이트도 같다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 

@@ -87,9 +87,10 @@ describe("U-136: the drafted texts, final", () => {
   });
 
   test("doctor's next steps: the key line asks for a new terminal; Korean steps ask, as the English do", () => {
-    assert.match(MESSAGE_TEXTS.en["doctor.next.key"], /^Register the key: set \{keyEnv\} as the API key line says, then open a new terminal$/);
+    // U-132 (main) chose "the line above" in English; the Korean says the same.
+    assert.match(MESSAGE_TEXTS.en["doctor.next.key"], /^Register the key: set \{keyEnv\} as the line above says, then open a new terminal$/);
     // The variable's name is followed by a word, not by a particle chosen for its last sound.
-    assert.equal(MESSAGE_TEXTS.ko["doctor.next.key"], "키 등록: API 키 줄의 안내대로 {keyEnv} 환경 변수를 등록하고 새 터미널을 여세요");
+    assert.equal(MESSAGE_TEXTS.ko["doctor.next.key"], "키 등록: 위 줄의 안내대로 {keyEnv} 환경 변수를 등록하고 새 터미널을 여세요");
     assert.equal(MESSAGE_TEXTS.ko["doctor.next.other"], "그 밖의 실패한 점검 {count}개: 각 줄의 안내대로 고치세요");
   });
 

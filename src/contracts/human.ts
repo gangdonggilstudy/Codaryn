@@ -752,6 +752,14 @@ export const FIXED_MESSAGES = {
   "runs.plan_applying": { runId: "runId" },
   "runs.plan_apply_reverted": { runId: "runId" },
   "runs.plan_apply_missing": { runId: "runId" },
+  // U-129 (1), PM: an apply run's changes cell (RunListEntry.changes, its applied actions) says they
+  // are actions, not files: `runs.apply_action_one` when there is one, else `runs.apply_actions`
+  // (English "1 action", "{count} actions"; Korean "동작 {count}"). The JSON keeps the number.
+  "runs.apply_actions": { count: "count" },
+  "runs.apply_action_one": {},
+  // U-129 (2), AXM-21: added to the result column of a run with RunListEntry.review: `{verdict}` is
+  // `review.verdict.<verdict>`, as review.recorded writes it.
+  "runs.review": { verdict: "text" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},
@@ -850,9 +858,13 @@ export const FIXED_MESSAGES = {
   // U-115 (UXM-9): the short help at a terminal (`codaryn`, `codaryn --help`): help.intro, then
   // help.first_steps and first_use.try_without_key, help.commands_heading with one help.summary.<command>
   // per command in the first-use order, then help.more, help.key, help.output, help.contract. Not
-  // at a terminal the full help is as before.
+  // at a terminal the full help is as before. U-132 (review R-91 L-2): each line within 100 columns:
+  // help.first_steps is the heading and help.first_steps_commands the commands on the next line
+  // (indented two); help.version follows help.more on its own line.
   "help.first_steps": {},
+  "help.first_steps_commands": {},
   "help.more": {},
+  "help.version": {},
   "help.summary.init": {},
   "help.summary.doctor": {},
   "help.summary.models": {},
@@ -922,17 +934,24 @@ export const FIXED_MESSAGES = {
   // .key_unusable, .model or .model_after_key, .other, .warnings, and .again), from the checks' texts;
   // with nothing to do, .ready (or .ready_task when doctor was given --task). The check lines and
   // doctor --json are as before; not at a terminal nothing is added.
+  // U-132 (review R-91): .init_with_config in place of .init where there is no default config
+  // location at all (L-1: init needs --config there); .model_after_key_fix after a key that cannot
+  // be sent (L-4); .ready says the run works in the folder it starts in, and .ready_workspace is the
+  // quick form for doctor given --workspace (L-3). Every line within 100 columns with its number (L-2).
   "doctor.next.heading": {},
   "doctor.next.init": {},
+  "doctor.next.init_with_config": {},
   "doctor.next.config_fix": {},
   "doctor.next.key": { keyEnv: "keyEnv" },
   "doctor.next.key_unusable": { keyEnv: "keyEnv" },
   "doctor.next.model": {},
   "doctor.next.model_after_key": {},
+  "doctor.next.model_after_key_fix": {},
   "doctor.next.other": { count: "count" },
   "doctor.next.warnings": { count: "count" },
   "doctor.next.again": {},
   "doctor.next.ready": {},
+  "doctor.next.ready_workspace": {},
   "doctor.next.ready_task": {},
   // DR-36 (b), DR-34 (a): the key is set and where `{provider}` requests send it: `{origin}`, set by
   // the provider's address variable `{variable}`, by the config field `{field}`, or the default.
@@ -1205,7 +1224,9 @@ export type DoctorText = {
  *   way to ask (the CLI gave the engine its terminal question). Absent when there was none. They are
  *   among deniedCommandCalls; the add-a-rule hint is for the other denied command calls only, and
  *   each count above 0 has its line: `summary.confirm_denied.user`, `.cancelled`, and for `default`
- *   `.unanswered` when couldAsk, else `.unasked`.
+ *   `.unanswered` when couldAsk, else `.unasked`. U-137 (R88b-L1): "among deniedCommandCalls" holds also
+ *   for a call whose run ended at its question (cancelled, or the time limit): the engine records its
+ *   denied `tool_decision` after the answer (journal.ts), so the hint still counts the other calls.
  * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
  *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
  *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the

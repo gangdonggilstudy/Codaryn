@@ -23,7 +23,7 @@ import { after, describe, test } from "node:test";
 import { DISCARDED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME, needsNotRevertedConfirmation } from "../../../src/contracts/index.js";
 import type { ApplyCleanup, ApplyResult, CleanupConfirmation, CleanupPlan, EngineResult, StateSummary } from "../../../src/contracts/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
-import { itemName, notRevertedHeadLine, runCleanup } from "../../../src/cli/cleanup.js";
+import { itemName, runCleanup } from "../../../src/cli/cleanup.js";
 import type { CleanupOutput } from "../../../src/cli/cleanup.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
 import { runRevert } from "../../../src/cli/revert.js";
@@ -119,13 +119,15 @@ describe("DR-44 (가): the records of a run not reverted go only with --include-
     return { base, work, notReverted, reverted };
   }
 
+  // U-86: the run not reverted is in the --include-not-reverted group, which says what it loses.
   test("the preview's head line says how many selected runs were not reverted", async () => {
     const { base, notReverted, reverted } = await twoRuns();
     const plan = (await preview(base, ["--older-than", "0"])).plan;
     assert.ok(plan.items.find((item) => itemName(item) === notReverted)?.warnings.includes("not_reverted"), JSON.stringify(plan.items));
     assert.deepEqual(plan.items.find((item) => itemName(item) === reverted)?.warnings, []);
     const text = (await cleanup(base, ["--older-than", "0"], false)).text;
-    assert.ok(text.includes(notRevertedHeadLine(createMessageCatalog("en"), 1)), text);
+    const item = plan.items.find((entry) => itemName(entry) === notReverted);
+    assert.ok(text.includes(createMessageCatalog("en").format("cleanup.group.include_not_reverted", { count: 1, bytes: item?.size.bytes ?? -1 })), text);
     assert.ok(text.includes("--include-not-reverted"), text);
   });
 

@@ -99,6 +99,12 @@ export interface StateSummary {
    * removed; shown only (cleanup.summary.unknown_folders). Absent when there is none.
    */
   readonly unknownFolders?: { readonly count: number } & StateSize;
+  /**
+   * U-86 (the rest of UXM-1): of `discarded`, the folders whose run has no records left
+   * (cleanup.summary.discarded_without_records). Under a symbol key, so `cleanup --json` does not
+   * change. Absent from a store before U-86.
+   */
+  readonly [STATE_DISCARDED_WITHOUT_RECORDS]?: { readonly count: number } & StateSize;
 }
 
 /** Signature of `summarizeState`, exported by `src/store/index.ts`. Reads only; never rejects for one run. */
@@ -231,7 +237,46 @@ export interface CleanupPlan {
    * file ids). applyCleanup removes nothing unless the plan it makes again has this digest.
    */
   readonly digest: ContentHash;
+  /**
+   * U-86: each item's fate, one per `items` entry in the same order (CleanupItemFate). Under a symbol
+   * key, so `cleanup --json` and the digest do not change; a spread copy keeps it. Absent only from a
+   * store before U-86: a renderer then takes a run's records with a NOT_REVERTED_WARNINGS code as
+   * `["include_not_reverted"]`, a discarded-files folder as `["delete_discarded"]` and anything else
+   * as `[]`.
+   */
+  readonly [CLEANUP_ITEM_FATES]?: readonly CleanupItemFate[];
 }
+
+/** U-86: the confirmations besides `--confirm` (CleanupConfirmation.includeNotReverted, .discarded). */
+export const CLEANUP_CONFIRM_FLAGS = ["include_not_reverted", "delete_discarded"] as const;
+export type CleanupConfirmFlag = (typeof CLEANUP_CONFIRM_FLAGS)[number];
+
+/**
+ * U-86 (UXM-10): what applyCleanup would do with one plan item, the plan unchanged, under each
+ * confirmation a person can give (planCleanup works it out with the same rules).
+ * - removedWith: the fewest flags besides `--confirm` with which it is removed, in
+ *   CLEANUP_CONFIRM_FLAGS order, each once (`[]`: `--confirm` alone). A run's records with a
+ *   NOT_REVERTED_WARNINGS code need include_not_reverted; a discarded-files folder needs
+ *   delete_discarded; an apply run with discarded_left needs delete_discarded (its folder selected
+ *   too) and whatever its own warnings need; a plan run needs what its apply run, selected too,
+ *   needs; leftovers need nothing.
+ * - keptFor: no confirmation removes it in this selection. used_by_kept_apply: a plan run whose
+ *   apply run is not selected, or is kept whatever is confirmed. discarded_left: an apply run whose
+ *   discarded-files folder holds files and is not selected.
+ */
+export type CleanupItemFate =
+  | { readonly removedWith: readonly CleanupConfirmFlag[] }
+  | { readonly keptFor: Extract<CleanupKeptReason, "used_by_kept_apply" | "discarded_left"> };
+
+/** U-86: the key of CleanupPlan's fates. A symbol, so no JSON line carries it. */
+export const CLEANUP_ITEM_FATES: unique symbol = Symbol("codaryn.cleanupItemFates");
+
+/**
+ * U-86 (the rest of UXM-1): the key of StateSummary's count of discarded-files folders whose run has
+ * no records left (`discarded/<runId>/` without `runs/<runId>/`). A symbol, so no JSON line carries
+ * it.
+ */
+export const STATE_DISCARDED_WITHOUT_RECORDS: unique symbol = Symbol("codaryn.stateDiscardedWithoutRecords");
 
 /** Signature of `planCleanup`, exported by `src/store/index.ts`. Reads only. */
 export type PlanCleanup = (request: {

@@ -70,7 +70,7 @@ describe("normalizeSide", () => {
   // in journal.jsonl and result.json, so the records folder that cleanup measures is 2 bytes larger.
   // cleanup's output (text and JSON) gives that size: there it is <BYTES>. The record files are
   // compared as they are (their "durationMs" is <MS> already), and no other step's numbers change.
-  test("U-167: cleanup steps' byte counts are <BYTES>; record files and other steps keep theirs", { todo: "U-167" }, () => {
+  test("U-167: cleanup steps' byte counts are <BYTES>; record files and other steps keep theirs", () => {
     const side = (bytes) =>
       normalizeSide([
         { key: "step 2: codaryn cleanup --workspace work --run 20261113T010203Z-aaaaaaaa | stdout", text: `Run records: 1 (${bytes} bytes)\nRemoved only with --include-not-reverted besides: 1 (${bytes} bytes). These are runs\n1 file(s), ${bytes} bytes` },

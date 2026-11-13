@@ -94,6 +94,20 @@ describe("normalizeSide", () => {
     assert.deepEqual([a[3], a[4]], ["codaryn: wrote 7093 bytes", '{"bytes":7093,"note":"7093 bytes"}'], "another step and a record file are kept");
     assert.notDeepEqual([b[3], b[4]], [a[3], a[4]]);
   });
+
+  // U-256: a confirmed cleanup writes the sizes it measured into .codaryn/cleanup.jsonl.
+  test("U-256: the cleanup record's byte counts are <BYTES> too; other record files keep theirs", () => {
+    const side = (bytes) =>
+      normalizeSide([
+        { key: "file work/.codaryn/cleanup.jsonl", text: `{"removed":{"runs":{"count":1,"files":4,"bytes":${bytes}},"discarded":{"count":0,"files":0,"bytes":0}}}` },
+        { key: "file work/.codaryn/runs/20261113T010203Z-aaaaaaaa/journal.jsonl", text: `{"bytes":${bytes}}` },
+      ]);
+    const a = [...side(7097).values()];
+    const b = [...side(7095).values()];
+    assert.equal(a[0], b[0], "the cleanup record is the same");
+    assert.equal(a[0], '{"removed":{"runs":{"count":1,"files":4,"bytes":<BYTES>},"discarded":{"count":0,"files":0,"bytes":<BYTES>}}}');
+    assert.deepEqual([a[1], b[1]], ['{"bytes":7097}', '{"bytes":7095}'], "another record file keeps its numbers");
+  });
 });
 
 describe("diffLines and compareSides", () => {

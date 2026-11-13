@@ -27,6 +27,24 @@ export interface ConsentRetry {
   readonly files: number;
 }
 
+/** R21b-L-1: the task form this app started a run with (the main process remembers it). */
+export interface RememberedForm {
+  readonly profile: string | null;
+  readonly workflow: string | null;
+}
+
+/**
+ * U-92 (review R-73, U-79 L1): what a verdict is recorded with. Only for a run the person was shown
+ * (listed, or started here), and with the form the main process remembers for it, never one the page
+ * names; a run without a remembered form (started elsewhere, or from a task file) is refused, as the
+ * window says to use the CLI for it.
+ */
+export function reviewTarget(listed: boolean, form: RememberedForm | undefined): { readonly ok: true; readonly form: RememberedForm } | { readonly ok: false; readonly code: string } {
+  if (!listed) return { ok: false, code: "unknown_run" };
+  if (form === undefined) return { ok: false, code: "form_unknown" };
+  return { ok: true, form };
+}
+
 export class RunHistory {
   private readonly listed = new Map<string, Set<string>>();
   private readonly previews = new Map<string, RevertPreview & { readonly at: number }>();
@@ -44,6 +62,13 @@ export class RunHistory {
 
   wasListed(workspace: string, runId: string): boolean {
     return this.listed.get(workspace)?.has(runId) === true;
+  }
+
+  /** U-92: a run this main process started in the workspace counts as one the person was shown (its result screen). */
+  noteStarted(workspace: string, runId: string): void {
+    const runs = this.listed.get(workspace) ?? new Set<string>();
+    runs.add(runId);
+    this.listed.set(workspace, runs);
   }
 
   /** A new token for this preview. The oldest are forgotten past MAX_PREVIEWS. */

@@ -30,6 +30,7 @@ import {
   toSchemaFieldPath,
 } from "../contracts/index.js";
 import type {
+  ApiKeyEnv,
   ListParkedFiles,
   CatalogText,
   CodarynConfig,
@@ -48,7 +49,10 @@ import type {
   ResolvedTaskSpec,
   Workspace,
 } from "../contracts/index.js";
+import { createMessageCatalog } from "../i18n/index.js";
 import { parseScript } from "../model/index.js";
+// U-87: the transport's own key rule (S-11), as provider.ts takes the providers from this module.
+import { isUsableApiKey } from "../model/anthropic/index.js";
 import { buildChildEnv, planWindowsLaunch } from "../tools/index.js";
 import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -417,8 +421,22 @@ function worst(checks: readonly DoctorCheck[]): DoctorStatus {
 }
 
 /** N-21: the text output in the catalog's language. Without a catalog (or a text), the English lines. */
-export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog): string {
-  if (messages === undefined) return renderDoctorEnglish(output);
+/**
+ * U-100 (design gap C-10, N-10, D-4): under a key check that says the variable is not set, the line
+ * init gives for registering it on this operating system (init.key_hint_windows or
+ * init.key_hint_posix). Neither puts a value in a command. For people only: the JSON is as before.
+ */
+/** U-100: init's registration line for a key variable. */
+type KeyHint = { readonly id: "init.key_hint_windows" | "init.key_hint_posix"; readonly params: { readonly keyEnv: ApiKeyEnv } };
+
+function keyHintOf(check: DoctorOutput["checks"][number], platform: NodeJS.Platform): KeyHint | null {
+  if (check.id !== "api_key" || check.text === undefined || check.text.id !== "doctor.api_key.missing" || !("params" in check.text)) return null;
+  const { keyEnv } = check.text.params as { keyEnv: ApiKeyEnv };
+  return { id: platform === "win32" ? "init.key_hint_windows" : "init.key_hint_posix", params: { keyEnv } };
+}
+
+export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog, platform: NodeJS.Platform = process.platform): string {
+  if (messages === undefined) return renderDoctorEnglish(output, platform);
   const raw = messages.format as (id: MessageId, params?: object) => CatalogText;
   // A catalog without a text for an id (an older catalog) must not stop doctor: the English stays.
   const format = (id: MessageId, fallback: string, params?: object): string => {
@@ -446,7 +464,9 @@ export function renderDoctor(output: DoctorOutput, messages?: MessageCatalog): s
     // DR-36 (b): each note on its own line under the check's text.
     const indent = " ".repeat(10 + width + 2);
     const notes = fromCatalog ? (check.notes ?? []).map((note) => `${indent}${format(note.id, noteEnglish(note), "params" in note ? note.params : undefined)}`) : [];
-    return [first, ...notes];
+    const keyHint = keyHintOf(check, platform);
+    const hint = keyHint === null ? [] : [`${indent}${format(keyHint.id, englishLine(keyHint), keyHint.params)}`];
+    return [first, ...notes, ...hint];
   });
   const english = `doctor: ${output.status} (exit code ${output.exitCode}). No network access was made and nothing was changed.`;
   let footer: string;
@@ -468,9 +488,23 @@ function noteEnglish(note: DoctorText): string {
   return note.id;
 }
 
-function renderDoctorEnglish(output: DoctorOutput): string {
+/** The English catalog's text of a message and its parameters, or its id when that has none. */
+function englishLine(text: { readonly id: MessageId; readonly params?: object }): string {
+  try {
+    return (createMessageCatalog("en").format as (id: MessageId, params?: object) => string)(text.id, text.params);
+  } catch {
+    return text.id;
+  }
+}
+
+function renderDoctorEnglish(output: DoctorOutput, platform: NodeJS.Platform): string {
   const width = Math.max(...output.checks.map((check) => check.id.length));
-  const lines = output.checks.map((check) => `[${check.status}]`.padEnd(10) + `${check.id.padEnd(width)}  ${check.message}`);
+  const lines = output.checks.flatMap((check) => {
+    const line = `[${check.status}]`.padEnd(10) + `${check.id.padEnd(width)}  ${check.message}`;
+    // U-100: the registration line, in English, under a missing key.
+    const keyHint = keyHintOf(check, platform);
+    return keyHint === null ? [line] : [line, `${" ".repeat(10 + width + 2)}${englishLine(keyHint)}`];
+  });
   lines.push("", `doctor: ${output.status} (exit code ${output.exitCode}). No network access was made and nothing was changed.`);
   return `${lines.join("\n")}\n`;
 }
@@ -636,7 +670,17 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     // The chosen provider's own key variable (API_PROVIDERS, SP-D12); the other known keys do not
     // count (SP-2 only hides them).
     const keyEnv = API_PROVIDERS[provider].keyEnv;
-    if (envValue(env, keyEnv) !== null) {
+    const key = envValue(env, keyEnv);
+    if (key !== null && !isUsableApiKey(key)) {
+      // U-87 (C-12, PM): a key a request cannot carry. The run sends nothing and ends as a run
+      // result (model_error, not_configured); doctor says so first. The reason only, never the value.
+      set(
+        "api_key",
+        "fail",
+        `${keyEnv} is set but holds a character other than printable ASCII (0x21-0x7E, no spaces); it cannot be sent, so an ${provider} run sends nothing and ends with model_error (not_configured)`,
+        { id: "doctor.api_key.unusable", params: { keyEnv } },
+      );
+    } else if (key !== null) {
       // DR-34 (a), DR-36 (b): say where the key goes (the origin of the address, never its path) and
       // where that address is set, in the message and as the catalog text.
       const destination = keyDestination(env, config, provider);
@@ -935,6 +979,6 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);
   const status = worst(checks);
   const output: DoctorOutput = { schemaVersion: 1, kind: "doctor", status, exitCode: DOCTOR_EXIT_CODES[status], checks };
-  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages);
+  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages, platform);
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }

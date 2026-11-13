@@ -120,6 +120,11 @@ const results: Record<string, unknown> = {};
 const SAVED_REPORTS = join(GUI, "build", "smoke-report");
 const savedReports: string[] = [];
 const notices: { readonly title: string; readonly body: string }[] = [];
+/** U-63: the files the OS open dialog would choose, in order (null: closed without a file). */
+const openAnswers: (string | null)[] = [];
+/** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
+const copied: string[] = [];
+const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
 let pretendInactive = false;
 /** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
 const transportOf = (response: { readonly ok: boolean; readonly value?: unknown; readonly error?: { readonly code: string } }): unknown => (response.ok ? response.value : response.error?.code);
@@ -145,6 +150,10 @@ startGui({
     return join(SAVED_REPORTS, name);
   },
   // U-5 (3.6): the OS end notifications, kept instead of shown.
+  answerOpenDialog: async () => openAnswers.shift() ?? null,
+  writeClipboard: (text) => {
+    copied.push(text);
+  },
   notify: (notice) => {
     notices.push(notice);
   },
@@ -374,6 +383,27 @@ startGui({
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;
       pretendInactive = false;
+      // U-62 (6.4, R-73): the run id through the main process; anything but a run id or a digest's first 12 is refused, nothing written.
+      await js("document.getElementById('run-copy-id')?.click(); true");
+      results["copyRunId"] = {
+        status: await waitFor("document.querySelector('#run-copy-id + .copy-status')?.getAttribute('data-copied') ?? null"),
+        copied: copied.at(-1) ?? null,
+        runId: (results["runResult"] as { runId?: string } | null)?.runId ?? null,
+      };
+      results["copyRefused"] = await (async () => {
+        const before = copied.length;
+        const code = (call: string): Promise<unknown> => js(`${call}.then((reply) => reply.ok === true ? "copied" : reply.code)`);
+        return {
+          keyShape: await code(`window.codaryn.copyText(${JSON.stringify(COPY_KEY_SHAPED)})`),
+          keyValue: await code(`window.codaryn.copyText(${JSON.stringify(process.env["ANTHROPIC_API_KEY"] ?? "")})`),
+          path: await code("window.codaryn.copyText('sub/b.txt')"),
+          words: await code("window.codaryn.copyText('any text at all')"),
+          digestUpper: await code("window.codaryn.copyText('0123456789AB')"),
+          lineBreak: await code("window.codaryn.copyText('a\\nb')"),
+          noPathCopy: await js("typeof window.codaryn.copyPath"),
+          written: copied.length - before,
+        };
+      })();
       // U-61 (3.12): the first run changed a file, so its result offers the revert preview, opened on the run list.
       results["revertFromResult"] = {
         runId: (results["runResult"] as { runId?: string } | null)?.runId ?? null,
@@ -444,6 +474,13 @@ startGui({
       const directRunId = await newResult(beforeDirect);
       await js("document.getElementById('run-view-plan')?.click(); true");
       results["directPlanShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      // U-62 (3.9): the digest's first 12 characters, as the plan shows them.
+      await js("document.getElementById('plan-copy-digest')?.click(); true");
+      results["copyDigest"] = {
+        status: await waitFor("document.querySelector('#plan-copy-digest + .copy-status')?.getAttribute('data-copied') ?? null"),
+        copied: copied.at(-1) ?? null,
+        summary: await js("document.getElementById('plan-summary')?.textContent ?? ''"),
+      };
       // U-32 (U-14 AXM-15): the model's summary under the agent's-words label, after the actions,
       // drawn by the engine's quoteModelText.
       results["planAgentWords"] = await js(
@@ -584,6 +621,11 @@ startGui({
         })(),
         verdict: await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null"),
         others: await js(`document.querySelectorAll('[data-review]').length`),
+      };
+      // U-92 (R-73, U-79 L1): a verdict only for a run the person was shown, with the form the main process remembers.
+      results["reviewGuard"] = {
+        forgedForm: await js(`window.codaryn.review(${JSON.stringify(second.ok ? second.handle : "")}, ${JSON.stringify(analyzeRunId)}, 'nonesuch', 'nonesuch', 'accept', null).then((r) => (r.ok ? r.verdict : r.code))`),
+        unlisted: await js(`window.codaryn.review(${JSON.stringify(second.ok ? second.handle : "")}, '20261113T000000Z-00000000', null, null, 'accept', null).then((r) => (r.ok ? 'recorded' : r.code))`),
       };
 
       // 5i2. UXM-14, DR-38: a records-changed mark on the analyze run, as a command outside the run could
@@ -781,6 +823,55 @@ startGui({
         }
       })();
       results["setupText"] = await js("document.getElementById('work')?.textContent ?? ''");
+
+      // U-63 (3.5, GUI-D8): a task file's run. Its model is the scripted one (no request to the fake
+      // API). The dialogs are answered by the test; no path reaches the page. A dialog closed without a
+      // file starts nothing; a task file inside its workspace is refused by the app layer (S-1).
+      const taskDir = join(GUI, "build", "smoke-task");
+      mkdirSync(taskDir, { recursive: true });
+      const taskSpec = (workspaceRoot: string) => ({
+        schemaVersion: 1,
+        id: "smoke-task-file",
+        goal: "say that the task file ran",
+        workflow: "document",
+        workspaceRoot,
+        model: { provider: "scripted", scriptPath: "./script.json" },
+        policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false },
+        privacy: { secretEnv: [] },
+        // Within the config file's limits (a task may not go past them).
+        limits: { maxModelTurns: 3, maxToolCalls: 3, maxTotalTokens: 50_000, maxDurationMs: 60_000 },
+        verifiers: [],
+      });
+      writeFileSync(join(taskDir, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "the task file ran" }] }));
+      writeFileSync(join(taskDir, "task.json"), JSON.stringify(taskSpec(SECOND)));
+      writeFileSync(join(taskDir, "vars.env"), "SMOKE_TASK_VAR=1\n");
+      writeFileSync(join(SECOND, "inside-task.json"), JSON.stringify(taskSpec(SECOND)));
+      const taskHandle = JSON.stringify(second.ok ? second.handle : "");
+      openAnswers.push(null);
+      const cancelled = await js(`window.codaryn.startTaskRun(${taskHandle}, false)`);
+      openAnswers.push(join(SECOND, "inside-task.json"));
+      const inside = await js(`window.codaryn.startTaskRun(${taskHandle}, false)`);
+      openAnswers.push(join(taskDir, "task.json"), join(taskDir, "vars.env"));
+      await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+      await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+      const beforeTask = await resultId();
+      await js("(() => { document.getElementById('task-with-vars').checked = true; document.getElementById('task-run-file').click(); return true; })()");
+      const taskRunId = await newResult(beforeTask, 60_000);
+      const taskDone = typeof taskRunId === "string" && taskRunId !== beforeTask ? "done" : taskRunId;
+      results["taskFileRun"] = {
+        cancelled,
+        inside,
+        done: taskDone,
+        result: await js("(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason') }; })()"),
+        place: await waitFor("(() => { const p = document.getElementById('run-task-steps')?.getAttribute('data-task-place'); return p && p !== 'checking' ? p : null; })()"),
+        answersLeft: openAnswers.length,
+        pathsOnPage: await js(`document.body.textContent.includes(${JSON.stringify(taskDir)})`),
+      };
+      unlinkSync(join(SECOND, "inside-task.json"));
+      // U-92: the task file's run is listed but has no remembered form, so the main process refuses its review.
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["reviewTaskRun"] = await js(`window.codaryn.review(${taskHandle}, ${JSON.stringify(taskRunId)}, null, null, 'accept', null).then((r) => (r.ok ? 'recorded' : r.code))`);
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

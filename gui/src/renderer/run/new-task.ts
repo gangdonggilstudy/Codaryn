@@ -142,7 +142,30 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
             start();
           }
         });
-        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, advanced, message, runButton);
+        // U-63 (3.5, GUI-D8): a run of a task file (for developers). The main process's OS dialogs choose
+        // the task file and, when asked for, a variables file; no path reaches the page or is kept.
+        const taskFile = el("section", undefined, { id: "task-file", "aria-labelledby": "task-file-title" });
+        const withVars = el("input", undefined, { type: "checkbox", id: "task-with-vars" });
+        const varsField = el("p", undefined, { class: "field" });
+        varsField.append(withVars, el("label", t.format("task.withVars"), { for: "task-with-vars" }));
+        const fromFile = button(t.format("task.runFile"), () => {
+          const before = run.last;
+          if (!run.starting({ goal: "", profile: null, workflow: null, taskFile: true })) return;
+          void (async () => {
+            const started = asStartRun(await api.startTaskRun(workspace.handle, withVars.checked === true));
+            if (started.ok) {
+              run.started(started.runId, Date.now());
+              deps.showRun();
+              return;
+            }
+            // A dialog closed without a file starts nothing; the session's goal stays as it was.
+            run.failedToStart(started.code === "cancelled" ? "start_cancelled" : started.code);
+            run.last = before;
+          })();
+        }, { id: "task-run-file" });
+        if (!run.canStart) fromFile.setAttribute("disabled", "");
+        taskFile.append(el("h3", t.format("task.fileTitle"), { id: "task-file-title" }), el("p", t.format("task.fileText"), { class: "notice" }), varsField, fromFile);
+        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, advanced, message, runButton, taskFile);
         body.setAttribute("data-newtask-ready", reply.ok ? "ok" : "error");
       })();
     },

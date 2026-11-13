@@ -11,6 +11,7 @@
  *   which refuses again if the file changed in between.
  *
  * Widening (UX 7, M-9): a command allowed that was not, any command allowed with extra arguments, a
+ * command that asked a person before each call allowed without asking (U-107, R-79 F-1), a
  * limit raised or removed, a protected path or an integrity path removed, a secret variable no
  * longer masked, a verifier removed, a command verifier added or changed (R-14 L-2), path tokens restored, plan actions allowed, a different API
  * address (top-level or a provider's, GUI F-3), another provider for quick runs (F-3), a profile or
@@ -20,7 +21,7 @@
 
 import { createHash } from "node:crypto";
 import { API_PROVIDERS, API_PROVIDER_NAMES, mergeWorkflowPolicy, mergeWorkflowVerifiers } from "../contracts/index.js";
-import type { ApiProviderName, CodarynConfig, CommandRule, Limits } from "../contracts/index.js";
+import type { ApiProviderName, CodarynConfig, CommandRule, ConfirmableCommandRule, Limits } from "../contracts/index.js";
 import { writeConfigAtomic } from "../cli/models.js";
 import { configFieldOf, providerSettingsOf } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
@@ -44,8 +45,39 @@ export function digestOf(text: string): string {
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
+/** The calls a rule matches: executable, arguments prefix, extra arguments (not whether it asks). */
 function ruleKey(rule: CommandRule): string {
   return JSON.stringify([rule.executable, rule.argsPrefix, rule.allowExtraArgs]);
+}
+
+/** U-74: a rule of the user's settings that asks a person before each call it allows. */
+const asks = (rule: CommandRule): boolean => (rule as ConfirmableCommandRule).confirm === true;
+
+/**
+ * The command rules' widening; `prefix` names whose (e.g. "workflows.docs.").
+ * - A rule matching calls no rule matched before: `command_added` (and `extra_args_allowed` when it
+ *   takes extra arguments), whether it asks or not: a run can make calls it could not make before.
+ * - U-107 (R-79 F-1): a rule without `confirm` matching calls only an asking rule matched before:
+ *   `confirm_removed`. The policy gate allows a call any rule without `confirm` allows, so those
+ *   calls now run without a person's answer (the asking rule changed, or a plain copy added).
+ * - A rule that asks where a plain one was, or a plain rule kept, widens nothing.
+ */
+function commandWidening(before: readonly CommandRule[], after: readonly CommandRule[], prefix: string): SettingsWidening[] {
+  const plainBefore = new Set(before.filter((rule) => !asks(rule)).map(ruleKey));
+  const askingBefore = new Set(before.filter(asks).map(ruleKey));
+  const found: SettingsWidening[] = [];
+  for (const [index, rule] of after.entries()) {
+    const key = ruleKey(rule);
+    const field = `${prefix}policy.commands[${index}]`;
+    if (plainBefore.has(key)) continue;
+    if (askingBefore.has(key)) {
+      if (!asks(rule)) found.push({ kind: "confirm_removed", field });
+      continue;
+    }
+    found.push({ kind: "command_added", field });
+    if (rule.allowExtraArgs) found.push({ kind: "extra_args_allowed", field });
+  }
+  return found;
 }
 
 const LIMIT_FIELDS = ["maxModelTurns", "maxToolCalls", "maxTotalTokens", "maxDurationMs", "maxRepairAttempts", "maxSameFailures"] as const;
@@ -68,13 +100,7 @@ type VerifierRules = CodarynConfig["verifiers"];
 
 /** The policy checks of the judgment for one set of rules; `prefix` names whose (e.g. "workflows.docs."). */
 function policyWidening(before: PolicyRules, after: PolicyRules, prefix: string): SettingsWidening[] {
-  const found: SettingsWidening[] = [];
-  const oldRules = new Set((before?.commands ?? []).map(ruleKey));
-  for (const [index, rule] of (after?.commands ?? []).entries()) {
-    if (oldRules.has(ruleKey(rule))) continue;
-    found.push({ kind: "command_added", field: `${prefix}policy.commands[${index}]` });
-    if (rule.allowExtraArgs) found.push({ kind: "extra_args_allowed", field: `${prefix}policy.commands[${index}]` });
-  }
+  const found: SettingsWidening[] = [...commandWidening(before?.commands ?? [], after?.commands ?? [], prefix)];
   const newProtected = new Set(after?.protectedPaths ?? []);
   if ((before?.protectedPaths ?? []).some((entry) => !newProtected.has(entry))) found.push({ kind: "protected_path_removed", field: `${prefix}policy.protectedPaths` });
   if (before?.restorePathTokens !== true && after?.restorePathTokens === true) found.push({ kind: "restore_path_tokens_enabled", field: `${prefix}policy.restorePathTokens` });
@@ -126,12 +152,7 @@ function workflowRulesWidening(before: CodarynConfig, after: CodarynConfig): Set
 
 /** What `after` lets a run do that `before` did not. */
 export function wideningOf(before: CodarynConfig, after: CodarynConfig): SettingsWidening[] {
-  const found: SettingsWidening[] = [];
-  const oldRules = new Set((before.policy?.commands ?? []).map(ruleKey));
-  for (const [index, rule] of (after.policy?.commands ?? []).entries()) {
-    if (!oldRules.has(ruleKey(rule))) found.push({ kind: "command_added", field: `policy.commands[${index}]` });
-    if (rule.allowExtraArgs && !oldRules.has(ruleKey(rule))) found.push({ kind: "extra_args_allowed", field: `policy.commands[${index}]` });
-  }
+  const found: SettingsWidening[] = [...commandWidening(before.policy?.commands ?? [], after.policy?.commands ?? [], "")];
   const oldLimits: Partial<Limits> = before.limits ?? {};
   const newLimits: Partial<Limits> = after.limits ?? {};
   for (const field of LIMIT_FIELDS) {
@@ -182,6 +203,13 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
   }
   if (quickProvider(before) !== quickProvider(after)) found.push({ kind: "provider_changed", field: "provider" });
   if (!same(before.profiles, after.profiles)) found.push({ kind: "profile_changed", field: "profiles" });
+  // U-107 (R-79 F-1): a profile's command that asked and no longer asks is named too, besides
+  // profile_changed (which every profile change gives).
+  for (const [name, profile] of Object.entries(after.profiles ?? {})) {
+    const old = before.profiles?.[name];
+    if (old === undefined) continue;
+    found.push(...commandWidening(old.policy?.commands ?? [], profile.policy?.commands ?? [], `profiles.${name}.`).filter((item) => item.kind === "confirm_removed"));
+  }
   // Review R-27 I4: a profile's own provider wins for its quick runs (SP-D10), so a profile that now
   // sends them to another provider says so, besides profile_changed.
   for (const [name, profile] of Object.entries(after.profiles ?? {})) {

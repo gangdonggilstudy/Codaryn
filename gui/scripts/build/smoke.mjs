@@ -237,7 +237,9 @@ const U13_DIALOGS = [
 ];
 /** U-22 (5j3, Windows only): the cleanup of the analyze run's records while one of its files is held open. */
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,stateSummary,tree";
+// U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
+// U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -358,6 +360,31 @@ const expected = [
   ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
+  // U-63 (3.5, GUI-D8): a task file's run with a variables file, its next steps in the open workspace; a closed dialog and a task file inside its workspace start nothing.
+  [
+    "taskFileRun",
+    (v) =>
+      v !== null &&
+      v.cancelled?.ok === false &&
+      v.cancelled.code === "cancelled" &&
+      v.inside?.ok === false &&
+      typeof v.inside.code === "string" &&
+      v.inside.code !== "cancelled" &&
+      v.done === "done" &&
+      v.result !== null &&
+      v.place === "open" &&
+      v.answersLeft === 0 &&
+      v.pathsOnPage === false,
+  ],
+  // U-62 (6.4, R-73): copies go through the main process: a run id or a digest's first 12, nothing else.
+  ["copyRunId", (v) => v !== null && v.status === "ok" && typeof v.runId === "string" && v.copied === v.runId],
+  [
+    "copyRefused",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({ keyShape: "invalid_args", keyValue: "invalid_args", path: "invalid_args", words: "invalid_args", digestUpper: "invalid_args", lineBreak: "invalid_args", noPathCopy: "undefined", written: 0 }),
+  ],
+  ["copyDigest", (v) => v !== null && v.status === "ok" && typeof v.copied === "string" && /^[0-9a-f]{12}$/.test(v.copied) && v.summary.includes(v.copied)],
   // U-61 (3.12): a result that changed files offers the revert preview; it opens on the run list.
   ["revertFromResult", (v) => v !== null && v.offered === true && v.preview === "1" && typeof v.title === "string" && typeof v.runId === "string" && v.title.includes(v.runId)],
   ["cancelReady", (v) => v === "ready"],
@@ -445,6 +472,10 @@ const expected = [
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
   // U-79: the run waiting for its review is reviewed from the list too: its report's review tab, with the verdict of 5g.
+  // U-92 (R-73, U-79 L1): the page's form is not used (the remembered one is); a run never shown is refused.
+  ["reviewGuard", (v) => JSON.stringify(v) === JSON.stringify({ forgedForm: "accepted", unlisted: "unknown_run" })],
+  // U-92: a listed run with no remembered form (a task file's) is refused by the main process.
+  ["reviewTaskRun", (v) => v === "form_unknown"],
   ["reviewFromList", (v) => v !== null && v.offered === true && v.tab === "review" && v.verdict === "accepted"],
   // PM (a): the engine host's test transport refused no request to another machine.
   ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],

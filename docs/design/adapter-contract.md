@@ -534,6 +534,11 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
 - **바꾸기.** GUI가 만든 새 설정 전체를 받는다.
   - 제안은 쓰지 않는다. 같은 검사를 거친 뒤 바뀌는 필드와 **권한을 넓히는 변경**을 준다(UX 7, M-9).
     - 명령 추가, 추가 인자 허용
+      - 묻는 규칙(U-74 `confirm: true`)을 새로 더해도 명령 추가다. 사람이 허락하면 전에 못 하던 호출을 하게 된다.
+    - U-107(R-79 F-1): 묻던 명령을 묻지 않고 허용(`confirm_removed`). 규칙에서 `confirm`을 빼거나, 묻는 규칙과 같은 호출을 맞추는 `confirm` 없는 규칙을 더한 경우다. 정책 관문은 `confirm` 없는 규칙 하나라도 맞으면 묻지 않고 허용하기 때문이다.
+      - 규칙이 묻게 되는 변경은 좁히기다.
+      - 프로필의 규칙도 같다. `profile_changed`에 더해 `confirm_removed`(`profiles.<이름>.policy.commands[i]`)를 준다.
+      - 작업 종류의 합친 규칙은 설정 규칙의 `confirm`을 이어받으므로, 설정 쪽 항목 하나로 말한다.
     - 한도 올림·없앰
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거
     - 명령 검증기 추가·변경(R-14 L-2, `b30bbce`): 실행마다 사람의 권한으로 돈다. 파일 규칙 검증기 추가는 넓히기가 아니다
@@ -560,9 +565,9 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   - 쓰기는 CLI의 `writeConfigAtomic`(`models --use`와 같은 함수)이다. 바꾸는 순간에 파일이 달라졌으면 다시 거부한다.
   - 쓴 파일은 정해진 형식의 JSON이며, 원래 파일의 들여쓰기·순서는 남지 않는다.
 
-### 5.12 작업 공간 목록 [구현 U-89] (standalone-gui 3.3)
+### 5.12 작업 공간 목록 [구현 U-89, U-102] (standalone-gui 3.3)
 
-GUI의 파일 나무가 쓴다. 작업 공간의 한 디렉터리를 한 단계만 준다. 읽기만 한다: 잠금·기록·실행 디렉터리를 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/workspace-dir.ts`, 시험은 `tests/unit/app/u89-workspace-dir.test.ts`다.
+GUI의 파일 나무가 쓴다. 작업 공간의 한 디렉터리를 한 단계만 준다. 읽기만 한다: 잠금·기록·실행 디렉터리를 만들지 않고 아무것도 보내지 않는다. 코드는 `src/app/workspace-dir.ts`, 시험은 `tests/unit/app/u89-workspace-dir.test.ts`와 `u102-workspace-dir-protected-invisible.test.ts`다.
 
 ```ts
 listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirListing
@@ -573,7 +578,8 @@ listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirLi
 
 - **설정.** `changes`(5.7)와 같은 읽기 준비(`prepareTask`의 1~7단계, 실행하지 않는 명령)로 작업 공간, 지금 등록한 비밀, 효력 있는 정책의 보호 경로를 얻는다. 설정이 풀리지 않으면 그 오류(예: `secret_env_missing`)이고 아무것도 읽지 않는다.
 - **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
-  - `dir`: 뿌리는 `""`, 그 밖은 `/`로 이은 상대 조각. 빈 조각, `.`, `..`, `\`, `:`, 제어 문자는 안 된다. 조각마다 255자, 깊이 64까지다.
+  - `dir`: 뿌리는 `""`, 그 밖은 `/`로 이은 상대 조각. 빈 조각, `.`, `..`, `\`, `:`, 제어 문자(C0, DEL, C1)는 안 된다. 조각마다 255자, 깊이 64까지다.
+    - U-102: 줄·문단 구분 문자(U+2028, U+2029)와 기본 무시 문자(`\p{Default_Ignorable_Code_Point}`)도 안 된다. 그런 이름은 모양 때문에 가린 항목이므로 펼칠 수 없다.
   - `offset`: 0 이상의 정수. 앞 쪽의 `nextOffset`을 넘긴다.
   - `limit`: 1~500(`WORKSPACE_PAGE_SIZE`). 없으면 500이다.
 - **링크를 따라가지 않는다.**
@@ -582,10 +588,19 @@ listWorkspaceDir({ settings: TaskForm, dir, offset, limit? }) → WorkspaceDirLi
   - 항목은 자기 종류로 읽는다(`readdir`의 `withFileTypes`, 링크를 따라가지 않음). 링크·junction은 `link`, 뿌리의 `.codaryn`은 `state`이고 둘 다 다시 펼치지 않는다.
 - **이름은 가려서 준다.**
   - 제어 문자(C0, DEL, C1)가 든 이름은 아예 보이지 않는다(`shown: ""`).
-  - 그 밖은 `cleanText`, 키 모양과 지금 설정된 모든 API 키 값(`hideKeys`, `knownKeyValues`), 지금 등록한 값(게이트웨이의 `mask`, AC-D14) 순서로 가린다. 가리기가 실패하면 `""`이다.
+  - 그 밖은 키 모양과 지금 설정된 모든 API 키 값(`hideKeys`, `knownKeyValues`), 지금 등록한 값(게이트웨이의 `mask`, AC-D14) 순서로 가린다. 둘 다 이름을 있는 그대로 보므로, 보이지 않는 문자로 끊은 값도 찾는다. 가리기가 실패하면 `""`이다.
+  - 그다음 `cleanText`(양방향 제어 등을 `?`로)를 거친다.
+  - U-102(R-78 L-2): 기본 무시 문자도 하나하나 `?`로 보인다. 영폭 공백·연결자, BOM, 소프트 하이픈, 한글 채움 문자, 이체 선택자 등이다. 그래서 두 이름이 같아 보일 수 없고, 그런 항목은 `masked`다.
+    - 순서가 중요하다. `?`로 먼저 바꾸면 끊긴 키 값이나 키 모양이 더는 키로 보이지 않아 일부가 드러난다. 그래서 가린 뒤에 바꾼다(시험이 본다).
   - `shown`이 원래 이름과 다르면 `masked: true`이고 `name`은 `null`이다. **가린 항목의 원래 이름은 앱 계층 밖으로 나가지 않는다.** 그래서 어댑터는 그 항목을 열거나 고를 수 없다.
   - `name`은 어댑터가 아래 경로를 만들 때만 쓴다. 보여 줄 때는 `shown`을 쓴다.
-- **보호.** `protected`는 효력 있는 정책의 보호 경로가 항목의 상대 경로를 덮는지다(정책의 `compileProtectedPaths`, 정책이 경로를 판정하는 그대로 글자 기준).
+- **보호.** U-102(R-78 L-1): `protected`는 정책 관문이 그 경로에 쓰기를 보호 경로로 막는지다. 정책의 `compileProtectedPaths`를 그대로 쓴다.
+  - 먼저 글자 기준(`covers`, `checkRequested`와 같음), 다음 실경로 기준(`coversEffective`, `checkEffective`와 같음)이다.
+  - 그래서 보호 경로인 링크의 대상, 보호 폴더를 가리키는 링크, 짧은 이름(8.3)으로 부른 보호 폴더의 항목도 보호로 나온다. 시험이 모든 항목을 정책 관문의 쓰기 판정과 비교한다.
+  - 파일·디렉터리 항목의 실경로는 나열한 디렉터리의 실경로와 그 이름이다. 링크와 그 밖의 항목은 쓰기처럼 풀어 본다. 작업 공간이 거부하는 쓰기(뿌리 밖, 상태 디렉터리)는 보호가 아니다.
+  - 작업 공간의 경로 풀이는 한 번의 목록 동안 기억한다. 정책의 판정은 보호 항목마다 풀이를 하기 때문이다. 판정하지 못하면 보호로 보인다.
+  - 이 기계에서 항목 20,000개, 보호 경로 셋인 디렉터리를 나열하는 데 약 150 ms였다.
+- **U-102 시험**(8절 표의 5.12 행에 더해): 보호 링크의 대상·보호 폴더로 가는 링크·짧은 이름의 보호 폴더가 보호, 모든 항목이 정책 관문의 쓰기 판정과 같음, 보이지 않는 문자가 든 이름이 `?`로 보이고 가린 항목, 그런 `dir`은 `invalid_arguments`, 보이지 않는 문자로 끊은 등록 값·키 값·키 모양이 가려짐.
 - **크기와 순서.**
   - 항목이 `MAX_WORKSPACE_DIR_ENTRIES`(100,000)를 넘으면 `too_large`다. 일부만 주지 않는다.
   - 디렉터리(`dir`, `state`)가 먼저, 그다음 나머지다. 각 묶음은 숫자를 아는 정렬(`Intl.Collator("en", { numeric, sensitivity: "base" })`) 뒤 코드 포인트 순서로 정한다. 같은 디렉터리는 같은 순서다.

@@ -101,17 +101,20 @@ async function digestOf(base: string, args: readonly string[]): Promise<string> 
 
 const runDir = (work: string, runId: string): string => path.join(work, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
 
-describe("R-34b P-3: the offered command does not carry --include-not-reverted", () => {
-  test("the confirm line names --confirm only; a line of its own tells the flag and what is lost", async () => {
+// U-86 (PM, plan B) replaces R-34b P-3: the preview ends with two commands, --confirm alone and the one
+// with every flag some item needs, so the second carries --include-not-reverted. What it loses is
+// told before it, in that group's own line, not one word weaker.
+describe("U-86 (after R-34b P-3): the command with every flag carries --include-not-reverted; its group says what is lost", () => {
+  test("a run not reverted: the --confirm alone line, if any, does not carry the flag; the group line tells what is lost", async () => {
     const { base, work } = await workspace();
     await changingRun(base, work, "a");
     const text = (await cleanup(base, ["--older-than", "0"], false)).text;
     const lines = text.split("\n");
     const offered = lines.filter((line) => /--confirm [0-9a-f]{12}/.test(line));
-    assert.equal(offered.length, 1, text);
-    assert.equal(offered[0]?.includes("--include-not-reverted"), false, offered[0] ?? "");
+    assert.ok(offered.some((line) => line.endsWith(" --include-not-reverted")), text);
+    for (const line of offered.filter((entry) => !entry.includes("--include-not-reverted"))) assert.equal(line.includes("--delete-discarded"), false, line);
     const apart = lines.filter((line) => line.includes("--include-not-reverted") && !/--confirm [0-9a-f]{12}/.test(line));
-    assert.ok(apart.some((line) => /can no longer be reverted/.test(line) && /yourself/.test(line)), text);
+    assert.ok(apart.some((line) => /can no longer be reverted/.test(line)), text);
   });
 
   test("no run not reverted: no such line", async () => {
@@ -235,12 +238,13 @@ describe("U-3 (R-34c L-1): what the CLI shows of the contract's unknown folders 
     }
   });
 
+  // U-86: that line is the --include-not-reverted group's.
   test("the line apart about --include-not-reverted also names runs whose records cannot be checked", async () => {
     const { base, work } = await workspace();
     const runId = await changingRun(base, work, "u");
     await writeFile(path.join(runDir(work, runId), "result.json"), "{ not json", "utf8");
     const text = (await cleanup(base, ["--older-than", "0"], false)).text;
     const apart = text.split("\n").filter((line) => line.includes("--include-not-reverted") && !/--confirm [0-9a-f]{12}/.test(line));
-    assert.ok(apart.some((line) => /records cannot be checked/.test(line) && /yourself/.test(line)), text);
+    assert.ok(apart.some((line) => /records cannot be checked/.test(line) && /can no longer be reverted/.test(line)), text);
   });
 });

@@ -3,9 +3,9 @@
  * Order per call: checkRequested -> restore permitted fields -> checkEffective -> execute.
  */
 
-import type { PolicyConfig } from "./task.js";
-import type { JsonObject } from "./text.js";
-import type { EffectiveToolCall, EffectiveWorkflowToolCall, ToolCall, ToolDescriptor } from "./tool.js";
+import type { ConfirmablePolicyConfig } from "./task.js";
+import type { JsonObject, MaskedText } from "./text.js";
+import type { EffectiveToolCall, EffectiveWorkflowToolCall, ToolCall, ToolDescriptor, ToolName } from "./tool.js";
 import type { Workspace } from "./workspace.js";
 
 export const PERMISSION_KINDS = ["path", "command", "network", "destructive", "restore"] as const;
@@ -24,6 +24,13 @@ export const POLICY_DENIAL_CODES = [
   "protected_path",
   /** G-A: a plan action whose kind `PolicyConfig.planActions` does not list. Permission `destructive`. */
   "plan_action_not_allowed",
+  /**
+   * U-74 (DR-3): a command a `confirm: true` rule allows only after a person allowed this one call
+   * (PolicyDecision `confirm`), and that was not allowed: the person denied or closed the question,
+   * nobody could be asked, the run was cancelled or hit its time limit while it waited. Permission
+   * `command`. Why is in the journal's `confirmation_answered.by`.
+   */
+  "confirmation_required",
 ] as const;
 export type PolicyDenialCode = (typeof POLICY_DENIAL_CODES)[number];
 
@@ -44,19 +51,73 @@ export const REFUSAL_HINTS: { readonly [C in PolicyDenialCode | "unresolved_toke
   restore_denied: "A protected placeholder cannot be used in this field.",
   protected_path: "This path is protected in this task; do not write to it.",
   plan_action_not_allowed: "This task does not allow this kind of plan action.",
+  confirmation_required: "The person did not allow this call during the run; do not repeat it.",
   unresolved_token: "A protected placeholder cannot be used in this field.",
   invalid_token: "Keep protected placeholders exactly as they were given, or leave them out.",
 };
 
 /**
- * Phase 1a is non-interactive: a decision is allow or deny, never "ask".
- * G-A: unchanged in stage 4. Plan approval happens between runs (plan.ts, DR-1), not here. The
- * in-run permission question (N-11) is decided as DR-3 and comes at the start of stage 5; its
- * decision value and `EngineDeps.confirm` are named here only and not part of this contract yet.
+ * A decision is allow or deny. Plan approval happens between runs (plan.ts, DR-1), not here.
+ * U-74 (DR-3): the in-run permission question is a denial with a mark: `confirm: true`, only with
+ * permission `command` and code `confirmation_required`, only from checkEffective, and only when the
+ * command is allowed by a `confirm: true` rule of the user's settings (ConfirmableCommandRule) and
+ * by no rule without it. A part that does not know the mark denies (the safe default). The engine
+ * asks (EngineDeps.confirm); after `allow_once` it judges the same call with checkEffective again
+ * and runs it only when that again allows it or gives the same mark (the answer is for that call
+ * once). What the policy denies outright (outside the root, the state directory, a protected path,
+ * a refused restore) is never asked. Without any `confirm` rule the mark never comes.
  */
 export type PolicyDecision =
   | { readonly allowed: true }
-  | { readonly allowed: false; readonly permission: PermissionKind; readonly code: PolicyDenialCode };
+  | { readonly allowed: false; readonly permission: PermissionKind; readonly code: PolicyDenialCode; readonly confirm?: true };
+
+/** U-74: the request id of a question: `q` and its number in the run, from 1. */
+export const CONFIRM_ID_PATTERN_SOURCE = "^q[1-9][0-9]{0,5}$";
+
+/**
+ * U-74 (DR-1, DR-3, adapter-contract 5.9): the one question asked during a run, a permission
+ * question. Fixed fields only: `subject` is the call's executable as the gateway masks it (the same
+ * text as the user's rule, which matches it exactly) and `argumentCount` the number of its
+ * arguments. The arguments themselves are the model's text and are never in it. Not restored for
+ * display. U-106 (R-79 L-2): a screen shows `subject` as it is, so the engine makes it safe as the
+ * final message (safeModelText): control and invisible characters other than LF and TAB left out,
+ * masked, key shapes hidden as HIDDEN_KEY_MARKER. Renderers need not hide keys in it again.
+ */
+export interface ConfirmRequest {
+  readonly kind: "permission";
+  /** CONFIRM_ID_PATTERN_SOURCE. */
+  readonly id: string;
+  readonly callId: string;
+  readonly tool: ToolName;
+  readonly permission: PermissionKind;
+  readonly subject: MaskedText;
+  readonly argumentCount: number;
+}
+
+/** U-74: the answers. `dismissed`: closed without answering, recorded as `deny` by `default`. */
+export const CONFIRM_ANSWER_DECISIONS = ["allow_once", "deny", "dismissed"] as const;
+export type ConfirmAnswer = { readonly decision: (typeof CONFIRM_ANSWER_DECISIONS)[number] };
+
+/** U-74: what `confirmation_answered` records. There is no "always": an answer is for one call. */
+export const CONFIRMATION_DECISIONS = ["allow_once", "deny"] as const;
+export type ConfirmationDecision = (typeof CONFIRMATION_DECISIONS)[number];
+/**
+ * U-74 (DR-10): who decided. `user`: a person answered allow_once or deny. `default`: nobody could
+ * be asked (no EngineDeps.confirm, not a terminal), the question was dismissed, the answer was not
+ * one of the decisions or the asking failed, or the run's time limit (maxDurationMs, which the wait
+ * counts in) ended the wait; always `deny`. `cancelled`: the run was cancelled while it waited.
+ */
+export const CONFIRMATION_BY = ["user", "default", "cancelled"] as const;
+export type ConfirmationBy = (typeof CONFIRMATION_BY)[number];
+
+/**
+ * U-74: EngineDeps.confirm, as the app layer's RunObserver.confirm. `signal` aborts when the run is
+ * cancelled or its time is up; the engine treats a throw or an answer that is not one of
+ * CONFIRM_ANSWER_DECISIONS as `dismissed`. U-106 (R-79 L-3): the engine reads the answer's
+ * `decision` once, right after it came, and only as an own property: a read that throws or a
+ * `decision` on the prototype is `dismissed` too.
+ */
+export type ConfirmPermission = (request: ConfirmRequest, signal: AbortSignal) => Promise<ConfirmAnswer>;
 
 export interface PolicyGate {
   /**
@@ -89,7 +150,8 @@ export interface PlanActionCall {
 }
 
 export interface PolicyGateOptions {
-  readonly config: PolicyConfig;
+  /** U-74: command rules may carry `confirm` (ConfirmableCommandRule). */
+  readonly config: ConfirmablePolicyConfig;
   readonly workspace: Workspace;
 }
 

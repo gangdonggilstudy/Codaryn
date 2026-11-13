@@ -41,6 +41,7 @@ import {
   ALL_TOOL_DESCRIPTORS,
   ALL_TOOL_NAMES,
   BUILTIN_TOOLS,
+  CONFIRM_ANSWER_DECISIONS,
   CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
@@ -60,11 +61,13 @@ import {
   TOOL_FAILURE_HINTS,
   asRawText,
   failedToolContent,
+  safeModelText,
   toolFailureMessage,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
   AnyToolName,
+  ConfirmAnswer,
   ContentHash,
   EffectiveToolCall,
   EffectiveWorkflowToolCall,
@@ -99,6 +102,9 @@ import type {
   ToolErrorCode,
   ToolName,
   ToolResult,
+  ConfirmRequest,
+  ConfirmationBy,
+  ConfirmationDecision,
   VerifierOutcome,
   VerifierResult,
   WorkflowToolName,
@@ -306,6 +312,22 @@ interface ProposedPlan {
   readonly actions: number;
 }
 
+/**
+ * U-106 (R-79 L-3): the decision of a permission answer, read once, inside a try, from an own
+ * property only. A read that throws (a getter, a proxy), a `decision` on the prototype (an IPC value
+ * copied with Object.assign can bring one through `__proto__`), or anything not one of
+ * CONFIRM_ANSWER_DECISIONS is `dismissed`, as ConfirmPermission says.
+ */
+function answerDecision(answer: unknown): ConfirmAnswer["decision"] {
+  try {
+    if (typeof answer !== "object" || answer === null || !Object.hasOwn(answer, "decision")) return "dismissed";
+    const decision: unknown = (answer as { readonly decision?: unknown }).decision;
+    return (CONFIRM_ANSWER_DECISIONS as readonly unknown[]).includes(decision) ? (decision as ConfirmAnswer["decision"]) : "dismissed";
+  } catch {
+    return "dismissed";
+  }
+}
+
 function isProposedPlan(payload: unknown): payload is { readonly digest: ContentHash; readonly actions: readonly ResolvedPlanAction[] } {
   if (typeof payload !== "object" || payload === null) return false;
   const value = payload as { digest?: unknown; actions?: unknown };
@@ -362,8 +384,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   let lastFinal: MaskedText | null = null;
   /** U-55 (AXM-9): the model error that ended the run (EngineResult.modelError); null otherwise. */
   let endingModelError: RunModelError | null = null;
-  const endedByModelError = (kind: ModelErrorKind, turn: number, httpStatus?: number): End => {
-    const retryable = modelErrorRetryable(kind, httpStatus);
+  // U-82 (DR-68): `verdict` is the outcome's own retryable, which comes first.
+  const endedByModelError = (kind: ModelErrorKind, turn: number, httpStatus?: number, verdict?: boolean): End => {
+    const retryable = modelErrorRetryable(kind, httpStatus, verdict);
     endingModelError = retryable === undefined ? { kind, turn } : { kind, turn, retryable };
     return { status: "failed", reason: "model_error" };
   };
@@ -613,6 +636,85 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     const result: ToolResult = { callId: call.id, tool: call.name, ok: false, content, errorCode: code };
     await record({ type: "tool_result", result });
     return result;
+  };
+
+  /** U-74: the number of the last permission question of this run (ConfirmRequest.id `q<k>`). */
+  let confirmations = 0;
+
+  /** U-106: text a screen shows as it is (safeModelText with the run's gateway); null when masking fails. */
+  const shownText = (text: string): MaskedText | null => {
+    try {
+      const shown = safeModelText(text, (one) => privacy.mask(one));
+      return shown === null ? null : (shown as MaskedText);
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * U-74 B-3 (DR-3, DR-10): the second check gave the confirm mark. Records the question (fixed
+   * fields, the masked executable, the number of arguments; never the arguments), asks
+   * EngineDeps.confirm (absent: nobody, so deny by default), records the answer, and after
+   * `allow_once` judges the same call again: allowed, or the same mark (the answer is for this call
+   * once), runs it; any other denial denies. The wait counts in maxDurationMs: the run's signal ends
+   * it, and a cancel or the time limit then ends the run.
+   */
+  const askPermission = async (
+    call: ToolCall,
+    tool: ToolName,
+    effective: EffectiveToolCall,
+    descriptor: ToolDescriptor,
+    mark: Extract<PolicyDecision, { allowed: false }>,
+  ): Promise<PolicyDecision | End> => {
+    const args = effective.args as { readonly executable?: unknown; readonly args?: unknown };
+    // U-106 (R-79 L-2): a screen shows the subject as it is, so it is made safe as the final message
+    // is (safeModelText): masked by the gateway and its key shapes hidden. Null fails closed.
+    const subject = shownText(typeof args.executable === "string" ? args.executable : "");
+    if (subject === null) return MASKING_FAILED;
+    confirmations += 1;
+    const request: ConfirmRequest = {
+      kind: "permission",
+      id: `q${confirmations}`,
+      callId: call.id,
+      tool,
+      permission: mark.permission,
+      subject,
+      argumentCount: Array.isArray(args.args) ? args.args.length : 0,
+    };
+    await record({ type: "confirmation_requested", ...request });
+    let decision: ConfirmAnswer["decision"] = "dismissed";
+    const ask = deps.confirm;
+    if (ask !== undefined && !runSignal.aborted) {
+      let stopWaiting: () => void = () => {};
+      const ended = new Promise<never>((_resolve, reject) => {
+        stopWaiting = () => reject(new Error("the run's signal aborted"));
+        runSignal.addEventListener("abort", stopWaiting, { once: true });
+      });
+      try {
+        // U-106 (R-79 L-3): the answer is read once, right after it came (answerDecision).
+        decision = answerDecision(await Promise.race([ask(request, runSignal), ended]));
+      } catch {
+        decision = "dismissed";
+      } finally {
+        runSignal.removeEventListener("abort", stopWaiting);
+        ended.catch(() => {});
+      }
+    }
+    const answered = async (decision: ConfirmationDecision, by: ConfirmationBy): Promise<void> => {
+      await record({ type: "confirmation_answered", id: request.id, decision, by });
+    };
+    const stop = interrupted();
+    if (stop !== null) {
+      await answered("deny", stop.status === "cancelled" ? "cancelled" : "default");
+      return stop;
+    }
+    if (decision !== "allow_once") {
+      await answered("deny", decision === "deny" ? "user" : "default");
+      return mark;
+    }
+    await answered("allow_once", "user");
+    const again = await policy.checkEffective(effective, descriptor);
+    return again.allowed || again.confirm === true ? { allowed: true } : again;
   };
 
   const denied = async (
@@ -932,7 +1034,13 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (effectiveArgs === null) return invalidArgs(toolArgsProblem(name, resolved.args));
     const effective = { id: call.id, name, args: effectiveArgs } as EffectiveToolCall;
 
-    const checked = await policy.checkEffective(effective, descriptor);
+    let checked = await policy.checkEffective(effective, descriptor);
+    // U-74 (DR-3): only the confirm mark asks; without it nothing here changes.
+    if (!checked.allowed && checked.confirm === true) {
+      const answeredDecision = await askPermission(call, name, effective, descriptor, checked);
+      if (isEnd(answeredDecision)) return answeredDecision;
+      checked = answeredDecision;
+    }
     if (!checked.allowed) return denied(call, "policy_effective", checked);
     await record({
       type: "tool_decision",
@@ -1103,7 +1211,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         if (message !== null) {
           await record({ type: "model_error", turn, kind: outcome.kind, message });
         }
-        return endedByModelError(outcome.kind, turn, outcome.httpStatus);
+        return endedByModelError(outcome.kind, turn, outcome.httpStatus, outcome.retryable);
       }
 
       const response = outcome.response;

@@ -19,6 +19,7 @@ import {
 } from "../../../src/contracts/index.js";
 import type { DoctorOutput, EngineResult, ReportOutput } from "../../../src/contracts/index.js";
 import { runDoctor } from "../../../src/cli/doctor.js";
+import { createMessageCatalog } from "../../../src/i18n/index.js";
 import type { DoctorEnvironment } from "../../../src/cli/doctor.js";
 import type { CommandOutcome } from "../../../src/cli/guard.js";
 import { runReport } from "../../../src/cli/report.js";
@@ -421,13 +422,33 @@ describe("U-6 doctor", () => {
     }
   });
 
-  test("text output: one line per check and a closing line", async () => {
+  // U-100 (PM: approved): under the key check that says the key is not set comes init's line for
+  // registering it on this operating system, indented to the messages; `doctor --json` is as before.
+  test("text output: one line per check, the registration line under a missing key, and a closing line", async () => {
     const { base } = await doctorBase();
     await mkdir(path.join(base, "empty"));
     const printed = text(await runDoctor(doctorIo(base, [])));
     const lines = printed.trimEnd().split("\n");
-    assert.equal(lines.length, DOCTOR_CHECK_IDS.length + 2);
+    assert.equal(lines.length, DOCTOR_CHECK_IDS.length + 3, printed);
+    const width = Math.max(...DOCTOR_CHECK_IDS.map((id) => id.length));
+    // One line per check, in order: `[status]` in ten columns, then the id.
+    const checkLines = lines.filter((line) => /^\[(ok|warn|fail|skipped)\] /.test(line));
+    assert.deepEqual(
+      checkLines.map((line) => line.slice(10, 10 + width).trimEnd()),
+      [...DOCTOR_CHECK_IDS],
+      printed,
+    );
     assert.ok(lines[0]?.startsWith("[ok]") && lines[0].includes("node_version"));
+    const keyAt = lines.findIndex((line) => line.slice(10, 10 + width).trimEnd() === "api_key");
+    assert.ok(lines[keyAt]?.startsWith("[fail]"), printed);
+    const hint = createMessageCatalog("en").format(process.platform === "win32" ? "init.key_hint_windows" : "init.key_hint_posix", { keyEnv: ANTHROPIC_API_KEY_ENV });
+    assert.equal(lines[keyAt + 1], `${" ".repeat(10 + width + 2)}${hint}`, printed);
+    assert.equal(lines[lines.length - 2], "", printed);
     assert.ok(lines[lines.length - 1]?.startsWith("doctor: fail (exit code 1). No network access was made"));
+
+    const json = await doctorJson(doctorIo(base, []));
+    assert.deepEqual(json.output.checks.map((check) => check.id), [...DOCTOR_CHECK_IDS]);
+    assert.equal(json.status["api_key"], "fail");
+    assert.equal(json.raw.includes(hint), false, "the JSON carries no registration line");
   });
 });

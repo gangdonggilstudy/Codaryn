@@ -1283,11 +1283,9 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - 간편 형식 `plan`·`apply`·`review`의 설정 안내(R-11 L-2)는 JSON `message`에만 있다. 사람용 stderr에는 일반 고치는 법만 나온다(검토 R-12 L-2). 안내 문구 id(계약 담당)와 두 언어 글(N-B)이 생기면 stderr에도 붙인다. 재현은 `tests/unit/cli/g-r12.test.ts`에 `todo`로 있다.
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
-- run 계획의 사람용 글 가운데 CLI가 아직 쓰지 않는 것(U-216, main `07b4124`의 실제 CLI로 확인):
-  - 터미널의 승인 질문은 이동 계획과 같은 `Apply this plan? [y/N]`이다. U-198의 `changesApprovalText`(`apply.changes.what`, `apply.changes.summary_note`, `apply.changes.commands_note`)와 `changesApplyQuestion`(`apply.changes_question`)은 `src/cli/human`에 있지만 `apply`가 부르지 않는다.
+- run 계획의 사람용 글 가운데 CLI가 아직 쓰지 않는 것(U-216·U-238, main `529fcea`의 실제 CLI로 확인):
   - 계획 없이 끝난 계획 실행(예: 계획 파일이 `writablePaths` 밖이라 `propose_changes`가 거부됨)은 `failed`/`model_error`(`malformed_response`)이고, 끝 요약의 마지막 안내는 모델 설정 점검(`Check with codaryn doctor and codaryn models, …`)이다.
-  - 작업 종류에 `propose_changes`가 없으면 실행은 모델 요청 전에 거부된다(정의는 `invalid_config`, task 파일의 `plan: "run"`은 `invalid_task`). 그러나 `doctor`는 그런 정의를 알리지 않고 `ok`다.
-  - U-221 뒤로 끝 요약(`A plan is ready: 2 file(s) to write…`와 계획 보기의 요약 표지), `runs`·`plan`·`report`의 수행 이름(`carried out`), 한 번만 나오는 `writablePaths` 안내는 run 계획의 글이다([사용 설명서](usage.md) 18.11절).
+  - U-221·U-228 뒤로 끝 요약(`A plan is ready: 2 file(s) to write…`와 계획 보기의 요약 표지), `runs`·`plan`·`report`의 수행 이름(`carried out`), 한 번만 나오는 `writablePaths` 안내, 터미널의 승인 질문(`changesApprovalText`의 줄들과 `Start the run that makes these changes? [y/N]`)은 run 계획의 글이다. `propose_changes`가 없는 작업 종류는 모델 요청 전에 거부되고(`invalid_config`·`invalid_task`, 힌트 `plan_tool_missing`) `doctor`는 그 파일을 실패로 알린다([사용 설명서](usage.md) 18.11절).
 
 ### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
 

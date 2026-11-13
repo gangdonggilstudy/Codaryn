@@ -318,6 +318,8 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
 | `plan_run_not_available` | `invalid_task`, `invalid_config` | — | U-177이 B-4 전까지 `plan: "run"`을 받지 않을 때 쓰던 힌트. U-195부터 주지 않는다(값은 더하기만이라 남는다, 18.1) |
+| `plan_kind_differs` | `run_not_plan` | — | U-228: 그 실행에는 계획이 있지만 `apply`에 준 task가 수행하는 종류가 아님(바꿀 파일 계획에 계획 방식 `apply`나 계획 방식 없는 task, 이동 계획에 계획 방식 `run`이나 계획 방식 없는 task). 사람용 오류는 `run_not_plan`의 줄 대신 `error.run_not_plan.other_kind`를 쓰고, 이 힌트를 고치는 법으로 준다 |
+| `plan_tool_missing` | `invalid_task`, `invalid_config` | — | U-228(U-224): 작업 종류가 계획 방식의 계획 도구 없이 해석됨(`run`에는 `propose_changes`, `apply`에는 `propose_plan`). 문제 코드 `plan_tool_missing` |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
 | `key_field_in_task` | `key_in_file` | `field`: 필드 자리 | task 파일의 그 필드에 키 필드나 키 값이 있음 |
 | `key_field_in_config` | `key_in_file` | `field`: 필드 자리 | 설정 파일의 그 필드에 키 필드나 키 값이 있음 |

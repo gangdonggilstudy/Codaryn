@@ -291,6 +291,15 @@ function keyIdSetup(dir) {
 const cleanup = (...more) => ({ args: ["cleanup", "--workspace", "work", ...more] });
 const cleanupDigestOf = (step) => (ctx) => String(ctx.json(step)?.plan?.digest ?? "none").slice(0, 12);
 
+/**
+ * U-265: cleanup by age, with no clock of the comparison's own. A run or a discarded folder is selected
+ * by `--older-than <days>` when now minus its start is more than that many days (the store's rule), so a
+ * run made seconds before is always selected by 0 days and never by 1: the comparison's real clock is
+ * far from any day's boundary, and the selection is the same in both builds and in every run.
+ */
+const OLDER = ["--older-than", "0"];
+const DISCARDED_OLDER = ["--discarded-older-than", "0"];
+
 export const CASES = [
   {
     name: "document-run",
@@ -699,5 +708,40 @@ export const CASES = [
     lang: "ko",
     setup: documentSetup(DOCUMENT_STEPS),
     steps: [run(), { args: ["changes", "--workspace", "work", "--run", "latest"] }, { args: ["changes", "--workspace", "work", "--run", NO_RUN] }],
+  },
+  // U-265: cleanup by age (--older-than, --discarded-older-than): none by 1 day, all by 0, then confirmed; and --reverted.
+  {
+    name: "cleanup-older-than",
+    setup: planSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      cleanup("--older-than", "1", "--discarded-older-than", "1"),
+      cleanup("--older-than", "1", "--json"),
+      cleanup(...OLDER),
+      cleanup(...OLDER, ...DISCARDED_OLDER, "--json"),
+      (ctx) => cleanup(...OLDER, ...DISCARDED_OLDER, "--confirm", cleanupDigestOf(5)(ctx)),
+      (ctx) => cleanup(...OLDER, ...DISCARDED_OLDER, "--confirm", cleanupDigestOf(5)(ctx), "--delete-discarded", "--include-not-reverted", "--json"),
+      runs(),
+    ],
+  },
+  {
+    name: "cleanup-older-than-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), cleanup("--older-than", "1"), cleanup(...OLDER), cleanup(...OLDER, "--json"), (ctx) => cleanup(...OLDER, "--confirm", cleanupDigestOf(3)(ctx), "--include-not-reverted")],
+  },
+  {
+    name: "cleanup-reverted",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      run(),
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(1)(ctx)] }),
+      cleanup("--reverted"),
+      cleanup("--reverted", "--json"),
+      (ctx) => cleanup("--reverted", "--confirm", cleanupDigestOf(4)(ctx), "--json"),
+      runs(),
+    ],
   },
 ];

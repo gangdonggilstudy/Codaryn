@@ -75,34 +75,31 @@ codaryn: turn 3
 codaryn: write file — allowed (write_file)
 codaryn: created summary.md
 codaryn: turn 4
-codaryn: protected material check — unchanged (before_verify)
 codaryn: check #1 — not passed (fail)
-codaryn: protected material check — unchanged (after_verify)
 codaryn: repair 1 — checks not passed: 1
 codaryn: turn 5
 codaryn: write file — allowed (write_file)
 codaryn: changed summary.md
 codaryn: turn 6
-codaryn: protected material check — unchanged (before_verify)
 codaryn: check #1 — passed (pass)
-codaryn: protected material check — unchanged (after_verify)
 codaryn: finished — done (verified)
 ── Result: done — every configured check passed (done/verified) ──
 Checks passed: 1 of 1 (within the configured checks)
+Protected material checks that found no change: 5
 Files changed: 1
   summary.md (created)
 Denied calls: 1
 To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.
-Usage: model turns 6 · tool calls 3 · 0 s
+Usage: model turns 6 · tool calls 3 · 0.1 s
 The agent's last message (the agent's own words, not a verified fact):
   | 빠진 '## 할 일' 절을 더했다.
 Read the report, and revert if needed.
-Run id: 20261112T030342Z-42ed82a7
-Report: codaryn report --workspace <workspace> --run 20261112T030342Z-42ed82a7
-Revert: codaryn revert --workspace <workspace> --run 20261112T030342Z-42ed82a7
+Run id: 20261113T021512Z-b4fd29f4
+Report: codaryn report --workspace <workspace> --run 20261113T021512Z-b4fd29f4
+Revert: codaryn revert --workspace <workspace> --run 20261113T021512Z-b4fd29f4
 ```
 
-- `protected material check — unchanged`: 보호 경로(`notes.md`)가 실행 시작 때와 같은지 확인한 결과다(13절).
+- `protected material check — unchanged`: 보호 경로(`notes.md`)가 실행 시작 때와 같은지 확인한 결과다(13절). 이 실행은 시작 때와 검증 회차마다 검증 전과 후, 모두 5번 확인한다. 바뀐 것이 없으면 진행 줄에는 첫 확인만 나오고, 나머지는 끝 요약의 `Protected material checks that found no change: 5`가 함께 센다. 바뀐 것을 찾은 확인은 접지 않고 언제나 제 줄로 나오며, 그때는 이 요약 줄이 없다.
 - `run command — denied (command/command_not_allowed)`: 허용 목록이 비어 있어 명령이 거부됐다. 거부는 실행을 끝내지 않고 모델에 돌아간다. 끝 요약의 `Denied calls`와 그 아래 안내가 이것이다. task 파일 실행이므로 안내는 task 파일의 `policy.commands`를 가리킨다.
 - `check #1 — not passed (fail)` → `repair 1`: 검증 실패 근거를 모델에 돌려보내 다시 고치게 했다(9절). 검증기는 id가 아니라 순번으로 나온다.
 - 끝 요약의 `Files changed`는 바뀐 파일 수다. `summary.md`를 두 번 썼어도 파일은 하나다.
@@ -114,7 +111,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T030342Z-42ed82a7
 
 ```
 run id                     started              changes  result
-20261112T030342Z-42ed82a7  2026-11-12 12:03:42  1        done (done/verified)
+20261113T021512Z-b4fd29f4  2026-11-13 11:15:12  1        done (done/verified)
 ```
 
 시작 시각은 지역 시간이다. `changes`는 실행이 바꾼 서로 다른 파일 수다. 이 체험은 `summary.md`를 두 번 썼으므로 결과 JSON의 `changes`에는 두 건이 있지만 목록에는 1로 나온다(끝 요약의 `Files changed`와 같다).
@@ -122,7 +119,7 @@ run id                     started              changes  result
 **report:** `--run latest`는 가장 최근 실행을 고른다. 고른 실행은 stderr에 먼저 나온다.
 
 ```
-codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
+codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
 ```
 
 stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Provider: scripted (scripted model; no API was called)`, 검증기 1번 **pass**, `Repairs started: 1`, 보호 대상 확인 5회와 변경 없음, 변경 두 건, `Tool calls: 3 of 8 (denied: 1)`, 검사하지 않은 범위가 나온다. 보고서도 검증기를 순번(`verifier 1`)으로 쓴다. id는 `--json`에만 있다. 변경과 사용량 사이에는 `## The agent's last message` 절이 있다. 머리말 `The agent's last message. These are the agent's own words, not a verified fact.` 아래에 끝 요약과 같은 `|` 줄이 코드 블록으로 나온다(8절 "에이전트의 마지막 답").
@@ -130,7 +127,7 @@ stdout은 사람이 읽는 Markdown 요약이다(10절). 이 체험에서는 `Pr
 **revert --dry-run:** 아무것도 바꾸지 않고 무엇을 되돌릴지 보인다. stdout은 `"dryRun":true`가 붙은 결과 JSON 한 줄이고 종료 코드는 실제 되돌리기와 같다(0). 이 JSON 줄도 파이프나 파일일 때만 나오고, 콘솔에서는 stderr의 글만 보인다. stderr:
 
 ```
-codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
+codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
 codaryn: Files to revert: 1 (preview, nothing changed) (complete)
   summary.md — deleted (created by this run)
 Run again without --dry-run to revert.
@@ -139,7 +136,7 @@ Run again without --dry-run to revert.
 **revert:** 실행이 만든 `summary.md`를 지운다. 결과는 `"status":"complete"`, `"reverted":[{"path":"summary.md","action":"deleted"}]`, 종료 0이다. `.codaryn/`의 기록은 남는다. stderr:
 
 ```
-codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
+codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
 codaryn: Files reverted: 1 (complete)
   summary.md — deleted (created by this run)
 ```
@@ -147,11 +144,11 @@ codaryn: Files reverted: 1 (complete)
 같은 실행을 한 번 더 되돌리면 할 일이 없다. `complete`, 종료 0이고 `skipped[].reason`은 `already_reverted`, 결과에 이전 되돌리기의 시각과 상태(`revertedBefore`)가 붙는다. 실행 목록의 그 줄에는 `· reverted (complete)`가 붙는다. stderr:
 
 ```
-codaryn: Chose the latest run: 20261112T030342Z-42ed82a7 (started 2026-11-12 12:03:42)
+codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:15:12)
 codaryn: Files reverted: 0 (complete)
 Files skipped: 1
   summary.md — already as it was before the run (already_reverted)
-This run was already reverted before, so its files may show as changed since the run. (complete, 2026-11-12 12:03:53)
+This run was already reverted before, so its files may show as changed since the run. (complete, 2026-11-13 11:15:13)
 ```
 
 **다시 체험하기:** 되돌린 뒤 같은 사본에서 `run`부터 다시 하거나 새로 복사한다. 되돌리지 않고 다시 실행하면 `summary.md`가 이미 있어 첫 `write_file`이 `conflict`로 거부되고, 이전 실행이 만든 파일로 검증이 통과해 `changes`가 빈 `done`이 된다. **검증 통과는 이번 실행이 파일을 바꿨다는 뜻이 아니다.** 끝 요약의 `Files changed`와 `changes`를 함께 본다.

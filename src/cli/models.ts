@@ -41,6 +41,8 @@ import type {
   CodarynConfig,
   ListAnthropicModels,
   ListModels,
+  MessageCatalog,
+  MessageId,
   ModelsListEntry,
   ModelsOutput,
 } from "../contracts/index.js";
@@ -103,6 +105,8 @@ export interface ModelsEnvironment {
    * both terminals: the prompt is never shown otherwise (Y-3).
    */
   readonly ask?: (question: string) => Promise<string | null>;
+  /** U-156: the person's message catalog for the text and the question (main.ts's); English without it. The JSON does not use it. */
+  readonly messages?: MessageCatalog;
   /** Writes the config file (`writeConfigAtomic` when absent). Rejects on failure; the file is unchanged then. */
   readonly writeConfig?: (file: string, text: string, options: ConfigWriteOptions) => Promise<void>;
   readonly signal?: AbortSignal;
@@ -200,7 +204,80 @@ function tokens(value: number | null): string {
   return value === null ? "-" : String(value);
 }
 
-function table(models: readonly ModelsListEntry[], currentId: string | null): string[] {
+/** U-156 (nb-i18n's E group): the words of models' text; each line's values are put in by the renderer. */
+interface ModelsWords {
+  heads(): readonly [string, string, string, string];
+  noneListed(): string;
+  listed(count: number): string;
+  noCurrent(variable: string): string;
+  currentFrom(source: string): string;
+  notListed(): string;
+  writtenLabel(): string;
+  writtenPlace(field: string, created: boolean): string;
+  overridden(variable: string, field: string): string;
+  usePrompt(field: string): string;
+}
+
+/** The text before U-156, character for character: without a catalog, and wherever the catalog cannot give one. */
+const ENGLISH_WORDS: ModelsWords = {
+  heads: () => ["id", "name", "input tokens", "output tokens"],
+  noneListed: () => "No model was listed for this key.",
+  listed: (count) => `Models this key can use (${count})`,
+  noCurrent: (variable) => `No current model: none is set in ${variable} or the config file. Choose one with --use <number|id> --config <config.json>.`,
+  currentFrom: (source) => `current model (from ${source === "config" ? "the config file" : source})`,
+  notListed: () => "(not in this list)",
+  writtenLabel: () => "Written",
+  writtenPlace: (field, created) => `is now the config file's ${field}${created ? " (the file was created)" : ""}.`,
+  overridden: (variable, field) => `Note: ${variable} is set and is used instead of the config file's ${field} until it is unset.`,
+  usePrompt: (field) => `Number or id to write into the config file's ${field} (Enter to skip)`,
+};
+
+/** The catalog's words (models.*); a text the catalog cannot give (an id or value it refuses) is the English one. */
+function catalogWords(messages: MessageCatalog): ModelsWords {
+  const format = messages.format as (id: MessageId, params?: object) => string;
+  const or = (line: () => string, english: () => string): string => {
+    try {
+      return line();
+    } catch {
+      return english();
+    }
+  };
+  // `{field}` is a SchemaFieldPath and `{variable}` a model variable (settingEnv); anything else is the English.
+  const field = (value: string): string => {
+    const checked = toSchemaFieldPath(value);
+    if (checked === null) throw new Error("not a field path");
+    return checked;
+  };
+  return {
+    heads: () => {
+      const [id, name, input, output] = ENGLISH_WORDS.heads();
+      return [
+        or(() => format("models.table.id"), () => id),
+        or(() => format("models.table.name"), () => name),
+        or(() => format("models.table.input_tokens"), () => input),
+        or(() => format("models.table.output_tokens"), () => output),
+      ];
+    },
+    noneListed: () => or(() => format("models.none_listed"), ENGLISH_WORDS.noneListed),
+    listed: (count) => or(() => format("models.listed", { count }), () => ENGLISH_WORDS.listed(count)),
+    noCurrent: (variable) => or(() => format("models.no_current", { variable }), () => ENGLISH_WORDS.noCurrent(variable)),
+    currentFrom: (source) =>
+      or(
+        () => (source === "config" ? format("models.current_from_config") : format("models.current_from_env", { variable: source })),
+        () => ENGLISH_WORDS.currentFrom(source),
+      ),
+    notListed: () => or(() => format("models.not_listed"), ENGLISH_WORDS.notListed),
+    writtenLabel: () => or(() => format("models.written_label"), ENGLISH_WORDS.writtenLabel),
+    writtenPlace: (place, created) =>
+      or(() => format(created ? "models.written_place_created" : "models.written_place", { field: field(place) }), () => ENGLISH_WORDS.writtenPlace(place, created)),
+    overridden: (variable, place) => or(() => format("models.overridden", { variable, field: field(place) }), () => ENGLISH_WORDS.overridden(variable, place)),
+    usePrompt: (place) => or(() => format("models.use_prompt", { field: field(place) }), () => ENGLISH_WORDS.usePrompt(place)),
+  };
+}
+
+const wordsOf = (messages: MessageCatalog | undefined): ModelsWords => (messages === undefined ? ENGLISH_WORDS : catalogWords(messages));
+
+function table(models: readonly ModelsListEntry[], currentId: string | null, words: ModelsWords = ENGLISH_WORDS): string[] {
   const rows = models.map((model) => [
     `${model.id === currentId ? "*" : " "} ${model.number}`,
     cleanText(model.id),
@@ -208,7 +285,8 @@ function table(models: readonly ModelsListEntry[], currentId: string | null): st
     tokens(model.maxInputTokens),
     tokens(model.maxOutputTokens),
   ]);
-  const header = ["  #", "id", "name", "input tokens", "output tokens"];
+  // The `  #` column head is not a word and stays as it is.
+  const header = ["  #", ...words.heads()];
   // U-127: terminal columns (displayWidth), so a name with wide characters keeps the columns after it.
   const widths = header.map((title, column) => Math.max(displayWidth(title), ...rows.map((row) => displayWidth(row[column] ?? ""))));
   const format = (row: readonly string[]): string =>
@@ -227,28 +305,31 @@ export interface ModelsTextPlaces {
 
 const ANTHROPIC_PLACES: ModelsTextPlaces = { modelEnv: CODARYN_MODEL_ENV, field: "model" };
 
-export function renderModels(output: ModelsOutput, withTable: boolean, places: ModelsTextPlaces = ANTHROPIC_PLACES): string {
+/**
+ * The text of models. U-156: the lines come from `messages` (models.*) in the person's language; the
+ * renderer puts in the values and marks (`: `, `* `, the model ids and names). Without a catalog, the
+ * English, which the English catalog gives character for character.
+ */
+export function renderModels(output: ModelsOutput, withTable: boolean, places: ModelsTextPlaces = ANTHROPIC_PLACES, messages?: MessageCatalog): string {
+  const words = wordsOf(messages);
   const lines: string[] = [];
   if (withTable) {
     if (output.models.length === 0) {
-      lines.push("No model was listed for this key.");
+      lines.push(words.noneListed());
     } else {
-      lines.push(`Models this key can use (${output.models.length}):`, "", ...table(output.models, output.current?.id ?? null), "");
+      lines.push(`${words.listed(output.models.length)}:`, "", ...table(output.models, output.current?.id ?? null, words), "");
     }
   }
   const current = output.current;
   if (current === null) {
-    lines.push(`No current model: none is set in ${places.modelEnv} or the config file. Choose one with --use <number|id> --config <config.json>.`);
+    lines.push(words.noCurrent(places.modelEnv));
   } else {
-    const from = current.source === "config" ? "the config file" : current.source;
-    lines.push(`* current model (from ${from}): ${cleanText(current.id)}${current.listed ? "" : " (not in this list)"}`);
+    lines.push(`* ${words.currentFrom(current.source)}: ${cleanText(current.id)}${current.listed ? "" : ` ${words.notListed()}`}`);
   }
   const selected = output.selected;
   if (selected !== null) {
-    lines.push(`Written: ${cleanText(selected.id)} is now the config file's ${places.field}${selected.created ? " (the file was created)" : ""}.`);
-    if (selected.overriddenBy !== null) {
-      lines.push(`Note: ${selected.overriddenBy} is set and is used instead of the config file's ${places.field} until it is unset.`);
-    }
+    lines.push(`${words.writtenLabel()}: ${cleanText(selected.id)} ${words.writtenPlace(places.field, selected.created)}`);
+    if (selected.overriddenBy !== null) lines.push(words.overridden(selected.overriddenBy, places.field));
   }
   return `${lines.join(LF)}${LF}`;
 }
@@ -406,8 +487,8 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
       selected: null,
       ...(provider === "anthropic" ? {} : { provider }),
     };
-    const shown = hideKeys(scrub(renderModels(before, true, places), secrets), currentKey);
-    const answer = await io.ask(`${shown}Number or id to write into the config file's ${field} (Enter to skip): `);
+    const shown = hideKeys(scrub(renderModels(before, true, places, io.messages), secrets), currentKey);
+    const answer = await io.ask(`${shown}${wordsOf(io.messages).usePrompt(field)}: `);
     choice = answer === null || answer.trim() === "" ? null : answer.trim();
   }
 
@@ -450,7 +531,7 @@ export async function runModels(io: ModelsEnvironment): Promise<CommandOutcome> 
     // SP-6: the listed provider; for anthropic it waits for the PM's approval of the SP-0 pin change.
     ...(provider === "anthropic" ? {} : { provider }),
   };
-  const printed = args.json ? jsonLine(output) : renderModels(output, !prompted, places);
+  const printed = args.json ? jsonLine(output) : renderModels(output, !prompted, places, io.messages);
   return { text: hideKeys(scrub(printed, secrets), currentKey), exitCode: output.exitCode };
 }
 

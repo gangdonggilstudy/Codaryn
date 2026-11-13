@@ -4,11 +4,12 @@
  * failedCallsIn), its result read and checked field by field (readResult), an apply run's journal
  * summary and result (summarizeApplyJournal, readApplyResult), the first record's type, and the run
  * files' state and reading under MAX_REPORT_FILE_BYTES. A record that fails a check is a RecordError,
- * whose message is fixed text. The text below is as it was in src/cli/report.ts, but for: the names
- * the CLI's report command and rendering use are exported. ReportReadEnvironment holds the fields of
- * the CLI's ReportEnvironment the report's rules read (their comments as they were); the CLI's widens
- * it with argv and env. The CLI keeps the rendering and the fixed texts; its old place re-exports what
- * the tests and the app layer take (plan A).
+ * whose message is fixed text. The text below is as it was in src/cli/report.ts. ReportReadEnvironment
+ * holds the fields of the CLI's ReportEnvironment the report's rules read (their comments as they
+ * were); the CLI's widens it with argv and env. The CLI keeps the rendering and the fixed texts; its
+ * old place re-exports what the tests and the app layer take (plan A). The report command's rules
+ * follow at the end (readReport, the second commit of U-311): runReport's lines, with an error given
+ * as { ok: false, outcome }.
  */
 
 import { realpath as realpathCallback } from "node:fs";
@@ -27,7 +28,13 @@ import {
   MODEL_PROVIDER_NAMES,
   PLAN_ITEM_PROBLEMS,
   toRunId,
+  REPORT_EXIT_CODES,
+  RESULT_FILE_NAME,
   RESULT_SCHEMA_VERSION,
+  RUNS_DIR_NAME,
+  STATE_DIR_NAME,
+  JOURNAL_FILE_NAME,
+  planApplyStateOf,
   TERMINAL_RUN_STATUSES,
   VERIFIER_KINDS,
   isReasonOfStatus,
@@ -38,7 +45,11 @@ import type {
   ApplyNoticeKind,
   PlanRecordsUncheckedCause,
   ApplyResult,
+  ApplyReportOutput,
   ListRuns,
+  ReportStatus,
+  ReviewRecord,
+  RunReportOutput,
   ContentHash,
   EngineResult,
   FileChangeRecord,
@@ -57,7 +68,11 @@ import type {
 } from "../contracts/index.js";
 import { createFailedCalls } from "./failed-calls.js";
 import type { CheckedRun } from "./input/run-ref.js";
-import { hasRecordsChangedMark, inspectRun } from "../store/index.js";
+import { resolveRunReference } from "./input/run-ref.js";
+import { localPathProblem } from "./input/task.js";
+import { cliError } from "./prepare.js";
+import type { CommandOutcome } from "./command-outcome.js";
+import { hasRecordsChangedMark, inspectRun, readReviewRecord } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 
 /** U-311: what the report's rules read of a command's environment (ReportEnvironment's, but for argv and env). */
@@ -79,7 +94,7 @@ export interface ReportReadEnvironment {
   readonly hasRecordsChangedMark?: (workspaceRoot: string, runId: string) => Promise<boolean>;
 }
 
-export async function pathExists(target: string): Promise<boolean> {
+async function pathExists(target: string): Promise<boolean> {
   try {
     await lstat(target);
     return true;
@@ -88,7 +103,7 @@ export async function pathExists(target: string): Promise<boolean> {
   }
 }
 
-export const realpathNative = promisify(realpathCallback.native);
+const realpathNative = promisify(realpathCallback.native);
 
 /** Every reason, per status. The type keeps each entry a valid reason for its status. */
 // DR-16: the reasons of each status come from the contract (RUN_REASONS_BY_STATUS through
@@ -106,7 +121,7 @@ void listsComplete;
 const HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 
 /** A record failed a check. Its message is fixed text, never record content. */
-export class RecordError extends Error {}
+class RecordError extends Error {}
 
 
 function bad(message: string): never {
@@ -124,7 +139,7 @@ function str(value: unknown): string {
 }
 
 /** Text read back from the run's own masked records. Not new masking: the run masked it when recording. */
-export function recorded(value: unknown): MaskedText {
+function recorded(value: unknown): MaskedText {
   return str(value) as MaskedText;
 }
 
@@ -448,7 +463,7 @@ function planOf(value: unknown): { digest: ContentHash; actions: number; kind?: 
 }
 
 /** The `type` of the journal's first record, or null when the first line is not a JSON object. */
-export function firstRecordType(text: string): unknown {
+function firstRecordType(text: string): unknown {
   const end = text.indexOf("\n");
   try {
     const first = JSON.parse(end === -1 ? text : text.slice(0, end)) as unknown;
@@ -626,7 +641,7 @@ export function readApplyResult(text: string, runId: string, journal: ApplyRepor
 
 type FileState = "file" | "missing" | "other" | "too_large";
 
-export async function fileState(file: string): Promise<FileState> {
+async function fileState(file: string): Promise<FileState> {
   try {
     const info = await lstat(file);
     if (!info.isFile()) return "other";
@@ -637,8 +652,163 @@ export async function fileState(file: string): Promise<FileState> {
   }
 }
 
-export async function readRecordFile(file: string): Promise<string> {
+async function readRecordFile(file: string): Promise<string> {
   const bytes = await readFile(file);
   if (bytes.length > MAX_REPORT_FILE_BYTES) bad("a run file is too large");
   return bytes.toString("utf8");
+}
+
+/** What `codaryn report` was given: the workspace and `--run` (N-7, N-18). */
+export interface ReportRequest {
+  readonly workspace: string;
+  readonly run: string;
+  /** Whether the text is wanted: what became of a plan run's apply is read for the text only (U-131). */
+  readonly planApplyLine: boolean;
+}
+
+/**
+ * U-311 (C-8): `codaryn report`'s rules, as runReport had them: the workspace (S-5, a real directory),
+ * the run --run names (N-7, N-18, N-23), the run list's judgment (N-27), the run directory not a link,
+ * the records-changed mark (DR-38, fail closed), the run files' state, the journal and the result read
+ * and checked (a run's or, by the first record, an apply run's; DR-12), a waiting run's verdict, and
+ * with planApplyLine what became of a plan run's apply. The CLI prints the report as its JSON line or
+ * its text.
+ */
+export async function readReport(
+  io: ReportReadEnvironment,
+  request: ReportRequest,
+): Promise<
+  | {
+      readonly ok: true;
+      readonly report: RunReportOutput | ApplyReportOutput;
+      readonly failedToolCalls: number;
+      readonly planApply: ReturnType<typeof planApplyStateOf>;
+    }
+  | { readonly ok: false; readonly outcome: CommandOutcome }
+> {
+  // S-5: a network or device path is refused before the file system is touched.
+  const problem = localPathProblem(request.workspace, io.cwd);
+  if (problem !== null) return { ok: false, outcome: cliError("invalid_arguments", `the path given by --workspace ${problem}`) };
+
+  let root: string;
+  try {
+    root = await realpathNative(path.resolve(io.cwd, request.workspace));
+    if (!(await lstat(root)).isDirectory()) throw new Error("not a directory");
+  } catch {
+    return { ok: false, outcome: cliError("workspace_not_found", "the workspace is not an existing directory") };
+  }
+  // N-7, N-18: `latest` is the newest checked run; ambiguous when a directory has that name.
+  const reference = await resolveRunReference(root, request.run, {
+    exists: pathExists,
+    ...(io.listRuns === undefined ? {} : { listRuns: io.listRuns }),
+    inspect: io.inspectRun ?? inspectRun,
+  });
+  if (!reference.ok) return { ok: false, outcome: cliError(reference.code, reference.message) };
+  const runId = reference.runId;
+  // N-27 (b), review R-7 I-2: the run list's judgment (record ownership, schema, times, and the
+  // id's exact form, N-27 a) applies to the report too; its records are not shown as a report.
+  let damaged: boolean;
+  try {
+    damaged = await (io.isDamaged ?? (async (workspaceRoot: string, id: string) => (await (io.inspectRun ?? inspectRun)(workspaceRoot, id)) === "damaged"))(root, runId);
+  } catch {
+    damaged = true;
+  }
+  if (damaged) {
+    return { ok: false, outcome: cliError("invalid_run_record", "the run's records do not pass the checks (`codaryn runs` shows it as damaged); no report is shown") };
+  }
+  if (reference.latest !== null) {
+    try {
+      io.announceLatest?.(reference.latest);
+    } catch {
+      // The notice is best effort.
+    }
+  }
+
+  const runDir = path.join(root, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
+  const fold = (value: string): string => ((io.platform ?? process.platform) === "win32" ? value.toLowerCase() : value);
+  let realRunDir: string;
+  try {
+    realRunDir = await realpathNative(runDir);
+  } catch {
+    return { ok: false, outcome: cliError("run_not_found", "the workspace has no records for that run id") };
+  }
+  if (fold(realRunDir) !== fold(runDir)) {
+    return { ok: false, outcome: cliError("invalid_run_record", "the run directory is a link; the report reads only the workspace's own records") };
+  }
+
+  // DR-38: the run's records were changed by something else; the report is shown and says so.
+  // A mark that cannot be read counts as one (fail closed).
+  let recordsChanged: boolean;
+  try {
+    recordsChanged = await (io.hasRecordsChangedMark ?? hasRecordsChangedMark)(root, runId);
+  } catch {
+    recordsChanged = true;
+  }
+
+  const journalFile = path.join(runDir, JOURNAL_FILE_NAME);
+  const resultFile = path.join(runDir, RESULT_FILE_NAME);
+  const journalState = await fileState(journalFile);
+  if (journalState === "missing") return { ok: false, outcome: cliError("run_not_found", "the workspace has no journal for that run id") };
+  const resultState = await fileState(resultFile);
+  for (const state of [journalState, resultState]) {
+    if (state === "too_large") return { ok: false, outcome: cliError("invalid_run_record", `a run file is larger than ${MAX_REPORT_FILE_BYTES} bytes`) };
+    if (state === "other") return { ok: false, outcome: cliError("invalid_run_record", "a run file is not a regular file or cannot be read") };
+  }
+
+  let report: RunReportOutput | ApplyReportOutput;
+  let failedToolCalls = 0;
+  try {
+    const hasResult = resultState === "file";
+    const journalText = await readRecordFile(journalFile);
+    // DR-12: readers tell the two journals apart by the first record.
+    if (firstRecordType(journalText) === "apply_started") {
+      const journal = summarizeApplyJournal(journalText, runId, hasResult);
+      const result = hasResult ? readApplyResult(await readRecordFile(resultFile), runId, journal) : null;
+      const status: ReportStatus = result === null ? "incomplete" : "complete";
+      report = { schemaVersion: 1, kind: "report", runKind: "apply", runId, status, exitCode: REPORT_EXIT_CODES[status], result, journal };
+    } else {
+      const journal = summarizeJournal(journalText, runId, hasResult);
+      failedToolCalls = failedCallsIn(journalText);
+      const result = hasResult ? readResult(await readRecordFile(resultFile), runId, journal.taskId) : null;
+      const status: ReportStatus = result === null ? "incomplete" : "complete";
+      // N-D 5th round: a run waiting for review shows the person's verdict (review.json) when there is one.
+      let verdict: ReviewRecord | null | undefined;
+      if (result?.reason === "awaiting_review") {
+        try {
+          verdict = await readReviewRecord(root, runId);
+        } catch {
+          verdict = null;
+        }
+      }
+      report = {
+        schemaVersion: 1,
+        kind: "report",
+        runId,
+        status,
+        exitCode: REPORT_EXIT_CODES[status],
+        ...(recordsChanged ? { recordsChanged: true as const } : {}),
+        result,
+        journal,
+        ...(verdict === undefined ? {} : { verdict }),
+      };
+    }
+  } catch (error) {
+    if (error instanceof RecordError) return { ok: false, outcome: cliError("invalid_run_record", `the run's records cannot be used: ${error.message}`) };
+    return { ok: false, outcome: cliError("invalid_run_record", "the run's records cannot be read") };
+  }
+
+  // U-131 (N2, UXM-5): for the text only, what became of a plan run's apply, by the run list's rule
+  // (planApplyStateOf, as `runs` and the plan view say). Best effort; the JSON does not carry it.
+  let planApply: ReturnType<typeof planApplyStateOf> = null;
+  if (request.planApplyLine && !("runKind" in report) && report.result?.plan !== undefined && io.listRuns !== undefined) {
+    try {
+      const entries = (await io.listRuns({ workspaceRoot: root })).runs;
+      const entry = entries.find((other): other is CheckedRun => other.state === "checked" && other.runId === runId);
+      planApply = entry === undefined ? null : planApplyStateOf(entry, entries);
+    } catch {
+      planApply = null;
+    }
+  }
+
+  return { ok: true, report, failedToolCalls, planApply };
 }

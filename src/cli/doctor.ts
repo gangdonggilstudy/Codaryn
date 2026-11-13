@@ -440,18 +440,19 @@ function keyHintOf(check: DoctorOutput["checks"][number], platform: NodeJS.Platf
 
 /**
  * The text of doctor. U-115 (UXM-9): with `terminal` (stdout is a terminal), what is not set up yet
- * and what to do next follow the closing line (nextStepLines); `task`: doctor was given --task.
+ * and what to do next follow the closing line (nextStepLines); `task`: doctor was given --task;
+ * U-132 (R-91 L-3): `workspace`: doctor was given --workspace.
  * Without it the text is as before, line for line.
  */
 export function renderDoctor(
   output: DoctorOutput,
   messages?: MessageCatalog,
   platform: NodeJS.Platform = process.platform,
-  options: { readonly terminal?: boolean; readonly task?: boolean } = {},
+  options: { readonly terminal?: boolean; readonly task?: boolean; readonly workspace?: boolean } = {},
 ): string {
   const text = messages === undefined ? renderDoctorEnglish(output, platform) : renderDoctorLines(output, messages, platform);
   if (options.terminal !== true) return text;
-  const next = nextStepLines(output, messages ?? createMessageCatalog("en"), options.task === true);
+  const next = nextStepLines(output, messages ?? createMessageCatalog("en"), options.task === true ? "task" : options.workspace === true ? "workspace" : "here");
   return next.length === 0 ? text : `${text}${next.join("\n")}\n`;
 }
 
@@ -461,9 +462,12 @@ export function renderDoctor(
  * fills are not counted again; a file that fails: fix it), the key (not set, or holding a character that cannot be sent), the model
  * (not set or a placeholder; after the key when the key is a step), the other failed checks, the
  * warnings, then doctor again; with the key not set, the way to try without one. With nothing to
- * do, the next command (the warnings first, if any).
+ * do, the next command (the warnings first, if any). U-132 (review R-91): with no default config
+ * location at all, init with --config (L-1); after a key that cannot be sent, the model once its
+ * value is fixed (L-4); the next command for what doctor checked: the task, the folder given with
+ * --workspace (the quick form), or the folder the run starts in (L-3).
  */
-function nextStepLines(output: DoctorOutput, catalog: MessageCatalog, task: boolean): string[] {
+function nextStepLines(output: DoctorOutput, catalog: MessageCatalog, checked: "task" | "workspace" | "here"): string[] {
   const raw = catalog.format as (id: MessageId, params?: object) => string;
   const say = (id: MessageId, params?: object): string => {
     try {
@@ -479,7 +483,8 @@ function nextStepLines(output: DoctorOutput, catalog: MessageCatalog, task: bool
   // No config file is a step only when a run would miss what it gives (a task file brings its own).
   const missesConfig = checkOf("limits")?.status === "fail" || checkOf("model")?.status === "fail";
   if ((configText === "doctor.config_file.default_missing" || configText === "doctor.config_file.none") && missesConfig) {
-    steps.push(say("doctor.next.init"));
+    // No default location at all: init cannot make one there, so the file goes where --config says.
+    steps.push(say(configText === "doctor.config_file.none" ? "doctor.next.init_with_config" : "doctor.next.init"));
     handled.add("config_file").add("limits");
   } else if (checkOf("config_file")?.status === "fail") {
     steps.push(say("doctor.next.config_fix"));
@@ -495,7 +500,7 @@ function nextStepLines(output: DoctorOutput, catalog: MessageCatalog, task: bool
   }
   const modelText = checkOf("model")?.text?.id;
   if (modelText === "doctor.model.missing" || modelText === "doctor.model.placeholder") {
-    steps.push(say(keyMissing || keyUnusable ? "doctor.next.model_after_key" : "doctor.next.model"));
+    steps.push(say(keyMissing ? "doctor.next.model_after_key" : keyUnusable ? "doctor.next.model_after_key_fix" : "doctor.next.model"));
     handled.add("model");
   }
   const others = output.checks.filter((check) => check.status === "fail" && !handled.has(check.id)).length;
@@ -506,7 +511,7 @@ function nextStepLines(output: DoctorOutput, catalog: MessageCatalog, task: bool
     steps.push(say("doctor.next.again"));
     return [say("doctor.next.heading"), ...steps.map((step, index) => `  ${index + 1}. ${step}`), ...(keyMissing ? [say("first_use.try_without_key")] : [])];
   }
-  const ready = say(task ? "doctor.next.ready_task" : "doctor.next.ready");
+  const ready = say(checked === "task" ? "doctor.next.ready_task" : checked === "workspace" ? "doctor.next.ready_workspace" : "doctor.next.ready");
   return warnings > 0 ? [say("doctor.next.warnings", { count: warnings }), ready] : [ready];
 }
 
@@ -1054,6 +1059,6 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   const checks = DOCTOR_CHECK_IDS.map((id) => results.get(id) as DoctorCheck);
   const status = worst(checks);
   const output: DoctorOutput = { schemaVersion: 1, kind: "doctor", status, exitCode: DOCTOR_EXIT_CODES[status], checks };
-  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages, platform, { terminal: io.stdoutIsTerminal === true, task: args.taskPath !== null });
+  const text = args.json ? jsonLine(output) : renderDoctor(output, io.messages, platform, { terminal: io.stdoutIsTerminal === true, task: args.taskPath !== null, workspace: args.workspace !== null });
   return { text: hideKeys(text, currentKey), exitCode: output.exitCode };
 }

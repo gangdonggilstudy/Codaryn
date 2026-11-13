@@ -27,6 +27,8 @@ export type { ChangesPlanCheckSource, ChangesPlanView } from "./changes-plan.js"
 export { MAX_WORKSPACE_TEXT_BYTES, isWorkspaceFile, readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
 export type { WorkspaceTextOperations, WorkspaceTextSource, WorkspaceTextStage, WorkspaceTextWriteSource } from "./workspace-text.js";
 export type { ApplyCheckOperations, ApplyCheckSource } from "./check-apply.js";
+export { LOCK_RELEASE_RETRY_DELAYS_MS, retryLockRelease } from "./lock-retry.js";
+export type { LockRetryEnd, LockRetryOptions, LockToRelease } from "./lock-retry.js";
 export type {
   AppliedActionRecord,
   ApplyJournalEvent,

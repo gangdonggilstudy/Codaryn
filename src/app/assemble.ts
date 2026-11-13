@@ -20,6 +20,8 @@
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { acquireLock, createRunRecorders, releaseLock, writeResult } from "../store/index.js";
+import { retryLockRelease } from "./lock-retry.js";
+import type { LockRetryOptions } from "./lock-retry.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
@@ -39,12 +41,15 @@ function lockedMessage(holder: LockInfo | null): string {
  * its retries, or answered false), `onLockLeft` is called and the run's end goes on: its result
  * (written to result.json first) stays, not an internal error. The lock is then held while this
  * process lives, and a later run of another process finds it stale once it has ended.
+ * U-211: a release that threw is tried again a few seconds later (retryLockRelease, `lockRetry`),
+ * for this run's lock only; an answer of false (the lock is not this run's) is not.
  */
 export function createAppAssemble(
   parentEnv: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform,
   onAssembled: (assembled: { readonly privacy: PrivacyGateway; readonly workspaceRoot: string }) => void,
   onLockLeft: () => void = () => undefined,
+  lockRetry: LockRetryOptions = {},
 ): Assemble {
   return async (input) => {
     const { task, runId, model, secrets, clock, signal } = input;
@@ -108,12 +113,15 @@ export function createAppAssemble(
           } finally {
             // U-193: a lock left is told, never a reason to lose the run's result.
             let released = false;
+            let threw = false;
             try {
               released = (await releaseLock({ workspaceRoot, runId })) === true;
             } catch {
-              released = false;
+              threw = true;
             }
             if (!released) onLockLeft();
+            // U-211: the file may be held a moment longer than the store's retries; tried again later.
+            if (threw) void retryLockRelease({ workspaceRoot, runId }, lockRetry);
           }
         },
       };

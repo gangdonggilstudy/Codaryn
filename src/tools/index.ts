@@ -38,12 +38,14 @@ import type {
   WriteFileArgs,
 } from "../contracts/index.js";
 
+import { compilePathSet } from "../policy/path-set.js";
 import { takeJudged } from "../workspace/judged.js";
 import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
 import { createPlannedFileProbe as plannedFileProbeFor, inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
+import { listVisible } from "./visible-list.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { CountingPlanExecutor, PlanExecutorDeps } from "./plan-executor.js";
@@ -115,6 +117,14 @@ export interface ToolRunnerOptions {
   readonly fileOps?: Partial<PlanFileOps>;
   /** For tests. Defaults to `process.platform`. Decides whether plan paths compare without case. */
   readonly platform?: NodeJS.Platform;
+  /**
+   * U-203 (bundle A, R-3, R-4): the run's unreadable paths, ResolvedTaskSpec.unreadablePaths (every
+   * source united, review R-102 M-1). search_files and inspect_files
+   * leave out what is under them, names included, judged by the text and the real path (the gate
+   * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent or
+   * empty: nothing is left out, as before (Codex V-13b L-1).
+   */
+  readonly unreadablePaths?: readonly string[];
 }
 
 /**
@@ -279,10 +289,23 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     };
   }
 
+  // U-203 (R-1): the unreadable paths with the gate's rule (a deny list: an unusable one covers all).
+  // Codex V-13b L-1: an empty list is no unreadable path at all, so the tools list as without one; a
+  // value that is not a list is still unusable and covers everything.
+  const noUnreadable = options.unreadablePaths === undefined || (Array.isArray(options.unreadablePaths) && options.unreadablePaths.length === 0);
+  const unreadable = noUnreadable ? null : compilePathSet(options.unreadablePaths, { match: "prefix", onUnusable: "covers" });
+
   async function searchFiles(args: SearchFilesArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
-    const listed = await workspace.list(resolved.path);
+    // U-203 (R-3, R-4): what is under an unreadable path is left out, names included. `withheld`
+    // follows the entries alone (one lies in this folder), never what exists there.
+    const hidden = unreadable === null ? null : await unreadable.snapshot(workspace);
+    const withheld = hidden !== null && hidden.within(resolved.path.relative);
+    // U-203 (Codex V-13 M-1, M-2): with unreadable paths the listing leaves them out before it counts
+    // or enters them, and hides a link whose real path is under them (visible-list.ts), so the
+    // result, its `truncated` and its errors do not depend on what exists there.
+    const listed = hidden === null ? await workspace.list(resolved.path) : await listVisible(workspace, resolved.path, hidden);
     if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
 
     // Matching works on masked text only: the path names and the file contents a model would
@@ -291,6 +314,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     const entries: SearchEntry[] = [];
     for (const entry of listed.entries) {
       if (signal.aborted) return fail("cancelled", "search cancelled");
+      if (hidden !== null && hidden.covers(entry.relative)) continue;
       const maskedPath = maskText(entry.relative);
       if (maskedPath === null) return fail("masking_failed", "masking a path failed");
       if (args.nameContains !== undefined && !maskedPath.includes(args.nameContains)) continue;
@@ -301,6 +325,8 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         // Each file is resolved again, so a link that leaves the root is never read.
         const file = await workspace.resolve(entry.relative, "read");
         if (!file.ok) continue;
+        // U-203: a link that leads under an unreadable path is not read either.
+        if (hidden !== null && hidden.covers(file.path.relative)) continue;
         const read = await workspace.readText(file.path);
         if (!read.ok) {
           // U-189 (Codex V-10b): a file that could not be read (io_error: the read saw its folders change on
@@ -341,7 +367,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
           : { path: maskedPath, kind: entry.kind, matches },
       );
     }
-    return { ok: true, payload: { entries, truncated } };
+    return { ok: true, payload: { entries, truncated, ...(withheld ? { withheld: true as const } : {}) } };
   }
 
   /**
@@ -503,6 +529,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   const workflowDeps = {
     workspace,
     privacy,
+    ...(unreadable === null ? {} : { unreadable }),
     ...(options.planRecorder === undefined ? {} : { planRecorder: options.planRecorder }),
     fileOps: { ...nodePlanFileOps, ...options.fileOps },
     platform: options.platform ?? process.platform,

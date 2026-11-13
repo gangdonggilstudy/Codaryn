@@ -296,14 +296,22 @@ function fateOf(plan: CleanupPlan, index: number, item: CleanupItem): CleanupIte
   return { removedWith: [] };
 }
 
-/** U-86: the preview's groups, in order. An item that needs both flags is in delete_discarded. */
-const GROUPS = ["confirm", "include_not_reverted", "delete_discarded", "kept"] as const;
+/**
+ * U-86: the preview's groups, in order, each named by its text (cleanup.group.<group>). R-76 M-1
+ * (PM): an item that needs both flags has a group of its own, so each group holds what goes with
+ * exactly its flags: a confirmation removes the confirm group's items and those of each group whose
+ * flags it gives (both only with both). The blocked items follow them, under their own line (L-1).
+ */
+const GROUPS = ["confirm", "include_not_reverted", "delete_discarded", "both", "kept"] as const;
 type Group = (typeof GROUPS)[number];
 
 function groupOf(fate: CleanupItemFate): Group {
   if ("keptFor" in fate) return "kept";
-  if (fate.removedWith.includes("delete_discarded")) return "delete_discarded";
-  return fate.removedWith.includes("include_not_reverted") ? "include_not_reverted" : "confirm";
+  const notReverted = fate.removedWith.includes("include_not_reverted");
+  const discarded = fate.removedWith.includes("delete_discarded");
+  if (notReverted && discarded) return "both";
+  if (discarded) return "delete_discarded";
+  return notReverted ? "include_not_reverted" : "confirm";
 }
 
 /**
@@ -377,7 +385,7 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, o
     const bytes = members.reduce((sum, { item }) => sum + item.size.bytes, 0);
     const count = members.length;
     if (group === "kept") out.push(messages.format("cleanup.group.kept", { count }));
-    else if (group === "delete_discarded") out.push(messages.format("cleanup.group.delete_discarded", { count, files, bytes }));
+    else if (group === "delete_discarded" || group === "both") out.push(messages.format(`cleanup.group.${group}`, { count, files, bytes }));
     else out.push(messages.format(`cleanup.group.${group}`, { count, bytes }));
     for (const { item, fate } of members) {
       // The kind is named: one group can hold an apply run's records and its discarded files.
@@ -388,6 +396,9 @@ export function renderCleanup(output: CleanupOutput, messages: MessageCatalog, o
       else for (const code of item.warnings) out.push(`  ${warningText(code)}`);
     }
   }
+  // R-76 L-1 (PM): what cannot be removed in this cleanup, last and under its own line, so it is not
+  // read as one of the group above.
+  if (plan.blocked.length > 0) out.push(messages.format("cleanup.group.blocked", { count: plan.blocked.length }));
   for (const item of plan.blocked) {
     const reason = (CLEANUP_BLOCK_CODES as readonly string[]).includes(item.code) ? messages.format(`cleanup.blocked.${item.code}`) : item.code;
     out.push(`- ${targetName(item.target)} ${item.runId}: ${reason}`);

@@ -42,13 +42,13 @@ import type {
   ModelInfo,
 } from "../contracts/index.js";
 import { parseInitArgs } from "./args.js";
-import { chooseConfigFile } from "./config-file.js";
+import { chooseConfigFile } from "../app/input/config-file.js";
 import type { CommandOutcome } from "./guard.js";
 import { argumentsError, cliError } from "./run.js";
 import type { WorkspaceLocation } from "../app/input/security/index.js";
-import { envValue, resolveListSettings } from "./settings.js";
-import type { SettingsEnvironment } from "./settings.js";
-import { localPathProblem } from "./task.js";
+import { envValue, resolveListSettings } from "../app/input/settings.js";
+import type { SettingsEnvironment } from "../app/input/settings.js";
+import { localPathProblem } from "../app/input/task.js";
 import { cleanText, hideKeys } from "../app/input/text-safety.js";
 
 /** package.json scripts that may be offered as allowed commands, and the rule each becomes. */

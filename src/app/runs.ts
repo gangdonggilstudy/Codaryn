@@ -15,7 +15,7 @@ import { listRuns as storeListRuns } from "../store/index.js";
 import { RUN_ID_PATTERN } from "../contracts/index.js";
 import { resolveWorkspaceRoot } from "../cli/runs.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "../cli/run-ref.js";
-import { knownKeyValues } from "../cli/settings.js";
+import { knownKeyValues } from "./input/settings.js";
 import { hideKeys } from "./input/text-safety.js";
 import type { KnownKeys } from "./input/security/index.js";
 import { copyEnvironment } from "./environment.js";

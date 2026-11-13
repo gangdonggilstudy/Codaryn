@@ -640,7 +640,7 @@ export const PROVIDER_SETTINGS = ["key", "model", "output_limit"] as const;
 export type ProviderSetting = (typeof PROVIDER_SETTINGS)[number];
 
 /**
- * U-37: one setting not set, as the run's settings resolve it (src/cli/settings.ts):
+ * U-37: one setting not set, as the run's settings resolve it (src/app/input/settings.ts):
  * - key: the provider's key variable (`error.missing.key`).
  * - model: no model left, or only a placeholder (`error.missing.model`,
  *   `error.missing.model_placeholder`): the task's `model.model`, the provider's model variable,

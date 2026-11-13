@@ -26,10 +26,10 @@ import { listRuns } from "../store/index.js";
 import type { CommandOutcome, JsonOutcome } from "./guard.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "./run-ref.js";
 import { argumentsError, cliError } from "./run.js";
-import { knownKeyValues } from "./settings.js";
+import { knownKeyValues } from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
-import type { SettingsEnvironment } from "./settings.js";
-import { localPathProblem } from "./task.js";
+import type { SettingsEnvironment } from "../app/input/settings.js";
+import { localPathProblem } from "../app/input/task.js";
 import { hideKeys } from "../app/input/text-safety.js";
 
 const realpathNative = promisify(realpathCallback.native);

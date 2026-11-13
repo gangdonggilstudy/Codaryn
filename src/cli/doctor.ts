@@ -58,8 +58,8 @@ import type { ExecutableFileSystem } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { parseDoctorArgs } from "./args.js";
-import { parseConfig } from "./config.js";
-import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
+import { parseConfig } from "../app/input/config.js";
+import { chooseConfigFile, isMissingFile, selectProfile } from "../app/input/config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
@@ -84,16 +84,16 @@ import {
   modelPlaceholderSeen,
   providerSettingsOf,
   resolveModelId,
-} from "./settings.js";
+} from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
-import type { SettingsEnvironment } from "./settings.js";
+import type { SettingsEnvironment } from "../app/input/settings.js";
 import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
-import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./task.js";
-import type { InputErrorPosition } from "./task.js";
+import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "../app/input/task.js";
+import type { InputErrorPosition } from "../app/input/task.js";
 import { displayWidth, padEnd } from "./human/index.js";
 import { hideKeys } from "../app/input/text-safety.js";
-import { writablePathSetsOf } from "./writable.js";
-import { UNREADABLE_PATHS_REQUIRED_TEXT, privateAnalysisWithoutData, runUnreadablePaths } from "./unreadable.js";
+import { writablePathSetsOf } from "../app/input/writable.js";
+import { UNREADABLE_PATHS_REQUIRED_TEXT, privateAnalysisWithoutData, runUnreadablePaths } from "../app/input/unreadable.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
 export const MODELS_HINT = "`codaryn models` lists the models the key can use";

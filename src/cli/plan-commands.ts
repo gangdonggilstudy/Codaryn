@@ -99,11 +99,11 @@ import { argumentsError, cliError, prepareTask, runPrepared, withHint } from "./
 import type { CliEnvironment, PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
 import { createRunId } from "../app/input/run-id.js";
 import { goalHoldsKey } from "../app/input/security/index.js";
-import { envValue, knownKeyValues } from "./settings.js";
+import { envValue, knownKeyValues } from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "../app/input/text-safety.js";
-import { runGuards } from "./unreadable.js";
+import { runGuards } from "../app/input/unreadable.js";
 import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
 import type { LoadedChangesPlan } from "./human/index.js";
 

@@ -13,7 +13,7 @@ import { revertStatus } from "./assemble.js";
 import type { PlanApply, RevertCommand, RevertCommandInput, RevertCommandOutcome } from "./assemble.js";
 import { argumentsError, cliError } from "./run.js";
 import { createRunId } from "../app/input/run-id.js";
-import { localPathProblem } from "./task.js";
+import { localPathProblem } from "../app/input/task.js";
 
 export interface RevertEnvironment {
   readonly argv: readonly string[];

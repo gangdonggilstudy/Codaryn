@@ -28,14 +28,20 @@ export type OpenCheckState =
   | { readonly phase: "checking"; readonly handle: string; readonly lockHeld?: true }
   /** Codex V-27 L-1: a failed check says nothing of the lock, so a held lock before it stays held (`lockHeld`). */
   | { readonly phase: "error"; readonly handle: string; readonly code: string; readonly lockHeld?: true }
-  | { readonly phase: "done"; readonly handle: string; readonly reply: DoctorDone; readonly lockHeld: boolean };
+  /**
+   * `lockHeld`: the doctor's answer. R-111b (a): `byOther` false when that answer came while this window's
+   * own run went on in the workspace (the lock was the run's own): then it is not counted or carried.
+   */
+  | { readonly phase: "done"; readonly handle: string; readonly reply: DoctorDone; readonly lockHeld: boolean; readonly byOther?: boolean };
 
 /**
  * U-247, Codex V-27 L-1: whether the check counts the workspace `handle`'s lock as held by another
  * process: its answer said so, or a check of it since (still going, or failed) has not said it is free.
  */
 export function heldFor(state: OpenCheckState, handle: string | undefined): boolean {
-  return state.phase !== "none" && state.lockHeld === true && state.handle === handle;
+  if (state.phase === "none" || state.handle !== handle || state.lockHeld !== true) return false;
+  // R-111b (a): the window's own run's lock is not another process's.
+  return state.phase !== "done" || state.byOther !== false;
 }
 
 /** Whether the doctor's lock check says a live process holds the workspace's lock. */
@@ -53,7 +59,11 @@ export class OpenCheck {
   private generation = 0;
   private readonly watchers = new Map<string, () => void>();
 
-  constructor(private readonly api: CodarynApi) {}
+  /** R-111b (a): `ownRun` says whether this window's own run goes on in the workspace `handle` now. */
+  constructor(
+    private readonly api: CodarynApi,
+    private readonly ownRun: (handle: string) => boolean = () => false,
+  ) {}
 
   /** Checks `workspace` (or forgets the last result). An answer for an earlier call is dropped. */
   async run(workspace: Workspace | null): Promise<void> {
@@ -75,7 +85,7 @@ export class OpenCheck {
       reply = { ok: false, code: "host_error" };
     }
     if (generation !== this.generation) return;
-    if (reply.ok) this.set({ phase: "done", handle, reply, lockHeld: lockHeld(reply) });
+    if (reply.ok) this.set({ phase: "done", handle, reply, lockHeld: lockHeld(reply), byOther: !this.ownRun(handle) });
     else this.set(stillHeld ? { phase: "error", handle, code: reply.code, lockHeld: true } : { phase: "error", handle, code: reply.code });
   }
 

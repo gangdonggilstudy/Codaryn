@@ -30,7 +30,15 @@ export interface NewTaskDeps {
   /** R21b-L-1: the form of a run that started, as the workspace's last one. */
   readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
   /** U-68 (3.2): another process holds the open workspace's lock (the run button is off while it does), and a watcher slot. */
-  readonly lock?: { readonly locked: () => boolean; readonly watch: (watcher: () => void) => void };
+  readonly lock?: {
+    readonly locked: () => boolean;
+    /** R-111b (b): the lock counted as held is being checked again. */
+    readonly checking?: () => boolean;
+    /** R-111b (c): the check again failed; the lock still counts as held. */
+    readonly failed?: () => boolean;
+    readonly recheck?: () => void;
+    readonly watch: (watcher: () => void) => void;
+  };
 }
 
 function select(id: string, label: string, options: readonly (readonly [string, string])[], chosen: string): { field: HTMLElement; input: HTMLSelectElement } {
@@ -163,6 +171,17 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         const lockNote = el("p", t.format("task.locked"), { id: "task-locked", role: "status", hidden: "" });
         const applyLock = (): void => {
           const locked = deps.lock?.locked() ?? false;
+          // R-111b (b, c): another process holds it (an answer said so), it is being checked again, or the
+          // check again failed (then the person can check again). The run button is off in all three.
+          const checking = locked && (deps.lock?.checking?.() ?? false);
+          const failed = locked && !checking && (deps.lock?.failed?.() ?? false);
+          lockNote.setAttribute("data-lock", checking ? "checking" : failed ? "failed" : "held");
+          if (failed && deps.lock?.recheck !== undefined) {
+            const recheck = deps.lock.recheck;
+            lockNote.replaceChildren(t.format("task.lockCheckFailed"), " ", button(t.format("task.lockRecheck"), () => recheck(), { id: "task-lock-recheck" }));
+          } else {
+            lockNote.replaceChildren(t.format(checking ? "task.lockChecking" : "task.locked"));
+          }
           if (locked) lockNote.removeAttribute("hidden");
           else lockNote.setAttribute("hidden", "");
           if (locked || !run.canStart) runButton.setAttribute("disabled", "");

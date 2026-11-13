@@ -78,7 +78,7 @@ import type {
   AnyToolName,
 } from "../../contracts/index.js";
 import { isRunTimestamp } from "../../store/index.js";
-import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "./format.js";
+import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "../../app/input/format.js";
 import { queryTableFacts } from "./query-table.js";
 import type { QueryTableFacts } from "./query-table.js";
 

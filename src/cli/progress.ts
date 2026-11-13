@@ -14,7 +14,7 @@
 import { ALL_TOOL_NAMES } from "../contracts/index.js";
 import type { Journal, JournalEvent, PrivacyGateway } from "../contracts/index.js";
 import { createFailedCalls } from "./failed-calls.js";
-import { cleanText, safeToken } from "./text-safety.js";
+import { cleanText, safeToken } from "../app/input/text-safety.js";
 
 export const PROGRESS_PREFIX = "codaryn: ";
 

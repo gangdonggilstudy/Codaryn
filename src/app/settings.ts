@@ -21,8 +21,8 @@ import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../c
 import { chooseConfigFile, isMissingFile } from "../cli/config-file.js";
 import { parseConfig } from "../cli/config.js";
 import { jsonSyntaxError, positionDiagnostic } from "../cli/run.js";
-import { MAX_KEY_SCAN_DEPTH, findKeyInJson, inputFileTooLarge, inputFileTooLargeMessage, rawTextHoldsKey } from "../cli/security/index.js";
-import type { KnownKeys } from "../cli/security/index.js";
+import { MAX_KEY_SCAN_DEPTH, findKeyInJson, inputFileTooLarge, inputFileTooLargeMessage, rawTextHoldsKey } from "./input/security/index.js";
+import type { KnownKeys } from "./input/security/index.js";
 import { envValue, knownKeyValues } from "../cli/settings.js";
 import { quickProvider } from "../cli/task.js";
 import { appError } from "./errors.js";

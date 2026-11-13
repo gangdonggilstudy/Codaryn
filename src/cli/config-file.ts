@@ -23,7 +23,7 @@ import type {
   DefaultConfigLocation,
   FindDefaultConfigLocation,
 } from "../contracts/index.js";
-import { checkLocalPathSyntax } from "./security/index.js";
+import { checkLocalPathSyntax } from "../app/input/security/index.js";
 import { envValue } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { localPathProblem } from "./task.js";

@@ -3,8 +3,8 @@
  * arguments that can be copied, and the width of text in a terminal.
  */
 
-import { KEY_MASK_SHAPE_SOURCE } from "../security/index.js";
-import { REPLACEMENT, cleanText, hideKeys, safeToken } from "../text-safety.js";
+import { KEY_MASK_SHAPE_SOURCE } from "./security/index.js";
+import { REPLACEMENT, cleanText, hideKeys, safeToken } from "./text-safety.js";
 
 /** Longest path shown in a human line, in characters (as progress.ts). */
 export const MAX_SHOWN_PATH = 200;

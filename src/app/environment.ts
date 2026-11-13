@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { runtimeLocale } from "../i18n/index.js";
-import { findInstall } from "../cli/install.js";
+import { findInstall } from "./input/install.js";
 import type { AppEnvironment } from "./types.js";
 
 /** A mutable copy of `source`. On Windows names are matched without case, keeping their first spelling. */

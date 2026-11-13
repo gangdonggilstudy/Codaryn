@@ -4,7 +4,7 @@
  * or reorder a line are replaced before printing, and key-shaped text is hidden.
  */
 
-import { KEY_SEPARATOR_PATTERN_SOURCE, compactKeyText, keyLettersAndDigits, keyLikeSkeleton } from "../contracts/index.js";
+import { KEY_SEPARATOR_PATTERN_SOURCE, compactKeyText, keyLettersAndDigits, keyLikeSkeleton } from "../../contracts/index.js";
 import { KEY_MASK_SHAPE_SOURCE, keyValuesOf } from "./security/index.js";
 import type { KnownKeys } from "./security/index.js";
 

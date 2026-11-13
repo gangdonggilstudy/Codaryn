@@ -17,4 +17,4 @@ export { SUMMARY_HIDDEN_MARKER, changesApplyQuestion, changesApprovalText, chang
 export type { ChangesApprovalContext, ChangesPlanViewOutcome, LoadedChangesPlan } from "./changes-plan.js";
 export type { HumanWriter, HumanWriterOptions } from "./writer.js";
 // U-125: displayWidth, padEnd and padStart are the one terminal width for every table (doctor, models: U-127).
-export { MODEL_TEXT_COLUMNS, MODEL_TEXT_FALLBACK_COLUMNS, MODEL_TEXT_PREFIX, displayWidth, formatLocalTime, padEnd, padStart, quoteModelText, shellArg, terminalColumns } from "./format.js";
+export { MODEL_TEXT_COLUMNS, MODEL_TEXT_FALLBACK_COLUMNS, MODEL_TEXT_PREFIX, displayWidth, formatLocalTime, padEnd, padStart, quoteModelText, shellArg, terminalColumns } from "../../app/input/format.js";

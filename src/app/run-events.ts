@@ -55,7 +55,7 @@ import { APPLY_JOURNAL_EVENT_TYPES, JOURNAL_EVENT_TYPES, JOURNAL_FILE_NAME, MAX_
 import type { ApplyJournalEntryType, JournalRecord, PrivacyGateway } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { readApplyResult, readResult, summarizeApplyJournal, summarizeJournal } from "../cli/report.js";
-import { REPLACEMENT, cleanText, hideKeys, hideKeysInStrings } from "../cli/text-safety.js";
+import { REPLACEMENT, cleanText, hideKeys, hideKeysInStrings } from "./input/text-safety.js";
 import { hasRecordsChangedMark, inspectRun, isRunTimestamp } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";

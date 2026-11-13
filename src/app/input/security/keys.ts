@@ -16,8 +16,8 @@ import {
   createKeyValueCheck,
   holdsRefusedKeyShape,
   withoutInvisibleCharacters,
-} from "../../contracts/index.js";
-import type { ApiKeyEnv } from "../../contracts/index.js";
+} from "../../../contracts/index.js";
+import type { ApiKeyEnv } from "../../../contracts/index.js";
 
 /** Containers (objects and arrays) deeper than this are rejected as invalid input. */
 export const MAX_KEY_SCAN_DEPTH = 64;

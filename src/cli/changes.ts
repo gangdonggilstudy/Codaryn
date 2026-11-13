@@ -39,8 +39,8 @@ import type { CommandOutcome } from "./guard.js";
 import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
-import { inputFileTooLarge } from "./security/index.js";
-import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
+import { inputFileTooLarge } from "../app/input/security/index.js";
+import { cleanText, hideKeys, hideKeysInStrings } from "../app/input/text-safety.js";
 
 export const CHANGES_USAGE =
   "codaryn changes (--task <task.json> | --workspace <dir> [--profile <name>]) " +

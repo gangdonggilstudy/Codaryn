@@ -36,7 +36,7 @@ import path from "node:path";
 import { MIN_PLAN_DIGEST_PREFIX, STATE_DIR_NAME } from "../contracts/index.js";
 import type { Clock, ContentHash, PlanItemProblem, ResolvedPlanAction, ResolvedTaskSpec } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../cli/args.js";
-import { createRunId } from "../cli/run-id.js";
+import { createRunId } from "./input/run-id.js";
 import { preflightPlan } from "../engine/index.js";
 import { runGuards } from "../cli/unreadable.js";
 import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";

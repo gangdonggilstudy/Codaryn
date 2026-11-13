@@ -592,6 +592,8 @@ export const EN_MESSAGES: MessageTexts = {
   "tool.propose_plan": "propose a plan",
   // U-180 (DR-69 B-3), draft for nb-i18n.
   "tool.propose_changes": "propose the files to change",
+  // U-208 (bundle A), draft for nb-i18n.
+  "tool.query_table": "aggregate a table",
 
   "revert.skip.changed_since_run": "changed again after the run",
   "revert.skip.missing_snapshot": "snapshot missing",

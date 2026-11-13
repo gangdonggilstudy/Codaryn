@@ -591,6 +591,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.propose_plan": "계획 제안",
   // U-180 (DR-69 B-3), nb-i18n 이 다듬을 초안.
   "tool.propose_changes": "바꿀 파일 제안",
+  // U-208 (묶음 A), nb-i18n 이 다듬을 초안.
+  "tool.query_table": "표 집계",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

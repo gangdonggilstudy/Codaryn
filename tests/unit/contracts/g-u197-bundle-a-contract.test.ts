@@ -7,8 +7,8 @@
  * - k: 5 by default, 5 to 1000 (review V-12 M-1: DR-70 before Q-4); no source lowers it, each only
  *   raises it. ResolvedTaskSpec.minGroupSize and .unreadablePaths are what a run reads (R-102 M-1).
  * - next is a cursor of shown-group ordinals, never a key or a row's value (V-12 M-2, R-102 L-1).
- * - Not carried out yet: query_table is not a task type tool, analyze-private not a built-in id, and
- *   the two problems not among WORKFLOW_PROBLEMS (A-5, A-6 add them with their parts).
+ * - Not carried out yet: analyze-private is not a built-in id, and the two problems not among
+ *   WORKFLOW_PROBLEMS (A-6 adds them with their parts). U-208 (A-5) made query_table a task type tool.
  */
 
 import assert from "node:assert/strict";
@@ -143,7 +143,7 @@ describe("U-197 DR-70: what of the groups may be given", () => {
   });
 });
 
-describe("U-197: query_table's descriptor and definition (not a task type tool yet)", () => {
+describe("U-197: query_table's descriptor and definition", () => {
   test("a read with the access aggregate, which the gate allows under unreadable paths (A-3)", () => {
     const tool = QUERY_TABLE_DESCRIPTOR;
     assert.equal(tool.name, QUERY_TABLE_TOOL_NAME);
@@ -164,8 +164,8 @@ describe("U-197: query_table's descriptor and definition (not a task type tool y
     assert.equal(args.operations?.length, 1);
   });
 
-  test("A-5 makes it a task type tool; A-6 adds analyze-private and the two problems", () => {
-    assert.equal((ALL_TOOL_NAMES as readonly string[]).includes(QUERY_TABLE_TOOL_NAME), false);
+  test("A-5 (U-208) made it a task type tool; A-6 adds analyze-private and the two problems", () => {
+    assert.equal((ALL_TOOL_NAMES as readonly string[]).includes(QUERY_TABLE_TOOL_NAME), true);
     assert.equal((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(ANALYZE_PRIVATE_WORKFLOW_ID), false);
     for (const problem of PRIVATE_DATA_WORKFLOW_PROBLEMS) assert.equal((WORKFLOW_PROBLEMS as readonly string[]).includes(problem), false, problem);
     assert.equal(new Set(QUERY_TABLE_PROBLEMS).size, QUERY_TABLE_PROBLEMS.length);

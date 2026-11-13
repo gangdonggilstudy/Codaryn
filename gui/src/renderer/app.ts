@@ -28,11 +28,14 @@ import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
 import { OpenCheck, heldFor } from "./workspace/open-check.js";
+import { OwnLockCalls } from "./workspace/own-lock.js";
 
 async function start(): Promise<void> {
   const root = document.getElementById("app");
   if (root === null) return;
-  const api = window.codaryn;
+  // R-111b M-1: the window's calls that take a workspace lock are counted while they go on (OwnLockCalls).
+  const ownLock = new OwnLockCalls();
+  const api = ownLock.track(window.codaryn);
   const info = asInfo(await api.info());
   let language = info.language;
   document.documentElement.lang = language;
@@ -51,8 +54,12 @@ async function start(): Promise<void> {
   let savedScreen = info.ui?.screen ?? null;
 
   // U-68 (3.2): the checks when a workspace opens (again when a run ends and on F5).
-  // R-111b (a): a held lock seen during this window's own run in that workspace is the run's own.
-  const openCheck = new OpenCheck(api, (handle) => runWorkspace === handle && run.phase !== "idle" && run.phase !== "done");
+  // R-111b (a), M-1: a held lock seen while this window's own work may have held it (its run in that
+  // workspace, or a locking call during the check) is its own.
+  const openCheck = new OpenCheck(api, {
+    busy: (handle) => (runWorkspace === handle && run.phase !== "idle" && run.phase !== "done") || ownLock.inFlight > 0,
+    started: () => ownLock.started,
+  });
   const setWorkspace = (workspace: Workspace): void => {
     current = workspace;
     void openCheck.run(workspace);

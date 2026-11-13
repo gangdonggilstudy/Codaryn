@@ -13,6 +13,8 @@ import { asDoctor } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import type { DoctorCheckView, DoctorReply } from "../../shared/ipc.js";
 import { button, el } from "../shell/dom.js";
+import { NO_OWN_LOCK } from "./own-lock.js";
+import type { OwnLock } from "./own-lock.js";
 
 /** The doctor checks about the workspace itself, in the order shown. */
 export const OPEN_CHECK_IDS = ["workspace", "file_locations", "install_dir", "lock"] as const;
@@ -29,8 +31,9 @@ export type OpenCheckState =
   /** Codex V-27 L-1: a failed check says nothing of the lock, so a held lock before it stays held (`lockHeld`). */
   | { readonly phase: "error"; readonly handle: string; readonly code: string; readonly lockHeld?: true }
   /**
-   * `lockHeld`: the doctor's answer. R-111b (a): `byOther` false when that answer came while this window's
-   * own run went on in the workspace (the lock was the run's own): then it is not counted or carried.
+   * `lockHeld`: the doctor's answer. R-111b (a), M-1: `byOther` false when this window's own work may have
+   * held the lock while the check went on (its run or apply in the workspace, or a locking call that started,
+   * went on or ended meanwhile; OwnLock): then the lock is not counted, carried or shown as another's.
    */
   | { readonly phase: "done"; readonly handle: string; readonly reply: DoctorDone; readonly lockHeld: boolean; readonly byOther?: boolean };
 
@@ -59,10 +62,10 @@ export class OpenCheck {
   private generation = 0;
   private readonly watchers = new Map<string, () => void>();
 
-  /** R-111b (a): `ownRun` says whether this window's own run goes on in the workspace `handle` now. */
+  /** R-111b (a), M-1: `own` says what of this window's own work may hold a workspace's lock. */
   constructor(
     private readonly api: CodarynApi,
-    private readonly ownRun: (handle: string) => boolean = () => false,
+    private readonly own: OwnLock = NO_OWN_LOCK,
   ) {}
 
   /** Checks `workspace` (or forgets the last result). An answer for an earlier call is dropped. */
@@ -77,6 +80,9 @@ export class OpenCheck {
     // Only an answer frees a held lock: a check that is still going or failed keeps it (V-27 L-1).
     const stillHeld = heldFor(this.state, handle);
     this.set(stillHeld ? { phase: "checking", handle, lockHeld: true } : { phase: "checking", handle });
+    // R-111b M-1: own work going on when the check starts, or started before its answer, may be what it saw.
+    const startedBefore = this.own.started();
+    const busyBefore = this.own.busy(handle);
     let reply: DoctorReply;
     try {
       reply = asDoctor(await this.api.doctor(handle));
@@ -85,7 +91,8 @@ export class OpenCheck {
       reply = { ok: false, code: "host_error" };
     }
     if (generation !== this.generation) return;
-    if (reply.ok) this.set({ phase: "done", handle, reply, lockHeld: lockHeld(reply), byOther: !this.ownRun(handle) });
+    const ownWork = busyBefore || this.own.busy(handle) || this.own.started() !== startedBefore;
+    if (reply.ok) this.set({ phase: "done", handle, reply, lockHeld: lockHeld(reply), byOther: !ownWork });
     else this.set(stillHeld ? { phase: "error", handle, code: reply.code, lockHeld: true } : { phase: "error", handle, code: reply.code });
   }
 
@@ -104,8 +111,10 @@ export class OpenCheck {
  * The card on the workspace screen. `ownRun`: a run of this window goes on in this workspace, so a
  * held lock is that run's and is not called another run's.
  */
-export function openCheckCard(t: Texts, state: OpenCheckState, ownRun: boolean, showChecks: () => void): HTMLElement {
+export function openCheckCard(t: Texts, state: OpenCheckState, ownRunNow: boolean, showChecks: () => void): HTMLElement {
   const card = el("section", undefined, { id: "open-check", "aria-labelledby": "open-check-title", "data-open-check": state.phase });
+  // R-111b M-1: a held answer the window's own work may have caused is not another run's either.
+  const ownRun = ownRunNow || (state.phase === "done" && state.byOther === false);
   card.setAttribute("data-locked", String(state.phase === "done" && state.lockHeld && !ownRun));
   if (state.phase === "none") {
     card.setAttribute("hidden", "");

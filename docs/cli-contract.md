@@ -1315,3 +1315,13 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
   - 대신 0보다 큰 것마다 한 줄: `summary.confirm_denied.user`(사람이 거부), `.cancelled`(기다리는 동안 취소), `default`는 `couldAsk`면 `.unanswered`(입력 끝이나 시간 한도), 아니면 `.unasked`(이 실행은 물을 수 없었다: 터미널이 아니거나 `--quiet`).
   - 앱 계층의 실행(GUI)은 이 필드를 아직 채우지 않는다(선택 필드라 지금 출력 그대로).
 - 시험: `tests/unit/cli/g-u110-r88-terminal.test.ts`(R-88: 끊음, 끝난 입력, 놓음; 실제 CLI의 실행 취소와 init의 멈춤, `u110-terminal-preload`로 흉내), `tests/unit/cli/g-u110-terminal-confirm.test.ts`(실행 안의 질문과 답, `--quiet`, 통로 없음), `tests/unit/cli/g-u110-terminal-line.test.ts`(한 줄 읽기, 질문 글, 답 규칙, 파이프로 넣은 `y`는 답이 되지 않음).
+
+### 18.18 기록과 맞게 고친 글 다섯 (U-131, U-129의 넘김)
+
+- 모두 사람용 글만 바꾼다. `report --json`, `review --json`, `changes --json`, 적용 결과(JSON)는 그대로다.
+- `report`의 사람 확인 절(N1, AXM-21): 판정이 없을 때만 "The run waits for a person's verdict (…)"를 낸다. 판정이 있으면 그 줄이 없고, 판정 줄 뒤에 ``A later review replaces it: `codaryn review --run <id> --accept | --reject`.``가 온다.
+- `report`의 계획 줄(N2, UXM-5): 계획 실행의 적용을 실행 목록의 규칙(`planApplyStateOf`, `runs`와 계획 보기와 같음)으로 본다. 적용이 없으면 예전처럼 "waiting for approval"이다. `applied`면 ``- Plan: N action(s), applied by run `<id>` (its report: `codaryn report --run <id>`).``이고, `unfinished`·`applying`·`reverted`·`record_missing`은 `runs.plan_*`와 같은 뜻의 영어다. 글을 낼 때만 실행 목록을 읽는다(`--json`이면 읽지 않는다).
+- `review --reject`(N3, AXM-21): 그 실행이 바꾼 파일이 있으면(`result.changes`가 1건 이상) 끝에 되돌리는 명령(`summary.next_revert`, `--workspace`를 쳤으면 `summary.next_revert_typed`, DR-51)을 낸다. 받아들였거나 바꾼 파일이 없으면 예전 그대로다.
+- 계획 실행의 `changes`(N4, UXM-4·5): `changes.none` 대신 `changes.plan_only`(계획만 만들고 스스로 바꾼 파일은 없음), 적용이 있으면 이어서 `changes.plan_applied`(그 적용 실행이 끝났으면) 또는 `changes.plan_apply_other`(`codaryn runs`가 그 끝을 보여 줌). 실행 목록은 앱 계층의 `listRuns`로 그 실행의 작업 공간(친 `--workspace`, 또는 task 파일의 `workspaceRoot`)에서 읽는다. 읽지 못하면 예전 글(`changes.none`)이다.
+- 다른 작업으로 만든 계획의 적용(N5, UXM-15): 계획 실행의 작업 id(`planTaskIdOf`)가 이 적용의 것과 다르면, `apply.notice.plan_task_differs`를 적용 시작 줄 바로 다음 진행 줄로, 터미널이면 승인 질문(`apply.question`) 바로 앞에도 낸다. 끝 요약의 알림(결과의 `notices`)은 그대로다. 같은 작업 id를 엔진(`ApplyDeps.planTaskId`)에 준다. 기록과 계약은 바뀌지 않는다.
+- 시험: `tests/unit/cli/g-u131-handoffs.test.ts`(실제 CLI, 대본 모델, net guard; 터미널 질문은 `u115-terminal-preload`로 흉내).

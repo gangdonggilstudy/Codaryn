@@ -262,7 +262,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 ### 8.3 오류 코드와 힌트 한 곳 (U-166, AXM-11)
 
 - 오류 JSON(`CliErrorOutput`)의 `code`와 `hint`에 올 수 있는 값을 여기 한 곳에 둔다. 8절과 15~18절의 "더해졌다"는 값이 생긴 내력이다. 값의 원천은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES`, `CLI_ERROR_CATEGORY`, `CLI_ERROR_RETRYABLE`, `ALL_CLI_ERROR_HINTS`이고, 유닛 시험(`tests/unit/cli/g-u166-axm-cli.test.ts`)이 아래 두 표와 그 상수가 같은지 본다.
-- **더하기만 한다.** `code`와 `hint`의 값은 지우거나 뜻을 바꾸지 않고 더하기만 한다. 기존 JSON을 깨는 변경은 DR-48이 두 곳(정리 명령의 JSON, 도는 실행의 조회)에만 허용했고 U-22가 그것을 했다. 코드로는 `cleanup_plan_changed`와 `run_in_progress`가 더해졌다.
+- **더하기만 한다.** `code`와 `hint`의 값은 지우거나 뜻을 바꾸지 않고 더하기만 한다. 예외 하나: U-235(PM)가 `hint`의 `plan_run_not_available`(U-177이 `plan: "run"`을 받지 않던 동안의 힌트)을 뺐다. U-195부터 어떤 출력도 그 값을 담지 않았다. 기존 JSON을 깨는 변경은 DR-48이 두 곳(정리 명령의 JSON, 도는 실행의 조회)에만 허용했고 U-22가 그것을 했다. 코드로는 `cleanup_plan_changed`와 `run_in_progress`가 더해졌다.
 - **분기는 필드로 한다.** 프로그램은 `code`, `category`, `retryable`(8.2), `hint`, `diagnostic.code`(17.5)로 가른다. `message`는 사람이 읽는 영어 설명이고 같은 `code`에서도 경우마다 다르다(예: `invalid_arguments`는 사용법 전체를 담는다).
 - 사람용 오류(stderr)는 `code`의 `error.<code>.what`·`error.<code>.fix`를 쓰고, `hint`가 있으면 `error.hint.<hint>` 한 줄을 더한다(17.4, U-37).
 - 종료 코드는 `code`가 정한다. 실행이 시작된 뒤의 끝(`run`의 상태, `revert`의 `partial`)은 이 표가 아니라 8절의 `RUN_EXIT_CODES`·`REVERT_EXIT_CODES`다.
@@ -318,7 +318,6 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `key_in_task` | `key_in_file` | — | task 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
-| `plan_run_not_available` | `invalid_task`, `invalid_config` | — | U-177이 B-4 전까지 `plan: "run"`을 받지 않을 때 쓰던 힌트. U-195부터 주지 않는다(값은 더하기만이라 남는다, 18.1) |
 | `plan_kind_differs` | `run_not_plan` | — | U-228: 그 실행에는 계획이 있지만 `apply`에 준 task가 수행하는 종류가 아님(바꿀 파일 계획에 계획 방식 `apply`나 계획 방식 없는 task, 이동 계획에 계획 방식 `run`이나 계획 방식 없는 task). 사람용 오류는 `run_not_plan`의 줄 대신 `error.run_not_plan.other_kind`를 쓰고, 이 힌트를 고치는 법으로 준다 |
 | `plan_tool_missing` | `invalid_task`, `invalid_config` | — | U-228(U-224): 작업 종류가 계획 방식의 계획 도구 없이 해석됨(`run`에는 `propose_changes`, `apply`에는 `propose_plan`). 문제 코드 `plan_tool_missing` |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
@@ -386,9 +385,9 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 - 작업 공간 계층과 계획 실행기는 `resolve`한 실경로 문자열로 다시 연다(폴더 손잡이 기준 호출이 없음). 그래서 확인과 사용 사이의 폴더 바꿔치기를 다 닫지는 못한다. U-189(병합 `c0afedb`)가 아래 둘을 좁혔다.
 - **게이트가 판정한 경로(U-189, `src/workspace/judged.ts`):** 도구가 인자를 다시 풀어 얻은 실경로가 게이트가 판정한 실경로와 다르면, 그 호출은 아무것도 하지 않고 `policy_denied`다(메시지 `the path leads elsewhere than when the policy judged it; nothing was done`). 모든 파일 도구에 해당한다. 게이트가 판정하지 않은 인자(`search_files`가 목록 뒤 하나씩 푸는 파일)에는 해당하지 않는다.
-- **읽기(U-189, `src/workspace/guard.ts`):** `read_file`, `search_files`(내용과 이름), `inspect_files`는 연 손잡이의 식별자와 길 위 폴더들의 식별자·변경 시각을 다시 본다. 바뀌었으면 처음부터 `GUARD_ATTEMPTS`(3)번까지 다시 한 뒤 `io_error`다. 내용 찾기에서 그렇게 건너뛴 파일이 있으면 `truncated`가 참이다(5절 U-189 줄).
+- **읽기(U-189, `src/workspace/guard.ts`):** `read_file`, `search_files`(내용과 이름), `inspect_files`는 연 손잡이의 식별자와 길 위 폴더들의 식별자·변경 시각을 다시 본다. 바뀌었으면 처음부터 다시 한다. 처음까지 모두 `GUARD_ATTEMPTS`(6)번이고, 시도 사이의 기다림은 `GUARD_PAUSES_MS`(0·0·50·200·500 ms)다. 그래도 바뀌면 `io_error`다(5절 U-213 줄). 내용 찾기에서 그렇게 건너뛴 파일이 있으면 `truncated`가 참이다(5절 U-189 줄).
   - 남는 것: 마지막 확인과 경로로 하는 호출 사이의 순간, 폴더의 변경 시각이 없는 FAT·exFAT에서 바꿨다 되돌린 것, 작업 공간 루트 자체를 바꿨다 되돌린 것.
-  - 같은 폴더가 쉬지 않고 바뀌는 동안에는 정상 읽기도 `io_error`가 될 수 있다(Codex V-10c: 160번 중 50번, 대상 파일은 늘 그대로).
+  - 같은 폴더가 쉬지 않고 바뀌는 동안에는 정상 읽기도 `io_error`가 될 수 있다. U-213 뒤 몰아치는 동안의 거부는 `read_file`이 23%에서 1.2%로, 목록과 `inspect_files`가 19%에서 1.25%로 줄었다(검토 R-107, 측정 두 번의 합계). 다시 시도의 2초 한도는 새 시도의 시작만 막으므로, 부하에서 걷기 한 번이 길면 호출 전체는 2초에 그 걷기를 더한 만큼 걸릴 수 있다(R-107 O-2).
 - **쓰기와 계획 적용:** 도구가 경로를 푼 뒤의 바꿔치기는 닫지 못한다. 닿을 수 있는 곳은 작업 공간 밖, 그리고 작업 공간 안의 보호 경로와 `writablePaths` 밖이다. 계획 이동은 원본 쪽 폴더가 바뀌면 밖의 파일 이름을 지울 수 있다(`unlink`).
 - 행위자는 허용된 명령의 배경 프로세스와 같은 PC의 다른 프로그램이다.
 - 근거: 읽기는 Codex V-10b·V-10c가 재현했다(시험이 맞춘 바꿔치기 32번 가운데 밖의 내용·이름·해시를 돌려준 것 0번). 쓰기와 계획 적용은 코드 조사(na-core, main `21107dc`)이고 경합은 재현하지 않았다. 앱 계층의 작업 공간 글 읽기·쓰기에 남은 같은 틈은 Codex가 재현했다(V-1b, [privacy.md](privacy.md) 13절).
@@ -1134,7 +1133,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 해석 규칙(`resolveWorkflow`)
   - 도구는 작업 종류가 허용한 것 안에서만 좁힐 수 있다.
   - `plan: "apply"`는 약하게 바꿀 수 없다.
-  - U-195(DR-69 B-4): 파서(`parsePlanMode`)는 `PLAN_MODES`의 값을 모두 받는다. U-177(검토 R-99 M-2)이 B-4 전까지 하던 `plan: "run"`의 거부는 없어졌고 그 힌트 `plan_run_not_available`은 주지 않는다. 틀린 값은 `plan must be one of none, apply, run`이다.
+  - U-195(DR-69 B-4): 파서(`parsePlanMode`)는 `PLAN_MODES`의 값을 모두 받는다. U-177(검토 R-99 M-2)이 B-4 전까지 하던 `plan: "run"`의 거부는 없어졌고 그 힌트 `plan_run_not_available`은 주지 않고, U-235에서 힌트 목록에서도 뺐다(8.3의 예외). 틀린 값은 `plan must be one of none, apply, run`이다.
     - `plan: "run"`의 계획 실행이 계획을 저장하려면 그 실행의 도구에 `propose_changes`가 있어야 한다. 지금 내장 작업 종류에는 그 도구를 둔 것이 없으므로, 설정 파일의 작업 종류 정의(`tools`에 `propose_changes`, `plan: "run"`)와 그것을 가리키는 `workflowRef`나 `--workflow`로 쓴다.
     - U-224(p4g): 계획 방식이 `run`인데 도구에 `propose_changes`가 없거나, `apply`인데 `propose_plan`이 없으면 해석에서 거부한다(`plan_tool_missing`, 자리는 정의의 `workflows.tools`, task의 `tools`, task의 `plan` 가운데 고칠 곳). 전에는 모델까지 가서 `failed`/`model_error`로 끝났다.
     - U-228: 그 오류에는 힌트 `plan_tool_missing`(계획 방식마다 필요한 도구와 고치는 법)이 붙는다. doctor는 실행처럼 작업 종류를 해석해, 이 문제일 때 고칠 파일의 점검을 `fail`로 한다. 정의나 프로필이면 `config_file`(`doctor.config_file.plan_tool_missing`), 아니면 `task_file`(`doctor.task_file.plan_tool_missing`)이다. 메시지는 실행의 글이다. 다른 해석 문제는 전처럼 실행이 말한다.
@@ -1335,6 +1334,9 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - 간편 형식 `plan`·`apply`·`review`의 설정 안내(R-11 L-2)는 JSON `message`에만 있다. 사람용 stderr에는 일반 고치는 법만 나온다(검토 R-12 L-2). 안내 문구 id(계약 담당)와 두 언어 글(N-B)이 생기면 stderr에도 붙인다. 재현은 `tests/unit/cli/g-r12.test.ts`에 `todo`로 있다.
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
+- run 계획의 사람용 글 가운데 CLI가 아직 쓰지 않는 것(U-216·U-238, main `529fcea`의 실제 CLI로 확인):
+  - 계획 없이 끝난 계획 실행(예: 계획 파일이 `writablePaths` 밖이라 `propose_changes`가 거부됨)은 `failed`/`model_error`(`malformed_response`)이고, 끝 요약의 마지막 안내는 모델 설정 점검(`Check with codaryn doctor and codaryn models, …`)이다.
+  - U-221·U-228 뒤로 끝 요약(`A plan is ready: 2 file(s) to write…`와 계획 보기의 요약 표지), `runs`·`plan`·`report`의 수행 이름(`carried out`), 한 번만 나오는 `writablePaths` 안내, 터미널의 승인 질문(`changesApprovalText`의 줄들과 `Start the run that makes these changes? [y/N]`)은 run 계획의 글이다. `propose_changes`가 없는 작업 종류는 모델 요청 전에 거부되고(`invalid_config`·`invalid_task`, 힌트 `plan_tool_missing`) `doctor`는 그 파일을 실패로 알린다([사용 설명서](usage.md) 18.11절).
 
 ### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
 

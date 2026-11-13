@@ -341,7 +341,10 @@ export type DataRule =
  * U-197 (bundle A, Q-7): to become MAX_QUERY_TABLE_BYTES (64 MiB) with the shared table reading in
  * pieces (A-2), once a 64 MiB table has been timed. R-6 (A-7): an `aggregate_match` whose source is
  * under unreadablePaths gives no recomputed number in its evidence, only which row and column did not
- * match, so a repair cannot learn a hidden group's value from it.
+ * match, so a repair cannot learn a hidden group's value from it. U-223 (PM, R-6 widened): neither
+ * does a target or a `table_shape` table under them give a cell value or a row count read from it;
+ * the verdicts, `checked` and `limits` stay. The list reaches data_checks with the runner
+ * (VerifierRunner).
  */
 export const MAX_DATA_TABLE_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_DATA_TOLERANCE = { absolute: 1e-9, relative: 1e-9 } as const;
@@ -400,6 +403,16 @@ export interface VerifierResult {
   readonly limits: readonly MaskedText[];
 }
 
+/**
+ * U-231 (nd-docs' U-223; bundle A A-7, R-6): a run's verifier runner is made with that run's
+ * unreadable paths (ResolvedTaskSpec.unreadablePaths, every source united), not given them per call:
+ * `run(config, signal)` stays, and the list is an option of its making
+ * (`VerifierRunnerOptions.unreadablePaths` in src/verify, judged as the policy gate judges them: by
+ * the real path, a link entry covering its target, an unusable list covering everything).
+ * data_checks then writes no number read from a table under them (MAX_DATA_TABLE_BYTES' note).
+ * Whoever makes the runner for a run passes the list: the CLI's run and a plan's apply (U-210 with
+ * U-223), the app layer's assembly (p5a). Absent or empty: nothing is withheld, as before.
+ */
 export interface VerifierRunner {
   /** Runs one configured verifier. Never throws for verifier-level failures. */
   run(config: VerifierConfig, signal: AbortSignal): Promise<RawVerifierResult>;

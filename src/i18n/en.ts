@@ -30,7 +30,6 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "The config file has no profile of the name given with --profile; check the profile names in the config file.",
   "error.hint.task_type_not_found": "The task type given (with --workflow or in the task file) is neither built in nor defined in the config file; check its name.",
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
-  "error.hint.plan_run_not_available": "Plan mode \"run\" cannot be used in this version yet; set plan to \"none\" or \"apply\". Nothing was sent to a model.",
   // U-228, drafts for nb-i18n.
   "error.hint.plan_kind_differs":
     "Give apply the task the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",

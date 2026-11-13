@@ -508,6 +508,15 @@ export interface ChangesRequest {
 }
 
 /**
+ * U-234 (R-107 O-1): how a changes view may be given up. `signal`, once aborted, ends the waits of a
+ * read in a burst of changes (U-213: up to GUARD_PAUSES_MS, 750 ms, per file) and starts no try more;
+ * a file still changing is then `unreadable`, as when its tries ran out. Absent: the reads wait.
+ */
+export interface ChangesOptions {
+  readonly signal?: AbortSignal;
+}
+
+/**
  * DR-17: the task form `plan`, `apply`, `review` and `changes` take, as G-A defines it for the CLI:
  * a task file, or a workspace with the config file's defaults and an optional profile. It decides
  * the secrets (S-2 to S-4) and the workspace exactly as for a run; it needs no goal and no model.
@@ -974,7 +983,7 @@ export interface CodarynApp {
   /** `codaryn models --json --use <id>`: writes the config file's `model` atomically, nothing else. */
   selectModel(request: SelectModelRequest): Promise<AppCallOutcome<ModelsOutput>>;
   /** DR-7: the run's changes, masked again with the secrets registered now. Reads only. */
-  changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>>;
+  changes(request: ChangesRequest, options?: ChangesOptions): Promise<AppCallOutcome<ChangesOutput>>;
   /** U-89 (GUI 3.3): one directory of the workspace, masked, links never followed. Reads only. */
   listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>>;
   /** U-172 (DR-72): a workspace text file for a person, as shown, and whether it can be edited here. Reads only, no lock (adapter-contract 5.15). */

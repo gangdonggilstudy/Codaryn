@@ -340,6 +340,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.api_key.scripted": "task가 scripted 모델을 쓰므로 키가 필요 없습니다",
   "doctor.api_key.ok": "{keyEnv}가 설정되어 있습니다(값은 보지 않습니다)",
   "doctor.api_key.missing": "{keyEnv}가 설정되지 않았습니다. {provider} 제공자의 실행은 provider_not_configured로 멈춥니다",
+  "doctor.api_key.unusable": "{keyEnv} 값에 출력 가능한 ASCII(0x21-0x7E, 공백 없음)가 아닌 글자가 있어 보낼 수 없습니다. 변수 값을 확인하세요",
   "doctor.api_key.sends_to_env": "{keyEnv}가 설정되어 있습니다. {provider} 요청은 이 키를 {origin}에 보냅니다({variable} 변수가 정한 주소)",
   "doctor.api_key.sends_to_config": "{keyEnv}가 설정되어 있습니다. {provider} 요청은 이 키를 {origin}에 보냅니다(설정 필드 {field}가 정한 주소)",
   "doctor.api_key.sends_to_default": "{keyEnv}가 설정되어 있습니다. {provider} 요청은 이 키를 기본 주소 {origin}에 보냅니다",

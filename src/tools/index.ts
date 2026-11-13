@@ -52,8 +52,16 @@ export { MAX_INSPECT_WALK_ENTRIES } from "./workflow-tools.js";
  * U-187 (DR-69 B-6): the PlannedFileProbe for a workspace, for ApprovedChangesPlan.fileNow (the
  * caller of runApprovedPlan wires it). Node's file operations unless `fileOps` replaces some.
  */
-export function createPlannedFileProbe(options: { readonly workspace: Workspace; readonly fileOps?: Partial<PlanFileOps> }): PlannedFileProbe {
-  return plannedFileProbeFor({ workspace: options.workspace, fileOps: { ...nodePlanFileOps, ...options.fileOps } });
+export function createPlannedFileProbe(options: {
+  readonly workspace: Workspace;
+  readonly fileOps?: Partial<PlanFileOps>;
+  readonly platform?: NodeJS.Platform;
+}): PlannedFileProbe {
+  return plannedFileProbeFor({
+    workspace: options.workspace,
+    fileOps: { ...nodePlanFileOps, ...options.fileOps },
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
+  });
 }
 export { HARD_LINK_UNAVAILABLE_PROBLEM } from "./plan-files.js";
 export type { PlanFileOps } from "./plan-files.js";

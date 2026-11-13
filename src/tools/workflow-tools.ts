@@ -572,17 +572,27 @@ export async function proposeChanges(
  * SHA-256 of the regular file the path names, its last name not a link (inspectSource, hashFile),
  * `missing` when it is gone, else `other`. A check that fails, a path the workspace refuses and a
  * cancel answer `other` (fail closed: plannedFileStale takes it as stale). Reads only.
+ * Review V-11 H-1: a planned file's path is its effective path when the plan was made (links
+ * resolved, ResolvedPlannedFile). It still fits only while it resolves to itself: a link now on its
+ * way (a parent folder turned into a junction) leads elsewhere, and that is `other`.
  */
-export function createPlannedFileProbe(options: { readonly workspace: Workspace; readonly fileOps: PlanFileOps }): PlannedFileProbe {
+export function createPlannedFileProbe(options: {
+  readonly workspace: Workspace;
+  readonly fileOps: PlanFileOps;
+  readonly platform?: NodeJS.Platform;
+}): PlannedFileProbe {
   const { workspace, fileOps } = options;
+  const platform = options.platform ?? process.platform;
+  const itself = (resolved: ResolvedPath, planned: string): boolean => pathKey(resolved.relative, platform) === pathKey(planned, platform);
   return async (file, signal): Promise<PlannedFileNow> => {
     try {
       if (file.change === "create") {
         const now = await inspectDestination(workspace, file.path, fileOps);
-        return now.ok ? { kind: "missing" } : { kind: "other" };
+        return now.ok && itself(now.path, file.path) ? { kind: "missing" } : { kind: "other" };
       }
       const now = await inspectSource(workspace, file.path, fileOps);
       if (!now.ok) return now.problem === "source_missing" ? { kind: "missing" } : { kind: "other" };
+      if (!itself(now.path, file.path)) return { kind: "other" };
       const hashed = await hashFile(now.path.absolute, { expected: now.identity, signal });
       if (hashed.ok) return { kind: "file", sha256: hashed.hash };
       return hashed.reason === "missing" ? { kind: "missing" } : { kind: "other" };

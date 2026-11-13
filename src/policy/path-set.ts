@@ -73,6 +73,13 @@ export interface PathSetOptions {
   readonly match: "prefix" | "exact";
   /** What an unusable list or entry covers: everything (a deny list) or nothing (an allow list). */
   readonly onUnusable: "covers" | "misses";
+  /**
+   * Review V-11 H-1, allow lists only: `refuse` for entries that are effective paths already (an
+   * approved plan's files, resolved when the plan was made). Such an entry covers only its own text,
+   * and only while it still resolves to itself: a link now on its way makes it allow nothing, and it
+   * never covers the place a link leads to. Absent or `follow`: a link entry covers its real path.
+   */
+  readonly entryLinks?: "follow" | "refuse";
 }
 
 export interface PathSet {
@@ -144,7 +151,14 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
         // Refused (outside the workspace, a dangling link, the state directory, a form the
         // workspace does not accept): the entry allows nothing.
         if (!resolved.ok) continue;
-        if (byText[index] === true || entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
+        const real = segmentsOf(resolved.path.relative);
+        if (options.entryLinks === "refuse") {
+          // V-11 H-1: an effective path covers its own text only while it still resolves to itself.
+          const text = lexical[index] as readonly string[];
+          if (byText[index] === true && real.length === text.length && real.every((segment, at) => segment === text[at])) return true;
+          continue;
+        }
+        if (byText[index] === true || entryCovers(real, relative, options.match)) return true;
       }
       return false;
     },

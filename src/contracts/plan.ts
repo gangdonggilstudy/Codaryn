@@ -539,7 +539,10 @@ export function plannedFileStale(file: ResolvedPlannedFile, now: PlannedFileNow)
  * parents are folders, `other` for anything else (a dangling link too). For `modify`: `file` with its
  * SHA-256 when the path names a regular file (its last name not a link), `missing` when it is gone,
  * `other` otherwise. A check that cannot be made answers `other`, which plannedFileStale takes as
- * stale (fail closed). tools' `createPlannedFileProbe` makes it for a workspace.
+ * stale (fail closed). tools' `createPlannedFileProbe` makes it for a workspace. Review V-11 H-1:
+ * a planned file's path is its effective path when the plan was made (links resolved); it fits only
+ * while it still resolves to itself, so a link now on its way (a parent turned into a junction) is
+ * `other`.
  */
 export type PlannedFileProbe = (file: ResolvedPlannedFile, signal: AbortSignal) => Promise<PlannedFileNow>;
 

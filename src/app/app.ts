@@ -68,7 +68,6 @@ import { knownKeyValues } from "../cli/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
-import type { LockRetryOptions } from "./lock-retry.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
@@ -169,8 +168,6 @@ export interface AppHooks {
   readonly applyCheck?: ApplyCheckOperations;
   /** U-172: writeWorkspaceText's lock release, and a pause at each check (V-1's races). Tests only. */
   readonly workspaceText?: WorkspaceTextOperations;
-  /** U-211: the later tries of a run's lock release that failed (their waits, how they ended). Tests only. */
-  readonly lockRetry?: LockRetryOptions;
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -284,7 +281,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    * those of the run that carries out an approved run plan (applyPlan).
    * - The assembly (createAppAssemble): DR-15's events from the records the engine appends, masked
    *   again with the run's gateway, to `observer`; U-108's permission questions to `observer.confirm`;
-   *   U-193's lockLeft and U-211's later release tries.
+   *   U-193's lockLeft.
    * - The start gate (adapter-contract 5.1): `started` gives the run id and workspace once the run
    *   is assembled; the engine (runTask, or runApprovedPlan for an approved plan) waits for `open`,
    *   which the caller calls after it handed out the handle, so the id is known before the first event.
@@ -315,7 +312,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       () => {
         lockLeft = true;
       },
-      hooks.lockRetry,
     );
     const assemble: Assemble = async (input) => {
       const assembled = await ownAssemble(input);

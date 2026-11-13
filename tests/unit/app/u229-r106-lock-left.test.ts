@@ -7,9 +7,8 @@
  *   output, as a run's does (RunOutcome). The apply of a plan of moves cannot follow yet: the CLI's
  *   runApply tells it only in its end summary (contract 5.1).
  * - I-5: when the app's assembly fails after it took the lock, a release that throws replaced the
- *   assembly's own error and started no later try. Now the assembly's error is the one thrown, as in
- *   the CLI's assembly since U-220, and the release is tried again later (U-211), through the lock's
- *   queue (V-17 H-1).
+ *   assembly's own error. Now the assembly's error is the one thrown, as in the CLI's assembly since
+ *   U-220; the lock stays (no later try: U-211's was taken out after Codex V-17b).
  * The removal of lock.json fails with EBUSY past the store's retries (injected only there, as U-220's
  * tests do). Reproduced first (0d5181d, todo until the app passed them on). Temporary folders, scripted
  * model, fake values only.
@@ -93,13 +92,12 @@ describe("U-229, R-106 L-1: a revert whose lock cannot be released", () => {
 });
 
 describe("U-229, R-106 I-5: the app's assembly fails after it took the lock, and the release throws", () => {
-  test("the assembly's own error is thrown, and a later try releases the lock", async () => {
+  test("the assembly's own error is thrown, and the lock is left", async () => {
     const base = await setupRun({}, {}, []);
     const work = path.join(base, "work");
     const lockFile = path.join(work, ".codaryn", "lock.json");
     const parsed = parseTask(JSON.parse(readFileSync(path.join(base, "task.json"), "utf8")), base);
     assert.ok(parsed.ok, JSON.stringify(parsed));
-    let ended: string | null = null;
     const assemble = createAppAssemble(
       {},
       process.platform,
@@ -107,14 +105,13 @@ describe("U-229, R-106 I-5: the app's assembly fails after it took the lock, and
         throw new Error("U-229: the assembly fails after the lock");
       },
       () => undefined,
-      { delaysMs: [300], onEnd: (end) => (ended = end) },
     );
     const input = { task: parsed.task, runId: "u229-i5-run", model: {} as ModelProvider, secrets: [], clock: { now: () => Date.now() }, signal: new AbortController().signal };
     try {
       await whileLockStays(lockFile, () => assert.rejects(assemble(input), /the assembly fails after the lock/));
-      for (let waited = 0; ended === null && waited < 10_000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(ended, "released", "U-211's later try");
-      assert.equal(existsSync(lockFile), false);
+      // No later try (Codex V-17b, PM): the lock stays while this process lives, as U-193 says.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(existsSync(lockFile), true, "the lock is left");
     } finally {
       await takeBack(lockFile, work);
     }

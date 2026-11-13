@@ -7,8 +7,9 @@
  * its `onLockLeft` (U-193) and resolved with nothing, so to the CLI it said "released" either way.
  * Here the app's assembly is called as the CLI calls it; the release fails in the two ways U-220
  * names: the lock is no longer this run's (release answers false), and the removal of lock.json fails
- * with EBUSY past the store's retries (injected only there, as U-220's tests do), after which U-211's
- * later try releases it. Reproduced first (4200131, todo until the app's finish gave the marker).
+ * with EBUSY past the store's retries (injected only there, as U-220's tests do); the lock then stays
+ * (no later try: U-211's was taken out after Codex V-17b). Reproduced first (4200131, todo until the
+ * app's finish gave the marker).
  * Temporary folders, the real store, fake values only.
  */
 
@@ -76,7 +77,7 @@ interface Assembled {
 }
 
 /** The app's assembly of a run, as the CLI calls it; the lock is held once it returns. */
-async function assembled(runId: string, lockRetry: Parameters<typeof createAppAssemble>[4] = {}): Promise<Assembled> {
+async function assembled(runId: string): Promise<Assembled> {
   const base = await mkdtemp(path.join(tmpdir(), "codaryn-u229-"));
   temporaryDirs.push(base);
   const work = path.join(base, "ws");
@@ -92,7 +93,6 @@ async function assembled(runId: string, lockRetry: Parameters<typeof createAppAs
     () => {
       told += 1;
     },
-    lockRetry,
   );
   const outcome = await assemble({
     task: parsed.task,
@@ -132,9 +132,8 @@ describe("U-229: the app's finish says whether it released the lock (U-220's con
     }
   });
 
-  test("a release that throws past the store's retries: { lockLeft: true }, the result stored, a later try releases it", async () => {
-    let ended: string | null = null;
-    const run = await assembled("u229-busy", { delaysMs: [300], onEnd: (end) => (ended = end) });
+  test("a release that throws past the store's retries: { lockLeft: true }, the result stored, the lock left", async () => {
+    const run = await assembled("u229-busy");
     const result = { kind: "run", runId: run.runId } as unknown as EngineResult;
     const finished = await whileLockStays(run.lockFile, () => run.finish(result));
     try {
@@ -142,9 +141,10 @@ describe("U-229: the app's finish says whether it released the lock (U-220's con
       assert.equal(run.lockLeftTold(), 1);
       const stored = path.join(run.work, ".codaryn", "runs", run.runId, "result.json");
       assert.deepEqual(JSON.parse(readFileSync(stored, "utf8")), result, "the result is written before the release");
-      for (let waited = 0; ended === null && waited < 10_000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(ended, "released", "U-211's later try");
-      assert.equal(existsSync(run.lockFile), false);
+      // No later try (Codex V-17b, PM): the lock stays while this process lives, as U-193 says. Longer
+      // than the first wait U-211 had (2 s), so a later try on that schedule would be seen here.
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      assert.equal(lockRunId(run.lockFile), run.runId, "the lock is left");
     } finally {
       if (existsSync(run.lockFile)) await releaseLock({ workspaceRoot: run.work, runId: run.runId });
     }

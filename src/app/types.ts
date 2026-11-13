@@ -935,7 +935,7 @@ export interface ApplyObserver {
 /**
  * DR-2: an apply's end. U-218: a run plan's apply is a model run, so its outcome is that run's
  * EngineResult (kind "run", with planRunId and planDigest; the run's verifiers and changes) and, as a
- * run's (U-193), `lockLeft` when its lock could not be released at its end (U-211 tries again later).
+ * run's (U-193), `lockLeft` when its lock could not be released at its end.
  */
 export type ApplyOutcome =
   | { readonly ok: true; readonly output: ApplyResult }

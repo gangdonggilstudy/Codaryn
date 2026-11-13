@@ -19,9 +19,7 @@
 
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createRunRecorders, hasRecordsChangedMark, stateUncheckedSince, writeResult } from "../store/index.js";
-import { releaseOwnLock, retryLockRelease } from "./lock-retry.js";
-import type { LockRetryOptions } from "./lock-retry.js";
+import { acquireLock, createRunRecorders, hasRecordsChangedMark, releaseLock, stateUncheckedSince, writeResult } from "../store/index.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createPlannedFileProbe, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
@@ -41,8 +39,6 @@ function lockedMessage(holder: LockInfo | null): string {
  * its retries, or answered false), `onLockLeft` is called and the run's end goes on: its result
  * (written to result.json first) stays, not an internal error. The lock is then held while this
  * process lives, and a later run of another process finds it stale once it has ended.
- * U-211: a release that threw is tried again a few seconds later (retryLockRelease, `lockRetry`),
- * for this run's lock only; an answer of false (the lock is not this run's) is not.
  * U-229 (after U-220): finish then also resolves with `{ lockLeft: true }`, as the CLI's assembly
  * does, and with nothing when it released the lock.
  * U-218 (DR-69 B-4): with AssemblyInput.planRunId (a run that carries out an approved run plan), the
@@ -55,7 +51,6 @@ export function createAppAssemble(
   platform: NodeJS.Platform,
   onAssembled: (assembled: { readonly privacy: PrivacyGateway; readonly workspaceRoot: string }) => void,
   onLockLeft: () => void = () => undefined,
-  lockRetry: LockRetryOptions = {},
 ): Assemble {
   return async (input) => {
     const { task, runId, model, secrets, clock, signal } = input;
@@ -135,28 +130,21 @@ export function createAppAssemble(
             if (result !== null) await writeResult(workspaceRoot, result);
           } finally {
             // U-193: a lock left is told, never a reason to lose the run's result.
-            let threw = false;
             try {
-              // V-17 H-1: through the queue of this lock, never beside its later tries.
-              released = (await releaseOwnLock({ workspaceRoot, runId })) === true;
+              released = (await releaseLock({ workspaceRoot, runId })) === true;
             } catch {
-              threw = true;
+              released = false;
             }
             if (!released) onLockLeft();
-            // U-211: the file may be held a moment longer than the store's retries; tried again later.
-            if (threw) void retryLockRelease({ workspaceRoot, runId }, lockRetry);
           }
           // U-229 (U-220's contract): the CLI reads a lock left from finish (its end summary).
           return released ? undefined : { lockLeft: true as const };
         },
       };
     } catch (error) {
-      // U-229 (R-106 I-5, as the CLI's assembly since U-220): the assembly's own error is the one thrown;
-      // a release that throws after it is tried again later (U-211), through the lock's queue.
-      await releaseOwnLock({ workspaceRoot, runId }).catch(() => {
-        void retryLockRelease({ workspaceRoot, runId }, lockRetry);
-        return false;
-      });
+      // U-229 (R-106 I-5, as the CLI's assembly since U-220): the assembly's own error is the one thrown,
+      // not a release that failed after it.
+      await releaseLock({ workspaceRoot, runId }).catch(() => false);
       throw error;
     }
   };

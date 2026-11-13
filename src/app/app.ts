@@ -2,14 +2,15 @@
  * The app layer (adapter-contract sections 3 to 5): what every adapter calls to run, report,
  * revert, check and compare. It holds no task logic; the engine does.
  *
- * Interim implementation (A-1). The pre-run checks and the commands still live in `src/cli`, which
- * this assignment may not change. Rather than copy the security checks (S-1 to S-9, U-1, U-3) and
- * risk two versions drifting apart, the app layer calls the CLI's own, fully injected functions
- * with argument lists built from the request, and receives their output objects unchanged. So
- * `startRun` checks in the same order, with the same codes and messages, as `codaryn run`.
- * The run's assembly is the app layer's own (./assemble.ts, DR-4). This makes `src/app` depend on
- * `src/cli` for now; migration step 2 moves that code into `src/app` and turns the dependency
- * around without changing this module's interface.
+ * Interim implementation (A-1). The pre-run checks (prepareTask) and the commands still live in
+ * `src/cli`. Rather than copy the security checks (S-1 to S-9, U-1, U-3) and risk two versions
+ * drifting apart, the app layer calls the CLI's own, fully injected functions with argument lists
+ * built from the request, and receives their output objects unchanged. So `startRun` checks in the
+ * same order, with the same codes and messages, as `codaryn run`. This makes `src/app` depend on
+ * `src/cli` for now; the CLI migration (docs/reviews/2026-11-13-cli-migration-plan.md) moves that
+ * code into `src/app` step by step and turns the dependency around without changing this module's
+ * interface. Already here: the input layer (./input/, C-3a and C-3b) and the run's assembly
+ * (./assembly.ts, C-4), which the CLI's runs use too; the app's hooks for it are ./assemble.ts (DR-4).
  */
 
 import { existsSync } from "node:fs";
@@ -47,7 +48,7 @@ import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
 import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
-import type { Assemble } from "../cli/assemble.js";
+import type { Assemble } from "./assembly.js";
 import { createCancelSource } from "../cli/cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { runDoctor } from "../cli/doctor.js";

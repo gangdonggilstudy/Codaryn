@@ -39,6 +39,7 @@ import type { CommandOutcome } from "./guard.js";
 import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
+import { inputFileTooLarge } from "./security/index.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
 
 export const CHANGES_USAGE =
@@ -310,7 +311,10 @@ async function planRunOf(io: ChangesEnvironment, settings: TaskForm, runId: stri
       workspace = path.resolve(cwd, settings.input.workspace);
     } else {
       const taskPath = path.resolve(cwd, settings.input.taskPath);
-      const task = JSON.parse((await (io.readFile ?? ((file: string) => readFile(file, "utf8")))(taskPath)).replace(/^\uFEFF/, "")) as { workspaceRoot?: unknown };
+      const taskText = (await (io.readFile ?? ((file: string) => readFile(file, "utf8")))(taskPath)).replace(/^\uFEFF/, "");
+      // U-153 (R-94 I4): the first read's size check (DR-40 (b)); a larger file gives the text as before.
+      if (inputFileTooLarge(taskText)) return null;
+      const task = JSON.parse(taskText) as { workspaceRoot?: unknown };
       if (typeof task.workspaceRoot !== "string") return null;
       workspace = path.resolve(path.dirname(taskPath), task.workspaceRoot);
     }

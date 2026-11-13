@@ -58,6 +58,12 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
   { file: "config-file.js", names: ["chooseConfigFile"], step: "C-3b" },
   { file: "unreadable.js", names: ["runGuards", "runUnreadablePaths", "runMinGroupSize"], step: "C-3b" },
   { file: "assemble.js", names: ["assembleRun", "createAssemble", "createRevertCommand", "revertStatus"], step: "C-4 (names in a file that stays; the pinned file takes assembleRun)" },
+  {
+    file: "run.js",
+    names: ["prepareTask", "cliError", "withHint", "argumentsError", "settingsError", "positionDiagnostic", "jsonSyntaxError", "workflowProblemText", "runCli"],
+    step: "C-5 (names in a file that stays; the pinned file takes runCli)",
+  },
+  { file: "json-position.js", names: ["jsonErrorOffset", "lineAndColumn", "jsonSyntaxPosition"], step: "C-5" },
 ];
 
 describe("U-282: the old paths the CLI migration keeps as re-exports are there (plan A)", () => {

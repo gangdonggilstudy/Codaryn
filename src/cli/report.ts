@@ -72,7 +72,7 @@ import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
-import { argumentsError, cliError } from "./run.js";
+import { argumentsError, cliError } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
 import type { SettingsEnvironment } from "../app/input/settings.js";

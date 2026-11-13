@@ -1172,7 +1172,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 간편 형식의 `plan`·`apply`·`review`도 실행 설정(한도 포함)을 설정 파일에서 읽는다. 빠지면 `invalid_config`이고, 계획 실행의 task를 `--task`로 주라고 안내한다(검토 R-11 L-2).
 - task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 작업 종류의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
 - 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
-- `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 작업 종류, 가릴 값 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17).
+- `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 작업 종류, 가릴 값 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17). 이행 C-5(U-287)부터 `src/app/prepare.ts`에 있고, 그 전에는 `src/cli/run.ts`에 있었다.
 
 #### 18.1.1 정책 합치기 (DR-41)
 

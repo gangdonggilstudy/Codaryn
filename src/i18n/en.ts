@@ -12,6 +12,8 @@ export const EN_MESSAGES: MessageTexts = {
   "error.label": "error",
   "error.fix_label": "To fix",
   "error.doctor_hint": "Check: codaryn doctor",
+  // U-228, draft for nb-i18n.
+  "error.run_not_plan.other_kind": "that run's plan is not of the kind the task given to apply carries out",
   "error.hint.quick_form_needs_task":
     "The quick form (--workspace) of plan, apply and review reads the run settings, limits included, from the config file. Give the plan run's task with --task instead: it brings its own settings and secrets.",
   "error.hint.unknown_command": "No command was given, or the word given is not a Codaryn command; codaryn --help lists the commands.",
@@ -29,6 +31,11 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.task_type_not_found": "The task type given (with --workflow or in the task file) is neither built in nor defined in the config file; check its name.",
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
   "error.hint.plan_run_not_available": "Plan mode \"run\" cannot be used in this version yet; set plan to \"none\" or \"apply\". Nothing was sent to a model.",
+  // U-228, drafts for nb-i18n.
+  "error.hint.plan_kind_differs":
+    "Give apply the task the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
+  "error.hint.plan_tool_missing":
+    "A task type with plan \"run\" needs propose_changes among its tools, and one with plan \"apply\" needs propose_plan. Add the tool to the task type's tools (and to the task's own tools if it lists them), or leave the plan mode out.",
   "error.hint.key_in_goal": "The key value is in the goal; take it out of the goal.",
   "error.hint.key_in_task": "The key field or value is in the task file given with --task; take it out of that file.",
   "error.hint.key_in_config": "The key field or value is in the config file; take it out of that file.",
@@ -407,12 +414,18 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.config_file.too_deep": "the config file ({location}) is nested too deeply",
   "doctor.config_file.invalid": "the config file ({location}) has an invalid value at {field} (values are not shown)",
   "doctor.config_file.invalid_unlocated": "the config file ({location}) has an invalid value (the position cannot be named)",
+  // U-228, draft for nb-i18n.
+  "doctor.config_file.plan_tool_missing":
+    "the config file ({location}) has a task type whose plan mode lacks its plan tool (plan \"run\" needs propose_changes, plan \"apply\" needs propose_plan); a run refuses it",
   "doctor.task_file.unreadable": "the task file cannot be read",
   "doctor.task_file.json_syntax": "JSON syntax error in the task file at line {line}, column {column}",
   "doctor.task_file.key": "the task file holds a key field or a key value",
   "doctor.task_file.too_deep": "the task file is nested too deeply",
   "doctor.task_file.invalid": "the task file has an invalid value at {field} (values are not shown)",
   "doctor.task_file.invalid_unlocated": "the task file has an invalid value (the position cannot be named)",
+  // U-228, draft for nb-i18n.
+  "doctor.task_file.plan_tool_missing":
+    "the task's plan mode lacks its plan tool among the tools (plan \"run\" needs propose_changes, plan \"apply\" needs propose_plan); a run refuses the task",
   "doctor.task_file.valid": "the task file is valid",
   "doctor.model.script_unreadable": "the scripted model's script file cannot be read",
   "doctor.model.script_json_syntax": "JSON syntax error in the script file at line {line}, column {column}",

@@ -42,6 +42,9 @@ function limitToolNames(record: JournalRecord): JournalRecord {
   switch (record.type) {
     case "tool_decision":
       return { ...record, tool: tool(record.tool) };
+    // U-74: the permission question names the tool of the call it asks about.
+    case "confirmation_requested":
+      return { ...record, tool: tool(record.tool) };
     case "tool_result":
       return { ...record, result: result(record.result) };
     case "model_response":

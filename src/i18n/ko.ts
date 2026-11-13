@@ -48,6 +48,7 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.result": "결과: {status} — {reason}",
   "summary.verifiers": "검증: {total}개 중 {passed}개 통과(지정한 검증 범위에서)",
   "summary.no_verifiers": "검증: 지정한 검증 없음",
+  "summary.integrity_unchanged": "바뀐 것이 없었던 보호 대상 확인: {count}번",
   "summary.changes": "바뀐 파일: {count}개",
   "summary.denied": "거부된 호출: {count}건",
   "summary.failed": "실패한 호출: {count}건",

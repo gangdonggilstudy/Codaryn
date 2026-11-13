@@ -18,6 +18,8 @@ export { MODEL_TEXT_MAX_ROWS, modelTextRows } from "./model-text.js";
 export type { ModelTextOptions } from "./model-text.js";
 export { MAX_WORKSPACE_DIR_ENTRIES, WORKSPACE_PAGE_SIZE, isWorkspaceDir, listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 export type { WorkspaceDirOptions, WorkspaceDirSource } from "./workspace-dir.js";
+export { MAX_RUN_EVENTS_PAGE, MAX_RUN_EVENTS_PAGE_BYTES, RUN_EVENTS_PAGE_SIZE, RUN_EVENT_TYPES, listRunEventsIn, runEventsArguments } from "./run-events.js";
+export type { RunEventsDeps, RunEventsSource } from "./run-events.js";
 export type {
   AppliedActionRecord,
   ApplyJournalEvent,
@@ -59,6 +61,7 @@ export type {
   CleanupPreview,
   CleanupPreviewRequest,
   ListRunsRequest,
+  ListRunEventsRequest,
   ListWorkspaceDirRequest,
   StateSummaryRequest,
   StateSummaryView,
@@ -71,6 +74,8 @@ export type {
   ReviewRequest,
   RevertRequest,
   RunEvent,
+  RunEventType,
+  RunEventsPage,
   RunHandle,
   RunObserver,
   RunOutcome,
@@ -86,6 +91,7 @@ export type {
   WorkflowPolicyNarrowing,
   StartOutcome,
   StartRunRequest,
+  StoredRunRecord,
   RevertConsentRequest,
   TaskForm,
   UnsafeMoveConsentRequest,

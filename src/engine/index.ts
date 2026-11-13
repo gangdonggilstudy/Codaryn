@@ -61,11 +61,13 @@ import {
   TOOL_FAILURE_HINTS,
   asRawText,
   failedToolContent,
+  safeModelText,
   toolFailureMessage,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
   AnyToolName,
+  ConfirmAnswer,
   ContentHash,
   EffectiveToolCall,
   EffectiveWorkflowToolCall,
@@ -308,6 +310,22 @@ export function offeredTools(tools: readonly AnyToolName[], plan: "none" | "appl
 interface ProposedPlan {
   readonly digest: ContentHash;
   readonly actions: number;
+}
+
+/**
+ * U-106 (R-79 L-3): the decision of a permission answer, read once, inside a try, from an own
+ * property only. A read that throws (a getter, a proxy), a `decision` on the prototype (an IPC value
+ * copied with Object.assign can bring one through `__proto__`), or anything not one of
+ * CONFIRM_ANSWER_DECISIONS is `dismissed`, as ConfirmPermission says.
+ */
+function answerDecision(answer: unknown): ConfirmAnswer["decision"] {
+  try {
+    if (typeof answer !== "object" || answer === null || !Object.hasOwn(answer, "decision")) return "dismissed";
+    const decision: unknown = (answer as { readonly decision?: unknown }).decision;
+    return (CONFIRM_ANSWER_DECISIONS as readonly unknown[]).includes(decision) ? (decision as ConfirmAnswer["decision"]) : "dismissed";
+  } catch {
+    return "dismissed";
+  }
 }
 
 function isProposedPlan(payload: unknown): payload is { readonly digest: ContentHash; readonly actions: readonly ResolvedPlanAction[] } {
@@ -623,6 +641,16 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   /** U-74: the number of the last permission question of this run (ConfirmRequest.id `q<k>`). */
   let confirmations = 0;
 
+  /** U-106: text a screen shows as it is (safeModelText with the run's gateway); null when masking fails. */
+  const shownText = (text: string): MaskedText | null => {
+    try {
+      const shown = safeModelText(text, (one) => privacy.mask(one));
+      return shown === null ? null : (shown as MaskedText);
+    } catch {
+      return null;
+    }
+  };
+
   /**
    * U-74 B-3 (DR-3, DR-10): the second check gave the confirm mark. Records the question (fixed
    * fields, the masked executable, the number of arguments; never the arguments), asks
@@ -639,7 +667,9 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     mark: Extract<PolicyDecision, { allowed: false }>,
   ): Promise<PolicyDecision | End> => {
     const args = effective.args as { readonly executable?: unknown; readonly args?: unknown };
-    const subject = mask(typeof args.executable === "string" ? args.executable : "");
+    // U-106 (R-79 L-2): a screen shows the subject as it is, so it is made safe as the final message
+    // is (safeModelText): masked by the gateway and its key shapes hidden. Null fails closed.
+    const subject = shownText(typeof args.executable === "string" ? args.executable : "");
     if (subject === null) return MASKING_FAILED;
     confirmations += 1;
     const request: ConfirmRequest = {
@@ -652,7 +682,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       argumentCount: Array.isArray(args.args) ? args.args.length : 0,
     };
     await record({ type: "confirmation_requested", ...request });
-    let answer: unknown;
+    let decision: ConfirmAnswer["decision"] = "dismissed";
     const ask = deps.confirm;
     if (ask !== undefined && !runSignal.aborted) {
       let stopWaiting: () => void = () => {};
@@ -661,9 +691,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         runSignal.addEventListener("abort", stopWaiting, { once: true });
       });
       try {
-        answer = await Promise.race([ask(request, runSignal), ended]);
+        // U-106 (R-79 L-3): the answer is read once, right after it came (answerDecision).
+        decision = answerDecision(await Promise.race([ask(request, runSignal), ended]));
       } catch {
-        answer = undefined;
+        decision = "dismissed";
       } finally {
         runSignal.removeEventListener("abort", stopWaiting);
         ended.catch(() => {});
@@ -677,10 +708,6 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       await answered("deny", stop.status === "cancelled" ? "cancelled" : "default");
       return stop;
     }
-    const decision =
-      typeof answer === "object" && answer !== null && (CONFIRM_ANSWER_DECISIONS as readonly unknown[]).includes((answer as { decision?: unknown }).decision)
-        ? (answer as { decision: (typeof CONFIRM_ANSWER_DECISIONS)[number] }).decision
-        : "dismissed";
     if (decision !== "allow_once") {
       await answered("deny", decision === "deny" ? "user" : "default");
       return mark;

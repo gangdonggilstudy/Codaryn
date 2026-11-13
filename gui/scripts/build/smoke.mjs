@@ -358,6 +358,14 @@ const expected = [
   ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
+  // U-62 (6.4): copies go through the main process: the run id, and nothing that is not copyable.
+  ["copyRunId", (v) => v !== null && v.status === "ok" && typeof v.runId === "string" && v.copied === v.runId],
+  [
+    "copyRefused",
+    (v) => JSON.stringify(v) === JSON.stringify({ keyShape: "not_copyable", keyValue: "not_copyable", control: "invalid_args", lineBreak: "invalid_args", tooLong: "invalid_args", unknownEntry: "unknown_entry", written: 0 }),
+  ],
+  ["copyPath", (v) => v !== null && v.status === "ok" && v.copied === "sub/b.txt"],
+  ["copyDigest", (v) => v !== null && v.status === "ok" && typeof v.copied === "string" && /^[0-9a-f]{12}$/.test(v.copied) && v.summary.includes(v.copied)],
   // U-61 (3.12): a result that changed files offers the revert preview; it opens on the run list.
   ["revertFromResult", (v) => v !== null && v.offered === true && v.preview === "1" && typeof v.title === "string" && typeof v.runId === "string" && v.title.includes(v.runId)],
   ["cancelReady", (v) => v === "ready"],

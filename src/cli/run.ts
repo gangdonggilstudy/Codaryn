@@ -26,6 +26,7 @@ import {
   mergeWorkflowPolicy,
   mergeWorkflowVerifiers,
   toSchemaFieldPath,
+  toShownWorkspace,
   workflowPolicyNarrowings,
   workflowVerifierNarrowings,
 } from "../contracts/index.js";
@@ -57,6 +58,7 @@ import type {
   MessageCatalog,
   RunSummaryContext,
   RunTask,
+  ShownWorkspace,
   WorkflowDefinition,
   WorkflowProblem,
   WorkflowSettings,
@@ -171,6 +173,8 @@ export interface RunNotes {
   deniedToolCalls: number;
   /** N-23: the denied calls whose permission is `command`. */
   deniedCommandCalls: number;
+  /** DR-51 (U-38): the typed --workspace of the quick form, after the run's masking (toShownWorkspace); absent when it gives none. */
+  workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
   failedToolCalls: number;
 }
@@ -406,6 +410,8 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
 function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
   return {
     workspaceForm: args.input.kind === "task" ? "task" : args.input.oneLine ? "current" : "given",
+    // DR-51 (U-38): with "given" only; the hints then show the path the person typed.
+    ...(args.input.kind === "quick" && !args.input.oneLine && notes.workspaceShown !== undefined ? { workspaceShown: notes.workspaceShown } : {}),
     configDefault: notes.configDefault,
     profileApplied: args.profile !== null,
     deniedToolCalls: notes.deniedToolCalls,
@@ -829,6 +835,18 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     // U-8: progress lines follow the journal; they start only once the run has started.
     const write = args.quiet ? undefined : io.writeProgress;
     const privacy = assembled.deps.privacy;
+    // DR-51 (U-38): the typed --workspace for the end summary's hints, after the run's own masking.
+    // Best effort, as the summary is: a gateway that cannot mask it leaves the hint at <workspace>.
+    if (args.input.kind === "quick" && !args.input.oneLine) {
+      try {
+        const typed = args.input.workspace;
+        const masked = privacy.mask(typed);
+        const shown = toShownWorkspace(typed, masked.ok ? masked.text : null);
+        if (shown !== null) notes.workspaceShown = shown;
+      } catch {
+        // No path is shown.
+      }
+    }
     // N-4, N-5: the human renderer in the chosen language (the config's language is known now).
     let human: { readonly output: HumanOutput; readonly messages: MessageCatalog } | undefined;
     try {

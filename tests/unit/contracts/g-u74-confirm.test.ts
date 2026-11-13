@@ -78,7 +78,8 @@ describe("U-74: who may ask", () => {
 
 describe("U-74: the policy's confirm result, the question and the answer", () => {
   test("confirm is a denial with a mark and its own code, which has a hint for the model", () => {
-    assert.equal(POLICY_DENIAL_CODES.at(-1), "confirmation_required");
+    // U-175 added path_not_writable after it; the codes before it keep their places.
+    assert.equal(POLICY_DENIAL_CODES.indexOf("confirmation_required"), POLICY_DENIAL_CODES.indexOf("plan_action_not_allowed") + 1);
     const decision: PolicyDecision = { allowed: false, permission: "command", code: "confirmation_required", confirm: true };
     assert.equal(decision.allowed, false, "a part that does not know the mark denies");
     assert.equal(typeof REFUSAL_HINTS.confirmation_required, "string");

@@ -191,8 +191,9 @@ export interface PolicyConfig {
    *   (ResolvedTaskSpec.writablePathSets). A task file can narrow the user's settings, never widen them.
    * - Protected paths and the other denials still apply under it.
    * - It guards the file tools only (B-8): a command the policy allows can write wherever it can.
-   * - Not read yet: the parsers refuse the field (`unknown_field`) and the gate does not judge it
-   *   until the policy unit (B-2) and the CLI and the app (B-4).
+   * - U-175 (B-2): the gate judges the lists it is given (PolicyGateOptions.writablePathSets,
+   *   `path_not_writable`). The parsers still refuse the field (`unknown_field`) and nothing builds
+   *   the lists until the CLI and the app (B-4).
    */
   readonly writablePaths?: readonly string[];
 }

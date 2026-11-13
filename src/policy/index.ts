@@ -2,6 +2,12 @@
  * Policy gate: every required permission is judged on its own, before and after restoration.
  * Requirements come from the tool descriptor and the fixed table in the contracts.
  * Nothing in the call arguments or in workspace files can lower them.
+ *
+ * U-175 (DR-69 B-2): writable paths (PolicyGateOptions.writablePathSets). A write that one of the
+ * lists does not cover is denied as `path`/`path_not_writable`. Judged only after links are
+ * resolved (checkEffective): for an allow list the text alone decides nothing, since a path that
+ * misses every entry's text may still lie under an entry's real path, and one that matches an
+ * entry's text may still lead elsewhere through a link below it. A protected path is reported first.
  */
 
 import { BUILTIN_TOOLS, PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE } from "../contracts/index.js";
@@ -14,8 +20,11 @@ import type {
   PolicyDenialCode,
   ToolDescriptor,
   ToolRequirements,
+  WritablePathSet,
 } from "../contracts/index.js";
 import { lexicalCheck } from "../workspace/lexical.js";
+import { compilePathSet } from "./path-set.js";
+import type { PathSet } from "./path-set.js";
 import { compileProtectedPaths } from "./protected.js";
 
 /** T-13: the single format rule for `protectedPaths`, used by the CLI and by this gate. */
@@ -104,10 +113,28 @@ function matchesRule(rule: CommandRule, args: readonly string[]): boolean {
   return rule.argsPrefix.every((value, index) => args[index] === value);
 }
 
-export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
+/**
+ * U-175 (B-2, B-4, B-5): one matcher per writable list. A policy's list covers what is below its
+ * entries; the approved plan's files cover exactly themselves. Allow lists: an unusable list or
+ * entry covers nothing.
+ */
+function compileWritablePathSets(sets: readonly WritablePathSet[] | undefined): readonly PathSet[] {
+  return (sets ?? []).map((set) => compilePathSet(set.entries, { match: set.source === "plan" ? "exact" : "prefix", onUnusable: "misses" }));
+}
+
+export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets }) => {
   const tokenLike = new RegExp(PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, "i");
   // Only the config decides what is protected. Writes are denied; reads and `cwd` are not.
   const protectedPaths = compileProtectedPaths(config.protectedPaths);
+  const writable = compileWritablePathSets(writablePathSets);
+
+  /** True when every writable list covers the resolved path (no list: no such limit). */
+  async function writableEffective(relative: string): Promise<boolean> {
+    for (const set of writable) {
+      if (!(await set.coversEffective(relative, workspace))) return false;
+    }
+    return true;
+  }
 
   function restorableFields(descriptor: ToolDescriptor): readonly string[] {
     return config.restorePathTokens === true ? [...descriptor.restoreFields] : [];
@@ -213,6 +240,9 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
             // Compared after links are resolved, so a link cannot lead around a protected path,
             // and each entry is resolved too, so a link entry protects its real path (T-13).
             denials.push(deny("path", "protected_path"));
+          } else if (access === "write" && !(await writableEffective(outcome.path.relative))) {
+            // U-175 (B-2): every writable list must cover the resolved path (the intersection).
+            denials.push(deny("path", "path_not_writable"));
           }
         }
       }

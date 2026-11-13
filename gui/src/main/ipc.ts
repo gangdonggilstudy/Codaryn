@@ -59,7 +59,7 @@ import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.j
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
 import { parseCopyArgs, parseStartTaskArgs } from "../shared/ipc.js";
-import type { CopyReply } from "../shared/ipc.js";
+import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
 import type { CreateSettingsReply, SuggestionsReply } from "../shared/ipc.js";
@@ -128,6 +128,11 @@ export interface IpcDeps {
   readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
   /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
   readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
+  /**
+   * U-64 (3.12, 4.4): starts a new engine host when the one before has ended (never while one runs).
+   * Only the window's "Restart engine" asks for it; the main process never restarts it on its own.
+   */
+  readonly restartEngine: () => Promise<RestartReply>;
   /** U-63 (3.5, GUI-D8): the OS open dialog for the task file or the variables file (null: cancelled). Never kept. */
   readonly chooseOpenFile: (kind: "task" | "vars") => Promise<string | null>;
   /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
@@ -688,6 +693,8 @@ export function registerIpc(deps: IpcDeps): void {
     if (!response.ok) return { ok: false, code: response.error.code };
     return toReviewReply(response.value);
   });
+
+  handle(IPC_CHANNELS.restartEngine, async (args): Promise<RestartReply> => (isNoArgs(args) ? deps.restartEngine() : { ok: false, code: "invalid_args" }));
 
   handle(IPC_CHANNELS.cancelRun, async (args): Promise<boolean> => {
     if (!isNoArgs(args)) return false;

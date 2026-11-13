@@ -9,8 +9,8 @@
  * - Few, short waits (LOCK_RELEASE_RETRY_DELAYS_MS), on timers that do not keep the process alive.
  * - The run's outcome still says lockLeft: true (what was true at its end); nothing else changes.
  * The handle case needs Windows (another process opens the lock file sharing reading only, as in
- * U-176's and U-193's tests). Reproduced first (todo until the app tries again). Temporary folders,
- * scripted model, fake values only.
+ * U-176's and U-193's tests). Reproduced first (bad5a40, todo until the app tried again).
+ * Temporary folders, scripted model, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -26,7 +26,6 @@ import { runTask as engineRunTask } from "../../../src/engine/index.js";
 import { acquireLock, inspectLock, releaseLock } from "../../../src/store/index.js";
 import { WRITE_NOTES, appEnvironment, exists, plannedRun, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-211: the app does not try a failed lock release again yet" };
 const windowsOnly = process.platform === "win32" ? false : "a handle that does not share deletion is made with PowerShell on Windows";
 
 type Lock = { readonly workspaceRoot: string; readonly runId: string };
@@ -53,10 +52,14 @@ function endTold(ms: number): { readonly onEnd: (end: End, lock: Lock) => void; 
   const told = new Promise<{ end: End; lock: Lock }>((resolve) => {
     tell = resolve;
   });
-  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), ms));
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
   return {
     onEnd: (end, lock) => {
       count += 1;
+      clearTimeout(timer);
       tell({ end, lock });
     },
     ended: Promise.race([told, timeout]),
@@ -81,7 +84,7 @@ async function holdOpen(file: string, ms: number): Promise<{ readonly closed: Pr
 describe("U-211: retryLockRelease", () => {
   const lock: Lock = { workspaceRoot: "/fake/work", runId: "20261113T120000Z-0a1b2c3d" };
 
-  test("a release that throws is tried again; one that removes the lock ends the tries; every try asks for the same lock", TODO, async () => {
+  test("a release that throws is tried again; one that removes the lock ends the tries; every try asks for the same lock", async () => {
     const asked: Lock[] = [];
     let calls = 0;
     const end = await retryLockRelease(lock, {
@@ -97,13 +100,13 @@ describe("U-211: retryLockRelease", () => {
     assert.deepEqual(asked, [lock, lock]);
   });
 
-  test("an answer of false (the lock is not this id's any more) ends the tries at once", TODO, async () => {
+  test("an answer of false (the lock is not this id's any more) ends the tries at once", async () => {
     let calls = 0;
     const end = await retryLockRelease(lock, { delaysMs: [1, 1, 1], release: async () => ((calls += 1), false) });
     assert.deepEqual([end, calls], ["not_held", 1]);
   });
 
-  test("every try throws: left after the last wait, no more", TODO, async () => {
+  test("every try throws: left after the last wait, no more", async () => {
     let calls = 0;
     const told: End[] = [];
     const end = await retryLockRelease(lock, {
@@ -117,7 +120,7 @@ describe("U-211: retryLockRelease", () => {
     assert.deepEqual([end, calls, told], ["left", 2, ["left"]]);
   });
 
-  test("the default waits are few and short", TODO, () => {
+  test("the default waits are few and short", () => {
     const delays = exported["LOCK_RELEASE_RETRY_DELAYS_MS"] as readonly number[] | undefined;
     assert.ok(Array.isArray(delays), "the app layer gives LOCK_RELEASE_RETRY_DELAYS_MS");
     assert.ok(delays.length >= 1 && delays.length <= 3, `${delays.length} tries`);
@@ -125,7 +128,7 @@ describe("U-211: retryLockRelease", () => {
     assert.ok(delays.reduce((sum, ms) => sum + ms, 0) <= 15_000, "in all at most 15 s");
   });
 
-  test("the waits do not keep the process alive", TODO, async () => {
+  test("the waits do not keep the process alive", async () => {
     const module = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "app", "lock-retry.js")).href;
     const script = `const { retryLockRelease } = await import(${JSON.stringify(module)}); void retryLockRelease({ workspaceRoot: "/fake/work", runId: "r-1" }, { delaysMs: [60000], release: async () => { throw new Error("held"); } });`;
     const started = Date.now();
@@ -137,7 +140,7 @@ describe("U-211: retryLockRelease", () => {
     assert.ok(Date.now() - started < 20_000, "it ended without waiting for the 60 s timer");
   });
 
-  test("with the store: another run's lock is never taken; this run's is", TODO, async () => {
+  test("with the store: another run's lock is never taken; this run's is", async () => {
     const base = await setupRun({}, {}, []);
     const work = path.join(base, "work");
     const mine = "20261113T120000Z-11111111";
@@ -156,7 +159,7 @@ describe("U-211: retryLockRelease", () => {
 });
 
 describe("U-211: a run through the app whose lock release fails", () => {
-  test("the app tries again a few seconds later and the lock is gone without the app closing; lockLeft still told", { ...TODO, skip: windowsOnly }, async () => {
+  test("the app tries again a few seconds later and the lock is gone without the app closing; lockLeft still told", { skip: windowsOnly }, async () => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const work = path.join(base, "work");
     const told = endTold(15_000);
@@ -209,7 +212,7 @@ describe("U-211: checkApply's and writeWorkspaceText's release", () => {
     };
   };
 
-  test("checkApply: a release that threw is tried again later, with the check's own lock id", TODO, async () => {
+  test("checkApply: a release that threw is tried again later, with the check's own lock id", async () => {
     const planned = await plannedRun();
     const work = path.join(planned.base, "work");
     const told = endTold(5_000);
@@ -238,7 +241,7 @@ describe("U-211: checkApply's and writeWorkspaceText's release", () => {
     }
   });
 
-  test("writeWorkspaceText: a release that threw is tried again later; the edit is written", TODO, async () => {
+  test("writeWorkspaceText: a release that threw is tried again later; the edit is written", async () => {
     const base = await setupRun({ "a.txt": "a\n" }, {}, []);
     const work = path.join(base, "work");
     const told = endTold(5_000);

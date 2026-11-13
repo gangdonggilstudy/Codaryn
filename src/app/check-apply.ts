@@ -40,6 +40,8 @@ import { createRunId } from "../cli/run-id.js";
 import { preflightPlan } from "../engine/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
+import { retryLockRelease } from "./lock-retry.js";
+import type { LockRetryOptions } from "./lock-retry.js";
 import { createPlanExecutor } from "../tools/index.js";
 import type { PlanFileOps } from "../tools/index.js";
 import { createWorkspace } from "../workspace/index.js";
@@ -87,6 +89,8 @@ export interface ApplyCheckOperations {
   readonly fileOps?: Partial<PlanFileOps>;
   readonly removeProbe?: (file: string) => Promise<void>;
   readonly releaseLock?: (options: { readonly workspaceRoot: string; readonly runId: string }) => Promise<boolean>;
+  /** U-211: the later tries of a release that threw (their waits, how they ended). */
+  readonly lockRetry?: LockRetryOptions;
 }
 
 const sourceOf = (action: ResolvedPlanAction): string => (action.kind === "move" ? action.from : action.path);
@@ -201,15 +205,20 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
   } finally {
     const release = operations.releaseLock ?? storeReleaseLock;
     let released = false;
+    let threw = false;
     for (let attempt = 0; attempt < 2 && !released; attempt += 1) {
       try {
         // U-193 (as V-1 L-1): the store answers false when the lock is not this check's any more; not taken back either.
         released = (await release({ workspaceRoot: workspace.root, runId: lockId })) === true;
+        threw = false;
       } catch {
         // Tried once more, then told.
+        threw = true;
       }
     }
     lockLeft = !released;
+    // U-211: a release that threw is tried again a few seconds later, for this check's lock only.
+    if (threw) void retryLockRelease({ workspaceRoot: workspace.root, runId: lockId }, { release, ...operations.lockRetry });
   }
   if (failed) return { ok: false, error: appError("internal_error", `the plan could not be checked; nothing was moved${probesLeft > 0 || lockLeft ? " (a probe or the lock was left)" : ""}`) };
   return {

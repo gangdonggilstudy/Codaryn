@@ -64,6 +64,7 @@ import { knownKeyValues } from "../cli/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
+import type { LockRetryOptions } from "./lock-retry.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
@@ -159,6 +160,8 @@ export interface AppHooks {
   readonly applyCheck?: ApplyCheckOperations;
   /** U-172: writeWorkspaceText's lock release, and a pause at each check (V-1's races). Tests only. */
   readonly workspaceText?: WorkspaceTextOperations;
+  /** U-211: the later tries of a run's lock release that failed (their waits, how they ended). Tests only. */
+  readonly lockRetry?: LockRetryOptions;
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -285,6 +288,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       () => {
         lockLeft = true;
       },
+      hooks.lockRetry,
     );
     const assemble: Assemble = async (input) => {
       const assembled = await ownAssemble(input);

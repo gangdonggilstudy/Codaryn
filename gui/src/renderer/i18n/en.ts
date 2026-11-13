@@ -270,6 +270,8 @@ export const EN: { readonly [K in TextId]: string } = {
   "widen.workflow_changed": "a task type definition changed",
   "widen.writable_path_added": "a writable path added",
   "widen.writable_paths_unlimited": "the writable paths limit removed (file tools may write anywhere in the workspace)",
+  "widen.unreadable_path_removed": "an unreadable path removed (the model may read those files)",
+  "widen.min_group_size_lowered": "the minimum group size k lowered (smaller groups of the tables under unreadable paths are shown to the model)",
   "widen.other": "another widening",
   "error.bad_number": "Enter a whole number of 1 or more.",
   "error.empty_value": "Enter a value first.",

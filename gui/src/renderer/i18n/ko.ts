@@ -272,6 +272,8 @@ export const KO = {
   "widen.workflow_changed": "작업 종류 정의 바꿈",
   "widen.writable_path_added": "쓰기 허용 경로 넓힘",
   "widen.writable_paths_unlimited": "쓰기 허용 경로 제한 없앰(파일 도구가 작업 공간 어디든 씀)",
+  "widen.unreadable_path_removed": "읽기 제외 경로 뺌(모델이 그 파일을 읽을 수 있게 됨)",
+  "widen.min_group_size_lowered": "묶음 최소 크기 k 낮춤(읽기 제외 경로의 표에서 더 작은 묶음이 모델에게 보임)",
   "widen.other": "그 밖의 넓히기",
   "error.bad_number": "1 이상의 정수를 넣으세요.",
   "error.empty_value": "값을 먼저 넣으세요.",

@@ -40,7 +40,7 @@ export function runUnreadablePaths(sources: WritableSources): readonly string[] 
 /**
  * U-210 (review R-108 H-1): what the run's unreadable paths and k give each part of a run that judges
  * or reads, so no part is made without them (R-108 found the gate of a carried-out plan made without
- * the list). The CLI makes every one of these from it: a run's assembly (src/cli/assemble.ts: the
+ * the list). The CLI makes every one of these from it: a run's assembly (src/app/assembly.ts since C-4: the
  * gate, the tool runner, the verifier runner, the integrity checks, and a carried-out plan's gate),
  * and a plan of moves' apply (src/cli/plan-commands.ts: its gate, its verifier runner and its
  * integrity checks). A revert makes none of them. The app's assembly and its checks can make theirs

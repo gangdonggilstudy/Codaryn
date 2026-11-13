@@ -1,5 +1,7 @@
 /**
- * The single place where real modules are put together for one run.
+ * The CLI's revert command (createRevertCommand, revertStatus), which moves to the app layer in the CLI
+ * migration's C-9a. The run's assembly, the one place where real modules are put together for one run,
+ * is the app layer's since C-4 (U-285): src/app/assembly.ts; its names are re-exported below (plan A).
  * Other modules are used through their public `index.ts` exports only.
  */
 
@@ -7,51 +9,30 @@ import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
 import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME, planApplyStateOf } from "../contracts/index.js";
 import type { PlanApplyState, RunId, RunListEntry, RunReason } from "../contracts/index.js";
-import { createPrivacyGateway } from "../privacy/index.js";
-import {
-  RevertRunError,
-  acquireLock,
-  createRunRecorders,
-  hasRecordsChangedMark,
-  listRuns as storeListRuns,
-  releaseLock,
-  stateUncheckedSince,
-  writeResult,
-} from "../store/index.js";
-import type { LockInfo, RunInspection } from "../store/index.js";
-import { createCommandRunner, createPlannedFileProbe, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
-import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
+import { RevertRunError, acquireLock, hasRecordsChangedMark, listRuns as storeListRuns, releaseLock } from "../store/index.js";
+import type { RunInspection } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
   ApprovalChannel,
   RevertErrorCode,
   CliErrorCode,
   Clock,
-  EngineDeps,
-  EngineResult,
   ListRuns,
   LoadPlan,
-  ModelProvider,
-  PlannedFileProbe,
-  PolicyGate,
-  PrivacyGateway,
-  ResolvedTaskSpec,
   ReadRevertRecord,
   RevertOutcome,
   RevertRun,
   RevertStatus,
   WriteRevertRecord,
-  Workspace,
-  WritablePathSet,
 } from "../contracts/index.js";
 import { resolveRunReference } from "./run-ref.js";
-import { runGuards } from "../app/input/unreadable.js";
 import type { CheckedRun } from "./run-ref.js";
 import { lockedMessage } from "../app/assembly.js";
 
 // U-285 (CLI migration C-4): the run's assembly is the app layer's now (src/app/assembly.ts). These
 // re-exports keep the old names for the tests, the pinned file (tests/unit/cli/sp0-pins.ts takes
-// assembleRun) and the app layer's wrapper (plan A); the revert command below stays until C-9a.
+// assembleRun) and the app layer's wrapper until p5a points it at the new place (plan A); the CLI's
+// own users (run.ts, main.ts) import from there. The revert command below stays until C-9a.
 export { assembleRun, createAssemble } from "../app/assembly.js";
 export type { ApprovedPlanParts, Assemble, AssembleHooks, AssemblyInput, AssemblyOutcome } from "../app/assembly.js";
 

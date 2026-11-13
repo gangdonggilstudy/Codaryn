@@ -589,6 +589,7 @@ const expected = [
   ["planAgentWords", (v) => v !== null && typeof v.label === "string" && /agent's own words|에이전트의 말/.test(v.label) && v.text === "a.txt to moved" && v.afterActions === true],
   ["applyByWorkflow", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
   ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
+  ["applyNoGap", (v) => v === true],
   ["planRun", (v) => v === "plan_pending"],
   ["planShown", (v) => v === "pending"],
   // R21b-L-1: opened from the run list with the remembered form, so it can be applied there.

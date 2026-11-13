@@ -59,6 +59,13 @@ export interface RunsDeps {
 }
 
 export const RUN_FLUSH_MS = 100;
+/**
+ * U-271 (R-112 L-1): in an apply of a plan of moves the app layer stores `plan_item_started` right before
+ * each action (R-9 I-4, PlanItemStartedEvent) and does not give it, so the action's own record (one of
+ * these, src/engine/apply.ts) comes two numbers after the record before it. That number is known: no gap.
+ */
+const AFTER_ITEM_STARTED: ReadonlySet<unknown> = new Set(["file_moved", "file_discarded", "plan_item_failed"]);
+
 /** Items kept for one run while they wait to go out; more are dropped with one "gap" item. */
 const MAX_PENDING_ITEMS = 5000;
 const MAX_LIST = 500;
@@ -258,6 +265,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
     begin: (observer: RunObserverOf) => Promise<unknown>,
     resultOf: (done: unknown, unsafeMoves: number | null, deniedNotPlanned: number) => Obj | HostFailure,
     asks = false,
+    startedSkips = false,
   ): Promise<Obj | HostFailure> {
     {
       const token = deps.token();
@@ -273,7 +281,9 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
           const record = isObj(event) && event["kind"] === "record" && isObj(event["record"]) ? event["record"] : null;
           if (record !== null) {
             const seq = record["seq"];
-            if (typeof seq === "number" && lastSeq > 0 && seq > lastSeq + 1) run.pending.push({ at: null, kind: "gap", text: "" });
+            // U-271 (R-112 L-1): an apply's action record after its start record, which is not given, is no gap.
+            const knownSkip = startedSkips && typeof seq === "number" && seq === lastSeq + 2 && AFTER_ITEM_STARTED.has(record["type"]);
+            if (typeof seq === "number" && lastSeq > 0 && seq > lastSeq + 1 && !knownSkip) run.pending.push({ at: null, kind: "gap", text: "" });
             if (typeof seq === "number") lastSeq = seq;
             if (record["type"] === "model_request") run.turns += 1;
             if (record["type"] === "tool_result") run.tools += 1;
@@ -403,6 +413,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             { ...observer, onRunEvent: (event: unknown) => observer.onEvent(event) },
           ),
         (done, unsafeMoves, deniedNotPlanned) => applyOutcomeValue(done, deps.shown, deps.shownText, unsafeMoves, deniedNotPlanned),
+        true,
         true,
       );
     },

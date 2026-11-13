@@ -849,6 +849,8 @@ startGui({
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
       results["applyByWorkflowMoved"] = { from: existsSync(join(SECOND, "a.txt")), to: existsSync(join(SECOND, "moved", "a.txt")) };
+      // U-271 (R-112 L-1): its action's start record is not given, and that is no missing progress line.
+      results["applyNoGap"] = await js("document.getElementById('run-gap')?.hasAttribute('hidden') ?? null");
 
       // B: through a profile whose workflowRef is organize: the plan's apply takes the same profile.
       const beforePlan = await resultId();

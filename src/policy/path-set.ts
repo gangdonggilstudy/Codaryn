@@ -24,6 +24,9 @@
  *   an entry that cannot be resolved (refused, or the resolving failed) allows nothing. What is not
  *   checked is not allowed. A deny list (`covers`) keeps its rule exactly: its text covers at once,
  *   since covering more is its safe side.
+ * - U-180 (review R-101 L-2): an allow list resolves the entries whose text covers the path first,
+ *   so an allowed write usually costs one resolve; the other entries (which can cover only through
+ *   their real paths) are resolved only when none of those allowed. The answer is the same.
  */
 
 import path from "node:path";
@@ -127,7 +130,11 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
   return {
     covers,
     async coversEffective(relative, workspace) {
-      for (const [index, entry] of entries.entries()) {
+      // R-101 L-2: the entries whose text covers the path first, then the others.
+      const byText = lexical.map((text) => entryCovers(text, relative, options.match));
+      const order = [...entries.keys()].sort((a, b) => Number(byText[b]) - Number(byText[a]));
+      for (const index of order) {
+        const entry = entries[index] as string;
         let resolved: Awaited<ReturnType<Workspace["resolve"]>>;
         try {
           resolved = await workspace.resolve(entry, "read");
@@ -137,8 +144,7 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
         // Refused (outside the workspace, a dangling link, the state directory, a form the
         // workspace does not accept): the entry allows nothing.
         if (!resolved.ok) continue;
-        const text = lexical[index] as readonly string[];
-        if (entryCovers(text, relative, options.match) || entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
+        if (byText[index] === true || entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
       }
       return false;
     },

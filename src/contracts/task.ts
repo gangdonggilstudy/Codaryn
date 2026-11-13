@@ -184,7 +184,10 @@ export interface PolicyConfig {
    * else. The format, the matching and the platform rules are protectedPaths' (checkProtectedPaths;
    * whole `/` separated segments, an entry covers itself and everything below it; judged on the
    * text, then on the real path, and an entry that is a link covers its real path; on Windows
-   * ignoring case). It is an allow list, so an unusable entry covers nothing (fail closed).
+   * ignoring case). It is an allow list and fails closed (review R-101 L-1): a list the format rule
+   * rejects covers nothing as a whole, and an entry whose real path is outside the workspace, a
+   * dangling link or not found (V-3 M-1: an entry allows only once its real path was found) covers
+   * nothing on its own. A path that does not exist yet (a file to create) resolves as usual.
    * - Absent: no such limit. Present and empty: no file tool may write.
    * - Only narrows: each source that states it (the config file, the applied profile, the task type
    *   definition, the task file) is one more list, and a write must be covered by every list

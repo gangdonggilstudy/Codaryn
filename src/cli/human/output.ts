@@ -657,6 +657,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // says how many and that they are in .codaryn/parked/ (fixed text); each place is in the JSON.
       const parked = skipped.filter((file) => typeof file.parkedAt === "string").length;
       if (parked > 0) out.push(catalog.format("revert.parked", { count: parked }));
+      // U-139 (UXM-6): a run with a records-changed mark (RevertOutput.recordsChanged, DR-38) says so after
+      // its lists, as runs and report do: the revert goes on and checks every file.
+      if (output.recordsChanged === true) out.push(catalog.format("revert.records_changed"));
       // DR-25: the preview did not check whether this drive can move the listed files back safely.
       if (output.dryRun === true && output.moveSafetyUnchecked === true) out.push(catalog.format("revert.dry_run_move_unchecked"));
 
@@ -693,7 +696,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const rows: string[][] = [
         [
           catalog.format("runs.column.run_id"),
-          catalog.format("runs.column.started"),
+          // U-139 (UXM-23): the header says the time is local; the run id header says UTC.
+          catalog.format("runs.column.started_local"),
           catalog.format("runs.column.changes"),
           catalog.format("runs.column.status"),
         ],
@@ -721,6 +725,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
               ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
               : catalog.format(`status.${pair.status}`);
         let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
+        // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
+        const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
+        if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
         // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
         // review.json); the time is in the JSON only. Before the marks of what came after the run.
         const review: unknown = entry.review;

@@ -53,10 +53,11 @@ describe("U-129 (1): an apply run's changes cell says the number is actions", ()
     assert.equal(rowsOf(standIn, apply(null, { status: null, reason: null }))[0]?.[2], "-");
   });
 
-  test("the rest of the apply row is as before (its status words)", () => {
+  test("the rest of the apply row is as before (its status words first)", () => {
     const [row] = rowsOf(standIn, apply(7));
     assert.equal(row?.[0], APPLY);
-    assert.equal(row?.[3], `${asText(real)("status.done")} (done/verified)`);
+    // U-139 (UXM-5) adds the plan run after the status words (u139-runs-apply-plan.test.ts).
+    assert.ok(row?.[3]?.startsWith(`${asText(real)("status.done")} (done/verified) · `), String(row?.[3]));
   });
 });
 

@@ -192,8 +192,10 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.example.reverted": "runs reverted entirely: codaryn cleanup --workspace <workspace> --reverted",
   "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
-  "runs.column.run_id": "run id",
+  "runs.column.run_id": "run id (UTC)",
   "runs.column.started": "started",
+  // U-139 (UXM-23; draft for nb-i18n): the runs table's started header.
+  "runs.column.started_local": "started (local)",
   "runs.column.status": "result",
   "runs.column.changes": "changes",
   "runs.empty": "This workspace has no runs.",
@@ -210,6 +212,8 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.apply_actions": "{count} actions",
   "runs.apply_action_one": "1 action",
   "runs.review": "review: {verdict}",
+  // U-139 (UXM-5; draft for nb-i18n): the plan run an apply run applied.
+  "runs.apply_of": "apply of the plan of run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",

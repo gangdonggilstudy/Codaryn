@@ -47,6 +47,15 @@ export async function readReviewRecord(workspaceRoot: string, runId: string): Pr
   assertRunId(runId);
   const dir = runDir(workspaceRoot, runId);
   if (!(await isOwnRunDir(workspaceRoot, runId))) throw new Error("the run directory is missing or a link; its review record is not read");
+  return reviewRecordIn(dir, runId);
+}
+
+/**
+ * U-129 (AXM-21): the review record in a run directory the caller has checked to be the run's own
+ * plain directory (listRuns does), with readReviewRecord's checks: null when there is none; rejects
+ * when one exists but cannot be read or fails the checks.
+ */
+export async function reviewRecordIn(dir: string, runId: string): Promise<ReviewRecord | null> {
   const file = join(dir, REVIEW_FILE_NAME);
   try {
     const info = await lstat(file);

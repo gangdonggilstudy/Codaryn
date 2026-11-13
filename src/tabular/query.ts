@@ -21,8 +21,8 @@
  *   then the operations' in order; a name the header holds twice is duplicate_column), then the
  *   first data row whose cell is not a number for a numeric operation (lowest operation on a tie),
  *   then too many groups. Groups beyond `maxGroups` are not kept; their rows are still checked for
- *   numbers. U-277: with `nonNumbers: "skip"` (a table under unreadablePaths) no cell is a not_number
- *   here; the tool decides one on the groups it shows (TableQuery.nonNumbers).
+ *   numbers. U-277: with `nonNumbers: "skip"` (a table under unreadablePaths) there is no not_number:
+ *   such a cell is left out as an empty one is (TableQuery.nonNumbers).
  * - Groups come in code unit order of their keys (the payload's order), compared key by key.
  */
 
@@ -41,20 +41,18 @@ export interface TableQuery {
   /** Most groups kept; one more makes the query `too_many_groups`. Default MAX_QUERY_COUNTED_GROUPS. */
   readonly maxGroups?: number;
   /**
-   * U-277 (Codex V-28 M1): "refuse" (the default): a numeric operation's cell that is not a number
-   * is `not_number` at the first such data row, as below. "skip", for a table under
-   * unreadablePaths: no such cell is a problem here; each is left out as an empty cell is and
-   * counted, and the outcome's `tallies` give, per group and operation, the cells that went into the
-   * value and the cells left out, so the tool can decide on the groups it shows (query.ts in the
-   * contracts). A group not kept (too many groups) is not checked for numbers in this mode.
+   * U-277 (Codex V-28 M1, V-28b): "refuse" (the default): a numeric operation's cell that is not a
+   * number is `not_number` at the first such data row, as below. "skip", for a table under
+   * unreadablePaths: no such cell is a problem; each is left out as an empty cell is, so whether the
+   * query is refused never turns on a cell's type (query.ts in the contracts), and the outcome's
+   * `tallies` give, per group and operation, the cells that went into the value (V-19's fewCells).
    */
   readonly nonNumbers?: "refuse" | "skip";
 }
 
-/** U-277: one group's cells per operation (`nonNumbers: "skip"`): taken into the value, and left out. */
+/** U-277: one group's cells per operation (`nonNumbers: "skip"`) that went into its value: a count's non-empty cells, a sum's or mean's numbers. */
 export interface QueryTally {
   readonly cells: readonly number[];
-  readonly notNumbers: readonly number[];
 }
 
 /** Why a table cannot be read at all: the problem names a code and where, never a cell's text. */
@@ -143,7 +141,7 @@ export class TableQuerySink implements TableSink {
   private tooMany = false;
   /** Per operation: the first data row of a group not kept whose cell is not a number. */
   private readonly notKeptNotNumber: (number | null)[];
-  /** U-277: cells that are not numbers are left out and counted, not a problem (TableQuery.nonNumbers). */
+  /** U-277: cells that are not numbers are left out as empty ones, not a problem (TableQuery.nonNumbers). */
   private readonly skip: boolean;
 
   constructor(private readonly query: TableQuery) {
@@ -228,10 +226,7 @@ export class TableQuerySink implements TableSink {
       }),
     }));
     if (!this.skip) return { ok: true, rows: outcome.rows, withoutKey: this.withoutKey, groups };
-    const tallies: QueryTally[] = sorted.map((group) => ({
-      cells: group.aggregates.map((aggregate) => aggregate.taken()),
-      notNumbers: group.aggregates.map((aggregate) => aggregate.notNumbers()),
-    }));
+    const tallies: QueryTally[] = sorted.map((group) => ({ cells: group.aggregates.map((aggregate) => aggregate.taken()) }));
     return { ok: true, rows: outcome.rows, withoutKey: this.withoutKey, groups, tallies };
   }
 }

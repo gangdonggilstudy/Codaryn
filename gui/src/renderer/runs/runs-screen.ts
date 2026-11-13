@@ -63,6 +63,8 @@ function revertList(t: Texts, view: RevertView): HTMLElement[] {
   }
   if (view.moveSafetyUnchecked) out.push(el("p", t.format("runs.moveSafety"), { class: "notice" }));
   if (view.revertedBefore !== null) out.push(el("p", t.format("runs.revertedBefore", { time: localDateTime(view.revertedBefore.at) }), { class: "notice" }));
+  // U-271 (U-229): the lock left after the revert, said as a run's is (U-240: no retry is promised).
+  if (view.lockLeft === true) out.push(el("p", t.format("runs.revertLockLeft"), { role: "alert", class: "error", id: "revert-lock-left" }));
   return out;
 }
 
@@ -75,7 +77,8 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   const facts = [
     run.startedAt === null ? "" : localDateTime(run.startedAt),
     word(t, "runkind", run.kind),
-    run.status === null ? t.format("runstatus.none") : word(t, "runstatus", run.status),
+    // U-271 (C-27): a run without a result says where it is, in the CLI's runs words.
+    run.status === null ? t.format(run.phase === "running" ? "runs.phase.running" : run.phase === "no_result" ? "runs.phase.no_result" : "runs.phase.unknown") : word(t, "runstatus", run.status),
     run.changes === null ? t.format("runs.changesUnknown") : t.format("runs.changes", { count: String(run.changes) }),
   ];
   item.setAttribute("data-status", run.status ?? "none");

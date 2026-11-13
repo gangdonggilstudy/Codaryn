@@ -18,6 +18,7 @@ import { runLog } from "./run-log.js";
 import type { Screen } from "../shell/shell.js";
 import type { MaskingView, ReportView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
+import type { RunFilter } from "../run/run-model.js";
 
 /**
  * U-40 (DR-52, AXM-17): the masking line of the run's end and of the report, the same words as the
@@ -38,7 +39,12 @@ export interface ReportDeps {
   readonly current: () => Workspace | null;
   /** The changes screen for a run (DR-29), with the run's form when known. */
   readonly openChanges: (runId: string, form: RunForm | null) => void;
+  /** U-271 (3.7): the settings screen, where the permission rules are (3.10). */
+  readonly openSettings?: () => void;
 }
+
+/** U-271 (3.7): what the summary tab may do with the other tabs (set once they are drawn). */
+type TabMoves = { goTab: (id: string) => void; logFilter: RunFilter };
 
 type RunForm = { readonly profile: string | null; readonly workflow: string | null };
 
@@ -60,7 +66,7 @@ function list(items: readonly string[], attrs: Readonly<Record<string, string>> 
 
 type Tab = { readonly id: string; readonly label: string; readonly build: () => HTMLElement[] };
 
-function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly status: string; readonly reason: string } | null, form: RunForm | null): Tab[] {
+function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly status: string; readonly reason: string } | null, form: RunForm | null, moves: TabMoves): Tab[] {
   const tabs: Tab[] = [];
   tabs.push({
     id: "summary",
@@ -74,6 +80,24 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
       ];
       if (view.run !== null) parts.push(el("p", t.format("report.workflow", { workflow: view.run.workflow, provider: view.run.provider ?? "-" })));
       if (view.status === "incomplete") parts.push(el("p", t.format("report.incomplete"), { class: "notice" }));
+      // U-271 (3.7): the run's denials, where to see them (the records, denials only) and how to allow them.
+      const denied = view.run?.deniedToolCalls ?? null;
+      if (denied !== null && denied > 0) {
+        const box = el("section", undefined, { id: "report-denied", "aria-labelledby": "report-denied-title" });
+        box.append(el("h4", t.format("report.denied", { count: String(denied) }), { id: "report-denied-title" }));
+        if (deps.current() !== null) {
+          box.append(
+            button(t.format("report.deniedShow"), () => {
+              moves.logFilter = "denied";
+              moves.goTab("log");
+            }, { id: "report-denied-show" }),
+          );
+        }
+        box.append(el("p", t.format("report.deniedHow"), { class: "notice" }));
+        const openSettings = deps.openSettings;
+        if (openSettings !== undefined) box.append(button(t.format("report.deniedSettings"), () => openSettings(), { id: "report-denied-settings" }));
+        parts.push(box);
+      }
       // U-21 (DR-47, AXM-1): the agent's last message under the report's label (its own words, not a verified fact).
       if (view.finalMessage !== undefined && view.finalMessage !== null) {
         const words = el("div", undefined, { id: "report-final-message" });
@@ -202,7 +226,11 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
     tabs.push({
       id: "log",
       label: t.format("report.tab.log"),
-      build: () => runLog(t, deps.api, { workspace, runId: view.runId, profile: form?.profile ?? null, workflow: form?.workflow ?? null }),
+      build: () => {
+        const filter = moves.logFilter;
+        moves.logFilter = "all";
+        return runLog(t, deps.api, { workspace, runId: view.runId, profile: form?.profile ?? null, workflow: form?.workflow ?? null }, filter);
+      },
     });
   }
   return tabs;
@@ -264,7 +292,8 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
           body.setAttribute("data-report-ready", "error");
           return;
         }
-        const tabs = tabsOf(t, deps, reply.view, reply.labels ?? null, form);
+        const moves: TabMoves = { goTab: () => undefined, logFilter: "all" };
+        const tabs = tabsOf(t, deps, reply.view, reply.labels ?? null, form, moves);
         const bar = el("div", undefined, { role: "tablist", "aria-label": t.format("report.title") });
         const panel = el("section", undefined, { role: "tabpanel", id: "report-panel", tabindex: "0" });
         const buttons: HTMLButtonElement[] = [];
@@ -294,6 +323,12 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
         // UXM-14, DR-38: as the CLI's report warns; U-32: above the tabs, as every tab is the records' content.
         const warning = reply.view.recordsChanged === true ? [el("p", t.format("report.recordsChanged"), { class: "notice", id: "report-records-changed" })] : [];
         body.replaceChildren(...warning, bar, panel, ...saveReportButton(t, api, workspace, runId, "report-save"));
+        moves.goTab = (id) => {
+          const index = tabs.findIndex((tab) => tab.id === id);
+          if (index < 0) return;
+          select(index);
+          buttons[index]?.focus();
+        };
         select(Math.max(0, tabs.findIndex((tab) => tab.id === firstTab)));
         body.setAttribute("data-report-ready", reply.view.kind);
       })();

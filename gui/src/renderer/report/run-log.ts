@@ -25,7 +25,7 @@ export interface RunLogTarget {
 }
 
 /** The records tab's content: its notes, the filter, the list and "more"; it loads its first page itself. */
-export function runLog(t: Texts, api: CodarynApi, target: RunLogTarget): HTMLElement[] {
+export function runLog(t: Texts, api: CodarynApi, target: RunLogTarget, firstFilter: RunFilter = "all"): HTMLElement[] {
   const notes = el("div", undefined, { id: "report-log-notes" });
   const list = el("ol", undefined, { id: "report-log", "aria-label": t.format("report.log.label") });
   const counts = el("p", undefined, { id: "report-log-counts" });
@@ -34,7 +34,9 @@ export function runLog(t: Texts, api: CodarynApi, target: RunLogTarget): HTMLEle
   for (const value of FILTERS) select.append(el("option", t.format(`run.filter.${value}`), { value }));
   const filterField = el("p", undefined, { class: "field" });
   filterField.append(el("label", t.format("run.filter"), { for: "report-log-filter" }), select);
-  let filter: RunFilter = "all";
+  // U-271 (3.7): the summary's denials open this tab with "denials only".
+  let filter: RunFilter = firstFilter;
+  select.value = firstFilter;
   let items: RunItemView[] = [];
   let records = 0;
   let next: number | null = 0;

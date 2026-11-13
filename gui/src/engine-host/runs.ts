@@ -12,8 +12,8 @@
  */
 
 import { MAX_FINAL_MESSAGE_CHARS, isRunId, maskingOf } from "../shared/ipc.js";
-import { encodeLine, parseQuestion } from "../shared/protocol.js";
-import type { HostRunItem, PermissionQuestion } from "../shared/protocol.js";
+import { encodeLine, parseQuestion, parseRunLimits } from "../shared/protocol.js";
+import type { HostRunItem, PermissionQuestion, RunLimitsView } from "../shared/protocol.js";
 import { failureOf } from "./settings.js";
 import type { HostFailure, Shown } from "./settings.js";
 
@@ -59,6 +59,13 @@ export interface RunsDeps {
 }
 
 export const RUN_FLUSH_MS = 100;
+/**
+ * U-271 (R-112 L-1): in an apply of a plan of moves the app layer stores `plan_item_started` right before
+ * each action (R-9 I-4, PlanItemStartedEvent) and does not give it, so the action's own record (one of
+ * these, src/engine/apply.ts) comes two numbers after the record before it. That number is known: no gap.
+ */
+const AFTER_ITEM_STARTED: ReadonlySet<unknown> = new Set(["file_moved", "file_discarded", "plan_item_failed"]);
+
 /** Items kept for one run while they wait to go out; more are dropped with one "gap" item. */
 const MAX_PENDING_ITEMS = 5000;
 const MAX_LIST = 500;
@@ -130,6 +137,8 @@ interface Running {
   timer: ReturnType<typeof setTimeout> | null;
   turns: number;
   tools: number;
+  /** U-271 (3.6): the run's limits from its run_started record; null until then or when they do not fit. */
+  limits: RunLimitsView | null;
   /** U-124: the questions asked now, by id: how each is answered. */
   readonly questions: Map<string, (decision: "allow_once" | "deny" | "dismissed") => void>;
 }
@@ -243,7 +252,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
     if (run.pending.length === 0) return;
     const items = run.pending.splice(0, run.pending.length);
     try {
-      deps.write(encodeLine({ v: 1, type: "events", run: token, items, counts: { turns: run.turns, tools: run.tools } }));
+      deps.write(encodeLine({ v: 1, type: "events", run: token, items, counts: { turns: run.turns, tools: run.tools, ...(run.limits === null ? {} : { limits: run.limits }) } }));
     } catch {
       deps.log("codaryn engine host: progress items could not be sent");
     }
@@ -258,12 +267,13 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
     begin: (observer: RunObserverOf) => Promise<unknown>,
     resultOf: (done: unknown, unsafeMoves: number | null, deniedNotPlanned: number) => Obj | HostFailure,
     asks = false,
+    startedSkips = false,
   ): Promise<Obj | HostFailure> {
     {
       const token = deps.token();
       // U-124 (3.6, DR-3): how this run's questions ended, from its own records (for the result's lines).
       const tally = { allowed: 0, user: 0, default: 0, cancelled: 0 };
-      const run: Running = { cancel: () => undefined, pending: [], dropped: false, open: false, timer: null, turns: 0, tools: 0, questions: new Map() };
+      const run: Running = { cancel: () => undefined, pending: [], dropped: false, open: false, timer: null, turns: 0, tools: 0, limits: null, questions: new Map() };
       let lastSeq = 0;
       let unsafeMoves: number | null = null;
       // U-226: writes refused as path_not_writable; in a run that carries out a plan, each is outside the plan's files.
@@ -273,8 +283,15 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
           const record = isObj(event) && event["kind"] === "record" && isObj(event["record"]) ? event["record"] : null;
           if (record !== null) {
             const seq = record["seq"];
-            if (typeof seq === "number" && lastSeq > 0 && seq > lastSeq + 1) run.pending.push({ at: null, kind: "gap", text: "" });
+            // U-271 (R-112 L-1): an apply's action record after its start record, which is not given, is no gap.
+            const knownSkip = startedSkips && typeof seq === "number" && seq === lastSeq + 2 && AFTER_ITEM_STARTED.has(record["type"]);
+            if (typeof seq === "number" && lastSeq > 0 && seq > lastSeq + 1 && !knownSkip) run.pending.push({ at: null, kind: "gap", text: "" });
             if (typeof seq === "number") lastSeq = seq;
+            // U-271 (3.6): the limits the run started with, for the counts' denominators.
+            if (record["type"] === "run_started" && isObj(record["limits"])) {
+              const given = record["limits"];
+              run.limits = parseRunLimits({ turns: given["maxModelTurns"], tools: given["maxToolCalls"], durationMs: given["maxDurationMs"] });
+            }
             if (record["type"] === "model_request") run.turns += 1;
             if (record["type"] === "tool_result") run.tools += 1;
             if (record["type"] === "plan_checked") unsafeMoves = Array.isArray(record["unsafeMoves"]) ? record["unsafeMoves"].length : 0;
@@ -403,6 +420,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             { ...observer, onRunEvent: (event: unknown) => observer.onEvent(event) },
           ),
         (done, unsafeMoves, deniedNotPlanned) => applyOutcomeValue(done, deps.shown, deps.shownText, unsafeMoves, deniedNotPlanned),
+        true,
         true,
       );
     },

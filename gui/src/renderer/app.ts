@@ -15,7 +15,7 @@ import { Shell } from "./shell/shell.js";
 import { Palette } from "./shell/palette.js";
 import type { Command } from "./shell/palette.js";
 import { newTaskScreen } from "./run/new-task.js";
-import { RunModel, clock } from "./run/run-model.js";
+import { RunModel, clock, countValues } from "./run/run-model.js";
 import { runScreen } from "./run/run-screen.js";
 import { runsScreen } from "./runs/runs-screen.js";
 import { planScreen } from "./plan/plan-screen.js";
@@ -33,8 +33,9 @@ import { OwnLockCalls } from "./workspace/own-lock.js";
 async function start(): Promise<void> {
   const root = document.getElementById("app");
   if (root === null) return;
-  // R-111b M-1: the window's calls that take a workspace lock are counted while they go on (OwnLockCalls).
-  const ownLock = new OwnLockCalls();
+  // R-111b M-1: the window's calls that take a workspace lock are kept while they go on (OwnLockCalls);
+  // U-271 (R-111c L-1): with the workspace each acts on (a token's call: the one open when it is made).
+  const ownLock = new OwnLockCalls(() => current?.handle ?? null);
   const api = ownLock.track(window.codaryn);
   const info = asInfo(await api.info());
   let language = info.language;
@@ -55,10 +56,13 @@ async function start(): Promise<void> {
 
   // U-68 (3.2): the checks when a workspace opens (again when a run ends and on F5).
   // R-111b (a), M-1: a held lock seen while this window's own work may have held it (its run in that
-  // workspace, or a locking call during the check) is its own.
+  // workspace, or a locking call in that workspace during the check) is its own. U-271 (R-111c L-1): a run
+  // holds the lock once its start answered (running, cancelling); the start call itself is kept, so one
+  // refused for the lock does not count.
   const openCheck = new OpenCheck(api, {
-    busy: (handle) => (runWorkspace === handle && run.phase !== "idle" && run.phase !== "done") || ownLock.inFlight > 0,
-    started: () => ownLock.started,
+    busy: (handle) => runWorkspace === handle && (run.phase === "running" || run.phase === "cancelling"),
+    mark: () => ownLock.mark(),
+    overlapped: (handle, since) => ownLock.overlapped(handle, since),
   });
   const setWorkspace = (workspace: Workspace): void => {
     current = workspace;
@@ -158,6 +162,7 @@ async function start(): Promise<void> {
         current: () => current,
         open: openWorkspace,
         showRun: () => shell?.show("run"),
+        showScreen: (id) => shell?.show(id),
         // R21b-L-1: the main process remembers it too; this keeps the open workspace's copy current.
         rememberForm: (form) => {
           if (current !== null) current = { ...current, lastForm: form };
@@ -172,7 +177,7 @@ async function start(): Promise<void> {
         },
       }),
     );
-    const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
+    const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run"), showScreen: (id) => shell?.show(id) });
     /** `formKnown` false: the run's form is unknown (started elsewhere); its plan is shown, not applied. */
     const openPlan = (runId: string, profile: string | null, workflow: string | null, formKnown = true, recordsChanged = false): void => {
       plan.choose(runId, profile, workflow, formKnown, recordsChanged);
@@ -184,7 +189,7 @@ async function start(): Promise<void> {
       changes.choose(runId, profile, workflow, file);
       shell?.show("changes");
     };
-    const report = reportScreen({ texts, api, current: () => current, openChanges: (runId, form) => openChanges(runId, form?.profile ?? null, form?.workflow ?? null) });
+    const report = reportScreen({ texts, api, current: () => current, openChanges: (runId, form) => openChanges(runId, form?.profile ?? null, form?.workflow ?? null), openSettings: () => shell?.show("settings") });
     /** The report of a run, with the run's own form (for its changes view); U-61: and the tab to open first. */
     const openReport = (runId: string, form: { readonly profile: string | null; readonly workflow: string | null } | null, tab: string | null = null): void => {
       report.choose(runId, form, tab);
@@ -197,14 +202,14 @@ async function start(): Promise<void> {
       shell?.show("runs");
     };
     const openSettings = (): void => shell?.show("settings");
-    frame.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport, openRevert, openSettings }));
+    frame.add(runScreen({ texts, api, run, newTask: () => shell?.show("newtask"), announce: (text) => shell?.announce(text), current: () => current, openPlan, openChanges, openReport, openRevert, openSettings, showScreen: (id) => shell?.show(id) }));
     frame.add(plan);
     frame.add(changes);
     frame.add(report);
     frame.add(runs);
     frame.add(cleanupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
     frame.add(checksScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text) }));
-    frame.add(settingsScreen({ texts, api, language, announce: (text) => shell?.announce(text), languageChanged: () => void relanguage() }));
+    frame.add(settingsScreen({ texts, api, language, announce: (text) => shell?.announce(text), languageChanged: () => void relanguage(), showScreen: (id) => shell?.show(id) }));
     frame.add(setupScreen({ texts, api, current: () => current, announce: (text) => shell?.announce(text), show: (id) => shell?.show(id) }));
     frame.add(text);
     // U-67 (3.13): the palette's fixed commands (nothing is built from a model's text or a file name).
@@ -270,7 +275,8 @@ async function start(): Promise<void> {
       return;
     }
     const seconds = run.elapsed(Date.now());
-    shell?.setRun(texts.format("run.statusBar", { state: texts.format(`run.phase.${run.phase}`), time: seconds === null ? "-" : clock(seconds), turns: String(run.counts.turns), tools: String(run.counts.tools) }));
+    // U-271 (3.6): with the run's limits as denominators once its start gave them.
+    shell?.setRun(texts.format("run.statusBar", { state: texts.format(`run.phase.${run.phase}`), ...countValues(run.counts, seconds) }));
   };
 
   // U-70 (4.5): the last screen when it is one that stands on its own (not a run's plan, changes or report).
@@ -301,8 +307,11 @@ async function start(): Promise<void> {
     // U-65 (3.3): the tree is read again, and marks what this run did when it ran in the open workspace
     // with a form the window knows (a task file's run names its own workspace); else the old marks go.
     const here = runWorkspace !== null && runWorkspace === current?.handle && run.last !== null && run.last.taskFile !== true;
+    const applyHere = runWorkspace !== null && runWorkspace === current?.handle;
     runWorkspace = null;
     if (done.ok && done.result.kind === "run" && here) tree?.markRun({ runId: done.runId, profile: run.last?.profile ?? null, workflow: run.last?.workflow ?? null }, done.result.changes);
+    // U-271 (3.3): an apply of moves in the open workspace: what it moved, and how many it discarded.
+    else if (done.ok && done.result.kind === "apply" && applyHere) tree?.markApply({ runId: done.runId, profile: null, workflow: null }, done.result.applied);
     else tree?.clearMarks();
     tree?.refresh();
     // U-68: the lock this run held is gone; check again.

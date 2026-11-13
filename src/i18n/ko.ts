@@ -84,6 +84,8 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.form.typed": "--workspace {workspace}",
   "summary.form.current": "--workspace .",
   "summary.plan_ready": "계획을 만들었습니다: 동작 {actions}개. 아무것도 바꾸지 않았고 승인을 기다립니다.",
+  // U-221 (nb-i18n이 다듬을 초안): 실행 계획의 것, 계획 보기가 세는 대로.
+  "summary.plan_ready_changes": "계획을 만들었습니다: 쓸 파일 {count}개. 아무것도 바꾸지 않았고 승인을 기다립니다.",
   "summary.next_plan": "계획 보기: codaryn plan {form} --run {runId}",
   "summary.next_apply": "승인해 적용: codaryn apply {form} --run {runId} --digest <다이제스트>",
   "summary.review_checklist": "확인할 항목 {count}개:",
@@ -107,6 +109,9 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.change.modify": "수정",
   "plan.changes.summary_label": "계획 실행이 쓴 계획 요약(모델이 쓴 말로 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨)",
   "plan.changes.next_apply": "이 변경을 할 실행을 시작하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  // U-221 (nb-i18n이 다듬을 초안): 수행된 실행 계획, report와 같은 말로.
+  "plan.changes.status_carried_out": "수행됨",
+  "plan.changes.carried_by": "실행 {runId}에서 수행함",
   "plan.changes.digest_guarantee":
     "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 요약을 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
   "apply.question": "이 계획을 적용할까요?",
@@ -233,6 +238,11 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.plan_apply_unfinished": "계획 적용이 끝나지 않음(적용 실행 {runId}, {reason})",
   "runs.plan_applying": "계획 적용 중이거나 적용이 멈춤(적용 실행 {runId}, 결과 없음)",
   "runs.plan_apply_reverted": "계획을 적용했다가 되돌림(적용 실행 {runId})",
+  // U-221 (nb-i18n이 다듬을 초안): 실행 계획을 만든 실행의 줄, 그 계획을 수행한 실행에 따라.
+  "runs.plan_carried_out": "계획 수행됨(실행 {runId})",
+  "runs.plan_carried_ended": "계획 수행됨(실행 {runId}, 끝남: {reason})",
+  "runs.plan_carrying": "계획 수행 중이거나 그 실행이 멈춤(실행 {runId}, 결과 없음)",
+  "runs.plan_carried_reverted": "계획을 수행했다가 되돌림(실행 {runId})",
   "runs.plan_apply_missing": "적용 실행 {runId}의 기록 없음(지웠거나 확인할 수 없음)",
   // U-129 (PM 초안, nb-i18n 확인): 적용 실행의 변경 칸, 결과 칸의 사람 판정.
   "runs.apply_actions": "동작 {count}개",

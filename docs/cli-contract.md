@@ -129,6 +129,7 @@ node dist/src/cli/main.js --help | help <명령> | <명령> --help | --version
 
 - `change`는 `{kind:"replace_all", content}` 또는 `{kind:"replace_text", oldText, newText}`다.
 - U-189(Codex V-10b): `search_files`의 `truncated`는 상한(항목 수, 파일마다 맞는 줄 수)에 닿았을 때와 함께, 내용 찾기에서 읽지 못해(`io_error`: 읽기가 매번 폴더의 바뀜을 봄, 또는 다른 입출력 실패) 건너뛴 파일이 있을 때도 참이다. 결과가 다 갖춰지지 않았다는 뜻이다. 텍스트가 아니거나 너무 크거나 목록 뒤 없어진 파일은 지금처럼 말없이 건너뛴다. 도구 정의는 바뀌지 않는다.
+- U-213(ne-verify의 읽기 거부 측정, 그 제안 P5): `read_file`, `search_files`, `inspect_files`, `write_file`이 쓰기 전에 읽는 것은 경로 위 폴더의 바뀜을 보면 다시 시도한다. 곧바로 두 번 하고, 그 뒤 50·200·500 ms를 기다리며 한다(모두 6번). 그래도 매번 바뀌면 지금처럼 `io_error`다. 기다림은 처음 세 번이 모두 바뀜일 때만 생긴다. 그래서 보통의 읽기는 느려지지 않고, 1초 안팎의 몰아치기(npm install, git checkout) 동안 한 번의 읽기가 가장 길게 약 0.75초 더 걸린다. 목록, `inspect_files`, 그리고 `search_files`의 목록과 그 모든 읽기는 시작부터 2초가 지난 뒤 새 시도를 시작하지 않는다(큰 트리에서 시도가 쌓이지 않게). 실행이 취소되면 기다림은 곧바로 끝나고 더 시도하지 않는다. 도구 정의, 오류 코드, 오류 글은 바뀌지 않는다(`inspect_files`는 기다림 중 취소되면 이미 있는 `cancelled` 글을 준다).
 - DR-72(U-173): `write_file`이 남길 파일이 디스크 바이트(UTF-8, BOM 포함)로 `MAX_WRITE_BYTES`(16 MiB)를 넘으면 `too_large`다. 원본을 남기지 않고 아무것도 쓰지 않는다. 읽기 상한 `MAX_READ_BYTES`(256 KiB)와 따로 둔다. 검증기는 그보다 큰 문서·표를 읽기 때문이다(`MAX_MARKDOWN_RULE_FILE_BYTES`, `MAX_DATA_TABLE_BYTES`). 그래서 256 KiB보다 크게 쓴 파일은 지금처럼 `read_file`·`write_file`이 다시 읽지 못한다. 도구 정의(`TOOL_DEFINITIONS`)는 바뀌지 않는다.
 - 요구 권한, 복원 가능 필드, 문서 필드는 `BUILTIN_TOOLS`에 고정되어 있다. 모델과 task가 낮출 수 없다. 오류 코드는 `TOOL_ERROR_CODES`, 상한은 `MAX_READ_BYTES` 등 `tool.ts`의 상수를 쓴다. 자식 프로세스 환경은 `CHILD_ENV_ALLOWLIST`만 전달한다.
 - 거부된 호출은 실행을 끝내지 않는다. `ok:false`인 `ToolResult`로 모델에 돌아간다.

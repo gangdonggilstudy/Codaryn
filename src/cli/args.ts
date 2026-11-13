@@ -27,9 +27,12 @@ import {
 import type { CliErrorHint, DetailedCliErrorHint } from "../contracts/index.js";
 import { RUN_ID_PATTERN } from "../contracts/index.js";
 import type { RunArgs, RunInput } from "../app/prepare.js";
+import type { TaskFormArgs } from "../app/plan-view.js";
 
 // U-287 (CLI migration C-5): the run's parsed arguments are the app layer's type now (src/app/prepare.ts).
 export type { RunArgs, RunInput } from "../app/prepare.js";
+// U-306 (C-7a): the task form plan, apply and review take is the app layer's type now (src/app/plan-view.ts).
+export type { TaskFormArgs } from "../app/plan-view.js";
 
 /**
  * A parse failure. U-37 (UXM-2, DR-57): `hint` names its reason for the human error (CliErrorOutput.hint);
@@ -373,24 +376,6 @@ export function parseInitArgs(argv: readonly string[]): ParseInitArgsOutcome {
       json: read.switches.has("--json"),
     },
   };
-}
-
-/**
- * G-F (DR-17): the task form `plan`, `apply` and `review` share with `run`: `--task <file>`, or
- * `--workspace <dir>` with `--profile` and `--workflow`; and `--config`, `--vars-file`.
- * There is no goal: these commands do not run a model.
- */
-export interface TaskFormArgs {
-  readonly input: { readonly kind: "task"; readonly taskPath: string } | { readonly kind: "quick"; readonly workspace: string };
-  /**
-   * U-17 (UXM-3, AXM-14): the command runs no model and no verifier (`plan`, `review`), so its quick
-   * form does not need the run's limits; the form is read for the secrets and the workflow only.
-   */
-  readonly readOnly?: boolean;
-  readonly configPath: string | null;
-  readonly varsFile: string | null;
-  readonly profile: string | null;
-  readonly workflow: string | null;
 }
 
 const TASK_FORM_OPTIONS = ["--task", "--workspace", "--config", "--vars-file", "--profile", "--workflow"] as const;

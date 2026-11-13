@@ -71,6 +71,13 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
   { file: "failed-calls.js", names: ["createFailedCalls"], step: "C-6a (U-293 moved it; progress.ts takes it)" },
   { file: "result-fields.js", names: ["withoutEmptyStateChanged"], step: "C-6a (U-293 moved it)" },
   { file: "human/query-table.js", names: ["queryTableFacts"], step: "C-6a (U-293 moved it; nc-human's file)" },
+  {
+    file: "plan-commands.js",
+    names: ["NO_GOAL", "runPlan", "runReview", "runApply", "applyChangesPlan", "renderPlan", "renderReview", "applyQuestion", "unsafeMoveQuestion", "latestPlanRule", "planJsonLine"],
+    step: "C-7a (U-306; names in a file that stays: tests and the app layer take them)",
+  },
+  { file: "run-ref.js", names: ["resolveRunReference", "STORE_RUN_REFERENCE_DEPS"], step: "C-7a (U-306; tests and the app's runs.ts take them)" },
+  { file: "guard.js", names: ["jsonLine", "renderOutcome", "stdoutText", "runGuardedCommand"], step: "C-7a (U-306; a file that stays, its outcome types moved)" },
   { file: "json-position.js", names: ["jsonErrorOffset", "lineAndColumn", "jsonSyntaxPosition"], step: "C-5" },
 ];
 

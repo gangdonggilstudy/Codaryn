@@ -16,8 +16,8 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
   - 이 문서와 지금 앱 계층의 대조는 [설계 차이 조사](../reviews/2026-11-13-adapter-design-gap-survey.md)(main 86a9470)에 있다.
   - 이 판은 그 조사의 낡은 곳을 고쳤다(U-72).
 - 계약(`src/contracts`)은 그 뒤 여러 단위가 바꾸었다. 계약 변경은 역할 1(계약 담당)이 만든다.
-  - 앱 계층의 요청·응답 타입은 지금도 `src/app/types.ts`에 있다.
-  - 그것을 `src/contracts/app.ts`로 옮기는 일(7.2 이행 1)은 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다(7.2).
+  - 앱 계층의 요청·응답 타입은 `src/contracts/app.ts`에 있다(7.2 이행 1a, U-254). `src/app/types.ts`는 다시 내보내기만 한다.
+  - 남은 이행(1b~5)은 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다(7.2).
 - 실제 API는 호출하지 않았다. 앱 계층의 시험은 대본 모델과 가짜 값만 쓴다.
 
 표기
@@ -125,7 +125,7 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
 어댑터가 프로세스 사실을 넣는다. 앱 계층은 프로세스 전역(`process.env`, 신호, stdout)을 직접 만지지 않는다.
 
 ```ts
-// src/app/types.ts (DR-65: 기능 뒤 7.2 이행 1에서 src/contracts/app.ts로 옮긴다)
+// src/contracts/app.ts (7.2 이행 1a, U-254. src/app/types.ts가 다시 내보낸다)
 export interface AppEnvironment {
   /** 환경 변수. 호출마다 복사한다. 이 객체는 바꾸지 않는다. */
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -952,13 +952,13 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 
 | 이행 | 내용 | 바뀌는 파일 | 지금의 상태 |
 | --- | --- | --- | --- |
-| 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 없음. 타입이 `src/app/types.ts`에 있고, `Journal.append`는 `Promise<void>`다(앱 계층이 `seq`를 스스로 센다). DR-65: 기능 뒤 |
+| 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 일부. 4·5절 타입은 `src/contracts/app.ts`에 있다(1a, U-254). `src/app/types.ts`는 다시 내보내기만 한다. 질문 사건 타입은 계약에 있다(U-74). 남은 것: `Journal.append`는 아직 `Promise<void>`다(1b, AC-D3. 앱 계층이 `seq`를 스스로 센다) |
 | 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 없음. 조립은 앱 계층의 것이 생겼다(DR-4). 실행 전 검사는 아직 `runCli` 호출이다. DR-65: 기능 뒤 |
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 일부. 앱 계층 쪽은 됐다(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않는다. DR-65: 기능 뒤 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 일부. 앱 함수는 모두 있다: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI 명령 가운데 앱 함수를 부르는 것은 `changes`뿐이다(`main.ts`가 연결). 나머지는 거꾸로 앱이 CLI를 감싼다. store의 스냅샷 읽기는 `readRunOriginals`로 있다. DR-65: 기능 뒤 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | 일부. 앱 계층이 CLI의 `runDoctor`·`runModels`를 감싼다(`doctor`, `listModels`, `selectModel`). DR-65: 기능 뒤 |
 | 6 줄 프로토콜 (DR-20으로 추진하지 않음) | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | 추진 안 함. CLI 쪽 모듈과 VS Code 코어 왕복 시험은 남아 있고(`3c09b58`) 연결되지 않았다. DR-66으로 지웠다(U-81) |
-| 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 구현됨. `plan`, `applyPlan`, `review`가 있다(5.6). 타입은 G-A의 것이다(`src/app/general-tasks.ts`가 되풀이, DR-17) |
+| 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 구현됨. `plan`, `applyPlan`, `review`가 있다(5.6). 타입은 G-A의 것이다(DR-17). 앱 계층은 계약에서 바로 다시 내보낸다(U-254, `src/app/general-tasks.ts` 없앰) |
 | 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 없음. PM 결정으로 다음에 한다(조사 B, 5.9) |
 
 - 순서 제약(설계 당시): 이행 2는 N-A(`src/cli/run.ts`) 병합 뒤에 시작한다. N-A는 병합됐다.

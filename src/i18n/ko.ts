@@ -636,9 +636,9 @@ export const KO_MESSAGES: MessageTexts = {
   "permission.destructive": "파괴적 동작",
   "permission.restore": "가림 복원",
 
-  "phase.run_start": "시작할 때",
+  "phase.run_start": "실행을 시작할 때",
   "phase.before_verify": "검증 전",
-  "phase.after_verify": "검증 후",
+  "phase.after_verify": "검증 뒤",
 
   "modelError.not_configured": "설정 안 됨",
   "modelError.not_implemented": "지원하지 않는 제공자",

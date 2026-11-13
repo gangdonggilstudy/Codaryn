@@ -359,6 +359,8 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
   unknown_workflow: "names no built-in workflow and no workflows entry of the config file",
   tool_not_allowed: "names a tool the workflow definition does not offer (tools only narrow)",
   plan_weakened: 'cannot be "none" under a workflow with plan "apply"',
+  // U-224 (p4g; one line in this file for the contract's new problem).
+  plan_tool_missing: 'leaves out the plan tool of the plan mode: "apply" needs propose_plan and "run" needs propose_changes among the tools',
   commands_not_allowed: "must be empty: the workflow allows no command",
   review_without_checklist: 'is required with completion "human_review"',
   checklist_without_review: 'is only allowed with completion "human_review"',

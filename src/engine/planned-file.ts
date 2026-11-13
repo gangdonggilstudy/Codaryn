@@ -2,7 +2,7 @@
  * U-219 (p5a's request; contract plan.ts `JudgePlannedFile`): the gate's decision on one planned file
  * of an approved `run` plan, as the run that carries it out judges it before its first model request
  * (checkApprovedPlan). Given out, as preflightPlan is, so the app layer's check before the approval
- * calls the same function, not a copy.
+ * can call the same function instead of its own lines; Codex V-21: it does not yet (p5a, U-229).
  */
 
 import { PLANNED_FILE_DESCRIPTOR } from "../contracts/index.js";

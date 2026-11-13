@@ -512,6 +512,7 @@ export const FIXED_MESSAGES = {
   "summary.denied_unreadable_hint": {},
   // U-207 (DR-70, Q-4; draft for nb-i18n): RunSummaryContext.hiddenGroups, the table results of this
   // run that left out groups of fewer than k rows (QueryTablePayload.suppressedGroups above 0), and k.
+  // U-210 (R-108 L-2): or values from fewer than k cells (a shown group's fewCells, Codex V-19).
   // Counts only: never a key, a value or a column.
   "summary.groups_hidden": { results: "count", k: "count" },
   "summary.denied_hint": {},
@@ -1461,7 +1462,9 @@ export interface RunSummaryContext {
    * U-207 (DR-70, Q-4; draft for na-core, which counts it in U-210): the query_table results of this
    * run that left out groups
    * of fewer than k rows (`tool_result` of query_table, ok, whose payload has suppressedGroups above
-   * 0; queryTableFacts reads it), and the k they applied (the largest when they differ).
+   * 0; queryTableFacts reads it), and the k they applied (the largest when they differ). U-210
+   * (R-108 L-2): also a result that left out only values from fewer than k cells (a shown group's
+   * fewCells, Codex V-19).
    * `summary.groups_hidden` when `results` is above 0. Counts only. Optional: absent, no line.
    */
   readonly hiddenGroups?: { readonly results: number; readonly minGroupSize: number };

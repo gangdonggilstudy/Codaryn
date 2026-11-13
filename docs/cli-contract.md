@@ -642,6 +642,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **거는 곳**
   - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`, U-223: `data_checks`의 근거에 그 아래 원본에서 읽은 수를 쓰지 않는다).
   - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
+  - 승인된 계획을 수행하는 실행: 엔진이 계획 파일 목록을 더해 만드는 게이트(`ApprovedPlanParts.policyFor`)도 실행의 목록을 받는다(검토 R-108 H-1). 전에는 그 게이트만 목록 없이 만들어져, task 파일 아래에서 설정·프로필이 준 항목 밑의 `read_file`이 계획 수행 중에 허용되었다.
+  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/cli/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
   - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
 - **명령 금지(R-5)**
   - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
@@ -651,7 +653,9 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **사람에게 알리는 것(U-207의 줄)**
   - 실행이 센다(`notePrivateData`). 끝 요약은 `unreadable_path`로 거부된 호출 수(`summary.denied_unreadable`)와 사람이 할 수 있는 일(`summary.denied_unreadable_hint`)을 말한다(`RunSummaryContext.deniedUnreadable`).
   - `query_table` 결과가 k 미만 묶음을 뺐으면 `summary.groups_hidden`이다(`hiddenGroups`: 결과 수와 가장 큰 k). 둘 다 0이면 필드도 줄도 없다.
+    - R-108 L-2: 묶음은 보이되 값이 기여 칸 k 미만이라 빠진 결과(Codex V-19, `QueryGroup.fewCells`)도 센다. `queryTableFacts`는 그런 묶음의 수만 읽는다(`hiddenValues`, 없으면 필드가 없다). 줄은 "k행 미만의 묶음이나 k칸 미만으로 셈한 값"을 뺐다고 말한다.
   - 진행 줄은 무엇을 물었는지만 말한다(`progress.query_table`, `_whole`, `_describe`와 연산 코드, U-207). 경로, 열 이름, 묶음 키, 행 수, 집계 값은 없다.
+- **카나리(ne-verify U-232의 틀):** `g-u210-canary-cli`가 그 틀의 작업 공간(세 형식의 표, 칸마다 표지, 묶음 키 표지, 줄마다 표지인 메모, 이름이 표지인 파일과 폴더)에서 analyze-private를 대본 모델과 모의 Anthropic API로 돌린다. 행·이름·k 미만 묶음 키가 모델로 간 것, 기록, 사람용 출력 어디에도 없고(`leaksOf`가 빔), 한 열로 묶은 k 이상 묶음의 키는 모두 모델에게 간다(양성 대조).
 - **끝에서 끝까지(U-210 둘째 몫의 시험):** 실제 CLI를 대본 모델과 127.0.0.1의 모의 Anthropic API로 돌린다. 표의 칸마다 실행 때 만든 표지를 두고, 행의 표지와 k 미만 묶음의 키가 도구 결과, 기록(`.codaryn` 아래 전부), 모델 요청 본문, 사람용 출력(stdout, stderr) 어디에도 없음을 확인한다. k 이상 묶음의 키, 열 이름, 수는 모델에게 간다.
 - **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
 - **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).

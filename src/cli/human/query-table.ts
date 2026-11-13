@@ -1,10 +1,12 @@
 /**
  * U-207 (P1 bundle A, DR-70; contract U-197): what a person may be told of a `query_table` result, read
  * from its `tool_result` record: what was asked (the operation kinds, how many columns it grouped by,
- * or that the table's shape was asked) and two counts (how many groups were left out for fewer than k
- * rows, and k). Nothing else of the payload is read or returned: no path, no column name, no group key,
- * no row count of a group and no aggregate, so neither a progress line nor the end summary can carry a
- * value of the table. The CLI's run (na-core) reads the same facts for RunSummaryContext.hiddenGroups.
+ * or that the table's shape was asked) and three counts (how many groups were left out for fewer than k
+ * rows, how many shown groups had a value left out for fewer than k cells (Codex V-19, fewCells; U-210,
+ * R-108 L-2), and k). Nothing else of the payload is read or returned: no path, no column name, no
+ * group key, no row count of a group and no aggregate, so neither a progress line nor the end summary
+ * can carry a value of the table. The CLI's run (na-core) reads the same facts for
+ * RunSummaryContext.hiddenGroups.
  */
 
 import { MAX_QUERY_GROUP_COLUMNS, QUERY_TABLE_OPS, QUERY_TABLE_TOOL_NAME } from "../../contracts/index.js";
@@ -21,6 +23,11 @@ export type QueryTableFacts =
       readonly groupColumns: number;
       /** Groups left out for fewer than `minGroupSize` rows (over the whole query, on every page). */
       readonly suppressedGroups: number;
+      /**
+       * U-210 (R-108 L-2): shown groups of this page with a value left out for fewer than k cells
+       * (fewCells). Absent when there is none, so the facts of a result without any are as before.
+       */
+      readonly hiddenValues?: number;
       readonly minGroupSize: number;
     };
 
@@ -42,10 +49,11 @@ export function queryTableFacts(result: unknown): QueryTableFacts | null {
     return null;
   }
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
-  const { kind, groupBy, operations, suppressedGroups, minGroupSize } = payload as {
+  const { kind, groupBy, operations, groups, suppressedGroups, minGroupSize } = payload as {
     readonly kind?: unknown;
     readonly groupBy?: unknown;
     readonly operations?: unknown;
+    readonly groups?: unknown;
     readonly suppressedGroups?: unknown;
     readonly minGroupSize?: unknown;
   };
@@ -58,5 +66,12 @@ export function queryTableFacts(result: unknown): QueryTableFacts | null {
     if (!(QUERY_TABLE_OPS as readonly unknown[]).includes(op)) return null;
     if (!kinds.includes(op as AggregateOp)) kinds.push(op as AggregateOp);
   }
-  return { kind: "groups", operations: kinds, groupColumns: groupBy.length, suppressedGroups, minGroupSize };
+  // U-210 (R-108 L-2): only whether each shown group lists a value left out, never the group itself.
+  const hiddenValues = Array.isArray(groups)
+    ? groups.filter((group: unknown) => {
+        const few: unknown = typeof group === "object" && group !== null ? (group as { readonly fewCells?: unknown }).fewCells : undefined;
+        return Array.isArray(few) && few.length > 0;
+      }).length
+    : 0;
+  return { kind: "groups", operations: kinds, groupColumns: groupBy.length, suppressedGroups, ...(hiddenValues > 0 ? { hiddenValues } : {}), minGroupSize };
 }

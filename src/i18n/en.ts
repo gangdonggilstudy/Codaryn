@@ -72,7 +72,9 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.denied_unreadable": "Calls refused at files this task may not read: {count}",
   "summary.denied_unreadable_hint":
     "Those files are kept from the agent on purpose (unreadablePaths); it can still aggregate their tables with query_table. To let it read them, take the entry out of unreadablePaths where it was set.",
-  "summary.groups_hidden": "Groups of fewer than {k} rows were left out of {results} table result(s); the agent got only how many there were.",
+  // U-210 (R-108 L-2), draft for nb-i18n: whole groups or values from fewer than k cells.
+  "summary.groups_hidden":
+    "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got only how many groups were left out.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",

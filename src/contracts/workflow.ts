@@ -19,8 +19,9 @@
  * P1: `writablePaths` is a policy field of this contract (task.ts, U-170; DR-69 B-4) and plan mode
  * `run` a plan mode (plan.ts). Bundle A (DR-70): `unreadablePaths` is a policy field too, united over
  * the definition and the configured policy (mergeWorkflowPolicy; U-197, R-2), and the `query_table`
- * tool's contract is query.ts (U-197; its runner is A-5, U-208). Named here only, not yet part of
- * it: Markdown file rules and the `analyze-private` definition (A-6).
+ * tool's contract is query.ts (U-197; its runner is A-5, U-208). U-210 (A-6): `analyze-private` is a
+ * built-in id (BUILTIN_WORKFLOW_IDS) with its two problems in WORKFLOW_PROBLEMS. Named here only, not
+ * yet part of it: Markdown file rules.
  */
 
 import type { PlanActionKind, PlanMode } from "./plan.js";

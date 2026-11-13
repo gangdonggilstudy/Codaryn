@@ -252,7 +252,7 @@ describe("two real builds of HEAD", () => {
 describe("the command line", () => {
   // U-167: --work given as a relative folder (as ne-verify's report-main-health writes it) was
   // joined to the build folder twice, so the build could not find tsc and the tool stopped (exit 2).
-  test("U-167: a relative --work folder: both builds and a case compare, no difference", { timeout: 900_000, todo: "U-167" }, async () => {
+  test("U-167: a relative --work folder: both builds and a case compare, no difference", { timeout: 900_000 }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "codaryn-compare-relative-"));
     const before = process.cwd();
     try {

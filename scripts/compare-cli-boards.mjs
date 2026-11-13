@@ -129,7 +129,9 @@ function removeLink(link) {
  * Unpacks `commit` into `dir` (git archive) and builds it. `alter(dir)` may change the unpacked
  * sources before the build (the tool's own tests). Returns the build.
  */
-export async function prepareBoard({ commit, dir, nodeModules = path.join(REPO, "node_modules"), alter }) {
+export async function prepareBoard({ commit, dir: given, nodeModules = path.join(REPO, "node_modules"), alter }) {
+  // U-167: a relative folder is taken from the current directory once (the build runs inside it).
+  const dir = path.resolve(given);
   const sha = git(["rev-parse", "--verify", `${commit}^{commit}`]);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -283,7 +285,9 @@ function pathsFor(caseDir, board, apiUrl) {
 }
 
 /** Runs the cases with both builds and compares them. */
-export async function compareBuilds({ base, head, cases = CASES, caseDir }) {
+export async function compareBuilds({ base, head, cases = CASES, caseDir: given }) {
+  // U-167: absolute, so the path forms normalized are those the CLI prints.
+  const caseDir = path.resolve(given);
   const results = [];
   for (const spec of cases) {
     const sides = {};
@@ -360,7 +364,8 @@ export async function main(argv) {
   const names = options.cases === undefined ? null : new Set(options.cases.split(","));
   const cases = names === null ? CASES : CASES.filter((spec) => names.has(spec.name));
   if (names !== null && cases.length !== names.size) throw new Error(`unknown case in --cases: ${[...names].filter((name) => !CASES.some((spec) => spec.name === name)).join(", ")}`);
-  const work = options.work ?? path.join(tmpdir(), `codaryn-compare-${process.pid}`);
+  // U-167: --work may be relative (to the current directory).
+  const work = path.resolve(options.work ?? path.join(tmpdir(), `codaryn-compare-${process.pid}`));
   mkdirSync(work, { recursive: true });
   try {
     const base = await prepareBoard({ commit: options.base, dir: path.join(work, "base") });

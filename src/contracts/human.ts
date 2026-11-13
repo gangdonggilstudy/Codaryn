@@ -208,6 +208,8 @@ export const SCHEMA_FIELD_NAMES = [
   "destructive",
   "restorePathTokens",
   "protectedPaths",
+  // U-182 (DR-69 B-4, review R-99 L-3; in na-core's unit by PM decision): `policy.writablePaths`.
+  "writablePaths",
   "privacy",
   "secretEnv",
   "limits",
@@ -610,6 +612,9 @@ export const FIXED_MESSAGES = {
   "progress.integrity_changed": { phase: "phase", count: "count" },
   "progress.finished": { status: "text", reason: "reason" },
   "progress.model_not_found": {},
+  // U-182 (DR-69 B-4): after a run whose `{count}` writes were denied as path_not_writable, how to
+  // allow a file (every writable list must cover it). A progress line, not in the result.
+  "progress.not_writable_hint": { count: "count" },
   "progress.unknown_tool": {},
   // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
   // `{problem}` is `plan.problem.<problem>`; an action is shown by its number (index + 1).
@@ -1037,6 +1042,11 @@ export const FIXED_MESSAGES = {
   // does not check those arguments, so such a command can change files outside an approved plan.
   // A warning in the `commands` check (no new check id).
   "doctor.commands.extra_args_with_plan": { count: "count" },
+  // U-182 (DR-69 B-8): `{count}` command rules while a writable list applies (policy.writablePaths of
+  // the config, the profile, the task type or the task). The lists bind the file tools only, so such
+  // a command can write files outside them. A warning in the `commands` check, or one of its notes
+  // when the check says something else (no new check id).
+  "doctor.commands.writable_with_commands": { count: "count" },
   // DR-41: notes of the `commands` check (DoctorCheck.notes): what the task type's own rules left out
   // of the configured policy (workflowPolicyNarrowings). Counts only.
   "doctor.workflow_policy.commands_dropped": { count: "count" },

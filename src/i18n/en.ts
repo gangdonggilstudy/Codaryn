@@ -28,6 +28,7 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "The config file has no profile of the name given with --profile; check the profile names in the config file.",
   "error.hint.task_type_not_found": "The task type given (with --workflow or in the task file) is neither built in nor defined in the config file; check its name.",
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
+  "error.hint.plan_run_not_available": "Plan mode \"run\" cannot be used in this version yet; set plan to \"none\" or \"apply\". Nothing was sent to a model.",
   "error.hint.key_in_goal": "The key value is in the goal; take it out of the goal.",
   "error.hint.key_in_task": "The key field or value is in the task file given with --task; take it out of that file.",
   "error.hint.key_in_config": "The key field or value is in the config file; take it out of that file.",
@@ -127,6 +128,8 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.integrity_changed": "protected material check — changed or not checkable: {count} ({phase})",
   "progress.finished": "finished — {status} ({reason})",
   "progress.model_not_found": "The model was not found (HTTP 404). codaryn models lists the models the key can use.",
+  "progress.not_writable_hint":
+    "Writes denied because the file is not in writablePaths: {count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
   "progress.unknown_tool": "(unknown tool)",
   "progress.apply_started": "apply started — actions: {actions}, {approval}",
   "progress.plan_checked": "preflight — problems: {count}",
@@ -443,6 +446,8 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.commands.none": "no command is allowed and no command check is configured",
   "doctor.commands.extra_args_with_plan":
     "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
+  "doctor.commands.writable_with_commands":
+    "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",
   "doctor.workflow_policy.commands_narrowed": "a run of this task type narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this task type leaves out plan actions of the configured policy: {count}",
@@ -632,6 +637,8 @@ export const EN_MESSAGES: MessageTexts = {
   "denial.confirmation_required": "not allowed by the person during the run",
   "denial.protected_path": "protected path",
   "denial.plan_action_not_allowed": "plan action not allowed",
+  // U-175 (DR-69 B-2), draft: a write outside the files the task may write.
+  "denial.path_not_writable": "not among the files this task may write",
   "denial.unknown_tool": "unknown tool",
   "denial.invalid_args": "invalid arguments",
   "denial.policy_denied": "denied by the permissions",

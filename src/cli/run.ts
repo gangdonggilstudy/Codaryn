@@ -101,6 +101,7 @@ import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApi
 import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
+import { writablePathSetsOf } from "./writable.js";
 
 export interface CliEnvironment {
   readonly argv: readonly string[];
@@ -184,6 +185,8 @@ export interface RunNotes {
   deniedToolCalls: number;
   /** N-23: the denied calls whose permission is `command`. */
   deniedCommandCalls: number;
+  /** U-182 (DR-69 B-4): the denied writes outside the writable lists (path_not_writable); absent is 0. */
+  deniedNotWritable?: number;
   /** DR-51 (U-38): the typed --workspace of the quick form, after the run's masking (toShownWorkspace); absent when it gives none. */
   workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
@@ -308,6 +311,10 @@ function withModelHint(
   if (write !== undefined) writeMasked(write, privacy, progressText);
   return { ...result, notices: [...result.notices, masked.text] };
 }
+
+/** U-182: the English of progress.not_writable_hint, when no catalog is given. */
+const notWritableHint = (count: number): string =>
+  `Writes denied because the file is not in writablePaths: ${count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.`;
 
 /** G-A: what each workflow problem means, after the field position (never a value). */
 const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
@@ -634,11 +641,18 @@ export async function prepareTask(
   let config: CodarynConfig | null = null;
   if (configFile !== null) {
     const outcome = parseConfig(configFile.value);
-    if (!outcome.ok) return error("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
+    if (!outcome.ok) {
+      const failed = error("invalid_config", outcome.message, positionDiagnostic("config", outcome.position));
+      // U-177: a parser's hint (a definition's plan "run") makes the human error say why.
+      return outcome.hint === undefined ? failed : withHint(failed, outcome.hint);
+    }
     config = outcome.config;
     notes.configLanguage = config.language ?? null;
     notes.configDefault = defaultDisplay;
   }
+  // U-182 (DR-69 B-4): the config file's own policy is one writable list even when a profile's
+  // policy replaces it below, so it is kept as parsed.
+  const fileConfig = config;
   let profileWorkflowRef: string | null = null;
   if (args.profile !== null) {
     profileWorkflowRef = (config?.profiles ?? {})[args.profile]?.workflowRef ?? null;
@@ -666,6 +680,8 @@ export async function prepareTask(
     // A task file's own fields are "task"; limits bounded by the config file and the quick form are "config".
     const file: InputDiagnosticFile = taskFile !== null && taskOutcome.code === "invalid_task" ? "task" : "config";
     const failed = error(taskOutcome.code, taskOutcome.message, positionDiagnostic(file, taskOutcome.position));
+    // U-177: a parser's hint (a task file's plan "run") makes the human error say why.
+    if (taskOutcome.hint !== undefined) return withHint(failed, taskOutcome.hint);
     // U-115 (UXM-9, U-37): the quick form's settings were missing because there is no config file
     // yet; the person is told so (codaryn init). The message, the code and the exit code are as before.
     return noConfigYet && taskFile === null && configFile === null && taskOutcome.code === "invalid_config" ? withHint(failed, "config_missing") : failed;
@@ -718,10 +734,14 @@ export async function prepareTask(
   const mergeHere = taskFile !== null && definition !== undefined;
   const mergedPolicy = mergeHere ? (mergeWorkflowPolicy(definition.policy, parsed.policy) ?? parsed.policy) : parsed.policy;
   const mergedVerifiers = mergeHere ? (mergeWorkflowVerifiers(definition.verifiers, parsed.verifiers) ?? parsed.verifiers) : parsed.verifiers;
+  // U-182 (DR-69 B-4): every source's writable list, each its own (the gate needs all to cover a
+  // write); none when no source states one, so a run without them is as before.
+  const writablePathSets = writablePathSetsOf({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: taskFile !== null ? parsed.policy : null });
   const task = withConfigSecrets(
     {
       ...withWorkflow({ ...parsed, policy: mergedPolicy, verifiers: mergedVerifiers }, resolved.workflowRef, resolved.settings),
       ...(policyNarrowings.length === 0 ? {} : { policyNarrowings }),
+      ...(writablePathSets.length === 0 ? {} : { writablePathSets }),
     },
     config,
   );
@@ -856,6 +876,7 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;
+          if (event.code === "path_not_writable") notes.deniedNotWritable = (notes.deniedNotWritable ?? 0) + 1;
         }
         if (event.type === "confirmation_answered" && event.decision === "deny" && (event.by === "user" || event.by === "default" || event.by === "cancelled")) {
           const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
@@ -932,6 +953,12 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
       const ended = withoutEmptyStateChanged(await (io.runTask ?? engineRunTask)(deps));
       const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
       const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
+      // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress
+      // line only; the result is unchanged.
+      const notWritable = notes.deniedNotWritable ?? 0;
+      if (write !== undefined && notWritable > 0) {
+        writeMasked(write, privacy, human === undefined ? notWritableHint(notWritable) : human.messages.format("progress.not_writable_hint", { count: notWritable }));
+      }
       result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));
     } finally {
       // Releases the workspace lock even when the run threw.

@@ -47,6 +47,8 @@ const PLAIN = [
   "key_in_config",
   // U-115 (UXM-9, PM: in na-core's branch for p4g-general to confirm): no config file at all.
   "config_missing",
+  // U-177 (review R-99 M-2, in na-core's branch for p4g-general to confirm): plan "run" before B-4.
+  "plan_run_not_available",
 ];
 const DETAILED: { readonly [hint: string]: { readonly [param: string]: string } } = {
   unknown_option: { position: "count" },

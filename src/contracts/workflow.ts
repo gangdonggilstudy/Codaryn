@@ -76,7 +76,8 @@ export interface HumanReviewConfig {
  *   `unknown_tool`. Built-in names (TOOL_NAMES) and task type tools (WORKFLOW_TOOL_NAMES).
  * - instructions: appended after the fixed system prompt, masked, so the first `model_request`
  *   records it (GT-D3). User config text: it must not spell the privacy token marker.
- * - plan: see plan.ts. With "apply" the run offers only read tools and `propose_plan`.
+ * - plan: see plan.ts. With "apply" the run offers only read tools and `propose_plan`; with "run"
+ *   (P1, B-1) only read tools and `propose_changes` (ToolDescriptor.planMode).
  * - completion, humanReview: see COMPLETION_MODES.
  */
 export interface WorkflowSettings {
@@ -141,6 +142,9 @@ function commandRuleIntersection(a: CommandRule, b: CommandRule): CommandRule | 
  * - restorePathTokens: true only when both allow it. network, destructive: "deny".
  * - U-74: a configured rule's `confirm: true` stays on every rule its intersection gives, so a
  *   definition never turns a question into a plain allow. A definition's rules cannot ask.
+ * - writablePaths (P1, B-4): not combined here. Each source's list stays its own list in
+ *   ResolvedTaskSpec.writablePathSets, and a write must be covered by all of them; the merged
+ *   policy's `writablePaths` is not what the gate reads.
  */
 export function mergeWorkflowPolicy(
   definition: PolicyConfig | undefined,
@@ -311,7 +315,8 @@ export interface WorkflowDefinition {
  * field position, never a value).
  * - unknown_workflow: `workflowRef` names no built-in and no config entry
  * - tool_not_allowed: a task lists a tool its definition does not list (tools only narrow)
- * - plan_weakened: a task sets `plan: "none"` under a definition with `plan: "apply"`
+ * - plan_weakened: a task sets `plan: "none"` under a definition with `plan: "apply"`, or (U-170,
+ *   B-1) with `plan: "run"`
  * - commands_not_allowed: command rules under `allowCommands: false`
  * - review_without_checklist, checklist_without_review: humanReview and completion disagree
  * - instructions_too_long, checklist_too_long: over the MAX_ constants above

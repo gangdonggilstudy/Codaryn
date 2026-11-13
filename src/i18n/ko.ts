@@ -27,6 +27,7 @@ export const KO_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "설정 파일에 --profile 옵션으로 준 이름의 프로필이 없습니다. 설정 파일의 프로필 이름을 확인하세요.",
   "error.hint.task_type_not_found": "준 작업 종류(--workflow 옵션이나 task 파일)가 기본으로 있는 것도 아니고 설정 파일에 정의된 것도 아닙니다. 이름을 확인하세요.",
   "error.hint.config_missing": "설정 파일이 아직 없습니다(기본 위치에 없음). codaryn init으로 만드세요.",
+  "error.hint.plan_run_not_available": "계획 방식 \"run\"은 이 판에서 아직 쓸 수 없습니다. plan을 \"none\"이나 \"apply\"로 두세요. 모델에는 아무것도 보내지 않았습니다.",
   "error.hint.key_in_goal": "목표 문장에 키 값이 있습니다. 목표에서 빼세요.",
   "error.hint.key_in_task": "--task 옵션으로 준 task 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
   "error.hint.key_in_config": "설정 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
@@ -126,6 +127,8 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.integrity_changed": "보호 대상 확인 — {count}개가 바뀌었거나 확인할 수 없음 ({phase})",
   "progress.finished": "끝 — {status} ({reason})",
   "progress.model_not_found": "모델을 찾지 못했습니다(HTTP 404). codaryn models로 키가 쓸 수 있는 모델을 보세요.",
+  "progress.not_writable_hint":
+    "writablePaths에 없는 파일이라 거부된 쓰기: {count}건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
   "progress.unknown_tool": "(모르는 도구)",
   "progress.apply_started": "적용 시작 — 동작 {actions}개, {approval}",
   "progress.plan_checked": "적용 전 점검 — 문제 {count}개",
@@ -442,6 +445,8 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.commands.none": "허용한 명령도 명령 검증기도 없습니다",
   "doctor.commands.extra_args_with_plan":
     "추가 인수를 받는 명령 규칙 {count}개가 계획 동작(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
+  "doctor.commands.writable_with_commands":
+    "writablePaths가 파일 도구를 제한하는 중에 명령 규칙 {count}개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",
@@ -631,6 +636,8 @@ export const KO_MESSAGES: MessageTexts = {
   "denial.confirmation_required": "실행 중 사람이 허용하지 않음",
   "denial.protected_path": "보호 경로",
   "denial.plan_action_not_allowed": "허용하지 않은 계획 동작",
+  // U-175 (DR-69 B-2), 초안: 작업이 쓸 수 있는 파일 밖의 쓰기.
+  "denial.path_not_writable": "쓰기를 허용한 파일 밖",
   "denial.unknown_tool": "모르는 도구",
   "denial.invalid_args": "잘못된 인자",
   "denial.policy_denied": "권한 규칙이 거부함",

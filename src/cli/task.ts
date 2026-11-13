@@ -54,6 +54,7 @@ import {
 import type {
   AggregateOp,
   AnyToolName,
+  CliErrorHint,
   CompletionMode,
   DataRule,
   HumanReviewConfig,
@@ -71,7 +72,14 @@ export type TaskErrorCode = "invalid_task" | "invalid_config";
 
 export type ParseTaskOutcome =
   | { readonly ok: true; readonly task: ResolvedTaskSpec }
-  | { readonly ok: false; readonly code: TaskErrorCode; readonly message: string; readonly position?: InputErrorPosition };
+  | {
+      readonly ok: false;
+      readonly code: TaskErrorCode;
+      readonly message: string;
+      readonly position?: InputErrorPosition;
+      /** U-177: the error's hint when the parser knows the cause (CliErrorOutput.hint). */
+      readonly hint?: CliErrorHint;
+    };
 
 /**
  * N-15: where a validation failure is, as schema field text. The CLI turns it into an
@@ -86,12 +94,16 @@ export interface InputErrorPosition {
 
 export type Rec = Record<string, unknown>;
 
-/** A validation failure. Its message names a field, never a value. `code` overrides the default. */
+/**
+ * A validation failure. Its message names a field, never a value. `code` overrides the default.
+ * U-177: `hint` is the error's hint when the parser knows the cause; the outcome carries it.
+ */
 export class InputError extends Error {
   constructor(
     message: string,
     readonly code?: TaskErrorCode,
     readonly position?: InputErrorPosition,
+    readonly hint?: CliErrorHint,
   ) {
     super(message);
   }
@@ -300,9 +312,10 @@ const PROTECTED_PATH_MESSAGES: { readonly [R in ProtectedPathProblemReason]: str
  * `policy.protectedPaths` (T-13): the policy module's `checkProtectedPaths` decides, so the CLI
  * rejects exactly what the gate would treat as unusable. The message names the position only.
  * Entries are kept as written; the gate compares them with resolved paths (R-5).
+ * U-182 (DR-69 B-4): `policy.writablePaths` has the same format (PolicyConfig.writablePaths), so
+ * the same check names its position. An empty list is kept: it allows no file tool write.
  */
-function parseProtectedPaths(value: unknown): string[] {
-  const field = "policy.protectedPaths";
+function parsePathList(value: unknown, field: "policy.protectedPaths" | "policy.writablePaths"): string[] {
   const [problem] = checkProtectedPaths(value);
   if (problem !== undefined) {
     const at = problem.index === null ? field : `${field}[${problem.index}]`;
@@ -325,7 +338,7 @@ const COMMAND_RULE_FIELDS = ["executable", "argsPrefix", "allowExtraArgs"] as co
 export function parsePolicy(value: unknown, source: "settings"): ConfirmablePolicyConfig;
 export function parsePolicy(value: unknown, source: "task" | "definition"): PolicyConfig;
 export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePolicyConfig {
-  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions"]);
+  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions", "writablePaths"]);
   if (!Array.isArray(rec["commands"])) fail("policy.commands must be an array");
   const ruleFields: readonly string[] = source === "settings" ? [...COMMAND_RULE_FIELDS, "confirm"] : COMMAND_RULE_FIELDS;
   const commands = (rec["commands"] as unknown[]).map((item, index): ConfirmableCommandRule => {
@@ -345,7 +358,9 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
   if (rec["network"] !== "deny") fail('policy.network must be "deny"');
   if (rec["destructive"] !== "deny") fail('policy.destructive must be "deny"');
   if (typeof rec["restorePathTokens"] !== "boolean") fail("policy.restorePathTokens must be a boolean");
-  const protectedPaths = rec["protectedPaths"] === undefined ? undefined : parseProtectedPaths(rec["protectedPaths"]);
+  const protectedPaths = rec["protectedPaths"] === undefined ? undefined : parsePathList(rec["protectedPaths"], "policy.protectedPaths");
+  // U-182 (DR-69 B-4): each source's list is kept as given; the run builds writablePathSets from them.
+  const writablePaths = rec["writablePaths"] === undefined ? undefined : parsePathList(rec["writablePaths"], "policy.writablePaths");
   const planActions = rec["planActions"] === undefined ? undefined : parsePlanActions(rec["planActions"]);
   return {
     commands,
@@ -354,6 +369,7 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
     restorePathTokens: rec["restorePathTokens"],
     ...(protectedPaths === undefined ? {} : { protectedPaths }),
     ...(planActions === undefined ? {} : { planActions }),
+    ...(writablePaths === undefined ? {} : { writablePaths }),
   };
 }
 
@@ -377,8 +393,21 @@ export function parseToolList(value: unknown, field: string): AnyToolName[] {
   return value as AnyToolName[];
 }
 
+/**
+ * U-177 (review R-99 M-2): the plan modes the CLI takes. "run" is in PLAN_MODES (U-170) but nothing
+ * carries it out before B-3 and B-4: a run plan run could only end as failed/model_error after model
+ * requests. So it is refused here, before anything is sent, and a wrong value's message does not
+ * offer it. B-4 takes it back.
+ */
+const TAKEN_PLAN_MODES: readonly PlanMode[] = PLAN_MODES.filter((mode) => mode !== "run");
+
+/** A task file's or a config definition's `plan` (invalid_task or invalid_config by the caller). */
 export function parsePlanMode(value: unknown, field: string): PlanMode {
-  if (!(PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${PLAN_MODES.join(", ")}`);
+  if (value === "run") {
+    const message = `${field} "run" is not available yet: nothing carries out a run plan in this version; use ${TAKEN_PLAN_MODES.join(" or ")}`;
+    throw new InputError(message, undefined, positionFromMessage(message), "plan_run_not_available");
+  }
+  if (!(TAKEN_PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${TAKEN_PLAN_MODES.join(", ")}`);
   return value as PlanMode;
 }
 
@@ -702,6 +731,7 @@ function attempt(code: TaskErrorCode, build: () => ResolvedTaskSpec): ParseTaskO
         code: error.code ?? code,
         message: error.message,
         ...(error.position === undefined ? {} : { position: error.position }),
+        ...(error.hint === undefined ? {} : { hint: error.hint }),
       };
     }
     throw error;

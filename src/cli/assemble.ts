@@ -373,7 +373,8 @@ export const assembleRun: Assemble = async (input) => {
 
   try {
     const privacy = createPrivacyGateway({ secrets });
-    const policy = createPolicyGate({ config: task.policy, workspace });
+    // U-182 (DR-69 B-4): the task's writable lists (one per source); none, no such limit.
+    const policy = createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) });
     // T-1: one runner for tools and verifiers. The value check keeps registered secrets out of
     // the child environment; the workspace root lets .cmd/.bat run (and refuses those inside it).
     const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });

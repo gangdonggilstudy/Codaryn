@@ -6,8 +6,10 @@
  * other (held while the process lives, stale once it has ended, when the next acquire reclaims it).
  * - held briefly (100 ms after the run wrote its result, so a slow holder still lets go within the tries): the run ends done, the lock is gone, the
  *   next run starts and ends done;
- * - held long (4 s): the run's records are complete (result.json done), the CLI says internal_error,
- *   the lock is left with the ended CLI's pid, doctor calls it stale, and the next run reclaims it.
+ * - held long (4 s): the run's records are complete (result.json done). U-220: the CLI prints the
+ *   run's own result and exits with its code, and the end summary says lock.release_failed (it was
+ *   internal_error before); the lock is left with the ended CLI's pid, doctor calls it stale, and the
+ *   next run reclaims it.
  * Windows only: elsewhere removing a file another process has open does not fail. The holder is a
  * PowerShell process ([IO.File]::Open with FileShare.Read); the time bounds are generous.
  */
@@ -19,6 +21,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
+import { createMessageCatalog } from "../../src/i18n/index.js";
 import { createSandbox } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
 import { createFileArgs, textStep, toolStep, writeGeneralTask } from "../fixtures/general-tasks.js";
@@ -93,7 +96,7 @@ test("U-194: the lock file held briefly when the run releases it: the run ends d
   assert.equal(existsSync(lockFile(sb)), false);
 });
 
-test("U-194: the lock file held long: the run's records are complete, the CLI says internal_error, the lock is left stale and the next run reclaims it", { timeout: 120_000, skip: WINDOWS ? false : "only Windows refuses to remove a file another process holds" }, async (t) => {
+test("U-194, U-220: the lock file held long: the run's result stands and the summary says the lock was left; the lock is stale and the next run reclaims it", { timeout: 120_000, skip: WINDOWS ? false : "only Windows refuses to remove a file another process holds" }, async (t) => {
   const sb = createSandbox(t);
   const holder = startHolder(t, sb, 4_000);
   await waitFor(() => existsSync(holder.ready), 30_000, "the holder waiting");
@@ -103,11 +106,15 @@ test("U-194: the lock file held long: the run's records are complete, the CLI sa
   t.diagnostic(`holder: ${log}; run ${first.durationMs} ms; stderr: ${first.stderr.trim().split("\n").slice(-2).join(" | ")}`);
   assert.match(log, /^held \d+ ms after the result$/);
   const output = lastJson(first);
-  // The run wrote its result before the release; the release gave up after its tries and threw.
-  assert.deepEqual([output.kind, output.code, first.exitCode], ["error", "internal_error", 70], first.stdout);
+  // The run wrote its result before the release; the release gave up after its tries. U-220: the
+  // CLI prints the run's own result and exits with its code; the end summary says the lock was left.
+  assert.deepEqual([output.kind, output.status, output.reason, first.exitCode], ["run", "done", "verified", 0], first.stdout + first.stderr);
+  assert.ok(first.stderr.includes(createMessageCatalog("en").format("lock.release_failed")), first.stderr);
+  assert.ok(!first.stderr.includes("internal_error"), first.stderr);
   const runs = path.join(sb.workspace, ".codaryn", "runs");
-  const recorded = JSON.parse(readFileSync(path.join(runs, readdirOne(runs), "result.json"), "utf8")) as { status: string; reason: string };
+  const recorded = JSON.parse(readFileSync(path.join(runs, readdirOne(runs), "result.json"), "utf8")) as { runId: string; status: string; reason: string };
   assert.deepEqual([recorded.status, recorded.reason], ["done", "verified"], "the run's own records are complete");
+  assert.equal(output.runId, recorded.runId, "the printed result is the stored one");
   // The lock stays with the CLI's pid; that process has ended, so the lock is stale.
   assert.ok(existsSync(lockFile(sb)), "the lock file is left");
   const doctor = await runGuarded(sb, ["doctor", "--task", task(sb, "two.txt"), "--json"], cliEnv(), 60_000);

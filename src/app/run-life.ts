@@ -39,7 +39,7 @@ import type {
   RunTask,
   StoredChangesPlan,
 } from "../contracts/index.js";
-import { API_PROVIDER_FACTORIES } from "../cli/provider.js";
+import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { runApprovedPlan as engineRunApprovedPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { createRunId } from "./input/run-id.js";

@@ -5,6 +5,7 @@
 
 import { DEFAULT_MAX_REPAIR_ATTEMPTS, DEFAULT_MAX_SAME_FAILURES, asRawText } from "../../../src/contracts/index.js";
 import type {
+  JournalRecord,
   EffectiveToolCall,
   EngineDeps,
   JournalEvent,
@@ -227,9 +228,11 @@ export class FakeJournal {
   readonly events: JournalEvent[] = [];
   closed = false;
   constructor(private readonly log?: Log) {}
-  async append(event: JournalEvent): Promise<void> {
+  async append(event: JournalEvent): Promise<JournalRecord> {
     if (event.type === "tool_result") this.log?.push("journal.tool_result");
     this.events.push(event);
+    // AC-D3 (C-2): the stored record, numbered as the store numbers a new run's journal.
+    return { seq: this.events.length, at: new Date(0).toISOString(), runId: "fake-run", ...event };
   }
   async close(): Promise<void> {
     this.closed = true;

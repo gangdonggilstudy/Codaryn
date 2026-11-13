@@ -51,8 +51,11 @@ export interface RunGuards {
   gate(writablePathSets?: readonly WritablePathSet[]): PolicyGate;
   /** For createToolRunner: the run's unreadable paths (listing tools, query_table) and k (query_table). */
   readonly tools: { readonly unreadablePaths?: readonly string[]; readonly minGroupSize?: number };
-  /** For createVerifierRunner: the run's unreadable paths (data_checks' evidence, U-223). */
-  readonly verifiers: { readonly unreadablePaths?: readonly string[] };
+  /**
+   * For createVerifierRunner: the run's unreadable paths (data_checks' evidence, U-223) and k (U-258: a
+   * grouped data check over an unreadable source compares the groups of at least k rows, as query_table).
+   */
+  readonly verifiers: { readonly unreadablePaths?: readonly string[]; readonly minGroupSize?: number };
   /** For createIntegrityChecker's protectedPaths: the policy's protected paths and the unreadable ones. */
   readonly protectedPaths: readonly string[];
 }
@@ -63,7 +66,7 @@ export function runGuards(task: Pick<ResolvedTaskSpec, "policy" | "writablePathS
     gate: (writablePathSets = task.writablePathSets) =>
       createPolicyGate({ config: task.policy, workspace, ...(writablePathSets === undefined ? {} : { writablePathSets }), ...unreadable }),
     tools: { ...unreadable, ...(task.minGroupSize === undefined ? {} : { minGroupSize: task.minGroupSize }) },
-    verifiers: unreadable,
+    verifiers: { ...unreadable, ...(task.minGroupSize === undefined ? {} : { minGroupSize: task.minGroupSize }) },
     protectedPaths: integrityPathsOf(task.policy.protectedPaths, task.unreadablePaths),
   };
 }

@@ -17,7 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { MAX_QUERY_COUNTED_GROUPS, MAX_QUERY_RESULT_GROUPS, QUERY_CURSOR_PATTERN_SOURCE } from "../../../src/contracts/index.js";
+import { MAX_QUERY_COUNTED_GROUPS, MAX_QUERY_RESULT_GROUPS, QUERY_CURSOR_PATTERN_SOURCE, QUERY_TABLE_PROBLEM_HINTS } from "../../../src/contracts/index.js";
+import type { QueryTableProblem } from "../../../src/contracts/index.js";
 import type { QueryTablePayload, RawWorkflowToolOutcome, Workspace } from "../../../src/contracts/index.js";
 import { createToolRunner } from "../../../src/tools/index.js";
 import { queryTableTool } from "../../../src/tools/query-table.js";
@@ -108,6 +109,9 @@ function failureOf(outcome: RawWorkflowToolOutcome): { code: string; message: st
 }
 
 const PRIVATE = { unreadablePaths: ["private"] } as const;
+/** U-261: query_table's invalid_table message, its problem's own hint after it. */
+const told = (problem: QueryTableProblem, where?: string): string =>
+  `table rejected: ${problem}${where === undefined ? "" : ` at ${where}`}. ${QUERY_TABLE_PROBLEM_HINTS[problem]}`;
 const PEOPLE_QUERY = {
   path: "private/people.csv",
   groupBy: ["city"],
@@ -182,7 +186,7 @@ describe("U-208: query_table on any table", () => {
     assert.equal(last.groups.length, 450 - 2 * MAX_QUERY_RESULT_GROUPS);
     assert.equal(last.next, null);
     for (const cursor of ["g450", "g9999", "k0200", "g01"]) {
-      assert.deepEqual(failureOf(await ask(cursor)), { code: "invalid_table", message: "table rejected: after_not_found" }, cursor);
+      assert.deepEqual(failureOf(await ask(cursor)), { code: "invalid_table", message: told("after_not_found") }, cursor);
     }
   });
 
@@ -220,7 +224,7 @@ describe("U-208: query_table on a table under the unreadable paths", () => {
   test("min and max are op_not_allowed, by their index", async () => {
     for (const op of ["min", "max"]) {
       const failure = failureOf(await query({ ...PEOPLE_QUERY, operations: [{ op: "count", column: "name" }, { op, column: "amount" }] }, PRIVATE));
-      assert.deepEqual(failure, { code: "invalid_table", message: "table rejected: op_not_allowed at operations[1].op" });
+      assert.deepEqual(failure, { code: "invalid_table", message: told("op_not_allowed", "operations[1].op") });
     }
   });
 
@@ -253,21 +257,21 @@ describe("U-208: query_table on a table under the unreadable paths", () => {
     assert.equal(payload.minGroupSize, 5);
     assert.equal(payload.suppressedGroups, 2);
     const failure = failureOf(await query({ ...PEOPLE_QUERY, path: "alias/people.csv", operations: [{ op: "max", column: "amount" }] }, PRIVATE));
-    assert.equal(failure.message, "table rejected: op_not_allowed at operations[0].op");
+    assert.equal(failure.message, told("op_not_allowed", "operations[0].op"));
   });
 });
 
 describe("U-208: a failure names a code and a place, never a cell, a path or a column name", () => {
   const cases: readonly [string, Record<string, unknown>, { code: string; message: string }][] = [
-    ["not_number", { path: "data/bad-number.csv", operations: [{ op: "sum", column: "v" }] }, { code: "invalid_table", message: "table rejected: not_number at data row 2, operations[0]" }],
-    ["not_table", { path: "data/bad-quote.csv", operations: [{ op: "count", column: "v" }] }, { code: "invalid_table", message: "table rejected: not_table at line 3 (unterminated_quote)" }],
-    ["not_text", { path: "data/not-text.csv", operations: [{ op: "count", column: "v" }] }, { code: "invalid_table", message: "table rejected: not_text" }],
-    ["unknown_column", { path: "data/sales.csv", groupBy: [CANARY], operations: [{ op: "count", column: "qty" }] }, { code: "invalid_table", message: "table rejected: unknown_column at groupBy[0]" }],
-    ["unknown_column (operation)", { path: "data/sales.csv", operations: [{ op: "count", column: CANARY }] }, { code: "invalid_table", message: "table rejected: unknown_column at operations[0].column" }],
-    ["duplicate_column (header)", { path: "data/doubled.csv", operations: [{ op: "sum", column: "v" }] }, { code: "invalid_table", message: "table rejected: duplicate_column at operations[0].column" }],
-    ["duplicate_column (groupBy twice)", { path: "data/sales.csv", groupBy: ["region", "region"], operations: [{ op: "count", column: "qty" }] }, { code: "invalid_table", message: "table rejected: duplicate_column at groupBy[1]" }],
-    ["groupBy twice, unknown: the first place wins", { path: "data/sales.csv", groupBy: [CANARY, CANARY], operations: [{ op: "count", column: "qty" }] }, { code: "invalid_table", message: "table rejected: unknown_column at groupBy[0]" }],
-    ["groupBy twice on a broken table: the table wins", { path: "data/bad-quote.csv", groupBy: ["g", "g"], operations: [{ op: "count", column: "v" }] }, { code: "invalid_table", message: "table rejected: not_table at line 3 (unterminated_quote)" }],
+    ["not_number", { path: "data/bad-number.csv", operations: [{ op: "sum", column: "v" }] }, { code: "invalid_table", message: told("not_number", "data row 2, operations[0]") }],
+    ["not_table", { path: "data/bad-quote.csv", operations: [{ op: "count", column: "v" }] }, { code: "invalid_table", message: told("not_table", "line 3 (unterminated_quote)") }],
+    ["not_text", { path: "data/not-text.csv", operations: [{ op: "count", column: "v" }] }, { code: "invalid_table", message: told("not_text") }],
+    ["unknown_column", { path: "data/sales.csv", groupBy: [CANARY], operations: [{ op: "count", column: "qty" }] }, { code: "invalid_table", message: told("unknown_column", "groupBy[0]") }],
+    ["unknown_column (operation)", { path: "data/sales.csv", operations: [{ op: "count", column: CANARY }] }, { code: "invalid_table", message: told("unknown_column", "operations[0].column") }],
+    ["duplicate_column (header)", { path: "data/doubled.csv", operations: [{ op: "sum", column: "v" }] }, { code: "invalid_table", message: told("duplicate_column", "operations[0].column") }],
+    ["duplicate_column (groupBy twice)", { path: "data/sales.csv", groupBy: ["region", "region"], operations: [{ op: "count", column: "qty" }] }, { code: "invalid_table", message: told("duplicate_column", "groupBy[1]") }],
+    ["groupBy twice, unknown: the first place wins", { path: "data/sales.csv", groupBy: [CANARY, CANARY], operations: [{ op: "count", column: "qty" }] }, { code: "invalid_table", message: told("unknown_column", "groupBy[0]") }],
+    ["groupBy twice on a broken table: the table wins", { path: "data/bad-quote.csv", groupBy: ["g", "g"], operations: [{ op: "count", column: "v" }] }, { code: "invalid_table", message: told("not_table", "line 3 (unterminated_quote)") }],
     ["not found", { path: "data/missing.csv", operations: [{ op: "count", column: "v" }] }, { code: "not_found", message: "no table file at this path" }],
     ["a folder", { path: "data", format: "csv", operations: [{ op: "count", column: "v" }] }, { code: "not_found", message: "no table file at this path" }],
   ];

@@ -210,7 +210,12 @@ export type JournalRecord = JournalEvent & {
 };
 
 export interface Journal {
-  /** Appends one record and resolves after it was handed to the operating system. */
-  append(event: JournalEvent): Promise<void>;
+  /**
+   * Appends one record and resolves after it was handed to the operating system. AC-D3 (the CLI
+   * migration's C-2, U-262): resolves with the record as it was stored (`seq` and `at` as written,
+   * `runId`), so a wrapper that tells of records (the app's run events) gives the stored values and
+   * never counts or reads the clock itself. A wrapper passes on what it is given.
+   */
+  append(event: JournalEvent): Promise<JournalRecord>;
   close(): Promise<void>;
 }

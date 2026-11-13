@@ -16,6 +16,8 @@ API 키 없이 `analyze-private` 작업 종류를 끝까지 보는 예시다. �
 
 ## 실행
 
+출력과 설명은 [사용 안내 18.12절](../../docs/usage.md#1812-개인정보-표의-집계-분석-analyze-private-query_table)에 있다.
+
 ```powershell
 # 저장소 루트에서, 빌드(npm run build)를 마친 뒤. 복사본은 저장소 밖이어야 한다
 $ap = "$HOME\codaryn-analyze-private-demo"
@@ -39,6 +41,6 @@ node dist/src/cli/main.js runs --workspace $ap\workspace
 
 - 보장은 "행을 보내지 않는다"뿐이다. 여러 질의의 차로 작은 묶음의 값을 알아낼 수 있다. 이 대본의 결과만으로도 north의 합(800)에서 north·team-alpha의 합(500)을 빼면 north·team-beta 한 사람의 금액(300)이 나온다. 질의 횟수에는 한도가 없다.
 - 목표와 지시문은 그대로 모델에 간다. 실제 모델로 돌릴 때 목표에 개인정보를 적지 않는다.
-- 묶음으로 비교하는 `data_checks`(`aggregate_match`의 `groupBy`)는 원본의 모든 묶음에 결과 행이 있어야 맞는다. 5행 미만 묶음이 있는 열로 묶으면 모델이 그 묶음을 모르므로 통과할 수 없다. 이 예시는 모든 지역이 5행 이상이다.
+- 묶음으로 비교하는 `data_checks`(`aggregate_match`의 `groupBy`)는 원본이 읽기 제외 아래일 때 5행 이상인 묶음만 맞댄다(U-258). 결과에 그 밖의 키가 있으면 실패한다. 이 예시는 모든 지역이 5행 이상이라 세 지역을 다 맞댄다.
 - 사람이 보는 화면(변경 보기, GUI의 파일 보기)에는 읽기 제외 아래 파일도 보인다. 막는 것은 모델로 가는 것이다.
 - 읽기 제외가 걸린 확인은 대본 모델과 127.0.0.1의 모의 API(Anthropic, OpenAI)뿐이다. 실제 API로는 확인하지 않았다. 그 밖의 한계는 [민감정보 처리 13절](../../docs/privacy.md#13-알려진-한계)에 있다.

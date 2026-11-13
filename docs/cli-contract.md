@@ -643,7 +643,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 아무 원천도 정하지 않으면 필드가 없고 `query_table`은 기본값 5(`DEFAULT_MIN_GROUP_SIZE`)를 쓴다.
   - 조립이 실행의 k를 도구 실행기에 넘긴다(`ToolRunnerOptions.minGroupSize`, U-210 둘째 몫). k는 읽기 제외 아래의 표에만 걸린다. 다른 표는 다섯 연산을 모두 쓰고 묶음을 모두 준다(k 1).
 - **거는 곳**
-  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`, U-223: `data_checks`의 근거에 그 아래 원본에서 읽은 수를 쓰지 않는다).
+  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`와, U-258부터 실행의 k `minGroupSize`. 아래의 `data_checks` 항목).
   - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
   - 승인된 계획을 수행하는 실행: 엔진이 계획 파일 목록을 더해 만드는 게이트(`ApprovedPlanParts.policyFor`)도 실행의 목록을 받는다(검토 R-108 H-1). 전에는 그 게이트만 목록 없이 만들어져, task 파일 아래에서 설정·프로필이 준 항목 밑의 `read_file`이 계획 수행 중에 허용되었다.
   - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/cli/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
@@ -666,11 +666,19 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 진행 줄은 무엇을 물었는지만 말한다(`progress.query_table`, `_whole`, `_describe`와 연산 코드, U-207). 경로, 열 이름, 묶음 키, 행 수, 집계 값은 없다.
 - **카나리(ne-verify U-232의 틀):** `g-u210-canary-cli`가 그 틀의 작업 공간(세 형식의 표, 칸마다 표지, 묶음 키 표지, 줄마다 표지인 메모, 이름이 표지인 파일과 폴더)에서 analyze-private를 대본 모델과 모의 Anthropic API로 돌린다. 행·이름·k 미만 묶음 키가 모델로 간 것, 기록, 사람용 출력 어디에도 없고(`leaksOf`가 빔), 한 열로 묶은 k 이상 묶음의 키는 모두 모델에게 간다(양성 대조).
 - **끝에서 끝까지(U-210 둘째 몫의 시험):** 실제 CLI를 대본 모델과 127.0.0.1의 모의 Anthropic API로 돌린다. 표의 칸마다 실행 때 만든 표지를 두고, 행의 표지와 k 미만 묶음의 키가 도구 결과, 기록(`.codaryn` 아래 전부), 모델 요청 본문, 사람용 출력(stdout, stderr) 어디에도 없음을 확인한다. k 이상 묶음의 키, 열 이름, 수는 모델에게 간다.
-- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
+- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 실행 조립은 CLI의 `createAssemble`이고(`src/app/assemble.ts`, U-237), 적용 점검(`src/app/check-apply.ts`)과 run 계획 보기(`src/app/changes-plan.ts`)는 `runGuards`의 게이트를 쓴다. 그래서 GUI에서 시작한 실행도 같은 게이트·도구 실행기·검증기·무결성 대상을 받는다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-204, U-212).
 - **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).
-- **`data_checks`의 근거(R-6, U-223):** 원본이 읽기 제외 아래면 근거에 다시 계산한 수, 칸 수, 뺀 행 수를 쓰지 않고 "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다. 판정은 같다. 그래서 재수정이 작은 묶음의 값을 모델에게 실어 가지 못한다. 실제 CLI의 실행과 이동 계획 적용에서 시험한다(`g-u210-verifier-unreadable`).
+- **`data_checks`의 근거와 판정(R-6, U-223, U-258).** 사람에게 하는 설명은 [개인정보 문서](privacy.md) 13절의 "검증기가 알려 주는 것"과 15절의 표다. 재수정이 작은 묶음의 참값이나 자리, 모델이 추측한 값의 맞음·틀림을 모델에게 실어 가지 못하게 한다.
+  - 원본이나 대상이 읽기 제외 아래면 근거에 그 표에서 읽은 수(다시 계산한 값, 칸 수, 행 수)를 쓰지 않는다. "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다(U-223).
+  - 원본이 읽기 제외 아래면 실행의 k로 다음을 지킨다(U-258).
+    - 근거에 원본의 행 번호(묶음의 이름표, 수가 아닌 칸, 해석되지 않는 자리)와 숨긴 묶음의 키를 쓰지 않는다.
+    - 묶음 비교(`aggregate_match`의 `groupBy`)는 원본의 k행 이상인 묶음만 맞댄다. `query_table`이 모델에게 보이는 묶음이다. 결과에 그 밖의 키가 있으면 틀림이고, 그런 행의 수만 말한다. 숨긴 묶음의 키와 원본에 없는 키는 같은 글이다. 빠진 묶음도 수로만 말한다. k칸 미만으로 만든 값의 묶음은 숨긴 묶음처럼 뺀다.
+    - `query_table`이 주지 않는 값의 규칙은 맞대지 않는다: min·max, k행 미만이거나 k칸 미만으로 만든 표 전체의 값, 행 수가 k 미만인 표의 행 수(`rows.sameAs`). 근거는 `not compared: query_table does not give this value to the model`이다.
+  - 규칙이 검사하는 표(집계의 대상, `table_shape`의 표)가 읽기 제외 아래면, 그 파일이 있든 없든 맞대지 않는다. 근거는 `not compared: a verdict on a table under unreadable paths would tell the model about it`이다.
+  - 맞대지 않은 규칙은 결정 못 함이다. 검증의 한계 목록에 `N of M rules were not compared: …`가 붙는다. 검증 결과는 틀린 규칙이 하나라도 있으면 `fail`, 아니면 결정 못 한 규칙이 하나라도 있으면 `inconclusive`이다. 그래서 맞대지 않은 규칙만 있는 검증은 `inconclusive`이고 통과가 아니다.
+  - 시험: 실제 CLI의 실행과 이동 계획 적용(`g-u210-verifier-unreadable`), 검증기(`tests/unit/verify/u223-data-checks-unreadable.test.ts`, `u258-data-checks-small-groups.test.ts`).
 - **revert(Codex V-23의 참고, 그대로 둠):** `codaryn revert`는 실행이 남긴 스냅샷으로 그 실행이 바꾼 파일을 되돌린다. 지금 설정의 읽기 제외는 보지 않는다. 모델이 끼지 않는 사람의 동작이고, 실행 중에는 읽기 제외 아래의 쓰기가 거부되므로 그 실행의 스냅샷에는 그 아래 파일이 없다. 실행 뒤에 목록에 더한 경로의 파일은 되돌릴 수 있다.
-- **아직 없는 것:** 앱 계층의 연결과 설정 넓히기(R-7, p5a), GUI의 읽기 제외 편집과 `analyze-private` 안내(P-4, p5u-gui).
+- **아직 없는 것:** GUI 설정 화면의 읽기 제외 편집. 설정 파일을 손으로 고친다([개인정보 문서](privacy.md) 13절).
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 

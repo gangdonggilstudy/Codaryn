@@ -1087,7 +1087,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
     const failed = createFailedCalls();
     const watched: Journal = {
       async append(event) {
-        await recorded.append(event);
+        const stored = await recorded.append(event);
         if (failed.observe(event)) notes.failedToolCalls += 1;
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
@@ -1109,6 +1109,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
         if (event.type === "run_started" && event.policyNarrowings !== undefined && event.policyNarrowings.length > 0) {
           notes.policyNarrowings = event.policyNarrowings;
         }
+        return stored;
       },
       close: () => recorded.close(),
     };
@@ -1143,7 +1144,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
         ? progressed
         : {
             async append(event) {
-              await progressed.append(event);
+              const stored = await progressed.append(event);
               if (!announced && event.type === "run_started") {
                 announced = true;
                 writeMasked(
@@ -1154,6 +1155,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
                     : defaultConfigNotice(defaultDisplay ?? ""),
                 );
               }
+              return stored;
             },
             close: () => progressed.close(),
           };

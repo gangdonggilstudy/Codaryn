@@ -10,6 +10,7 @@ import { describe, test } from "node:test";
 
 import { PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE, asRawText, planActionShown } from "../../../src/contracts/index.js";
 import type {
+  ApplyJournalEntryRecord,
   AppliedPlanAction,
   ApplyDeps,
   ApplyJournalEntry,
@@ -64,9 +65,10 @@ class FakeApplyJournal {
   closed = false;
   /** R-9 I-4: a record type whose append fails, as when the process ends right before it. */
   failOn: string | null = null;
-  async append(event: ApplyJournalEntry): Promise<void> {
+  async append(event: ApplyJournalEntry): Promise<ApplyJournalEntryRecord> {
     if (event.type === this.failOn) throw new Error("the process ended");
     this.events.push(event);
+    return { seq: this.events.length, at: new Date(0).toISOString(), runId: "fake-apply", ...event };
   }
   async close(): Promise<void> {
     this.closed = true;

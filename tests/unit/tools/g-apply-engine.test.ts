@@ -15,6 +15,7 @@ import { test } from "node:test";
 
 import { PLAN_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME, asRawText } from "../../../src/contracts/index.js";
 import type {
+  ApplyJournalEntryRecord,
   ApplyDeps,
   ApplyJournalEvent,
   ApplyResult,
@@ -97,8 +98,9 @@ async function proposeReal(fx: Fixture, actions: readonly PlanActionArgs[]): Pro
 
 class MemoryJournal {
   readonly events: ApplyJournalEvent[] = [];
-  async append(event: ApplyJournalEvent): Promise<void> {
+  async append(event: ApplyJournalEvent): Promise<ApplyJournalEntryRecord> {
     this.events.push(event);
+    return { seq: this.events.length, at: new Date(0).toISOString(), runId: "fake-apply", ...event };
   }
   async close(): Promise<void> {}
   types(): string[] {

@@ -171,7 +171,7 @@ export function withProgress(
 ): Journal {
   return {
     async append(event) {
-      await journal.append(event);
+      const stored = await journal.append(event);
       let lines: readonly string[];
       try {
         const drawn = render(event);
@@ -188,6 +188,7 @@ export function withProgress(
           // Progress is best effort.
         }
       }
+      return stored;
     },
     close: () => journal.close(),
   };

@@ -28,6 +28,9 @@
 // gets a fake Anthropic API on 127.0.0.1 (scripts/compare-cli/fake-anthropic.mjs) and a fake key:
 // a permission question comes only from a config's rule, and a config's runs use an API provider.
 // The requests it got are compared too. The report says the terminal cases are an imitation.
+//
+// U-167: a case's `api.models` makes the fake API list those models (GET /v1/models) for
+// `codaryn models`. A cleanup step's byte counts are normalized (normalize.mjs).
 
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -222,7 +225,7 @@ function stepName(index, args, terminal, answers) {
 export async function runCase(board, spec, caseDir) {
   rmSync(caseDir, { recursive: true, force: true });
   mkdirSync(caseDir, { recursive: true });
-  const api = spec.api === undefined ? null : await startFakeAnthropic(spec.api.replies);
+  const api = spec.api === undefined ? null : await startFakeAnthropic(spec.api.replies, { models: spec.api.models });
   try {
     spec.setup(caseDir, { api: api?.url ?? null });
     const outputs = [];

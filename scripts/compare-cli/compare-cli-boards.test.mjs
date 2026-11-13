@@ -6,7 +6,11 @@
 //   catalog lines changed (the English "turn {turn}" progress line and the apply question) is found
 //   exactly there: the English run's stderr lines that use the first, the terminal apply's question
 //   line (U-135), and nothing else (the Korean case and the apply with --digest are the same).
-// Scripted models only; nothing leaves the machine. The temporary folder is removed at the end.
+// - U-167: a third build with nine texts changed (three of codaryn models, and the six that carry
+//   U-131's five hand-off texts) differs in the models and hand-off cases exactly at the steps that
+//   show them, and only by those texts.
+// Scripted models, and a fake API on 127.0.0.1 for the cases that need one; nothing leaves the
+// machine. The temporary folder is removed at the end.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -165,5 +169,82 @@ describe("two real builds of HEAD", () => {
       assert.match(line.head, /codaryn: round \d+$/);
     }
     assert.match(reportOf({ base, head, results }), /- base \d+:\d+: codaryn: turn 1\n\+ head \d+:\d+: codaryn: round 1/);
+  });
+
+  // U-167: each text is changed in one place, with a word before and after to find in a diff line.
+  const ALTERED = [
+    // codaryn models (U-156's catalog texts): the terminal question, the Korean list line, the written line.
+    { file: "src/i18n/en.ts", from: '"models.use_prompt": "Number or id to write into', to: '"models.use_prompt": "Number or id to put into', was: "write into", now: "put into" },
+    { file: "src/i18n/ko.ts", from: '"models.listed": "이 키로 쓸 수 있는', to: '"models.listed": "이 키로 고를 수 있는', was: "쓸 수 있는", now: "고를 수 있는" },
+    { file: "src/i18n/en.ts", from: '"models.written_label": "Written"', to: '"models.written_label": "Saved"', was: "Written", now: "Saved" },
+    // U-131 (cli-contract 18.18): N1 and N2 in the report, N3's revert line, N4's two changes lines, N5's notice.
+    { file: "src/cli/report.ts", from: "A later review replaces it: ", to: "A later review overrides it: ", was: "replaces it", now: "overrides it" },
+    { file: "src/cli/report.ts", from: "action(s), applied by run ${id} ${itsReport}.", to: "action(s), applied in run ${id} ${itsReport}.", was: "applied by run", now: "applied in run" },
+    { file: "src/i18n/en.ts", from: '"summary.next_revert": "Revert: ', to: '"summary.next_revert": "Undo: ', was: "Revert: ", now: "Undo: " },
+    { file: "src/i18n/en.ts", from: '"changes.plan_only": "This run only made a plan', to: '"changes.plan_only": "This run made only a plan', was: "only made", now: "made only" },
+    { file: "src/i18n/en.ts", from: "that run's report lists the moves.", to: "that run's report has the moves.", was: "lists the moves", now: "has the moves" },
+    { file: "src/i18n/en.ts", from: '"apply.notice.plan_task_differs": "The plan was made with another task', to: '"apply.notice.plan_task_differs": "The plan came from another task', was: "was made with another", now: "came from another" },
+  ];
+  const TERMINAL = "[terminal: stdin,stdout,stderr answers";
+  const NEW_CASES = {
+    "models-list-use": ["step 3: codaryn models --config config.json --use 1 | stdout"],
+    "models-list-use-ko": ["step 1: codaryn models --config config.json | stdout", "step 2: codaryn models --config config.json --use 1 | stdout", "step 3: codaryn models --config config.json | stdout"],
+    "terminal-models": [
+      `step 1: codaryn models --config config.json ${TERMINAL} ["1"]] | stdout`,
+      `step 2: codaryn models --config config.json ${TERMINAL} ["fake-model-c"]] | stdout`,
+      `step 3: codaryn models --config config.json ${TERMINAL} [""]] | stdout`,
+      `step 4: codaryn models --config config.json ${TERMINAL} [""]] | stdout`,
+    ],
+    "handoff-plan-applied": [
+      "step 2: codaryn changes --task task.json --run <RUN-1> | stdout",
+      "step 3: codaryn apply --task task.json --run <RUN-1> --digest <DIGEST-1:12> | stderr",
+      "step 4: codaryn changes --task task.json --run <RUN-1> | stdout",
+      "step 5: codaryn report --workspace work --run <RUN-1> | stdout",
+    ],
+    "handoff-review-reject": [
+      "step 1: codaryn run --task task.json | stderr",
+      "step 3: codaryn review --task task.json --run <RUN-1> --reject | stdout",
+      "step 4: codaryn report --workspace work --run <RUN-1> | stdout",
+    ],
+    "handoff-other-task": [
+      `step 2: codaryn apply --workspace work --workflow organize --config quick-config.json --run <RUN-1> ${TERMINAL} ["n"]] | stderr`,
+      "step 3: codaryn apply --workspace work --workflow organize --config quick-config.json --run <RUN-1> --digest <DIGEST-1:12> | stderr",
+    ],
+  };
+
+  test("U-167: the models and hand-off cases differ exactly where their texts show", { timeout: 900_000 }, async () => {
+    assert.ok(base !== undefined, "the first test made the base build");
+    const head = await prepareBoard({
+      commit: "HEAD",
+      dir: path.join(work, "head-u167"),
+      alter: (dir) => {
+        for (const { file, from, to } of ALTERED) {
+          const full = path.join(dir, ...file.split("/"));
+          const before = readFileSync(full, "utf8");
+          assert.equal(before.split(from).length, 2, `${file} has the text to change once: ${from}`);
+          writeFileSync(full, before.replace(from, to), "utf8");
+        }
+      },
+    });
+    const cases = CASES.filter((spec) => spec.name in NEW_CASES);
+    assert.equal(cases.length, Object.keys(NEW_CASES).length);
+    const results = await compareBuilds({ base, head, cases, caseDir: path.join(work, "case") });
+    const shown = reportOf({ base, head, results });
+    for (const result of results) {
+      assert.deepEqual(result.fence, [], `${result.name}: no network attempt`);
+      assert.deepEqual(result.differences.map((item) => item.key), NEW_CASES[result.name], `${result.name}\n${shown}`);
+      for (const difference of result.differences) {
+        assert.ok(difference.lines.length > 0);
+        for (const line of difference.lines) {
+          assert.equal(line.kind, "change", `${result.name}: ${difference.key}`);
+          assert.ok(ALTERED.some((item) => line.base.includes(item.was) && line.head.includes(item.now)), `${result.name}: ${line.base} | ${line.head}`);
+        }
+      }
+    }
+    // Each hand-off text is seen: N1 to N5 by their words.
+    const lines = results.flatMap((result) => result.differences.flatMap((item) => item.lines.map((line) => line.head)));
+    for (const word of ["overrides it", "applied in run", "Undo: ", "made only", "has the moves", "came from another", "put into", "고를 수 있는", "Saved"]) {
+      assert.ok(lines.some((line) => line.includes(word)), `seen: ${word}`);
+    }
   });
 });

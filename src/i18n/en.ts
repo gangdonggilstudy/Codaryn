@@ -75,9 +75,9 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.denied_not_writable_hint":
     "To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
   // U-207 (bundle A; drafts for nb-i18n).
-  "summary.denied_unreadable": "Calls refused at files this task may not read: {count}",
+  "summary.denied_unreadable": "Calls denied at paths this task may not read: {count}",
   "summary.denied_unreadable_hint":
-    "Those files are kept from the agent on purpose (unreadablePaths); it can still aggregate their tables with query_table. To let it read them, take the entry out of unreadablePaths where it was set.",
+    "These paths are kept from the agent on purpose (unreadablePaths); a task type with the query_table tool can still aggregate their tables. To let it read them, take the entry out of unreadablePaths where it was set.",
   // U-210 (R-108 L-2), draft for nb-i18n: whole groups or values from fewer than k cells.
   "summary.groups_hidden":
     "Groups of fewer than {k} rows, or values from fewer cells than that, were left out of {results} table result(s); the agent got neither those groups nor those values, only how many groups were left out.",
@@ -161,9 +161,9 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.tool_rejected": "{tool} — rejected by a check of the call ({code})",
   "progress.tool_failed": "{tool} — failed ({code})",
   // U-207 (bundle A; drafts for nb-i18n): what a table query asked, never a path, column or value.
-  "progress.query_table": "Table aggregated by {groupColumns} column(s)",
-  "progress.query_table_whole": "Table aggregated as a whole",
-  "progress.query_table_describe": "Table described: its columns and counts",
+  "progress.query_table": "aggregate a table — grouped by {groupColumns} column(s)",
+  "progress.query_table_whole": "aggregate a table — the whole table",
+  "progress.query_table_describe": "aggregate a table — its shape only (columns and counts)",
   "progress.confirmation_allowed": "permission question — allowed by the person, for this call only",
   "progress.confirmation_denied.user": "permission question — denied by the person",
   "progress.confirmation_denied.default": "permission question — denied by default (no answer, could not ask, or time ran out)",

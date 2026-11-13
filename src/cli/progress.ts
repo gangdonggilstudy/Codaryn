@@ -135,6 +135,16 @@ export function progressLine(event: JournalEvent): string | null {
       return event.limited ? `run records ${safeToken(event.phase)}: part of the state could not be checked` : null;
     case "run_finished":
       return `finished: ${safeToken(event.status)} (${safeToken(event.reason)})`;
+    // U-74 (DR-3, DR-10): the in-run permission question. The masked executable and the number of
+    // arguments only (the arguments are the model's text and are never in the record).
+    case "confirmation_requested": {
+      const argumentCount = Number.isSafeInteger(event.argumentCount) && event.argumentCount >= 0 ? event.argumentCount : 0;
+      return `tool ${toolName(event.tool)}: permission question ${safeToken(event.id)} for ${shownPath(event.subject)} (${count(argumentCount, "argument", "arguments")})`;
+    }
+    case "confirmation_answered":
+      return event.decision === "allow_once"
+        ? `permission question ${safeToken(event.id)}: allowed for this call once`
+        : `permission question ${safeToken(event.id)}: denied (${safeToken(event.by)})`;
     case "model_response":
     // U-18: a failed call's result needs the run's earlier decisions (englishProgressLines).
     case "tool_result":

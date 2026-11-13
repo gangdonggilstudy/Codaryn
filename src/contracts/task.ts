@@ -60,6 +60,12 @@ export interface TaskSpec {
  */
 export interface ResolvedTaskSpec extends TaskSpec {
   readonly limits: ResolvedLimits;
+  /**
+   * U-74: the policy the run uses. In the quick form the config's or the profile's, whose command
+   * rules may carry `confirm` (merged with a task type definition's by mergeWorkflowPolicy, which
+   * keeps it); from a task file its own, which cannot.
+   */
+  readonly policy: ConfirmablePolicyConfig;
   /** G-A: the definition's instructions (a task file cannot set them), or null. */
   readonly instructions?: string | null;
   /**
@@ -155,6 +161,22 @@ export interface CommandRule {
   readonly argsPrefix: readonly string[];
   /** When false the call's args must equal `argsPrefix`. */
   readonly allowExtraArgs: boolean;
+}
+
+/**
+ * U-74 (DR-3, M-9): a command rule of the user's own settings, the config file's `policy` or a
+ * profile's: with `confirm: true` a call it allows runs only after a person allowed that one call
+ * during the run (ConfirmRequest, src/contracts/policy.ts). Absent: allowed as before. A task file's
+ * policy and a task type definition's rules use CommandRule, which has no such field, so their
+ * schema refuses it (`unknown_field`): neither can make a question.
+ */
+export interface ConfirmableCommandRule extends CommandRule {
+  readonly confirm?: true;
+}
+
+/** U-74: PolicyConfig whose command rules may ask (the config file, a profile, the resolved task). */
+export interface ConfirmablePolicyConfig extends PolicyConfig {
+  readonly commands: readonly ConfirmableCommandRule[];
 }
 
 /**

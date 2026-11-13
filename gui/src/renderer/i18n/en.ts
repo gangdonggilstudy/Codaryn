@@ -531,6 +531,8 @@ export const EN: { readonly [K in TextId]: string } = {
   "report.records": "{count} records",
   "report.runCounts": "Model requests {requests} · denied tool calls {denied} · repairs {repairs}",
   "report.noVerdict": "No verdict by a person.",
+  "runs.review": "Review",
+  "report.reviewCli": "This app did not start this run, so it does not know its task part. Record the review with codaryn review, giving the task part the run was started with, its run id with --run, and --accept or --reject.",
   "report.verdictAt": "Recorded: {time}",
   "report.note": "Note: {note}",
   "phase.run_start": "at the start",

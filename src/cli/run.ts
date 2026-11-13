@@ -57,6 +57,7 @@ import type {
   PrivacyGateway,
   HumanOutput,
   MessageCatalog,
+  PolicyNarrowing,
   RunSummaryContext,
   RunTask,
   ShownWorkspace,
@@ -191,6 +192,8 @@ export interface RunNotes {
   confirmationDenied?: { user: number; default: number; cancelled: number };
   /** U-110: whether this run gave the engine a way to ask (the terminal question). */
   couldAsk?: boolean;
+  /** U-148 (U-140, UXM-18): `run_started.policyNarrowings` as recorded; absent when it has none. */
+  policyNarrowings?: readonly PolicyNarrowing[];
 }
 
 export interface CliRunOutcome {
@@ -434,6 +437,8 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     failedToolCalls: notes.failedToolCalls,
     // U-110 (R-85 M1): the denials after a permission question, so the hint is not to add a rule.
     ...(notes.confirmationDenied === undefined ? {} : { confirmationDenied: { ...notes.confirmationDenied, couldAsk: notes.couldAsk === true } }),
+    // U-148 (U-140, UXM-18): what the task type left out, as run_started records it; not when empty.
+    ...(notes.policyNarrowings === undefined || notes.policyNarrowings.length === 0 ? {} : { policyNarrowings: notes.policyNarrowings }),
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -855,6 +860,10 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
         if (event.type === "confirmation_answered" && event.decision === "deny" && (event.by === "user" || event.by === "default" || event.by === "cancelled")) {
           const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
           denied[event.by] += 1;
+        }
+        // U-148 (U-140, UXM-18): the end summary repeats what run_started recorded as left out.
+        if (event.type === "run_started" && event.policyNarrowings !== undefined && event.policyNarrowings.length > 0) {
+          notes.policyNarrowings = event.policyNarrowings;
         }
       },
       close: () => recorded.close(),

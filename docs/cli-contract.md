@@ -637,8 +637,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 아무 원천도 정하지 않으면 필드가 없고 `query_table`은 기본값 5(`DEFAULT_MIN_GROUP_SIZE`)를 쓴다.
   - 조립이 실행의 k를 도구 실행기에 넘긴다(`ToolRunnerOptions.minGroupSize`, U-210 둘째 몫). k는 읽기 제외 아래의 표에만 걸린다. 다른 표는 다섯 연산을 모두 쓰고 묶음을 모두 준다(k 1).
 - **거는 곳**
-  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께).
-  - 이동 계획의 적용: 적용 task의 목록을 게이트와 무결성 확인에 건다.
+  - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`, U-223: `data_checks`의 근거에 그 아래 원본에서 읽은 수를 쓰지 않는다).
+  - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
   - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
 - **명령 금지(R-5)**
   - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
@@ -652,9 +652,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **끝에서 끝까지(U-210 둘째 몫의 시험):** 실제 CLI를 대본 모델과 127.0.0.1의 모의 Anthropic API로 돌린다. 표의 칸마다 실행 때 만든 표지를 두고, 행의 표지와 k 미만 묶음의 키가 도구 결과, 기록(`.codaryn` 아래 전부), 모델 요청 본문, 사람용 출력(stdout, stderr) 어디에도 없음을 확인한다. k 이상 묶음의 키, 열 이름, 수는 모델에게 간다.
 - **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)이 게이트·도구 실행기·무결성 확인에 목록을 넘기는 일은 p5a의 몫이고 아직 하지 않았다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)도 p5a의 몫이다.
 - **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).
-- **아직 없는 것:**
-  - `data_checks` 검증기의 근거(R-6, A-7). 원본이 읽기 제외 표여도 지금 근거는 비교한 두 수를 담고, 재수정 때 모델로 간다.
-  - 앱 계층의 연결과 설정 넓히기(R-7, p5a), GUI의 읽기 제외 편집과 `analyze-private` 안내(P-4, p5u-gui).
+- **`data_checks`의 근거(R-6, U-223):** 원본이 읽기 제외 아래면 근거에 다시 계산한 수, 칸 수, 뺀 행 수를 쓰지 않고 "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다. 판정은 같다. 그래서 재수정이 작은 묶음의 값을 모델에게 실어 가지 못한다. 실제 CLI의 실행과 이동 계획 적용에서 시험한다(`g-u210-verifier-unreadable`).
+- **아직 없는 것:** 앱 계층의 연결과 설정 넓히기(R-7, p5a), GUI의 읽기 제외 편집과 `analyze-private` 안내(P-4, p5u-gui).
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 

@@ -166,6 +166,8 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 - 실행 결과 `EngineResult`: `schemaVersion`, `kind:"run"`, `runId`, `taskId`, `status`, `reason`, `exitCode`, `provider`, `verifiers`, `changes`, `usage`, `journalPath`, `notices`.
   - DR-47(U-21, AXM-1): 선택 `finalMessage`(`{text, truncated}`): 에이전트의 마지막 답. 실행의 마지막 모델 응답이 도구 호출 없는 마지막 답(`stop: "final"`)일 때만 있고, 맨 끝 필드다. 등록된 가릴 값은 가려지고 키 모양은 `[key]`, 줄 바꿈은 LF, 탭 말고 제어·보이지 않는 문자는 빠진다. `MAX_FINAL_MESSAGE_CHARS`(2000자)를 넘으면 잘리고 `truncated`가 true다. 계획 실행(`plan_pending`)과 답 없이 끝난 실행, DR-47 전에 쓴 결과에는 없다. 모델의 말이지 검증된 사실이 아니며, 사람용 끝 요약은 `summary.final_message` 머리말 뒤에 인용 줄로 보인다. 필드를 더하기만 한다(DR-48).
+  - U-59(AXM-15): 계획 실행이면 선택 `plan`(`{digest, actions}`)과 `planSummary`가 있다. `planSummary`는 계획을 저장한 `propose_plan` 호출의 `summary`이고, 실행의 가림을 거쳐 `finalMessage`와 같이 다듬은 글이다. 모델의 말이며 검증되지 않았고, `plan.json`과 다이제스트에 들지 않아 사람이 승인하는 대상이 아니다. 비었거나 U-59 전의 결과에는 없다(`src/contracts/engine.ts`).
+    - U-152: 사람용 끝 요약은 계획 실행의 `planSummary`를 계획 보기와 같은 머리말 `plan.summary_label` 뒤에 인용 줄로 보인다(최대 20줄, `FINAL_MESSAGE_MAX_LINES`). 다른 실행이 마지막 답을 보이는 자리다. JSON은 그대로다. 실제 출력은 사용 안내 18.2절에 있다.
   - `verifiers`는 마지막 검증 회차의 결과다. 재수정 뒤 검증 전에 한도로 끝나면 직전 회차의 결과가 남는다. 회차마다의 결과는 기록의 `verifier_result`에 모두 있다.
   - `usage.repairAttempts`는 시작한 재수정 수다. 단계 2 엔진은 항상 채운다(단계 1 기록에는 없다).
   - 선택 필드
@@ -916,6 +918,9 @@ codaryn doctor [...기존] [--profile <이름>]
   - 키가 있고 묻는 중이면 모델 목록을 요청한다(실제 API 요청). 실패하면 자리표시자를 남긴다.
   - 종료: `created` 0, `declined` 3(터미널에서 거절).
 - **`runs`(N-7)**: `RunsOutput`. `--workspace`가 없으면 현재 디렉터리다. `--limit`은 1~`RUNS_MAX_LIMIT`(1000), 기본 `RUNS_DEFAULT_LIMIT`(20). 상태 디렉터리를 만들지 않고 잠금도 잡지 않는다. 기록이 없으면 빈 목록(종료 0)이다.
+  - U-155·U-158(AXM-8): `checked` 항목의 선택 `phase`(`RUN_PHASES`: `running`, `finished`, `no_result`)는 실행이 어디 있는지 말한다. `result.json`이 없고 작업 공간 잠금이 그 실행을 가리키며 잠금을 쥔 프로세스가 살아 있으면 `running`, `result.json`이 있으면 `finished`, 둘 다 아니면 `no_result`다(`runPhaseOf`, `src/contracts/commands.ts`). 없으면 알 수 없음으로 읽고 끝난 것으로 읽지 않는다.
+  - U-162: 사람용 표는 `phase`가 있으면 `runs.incomplete` 대신 결과 칸에 `runs.running`(`running`, `진행 중`)이나 `runs.no_result`(`stopped without a result`, `결과 없이 중단됨`)를 쓴다. 변경 칸은 `-`다. 실제 출력은 사용 안내 10절 "실행 목록"에 있다.
+  - U-157(UXM-18): 기록 변경 표시가 있는 실행은 결과 칸 끝에 짧은 `runs.records_changed`(`records changed`, `기록 변경됨`)를 붙이고, 그런 실행이 표에 하나라도 있으면 표 아래에 설명 `runs.records_changed_note`를 한 번 쓴다. 실제 출력은 사용 안내 16절 "실행 기록 변조"에 있다.
 - **실행 기록 확인(N-16, 검토 M2)**: `listRuns`는 `report`와 같은 수준으로 기록을 확인한다. 세부는 `RunListEntry` 주석이 기준이다.
   - 확인: 실행 디렉터리가 링크가 아님, journal 첫 기록이 `seq` 1의 `run_started`이고 `runId`가 디렉터리 이름과 같음, `taskId`가 task id 형식, 시각이 `RUN_TIMESTAMP_PATTERN_SOURCE`(UTC `Z`) 형식, result.json의 `kind`·`runId`·상태와 이유의 조합·`exitCode`, revert.json의 `kind`·`runId`·시각·상태.
   - 통과한 실행은 `state: "checked"`다. 하나라도 실패하면 `state: "damaged"`이고 실행 id만 가진다. 손상된 실행은 목록 뒤쪽에 "손상"으로만 표시하고 `latest`로 고르지 않는다.
@@ -1105,6 +1110,8 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - 지금 task의 정책·검증기·가릴 값으로 적용한다(DR-5).
   - 폐기한 파일은 `.codaryn/discarded/<적용 runId>/`에 동작 번호 이름으로 남는다(DR-9).
   - stdout에는 `ApplyResult` 한 줄이 나오고, 같은 내용이 적용 실행의 `result.json`이 된다.
+  - U-155·U-158(GT-D14): `ApplyResult`의 선택 `foldersLeftEmpty`는 동작이 파일을 모두 비운 폴더의 수다. 폴더는 지우지 않고 그 자리에 남는다(폴더 지우기는 동작이 아니다). 0이면, 동작 뒤 목록 전에 멈췄으면, 목록이 `MAX_INVENTORY_FILES`에 닿았으면 없다. 수만 담고 경로는 담지 않는다(`src/contracts/plan.ts`).
+    - U-162: 사람용 끝 요약에 `summary.folders_left_empty` 한 줄이 붙는다(`Folders the actions left without files (kept in place): <수>`). 실제 출력은 사용 안내 18.2절에 있다.
   - 되돌리기: `codaryn revert --run <적용 runId>`
 - 위험한 이동에 대한 동의(DR-21)
   - 하드 링크가 없는 드라이브에서는 대상에 생긴 파일을 덮지 않는다는 보장 없이만 옮길 수 있다. 기본은 옮기지 않는다. 적용 전 점검이 그 이동을 `plan_checked.unsafeMoves`에 적고, 적용은 `needs-input`/`consent_required`로 끝난다(아무것도 옮기지 않음).

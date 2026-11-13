@@ -275,6 +275,24 @@ node dist/src/cli/main.js models --use 2
 - **실제 API에 요청한다**(`GET /v1/models`). 키는 요청 헤더에만 들어간다. 키가 없으면 `provider_not_configured`(종료 7)이고 아무것도 보내지 않는다. 작업 공간은 필요 없다.
 - **`--provider <anthropic|openai>`**: 어느 제공자의 목록인지 고른다. 없으면 설정 파일의 `provider`, 그것도 없으면 anthropic이다. 고른 제공자의 키·주소·모델 변수만 쓴다.
 - 표에는 번호, id, 이름, 입력·출력 토큰 상한이 나온다. 지금 실행이 쓸 모델(그 제공자의 모델 변수, 없으면 설정 파일)에는 `*`가 붙는다. `--json`이면 `kind:"models"` JSON 한 줄이다.
+- 표와 그 아래 줄, `--use`의 확인 줄, 터미널의 질문은 고른 언어를 따른다(U-156). 영어는 예전과 같다. 한국어 실제 출력(main `07cd600`, 루프백의 가짜 서버가 준 목록과 가짜 키, `--use 2`):
+
+  ```
+  이 키로 쓸 수 있는 모델(5개):
+
+    #  모델 id                   이름                입력 토큰  출력 토큰
+    1  cdy-listed-model-alpha    Fake Model Alpha      1000000     128000
+  * 2  cdy-listed-model-beta     Fake Model Beta       1000000      64000
+    3  cdy-listed-model-gamma    Fake Model Gamma       200000      64000
+    4  cdy-listed-model-delta    Fake Model Delta       200000       8192
+    5  cdy-listed-model-epsilon  Fake Model Epsilon     100000       4096
+
+  * 현재 모델(설정 파일에서): cdy-listed-model-beta
+  기록함: cdy-listed-model-beta — 이제 설정 파일의 model 값입니다.
+  ```
+
+  - 영어로는 머리 줄이 `Models this key can use (5):`, 확인 줄이 `Written: cdy-listed-model-beta is now the config file's model.`이다.
+  - 터미널 질문(stdout)은 `Number or id to write into the config file's model (Enter to skip): `, 한국어로 `설정 파일의 model에 쓸 번호나 id(Enter면 건너뜀): `다. 질문은 터미널을 흉내 내어 보았다(답은 넣지 않았다).
 - **`--use <번호|id>`**: 설정 파일에서 그 제공자의 모델 한 곳만 바꾼다. anthropic은 최상위 `model`, openai는 `providers.openai.model`이다. 다른 필드와 값, 순서는 그대로이고, 줄 안의 공백 배치는 다시 쓴다(한 줄에 쓴 배열이 여러 줄로 펼쳐진다).
   - `--config`나 `CODARYN_CONFIG`로 준 파일, 또는 기본 위치에 있는 파일이 필요하다. 기본 위치에 파일이 없으면 요청을 보내기 전에 `invalid_arguments`(종료 2)다. 먼저 `init`을 한다.
   - `--config`로 준 파일이 없으면 `schemaVersion`과 `model`만 있는 파일을 새로 만든다.
@@ -716,6 +734,21 @@ node dist/src/cli/main.js runs --workspace D:\work\notes --limit 5 --json
 
 - 최근 실행이 먼저 나온다(예시는 3절). `--workspace`가 없으면 현재 디렉터리, `--limit`은 1~1000(기본 20)이다. 아무것도 만들거나 바꾸지 않고 잠금도 잡지 않는다. 기록이 없으면 `This workspace has no runs.`이고 종료 0이다.
 - 되돌린 실행에는 `· reverted (complete)`가 붙는다.
+- **결과가 없는 실행**(U-162): 아직 도는 실행은 결과 칸이 `running`(한국어 `진행 중`)이다. 결과를 남기지 못하고 멈춘 실행(강제로 끝낸 프로세스 등)은 `stopped without a result`(한국어 `결과 없이 중단됨`)다. 변경 칸은 `-`다.
+  - 실제 출력(main `07cd600`, 대본 모델의 실행이 허용한 `node` 명령을 기다리는 동안, 그리고 그 CLI 프로세스를 끝낸 뒤):
+
+    ```
+    run id (UTC)               started (local)      changes  result
+    20261113T064706Z-50e3928a  2026-11-13 15:47:06  -        running
+    ```
+
+    ```
+    run id (UTC)               started (local)      changes  result
+    20261113T064706Z-50e3928a  2026-11-13 15:47:06  -        stopped without a result
+    ```
+
+  - 가르는 기준은 잠금이다: `result.json`이 없고 작업 공간 잠금이 그 실행을 가리키며 잠금을 쥔 프로세스가 살아 있으면 도는 중이다. 아니면 결과 없이 멈춘 것이다. 멈춘 실행의 잠금은 남아 있다가 다음 실행이 회수한다(17절).
+  - `runs --json`의 항목에는 `phase`가 있다: `running`, `finished`, `no_result`. 위 두 경우는 `"status":null`과 함께 `"phase":"running"`, `"phase":"no_result"`였다.
 - 기록이 확인을 통과하지 못한 실행은 목록 뒤쪽에 실행 id와 손상 표시만 나오고 `latest`로 고르지 않는다. `.codaryn`이나 `runs`가 링크이거나 나열할 수 없으면 `invalid_run_record`(종료 2)다.
 
 ### `--run latest`
@@ -750,6 +783,7 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 - 오류(종료 2): 그 runId의 기록이 없으면 `run_not_found`, 기록을 읽거나 해석할 수 없으면 `invalid_run_record`, 작업 공간이 없으면 `workspace_not_found`다.
 - 보고서는 이 두 파일만큼만 믿을 수 있다. 상태 디렉터리는 파일 도구에만 닫혀 있으므로, 실행 중 허용된 명령이 기록을 바꿀 수 있다.
 - 계획 실행은 동작 수와 다이제스트를, 사람 확인을 기다리는 실행은 확인 항목과 판정을 함께 보여 준다(18.6절). 적용 실행은 따로 만든 형식(`# Codaryn apply run report`)으로 보여 준다(18.2절).
+- 검사하지 않은 범위(`## Not checked`)의 끝에는 가림이 가리지 않는 것이 한 줄 붙는다(U-166). 실제 줄(main `07cd600`): `Masking hides only the values registered for this run and the forms of them it looks for. A secret that was not registered, another form of a value or text in another encoding (such as UTF-16) is not masked.` 적용 실행의 보고서에는 이 줄이 없다(모델에 보내는 것이 없다).
 
 | 종료 코드 | 뜻 |
 | --- | --- |
@@ -760,7 +794,7 @@ node dist/src/cli/main.js report --workspace D:\work\notes --run 20261112T031500
 | 4 | `budget-exhausted`: `max_model_turns`, `max_tool_calls`, `max_total_tokens`, `max_duration`, `usage_unknown` |
 | 5 | `cancelled` |
 | 6 | `workspace_locked`: 같은 작업 공간에서 다른 실행이나 되돌리기가 진행 중. `run_in_progress`: `--run latest`가 고를 가장 새 실행이 아직 도는 중(이 절의 "`--run latest`") |
-| 7 | `provider_not_configured`: 키·모델·출력 상한 미설정(자리표시자 모델 포함). 전송 없음 |
+| 7 | `provider_not_configured`: 키·모델·출력 상한 미설정(자리표시자 모델 포함). 전송 없음. `provider_not_implemented`: 그 제공자가 이 판에 없음(계약 표, U-166) |
 | 8 | `model_list_failed`: `models`의 API 요청 실패 |
 | 70 | `internal_error` |
 
@@ -887,6 +921,24 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **규칙 작성 요령:** 필요한 명령마다 규칙을 하나씩 만들고 인자까지 고정한다(예: `["--test"]`). `node -e`처럼 임의 코드를 실행하는 형태는 넣지 않는다.
 - **`network`, `destructive`:** `"deny"`만 있다. 네트워크 도구가 없다는 뜻일 뿐이며, 허용한 명령의 네트워크 사용을 막지는 않는다. **`restorePathTokens`**(경로 인자 속 토큰을 원래 값으로 바꿔 쓸지)는 보통 `false`로 둔다.
 - **파일 접근:** 경로는 `workspaceRoot` 안만 허용한다. 링크를 따라 밖으로 나가는 경로는 거부한다. **검증기 명령**은 사용자가 정한 것이므로 이 허용 목록과 따로 실행된다.
+- **쓰기 크기(U-173, DR-72):** `write_file`은 디스크에서 16 MiB(16,777,216바이트, UTF-8과 BOM 포함)보다 큰 파일을 남기지 않는다.
+  - 그런 쓰기는 `too_large`로 실패하고 아무것도 쓰지 않는다. 실행은 계속되고, 실패한 호출로 센다.
+  - 실제 출력(main `07cd600`, 대본 모델이 16 MiB보다 1바이트 큰 글을 쓰려 함, stderr의 앞부분):
+
+    ```
+    codaryn: turn 1
+    codaryn: write file — allowed (write_file)
+    codaryn: write file — failed (too_large)
+    codaryn: turn 2
+    codaryn: finished — needs input (no_verifier)
+    ── Result: needs input — no check is configured (needs-input/no_verifier) ──
+    Checks: none configured
+    Files changed: 0
+    Failed calls: 1
+    ```
+
+  - 한국어 진행 줄은 `파일 쓰기 — 실패 (too_large)`, 끝 요약은 `실패한 호출: 1건`이다. 그 파일은 만들어지지 않았다.
+  - 읽기 상한(256 KiB)과는 따로다. 그래서 256 KiB보다 크게 쓴 파일은 `read_file`·`write_file`이 다시 읽지 못한다([계약](cli-contract.md) DR-72).
 - 허용 목록에 없는 명령은 `command_not_allowed`로 거부되고 실행은 계속된다(3절 체험의 2번째 턴). 끝 요약이 거부 수와 고칠 곳(task 파일이면 task의 `policy.commands`, 간편 형식·한 줄 실행이면 설정 파일이나 프로필)을 알린다. `doctor`의 허용 명령 항목으로 허용한 명령을 실행 때와 같은 규칙으로 찾을 수 있는지 미리 본다(7절).
 
 **묻고 실행하는 규칙(`confirm`):** 설정 파일이나 프로필의 명령 규칙에 `"confirm": true`를 두면, 그 규칙이 허용하는 명령은 실행 중에 사람에게 묻는다. 허락받으면 그 호출 한 번만 실행한다(U-74, U-109, U-110, U-137).
@@ -971,6 +1023,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 이 흉내에서 `y`, `yes`, `예`, `네`, `  Y `는 허락으로, `no`와 Enter는 그 사람의 거부로, Ctrl+D는 답 없음으로, Ctrl+C는 취소로 기록됐다.
   - 프로필(`--profile`)에 둔 규칙도 같이 물었다.
   - 실제 Windows 콘솔과 Unix 터미널에서는 확인하지 않았다(16절).
+- **GUI에서 시작한 실행:** 같은 규칙으로 묻는다. 터미널 대신 GUI의 메인 프로세스가 OS 대화상자로 묻고, 기본 단추와 Esc는 거부다(U-124, 병합 `aa723d2`. 화면은 [독립 GUI 설계](design/standalone-gui.md) 3.6). 이 문서는 CLI를 다루므로 그 화면의 글은 옮기지 않았다.
 
 **보호 경로(`protectedPaths`):** 작업 공간 기준 상대 경로 목록이다. 그 아래에 대한 파일 도구의 쓰기를 거부한다(`tool_decision.code`가 `protected_path`). 읽기와 검색은 된다.
 
@@ -1126,9 +1179,9 @@ node --test dist/tests/live/openai-live.js
   - `apply`의 터미널 질문 `이 계획을 적용할까요? [y/N] (y·예·네: 예, Enter: 아니오)`(U-36)
   - `changes`의 본문(U-36)
   - 키가 없을 때 `models`의 오류
+  - `models`의 표, `--use`의 확인 줄, 터미널 질문(U-156. main `07cd600`에서 가짜 서버로 잼, 4절)
   - 모든 명령의 도움말 설명, 옵션 설명, 종료 코드 설명(U-35, U-53)
 - 이번에 다시 재지 못한 것:
-  - `models`의 표. 키와 모델 목록이 있어야 나온다. 예전 판에서는 영어였다.
   - 하드 링크가 없는 드라이브의 동의 질문. DR-59는 그 영어 글이 바뀌었다고 적었다.
 - **OS 언어 판단:** `CODARYN_LANG`과 설정의 `language`가 없으면 Node의 `Intl` 기본 로캘로 언어를 고른다. Windows에서는 이것이 표시 언어가 아니라 지역 형식을 따를 수 있다. 원하는 언어가 아니면 `CODARYN_LANG`이나 설정의 `language`로 고정한다(8절). Linux·macOS에서는 확인하지 않았다.
 - **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다(5초 안으로 맞으면 같은 프로세스로 본다). 끝난 실행의 잠금은 다음 실행이 회수한다. 시작 시각이 없는 잠금(이 확인이 생기기 전의 판이 쓴 것)은 프로세스 id만으로 판정하므로, 그 id를 다른 프로그램이 다시 쓰면 그 프로그램이 끝날 때까지 쥔 것으로 보인다(17절 "멈춘 실행의 잠금이 남아 막힐 때").

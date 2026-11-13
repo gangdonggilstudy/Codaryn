@@ -127,9 +127,10 @@ export function helpText(command: CommandName | null, catalog: MessageCatalog = 
   const lines: string[] = [];
   if (command === null && options.terminal === true) {
     const width = Math.max(...FIRST_USE_ORDER.map((name) => name.length));
-    lines.push(messages.format("help.intro"), "", messages.format("help.first_steps"), messages.format("first_use.try_without_key"), "", messages.format("help.commands_heading"));
+    // U-132 (R-91 L-2): the first steps as a heading and an indented command line, each within 100 columns.
+    lines.push(messages.format("help.intro"), "", messages.format("help.first_steps"), `  ${messages.format("help.first_steps_commands")}`, messages.format("first_use.try_without_key"), "", messages.format("help.commands_heading"));
     for (const name of FIRST_USE_ORDER) lines.push(`  ${name.padEnd(width)}  ${messages.format(`help.summary.${name}`)}`);
-    lines.push("", messages.format("help.more"), messages.format("help.key"), messages.format("help.output"), messages.format("help.contract"));
+    lines.push("", messages.format("help.more"), messages.format("help.version"), messages.format("help.key"), messages.format("help.output"), messages.format("help.contract"));
   } else if (command === null) {
     lines.push(messages.format("help.intro"), "", messages.format("help.commands_heading"));
     for (const name of COMMANDS) lines.push(`  ${USAGES[name]}`);

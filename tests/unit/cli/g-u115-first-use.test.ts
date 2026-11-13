@@ -59,7 +59,9 @@ describe("U-115 (A): the short help at a terminal", () => {
       [
         en("help.intro"),
         "",
-        'First time? In this order: codaryn init -> codaryn doctor -> codaryn run "<task>" -> codaryn report --run latest',
+        // U-132 (R-91 L-2, L-3): a heading that says where a run works, then the commands.
+        "First time? In this order (a run works in the current folder):",
+        '  codaryn init -> codaryn doctor -> codaryn run "<task>" -> codaryn report --run latest',
         "To try the flow without a key: docs/usage.md section 3 (examples/demo)",
         "",
         en("help.commands_heading"),
@@ -76,7 +78,8 @@ describe("U-115 (A): the short help at a terminal", () => {
         "  review   record a verdict on a run waiting for review",
         "  cleanup  clean up run records and discarded files",
         "",
-        "Options and usage of each command: codaryn help <command> (e.g. codaryn help run). Version: codaryn --version",
+        "Options and usage of each command: codaryn help <command> (e.g. codaryn help run)",
+        "Version: codaryn --version",
         en("help.key"),
         en("help.output"),
         en("help.contract"),
@@ -91,7 +94,7 @@ describe("U-115 (A): the short help at a terminal", () => {
     const named = shown.split("\n").flatMap((line) => (/^ {2}([a-z]+) {2,}/.exec(line)?.[1] ?? []));
     assert.deepEqual(named, [...FIRST_USE_ORDER]);
     assert.equal(shown.includes("codaryn run ("), false, shown);
-    assert.ok(shown.includes("처음이라면 이 순서로: codaryn init -> codaryn doctor"), shown);
+    assert.ok(shown.includes("처음이라면 이 순서로(실행은 현재 폴더에서 일합니다):\n  codaryn init -> codaryn doctor"), shown);
   });
 
   test("not at a terminal, and each command's own help: exactly as before", () => {

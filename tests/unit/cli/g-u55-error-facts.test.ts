@@ -92,10 +92,11 @@ describe("U-55: every CLI error says its category and whether trying again may h
 });
 
 describe("U-55: report --json carries the model error that ended a run", () => {
-  async function exhausted(): Promise<{ dir: string; result: EngineResult }> {
+  /** A run whose script runs out: at the first turn (no step), or at `afterSteps + 1`. */
+  async function exhausted(steps: readonly unknown[] = []): Promise<{ dir: string; result: EngineResult }> {
     const dir = await base();
-    // The script gives no step for the first turn: the run ends as model_error (script_exhausted).
-    await writeFile(path.join(dir, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [] }), "utf8");
+    // The script gives no step for the next turn: the run ends as model_error (script_exhausted).
+    await writeFile(path.join(dir, "script.json"), JSON.stringify({ schemaVersion: 1, steps }), "utf8");
     const task = {
       schemaVersion: 1,
       id: "u55",
@@ -128,12 +129,36 @@ describe("U-55: report --json carries the model error that ended a run", () => {
     assert.deepEqual(json.result?.modelError, result.modelError);
   });
 
+  // U-88 (R-71 L2): the contract has modelError with reason model_error only, at a turn the run made.
+  test("a run that failed at its second turn: the report carries turn 2 (within usage.modelTurns)", async () => {
+    const { dir, result } = await exhausted([{ toolCalls: [{ name: "read_file", args: { path: "missing.txt" } }] }]);
+    assert.deepEqual([result.modelError?.turn, result.usage.modelTurns], [2, 2], JSON.stringify(result));
+    assert.deepEqual((await report(dir, result.runId)).json.result?.modelError, result.modelError);
+  });
+
+  test("modelError on a run that did not end as model_error, or at a turn the run did not make: a damaged field", async () => {
+    const { dir, result } = await exhausted();
+    const file = resultFile(dir, result.runId);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    const tampered = [
+      { ...stored, status: "done", reason: "verified", exitCode: 0, modelError: { kind: "rate_limited", turn: 1, retryable: true } },
+      { ...stored, modelError: { kind: "rate_limited", turn: 2, retryable: true } },
+      { ...stored, modelError: { kind: "rate_limited", turn: Number.MAX_SAFE_INTEGER, retryable: true } },
+    ];
+    for (const changed of tampered) {
+      await writeFile(file, JSON.stringify(changed), "utf8");
+      const { exitCode, json } = await report(dir, result.runId);
+      assert.deepEqual([exitCode, json.code], [2, "invalid_run_record"], JSON.stringify(changed.modelError));
+    }
+  });
+
   test("retryable left out stays left out; another form is a damaged field", async () => {
     const { dir, result } = await exhausted();
     const file = resultFile(dir, result.runId);
     const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
-    await writeFile(file, JSON.stringify({ ...stored, modelError: { kind: "api_error", turn: 2 } }), "utf8");
-    assert.deepEqual((await report(dir, result.runId)).json.result?.modelError, { kind: "api_error", turn: 2 });
+    // The run made one model turn (U-88: modelError.turn is at most usage.modelTurns).
+    await writeFile(file, JSON.stringify({ ...stored, modelError: { kind: "api_error", turn: 1 } }), "utf8");
+    assert.deepEqual((await report(dir, result.runId)).json.result?.modelError, { kind: "api_error", turn: 1 });
     for (const bad of [{ kind: "nosuch", turn: 1 }, { kind: "api_error", turn: 0 }, { kind: "api_error", turn: 1, retryable: "yes" }, "api_error", null]) {
       await writeFile(file, JSON.stringify({ ...stored, modelError: bad }), "utf8");
       const { exitCode, json } = await report(dir, result.runId);

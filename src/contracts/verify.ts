@@ -34,17 +34,27 @@ export type FileRule =
  * MAX_MARKDOWN_RULE_FILE_BYTES) and nothing from the network.
  * - Outcomes, as the other rules: a file that is missing does not hold the rule (a document that is
  *   not there has neither the headings nor working links); a file that cannot be read, is not UTF-8
- *   text or is larger than the limit leaves the rule undecided (inconclusive).
+ *   text or is larger than the limit leaves the rule undecided (inconclusive). So do the three
+ *   reader causes below (U-143, R-89b N-1): a line over the line bound, brackets over the depth bound
+ *   (the links rule only), and the run's signal (cancelled, or its time limit) during the check.
  * - Lines end at LF, CR LF or a lone CR (as CommonMark); a leading byte order mark is dropped.
  * - Code: lines inside a fenced code block (``` or ~~~, closed by the same fence or the end of the
  *   file) and text inside a code span are neither headings nor links. Indented code blocks are not
  *   recognised (their text is read as ordinary text; MARKDOWN_RULE_LIMITS says so).
- * - HTML comments (R-89 L-1): a line that starts, after at most three spaces, with `<!--` opens a
- *   comment that ends with the line holding the next `-->` (that whole line belongs to it) or at the
- *   end of the file. Its lines are skipped as fenced code is: neither headings nor links. Inside
- *   another line a comment (`<!--` to the next `-->`) hides the links in it from `markdown_links`;
- *   in a heading's text it stays, as other inline markup does. Other HTML (blocks such as `<div>`,
- *   tags, `<a href>`) is not read as HTML: its lines are ordinary text.
+ * - HTML (R-89 L-1; U-143, R-89b N-1: as the verifier reads it): the seven kinds of CommonMark HTML
+ *   block are skipped as fenced code is, neither headings nor links. Each starts at a line that
+ *   begins, after at most three spaces, with:
+ *   1. `<script`, `<pre`, `<style` or `<textarea`, to the line holding its closing tag;
+ *   2. `<!--`, to the line holding the next `-->`;
+ *   3. `<?`, to the line holding `?>`;
+ *   4. `<!` and a letter, to the line holding `>`;
+ *   5. `<![CDATA[`, to the line holding `]]>`;
+ *   6. a block-level tag (as `<div>`, `<table>`, `<p>`), to the next blank line;
+ *   7. a whole open or closing tag alone on its line, to the next blank line.
+ *   The closing line belongs to the block, and a block not closed runs to the end of the file. Inside
+ *   another block a comment (`<!--` to the next `-->`) hides the links in it from `markdown_links`;
+ *   in a heading's text it stays, as other inline markup does. Other inline HTML (tags, `<a href>`) is
+ *   not read as HTML: it is ordinary text.
  * - Only top-level headings count (PM, R-89 I-1: the skeleton of a document is its top-level
  *   headings). A heading on a line of a block quote or of a list item does not count for
  *   `markdown_headings`:
@@ -56,12 +66,18 @@ export type FileRule =
  *     later lines indented at least to that column, and the blank lines between them, are lines of
  *     the item. A line indented less ends the item (and the list) unless it starts another item.
  *   Links in block quotes and list items are read as everywhere else.
- * - Reader bounds (R-89 M-1): a line longer than MAX_MARKDOWN_LINE_CHARS, or brackets nested deeper
- *   than MAX_MARKDOWN_BRACKET_DEPTH, leaves the rule undecided (inconclusive) with the note
- *   `<MARKDOWN_EVIDENCE_LEADS.lineTooLong or bracketsTooDeep>: line N` (the first such line). Lines
- *   of fenced code and of HTML comments do not count against the line bound (they are only looked
- *   at for their end). The bounds are a safety net: the reader is meant to take time in proportion
- *   to the file, whatever its lines, so that the run's duration limit and its cancel are kept.
+ * - Reader bounds (R-89 M-1; U-143, R-89b N-1: the values and scope PM accepted):
+ *   - a line longer than MAX_MARKDOWN_LINE_CHARS leaves either rule undecided with
+ *     markdownLineTooLongNote(the line). Lines of fenced code and of HTML blocks do not count (they
+ *     are only looked at for their end). A file of one line of exactly 1 MiB is undecided so (PM);
+ *   - brackets nested deeper than MAX_MARKDOWN_BRACKET_DEPTH leave `markdown_links` undecided with
+ *     markdownBracketsTooDeepNote(the line of the outer `[`). `markdown_headings` does not read
+ *     brackets, so the same file can still be judged by it.
+ *   The bounds are a safety net: the reader takes time in proportion to the file, whatever its
+ *   lines, so that the run's duration limit and its cancel are kept.
+ * - The run's signal (R-89 L-2): the rules look at it between their long steps. Stopped before the
+ *   document was read: MARKDOWN_EVIDENCE_LEADS.cancelledBeforeReading; while link targets were
+ *   looked at: MARKDOWN_EVIDENCE_LEADS.cancelledWhileChecking. Both undecided, never a failure.
  * - Evidence (the note of the rule's line, after the verifier's "<state>: <label> (" as for every
  *   rule): MARKDOWN_EVIDENCE_LEADS' text, then markdownEvidenceList of what is missing, at most
  *   MAX_MARKDOWN_EVIDENCE_ITEMS items. The engine masks it as any evidence before it is recorded or
@@ -81,18 +97,30 @@ export const MAX_MARKDOWN_EVIDENCE_ITEMS = 20;
 /** Most code points of one evidence item's text before it is cut with "…" (as long texts are). */
 export const MAX_MARKDOWN_EVIDENCE_ITEM_CHARS = 80;
 /**
- * R-89 M-1: the longest line a Markdown rule reads, in UTF-16 code units (a JavaScript string's
- * `length`), not counting its line break. A longer line, outside fenced code and HTML comments,
- * leaves the rule undecided.
+ * R-89 M-1 (U-143, R-89b N-1: the value PM accepted, 100,000): the longest line a Markdown rule
+ * reads, in UTF-16 code units (a JavaScript string's `length`), not counting its line break. A longer
+ * line, outside fenced code and HTML blocks, leaves the rule undecided. High enough for an image
+ * given as a `data:` URI on one line.
  */
-export const MAX_MARKDOWN_LINE_CHARS = 10_000;
+export const MAX_MARKDOWN_LINE_CHARS = 100_000;
 /**
- * R-89 M-1: the deepest nesting of brackets a Markdown rule reads: the number of `[` not yet closed
- * by a `]` within one block of text (a paragraph, a heading, a list item's or a block quote's text),
- * escaped brackets (a backslash before `[` or `]`) and code spans not counted. Deeper nesting leaves
- * the rule undecided.
+ * R-89 M-1 (U-143, R-89b N-1: the scope PM accepted, the links rule only): the deepest nesting of
+ * matched `[` `]` pairs within one block of text (a paragraph, a heading, a list item's or a block
+ * quote's text). An unmatched `[` (as in the interval `[0, 1)`) is text and is not counted; escaped
+ * brackets (a backslash before `[` or `]`) and code spans are not counted either. Deeper nesting
+ * leaves `markdown_links` undecided.
  */
 export const MAX_MARKDOWN_BRACKET_DEPTH = 32;
+
+/** U-143 (R-89b N-1): the note of a rule undecided by a line over MAX_MARKDOWN_LINE_CHARS (1-based line). */
+export function markdownLineTooLongNote(line: number): string {
+  return `line ${line} is longer than ${MAX_MARKDOWN_LINE_CHARS} characters, not read`;
+}
+
+/** U-143 (R-89b N-1): the note of a links rule undecided by brackets over MAX_MARKDOWN_BRACKET_DEPTH. */
+export function markdownBracketsTooDeepNote(line: number): string {
+  return `brackets nested deeper than ${MAX_MARKDOWN_BRACKET_DEPTH} levels at line ${line}, not read`;
+}
 
 /** M-2: one heading a document must have. */
 export interface MarkdownHeading {
@@ -158,10 +186,11 @@ export type MarkdownFileRule = MarkdownHeadingsRule | MarkdownLinksRule;
  *   from the first that could not be matched after the one before;
  * - brokenLinks: the targets that are missing or outside, each with its line and reason.
  * When it holds: held, alone.
- * When it is undecided (R-89 I-5 and M-1):
+ * When it is undecided (R-89 I-5, M-1, L-2):
  * - targetsUnchecked: `<lead>: <list>`, each target with `line N, <error code>` (and nothing failed);
- * - lineTooLong, bracketsTooDeep: `<lead>: line N`, the first line over the bound;
- * - fileTooLarge, notUtf8: alone.
+ * - fileTooLarge, notUtf8, cancelledBeforeReading, cancelledWhileChecking: alone;
+ * - a reader bound: markdownLineTooLongNote, markdownBracketsTooDeepNote (U-143: these replace the
+ *   leads lineTooLong and bracketsTooDeep of ba2e949, which no verifier wrote).
  * Other undecided notes (a path the workspace refuses, a file that cannot be opened or read, not a
  * regular file) and "file not found" (not held) are the verifier's own, as for the literal rules.
  * Example of a whole line:
@@ -174,10 +203,10 @@ export const MARKDOWN_EVIDENCE_LEADS = {
   brokenLinks: "targets missing or outside the workspace",
   held: "all found",
   targetsUnchecked: "targets that could not be looked at",
-  lineTooLong: `a line longer than ${MAX_MARKDOWN_LINE_CHARS} characters, not checked`,
-  bracketsTooDeep: `brackets nested deeper than ${MAX_MARKDOWN_BRACKET_DEPTH}, not checked`,
   fileTooLarge: `larger than ${MAX_MARKDOWN_RULE_FILE_BYTES} bytes, not read`,
   notUtf8: "not UTF-8 text",
+  cancelledBeforeReading: "cancelled before the document was read",
+  cancelledWhileChecking: "cancelled while the link targets were checked",
 } as const;
 
 /** One item of a Markdown rule's evidence: a heading text or a link target, and what to add in brackets. */
@@ -226,10 +255,10 @@ export function markdownRuleLabel(rule: MarkdownFileRule): string {
 export const MARKDOWN_RULE_LIMITS: readonly string[] = [
   "Markdown rules check only the listed headings and that relative link targets exist in the workspace; wording, the rest of the structure and the rendering are not checked",
   "links with a scheme (http:, mailto: and others) and anchors (#...) are not checked, and nothing is fetched from the network",
-  "headings and links inside fenced code blocks, code spans and HTML comments are not read; indented code blocks and other HTML are read as ordinary text",
+  "headings and links inside fenced code blocks, code spans, HTML blocks and HTML comments are not read; indented code blocks and other inline HTML are read as ordinary text",
   "only top-level headings count: headings inside list items and block quotes do not, and a Setext heading's text is the one line above its underline",
   "whether a link target exists follows the file system's rule for letter case",
-  `a file with a line longer than ${MAX_MARKDOWN_LINE_CHARS} characters or brackets nested deeper than ${MAX_MARKDOWN_BRACKET_DEPTH} is not checked (inconclusive)`,
+  `a file with a line longer than ${MAX_MARKDOWN_LINE_CHARS} characters is not checked, and the links rule does not check one whose brackets nest deeper than ${MAX_MARKDOWN_BRACKET_DEPTH} (inconclusive)`,
 ];
 
 /** Checks files under the workspace root with literal rules. */

@@ -593,6 +593,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
   - U-100(설계 공백 C-10, N-10): `api_key` 점검이 키 변수가 없다고 하면(`doctor.api_key.missing`) 그 줄 아래에 `init`이 쓰는 등록 안내 한 줄을 메시지 자리에 맞춰 들여 쓴다. Windows는 `init.key_hint_windows`, 그 밖은 `init.key_hint_posix`이고 `{keyEnv}`는 그 점검의 키 변수다. 어느 쪽도 명령에 값을 넣지 않는다. 사람용 글에만 있고 `--json`은 그대로다.
   - U-115(UXM-9): stdout이 터미널이면 끝 줄 다음에 '아직 안 한 설정과 다음에 할 일'이 온다("처음 시작 안내" 절). 터미널이 아니면 그대로다.
+  - U-127: 표의 열은 글자 수가 아니라 터미널 칸으로 맞춘다(`src/cli/human`의 `displayWidth`, `padEnd`; 한글 같은 넓은 글자는 2칸). 상태 칸은 10칸, 이름 칸은 가장 넓은 이름의 칸 수, 그 뒤 두 칸에 글이 온다. 점검 아래 들여 쓴 줄(notes, 키 등록 줄)도 그 칸에서 시작한다. ASCII는 칸 수가 글자 수와 같아 영어 출력은 그대로다. `models`의 표도 같은 함수로 맞춘다.
 - `--task`와 `--workspace`는 함께 쓸 수 없다(`invalid_arguments`, W-5). task 파일이 자기 작업 공간(`workspaceRoot`)을 정하기 때문이다. 작업 공간을 보는 항목(`workspace`, `file_locations`, `install_dir`, `integrity_paths`의 위치 판정)은 task의 `workspaceRoot`나 `--workspace`를 쓰고, 둘 다 없으면 `skipped`다.
 - 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`, `language`(N-20). 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
 - 종료(`DOCTOR_EXIT_CODES`): 가장 나쁜 항목에 따라 `ok` 0, `warn` 3, `fail` 1이다(`skipped`는 `ok`로 센다). 인자 오류는 `invalid_arguments`(`CliErrorOutput`)다.

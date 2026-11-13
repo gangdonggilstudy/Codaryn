@@ -116,6 +116,8 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
   if (problem !== null) return cliError("invalid_arguments", `the path given by --workspace ${problem}`);
 
   const workspace = path.resolve(io.cwd, parsed.args.workspace);
+  // DR-51 (U-38), review R-70 L-1 (PM): no typed path for the summary. revert knows no registered
+  // value, so its consent hint says <workspace> whatever was typed.
   if (!(await io.isDirectory(workspace))) {
     return cliError("workspace_not_found", "the workspace is not an existing directory");
   }

@@ -104,7 +104,7 @@ test("N-14 (H1): schema field positions accept known field names and indices onl
 });
 
 test("N-14: every fixed message declares only known parameter kinds; listed ids take none", () => {
-  const kinds = new Set(["count", "status", "reason", "permission", "denial", "modelError", "phase", "provider", "keyEnv", "settingEnv", "apiOrigin", "field", "runId", "text", "location", "suggestedCommand", "suggestedPath", "seconds", "language", "digest"]);
+  const kinds = new Set(["count", "status", "reason", "permission", "denial", "modelError", "phase", "provider", "keyEnv", "settingEnv", "apiOrigin", "field", "runId", "text", "location", "suggestedCommand", "suggestedPath", "seconds", "language", "digest", "workspace"]);
   for (const id of MESSAGE_IDS) {
     for (const kind of Object.values(messageParams(id))) assert.ok(kinds.has(kind), `${id}: ${kind}`);
   }

@@ -56,6 +56,9 @@ export function samples(kind: MessageParamKind, catalog: MessageCatalog): readon
       return [API_MODEL_ENVS[1], API_BASE_URL_ENVS[0]];
     case "apiOrigin":
       return ["https://api.example.test", "http://127.0.0.1:8080"];
+    case "workspace":
+      // DR-51 (U-38): typed workspace paths as toShownWorkspace makes them (quoted, nothing escaped).
+      return ['"D:\\work\\site"', '"../notes"'];
     default:
       // A kind the contract added after these samples: the tests that use it fail here, by name,
       // instead of the whole build stopping on a switch that is no longer exhaustive.

@@ -67,6 +67,7 @@ import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
+import { confirmThrough } from "./permission.js";
 import { modelsArguments } from "./models.js";
 import { listRunsIn, resolveRunIn, runIdOf, workspaceRootOf } from "./runs.js";
 import { applyCleanupIn, previewCleanupIn, stateSummaryIn } from "./cleanup.js";
@@ -263,7 +264,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       // DR-15: events from the records the engine appends, in memory, masked again with this gateway.
       const journal = journalWithEvents(assembled.deps.journal, input.runId, observer, privacy, input.clock);
       reportStart({ runId: input.runId, workspaceRoot });
-      return { ...assembled, deps: { ...assembled.deps, journal } };
+      // U-108 (B-4, DR-3): the engine's permission questions go to the observer (permission.ts).
+      return { ...assembled, deps: { ...assembled.deps, journal, confirm: confirmThrough(observer) } };
     };
 
     const runTask: RunTask = async (deps) => {

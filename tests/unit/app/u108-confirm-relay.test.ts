@@ -10,22 +10,21 @@
  *   observer as run events, the question before `confirm` is called.
  * The config file cannot hold an asking rule yet (U-74), so the test's runTask gives the real engine
  * a policy gate whose command rule asks. Scripted model, temporary folders, fake values only.
- * Reproduced first (todo until the app layer relays it).
+ * Reproduced first (ac6dbd0, todo until the app layer relayed it).
  */
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { createCodarynApp } from "../../../src/app/index.js";
+import { UNKNOWN_TOOL_NAME, answerOf, createCodarynApp, sanitizeRecord } from "../../../src/app/index.js";
+import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import type { AppHooks, RunEvent, RunHandle, RunObserver } from "../../../src/app/index.js";
 import type { EngineResult, JournalRecord } from "../../../src/contracts/index.js";
 import { runTask as engineRunTask } from "../../../src/engine/index.js";
 import { createPolicyGate } from "../../../src/policy/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 import { WRITE_NOTES, appEnvironment, readJournal, setupRun, taskRequest } from "./support.js";
-
-const TODO = { todo: "U-108: the app layer does not relay the permission question yet" };
 
 /** The command the model asks to run; it leaves `ran.txt` when it runs. */
 const MARK = "require('fs').writeFileSync('ran.txt', 'x')";
@@ -81,7 +80,7 @@ function answered(records: readonly JournalRecord[]): [unknown, unknown] {
 }
 
 describe("U-108 (B-4): the permission question goes to RunObserver.confirm", () => {
-  test("allow_once: asked with the contract's request and the run's signal, after its event; the command runs", TODO, async () => {
+  test("allow_once: asked with the contract's request and the run's signal, after its event; the command runs", async () => {
     const asked: { request: Record<string, unknown>; signal: AbortSignal }[] = [];
     const run = await askingRun(async (request, signal) => {
       asked.push({ request: request as unknown as Record<string, unknown>, signal });
@@ -101,7 +100,7 @@ describe("U-108 (B-4): the permission question goes to RunObserver.confirm", () 
     assert.equal(run.ran, true, "the command ran after the person's allow_once");
   });
 
-  test("the question's event is delivered before confirm is called", TODO, async () => {
+  test("the question's event is delivered before confirm is called", async () => {
     const order: string[] = [];
     const base = await setupRun({}, { policy: { commands: [NODE_RULE], network: "deny", destructive: "deny", restorePathTokens: false } }, [
       { toolCalls: [{ name: "run_command", args: { executable: process.execPath, args: ["-e", MARK] } }] },
@@ -123,7 +122,7 @@ describe("U-108 (B-4): the permission question goes to RunObserver.confirm", () 
     assert.deepEqual(order, ["confirmation_requested", "confirm called", "confirmation_answered"]);
   });
 
-  test("deny: recorded as the person's; the command does not run", TODO, async () => {
+  test("deny: recorded as the person's; the command does not run", async () => {
     let calls = 0;
     const run = await askingRun(async () => {
       calls += 1;
@@ -133,7 +132,7 @@ describe("U-108 (B-4): the permission question goes to RunObserver.confirm", () 
     assert.deepEqual([answered(run.stored), run.ran], [["deny", "user"], false]);
   });
 
-  test("no observer, no confirm, a throw or an answer that is no decision: dismissed, deny by default", TODO, async () => {
+  test("no observer, no confirm, a throw or an answer that is no decision: dismissed, deny by default", async () => {
     for (const [name, confirm] of [
       ["no observer", "no-observer"],
       ["no confirm", "none"],
@@ -169,7 +168,32 @@ describe("U-108 (B-4): the permission question goes to RunObserver.confirm", () 
     assert.equal(getterReads, 0, "a getter answer is not called");
   });
 
-  test("a cancel while the question waits: the signal confirm got aborts; deny by cancelled, the run cancelled", TODO, async () => {
+  test("answerOf on its own: a decision read once from an own data property, into a fresh object; anything else dismissed", () => {
+    let getterReads = 0;
+    const given = { decision: "allow_once" } as const;
+    const fresh = answerOf(given);
+    assert.deepEqual(fresh, { decision: "allow_once" });
+    assert.notEqual(fresh, given, "the engine gets the app layer's own object");
+    const withGetter = {
+      get decision() {
+        getterReads += 1;
+        return "deny";
+      },
+    };
+    const throwing = new Proxy({}, { getOwnPropertyDescriptor: () => { throw new Error("trap"); } });
+    for (const answer of [withGetter, Object.create({ decision: "deny" }), { decision: "always" }, { decision: "DENY" }, null, undefined, "deny", 1, throwing]) {
+      assert.deepEqual(answerOf(answer), { decision: "dismissed" }, String(answer));
+    }
+    assert.equal(getterReads, 0);
+  });
+
+  test("a run event of a question names a tool outside the built-in set as (unknown tool)", () => {
+    const record = { seq: 3, at: new Date().toISOString(), runId: "r1", type: "confirmation_requested", id: "q1", kind: "permission", callId: "c1", tool: "made_up", permission: "command", subject: "node", argumentCount: 0 };
+    const shown = sanitizeRecord(record as unknown as JournalRecord, createPrivacyGateway({ secrets: [] }));
+    assert.equal((shown as unknown as { tool?: unknown } | null)?.tool, UNKNOWN_TOOL_NAME);
+  });
+
+  test("a cancel while the question waits: the signal confirm got aborts; deny by cancelled, the run cancelled", async () => {
     let handle: RunHandle | null = null;
     let signalSeen: AbortSignal | null = null;
     const run = await askingRun(

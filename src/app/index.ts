@@ -15,6 +15,7 @@ export { planArguments, reviewArguments } from "./plans.js";
 export { profileWorkflowsOf } from "./settings.js";
 export { UNKNOWN_TOOL_NAME, deliver, journalWithEvents, sanitizeRecord } from "./events.js";
 export { MODEL_TEXT_MAX_ROWS, modelTextRows } from "./model-text.js";
+export { answerOf, confirmThrough } from "./permission.js";
 export type { ModelTextOptions } from "./model-text.js";
 export { MAX_WORKSPACE_DIR_ENTRIES, WORKSPACE_PAGE_SIZE, isWorkspaceDir, listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 export type { WorkspaceDirOptions, WorkspaceDirSource } from "./workspace-dir.js";

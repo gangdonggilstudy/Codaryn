@@ -14,6 +14,8 @@ import type {
   Clock,
   CodarynConfig,
   CommandRule,
+  ConfirmAnswer,
+  ConfirmRequest,
   InitOutput,
   InitSuggestedCommand,
   InitSuggestedProtectedPath,
@@ -270,31 +272,23 @@ export type RunEvent =
 /**
  * DR-1, DR-3: questions during a run are permission questions only. Plan approval is a step
  * between runs (`plan`, `applyPlan`). Only the user's settings and profiles can make a permission
- * ask (never a task file, M-9); after an answer the effective arguments are judged again. The
- * engine asks from the start of stage 5; until then `RunObserver.confirm` is never called.
+ * ask (never a task file, M-9); after an answer the effective arguments are judged again.
+ * U-108: the contract's types (src/contracts/policy.ts, U-74): the request has fixed fields, the
+ * masked executable made safe for a screen (U-106) and the number of arguments, never the
+ * arguments; the answer is allow_once, deny or dismissed (closed without answering, recorded as
+ * deny by `default`).
  */
-export interface ConfirmRequest {
-  readonly kind: "permission";
-  readonly id: string;
-  readonly callId: string;
-  readonly tool: ToolName;
-  readonly permission: PermissionKind;
-  /** The effective arguments, masked: fixed text and masked values only. */
-  readonly subject: MaskedText;
-}
-
-export type ConfirmAnswer =
-  | { readonly decision: "allow_once" }
-  | { readonly decision: "deny" }
-  /** The person closed the question without answering. Recorded as the default (`by: "default"`), a denial. */
-  | { readonly decision: "dismissed" };
+export type { ConfirmAnswer, ConfirmRequest };
 
 export interface RunObserver {
   /** Called synchronously for each event. Exceptions are ignored and never change the run. */
   onEvent?(event: RunEvent): void;
   /**
-   * Stage 5 (DR-3). Not called yet. When it is absent the app layer itself records each question
-   * as denied with `by: "default"`, so a denial no person gave is never recorded as theirs (DR-10).
+   * U-108 (B-4, DR-3): asked for each permission question of the run, after the
+   * `confirmation_requested` event and before `confirmation_answered` (permission.ts). `signal`
+   * aborts when the run is cancelled or its time is up; the run stops waiting then. Absent, a
+   * throw, or an answer that is not one of the decisions (read once, as an own data property) is
+   * `dismissed`: recorded as deny by `default`, never as the person's (DR-10).
    */
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 }

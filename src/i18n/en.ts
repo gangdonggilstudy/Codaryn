@@ -85,6 +85,8 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.form.typed": "--workspace {workspace}",
   "summary.form.current": "--workspace .",
   "summary.plan_ready": "A plan is ready: actions {actions}. Nothing was changed; it waits for approval.",
+  // U-221 (draft for nb-i18n): a run plan's, as its plan view counts it.
+  "summary.plan_ready_changes": "A plan is ready: {count} file(s) to write. Nothing was changed; it waits for approval.",
   "summary.next_plan": "Plan: codaryn plan {form} --run {runId}",
   "summary.next_apply": "Apply after approval: codaryn apply {form} --run {runId} --digest <digest>",
   "summary.review_checklist": "Items to check: {count}",
@@ -108,6 +110,9 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.change.modify": "modify",
   "plan.changes.summary_label": "The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan)",
   "plan.changes.next_apply": "To have a run make these changes: codaryn apply <the same task form> --run {runId} --digest",
+  // U-221 (drafts for nb-i18n): a run plan carried out, in the report's words.
+  "plan.changes.status_carried_out": "carried out",
+  "plan.changes.carried_by": "Carried out by run {runId}",
   "plan.changes.digest_guarantee":
     "The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
   "apply.question": "Apply this plan?",
@@ -235,6 +240,11 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.plan_applying": "plan being applied, or its apply stopped (apply run {runId}, no result yet)",
   "runs.plan_apply_reverted": "plan applied, then reverted (apply run {runId})",
   "runs.plan_apply_missing": "no readable records of the apply run {runId} (removed, or cannot be checked)",
+  // U-221 (drafts for nb-i18n): a run plan's plan run, by the run that carried it out.
+  "runs.plan_carried_out": "plan carried out by run {runId}",
+  "runs.plan_carried_ended": "plan carried out by run {runId}, which ended as {reason}",
+  "runs.plan_carrying": "plan being carried out by run {runId}, or that run stopped (no result yet)",
+  "runs.plan_carried_reverted": "plan carried out by run {runId}, then reverted",
   // U-129 (PM draft for nb-i18n): an apply run's changes cell, and a person's verdict in the result column.
   "runs.apply_actions": "{count} actions",
   "runs.apply_action_one": "1 action",

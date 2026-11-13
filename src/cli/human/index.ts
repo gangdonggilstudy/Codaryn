@@ -10,8 +10,8 @@ export { jsonSyntaxErrorOffset, jsonSyntaxErrorPosition, positionOf } from "./js
 export type { JsonPosition } from "./json-position.js";
 export { createHumanWriter } from "./writer.js";
 // U-191 (DR-69 B-3): the plan view of a run plan (kind "changes"), on the store's loadAnyPlan.
-export { SUMMARY_HIDDEN_MARKER, changesPlanOutput, changesPlanSummaryText, renderChangesPlan } from "./changes-plan.js";
-export type { ChangesPlanViewOutcome, LoadedChangesPlan } from "./changes-plan.js";
+export { SUMMARY_HIDDEN_MARKER, changesApplyQuestion, changesApprovalText, changesPlanOutput, changesPlanSummaryText, renderChangesPlan } from "./changes-plan.js";
+export type { ChangesApprovalContext, ChangesPlanViewOutcome, LoadedChangesPlan } from "./changes-plan.js";
 export type { HumanWriter, HumanWriterOptions } from "./writer.js";
 // U-125: displayWidth, padEnd and padStart are the one terminal width for every table (doctor, models: U-127).
 export { MODEL_TEXT_COLUMNS, MODEL_TEXT_FALLBACK_COLUMNS, MODEL_TEXT_PREFIX, displayWidth, formatLocalTime, padEnd, padStart, quoteModelText, shellArg, terminalColumns } from "./format.js";

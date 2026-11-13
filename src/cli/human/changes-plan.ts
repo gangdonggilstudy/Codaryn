@@ -141,3 +141,31 @@ export function renderChangesPlan(output: ChangesPlanOutput, currentKey: KnownKe
   lines.push(messages.format("plan.changes.digest_guarantee"));
   return `${lines.join("\n")}\n`;
 }
+
+/**
+ * U-198 (DR-69 B-3, B-8): what the CLI knows of the run that would carry a `run` plan out, for the lines
+ * before a person approves it. Draft for na-core (U-195), which fills it from the task it prepared.
+ * - commandsAllowed: the run may run commands (its tools include `run_command` and its policy has a
+ *   command rule). Such a command is not bound to the plan's files (B-8), and the approval says so.
+ */
+export interface ChangesApprovalContext {
+  readonly commandsAllowed: boolean;
+}
+
+/**
+ * U-198: the lines between a `run` plan's view (renderChangesPlan) and changesApplyQuestion at a
+ * terminal: apply.changes.what (a run whose file tools write only these {count} files),
+ * apply.changes.summary_note when the view shows the summary (the model's words, told to the run and
+ * not enforced; only the files are), and apply.changes.commands_note when commands are allowed.
+ */
+export function changesApprovalText(output: ChangesPlanOutput, context: ChangesApprovalContext, messages: MessageCatalog = createMessageCatalog("en")): string {
+  const lines: string[] = [messages.format("apply.changes.what", { count: output.files.length })];
+  if (quoteModelText(output.summary, Number.POSITIVE_INFINITY).length > 0) lines.push(messages.format("apply.changes.summary_note"));
+  if (context.commandsAllowed === true) lines.push(messages.format("apply.changes.commands_note"));
+  return `${lines.join("\n")}\n`;
+}
+
+/** U-198: apply's question for a `run` plan (apply.changes_question, then the [y/N] text), as applyQuestion. */
+export function changesApplyQuestion(messages: MessageCatalog = createMessageCatalog("en")): string {
+  return `${messages.format("apply.changes_question")} ${messages.format("prompt.yes_no_default_no")} `;
+}

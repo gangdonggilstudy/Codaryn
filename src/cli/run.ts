@@ -113,7 +113,7 @@ import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { writablePathSetsOf } from "./writable.js";
-import { runMinGroupSize, runUnreadablePaths } from "./unreadable.js";
+import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "./unreadable.js";
 import { queryTableFacts } from "./human/index.js";
 
 export interface CliEnvironment {
@@ -387,6 +387,9 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
   checklist_without_review: 'is only allowed with completion "human_review"',
   instructions_too_long: "is longer than the limit",
   checklist_too_long: "must have 1 to the maximum number of non-blank lines within the length limit",
+  // U-210 (bundle A, R-5, P-1): a command rule (a command verifier's text is unreadableWithCommandsText's).
+  unreadable_with_commands: "must be empty while unreadablePaths is set: a command can read any file, the ones kept from the agent too",
+  unreadable_paths_required: UNREADABLE_PATHS_REQUIRED_TEXT,
 };
 
 /**
@@ -396,7 +399,7 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
  */
 function unreadableWithCommandsText(field: string): string {
   return field.endsWith("policy.commands")
-    ? "must be empty while unreadablePaths is set: a command can read any file, the ones kept from the agent too"
+    ? WORKFLOW_PROBLEM_TEXT.unreadable_with_commands
     : "cannot be a command verifier while unreadablePaths is set: a command can read any file, and its output goes to the model";
 }
 
@@ -813,6 +816,13 @@ export async function prepareTask(
   }
   // G-A: resolve the workflow settings under the definition's ceilings (resolveWorkflow).
   const parsed = taskOutcome.task;
+  // U-210 (bundle A, A-6; R-2, Q-4, R-102 M-1): the run's unreadable paths, every source's united (the
+  // config file's also under a task file and a profile), and its k, the largest a source states (never
+  // below 5). Neither field when no source states one, so a run without them is as before. P-1: the
+  // resolution needs the list (analyze-private).
+  const runSources = { config: fileConfig, profile: args.profile, definition, taskFilePolicy: taskFile !== null ? parsed.policy : null };
+  const unreadablePaths = runUnreadablePaths(runSources);
+  const minGroupSize = runMinGroupSize(runSources);
   const resolved = resolveWorkflow({
     definitions,
     task: {
@@ -824,6 +834,7 @@ export async function prepareTask(
     },
     profileWorkflowRef,
     commandRules: parsed.policy.commands.length,
+    unreadablePaths,
   });
   if (!resolved.ok) {
     const fromConfig = taskFile === null || resolved.field.startsWith("profiles") || resolved.field.startsWith("workflows");
@@ -852,13 +863,8 @@ export async function prepareTask(
   // U-182 (DR-69 B-4): every source's writable list, each its own (the gate needs all to cover a
   // write); none when no source states one, so a run without them is as before.
   const writablePathSets = writablePathSetsOf({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: taskFile !== null ? parsed.policy : null });
-  // U-210 (bundle A, A-6; R-2, Q-4, R-102 M-1): the run's unreadable paths, every source's united (the
-  // config file's also under a task file and a profile), and its k, the largest a source states (never
-  // below 5). Neither field when no source states one, so a run without them is as before.
-  const runSources = { config: fileConfig, profile: args.profile, definition, taskFilePolicy: taskFile !== null ? parsed.policy : null };
-  const unreadablePaths = runUnreadablePaths(runSources);
-  const minGroupSize = runMinGroupSize(runSources);
-  // R-5: then no command rule and no command verifier, refused before anything is recorded.
+  // U-210 (R-5): with the run's unreadable paths (above) no command rule and no command verifier,
+  // refused before anything is recorded.
   const commandsRefused = unreadableWithCommands(
     unreadablePaths,
     definition,

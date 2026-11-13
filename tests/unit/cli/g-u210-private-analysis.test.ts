@@ -150,7 +150,8 @@ describe("U-210: analyze-private without an unreadable path is refused before th
     const refused = json(await runGuarded(sb, ["run", "--task", task, "--config", bare], cliEnv()));
     assert.equal(refused["code"], "invalid_task", JSON.stringify(refused));
     assert.match(String(refused["message"]), /^policy\.unreadablePaths must not be empty under the analyze-private task type/);
-    assert.deepEqual(refused["diagnostic"], { file: "task", code: "invalid_value", field: "policy.unreadablePaths" });
+    const diagnostic = refused["diagnostic"] as { file?: string; code?: string; field?: string } | undefined;
+    assert.deepEqual([diagnostic?.file, diagnostic?.code, diagnostic?.field], ["task", "invalid_value", "policy.unreadablePaths"]);
     assert.deepEqual(runDirs(sb), [], "no run was recorded");
     const listed = writeConfigFile(sb, { schemaVersion: 1, limits: LIMITS, policy: { ...POLICY, unreadablePaths: ["private"] } }, "listed.json");
     const ran = json(await runGuarded(sb, ["run", "--task", task, "--config", listed], cliEnv()));

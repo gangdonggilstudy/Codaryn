@@ -17,9 +17,9 @@
  * another (that needs added noise, outside P1).
  *
  * U-208 (A-5): a task type tool (WORKFLOW_TOOL_NAMES); the tool runner reads the table in pieces
- * (src/tabular, U-202) and applies k, the operations of unreadable tables and the pages here. Not
- * carried out yet: the parsers refuse `unreadablePaths` and `minGroupSize` and nothing fills the
- * run's unreadable list and k (A-6), and `analyze-private` is not a built-in definition (A-6).
+ * (src/tabular, U-202) and applies k, the operations of unreadable tables and the pages here.
+ * U-210 (A-6): the parsers take `unreadablePaths` and `minGroupSize`, the CLI fills the run's list
+ * and k and gives them to the gate and the tool runner, and `analyze-private` is built in.
  *
  * The reading's rules (U-202, accepted by the PM for U-208):
  * - A row whose cell in any groupBy column is empty is left out of the groups and counted apart; that
@@ -271,14 +271,14 @@ export const QUERY_TABLE_DEFINITION: ToolDefinition = {
 /**
  * P-1: the built-in task type for tables with personal data (`analyze-private`): read_file,
  * search_files, query_table and write_file, no command (allowCommands false), `human_review`, and
- * resolved only when the effective policy's unreadablePaths is not empty. Not a built-in id yet (A-6
- * adds it to BUILTIN_WORKFLOW_IDS with its definition and texts).
+ * resolved only when the effective policy's unreadablePaths is not empty. U-210 (A-6): a built-in id
+ * (BUILTIN_WORKFLOW_IDS), its definition in src/workflows.
  */
 export const ANALYZE_PRIVATE_WORKFLOW_ID = "analyze-private";
 
 /**
- * R-5, P-1: why a task type cannot be resolved with unreadable paths, beside WORKFLOW_PROBLEMS
- * (A-6 joins them, with the CLI's texts):
+ * R-5, P-1: why a task type cannot be resolved with unreadable paths. U-210 (A-6): WORKFLOW_PROBLEMS
+ * entries too, with the CLI's texts:
  * - unreadable_with_commands: unreadablePaths with any command rule or `command` verifier (a command
  *   can read anything; its output and a command verifier's go to the model)
  * - unreadable_paths_required: `analyze-private` with an empty effective unreadablePaths
@@ -309,8 +309,8 @@ export function integrityPathsOf(protectedPaths: readonly string[] | undefined, 
  * U-203 (A-3, R-5): the resolution's refusal of unreadable paths beside commands: a command rule
  * (field `policy.commands`) or a `command` verifier (field `verifiers[i]`, the first) while the run
  * has any unreadable path (ResolvedTaskSpec.unreadablePaths, every source united, review R-102 M-1).
- * Null otherwise. Pure; the CLI resolves with it once the problem joins WORKFLOW_PROBLEMS (A-6). The
- * gate also denies every command meanwhile.
+ * Null otherwise. Pure; the CLI resolves with it (U-210, A-6). The gate also denies every command
+ * meanwhile.
  */
 export function privateDataProblem(
   unreadablePaths: readonly string[] | undefined,

@@ -446,7 +446,9 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
     const planRunId = input.planRunId;
     const recorders = createRunRecorders({ workspaceRoot, runId, clock, ...(planRunId === undefined ? {} : { planRunId }) });
     const { journal, changeRecorder, planRecorder, stateGuard } = recorders;
-    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder, ...unreadable });
+    // U-210 (bundle A, Q-4): the run's k for query_table on an unreadable table; absent, the runner's 5.
+    const minGroupSize = task.minGroupSize === undefined ? {} : { minGroupSize: task.minGroupSize };
+    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder, ...unreadable, ...minGroupSize });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep
     // the phase 2 journal. The engine checks at run start and around each verification round.

@@ -26,6 +26,7 @@ import {
   MAX_REPORT_FILE_BYTES,
   MODEL_PROVIDER_NAMES,
   PLAN_ITEM_PROBLEMS,
+  planApplyStateOf,
   REPORT_EXIT_CODES,
   RESULT_FILE_NAME,
   RESULT_SCHEMA_VERSION,
@@ -516,16 +517,41 @@ export const REPORT_FIXED_LIMITS: readonly string[] = [
 ];
 
 /** `failedToolCalls` (U-18): the journal's failed calls (failedCallsIn), told in the text only. */
-export function renderReport(report: RunReportOutput, currentKey: KnownKeys = null, failedToolCalls = 0): string {
+/** U-131 (N2): what became of a plan run's apply, by the run list's rule (planApplyStateOf); text only. */
+export type ReportPlanApply = ReturnType<typeof planApplyStateOf>;
+
+export function renderReport(report: RunReportOutput, currentKey: KnownKeys = null, failedToolCalls = 0, planApply: ReportPlanApply = null): string {
   renderingKey = currentKey;
   try {
-    return renderReportText(report, failedToolCalls);
+    return renderReportText(report, failedToolCalls, planApply);
   } finally {
     renderingKey = null;
   }
 }
 
-function renderReportText(report: RunReportOutput, failedToolCalls: number): string {
+/**
+ * U-131 (N2, UXM-5): a plan run's line. Without an apply of it, the plan waits for approval as
+ * before; with one, what became of that apply, in the words `runs` uses (runs.plan_*).
+ */
+function planLine(actions: number, digest: string, runId: string, apply: ReportPlanApply): string {
+  if (apply === null) return `- Plan: ${actions} action(s) waiting for approval, digest ${code(digest)}. See it with ${code("codaryn plan --run " + runId)}.`;
+  const id = code(apply.applyRunId);
+  const itsReport = `(its report: ${code("codaryn report --run " + apply.applyRunId)})`;
+  switch (apply.state) {
+    case "applied":
+      return `- Plan: ${actions} action(s), applied by run ${id} ${itsReport}.`;
+    case "unfinished":
+      return `- Plan: ${actions} action(s); its apply by run ${id} did not finish${apply.reason === undefined ? "" : ` (${code(apply.reason)})`} ${itsReport}.`;
+    case "applying":
+      return `- Plan: ${actions} action(s); being applied by run ${id}, or that apply stopped without a result.`;
+    case "reverted":
+      return `- Plan: ${actions} action(s), applied by run ${id}, then reverted ${itsReport}.`;
+    case "record_missing":
+      return `- Plan: ${actions} action(s); taken up by run ${id}, whose records cannot be read (removed, or they cannot be checked).`;
+  }
+}
+
+function renderReportText(report: RunReportOutput, failedToolCalls: number, planApply: ReportPlanApply = null): string {
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
   out.push(`- Run: ${code(report.runId)}`);
@@ -536,9 +562,7 @@ function renderReportText(report: RunReportOutput, failedToolCalls: number): str
   );
   if (result !== null) {
     out.push(`- Result: ${code(result.status)} / ${code(result.reason)}, exit code ${result.exitCode}`);
-    if (result.plan !== undefined) {
-      out.push(`- Plan: ${result.plan.actions} action(s) waiting for approval, digest ${code(result.plan.digest)}. See it with ${code("codaryn plan --run " + report.runId)}.`);
-    }
+    if (result.plan !== undefined) out.push(planLine(result.plan.actions, result.plan.digest, report.runId, planApply));
   } else {
     out.push("- Result: none. The run has no result.json: it is still running, or it stopped without writing one.");
     out.push(
@@ -559,14 +583,17 @@ function renderReportText(report: RunReportOutput, failedToolCalls: number): str
   if (journal.repairs > 0) out.push("", `Repairs started: ${journal.repairs}.`);
   if (result?.review !== undefined) {
     out.push("", "## Review checklist", "");
-    out.push(`The run waits for a person's verdict (${code("codaryn review --run " + report.runId + " --accept | --reject")}).`);
+    const verdict = report.verdict ?? null;
+    const reviewCommand = code("codaryn review --run " + report.runId + " --accept | --reject");
+    // U-131 (N1, AXM-21): the run waits for a verdict only while it has none.
+    if (verdict === null) out.push(`The run waits for a person's verdict (${reviewCommand}).`);
     for (const item of result.review.checklist) out.push(`- ${code(item)}`);
     out.push("");
-    const verdict = report.verdict ?? null;
     if (verdict === null) {
       out.push("No verdict yet.");
     } else {
       out.push(`Verdict: **${verdict.verdict}** (${code(verdict.at)})${verdict.note === null ? "" : `, note: ${code(verdict.note)}`}`);
+      out.push(`A later review replaces it: ${reviewCommand}.`);
     }
   }
 
@@ -1078,6 +1105,19 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
     return cliError("invalid_run_record", "the run's records cannot be read");
   }
 
+  // U-131 (N2, UXM-5): for the text only, what became of a plan run's apply, by the run list's rule
+  // (planApplyStateOf, as `runs` and the plan view say). Best effort; the JSON does not carry it.
+  let planApply: ReportPlanApply = null;
+  if (!json && !("runKind" in report) && report.result?.plan !== undefined && io.listRuns !== undefined) {
+    try {
+      const entries = (await io.listRuns({ workspaceRoot: root })).runs;
+      const entry = entries.find((other): other is CheckedRun => other.state === "checked" && other.runId === runId);
+      planApply = entry === undefined ? null : planApplyStateOf(entry, entries);
+    } catch {
+      planApply = null;
+    }
+  }
+
   const currentKey = knownKeyValues(io.env);
   let text: string;
   try {
@@ -1086,7 +1126,7 @@ export async function runReport(io: ReportEnvironment): Promise<CommandOutcome> 
       ? jsonLine(hideKeysInStrings(report, currentKey))
       : "runKind" in report
         ? renderApplyReport(report, currentKey)
-        : renderReport(report, currentKey, failedToolCalls);
+        : renderReport(report, currentKey, failedToolCalls, planApply);
   } catch {
     // X-2: everything printed comes from the records, so a failure here means records a run
     // would not write (changed or broken after the run), not an internal error.

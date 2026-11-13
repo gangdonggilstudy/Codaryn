@@ -531,6 +531,9 @@ export const FIXED_MESSAGES = {
   "summary.next_review": { form: "text", runId: "runId" },
   "summary.apply_actions": { applied: "count", total: "count" },
   "summary.apply_plan_run": { runId: "runId" },
+  // U-158 (GT-D14), draft for nb-i18n and nc-human: ApplyResult.foldersLeftEmpty, how many folders
+  // the actions left without files; they stay. A line of the apply summary when it is present.
+  "summary.folders_left_empty": { count: "count" },
   // U-14 (UXM-6, AXM-2, AXM-15): lines of the plan view (`codaryn plan`, the approval screen).
   // records_changed: first, when PlanOutput.recordsChanged (the records were changed outside the run,
   // so this plan may not be the one the run made); cannot_apply: in place of the command to apply it
@@ -733,16 +736,27 @@ export const FIXED_MESSAGES = {
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
   "runs.column.started": {},
+  // U-139 (UXM-23, PM): the runs table's started column header, which says the time is local (the run
+  // id header says UTC). runs.column.started stays the word of latestChosen's "(started <time>)".
+  "runs.column.started_local": {},
   "runs.column.status": {},
   "runs.column.changes": {},
   "runs.empty": {},
   "runs.incomplete": {},
+  // U-158 (AXM-8), drafts for nb-i18n and nc-human: in place of runs.incomplete when the entry has a
+  // phase (RunListEntry.phase): still going, or stopped without a result. Without a phase,
+  // runs.incomplete as before.
+  "runs.running": {},
+  "runs.no_result": {},
   "runs.damaged": {},
   "runs.reverted": {},
   // N-23 (g): the run's own records are fine, only its revert record failed the checks.
   "runs.revert_record_damaged": {},
   // DR-38: a run whose records were changed by something other than the run (state.ts).
   "runs.records_changed": {},
+  // U-157 (UXM-18, PM): under the runs table, once, when a listed run has a records-changed mark: what
+  // the short mark at the end of its result column (runs.records_changed) means, so that row stays short.
+  "runs.records_changed_note": {},
   // U-16 (UXM-5): a plan run whose plan was applied (RunListEntry.appliedBy), in place of the
   // needs-input words: applied by `{runId}`.
   "runs.plan_applied": { runId: "runId" },
@@ -760,6 +774,10 @@ export const FIXED_MESSAGES = {
   // U-129 (2), AXM-21: added to the result column of a run with RunListEntry.review: `{verdict}` is
   // `review.verdict.<verdict>`, as review.recorded writes it.
   "runs.review": { verdict: "text" },
+  // U-139 (UXM-5, PM; a draft for p4g-general and nb-i18n): added to an apply run's result column
+  // right after its status words: the plan run it applied (RunListEntry.planRunId), so the row says
+  // which plan it is the apply of, as the plan run's row names its apply run (runs.plan_applied).
+  "runs.apply_of": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},
@@ -777,6 +795,12 @@ export const FIXED_MESSAGES = {
   "changes.heading": { runId: "runId" },
   "changes.no_text_note": {},
   "changes.none": {},
+  // U-131 (N4, UXM-4, 5): a plan run (plan_pending) in place of changes.none: changes.plan_only, then
+  // what became of its plan by the run list's rule (planApplyStateOf): changes.plan_applied when the
+  // apply run is done, changes.plan_apply_other otherwise (`{runId}`: that apply run). Text only.
+  "changes.plan_only": {},
+  "changes.plan_applied": { runId: "runId" },
+  "changes.plan_apply_other": { runId: "runId" },
   "changes.file.created": {},
   "changes.file.changed": {},
   "changes.no_difference": {},
@@ -808,6 +832,27 @@ export const FIXED_MESSAGES = {
   "progress.workflow_policy.restore_path_tokens_off": {},
   "progress.workflow_policy.verifiers_dropped": { count: "count" },
   "runs.omitted": { count: "count" },
+
+  // U-156 (nb-i18n's E group, U-154's table): `codaryn models`' text. The renderer adds the marks and
+  // the values the texts end before (G-A): `: `, `* `, the model id and name (outside values, never in
+  // a text). `{variable}` is the provider's model variable, `{field}` where --use writes (`model` or
+  // `providers.openai.model`). The table's `  #` column head is not a word and stays as it is. The
+  // English is the text before U-156, character for character (SP-0 pins it).
+  "models.table.id": {},
+  "models.table.name": {},
+  "models.table.input_tokens": {},
+  "models.table.output_tokens": {},
+  "models.none_listed": {},
+  "models.listed": { count: "count" },
+  "models.no_current": { variable: "settingEnv" },
+  "models.current_from_config": {},
+  "models.current_from_env": { variable: "settingEnv" },
+  "models.not_listed": {},
+  "models.written_label": {},
+  "models.written_place": { field: "field" },
+  "models.written_place_created": { field: "field" },
+  "models.overridden": { variable: "settingEnv", field: "field" },
+  "models.use_prompt": { field: "field" },
 
   // `codaryn init` (N-2). Questions go to stderr; the final text (src/cli/init.ts) to stdout.
   "init.location": { location: "location" },
@@ -1309,7 +1354,11 @@ export interface HumanOutput {
    * `summary.next_revert_unsafe`; R-70 L-1 (PM): `revert` passes none, so it never does.
    */
   revertSummary(output: RevertOutput, context?: RevertSummaryContext): string;
-  /** N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the damaged mark. */
+  /**
+   * N-7, N-16: stdout text of `codaryn runs` without `--json`. Damaged runs show only their id and the
+   * damaged mark. U-158 (AXM-8): a run without a result says `runs.running` or `runs.no_result` by
+   * its `phase`, and `runs.incomplete` when it has none.
+   */
   runsText(output: RunsOutput): string;
   /**
    * N-23: stderr before `revert --run latest` and `report --run latest` act: the chosen run id
@@ -1328,7 +1377,8 @@ export interface HumanOutput {
    * and the next commands (report, revert). For `consent_required` (DR-21): `summary.unsafe_moves`
    * and `summary.next_apply_unsafe` with the digest as an item. U-8: `apply.notice.<kind>` for each
    * of `noticeKinds`, whatever the status; U-33: for `plan_records_unchecked` with a
-   * `planRecordsUncheckedCause`, `apply.notice.plan_records_unchecked.<cause>` instead. Optional only until the renderer (N-C) has it.
+   * `planRecordsUncheckedCause`, `apply.notice.plan_records_unchecked.<cause>` instead. U-158
+   * (GT-D14): `summary.folders_left_empty` when `foldersLeftEmpty` is present. Optional only until the renderer (N-C) has it.
    * `runSummary` covers the plan run (`plan_pending`: `summary.plan_ready`, `summary.next_plan`,
    * `summary.next_apply` with the digest as an item) and human review (`awaiting_review`:
    * `summary.review_checklist` with the checklist entries as items, `summary.next_review`).

@@ -238,7 +238,7 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
     case "changes":
       // DR-7, DR-14: the app layer's `changes` with this process's environment; it reads only.
       // U-36 (R66-M1): the text in the person's language, as plan and apply have it.
-      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()), messages: human.messages }));
+      return plain(await runChanges({ argv, env: process.env, app: createCodarynApp(await createNodeAppEnvironment()), messages: human.messages, cwd: process.cwd(), readFile: readText }));
     case "cleanup":
       // DR-39: a preview unless --confirm names the plan digest; people's discarded files need --delete-discarded too.
       return plain(await runCleanup({ argv, cwd: process.cwd(), env: process.env, clock, messages: human.messages }));
@@ -327,6 +327,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           listModels: anthropicModelLister,
           listers: API_MODEL_LISTERS,
           defaultConfig,
+          // U-156: the text and the question in the person's language (models.*).
+          messages: human.messages,
           // Y-3: the number is asked only when both stdin and stdout are terminals.
           ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask: (question: string) => askLine(question) } : {}),
         }),

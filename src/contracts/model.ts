@@ -81,7 +81,7 @@ export const MODEL_ERROR_KINDS = [
    * `organization_usage_limit_exceeded`, or the older code `insufficient_quota`). Not retried.
    */
   "quota_exhausted",
-  /** The provider said it is overloaded (anthropic: HTTP 529 or 503), after the allowed retries. */
+  /** The provider said it is overloaded (anthropic: HTTP 529 or 503; openai: HTTP 503), after the allowed retries. */
   "overloaded",
   /** A request did not finish within `requestTimeoutMs`, after the allowed retries. */
   "timeout",
@@ -156,13 +156,16 @@ export interface ModelProvider {
 /**
  * SP-1: settings the CLI resolves before it creates an API provider. Every field is set: the CLI
  * refuses to start (nothing is sent) when the key, the model or the output cap is missing. The
- * provider is chosen apart from these values (by the factory), until SP-4 adds it here.
+ * provider is chosen apart from these values: the caller picks the provider's factory by the
+ * resolved provider (the CLI's API_PROVIDER_FACTORIES, src/cli/provider.ts; the app layer runs
+ * through it), so this type carries none (U-143: SP-4 and SP-6 resolved the provider this way
+ * instead of adding it here).
  */
 export interface ResolvedApiSettings {
   /** From the provider's key variable (API_PROVIDERS). Memory only: never logged, recorded, printed or put in an error message. */
   readonly apiKey: string;
   readonly model: string;
-  /** Sent as `max_tokens` on every request. */
+  /** The output cap sent on every request: Anthropic `max_tokens`, OpenAI `max_output_tokens`. */
   readonly maxOutputTokens: number;
   /** Without a trailing slash. The provider appends the API path. */
   readonly apiBaseUrl: string;

@@ -186,6 +186,20 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     }
     return { lines, total };
   };
+  /**
+   * DR-41, DR-43 (b): the texts of what a task type's own rules left out of the given policy and checks
+   * (run_started.policyNarrowings, RunSummaryContext.policyNarrowings, U-140), in their order: kinds and
+   * counts only. A kind outside POLICY_NARROWING_KINDS, or a count below 1 where the kind has one, has no
+   * text. The start line joins them to itself; U-146 (UXM-18): the end summary writes one a line.
+   */
+  const narrowingTexts = (given: unknown): string[] =>
+    (Array.isArray(given) ? (given as readonly unknown[]) : []).flatMap((item): string[] => {
+      if (typeof item !== "object" || item === null) return [];
+      const narrowing = item as { readonly kind?: unknown; readonly count?: unknown };
+      if (!isOneOf(narrowing.kind, POLICY_NARROWING_KINDS)) return [];
+      if (narrowing.kind === "restore_path_tokens_off") return [catalog.format("progress.workflow_policy.restore_path_tokens_off")];
+      return isCount(narrowing.count, 1) ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
+    });
   /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
   const integritySummary = (): string[] =>
     integrityChecks > 0 && integrityChanged === 0 ? [catalog.format("summary.integrity_unchanged", { count: integrityChecks })] : [];
@@ -419,6 +433,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       // U-104: the protected-material checks that found nothing, folded in the progress lines.
       out.push(...integritySummary());
+      // U-146 (UXM-18): what the task type's own rules left out (RunSummaryContext.policyNarrowings, filled by
+      // run), once more, one a line with the start line's texts; absent or empty: no line.
+      out.push(...narrowingTexts(context.policyNarrowings));
       // N-23(d): files, not change records. A path's first record says whether the run created it.
       const files = new Map<string, boolean>();
       for (const change of changes) {
@@ -467,6 +484,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       if (context.configDefault !== null) out.push(catalog.format("summary.config_default", { location: context.configDefault }));
       if (context.profileApplied) out.push(catalog.format("summary.profile_applied"));
+      // U-152 (AXM-15): a plan run shows the agent's description of its plan (EngineResult.planSummary,
+      // U-59) where another run shows its last message: under the plan view's label (plan.summary_label),
+      // quoted rows as the plan view draws them. The model's own words, not checked and not what a person
+      // approves (not in plan.json or the digest).
+      const planSummary: unknown = result.planSummary;
+      if (planReady && typeof planSummary === "string") {
+        const rows = quoteModelText(planSummary, FINAL_MESSAGE_MAX_LINES);
+        if (rows.length > 0) out.push(`${catalog.format("plan.summary_label")}:`, ...rows);
+      }
       // DR-47 (AXM-1): the agent's last message, after the facts and before the advice. It is the
       // agent's own words: under its label, each line set apart; not for a plan run.
       const final: unknown = result.finalMessage;
@@ -515,12 +541,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = isOneOf(event.provider, PROVIDERS) ? catalog.format("progress.run_started", { provider: event.provider }) : null;
           // DR-43 (b), DR-41: kinds and counts only. One line per record (HumanOutput.progressLine), so
           // each narrowing is one more fact of the start line.
-          const given: readonly PolicyNarrowing[] = Array.isArray(event.policyNarrowings) ? event.policyNarrowings : [];
-          const narrowings = given.flatMap((narrowing): string[] => {
-            if (!isOneOf(narrowing.kind, POLICY_NARROWING_KINDS)) return [];
-            if (narrowing.kind === "restore_path_tokens_off") return [catalog.format("progress.workflow_policy.restore_path_tokens_off")];
-            return isCount(narrowing.count) && narrowing.count > 0 ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
-          });
+          const narrowings = narrowingTexts(event.policyNarrowings);
           if (line !== null && narrowings.length > 0) line = [line, ...narrowings].join(" · ");
           break;
         }
@@ -657,6 +678,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // says how many and that they are in .codaryn/parked/ (fixed text); each place is in the JSON.
       const parked = skipped.filter((file) => typeof file.parkedAt === "string").length;
       if (parked > 0) out.push(catalog.format("revert.parked", { count: parked }));
+      // U-139 (UXM-6): a run with a records-changed mark (RevertOutput.recordsChanged, DR-38) says so after
+      // its lists, as runs and report do: the revert goes on and checks every file.
+      if (output.recordsChanged === true) out.push(catalog.format("revert.records_changed"));
       // DR-25: the preview did not check whether this drive can move the listed files back safely.
       if (output.dryRun === true && output.moveSafetyUnchecked === true) out.push(catalog.format("revert.dry_run_move_unchecked"));
 
@@ -693,7 +717,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const rows: string[][] = [
         [
           catalog.format("runs.column.run_id"),
-          catalog.format("runs.column.started"),
+          // U-139 (UXM-23): the header says the time is local; the run id header says UTC.
+          catalog.format("runs.column.started_local"),
           catalog.format("runs.column.changes"),
           catalog.format("runs.column.status"),
         ],
@@ -721,6 +746,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
               ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
               : catalog.format(`status.${pair.status}`);
         let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
+        // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
+        const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
+        if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
         // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
         // review.json); the time is in the JSON only. Before the marks of what came after the run.
         const review: unknown = entry.review;
@@ -749,6 +777,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           .join("  ")
           .trimEnd(),
       );
+      // U-157 (UXM-18): a row carries only the short records-changed mark; what it means is one line under
+      // the table, once, when a listed run has the mark.
+      if (runs.some((entry) => entry.state === "checked" && entry.recordsChanged === true)) out.push(catalog.format("runs.records_changed_note"));
       if (omitted > 0) out.push(catalog.format("runs.omitted", { count: omitted }));
       return lines(out);
     },

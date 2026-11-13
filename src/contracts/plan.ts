@@ -45,7 +45,7 @@ import { PRIVACY_TOKEN_PATTERN_SOURCE } from "./text.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolDescriptor } from "./tool.js";
 import type { Workspace } from "./workspace.js";
-import type { InventoryChecker, VerifierConfig, VerifierResult, VerifierRunner } from "./verify.js";
+import type { InventoryChecker, InventoryManifest, VerifierConfig, VerifierResult, VerifierRunner } from "./verify.js";
 
 /** How a task treats a plan. `none`: no plan step, as before stage 4. P1 adds "run". */
 export const PLAN_MODES = ["none", "apply"] as const;
@@ -818,6 +818,57 @@ export interface ApplyResult {
    * `apply.notice.plan_records_unchecked.run_since_plan`, not U-8's. Absent without that kind.
    */
   readonly planRecordsUncheckedCause?: PlanRecordsUncheckedCause;
+  /**
+   * U-155 (GT-D14, the contract's part): how many folders the apply's actions left without any file,
+   * which stay in place (removing a folder is not an action: GT-D14 tells and keeps them). See
+   * foldersLeftEmptyOf for the count. Absent when it is 0, when the apply stopped before its
+   * inventory after the actions, when either inventory reached MAX_INVENTORY_FILES (it cannot be
+   * told), and in results before U-155. A count only, never a path. U-158: `applyPlan` sets it
+   * from its inventories before and after the actions; the human line (`apply.folders_left_empty`)
+   * follows with the renderer.
+   */
+  readonly foldersLeftEmpty?: number;
+}
+
+/**
+ * U-155 (GT-D14): the folders that held at least one file or link in `before` and hold none in
+ * `after`, among the folders on the applied actions' source paths (each folder from the source's
+ * parent up to, not including, the workspace root). The inventories list files and links only
+ * (InventoryManifest), so a folder left with only empty folders inside counts as left empty too.
+ * Null when either manifest reached its limit or holds an `unchecked` entry under such a folder (it
+ * cannot be told). Paths are root-relative, `/` separated, as the manifests and the actions give
+ * them; letter case is compared as written. Pure; ApplyResult.foldersLeftEmpty is its value when
+ * above 0.
+ */
+export function foldersLeftEmptyOf(
+  before: InventoryManifest,
+  after: InventoryManifest,
+  applied: readonly AppliedPlanAction[],
+): number | null {
+  if (before.limitReached || after.limitReached) return null;
+  const folders = new Set<string>();
+  for (const { action } of applied) {
+    const source = action.kind === "move" ? action.from : action.path;
+    const parts = source.split("/");
+    for (let end = parts.length - 1; end > 0; end -= 1) folders.add(parts.slice(0, end).join("/"));
+  }
+  const holds = (manifest: InventoryManifest, folder: string): boolean | null => {
+    let found = false;
+    for (const entry of manifest.entries) {
+      if (!entry.path.startsWith(`${folder}/`)) continue;
+      if (entry.kind === "unchecked") return null;
+      found = true;
+    }
+    return found;
+  };
+  let count = 0;
+  for (const folder of folders) {
+    const had = holds(before, folder);
+    const has = holds(after, folder);
+    if (had === null || has === null) return null;
+    if (had && !has) count += 1;
+  }
+  return count;
 }
 
 /**

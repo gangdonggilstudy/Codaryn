@@ -26,8 +26,10 @@
  * (DR-14).
  */
 
-import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS } from "../contracts/index.js";
-import type { MessageCatalog, RunId } from "../contracts/index.js";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { ANTHROPIC_API_KEY_ENV, LATEST_RUN_ALIAS, RUNS_MAX_LIMIT, planApplyStateOf } from "../contracts/index.js";
+import type { MessageCatalog, RunId, RunListEntry } from "../contracts/index.js";
 import { toCliError } from "../app/index.js";
 import type { ChangedFileView, ChangesOutput, CodarynApp, TaskForm } from "../app/index.js";
 import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
@@ -37,6 +39,7 @@ import type { CommandOutcome } from "./guard.js";
 import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "./settings.js";
 import type { SettingsEnvironment } from "./settings.js";
+import { inputFileTooLarge } from "./security/index.js";
 import { cleanText, hideKeys, hideKeysInStrings } from "./text-safety.js";
 
 export const CHANGES_USAGE =
@@ -129,6 +132,9 @@ interface ChangesWords {
   recordsChanged(): string;
   none(): string;
   applyRun(count: number, planRunId: RunId): string;
+  planOnly(): string;
+  planApplied(applyRunId: RunId): string;
+  planApplyOther(applyRunId: RunId): string;
   file(created: boolean): string;
   state(state: FileState): string;
   /** Why the text is not shown; the renderer adds the code in parentheses. */
@@ -154,6 +160,9 @@ const ENGLISH_WORDS: ChangesWords = {
     "no text for some files: a file's text is shown only when the secrets registered now mask it as the run did and the file is as the run left it; the others have their path and state only (DR-29)",
   recordsChanged: () => "This run has a records-changed mark, so no file text is shown; only paths and states.",
   none: () => "the run changed no file",
+  planOnly: () => "This run only made a plan and changed no file itself.",
+  planApplied: (applyRunId) => `Its plan was applied by run ${cleanText(applyRunId)}; that run's report lists the moves.`,
+  planApplyOther: (applyRunId) => `An apply run took up its plan: ${cleanText(applyRunId)}; codaryn runs shows where that apply stands.`,
   applyRun: (count, planRunId) => `the run is an apply run: it applied ${count} action(s) of the plan of run ${cleanText(planRunId)} (moves and discards, not file writes); codaryn report lists them`,
   file: (created) => (created ? "created by the run" : "changed by the run"),
   state: (state) => STATE_TEXT[state],
@@ -179,6 +188,9 @@ function catalogWords(messages: MessageCatalog): ChangesWords {
     noTextNote: () => or(() => messages.format("changes.no_text_note"), ENGLISH_WORDS.noTextNote),
     recordsChanged: () => or(() => messages.format("changes.records_changed"), ENGLISH_WORDS.recordsChanged),
     none: () => or(() => messages.format("changes.none"), ENGLISH_WORDS.none),
+    planOnly: () => or(() => messages.format("changes.plan_only"), ENGLISH_WORDS.planOnly),
+    planApplied: (applyRunId) => or(() => messages.format("changes.plan_applied", { runId: applyRunId }), () => ENGLISH_WORDS.planApplied(applyRunId)),
+    planApplyOther: (applyRunId) => or(() => messages.format("changes.plan_apply_other", { runId: applyRunId }), () => ENGLISH_WORDS.planApplyOther(applyRunId)),
     applyRun: (count, planRunId) => or(() => messages.format("changes.apply_run", { count, runId: planRunId }), () => ENGLISH_WORDS.applyRun(count, planRunId)),
     file: (created) => or(() => messages.format(created ? "changes.file.created" : "changes.file.changed"), () => ENGLISH_WORDS.file(created)),
     state: (state) => or(() => messages.format(`changes.state.${state}`), () => ENGLISH_WORDS.state(state)),
@@ -226,7 +238,15 @@ export function changedRegion(before: string | null, after: string | null, messa
  * The text form. Every piece comes from the masked output; control characters are replaced. U-36:
  * the words are `messages`' (the person's language); the English before U-36 without it.
  */
-export function renderChanges(output: ChangesOutput, messages?: MessageCatalog): string {
+/**
+ * U-131 (N4): a plan run (plan_pending) and what became of its plan, by the run list's rule
+ * (planApplyStateOf): null when no apply took it up. For the text only; the JSON does not carry it.
+ */
+export interface ChangesPlanRun {
+  readonly apply: ReturnType<typeof planApplyStateOf>;
+}
+
+export function renderChanges(output: ChangesOutput, messages?: MessageCatalog, planRun?: ChangesPlanRun | null): string {
   const words = wordsOf(messages);
   // The app layer gives only run ids that pass RUN_ID_PATTERN.
   const out = [words.heading(output.runId as RunId)];
@@ -240,7 +260,12 @@ export function renderChanges(output: ChangesOutput, messages?: MessageCatalog):
   // app layer gives them as `applyRun` (contract ChangesApplyRun).
   const applyRun = output.applyRun;
   if (applyRun !== undefined) out.push(words.applyRun(applyRun.actions, applyRun.planRunId));
-  else if (output.files.length === 0) out.push(words.none());
+  else if (output.files.length === 0 && planRun !== undefined && planRun !== null) {
+    // U-131 (N4, UXM-4, 5): a plan run changes no file itself; its plan's apply run is the one that does.
+    out.push(words.planOnly());
+    const apply = planRun.apply;
+    if (apply !== null) out.push(apply.state === "applied" ? words.planApplied(apply.applyRunId) : words.planApplyOther(apply.applyRunId));
+  } else if (output.files.length === 0) out.push(words.none());
   for (const file of output.files) {
     out.push(`== ${cleanText(file.path)}: ${words.file(file.created)}; ${words.state(file.state)}`);
     if (file.unavailable !== null) {
@@ -258,10 +283,50 @@ export interface ChangesEnvironment {
   readonly argv: readonly string[];
   /** Read only to keep the current key out of what is printed. */
   readonly env: SettingsEnvironment;
-  /** The app layer (`createCodarynApp` with the process's environment in main.ts). */
-  readonly app: Pick<CodarynApp, "changes">;
+  /**
+   * The app layer (`createCodarynApp` with the process's environment in main.ts). U-131 (N4): its
+   * `listRuns`, when given, tells the text whether the run is a plan run and what became of its plan.
+   */
+  readonly app: Pick<CodarynApp, "changes"> & Partial<Pick<CodarynApp, "listRuns">>;
+  /** U-131 (N4): where a task file's relative path is resolved (the process's cwd in main.ts). */
+  readonly cwd?: string;
+  /** U-131 (N4): reads a task file for its workspaceRoot (best effort, text only). */
+  readonly readFile?: (file: string) => Promise<string>;
   /** U-36: the person's message catalog for the text form (main.ts's); English without it. The JSON does not use it. */
   readonly messages?: MessageCatalog;
+}
+
+/**
+ * U-131 (N4): whether the run is a plan run and what became of its plan, from the run list of its
+ * workspace (the --workspace given, or the task file's workspaceRoot). Best effort, for the text: a
+ * list or file that cannot be read leaves the text as before (null).
+ */
+async function planRunOf(io: ChangesEnvironment, settings: TaskForm, runId: string): Promise<ChangesPlanRun | null> {
+  const listRuns = io.app.listRuns;
+  if (listRuns === undefined) return null;
+  try {
+    const cwd = io.cwd ?? process.cwd();
+    let workspace: string;
+    if (settings.input.kind === "workspace") {
+      workspace = path.resolve(cwd, settings.input.workspace);
+    } else {
+      const taskPath = path.resolve(cwd, settings.input.taskPath);
+      const taskText = (await (io.readFile ?? ((file: string) => readFile(file, "utf8")))(taskPath)).replace(/^\uFEFF/, "");
+      // U-153 (R-94 I4): the first read's size check (DR-40 (b)); a larger file gives the text as before.
+      if (inputFileTooLarge(taskText)) return null;
+      const task = JSON.parse(taskText) as { workspaceRoot?: unknown };
+      if (typeof task.workspaceRoot !== "string") return null;
+      workspace = path.resolve(path.dirname(taskPath), task.workspaceRoot);
+    }
+    const listed = await listRuns.call(io.app, { workspace, limit: RUNS_MAX_LIMIT });
+    if (!listed.ok) return null;
+    const entries: readonly RunListEntry[] = listed.output.runs;
+    const entry = entries.find((other): other is Extract<RunListEntry, { readonly state: "checked" }> => other.state === "checked" && other.runId === runId);
+    if (entry === undefined || entry.reason !== "plan_pending") return null;
+    return { apply: planApplyStateOf(entry, entries) };
+  } catch {
+    return null;
+  }
 }
 
 /** `codaryn changes`. Text on stdout, or ChangesOutput as one JSON line with `--json`. Errors are CliErrorOutput. */
@@ -276,6 +341,7 @@ export async function runChanges(io: ChangesEnvironment): Promise<CommandOutcome
   const currentKey = knownKeyValues(io.env);
   // N-19: one ASCII JSON line. N-27 (c): keys are hidden in the strings before the JSON is written
   // (in JSON text a control character becomes a six-character escape the key check cannot see through).
-  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output, io.messages), currentKey);
+  const planRun = parsed.args.json || outcome.output.files.length > 0 || outcome.output.applyRun !== undefined ? null : await planRunOf(io, parsed.args.settings, outcome.output.runId);
+  const text = parsed.args.json ? jsonLine(hideKeysInStrings(outcome.output, currentKey)) : hideKeys(renderChanges(outcome.output, io.messages, planRun), currentKey);
   return { text, exitCode: outcome.output.exitCode };
 }

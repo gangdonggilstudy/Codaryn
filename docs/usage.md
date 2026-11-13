@@ -110,7 +110,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261113T021512Z-b4fd29f4
 **runs:** 작업 공간의 실행 목록이다(10절). 실제 출력:
 
 ```
-run id                     started              changes  result
+run id (UTC)               started (local)      changes  result
 20261113T021512Z-b4fd29f4  2026-11-13 11:15:12  1        done (done/verified)
 ```
 
@@ -148,7 +148,7 @@ codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:
 codaryn: Files reverted: 0 (complete)
 Files skipped: 1
   summary.md — already as it was before the run (already_reverted)
-This run was already reverted before, so its files may show as changed since the run. (complete, 2026-11-13 11:15:13)
+Files already as before the run are skipped; it was reverted before (complete, 2026-11-13 11:15:13)
 ```
 
 **다시 체험하기:** 되돌린 뒤 같은 사본에서 `run`부터 다시 하거나 새로 복사한다. 되돌리지 않고 다시 실행하면 `summary.md`가 이미 있어 첫 `write_file`이 `conflict`로 거부되고, 이전 실행이 만든 파일로 검증이 통과해 `changes`가 빈 `done`이 된다. **검증 통과는 이번 실행이 파일을 바꿨다는 뜻이 아니다.** 끝 요약의 `Files changed`와 `changes`를 함께 본다.
@@ -360,7 +360,7 @@ codaryn: finished — needs input (no_verifier)
 **결과 읽기와 되돌리기:** OpenAI로 한 실행도 Anthropic 실행과 같이 `runs`, `report`, `changes`, `revert`로 다룬다(10절, 11절). main `e75726e`에서 위 실행을 다룬 실제 출력:
 
 ```
-run id                     started              changes  result
+run id (UTC)               started (local)      changes  result
 20261112T083533Z-dcf48f22  2026-11-12 17:35:33  1        needs input (needs-input/no_verifier)
 ```
 
@@ -396,7 +396,7 @@ run id                     started              changes  result
 | `requestTimeoutMs`, `maxRetries` | HTTP 요청 시간 제한(기본 600000)과 재시도 횟수(0~10, 기본 2) |
 | `apiBaseUrl` | API 주소. 보통 비워 둔다 |
 | `limits` | 한도의 **상한**. task가 비운 필드에는 이 값을 쓴다 |
-| `policy`, `verifiers` | 간편 형식과 한 줄 실행에서만 쓴다. task 파일은 자기 값을 쓴다 |
+| `policy`, `verifiers` | 간편 형식과 한 줄 실행에서만 쓴다. task 파일은 자기 값을 쓴다. 명령 규칙에 묻고 실행하는 `confirm: true`를 둘 수 있다(13절) |
 | `secretEnv` | 가릴 값으로 등록할 환경 변수 이름. task의 것에 더해진다 |
 | `integrity.paths` | 작업 공간 밖 검증 자료(기준 테스트 등)의 절대 경로. 실행 중 바뀌면 `needs-input`/`protected_changed`([계약 15절](cli-contract.md#15-단계-3-계약-u-1u-3-u-5-u-6)) |
 | `language` | 사람용 글의 언어 `"ko"` 또는 `"en"`(8절) |
@@ -415,7 +415,7 @@ run id                     started              changes  result
 ```
 
 - `--profile <이름>`은 `run`(모든 형식)과 `doctor`가 받는다. 이름은 영문·숫자·`.`·`_`·`-` 1~64자이며, 형식이 틀리면 `invalid_arguments`다.
-- 간편 형식과 한 줄 실행에서는 프로필의 `policy`·`verifiers`가 설정의 것을 대신하고, `limits`는 설정 `limits` 위에 필드별로 덮인다. task 파일 실행에서는 프로필의 한도만 상한으로 쓴다.
+- 간편 형식과 한 줄 실행에서는 프로필의 `policy`·`verifiers`가 설정의 것을 대신하고, `limits`는 설정 `limits` 위에 필드별로 덮인다. task 파일 실행에서는 프로필의 한도만 상한으로 쓴다. 프로필의 명령 규칙에도 `confirm: true`를 둘 수 있다(13절).
 - 프로필의 한도는 설정 최상위 `limits`보다 클 수 없다. 파일을 읽을 때 모든 프로필을 검사하므로, 고르지 않은 프로필 하나가 넘어도 `invalid_config`다. 오류는 이름 대신 순번으로 위치를 말한다(`profiles[1].limits.maxModelTurns`).
 - 프로필을 쓴 실행은 끝 요약에 `A profile was applied (--profile).`가 붙는다. 이름은 나오지 않는다.
 - 그 이름의 프로필이 없으면 `run`은 `invalid_config`다. 프로필은 사용자 설정 파일에만 있고 task 파일은 프로필을 가질 수 없다.
@@ -889,6 +889,89 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **파일 접근:** 경로는 `workspaceRoot` 안만 허용한다. 링크를 따라 밖으로 나가는 경로는 거부한다. **검증기 명령**은 사용자가 정한 것이므로 이 허용 목록과 따로 실행된다.
 - 허용 목록에 없는 명령은 `command_not_allowed`로 거부되고 실행은 계속된다(3절 체험의 2번째 턴). 끝 요약이 거부 수와 고칠 곳(task 파일이면 task의 `policy.commands`, 간편 형식·한 줄 실행이면 설정 파일이나 프로필)을 알린다. `doctor`의 허용 명령 항목으로 허용한 명령을 실행 때와 같은 규칙으로 찾을 수 있는지 미리 본다(7절).
 
+**묻고 실행하는 규칙(`confirm`):** 설정 파일이나 프로필의 명령 규칙에 `"confirm": true`를 두면, 그 규칙이 허용하는 명령은 실행 중에 사람에게 묻는다. 허락받으면 그 호출 한 번만 실행한다(U-74, U-109, U-110, U-137).
+
+```json
+"policy": { "commands": [{ "executable": "node", "argsPrefix": ["ask.mjs"], "allowExtraArgs": false, "confirm": true }],
+            "network": "deny", "destructive": "deny", "restorePathTokens": false }
+```
+
+- **받는 곳:** 설정 파일의 `policy.commands[i]`와 프로필의 `profiles.<이름>.policy.commands[i]`뿐이다. 그래서 간편 형식과 한 줄 실행에서만 쓰인다.
+  - task 파일에 두면 `invalid_task`(종료 2)이고 메시지는 `policy.commands[0] has an unknown field; allowed fields: executable, argsPrefix, allowExtraArgs`다.
+  - 작업 종류 정의(`workflows.<id>.policy`)에 두면 설정 파일 오류다. `doctor`의 설정 파일 항목이 `workflows[0].policy.commands[0] has an unknown field; allowed fields: executable, argsPrefix, allowExtraArgs`로 실패한다.
+  - 값은 `true`뿐이다. `false`면 `invalid_config`(종료 2)이고 메시지는 `policy.commands[0].confirm must be true when it is given`이다.
+  - `doctor`는 이런 설정을 유효하게 읽는다(`config file` 항목 `ok`). 묻는 규칙이 있다고 따로 알리지는 않는다.
+- **묻는 호출:** `confirm` 규칙만 그 호출을 허용할 때 묻는다. 같은 호출을 `confirm` 없는 규칙도 허용하면 묻지 않고 실행한다. 허용 목록 밖이거나 다른 이유(작업 공간 밖 등)로 거부되는 호출은 묻지 않고 거부한다. 묻는 것은 명령뿐이다.
+- **터미널에서만 묻는다:** `run`의 표준 입력과 stderr가 모두 터미널이고 `--quiet`가 아닐 때만 묻는다. stdout은 상관없다(파이프면 JSON 한 줄도 나온다). 질문은 stderr에 한 줄이다. 실제 출력(stderr의 앞부분, 줄 끝의 `y`는 친 답):
+
+  ```
+  codaryn: run started — provider anthropic
+  codaryn: turn 1
+  Allow a command for this one call? With no answer it is denied. Only its executable and its number of arguments (1) are shown, not the arguments themselves. Executable: node [y/N] y
+  codaryn: permission question — allowed by the person, for this call only
+  codaryn: run command — allowed (run_command)
+  codaryn: turn 2
+  ```
+
+  - 보이는 것은 실행 파일(가린 뒤)과 인자 개수뿐이다. 인자는 보이지 않는다.
+  - 한국어 질문은 `명령 하나를 이번 호출에만 허용할까요? 답하지 않으면 거부합니다. 보이는 것은 실행 파일 이름과 인자 개수(1개)뿐이며, 인자 자체는 보이지 않습니다. 실행 파일: node [y/N] (y·예·네: 예, Enter: 아니오)`다.
+- **답:** 한 줄로 답한다.
+  - `y`, `yes`, `예`, `네`(앞뒤 공백과 대소문자는 무시)면 그 호출 한 번만 허용한다. 다음 호출은 다시 판정한다.
+  - 그 밖의 줄(Enter 포함)은 그 사람의 거부다. 명령은 돌지 않고, 거부가 모델에 돌아가며 실행은 계속된다. 끝 요약은 다음과 같고, 이 호출에는 "규칙을 더하라"는 안내를 내지 않는다.
+
+    ```
+    Denied calls: 1
+    Denied by the person: 1 call(s) whose rule asks first.
+    ```
+
+    한국어로는 `거부된 호출: 1건`, `확인을 받게 된 명령의 호출 1건을 사람이 거부했습니다.`다.
+  - 답 없이 입력이 끝나면(Ctrl+D 등) 기본 거부다. 끝 요약은 `Denied with no answer: 1 call(s) whose rule asks first (the input ended or time ran out).`다.
+  - 질문을 기다리는 시간도 실행 시간 한도(`maxDurationMs`)에 든다. 한도에 닿으면 답 없이 거부되고 실행은 끝난다(코드 기준).
+- **질문 중의 Ctrl+C:** 그 호출만이 아니라 실행 전체를 취소한다(`cancelled`, 종료 5). 모델은 다시 부르지 않는다. 실제 출력(stderr):
+
+  ```
+  codaryn: permission question — denied: the run was cancelled while it waited
+  codaryn: run command — denied (command/confirmation_required)
+  codaryn: finished — cancelled (cancelled)
+  ── Result: cancelled — cancellation was requested (cancelled/cancelled) ──
+  Checks: none configured
+  Files changed: 0
+  Denied calls: 1
+  Denied because the run was cancelled while it waited: 1 call(s) whose rule asks first.
+  ```
+
+- **물을 수 없으면 기본 거부:** 터미널이 아니거나(파이프, 파일, 예약 작업) `--quiet`면 묻지 않고 거부한다. 실제 출력(표준 입력·stdout·stderr가 모두 파이프인 실행의 stderr):
+
+  ```
+  codaryn: turn 1
+  codaryn: permission question — denied by default (no answer, could not ask, or time ran out)
+  codaryn: run command — denied (command/confirmation_required)
+  codaryn: turn 2
+  codaryn: finished — needs input (no_verifier)
+  ── Result: needs input — no check is configured (needs-input/no_verifier) ──
+  Checks: none configured
+  Files changed: 0
+  Denied calls: 1
+  Denied without asking: 1 call(s) whose rule asks first (not at a terminal, or --quiet).
+  ```
+
+  - 한국어 끝 요약은 `확인을 받게 된 명령의 호출 1건을 묻지 않고 거부했습니다(터미널이 아니거나 --quiet 옵션을 줌).`다.
+  - `--quiet`면 사람용 줄 없이 JSON 한 줄만 나오고, 기록은 같다.
+- **기록:** 질문마다 실행 기록(`journal.jsonl`)에 세 줄이 이 차례로 남는다. 아래는 사람이 거부한 실행의 실제 기록이다(각 줄의 `seq`, `at`, `runId`는 뺐다).
+
+  ```
+  {"type":"confirmation_requested","kind":"permission","id":"q1","callId":"toolu_a1","tool":"run_command","permission":"command","subject":"node","argumentCount":1}
+  {"type":"confirmation_answered","id":"q1","decision":"deny","by":"user"}
+  {"type":"tool_decision","callId":"toolu_a1","tool":"run_command","stage":"policy_effective","allowed":false,"permission":"command","code":"confirmation_required"}
+  ```
+
+  - 답(`decision`, `by`): 허락은 `allow_once`/`user`, 그 사람의 거부는 `deny`/`user`, 답 없음과 물을 수 없음은 `deny`/`default`, 기다리는 동안의 취소는 `deny`/`cancelled`다. 인자는 기록하지 않는다.
+  - 그 뒤: 허락이면 `tool_decision`이 허용이고 명령의 `tool_result`가 이어진다. 거부면 거부 `tool_result`(`policy_denied`)가 모델에 돌아간다. 기다리는 동안 실행이 취소되거나 시간이 다 되면 거부 `tool_decision` 뒤 `tool_result` 없이 실행이 끝난다(U-137). 그래서 이런 호출도 `Denied calls`에 든다.
+- **확인 범위:** 위 출력은 main `cd1cace`의 실제 CLI를 루프백의 가짜 Anthropic 서버(네트워크 막이 켬)와 흉내 낸 터미널로 돌린 것이다. 흉내는 표준 입력·stdout·stderr의 `isTTY`만 참으로 두고, 답은 파이프로 넣었다.
+  - 이 흉내에서 `y`, `yes`, `예`, `네`, `  Y `는 허락으로, `no`와 Enter는 그 사람의 거부로, Ctrl+D는 답 없음으로, Ctrl+C는 취소로 기록됐다.
+  - 프로필(`--profile`)에 둔 규칙도 같이 물었다.
+  - 실제 Windows 콘솔과 Unix 터미널에서는 확인하지 않았다(16절).
+
 **보호 경로(`protectedPaths`):** 작업 공간 기준 상대 경로 목록이다. 그 아래에 대한 파일 도구의 쓰기를 거부한다(`tool_decision.code`가 `protected_path`). 읽기와 검색은 된다.
 
 - **권고:** 테스트와 검증 설정을 보호한다. 테스트 폴더, 테스트 파일, 검증기가 읽는 설정 파일(예: `npm test`를 쓴다면 `package.json`)이 대상이다. 모델이 테스트를 고쳐 검증을 통과시키는 길을 막는다. 문서 작업에서는 원본 자료를 보호한다(3절 체험의 `notes.md`).
@@ -965,6 +1048,7 @@ node --test dist/tests/live/openai-live.js
 - **OS 격리 없음:** 허용한 명령과 검증기 명령은 사용자 권한으로 실행된다. 작업 공간 밖 파일 접근과 네트워크 사용을 OS 수준에서 막지 않는다.
 - **가릴 값이 든 줄:** 수정, 이동, 삭제할 수 없다. 사람이 직접 고친다. 그 줄 앞뒤의 다른 줄을 바꿔 여러 줄에 걸친 식의 의미가 달라지는 것은 막지 못한다.
 - **남는 자손 프로세스:** 명령이 끝난 뒤에도 분리되어 떠 있는 자손 프로세스(예: 백그라운드로 띄운 서버)는 남을 수 있다.
+- **실행 중 권한 질문(13절 `confirm`):** 터미널을 흉내 내어서만 확인했다. 실제 Windows 콘솔과 Unix 터미널의 키 입력(Ctrl+C, Ctrl+D, Windows의 Ctrl+Z)은 그대로 재현되지 않았다. 묻는 것은 명령뿐이다.
 - **스냅샷:** 원문이라 비밀이 있을 수 있고, 실행된 명령이 읽을 수 있다. 보관 기간 관리가 없으므로 `cleanup`으로 미리 본 뒤 지운다(18.8절). 손으로 지우면 계획 실행을 잃어 그 적용을 되돌릴 수 없게 될 수 있다.
 - **개인정보:** 표와 문서의 내용은 그대로 모델에 간다. 등록한 가릴 값 말고는 가리지 않고, 원자료 대신 집계만 보내는 도구가 아직 없다(18.7절).
 - **하드 링크가 없는 드라이브:** FAT32·exFAT처럼 하드 링크가 없는 드라이브에서는 파일 정리의 이동과 그 되돌리기를 기본으로 하지 않는다. 사람이 그 적용·되돌리기 한 번마다 `--allow-unsafe-move`로 동의해야 하고, 동의하면 "대상에 생긴 파일을 덮어쓰지 않는다"는 보장이 없다(18.5절). 이 경로는 하드 링크 만들기가 실패하도록 흉내 낸 환경에서만 확인했고, 실제 FAT32·exFAT 드라이브에서는 확인하지 않았다.
@@ -1015,14 +1099,15 @@ node --test dist/tests/live/openai-live.js
 - **실행 기록 변조(결정 DR-38, DR-37 (b)):** `report`, `changes`, `revert`는 `.codaryn\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
   - **실행 중의 변경은 알아챈다.** 실행의 시작과 끝, 그리고 명령을 돌린 뒤마다 `.codaryn\`을 살피고, 그 실행이 쓴 것 말고 바뀐 것이 있는지 본다. 다른 것이 바뀌었으면 실행을 `failed`/`state_changed`(종료 1)로 끝내고 그 실행에 "기록이 바뀜" 표시를 남긴다. 확인(main `6df2eae`, 허용한 `node` 명령이 고침): 그 실행 자신의 기록, 이미 끝난 다른 실행의 `result.json`, `.codaryn\`에 새 파일 하나 모두 이렇게 끝났다. 끝 요약은 `the state directory was changed by something other than the run, or could not be checked (failed/state_changed)`와 "허용한 명령과 검사를 살펴보라"는 안내를 낸다.
   - 표시가 붙는 것은 그때 돌던 실행이다. 기록이 고쳐진 다른 실행에는 표시가 없다.
-  - 표시가 있는 실행: `report`가 `This run has a records-changed mark: … this report may not match what happened.`를 낸다. `changes`는 파일 글을 보이지 않는다(이유는 `masking_unverified`로만 나오고 표시는 따로 말하지 않는다). `revert`는 막지 않고 파일마다 스냅숏과 다이제스트를 확인하며 JSON에 `recordsChanged: true`를 싣는다(사람용 글에는 아직 표시가 없다). `runs`는 결과 칸 끝에 표시를 붙이고, `--json`에는 `recordsChanged: true`가 있다. 실제 출력(main `bded611`):
+  - 표시가 있는 실행: `report`가 `This run has a records-changed mark: … this report may not match what happened.`를 낸다. `changes`는 파일 글을 보이지 않는다(이유는 `masking_unverified`로만 나오고 표시는 따로 말하지 않는다). `revert`는 막지 않고 파일마다 스냅숏과 다이제스트를 확인하며 JSON에 `recordsChanged: true`를 싣는다. 사람용 글에는 파일 목록 뒤에 `This run has a records-changed mark. The revert still checks every file against its snapshot and digest.`(한국어 `이 실행에는 기록 변경 표시가 있습니다. 되돌리기는 그래도 파일마다 스냅샷과 다이제스트를 확인합니다.`)가 나온다(U-139). `runs`는 결과 칸 끝에 짧은 표시를 붙이고, 그 뜻은 표 아래에 한 줄로 한 번 말한다(U-157). `--json`에는 `recordsChanged: true`가 있다. `runs`의 실제 출력(U-157, 파일 하나를 만든 뒤 허용한 `node -e` 명령이 `.codaryn\`에 파일 하나를 쓴 실행):
 
     ```
-    run id                     started              changes  result
-    20261112T133827Z-be2edb3c  2026-11-12 22:38:27  0        failed (failed/state_changed) · records changed (something other than the run changed its records)
+    run id (UTC)               started (local)      changes  result
+    20261113T051057Z-c61169fd  2026-11-13 14:10:57  1        failed (failed/state_changed) · records changed
+    records changed: something other than the run changed that run's records
     ```
 
-    한국어로는 `실패 (failed/state_changed) · 기록 변경됨(실행이 아닌 것이 실행 기록을 바꿈)`이다. 표시가 붙은 줄은 영어로 155자라 80칸 터미널에서는 접힌다.
+    한국어로는 `실패 (failed/state_changed) · 기록 변경됨`이고, 표 아래 줄은 `기록 변경됨: 실행이 아닌 것이 그 실행의 기록을 바꿨습니다`이다. 표시가 붙은 줄은 영어로 104칸, 한국어로 95칸(한글은 두 칸으로 셈)이다. 설명을 표 아래로 옮겨 영어 121칸, 한국어 118칸에서 줄었다. 영어는 상태 글이 길어 아직 100칸을 넘는다(`done (done/verified)` 줄은 95칸).
   - 표시가 있는 계획 실행은 `apply`가 거부한다(`plan_records_changed`, 18.3절).
   - 실행 자신의 `journal.jsonl`에 엉뚱한 줄이 들어가면 `report`와 `changes`가 그 실행을 `invalid_run_record`로 읽지 않는다.
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).
@@ -1078,7 +1163,7 @@ node --test dist/tests/live/openai-live.js
 | `plan_secrets_differ` | 지금 등록한 가릴 값이 계획 실행 때와 다르게 계획의 경로를 가린다. 아무것도 보이거나 옮기지 않았다. 계획 실행에 쓴 task로 다시 하거나, 계획을 새로 만든다(18.3절) |
 | `run_not_plan` | `plan`·`apply`에 준 실행이 계획을 제안하고 멈춘 실행(`plan_pending`)이 아니다. 또는 `apply`의 task가 `workflowRef`로 `plan: "apply"` 작업 종류를 고르지 않았다. 계획 실행에 쓴 task로 한다(18.3절) |
 | `plan_not_approved` | `--digest`가 없거나 그 계획의 다이제스트와 맞지 않는다. `plan`으로 다이제스트를 보고 앞 12자 이상을 준다 |
-| `plan_already_applied` | 그 계획은 이미 적용됐다. 결과는 `report --run <적용 실행 id>`로 보고, 되돌리려면 `revert --run <적용 실행 id>`를 쓴다 |
+| `plan_already_applied` | 그 계획은 이미 적용됐다. 결과는 `report --run <적용 실행 id>`로 본다. 다시 하려면 `revert --run <적용 실행 id>`로 되돌린 뒤 `run`으로 새 계획을 만든다. 오류 설명의 고칠 곳은 `To fix: See codaryn report. To do it again, revert it, then make a new plan with codaryn run.`(한국어 `고치는 법: codaryn report로 결과를 보고, 다시 하려면 되돌린 뒤 codaryn run으로 새 계획을 만드세요.`)이다(main `cd1cace`) |
 | `run_not_awaiting_review` | `review`에 준 실행이 `awaiting_review`로 끝나지 않았다 |
 | `plan_records_changed` | 그 계획 실행에 기록 변경 표시가 있다(`runs`의 결과 칸 끝에 `records changed`). 실행이 아닌 것이 그 기록을 바꿔 계획이 읽은 것과 다를 수 있어 아무것도 묻거나 옮기지 않았다. `codaryn run`으로 계획을 새로 만들어(`codaryn plan`은 계획을 보여 주기만 한다) 새 계획을 읽고 적용한다. `plan`은 그 계획을 경고와 함께 보이지만 적용 명령은 보이지 않는다(18.3절) |
 | `failed`/`state_changed` | 실행 중에 그 실행이 아닌 것(허용한 명령, 명령형 검증기, 다른 프로그램)이 `.codaryn\`을 바꿨다. 실행을 멈췄고 표시를 남겼다. `report`를 읽고, 허용한 명령과 검증기가 `.codaryn\`에 쓰지 않는지 본 뒤 다시 실행한다(16절 "실행 기록 변조") |
@@ -1233,6 +1318,8 @@ codaryn: finished — needs input (plan_pending)
 A plan is ready: actions 3. Nothing was changed; it waits for approval.
 Files changed: 0
 Usage: model turns 2 · tool calls 2 · 0 s
+The agent's description (the model's own words, not checked, and not what you approve):
+  | 사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다
 Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.
 Run id: 20261112T200120Z-c27683db
 Report: codaryn report --workspace <workspace> --run 20261112T200120Z-c27683db
@@ -1302,7 +1389,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T200121Z-da084c3e
 - 검증 1번은 적용이 늘 돌리는 파일 목록 확인(`inventory`)이다. 계획에 있던 이동·폐기만 일어났는지 본다. 2번은 task의 `file_rules`다.
 - 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등. 콘솔에서는 `--json`이나 `--quiet`일 때만, 10절 "터미널에서"), 같은 내용이 그 실행의 `result.json`이 된다.
 - 폐기한 파일은 `.codaryn\discarded\<적용 실행 id>\` 아래에 동작 번호 이름(`2`)으로 있다.
-- `runs`에는 적용 실행이 맨 위에 `3 actions  done (done/verified)`로 나온다. 적용 실행의 변경 칸은 바꾼 파일 수가 아니라 적용한 동작 수이고, 그렇다고 낱말로 말한다(한국어 `동작 3`). `runs --json`의 `changes`는 수(`3`) 그대로다. `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> (<지역 시각>)` 줄이 붙는다(예: `Applied by run 20261112T235227Z-ff199ffc (2026-11-13 08:52:27)`, main `76c5280`, DR-59). 한국어는 `적용 실행 <id>에서 적용함 (<지역 시각>)`이다.
+- `runs`에는 적용 실행이 맨 위에 `3 actions  done (done/verified) · applies the plan of run <계획 실행 id>`로 나온다(한국어는 결과 칸 끝이 `· 실행 <계획 실행 id>의 계획 적용`). 적용 실행의 변경 칸은 바꾼 파일 수가 아니라 적용한 동작 수이고, 그렇다고 낱말로 말한다(한국어 `동작 3개`). `runs --json`의 `changes`는 수(`3`) 그대로다. `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> (<지역 시각>)` 줄이 붙는다(예: `Applied by run 20261112T235227Z-ff199ffc (2026-11-13 08:52:27)`, main `76c5280`, DR-59). 한국어는 `적용 실행 <id>에서 적용함 (<지역 시각>)`이다.
 - **실행 목록의 계획 실행 줄(U-16):** 결과 칸이 그 계획의 적용이 어떻게 되었는지 말한다. 판정은 적용 실행의 기록으로 한다(계약의 `planApplyStateOf`).
 
   | 상태 | 결과 칸(영어) | 한국어 | 언제 |
@@ -1529,7 +1616,7 @@ node dist/src/cli/main.js review --task <task.json> --run <실행 id> --reject
 - 실행의 `result.json`은 바뀌지 않는다. 판정해도 실행이 `done`이 되지는 않는다.
 - 메모는 500자 이하다. 키 모양이 있으면 `key_in_file`이고, 등록한 가릴 값은 가려서 저장한다.
 - `awaiting_review`로 끝나지 않은 실행이면 `run_not_awaiting_review`(종료 2)다. `--run latest`를 받으므로, 고른 실행 id(stderr)가 본 실행과 같은지 확인한다.
-- `report`의 `Review checklist` 절이 확인 항목과 판정을 보여 준다. 판정 전에는 `No verdict yet.`, 판정 뒤에는 예를 들어 `Verdict: **rejected** (`2026-11-12T05:58:15.969Z`)`다. 판정은 그 실행의 `review.json`에 있다.
+- `report`의 `Review checklist` 절이 확인 항목과 판정을 보여 준다. 판정 전에는 `No verdict yet.`, 판정 뒤에는 예를 들어 `Verdict: **rejected** (`2026-11-12T05:58:15.969Z`)`이고, 그 뒤에 판정을 바꾸는 명령 줄(`A later review replaces it: …`)이 붙는다(18.9절). 판정은 그 실행의 `review.json`에 있다.
 - 확인 항목은 작업 종류가 정한다. task의 `humanReview.checklist`로 바꿀 수 있다.
 - 사람 확인은 사람의 판단을 기록할 뿐이다. 보고서의 해석이나 분석 방법을 Codaryn이 확인하지는 않는다.
 - 결과 표의 형태와 집계는 `data_checks` 검증기로 확인한다(규칙은 [CLI·공통 계약](cli-contract.md)과 `src/contracts/verify.ts`).
@@ -1754,14 +1841,26 @@ The run's result and records are unchanged; `codaryn report` shows the verdict.
 - 판정은 `review.json`에만 남는다. 실행의 상태는 그대로 `needs-input`/`awaiting_review`이고, `runs`도 그렇게 보인다. 결과 칸 끝에는 판정이 붙는다(한국어 `검토: 받아들임`). `runs --json`의 그 항목에는 `review`(`verdict`, `at`)가 있다. 메모는 `report`에만 나온다:
 
   ```
-  run id                     started              changes  result
-  20261113T025019Z-d83b9b61  2026-11-13 11:50:19  2        needs input (needs-input/awaiting_review) · review: accepted
+  run id (UTC)               started (local)      changes  result
+  20261113T045806Z-27e1337b  2026-11-13 13:58:06  2        needs input (needs-input/awaiting_review) · review: accepted
   ```
 
-- 판정 뒤 보고서의 사람 확인 절 끝은 `No verdict yet.` 대신 ``Verdict: **accepted** (`2026-11-13T02:50:19.833Z`), note: `checked-by-hand` ``다.
+- 판정 뒤 보고서의 사람 확인 절은 다음과 같다(U-131). 판정 전과 달리 `The run waits …` 줄이 없고, `No verdict yet.` 자리에 판정 줄이, 그 뒤에 판정을 바꾸는 명령 줄이 온다. 이 블록과 위 `runs` 표는 main `cd1cace`에서 다시 돌린 실행이라 실행 id와 시간이 위와 다르다.
+
+  ```
+  ## Review checklist
+
+  - `The report's interpretation matches the result table.`
+  - `No input data the goal names is missing from the analysis.`
+
+  Verdict: **accepted** (`2026-11-13T04:58:06.648Z`), note: `checked-by-hand`
+  A later review replaces it: `codaryn review --run 20261113T045806Z-27e1337b --accept | --reject`.
+  ```
+
+  - 처음 실행(`20261113T025019Z-d83b9b61`, main `28696fa`)의 판정 줄은 ``Verdict: **accepted** (`2026-11-13T02:50:19.833Z`), note: `checked-by-hand` ``였다.
 - 한국어 `review` 출력의 첫 줄은 `실행 <id>의 검토: 받아들임.`이다.
 - 자기 표로 해 볼 때는 `task.json`의 목표와 검증기 경로·열 이름을 바꾸고, 실제 모델 설정(4절)으로 돌린다. 개인정보가 든 표는 쓰지 않는다(18.7절).
-- 확인 범위: 위 출력은 main `28696fa`의 실제 CLI를 저장소 밖의 복사본에서 돌린 것이다(키 없음, 대본 모델).
+- 확인 범위: 위 출력은 main `28696fa`의 실제 CLI를 저장소 밖의 복사본에서 돌린 것이다(키 없음, 대본 모델). 판정 뒤의 `runs` 표와 보고서는 main `cd1cace`에서 다시 돌렸다. 그때 run·report(판정 전)·review의 블록은 실행 id와 시간 말고는 위와 같았다.
 
 ### 18.10 사용자 정의 작업 종류 체험
 

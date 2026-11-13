@@ -56,6 +56,7 @@ import type {
   ResolvedPlanAction,
   ReviewOutput,
   RunId,
+  ShownWorkspace,
   StateUncheckedSince,
   StoredPlan,
 } from "../contracts/index.js";
@@ -74,6 +75,7 @@ import {
   listRuns as storeListRuns,
   loadPlan as storeLoadPlan,
   readReviewRecord,
+  readRevertRecord,
   releaseLock,
   writeResult,
   writeReviewRecord,
@@ -625,6 +627,15 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     }
   }
 
+  // U-131 (N5, UXM-15): a plan made with another task than this apply's is told before the
+  // approval question and right after the apply's start line, not only in the end summary (the
+  // engine's notice stays there). The same task id goes to the engine (ApplyDeps.planTaskId).
+  const planTaskId = await planTaskIdOf(io, workspaceRoot, planRunId);
+  const otherTask =
+    planTaskId !== null && planTaskId !== task.id
+      ? catalogLine(io.messages, (catalog) => catalog.format("apply.notice.plan_task_differs"), () => PLAN_TASK_DIFFERS_ENGLISH)
+      : null;
+
   // Approval (6.4 1): the digest's first characters (cli-flag, or adapter for the app layer), or a
   // [y/N] question at a terminal.
   let approval: ApprovalChannel;
@@ -650,7 +661,11 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     const currentKey = knownKeyValues(io.env);
     // U-14 (AXM-15): the approval question shows the agent's description too (not part of the digest).
     const summary = await planSummary(io, workspaceRoot, planRunId, shown.digest, shown.privacy);
-    const question = [renderPlan({ ...shown.output, inventoryLimitReached, ...(summary === null ? {} : { summary }) }, currentKey, io.messages).trimEnd(), applyQuestion(io.messages)].join("\n");
+    const question = [
+      renderPlan({ ...shown.output, inventoryLimitReached, ...(summary === null ? {} : { summary }) }, currentKey, io.messages).trimEnd(),
+      ...(otherTask === null ? [] : [otherTask]),
+      applyQuestion(io.messages),
+    ].join("\n");
     const answer = (await ask(question))?.trim().toLowerCase() ?? "";
     if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was moved");
     approval = "cli-tty";
@@ -687,7 +702,6 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
       // ApplyDeps.stateGuard. `runId` is this apply run; `planRunId` the plan run it carries out,
       // whose directory gets the applied mark. The journal notes each discarded file as its own.
       const recorders = createApplyRecorders({ workspaceRoot, runId, clock: io.clock, planRunId });
-      const planTaskId = await planTaskIdOf(io, workspaceRoot, planRunId);
       const journal = observeApply(
         recorders.journal,
         privacy,
@@ -696,6 +710,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         (event) => {
           if (event.type === "plan_checked") unsafeMoves = event.unsafeMoves?.length ?? 0;
         },
+        (event) => (event.type === "apply_started" ? otherTask : null),
       );
       result = await (io.applyPlan ?? engineApplyPlan)({
         plan: shown.plan,
@@ -795,6 +810,8 @@ function observeApply(
   write: ((line: string) => void) | undefined,
   human: HumanOutput | undefined,
   observe: (event: ApplyJournalEvent) => void,
+  /** U-131 (N5): one more progress line after a record's own (null: none). */
+  after: (event: ApplyJournalEvent) => string | null = () => null,
 ): ApplyJournal {
   const render = write === undefined || human?.applyProgressLine === undefined ? undefined : human.applyProgressLine.bind(human);
   return {
@@ -804,19 +821,32 @@ function observeApply(
       // (ApplyJournalEvent): neither the observer nor the renderer gets it.
       if (event.type === "plan_item_started") return;
       observe(event);
-      if (render === undefined || write === undefined) return;
+      if (write === undefined) return;
+      const lines: string[] = [];
       try {
-        const line = render(event);
-        if (line === null) return;
-        const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
-        if (masked.ok) write(`${cleanText(masked.text)}\n`);
+        const line = render === undefined ? null : render(event);
+        if (line !== null) lines.push(line);
+        const more = after(event);
+        if (more !== null) lines.push(more);
       } catch {
         // Progress is best effort.
+      }
+      for (const line of lines) {
+        try {
+          const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
+          if (masked.ok) write(`${cleanText(masked.text)}\n`);
+        } catch {
+          // Progress is best effort.
+        }
       }
     },
     close: () => journal.close(),
   };
 }
+
+/** U-131 (N5): the English of apply.notice.plan_task_differs, when no catalog is given. */
+const PLAN_TASK_DIFFERS_ENGLISH =
+  "The plan was made with another task than the one given to this apply (for example a task file, and the quick form now): the checks and rules used are this apply's, not those of the plan's task. The apply was not stopped for this. An apply with the same task form as the plan run uses that task's checks and rules.";
 
 /**
  * U-16 (UXM-15, ApplyDeps.planTaskId): the task id the plan run ran with, as its run list entry
@@ -838,7 +868,7 @@ async function planTaskIdOf(io: PlanCommandEnvironment, workspaceRoot: string, p
 async function awaitingReview(
   workspaceRoot: string,
   runId: string,
-): Promise<{ ok: true; checklist: readonly MaskedText[] } | { ok: false; outcome: CommandOutcome }> {
+): Promise<{ ok: true; checklist: readonly MaskedText[]; changedFiles: number } | { ok: false; outcome: CommandOutcome }> {
   const dir = path.join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME, runId);
   try {
     const info = await lstat(dir);
@@ -866,15 +896,24 @@ async function awaitingReview(
   if (!Array.isArray(checklist) || !checklist.every((item) => typeof item === "string")) {
     return { ok: false, outcome: cliError("invalid_run_record", "the run's result.json has no readable checklist") };
   }
-  return { ok: true, checklist: checklist as MaskedText[] };
+  // U-131 (N3): whether the run changed files (a rejected run then has something to revert).
+  const changedFiles = Array.isArray(result.changes) ? result.changes.length : 0;
+  return { ok: true, checklist: checklist as MaskedText[], changedFiles };
 }
 
 /**
  * U-36: review's text without --json: the recorded line (review.recorded, or review.recorded_replaced
  * when an earlier review was replaced, with the verdict's words), the checklist as items, and
- * review.unchanged. English as before.
+ * review.unchanged. English as before. U-131 (N3, AXM-21): `revert`, given for a rejected run that
+ * changed files, adds the command that undoes them (summary.next_revert, or summary.next_revert_typed
+ * with the --workspace the person typed, DR-51).
  */
-export function renderReview(output: ReviewOutput, currentKey: KnownKeys, messages?: MessageCatalog): string {
+export function renderReview(
+  output: ReviewOutput,
+  currentKey: KnownKeys,
+  messages?: MessageCatalog,
+  revert?: { readonly workspaceShown: ShownWorkspace | null },
+): string {
   const lines = [
     catalogLine(
       messages,
@@ -887,6 +926,18 @@ export function renderReview(output: ReviewOutput, currentKey: KnownKeys, messag
     ),
     ...output.checklist.map((item, index) => `  ${index + 1}. ${cleanText(hideKeys(item, currentKey))}`),
     catalogLine(messages, (catalog) => catalog.format("review.unchanged"), () => "The run's result and records are unchanged; `codaryn report` shows the verdict."),
+    ...(revert === undefined
+      ? []
+      : [
+          catalogLine(
+            messages,
+            (catalog) =>
+              revert.workspaceShown === null
+                ? catalog.format("summary.next_revert", { runId: messageRunId(output.runId) })
+                : catalog.format("summary.next_revert_typed", { runId: messageRunId(output.runId), workspace: revert.workspaceShown }),
+            () => `Revert: codaryn revert --workspace ${revert.workspaceShown ?? "<workspace>"} --run ${output.runId}`,
+          ),
+        ]),
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -944,7 +995,17 @@ export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutc
     replaced,
   };
   if (args.json) return { output, exitCode: output.exitCode };
-  return { text: renderReview(output, currentKey, io.messages), exitCode: output.exitCode };
+  // U-131 (N3): a rejected run that changed files: how to undo them, with the workspace as typed.
+  // U-153 (R-94 I2): not when its changes were already reverted completely (the command would only
+  // end as already_reverted). A record that cannot be read counts as none: the line is given.
+  let revert: { readonly workspaceShown: ShownWorkspace | null } | undefined;
+  const revertedFully = args.verdict === "rejected" && review.changedFiles > 0 && (await readRevertRecord(workspaceRoot, runId).catch(() => null))?.status === "complete";
+  if (args.verdict === "rejected" && review.changedFiles > 0 && !revertedFully) {
+    const typed = args.form.input.kind === "quick" ? args.form.input.workspace : null;
+    const masked = typed === null ? null : createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(typed);
+    revert = { workspaceShown: typed === null || masked === null ? null : toShownWorkspace(typed, masked.ok ? masked.text : null) };
+  }
+  return { text: renderReview(output, currentKey, io.messages, revert), exitCode: output.exitCode };
 }
 
 /** Exposed for tests: the latest run rule the commands share with the store (N-23 b). */

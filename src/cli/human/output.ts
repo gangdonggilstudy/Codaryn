@@ -423,15 +423,22 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (!Object.prototype.hasOwnProperty.call(CLI_ERROR_EXIT_CODES, code)) {
         return lines([`${HUMAN_PREFIX}${label} (${token(code)})`]);
       }
-      const out = [`${HUMAN_PREFIX}${label} — ${catalog.format(`error.${code}.what`)} (${code})`];
+      // U-228: run_not_plan for a run whose plan is of another kind (hint plan_kind_differs): the run
+      // has a plan, so the line says so and the hint is the fix, in place of run_not_plan's own lines.
+      const otherKind = code === "run_not_plan" && output.hint === "plan_kind_differs";
+      const what = otherKind ? catalog.format("error.run_not_plan.other_kind") : catalog.format(`error.${code}.what`);
+      const out = [`${HUMAN_PREFIX}${label} — ${what} (${code})`];
       const diagnostic = output.diagnostic === undefined ? null : diagnosticText(output.diagnostic);
       if (diagnostic !== null) out.push(`  ${diagnostic}`);
-      out.push(`  ${catalog.format("error.fix_label")}: ${catalog.format(`error.${code}.fix`)}`);
+      const fix = otherKind ? catalog.format("error.hint.plan_kind_differs") : catalog.format(`error.${code}.fix`);
+      out.push(`  ${catalog.format("error.fix_label")}: ${fix}`);
       // N-D 4: the hints are the renderer's own indented lines, so the CLI finds them and adds none.
       if (DOCTOR_CODES.has(code)) out.push(`  ${catalog.format("error.doctor_hint")}`);
       if (code === "workspace_locked") out.push(`  ${catalog.format("lock.remove_hint")}`);
       // R-12 L-2: the error's own advice (CliErrorOutput.hint), as one more indented line.
-      if (isOneOf(output.hint, CLI_ERROR_HINTS)) out.push(`  ${catalog.format(`error.hint.${output.hint}`)}`);
+      if (isOneOf(output.hint, CLI_ERROR_HINTS)) {
+        if (!otherKind) out.push(`  ${catalog.format(`error.hint.${output.hint}`)}`);
+      }
       // U-37 (R-69 M1): or a hint that takes a value, from the error's detail.
       else out.push(...detailedHintLines(output));
       return lines(out);

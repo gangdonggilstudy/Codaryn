@@ -592,6 +592,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `codaryn doctor [--config <파일>] [--vars-file <파일>] [--task <task.json> | --workspace <디렉터리>] [--json]`은 네트워크 접속, 모델 요청, 쓰기 없이 점검한다. 기본 출력은 항목마다 한 줄의 글이고, `--json`이면 `DoctorOutput` 한 줄이다.
   - U-100(설계 공백 C-10, N-10): `api_key` 점검이 키 변수가 없다고 하면(`doctor.api_key.missing`) 그 줄 아래에 `init`이 쓰는 등록 안내 한 줄을 메시지 자리에 맞춰 들여 쓴다. Windows는 `init.key_hint_windows`, 그 밖은 `init.key_hint_posix`이고 `{keyEnv}`는 그 점검의 키 변수다. 어느 쪽도 명령에 값을 넣지 않는다. 사람용 글에만 있고 `--json`은 그대로다.
+  - U-115(UXM-9): stdout이 터미널이면 끝 줄 다음에 '아직 안 한 설정과 다음에 할 일'이 온다("처음 시작 안내" 절). 터미널이 아니면 그대로다.
 - `--task`와 `--workspace`는 함께 쓸 수 없다(`invalid_arguments`, W-5). task 파일이 자기 작업 공간(`workspaceRoot`)을 정하기 때문이다. 작업 공간을 보는 항목(`workspace`, `file_locations`, `install_dir`, `integrity_paths`의 위치 판정)은 task의 `workspaceRoot`나 `--workspace`를 쓰고, 둘 다 없으면 `skipped`다.
 - 항목(`DOCTOR_CHECK_IDS` 순서): `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`, `language`(N-20). 상태는 `ok`/`warn`/`fail`/`skipped`(볼 대상이 없음)다.
 - 종료(`DOCTOR_EXIT_CODES`): 가장 나쁜 항목에 따라 `ok` 0, `warn` 3, `fail` 1이다(`skipped`는 `ok`로 센다). 인자 오류는 `invalid_arguments`(`CliErrorOutput`)다.
@@ -662,6 +663,22 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - 옵션은 사용법 줄의 순서로 적는다. `apply`의 `--run`은 계획 실행의 정확한 id만 받으므로 `plan_run`이고, `cleanup`의 `--run`은 `run_ids`다. 둘 다 `latest`를 받지 않는다. `apply`는 `--json`도 적는다(U-23).
 - 도움말에는 결정 번호를 적지 않는다.
 - 사용법 줄은 바꾸지 않았다(`invalid_arguments` 메시지에 들어 있다). `codaryn --help`의 사용법 목록도 순서와 글자가 같다.
+
+### 처음 시작 안내 (U-115, UXM-9)
+
+- 모두 **터미널일 때만** 더한다. 터미널이 아닐 때의 글과 모든 JSON 줄, 종료 코드는 바이트까지 그대로다(아래 config_missing만 예외, PM 결정). 터미널 여부는 그 글이 가는 곳의 `isTTY`다(도움말·`doctor`·`init`은 stdout, 오류 설명은 stderr). 렌더러마다 기본값이 거짓인 선택 인자(`terminal`)로 받으므로, 그 인자를 주지 않는 호출(시험, SP-0 고정, 앱 계층)은 전과 같다.
+- 짧은 도움말: 터미널의 `codaryn`과 `codaryn --help`(`helpText(null, catalog, { terminal: true })`)는 `help.intro`, `help.first_steps`(처음 순서: init → doctor → run → report), `first_use.try_without_key`(docs/usage.md 3절의 키 없는 체험), `help.commands_heading`과 명령마다 `help.summary.<명령>` 한 줄(첫 사용 순서: init, doctor, models, run, runs, report, changes, revert, plan, apply, review, cleanup), `help.more`(`codaryn help <명령>`), `help.key`, `help.output`, `help.contract`다. 명령마다의 도움말(`codaryn help <명령>`)과 터미널이 아닐 때의 `--help`는 전과 같다(사용법 줄 전체).
+- `doctor`: 터미널이면 끝 줄 다음에 '아직 안 한 설정과 다음에 할 일'(`doctor.next.heading`)을 번호로 낸다. 점검의 text id로 정해진 순서로 뽑는다.
+  1. 설정 파일이 없고(`doctor.config_file.default_missing`, `.none`) 한도나 모델 점검이 실패하면 `doctor.next.init`. 그 한도 실패는 다시 세지 않는다. task 파일로 점검하면(자기 설정을 가짐) 설정 파일이 없어도 단계가 아니다. 설정 파일이 실패하면 `doctor.next.config_fix`.
+  2. 키가 없으면(`doctor.api_key.missing`) `doctor.next.key`, 보낼 수 없는 글자가 있으면(`doctor.api_key.unusable`) `doctor.next.key_unusable`(`{keyEnv}`).
+  3. 모델이 없거나 자리표시자면 `doctor.next.model`, 2가 있으면 `doctor.next.model_after_key`.
+  4. 위에 들지 않은 실패 수 `doctor.next.other`, 경고 수 `doctor.next.warnings`, 끝에 `doctor.next.again`. 키가 없으면 그 뒤에 `first_use.try_without_key`.
+  - 할 일이 없으면 제목 없이 `doctor.next.ready`(`--task`면 `doctor.next.ready_task`). 경고가 있으면 그 앞에 `doctor.next.warnings`.
+  - 점검 줄, 끝 줄, `doctor --json`은 그대로다.
+- `init`: 터미널이고 키가 없으면 `init.next` 뒤에 `first_use.try_without_key`.
+- `run`의 오류: stderr가 터미널이고 `provider_not_configured`이면 오류 설명 끝에 `first_use.try_without_key`.
+- 설정 파일이 아예 없을 때(`--config`도 `CODARYN_CONFIG`도 없고 기본 위치에 파일이 없음) 간편 형식·한 줄 실행의 설정 오류(`invalid_config`)는 힌트 `config_missing`(U-37 방식, `CLI_ERROR_HINTS`)을 단다. 사람용 줄은 `error.hint.config_missing`(설정 파일이 아직 없다, `codaryn init`으로 만든다)이다. 이것만은 터미널 여부와 상관없다. 오류 JSON에 `hint` 값이 하나 더 생길 뿐 `message`·`diagnostic`·`code`·종료 코드는 그대로다. `--config`로 준 파일이나 기본 위치의 파일이 있으면, 기본 위치가 아예 없으면 힌트가 없다.
+- 시험: `tests/unit/cli/g-u115-first-use.test.ts`(렌더러와 실행, 터미널이 아니면 그대로), `tests/unit/cli/g-u115-terminal.test.ts`(실제 CLI, `u115-terminal-preload`로 흐름을 터미널로 보임).
 
 ### init이 제공자를 묻는다 (U-26, UXM-11, DR-46)
 

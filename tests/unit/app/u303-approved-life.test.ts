@@ -9,8 +9,8 @@
  * approved plan, each in a folder of its own made the same way, and must give the same: the result and
  * the carrying run's records, the plan's claim (applied.json), the counts, a refusal under the lock
  * and an assembly that cannot claim the plan, and a second carrying run of a plan already claimed.
- * Reproduced first (todo until runLife takes an approved plan). Temporary folders, scripted models,
- * fake values only.
+ * Reproduced first (9a62465, todo until runLife took an approved plan). Temporary folders, scripted
+ * models, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -38,10 +38,6 @@ const GOAL = "rewrite the guide for new users";
 const OLD_GUIDE = "old guide\n";
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 const notes = (): RunNotes => ({ configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 });
-
-/** runLife with an approved plan, as this unit gives it (its fifth parameter). */
-type LifeWithPlan = (io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask, approved?: ApprovedRunPlan) => Promise<RunLifeEnd>;
-const lifeWithPlan = runLife as unknown as LifeWithPlan;
 
 interface Made {
   readonly base: string;
@@ -132,14 +128,12 @@ async function bothLives(prepare: (made: Made) => Promise<void> = async () => {}
   const oldNotes = notes();
   const newNotes = notes();
   const cli = await runPrepared(ioFor(old), old.args, oldNotes, old.prepared, old.approved);
-  const life = await lifeWithPlan(ioFor(now), now.args, newNotes, now.prepared, now.approved);
+  const life = await runLife(ioFor(now), now.args, newNotes, now.prepared, now.approved);
   return { old, now, cli, life, oldNotes, newNotes };
 }
 
-const TODO = "U-303: runLife takes an approved plan (reproduced first)";
-
 describe("U-303: the app's run life carries out an approved run plan as the CLI's does", () => {
-  test("the carrying run: the same result and records, the plan claimed once, the write outside the plan counted as such", { todo: TODO }, async () => {
+  test("the carrying run: the same result and records, the plan claimed once, the write outside the plan counted as such", async () => {
     const { old, now, cli, life, oldNotes, newNotes } = await bothLives();
     assert.equal(life.kind, "ended", JSON.stringify(life));
     const oldResult = cli.output as EngineResult;
@@ -153,7 +147,7 @@ describe("U-303: the app's run life carries out an approved run plan as the CLI'
     assert.deepEqual([newNotes.deniedNotPlanned, newNotes.deniedNotWritable], [1, undefined], "a write outside the plan is outside the plan, not outside writablePaths");
   });
 
-  test("a records-changed mark found under the lock: the same refusal, the carrying run's nothing written, the lock released", { todo: TODO }, async () => {
+  test("a records-changed mark found under the lock: the same refusal, the carrying run's nothing written, the lock released", async () => {
     const mark = async (made: Made) => writeFile(path.join(runDirOf(made, made.approved.planRunId), RECORDS_CHANGED_FILE_NAME), "{}\n", "utf8");
     const { old, now, cli, life } = await bothLives(mark);
     assert.equal(cli.output.kind, "error", JSON.stringify(cli.output));
@@ -167,7 +161,7 @@ describe("U-303: the app's run life carries out an approved run plan as the CLI'
     }
   });
 
-  test("an assembly that cannot claim a plan: the same internal error, the lock released", { todo: TODO }, async () => {
+  test("an assembly that cannot claim a plan: the same internal error, the lock released", async () => {
     const noParts = (made: Made): CliEnvironment => {
       const assemble: Assemble = async (input) => {
         const assembled = await assembleRun(input);
@@ -184,12 +178,12 @@ describe("U-303: the app's run life carries out an approved run plan as the CLI'
     for (const made of [old, now]) assert.equal(await exists(path.join(made.base, "work", STATE_DIR_NAME, "lock.json")), false);
   });
 
-  test("a plan already claimed: a second carrying run ends the same way in both lives", { todo: TODO }, async () => {
+  test("a plan already claimed: a second carrying run ends the same way in both lives", async () => {
     const { old, now } = await bothLives();
     await carryingScript(old.base);
     await carryingScript(now.base);
     const again = await runPrepared(cliIo(old.base), old.args, notes(), old.prepared, old.approved);
-    const lifeAgain = await lifeWithPlan(cliIo(now.base), now.args, notes(), now.prepared, now.approved);
+    const lifeAgain = await runLife(cliIo(now.base), now.args, notes(), now.prepared, now.approved);
     const shown = (end: RunLifeEnd) => (end.kind === "ended" ? end.result : end.output);
     assert.deepEqual(normalized(shown(lifeAgain), now), normalized(again.output, old));
   });

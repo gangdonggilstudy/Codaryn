@@ -42,6 +42,7 @@ import type {
   MaskedText,
   RawText,
   RecordsChangedMark,
+  RunRecorders,
   RunRecordersOptions,
   StateComparison,
   StateFingerprint,
@@ -118,20 +119,52 @@ function walkOrder(a: string, b: string): number {
 }
 
 /**
+ * U-181 (DR-69 B-3, B-7): the options of a run that carries out an approved `run` plan: the plan
+ * run whose directory gets PLAN_APPLIED_FILE_NAME, as ApplyRecordersOptions.planRunId.
+ */
+export interface PlanCarryingRecordersOptions extends RunRecordersOptions {
+  readonly planRunId: string;
+}
+
+/**
+ * U-181 (B-3, B-7): such a run's recorders, and its claim of the plan: applied.json in the plan run's
+ * directory, created exclusively with this run as `applyRunId` (ApplyRecorders.markApplied's rules),
+ * so a plan is carried out once. The state guard knows that write (tier "state"), as an apply's.
+ */
+export interface PlanCarryingRecorders extends RunRecorders {
+  markApplied(): Promise<"marked" | "already_applied">;
+}
+
+/**
  * DR-38: CreateRunRecorders (state.ts): the run's journal, change recorder and plan recorder (as
  * createJournal, createChangeRecorder and createPlanRecorder make them) and the state guard that
  * knows what they write. The CLI and the app pass `stateGuard` to the engine as EngineDeps.stateGuard.
+ * U-181 (B-3, B-7): with `planRunId`, for a run that carries out that plan run's `run` plan, also
+ * `markApplied` (PlanCarryingRecorders); the plan run is another run. Without it, as before.
  */
-export const createRunRecorders: CreateRunRecorders = (options) => {
+export function createRunRecorders(options: PlanCarryingRecordersOptions): PlanCarryingRecorders;
+export function createRunRecorders(options: RunRecordersOptions): RunRecorders;
+export function createRunRecorders(options: RunRecordersOptions & { readonly planRunId?: string }): RunRecorders | PlanCarryingRecorders {
+  const { workspaceRoot, runId, planRunId, clock } = options;
+  if (planRunId !== undefined) {
+    assertRunId(planRunId);
+    if (planRunId === runId) throw new TypeError("a run cannot carry out its own plan");
+  }
   const { notes, stateGuard } = guardFor(options);
-  const { workspaceRoot, runId } = options;
-  return {
+  const recorders: RunRecorders = {
     journal: appendOnlyJournal<JournalEvent>(options, notes),
     changeRecorder: changeRecorderWith({ workspaceRoot, runId }, notes),
     planRecorder: planRecorderWith({ workspaceRoot, runId }, notes),
     stateGuard,
   };
-};
+  if (planRunId === undefined) return recorders;
+  return {
+    ...recorders,
+    markApplied: () => markPlanAppliedWith({ workspaceRoot, planRunId, applyRunId: runId, at: new Date(clock.now()).toISOString() }, notes),
+  };
+}
+// The contract's signature still fits (CreateRunRecorders, state.ts).
+createRunRecorders satisfies CreateRunRecorders;
 
 /** A stored name the executor gives a discarded file (discardedStoredName: the action index). */
 const STORED_NAME = /^(?:0|[1-9][0-9]{0,8})$/;

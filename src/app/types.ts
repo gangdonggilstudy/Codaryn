@@ -41,6 +41,7 @@ import type {
   RevertOutput,
   RunsOutput,
   ToolName,
+  AnyPlanOutput,
 } from "../contracts/index.js";
 import type { ApplyJournalRecord, ApplyResult, PlanOutput, ReviewOutput } from "./general-tasks.js";
 
@@ -319,7 +320,18 @@ export interface RunObserver {
 }
 
 export type RunOutcome =
-  | { readonly ok: true; readonly result: EngineResult }
+  | {
+      readonly ok: true;
+      readonly result: EngineResult;
+      /**
+       * U-193 (after U-176): the run's workspace lock could not be released at its end (the release
+       * threw after its retries, or answered false). The result is the run's as written to
+       * result.json; nothing in it changes. The lock is held while this process lives (the app's
+       * engine runs in it), so a later start here is workspace_locked until the app closes; a run
+       * of another process then finds it stale. Absent: released. Message: lock.release_failed.
+       */
+      readonly lockLeft?: true;
+    }
   /** An internal error after the start (`internal_error`). The lock is released. */
   | { readonly ok: false; readonly error: AppError };
 
@@ -435,7 +447,8 @@ export interface CleanupApplied {
    * The store's outcome: what was removed entirely and what was kept and why (DR-44: partly_removed is
    * never reported as removed). `ok` is true for `removed` only, as in the CLI's JSON. A digest that
    * is not the plan's (cleanup_plan_changed) and a held lock (workspace_locked) are call errors, not
-   * outcomes.
+   * outcomes. U-193: its `lockLeft` (the contract's, when the store could not release the lock) is
+   * passed on as the store gives it.
    */
   readonly outcome: CleanupDoneOutcome;
 }
@@ -843,6 +856,15 @@ export interface CheckApplyRequest {
  */
 export interface PlanCheck {
   readonly kind: "plan_check";
+  /**
+   * U-196 (DR-69 B-3, B-4): present for a run plan (plan.json `kind: "changes"`), as ChangesPlanOutput's
+   * `planKind`. Then `problems` are the planned files the gate of the run that carries the plan out
+   * would deny as a write ("denied", by the file's index in the plan view); whether a file still fits
+   * the plan is the engine's check before its first model request. No lock, probe or move is made:
+   * `unsafeMoves` is empty, `inventoryLimitReached` false, `probesLeft` and `probesRemoved` 0, and
+   * `lockLeft` false. Absent: a plan of mode apply, as before.
+   */
+  readonly planKind?: "changes";
   readonly planRunId: string;
   /** The full digest of the plan checked. */
   readonly digest: ContentHash;
@@ -981,7 +1003,11 @@ export interface CodarynApp {
    * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.
    * Required since the general task commands are in main (PM decision on A-5 question 1).
    */
-  plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
+  /**
+   * U-196: a run plan (plan.json `kind: "changes"`) is shown as ChangesPlanOutput (`planKind:
+   * "changes"`); a plan of mode apply as PlanOutput, as before (AnyPlanOutput, told apart by planKind).
+   */
+  plan(request: PlanRequest): Promise<AppCallOutcome<AnyPlanOutput>>;
   applyPlan(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
   review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
 }

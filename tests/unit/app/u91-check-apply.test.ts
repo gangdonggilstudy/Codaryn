@@ -100,7 +100,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     );
     assert.ok(isRunTimestamp(checked.checkedAt));
     assert.deepEqual(await tree(work), before, "no file, record, lock or probe is left or changed");
-    const view = ok<PlanOutput>(await app.plan({ settings: taskForm(base), runId: plan.runId }));
+    const view = ok(await app.plan({ settings: taskForm(base), runId: plan.runId })) as PlanOutput;
     assert.deepEqual([view.status, view.appliedBy], ["pending", null]);
     const started = await app.applyPlan({ settings: taskForm(base), planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));

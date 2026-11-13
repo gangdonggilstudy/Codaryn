@@ -16,6 +16,9 @@ export const IPC_CHANNELS = {
   saveUi: "codaryn:app:saveui",
   runEvents: "codaryn:runs:events",
   checkPlan: "codaryn:plan:check",
+  openText: "codaryn:workspace:opentext",
+  saveText: "codaryn:workspace:savetext",
+  textDirty: "codaryn:workspace:textdirty",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -914,6 +917,8 @@ const nameOrNull = (value: unknown): value is string | null => value === null ||
 export type PlanCheckReply =
   | {
       readonly ok: true;
+      /** U-206: a run plan's check: its problems are planned files (by index) the later run's gate denies ("denied"). */
+      readonly planKind?: "changes";
       readonly problems: readonly { readonly index: number; readonly problem: string }[];
       readonly unsafeMoves: readonly number[];
       readonly inventoryLimitReached: boolean;
@@ -929,11 +934,13 @@ export function parseCheckPlanArgs(value: unknown): string | null {
 }
 
 /** The engine host's check of the plan `planRunId` with `digest`, checked field by field; another plan's is host_error. */
-export function toPlanCheckReply(value: unknown, planRunId: string, digest: string, actions: number): PlanCheckReply {
+export function toPlanCheckReply(value: unknown, planRunId: string, digest: string, actions: number, planKind?: "changes"): PlanCheckReply {
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const fail = { ok: false, code: "host_error" } as const;
   const { problems, unsafeMoves, inventoryLimitReached, probesLeft, probesRemoved, lockLeft } = value;
   if (value["planRunId"] !== planRunId || value["digest"] !== digest) return fail;
+  // U-206: the check must be of the plan kind the main process showed (a run plan's indexes are its files).
+  if (value["planKind"] !== planKind) return fail;
   if (!Array.isArray(problems) || !Array.isArray(unsafeMoves) || typeof inventoryLimitReached !== "boolean" || !count(probesLeft) || !count(probesRemoved) || typeof lockLeft !== "boolean") return fail;
   const index = (n: unknown): n is number => count(n) && n < actions;
   const found: { index: number; problem: string }[] = [];
@@ -941,8 +948,154 @@ export function toPlanCheckReply(value: unknown, planRunId: string, digest: stri
     if (!isObj(item) || !index(item["index"]) || typeof item["problem"] !== "string" || !ERROR_CODE.test(item["problem"])) return fail;
     found.push({ index: item["index"], problem: item["problem"] });
   }
-  if (!unsafeMoves.every(index)) return fail;
-  return { ok: true, problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
+  if (!unsafeMoves.every(index) || (planKind === "changes" && unsafeMoves.length > 0)) return fail;
+  return { ok: true, ...(planKind === "changes" ? { planKind } : {}), problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
+}
+
+/**
+ * U-174 (DR-72, standalone-gui 3.14, adapter-contract 5.15): the text view of one workspace file.
+ * The text is the app layer's (masked with the values registered now, key values and key shapes
+ * hidden, control characters replaced; LF line breaks); it reaches the page through the textarea's
+ * value only. A file not opened has no text, only why. The digest, line ending and byte order mark
+ * stay out of the page (the edit unit binds them to its token in the main process).
+ */
+export const TEXT_READ_ONLY_REASONS = ["masked", "control_characters", "mixed_line_endings", "protected", "settings_file", "read_only", "hard_link", "workspace_locked"] as const;
+export type TextReadOnlyReason = (typeof TEXT_READ_ONLY_REASONS)[number];
+export const TEXT_NOT_OPENED = ["not_found", "not_file", "refused", "too_large", "not_text", "unreadable", "mask_failed"] as const;
+export type TextNotOpened = (typeof TEXT_NOT_OPENED)[number];
+/** The longest text the view takes in UTF-16 units: a file of MAX_READ_BYTES (256 KiB) UTF-8 bytes has no more. */
+export const MAX_TEXT_CHARS = 262_144;
+/** What the app layer replaced already; a text with one of these did not come from it (host_error). */
+const UNSHOWN_TEXT_CHAR = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028-\u202E\u2066-\u2069]/;
+
+export type TextReply =
+  | {
+      readonly ok: true;
+      readonly opened: true;
+      readonly text: string;
+      /** Masking changed the text: what is shown is not the file's text. */
+      readonly masked: boolean;
+      readonly protected: boolean;
+      /** Whether the edit unit may let the person change it; the reasons why not, in the app layer's order. */
+      readonly editable: boolean;
+      readonly readOnlyReasons: readonly TextReadOnlyReason[];
+      readonly lines: number;
+      /**
+       * U-184: when editable, the main process's token for saving this file as opened (bound there to
+       * the workspace, the path and the digest read); null otherwise. The page sends it back with the text.
+       */
+      readonly editToken: string | null;
+    }
+  | { readonly ok: true; readonly opened: false; readonly reason: TextNotOpened }
+  | { readonly ok: false; readonly code: string };
+
+/** The engine host's text value, checked field by field; nothing else reaches the page. */
+export function toTextReply(value: unknown): TextReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  if (value["status"] !== "opened") {
+    const reason = value["status"];
+    return typeof reason === "string" && (TEXT_NOT_OPENED as readonly string[]).includes(reason) && hasOnlyKeys(value, ["ok", "status"]) ? { ok: true, opened: false, reason: reason as TextNotOpened } : fail;
+  }
+  const { text, masked, editable, readOnlyReasons, digest, lineEnding, bom, bytes } = value;
+  const marked = value["protected"];
+  if (typeof text !== "string" || text.length > MAX_TEXT_CHARS || UNSHOWN_TEXT_CHAR.test(text)) return fail;
+  if (typeof masked !== "boolean" || typeof marked !== "boolean" || typeof editable !== "boolean" || typeof bom !== "boolean") return fail;
+  if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest) || !["lf", "crlf", "none", "mixed"].includes(lineEnding as string) || !count(bytes) || bytes > MAX_TEXT_CHARS) return fail;
+  if (!Array.isArray(readOnlyReasons) || readOnlyReasons.length > TEXT_READ_ONLY_REASONS.length) return fail;
+  const reasons: TextReadOnlyReason[] = [];
+  for (const reason of readOnlyReasons) {
+    if (typeof reason !== "string" || !(TEXT_READ_ONLY_REASONS as readonly string[]).includes(reason) || reasons.includes(reason as TextReadOnlyReason)) return fail;
+    reasons.push(reason as TextReadOnlyReason);
+  }
+  // Editable exactly when nothing keeps it read only; masked text is never editable.
+  if (editable !== (reasons.length === 0) || (masked && !reasons.includes("masked"))) return fail;
+  return { ok: true, opened: true, text, masked, protected: marked, editable, readOnlyReasons: reasons, lines: text === "" ? 1 : text.split("\n").length, editToken: null };
+}
+
+/** U-184: the digest the engine host's opened text was read with (checked by toTextReply first), or null. */
+export function textDigestOf(value: unknown): string | null {
+  return isObj(value) && value["ok"] === true && value["status"] === "opened" && typeof value["digest"] === "string" && /^[0-9a-f]{64}$/.test(value["digest"]) ? value["digest"] : null;
+}
+
+/**
+ * U-184 (DR-72, 3.14; adapter-contract 5.15): a person's save of a text the view opened editable.
+ * The page sends the main process's edit token and the textarea's text (LF line breaks, no byte order
+ * mark) only; the main process asks the person once per opened file and the app layer judges and writes.
+ */
+export const TEXT_PROBLEMS = ["masked", "control_characters", "too_large"] as const;
+export type TextProblem = (typeof TEXT_PROBLEMS)[number];
+export const TEXT_SAVE_REFUSALS = ["conflict", "workspace_locked", "not_editable", "text_refused", "path_changed", "write_failed", ...TEXT_NOT_OPENED] as const;
+export type TextSaveRefusal = (typeof TEXT_SAVE_REFUSALS)[number];
+
+export type SaveTextReply =
+  | {
+      readonly ok: true;
+      readonly saved: true;
+      /** The text was the file's already: nothing was written. */
+      readonly unchanged: boolean;
+      /** The workspace lock could not be taken back (the app layer says so; never hidden). */
+      readonly lockLeft: boolean;
+      /**
+       * The token for the next save (the file as written now); null when the token was dropped during
+       * the write (settings written, the window closed): saved, and the view must be opened again.
+       */
+      readonly editToken: string | null;
+    }
+  | {
+      readonly ok: true;
+      readonly saved: false;
+      readonly status: TextSaveRefusal;
+      readonly readOnlyReasons: readonly TextReadOnlyReason[];
+      readonly textProblems: readonly TextProblem[];
+      readonly lockLeft: boolean;
+    }
+  | { readonly ok: false; readonly code: string };
+
+/** `saveText` arguments: `{token, text}`; the text a string of well-formed UTF-16 (its size is judged after). */
+export function parseSaveTextArgs(value: unknown): { readonly token: string; readonly text: string } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["token", "text"])) return null;
+  const { token, text } = value;
+  if (!isHandle(token) || typeof text !== "string") return null;
+  // A lone surrogate cannot be written as UTF-8 (the app layer refuses it too).
+  return /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text) ? null : { token, text };
+}
+
+/** `textDirty` arguments: `{dirty}`, whether the text view holds an unsaved edit. */
+export function parseTextDirtyArgs(value: unknown): boolean | null {
+  return isObj(value) && hasOnlyKeys(value, ["dirty"]) && typeof value["dirty"] === "boolean" ? value["dirty"] : null;
+}
+
+/** A known list, each value once, or null. */
+function knownList<T extends string>(value: unknown, known: readonly T[]): T[] | null {
+  if (!Array.isArray(value) || value.length > known.length) return null;
+  const out: T[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !(known as readonly string[]).includes(item) || out.includes(item as T)) return null;
+    out.push(item as T);
+  }
+  return out;
+}
+
+/**
+ * The engine host's write value, checked field by field. `saved` comes with the new digest (for the
+ * next token, which the caller issues); a refusal with its reasons or problems only.
+ */
+export function toSaveOutcome(value: unknown): { readonly saved: true; readonly unchanged: boolean; readonly digest: string; readonly lockLeft: boolean } | Exclude<SaveTextReply, { readonly saved: true }> {
+  // (The next token is the caller's to issue; see main/text-files.ts.)
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { status, digest, lockLeft } = value;
+  const reasons = knownList(value["readOnlyReasons"], TEXT_READ_ONLY_REASONS);
+  const problems = knownList(value["textProblems"], TEXT_PROBLEMS);
+  if (typeof lockLeft !== "boolean" || reasons === null || problems === null) return fail;
+  if (status === "written" || status === "unchanged") {
+    return typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest) && reasons.length === 0 && problems.length === 0 ? { saved: true, unchanged: status === "unchanged", digest, lockLeft } : fail;
+  }
+  if (typeof status !== "string" || !(TEXT_SAVE_REFUSALS as readonly string[]).includes(status) || digest !== null) return fail;
+  // Reasons go with not_editable only, problems with text_refused only, and those two are never empty.
+  if ((status === "not_editable") !== reasons.length > 0 || (status === "text_refused") !== problems.length > 0) return fail;
+  return { ok: true, saved: false, status: status as TextSaveRefusal, readOnlyReasons: reasons, textProblems: problems, lockLeft };
 }
 
 /** U-118: `runEvents` arguments: the run, its form, and the page's offset. */
@@ -1025,7 +1178,20 @@ export function parseReviewArgs(value: unknown): { readonly workspace: string; r
 export const MAX_PLAN_SUMMARY_ROWS = 21;
 
 /** GU-5 (3.9): a plan as the window shows it. `approval` is the token its apply takes (null once applied). */
+/** U-206 (U-196, DR-69 B-3): one file of a run plan: its masked path, and whether the later run makes or changes it. */
+export interface PlannedFileView {
+  readonly path: string;
+  readonly change: "create" | "modify";
+}
+
 export interface PlanView {
+  /**
+   * U-206: present for a run plan (the app layer's ChangesPlanOutput): then `files` are what a later
+   * run will make or change, `actions` is empty and `inventoryLimitReached` false. Absent: a plan of
+   * moves and discards, as before.
+   */
+  readonly planKind?: "changes";
+  readonly files?: readonly PlannedFileView[];
   readonly runId: string;
   readonly status: "pending" | "applied";
   readonly digest: string;
@@ -1076,9 +1242,22 @@ export function toPlanView(value: unknown): { readonly ok: true; readonly view: 
   const recordsChanged = value["recordsChanged"] ?? false;
   const summary = toSummaryRows(value["summary"]);
   if (typeof recordsChanged !== "boolean" || summary === "bad") return fail;
+  // U-206: a run plan's files, each a short masked path and create or modify; no actions then.
+  const planKind = value["planKind"];
+  let files: PlannedFileView[] | null = null;
+  if (planKind !== undefined) {
+    const given = value["files"];
+    if (planKind !== "changes" || !Array.isArray(given) || given.length > 10_000 || actions.length > 0 || inventoryLimitReached) return fail;
+    files = [];
+    for (const file of given) {
+      if (!isObj(file) || !shortText(file["path"]) || file["path"].length === 0 || UNSAFE_IN_MESSAGE.test(file["path"]) || (file["change"] !== "create" && file["change"] !== "modify")) return fail;
+      files.push({ path: file["path"], change: file["change"] });
+    }
+  } else if (value["files"] !== undefined) return fail;
   return {
     ok: true,
     view: {
+      ...(files === null ? {} : { planKind: "changes" as const, files }),
       runId,
       status,
       digest,

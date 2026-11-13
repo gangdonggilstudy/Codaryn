@@ -24,6 +24,8 @@ import type { ChangeMarkSource, MarkedRun } from "./tree-marks.js";
 export interface TreeOptions {
   /** U-65: opens the run's changes view at the file (a changed file was chosen). */
   readonly openChange?: (run: MarkedRun, path: string) => void;
+  /** U-174 (DR-72, 3.14): opens the text view of a file, by its id and its shown name. */
+  readonly openText?: (node: string, name: string) => void;
 }
 
 export class TreeView {
@@ -36,6 +38,8 @@ export class TreeView {
   /** U-103 (3.3): copies the focused entry's relative path (by its id; the main process resolves it). */
   private readonly copyPath: HTMLButtonElement;
   private readonly copyStatus: HTMLElement;
+  /** U-174 (3.14): opens the focused file in the text view (a file the app layer did not mask). */
+  private readonly openButton: HTMLButtonElement;
   private readonly refreshButton: HTMLButtonElement;
   private readonly note: HTMLParagraphElement;
   private readonly marksNote = el("p", undefined, { id: "tree-marks", class: "tree-note", hidden: "" });
@@ -55,6 +59,7 @@ export class TreeView {
     this.reveal = button(texts.format("tree.reveal"), () => void this.revealFocused(), { id: "tree-reveal", disabled: "" });
     this.copyPath = button(texts.format("copy.path"), () => void this.copyFocused(), { id: "tree-copy-path", class: "copy", disabled: "" });
     this.copyStatus = el("span", undefined, { role: "status", class: "copy-status", id: "tree-copy-status" });
+    this.openButton = button(texts.format("tree.open"), () => this.openFocused(), { id: "tree-open", disabled: "" });
     this.refreshButton = button(texts.format("tree.refresh"), () => this.refresh(), { id: "tree-refresh", disabled: "" });
     this.note = el("p", texts.format("tree.empty"), { class: "tree-note" });
     this.protectedNote = el("p", texts.format("tree.protectedNote"), { id: "tree-protected-note", class: "tree-note", hidden: "" });
@@ -68,7 +73,7 @@ export class TreeView {
       this.refresh();
     });
     const head = el("div", undefined, { class: "panel-head" });
-    head.append(el("h2", texts.format("region.files"), { id: "files-title" }), this.refreshButton, this.reveal, this.copyPath, this.copyStatus);
+    head.append(el("h2", texts.format("region.files"), { id: "files-title" }), this.refreshButton, this.openButton, this.reveal, this.copyPath, this.copyStatus);
     panel.replaceChildren(head, this.note, this.marksNote, this.protectedNote, this.list);
   }
 
@@ -238,6 +243,9 @@ export class TreeView {
       if (entry) control.removeAttribute("disabled");
       else control.setAttribute("disabled", "");
     }
+    // U-174: Open is for a file with an id (a masked entry has none), when the window can show it.
+    if (focused !== null && focused.id !== null && focused.kind === "file" && this.options.openText !== undefined) this.openButton.removeAttribute("disabled");
+    else this.openButton.setAttribute("disabled", "");
     if (this.marks === null) this.marksNote.setAttribute("hidden", "");
     else {
       this.marksText.textContent = `${this.texts.format("tree.marksOf", { runId: this.marks.run.runId, count: String(this.marks.size) })} `;
@@ -306,6 +314,13 @@ export class TreeView {
     const reply = asCopy(await this.api.copyPath(this.workspace.handle, node.id));
     this.copyStatus.textContent = reply.ok ? this.texts.format("copy.done") : this.texts.format("copy.failed", { code: reply.code });
     this.copyStatus.setAttribute("data-copied", reply.ok ? "ok" : reply.code);
+  }
+
+  /** U-174: the focused file in the text view, by its id; its name as the tree shows it. */
+  private openFocused(): void {
+    const node = this.focusedNode();
+    if (node === null || node.id === null || node.kind !== "file") return;
+    this.options.openText?.(node.id, node.name);
   }
 
   private async revealFocused(): Promise<void> {

@@ -54,6 +54,12 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.changes": "바뀐 파일: {count}개",
   "summary.denied": "거부된 호출: {count}건",
   "summary.failed": "실패한 호출: {count}건",
+  // U-198 (nb-i18n이 다듬을 초안): 실행이 쓸 수 있는 파일 밖의 쓰기.
+  "summary.denied_not_planned": "이 계획이 승인한 파일이 아니라 거부된 쓰기: {count}건",
+  "summary.denied_not_planned_hint": "다른 파일을 바꾸려면 그 파일을 담은 새 계획을 만들어 승인하세요.",
+  "summary.denied_not_writable": "설정의 writablePaths 밖이라 거부된 쓰기: {count}건",
+  "summary.denied_not_writable_hint":
+    "그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.confirm_denied.user": "확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",
@@ -95,7 +101,20 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "작업 공간의 파일이 인벤토리 검사가 셀 수 있는 것보다 많습니다. 적용하면 plan_stale로 멈추고 아무것도 옮기지 않습니다.",
   "plan.applied_by": "적용 실행 {runId}에서 적용함",
   "plan.next_apply": "적용하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  // U-191 (nb-i18n이 다듬을 초안): 실행 계획(뒤 실행이 쓸 파일)의 계획 보기.
+  "plan.changes.heading": "실행 {runId}의 계획: 쓸 파일 {count}개, {status}",
+  "plan.change.create": "생성",
+  "plan.change.modify": "수정",
+  "plan.changes.summary_label": "계획의 요약, 계획 실행이 쓴 것(모델이 쓴 말이며 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨)",
+  "plan.changes.next_apply": "이 변경을 실행하게 하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  "plan.changes.digest_guarantee":
+    "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 요약을 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
   "apply.question": "이 계획을 적용할까요?",
+  // U-198 (nb-i18n이 다듬을 초안): 실행 계획의 apply 질문.
+  "apply.changes.what": "승인하면 파일 도구가 이 파일 {count}개에만 쓸 수 있는 실행이 시작됩니다.",
+  "apply.changes.summary_note": "위의 요약은 모델이 쓴 작업 설명이며 계획과 함께 승인됩니다. 목표나 새 지시가 아니며, 실행이 그 설명대로 하는지는 아무것도 확인하지 않습니다. 강제되는 것은 파일 목록뿐입니다.",
+  "apply.changes.commands_note": "이 작업은 명령도 허용하며, 정책이 허용한 명령은 이 파일들에 묶이지 않습니다.",
+  "apply.changes_question": "이 변경을 할 실행을 시작할까요?",
   "apply.unsafe_move_question": "이 계획의 이동 {count}개는 이 드라이브에 하드 링크가 없어 대상 자리의 파일을 덮어쓸 수 있습니다. 아무것도 옮기지 않았습니다. 이번 적용에서만 그래도 옮기도록 다시 적용할까요?",
   "review.recorded": "실행 {runId}의 검토: {verdict}.",
   "review.recorded_replaced": "실행 {runId}의 검토: {verdict}(앞선 검토를 바꿈).",
@@ -221,6 +240,8 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.review": "검토: {verdict}",
   // U-139 (UXM-5, nb-i18n이 다듬을 초안): 적용 실행이 적용한 계획 실행.
   "runs.apply_of": "실행 {runId}의 계획 적용",
+  // U-198 (nb-i18n이 다듬을 초안): 실행 계획을 실행한 실행.
+  "runs.carried_plan": "실행 {runId}의 계획 실행",
   "report.records_changed": "이 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 보고서가 실제로 일어난 일과 다를 수 있습니다.",
   "report.final_message": "에이전트의 마지막 답입니다. 에이전트의 말이며 검증된 사실이 아닙니다.",
   "changes.records_changed": "이 실행에는 기록 변경 표시가 있어 파일 글을 보이지 않습니다. 경로와 상태만 보입니다.",
@@ -447,6 +468,8 @@ export const KO_MESSAGES: MessageTexts = {
     "추가 인수를 받는 명령 규칙 {count}개가 계획 동작(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
   "doctor.commands.writable_with_commands":
     "writablePaths가 파일 도구를 제한하는 중에 명령 규칙 {count}개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다",
+  "doctor.commands.plan_run_with_commands":
+    "계획 방식 \"run\"과 명령 규칙 {count}개가 함께 있습니다. 승인한 파일은 파일 도구만 묶으므로, 허용한 명령은 계획 밖의 파일에 쓸 수 있습니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",
@@ -478,6 +501,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.parked_left":
     "되돌리기가 제자리에 돌려놓지 못한 파일 {count}개가 .codaryn/parked/에 남아 있습니다. 저절로 지워지지 않으니 직접 제자리로 옮기거나 지우세요",
   "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
+  "lock.release_failed": "작업 공간 잠금을 풀지 못했습니다. Codaryn을 모두 닫으면 다음 실행이 정리합니다. 그 전에 실행이 막히면 codaryn doctor로 확인하세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
   "error.invalid_arguments.fix": "codaryn help <명령>으로 그 명령의 사용법을, codaryn --help로 명령 목록을 확인하세요.",
@@ -524,8 +548,9 @@ export const KO_MESSAGES: MessageTexts = {
   "error.plan_already_applied.fix": "codaryn report로 결과를 보고, 다시 하려면 되돌린 뒤 codaryn run으로 새 계획을 만드세요.",
   "error.plan_secrets_differ.what": "지금 등록된 가릴 값이 계획 실행 때와 다르게 계획의 경로를 가려, 아무것도 보여 주거나 바꾸지 않았습니다",
   "error.plan_secrets_differ.fix": "계획 실행 때와 같은 작업 지정 방식(따라서 같은 가릴 값)으로 다시 하거나, 계획을 새로 만드세요.",
-  "error.plan_run_missing.what": "이 적용이 쓴 계획 실행의 기록(plan.json)이 없어, 아무것도 바꾸지 않았습니다",
-  "error.plan_run_missing.fix": "적용을 되돌리려면 그 계획 실행을 남겨 두어야 합니다. 지운 실행 폴더가 있으면 되살리세요.",
+  "error.plan_run_missing.what": "계획 실행의 기록(plan.json)이 없어 아무것도 바꾸지 않았습니다",
+  "error.plan_run_missing.fix":
+    "계획을 보거나 적용하려면 codaryn run으로 계획을 다시 만드세요. 적용을 되돌리려면 그 계획 실행이 있어야 하니, 지웠다면 그 실행 폴더를 되살리세요.",
   "error.plan_records_changed.what": "계획 실행에 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔 그 계획이 읽은 것과 다를 수 있어, 아무것도 묻거나 바꾸지 않았습니다",
   "error.plan_records_changed.fix": "codaryn run을 새로 실행해 계획을 다시 만들고(codaryn plan은 계획을 보여 주기만 합니다), 새 계획을 확인한 뒤 그것을 적용하세요. 표시가 있는 실행은 무슨 일이 있었는지의 증거로 남겨 두세요.",
   "error.run_not_awaiting_review.what": "그 실행은 사람의 검토를 기다리는 상태가 아닙니다. 아무것도 쓰지 않았습니다",
@@ -587,6 +612,8 @@ export const KO_MESSAGES: MessageTexts = {
   "tool.run_command": "명령 실행",
   "tool.inspect_files": "파일 목록 보기",
   "tool.propose_plan": "계획 제안",
+  // U-180 (DR-69 B-3), nb-i18n 이 다듬을 초안.
+  "tool.propose_changes": "바꿀 파일 제안",
 
   "revert.skip.changed_since_run": "실행 뒤에 다시 바뀜",
   "revert.skip.missing_snapshot": "스냅샷 없음",

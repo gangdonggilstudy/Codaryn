@@ -13,11 +13,11 @@ import type { ModelErrorKind, ModelProvider } from "./model.js";
 import { modelErrorRetryable } from "./model.js";
 import type { ConfirmPermission, PolicyGate } from "./policy.js";
 import type { PrivacyGateway } from "./privacy.js";
-import type { ModelProviderName, ResolvedTaskSpec } from "./task.js";
+import type { ModelProviderName, ResolvedTaskSpec, WritablePathSet } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolRunner } from "./tool.js";
 import type { VerifierResult, VerifierRunner } from "./verify.js";
-import type { ApplyResult, PlanOutput } from "./plan.js";
+import type { ApplyResult, ApprovedChangesPlan, ChangesPlanOutput, PlanOutput } from "./plan.js";
 import type { ReviewOutput } from "./workflow.js";
 
 export const RUN_STATUSES = [
@@ -735,6 +735,8 @@ export type CommandOutput =
   | RunsOutput
   | ApplyResult
   | PlanOutput
+  // U-195 (DR-69 B-4; in na-core's unit for p4g-general to confirm): `codaryn plan --json` of a run plan.
+  | ChangesPlanOutput
   | ReviewOutput;
 
 /** Injected time source in milliseconds. */
@@ -792,6 +794,33 @@ export interface EngineDeps {
    */
   readonly confirm?: ConfirmPermission;
 }
+
+/**
+ * U-187 (DR-69 B-3, B-4, B-6, B-7): EngineDeps for a run that carries out an approved `run` plan,
+ * except the gate: the engine makes it with `policyFor`, giving it the task's writable lists and the
+ * plan's files as one more list (approvedPlanWritablePathSets), so the run writes planned files only
+ * and only where every list allows. The caller's `policyFor` is createPolicyGate with the run's
+ * policy and workspace.
+ * - Before the first model request: every planned file is checked (`approved.fileNow` and
+ *   plannedFileStale), then judged by that gate as a write (PLANNED_FILE_DESCRIPTOR), then the plan
+ *   is claimed once (`approved.markApplied`), all before the run's first state check. A file that
+ *   no longer fits, a denial, a check that fails, a claim that fails or a plan already carried out
+ *   ends the run as `failed`/`plan_stale` with a notice that names the file's index (never a path):
+ *   no model request, nothing written, and (except a plan already claimed) the plan not claimed.
+ * - Then it runs as a run without a plan step: no plan tool is offered, and its verifiers and
+ *   completion are the task's. Its system text has, after the fixed prompt and the task type's
+ *   instructions, a fixed label and the approved plan: the files with their change and the summary
+ *   (its visible parts, the gaps marked), told as the plan run's words that the person approved, not
+ *   as new instructions. The whole text is masked with this run's gateway.
+ * - `run_started` records planRunId, planDigest and approval; the result planRunId and planDigest.
+ */
+export interface ApprovedPlanRunDeps extends Omit<EngineDeps, "policy"> {
+  readonly approved: ApprovedChangesPlan;
+  policyFor(writablePathSets: readonly WritablePathSet[]): PolicyGate;
+}
+
+/** U-187: signature of `runApprovedPlan`, exported by `src/engine/index.ts`. */
+export type RunApprovedPlan = (deps: ApprovedPlanRunDeps) => Promise<EngineResult>;
 
 /** Signature of `runTask`, exported by `src/engine/index.ts`. */
 export type RunTask = (deps: EngineDeps) => Promise<EngineResult>;

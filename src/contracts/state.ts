@@ -87,6 +87,12 @@ export interface RunRecordersOptions {
   readonly runId: string;
   readonly clock: Clock;
   readonly limits?: StateGuardLimits;
+  /**
+   * U-181, U-187 (DR-69 B-3, B-7): for a run that carries out an approved `run` plan, the plan run
+   * (another run; the store refuses the run's own id). The recorders then also have `markApplied`.
+   * Absent: as before.
+   */
+  readonly planRunId?: string;
 }
 
 /** A run's journal and recorders, and the state guard that knows what they write. */
@@ -96,6 +102,13 @@ export interface RunRecorders {
   readonly planRecorder: PlanRecorder;
   /** EngineDeps.stateGuard for this run. */
   readonly stateGuard: StateGuard;
+  /**
+   * U-181, U-187: present exactly when RunRecordersOptions.planRunId was given. Writes
+   * PLAN_APPLIED_FILE_NAME in that plan run's directory exclusively, with this run as `applyRunId`
+   * (ApplyRecorders.markApplied's rules), so a plan is carried out once; the state guard knows that
+   * write. ApprovedChangesPlan.markApplied.
+   */
+  markApplied?(): Promise<"marked" | "already_applied">;
 }
 
 /**

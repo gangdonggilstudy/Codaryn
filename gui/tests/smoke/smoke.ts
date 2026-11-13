@@ -11,8 +11,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { startGui } from "../../src/main/app.js";
@@ -21,6 +21,8 @@ const GUI = fileURLToPath(new URL("../../../", import.meta.url));
 const RESULT = join(GUI, "build", "smoke-result.json");
 const STATE = join(GUI, "build", "smoke-state", "gui-state.json");
 const SECOND = process.env["CODARYN_SMOKE_SECOND"] ?? "";
+/** U-206: a run plan's run folder that smoke.mjs wrote as the store does, copied into SECOND before step 8. */
+const RUN_PLAN = process.env["CODARYN_SMOKE_RUN_PLAN"] ?? "";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 /** R29-L1: the model requests the fake API has received so far (the smoke script's count file); -1 when unread. */
@@ -282,6 +284,104 @@ startGui({
         result.texts = copied.slice(before);
         return result;
       })();
+      // U-174 (DR-72, 3.14): the text view. The files are made for this check and removed after it, so
+      // the tree the later checks read is the one they expect.
+      results["textView"] = await (async () => {
+        const dir = join(SECOND, "texts");
+        mkdirSync(dir, { recursive: true });
+        // A key shape, written in parts so no key-shaped text sits in the source.
+        const keyShaped = ["sk", "ant", "TEXT".repeat(10)].join("-");
+        writeFileSync(join(dir, "plain.txt"), "line one\r\nline two\r\n");
+        writeFileSync(join(dir, "key.txt"), `token = ${keyShaped}\n`);
+        writeFileSync(join(dir, "big.txt"), "x".repeat(300_000));
+        writeFileSync(join(dir, "binary.dat"), Buffer.from([0x41, 0x00, 0x42]));
+        try {
+          const handleText = JSON.stringify(second.ok ? second.handle : "");
+          type Listed = { ok: boolean; entries?: { id: string | null; name: string }[] };
+          const top = (await js(`window.codaryn.tree(${handleText}, null, 0)`)) as Listed;
+          const textsId = top.entries?.find((entry) => entry.name === "texts")?.id ?? "";
+          const listed = (await js(`window.codaryn.tree(${handleText}, ${JSON.stringify(textsId)}, 0)`)) as Listed;
+          const idOf = (name: string): string => listed.entries?.find((entry) => entry.name === name)?.id ?? "";
+          type Reply = { ok: boolean; opened?: boolean; text?: string; masked?: boolean; editable?: boolean; readOnlyReasons?: string[]; lines?: number; reason?: string; code?: string };
+          const open = async (node: string): Promise<Reply> => (await js(`window.codaryn.openText(${handleText}, ${JSON.stringify(node)})`)) as Reply;
+          const plain = await open(idOf("plain.txt"));
+          const key = await open(idOf("key.txt"));
+          const statusOf = (reply: Reply): string => (reply.ok ? (reply.opened === false ? (reply.reason ?? "") : "opened") : (reply.code ?? ""));
+          const ui = await (async () => {
+            await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.trim().endsWith('a.txt'))?.click(); true");
+            await js("document.getElementById('tree-open')?.click(); true");
+            const ready = await waitFor("(() => { const r = document.getElementById('text')?.getAttribute('data-text-ready'); return r === 'opened' || r === 'not_opened' || r === 'error' ? r : null; })()");
+            const area = (await js("(() => { const a = document.getElementById('text-content'); return a === null ? null : { value: a.value, readOnly: a.readOnly }; })()")) as { value: string; readOnly: boolean } | null;
+            await js("document.getElementById('text-close')?.click(); true");
+            const back = await js("document.getElementById('work')?.getAttribute('data-screen') ?? null");
+            return { ready, value: area?.value ?? null, readOnly: area?.readOnly ?? null, back };
+          })();
+          // U-184 (DR-72, 3.14): saving, by the edit token and the text only.
+          results["textEdit"] = await (async () => {
+            type Saved = { ok: boolean; saved?: boolean; status?: string; textProblems?: string[]; editToken?: string; code?: string };
+            const save = async (token: string, body: string): Promise<Saved> => (await js(`window.codaryn.saveText(${JSON.stringify(token)}, ${JSON.stringify(body)})`)) as Saved;
+            const outcome = (reply: Saved): string => (reply.ok ? (reply.saved === true ? "saved" : (reply.status ?? "")) : (reply.code ?? ""));
+            const asked = (): number => dialogs.filter((id) => id === "textSave.message").length;
+            const askedBefore = asked();
+            const opened = (await open(idOf("plain.txt"))) as Reply & { editToken?: string | null };
+            const firstToken = opened.editToken ?? "";
+            const first = await save(firstToken, "line one\nline 2\n");
+            const disk = readFileSync(join(dir, "plain.txt"), "utf8");
+            const second = await save(first.editToken ?? "", "line one\nline 3\n");
+            const oldToken = await save(firstToken, "line one\nline 4\n");
+            const before = readFileSync(join(dir, "plain.txt"), "utf8");
+            const refused = await save(second.editToken ?? "", `line one\nsecret ${keyShaped}\n`);
+            writeFileSync(join(dir, "plain.txt"), "changed elsewhere\r\n");
+            const conflict = await save(second.editToken ?? "", "line one\nline 5\n");
+            const unchangedOnDisk = readFileSync(join(dir, "plain.txt"), "utf8") === "changed elsewhere\r\n" && before === "line one\r\nline 3\r\n";
+            const apiAsked = asked() - askedBefore;
+            // The window: open a.txt, type, try to leave (asked, keep), save (a new opened file asks once more).
+            const aBefore = readFileSync(join(SECOND, "a.txt"), "utf8");
+            const ui = await (async () => {
+              await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.trim().endsWith('a.txt'))?.click(); true");
+              await js("document.getElementById('tree-open')?.click(); true");
+              await waitFor("document.getElementById('text')?.getAttribute('data-editable') === 'true' ? 'ok' : null");
+              await js("(() => { const a = document.getElementById('text-content'); a.value = 'alpha beta'; a.dispatchEvent(new Event('input')); return true; })()");
+              const unsaved = await js("document.getElementById('text-save')?.hasAttribute('disabled') === false");
+              await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+              const leaveAsked = await js("document.getElementById('text-leave')?.hasAttribute('hidden') === false");
+              await js("document.getElementById('text-leave-keep')?.click(); true");
+              const stayed = await js("document.getElementById('work')?.getAttribute('data-screen') ?? null");
+              await js("document.getElementById('text-save')?.click(); true");
+              const saved = await waitFor("document.querySelector('#text-result [data-save]')?.getAttribute('data-save') ?? null");
+              const clean = await js("document.getElementById('text-save')?.hasAttribute('disabled') === true");
+              return { unsaved, leaveAsked, stayed, saved, asked: asked() - askedBefore, disk: readFileSync(join(SECOND, "a.txt"), "utf8"), clean };
+            })();
+            // a.txt goes back to what the later checks expect.
+            writeFileSync(join(SECOND, "a.txt"), aBefore);
+            await js("document.getElementById('text-close')?.click(); true");
+            return {
+              editable: opened.editable,
+              first: outcome(first),
+              disk,
+              second: outcome(second),
+              asked: apiAsked,
+              oldToken: outcome(oldToken),
+              refused: { status: outcome(refused), problems: refused.textProblems ?? [] },
+              conflict: outcome(conflict),
+              unchangedOnDisk,
+              ui,
+            };
+          })();
+          return {
+            plain: { opened: plain.opened, text: plain.text, masked: plain.masked, editable: plain.editable, reasons: plain.readOnlyReasons, lines: plain.lines },
+            key: { opened: key.opened, masked: key.masked, editable: key.editable, firstReason: key.readOnlyReasons?.[0] ?? null, keyShown: (key.text ?? "").includes(keyShaped) },
+            big: statusOf(await open(idOf("big.txt"))),
+            binary: statusOf(await open(idOf("binary.dat"))),
+            unknown: statusOf(await open("0".repeat(32))),
+            pathString: statusOf((await js(`window.codaryn.openText(${handleText}, "texts/plain.txt")`)) as Reply),
+            ui,
+          };
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      })();
+
       // U-67 (3.13, 10): the command palette, the shortcuts, F5 and the tree's first-letter jump.
       results["keys"] = await (async () => {
         const press = (target: string, key: string, ctrl = false, shift = false): Promise<unknown> =>
@@ -1238,6 +1338,27 @@ startGui({
           pageCanAnswer: await js("Object.keys(window.codaryn).some((name) => /answer|permission|question/i.test(name))"),
           ended: typeof ended === "string" && ended !== "timeout",
         };
+      })();
+
+      // U-206 (U-196, DR-69 B-3): a run plan, copied in after every step that lists this workspace's runs,
+      // opened from the run list. The window shows its files and summary and keeps apply off; through the
+      // page's own API, the main process refuses its apply before any dialog and passes the check's code on.
+      results["runPlan"] = await (async () => {
+        if (RUN_PLAN === "") return null;
+        const runId = basename(RUN_PLAN);
+        cpSync(RUN_PLAN, join(SECOND, ".codaryn", "runs", runId), { recursive: true });
+        const asked = dialogs.length;
+        await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+        await js(`document.querySelector('[data-plan="${runId}"]')?.click(); true`);
+        const shown = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+        const screen = (await js(
+          "({ files: [...document.querySelectorAll('#plan-files li')].map((li) => [li.getAttribute('data-change'), li.textContent.split(': ').pop()]), kind: document.getElementById('plan-summary')?.getAttribute('data-plan-kind') ?? null, approved: document.getElementById('plan-agent-words')?.getAttribute('data-approved') ?? null, words: document.getElementById('plan-agent-words-text')?.textContent ?? null, moves: document.getElementById('plan-actions') !== null, applyOff: document.getElementById('plan-apply')?.hasAttribute('disabled') ?? null, why: document.getElementById('plan-run-apply-unavailable') !== null, check: document.getElementById('plan-check') !== null })",
+        )) as Record<string, unknown>;
+        const viaApi = (await js(
+          `window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(runId)}, null, null).then(async (r) => { if (!r.ok) return { plan: r.code }; const apply = await window.codaryn.applyPlan(r.approval, false); const consent = await window.codaryn.applyPlan(r.approval, true); const checked = await window.codaryn.checkPlan(r.approval); return { planKind: r.view.planKind ?? null, fileCount: (r.view.files ?? []).length, digest: r.view.digest, approval: typeof r.approval, apply: apply.ok ? 'started' : apply.code, consent: consent.ok ? 'started' : consent.code, checked: checked.ok ? 'checked' : checked.code }; })`,
+        )) as Record<string, unknown>;
+        return { shown, ...screen, ...viaApi, dialogs: dialogs.length - asked };
       })();
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),

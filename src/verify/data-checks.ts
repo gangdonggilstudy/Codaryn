@@ -14,6 +14,13 @@
  * Tables are read with `node:fs` from the path `Workspace.resolve` proved to be inside the root
  * (links resolved, the state directory refused), because `Workspace.readText` stops at
  * MAX_READ_BYTES and a data table may be larger (up to MAX_DATA_TABLE_BYTES).
+ *
+ * U-202 (bundle A, A-2, Q-7): a table is read in chunks (src/tabular/stream.ts) and each rule keeps
+ * only what it needs while the rows go by: a shape keeps the columns and the row count, an aggregate
+ * keeps a running value per group (RunningAggregate) and the target's keys and compared cells. The
+ * outcome and the evidence are the ones of the whole-table reading before, letter for letter (the
+ * frozen copy in tests/unit/verify/reference is compared with this one). The limit stays 16 MiB until
+ * the PM sets it from the timings.
  */
 
 import fs from "node:fs/promises";
@@ -28,12 +35,14 @@ import type {
   TableRef,
   Workspace,
 } from "../contracts/index.js";
-import { aggregate, columnCells, findColumn, groupCells, parseNumber, parseTable, withinTolerance } from "../tabular/index.js";
-import type { AggregateOutcome, Table, TableProblem, Tolerance } from "../tabular/index.js";
+import { RunningAggregate, findColumn, parseNumber, scanTable, withinTolerance } from "../tabular/index.js";
+import type { AggregateOutcome, TableProblem, TableScanOutcome, TableSink, Tolerance } from "../tabular/index.js";
 import { createRawVerifierResult } from "./result.js";
 
 /** Most problems listed per rule; the rest are counted. */
 export const MAX_LISTED_PROBLEMS = 20;
+/** U-202: bytes read at a time. */
+export const DATA_TABLE_CHUNK_BYTES = 64 * 1024;
 /** Longest column name shown in evidence, in characters. */
 const MAX_SHOWN_NAME = 80;
 
@@ -78,8 +87,15 @@ function describeProblem(problem: TableProblem): string {
   return `${problem.code.replace(/_/g, " ")}${where.length > 0 ? ` at ${where.join(", ")}` : ""}`;
 }
 
+/** U-202: what a rule's tables are read with. */
+interface Reading {
+  readonly maxBytes: number;
+  readonly chunkBytes: number;
+}
+
+/** A table read through: its columns and data rows; what else a rule needs its sink kept. */
 type Loaded =
-  | { readonly ok: true; readonly table: Table }
+  | { readonly ok: true; readonly columns: readonly string[]; readonly rows: number }
   | { readonly ok: false; readonly fixable: boolean; readonly note: string };
 
 function isTableRef(value: unknown): value is TableRef {
@@ -94,13 +110,16 @@ function errorCode(error: unknown): string | undefined {
 }
 
 /**
- * Reads and parses one table. `fixable` marks problems the model could fix in a file it wrote
- * (missing, too large, not UTF-8, does not parse); the role decides what that means.
+ * Reads one table through, in chunks, into `sink`. `fixable` marks problems the model could fix in
+ * a file it wrote (missing, too large, not UTF-8, does not parse); the role decides what that means.
+ * The problems rank as the whole-table reading ranked them: a read error, then the size, then UTF-8,
+ * then parsing (scanTable reads to the end after a problem for that). A sink's error is not a read
+ * error: it passes through to the verifier's "check failed".
  */
-async function loadTable(ref: TableRef, workspace: Workspace, maxBytes: number): Promise<Loaded> {
+async function loadTable(ref: TableRef, workspace: Workspace, reading: Reading, sink: TableSink = {}): Promise<Loaded> {
+  const { maxBytes } = reading;
   const resolved = await workspace.resolve(ref.path, "read");
   if (!resolved.ok) return { ok: false, fixable: false, note: `path rejected (${resolved.code})` };
-  let bytes: Buffer;
   let handle: fs.FileHandle;
   try {
     handle = await fs.open(resolved.path.absolute, "r");
@@ -109,36 +128,148 @@ async function loadTable(ref: TableRef, workspace: Workspace, maxBytes: number):
     if (code === "ENOENT" || code === "ENOTDIR") return { ok: false, fixable: true, note: "file not found" };
     return { ok: false, fixable: false, note: `file could not be opened (${code ?? "unknown error"})` };
   }
+  const read = { bytes: 0, failed: false, error: undefined as unknown };
+  let scanned: TableScanOutcome;
   try {
-    const info = await handle.stat();
+    let info: Awaited<ReturnType<fs.FileHandle["stat"]>>;
+    try {
+      info = await handle.stat();
+    } catch (error) {
+      return { ok: false, fixable: false, note: `file could not be read (${errorCode(error) ?? "unknown error"})` };
+    }
     if (!info.isFile()) return { ok: false, fixable: true, note: "not a regular file" };
     if (info.size > maxBytes) return { ok: false, fixable: true, note: `larger than ${maxBytes} bytes` };
     // One byte more than allowed tells a file that grew after stat.
-    const buffer = Buffer.alloc(Math.min(info.size, maxBytes) + 1);
-    let filled = 0;
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
-      if (bytesRead === 0) break;
-      filled += bytesRead;
-      if (filled === buffer.length) break;
-    }
-    if (filled > maxBytes) return { ok: false, fixable: true, note: `larger than ${maxBytes} bytes` };
-    bytes = buffer.subarray(0, filled);
-  } catch (error) {
-    return { ok: false, fixable: false, note: `file could not be read (${errorCode(error) ?? "unknown error"})` };
+    const limit = Math.min(info.size, maxBytes) + 1;
+    const buffer = Buffer.alloc(Math.max(1, Math.min(reading.chunkBytes, limit)));
+    const file = handle;
+    const chunks = async function* (): AsyncGenerator<Uint8Array> {
+      while (read.bytes < limit) {
+        let bytesRead: number;
+        try {
+          ({ bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, limit - read.bytes), read.bytes));
+        } catch (error) {
+          read.failed = true;
+          read.error = error;
+          return;
+        }
+        if (bytesRead === 0) return;
+        read.bytes += bytesRead;
+        // The decoder takes the chunk before the next read reuses the buffer.
+        yield buffer.subarray(0, bytesRead);
+      }
+    };
+    scanned = await scanTable(chunks(), ref.format, sink);
   } finally {
     await handle.close().catch(() => undefined);
   }
-  let text: string;
-  try {
-    // The default decoder drops a leading byte order mark.
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return { ok: false, fixable: true, note: "not UTF-8 text" };
+  if (read.failed) return { ok: false, fixable: false, note: `file could not be read (${errorCode(read.error) ?? "unknown error"})` };
+  if (read.bytes > maxBytes) return { ok: false, fixable: true, note: `larger than ${maxBytes} bytes` };
+  if (!scanned.ok) {
+    // The default decoder drops a leading byte order mark (scanTable decodes as before).
+    if (scanned.reason === "not_text") return { ok: false, fixable: true, note: "not UTF-8 text" };
+    return { ok: false, fixable: true, note: `does not parse as ${ref.format}: ${describeProblem(scanned.problem)}` };
   }
-  const parsed = parseTable(text, ref.format);
-  if (!parsed.ok) return { ok: false, fixable: true, note: `does not parse as ${ref.format}: ${describeProblem(parsed.problem)}` };
-  return { ok: true, table: parsed.table };
+  return { ok: true, columns: scanned.columns, rows: scanned.rows };
+}
+
+/** U-202: finds a column as `findColumn` does on the whole table, while the columns arrive (stream.ts). */
+class ColumnAt {
+  private index: number | null = null;
+
+  constructor(private readonly name: string) {}
+
+  see(columns: readonly string[]): void {
+    if (this.index !== null) return;
+    const found = findColumn({ columns }, this.name);
+    if (found.ok) this.index = found.index;
+  }
+
+  /** The row's cell; empty while the column is not known (a jsonl row without the key, or a column the verdict refuses). */
+  cell(cells: readonly string[]): string {
+    return this.index === null ? "" : (cells[this.index] ?? "");
+  }
+}
+
+/**
+ * U-202: an aggregate's source as it is read: the running value of the column (without groupBy), or
+ * per group in order of first appearance with its first data row, and the rows without a group
+ * value, as `columnCells` and `groupCells` gave them over the whole table.
+ */
+class SourceTally implements TableSink {
+  readonly total: RunningAggregate;
+  readonly groups = new Map<string, { readonly firstDataRow: number; readonly aggregate: RunningAggregate }>();
+  withoutKey = 0;
+  private readonly column: ColumnAt;
+  private readonly key: ColumnAt | null;
+
+  constructor(column: string, groupBy: string | null, private readonly op: AggregateOp) {
+    this.total = new RunningAggregate(op);
+    this.column = new ColumnAt(column);
+    this.key = groupBy === null ? null : new ColumnAt(groupBy);
+  }
+
+  columns(columns: readonly string[]): void {
+    this.column.see(columns);
+    this.key?.see(columns);
+  }
+
+  row(cells: readonly string[], dataRow: number): void {
+    const cell = this.column.cell(cells);
+    if (this.key === null) {
+      this.total.add(cell, dataRow);
+      return;
+    }
+    const key = this.key.cell(cells);
+    if (key.length === 0) {
+      this.withoutKey += 1;
+      return;
+    }
+    let group = this.groups.get(key);
+    if (group === undefined) {
+      group = { firstDataRow: dataRow, aggregate: new RunningAggregate(this.op) };
+      this.groups.set(key, group);
+    }
+    group.aggregate.add(cell, dataRow);
+  }
+}
+
+/**
+ * U-202: an aggregate's target as it is read: without groupBy, the compared cell of data row 1; with
+ * it, the data rows whose key is empty (in order), and per key in order of first appearance its data
+ * rows and the compared cell of the first of them (the only one compared).
+ */
+class TargetTally implements TableSink {
+  firstCell = "";
+  readonly emptyKeyRows: number[] = [];
+  readonly byKey = new Map<string, { readonly rows: number[]; readonly cell: string }>();
+  private readonly column: ColumnAt;
+  private readonly key: ColumnAt | null;
+
+  constructor(column: string, keyColumn: string | null) {
+    this.column = new ColumnAt(column);
+    this.key = keyColumn === null ? null : new ColumnAt(keyColumn);
+  }
+
+  columns(columns: readonly string[]): void {
+    this.column.see(columns);
+    this.key?.see(columns);
+  }
+
+  row(cells: readonly string[], dataRow: number): void {
+    if (this.key === null) {
+      if (dataRow === 1) this.firstCell = this.column.cell(cells);
+      return;
+    }
+    const key = this.key.cell(cells);
+    if (key.length === 0) {
+      this.emptyKeyRows.push(dataRow);
+      return;
+    }
+    const entry = this.byKey.get(key);
+    if (entry === undefined) this.byKey.set(key, { rows: [dataRow], cell: this.column.cell(cells) });
+    else entry.rows.push(dataRow);
+  }
 }
 
 /** What a load problem means for a table in this role. */
@@ -210,7 +341,7 @@ class Problems {
 async function checkShape(
   rule: Extract<DataRule, { type: "table_shape" }>,
   workspace: Workspace,
-  maxBytes: number,
+  reading: Reading,
 ): Promise<Verdict> {
   if (!isTableRef(rule.table)) return undecided("the rule is not valid: table needs a path and a format (csv, tsv or jsonl)");
   if (rule.columns !== undefined && !(Array.isArray(rule.columns) && rule.columns.every((name) => typeof name === "string"))) {
@@ -219,9 +350,9 @@ async function checkShape(
   const match = rule.columnsMatch ?? "exact";
   if (match !== "exact" && match !== "includes") return undecided('the rule is not valid: columnsMatch must be "exact" or "includes"');
 
-  const loaded = await loadTable(rule.table, workspace, maxBytes);
+  const loaded = await loadTable(rule.table, workspace, reading);
   if (!loaded.ok) return loadVerdict("target", rule.table, loaded);
-  const table = loaded.table;
+  const table = loaded;
   const problems = new Problems();
   const notes: string[] = [];
 
@@ -241,16 +372,16 @@ async function checkShape(
     const forms = ["equals", "sameAs"].filter((name) => (rows as Record<string, unknown>)[name] !== undefined).length;
     const ranged = rows.min !== undefined || rows.max !== undefined;
     if (forms + (ranged ? 1 : 0) !== 1) return undecided("the rule is not valid: rows needs exactly one of equals, min/max or sameAs");
-    const count = table.rows.length;
+    const count = table.rows;
     if (rows.equals !== undefined) {
       if (!isCount(rows.equals)) return undecided("the rule is not valid: rows.equals must be a whole number");
       if (count === rows.equals) notes.push(`${count} data rows`);
       else problems.add(`${count} data rows, expected ${rows.equals}`);
     } else if (rows.sameAs !== undefined) {
       if (!isTableRef(rows.sameAs)) return undecided("the rule is not valid: rows.sameAs needs a path and a format");
-      const other = await loadTable(rows.sameAs, workspace, maxBytes);
+      const other = await loadTable(rows.sameAs, workspace, reading);
       if (!other.ok) return loadVerdict("source", rows.sameAs, other);
-      const expected = other.table.rows.length;
+      const expected = other.rows;
       if (count === expected) notes.push(`${count} data rows, as ${describeTable(rows.sameAs)}`);
       else problems.add(`${count} data rows, expected ${expected} as ${describeTable(rows.sameAs)}`);
     } else {
@@ -303,7 +434,7 @@ function compareValue(
 async function checkAggregate(
   rule: Extract<DataRule, { type: "aggregate_match" }>,
   workspace: Workspace,
-  maxBytes: number,
+  reading: Reading,
 ): Promise<Verdict> {
   if (!isTableRef(rule.source) || !isTableRef(rule.target)) return undecided("the rule is not valid: source and target need a path and a format");
   if (typeof rule.column !== "string" || typeof rule.targetColumn !== "string") return undecided("the rule is not valid: column and targetColumn are required");
@@ -317,22 +448,26 @@ async function checkAggregate(
   if (tolerance === null) return undecided("the rule is not valid: tolerance values must be finite non-negative numbers");
   const op: AggregateOp = rule.op;
 
-  const source = await loadTable(rule.source, workspace, maxBytes);
+  // U-202: each table is read once, its tally kept by the rule's columns; the verdict below asks in
+  // the order the whole-table reading asked (columns first, then the computed values).
+  const sourceTally = new SourceTally(rule.column, grouped ? (rule.groupBy as string) : null, op);
+  const source = await loadTable(rule.source, workspace, reading, sourceTally);
   if (!source.ok) return loadVerdict("source", rule.source, source);
-  const target = await loadTable(rule.target, workspace, maxBytes);
+  const targetTally = new TargetTally(rule.targetColumn, grouped ? (rule.targetKeyColumn as string) : null);
+  const target = await loadTable(rule.target, workspace, reading, targetTally);
   if (!target.ok) return loadVerdict("target", rule.target, target);
 
-  const sourceColumn = findColumn(source.table, rule.column);
+  const sourceColumn = findColumn(source, rule.column);
   if (!sourceColumn.ok) return undecided(`source column ${shownName(rule.column)} is ${sourceColumn.problem}`);
-  const targetColumn = findColumn(target.table, rule.targetColumn);
+  const targetColumn = findColumn(target, rule.targetColumn);
   if (!targetColumn.ok) return notHeld(`target column ${shownName(rule.targetColumn)} is ${targetColumn.problem}`);
   const problems = new Problems();
 
   if (!grouped) {
-    const outcome = aggregate(columnCells(source.table, sourceColumn.index), op);
+    const outcome = sourceTally.total.result();
     if (!outcome.ok) return sourceProblem(outcome, rule.column, "");
-    if (target.table.rows.length !== 1) return notHeld(`target has ${target.table.rows.length} data rows; expected exactly 1`);
-    const cell = target.table.rows[0]?.[targetColumn.index] ?? "";
+    if (target.rows !== 1) return notHeld(`target has ${target.rows} data rows; expected exactly 1`);
+    const cell = targetTally.firstCell;
     if (compareValue(outcome.value, cell, 1, rule.targetColumn, tolerance, problems, "")) {
       return held(`recomputed ${outcome.value} from ${outcome.values} cells; target data row 1 agrees`);
     }
@@ -341,61 +476,50 @@ async function checkAggregate(
 
   const groupBy = rule.groupBy as string;
   const keyName = rule.targetKeyColumn as string;
-  const keyColumn = findColumn(source.table, groupBy);
+  const keyColumn = findColumn(source, groupBy);
   if (!keyColumn.ok) return undecided(`source column ${shownName(groupBy)} is ${keyColumn.problem}`);
-  const targetKey = findColumn(target.table, keyName);
+  const targetKey = findColumn(target, keyName);
   if (!targetKey.ok) return notHeld(`target column ${shownName(keyName)} is ${targetKey.problem}`);
 
-  const grouping = groupCells(source.table, sourceColumn.index, keyColumn.index);
   // R-13 L-2 (PM decision: kept, and named in DATA_CHECKS_LIMITS): a group without any number in the
   // column leaves the whole rule undecided, like every other source problem.
   const computed = new Map<string, { value: number; firstDataRow: number }>();
-  for (const group of grouping.groups) {
-    const outcome = aggregate(group.cells, op);
+  for (const [key, group] of sourceTally.groups) {
+    const outcome = group.aggregate.result();
     if (!outcome.ok) return sourceProblem(outcome, rule.column, ` (group first seen at source data row ${group.firstDataRow})`);
-    computed.set(group.key, { value: outcome.value, firstDataRow: group.firstDataRow });
+    computed.set(key, { value: outcome.value, firstDataRow: group.firstDataRow });
   }
 
-  const targetRows = new Map<string, number[]>();
-  target.table.rows.forEach((row, index) => {
-    const key = row[targetKey.index] ?? "";
-    const dataRow = index + 1;
-    if (key.length === 0) {
-      problems.add(`target data row ${dataRow} has an empty key`);
-      return;
-    }
-    const rows = targetRows.get(key) ?? [];
-    rows.push(dataRow);
-    targetRows.set(key, rows);
-  });
+  for (const dataRow of targetTally.emptyKeyRows) problems.add(`target data row ${dataRow} has an empty key`);
+  const targetRows = targetTally.byKey;
   let agreed = 0;
   for (const [key, { value, firstDataRow }] of computed) {
-    const rows = targetRows.get(key);
+    const entry = targetRows.get(key);
     const label = ` (group first seen at source data row ${firstDataRow})`;
-    if (rows === undefined) {
+    if (entry === undefined) {
       problems.add(`no target row for the group first seen at source data row ${firstDataRow}`);
       continue;
     }
+    const rows = entry.rows;
     if (rows.length > 1) {
       problems.add(`target data rows ${rows.join(", ")} have the same key${label}`);
       continue;
     }
     const targetRow = rows[0] as number;
-    const cell = target.table.rows[targetRow - 1]?.[targetColumn.index] ?? "";
-    if (compareValue(value, cell, targetRow, rule.targetColumn, tolerance, problems, label)) agreed += 1;
+    if (compareValue(value, entry.cell, targetRow, rule.targetColumn, tolerance, problems, label)) agreed += 1;
   }
-  for (const [key, rows] of targetRows) {
+  for (const [key, { rows }] of targetRows) {
     if (!computed.has(key)) problems.add(`target data row ${rows[0]} has a key that no source row has`);
   }
-  const skipped = grouping.withoutKey > 0 ? `; ${grouping.withoutKey} source rows without a group value left out` : "";
+  const skipped = sourceTally.withoutKey > 0 ? `; ${sourceTally.withoutKey} source rows without a group value left out` : "";
   if (problems.size > 0) return notHeld(`${problems.text()}${skipped}`);
   return held(`${agreed} groups agree${skipped}`);
 }
 
-async function checkRule(rule: DataRule, workspace: Workspace, maxBytes: number): Promise<Verdict> {
+async function checkRule(rule: DataRule, workspace: Workspace, reading: Reading): Promise<Verdict> {
   if (typeof rule !== "object" || rule === null) return undecided("the rule is not valid");
-  if (rule.type === "table_shape") return checkShape(rule, workspace, maxBytes);
-  if (rule.type === "aggregate_match") return checkAggregate(rule, workspace, maxBytes);
+  if (rule.type === "table_shape") return checkShape(rule, workspace, reading);
+  if (rule.type === "aggregate_match") return checkAggregate(rule, workspace, reading);
   return undecided("the rule is not valid: unknown type");
 }
 
@@ -410,6 +534,8 @@ function safeLabel(rule: DataRule): string {
 export interface DataChecksOptions {
   /** Largest table read, in bytes. Defaults to MAX_DATA_TABLE_BYTES; tests lower it. */
   readonly maxTableBytes?: number;
+  /** U-202: bytes read at a time. Defaults to DATA_TABLE_CHUNK_BYTES; tests make it small to split everything. */
+  readonly chunkBytes?: number;
 }
 
 export async function runDataChecksVerifier(
@@ -418,7 +544,10 @@ export async function runDataChecksVerifier(
   signal: AbortSignal,
   options: DataChecksOptions = {},
 ): Promise<RawVerifierResult> {
-  const maxBytes = options.maxTableBytes ?? MAX_DATA_TABLE_BYTES;
+  const reading: Reading = {
+    maxBytes: options.maxTableBytes ?? MAX_DATA_TABLE_BYTES,
+    chunkBytes: Math.max(1, Math.floor(options.chunkBytes ?? DATA_TABLE_CHUNK_BYTES)),
+  };
   const rules = Array.isArray(config.rules) ? config.rules : [];
   if (rules.length === 0) {
     return createRawVerifierResult({
@@ -442,7 +571,7 @@ export async function runDataChecksVerifier(
       verdict = undecided("cancelled before this rule was checked");
     } else {
       try {
-        verdict = await checkRule(rule, workspace, maxBytes);
+        verdict = await checkRule(rule, workspace, reading);
       } catch (error) {
         verdict = undecided(`check failed: ${error instanceof Error ? error.message : String(error)}`);
       }

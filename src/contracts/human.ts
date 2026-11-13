@@ -447,6 +447,9 @@ export const FIXED_MESSAGES = {
   "error.label": {},
   "error.fix_label": {},
   "error.doctor_hint": {},
+  // U-228 (draft for nb-i18n): run_not_plan's line with the hint plan_kind_differs, in place of
+  // `error.run_not_plan.what`: the run has a plan, of another kind than the task carries out.
+  "error.run_not_plan.other_kind": {},
   // U-37: the hints whose line takes a value (DETAILED_CLI_ERROR_HINTS, from CliErrorOutput's
   // CLI_ERROR_HINT_DETAIL); the others are listed (`error.hint.<hint>`). unknown_option names the
   // argument by its position only (DR-57). provider_settings_missing is followed by one item line
@@ -1013,12 +1016,17 @@ export const FIXED_MESSAGES = {
   "doctor.config_file.too_deep": { location: "location" },
   "doctor.config_file.invalid": { location: "location", field: "field" },
   "doctor.config_file.invalid_unlocated": { location: "location" },
+  // U-228 (U-224; draft for nb-i18n): a task type of the config file (named by the task or the
+  // profile) resolves to a plan mode without its plan tool, which a run refuses (plan_tool_missing).
+  "doctor.config_file.plan_tool_missing": { location: "location" },
   "doctor.task_file.unreadable": {},
   "doctor.task_file.json_syntax": { line: "count", column: "count" },
   "doctor.task_file.key": {},
   "doctor.task_file.too_deep": {},
   "doctor.task_file.invalid": { field: "field" },
   "doctor.task_file.invalid_unlocated": {},
+  // U-228 (U-224; draft for nb-i18n): the task's own plan mode or tools leave out the plan tool.
+  "doctor.task_file.plan_tool_missing": {},
   "doctor.task_file.valid": {},
   "doctor.model.script_unreadable": {},
   "doctor.model.script_json_syntax": { line: "count", column: "count" },

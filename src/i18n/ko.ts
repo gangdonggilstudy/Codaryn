@@ -11,6 +11,8 @@ export const KO_MESSAGES: MessageTexts = {
   "error.label": "오류",
   "error.fix_label": "고치는 법",
   "error.doctor_hint": "점검: codaryn doctor",
+  // U-228 (nb-i18n이 다듬을 초안).
+  "error.run_not_plan.other_kind": "그 실행의 계획은 apply에 준 task가 수행하는 종류가 아닙니다",
   "error.hint.quick_form_needs_task":
     "plan, apply, review의 간편 형식(--workspace)은 한도를 포함한 실행 설정을 설정 파일에서 읽습니다. 대신 계획 실행의 task를 --task로 주세요. task는 자기 설정과 가릴 값을 함께 가져옵니다.",
   "error.hint.unknown_command": "명령이 없거나, 준 낱말이 Codaryn 명령이 아닙니다. 명령 목록은 codaryn --help로 확인하세요.",
@@ -27,7 +29,11 @@ export const KO_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "설정 파일에 --profile 옵션으로 준 이름의 프로필이 없습니다. 설정 파일의 프로필 이름을 확인하세요.",
   "error.hint.task_type_not_found": "준 작업 종류(--workflow 옵션이나 task 파일)가 기본으로 있는 것도 아니고 설정 파일에 정의된 것도 아닙니다. 이름을 확인하세요.",
   "error.hint.config_missing": "설정 파일이 아직 없습니다(기본 위치에 없음). codaryn init으로 만드세요.",
-  "error.hint.plan_run_not_available": "계획 방식 \"run\"은 이 판에서 아직 쓸 수 없습니다. plan을 \"none\"이나 \"apply\"로 두세요. 모델에는 아무것도 보내지 않았습니다.",
+  // U-228 (nb-i18n이 다듬을 초안).
+  "error.hint.plan_kind_differs":
+    "계획을 만든 실행이 쓴 task를 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
+  "error.hint.plan_tool_missing":
+    "계획 방식이 \"run\"인 작업 종류는 도구에 propose_changes가, \"apply\"인 작업 종류는 propose_plan이 있어야 합니다. 작업 종류의 도구(task가 도구를 적었다면 그 목록에도)에 그 도구를 더하거나 계획 방식을 빼세요.",
   "error.hint.key_in_goal": "목표 문장에 키 값이 있습니다. 목표에서 빼세요.",
   "error.hint.key_in_task": "--task 옵션으로 준 task 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
   "error.hint.key_in_config": "설정 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
@@ -406,12 +412,18 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.config_file.too_deep": "설정 파일({location})이 너무 깊게 중첩되어 있습니다",
   "doctor.config_file.invalid": "설정 파일({location})의 {field} 값이 올바르지 않습니다(값은 표시하지 않습니다)",
   "doctor.config_file.invalid_unlocated": "설정 파일({location})의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
+  // U-228 (nb-i18n이 다듬을 초안).
+  "doctor.config_file.plan_tool_missing":
+    "설정 파일({location})에 계획 방식의 계획 도구가 없는 작업 종류가 있습니다(\"run\"은 propose_changes, \"apply\"는 propose_plan이 필요합니다). 실행이 거부합니다",
   "doctor.task_file.unreadable": "task 파일을 읽을 수 없습니다",
   "doctor.task_file.json_syntax": "task 파일의 JSON 문법 오류: {line}줄 {column}열",
   "doctor.task_file.key": "task 파일에 키 필드나 키 값이 있습니다",
   "doctor.task_file.too_deep": "task 파일이 너무 깊게 중첩되어 있습니다",
   "doctor.task_file.invalid": "task 파일의 {field} 값이 올바르지 않습니다(값은 표시하지 않습니다)",
   "doctor.task_file.invalid_unlocated": "task 파일의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
+  // U-228 (nb-i18n이 다듬을 초안).
+  "doctor.task_file.plan_tool_missing":
+    "task의 계획 방식에 맞는 계획 도구가 도구 목록에 없습니다(\"run\"은 propose_changes, \"apply\"는 propose_plan이 필요합니다). 실행이 거부합니다",
   "doctor.task_file.valid": "task 파일이 올바릅니다",
   "doctor.model.script_unreadable": "scripted 모델의 대본 파일을 읽을 수 없습니다",
   "doctor.model.script_json_syntax": "대본 파일의 JSON 문법 오류: {line}줄 {column}열",
@@ -675,7 +687,7 @@ export const KO_MESSAGES: MessageTexts = {
   "denial.protected_path": "보호 경로",
   "denial.plan_action_not_allowed": "허용하지 않은 계획 동작",
   // U-175 (DR-69 B-2), 초안: 작업이 쓸 수 있는 파일 밖의 쓰기.
-  "denial.path_not_writable": "쓰기를 허용한 파일 밖",
+  "denial.path_not_writable": "쓰기 허용 경로 밖",
   // U-197 (묶음 A), nb-i18n 이 다듬을 초안.
   "denial.unreadable_path": "읽기 제외 경로",
   "denial.unknown_tool": "모르는 도구",

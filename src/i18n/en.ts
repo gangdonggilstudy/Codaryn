@@ -32,7 +32,7 @@ export const EN_MESSAGES: MessageTexts = {
   "error.hint.config_missing": "There is no config file yet (none at the default location). Create one with codaryn init.",
   // U-228, drafts for nb-i18n.
   "error.hint.plan_kind_differs":
-    "Give apply the task the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
+    "Give apply the same task form the plan run used: a plan of moves and discards is carried out by a task type with plan \"apply\", a plan of files to write by one with plan \"run\". codaryn plan shows which it is.",
   // U-210 (R-110 M-1), drafts for nb-i18n.
   "error.hint.unreadable_paths_required":
     "The analyze-private task type needs at least one entry in policy.unreadablePaths. Put the folder of the tables with personal data there, in the task file, the config file or a profile.",

@@ -658,6 +658,11 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - 제어 문자와 양방향 문자는 `cleanText`로 `?`가 된다. 줄바꿈(LF)과 탭은 남는다.
   - 기본 무시 문자(`\p{Default_Ignorable_Code_Point}`: 영폭 공백·연결자, BOM, 소프트 하이픈, 이체 선택자 등)도 `?`가 된다. 그래서 이모지의 연결자와 이체 선택자도 `?`로 보인다.
   - 가린 뒤에 정리하므로, 그런 문자로 끊긴 값이나 키도 먼저 찾는다(5.12와 같은 순서).
+  - **JSON 글의 안쪽**(U-121, R-80b L-1). 도구 결과의 `content`와 도구 호출의 `argsJson`은 JSON 글이다(어느 깊이든: `tool_result.result`, `model_request`의 도구·어시스턴트 메시지, `model_response.toolCalls`).
+    - 그런 문자열은 풀어서, 안쪽의 모든 문자열과 필드 이름을 같은 게이트웨이로 가리고, 키 모양과 지금의 키 값을 가리고, 위와 같이 정리한 뒤 JSON으로 다시 쓴다. 그래서 풀어 보이는 어댑터도 정리된 글을 받는다.
+    - JSON 이스케이프(`\uXXXX`)로 등록 값을 적은 글은 바깥 글에서 가리기가 보지 못한다. 안쪽에서 다시 가리므로 응답에 나오지 않는다(시험).
+    - JSON이 아닌 글(실패한 도구 결과의 문구 등)은 정리한 문자열 그대로다. 안쪽을 가릴 수 없는 레코드는 빼고 `skipped`로 센다.
+    - 다시 쓴 JSON은 엔진이 쓴 압축 꼴과 같다(실행 이벤트와 같음을 보는 시험이 그대로 통과한다). 다만 들여쓰기가 있던 JSON 글은 압축 꼴이 된다.
 - **상태.**
   - `damaged`(R-80 M-1 다): 위에서 journal이 손상이거나, `report`의 읽기(`summarizeJournal`·`readResult`, 적용은 `summarizeApplyJournal`·`readApplyResult`)가 journal이나 result.json을 거부했다. 받은 레코드와 `missing`을 함께 준다.
     - 그래서 `report`가 `invalid_run_record`로 거부하는 사본에서 이 함수가 `complete`라고 하지 않는다(시험이 같은 사본에 `report`를 불러 본다).

@@ -7,7 +7,7 @@
  * escaped text. Now such a string is parsed, every inner string masked with the values registered
  * now, key shapes hidden and cleaned as every other string, and written as JSON again; one that is
  * not JSON stays a cleaned string. A record whose inner strings cannot be masked is left out.
- * Reproduced first (todo until fixed). Scripted model, temporary folders, fake values only.
+ * Reproduced first (4db1cde, todo until fixed). Scripted model, temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -17,8 +17,6 @@ import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, RunEventsPage, StoredRunRecord } from "../../../src/app/index.js";
 import { FAKE_SECRET, WRITE_NOTES, appEnvironment, readJournal, runDir, setupRun, taskForm, taskRequest } from "./support.js";
-
-const TODO = { todo: "U-121: the JSON text inside content and argsJson is not cleaned" };
 
 const BEL = String.fromCodePoint(0x07);
 const ESC = String.fromCodePoint(0x1b);
@@ -65,7 +63,7 @@ function innerStrings(records: readonly StoredRunRecord[]): string[] {
 }
 
 describe("U-121 (R-80b L-1): the strings inside a tool result's content and a tool call's argsJson are masked and cleaned", () => {
-  test("a file read with control, bidirectional and invisible characters: none inside the JSON texts; LF and TAB stay", TODO, async () => {
+  test("a file read with control, bidirectional and invisible characters: none inside the JSON texts; LF and TAB stay", async () => {
     const text = `a${BEL}b ${ESC}[31mred ${SOH} ${RLO}rlo ${ZWSP}zw crlf${CR}\nline2\tend\n`;
     const base = await setupRun({ "data.txt": text }, {}, [{ toolCalls: [{ name: "read_file", args: { path: "data.txt" } }] }, WRITE_NOTES, { text: "done" }]);
     const app = createCodarynApp(await appEnvironment(base));
@@ -80,7 +78,7 @@ describe("U-121 (R-80b L-1): the strings inside a tool result's content and a to
     assert.equal(page.status, "complete");
   });
 
-  test("a JSON escape that spells a registered value: masked inside, and never in the response", TODO, async () => {
+  test("a JSON escape that spells a registered value: masked inside, and never in the response", async () => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const app = createCodarynApp(await appEnvironment(base));
     const started = await app.startRun(taskRequest(base));

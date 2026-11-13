@@ -332,6 +332,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "skip.original_path_taken": "another file is at the original place",
   "skip.unsafe_move": "skipped: a move that could replace a file",
   "error.unknown_run": "That run is not in the list. Refresh the list.",
+  "error.form_unknown": "This app did not start that run (or ran it from a task file), so it does not know its task form. Record its review with codaryn review.",
   "error.unknown_preview": "That preview can no longer be used. Preview again.",
   "error.not_confirmed": "It was not confirmed, so nothing was done.",
   "error.unknown_plan": "That plan view can no longer be used. Open the plan again.",

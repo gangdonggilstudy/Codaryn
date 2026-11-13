@@ -754,6 +754,8 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   - 계획 파일마다, 그 계획을 수행할 실행의 관문이 쓰기로 거부하는지 본다(`checkChangesPlanFiles`).
     - 관문은 task의 정책·쓰기 경로 목록에 계획 파일 목록을 하나 더한 것이다(`approvedPlanWritablePathSets`와 같음). `PLANNED_FILE_DESCRIPTOR`로 글자와 실경로를 모두 본다.
     - 이는 엔진이 첫 모델 요청 전에 하는 판정이다. 거부된 파일은 그 순번으로 `problems`에 `denied`로 담긴다.
+    - U-237(R-108 H-2, U-219, Codex V-21): 관문은 수행하는 실행이 받는 그것(`approvedPlan.policyFor`)과 같게 `runGuards`로 만든다. 그래서 실행의 읽기 제외 목록(모든 원천을 합친 것) 아래 파일도 거부된다. 판정은 엔진 자신의 `judgePlannedFile`을 부른다(이 모듈의 따로 쓴 줄이 아니다).
+  - U-237: 이동 계획의 점검도 관문을 `runGuards`로 만든다(CLI의 이동 계획 적용과 같다). 그래서 읽기 제외 아래로 옮기거나 버리는 동작은 적용처럼 점검에서도 문제로 나온다. 전에는 점검이 아무 말 없이 지나고 적용만 거부했다. 시험 `tests/unit/app/u237-app-checks-unreadable.test.ts`.
   - 파일이 계획 때와 같은지(낡음, `plannedFileStale`)는 엔진이 실행 직전에 읽어 본다. 여기서 보면 그 사이에 바뀔 수 있는 것을 말할 뿐이라 보지 않는다(PM).
   - 잠금, 시험 링크, 이동이 없다. 결과에는 `planKind: "changes"`가 붙고 `unsafeMoves` `[]`, `inventoryLimitReached` false, `probesLeft`·`probesRemoved` 0, `lockLeft` false다. 기존 `PlanCheck` 꼴에 표지 하나만 더했다.
 

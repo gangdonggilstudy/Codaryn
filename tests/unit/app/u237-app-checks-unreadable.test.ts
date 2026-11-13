@@ -11,7 +11,7 @@
  *   the engine's own judgement (judgePlannedFile, U-219; Codex V-21) with the same lists
  *   (approvedPlanWritablePathSets) instead of its own lines.
  * Each plan is made while no list exists; then the config file gets `unreadablePaths: ["private"]`.
- * Reproduced first (todo until the checks used runGuards). Temporary folders, scripted model, fake values only.
+ * Reproduced first (3718d41, todo until the checks used runGuards). Temporary folders, scripted model, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -22,7 +22,6 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { PlanCheck } from "../../../src/app/index.js";
 import { appEnvironment, exists, planSteps, plannedRun, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "R-108 H-2: the app's checks judge with runGuards' gate" };
 /** A whole policy (a config file's policy is one), with the private folder unreadable. */
 const PRIVATE_POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, unreadablePaths: ["private"] };
 const REWRITE = { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" };
@@ -33,7 +32,7 @@ function checked(outcome: { ok: boolean }): PlanCheck {
 }
 
 describe("U-237, R-108 H-2: the app's checks and the run's unreadable paths", () => {
-  test("a plan of moves into an unreadable folder: the check says so, as the apply refuses it", TODO, async () => {
+  test("a plan of moves into an unreadable folder: the check says so, as the apply refuses it", async () => {
     const planned = await plannedRun({ "a.txt": "alpha\n" }, planSteps("a.txt", "private/a.txt"));
     const config = path.join(planned.base, "config.json");
     await writeFile(config, JSON.stringify({ schemaVersion: 1, policy: PRIVATE_POLICY }), "utf8");
@@ -48,7 +47,7 @@ describe("U-237, R-108 H-2: the app's checks and the run's unreadable paths", ()
     assert.equal(await exists(path.join(planned.base, "work", "a.txt")), true);
   });
 
-  test("a run plan with a file under an unreadable folder: the check denies that file, as the carried-out run's gate does", TODO, async () => {
+  test("a run plan with a file under an unreadable folder: the check denies that file, as the carried-out run's gate does", async () => {
     const propose = { toolCalls: [{ name: "propose_changes", args: { summary: "add the notes", files: [{ path: "NOTES.md", change: "create" }, { path: "private/notes.md", change: "create" }] } }] };
     const base = await setupRun({}, { workflowRef: "rewrite" }, [propose, { text: "planned" }]);
     const config = path.join(base, "config.json");

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { RUN_PHASES, planApplyStateOf, toRunId } from "../../../src/contracts/index.js";
+import { RUN_PHASES, planApplyStateOf, runPhaseOf, toRunId } from "../../../src/contracts/index.js";
 import type { RunId, RunListEntry, RunPhase, RunsOutput } from "../../../src/contracts/index.js";
 
 type Checked = Extract<RunListEntry, { readonly state: "checked" }>;
@@ -51,6 +51,15 @@ describe("U-155: RunListEntry.phase", () => {
     assert.deepEqual(JSON.parse(JSON.stringify(output)), output);
     const phases: readonly RunPhase[] = output.runs.flatMap((entry) => (entry.state === "checked" && entry.phase !== undefined ? [entry.phase] : []));
     assert.deepEqual(phases, ["running"]);
+  });
+
+  test("U-158 runPhaseOf: a result comes first, then a live lock that names the run", () => {
+    assert.equal(runPhaseOf({ hasResult: true, lockedByThisRun: false }), "finished");
+    assert.equal(runPhaseOf({ hasResult: true, lockedByThisRun: true }), "finished", "the result is written before the lock goes");
+    assert.equal(runPhaseOf({ hasResult: false, lockedByThisRun: true }), "running");
+    assert.equal(runPhaseOf({ hasResult: false, lockedByThisRun: false }), "no_result");
+    const every = new Set([true, false].flatMap((hasResult) => [true, false].map((lockedByThisRun) => runPhaseOf({ hasResult, lockedByThisRun }))));
+    assert.deepEqual([...every].sort(), [...RUN_PHASES].sort(), "every phase is reachable, and nothing else");
   });
 
   test("the rule for plan runs does not look at it", () => {

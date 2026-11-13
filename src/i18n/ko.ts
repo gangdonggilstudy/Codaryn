@@ -34,9 +34,9 @@ export const KO_MESSAGES: MessageTexts = {
     "계획을 만든 실행과 같은 작업 지정을 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
   // U-210 (R-110 M-1; nb-i18n이 다듬을 초안).
   "error.hint.unreadable_paths_required":
-    "analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. 개인정보가 든 표의 폴더를 task 파일, 설정 파일, 프로필 가운데 한 곳에 두세요.",
+    "analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. 개인정보가 든 표의 폴더를 task 파일, 설정 파일, 프로필 가운데 한 곳의 policy.unreadablePaths에 넣으세요.",
   "error.hint.unreadable_with_commands":
-    "unreadablePaths가 있으면 명령 규칙도 명령 검증기도 둘 수 없습니다. 명령은 어떤 파일이든 읽을 수 있어, 에이전트에게서 감춘 파일도 읽습니다. policy.commands와 verifiers에서 빼거나 unreadablePaths 없이 실행하세요.",
+    "unreadablePaths가 있으면 명령 규칙도 명령 검증기도 둘 수 없습니다. 명령은 어떤 파일이든 읽을 수 있어, 에이전트에게서 감춘 파일도 읽을 수 있습니다. policy.commands와 verifiers에서 빼거나 unreadablePaths 없이 실행하세요.",
   "error.hint.min_group_size_range":
     "policy.minGroupSize(읽기 제외 표의 집계가 보여 주는 가장 작은 묶음)는 5부터 1000까지의 정수여야 합니다. 그 범위의 값을 두세요. 어느 곳도 낮출 수는 없고 높이기만 합니다.",
   "error.hint.plan_tool_missing":

@@ -17,10 +17,15 @@
  */
 
 import { MODEL_TEXT_PREFIX, quoteModelText } from "./input/format.js";
-import { FINAL_MESSAGE_MAX_LINES } from "../cli/human/output.js";
 import { hideKeys } from "./input/text-safety.js";
 
 /** The rows of a model's text the CLI shows (its plan view and the end summary's last message). */
+/**
+ * DR-47: rows of the agent's last message shown in a run summary (quoteModelText). The rest are counted.
+ * U-280 (CLI migration C-3a): moved here from src/cli/human/output.ts, which re-exports it.
+ */
+export const FINAL_MESSAGE_MAX_LINES = 20;
+
 export const MODEL_TEXT_MAX_ROWS: number = FINAL_MESSAGE_MAX_LINES;
 
 export interface ModelTextOptions {

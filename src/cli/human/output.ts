@@ -79,6 +79,7 @@ import type {
 } from "../../contracts/index.js";
 import { isRunTimestamp } from "../../store/index.js";
 import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "../../app/input/format.js";
+import { FINAL_MESSAGE_MAX_LINES } from "../../app/model-text.js";
 import { queryTableFacts } from "./query-table.js";
 import type { QueryTableFacts } from "./query-table.js";
 
@@ -124,8 +125,9 @@ function localTime(at: unknown): string | null {
   return isRunTimestamp(at) ? formatLocalTime(Date.parse(at)) : null;
 }
 
-/** DR-47: rows of the agent's last message shown in a run summary (quoteModelText). The rest are counted. */
-export const FINAL_MESSAGE_MAX_LINES = 20;
+// DR-47: rows of the agent's last message shown in a run summary. U-280 (CLI migration C-3a): the
+// app layer's now (src/app/model-text.ts); re-exported for the renderer's users and the tests.
+export { FINAL_MESSAGE_MAX_LINES };
 
 /** "(+3)" after a cut list. */
 function moreLine(count: number): string {

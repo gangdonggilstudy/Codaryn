@@ -672,14 +672,15 @@ startGui({
 
       // 5f. GU-5: a plan run (organize), the plan screen, refused requests, and an apply the main process asked about.
       const resultId = (): Promise<unknown> => js("document.getElementById('run-result-id')?.textContent ?? null");
-      // U-178: a new result id, or "error:<code>" as soon as the run screen shows a start or an end that
-      // failed (no waiting out the time for a run that is not going on), or "timeout". Anything but a run
-      // id is noted in stepFailures with what the window, the start blocks and the lock file showed.
+      // U-178: a new result id, or "error:<code>" as soon as the run screen (when it is the one shown: its
+      // own #run-state and #run-end) shows a start or an end that failed (no waiting out the time for a run
+      // that is not going on), or "timeout". Anything but a run id is noted in stepFailures with what the
+      // window, the start blocks and the lock file showed.
       results["stepFailures"] = stepFailures;
       const newResult = async (previous: unknown, ms = 90_000, step = "result"): Promise<unknown> => {
         const startedAt = Date.now();
         const value = await waitFor(
-          `(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; if (id !== null && id !== ${JSON.stringify(previous)}) return id; const phase = document.querySelector('[data-run-phase]')?.getAttribute('data-run-phase') ?? null; const error = document.querySelector('[data-run-phase] [data-error]')?.getAttribute('data-error') ?? null; return error !== null && (phase === 'idle' || phase === 'done') ? 'error:' + error : null; })()`,
+          `(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; if (id !== null && id !== ${JSON.stringify(previous)}) return id; const phase = document.getElementById('run-state')?.getAttribute('data-phase') ?? null; const error = document.querySelector('#run-end [data-error]')?.getAttribute('data-error') ?? null; return error !== null && (phase === 'idle' || phase === 'done') ? 'error:' + error : null; })()`,
           stepFailures.length > 0 ? Math.min(ms, AFTER_FAILURE_MS) : ms,
         );
         if (isRunIdValue(value)) return value;
@@ -689,7 +690,8 @@ startGui({
           value,
           waitedMs: Date.now() - startedAt,
           screen: await js("document.getElementById('work')?.getAttribute('data-screen') ?? null"),
-          runPhase: await js("document.querySelector('[data-run-phase]')?.getAttribute('data-run-phase') ?? null"),
+          runPhase: await js("document.getElementById('run-state')?.getAttribute('data-phase') ?? null"),
+          error: await js("document.querySelector('#work [data-error]')?.getAttribute('data-error') ?? null"),
           startsBlocked: [...startsBlocked],
           lock: lockNow(),
           apiMessages: messagesReceived(),
@@ -1120,7 +1122,8 @@ startGui({
       const beforeTask = await resultId();
       await js("(() => { document.getElementById('task-with-vars').checked = true; document.getElementById('task-run-file').click(); return true; })()");
       const taskRunId = await newResult(beforeTask, 60_000, "U-63 task file run");
-      const taskDone = typeof taskRunId === "string" && taskRunId !== beforeTask ? "done" : taskRunId;
+      // U-178: "done" only for a run id (a wait's "timeout" or an "error:<code>" is shown as it is).
+      const taskDone = isRunIdValue(taskRunId) && taskRunId !== beforeTask ? "done" : taskRunId;
       results["taskFileRun"] = {
         cancelled,
         inside,

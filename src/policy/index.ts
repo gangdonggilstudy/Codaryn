@@ -23,6 +23,7 @@ import type {
   ToolRequirements,
   WritablePathSet,
 } from "../contracts/index.js";
+import { noteJudged } from "../workspace/judged.js";
 import { lexicalCheck } from "../workspace/lexical.js";
 import { compilePathSet } from "./path-set.js";
 import type { PathSet } from "./path-set.js";
@@ -245,6 +246,8 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writable
           denials.push(deny("restore", "restore_denied"));
         } else {
           const outcome = await workspace.resolve(value, access);
+          // U-189 (T-1): the real path judged here; the tool, resolving the argument again, must land on it.
+          if (outcome.ok) noteJudged(workspace, value, access, outcome.path);
           if (!outcome.ok) {
             denials.push(deny("path", outcome.code));
           } else if (access === "write" && (await protectedPaths.coversEffective(outcome.path.relative, workspace))) {

@@ -38,6 +38,7 @@ import type {
   WriteFileArgs,
 } from "../contracts/index.js";
 
+import { takeJudged } from "../workspace/judged.js";
 import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
@@ -245,10 +246,19 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     path: string,
     access: PathAccess,
   ): Promise<{ ok: true; path: ResolvedPath } | Failure> {
+    // U-189 (T-1): the real path the policy gate judged for this argument, if it judged one.
+    const judged = takeJudged(workspace, path, access);
     const resolved = await workspace.resolve(path, access);
-    if (resolved.ok) return resolved;
-    // The policy gate should have stopped this call. The tool still refuses to touch the path.
-    return fail("policy_denied", `path rejected by workspace: ${resolved.code}`);
+    if (!resolved.ok) {
+      // The policy gate should have stopped this call. The tool still refuses to touch the path.
+      return fail("policy_denied", `path rejected by workspace: ${resolved.code}`);
+    }
+    // A folder swapped for a link after the gate judged the path makes this resolution land elsewhere
+    // (perhaps a protected path or one outside the writable lists): nothing is done.
+    if (judged !== undefined && judged !== resolved.path.absolute) {
+      return fail("policy_denied", "the path leads elsewhere than when the policy judged it; nothing was done");
+    }
+    return resolved;
   }
 
   async function readFile(args: ReadFileArgs): Promise<RawToolOutcome> {
@@ -292,7 +302,13 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         const file = await workspace.resolve(entry.relative, "read");
         if (!file.ok) continue;
         const read = await workspace.readText(file.path);
-        if (!read.ok) continue;
+        if (!read.ok) {
+          // U-189 (Codex V-10b): a file that could not be read (io_error: the read saw its folders change on
+          // every try, or another I/O failure) may hold the text: the result is not complete, and says so.
+          // A file that is not text, too large or gone since the listing holds no searchable text now.
+          if (read.code === "io_error") truncated = true;
+          continue;
+        }
         const raw: string = read.snapshot.text;
         const masked = maskText(raw.startsWith(BOM) ? raw.slice(BOM.length) : raw);
         if (masked === null) return fail("masking_failed", "masking a file failed");

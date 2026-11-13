@@ -60,6 +60,9 @@ import {
   pathKey,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
+import { nodeFileLayer } from "../workspace/file-layer.js";
+import { FolderWatch, retried, sameChain, walkChain } from "../workspace/guard.js";
+import { takeJudged } from "../workspace/judged.js";
 
 /**
  * Most entries `inspect_files` walks under one directory. Above it the call fails with
@@ -109,12 +112,14 @@ interface WalkedEntry {
  * Every file and directory under `dir`, sorted by root-relative path. Links and other special
  * entries are skipped and never followed. The state directory is never entered.
  */
-async function walk(root: string, dir: string, signal: AbortSignal): Promise<WalkedEntry[] | Failure> {
+async function walk(root: string, dir: string, signal: AbortSignal, watch: FolderWatch): Promise<WalkedEntry[] | Failure | "changed"> {
   const found: WalkedEntry[] = [];
   const pending: string[] = [dir];
   while (pending.length > 0) {
     if (signal.aborted) return fail("cancelled", "inspect_files cancelled");
     const current = pending.pop() as string;
+    // U-189 (Codex V-10): each folder is looked at before it is read; a link there now is a swap.
+    if (!(await watch.enter(current))) return "changed";
     let children: Dirent[];
     try {
       children = await fs.readdir(current, { withFileTypes: true });
@@ -174,18 +179,42 @@ export async function inspectFiles(
   args: InspectFilesArgs,
   signal: AbortSignal,
 ): Promise<RawWorkflowToolOutcome> {
-  const { workspace, privacy } = deps;
+  const { workspace } = deps;
   if (typeof args.path !== "string") return fail("invalid_args", "path must be a string");
+  // U-189 (T-1, Codex V-10): the real path the policy gate judged for this argument, if it judged one.
+  const judged = takeJudged(workspace, args.path, "read");
   const resolved = await workspace.resolve(args.path, "read");
   if (!resolved.ok) return fail("policy_denied", `path rejected by workspace: ${resolved.code}`);
+  if (judged !== undefined && judged !== resolved.path.absolute) {
+    return fail("policy_denied", "the path leads elsewhere than when the policy judged it; nothing was done");
+  }
   try {
     const stat = await fs.stat(resolved.path.absolute);
     if (!stat.isDirectory()) return fail("invalid_args", "path is not a directory");
   } catch (error) {
     return fail(isMissing(error) ? "not_found" : "io_error", "cannot read directory");
   }
+  // U-189 (P-1, Codex V-10): names, sizes, times and hashes come only from folders that stayed the
+  // ones checked (guard.ts); a change seen is tried again, still seen it is io_error.
+  const outcome = await retried(async () => {
+    const first = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
+    if (!first.ok) return first.code === "changed" ? "changed" : fail(first.code === "not_found" ? "not_found" : "io_error", "cannot read directory");
+    const watch = new FolderWatch(nodeFileLayer.lstatId);
+    const result = await inspectOnce(deps, args, signal, resolved.path.absolute, watch);
+    if (result === "changed") return "changed";
+    if (!result.ok) return result;
+    const second = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
+    if (!second.ok || !sameChain(first.seen, second.seen) || !(await watch.unchanged())) return "changed";
+    return result;
+  });
+  return outcome === "changed" ? fail("io_error", "the folders changed while they were read; nothing was given") : outcome;
+}
 
-  const walked = await walk(workspace.root, resolved.path.absolute, signal);
+/** One pass of inspect_files over the checked folder `dir`, every folder read kept in `watch`. */
+async function inspectOnce(deps: WorkflowToolDeps, args: InspectFilesArgs, signal: AbortSignal, dir: string, watch: FolderWatch): Promise<RawWorkflowToolOutcome | "changed"> {
+  const { workspace, privacy } = deps;
+  const walked = await walk(workspace.root, dir, signal, watch);
+  if (walked === "changed") return "changed";
   if (!Array.isArray(walked)) return walked;
 
   let start = 0;

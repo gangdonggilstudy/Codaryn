@@ -39,6 +39,8 @@ export interface RunRequest {
   readonly goal: string;
   readonly profile: string | null;
   readonly workflow: string | null;
+  /** U-63: a run of a task file (it names its own workspace, which may not be the open one). */
+  readonly taskFile?: true;
 }
 
 export class RunModel {

@@ -10,7 +10,7 @@
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
-import { asStartRun } from "../api.js";
+import { asRuns, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { actionLine } from "../plan/plan-screen.js";
 import { button, el } from "../shell/dom.js";
@@ -30,7 +30,7 @@ export interface RunScreenDeps {
   readonly announce: (text: string) => void;
   /** GU-5: the open workspace (for a review) and the plan screen for a plan run. */
   readonly current: () => Workspace | null;
-  readonly openPlan: (runId: string, profile: string | null, workflow: string | null) => void;
+  readonly openPlan: (runId: string, profile: string | null, workflow: string | null, formKnown?: boolean) => void;
   /** DR-29: the changed files of a run, by path and state, and their texts when verified. */
   readonly openChanges: (runId: string, profile: string | null, workflow: string | null) => void;
   /** GU-3 (3.7): the run's report, with the run's form; U-61: and the tab to open first. */
@@ -42,7 +42,12 @@ export interface RunScreenDeps {
 }
 
 /** GU-5: what follows a result: the plan, the DR-21 consent question, the applied actions, a review. */
-function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
+/**
+ * `formKnown` false (U-63, a task file's run): the window does not keep the task file's path, so the
+ * run's form is unknown here, as for a run started elsewhere: its plan is shown, not applied, and its
+ * review is recorded with the CLI.
+ */
+function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView, formKnown = true): HTMLElement[] {
   const { api, run } = deps;
   const out: HTMLElement[] = [button(t.format("run.viewReport"), () => deps.openReport(result.runId, run.last === null ? null : { profile: run.last.profile, workflow: run.last.workflow }), { id: "run-view-report" })];
   // 3.12: saving the report is one of the next steps of an ended run.
@@ -52,7 +57,7 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
     out.push(button(t.format("run.viewChanges"), () => deps.openChanges(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-changes" }));
   }
   if (result.plan !== null) {
-    out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null), { id: "run-view-plan" }));
+    out.push(button(t.format("run.viewPlan"), () => deps.openPlan(result.runId, run.last?.profile ?? null, run.last?.workflow ?? null, formKnown), { id: "run-view-plan" }));
   }
   // U-61 (3.12): the next steps the design names for how the run ended. A run or an apply that
   // changed something can be reverted (done, cancelled, apply_incomplete and the rest alike).
@@ -90,10 +95,29 @@ function nextSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLEl
     }
   }
   // GU-5 (3.7), U-79: the review panel, the same as the report's review tab has.
-  if (result.review !== null && workspace !== null) {
+  if (result.review !== null && workspace !== null && !formKnown) out.push(el("p", t.format("report.reviewCli"), { class: "notice", id: "run-review-cli" }));
+  else if (result.review !== null && workspace !== null) {
     out.push(reviewPanel({ texts: t, api, workspace, runId: result.runId, profile: run.last?.profile ?? null, workflow: run.last?.workflow ?? null, announce: deps.announce }, { panel: "run-review-panel", title: "run-review-title" }));
   }
   return out;
+}
+
+/**
+ * U-63 (3.5): a task file names its own workspace, which the app layer does not tell the window
+ * (reported to the app layer's owner). The next steps read and change the open workspace's records,
+ * so they are offered only when the open workspace's run list has this run; otherwise the window
+ * says to open the task's workspace.
+ */
+function taskRunSteps(t: Texts, deps: RunScreenDeps, result: RunResultView): HTMLElement[] {
+  const box = el("div", undefined, { id: "run-task-steps", "data-task-place": "checking" });
+  const workspace = deps.current();
+  void (async () => {
+    const reply = workspace === null ? null : asRuns(await deps.api.listRuns(workspace.handle));
+    const here = reply !== null && reply.ok && reply.runs.some((item) => item.runId === result.runId);
+    box.replaceChildren(...(here ? nextSteps(t, deps, result, false) : [el("p", t.format("run.taskElsewhere"), { class: "notice", id: "run-task-elsewhere" })]));
+    box.setAttribute("data-task-place", here ? "open" : "elsewhere");
+  })();
+  return [box];
 }
 
 const FILTERS: readonly RunFilter[] = ["all", "denied", "files", "checks"];
@@ -270,7 +294,7 @@ export function runScreen(deps: RunScreenDeps): Screen {
         }
         if (phase === "idle" && run.startError === null && run.done === null) end.append(el("p", t.format("run.none")));
         if (phase === "done" && run.done !== null) {
-          if (run.done.ok) end.append(resultView(t, api, run.done.result, run.done.labels), ...nextSteps(t, deps, run.done.result));
+          if (run.done.ok) end.append(resultView(t, api, run.done.result, run.done.labels), ...(run.last?.taskFile === true ? taskRunSteps(t, deps, run.done.result) : nextSteps(t, deps, run.done.result)));
           else end.append(el("div", `${errorText(t, run.done.code)} ${t.format("error.code", { code: run.done.code })}`, { role: "alert", class: "error", "data-error": run.done.code }));
         }
         if (phase === "idle" || phase === "done") end.append(button(t.format("run.again"), deps.newTask, { id: "run-again" }));

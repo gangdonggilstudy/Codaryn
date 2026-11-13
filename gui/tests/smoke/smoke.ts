@@ -120,6 +120,8 @@ const results: Record<string, unknown> = {};
 const SAVED_REPORTS = join(GUI, "build", "smoke-report");
 const savedReports: string[] = [];
 const notices: { readonly title: string; readonly body: string }[] = [];
+/** U-63: the files the OS open dialog would choose, in order (null: closed without a file). */
+const openAnswers: (string | null)[] = [];
 /** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
 const copied: string[] = [];
 const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
@@ -148,6 +150,7 @@ startGui({
     return join(SAVED_REPORTS, name);
   },
   // U-5 (3.6): the OS end notifications, kept instead of shown.
+  answerOpenDialog: async () => openAnswers.shift() ?? null,
   writeClipboard: (text) => {
     copied.push(text);
   },
@@ -818,6 +821,48 @@ startGui({
         }
       })();
       results["setupText"] = await js("document.getElementById('work')?.textContent ?? ''");
+
+      // U-63 (3.5, GUI-D8): a task file's run. Its model is the scripted one (no request to the fake
+      // API). The dialogs are answered by the test; no path reaches the page. A dialog closed without a
+      // file starts nothing; a task file inside its workspace is refused by the app layer (S-1).
+      const taskDir = join(GUI, "build", "smoke-task");
+      mkdirSync(taskDir, { recursive: true });
+      const taskSpec = (workspaceRoot: string) => ({
+        schemaVersion: 1,
+        id: "smoke-task-file",
+        goal: "say that the task file ran",
+        workflow: "document",
+        workspaceRoot,
+        model: { provider: "scripted", scriptPath: "./script.json" },
+        policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false },
+        privacy: { secretEnv: [] },
+        limits: { maxModelTurns: 3, maxToolCalls: 3, maxTotalTokens: null, maxDurationMs: 60_000 },
+        verifiers: [],
+      });
+      writeFileSync(join(taskDir, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "the task file ran" }] }));
+      writeFileSync(join(taskDir, "task.json"), JSON.stringify(taskSpec(SECOND)));
+      writeFileSync(join(taskDir, "vars.env"), "SMOKE_TASK_VAR=1\n");
+      writeFileSync(join(SECOND, "inside-task.json"), JSON.stringify(taskSpec(SECOND)));
+      const taskHandle = JSON.stringify(second.ok ? second.handle : "");
+      openAnswers.push(null);
+      const cancelled = await js(`window.codaryn.startTaskRun(${taskHandle}, false)`);
+      openAnswers.push(join(SECOND, "inside-task.json"));
+      const inside = await js(`window.codaryn.startTaskRun(${taskHandle}, false)`);
+      openAnswers.push(join(taskDir, "task.json"), join(taskDir, "vars.env"));
+      await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+      await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+      await js("(() => { document.getElementById('task-with-vars').checked = true; document.getElementById('task-run-file').click(); return true; })()");
+      const taskDone = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 60_000);
+      results["taskFileRun"] = {
+        cancelled,
+        inside,
+        done: taskDone,
+        result: await js("(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason') }; })()"),
+        place: await waitFor("(() => { const p = document.getElementById('run-task-steps')?.getAttribute('data-task-place'); return p && p !== 'checking' ? p : null; })()"),
+        answersLeft: openAnswers.length,
+        pathsOnPage: await js(`document.body.textContent.includes(${JSON.stringify(taskDir)})`),
+      };
+      unlinkSync(join(SECOND, "inside-task.json"));
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

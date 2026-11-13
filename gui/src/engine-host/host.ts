@@ -289,6 +289,16 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         language = chosen;
         return runs.start(rest);
       }
+      case "startTaskRun": {
+        // U-63 (3.5): the paths the main process's dialogs chose; the app layer checks them as the CLI's run does (S-1, C-2).
+        if (!isObj(args) || !onlyKeys(args, ["taskPath", "varsFile", "language"])) throw new ArgsError();
+        const { taskPath, language: chosen } = args;
+        const varsFile = args["varsFile"] ?? null;
+        const pathOk = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= MAX_PATH_CHARS && isAbsolute(value) && !value.includes("\0");
+        if (!pathOk(taskPath) || !(varsFile === null || pathOk(varsFile)) || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
+        language = chosen;
+        return runs.startTask({ taskPath, varsFile });
+      }
       case "listRuns": {
         if (!isObj(args)) throw new ArgsError();
         const workspace = workspaceArg(args, ["workspace"]);

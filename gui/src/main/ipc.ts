@@ -57,7 +57,7 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyableText, parseCopyArgs, toCopyCheck } from "../shared/ipc.js";
+import { copyableText, parseCopyArgs, parseStartTaskArgs, toCopyCheck } from "../shared/ipc.js";
 import type { CopyReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
@@ -128,6 +128,8 @@ export interface IpcDeps {
   readonly confirmApply: (approval: PlanApproval) => Promise<boolean>;
   /** GU-5 (DR-21): asks the person (a separate OS dialog) for the consent to unsafe moves; true only on "agree". */
   readonly confirmConsent: (approval: PlanApproval) => Promise<boolean>;
+  /** U-63 (3.5, GUI-D8): the OS open dialog for the task file or the variables file (null: cancelled). Never kept. */
+  readonly chooseOpenFile: (kind: "task" | "vars") => Promise<string | null>;
   /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
   readonly writeClipboard: (text: string) => void;
 }
@@ -481,6 +483,39 @@ export function registerIpc(deps: IpcDeps): void {
       deps.runs.begin(token, runId);
       // R21b-L-1: the run's form, so its plan, changes and report open with it later (also after a restart).
       await workspaces.rememberRun(parsed.workspace, runId, { profile: parsed.profile, workflow: parsed.workflow });
+      return { ok: true, runId };
+    } finally {
+      starting = false;
+    }
+  });
+
+  /**
+   * U-63 (3.5, GUI-D8): a run of a task file the person chooses in the OS dialog, with a variables
+   * file chosen the same way when asked for. The paths go to the engine host only: not to the page,
+   * not into gui-state.json (the run's form is not remembered, so its plan is shown, not applied
+   * here). The app layer refuses a task file inside its workspace (S-1), as the CLI's run does.
+   */
+  handle(IPC_CHANNELS.startTaskRun, async (args): Promise<StartRunReply> => {
+    const parsed = args.length === 1 ? parseStartTaskArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    if (deps.runs.running || starting) return { ok: false, code: "run_active" };
+    if (workspaces.path(parsed.workspace) === null) return { ok: false, code: "unknown_workspace" };
+    starting = true;
+    try {
+      const taskPath = await deps.chooseOpenFile("task");
+      if (taskPath === null) return { ok: false, code: "cancelled" };
+      const varsFile = parsed.withVars ? await deps.chooseOpenFile("vars") : null;
+      if (parsed.withVars && varsFile === null) return { ok: false, code: "cancelled" };
+      const state = await deps.host();
+      if (!("host" in state)) return { ok: false, code: state.failure };
+      const response = await state.host.call("startTaskRun", { taskPath, varsFile, language }, START_TIMEOUT_MS);
+      if (!response.ok) return { ok: false, code: response.error.code };
+      const value = response.value as Record<string, unknown> | null;
+      if (typeof value !== "object" || value === null || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+      const token = value["run"];
+      const runId = value["runId"];
+      if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
+      deps.runs.begin(token, runId);
       return { ok: true, runId };
     } finally {
       starting = false;

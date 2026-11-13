@@ -20,11 +20,152 @@ export interface CommandVerifierConfig {
   readonly expectExitCode?: number;
 }
 
+/** U-116: the Markdown rules (MarkdownFileRule) are rules of the same list. */
 export type FileRule =
   | { readonly type: "exists"; readonly path: string }
   | { readonly type: "absent"; readonly path: string }
   | { readonly type: "contains"; readonly path: string; readonly text: string }
-  | { readonly type: "not_contains"; readonly path: string; readonly text: string };
+  | { readonly type: "not_contains"; readonly path: string; readonly text: string }
+  | MarkdownFileRule;
+
+/**
+ * U-116 (P1 bundle C, proposal M-1 to M-5, docs/reviews/2026-11-13-p1-bundle-proposal.md): two
+ * Markdown rules of `file_rules`. They read the UTF-8 file at `path` (at most
+ * MAX_MARKDOWN_RULE_FILE_BYTES) and nothing from the network.
+ * - Outcomes, as the other rules: a file that is missing does not hold the rule (a document that is
+ *   not there has neither the headings nor working links); a file that cannot be read, is not UTF-8
+ *   text or is larger than the limit leaves the rule undecided (inconclusive).
+ * - Code: lines inside a fenced code block (``` or ~~~, closed by the same fence or the end of the
+ *   file) and text inside a code span are neither headings nor links. Indented code blocks are not
+ *   recognised (their text is read as ordinary text; MARKDOWN_RULE_LIMITS says so).
+ * - Evidence (the note of the rule's line, after the verifier's "<state>: <label> (" as for every
+ *   rule): MARKDOWN_EVIDENCE_LEADS' text, then markdownEvidenceList of what is missing, at most
+ *   MAX_MARKDOWN_EVIDENCE_ITEMS items. The engine masks it as any evidence before it is recorded or
+ *   sent (registered values become tokens), and cuts it at MAX_EVIDENCE_BYTES.
+ */
+export const MARKDOWN_RULE_TYPES = ["markdown_headings", "markdown_links"] as const;
+export type MarkdownRuleType = (typeof MARKDOWN_RULE_TYPES)[number];
+
+/** Largest file a Markdown rule reads (1 MiB). A larger file leaves the rule undecided. */
+export const MAX_MARKDOWN_RULE_FILE_BYTES = 1_048_576;
+/** Most headings one `markdown_headings` rule lists. More is `invalid_task` / `invalid_config`. */
+export const MAX_MARKDOWN_RULE_HEADINGS = 50;
+/** Most code points of one listed heading text (after trimming); it may not be empty. */
+export const MAX_MARKDOWN_HEADING_CHARS = 200;
+/** Most items one rule's evidence lists; the rest is counted ("and N more"). */
+export const MAX_MARKDOWN_EVIDENCE_ITEMS = 20;
+/** Most code points of one evidence item's text before it is cut with "…" (as long texts are). */
+export const MAX_MARKDOWN_EVIDENCE_ITEM_CHARS = 80;
+
+/** M-2: one heading a document must have. */
+export interface MarkdownHeading {
+  /**
+   * Compared exactly with a heading's text as written: the text after the ATX marker (`#` to
+   * `######` then a space, a TAB or the end of the line; at most three spaces before the marker) or
+   * the line above a Setext underline (`=` level 1, `-` level 2), with white space at both ends
+   * and a closing run of `#` (preceded by a space or a TAB) removed. Case counts; inline markup
+   * (`**`, `` ` ``, links) is part of the text.
+   */
+  readonly text: string;
+  /** 1 to 6. Absent: a heading of any level matches. */
+  readonly level?: number;
+}
+
+/**
+ * M-2: the document has these headings. `order` "any" (the default): each listed heading matches at
+ * least one heading of the document. "in_order": they match headings of the document in the listed
+ * order, each after the one matched before (other headings may come between, and a heading listed
+ * twice needs two).
+ */
+export interface MarkdownHeadingsRule {
+  readonly type: "markdown_headings";
+  readonly path: string;
+  /** 1 to MAX_MARKDOWN_RULE_HEADINGS. */
+  readonly headings: readonly MarkdownHeading[];
+  readonly order?: "any" | "in_order";
+}
+
+/**
+ * M-3: every relative link of the document points at something that exists in the workspace.
+ * - Links read: inline links and images (`[text](target)`, `![alt](target)`, the target optionally
+ *   in `<...>` and followed by a title) and reference definitions (`[label]: target`).
+ * - Not checked: a target with a scheme (`[A-Za-z][A-Za-z0-9+.-]*:`, as http:, mailto: or a drive
+ *   letter), a target that is only an anchor (`#...`) or empty, and every anchor (the `#...` part
+ *   is removed before resolving; anchors are not compared with headings).
+ * - A target's `?...` part is removed and percent escapes are decoded. It is resolved against the
+ *   document's directory. One that starts with `/` or `\`, or lands outside the workspace root or
+ *   in the state directory, is "outside": it fails without being looked for (the rule never probes
+ *   outside the workspace). Otherwise it must exist (a file or a directory), else it is "missing".
+ */
+export interface MarkdownLinksRule {
+  readonly type: "markdown_links";
+  readonly path: string;
+}
+
+export type MarkdownFileRule = MarkdownHeadingsRule | MarkdownLinksRule;
+
+/**
+ * The leading words of a Markdown rule's note when it does not hold, before the list:
+ * - missingHeadings ("any"): the listed headings no heading of the document matches;
+ * - headingsOutOfOrder ("in_order"): the listed headings left when the document is read in order,
+ *   from the first that could not be matched after the one before;
+ * - brokenLinks: the targets that are missing or outside, each with its line and reason.
+ * When the rule holds the note is MARKDOWN_EVIDENCE_LEADS.held. Example of a whole line:
+ * `not held: "docs/guide.md" has relative links whose targets exist (targets missing or outside the
+ * workspace: "img/a.png" (line 12, missing), "../x.md" (line 30, outside))`.
+ */
+export const MARKDOWN_EVIDENCE_LEADS = {
+  missingHeadings: "headings not found",
+  headingsOutOfOrder: "headings not found in the given order",
+  brokenLinks: "targets missing or outside the workspace",
+  held: "all found",
+} as const;
+
+/** One item of a Markdown rule's evidence: a heading text or a link target, and what to add in brackets. */
+export interface MarkdownEvidenceItem {
+  readonly text: string;
+  /** For a heading: `level N` when the rule gave a level. For a link: `line N, missing` or `line N, outside`. */
+  readonly detail?: string;
+}
+
+function cutEvidenceText(text: string): string {
+  const points = Array.from(text);
+  return points.length <= MAX_MARKDOWN_EVIDENCE_ITEM_CHARS ? text : `${points.slice(0, MAX_MARKDOWN_EVIDENCE_ITEM_CHARS - 1).join("")}…`;
+}
+
+/**
+ * The list of a Markdown rule's note (and of the headings in its label): each item's text cut at
+ * MAX_MARKDOWN_EVIDENCE_ITEM_CHARS code points and quoted as JSON, then ` (detail)`; joined with
+ * ", "; at most MAX_MARKDOWN_EVIDENCE_ITEMS items, then ", and N more". Pure.
+ */
+export function markdownEvidenceList(items: readonly MarkdownEvidenceItem[]): string {
+  const shown = items.slice(0, MAX_MARKDOWN_EVIDENCE_ITEMS).map((item) => {
+    const quoted = JSON.stringify(cutEvidenceText(item.text));
+    return item.detail === undefined ? quoted : `${quoted} (${item.detail})`;
+  });
+  const rest = items.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")}, and ${rest} more` : shown.join(", ");
+}
+
+/**
+ * The label of a Markdown rule (its `checked` entry and the middle of its evidence line). The path
+ * is quoted as the other rules quote it.
+ */
+export function markdownRuleLabel(rule: MarkdownFileRule): string {
+  if (rule.type === "markdown_links") return `"${rule.path}" has relative links whose targets exist`;
+  const headings = markdownEvidenceList(rule.headings.map((heading) => ({ text: heading.text, ...(heading.level === undefined ? {} : { detail: `level ${heading.level}` }) })));
+  return rule.order === "in_order" ? `"${rule.path}" has the headings ${headings} in this order` : `"${rule.path}" has the headings ${headings}`;
+}
+
+/**
+ * The limits a `file_rules` result lists when it has a Markdown rule (RawVerifierResult.limits),
+ * besides the literal rules' own. Fixed text: it reaches the model after masking unchanged.
+ */
+export const MARKDOWN_RULE_LIMITS: readonly string[] = [
+  "Markdown rules check only the listed headings and that relative link targets exist in the workspace; wording, the rest of the structure and the rendering are not checked",
+  "links with a scheme (http:, mailto: and others) and anchors (#...) are not checked, and nothing is fetched from the network",
+  "headings and links inside fenced code blocks and code spans are not read; indented code blocks are read as ordinary text",
+];
 
 /** Checks files under the workspace root with literal rules. */
 export interface FileRulesVerifierConfig {

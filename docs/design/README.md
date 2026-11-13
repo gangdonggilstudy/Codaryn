@@ -35,7 +35,7 @@
 | 계획 승인: 어댑터 계약 5.7의 실행 중 `plan` 질문과 범용 작업 GT-D4의 실행 사이 확인(R-1 H-1, D3 UX-D7) | DR-1 실행 사이 확인 하나 | adapter-contract(반영), standalone-gui(반영), vscode-extension(DR-20으로 추진하지 않음) |
 | 변경 비교: VS Code 원문 비교(VX-D6)와 GUI 다시 가린 비교(R-1 M-6, D3 UX-D6) | DR-7 다시 가린 비교만 | adapter-contract(반영), standalone-gui(반영), vscode-extension(DR-20으로 추진하지 않음) |
 | 단일 프로세스 조건 문장과 GUI 엔진 전용 프로세스(R-1 M-7) | DR-8 | architecture 1절(반영), standalone-gui(반영, DR-26으로 엔진 호스트 확정) |
-| 실행 중 권한 확인의 형태(R-1 M-1) | DR-3 | general-tasks(반영), adapter-contract(반영). 구현은 없다 |
+| 실행 중 권한 확인의 형태(R-1 M-1) | DR-3 | general-tasks(반영), adapter-contract(반영). 엔진·앱 계층·CLI는 구현됨(U-74 `08bee85`, U-108 `7f2de4c`, U-109·U-110 `15e49a4`, U-137 `118338d`). GUI의 질문 화면은 없다(코드 기준) |
 | 워크플로 선택과 적용 통로(R-1 M-2) | DR-1, DR-2 | adapter-contract(반영), vscode-extension(DR-20으로 추진하지 않음) |
 | 앱 환경 사본의 동작 차이(R-1 M-3) | DR-4 | adapter-contract(반영) |
 | `plan.json`의 정책 사본, `inventory` 상한, 보관함 위치(R-1 M-4, M-5, M-8) | DR-5, DR-6, DR-9 | general-tasks(반영), standalone-gui(DR-9 반영). 구현됨(`d7f8381`) |

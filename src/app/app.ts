@@ -53,19 +53,20 @@ import type { Assemble } from "./assembly.js";
 import { createRunCancelSource } from "./cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
-import type { CommandOutcome } from "../cli/guard.js";
+import type { CommandOutcome } from "./command-outcome.js";
 import { runInit } from "../cli/init.js";
 import { runModels } from "../cli/models.js";
-import { runApply, runPlan, runReview } from "../cli/plan-commands.js";
+import { runApply } from "../cli/plan-commands.js";
 import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
-import { parseArgs } from "../cli/args.js";
+import { parseArgs, parsePlanArgs, parseReviewArgs } from "../cli/args.js";
 import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { argumentsError, prepareTask } from "./prepare.js";
+import { recordReview, showPlan } from "./plan-view.js";
 import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
 import { runLife } from "./run-life.js";
 import type { RunLifeEnd } from "./run-life.js";
@@ -209,6 +210,11 @@ function jsonOutcome<T extends { readonly kind: string }>(outcome: CommandOutcom
     // Falls through: not the expected object.
   }
   return { ok: false, error: INTERNAL_ERROR };
+}
+
+/** A command's refusal as the app's error, as jsonOutcome reads it: the CLI's error output, else an internal error. */
+function commandError(outcome: CommandOutcome): AppError {
+  return "output" in outcome && outcome.output.kind === "error" ? fromCliError(outcome.output) : INTERNAL_ERROR;
 }
 
 const nextMacrotask = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -857,7 +863,15 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       // U-196: a run plan is shown by the app until the CLI's plan view chooses by kind (U-195).
       const changes = await runPlanView(request);
       if (changes !== null) return changes;
-      return jsonOutcome<PlanOutput>(await runPlan(planCommandEnvironment(planArguments(request))), "plan");
+      // U-308 (C-7a's app side): the plan view's rules are the app layer's (showPlan, plan-view.ts), no
+      // longer the CLI's runPlan around them; the request is still judged by the CLI's parser, as before.
+      const argv = planArguments(request);
+      const parsed = parsePlanArgs(argv);
+      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
+      const shown = await showPlan(planCommandEnvironment(argv), parsed.args.form, parsed.args.runId);
+      if (!shown.ok) return { ok: false, error: commandError(shown.outcome) };
+      // As jsonOutcome judged runPlan's JSON line: only a plan of mode apply is this call's output here.
+      return shown.kind === "plan" ? { ok: true, output: shown.output } : { ok: false, error: INTERNAL_ERROR };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }
@@ -868,7 +882,14 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     const args = reviewArguments(request);
     if (!args.ok) return args;
     try {
-      return jsonOutcome<ReviewOutput>(await runReview(planCommandEnvironment(args.argv)), "review");
+      // U-308 (C-7a's app side): the review's rules are the app layer's (recordReview, plan-view.ts), no
+      // longer the CLI's runReview around them; the request is still judged by the CLI's parser, as before.
+      const parsed = parseReviewArgs(args.argv);
+      if (!parsed.ok) return { ok: false, error: fromCliError(argumentsError(parsed).output) };
+      const review = parsed.args;
+      const recorded = await recordReview(planCommandEnvironment(args.argv), { form: review.form, run: review.runId, verdict: review.verdict, note: review.note, revertLine: !review.json });
+      if (!recorded.ok) return { ok: false, error: commandError(recorded.outcome) };
+      return { ok: true, output: recorded.output };
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
     }

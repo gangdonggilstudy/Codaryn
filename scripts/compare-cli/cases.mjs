@@ -1167,4 +1167,56 @@ export const CASES = [
       report("latest", "--json"),
     ],
   },
+  // U-308 (the CLI migration's C-7b, first commit): applying a plan of moves, where only plan-apply,
+  // terminal-apply-yes/no and handoff-other-task reached it: its refusals before anything is moved (a
+  // digest that is not the plan's, a task with no plan mode, a records-changed mark, a held lock, a plan
+  // applied already), in English and Korean; the apply with --quiet; and the apply's lines and summary
+  // in Korean; and the person's consent given as the CLI's argument (--allow-unsafe-move) to a plan
+  // with no unsafe move, in English and Korean. An unsafe move itself needs a volume without hard links,
+  // so the stop for consent, the terminal's consent question and the second apply after it are a unit
+  // test's (an apply engine given in, as g-consent does), not a board case.
+  ...["", "-ko"].map((suffix) => ({
+    name: `apply-refusals${suffix}`,
+    ...(suffix === "-ko" ? { lang: "ko" } : {}),
+    setup: (dir) => {
+      planSetup(dir);
+      write(dir, "noplan-task.json", task());
+    },
+    steps: [
+      run(),
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", "000000000000"] }),
+      (ctx) => ({ args: ["apply", "--task", "noplan-task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+      (ctx) => {
+        write(ctx.dir, `work/.codaryn/runs/${runIdOf(0)(ctx)}/records-changed.json`, {});
+        return { args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      (ctx) => {
+        rmSync(path.join(ctx.dir, "work", ".codaryn", "runs", runIdOf(0)(ctx), "records-changed.json"), { force: true });
+        lockHeld(ctx.dir);
+        return { args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return { args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+    ],
+  })),
+  {
+    name: "apply-quiet",
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx), "--quiet"] }), report("latest", "--json")],
+  },
+  {
+    name: "apply-ko",
+    lang: "ko",
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }), report("latest")],
+  },
+  ...["", "-ko"].map((suffix) => ({
+    name: `apply-unsafe-flag${suffix}`,
+    ...(suffix === "-ko" ? { lang: "ko" } : {}),
+    setup: planSetup,
+    steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx), "--allow-unsafe-move"] }), report("latest", "--json")],
+  })),
 ];

@@ -16,8 +16,11 @@
  *   that column, which is not given.
  * - Groups come MAX_QUERY_RESULT_GROUPS at a time; `next` is a cursor of the shown groups' ordinals
  *   (QUERY_CURSOR_PATTERN_SOURCE), never a key.
- * - A failure's message names a code and a row, line or argument index, never a cell's text, a path
- *   or a column name. Numbers are given as computed, not rounded (Q-9).
+ * - A failure's message names a code and a row, line or argument index, never a cell's text or a
+ *   path, then the problem's hint (U-261). On a table under unreadable paths it names no row and no
+ *   line: a not_number names the operation and its column (the model's own name for it) and says the
+ *   column holds a cell that is not a number, nothing about which or how many. Numbers are given as
+ *   computed, not rounded (Q-9).
  * - Raw local text like every tool payload: the engine masks it before it is recorded or sent.
  */
 
@@ -150,8 +153,11 @@ function readFailure(failure: TableReadFailure, unreadable: boolean): Failure {
   return rejected("not_table", line === null || unreadable ? `(${code})` : `line ${line} (${code})`);
 }
 
-/** U-261: under unreadablePaths a not_number names the operation, not the data row. */
-function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>, unreadable: boolean): Failure {
+/**
+ * U-261: under unreadablePaths a not_number names the operation and its column (as the model gave it)
+ * and says a cell of it is not a number; never the data row (DR-70).
+ */
+function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>, unreadable: boolean, operations: readonly QueryOperation[]): Failure {
   switch (outcome.problem) {
     case "not_text":
     case "not_table":
@@ -160,7 +166,12 @@ function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>, unreada
     case "duplicate_column":
       return rejected(outcome.problem, outcome.field === "groupBy" ? `groupBy[${outcome.index}]` : `operations[${outcome.index}].column`);
     case "not_number":
-      return rejected("not_number", unreadable ? `operations[${outcome.operation}]` : `data row ${outcome.dataRow}, operations[${outcome.operation}]`);
+      return rejected(
+        "not_number",
+        unreadable
+          ? `operations[${outcome.operation}] (column ${JSON.stringify(operations[outcome.operation]?.column ?? "")} holds a cell that is not a number)`
+          : `data row ${outcome.dataRow}, operations[${outcome.operation}]`,
+      );
     case "too_many_groups":
       return fail("too_many_groups", `the query counts more than ${MAX_QUERY_COUNTED_GROUPS} groups`);
   }
@@ -263,7 +274,7 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
   // query.ts: a groupBy name given twice is `duplicate_column` at its second place, after the table's
   // problems and the first place's own (src/tabular leaves this to the tool).
   if (duplicateGroupBy(args.groupBy ?? []) && !problemBefore(result, 1)) return rejected("duplicate_column", "groupBy[1]");
-  if (!result.ok) return queryFailure(result, unreadable);
+  if (!result.ok) return queryFailure(result, unreadable, operations);
   // DR-70: only the groups of at least k rows; the others merged into their number. V-19: in those,
   // only the values of at least k cells.
   const shown = shownGroups(result.groups, k);

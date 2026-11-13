@@ -200,7 +200,10 @@ export type QueryTablePayload =
 
 /**
  * Why `query_table` refuses a table (tool error `invalid_table`; the message names the code and a
- * row or line number, never a cell's text and never a parser's own message, which can hold one):
+ * row or line number, never a cell's text and never a parser's own message, which can hold one; U-261:
+ * then the problem's hint, QUERY_TABLE_PROBLEM_HINTS. On a table under unreadablePaths no row and no
+ * line number: not_table names its parse problem's code only, and not_number the operation and its
+ * column with "holds a cell that is not a number", never which cell or how many, DR-70):
  * - not_text: the file is not UTF-8 text (U-208, U-202's reading tells it before a parse problem)
  * - not_table: the file does not parse as its format (quotes, field counts, a JSON line)
  * - unknown_column: a groupBy or operation column the header does not have

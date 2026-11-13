@@ -191,8 +191,8 @@ describe("U-208: the canary - only DR-70's four reach the model, the journal and
     // U-261: the refused operation's own hint, not the columns' one.
     assert.ok(String(resultOf("q4").content).endsWith(QUERY_TABLE_PROBLEM_HINTS.op_not_allowed), String(resultOf("q4").content));
     assert.equal(resultOf("q5").errorCode, "invalid_table");
-    // U-261: under unreadablePaths the message names the operation, never a data row.
-    assert.match(String(resultOf("q5").content), /not_number at operations\[0\]\. /);
+    // U-261: under unreadablePaths the message names the operation and its column, never a data row.
+    assert.match(String(resultOf("q5").content), /not_number at operations\[0\] \(column "name" holds a cell that is not a number\)\. /);
     assert.doesNotMatch(String(resultOf("q5").content), /data row/);
     const denial = outcome.journal.ofType("tool_decision").find((event) => event.callId === "r1" && !event.allowed);
     assert.equal(denial?.code, "unreadable_path");

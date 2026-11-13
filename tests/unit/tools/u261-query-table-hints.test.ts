@@ -4,7 +4,8 @@
  * unreadablePaths for max was told to look at the columns). Now each message ends with its problem's
  * own hint (QUERY_TABLE_PROBLEM_HINTS) and the engine adds none. The hints are model-bound fixed texts
  * (FIXED_MODEL_TEXTS) with no number in them, and under unreadablePaths a message names no data row
- * and no line (nothing of a single row reaches the model, DR-70); a general table keeps them.
+ * and no line (nothing of a single row reaches the model, DR-70): a not_number names the operation
+ * and its column and says the column holds a cell that is not a number. A general table keeps them.
  */
 
 import assert from "node:assert/strict";
@@ -78,7 +79,7 @@ describe("U-261: query_table's hints, one for each problem", () => {
 
   test("under unreadablePaths no data row and no line; a general table names them", async () => {
     const privateNumber = messageOf(await query({ path: "private/bad-number.csv", operations: [{ op: "sum", column: "v" }] }));
-    assert.equal(privateNumber, `table rejected: not_number at operations[0]. ${QUERY_TABLE_PROBLEM_HINTS.not_number}`);
+    assert.equal(privateNumber, `table rejected: not_number at operations[0] (column "v" holds a cell that is not a number). ${QUERY_TABLE_PROBLEM_HINTS.not_number}`);
     const privateQuote = messageOf(await query({ path: "private/bad-quote.csv", operations: [{ op: "count", column: "v" }] }));
     assert.equal(privateQuote, `table rejected: not_table at (unterminated_quote). ${QUERY_TABLE_PROBLEM_HINTS.not_table}`);
     const describeQuote = messageOf(await query({ path: "private/bad-quote.csv", describe: true }));

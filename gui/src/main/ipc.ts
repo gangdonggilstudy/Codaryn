@@ -49,6 +49,7 @@ import type { EngineHost } from "./engine-client.js";
 import type { ModelEntries, ModelListLimit } from "./model-entries.js";
 import type { RunManager } from "./runs.js";
 import type { ConsentRetry, RevertPreview, RunHistory } from "./history.js";
+import { reviewTarget } from "./history.js";
 import type { ChangesReply, PlanReply, ReportReply, RevertReply, ReviewReply, RunsReply, SettingsProposalReply, SettingsWrittenReply } from "../shared/ipc.js";
 import { parseSettingsEdit } from "../shared/settings-edit.js";
 import { cleanupQuestions } from "../shared/cleanup.js";
@@ -462,6 +463,8 @@ export function registerIpc(deps: IpcDeps): void {
       deps.runs.begin(token, runId);
       // R21b-L-1: the run's form, so its plan, changes and report open with it later (also after a restart).
       await workspaces.rememberRun(parsed.workspace, runId, { profile: parsed.profile, workflow: parsed.workflow });
+      // U-92: the person sees this run's result, so its review is one they were shown.
+      deps.history.noteStarted(parsed.workspace, runId);
       return { ok: true, runId };
     } finally {
       starting = false;
@@ -676,9 +679,12 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const root = workspaces.path(parsed.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
+    // U-92 (R-73, U-79 L1): a run the person was shown, with the form this app remembers for it (the page's is not used).
+    const target = reviewTarget(deps.history.wasListed(parsed.workspace, parsed.runId), (await workspaces.runForms(parsed.workspace)).get(parsed.runId));
+    if (!target.ok) return { ok: false, code: target.code };
     const state = await deps.host();
     if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("review", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
+    const response = await state.host.call("review", { workspace: root, profile: target.form.profile, workflowRef: target.form.workflow, runId: parsed.runId, decision: parsed.decision, note: parsed.note }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     return toReviewReply(response.value);
   });

@@ -334,6 +334,7 @@ export const KO = {
   "skip.original_path_taken": "원래 자리에 다른 파일이 있음",
   "skip.unsafe_move": "덮어쓸 위험이 있는 이동이라 건너뜀",
   "error.unknown_run": "목록에 없는 실행입니다. 목록을 새로 고치세요.",
+  "error.form_unknown": "이 앱이 시작한 실행이 아니라(또는 task 파일로 실행해) 작업 형태를 모릅니다. codaryn review로 판정하세요.",
   "error.unknown_preview": "그 미리보기는 더 이상 쓸 수 없습니다. 미리보기를 다시 하세요.",
   "error.not_confirmed": "확인하지 않아 아무것도 하지 않았습니다.",
   "error.unknown_plan": "그 계획 보기는 더 이상 쓸 수 없습니다. 계획을 다시 여세요.",

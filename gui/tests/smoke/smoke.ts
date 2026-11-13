@@ -622,6 +622,11 @@ startGui({
         verdict: await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null"),
         others: await js(`document.querySelectorAll('[data-review]').length`),
       };
+      // U-92 (R-73, U-79 L1): a verdict only for a run the person was shown, with the form the main process remembers.
+      results["reviewGuard"] = {
+        forgedForm: await js(`window.codaryn.review(${JSON.stringify(second.ok ? second.handle : "")}, ${JSON.stringify(analyzeRunId)}, 'nonesuch', 'nonesuch', 'accept', null).then((r) => (r.ok ? r.verdict : r.code))`),
+        unlisted: await js(`window.codaryn.review(${JSON.stringify(second.ok ? second.handle : "")}, '20261113T000000Z-00000000', null, null, 'accept', null).then((r) => (r.ok ? 'recorded' : r.code))`),
+      };
 
       // 5i2. UXM-14, DR-38: a records-changed mark on the analyze run, as a command outside the run could
       // leave it. The run list marks the run and its report warns.
@@ -863,6 +868,10 @@ startGui({
         pathsOnPage: await js(`document.body.textContent.includes(${JSON.stringify(taskDir)})`),
       };
       unlinkSync(join(SECOND, "inside-task.json"));
+      // U-92: the task file's run is listed but has no remembered form, so the main process refuses its review.
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["reviewTaskRun"] = await js(`window.codaryn.review(${taskHandle}, ${JSON.stringify(taskRunId)}, null, null, 'accept', null).then((r) => (r.ok ? 'recorded' : r.code))`);
 
       // 6. What the page can and cannot do.
       results["renderer"] = await js(

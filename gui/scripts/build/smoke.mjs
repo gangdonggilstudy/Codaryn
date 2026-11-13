@@ -472,6 +472,10 @@ const expected = [
   ["reportText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes("journal.jsonl")],
   ["listReport", (v) => v === "no_verifier"],
   // U-79: the run waiting for its review is reviewed from the list too: its report's review tab, with the verdict of 5g.
+  // U-92 (R-73, U-79 L1): the page's form is not used (the remembered one is); a run never shown is refused.
+  ["reviewGuard", (v) => JSON.stringify(v) === JSON.stringify({ forgedForm: "accepted", unlisted: "unknown_run" })],
+  // U-92: a listed run with no remembered form (a task file's) is refused by the main process.
+  ["reviewTaskRun", (v) => v === "form_unknown"],
   ["reviewFromList", (v) => v !== null && v.offered === true && v.tab === "review" && v.verdict === "accepted"],
   // PM (a): the engine host's test transport refused no request to another machine.
   ["transportRefused", (v) => JSON.stringify(v) === JSON.stringify({ mode: "loopback-only", refused: 0 })],

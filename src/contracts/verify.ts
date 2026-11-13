@@ -336,7 +336,13 @@ export type DataRule =
       readonly tolerance?: { readonly absolute?: number; readonly relative?: number };
     };
 
-/** Largest table a data check reads (16 MiB). A larger source is `inconclusive`, a larger target `fail`. */
+/**
+ * Largest table a data check reads (16 MiB). A larger source is `inconclusive`, a larger target `fail`.
+ * U-197 (bundle A, Q-7): to become MAX_QUERY_TABLE_BYTES (64 MiB) with the shared table reading in
+ * pieces (A-2), once a 64 MiB table has been timed. R-6 (A-7): an `aggregate_match` whose source is
+ * under unreadablePaths gives no recomputed number in its evidence, only which row and column did not
+ * match, so a repair cannot learn a hidden group's value from it.
+ */
 export const MAX_DATA_TABLE_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_DATA_TOLERANCE = { absolute: 1e-9, relative: 1e-9 } as const;
 

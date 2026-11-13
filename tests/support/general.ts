@@ -51,7 +51,8 @@ export function shortDigest(digest: string): string {
 
 export function expectPlanOutput(run: CliRun, runId: string): PlanOutput {
   const output = parseCommandOutput(run);
-  if (output.kind !== "plan") assert.fail(`expected a plan, got ${JSON.stringify(output).slice(0, 500)}`);
+  // U-195: a run plan's view (ChangesPlanOutput, planKind "changes") is not this one.
+  if (output.kind !== "plan" || "planKind" in output) assert.fail(`expected a plan, got ${JSON.stringify(output).slice(0, 500)}`);
   assert.equal(output.runId, runId);
   assert.equal(output.exitCode, 0);
   return output;

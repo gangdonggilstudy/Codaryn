@@ -11,8 +11,9 @@ import { MESSAGE_IDS, POLICY_DENIAL_CODES, REFUSAL_HINTS, messageParams } from "
 import type { MessageId } from "../../../src/contracts/index.js";
 
 describe("U-175: path_not_writable", () => {
-  test("a denial code, added last", () => {
-    assert.equal(POLICY_DENIAL_CODES.at(-1), "path_not_writable");
+  test("a denial code, added after the earlier ones", () => {
+    // U-197 added unreadable_path after it; the codes keep their places.
+    assert.equal(POLICY_DENIAL_CODES.indexOf("path_not_writable"), POLICY_DENIAL_CODES.indexOf("confirmation_required") + 1);
     assert.equal(POLICY_DENIAL_CODES.indexOf("protected_path"), 8, "the codes before it keep their places");
     assert.equal(new Set(POLICY_DENIAL_CODES).size, POLICY_DENIAL_CODES.length);
   });

@@ -65,6 +65,31 @@ describe("normalizeSide", () => {
       ].join("\n"),
     );
   });
+
+  // U-167 (ne-verify's report-main-health): a run over 100 ms writes one more digit of "durationMs"
+  // in journal.jsonl and result.json, so the records folder that cleanup measures is 2 bytes larger.
+  // cleanup's output (text and JSON) gives that size: there it is <BYTES>. The record files are
+  // compared as they are (their "durationMs" is <MS> already), and no other step's numbers change.
+  test("U-167: cleanup steps' byte counts are <BYTES>; record files and other steps keep theirs", { todo: "U-167" }, () => {
+    const side = (bytes) =>
+      normalizeSide([
+        { key: "step 2: codaryn cleanup --workspace work --run 20261113T010203Z-aaaaaaaa | stdout", text: `Run records: 1 (${bytes} bytes)\nRemoved only with --include-not-reverted besides: 1 (${bytes} bytes). These are runs\n1 file(s), ${bytes} bytes` },
+        { key: "step 3: codaryn cleanup --workspace work --run 20261113T010203Z-aaaaaaaa | stdout", text: `실행 기록: 1개(${bytes}바이트)\n파일 1개, ${bytes}바이트` },
+        { key: "step 4: codaryn cleanup --workspace work --run 20261113T010203Z-aaaaaaaa --json | stdout", text: `{"summary":{"runs":{"count":1,"bytes":${bytes},"oldest":null},"discarded":{"runs":0,"files":0,"bytes": ${bytes}}}}` },
+        { key: "step 1: codaryn run --task task.json | stderr", text: `codaryn: wrote ${bytes} bytes` },
+        { key: "file work/.codaryn/runs/20261113T010203Z-aaaaaaaa/result.json", text: `{"bytes":${bytes},"note":"${bytes} bytes"}` },
+      ]);
+    const a = [...side(7093).values()];
+    const b = [...side(7095).values()];
+    assert.deepEqual(a.slice(0, 3), b.slice(0, 3), "the cleanup steps are the same");
+    assert.deepEqual(a.slice(0, 3), [
+      "Run records: 1 (<BYTES> bytes)\nRemoved only with --include-not-reverted besides: 1 (<BYTES> bytes). These are runs\n1 file(s), <BYTES> bytes",
+      "실행 기록: 1개(<BYTES>바이트)\n파일 1개, <BYTES>바이트",
+      '{"summary":{"runs":{"count":1,"bytes":<BYTES>,"oldest":null},"discarded":{"runs":0,"files":0,"bytes": <BYTES>}}}',
+    ]);
+    assert.deepEqual([a[3], a[4]], ["codaryn: wrote 7093 bytes", '{"bytes":7093,"note":"7093 bytes"}'], "another step and a record file are kept");
+    assert.notDeepEqual([b[3], b[4]], [a[3], a[4]]);
+  });
 });
 
 describe("diffLines and compareSides", () => {

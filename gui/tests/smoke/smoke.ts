@@ -573,6 +573,18 @@ startGui({
       results["listReport"] = await waitFor(
         "(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-status')?.getAttribute('data-reason') ?? r) : null; })()",
       );
+      // U-79 (3.7, 3.8): the analyze run waits for a review; its row opens the report on the review tab (its verdict, recorded in 5g).
+      await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
+      await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+      results["reviewFromList"] = {
+        offered: await js(`document.querySelector('[data-review="${analyzeRunId}"]') !== null`),
+        tab: await (async () => {
+          await js(`document.querySelector('[data-review="${analyzeRunId}"]')?.click(); true`);
+          return waitFor("(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'none' ? (document.getElementById('report-panel')?.getAttribute('data-tab') ?? r) : null; })()");
+        })(),
+        verdict: await js("document.getElementById('report-verdict')?.getAttribute('data-verdict') ?? null"),
+        others: await js(`document.querySelectorAll('[data-review]').length`),
+      };
 
       // 5i2. UXM-14, DR-38: a records-changed mark on the analyze run, as a command outside the run could
       // leave it. The run list marks the run and its report warns.

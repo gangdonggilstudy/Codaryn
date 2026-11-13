@@ -11,6 +11,7 @@ import { asReport, asSaveReport } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import { copyControl } from "../shell/copy.js";
+import { reviewPanel } from "../run/review-panel.js";
 import type { Screen } from "../shell/shell.js";
 import type { MaskingView, ReportView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
@@ -184,7 +185,7 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
       label: t.format("report.tab.review"),
       build: () =>
         verdict === null
-          ? [el("p", t.format("report.noVerdict"))]
+          ? reviewLater(t, deps, view, form)
           : [
               el("p", t.format(verdict.verdict === "accepted" ? "review.accepted" : "review.rejected"), { id: "report-verdict", "data-verdict": verdict.verdict }),
               el("p", t.format("report.verdictAt", { time: localDateTime(verdict.at) })),
@@ -193,6 +194,23 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
     });
   }
   return tabs;
+}
+
+/**
+ * U-79 (3.7, 3.8): a run waiting for its review, reviewed later: the workflow's checklist and the
+ * review panel, with the run's own form. A run this app did not start (form unknown) is reviewed with
+ * the CLI, which takes the task part the run was started with.
+ */
+function reviewLater(t: Texts, deps: ReportDeps, view: ReportView, form: RunForm | null): HTMLElement[] {
+  const workspace = deps.current();
+  if (view.review === undefined || view.review === null || workspace === null) return [el("p", t.format("report.noVerdict"))];
+  const parts: HTMLElement[] = [el("h4", t.format("run.review")), list(view.review.checklist, { id: "report-review-checklist" })];
+  if (form === null) {
+    parts.push(el("p", t.format("report.reviewCli"), { class: "notice", id: "report-review-cli" }));
+    return parts;
+  }
+  parts.push(reviewPanel({ texts: t, api: deps.api, workspace, runId: view.runId, profile: form.profile, workflow: form.workflow }, { panel: "report-review-panel", title: "report-review-title" }));
+  return parts;
 }
 
 export function reportScreen(deps: ReportDeps): ReportScreen {

@@ -985,6 +985,8 @@ export interface ReportView {
   readonly finalMessage?: FinalMessageView | null;
   /** U-40 (DR-52): the masking counts from the run's result; null when there are none or they are not counts. */
   readonly masking?: MaskingView | null;
+  /** U-79 (3.7): a run waiting for its review: the workflow's checklist from its result; null otherwise. */
+  readonly review?: { readonly checklist: readonly string[] } | null;
   readonly kind: "run" | "apply";
   readonly status: "complete" | "incomplete";
   readonly finished: { readonly status: string; readonly reason: string } | null;
@@ -1112,7 +1114,10 @@ export function toReportReply(value: unknown): ReportReply {
     };
   }
   const masking = maskingOf(value["masking"]);
-  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, masking, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
+  const given = value["review"] ?? null;
+  if (!(given === null || (isObj(given) && hasOnlyKeys(given, ["checklist"]) && textList(given["checklist"])))) return fail;
+  const review = given === null ? null : { checklist: given["checklist"] as string[] };
+  return { ok: true, view: { runId, kind, status, recordsChanged, finalMessage, masking, review, finished: finishedView, usage: usageView, verifiers: verifierViews, integrity: integrityViews, records: records as number | null, taskId, run, apply } };
 }
 
 export type ReviewReply = { readonly ok: true; readonly verdict: "accepted" | "rejected"; readonly replaced: boolean } | { readonly ok: false; readonly code: string };

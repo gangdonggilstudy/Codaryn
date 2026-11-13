@@ -20,6 +20,12 @@ import { compileProtectedPaths } from "./protected.js";
 
 /** T-13: the single format rule for `protectedPaths`, used by the CLI and by this gate. */
 export { checkProtectedPaths } from "./protected.js";
+/**
+ * U-105 (app layer U-89): the gate's own matcher for `protectedPaths`, for a caller that shows
+ * which entries are protected (the app layer's workspace list) with the gate's rule, not a copy.
+ */
+export { compileProtectedPaths } from "./protected.js";
+export type { ProtectedPaths } from "./protected.js";
 
 type Denial = Extract<PolicyDecision, { allowed: false }>;
 

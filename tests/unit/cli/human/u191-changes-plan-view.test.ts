@@ -138,10 +138,10 @@ describe("U-191: renderChangesPlan", () => {
       `Digest: ${loaded.digest}`,
       "  1. modify  docs/guide.md",
       "  2. create  docs/CHANGELOG.md",
-      "What the run that makes these changes will be told (the model's own words, not checked, and part of what you approve):",
+      "The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan):",
       `${MODEL_TEXT_PREFIX}Rewrite the guide's intro and start a changelog`,
       `To have a run make these changes: codaryn apply <the same task form> --run ${PLAN_RUN} --digest ${loaded.digest.slice(0, MIN_PLAN_DIGEST_PREFIX)}`,
-      "The digest names exactly these files, the contents the files to modify had when the plan was made, and the words above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
+      "The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
     ]);
     assert.equal(renderChangesPlan(view, null), renderChangesPlan(view, null, en), "English when no catalog is given");
   });
@@ -150,7 +150,7 @@ describe("U-191: renderChangesPlan", () => {
     const { loaded } = await stored(FILES, "Rewrite");
     const lines = renderChangesPlan(output(loaded), null, ko).trimEnd().split("\n");
     assert.deepEqual(lines.slice(0, 4), [`실행 ${PLAN_RUN}의 계획: 쓸 파일 2개, 적용 전`, `다이제스트: ${loaded.digest}`, "  1. 수정  docs/guide.md", "  2. 생성  docs/CHANGELOG.md"]);
-    assert.equal(lines[4], "이 변경을 할 실행이 받을 지시(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상에 들어감):");
+    assert.equal(lines[4], "계획의 요약, 계획 실행이 쓴 것(모델이 쓴 말이며 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨):");
     assert.equal(lines[6], `이 변경을 실행하게 하려면: codaryn apply <같은 작업 지정> --run ${PLAN_RUN} --digest ${loaded.digest.slice(0, MIN_PLAN_DIGEST_PREFIX)}`);
   });
 

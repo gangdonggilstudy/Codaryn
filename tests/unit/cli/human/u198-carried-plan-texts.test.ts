@@ -2,8 +2,9 @@
  * U-198 (DR-69 B-3, B-4, B-8): the human text of a run that carries out a `run` plan, before U-187's
  * engine and na-core's U-195 connect it.
  * - Apply's question for a `run` plan: after the plan view, what approving starts (a run whose file
- *   tools write only these files, with their number), that the summary is the model's words the run is
- *   told and only the files are enforced, a line when commands are allowed (B-8), then the question.
+ *   tools write only these files, with their number), that the summary is the model's description of
+ *   the work, not the goal or a new instruction, and only the files are enforced, a line when commands
+ *   are allowed (B-8), then the question.
  * - The end summary: which plan run it carried out (EngineResult.planRunId, `summary.apply_plan_run`),
  *   and the writes refused as outside the files it may write (RunSummaryContext.deniedNotWritable).
  * - The runs table: the carrying run's row names that plan run; the plan run's row reads as applied by it.
@@ -59,7 +60,7 @@ describe("U-198: apply's question for a run plan (English)", () => {
   test("after the plan view: what approving starts, the summary note, then the question", () => {
     assert.deepEqual(changesApprovalText(VIEW, { commandsAllowed: false }, en).trimEnd().split("\n"), [
       "Approving starts a run whose file tools can write only these 2 file(s).",
-      "The instruction above is the model's own words: the run is told them, but nothing checks that it follows them. Only the file list is enforced.",
+      "The summary above is the model's description of the work, approved with the plan. It is not the goal or a new instruction, and nothing checks the run against it; only the file list is enforced.",
     ]);
     assert.equal(changesApplyQuestion(en), "Start the run that makes these changes? [y/N] ");
     assert.equal(changesApprovalText(VIEW, { commandsAllowed: false }), changesApprovalText(VIEW, { commandsAllowed: false }, en), "English when no catalog is given");

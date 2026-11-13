@@ -102,14 +102,14 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.changes.heading": "Plan of run {runId}: {count} file(s) to write, {status}",
   "plan.change.create": "create",
   "plan.change.modify": "modify",
-  "plan.changes.summary_label": "What the run that makes these changes will be told (the model's own words, not checked, and part of what you approve)",
+  "plan.changes.summary_label": "The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan)",
   "plan.changes.next_apply": "To have a run make these changes: codaryn apply <the same task form> --run {runId} --digest",
   "plan.changes.digest_guarantee":
-    "The digest names exactly these files, the contents the files to modify had when the plan was made, and the words above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
+    "The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
   "apply.question": "Apply this plan?",
   // U-198 (drafts for nb-i18n): apply's question for a run plan.
   "apply.changes.what": "Approving starts a run whose file tools can write only these {count} file(s).",
-  "apply.changes.summary_note": "The instruction above is the model's own words: the run is told them, but nothing checks that it follows them. Only the file list is enforced.",
+  "apply.changes.summary_note": "The summary above is the model's description of the work, approved with the plan. It is not the goal or a new instruction, and nothing checks the run against it; only the file list is enforced.",
   "apply.changes.commands_note": "This task also allows commands, and a command the policy allows is not limited to these files.",
   "apply.changes_question": "Start the run that makes these changes?",
   "apply.unsafe_move_question": "Moves of this plan that could replace a file at the destination, since the drive has no hard links: {count}. Nothing was moved. Apply again and make such moves anyway, for this apply only?",

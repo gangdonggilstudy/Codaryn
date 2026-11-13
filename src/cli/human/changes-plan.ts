@@ -1,8 +1,9 @@
 /**
  * U-191 (DR-69 B-1, B-3): the plan view of a `run` plan (StoredChangesPlan, `kind: "changes"`), on the
  * store's loadAnyPlan. changesPlanOutput makes ChangesPlanOutput from the loaded plan: each path masked
- * again with the secrets registered now (DR-28, as a plan of mode apply), and the summary, the words
- * the later run is told, from its visible parts. renderChangesPlan is its text for people. A plan of
+ * again with the secrets registered now (DR-28, as a plan of mode apply), and the summary, the plan
+ * run's description of the work (not the goal or new instructions), from its visible parts.
+ * renderChangesPlan is its text for people. A plan of
  * mode apply keeps its own view (renderPlan, src/cli/plan-commands.ts), unchanged. Nothing here reads
  * or writes a file: `codaryn plan` and the approval screen choose a view by the plan's kind with B-4.
  */
@@ -58,7 +59,8 @@ export type ChangesPlanViewOutcome =
  *   then made safe in the output itself, as the move plan's summary is (R-49 R49-M1, planSummary),
  *   so every output that carries it (--json, the app layer, the approval screen) has it: key shapes
  *   and `options.currentKey` hidden, control characters replaced, trimmed. Line feeds and tabs stay
- *   (cleanText's keepLineBreaks): it is the later run's instruction, stored with them (safeModelText).
+ *   (cleanText's keepLineBreaks): it is stored with them (safeModelText) and shown with them to the
+ *   later run as the approved plan's description.
  * - A masking that fails: `internal_error`.
  * - status: `applied` once applied.json names the run that carried the plan out (appliedBy), else
  *   `pending`. recordsChanged: when the caller found a records-changed mark on the plan run.
@@ -162,8 +164,9 @@ export interface ChangesApprovalContext {
 /**
  * U-198: the lines between a `run` plan's view (renderChangesPlan) and changesApplyQuestion at a
  * terminal: apply.changes.what (a run whose file tools write only these {count} files),
- * apply.changes.summary_note when the view shows the summary (the model's words, told to the run and
- * not enforced; only the files are), and apply.changes.commands_note when commands are allowed.
+ * apply.changes.summary_note when the view shows the summary (the model's description of the work,
+ * approved with the plan, not the goal or a new instruction; only the files are enforced), and
+ * apply.changes.commands_note when commands are allowed.
  */
 export function changesApprovalText(output: ChangesPlanOutput, context: ChangesApprovalContext, messages: MessageCatalog = createMessageCatalog("en")): string {
   const lines: string[] = [messages.format("apply.changes.what", { count: output.files.length })];

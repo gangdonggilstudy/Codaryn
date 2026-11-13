@@ -583,8 +583,9 @@ export const FIXED_MESSAGES = {
   // plan.status.<status>, applied_by).
   // - plan.changes.heading: as plan.heading, `{count}` the planned files.
   // - plan.change.create, plan.change.modify: each planned file's change, before its masked path.
-  // - plan.changes.summary_label: before the summary, which the later run is told and which is part
-  //   of what is approved (R-99 L-1); the summary follows as the model's words (quoteModelText).
+  // - plan.changes.summary_label: before the summary: the plan run's description of the work, approved
+  //   with the plan (it is under the digest, R-99 L-1), not the goal or new instructions (PM; the
+  //   engine's own label says so to the later run); the summary follows as the model's words.
   // - plan.changes.next_apply ({runId}: the plan run) while pending and not marked: as
   //   plan.next_apply, the digest's first characters after it.
   // - plan.changes.digest_guarantee: last (the digest names the files, the contents of the files to
@@ -599,8 +600,9 @@ export const FIXED_MESSAGES = {
   "apply.question": {},
   // U-198 (DR-69 B-3, B-8; drafts for nb-i18n): apply's terminal question for a `run` plan, after its
   // plan view (renderChangesPlan): what approving starts (a run whose file tools write only these
-  // {count} files), that the summary is the model's words the run is told and that only the files
-  // are enforced, a line when the run's policy allows commands (a command is not bound to the
+  // {count} files), that the summary is the model's description of the work, approved with the plan
+  // and not the goal or a new instruction, and that only the files are enforced, a line when the
+  // run's policy allows commands (a command is not bound to the
   // files, B-8), then apply.changes_question and `prompt.yes_no_default_no`.
   "apply.changes.what": { count: "count" },
   "apply.changes.summary_note": {},

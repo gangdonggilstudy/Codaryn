@@ -113,6 +113,13 @@ function providerModel(config: Obj | null, name: string): string | null {
   return typeof model === "string" && model.trim().length > 0 ? model : null;
 }
 
+/** U-80: the provider's output cap where it reads it (as providerModel reads its model); null when none. */
+function providerOutputCap(config: Obj | null, name: string): number | null {
+  const entry = own(own(config, "providers"), name);
+  const cap = isObj(entry) ? entry["maxOutputTokens"] : name === "anthropic" ? own(config, "maxOutputTokens") : undefined;
+  return typeof cap === "number" && Number.isSafeInteger(cap) && cap >= 1 ? cap : null;
+}
+
 /**
  * Each provider of the table as the settings screen shows it: the key variable's name and whether
  * it is set now (never its value), the model the config keeps for it and whether its model
@@ -128,6 +135,8 @@ function apiProvidersView(config: Obj | null, table: readonly ApiProviderEntry[]
       modelEnv: entry.modelEnv,
       modelEnvSet: envSet(entry.modelEnv),
       model: model === null ? null : shown(model),
+      // U-80: without it a run with this provider stops before anything is sent (provider_not_configured).
+      outputCap: providerOutputCap(config, entry.name),
       // R27-I3: when set, runs send to that variable's address, not the config file's (as doctor's sends_to_env says).
       baseUrlEnv: entry.baseUrlEnv ?? null,
       baseUrlEnvSet: entry.baseUrlEnv === undefined ? false : envSet(entry.baseUrlEnv),

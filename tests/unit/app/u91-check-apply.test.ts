@@ -10,8 +10,8 @@
  * - Nothing is moved, recorded or claimed. The check holds the workspace lock while the executor
  *   probes for hard links, and takes back both before it ends; a probe or a lock it cannot take back
  *   is told in the result (`probesLeft`, `lockLeft`), never hidden.
- * Reproduced first (todo until the app layer gives it). Scripted model, temporary folders, fake
- * values only. Every probe and lock a test leaves is taken back by the test.
+ * Reproduced first (9f32ee5, todo until the app layer gave it). Scripted model, temporary folders,
+ * fake values only. Every probe and lock a test leaves is taken back by the test.
  */
 
 import assert from "node:assert/strict";
@@ -21,35 +21,19 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { RECORDS_CHANGED_FILE_NAME } from "../../../src/contracts/index.js";
 import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppCallOutcome, AppHooks, ApplyResult, CodarynApp, PlanOutput, TaskForm } from "../../../src/app/index.js";
+import type { AppCallOutcome, AppHooks, ApplyCheckOperations, ApplyResult, CheckApplyRequest, CodarynApp, PlanCheck, PlanOutput, TaskForm } from "../../../src/app/index.js";
 import { acquireLock, isRunTimestamp, releaseLock } from "../../../src/store/index.js";
 import { PLAN_TASK, SECRET_ENV, WRITE_NOTES, appEnvironment, planSteps, plannedRun, readJournal, runDir, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-91: the app layer has no checkApply yet" };
-
-type Check = {
-  readonly kind: "plan_check";
-  readonly planRunId: string;
-  readonly digest: string;
-  readonly checkedAt: string;
-  readonly problems: readonly { readonly index: number; readonly problem: string }[];
-  readonly unsafeMoves: readonly number[];
-  readonly inventoryLimitReached: boolean;
-  readonly probesLeft: number;
-  readonly lockLeft: boolean;
-};
+type Check = PlanCheck;
 type Request = { readonly settings: TaskForm; readonly planRunId: string; readonly digest: string };
-type CheckFn = (request: Request) => Promise<AppCallOutcome<Check>>;
 
 const NO_RUN = "20200101T000000Z-00000000";
 const OTHER_SECRET = "other-fake-APP-VALUE-0099";
 const PROBE_PREFIX = ".codaryn-link-probe-";
 
-function check(app: CodarynApp): CheckFn {
-  const fn = (app as unknown as Record<string, unknown>)["checkApply"];
-  assert.equal(typeof fn, "function", "the app layer gives checkApply");
-  return (fn as CheckFn).bind(app);
-}
+/** The app's checkApply, called as an adapter calls it; a test may hand it what an adapter must not. */
+const check = (app: CodarynApp) => (request: Request) => app.checkApply(request as CheckApplyRequest);
 
 function ok<T>(outcome: AppCallOutcome<T>): T {
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -84,8 +68,8 @@ async function probes(work: string): Promise<string[]> {
 }
 
 /** Hooks only the check uses (the file operations of its executor, its probe removal and its lock release). */
-function checkHooks(applyCheck: Record<string, unknown>): AppHooks {
-  return { applyCheck } as unknown as AppHooks;
+function checkHooks(applyCheck: ApplyCheckOperations): AppHooks {
+  return { applyCheck };
 }
 
 /** A plan run whose task allows moves and discards, with `actions`; and an apply task that allows moves only. */
@@ -105,7 +89,7 @@ async function plannedWith(files: Readonly<Record<string, string>>, actions: rea
 }
 
 describe("U-91: checkApply checks a pending plan as the apply's preflight would, and changes nothing", () => {
-  test("a plan that can be applied: nothing to tell, nothing left or changed, and it can still be applied", TODO, async () => {
+  test("a plan that can be applied: nothing to tell, nothing left or changed, and it can still be applied", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     const before = await tree(work);
@@ -124,7 +108,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(existsSync(path.join(work, "sorted", "a.txt")), true, "the apply after the check moved the file");
   });
 
-  test("the same judgement as the apply's preflight record (plan_checked), action by action", TODO, async () => {
+  test("the same judgement as the apply's preflight record (plan_checked), action by action", async () => {
     const run = await plannedWith({ "a.txt": "a\n", "b.txt": "b\n", "c.txt": "c\n", "d.txt": "d\n" }, [
       { kind: "move", from: "a.txt", to: "x/a.txt" },
       { kind: "move", from: "b.txt", to: "x/b.txt" },
@@ -151,7 +135,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(existsSync(path.join(work, "a.txt")), true, "nothing was moved");
   });
 
-  test("DR-21: a move that could only be made unsafely is listed, as the consent it would need", TODO, async () => {
+  test("DR-21: a move that could only be made unsafely is listed, as the consent it would need", async () => {
     const { base, plan, digest } = await plannedRun();
     const noLinks = Object.assign(new Error("no hard links here"), { code: "EPERM" });
     const app = createCodarynApp(await appEnvironment(base), checkHooks({ fileOps: { link: async () => Promise.reject(noLinks) } }));
@@ -159,7 +143,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.deepEqual([checked.problems, checked.unsafeMoves, checked.probesLeft], [[], [0], 0]);
   });
 
-  test("a probe the executor could not take back is taken back by the check", TODO, async () => {
+  test("a probe the executor could not take back is taken back by the check", async () => {
     const { base, plan, digest } = await plannedRun();
     const busy = Object.assign(new Error("busy"), { code: "EBUSY" });
     const app = createCodarynApp(await appEnvironment(base), checkHooks({ fileOps: { unlink: async () => Promise.reject(busy) } }));
@@ -168,7 +152,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.deepEqual(await probes(path.join(base, "work")), []);
   });
 
-  test("a probe that cannot be taken back at all is told (probesLeft), not hidden", TODO, async () => {
+  test("a probe that cannot be taken back at all is told (probesLeft), not hidden", async () => {
     const { base, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     const busy = Object.assign(new Error("busy"), { code: "EBUSY" });
@@ -187,7 +171,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.deepEqual(await probes(work), []);
   });
 
-  test("the workspace lock: held while checking and released after; a held lock is workspace_locked", TODO, async () => {
+  test("the workspace lock: held while checking and released after; a held lock is workspace_locked", async () => {
     const { base, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     const lockFile = path.join(work, ".codaryn", "lock.json");
@@ -213,7 +197,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(existsSync(lockFile), false);
   });
 
-  test("a lock that cannot be released is told (lockLeft), not hidden", TODO, async () => {
+  test("a lock that cannot be released is told (lockLeft), not hidden", async () => {
     const { base, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     const lockFile = path.join(work, ".codaryn", "lock.json");
@@ -230,7 +214,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(existsSync(lockFile), false);
   });
 
-  test("the apply's refusals, before anything is checked; none leaves a lock", TODO, async () => {
+  test("the apply's refusals, before anything is checked; none leaves a lock", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const work = path.join(base, "work");
     const form = taskForm(base);
@@ -258,13 +242,17 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(existsSync(path.join(work, ".codaryn", "lock.json")), false);
   });
 
-  test("a plan already applied, and a run that is not a plan", TODO, async () => {
+  test("a plan already applied, and a run that is not a plan", async () => {
     const { base, app, plan, digest } = await plannedRun();
     const started = await app.applyPlan({ settings: taskForm(base), planRunId: plan.runId, digest, cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));
     await started.handle.done;
     assert.equal(code(await check(app)({ settings: taskForm(base), planRunId: plan.runId, digest })), "plan_already_applied");
-    assert.equal(code(await check(app)({ settings: taskForm(base), planRunId: started.handle.runId, digest })), "run_not_plan", "an apply run holds no plan");
+    // An apply run holds no plan: refused as the apply refuses it.
+    const applyRun = started.handle.runId;
+    const viaApply = await app.applyPlan({ settings: taskForm(base), planRunId: applyRun, digest, cancelFile: null, unsafeMoveConsent: null });
+    assert.equal(viaApply.ok, false);
+    assert.equal(code(await check(app)({ settings: taskForm(base), planRunId: applyRun, digest })), viaApply.ok ? "ok" : viaApply.error.code);
 
     const plain = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const plainApp = createCodarynApp(await appEnvironment(plain));
@@ -274,7 +262,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(code(await check(plainApp)({ settings: taskForm(plain), planRunId: ran.handle.runId, digest })), "run_not_plan");
   });
 
-  test("DR-28: values registered now that mask the plan's paths otherwise: plan_secrets_differ", TODO, async () => {
+  test("DR-28: values registered now that mask the plan's paths otherwise: plan_secrets_differ", async () => {
     const name = `${OTHER_SECRET}.txt`;
     const { base, plan, digest } = await plannedRun({ [name]: "o" }, planSteps(name, "sorted/o.txt"));
     const later = createCodarynApp(await appEnvironment(base, { env: { [SECRET_ENV]: OTHER_SECRET } }));
@@ -282,7 +270,7 @@ describe("U-91: checkApply checks a pending plan as the apply's preflight would,
     assert.equal(existsSync(path.join(base, "work", ".codaryn", "lock.json")), false);
   });
 
-  test("settings that do not resolve give their error and nothing is checked", TODO, async () => {
+  test("settings that do not resolve give their error and nothing is checked", async () => {
     const { base, plan, digest } = await plannedRun();
     const app = createCodarynApp(await appEnvironment(base, { env: {} }));
     assert.equal(code(await check(app)({ settings: taskForm(base), planRunId: plan.runId, digest })), "secret_env_missing");

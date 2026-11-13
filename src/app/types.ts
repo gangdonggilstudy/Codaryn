@@ -10,6 +10,7 @@
 import type {
   ApplyJournalEventType,
   ChangesApplyRun,
+  ContentHash,
   CliErrorCategory,
   CliErrorCode,
   Clock,
@@ -31,6 +32,7 @@ import type {
   CleanupSelection,
   CleanupStatus,
   PermissionKind,
+  PlanItemProblem,
   PolicyNarrowingKind,
   StateSummary,
   ReportOutput,
@@ -663,6 +665,40 @@ export interface RunEventsPage {
   readonly nextOffset: number | null;
 }
 
+/** U-91 (GUI 3.9, DR-21, adapter-contract 5.14): a pending plan checked before it is applied. */
+export interface CheckApplyRequest {
+  /** The apply's settings (DR-5, DR-12): its policy and planActions judge the actions. */
+  readonly settings: TaskForm;
+  /** The plan run, by its own id ("latest" is not taken). */
+  readonly planRunId: string;
+  /** The digest of the plan shown, or its first MIN_PLAN_DIGEST_PREFIX (12) or more characters. Another plan is plan_not_approved. */
+  readonly digest: string;
+}
+
+/**
+ * U-91: what the apply's preflight would find now. Indexes, codes and counts only: the paths are the
+ * plan view's (masked), matched by index. Not a consent (DR-21) and not a promise: the apply checks
+ * again, and a file changed in between ends it as plan_stale.
+ */
+export interface PlanCheck {
+  readonly kind: "plan_check";
+  readonly planRunId: string;
+  /** The full digest of the plan checked. */
+  readonly digest: ContentHash;
+  /** When it was checked (ISO 8601 UTC). */
+  readonly checkedAt: string;
+  /** Actions that cannot be applied (0-based index), judged as the apply's plan_checked.problems. */
+  readonly problems: readonly { readonly index: number; readonly problem: PlanItemProblem }[];
+  /** DR-21: actions that could only be made unsafely (no hard links there); the apply needs the person's consent for them. */
+  readonly unsafeMoves: readonly number[];
+  /** DR-6: the workspace has more files than the inventory lists, so the apply could not be verified. */
+  readonly inventoryLimitReached: boolean;
+  /** Hard link probes this check could not take back (normally 0): each is a second name of a source file. */
+  readonly probesLeft: number;
+  /** True when the workspace lock this check took could not be released: runs are refused until it is. */
+  readonly lockLeft: boolean;
+}
+
 /** DR-17: `codaryn plan`'s task form (G-A): the plan is masked again with the secrets of these settings. */
 export interface PlanRequest {
   readonly settings: TaskForm;
@@ -767,6 +803,8 @@ export interface CodarynApp {
   listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>>;
   /** U-90 (GUI 3.7): one page of a run's stored records, checked line by line and masked again (adapter-contract 5.13). */
   listRunEvents(request: ListRunEventsRequest): Promise<AppCallOutcome<RunEventsPage>>;
+  /** U-91 (GUI 3.9, DR-21): the apply's preflight for a pending plan, under the lock; nothing moved or recorded (adapter-contract 5.14). */
+  checkApply(request: CheckApplyRequest): Promise<AppCallOutcome<PlanCheck>>;
   /**
    * DR-1, DR-17: the plan screen after a `needs-input`/`plan_pending` result, the apply with the
    * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.

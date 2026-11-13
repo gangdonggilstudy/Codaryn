@@ -635,6 +635,41 @@ listRunEvents({ settings: TaskForm, runId, offset, limit?, types? }) → RunEven
   - 쪽마다 journal 전체를 다시 읽고 가린다. 이 기계에서 가리기는 MiB당 약 0.1초, 키 가리기는 약 0.2초였다. 큰 journal이면 쪽마다 그만큼 걸린다.
   - 등록 값 가리기의 한계는 5.7과 같다(지금 등록한 값만 가린다).
 
+### 5.14 적용 전 점검 [구현 U-91] (standalone-gui 3.9, DR-21)
+
+계획 화면이 첫 적용 전에 "적용할 수 없는 행동"과 "동의가 필요한 이동"을 보이게 한다. 지금은 첫 적용이 `consent_required`로 끝난 뒤에야 안다. 아무것도 옮기거나 기록하지 않는다. 코드는 `src/app/check-apply.ts`, 시험은 `tests/unit/app/u91-check-apply.test.ts`다.
+
+```ts
+checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
+  // { kind: "plan_check", planRunId, digest, checkedAt, problems: { index, problem }[], unsafeMoves: number[],
+  //   inventoryLimitReached, probesLeft, lockLeft }
+```
+
+- **인자.** 맞지 않으면 아무것도 읽기 전에 `invalid_arguments`다.
+  - `planRunId`: 실행 id 꼴, `"latest"`는 받지 않는다(보인 계획의 id).
+  - `digest`: 보인 계획의 다이제스트나 그 앞 12자(`MIN_PLAN_DIGEST_PREFIX`) 이상, 소문자 16진.
+- **거부는 적용의 것이다.** 아래 순서로 본다. 여러 개에 걸리면 적용과 코드가 다를 수 있다(적용은 실행 판정을 작업 종류보다 먼저 본다).
+  1. 설정(`readingSecrets`)과 그 오류
+  2. 적용 task가 `plan: "apply"`로 풀리지 않으면 `run_not_plan`
+  3. 계획 보기(`plan`, CLI의 runPlan)의 오류: `run_not_found`, `invalid_run_record`, `run_not_plan`, `plan_run_missing`, `plan_secrets_differ`(DR-28)
+  4. 이미 적용됨 `plan_already_applied`, 기록 변경 표시 `plan_records_changed`, 다이제스트가 다르면 `plan_not_approved`
+  5. store의 `loadPlan`으로 계획을 다시 읽어 경로를 얻는다. 보기가 판정한 계획(같은 다이제스트, 적용 안 됨)이어야 한다.
+  6. 잠금. 다른 작업이 잡고 있으면 `workspace_locked`다(재시도 가능).
+- **판정은 적용 사전 점검의 것이다.** 적용 task의 설정으로 행동마다 본다.
+  - 적용 task의 `planActions`와 정책 관문(`createPolicyGate`, `PLAN_ACTION_DESCRIPTORS`, 경로를 풀기 전과 후). 아니면 `denied`다.
+    - 엔진은 이 부름을 `applyPlan` 안에 둔다. 엔진이 `preflightPlan`으로 내보내기 전까지(조사 3-a) 앱 계층이 같은 방식으로 부른다.
+    - 시험이 실제 적용의 `plan_checked` 기록과 행동마다 같음을 본다.
+  - 그다음 tools의 `createPlanExecutor`의 `check`를 그대로 부른다: 원본, 해시, 목적지, DR-21의 하드 링크 시험. `unsafe_move`는 `unsafeMoves`로, 다른 문제는 `problems`로 간다.
+  - 인벤토리 상한(DR-6)은 계획 보기가 센 것이다(같은 `createInventoryChecker`).
+- **잠금과 시험 링크를 거둔다.**
+  - 하드 링크 시험은 원본 파일의 두 번째 이름을 잠깐 만든다. 같은 볼륨이면 상태 디렉터리 안에, 아니면 원본 옆에 만든다. 그래서 점검하는 동안 작업 공간 잠금을 잡는다.
+  - 끝나기 전에, 실행기가 거두지 못한 이 프로세스의 시험 링크를 찾아 지운다. 대상은 점검 전에 없던 이름이고, 일반 파일만이다.
+  - 그래도 남은 시험 링크의 수는 `probesLeft`, 풀지 못한 잠금은 `lockLeft: true`로 알린다. 숨기지 않는다. 잠금 풀기는 한 번 더 해 본다.
+  - 점검이 도중에 실패하면 `internal_error`이고, 남긴 것이 있으면 문구가 그렇다고 말한다.
+- **남기지 않는다.** 실행 디렉터리, journal, `plan_checked` 기록, 적용 표시(`markApplied`)를 만들지 않는다. 계획은 그대로 다음 적용을 기다린다.
+- **글이 없다.** 응답은 순번, 코드, 수, 다이제스트뿐이다. 경로는 계획 보기(가림본)의 순번으로 짝짓는다.
+- **동의도 약속도 아니다.** 점검 결과는 DR-21 동의를 만들지 않는다. 동의는 지금처럼 사람의 입력으로만 만들어 `applyPlan`의 `unsafeMoveConsent`로 간다. 적용은 사전 점검을 다시 하므로, 그 사이에 파일이 바뀌면 `plan_stale`로 끝난다.
+
 ## 6. 프로세스 밖 어댑터용 줄 프로토콜 [DR-20으로 추진하지 않음 — 참고용]
 
 > 사용자 결정 DR-20으로 이 절은 추진하지 않는다. GUI는 같은 프로세스 어댑터(엔진 전용 프로세스)로 5절 함수를 직접 부른다. 아래는 결정 전의 설계와 구현 기록으로 남긴다.
@@ -738,6 +773,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 읽기 명령 | `report`(complete, `run_not_found`), `revert`, `doctor`(점검 id마다 하나: 지금 18개, `DOCTOR_CHECK_IDS`. 설계 당시 12개, W-5) |
 | 작업 공간 목록(5.12) | 종류·순서·보호·`state`, 등록 값·키 모양·제어 문자 이름이 가려지고 `name: null`, 링크·junction과 그 안의 경로는 `refused`, `not_found`·`not_dir`, 맞지 않는 인자, 500개씩의 쪽과 숫자 순서, 상한을 넘으면 `too_large`, 상태 디렉터리를 만들지 않음, 설정 오류 |
 | 실행 사건 목록(5.13) | 끝난 실행의 레코드가 그 실행의 이벤트와 같음(`at` 제외), 꼴이 맞지 않는 줄(JSON 아님, 배열, 다른 실행, 다음 번호 아님, 시각 아님, 모르는 종류, 다른 실행 종류의 종류, 비밀을 담은 필드 이름, 끝나지 않은 꼬리)이 빠지고 셈, 그 뒤 맞는 줄은 가려서 줌, 지금 등록한 값과 키 모양을 가림, 적용 실행(시작 레코드 빠짐, 번호 유지), 기록 변경 표시, 도는 중(`incomplete`), 없음·손상·맞지 않는 인자, 종류 필터와 쪽, 2 MiB 끊기와 큰 레코드 혼자, 잠금 없음·journal 그대로, 설정 오류 |
+| 적용 전 점검(5.14) | 적용할 수 있는 계획에서 아무것도 남거나 바뀌지 않고(작업 공간 전체 비교) 그 뒤 적용이 됨, 실제 적용의 `plan_checked`와 행동마다 같음(`source_changed`, `destination_exists`, `denied`), 하드 링크 없음의 `unsafeMoves`, 실행기가 거두지 못한 시험 링크를 거둠, 거두지 못한 것은 `probesLeft`, 점검 중 잠금과 잡힌 잠금의 `workspace_locked`, 풀지 못한 잠금은 `lockLeft`, 적용의 거부(인자, 다이제스트, 없음, 작업 종류, DR-28, 기록 변경, 이미 적용, 적용 실행), 설정 오류 |
 
 - 시험의 힘을 변이로 확인했다. 아래 셋은 각각 관련 시험이 실패했고, 되돌린 뒤 통과했다.
   - 변수 파일을 사본 대신 호출자 env에 적재

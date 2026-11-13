@@ -1280,3 +1280,14 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 
 - 계획 실행은 스스로 파일을 바꾸지 않는다. 그 계획을 적용한 실행이 있고 이번 되돌리기가 되돌린 것도 건너뛴 것도 없으면 되돌리기 기록을 쓰지 않는다(목록에 "되돌림"이 붙지 않음). JSON 줄은 그대로다.
 - stderr의 안내는 `revert.plan_only` 한 줄과, 그 적용 실행을 계약의 규칙 `planApplyStateOf`(실행 목록)로 판정한 상태의 줄이다. `PLAN_APPLY_STATES_TO_REVERT`(`applied`, `unfinished`)일 때만 그 실행을 되돌리라고 한다(`revert.plan_revert_apply`, `--run <적용 실행>`). `applying`(결과가 아직 없음), `reverted`(마지막 되돌리기가 complete), `record_missing`(목록에 없거나 손상)은 그렇다고만 말한다(`revert.plan_applying`, `revert.plan_apply_reverted`, `revert.plan_apply_missing`). 목록을 읽지 못하면 그렇다고 말한다. 다섯 문구 id는 카탈로그에 있다. main `1e54ca9`의 실제 CLI(`CODARYN_LANG=ko`)로 `revert.plan_only`, `revert.plan_revert_apply`, `revert.plan_apply_reverted`가 한국어로 나오는 것을 확인했다. `revert.plan_applying`, `revert.plan_apply_missing`은 카탈로그에서만 확인했다. `--dry-run`도 같다.
+
+### 18.16 묻고 실행하는 명령 규칙 `confirm` (U-109, R-79 L-1, 설계 Q-2)
+
+- 어디서 받나: 설정 파일의 `policy.commands[i]`와 프로필의 `profiles.<이름>.policy.commands[i]`에서만 `confirm: true`를 받는다(계약 `ConfirmableCommandRule`; `parsePolicy(value, "settings")`). 사람의 설정이기 때문이다.
+- 그 밖에서는 지금처럼 알 수 없는 필드다. task 파일의 `policy.commands[i]`는 `invalid_task`, 설정의 작업 종류 정의 `workflows.<id>.policy.commands[i]`는 `invalid_config`이고 둘 다 `unknown_field`다. 작업과 함께 오는 파일이 질문을 만들 수 없게 한다.
+- 값은 `true`뿐이다. 없으면 묻지 않는 보통 규칙이다. `false`나 다른 값은 `invalid_config`(`invalid_value`)이고 메시지는 `policy.commands[i].confirm must be true when it is given`이다. 진단의 `field`는 그 규칙(`policy.commands[i]`, 프로필이면 `profiles[n].policy.commands[i]`)이다. `confirm`이 계약의 `SCHEMA_FIELD_NAMES`에 아직 없어서다.
+- 뜻(U-74, 엔진): 그 규칙에만 맞는 명령 호출은 물어서 허락받으면 그 한 번만 실행된다. 같은 실행 파일이라도 `confirm`이 없는 규칙에 맞는 호출은 묻지 않고 실행된다. 작업 종류 정의와 합칠 때(`mergeWorkflowPolicy`) 남는 규칙에도 `confirm`이 남는다.
+- 지금의 CLI에는 물을 통로가 없다. 그래서 그런 호출은 엔진이 질문(`confirmation_requested`)과 기본 답(`confirmation_answered`, `deny`, `default`)을 기록한 뒤 `command/confirmation_required`로 거부하고, 명령은 돌지 않는다. 모델은 그 거부를 도구 결과로 받는다. 터미널에서 묻는 것은 U-110(B-5)이다.
+- `doctor`는 그런 설정을 유효하게 읽는다(`config_file` `ok`). 묻는 규칙이 있다는 알림은 아직 없다.
+- 앱 계층의 설정 바꾸기에서 규칙의 `confirm`을 지우는 제안은 넓히기다(`confirm_removed`, U-107).
+- 시험: `tests/unit/cli/g-u109-confirm-rules.test.ts`(실제 CLI, 루프백 가짜 서버).

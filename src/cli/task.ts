@@ -21,6 +21,8 @@ import type {
   ApiProviderName,
   CodarynConfig,
   CommandRule,
+  ConfirmableCommandRule,
+  ConfirmablePolicyConfig,
   FileRule,
   Limits,
   ModelConfig,
@@ -303,17 +305,35 @@ function parseProtectedPaths(value: unknown): string[] {
   return [...(value as readonly string[])];
 }
 
-export function parsePolicy(value: unknown): PolicyConfig {
+/**
+ * U-109 (review R-79 L-1, design Q-2): where a policy is written. Only the user's settings, the
+ * config file's `policy` and each profile's, may mark a command rule `confirm: true`, ask before
+ * running (ConfirmableCommandRule). A task file and a task type's definition may not (an unknown
+ * field, as before), so no file that comes with a task can make a question. `confirm` is `true`
+ * or absent: `false` would only mean what its absence means and is refused rather than read.
+ */
+export type PolicySource = "task" | "definition" | "settings";
+
+const COMMAND_RULE_FIELDS = ["executable", "argsPrefix", "allowExtraArgs"] as const;
+
+export function parsePolicy(value: unknown, source: "settings"): ConfirmablePolicyConfig;
+export function parsePolicy(value: unknown, source: "task" | "definition"): PolicyConfig;
+export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePolicyConfig {
   const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions"]);
   if (!Array.isArray(rec["commands"])) fail("policy.commands must be an array");
-  const commands = (rec["commands"] as unknown[]).map((item, index): CommandRule => {
+  const ruleFields: readonly string[] = source === "settings" ? [...COMMAND_RULE_FIELDS, "confirm"] : COMMAND_RULE_FIELDS;
+  const commands = (rec["commands"] as unknown[]).map((item, index): ConfirmableCommandRule => {
     const field = `policy.commands[${index}]`;
-    const rule = record(item, field, ["executable", "argsPrefix", "allowExtraArgs"]);
+    const rule = record(item, field, ruleFields);
     if (typeof rule["allowExtraArgs"] !== "boolean") fail(`${field}.allowExtraArgs must be a boolean`);
+    const confirm = rule["confirm"];
+    // The diagnostic names the rule: `confirm` is not among the contract's SCHEMA_FIELD_NAMES yet.
+    if (confirm !== undefined && confirm !== true) fail(`${field}.confirm must be true when it is given`, undefined, { code: "invalid_value", field });
     return {
       executable: localPathText(rule["executable"], `${field}.executable`),
       argsPrefix: strings(rule["argsPrefix"], `${field}.argsPrefix`),
       allowExtraArgs: rule["allowExtraArgs"],
+      ...(confirm === true ? { confirm: true as const } : {}),
     };
   });
   if (rec["network"] !== "deny") fail('policy.network must be "deny"');
@@ -677,7 +697,7 @@ export function parseTask(value: unknown, taskDir: string, defaults: TaskDefault
     const workflow = text(rec["workflow"], "workflow");
     const workspaceRoot = resolveLocal(taskDir, text(rec["workspaceRoot"], "workspaceRoot"), "workspaceRoot");
     const model = parseModel(rec["model"], taskDir);
-    const policy = parsePolicy(rec["policy"]);
+    const policy = parsePolicy(rec["policy"], "task");
     // G-A: the task's own workflow fields; resolved against the definition afterwards (resolveWorkflow).
     const workflowRef = rec["workflowRef"] === undefined ? undefined : parseWorkflowRef(rec["workflowRef"], "workflowRef");
     const tools = rec["tools"] === undefined ? undefined : parseToolList(rec["tools"], "tools");

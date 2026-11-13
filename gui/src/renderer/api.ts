@@ -34,6 +34,7 @@ import type {
   SelectModelReply,
   SettingsReply,
   SettingsProposalReply,
+  SettingsPrivateDataView,
   SettingsRules,
   SuggestedCommandView,
   PolicyNarrowingView,
@@ -278,6 +279,8 @@ function asProfile(value: unknown): ProfileView | null {
     commands: value["commands"],
     verifiers: n(value["verifiers"]),
     protectedPaths: n(value["protectedPaths"]),
+    hasPolicy: value["hasPolicy"] === true,
+    unreadablePaths: n(value["unreadablePaths"]),
   };
 }
 
@@ -308,6 +311,7 @@ export function asSettings(value: unknown): SettingsReply {
       provider: str(view["provider"]) ? view["provider"] : null,
       defaultProvider: str(view["defaultProvider"]) ? view["defaultProvider"] : null,
       apiProviders: Array.isArray(view["apiProviders"]) ? view["apiProviders"].flatMap(asApiProvider) : [],
+      privateData: asPrivateData(view["privateData"]),
     },
   };
 }
@@ -327,6 +331,16 @@ function asApiProvider(value: unknown): ApiProviderView[] {
       listable: value["listable"] === true,
     },
   ];
+}
+
+/** U-247: the config's unreadable paths and k (the main process checked them); null when absent. */
+function asPrivateData(value: unknown): SettingsPrivateDataView | null {
+  if (!isObj(value) || !strList(value["unreadablePaths"]) || !isObj(value["minGroupSize"])) return null;
+  const k = value["minGroupSize"];
+  const n = (v: unknown): number | null => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
+  const [effective, min, max] = [n(k["effective"]), n(k["min"]), n(k["max"])];
+  if (effective === null || min === null || max === null) return null;
+  return { unreadablePaths: value["unreadablePaths"], minGroupSize: { configured: n(k["configured"]), effective, min, max } };
 }
 
 function asRules(value: unknown): SettingsRules {

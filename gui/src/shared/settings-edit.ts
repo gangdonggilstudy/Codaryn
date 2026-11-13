@@ -34,7 +34,12 @@ export type SettingsEdit =
   | { readonly op: "addProtectedPath"; readonly path: string }
   | { readonly op: "removeProtectedPath"; readonly index: number; readonly shown: string }
   | { readonly op: "addSecretEnv"; readonly name: string }
-  | { readonly op: "removeSecretEnv"; readonly index: number; readonly shown: string };
+  | { readonly op: "removeSecretEnv"; readonly index: number; readonly shown: string }
+  /** U-247 (bundle A, U-215): the config's policy.unreadablePaths, with the protected paths' rules. */
+  | { readonly op: "addUnreadablePath"; readonly path: string }
+  | { readonly op: "removeUnreadablePath"; readonly index: number; readonly shown: string }
+  /** U-247: the config's policy.minGroupSize (null: none). Its range (5 to 1000) is the app layer's to check (invalid_config). */
+  | { readonly op: "minGroupSize"; readonly value: number | null };
 
 const PLAIN = /^[^\u0000-\u001f\u007f]{1,200}$/;
 const PATH = /^[^\u0000-\u001f\u007f]{1,1024}$/;
@@ -84,8 +89,16 @@ export function parseSettingsEdit(value: unknown): SettingsEdit | null {
       return only(v, ["op", "path"]) && typeof v["path"] === "string" && PATH.test(v["path"]) ? { op: "addProtectedPath", path: v["path"] } : null;
     case "addSecretEnv":
       return only(v, ["op", "name"]) && typeof v["name"] === "string" && ENV_NAME.test(v["name"]) ? { op: "addSecretEnv", name: v["name"] } : null;
+    case "addUnreadablePath":
+      return only(v, ["op", "path"]) && typeof v["path"] === "string" && PATH.test(v["path"]) ? { op: "addUnreadablePath", path: v["path"] } : null;
+    case "minGroupSize": {
+      const k = v["value"];
+      if (!only(v, ["op", "value"]) || !(k === null || (typeof k === "number" && Number.isSafeInteger(k) && k >= 1 && k <= MAX_LIMIT))) return null;
+      return { op: "minGroupSize", value: k as number | null };
+    }
     case "removeCommand":
     case "removeProtectedPath":
+    case "removeUnreadablePath":
     case "removeSecretEnv":
       return only(v, ["op", "index", "shown"]) && index(v["index"]) && typeof v["shown"] === "string" && v["shown"].length <= 2000
         ? ({ op: v["op"], index: v["index"], shown: v["shown"] } as SettingsEdit)
@@ -183,6 +196,26 @@ export function applySettingsEdit(config: unknown, edit: SettingsEdit, shown: Sh
     case "removeProtectedPath": {
       const failed = removeAt(listOf(policy(), "protectedPaths"), edit.index, edit.shown, (item) => (typeof item === "string" ? shown(item) : "?"));
       if (failed !== null) return failed;
+      break;
+    }
+    case "addUnreadablePath": {
+      const paths = listOf(policy(), "unreadablePaths");
+      if (paths.includes(edit.path)) return { ok: false, code: "already_present" };
+      paths.push(edit.path);
+      break;
+    }
+    case "removeUnreadablePath": {
+      const failed = removeAt(listOf(policy(), "unreadablePaths"), edit.index, edit.shown, (item) => (typeof item === "string" ? shown(item) : "?"));
+      if (failed !== null) return failed;
+      break;
+    }
+    case "minGroupSize": {
+      // Unset: no policy is made for it; set: in the policy, made as for a protected path when none is there.
+      if (edit.value === null) {
+        if (isObj(next["policy"])) delete (next["policy"] as Obj)["minGroupSize"];
+      } else {
+        policy()["minGroupSize"] = edit.value;
+      }
       break;
     }
     case "addSecretEnv": {

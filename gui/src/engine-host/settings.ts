@@ -63,11 +63,16 @@ function profileView(name: string, profile: unknown, workflowRef: string | null,
   const protectedPaths = own(policy, "protectedPaths");
   const verifiers = own(profile, "verifiers");
   const provider = own(profile, "provider");
+  // U-247 (R-111 L-2, L-3): a profile's own policy takes the config's place in a quick run (its commands
+  // with it); its unreadable paths are added to the config's.
+  const unreadable = own(policy, "unreadablePaths");
   return {
     name: shown(name),
     workflowRef: workflowRef === null ? null : shown(workflowRef),
     // SP-D10: a profile's provider wins over the config's for runs with that profile.
     provider: typeof provider === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(provider) ? provider : null,
+    hasPolicy: isObj(policy),
+    unreadablePaths: Array.isArray(unreadable) ? unreadable.length : 0,
     limits,
     commands,
     verifiers: Array.isArray(verifiers) ? verifiers.length : 0,
@@ -97,6 +102,23 @@ function rulesView(config: Obj | null, shown: Shown, envSet: (name: string) => b
     commands: Array.isArray(commands) ? commands.slice(0, MAX_LIST).map((rule) => commandText(rule, shown)) : [],
     protectedPaths: Array.isArray(paths) ? paths.slice(0, MAX_LIST).map((item) => (typeof item === "string" ? shown(item) : "?")) : [],
     secretEnv: Array.isArray(names) ? names.slice(0, MAX_LIST).flatMap((name) => (typeof name === "string" ? [{ name: shown(name), set: envSet(name) }] : [])) : [],
+  };
+}
+
+/**
+ * U-247 (U-215): the config's unreadable paths and its k as the app layer gives them
+ * (SettingsView.privateData): the paths in the file's order, cleaned; k as configured (or null), the
+ * k a run gets from the config alone, and the contract's range. Null when absent or not that shape.
+ */
+function privateDataView(value: unknown, shown: Shown): Obj | null {
+  if (!isObj(value) || !Array.isArray(value["unreadablePaths"]) || !isObj(value["minGroupSize"])) return null;
+  const k = value["minGroupSize"];
+  const whole = (n: unknown): number | null => (typeof n === "number" && Number.isSafeInteger(n) ? n : null);
+  const [configured, effective, min, max] = [k["configured"] === null ? null : whole(k["configured"]), whole(k["effective"]), whole(k["min"]), whole(k["max"])];
+  if ((k["configured"] !== null && configured === null) || effective === null || min === null || max === null) return null;
+  return {
+    unreadablePaths: value["unreadablePaths"].slice(0, MAX_LIST).map((item) => (typeof item === "string" ? shown(item) : "?")),
+    minGroupSize: { configured, effective, min, max },
   };
 }
 
@@ -212,6 +234,7 @@ export function settingsValue(
       provider: typeof own(config, "provider") === "string" && table.some((entry) => entry.name === own(config, "provider")) ? (own(config, "provider") as string) : null,
       defaultProvider: table.some((entry) => entry.name === "anthropic") ? "anthropic" : (table[0]?.name ?? null),
       apiProviders: apiProvidersView(config, table, providers, shown, envSet),
+      privateData: privateDataView(view["privateData"], shown),
     },
   };
 }

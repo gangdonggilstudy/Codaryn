@@ -30,7 +30,15 @@ export interface NewTaskDeps {
   /** R21b-L-1: the form of a run that started, as the workspace's last one. */
   readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
   /** U-68 (3.2): another process holds the open workspace's lock (the run button is off while it does), and a watcher slot. */
-  readonly lock?: { readonly locked: () => boolean; readonly watch: (watcher: () => void) => void };
+  readonly lock?: {
+    readonly locked: () => boolean;
+    /** R-111b (b): the lock counted as held is being checked again. */
+    readonly checking?: () => boolean;
+    /** R-111b (c): the check again failed; the lock still counts as held. */
+    readonly failed?: () => boolean;
+    readonly recheck?: () => void;
+    readonly watch: (watcher: () => void) => void;
+  };
 }
 
 function select(id: string, label: string, options: readonly (readonly [string, string])[], chosen: string): { field: HTMLElement; input: HTMLSelectElement } {
@@ -96,11 +104,32 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         // U-61 (3.2, DR-23, GT-D8): data analysis sends the tables' rows as they are; said only as it is
         // (usage 18.7). Shown when the chosen task type, or the chosen profile's, is analyze.
         const analyze = el("p", t.format("task.analyzeNotice"), { id: "task-analyze-notice", class: "notice", hidden: "" });
+        // U-247 (bundle A, proposal P-4): analyze-private, when chosen: what it does, that it cannot use
+        // commands, and (from the config) what would make its run refused. Said only when it is chosen.
+        const privateNotice = el("div", undefined, { id: "task-private-notice", class: "notice", hidden: "" });
         const describeTaskType = (): void => {
           const chosen = view?.profiles.find((item) => item.name === profile.input.value);
           const taskType = workflow.input.value !== "" ? workflow.input.value : (chosen?.workflowRef ?? null);
           if (taskType === "analyze") analyze.removeAttribute("hidden");
           else analyze.setAttribute("hidden", "");
+          if (taskType === "analyze-private") {
+            // R-111 L-2, L-3: as the CLI resolves a quick run: the config's unreadable paths are always kept
+            // and the chosen profile's are added; a profile with its own policy takes the config's place,
+            // command rules too. analyze-private allows no command rule at all.
+            const unreadable = (view?.privateData?.unreadablePaths.length ?? 0) + (chosen?.unreadablePaths ?? 0);
+            const ownPolicy = chosen?.hasPolicy === true;
+            const commands = ownPolicy ? (chosen?.commands.length ?? 0) : (view?.rules.commands.length ?? 0);
+            const lines: HTMLElement[] = [el("p", t.format("task.privateNotice"))];
+            if (unreadable === 0) lines.push(el("p", t.format("task.privateNeedsUnreadable"), { role: "alert", id: "task-private-needs-unreadable" }));
+            if (commands > 0) {
+              lines.push(el("p", t.format(ownPolicy ? "task.privateCommandsProfile" : "task.privateCommands"), { role: "alert", id: "task-private-commands", "data-policy": ownPolicy ? "profile" : "config" }));
+            }
+            privateNotice.replaceChildren(...lines);
+            privateNotice.removeAttribute("hidden");
+          } else {
+            privateNotice.setAttribute("hidden", "");
+            privateNotice.replaceChildren();
+          }
         };
         describeTaskType();
         workflow.input.addEventListener("change", describeTaskType);
@@ -142,6 +171,17 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         const lockNote = el("p", t.format("task.locked"), { id: "task-locked", role: "status", hidden: "" });
         const applyLock = (): void => {
           const locked = deps.lock?.locked() ?? false;
+          // R-111b (b, c): another process holds it (an answer said so), it is being checked again, or the
+          // check again failed (then the person can check again). The run button is off in all three.
+          const checking = locked && (deps.lock?.checking?.() ?? false);
+          const failed = locked && !checking && (deps.lock?.failed?.() ?? false);
+          lockNote.setAttribute("data-lock", checking ? "checking" : failed ? "failed" : "held");
+          if (failed && deps.lock?.recheck !== undefined) {
+            const recheck = deps.lock.recheck;
+            lockNote.replaceChildren(t.format("task.lockCheckFailed"), " ", button(t.format("task.lockRecheck"), () => recheck(), { id: "task-lock-recheck" }));
+          } else {
+            lockNote.replaceChildren(t.format(checking ? "task.lockChecking" : "task.locked"));
+          }
           if (locked) lockNote.removeAttribute("hidden");
           else lockNote.setAttribute("hidden", "");
           if (locked || !run.canStart) runButton.setAttribute("disabled", "");
@@ -178,7 +218,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         }, { id: "task-run-file" });
         if (!run.canStart) fromFile.setAttribute("disabled", "");
         taskFile.append(el("h3", t.format("task.fileTitle"), { id: "task-file-title" }), el("p", t.format("task.fileText"), { class: "notice" }), varsField, fromFile);
-        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, advanced, message, lockNote, runButton, taskFile);
+        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, privateNotice, advanced, message, lockNote, runButton, taskFile);
         body.setAttribute("data-newtask-ready", reply.ok ? "ok" : "error");
       })();
     },

@@ -101,9 +101,12 @@ test("settings (GU-6): the host sends the display form only, and every config te
     commands: ["<node?>"],
     verifiers: 1,
     protectedPaths: 2,
+    // U-247 (R-111): its own policy (it takes the config's place in a quick run) and its unreadable paths.
+    hasPolicy: true,
+    unreadablePaths: 0,
   });
   // A profile name that is an object key of every object does not reach into the prototype.
-  assert.deepEqual(reply.view.profiles[1], { name: "<__proto__>", workflowRef: null, provider: null, limits: [], commands: [], verifiers: 0, protectedPaths: 0 });
+  assert.deepEqual(reply.view.profiles[1], { name: "<__proto__>", workflowRef: null, provider: null, limits: [], commands: [], verifiers: 0, protectedPaths: 0, hasPolicy: false, unreadablePaths: 0 });
   assert.deepEqual(reply.view.workflows, { builtin: ["<code>", "<document>"], config: ["<mine>"] });
   assert.deepEqual(reply.view.providers, ["anthropic"]);
   assert.deepEqual(reply.view.env, ENV);

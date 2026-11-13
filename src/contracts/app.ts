@@ -20,7 +20,7 @@ import type { CodarynConfig, DefaultConfigDisplay } from "./config.js";
 import type { CliErrorCategory, CliErrorCode, Clock, EngineResult, InputDiagnostic, RevertOutput } from "./engine.js";
 import type { InitSuggestedCommand, InitSuggestedProtectedPath, MessageLanguage } from "./human.js";
 import type { JournalEventType, JournalRecord } from "./journal.js";
-import type { AnyPlanOutput, ApplyJournalEventType, ApplyJournalRecord, ApplyResult, PlanItemProblem, PlanOutput } from "./plan.js";
+import type { AnyPlanOutput, ApplyJournalEventType, ApplyJournalRecord, ApplyResult, ChangesPlanOutput, PlanItemProblem, PlanOutput } from "./plan.js";
 import type { ConfirmAnswer, ConfirmRequest, PermissionKind } from "./policy.js";
 import type { CommandRule } from "./task.js";
 import type { ContentHash, MaskedText } from "./text.js";
@@ -410,6 +410,7 @@ export type RunOutcome =
   /** An internal error after the start (`internal_error`). The lock is released. There is no tally: no end summary is written. */
   | { readonly ok: false; readonly error: AppError };
 
+/** C-6a, C-7b: the handle's runId, configLanguage, defaultConfig and mask mean what RunFacts' fields of the same names mean. */
 export interface RunHandle {
   /** Known before the first event is delivered and before the engine starts. */
   readonly runId: string;
@@ -1048,6 +1049,10 @@ export interface ApplyPlanRequest {
 
 /** DR-2: an apply run's events: its own records (G-A ApplyJournalRecord), sanitized as run events are. */
 export type ApplyEvent =
+  /**
+   * C-7b: every string in it is masked again, its closed words too, as in a run's record event;
+   * ApplyObserver.onStoredRecord gives the record as stored.
+   */
   | { readonly kind: "record"; readonly record: ApplyJournalRecord }
   | { readonly kind: "notice"; readonly text: MaskedText };
 
@@ -1061,6 +1066,114 @@ export interface ApplyObserver {
   onRunEvent?(event: RunEvent): void;
   /** U-218: that run's permission questions, as RunObserver.confirm (U-108: absent or failing is `dismissed`). */
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
+  /**
+   * C-7b (PM D-4): each record of the apply run as its journal stored it, by RunObserver.onStoredRecord's
+   * rule: in `seq` order, synchronously right after it was stored and before onEvent gets its copy,
+   * with the engine's masking only (free text masked, closed words as written). For an adapter that
+   * draws people's lines in this process (the CLI's apply progress lines), masking each drawn line
+   * with ApplyFacts.mask. A host that hands anything of a run to a window or over IPC uses onEvent
+   * and never this; the GUI's engine host does not (u292 test). Exceptions are ignored.
+   */
+  onStoredRecord?(record: ApplyJournalRecord): void;
+  /**
+   * C-7b: the same for the run that carries out a run plan: its records as stored, by
+   * RunObserver.onStoredRecord's rule, its drawn lines masked with RunFacts.mask. Never to a window
+   * or over IPC (u292 test). Exceptions are ignored.
+   */
+  onStoredRunRecord?(record: JournalRecord): void;
+}
+
+/**
+ * C-7b (the CLI migration, PM D-2): what the app layer's apply life asks and tells the CLI's apply.
+ * The CLI and CodarynApp.applyPlan call the same life; the app's applyPlan gives `observer` only, so
+ * an adapter's apply asks nothing: it is approved before the call (DR-1, DR-3) and its consent to
+ * unsafe moves comes in its request (DR-21). No CodarynApp method takes these hooks. A question hook
+ * that throws counts as a no; any other hook's throw is ignored. None of them changes what is
+ * applied, and nothing a hook gets is in the apply's result, result.json, a record or an error
+ * (u309 test).
+ */
+export interface ApplyLifeHooks {
+  readonly observer?: ApplyObserver;
+  /**
+   * Once, after the refusals that come before anything is asked (a plan already applied, a
+   * records-changed mark, an adapter's consent checks) and before the approval: what the CLI draws
+   * with.
+   */
+  ready?(facts: ApplyFacts): void;
+  /**
+   * The approval question (6.4 1), only when no digest was given: the view as the question shows it,
+   * and true approves (channel cli-tty). Absent: plan_not_approved, an apply needs --digest. Asked
+   * before the lock and the cancel source, as now. For a plan of moves, the workspace listing for
+   * the view's inventory limit runs before it and takes the apply's cancel (R-18 L1).
+   */
+  approve?(view: ApplyApprovalView): Promise<boolean>;
+  /**
+   * A plan of moves: after each apply run ended (its result.json written, its lock released) and
+   * before any question after it. The CLI writes that apply's end summary here, so DR-21's consent
+   * question comes after the first summary.
+   */
+  applyEnded?(end: ApplyRunEnd): void;
+  /**
+   * DR-21: after an apply of a plan of moves ended as consent_required with no consent given: may a
+   * second apply make these unsafe moves anyway, for that apply only? true starts it, with channel
+   * cli-tty and a new apply run. Absent, or false: the first apply's end stands. Never for a run plan.
+   */
+  consentToUnsafeMoves?(unsafeMoves: number): Promise<boolean>;
+  /** A run plan: once its run is assembled, before its first record; what the CLI draws that run with. */
+  runReady?(facts: RunFacts): void;
+}
+
+/** C-7b: what an apply's drawing needs, given once by ApplyLifeHooks.ready. */
+export interface ApplyFacts {
+  /** "moves": a plan of moves and discards (plan "apply"); "changes": a run plan (plan "run"). */
+  readonly planKind: "moves" | "changes";
+  /**
+   * U-131 (N5): the plan run ran with another task than this apply's. The CLI says it before the
+   * approval question and right after the apply's start (apply_started, or the run plan's start).
+   */
+  readonly otherTask: boolean;
+  /**
+   * The apply's masking: the plan view's gateway, with which the CLI masks its apply progress lines,
+   * its end summary and DR-51's shown workspace now (a run plan's run masks with its own: RunFacts.mask).
+   * Null when the text cannot be masked: write nothing then. Never for a model or a record, never to a
+   * window or over IPC.
+   */
+  readonly mask: (text: string) => MaskedText | null;
+}
+
+/** C-7b: the approval question's view, the plan output `codaryn plan --json` gives, as the question shows it. */
+export type ApplyApprovalView =
+  /** A plan of moves, with the inventory limit as listed for this question and the agent's summary (U-14) when it can be read. */
+  | { readonly kind: "moves"; readonly plan: PlanOutput }
+  /** A run plan (U-228): its view, and whether the task allows commands (the note changesApprovalText adds). */
+  | { readonly kind: "changes"; readonly plan: ChangesPlanOutput; readonly commandsAllowed: boolean };
+
+/**
+ * C-7b: one apply run of a plan of moves, ended. Its result as written to result.json, and whether
+ * its lock was left (U-220), for the CLI's end summary only. CodarynApp.applyPlan gives no
+ * applyEnded, so ApplyOutcome stays without that lockLeft (PM: a change the GUI would show, after
+ * the migration).
+ */
+export interface ApplyRunEnd {
+  readonly result: ApplyResult;
+  readonly lockLeft: boolean;
+}
+
+/**
+ * C-7b: a run's facts for the adapter that draws it (a run plan's run through ApplyLifeHooks.runReady),
+ * as RunHandle gives a run's.
+ * - runId: the run's id.
+ * - configLanguage (N-4): the config's `language`, or null when it sets none. A run plan's run is
+ *   drawn in it, as a run is. The apply's own question, lines and summary are not: the CLI picks them
+ *   without the config's language, as before.
+ * - defaultConfig (N-1): the default config location's fixed display form when the config came from it.
+ * - mask: the run's own masking (its gateway), as RunHandle.mask.
+ */
+export interface RunFacts {
+  readonly runId: string;
+  readonly configLanguage: MessageLanguage | null;
+  readonly defaultConfig: DefaultConfigDisplay | null;
+  readonly mask: (text: string) => MaskedText | null;
 }
 
 /**

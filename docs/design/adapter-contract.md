@@ -537,7 +537,10 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 묻는 규칙(U-74 `confirm: true`)을 새로 더해도 명령 추가다. 사람이 허락하면 전에 못 하던 호출을 하게 된다.
     - U-107(R-79 F-1): 묻던 명령을 묻지 않고 허용(`confirm_removed`). 규칙에서 `confirm`을 빼거나, 묻는 규칙과 같은 호출을 맞추는 `confirm` 없는 규칙을 더한 경우다. 정책 관문은 `confirm` 없는 규칙 하나라도 맞으면 묻지 않고 허용하기 때문이다.
       - 규칙이 묻게 되는 변경은 좁히기다.
-      - 프로필의 규칙도 같다. `profile_changed`에 더해 `confirm_removed`(`profiles.<이름>.policy.commands[i]`)를 준다.
+      - 프로필의 규칙도 같다. `profile_changed`에 더해 그 프로필 안의 항목(`profiles.<이름>.policy.commands[i]`)을 준다.
+        - U-117(R-85 L1): 바뀐 뒤 자기 정책을 가진 프로필은, 그 프로필의 실행이 전에 쓰던 명령과 견준다. 전에 자기 정책이 있었으면 그것이고, 없었으면 설정의 정책이다(정책 없는 프로필은 설정의 정책으로 돈다).
+        - 묻던 명령이 묻지 않게 되면 `confirm_removed`, 새 명령이면 `command_added`(추가 인자면 `extra_args_allowed`도)다.
+        - 바뀐 뒤 자기 정책이 없는 프로필(설정의 정책으로 돌게 됨)은 `profile_changed`만 준다.
       - 작업 종류의 합친 규칙은 설정 규칙의 `confirm`을 이어받으므로, 설정 쪽 항목 하나로 말한다.
     - 한도 올림·없앰
     - 보호 경로·무결성 경로·가릴 변수·검증기 제거

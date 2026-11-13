@@ -7,15 +7,13 @@
  * its own policy, or the config's when it had none. A question gone is `confirm_removed`, a new
  * command `command_added` (with `extra_args_allowed`), in that profile.
  * The config file cannot hold `confirm` yet, so the judgement (wideningOf) is called directly.
- * Reproduced first (todo until fixed). Fake values only.
+ * Reproduced first (b412477, todo until fixed). Fake values only.
  */
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { wideningOf } from "../../../src/app/index.js";
 import type { CodarynConfig } from "../../../src/contracts/index.js";
-
-const TODO = { todo: "U-117: a profile that gets its own policy is compared with nothing" };
 
 const NODE_ANY = { executable: "node", argsPrefix: [], allowExtraArgs: true } as const;
 const ASKING_NODE = { ...NODE_ANY, confirm: true } as const;
@@ -30,14 +28,14 @@ function config(commands: readonly object[] | null, profiles: Record<string, unk
 const kinds = (before: CodarynConfig, after: CodarynConfig): string[] => wideningOf(before, after).map((item) => `${item.kind}@${item.field}`);
 
 describe("U-117 (R-85 L1): a profile that gets a policy is compared with the config's it ran with", () => {
-  test("the config's asking rule, and the profile now has a plain rule for the same calls: confirm_removed in the profile", TODO, () => {
+  test("the config's asking rule, and the profile now has a plain rule for the same calls: confirm_removed in the profile", () => {
     assert.deepEqual(kinds(config([ASKING_NODE], { p: {} }), config([ASKING_NODE], { p: { policy: policy([NODE_ANY]) } })), [
       "profile_changed@profiles",
       "confirm_removed@profiles.p.policy.commands[0]",
     ]);
   });
 
-  test("a new command in the profile's new policy: command_added (and extra arguments) in the profile", TODO, () => {
+  test("a new command in the profile's new policy: command_added (and extra arguments) in the profile", () => {
     assert.deepEqual(kinds(config([GIT], { p: {} }), config([GIT], { p: { policy: policy([GIT, NODE_ANY]) } })), [
       "profile_changed@profiles",
       "command_added@profiles.p.policy.commands[1]",
@@ -51,7 +49,7 @@ describe("U-117 (R-85 L1): a profile that gets a policy is compared with the con
     assert.deepEqual(kinds(config([NODE_ANY], { p: {} }), config([NODE_ANY], { p: { policy: policy([ASKING_NODE]) } })), ["profile_changed@profiles"], "a question added narrows");
   });
 
-  test("a profile that had its own policy adds a command: command_added in the profile, as when it gets one", TODO, () => {
+  test("a profile that had its own policy adds a command: command_added in the profile, as when it gets one", () => {
     assert.deepEqual(kinds(config([], { p: { policy: policy([GIT]) } }), config([], { p: { policy: policy([GIT, NODE_ANY]) } })), [
       "profile_changed@profiles",
       "command_added@profiles.p.policy.commands[1]",

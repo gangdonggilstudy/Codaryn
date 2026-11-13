@@ -1,16 +1,16 @@
 /**
- * Codex V-14 L-1 (B-4 end to end): writes refused as path_not_writable were counted by the run
- * (RunNotes.deniedNotWritable) but not handed to the end summary (RunSummaryContext.deniedNotWritable,
- * U-198's `summary.denied_not_writable` line), so the real CLI never showed it; and a run that carries
- * out a run plan told the person to add the file to writablePaths although its approved files refused
- * the write, which no writablePaths entry can widen.
- * Now, on the real CLI (a process, other denials mixed in):
- * - the end summary has the line with the count of writes refused as not writable;
- * - in a run that carries out a plan, a refused write gets the plan's hint (make a new plan and approve
- *   it), not the writablePaths hint, also for a file the apply task's writablePaths names: a planned
- *   file a writable list leaves out ends the run as plan_stale before the model (U-187), so every
- *   refused write of a carried run is outside the plan;
- * - a run without a plan keeps the writablePaths hint.
+ * Codex V-14 L-1 (B-4 end to end): writes refused as path_not_writable were counted by the run but not
+ * handed to the end summary, so the real CLI never showed U-198's line; and a run that carries out a
+ * run plan told the person to add the file to writablePaths although its approved files refused the
+ * write, which no writablePaths entry can widen.
+ * Now, on the real CLI (a process, other denials mixed in), with U-198's end summary that tells the
+ * two causes apart (RunSummaryContext.deniedNotPlanned, deniedNotWritable, each with its advice):
+ * - in a run that carries out a plan, every refused write counts as not one the plan approved (make a
+ *   new plan and approve it), also a file the apply task's writablePaths names: a planned file a
+ *   writable list leaves out ends the run as plan_stale before the model (U-187); no writablePaths
+ *   advice, neither the end summary's nor the progress line;
+ * - a run without a plan: the end summary's writablePaths count and advice, and the progress line as
+ *   before (U-182).
  * Scripted model, temporary folders; no network.
  */
 
@@ -85,8 +85,9 @@ describe("V-14 L-1 on the real CLI: refused writes in the end summary and the ri
     const ran = await carry(sb, planned, steps, "en");
     const en = createMessageCatalog("en");
     assert.ok(ran.stderr.includes(line(en, "summary.denied", 3)), ran.stderr);
-    assert.ok(ran.stderr.includes(line(en, "summary.denied_not_writable", 2)), ran.stderr);
-    assert.ok(ran.stderr.includes(line(en, "progress.not_in_plan_hint", 2)), ran.stderr);
+    assert.ok(ran.stderr.includes(line(en, "summary.denied_not_planned", 2)), ran.stderr);
+    assert.ok(ran.stderr.includes(en.format("summary.denied_not_planned_hint")), ran.stderr);
+    assert.equal(ran.stderr.includes(line(en, "summary.denied_not_writable", 2)), false, ran.stderr);
     assert.equal(ran.stderr.includes("add it to writablePaths"), false, "no writablePaths hint for files the plan did not approve");
     assert.equal(existsSync(path.join(sb.workspace, "not-approved.txt")) || existsSync(path.join(sb.workspace, "docs", "guide.md.extra")), false);
     assert.equal(readFileSync(path.join(sb.workspace, "docs", "new.md"), "utf8"), "new page\n");
@@ -99,9 +100,10 @@ describe("V-14 L-1 on the real CLI: refused writes in the end summary and the ri
     // DR-5: the apply's own task; its list covers both planned files and other.txt.
     const ran = await carry(sb, planned, steps, "ko", { writablePaths: ["docs", "other.txt"] });
     const ko = createMessageCatalog("ko");
-    assert.ok(ran.stderr.includes(line(ko, "summary.denied_not_writable", 1)), ran.stderr);
-    assert.ok(ran.stderr.includes(line(ko, "progress.not_in_plan_hint", 1)), ran.stderr);
+    assert.ok(ran.stderr.includes(line(ko, "summary.denied_not_planned", 1)), ran.stderr);
+    assert.ok(ran.stderr.includes(ko.format("summary.denied_not_planned_hint")), ran.stderr);
     assert.equal(ran.stderr.includes(line(ko, "progress.not_writable_hint", 1)), false, "widening writablePaths would not help");
+    assert.equal(ran.stderr.includes(ko.format("summary.denied_not_writable_hint")), false, "widening writablePaths would not help");
     assert.equal(existsSync(path.join(sb.workspace, "other.txt")), false);
     assert.equal(readFileSync(path.join(sb.workspace, "docs", "new.md"), "utf8"), "new page\n");
   });
@@ -114,7 +116,7 @@ describe("V-14 L-1 on the real CLI: refused writes in the end summary and the ri
     assert.equal(`${String(result["status"])}/${String(result["reason"])}`, "failed/plan_stale", ran.stdout);
     assert.equal((result["usage"] as { modelTurns: number }).modelTurns, 0);
     const en = createMessageCatalog("en");
-    assert.equal(ran.stderr.includes(line(en, "progress.not_in_plan_hint", 1)) || ran.stderr.includes("add it to writablePaths"), false);
+    assert.equal(ran.stderr.includes(en.format("summary.denied_not_planned_hint")) || ran.stderr.includes("add it to writablePaths"), false);
   });
 
   test("a run without a plan: the summary's count and the writablePaths hint, beside a command denial", { timeout: 60_000 }, async (t) => {
@@ -127,7 +129,8 @@ describe("V-14 L-1 on the real CLI: refused writes in the end summary and the ri
     const en = createMessageCatalog("en");
     assert.ok(ran.stderr.includes(line(en, "summary.denied", 2)), ran.stderr);
     assert.ok(ran.stderr.includes(line(en, "summary.denied_not_writable", 1)), ran.stderr);
+    assert.ok(ran.stderr.includes(en.format("summary.denied_not_writable_hint")), ran.stderr);
     assert.ok(ran.stderr.includes(line(en, "progress.not_writable_hint", 1)), ran.stderr);
-    assert.equal(ran.stderr.includes(line(en, "progress.not_in_plan_hint", 1)), false);
+    assert.equal(ran.stderr.includes(en.format("summary.denied_not_planned_hint")), false);
   });
 });

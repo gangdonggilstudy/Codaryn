@@ -3,8 +3,8 @@
  * config file a run would read, whether it is there, what it says, and the profile and workflow
  * names a new task can choose.
  *
- * The file is chosen and checked exactly as `codaryn run` does (src/cli/run.ts steps 3 to 5), with
- * the CLI's own functions in the same order:
+ * The file is chosen and checked exactly as `codaryn run` does (prepareTask's steps 3 to 5,
+ * ./prepare.ts since the CLI migration's C-5), with the same functions in the same order:
  *   chooseConfigFile (--config → CODARYN_CONFIG → the N-1 default location, S-5)
  *   → read (a missing file is "no config" only at the default location; a BOM is dropped)
  *   → rawTextHoldsKey (C-1, S-6) → JSON with a line and column on a syntax error (N-6)
@@ -12,15 +12,15 @@
  * Nothing here judges a value itself. Reads only. The settings change (settings-change.ts) uses
  * the same checks for the text it would write.
  *
- * The CLI keeps this sequence inline in run.ts; a shared config reader there would let this file
- * call one function instead (A-4 report).
+ * prepareTask keeps this sequence inline (./prepare.ts); a shared config reader there would let this
+ * file call one function instead (A-4 report).
  */
 
 import { API_KEY_ENVS, API_PROVIDERS, BUILTIN_WORKFLOW_IDS, MIN_GROUP_SIZE_LIMITS, effectiveMinGroupSize, workflowPolicyNarrowings, workflowVerifierNarrowings } from "../contracts/index.js";
 import type { CodarynConfig, DefaultConfigLocation, InputDiagnostic } from "../contracts/index.js";
 import { chooseConfigFile, isMissingFile } from "./input/config-file.js";
 import { parseConfig } from "./input/config.js";
-import { jsonSyntaxError, positionDiagnostic } from "../cli/run.js";
+import { jsonSyntaxError, positionDiagnostic } from "./prepare.js";
 import { MAX_KEY_SCAN_DEPTH, findKeyInJson, inputFileTooLarge, inputFileTooLargeMessage, rawTextHoldsKey } from "./input/security/index.js";
 import type { KnownKeys } from "./input/security/index.js";
 import { envValue, knownKeyValues } from "./input/settings.js";

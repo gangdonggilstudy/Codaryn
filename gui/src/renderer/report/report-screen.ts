@@ -3,6 +3,8 @@
  * layer's structured `report` (never Markdown turned into HTML). Tabs: summary, checks (by number,
  * with their evidence), changes (a run) or actions (an apply), protected items ("found after the
  * fact"), usage, the masking counts (U-40) and records, and the person's verdict. Every text came masked and cleaned.
+ * U-118 (3.7): the records tab (run-log.ts), and, when the report is refused as a damaged record,
+ * the records that can still be read, with the damage said first.
  */
 
 import type { Texts } from "../i18n/catalog.js";
@@ -12,6 +14,7 @@ import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import { copyControl } from "../shell/copy.js";
 import { reviewPanel } from "../run/review-panel.js";
+import { runLog } from "./run-log.js";
 import type { Screen } from "../shell/shell.js";
 import type { MaskingView, ReportView } from "../../shared/ipc.js";
 import { FINAL_MESSAGE_LIMIT, clock, localDateTime } from "../run/run-model.js";
@@ -193,6 +196,15 @@ function tabsOf(t: Texts, deps: ReportDeps, view: ReportView, labels: { readonly
             ],
     });
   }
+  // U-118 (3.7): the run's records as the progress list's lines, page by page, with its filter (the last tab, as 3.7 lists them).
+  const workspace = deps.current();
+  if (workspace !== null) {
+    tabs.push({
+      id: "log",
+      label: t.format("report.tab.log"),
+      build: () => runLog(t, deps.api, { workspace, runId: view.runId, profile: form?.profile ?? null, workflow: form?.workflow ?? null }),
+    });
+  }
   return tabs;
 }
 
@@ -243,6 +255,12 @@ export function reportScreen(deps: ReportDeps): ReportScreen {
         const reply = asReport(await api.report(workspace.handle, runId));
         if (!reply.ok) {
           body.replaceChildren(el("div", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { role: "alert", class: "error", "data-error": reply.code }));
+          // U-118 (3.7): a damaged record refuses the report; the records that can be read are offered, damage first.
+          if (reply.code === "invalid_run_record") {
+            const box = el("section", undefined, { id: "report-log-box" });
+            const open = button(t.format("report.log.open"), () => box.replaceChildren(...runLog(t, api, { workspace, runId, profile: form?.profile ?? null, workflow: form?.workflow ?? null })), { id: "report-log-open" });
+            body.append(open, box);
+          }
           body.setAttribute("data-report-ready", "error");
           return;
         }

@@ -58,7 +58,9 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCopyArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange } from "../shared/ipc.js";
+import { copyablePath, parseCopyArgs, parseRunEventsArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
+import type { RunEventsReply } from "../shared/ipc.js";
+import { parseRunItems } from "../shared/protocol.js";
 import type { UiMemoryView } from "../shared/ipc.js";
 import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
@@ -696,6 +698,24 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   // DR-7, DR-29 (3.4): a run's changed files, by path and state only. It reads; it changes nothing.
+  // U-118 (3.7): one page of a run's records, as the progress list's lines, in the window's language.
+  handle(IPC_CHANNELS.runEvents, async (args): Promise<RunEventsReply> => {
+    const parsed = args.length === 1 ? parseRunEventsArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    const root = workspaces.path(parsed.workspace);
+    if (root === null) return { ok: false, code: "unknown_workspace" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call(
+      "runEvents",
+      { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId, offset: parsed.offset, language: language === "ko" ? "ko" : "en" },
+      RUNS_TIMEOUT_MS,
+    );
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const reply = toRunEventsReply(response.value, parseRunItems);
+    return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
+  });
+
   handle(IPC_CHANNELS.changes, async (args): Promise<ChangesReply> => {
     const parsed = args.length === 1 ? parsePlanArgs(args[0]) : null;
     if (parsed === null) return { ok: false, code: "invalid_args" };

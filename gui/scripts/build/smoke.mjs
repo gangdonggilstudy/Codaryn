@@ -239,7 +239,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -310,6 +310,8 @@ const expected = [
   ["languageNow", (v) => JSON.stringify(v) === JSON.stringify({ shown: "ok", file: ["config.json"], switched: "redrawn", renamed: true, screen: "settings", back: "redrawn", lang: true })],
   // U-70 (4.5, 3.1): Home goes to 160, Right adds 16, dragging 100 pixels adds 100 and the panel is that wide; the width and the screen reach gui-state.json.
   ["windowState", (v) => JSON.stringify(v) === JSON.stringify({ min: 160, step: 16, dragged: 100, panel: true, saved: { screen: "checks", treeWidth: 276 } })],
+  // U-118 (3.7): the records tab shows the analyze run's lines (complete), the checks filter keeps checks only, its records-changed mark is the one note; a broken journal line makes the page damaged.
+  ["recordsTab", (v) => JSON.stringify(v) === JSON.stringify({ ready: "complete", lines: true, checks: true, notes: 1, recordsNote: true, damaged: { status: "damaged", skipped: 1, missing: 0, lines: true } })],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],
@@ -506,7 +508,8 @@ const expected = [
   ["reportF7", (v) => v === true],
   // GU-3 (3.7): reports from a result and from the run list.
   ["reportReady", (v) => v === "run"],
-  ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review"])],
+  // U-118: the records tab comes last (3.7).
+  ["reportTabs", (v) => JSON.stringify(v) === JSON.stringify(["summary", "checks", "changes", "protected", "usage", "review", "log"])],
   ["reportSummary", (v) => v === "awaiting_review"],
   // U-54 (R-65 L-1): in the same window, the analyze run's codaryn-call-1 (allowed, then not_found) has
   // its failed line, the CLI's words, in its progress list.

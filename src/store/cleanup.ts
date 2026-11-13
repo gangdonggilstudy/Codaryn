@@ -345,6 +345,17 @@ interface ItemFacts {
   readonly planRunId: string | null;
 }
 
+/**
+ * The order applyCleanup handles a plan's items in, plan order within each step. U-13: discarded-files
+ * folders first, so an apply's records go only after its folder went. DR-44 (a): then apply runs, then
+ * the other runs (their plan runs among them), then leftovers. U-86: the preview foresees in it too.
+ */
+function cleanupOrder(items: readonly CleanupItem[], facts: readonly (ItemFacts | null)[]): { item: CleanupItem; index: number }[] {
+  const rank = (item: CleanupItem, index: number): number =>
+    item.target === "discarded" ? 0 : item.target === "run" ? (facts[index]?.kind === "apply" || (facts[index]?.planRunId ?? null) !== null ? 1 : 2) : 3;
+  return items.map((item, index) => ({ item, index })).sort((a, b) => rank(a.item, a.index) - rank(b.item, b.index) || a.index - b.index);
+}
+
 interface Planned {
   readonly plan: CleanupPlan;
   /** For each item, in plan order, the fingerprint the digest holds. */
@@ -443,6 +454,78 @@ function totalsOf(items: readonly (CleanupItemRef & { readonly size: StateSize; 
 }
 
 export const planCleanup: PlanCleanup = async (request) => (await makePlan(request.workspaceRoot, request.selection, request.now)).plan;
+
+/** U-86: a confirmation's two switches (CleanupConfirmation without its digest). */
+export interface CleanupSwitches {
+  readonly includeNotReverted: boolean;
+  readonly discarded: boolean;
+}
+
+/**
+ * U-86 (C-18): what a confirmed cleanup does with a plan item, as applyCleanup decides it when every
+ * removal succeeds: removed, or kept for a reason the confirmation decides. A plan run kept because
+ * an apply run that uses it is kept names that apply run. What a removal itself can meet (changed,
+ * not_plain_directory, io_error, partly_removed) is not foreseen.
+ */
+export type PredictedCleanupFate =
+  | { readonly removed: true }
+  | { readonly removed: false; readonly reason: "not_reverted_not_confirmed" | "discarded_left" | "not_confirmed" }
+  | { readonly removed: false; readonly reason: "used_by_kept_apply"; readonly keptWith: RunId };
+
+/** U-86: applyCleanup's decisions on `plan` under `switches`, in its order (cleanupOrder), without removing. */
+function predictFates(plan: CleanupPlan, facts: readonly (ItemFacts | null)[], switches: CleanupSwitches): PredictedCleanupFate[] {
+  const fates: PredictedCleanupFate[] = plan.items.map(() => ({ removed: true }));
+  // The discarded-files folders this cleanup removes; they go before any run's records.
+  const foldersGoing = new Set<string>(switches.discarded ? plan.items.flatMap((item) => (item.target === "discarded" ? [item.runId] : [])) : []);
+  /** Plan runs a kept apply run uses, each with the first such apply run. */
+  const plansOfKeptApplies = new Map<string, RunId>();
+  for (const { item, index } of cleanupOrder(plan.items, facts)) {
+    if (item.target === "run") {
+      const itemFacts = facts[index] ?? null;
+      const keepApply = (reason: "not_reverted_not_confirmed" | "discarded_left"): void => {
+        fates[index] = { removed: false, reason };
+        const planRunId = itemFacts?.planRunId ?? null;
+        if (planRunId !== null && !plansOfKeptApplies.has(planRunId)) plansOfKeptApplies.set(planRunId, item.runId);
+      };
+      if (needsNotRevertedConfirmation(item.warnings) && !switches.includeNotReverted) {
+        keepApply("not_reverted_not_confirmed");
+        continue;
+      }
+      // A run that is not known to be a plain run, with files in its discarded-files folder (the
+      // warning says so), keeps its records unless that folder goes in the same cleanup.
+      if (itemFacts?.kind !== "run" && item.warnings.includes("discarded_left") && !foldersGoing.has(item.runId)) {
+        keepApply("discarded_left");
+        continue;
+      }
+      const keptWith = plansOfKeptApplies.get(item.runId);
+      if (keptWith !== undefined) fates[index] = { removed: false, reason: "used_by_kept_apply", keptWith };
+    } else if (item.target === "discarded" && !switches.discarded) {
+      fates[index] = { removed: false, reason: "not_confirmed" };
+    }
+  }
+  return fates;
+}
+
+/**
+ * U-86 (C-18): planCleanup's plan and, for each confirmation asked, what a confirmed cleanup does with
+ * each item, in plan order. Reads only; the plan is planCleanup's, unchanged.
+ */
+export async function previewCleanup(
+  request: Parameters<PlanCleanup>[0],
+  confirmations: readonly CleanupSwitches[],
+): Promise<{ readonly plan: CleanupPlan; readonly fates: readonly (readonly PredictedCleanupFate[])[] }> {
+  const { plan, facts } = await makePlan(request.workspaceRoot, request.selection, request.now);
+  return { plan, fates: confirmations.map((switches) => predictFates(plan, facts, switches)) };
+}
+
+/**
+ * U-86 (UXM-1): the discarded-files folders whose run has no records any more and that hold at least
+ * one file. Nothing says any more what those files were called or where they were. Reads only.
+ */
+export async function recordlessDiscarded(request: { readonly workspaceRoot: string }): Promise<{ readonly count: number } & StateSize> {
+  const folders = (await scan(request.workspaceRoot)).orphanDiscarded.filter((item) => holdsFiles(item.tree));
+  return { count: folders.length, ...sizeOf(folders.map((item) => item.tree)) };
+}
 
 /** Whether `parent` has an entry named exactly `name` (N-27 (a), as for run directories). */
 async function hasExactEntry(parent: string, name: string): Promise<boolean> {
@@ -545,10 +628,7 @@ export async function applyCleanupWith(request: Parameters<ApplyCleanup>[0], ope
     };
     // U-13: discarded-files folders first, so an apply's records go only after its folder went.
     // DR-44 (a): then apply runs, then the other runs (their plan runs among them), then leftovers.
-    const order = plan.items.map((item, index) => ({ item, index }));
-    const rank = ({ item, index }: { item: CleanupItem; index: number }): number =>
-      item.target === "discarded" ? 0 : item.target === "run" ? (facts[index]?.kind === "apply" || (facts[index]?.planRunId ?? null) !== null ? 1 : 2) : 3;
-    order.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
+    const order = cleanupOrder(plan.items, facts);
     /** Plan runs an apply run uses that was selected and stays. */
     const plansOfKeptApplies = new Set<string>();
     /** U-13: runs whose discarded-files folder this cleanup moved aside and could not remove entirely. */

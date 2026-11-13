@@ -190,8 +190,9 @@ describe("U-13 (UXM-1), the CLI over the contract's answer", () => {
     assert.ok(lines.some((line) => line.startsWith(`- run ${done.ids.applyRunId}: `)), done.text);
   });
 
-  // U-86: the apply run is in the --delete-discarded group (its folder is selected), with its warning
-  // line, and the command that removes everything names --delete-discarded.
+  // U-86: the apply run is in a group that needs --delete-discarded (R-76 M-1: with
+  // --include-not-reverted, the group of both), with its warning line, and the command that removes
+  // everything names --delete-discarded.
   test("the preview says beforehand that the apply's records stay without --delete-discarded", async () => {
     const { base, applyRunId } = await appliedNotReverted();
     const text = (await cleanup(base, SELECT, false)).text;

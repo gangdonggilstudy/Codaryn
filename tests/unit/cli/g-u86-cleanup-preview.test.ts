@@ -5,8 +5,9 @@
  * on one line; its next steps repeated them as long sentences; with nothing selected it said there
  * was nothing to clean up; and the summary did not count the discarded files left without records.
  * Now the preview groups the items by the store's fate for each (CleanupPlan's CLEANUP_ITEM_FATES):
- * --confirm alone, --include-not-reverted besides, --delete-discarded besides (an item that needs
- * both is here), kept with an apply run; one line per warning under its item, which names its kind;
+ * --confirm alone, --include-not-reverted besides, --delete-discarded besides, both flags besides
+ * (R-76 M-1), kept with an apply run, and last what cannot be removed (R-76 L-1); one line per
+ * warning under its item, which names its kind;
  * then the two commands (--confirm alone; every flag needed), and with nothing selected two example
  * commands. After a confirmation, and in `cleanup --json`, nothing changes.
  * A stand-in catalog shows which text each line is. Made-up outputs; no store is read.
@@ -43,7 +44,7 @@ const item = (target: "run" | "discarded" | "leftover", name: string, files: num
 const warning = (code: string): string => `  ${f(`cleanup.warning.${code}` as MessageId)}`;
 
 describe("U-86: the preview groups the items by what must be given for each to go", () => {
-  test("every group, a warning per line under its item, the blocked run, then both commands", () => {
+  test("every group, a warning per line under its item, the blocked run under its own line, then both commands", () => {
     assert.equal(
       render(preview(PLAN_ALL_FATES)),
       text([
@@ -61,6 +62,7 @@ describe("U-86: the preview groups the items by what must be given for each to g
         warning("discarded_left"),
         item("discarded", RUN_B, 2, 200),
         warning("people_files"),
+        f("cleanup.group.blocked", { count: 1 }),
         `- ${f("cleanup.target.run")} ${RUN_D}: ${f("cleanup.blocked.lock_held")}`,
         "",
         `${f("cleanup.command.confirm")} --confirm ${SHORT}`,
@@ -69,17 +71,20 @@ describe("U-86: the preview groups the items by what must be given for each to g
     );
   });
 
-  test("an item that needs both flags is in the --delete-discarded group; its warnings say it was not reverted", () => {
+  // R-76 M-1 (PM): the item that needs both flags has a group of its own; the folder, which
+  // --delete-discarded alone removes, stays in that flag's group.
+  test("an item that needs both flags is in the group of both; its warnings say it was not reverted", () => {
     const shown = render(preview(PLAN_BOTH));
     assert.ok(
       shown.includes(
         text([
-          f("cleanup.group.delete_discarded", { count: 2, files: 3, bytes: 30 }),
+          f("cleanup.group.delete_discarded", { count: 1, files: 1, bytes: 10 }),
+          item("discarded", RUN_A, 1, 10),
+          warning("people_files"),
+          f("cleanup.group.both", { count: 1, files: 2, bytes: 20 }),
           item("run", RUN_A, 2, 20),
           warning("not_reverted"),
           warning("discarded_left"),
-          item("discarded", RUN_A, 1, 10),
-          warning("people_files"),
           "",
           `${f("cleanup.command.all")} --confirm ${SHORT} --include-not-reverted --delete-discarded`,
         ]),

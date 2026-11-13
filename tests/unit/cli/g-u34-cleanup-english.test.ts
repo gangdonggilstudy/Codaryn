@@ -55,7 +55,8 @@ const summaryLines = [
 
 describe("U-34: the English cleanup output is as it was", () => {
   // U-86 (PM, plan B): the preview is grouped by what must be given for each item to go. These three
-  // cases changed with it (approved); the lines after a confirmation and the JSON did not.
+  // cases changed with it (approved); the lines after a confirmation and the JSON did not. R-76 L-1
+  // (PM): in the two with a blocked item, the blocked group's line stands above it.
   test("a preview with run records, a discarded-files folder, a leftover and a blocked run", () => {
     assert.equal(
       renderCleanup(preview(PLAN_ALL_FATES), english),
@@ -73,6 +74,7 @@ describe("U-34: the English cleanup output is as it was", () => {
         `  ${en("cleanup.warning.discarded_left")}`,
         `- discarded ${RUN_B}: 2 file(s), 200 bytes`,
         `  ${en("cleanup.warning.people_files")}`,
+        en("cleanup.group.blocked", { count: 1 }),
         `- run ${RUN_D}: ${en("cleanup.blocked.lock_held")}`,
         "",
         `${en("cleanup.command.confirm")} --confirm ${SHORT}`,
@@ -89,6 +91,7 @@ describe("U-34: the English cleanup output is as it was", () => {
         en("cleanup.group.delete_discarded", { count: 1, files: 2, bytes: 200 }),
         `- discarded ${RUN_B}: 2 file(s), 200 bytes`,
         `  ${en("cleanup.warning.people_files")}`,
+        en("cleanup.group.blocked", { count: 1 }),
         `- discarded ${RUN_D}: ${en("cleanup.blocked.no_result")}`,
         "",
         `${en("cleanup.command.all")} --confirm ${SHORT} --delete-discarded`,

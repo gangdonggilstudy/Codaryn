@@ -739,6 +739,10 @@ const fetched = existsSync(dictionaries) ? readdirSync(dictionaries) : [];
 process.stdout.write(`${fetched.length === 0 ? "ok" : "FAIL"} noDictionaryDownload: ${JSON.stringify(fetched)}\n`);
 if (fetched.length > 0) failed += 1;
 if (!junction) process.stdout.write("NOTE the junction could not be made here; the link row was not checked\n");
+// U-178: a step whose run gave no result id is told with why (not a check: its own checks failed above).
+for (const step of Array.isArray(seen.stepFailures) ? seen.stepFailures : []) {
+  process.stdout.write(`NOTE no result for ${step?.step}: ${JSON.stringify(step).slice(0, 600)}\n`);
+}
 if (seen.error !== undefined) {
   failed += 1;
   process.stdout.write(`FAIL error: ${JSON.stringify(seen.error)}\n`);

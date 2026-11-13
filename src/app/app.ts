@@ -59,7 +59,7 @@ import { runModels } from "../cli/models.js";
 import { runApply, runPlan, runReview } from "../cli/plan-commands.js";
 import type { PlanCommandEnvironment } from "../cli/plan-commands.js";
 import type { ModelsEnvironment } from "../cli/models.js";
-import { API_MODEL_LISTERS, anthropicModelLister } from "../cli/provider.js";
+import { API_MODEL_LISTERS, anthropicModelLister } from "./provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
 import { parseArgs } from "../cli/args.js";

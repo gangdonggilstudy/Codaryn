@@ -1,28 +1,8 @@
 /**
- * The one place where the CLI gets the API provider implementations (E2, Y-1, SP-6).
- * - The factories: `run.ts` calls one only after the key, the model, the output cap, the address
- *   and the limits of that provider are resolved, so a missing setting is still rejected before
- *   anything is sent.
- * - The listers: `codaryn models` calls one only after that provider's key and address are
- *   resolved with the same rules as `run` (`resolveListSettings`).
+ * U-307 (the CLI migration's C-6b; na-core's list): the API providers' factories and model listers
+ * moved word for word to src/app/provider.ts, where the app layer's run life makes a run's provider
+ * (run-life.ts) and its model commands list models (app.ts), so the app takes nothing of src/cli for
+ * them. The CLI's main.ts keeps this path.
  */
 
-import type { ApiProviderName, CreateAnthropicProvider, CreateApiProvider, ListAnthropicModels, ListModels } from "../contracts/index.js";
-import { createAnthropicProvider, listAnthropicModels } from "../model/anthropic/index.js";
-import { createOpenAIProvider, listOpenAIModels } from "../model/openai/index.js";
-
-export const anthropicProviderFactory: CreateAnthropicProvider = createAnthropicProvider;
-
-export const anthropicModelLister: ListAnthropicModels = listAnthropicModels;
-
-/** SP-6: each API provider's factory (the OpenAI Responses API adapter for openai). */
-export const API_PROVIDER_FACTORIES: { readonly [P in ApiProviderName]: CreateApiProvider } = {
-  anthropic: anthropicProviderFactory,
-  openai: createOpenAIProvider,
-};
-
-/** SP-6: each API provider's model lister. */
-export const API_MODEL_LISTERS: { readonly [P in ApiProviderName]: ListModels } = {
-  anthropic: anthropicModelLister,
-  openai: listOpenAIModels,
-};
+export { API_MODEL_LISTERS, API_PROVIDER_FACTORIES, anthropicModelLister, anthropicProviderFactory } from "../app/provider.js";

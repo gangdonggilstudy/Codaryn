@@ -20,8 +20,12 @@
  * - the HTTP 404 hint (modelNotFound beside the result) and a cancel through the app's onSignal hook,
  *   which is attached when the cancel source is made (never during the pre-run checks) and detached at
  *   the end.
- * Reproduced first (36d83f7, todo until the app ran its own life). Temporary folders, scripted models
- * and a fake provider, fake values only; nothing is sent.
+ * Reproduced first (36d83f7, todo until the app ran its own life). U-307 (ne-verify R-116 I-1): since
+ * U-296 the counts, the handle's facts and the notices on both sides come from the same code, so those
+ * comparisons are expected values now (each case's counts, the config's language and location, the
+ * hint, the progress lines as drawn); a refusal is still held against runCli's JSON line, which the CLI
+ * prints from the life's own output while the app hands the same error through fromCliError and
+ * runErrorOutput. Temporary folders, scripted models and a fake provider, fake values only; nothing is sent.
  */
 
 import assert from "node:assert/strict";
@@ -29,7 +33,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { createCodarynApp } from "../../../src/app/index.js";
+import { MODEL_NOT_FOUND_HINT, createCodarynApp } from "../../../src/app/index.js";
 import type { AppEnvironment, AppError, AppHooks, RunHandle, RunObserver, StartOutcome, StartRunRequest } from "../../../src/app/index.js";
 import { appError, fromCliError, runErrorOutput } from "../../../src/app/errors.js";
 import { findDefaultConfigLocation } from "../../../src/app/input/config-file.js";
@@ -40,7 +44,7 @@ import { assembleRun } from "../../../src/app/assembly.js";
 import { createHumanOutput } from "../../../src/cli/human/index.js";
 import { PROGRESS_PREFIX } from "../../../src/cli/progress.js";
 import { runCli } from "../../../src/cli/run.js";
-import type { CliEnvironment, CliRunOutcome } from "../../../src/cli/run.js";
+import type { CliEnvironment } from "../../../src/cli/run.js";
 import {
   ALL_CLI_ERROR_HINTS,
   ANTHROPIC_API_KEY_ENV,
@@ -49,7 +53,7 @@ import {
   DETAILED_CLI_ERROR_HINTS,
   PRIVACY_TOKEN_PATTERN_SOURCE,
 } from "../../../src/contracts/index.js";
-import type { CliErrorCode, CliErrorOutput, EngineResult, InputDiagnostic, JournalEvent, JournalRecord, MaskedText, MessageLanguage, ModelProvider } from "../../../src/contracts/index.js";
+import type { CliErrorCode, InputDiagnostic, JournalEvent, JournalRecord, MaskedText, MessageLanguage, ModelProvider } from "../../../src/contracts/index.js";
 import { createMessageCatalog } from "../../../src/i18n/index.js";
 import { FAKE_SECRET, NOTES_RULE, SECRET_ENV, WRITE_NOTES, appEnvironment, readJournal, setupRun, taskRequest } from "./support.js";
 
@@ -146,17 +150,6 @@ async function appRun(base: string, request: StartRunRequest, env: Record<string
 const ENV = { [SECRET_ENV]: FAKE_SECRET };
 const taskArgv = (base: string, ...more: string[]) => ["run", "--task", path.join(base, "task.json"), ...more];
 
-/** The end summary's counts the CLI's notes give (RunSummaryContext), without what is not a count of the records. */
-function countsOf(cli: CliRunOutcome): Record<string, unknown> {
-  const summary = cli.info?.summary as unknown as Record<string, unknown>;
-  const counts: Record<string, unknown> = {};
-  for (const key of ["deniedToolCalls", "deniedCommandCalls", "failedToolCalls", "confirmationDenied", "policyNarrowings", "deniedNotPlanned", "deniedNotWritable", "deniedUnreadable", "hiddenGroups"]) {
-    if (summary[key] === undefined) continue;
-    counts[key] = key === "confirmationDenied" ? (({ couldAsk: _couldAsk, ...rest }) => rest)(summary[key] as Record<string, unknown>) : summary[key];
-  }
-  return counts;
-}
-
 const DENIALS_TASK = { policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, writablePaths: ["NOTES.md"] } };
 const DENIALS_STEPS = [
   { toolCalls: [{ name: "run_command", args: { executable: "node", args: ["--version"] } }] },
@@ -190,39 +183,59 @@ const CLOSED_TASK = {
 };
 const CLOSED_STEPS = [{ toolCalls: [{ name: "write_file", args: { path: "other.md", expectedHash: null, change: { kind: "replace_all", content: "x\n" } } }] }, WRITE_NOTES, { text: "done" }];
 
-describe("U-293: the app layer's own run life, against the CLI's", () => {
-  for (const [what, files, task, steps] of [
-    ["denials (command, outside, not writable) and a failed call", {}, DENIALS_TASK, DENIALS_STEPS],
-    ["a read under the unreadable paths and a table that hid a small group", { "private/people.csv": `${PEOPLE_CSV}\n` }, PRIVATE_TASK, PRIVATE_STEPS],
-    ["registered values inside closed words", { "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS],
+/** The progress lines of the closed-word run, tokens named by first appearance. */
+const EXPECTED_LINES = {
+  en: [
+    "run started — provider scripted",
+    "protected material check — unchanged (run_start)",
+    "turn 1",
+    "write file — denied (path/path_<TOKEN1>)",
+    "turn 2",
+    "write file — allowed (write_file)",
+    "created NOTES.md",
+    "turn 3",
+    "check #1 — passed (pass)",
+    "finished — done (verified)",
+  ],
+  ko: [
+    "실행 시작 — 모델 제공자 scripted",
+    "보호 대상 확인 — 바뀌지 않음 (run_start)",
+    "1턴",
+    "파일 쓰기 — 거부 (path/path_<TOKEN1>)",
+    "2턴",
+    "파일 쓰기 — 허용 (write_file)",
+    "파일 만듦 NOTES.md",
+    "3턴",
+    "검증 1번 — 통과 (pass)",
+    "끝 — 완료 (verified)",
+  ],
+} as const;
+
+describe("U-293: the app layer's own run life, and what an adapter that draws its own text gets from it", () => {
+  for (const [what, files, task, steps, expected] of [
+    ["denials (command, outside, not writable) and a failed call", {}, DENIALS_TASK, DENIALS_STEPS, { deniedToolCalls: 3, deniedCommandCalls: 1, failedToolCalls: 1, deniedNotWritable: 1 }],
+    ["a read under the unreadable paths and a table that hid a small group", { "private/people.csv": `${PEOPLE_CSV}\n` }, PRIVATE_TASK, PRIVATE_STEPS, { deniedToolCalls: 1, deniedCommandCalls: 0, failedToolCalls: 0, deniedUnreadable: 1, hiddenGroups: { results: 1, minGroupSize: 5 } }],
+    ["registered values inside closed words", { "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS, { deniedToolCalls: 1, deniedCommandCalls: 0, failedToolCalls: 0, deniedNotWritable: 1 }],
   ] as const) {
-    test(`tally: the end summary's counts equal runCli's (${what})`, async () => {
+    test(`tally: the end summary's counts beside the result, counted from the records as stored (${what})`, async () => {
       const env = task === CLOSED_TASK ? CLOSED_ENV : ENV;
-      const bases = await pair(files, task, steps);
-      const cli = await runCli(cliIo(bases.cli, taskArgv(bases.cli), env, "en").io);
-      assert.equal(cli.output.kind, "run", JSON.stringify(cli.output));
-      const handle = started(await appRun(bases.app, taskRequest(bases.app), env));
-      const done = await handle.done;
+      const base = await setupRun(files, task, steps);
+      const done = await started(await appRun(base, taskRequest(base), env)).done;
       assert.ok(done.ok, JSON.stringify(done));
-      const tally = done.tally;
-      assert.ok(tally !== undefined, "the app gives the counts beside the result");
-      assert.deepEqual({ ...tally }, countsOf(cli));
-      assert.ok(tally.deniedToolCalls + tally.failedToolCalls > 0, "the case counts something");
+      assert.deepEqual(done.tally, expected);
     });
   }
 
   for (const language of ["en", "ko"] as const) {
-    test(`progress lines: the stored records drawn and masked with handle.mask are runCli's lines, registered values inside closed words too (${language})`, async () => {
-      const bases = await pair({ "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS);
-      const cli = cliIo(bases.cli, taskArgv(bases.cli), CLOSED_ENV, language);
-      assert.equal((await runCli(cli.io)).output.kind, "run");
+    test(`progress lines: the stored records drawn with the CLI's renderer and masked with handle.mask, registered values inside closed words too (${language})`, async () => {
+      const base = await setupRun({ "README.md": "# Readme\n" }, CLOSED_TASK, CLOSED_STEPS);
       const drawn = drawing(language);
-      const handle = started(await appRun(bases.app, taskRequest(bases.app), CLOSED_ENV, { ...drawn.observer, attach: drawn.attach }));
+      const handle = started(await appRun(base, taskRequest(base), CLOSED_ENV, { ...drawn.observer, attach: drawn.attach }));
       assert.ok((await handle.done).ok);
-      assert.ok(drawn.lines.length >= 6, drawn.lines.join(""));
       assert.equal(drawn.lines.includes("<NOT MASKED>"), false, "the handle's mask was there for every line");
-      // The CLI writes after the engine what is not drawn from a record (the writablePaths hint, the end summary).
-      assert.deepEqual(tokensNamed(drawn.lines), tokensNamed(cli.lines.slice(0, drawn.lines.length)));
+      // The lines codaryn run draws for this run (nc-human's T-3, pinned for the CLI in u291): the denial's
+      // code with the registered value masked in it, and one protection check line before the turns.
+      assert.deepEqual(tokensNamed(drawn.lines), EXPECTED_LINES[language].map((line) => `codaryn: ${line}\n`));
       const text = drawn.lines.join("");
       assert.ok(text.includes("path_[[CODARYN_SECRET:"), "the denial line keeps its code with the value masked (T-3)");
       assert.equal(text.includes("not_writable") || text.includes("before_verify"), false, "no registered value is shown");
@@ -241,21 +254,17 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     assert.deepEqual(drawn.order, expected);
   });
 
-  test("the handle: the config's language and the default config location as runCli's notes have them, and the run's mask", async () => {
+  test("the handle: the config's language and the default config location shown, known before the first event, and the run's mask", async () => {
     const appData = (base: string) => path.join(base, "appdata");
     const env = (base: string): Record<string, string> => ({ ...ENV, APPDATA: appData(base), XDG_CONFIG_HOME: appData(base) });
-    const bases = await pair({}, {}, [WRITE_NOTES, { text: "done" }], async (base) => {
-      const location = findDefaultConfigLocation(process.platform, env(base), null);
-      assert.ok(location !== null);
-      await mkdir(path.dirname(location.path), { recursive: true });
-      await writeFile(location.path, JSON.stringify({ schemaVersion: 1, language: "ko" }), "utf8");
-    });
-    const cli = await runCli(cliIo(bases.cli, taskArgv(bases.cli), env(bases.cli), "ko", { defaultConfig: findDefaultConfigLocation(process.platform, env(bases.cli), null) }).io);
-    assert.equal(cli.output.kind, "run", JSON.stringify(cli.output));
-    const handle = started(await appRun(bases.app, taskRequest(bases.app), env(bases.app)));
+    const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
+    const location = findDefaultConfigLocation(process.platform, env(base), null);
+    assert.ok(location !== null);
+    await mkdir(path.dirname(location.path), { recursive: true });
+    await writeFile(location.path, JSON.stringify({ schemaVersion: 1, language: "ko" }), "utf8");
+    const handle = started(await appRun(base, taskRequest(base), env(base)));
     const facts = handle;
-    assert.deepEqual([facts.configLanguage, facts.defaultConfig], [cli.info?.configLanguage, cli.info?.summary.configDefault]);
-    assert.deepEqual([facts.configLanguage, typeof facts.defaultConfig], ["ko", "string"]);
+    assert.deepEqual([facts.configLanguage, facts.defaultConfig], ["ko", location.display], "the config's language, the location's fixed display (N-1, N-14)");
     const masked = facts.mask?.(`token: ${FAKE_SECRET}`) ?? null;
     assert.ok(masked !== null && !masked.includes(FAKE_SECRET) && new RegExp(PRIVACY_TOKEN_PATTERN_SOURCE).test(masked), String(masked));
     assert.equal(facts.mask?.("nothing to hide"), "nothing to hide");
@@ -263,14 +272,15 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
   });
 
   const lockOf = (base: string) => writeFile(path.join(base, "work", ".codaryn", "lock.json"), JSON.stringify({ pid: process.pid, runId: "20200101T000000Z-0000beef", startedAt: "2020-01-01T00:00:00.000Z" }), "utf8");
-  for (const [what, task, more, withConfig] of [
-    ["a script file that is missing", { model: { provider: "scripted", scriptPath: "./no-such-script.json" } }, async () => {}, true],
-    ["a script file with a JSON syntax error", { model: { provider: "scripted", scriptPath: "./bad-script.json" } }, async (base: string) => writeFile(path.join(base, "bad-script.json"), '{ "schemaVersion": 1, "steps": [', "utf8"), true],
-    ["a script step with an unknown field", { model: { provider: "scripted", scriptPath: "./odd-script.json" } }, async (base: string) => writeFile(path.join(base, "odd-script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "x", unknownField: 1 }] }), "utf8"), true],
-    ["a workspace another live process holds", {}, async (base: string) => (await mkdir(path.join(base, "work", ".codaryn"), { recursive: true }), lockOf(base)), true],
-    ["a task file with a JSON syntax error", {}, async (base: string) => writeFile(path.join(base, "task.json"), '{ "schemaVersion": 1, "id": ', "utf8"), true],
+  for (const [what, task, more, withConfig, language] of [
+    ["a script file that is missing", { model: { provider: "scripted", scriptPath: "./no-such-script.json" } }, async () => {}, true, "ko"],
+    ["a script file with a JSON syntax error", { model: { provider: "scripted", scriptPath: "./bad-script.json" } }, async (base: string) => writeFile(path.join(base, "bad-script.json"), '{ "schemaVersion": 1, "steps": [', "utf8"), true, "ko"],
+    ["a script step with an unknown field", { model: { provider: "scripted", scriptPath: "./odd-script.json" } }, async (base: string) => writeFile(path.join(base, "odd-script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "x", unknownField: 1 }] }), "utf8"), true, "ko"],
+    ["a workspace another live process holds", {}, async (base: string) => (await mkdir(path.join(base, "work", ".codaryn"), { recursive: true }), lockOf(base)), true, "ko"],
+    // The task file is read before the config, so its refusal comes with no language.
+    ["a task file with a JSON syntax error", {}, async (base: string) => writeFile(path.join(base, "task.json"), '{ "schemaVersion": 1, "id": ', "utf8"), true, undefined],
   ] as const) {
-    test(`a refusal: the app's error is runCli's JSON line (runErrorOutput) and gives the config's language (${what})`, async () => {
+    test(`a refusal: the app's error prints as runCli's JSON line (runErrorOutput), the config's language beside it (${what})`, async () => {
       const bases = await pair({}, task, [{ text: "done" }], async (base) => {
         await more(base);
         await writeFile(path.join(base, "ko-config.json"), JSON.stringify({ schemaVersion: 1, language: "ko" }), "utf8");
@@ -281,7 +291,7 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
       const outcome = await appRun(bases.app, taskRequest(bases.app, { configPath: withConfig ? path.join(bases.app, "ko-config.json") : null }), ENV);
       assert.equal(outcome.ok, false, JSON.stringify(outcome));
       const failure = outcome as { error: AppError; configLanguage?: MessageLanguage };
-      assert.equal(failure.configLanguage ?? null, cli.info?.configLanguage, "the config's language beside the refusal (absent when the config gave none)");
+      assert.equal(failure.configLanguage, language, "the config's language beside the refusal (absent when the config was not read)");
       const printed = runErrorOutput(failure.error);
       const at = (text: string, base: string) => text.split(base).join("<BASE>").split(base.split("\\").join("\\\\")).join("<BASE>");
       assert.equal(at(JSON.stringify(printed), bases.app), at(JSON.stringify(cli.output), bases.cli));
@@ -311,17 +321,16 @@ describe("U-293: the app layer's own run life, against the CLI's", () => {
     assert.ok(checked > 100, String(checked));
   });
 
-  test("modelNotFound: a request answered with HTTP 404 gives the hint's notice as runCli does, and modelNotFound beside the result", async () => {
+  test("modelNotFound: a request answered with HTTP 404 ends with the hint's notice, and modelNotFound beside the result", async () => {
     const task = { model: { provider: "anthropic", model: "fake-model-gone", maxOutputTokens: 100 }, limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: 1000, maxDurationMs: 60_000 } };
     const provider: ModelProvider = { name: "anthropic", complete: async () => ({ ok: false, kind: "api_error", message: "HTTP 404 not_found_error", httpStatus: 404 }) };
     const env = { ...ENV, [ANTHROPIC_API_KEY_ENV]: FAKE_KEY };
-    const bases = await pair({}, task, []);
-    const cli = await runCli(cliIo(bases.cli, taskArgv(bases.cli), env, "en", { createAnthropicProvider: () => provider }).io);
-    assert.equal(cli.output.kind, "run");
-    const handle = started(await appRun(bases.app, taskRequest(bases.app), env, undefined, { createAnthropicProvider: () => provider }));
+    const base = await setupRun({}, task, []);
+    const handle = started(await appRun(base, taskRequest(base), env, undefined, { createAnthropicProvider: () => provider }));
     const done = await handle.done;
     assert.ok(done.ok, JSON.stringify(done));
-    assert.deepEqual(done.result.notices, (cli.output as EngineResult).notices);
+    assert.deepEqual([done.result.status, done.result.reason], ["failed", "model_error"]);
+    assert.equal(done.result.notices.at(-1), MODEL_NOT_FOUND_HINT, "the hint's notice, in English, last");
     assert.equal(done.modelNotFound, true);
     const scripted = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const plain = await started(await appRun(scripted, taskRequest(scripted), ENV)).done;

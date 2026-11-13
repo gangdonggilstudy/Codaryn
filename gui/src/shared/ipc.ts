@@ -1571,6 +1571,11 @@ export type RunListItem =
       /** U-61 (U-16): for a plan run an apply claimed, what became of that apply; null otherwise. */
       readonly planApply?: PlanApplyView | null;
       /**
+       * U-244 (the CLI's runs.apply_of, runs.carried_plan): the plan run this run applied (an apply run) or
+       * carried out (a run that carried out a changes plan); null or absent for any other run.
+       */
+      readonly planRunId?: string | null;
+      /**
        * R21b-L-1: the task form the run was started with, when this app started it (the main process
        * remembers it). Null: unknown (started elsewhere), so a plan of it is shown but not applied here.
        */
@@ -1618,7 +1623,9 @@ export function toRunsReply(value: unknown): RunsReply {
     if (!(changes === null || count(changes)) || reverted === undefined || typeof revertRecordDamaged !== "boolean") return fail;
     const planApply = planApplyOf(run["planApply"]);
     if (planApply === "bad") return fail;
-    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply });
+    const planRunId = run["planRunId"] ?? null;
+    if (!(planRunId === null || isRunId(planRunId)) || planRunId === run["runId"]) return fail;
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply, planRunId });
   }
   return { ok: true, runs: items, omitted };
 }

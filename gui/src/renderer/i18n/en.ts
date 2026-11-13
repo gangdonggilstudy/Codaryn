@@ -592,6 +592,8 @@ export const EN: { readonly [K in TextId]: string } = {
   "runs.planApply.applying": "plan being applied, or its apply stopped (apply run {runId}, no result yet)",
   "runs.planApply.reverted": "plan applied, then reverted (apply run {runId})",
   "runs.planApply.record_missing": "no readable records of the apply run {runId} (removed, or cannot be checked)",
+  "runs.applyOf": "applies the plan of run {runId}",
+  "runs.carriedPlan": "carries out the plan of run {runId}",
   "runs.planCarried.applied": "plan carried out by run {runId}",
   "runs.planCarried.unfinished": "plan carried out by run {runId}, which ended as {reason}",
   "runs.planCarried.applying": "plan being carried out by run {runId}, or that run stopped (no result yet)",

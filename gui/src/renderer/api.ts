@@ -467,6 +467,7 @@ export function asRuns(value: unknown): RunsReply {
         revertRecordDamaged: run["revertRecordDamaged"] === true,
         recordsChanged: run["recordsChanged"] === true,
         planApply: asPlanApply(run["planApply"]),
+        planRunId: str(run["planRunId"]) && RUN_ID.test(run["planRunId"]) ? run["planRunId"] : null,
         form: asForm(run["form"]),
       },
     ];

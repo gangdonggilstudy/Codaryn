@@ -81,6 +81,8 @@ export function runsValue(outcome: unknown, shown: Shown, planApplyOf?: PlanAppl
       // UXM-14, DR-38: a records-changed mark (absent: false).
       recordsChanged: entry["recordsChanged"] === true,
       planApply: planApplyOf === undefined ? null : carriedMark(planApplyValue(planApplyOf, entry, entries), entry, entries),
+      // U-244 (U-139, U-198): the plan run an apply run applied, or a run carried out (RunListEntry.planRunId).
+      planRunId: typeof entry["planRunId"] === "string" && RUN_ID.test(entry["planRunId"]) ? entry["planRunId"] : null,
     });
   }
   return { ok: true, runs, omitted: count(output["omitted"]) ?? 0 };

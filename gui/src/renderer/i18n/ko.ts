@@ -594,6 +594,8 @@ export const KO = {
   "runs.planApply.applying": "계획 적용 중이거나 적용이 멈춤(적용 실행 {runId}, 결과 없음)",
   "runs.planApply.reverted": "계획을 적용했다가 되돌림(적용 실행 {runId})",
   "runs.planApply.record_missing": "적용 실행 {runId}의 기록 없음(지웠거나 확인할 수 없음)",
+  "runs.applyOf": "실행 {runId}의 계획 적용",
+  "runs.carriedPlan": "실행 {runId}의 계획 수행",
   "runs.planCarried.applied": "계획 수행됨(실행 {runId})",
   "runs.planCarried.unfinished": "계획 수행됨(실행 {runId}, 끝남: {reason})",
   "runs.planCarried.applying": "계획 수행 중이거나 그 실행이 멈춤(실행 {runId}, 결과 없음)",

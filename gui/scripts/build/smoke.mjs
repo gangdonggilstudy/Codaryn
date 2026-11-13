@@ -836,7 +836,8 @@ const expected = [
   // clean and applied after the run plan's dialog. The run that carries it out writes the planned file,
   // is refused the one file the plan does not name, and its result says whose plan and how many writes
   // were refused; with no verifier it ends needs-input (no_verifier), as any run that changed a file does.
-  // U-221's words: the plan screen and the plan run's row say the plan was carried out by that run. A token taken before is refused afterwards (already applied); the plan screen then
+  // U-221's words: the plan screen and the plan run's row say the plan was carried out by that run.
+  // U-244: the carrying run's own row names the plan run (runs.carried_plan), apply rows theirs (runs.apply_of). A token taken before is refused afterwards (already applied); the plan screen then
   // says which run applied it.
   [
     "runPlanApply",
@@ -859,6 +860,8 @@ const expected = [
         appliedByCarry: true,
         appliedCarried: "true",
         rowCarried: true,
+        carryRowNamesPlan: true,
+        applyRowsNamePlans: true,
         dialogs: ["applyRun.message", "applyRun.message"],
       }),
   ],

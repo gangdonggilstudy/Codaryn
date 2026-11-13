@@ -1389,6 +1389,10 @@ startGui({
         const row = (await js(
           `(() => { const mark = document.querySelector('[data-plan="${planRunId}"]')?.parentElement?.querySelector('.plan-apply'); return mark ? { carried: mark.getAttribute('data-plan-carried'), text: mark.textContent } : null; })()`,
         )) as { carried: string | null; text: string | null } | null;
+        // U-244: the carrying run's own row names the plan run it carried out; apply rows name theirs.
+        const planOf = (await js(
+          `(() => { const carry = document.querySelector('[data-run="${String(carryId)}"] [data-plan-of-kind="carried"]'); return { carried: carry ? carry.getAttribute('data-plan-of') : null, applies: document.querySelectorAll('[data-plan-of-kind="apply"]').length }; })()`,
+        )) as { carried: string | null; applies: number };
         await js(`document.querySelector('[data-plan="${planRunId}"]')?.click(); true`);
         const after = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
         const appliedBy = await js("document.getElementById('plan-applied')?.textContent ?? null");
@@ -1411,6 +1415,8 @@ startGui({
           appliedByCarry: typeof appliedBy === "string" && isRunIdValue(carryId) && appliedBy.includes(carryId),
           appliedCarried,
           rowCarried: row !== null && row.carried === "true" && typeof row.text === "string" && isRunIdValue(carryId) && row.text.includes(carryId),
+          carryRowNamesPlan: planOf.carried === planRunId,
+          applyRowsNamePlans: planOf.applies >= 1,
           dialogs: dialogs.slice(asked),
         };
       })();

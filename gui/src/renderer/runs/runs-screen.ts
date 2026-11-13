@@ -80,6 +80,12 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   ];
   item.setAttribute("data-status", run.status ?? "none");
   item.append(el("span", facts.filter((fact) => fact !== "").join(" · "), { class: "run-facts" }), el("span", run.taskId, { class: "task-id" }), el("code", run.runId, { class: "run-id", lang: "en" }), copyControl(t, t.format("copy.runId"), () => copy(run.runId), { "data-copy": run.runId }));
+  // U-244 (U-139, U-198): an apply run names the plan run it applied, a run that carried out a changes plan
+  // the plan run it carried out, right after its facts, in the CLI's runs words.
+  if (run.planRunId != null) {
+    const of = run.kind === "apply" ? "apply" : "carried";
+    item.append(el("span", t.format(of === "apply" ? "runs.applyOf" : "runs.carriedPlan", { runId: run.planRunId }), { class: "plan-of", "data-plan-of": run.planRunId, "data-plan-of-kind": of }));
+  }
   if (run.reverted !== null) item.append(el("span", t.format(run.reverted.status === "partial" ? "runs.revertedPartial" : "runs.reverted", { time: localDateTime(run.reverted.at) }), { class: "reverted" }));
   if (run.revertRecordDamaged) item.append(el("span", t.format("runs.revertDamaged"), { class: "damaged" }));
   // UXM-14, DR-38: as the CLI's runs says it (U-157, U-163: a short mark; its explanation is one line under the list).

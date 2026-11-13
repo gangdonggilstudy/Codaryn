@@ -45,7 +45,7 @@ async function workspace(): Promise<string> {
 }
 
 /** What the apply does between its start and its verification round: mark the plan, discard the file. */
-async function applyActions(root: string, discardedRoot: string, mark: () => Promise<"marked" | "already_applied">, append: (event: ApplyJournalEvent) => Promise<void>): Promise<void> {
+async function applyActions(root: string, discardedRoot: string, mark: () => Promise<"marked" | "already_applied">, append: (event: ApplyJournalEvent) => Promise<unknown>): Promise<void> {
   assert.equal(await mark(), "marked");
   await rename(join(root, "c.log"), join(discardedRoot, discardedStoredName(0)));
   await append(DISCARDED);

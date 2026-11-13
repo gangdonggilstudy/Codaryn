@@ -127,7 +127,7 @@ describe("U-105: preflightPlan with tools' executor and the real gate", () => {
       privacy,
       verifiers: new FakeVerifiers(),
       inventory,
-      journal: { append: async (event) => void records.push(event), close: async () => undefined },
+      journal: { append: async (event) => (records.push(event), { seq: records.length, at: "1970-01-01T00:00:00.000Z", runId: "apply-run", ...event }), close: async () => undefined },
       clock: new FakeClock(),
       signal: new AbortController().signal,
       async markApplied() {

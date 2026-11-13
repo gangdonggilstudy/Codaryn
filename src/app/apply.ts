@@ -5,8 +5,8 @@
  *   the approval and the consent travel through `AdapterApply`, never as arguments.
  * - `applyJournalWithEvents`: the apply's events, built in memory from what the engine appends,
  *   as run events are (DR-15). The journal file is never read back.
- *   - `seq` counts every stored entry from 1, as the store numbers the apply's journal, so an event
- *     and its stored line have the same number.
+ *   - `seq` and `at` are the stored entry's own (AC-D3, the CLI migration's C-2, U-262): the journal
+ *     resolves with the entry as it wrote it, so an event and its stored line are the same record.
  *   - `plan_item_started` (R-9 I-4) is stored but not delivered: it is the revert's record of an
  *     action begun, not progress for a person, and ApplyEvent carries ApplyJournalRecord only. Its
  *     number is skipped.
@@ -14,7 +14,7 @@
  *     not delivered; the gap in `seq` shows it.
  */
 
-import type { ApplyJournal, ApplyJournalRecord, Clock, PrivacyGateway } from "../contracts/index.js";
+import type { ApplyJournal, ApplyJournalRecord, PrivacyGateway } from "../contracts/index.js";
 import { maskStrings } from "./events.js";
 import type { ApplyEvent, ApplyObserver, ApplyPlanRequest, TaskForm } from "./types.js";
 
@@ -48,23 +48,15 @@ export function deliverApply(observer: ApplyObserver | undefined, event: ApplyEv
 }
 
 /** Wraps the apply's journal so each stored record is delivered to `observer`, start records left out. */
-export function applyJournalWithEvents(
-  journal: ApplyJournal,
-  runId: string,
-  observer: ApplyObserver | undefined,
-  privacy: PrivacyGateway,
-  clock: Clock,
-): ApplyJournal {
+export function applyJournalWithEvents(journal: ApplyJournal, observer: ApplyObserver | undefined, privacy: PrivacyGateway): ApplyJournal {
   if (observer?.onEvent === undefined) return journal;
-  let seq = 0;
   return {
     async append(entry) {
-      await journal.append(entry);
-      seq += 1;
-      if (entry.type === "plan_item_started") return;
-      const record = { seq, at: new Date(clock.now()).toISOString(), runId, ...entry } as ApplyJournalRecord;
-      const shown = maskStrings(record, privacy);
+      const stored = await journal.append(entry);
+      if (stored.type === "plan_item_started") return stored;
+      const shown = maskStrings(stored as ApplyJournalRecord, privacy);
       if (shown !== null) deliverApply(observer, { kind: "record", record: shown });
+      return stored;
     },
     close: () => journal.close(),
   };

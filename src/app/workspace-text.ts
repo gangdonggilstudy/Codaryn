@@ -77,8 +77,6 @@ import { cleanText, hideKeys } from "../cli/text-safety.js";
 import { createRunId } from "../cli/run-id.js";
 import { compileProtectedPaths } from "../policy/index.js";
 import { acquireLock, inspectLock, releaseLock as storeReleaseLock } from "../store/index.js";
-import { releaseOwnLock, retryLockRelease } from "./lock-retry.js";
-import type { LockRetryOptions } from "./lock-retry.js";
 import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
 import { isWorkspaceDir } from "./workspace-dir.js";
@@ -161,8 +159,6 @@ export type WorkspaceTextStage = "walking" | "checked" | "opened" | "judged" | "
 export interface WorkspaceTextOperations {
   readonly releaseLock?: (options: { readonly workspaceRoot: string; readonly runId: string }) => Promise<boolean>;
   readonly pause?: (stage: WorkspaceTextStage) => Promise<void>;
-  /** U-211: the later tries of a release that threw (their waits, how they ended). */
-  readonly lockRetry?: LockRetryOptions;
 }
 
 type NotOpened = "not_found" | "not_file" | "refused" | "too_large" | "not_text" | "unreadable";
@@ -448,19 +444,13 @@ export async function writeWorkspaceTextIn(
   // V-1 L-1: the store answers false when the lock is not this call's any more; that is not taken back either.
   const release = operations.releaseLock ?? storeReleaseLock;
   let released = false;
-  let threw = false;
   for (let attempt = 0; attempt < 2 && !released; attempt += 1) {
     try {
-      // V-17 H-1: through the queue of this lock, never beside its later tries.
-      released = (await releaseOwnLock({ workspaceRoot: workspace.root, runId: lockId }, release)) === true;
-      threw = false;
+      released = (await release({ workspaceRoot: workspace.root, runId: lockId })) === true;
     } catch {
       released = false;
-      threw = true;
     }
   }
-  // U-211: a release that threw is tried again a few seconds later, for this save's lock only.
-  if (threw) void retryLockRelease({ workspaceRoot: workspace.root, runId: lockId }, { release, ...operations.lockRetry });
   return { ok: true, output: { ...result, lockLeft: !released } };
 }
 

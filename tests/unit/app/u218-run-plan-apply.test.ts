@@ -8,7 +8,7 @@
  *   permission questions to `confirm` (U-108);
  * - the cancel channel (handle.cancel) and the start gate: the handle, with the carrying run's id,
  *   comes before its first event and before its engine starts;
- * - U-193's lockLeft and U-211's later release tries.
+ * - U-193's lockLeft (U-229: no later release try, after Codex V-17b).
  * The approval is recorded as `adapter` (run_started.approval); the result is the carrying run's
  * EngineResult with planRunId and planDigest. A plan of moves applies as before.
  * The scripted model starts each run's script at its first step, so the carrying run's steps are
@@ -176,9 +176,8 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
     assert.equal(process.env["LANG"] === lang, false, "not from this process's environment");
   });
 
-  test("a lock left at the carrying run's end is told and tried again later", { skip: windowsOnly }, async () => {
+  test("a lock left at the carrying run's end is told, and stays", { skip: windowsOnly }, async () => {
     let holder: { readonly closed: Promise<void> } | null = null;
-    let ended: string | null = null;
     let work = "";
     const made = await runPlanMade({
       runApprovedPlan: async (deps: Parameters<typeof engineRunApprovedPlan>[0]) => {
@@ -186,7 +185,6 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
         holder = await holdOpen(path.join(work, ".codaryn", "lock.json"), 1500);
         return result;
       },
-      lockRetry: { delaysMs: [1500, 3000], onEnd: (end: string) => (ended = end) },
     });
     work = path.join(made.base, "work");
     const handle = await started(made.app, made);
@@ -194,9 +192,10 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
     try {
       assert.ok(done.ok, JSON.stringify(done));
       assert.equal(done.lockLeft, true);
-      for (let waited = 0; ended === null && waited < 15_000; waited += 100) await new Promise((resolve) => setTimeout(resolve, 100));
-      assert.equal(ended, "released");
-      assert.equal(await exists(path.join(work, ".codaryn", "lock.json")), false);
+      // No later try (Codex V-17b, PM): once the other process let the file go, the lock still stays.
+      await (holder as { closed: Promise<void> } | null)?.closed;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(await exists(path.join(work, ".codaryn", "lock.json")), true, "the lock is left");
     } finally {
       await (holder as { closed: Promise<void> } | null)?.closed;
       if (await exists(path.join(work, ".codaryn", "lock.json"))) await releaseLock({ workspaceRoot: work, runId: handle.runId });

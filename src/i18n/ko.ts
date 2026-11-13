@@ -31,16 +31,16 @@ export const KO_MESSAGES: MessageTexts = {
   "error.hint.config_missing": "설정 파일이 아직 없습니다(기본 위치에 없음). codaryn init으로 만드세요.",
   // U-228 (nb-i18n이 다듬을 초안).
   "error.hint.plan_kind_differs":
-    "계획을 만든 실행이 쓴 task를 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
+    "계획을 만든 실행과 같은 작업 지정을 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",
   // U-210 (R-110 M-1; nb-i18n이 다듬을 초안).
   "error.hint.unreadable_paths_required":
-    "analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. 개인정보가 든 표의 폴더를 task 파일, 설정 파일, 프로필 가운데 한 곳에 두세요.",
+    "analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. 개인정보가 든 표의 폴더를 task 파일, 설정 파일, 프로필 가운데 한 곳의 policy.unreadablePaths에 넣으세요.",
   "error.hint.unreadable_with_commands":
-    "unreadablePaths가 있으면 명령 규칙도 명령 검증기도 둘 수 없습니다. 명령은 어떤 파일이든 읽을 수 있어, 에이전트에게서 감춘 파일도 읽습니다. policy.commands와 verifiers에서 빼거나 unreadablePaths 없이 실행하세요.",
+    "unreadablePaths가 있으면 명령 규칙도 명령 검증기도 둘 수 없습니다. 명령은 어떤 파일이든 읽을 수 있어, 에이전트에게서 감춘 파일도 읽을 수 있습니다. policy.commands와 verifiers에서 빼거나 unreadablePaths 없이 실행하세요.",
   "error.hint.min_group_size_range":
     "policy.minGroupSize(읽기 제외 표의 집계가 보여 주는 가장 작은 묶음)는 5부터 1000까지의 정수여야 합니다. 그 범위의 값을 두세요. 어느 곳도 낮출 수는 없고 높이기만 합니다.",
   "error.hint.plan_tool_missing":
-    "계획 방식이 \"run\"인 작업 종류는 도구에 propose_changes가, \"apply\"인 작업 종류는 propose_plan이 있어야 합니다. 작업 종류의 도구(task가 도구를 적었다면 그 목록에도)에 그 도구를 더하거나 계획 방식을 빼세요.",
+    "계획 방식이 \"run\"인 작업 종류에는 propose_changes 도구가, \"apply\"인 작업 종류에는 propose_plan 도구가 있어야 합니다. 작업 종류의 도구(task가 도구를 적었다면 그 목록에도)에 그 도구를 더하거나 계획 방식을 빼세요.",
   "error.hint.key_in_goal": "목표 문장에 키 값이 있습니다. 목표에서 빼세요.",
   "error.hint.key_in_task": "--task 옵션으로 준 task 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
   "error.hint.key_in_config": "설정 파일에 키 필드나 키 값이 있습니다. 그 파일에서 빼세요.",
@@ -74,12 +74,12 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.denied_not_writable_hint":
     "그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록에 그 파일이 있어야 합니다.",
   // U-207 (묶음 A; nb-i18n이 다듬을 초안).
-  "summary.denied_unreadable": "읽기 제외 파일이라 거부된 호출: {count}건",
+  "summary.denied_unreadable": "읽기 제외 경로라 거부된 호출: {count}건",
   "summary.denied_unreadable_hint":
-    "그 파일들은 일부러 에이전트가 읽지 못하게 한 것입니다(unreadablePaths). 에이전트는 query_table로 그 표를 집계할 수는 있습니다. 읽게 하려면 그 항목을 정한 곳의 unreadablePaths에서 빼세요.",
+    "그 경로는 일부러 에이전트가 읽지 못하게 했습니다(unreadablePaths). query_table 도구가 있는 작업 종류라면 그 아래의 표를 집계할 수 있습니다. 읽게 하려면 그 항목을 정한 곳의 unreadablePaths에서 빼세요.",
   // U-210 (R-108 L-2; nb-i18n이 다듬을 초안): 묶음 전체, 또는 k칸 미만으로 셈한 값.
   "summary.groups_hidden":
-    "표 결과 {results}건에서 {k}행 미만의 묶음이나 그보다 적은 칸으로 셈한 값을 뺐습니다. 에이전트는 그 묶음도 그 값도 받지 않았고, 뺀 묶음의 개수만 받았습니다.",
+    "{k}행 미만인 묶음이나 그보다 적은 칸으로 셈한 값을 표 결과 {results}건에서 뺐습니다. 에이전트는 그 묶음도 그 값도 받지 않았고, 뺀 묶음의 개수와 어느 값이 비었는지만 받았습니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.confirm_denied.user": "확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",
@@ -110,7 +110,7 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.next_apply": "승인해 적용: codaryn apply {form} --run {runId} --digest <다이제스트>",
   "summary.review_checklist": "확인할 항목 {count}개:",
   // U-207 (P-3; nb-i18n이 다듬을 초안): analyze-private가 더하는 항목(PRIVATE_REVIEW_ITEM).
-  "review.item.no_identifying_values": "결과 표와 보고서에 한 사람을 알아볼 수 있는 값이 없다.",
+  "review.item.no_identifying_values": "결과 표와 보고서에 한 사람을 알아볼 수 있는 값이 없습니다.",
   "summary.next_review": "판정 기록: codaryn review {form} --run {runId} --accept 또는 --reject",
   "summary.apply_actions": "적용한 동작: {total}개 중 {applied}개",
   "summary.apply_plan_run": "계획 실행: {runId}",
@@ -160,9 +160,9 @@ export const KO_MESSAGES: MessageTexts = {
   "progress.tool_rejected": "{tool} — 호출 검사에서 거부 ({code})",
   "progress.tool_failed": "{tool} — 실패 ({code})",
   // U-207 (묶음 A; nb-i18n이 다듬을 초안): 표 집계가 무엇을 물었는지만. 경로·열·값은 없음.
-  "progress.query_table": "표 집계: 묶음 열 {groupColumns}개",
-  "progress.query_table_whole": "표 집계: 표 전체",
-  "progress.query_table_describe": "표 모양 확인: 열과 개수",
+  "progress.query_table": "표 집계 — 묶음 열 {groupColumns}개",
+  "progress.query_table_whole": "표 집계 — 표 전체",
+  "progress.query_table_describe": "표 집계 — 표 모양만(열과 개수)",
   "progress.confirmation_allowed": "권한 확인 — 사람이 이번 호출에만 허용함",
   "progress.confirmation_denied.user": "권한 확인 — 사람이 거부함",
   "progress.confirmation_denied.default": "권한 확인 — 기본값으로 거부함(답이 없었거나, 물을 수 없었거나, 시간 한도에 닿음)",
@@ -434,7 +434,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.config_file.invalid_unlocated": "설정 파일({location})의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
   // U-228 (nb-i18n이 다듬을 초안).
   "doctor.config_file.plan_tool_missing":
-    "설정 파일({location})에 계획 방식의 계획 도구가 없는 작업 종류가 있습니다(\"run\"은 propose_changes, \"apply\"는 propose_plan이 필요합니다). 실행이 거부합니다",
+    "설정 파일({location})에 계획 방식에 맞는 계획 도구가 없는 작업 종류가 있습니다(계획 방식 \"run\"에는 propose_changes 도구, \"apply\"에는 propose_plan 도구가 필요합니다). 실행은 이를 거부합니다",
   "doctor.task_file.unreadable": "task 파일을 읽을 수 없습니다",
   "doctor.task_file.json_syntax": "task 파일의 JSON 문법 오류: {line}줄 {column}열",
   "doctor.task_file.key": "task 파일에 키 필드나 키 값이 있습니다",
@@ -443,7 +443,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.task_file.invalid_unlocated": "task 파일의 값이 올바르지 않습니다(위치를 특정할 수 없습니다)",
   // U-228 (nb-i18n이 다듬을 초안).
   "doctor.task_file.plan_tool_missing":
-    "task의 계획 방식에 맞는 계획 도구가 도구 목록에 없습니다(\"run\"은 propose_changes, \"apply\"는 propose_plan이 필요합니다). 실행이 거부합니다",
+    "task의 계획 방식에 맞는 계획 도구가 도구 목록에 없습니다(계획 방식 \"run\"에는 propose_changes 도구, \"apply\"에는 propose_plan 도구가 필요합니다). 실행은 이 task를 거부합니다",
   "doctor.task_file.valid": "task 파일이 올바릅니다",
   "doctor.model.script_unreadable": "scripted 모델의 대본 파일을 읽을 수 없습니다",
   "doctor.model.script_json_syntax": "대본 파일의 JSON 문법 오류: {line}줄 {column}열",
@@ -518,7 +518,7 @@ export const KO_MESSAGES: MessageTexts = {
     "analyze-private 작업 종류에는 policy.unreadablePaths 항목(개인정보가 든 표의 폴더)이 하나 이상 있어야 합니다. task 파일, 설정 파일, 프로필 가운데 한 곳에 두세요",
   "doctor.private_data.min_group_size_range": "policy.minGroupSize(읽기 제외 표의 집계가 보여 주는 가장 작은 묶음)는 5부터 1000까지의 정수입니다",
   "doctor.commands.unreadable_with_commands":
-    "unreadablePaths가 있는데 명령 규칙과 명령 검증기가 {count}개 있습니다. 명령은 어떤 파일이든 읽을 수 있어 에이전트에게서 감춘 파일도 읽을 수 있으므로, 실행이 거부합니다",
+    "unreadablePaths가 있는데 명령 규칙과 명령 검증기가 {count}개 있습니다. 명령은 어떤 파일이든 읽을 수 있어 에이전트에게서 감춘 파일도 읽을 수 있으므로, 실행은 이를 거부합니다",
   "doctor.workflow_policy.commands_dropped": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 빠집니다",
   "doctor.workflow_policy.commands_narrowed": "이 작업 종류로 실행하면 설정한 정책의 명령 규칙 {count}개가 좁혀집니다",
   "doctor.workflow_policy.plan_actions_dropped": "이 작업 종류로 실행하면 설정한 정책의 계획 동작 {count}개가 빠집니다",

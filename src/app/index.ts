@@ -31,7 +31,6 @@ export type {
   AppliedActionRecord,
   ApplyJournalEvent,
   ApplyJournalRecord,
-  ApplyReason,
   ApplyJournalEntry,
   ApplyResult,
   ApprovalChannel,
@@ -42,7 +41,9 @@ export type {
   PlanStatus,
   ReviewOutput,
   ReviewVerdict,
-} from "./general-tasks.js";
+} from "../contracts/index.js";
+// U-254: ApplyReason with the app layer's other types (src/contracts/app.ts).
+export type { ApplyReason } from "../contracts/app.js";
 export type {
   AppCallOutcome,
   AppEnvironment,

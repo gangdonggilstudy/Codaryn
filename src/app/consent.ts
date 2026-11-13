@@ -11,7 +11,7 @@
 
 import { CONTENT_HASH_PATTERN_SOURCE, MIN_PLAN_DIGEST_PREFIX } from "../contracts/index.js";
 import { appError } from "./errors.js";
-import type { UnsafeMoveConsent } from "./general-tasks.js";
+import type { UnsafeMoveConsent } from "../contracts/index.js";
 import type { AppError, ApplyPlanRequest, RevertRequest } from "./types.js";
 
 const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);

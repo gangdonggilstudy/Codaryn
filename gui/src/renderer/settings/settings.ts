@@ -25,6 +25,7 @@ import type { CodarynApi } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { PolicyNarrowingView, ProfileView, SettingsPrivateDataView, SettingsRules, SettingsView } from "../../shared/ipc.js";
+import { keyHowLine } from "./key-how.js";
 
 export interface SettingsDeps {
   readonly texts: Texts;
@@ -524,6 +525,9 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         const key = section("settings-key", t.format("settings.key"));
         key.append(el("p", t.format(view.keyAvailable ? "settings.keyAvailable" : "settings.keyMissing"), { "data-key": view.keyAvailable ? "available" : "missing" }));
         key.append(el("p", t.format("settings.keyHow")));
+        // U-271 (C-23): how on this OS, when the key of the provider in use is not set.
+        const how = keyHowLine(t, view, "settings-key-os");
+        if (how !== null) key.append(how);
 
         const editable = view.file !== null && view.file.exists;
         const sections = [general(t, view, deps.language, propose, () => api.revealConfig()), providerSection(t, view, editable ? propose : null, warn), model, profiles, workflows];

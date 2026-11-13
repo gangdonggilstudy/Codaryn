@@ -312,6 +312,8 @@ export const KO = {
   "settings.keyAvailable": "키가 등록되어 있습니다. 값은 보이지 않습니다.",
   "settings.keyMissing": "키가 없습니다.",
   "settings.keyHow": "키는 앱을 실행한 환경의 변수로만 받습니다. 여기에는 키 입력란이 없습니다. 등록한 뒤 앱을 다시 시작하세요.",
+  "key.how.windows": "Windows에서 등록하는 법: 시작 메뉴에서 '계정의 환경 변수 편집'을 열거나(rundll32 sysdm.cpl,EditEnvironmentVariables) 사용자 변수 {env}를 더한 뒤, 열려 있는 Codaryn 창을 모두 닫고 다시 시작하세요.",
+  "key.how.posix": "macOS·Linux에서 등록하는 법: Codaryn을 실행하는 환경에 변수 {env}를 정하세요(예: 셸 시작 파일 ~/.profile에 export {env}=… 줄을 더하고 그 셸에서 실행). 그 뒤 Codaryn을 다시 시작하세요.",
   "limit.maxModelTurns": "모델 턴",
   "limit.maxToolCalls": "도구 호출",
   "limit.maxTotalTokens": "토큰",

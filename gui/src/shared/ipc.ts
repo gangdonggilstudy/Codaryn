@@ -386,8 +386,11 @@ export interface SettingsView {
   readonly workflows: { readonly builtin: readonly string[]; readonly config: readonly string[] };
   readonly keyAvailable: boolean;
   readonly providers: readonly string[];
-  /** Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). */
-  readonly env: { readonly model: boolean; readonly language: boolean };
+  /**
+   * Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). U-271 (C-23): `os`, the kind of
+   * operating system the app runs on, for the steps that register a key; absent when it is not known.
+   */
+  readonly env: { readonly model: boolean; readonly language: boolean; readonly os?: "windows" | "posix" };
   /** GU-6: the config file's own rules (3.10): limits, command rules as text, protected paths, secret names. */
   readonly rules: SettingsRules;
   /** DR-41: what each task kind's own rules leave out of these rules. */

@@ -305,7 +305,7 @@ export function asSettings(value: unknown): SettingsReply {
       workflows: { builtin: strList(workflows["builtin"]) ? workflows["builtin"] : [], config: strList(workflows["config"]) ? workflows["config"] : [] },
       keyAvailable: view["keyAvailable"] === true,
       providers: strList(view["providers"]) ? view["providers"] : [],
-      env: { model: env["model"] === true, language: env["language"] === true },
+      env: { model: env["model"] === true, language: env["language"] === true, ...(env["os"] === "windows" || env["os"] === "posix" ? { os: env["os"] } : {}) },
       rules: asRules(view["rules"]),
       policyNarrowings: asNarrowings(view["policyNarrowings"]),
       provider: str(view["provider"]) ? view["provider"] : null,

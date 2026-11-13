@@ -310,6 +310,8 @@ export const EN: { readonly [K in TextId]: string } = {
   "settings.keyAvailable": "A key is registered. Its value is not shown.",
   "settings.keyMissing": "There is no key.",
   "settings.keyHow": "The key comes only from a variable of the environment the app was started in. There is no key field here. After registering it, start the app again.",
+  "key.how.windows": "To register it on Windows: open \"Edit environment variables for your account\" from the Start menu (rundll32 sysdm.cpl,EditEnvironmentVariables) and add the user variable {env}, then close every Codaryn window and start it again.",
+  "key.how.posix": "To register it on macOS or Linux: set the variable {env} in the environment Codaryn starts in (for example an export {env}=… line in the shell start file ~/.profile, then start it from that shell). Then start Codaryn again.",
   "limit.maxModelTurns": "model turns",
   "limit.maxToolCalls": "tool calls",
   "limit.maxTotalTokens": "tokens",

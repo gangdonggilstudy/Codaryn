@@ -21,6 +21,7 @@ import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { SettingsView } from "../../shared/ipc.js";
 import { doctorParts } from "../checks/checks.js";
+import { keyHowLine, keyOf } from "../settings/key-how.js";
 
 export interface SetupDeps {
   readonly texts: Texts;
@@ -39,11 +40,6 @@ function errorLine(t: Texts, code: string): HTMLElement {
 }
 
 /** The provider runs use now, its key variable and whether it is set (never its value). */
-function keyOf(view: SettingsView): { readonly provider: string; readonly keyEnv: string; readonly keySet: boolean } {
-  const provider = view.provider ?? view.defaultProvider ?? "-";
-  const entry = view.apiProviders.find((item) => item.name === provider);
-  return { provider, keyEnv: entry?.keyEnv ?? "-", keySet: entry?.keySet ?? view.keyAvailable };
-}
 
 export function setupScreen(deps: SetupDeps): Screen {
   const { texts: t, api } = deps;
@@ -127,7 +123,11 @@ export function setupScreen(deps: SetupDeps): Screen {
               button(t.format("setup.model.choose"), () => deps.show("settings"), { id: "setup-choose-model" }),
             );
           } else {
-            parts.push(el("p", t.format("setup.model.keyMissing", { env: key.keyEnv }), { id: "setup-key", "data-key": "missing" }), el("p", t.format("setup.model.tryScripted"), { class: "notice" }));
+            parts.push(el("p", t.format("setup.model.keyMissing", { env: key.keyEnv }), { id: "setup-key", "data-key": "missing" }));
+            // U-271 (C-23): how on this OS.
+            const how = keyHowLine(t, view, "setup-key-os");
+            if (how !== null) parts.push(how);
+            parts.push(el("p", t.format("setup.model.tryScripted"), { class: "notice" }));
           }
           body.replaceChildren(...parts);
         } else if (step === "permissions") {
@@ -200,6 +200,8 @@ export function setupScreen(deps: SetupDeps): Screen {
           const parts: HTMLElement[] = [...doctorParts(t, reply)];
           const key = keyOf(view);
           if (!key.keySet) parts.push(el("p", t.format("setup.checks.keyHow", { env: key.keyEnv }), { class: "notice", id: "setup-key-how" }));
+          const how = keyHowLine(t, view, "setup-checks-key-os");
+          if (how !== null) parts.push(how);
           parts.push(el("p", t.format("setup.checks.done"), { class: "notice" }));
           body.replaceChildren(...parts);
         }

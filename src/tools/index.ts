@@ -45,6 +45,7 @@ import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
 import { createPlannedFileProbe as plannedFileProbeFor, inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
+import { listVisible } from "./visible-list.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { CountingPlanExecutor, PlanExecutorDeps } from "./plan-executor.js";
@@ -120,8 +121,8 @@ export interface ToolRunnerOptions {
    * U-203 (bundle A, R-3, R-4): the run's unreadable paths, ResolvedTaskSpec.unreadablePaths (every
    * source united, review R-102 M-1). search_files and inspect_files
    * leave out what is under them, names included, judged by the text and the real path (the gate
-   * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent:
-   * nothing is left out, as before.
+   * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent or
+   * empty: nothing is left out, as before (Codex V-13b L-1).
    */
   readonly unreadablePaths?: readonly string[];
 }
@@ -289,17 +290,23 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   }
 
   // U-203 (R-1): the unreadable paths with the gate's rule (a deny list: an unusable one covers all).
-  const unreadable = options.unreadablePaths === undefined ? null : compilePathSet(options.unreadablePaths, { match: "prefix", onUnusable: "covers" });
+  // Codex V-13b L-1: an empty list is no unreadable path at all, so the tools list as without one; a
+  // value that is not a list is still unusable and covers everything.
+  const noUnreadable = options.unreadablePaths === undefined || (Array.isArray(options.unreadablePaths) && options.unreadablePaths.length === 0);
+  const unreadable = noUnreadable ? null : compilePathSet(options.unreadablePaths, { match: "prefix", onUnusable: "covers" });
 
   async function searchFiles(args: SearchFilesArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
-    const listed = await workspace.list(resolved.path);
-    if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
     // U-203 (R-3, R-4): what is under an unreadable path is left out, names included. `withheld`
     // follows the entries alone (one lies in this folder), never what exists there.
     const hidden = unreadable === null ? null : await unreadable.snapshot(workspace);
     const withheld = hidden !== null && hidden.within(resolved.path.relative);
+    // U-203 (Codex V-13 M-1, M-2): with unreadable paths the listing leaves them out before it counts
+    // or enters them, and hides a link whose real path is under them (visible-list.ts), so the
+    // result, its `truncated` and its errors do not depend on what exists there.
+    const listed = hidden === null ? await workspace.list(resolved.path) : await listVisible(workspace, resolved.path, hidden);
+    if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
 
     // Matching works on masked text only: the path names and the file contents a model would
     // see. Matching raw text would let the result reveal secrets one character at a time.

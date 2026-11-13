@@ -487,8 +487,18 @@ export const FIXED_MESSAGES = {
   // U-18 (AXM-4): RunSummaryContext.failedToolCalls when above 0, right after summary.denied (its
   // hint lines come after both).
   "summary.failed": { count: "count" },
+  // U-198 (DR-69 B-4, Codex V-14 L-1; drafts for nb-i18n): the writes refused as path_not_writable, by
+  // why (RunSummaryContext.deniedNotPlanned, deniedNotWritable), each right after summary.denied when
+  // above 0 and followed by its own advice: not one of the files the carried-out plan approved (to
+  // change others, make a new plan that names them and approve it), or outside the writablePaths of
+  // the settings (add the file to every list). The plan's first.
+  "summary.denied_not_planned": { count: "count" },
+  "summary.denied_not_planned_hint": {},
+  "summary.denied_not_writable": { count: "count" },
+  "summary.denied_not_writable_hint": {},
   // U-207 (bundle A, R-3, R-8; drafts for nb-i18n): RunSummaryContext.deniedUnreadable, the calls refused
-  // at a path this task may not read (unreadable_path), right after summary.denied, then once what a
+  // at a path this task may not read (unreadable_path), after summary.denied and the not-writable
+  // lines (summary.denied_not_planned, summary.denied_not_writable, each with its advice), then once what a
   // person can do (the files are kept from the agent on purpose; query_table may still aggregate
   // their tables; to let it read them, take the entry out of unreadablePaths where it was set).
   "summary.denied_unreadable": { count: "count" },
@@ -590,7 +600,36 @@ export const FIXED_MESSAGES = {
   "plan.inventory_limit": {},
   "plan.applied_by": { runId: "runId" },
   "plan.next_apply": { runId: "runId" },
+  // U-191 (DR-69 B-1, B-3; drafts for nb-i18n): the plan view of a `run` plan (ChangesPlanOutput),
+  // beside the lines above, which it shares (records_changed, cannot_apply, digest_label,
+  // plan.status.<status>, applied_by).
+  // - plan.changes.heading: as plan.heading, `{count}` the planned files.
+  // - plan.change.create, plan.change.modify: each planned file's change, before its masked path.
+  // - plan.changes.summary_label: before the summary: the plan run's description of the work, approved
+  //   with the plan (it is under the digest, R-99 L-1), not the goal or new instructions (PM; the
+  //   engine's own label says so to the later run); the summary follows as the model's words.
+  // - plan.changes.next_apply ({runId}: the plan run) while pending and not marked: as
+  //   plan.next_apply, the digest's first characters after it.
+  // - plan.changes.digest_guarantee: last (the digest names the files, the contents of the files to
+  //   modify and the summary; the run stops before its first model request if one changed; its file
+  //   tools write only these files, B-8).
+  "plan.changes.heading": { runId: "runId", count: "count", status: "text" },
+  "plan.change.create": {},
+  "plan.change.modify": {},
+  "plan.changes.summary_label": {},
+  "plan.changes.next_apply": { runId: "runId" },
+  "plan.changes.digest_guarantee": {},
   "apply.question": {},
+  // U-198 (DR-69 B-3, B-8; drafts for nb-i18n): apply's terminal question for a `run` plan, after its
+  // plan view (renderChangesPlan): what approving starts (a run whose file tools write only these
+  // {count} files), that the summary is the model's description of the work, approved with the plan
+  // and not the goal or a new instruction, and that only the files are enforced, a line when the
+  // run's policy allows commands (a command is not bound to the
+  // files, B-8), then apply.changes_question and `prompt.yes_no_default_no`.
+  "apply.changes.what": { count: "count" },
+  "apply.changes.summary_note": {},
+  "apply.changes.commands_note": {},
+  "apply.changes_question": {},
   "apply.unsafe_move_question": { count: "count" },
   "review.recorded": { runId: "runId", verdict: "text" },
   "review.recorded_replaced": { runId: "runId", verdict: "text" },
@@ -637,6 +676,8 @@ export const FIXED_MESSAGES = {
   "progress.model_not_found": {},
   // U-182 (DR-69 B-4): after a run whose `{count}` writes were denied as path_not_writable, how to
   // allow a file (every writable list must cover it). A progress line, not in the result.
+  // U-195 (Codex V-14 L-1, with U-198): not after a run that carries out a `run` plan, whose refused
+  // writes are outside the plan (the end summary's summary.denied_not_planned and its hint say so).
   "progress.not_writable_hint": { count: "count" },
   "progress.unknown_tool": {},
   // G-A: an apply run's records (ApplyJournalEvent). `{approval}` is `approval.<channel>`,
@@ -806,6 +847,9 @@ export const FIXED_MESSAGES = {
   // right after its status words: the plan run it applied (RunListEntry.planRunId), so the row says
   // which plan it is the apply of, as the plan run's row names its apply run (runs.plan_applied).
   "runs.apply_of": { runId: "runId" },
+  // U-198 (DR-69 B-3; draft for nb-i18n): a run that carried out a `run` plan (RunListEntry.planRunId
+  // on a `kind: "run"` entry) names that plan run after its status words, as runs.apply_of does.
+  "runs.carried_plan": { runId: "runId" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},
@@ -1070,6 +1114,10 @@ export const FIXED_MESSAGES = {
   // a command can write files outside them. A warning in the `commands` check, or one of its notes
   // when the check says something else (no new check id).
   "doctor.commands.writable_with_commands": { count: "count" },
+  // U-195 (DR-69 B-8): `{count}` command rules while the task's plan mode is "run": the approved files
+  // bind the file tools only, so such a command can write outside the plan. As the line above (a
+  // warning of the `commands` check, or one of its notes).
+  "doctor.commands.plan_run_with_commands": { count: "count" },
   // U-210 (bundle A, R-5; draft for nb-i18n): `{count}` command rules and command verifiers while the
   // run has unreadable paths (every source's policy.unreadablePaths). A run refuses them (a command
   // can read any file), so the `commands` check fails with this text (no new check id).
@@ -1347,14 +1395,31 @@ export interface RunSummaryContext {
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
   /**
-   * U-207 (bundle A, R-3, R-8; draft for na-core): the denied calls of this run whose code is
-   * `unreadable_path` (`tool_decision` with `allowed: false`). Among deniedToolCalls.
-   * `summary.denied_unreadable` right after `summary.denied`, then `summary.denied_unreadable_hint`,
-   * when above 0. Optional: absent counts as 0, no line.
+   * U-198 (DR-69 B-4, Codex V-14 L-1; drafts for na-core, U-195): the denied writes of this run whose
+   * code is `path_not_writable` (`tool_decision` with `allowed: false`), by why, each write once:
+   * - deniedNotPlanned: in a run that carries out a `run` plan, a write the plan's own list
+   *   (WritablePathSet source `plan`) does not cover, whatever the other lists say;
+   *   `summary.denied_not_planned`, then `summary.denied_not_planned_hint` (make a new plan);
+   * - deniedNotWritable: any other such write: a list of the settings (config file, profile, task
+   *   type, task file) does not cover it; `summary.denied_not_writable`, then
+   *   `summary.denied_not_writable_hint` (add the file to writablePaths).
+   * Among deniedToolCalls; right after `summary.denied`, the plan's first. Optional: absent counts as
+   * 0, no line. `tool_decision` names only the code, so a caller tells the two apart by which list
+   * refused the write (the unit's report: the gate's part).
+   */
+  readonly deniedNotPlanned?: number;
+  readonly deniedNotWritable?: number;
+  /**
+   * U-207 (bundle A, R-3, R-8; draft for na-core, which counts it in U-210): the denied calls of this
+   * run whose code is `unreadable_path` (`tool_decision` with `allowed: false`). Among
+   * deniedToolCalls. `summary.denied_unreadable`, then `summary.denied_unreadable_hint`, when above 0,
+   * after `summary.denied` and the not-writable lines (deniedNotPlanned, deniedNotWritable).
+   * Optional: absent counts as 0, no line.
    */
   readonly deniedUnreadable?: number;
   /**
-   * U-207 (DR-70, Q-4; draft for na-core): the query_table results of this run that left out groups
+   * U-207 (DR-70, Q-4; draft for na-core, which counts it in U-210): the query_table results of this
+   * run that left out groups
    * of fewer than k rows (`tool_result` of query_table, ok, whose payload has suppressedGroups above
    * 0; queryTableFacts reads it), and the k they applied (the largest when they differ).
    * `summary.groups_hidden` when `results` is above 0. Counts only. Optional: absent, no line.

@@ -54,6 +54,12 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.changes": "바뀐 파일: {count}개",
   "summary.denied": "거부된 호출: {count}건",
   "summary.failed": "실패한 호출: {count}건",
+  // U-198 (nb-i18n이 다듬을 초안): 실행이 쓸 수 있는 파일 밖의 쓰기.
+  "summary.denied_not_planned": "이 계획이 승인한 파일이 아니라 거부된 쓰기: {count}건",
+  "summary.denied_not_planned_hint": "다른 파일을 바꾸려면 그 파일을 담은 새 계획을 만들어 승인하세요.",
+  "summary.denied_not_writable": "설정의 writablePaths 밖이라 거부된 쓰기: {count}건",
+  "summary.denied_not_writable_hint":
+    "그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
   // U-207 (묶음 A; nb-i18n이 다듬을 초안).
   "summary.denied_unreadable": "읽기 제외 파일이라 거부된 호출: {count}건",
   "summary.denied_unreadable_hint":
@@ -102,7 +108,20 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "작업 공간의 파일이 인벤토리 검사가 셀 수 있는 것보다 많습니다. 적용하면 plan_stale로 멈추고 아무것도 옮기지 않습니다.",
   "plan.applied_by": "적용 실행 {runId}에서 적용함",
   "plan.next_apply": "적용하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  // U-191 (nb-i18n이 다듬을 초안): 실행 계획(뒤 실행이 쓸 파일)의 계획 보기.
+  "plan.changes.heading": "실행 {runId}의 계획: 쓸 파일 {count}개, {status}",
+  "plan.change.create": "생성",
+  "plan.change.modify": "수정",
+  "plan.changes.summary_label": "계획의 요약, 계획 실행이 쓴 것(모델이 쓴 말이며 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨)",
+  "plan.changes.next_apply": "이 변경을 실행하게 하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
+  "plan.changes.digest_guarantee":
+    "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 요약을 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
   "apply.question": "이 계획을 적용할까요?",
+  // U-198 (nb-i18n이 다듬을 초안): 실행 계획의 apply 질문.
+  "apply.changes.what": "승인하면 파일 도구가 이 파일 {count}개에만 쓸 수 있는 실행이 시작됩니다.",
+  "apply.changes.summary_note": "위의 요약은 모델이 쓴 작업 설명이며 계획과 함께 승인됩니다. 목표나 새 지시가 아니며, 실행이 그 설명대로 하는지는 아무것도 확인하지 않습니다. 강제되는 것은 파일 목록뿐입니다.",
+  "apply.changes.commands_note": "이 작업은 명령도 허용하며, 정책이 허용한 명령은 이 파일들에 묶이지 않습니다.",
+  "apply.changes_question": "이 변경을 할 실행을 시작할까요?",
   "apply.unsafe_move_question": "이 계획의 이동 {count}개는 이 드라이브에 하드 링크가 없어 대상 자리의 파일을 덮어쓸 수 있습니다. 아무것도 옮기지 않았습니다. 이번 적용에서만 그래도 옮기도록 다시 적용할까요?",
   "review.recorded": "실행 {runId}의 검토: {verdict}.",
   "review.recorded_replaced": "실행 {runId}의 검토: {verdict}(앞선 검토를 바꿈).",
@@ -232,6 +251,8 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.review": "검토: {verdict}",
   // U-139 (UXM-5, nb-i18n이 다듬을 초안): 적용 실행이 적용한 계획 실행.
   "runs.apply_of": "실행 {runId}의 계획 적용",
+  // U-198 (nb-i18n이 다듬을 초안): 실행 계획을 실행한 실행.
+  "runs.carried_plan": "실행 {runId}의 계획 실행",
   "report.records_changed": "이 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 보고서가 실제로 일어난 일과 다를 수 있습니다.",
   "report.final_message": "에이전트의 마지막 답입니다. 에이전트의 말이며 검증된 사실이 아닙니다.",
   "changes.records_changed": "이 실행에는 기록 변경 표시가 있어 파일 글을 보이지 않습니다. 경로와 상태만 보입니다.",
@@ -458,6 +479,8 @@ export const KO_MESSAGES: MessageTexts = {
     "추가 인수를 받는 명령 규칙 {count}개가 계획 동작(policy.planActions)과 함께 켜져 있습니다. Codaryn은 그 인수를 확인하지 않으므로, 그런 명령은 승인한 계획 밖의 파일을 바꿀 수 있습니다",
   "doctor.commands.writable_with_commands":
     "writablePaths가 파일 도구를 제한하는 중에 명령 규칙 {count}개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다",
+  "doctor.commands.plan_run_with_commands":
+    "계획 방식 \"run\"과 명령 규칙 {count}개가 함께 있습니다. 승인한 파일은 파일 도구만 묶으므로, 허용한 명령은 계획 밖의 파일에 쓸 수 있습니다",
   // U-210 (묶음 A, R-5; nb-i18n이 다듬을 초안).
   "doctor.commands.unreadable_with_commands":
     "unreadablePaths가 있는데 명령 규칙과 명령 검증기가 {count}개 있습니다. 명령은 어떤 파일이든 읽을 수 있어 에이전트에게서 감춘 파일도 읽을 수 있으므로, 실행이 거부합니다",

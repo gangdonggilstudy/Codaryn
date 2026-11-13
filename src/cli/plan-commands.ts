@@ -35,6 +35,7 @@ import {
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
+  AnyStoredPlan,
   ApplyJournal,
   InventoryChecker,
   ApplyJournalEntry,
@@ -42,13 +43,16 @@ import type {
   ApplyPlan,
   ApplyResult,
   ApprovalChannel,
+  ChangesPlanOutput,
   UnsafeMoveConsent,
   Clock,
   ContentHash,
   EngineResult,
   HumanOutput,
   ListRuns,
+  LoadAnyPlan,
   LoadPlan,
+  LoadPlanOutcome,
   MaskedPlanAction,
   MaskedText,
   MessageCatalog,
@@ -74,7 +78,7 @@ import {
   isRunTimestamp,
   latestRun,
   listRuns as storeListRuns,
-  loadPlan as storeLoadPlan,
+  loadAnyPlan as storeLoadAnyPlan,
   readReviewRecord,
   readRevertRecord,
   releaseLock,
@@ -87,21 +91,22 @@ import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } 
 import type { InventoryCheckerOptions } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { parseApplyArgs, parsePlanArgs, parseReviewArgs } from "./args.js";
-import type { RunArgs, TaskFormArgs } from "./args.js";
+import type { ApplyArgs, RunArgs, TaskFormArgs } from "./args.js";
 import type { CommandOutcome } from "./guard.js";
 import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
-import { argumentsError, cliError, prepareTask } from "./run.js";
-import type { PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
+import { argumentsError, cliError, prepareTask, runPrepared } from "./run.js";
+import type { CliEnvironment, PrepareEnvironment, PreparedTask, RunNotes } from "./run.js";
 import { createRunId } from "./run-id.js";
 import { goalHoldsKey } from "./security/index.js";
 import { envValue, knownKeyValues } from "./settings.js";
 import type { KnownKeys } from "./security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "./text-safety.js";
-import { FINAL_MESSAGE_MAX_LINES, displayWidth, formatLocalTime, quoteModelText } from "./human/index.js";
+import { FINAL_MESSAGE_MAX_LINES, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
+import type { LoadedChangesPlan } from "./human/index.js";
 
 /** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
 const PLAN_SUMMARY_MAX_ROWS = FINAL_MESSAGE_MAX_LINES;
@@ -116,6 +121,11 @@ export interface PlanCommandEnvironment extends PrepareEnvironment {
   /** Overrides for tests; the store's functions otherwise. */
   readonly listRuns?: ListRuns;
   readonly loadPlan?: LoadPlan;
+  /**
+   * U-195 (DR-69 B-4): the store's loadAnyPlan (the default), so `plan` and `apply` choose by the
+   * plan's kind. A test that gives `loadPlan` only gets a plan of mode apply, as before.
+   */
+  readonly loadAnyPlan?: LoadAnyPlan;
   /** The workspace listing (verify's `createInventoryChecker` when absent). Tests count its listings. */
   readonly createInventoryChecker?: (options: InventoryCheckerOptions) => InventoryChecker;
   readonly inspectRun?: (workspaceRoot: string, runId: string) => Promise<RunInspection>;
@@ -179,6 +189,13 @@ export interface ApplyCommandEnvironment extends PlanCommandEnvironment {
   /** The human renderer, for apply progress lines and the end summary (optional methods, G-A). */
   readonly human?: HumanOutput;
   readonly cancelSignal: (cancelFile: string | null) => { signal: AbortSignal; dispose(): void };
+  /**
+   * U-195 (DR-69 B-3, B-4): `codaryn run`'s environment, for a plan of kind "changes", whose apply is a
+   * model run (runPrepared with the approved plan): the provider, the assembly, the progress lines
+   * and the end summary are a run's. Absent: such a plan is not carried out here (internal_error,
+   * nothing sent or written). A plan of mode apply never uses it.
+   */
+  readonly run?: CliEnvironment;
 }
 
 /** The RunArgs `prepareTask` takes for a task form. */
@@ -272,7 +289,8 @@ function actionLines(actions: readonly MaskedPlanAction[], currentKey: KnownKeys
   );
 }
 
-type Prepared = { readonly prepared: PreparedTask; readonly workspaceRoot: string; readonly runId: string };
+/** U-195: `notes` are the preparation's (the config's language), which a run plan's apply passes on to its run. */
+export type Prepared = { readonly prepared: PreparedTask; readonly workspaceRoot: string; readonly runId: string; readonly notes: RunNotes };
 
 /**
  * Review R-11 L-2: plan, apply and review run no model, but their quick form builds the run's
@@ -298,7 +316,8 @@ async function prepareFor(
   secrets = true,
 ): Promise<{ ok: true; value: Prepared } | { ok: false; outcome: CommandOutcome }> {
   // U-17: plan and review run nothing, so their quick form needs no run limits (TaskFormArgs.readOnly).
-  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), notes(), { secrets, ...(form.readOnly === true ? { readOnly: true } : {}) });
+  const runNotes = notes();
+  const ready = await prepareTask(io, runArgsOf(form, cancelFile, quiet), runNotes, { secrets, ...(form.readOnly === true ? { readOnly: true } : {}) });
   if (!("prepared" in ready)) return { ok: false, outcome: withQuickFormHint(ready, form) };
   let workspaceRoot: string;
   try {
@@ -326,7 +345,7 @@ async function prepareFor(
       // Best effort.
     }
   }
-  return { ok: true, value: { prepared: ready.prepared, workspaceRoot, runId: reference.runId } };
+  return { ok: true, value: { prepared: ready.prepared, workspaceRoot, runId: reference.runId, notes: runNotes } };
 }
 
 const LOAD_MESSAGES = {
@@ -337,6 +356,35 @@ const LOAD_MESSAGES = {
   invalid_run_record: "the plan run's records cannot be used (plan.json or result.json cannot be read, or they disagree)",
 } as const;
 
+const PLAN_SECRETS_DIFFER_MESSAGE =
+  "the secrets registered now mask the plan's paths differently from the plan run, or the plan has no masked form; nothing was shown, asked, recorded or moved. Use the plan run's task form (--task), or make the plan again";
+
+/** U-195: the plan of either kind (loadAnyPlan); a test's `loadPlan` alone gives a plan of mode apply, as before. */
+function loadAny(io: PlanCommandEnvironment, value: Prepared): Promise<LoadPlanOutcome<AnyStoredPlan>> {
+  const load: LoadAnyPlan = io.loadAnyPlan ?? io.loadPlan ?? storeLoadAnyPlan;
+  return load({ workspaceRoot: value.workspaceRoot, runId: value.runId });
+}
+
+/**
+ * U-195 (DR-69 B-4): a run plan's view, U-191's changesPlanOutput with the secrets registered now
+ * (DR-28: a path they mask differently from the plan run shows nothing, plan_secrets_differ) and the
+ * plan run's records-changed mark.
+ */
+async function changesView(
+  io: PlanCommandEnvironment,
+  value: Prepared,
+  loaded: LoadedChangesPlan,
+): Promise<{ ok: true; output: ChangesPlanOutput } | { ok: false; outcome: CommandOutcome }> {
+  const privacy = createPrivacyGateway({ secrets: [...value.prepared.secrets] });
+  const marked = await planRunMarked(io, value.workspaceRoot, value.runId);
+  const view = changesPlanOutput(loaded, privacy, { recordsChanged: marked });
+  if (view.ok) return { ok: true, output: view.output };
+  return {
+    ok: false,
+    outcome: view.code === "plan_secrets_differ" ? cliError("plan_secrets_differ", PLAN_SECRETS_DIFFER_MESSAGE) : cliError("internal_error", "a path of the plan could not be masked; nothing is shown"),
+  };
+}
+
 /** The plan, masked again, with its digest, applied state and the inventory limit (DR-5, DR-6). */
 async function loadShown(
   io: PlanCommandEnvironment,
@@ -346,11 +394,12 @@ async function loadShown(
    * does not (false here), and lists it with the apply's cancel signal only when it asks a person.
    */
   listInventory: boolean,
+  /** U-195: the plan as loadAny gave it, a plan of mode apply (a run plan is shown by changesView). */
+  loaded: LoadPlanOutcome,
 ): Promise<
   | { ok: true; plan: StoredPlan; digest: ContentHash; output: PlanOutput; privacy: PrivacyGateway }
   | { ok: false; outcome: CommandOutcome }
 > {
-  const loaded = await (io.loadPlan ?? storeLoadPlan)({ workspaceRoot: value.workspaceRoot, runId: value.runId });
   if (!loaded.ok) return { ok: false, outcome: cliError(loaded.code, LOAD_MESSAGES[loaded.code]) };
   const privacy = createPrivacyGateway({ secrets: [...value.prepared.secrets] });
   const actions: MaskedPlanAction[] = [];
@@ -363,10 +412,7 @@ async function loadShown(
     if (!planActionShownMatches(action, masked)) {
       return {
         ok: false,
-        outcome: cliError(
-          "plan_secrets_differ",
-          "the secrets registered now mask the plan's paths differently from the plan run, or the plan has no masked form; nothing was shown, asked, recorded or moved. Use the plan run's task form (--task), or make the plan again",
-        ),
+        outcome: cliError("plan_secrets_differ", PLAN_SECRETS_DIFFER_MESSAGE),
       };
     }
     actions.push(masked);
@@ -552,7 +598,15 @@ export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcom
   if (!parsed.ok) return argumentsError(parsed);
   const ready = await prepareFor(io, parsed.args.form, parsed.args.runId, null, false);
   if (!ready.ok) return ready.outcome;
-  const shown = await loadShown(io, ready.value, true);
+  const loaded = await loadAny(io, ready.value);
+  // U-195 (DR-69 B-4): a run plan (kind "changes") has its own view (U-191); a plan of mode apply, as before.
+  if (loaded.ok && loaded.plan.kind === "changes") {
+    const view = await changesView(io, ready.value, { plan: loaded.plan, digest: loaded.digest, applied: loaded.applied });
+    if (!view.ok) return view.outcome;
+    if (parsed.args.json) return { output: view.output, exitCode: view.output.exitCode };
+    return { text: renderChangesPlan(view.output, knownKeyValues(io.env), io.messages), exitCode: view.output.exitCode };
+  }
+  const shown = await loadShown(io, ready.value, true, loaded as LoadPlanOutcome);
   if (!shown.ok) return shown.outcome;
   // U-14 (AXM-2): a marked plan run is still shown, as one that cannot be applied; its journal may
   // have been changed too, so the summary is left out.
@@ -595,10 +649,20 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
   if (!ready.ok) return ready.outcome;
   const { prepared, workspaceRoot, runId: planRunId } = ready.value;
   const task = prepared.task;
-  if (workflowSettingsOf(task).plan !== "apply") {
+  const mode = workflowSettingsOf(task).plan;
+  // U-195 (DR-69 B-3, B-4): a task resolved to plan "run" carries out a run plan with a model run.
+  if (mode === "run") return applyChangesPlan(io, args, ready.value);
+  if (mode !== "apply") {
     return cliError("run_not_plan", 'the task given to apply does not resolve to a workflow with plan "apply"; nothing was moved');
   }
-  const shown = await loadShown(io, ready.value, false);
+  const loaded = await loadAny(io, ready.value);
+  if (loaded.ok && loaded.plan.kind === "changes") {
+    return cliError(
+      "run_not_plan",
+      'that run made a plan of files to write (plan "run"), but the task given to apply resolves to plan "apply"; give the task the plan run used; nothing was moved',
+    );
+  }
+  const shown = await loadShown(io, ready.value, false, loaded as LoadPlanOutcome);
   if (!shown.ok) return shown.outcome;
   if (shown.output.appliedBy !== null) {
     return cliError("plan_already_applied", "that plan was already applied; nothing was moved. Revert the apply run to undo it");
@@ -808,6 +872,119 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     }
   }
   return { output: final.result, exitCode: final.result.exitCode };
+}
+
+/**
+ * U-195 (PM decision 2): the goal a run plan's run is given: the plan run's own goal, the person's
+ * words, as its journal recorded them (the first model request's user message, masked by the plan
+ * run), in every task form. Never the model's summary (the engine tells that as the approved plan).
+ * null when it cannot be read: the journal is gone or not this run's, or that message is not there.
+ */
+async function planRunGoal(io: PlanCommandEnvironment, workspaceRoot: string, planRunId: string): Promise<string | null> {
+  try {
+    const text = await (io.readJournal ?? readPlanJournal)(workspaceRoot, planRunId);
+    for (const line of text.split("\n")) {
+      if (line.length === 0) continue;
+      const record: unknown = JSON.parse(line);
+      if (field(record, "runId") !== planRunId) return null;
+      if (field(record, "type") !== "model_request") continue;
+      if (field(record, "turn") !== 1) return null;
+      const messages = field(record, "newMessages");
+      const first: unknown = Array.isArray(messages) ? messages[0] : undefined;
+      const content = field(first, "content");
+      return field(first, "role") === "user" && typeof content === "string" && content.trim().length > 0 ? content : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * U-195 (DR-69 B-3, B-4, B-7): `codaryn apply` of a plan of kind "changes" (the task resolves to
+ * `plan: "run"`). The approval is a plan of mode apply's (DR-1: --digest, the terminal question with
+ * the plan's view, the adapter's), then a model run carries the plan out: runPrepared with the
+ * approved plan, whose engine (runApprovedPlan) checks every planned file, claims the plan once
+ * (applied.json) and writes planned files only. The output is the run's EngineResult (planRunId,
+ * planDigest). Refused before anything is asked, sent or written: a plan of the other kind
+ * (run_not_plan), a plan already carried out (plan_already_applied), a records-changed mark
+ * (plan_records_changed), an unsafe-move consent (it is for moves: invalid_arguments), the view's
+ * checks (plan_secrets_differ), a plan run whose goal cannot be read (invalid_run_record: the run is
+ * given the plan run's goal, planRunGoal, in every task form).
+ * Exported for tests while U-177 has the parsers refuse plan "run", so that no task resolves to it
+ * yet and runApply cannot reach this path from the command line (the refusal goes with U-187's fix).
+ */
+export async function applyChangesPlan(io: ApplyCommandEnvironment, args: ApplyArgs, value: Prepared): Promise<CommandOutcome> {
+  const { workspaceRoot, runId: planRunId } = value;
+  const loaded = await loadAny(io, value);
+  if (!loaded.ok) return cliError(loaded.code, LOAD_MESSAGES[loaded.code]);
+  if (loaded.plan.kind !== "changes") {
+    return cliError(
+      "run_not_plan",
+      'that run made a plan of moves and discards (plan "apply"), but the task given to apply resolves to plan "run"; give the task the plan run used; nothing was run',
+    );
+  }
+  const plan = loaded.plan;
+  if (loaded.applied !== null) {
+    return cliError("plan_already_applied", "that plan was already carried out; nothing was run. Revert the run that carried it out to undo it");
+  }
+  if (await planRunMarked(io, workspaceRoot, planRunId)) {
+    return cliError(
+      "plan_records_changed",
+      "the plan run's records were changed by something other than the run (a records-changed mark), so its plan may not be the one shown; nothing was asked, sent or written. Make the plan again with a new codaryn run",
+    );
+  }
+  const adapter = io.adapter;
+  if (args.allowUnsafeMove || (adapter !== undefined && adapter.unsafeMoveConsent !== null)) {
+    return cliError("invalid_arguments", `the consent to unsafe moves (${UNSAFE_MOVE_CONSENT_ARGUMENT}) is for a plan of moves; a run plan moves no file; nothing was run`);
+  }
+  const view = await changesView(io, value, { plan, digest: loaded.digest, applied: loaded.applied });
+  if (!view.ok) return view.outcome;
+  const goal = await planRunGoal(io, workspaceRoot, planRunId);
+  if (goal === null) {
+    return cliError("invalid_run_record", "the plan run's records do not hold the goal it was given, so its plan is not carried out; nothing was asked, sent or written");
+  }
+  const runIo = io.run;
+  if (runIo === undefined) return cliError("internal_error", "this build cannot carry out a run plan here; nothing was sent or written");
+
+  // U-131 (N5) as for a plan of mode apply: a plan made with another task is told before the question.
+  const planTaskId = await planTaskIdOf(io, workspaceRoot, planRunId);
+  const otherTask =
+    planTaskId !== null && planTaskId !== value.prepared.task.id
+      ? catalogLine(io.messages, (catalog) => catalog.format("apply.notice.plan_task_differs"), () => PLAN_TASK_DIFFERS_ENGLISH)
+      : null;
+  const ask = adapter === undefined ? io.ask : undefined;
+  let approval: ApprovalChannel;
+  if (args.digest !== null) {
+    if (!loaded.digest.startsWith(args.digest)) return cliError("plan_not_approved", "--digest does not match the plan's digest; nothing was run. `codaryn plan` shows it");
+    approval = adapter === undefined ? "cli-flag" : "adapter";
+  } else if (ask !== undefined) {
+    const question = [
+      renderChangesPlan(view.output, knownKeyValues(io.env), io.messages).trimEnd(),
+      ...(otherTask === null ? [] : [otherTask]),
+      applyQuestion(io.messages),
+    ].join("\n");
+    const answer = (await ask(question))?.trim().toLowerCase() ?? "";
+    if (!YES.has(answer)) return cliError("plan_not_approved", "the plan was not approved; nothing was run");
+    approval = "cli-tty";
+  } else {
+    return cliError("plan_not_approved", "an apply needs --digest with the plan's digest (codaryn plan shows it); nothing was run");
+  }
+  if (otherTask !== null && !args.quiet && io.writeProgress !== undefined) {
+    try {
+      io.writeProgress(`${cleanText(`${PROGRESS_PREFIX}${otherTask}`)}\n`);
+    } catch {
+      // Progress is best effort.
+    }
+  }
+  const prepared: PreparedTask = { ...value.prepared, task: { ...value.prepared.task, goal } };
+  const outcome = await runPrepared(runIo, runArgsOf(args.form, args.cancelFile, args.quiet), value.notes, prepared, {
+    planRunId,
+    digest: loaded.digest,
+    approval,
+    plan,
+  });
+  return { output: outcome.output, exitCode: outcome.exitCode };
 }
 
 /**

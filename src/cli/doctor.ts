@@ -960,16 +960,25 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     // anywhere it can. The lists a run would have (writablePathSetsOf, as run.ts builds them).
     const commandRules = (policy?.commands ?? []).length;
     const writableLists = writablePathSetsOf({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: task?.policy ?? null });
-    const writableWarning: { readonly message: string; readonly text: DoctorText } | null =
-      commandRules > 0 && writableLists.length > 0
-        ? {
-            message: `${commandRules} command rule(s) while writablePaths limits the file tools; writablePaths does not bind commands, so an allowed command can write files outside it`,
-            text: { id: "doctor.commands.writable_with_commands", params: { count: commandRules } },
-          }
-        : null;
-    const withWritable = (message: string): string => (writableWarning === null ? message : `${message}; ${writableWarning.message}`);
-    // The warning is the check's text when nothing else is said; otherwise one of its notes.
-    const writableNotes: DoctorText[] = writableWarning === null ? policyNotes : [writableWarning.text, ...policyNotes];
+    // U-195 (DR-69 B-8): likewise a plan of mode "run": its approved files bind the file tools only.
+    // The task's plan, else the task type definition's (as resolveWorkflow resolves it).
+    const planMode = task?.plan ?? definition?.plan ?? "none";
+    const laterWarnings: { readonly message: string; readonly text: DoctorText }[] = [];
+    if (commandRules > 0 && writableLists.length > 0) {
+      laterWarnings.push({
+        message: `${commandRules} command rule(s) while writablePaths limits the file tools; writablePaths does not bind commands, so an allowed command can write files outside it`,
+        text: { id: "doctor.commands.writable_with_commands", params: { count: commandRules } },
+      });
+    }
+    if (commandRules > 0 && planMode === "run") {
+      laterWarnings.push({
+        message: `${commandRules} command rule(s) with plan "run"; the approved files bind the file tools only, so an allowed command can write files outside the plan`,
+        text: { id: "doctor.commands.plan_run_with_commands", params: { count: commandRules } },
+      });
+    }
+    const withWritable = (message: string): string => [message, ...laterWarnings.map((warning) => warning.message)].join("; ");
+    // A warning is the check's text when nothing else is said; otherwise one of its notes.
+    const writableNotes: DoctorText[] = [...laterWarnings.map((warning) => warning.text), ...policyNotes];
     // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
     // actions. Codaryn does not check a command's arguments, so such a command can change files
     // outside an approved plan. Problems found above keep their text; the warning joins the message.
@@ -983,8 +992,9 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       } else {
         set("commands", checked.status, withWritable(`${checked.message}; ${warning}`), checked.text, writableNotes);
       }
-    } else if (writableWarning !== null && checked.status === "ok") {
-      set("commands", "warn", writableWarning.message, writableWarning.text, policyNotes);
+    } else if (laterWarnings.length > 0 && checked.status === "ok") {
+      const [first, ...rest] = laterWarnings as [{ readonly message: string; readonly text: DoctorText }, ...{ readonly message: string; readonly text: DoctorText }[]];
+      set("commands", "warn", laterWarnings.map((warning) => warning.message).join("; "), first.text, [...rest.map((warning) => warning.text), ...policyNotes]);
     } else {
       set("commands", checked.status, withWritable(checked.message), checked.text, writableNotes);
     }

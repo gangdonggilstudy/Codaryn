@@ -455,6 +455,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // G-A: a plan waiting for approval says so first.
       const planReady = pair?.reason === "plan_pending" && result.plan !== undefined && isCount(result.plan.actions);
       if (planReady && result.plan !== undefined) out.push(catalog.format("summary.plan_ready", { actions: result.plan.actions }));
+      // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run (EngineResult.planRunId),
+      // as an apply's summary does; absent in every other run, so no other summary changes.
+      const carried: unknown = result.planRunId;
+      const carriedPlan = typeof carried === "string" ? toRunId(carried) : null;
+      if (carriedPlan !== null) out.push(catalog.format("summary.apply_plan_run", { runId: carriedPlan }));
       // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
@@ -488,8 +493,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // U-198 (B-4, V-14 L-1): of those, the writes refused as not writable, by why, each with its own
+      // advice: not one of the carried-out plan's files (make a new plan), then outside the settings'
+      // writablePaths (add the file). The fields are optional: absent is 0, no line.
+      const notPlanned = isCount(context.deniedNotPlanned) ? context.deniedNotPlanned : 0;
+      if (notPlanned > 0) out.push(catalog.format("summary.denied_not_planned", { count: notPlanned }), catalog.format("summary.denied_not_planned_hint"));
+      const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
+      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }), catalog.format("summary.denied_not_writable_hint"));
       // U-207 (bundle A, R-8): of those, the calls refused at a path this task may not read, and once
-      // what a person can do about it. Optional: absent is 0, no line.
+      // what a person can do about it, after the not-writable lines. Optional: absent is 0, no line.
       const unreadable = isCount(context.deniedUnreadable) ? context.deniedUnreadable : 0;
       if (unreadable > 0) out.push(catalog.format("summary.denied_unreadable", { count: unreadable }), catalog.format("summary.denied_unreadable_hint"));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
@@ -804,6 +816,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
         const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
         if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
+        // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run in the same place
+        // (RunListEntry.planRunId on a run that is not an apply run; absent on every other run).
+        const carriedPlan = entry.kind !== "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
+        if (carriedPlan !== null) status += ` · ${catalog.format("runs.carried_plan", { runId: carriedPlan })}`;
         // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
         // review.json); the time is in the JSON only. Before the marks of what came after the run.
         const review: unknown = entry.review;

@@ -36,6 +36,8 @@ import type {
   AnthropicProviderDeps,
   ApiProviderDeps,
   ApiProviderName,
+  ApprovalChannel,
+  ApprovedPlanRunDeps,
   CliErrorCode,
   CliErrorHint,
   CliErrorHintDetail,
@@ -43,11 +45,13 @@ import type {
   CliOutput,
   Clock,
   CodarynConfig,
+  ContentHash,
   CreateAnthropicProvider,
   CreateApiProvider,
   DefaultConfigDisplay,
   DefaultConfigLocation,
   DetailedCliErrorHint,
+  EngineDeps,
   EngineResult,
   InputDiagnostic,
   InputDiagnosticFile,
@@ -59,11 +63,14 @@ import type {
   PrivacyGateway,
   HumanOutput,
   MessageCatalog,
+  PlanMode,
   PolicyConfig,
   PolicyNarrowing,
+  RunApprovedPlan,
   RunSummaryContext,
   RunTask,
   ShownWorkspace,
+  StoredChangesPlan,
   VerifierConfig,
   WorkflowDefinition,
   WorkflowProblem,
@@ -75,11 +82,11 @@ import { cleanText } from "./text-safety.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { terminalConfirm } from "./confirm.js";
 import type { AskLine } from "./confirm.js";
-import { runTask as engineRunTask } from "../engine/index.js";
+import { runApprovedPlan as engineRunApprovedPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
 import type { RunArgs } from "./args.js";
-import type { Assemble } from "./assemble.js";
+import type { ApprovedPlanParts, Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
@@ -131,6 +138,8 @@ export interface CliEnvironment {
   readonly randomBytes: (size: number) => Uint8Array;
   readonly assemble: Assemble;
   readonly runTask?: RunTask;
+  /** U-195: overrides the engine's runApprovedPlan in tests (a run that carries out an approved run plan). */
+  readonly runApprovedPlan?: RunApprovedPlan;
   /** Overrides `anthropicProviderFactory` in tests. `null` stands for a provider that is not connected. */
   readonly createAnthropicProvider?: CreateAnthropicProvider | null;
   /** Passed to the anthropic provider. Tests inject `fetch` here; the real CLI leaves it unset. */
@@ -191,8 +200,13 @@ export interface RunNotes {
   deniedToolCalls: number;
   /** N-23: the denied calls whose permission is `command`. */
   deniedCommandCalls: number;
-  /** U-182 (DR-69 B-4): the denied writes outside the writable lists (path_not_writable); absent is 0. */
+  /**
+   * U-182 (DR-69 B-4): the denied writes outside the writable lists (path_not_writable); absent is 0.
+   * U-195 (Codex V-14 L-1, U-198): in a run that does not carry out a plan.
+   */
   deniedNotWritable?: number;
+  /** U-195 (Codex V-14 L-1, U-198): such writes in a run that carries out a plan (outside its files); absent is 0. */
+  deniedNotPlanned?: number;
   /** DR-51 (U-38): the typed --workspace of the quick form, after the run's masking (toShownWorkspace); absent when it gives none. */
   workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
@@ -337,6 +351,28 @@ function withModelHint(
   return { ...result, notices: [...result.notices, masked.text] };
 }
 
+/**
+ * U-195: ApprovedPlanRunDeps from a run's deps: no gate of its own (the engine makes it with
+ * policyFor, adding the plan's files as one more writable list), and the approved plan with the
+ * assembly's probe, claim and records question.
+ */
+function approvedDeps(deps: EngineDeps, approved: ApprovedRunPlan, parts: ApprovedPlanParts): ApprovedPlanRunDeps {
+  const { policy: _gate, ...rest } = deps;
+  return {
+    ...rest,
+    approved: {
+      planRunId: approved.planRunId,
+      digest: approved.digest,
+      approval: approved.approval,
+      plan: approved.plan,
+      fileNow: parts.fileNow,
+      markApplied: () => parts.markApplied(),
+      planRecordsUnchecked: () => parts.planRecordsUnchecked(),
+    },
+    policyFor: (sets) => parts.policyFor(sets),
+  };
+}
+
 /** U-182: the English of progress.not_writable_hint, when no catalog is given. */
 const notWritableHint = (count: number): string =>
   `Writes denied because the file is not in writablePaths: ${count}. To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.`;
@@ -389,6 +425,16 @@ function unreadableWithCommands(
     return error(file === "task" ? "invalid_task" : "invalid_config", `${field} ${unreadableWithCommandsText(field)}`, positionDiagnostic(file, { code: "invalid_value", field }));
   }
   return null;
+}
+
+/**
+ * U-195 (U-177's note): plan_weakened names the task's and the definition's plan modes (U-180: a task
+ * keeps a definition's "apply" or "run", or sets one under "none"). A definition's "apply" and a
+ * task's "none" give WORKFLOW_PROBLEM_TEXT's text, as before.
+ */
+function planWeakenedText(taskPlan: PlanMode | undefined, definitionPlan: PlanMode | undefined): string {
+  if (taskPlan === undefined || definitionPlan === undefined) return WORKFLOW_PROBLEM_TEXT.plan_weakened;
+  return `cannot be "${taskPlan}" under a workflow with plan "${definitionPlan}"`;
 }
 
 /**
@@ -509,6 +555,9 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     ...(notes.confirmationDenied === undefined ? {} : { confirmationDenied: { ...notes.confirmationDenied, couldAsk: notes.couldAsk === true } }),
     // U-148 (U-140, UXM-18): what the task type left out, as run_started records it; not when empty.
     ...(notes.policyNarrowings === undefined || notes.policyNarrowings.length === 0 ? {} : { policyNarrowings: notes.policyNarrowings }),
+    // U-195 (Codex V-14 L-1, U-198): the writes refused as not writable, by why; not when none.
+    ...(notes.deniedNotPlanned === undefined ? {} : { deniedNotPlanned: notes.deniedNotPlanned }),
+    ...(notes.deniedNotWritable === undefined ? {} : { deniedNotWritable: notes.deniedNotWritable }),
     // U-210 (U-207): the calls refused at unreadable paths and the table results that hid groups; not when none.
     ...(notes.deniedUnreadable === undefined ? {} : { deniedUnreadable: notes.deniedUnreadable }),
     ...(notes.hiddenGroups === undefined ? {} : { hiddenGroups: { ...notes.hiddenGroups } }),
@@ -781,7 +830,7 @@ export async function prepareTask(
     const file: InputDiagnosticFile = fromConfig ? "config" : "task";
     const workflowError = error(
       fromConfig ? "invalid_config" : "invalid_task",
-      `${resolved.field} ${WORKFLOW_PROBLEM_TEXT[resolved.problem]}`,
+      `${resolved.field} ${resolved.problem === "plan_weakened" ? planWeakenedText(parsed.plan, definition?.plan) : WORKFLOW_PROBLEM_TEXT[resolved.problem]}`,
       positionDiagnostic(file, { code: "invalid_value", field: resolved.field }),
     );
     // U-37: a task type neither built in nor in the config's workflows.
@@ -899,8 +948,31 @@ export async function prepareTask(
 async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Promise<CliRunOutcome> {
   const ready = await prepareTask(io, args, notes);
   if (!("prepared" in ready)) return ready;
-  const { task, config, integrityPaths, defaultDisplay } = ready.prepared;
-  const secrets = [...ready.prepared.secrets];
+  return runPrepared(io, args, notes, ready.prepared);
+}
+
+/**
+ * U-195 (DR-69 B-3, B-4): an approved `run` plan that `codaryn apply` carries out (ApprovedChangesPlan
+ * without what the assembly makes): the plan run, the approved digest, how the person approved it,
+ * and the plan as loaded (LoadAnyPlan).
+ */
+export interface ApprovedRunPlan {
+  readonly planRunId: string;
+  readonly digest: ContentHash;
+  readonly approval: ApprovalChannel;
+  readonly plan: StoredChangesPlan;
+}
+
+/**
+ * Steps 8 on (the model, the assembly, the engine, the end summary) for a prepared task. `run` gives
+ * no `approved`. U-195: `codaryn apply` gives the approved `run` plan it checked: the assembly then
+ * claims that plan run (AssemblyInput.planRunId) and the engine's runApprovedPlan carries it out
+ * (EngineResult with planRunId and planDigest); the rest (progress lines, end summary, result.json)
+ * is a run's.
+ */
+export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask, approved?: ApprovedRunPlan): Promise<CliRunOutcome> {
+  const { task, config, integrityPaths, defaultDisplay } = prepared;
+  const secrets = [...prepared.secrets];
   const addSecret = (value: string): void => {
     if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
   };
@@ -948,8 +1020,41 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
   const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
   const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
   try {
-    const assembled = await io.assemble({ task, runId, model: watchedModel, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
+    const assembled = await io.assemble({
+      task,
+      runId,
+      model: watchedModel,
+      secrets,
+      clock: io.clock,
+      signal: cancel.signal,
+      integrityPaths,
+      ...(approved === undefined ? {} : { planRunId: approved.planRunId }),
+    });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
+    // U-195: an assembly that cannot claim a plan (an older one) carries none out.
+    const parts = assembled.approvedPlan;
+    if (approved !== undefined && parts === undefined) {
+      await assembled.finish(null);
+      return error("internal_error", "this build cannot carry out a run plan; nothing was sent or written");
+    }
+    // U-195 (PM, as an apply of a plan of moves, U-1): the plan run's records-changed mark again, now
+    // that the lock is held: a mark written since apply's own look stops the run before anything is
+    // recorded, sent or written. A look that cannot be made counts as a mark (fail closed).
+    if (approved !== undefined && parts !== undefined) {
+      let marked: boolean;
+      try {
+        marked = await parts.planRecordsChanged();
+      } catch {
+        marked = true;
+      }
+      if (marked) {
+        await assembled.finish(null);
+        return error(
+          "plan_records_changed",
+          "the plan run's records were changed by something other than the run (a records-changed mark), found under the workspace lock; its plan may not be the one approved, so nothing was recorded, sent or written. Make the plan again with a new codaryn run",
+        );
+      }
+    }
     const recorded = assembled.deps.journal;
     // U-18: the calls allowed and then failed, counted as the records are written.
     const failed = createFailedCalls();
@@ -960,7 +1065,13 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
         if (event.type === "tool_decision" && !event.allowed) {
           notes.deniedToolCalls += 1;
           if (event.permission === "command") notes.deniedCommandCalls += 1;
-          if (event.code === "path_not_writable") notes.deniedNotWritable = (notes.deniedNotWritable ?? 0) + 1;
+          // U-195 (Codex V-14 L-1, U-198): in a run that carries out a plan, every such write is outside
+          // the plan's files: before the model the engine judged each planned file at the same gate and
+          // ended the run as plan_stale if a writable list left one out (U-187, checkApprovedPlan).
+          if (event.code === "path_not_writable") {
+            if (approved === undefined) notes.deniedNotWritable = (notes.deniedNotWritable ?? 0) + 1;
+            else notes.deniedNotPlanned = (notes.deniedNotPlanned ?? 0) + 1;
+          }
         }
         if (event.type === "confirmation_answered" && event.decision === "deny" && (event.by === "user" || event.by === "default" || event.by === "cancelled")) {
           const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
@@ -1035,11 +1146,17 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     let result: EngineResult | null = null;
     try {
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
-      const ended = withoutEmptyStateChanged(await (io.runTask ?? engineRunTask)(deps));
+      const ended = withoutEmptyStateChanged(
+        approved === undefined || parts === undefined
+          ? await (io.runTask ?? engineRunTask)(deps)
+          : await (io.runApprovedPlan ?? engineRunApprovedPlan)(approvedDeps(deps, approved, parts)),
+      );
       const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
       const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
       // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress
-      // line only; the result is unchanged.
+      // line only; the result is unchanged. U-195 (Codex V-14 L-1, U-198): not in a run that carries
+      // out a plan, whose refused writes are counted as outside the plan (deniedNotPlanned), which no
+      // writablePaths entry widens; the end summary tells those and how to go on.
       const notWritable = notes.deniedNotWritable ?? 0;
       if (write !== undefined && notWritable > 0) {
         writeMasked(write, privacy, human === undefined ? notWritableHint(notWritable) : human.messages.format("progress.not_writable_hint", { count: notWritable }));

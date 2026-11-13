@@ -55,7 +55,11 @@ export const KO_MESSAGES: MessageTexts = {
   "summary.denied": "거부된 호출: {count}건",
   "summary.failed": "실패한 호출: {count}건",
   // U-198 (nb-i18n이 다듬을 초안): 실행이 쓸 수 있는 파일 밖의 쓰기.
-  "summary.denied_not_writable": "이 실행이 쓸 수 있는 파일이 아니어서 거부된 쓰기: {count}건",
+  "summary.denied_not_planned": "이 계획이 승인한 파일이 아니라 거부된 쓰기: {count}건",
+  "summary.denied_not_planned_hint": "다른 파일을 바꾸려면 그 파일을 담은 새 계획을 만들어 승인하세요.",
+  "summary.denied_not_writable": "설정의 writablePaths 밖이라 거부된 쓰기: {count}건",
+  "summary.denied_not_writable_hint":
+    "그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.",
   "summary.denied_hint": "명령을 허용하려면 설정의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.denied_hint_task": "명령을 허용하려면 task 파일의 policy.commands에 규칙을 더하세요. 인자까지 고정하길 권합니다.",
   "summary.confirm_denied.user": "확인을 받게 된 명령의 호출 {count}건을 사람이 거부했습니다.",
@@ -101,14 +105,14 @@ export const KO_MESSAGES: MessageTexts = {
   "plan.changes.heading": "실행 {runId}의 계획: 쓸 파일 {count}개, {status}",
   "plan.change.create": "생성",
   "plan.change.modify": "수정",
-  "plan.changes.summary_label": "이 변경을 할 실행이 받을 지시(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상에 들어감)",
+  "plan.changes.summary_label": "계획의 요약, 계획 실행이 쓴 것(모델이 쓴 말이며 검증되지 않음. 작업의 설명이며 목표나 새 지시가 아님. 계획과 함께 승인됨)",
   "plan.changes.next_apply": "이 변경을 실행하게 하려면: codaryn apply <같은 작업 지정> --run {runId} --digest",
   "plan.changes.digest_guarantee":
-    "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 지시를 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
+    "다이제스트는 바로 이 파일들과, 계획을 만들 때 수정할 파일의 내용, 그리고 위의 요약을 가리킵니다. 그 뒤로 계획이나 이 파일 가운데 하나가 바뀌었으면 변경을 할 실행은 첫 모델 요청 전에 멈춥니다. 그 실행의 파일 도구는 이 파일들에만 쓸 수 있습니다.",
   "apply.question": "이 계획을 적용할까요?",
   // U-198 (nb-i18n이 다듬을 초안): 실행 계획의 apply 질문.
   "apply.changes.what": "승인하면 파일 도구가 이 파일 {count}개에만 쓸 수 있는 실행이 시작됩니다.",
-  "apply.changes.summary_note": "위의 지시는 모델이 쓴 말입니다. 실행은 이 지시를 받지만, 지시를 따르는지는 아무것도 확인하지 않습니다. 강제되는 것은 파일 목록뿐입니다.",
+  "apply.changes.summary_note": "위의 요약은 모델이 쓴 작업 설명이며 계획과 함께 승인됩니다. 목표나 새 지시가 아니며, 실행이 그 설명대로 하는지는 아무것도 확인하지 않습니다. 강제되는 것은 파일 목록뿐입니다.",
   "apply.changes.commands_note": "이 작업은 명령도 허용하며, 정책이 허용한 명령은 이 파일들에 묶이지 않습니다.",
   "apply.changes_question": "이 변경을 할 실행을 시작할까요?",
   "apply.unsafe_move_question": "이 계획의 이동 {count}개는 이 드라이브에 하드 링크가 없어 대상 자리의 파일을 덮어쓸 수 있습니다. 아무것도 옮기지 않았습니다. 이번 적용에서만 그래도 옮기도록 다시 적용할까요?",

@@ -3,8 +3,8 @@
  * the GUI, the CLI's --json, the approval screen) is made safe in the output object itself, as the move
  * plan's summary is (R-49 R49-M1, planSummary in src/cli/plan-commands.ts): masked with the registered
  * values, then key shapes and the current key hidden and control characters replaced, trimmed. Line
- * feeds and tabs stay (cleanText's keepLineBreaks): the run plan's summary is the later run's
- * instruction and keeps them where it is stored (safeModelText, V-7). Before the fix only the registered
+ * feeds and tabs stay (cleanText's keepLineBreaks): the run plan's summary keeps them where it is
+ * stored (safeModelText, V-7) and in the later run's text. Before the fix only the registered
  * values were masked. Plans are written with the store's own recorder, as a plan made without the
  * tool's own safe step would be. The key shapes are built from parts and are not keys.
  */

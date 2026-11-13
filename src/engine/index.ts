@@ -41,6 +41,7 @@ import {
   ALL_TOOL_DESCRIPTORS,
   ALL_TOOL_NAMES,
   BUILTIN_TOOLS,
+  CONFIRM_ANSWER_DECISIONS,
   CALL_ID_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   PLAN_ACTION_DESCRIPTORS,
@@ -99,6 +100,9 @@ import type {
   ToolErrorCode,
   ToolName,
   ToolResult,
+  ConfirmRequest,
+  ConfirmationBy,
+  ConfirmationDecision,
   VerifierOutcome,
   VerifierResult,
   WorkflowToolName,
@@ -615,6 +619,76 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     return result;
   };
 
+  /** U-74: the number of the last permission question of this run (ConfirmRequest.id `q<k>`). */
+  let confirmations = 0;
+
+  /**
+   * U-74 B-3 (DR-3, DR-10): the second check gave the confirm mark. Records the question (fixed
+   * fields, the masked executable, the number of arguments; never the arguments), asks
+   * EngineDeps.confirm (absent: nobody, so deny by default), records the answer, and after
+   * `allow_once` judges the same call again: allowed, or the same mark (the answer is for this call
+   * once), runs it; any other denial denies. The wait counts in maxDurationMs: the run's signal ends
+   * it, and a cancel or the time limit then ends the run.
+   */
+  const askPermission = async (
+    call: ToolCall,
+    tool: ToolName,
+    effective: EffectiveToolCall,
+    descriptor: ToolDescriptor,
+    mark: Extract<PolicyDecision, { allowed: false }>,
+  ): Promise<PolicyDecision | End> => {
+    const args = effective.args as { readonly executable?: unknown; readonly args?: unknown };
+    const subject = mask(typeof args.executable === "string" ? args.executable : "");
+    if (subject === null) return MASKING_FAILED;
+    confirmations += 1;
+    const request: ConfirmRequest = {
+      kind: "permission",
+      id: `q${confirmations}`,
+      callId: call.id,
+      tool,
+      permission: mark.permission,
+      subject,
+      argumentCount: Array.isArray(args.args) ? args.args.length : 0,
+    };
+    await record({ type: "confirmation_requested", ...request });
+    let answer: unknown;
+    const ask = deps.confirm;
+    if (ask !== undefined && !runSignal.aborted) {
+      let stopWaiting: () => void = () => {};
+      const ended = new Promise<never>((_resolve, reject) => {
+        stopWaiting = () => reject(new Error("the run's signal aborted"));
+        runSignal.addEventListener("abort", stopWaiting, { once: true });
+      });
+      try {
+        answer = await Promise.race([ask(request, runSignal), ended]);
+      } catch {
+        answer = undefined;
+      } finally {
+        runSignal.removeEventListener("abort", stopWaiting);
+        ended.catch(() => {});
+      }
+    }
+    const answered = async (decision: ConfirmationDecision, by: ConfirmationBy): Promise<void> => {
+      await record({ type: "confirmation_answered", id: request.id, decision, by });
+    };
+    const stop = interrupted();
+    if (stop !== null) {
+      await answered("deny", stop.status === "cancelled" ? "cancelled" : "default");
+      return stop;
+    }
+    const decision =
+      typeof answer === "object" && answer !== null && (CONFIRM_ANSWER_DECISIONS as readonly unknown[]).includes((answer as { decision?: unknown }).decision)
+        ? (answer as { decision: (typeof CONFIRM_ANSWER_DECISIONS)[number] }).decision
+        : "dismissed";
+    if (decision !== "allow_once") {
+      await answered("deny", decision === "deny" ? "user" : "default");
+      return mark;
+    }
+    await answered("allow_once", "user");
+    const again = await policy.checkEffective(effective, descriptor);
+    return again.allowed || again.confirm === true ? { allowed: true } : again;
+  };
+
   const denied = async (
     call: ToolCall,
     stage: "policy_requested" | "policy_effective",
@@ -932,7 +1006,13 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     if (effectiveArgs === null) return invalidArgs(toolArgsProblem(name, resolved.args));
     const effective = { id: call.id, name, args: effectiveArgs } as EffectiveToolCall;
 
-    const checked = await policy.checkEffective(effective, descriptor);
+    let checked = await policy.checkEffective(effective, descriptor);
+    // U-74 (DR-3): only the confirm mark asks; without it nothing here changes.
+    if (!checked.allowed && checked.confirm === true) {
+      const answeredDecision = await askPermission(call, name, effective, descriptor, checked);
+      if (isEnd(answeredDecision)) return answeredDecision;
+      checked = answeredDecision;
+    }
     if (!checked.allowed) return denied(call, "policy_effective", checked);
     await record({
       type: "tool_decision",

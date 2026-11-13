@@ -33,12 +33,12 @@ import type { DoctorCheckId, DoctorCheckStatus } from "./commands.js";
 import { CLI_ERROR_EXIT_CODES, CLI_ERROR_HINTS, RUN_REASONS, TERMINAL_RUN_STATUSES } from "./engine.js";
 import { INTEGRITY_PHASES } from "./integrity.js";
 import { MODEL_ERROR_KINDS } from "./model.js";
-import { PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
+import { CONFIRMATION_BY, PERMISSION_KINDS, POLICY_DENIAL_CODES } from "./policy.js";
 import type { CliErrorCode, CliErrorHint, CliErrorOutput, EngineResult, RevertOutput, RunReason, TerminalRunStatus } from "./engine.js";
 import type { IntegrityPhase } from "./integrity.js";
 import type { JournalEvent } from "./journal.js";
 import type { ModelErrorKind } from "./model.js";
-import type { PermissionKind, PolicyDenialCode } from "./policy.js";
+import type { ConfirmationBy, PermissionKind, PolicyDenialCode } from "./policy.js";
 import { APPLY_NOTICE_KINDS, APPROVAL_CHANNELS, PLAN_ITEM_PROBLEMS, PLAN_RECORDS_UNCHECKED_CAUSES } from "./plan.js";
 import type { ApplyJournalEvent, ApplyNoticeKind, ApplyResult, ApprovalChannel, PlanItemProblem, PlanRecordsUncheckedCause } from "./plan.js";
 import type { ModelProviderName } from "./task.js";
@@ -752,6 +752,12 @@ export const FIXED_MESSAGES = {
   // of the state directory that was too large to check (the run goes on).
   "progress.state_changed": { count: "count" },
   "progress.state_unchecked": {},
+  // U-74 (DR-3): the in-run permission question (ConfirmRequest). The question: `{count}` is
+  // ConfirmRequest.argumentCount; the renderer puts the masked executable (`subject`) after it as an
+  // item and then `prompt.yes_no_default_no` (Enter, end of input or no terminal: no). Then one
+  // progress line: allowed for this call once, or `progress.confirmation_denied.<by>`.
+  "confirm.question.command": { count: "count" },
+  "progress.confirmation_allowed": {},
   // DR-41: lines at the run's start from run_started.policyNarrowings. Counts only.
   "progress.workflow_policy.commands_dropped": { count: "count" },
   "progress.workflow_policy.commands_narrowed": { count: "count" },
@@ -981,6 +987,7 @@ export type ListedMessageId =
   | `permission.${PermissionKind}`
   | `phase.${IntegrityPhase}`
   | `modelError.${ModelErrorKind}`
+  | `progress.confirmation_denied.${ConfirmationBy}`
   | `language.source.${LanguageSource}`
   | `help.command.${HelpCommand}`
   | `help.option.${HelpOption}`
@@ -1037,6 +1044,7 @@ export const MESSAGE_IDS: readonly MessageId[] = [
   ...PERMISSION_KINDS.map((kind) => `permission.${kind}` as const),
   ...INTEGRITY_PHASES.map((phase) => `phase.${phase}` as const),
   ...MODEL_ERROR_KINDS.map((kind) => `modelError.${kind}` as const),
+  ...CONFIRMATION_BY.map((by) => `progress.confirmation_denied.${by}` as const),
   ...LANGUAGE_SOURCES.map((source) => `language.source.${source}` as const),
   ...HELP_COMMANDS.map((command) => `help.command.${command}` as const),
   ...HELP_OPTIONS.map((option) => `help.option.${option}` as const),

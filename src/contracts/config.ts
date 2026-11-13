@@ -7,7 +7,7 @@
  */
 
 import type { MessageLanguage } from "./human.js";
-import type { Limits, PolicyConfig } from "./task.js";
+import type { ConfirmablePolicyConfig, Limits, PolicyConfig } from "./task.js";
 import type { VerifierConfig } from "./verify.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
@@ -81,8 +81,8 @@ export interface CodarynConfig {
   readonly maxRetries?: number;
   /** Default limits. Same rules as task limits: positive integers, `maxTotalTokens` may be null. */
   readonly limits?: Partial<Limits>;
-  /** Quick form policy. Absent means DENY_ALL_POLICY. */
-  readonly policy?: PolicyConfig;
+  /** Quick form policy. Absent means DENY_ALL_POLICY. U-74: its command rules may say `confirm: true`. */
+  readonly policy?: ConfirmablePolicyConfig;
   /** Quick form verifiers. Absent means none (the run ends as needs-input, `no_verifier`). */
   readonly verifiers?: readonly VerifierConfig[];
   /** Names of environment variables whose values are registered as secrets. */
@@ -140,7 +140,8 @@ export interface ProviderSettings {
 export interface ConfigProfile {
   /** SP-D10: the API provider for the quick form with this profile; it wins over the config's `provider`. */
   readonly provider?: ApiProviderName;
-  readonly policy?: PolicyConfig;
+  /** U-74: its command rules may say `confirm: true`, as the config's. */
+  readonly policy?: ConfirmablePolicyConfig;
   readonly verifiers?: readonly VerifierConfig[];
   readonly limits?: Partial<Limits>;
   /** G-A: the task type definition this profile uses when the task names none (`ResolveWorkflow`). */

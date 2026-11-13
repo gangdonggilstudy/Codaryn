@@ -1,15 +1,14 @@
 /**
- * U-176 (ne-verify's smoke flake; design in the unit's report): a lock that could not be released
- * stayed with this process's live pid, so every later start in this process was workspace_locked.
- * - (1) releaseLock tries again, briefly, when removing the lock fails with EBUSY or EPERM (a handle
- *   that does not share deletion, as some scanners open files); in the end it still throws.
- * - (3) acquireLock (and inspectLock, which judges as it does) takes back a lock of this very process
- *   that no attempt here holds any more: its pid is this process's, its recorded start is this
- *   process's to the letter, and it is not in this process's list of held locks. Nothing else
- *   changes: a live lock of another process, a lock this process holds now, and a lock of this pid
- *   without a recorded start are never taken back.
- * The handle cases need Windows: another process (PowerShell) opens the lock file sharing reading only,
- * as the smoke flake's holder did, so removing or moving it fails (EPERM) until it closes. Fake run ids only.
+ * U-176 (ne-verify's smoke flake; design in the unit's report; changed after Codex's V-4): a lock that
+ * could not be released stayed with this process's live pid, so every later start in this process was
+ * workspace_locked.
+ * - (1) releaseLock tries again, briefly, when reading or removing the lock fails with EBUSY or EPERM (a
+ *   handle that does not share deletion or reading, as some scanners open files).
+ * - (2) When it still cannot, it throws, so the caller can say so; the lock stays and is judged by the
+ *   rules as before: held while this process lives, never taken back by this process (V-4 H-1: the
+ *   reclaim of a process's own lock is taken out). A later release of the same run still removes it.
+ * The handle cases need Windows: another process (PowerShell) opens the lock file sharing reading only
+ * (no deletion), as the smoke flake's holder did, or sharing nothing (no reading either). Fake run ids only.
  */
 
 import assert from "node:assert/strict";
@@ -36,11 +35,11 @@ const lockFile = (root: string): string => join(root, ".codaryn", "lock.json");
 const OWN_START = new Date(performance.timeOrigin).toISOString();
 const windowsOnly = process.platform === "win32" ? false : "a handle that does not share deletion is made with PowerShell on Windows";
 /**
- * Another process opens `file` sharing reading only (no deletion) for `ms` milliseconds. Resolves once it
- * holds the file; `closed` resolves when it has let go.
+ * Another process opens `file` for `ms` milliseconds, sharing reading only ("Read": no deletion) or
+ * nothing ("None": no reading either). Resolves once it holds the file; `closed` resolves when it has let go.
  */
-async function holdOpen(file: string, ms: number): Promise<{ readonly closed: Promise<void> }> {
-  const script = `$h = [System.IO.File]::Open($env:U176_FILE, "Open", "Read", "Read"); [Console]::Out.WriteLine("held"); Start-Sleep -Milliseconds ${ms}; $h.Close()`;
+async function holdOpen(file: string, ms: number, share: "Read" | "None" = "Read"): Promise<{ readonly closed: Promise<void> }> {
+  const script = `$h = [System.IO.File]::Open($env:U176_FILE, "Open", "Read", "${share}"); [Console]::Out.WriteLine("held"); Start-Sleep -Milliseconds ${ms}; $h.Close()`;
   const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, U176_FILE: file }, stdio: ["ignore", "pipe", "ignore"] });
   const closed = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   await new Promise<void>((resolve, reject) => {
@@ -52,50 +51,60 @@ async function holdOpen(file: string, ms: number): Promise<{ readonly closed: Pr
 const transient = (error: unknown): boolean => ["EBUSY", "EPERM"].includes(String((error as { code?: unknown }).code));
 
 describe("U-176 (1): releaseLock tries again when the lock file is held open", () => {
-  test("a handle closed after a short while: the release succeeds and the lock is gone", { skip: windowsOnly }, async () => {
-    const root = await workspace();
-    assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
-    const holder = await holdOpen(lockFile(root), 300);
-    assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-a" }), true);
-    await holder.closed;
-    assert.equal(existsSync(lockFile(root)), false);
-  });
-
-  test("a handle held past the retries: the release throws, the lock stays", { skip: windowsOnly }, async () => {
-    const root = await workspace();
-    assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
-    const holder = await holdOpen(lockFile(root), 3000);
-    try {
-      await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }), transient);
-      assert.equal(existsSync(lockFile(root)), true);
-    } finally {
+  for (const share of ["Read", "None"] as const) {
+    const what = share === "Read" ? "removing" : "reading";
+    test(`a handle that stops ${what} closes after a short while: the release succeeds and the lock is gone`, { skip: windowsOnly }, async () => {
+      const root = await workspace();
+      assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
+      const holder = await holdOpen(lockFile(root), 300, share);
+      assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-a" }), true);
       await holder.closed;
-    }
-  });
+      assert.equal(existsSync(lockFile(root)), false);
+      assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-b", clock })).ok);
+      assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-b" }), true);
+    });
+
+    test(`a handle that stops ${what} past the retries: the release throws, the lock stays`, { skip: windowsOnly }, async () => {
+      const root = await workspace();
+      assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
+      const holder = await holdOpen(lockFile(root), 3000, share);
+      try {
+        if (share === "Read") await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }), transient);
+        else await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }));
+        assert.equal(existsSync(lockFile(root)), true);
+      } finally {
+        await holder.closed;
+      }
+    });
+  }
 });
 
-describe("U-176 (3): a lock of this process that nothing here holds any more is taken back", () => {
-  test("after a release that failed: inspectLock says stale, and the next acquire in this process takes it", { skip: windowsOnly }, async () => {
+describe("U-176 (2): a lock left by a failed release is judged as before; this process never takes it back", () => {
+  test("after the handle closed: held, the next acquire here is refused and moves nothing; releasing the run again removes it", { skip: windowsOnly }, async () => {
     const root = await workspace();
     assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-a", clock })).ok);
     const holder = await holdOpen(lockFile(root), 3000);
     await assert.rejects(releaseLock({ workspaceRoot: root, runId: "run-a" }), transient);
     await holder.closed;
-    assert.equal((await inspectLock(root)).state, "stale");
-    const next = await acquireLock({ workspaceRoot: root, runId: "run-b", clock });
-    assert.ok(next.ok, JSON.stringify(next));
-    assert.equal(JSON.parse(readFileSync(lockFile(root), "utf8")).runId, "run-b");
+    const text = readFileSync(lockFile(root), "utf8");
+    assert.equal((await inspectLock(root)).state, "held");
+    const next = await acquireLock({ workspaceRoot: root, runId: "run-b", clock, retryForMs: 200 });
+    assert.deepEqual([next.ok, next.ok ? null : next.holder?.runId], [false, "run-a"]);
+    assert.equal(readFileSync(lockFile(root), "utf8"), text, "the left lock is untouched");
+    assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-a" }), true);
+    assert.ok((await acquireLock({ workspaceRoot: root, runId: "run-b", clock })).ok);
     assert.equal(await releaseLock({ workspaceRoot: root, runId: "run-b" }), true);
   });
 
-  test("a lock written with this process's pid and start but held by nothing here: taken back (any platform)", async () => {
+  test("a lock written with this process's pid and exact start that nothing here holds: held, never taken back (any platform)", async () => {
     const root = await workspace();
     await mkdir(join(root, ".codaryn"), { recursive: true });
-    writeFileSync(lockFile(root), `${JSON.stringify({ pid: process.pid, runId: "left-run", startedAt: "2026-11-13T00:00:00.000Z", processStartedAt: OWN_START })}\n`);
-    assert.equal((await inspectLock(root)).state, "stale");
-    const next = await acquireLock({ workspaceRoot: root, runId: "run-b", clock });
-    assert.ok(next.ok, JSON.stringify(next));
-    await releaseLock({ workspaceRoot: root, runId: "run-b" });
+    const text = `${JSON.stringify({ pid: process.pid, runId: "left-run", startedAt: "2026-11-13T00:00:00.000Z", processStartedAt: OWN_START })}\n`;
+    writeFileSync(lockFile(root), text);
+    assert.equal((await inspectLock(root)).state, "held");
+    const next = await acquireLock({ workspaceRoot: root, runId: "run-b", clock, retryForMs: 200 });
+    assert.equal(next.ok, false);
+    assert.equal(readFileSync(lockFile(root), "utf8"), text);
   });
 
   test("a lock this process holds now is never taken back by another attempt here", async () => {

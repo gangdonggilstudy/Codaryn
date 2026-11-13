@@ -659,7 +659,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - doctor: 실패한 점검(task 파일, 설정 파일)에 까닭의 notes가 붙는다. `doctor.private_data.unreadable_paths_required`, `doctor.private_data.min_group_size_range`다. 명령 규칙과 읽기 제외는 전처럼 `commands` 점검이 말한다.
   - doctor의 `commands` 점검은 실행의 목록(위와 같이 합친 것)과 명령 규칙이나 명령 검증기가 함께 있으면 `fail`이다. 문구는 `doctor.commands.unreadable_with_commands`이고 `count`는 명령 규칙과 명령 검증기의 수다. 명령은 찾아보지 않는다.
 - **사람에게 알리는 것(U-207의 줄)**
-  - 실행이 센다(`notePrivateData`). 끝 요약은 `unreadable_path`로 거부된 호출 수(`summary.denied_unreadable`)와 사람이 할 수 있는 일(`summary.denied_unreadable_hint`)을 말한다(`RunSummaryContext.deniedUnreadable`).
+  - 실행이 센다(`notePrivateData`, 이행 C-6a부터 앱의 `src/app/tally.ts`). 끝 요약은 `unreadable_path`로 거부된 호출 수(`summary.denied_unreadable`)와 사람이 할 수 있는 일(`summary.denied_unreadable_hint`)을 말한다(`RunSummaryContext.deniedUnreadable`).
   - `codaryn review`도 확인 목록의 내장 항목(analyze-private의 `PRIVATE_REVIEW_ITEM`)을 고른 언어로 보인다(`builtinReviewItemText`, R-110 L-3). analyze에서 온 두 항목은 기록된 영어 그대로다.
   - `query_table` 결과가 k 미만 묶음을 뺐으면 `summary.groups_hidden`이다(`hiddenGroups`: 결과 수와 가장 큰 k). 둘 다 0이면 필드도 줄도 없다.
     - R-108 L-2: 묶음은 보이되 값이 기여 칸 k 미만이라 빠진 결과(Codex V-19, `QueryGroup.fewCells`)도 센다. `queryTableFacts`는 그런 묶음의 수만 읽는다(`hiddenValues`, 없으면 필드가 없다). 줄은 "k행 미만의 묶음이나 k칸 미만으로 셈한 값"을 뺐다고 말한다.
@@ -887,7 +887,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 - `run`은 실행이 시작된 뒤 기록마다 stderr에 `codaryn: `로 시작하는 한 줄을 쓴다. 실행 시작, 턴 번호, 도구 허용·거부(권한/코드), 만들거나 바꾼 파일, 검증기 결과, 재수정 회차, 보호 대상 확인, 종료 상태가 대상이다. 모델 응답과 도구 결과는 쓰지 않는다.
 - 줄은 기록(가림본)에서만 만들고, 실행의 개인정보 게이트로 다시 가린 뒤 제어 문자를 바꾼다. 내장 도구가 아닌 도구 이름은 `(unknown tool)`, 형식에 맞지 않는 id는 `?`로 쓴다.
-- DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(`withProgress`는 렌더러가 준 줄마다 따로 가리고 쓴다).
+- DR-43 (b), R-31 L-1: 기록 하나가 여러 줄을 낼 수 있다(렌더러가 준 줄마다 따로 가리고 쓴다, `writeProgressLines`). 이행 C-6a(U-296)부터 `run`은 저장된 기록(`RunObserver.onStoredRecord`, 엔진이 가린 그대로)마다 줄을 그리고 실행의 게이트로 가린다. 승인된 run 계획의 실행은 C-6b까지 `withProgress`다.
   - 실행 시작(`run_started`)에 `policyNarrowings`가 있으면 시작 줄 아래에 하나씩 쓴다(종류와 수만, `progress.workflow_policy.*`).
   - 영어 줄(`progressLines`, 렌더러가 없을 때)은 카탈로그의 영어 글과 같다. 사람용 렌더러(`HumanOutput.progressLine`, N-C)의 줄은 그쪽 변경을 기다린다.
 - 실행 전 오류에는 진행 표시가 없다. `--quiet`이면 쓰지 않는다. stderr 쓰기 실패는 실행에 영향을 주지 않는다. stdout은 그대로 JSON 한 줄이다.
@@ -1173,6 +1173,12 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - task 필드 `tools`, `completion`, `humanReview`, `policy.planActions`는 해석된 작업 종류의 상한 안에서만 받는다. 상한을 넘으면 `invalid_task`이고, 진단은 필드 위치를 가리킨다.
 - 검증기 종류 `data_checks`(표 참조, 행 수, 값 규칙)를 task와 설정에서 받는다(`src/contracts/verify.ts`).
 - `prepareTask`(1~7단계: 설정, 변수 파일, 프로필, 키 거부, 위치 규칙, 작업 종류, 가릴 값 등록)는 `run`, `plan`, `apply`, `review`, `changes`가 함께 쓴다(DR-17). 이행 C-5(U-287)부터 `src/app/prepare.ts`에 있고, 그 전에는 `src/cli/run.ts`에 있었다.
+- `run`의 8단계 뒤는 이행 C-6a(U-296)부터 앱의 `runLife`(`src/app/run-life.ts`)다.
+  - `runLife`가 하는 것: 모델, 취소 원천, 조립과 잠금, 끝 요약의 수(`src/app/tally.ts`), 엔진, 안내(Y-4, N-1), 결과 저장과 잠금 해제. 코드와 문구는 그 전과 같다.
+  - CLI(`src/cli/run.ts`)는 사람이 보는 것을 그린다: 진행 줄, 기본 설정 줄, 권한 질문, Y-4 줄, writablePaths 줄, 끝 요약.
+  - 실행 환경은 CLI의 것 그대로다(`process.env`, 변수 파일, CLI의 조립. DR-4는 전과 같다).
+  - 취소 원천(SIGINT, SIGTERM, 취소 파일)은 실행 전 검사와 8단계 모델 뒤, 조립 바로 앞에 한 번 만든다. 실행이 끝나 잠금이 풀린 뒤에 뗀다. 그래서 실행 전 검사 중의 SIGINT는 Node 기본대로 프로세스를 끝낸다(시험 `tests/unit/cli/u299-c6a-life-edges.test.ts`).
+  - 승인된 run 계획의 실행(`codaryn apply`)은 C-6b까지 CLI의 `runPrepared`다.
 
 #### 18.1.1 정책 합치기 (DR-41)
 
@@ -1541,7 +1547,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 줄이 오지 않으면 답이 없는 것이다(`dismissed`, 기록은 `deny`, `default`). 입력 끝, 터미널의 Ctrl+D(질문을 닫음), Enter 없는 마지막 줄, 묻다가 난 실패가 그렇다. 실행이 취소되거나 시간이 다 되면 엔진의 신호가 질문을 끝내고, 기록은 엔진이 정한다(`cancelled` 또는 `default`).
   - Windows의 Ctrl+Z(R-88 I3): Node의 readline은 터미널 방식의 Windows에서 Ctrl+Z 키를 무시한다(소스로 읽음). 그래서 Ctrl+Z 뒤 Enter는 빈 줄, 곧 그 사람의 거부(`deny`, `user`)일 것이다. 결정은 같은 거부이고 `by`만 다르다.
 - 질문 중의 Ctrl+C(R-88 M2): 터미널에서 readline은 표준 입력을 raw로 두어 Ctrl+C를 신호가 아니라 키로 받는다. `askLine`은 그것을 readline의 'SIGINT'로 듣고 '끊음'으로 돌려준다(줄이나 답 없음과 다름).
-  - `run`의 권한 질문: CLI의 취소 통로(`cancel.ts`가 듣는 SIGINT)와 같은 길로 실행 전체를 취소한다. 엔진의 신호가 질문을 끝내고 기록은 `deny`, `cancelled`, 실행은 `cancelled`(종료 5)로 끝난다. 모델은 다시 부르지 않는다.
+  - `run`의 권한 질문: CLI의 취소 통로(`src/cli/cancel.ts`가 듣는 SIGINT. 이행 C-6a부터 앱의 `src/app/cancel.ts` `createRunCancelSource`를 넘겨준다)와 같은 길로 실행 전체를 취소한다. 엔진의 신호가 질문을 끝내고 기록은 `deny`, `cancelled`, 실행은 `cancelled`(종료 5)로 끝난다. 모델은 다시 부르지 않는다.
   - `apply`·`revert`·`models`·`init`의 질문: `prompt.interrupted` 한 줄을 stderr에 쓰고 종료 5로 끝난다. 이 질문들은 바꾸기 전(또는 더 바꾸기 전)에 묻는다. 그래서 아무것도 더 바뀌지 않는다(`init`은 설정을 쓰지 않는다). `apply`의 위험한 이동 동의와 `revert`의 질문은 첫 번은 이미 끝난 뒤다(그 결과는 기록에 있다). 끝 요약은 내지 않는다.
 - 명령 권한만 묻는다. 다른 권한의 질문은 글이 없어 묻지 않고 답이 없는 것으로 돌려준다.
 - 모든 질문의 한 줄 읽기(`src/cli/terminal.ts`의 `askLine`, 답은 줄 · 답 없음 · 끊음)는 입력이 끝나면 답 없음으로 끝난다. readline의 `question()`만으로는 입력 끝에서 끝나지 않아, `apply`·`revert`·`models`·`init`의 질문도 입력 끝에서 멈춰 있었다. 이제 그 질문들도 입력 끝을 '아니오'(또는 답 없음)로 받는다.

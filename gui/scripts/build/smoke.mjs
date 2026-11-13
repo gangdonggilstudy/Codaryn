@@ -304,6 +304,8 @@ const expected = [
         jump: ["moved", "sub"],
       }),
   ],
+  // U-68 (3.2): the card after opening (no lock), a held lock on the card and the run button off, then on again once the lock is gone.
+  ["openCheck", (v) => JSON.stringify(v) === JSON.stringify({ first: "done:false", held: "held", line: "alert", runOff: [true, false], freed: "free", runOn: true })],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],

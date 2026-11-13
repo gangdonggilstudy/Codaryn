@@ -278,6 +278,31 @@ startGui({
         const jumped = await js("document.activeElement?.querySelector('.name')?.textContent ?? null");
         return { opened, listed, cancel, filtered, ran, escaped, newTask, settings, refreshed, jump: [from === "sub" ? "same" : "moved", jumped] };
       })();
+      // U-68 (3.2): the checks on opening. A lock a live process holds (this test's own pid; judged by
+      // the pid alone) shows on the workspace screen and turns the new task's run off; gone, it is on again.
+      results["openCheck"] = await (async () => {
+        const pressF5 = (): Promise<unknown> => js("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', bubbles: true, cancelable: true })); true");
+        const card = "(() => { const c = document.getElementById('open-check'); const p = c?.getAttribute('data-open-check'); return p === 'done' || p === 'error' ? p + ':' + c.getAttribute('data-locked') : null; })()";
+        await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
+        const first = await waitFor(card, 60_000);
+        const lockFile = join(SECOND, ".codaryn", "lock.json");
+        writeFileSync(lockFile, JSON.stringify({ pid: process.pid, runId: "20261113T000000Z-0000a068", startedAt: new Date().toISOString() }));
+        try {
+          await pressF5();
+          const held = await waitFor("document.getElementById('open-check')?.getAttribute('data-locked') === 'true' ? 'held' : null", 60_000);
+          const line = await js("document.querySelector('#open-check [data-lock=\"held\"]')?.getAttribute('role') ?? null");
+          await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+          await waitFor("document.getElementById('task-run') ? 'ready' : null", 30_000);
+          const runOff = await js("[document.getElementById('task-run')?.hasAttribute('disabled'), document.getElementById('task-locked')?.hasAttribute('hidden')]");
+          unlinkSync(lockFile);
+          await pressF5();
+          const freed = await waitFor("document.getElementById('task-locked')?.hasAttribute('hidden') === true ? 'free' : null", 60_000);
+          const runOn = await js("document.getElementById('task-run')?.hasAttribute('disabled') === false");
+          return { first, held, line, runOff, freed, runOn };
+        } finally {
+          if (existsSync(lockFile)) unlinkSync(lockFile);
+        }
+      })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");

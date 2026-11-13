@@ -29,6 +29,8 @@ export interface NewTaskDeps {
   readonly showRun: () => void;
   /** R21b-L-1: the form of a run that started, as the workspace's last one. */
   readonly rememberForm?: (form: { readonly profile: string | null; readonly workflow: string | null }) => void;
+  /** U-68 (3.2): another process holds the open workspace's lock (the run button is off while it does), and a watcher slot. */
+  readonly lock?: { readonly locked: () => boolean; readonly watch: (watcher: () => void) => void };
 }
 
 function select(id: string, label: string, options: readonly (readonly [string, string])[], chosen: string): { field: HTMLElement; input: HTMLSelectElement } {
@@ -136,6 +138,17 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
           runButton.setAttribute("disabled", "");
           message.append(el("p", t.format("task.busy")));
         }
+        // U-68 (3.2): while another process holds the workspace's lock a run cannot start; updated in place.
+        const lockNote = el("p", t.format("task.locked"), { id: "task-locked", role: "status", hidden: "" });
+        const applyLock = (): void => {
+          const locked = deps.lock?.locked() ?? false;
+          if (locked) lockNote.removeAttribute("hidden");
+          else lockNote.setAttribute("hidden", "");
+          if (locked || !run.canStart) runButton.setAttribute("disabled", "");
+          else runButton.removeAttribute("disabled");
+        };
+        applyLock();
+        deps.lock?.watch(applyLock);
         goal.addEventListener("keydown", (event) => {
           if (event.key === "Enter" && event.ctrlKey && !runButton.hasAttribute("disabled")) {
             event.preventDefault();
@@ -165,7 +178,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
         }, { id: "task-run-file" });
         if (!run.canStart) fromFile.setAttribute("disabled", "");
         taskFile.append(el("h3", t.format("task.fileTitle"), { id: "task-file-title" }), el("p", t.format("task.fileText"), { class: "notice" }), varsField, fromFile);
-        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, advanced, message, runButton, taskFile);
+        body.replaceChildren(workflow.field, profile.field, model, goalField, notice, analyze, advanced, message, lockNote, runButton, taskFile);
         body.setAttribute("data-newtask-ready", reply.ok ? "ok" : "error");
       })();
     },

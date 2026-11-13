@@ -23,6 +23,7 @@ import { setupScreen } from "./setup/setup-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
+import { OpenCheck } from "./workspace/open-check.js";
 
 async function start(): Promise<void> {
   const root = document.getElementById("app");
@@ -38,8 +39,11 @@ async function start(): Promise<void> {
   /** U-65: the handle of the workspace the run going on started in. */
   let runWorkspace: string | null = null;
 
+  // U-68 (3.2): the checks when a workspace opens (again when a run ends and on F5).
+  const openCheck = new OpenCheck(api);
   const setWorkspace = (workspace: Workspace): void => {
     current = workspace;
+    void openCheck.run(workspace);
     shell?.setWorkspace(workspace.name);
     tree?.setWorkspace(workspace);
     shell?.refresh();
@@ -73,6 +77,7 @@ async function start(): Promise<void> {
   const REDRAWN_ON_F5 = new Set(["home", "runs", "checks", "changes", "report", "plan", "cleanup", "settings"]);
   const readAgain = (): void => {
     tree?.refresh();
+    void openCheck.run(current);
     const id = shell?.currentScreen ?? null;
     if (id !== null && REDRAWN_ON_F5.has(id)) shell?.refresh();
   };
@@ -86,8 +91,13 @@ async function start(): Promise<void> {
   shell.mount(root);
   // U-65: a changed file chosen in the tree opens its run's comparison at that file.
   tree = new TreeView(texts, api, shell.filePanel, { openChange: (marked, path) => openChanges(marked.runId, marked.profile, marked.workflow, path) });
-  shell.add(homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError }));
   const run = new RunModel();
+  // U-68: this window's own run in the open workspace holds its lock; that is not another run's.
+  const ownRunHere = (): boolean => runWorkspace !== null && runWorkspace === current?.handle && run.phase !== "idle" && run.phase !== "done";
+  const lockedByOther = (): boolean => openCheck.state.phase === "done" && openCheck.state.lockHeld && openCheck.state.handle === current?.handle && !ownRunHere();
+  shell.add(
+    homeScreen({ texts, api, current: () => current, open: openWorkspace, opened: setWorkspace, takeOpenError, openCheck: { check: openCheck, ownRun: ownRunHere, showChecks: () => shell?.show("checks") } }),
+  );
   shell.add(
     newTaskScreen({
       texts,
@@ -100,6 +110,7 @@ async function start(): Promise<void> {
       rememberForm: (form) => {
         if (current !== null) current = { ...current, lastForm: form };
       },
+      lock: { locked: lockedByOther, watch: (watcher) => openCheck.watch("newtask", watcher) },
     }),
   );
   const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });
@@ -210,6 +221,8 @@ async function start(): Promise<void> {
     if (done.ok && done.result.kind === "run" && here) tree?.markRun({ runId: done.runId, profile: run.last?.profile ?? null, workflow: run.last?.workflow ?? null }, done.result.changes);
     else tree?.clearMarks();
     tree?.refresh();
+    // U-68: the lock this run held is gone; check again.
+    void openCheck.run(current);
     shell?.announce(done.ok ? texts.format("run.ended", { status: done.labels.status }) : texts.format("run.endedError", { code: done.code }));
   });
   run.subscribe(() => {

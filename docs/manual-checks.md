@@ -19,6 +19,7 @@
   - GUI의 권한 대화상자(U-124)는 main `b249171`에서 M-3.11로 넣었다(U-185, nd-docs가 이 단위에 한해 고침).
   - 계획 실행(묶음 B-4)은 main `13ea1ac`에서 7절로 넣었다(U-217). 자동 시험은 `tests/integration/n15-plan-run.test.ts`다.
   - 묶음 A(읽기 제외, `query_table`, `analyze-private`)는 main `1f0eb85`에서 8절로 넣었다(U-251). 같은 판에서 M-7.4를 GUI의 계획 수행(U-226) 뒤로 고치고 M-7.5를 더했다.
+  - M-8.4·M-8.5는 U-247(GUI의 읽기 제외·k 편집과 analyze-private 안내)이 병합된 main `bc9ea45`에서 고쳤고, M-3.18(GS-4: OS 알림과 클립보드)을 더했다(U-266).
 - 출처
   - `docs/reviews/2026-11-13-*.md`의 '검사하지 않은 범위'와 'PM 판단' 절
   - `docs/pm-status.md`의 '확인하지 않은 범위'
@@ -96,6 +97,7 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-3.15 | 실제 한글 입력기로 조합하는 동안의 Ctrl+S | 없음 | Microsoft 한국어 입력기 | U-184 |
 | M-3.16 | 실행 중의 저장 거부와, 다른 편집기가 바꾼 뒤의 충돌 안내 | 없음 | — | U-184, U-172 |
 | M-3.17 | 파일 보기의 화면 낭독기와 키보드만 쓰기 | 없음 | NVDA는 선택 | U-174, U-184, E-5 |
+| M-3.18 | OS 알림과 클립보드에 가짜 키·가짜 가릴 값이 나가지 않는지(GS-4) | 없음 | — | GS-4, U-274, U-62, U-103 |
 | M-4.1 | FAT32·exFAT에서 적용·되돌리기 동의(CLI) | 없음 | 빈 USB 메모리 또는 VHD | DR-21, DR-25, U-119 |
 | M-4.2 | FAT32·exFAT에서 동의(GUI) | 없음 | 위와 같음 | DR-25, U-119 |
 | M-4.3 | 두 볼륨 사이 이동 | 없음 | 두 번째 볼륨 | 설계 조사 5.4 |
@@ -121,8 +123,8 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyConti
 | M-8.1 | 실제 모델이 읽기 제외 표에 `query_table`을 쓰는지 | **필요** | — | U-208, U-210, DR-70 |
 | M-8.2 | 실제 모델이 읽기 제외 아래를 읽으려다 거부된 뒤 하는 일 | **필요** | — | U-203, U-210, R-3 |
 | M-8.3 | 실제 모델이 k 미만 묶음을 숨긴 결과로 결과 표와 보고서를 쓰는 모습 | **필요** | — | U-208, DR-70, Q-8 |
-| M-8.4 | GUI에서 analyze-private 고르기와 거부 까닭 표시 | 없음(뒷부분은 필요) | NVDA는 선택 | U-212, U-210, R-110 |
-| M-8.5 | GUI 설정 넓히기 대화상자의 새 두 종류(읽기 제외 뺌, k 낮춤) | — | — | U-204, U-212. **지금은 할 수 없음**(8절) |
+| M-8.4 | GUI에서 analyze-private 고르기: 안내 글, 설정·프로필에 따른 경고, 거부 까닭 | 없음(뒷부분은 필요) | NVDA는 선택 | U-212, U-247, U-210, R-110, R-111 |
+| M-8.5 | GUI 설정 화면의 읽기 제외 경로·k 편집과 넓히기 대화상자의 새 두 종류 | 없음 | — | U-204, U-212, U-247, R-7, R-111 |
 
 ---
 
@@ -1313,6 +1315,98 @@ node dist/src/cli/main.js run --task "$HOME\codaryn-manual\slow-ed\task.json"
 - 설계 [독립 GUI 설계](design/standalone-gui.md) 10절
 
 **관련**: U-174, U-184, E-5
+
+### M-3.18 OS 알림과 클립보드에 가짜 키·가짜 가릴 값이 나가지 않는지 (키 없음, GS-4)
+
+**확인할 것**: 가짜 키 값과 가짜 `secretEnv` 값으로 GUI에서 실행할 때 다음이 맞는지
+- 실행이 끝날 때 뜨는 OS 알림에 두 값이 없는지
+- 창이 클립보드에 쓰는 것(실행 id 복사, 상대 경로 복사)에 두 값이 없는지
+- 창 제목에 두 값이 없는지
+
+**여기서 못 한 까닭**
+- G-sec 시험(U-274)과 연기 시험은 알림과 클립보드를 가짜로 바꿔 기록만 했다.
+- 실제 Windows 알림 센터와 실제 클립보드에 무엇이 가는지는 사람이 봐야 한다(설계의 보안 시험 GS-4).
+- 렌더러가 클립보드에 직접 쓰는 길은 M-3.9가 따로 본다.
+
+**준비**
+- 3절의 시험용 설정(`$m\gui-config.json`)을 쓴다.
+- 가짜 키가 있으면 GUI가 모델 목록을 물을 수 있다. 그래서 API 주소를 닫힌 루프백 포트로 바꿔, 어떤 요청도 밖으로 나가지 않게 한다.
+- 키 값은 실제 키가 아니고, 키 모양도 아니다. 실행은 대본 모델이라 API를 부르지 않는다.
+- 트리는 실행 전에는 설정의 가릴 변수만 안다. 그래서 가짜 가릴 값의 변수를 설정의 `secretEnv`에도 둔다.
+- 끝 단계에서 20초 기다리므로 창을 바꿀 시간이 있다.
+
+```powershell
+$gs = "$m\gs4"
+New-Item -ItemType Directory -Force "$gs\workspace" | Out-Null
+$fakeSecret = "gs4secret" + (Get-Random -Minimum 100000000 -Maximum 999999999)     # 가짜 가릴 값
+$fakeKey = "gs4-fake-apikey-" + (Get-Random -Minimum 100000000 -Maximum 999999999) # 가짜 키 값(키 모양 아님)
+[IO.File]::WriteAllText("$gs\workspace\notes.txt", "secret: $fakeSecret`nkey: $fakeKey`n")
+[IO.File]::WriteAllText("$gs\workspace\$fakeSecret.txt", "a file named after the secret`n")
+[IO.File]::WriteAllText("$gs\task.json", @'
+{
+  "schemaVersion": 1, "id": "manual-gs4", "goal": "read the notes", "workflow": "document", "workspaceRoot": "./workspace",
+  "model": { "provider": "scripted", "scriptPath": "./script.json" },
+  "policy": { "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false },
+  "privacy": { "secretEnv": ["CODARYN_GS4_SECRET"] },
+  "limits": { "maxModelTurns": 4, "maxToolCalls": 4, "maxTotalTokens": 1000, "maxDurationMs": 120000 },
+  "verifiers": [{ "id": "notes", "kind": "file_rules", "rules": [{ "type": "exists", "path": "notes.txt" }] }]
+}
+'@)
+$script = @{ schemaVersion = 1; steps = @(
+  @{ toolCalls = @(@{ name = "read_file"; args = @{ path = "notes.txt" } }); usage = @{ inputTokens = 0; outputTokens = 0 } },
+  @{ delayMs = 20000; text = "The notes say $fakeSecret and $fakeKey."; usage = @{ inputTokens = 0; outputTokens = 0 } }
+) }
+[IO.File]::WriteAllText("$gs\script.json", ($script | ConvertTo-Json -Depth 8))
+$gc = Get-Content $m\gui-config.json -Raw -Encoding UTF8 | ConvertFrom-Json
+$gc | Add-Member -NotePropertyName apiBaseUrl -NotePropertyValue "http://127.0.0.1:9" -Force
+$gc | Add-Member -NotePropertyName secretEnv -NotePropertyValue @("CODARYN_GS4_SECRET") -Force     # 트리도 그 값을 가리게
+[IO.File]::WriteAllText("$m\gui-config.json", ($gc | ConvertTo-Json -Depth 10))
+"secret $fakeSecret / key $fakeKey"     # 두 값을 적어 둔다(가짜다)
+# 이 터미널에서만 두 변수를 두고 GUI를 띄운다
+$env:CODARYN_GS4_SECRET = $fakeSecret
+$env:ANTHROPIC_API_KEY = $fakeKey
+$env:CODARYN_CONFIG = "$m\gui-config.json"
+npm start                               # gui 폴더에서
+# 다 끝나면 이 터미널을 닫는다(두 변수가 함께 사라진다)
+```
+
+- 이 대본 실행은 CLI로 마른 실행해 확인했다(main `bc9ea45`, 네트워크 막음).
+  - 결과는 `done/verified`였다.
+  - 두 값 모두 stderr, stdout, `.codaryn`의 기록(변경 스냅숏 제외)에 원문이 0건이었다.
+  - 끝 요약의 마지막 말은 가려져 나왔다(`[[CODARYN_SECRET:…]]`, 키는 지워짐).
+
+**순서**
+1. `$gs\workspace`를 연다. 트리에서 이름이 가짜 가릴 값인 파일을 본다.
+2. 그 파일을 고르고 "Copy relative path"를 본다. 그다음 `notes.txt`를 고르고 누른다. 메모장에 붙여 본다.
+3. 새 작업 화면에서 "task 파일 고르고 실행…"으로 `$gs\task.json`을 실행한다.
+   - 곧바로 메모장을 앞으로 가져와 Codaryn 창을 뒤로 보낸다.
+   - 20초쯤 뒤 뜨는 Windows 알림을 읽는다.
+   - 알림 센터(Win+N)에서도 본다.
+4. 결과 화면에서 "Copy run id"를 누르고 메모장에 붙인다. 보고서 화면의 "Copy run id"도 같이 한다.
+5. 실행 중과 끝난 뒤의 창 제목(작업 표시줄의 글 포함)을 본다.
+6. 메모장에서 Ctrl+F로 두 값(앞에 적어 둔 것)과 그 앞 몇 글자(`gs4secret`, `gs4-fake-apikey`)를 찾는다.
+
+**기대 결과**
+- 1·2
+  - 그 파일은 트리에 이름 대신 가린 모양으로 보이고 `— hidden name`이 붙는다.
+  - 고르면 "Copy relative path"가 꺼져 있다(가린 항목에는 id가 없다).
+  - `notes.txt`의 복사는 `notes.txt`만 붙는다.
+- 3
+  - 알림은 `A Codaryn run ended: <상태>`(한국어면 `Codaryn 실행이 끝났습니다: <상태>`)뿐이다. 제목은 `Codaryn`이다.
+  - 두 값도, 목표나 마지막 말도 없다.
+  - 창이 앞에 있었으면 알림은 뜨지 않는다. 그때는 다시 한다.
+- 4: 붙는 것은 실행 id(`20261114T…Z-xxxxxxxx` 꼴)뿐이다.
+- 5: 제목에 두 값이 없다.
+- 6: 메모장에 두 값도 그 앞부분도 없다.
+- 덧붙여 실행 화면, 결과의 마지막 말, 파일 보기(`notes.txt`)에서 두 값이 가려져 보이는지 적는다. 자동 시험이 본 것이지만 실제 창에서 한 번 더 본다.
+- 하나라도 원문이 보이면 화면을 찍지 말고(값이 남는다), 어디서 보였는지만 알린다. 값은 가짜다.
+
+**다르면 볼 곳**
+- 알림: `gui/src/main/app.ts`(`onEnded`), `gui/src/main/dialog-texts.ts`(`endNotice`)
+- 클립보드: `gui/src/main/ipc.ts`(`copyText`는 실행 id와 다이제스트 앞 12자만, `copyPath`는 가리지 않은 항목만)
+- 가림: `src/privacy/`, [개인정보 문서](privacy.md)
+
+**관련**: GS-4, U-274, U-62, U-103, R-73
 
 ---
 
@@ -2569,75 +2663,126 @@ Import-Csv "$pa\workspace\private\people.csv" | Group-Object zone | Select-Objec
 
 **관련**: U-208, DR-70, Q-8
 
-### M-8.4 GUI에서 analyze-private 고르기와 거부 까닭 (키 없음, 뒷부분은 키 필요)
+### M-8.4 GUI에서 analyze-private 고르기와 경고, 거부 까닭 (키 없음, 뒷부분은 키 필요)
 
 **확인할 것**
 - 새 작업 화면의 작업 종류 목록에 `analyze-private`가 있는지
-- `analyze`를 고르면 안내 글이 바뀐 대로 나오는지
-- 읽기 제외 경로 없이 `analyze-private`를 시작하면 거부되고, 그 까닭이 CLI와 같은 글로 보이는지
+- 고르면 이 작업 종류의 안내가 나오는지
+- 설정과 고른 프로필에 따라 경고가 맞게 나오는지(CLI가 거부할 때만)
+- 경고를 무시하고 시작하면 거부되고, 그 까닭이 CLI와 같은 글로 보이는지
 
 **여기서 못 한 까닭**
-- 화면과 까닭 전달은 GUI 단위 시험이 확인했다(U-212).
+- 화면과 경고 조건은 GUI 단위 시험이 확인했다(U-212, U-247).
+- R-111b가 일곱 경우로 경고와 CLI 판정이 맞음을 쟀다.
 - 실제 창의 모양, 알림 영역의 낭독, 한국어 글은 사람이 봐야 한다.
 
-**준비**: 3절의 시험용 설정(`$m\gui-config.json`)을 쓴다. 읽기 제외 경로가 없어야 한다. 작업 공간은 공통 준비의 `$pa\workspace`를 쓴다.
+**준비**
+- 3절의 시험용 설정(`$m\gui-config.json`)을 쓴다. 처음에는 읽기 제외 경로도 명령 규칙도 없어야 한다.
+- 작업 공간은 8절 공통 준비의 `$pa\workspace`를 쓴다.
+- 프로필 둘을 손으로 더한다. 설정 화면은 프로필을 고치지 않는다. 더한 뒤 GUI를 다시 띄운다.
+
+```powershell
+$gc = Get-Content $m\gui-config.json -Raw -Encoding UTF8 | ConvertFrom-Json
+$policy = '{ "commands": [], "network": "deny", "destructive": "deny", "restorePathTokens": false, "unreadablePaths": ["private"] }' | ConvertFrom-Json
+$withRule = '{ "commands": [{ "executable": "node", "argsPrefix": ["--version"], "allowExtraArgs": false }], "network": "deny", "destructive": "deny", "restorePathTokens": false, "unreadablePaths": ["private"] }' | ConvertFrom-Json
+$gc | Add-Member -NotePropertyName profiles -NotePropertyValue ([pscustomobject]@{ private = [pscustomobject]@{ policy = $policy }; ruled = [pscustomobject]@{ policy = $withRule } }) -Force
+[IO.File]::WriteAllText("$m\gui-config.json", ($gc | ConvertTo-Json -Depth 10))
+```
 
 **순서**
 1. GUI를 띄우고 `$pa\workspace`를 연다. 새 작업 화면을 연다.
-2. 작업 종류 목록을 펼쳐 본다.
-3. `analyze`를 고른다. 안내 글을 적는다.
-4. `analyze-private`를 고르고, 목표를 적고 시작한다.
-5. 언어를 한국어로 바꾸고(설정 화면) 4를 한다.
-6. (키 필요, 선택) `$m\gui-config.json`의 `policy`에 `"unreadablePaths": ["private"]`를 손으로 더한다. GUI 설정 화면에는 이 칸이 없다. 그 뒤 4를 하고 사람 확인까지 간다.
+2. 작업 종류 목록을 펼쳐 본다. `analyze`를 고르고 안내 글을 적는다.
+3. `analyze-private`를 고른다. 프로필은 "기본"으로 둔다. 안내와 경고를 적는다.
+4. 프로필 `private`를 고른다. 안내와 경고를 적는다.
+5. 프로필 `ruled`를 고른다. 안내와 경고를 적는다.
+6. 프로필을 "기본"으로 돌리고 목표를 적고 시작한다.
+7. 언어를 한국어로 바꾸고(설정 화면) 3과 6을 한다.
+8. (키 필요, 선택) 프로필 `private`로 시작해 사람 확인까지 간다. 끝나면 8절의 "새는 것이 없는지 보는 명령"을 한다.
 
 **기대 결과**(코드와 GUI 문구 기준)
-- 2: 목록에 `analyze-private`가 있다(내장 여섯).
-- 3: 안내 글은 `Data analysis can read a table as it is, or get only its groups from query_table. …`이다. 그 안에 `Keep tables with personal data under an unreadable path and use analyze-private: …`가 있다.
-- `analyze-private`를 고르면 안내 글이 사라진다. 이 작업 종류만의 안내는 없다(코드 기준). 본 대로 적는다.
-- 4: 실행이 시작되지 않는다.
-  - 메시지 자리에 설정 오류의 글(`The config file is missing or not in the right form. …`)이 나온다.
-  - 같은 문단에서 그 뒤에 까닭이 나오고, 끝에 오류 코드(`invalid_config`)가 나온다. 까닭은 `The analyze-private task type needs at least one entry in policy.unreadablePaths. Put the folder of the tables with personal data there, in the task file, the config file or a profile.`다.
-  - 키가 없어도 이 거부가 먼저다. CLI로 확인했다.
-  - 아무것도 기록되지 않는다(`$pa\workspace\.codaryn`에 새 실행이 없다).
-- 5: 까닭이 한국어로 나온다: `analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. …`
-- 6
+- 2
+  - 목록에 `analyze-private`가 있다(내장 여섯).
+  - `analyze`의 안내는 `Data analysis can read a table as it is, or get only its groups from query_table. …`이다.
+- 3
+  - 안내: `Analysis of personal data (analyze-private): keep the tables with personal data under an unreadable path; the model gets only query_table's groups. This task type cannot use commands, and it ends with a person's review.`
+  - 경고(알림): `Neither the config file nor the chosen profile has an unreadable path. analyze-private needs at least one, so started like this the run is refused. …`
+- 4: 안내만 나오고 경고는 없다. 프로필의 목록이 실행에 더해진다.
+- 5: 경고(알림): `The chosen profile's policy has command rules. analyze-private allows no command, so started like this the run is refused. …`
+- 6: 실행이 시작되지 않는다.
+  - 메시지 자리의 한 문단에 설정 오류의 글, 까닭, 오류 코드(`invalid_config`)가 차례로 나온다.
+  - 까닭은 `The analyze-private task type needs at least one entry in policy.unreadablePaths. …`다.
+  - 키가 없어도 이 거부가 먼저다.
+  - 아무것도 기록되지 않는다.
+- 7: 같은 것이 한국어로 나온다.
+  - 경고: `설정 파일과 고른 프로필에 읽기 제외 경로가 없습니다. …`
+  - 까닭: `analyze-private 작업 종류에는 policy.unreadablePaths 항목이 하나 이상 있어야 합니다. …`
+- 설정 파일의 정책에 명령 규칙이 있으면(프로필 "기본"), 경고는 `The config file's policy has command rules. …`다. 시험하려면 설정 화면에서 명령 규칙을 하나 더한다.
+- 8
   - 실행이 돌고, 진행 줄에 표 집계와 거부가 보인다.
-  - 사람 확인 화면의 확인 목록 셋째 항목이 `No value in the result table or the report can identify a person.`이다(한국어면 그 번역).
-  - 끝나면 M-8.1의 "새는 것이 없는지 보는 명령"을 한다.
-- 낭독기를 켰다면, 거부 글이 알림으로 읽히는지 적는다(`role="alert"`).
+  - 사람 확인 화면의 확인 목록 셋째 항목이 `No value in the result table or the report can identify a person.`이다.
+- 낭독기를 켰다면, 경고와 거부 글이 알림으로 읽히는지 적는다.
 
 **다르면 볼 곳**
-- `gui/src/renderer/run/new-task.ts`, `gui/src/renderer/run/run-model.ts`
-- `gui/src/engine-host/settings.ts`, `gui/src/main/ipc.ts`(까닭 전달)
-- 문구: `gui/src/renderer/i18n/en.ts`·`ko.ts`(`task.analyzeNotice`, `error.hint.*`)
+- `gui/src/renderer/run/new-task.ts`(`task-private-notice`)
+- `gui/src/engine-host/settings.ts`(프로필의 `hasPolicy`, `unreadablePaths` 수)
+- 문구: `gui/src/renderer/i18n/en.ts`·`ko.ts`(`task.private*`, `error.hint.*`)
 
-**관련**: U-212, U-210, R-110 M-1
+**관련**: U-212, U-247, U-210, R-110 M-1, R-111 L-2·L-3
 
-### M-8.5 GUI 설정 넓히기 대화상자의 새 두 종류 (지금은 할 수 없음)
+### M-8.5 GUI 설정 화면의 읽기 제외 경로·k 편집과 넓히기 대화상자 (키 없음)
 
-**확인할 것**: 설정 변경이 읽기 제외 경로를 빼거나 k를 낮출 때 넓히기 대화상자가 다음을 하는지
-- 그 종류를 이름으로 말하는지
-  - `an unreadable path removed (the model may read those files)`
-  - `the minimum group size k lowered (smaller groups of the tables under unreadable paths are shown to the model)`
+**확인할 것**
+- 설정 화면의 "Personal data (unreadable paths)"에서 읽기 제외 경로를 더하고 빼고, k를 정하고 지울 수 있는지
+- 실행이 할 수 있는 일을 넓히는 변경이 화면의 넓힘 목록과 OS 대화상자에서 그 종류를 말하는지. 넓히는 변경은 경로 빼기, k 낮추기, 5보다 큰 k 지우기다.
 - 기본 단추가 "Do not write"인지
+- 넓히지 않는 변경은 묻지 않고 쓰는지. 더하기, 같은 경로의 다른 철자 빼기, k 올리기가 그렇다.
 
-**지금 할 수 없는 까닭**(main `1f0eb85`, 코드 기준)
-- GUI 설정 화면이 고칠 수 있는 것은 정해져 있다(`gui/src/shared/settings-edit.ts`의 `SettingsEdit`).
-  - 언어, 제공자, 출력 상한, 한도, 명령 규칙, 보호 경로, 가릴 변수 이름이다.
-  - 읽기 제외 경로와 k는 없다.
-  - 그래서 GUI에서 만든 변경이 이 두 넓히기를 낳지 못한다.
-- 앱 계층의 판정(`src/app/settings-change.ts`)과 대화상자의 글(`gui/src/main/dialog-texts.ts`)은 있다. 단위 시험이 확인했다(U-204, U-212).
-- 설정 파일을 손으로 고치면 대화상자가 나오지 않는다. GUI 밖의 변경이기 때문이다.
-- 읽기 제외와 k를 고치는 칸이 GUI에 생기면(P-4, p5u-gui) 아래 순서로 한다.
+**여기서 못 한 까닭**
+- 판정은 앱 계층과 GUI 단위 시험이 확인했다(U-204, U-212, U-247).
+- R-111이 판의 함수로 다음 경우의 판정을 쟀다: 빈 목록, 중복, 대소문자, 끝 구분자, `./`, k 지움.
+- 실제 OS 대화상자의 모양, 기본 단추, 키 입력, 낭독은 사람이 봐야 한다.
 
-**그때의 순서와 기대 결과**
-1. 설정에 `policy.unreadablePaths`와 `minGroupSize`를 둔다.
-2. GUI 설정 화면에서 항목 하나를 빼고, 제안을 본다. 화면의 넓히기 목록에 위 글이 나온다.
-3. "Write"를 누른다. OS 대화상자(`This settings change lets runs do more. Write it to the config file?`)의 자세한 글에 위 종류와 필드(`policy.unreadablePaths`)가 나온다. 값은 나오지 않는다.
-4. 기본 단추와 Esc는 "Do not write"다. 그 답이면 파일이 그대로다.
-5. k를 6에서 5로 낮추는 것도 같다(`policy.minGroupSize`). 5 아래로는 둘 수 없다.
+**준비**: 3절의 시험용 설정(`$m\gui-config.json`, `CODARYN_CONFIG`)으로 GUI를 띄운다. 설정 화면을 연다.
 
-**관련**: U-204, U-212, R-7, P-4
+**순서**
+- 추가, 빼기("Remove"), 정하기("Set"), "Use the default" 단추는 누르면 곧바로 제안을 보인다.
+- 그 뒤 "Write to the config file"을 누른다.
+- 결과는 `Get-Content $m\gui-config.json`으로 본다.
+1. 경로 `private`를 더한다.
+2. 경로 `Private`를 더한다(Windows: 같은 경로의 다른 철자). 그다음 목록에서 `Private`를 뺀다.
+3. 목록에서 `private`를 뺀다. 대화상자에서 Enter, Esc, "Do not write"를 차례로 해 보고, 마지막에 "Write"로 쓴다.
+4. k를 7로 정한다. 그다음 6으로 정한다(대화상자에서 "Do not write"). 그다음 "Use the default"를 누른다(대화상자에서 "Write").
+5. 잘못된 값을 넣어 본다: 경로 `..\x`, `C:\data`, k 3, k 1001.
+
+**기대 결과**
+- 섹션 위의 안내 끝에 `This shows the config file's own list and k; a profile's or a task type definition's are not shown here (runs get them too).`가 있다.
+- k 칸 위의 안내는 `… groups of fewer than k rows, and values from fewer cells than that, do not reach the model; …`다.
+- 1·2: 넓힘 목록이 없고 대화상자 없이 쓴다. 2의 빼기도 묻지 않는다. 남은 `private`가 같은 경로를 덮기 때문이다.
+- 3
+  - 화면의 제안에 `This change lets runs do more. …`와 `an unreadable path removed (the model may read those files) (policy.unreadablePaths)`가 나온다.
+  - OS 대화상자
+    - 제목: `Codaryn`
+    - 글: `This settings change lets runs do more. Write it to the config file?`
+    - 자세한 글: 위 종류와 필드. 경로 값은 나오지 않는다.
+    - 단추: "Write"와 "Do not write". 기본 단추와 처음 포커스는 "Do not write"다.
+  - Enter, Esc, "Do not write"는 쓰지 않는다. 파일은 그대로다.
+  - 한국어면 `읽기 제외 경로 뺌(모델이 그 파일을 읽을 수 있게 됨)`이다.
+- 4
+  - 7은 묻지 않고 쓴다.
+  - 6은 `the minimum group size k lowered (…) (policy.minGroupSize)`로 묻는다.
+  - "Use the default"(7에서 기본 5로)도 같은 종류로 묻는다.
+  - k가 5일 때 "Use the default"는 묻지 않는다.
+- 5: 쓰지 않는다.
+  - 경로는 제안이 거부되며 까닭이 보인다: `policy.unreadablePaths[i] must not contain a '..' segment`나 `must be relative to the workspace root`.
+  - k 3·1001은 화면이 먼저 막고 경고를 보인다.
+- 설정에 명령 규칙이 있으면서 읽기 제외 경로를 더하면, 섹션에 알림이 나온다: `… Runs with this config's policy (without a profile of its own policy or a task file) are refused; …`
+
+**다르면 볼 곳**
+- `gui/src/renderer/settings/settings.ts`, `gui/src/shared/settings-edit.ts`
+- `gui/src/main/ipc.ts`(`applySettings`), `gui/src/main/dialog-texts.ts`
+- `src/app/settings-change.ts`(`unreadableWidening`)
+
+**관련**: U-204, U-212, U-215, U-247, R-7, R-111
 
 ---
 

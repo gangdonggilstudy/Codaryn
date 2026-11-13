@@ -443,7 +443,7 @@ function asPlanApply(value: unknown): PlanApplyView | null {
   if (!isObj(value) || !str(value["applyRunId"]) || !RUN_ID.test(value["applyRunId"])) return null;
   const state = value["state"];
   if (state !== "applied" && state !== "unfinished" && state !== "applying" && state !== "reverted" && state !== "record_missing") return null;
-  return { state, applyRunId: value["applyRunId"], reason: str(value["reason"]) ? value["reason"] : null };
+  return { state, applyRunId: value["applyRunId"], reason: str(value["reason"]) ? value["reason"] : null, ...(value["carried"] === true ? { carried: true as const } : {}) };
 }
 
 export function asRuns(value: unknown): RunsReply {

@@ -16,7 +16,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { applyOutcomeValue, createRunRegistry } from "../../src/engine-host/runs.js";
+import { runsValue } from "../../src/engine-host/history.js";
+import type { PlanApplyOf } from "../../src/engine-host/history.js";
+import { applyOutcomeValue, createRunRegistry, runResultValue } from "../../src/engine-host/runs.js";
 import { planValue } from "../../src/engine-host/plans.js";
 import { DIALOG_TEXTS } from "../../src/main/dialog-texts.js";
 import type { CodarynApi } from "../../src/renderer/api.js";
@@ -25,9 +27,10 @@ import { EN } from "../../src/renderer/i18n/en.js";
 import { KO } from "../../src/renderer/i18n/ko.js";
 import { planScreen } from "../../src/renderer/plan/plan-screen.js";
 import { RunModel } from "../../src/renderer/run/run-model.js";
+import { runsScreen } from "../../src/renderer/runs/runs-screen.js";
 import { runScreen } from "../../src/renderer/run/run-screen.js";
 import type { RunScreenDeps } from "../../src/renderer/run/run-screen.js";
-import { toPlanView, toRunResultView } from "../../src/shared/ipc.js";
+import { toPlanView, toRunResultView, toRunsReply } from "../../src/shared/ipc.js";
 import type { RunResultView } from "../../src/shared/ipc.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
 import { FakeElement, installFakeDom, settle } from "./fake-dom.js";
@@ -274,8 +277,95 @@ test("U-226: the words: the main process's dialog names the files and the summar
   assert.equal(EN["run.deniedNotPlanned"], en.EN_MESSAGES["summary.denied_not_planned"]);
   assert.equal(KO["run.deniedNotPlannedHint"], ko.KO_MESSAGES["summary.denied_not_planned_hint"]);
   assert.equal(EN["run.deniedNotPlannedHint"], en.EN_MESSAGES["summary.denied_not_planned_hint"]);
+  // U-221's names of a run plan carried out: the plan's status line and the plan run's row.
+  const named: [string, string][] = [
+    ["plan.carriedOut", "plan.changes.status_carried_out"],
+    ["plan.carriedBy", "plan.changes.carried_by"],
+    ["runs.planCarried.applied", "runs.plan_carried_out"],
+    ["runs.planCarried.unfinished", "runs.plan_carried_ended"],
+    ["runs.planCarried.applying", "runs.plan_carrying"],
+    ["runs.planCarried.reverted", "runs.plan_carried_reverted"],
+  ];
+  for (const [gui, cli] of named) {
+    assert.equal((KO as Readonly<Record<string, string>>)[gui], ko.KO_MESSAGES[cli], `ko ${gui}`);
+    assert.equal((EN as Readonly<Record<string, string>>)[gui], en.EN_MESSAGES[cli], `en ${gui}`);
+  }
   for (const texts of [KO, EN] as Readonly<Record<string, string>>[]) {
     assert.equal("plan.runApplyUnavailable" in texts || "error.run_plan_apply_unavailable" in texts, false, "no longer said");
     assert.ok(texts["error.run_not_plan"]?.includes("\"run\""), "how a run plan is applied");
+  }
+});
+
+/** The contract's rule as far as these rows need it: the entry whose run id appliedBy names. */
+const ruleOf: PlanApplyOf = (entry, entries) => {
+  const by = (entry as { appliedBy?: { runId?: string } }).appliedBy?.runId;
+  const taker = (entries as { runId: string; status?: string }[]).find((other) => other.runId === by);
+  return by === undefined || taker === undefined ? null : { state: "applied", applyRunId: by, reason: null };
+};
+
+test("U-226 (U-221): a run plan's plan run carried out by a run is marked, and its row says so in the CLI's carried words", async () => {
+  const planEntry = { state: "checked", runId: PLAN, kind: "run", startedAt: null, taskId: "t", status: "needs-input", reason: "plan_pending", changes: 0, reverted: null, revertRecordDamaged: false, appliedBy: { runId: CARRY, at: "2026-11-13T15:10:05.000Z" } };
+  const carryEntry = { state: "checked", runId: CARRY, kind: "run", planRunId: PLAN, startedAt: null, taskId: "t", status: "needs-input", reason: "no_verifier", changes: 1, reverted: null, revertRecordDamaged: false };
+  const applyEntry = { ...carryEntry, kind: "apply" };
+  const rowOf = (entries: unknown[]) => (runsValue({ ok: true, output: { kind: "runs", runs: entries, omitted: 0 } }, same, ruleOf) as { runs: { runId: string; planApply: unknown }[] }).runs.find((run) => run.runId === PLAN)?.planApply;
+  assert.deepEqual(rowOf([planEntry, carryEntry]), { state: "applied", applyRunId: CARRY, reason: null, carried: true });
+  assert.deepEqual(rowOf([planEntry, applyEntry]), { state: "applied", applyRunId: CARRY, reason: null }, "an apply run's plan of moves: as before");
+  const base = runsValue({ ok: true, output: { kind: "runs", runs: [planEntry, carryEntry], omitted: 0 } }, same, ruleOf) as { ok: true; runs: Record<string, unknown>[]; omitted: number };
+  const reply = toRunsReply(base);
+  assert.ok(reply.ok);
+  const forged = (planApply: unknown) => toRunsReply({ ...base, runs: [{ ...base.runs[0], planApply }, base.runs[1]] }).ok;
+  assert.equal(forged({ state: "applied", applyRunId: CARRY, reason: null, carried: false }), false, "only true");
+  assert.equal(forged({ state: "applied", applyRunId: CARRY, reason: null, carried: "yes" }), false);
+  const restore = installFakeDom();
+  try {
+    for (const language of ["ko", "en"] as const) {
+      const texts = language === "ko" ? KO : EN;
+      const api = new Proxy({} as CodarynApi, { get: (_t, name: string) => async () => (name === "listRuns" ? (reply.ok ? { ok: true, runs: reply.runs, omitted: 0 } : null) : null) });
+      const screen = runsScreen({ texts: textsFor(language), api, current: () => ({ handle: HANDLE, name: "ws" }), open: () => undefined, announce: () => undefined, openPlan: () => undefined, openChanges: () => undefined, openReport: () => undefined });
+      const root = new FakeElement("main");
+      screen.show(root as unknown as HTMLElement);
+      await settle();
+      const mark = root.findAll((e) => e.getAttribute("data-plan-apply") === "applied")[0];
+      assert.equal(mark?.getAttribute("data-plan-carried"), "true");
+      assert.equal(mark?.textContent, texts["runs.planCarried.applied"].replace("{runId}", CARRY));
+    }
+  } finally {
+    restore();
+  }
+});
+
+test("U-226 (U-221): a carried-out run plan's screen names the run that carried it out; its plan run's result counts files", async () => {
+  const restore = installFakeDom();
+  try {
+    const applied = { ...changesPlan, output: { ...changesPlan.output, status: "applied", appliedBy: { runId: CARRY, at: "2026-11-13T15:10:05.000Z" } } };
+    const view = toPlanView(planValue(applied, same, (text) => text.split("\n")));
+    assert.ok(view.ok);
+    const api = new Proxy({} as CodarynApi, { get: (_t, name: string) => async () => (name === "plan" ? { ok: true, view: view.ok ? view.view : null, approval: null } : null) });
+    for (const language of ["ko", "en"] as const) {
+      const texts = language === "ko" ? KO : EN;
+      const screen = planScreen({ texts: textsFor(language), api, run: new RunModel(), current: () => ({ handle: HANDLE, name: "ws" }), showRun: () => undefined });
+      screen.choose(PLAN, null, "rewrite");
+      const root = new FakeElement("main");
+      screen.show(root as unknown as HTMLElement);
+      await settle();
+      const line = byId(root, "plan-applied");
+      assert.equal(line?.getAttribute("data-carried"), "true");
+      assert.ok(line?.textContent.startsWith(texts["plan.carriedBy"].replace("{runId}", CARRY)), line?.textContent);
+    }
+  } finally {
+    restore();
+  }
+  const made = runResultValue({ ok: true, result: { ...carried().output, planRunId: undefined, planDigest: undefined, runId: PLAN, status: "needs-input", reason: "plan_pending", plan: { digest: DIGEST, actions: 1, kind: "changes" } } }, same) as { ok: true; result: Record<string, unknown> };
+  assert.deepEqual(made.result["plan"], { digest: DIGEST, actions: 1, kind: "changes" });
+  const checked = toRunResultView(made);
+  assert.ok(checked.ok && checked.result.plan?.kind === "changes");
+  assert.equal(toRunResultView({ ok: true, result: { ...made.result, plan: { digest: DIGEST, actions: 1, kind: "moves" } } }).ok, false, "no other kind");
+  const restore2 = installFakeDom();
+  try {
+    const root = await resultScreen("ko", viewOf({ runId: PLAN, status: "needs-input", reason: "plan_pending", planRunId: null, plan: { digest: DIGEST, actions: 1, kind: "changes" } }));
+    assert.equal(byId(root, "run-plan")?.textContent, KO["run.planChanges"].replace("{count}", "1").replace("{digest}", DIGEST.slice(0, 12)));
+  } finally {
+    for (const root of shownRoots) root.replaceChildren();
+    restore2();
   }
 });

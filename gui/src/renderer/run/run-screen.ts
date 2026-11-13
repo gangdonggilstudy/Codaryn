@@ -204,7 +204,12 @@ function resultView(t: Texts, api: CodarynApi, result: RunResultView, labels: { 
       if (count > 0) box.append(el("p", t.format(`run.confirm.${key}`, { count: String(count) }), { id: `run-question-${key}` }));
     }
   }
-  if (result.plan !== null) box.append(el("p", t.format("run.plan", { actions: String(result.plan.actions ?? "-"), digest: result.plan.digest.slice(0, 12) }), { id: "run-plan" }));
+  // U-226 (U-221): a run plan's line counts files to write, as the CLI's end summary does.
+  if (result.plan !== null) {
+    const digest = result.plan.digest.slice(0, 12);
+    const counted = String(result.plan.actions ?? "-");
+    box.append(el("p", result.plan.kind === "changes" ? t.format("run.planChanges", { count: counted, digest }) : t.format("run.plan", { actions: counted, digest }), { id: "run-plan" }));
+  }
   // U-226 (U-218): a run that carried out a run plan: whose plan, and (the CLI's end summary) its writes
   // refused because the approved plan does not name the file, with how to change other files.
   if (result.kind === "run" && result.planRunId !== null) {

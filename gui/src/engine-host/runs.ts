@@ -109,7 +109,8 @@ export function runResultValue(outcome: unknown, shown: Shown, shownText: Shown 
         durationMs: num(usage["durationMs"]),
       },
       notices: texts(result["notices"], shown),
-      plan: isObj(plan) && typeof plan["digest"] === "string" ? { digest: plan["digest"], actions: num(plan["actions"]) } : null,
+      // U-226 (U-221): a run plan's `actions` is its number of files; its kind says so.
+      plan: isObj(plan) && typeof plan["digest"] === "string" ? { digest: plan["digest"], actions: num(plan["actions"]), ...(plan["kind"] === "changes" ? { kind: "changes" } : {}) } : null,
       review: isObj(review) ? { checklist: texts(review["checklist"], shown) } : null,
       protectedChanged: Array.isArray(result["protectedChanged"]) ? result["protectedChanged"].length : null,
       finalMessage: finalMessageValue(result["finalMessage"], shownText),

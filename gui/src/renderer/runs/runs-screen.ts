@@ -87,7 +87,15 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   // U-61 (U-16, R-55): what became of this plan's apply, by the contract's rule, in the CLI's runs words.
   if (run.planApply != null) {
     const { state, applyRunId, reason } = run.planApply;
-    item.append(el("span", t.format(`runs.planApply.${state}`, { runId: applyRunId, reason: reason ?? "-" }), { class: "plan-apply", "data-plan-apply": state }));
+    // U-226 (U-221): a run plan carried out by a run, in the CLI's carried words (record_missing keeps the apply's).
+    const carried = run.planApply.carried === true && state !== "record_missing";
+    item.append(
+      el("span", t.format(carried ? `runs.planCarried.${state}` : `runs.planApply.${state}`, { runId: applyRunId, reason: reason ?? "-" }), {
+        class: "plan-apply",
+        "data-plan-apply": state,
+        ...(carried ? { "data-plan-carried": "true" } : {}),
+      }),
+    );
   }
   const open = button(t.format("runs.preview"), () => preview(run.runId), { "data-preview": run.runId });
   open.setAttribute("aria-label", `${t.format("runs.preview")}: ${run.runId}`);

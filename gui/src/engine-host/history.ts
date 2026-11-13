@@ -43,6 +43,17 @@ function planApplyValue(of: PlanApplyOf, entry: Obj, entries: readonly unknown[]
   }
 }
 
+/**
+ * U-226 (U-221): a run plan's plan run, when the entry that took its plan up (the one the rule named)
+ * is a run that carried it out (a run with this plan run's id, not an apply run): its words are the
+ * CLI's carried ones (`carried: true`). A plan of moves' state is as before.
+ */
+function carriedMark(value: Obj | null, entry: Obj, entries: readonly unknown[]): Obj | null {
+  if (value === null) return null;
+  const taker = entries.find((other) => isObj(other) && other["state"] === "checked" && other["runId"] === value["applyRunId"] && other["planRunId"] === entry["runId"]);
+  return isObj(taker) && taker["kind"] !== "apply" ? { ...value, carried: true } : value;
+}
+
 /** `listRuns` → `{ok, runs, omitted}` or a failure. */
 export function runsValue(outcome: unknown, shown: Shown, planApplyOf?: PlanApplyOf): Obj | HostFailure {
   const output = outputOf(outcome);
@@ -69,7 +80,7 @@ export function runsValue(outcome: unknown, shown: Shown, planApplyOf?: PlanAppl
       revertRecordDamaged: entry["revertRecordDamaged"] === true,
       // UXM-14, DR-38: a records-changed mark (absent: false).
       recordsChanged: entry["recordsChanged"] === true,
-      planApply: planApplyOf === undefined ? null : planApplyValue(planApplyOf, entry, entries),
+      planApply: planApplyOf === undefined ? null : carriedMark(planApplyValue(planApplyOf, entry, entries), entry, entries),
     });
   }
   return { ok: true, runs, omitted: count(output["omitted"]) ?? 0 };

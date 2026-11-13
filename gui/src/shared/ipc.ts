@@ -770,7 +770,8 @@ export interface RunResultView {
     readonly durationMs: number | null;
   };
   readonly notices: readonly string[];
-  readonly plan: { readonly digest: string; readonly actions: number | null } | null;
+  /** U-226 (U-221): `kind` "changes" for a run plan, whose `actions` is its number of files. */
+  readonly plan: { readonly digest: string; readonly actions: number | null; readonly kind?: "changes" } | null;
   readonly review: { readonly checklist: readonly string[] } | null;
   readonly protectedChanged: number | null;
   /** GU-5: "apply" for an apply run (DR-2), with its plan run, its done actions and the unsafe moves its check found. */
@@ -842,7 +843,9 @@ export function toRunResultView(value: unknown): { readonly ok: true; readonly r
   let planView: RunResultView["plan"] = null;
   if (plan !== null) {
     if (!isObj(plan) || typeof plan["digest"] !== "string" || !DIGEST.test(plan["digest"]) || !numOrNull(plan["actions"])) return fail;
-    planView = { digest: plan["digest"], actions: plan["actions"] as number | null };
+    // U-226 (U-221): a run plan's kind (its actions are its files); absent for a plan of moves.
+    if (plan["kind"] !== undefined && plan["kind"] !== "changes") return fail;
+    planView = { digest: plan["digest"], actions: plan["actions"] as number | null, ...(plan["kind"] === "changes" ? { kind: "changes" as const } : {}) };
   }
   let reviewView: RunResultView["review"] = null;
   if (review !== null) {
@@ -1541,6 +1544,8 @@ export interface PlanApplyView {
   readonly applyRunId: string;
   /** The apply run's reason, for "unfinished"; null otherwise or when it has none. */
   readonly reason: string | null;
+  /** U-226 (U-221): a run plan carried out by a run (not an apply run); the CLI's carried words. */
+  readonly carried?: true;
 }
 
 /** GU-4 (3.8): one row of the run list. A damaged run has its id only. */
@@ -1579,10 +1584,11 @@ const revertedMark = (value: unknown): { at: string; status: "complete" | "parti
 /** U-61: a row's plan apply state as the engine host gives it: null when absent, "bad" when it does not fit. */
 function planApplyOf(value: unknown): PlanApplyView | null | "bad" {
   if (value === undefined || value === null) return null;
-  if (!isObj(value) || !hasOnlyKeys(value, ["state", "applyRunId", "reason"])) return "bad";
-  const { state, applyRunId, reason } = value;
+  if (!isObj(value) || !hasOnlyKeys(value, ["state", "applyRunId", "reason", "carried"])) return "bad";
+  const { state, applyRunId, reason, carried } = value;
   if (typeof state !== "string" || !(PLAN_APPLY_STATES as readonly string[]).includes(state) || !isRunId(applyRunId) || !(reason === null || (typeof reason === "string" && WORD.test(reason)))) return "bad";
-  return { state: state as PlanApplyView["state"], applyRunId, reason };
+  if (carried !== undefined && carried !== true) return "bad";
+  return { state: state as PlanApplyView["state"], applyRunId, reason, ...(carried === true ? { carried } : {}) };
 }
 
 /** The engine host's run list, checked field by field. */

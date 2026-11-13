@@ -179,7 +179,15 @@ export function planScreen(deps: PlanDeps): PlanScreen {
           unknown.append(el("p", t.format("plan.formUnknown", { runId: view.runId })), commands);
           parts.push(unknown);
         } else if (view.status === "applied" || reply.approval === null) {
-          parts.push(el("p", view.appliedBy === null ? t.format("plan.applied") : t.format("plan.appliedBy", { runId: view.appliedBy.runId, time: localDateTime(view.appliedBy.at) }), { id: "plan-applied" }));
+          // U-226 (U-221): a run plan carried out, in the CLI's words (the run that carried it out, then the time).
+          const carriedOut = runPlan && view.status === "applied";
+          const line =
+            view.appliedBy === null
+              ? t.format(carriedOut ? "plan.carriedOut" : "plan.applied")
+              : carriedOut
+                ? `${t.format("plan.carriedBy", { runId: view.appliedBy.runId })} (${localDateTime(view.appliedBy.at)})`
+                : t.format("plan.appliedBy", { runId: view.appliedBy.runId, time: localDateTime(view.appliedBy.at) });
+          parts.push(el("p", line, { id: "plan-applied", ...(carriedOut ? { "data-carried": "true" } : {}) }));
         } else {
           // U-226 (U-218): a run plan too: its apply is the run that carries it out (the main process
           // asks first with its own dialog); the run screen shows its progress, cancel and result.

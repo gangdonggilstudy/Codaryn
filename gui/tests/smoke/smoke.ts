@@ -1385,9 +1385,14 @@ startGui({
         const again = typeof spare === "string" ? await js(`window.codaryn.applyPlan(${JSON.stringify(spare)}, false).then((r) => (r.ok ? 'started' : r.code))`) : "no spare token";
         await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
         await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
+        // U-226 (U-221): the plan run's row names the run that carried its plan out, in the carried words.
+        const row = (await js(
+          `(() => { const mark = document.querySelector('[data-plan="${planRunId}"]')?.parentElement?.querySelector('.plan-apply'); return mark ? { carried: mark.getAttribute('data-plan-carried'), text: mark.textContent } : null; })()`,
+        )) as { carried: string | null; text: string | null } | null;
         await js(`document.querySelector('[data-plan="${planRunId}"]')?.click(); true`);
         const after = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
         const appliedBy = await js("document.getElementById('plan-applied')?.textContent ?? null");
+        const appliedCarried = await js("document.getElementById('plan-applied')?.getAttribute('data-carried') ?? null");
         const planned = join(SECOND, "planned.md");
         return {
           planReason,
@@ -1404,6 +1409,8 @@ startGui({
           again,
           after,
           appliedByCarry: typeof appliedBy === "string" && isRunIdValue(carryId) && appliedBy.includes(carryId),
+          appliedCarried,
+          rowCarried: row !== null && row.carried === "true" && typeof row.text === "string" && isRunIdValue(carryId) && row.text.includes(carryId),
           dialogs: dialogs.slice(asked),
         };
       })();

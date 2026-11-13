@@ -40,28 +40,38 @@
  * (showPlan, recordReview). What is left to differ is the wrapping: the task form and the workspace form
  * (with its task type), where DR-28's secrets come from (the task file's or the config's), and an
  * error's way back (fromCliError).
+ *
+ * U-312 (ne-verify's C-7b integration gaps; before C-7b moves the apply of a plan of moves into the app
+ * layer): that apply by the CLI and by the app's applyPlan. The five refusals (a wrong digest, a task of
+ * another plan kind, a records-changed mark, a held lock, a plan applied already) and the mark found under
+ * the lock; the consent to unsafe moves on a volume without hard links (fs-faults.ts makes one: links
+ * under the workspace fail as they do on FAT); and a lock the apply cannot release (fs-faults.ts again).
  */
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { createCodarynApp, createNodeAppEnvironment } from "../../src/app/index.js";
+import { createMessageCatalog } from "../../src/i18n/index.js";
 import type { CodarynApp, TaskForm } from "../../src/app/index.js";
 import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE, RECORDS_CHANGED_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
 import type { ApplyJournalRecord, ApplyResult, CommandVerifierConfig, EngineResult, JournalRecord, ScriptStep } from "../../src/contracts/index.js";
 import { fakeApiConfig, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
-import { createFileArgs, organizeScript, sha256Of, textStep, toolStep, writeGeneralTask, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
+import { ORGANIZE_ACTIONS, afterActions, createFileArgs, organizeScript, sha256Of, textStep, toolStep, writeGeneralTask, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
 import { EDIT_RIGHT_FIX, EDIT_WRONG_FIX, PRICE_CHECK_PATH, PRICE_PATH, writeRepairProject } from "../fixtures/repair-project.js";
 import { FAKE_API_KEY, FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
 import { NODE, cliEnv, expectCliError, expectRunResult, lockPath, readRunFiles, runDirOf, runTask, sha256Hex, startCli, waitFor } from "../support/cli.js";
 import { MOCK_LABEL, replyText, replyTools, runGuarded, startFakeAnthropic, toolUse } from "../support/fake-anthropic.js";
 import { applyArgs, expectApplyResult, planDigestOf, readApplyJournal, recordsOf, shortDigest } from "../support/general.js";
+import { FS_FAULTS_ENV, FS_FAULTS_MODULE_URL, installFsFaults } from "../support/fs-faults.js";
+import type { FsFaults } from "../support/fs-faults.js";
 import { MARK_AT_LOCK_ENV, MARK_AT_LOCK_MODULE_URL, installMarkAtLock } from "../support/mark-at-lock.js";
+import { workspaceBytes } from "../support/repair-check.js";
 import { attemptSteps, spareSteps } from "../support/repair-script.js";
 import type { Attempt } from "../support/repair-script.js";
 
@@ -915,4 +925,199 @@ test("U-310 적용 전 점검: 앱의 checkApply가 CLI apply의 사전 점검(p
   assert.equal(markedCheck.error.code, markedApply.json["code"]);
   assert.match(markedCheck.error.message, /records were changed by something other than the run, so its plan may not be the one shown; nothing was checked$/);
   assert.match(String(markedApply.json["message"]), /^the plan run's records were changed by something other than the run \(a records-changed mark\), so its plan may not be the one shown; nothing was asked, recorded or moved/);
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-312: before C-7b, the apply of a plan of moves by the CLI and by the app layer's applyPlan
+
+interface MovesSide {
+  readonly sb: Sandbox;
+  readonly task: string;
+  readonly original: ReadonlyMap<string, Buffer>;
+  readonly planRunId: string;
+  readonly digest: string;
+}
+
+/** The organize workspace and a plan of moves made by the CLI (ORGANIZE_ACTIONS). */
+async function movesSideOf(t: TestContext, env: NodeJS.ProcessEnv): Promise<MovesSide> {
+  const sb = createSandbox(t);
+  const original = writeOrganizeWorkspace(sb);
+  const task = writeOrganizeTask(sb, "u312-moves", organizeScript());
+  const planned = expectRunResult(await startCli(["run", "--task", task], { cwd: sb.base, env, timeoutMs: TIMEOUT_MS }).done);
+  return { sb, task, original, planRunId: planned.runId, digest: planDigestOf(planned) };
+}
+
+/** `codaryn apply` of the side's plan, with `faults` (fs-faults.ts) or a mark at the lock (mark-at-lock.ts) in its process. */
+async function cliApply(side: MovesSide, env: NodeJS.ProcessEnv, options: { readonly digest?: string; readonly task?: readonly string[]; readonly extra?: readonly string[]; readonly faults?: FsFaults; readonly markAtLock?: boolean } = {}) {
+  const args = ["apply", ...(options.task ?? ["--task", side.task]), "--run", side.planRunId, "--digest", options.digest ?? shortDigest(side.digest), ...(options.extra ?? [])];
+  const preload = [...(options.faults === undefined ? [] : [FS_FAULTS_MODULE_URL]), ...(options.markAtLock === true ? [MARK_AT_LOCK_MODULE_URL] : [])];
+  const runEnv = {
+    ...env,
+    ...(options.faults === undefined ? {} : { [FS_FAULTS_ENV]: JSON.stringify(options.faults) }),
+    ...(options.markAtLock === true ? { [MARK_AT_LOCK_ENV]: `${lockPath(side.sb.workspace)}|${join(runDirOf(side.sb.workspace, side.planRunId), RECORDS_CHANGED_FILE_NAME)}` } : {}),
+  };
+  const run = await startCli(args, { cwd: side.sb.base, env: runEnv, timeoutMs: TIMEOUT_MS, ...(preload.length === 0 ? {} : { preload }) }).done;
+  return { run, json: JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Record<string, unknown> };
+}
+
+/** The app layer's applyPlan of the side's plan, as the GUI's main process asks for it. */
+async function appApply(app: CodarynApp, side: MovesSide, options: { readonly digest?: string; readonly form?: TaskForm; readonly consent?: boolean } = {}) {
+  return app.applyPlan({
+    settings: options.form ?? taskFormOf(side.task),
+    planRunId: side.planRunId,
+    digest: options.digest ?? shortDigest(side.digest),
+    cancelFile: null,
+    unsafeMoveConsent: options.consent === true ? { digest: side.digest } : null,
+  });
+}
+
+/** The app's refusal before a handle. */
+async function appRefusal(started: Awaited<ReturnType<typeof appApply>>): Promise<Record<string, unknown>> {
+  assert.ok(!started.ok, `the app layer started the apply: ${JSON.stringify(started)}`);
+  return errorFacts(started.error);
+}
+
+/** The app's apply that ended with a result, and its records. */
+async function appApplied(started: Awaited<ReturnType<typeof appApply>>, sb: Sandbox): Promise<{ readonly result: ApplyResult; readonly records: readonly ApplyJournalRecord[] }> {
+  assert.ok(started.ok, JSON.stringify(started));
+  const done = await started.handle.done;
+  assert.ok(done.ok && done.output.kind === "apply", JSON.stringify(done));
+  const result = done.output as ApplyResult;
+  return { result, records: readApplyJournal(sb.workspace, result.runId) };
+}
+
+/** Two applies the same but for their ids and the channels of the approval and the consent, which each side's own. */
+function assertSameApply(cli: { readonly result: ApplyResult; readonly records: readonly ApplyJournalRecord[] }, cliSide: MovesSide, app: { readonly result: ApplyResult; readonly records: readonly ApplyJournalRecord[] }, appSide: MovesSide, label: string): void {
+  const ids = (side: MovesSide, result: ApplyResult) => ({ PLAN: side.planRunId, APPLY: result.runId, DIGEST: side.digest });
+  assert.deepEqual(app.records.map((record) => record.type), cli.records.map((record) => record.type), `${label}: the same kinds of records`);
+  assert.deepEqual(normalized(app.result, appSide.sb, ids(appSide, app.result)), normalized(cli.result, cliSide.sb, ids(cliSide, cli.result)), `${label}: the same ApplyResult`);
+  const leaveOut = ["approval", "unsafeMoveConsent"];
+  assert.deepEqual(normalized(app.records, appSide.sb, ids(appSide, app.result), leaveOut), normalized(cli.records, cliSide.sb, ids(cliSide, cli.result), leaveOut), `${label}: the same records (channels aside)`);
+}
+
+test("U-312 이동 계획 적용의 거부 다섯: CLI의 오류 JSON과 앱 applyPlan의 거부가 같고 아무것도 옮기지 않으며, 잠금 아래의 기록 변경 표시도 같게 멈춘다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const side = await movesSideOf(t, env);
+  const app = await appFor(side.sb, env);
+  const mark = join(runDirOf(side.sb.workspace, side.planRunId), RECORDS_CHANGED_FILE_NAME);
+  const untouched = (label: string): void => assert.deepEqual(workspaceBytes(side.sb.workspace), side.original, `${label}: nothing moved`);
+
+  // 1. A digest that is not the plan's.
+  const wrong = await cliApply(side, env, { digest: "0".repeat(12) });
+  assert.deepEqual([wrong.run.exitCode, wrong.json["code"]], [2, "plan_not_approved"]);
+  assert.deepEqual(await appRefusal(await appApply(app, side, { digest: "0".repeat(12) })), errorFacts(wrong.json), "plan_not_approved alike");
+  untouched("a wrong digest");
+
+  // 2. A task whose task type carries out a run plan (plan "run"): not this plan's kind.
+  const config = writeConfigFile(side.sb, { schemaVersion: 1, workflows: { rewrite: { tools: ["read_file", "write_file", "propose_changes"], plan: "run" } } }, "rewrite-config.json");
+  const rewriteTask = writeGeneralTask({ ...side.sb, taskPath: join(side.sb.base, "rewrite-task.json"), scriptPath: join(side.sb.base, "unused-script.json") }, { id: "u312-rewrite", fields: { workflowRef: "rewrite" } });
+  const kind = await cliApply(side, env, { task: ["--task", rewriteTask, "--config", config] });
+  assert.deepEqual([kind.run.exitCode, kind.json["code"], kind.json["hint"]], [2, "run_not_plan", "plan_kind_differs"]);
+  const kindForm: TaskForm = { input: { kind: "task", taskPath: rewriteTask }, configPath: config, varsFile: null, profile: null, workflowRef: null };
+  assert.deepEqual(await appRefusal(await appApply(app, side, { form: kindForm })), errorFacts(kind.json), "run_not_plan with its hint alike");
+  untouched("another kind of task");
+
+  // 3. The plan run's records-changed mark, before the lock (apply's own look).
+  writeFileSync(mark, "{}\n");
+  const marked = await cliApply(side, env);
+  assert.deepEqual([marked.run.exitCode, marked.json["code"]], [2, "plan_records_changed"]);
+  assert.deepEqual(await appRefusal(await appApply(app, side)), errorFacts(marked.json), "plan_records_changed alike");
+  rmSync(mark);
+  untouched("a records-changed mark");
+
+  // 4. A lock a live process holds: the apply's own words, not a run's.
+  const holder = spawn(NODE, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  t.after(() => {
+    holder.kill();
+  });
+  writeFileSync(lockPath(side.sb.workspace), JSON.stringify({ pid: holder.pid, runId: "20261114T000000Z-0a0a0a0a", startedAt: "2026-11-14T00:00:00.000Z" }));
+  const locked = await cliApply(side, env);
+  assert.deepEqual([locked.run.exitCode, locked.json["code"], locked.json["message"]], [6, "workspace_locked", "another run or revert holds the workspace; nothing was moved"]);
+  assert.deepEqual(await appRefusal(await appApply(app, side)), errorFacts(locked.json), "workspace_locked alike");
+  rmSync(lockPath(side.sb.workspace));
+  untouched("a held lock");
+
+  // 5. The mark written as the apply makes its lock (mark-at-lock.ts): the engine's look under the lock
+  // stops the apply as plan_stale, before it claims the plan.
+  const underLock = await cliApply(side, env, { markAtLock: true });
+  assert.equal(underLock.run.exitCode, 1);
+  const cliUnder = { result: expectApplyResult(underLock.run, side.planRunId), records: [] as ApplyJournalRecord[] };
+  assert.deepEqual([cliUnder.result.status, cliUnder.result.reason, cliUnder.result.applied.length], ["failed", "plan_stale", 0]);
+  const cliUnderRecords = readApplyJournal(side.sb.workspace, cliUnder.result.runId);
+  rmSync(mark);
+  const hook = installMarkAtLock(lockPath(side.sb.workspace), mark);
+  let appUnder: { readonly result: ApplyResult; readonly records: readonly ApplyJournalRecord[] };
+  try {
+    appUnder = await appApplied(await appApply(app, side), side.sb);
+  } finally {
+    hook.remove();
+  }
+  assert.ok(hook.made(), "the mark was written as the app's apply made its lock");
+  rmSync(mark);
+  assertSameApply({ result: cliUnder.result, records: cliUnderRecords }, side, appUnder, side, "the look under the lock");
+  untouched("a mark under the lock");
+
+  // 6. Applied once; a second apply is refused alike.
+  const applied = await cliApply(side, env);
+  assert.equal(expectApplyResult(applied.run, side.planRunId).status, "done");
+  const again = await cliApply(side, env);
+  assert.deepEqual([again.run.exitCode, again.json["code"]], [2, "plan_already_applied"]);
+  assert.deepEqual(await appRefusal(await appApply(app, side)), errorFacts(again.json), "plan_already_applied alike");
+});
+
+test("U-312 위험한 이동의 동의(하드 링크가 없는 볼륨 흉내): 동의 없이는 두 길 모두 consent_required로 멈추고, 동의를 주면 같게 옮긴다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = await movesSideOf(t, env);
+  const appSide = await movesSideOf(t, env);
+  const app = await appFor(appSide.sb, env);
+  const faults = installFsFaults({ noLinksUnder: appSide.sb.workspace });
+  try {
+    // Without a consent: nothing moved, the plan not claimed, every move listed as unsafe.
+    const cliFirst = await cliApply(cliSide, env, { faults: { noLinksUnder: cliSide.sb.workspace } });
+    assert.equal(cliFirst.run.exitCode, 3);
+    const cliStopped = expectApplyResult(cliFirst.run, cliSide.planRunId);
+    assert.deepEqual([cliStopped.status, cliStopped.reason, cliStopped.applied.length], ["needs-input", "consent_required", 0]);
+    const cliStoppedRecords = readApplyJournal(cliSide.sb.workspace, cliStopped.runId);
+    assert.deepEqual(recordsOf(cliStoppedRecords, "plan_checked")[0]?.unsafeMoves, ORGANIZE_ACTIONS.map((_, index) => index), "every move could replace a file");
+    assert.ok(cliFirst.run.stderr.includes("Not applied: moves that could replace a file: 7. Nothing was moved."), cliFirst.run.stderr);
+    const appStopped = await appApplied(await appApply(app, appSide), appSide.sb);
+    assertSameApply({ result: cliStopped, records: cliStoppedRecords }, cliSide, appStopped, appSide, "without a consent");
+    for (const side of [cliSide, appSide]) assert.deepEqual(workspaceBytes(side.sb.workspace), side.original, "nothing moved");
+    assert.ok(faults.counts.links > 0, "the app's apply met the fault");
+
+    // With this plan's consent: the CLI's --allow-unsafe-move and the app's request; every move made unsafely.
+    const cliSecond = await cliApply(cliSide, env, { faults: { noLinksUnder: cliSide.sb.workspace }, extra: ["--allow-unsafe-move"] });
+    const cliMoved = expectApplyResult(cliSecond.run, cliSide.planRunId);
+    assert.deepEqual([cliMoved.status, cliMoved.reason, cliSecond.run.exitCode], ["done", "verified", 0]);
+    assert.ok(cliMoved.applied.every((item) => item.unsafe === true) && cliMoved.applied.length === ORGANIZE_ACTIONS.length, "every move made unsafely");
+    const appMoved = await appApplied(await appApply(app, appSide, { consent: true }), appSide.sb);
+    const consentOf = (records: readonly ApplyJournalRecord[]): unknown => (records[0] as { readonly unsafeMoveConsent?: unknown } | undefined)?.unsafeMoveConsent;
+    assert.deepEqual([consentOf(readApplyJournal(cliSide.sb.workspace, cliMoved.runId)), consentOf(appMoved.records)], ["cli-flag", "adapter"], "each consent's own channel");
+    assertSameApply({ result: cliMoved, records: readApplyJournal(cliSide.sb.workspace, cliMoved.runId) }, cliSide, appMoved, appSide, "with the consent");
+    for (const side of [cliSide, appSide]) assert.deepEqual(workspaceBytes(side.sb.workspace), afterActions(side.original, ORGANIZE_ACTIONS), "moved as planned");
+  } finally {
+    faults.remove();
+  }
+});
+
+test("U-312 적용의 잠금을 풀지 못함(lock left): 두 길 모두 결과는 그대로이고 잠금이 남으며, CLI의 끝 요약이 그렇다고 한다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = await movesSideOf(t, env);
+  const appSide = await movesSideOf(t, env);
+  const cliRun = await cliApply(cliSide, env, { faults: { failLockRemoval: lockPath(cliSide.sb.workspace) } });
+  const cliResult = expectApplyResult(cliRun.run, cliSide.planRunId);
+  assert.deepEqual([cliResult.status, cliResult.reason, cliRun.run.exitCode], ["done", "verified", 0], "the result stands");
+  assert.ok(cliRun.run.stderr.includes(createMessageCatalog("en").format("lock.release_failed")), cliRun.run.stderr);
+  const app = await appFor(appSide.sb, env);
+  const faults = installFsFaults({ failLockRemoval: lockPath(appSide.sb.workspace) });
+  let appRun: { readonly result: ApplyResult; readonly records: readonly ApplyJournalRecord[] };
+  try {
+    appRun = await appApplied(await appApply(app, appSide), appSide.sb);
+  } finally {
+    faults.remove();
+  }
+  assert.ok(faults.counts.removals > 0, "the app's release met the fault");
+  for (const side of [cliSide, appSide]) assert.equal(existsSync(lockPath(side.sb.workspace)), true, "the lock is left");
+  assertSameApply({ result: cliResult, records: readApplyJournal(cliSide.sb.workspace, cliResult.runId) }, cliSide, appRun, appSide, "a lock left");
+  // As the app's apply result has no lockLeft yet (PM, C-7b D-3: a later unit), nothing is said of it here.
 });

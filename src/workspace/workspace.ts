@@ -25,6 +25,7 @@ import type {
   ContentHash,
   GuardedCallOptions,
   ListEntry,
+  ListOptions,
   ListOutcome,
   PathAccess,
   ReadTextOutcome,
@@ -197,16 +198,21 @@ export async function createWorkspaceWithFileLayer(
    * (guard.ts). A change seen is tried again (retried); still seen, it is io_error, and no name read
    * through a swapped folder is given.
    */
-  async function list(dir: ResolvedPath, options?: GuardedCallOptions): Promise<ListOutcome> {
+  async function list(dir: ResolvedPath, options?: ListOptions): Promise<ListOutcome> {
     if (!issued.has(dir)) {
       return { ok: false, code: "io_error" };
     }
     // U-213: a listing's tries are limited in time too (a large tree), by the caller's time or 2 s from now.
-    const outcome = await retried(() => listOnce(dir), { signal: options?.signal, until: options?.retryUntil ?? retryDeadline() });
+    const leaveOut = options?.leaveOut;
+    const outcome = await retried(() => listOnce(dir, leaveOut), { signal: options?.signal, until: options?.retryUntil ?? retryDeadline() });
     return outcome === "changed" ? { ok: false, code: "io_error" } : outcome;
   }
 
-  async function listOnce(dir: ResolvedPath): Promise<ListOutcome | "changed"> {
+  /**
+   * One try of the listing. U-242 (ListOptions.leaveOut): an entry it leaves out is skipped where it
+   * is met, before it is counted, and a folder left out is never read; without it, nothing changes.
+   */
+  async function listOnce(dir: ResolvedPath, leaveOut?: ListOptions["leaveOut"]): Promise<ListOutcome | "changed"> {
     const first = await walkChain(files.lstatId, root, dir.relative);
     if (!first.ok) return first.code === "changed" ? "changed" : { ok: false, code: first.code === "not_found" ? "not_found" : "io_error" };
     if (!first.last.isDirectory()) return { ok: false, code: "not_found" };
@@ -227,9 +233,13 @@ export async function createWorkspaceWithFileLayer(
         if (relative === "." && isStateDirName(entry.name)) {
           continue;
         }
+        const entryRelative = relative === "." ? entry.name : `${relative}/${entry.name}`;
+        if (leaveOut !== undefined && (await leaveOut({ relative: entryRelative, link: !entry.isDirectory() && entry.isFile?.() !== true }))) {
+          continue;
+        }
         pending.push({
           absolute: path.join(absolute, entry.name),
-          relative: relative === "." ? entry.name : `${relative}/${entry.name}`,
+          relative: entryRelative,
           kind: entry.isDirectory() ? "dir" : "file",
         });
       }

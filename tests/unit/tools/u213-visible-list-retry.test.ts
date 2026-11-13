@@ -1,13 +1,15 @@
 /**
- * U-213 after main's U-203: search_files with unreadable paths lists through visible-list.ts
- * (listVisible), the tools' own listing that leaves unreadable entries out before it counts or enters
- * them. Its folder guards are Workspace.list's (a walk, each folder looked at before its readdir,
- * walked and looked at again at the end); its tries again are too: six, twice at once and then after
- * waits of 50, 200 and 500 ms, none started 2 s or more after the search began, and the run's signal
- * ends a wait. The search's error texts do not change.
+ * U-213 after main's U-203: search_files with unreadable paths leaves unreadable entries out before
+ * it counts or enters them. U-242: through Workspace.list itself with ListOptions.leaveOut
+ * (hidden-entries.ts), no longer the tools' own copy (visible-list.ts). Its folder guards are
+ * Workspace.list's (a walk, each folder looked at before its readdir, walked and looked at again at
+ * the end); its tries again are too: six, twice at once and then after waits of 50, 200 and 500 ms,
+ * none started 2 s or more after the search began, and the run's signal ends a wait. The search's
+ * error texts do not change.
  *
- * listVisible resolves a link in a listed folder through Workspace.resolve; the test's workspace
- * wraps resolve to change the folder there (a burst), inside a try, after the folder was looked at.
+ * The listing's leaveOut resolves a link in a listed folder through Workspace.resolve; the test's
+ * workspace wraps resolve to change the folder there (a burst), inside a try, after the folder was
+ * looked at.
  */
 
 import assert from "node:assert/strict";
@@ -19,7 +21,7 @@ import { after, before, test } from "node:test";
 import type { Workspace } from "../../../src/contracts/index.js";
 import { compilePathSet } from "../../../src/policy/path-set.js";
 import { createToolRunner } from "../../../src/tools/index.js";
-import { listVisible } from "../../../src/tools/visible-list.js";
+import { leaveOutUnreadable } from "../../../src/tools/hidden-entries.js";
 import { GUARD_ATTEMPTS } from "../../../src/workspace/guard.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 import { createFakePrivacy } from "./doubles.js";
@@ -49,7 +51,7 @@ after(() => {
 });
 
 /**
- * The workspace with resolve wrapped: resolving `vis/link` (listVisible does, for a link) waits
+ * The workspace with resolve wrapped: resolving `vis/link` (the listing's leaveOut does, for a link) waits
  * `slowMs` and, for the first `burst` times, changes `vis` past the clock tick of its last change.
  */
 async function burstWorkspace(burst: number, slowMs = 0): Promise<{ workspace: Workspace; links: () => number }> {
@@ -119,7 +121,7 @@ test("U-213 visible listing: called without options it keeps its own 2 s limit, 
   const dir = await workspace.resolve("vis", "read");
   assert.ok(dir.ok, JSON.stringify(dir));
   const hidden = await compilePathSet(["secret"], { match: "prefix", onUnusable: "covers" }).snapshot(workspace);
-  const listed = await listVisible(workspace, dir.path, hidden);
+  const listed = await workspace.list(dir.path, { leaveOut: leaveOutUnreadable(workspace, hidden) });
   assert.equal(listed.ok ? "listed" : listed.code, "io_error");
   assert.equal(links(), 3, "tries of over 700 ms: the fourth would start after 2 s");
 });

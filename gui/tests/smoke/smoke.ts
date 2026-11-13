@@ -212,10 +212,6 @@ startGui({
         "(() => { const tree = document.querySelector('.tree'); const first = tree.querySelector('[tabindex=\"0\"]'); first.focus(); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); const last = document.activeElement?.getAttribute('data-key'); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); return { moved: last !== null && last !== document.activeElement?.getAttribute('data-key'), inTree: tree.contains(document.activeElement) }; })()",
       );
       results["treeText"] = await js("document.querySelector('.tree')?.textContent ?? ''");
-      // U-62 (3.3): a file's relative path, by its id: the main process resolves it and copies it after the engine host's check.
-      await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.includes('b.txt'))?.click(); true");
-      await js("document.getElementById('tree-copy-path')?.click(); true");
-      results["copyPath"] = { status: await waitFor("document.getElementById('tree-copy-status')?.getAttribute('data-copied') ?? null"), copied: copied.at(-1) ?? null };
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
@@ -384,7 +380,7 @@ startGui({
       results["runAgainWhileIdle"] = await js("window.codaryn.cancelRun()");
       results["endNotice"] = notices[0] ?? null;
       pretendInactive = false;
-      // U-62 (6.4): the run id through the main process; text that is not copyable is refused and nothing is written.
+      // U-62 (6.4, R-73): the run id through the main process; anything but a run id or a digest's first 12 is refused, nothing written.
       await js("document.getElementById('run-copy-id')?.click(); true");
       results["copyRunId"] = {
         status: await waitFor("document.querySelector('#run-copy-id + .copy-status')?.getAttribute('data-copied') ?? null"),
@@ -397,10 +393,11 @@ startGui({
         return {
           keyShape: await code(`window.codaryn.copyText(${JSON.stringify(COPY_KEY_SHAPED)})`),
           keyValue: await code(`window.codaryn.copyText(${JSON.stringify(process.env["ANTHROPIC_API_KEY"] ?? "")})`),
-          control: await code("window.codaryn.copyText('a\\u0007b')"),
+          path: await code("window.codaryn.copyText('sub/b.txt')"),
+          words: await code("window.codaryn.copyText('any text at all')"),
+          digestUpper: await code("window.codaryn.copyText('0123456789AB')"),
           lineBreak: await code("window.codaryn.copyText('a\\nb')"),
-          tooLong: await code("window.codaryn.copyText('x'.repeat(1001))"),
-          unknownEntry: await code(`window.codaryn.copyPath(${JSON.stringify(second.ok ? second.handle : "")}, ${JSON.stringify("0".repeat(32))})`),
+          noPathCopy: await js("typeof window.codaryn.copyPath"),
           written: copied.length - before,
         };
       })();

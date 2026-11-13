@@ -156,7 +156,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
   - 표시는 지금 디스크 기준이다. 실행 뒤 바뀐 파일은 `changes`의 `state`(`changed_since_run`, `missing`)를 따른다.
 - 동작
   - 바뀐 파일을 고르면 변경 비교(3.4)가 그 파일로 열린다.
-  - 항목 메뉴: "탐색기에서 보기"(메인이 id를 경로로 바꿔 탐색기에서 선택 상태로 연다), "상대 경로 복사"(가린 이름으로 만든 경로).
+  - 항목 메뉴: "탐색기에서 보기"(메인이 id를 경로로 바꿔 탐색기에서 선택 상태로 연다), "상대 경로 복사"(가린 이름으로 만든 경로). 상대 경로 복사는 아직 없다(R-73 M1: 임시 트리가 등록한 가릴 값을 가리지 않음, G-list 뒤).
   - 파일 내용 보기와 기본 앱으로 열기는 없다(6.8, GUI-D20).
   - 새로 고침(F5). 자동 감시(파일 시스템 감시)는 v1에 두지 않는다. 실행이 끝나면 한 번 새로 읽는다.
 
@@ -568,7 +568,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 | 영역 | 함수 | 메인 확인 |
 | --- | --- | --- |
 | 앱 | `info()`, `copyText(text)`(U-62) | — |
-| 작업 공간 | `openFolder()`, `recent()`, `openRecent(id)`, `forgetRecent(id)`, `tree(workspace, node | null, offset)`, `reveal(workspace, node)`, `copyPath(workspace, node)`(U-62, 항목 id로), `onWorkspaceOpened(listener)`(명령줄·두 번째 실행) | — |
+| 작업 공간 | `openFolder()`, `recent()`, `openRecent(id)`, `forgetRecent(id)`, `tree(workspace, node | null, offset)`, `reveal(workspace, node)`, `onWorkspaceOpened(listener)`(명령줄·두 번째 실행) | — |
 | 점검 | `doctor(workspace | null)` | — |
 | 실행 | `startRun(workspace, goal, profile, workflow)`, `cancelRun()`(앱 전체 실행 하나라 토큰 인자 없음), `onRunEvents(listener)`, `onRunDone(listener)` | — |
 | 결과 | `listRuns(workspace)`, `report(workspace, runId)`, `changes(workspace, runId, profile, workflow)`, `saveReport(workspace, runId)` | 저장 대화상자 |
@@ -581,7 +581,7 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
   - 언어 바꾸기(`setLanguage`)는 따로 두지 않고 설정 변경 제안의 편집 하나로 한다.
   - `models()`·`useModel(provider, model)`은 `listModels(provider)`·`selectModel(entryId)`가 되었다. 메인이 목록 항목마다 id를 주고, 화면은 그 id만 보낸다.
   - 이벤트는 `onEvents` 하나가 아니라 실행 이벤트, 실행 끝, 작업 공간 열림의 세 구독이다. 모두 메인이 검사한 값의 복사본이다.
-- 복사(U-62): 화면은 클립보드에 쓰지 않는다. `copyText`·`copyPath`를 받은 메인이 한 줄인지, 길이(1,000자 이하), 제어·줄·서식·방향·보이지 않는 문자가 없는지 본다(`copyableText`). 그다음 엔진 호스트의 `copyCheck`로 엔진의 가림(키 모양, 지금 설정된 모든 키 값)이 그 글을 바꾸지 않는지 본 뒤에만 클립보드에 쓴다. 경로는 항목 id로만 받아 메인이 푼다. 실행 id(결과, 실행 목록, 보고서), 다이제스트 앞 12자(계획), 트리 항목의 상대 경로에 복사 단추가 있다. 연기 시험은 OS 클립보드 대신 기록기를 쓴다.
+- 복사(U-62, 검토 R-73과 PM 결정): 화면은 클립보드에 쓰지 않는다. `copyText`를 받은 메인은 실행 id 꼴이나 다이제스트 앞 12자(소문자 16진)만 쓰고, 그 밖은 `invalid_args`다. 그래서 화면이 다른 글을 클립보드에 쓸 수 없다. 실행 id(결과, 실행 목록, 보고서)와 다이제스트 앞 12자(계획)에 복사 단추가 있다. 연기 시험은 OS 클립보드 대신 기록기를 쓴다. 트리의 상대 경로 복사는 뺐다: 임시 트리가 설정에 등록한 가릴 값(`secretEnv`)을 가리지 않아 그 값이 든 경로가 클립보드로 갈 수 있기 때문이다(R-73 M1). 트리가 앱 계층의 작업 공간 목록을 쓰게 된 뒤(G-list) 다시 넣는다.
 - 아직 없는 것: `startTaskRun`(U-63 예정), `restartEngine`(U-64 예정), `planCheck`(앱 계층의 적용 전 점검 함수 뒤).
 
 - 메인의 검사
@@ -879,7 +879,7 @@ decisions.md 6절에 따라 공식 문서를 열어 확인하고 링크와 날�
 | --- | --- | --- | --- |
 | U-60 | 설계 문서 현행화(이 개정) | 전체 | 없음 |
 | U-61 | 결과의 다음 행동(되돌리기, 보호 대상, 한도, 새 계획), 실행 목록의 적용 상태(`appliedBy`), 분석 작업의 안내. 변경 화면의 `applyRun`은 열 길이 없어 하지 않음(3.4) | 3.12, 3.8, 3.4, 3.2 | 없음 |
-| U-62 | 복사(`copyText`: 메인이 길이·제어 문자·키 모양을 다시 검사, 가린 글만) | 6.4, 3.7, 3.8, 3.9, 3.3 | 없음 |
+| U-62 | 복사(`copyText`: 실행 id와 다이제스트 앞 12자만. 경로 복사는 G-list 뒤) | 6.4, 3.7, 3.8, 3.9, 3.3 | 없음 |
 | U-63 | task 파일로 실행과 변수 파일(경로를 기억하지 않음) | 3.5, GUI-D8 | 없음 |
 | U-64 | 엔진 다시 시작(`restartEngine`)과 엔진 종료 카드 | 3.12, 4.4 | 없음 |
 | U-65 | 트리의 변경·보호 표시, 바뀐 파일에서 비교 열기, 새로 고침 | 3.3 | 없음 |

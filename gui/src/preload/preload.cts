@@ -12,7 +12,6 @@ const { contextBridge, ipcRenderer } = electron;
 const CHANNELS = {
   info: "codaryn:app:info",
   copyText: "codaryn:app:copy",
-  copyPath: "codaryn:workspace:copypath",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -84,7 +83,6 @@ const api = Object.freeze({
     ipcRenderer.invoke(CHANNELS.tree, { workspace: text(workspace), node: text(node), offset: count(offset) }),
   reveal: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.reveal, { workspace: text(workspace), node: text(node) }),
   copyText: (value: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyText, { text: text(value) }),
-  copyPath: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyPath, { workspace: text(workspace), node: text(node) }),
   doctor: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.doctor, { workspace: text(workspace) }),
   settings: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.settings),
   listModels: (provider: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listModels, { provider: text(provider) }),

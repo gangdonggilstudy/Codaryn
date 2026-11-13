@@ -40,7 +40,6 @@ export const EN: { readonly [K in TextId]: string } = {
   "tree.reveal": "Show in folder",
   "copy.runId": "Copy run id",
   "copy.digest": "Copy digest (first 12)",
-  "copy.path": "Copy relative path",
   "copy.done": "Copied.",
   "copy.failed": "Not copied ({code}).",
   "tree.readOnly": "Read-only view. Files are not opened or changed.",

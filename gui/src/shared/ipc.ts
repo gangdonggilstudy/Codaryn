@@ -10,7 +10,6 @@
 export const IPC_CHANNELS = {
   info: "codaryn:app:info",
   copyText: "codaryn:app:copy",
-  copyPath: "codaryn:workspace:copypath",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -104,27 +103,22 @@ export function parseRevealArgs(value: unknown): { readonly workspace: string; r
 }
 
 /**
- * U-62 (6.4, 2 principle 4): copying puts only text the window shows, masked, on the clipboard. The
- * main process checks it here (one line of at most MAX_COPY_CHARS characters, no control, line,
- * format, direction or invisible character), then asks the engine host whether its own hiding
- * (key shapes, every key value now set) would change it; only text it would not change is copied.
+ * U-62 (6.4, 2 principle 4; review R-73 M1, L1, PM decision): the main process copies only the two
+ * things the window copies: a run id, or a digest's first 12 characters (lowercase hexadecimal, what
+ * the CLI's apply --digest takes). Anything else is refused (invalid_args), so the page cannot put
+ * other text on the clipboard. A path is not copied until the tree comes from the app layer's
+ * workspace list, which masks the registered secrets as well (G-list).
  */
-export const MAX_COPY_CHARS = 1000;
-const NOT_COPYABLE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/;
+const DIGEST_START = /^[0-9a-f]{12}$/;
 
-/** The text to copy, or null when it is not one line the window may copy. */
-export function copyableText(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 && value.length <= MAX_COPY_CHARS && !NOT_COPYABLE.test(value) ? value : null;
+/** The value to copy, or null when it is neither a run id nor a digest's first 12 characters. */
+export function copyableValue(value: unknown): string | null {
+  return isRunId(value) || (typeof value === "string" && DIGEST_START.test(value)) ? value : null;
 }
 
 /** `copyText` arguments: `{text}` only. */
 export function parseCopyArgs(value: unknown): string | null {
-  return isObj(value) && hasOnlyKeys(value, ["text"]) ? copyableText(value["text"]) : null;
-}
-
-/** The engine host's answer to `copyCheck`: true only when its hiding leaves the text as it is. */
-export function toCopyCheck(value: unknown): boolean {
-  return isObj(value) && value["ok"] === true && value["clean"] === true;
+  return isObj(value) && hasOnlyKeys(value, ["text"]) ? copyableValue(value["text"]) : null;
 }
 
 export type CopyReply = { readonly ok: true } | { readonly ok: false; readonly code: string };

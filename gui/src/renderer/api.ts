@@ -51,10 +51,8 @@ export interface CodarynApi {
   forgetRecent(id: string): Promise<unknown>;
   tree(workspace: string, node: string | null, offset: number): Promise<unknown>;
   reveal(workspace: string, node: string): Promise<unknown>;
-  /** U-62: copies text the window shows (the main process checks it first). */
+  /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
   copyText(text: string): Promise<unknown>;
-  /** U-62: copies a tree entry's relative path, by its id. */
-  copyPath(workspace: string, node: string): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;

@@ -369,6 +369,34 @@ const SCRIPT_FILES = {
 };
 const SCRIPT_TASKS = ["missing-script-task.json", "syntax-script-task.json", "shape-script-task.json"];
 
+/**
+ * U-306 (C-7a's cases): an organize plan that moves a file whose name holds a registered value (the
+ * task's secretEnv), so the quick form, which registers none, masks its path differently (DR-28,
+ * plan_secrets_differ); and an analyze run that waits for review, beside a document run that does not.
+ */
+const PLAN_SECRET_ENV = "CMP_PLAN_SECRET";
+function secretPlanSetup(dir) {
+  write(dir, `work/inbox/${FAKE_SECRET}.txt`, "alpha\n");
+  write(dir, "bare-config.json", { schemaVersion: 1 });
+  write(dir, "task.json", task({ workflowRef: "organize", goal: "Sort the inbox.", privacy: { secretEnv: [PLAN_SECRET_ENV] }, policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, planActions: ["move", "discard"] }, verifiers: [] }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [{ toolCalls: [{ name: "propose_plan", args: { summary: "Sort the inbox", actions: [{ kind: "move", from: `inbox/${FAKE_SECRET}.txt`, to: "sorted/a.txt" }] } }] }],
+  });
+}
+const PLAN_SECRET = { [PLAN_SECRET_ENV]: FAKE_SECRET };
+/** The plan run's records-changed mark (any entry at its name counts, store/marks.ts). */
+function markRecordsChanged(dir, runId) {
+  write(dir, `work/.codaryn/runs/${runId}/records-changed.json`, { schemaVersion: 1, note: "compare" });
+}
+function reviewSetup(dir) {
+  analyzeSetup(dir);
+  write(dir, "bare-config.json", { schemaVersion: 1 });
+  write(dir, "work/notes.md", "# Weekly notes\n\n- The site moves next week.\n");
+  write(dir, "doc-task.json", task({ id: "compare-doc", model: { provider: "scripted", scriptPath: "./doc-script.json" } }));
+  write(dir, "doc-script.json", { schemaVersion: 1, steps: DOCUMENT_STEPS });
+}
+
 export const CASES = [
   {
     name: "document-run",
@@ -647,6 +675,79 @@ export const CASES = [
       { args: ["run", "--workspace", "work", "--goal", "Summarize the notes.", "--config", "quick-config.json", "--workflow", "nope"] },
       { args: ["run", "--task", "no-plan-tool-task.json"] },
       { args: ["run", "--task", "task.json", "--config", "work/inside-config.json"] },
+    ],
+  },
+  // U-306 (the CLI migration's C-7a: the plan view's and review's rules move to the app layer): the
+  // paths of plan and review no other case reaches. A plan shown with the plan run's task form and with
+  // the quick form, which registers no secret and so masks a path differently (plan_secrets_differ);
+  // the plan run's records-changed mark (the warning, "cannot be applied", no summary; --json's
+  // recordsChanged); --run latest. A review with a note, one that replaces it (--json), a note that
+  // holds a key, a held lock, a run that does not wait for review, and the quick form's reject with its
+  // revert line (the workspace as typed). The ones a person reads again in Korean.
+  {
+    name: "plan-view-paths",
+    setup: secretPlanSetup,
+    steps: [
+      { ...run(), env: PLAN_SECRET },
+      (ctx) => ({ args: ["plan", "--task", "task.json", "--run", runIdOf(0)(ctx)], env: PLAN_SECRET }),
+      (ctx) => ({ args: ["plan", "--workspace", "work", "--workflow", "organize", "--config", "bare-config.json", "--run", runIdOf(0)(ctx)] }),
+      (ctx) => {
+        markRecordsChanged(ctx.dir, runIdOf(0)(ctx));
+        return { args: ["plan", "--task", "task.json", "--run", runIdOf(0)(ctx)], env: PLAN_SECRET };
+      },
+      (ctx) => ({ args: ["plan", "--task", "task.json", "--run", runIdOf(0)(ctx), "--json"], env: PLAN_SECRET }),
+      { args: ["plan", "--task", "task.json", "--run", "latest"], env: PLAN_SECRET },
+    ],
+  },
+  {
+    name: "plan-view-paths-ko",
+    lang: "ko",
+    setup: secretPlanSetup,
+    steps: [
+      { ...run(), env: PLAN_SECRET },
+      (ctx) => ({ args: ["plan", "--task", "task.json", "--run", runIdOf(0)(ctx)], env: PLAN_SECRET }),
+      (ctx) => ({ args: ["plan", "--workspace", "work", "--workflow", "organize", "--config", "bare-config.json", "--run", runIdOf(0)(ctx)] }),
+      (ctx) => {
+        markRecordsChanged(ctx.dir, runIdOf(0)(ctx));
+        return { args: ["plan", "--task", "task.json", "--run", runIdOf(0)(ctx)], env: PLAN_SECRET };
+      },
+    ],
+  },
+  {
+    name: "review-paths",
+    setup: reviewSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--accept", "--note", "The totals look right."] }),
+      (ctx) => ({ args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--reject", "--json"] }),
+      (ctx) => ({ args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--accept", "--note", `use ${["sk", "ant", "api03", "FAKE".repeat(20)].join("-")}`] }),
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return { args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--accept"] };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return { args: ["run", "--task", "doc-task.json"] };
+      },
+      (ctx) => ({ args: ["review", "--task", "doc-task.json", "--run", runIdOf(5)(ctx), "--accept"] }),
+      (ctx) => ({ args: ["review", "--workspace", "work", "--workflow", "analyze", "--config", "bare-config.json", "--run", runIdOf(0)(ctx), "--reject"] }),
+    ],
+  },
+  {
+    name: "review-paths-ko",
+    lang: "ko",
+    setup: reviewSetup,
+    steps: [
+      run(),
+      (ctx) => ({ args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--accept", "--note", "The totals look right."] }),
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return { args: ["review", "--task", "task.json", "--run", runIdOf(0)(ctx), "--accept"] };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return { args: ["review", "--workspace", "work", "--workflow", "analyze", "--config", "bare-config.json", "--run", runIdOf(0)(ctx), "--reject"] };
+      },
     ],
   },
   // U-135: terminal cases (imitated: see the tool).

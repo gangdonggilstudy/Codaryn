@@ -99,6 +99,11 @@ export type JournalEvent =
    * U-74 (DR-3): a permission question, recorded before it is asked, also when nobody can be asked
    * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable (key shapes hidden,
    * U-106) and a count; no argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
+   * U-137 (R88b-L1): always, also when the run ends at the question (cancelled, or its time limit):
+   * the answer `deny`, then the call's denial (`policy_effective`, its permission, code
+   * `confirmation_required`), then no `tool_result` (nothing goes back to the model) and the run's
+   * end. So every `deny` answer has its denied `tool_decision`, and readers that count denied calls
+   * by `tool_decision` (run's end summary, report, the app layer's events) count it.
    */
   | {
       readonly type: "confirmation_requested";

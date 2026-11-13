@@ -652,13 +652,31 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     }
   };
 
+  /** A call's denial as recorded: its `tool_decision` with `allowed: false`. */
+  const recordDenial = async (
+    call: ToolCall,
+    stage: "policy_requested" | "policy_effective",
+    decision: Extract<PolicyDecision, { allowed: false }>,
+  ): Promise<void> => {
+    await record({
+      type: "tool_decision",
+      callId: call.id,
+      tool: call.name,
+      stage,
+      allowed: false,
+      permission: decision.permission,
+      code: decision.code,
+    });
+  };
+
   /**
    * U-74 B-3 (DR-3, DR-10): the second check gave the confirm mark. Records the question (fixed
    * fields, the masked executable, the number of arguments; never the arguments), asks
    * EngineDeps.confirm (absent: nobody, so deny by default), records the answer, and after
    * `allow_once` judges the same call again: allowed, or the same mark (the answer is for this call
    * once), runs it; any other denial denies. The wait counts in maxDurationMs: the run's signal ends
-   * it, and a cancel or the time limit then ends the run.
+   * it, and a cancel or the time limit then ends the run. U-137 (R88b-L1): then too the call's
+   * denial is recorded after the answer, with no result (the run ends).
    */
   const askPermission = async (
     call: ToolCall,
@@ -711,6 +729,10 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     const stop = interrupted();
     if (stop !== null) {
       await answered("deny", stop.status === "cancelled" ? "cancelled" : "default");
+      // U-137 (R88b-L1): the call is denied as when the answer is no, so its decision follows the
+      // answer (journal.ts) and every reader counts it among the denied calls. No result goes back
+      // to the model: the run ends here.
+      await recordDenial(call, "policy_effective", mark);
       return stop;
     }
     if (decision !== "allow_once") {
@@ -727,15 +749,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
     stage: "policy_requested" | "policy_effective",
     decision: Extract<PolicyDecision, { allowed: false }>,
   ): Promise<ToolResult | End> => {
-    await record({
-      type: "tool_decision",
-      callId: call.id,
-      tool: call.name,
-      stage,
-      allowed: false,
-      permission: decision.permission,
-      code: decision.code,
-    });
+    await recordDenial(call, stage, decision);
     return errorResult(call, "policy_denied", `denied by policy: ${decision.permission}/${decision.code}. ${REFUSAL_HINTS[decision.code]}`);
   };
 

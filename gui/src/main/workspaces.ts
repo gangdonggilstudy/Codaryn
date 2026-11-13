@@ -7,7 +7,8 @@
 import { basename, dirname } from "node:path";
 import { isHandle } from "../shared/ipc.js";
 import type { OpenReply, RecentView, TreeEntryView, TreeKind, TreeReply } from "../shared/ipc.js";
-import { EMPTY_STATE, memoryFor, readGuiState, withOpened, withoutPath, withRunForm, writeGuiState } from "./gui-state.js";
+import { EMPTY_STATE, EMPTY_WINDOW, memoryFor, readGuiState, windowOf, withOpened, withoutPath, withRunForm, writeGuiState } from "./gui-state.js";
+import type { WindowMemory } from "./gui-state.js";
 import type { RunForm } from "./gui-state.js";
 import type { GuiState } from "./gui-state.js";
 import { WorkspaceHandles } from "./handles.js";
@@ -42,6 +43,7 @@ export class Workspaces {
   private state: GuiState | null = null;
   private readonly recentIds = new Map<string, string>();
   private writing: Promise<void> = Promise.resolve();
+  private remembering: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: WorkspacesDeps) {
     this.handles = new WorkspaceHandles(deps.randomBytes);
@@ -51,6 +53,27 @@ export class Workspaces {
   private async load(): Promise<GuiState> {
     if (this.state === null) this.state = this.deps.stateFile === null ? EMPTY_STATE : await readGuiState(this.deps.stateFile, this.deps.platform);
     return this.state;
+  }
+
+  /** U-70 (4.5): how the window was left (the empty memory when nothing fits). */
+  async windowMemory(): Promise<WindowMemory> {
+    return (await this.load()).window ?? EMPTY_WINDOW;
+  }
+
+  /** U-70: keeps a change to the window's memory, in order; what does not fit is dropped (windowOf). */
+  rememberWindow(change: Partial<WindowMemory>): Promise<void> {
+    const job = this.remembering.then(async () => {
+      const state = await this.load();
+      await this.save({ ...state, window: windowOf({ ...(state.window ?? EMPTY_WINDOW), ...change }) });
+    });
+    this.remembering = job.catch(() => undefined);
+    return job;
+  }
+
+  /** U-70: waits for the window changes asked for and the saves under way (before the app quits). */
+  async flush(): Promise<void> {
+    await this.remembering;
+    await this.writing;
   }
 
   /** Saves in order; a failed save keeps the list in memory and is not an error for the window. */

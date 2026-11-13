@@ -92,6 +92,7 @@ import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./ta
 import type { InputErrorPosition } from "./task.js";
 import { displayWidth, padEnd } from "./human/index.js";
 import { hideKeys } from "./text-safety.js";
+import { writablePathSetsOf } from "./writable.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
 export const MODELS_HINT = "`codaryn models` lists the models the key can use";
@@ -658,6 +659,8 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
 
   // config_file: --config, CODARYN_CONFIG, then the default location (N-1).
   let config: CodarynConfig | null = null;
+  // U-182: the config file as parsed, before --profile (its own writable list, as a run sees it).
+  let fileConfig: CodarynConfig | null = null;
   let configPath: string | null = null;
   const chosen = chooseConfigFile({ argument: args.configPath, env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   const refusedNote = io.defaultConfigRefused === true ? "; the default location is a network or device path and is not used" : "";
@@ -686,6 +689,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       const outcome = parseConfig(loaded.value);
       if (outcome.ok) {
         config = outcome.config;
+        fileConfig = outcome.config;
         configPath = loaded.path;
         // N-A 32.3 (0d38bfa): valid_at names the default location; a file given by --config or
         // CODARYN_CONFIG is valid_given (valid_at called every source "the default location").
@@ -940,6 +944,20 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" }, policyNotes);
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
+    // U-182 (DR-69 B-8): writable lists bind the file tools only; an allowed command can write
+    // anywhere it can. The lists a run would have (writablePathSetsOf, as run.ts builds them).
+    const commandRules = (policy?.commands ?? []).length;
+    const writableLists = writablePathSetsOf({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: task?.policy ?? null });
+    const writableWarning: { readonly message: string; readonly text: DoctorText } | null =
+      commandRules > 0 && writableLists.length > 0
+        ? {
+            message: `${commandRules} command rule(s) while writablePaths limits the file tools; writablePaths does not bind commands, so an allowed command can write files outside it`,
+            text: { id: "doctor.commands.writable_with_commands", params: { count: commandRules } },
+          }
+        : null;
+    const withWritable = (message: string): string => (writableWarning === null ? message : `${message}; ${writableWarning.message}`);
+    // The warning is the check's text when nothing else is said; otherwise one of its notes.
+    const writableNotes: DoctorText[] = writableWarning === null ? policyNotes : [writableWarning.text, ...policyNotes];
     // G-F (general-tasks.md 7.1, PM answer Q5): rules that take any further arguments beside plan
     // actions. Codaryn does not check a command's arguments, so such a command can change files
     // outside an approved plan. Problems found above keep their text; the warning joins the message.
@@ -949,12 +967,14 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
         `${extraArgs} command rule(s) take any further arguments (allowExtraArgs) while plans may move or discard files ` +
         "(policy.planActions); Codaryn does not check those arguments, so such a command can change files outside an approved plan";
       if (checked.status === "ok") {
-        set("commands", "warn", warning, { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } }, policyNotes);
+        set("commands", "warn", withWritable(warning), { id: "doctor.commands.extra_args_with_plan", params: { count: extraArgs } }, writableNotes);
       } else {
-        set("commands", checked.status, `${checked.message}; ${warning}`, checked.text, policyNotes);
+        set("commands", checked.status, withWritable(`${checked.message}; ${warning}`), checked.text, writableNotes);
       }
+    } else if (writableWarning !== null && checked.status === "ok") {
+      set("commands", "warn", writableWarning.message, writableWarning.text, policyNotes);
     } else {
-      set("commands", checked.status, checked.message, checked.text, policyNotes);
+      set("commands", checked.status, withWritable(checked.message), checked.text, writableNotes);
     }
   }
 

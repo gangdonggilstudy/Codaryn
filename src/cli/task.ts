@@ -312,9 +312,10 @@ const PROTECTED_PATH_MESSAGES: { readonly [R in ProtectedPathProblemReason]: str
  * `policy.protectedPaths` (T-13): the policy module's `checkProtectedPaths` decides, so the CLI
  * rejects exactly what the gate would treat as unusable. The message names the position only.
  * Entries are kept as written; the gate compares them with resolved paths (R-5).
+ * U-182 (DR-69 B-4): `policy.writablePaths` has the same format (PolicyConfig.writablePaths), so
+ * the same check names its position. An empty list is kept: it allows no file tool write.
  */
-function parseProtectedPaths(value: unknown): string[] {
-  const field = "policy.protectedPaths";
+function parsePathList(value: unknown, field: "policy.protectedPaths" | "policy.writablePaths"): string[] {
   const [problem] = checkProtectedPaths(value);
   if (problem !== undefined) {
     const at = problem.index === null ? field : `${field}[${problem.index}]`;
@@ -337,7 +338,7 @@ const COMMAND_RULE_FIELDS = ["executable", "argsPrefix", "allowExtraArgs"] as co
 export function parsePolicy(value: unknown, source: "settings"): ConfirmablePolicyConfig;
 export function parsePolicy(value: unknown, source: "task" | "definition"): PolicyConfig;
 export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePolicyConfig {
-  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions"]);
+  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions", "writablePaths"]);
   if (!Array.isArray(rec["commands"])) fail("policy.commands must be an array");
   const ruleFields: readonly string[] = source === "settings" ? [...COMMAND_RULE_FIELDS, "confirm"] : COMMAND_RULE_FIELDS;
   const commands = (rec["commands"] as unknown[]).map((item, index): ConfirmableCommandRule => {
@@ -357,7 +358,9 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
   if (rec["network"] !== "deny") fail('policy.network must be "deny"');
   if (rec["destructive"] !== "deny") fail('policy.destructive must be "deny"');
   if (typeof rec["restorePathTokens"] !== "boolean") fail("policy.restorePathTokens must be a boolean");
-  const protectedPaths = rec["protectedPaths"] === undefined ? undefined : parseProtectedPaths(rec["protectedPaths"]);
+  const protectedPaths = rec["protectedPaths"] === undefined ? undefined : parsePathList(rec["protectedPaths"], "policy.protectedPaths");
+  // U-182 (DR-69 B-4): each source's list is kept as given; the run builds writablePathSets from them.
+  const writablePaths = rec["writablePaths"] === undefined ? undefined : parsePathList(rec["writablePaths"], "policy.writablePaths");
   const planActions = rec["planActions"] === undefined ? undefined : parsePlanActions(rec["planActions"]);
   return {
     commands,
@@ -366,6 +369,7 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
     restorePathTokens: rec["restorePathTokens"],
     ...(protectedPaths === undefined ? {} : { protectedPaths }),
     ...(planActions === undefined ? {} : { planActions }),
+    ...(writablePaths === undefined ? {} : { writablePaths }),
   };
 }
 

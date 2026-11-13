@@ -16,6 +16,7 @@ const CHANNELS = {
   copyPath: "codaryn:workspace:copypath",
   revealConfig: "codaryn:settings:revealconfig",
   saveUi: "codaryn:app:saveui",
+  runEvents: "codaryn:runs:events",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -131,6 +132,8 @@ const api = Object.freeze({
     ipcRenderer.invoke(CHANNELS.plan, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow) }),
   /** Only the plan view's approval token and whether to be asked for the consent: never a consent or digest. */
   applyPlan: (approval: unknown, askConsent: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.applyPlan, { approval: text(approval), askConsent: askConsent === true }),
+  runEvents: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown, offset: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(CHANNELS.runEvents, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow), offset: count(offset) }),
   changes: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.changes, { workspace: text(workspace), runId: text(runId), profile: text(profile), workflow: text(workflow) }),
   review: (workspace: unknown, runId: unknown, profile: unknown, workflow: unknown, decision: unknown, note: unknown): Promise<unknown> =>

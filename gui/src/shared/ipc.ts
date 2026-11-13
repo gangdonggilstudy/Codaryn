@@ -14,6 +14,7 @@ export const IPC_CHANNELS = {
   copyPath: "codaryn:workspace:copypath",
   revealConfig: "codaryn:settings:revealconfig",
   saveUi: "codaryn:app:saveui",
+  runEvents: "codaryn:runs:events",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -880,6 +881,49 @@ const nameOrNull = (value: unknown): value is string | null => value === null ||
  * GU-5: `plan` and `changes` arguments: the workspace, the run chosen, and the profile and task kind
  * of its task form (DR-17, DR-28; R-14 L-3: the task kind the run was started with).
  */
+/** U-118: `runEvents` arguments: the run, its form, and the page's offset. */
+export function parseRunEventsArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly workflow: string | null; readonly offset: number } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "workflow", "offset"])) return null;
+  const { offset, ...rest } = value;
+  const run = parsePlanArgs(rest);
+  return run !== null && typeof offset === "number" && Number.isSafeInteger(offset) && offset >= 0 && offset <= 10_000_000 ? { ...run, offset } : null;
+}
+
+export const RUN_EVENTS_STATUSES = ["complete", "incomplete", "damaged"] as const;
+
+/**
+ * U-118 (3.7, adapter-contract 5.13): one page of a run's records as the window shows them: the
+ * progress list's lines, the page's state, and how many lines were left out and record numbers are
+ * missing. `records` is how many records the page had (`items` are the ones with a line).
+ */
+export type RunEventsReply =
+  | {
+      readonly ok: true;
+      readonly runId: string;
+      readonly runKind: "run" | "apply";
+      readonly status: (typeof RUN_EVENTS_STATUSES)[number];
+      readonly recordsChanged: boolean;
+      readonly items: readonly RunItemView[];
+      readonly records: number;
+      readonly total: number;
+      readonly skipped: number;
+      readonly missing: number;
+      readonly offset: number;
+      readonly nextOffset: number | null;
+    }
+  | { readonly ok: false; readonly code: string };
+
+/** The engine host's page, checked field by field; nothing else is passed on. */
+export function toRunEventsReply(value: unknown, items: (value: unknown) => readonly RunItemView[] | null): RunEventsReply {
+  if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+  const fail = { ok: false, code: "host_error" } as const;
+  const { runId, runKind, status, recordsChanged, records, total, skipped, missing, offset, nextOffset } = value;
+  const shown = items(value["items"]);
+  if (!isRunId(runId) || (runKind !== "run" && runKind !== "apply") || typeof status !== "string" || !(RUN_EVENTS_STATUSES as readonly string[]).includes(status) || typeof recordsChanged !== "boolean") return fail;
+  if (shown === null || !count(records) || shown.length > records || !count(total) || !count(skipped) || !count(missing) || !count(offset) || !(nextOffset === null || count(nextOffset))) return fail;
+  return { ok: true, runId, runKind, status: status as (typeof RUN_EVENTS_STATUSES)[number], recordsChanged, items: shown, records, total, skipped, missing, offset, nextOffset };
+}
+
 export function parsePlanArgs(value: unknown): { readonly workspace: string; readonly runId: string; readonly profile: string | null; readonly workflow: string | null } | null {
   if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "runId", "profile", "workflow"])) return null;
   const { workspace, runId } = value;

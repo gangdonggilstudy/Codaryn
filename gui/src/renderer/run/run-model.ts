@@ -35,6 +35,13 @@ const FILTER_KINDS: Readonly<Record<Exclude<RunFilter, "all">, readonly string[]
   checks: ["verifier_result", "integrity_checked"],
 };
 
+/** The items a filter keeps (U-118: the run screen's list and the report's records tab use the same). */
+export function filterItems<T extends { readonly kind: string }>(items: readonly T[], filter: RunFilter): T[] {
+  if (filter === "all") return [...items];
+  const kinds = FILTER_KINDS[filter];
+  return items.filter((item) => kinds.includes(item.kind));
+}
+
 export interface RunRequest {
   readonly goal: string;
   readonly profile: string | null;
@@ -164,9 +171,7 @@ export class RunModel {
 
   /** The items a filter shows, oldest first. */
   shown(filter: RunFilter): RunItemView[] {
-    if (filter === "all") return this.items;
-    const kinds = FILTER_KINDS[filter];
-    return this.items.filter((item) => kinds.includes(item.kind));
+    return filter === "all" ? this.items : filterItems(this.items, filter);
   }
 
   /** Seconds since the run started, or null. */

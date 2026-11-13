@@ -20,6 +20,7 @@ import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js"
 import type { CleanupSelectionArg } from "../shared/cleanup.js";
 import { appliedValue, previewValue, summaryValue } from "./cleanup.js";
 import { reportMarkdownValue } from "./report.js";
+import { runEventsValue } from "./run-events.js";
 import { initValue, suggestionsValue } from "./setup.js";
 import type { Shown } from "./settings.js";
 import type { ModelText } from "./model-text.js";
@@ -60,6 +61,8 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** U-118 (U-90, adapter-contract 5.13): one page of a run's stored records (run-events.ts). */
+  listRunEvents(request: { readonly settings: HostTaskForm; readonly runId: string; readonly offset: number }): Promise<unknown>;
   /** U-103 (U-89, adapter-contract 5.12): one directory of the workspace for the file tree (tree.ts). */
   listWorkspaceDir(request: { readonly settings: HostTaskForm; readonly dir: string; readonly offset: number }): Promise<unknown>;
   /** U-11 (3.11): the config file with the defaults (init without questions), and init's fixed suggestions for a workspace. */
@@ -356,6 +359,16 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const runId = args["runId"];
         if (typeof runId !== "string" || !RUN_ID.test(runId)) throw new ArgsError();
         return changesValue(await deps.app.changes({ settings: taskForm(workspace, profile, workflowRef), runId }), deps.shown, shownText);
+      }
+      case "runEvents": {
+        // U-118 (3.7): a page of the run's records, each as the progress list's line, in the window's language.
+        if (!isObj(args)) throw new ArgsError();
+        const workspace = workspaceArg(args, ["workspace", "profile", "workflowRef", "runId", "offset", "language"]);
+        const profile = nameArg(args["profile"]);
+        const workflowRef = nameArg(args["workflowRef"]);
+        const { runId, offset, language: chosen } = args;
+        if (typeof runId !== "string" || !RUN_ID.test(runId) || typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0 || (chosen !== "ko" && chosen !== "en")) throw new ArgsError();
+        return runEventsValue(await deps.app.listRunEvents({ settings: taskForm(workspace, profile, workflowRef), runId, offset }), deps.itemsIn(chosen));
       }
       case "transport":
         // PM (a): the test transport's mode and how many requests to another machine it refused.

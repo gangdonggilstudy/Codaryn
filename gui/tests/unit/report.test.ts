@@ -160,7 +160,8 @@ test("report (GU-3): the report screen shows its tabs and switches between them"
     await settle();
     await settle();
     const tabs = root.findAll((e) => e.getAttribute("role") === "tab").map((e) => e.getAttribute("data-tab"));
-    assert.deepEqual(tabs, ["summary", "checks", "changes", "protected", "usage", "review"]);
+    // U-118: the records tab is the last one (3.7).
+    assert.deepEqual(tabs, ["summary", "checks", "changes", "protected", "usage", "review", "log"]);
     const panel = root.findAll((e) => e.getAttribute("role") === "tabpanel")[0];
     assert.equal(panel?.getAttribute("data-tab"), "summary");
     assert.ok(panel?.textContent.includes("Result S: R"));

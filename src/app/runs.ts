@@ -16,8 +16,8 @@ import { RUN_ID_PATTERN } from "../contracts/index.js";
 import { resolveWorkspaceRoot } from "../cli/runs.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "./input/run-ref.js";
 import { knownKeyValues } from "./input/settings.js";
-import { hideKeys } from "./input/text-safety.js";
-import type { KnownKeys } from "./input/security/index.js";
+// U-315 (C-9a): the shared key hiding for the JSON, in place of a copy of it here.
+import { hideKeysInStrings } from "./input/text-safety.js";
 import { copyEnvironment } from "./environment.js";
 import { appError, fromCliError } from "./errors.js";
 import type { AppCallOutcome, AppEnvironment, AppError, ListRunsRequest, ResolvedRun, ResolveRunRequest } from "./types.js";
@@ -49,17 +49,6 @@ export async function runIdOf(workspaceRoot: string, run: string): Promise<Resol
   const resolved = await resolveRunReference(workspaceRoot, run, STORE_RUN_REFERENCE_DEPS);
   if (!resolved.ok) return { ok: false, error: appError(resolved.code, resolved.message) };
   return { ok: true, value: resolved.runId };
-}
-
-/** Every string in `value` with key shapes and the current key hidden, as `runs --json` does (N-23 a). */
-function hideKeysInStrings<T>(value: T, currentKey: KnownKeys): T {
-  const walk = (item: unknown): unknown => {
-    if (typeof item === "string") return hideKeys(item, currentKey);
-    if (Array.isArray(item)) return item.map(walk);
-    if (typeof item === "object" && item !== null) return Object.fromEntries(Object.entries(item).map(([name, child]) => [name, walk(child)]));
-    return item;
-  };
-  return walk(value) as T;
 }
 
 async function listing(workspaceRoot: string): Promise<Resolved<RunListing>> {

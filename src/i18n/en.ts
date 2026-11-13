@@ -479,6 +479,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.lock.parked_left":
     "files a revert could not put back are left in .codaryn/parked/: {count}; move them back or delete them, as nothing removes them",
   "lock.remove_hint": "If no Codaryn is running in this workspace, delete .codaryn/lock.json and, if it is there, .codaryn/lock.json.reclaim.",
+  "lock.release_failed": "The workspace lock could not be released. The next run clears it once Codaryn has closed; if a run is refused before then, run codaryn doctor.",
 
   "error.invalid_arguments.what": "the command arguments are not valid",
   "error.invalid_arguments.fix": "See codaryn help <command> for a command's usage, and codaryn --help for the list of commands.",

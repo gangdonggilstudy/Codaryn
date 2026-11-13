@@ -38,15 +38,23 @@ function deny(permission: PermissionKind, code: PolicyDenialCode): Denial {
   return { allowed: false, permission, code };
 }
 
+/**
+ * U-74 (DR-3): the confirm mark is reported only when it is the only denial; any other denial wins,
+ * so what the policy denies outright is never asked.
+ */
 function decide(denials: readonly Denial[]): PolicyDecision {
+  const plain = denials.filter((denial) => denial.confirm !== true);
   for (const permission of REPORT_ORDER) {
-    const found = denials.find((denial) => denial.permission === permission);
+    const found = plain.find((denial) => denial.permission === permission);
     if (found !== undefined) {
       return found;
     }
   }
-  return ALLOWED;
+  return denials.find((denial) => denial.confirm === true) ?? ALLOWED;
 }
+
+/** U-74: the mark of a command only a `confirm: true` rule of the user's settings allows. */
+const CONFIRM_MARK: Denial = { allowed: false, permission: "command", code: "confirmation_required", confirm: true };
 
 /**
  * Requirements of the descriptor. For a built-in tool name the fixed table is merged in,
@@ -105,7 +113,12 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
     return config.restorePathTokens === true ? [...descriptor.restoreFields] : [];
   }
 
-  function checkCommand(args: unknown): Denial | null {
+  /**
+   * U-74 (DR-3): a command a rule without `confirm` allows is allowed. One that only `confirm: true`
+   * rules allow (ConfirmableCommandRule, the user's settings only) passes the first check and gets
+   * CONFIRM_MARK from the second, after restoration, where the engine asks.
+   */
+  function checkCommand(args: unknown, stage: "requested" | "effective"): Denial | null {
     const executable = readField(args, "executable");
     const callArgs = readField(args, "args");
     if (typeof executable !== "string") {
@@ -118,14 +131,17 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
     if (!Array.isArray(callArgs) || !callArgs.every((value) => typeof value === "string")) {
       return deny("command", "args_not_allowed");
     }
-    return rules.some((rule) => matchesRule(rule, callArgs)) ? null : deny("command", "args_not_allowed");
+    const matching = rules.filter((rule) => matchesRule(rule, callArgs));
+    if (matching.length === 0) return deny("command", "args_not_allowed");
+    if (matching.some((rule) => rule.confirm !== true)) return null;
+    return stage === "requested" ? null : CONFIRM_MARK;
   }
 
   /** Checks that do not depend on paths: command, network, destructive. */
-  function checkFixed(requires: ToolRequirements, args: unknown): Denial[] {
+  function checkFixed(requires: ToolRequirements, args: unknown, stage: "requested" | "effective"): Denial[] {
     const denials: Denial[] = [];
     if (requires.command) {
-      const denial = checkCommand(args);
+      const denial = checkCommand(args, stage);
       if (denial !== null) {
         denials.push(denial);
       }
@@ -156,7 +172,7 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
 
     checkRequested(call, descriptor) {
       const requires = requirementsOf(descriptor);
-      const denials = checkFixed(requires, call.args);
+      const denials = checkFixed(requires, call.args, "requested");
       const restorable = restorableFields(descriptor);
       for (const { field, access } of requires.paths) {
         const value = pathValue(call.args, field, access);
@@ -181,7 +197,7 @@ export const createPolicyGate: CreatePolicyGate = ({ config, workspace }) => {
 
     async checkEffective(call, descriptor) {
       const requires = requirementsOf(descriptor);
-      const denials = checkFixed(requires, call.args);
+      const denials = checkFixed(requires, call.args, "effective");
       for (const { field, access } of requires.paths) {
         const value = pathValue(call.args, field, access);
         if (typeof value !== "string") {

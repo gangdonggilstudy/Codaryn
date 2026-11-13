@@ -186,6 +186,20 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     }
     return { lines, total };
   };
+  /**
+   * DR-41, DR-43 (b): the texts of what a task type's own rules left out of the given policy and checks
+   * (run_started.policyNarrowings, RunSummaryContext.policyNarrowings, U-140), in their order: kinds and
+   * counts only. A kind outside POLICY_NARROWING_KINDS, or a count below 1 where the kind has one, has no
+   * text. The start line joins them to itself; U-146 (UXM-18): the end summary writes one a line.
+   */
+  const narrowingTexts = (given: unknown): string[] =>
+    (Array.isArray(given) ? (given as readonly unknown[]) : []).flatMap((item): string[] => {
+      if (typeof item !== "object" || item === null) return [];
+      const narrowing = item as { readonly kind?: unknown; readonly count?: unknown };
+      if (!isOneOf(narrowing.kind, POLICY_NARROWING_KINDS)) return [];
+      if (narrowing.kind === "restore_path_tokens_off") return [catalog.format("progress.workflow_policy.restore_path_tokens_off")];
+      return isCount(narrowing.count, 1) ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
+    });
   /** U-104: the summary's line of the checks drawn, when there were some and none found a change. */
   const integritySummary = (): string[] =>
     integrityChecks > 0 && integrityChanged === 0 ? [catalog.format("summary.integrity_unchanged", { count: integrityChecks })] : [];
@@ -419,6 +433,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       }
       // U-104: the protected-material checks that found nothing, folded in the progress lines.
       out.push(...integritySummary());
+      // U-146 (UXM-18): what the task type's own rules left out (RunSummaryContext.policyNarrowings, filled by
+      // run), once more, one a line with the start line's texts; absent or empty: no line.
+      out.push(...narrowingTexts(context.policyNarrowings));
       // N-23(d): files, not change records. A path's first record says whether the run created it.
       const files = new Map<string, boolean>();
       for (const change of changes) {
@@ -515,12 +532,7 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           line = isOneOf(event.provider, PROVIDERS) ? catalog.format("progress.run_started", { provider: event.provider }) : null;
           // DR-43 (b), DR-41: kinds and counts only. One line per record (HumanOutput.progressLine), so
           // each narrowing is one more fact of the start line.
-          const given: readonly PolicyNarrowing[] = Array.isArray(event.policyNarrowings) ? event.policyNarrowings : [];
-          const narrowings = given.flatMap((narrowing): string[] => {
-            if (!isOneOf(narrowing.kind, POLICY_NARROWING_KINDS)) return [];
-            if (narrowing.kind === "restore_path_tokens_off") return [catalog.format("progress.workflow_policy.restore_path_tokens_off")];
-            return isCount(narrowing.count) && narrowing.count > 0 ? [catalog.format(`progress.workflow_policy.${narrowing.kind}`, { count: narrowing.count })] : [];
-          });
+          const narrowings = narrowingTexts(event.policyNarrowings);
           if (line !== null && narrowings.length > 0) line = [line, ...narrowings].join(" · ");
           break;
         }

@@ -327,6 +327,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
           listModels: anthropicModelLister,
           listers: API_MODEL_LISTERS,
           defaultConfig,
+          // U-156: the text and the question in the person's language (models.*).
+          messages: human.messages,
           // Y-3: the number is asked only when both stdin and stdout are terminals.
           ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask: (question: string) => askLine(question) } : {}),
         }),

@@ -7,8 +7,21 @@
 
 import type { CliErrorOutput, HumanOutput, MessageCatalog } from "../contracts/index.js";
 
+/**
+ * U-190 (AXM-21): the error as the renderer is given it; the JSON line keeps the output as it is.
+ * With `config_missing` (no config file at all, so the quick form's settings were never given) a
+ * setting the run needs is missing rather than invalid: an `invalid_value` diagnostic is shown as
+ * `missing_field`, so the diagnostic line agrees with the hint's line ("There is no config file
+ * yet"). Every other error is given as it is.
+ */
+function shownToPerson(output: CliErrorOutput): CliErrorOutput {
+  const diagnostic = output.diagnostic;
+  if (output.hint !== "config_missing" || diagnostic === undefined || diagnostic.code !== "invalid_value") return output;
+  return { ...output, diagnostic: { ...diagnostic, code: "missing_field" } };
+}
+
 export function explainedErrorText(output: CliErrorOutput, human: { readonly output: HumanOutput; readonly messages: MessageCatalog }): string {
-  let text = human.output.error(output);
+  let text = human.output.error(shownToPerson(output));
   if (output.code === "workspace_locked") {
     const hint = human.messages.format("lock.remove_hint");
     if (!text.includes(hint)) text = `${text.endsWith("\n") || text.length === 0 ? text : `${text}\n`}  ${hint}\n`;

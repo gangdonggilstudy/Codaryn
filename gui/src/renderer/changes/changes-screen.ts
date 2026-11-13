@@ -33,6 +33,8 @@ export interface ChangesDeps {
   readonly current: () => Workspace | null;
   /** U-65: the run's files as loaded, for the file tree's marks. */
   readonly loaded?: (run: { readonly runId: string; readonly profile: string | null; readonly workflow: string | null }, files: readonly ChangedFileItem[]) => void;
+  /** U-174 (DR-72, 3.14): opens the text view of a file the main process gave an id, with its shown path. */
+  readonly openText?: (node: string, name: string) => void;
 }
 
 export interface ChangesScreen extends Screen {
@@ -51,6 +53,8 @@ export interface ChangesView {
 
 /** U-66: shows a file in the file manager by the main process's id; the status cell says if it could not. */
 type Reveal = (file: ChangedFileItem, status: HTMLElement) => void;
+/** U-174: opens a file the main process gave an id in the text view. */
+type OpenText = (file: ChangedFileItem) => void;
 
 /** U-66: one side of a side-by-side row: the line number, then the mark and the text. */
 function sideCells(t: Texts, line: DiffLine | null, side: "old" | "new"): HTMLElement[] {
@@ -89,7 +93,7 @@ function word(t: Texts, prefix: string, value: string): string {
   return t.has(id) ? t.format(id) : value;
 }
 
-function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boolean, view: ChangesView = { side: false, wrap: true }, reveal: Reveal | null = null): HTMLElement {
+function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boolean, view: ChangesView = { side: false, wrap: true }, reveal: Reveal | null = null, openText: OpenText | null = null): HTMLElement {
   const section = el("section", undefined, { class: "changed-file", "data-file": String(index), "data-state": file.state, "data-created": String(file.created), tabindex: "-1" });
   const facts = [word(t, "changestate", file.state)];
   if (file.created) facts.push(t.format("changes.created"));
@@ -99,6 +103,10 @@ function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boo
   if (reveal !== null && typeof file.id === "string") {
     const status = el("span", undefined, { role: "status", class: "reveal-status" });
     section.append(button(t.format("tree.reveal"), () => reveal(file, status), { class: "reveal", "data-reveal": String(index) }), status);
+  }
+  // U-174 (3.14): the file as it is now, in the text view (an id is given only for a plain path that is there).
+  if (openText !== null && typeof file.id === "string" && file.state !== "missing") {
+    section.append(button(t.format("changes.openText"), () => openText(file), { class: "open-text", "data-open-text": String(index) }));
   }
   if (file.before === null && file.after === null) {
     if (file.unavailable === "masking_unverified") section.append(el("p", t.format(marked ? "changes.unverifiedMarked" : "changes.unverified"), { class: "notice", "data-text": "hidden" }));
@@ -209,7 +217,8 @@ export function changesScreen(deps: ChangesDeps): ChangesScreen {
         };
         const files = el("div", undefined, { id: "changes-files" });
         const draw = (): HTMLElement[] => {
-          const sections = reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged, view, reveal));
+          const openText: OpenText | null = deps.openText === undefined ? null : (file) => (typeof file.id === "string" ? deps.openText?.(file.id, file.path) : undefined);
+          const sections = reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged, view, reveal, openText));
           files.replaceChildren(...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : sections));
           return sections;
         };

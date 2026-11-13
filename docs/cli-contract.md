@@ -611,7 +611,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **사람과 모델에게 알리는 것**
   - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
   - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
-- **앱 계층:** 같은 `prepareTask`로 목록을 만든다. 그러나 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)은 아직 게이트에 목록을 넘기지 않는다(앱 담당 몫).
+- **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
 - **계획 run:** `plan: "run"`은 B-4 전까지 거부된다(18.1, U-177). 승인된 계획의 파일 목록(`plan` 원천)은 B-3이 더한다.
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
@@ -800,6 +800,8 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - `init`: 터미널이고 키가 없으면 `init.next` 뒤에 `first_use.try_without_key`.
 - `run`의 오류: stderr가 터미널이고 `provider_not_configured`이면 오류 설명 끝에 `first_use.try_without_key`.
 - 설정 파일이 아예 없을 때(`--config`도 `CODARYN_CONFIG`도 없고 기본 위치에 파일이 없음) 간편 형식·한 줄 실행의 설정 오류(`invalid_config`)는 힌트 `config_missing`(U-37 방식, `CLI_ERROR_HINTS`)을 단다. 사람용 줄은 `error.hint.config_missing`(설정 파일이 아직 없다, `codaryn init`으로 만든다)이다. 이것만은 터미널 여부와 상관없다. 오류 JSON에 `hint` 값이 하나 더 생길 뿐 `message`·`diagnostic`·`code`·종료 코드는 그대로다. `--config`로 준 파일이나 기본 위치의 파일이 있으면, 기본 위치가 아예 없으면 힌트가 없다.
+  - U-190(AXM-21): 이 힌트가 있을 때 사람용 오류의 진단 줄은 `invalid_value`("값이 올바르지 않습니다")가 아니라 `missing_field`("필드가 없습니다")로 보인다. 그래서 힌트 줄(설정 파일이 아직 없다)과 어긋나지 않는다. CLI가 렌더러에 넘기는 사본만 그렇고(`src/cli/error-text.ts`), JSON의 `diagnostic.code`는 `invalid_value` 그대로다(DR-48).
+  - 첫 줄(`error.invalid_config.what`, "설정 파일을 읽을 수 없거나 값이 올바르지 않습니다")은 코드로만 고르는 글이라 그대로다.
 - 시험: `tests/unit/cli/g-u115-first-use.test.ts`(렌더러와 실행, 터미널이 아니면 그대로), `tests/unit/cli/g-u115-terminal.test.ts`(실제 CLI, `u115-terminal-preload`로 흐름을 터미널로 보임), `tests/unit/cli/g-u132-first-use-r91.test.ts`(R-91의 넷).
 
 ### init이 제공자를 묻는다 (U-26, UXM-11, DR-46)
@@ -1241,6 +1243,7 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
 - `plan_secrets_differ`(DR-28, 18.3): 지금 가릴 값이 계획 실행과 다르게 가린다. 계획을 읽은 직후에 확인한다.
 - `plan_run_missing`(R-9c C-1): 계획 실행이 `plan_pending`으로 끝났는데 `plan.json`이 없다(`plan`, `apply`). 적용 실행의 되돌리기에서는 그 계획 실행이나 계획이 사라졌다(14절).
+  - 사람용 두 줄(`error.plan_run_missing.what`·`.fix`)은 렌더러가 코드로만 고르므로, 두 경우에 모두 맞는 글이다(U-190, AXM-21). 무엇이 일어났나는 적용을 말하지 않는다. 고치는 법은 계획을 보거나 적용하려면 `codaryn run`으로 다시 만들고, 적용을 되돌리려면 그 계획 실행을 남기거나 되살리라고 한다.
 - 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
 
 ### 18.9 아직 없는 것

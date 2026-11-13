@@ -805,6 +805,59 @@ export const CASES = [
     setup: planSetup,
     steps: [run(), (ctx) => ({ args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }), report("latest", "--json")],
   },
+  // U-314 (the CLI migration's C-9a: the revert's rules move to the app layer): the revert's paths no
+  // other case reaches. --workspace as a device path and as a folder that is not there; a dry run with
+  // the consent argument; a run with a records-changed mark (said, not refused); a held lock (the run
+  // lock's text); a revert with --allow-unsafe-move (the CLI's consent channel, recorded); a run whose
+  // journal is gone, and one whose result is not JSON (damaged). The ones a person reads again in Korean.
+  {
+    name: "revert-paths",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      { args: ["revert", "--workspace", "NUL", "--run", "latest"] },
+      { args: ["revert", "--workspace", "nowhere", "--run", "latest"] },
+      (ctx) => ({ args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx), "--dry-run", "--allow-unsafe-move"] }),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(0)(ctx), "records-changed.json", { schemaVersion: 1, note: "compare" });
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx), "--dry-run"] };
+      },
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx)] };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx), "--allow-unsafe-move"] };
+      },
+      run(),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(7)(ctx), "journal.jsonl", null);
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(7)(ctx)] };
+      },
+      run(),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(9)(ctx), "result.json", "{ not json\n");
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(9)(ctx)] };
+      },
+    ],
+  },
+  {
+    name: "revert-paths-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      (ctx) => {
+        runFile(ctx.dir, runIdOf(0)(ctx), "records-changed.json", { schemaVersion: 1, note: "compare" });
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx), "--dry-run"] };
+      },
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return { args: ["revert", "--workspace", "work", "--run", runIdOf(0)(ctx)] };
+      },
+    ],
+  },
   // U-135: terminal cases (imitated: see the tool).
   {
     name: "terminal-first-page",

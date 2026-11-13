@@ -18,6 +18,9 @@
  *   for or against goes to the model. Such a rule is undecided and says why; within a grouped rule
  *   such groups are left out like the hidden ones. The verifier's limits count the rules not compared,
  *   so a check of such rules only does not read as passed.
+ * - PM, after that: a rule whose checked table (an aggregate's target, a table_shape table) is under
+ *   unreadable paths is not compared either, whatever it checks and whether the file is there: the
+ *   model cannot write such a table, and a verdict would tell it about the table.
  * - Without unreadable paths the evidence is as before (the frozen copy's tests stay).
  * Temporary folder, synthetic values only.
  */
@@ -66,7 +69,7 @@ const HIDDEN_VALUES = [String(sumOf("summit")), "999.125", ...ROWS.filter(([regi
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), "codaryn-u258-"));
-  for (const dir of ["data", "out"]) await mkdir(join(root, dir));
+  for (const dir of ["data", "out", "open", "secret"]) await mkdir(join(root, dir));
   const harbor = sumOf("harbor");
   const meadow = sumOf("meadow");
   const files: Record<string, string> = {
@@ -93,6 +96,11 @@ before(async () => {
     "out/bonus.csv": "region,sum\nharbor,999\nmeadow,31.25\n",
     "out/bonus-count.csv": "region,sum\nharbor,3\nmeadow,5\n",
     "out/three.csv": "k\n1\n2\n3\n",
+    // A readable copy of the source, and tables under a folder only the targets are in.
+    "open/people.csv": table(ROWS),
+    "secret/total.csv": "total\n1\n",
+    "secret/by-region.csv": `region,sum\nharbor,${harbor}\nmeadow,${meadow}\n`,
+    "secret/rows.csv": "k\n1\n2\n3\n",
     // A target under the unreadable folder too: no count of its rows is written (U-223, PM).
     "data/target-with-hidden.csv": `region,sum\nharbor,${harbor}\nmeadow,${meadow}\nsummit,1\nvalley,2\n`,
   };
@@ -136,6 +144,7 @@ function assertNothingHidden(evidence: string): void {
 }
 
 const NOT_COMPARED = "the source's groups of fewer than 5 rows are not compared";
+const NOT_JUDGED = "not compared: a verdict on a table under unreadable paths would tell the model about it";
 
 test("U-258: a target with exactly the source's groups of at least k rows holds; the smaller ones are not asked for", async () => {
   const { state, note } = await noteOf(byRegion("out/shown-right.csv"));
@@ -162,10 +171,9 @@ test("U-258 (F-1): a target row for a hidden group fails, in the words of a key 
   for (const result of [hidden, unknown, two]) assertNothingHidden(result.note);
 });
 
-test("U-258: a target under unreadable paths too gets no count of its rows", async () => {
+test("U-258: a target under unreadable paths too is not compared", async () => {
   const { state, note } = await noteOf(byRegion("data/target-with-hidden.csv"));
-  assert.equal(state, "not held");
-  assert.equal(note, `the target has rows whose key is not one of the source's groups of at least 5 rows; ${NOT_COMPARED}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE}`);
+  assert.deepEqual({ state, note }, { state: "undecided", note: `${NOT_JUDGED}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE}` });
   assertNothingHidden(note);
 });
 
@@ -296,11 +304,39 @@ test("U-258 (PM): the row count of a table under k rows is not compared (rows.sa
 test("U-258 (PM): the limits count the rules not compared, so such a check never reads as passed", async () => {
   const mixed = await run([byRegion("out/shown-right.csv"), rule("max", "data/people.csv", "out/shown-right.csv"), rule("sum", "data/small.csv", "out/total.csv", "amount", false)]);
   assert.equal(mixed.outcome, "inconclusive");
-  assert.ok(mixed.limits.includes("2 of 3 rules were not compared: their source is under unreadable paths, and query_table does not give the model the values they check"), JSON.stringify(mixed.limits));
+  assert.ok(mixed.limits.includes("2 of 3 rules were not compared: a table they check is under unreadable paths, and a verdict would tell the model what query_table does not give it"), JSON.stringify(mixed.limits));
   const only = await run([rule("min", "data/people.csv", "out/shown-right.csv")]);
   assert.equal(only.outcome, "inconclusive");
-  assert.ok(only.limits.includes("1 of 1 rules were not compared: their source is under unreadable paths, and query_table does not give the model the values they check"), JSON.stringify(only.limits));
+  assert.ok(only.limits.includes("1 of 1 rules were not compared: a table they check is under unreadable paths, and a verdict would tell the model what query_table does not give it"), JSON.stringify(only.limits));
   // A check whose rules are all compared has the limits of before.
   const compared = await run([byRegion("out/shown-right.csv")]);
   assert.equal(compared.limits.some((line) => line.includes("not compared")), false, JSON.stringify(compared.limits));
+});
+
+test("U-258 (PM): a rule whose checked table is under unreadable paths is not compared, whatever it checks", async () => {
+  const SECRET: DataChecksOptions = { unreadablePaths: ["secret"] };
+  const end = `${NOT_JUDGED}; ${UNREADABLE_TARGET_NOTE}`;
+  const rules: DataRule[] = [
+    rule("sum", "open/people.csv", "secret/total.csv", "amount", false),
+    byRegion("secret/by-region.csv", "open/people.csv"),
+    rule("sum", "open/people.csv", "secret/missing.csv", "amount", false),
+    { type: "table_shape", table: csv("secret/rows.csv"), rows: { equals: 3 } },
+    { type: "table_shape", table: csv("secret/rows.csv"), columns: ["k"] },
+    { type: "table_shape", table: csv("secret/missing.csv"), rows: { min: 1 } },
+  ];
+  const hidden = await run(rules, SECRET);
+  for (const line of hidden.evidence.split("\n")) {
+    assert.ok(line.startsWith("undecided: ") && line.endsWith(`(${end})`), line);
+  }
+  // Not even whether the file is there.
+  assert.equal(/not found|data rows|agree|match/.test(hidden.evidence.replace(/matches "/g, "")), false, hidden.evidence);
+  assert.equal(hidden.outcome, "inconclusive");
+  assert.ok(hidden.limits.includes("6 of 6 rules were not compared: a table they check is under unreadable paths, and a verdict would tell the model what query_table does not give it"), JSON.stringify(hidden.limits));
+  // With the source hidden too, both notes follow.
+  const both = await noteOf(rule("sum", "data/people.csv", "secret/total.csv", "amount", false), { unreadablePaths: ["data", "secret"] });
+  assert.deepEqual(both, { state: "undecided", note: `${NOT_JUDGED}; ${UNREADABLE_SOURCE_NOTE}; ${UNREADABLE_TARGET_NOTE}` });
+  // Without the list every rule is compared as before: the table of 3 rows holds, the missing file fails.
+  const plain = (await run(rules, {})).evidence.split("\n");
+  assert.deepEqual(plain.map((line) => line.slice(0, line.indexOf(":"))), ["not held", "held", "not held", "held", "held", "not held"]);
+  assert.ok(plain[2]?.includes("file not found"), plain.join("\n"));
 });

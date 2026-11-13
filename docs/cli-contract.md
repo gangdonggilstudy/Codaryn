@@ -159,8 +159,8 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 - N-19: stdout의 JSON 한 줄(모든 명령의 JSON 출력과 `--json`)은 U+007F보다 큰 문자를 모두 `\uXXXX`로 쓴다(BMP 밖 문자는 서로게이트 쌍). JSON으로 읽으면 값은 같다. Windows PowerShell 5.1의 기본 코드 페이지에서도 깨지지 않게 하기 위해서다. `report`·`doctor`·`models`의 기본 글 출력은 그대로다.
 
 - 명령별 stdout(17절, 18절까지 반영)
-  - JSON 한 줄만: `run`(`CliOutput`), `revert`(`RevertOutput`), `apply`(`ApplyResult`)
-  - 기본은 글이고 `--json`이면 JSON 한 줄: `report`(`AnyReportOutput`: 실행은 `RunReportOutput`, 적용 실행은 `ApplyReportOutput`), `doctor`(`DoctorOutput`), `models`(`ModelsOutput`), `init`(`InitOutput`), `runs`(`RunsOutput`), `plan`(`PlanOutput`), `review`(`ReviewOutput`), `changes`(`ChangesOutput`)
+  - JSON 한 줄만: `run`(`CliOutput`), `revert`(`RevertOutput`), `apply`(`ApplyResult`, run 계획이면 그 계획을 수행한 실행의 `CliOutput`, 18.4)
+  - 기본은 글이고 `--json`이면 JSON 한 줄: `report`(`AnyReportOutput`: 실행은 `RunReportOutput`, 적용 실행은 `ApplyReportOutput`), `doctor`(`DoctorOutput`), `models`(`ModelsOutput`), `init`(`InitOutput`), `runs`(`RunsOutput`), `plan`(`PlanOutput`, run 계획이면 `ChangesPlanOutput`, 18.3), `review`(`ReviewOutput`), `changes`(`ChangesOutput`)
   - 사람용 글(오류 설명, 진행 줄, 끝 요약, 터미널 질문)은 stderr다(17.4). `run`, `revert`, `apply`는 `--quiet`로 끈다.
 
 - 명령 밖으로 새어 나온 예외는 최상위(`src/cli/guard.ts`의 `runGuarded`)에서 잡아 `internal_error`(종료 70) 한 줄로 바꾼다. 예외 문구와 스택은 경로·파일 내용·비밀 값을 담을 수 있으므로 stdout과 stderr 어디에도 출력하지 않는다(S-6).
@@ -316,7 +316,7 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 | `key_in_task` | `key_in_file` | — | task 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `key_in_config` | `key_in_file` | — | 설정 파일에 키 필드나 키 값이 있음(자리를 필드로 말할 수 없을 때) |
 | `config_missing` | `invalid_config` | — | 간편 형식·한 줄 실행에서 설정 파일이 아예 없음(`codaryn init`으로 만든다, 15절 "처음 시작 안내") |
-| `plan_run_not_available` | `invalid_task`, `invalid_config` | — | `plan: "run"`(U-170의 `PLAN_MODES`)을 B-4 전까지 받지 않음. task 파일의 것은 `invalid_task`, 설정 파일 작업 종류 정의의 것은 `invalid_config`(18.1, U-177) |
+| `plan_run_not_available` | `invalid_task`, `invalid_config` | — | U-177이 B-4 전까지 `plan: "run"`을 받지 않을 때 쓰던 힌트. U-195부터 주지 않는다(값은 더하기만이라 남는다, 18.1) |
 | `unknown_option` | `invalid_arguments` | `position`: 명령 단어 뒤 몇 번째 인자인지 | 그 명령이 받지 않는 옵션이거나 두 번 준 옵션. 이름이 아니라 자리로 말한다(DR-57) |
 | `key_field_in_task` | `key_in_file` | `field`: 필드 자리 | task 파일의 그 필드에 키 필드나 키 값이 있음 |
 | `key_field_in_config` | `key_in_file` | `field`: 필드 자리 | 설정 파일의 그 필드에 키 필드나 키 값이 있음 |
@@ -612,7 +612,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 쓰기가 `path_not_writable`로 거부된 실행은 끝에 진행 줄 하나로 파일을 허용하는 법을 말한다(`progress.not_writable_hint`, 거부 수). 결과 JSON에는 싣지 않는다.
   - 모델에게는 계약의 `REFUSAL_HINTS.path_not_writable`이 간다(U-175).
 - **앱 계층:** 같은 `prepareTask`로 목록을 만들고, 앱의 조립(`src/app/assemble.ts`)과 적용 점검(`src/app/check-apply.ts`)도 CLI처럼 게이트에 목록을 넘긴다(U-186, 병합 `a1d5c65`). 그래서 GUI에서 시작한 실행과 적용 점검도 목록 밖의 쓰기와 동작을 `path_not_writable`로 막는다. 설정 변경의 넓히기 판정(목록에 없던 항목, 목록 삭제)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-183).
-- **계획 run:** `plan: "run"`은 B-4 전까지 거부된다(18.1, U-177). 승인된 계획의 파일 목록(`plan` 원천)은 B-3이 더한다.
+- **계획 run:** run 계획을 수행하는 실행은 엔진이 승인된 파일 목록을 목록 하나(`plan` 원천, 정확히 그 파일)로 더해 판정한다(U-187, `approvedPlanWritablePathSets`). doctor는 `plan: "run"`과 명령 규칙이 함께 있어도 경고한다(18.4, B-8).
 
 ## 14. 스냅샷과 되돌리기 (R-6, R-7)
 
@@ -726,6 +726,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ### report의 세부 (U-5)
 
+- U-195(DR-69 B-3): run 계획을 수행한 실행의 보고서는 `- Plan run: <id>, digest <d> (this run carried out its approved plan)` 줄을 더하고, `--json`의 `result`는 `planRunId`·`planDigest`(함께, run id와 다이제스트 꼴)와 계획의 `kind: "changes"`를 옮긴다. run 계획 실행의 줄은 쓸 파일 수와, 그 계획을 수행한 실행이 어떻게 끝났는지를 말한다(검증기 없는 실행은 `needs-input`/`no_verifier`로 끝나도 일은 했다).
 - Markdown 절: 실행 요약(실행 id, 작업, 제공자, 결과), 검증(마지막 회차, 통과하지 않은 검증기의 증거), 보호 대상, 변경, 사용량, 검사하지 않은 범위(검증기마다의 한계와 고정 문구), 알림.
   - U-166(AXM-17): 실행 보고서의 고정 문구 끝 줄은 가림이 가리지 않는 것이다. 등록한 값과 가림이 찾는 그 변형만 가리며, 등록하지 않은 비밀, 다른 변형, 다른 인코딩(UTF-16 등)의 글은 가리지 않는다(privacy.md 13절). 개수·값·자리는 싣지 않는다(8.1). 적용 실행의 보고서에는 없다(모델에 보내는 글이 없다).
 - 실행 디렉터리가 링크(정션 포함)이면 따라가지 않고 `invalid_run_record`다. 기록은 모두 그 실행의 것이어야 하고(`runId`, 1부터 연속인 `seq`, 첫 기록 `run_started`), 보고서가 쓰는 필드는 형식을 확인한다. 모르는 종류의 기록은 건너뛴다. `result.json`은 확인한 필드만으로 다시 만든다.
@@ -1044,6 +1045,7 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
     - `lock.remove_hint` 문구도 reclaim 파일을 가리킨다(N-B 문구).
 - **doctor `commands` 점검(G-F, Q5)**: `allowExtraArgs: true` 명령 규칙과 `policy.planActions`가 함께 있으면 `warn`이다. 다른 문제가 있으면 그 글을 두고 경고를 메시지에 붙인다. 문구는 `doctor.commands.extra_args_with_plan`이다.
 - **doctor `commands` 점검(U-182, B-8)**: 쓰기 허용 목록(`writablePaths`, 13.1)과 명령 규칙이 함께 있으면 `warn`이다(`doctor.commands.writable_with_commands`). 앞의 경고나 다른 문제가 있으면 그 글을 두고 이 문구를 `notes`에, 메시지 뒤에 붙인다.
+- **doctor `commands` 점검(U-195, B-8)**: 계획 방식 `run`(task의 `plan`, 없으면 정의의 것)과 명령 규칙이 함께 있어도 `warn`이다(`doctor.commands.plan_run_with_commands`). 승인한 파일은 파일 도구만 묶는다. 쓰기 목록의 경고와 함께면 그것이 글이고 이것은 `notes`다.
 
 ### 17.7 오류 코드 추가
 
@@ -1075,10 +1077,9 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 - 해석 규칙(`resolveWorkflow`)
   - 도구는 작업 종류가 허용한 것 안에서만 좁힐 수 있다.
   - `plan: "apply"`는 약하게 바꿀 수 없다.
-  - U-177(검토 R-99 M-2): 계약의 `PLAN_MODES`에는 `run`이 있지만(U-170, DR-69) 그것을 실행하는 것이 아직 없다(묶음 B의 B-3, B-4). 그래서 CLI의 파서(`parsePlanMode`)는 B-4 전까지 `plan: "run"`을 모델 요청 전에 거부한다.
-    - task 파일의 것은 `invalid_task`, 설정 파일 작업 종류 정의의 것은 `invalid_config`이고, 힌트는 `plan_run_not_available`(사람용 줄 `error.hint.plan_run_not_available`)이다. 실행도 기록도 만들지 않는다.
-    - 그 밖의 틀린 값은 지금처럼 `plan must be one of none, apply`다(받지 않는 `run`을 권하지 않는다).
-    - 앱 계층도 같은 파서를 쓴다. 다만 설정 화면(`src/app/settings.ts`)의 오류에는 힌트를 붙이지 않는다(`message`가 같은 것을 말한다).
+  - U-195(DR-69 B-4): 파서(`parsePlanMode`)는 `PLAN_MODES`의 값을 모두 받는다. U-177(검토 R-99 M-2)이 B-4 전까지 하던 `plan: "run"`의 거부는 없어졌고 그 힌트 `plan_run_not_available`은 주지 않는다. 틀린 값은 `plan must be one of none, apply, run`이다.
+    - `plan: "run"`의 계획 실행이 계획을 저장하려면 그 실행의 도구에 `propose_changes`가 있어야 한다. 지금 내장 작업 종류에는 그 도구를 둔 것이 없으므로, 설정 파일의 작업 종류 정의(`tools`에 `propose_changes`, `plan: "run"`)와 그것을 가리키는 `workflowRef`나 `--workflow`로 쓴다.
+  - `plan_weakened`(U-180: task는 정의의 `apply`·`run`을 그대로 두거나 `none` 정의 아래에서만 정한다)의 글은 task와 정의의 방식을 둘 다 말한다. 정의 `apply`에 task `none`이면 전과 같은 `plan cannot be "none" under a workflow with plan "apply"`다(U-195).
   - `allowCommands: false`인 작업 종류에서는 `policy.commands`를 쓸 수 없다.
     - 이 금지는 모델이 부를 수 있는 명령(정책의 명령 규칙)에 대한 것이다(GT-D10). 사람이 task나 설정에 둔 `command` 검증기는 막지 않는다(설계 4.3). 그 검증기는 적용 뒤, 인벤토리 점검 다음에 실행되므로, 거기서 바꾼 파일은 인벤토리가 보지 않는다(검토 R-11 L-3, PM 판단 P-3 대기).
   - 사람 검토 작업 종류에는 확인 목록이 있어야 한다.
@@ -1130,6 +1131,9 @@ codaryn plan <task 형식> --run <runId|latest> [--json]
   - 인벤토리 상한 도달 여부
   - 글 출력의 마지막 줄은 적용 명령(`--digest`에 다이제스트 앞 12자)이다.
 - 기록의 사본은 보여 주지 않는다. `plan.json`을 다시 가린다(DR-5).
+- **run 계획(U-195, DR-69 B-4):** `plan`은 store의 `loadAnyPlan`으로 읽고 계획의 종류로 나눈다. `kind: "changes"`이면 U-191의 보기(`changesPlanOutput`, `renderChangesPlan`)다.
+  - `--json`은 `ChangesPlanOutput`(`planKind: "changes"`, 가린 `files`, 다이제스트 안의 요약 `summary`, `appliedBy`, `recordsChanged`)이다. 이동 계획의 `PlanOutput`은 바뀌지 않는다(`planKind`가 없다).
+  - 경로의 가린 조각 비교(DR-28)와 기록 변경 표시는 이동 계획과 같다.
 - 같은 가릴 값인지 확인(DR-28, 검토 R-11 M-1)
   - `plan.json`의 각 동작은 계획 실행이 가린 표기의 보이는 조각(`shown`)을 함께 담는다. 가릴 값이나 그 해시는 담지 않는다.
   - `plan`과 `apply`는 지금 형식이 등록한 가릴 값으로 다시 가린 결과를 `planActionShownMatches`로 그 조각과 비교한다.
@@ -1172,6 +1176,15 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
   - 터미널 질문은 하지 않는다. `--allow-unsafe-move`는 `invalid_arguments`로 거부한다.
   - `adapter.unsafeMoveConsent`는 **호출자가 사람의 입력으로 받은 것만** 넘긴다. 사람이 화면에서 그 적용 한 번에 동의한 것이어야 한다. task·설정·프로필·계획·모델이나 이전 적용에서 온 값을 넘기지 않는다.
   - 그 동의의 경로는 `adapter`, 다이제스트는 적용하는 계획의 전체 다이제스트여야 한다. 아니면 실행 전에 `invalid_arguments`다. 동의가 null이면 `consent_required`로 끝나고 다시 묻지 않는다. GUI가 사람에게 묻고 다시 부른다.
+- **run 계획의 적용(U-195, DR-69 B-3, B-4, B-7):** task가 `plan: "run"`으로 해석되면 `apply`는 run 계획(`kind: "changes"`)을 모델 실행으로 수행한다.
+  - 종류가 맞지 않으면 양쪽 다 `run_not_plan`이다(이동 계획 task에 run 계획, run 계획 task에 이동 계획).
+  - 묻거나 보내거나 쓰기 전에 거부한다: 이미 수행한 계획(`plan_already_applied`), 기록 변경 표시(`plan_records_changed`), 위험한 이동 동의(`--allow-unsafe-move`나 adapter의 동의, `invalid_arguments`: 이동에만 쓴다), 가린 조각이 다름(`plan_secrets_differ`), goal을 읽을 수 없는 계획 실행(`invalid_run_record`).
+  - 승인은 이동 계획과 같다(`--digest`, run 계획의 보기를 보이는 터미널 질문, adapter). 다른 task로 만든 계획의 알림(U-131)도 같다. 실행 환경이 없는 빌드는 `internal_error`다.
+  - 실행: 실행 환경(`ApplyCommandEnvironment.run`, CLI는 `run`과 같은 환경)으로 `runPrepared`가 승인된 계획을 넘겨 돈다. 조립은 계획 실행을 claim할 수 있게 만들어지고(`AssemblyInput.planRunId`), 엔진의 `runApprovedPlan`이 계획 파일을 확인하고, 계획을 한 번만 claim하고(`applied.json`), 계획 파일만 쓰게 한다.
+  - **잠금 아래 다시 봄(PM, 이동 계획의 U-1과 같게):** 조립이 잠금을 잡은 뒤 엔진이 시작하기 전에 계획 실행의 기록 변경 표시를 다시 본다. 표시가 있거나 볼 수 없으면 `plan_records_changed`이고, 기록·요청·쓰기·claim 없이 잠금을 놓는다.
+  - **goal:** 계획을 만든 실행의 goal이다. 그 실행 journal의 첫 모델 요청의 user 메시지(그 실행이 가린 글)이고, task 형식과 상관없다. 모델의 요약은 goal이 아니라 엔진이 시스템 글에 승인된 계획으로 넣는다.
+  - 출력은 그 실행의 `CliOutput`(`EngineResult`)이고 `planRunId`와 `planDigest`가 있다. 진행 줄, 끝 요약, `result.json`, 되돌리기(`codaryn revert --run <그 실행>`)는 실행과 같다.
+  - 앱 계층은 같은 `runApply`에 앱의 고리만 넘긴다(p5a U-196). 조립은 `createAssemble(hooks)` 하나이고, 고리는 명령의 부모 환경·플랫폼(DR-4)과 `onAssembled`다.
 - 검증기 명령의 부모 환경(DR-4): `runApply`는 받은 환경(`parentEnv`, 없으면 `env`)을 명령 실행기에 넘기고 `CHILD_ENV_ALLOWLIST`로 거른다. 앱 계층은 변수 파일을 읽어 넣은 실행의 환경 사본을 넘긴다. CLI 자기 프로세스에서는 `process.env`다.
 
 ### 18.5 `codaryn review`

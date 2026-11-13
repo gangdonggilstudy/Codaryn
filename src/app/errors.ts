@@ -3,7 +3,7 @@
  * without its envelope; codes and exit codes are the CLI's own table, unchanged.
  */
 
-import { CLI_ERROR_EXIT_CODES } from "../contracts/index.js";
+import { CLI_ERROR_EXIT_CODES, cliErrorFacts } from "../contracts/index.js";
 import type { CliErrorCode, CliErrorOutput } from "../contracts/index.js";
 import type { AppError } from "./types.js";
 
@@ -27,9 +27,18 @@ export function appErrorExitCode(error: AppError): number {
   return CLI_ERROR_EXIT_CODES[error.code];
 }
 
-/** The CliErrorOutput `codaryn` prints for this error. */
+/**
+ * The CliErrorOutput `codaryn` prints for this error. U-55 (AXM-9): with the contract's facts,
+ * `category` and `retryable` (cliErrorFacts of its code), after the error's own fields. An error
+ * that already carries them (the CLI's own error output, which fromCliError keeps: model_list_failed
+ * decides `retryable` by the listing's model error) keeps its own; `retryable` is left out only when
+ * neither says (model_list_failed without the listing's model error: unknown, never false).
+ */
 export function toCliError(error: AppError): CliErrorOutput {
-  return { schemaVersion: 1, kind: "error", ...error, exitCode: appErrorExitCode(error) };
+  const facts = cliErrorFacts(error.code);
+  const category = error.category ?? facts.category;
+  const retryable = error.retryable ?? facts.retryable;
+  return { schemaVersion: 1, kind: "error", ...error, category, ...(retryable === undefined ? {} : { retryable }), exitCode: appErrorExitCode(error) };
 }
 
 export const INTERNAL_ERROR: AppError = appError("internal_error", INTERNAL_ERROR_MESSAGE);

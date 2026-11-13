@@ -225,6 +225,7 @@ export interface RunObserver {
 
 - 실행 결과는 `EngineResult` 그대로다(`engine.ts:151-177`). 적용 결과는 범용 작업의 `ApplyResult`다(5.6). 어댑터마다 다른 결과 형식은 만들지 않는다.
   - U-25 (DR-52): 가리기가 됐는지는 `EngineResult.masking { registeredValues, maskedPlaces }`(개수만)으로 `done`의 결과에 그대로 실린다. 가릴 값이 하나도 없으면 이 필드가 없다. 앱 계층은 실행의 게이트웨이를 `createPrivacyGateway`로 만들어 그대로 엔진에 넘기고(`assemble.ts`), 결과를 고르지 않고 넘긴다. `report`의 `result`에도 result.json에 적힌 같은 값이 실린다(CLI의 report가 그 필드를 지닌다).
+  - U-55 (AXM-9): 모델 오류로 끝난 실행의 `EngineResult.modelError { kind, turn, retryable? }`도 `done`의 결과에 그대로 실린다. `retryable`을 알 수 없으면 빠진 채로 간다(`tests/unit/app/u55-error-facts.test.ts`). `report`의 `result`에 실리는지는 CLI의 report가 그 필드를 지니는지에 달렸다(CLI 몫).
 - `report({ workspace, runId })` → `ReportOutput`(`commands.ts:62-71`). 작업 공간의 기록만 읽고 잠금을 잡지 않는다. 실행 중이면 `incomplete`(종료 3)다.
 - `reportMarkdown({ workspace, runId })` → `{ kind: "report_markdown", markdown, exitCode }`(GU-3 보고서 저장).
   - `codaryn report`를 `--json` 없이 부른 글 그대로다. Markdown이고 모든 API 제공자의 키 값을 가린다.
@@ -459,6 +460,10 @@ export type ConfirmAnswer =
 - `AppError`는 CLI의 `CliErrorOutput`에서 봉투(`schemaVersion`·`kind`·`exitCode`)만 뺀 것이다.
   - 봉투 밖의 필드는 그대로 둔다. N-A가 더하는 입력 진단(`diagnostic`, N-6)도 잃지 않는다.
   - `toCliError`/`fromCliError`로 양방향 변환한다. 코드 이름과 종료 코드 대응은 바꾸지 않는다(모든 코드를 시험함).
+  - U-55 (AXM-9): `toCliError`는 계약의 `cliErrorFacts(code)`인 `category`(input·state·environment·internal)와 `retryable`(같은 명령을 그대로 다시 하면 될 수 있는지)을 붙인다.
+    - CLI 자신의 오류에서 온 `AppError`가 이미 그 값을 지니면(`fromCliError`가 남긴다) 그것을 쓴다. 예: 목록의 모델 오류로 정한 `model_list_failed`의 `retryable`.
+    - `retryable`은 알 수 없을 때만 빠진다. 모델 오류 없는 `model_list_failed`가 그렇다. 빠진 것은 모름이지 거짓이 아니다.
+    - 종료 코드와 다른 필드는 그대로다. 시험은 `tests/unit/app/u55-error-facts.test.ts`다.
 - `message`는 고정 문구, 필드 위치, 개수만 쓴다(S-3, S-6, N-6). 사람용 문장은 어댑터가 코드로 N-4 카탈로그에서 찾는다(N-5).
 - 앱 계층이 새 실행 전 오류를 만들면 `CliErrorCode`에 더하는 계약 변경이다(역할 1).
 - `AppError`에는 선택 필드 `diagnostic`(N-6: 설정·task 파일의 필드 위치, 줄과 열)이 있다. 값은 넣지 않는다.

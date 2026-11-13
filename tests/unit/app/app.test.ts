@@ -9,7 +9,7 @@ import { writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, DOCTOR_CHECK_IDS } from "../../../src/contracts/index.js";
+import { ANTHROPIC_API_KEY_ENV, CLI_ERROR_EXIT_CODES, DOCTOR_CHECK_IDS, cliErrorFacts } from "../../../src/contracts/index.js";
 import type { CliErrorCode, EngineResult, JournalRecord, ModelProvider } from "../../../src/contracts/index.js";
 import { MODEL_NOT_FOUND_HINT } from "../../../src/cli/run.js";
 import { RUN_ID_PATTERN } from "../../../src/cli/run-id.js";
@@ -330,8 +330,11 @@ describe("errors and arguments", () => {
     for (const code of Object.keys(CLI_ERROR_EXIT_CODES) as CliErrorCode[]) {
       const error = appError(code, "fixed text");
       assert.equal(appErrorExitCode(error), CLI_ERROR_EXIT_CODES[code]);
-      assert.deepEqual(toCliError(error), { schemaVersion: 1, kind: "error", code, exitCode: CLI_ERROR_EXIT_CODES[code], message: "fixed text" });
-      assert.deepEqual(fromCliError(toCliError(error)), error, "the CLI's error output and AppError convert both ways");
+      // U-55 (AXM-9): with the contract's facts of the code (category, retryable).
+      const facts = cliErrorFacts(code);
+      assert.deepEqual(toCliError(error), { schemaVersion: 1, kind: "error", code, exitCode: CLI_ERROR_EXIT_CODES[code], message: "fixed text", ...facts });
+      assert.deepEqual(fromCliError(toCliError(error)), { ...error, ...facts }, "the CLI's error output and AppError convert both ways, the facts kept");
+      assert.deepEqual(toCliError(fromCliError(toCliError(error))), toCliError(error), "and back again unchanged");
     }
     const withExtra = { schemaVersion: 1, kind: "error", code: "invalid_config", exitCode: 2, message: "m", diagnostic: { line: 3 } } as const;
     assert.deepEqual(fromCliError(withExtra as never), { code: "invalid_config", message: "m", diagnostic: { line: 3 } }, "fields beyond the envelope are kept");

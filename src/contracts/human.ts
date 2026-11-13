@@ -281,6 +281,14 @@ export function toSchemaFieldPath(text: string): SchemaFieldPath | null {
   return text as SchemaFieldPath;
 }
 
+/**
+ * U-280 (CLI migration C-3a, moved from src/cli/args.ts): a run id by the rule the store names its run
+ * directories with; `--run` and the app layer's requests are checked against it. The same rule as
+ * RUN_ID below and the store's and the plan executor's own copies; making them one is not part of
+ * the migration.
+ */
+export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /** N-14, N-16: the text as a RunId when it follows the run directory rule (no `..`), else null. */

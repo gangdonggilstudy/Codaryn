@@ -24,9 +24,9 @@ import type {
 } from "../../contracts/index.js";
 import { createMessageCatalog } from "../../i18n/index.js";
 import { isRunTimestamp } from "../../store/index.js";
-import type { KnownKeys } from "../security/index.js";
-import { cleanText, hideKeys } from "../text-safety.js";
-import { displayWidth, formatLocalTime, quoteModelText } from "./format.js";
+import type { KnownKeys } from "../../app/input/security/index.js";
+import { cleanText, hideKeys } from "../../app/input/text-safety.js";
+import { displayWidth, formatLocalTime, quoteModelText } from "../../app/input/format.js";
 
 /**
  * Where the plan run's masking took a value out of the summary. The stored summary holds only the

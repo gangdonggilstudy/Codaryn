@@ -114,9 +114,9 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
   - 그 밖의 파일은 쓰지 않는다.
 - 의존 방향
   - 목표: `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`.
-  - 지금(main 6ef6e3a, U-272가 코드에서 셈): 두 방향이다.
-    - `app` → `cli`: 앱 계층의 14파일이 CLI 모듈 26개를 부른다. 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립도 CLI의 `createAssemble` 한 벌을 앱이 감싼다(U-237, 4절).
-    - `cli` → `app`: `src/cli/changes.ts`와 `main.ts` 두 파일이 앱 계층을 부른다. 전에 있던 `protocol/*`는 DR-66으로 지웠다(U-81).
+  - 지금(이행 C-3a 뒤, U-280. U-272가 main 6ef6e3a의 코드에서 센 수에서 C-3a가 옮긴 것을 뺐다): 두 방향이다.
+    - `app` → `cli`: 앱 계층의 9파일이 CLI 모듈 20개를 부른다. 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립도 CLI의 `createAssemble` 한 벌을 앱이 감싼다(U-237, 4절). 보안 검사·글 정리·설치 확인·실행 id·모델 글 꼴은 `src/app/input/`으로 옮겼다(C-3a). 옛 자리(`src/cli/security/index.ts` 등)는 시험과 고정 파일을 위한 다시 내보내기다.
+    - `cli` → `app`: `src/cli/changes.ts`와 `main.ts` 두 파일이 앱 계층의 명령을 부른다. 전에 있던 `protocol/*`는 DR-66으로 지웠다(U-81). C-3a 뒤로는 CLI의 다른 모듈도 `src/app/input/`과 `src/app/model-text.ts`를 가져온다(목표 방향).
   - 목표로 가는 이행 1~5(7.2)는 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다. 그때까지 AC-D16이 그대로 유효하다.
 - 이름은 `src/app`이다(AC-D1 채택).
 
@@ -236,7 +236,7 @@ export interface RunObserver {
    - U-250(이행 계획 P-2, R-80 I-1): 그 목록은 실행에 줄 수 있는 모든 도구다(`ALL_TOOL_NAMES`: 내장 넷과 작업 종류 도구 `inspect_files`, `propose_plan`, `propose_changes`, `query_table`). CLI의 진행 줄이 이름을 보이는 것과 같다. 전에는 내장 넷만 남겨 작업 종류 도구가 `(unknown tool)`로 보였다. 목록에 없는 이름(대소문자나 공백이 다른 것 포함)과 가릴 값은 그대로다. 지난 실행의 이벤트 쪽(`listRunEvents`)도 같은 함수(`sanitizeRecord`)를 쓴다. 시험 `tests/unit/app/u250-event-tool-names.test.ts`.
    - 가릴 수 없는 글이 하나라도 있으면 그 이벤트는 보내지 않는다(`seq`가 비어 보인다).
    - 엔진도 목록 밖 도구 이름과 안전하지 않은 호출 id를 기록할 때 바꾼다(AC-D15, G-A 브랜치 `0824dde`). 앱 계층의 다시 가림은 그 뒤에도 남긴다(DR-13).
-6. 글에는 제어 문자가 있을 수 있다. 화면에 내기 전에 어댑터가 정리한다(`src/cli/text-safety.ts:25`와 같은 규칙).
+6. 글에는 제어 문자가 있을 수 있다. 화면에 내기 전에 어댑터가 정리한다(`src/app/input/text-safety.ts`의 `cleanText`와 같은 규칙, C-3a 전에는 `src/cli/text-safety.ts`).
 7. 사람용 문장은 이벤트에 없다. 어댑터가 N-4 문구 카탈로그로 만든다.
 
 - 첫 판(A-1 `f1e796b`~`6aa3f44`)은 append 뒤 journal 파일에 새로 붙은 줄을 읽어 이벤트를 만들었다. 끼워 넣은 줄이 가리지 않은 채 관찰자에게 갔다(R-4 H-1, 재현됨). `1c86ec6`에서 위 1·2·5로 고쳤다.
@@ -954,7 +954,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 이행 | 내용 | 바뀌는 파일 | 지금의 상태 |
 | --- | --- | --- | --- |
 | 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 일부. 4·5절 타입은 `src/contracts/app.ts`에 있다(1a, U-254). `src/app/types.ts`는 다시 내보내기만 한다. 질문 사건 타입은 계약에 있다(U-74). 남은 것: `Journal.append`는 아직 `Promise<void>`다(1b, AC-D3. 앱 계층이 `seq`를 스스로 센다) |
-| 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 없음. 조립은 CLI의 `createAssemble` 한 벌이고, 앱 계층은 그것에 DR-4의 환경 사본 등 앱의 고리를 주어 감싼다(U-237). 앱으로 옮기는 일은 이행 계획서의 C-4다. 실행 전 검사는 아직 `runCli` 호출이다. DR-65: 기능 뒤 |
+| 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 일부. 입력 층의 앞쪽(보안 검사, 글 정리, 설치 확인, 실행 id, 모델 글 꼴)이 `src/app/input/`에 있다(C-3a, U-280). 조립은 CLI의 `createAssemble` 한 벌이고, 앱 계층은 그것에 DR-4의 환경 사본 등 앱의 고리를 주어 감싼다(U-237). 앱으로 옮기는 일은 이행 계획서의 C-4다. 설정·task 해석(C-3b), `prepareTask`(C-5)와 실행 수명(C-6a)은 아직 CLI다. 실행 전 검사는 아직 `runCli` 호출이다 |
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 일부. 앱 계층 쪽은 됐다(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않는다. DR-65: 기능 뒤 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 일부. 앱 함수는 모두 있다: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI 명령 가운데 앱 함수를 부르는 것은 `changes`뿐이다(`main.ts`가 연결). 나머지는 거꾸로 앱이 CLI를 감싼다. store의 스냅샷 읽기는 `readRunOriginals`로 있다. DR-65: 기능 뒤 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | 일부. 앱 계층이 CLI의 `runDoctor`·`runModels`를 감싼다(`doctor`, `listModels`, `selectModel`). DR-65: 기능 뒤 |

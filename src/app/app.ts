@@ -63,7 +63,7 @@ import { runRevert } from "../cli/revert.js";
 import { prepareTask, runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome, PrepareEnvironment, RunNotes } from "../cli/run.js";
 import type { RunArgs } from "../cli/args.js";
-import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
+import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
 import { knownKeyValues } from "../cli/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";

@@ -12,7 +12,7 @@
  */
 
 import type { ConfirmAnswer, ConfirmPermission, ConfirmRequest, MessageCatalog } from "../contracts/index.js";
-import { cleanText } from "./text-safety.js";
+import { cleanText } from "../app/input/text-safety.js";
 
 /** apply's yes answers (plan-commands), compared trimmed and in lower case. */
 const YES = new Set(["y", "yes", "예", "네"]);

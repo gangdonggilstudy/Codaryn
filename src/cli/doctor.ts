@@ -72,8 +72,8 @@ import {
   inputFileTooLarge,
   inputFileTooLargeMessage,
   rawTextHoldsKey,
-} from "./security/index.js";
-import type { PathRelation, WorkspaceLocation } from "./security/index.js";
+} from "../app/input/security/index.js";
+import type { PathRelation, WorkspaceLocation } from "../app/input/security/index.js";
 import {
   configFieldOf,
   envValue,
@@ -85,13 +85,13 @@ import {
   providerSettingsOf,
   resolveModelId,
 } from "./settings.js";
-import type { KnownKeys } from "./security/index.js";
+import type { KnownKeys } from "../app/input/security/index.js";
 import type { SettingsEnvironment } from "./settings.js";
 import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { displayWidth, padEnd } from "./human/index.js";
-import { hideKeys } from "./text-safety.js";
+import { hideKeys } from "../app/input/text-safety.js";
 import { writablePathSetsOf } from "./writable.js";
 import { UNREADABLE_PATHS_REQUIRED_TEXT, privateAnalysisWithoutData, runUnreadablePaths } from "./unreadable.js";
 

@@ -66,7 +66,7 @@ import type {
   TableRef,
 } from "../contracts/index.js";
 import { checkProtectedPaths } from "../policy/index.js";
-import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "./security/index.js";
+import { checkLocalPathSyntax, checkTimerMs, resolveBoundedLimits, validateSecretEnvNames } from "../app/input/security/index.js";
 
 /** `invalid_config` when the config file caused the failure (S-7 bounds, quick form). */
 export type TaskErrorCode = "invalid_task" | "invalid_config";

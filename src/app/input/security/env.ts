@@ -3,7 +3,7 @@
  * Messages name a position, never a variable name or a value.
  */
 
-import { API_PROVIDERS, API_PROVIDER_NAMES, CODARYN_CONFIG_ENV } from "../../contracts/index.js";
+import { API_PROVIDERS, API_PROVIDER_NAMES, CODARYN_CONFIG_ENV } from "../../../contracts/index.js";
 
 export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

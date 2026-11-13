@@ -743,6 +743,14 @@ export const FIXED_MESSAGES = {
   "runs.plan_applying": { runId: "runId" },
   "runs.plan_apply_reverted": { runId: "runId" },
   "runs.plan_apply_missing": { runId: "runId" },
+  // U-129 (1), PM: an apply run's changes cell (RunListEntry.changes, its applied actions) says they
+  // are actions, not files: `runs.apply_action_one` when there is one, else `runs.apply_actions`
+  // (English "1 action", "{count} actions"; Korean "동작 {count}"). The JSON keeps the number.
+  "runs.apply_actions": { count: "count" },
+  "runs.apply_action_one": {},
+  // U-129 (2), AXM-21: added to the result column of a run with RunListEntry.review: `{verdict}` is
+  // `review.verdict.<verdict>`, as review.recorded writes it.
+  "runs.review": { verdict: "text" },
   "report.records_changed": {},
   "report.final_message": {},
   "changes.records_changed": {},

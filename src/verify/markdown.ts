@@ -16,7 +16,9 @@
  * - Headings: ATX (`#` to `######` then a space, a TAB or the end of the line; at most three spaces
  *   before; a closing `#` run after a space or TAB is dropped) and Setext (the line above a `=`
  *   underline is level 1, above a `-` underline level 2). Lines of block quotes and list items are
- *   not headings.
+ *   not headings (U-149, R-89b N-2): a list item's later lines indented at least to its content
+ *   column, and the blank lines between them, are lines of the item; a line indented less ends the
+ *   list unless it starts another item.
  * - Links: inline links and images (`[text](target "title")`, `![alt](<target>)`) and one-line
  *   reference definitions (`[label]: target`). Backslash escapes are honoured.
  *
@@ -118,6 +120,31 @@ function afterIndent(line: string, inList: boolean): number {
   }
   while (index < 3 && line[index] === " ") index += 1;
   return index;
+}
+
+/**
+ * U-149 (R-89b N-2, contract MarkdownFileRule): the content column of the list item `line` starts
+ * (LIST_ITEM matched it). The text starts after the marker and the 1 to 4 columns of white space
+ * that follow it, or one column after the marker when the text is empty or starts 5 or more columns
+ * after it. A TAB advances to the next multiple of four.
+ */
+function listItemContentColumn(line: string): number {
+  let index = 0;
+  while (index < 3 && line[index] === " ") index += 1;
+  let markerEnd = index + 1;
+  if (!/[-+*]/.test(line[index] ?? "")) {
+    markerEnd = index;
+    while (/[0-9]/.test(line[markerEnd] ?? "")) markerEnd += 1;
+    markerEnd += 1;
+  }
+  const afterMarker = markerEnd;
+  let column = afterMarker;
+  let at = markerEnd;
+  while (isSpaceOrTab(line[at])) {
+    column = line[at] === "\t" ? column + 4 - (column % 4) : column + 1;
+    at += 1;
+  }
+  return at >= line.length || column - afterMarker >= 5 ? afterMarker + 1 : column;
 }
 
 /** How many `char` follow from `from`. */
@@ -296,6 +323,8 @@ export function readMarkdown(text: string, options: MarkdownReadOptions = {}): M
   let fence: Fence | null = null;
   let html: HtmlBlockEnd | null = null;
   let inList = false;
+  /** U-149: the content column of the list's current top-level item (listItemContentColumn). */
+  let contentColumn = 0;
 
   const readLinks = (inline: string, firstLine: number): void => {
     if (!withLinks || state.unread !== null) return;
@@ -340,10 +369,12 @@ export function readMarkdown(text: string, options: MarkdownReadOptions = {}): M
       flushBlock();
       continue;
     }
-    // A line that is neither indented nor a list item ends the list.
-    if (inList && indentOf(line) < 2 && !LIST_ITEM.test(line)) inList = false;
+    // U-149 (R-89b N-2): a line indented less than the item's content column ends the list unless it
+    // starts another item. A line indented at least that far is a line of the item: not a heading.
+    if (inList && indentOf(line) < contentColumn && !LIST_ITEM.test(line)) inList = false;
+    const itemLine = inList && !LIST_ITEM.test(line);
 
-    const atx = atxHeading(line);
+    const atx = itemLine ? null : atxHeading(line);
     if (atx !== null) {
       flushBlock();
       headings.push({ level: atx.level, text: atx.text, line: lineNumber });
@@ -377,7 +408,11 @@ export function readMarkdown(text: string, options: MarkdownReadOptions = {}): M
     const listItem = LIST_ITEM.test(line);
     if (listItem || QUOTE.test(line)) {
       // A list item or quote line starts its own block; it is never a Setext heading's text.
-      if (listItem) inList = true;
+      if (listItem) {
+        // A nested item (indented to the content column) stays a line of the top-level item.
+        if (!inList || indentOf(line) < contentColumn) contentColumn = listItemContentColumn(line);
+        inList = true;
+      }
       flushBlock();
       block = [line];
       blockStart = lineNumber;

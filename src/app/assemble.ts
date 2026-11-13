@@ -19,8 +19,8 @@
 
 import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
-import { acquireLock, createRunRecorders, hasRecordsChangedMark, releaseLock, stateUncheckedSince, writeResult } from "../store/index.js";
-import { retryLockRelease } from "./lock-retry.js";
+import { acquireLock, createRunRecorders, hasRecordsChangedMark, stateUncheckedSince, writeResult } from "../store/index.js";
+import { releaseOwnLock, retryLockRelease } from "./lock-retry.js";
 import type { LockRetryOptions } from "./lock-retry.js";
 import type { LockInfo } from "../store/index.js";
 import { createCommandRunner, createPlannedFileProbe, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
@@ -137,7 +137,8 @@ export function createAppAssemble(
             // U-193: a lock left is told, never a reason to lose the run's result.
             let threw = false;
             try {
-              released = (await releaseLock({ workspaceRoot, runId })) === true;
+              // V-17 H-1: through the queue of this lock, never beside its later tries.
+              released = (await releaseOwnLock({ workspaceRoot, runId })) === true;
             } catch {
               threw = true;
             }
@@ -150,7 +151,7 @@ export function createAppAssemble(
         },
       };
     } catch (error) {
-      await releaseLock({ workspaceRoot, runId });
+      await releaseOwnLock({ workspaceRoot, runId });
       throw error;
     }
   };

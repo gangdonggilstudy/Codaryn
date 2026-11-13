@@ -40,7 +40,7 @@ import { createRunId } from "../cli/run-id.js";
 import { preflightPlan } from "../engine/index.js";
 import { createPolicyGate } from "../policy/index.js";
 import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
-import { retryLockRelease } from "./lock-retry.js";
+import { releaseOwnLock, retryLockRelease } from "./lock-retry.js";
 import type { LockRetryOptions } from "./lock-retry.js";
 import { createPlanExecutor } from "../tools/index.js";
 import type { PlanFileOps } from "../tools/index.js";
@@ -209,7 +209,8 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
     for (let attempt = 0; attempt < 2 && !released; attempt += 1) {
       try {
         // U-193 (as V-1 L-1): the store answers false when the lock is not this check's any more; not taken back either.
-        released = (await release({ workspaceRoot: workspace.root, runId: lockId })) === true;
+        // V-17 H-1: through the queue of this lock, never beside its later tries.
+        released = (await releaseOwnLock({ workspaceRoot: workspace.root, runId: lockId }, release)) === true;
         threw = false;
       } catch {
         // Tried once more, then told.

@@ -917,6 +917,8 @@ const nameOrNull = (value: unknown): value is string | null => value === null ||
 export type PlanCheckReply =
   | {
       readonly ok: true;
+      /** U-206: a run plan's check: its problems are planned files (by index) the later run's gate denies ("denied"). */
+      readonly planKind?: "changes";
       readonly problems: readonly { readonly index: number; readonly problem: string }[];
       readonly unsafeMoves: readonly number[];
       readonly inventoryLimitReached: boolean;
@@ -932,11 +934,13 @@ export function parseCheckPlanArgs(value: unknown): string | null {
 }
 
 /** The engine host's check of the plan `planRunId` with `digest`, checked field by field; another plan's is host_error. */
-export function toPlanCheckReply(value: unknown, planRunId: string, digest: string, actions: number): PlanCheckReply {
+export function toPlanCheckReply(value: unknown, planRunId: string, digest: string, actions: number, planKind?: "changes"): PlanCheckReply {
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const fail = { ok: false, code: "host_error" } as const;
   const { problems, unsafeMoves, inventoryLimitReached, probesLeft, probesRemoved, lockLeft } = value;
   if (value["planRunId"] !== planRunId || value["digest"] !== digest) return fail;
+  // U-206: the check must be of the plan kind the main process showed (a run plan's indexes are its files).
+  if (value["planKind"] !== planKind) return fail;
   if (!Array.isArray(problems) || !Array.isArray(unsafeMoves) || typeof inventoryLimitReached !== "boolean" || !count(probesLeft) || !count(probesRemoved) || typeof lockLeft !== "boolean") return fail;
   const index = (n: unknown): n is number => count(n) && n < actions;
   const found: { index: number; problem: string }[] = [];
@@ -944,8 +948,8 @@ export function toPlanCheckReply(value: unknown, planRunId: string, digest: stri
     if (!isObj(item) || !index(item["index"]) || typeof item["problem"] !== "string" || !ERROR_CODE.test(item["problem"])) return fail;
     found.push({ index: item["index"], problem: item["problem"] });
   }
-  if (!unsafeMoves.every(index)) return fail;
-  return { ok: true, problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
+  if (!unsafeMoves.every(index) || (planKind === "changes" && unsafeMoves.length > 0)) return fail;
+  return { ok: true, ...(planKind === "changes" ? { planKind } : {}), problems: found, unsafeMoves: [...unsafeMoves] as number[], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
 }
 
 /**
@@ -1174,7 +1178,20 @@ export function parseReviewArgs(value: unknown): { readonly workspace: string; r
 export const MAX_PLAN_SUMMARY_ROWS = 21;
 
 /** GU-5 (3.9): a plan as the window shows it. `approval` is the token its apply takes (null once applied). */
+/** U-206 (U-196, DR-69 B-3): one file of a run plan: its masked path, and whether the later run makes or changes it. */
+export interface PlannedFileView {
+  readonly path: string;
+  readonly change: "create" | "modify";
+}
+
 export interface PlanView {
+  /**
+   * U-206: present for a run plan (the app layer's ChangesPlanOutput): then `files` are what a later
+   * run will make or change, `actions` is empty and `inventoryLimitReached` false. Absent: a plan of
+   * moves and discards, as before.
+   */
+  readonly planKind?: "changes";
+  readonly files?: readonly PlannedFileView[];
   readonly runId: string;
   readonly status: "pending" | "applied";
   readonly digest: string;
@@ -1225,9 +1242,22 @@ export function toPlanView(value: unknown): { readonly ok: true; readonly view: 
   const recordsChanged = value["recordsChanged"] ?? false;
   const summary = toSummaryRows(value["summary"]);
   if (typeof recordsChanged !== "boolean" || summary === "bad") return fail;
+  // U-206: a run plan's files, each a short masked path and create or modify; no actions then.
+  const planKind = value["planKind"];
+  let files: PlannedFileView[] | null = null;
+  if (planKind !== undefined) {
+    const given = value["files"];
+    if (planKind !== "changes" || !Array.isArray(given) || given.length > 10_000 || actions.length > 0 || inventoryLimitReached) return fail;
+    files = [];
+    for (const file of given) {
+      if (!isObj(file) || !shortText(file["path"]) || file["path"].length === 0 || UNSAFE_IN_MESSAGE.test(file["path"]) || (file["change"] !== "create" && file["change"] !== "modify")) return fail;
+      files.push({ path: file["path"], change: file["change"] });
+    }
+  } else if (value["files"] !== undefined) return fail;
   return {
     ok: true,
     view: {
+      ...(files === null ? {} : { planKind: "changes" as const, files }),
       runId,
       status,
       digest,

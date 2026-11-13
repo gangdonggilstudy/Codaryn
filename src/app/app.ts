@@ -21,6 +21,8 @@ import type {
   ApiProviderName,
   ApplyPlan,
   ApplyResult,
+  AnyPlanOutput,
+  ChangesPlanOutput,
   PlanOutput,
   ReviewOutput,
   CreateAnthropicProvider,
@@ -69,6 +71,7 @@ import { readChanges } from "./changes.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 import { listRunEventsIn, runEventsArguments } from "./run-events.js";
 import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
+import { changesPlanViewIn, checkChangesPlanFiles, storedPlanKindOf } from "./changes-plan.js";
 import type { ApplyCheckOperations } from "./check-apply.js";
 import { readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
 import type { WorkspaceTextOperations, WorkspaceTextSource } from "./workspace-text.js";
@@ -763,8 +766,11 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   }
 
   /** DR-5, DR-17: `codaryn plan --json`: the stored plan masked again with this task form's secrets. Reads only. */
-  async function plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>> {
+  async function plan(request: PlanRequest): Promise<AppCallOutcome<AnyPlanOutput>> {
     try {
+      // U-196: a run plan is shown by the app until the CLI's plan view chooses by kind (U-195).
+      const changes = await runPlanView(request);
+      if (changes !== null) return changes;
       return jsonOutcome<PlanOutput>(await runPlan(planCommandEnvironment(planArguments(request))), "plan");
     } catch {
       return { ok: false, error: INTERNAL_ERROR };
@@ -863,11 +869,21 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     try {
       const probe = await readingSecrets(request.settings);
       if (!probe.ok) return probe;
+      const planRoot = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!planRoot.ok) return planRoot;
+      // Review R-103 L-1: a plan that cannot be read is refused with the store's code first, as the
+      // plan view refuses it (the same store, the same codes), not taken for a plan of mode apply.
+      const stored = await storedPlanKindOf(planRoot.value, checked.planRunId);
+      if (!stored.ok) return { ok: false, error: appError(stored.code, `run ${checked.planRunId} has no plan that can be checked (${stored.code}); nothing was checked`) };
+      // U-196 (DR-69 B-3, B-4): a run plan is checked as its run will judge it (changes-plan.ts).
+      if (stored.kind === "changes") return await checkRunPlan(probe, planRoot.value, checked.planRunId, checked.digest);
       if (workflowSettingsOf(probe.task).plan !== "apply") {
         return { ok: false, error: appError("run_not_plan", 'the task given to the check does not resolve to a workflow with plan "apply"; nothing was checked') };
       }
-      const view = await plan({ settings: request.settings, runId: checked.planRunId });
-      if (!view.ok) return view;
+      const shown = await plan({ settings: request.settings, runId: checked.planRunId });
+      if (!shown.ok) return shown;
+      if ("planKind" in shown.output) return { ok: false, error: appError("internal_error", "the plan changed its kind while it was checked; nothing was checked") };
+      const view = { output: shown.output };
       if (view.output.appliedBy !== null) return { ok: false, error: appError("plan_already_applied", "that plan was already applied; nothing was checked") };
       if (view.output.recordsChanged === true) {
         return { ok: false, error: appError("plan_records_changed", "the plan run's records were changed by something other than the run, so its plan may not be the one shown; nothing was checked") };
@@ -875,11 +891,9 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (!view.output.digest.startsWith(checked.digest)) {
         return { ok: false, error: appError("plan_not_approved", "the digest does not match the plan's digest; nothing was checked") };
       }
-      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
-      if (!root.ok) return root;
       return await checkApplyIn(
         {
-          workspaceRoot: root.value,
+          workspaceRoot: planRoot.value,
           task: probe.task,
           planRunId: checked.planRunId,
           digest: view.output.digest,
@@ -892,6 +906,67 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     } catch {
       return { ok: false, error: appError("internal_error", "the plan could not be checked; nothing was moved") };
     }
+  }
+
+  /**
+   * U-196 (DR-69 B-3, B-4): checkApply on a run plan. The apply task must resolve to plan "run" (no
+   * setting can before B-4, U-177); then the view's refusals as for a plan of mode apply (DR-28,
+   * already carried out, records-changed mark, digest), then each planned file judged by the gate
+   * the run will have (checkChangesPlanFiles). No lock, no probe, no move: those fields are empty.
+   */
+  async function checkRunPlan(
+    probe: { readonly secrets: readonly string[]; readonly keys: readonly string[]; readonly task: ResolvedTaskSpec },
+    workspaceRoot: string,
+    planRunId: string,
+    digest: string,
+  ): Promise<AppCallOutcome<PlanCheck>> {
+    if (workflowSettingsOf(probe.task).plan !== "run") {
+      return { ok: false, error: appError("run_not_plan", 'the plan is a run plan: the task given to the check must resolve to a workflow with plan "run"; nothing was checked') };
+    }
+    const view = await changesPlanViewIn({ workspaceRoot, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys }, planRunId);
+    if (!view.ok) return view;
+    const shown = view.output.output;
+    if (shown.appliedBy !== null) return { ok: false, error: appError("plan_already_applied", "that plan was already carried out; nothing was checked") };
+    if (shown.recordsChanged === true) {
+      return { ok: false, error: appError("plan_records_changed", "the plan run's records were changed by something other than the run, so its plan may not be the one shown; nothing was checked") };
+    }
+    if (!shown.digest.startsWith(digest)) return { ok: false, error: appError("plan_not_approved", "the digest does not match the plan's digest; nothing was checked") };
+    const problems = await checkChangesPlanFiles(
+      { workspaceRoot, policy: probe.task.policy, ...(probe.task.writablePathSets === undefined ? {} : { writablePathSets: probe.task.writablePathSets }) },
+      view.output.files,
+    );
+    return {
+      ok: true,
+      output: {
+        kind: "plan_check",
+        planKind: "changes",
+        planRunId,
+        digest: shown.digest,
+        checkedAt: new Date(environment.clock.now()).toISOString(),
+        problems: problems.map((item) => ({ index: item.index, problem: item.problem })),
+        unsafeMoves: [],
+        inventoryLimitReached: false,
+        probesLeft: 0,
+        probesRemoved: 0,
+        lockLeft: false,
+      },
+    };
+  }
+
+  /** U-196: a run plan's view (changes-plan.ts), or null for any other request (the CLI's plan view then). */
+  async function runPlanView(request: PlanRequest): Promise<AppCallOutcome<ChangesPlanOutput> | null> {
+    if (typeof request !== "object" || request === null || typeof request.runId !== "string") return null;
+    const probe = await readingSecrets(request.settings);
+    if (!probe.ok) return null;
+    const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+    if (!root.ok) return null;
+    const runId = await runIdOf(root.value, request.runId);
+    if (!runId.ok) return null;
+    const stored = await storedPlanKindOf(root.value, runId.value);
+    // Not a run plan, or none that can be read: the CLI's plan view, which gives the store's code.
+    if (!stored.ok || stored.kind !== "changes") return null;
+    const view = await changesPlanViewIn({ workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys }, runId.value);
+    return view.ok ? { ok: true, output: view.output.output } : view;
   }
 
   return {

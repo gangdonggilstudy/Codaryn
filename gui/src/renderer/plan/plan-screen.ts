@@ -83,7 +83,9 @@ export function planCheckParts(t: Texts, result: ReturnType<typeof asPlanCheck>,
     const row = rows[index];
     if (row === undefined) continue;
     row.setAttribute("data-problem", problem);
-    const id = `plancheck.problem.${problem}`;
+    // U-206: a run plan's problems say what the later run could not do to that file.
+    const runId = `plancheck.runProblem.${problem}`;
+    const id = result.planKind === "changes" && t.has(runId) ? runId : `plancheck.problem.${problem}`;
     row.append(el("span", ` — ${t.has(id) ? t.format(id) : problem}`, { class: "plan-problem" }));
   }
   for (const index of result.unsafeMoves) {
@@ -92,7 +94,8 @@ export function planCheckParts(t: Texts, result: ReturnType<typeof asPlanCheck>,
     row.setAttribute("data-unsafe", "true");
     row.append(el("span", ` — ${t.format("plancheck.unsafeRow")}`, { class: "plan-unsafe" }));
   }
-  if (result.problems.length > 0) parts.push(el("p", t.format("plancheck.problems", { count: String(result.problems.length) }), { role: "alert", id: "plan-check-problems" }));
+  // U-206: a run plan's problems are files the later run's gate would deny; an apply plan's are actions.
+  if (result.problems.length > 0) parts.push(el("p", t.format(result.planKind === "changes" ? "plancheck.deniedFiles" : "plancheck.problems", { count: String(result.problems.length) }), { role: "alert", id: "plan-check-problems" }));
   if (result.unsafeMoves.length > 0) parts.push(el("p", t.format("plancheck.unsafe", { count: String(result.unsafeMoves.length) }), { class: "notice", id: "plan-check-unsafe" }));
   if (result.problems.length === 0 && result.unsafeMoves.length === 0) parts.push(el("p", t.format("plancheck.clean"), { id: "plan-check-clean" }));
   if (result.probesRemoved > 0) parts.push(el("p", t.format("plancheck.probesRemoved", { count: String(result.probesRemoved) }), { class: "notice", id: "plan-check-probes-removed" }));
@@ -132,10 +135,18 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         const view = reply.view;
         // U-32 (UXM-14, U-14 AXM-2): the mark the plan view itself carries, or the run list's (fail closed).
         const marked = view.recordsChanged === true || target.recordsChanged;
+        // U-206 (U-196, DR-69 B-3): a run plan lists the files a later run will make or change.
+        const runPlan = view.planKind === "changes";
+        const files = view.files ?? [];
         const moves = view.actions.filter((action) => action.kind === "move").length;
-        const summary = el("p", t.format("plan.summary", { moves: String(moves), discards: String(view.actions.length - moves), digest: view.digest.slice(0, 12) }), { id: "plan-summary" });
-        const list = el("ul", undefined, { id: "plan-actions" });
-        const rows = view.actions.map((action, index) => el("li", actionLine(t, action), { "data-kind": action.kind, "data-index": String(index) }));
+        const creates = files.filter((file) => file.change === "create").length;
+        const summary = runPlan
+          ? el("p", t.format("plan.runSummary", { creates: String(creates), modifies: String(files.length - creates), digest: view.digest.slice(0, 12) }), { id: "plan-summary", "data-plan-kind": "changes" })
+          : el("p", t.format("plan.summary", { moves: String(moves), discards: String(view.actions.length - moves), digest: view.digest.slice(0, 12) }), { id: "plan-summary" });
+        const list = el("ul", undefined, { id: runPlan ? "plan-files" : "plan-actions" });
+        const rows = runPlan
+          ? files.map((file, index) => el("li", `${t.format(file.change === "create" ? "plan.fileCreate" : "plan.fileModify")}: ${file.path}`, { "data-change": file.change, "data-index": String(index) }))
+          : view.actions.map((action, index) => el("li", actionLine(t, action), { "data-kind": action.kind, "data-index": String(index) }));
         list.append(...rows);
         const parts: HTMLElement[] = [];
         // As the CLI's plan: a marked plan run's warning comes before anything of the plan.
@@ -145,8 +156,10 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         // U-32 (U-14 AXM-15): the model's summary under the label that says whose words they are and
         // that they are not what is approved; rows as the engine drew them. None for a marked plan run.
         if (!marked && view.summary !== undefined && view.summary.length > 0) {
-          const words = el("section", undefined, { id: "plan-agent-words" });
-          words.append(el("p", t.format("plan.summaryLabel"), { class: "notice" }), el("div", view.summary.join("\n"), { class: "agent-words", id: "plan-agent-words-text" }));
+          // U-206: a run plan's summary is in the plan and its digest: it is approved with the files. It
+          // is the model's description of the plan, not the run's goal.
+          const words = el("section", undefined, { id: "plan-agent-words", ...(runPlan ? { "data-approved": "true" } : {}) });
+          words.append(el("p", t.format(runPlan ? "plan.runSummaryLabel" : "plan.summaryLabel"), { class: "notice" }), el("div", view.summary.join("\n"), { class: "agent-words", id: "plan-agent-words-text" }));
           parts.push(words);
         }
         if (view.inventoryLimitReached) parts.push(el("p", t.format("plan.inventoryLimit"), { class: "notice", id: "plan-inventory" }));
@@ -155,6 +168,23 @@ export function planScreen(deps: PlanDeps): PlanScreen {
         if (view.status !== "applied" && marked) {
           // DR-38: the engine refuses it (plan_records_changed); in place of the apply button.
           parts.push(el("p", t.format("plan.cannotApply"), { class: "notice", id: "plan-cannot-apply" }));
+        } else if (runPlan && view.status !== "applied" && reply.approval !== null) {
+          // U-206 (U-196): a run plan is checked (files the later run could not write) but not carried
+          // out from this app yet: the button stays off and says why (the main process refuses it too).
+          const off = button(t.format("plan.apply"), () => undefined, { id: "plan-apply", disabled: "", "aria-describedby": "plan-run-apply-unavailable" });
+          const why = el("p", t.format("plan.runApplyUnavailable"), { class: "notice", id: "plan-run-apply-unavailable" });
+          if (target.formKnown) {
+            const approval = reply.approval;
+            const check = el("section", undefined, { id: "plan-check", "aria-labelledby": "plan-check-title", "data-check": "checking" });
+            check.append(el("h3", t.format("plancheck.title"), { id: "plan-check-title" }), el("p", t.format("plancheck.checking")));
+            parts.push(check);
+            void (async () => {
+              const result = asPlanCheck(await api.checkPlan(approval));
+              check.replaceChildren(el("h3", t.format("plancheck.title"), { id: "plan-check-title" }), ...planCheckParts(t, result, rows));
+              check.setAttribute("data-check", !result.ok ? "error" : result.problems.length > 0 ? "problems" : "clean");
+            })();
+          }
+          parts.push(off, why);
         } else if (view.status !== "applied" && reply.approval !== null && !target.formKnown) {
           const unknown = el("div", undefined, { class: "notice", id: "plan-form-unknown" });
           const commands = el("ul", undefined, { id: "plan-cli-commands" });

@@ -11,11 +11,11 @@
  *   planned file judged by the gate the run will have (the task's policy and writable lists, and
  *   the plan's files as one more list) as the engine judges it before its first model request,
  *   without taking the lock. Whether a file still fits the plan (staleness) the engine checks.
- * Reproduced first (todo until the app gives them). Temporary folders, fake values only.
+ * Reproduced first (86d2adc, todo until the app gave them). Temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import * as appModule from "../../../src/app/index.js";
@@ -27,9 +27,8 @@ import { createPrivacyGateway } from "../../../src/privacy/index.js";
 import { createPlanRecorder, markPlanApplied } from "../../../src/store/index.js";
 import { FAKE_SECRET, PLAN_TASK, appEnvironment, setupRun, taskForm } from "./support.js";
 
-const TODO = { todo: "U-196: the app does not show or check a run plan yet" };
-const PLAN_RUN = "20261113T120000Z-0a1b2c3d";
-const CARRY_RUN = "20261113T130000Z-11111111";
+const PLAN_RUN = "20261101T120000Z-0a1b2c3d";
+const CARRY_RUN = "20261101T130000Z-11111111";
 const HASH = "a".repeat(64) as ContentHash;
 
 type View = {
@@ -63,8 +62,10 @@ async function storeRunPlan(base: string, files: readonly { path: string; change
   const digest = await createPlanRecorder({ workspaceRoot: work, runId: PLAN_RUN }).saveChangesPlan!({ summary: maskedParts(mask(summary)), files: planned });
   const dir = path.join(work, ".codaryn", "runs", PLAN_RUN);
   await mkdir(dir, { recursive: true });
-  const started = { seq: 1, at: "2026-11-13T12:00:01.000Z", runId: PLAN_RUN, type: "run_started", schemaVersion: 1, taskId: "app-task", workflow: "write", provider: "scripted", limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: null, maxDurationMs: 1000 } };
-  await writeFile(path.join(dir, "journal.jsonl"), `${JSON.stringify(started)}\n`);
+  const started = { seq: 1, at: "2026-11-01T12:00:01.000Z", runId: PLAN_RUN, type: "run_started", schemaVersion: 1, taskId: "app-task", workflow: "write", provider: "scripted", limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: null, maxDurationMs: 1000 } };
+  // A finished run's records, so `latest` names it as the store judges runs.
+  const finished = { seq: 2, at: "2026-11-01T12:00:02.000Z", runId: PLAN_RUN, type: "run_finished", status: "needs-input", reason: "plan_pending", usage: { modelTurns: 1, toolCalls: 1, inputTokens: null, outputTokens: null, durationMs: 1, repairAttempts: 0 } };
+  await writeFile(path.join(dir, "journal.jsonl"), `${JSON.stringify(started)}\n${JSON.stringify(finished)}\n`);
   const result = {
     schemaVersion: 1, kind: "run", runId: PLAN_RUN, taskId: "app-task", status: "needs-input", reason: "plan_pending", exitCode: 3, provider: "scripted", verifiers: [], changes: [],
     usage: { modelTurns: 1, toolCalls: 1, inputTokens: null, outputTokens: null, durationMs: 1 }, journalPath: `.codaryn/runs/${PLAN_RUN}/journal.jsonl`, notices: [],
@@ -86,7 +87,7 @@ async function withRunPlan(files: readonly { path: string; change: "create" | "m
 }
 
 describe("U-196: plan() shows a run plan", () => {
-  test("its files, summary, digest and pending status, as the plan run stored them", TODO, async () => {
+  test("its files, summary, digest and pending status, as the plan run stored them", async () => {
     const { base, app, digest } = await withRunPlan();
     const outcome = await app.plan({ settings: taskForm(base), runId: PLAN_RUN });
     assert.equal(outcome.ok, true, JSON.stringify(outcome));
@@ -103,21 +104,21 @@ describe("U-196: plan() shows a run plan", () => {
     assert.equal((latest as unknown as { output: View }).output.runId, PLAN_RUN, "latest names it as for any plan");
   });
 
-  test("applied once applied.json names the run that carried it out", TODO, async () => {
+  test("applied once applied.json names the run that carried it out", async () => {
     const { base, app } = await withRunPlan();
-    await markPlanApplied({ workspaceRoot: path.join(base, "work"), planRunId: PLAN_RUN, applyRunId: CARRY_RUN, at: "2026-11-13T13:00:05.000Z" });
+    await markPlanApplied({ workspaceRoot: path.join(base, "work"), planRunId: PLAN_RUN, applyRunId: CARRY_RUN, at: "2026-11-01T13:00:05.000Z" });
     const view = (await app.plan({ settings: taskForm(base), runId: PLAN_RUN })) as unknown as { ok: boolean; output: View };
     assert.deepEqual([view.output.status, view.output.appliedBy?.runId], ["applied", CARRY_RUN]);
   });
 
-  test("a path that masks otherwise with the secrets registered now: plan_secrets_differ (DR-28), no path shown", TODO, async () => {
+  test("a path that masks otherwise with the secrets registered now: plan_secrets_differ (DR-28), no path shown", async () => {
     const { base, app } = await withRunPlan([{ path: `notes/${FAKE_SECRET}.md`, change: "create" }]);
     const error = failure(await app.plan({ settings: taskForm(base), runId: PLAN_RUN }));
     assert.equal(error.code, "plan_secrets_differ");
     assert.equal(JSON.stringify(error).includes(FAKE_SECRET), false);
   });
 
-  test("the same secrets as the plan run: the path is shown masked", TODO, async () => {
+  test("the same secrets as the plan run: the path is shown masked", async () => {
     const { base, app } = await withRunPlan([{ path: `notes/${FAKE_SECRET}.md`, change: "create" }], [FAKE_SECRET]);
     const view = (await app.plan({ settings: taskForm(base), runId: PLAN_RUN })) as unknown as { ok: boolean; output: View };
     assert.equal(view.ok, true, JSON.stringify(view));
@@ -125,7 +126,7 @@ describe("U-196: plan() shows a run plan", () => {
     assert.equal(view.output.files.length, 1);
   });
 
-  test("a records-changed mark on the plan run is shown", TODO, async () => {
+  test("a records-changed mark on the plan run is shown", async () => {
     const { base, app } = await withRunPlan();
     await writeFile(path.join(base, "work", ".codaryn", "runs", PLAN_RUN, "records-changed.json"), "{}");
     const view = (await app.plan({ settings: taskForm(base), runId: PLAN_RUN })) as unknown as { ok: boolean; output: View };
@@ -134,7 +135,7 @@ describe("U-196: plan() shows a run plan", () => {
 });
 
 describe("U-196: checkApply and a run plan", () => {
-  test("an apply task that does not resolve to plan \"run\" is refused, saying so; nothing is checked", TODO, async () => {
+  test("an apply task that does not resolve to plan \"run\" is refused, saying so; nothing is checked", async () => {
     const base = await setupRun({}, PLAN_TASK, []);
     const digest = await storeRunPlan(base, FILES, "Tidy the guide.");
     const app = createCodarynApp(await appEnvironment(base));
@@ -143,7 +144,7 @@ describe("U-196: checkApply and a run plan", () => {
     assert.match(error.message, /plan "run"/);
   });
 
-  test("checkChangesPlanFiles: each planned file judged by the run's gate (policy, writable lists and the plan's files)", TODO, async () => {
+  test("checkChangesPlanFiles: each planned file judged by the run's gate (policy, writable lists and the plan's files)", async () => {
     const check = (appModule as unknown as Record<string, unknown>)["checkChangesPlanFiles"] as
       | ((source: { readonly workspaceRoot: string; readonly policy: PolicyConfig; readonly writablePathSets?: readonly WritablePathSet[] }, files: readonly { readonly path: string }[]) => Promise<readonly { index: number; problem: string }[]>)
       | undefined;
@@ -159,5 +160,9 @@ describe("U-196: checkApply and a run plan", () => {
       { index: 1, problem: "denied" },
       { index: 2, problem: "denied" },
     ]);
+    // By the real path too: a junction to the protected folder is allowed by its letters, denied by where it leads.
+    await mkdir(path.join(work, "docs", "private"), { recursive: true });
+    await symlink(path.join(work, "docs", "private"), path.join(work, "alias"), "junction");
+    assert.deepEqual(await check!({ workspaceRoot: work, policy }, [{ path: "alias/x.md" }, { path: "docs/guide.md" }]), [{ index: 0, problem: "denied" }]);
   });
 });

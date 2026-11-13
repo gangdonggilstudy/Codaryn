@@ -41,6 +41,7 @@ import type {
   RevertOutput,
   RunsOutput,
   ToolName,
+  AnyPlanOutput,
 } from "../contracts/index.js";
 import type { ApplyJournalRecord, ApplyResult, PlanOutput, ReviewOutput } from "./general-tasks.js";
 
@@ -830,6 +831,15 @@ export interface CheckApplyRequest {
  */
 export interface PlanCheck {
   readonly kind: "plan_check";
+  /**
+   * U-196 (DR-69 B-3, B-4): present for a run plan (plan.json `kind: "changes"`), as ChangesPlanOutput's
+   * `planKind`. Then `problems` are the planned files the gate of the run that carries the plan out
+   * would deny as a write ("denied", by the file's index in the plan view); whether a file still fits
+   * the plan is the engine's check before its first model request. No lock, probe or move is made:
+   * `unsafeMoves` is empty, `inventoryLimitReached` false, `probesLeft` and `probesRemoved` 0, and
+   * `lockLeft` false. Absent: a plan of mode apply, as before.
+   */
+  readonly planKind?: "changes";
   readonly planRunId: string;
   /** The full digest of the plan checked. */
   readonly digest: ContentHash;
@@ -968,7 +978,11 @@ export interface CodarynApp {
    * person's approval (and DR-21 consent), and the person's review after `awaiting_review`.
    * Required since the general task commands are in main (PM decision on A-5 question 1).
    */
-  plan(request: PlanRequest): Promise<AppCallOutcome<PlanOutput>>;
+  /**
+   * U-196: a run plan (plan.json `kind: "changes"`) is shown as ChangesPlanOutput (`planKind:
+   * "changes"`); a plan of mode apply as PlanOutput, as before (AnyPlanOutput, told apart by planKind).
+   */
+  plan(request: PlanRequest): Promise<AppCallOutcome<AnyPlanOutput>>;
   applyPlan(request: ApplyPlanRequest, observer?: ApplyObserver): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }>;
   review(request: ReviewRequest): Promise<AppCallOutcome<ReviewOutput>>;
 }

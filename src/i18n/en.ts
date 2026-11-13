@@ -251,7 +251,7 @@ export const EN_MESSAGES: MessageTexts = {
   "help.output": "At a terminal (stdout and stderr both), the result of run, revert and apply, and any command's error, show only as human lines on stderr (progress, summary, explained error). They are also printed as one JSON line on stdout with --json, or when stdout or stderr is not a terminal (a pipe or a file, such as 2> log.txt). --quiet leaves the human lines out and prints the JSON line, at a terminal too.",
   "help.key": "The API key is read only from the provider's environment variable (or --vars-file), never from a file given with --task or --config; codaryn doctor names the variable.",
   "help.contract": "See docs/cli-contract.md for the full contract.",
-  "help.first_steps": "First time? In this order: codaryn init → codaryn doctor → codaryn run \"<task>\" → codaryn report --run latest",
+  "help.first_steps": "First time? In this order: codaryn init -> codaryn doctor -> codaryn run \"<task>\" -> codaryn report --run latest",
   "help.more": "Options and usage of each command: codaryn help <command> (e.g. codaryn help run). Version: codaryn --version",
   "help.summary.init": "create the config file",
   "help.summary.doctor": "check what a run needs (no network access)",

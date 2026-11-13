@@ -250,7 +250,7 @@ export const KO_MESSAGES: MessageTexts = {
   "help.output": "터미널(stdout과 stderr 모두)에서는 run·revert·apply의 결과와 모든 명령의 오류가 stderr의 사람용 줄(진행 줄, 요약, 오류 설명)로만 보입니다. 그 결과와 오류는 --json을 주거나 stdout이나 stderr가 터미널이 아닐 때(파이프, 파일, 예: 2> log.txt) stdout에 JSON 한 줄로도 냅니다. --quiet면 사람용 줄을 내지 않고, 터미널에서도 JSON 한 줄을 냅니다.",
   "help.key": "API 키는 제공자의 환경 변수(또는 --vars-file)에서만 읽고, --task나 --config 파일에서는 읽지 않습니다. 변수 이름은 codaryn doctor가 알려 줍니다.",
   "help.contract": "전체 계약은 docs/cli-contract.md를 보세요.",
-  "help.first_steps": "처음이라면 이 순서로: codaryn init → codaryn doctor → codaryn run \"<할 일>\" → codaryn report --run latest",
+  "help.first_steps": "처음이라면 이 순서로: codaryn init -> codaryn doctor -> codaryn run \"<할 일>\" -> codaryn report --run latest",
   "help.more": "명령마다의 옵션과 사용법: codaryn help <명령> (예: codaryn help run). 버전: codaryn --version",
   "help.summary.init": "설정 파일을 만듭니다",
   "help.summary.doctor": "실행에 필요한 것을 점검합니다(네트워크 없음)",

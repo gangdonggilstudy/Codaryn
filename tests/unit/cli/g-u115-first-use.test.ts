@@ -59,7 +59,7 @@ describe("U-115 (A): the short help at a terminal", () => {
       [
         en("help.intro"),
         "",
-        'First time? In this order: codaryn init → codaryn doctor → codaryn run "<task>" → codaryn report --run latest',
+        'First time? In this order: codaryn init -> codaryn doctor -> codaryn run "<task>" -> codaryn report --run latest',
         "To try the flow without a key: docs/usage.md section 3 (examples/demo)",
         "",
         en("help.commands_heading"),
@@ -91,7 +91,7 @@ describe("U-115 (A): the short help at a terminal", () => {
     const named = shown.split("\n").flatMap((line) => (/^ {2}([a-z]+) {2,}/.exec(line)?.[1] ?? []));
     assert.deepEqual(named, [...FIRST_USE_ORDER]);
     assert.equal(shown.includes("codaryn run ("), false, shown);
-    assert.ok(shown.includes("처음이라면 이 순서로: codaryn init → codaryn doctor"), shown);
+    assert.ok(shown.includes("처음이라면 이 순서로: codaryn init -> codaryn doctor"), shown);
   });
 
   test("not at a terminal, and each command's own help: exactly as before", () => {

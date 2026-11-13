@@ -63,6 +63,8 @@ function revertList(t: Texts, view: RevertView): HTMLElement[] {
   }
   if (view.moveSafetyUnchecked) out.push(el("p", t.format("runs.moveSafety"), { class: "notice" }));
   if (view.revertedBefore !== null) out.push(el("p", t.format("runs.revertedBefore", { time: localDateTime(view.revertedBefore.at) }), { class: "notice" }));
+  // U-271 (U-229): the lock left after the revert, said as a run's is (U-240: no retry is promised).
+  if (view.lockLeft === true) out.push(el("p", t.format("runs.revertLockLeft"), { role: "alert", class: "error", id: "revert-lock-left" }));
   return out;
 }
 

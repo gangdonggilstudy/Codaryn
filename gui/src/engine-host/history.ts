@@ -116,5 +116,7 @@ export function revertValue(outcome: unknown, shown: Shown): Obj | HostFailure {
     revertedBefore: isObj(before) && typeof before["at"] === "string" ? { at: before["at"], status: before["status"] === "partial" ? "partial" : "complete" } : null,
     // U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checked every file.
     ...(output["recordsChanged"] === true ? { recordsChanged: true } : {}),
+    // U-271 (U-229, R-106 L-1): the revert's workspace lock could not be released at its end (RevertCallOutcome.lockLeft).
+    ...(isObj(outcome) && outcome["lockLeft"] === true ? { lockLeft: true } : {}),
   };
 }

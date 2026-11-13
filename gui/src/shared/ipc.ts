@@ -1685,6 +1685,8 @@ export interface RevertView {
   readonly revertedBefore: { readonly at: string; readonly status: "complete" | "partial" } | null;
   /** U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checks every file. Absent: none. */
   readonly recordsChanged?: true;
+  /** U-271 (U-229): the revert could not release the workspace lock at its end. Absent: released. */
+  readonly lockLeft?: true;
 }
 
 /**
@@ -1723,7 +1725,12 @@ export function toRevertView(value: unknown): { readonly ok: true; readonly view
   }
   const recordsChanged = value["recordsChanged"] ?? false;
   if (typeof recordsChanged !== "boolean") return fail;
-  return { ok: true, view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before, ...(recordsChanged ? { recordsChanged: true as const } : {}) } };
+  const lockLeft = value["lockLeft"];
+  if (lockLeft !== undefined && lockLeft !== true) return fail;
+  return {
+    ok: true,
+    view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before, ...(recordsChanged ? { recordsChanged: true as const } : {}), ...(lockLeft === true ? { lockLeft } : {}) },
+  };
 }
 
 /** The engine host's answer to `selectModel`, checked. */

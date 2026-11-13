@@ -621,6 +621,7 @@ export const KO = {
   "runs.phase.running": "진행 중",
   "runs.phase.no_result": "결과 없이 중단됨",
   "runs.phase.unknown": "결과 없음(진행 중이거나 중단됨)",
+  "runs.revertLockLeft": "되돌린 뒤 작업 공간 잠금을 풀지 못했습니다. Codaryn을 모두 닫으면 다음 실행이 정리합니다. 그 전에 실행이 거부되면 점검 화면에서 확인하세요.",
   "runs.planCarried.applied": "계획 수행됨(실행 {runId})",
   "runs.planCarried.unfinished": "계획 수행됨(실행 {runId}, 끝남: {reason})",
   "runs.planCarried.applying": "계획 수행 중이거나 그 실행이 멈춤(실행 {runId}, 결과 없음)",

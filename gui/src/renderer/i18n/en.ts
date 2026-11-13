@@ -619,6 +619,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "runs.phase.running": "running",
   "runs.phase.no_result": "stopped without a result",
   "runs.phase.unknown": "no result (running or stopped)",
+  "runs.revertLockLeft": "After the revert the workspace lock could not be released. The next run clears it once Codaryn has closed; if a run is refused before then, look at the Checks screen.",
   "runs.planCarried.applied": "plan carried out by run {runId}",
   "runs.planCarried.unfinished": "plan carried out by run {runId}, which ended as {reason}",
   "runs.planCarried.applying": "plan being carried out by run {runId}, or that run stopped (no result yet)",

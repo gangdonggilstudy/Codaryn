@@ -124,6 +124,7 @@ import { countPrivacyTokens } from "../contracts/index.js";
 import { REPAIR_FIXED_TEXTS, buildRepairFeedback, failureSignature, prepareEvidence } from "./feedback.js";
 import type { FailedForFeedback } from "./feedback.js";
 import { FINAL_MESSAGE_KEY_MARKER, finalMessageOf } from "./final-message.js";
+import { judgePlannedFile } from "./planned-file.js";
 import { RunState } from "./state.js";
 import {
   ARGS_RULES,
@@ -139,6 +140,7 @@ import type { ArgsProblem } from "./validate-args.js";
 export { RunState, InvalidTransitionError, canTransition } from "./state.js";
 export { APPLY_FIXED_TEXTS, applyPlan } from "./apply.js";
 export { preflightPlan } from "./preflight.js";
+export { judgePlannedFile } from "./planned-file.js";
 export { validateToolArgs, validateWorkflowToolArgs } from "./validate-args.js";
 export {
   EVIDENCE_CAPTURE_NOTE,
@@ -1642,9 +1644,8 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
       const stop = interrupted();
       if (stop !== null) return stop;
       if (plannedFileStale(file, now)) return staleWith(`${APPROVED_STALE_LEAD}${index}${APPROVED_STALE_END}`);
-      const fileCall = { id: "approved-plan", name: PLANNED_FILE_DESCRIPTOR.name, args: { path: file.path } };
-      const requested = policy.checkRequested(fileCall, PLANNED_FILE_DESCRIPTOR);
-      const decision = requested.allowed ? await policy.checkEffective(fileCall, PLANNED_FILE_DESCRIPTOR) : requested;
+      // U-219: the one judgement the app layer's check before the approval shares (judgePlannedFile).
+      const decision = await judgePlannedFile(policy, file.path);
       if (!decision.allowed) return staleWith(`${APPROVED_DENIED_LEAD}${index}: ${decision.permission}/${decision.code}${APPROVED_DENIED_END}`);
     }
     const stop = interrupted();

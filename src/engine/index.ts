@@ -203,6 +203,9 @@ const APPROVED_DENIED_LEAD = "the approved plan is not allowed by the policy now
 const APPROVED_DENIED_END = "; nothing was written";
 const APPROVED_CLAIMED_NOTICE = "the approved plan was already carried out by another run; nothing was written";
 const APPROVED_CLAIM_FAILED_NOTICE = "the approved plan could not be claimed for this run; nothing was written";
+/** U-187 (U-181's handoff): ApprovedChangesPlan.planRecordsUnchecked, in the apply run's words. */
+const APPROVED_RECORDS_UNCHECKED_NOTICE =
+  "a run since the plan was made could not check the state directory entirely, so the plan run's records may have changed without a mark (plan_records_unchecked)";
 /** GT-E4: notice of a run that waits for a person's review. */
 const REVIEW_NOTICE = "awaiting human review: the configured checks are done; a person records the verdict";
 const NO_VERIFIER_NOTICE = "no automatic verification: no verifier is configured for this task";
@@ -248,6 +251,7 @@ export const FIXED_MODEL_TEXTS: readonly string[] = [
   APPROVED_DENIED_END,
   APPROVED_CLAIMED_NOTICE,
   APPROVED_CLAIM_FAILED_NOTICE,
+  APPROVED_RECORDS_UNCHECKED_NOTICE,
   PLAN_ACTION_LEAD,
   PLANNED_FILE_LEAD,
   REVIEW_NOTICE,
@@ -1652,6 +1656,20 @@ async function runWith(deps: EngineDeps, approved: ApprovedChangesPlan | null): 
       return staleWith(APPROVED_CLAIM_FAILED_NOTICE);
     }
     if (claimed !== "marked") return staleWith(APPROVED_CLAIMED_NOTICE);
+    // U-181's handoff: as an apply run, whether a run since the plan could not check the records;
+    // told once, the run goes on. A question that cannot be answered counts as unchecked.
+    if (plan.planRecordsUnchecked !== undefined) {
+      let unchecked: boolean;
+      try {
+        unchecked = (await plan.planRecordsUnchecked()) === true;
+      } catch {
+        unchecked = true;
+      }
+      if (unchecked) {
+        const masked = mask(APPROVED_RECORDS_UNCHECKED_NOTICE);
+        if (masked !== null) notices.push(masked);
+      }
+    }
     return null;
   };
 

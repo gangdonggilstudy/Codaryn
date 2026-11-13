@@ -10,7 +10,16 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { PLANNED_FILE_DESCRIPTOR, PLAN_ACTION_DESCRIPTORS, approvedPlanWritablePathSets } from "../../../src/contracts/index.js";
-import type { ApprovedChangesPlan, ApprovedPlanRunDeps, ContentHash, EngineDeps, StoredChangesPlan, WritablePathSet } from "../../../src/contracts/index.js";
+import type {
+  ApprovedChangesPlan,
+  ApprovedPlanRunDeps,
+  ContentHash,
+  EngineDeps,
+  RunRecorders,
+  RunRecordersOptions,
+  StoredChangesPlan,
+  WritablePathSet,
+} from "../../../src/contracts/index.js";
 
 const HASH = "d".repeat(64) as ContentHash;
 const PLAN: StoredChangesPlan = {
@@ -55,6 +64,19 @@ describe("U-187: the deps of runApprovedPlan", () => {
     // @ts-expect-error the engine makes the gate itself (policyFor), so no gate is given
     const withGate: Pick<ApprovedPlanRunDeps, "policy"> = { policy: {} as EngineDeps["policy"] };
     assert.ok(withGate);
+  });
+});
+
+describe("U-187 (U-181's handoff): the recorders of a run that carries out a plan", () => {
+  test("RunRecordersOptions.planRunId and RunRecorders.markApplied are optional; the claim feeds ApprovedChangesPlan", async () => {
+    const plain: Pick<RunRecordersOptions, "planRunId"> = {};
+    const carrying: Pick<RunRecordersOptions, "planRunId"> = { planRunId: PLAN.runId };
+    assert.deepEqual([plain.planRunId, carrying.planRunId], [undefined, PLAN.runId]);
+    const recorders: Pick<RunRecorders, "markApplied"> = { markApplied: async () => "marked" };
+    const without: Pick<RunRecorders, "markApplied"> = {};
+    assert.equal(without.markApplied, undefined);
+    const claim: ApprovedChangesPlan["markApplied"] | undefined = recorders.markApplied;
+    assert.equal(await claim?.(), "marked");
   });
 });
 

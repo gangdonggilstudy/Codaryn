@@ -321,8 +321,10 @@ export interface PlanRecorder {
    * `files` as given), with savePlan's rules: created exclusively, resolved with the SHA-256 of the
    * bytes written, rejected when the file exists or cannot be written, no hard links needed. The
    * `propose_changes` tool builds every `shown` and the summary's visible parts with the run's own
-   * gateway, the summary made safe with safeModelText first (V-7 M-1). Optional until the store has it (B-3): a recorder without it stores no `run` plan, and
-   * the tool then fails with `io_error`, as without a recorder.
+   * gateway, the summary made safe with safeModelText first (V-7 M-1). U-181 (store): the store's
+   * recorders have it. It stays optional in the contract for other recorders (test doubles): a
+   * recorder without it stores no `run` plan, and the tool then fails with `io_error`, as without
+   * a recorder.
    */
   saveChangesPlan?(plan: { readonly summary: MaskedParts; readonly files: readonly StoredPlannedFile[] }): Promise<ContentHash>;
 }
@@ -375,7 +377,9 @@ export type LoadPlan = (request: LoadPlanRequest) => Promise<LoadPlanOutcome>;
  * the same codes and checks, and a `kind: "changes"` plan.json is read with its own exact keys
  * (StoredChangesPlan; each file's path passes the same lexical rules as an action's, DR-24 (d)).
  * LoadPlan keeps answering `invalid_run_record` for a `run` plan, so `plan` and `apply`, which use
- * it, are as before until they choose by kind (B-4). Not exported by the store yet (B-3).
+ * it, are as before until they choose by kind (B-4). U-181: exported by the store (`loadAnyPlan`),
+ * which also refuses a plan whose kind is not the one the plan run's result names
+ * (EngineResult.plan.kind "changes" for a `run` plan).
  */
 export type LoadAnyPlan = (request: LoadPlanRequest) => Promise<LoadPlanOutcome<AnyStoredPlan>>;
 
@@ -481,10 +485,11 @@ export type StoredPlannedFile = ResolvedPlannedFile & { readonly shown: MaskedPa
  * the user's settings and the task at that time). `summary` is the summary as the plan run made it
  * safe (safeModelText, review V-7 M-1: control and invisible characters left out, registered values
  * masked, key shapes hidden as HIDDEN_KEY_MARKER), as visible parts (MaskedParts: no privacy token,
- * no secret value, no key shape); the later run masks it again before sending it (B-3). R-99 L-1: the summary under the digest differs from the proposal's
- * B-2 (paths and hashes only); the PM accepted it as the safer side. Not written or read yet:
- * LoadPlan takes `kind: "plan"` only and answers `invalid_run_record` for this kind; LoadAnyPlan
- * (B-3) reads both.
+ * no secret value, no key shape); the later run masks it again before sending it (B-3). R-99 L-1:
+ * the summary under the digest differs from the proposal's B-2 (paths and hashes only); the PM
+ * accepted it as the safer side. U-181: the store writes it (PlanRecorder.saveChangesPlan) and
+ * reads it with LoadAnyPlan; LoadPlan still takes `kind: "plan"` only and answers
+ * `invalid_run_record` for this kind.
  */
 export interface StoredChangesPlan {
   readonly schemaVersion: 1;
@@ -551,8 +556,19 @@ export interface ApprovedChangesPlan {
   readonly approval: ApprovalChannel;
   readonly plan: StoredChangesPlan;
   readonly fileNow: PlannedFileProbe;
-  /** As ApplyDeps.markApplied: writes PLAN_APPLIED_FILE_NAME exclusively; "already_applied" when it exists. */
+  /**
+   * As ApplyDeps.markApplied: writes PLAN_APPLIED_FILE_NAME exclusively; "already_applied" when it
+   * exists. U-181: RunRecorders.markApplied of this run's recorders (made with
+   * RunRecordersOptions.planRunId), whose state guard knows that write.
+   */
   markApplied(): Promise<"marked" | "already_applied">;
+  /**
+   * U-187 (U-181's handoff), as ApplyDeps.planRecordsUnchecked: whether a run since the plan could
+   * not check the state directory (the store's StateUncheckedSince for `planRunId`, with this run as
+   * the apply run). True, or a question that cannot be answered, adds a notice once; the run goes
+   * on. Asked once, after the claim. Absent: not asked.
+   */
+  readonly planRecordsUnchecked?: () => Promise<boolean>;
 }
 
 /**

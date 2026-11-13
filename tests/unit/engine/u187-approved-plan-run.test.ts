@@ -159,6 +159,47 @@ describe("U-187: an approved plan that no longer fits ends before the first mode
   });
 });
 
+describe("U-187 (U-181's handoff): planRecordsUnchecked, asked once after the claim", () => {
+  const NOTICE = "could not check the state directory entirely";
+  const cases: [string, ApprovedChangesPlan["planRecordsUnchecked"], boolean][] = [
+    ["true: told once", async () => true, true],
+    ["a question that cannot be answered: told", async () => Promise.reject(new Error("unreadable")), true],
+    ["false: nothing told", async () => false, false],
+    ["not given: nothing told", undefined, false],
+  ];
+  for (const [name, question, told] of cases) {
+    test(name, async () => {
+      const run = harness({ steps: [() => finalAnswer()], task: TASK, tools: new FakeTools() });
+      const { approved, claims } = approvedPlan();
+      let asked = 0;
+      let claimsWhenAsked = -1;
+      const given: ApprovedChangesPlan =
+        question === undefined
+          ? approved
+          : {
+              ...approved,
+              planRecordsUnchecked: () => {
+                asked += 1;
+                claimsWhenAsked = claims();
+                return question();
+              },
+            };
+      const { result } = await carryOut(run, given);
+      assert.equal(result.notices.filter((one) => one.includes(NOTICE)).length, told ? 1 : 0);
+      if (question !== undefined) assert.deepEqual([asked, claimsWhenAsked], [1, 1], "once, after the claim");
+      assert.equal(run.model.requests.length, 1, "the run goes on");
+    });
+  }
+
+  test("not asked when the plan no longer fits", async () => {
+    const run = harness({ steps: [() => finalAnswer()], task: TASK, tools: new FakeTools() });
+    const { approved } = approvedPlan({ markApplied: async () => "already_applied" });
+    let asked = 0;
+    await carryOut(run, { ...approved, planRecordsUnchecked: async () => ((asked += 1), true) });
+    assert.equal(asked, 0);
+  });
+});
+
 describe("U-187: runTask is as before", () => {
   test("a plan run of mode run without an approved plan still offers its plan tool and names no plan run", async () => {
     const run = harness({ steps: [() => finalAnswer()], task: TASK, tools: new FakeTools() });

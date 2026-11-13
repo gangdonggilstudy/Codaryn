@@ -239,7 +239,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revert,revertConsent,review,saveReport,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -279,6 +279,13 @@ const expected = [
   ["checksShown", (v) => typeof v === "number" && v >= 5],
   ["url", (v) => v === "app://codaryn/index.html"],
   ["renderer", (v) => v.process === "undefined" && v.require === "undefined" && v.ipcRenderer === "undefined" && v.module === "undefined" && v.api === API],
+  // U-103 (G-list, 3.3): the masked name has no id; plain paths copied by id, top and nested; other ids, a path string and another workspace refused.
+  [
+    "treeCopyPath",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({ masked: [null], top: "copied", nested: "copied", unknown: "unknown_entry", pathString: "invalid_args", otherWorkspace: "unknown_workspace", button: "ok", texts: ["a.txt", "sub/b.txt", "a.txt"] }),
+  ],
   ["treePathString", (v) => v.ok === false && v.code === "invalid_args"],
   ["treeUnknownNode", (v) => v.ok === false && v.code === "unknown_entry"],
   ["revealUnknown", (v) => v === false],
@@ -389,7 +396,7 @@ const expected = [
     "copyRefused",
     (v) =>
       JSON.stringify(v) ===
-      JSON.stringify({ keyShape: "invalid_args", keyValue: "invalid_args", path: "invalid_args", words: "invalid_args", digestUpper: "invalid_args", lineBreak: "invalid_args", noPathCopy: "undefined", written: 0 }),
+      JSON.stringify({ keyShape: "invalid_args", keyValue: "invalid_args", path: "invalid_args", words: "invalid_args", digestUpper: "invalid_args", lineBreak: "invalid_args", written: 0 }),
   ],
   ["copyDigest", (v) => v !== null && v.status === "ok" && typeof v.copied === "string" && /^[0-9a-f]{12}$/.test(v.copied) && v.summary.includes(v.copied)],
   // U-61 (3.12): a result that changed files offers the revert preview; it opens on the run list.

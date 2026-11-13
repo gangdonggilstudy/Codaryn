@@ -45,6 +45,7 @@ export const KO = {
   "tree.reveal": "탐색기에서 보기",
   "copy.runId": "실행 id 복사",
   "copy.digest": "다이제스트 복사(앞 12자)",
+  "copy.path": "상대 경로 복사",
   "copy.done": "복사했습니다.",
   "copy.failed": "복사하지 않았습니다({code}).",
   "tree.readOnly": "읽기 전용 보기입니다. 파일을 열거나 바꾸지 않습니다.",

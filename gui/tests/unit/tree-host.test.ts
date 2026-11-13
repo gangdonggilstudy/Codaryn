@@ -1,7 +1,10 @@
 /**
- * GU-2: the engine host's directory listing for the file tree (src/engine-host/tree.ts) with the
- * real engine's workspace rules and text safety helpers (the root build, dist/src), on real
- * folders. Names with the shape of a key are fake values built at run time.
+ * GU-2, U-103 (G-list): the engine host's file tree is the app layer's `listWorkspaceDir` (U-89,
+ * adapter-contract 5.12). Its value is checked field by field (tree.ts); a masked entry has no real
+ * name. With the real app layer (the root build, dist/src) on real folders: key shapes and the
+ * values the settings register (`secretEnv`, R-73 M1) are masked, a junction is a link and is not
+ * followed, the state directory is apart, and the protected paths mark entries. Names with the
+ * shape of a key and registered values are fake values built at run time.
  */
 
 import assert from "node:assert/strict";
@@ -13,144 +16,147 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createHostHandler } from "../../src/engine-host/host.js";
-import { MAX_TREE_ENTRIES, TREE_PAGE_SIZE, createTreeLister, isTreeDir } from "../../src/engine-host/tree.js";
-import type { TreeEngine, TreeResult } from "../../src/engine-host/tree.js";
+import { taskForm } from "../../src/engine-host/runs.js";
+import { TREE_PAGE_SIZE, createTreeLister, treeValue } from "../../src/engine-host/tree.js";
+import type { TreeApp, TreeResult } from "../../src/engine-host/tree.js";
 import { fakeApp } from "./fake-app.js";
 import { parseHostMessage } from "../../src/shared/protocol.js";
 
 const GUI = fileURLToPath(new URL("../../../", import.meta.url));
 const ENGINE_DIR = path.join(GUI, "..", "dist", "src");
-const ENGINE_BUILT = existsSync(path.join(ENGINE_DIR, "workspace", "index.js")) && existsSync(path.join(ENGINE_DIR, "cli", "text-safety.js"));
+const ENGINE_BUILT = existsSync(path.join(ENGINE_DIR, "app", "index.js"));
 const KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
+const REGISTERED = "fake-registered-VALUE-u103";
+const listed = (entries: unknown[], extra: Record<string, unknown> = {}) => ({
+  ok: true,
+  output: { kind: "workspace_dir", status: "listed", masking: "current_secrets", entries, total: entries.length, offset: 0, nextOffset: null, ...extra },
+});
+const plain = (name: string, kind = "file", marked = false) => ({ name, shown: name, kind, masked: false, protected: marked });
 
-async function engine(currentKey: string | null = null): Promise<TreeEngine> {
-  const workspace = (await import(pathToFileURL(path.join(ENGINE_DIR, "workspace", "index.js")).href)) as Pick<TreeEngine, "createWorkspace">;
-  const safety = (await import(pathToFileURL(path.join(ENGINE_DIR, "cli", "text-safety.js")).href)) as Pick<TreeEngine, "cleanText" | "hideKeys">;
-  return {
-    createWorkspace: (options) => workspace.createWorkspace(options),
-    cleanText: (text) => safety.cleanText(text),
-    hideKeys: (text, key) => safety.hideKeys(text, key),
-    currentKey: () => currentKey,
-    platform: process.platform,
+test("U-103: the tree value takes the app layer's listing field by field; a masked entry has no name", () => {
+  assert.deepEqual(treeValue(listed([plain("sub", "dir", true), { name: null, shown: "[key].txt", kind: "file", masked: true, protected: false }])), {
+    ok: true,
+    entries: [
+      { name: "sub", shown: "sub", kind: "dir", masked: false, protected: true },
+      { name: null, shown: "[key].txt", kind: "file", masked: true, protected: false },
+    ],
+    total: 2,
+    offset: 0,
+    nextOffset: null,
+  });
+  for (const status of ["not_found", "not_dir", "too_large", "refused", "unreadable"]) {
+    assert.deepEqual(treeValue({ ok: true, output: { kind: "workspace_dir", status } }), { ok: false, code: status });
+  }
+  assert.deepEqual(treeValue({ ok: false, error: { code: "invalid_config", message: "x" } }), { ok: false, code: "invalid_config" });
+  assert.deepEqual(treeValue({ ok: false, error: { code: "Not A Code" } }), { ok: false, code: "host_error" });
+  const bad: unknown[] = [
+    null,
+    { ok: true, output: { kind: "other", status: "listed" } },
+    listed([plain("a")], { masking: "none" }),
+    listed([{ ...plain("a"), masked: true }]),
+    listed([{ name: "real", shown: "[key]", kind: "file", masked: true, protected: false }]),
+    listed([{ name: "real", shown: "shown", kind: "file", masked: false, protected: false }]),
+    listed([{ name: null, shown: "x", kind: "file", masked: false, protected: false }]),
+    listed([{ ...plain("a"), kind: "socket" }]),
+    listed([{ ...plain("a"), protected: "yes" }]),
+    listed([plain("a")], { total: -1 }),
+    listed(Array.from({ length: TREE_PAGE_SIZE + 1 }, (_v, i) => plain(`f${i}`))),
+  ];
+  for (const value of bad) assert.deepEqual(treeValue(value), { ok: false, code: "host_error" }, JSON.stringify(value).slice(0, 120));
+});
+
+test("U-103: the lister asks the app layer with the open workspace and the config file's defaults; a throw is host_error", async () => {
+  const asked: unknown[] = [];
+  const app: TreeApp = {
+    async listWorkspaceDir(request) {
+      asked.push(request);
+      return listed([plain("a.txt")]);
+    },
   };
+  const list = createTreeLister(app, (workspace) => taskForm(workspace, null, null));
+  const result = await list({ workspace: "C:\\ws", dir: "sub", offset: 500 });
+  assert.equal(result.ok, true);
+  assert.deepEqual(asked, [{ settings: { input: { kind: "workspace", workspace: "C:\\ws" }, configPath: null, varsFile: null, profile: null, workflowRef: null }, dir: "sub", offset: 500 }]);
+  const throwing = createTreeLister({ listWorkspaceDir: async () => Promise.reject(new Error("boom")) }, (workspace) => taskForm(workspace, null, null));
+  assert.deepEqual(await throwing({ workspace: "C:\\ws", dir: "", offset: 0 }), { ok: false, code: "host_error" });
+});
+
+interface AppModule {
+  createNodeAppEnvironment(): Promise<unknown>;
+  createCodarynApp(environment: unknown): TreeApp;
 }
 
-async function fixture(): Promise<{ root: string; cleanup: () => Promise<void> }> {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), "codaryn-gui-tree-"));
-  const root = path.join(base, "ws");
-  await fs.mkdir(path.join(root, "sub", "deeper"), { recursive: true });
-  await fs.mkdir(path.join(root, ".codaryn", "runs"), { recursive: true });
-  await fs.writeFile(path.join(root, "a.txt"), "a");
-  await fs.writeFile(path.join(root, "B.txt"), "b");
-  await fs.writeFile(path.join(root, "file10.txt"), "10");
-  await fs.writeFile(path.join(root, "file9.txt"), "9");
-  await fs.writeFile(path.join(root, "sub", "c.txt"), "c");
-  await fs.writeFile(path.join(root, `${KEY_SHAPED}.txt`), "fake");
-  await fs.mkdir(path.join(base, "outside"));
-  return { root, cleanup: () => fs.rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) };
+/** The real app layer with `env` set for its environment until `restore`. */
+async function realLister(env: Record<string, string>): Promise<{ list: (dir: string, workspace: string) => Promise<TreeResult>; restore: () => void }> {
+  const module = (await import(pathToFileURL(path.join(ENGINE_DIR, "app", "index.js")).href)) as AppModule;
+  const before = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, env);
+  const restore = (): void => {
+    for (const [name, value] of before) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+  const app = module.createCodarynApp(await module.createNodeAppEnvironment());
+  const lister = createTreeLister(app, (workspace) => taskForm(workspace, null, null));
+  return { list: (dir, workspace) => lister({ workspace, dir, offset: 0 }), restore };
 }
 
-const names = (result: TreeResult): string[] => (result.ok ? result.entries.map((entry) => `${entry.kind}:${entry.shown}`) : [result.code]);
-
-test("tree: relative directories are plain segments only", () => {
-  for (const ok of ["", "a", "a/b", "a b/c"]) assert.equal(isTreeDir(ok), true, ok);
-  for (const bad of ["/a", "a//b", "a/", "..", "a/../b", ".", "a\\b", "C:", "a\u0001b", Array.from({ length: 65 }, () => "x").join("/")]) {
-    assert.equal(isTreeDir(bad), false, bad);
-  }
-});
-
-test("tree: the top level lists folders first in a natural order, the state directory apart, a key-shaped name hidden", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
-  const { root, cleanup } = await fixture();
+test("U-103: with the real app layer, key shapes and registered values are masked without a name, links are not followed, protected paths mark", { skip: !ENGINE_BUILT && "the engine is not built" }, async (t) => {
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "codaryn-gui-u103-")));
+  let restoreEnv = (): void => undefined;
   try {
-    const list = createTreeLister(await engine());
-    const top = await list({ workspace: root, dir: "", offset: 0 });
-    assert.deepEqual(names(top), ["state:.codaryn", "dir:sub", "file:a.txt", "file:B.txt", "file:file9.txt", "file:file10.txt", "file:[key].txt"]);
-    assert.ok(top.ok);
-    if (!top.ok) return;
-    const masked = top.entries.find((entry) => entry.masked);
-    assert.equal(masked?.name, `${KEY_SHAPED}.txt`, "the real name stays for the main process");
-    assert.equal(top.entries.filter((entry) => entry.masked).length, 1);
-    assert.deepEqual(names(await list({ workspace: root, dir: "sub", offset: 0 })), ["dir:deeper", "file:c.txt"]);
-    assert.deepEqual(names(await list({ workspace: root, dir: "sub/deeper", offset: 0 })), []);
-  } finally {
-    await cleanup();
-  }
-});
-
-test("tree: the state directory, places outside and missing folders are refused", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
-  const { root, cleanup } = await fixture();
-  try {
-    const list = createTreeLister(await engine());
-    assert.deepEqual(names(await list({ workspace: root, dir: ".codaryn", offset: 0 })), ["state_dir"]);
-    assert.deepEqual(names(await list({ workspace: root, dir: ".codaryn/runs", offset: 0 })), ["state_dir"]);
-    assert.deepEqual(names(await list({ workspace: root, dir: "../outside", offset: 0 })), ["invalid_path"]);
-    assert.deepEqual(names(await list({ workspace: root, dir: "a.txt", offset: 0 })), ["not_dir"]);
-    const missing = names(await list({ workspace: root, dir: "nothing", offset: 0 }));
-    assert.ok(missing[0] === "not_found" || missing[0] === "invalid_path", String(missing[0]));
-  } finally {
-    await cleanup();
-  }
-});
-
-test("tree: a junction is listed as a link and is not followed, also when it points outside", { skip: !ENGINE_BUILT && "the engine is not built" }, async (t) => {
-  const { root, cleanup } = await fixture();
-  try {
+    const root = path.join(base, "ws");
+    await fs.mkdir(path.join(root, "sub", "deeper"), { recursive: true });
+    await fs.mkdir(path.join(root, ".codaryn", "runs"), { recursive: true });
+    await fs.mkdir(path.join(base, "outside"));
+    await fs.writeFile(path.join(root, "a.txt"), "a");
+    await fs.writeFile(path.join(root, `${KEY_SHAPED}.txt`), "k");
+    await fs.writeFile(path.join(root, `note-${REGISTERED}.txt`), "r");
+    await fs.writeFile(path.join(root, "sub", "b.txt"), "b");
+    let junction = true;
     try {
-      await fs.symlink(path.join(root, "..", "outside"), path.join(root, "out-link"), "junction");
-      await fs.symlink(path.join(root, "sub"), path.join(root, "in-link"), "junction");
+      await fs.symlink(path.join(base, "outside"), path.join(root, "jump"), "junction");
     } catch {
-      t.skip("links cannot be made here");
+      junction = false;
+    }
+    const config = path.join(base, "config.json");
+    await fs.writeFile(
+      config,
+      JSON.stringify({ schemaVersion: 1, secretEnv: ["CODARYN_U103_SECRET"], policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, protectedPaths: ["sub"] } }),
+    );
+    const real = await realLister({ CODARYN_CONFIG: config, CODARYN_U103_SECRET: REGISTERED, APPDATA: path.join(base, "appdata"), XDG_CONFIG_HOME: path.join(base, "xdg") });
+    restoreEnv = real.restore;
+    const list = real.list;
+    const top = await list("", root);
+    assert.ok(top.ok, JSON.stringify(top));
+    if (!top.ok) return;
+    const text = JSON.stringify(top);
+    assert.equal(text.includes(KEY_SHAPED), false, "no key shape");
+    assert.equal(text.includes(REGISTERED), false, "R-73 M1: a value the settings register is masked too");
+    const masked = top.entries.filter((entry) => entry.masked);
+    assert.equal(masked.length, 2);
+    assert.ok(masked.every((entry) => entry.name === null), "a masked entry has no real name");
+    const byName = (name: string) => top.entries.find((entry) => entry.name === name);
+    assert.deepEqual(byName(".codaryn")?.kind, "state");
+    assert.deepEqual(byName("sub"), { name: "sub", shown: "sub", kind: "dir", masked: false, protected: true });
+    assert.equal(byName("a.txt")?.protected, false);
+    const firstOther = top.entries.findIndex((entry) => entry.kind !== "dir" && entry.kind !== "state");
+    assert.ok(firstOther > 0 && top.entries.slice(firstOther).every((entry) => entry.kind !== "dir" && entry.kind !== "state"), "folders first");
+    assert.deepEqual(await list(".codaryn", root), { ok: false, code: "refused" });
+    assert.deepEqual(await list("missing", root), { ok: false, code: "not_found" });
+    assert.deepEqual(await list("a.txt", root), { ok: false, code: "not_dir" });
+    const sub = await list("sub", root);
+    assert.ok(sub.ok && sub.entries.some((entry) => entry.name === "b.txt" && entry.protected), "below a protected folder, protected too");
+    if (!junction) {
+      t.diagnostic("junctions cannot be made here; the link case is skipped");
       return;
     }
-    const list = createTreeLister(await engine());
-    const top = names(await list({ workspace: root, dir: "", offset: 0 }));
-    assert.ok(top.includes("link:out-link") && top.includes("link:in-link"), top.join(","));
-    assert.deepEqual(names(await list({ workspace: root, dir: "out-link", offset: 0 })), ["outside_root"], "asking for it directly resolves outside");
+    assert.equal(byName("jump")?.kind, "link");
+    assert.deepEqual(await list("jump", root), { ok: false, code: "refused" }, "a link is never followed");
   } finally {
-    await cleanup();
-  }
-});
-
-test("tree: the current key and control characters in names are hidden", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
-  const { root, cleanup } = await fixture();
-  try {
-    const currentKey = `fake-current-key-${"x".repeat(24)}`;
-    await fs.writeFile(path.join(root, `${currentKey}.md`), "k");
-    const list = createTreeLister(await engine(currentKey));
-    const top = await list({ workspace: root, dir: "", offset: 0 });
-    assert.ok(top.ok);
-    assert.doesNotMatch(JSON.stringify(top.ok ? top.entries.map((entry) => entry.shown) : []), /fake-current-key|FAKEFAKE/);
-    // NTFS cannot hold control characters in names, so the rule is checked with a cleanText that
-    // treats "z" as one: a name it would change is not shown at all and is masked.
-    await fs.writeFile(path.join(root, "zebra.txt"), "z");
-    const strict = createTreeLister({ ...(await engine()), cleanText: (text) => text.replace(/z/g, "?") });
-    const listed = await strict({ workspace: root, dir: "", offset: 0 });
-    assert.ok(listed.ok);
-    const zebra = listed.ok ? listed.entries.find((entry) => entry.name === "zebra.txt") : undefined;
-    assert.deepEqual(zebra && { shown: zebra.shown, masked: zebra.masked }, { shown: "", masked: true });
-  } finally {
-    await cleanup();
-  }
-});
-
-test("tree: large folders come in pages of TREE_PAGE_SIZE", { skip: !ENGINE_BUILT && "the engine is not built" }, async () => {
-  const { root, cleanup } = await fixture();
-  try {
-    const many = path.join(root, "many");
-    await fs.mkdir(many);
-    await Promise.all(Array.from({ length: TREE_PAGE_SIZE + 7 }, (_v, i) => fs.writeFile(path.join(many, `f${i}.txt`), "")));
-    const list = createTreeLister(await engine());
-    const first = await list({ workspace: root, dir: "many", offset: 0 });
-    assert.ok(first.ok);
-    if (!first.ok) return;
-    assert.equal(first.entries.length, TREE_PAGE_SIZE);
-    assert.equal(first.total, TREE_PAGE_SIZE + 7);
-    assert.equal(first.nextOffset, TREE_PAGE_SIZE);
-    const second = await list({ workspace: root, dir: "many", offset: TREE_PAGE_SIZE });
-    assert.ok(second.ok && second.entries.length === 7 && second.nextOffset === null);
-    assert.ok(MAX_TREE_ENTRIES >= 100_000);
-  } finally {
-    await cleanup();
+    restoreEnv();
+    await fs.rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

@@ -8,10 +8,13 @@
 export class FakeElement {
   readonly children: FakeElement[] = [];
   private readonly attributes = new Map<string, string>();
-  private readonly listeners = new Map<string, (() => void)[]>();
+  private readonly listeners = new Map<string, ((event?: unknown) => void)[]>();
   private text = "";
   value = "";
   selected = false;
+  tabIndex = -1;
+  /** U-65: the tree sets a custom property for its indent; nothing reads it here. */
+  readonly style = { setProperty: (): void => undefined };
 
   constructor(readonly tagName: string) {}
 
@@ -53,13 +56,13 @@ export class FakeElement {
     this.append(...nodes);
   }
 
-  addEventListener(type: string, listener: () => void): void {
+  addEventListener(type: string, listener: (event?: unknown) => void): void {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
 
-  /** Runs the listeners of an event other than a click (for example "change"). */
-  dispatch(type: string): void {
-    for (const listener of this.listeners.get(type) ?? []) listener();
+  /** Runs the listeners of an event other than a click (for example "change"); U-65: with the event, if given. */
+  dispatch(type: string, event?: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 
   click(): void {
@@ -81,10 +84,17 @@ export class FakeElement {
     return found;
   }
 
-  /** The first element below this one with that tag name (the only selector the screens use here). */
+  /** The first element below this one that a selector matches: a tag name, `[name]` or `[name="value"]` only. */
   querySelector(selector: string): FakeElement | null {
-    if (!/^[a-z][a-z0-9]*$/.test(selector)) throw new Error(`fake DOM: only a tag name selector, not ${selector}`);
-    return this.findAll((element) => element.tagName === selector)[0] ?? null;
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
+
+  querySelectorAll(selector: string): FakeElement[] {
+    if (/^[a-z][a-z0-9]*$/.test(selector)) return this.findAll((element) => element.tagName === selector);
+    const attribute = /^\[([a-z][a-z0-9-]*)(?:="([^"]*)")?\]$/.exec(selector);
+    if (attribute === null) throw new Error(`fake DOM: a tag name or attribute selector only, not ${selector}`);
+    const [, name, value] = attribute as unknown as [string, string, string | undefined];
+    return this.findAll((element) => (value === undefined ? element.hasAttribute(name) : element.getAttribute(name) === value));
   }
 
   /** Whether `node` is this element or below it. */

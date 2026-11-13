@@ -58,7 +58,7 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { parseCopyArgs, parseStartTaskArgs } from "../shared/ipc.js";
+import { copyablePath, parseCopyArgs, parseStartTaskArgs } from "../shared/ipc.js";
 import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
@@ -250,6 +250,22 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC_CHANNELS.copyText, async (args): Promise<CopyReply> => {
     const text = args.length === 1 ? parseCopyArgs(args[0]) : null;
     if (text === null) return { ok: false, code: "invalid_args" };
+    deps.writeClipboard(text);
+    return { ok: true };
+  });
+
+  /**
+   * U-103 (G-list, 3.3): a tree entry's path relative to the workspace, by its id (the page never names
+   * a path). Only entries the app layer did not mask have an id; the path is checked again (copyablePath).
+   */
+  handle(IPC_CHANNELS.copyPath, async (args): Promise<CopyReply> => {
+    const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
+    if (parsed === null) return { ok: false, code: "invalid_args" };
+    if (workspaces.path(parsed.workspace) === null) return { ok: false, code: "unknown_workspace" };
+    const rel = workspaces.treeIds.resolve(parsed.workspace, parsed.node);
+    if (rel === null) return { ok: false, code: "unknown_entry" };
+    const text = copyablePath(rel);
+    if (text === null) return { ok: false, code: "not_copyable" };
     deps.writeClipboard(text);
     return { ok: true };
   });

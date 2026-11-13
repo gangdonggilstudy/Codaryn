@@ -148,7 +148,7 @@ codaryn: Chose the latest run: 20261113T021512Z-b4fd29f4 (started 2026-11-13 11:
 codaryn: Files reverted: 0 (complete)
 Files skipped: 1
   summary.md — already as it was before the run (already_reverted)
-This run was already reverted before, so its files may show as changed since the run. (complete, 2026-11-13 11:15:13)
+Files already as before the run are skipped; it was reverted before (complete, 2026-11-13 11:15:13)
 ```
 
 **다시 체험하기:** 되돌린 뒤 같은 사본에서 `run`부터 다시 하거나 새로 복사한다. 되돌리지 않고 다시 실행하면 `summary.md`가 이미 있어 첫 `write_file`이 `conflict`로 거부되고, 이전 실행이 만든 파일로 검증이 통과해 `changes`가 빈 `done`이 된다. **검증 통과는 이번 실행이 파일을 바꿨다는 뜻이 아니다.** 끝 요약의 `Files changed`와 `changes`를 함께 본다.

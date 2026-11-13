@@ -87,7 +87,7 @@ describe("U-129 with the real catalog", () => {
     const catalog = createMessageCatalog("en");
     assert.deepEqual([rowsOf(catalog, apply(7))[0]?.[2], rowsOf(catalog, apply(1))[0]?.[2]], ["7 actions", "1 action"]);
   });
-  test("ko: '동작 7' and '동작 1' (PM)", { skip }, () => {
+  test("ko: '동작 7개' and '동작 1개' (PM, U-145)", { skip }, () => {
     const catalog = createMessageCatalog("ko");
     assert.deepEqual([rowsOf(catalog, apply(7))[0]?.[2], rowsOf(catalog, apply(1))[0]?.[2]], ["동작 7개", "동작 1개"]);
   });

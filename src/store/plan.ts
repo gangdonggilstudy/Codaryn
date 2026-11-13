@@ -7,6 +7,11 @@
  * - `<root>/.codaryn/runs/<plan runId>/applied.json` (PlanAppliedRecord): created exclusively by
  *   `markPlanApplied`, so a plan is applied at most once.
  * - `loadPlan` reads both for `plan` and `apply`; it changes nothing.
+ * - U-181 (DR-69 B-1, B-3, B-7): plan.json of a `run` plan (StoredChangesPlan, `kind: "changes"`),
+ *   written once by the same recorder's `saveChangesPlan` under the same digest rule (the summary is
+ *   in the bytes, so the digest covers it); `loadAnyPlan` reads either kind, told apart by `kind`, and
+ *   `loadPlan` still refuses a `run` plan. The run that carries such a plan out claims it with the
+ *   same applied.json, once.
  *
  * plan.json is raw local text like the snapshots (R-8): paths as the workspace resolved them. It is
  * never sent to a model and is shown only masked again. Run directories that are links are not
@@ -20,6 +25,8 @@ import {
   CONTENT_HASH_PATTERN_SOURCE,
   JOURNAL_FILE_NAME,
   MAX_PLAN_ACTIONS,
+  MAX_PLAN_SUMMARY_CHARS,
+  MAX_PLANNED_FILES,
   MAX_REPORT_FILE_BYTES,
   PLAN_APPLIED_FILE_NAME,
   PLAN_FILE_NAME,
@@ -29,14 +36,18 @@ import {
   toRunId,
 } from "../contracts/index.js";
 import type {
+  AnyStoredPlan,
   ContentHash,
   CreatePlanRecorder,
+  LoadAnyPlan,
   LoadPlan,
   LoadPlanOutcome,
   MaskedParts,
   PlanAppliedRecord,
+  StoredChangesPlan,
   StoredPlan,
   StoredPlanAction,
+  StoredPlannedFile,
 } from "../contracts/index.js";
 import {
   assertRunId,
@@ -58,6 +69,13 @@ const CONTENT_HASH = new RegExp(CONTENT_HASH_PATTERN_SOURCE);
 /** DR-28: bounds for one path's visible parts (a stored path has at most 4096 characters). */
 const MAX_SHOWN_PARTS = 4097;
 const MAX_SHOWN_TEXT = 8192;
+/**
+ * U-181: bounds for a `run` plan's summary as visible parts. The tool takes at most
+ * MAX_PLAN_SUMMARY_CHARS UTF-16 units and masking only takes text out (the tokens), so the parts
+ * are at most one more than that; the text bound is the plan view's for a masked summary.
+ */
+const MAX_SUMMARY_PARTS = MAX_PLAN_SUMMARY_CHARS + 1;
+const MAX_SUMMARY_TEXT = MAX_PLAN_SUMMARY_CHARS * 4;
 
 type Obj = Record<string, unknown>;
 
@@ -145,9 +163,53 @@ export function canonicalActions(value: unknown): StoredPlanAction[] | null {
   return actions;
 }
 
+/**
+ * U-181 (B-1): one planned file in canonical form (path, change, sha256, shown), or null. Exactly
+ * those keys; the path passes the same lexical rules as an action's (DR-24 d); `create` has a null
+ * hash and `modify` a SHA-256; `shown` is the path's visible parts (DR-28), always present.
+ */
+function canonicalPlannedFile(value: unknown): StoredPlannedFile | null {
+  if (!isObj(value) || !hasExactKeys(value, ["path", "change", "sha256", "shown"])) return null;
+  const { path, change, sha256 } = value;
+  if (!isWorkspaceRelativePath(path)) return null;
+  const shown = maskedPartsOf(value["shown"]);
+  if (shown === null) return null;
+  if (change === "create" && sha256 === null) return { path, change, sha256: null, shown };
+  if (change === "modify" && typeof sha256 === "string" && CONTENT_HASH.test(sha256)) return { path, change, sha256: sha256 as ContentHash, shown };
+  return null;
+}
+
+/**
+ * U-181 (B-1, B-5): the planned files in canonical form, or null when any is not a planned file,
+ * a path is listed twice, or the count is not 1 to MAX_PLANNED_FILES.
+ */
+export function canonicalPlannedFiles(value: unknown): StoredPlannedFile[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PLANNED_FILES) return null;
+  const files: StoredPlannedFile[] = [];
+  const paths = new Set<string>();
+  for (const item of value) {
+    const file = canonicalPlannedFile(item);
+    if (file === null || paths.has(file.path)) return null;
+    paths.add(file.path);
+    files.push(file);
+  }
+  return files;
+}
+
+/** U-181 (B-1): a `run` plan's summary as the plan run masked it (visible parts), or null. */
+function summaryPartsOf(value: unknown): MaskedParts | null {
+  return sharedMaskedPartsOf(value, MAX_SUMMARY_PARTS, MAX_SUMMARY_TEXT);
+}
+
 /** plan.json's content for these actions: one line of JSON and a line feed. */
 function planText(runId: string, actions: readonly StoredPlanAction[]): string {
   const stored: StoredPlan = { schemaVersion: 1, kind: "plan", runId, actions };
+  return `${JSON.stringify(stored)}\n`;
+}
+
+/** U-181 (B-1): plan.json's content for a `run` plan, as planText: one line of JSON and a line feed. */
+function changesPlanText(runId: string, summary: MaskedParts, files: readonly StoredPlannedFile[]): string {
+  const stored: StoredChangesPlan = { schemaVersion: 1, kind: "changes", runId, summary, files };
   return `${JSON.stringify(stored)}\n`;
 }
 
@@ -162,19 +224,31 @@ export const createPlanRecorder: CreatePlanRecorder = (options) => planRecorderW
 export function planRecorderWith(options: Parameters<CreatePlanRecorder>[0], notes?: RunWriteNotes): ReturnType<CreatePlanRecorder> {
   const { workspaceRoot, runId } = options;
   assertRunId(runId);
+  /** plan.json created exclusively with exactly `text`; resolves with the SHA-256 of those bytes. */
+  const writePlan = async (text: string): Promise<ContentHash> => {
+    const dir = await ensureRunDir(workspaceRoot, runId);
+    if (notes !== undefined) await notes.dir(dir);
+    const file = join(dir, PLAN_FILE_NAME);
+    if (!(await createExclusive(file, text))) {
+      throw new Error("the run already has a plan.json; it was left as it is");
+    }
+    if (notes !== undefined) await notes.file(file, { sha256: sha256Hex(text), size: Buffer.byteLength(text, "utf8") });
+    return sha256Hex(text);
+  };
   return {
     async savePlan(actions) {
       const canonical = canonicalActions(actions);
       if (canonical === null) throw new TypeError("savePlan needs 1 to MAX_PLAN_ACTIONS resolved actions with source hashes");
-      const text = planText(runId, canonical);
-      const dir = await ensureRunDir(workspaceRoot, runId);
-      if (notes !== undefined) await notes.dir(dir);
-      const file = join(dir, PLAN_FILE_NAME);
-      if (!(await createExclusive(file, text))) {
-        throw new Error("the run already has a plan.json; it was left as it is");
+      return writePlan(planText(runId, canonical));
+    },
+    // U-181 (B-1, B-3): a `run` plan, with savePlan's rules; the summary is in the bytes the digest covers.
+    async saveChangesPlan(plan) {
+      const summary = summaryPartsOf((plan as { readonly summary?: unknown } | null)?.summary);
+      const files = canonicalPlannedFiles((plan as { readonly files?: unknown } | null)?.files);
+      if (summary === null || files === null) {
+        throw new TypeError("saveChangesPlan needs the summary's visible parts and 1 to MAX_PLANNED_FILES planned files, each path once");
       }
-      if (notes !== undefined) await notes.file(file, { sha256: sha256Hex(text), size: Buffer.byteLength(text, "utf8") });
-      return sha256Hex(text);
+      return writePlan(changesPlanText(runId, summary, files));
     },
   };
 }
@@ -225,8 +299,30 @@ function parseApplied(record: Obj, planRunId: string): PlanAppliedRecord {
   return { schemaVersion: 1, kind: "plan_applied", planRunId, applyRunId, at };
 }
 
-/** See LoadPlan. */
-export const loadPlan: LoadPlan = async (request): Promise<LoadPlanOutcome> => {
+/**
+ * U-181 (B-1): plan.json's object as a stored plan of either kind, by its `kind`, with that kind's
+ * exact keys; anything else is invalid.
+ */
+function storedPlanOf(stored: Obj, runId: string): AnyStoredPlan {
+  if (stored["schemaVersion"] !== 1 || stored["runId"] !== runId) invalid();
+  if (stored["kind"] === "plan") {
+    if (!hasExactKeys(stored, ["schemaVersion", "kind", "runId", "actions"])) invalid();
+    const actions = canonicalActions(stored["actions"]);
+    if (actions === null) return invalid();
+    return { schemaVersion: 1, kind: "plan", runId, actions };
+  }
+  if (stored["kind"] === "changes") {
+    if (!hasExactKeys(stored, ["schemaVersion", "kind", "runId", "summary", "files"])) invalid();
+    const summary = summaryPartsOf(stored["summary"]);
+    const files = canonicalPlannedFiles(stored["files"]);
+    if (summary === null || files === null) return invalid();
+    return { schemaVersion: 1, kind: "changes", runId, summary, files };
+  }
+  return invalid();
+}
+
+/** See LoadAnyPlan (U-181): LoadPlan's codes and checks, for either kind of plan. */
+export const loadAnyPlan: LoadAnyPlan = async (request): Promise<LoadPlanOutcome<AnyStoredPlan>> => {
   const { workspaceRoot, runId } = request;
   if (toRunId(runId) === null) return { ok: false, code: "run_not_found" };
   const runsDir = join(workspaceRoot, STATE_DIR_NAME, RUNS_DIR_NAME);
@@ -255,19 +351,26 @@ export const loadPlan: LoadPlan = async (request): Promise<LoadPlanOutcome> => {
     if (planBytes === "missing") return { ok: false, code: "plan_run_missing" };
     const digest = sha256Hex(planBytes);
     if (digest !== planInfo["digest"]) invalid();
-    const stored = parseObject(planBytes);
-    if (!hasExactKeys(stored, ["schemaVersion", "kind", "runId", "actions"])) invalid();
-    if (stored["schemaVersion"] !== 1 || stored["kind"] !== "plan" || stored["runId"] !== runId) invalid();
-    const actions = canonicalActions(stored["actions"]);
-    if (actions === null) return invalid();
+    const plan = storedPlanOf(parseObject(planBytes), runId);
+    // U-181 (EngineResult.plan.kind): the result names a `run` plan exactly when plan.json is one.
+    if (plan.kind === "changes" ? planInfo["kind"] !== "changes" : Object.hasOwn(planInfo, "kind")) invalid();
 
     const appliedBytes = await readRecordBytes(join(dir, PLAN_APPLIED_FILE_NAME));
     const applied = appliedBytes === "missing" ? null : parseApplied(parseObject(appliedBytes), runId);
-    return { ok: true, plan: { schemaVersion: 1, kind: "plan", runId, actions }, digest, applied };
+    return { ok: true, plan, digest, applied };
   } catch (error) {
     if (error instanceof Invalid) return { ok: false, code: "invalid_run_record" };
     return { ok: false, code: "invalid_run_record" };
   }
+};
+
+/** See LoadPlan: loadAnyPlan for a plan of mode apply; a `run` plan is `invalid_run_record` (U-181, B-4). */
+export const loadPlan: LoadPlan = async (request): Promise<LoadPlanOutcome> => {
+  const outcome = await loadAnyPlan(request);
+  if (!outcome.ok) return outcome;
+  const { plan, digest, applied } = outcome;
+  if (plan.kind !== "plan") return { ok: false, code: "invalid_run_record" };
+  return { ok: true, plan, digest, applied };
 };
 
 export interface MarkPlanAppliedRequest {

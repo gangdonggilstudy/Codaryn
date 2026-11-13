@@ -168,8 +168,11 @@ export interface PolicyGateOptions {
    * (checkEffective): the path's text first, then each entry's real path, so a link entry covers its
    * target. A policy's list covers what is below its entries; the plan's files only themselves. An
    * unusable list or entry covers nothing, and (review V-3 M-1) an entry allows only after its own
-   * real path was found: one the workspace cannot resolve allows nothing, even when its text matches. Absent or empty: no such limit. Every write access is
-   * judged, a plan action's paths too.
+   * real path was found: one the workspace cannot resolve allows nothing, even when its text matches.
+   * PM (U-187, on na-core U-182's question): every write path is under the lists, a plan's proposal
+   * and its apply included (PolicyConfig.writablePaths): every write access is judged, a plan
+   * action's paths and a planned file's too, so they fail closed outside them. Absent or empty: no
+   * such limit.
    */
   readonly writablePathSets?: readonly WritablePathSet[];
 }

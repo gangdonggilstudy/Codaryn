@@ -36,6 +36,13 @@ export { checkProtectedPaths } from "./protected.js";
  */
 export { compileProtectedPaths } from "./protected.js";
 export type { ProtectedPaths } from "./protected.js";
+/**
+ * U-187 (p5a request): the path set matcher itself (path-set.ts), for a caller that judges a list of
+ * workspace paths with the gate's rule, not a copy: `prefix` or `exact`, a deny list (`covers`) or an
+ * allow list (`misses`, an entry allows only once its real path was found).
+ */
+export { checkPathSetFormat, compilePathSet } from "./path-set.js";
+export type { PathSet, PathSetOptions } from "./path-set.js";
 
 type Denial = Extract<PolicyDecision, { allowed: false }>;
 

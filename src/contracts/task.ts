@@ -88,7 +88,9 @@ export interface ResolvedTaskSpec extends TaskSpec {
    * order, each source once: a file tool may write a path only when every list covers it (the
    * intersection, PolicyConfig.writablePaths). Absent or empty: no such limit. The policy gate
    * judges it (PolicyGateOptions.writablePathSets), never the merged `policy.writablePaths`:
-   * mergeWorkflowPolicy does not combine the lists. Not set yet: the CLI and the app set it with B-4.
+   * mergeWorkflowPolicy does not combine the lists. U-182 (B-4): the CLI builds them from each
+   * source (src/cli/writable.ts); the app layer follows. A run that carries out an approved `run`
+   * plan adds the plan's files as one more list (approvedPlanWritablePathSets, U-187).
    */
   readonly writablePathSets?: readonly WritablePathSet[];
 }
@@ -195,8 +197,12 @@ export interface PolicyConfig {
    * - Protected paths and the other denials still apply under it.
    * - It guards the file tools only (B-8): a command the policy allows can write wherever it can.
    * - U-175 (B-2): the gate judges the lists it is given (PolicyGateOptions.writablePathSets,
-   *   `path_not_writable`). The parsers still refuse the field (`unknown_field`) and nothing builds
-   *   the lists until the CLI and the app (B-4).
+   *   `path_not_writable`). U-182 (B-4): the CLI's parsers take the field and the CLI builds the
+   *   lists; the app layer follows.
+   * - Every write path is under the lists (PM, U-187, on na-core U-182's question): a file tool's
+   *   write, each file a plan proposes (PLANNED_FILE_DESCRIPTOR), each action of a plan of mode
+   *   apply when it is proposed and when it is applied (PLAN_ACTION_DESCRIPTORS). So proposing or
+   *   applying a plan that touches a path outside them fails closed, as a write there would.
    */
   readonly writablePaths?: readonly string[];
 }

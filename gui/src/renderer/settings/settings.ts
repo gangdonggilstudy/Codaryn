@@ -24,7 +24,7 @@ import { asCopy, asModels, asProposal, asSelectModel, asSettings, asWritten } fr
 import type { CodarynApi } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
-import type { PolicyNarrowingView, ProfileView, SettingsRules, SettingsView } from "../../shared/ipc.js";
+import type { PolicyNarrowingView, ProfileView, SettingsPrivateDataView, SettingsRules, SettingsView } from "../../shared/ipc.js";
 
 export interface SettingsDeps {
   readonly texts: Texts;
@@ -174,6 +174,45 @@ function rulesSection(t: Texts, rules: SettingsRules, narrowings: readonly Polic
     labelled("settings-protected-path", t.format("settings.pathInput"), path),
     button(t.format("settings.addPath"), () => (path.value.trim() === "" ? warn("empty_value") : propose({ op: "addProtectedPath", path: path.value.trim() })), { id: "settings-protected-add" }),
   );
+  return box;
+}
+
+/**
+ * U-247 (bundle A, proposal P-4, U-215): the config's unreadable paths (added, removed by the text shown)
+ * and its k (set within the contract's range, or back to the default). Removing an entry or lowering k is
+ * a widening the main process asks about (U-212). Command rules cannot be kept with unreadable paths
+ * (the CLI's R-5): said always, and as an alert when the config has both.
+ */
+function privateSection(t: Texts, rules: SettingsRules, data: SettingsPrivateDataView, propose: Propose, warn: (code: string) => void): HTMLElement {
+  const box = section("settings-private", t.format("settings.private"));
+  box.append(el("p", t.format("settings.privateNote"), { class: "notice" }));
+  box.append(el("h4", t.format("settings.unreadable")));
+  box.append(data.unreadablePaths.length === 0 ? el("p", t.format("settings.noUnreadable")) : removable(t, data.unreadablePaths, "removeUnreadablePath", propose, { id: "settings-unreadable" }));
+  const path = el("input", undefined, { type: "text", id: "settings-unreadable-path", maxlength: "1024", spellcheck: "false" });
+  box.append(
+    labelled("settings-unreadable-path", t.format("settings.unreadableInput"), path),
+    button(t.format("settings.addUnreadable"), () => (path.value.trim() === "" ? warn("empty_value") : propose({ op: "addUnreadablePath", path: path.value.trim() })), { id: "settings-unreadable-add" }),
+  );
+  if (data.unreadablePaths.length > 0 && rules.commands.length > 0) {
+    box.append(el("p", t.format("settings.unreadableCommands"), { role: "alert", class: "error", id: "settings-unreadable-commands" }));
+  } else {
+    box.append(el("p", t.format("settings.unreadableCommandsNote"), { class: "notice", id: "settings-unreadable-commands-note" }));
+  }
+  const k = data.minGroupSize;
+  box.append(el("h4", t.format("settings.minGroupSize")), el("p", t.format("settings.minGroupSizeNote", { min: String(k.min), max: String(k.max) }), { class: "notice" }));
+  const row = el("p", undefined, { id: "settings-min-group-size", "data-configured": k.configured === null ? "none" : String(k.configured) });
+  row.append(el("span", k.configured === null ? t.format("settings.minGroupSizeDefault", { value: String(k.effective) }) : t.format("settings.minGroupSizeValue", { value: String(k.configured) })));
+  const input = el("input", undefined, { type: "number", min: String(k.min), max: String(k.max), step: "1", id: "settings-min-group-size-input", "aria-label": t.format("settings.minGroupSizeInput") });
+  row.append(
+    input,
+    button(t.format("settings.limitSet"), () => {
+      const n = Number(input.value);
+      if (input.value.trim() === "" || !Number.isSafeInteger(n) || n < k.min || n > k.max) return warn("bad_number");
+      propose({ op: "minGroupSize", value: n });
+    }, { id: "settings-min-group-size-set" }),
+  );
+  if (k.configured !== null) row.append(button(t.format("settings.limitUnset"), () => propose({ op: "minGroupSize", value: null }), { id: "settings-min-group-size-unset" }));
+  box.append(row);
   return box;
 }
 
@@ -489,6 +528,8 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         const editable = view.file !== null && view.file.exists;
         const sections = [general(t, view, deps.language, propose, () => api.revealConfig()), providerSection(t, view, editable ? propose : null, warn), model, profiles, workflows];
         if (editable) sections.push(rulesSection(t, view.rules, view.policyNarrowings, propose, warn), secretsSection(t, view.rules, propose, warn));
+        // U-247: shown when the app layer gives the config's private data (U-215).
+        if (editable && view.privateData != null) sections.push(privateSection(t, view.rules, view.privateData, propose, warn));
         else sections.push(el("p", t.format("settings.createFirst"), { class: "notice", id: "settings-create-first" }));
         body.replaceChildren(proposal, ...sections, key);
         body.setAttribute("data-settings-ready", "ok");

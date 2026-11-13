@@ -27,12 +27,15 @@ import { setupScreen } from "./setup/setup-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
-import { OpenCheck } from "./workspace/open-check.js";
+import { OpenCheck, heldFor } from "./workspace/open-check.js";
+import { OwnLockCalls } from "./workspace/own-lock.js";
 
 async function start(): Promise<void> {
   const root = document.getElementById("app");
   if (root === null) return;
-  const api = window.codaryn;
+  // R-111b M-1: the window's calls that take a workspace lock are counted while they go on (OwnLockCalls).
+  const ownLock = new OwnLockCalls();
+  const api = ownLock.track(window.codaryn);
   const info = asInfo(await api.info());
   let language = info.language;
   document.documentElement.lang = language;
@@ -51,7 +54,12 @@ async function start(): Promise<void> {
   let savedScreen = info.ui?.screen ?? null;
 
   // U-68 (3.2): the checks when a workspace opens (again when a run ends and on F5).
-  const openCheck = new OpenCheck(api);
+  // R-111b (a), M-1: a held lock seen while this window's own work may have held it (its run in that
+  // workspace, or a locking call during the check) is its own.
+  const openCheck = new OpenCheck(api, {
+    busy: (handle) => (runWorkspace === handle && run.phase !== "idle" && run.phase !== "done") || ownLock.inFlight > 0,
+    started: () => ownLock.started,
+  });
   const setWorkspace = (workspace: Workspace): void => {
     current = workspace;
     void openCheck.run(workspace);
@@ -94,7 +102,8 @@ async function start(): Promise<void> {
   const run = new RunModel();
   // U-68: this window's own run in the open workspace holds its lock; that is not another run's.
   const ownRunHere = (): boolean => runWorkspace !== null && runWorkspace === current?.handle && run.phase !== "idle" && run.phase !== "done";
-  const lockedByOther = (): boolean => openCheck.state.phase === "done" && openCheck.state.lockHeld && openCheck.state.handle === current?.handle && !ownRunHere();
+  // U-247, Codex V-27 L-1: held until an answer says free (a check going on or failed keeps it).
+  const lockedByOther = (): boolean => heldFor(openCheck.state, current?.handle) && !ownRunHere();
   const runGoing = (): boolean => run.phase !== "idle" && run.phase !== "done";
   // U-64 (3.12, 4.4): when the engine ended (or did not start), its card and the restart button.
   const restartEngine = async (): Promise<string> => {
@@ -153,7 +162,14 @@ async function start(): Promise<void> {
         rememberForm: (form) => {
           if (current !== null) current = { ...current, lastForm: form };
         },
-        lock: { locked: lockedByOther, watch: (watcher) => openCheck.watch("newtask", watcher) },
+        lock: {
+          locked: lockedByOther,
+          // R-111b (b, c): while a held lock is checked again, and when that check failed (then a check again).
+          checking: () => openCheck.state.phase === "checking",
+          failed: () => openCheck.state.phase === "error",
+          recheck: () => void openCheck.run(current),
+          watch: (watcher) => openCheck.watch("newtask", watcher),
+        },
       }),
     );
     const plan = planScreen({ texts, api, run, current: () => current, showRun: () => shell?.show("run") });

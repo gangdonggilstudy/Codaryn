@@ -8,20 +8,12 @@
 
 import type { CommandOutput } from "../contracts/index.js";
 import { cliError } from "../app/prepare.js";
+import type { CommandOutcome, JsonOutcome } from "../app/command-outcome.js";
+
+// U-306 (C-7a): the outcome types are the app layer's (src/app/command-outcome.ts); these names stay (plan A).
+export type { CommandOutcome, JsonOutcome } from "../app/command-outcome.js";
 
 export const UNEXPECTED_ERROR_MESSAGE = "codaryn stopped because of an unexpected internal error";
-
-/** A command outcome printed as one JSON line. */
-export interface JsonOutcome {
-  readonly output: CommandOutput;
-  readonly exitCode: number;
-}
-
-/**
- * What one command prints on stdout, and the process exit code. `output` is printed as one JSON
- * line; `text` is printed as it is, ending with a line feed.
- */
-export type CommandOutcome = JsonOutcome | { readonly text: string; readonly exitCode: number };
 
 /**
  * N-19: one JSON line in ASCII only. Every character above U+007F is written as \uXXXX (an

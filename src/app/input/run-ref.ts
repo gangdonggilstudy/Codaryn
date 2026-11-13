@@ -22,10 +22,10 @@
 
 import { lstat } from "node:fs/promises";
 import path from "node:path";
-import { LATEST_RUN_ALIAS, RUNS_DIR_NAME, STATE_DIR_NAME } from "../contracts/index.js";
-import type { CliErrorCode, ListRuns, RunListEntry } from "../contracts/index.js";
-import { inspectLock, latestRun, listRuns } from "../store/index.js";
-import type { RunInspection } from "../store/index.js";
+import { LATEST_RUN_ALIAS, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../contracts/index.js";
+import type { CliErrorCode, ListRuns, RunListEntry } from "../../contracts/index.js";
+import { inspectLock, latestRun, listRuns } from "../../store/index.js";
+import type { RunInspection } from "../../store/index.js";
 
 export type CheckedRun = Extract<RunListEntry, { readonly state: "checked" }>;
 

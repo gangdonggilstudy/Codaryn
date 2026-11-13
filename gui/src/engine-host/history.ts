@@ -81,6 +81,8 @@ export function runsValue(outcome: unknown, shown: Shown, planApplyOf?: PlanAppl
       // UXM-14, DR-38: a records-changed mark (absent: false).
       recordsChanged: entry["recordsChanged"] === true,
       planApply: planApplyOf === undefined ? null : carriedMark(planApplyValue(planApplyOf, entry, entries), entry, entries),
+      // U-271 (C-27, U-155): where a run without a result is (RunListEntry.phase), as the CLI's runs says it.
+      phase: entry["phase"] === "running" || entry["phase"] === "no_result" ? entry["phase"] : null,
       // U-244 (U-139, U-198): the plan run an apply run applied, or a run carried out (RunListEntry.planRunId).
       planRunId: typeof entry["planRunId"] === "string" && RUN_ID.test(entry["planRunId"]) ? entry["planRunId"] : null,
     });
@@ -114,5 +116,7 @@ export function revertValue(outcome: unknown, shown: Shown): Obj | HostFailure {
     revertedBefore: isObj(before) && typeof before["at"] === "string" ? { at: before["at"], status: before["status"] === "partial" ? "partial" : "complete" } : null,
     // U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checked every file.
     ...(output["recordsChanged"] === true ? { recordsChanged: true } : {}),
+    // U-271 (U-229, R-106 L-1): the revert's workspace lock could not be released at its end (RevertCallOutcome.lockLeft).
+    ...(isObj(outcome) && outcome["lockLeft"] === true ? { lockLeft: true } : {}),
   };
 }

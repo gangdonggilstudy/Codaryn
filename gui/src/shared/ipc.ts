@@ -386,8 +386,11 @@ export interface SettingsView {
   readonly workflows: { readonly builtin: readonly string[]; readonly config: readonly string[] };
   readonly keyAvailable: boolean;
   readonly providers: readonly string[];
-  /** Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). */
-  readonly env: { readonly model: boolean; readonly language: boolean };
+  /**
+   * Whether CODARYN_MODEL and CODARYN_LANG are set (never their values). U-271 (C-23): `os`, the kind of
+   * operating system the app runs on, for the steps that register a key; absent when it is not known.
+   */
+  readonly env: { readonly model: boolean; readonly language: boolean; readonly os?: "windows" | "posix" };
   /** GU-6: the config file's own rules (3.10): limits, command rules as text, protected paths, secret names. */
   readonly rules: SettingsRules;
   /** DR-41: what each task kind's own rules leave out of these rules. */
@@ -740,7 +743,8 @@ export interface RunItemView {
 export interface RunEventsPayload {
   readonly runId: string;
   readonly items: readonly RunItemView[];
-  readonly counts: { readonly turns: number; readonly tools: number };
+  /** U-271 (3.6): `limits`, the run's limits once known (protocol.ts RunLimitsView). */
+  readonly counts: { readonly turns: number; readonly tools: number; readonly limits?: { readonly turns: number; readonly tools: number; readonly durationMs: number } };
 }
 
 /**
@@ -1610,6 +1614,8 @@ export type RunListItem =
       readonly recordsChanged?: boolean;
       /** U-61 (U-16): for a plan run an apply claimed, what became of that apply; null otherwise. */
       readonly planApply?: PlanApplyView | null;
+      /** U-271 (C-27, U-155): a run without a result: still going, or stopped without one; null otherwise or unknown. */
+      readonly phase?: "running" | "no_result" | null;
       /**
        * U-244 (the CLI's runs.apply_of, runs.carried_plan): the plan run this run applied (an apply run) or
        * carried out (a run that carried out a changes plan); null or absent for any other run.
@@ -1665,7 +1671,9 @@ export function toRunsReply(value: unknown): RunsReply {
     if (planApply === "bad") return fail;
     const planRunId = run["planRunId"] ?? null;
     if (!(planRunId === null || isRunId(planRunId)) || planRunId === run["runId"]) return fail;
-    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply, planRunId });
+    const phase = run["phase"] ?? null;
+    if (!(phase === null || ((phase === "running" || phase === "no_result") && status === null))) return fail;
+    items.push({ state: "checked", runId: run["runId"], kind, startedAt: startedAt as string | null, taskId, status: status as string | null, reason: reason as string | null, changes: changes as number | null, reverted, revertRecordDamaged, recordsChanged, planApply, planRunId, phase });
   }
   return { ok: true, runs: items, omitted };
 }
@@ -1681,6 +1689,8 @@ export interface RevertView {
   readonly revertedBefore: { readonly at: string; readonly status: "complete" | "partial" } | null;
   /** U-32 (UXM-14, DR-38): the run has a records-changed mark; the revert still checks every file. Absent: none. */
   readonly recordsChanged?: true;
+  /** U-271 (U-229): the revert could not release the workspace lock at its end. Absent: released. */
+  readonly lockLeft?: true;
 }
 
 /**
@@ -1719,7 +1729,12 @@ export function toRevertView(value: unknown): { readonly ok: true; readonly view
   }
   const recordsChanged = value["recordsChanged"] ?? false;
   if (typeof recordsChanged !== "boolean") return fail;
-  return { ok: true, view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before, ...(recordsChanged ? { recordsChanged: true as const } : {}) } };
+  const lockLeft = value["lockLeft"];
+  if (lockLeft !== undefined && lockLeft !== true) return fail;
+  return {
+    ok: true,
+    view: { runId, status, dryRun, reverted: files, skipped: skips, moveSafetyUnchecked, revertedBefore: before, ...(recordsChanged ? { recordsChanged: true as const } : {}), ...(lockLeft === true ? { lockLeft } : {}) },
+  };
 }
 
 /** The engine host's answer to `selectModel`, checked. */

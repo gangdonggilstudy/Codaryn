@@ -23,8 +23,10 @@ import { errorText } from "../i18n/catalog.js";
 import { asCopy, asModels, asProposal, asSelectModel, asSettings, asWritten } from "../api.js";
 import type { CodarynApi } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { withMoves } from "../shell/error-move.js";
 import type { Screen } from "../shell/shell.js";
 import type { PolicyNarrowingView, ProfileView, SettingsPrivateDataView, SettingsRules, SettingsView } from "../../shared/ipc.js";
+import { keyHowLine } from "./key-how.js";
 
 export interface SettingsDeps {
   readonly texts: Texts;
@@ -34,9 +36,11 @@ export interface SettingsDeps {
   readonly announce: (text: string) => void;
   /** U-69 (11): a change was written; the window looks again at its language (a new one redraws it at once). */
   readonly languageChanged?: () => void;
+  /** U-271 (3.12): another screen, for an error whose fix is done there (error-move.ts). */
+  readonly showScreen?: (screen: string) => void;
 }
 
-function errorBox(t: Texts, code: string): HTMLElement {
+function errorBoxOf(t: Texts, code: string): HTMLElement {
   const box = el("div", undefined, { role: "alert", class: "error", "data-error": code });
   box.append(el("p", errorText(t, code)), el("p", t.format("error.code", { code }), { class: "code", lang: "en" }));
   return box;
@@ -359,6 +363,8 @@ function general(t: Texts, view: SettingsView, language: "ko" | "en", propose?: 
 }
 
 export function settingsScreen(deps: SettingsDeps): Screen {
+  // U-271 (3.12): this screen's error cards, with a button to the screen an error's fix is on.
+  const errorBox = (t: Texts, code: string): HTMLElement => withMoves(errorBoxOf(t, code), t, code, deps.showScreen, "settings");
   const { texts: t, api } = deps;
   let written: string | null = null;
   const screen: Screen = {
@@ -524,6 +530,9 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         const key = section("settings-key", t.format("settings.key"));
         key.append(el("p", t.format(view.keyAvailable ? "settings.keyAvailable" : "settings.keyMissing"), { "data-key": view.keyAvailable ? "available" : "missing" }));
         key.append(el("p", t.format("settings.keyHow")));
+        // U-271 (C-23): how on this OS, when the key of the provider in use is not set.
+        const how = keyHowLine(t, view, "settings-key-os");
+        if (how !== null) key.append(how);
 
         const editable = view.file !== null && view.file.exists;
         const sections = [general(t, view, deps.language, propose, () => api.revealConfig()), providerSection(t, view, editable ? propose : null, warn), model, profiles, workflows];

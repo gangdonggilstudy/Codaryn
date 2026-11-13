@@ -25,6 +25,7 @@ import { errorText } from "../i18n/catalog.js";
 import { asPlan, asPlanCheck, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
+import { withMoves } from "../shell/error-move.js";
 import { copyControl } from "../shell/copy.js";
 import type { Screen } from "../shell/shell.js";
 import type { PlanActionView } from "../../shared/ipc.js";
@@ -37,6 +38,8 @@ export interface PlanDeps {
   readonly run: RunModel;
   readonly current: () => Workspace | null;
   readonly showRun: () => void;
+  /** U-271 (3.12): another screen, for an error whose fix is done there (error-move.ts). */
+  readonly showScreen?: (screen: string) => void;
 }
 
 export interface PlanScreen extends Screen {
@@ -206,7 +209,7 @@ export function planScreen(deps: PlanDeps): PlanScreen {
                 deps.showRun();
               } else {
                 run.failedToStart(started.code);
-                message.replaceChildren(el("p", `${errorText(t, started.code)} ${t.format("error.code", { code: started.code })}`, { "data-error": started.code }));
+                message.replaceChildren(withMoves(el("p", `${errorText(t, started.code)} ${t.format("error.code", { code: started.code })}`, { "data-error": started.code }), t, started.code, deps.showScreen, "plan"));
               }
             })();
           }, { id: "plan-apply" });

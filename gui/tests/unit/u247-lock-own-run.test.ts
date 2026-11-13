@@ -38,7 +38,7 @@ function doctorOutput(lockText: string): Record<string, unknown> {
 function harness(ownRun: () => boolean) {
   const answers: { resolve: (value: unknown) => void }[] = [];
   const api = { doctor: () => new Promise((resolve) => answers.push({ resolve })) } as unknown as CodarynApi;
-  const check = new OpenCheck(api, { busy: () => ownRun(), started: () => 0 });
+  const check = new OpenCheck(api, { busy: () => ownRun(), mark: () => 0, overlapped: () => false });
   const answer = (index: number, lockText: string): void => answers[index]?.resolve({ ok: true, view: toDoctorView(doctorOutput(lockText)), labels: {}, workspaceName: "ws" });
   const fail = (index: number): void => answers[index]?.resolve({ ok: false, code: "adapter_timeout" });
   return { check, answer, fail, now: (): OpenCheckState => check.state };
@@ -136,9 +136,9 @@ test("U-247 (R-111b M-1): a locking call of this window during the check makes a
     saveText: () => Promise.reject(new Error("refused")),
     info: async () => "info",
   } as unknown as CodarynApi;
-  const calls = new OwnLockCalls();
+  const calls = new OwnLockCalls(() => HANDLE);
   const api = calls.track(base);
-  const check = new OpenCheck(api, { busy: () => calls.inFlight > 0, started: () => calls.started });
+  const check = new OpenCheck(api, { busy: () => false, mark: () => calls.mark(), overlapped: (handle, since) => calls.overlapped(handle, since) });
   const held = (index: number): void => answers[index]?.resolve({ ok: true, view: toDoctorView(doctorOutput("doctor.lock.held")), labels: {}, workspaceName: "ws" });
   // A revert that starts and ends while the check goes on: the doctor may have seen its lock.
   const during = check.run({ handle: HANDLE, name: "ws" });
@@ -173,7 +173,7 @@ test("U-247 (R-111b M-1): a locking call of this window during the check makes a
   assert.equal(heldFor(check.state, HANDLE), true);
   // A call that rejects is counted only while it goes on; every other call is the api's own.
   await assert.rejects(api.saveText("t", "x"));
-  assert.deepEqual([calls.inFlight, calls.started], [0, 3]);
+  assert.deepEqual([calls.inFlight, calls.mark()], [0, 6], "three calls, each kept from its start to its end");
   assert.equal(await api.info(), "info");
   assert.equal(base.revert === api.revert, false, "the tracked object, not the page's");
   assert.deepEqual([...LOCKING_CALLS].sort(), ["applyCleanup", "applyPlan", "checkPlan", "revert", "revertConsent", "review", "saveText", "startRun", "startTaskRun"]);

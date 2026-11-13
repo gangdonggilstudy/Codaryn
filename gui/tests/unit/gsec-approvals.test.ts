@@ -122,7 +122,7 @@ describe("G-sec: plan approvals are the main process's", () => {
   // Finding (U-274, for p5u-gui): engine-host/plans.ts reads every status but "applied" as "pending",
   // so an output whose status the contract does not have (PLAN_STATUSES: pending, applied) is shown
   // as an approvable plan and gets a token. Today the app gives only those two (low); fail closed.
-  test("a plan output whose status the contract does not have is refused by the host, not shown as pending", { todo: "G-sec finding for p5u-gui: the host's planValue maps an unknown status to pending" }, () => {
+  test("a plan output whose status the contract does not have is refused by the host, not shown as pending", () => {
     for (const status of ["stale", "gsec-unknown", 1, null]) {
       assert.deepEqual(planValue({ ok: true, output: planOutput({ status }) }, (text) => text), { ok: false, code: "host_error" }, String(status));
     }

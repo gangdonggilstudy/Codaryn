@@ -3,7 +3,11 @@
 > **사용자 결정 DR-20(2026-11-12): VS Code 확장(플러그인)은 개발하지 않는다.** 독립 GUI 하나만 만들고(Electron, Windows 11 64비트 먼저), 플러그인과 같은 편의성(작업 공간 폴더 열기, 파일 트리와 변경 비교, 실행 목록, 계획 승인, 설정·프로필·모델 선택, 진행 표시와 취소)을 그 GUI가 갖는다. GUI는 Electron의 엔진 전용 프로세스가 앱 계층 함수를 직접 부른다([독립 GUI](standalone-gui.md) 5.1, [어댑터 계약](adapter-contract.md)).
 >
 > - 이 문서의 결정(VX-D1~D14)과 N-13의 "VS Code 확장 먼저"는 DR-20이 대체한다. 아래 내용은 결정 전의 설계 기록으로만 남긴다.
-> - 이미 커밋된 `vscode/src/core/**`(`11d5676`)와 `tests/unit/vscode/**`는 지우지 않았다. 쓰임이 없으면 GUI 묶음 때 정리 여부를 PM이 정한다.
+> - **지웠다(U-81, 사용자 결정 DR-66, 2026-11-13).** 연결되지 않은 코드와 그 시험을 지웠다. 합계 12파일 1,451줄이다.
+>   - VS Code 확장 코어 `vscode/src/core/**`(`11d5676`)와 `tests/unit/vscode/**`
+>   - 프로세스 밖 줄 프로토콜 `src/cli/protocol/**`(`3c09b58`, adapter-contract 6절)와 `tests/unit/cli/protocol/**`
+>   - 지우기 전에 `src`, `gui`, `tests`, `scripts`와 루트 설정에서 이 코드를 부르거나 가리키는 곳이 없음을 확인했다. `tsconfig.json`의 `include`는 `src`·`tests`뿐이었고, 확장 코어는 그 시험이 import해서만 빌드됐다.
+>   - 아래의 `vscode/src/core` 언급(V3 등)은 지운 코드의 기록이다. 다시 필요하면 `11d5676`에서 찾는다.
 > - 여기서 GUI로 옮겨 쓸 수 있는 생각: 다시 가린 변경 비교(DR-7), 시작 전 취소 비활성과 창 닫기 순서(R-1 L-2), 자식 Node 환경에서 `NODE_OPTIONS`·`NODE_PATH` 빼기(VX-D13), 권한·경로 설정을 작업 공간이 바꾸지 못하게 하기(VX-D10).
 
 VS Code에서 Codaryn을 쓰는 확장을 설계한다. 다룰 것은 다음과 같다.

@@ -2,7 +2,7 @@
 
 CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 것은 다음과 같다.
 
-> **DR-20(사용자 결정, 2026-11-12): VS Code 확장은 개발하지 않는다.** 독립 GUI 하나만 만들고(Electron, Windows 11 64비트 먼저), 플러그인과 같은 편의성을 그 GUI가 갖는다. GUI는 Electron의 **엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 형태**가 기준이다(standalone-gui 5.1). 그래서 이 문서의 VS Code 확장과 프로세스 밖 줄 프로토콜(6절, AC-D7~D9) 서술은 **추진하지 않는다**. 내용은 참고용으로 남긴다. 이미 커밋된 `src/cli/protocol/`(`3c09b58`)와 `vscode/src/core`(`11d5676`)는 지우지 않았다. 사용자 결정 DR-66(2026-11-13)으로 그 코드와 그 시험을 지운다(U-81, 설계 차이 조사 [D-1](../reviews/2026-11-13-adapter-design-gap-survey.md)).
+> **DR-20(사용자 결정, 2026-11-12): VS Code 확장은 개발하지 않는다.** 독립 GUI 하나만 만들고(Electron, Windows 11 64비트 먼저), 플러그인과 같은 편의성을 그 GUI가 갖는다. GUI는 Electron의 **엔진 전용 프로세스가 앱 계층 함수를 직접 부르는 형태**가 기준이다(standalone-gui 5.1). 그래서 이 문서의 VS Code 확장과 프로세스 밖 줄 프로토콜(6절, AC-D7~D9) 서술은 **추진하지 않는다**. 내용은 참고용으로 남긴다. 이미 커밋된 `src/cli/protocol/`(`3c09b58`)와 `vscode/src/core`(`11d5676`)는 지우지 않았다. 사용자 결정 DR-66(2026-11-13)으로 그 코드와 그 시험을 지웠다(U-81, 설계 차이 조사 [D-1](../reviews/2026-11-13-adapter-design-gap-survey.md)).
 - 실행 시작, 진행 이벤트 구독, 취소, 결과, 보고서, 되돌리기
 - 계획 확인·적용·사람 확인, 변경 비교
 - 권한 확인 질문, 오류 모델
@@ -357,7 +357,7 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
   - `runApply`는 검증기 명령 실행기를 `io.parentEnv ?? io.env`로 만든다(`src/cli/plan-commands.ts`).
   - U-71 시험이 고정한다(`tests/unit/app/u71-apply-parent-env.test.ts`): 변수 파일의 짧은 `LANG`이 적용의 명령 검증기에 가고, 호출자의 env와 `process.env`는 바뀌지 않는다.
   - 예전의 "남은 차이(`parentEnv` 없음)"는 고쳐졌다.
-- (DR-20으로 추진하지 않음) VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 만들어 두었다(`vscode/src/core/args.ts`, 참고용).
+- (DR-20으로 추진하지 않음) VS Code 확장 코어는 이 세 명령의 인자를 G-A의 task 형식으로 만들어 두었다(`vscode/src/core/args.ts`). U-81(DR-66)로 지웠다.
 
 ### 5.7 변경 비교 [구현 A-1] (DR-7)
 
@@ -559,7 +559,7 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
 
 > 사용자 결정 DR-20으로 이 절은 추진하지 않는다. GUI는 같은 프로세스 어댑터(엔진 전용 프로세스)로 5절 함수를 직접 부른다. 아래는 결정 전의 설계와 구현 기록으로 남긴다.
 >
-> 남은 코드(`src/cli/protocol/**`, `vscode/src/core/**`와 그 시험, 합계 1,451줄)는 사용자 결정 DR-66으로 지운다(U-81, 설계 차이 조사 D-1).
+> 남은 코드(`src/cli/protocol/**`, `vscode/src/core/**`와 그 시험, 합계 12파일 1,451줄)는 사용자 결정 DR-66으로 지웠다(U-81, 설계 차이 조사 D-1). 아래의 "구현 상태"는 지운 코드의 기록이다(`3c09b58`).
 
 VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴다. 같은 프로세스 어댑터는 5절 함수를 직접 쓴다.
 
@@ -618,7 +618,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 - 이행 1~5는 동작을 바꾸지 않는 구조 이동이다. 사용자 결정 DR-65(2026-11-13)로 한다.
   - 기능(실행 중 권한 확인 질문 5.9, GUI 남은 항목, 사용성 지적) 뒤에 직렬로 한다.
   - 이행 단위마다 고정 출력(sp0, 통합 시험)이 글자까지 같아야 병합한다(7.1).
-- 이행 6은 DR-20으로 추진하지 않는다. 남은 코드는 사용자 결정 DR-66으로 지운다(U-81).
+- 이행 6은 DR-20으로 추진하지 않는다. 남은 코드는 사용자 결정 DR-66으로 지웠다(U-81).
 - 이행 8은 PM이 다음에 하기로 했다(조사 B, 5.9).
 
 | 이행 | 내용 | 바뀌는 파일 | 지금의 상태 |
@@ -628,7 +628,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 일부. 앱 계층 쪽은 됐다(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않는다. DR-65: 기능 뒤 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 일부. 앱 함수는 모두 있다: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI 명령 가운데 앱 함수를 부르는 것은 `changes`뿐이다(`main.ts`가 연결). 나머지는 거꾸로 앱이 CLI를 감싼다. store의 스냅샷 읽기는 `readRunOriginals`로 있다. DR-65: 기능 뒤 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | 일부. 앱 계층이 CLI의 `runDoctor`·`runModels`를 감싼다(`doctor`, `listModels`, `selectModel`). DR-65: 기능 뒤 |
-| 6 줄 프로토콜 (DR-20으로 추진하지 않음) | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | 추진 안 함. CLI 쪽 모듈과 VS Code 코어 왕복 시험은 남아 있고(`3c09b58`) 연결되지 않았다. DR-66으로 지운다(U-81) |
+| 6 줄 프로토콜 (DR-20으로 추진하지 않음) | `run`·`apply`의 `--events jsonl`, `run`의 `--confirm stdio`, `apply`의 `--cancel-file` | `src/cli/protocol/**`(신규, A-3), `src/cli/main.ts`, `src/cli/run.ts`, `src/cli/args.ts`, `src/contracts/**` | 추진 안 함. CLI 쪽 모듈과 VS Code 코어 왕복 시험은 남아 있고(`3c09b58`) 연결되지 않았다. DR-66으로 지웠다(U-81) |
 | 7 범용 작업 연결 | `plan`, `applyPlan`, `review`를 앱 계층에(5.6) | `src/app/**`, G-E의 CLI | 구현됨. `plan`, `applyPlan`, `review`가 있다(5.6). 타입은 G-A의 것이다(`src/app/general-tasks.ts`가 되풀이, DR-17) |
 | 8 권한 질문 | 정책 "확인 필요", `EngineDeps.confirm`, 답 뒤 재판정, 질문 사건, CLI 터미널 질문(stderr에 묻고 stdin에서 읽음) | `src/engine/**`, `src/policy/**`, `src/contracts/**`, `src/cli/**` | 없음. PM 결정으로 다음에 한다(조사 B, 5.9) |
 

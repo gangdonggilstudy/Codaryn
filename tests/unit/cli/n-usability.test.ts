@@ -509,8 +509,9 @@ describe("N-2 init", () => {
     const run = await initEnv({
       argv: ["init", "--workspace", workspace],
       env: { ANTHROPIC_API_KEY: FAKE_KEY },
-      // create, model 1, allow npm test, protect tests (default yes), not package.json, language.
-      answers: ["y", "1", "y", "", "n", "ko"],
+      // create, the provider (Enter: anthropic, U-26), model 1, allow npm test, protect tests
+      // (default yes), not package.json, language.
+      answers: ["y", "", "1", "y", "", "n", "ko"],
       listModels: async (settings) => {
         listed.push(settings);
         return { ok: true, models: [{ id: "model-a", displayName: "A", createdAt: null, maxInputTokens: null, maxOutputTokens: null }] };

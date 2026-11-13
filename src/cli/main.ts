@@ -276,6 +276,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
             ? { ask: (question: string) => askLine(question, process.stderr), tell: (line: string) => writeHuman(line) }
             : {}),
           listModels: anthropicModelLister,
+          // U-26: the provider init asks for lists its models with its own lister.
+          listers: API_MODEL_LISTERS,
         }),
       );
     case "models":

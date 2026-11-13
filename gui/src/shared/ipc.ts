@@ -329,6 +329,8 @@ export interface ApiProviderView {
   readonly modelEnvSet: boolean;
   /** The model the config keeps for this provider. */
   readonly model: string | null;
+  /** U-80: the output cap the config keeps for this provider (`maxOutputTokens`); null: none, so its runs stop. */
+  readonly outputCap?: number | null;
   /** R27-I3: the address variable's name and whether it is set now (then runs send there, not to the config's address). */
   readonly baseUrlEnv: string | null;
   readonly baseUrlEnvSet: boolean;
@@ -344,14 +346,16 @@ function toApiProviders(value: unknown): ApiProviderView[] | null {
   if (!Array.isArray(value) || value.length > 16) return null;
   const out: ApiProviderView[] = [];
   for (const item of value) {
-    if (!isObj(item) || !hasOnlyKeys(item, ["name", "keyEnv", "keySet", "modelEnv", "modelEnvSet", "model", "baseUrlEnv", "baseUrlEnvSet", "listable"])) return null;
+    if (!isObj(item) || !hasOnlyKeys(item, ["name", "keyEnv", "keySet", "modelEnv", "modelEnvSet", "model", "outputCap", "baseUrlEnv", "baseUrlEnvSet", "listable"])) return null;
+    const outputCap = item["outputCap"] ?? null;
+    if (!(outputCap === null || (count(outputCap) && outputCap >= 1))) return null;
     const { name, keyEnv, keySet, modelEnv, modelEnvSet, model, listable } = item;
     const baseUrlEnv = item["baseUrlEnv"] ?? null;
     const baseUrlEnvSet = item["baseUrlEnvSet"] ?? false;
     if (!(baseUrlEnv === null || (typeof baseUrlEnv === "string" && ENV_NAME_TEXT.test(baseUrlEnv))) || typeof baseUrlEnvSet !== "boolean") return null;
     if (typeof name !== "string" || !PROVIDER_NAME.test(name) || typeof keyEnv !== "string" || !ENV_NAME_TEXT.test(keyEnv) || typeof modelEnv !== "string" || !ENV_NAME_TEXT.test(modelEnv)) return null;
     if (typeof keySet !== "boolean" || typeof modelEnvSet !== "boolean" || typeof listable !== "boolean" || !(model === null || shortText(model))) return null;
-    out.push({ name, keyEnv, keySet, modelEnv, modelEnvSet, model: model as string | null, baseUrlEnv: baseUrlEnv as string | null, baseUrlEnvSet, listable });
+    out.push({ name, keyEnv, keySet, modelEnv, modelEnvSet, model: model as string | null, outputCap: outputCap as number | null, baseUrlEnv: baseUrlEnv as string | null, baseUrlEnvSet, listable });
   }
   return out;
 }

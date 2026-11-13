@@ -11,11 +11,12 @@
 
 import path from "node:path";
 import {
-  ANTHROPIC_API_KEY_ENV,
   API_PROVIDERS,
+  API_PROVIDER_NAMES,
   DENY_ALL_POLICY,
   INIT_DEFAULT_LIMITS,
   INIT_DEFAULT_MAX_OUTPUT_TOKENS,
+  INIT_DEFAULT_PROVIDER,
   INIT_EXIT_CODES,
   INIT_QUESTION_DEFAULTS,
   INIT_SUGGESTED_PROTECTED_PATHS,
@@ -25,6 +26,8 @@ import {
 } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
+  ApiProviderDeps,
+  ApiProviderName,
   CommandRule,
   DefaultConfigDisplay,
   DefaultConfigLocation,
@@ -33,6 +36,7 @@ import type {
   InitSuggestedProtectedPath,
   InitStatus,
   ListAnthropicModels,
+  ListModels,
   MessageCatalog,
   MessageLanguage,
   ModelInfo,
@@ -89,6 +93,10 @@ export interface InitEnvironment {
   /** Lists models (a real API request); asked only when the key is set and questions are asked. */
   readonly listModels?: ListAnthropicModels;
   readonly anthropicDeps?: AnthropicProviderDeps;
+  /** U-26: the other providers' listers (main.ts passes API_MODEL_LISTERS); anthropic falls back to listModels. */
+  readonly listers?: { readonly [P in ApiProviderName]?: ListModels };
+  /** U-26: injection points per API provider; anthropic falls back to anthropicDeps. */
+  readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
 }
 
 const YES = new Set(["y", "yes", "예", "네", "ㅇ"]);
@@ -126,17 +134,23 @@ async function suggestedScripts(io: InitEnvironment, workspace: string): Promise
   return SUGGESTED_SCRIPTS.filter((entry) => typeof (scripts as Record<string, unknown>)[entry.script] === "string");
 }
 
-/** The config file init writes, as JSON text with a final line feed. */
+/**
+ * The config file init writes, as JSON text with a final line feed. U-26 (UXM-11): in the form of
+ * `provider` (anthropic when absent): anthropic's model and output limit at the top level, as
+ * before; another provider's under `providers.<provider>`, with `provider` naming it.
+ */
 export function initConfigText(choices: {
   readonly model: string;
   readonly commands: readonly CommandRule[];
   readonly protectedPaths: readonly InitSuggestedProtectedPath[];
   readonly language: MessageLanguage | null;
+  readonly provider?: ApiProviderName;
 }): string {
+  const provider = choices.provider ?? "anthropic";
+  const settings = { model: choices.model, maxOutputTokens: INIT_DEFAULT_MAX_OUTPUT_TOKENS };
   const config = {
     schemaVersion: 1,
-    model: choices.model,
-    maxOutputTokens: INIT_DEFAULT_MAX_OUTPUT_TOKENS,
+    ...(provider === "anthropic" ? settings : { provider, providers: { [provider]: settings } }),
     limits: { ...INIT_DEFAULT_LIMITS },
     policy: {
       ...DENY_ALL_POLICY,
@@ -221,7 +235,9 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
     return cliError("config_exists", `a file already exists at ${target.display}; it was left as it was. Edit it, or remove it and run init again`);
   }
 
-  const keySet = envValue(io.env, ANTHROPIC_API_KEY_ENV) !== null;
+  // U-26 (UXM-11, DR-46): the provider is asked at a terminal; otherwise anthropic, as before.
+  let provider: ApiProviderName = INIT_DEFAULT_PROVIDER;
+  let keySet = envValue(io.env, API_PROVIDERS[provider].keyEnv) !== null;
   const ask = args.json ? undefined : io.ask;
   const interactive = ask !== undefined;
   let model = MODEL_PLACEHOLDER;
@@ -232,6 +248,8 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
   const output = (status: InitStatus): InitOutput => ({
     schemaVersion: RESULT_SCHEMA_VERSION,
     kind: "init",
+    // U-26: only when it was asked, so an output without questions is as before.
+    ...(interactive ? { provider } : {}),
     status,
     exitCode: INIT_EXIT_CODES[status],
     config: { source: target.source, display: target.display },
@@ -266,11 +284,20 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
     );
     if (!yesNo(confirmed, fallback("confirm_create"))) return finish("declined");
 
+    // U-26: the provider, by number or name; Enter, an unknown answer or the end of input give the
+    // default. The file, the key and the model list are that provider's.
+    const listed = API_PROVIDER_NAMES.map((name, index) => `  ${index + 1}  ${name}`);
+    const answer = (await ask(`${listed.join("\n")}\n${messages.format("init.provider_pick", { provider: INIT_DEFAULT_PROVIDER })} `))?.trim().toLowerCase() ?? "";
+    provider = providerOf(answer);
+    tell(messages.format("init.provider_chosen", { provider }));
+    keySet = envValue(io.env, API_PROVIDERS[provider].keyEnv) !== null;
+
     // Model: listed only with a key, through `codaryn models`' listing (a real API request).
-    if (!keySet || io.listModels === undefined) {
+    const lister: ListModels | undefined = provider === "anthropic" ? (io.listModels ?? io.listers?.anthropic) : io.listers?.[provider];
+    if (!keySet || lister === undefined) {
       tell(messages.format("init.model_no_key"));
     } else {
-      const picked = await pickModel(io, ask, tell, messages);
+      const picked = await pickModel(io, ask, tell, messages, provider, lister);
       if (picked !== null) {
         model = picked;
         modelChosen = true;
@@ -310,7 +337,7 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
 
   try {
     await io.makeDirectory(path.dirname(target.path));
-    await io.writeNewFile(target.path, initConfigText({ model, commands, protectedPaths, language }));
+    await io.writeNewFile(target.path, initConfigText({ model, commands, protectedPaths, language, provider }));
   } catch (error) {
     if (isExists(error)) {
       return cliError("config_exists", `a file already exists at ${target.display}; it was left as it was`);
@@ -320,18 +347,30 @@ export async function runInit(io: InitEnvironment): Promise<CommandOutcome> {
   return finish("created");
 }
 
-/** Lists the models and asks for a number or an id. Null: none chosen (the placeholder stays). */
+/** U-26: the provider an answer names, by number (1-based, API_PROVIDER_NAMES order) or name; else the default. */
+function providerOf(answer: string): ApiProviderName {
+  const byNumber = /^[0-9]{1,2}$/.test(answer) ? API_PROVIDER_NAMES[Number(answer) - 1] : undefined;
+  if (byNumber !== undefined) return byNumber;
+  return (API_PROVIDER_NAMES as readonly string[]).includes(answer) ? (answer as ApiProviderName) : INIT_DEFAULT_PROVIDER;
+}
+
+/**
+ * Lists `provider`'s models with its key and `lister`, and asks for a number or an id. Null: none
+ * chosen (the placeholder stays).
+ */
 async function pickModel(
   io: InitEnvironment,
   ask: (question: string) => Promise<string | null>,
   tell: (text: string) => void,
   messages: MessageCatalog,
+  provider: ApiProviderName,
+  lister: ListModels,
 ): Promise<string | null> {
-  const resolved = resolveListSettings(io.env, null);
-  if (!resolved.ok || io.listModels === undefined) return null;
-  let listed: Awaited<ReturnType<ListAnthropicModels>>;
+  const resolved = resolveListSettings(io.env, null, provider);
+  if (!resolved.ok) return null;
+  let listed: Awaited<ReturnType<ListModels>>;
   try {
-    listed = await io.listModels(resolved.settings, io.anthropicDeps);
+    listed = await lister(resolved.settings, io.providerDeps?.[provider] ?? (provider === "anthropic" ? io.anthropicDeps : undefined));
   } catch {
     tell(messages.format("init.model_list_failed", { kind: "api_error" }));
     return null;

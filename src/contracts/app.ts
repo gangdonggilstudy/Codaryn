@@ -303,6 +303,8 @@ export type RunEvent =
   /**
    * A record as the journal stored it (masked), in `seq` order, after it was written. Model-given
    * tool names outside the built-in set read "(unknown tool)" and call ids are masked again (L-1).
+   * C-6a: every string in it is masked again with the run's gateway, its closed words too, so a
+   * registered value that matched one changes it; RunObserver.onStoredRecord gives the record as stored.
    */
   | { readonly kind: "record"; readonly record: JournalRecord }
   /** A run-level note outside the journal (for example the Y-4 hint). Also in the result's notices. */
@@ -330,6 +332,22 @@ export interface RunObserver {
    * `dismissed`: recorded as deny by `default`, never as the person's (DR-10).
    */
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
+  /**
+   * C-6a (PM, after U-289's secret-in-closed-word case): each record of the run as the journal
+   * stored it, in `seq` order, synchronously right after it was stored and before onEvent gets its
+   * copy. It carries the engine's masking only, the same as the run's journal.jsonl holds:
+   * - its free text (paths, outputs, messages) is masked;
+   * - its closed words (for example `type`, `code`, `permission`, `decision`, `by`, `kind`, a
+   *   check's `phase`, the provider) are as written, not masked again;
+   * - model-given tool names and call ids are as stored (onEvent's L-1 reading does not apply).
+   * For an adapter that draws people's lines in this process from those closed words, as the CLI
+   * draws its progress lines now. It masks each drawn line with RunHandle.mask before it shows it.
+   * onEvent's copy would not do: a registered value that matched a closed word changes it, and with
+   * it the line drawn. A host that hands anything of a run to a window or over IPC uses onEvent
+   * (DR-15) and never this; the GUI's engine host does not (u292 test). Exceptions are ignored and
+   * never change the run.
+   */
+  onStoredRecord?(record: JournalRecord): void;
 }
 
 /**

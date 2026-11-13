@@ -675,13 +675,18 @@ export const FIXED_MESSAGES = {
   // - The groups, in this order, each shown only when it has items: cleanup.group.confirm
   //   (removed with --confirm alone; leftovers among them), cleanup.group.include_not_reverted
   //   (only with --include-not-reverted besides), cleanup.group.delete_discarded (only with
-  //   --delete-discarded besides; an item that needs both flags is here, and its warning lines say
-  //   it was not reverted), cleanup.group.kept (no confirmation removes them in this selection).
+  //   --delete-discarded besides), cleanup.group.both (R-76 M-1: only with both flags besides: an
+  //   apply run not reverted whose discarded files go with it, its plan run), cleanup.group.kept (no
+  //   confirmation removes them in this selection), and last cleanup.group.blocked (R-76 L-1: the
+  //   plan's `blocked`, which cannot be removed in this cleanup, each with its
+  //   `cleanup.blocked.<code>`). Each group's `{count}` is the number of its items, so with a
+  //   confirmation the items that go are the confirm group's and those of each group whose flags it
+  //   gives (cleanup.group.both only with both).
   //   PM: not one word weaker than before. cleanup.group.include_not_reverted says at least what
   //   cleanup.confirm.not_reverted said (once their records are removed, those runs can no longer be
   //   reverted or put back by hand); cleanup.group.delete_discarded what cleanup.confirm.discarded
-  //   said (they are people's own files and cannot be put back). `{count}` items, `{files}` and
-  //   `{bytes}` their sizes.
+  //   said (they are people's own files and cannot be put back); cleanup.group.both both of them.
+  //   `{count}` items, `{files}` and `{bytes}` their sizes.
   // - Under each item (its name and cleanup.size, as before): one line per warning,
   //   `cleanup.warning.<code>`, in place of the "; " list; a kept item's `cleanup.kept.<keptFor>`.
   // - Then the commands (G-A: the renderer puts the options after the text on one line, one space
@@ -696,7 +701,9 @@ export const FIXED_MESSAGES = {
   "cleanup.group.confirm": { count: "count", bytes: "count" },
   "cleanup.group.include_not_reverted": { count: "count", bytes: "count" },
   "cleanup.group.delete_discarded": { count: "count", files: "count", bytes: "count" },
+  "cleanup.group.both": { count: "count", files: "count", bytes: "count" },
   "cleanup.group.kept": { count: "count" },
+  "cleanup.group.blocked": { count: "count" },
   "cleanup.command.confirm": {},
   "cleanup.command.all": {},
   "cleanup.no_selection": {},

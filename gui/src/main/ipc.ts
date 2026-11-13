@@ -39,12 +39,7 @@ import {
   toRevertView,
   toRunsReply,
   parseTreeArgs,
-  toTextReply,
-  textDigestOf,
-  toSaveOutcome,
-  parseSaveTextArgs,
   parseTextDirtyArgs,
-  MAX_TEXT_CHARS,
   isRunId,
   toDoctorView,
   toHostModelList,
@@ -79,6 +74,7 @@ import { basename } from "node:path";
 import type { SettingsProposal, SettingsProposals } from "./settings-proposals.js";
 import type { PlanApproval, PlanApprovals } from "./plans.js";
 import type { TextEdits } from "./text-edits.js";
+import { createTextFiles } from "./text-files.js";
 import type { Workspaces } from "./workspaces.js";
 
 const DOCTOR_TIMEOUT_MS = 60_000;
@@ -257,65 +253,10 @@ export function registerIpc(deps: IpcDeps): void {
     return workspaces.treeReply(parsed.workspace, dir, response.value);
   });
 
-  /**
-   * U-174 (DR-72, 3.14): the text view of one entry, by the id the main process gave in a tree listing
-   * or a changes reply (the page names no path). The app layer opens it (regular UTF-8 files up to
-   * 256 KiB, no link, not the state directory) and masks it; the reply is checked (toTextReply). The
-   * digest, line ending and byte order mark stay here (the edit unit binds them to its token).
-   */
-  handle(IPC_CHANNELS.openText, async (args): Promise<TextReply> => {
-    const parsed = args.length === 1 ? parseRevealArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const root = workspaces.path(parsed.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    const rel = workspaces.treeIds.resolve(parsed.workspace, parsed.node);
-    if (rel === null) return { ok: false, code: "unknown_entry" };
-    const state = await deps.host();
-    if (!("host" in state)) return { ok: false, code: state.failure };
-    const response = await state.host.call("readText", { workspace: root, path: rel }, TEXT_TIMEOUT_MS);
-    if (!response.ok) return { ok: false, code: response.error.code };
-    const reply = toTextReply(response.value);
-    // U-184: an editable file gets the token its save will need (the digest read stays here).
-    const digest = textDigestOf(response.value);
-    if (!reply.ok || !reply.opened || !reply.editable || digest === null) return reply;
-    return { ...reply, editToken: deps.textEdits.issue(parsed.workspace, rel, digest) };
-  });
-
-  /**
-   * U-184 (DR-72, 3.14; principle 6, GUI-D22): a person's save of a file the view opened editable,
-   * by its edit token and the textarea's text only. The first save of an opened file asks the person
-   * in this process's dialog (default: cancel). The app layer takes the workspace lock, judges the
-   * file and the new text again, and writes it as it was opened (line endings, byte order mark); the
-   * reply is checked (toSaveOutcome). A written file gets a new token; nothing goes into a run record.
-   */
-  handle(IPC_CHANNELS.saveText, async (args): Promise<SaveTextReply> => {
-    const parsed = args.length === 1 ? parseSaveTextArgs(args[0]) : null;
-    if (parsed === null) return { ok: false, code: "invalid_args" };
-    const edit = deps.textEdits.get(parsed.token);
-    if (edit === null) return { ok: false, code: "unknown_entry" };
-    const root = workspaces.path(edit.workspace);
-    if (root === null) return { ok: false, code: "unknown_workspace" };
-    // Longer than any file the view opens: refused before anyone is asked (the app layer judges the bytes).
-    if (parsed.text.length > MAX_TEXT_CHARS) return { ok: true, saved: false, status: "text_refused", readOnlyReasons: [], textProblems: ["too_large"], lockLeft: false };
-    if (!deps.textEdits.begin(parsed.token)) return { ok: false, code: "busy" };
-    try {
-      if (!edit.confirmed) {
-        if (!(await deps.confirmTextSave())) return { ok: false, code: "cancelled" };
-        deps.textEdits.confirm(parsed.token);
-      }
-      const state = await deps.host();
-      if (!("host" in state)) return { ok: false, code: state.failure };
-      const response = await state.host.call("writeText", { workspace: root, path: edit.path, text: parsed.text, baseDigest: edit.digest }, TEXT_TIMEOUT_MS);
-      if (!response.ok) return { ok: false, code: response.error.code };
-      const outcome = toSaveOutcome(response.value);
-      if (!("saved" in outcome) || outcome.saved !== true) return outcome;
-      const next = deps.textEdits.replace(parsed.token, outcome.digest);
-      if (next === null) return { ok: false, code: "unknown_entry" };
-      return { ok: true, saved: true, unchanged: outcome.unchanged, lockLeft: outcome.lockLeft, editToken: next };
-    } finally {
-      deps.textEdits.end(parsed.token);
-    }
-  });
+  // U-174, U-184 (3.14): the text view's open and save (main/text-files.ts; V-5 M-1: a reset holds for requests under way too).
+  const textFiles = createTextFiles({ workspaces, edits: deps.textEdits, host: deps.host, confirm: deps.confirmTextSave, timeoutMs: TEXT_TIMEOUT_MS });
+  handle(IPC_CHANNELS.openText, (args): Promise<TextReply> => textFiles.open(args));
+  handle(IPC_CHANNELS.saveText, (args): Promise<SaveTextReply> => textFiles.save(args));
 
   // U-184: the text view tells whether it holds an unsaved edit; closing the window asks then.
   handle(IPC_CHANNELS.textDirty, async (args): Promise<boolean> => {

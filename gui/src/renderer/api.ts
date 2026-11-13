@@ -238,6 +238,8 @@ export function asSaveText(value: unknown): SaveTextReply {
   const lockLeft = value["lockLeft"] === true;
   if (value["saved"] === true) {
     const token = value["editToken"];
+    // V-5 M-1: a write that ended after its token was dropped is saved with no next token.
+    if (token === null) return { ok: true, saved: true, unchanged: value["unchanged"] === true, lockLeft, editToken: null };
     return str(token) && HEX.test(token) ? { ok: true, saved: true, unchanged: value["unchanged"] === true, lockLeft, editToken: token } : { ok: false, code: "host_error" };
   }
   const status = value["status"];

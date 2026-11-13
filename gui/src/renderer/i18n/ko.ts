@@ -681,6 +681,7 @@ export const KO = {
   "text.noEdits": "고친 것 없음",
   "text.saving": "저장하는 중입니다.",
   "text.saved": "저장했습니다.",
+  "text.savedReopen": "저장하는 동안 설정이 바뀌어, 이어서 고치려면 파일을 다시 여세요.",
   "text.saveUnchanged": "파일과 같은 글이라 쓰지 않았습니다.",
   "text.saveCancelled": "저장하지 않았습니다(확인에서 \"저장하지 않음\"을 골랐습니다). 고친 글은 그대로 있습니다.",
   "text.lockLeft": "저장 뒤 작업 공간 잠금을 풀지 못했습니다. 그동안 실행은 거부됩니다. 이 작업 공간에서 도는 Codaryn이 없으면 .codaryn/lock.json을 지우세요.",

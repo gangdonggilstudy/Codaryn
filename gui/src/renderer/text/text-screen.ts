@@ -14,6 +14,9 @@
  *   and the new text again and writes it as it was opened. A refusal is said in words and the text
  *   stays. While a run goes on in this window the text is read only. Leaving the view (another
  *   screen, another file, F5) with an unsaved edit asks first; closing the window, the main process.
+ * - Codex V-5 M-2: a save's reply belongs to the view that sent it. Opening another file, reading
+ *   again, leaving or discarding makes a new view; a reply that comes later for an earlier view
+ *   changes nothing on the current one (its text, its unsaved mark, what the main process is told).
  * - A wrap switch (on by default, as the changes view). With wrapping off, line numbers stand beside
  *   the text (hidden from screen readers); the cursor's line and the line count are in the status line.
  */
@@ -89,6 +92,8 @@ export function textScreen(deps: TextDeps): TextScreen {
   /** The shown view's hooks: ask about the unsaved edit, and follow the run state. */
   let askToLeave: (() => void) | null = null;
   let followRun: (() => void) | null = null;
+  /** V-5 M-2: the view now; a save's reply for an earlier one is dropped. */
+  let current = 0;
 
   const setDirty = (value: boolean): void => {
     if (dirty === value) return;
@@ -123,6 +128,7 @@ export function textScreen(deps: TextDeps): TextScreen {
     show(root) {
       const workspace = deps.current();
       const chosen = target;
+      current += 1;
       setDirty(false);
       askToLeave = null;
       followRun = null;
@@ -171,6 +177,8 @@ export function textScreen(deps: TextDeps): TextScreen {
           () => {
             const go = pending;
             pending = null;
+            // The edit is let go: a save of it still under way no longer speaks for this view.
+            current += 1;
             setDirty(false);
             leaving.setAttribute("hidden", "");
             if (go === null) return;
@@ -188,6 +196,8 @@ export function textScreen(deps: TextDeps): TextScreen {
       };
 
       const load = async (): Promise<void> => {
+        current += 1;
+        const mine = current;
         setDirty(false);
         view.setAttribute("data-text-ready", "loading");
         body.replaceChildren(el("p", t.format("runs.loading")));
@@ -274,6 +284,8 @@ export function textScreen(deps: TextDeps): TextScreen {
           result.replaceChildren(el("p", t.format("text.saving")));
           const text = area.value;
           const reply = asSaveText(await api.saveText(token, text));
+          // V-5 M-2: the person moved on (another file, read again, left): this reply is not the current view's.
+          if (mine !== current) return;
           saving = false;
           if (!reply.ok) {
             result.replaceChildren(el("p", reply.code === "cancelled" ? t.format("text.saveCancelled") : `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`, { class: reply.code === "cancelled" ? "notice" : "error", "data-save": reply.code }));
@@ -281,6 +293,8 @@ export function textScreen(deps: TextDeps): TextScreen {
             token = reply.editToken;
             opened = text;
             const words = [el("p", t.format(reply.unchanged ? "text.saveUnchanged" : "text.saved"), { "data-save": reply.unchanged ? "unchanged" : "saved" })];
+            // V-5 M-1: saved, but its token was dropped meanwhile (settings written): read only until opened again.
+            if (reply.editToken === null) words.push(el("p", t.format("text.savedReopen"), { class: "notice", id: "text-saved-reopen" }));
             if (reply.lockLeft) words.push(el("p", t.format("text.lockLeft"), { class: "notice" }));
             result.replaceChildren(...words);
           } else {

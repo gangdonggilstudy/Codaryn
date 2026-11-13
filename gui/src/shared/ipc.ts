@@ -1032,8 +1032,11 @@ export type SaveTextReply =
       readonly unchanged: boolean;
       /** The workspace lock could not be taken back (the app layer says so; never hidden). */
       readonly lockLeft: boolean;
-      /** The token for the next save (the file as written now). */
-      readonly editToken: string;
+      /**
+       * The token for the next save (the file as written now); null when the token was dropped during
+       * the write (settings written, the window closed): saved, and the view must be opened again.
+       */
+      readonly editToken: string | null;
     }
   | {
       readonly ok: true;
@@ -1075,6 +1078,7 @@ function knownList<T extends string>(value: unknown, known: readonly T[]): T[] |
  * next token, which the caller issues); a refusal with its reasons or problems only.
  */
 export function toSaveOutcome(value: unknown): { readonly saved: true; readonly unchanged: boolean; readonly digest: string; readonly lockLeft: boolean } | Exclude<SaveTextReply, { readonly saved: true }> {
+  // (The next token is the caller's to issue; see main/text-files.ts.)
   if (!isObj(value) || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
   const fail = { ok: false, code: "host_error" } as const;
   const { status, digest, lockLeft } = value;

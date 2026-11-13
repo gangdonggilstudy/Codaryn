@@ -679,6 +679,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "text.noEdits": "No edits",
   "text.saving": "Saving.",
   "text.saved": "Saved.",
+  "text.savedReopen": "The settings changed during the save; open the file again to go on editing.",
   "text.saveUnchanged": "The text is the file's already, so nothing was written.",
   "text.saveCancelled": "Not saved (\"Do not save\" was chosen in the confirmation). Your edits are still here.",
   "text.lockLeft": "After the save the workspace lock could not be released. Runs are refused meanwhile. If no Codaryn is running in this workspace, delete .codaryn/lock.json.",

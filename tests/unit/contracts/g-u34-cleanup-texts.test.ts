@@ -17,16 +17,11 @@ import type { CleanupItemRef, CleanupTarget, MessageId, MessageParamKind } from 
 const SENTENCES: { readonly [id: string]: { readonly [param: string]: MessageParamKind } } = {
   "cleanup.size": { files: "count", bytes: "count" },
   "cleanup.nothing_removed": {},
-  "cleanup.next.confirm_runs": {},
-  "cleanup.next.not_reverted": { count: "count" },
-  "cleanup.next.discarded": {},
-  "cleanup.next.discarded_left": { count: "count" },
-  "cleanup.next.confirm_discarded": {},
-  "cleanup.next.confirm_leftovers": {},
 };
 
 describe("U-34: the cleanup lines that were English have message ids", () => {
-  test("the size, the outcome that removed nothing and the preview's next steps, with counts only", () => {
+  // U-86 retired the preview's six next steps (cleanup.next.*): the groups and two commands replace them.
+  test("the size and the outcome that removed nothing, with counts only", () => {
     const ids = MESSAGE_IDS as readonly string[];
     for (const [id, params] of Object.entries(SENTENCES)) {
       assert.ok(ids.includes(id), id);

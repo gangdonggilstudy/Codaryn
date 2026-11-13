@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { DISCARDED_DIR_NAME, PARKED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
+import { DISCARDED_DIR_NAME, NOT_REVERTED_WARNINGS, PARKED_DIR_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { ApplyResult, EngineResult } from "../../../src/contracts/index.js";
 import { assembleRun, createRevertCommand } from "../../../src/cli/assemble.js";
 import { runApply } from "../../../src/cli/plan-commands.js";
@@ -172,17 +172,24 @@ describe("DR-39: codaryn cleanup previews first and removes only what was confir
     // The catalog's lines (their words are N-B's), with the numbers of the JSON preview.
     const en = createMessageCatalog("en");
     assert.ok(preview.text.includes(en.format("cleanup.summary.runs", { count: summary.runs.count, bytes: summary.runs.bytes })), preview.text);
-    assert.ok(preview.text.includes(en.format("cleanup.confirm.runs", { count: plan.totals.runs.count, bytes: plan.totals.runs.bytes })), preview.text);
+    // U-86: the run's group, by what it needs (a run not reverted needs --include-not-reverted).
+    const item = plan.items[0];
+    assert.ok(item !== undefined, JSON.stringify(plan));
+    const group = item.warnings.some((code) => (NOT_REVERTED_WARNINGS as readonly string[]).includes(code)) ? "cleanup.group.include_not_reverted" : "cleanup.group.confirm";
+    assert.ok(preview.text.includes(en.format(group, { count: 1, bytes: item.size.bytes })), preview.text);
     assert.ok(preview.text.includes(target), preview.text);
     assert.ok(preview.text.includes("--confirm "), preview.text);
     assert.ok(await exists(runDir(work, target)));
   });
 
-  test("an empty selection is nothing to clean up", async () => {
+  // U-86 (UXM-10): with no selection option the preview offers two example commands.
+  test("no selection offers example commands", async () => {
     const { base } = await workspaceWithRuns(1);
     const preview = await cleanup(base, [], false);
     assert.equal(preview.exitCode, 0);
-    assert.ok(preview.text.includes(createMessageCatalog("en").format("cleanup.nothing")), preview.text);
+    const en = createMessageCatalog("en");
+    for (const id of ["cleanup.no_selection", "cleanup.example.older_than", "cleanup.example.reverted"] as const) assert.ok(preview.text.includes(en.format(id)), preview.text);
+    assert.equal(preview.text.includes(en.format("cleanup.nothing")), false, preview.text);
   });
 
   test("bad arguments are refused before anything is read", async () => {

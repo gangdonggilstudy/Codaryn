@@ -865,7 +865,39 @@ const expected = [
         dialogs: ["applyRun.message", "applyRun.message"],
       }),
   ],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "applyRun.message", "applyRun.message", "applyRun.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // U-247 (bundle A, proposal P-4) and U-212: analyze-private is listed; chosen before the config has an
+  // unreadable path, it says what it needs and that the config's command rule is in the way, and its start
+  // is refused for that rule (invalid_config, no hint, as the CLI without unreadable paths). The settings
+  // section adds an unreadable path (no dialog; an alert as the config has a command rule); analyze-private
+  // is then refused with the CLI's reason in words (unreadable_with_commands); k is set (no dialog) and
+  // unset (min_group_size_lowered, asked), and the path removed (unreadable_path_removed, asked).
+  [
+    "privateData",
+    (v) =>
+      v !== null &&
+      v.builtin === true &&
+      JSON.stringify(v.before) === JSON.stringify({ shown: true, needs: true, commands: true }) &&
+      typeof v.refused === "object" &&
+      v.refused.code === "invalid_config" &&
+      v.refused.hint === null &&
+      typeof v.refusedWith === "object" &&
+      v.refusedWith.code === "invalid_config" &&
+      v.refusedWith.hint === "unreadable_with_commands" &&
+      typeof v.refusedWith.text === "string" &&
+      v.refusedWith.text.includes(KO_MESSAGES["error.hint.unreadable_with_commands"]) &&
+      v.section === true &&
+      JSON.stringify(v.addProposal) === JSON.stringify(["ready", []]) &&
+      JSON.stringify(v.added) === JSON.stringify({ written: "written", paths: ["private-data"], alert: "alert" }) &&
+      JSON.stringify(v.raiseProposal) === JSON.stringify(["ready", []]) &&
+      JSON.stringify(v.raised) === JSON.stringify({ written: "written", k: "10" }) &&
+      JSON.stringify(v.noticeWith) === JSON.stringify({ shown: true, needs: false, commands: true }) &&
+      JSON.stringify(v.lowerProposal) === JSON.stringify(["widens", ["min_group_size_lowered"]]) &&
+      JSON.stringify(v.lowered) === JSON.stringify({ written: "written", k: "none" }) &&
+      JSON.stringify(v.removeProposal) === JSON.stringify(["widens", ["unreadable_path_removed"]]) &&
+      JSON.stringify(v.removed) === JSON.stringify({ written: "written", paths: [] }) &&
+      JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message"]),
+  ],
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "applyRun.message", "applyRun.message", "applyRun.message", "widen.message", "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

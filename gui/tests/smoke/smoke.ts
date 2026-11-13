@@ -1421,6 +1421,63 @@ startGui({
         };
       })();
 
+      // U-247 (bundle A, proposal P-4) and U-212: analyze-private chosen before the config has an unreadable
+      // path says what it needs and that the config's command rule (5b2) is in the way; its start is refused
+      // (the command rule first: invalid_config, no hint without unreadable paths, as the CLI). The settings
+      // screen adds an unreadable path (an alert: command rules with it); analyze-private is then refused with
+      // the CLI's reason in words (unreadable_with_commands); k is set and unset (a widening, asked), and the
+      // path removed (a widening, asked), so the config is as before for step 8. Every start here is refused
+      // when the task type is resolved, before any model request.
+      results["privateData"] = await (async () => {
+        let builtin = false;
+        const chooseAnalyzePrivate = async (): Promise<{ shown: boolean; needs: boolean; commands: boolean }> => {
+          await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+          await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+          const options = await js("[...document.querySelectorAll('#task-workflow option')].map((o) => o.value)");
+          builtin = Array.isArray(options) && options.includes("analyze-private");
+          await js("(() => { const w = document.getElementById('task-workflow'); w.value = 'analyze-private'; w.dispatchEvent(new Event('change')); return true; })()");
+          return (await js(
+            "({ shown: document.getElementById('task-private-notice')?.hasAttribute('hidden') === false, needs: document.getElementById('task-private-needs-unreadable') !== null, commands: document.getElementById('task-private-commands') !== null })",
+          )) as { shown: boolean; needs: boolean; commands: boolean };
+        };
+        const startRefused = async (): Promise<unknown> => {
+          await js("(() => { const g = document.getElementById('task-goal'); g.value = 'count the rows'; document.getElementById('task-run').click(); return true; })()");
+          return waitFor("(() => { const e = document.querySelector('#run-end [data-error]'); return e ? { code: e.getAttribute('data-error'), hint: e.getAttribute('data-hint'), text: e.textContent } : null; })()", 30_000);
+        };
+        const before = await chooseAnalyzePrivate();
+        const refused = await startRefused();
+        const asked = dialogs.length;
+        await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+        await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+        const section = await js("document.getElementById('settings-private') !== null");
+        const settle = (): Promise<unknown> =>
+          waitFor("(() => { const ready = document.getElementById('settings')?.getAttribute('data-settings-ready'); const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return ready === 'ok' && p === 'written' ? 'written' : p === 'not_confirmed' || p === 'error' ? p : null; })()");
+        const proposed = (): Promise<unknown> =>
+          waitFor("(() => { const p = document.getElementById('settings-proposal')?.getAttribute('data-proposal'); return p && p !== 'asking' ? [p, [...document.querySelectorAll('#settings-proposal .widening [data-kind]')].map((li) => li.getAttribute('data-kind'))] : null; })()");
+        const paths = (): Promise<unknown> => js("[...document.querySelectorAll('#settings-unreadable li > span:first-child')].map((s) => s.textContent)");
+        await js("(() => { document.getElementById('settings-unreadable-path').value = 'private-data'; document.getElementById('settings-unreadable-add').click(); return true; })()");
+        const addProposal = await proposed();
+        await js("document.getElementById('settings-write')?.click(); true");
+        const added = { written: await settle(), paths: await paths(), alert: await js("document.getElementById('settings-unreadable-commands')?.getAttribute('role') ?? null") };
+        await js("(() => { document.getElementById('settings-min-group-size-input').value = '10'; document.getElementById('settings-min-group-size-set').click(); return true; })()");
+        const raiseProposal = await proposed();
+        await js("document.getElementById('settings-write')?.click(); true");
+        const raised = { written: await settle(), k: await js("document.getElementById('settings-min-group-size')?.getAttribute('data-configured') ?? null") };
+        const noticeWith = await chooseAnalyzePrivate();
+        const refusedWith = await startRefused();
+        await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+        await waitFor("document.getElementById('settings')?.getAttribute('data-settings-ready') ?? null");
+        await js("document.getElementById('settings-min-group-size-unset')?.click(); true");
+        const lowerProposal = await proposed();
+        await js("document.getElementById('settings-write')?.click(); true");
+        const lowered = { written: await settle(), k: await js("document.getElementById('settings-min-group-size')?.getAttribute('data-configured') ?? null") };
+        await js("document.querySelector('#settings-unreadable [data-remove]')?.click(); true");
+        const removeProposal = await proposed();
+        await js("document.getElementById('settings-write')?.click(); true");
+        const removed = { written: await settle(), paths: await paths() };
+        return { builtin, before, refused, section, addProposal, added, raiseProposal, raised, noticeWith, refusedWith, lowerProposal, lowered, removeProposal, removed, dialogs: dialogs.slice(asked) };
+      })();
+
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");

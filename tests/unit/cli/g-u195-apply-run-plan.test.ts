@@ -17,10 +17,10 @@
 
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { PLAN_APPLIED_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
+import { PLAN_APPLIED_FILE_NAME, RECORDS_CHANGED_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../../src/contracts/index.js";
 import type { CliErrorOutput, EngineResult, ResolvedTaskSpec } from "../../../src/contracts/index.js";
 import type { RunArgs } from "../../../src/cli/args.js";
 import * as assembleModule from "../../../src/cli/assemble.js";
@@ -198,6 +198,26 @@ describe("U-195: codaryn apply of a run plan", () => {
     assert.ok(carried.system.includes(SUMMARY), "the summary is told as the approved plan, in the system text");
     assert.deepEqual(told, [made.value.workspaceRoot], "the host's hook is told once");
     assert.equal(errorOf(await apply(applyIo(made), applyArgs(made), made.value)).code, "plan_already_applied", "a plan is carried out once");
+  });
+
+  test("a records-changed mark written after the approval is found under the lock: nothing recorded, sent or written", { timeout: 60_000 }, async () => {
+    // U-195 second part (PM: as an apply of a plan of moves, U-1): the run's assembly holds the lock;
+    // a mark written right then is found before the engine starts.
+    const apply = applyChangesPlan as ApplyChangesPlan;
+    const made = await makeRunPlan();
+    await writeApplyScript(made.base);
+    const marking: Assemble = async (input) => {
+      const assembled = await assembleModule.assembleRun(input);
+      await writeFile(path.join(runDir(made, made.planRunId), RECORDS_CHANGED_FILE_NAME), "{}", "utf8");
+      return assembled;
+    };
+    const outcome = await apply(applyIo(made, { run: cliIo(made.base, { assemble: marking }) } as Partial<ApplyCommandEnvironment>), applyArgs(made), made.value);
+    assert.equal(errorOf(outcome).code, "plan_records_changed");
+    assert.equal(await readFile(path.join(made.base, "work", "docs", "guide.md"), "utf8"), OLD_GUIDE, "nothing written");
+    await assert.rejects(readFile(path.join(runDir(made, made.planRunId), PLAN_APPLIED_FILE_NAME), "utf8"), "the plan is not claimed");
+    const runs = (await readdir(path.join(made.base, "work", STATE_DIR_NAME, RUNS_DIR_NAME))).filter((name) => name !== made.planRunId);
+    assert.deepEqual(runs, [], "no run was recorded");
+    await assert.rejects(readFile(path.join(made.base, "work", STATE_DIR_NAME, "lock.json"), "utf8"), "the lock was let go");
   });
 
   test("a task resolved to plan apply refuses a run plan (run_not_plan)", { timeout: 60_000 }, async () => {

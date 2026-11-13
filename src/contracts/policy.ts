@@ -167,7 +167,8 @@ export interface PolicyGateOptions {
    * of the lists does not cover (`path`/`path_not_writable`), on the resolved path only
    * (checkEffective): the path's text first, then each entry's real path, so a link entry covers its
    * target. A policy's list covers what is below its entries; the plan's files only themselves. An
-   * unusable list or entry covers nothing. Absent or empty: no such limit. Every write access is
+   * unusable list or entry covers nothing, and (review V-3 M-1) an entry allows only after its own
+   * real path was found: one the workspace cannot resolve allows nothing, even when its text matches. Absent or empty: no such limit. Every write access is
    * judged, a plan action's paths too.
    */
   readonly writablePathSets?: readonly WritablePathSet[];

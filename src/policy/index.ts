@@ -8,6 +8,7 @@
  * resolved (checkEffective): for an allow list the text alone decides nothing, since a path that
  * misses every entry's text may still lie under an entry's real path, and one that matches an
  * entry's text may still lead elsewhere through a link below it. A protected path is reported first.
+ * Review V-3 M-1: an entry allows only after its own real path was found (path-set.ts, `misses`).
  */
 
 import { BUILTIN_TOOLS, PRIVACY_TOKEN_FRAGMENT_PATTERN_SOURCE } from "../contracts/index.js";

@@ -19,6 +19,11 @@
  *   covers its real path too. An entry whose real path is outside the workspace (or a dangling
  *   link) is unusable: it covers everything (`covers`) or nothing (`misses`). An entry inside the
  *   state directory is passed over: no file tool writes there.
+ * - U-175 (review V-3 M-1): an allow list (`misses`) covers a path only through an entry whose
+ *   real path was found: every entry is resolved before its text or its real path may allow, and
+ *   an entry that cannot be resolved (refused, or the resolving failed) allows nothing. What is not
+ *   checked is not allowed. A deny list (`covers`) keeps its rule exactly: its text covers at once,
+ *   since covering more is its safe side.
  */
 
 import path from "node:path";
@@ -73,7 +78,8 @@ export interface PathSet {
   /**
    * Effective check, for a path whose links are resolved: the text first, then every entry resolved
    * to its real path, so a link entry covers its target. Each call resolves again, so a link made
-   * during the run is seen as well.
+   * during the run is seen as well. For an allow list (`misses`) an entry counts only once it was
+   * resolved; `covers` alone never allows a write there.
    */
   coversEffective(relative: string, workspace: Workspace): Promise<boolean>;
 }
@@ -97,20 +103,42 @@ export function compilePathSet(value: unknown, options: PathSetOptions): PathSet
   if (entries.length === 0) return NOTHING;
   const lexical = entries.map(segmentsOf);
   const covers = (relative: string): boolean => lexical.some((entry) => entryCovers(entry, relative, options.match));
+  if (options.onUnusable === "covers") {
+    // A deny list (the protected paths' rule, unchanged): the text covers at once.
+    return {
+      covers,
+      async coversEffective(relative, workspace) {
+        if (covers(relative)) return true;
+        for (const entry of entries) {
+          const resolved = await workspace.resolve(entry, "read");
+          if (!resolved.ok) {
+            // Inside the state directory: file tools cannot write there anyway.
+            if (resolved.code === "state_dir") continue;
+            // Outside the workspace (or a dangling link): the entry is unusable. Fail closed.
+            return true;
+          }
+          if (entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
+        }
+        return false;
+      },
+    };
+  }
+  // An allow list (V-3 M-1): an entry allows only after its real path was found.
   return {
     covers,
     async coversEffective(relative, workspace) {
-      if (covers(relative)) return true;
-      for (const entry of entries) {
-        const resolved = await workspace.resolve(entry, "read");
-        if (!resolved.ok) {
-          // Inside the state directory: file tools cannot write there anyway.
-          if (resolved.code === "state_dir") continue;
-          // Outside the workspace (or a dangling link): the entry is unusable.
-          if (options.onUnusable === "covers") return true;
-          continue;
+      for (const [index, entry] of entries.entries()) {
+        let resolved: Awaited<ReturnType<Workspace["resolve"]>>;
+        try {
+          resolved = await workspace.resolve(entry, "read");
+        } catch {
+          continue; // not checked: it allows nothing
         }
-        if (entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
+        // Refused (outside the workspace, a dangling link, the state directory, a form the
+        // workspace does not accept): the entry allows nothing.
+        if (!resolved.ok) continue;
+        const text = lexical[index] as readonly string[];
+        if (entryCovers(text, relative, options.match) || entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
       }
       return false;
     },

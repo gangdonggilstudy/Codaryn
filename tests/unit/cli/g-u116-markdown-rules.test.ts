@@ -122,6 +122,19 @@ describe("U-116: anything else is refused before the run, by position", () => {
     });
   }
 
+  test("the diagnostic names the rule (headings, level and order are not schema field names yet)", () => {
+    const at = (rule: unknown) => {
+      const parsed = parseTask(task([rule]), TASK_DIR);
+      assert.ok(!parsed.ok, JSON.stringify(parsed));
+      return parsed.position;
+    };
+    assert.deepEqual(at(headings(undefined)), { code: "missing_field", field: AT });
+    assert.deepEqual(at(headings([])), { code: "invalid_value", field: AT });
+    assert.deepEqual(at(headings([{ text: "" }])), { code: "invalid_value", field: AT });
+    assert.deepEqual(at(headings([{ text: "Install", level: 9 }])), { code: "invalid_value", field: AT });
+    assert.deepEqual(at(headings([{ text: "Install" }], { order: "random" })), { code: "invalid_value", field: AT });
+  });
+
   test("an order other than any or in_order", () => {
     assert.deepEqual(refusal(headings([{ text: "Install" }], { order: "random" })), { code: "invalid_task", message: `${AT}.order must be "any" or "in_order"` });
   });

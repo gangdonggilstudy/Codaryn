@@ -22,6 +22,9 @@ import type {
   CodarynConfig,
   CommandRule,
   FileRule,
+  MarkdownFileRule,
+  MarkdownHeading,
+  MarkdownRuleType,
   Limits,
   ModelConfig,
   ModelProviderName,
@@ -36,6 +39,9 @@ import {
   ALL_TOOL_NAMES,
   COMPLETION_MODES,
   CONFIGURABLE_VERIFIER_KINDS,
+  MARKDOWN_RULE_TYPES,
+  MAX_MARKDOWN_HEADING_CHARS,
+  MAX_MARKDOWN_RULE_HEADINGS,
   MAX_REVIEW_CHECKLIST_ITEMS,
   MAX_REVIEW_CHECKLIST_ITEM_CHARS,
   PLAN_ACTION_KINDS,
@@ -451,9 +457,12 @@ export function parseSecretEnv(value: unknown, field: string): string[] {
   return outcome.ok ? [...outcome.names] : fail(outcome.message);
 }
 
-const RULE_TYPES = ["exists", "absent", "contains", "not_contains"];
+const RULE_TYPES = ["exists", "absent", "contains", "not_contains", ...MARKDOWN_RULE_TYPES];
 
 function parseRule(value: unknown, field: string): FileRule {
+  // U-116: a Markdown rule has fields of its own, so it is told apart before the fields are checked.
+  const given = typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Rec)["type"] : undefined;
+  if (given === "markdown_headings" || given === "markdown_links") return parseMarkdownRule(value, field, given);
   const rec = record(value, field, ["type", "path", "text"]);
   const type = rec["type"];
   const rulePath = text(rec["path"], `${field}.path`);
@@ -465,6 +474,43 @@ function parseRule(value: unknown, field: string): FileRule {
     return { type, path: rulePath, text: text(rec["text"], `${field}.text`) };
   }
   return fail(`${field}.type must be one of ${RULE_TYPES.join(", ")}`);
+}
+
+/**
+ * U-116 (P1 bundle C): a Markdown rule of file_rules in the contract's shape and limits
+ * (MarkdownFileRule). A heading's text is kept trimmed, as M-2 compares it; its limit counts code
+ * points after trimming. The verifier reads the file; the parser only checks the shape. The
+ * diagnostic names the rule: `headings`, `level` and `order` are not among the contract's
+ * SCHEMA_FIELD_NAMES yet; the message names the place.
+ */
+function parseMarkdownRule(value: unknown, field: string, type: MarkdownRuleType): MarkdownFileRule {
+  if (type === "markdown_links") {
+    const rec = record(value, field, ["type", "path"]);
+    return { type, path: text(rec["path"], `${field}.path`) };
+  }
+  const rec = record(value, field, ["type", "path", "headings", "order"]);
+  const rulePath = text(rec["path"], `${field}.path`);
+  const list = rec["headings"];
+  const atRule = (code: "invalid_value" | "missing_field" = "invalid_value") => ({ code, field });
+  if (!Array.isArray(list) || list.length === 0 || list.length > MAX_MARKDOWN_RULE_HEADINGS) {
+    fail(`${field}.headings must be an array of 1 to ${MAX_MARKDOWN_RULE_HEADINGS} headings`, undefined, atRule(list === undefined ? "missing_field" : "invalid_value"));
+  }
+  const headings = (list as unknown[]).map((item, index): MarkdownHeading => {
+    const at = `${field}.headings[${index}]`;
+    const heading = record(item, at, ["text", "level"]);
+    const written = heading["text"];
+    const trimmed = typeof written === "string" ? written.trim() : "";
+    const points = Array.from(trimmed).length;
+    if (typeof written !== "string" || points === 0 || points > MAX_MARKDOWN_HEADING_CHARS) {
+      fail(`${at}.text must be a string of 1 to ${MAX_MARKDOWN_HEADING_CHARS} characters after trimming`, undefined, atRule());
+    }
+    const level = heading["level"];
+    if (level !== undefined && !(typeof level === "number" && Number.isInteger(level) && level >= 1 && level <= 6)) fail(`${at}.level must be an integer from 1 to 6`, undefined, atRule());
+    return { text: trimmed, ...(level === undefined ? {} : { level: level as number }) };
+  });
+  const order = rec["order"];
+  if (order !== undefined && order !== "any" && order !== "in_order") fail(`${field}.order must be "any" or "in_order"`, undefined, atRule());
+  return { type, path: rulePath, headings, ...(order === undefined ? {} : { order: order as "any" | "in_order" }) };
 }
 
 function parseTableRef(value: unknown, field: string): TableRef {

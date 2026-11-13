@@ -1374,7 +1374,7 @@ node --test dist/tests/live/openai-live.js
 - **사용자 정의 작업 종류:** 설정 파일의 `workflows`에 `"<id>": { 정의 }`로 둔다. 내장 id는 다시 정의할 수 없다.
   - 필드: `label`, `tools`, `instructions`, `plan`(`none`·`apply`·`run`), `completion`(`verifiers`·`human_review`), `humanReview`(`checklist`), `allowCommands`, `policy`, `verifiers`, `limits`
   - **`plan: "run"`(실행 계획)은 18.11절이다.** 그 정의의 `tools`에는 계획 도구 `propose_changes`가 있어야 한다. 내장 작업 종류에는 그 도구를 둔 것이 없다. U-177이 막던 거부는 B-4(병합 `2ef6b48`)로 없어졌다.
-  - 틀린 값(예: `"later"`)은 `plan must be one of none, apply, run`이다(`invalid_task`, main `13ea1ac`의 실제 CLI).
+  - 틀린 값(예: `"later"`)은 `plan must be one of none, apply, run`이다(`invalid_task`, main `d7e4b14`의 실제 CLI).
   - 정의는 사용자 설정 파일에만 있다. task 파일은 작업 종류를 정의할 수 없고, 작업 공간 안의 파일로는 바꿀 수 없다(5절).
 - **task가 바꿀 수 있는 범위**(넘으면 `invalid_task`, 간편 형식·프로필의 값이면 `invalid_config`):
   - `tools`는 작업 종류가 주는 도구 안에서 줄이기만 한다.
@@ -2095,7 +2095,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261113T025137Z-78bbf85d
 - **이동 계획과 다른 점:** 수행이 적용기가 아니라 모델 실행이다. 검증기는 계획을 수행한 실행에서 돈다. 되돌리기는 보통 실행과 같다(`revert --run <계획을 수행한 실행>`).
 - **강제되는 것:** 파일 목록(그리고 `writablePaths`, 13절). 계획 뒤에 계획이나 그 파일이 바뀌면 첫 모델 요청 전에 멈춘다.
 - **강제되지 않는 것:** 요약은 모델이 쓴 작업 설명이다. 다이제스트에 묶여 계획과 함께 승인되지만, 실행이 그 설명대로 하는지는 아무것도 확인하지 않는다. 허용한 명령도 이 파일들에 묶이지 않는다(아래 "명령 규칙").
-- **확인:** 아래 출력은 모두 main `13ea1ac`의 실제 CLI를 저장소 밖 임시 폴더에서 대본 모델로 돌린 것이다(키 없음, `CODARYN_LANG=en`). 모델이 받은 글을 루프백(127.0.0.1)의 가짜 Anthropic 서버로 보는 것은 시험 `tests/unit/cli/g-u195-run-plan-cli.test.ts`의 몫이다.
+- **확인:** 아래 출력은 모두 main `d7e4b14`의 실제 CLI를 저장소 밖 임시 폴더에서 대본 모델로 돌린 것이다(키 없음, `CODARYN_LANG=en`). 모델이 받은 글을 루프백(127.0.0.1)의 가짜 Anthropic 서버로 보는 것은 시험 `tests/unit/cli/g-u195-run-plan-cli.test.ts`의 몫이다.
 
 **준비: 작업 종류 정의.** 내장 작업 종류에는 계획 도구 `propose_changes`를 둔 것이 없다. 설정 파일의 `workflows`에 정의를 두고 task의 `workflowRef`(또는 간편 형식의 `--workflow`)로 고른다(18.1절 "사용자 정의 작업 종류").
 
@@ -2131,27 +2131,27 @@ The agent's description (the model's own words, not checked, and not what you ap
   | Rewrite docs/guide.md for new users and add docs/new.md with a short
   | start page.
 Read the plan with codaryn plan, and apply it with codaryn apply if you approve it.
-Run id: 20261113T093644Z-eea6a90e
-Report: codaryn report --workspace <workspace> --run 20261113T093644Z-eea6a90e
-Plan: codaryn plan --task <task.json> --run 20261113T093644Z-eea6a90e
-Apply after approval: codaryn apply --task <task.json> --run 20261113T093644Z-eea6a90e --digest <digest>
-  c8d90ef77a98838fbad3e7045a8a6341c734db090f6676d595c2003378faf1cc
+Run id: 20261113T133015Z-abb9ef11
+Report: codaryn report --workspace <workspace> --run 20261113T133015Z-abb9ef11
+Plan: codaryn plan --task <task.json> --run 20261113T133015Z-abb9ef11
+Apply after approval: codaryn apply --task <task.json> --run 20261113T133015Z-abb9ef11 --digest <digest>
+  c3ae9b1c551156d89f4f1c3b0fda6c72c355a4d986429d5a2e697ca74ca881cf
 ```
 
-- stdout JSON의 `plan`은 {"digest":"c8d90ef77a98838fbad3e7045a8a6341c734db090f6676d595c2003378faf1cc","actions":2,"kind":"changes"}이고 `planSummary`가 요약이다.
+- stdout JSON의 `plan`은 {"digest":"c3ae9b1c551156d89f4f1c3b0fda6c72c355a4d986429d5a2e697ca74ca881cf","actions":2,"kind":"changes"}이고 `planSummary`가 요약이다.
 - 이 끝 요약은 이동 계획의 글을 그대로 쓴다: `actions 2`, 그리고 요약 표지의 `not what you approve`. 실행 계획에서는 요약도 다이제스트에 묶여 승인된다(아래 계획 보기의 글). 아래 "알려진 한계"에 적었다.
 
 **2. 계획 보기(`plan`).**
 
 ```
-Plan of run 20261113T093644Z-eea6a90e: 2 file(s) to write, pending
-Digest: c8d90ef77a98838fbad3e7045a8a6341c734db090f6676d595c2003378faf1cc
+Plan of run 20261113T133015Z-abb9ef11: 2 file(s) to write, pending
+Digest: c3ae9b1c551156d89f4f1c3b0fda6c72c355a4d986429d5a2e697ca74ca881cf
   1. modify  docs/guide.md
   2. create  docs/new.md
 The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan):
   | Rewrite docs/guide.md for new users and add docs/new.md with a short
   | start page.
-To have a run make these changes: codaryn apply <the same task form> --run 20261113T093644Z-eea6a90e --digest c8d90ef77a98
+To have a run make these changes: codaryn apply <the same task form> --run 20261113T133015Z-abb9ef11 --digest c3ae9b1c5511
 The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.
 ```
 
@@ -2182,24 +2182,24 @@ codaryn: turn 4
 codaryn: check #1 — passed (pass)
 codaryn: finished — done (verified)
 ── Result: done — every configured check passed (done/verified) ──
-Plan run: 20261113T093644Z-eea6a90e
+Plan run: 20261113T133015Z-abb9ef11
 Checks passed: 1 of 1 (within the configured checks)
 Files changed: 2
   docs/guide.md (changed)
   docs/new.md (created)
 Denied calls: 1
-Writes refused because the file is not one this plan approved: 1
+Writes denied because the file is not in the approved plan: 1
 To change other files, make a new plan that names them and approve it.
 Usage: model turns 4 · tool calls 2 · 0.1 s
 The agent's last message (the agent's own words, not a verified fact):
   | done
 Read the report, and revert if needed.
-Run id: 20261113T093731Z-a112830e
-Report: codaryn report --workspace <workspace> --run 20261113T093731Z-a112830e
-Revert: codaryn revert --workspace <workspace> --run 20261113T093731Z-a112830e
+Run id: 20261113T133016Z-1a398a56
+Report: codaryn report --workspace <workspace> --run 20261113T133016Z-1a398a56
+Revert: codaryn revert --workspace <workspace> --run 20261113T133016Z-1a398a56
 ```
 
-- stdout JSON은 그 실행의 결과다(`kind: "run"`). `planRunId`는 "20261113T093644Z-eea6a90e", `planDigest`는 계획의 다이제스트다. 이동 계획의 `apply`처럼 `ApplyResult`가 아니다.
+- stdout JSON은 그 실행의 결과다(`kind: "run"`). `planRunId`는 "20261113T133015Z-abb9ef11", `planDigest`는 계획의 다이제스트다. 이동 계획의 `apply`처럼 `ApplyResult`가 아니다.
 - 계획을 수행한 실행의 목표는 계획을 만든 실행의 목표(사람이 준 글)다. 요약은 목표가 아니라 시스템 글의 승인된 계획 아래에 들어간다(DR-74 (2)). 이번 실행의 첫 모델 요청에서 확인한 시스템 글의 그 부분:
 
 ```
@@ -2216,22 +2216,22 @@ Rewrite docs/guide.md for new users and add docs/new.md with a short start page.
 
 ```
 run id (UTC)               started (local)      changes  result
-20261113T093731Z-a112830e  2026-11-13 18:37:31  2        done (done/verified) · carries out the plan of run 20261113T093644Z-eea6a90e
-20261113T093644Z-eea6a90e  2026-11-13 18:36:44  0        plan applied by run 20261113T093731Z-a112830e (needs-input/plan_pending)
+20261113T133016Z-1a398a56  2026-11-13 22:30:16  2        done (done/verified) · carries out the plan of run 20261113T133015Z-abb9ef11
+20261113T133015Z-abb9ef11  2026-11-13 22:30:15  0        plan applied by run 20261113T133016Z-1a398a56 (needs-input/plan_pending)
 ```
 
 - `report --run <계획을 수행한 실행>`의 줄과, 계획을 만든 실행의 `report`의 줄(차례로). `report --json`의 `result`도 `planRunId`·`planDigest`를 옮긴다.
 
 ```
-- Plan run: `20261113T093644Z-eea6a90e`, digest `c8d90ef77a98838fbad3e7045a8a6341c734db090f6676d595c2003378faf1cc` (this run carried out its approved plan)
-- Plan: 2 file(s) to write, carried out by run `20261113T093731Z-a112830e` (its report: `codaryn report --run 20261113T093731Z-a112830e`).
+- Plan run: `20261113T133015Z-abb9ef11`, digest `c3ae9b1c551156d89f4f1c3b0fda6c72c355a4d986429d5a2e697ca74ca881cf` (this run carried out its approved plan)
+- Plan: 2 file(s) to write, carried out by run `20261113T133016Z-1a398a56` (its report: `codaryn report --run 20261113T133016Z-1a398a56`).
 ```
 
 - `plan`을 다시 보면 머리와 끝 줄이 이렇다:
 
 ```
-Plan of run 20261113T093644Z-eea6a90e: 2 file(s) to write, applied
-Applied by run 20261113T093731Z-a112830e (2026-11-13 18:37:31)
+Plan of run 20261113T133015Z-abb9ef11: 2 file(s) to write, applied
+Applied by run 20261113T133016Z-1a398a56 (2026-11-13 22:30:16)
 ```
 
 - 되돌리기는 보통 실행과 같다(11절). 미리보기:
@@ -2258,13 +2258,13 @@ codaryn: error — this plan was already applied, so nothing was changed (plan_a
 codaryn: run started — provider scripted
 codaryn: finished — failed (plan_stale)
 ── Result: failed — the plan no longer fits the workspace, so nothing was applied (failed/plan_stale) ──
-Plan run: 20261113T093844Z-dbe324d9
+Plan run: 20261113T133018Z-a3b2c29a
 Checks: none configured
 Files changed: 0
-Usage: model turns 0 · tool calls 0 · 0.1 s
+Usage: model turns 0 · tool calls 0 · 0 s
 Check the workspace, then run the same task again to make a new plan.
-Run id: 20261113T093846Z-f3fa2313
-Report: codaryn report --workspace <workspace> --run 20261113T093846Z-f3fa2313
+Run id: 20261113T133019Z-526b357c
+Report: codaryn report --workspace <workspace> --run 20261113T133019Z-526b357c
 ```
 
 - 결과의 `notices`: `["the approved plan no longer fits the workspace: file 0 is not as it was when the plan was made; nothing was written"]`
@@ -2273,7 +2273,7 @@ Report: codaryn report --workspace <workspace> --run 20261113T093846Z-f3fa2313
 
 **7. `writablePaths`와의 교집합.** 계획을 수행한 실행의 쓰기는 승인된 파일 목록(정확히 그 파일들)과 `writablePaths`(13절)의 모든 목록이 함께 덮어야 한다.
 
-- task의 `writablePaths`가 `["docs"]`일 때 계획에 없는 `docs/extra.md`는 `writablePaths` 안이지만 거부됐다: `Writes refused because the file is not one this plan approved: 1`.
+- task의 `writablePaths`가 `["docs"]`일 때 계획에 없는 `docs/extra.md`는 `writablePaths` 안이지만 거부됐다: `Writes denied because the file is not in the approved plan: 1`.
 - 계획을 만든 뒤 task의 목록을 `["docs/new.md"]`로 좁혀 승인하자 `failed`/`plan_stale`, 모델 0턴이었다(`notices`: `["the approved plan is not allowed by the policy now: file 0: path/path_not_writable; nothing was written"]`).
 - 처음부터 그 목록으로 계획을 만들면, 목록 밖 파일을 담은 `propose_changes`가 거부된다. 그러면 계획 없이 끝나 `failed`/`model_error`다:
 
@@ -2291,14 +2291,14 @@ codaryn: Writes denied because the file is not in writablePaths: 1. To allow a f
 Checks: none configured
 Files changed: 0
 Denied calls: 1
-Writes refused because the file is outside the settings' writablePaths: 1
+Writes denied because the file is not in writablePaths: 1
 To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.
 Usage: model turns 3 · tool calls 1 · 0.1 s
 The agent's last message (the agent's own words, not a verified fact):
   | The plan is ready.
 Check with codaryn doctor and codaryn models, then try again later.
-Run id: 20261113T093943Z-607df86e
-Report: codaryn report --workspace <workspace> --run 20261113T093943Z-607df86e
+Run id: 20261113T133023Z-bece045a
+Report: codaryn report --workspace <workspace> --run 20261113T133023Z-bece045a
 ```
 
   모델은 도구 결과로 `error (policy_denied): denied by policy: file 0: path/path_not_writable. …`를 받는다. 이 실행은 계획을 만드는 실행이라 `writablePaths` 안내가 나온다(진행 줄과 끝 요약에 같은 글이 두 번). `model_error`의 마지막 줄 `Check with codaryn doctor and codaryn models, then try again later.`는 이 경우에 맞지 않는다(아래 "알려진 한계").
@@ -2327,7 +2327,7 @@ Report: codaryn report --workspace <workspace> --run 20261113T093943Z-607df86e
   - 사람이 그 작업 공간을 지정해 다이제스트로 승인해야 하므로 고치지 않는다. 계획에 작업 공간을 묶으면 폴더를 옮길 때 승인을 기다리는 계획이 깨진다. 이동 계획도 같다. 기록 없는 작업 공간에 실행 id만 주면 `run_not_found`다(cli-contract 18.4).
 - **요약과 명령:** 요약은 강제되지 않고, 허용한 명령은 승인한 파일에 묶이지 않는다(위 8).
 - **`propose_changes`가 없는 작업 종류:** 실행 전에 거부되지 않고 `failed`/`model_error`로 끝나며, `doctor`도 알리지 않는다(위 "준비"). 그 마지막 줄의 안내(모델 설정 점검)도 이 경우에 맞지 않는다.
-- **사람용 글의 어긋남(main `13ea1ac`):**
+- **사람용 글의 어긋남(main `d7e4b14`):**
   - 계획을 만든 실행의 끝 요약은 이동 계획의 글(`actions`, 요약은 `not what you approve`)이다. 계획 보기는 요약이 계획과 함께 승인된다고 말한다.
   - 터미널의 승인 질문은 이동 계획과 같은 `Apply this plan? [y/N]`이다. 실행 계획용 질문 글(파일 도구가 이 파일들에만 쓰는 실행을 시작한다는 것, 요약이 강제되지 않는다는 것, 명령의 알림)은 카탈로그에 있지만 CLI가 아직 쓰지 않는다(cli-contract 18.9).
   - 검증기 없는 task에서 계획을 수행한 실행은 일을 하고도 `needs-input`/`no_verifier`로 끝난다. 그때 `runs`는 계획을 만든 실행을 `plan apply not finished (apply run …, no_verifier)`라 부르고, `plan`은 `applied`, `report`는 `carried out by run …, which ended as no_verifier`라 부른다.

@@ -10,8 +10,11 @@
  * must be the walked file's, the path walked again must be the same objects, and only then are the
  * bytes read through that handle. A swap seen is `io_error` (the contract's codes stay); nothing
  * read through the swapped path is given.
- * - Not closed: listing (`list`, readdir by path), writing (`writeText`) and the plan executor
- *   still use the path string after their checks; Node has no calls relative to a folder handle.
+ * - Codex V-10: folders are compared on their change time too (guard.ts), so a folder swapped and
+ *   swapped back between the two walks is seen. `list` (W-3) is guarded the same way: every folder it
+ *   reads is looked at before and checked at the end. A change seen is tried again, then io_error.
+ * - Not closed: writing (`writeText`) and the plan executor still use the path string after their
+ *   checks; Node has no calls relative to a folder handle (see guard.ts for what stays open).
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -31,7 +34,8 @@ import type {
   WriteTextOutcome,
   WriteTextRequest,
 } from "../contracts/index.js";
-import type { FileId, FileLayer, IdStat } from "./file-layer.js";
+import type { FileLayer } from "./file-layer.js";
+import { FolderWatch, retried, sameChain, sameId, walkChain } from "./guard.js";
 import { classifyAgainstRoot, isStateDirName, isValidPathInput } from "./lexical.js";
 
 function errorCode(error: unknown): string | undefined {
@@ -47,12 +51,8 @@ function isMissing(error: unknown): boolean {
   return code === "ENOENT" || code === "ENOTDIR";
 }
 
-const sameId = (a: FileId | undefined, b: FileId | undefined): boolean => a !== undefined && b !== undefined && a.dev === b.dev && a.ino === b.ino;
-const sameIds = (a: readonly FileId[], b: readonly FileId[]): boolean => a.length === b.length && a.every((id, index) => sameId(id, b[index]));
-
 /** U-189: why a guarded read did not happen, in the contract's codes. */
 type ReadFailure = "not_found" | "not_text" | "too_large" | "io_error";
-type Walk = { readonly ok: true; readonly ids: readonly FileId[]; readonly last: IdStat } | { readonly ok: false; readonly code: ReadFailure };
 
 function sha256(bytes: Uint8Array): ContentHash {
   return createHash("sha256").update(bytes).digest("hex");
@@ -123,56 +123,42 @@ export async function createWorkspaceWithFileLayer(
   }
 
   /**
-   * U-189: `lstat` of the root and of every prefix of the real path `relative`: the root and each
-   * folder a folder, never a link (a link now means a swap: `io_error`). The last is what the path
-   * names; its kind is the caller's to judge.
+   * U-189: the bytes of the checked file, read through a handle whose identity is the walked file's,
+   * the real path walked again the same (guard.ts: folders unchanged too, so a swap undone is seen).
+   * A change seen is tried again (retried); still seen, it is io_error.
    */
-  async function walk(relative: string): Promise<Walk> {
-    const segments = relative === "." ? [] : relative.split("/");
-    const places = [root, ...segments.map((_segment, index) => path.join(root, ...segments.slice(0, index + 1)))];
-    const ids: FileId[] = [];
-    let last: IdStat | undefined;
-    for (const [index, place] of places.entries()) {
-      try {
-        last = await files.lstatId(place);
-      } catch (error) {
-        return { ok: false, code: isMissing(error) ? "not_found" : "io_error" };
-      }
-      if (last.isSymbolicLink()) return { ok: false, code: "io_error" };
-      if (index < places.length - 1 && !last.isDirectory()) return { ok: false, code: index === 0 ? "io_error" : "not_found" };
-      ids.push(last.id);
-    }
-    return last === undefined ? { ok: false, code: "io_error" } : { ok: true, ids, last };
-  }
-
-  /** U-189: the bytes of the checked file, read through a handle whose identity is the walked file's. */
   async function readChecked(target: ResolvedPath): Promise<{ readonly ok: true; readonly bytes: Uint8Array } | { readonly ok: false; readonly code: ReadFailure }> {
-    const first = await walk(target.relative);
-    if (!first.ok) return first;
-    if (!first.last.isFile()) return { ok: false, code: "not_text" };
-    if (first.last.size > BigInt(MAX_READ_BYTES)) return { ok: false, code: "too_large" };
-    let handle;
-    try {
-      handle = await files.openRead(target.absolute);
-    } catch (error) {
-      const code = errorCode(error);
-      if (isMissing(error)) return { ok: false, code: "not_found" };
-      // ELOOP: the last segment became a link (O_NOFOLLOW).
-      return { ok: false, code: code === "EISDIR" ? "not_text" : "io_error" };
-    }
-    try {
-      const held = await handle.stat();
-      if (!held.isFile()) return { ok: false, code: "not_text" };
-      // The opened file must be the one walked, and the path walked again the same objects.
-      if (!sameId(held.id, first.ids.at(-1))) return { ok: false, code: "io_error" };
-      const second = await walk(target.relative);
-      if (!second.ok || !sameIds(first.ids, second.ids)) return { ok: false, code: "io_error" };
-      return { ok: true, bytes: await handle.read(MAX_READ_BYTES + 1) };
-    } catch {
-      return { ok: false, code: "io_error" };
-    } finally {
-      await handle.close().catch(() => undefined);
-    }
+    const attempt = async (): Promise<{ readonly bytes: Uint8Array } | ReadFailure | "changed"> => {
+      const first = await walkChain(files.lstatId, root, target.relative);
+      if (!first.ok) return first.code;
+      if (!first.last.isFile()) return "not_text";
+      if (first.last.size > BigInt(MAX_READ_BYTES)) return "too_large";
+      let handle;
+      try {
+        handle = await files.openRead(target.absolute);
+      } catch (error) {
+        const code = errorCode(error);
+        if (isMissing(error)) return "not_found";
+        // ELOOP: the last segment became a link (O_NOFOLLOW).
+        return code === "EISDIR" ? "not_text" : code === "ELOOP" ? "changed" : "io_error";
+      }
+      try {
+        const held = await handle.stat();
+        if (!held.isFile()) return "not_text";
+        // The opened file must be the one walked, and the path walked again the same objects, folders unchanged.
+        if (!sameId(held.id, first.seen.at(-1)?.id)) return "changed";
+        const second = await walkChain(files.lstatId, root, target.relative);
+        if (!second.ok || !sameChain(first.seen, second.seen)) return "changed";
+        return { bytes: await handle.read(MAX_READ_BYTES + 1) };
+      } catch {
+        return "io_error";
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+    };
+    const outcome = await retried(attempt);
+    if (outcome === "changed") return { ok: false, code: "io_error" };
+    return typeof outcome === "string" ? { ok: false, code: outcome } : { ok: true, bytes: outcome.bytes };
   }
 
   async function readText(target: ResolvedPath): Promise<ReadTextOutcome> {
@@ -202,17 +188,27 @@ export async function createWorkspaceWithFileLayer(
     };
   }
 
+  /**
+   * U-189 (W-3, Codex V-10): the listing reads only the folders the checked path leads to. The real
+   * path is walked first; each folder read is looked at before its readdir (a folder, not a link);
+   * at the end the path is walked again and every folder read must be the same object, unchanged
+   * (guard.ts). A change seen is tried again (retried); still seen, it is io_error, and no name read
+   * through a swapped folder is given.
+   */
   async function list(dir: ResolvedPath): Promise<ListOutcome> {
     if (!issued.has(dir)) {
       return { ok: false, code: "io_error" };
     }
-    try {
-      if (!(await files.stat(dir.absolute)).isDirectory()) {
-        return { ok: false, code: "not_found" };
-      }
-    } catch (error) {
-      return { ok: false, code: isMissing(error) ? "not_found" : "io_error" };
-    }
+    const outcome = await retried(() => listOnce(dir));
+    return outcome === "changed" ? { ok: false, code: "io_error" } : outcome;
+  }
+
+  async function listOnce(dir: ResolvedPath): Promise<ListOutcome | "changed"> {
+    const first = await walkChain(files.lstatId, root, dir.relative);
+    if (!first.ok) return first.code === "changed" ? "changed" : { ok: false, code: first.code === "not_found" ? "not_found" : "io_error" };
+    if (!first.last.isDirectory()) return { ok: false, code: "not_found" };
+    const watch = new FolderWatch(files.lstatId);
+    const CHANGED = new Error("changed");
 
     interface Pending extends ListEntry {
       readonly absolute: string;
@@ -223,6 +219,7 @@ export async function createWorkspaceWithFileLayer(
     const pending: Pending[] = [];
 
     async function expand(absolute: string, relative: string): Promise<void> {
+      if (!(await watch.enter(absolute))) throw CHANGED;
       for (const entry of await files.readdir(absolute)) {
         if (relative === "." && isStateDirName(entry.name)) {
           continue;
@@ -237,24 +234,28 @@ export async function createWorkspaceWithFileLayer(
     }
 
     const entries: ListEntry[] = [];
+    let truncated = false;
     try {
       await expand(dir.absolute, dir.relative);
       for (;;) {
         const next = pending.pop();
-        if (next === undefined) {
-          return { ok: true, entries, truncated: false };
-        }
+        if (next === undefined) break;
         if (entries.length >= MAX_SEARCH_ENTRIES) {
-          return { ok: true, entries, truncated: true };
+          truncated = true;
+          break;
         }
         entries.push({ relative: next.relative, kind: next.kind });
         if (next.kind === "dir") {
           await expand(next.absolute, next.relative);
         }
       }
-    } catch {
-      return { ok: false, code: "io_error" };
+    } catch (error) {
+      return error === CHANGED ? "changed" : { ok: false, code: "io_error" };
     }
+    // Every folder read still the one checked, unchanged; the path to it too.
+    const second = await walkChain(files.lstatId, root, dir.relative);
+    if (!second.ok || !sameChain(first.seen, second.seen) || !(await watch.unchanged())) return "changed";
+    return { ok: true, entries, truncated };
   }
 
   async function writeText(request: WriteTextRequest): Promise<WriteTextOutcome> {

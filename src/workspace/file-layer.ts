@@ -26,6 +26,12 @@ export interface FileId {
 export interface IdStat {
   readonly id: FileId;
   readonly size: bigint;
+  /**
+   * Change time in nanoseconds. A folder's changes when an entry in it is added, removed or renamed
+   * (a junction swapped in and back out included), so two walks that see the same folders unchanged
+   * saw no swap in between.
+   */
+  readonly ctime: bigint;
   isFile(): boolean;
   isDirectory(): boolean;
   isSymbolicLink(): boolean;
@@ -79,6 +85,7 @@ function idStat(stat: BigIntStats): IdStat {
   return {
     id: { dev: stat.dev, ino: stat.ino },
     size: stat.size,
+    ctime: stat.ctimeNs,
     isFile: () => stat.isFile(),
     isDirectory: () => stat.isDirectory(),
     isSymbolicLink: () => stat.isSymbolicLink(),

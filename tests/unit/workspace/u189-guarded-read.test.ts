@@ -134,7 +134,7 @@ test("U-189: a folder swapped after the open: the second walk sees it (or the pl
   else assert.ok(read.ok && read.snapshot.text === "inside\n", "no swap: the checked file, as it is");
 });
 
-test("U-189: the file swapped for another between the walk and the open: io_error", async () => {
+test("U-189: the file replaced by another at the same path between the walk and the open: tried again, the file there now", async () => {
   let armed = false;
   const layer: FileLayer = {
     ...nodeFileLayer,
@@ -151,7 +151,9 @@ test("U-189: the file swapped for another between the walk and the open: io_erro
   const resolved = await prepared(workspace, "w4");
   armed = true;
   const read = await workspace.readText(resolved);
-  assert.deepEqual(read, { ok: false, code: "io_error" });
+  // Codex V-10: the change is seen and the read tried again; the path is the same place, so the file there
+  // now is given (a replacement in place is not a swap of location: nothing from elsewhere comes out).
+  assert.ok(read.ok && read.snapshot.text === "another file\n", JSON.stringify(read));
 });
 
 test("U-189: missing, a folder, and too large keep their codes", async () => {

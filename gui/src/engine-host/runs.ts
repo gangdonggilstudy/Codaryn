@@ -20,11 +20,11 @@ import type { HostFailure, Shown } from "./settings.js";
 /** One app layer RunEvent turned into a progress item, or null when it shows nothing. */
 export type RunItemOf = (event: unknown) => HostRunItem | null;
 
-/** The app layer's StartRunRequest for the quick form. */
+/** The app layer's StartRunRequest: the quick form, or (U-63) a task file with its variables file. */
 export interface HostStartRunRequest {
-  readonly input: { readonly kind: "quick"; readonly workspace: string; readonly goal: string };
+  readonly input: { readonly kind: "quick"; readonly workspace: string; readonly goal: string } | { readonly kind: "task"; readonly taskPath: string };
   readonly configPath: null;
-  readonly varsFile: null;
+  readonly varsFile: string | null;
   readonly profile: string | null;
   readonly workflowRef: string | null;
   readonly cancelFile: null;
@@ -127,6 +127,8 @@ interface Running {
 
 export interface RunRegistry {
   start(args: { readonly workspace: string; readonly goal: string; readonly profile: string | null; readonly workflowRef: string | null }): Promise<Obj | HostFailure>;
+  /** U-63 (3.5): a run of a task file (it names its workspace, goal and settings), with a variables file or none. */
+  startTask(args: { readonly taskPath: string; readonly varsFile: string | null }): Promise<Obj | HostFailure>;
   /**
    * GU-5: applies a plan (DR-1, DR-2): the same events and cancel as a run. `consent` is the
    * person's DR-21 consent for this plan's digest, set only by the main process after its dialog.
@@ -287,6 +289,13 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             { input: { kind: "quick", workspace: args.workspace, goal: args.goal }, configPath: null, varsFile: null, profile: args.profile, workflowRef: args.workflowRef, cancelFile: null },
             observer,
           ),
+        (done) => runResultValue(done, deps.shown, deps.shownText),
+      );
+    },
+
+    startTask(args) {
+      return launch(
+        (observer) => deps.startRun({ input: { kind: "task", taskPath: args.taskPath }, configPath: null, varsFile: args.varsFile, profile: null, workflowRef: null, cancelFile: null }, observer),
         (done) => runResultValue(done, deps.shown, deps.shownText),
       );
     },

@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   listModels: "codaryn:models:list",
   selectModel: "codaryn:models:select",
   startRun: "codaryn:run:start",
+  startTaskRun: "codaryn:run:starttask",
   cancelRun: "codaryn:run:cancel",
   listRuns: "codaryn:runs:list",
   previewRevert: "codaryn:runs:previewrevert",
@@ -593,6 +594,17 @@ export const MAX_GOAL_CHARS = 20_000;
 const NAME = /^[^\u0000-\u001f\u007f]{1,200}$/;
 
 /** `startRun` arguments: the workspace handle, the goal, and the profile and task kind chosen, or null. */
+/**
+ * U-63 (3.5, GUI-D8): `startTaskRun` arguments: the open workspace and whether to choose a variables
+ * file too. No path: the main process's OS dialogs choose the task file (and the variables file),
+ * and neither path is kept or sent to the page.
+ */
+export function parseStartTaskArgs(value: unknown): { readonly workspace: string; readonly withVars: boolean } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "withVars"])) return null;
+  const { workspace, withVars } = value;
+  return isHandle(workspace) && typeof withVars === "boolean" ? { workspace, withVars } : null;
+}
+
 export function parseStartRunArgs(value: unknown): { readonly workspace: string; readonly goal: string; readonly profile: string | null; readonly workflow: string | null } | null {
   if (!isObj(value) || !hasOnlyKeys(value, ["workspace", "goal", "profile", "workflow"])) return null;
   const { workspace, goal } = value;

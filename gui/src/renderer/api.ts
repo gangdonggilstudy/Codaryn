@@ -63,6 +63,8 @@ export interface CodarynApi {
   previewCleanup(workspace: string, selection: Readonly<Record<string, unknown>>): Promise<unknown>;
   applyCleanup(token: string): Promise<unknown>;
   startRun(workspace: string, goal: string, profile: string | null, workflow: string | null): Promise<unknown>;
+  /** U-63: a run of a task file the main process's OS dialog chooses (and a variables file when `withVars`). */
+  startTaskRun(workspace: string, withVars: boolean): Promise<unknown>;
   cancelRun(): Promise<unknown>;
   onRunEvents(listener: (payload: unknown) => void): void;
   onRunDone(listener: (payload: unknown) => void): void;

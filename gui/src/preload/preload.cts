@@ -23,6 +23,7 @@ const CHANNELS = {
   listModels: "codaryn:models:list",
   selectModel: "codaryn:models:select",
   startRun: "codaryn:run:start",
+  startTaskRun: "codaryn:run:starttask",
   cancelRun: "codaryn:run:cancel",
   listRuns: "codaryn:runs:list",
   previewRevert: "codaryn:runs:previewrevert",
@@ -89,6 +90,7 @@ const api = Object.freeze({
   selectModel: (entry: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.selectModel, { entry: text(entry) }),
   startRun: (workspace: unknown, goal: unknown, profile: unknown, workflow: unknown): Promise<unknown> =>
     ipcRenderer.invoke(CHANNELS.startRun, { workspace: text(workspace), goal: text(goal), profile: text(profile), workflow: text(workflow) }),
+  startTaskRun: (workspace: unknown, withVars: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.startTaskRun, { workspace: text(workspace), withVars: withVars === true }),
   cancelRun: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.cancelRun),
   listRuns: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listRuns, { workspace: text(workspace) }),
   previewRevert: (workspace: unknown, runId: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.previewRevert, { workspace: text(workspace), runId: text(runId) }),

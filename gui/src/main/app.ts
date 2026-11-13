@@ -11,7 +11,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { BrowserWindow, Menu, Notification, app, clipboard, dialog, session } from "electron";
-import type { MessageBoxOptions } from "electron";
+import type { MessageBoxOptions, OpenDialogOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
 import { APP_INDEX_URL } from "./app-url.js";
@@ -63,6 +63,8 @@ export interface GuiOptions {
   readonly answerSaveDialog?: (name: string) => Promise<string | null>;
   /** Smoke tests only: receives the OS end notification instead of the OS (3.6). */
   readonly notify?: (notice: { readonly title: string; readonly body: string }) => void;
+  /** Smoke tests only: chooses the task file or the variables file instead of the OS open dialog (null: cancelled, U-63). */
+  readonly answerOpenDialog?: (kind: "task" | "vars") => Promise<string | null>;
   /** Smoke tests only: receives what would be copied instead of the OS clipboard (U-62). */
   readonly writeClipboard?: (text: string) => void;
   /** Smoke tests only: whether the window counts as active (focus cannot be taken away reliably in a test). */
@@ -294,6 +296,17 @@ export function startGui(options: GuiOptions): void {
         const box = saveDialogOptions(join(app.getPath("documents"), name));
         const chosen = window !== null && !window.isDestroyed() ? await dialog.showSaveDialog(window, box) : await dialog.showSaveDialog(box);
         return chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0 ? null : chosen.filePath;
+      },
+      // U-63 (3.5, GUI-D8): the OS open dialog; the path chosen is used once and not kept.
+      chooseOpenFile: async (kind) => {
+        if (options.answerOpenDialog !== undefined) return options.answerOpenDialog(kind);
+        const box: OpenDialogOptions = {
+          title: dialogText(language, kind === "task" ? "openTask.title" : "openVars.title"),
+          properties: ["openFile", "dontAddToRecent"],
+          ...(kind === "task" ? { filters: [{ name: "JSON", extensions: ["json"] }] } : {}),
+        };
+        const chosen = window !== null && !window.isDestroyed() ? await dialog.showOpenDialog(window, box) : await dialog.showOpenDialog(box);
+        return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
       },
       cleanupPreviews: new CleanupPreviews((size) => randomBytes(size), () => Date.now()),
       confirmCleanup: async (record) => {

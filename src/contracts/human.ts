@@ -746,6 +746,9 @@ export const FIXED_MESSAGES = {
   "runs.revert_record_damaged": {},
   // DR-38: a run whose records were changed by something other than the run (state.ts).
   "runs.records_changed": {},
+  // U-157 (UXM-18, PM): under the runs table, once, when a listed run has a records-changed mark: what
+  // the short mark at the end of its result column (runs.records_changed) means, so that row stays short.
+  "runs.records_changed_note": {},
   // U-16 (UXM-5): a plan run whose plan was applied (RunListEntry.appliedBy), in place of the
   // needs-input words: applied by `{runId}`.
   "runs.plan_applied": { runId: "runId" },

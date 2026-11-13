@@ -65,11 +65,11 @@ import type {
   TableRef,
   Workspace,
 } from "../contracts/index.js";
-import { compilePathSet } from "../policy/path-set.js";
 import type { PathSet } from "../policy/path-set.js";
 import { RunningAggregate, findColumn, parseNumber, scanTable, withinTolerance } from "../tabular/index.js";
 import type { AggregateOutcome, TableProblem, TableScanOutcome, TableSink, Tolerance } from "../tabular/index.js";
 import { createRawVerifierResult } from "./result.js";
+import { unreadablePathSet } from "./unreadable.js";
 
 /** Most problems listed per rule; the rest are counted. */
 export const MAX_LISTED_PROBLEMS = 20;
@@ -163,15 +163,8 @@ interface Hidden {
   readonly target: boolean;
 }
 
-/**
- * U-223 (R-6): the matcher of the run's unreadable paths, as the policy gate builds it: prefix
- * matching, and a value that is not a list (or an entry the format refuses) covers everything.
- * Absent or empty: null, and nothing changes.
- */
-function unreadableSet(value: unknown): PathSet | null {
-  if (value === undefined || (Array.isArray(value) && value.length === 0)) return null;
-  return compilePathSet(Array.isArray(value) ? value : "not a list", { match: "prefix", onUnusable: "covers" });
-}
+/** U-223 (R-6): the matcher of the run's unreadable paths, as the policy gate builds it (./unreadable.ts, U-276). */
+const unreadableSet = unreadablePathSet;
 
 /**
  * A table read through: its columns and data rows, and (U-223) its real path relative to the root

@@ -17,4 +17,4 @@ API 키 없이 `analyze` 작업 종류의 흐름을 보는 예시다.
 - 순서는 `doctor` → `run` → `report` → `review --accept` → `runs`다.
 - 이 폴더를 그대로 실행하지 말고 저장소 밖으로 복사해서 실행한다. 저장소 안에서는 `workspace_is_install_dir`로 거부된다.
 - 키도 설정 파일도 필요 없다.
-- 자료 분석은 표의 행을 그대로 모델에 보낸다. 실제 모델로 돌릴 때도 개인정보가 든 표는 쓰지 않는다([사용 안내 18.7절](../../docs/usage.md#187-개인정보가-든-자료는-다루지-않는다)).
+- 자료 분석은 표의 행을 그대로 모델에 보낸다. 실제 모델로 돌릴 때도 개인정보가 든 표는 쓰지 않는다. 그런 표는 읽기 제외 아래에 두고 `analyze-private`로 다룬다([사용 안내 18.7절](../../docs/usage.md#187-개인정보가-든-자료-읽기-제외와-analyze-private), 예시 [analyze-private-demo](../analyze-private-demo/README.md)).

@@ -97,6 +97,23 @@ function rulesView(config: Obj | null, shown: Shown, envSet: (name: string) => b
   };
 }
 
+/**
+ * U-247 (U-215): the config's unreadable paths and its k as the app layer gives them
+ * (SettingsView.privateData): the paths in the file's order, cleaned; k as configured (or null), the
+ * k a run gets from the config alone, and the contract's range. Null when absent or not that shape.
+ */
+function privateDataView(value: unknown, shown: Shown): Obj | null {
+  if (!isObj(value) || !Array.isArray(value["unreadablePaths"]) || !isObj(value["minGroupSize"])) return null;
+  const k = value["minGroupSize"];
+  const whole = (n: unknown): number | null => (typeof n === "number" && Number.isSafeInteger(n) ? n : null);
+  const [configured, effective, min, max] = [k["configured"] === null ? null : whole(k["configured"]), whole(k["effective"]), whole(k["min"]), whole(k["max"])];
+  if ((k["configured"] !== null && configured === null) || effective === null || min === null || max === null) return null;
+  return {
+    unreadablePaths: value["unreadablePaths"].slice(0, MAX_LIST).map((item) => (typeof item === "string" ? shown(item) : "?")),
+    minGroupSize: { configured, effective, min, max },
+  };
+}
+
 /** One API provider of the contract's table (API_PROVIDERS): its name and its variables' names. */
 export interface ApiProviderEntry {
   readonly name: string;
@@ -209,6 +226,7 @@ export function settingsValue(
       provider: typeof own(config, "provider") === "string" && table.some((entry) => entry.name === own(config, "provider")) ? (own(config, "provider") as string) : null,
       defaultProvider: table.some((entry) => entry.name === "anthropic") ? "anthropic" : (table[0]?.name ?? null),
       apiProviders: apiProvidersView(config, table, providers, shown, envSet),
+      privateData: privateDataView(view["privateData"], shown),
     },
   };
 }

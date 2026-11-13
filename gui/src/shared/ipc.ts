@@ -381,6 +381,24 @@ export interface SettingsView {
   readonly defaultProvider: string | null;
   /** The contract's API providers, in its order (DR-22: no name is written into the screens). */
   readonly apiProviders: readonly ApiProviderView[];
+  /** U-247 (U-215): the config's unreadable paths and k; null when the app layer gave none. */
+  readonly privateData?: SettingsPrivateDataView | null;
+}
+
+/** U-247 (bundle A, U-215): the config's policy.unreadablePaths (cleaned, file order) and its k. */
+export interface SettingsPrivateDataView {
+  readonly unreadablePaths: readonly string[];
+  /** As configured (null: none), the k a run gets from the config alone (never below min), and the contract's range. */
+  readonly minGroupSize: { readonly configured: number | null; readonly effective: number; readonly min: number; readonly max: number };
+}
+
+/** U-247: privateData as the engine host gives it; undefined when it does not fit. */
+function toPrivateData(value: unknown): SettingsPrivateDataView | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isObj(value) || !textList(value["unreadablePaths"]) || !isObj(value["minGroupSize"])) return undefined;
+  const { configured, effective, min, max } = value["minGroupSize"];
+  if (!count(effective) || !count(min) || !count(max) || min > max || effective < min || effective > max || !(configured === null || count(configured))) return undefined;
+  return { unreadablePaths: value["unreadablePaths"], minGroupSize: { configured: configured as number | null, effective, min, max } };
 }
 
 export interface ApiProviderView {
@@ -520,6 +538,8 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
     if (checked === null) return fail;
     profileViews.push(checked);
   }
+  const privateData = toPrivateData(view["privateData"]);
+  if (privateData === undefined) return fail;
   return {
     ok: true,
     view: {
@@ -528,6 +548,7 @@ export function toSettingsView(value: unknown, env: SettingsView["env"]): Settin
       language: language as "ko" | "en" | null,
       profiles: profileViews,
       workflows: { builtin: workflows["builtin"], config: workflows["config"] },
+      privateData,
       keyAvailable,
       providers,
       env,

@@ -8,8 +8,9 @@
  * decision): from a table under unreadablePaths (PolicyConfig, task.ts) the model may get nothing
  * but the column names, the key values of groups that at least k rows share, those groups' row
  * counts and their aggregates. No row is sent. Groups of fewer than k rows are merged into one count
- * of such groups (`suppressedGroups`): their keys, row counts and aggregates are not given, and
- * neither is how many rows they hold (it would follow from the totals).
+ * of such groups (`suppressedGroups`): their keys, row counts and aggregates are not given, nor is how
+ * many rows they hold, although it can be had by subtracting the groups shown from a total (review
+ * R-102 L-2; Q-8 below).
  *
  * What this protects and what not (Q-8): the guarantee is that no row is sent. k lowers the chance
  * that a small group shows by mistake; it does not stop someone who subtracts one answer from
@@ -27,19 +28,22 @@ import type { ToolDefinition, ToolDescriptor } from "./tool.js";
 /** Q-4: the group size k when the user's settings set none. */
 export const DEFAULT_MIN_GROUP_SIZE = 5;
 /**
- * Q-4: the values `PolicyConfig.minGroupSize` may take, in any source. The config file's value (or
- * the default) is the base; a profile, a task type definition and a task file can only raise it
- * (effectiveMinGroupSize).
+ * Q-4, DR-70: the values `PolicyConfig.minGroupSize` may take, in any source: whole numbers from 5
+ * to 1000. Review V-12 M-1: the user's decision DR-70 ("5 rows or more") comes before the
+ * proposal's Q-4 (settings 2 to 1000), so no source, the config file included, lowers k below 5;
+ * each can only raise it (effectiveMinGroupSize).
  */
-export const MIN_GROUP_SIZE_LIMITS = { min: 2, max: 1000 } as const;
+export const MIN_GROUP_SIZE_LIMITS = { min: 5, max: 1000 } as const;
 
 /**
- * Q-4: the run's k: the config file's `minGroupSize` (DEFAULT_MIN_GROUP_SIZE when it sets none),
- * raised by every other source that states a larger one (profile, definition, task file), never
- * lowered. Values are assumed checked against MIN_GROUP_SIZE_LIMITS. Pure.
+ * Q-4, DR-70: the run's k (ResolvedTaskSpec.minGroupSize): DEFAULT_MIN_GROUP_SIZE raised by every
+ * source that states a larger value, the config file's as well as a profile's, a definition's or a
+ * task file's, never lowered: never below MIN_GROUP_SIZE_LIMITS.min, whatever a source holds. Values
+ * are assumed checked against MIN_GROUP_SIZE_LIMITS by the parsers. Pure.
  */
 export function effectiveMinGroupSize(configured: number | undefined, raises: readonly (number | undefined)[]): number {
-  return Math.max(configured ?? DEFAULT_MIN_GROUP_SIZE, ...raises.filter((value): value is number => value !== undefined));
+  const given = [configured, ...raises].filter((value): value is number => value !== undefined);
+  return Math.max(DEFAULT_MIN_GROUP_SIZE, MIN_GROUP_SIZE_LIMITS.min, ...given);
 }
 
 /** Q-4: a table outside unreadablePaths has no hidden groups (k is 1); one under them has the run's k. */
@@ -90,8 +94,26 @@ export interface QueryTableArgs {
   /** Column names to group by; absent or empty: the whole table as one group. Each name once. */
   readonly groupBy?: readonly string[];
   readonly operations?: readonly QueryOperation[];
-  /** The `next` of the previous call of the same query: the groups after it. */
+  /** The `next` of the previous call of the same query (QUERY_CURSOR_PATTERN_SOURCE): the groups from it. */
   readonly after?: string;
+}
+
+/**
+ * Review V-12 M-2 (R-102 L-1): the only form of `next` and `after`: `g` and the ordinal, from 0, of
+ * the next group to give among the query's shown groups (those of at least k rows, in their order).
+ * It carries no key, no column value and nothing else read from a row, and counts no hidden group, so
+ * it says nothing about the table but how many groups were shown before it.
+ */
+export const QUERY_CURSOR_PATTERN_SOURCE = "^g(0|[1-9][0-9]{0,8})$";
+
+/** V-12 M-2: the cursor of the shown group at `index` (a whole number from 0). Pure. */
+export function queryCursorOf(index: number): string {
+  return `g${index}`;
+}
+
+/** V-12 M-2: the ordinal a cursor names, or null when it is not one (then `after_not_found`). Pure. */
+export function queryCursorIndex(cursor: string): number | null {
+  return new RegExp(QUERY_CURSOR_PATTERN_SOURCE).test(cursor) ? Number(cursor.slice(1)) : null;
 }
 
 /**
@@ -116,7 +138,8 @@ export interface QueryGroup {
 /**
  * What `query_table` returns, raw local text like every tool payload: the engine masks it before it
  * is recorded or sent, so column names and keys holding a registered value reach the model masked.
- * The only free text in it is column names and the keys of the groups shown (contract test).
+ * The only free text in it is column names and the keys of the groups shown (contract test); `next`
+ * is a cursor (QUERY_CURSOR_PATTERN_SOURCE), never a key or a value from a row (V-12 M-2).
  * - describe: the columns (header order), the data rows (null when hidden, as the counts are) and
  *   the k that applied.
  * - groups: the query as asked, the groups of at least `minGroupSize` rows (code unit order of their
@@ -148,7 +171,8 @@ export type QueryTablePayload =
  * - duplicate_column: the header names a column twice, or groupBy names one twice
  * - not_number: a numeric operation met a non-empty cell that is not a number
  * - op_not_allowed: min or max on a table under unreadablePaths (UNREADABLE_TABLE_OPS)
- * - after_not_found: `after` is not a `next` of this query
+ * - after_not_found: `after` is not a cursor (QUERY_CURSOR_PATTERN_SOURCE), or names no shown group of
+ *   this query
  */
 export const QUERY_TABLE_PROBLEMS = ["not_table", "unknown_column", "duplicate_column", "not_number", "op_not_allowed", "after_not_found"] as const;
 export type QueryTableProblem = (typeof QUERY_TABLE_PROBLEMS)[number];

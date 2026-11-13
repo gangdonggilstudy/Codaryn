@@ -179,6 +179,11 @@ export interface PolicyGateOptions {
    * judged, a plan action's paths too.
    */
   readonly writablePathSets?: readonly WritablePathSet[];
+  /**
+   * P1 bundle A (review R-102 M-1): ResolvedTaskSpec.unreadablePaths, every source's entries united.
+   * The gate judges them as a deny list (A-3, U-203). Absent: none.
+   */
+  readonly unreadablePaths?: readonly string[];
 }
 
 /** Signature of `createPolicyGate`, exported by `src/policy/index.ts`. */

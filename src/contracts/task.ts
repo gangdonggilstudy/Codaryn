@@ -91,6 +91,21 @@ export interface ResolvedTaskSpec extends TaskSpec {
    * mergeWorkflowPolicy does not combine the lists. Not set yet: the CLI and the app set it with B-4.
    */
   readonly writablePathSets?: readonly WritablePathSet[];
+  /**
+   * P1 bundle A (review R-102 M-1; R-2): the run's unreadable paths: every source's entries united
+   * (unreadablePathsOf over the config file, the applied profile, the task type definition and the
+   * task file; the config file's own also in a task file's run, and also under a profile). The gate
+   * (PolicyGateOptions.unreadablePaths) and the listing tools (the tool runner's unreadablePaths)
+   * read this, not `policy.unreadablePaths`, which is one source's list. Absent: none. Set by the CLI
+   * and the app (A-6).
+   */
+  readonly unreadablePaths?: readonly string[];
+  /**
+   * P1 bundle A (review R-102 M-1; Q-4, DR-70): the run's k, effectiveMinGroupSize over every source
+   * (5 to 1000). query_table reads this, not `policy.minGroupSize`. Absent: DEFAULT_MIN_GROUP_SIZE.
+   * Set by the CLI and the app (A-6).
+   */
+  readonly minGroupSize?: number;
 }
 
 /**
@@ -194,14 +209,16 @@ export interface PolicyConfig {
    * - With any entry, no command rule and no `command` verifier may be set
    *   (PRIVATE_DATA_WORKFLOW_PROBLEMS `unreadable_with_commands`, R-5).
    * - An entry that does not exist or holds nothing is judged the same way: no error tells it.
+   * - One source's list: the run reads ResolvedTaskSpec.unreadablePaths, every source united (R-102 M-1).
    * - Not read yet: the parsers refuse the field (A-6) and the gate does not judge it (A-3).
    */
   readonly unreadablePaths?: readonly string[];
   /**
    * P1 bundle A (U-197; Q-4): the group size k for tables under unreadablePaths: groups of fewer
-   * rows are not shown (query.ts, DR-70). MIN_GROUP_SIZE_LIMITS (2 to 1000). The config file's value,
-   * or DEFAULT_MIN_GROUP_SIZE, is the base; a profile, a definition and a task file can only raise it
-   * (effectiveMinGroupSize). Not read yet: the parsers refuse it (A-6).
+   * rows are not shown (query.ts, DR-70). A whole number within MIN_GROUP_SIZE_LIMITS (5 to 1000, R-102
+   * L-3, V-12 M-1): no source lowers k below 5 (DR-70); each can only raise it
+   * (effectiveMinGroupSize). The run reads ResolvedTaskSpec.minGroupSize. Not read yet: the parsers
+   * refuse it (A-6).
    */
   readonly minGroupSize?: number;
   /**

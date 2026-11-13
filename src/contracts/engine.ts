@@ -572,11 +572,9 @@ export interface CliErrorOutput {
  * - invalid_config: config_missing (U-115, UXM-9): the quick form or the one-line run found no config
  *   file at all (no --config, no CODARYN_CONFIG, and none at the default location), so its settings
  *   were missing; the person has not made one yet (codaryn init).
- * - invalid_task (a task file's `plan`), invalid_config (a config definition's `plan`):
- *   plan_run_not_available (U-177, review R-99 M-2): plan mode "run" is in PLAN_MODES (U-170) but
- *   nothing carries it out until B-3 and B-4, so the CLI's parsers refuse it before any model
- *   request (a run plan run could only end as failed/model_error). Not given any more once B-4
- *   takes "run"; it stays listed, as hints are only added (cli-contract 8.3).
+ * - U-235 (PM): plan_run_not_available, U-177's hint while the parsers refused plan "run" (before
+ *   B-4), is no longer listed. U-195 had stopped giving it; the PM took it out as an exception to
+ *   cli-contract 8.3's add-only rule (no output carries it any more).
  * - key_in_file: key_in_goal, key_in_task, key_in_config (where a key value was found);
  *   key_field_in_task or key_field_in_config when its place is a SchemaFieldPath.
  * - run_not_plan: plan_kind_differs (U-228): the run has a plan, of another kind than the task given
@@ -607,7 +605,6 @@ export const CLI_ERROR_HINTS = [
   "key_in_task",
   "key_in_config",
   "config_missing",
-  "plan_run_not_available",
   "plan_kind_differs",
   "plan_tool_missing",
 ] as const;

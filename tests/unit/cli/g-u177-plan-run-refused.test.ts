@@ -3,8 +3,8 @@
  * plan out. U-195 (DR-69 B-4) lifts it: codaryn apply now carries a run plan out (see
  * g-u195-run-plan-cli.test.ts for the whole way on the real CLI). So a task file's and a config
  * definition's `plan: "run"` are taken again, a wrong plan value's message lists every PLAN_MODES
- * value, and the hint plan_run_not_available is no longer given (it stays listed, as hints are only
- * added; cli-contract 8.3).
+ * value, and the hint plan_run_not_available is no longer given. U-235 (PM) took it out of
+ * CLI_ERROR_HINTS too, an exception to cli-contract 8.3's add-only rule.
  */
 
 import assert from "node:assert/strict";
@@ -42,9 +42,9 @@ describe("U-195 lifts U-177: the parsers take plan \"run\" again", () => {
     assert.equal(hintOf(outcome), undefined);
   });
 
-  test("a config definition's plan \"run\" parses; the hint stays listed but is not given", () => {
+  test("a config definition's plan \"run\" parses; the hint is no longer listed (U-235)", () => {
     const outcome = parseConfig({ schemaVersion: 1, workflows: { rundef: { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" } } });
     assert.ok(outcome.ok, outcome.ok ? "" : outcome.message);
-    assert.ok((CLI_ERROR_HINTS as readonly string[]).includes("plan_run_not_available"));
+    assert.equal((CLI_ERROR_HINTS as readonly string[]).includes("plan_run_not_available"), false);
   });
 });

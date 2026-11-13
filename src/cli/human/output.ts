@@ -657,6 +657,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // says how many and that they are in .codaryn/parked/ (fixed text); each place is in the JSON.
       const parked = skipped.filter((file) => typeof file.parkedAt === "string").length;
       if (parked > 0) out.push(catalog.format("revert.parked", { count: parked }));
+      // U-139 (UXM-6): a run with a records-changed mark (RevertOutput.recordsChanged, DR-38) says so after
+      // its lists, as runs and report do: the revert goes on and checks every file.
+      if (output.recordsChanged === true) out.push(catalog.format("revert.records_changed"));
       // DR-25: the preview did not check whether this drive can move the listed files back safely.
       if (output.dryRun === true && output.moveSafetyUnchecked === true) out.push(catalog.format("revert.dry_run_move_unchecked"));
 

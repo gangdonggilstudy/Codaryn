@@ -436,9 +436,11 @@ export interface EngineResult {
   /**
    * G-A: present with reason `plan_pending` only. The stored plan's digest, the one value both
    * `codaryn apply --digest` and the app layer's `applyPlan(runId, digest)` take (DR-1), and its
-   * number of actions. P1 (B-1): for a `run` plan (StoredChangesPlan), `actions` is its number of files.
+   * number of actions. U-175 (R-99 M-3, DR-69 B-1): `kind: "changes"` for a `run` plan
+   * (StoredChangesPlan), whose `actions` is its number of files, so a reader can say "files" and
+   * not "actions". Absent for a plan of mode apply: its JSON is as before.
    */
-  readonly plan?: { readonly digest: ContentHash; readonly actions: number };
+  readonly plan?: { readonly digest: ContentHash; readonly actions: number; readonly kind?: "changes" };
   /**
    * P1 (DR-69, B-3): present together in a run that carries out an approved `run` plan: the plan
    * run's id and the approved digest, as `run_started` records them. Absent in every other run, so

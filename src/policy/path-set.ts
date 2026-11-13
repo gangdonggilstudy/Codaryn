@@ -1,0 +1,118 @@
+/**
+ * U-175 (DR-69 B-2): one matcher for a set of workspace-relative paths, judged on the text and then
+ * on the real path (T-13). It is protected.ts's matcher made general; the protected paths keep
+ * exactly their rule (`match: "prefix"`, `onUnusable: "covers"`).
+ *
+ * | list                                  | match  | an unusable entry or list |
+ * | ------------------------------------- | ------ | ------------------------- |
+ * | protectedPaths, unreadablePaths (A-3) | prefix | covers (deny lists)       |
+ * | a policy's writablePaths (B-4)        | prefix | misses (allow lists)      |
+ * | an approved `run` plan's files (B-5)  | exact  | misses                    |
+ *
+ * - `checkPathSetFormat` is the single format rule (checkProtectedPaths, policy.ts in the contracts).
+ *   A list it rejects is unusable as a whole: it covers everything or nothing, by `onUnusable`.
+ * - Matching is by whole `/` separated segments, ignoring case on Windows. `prefix`: an entry
+ *   covers itself and everything below it (`.` covers the whole workspace). `exact`: the entry
+ *   itself only, never what is below it.
+ * - `covers` looks at the text only. `coversEffective` takes a path whose links are already
+ *   resolved (ResolvedPath.relative) and also resolves every entry, so an entry that is a link
+ *   covers its real path too. An entry whose real path is outside the workspace (or a dangling
+ *   link) is unusable: it covers everything (`covers`) or nothing (`misses`). An entry inside the
+ *   state directory is passed over: no file tool writes there.
+ */
+
+import path from "node:path";
+
+import type { CheckProtectedPaths, ProtectedPathProblem, Workspace } from "../contracts/index.js";
+import { isValidPathInput } from "../workspace/lexical.js";
+
+const IS_WINDOWS = process.platform === "win32";
+const ENTRY_SEPARATORS = IS_WINDOWS ? /[\\/]/ : /\//;
+
+function fold(segment: string): string {
+  return IS_WINDOWS ? segment.toLowerCase() : segment;
+}
+
+function segmentsOf(entry: string): string[] {
+  return entry.split(ENTRY_SEPARATORS).filter((segment) => segment !== "" && segment !== ".").map(fold);
+}
+
+/** The reason one entry is unusable, or null when it is a usable relative path. */
+function entryProblem(entry: unknown): ProtectedPathProblem["reason"] | null {
+  if (typeof entry !== "string") return "not_a_string";
+  if (entry.trim().length === 0) return "empty";
+  if (entry.includes("\0")) return "invalid_name";
+  if (path.isAbsolute(entry) || /^[\\/]/.test(entry) || /^[A-Za-z]:/.test(entry)) return "absolute";
+  if (entry.split(ENTRY_SEPARATORS).includes("..")) return "parent_segment";
+  if (!isValidPathInput(entry)) return "invalid_name";
+  return null;
+}
+
+/** T-13: see `CheckProtectedPaths` in the contracts. Pure and lexical. */
+export const checkPathSetFormat: CheckProtectedPaths = (value) => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return [{ index: null, reason: "not_a_list" }];
+  const problems: ProtectedPathProblem[] = [];
+  (value as readonly unknown[]).forEach((entry, index) => {
+    const reason = entryProblem(entry);
+    if (reason !== null) problems.push({ index, reason });
+  });
+  return problems;
+};
+
+export interface PathSetOptions {
+  /** `prefix`: an entry covers itself and what is below it. `exact`: the entry itself only. */
+  readonly match: "prefix" | "exact";
+  /** What an unusable list or entry covers: everything (a deny list) or nothing (an allow list). */
+  readonly onUnusable: "covers" | "misses";
+}
+
+export interface PathSet {
+  /** Lexical check: true when the set covers `relative` (`/` separated, "." for the root) by its text. */
+  covers(relative: string): boolean;
+  /**
+   * Effective check, for a path whose links are resolved: the text first, then every entry resolved
+   * to its real path, so a link entry covers its target. Each call resolves again, so a link made
+   * during the run is seen as well.
+   */
+  coversEffective(relative: string, workspace: Workspace): Promise<boolean>;
+}
+
+const NOTHING: PathSet = { covers: () => false, coversEffective: async () => false };
+const EVERYTHING: PathSet = { covers: () => true, coversEffective: async () => true };
+
+function entryCovers(entry: readonly string[], relative: string, match: PathSetOptions["match"]): boolean {
+  const segments = relative === "." ? [] : relative.split("/").map(fold);
+  if (match === "exact" ? entry.length !== segments.length : entry.length > segments.length) return false;
+  return entry.every((segment, index) => segment === segments[index]);
+}
+
+/**
+ * Builds the matcher for one list. Absent or empty covers nothing. A value that checkPathSetFormat
+ * rejects is unusable: it covers everything or nothing, by `options.onUnusable`.
+ */
+export function compilePathSet(value: unknown, options: PathSetOptions): PathSet {
+  if (checkPathSetFormat(value).length > 0) return options.onUnusable === "covers" ? EVERYTHING : NOTHING;
+  const entries = (value ?? []) as readonly string[];
+  if (entries.length === 0) return NOTHING;
+  const lexical = entries.map(segmentsOf);
+  const covers = (relative: string): boolean => lexical.some((entry) => entryCovers(entry, relative, options.match));
+  return {
+    covers,
+    async coversEffective(relative, workspace) {
+      if (covers(relative)) return true;
+      for (const entry of entries) {
+        const resolved = await workspace.resolve(entry, "read");
+        if (!resolved.ok) {
+          // Inside the state directory: file tools cannot write there anyway.
+          if (resolved.code === "state_dir") continue;
+          // Outside the workspace (or a dangling link): the entry is unusable.
+          if (options.onUnusable === "covers") return true;
+          continue;
+        }
+        if (entryCovers(segmentsOf(resolved.path.relative), relative, options.match)) return true;
+      }
+      return false;
+    },
+  };
+}

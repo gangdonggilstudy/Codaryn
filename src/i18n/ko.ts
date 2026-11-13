@@ -687,7 +687,7 @@ export const KO_MESSAGES: MessageTexts = {
   "denial.protected_path": "보호 경로",
   "denial.plan_action_not_allowed": "허용하지 않은 계획 동작",
   // U-175 (DR-69 B-2), 초안: 작업이 쓸 수 있는 파일 밖의 쓰기.
-  "denial.path_not_writable": "쓰기를 허용한 파일 밖",
+  "denial.path_not_writable": "쓰기 허용 경로 밖",
   // U-197 (묶음 A), nb-i18n 이 다듬을 초안.
   "denial.unreadable_path": "읽기 제외 경로",
   "denial.unknown_tool": "모르는 도구",

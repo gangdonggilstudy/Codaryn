@@ -329,6 +329,46 @@ const PREPARE_FILES = {
   "secret-task.json": task({ privacy: { secretEnv: ["CMP_MISSING"] } }),
 };
 
+/**
+ * U-289 (the CLI migration's C-6a, first commit): what a run's life after its step 7 does, which the
+ * app layer takes over from the CLI, where no case reached it yet: the HTTP 404 hint (Y-4), the line
+ * that the default config location was read (N-1), a cancel file, the script file's errors (step 8),
+ * a permission question with no terminal to ask at (denied by default), and a refusal's human text in
+ * the config's language. KO_CONFIG's cases leave CODARYN_LANG empty (unset, N-20), so the config's
+ * `language` chooses the text, as the run's notes carry it (RunNotes.configLanguage).
+ */
+const KO_CONFIG = { schemaVersion: 1, language: "ko" };
+const CONFIG_LANGUAGE = { CODARYN_LANG: "" };
+/** A config at the default location (N-1): under APPDATA on Windows, XDG_CONFIG_HOME elsewhere (the tool points both into the case). */
+function defaultConfigAt(dir, content) {
+  write(dir, "appdata/Codaryn/config.json", content);
+  write(dir, "xdg/codaryn/config.json", content);
+}
+/** A quick run whose config sends to a path of the fake API that answers 404 (fake-anthropic.mjs: every path but /v1/messages). */
+function notFoundSetup(dir, { api }) {
+  write(dir, "work/notes.md", "# Weekly notes\n");
+  write(dir, "config.json", {
+    schemaVersion: 1,
+    model: "fake-model",
+    maxOutputTokens: 256,
+    apiBaseUrl: `${api}/nope`,
+    requestTimeoutMs: 20000,
+    maxRetries: 0,
+    limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: 200000, maxDurationMs: 60000 },
+  });
+}
+const NOT_FOUND_RUN = ["run", "--config", "config.json", "--workspace", "work", "--goal", "Summarize the notes."];
+const scriptTask = (scriptPath) => task({ model: { provider: "scripted", scriptPath } });
+const SCRIPT_FILES = {
+  "missing-script-task.json": scriptTask("./no-such-script.json"),
+  "syntax-script-task.json": scriptTask("./syntax-script.json"),
+  "syntax-script.json": '{ "schemaVersion": 1, "steps": [',
+  "shape-script-task.json": scriptTask("./shape-script.json"),
+  "shape-script.json": { schemaVersion: 1, steps: [{ text: "done", unknownField: 1 }] },
+  "ko-config.json": KO_CONFIG,
+};
+const SCRIPT_TASKS = ["missing-script-task.json", "syntax-script-task.json", "shape-script-task.json"];
+
 export const CASES = [
   {
     name: "document-run",
@@ -916,6 +956,48 @@ export const CASES = [
       cleanup("--reverted", "--json"),
       (ctx) => cleanup("--reverted", "--confirm", cleanupDigestOf(4)(ctx), "--json"),
       runs(),
+    ],
+  },
+  // U-289 (C-6a's first commit): a run's life after step 7, see KO_CONFIG.
+  { name: "model-not-found", api: { replies: [] }, setup: notFoundSetup, steps: [{ args: NOT_FOUND_RUN }, report("latest", "--json")] },
+  { name: "model-not-found-ko", lang: "ko", api: { replies: [] }, setup: notFoundSetup, steps: [{ args: NOT_FOUND_RUN }] },
+  {
+    name: "default-config",
+    setup: (dir) => {
+      documentSetup(DOCUMENT_STEPS)(dir);
+      defaultConfigAt(dir, { schemaVersion: 1 });
+    },
+    steps: [run(), report("latest", "--json")],
+  },
+  {
+    name: "default-config-ko",
+    setup: (dir) => {
+      documentSetup(DOCUMENT_STEPS)(dir);
+      defaultConfigAt(dir, KO_CONFIG);
+    },
+    steps: [{ ...run(), env: CONFIG_LANGUAGE }],
+  },
+  { name: "cancel-file", setup: documentSetup(DOCUMENT_STEPS, {}, { "cancel.flag": "" }), steps: [run("--cancel-file", "cancel.flag"), report("latest"), report("latest", "--json")] },
+  { name: "invalid-script", setup: documentSetup(DOCUMENT_STEPS, {}, SCRIPT_FILES), steps: SCRIPT_TASKS.map((file) => ({ args: ["run", "--task", file] })) },
+  {
+    name: "invalid-script-ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, SCRIPT_FILES),
+    steps: SCRIPT_TASKS.map((file) => ({ args: ["run", "--task", file, "--config", "ko-config.json"], env: CONFIG_LANGUAGE })),
+  },
+  { name: "permission-no-terminal", api: { replies: permissionReplies() }, setup: permissionSetup, steps: [{ args: PERMISSION_RUN }, report("latest")] },
+  { name: "permission-no-terminal-ko", lang: "ko", api: { replies: permissionReplies() }, setup: permissionSetup, steps: [{ args: PERMISSION_RUN }, report("latest")] },
+  {
+    name: "locked-ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, { "ko-config.json": KO_CONFIG }),
+    steps: [
+      (ctx) => {
+        lockHeld(ctx.dir);
+        return { ...run("--config", "ko-config.json"), env: CONFIG_LANGUAGE };
+      },
+      (ctx) => {
+        lockTaken(ctx.dir);
+        return { ...run("--config", "ko-config.json"), env: CONFIG_LANGUAGE };
+      },
     ],
   },
 ];

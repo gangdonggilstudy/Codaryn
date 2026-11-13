@@ -78,13 +78,13 @@ describe("U-141: askLine ends the prompt's line when no line came", () => {
     });
   }
 
-  test("an aborted question: one line end", async () => {
+  test("an aborted question: one line end (readline's own, so none is added)", async () => {
     const io = streams(false);
     const controller = new AbortController();
     const answer = askLine("question? ", io, controller.signal);
     controller.abort();
     assert.deepEqual(await answer, { none: true });
-    assert.equal(io.written(), "question? \n");
+    assert.equal(io.written().replace(/\r/g, ""), "question? \n");
   });
 });
 

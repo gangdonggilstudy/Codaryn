@@ -25,8 +25,8 @@ import type {
   RevertStatus,
   WriteRevertRecord,
 } from "../contracts/index.js";
-import { resolveRunReference } from "./run-ref.js";
-import type { CheckedRun } from "./run-ref.js";
+import { resolveRunReference } from "../app/input/run-ref.js";
+import type { CheckedRun } from "../app/input/run-ref.js";
 import { lockedMessage } from "../app/assembly.js";
 
 // U-285 (CLI migration C-4): the run's assembly is the app layer's now (src/app/assembly.ts). These

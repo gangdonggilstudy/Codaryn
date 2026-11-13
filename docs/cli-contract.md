@@ -1034,7 +1034,7 @@ codaryn doctor [...기존] [--profile <이름>]
   - result.json이나 revert.json이 없는 것은 손상이 아니다(해당 필드가 null). 있는데 읽기·해석·확인에 실패하면 손상이다.
   - 항목에 들어가는 문자열은 위 형식을 통과한 것뿐이라 제어 문자나 키 모양이 들어갈 수 없다. 사람용 표에는 `taskId`를 쓰지 않는다(N-14).
 - **`--run latest`(N-7, N-18)**: `report`, `revert`, 그리고 18절의 `plan`, `review`, `changes`에서 `listRuns`의 첫 `checked` 실행을 뜻한다. `apply`는 받지 않는다(승인이 계획 하나를 가리켜야 한다). 그런 실행이 없으면 `run_not_found`다. 이름이 정확히 `latest`인 실행 디렉터리(`.codaryn/runs/latest`)가 실제로 있으면 별칭으로 해석하지 않고 `invalid_arguments`로 끝나며 아무것도 바꾸지 않는다(검토 L1).
-  - U-22(DR-48, AXM-8, PM 결정): `latest`는 가장 새 실행이다. 결과가 아직 없는 `checked` 실행이 고를 끝난 실행보다 새것이고(또는 끝난 실행이 없고) 살아 있는 프로세스로 작업공간 잠금을 쥐고 있으면, 앞의 끝난 실행을 고르지 않고 `run_not_found`도 아닌 `run_in_progress`(종료 6, 끝난 뒤 다시 시도하거나 실행 id를 준다)다. 아무것도 바꾸지 않는다. 결과 없이 멈춘(잠금이 살아 있지 않은) 더 새 실행은 지금처럼 건너뛴다. 실행 id를 직접 주면 그 실행을 그대로 보인다. 이 규칙은 `latest`를 받는 모든 명령과 앱 계층에 하나다(R-51 M-2): 공용 함수 `resolveRunReference`(`src/cli/run-ref.ts`), 다른 함수가 없는 호출자는 store의 함수를 담은 `STORE_RUN_REFERENCE_DEPS`와 함께 쓴다. `report`, `revert`, `plan`, `review`, `changes`가 쓰고, `apply`는 실행 id만 받는다. `changes`와 앱 계층의 `resolveRun`은 앱 계층의 `runIdOf`(`src/app/runs.ts`)를 거쳐 이 함수를 쓰고, 실행 목록의 `resolveRunRef`(`src/cli/runs.ts`)도 이 함수를 쓴다(코드로 확인). 확인(main `1e54ca9`의 실제 CLI): 가장 새 실행이 도는 동안 `report`, `changes`(`--task`와 `--workspace` 생략), `revert --dry-run`, `plan`, `review`의 `--run latest`가 모두 `run_in_progress`(종료 6)였고, 앞선 실행의 id를 준 `changes`는 종료 0이었다.
+  - U-22(DR-48, AXM-8, PM 결정): `latest`는 가장 새 실행이다. 결과가 아직 없는 `checked` 실행이 고를 끝난 실행보다 새것이고(또는 끝난 실행이 없고) 살아 있는 프로세스로 작업공간 잠금을 쥐고 있으면, 앞의 끝난 실행을 고르지 않고 `run_not_found`도 아닌 `run_in_progress`(종료 6, 끝난 뒤 다시 시도하거나 실행 id를 준다)다. 아무것도 바꾸지 않는다. 결과 없이 멈춘(잠금이 살아 있지 않은) 더 새 실행은 지금처럼 건너뛴다. 실행 id를 직접 주면 그 실행을 그대로 보인다. 이 규칙은 `latest`를 받는 모든 명령과 앱 계층에 하나다(R-51 M-2): 공용 함수 `resolveRunReference`(`src/app/input/run-ref.ts`. 이행 C-7a(U-306) 전에는 `src/cli/run-ref.ts`이고, 옛 자리는 다시 내보낸다), 다른 함수가 없는 호출자는 store의 함수를 담은 `STORE_RUN_REFERENCE_DEPS`와 함께 쓴다. `report`, `revert`, `plan`, `review`, `changes`가 쓰고, `apply`는 실행 id만 받는다. `changes`와 앱 계층의 `resolveRun`은 앱 계층의 `runIdOf`(`src/app/runs.ts`)를 거쳐 이 함수를 쓰고, 실행 목록의 `resolveRunRef`(`src/cli/runs.ts`)도 이 함수를 쓴다(코드로 확인). 확인(main `1e54ca9`의 실제 CLI): 가장 새 실행이 도는 동안 `report`, `changes`(`--task`와 `--workspace` 생략), `revert --dry-run`, `plan`, `review`의 `--run latest`가 모두 `run_in_progress`(종료 6)였고, 앞선 실행의 id를 준 `changes`는 종료 0이었다.
 - **`revert --dry-run`(N-7)**: `RevertRequest.dryRun`. 실제 되돌리기와 같은 판정을 하고 아무것도 바꾸지 않는다. 잠금을 잡지 않고 되돌리기 기록도 쓰지 않는다. 출력은 `dryRun: true`인 `RevertOutput`이고 상태·종료 코드는 실제 되돌리기와 같다(`complete` 0, `partial` 3).
 - **되돌리기 기록(N-7)**: 실제 되돌리기는 끝난 뒤 잠금을 쥔 채 `runs/<runId>/revert.json`(`RevertRecord`)을 쓴다. 이전 기록이 N-16의 확인을 통과하면 출력의 `revertedBefore`에 그 시각과 상태를 담는다(두 번째 되돌리기가 `changed_since_run`인 이유를 알려 준다). 동작과 종료 코드는 바뀌지 않는다.
 - **`--quiet`**: `run`, `revert`, `apply`가 받는다. stderr의 사람용 출력(오류 설명, 끝 요약, 진행 줄)을 모두 생략한다. 인자 해석이 실패해도 인자에 `--quiet`가 있으면 생략한다.
@@ -1211,6 +1211,8 @@ N-B·N-C 보고의 계약 보완이다. 이 계약 커밋 시점에는 계약만
 codaryn plan <task 형식> --run <runId|latest> [--json]
 ```
 
+- 규칙의 자리: 이행 C-7a(U-306)부터 앱의 `showPlan`(`src/app/plan-view.ts`)이다. 그 안에 준비(`prepareFor`: 1~7단계와 `--run`), 두 종류 계획 읽기, 가림 확인(DR-28), 기록 변경 표시, 모델의 요약이 있다. CLI(`src/cli/plan-commands.ts`)는 인자를 해석하고 JSON 줄이나 글(`renderPlan`, `renderChangesPlan`)을 낸다.
+
 - 대상: `needs-input`/`plan_pending`으로 끝난 실행의 `plan.json`. 다른 실행이면 `run_not_plan`이다.
 - 출력
   - `PlanOutput`: 동작 목록(지금 가릴 값으로 가린 경로), 다이제스트, 적용 여부(`appliedBy`)
@@ -1287,6 +1289,8 @@ codaryn apply <task 형식> --run <runId> --digest <앞 12자 이상의 16진수
 ```
 codaryn review <task 형식> --run <runId|latest> (--accept | --reject) [--note <text>] [--json]
 ```
+
+- 규칙의 자리: 이행 C-7a(U-306)부터 앱의 `recordReview`(`src/app/plan-view.ts`)이다. 그 안에 메모의 키 검사(S-8), 검토 대기 확인, 잠금 아래 `review.json` 쓰기, 되돌리기 줄의 작업 공간이 있다. CLI는 인자를 해석하고 JSON 줄이나 글(`renderReview`)을 낸다. 되돌리기 줄은 글을 낼 때만 묻는다.
 
 - 대상: `needs-input`/`awaiting_review`로 끝난 실행. 다른 실행이면 `run_not_awaiting_review`(종료 2)다.
 - 판정을 `review.json`에 쓴다(`ReviewRecord`). 다시 판정하면 이전 판정을 바꾸고 출력에 `replaced`가 나온다. `result.json`은 바뀌지 않는다. 검토로 실행이 `done`이 되지는 않는다.

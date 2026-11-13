@@ -21,7 +21,11 @@ type DoctorDone = Extract<DoctorReply, { ok: true }>;
 
 export type OpenCheckState =
   | { readonly phase: "none" }
-  | { readonly phase: "checking"; readonly handle: string }
+  /**
+   * U-247: `lockHeld` carried while the same workspace is checked again after a check that found the
+   * lock held, so a screen shown meanwhile keeps the run button off until the new answer says otherwise.
+   */
+  | { readonly phase: "checking"; readonly handle: string; readonly lockHeld?: true }
   | { readonly phase: "error"; readonly handle: string; readonly code: string }
   | { readonly phase: "done"; readonly handle: string; readonly reply: DoctorDone; readonly lockHeld: boolean };
 
@@ -51,7 +55,9 @@ export class OpenCheck {
       return;
     }
     const handle = workspace.handle;
-    this.set({ phase: "checking", handle });
+    const before = this.state;
+    const stillHeld = (before.phase === "done" || before.phase === "checking") && before.handle === handle && before.lockHeld === true;
+    this.set(stillHeld ? { phase: "checking", handle, lockHeld: true } : { phase: "checking", handle });
     const reply = asDoctor(await this.api.doctor(handle));
     if (generation !== this.generation) return;
     this.set(reply.ok ? { phase: "done", handle, reply, lockHeld: lockHeld(reply) } : { phase: "error", handle, code: reply.code });

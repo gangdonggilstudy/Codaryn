@@ -1084,6 +1084,10 @@ export const FIXED_MESSAGES = {
   // The hint after `workspace_locked`. Its text names `.codaryn/lock.json` and
   // `.codaryn/lock.json.reclaim` (DR-27 b): both may need removing when no Codaryn runs here.
   "lock.remove_hint": {},
+  // U-193 (after U-176): a run, a check or a cleanup finished but the workspace lock could not be
+  // released (RunOutcome.lockLeft, PlanCheck.lockLeft, CleanupOutcome.lockLeft). No path: the
+  // doctor's lock line names the file. Draft by p5a from nc-human's line (p4g, nb-i18n to confirm).
+  "lock.release_failed": {},
 } as const satisfies { readonly [id: string]: { readonly [param: string]: MessageParamKind } };
 
 export type FixedMessageId = keyof typeof FIXED_MESSAGES;

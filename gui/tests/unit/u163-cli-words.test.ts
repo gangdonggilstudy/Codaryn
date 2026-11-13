@@ -12,8 +12,12 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { DIALOG_TEXTS } from "../../src/main/dialog-texts.js";
+import type { CodarynApi } from "../../src/renderer/api.js";
+import { textsFor } from "../../src/renderer/i18n/catalog.js";
 import { EN } from "../../src/renderer/i18n/en.js";
 import { KO } from "../../src/renderer/i18n/ko.js";
+import { runsScreen } from "../../src/renderer/runs/runs-screen.js";
+import { FakeElement, installFakeDom, settle } from "./fake-dom.js";
 
 // This file runs as gui/build/tests/unit/u163-cli-words.test.js.
 const I18N = path.join(fileURLToPath(new URL("../../../", import.meta.url)), "..", "dist", "src", "i18n");
@@ -59,13 +63,17 @@ test("U-163 (3): a check that did not pass is 미통과, as the CLI says; 실패
 });
 
 test("U-163 (4): the records-changed mark is changed by something other than the run, in both languages", async () => {
-  const { ko } = await cli();
+  const { en, ko } = await cli();
   for (const id of ["cleanup.entry.recordsChanged", "cleanup.warning.records_changed"] as const) {
     assert.equal(KO[id], "기록 변경됨(실행이 아닌 것이 바꿈)", id);
     assert.equal(EN[id], "records changed (not by the run)", id);
     assert.doesNotMatch(`${KO[id]} ${EN[id]}`, /실행 중|during the run/, id);
   }
+  // U-157: the run list's row has the CLI's short mark, and its explanation is the CLI's line under the table.
   assert.equal(KO["runs.recordsChanged"], ko["runs.records_changed"]);
+  assert.equal(EN["runs.recordsChanged"], en["runs.records_changed"]);
+  assert.equal(KO["runs.recordsChangedNote"], ko["runs.records_changed_note"]);
+  assert.equal(EN["runs.recordsChangedNote"], en["runs.records_changed_note"]);
   // The other screens name the mark as the CLI does (기록 변경 표시), the same text where the meaning is the same.
   assert.equal(KO["plan.recordsChanged"], ko["plan.records_changed"]);
   assert.equal(KO["changes.recordsChanged"], ko["changes.records_changed"]);
@@ -106,4 +114,32 @@ test("U-163 (U-124): the permission dialog uses the CLI's 권한 확인 and 이�
   assert.ok(allowed.includes(DIALOG_TEXTS.ko["permission.allowOnce"]), "the CLI's progress line says the same");
   assert.ok((ko["confirm.question.command"] ?? "").includes("이번 호출에만 허용"));
   assert.ok((ko["confirm.question.command"] ?? "").startsWith(DIALOG_TEXTS.ko["permission.message"].split("?")[0] ?? "-"));
+});
+
+test("U-163 (4, U-157): a marked row has the short mark, and the list has its explanation once, under it", async () => {
+  const restore = installFakeDom();
+  try {
+    const row = (runId: string, recordsChanged: boolean) => ({ state: "checked", runId, kind: "run", startedAt: null, taskId: "quick", status: "complete", reason: "done", changes: 0, reverted: null, revertRecordDamaged: false, recordsChanged, form: null });
+    const shown = async (rows: readonly unknown[], language: "ko" | "en"): Promise<FakeElement> => {
+      const api = new Proxy({} as CodarynApi, { get: (_t, name: string) => async () => (name === "listRuns" ? { ok: true, runs: rows, omitted: 0 } : null) });
+      const screen = runsScreen({ texts: textsFor(language), api, current: () => ({ handle: "1".repeat(32), name: "ws" }), open: () => undefined, announce: () => undefined, openPlan: () => undefined, openChanges: () => undefined, openReport: () => undefined });
+      const root = new FakeElement("main");
+      screen.show(root as unknown as HTMLElement);
+      await settle();
+      return root;
+    };
+    for (const language of ["ko", "en"] as const) {
+      const texts = language === "ko" ? KO : EN;
+      const root = await shown([row("20261113T010203Z-0000abcd", true), row("20261113T010204Z-0000abce", false), row("20261113T010205Z-0000abcf", true)], language);
+      const marks = root.findAll((e) => e.getAttribute("data-records-changed") === "true");
+      assert.deepEqual(marks.map((e) => e.textContent), [texts["runs.recordsChanged"], texts["runs.recordsChanged"]], language);
+      const notes = root.findAll((e) => e.getAttribute("id") === "runs-records-changed-note");
+      assert.deepEqual(notes.map((e) => e.textContent), [texts["runs.recordsChangedNote"]], `${language}: once, for the whole list`);
+      assert.equal(notes[0]?.getAttribute("data-records-changed"), null, "the rows' marks stay the only data-records-changed");
+      const plain = await shown([row("20261113T010204Z-0000abce", false)], language);
+      assert.equal(plain.findAll((e) => e.getAttribute("id") === "runs-records-changed-note").length, 0, `${language}: no line without a mark`);
+    }
+  } finally {
+    restore();
+  }
 });

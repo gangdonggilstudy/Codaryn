@@ -64,6 +64,7 @@ import { createAppAssemble } from "./assemble.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
+import { listRunEventsIn, runEventsArguments } from "./run-events.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
@@ -90,6 +91,7 @@ import type {
   ApplyCleanupRequest,
   CleanupPreviewRequest,
   ListRunsRequest,
+  ListRunEventsRequest,
   ListWorkspaceDirRequest,
   StateSummaryRequest,
   ApplySettingsChangeRequest,
@@ -108,6 +110,7 @@ import type {
   ResolvedRun,
   ResolveRunRequest,
   RevertRequest,
+  RunEventsPage,
   RunHandle,
   RunObserver,
   RunOutcome,
@@ -327,7 +330,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    * own steps 1 to 7 (prepareTask), the ones `run`, `plan`, `apply` and `review` share, so the
    * secrets are the ones a run with these settings registers now. U-17 (DR-46): as a command that
    * runs nothing (`readOnly`), so the quick form needs no key, model or run limits. No lock,
-   * journal or file is made and nothing is sent. Used by `changes` and `listWorkspaceDir`. U-89: also
+   * journal or file is made and nothing is sent. Used by `changes`, `listWorkspaceDir` and `listRunEvents`. U-89: also
    * the effective policy's protected paths and every API key value set now (with the variables file).
    */
   async function readingSecrets(
@@ -405,6 +408,23 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return await listWorkspaceDirIn(source, checked.dir, checked.offset, checked.limit);
     } catch {
       return { ok: false, error: appError("internal_error", "the directory could not be listed") };
+    }
+  }
+
+  /** U-90 (GUI 3.7, adapter-contract 5.13): one page of a run's stored records (run-events.ts). */
+  async function listRunEvents(request: ListRunEventsRequest): Promise<AppCallOutcome<RunEventsPage>> {
+    // The request first: nothing is read for one that does not fit.
+    const checked = runEventsArguments(request);
+    if (!checked.ok) return checked;
+    try {
+      const probe = await readingSecrets(request.settings);
+      if (!probe.ok) return probe;
+      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!root.ok) return root;
+      const source = { workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys };
+      return await listRunEventsIn(source, checked.runId, checked.offset, checked.limit, checked.types);
+    } catch {
+      return { ok: false, error: appError("internal_error", "the run's records could not be listed") };
     }
   }
 
@@ -761,6 +781,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     doctor,
     changes,
     listWorkspaceDir,
+    listRunEvents,
     listModels,
     selectModel,
     readSettings,

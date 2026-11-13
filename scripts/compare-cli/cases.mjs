@@ -468,6 +468,40 @@ export const CASES = [
     setup: documentSetup(DOCUMENT_STEPS, {}, { "keyfield-task.json": task({ model: { provider: "scripted", scriptPath: "./script.json", apiKey: "placeholder" } }), "bom.env": "\uFEFFCMP_NAME=1\n" }),
     steps: [{ args: ["run", "--task", "keyfield-task.json"] }, { args: ["run", "--task", "task.json", "--vars-file", "bom.env"] }, { args: ["doctor", "--task", "keyfield-task.json"] }],
   },
+  // U-282 (the CLI migration's C-3b: the task, config, config file and provider settings parsers and the
+  // writable lists move to src/app/input/): their refusals and resolutions, in text and JSON. A task's
+  // near-miss field, a limit above the absolute cap and a writablePaths entry outside the workspace; a
+  // config's near-miss field, a definition with a built-in id and a profile that is not there; the
+  // quick form through CODARYN_CONFIG with no provider settings; doctor on the config and the profile.
+  {
+    name: "config-task-forms",
+    setup: documentSetup(DOCUMENT_STEPS, {}, {
+      "near-task.json": { ...task(), verifier: [] },
+      "cap-task.json": task({ limits: { maxModelTurns: 100000, maxToolCalls: 10, maxTotalTokens: null, maxDurationMs: 60000 } }),
+      "writable-task.json": task({ policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, writablePaths: ["../outside"] } }),
+      "near-config.json": { schemaVersion: 1, limit: {} },
+      "builtin-config.json": { schemaVersion: 1, workflows: { code: { tools: ["read_file"] } } },
+      "profile-config.json": { schemaVersion: 1, profiles: { docs: { workflowRef: "document" } } },
+      "quick-config.json": { schemaVersion: 1, limits: { maxModelTurns: 4, maxToolCalls: 4, maxTotalTokens: 1000, maxDurationMs: 60000 } },
+    }),
+    steps: [
+      { args: ["run", "--task", "near-task.json"] },
+      { args: ["run", "--task", "cap-task.json"] },
+      { args: ["run", "--task", "writable-task.json", "--json"] },
+      { args: ["run", "--task", "task.json", "--config", "near-config.json"] },
+      { args: ["run", "--task", "task.json", "--config", "builtin-config.json"] },
+      { args: ["run", "--workspace", "work", "--goal", "g", "--config", "profile-config.json", "--profile", "nope"] },
+      { args: ["run", "--workspace", "work", "--goal", "g"], env: { CODARYN_CONFIG: "quick-config.json" } },
+      { args: ["doctor", "--config", "near-config.json", "--json"] },
+      { args: ["doctor", "--config", "profile-config.json", "--profile", "docs"] },
+    ],
+  },
+  {
+    name: "config-task-forms-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS, {}, { "near-task.json": { ...task(), verifier: [] }, "near-config.json": { schemaVersion: 1, limit: {} } }),
+    steps: [{ args: ["run", "--task", "near-task.json"] }, { args: ["run", "--task", "task.json", "--config", "near-config.json"] }, { args: ["doctor", "--config", "near-config.json"] }],
+  },
   // U-135: terminal cases (imitated: see the tool).
   {
     name: "terminal-first-page",

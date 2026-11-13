@@ -24,12 +24,16 @@ export const MAX_INTEGRITY_BYTES = 256 * 1024 * 1024;
  * the engine masks it before it is recorded or printed.
  *
  * - file: a regular file and the SHA-256 of its exact bytes
- * - link: a symbolic link or junction below a protected entry, not followed; `sha256` is the
- *   SHA-256 of its target text as the link stores it
+ * - link: a symbolic link or junction below a protected entry; `sha256` is the SHA-256 of its
+ *   target text as the link stores it. W-2 (architecture 11, A-3): when its real target is inside
+ *   the workspace and outside the state directory, the target's content is listed too, under the
+ *   target's own workspace-relative path; a target outside the workspace is not (only
+ *   `externalPaths` checks such content). See `IntegrityChecker.capture`.
  * - absent: a protected entry that does not exist
  * - unchecked: a path that could not be hashed. `unreadable`: it could not be read or listed
- *   (permissions, a lock, an I/O error, a special file). `limit`: MAX_INTEGRITY_FILES or
- *   MAX_INTEGRITY_BYTES was reached, see `IntegrityChecker.capture`.
+ *   (permissions, a lock, an I/O error, a special file, a link whose target cannot be resolved for
+ *   another reason than being missing). `limit`: MAX_INTEGRITY_FILES or MAX_INTEGRITY_BYTES was
+ *   reached, see `IntegrityChecker.capture`.
  */
 export type IntegrityEntry =
   | { readonly path: RawText; readonly kind: "file"; readonly sha256: ContentHash }
@@ -60,8 +64,10 @@ export interface IntegrityChecker {
    *   root's contents and is itself shown as ".". The state directory (`STATE_DIR_NAME` at the
    *   root) is never entered, and an entry at or under it adds nothing.
    * - an `externalPaths` entry and everything below it: absolute, `/` separated.
-   * A protected entry that is itself a link is followed to its real path (T-13); links below an
-   * entry are recorded as `link` and not followed. When the file or byte limit is reached, the
+   * A protected entry that is itself a link is followed to its real path (T-13). A link below an
+   * entry is recorded as `link` and, W-2, its real target inside the workspace is listed too under
+   * the target's own path (a directory reached so is entered once per capture, which ends cycles;
+   * that content counts toward the entry's limits). When the file or byte limit is reached, the
    * entry being listed and every later entry each become one `unchecked`/`limit` entry at the
    * entry's own display path, and their other entries are dropped.
    */

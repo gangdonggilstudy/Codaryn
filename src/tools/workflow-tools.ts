@@ -26,6 +26,7 @@ import {
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
   maskedParts,
+  safeModelText,
   planActionShown,
 } from "../contracts/index.js";
 import type {
@@ -500,7 +501,8 @@ async function checkChanges(
  * U-180 (DR-69 B-1, B-3): `propose_changes`. Checks the files, hashes every `modify` file (the model
  * never supplies a hash), and stores plan.json of a `run` plan through PlanRecorder.saveChangesPlan:
  * the summary and each path as this run's own gateway masks them, as visible parts (MaskedParts: no
- * privacy token, no secret value). The summary is stored under the digest (R-99 L-1). Without a
+ * privacy token, no secret value); the summary also made safe with safeModelText (V-7 M-1: key
+ * shapes hidden, control and invisible characters left out). It is stored under the digest (R-99 L-1). Without a
  * recorder that can store such a plan, or when a text cannot be masked, nothing is stored
  * (`io_error`).
  */
@@ -535,8 +537,12 @@ export async function proposeChanges(
   if (recorder === undefined || typeof recorder.saveChangesPlan !== "function") {
     return fail("io_error", "no plan store for this kind of plan is available; nothing was stored");
   }
-  const summary = typeof args.summary === "string" ? deps.privacy.mask(args.summary) : null;
-  if (summary === null || !summary.ok) return fail("io_error", "masking the summary failed; nothing was stored");
+  // Review V-7 M-1: the summary is made safe as the engine's last message and plan summary are
+  // (safeModelText): control and invisible characters left out, the registered values masked, and
+  // key shapes hidden (HIDDEN_KEY_MARKER) also when nobody registered them. It goes into plan.json
+  // and from there into the system text of the run that carries the plan out.
+  const summary = typeof args.summary === "string" ? safeModelText(args.summary, (text) => deps.privacy.mask(text)) : null;
+  if (summary === null) return fail("io_error", "masking the summary failed; nothing was stored");
   const stored: StoredPlannedFile[] = [];
   for (const file of files) {
     const masked = deps.privacy.mask(file.path);
@@ -545,7 +551,7 @@ export async function proposeChanges(
   }
   let digest: string;
   try {
-    digest = await recorder.saveChangesPlan({ summary: maskedParts(summary.text), files: stored });
+    digest = await recorder.saveChangesPlan({ summary: maskedParts(summary), files: stored });
   } catch {
     // No detail: it could carry raw paths.
     return fail("io_error", "storing the plan failed; no plan exists");

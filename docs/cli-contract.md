@@ -384,9 +384,9 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
 
 - 작업 공간 계층과 계획 실행기는 `resolve`한 실경로 문자열로 다시 연다(폴더 손잡이 기준 호출이 없음). 그래서 확인과 사용 사이의 폴더 바꿔치기를 다 닫지는 못한다. U-189(병합 `c0afedb`)가 아래 둘을 좁혔다.
 - **게이트가 판정한 경로(U-189, `src/workspace/judged.ts`):** 도구가 인자를 다시 풀어 얻은 실경로가 게이트가 판정한 실경로와 다르면, 그 호출은 아무것도 하지 않고 `policy_denied`다(메시지 `the path leads elsewhere than when the policy judged it; nothing was done`). 모든 파일 도구에 해당한다. 게이트가 판정하지 않은 인자(`search_files`가 목록 뒤 하나씩 푸는 파일)에는 해당하지 않는다.
-- **읽기(U-189, `src/workspace/guard.ts`):** `read_file`, `search_files`(내용과 이름), `inspect_files`는 연 손잡이의 식별자와 길 위 폴더들의 식별자·변경 시각을 다시 본다. 바뀌었으면 처음부터 `GUARD_ATTEMPTS`(3)번까지 다시 한 뒤 `io_error`다. 내용 찾기에서 그렇게 건너뛴 파일이 있으면 `truncated`가 참이다(5절 U-189 줄).
+- **읽기(U-189, `src/workspace/guard.ts`):** `read_file`, `search_files`(내용과 이름), `inspect_files`는 연 손잡이의 식별자와 길 위 폴더들의 식별자·변경 시각을 다시 본다. 바뀌었으면 처음부터 다시 한다. 처음까지 모두 `GUARD_ATTEMPTS`(6)번이고, 시도 사이의 기다림은 `GUARD_PAUSES_MS`(0·0·50·200·500 ms)다. 그래도 바뀌면 `io_error`다(5절 U-213 줄). 내용 찾기에서 그렇게 건너뛴 파일이 있으면 `truncated`가 참이다(5절 U-189 줄).
   - 남는 것: 마지막 확인과 경로로 하는 호출 사이의 순간, 폴더의 변경 시각이 없는 FAT·exFAT에서 바꿨다 되돌린 것, 작업 공간 루트 자체를 바꿨다 되돌린 것.
-  - 같은 폴더가 쉬지 않고 바뀌는 동안에는 정상 읽기도 `io_error`가 될 수 있다(Codex V-10c: 160번 중 50번, 대상 파일은 늘 그대로).
+  - 같은 폴더가 쉬지 않고 바뀌는 동안에는 정상 읽기도 `io_error`가 될 수 있다. U-213 뒤 몰아치는 동안의 거부는 `read_file`이 23%에서 1.2%로, 목록과 `inspect_files`가 19%에서 1.25%로 줄었다(검토 R-107, 측정 두 번의 합계). 다시 시도의 2초 한도는 새 시도의 시작만 막으므로, 부하에서 걷기 한 번이 길면 호출 전체는 2초에 그 걷기를 더한 만큼 걸릴 수 있다(R-107 O-2).
 - **쓰기와 계획 적용:** 도구가 경로를 푼 뒤의 바꿔치기는 닫지 못한다. 닿을 수 있는 곳은 작업 공간 밖, 그리고 작업 공간 안의 보호 경로와 `writablePaths` 밖이다. 계획 이동은 원본 쪽 폴더가 바뀌면 밖의 파일 이름을 지울 수 있다(`unlink`).
 - 행위자는 허용된 명령의 배경 프로세스와 같은 PC의 다른 프로그램이다.
 - 근거: 읽기는 Codex V-10b·V-10c가 재현했다(시험이 맞춘 바꿔치기 32번 가운데 밖의 내용·이름·해시를 돌려준 것 0번). 쓰기와 계획 적용은 코드 조사(na-core, main `21107dc`)이고 경합은 재현하지 않았다. 앱 계층의 작업 공간 글 읽기·쓰기에 남은 같은 틈은 Codex가 재현했다(V-1b, [privacy.md](privacy.md) 13절).
@@ -1276,11 +1276,11 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - 간편 형식 `plan`·`apply`·`review`의 설정 안내(R-11 L-2)는 JSON `message`에만 있다. 사람용 stderr에는 일반 고치는 법만 나온다(검토 R-12 L-2). 안내 문구 id(계약 담당)와 두 언어 글(N-B)이 생기면 stderr에도 붙인다. 재현은 `tests/unit/cli/g-r12.test.ts`에 `todo`로 있다.
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
-- run 계획의 사람용 글 가운데 CLI가 아직 쓰지 않는 것(U-216, main `13ea1ac`의 실제 CLI로 확인):
+- run 계획의 사람용 글 가운데 CLI가 아직 쓰지 않는 것(U-216, main `07b4124`의 실제 CLI로 확인):
   - 터미널의 승인 질문은 이동 계획과 같은 `Apply this plan? [y/N]`이다. U-198의 `changesApprovalText`(`apply.changes.what`, `apply.changes.summary_note`, `apply.changes.commands_note`)와 `changesApplyQuestion`(`apply.changes_question`)은 `src/cli/human`에 있지만 `apply`가 부르지 않는다.
-  - 계획을 만든 실행(`plan_pending`, 계획 `kind: "changes"`)의 끝 요약은 이동 계획의 글이다: `A plan is ready: actions 2. …`와, 요약의 표지 `The agent's description (… not what you approve)`. run 계획의 요약은 다이제스트 안이라 계획과 함께 승인된다(18.3, R-99 L-1).
-  - 검증기 없이 `needs-input`/`no_verifier`로 끝난 수행을 `runs`는 계획을 만든 실행의 줄에서 `plan apply not finished`라 부른다. `plan`은 그 계획을 `applied`로, `report`는 `carried out by run …, which ended as no_verifier`로 보인다.
-  - 계획 없이 끝난 계획 실행(예: 계획 파일이 `writablePaths` 밖이라 `propose_changes`가 거부됨, 또는 작업 종류에 `propose_changes`가 없음)은 `failed`/`model_error`(`malformed_response`)이고, 끝 요약의 마지막 안내는 모델 설정 점검(`Check with codaryn doctor and codaryn models, …`)이다. `doctor`는 `plan: "run"`인데 `propose_changes`가 없는 작업 종류를 알리지 않는다.
+  - 계획 없이 끝난 계획 실행(예: 계획 파일이 `writablePaths` 밖이라 `propose_changes`가 거부됨)은 `failed`/`model_error`(`malformed_response`)이고, 끝 요약의 마지막 안내는 모델 설정 점검(`Check with codaryn doctor and codaryn models, …`)이다.
+  - 작업 종류에 `propose_changes`가 없으면 실행은 모델 요청 전에 거부된다(정의는 `invalid_config`, task 파일의 `plan: "run"`은 `invalid_task`). 그러나 `doctor`는 그런 정의를 알리지 않고 `ok`다.
+  - U-221 뒤로 끝 요약(`A plan is ready: 2 file(s) to write…`와 계획 보기의 요약 표지), `runs`·`plan`·`report`의 수행 이름(`carried out`), 한 번만 나오는 `writablePaths` 안내는 run 계획의 글이다([사용 설명서](usage.md) 18.11절).
 
 ### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
 

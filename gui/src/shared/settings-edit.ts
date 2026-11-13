@@ -8,6 +8,9 @@
  * - A removal names the index and the text the window showed for it; the host checks that it is
  *   still that entry, so a file changed meanwhile cannot make a removal hit another entry.
  * - Secret variables are names only, never values (S-3).
+ * - U-80: a provider's output cap (`maxOutputTokens`) is written where that provider reads it, as
+ *   `codaryn models --use` writes its model: anthropic's top-level field unless the file keeps
+ *   `providers.anthropic`, else `providers.<name>.maxOutputTokens` (the CLI's providerSettingsOf).
  */
 
 /** Text as the window may show it (the engine host's cleaning; identity where none is needed). */
@@ -23,6 +26,8 @@ export type SettingsEdit =
   | { readonly op: "language"; readonly value: "ko" | "en" | null }
   /** The config's `provider` (null: none named, the CLI's default). The engine host checks the name against the contract's table. */
   | { readonly op: "provider"; readonly value: string | null }
+  /** U-80: a provider's output cap (null: none). The engine host checks the name against the contract's table. */
+  | { readonly op: "outputCap"; readonly provider: string; readonly value: number | null }
   | { readonly op: "limit"; readonly key: LimitKey; readonly value: number | null }
   | { readonly op: "addCommand"; readonly executable: string; readonly argsPrefix: readonly string[]; readonly allowExtraArgs: boolean }
   | { readonly op: "removeCommand"; readonly index: number; readonly shown: string }
@@ -50,6 +55,12 @@ export function parseSettingsEdit(value: unknown): SettingsEdit | null {
       return only(v, ["op", "value"]) && (v["value"] === "ko" || v["value"] === "en" || v["value"] === null) ? { op: "language", value: v["value"] } : null;
     case "provider":
       return only(v, ["op", "value"]) && (v["value"] === null || (typeof v["value"] === "string" && PROVIDER.test(v["value"]))) ? { op: "provider", value: v["value"] } : null;
+    case "outputCap": {
+      const cap = v["value"];
+      if (!only(v, ["op", "provider", "value"]) || typeof v["provider"] !== "string" || !PROVIDER.test(v["provider"])) return null;
+      if (!(cap === null || (typeof cap === "number" && Number.isSafeInteger(cap) && cap >= 1 && cap <= MAX_LIMIT))) return null;
+      return { op: "outputCap", provider: v["provider"], value: cap as number | null };
+    }
     case "limit": {
       const key = v["key"];
       const limit = v["value"];
@@ -116,6 +127,19 @@ export function applySettingsEdit(config: unknown, edit: SettingsEdit, shown: Sh
       if (edit.value === null) delete next["provider"];
       else next["provider"] = edit.value;
       break;
+    case "outputCap": {
+      const providers = isObj(next["providers"]) ? (next["providers"] as Obj) : null;
+      let owner: Obj;
+      if (edit.provider === "anthropic" && (providers === null || !isObj(providers["anthropic"]))) owner = next;
+      else {
+        const all = providers ?? ((next["providers"] = {}) as Obj);
+        if (!isObj(all[edit.provider])) all[edit.provider] = {};
+        owner = all[edit.provider] as Obj;
+      }
+      if (edit.value === null) delete owner["maxOutputTokens"];
+      else owner["maxOutputTokens"] = edit.value;
+      break;
+    }
     case "limit": {
       if (!isObj(next["limits"])) next["limits"] = {};
       const limits = next["limits"] as Obj;

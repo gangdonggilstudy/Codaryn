@@ -339,6 +339,8 @@ DR-20의 "플러그인과 같은 편의성"을 다음처럼 옮긴다. 출처는
 - **제공자 중립**(DR-22): 제공자 이름, 키 변수 이름, 모델 목록은 설정과 앱 계층에서 받는다. 화면 코드에 "Anthropic"이나 `ANTHROPIC_API_KEY`를 고정해 넣지 않는다.
   - 제공자 표는 계약의 `API_PROVIDERS`에서, 목록을 잇는 제공자는 앱 계층의 `CONNECTED_MODEL_PROVIDERS`(지금 anthropic, openai)에서 온다. 키 없는 체험용 대본 제공자는 CLI에서만 쓴다.
   - 제공자 바꾸기는 설정 파일의 `provider`를 바꾸는 변경 제안이다. 앱 계층이 넓히기(`provider_changed`)로 판정하므로 메인 OS 확인 뒤에 쓴다(SP-D3, F-3, 14.4).
+  - 제공자마다 응답의 최대 길이(`maxOutputTokens`)를 보이고 편집 하나(`outputCap`)로 정한다(U-80). 그 제공자가 읽는 곳에 쓴다: anthropic은 `providers.anthropic`이 없으면 최상위, 아니면 `providers.<이름>.maxOutputTokens`(CLI의 `providerSettingsOf`, 모델을 쓰는 자리와 같다). 없으면 그 제공자로 하는 실행은 아무것도 보내기 전에 `provider_not_configured`로 멈춘다고 그 줄에 쓴다.
+  - U-80 전에는 첫 설정(init)이 최상위 값(anthropic의 것)만 쓰고 GUI에 이 편집이 없어, GUI만으로 openai를 고르면 실행이 멈췄다. 앱 계층의 넓히기 판정에는 이 필드가 없어(`src/app/settings-change.ts`) 메인 OS 확인 없이 쓴다.
 - **키**: 키 입력란은 어디에도 없다(C-1, N-10). 키는 앱을 실행한 환경의 변수로만 받는다. 등록한 뒤에는 앱을 다시 시작해야 한다(GUI-D7). 안내 문구는 OS별로 다르다(E-8).
 
 ### 3.11 첫 실행 안내 (마법사 4쪽, `init` 대응)

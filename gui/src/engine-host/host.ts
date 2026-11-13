@@ -339,6 +339,7 @@ export function createHostHandler(deps: HostDeps): HostHandler {
         const edit = parseSettingsEdit(args["edit"]);
         if (edit === null) throw new ArgsError();
         if (edit.op === "provider" && edit.value !== null && !(deps.apiProviders ?? []).some((entry) => entry.name === edit.value)) throw new ArgsError();
+        if (edit.op === "outputCap" && !(deps.apiProviders ?? []).some((entry) => entry.name === edit.provider)) throw new ArgsError();
         const read = await deps.app.readSettings({ configPath: null });
         const output = isObj(read) && read["ok"] === true && isObj(read["output"]) ? read["output"] : null;
         if (output === null) return { ok: false, code: "settings_unreadable" };

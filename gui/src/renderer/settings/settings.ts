@@ -227,10 +227,26 @@ function providerSection(t: Texts, view: SettingsView, propose: Propose | null):
       el("li", provider.model === null ? t.format("settings.providerNoModel") : t.format("settings.providerModel", { model: provider.model })),
     );
     if (provider.modelEnvSet) facts.append(el("li", t.format("settings.providerModelEnv", { env: provider.modelEnv })));
+    // U-80: the provider's output cap; without it its runs stop before anything is sent.
+    const cap = provider.outputCap ?? null;
+    facts.append(
+      el("li", cap === null ? t.format("settings.providerNoOutputCap") : t.format("settings.providerOutputCap", { count: String(cap) }), { "data-output-cap": cap === null ? "missing" : String(cap), ...(cap === null ? { class: "notice" } : {}) }),
+    );
     // R27-I3: the address variable wins over the config file's address (the value is not shown).
     if (provider.baseUrlEnvSet && provider.baseUrlEnv !== null) facts.append(el("li", t.format("settings.providerBaseUrlEnv", { env: provider.baseUrlEnv }), { "data-base-url-env": provider.baseUrlEnv }));
     if (!provider.listable) facts.append(el("li", t.format("settings.providerNoList", { provider: provider.name }), { "data-no-list": provider.name }));
     row.append(facts);
+    if (propose !== null) {
+      const input = el("input", undefined, { type: "number", min: "1", max: String(MAX_LIMIT), step: "1", id: `settings-output-cap-${provider.name}`, "aria-label": t.format("settings.outputCapInput", { provider: provider.name }) });
+      row.append(
+        input,
+        button(t.format("settings.limitSet"), () => {
+          const n = Number(input.value);
+          if (input.value.trim() === "" || !Number.isSafeInteger(n) || n < 1 || n > MAX_LIMIT) return;
+          propose({ op: "outputCap", provider: provider.name, value: n });
+        }, { "data-output-cap-set": provider.name }),
+      );
+    }
     list.append(row);
   }
   box.append(list);

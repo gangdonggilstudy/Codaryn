@@ -746,6 +746,8 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
     const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
     let result: ApplyResult;
     let unsafeMoves = 0;
+    /** U-220: the apply's lock could not be released at its end (told in its summary). */
+    let lockLeft = false;
     try {
       const workspace = await createWorkspace({ root: workspaceRoot });
       const privacy = shown.privacy;
@@ -832,7 +834,9 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         outcome: cliError("internal_error", "the apply stopped because of an internal error; `codaryn report` and `codaryn revert` work on what was done"),
       };
     } finally {
-      await releaseLock({ workspaceRoot, runId });
+      // U-220 (U-176, U-201): a release that throws after its retries, or answers false, leaves the
+      // lock; the apply's result and exit code stay and its summary says so, never internal_error.
+      lockLeft = !(await releaseLock({ workspaceRoot, runId }).then((value) => value === true, () => false));
       cancel.dispose();
     }
     if (!args.quiet && io.writeProgress !== undefined && io.human?.applySummary !== undefined) {
@@ -843,7 +847,7 @@ export async function runApply(io: ApplyCommandEnvironment): Promise<CommandOutc
         const typed = input.kind === "quick" ? input.workspace : null;
         const typedMasked = typed === null ? null : shown.privacy.mask(typed);
         const workspaceShown = typed === null || typedMasked === null ? null : toShownWorkspace(typed, typedMasked.ok ? typedMasked.text : null);
-        const summary = io.human.applySummary(result, { workspaceForm: form, ...(workspaceShown === null ? {} : { workspaceShown }) });
+        const summary = io.human.applySummary(result, { workspaceForm: form, ...(workspaceShown === null ? {} : { workspaceShown }), ...(lockLeft ? { lockLeft: true } : {}) });
         const masked = shown.privacy.mask(summary);
         if (masked.ok) io.writeProgress(cleanText(masked.text, true));
       } catch {

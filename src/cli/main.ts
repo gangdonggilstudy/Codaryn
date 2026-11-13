@@ -228,7 +228,8 @@ async function dispatch(): Promise<{ readonly outcome: CommandOutcome; readonly 
         ...(process.stdin.isTTY === true && process.stderr.isTTY === true ? { ask: (question: string) => askLine(question, process.stderr) } : {}),
       });
       // DR-51 (U-38), R-70 L-1: no typed --workspace (revert knows no registered value).
-      if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output));
+      // U-220 (U-201): a lock this revert could not release is told after its lists.
+      if (outcome.output.kind === "revert") writeHuman(human.output.revertSummary(outcome.output, outcome.lockLeft === true ? { lockLeft: true } : undefined));
       if (outcome.hint !== undefined) writeHuman(outcome.hint);
       return plain(outcome);
     }

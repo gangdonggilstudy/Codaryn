@@ -207,6 +207,8 @@ export interface RunNotes {
   deniedNotWritable?: number;
   /** U-195 (Codex V-14 L-1, U-198): such writes in a run that carries out a plan (outside its files); absent is 0. */
   deniedNotPlanned?: number;
+  /** U-220 (U-176, U-201): the run's workspace lock could not be released at its end (finish said so). */
+  lockLeft?: boolean;
   /** DR-51 (U-38): the typed --workspace of the quick form, after the run's masking (toShownWorkspace); absent when it gives none. */
   workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
@@ -564,6 +566,8 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     // U-210 (U-207): the calls refused at unreadable paths and the table results that hid groups; not when none.
     ...(notes.deniedUnreadable === undefined ? {} : { deniedUnreadable: notes.deniedUnreadable }),
     ...(notes.hiddenGroups === undefined ? {} : { hiddenGroups: { ...notes.hiddenGroups } }),
+    // U-220 (U-201): the run's lock could not be released at its end; not when it was.
+    ...(notes.lockLeft === true ? { lockLeft: true } : {}),
     policySource: args.input.kind === "task" ? "task" : "config",
   };
 }
@@ -1169,8 +1173,10 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
       }
       result = defaultDisplay === null ? hinted : withNotice(hinted, privacy, defaultConfigNotice(defaultDisplay));
     } finally {
-      // Releases the workspace lock even when the run threw.
-      await assembled.finish(result);
+      // Releases the workspace lock even when the run threw. U-220: a lock it could not release is
+      // told in the end summary (lock.release_failed); the run's result and exit code stay.
+      const finished: unknown = await assembled.finish(result);
+      if (typeof finished === "object" && finished !== null && (finished as { readonly lockLeft?: unknown }).lockLeft === true) notes.lockLeft = true;
     }
     // N-5: the end summary on stderr, after the lock is released.
     if (write !== undefined && human !== undefined) {

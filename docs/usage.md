@@ -921,23 +921,22 @@ node --test dist/tests/live/anthropic-live.js
   - 등록 개수로 다른 제공자의 키 변수가 있는지, 설정한 두 값이 같은지를 알 수 있다.
 - **쓰기 경합:** 해시 비교와 파일 교체 사이에 다른 프로그램이 쓰면 그 변경을 덮어쓸 수 있다.
 - **점검:** `doctor`는 모델이 실제로 있는지 확인하지 않는다.
-- **도움말과 사용법의 빠진 곳(UXM-20):** main `0ad28bc`의 실제 CLI로 확인했고, `9934a9a`에서 다시 보았다. 아래는 아직 고쳐지지 않았다.
-  - `help run`의 옵션 목록에 `--workflow`가 없다. 사용법 줄에는 `[--workflow <id>]`가 있다(18.1절).
-  - 다음 경우 오류 JSON의 `message`는 여러 명령의 사용법을 이어 붙인 묶음이다(검토 R-61의 R61-L1, R61-I1).
+- **도움말과 사용법의 빠진 곳(UXM-20):** main `0ad28bc`에서 처음 확인했고, U-53 뒤의 main `76c5280`에서 실제 CLI로 다시 쟀다.
+  - **고쳐진 것(U-53):**
+    - `help run`·`plan`·`apply`·`review`의 옵션 목록에 `--workflow <id>`가 있다(18.1절).
+    - `run`·`revert`·`apply`의 `--json` 옵션 글은 `--json: print the result's JSON line at a terminal too (stdout and stderr both); through a pipe or a file, or with stderr redirected, it is printed without it`이다. `apply`에도 이제 옵션 목록이 있다.
+    - `codaryn --help`의 출력 설명은 지금 동작과 맞다: `At a terminal (stdout and stderr both), the result of run, revert and apply, and any command's error, show only as human lines on stderr (progress, summary, explained error).` 다음 문장이 stderr를 파일로 돌린 경우(`such as 2> log.txt`)도 든다.
+    - `plan`·`changes`의 옵션 목록이 생략을 알린다: `--workspace <dir>: the workspace directory; when it is left out (and no --task is given), the current directory`.
+  - **그대로인 것:**
+    - `run`·`revert`·`apply`의 사용법 줄에는 `[--json]`이 없다. 오류 JSON의 사용법 묶음이 바뀌므로 넣지 않기로 했다(DR-59).
+    - `plan`·`changes`의 사용법 줄은 아직 `(--task <task.json> | --workspace <dir> …)` 꼴이다.
+  - 다음 경우 오류 JSON의 `message`는 여러 명령의 사용법을 이어 붙인 묶음이다(검토 R-61의 R61-L1, R61-I1). main `76c5280`에서도 그대로다.
     - 모르는 명령일 때
     - 명령 없이 쳤는데 stdout이 터미널이 아닐 때. 터미널에서는 도움말이 나온다(10절 "터미널에서").
     - `run`과 `revert`의 옵션 오류일 때
     - 그 묶음은 `codaryn plan|apply|review ... | codaryn --help | codaryn --version`으로 끝나고 `changes`와 `cleanup`이 없다. 두 명령의 사용법은 `codaryn help changes`, `codaryn help cleanup`으로 본다. 다른 명령의 옵션 오류는 그 명령의 사용법만 보인다.
     - 콘솔에서는 오류 JSON 줄이 나오지 않으므로, 이 묶음을 보려면 `--json`을 준다(10절 "터미널에서").
-  - `run`, `revert`, `apply`의 사용법 줄에는 `[--json]`이 없다(검토 R-58 R58-L2).
-    - `run`과 `revert`의 옵션 목록에는 `--json: print the result as one JSON line`이 있다. 이 글은 `report`의 것과 같아 "글 대신 JSON"으로 읽히지만, 실제 뜻은 "콘솔에서도 결과 JSON 줄을 낸다"다.
-    - `apply`는 옵션 목록이 없고, 설명 끝에 `At a terminal (stdout and stderr both) the result's JSON line is printed only with --json or --quiet.`가 있다.
-  - `codaryn --help`의 출력 설명은 지금 동작보다 넓거나 좁게 말한다.
-    - 첫 문장 `At a terminal only the human lines on stderr show (progress, summary, explained error).`는 너무 넓다. 콘솔에서도 `report`, `runs`, `plan` 같은 글은 stdout에 보인다.
-    - 둘째 문장은 JSON 줄이 나오는 때로 `--json`과 "stdout is not a terminal (a pipe or a file)"만 든다. stderr를 파일로 돌려도 나온다는 것(U-45)은 말하지 않는다.
-    - 한국어 둘째 문장은 `run·revert·apply의 결과와 오류는`이라, 영어의 "and any error"보다 좁게 읽힌다. 실제로는 어느 명령의 오류든 같은 규칙이다(위 "터미널에서"의 표).
-  - `plan`과 `changes`의 사용법 줄은 `(--task <task.json> | --workspace <dir> …)`이라 둘 중 하나가 꼭 있어야 하는 것처럼 보인다. 실제로는 둘 다 없으면 현재 폴더를 쓴다(10절 "`--workspace` 생략").
-  - 한국어 `doctor` 표는 열이 맞지 않는다(`[정상]      Node.js 버전  Node.js 26: …`, `[건너뜀]     변수 파일       …`). 영어 표는 맞는다.
+  - 한국어 `doctor` 표는 열이 맞지 않는다(`[정상]      설치 위치       …`, `[건너뜀]     보호 대상 경로    …`, main `76c5280`). 영어 표는 맞는다.
 - **실행 기록 변조(결정 DR-38, DR-37 (b)):** `report`, `changes`, `revert`는 `.codaryn\`의 실행 기록을 믿는다. 이 폴더는 모델의 파일 도구로는 쓸 수 없지만, 허용한 명령이나 같은 사용자의 다른 프로그램은 쓸 수 있다.
   - **실행 중의 변경은 알아챈다.** 실행의 시작과 끝, 그리고 명령을 돌린 뒤마다 `.codaryn\`을 살피고, 그 실행이 쓴 것 말고 바뀐 것이 있는지 본다. 다른 것이 바뀌었으면 실행을 `failed`/`state_changed`(종료 1)로 끝내고 그 실행에 "기록이 바뀜" 표시를 남긴다. 확인(main `6df2eae`, 허용한 `node` 명령이 고침): 그 실행 자신의 기록, 이미 끝난 다른 실행의 `result.json`, `.codaryn\`에 새 파일 하나 모두 이렇게 끝났다. 끝 요약은 `the state directory was changed by something other than the run, or could not be checked (failed/state_changed)`와 "허용한 명령과 검사를 살펴보라"는 안내를 낸다.
   - 표시가 붙는 것은 그때 돌던 실행이다. 기록이 고쳐진 다른 실행에는 표시가 없다.
@@ -954,19 +953,23 @@ node --test dist/tests/live/anthropic-live.js
   - **실행이 끝난 뒤의 변경은 알아채지 못한다.** 실행이 남긴 자식 프로세스나 다른 프로그램이 끝난 실행의 기록을 고치면 표시가 붙지 않는다. 확인: 끝난 실행의 스냅숏 파일을 고치자 `runs`는 그대로였다. `revert`는 그 파일을 `snapshot missing (missing_snapshot)`으로 건너뛰고 아무것도 쓰지 않았다(다이제스트가 맞지 않아서).
   - 실행이 끝난 뒤 변경 기록 파일의 다이제스트를 지금 값으로 바꿔 넣으면, `changes`를 다른 가릴 값으로 볼 때 실행 때 가렸던 값이 그대로 보인다(DR-37 (b)). 드러나는 값은 작업 공간 파일에 이미 있는 값이다.
   - `report`는 실행 기록만큼만 믿을 수 있다.
-- **출력 언어:** main `4010905`의 실제 CLI를 `CODARYN_LANG=ko`로 돌려 다시 쟀다. 한국어 설정에서도 영어로 나오는 것은 다음이다.
+- **출력 언어:** U-36·U-37 뒤의 main `76c5280`을 `CODARYN_LANG=ko`로 실제 CLI로 다시 쟀다. 한국어 설정에서도 영어로 나오는 것은 다음이다.
   - `report`의 Markdown. 실행 보고서와 적용 실행 보고서 모두다.
-  - `plan` 본문의 일부: 머리 줄(`Plan of run …`), `Digest:` 줄, 동작 줄, 적용 명령 줄(`To apply it: …`), `Applied by run …` 줄. 기록 변경 경고, 에이전트의 설명 머리말, 적용할 수 없다는 줄, 다이제스트가 묶는 것을 말하는 끝 문장은 한국어다(18.3절).
-  - `apply`의 터미널 질문 `Apply this plan? [y/N]`과, 그 앞에 보이는 계획 본문의 위 영어 줄들
-  - `changes`의 머리 줄(`changes of run …, masked with the secrets registered now (not the run's own masking)`)과 파일 줄(`== summary.md: created by the run; as the run left it`)
+  - `review` 결과의 확인 항목. 머리 줄(`실행 <id>의 검토: 받아들임.`)과 끝 줄은 한국어다. 내장 `analyze`의 두 항목(`The report's interpretation matches the result table.`, `No input data the goal names is missing from the analysis.`)은 작업 종류 정의의 고정 값이라 영어다. 그 글의 언어는 사용자에게 묻기로 했다(DR-57).
   - 도움말의 사용법 줄(`usage: codaryn …`), 옵션 이름, 종료 코드 줄의 상태 낱말(`done 0`, `preview 0` 등)
   - 오류 JSON의 `message`와 모든 `--json` 출력(고정)
-- 이번에 한국어로 나온 것:
+- 한국어로 나온 것(이번에 잰 것):
   - 진행 줄과 끝 요약(실패한 호출 줄 포함, 8절), `runs`, `revert`의 글, `doctor`, `init`
-  - 오류 설명
+  - 오류 설명과 그 이유 줄(U-37)
   - `cleanup`의 안내 전부(U-34, 18.8절)
-  - 모든 명령의 도움말 설명, 옵션 설명, 종료 코드 설명. `plan`·`apply`·`review`·`changes`·`cleanup`의 도움말도 이제 한국어다(U-35)
-- 이번에 다시 재지 못한 것: `models`의 표(키와 모델 목록이 있어야 나온다. 예전 판에서는 영어였다), 하드 링크가 없는 드라이브의 동의 질문(예전 판에서는 영어였다), `review`의 결과 글.
+  - `plan` 본문 전부(U-36, 18.2절): 머리 줄 `실행 <id>의 계획: 동작 3개, 적용 전`, `다이제스트:` 줄, 동작 줄(`이동`, `폐기`), 적용 명령 줄 `적용하려면: …`, 적용한 계획의 `적용 실행 <id>에서 적용함 (<지역 시각>)`
+  - `apply`의 터미널 질문 `이 계획을 적용할까요? [y/N] (y·예·네: 예, Enter: 아니오)`(U-36)
+  - `changes`의 본문(U-36)
+  - 키가 없을 때 `models`의 오류
+  - 모든 명령의 도움말 설명, 옵션 설명, 종료 코드 설명(U-35, U-53)
+- 이번에 다시 재지 못한 것:
+  - `models`의 표. 키와 모델 목록이 있어야 나온다. 예전 판에서는 영어였다.
+  - 하드 링크가 없는 드라이브의 동의 질문. DR-59는 그 영어 글이 바뀌었다고 적었다.
 - **OS 언어 판단:** `CODARYN_LANG`과 설정의 `language`가 없으면 Node의 `Intl` 기본 로캘로 언어를 고른다. Windows에서는 이것이 표시 언어가 아니라 지역 형식을 따를 수 있다. 원하는 언어가 아니면 `CODARYN_LANG`이나 설정의 `language`로 고정한다(8절). Linux·macOS에서는 확인하지 않았다.
 - **잠금 판정:** 프로세스 id는 다시 쓰일 수 있어서, 잠금을 쥔 프로세스가 같은 프로세스인지 시작 시각으로 함께 확인한다(5초 안으로 맞으면 같은 프로세스로 본다). 끝난 실행의 잠금은 다음 실행이 회수한다. 시작 시각이 없는 잠금(이 확인이 생기기 전의 판이 쓴 것)은 프로세스 id만으로 판정하므로, 그 id를 다른 프로그램이 다시 쓰면 그 프로그램이 끝날 때까지 쥔 것으로 보인다(17절 "멈춘 실행의 잠금이 남아 막힐 때").
 - **심한 부하에서의 잠금:** 시작 시각 조회(Windows PowerShell)가 5초 안에 답하지 않으면 그 잠금을 "쥐고 있음"으로 본다. 그래서 컴퓨터가 몹시 바쁠 때는 이미 끝난 실행의 잠금인데도 `workspace_locked`(종료 6)로 끝날 수 있다. 두 실행이 함께 작업 공간을 쓰지 않게 하려고 안전한 쪽으로 끝내는 것이다. 잠시 뒤 다시 실행하고, 계속되면 `doctor`의 작업 공간 잠금 항목을 본다(17절).
@@ -1055,7 +1058,7 @@ node --test dist/tests/live/anthropic-live.js
 
 작업 종류는 실행에 쓸 도구, 고정 지시, 계획 확인 여부, 끝나는 방식을 묶은 것이다. 작업 종류를 고르지 않은 task는 지금까지와 같이 실행된다(도구 넷 `read_file`, `search_files`, `write_file`, `run_command`, 계획 없음, 검증기로 완료).
 
-새 명령 `plan`, `apply`, `review`, `changes`는 모델을 부르지 않는다. 도움말은 영어 사용법 줄 아래에 설명, 옵션, 종료 코드를 한국어·영어로 보인다(U-35). 적용을 묻는 터미널 질문은 아직 영어다(16절 "출력 언어").
+새 명령 `plan`, `apply`, `review`, `changes`는 모델을 부르지 않는다. 도움말은 영어 사용법 줄 아래에 설명, 옵션, 종료 코드를 한국어·영어로 보인다(U-35). 본문과 적용을 묻는 터미널 질문도 한국어 설정에서는 한국어다(U-36, 16절 "출력 언어").
 
 ### 18.1 작업 종류 고르기
 
@@ -1068,7 +1071,7 @@ node --test dist/tests/live/anthropic-live.js
 | `organize` | `read_file`, `search_files`, `inspect_files`, `propose_plan` | 계획을 제안하고 멈춤. 사람이 승인하면 적용(18.3) | 파일 이동·폐기. 명령 금지 |
 
 - **고르는 곳**(앞의 것이 우선): task 파일의 `workflowRef` → 간편 형식의 `--workflow <id>` → 프로필의 `workflowRef`. task 파일과 `--workflow`를 함께 주면 `invalid_arguments`다.
-  - `codaryn help run`의 사용법 줄에는 `[--workflow <id>]`가 있지만 그 아래 옵션 목록에는 아직 없다(main `a191a50`, UXM-20). 뜻은 이 절의 것이다.
+  - `codaryn help run`(그리고 `plan`, `apply`, `review`)의 옵션 목록에 `--workflow <id>: the task type of the quick form (built in, or defined in the config file); not with --task, whose file names its own`가 있다(U-53, main `76c5280`의 실제 CLI).
 - task의 `workflow`는 표시용 이름표일 뿐이다. `"workflow": "organize"`만 쓰고 `workflowRef`가 없으면 예전 방식으로 실행되고 계획 도구가 없다.
 - **사용자 정의 작업 종류:** 설정 파일의 `workflows`에 `"<id>": { 정의 }`로 둔다. 내장 id는 다시 정의할 수 없다.
   - 필드: `label`, `tools`, `instructions`, `plan`(`none`·`apply`), `completion`(`verifiers`·`human_review`), `humanReview`(`checklist`), `allowCommands`, `policy`, `verifiers`, `limits`
@@ -1182,7 +1185,20 @@ The digest names exactly these actions and the contents the plan's files had whe
 
 - `The agent's description (…)` 아래의 `|` 줄은 모델이 계획을 제안하며 쓴 요약이다(U-14). 모델의 말이며 검증되지 않았고, **승인하는 대상이 아니다.** 요약은 `plan.json`과 다이제스트에 들지 않는다. 승인은 그 위의 동작 목록과 다이제스트로 한다. 이 체험의 요약이 한국어인 것은 대본이 그렇게 썼기 때문이다.
 - 끝 문장은 다이제스트가 묶는 것을 말한다: 이 동작들과, 계획을 만들 때 계획에 든 파일의 내용. 그 뒤 계획이나 그 파일이 바뀌었거나 계획 실행에 기록 변경 표시가 있으면 적용을 거부한다. 실행의 다른 기록(journal 등)은 다이제스트에 들지 않는다.
-- 한국어 설정에서는 설명의 머리말(`에이전트의 설명(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상이 아님):`)과 끝 문장이 한국어이고, 나머지 줄은 영어다(16절 "출력 언어").
+- 한국어 설정에서는 계획 보기 전체가 한국어다(U-36). 경로, 실행 id, 명령은 그대로다. main `76c5280`의 실제 출력(같은 예시, 일부):
+
+  ```
+  실행 20261112T235113Z-bcb77c7d의 계획: 동작 3개, 적용 전
+  다이제스트: 55c7dc68225a3dc542f376f49d738253cd55ce10a347eb2acc3169b4793b3e99
+    1. 이동  inbox/beach-2025.jpg  ->  photos/2025/beach-2025.jpg
+    2. 이동  inbox/receipt-2026.pdf  ->  documents/2026/receipt-2026.pdf
+    3. 폐기  inbox/old-draft.tmp  (지울 때까지 폐기 보관함 .codaryn/discarded/에 남음)
+  에이전트의 설명(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상이 아님):
+    | 사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다
+  적용하려면: codaryn apply <같은 task 형식> --run 20261112T235113Z-bcb77c7d --digest 55c7dc68225a
+  ```
+
+  - 그 아래 끝 문장도 한국어다(`다이제스트는 바로 이 동작들과, …`).
 
 **적용(`apply`):** 실제 출력(stderr). 종료 0이다.
 
@@ -1211,7 +1227,7 @@ Revert: codaryn revert --workspace <workspace> --run 20261112T200121Z-da084c3e
 - 검증 1번은 적용이 늘 돌리는 파일 목록 확인(`inventory`)이다. 계획에 있던 이동·폐기만 일어났는지 본다. 2번은 task의 `file_rules`다.
 - 적용은 새 실행(적용 실행)이다. stdout은 `kind:"apply"` JSON 한 줄이고(`planRunId`, `digest`, `applied` 등. 콘솔에서는 `--json`이나 `--quiet`일 때만, 10절 "터미널에서"), 같은 내용이 그 실행의 `result.json`이 된다.
 - 폐기한 파일은 `.codaryn\discarded\<적용 실행 id>\` 아래에 동작 번호 이름(`2`)으로 있다.
-- `runs`에는 적용 실행이 맨 위에 `3  done (done/verified)`로 나온다(`changes`는 적용한 동작 수). `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> at <시각>` 줄이 붙는다.
+- `runs`에는 적용 실행이 맨 위에 `3  done (done/verified)`로 나온다(`changes`는 적용한 동작 수). `plan`을 다시 보면 상태가 `applied`이고 `Applied by run <적용 실행 id> (<지역 시각>)` 줄이 붙는다(예: `Applied by run 20261112T235227Z-ff199ffc (2026-11-13 08:52:27)`, main `76c5280`, DR-59). 한국어는 `적용 실행 <id>에서 적용함 (<지역 시각>)`이다.
 - **실행 목록의 계획 실행 줄(U-16):** 결과 칸이 그 계획의 적용이 어떻게 되었는지 말한다. 판정은 적용 실행의 기록으로 한다(계약의 `planApplyStateOf`).
 
   | 상태 | 결과 칸(영어) | 한국어 | 언제 |
@@ -1307,7 +1323,7 @@ node dist/src/cli/main.js apply --task <task.json> --run <계획 실행 id> --di
 - **계획 보기(`plan`):** `plan.json`을 지금 명령의 가릴 값으로 다시 가려 보여 준다. 아무것도 바꾸지 않고 잠금도 잡지 않는다. `--run latest`를 받는다. 가릴 값이 든 경로는 `documents/[[CODARYN_SECRET:7a30010719392743]]/receipt-2026.pdf`처럼 토큰으로 보인다. 보이는 것(U-14, 18.2절의 예):
   - 머리 줄(동작 수와 `pending`·`applied`), 다이제스트, 동작 목록.
   - **에이전트의 설명:** 모델이 `propose_plan`에 쓴 요약(500자까지)을 `The agent's description (the model's own words, not checked, and not what you approve):` 아래 `|` 줄로 보인다. 계획 실행의 journal에서 읽어 지금 가릴 값으로 다시 가리고, 키 모양과 지금 키는 숨기고, 제어 문자는 뺀다. 요약은 다이제스트에 들지 않으므로 승인하는 대상이 아니다. 찾거나 읽거나 가리지 못하면 이 줄 없이 보인다.
-  - 적용하지 않은 계획이면 적용 명령(`To apply it: …`), 적용한 계획이면 `Applied by run <적용 실행 id> at <UTC 시각>.`.
+  - 적용하지 않은 계획이면 적용 명령(`To apply it: …`), 적용한 계획이면 `Applied by run <적용 실행 id> (<지역 시각>)`(DR-59 전에는 UTC 시각이었다).
   - 끝 문장: 다이제스트가 이 동작들과 계획을 만들 때의 파일 내용을 묶는다는 것, 그 뒤 계획이나 파일이 바뀌었거나 기록 변경 표시가 있으면 적용을 거부한다는 것, 실행의 다른 기록은 다이제스트에 들지 않는다는 것.
   - `--json`은 `kind:"plan"` 한 줄이다(`digest`, `actions`, `appliedBy`, `inventoryLimitReached`, 요약이 있으면 `summary`, 표시가 있으면 `recordsChanged: true`).
 - **승인**(둘 다 없으면 `plan_not_approved`, 종료 2, 아무것도 옮기지 않음):
@@ -1508,6 +1524,6 @@ The records of 1 run(s) not reverted, only partly reverted, or whose records can
 - **기록을 확인할 수 없는 실행**(결과 기록이 깨진 실행 등)의 줄에는 `records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files`가 붙고, `--include-not-reverted`를 따로 줘야 지워진다.
 - 지운 것은 `.codaryn\cleanup.jsonl`에 개수와 바이트만 남는다(이름과 경로는 없다).
 - `--json`이면 `kind:"cleanup"` JSON 한 줄이고, `status`가 한 일을 말한다(DR-48): `preview`(종료 0), `removed`(하나라도 지움, 0), `nothing_removed`(지운 것이 없음, 3), `partly_failed`(지우기가 일부 실패, 1). `outcome.ok`는 `removed`일 때만 `true`다. 다이제스트가 다르면 정리 JSON이 아니라 오류 JSON(`kind:"error"`, `cleanup_plan_changed`, 종료 2)이다. 터미널 질문은 없다. 지우는 길은 다이제스트 확인뿐이다.
-- 한국어 출력에서도 크기 조각(`N file(s), N bytes`)과 끝의 안내 줄은 아직 영어다.
+- 한국어 출력은 크기 조각과 끝의 안내 줄까지 한국어다(U-34). main `76c5280`의 미리보기에서는 `- <실행 id>: 파일 5개, 15671바이트`와 `아무것도 지우지 않았습니다. 실행 기록을 지우려면 같은 명령에 다음을 붙여 다시 실행하세요: --confirm <앞 12자>.`였다.
 - 확인 범위: 위 출력, `--confirm`만 준 결과, `status`와 종료 코드(`removed`, `nothing_removed`, 지우기 거부 ACL로 만든 `partly_failed`, 틀리거나 낡은 다이제스트의 `cleanup_plan_changed`)는 U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것), `--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
 - **계획 실행의 기록**은 그 계획의 적용 실행을 되돌리는 데 필요하다. 손으로 지우면 그 적용은 되돌릴 수 없다(`revert`는 `plan_run_missing`, 종료 2). 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.

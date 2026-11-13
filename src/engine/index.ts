@@ -48,6 +48,7 @@ import {
   PROFILE_NAME_PATTERN_SOURCE,
   REPLACED_CALL_ID_PREFIX,
   RESULT_SCHEMA_VERSION,
+  modelErrorRetryable,
   RUNS_DIR_NAME,
   RUN_EXIT_CODES,
   STATE_DIR_NAME,
@@ -76,6 +77,7 @@ import type {
   JsonObject,
   MaskedText,
   MaskedToolCall,
+  ModelErrorKind,
   ModelMessage,
   PolicyDecision,
   PolicyNarrowing,
@@ -86,6 +88,7 @@ import type {
   RawVerifierResult,
   RawWorkflowToolOutcome,
   ResolvedPlanAction,
+  RunModelError,
   RunReason,
   RunTask,
   StateCheckPhase,
@@ -357,6 +360,13 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
   // DR-47 (U-21): the masked text of the last model response when it was a final reply; reset when
   // the model is asked again, so a run that ended without a reply has none.
   let lastFinal: MaskedText | null = null;
+  /** U-55 (AXM-9): the model error that ended the run (EngineResult.modelError); null otherwise. */
+  let endingModelError: RunModelError | null = null;
+  const endedByModelError = (kind: ModelErrorKind, turn: number, httpStatus?: number): End => {
+    const retryable = modelErrorRetryable(kind, httpStatus);
+    endingModelError = retryable === undefined ? { kind, turn } : { kind, turn, retryable };
+    return { status: "failed", reason: "model_error" };
+  };
   // DR-38: the state guard, the last tier-run fingerprint (each window chains from it) and the
   // tier-state base of the run's start; the last recorded list goes into the result.
   const stateGuard = deps.stateGuard;
@@ -1093,7 +1103,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         if (message !== null) {
           await record({ type: "model_error", turn, kind: outcome.kind, message });
         }
-        return { status: "failed", reason: "model_error" };
+        return endedByModelError(outcome.kind, turn, outcome.httpStatus);
       }
 
       const response = outcome.response;
@@ -1144,7 +1154,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
         if (message !== null) {
           await record({ type: "model_error", turn, kind: "malformed_response", message });
         }
-        return { status: "failed", reason: "model_error" };
+        return endedByModelError("malformed_response", turn);
       }
 
       messages.push({ role: "assistant", text, toolCalls: echoed });
@@ -1334,6 +1344,7 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
           notices.push(message);
           await record({ type: "model_error", turn: modelTurns, kind: "malformed_response", message });
         }
+        endedByModelError("malformed_response", modelTurns);
         return NO_PLAN;
       }
       const verdict = await verify();
@@ -1390,6 +1401,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       // U-59 (AXM-15): apart from `plan`, whose two fields stay.
       ...(end.reason === "plan_pending" && proposedPlan !== null && planSummary !== null ? { planSummary } : {}),
       ...(end.reason === "awaiting_review" && reviewChecklist !== null ? { review: { checklist: reviewChecklist } } : {}),
+      // U-55 (AXM-9): only when a model error ended the run (not masking that failed).
+      ...(end.reason === "model_error" && endingModelError !== null ? { modelError: endingModelError } : {}),
     };
   } finally {
     clearTimeout(timer);

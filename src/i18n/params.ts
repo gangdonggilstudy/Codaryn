@@ -16,6 +16,9 @@
  *   and port of the person's own API address, nothing of its path, user info or query.
  * - field: a SchemaFieldPath (`toSchemaFieldPath`). runId: a RunId (`toRunId`).
  * - text: text the same catalog produced (`ownText`).
+ * - workspace (DR-51, U-38): a ShownWorkspace exactly as the contract's `toShownWorkspace` makes it
+ *   (`isShownWorkspace`): the typed workspace path in double quotes, after masking, with no key
+ *   shape, privacy-token fragment or character that cannot stand in double quotes in a shell.
  * - location, suggestedCommand, suggestedPath: one of the fixed display strings.
  *
  * Key-shaped text in the finished line is hidden with every output key shape of the contract
@@ -39,6 +42,7 @@ import {
   RUN_REASONS,
   TERMINAL_RUN_STATUSES,
   TOOL_ERROR_CODES,
+  isShownWorkspace,
   toApiOrigin,
   toRunId,
   toSchemaFieldPath,
@@ -55,7 +59,7 @@ const KEY_PATTERN = new RegExp(API_KEY_MASK_PATTERN_SOURCES.map((source) => `(?:
 
 const LOCATIONS = [...Object.values(DEFAULT_CONFIG_DISPLAY), "--config", "CODARYN_CONFIG"] as const satisfies readonly ConfigLocationDisplay[];
 
-type ClosedKind = Exclude<MessageParamKind, "count" | "seconds" | "field" | "runId" | "text" | "apiOrigin">;
+type ClosedKind = Exclude<MessageParamKind, "count" | "seconds" | "field" | "runId" | "text" | "apiOrigin" | "workspace">;
 
 /** Largest number of seconds shown (about 31 years); larger values are not plausible durations. */
 const MAX_SECONDS = 1_000_000_000;
@@ -147,6 +151,9 @@ export function formatParam(kind: MessageParamKind, value: unknown, ownText: (te
     case "apiOrigin":
       // Only an origin the contract would make from an address, in that exact form.
       return typeof value === "string" && toApiOrigin(value) === value ? value : REPLACEMENT;
+    case "workspace":
+      // DR-51: only a typed workspace path the contract would show, in that exact quoted form.
+      return isShownWorkspace(value) ? value : REPLACEMENT;
     default:
       return typeof value === "string" && CLOSED_KIND_VALUES[kind].has(value) ? value : REPLACEMENT;
   }

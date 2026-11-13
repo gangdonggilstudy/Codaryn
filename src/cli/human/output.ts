@@ -40,6 +40,7 @@ import {
   ALL_TOOL_NAMES,
   TOOL_ERROR_CODES,
   isReasonOfStatus,
+  isShownWorkspace,
   planApplyStateOf,
   toRunId,
   toSchemaFieldPath,
@@ -68,6 +69,7 @@ import type {
   RunSummaryContext,
   RunsOutput,
   SchemaFieldPath,
+  ShownWorkspace,
   TerminalRunStatus,
   AnyToolName,
 } from "../../contracts/index.js";
@@ -242,6 +244,26 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
   }
 
   /**
+   * DR-51 (U-38): the typed workspace a hint shows: the context's value when it is exactly what
+   * toShownWorkspace makes and the line's own cleaning (finalLine) keeps it as it is; otherwise null,
+   * and the hint says `<workspace>` as before (fail closed: the path as typed, or not at all).
+   */
+  function typedWorkspace(value: unknown): ShownWorkspace | null {
+    return isShownWorkspace(value) && finalLine(value) === value ? value : null;
+  }
+
+  /** DR-51 (U-38): for run and apply, the typed workspace with workspaceForm "given" only. */
+  function givenWorkspace(context: { readonly workspaceForm: unknown; readonly workspaceShown?: unknown }): ShownWorkspace | null {
+    return context.workspaceForm === "given" ? typedWorkspace(context.workspaceShown) : null;
+  }
+
+  /** How the next commands name the task form; DR-51: the typed workspace when there is one. */
+  function formText(workspaceForm: unknown, workspace: ShownWorkspace | null): CatalogText {
+    if (workspace !== null) return catalog.format("summary.form.typed", { workspace });
+    return catalog.format(`summary.form.${isOneOf(workspaceForm, WORKSPACE_FORMS) ? workspaceForm : "given"}`);
+  }
+
+  /**
    * U-37 (R-69 M1): the lines of a hint that takes a value (DETAILED_CLI_ERROR_HINTS), from the error's
    * CLI_ERROR_HINT_DETAIL. A detail that is absent or does not fit gives no line (the contract:
    * such a hint's line is left out), and never only part of them.
@@ -296,12 +318,25 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     return items;
   }
 
-  /** The run id, and the report and revert commands for it. */
-  function nextCommands(id: unknown, here: boolean, revertable: boolean): string[] {
+  /** The run id, and the report and revert commands for it. DR-51: with the typed workspace when there is one. */
+  function nextCommands(id: unknown, here: boolean, revertable: boolean, workspace: ShownWorkspace | null): string[] {
     const runId = toRunId(String(id));
     if (runId === null) return [];
-    const out = [catalog.format("summary.run_id", { runId }), catalog.format(here ? "summary.next_report_here" : "summary.next_report", { runId })];
-    if (revertable) out.push(catalog.format(here ? "summary.next_revert_here" : "summary.next_revert", { runId }));
+    const report = here
+      ? catalog.format("summary.next_report_here", { runId })
+      : workspace !== null
+        ? catalog.format("summary.next_report_typed", { runId, workspace })
+        : catalog.format("summary.next_report", { runId });
+    const out = [catalog.format("summary.run_id", { runId }), report];
+    if (revertable) {
+      out.push(
+        here
+          ? catalog.format("summary.next_revert_here", { runId })
+          : workspace !== null
+            ? catalog.format("summary.next_revert_typed", { runId, workspace })
+            : catalog.format("summary.next_revert", { runId }),
+      );
+    }
     return out;
   }
 
@@ -403,10 +438,12 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (pair !== null) out.push(catalog.format(`advice.${pair.reason}`));
 
       const here = context.workspaceForm === "current";
-      out.push(...nextCommands(result.runId, here, changes.length > 0));
+      // DR-51 (U-38): the typed workspace in the hints, with workspaceForm "given" only.
+      const workspace = givenWorkspace(context);
+      out.push(...nextCommands(result.runId, here, changes.length > 0, workspace));
       // G-A: a plan waiting for approval, or a run waiting for a person's review.
       const runId = toRunId(String(result.runId));
-      const form = catalog.format(`summary.form.${isOneOf(context.workspaceForm, WORKSPACE_FORMS) ? context.workspaceForm : "given"}`);
+      const form = formText(context.workspaceForm, workspace);
       if (runId !== null && planReady && result.plan !== undefined) {
         out.push(catalog.format("summary.next_plan", { form, runId }));
         out.push(catalog.format("summary.next_apply", { form, runId }));
@@ -526,6 +563,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       return line === null ? null : finalLine(line);
     },
 
+    // R-70 L-1 (PM): revert knows no registered values, so its hints never show a typed workspace,
+    // whatever context a caller gives (RevertSummaryContext is not read): `<workspace>` always.
     revertSummary(output: RevertOutput): string {
       const reverted = Array.isArray(output.reverted) ? output.reverted : [];
       const skipped = Array.isArray(output.skipped) ? output.skipped : [];
@@ -568,7 +607,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (output.dryRun !== true && revertedRun !== null && skipped.some((file) => file.reason === "unsafe_move")) {
         out.push(catalog.format("summary.next_revert_unsafe", { runId: revertedRun }));
       }
-      if (output.dryRun === true) out.push(catalog.format("revert.dry_run_next"));
+      // U-57 (UXM-21): only when the preview lists a file to revert. A dry run makes the real revert's
+      // decisions and only skips files, so with none listed a real revert would do nothing either.
+      if (output.dryRun === true && reverted.length > 0) out.push(catalog.format("revert.dry_run_next"));
       return lines(out);
     },
 
@@ -738,12 +779,13 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         if (!kinds.includes(kind)) continue;
         out.push(kind === "plan_records_unchecked" && cause !== null ? catalog.format(`apply.notice.plan_records_unchecked.${cause}`) : catalog.format(`apply.notice.${kind}`));
       }
-      out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0));
+      // DR-51 (U-38): the typed workspace in the hints, with workspaceForm "given" only.
+      const workspace = givenWorkspace(context);
+      out.push(...nextCommands(result.runId, context.workspaceForm === "current", applied.length > 0, workspace));
       // DR-21: stopped for the person's consent to unsafe moves; how to give it for one apply.
       if (pair?.reason === "consent_required" && planRunId !== null) {
         if (unsafeMoveCount !== null && unsafeMoveCount > 0) out.push(catalog.format("summary.unsafe_moves", { count: unsafeMoveCount }));
-        const form = catalog.format(`summary.form.${isOneOf(context.workspaceForm, WORKSPACE_FORMS) ? context.workspaceForm : "given"}`);
-        out.push(catalog.format("summary.next_apply_unsafe", { form, runId: planRunId }));
+        out.push(catalog.format("summary.next_apply_unsafe", { form: formText(context.workspaceForm, workspace), runId: planRunId }));
         if (typeof result.digest === "string" && DIGEST.test(result.digest)) out.push(`  ${result.digest}`);
       }
       return lines(out);

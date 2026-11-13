@@ -21,11 +21,13 @@ import path from "node:path";
 import {
   CLI_ERROR_EXIT_CODES,
   CLI_ERROR_HINT_DETAIL,
+  cliErrorFacts,
   LEGACY_WORKFLOW_SETTINGS,
   RESULT_SCHEMA_VERSION,
   mergeWorkflowPolicy,
   mergeWorkflowVerifiers,
   toSchemaFieldPath,
+  toShownWorkspace,
   workflowPolicyNarrowings,
   workflowVerifierNarrowings,
 } from "../contracts/index.js";
@@ -57,6 +59,7 @@ import type {
   MessageCatalog,
   RunSummaryContext,
   RunTask,
+  ShownWorkspace,
   WorkflowDefinition,
   WorkflowProblem,
   WorkflowSettings,
@@ -171,6 +174,8 @@ export interface RunNotes {
   deniedToolCalls: number;
   /** N-23: the denied calls whose permission is `command`. */
   deniedCommandCalls: number;
+  /** DR-51 (U-38): the typed --workspace of the quick form, after the run's masking (toShownWorkspace); absent when it gives none. */
+  workspaceShown?: ShownWorkspace;
   /** U-18 (AXM-4): calls allowed and then failed, by the rule of failed-calls.ts (RunSummaryContext.failedToolCalls). */
   failedToolCalls: number;
 }
@@ -185,7 +190,8 @@ export interface CliRunOutcome {
 function error(code: CliErrorCode, message: string, diagnostic?: InputDiagnostic): { output: CliErrorOutput; exitCode: number } {
   const exitCode = CLI_ERROR_EXIT_CODES[code];
   return {
-    output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message, ...(diagnostic === undefined ? {} : { diagnostic }) },
+    // U-55 (AXM-9): every error says its category and whether the same command may succeed later.
+    output: { schemaVersion: RESULT_SCHEMA_VERSION, kind: "error", code, exitCode, message, ...(diagnostic === undefined ? {} : { diagnostic }), ...cliErrorFacts(code) },
     exitCode,
   };
 }
@@ -406,6 +412,8 @@ export async function runCli(io: CliEnvironment): Promise<CliRunOutcome> {
 function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
   return {
     workspaceForm: args.input.kind === "task" ? "task" : args.input.oneLine ? "current" : "given",
+    // DR-51 (U-38): with "given" only; the hints then show the path the person typed.
+    ...(args.input.kind === "quick" && !args.input.oneLine && notes.workspaceShown !== undefined ? { workspaceShown: notes.workspaceShown } : {}),
     configDefault: notes.configDefault,
     profileApplied: args.profile !== null,
     deniedToolCalls: notes.deniedToolCalls,
@@ -708,13 +716,13 @@ export async function prepareTask(
       );
     }
   }
-  // U-37: the last element, whether the error gets input_inside_workspace. R-69 L1 (PM): not the
-  // cancel file, which the hint (task, config or variables file) does not name.
+  // U-37: the last element, whether the error gets input_inside_workspace. R-69 L1, R-69b L1 (PM):
+  // not the script file and the cancel file, which the hint (task, config or variables file) does not name.
   const located: [string | null, CliErrorCode, string, boolean][] = [
     [envPath, "invalid_config", "the file given by --vars-file", true],
     [configFile?.path ?? null, "invalid_config", "the config file", true],
     [taskFile?.path ?? null, "invalid_task", "the task file", true],
-    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file", true],
+    [task.model.provider === "scripted" ? task.model.scriptPath : null, "invalid_script", "the script file", false],
     // T-12: a cancel file inside the workspace could be created by the run itself.
     [args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile), "invalid_arguments", "the file given by --cancel-file", false],
   ];
@@ -829,6 +837,18 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     // U-8: progress lines follow the journal; they start only once the run has started.
     const write = args.quiet ? undefined : io.writeProgress;
     const privacy = assembled.deps.privacy;
+    // DR-51 (U-38): the typed --workspace for the end summary's hints, after the run's own masking.
+    // Best effort, as the summary is: a gateway that cannot mask it leaves the hint at <workspace>.
+    if (args.input.kind === "quick" && !args.input.oneLine) {
+      try {
+        const typed = args.input.workspace;
+        const masked = privacy.mask(typed);
+        const shown = toShownWorkspace(typed, masked.ok ? masked.text : null);
+        if (shown !== null) notes.workspaceShown = shown;
+      } catch {
+        // No path is shown.
+      }
+    }
     // N-4, N-5: the human renderer in the chosen language (the config's language is known now).
     let human: { readonly output: HumanOutput; readonly messages: MessageCatalog } | undefined;
     try {

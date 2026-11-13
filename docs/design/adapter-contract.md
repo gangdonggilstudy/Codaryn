@@ -362,6 +362,7 @@ interface ApplyObserver {
   - 이동 동의(`unsafeMoveConsent`)는 이동 계획의 것이라, 실행 계획에 주면 CLI가 `invalid_arguments`로 거부한다. plan "run"으로 풀리지 않는 과제 형식은 `run_not_plan`이고, 다이제스트가 다르면 `plan_not_approved`, 이미 수행했으면 `plan_already_applied`다.
   - 이동 계획(plan "apply")은 전과 같다. 이벤트는 `observer.onEvent`로 간다.
   - 시험은 `tests/unit/app/u218-run-plan-apply.test.ts`(11건)다. 이동 계획만 다루는 기존 시험은 `done`을 이동 계획의 꼴로 좁혔다.
+  - U-237(Codex V-24 M-3): 앱의 조립이 CLI의 것이 되어, 수행하는 실행도 관문·도구·검증기·무결성 대상을 `runGuards`에서 받는다. 그래서 설정 파일이나 프로필의 읽기 제외 아래 읽기는 `unreadable_path`로 거부되고, 검색은 그 아래를 빼며, 그 내용은 모델·기록·실행 이벤트 어디에도 없다. 시험 `tests/unit/app/u237-v24-carry-and-view.test.ts`.
   - 게이트를 빼는 변이는 시험이 가르지 못한다. CLI가 조립과 엔진 사이에 파일을 읽으므로(계획 실행의 기록 변경 표시 등), 게이트가 없어도 핸들이 먼저 나간다. `startRun`의 게이트도 같다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
@@ -469,6 +470,8 @@ interface ChangedFileView {
 - 스냅샷 파일이 일반 파일이 아니면(링크 등) 따라가지 않고 `snapshot_missing`이다(R-4 L-3).
 - 원본과 기록은 store의 `readRunOriginals`(DR-14)로 읽는다(`89692ac`). A-1의 스냅샷 직접 읽기는 없앴다.
 - 요청은 task 형식이다(DR-17). 작업 공간 형식이면 앱 계층이 고정 문구 목표(`PROBE_GOAL`)로 CLI의 간편 형식을 부른다. 목표는 비밀을 정하지 않는다.
+- **읽기 제외와 이 보기(U-237, Codex V-24 M-2, PM 결정).** 읽기 제외(`unreadablePaths`)는 모델로 가는 것을 막는다. 변경 보기와 파일 보기는 사람이 자기 파일을 보는 화면이라 읽기 제외 아래 파일도 그대로 보인다. 실행 뒤에 읽기 제외가 된 파일의 이전 원문(`before`)도 그렇다. 가릴 값 규칙(DR-28, DR-29)은 그대로 걸린다.
+  - 그 글은 모델 요청이나 실행 기록으로 가지 않는다. 보기는 아무것도 쓰지 않는다. 그 뒤의 실행은 그 파일도, 상태 폴더에 둔 실행의 원본도 읽지 못한다(`unreadable_path`, 상태 폴더 거부). 시험 `tests/unit/app/u237-v24-carry-and-view.test.ts`.
 - 예전의 한계 R-4 L-3(anthropic task는 키·모델·출력 상한이 풀려야 함)은 U-17(DR-46)로 없어졌다.
   - 앱 계층은 CLI의 1~7단계(`prepareTask`, 읽기 명령)만 돌린다. 8단계(모델)는 돌리지 않는다.
   - 그래서 비교에 제공자 설정이 필요 없다(`tests/unit/app/u17-read-changes.test.ts`).

@@ -10,7 +10,9 @@
  *   under an unreadable folder is denied there while the check said nothing. The check also now asks
  *   the engine's own judgement (judgePlannedFile, U-219; Codex V-21) with the same lists
  *   (approvedPlanWritablePathSets) instead of its own lines.
- * Each plan is made while no list exists; then the config file gets `unreadablePaths: ["private"]`.
+ * Each plan is made while no list exists; then the config file gets `unreadablePaths: ["private"]`, in
+ * its own policy or in a profile's the check names (Codex V-24 M-1: both sources were missed; the task
+ * file's and the definition's reached the old gate through the task's policy).
  * Reproduced first (3718d41, todo until the checks used runGuards). Temporary folders, scripted model, fake values only.
  */
 
@@ -26,17 +28,24 @@ import { appEnvironment, exists, planSteps, plannedRun, setupRun, taskForm, task
 const PRIVATE_POLICY = { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, unreadablePaths: ["private"] };
 const REWRITE = { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" };
 
+/** Where the list is put after the plan: the config file's own policy, or a profile's (named by the form). */
+type Source = "config" | "profile";
+const listed = (source: Source, more: Record<string, unknown> = {}) =>
+  source === "config" ? { schemaVersion: 1, policy: PRIVATE_POLICY, ...more } : { schemaVersion: 1, profiles: { private: { policy: PRIVATE_POLICY } }, ...more };
+const formOf = (base: string, config: string, source: Source) => taskForm(base, { configPath: config, ...(source === "profile" ? { profile: "private" } : {}) });
+
 function checked(outcome: { ok: boolean }): PlanCheck {
   assert.ok(outcome.ok, JSON.stringify(outcome));
   return (outcome as unknown as { output: PlanCheck }).output;
 }
 
 describe("U-237, R-108 H-2: the app's checks and the run's unreadable paths", () => {
-  test("a plan of moves into an unreadable folder: the check says so, as the apply refuses it", async () => {
+  for (const source of ["config", "profile"] as const) {
+  test(`a plan of moves into an unreadable folder (${source}): the check says so, as the apply refuses it`, async () => {
     const planned = await plannedRun({ "a.txt": "alpha\n" }, planSteps("a.txt", "private/a.txt"));
     const config = path.join(planned.base, "config.json");
-    await writeFile(config, JSON.stringify({ schemaVersion: 1, policy: PRIVATE_POLICY }), "utf8");
-    const settings = taskForm(planned.base, { configPath: config });
+    await writeFile(config, JSON.stringify(listed(source)), "utf8");
+    const settings = formOf(planned.base, config, source);
     const check = checked(await planned.app.checkApply({ settings, planRunId: planned.plan.runId, digest: planned.digest }));
     assert.equal(check.problems.length, 1, JSON.stringify(check.problems));
     assert.equal(check.problems[0]?.index, 0);
@@ -47,7 +56,7 @@ describe("U-237, R-108 H-2: the app's checks and the run's unreadable paths", ()
     assert.equal(await exists(path.join(planned.base, "work", "a.txt")), true);
   });
 
-  test("a run plan with a file under an unreadable folder: the check denies that file, as the carried-out run's gate does", async () => {
+  test(`a run plan with a file under an unreadable folder (${source}): the check denies that file, as the carried-out run's gate does`, async () => {
     const propose = { toolCalls: [{ name: "propose_changes", args: { summary: "add the notes", files: [{ path: "NOTES.md", change: "create" }, { path: "private/notes.md", change: "create" }] } }] };
     const base = await setupRun({}, { workflowRef: "rewrite" }, [propose, { text: "planned" }]);
     const config = path.join(base, "config.json");
@@ -60,9 +69,10 @@ describe("U-237, R-108 H-2: the app's checks and the run's unreadable paths", ()
     const plan = ended.result.plan as { digest: string; kind?: string } | undefined;
     assert.deepEqual([ended.result.reason, plan?.kind], ["plan_pending", "changes"], JSON.stringify(ended.result));
     // Afterwards the private folder becomes unreadable.
-    await writeFile(config, JSON.stringify({ schemaVersion: 1, policy: PRIVATE_POLICY, workflows: { rewrite: REWRITE } }), "utf8");
-    const check = checked(await app.checkApply({ settings: taskForm(base, { configPath: config }), planRunId: ended.result.runId, digest: plan!.digest }));
+    await writeFile(config, JSON.stringify(listed(source, { workflows: { rewrite: REWRITE } })), "utf8");
+    const check = checked(await app.checkApply({ settings: formOf(base, config, source), planRunId: ended.result.runId, digest: plan!.digest }));
     assert.deepEqual([check.kind, check.planKind], ["plan_check", "changes"]);
     assert.deepEqual(check.problems, [{ index: 1, problem: "denied" }], "the file under private, not NOTES.md");
   });
+  }
 });

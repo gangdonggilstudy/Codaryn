@@ -74,7 +74,7 @@
 | AD-01~06 | `model/anthropic/provider.test.ts`(AD-04는 통합 `m03`도) | 구현. 모의 전송·가짜 서버만, 실제 API 미확인 |
 | AD-07 | `cli/cli.test.ts` | 구현 |
 | VF-01~03 | `verify/verify.test.ts` | 구현 |
-| VF-04, 05 | 없음 | 단계 4 대상, 미구현 |
+| VF-04, 05 | `verify/g-data-checks.test.ts`(VF-04), `verify/g-inventory.test.ts`(VF-05), 보강 `verify/g-r13-data.test.ts`·`g-r13-inventory.test.ts` | 구현(단계 4, main `f7b878a`에서 확인) |
 
 단계 0 사례표에 없던 모듈의 유닛은 4.7절에 정리했다.
 
@@ -212,7 +212,7 @@ ID 없이 결정 번호(C-, R-, S-, T-, U-, V-, W-, X-)를 시험 이름에 붙�
 | 1 | 단계 표시가 1이고 도입 기능에 해당하는 사례 | 구현(PR-04, PR-12 제외). 키 없이 실행 |
 | 2 | PO-07, WS-06, EN-04, EN-08 | 구현 |
 | 3 | PO-08 | 구현(무결성 확인, 설치 위치 거부). 후보 침해 방지는 [테스트 전략](testing.md) 5절의 한계를 따른다 |
-| 4 | VF-04, VF-05 | 미구현 |
+| 4 | VF-04, VF-05 | 구현(`data_checks`, `inventory`. 4.0절 표) |
 
 ## 9. 경로와 러너(P-1로 확정)
 

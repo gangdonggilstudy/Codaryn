@@ -696,7 +696,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       const rows: string[][] = [
         [
           catalog.format("runs.column.run_id"),
-          catalog.format("runs.column.started"),
+          // U-139 (UXM-23): the header says the time is local; the run id header says UTC.
+          catalog.format("runs.column.started_local"),
           catalog.format("runs.column.changes"),
           catalog.format("runs.column.status"),
         ],

@@ -733,6 +733,9 @@ export const FIXED_MESSAGES = {
   // `codaryn runs` (N-7, N-16).
   "runs.column.run_id": {},
   "runs.column.started": {},
+  // U-139 (UXM-23, PM): the runs table's started column header, which says the time is local (the run
+  // id header says UTC). runs.column.started stays the word of latestChosen's "(started <time>)".
+  "runs.column.started_local": {},
   "runs.column.status": {},
   "runs.column.changes": {},
   "runs.empty": {},

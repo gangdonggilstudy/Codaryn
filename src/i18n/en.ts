@@ -192,8 +192,10 @@ export const EN_MESSAGES: MessageTexts = {
   "cleanup.example.reverted": "runs reverted entirely: codaryn cleanup --workspace <workspace> --reverted",
   "revert.dry_run_move_unchecked": "The preview did not check whether this drive can move files back without risking replacing a file; the real revert checks it and, without consent, skips such files.",
 
-  "runs.column.run_id": "run id",
+  "runs.column.run_id": "run id (UTC)",
   "runs.column.started": "started",
+  // U-139 (UXM-23; draft for nb-i18n): the runs table's started header.
+  "runs.column.started_local": "started (local)",
   "runs.column.status": "result",
   "runs.column.changes": "changes",
   "runs.empty": "This workspace has no runs.",

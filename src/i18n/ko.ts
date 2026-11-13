@@ -191,8 +191,10 @@ export const KO_MESSAGES: MessageTexts = {
   "cleanup.example.reverted": "다 되돌린 실행: codaryn cleanup --workspace <workspace> --reverted",
   "revert.dry_run_move_unchecked": "미리보기는 이 드라이브가 덮어쓰지 않고 되돌려 옮길 수 있는지 확인하지 않았습니다. 실제 되돌리기가 확인하고, 동의가 없으면 그런 파일은 건너뜁니다.",
 
-  "runs.column.run_id": "실행 id",
+  "runs.column.run_id": "실행 id (UTC)",
   "runs.column.started": "시작",
+  // U-139 (UXM-23, nb-i18n이 다듬을 초안): runs 표의 시작 열 머리.
+  "runs.column.started_local": "시작 (지역 시간)",
   "runs.column.status": "결과",
   "runs.column.changes": "변경",
   "runs.empty": "이 작업 공간에는 실행 기록이 없습니다.",

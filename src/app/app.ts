@@ -57,11 +57,13 @@ import { prepareTask, runCli } from "../cli/run.js";
 import type { CliEnvironment, CliRunOutcome, PrepareEnvironment, RunNotes } from "../cli/run.js";
 import type { RunArgs } from "../cli/args.js";
 import { locateInWorkspace, relateRealPaths } from "../cli/security/index.js";
+import { knownKeyValues } from "../cli/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
+import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
@@ -88,6 +90,7 @@ import type {
   ApplyCleanupRequest,
   CleanupPreviewRequest,
   ListRunsRequest,
+  ListWorkspaceDirRequest,
   StateSummaryRequest,
   ApplySettingsChangeRequest,
   CreateSettingsRequest,
@@ -97,6 +100,7 @@ import type {
   SelectModelRequest,
   SettingsChangeProposal,
   SettingsChangeRequest,
+  WorkspaceDirListing,
   SettingsSuggestions,
   SettingsSuggestionsRequest,
   SettingsView,
@@ -323,11 +327,21 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    * own steps 1 to 7 (prepareTask), the ones `run`, `plan`, `apply` and `review` share, so the
    * secrets are the ones a run with these settings registers now. U-17 (DR-46): as a command that
    * runs nothing (`readOnly`), so the quick form needs no key, model or run limits. No lock,
-   * journal or file is made and nothing is sent. Used by `changes`.
+   * journal or file is made and nothing is sent. Used by `changes` and `listWorkspaceDir`. U-89: also
+   * the effective policy's protected paths and every API key value set now (with the variables file).
    */
   async function readingSecrets(
     settings: TaskForm,
-  ): Promise<{ readonly ok: true; readonly secrets: readonly string[]; readonly workspaceRoot: string } | { readonly ok: false; readonly error: AppError }> {
+  ): Promise<
+    | {
+        readonly ok: true;
+        readonly secrets: readonly string[];
+        readonly workspaceRoot: string;
+        readonly protectedPaths: readonly string[] | undefined;
+        readonly keys: readonly string[];
+      }
+    | { readonly ok: false; readonly error: AppError }
+  > {
     const env = copyEnvironment(environment.env, platform);
     const args: RunArgs = {
       command: "run",
@@ -354,7 +368,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
     const ready = await prepareTask(io, args, notes, { readOnly: true });
     if (!("prepared" in ready)) return { ok: false, error: ready.output.kind === "error" ? fromCliError(ready.output) : INTERNAL_ERROR };
-    return { ok: true, secrets: ready.prepared.secrets, workspaceRoot: ready.prepared.task.workspaceRoot };
+    return {
+      ok: true,
+      secrets: ready.prepared.secrets,
+      workspaceRoot: ready.prepared.task.workspaceRoot,
+      protectedPaths: ready.prepared.task.policy.protectedPaths,
+      keys: knownKeyValues(env),
+    };
   }
 
   async function changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>> {
@@ -368,6 +388,23 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }));
     } catch {
       return { ok: false, error: appError("internal_error", "the changes could not be read") };
+    }
+  }
+
+  /** U-89 (GUI 3.3, adapter-contract 5.12): one directory of the workspace (workspace-dir.ts). */
+  async function listWorkspaceDir(request: ListWorkspaceDirRequest): Promise<AppCallOutcome<WorkspaceDirListing>> {
+    // The request first: nothing is read for one that does not fit.
+    const checked = workspaceDirArguments(request);
+    if (!checked.ok) return checked;
+    try {
+      const probe = await readingSecrets(request.settings);
+      if (!probe.ok) return probe;
+      const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+      if (!root.ok) return root;
+      const source = { workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys, protectedPaths: probe.protectedPaths };
+      return await listWorkspaceDirIn(source, checked.dir, checked.offset, checked.limit);
+    } catch {
+      return { ok: false, error: appError("internal_error", "the directory could not be listed") };
     }
   }
 
@@ -723,6 +760,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     applyCleanup,
     doctor,
     changes,
+    listWorkspaceDir,
     listModels,
     selectModel,
     readSettings,

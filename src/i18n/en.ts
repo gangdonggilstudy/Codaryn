@@ -341,6 +341,7 @@ export const EN_MESSAGES: MessageTexts = {
   "doctor.api_key.scripted": "the task uses the scripted model; no key is needed",
   "doctor.api_key.ok": "{keyEnv} is set (its value is not looked at)",
   "doctor.api_key.missing": "{keyEnv} is not set; a run with the {provider} provider stops with provider_not_configured",
+  "doctor.api_key.unusable": "{keyEnv} is set but holds a character other than printable ASCII (0x21-0x7E, no spaces), so it cannot be sent; check the variable's value",
   "doctor.api_key.sends_to_env": "{keyEnv} is set; {provider} requests send it to {origin}, the address {variable} sets",
   "doctor.api_key.sends_to_config": "{keyEnv} is set; {provider} requests send it to {origin}, the address the config field {field} sets",
   "doctor.api_key.sends_to_default": "{keyEnv} is set; {provider} requests send it to {origin}, the default address",

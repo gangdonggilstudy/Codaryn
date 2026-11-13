@@ -42,6 +42,12 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const PROVIDER = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_ARGS = 20;
 const MAX_LIMIT = 1_000_000_000;
+/**
+ * U-93 (review R-73, U-80 L1): the largest output cap any provider takes, the contract's
+ * MAX_OUTPUT_TOKENS_LIMIT (src/contracts/config.ts), repeated here as the window does not load the
+ * engine; a unit test compares the two. A larger value would come back as invalid_config.
+ */
+export const MAX_OUTPUT_CAP = 200_000;
 
 const only = (value: Obj, keys: readonly string[]): boolean => Object.keys(value).every((key) => keys.includes(key));
 const index = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < 10_000;
@@ -58,7 +64,7 @@ export function parseSettingsEdit(value: unknown): SettingsEdit | null {
     case "outputCap": {
       const cap = v["value"];
       if (!only(v, ["op", "provider", "value"]) || typeof v["provider"] !== "string" || !PROVIDER.test(v["provider"])) return null;
-      if (!(cap === null || (typeof cap === "number" && Number.isSafeInteger(cap) && cap >= 1 && cap <= MAX_LIMIT))) return null;
+      if (!(cap === null || (typeof cap === "number" && Number.isSafeInteger(cap) && cap >= 1 && cap <= MAX_OUTPUT_CAP))) return null;
       return { op: "outputCap", provider: v["provider"], value: cap as number | null };
     }
     case "limit": {
@@ -129,15 +135,23 @@ export function applySettingsEdit(config: unknown, edit: SettingsEdit, shown: Sh
       break;
     case "outputCap": {
       const providers = isObj(next["providers"]) ? (next["providers"] as Obj) : null;
-      let owner: Obj;
-      if (edit.provider === "anthropic" && (providers === null || !isObj(providers["anthropic"]))) owner = next;
-      else {
-        const all = providers ?? ((next["providers"] = {}) as Obj);
-        if (!isObj(all[edit.provider])) all[edit.provider] = {};
-        owner = all[edit.provider] as Obj;
+      if (edit.provider === "anthropic" && (providers === null || !isObj(providers["anthropic"]))) {
+        if (edit.value === null) delete next["maxOutputTokens"];
+        else next["maxOutputTokens"] = edit.value;
+        break;
       }
-      if (edit.value === null) delete owner["maxOutputTokens"];
-      else owner["maxOutputTokens"] = edit.value;
+      // U-93 (R-73 I2): removing makes no entry, and an entry (and `providers`) left empty goes, as an empty `limits` does.
+      if (edit.value === null) {
+        const entry = providers?.[edit.provider];
+        if (providers === null || !isObj(entry)) break;
+        delete entry["maxOutputTokens"];
+        if (Object.keys(entry).length === 0) delete providers[edit.provider];
+        if (Object.keys(providers).length === 0) delete next["providers"];
+        break;
+      }
+      const all = providers ?? ((next["providers"] = {}) as Obj);
+      if (!isObj(all[edit.provider])) all[edit.provider] = {};
+      (all[edit.provider] as Obj)["maxOutputTokens"] = edit.value;
       break;
     }
     case "limit": {

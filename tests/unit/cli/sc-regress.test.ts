@@ -122,8 +122,10 @@ describe("S-2 the key is a secret whatever the provider", () => {
 describe("S-6 the top level turns any exception into one internal_error object", () => {
   function assertInternalError(outcome: { output: unknown; exitCode: number }, ...hidden: string[]): void {
     assert.equal(outcome.exitCode, 70);
-    assert.deepEqual(Object.keys(outcome.output as object).sort(), ["code", "exitCode", "kind", "message", "schemaVersion"]);
-    const output = outcome.output as { kind: string; code: string; exitCode: number; message: string };
+    // U-55 (AXM-9): with its category and whether trying again may help.
+    assert.deepEqual(Object.keys(outcome.output as object).sort(), ["category", "code", "exitCode", "kind", "message", "retryable", "schemaVersion"]);
+    const output = outcome.output as { kind: string; code: string; exitCode: number; message: string; category: string; retryable: boolean };
+    assert.deepEqual([output.category, output.retryable], ["internal", false]);
     assert.equal(output.kind, "error");
     assert.equal(output.code, "internal_error");
     assert.equal(output.exitCode, 70);
@@ -171,6 +173,9 @@ describe("S-6 the top level turns any exception into one internal_error object",
       message: "the task file is nested more than 64 levels deep",
       // N-15: a structured diagnostic, with no field and no position.
       diagnostic: { code: "too_deep", file: "task", field: null, line: null, column: null },
+      // U-55 (AXM-9).
+      category: "input",
+      retryable: false,
     });
     assert.equal(await stat(path.join(base, "work", ".codaryn")).then(() => true, () => false), false);
   });

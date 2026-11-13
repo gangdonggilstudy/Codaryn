@@ -90,6 +90,35 @@ export const MODEL_ERROR_KINDS = [
 ] as const;
 export type ModelErrorKind = (typeof MODEL_ERROR_KINDS)[number];
 
+/**
+ * U-55 (AXM-9): whether trying again later may help after a model error, by the adapters' own
+ * classification (`classifyStatus` of each provider and the transport, src/model; facts C-5, C-6).
+ * The adapter has already retried what it could (`maxRetries`, `Retry-After`); true says a later
+ * run may succeed, not that it will.
+ * - true: rate_limited (HTTP 429), overloaded (529, 503), timeout, and api_error with HTTP 408, 409
+ *   or 5xx.
+ * - false: auth_failed, quota_exhausted (a 429 that retrying does not lift, DR-31 (f)),
+ *   not_configured, not_implemented, script_exhausted, malformed_response, aborted, and api_error
+ *   with any other HTTP status.
+ * - undefined, unknown: api_error without an HTTP status. A connection failure (which the transport
+ *   retries) and a TLS failure, a refused request format, a refusal or a failed response (which it
+ *   does not) look the same in a ModelOutcome. Absent means unknown, never false.
+ */
+export function modelErrorRetryable(kind: ModelErrorKind, httpStatus?: number): boolean | undefined {
+  switch (kind) {
+    case "rate_limited":
+    case "overloaded":
+    case "timeout":
+      return true;
+    case "api_error":
+      if (httpStatus === undefined) return undefined;
+      // As the adapters' classifyStatus (`status >= 500`).
+      return httpStatus === 408 || httpStatus === 409 || httpStatus >= 500;
+    default:
+      return false;
+  }
+}
+
 export type ModelOutcome =
   | { readonly ok: true; readonly response: ModelResponse }
   | {

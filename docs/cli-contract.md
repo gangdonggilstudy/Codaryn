@@ -222,6 +222,23 @@ stdout에는 출력 하나만 쓴다. `run`과 `revert`는 JSON 한 줄이다(`r
   - 같은 값은 하나로 센다. 줄 바꿈만 다른 값(CRLF와 LF)도 하나다.
   - 그래서 출력을 보는 사람은 실행 설정에 없는 다른 제공자의 키가 그 환경에 있는지, 그리고 설정한 두 값(예: `secretEnv` 하나와 키)이 같은지를 알 수 있다. 값과 길이는 알리지 않는다.
 
+### 8.2 다시 시도해도 되는 실패인지 (U-55, AXM-9)
+
+- 프로그램이 기록(journal)을 읽지 않고도, 같은 명령을 나중에 다시 해도 될지 가르게 한다. 필드를 더하기만 한다(DR-48).
+- **오류 JSON(`CliErrorOutput`)**: CLI가 만드는 모든 오류에 `category`와 `retryable`이 붙는다(`cliErrorFacts`). 순서는 `message`(그리고 `diagnostic`) 뒤다.
+  - `category`: `input`(준 것을 고쳐야 함), `state`(작업 공간이나 기록이 명령이 바라는 상태가 아님), `environment`(키·설정이 없음, 제공자, 모델 목록 실패, 설정 파일을 쓰지 못함), `internal`(Codaryn 자신의 실패). 코드마다 하나다(`CLI_ERROR_CATEGORY`).
+  - `retryable`: 그대로 다시 해도 나중에 될 수 있으면 true. `workspace_locked`, `run_in_progress`만 true다(잠금이나 실행이 끝나면 됨). 나머지는 false다(`CLI_ERROR_RETRYABLE`). `cleanup_plan_changed`는 새 미리보기가 먼저라 false, `internal_error`는 무턱대고 되풀이하지 않게 false다.
+  - `model_list_failed`의 `retryable`은 목록 요청의 실패로 정한다(`modelErrorRetryable`, 아래). 목록 함수가 던졌거나 판정할 수 없으면(HTTP 상태가 없는 `api_error`) `retryable`이 **없다**.
+- **실행 결과(`EngineResult.modelError`)**: 모델 오류가 실행을 끝냈을 때만 `{kind, turn, retryable?}`이 있다(reason `model_error`). `run`의 stdout, `result.json`, `report --json`의 `result`에 같다.
+  - `kind`: 모델 오류 종류(`MODEL_ERROR_KINDS`). `turn`: 실패한 요청의 모델 턴(1부터, journal의 `model_error.turn`과 같음).
+  - `retryable`(`modelErrorRetryable`): true는 `rate_limited`, `overloaded`, `timeout`, HTTP 408·409·5xx의 `api_error`. false는 `auth_failed`, `quota_exhausted`, `not_configured`, `not_implemented`, `script_exhausted`, `malformed_response`, `aborted`, 그 밖의 HTTP 상태의 `api_error`.
+  - 가림이 실패해 `model_error`로 끝난 실행은 모델 오류가 아니므로 `modelError`가 없다. U-55 전에 쓴 결과에도 없다.
+  - 키, 요청 본문, 제공자의 응답은 들어가지 않는다. journal의 `model_error` 기록이 가린 메시지를 그대로 가진다.
+  - `report --json`은 아는 꼴(`kind`가 모델 오류 종류, `turn`이 1 이상의 정수, `retryable`이 있으면 참·거짓)일 때만 옮긴다. 다른 꼴이면 다른 손상된 필드처럼 `invalid_run_record`다.
+- **없으면 알 수 없음**: `retryable`이 없는 것은 "다시 하면 안 된다"가 아니라 "알 수 없다"는 뜻이다(HTTP 상태가 없는 `api_error`, 던진 목록 함수, U-55 전의 출력). 프로그램은 없음을 false로 읽지 않는다. `category`가 없는 오류도 U-55 전의 출력이다.
+- true는 나중에 될 수 있다는 뜻이지 된다는 약속이 아니다. 제공자 어댑터는 이미 할 수 있는 만큼 다시 시도했다(`maxRetries`, `Retry-After`).
+- 고정 값(SP-0)은 바뀌지 않았다.
+
 ## 9. 계약 변경 절차
 
 변경이 필요하면 담당자가 사유와 원하는 형태를 PM에 요청한다 → PM이 승인한다 → 역할 1(기반 담당)만 `src/contracts/**`와 이 문서를 수정한다. 다른 담당자는 계약을 직접 고치거나 로컬 사본을 만들지 않는다.

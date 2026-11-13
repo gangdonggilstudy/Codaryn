@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
   APPLY_NOTICE_KINDS,
+  MODEL_ERROR_KINDS,
   PLAN_RECORDS_UNCHECKED_CAUSES,
   APPROVAL_CHANNELS,
   CONTENT_HASH_PATTERN_SOURCE,
@@ -398,7 +399,22 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     ...finalMessageOf(rec["finalMessage"], reason),
     // DR-52 (U-25): whether masking worked, the two counts as recorded.
     ...maskingOf(rec["masking"]),
+    // U-55 (AXM-9): the model error that ended the run, in its known form.
+    ...modelErrorOf(rec["modelError"]),
   };
+}
+
+/**
+ * U-55 (AXM-9): EngineResult.modelError {kind, turn, retryable?}, absent when the result has none (a
+ * run no model error ended, or a result written before U-55). Rebuilt from those three fields;
+ * another form is a damaged field. A missing retryable stays missing (unknown, never false).
+ */
+function modelErrorOf(value: unknown): { modelError?: { kind: (typeof MODEL_ERROR_KINDS)[number]; turn: number; retryable?: boolean } } {
+  if (value === undefined) return {};
+  const rec = obj(value);
+  const retryable = rec["retryable"];
+  if (retryable !== undefined && typeof retryable !== "boolean") bad("result.json has a field of the wrong type");
+  return { modelError: { kind: oneOf(rec["kind"], MODEL_ERROR_KINDS), turn: int(rec["turn"], 1), ...(retryable === undefined ? {} : { retryable }) } };
 }
 
 /**

@@ -9,6 +9,7 @@
 
 import type {
   ChangesApplyRun,
+  CliErrorCategory,
   CliErrorCode,
   Clock,
   CodarynConfig,
@@ -80,6 +81,12 @@ export interface AppError {
   readonly message: string;
   /** N-6: where in the config or task file the problem is (field path, line and column), when it can be said safely. */
   readonly diagnostic?: InputDiagnostic;
+  /**
+   * U-55 (AXM-9): the CLI's own facts when the error came from its output (fromCliError keeps
+   * them). toCliError gives every error cliErrorFacts of its code where these are absent.
+   */
+  readonly category?: CliErrorCategory;
+  readonly retryable?: boolean;
 }
 
 /** N-2: create the config file with the defaults (`init --json`, no questions). */

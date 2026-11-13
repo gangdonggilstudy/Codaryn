@@ -480,6 +480,15 @@ export const FIXED_MESSAGES = {
   "summary.denied_hint": {},
   // N-23: the same hint for a task file run, whose policy is the task's own.
   "summary.denied_hint_task": {},
+  // U-110 (review R-85 M1): RunSummaryContext.confirmationDenied, in place of the add-a-rule hint for
+  // those calls (the rule is there; it asks before running): `{count}` calls denied by the person
+  // (`user`), with no answer where this run could not ask (`unasked`: standard input or stderr not a
+  // terminal, or --quiet) or where the question went unanswered (`unanswered`: the input ended, or
+  // the time limit ended the wait), or because the run was cancelled while it waited (`cancelled`).
+  "summary.confirm_denied.user": { count: "count" },
+  "summary.confirm_denied.unasked": { count: "count" },
+  "summary.confirm_denied.unanswered": { count: "count" },
+  "summary.confirm_denied.cancelled": { count: "count" },
   "summary.usage": { turns: "count", toolCalls: "count", seconds: "seconds" },
   "summary.run_id": { runId: "runId" },
   // DR-52 (AXM-17): EngineResult.masking, counts only: `{registered}` values registered for masking,
@@ -1125,6 +1134,12 @@ export type DoctorText = {
  * - policySource (N-23): where the run's policy came from, so the denied-call hint points there:
  *   "task" (a task file states its own policy: `summary.denied_hint_task`) or "config" (the quick
  *   form and the one-line run: the config file or its profile, `summary.denied_hint`).
+ * - confirmationDenied (U-110, review R-85 M1): the calls denied after a permission question
+ *   (`confirmation_answered` with `deny`), by ConfirmationBy, and `couldAsk`: whether this run had a
+ *   way to ask (the CLI gave the engine its terminal question). Absent when there was none. They are
+ *   among deniedCommandCalls; the add-a-rule hint is for the other denied command calls only, and
+ *   each count above 0 has its line: `summary.confirm_denied.user`, `.cancelled`, and for `default`
+ *   `.unanswered` when couldAsk, else `.unasked`.
  * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
  *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
  *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the
@@ -1141,6 +1156,7 @@ export interface RunSummaryContext {
   readonly deniedToolCalls: number;
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
+  readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number; readonly couldAsk: boolean };
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
 }

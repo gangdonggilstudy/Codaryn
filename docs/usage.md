@@ -1061,7 +1061,7 @@ codaryn: 2턴
 codaryn: 파일 쓰기 — 거부 (path/path_not_writable)
 codaryn: 3턴
 codaryn: 끝 — 확인 필요 (no_verifier)
-codaryn: writablePaths에 없는 파일이라 거부된 쓰기: 1건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록이 그 파일을 덮어야 합니다.
+codaryn: writablePaths에 없는 파일이라 거부된 쓰기: 1건. 그 파일을 허용하려면 writablePaths를 둔 모든 곳(설정 파일, 프로필, 작업 종류, task 파일)에 더하세요. 모든 목록에 그 파일이 있어야 합니다.
 ── 결과: 확인 필요 — 검증 없음 (needs-input/no_verifier) ──
 ```
 
@@ -1082,7 +1082,7 @@ codaryn: 오류 — task 파일을 읽을 수 없거나 값이 올바르지 않�
 - **`doctor`의 주의:** 설정 파일에 `["src"]`와 명령 규칙 하나(`node --version`)를 둔 `doctor --config … --workspace …`의 허용 명령 줄이다. task 파일에 같은 둘을 둔 `doctor --task …`도 같은 줄을 내고 종료 3(주의)이다. `--json`의 그 항목은 `status: "warn"`, 문구 id `doctor.commands.writable_with_commands`다.
 
 ```
-[주의]    허용 명령       writablePaths가 파일 도구를 제한하는 중에 명령 규칙 1개가 있습니다. writablePaths는 명령을 묶지 않으므로, 허용한 명령은 그 밖의 파일에 쓸 수 있습니다
+[주의]    허용 명령       writablePaths가 파일 도구를 제한하는데 명령 규칙이 1개 있습니다. writablePaths는 명령을 묶지 않아, 허용한 명령은 그 밖의 파일에도 쓸 수 있습니다
 ```
 
 - **적용과 GUI:** 파일 정리의 적용(`apply`)도 적용할 때의 목록으로 판정한다. 목록 밖의 동작은 적용 전 점검에서 막히고 아무것도 옮기지 않는다. GUI에서 시작한 실행과 적용 점검도 같은 목록을 쓴다(U-186). 둘 다 통합 시험(`tests/integration/n12-writable-paths.test.ts`)이 실제 CLI와 앱 계층으로 확인하며, 이 절에는 그 출력을 옮기지 않았다.

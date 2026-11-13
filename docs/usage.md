@@ -174,8 +174,28 @@ node dist/src/cli/main.js init
 - 설정 파일을 **기본 위치**에 만든다. Windows는 `%APPDATA%\Codaryn\config.json`, 그 밖은 `$XDG_CONFIG_HOME/codaryn/config.json`(없으면 `~/.config/codaryn/config.json`)이다. `--config <파일>`이면 그 위치에 만든다.
 - 이미 파일이 있으면 아무것도 쓰지 않고 `config_exists`(종료 2)로 끝난다. 덮어쓰지 않는다.
 - 키를 묻지도 읽지도 쓰지 않는다. 키가 있는지와 등록 방법만 알린다.
-- 터미널에서 실행하면 모델(키가 있을 때 목록을 받아 고름), 한도, 명령 허용과 보호 경로 제안(`--workspace`를 줄 때), 언어를 하나씩 묻는다. 명령 허용 제안의 기본 답은 "아니오"다. 터미널 대화는 이 문서 작성 때 확인하지 않았다.
-- 터미널이 아니면 묻지 않고 기본값만 쓴다. 실제 출력(stdout, 종료 0):
+- 터미널에서 실행하면(stdin과 stderr가 모두 터미널, `--json` 없음) 차례로 묻는다(U-26, UXM-11):
+  1. 그 위치에 만들지(기본 예)
+  2. **제공자**(번호나 이름. Enter나 목록에 없는 답이면 anthropic). 파일, 키 안내, 모델 목록이 그 제공자의 것이 된다. openai를 고르면 최상위 `provider`와 `providers.openai` 아래에 모델·출력 한도를 쓴다(6절).
+  3. 모델(그 제공자의 키가 있을 때 목록을 받아 고름. 없으면 자리표시자)
+  4. 명령 허용과 보호 경로 제안(`--workspace`를 줄 때. 명령 허용 제안의 기본 답은 "아니오")
+  5. 언어
+- 터미널 대화의 실제 예(main `bc3305d`, 키 없음, `--config <파일>`, 답은 `y`, `2`, Enter). stderr의 질문이다. 터미널 제어 문자는 뺐고, 줄 끝의 `y`와 `2`는 친 답이 보인 것이다. 터미널은 시험과 같은 방식(미리 읽기로 stdin·stderr의 `isTTY`를 참으로 둠)으로 흉내 냈다:
+
+```
+Config file location: --config
+Create the config file there? [Y/n] y
+  1  anthropic
+  2  openai
+Choose the provider by number or name (Enter, or an answer not listed, gives anthropic). 2
+Provider: openai. The config file is written for it.
+Model: without a key the list cannot be fetched. After registering the key, choose one with codaryn models --use.
+Limits (defaults): turns 12 · tool calls 24 · tokens 150000 · 10 min
+Choose the message language (ko/en, Enter to follow the operating system).
+```
+
+  만들어진 파일은 아래 기본 파일과 같고, 모델 두 줄 대신 `"provider": "openai"`와 `"providers": { "openai": { "model": "<model id>", "maxOutputTokens": 4096 } }`가 들어 있다. stdout의 키 안내는 `OPENAI_API_KEY`를 말한다. 한국어 질문은 `제공자를 번호나 이름으로 고르세요(Enter나 목록에 없는 답이면 anthropic).`이다.
+- 터미널이 아니거나 `--json`이면 묻지 않고 기본값만 쓴다(제공자는 anthropic, 예전과 바이트까지 같음). 실제 출력(stdout, 종료 0):
 
 ```
 Not a terminal: nothing was asked and only the defaults were written.
@@ -271,7 +291,7 @@ node dist/src/cli/main.js models --use 2
 
 제공자는 Anthropic(기본)과 OpenAI 둘이다. OpenAI는 Responses API(`POST /v1/responses`)를 쓴다.
 
-**확인 범위:** 실제 OpenAI API로는 점검하지 않았다. OpenAI의 공식 문서로 확인한 사실([사실 확인](design/second-provider-facts.md))과 로컬 가짜 서버로만 확인했다. 아래 출력은 main `3e36b1b`의 실제 CLI를 가짜 키와 루프백 가짜 서버로 실행한 것이다. 14절의 실제 호출 점검은 Anthropic용만 있다.
+**확인 범위:** 실제 OpenAI API로는 점검하지 않았다. OpenAI의 공식 문서로 확인한 사실([사실 확인](design/second-provider-facts.md))과 로컬 가짜 서버로만 확인했다. 아래 출력은 main `3e36b1b`의 실제 CLI를 가짜 키와 루프백 가짜 서버로 실행한 것이다. 14절의 실제 호출 점검은 OpenAI용도 있지만(U-101) 한 번도 실행하지 않았다.
 
 **고르기:** 간편 형식과 한 줄 실행은 설정 파일의 `provider`를 쓰고, 없으면 anthropic이다. task 파일은 `model.provider`로 고른다. 제공자를 고르는 환경 변수는 없다.
 
@@ -473,6 +493,7 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 [skipped] variables file            no --vars-file given
 [skipped] task file                 no --task given
 [failed]  API key                   ANTHROPIC_API_KEY is not set; a run with the anthropic provider stops with provider_not_configured
+                                    Windows: run rundll32 sysdm.cpl,EditEnvironmentVariables, add the user variable ANTHROPIC_API_KEY, then open a new terminal.
 [failed]  model                     the model is still a placeholder, so it counts as not set; choose one with codaryn models --use
 [ok]      limits                    every limit is set for the quick form
 [ok]      file locations            input files outside the workspace: 1
@@ -486,6 +507,16 @@ node dist/src/cli/main.js doctor --task D:\codaryn-settings\tasks\fix-sum.json
 doctor: failed (exit code 1). No network access was made and nothing was changed.
 ```
 
+- 위 출력은 main `bc3305d`의 실제 CLI다(`init` 직후, 키 없음).
+- **키가 없을 때**(U-100): `API key` 줄 아래에 이 OS에서 키 변수를 등록하는 방법 한 줄이 붙는다. `init`의 안내와 같은 글이고, 명령에 값을 넣지 않는다. 한국어는 `Windows: rundll32 sysdm.cpl,EditEnvironmentVariables 로 환경 변수 창을 열어 사용자 변수 ANTHROPIC_API_KEY를 더하고 새 터미널을 여세요.`다. `--json`은 예전과 같다(이 줄이 없다). Windows에서만 확인했다.
+- **키는 있지만 보낼 수 없을 때**(U-87): 값에 출력 가능한 ASCII(0x21~0x7E)가 아닌 글자(공백 포함)가 있으면 `API key`가 `[failed]`다. 실행하면 아무것도 보내지 않고 `model_error`(`not_configured`)로 끝나기 때문이다. 값은 출력하지 않는다(값과 그 10자 조각이 stdout·stderr·`--json` 어디에도 없음을 확인).
+
+  ```
+  [failed]  API key                   ANTHROPIC_API_KEY is set but holds a character other than printable ASCII (0x21-0x7E, no spaces), so it cannot be sent; check the variable's value
+  ```
+
+  - 한국어는 `ANTHROPIC_API_KEY 값에 출력 가능한 ASCII(0x21-0x7E, 공백 없음)가 아닌 글자가 있어 보낼 수 없습니다. 변수 값을 확인하세요`다. `--json`의 점검은 `"status":"fail"`, 글 id `doctor.api_key.unusable`이다.
+  - 확인: main `bc3305d`의 실제 CLI, 공백이 든 합성 값.
 - `message language`는 언어가 어디서 정해졌는지 알린다. `CODARYN_LANG`이 `ko`·`en`이 아니면 `warn`이다(8절).
 - `workspace lock`은 `.codaryn/lock.json`을 바꾸지 않고 읽는다. 살아 있는 프로세스가 쥐고 있으면 `[warning]`이고 `doctor`는 종료 3이다(17절 `workspace_locked`).
 
@@ -514,6 +545,13 @@ node dist/src/cli/main.js run --task D:\codaryn-settings\tasks\fix-sum.json --va
 
 - 진행 줄: `codaryn: `로 시작한다. 실행 시작, 턴 번호, 도구 허용·거부(사람 말 뒤 괄호에 `권한/코드`), 허용됐지만 실패한 호출과 명령의 종료 코드·시간 초과(아래 "실패한 호출"), 만들거나 바꾼 파일, 검증 결과(검증기 순번), 재수정 회차, 보호 대상 확인, 종료 상태. 모델 응답과 도구 결과의 내용은 쓰지 않는다.
 - 끝 요약: 상태와 이유, 통과한 검증 수, 바뀐 파일 수와 목록(5개까지), 거부된 호출 수, 실패한 호출 수(있을 때), 허용 방법, 사용량(턴, 도구 호출, 초), 가림 개수(가릴 값을 등록한 실행), 에이전트의 마지막 답(있을 때), 기본 설정·프로필 사용 여부, 실행 id, 다음 명령(`report`, `revert`). 예시는 3절.
+- **다음 명령의 작업 공간 경로**(DR-51, DR-60, U-38): `--workspace`로 친 경로를 그대로 큰따옴표에 넣어 보인다. 복사해 쓸 수 있게 하려는 것이다. `run`과 `apply`의 끝 요약이 그렇다.
+  - 큰따옴표로 보이는 조건: 모든 글자가 글자·숫자·결합 부호, 공백, `\ / : . _ - ( ) , + = @` 가운데 하나다. 그리고 80자 이하이고, 끝이 역슬래시가 아니며, 등록한 가릴 값·키 모양·토큰 모양이 들어 있지 않다.
+  - 그 밖이면 예전처럼 `<workspace>`다. 예: 작은따옴표가 든 경로, 둥근 따옴표가 든 경로.
+  - task 파일 형식(`--task`)은 친 작업 공간 경로가 없으므로 `<workspace>`다(3절의 예). 한 줄 실행은 `--workspace .`이다(코드 기준).
+  - `revert`가 내는 다음 명령 안내(위험한 이동에 대한 동의, 18.5절)는 등록 값을 모르므로 늘 `<workspace>`다.
+  - JSON 결과와 실행 기록에는 경로를 싣지 않는다.
+  - 확인(main `bc3305d`의 실제 CLI, 간편 형식): 절대 경로 → `Report: codaryn report --workspace "D:\…\proj" --run <id>`(경로와 id는 줄임). 상대 경로 `proj` → `--workspace "proj"`. `it's here` 폴더 → `--workspace <workspace>`. `apply --workspace <경로>`의 끝 요약도 `Report:`와 `Revert:` 두 줄 모두 큰따옴표의 경로였다. 한국어 줄(`보고서: …`)도 같다.
 - **실패한 호출(U-18, AXM-4):** 정책이 허용했지만 해 보니 실패한 도구 호출은, 허용 줄 다음에 `<도구> — failed (<코드>)` 줄이 하나 더 붙는다. 실행이 끝나면 끝 요약에 `Failed calls: <수>`가 `Denied calls` 다음에 나온다.
   - 명령이 0이 아닌 코드로 끝나거나 시간 한도에 걸린 것은 실패로 세지 않는다. 대신 줄 하나가 붙는다. 실행 자체는 된 것이기 때문이다.
   - 거부된 호출(정책 밖, 인자 검사)은 실패로 세지 않는다. 거부 줄 하나뿐이다.
@@ -611,7 +649,30 @@ codaryn: 오류 — 설정 파일을 읽을 수 없거나 값이 올바르지 �
 `run`의 stdout에는 JSON 한 줄만 나온다(콘솔에서는 아래 "터미널에서"). 비 ASCII 문자는 `\uXXXX`로 나오므로 어느 코드 페이지에서도 JSON으로 읽힌다.
 
 - **실행이 시작되었으면 `kind:"run"`:** `runId`, `status`, `reason`, `exitCode`, `journalPath`, `notices`, `verifiers`(검증기별 `outcome`, `evidence`, `checked`, `limits`), `changes`(적용한 파일 변경과 해시), `usage`(턴, 도구 호출, 토큰, 시간, 재수정 수). 보호 대상이 있으면 `protectedChanged`(바뀐 보호 대상 목록)도 있다. 에이전트의 마지막 답이 있으면 `finalMessage`(`text`, `truncated`)도 있다(8절). `text`는 끝 요약과 같은 처리를 거친 글이고, 줄바꿈은 LF, 탭은 그대로다. 가릴 값을 등록한 실행이면 `masking`(`registeredValues`, `maskedPlaces`: 정수 둘, 8절 "가림 개수")도 있다. 등록한 값이 없으면 필드가 없고, 등록했지만 가린 곳이 없으면 `maskedPlaces`가 0이다. 실행 폴더의 `result.json`에도 같은 필드가 있다. DR-47 전의 판이 쓴 `result.json`에는 `finalMessage`가, DR-52 전의 판이 쓴 것에는 `masking`이 없다. `report --json`의 `result`에도 같은 두 개수가 있고, `report`의 Markdown 본문에는 가림 개수가 없다.
-- **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절). 메시지에는 값 대신 필드 이름만 적힌다.
+  - **모델 오류로 끝났으면 `modelError`**(U-55, U-82): `{kind, turn, retryable?}`. `kind`는 모델 오류 종류, `turn`은 실패한 요청의 턴(1부터)이다. `retryable`은 나중에 다시 하면 될 수 있는지다(아래 "다시 해도 되는지"). `result.json`과 `report --json`의 `result`에도 같다. 키, 요청 본문, 제공자의 응답은 들어가지 않는다. 사람용 끝 요약과 진행 줄은 바뀌지 않았다(진행 줄은 전처럼 `turn 1 — model request failed (api_error)`, 끝 요약은 `Check with codaryn doctor and codaryn models, then try again later.`).
+  - **계획 실행이면 `plan`과 `planSummary`**(U-59): `plan`은 `{digest, actions}`이고, `planSummary`는 에이전트가 `propose_plan`에 쓴 계획 설명이다. 가린 뒤 마지막 답과 같은 처리를 거친 글이다. 다이제스트와 `plan.json`에 들지 않으므로 승인하는 대상이 아니다(18.3절 "에이전트의 설명"과 같은 글). `result.json`에도 같다. 설명이 비었으면 필드가 없다. 확인(main `bc3305d`): 2절의 정리 체험(18.2절)에서 `"planSummary":"사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다"`(JSON에서는 `\uXXXX`)였고 `finalMessage`는 없었다.
+- **되돌리기는 `kind:"revert"`**(11절). **시작 전에 멈췄으면 `kind:"error"`:** `code`, `exitCode`, `message`, 선택 `diagnostic`(6절), `category`, `retryable`(U-55). 메시지에는 값 대신 필드 이름만 적힌다.
+  - `category`는 무엇을 고쳐야 하는지의 종류다: `input`(준 인자·파일·경로를 고침), `state`(작업 공간이나 기록이 명령이 바라는 상태가 아님), `environment`(키·설정·제공자·모델 목록·설정 파일 쓰기), `internal`(Codaryn 자신의 실패).
+  - 종료 코드와 `message`는 바뀌지 않았다. 필드를 더하기만 했다.
+- **다시 해도 되는지(`retryable`)**(U-55, U-82): 같은 명령을 그대로 나중에 다시 하면 될 수 있으면 `true`다. 된다는 약속은 아니다. 제공자 어댑터는 이미 할 수 있는 만큼 다시 시도했다(`maxRetries`, `retry-after`).
+  - **없으면 "알 수 없음"이다.** `false`로 읽지 않는다.
+  - 오류 JSON: `workspace_locked`, `run_in_progress`만 `true`다(잠금이나 실행이 끝나면 됨). `config_write_failed`는 없다(시스템이 받지 않는 이름이나 없는 드라이브와, 다른 프로그램이 쥔 파일이나 가득 찬 디스크가 같은 코드라 가를 수 없음, U-82). `model_list_failed`는 목록 요청의 실패로 정한다. 나머지는 `false`다.
+  - 모델 오류(`modelError.retryable`과 `model_list_failed`): 전송 층의 판정이 먼저다(U-82). 연결 실패(`ECONNREFUSED`, `ECONNRESET` 등)와 시간 초과는 `true`, TLS 실패와 보낼 수 없는 요청 꼴과 읽을 수 없는 응답 본문은 `false`, 전송이 가르지 못한 실패는 없음이다. HTTP 응답이 있으면 속도 제한(429)·과부하(503, 529)·408·409·5xx가 `true`, 인증 실패(401, 403)·할당량 소진(다시 해도 풀리지 않는 429)·그 밖의 4xx가 `false`다(코드 기준).
+  - 확인(main `bc3305d`의 실제 CLI, 루프백만):
+
+    | 경우 | 결과 |
+    | --- | --- |
+    | 닫힌 포트로 `run`(간편 형식) | `modelError` `{"kind":"api_error","turn":1,"retryable":true}`, 기록의 메시지 `network error: connection failed (ECONNREFUSED)` |
+    | 닫힌 포트로 `models --json` | `model_list_failed`, `category` `environment`, `retryable` `true` |
+    | 연결을 바로 끊는 루프백 서버 | `ECONNRESET`, `retryable` `true` |
+    | 포트 9(`fetch`가 막는 포트) | `retryable` `false`, 기록의 메시지 `the transport refused the request format (header, URL or port); nothing was sent` |
+    | `run --bogus` | `invalid_arguments`, `input`, `false` |
+    | 없는 실행의 `report` | `run_not_found`, `state`, `false` |
+    | 모델·키가 없는 설정으로 `run` | `provider_not_configured`, `environment`, `false` |
+    | 살아 있는 프로세스가 잠금을 쥔 작업 공간 | `workspace_locked`, `state`, `true` |
+    | 쓰기를 막은 폴더에 `init --config` | `config_write_failed`, `environment`, `retryable` 없음 |
+
+    전송이 가르지 못해 `retryable`이 없는 모델 오류는 이 환경에서 만들지 못했다(코드 기준). HTTP가 아닌 바이트로 답하는 서버도 `false`(요청 꼴)로 분류됐다.
 - `report`, `doctor`, `models`, `init`, `runs`는 기본이 사람이 읽는 글이고 `--json`이면 각각 `kind:"report"`, `"doctor"`, `"models"`, `"init"`, `"runs"` JSON 한 줄이다. 오류는 어느 명령이든 `kind:"error"` 한 줄이다(콘솔에서는 아래 "터미널에서").
 - **터미널에서(DR-49, DR-56, U-23, U-45):** stdout과 stderr가 **둘 다** 터미널이면(콘솔에서 그대로 칠 때) 두 가지 JSON 줄을 내지 않는다. `run`·`apply`·`revert`의 결과 JSON 줄과, 어느 명령이든 오류 JSON 줄이다. 사람용 글(끝 요약, 되돌림 요약, 오류 설명)은 stderr에 그대로 나오고, 종료 코드도 같다.
   - JSON 줄이 나오는 때: 인자 어디에든 `--json`이나 `--quiet`가 있을 때, stdout이 파이프나 파일일 때(`| ConvertFrom-Json`, `> out.json`), stderr를 파일로 돌릴 때(`2> log.txt`). stderr를 돌리면 화면에는 JSON 줄이 남는다.
@@ -849,18 +910,33 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 
 ## 14. 실제 호출 점검
 
-자세한 내용은 [tests/live/README.md](../tests/live/README.md)를 본다. 키는 미리 사용자 환경 변수에 등록해 둔다(이 점검은 변수 파일을 쓰지 않는다).
+> **실행한 적 없음.** 아래 두 점검은 이 저장소에서 아직 한 번도 실제 API로 실행되지 않았다. 작업자는 키 없이 "변수가 없으면 건너뛴다"만 확인했다(U-101: 5건 모두 건너뜀, 실패 0). 결과를 믿기 전에 사용자가 직접 한 번 돌려 본다.
+
+자세한 내용은 [tests/live/README.md](../tests/live/README.md)를 본다. 키는 미리 사용자 환경 변수에 등록해 둔다(이 점검은 변수 파일을 쓰지 않는다). 기본 npm 명령(`test`, `test:unit`, `test:integration`)에는 들어가지 않는다.
 
 ```powershell
 npm run build
 $env:CODARYN_LIVE = "1"
+# Anthropic: ANTHROPIC_API_KEY는 미리 설정해 둔다
 $env:CODARYN_MODEL = "<모델 ID>"
 node --test dist/tests/live/anthropic-live.js
+# OpenAI: OPENAI_API_KEY는 미리 설정해 둔다. 점검 3을 보려면 추론 모델
+$env:CODARYN_OPENAI_MODEL = "<모델 ID>"
+node --test dist/tests/live/openai-live.js
 ```
 
 - 모델 ID는 `models`(4절)로 확인한다.
-- 이 점검은 Anthropic용이다. OpenAI용 실제 호출 점검은 아직 없다(4절 "두 번째 제공자: OpenAI").
-- 임시 폴더 문서에 절 하나를 추가하는 작업을 실행하고 `done`인지, stdout·stderr·기록에 키가 없는지 확인한다. 세 변수 중 하나라도 없으면 아무것도 보내지 않고 "건너뜀"으로 끝난다. 고정 상한: 턴 4, 도구 호출 4, 출력 1024토큰/요청, 총 30000토큰, 3분, HTTP 요청 최대 8건.
+- 각 파일은 그 제공자의 세 변수(`CODARYN_LIVE=1`, 키, 모델 변수) 가운데 하나라도 없으면 아무것도 보내지 않고 모든 시험을 "건너뜀"으로 끝낸다. 두 파일을 한 번에 줄 수도 있다(변수가 있는 쪽만 돈다).
+- **Anthropic(`anthropic-live.ts`), 작업 둘**
+  - 문서 작업: 임시 폴더의 `README.md`에 절 하나를 더하고 `done`인지, 원래 글이 그대로인지 본다.
+  - 코드 작업(U-101): `math.mjs`의 틀린 `add`를 고치고, 보호 경로인 `check.mjs`를 도는 `command` 검증기가 `pass`이고 `check.mjs`가 그대로인지 본다.
+  - 상한(작업마다): 턴 4, 도구 호출 4, 출력 1024토큰/요청, 총 30000토큰, 3분. HTTP 요청은 작업마다 최대 8건, 둘이면 16건.
+- **OpenAI(`openai-live.ts`), 점검 셋**(U-101)
+  1. `models --provider openai --json`이 그 모델을 포함한 목록을 주는지.
+  2. 도구 한 바퀴(문서 작업과 같은 일)가 `done`인지.
+  3. 점검 2의 기록으로, 추론 항목을 다시 보낸 뒤의 요청이 받아들여졌는지([사실 C-11](design/second-provider-facts.md)). 모델이 추론 항목을 돌려주지 않으면 이 점검은 "건너뜀"이다.
+  - 상한: 턴 4, 도구 호출 4, 출력 4096토큰/요청, 총 40000토큰, 3분, HTTP 요청 최대 10건.
+- 두 파일 모두 stdout·stderr·기록에 키 원문과 정해진 변형이 없는지 본다(값은 출력하지 않고 변형 이름만 보고한다).
 
 ## 15. 투입 전 점검표
 
@@ -1009,7 +1085,7 @@ node --test dist/tests/live/anthropic-live.js
 | `failed`/`state_changed` | 실행 중에 그 실행이 아닌 것(허용한 명령, 명령형 검증기, 다른 프로그램)이 `.codaryn\`을 바꿨다. 실행을 멈췄고 표시를 남겼다. `report`를 읽고, 허용한 명령과 검증기가 `.codaryn\`에 쓰지 않는지 본 뒤 다시 실행한다(16절 "실행 기록 변조") |
 | `cleanup_plan_changed`(종료 2) | 준 다이제스트가 지금의 정리 미리보기의 것과 다르다. 미리보기 뒤에 새 실행, 되돌리기, 남은 폴더 등으로 상태 디렉터리가 바뀌었거나 다른 미리보기의 다이제스트다. 아무것도 지우지 않았다. 다시 미리 보고 새 다이제스트로 확인한다(18.8절) |
 | `cleanup`의 `nothing_removed`(종료 3) | 확인했지만 지운 것이 없다. 줄마다 남긴 이유가 나온다(되돌리지 않은 실행, 폐기 보관함이 남은 적용 등). 지우려면 그 이유가 말하는 확인(`--include-not-reverted`, `--delete-discarded`)을 더해 다시 미리 본다(18.8절) |
-| `cleanup`의 `partly_failed`(종료 1) | 권한이나 다른 프로그램 때문에 다 지우지 못했다. 원인을 없앤 뒤 다시 미리 보면 남은 것이 `Leftover folders to remove`로 나온다(18.8절) |
+| `cleanup`의 `partly_failed`(종료 1) | 권한이나 다른 프로그램 때문에 다 지우지 못했다. 원인을 없앤 뒤 다시 미리 보면 남은 것이 `Removed with --confirm alone` 묶음의 `leftover` 항목으로 나온다(18.8절) |
 | `needs-input`/`plan_pending` | 계획을 제안하고 멈췄다. 정상이다. `plan`으로 보고 승인하면 `apply`한다(18.3절) |
 | `needs-input`/`awaiting_review` | 검증을 통과했고 사람의 판정을 기다린다. 결과를 보고 `review --accept` 또는 `--reject`를 한다(18.6절) |
 | `needs-input`/`consent_required` | 하드 링크가 없는 드라이브라 이동을 하지 않았다. 계획은 그대로다. 위험을 받아들이면 `--allow-unsafe-move`로 다시 적용한다(18.5절) |
@@ -1471,7 +1547,7 @@ node dist/src/cli/main.js review --task <task.json> --run <실행 id> --reject
 `codaryn cleanup`이 상태 디렉터리(`.codaryn\`)의 실행 기록과 폐기 보관함을 보이고 지운다. 기본은 미리보기이고 아무것도 지우지 않는다.
 
 ```powershell
-# 요약만(아무것도 고르지 않음)
+# 요약과 고르는 예(아무것도 고르지 않음)
 node dist/src/cli/main.js cleanup --workspace D:\work\notes
 # 미리보기: 30일보다 오래된 실행 기록을 고르고, 경고와 다이제스트를 본다
 node dist/src/cli/main.js cleanup --workspace D:\work\notes --older-than 30
@@ -1487,43 +1563,81 @@ node dist/src/cli/main.js cleanup --workspace D:\work\notes --older-than 30 --co
   - `--confirm <digest>`: 미리보기가 보인 계획 그대로일 때만 지운다. 미리보기 뒤에 새 실행이나 되돌리기로 상태가 바뀌었거나 다른 미리보기의 다이제스트면 오류 `cleanup_plan_changed`(종료 2)이고 아무것도 지우지 않는다. 다시 미리 본다.
   - `--include-not-reverted`: 되돌리지 않았거나 일부만 되돌린 실행, 기록을 확인할 수 없는 실행의 기록을 지운다. 없으면 그 기록은 남고(`not_reverted_not_confirmed`) 나머지만 지워진다. 나머지에서 하나라도 지웠으면 종료 0, 하나도 지우지 못했으면 `nothing_removed`(종료 3)다. 남은 적용 실행이 쓰는 계획 실행도 함께 남는다. 지운 실행은 더는 되돌릴 수 없다.
   - `--delete-discarded`: 고른 폐기 보관함(사람의 파일)을 지운다. 없으면 폐기 보관함은 남고, 그 폐기 보관함을 만든 적용 실행의 기록도 남는다(DR-53, `discarded_left`). 파일의 원래 이름과 자리는 그 기록에만 있기 때문이다. 그 적용 실행이 쓰는 계획 실행도 함께 남는다(`used_by_kept_apply`). 이 기록은 같은 정리에서 그 폐기 보관함을 고르고 `--delete-discarded`를 줄 때, 또는 그 적용을 먼저 되돌린 뒤에 지워진다. 다른 것을 하나라도 지웠으면 종료 0, 하나도 지우지 못했으면 `nothing_removed`(종료 3)다.
-- 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것). 실행 id와 다이제스트는 실행마다, 기록의 바이트 수는 판마다 다르다):
+- **미리보기는 무엇을 주면 무엇이 지워지는지로 묶는다**(U-86, UXM-10). 묶음은 이 순서이고, 항목이 있는 묶음만 머리 줄이 나온다.
+  1. `--confirm`만으로 지우는 것(앞선 정리가 남긴 폴더도 여기)
+  2. `--include-not-reverted`도 주어야 지우는 것: 되돌리지 않았거나 일부만 되돌렸거나 기록을 확인할 수 없는 실행. 머리 줄이 지우면 되돌릴 수 없다는 것을 말한다.
+  3. `--delete-discarded`도 주어야 지우는 것: 폐기 보관함. 머리 줄이 사람의 파일이며 되살릴 수 없다고 말한다.
+  4. 둘 다 주어야 지우는 것: 되돌리지 않은 적용 실행과 그 계획 실행 등. 머리 줄이 위의 두 경고를 다 말한다.
+  5. 이 선택에서는 무엇을 확인해도 남는 것: 폐기 보관함이 남는 적용 실행과 그 계획 실행.
+  - 그 뒤에 지울 수 없는 것(돌고 있는 실행, 결과가 없는 실행, 고르지 않은 적용이 쓰는 계획 실행)이 `Cannot be removed in this cleanup: <수>. …` 아래 따로 나온다.
+  - 항목 줄은 `- <종류> <이름>: <크기>`다. 경고는 그 아래 한 줄씩이고, 남는 항목은 남는 까닭 한 줄이다.
+  - 끝에 명령이 둘까지 나온다. `--confirm`만으로 지우는 것이 있으면 `--confirm <다이제스트 앞 12자>`, 다른 옵션이 필요한 항목이 있으면 그 옵션을 모두 붙인 명령이다. 두 번째 명령에는 `--include-not-reverted`가 붙을 수 있다. 그대로 붙여 넣으면 되돌리지 않은 실행의 기록이 지워진다(그 묶음의 머리 줄이 말하는 것).
+  - 묶음의 수는 그 옵션으로 실제 지워지는 수와 같았다(검토 R-76·R-76b, 18가지 선택 × 네 옵션 조합).
+  - 아무것도 고르지 않으면 요약 뒤에 고르는 예 두 줄(`--older-than 30`, `--reverted`)이 나온다. 앞선 정리가 남긴 폴더가 있으면 그 묶음과 명령도 그 위에 나온다.
+- 3절 체험을 두 번 실행하고 처음 것만 되돌린 작업 공간에서 `--older-than 0` 미리보기의 실제 출력(stdout, main `bc3305d`. 실행 id와 다이제스트는 실행마다, 기록의 바이트 수는 판마다 다르다):
 
 ```
-Run records: 2 (30981 bytes)
+Run records: 2 (31145 bytes)
 Discarded files (people's own files an apply set aside): 0 (0 bytes)
 Files a revert could not put back (.codaryn/parked/, never cleaned up): 0 (0 bytes)
 
-Run records to remove: 2 (30981 bytes)
-  Of these, runs not reverted, only partly reverted, or whose records cannot be checked: 1. Their records go only with a confirmation of their own; without them those runs can no longer be reverted or put back by hand.
-- 20261112T175001Z-dc8f7ff4: 4 file(s), 15392 bytes; not reverted: without its records it can no longer be reverted
-- 20261112T175001Z-7c523da5: 5 file(s), 15589 bytes
+Removed with --confirm alone: 1 (15671 bytes)
+- run 20261113T015938Z-b4e55869: 5 file(s), 15671 bytes
+Removed only with --include-not-reverted besides: 1 (15474 bytes). These are runs not reverted, only partly reverted, or whose records cannot be checked. Their records go only with a confirmation of their own; without them those runs can no longer be reverted or put back by hand.
+- run 20261113T015939Z-96f785fb: 4 file(s), 15474 bytes
+  not reverted: without its records it can no longer be reverted
 
-Nothing was removed. To remove the run records, run the same command with --confirm fde688129e87.
-The records of 1 run(s) not reverted, only partly reverted, or whose records cannot be checked are kept unless you add --include-not-reverted yourself; once they are removed, those runs can no longer be reverted.
+Nothing was removed. To remove what needs no other option, run the same command with --confirm 4612d2674054
+Nothing was removed. To remove all of the above but what is kept, run the same command with --confirm 4612d2674054 --include-not-reverted
 ```
 
-  - 그 다이제스트로 `--confirm`만 주면 `Removed: run records 1, discarded-files folders 0, 15589 bytes`이고 종료 0이다. 되돌리지 않은 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
+  - 첫 명령(`--confirm`만)이면 `Removed: run records 1, discarded-files folders 0, 15671 bytes`이고 종료 0이다. 되돌리지 않은 실행은 `- run <id>: not reverted or only partly reverted, and removing it was not confirmed apart`로 남는다.
   - 남은 것이 그 실행뿐일 때 다시 `--confirm`만 주면 첫 줄이 `Nothing was removed.`이고 종료 3(`nothing_removed`)이다.
-  - 새 미리보기의 다이제스트로 `--include-not-reverted`를 더하면 그 실행도 지워진다.
-  - 파일 정리의 적용(폐기 하나)이 있는 작업 공간에서 `--discarded-older-than 0`을 더하면, 적용 실행 줄에 `an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was`가 붙는다. 폐기 보관함 줄은 `a discarded-files folder: people's own files are deleted`이다. 끝에는 `People's discarded files are deleted only with --delete-discarded besides.`와 `The records of 1 apply run(s) whose discarded files are still kept stay unless those files are deleted in the same cleanup (--delete-discarded, with their folders selected) or the apply is reverted first; only the records say what the files were.`가 나온다(main `531c8b8`의 실제 출력).
-  - 그 미리보기의 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 3(`nothing_removed`)이다(stdout, U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)):
+  - 둘째 명령(`--include-not-reverted`까지)이면 `Removed: run records 2, discarded-files folders 0, 31145 bytes`이고 종료 0이다.
+- 파일 정리의 적용(폐기 하나)이 있는 작업 공간(main `bc3305d`의 실제 출력):
+  - `--older-than 0`만 고르면 두 실행 모두 "남는 것"이고 명령은 나오지 않는다.
+
+    ```
+    Kept in this selection, whatever is confirmed: 2. An apply run's records go once its discarded files are deleted in the same cleanup (with their folders selected and --delete-discarded) or the apply is reverted first; only the records say what the files were. A plan run goes with its apply run.
+    - run 20261113T015941Z-0ed0cf10: 2 file(s), 6161 bytes
+      its discarded files stay, and only its records say what each file was called and where it was
+    - run 20261113T015941Z-2766ed4d: 4 file(s), 7821 bytes
+      a plan run whose apply run is kept; without it that apply could not be reverted
+    ```
+
+  - `--discarded-older-than 0`을 더하면 보관함은 셋째 묶음, 되돌리지 않은 적용 실행과 그 계획 실행은 넷째 묶음이다(요약 세 줄 다음):
+
+    ```
+    Removed only with --delete-discarded besides: 1 (1 file(s), 17 bytes), people's discarded files among them. They are people's own files and cannot be put back.
+    - discarded 20261113T015941Z-0ed0cf10: 1 file(s), 17 bytes
+      a discarded-files folder: people's own files are deleted
+    Removed only with both --include-not-reverted and --delete-discarded besides: 2 (6 file(s), 13982 bytes). Among them are runs not reverted, only partly reverted, or whose records cannot be checked. Their records go only with a confirmation of their own; without them those runs can no longer be reverted or put back by hand. Among them are also people's discarded files. They are people's own files and cannot be put back.
+    - run 20261113T015941Z-0ed0cf10: 2 file(s), 6161 bytes
+      not reverted: without its records it can no longer be reverted
+      an apply run with discarded files: its records are kept unless those files are deleted in the same cleanup, since only the records say what each file was called and where it was
+    - run 20261113T015941Z-2766ed4d: 4 file(s), 7821 bytes
+
+    Nothing was removed. To remove all of the above but what is kept, run the same command with --confirm d026e8ac8384 --include-not-reverted --delete-discarded
+    ```
+
+  - 그 다이제스트로 `--include-not-reverted`만 더해 확인하면 아무것도 지우지 않고 종료 3(`nothing_removed`)이다:
 
     ```
     Nothing was removed.
     Kept: the records of apply runs whose discarded files stay: 1. The records are the only note of what each of those files was called and where it was. They go once those applies are reverted, or when their discarded files are deleted in the same cleanup.
-    - discarded 20261112T175002Z-8af6e896: deleting the discarded files was not confirmed
-    - run 20261112T175002Z-8af6e896: its discarded files stay, and only its records say what each file was called and where it was
-    - run 20261112T175002Z-232ca09b: a plan run whose apply run is kept; without it that apply could not be reverted
+    - discarded 20261113T015941Z-0ed0cf10: deleting the discarded files was not confirmed
+    - run 20261113T015941Z-0ed0cf10: its discarded files stay, and only its records say what each file was called and where it was
+    - run 20261113T015941Z-2766ed4d: a plan run whose apply run is kept; without it that apply could not be reverted
     ```
 
-  - `--delete-discarded`까지 더하면 `Removed: run records 2, discarded-files folders 1, 13903 bytes`이고 종료 0이다. 바이트 수는 기록에 든 시각과 걸린 시간에 따라 실행마다 몇 바이트씩 다르다.
+  - `--delete-discarded`만 더하면 보관함만 지우고 종료 0이다(`Removed: run records 0, discarded-files folders 1, 17 bytes`). 두 실행은 `not reverted or only partly reverted, and removing it was not confirmed apart`와 `a plan run whose apply run is kept; without it that apply could not be reverted`로 남는다. 보관함의 파일은 되살릴 수 없게 된다.
+  - 둘 다 더하면(끝의 명령) `Removed: run records 2, discarded-files folders 1, 13999 bytes`이고 종료 0이다. 바이트 수는 기록에 든 시각과 걸린 시간에 따라 실행마다 몇 바이트씩 다르다.
   - 실행 기록만 고른 경우(`--discarded-older-than` 없음)와 기록을 확인할 수 없는 적용 실행도 같은 이유로 남는다. 적용을 먼저 되돌리면(`complete`) 그 실행의 폐기 보관함 폴더는 비고, `--older-than 0`의 확인으로 두 실행의 기록이 지워진다. 빈 폴더는 남는다.
 - **지우지 않는 것**: `.codaryn\parked\`(되돌리기가 제자리에 두지 못한 파일), 잠금, `.gitignore`, 돌고 있는 실행(`lock_held`, 적용 중이면 `workspace_locked`), 결과가 없는 실행(`no_result`), 고르지 않은 적용이 쓰는 계획 실행. 상태 디렉터리 안의 링크를 따라 밖을 지우지 않는다.
-- **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`로 남고 정리는 `partly_failed`(종료 1)다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기에 `Leftover folders to remove`로 나와 `--confirm`으로 지운다. 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).
-- **기록을 확인할 수 없는 실행**(결과 기록이 깨진 실행 등)의 줄에는 `records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files`가 붙고, `--include-not-reverted`를 따로 줘야 지워진다.
+- **다 지우지 못한 경우**: 권한이나 다른 프로그램 때문에 지우기가 중간에 실패하면 그 항목은 `partly_removed`로 남고 정리는 `partly_failed`(종료 1)다. 남은 것은 `.codaryn\cleanup-<16자리 16진수>\`에 정리의 표지와 함께 남고, 다음 미리보기의 `Removed with --confirm alone` 묶음에 `- leftover cleanup-<16자리 16진수>: …` 항목으로 나와 `--confirm`으로 지운다(고르는 옵션이 없어도 나온다). 표지가 없는 같은 이름 꼴의 폴더는 정리의 것이 아니므로 지우지 않고, 요약에 한 줄로만 보인다: `Unknown folders (.codaryn/cleanup-…, named like a cleanup's leftover but without its mark; never removed): 1 (2 bytes)`(한국어 `알 수 없는 폴더(…, 지우지 않음)`). 이전 판(main `6f85b65`~`5396225`)의 정리가 남긴 폴더도 표지가 달라 이렇게 보이고, 지금은 정리로 지울 수 없다(검토 R-40 낮음, store 담당 다음 단위).
+- **기록을 확인할 수 없는 실행**(결과 기록이 깨진 실행 등)은 항목 아래에 `records cannot be checked: whether it changed files or was reverted is not known, and removing them may remove the last copies of those files` 줄이 붙고, `--include-not-reverted`도 주어야 지우는 묶음에 든다.
 - 지운 것은 `.codaryn\cleanup.jsonl`에 개수와 바이트만 남는다(이름과 경로는 없다).
 - `--json`이면 `kind:"cleanup"` JSON 한 줄이고, `status`가 한 일을 말한다(DR-48): `preview`(종료 0), `removed`(하나라도 지움, 0), `nothing_removed`(지운 것이 없음, 3), `partly_failed`(지우기가 일부 실패, 1). `outcome.ok`는 `removed`일 때만 `true`다. 다이제스트가 다르면 정리 JSON이 아니라 오류 JSON(`kind:"error"`, `cleanup_plan_changed`, 종료 2)이다. 터미널 질문은 없다. 지우는 길은 다이제스트 확인뿐이다.
-- 한국어 출력은 크기 조각과 끝의 안내 줄까지 한국어다(U-34). main `76c5280`의 미리보기에서는 `- <실행 id>: 파일 5개, 15671바이트`와 `아무것도 지우지 않았습니다. 실행 기록을 지우려면 같은 명령에 다음을 붙여 다시 실행하세요: --confirm <앞 12자>.`였다.
-- 확인 범위: 위 출력, `--confirm`만 준 결과, `status`와 종료 코드(`removed`, `nothing_removed`, 지우기 거부 ACL로 만든 `partly_failed`, 틀리거나 낡은 다이제스트의 `cleanup_plan_changed`)는 U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것), `--include-not-reverted`의 결과는 main `6df2eae`의 실제 CLI다. 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
+- 한국어 출력은 묶음 머리 줄, 항목의 종류와 크기, 끝 줄까지 한국어다(U-34, U-86). main `bc3305d`의 위 미리보기에서는 `--confirm 옵션만으로 지우는 것: 1개(15671바이트)`, `- 실행 기록 <실행 id>: 파일 5개, 15671바이트`, `아무것도 지우지 않았습니다. 다른 옵션이 필요 없는 것만 지우려면 같은 명령에 다음을 붙여 다시 실행하세요: --confirm <앞 12자>`였다. 넷째 묶음의 머리 줄은 `--include-not-reverted 옵션과 --delete-discarded 옵션을 둘 다 주어야 지우는 것: …`이다.
+- 확인 범위: 위 미리보기와 확인 결과(네 옵션 조합), 고르지 않은 요약은 main `bc3305d`의 실제 CLI다. `status`와 종료 코드(`removed`, `nothing_removed`, 지우기 거부 ACL로 만든 `partly_failed`, 틀리거나 낡은 다이제스트의 `cleanup_plan_changed`)는 U-22 판(main `b2dad78`에 U-22의 네 브랜치를 더한 것)에서 확인했고, U-86은 확인 뒤의 출력과 `--json`을 바꾸지 않았다(검토 R-76, R-76b). 지우지 않는 것과 다 지우지 못한 경우는 판 `39df2ba`에서(검토 R-34·R-34b·R-34c), 알 수 없는 폴더의 줄과 기록을 확인할 수 없는 실행의 줄은 main `a7f3a2f`에서, 이전 판이 남긴 폴더는 `7556be6`(검토 R-40)에서 실제 CLI로 확인했다.
 - **계획 실행의 기록**은 그 계획의 적용 실행을 되돌리는 데 필요하다. 손으로 지우면 그 적용은 되돌릴 수 없다(`revert`는 `plan_run_missing`, 종료 2). 적용 실행의 stdout JSON과 `runs --json`의 `planRunId`가 어느 계획 실행인지 알려 준다.

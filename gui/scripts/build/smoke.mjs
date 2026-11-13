@@ -8,7 +8,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const gui = fileURLToPath(new URL("../../", import.meta.url));
@@ -56,6 +56,16 @@ const closeFake = [];
 // analyze run's call with it, later in the same window, fails (not_found) and must still get its line.
 // No model request is added: the two calls ride in replies the runs already had.
 const U54_ID = "bad id";
+// GS-3 (p5a's proposal, U-271): text that would be markup if the page parsed it as HTML, one marker per
+// place: the goal (smoke.ts types it), a file name (Windows allows no < or >, so the entities that would
+// become an <img> as HTML), a check's evidence, a plan's summary and the model's last words.
+const GS3_GOAL = 'GS-3 <img src=x onerror="window.__gs3=1"> <script>window.__gs3=2</script>';
+const GS3_FILE = "&lt;img src=x onerror=window.__gs3=3&gt;.txt";
+const GS3_EVIDENCE = "<img src=x onerror=window.__gs3=4> <script>window.__gs3=5</script>";
+const GS3_PLAN = "<img src=x onerror=window.__gs3=6> <script>window.__gs3=7</script>";
+const GS3_WORDS = "<img src=x onerror=window.__gs3=8> <script>window.__gs3=9</script>";
+// GS-4 (p5a's proposal, U-271): a fake value of a secret name the config registers (no key shape).
+const GS4_SECRET = "gs4-fake-secret-value-u271";
 // U-124 (3.6, DR-3): the command the profile "ask" asks about before it runs (its rule has confirm: true).
 const ASK_SCRIPT = "require('fs').appendFileSync('asked.txt', 'x')";
 const steps = [
@@ -66,7 +76,7 @@ const steps = [
   fakeApi.replyText("done"),
   { kind: "hang" },
   fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_a", "propose_plan", { summary: "a.txt to moved", actions: [{ kind: "move", from: "a.txt", to: "moved/a.txt" }] })]),
-  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: "sub/b.txt to moved", actions: [{ kind: "move", from: "sub/b.txt", to: "moved/b.txt" }] })]),
+  fakeApi.replyTools([fakeApi.toolUse("toolu_smoke_plan_b", "propose_plan", { summary: `sub/b.txt to moved ${GS3_PLAN}`, actions: [{ kind: "move", from: "sub/b.txt", to: "moved/b.txt" }] })]),
   fakeApi.replyTools([
     fakeApi.toolUse("toolu_smoke_report", "write_file", { path: "report.md", expectedHash: null, change: { kind: "replace_all", content: "결과 표\n해석\n" } }),
     fakeApi.toolUse("toolu_smoke_notes", "write_file", { path: "notes.md", expectedHash: null, change: { kind: "replace_all", content: "메모\n" } }),
@@ -88,6 +98,13 @@ const steps = [
     fakeApi.toolUse("toolu_smoke_carry_2", "write_file", { path: "unplanned.md", expectedHash: null, change: { kind: "replace_all", content: "not in the plan\n" } }),
   ]),
   fakeApi.replyText("carried"),
+  // GS-3 and GS-4 (U-271): a run with the profile "gs3" writes a file whose name would be markup and reads
+  // the file that holds the fake secret, then ends with words that would be markup; its check prints some.
+  fakeApi.replyTools([
+    fakeApi.toolUse("toolu_smoke_gs3_write", "write_file", { path: GS3_FILE, expectedHash: null, change: { kind: "replace_all", content: "gs3\n" } }),
+    fakeApi.toolUse("toolu_smoke_gs4_read", "read_file", { path: "gs4.txt" }),
+  ]),
+  fakeApi.replyText(GS3_WORDS),
   { kind: "hang" },
 ];
 const api = await fakeApi.startFakeAnthropic({ after: (fn) => closeFake.push(fn) }, steps, {
@@ -112,7 +129,11 @@ writeFileSync(
       tidy: { workflowRef: "organize" },
       // U-124: a command rule that asks before each call (confirm: true, the user's settings only).
       ask: { policy: { commands: [{ executable: process.execPath, argsPrefix: ["-e", ASK_SCRIPT], allowExtraArgs: false, confirm: true }], network: "deny", destructive: "deny", restorePathTokens: false } },
+      // GS-3 (U-271): a check whose evidence would be markup.
+      gs3: { verifiers: [{ id: "gs3", kind: "command", executable: process.execPath, args: ["-e", `process.stdout.write(${JSON.stringify(GS3_EVIDENCE)} + "\\n")`] }] },
     },
+    // GS-4 (U-271): a registered secret whose fake value is in the environment and in a workspace file.
+    secretEnv: ["SMOKE_GS4_SECRET"],
     // U-226 (U-218): a task type whose plan is "run": its run makes a changes plan; applying it is a run.
     workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" } },
   }),
@@ -125,6 +146,8 @@ writeFileSync(join(second, "a.txt"), "alpha");
 mkdirSync(join(second, "sub", "deeper"), { recursive: true });
 writeFileSync(join(second, "sub", "b.txt"), "bravo");
 writeFileSync(join(second, "sub", "deeper", "c.txt"), "charlie");
+// GS-4 (U-271): the fake secret's value, read by the GS-3 run (masked before the model and the window).
+writeFileSync(join(second, "gs4.txt"), `gs4 ${GS4_SECRET}\n`);
 mkdirSync(join(second, ".codaryn", "runs"), { recursive: true });
 writeFileSync(join(second, `${KEY_SHAPED}.txt`), "fake");
 let junction = true;
@@ -183,6 +206,8 @@ env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
 // The fixtures' fake OpenAI key: the settings screen shows that it is set, never its value. Runs here
 // stay on anthropic; the engine host's test transport reaches this machine only, for every provider.
 env[API_PROVIDERS.openai.keyEnv] = FAKE_OPENAI_KEY;
+// GS-4 (U-271): the registered secret's fake value.
+env.SMOKE_GS4_SECRET = GS4_SECRET;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
 env.CODARYN_SMOKE_RUN_PLAN = runPlanDir;
@@ -298,6 +323,41 @@ const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
 const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onTreeReset,onWorkspaceOpened,openFolder,openRecent,openText,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveText,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,textDirty,tree";
 seen.apiRequests = apiRequests;
+// GS-4 (p5a's proposal, U-271): after runs with the fake keys and the fake secret, none of their values is
+// in the GUI's own state folder, the smoke's Chromium profile or the window's title (smoke.ts records it),
+// as UTF-8 or UTF-16 text.
+seen.gs4Values = (() => {
+  const values = [FAKE_API_KEY, FAKE_OPENAI_KEY, GS4_SECRET];
+  const needles = values.flatMap((value) => [Buffer.from(value, "utf8"), Buffer.from(value, "utf16le")]);
+  const found = [];
+  let scanned = 0;
+  const walk = (dir) => {
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) {
+        let bytes;
+        try {
+          bytes = readFileSync(full);
+        } catch {
+          continue;
+        }
+        scanned += 1;
+        if (needles.some((needle) => bytes.includes(needle))) found.push(relative(gui, full));
+      }
+    }
+  };
+  walk(stateDir);
+  walk(profile);
+  const title = typeof seen.gs4Title === "string" ? seen.gs4Title : null;
+  return { scanned, found, title: title === null ? null : values.some((value) => title.includes(value)) ? "has a value" : "clean" };
+})();
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
 seen.configModel = configModel;
@@ -445,7 +505,7 @@ const expected = [
   // N-14: a file the environment names is shown by the variable name, not its path.
   ["settingsFile", (v) => v.source === "environment" && typeof v.text === "string" && v.text.includes("CODARYN_CONFIG") && !v.text.includes("smoke-config")],
   // U-124: the profile "ask" has a confirm rule.
-  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy", "ask"])],
+  ["settingsProfiles", (v) => JSON.stringify(v) === JSON.stringify(["doc", "tidy", "ask", "gs3"])],
   ["settingsKey", (v) => v === "available"],
   ["settingsText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(api.url)],
   ["modelsBeforeAsking", (v) => v === 0],
@@ -478,7 +538,7 @@ const expected = [
       v.model === "fake-model-b" &&
       JSON.stringify(v.commands) === JSON.stringify([{ executable: "node", argsPrefix: ["--version"], allowExtraArgs: false }]) &&
       JSON.stringify(v.protectedPaths) === JSON.stringify(["notes/private.md"]) &&
-      JSON.stringify(v.secretEnv) === "[]",
+      JSON.stringify(v.secretEnv) === JSON.stringify(["SMOKE_GS4_SECRET"]),
   ],
   ["settingsChangeText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
   // PM task (2): the provider choice; keys set or not by name, never a value; the list only for the provider in use.
@@ -498,7 +558,7 @@ const expected = [
     "apiRequests",
     // U-13's plan run (5j2) asks once more: 8 before it. U-124's run with the profile "ask" asks three times more.
     // U-226: the plan run of a run plan once, and the run that carries it out twice: 15.
-    (v) => v.models >= 2 && v.messages === 15 && v.other.length === 0 && v.allFakeKey === true,
+    (v) => v.models >= 2 && v.messages === 17 && v.other.length === 0 && v.allFakeKey === true,
   ],
   // GU-3: a run from the new task screen, a cancel from the window, and closing during a run.
   ["runDone", (v) => v === "done"],
@@ -591,7 +651,30 @@ const expected = [
   ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
   ["applyNoGap", (v) => v === true],
   ["runCountsLimits", (v) => typeof v === "string" && /\d+:\d\d\/\d+:\d\d · \D*\d+\/\d+ · \D*\d+\/\d+/.test(v)],
+  // GS-3 (U-271): plan B's summary, as text (the rows the model text is folded into joined again), no element, no CSP violation.
+  ["gs3PlanSummary", (v) => v !== null && typeof v.text === "string" && v.text.replace(/\s+/g, " ").includes(GS3_PLAN) && v.img === 0 && v.csp === 0],
   ["applyTreeMarks", (v) => v !== null && v.note === true && v.holds === "moved"],
+  // GS-3 (U-271): no element made, no CSP violation, every text as it is; the check passed.
+  [
+    "gs3",
+    (v) =>
+      v !== null &&
+      v.runId === true &&
+      v.status === "done" &&
+      JSON.stringify(v.before) === JSON.stringify(v.after) &&
+      v.after.img === 0 &&
+      v.after.onerror === 0 &&
+      v.after.ran === null &&
+      v.csp === 0 &&
+      v.words === GS3_WORDS &&
+      v.file === GS3_FILE &&
+      typeof v.evidence === "string" &&
+      v.evidence.includes(GS3_EVIDENCE) &&
+      v.goalKept === true &&
+      v.goalMarkup === true,
+  ],
+  // GS-4 (U-271): no fake key or secret value in the state folder, the profile or the title.
+  ["gs4Values", (v) => v !== null && v.scanned >= 2 && v.found.length === 0 && v.title === "clean"],
   ["planRun", (v) => v === "plan_pending"],
   ["planShown", (v) => v === "pending"],
   // R21b-L-1: opened from the run list with the remembered form, so it can be applied there.

@@ -61,6 +61,11 @@ export interface RevertCliOutcome {
    * English; the JSON line is as before.
    */
   readonly hint?: string;
+  /**
+   * U-220 (U-176, U-201): the revert finished but its workspace lock could not be released; the
+   * summary says `lock.release_failed` (RevertSummaryContext.lockLeft). Not in the JSON line.
+   */
+  readonly lockLeft?: true;
 }
 
 /** A catalog text, or `fallback` while this build's catalog does not have the id yet (N-B). */
@@ -197,5 +202,7 @@ export async function runRevert(io: RevertEnvironment): Promise<RevertCliOutcome
     exitCode,
     quiet,
     ...(result.planApply === undefined ? {} : { hint: appliedPlanHint(result.runId, result.planApply, dryRun, io.messages) }),
+    // U-220: a lock left by this revert, for the summary only (the JSON line is as before).
+    ...(result.lockLeft === true ? { lockLeft: true as const } : {}),
   };
 }

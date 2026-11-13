@@ -1,8 +1,9 @@
 /**
  * U-116 (P1 bundle C, M-1 to M-5): the contract of the two Markdown rules of `file_rules`
  * (`markdown_headings`, `markdown_links`): their types and limits, the shape of their evidence (the
- * lead words, the bounded list, the label) and the limit sentences. The verifier that checks them
- * is nd-docs' unit (src/verify); these tests pin what it must write.
+ * lead words, the bounded list, the label) and the limit sentences, and that they are rules of the
+ * same `file_rules` list. The verifier that checks them is nd-docs' unit (src/verify); these tests
+ * pin what it must write.
  */
 
 import assert from "node:assert/strict";
@@ -22,7 +23,14 @@ import {
   markdownEvidenceList,
   markdownRuleLabel,
 } from "../../../src/contracts/index.js";
-import type { MarkdownEvidenceItem, MarkdownFileRule, MarkdownHeadingsRule, MarkdownLinksRule } from "../../../src/contracts/index.js";
+import type {
+  FileRule,
+  FileRulesVerifierConfig,
+  MarkdownEvidenceItem,
+  MarkdownFileRule,
+  MarkdownHeadingsRule,
+  MarkdownLinksRule,
+} from "../../../src/contracts/index.js";
 import { createPrivacyGateway } from "../../../src/privacy/index.js";
 
 describe("U-116: the Markdown rules' types and limits (M-1, M-4)", () => {
@@ -50,6 +58,25 @@ describe("U-116: the Markdown rules' types and limits (M-1, M-4)", () => {
       ["markdown_headings", "markdown_headings", "markdown_links"],
     );
     assert.deepEqual(JSON.parse(JSON.stringify(ordered)), ordered, "plain JSON, as a task file holds it");
+  });
+
+  test("they are rules of file_rules: one list holds them with the literal rules (M-1)", () => {
+    const config: FileRulesVerifierConfig = {
+      id: "doc",
+      kind: "file_rules",
+      rules: [
+        { type: "exists", path: "README.md" },
+        { type: "markdown_headings", path: "README.md", headings: [{ text: "Install" }] },
+        { type: "markdown_links", path: "README.md" },
+      ],
+    };
+    const types: readonly FileRule["type"][] = config.rules.map((rule) => rule.type);
+    assert.deepEqual(types, ["exists", "markdown_headings", "markdown_links"]);
+    const markdown: readonly string[] = MARKDOWN_RULE_TYPES;
+    assert.deepEqual(
+      config.rules.filter((rule) => markdown.includes(rule.type)).map((rule) => rule.type),
+      ["markdown_headings", "markdown_links"],
+    );
   });
 });
 

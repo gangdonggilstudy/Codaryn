@@ -20,11 +20,13 @@ export interface CommandVerifierConfig {
   readonly expectExitCode?: number;
 }
 
+/** U-116: the Markdown rules (MarkdownFileRule) are rules of the same list. */
 export type FileRule =
   | { readonly type: "exists"; readonly path: string }
   | { readonly type: "absent"; readonly path: string }
   | { readonly type: "contains"; readonly path: string; readonly text: string }
-  | { readonly type: "not_contains"; readonly path: string; readonly text: string };
+  | { readonly type: "not_contains"; readonly path: string; readonly text: string }
+  | MarkdownFileRule;
 
 /**
  * U-116 (P1 bundle C, proposal M-1 to M-5, docs/reviews/2026-11-13-p1-bundle-proposal.md): two

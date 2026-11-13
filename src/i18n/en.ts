@@ -213,7 +213,7 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.apply_action_one": "1 action",
   "runs.review": "review: {verdict}",
   // U-139 (UXM-5; draft for nb-i18n): the plan run an apply run applied.
-  "runs.apply_of": "apply of the plan of run {runId}",
+  "runs.apply_of": "applies the plan of run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",
@@ -223,7 +223,7 @@ export const EN_MESSAGES: MessageTexts = {
   "changes.none": "the run changed no file",
   "changes.plan_only": "This run only made a plan and changed no file itself.",
   "changes.plan_applied": "Its plan was applied by run {runId}; that run's report lists the moves.",
-  "changes.plan_apply_other": "An apply run took up its plan: {runId}; codaryn runs shows how that apply ended.",
+  "changes.plan_apply_other": "An apply run took up its plan: {runId}; codaryn runs shows where that apply stands.",
   "changes.file.created": "created by the run",
   "changes.file.changed": "changed by the run",
   "changes.no_difference": "no difference to the original",

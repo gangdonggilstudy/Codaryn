@@ -222,7 +222,7 @@ export const KO_MESSAGES: MessageTexts = {
   "changes.none": "실행이 바꾼 파일이 없습니다",
   "changes.plan_only": "이 실행은 계획만 만들었고 파일을 직접 바꾸지 않았습니다.",
   "changes.plan_applied": "그 계획을 적용한 실행: {runId}. 옮긴 것은 그 실행의 보고서에 있습니다.",
-  "changes.plan_apply_other": "그 계획을 맡은 적용 실행: {runId}. 그 적용이 어떻게 끝났는지는 codaryn runs가 보여 줍니다.",
+  "changes.plan_apply_other": "그 계획을 맡은 적용 실행: {runId}. 그 적용이 어떤 상태인지는 codaryn runs가 보여 줍니다.",
   "changes.file.created": "실행이 만듦",
   "changes.file.changed": "실행이 바꿈",
   "changes.no_difference": "원본과 다른 곳이 없음",

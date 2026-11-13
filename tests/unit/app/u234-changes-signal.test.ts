@@ -8,20 +8,18 @@
  * `changes` takes `{ signal }` (ChangesOptions) and hands it to every read of a current file.
  * A test hook wraps the workspace to see what each read is given; the burst is the guard's own
  * `retried` with a try that always sees a change, so the waits are the real ones. Reproduced first
- * (todo until the view passed the signal). Temporary folders, scripted model, fake values only.
+ * (0f43616, todo until the view passed the signal). Temporary folders, scripted model, fake values only.
  */
 
 import assert from "node:assert/strict";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { createCodarynApp } from "../../../src/app/index.js";
-import type { AppCallOutcome, AppHooks, ChangesOutput, ChangesRequest, CodarynApp, RunHandle } from "../../../src/app/index.js";
+import type { AppCallOutcome, AppHooks, ChangesOptions, ChangesOutput, ChangesRequest, CodarynApp, RunHandle } from "../../../src/app/index.js";
 import type { GuardedCallOptions, ReadTextOutcome, ResolvedPath, Workspace } from "../../../src/contracts/index.js";
 import { retried } from "../../../src/workspace/guard.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 import { WRITE_NOTES, appEnvironment, setupRun, taskForm, taskRequest } from "./support.js";
-
-const TODO = { todo: "U-234: the changes view passes the caller's signal to its reads" };
 
 type Read = (target: ResolvedPath, options?: GuardedCallOptions) => Promise<ReadTextOutcome>;
 /** A workspace whose readText is `read`, given the real one; everything else is the real workspace. */
@@ -31,8 +29,7 @@ const wrapping = (read: (real: Read) => Read) => async (root: string): Promise<W
 };
 const hooksWith = (hooks: Record<string, unknown>): AppHooks => hooks as unknown as AppHooks;
 /** `changes` with its second argument (ChangesOptions), as this unit gives it. */
-const changesWith = (app: CodarynApp, request: ChangesRequest, options?: { signal?: AbortSignal }): Promise<AppCallOutcome<ChangesOutput>> =>
-  (app.changes as unknown as (request: ChangesRequest, options?: { signal?: AbortSignal }) => Promise<AppCallOutcome<ChangesOutput>>)(request, options);
+const changesWith = (app: CodarynApp, request: ChangesRequest, options?: ChangesOptions): Promise<AppCallOutcome<ChangesOutput>> => app.changes(request, options);
 
 /** A run through the app that wrote NOTES.md; the app made with `hooks`. */
 async function ranWith(hooks: Record<string, unknown>): Promise<{ readonly app: CodarynApp; readonly request: ChangesRequest }> {
@@ -51,7 +48,7 @@ function view(outcome: AppCallOutcome<ChangesOutput>): ChangesOutput {
 }
 
 describe("U-234: the changes view and the caller's signal", () => {
-  test("the signal given to changes reaches the read of each current file", TODO, async () => {
+  test("the signal given to changes reaches the read of each current file", async () => {
     const given: (AbortSignal | undefined)[] = [];
     const { app, request } = await ranWith({
       changesRead: { createWorkspace: wrapping((real) => (target, options) => (given.push(options?.signal), real(target, options))) },
@@ -63,7 +60,7 @@ describe("U-234: the changes view and the caller's signal", () => {
     assert.equal(given[0], controller.signal);
   });
 
-  test("without a signal the reads get none, and the view is as before", TODO, async () => {
+  test("without a signal the reads get none, and the view is as before", async () => {
     const given: (GuardedCallOptions | undefined)[] = [];
     const { app, request } = await ranWith({
       changesRead: { createWorkspace: wrapping((real) => (target, options) => (given.push(options), real(target, options))) },
@@ -74,7 +71,7 @@ describe("U-234: the changes view and the caller's signal", () => {
     assert.equal(given[0]?.signal, undefined);
   });
 
-  test("a read in a burst ends once the signal is aborted, not after the guard's 750 ms of waits", TODO, async () => {
+  test("a read in a burst ends once the signal is aborted, not after the guard's 750 ms of waits", async () => {
     // The guard's own retries, with a try that sees a change every time (a burst that never stops).
     const burst: Read = async (_target, options) => {
       const outcome = await retried(async () => "changed" as const, { signal: options?.signal });

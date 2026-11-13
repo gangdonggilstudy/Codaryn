@@ -68,6 +68,7 @@ import { planArguments, reviewArguments } from "./plans.js";
 import { createAppAssemble } from "./assemble.js";
 import { revertConsentOf, unsafeMoveConsentOf } from "./consent.js";
 import { readChanges } from "./changes.js";
+import type { ReadChangesDeps } from "./changes.js";
 import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 import { listRunEventsIn, runEventsArguments } from "./run-events.js";
 import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
@@ -97,6 +98,7 @@ import type {
   PlanCheck,
   PlanRequest,
   ReviewRequest,
+  ChangesOptions,
   ChangesRequest,
   CodarynApp,
   DoctorRequest,
@@ -162,6 +164,8 @@ export interface AppHooks {
   readonly applyCheck?: ApplyCheckOperations;
   /** U-172: writeWorkspaceText's lock release, and a pause at each check (V-1's races). Tests only. */
   readonly workspaceText?: WorkspaceTextOperations;
+  /** U-234: the changes view's reads (a wrapped workspace). Tests only; the signal comes from the call. */
+  readonly changesRead?: Pick<ReadChangesDeps, "createWorkspace">;
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -422,7 +426,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     };
   }
 
-  async function changes(request: ChangesRequest): Promise<AppCallOutcome<ChangesOutput>> {
+  /** DR-7, DR-29: a run's changes. U-234 (R-107 O-1): `options.signal` is given to the reads of the current files. */
+  async function changes(request: ChangesRequest, options: ChangesOptions = {}): Promise<AppCallOutcome<ChangesOutput>> {
     try {
       const probe = await readingSecrets(request.settings);
       if (!probe.ok) return probe;
@@ -430,7 +435,10 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (!root.ok) return root;
       const runId = await runIdOf(root.value, request.runId);
       if (!runId.ok) return runId;
-      return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }));
+      return await readChanges(root.value, runId.value, createPrivacyGateway({ secrets: probe.secrets }), {
+        ...hooks.changesRead,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
     } catch {
       return { ok: false, error: appError("internal_error", "the changes could not be read") };
     }

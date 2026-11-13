@@ -54,6 +54,7 @@ export type {
   ApplySettingsChangeRequest,
   ChangedFileUnavailable,
   ChangedFileView,
+  ChangesOptions,
   ChangesOutput,
   ChangesRequest,
   CheckApplyRequest,

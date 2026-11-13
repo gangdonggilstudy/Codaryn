@@ -109,6 +109,18 @@ interface Reading {
 
 /** U-223 (R-6): what the evidence says, once per rule, in place of the numbers read from such a source. */
 export const UNREADABLE_SOURCE_NOTE = "the source is under unreadable paths, so no number read from it is written";
+/**
+ * U-223 (PM, after R-6): the same for a target under unreadable paths (an aggregate's `target`, a
+ * `table_shape` table): no cell value read from it (the found number, nor a recomputed number that
+ * agreed with it) and no row or group count of it. Row numbers are still named.
+ */
+export const UNREADABLE_TARGET_NOTE = "the target is under unreadable paths, so no cell value or row count read from it is written";
+
+/** U-223: which tables of a rule are under unreadable paths. */
+interface Hidden {
+  readonly source: boolean;
+  readonly target: boolean;
+}
 
 /**
  * U-223 (R-6): the matcher of the run's unreadable paths, as the policy gate builds it: prefix
@@ -128,14 +140,15 @@ type Loaded =
   | { readonly ok: true; readonly columns: readonly string[]; readonly rows: number; readonly relative: string }
   | { readonly ok: false; readonly fixable: boolean; readonly note: string };
 
-/** U-223 (R-6): whether a source read through is under the run's unreadable paths (links resolved). */
+/** U-223 (R-6): whether a table read through is under the run's unreadable paths (links resolved). */
 async function isUnreadable(loaded: Extract<Loaded, { ok: true }>, workspace: Workspace, reading: Reading): Promise<boolean> {
   return reading.unreadable !== null && (await reading.unreadable.coversEffective(loaded.relative, workspace));
 }
 
-/** U-223 (R-6): a verdict whose source is under unreadable paths says so once, after its own note. */
-function withUnreadableNote(verdict: Verdict): Verdict {
-  return { state: verdict.state, note: `${verdict.note}; ${UNREADABLE_SOURCE_NOTE}` };
+/** U-223: a verdict whose source or target is under unreadable paths says so once each, after its own note. */
+function withUnreadableNotes(verdict: Verdict, hidden: Hidden): Verdict {
+  const notes = [hidden.source ? UNREADABLE_SOURCE_NOTE : null, hidden.target ? UNREADABLE_TARGET_NOTE : null].filter((note): note is string => note !== null);
+  return notes.length === 0 ? verdict : { state: verdict.state, note: [verdict.note, ...notes].join("; ") };
 }
 
 function isTableRef(value: unknown): value is TableRef {
@@ -397,6 +410,9 @@ async function checkShape(
   const notes: string[] = [];
   /** U-223 (R-6): the `rows.sameAs` table is under unreadable paths: its row count is not written. */
   let hiddenSource = false;
+  /** U-223 (PM): the checked table is under unreadable paths: its row count is not written. */
+  const hiddenTable = await isUnreadable(table, workspace, reading);
+  const shownRange = (rule: RowCountRule): string => `the data rows do not fit: expected ${describeRows(rule)}`;
 
   if (rule.columns !== undefined) {
     const expected = rule.columns;
@@ -417,7 +433,8 @@ async function checkShape(
     const count = table.rows;
     if (rows.equals !== undefined) {
       if (!isCount(rows.equals)) return undecided("the rule is not valid: rows.equals must be a whole number");
-      if (count === rows.equals) notes.push(`${count} data rows`);
+      if (count === rows.equals) notes.push(hiddenTable ? "data rows as required" : `${count} data rows`);
+      else if (hiddenTable) problems.add(shownRange({ equals: rows.equals }));
       else problems.add(`${count} data rows, expected ${rows.equals}`);
     } else if (rows.sameAs !== undefined) {
       if (!isTableRef(rows.sameAs)) return undecided("the rule is not valid: rows.sameAs needs a path and a format");
@@ -425,22 +442,27 @@ async function checkShape(
       if (!other.ok) return loadVerdict("source", rows.sameAs, other);
       const expected = other.rows;
       hiddenSource = await isUnreadable(other, workspace, reading);
-      if (count === expected) notes.push(`${count} data rows, as ${describeTable(rows.sameAs)}`);
-      else if (hiddenSource) problems.add(`${count} data rows, not as many as ${describeTable(rows.sameAs)}`);
-      else problems.add(`${count} data rows, expected ${expected} as ${describeTable(rows.sameAs)}`);
+      const as = describeTable(rows.sameAs);
+      if (count === expected) notes.push(hiddenTable ? `as many data rows as ${as}` : `${count} data rows, as ${as}`);
+      else if (hiddenTable && hiddenSource) problems.add(`not as many data rows as ${as}`);
+      else if (hiddenTable) problems.add(`the data rows do not fit: expected ${expected} as ${as}`);
+      else if (hiddenSource) problems.add(`${count} data rows, not as many as ${as}`);
+      else problems.add(`${count} data rows, expected ${expected} as ${as}`);
     } else {
       if ((rows.min !== undefined && !isCount(rows.min)) || (rows.max !== undefined && !isCount(rows.max))) {
         return undecided("the rule is not valid: rows.min and rows.max must be whole numbers");
       }
       const min = rows.min as number | undefined;
       const max = rows.max as number | undefined;
-      if ((min === undefined || count >= min) && (max === undefined || count <= max)) notes.push(`${count} data rows`);
-      else problems.add(`${count} data rows, expected ${describeRows({ ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) })}`);
+      const range = { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
+      if ((min === undefined || count >= min) && (max === undefined || count <= max)) notes.push(hiddenTable ? "data rows as required" : `${count} data rows`);
+      else if (hiddenTable) problems.add(shownRange(range));
+      else problems.add(`${count} data rows, expected ${describeRows(range)}`);
     }
   }
 
   const verdict = problems.size > 0 ? notHeld(problems.text()) : held(notes.length > 0 ? notes.join("; ") : "the table parses");
-  return hiddenSource ? withUnreadableNote(verdict) : verdict;
+  return withUnreadableNotes(verdict, { source: hiddenSource, target: hiddenTable });
 }
 
 /** What an aggregate problem in the source means: the model cannot fix the input. */
@@ -464,7 +486,7 @@ function compareValue(
   tolerance: Tolerance,
   problems: Problems,
   label: string,
-  hidden: boolean,
+  hidden: Hidden,
 ): boolean {
   const found = cell.length === 0 ? null : parseNumber(cell);
   if (found === null) {
@@ -472,8 +494,11 @@ function compareValue(
     return false;
   }
   if (withinTolerance(recomputed, found, tolerance)) return true;
-  // U-223 (R-6): neither number for a source under unreadable paths, only where it did not match.
-  if (hidden) problems.add(`target data row ${targetRow} of column ${shownName(targetColumn)} does not match${label}`);
+  // U-223 (R-6): neither number for a source under unreadable paths, only where it did not match;
+  // for a target under them (PM) not its own number: the recomputed one comes from a readable source.
+  const where = `target data row ${targetRow} of column ${shownName(targetColumn)} does not match${label}`;
+  if (hidden.source) problems.add(where);
+  else if (hidden.target) problems.add(`${where}: recomputed ${recomputed}`);
   else problems.add(`target data row ${targetRow}${label}: recomputed ${recomputed}, found ${found}`);
   return false;
 }
@@ -501,12 +526,13 @@ async function checkAggregate(
   const source = await loadTable(rule.source, workspace, reading, sourceTally);
   if (!source.ok) return loadVerdict("source", rule.source, source);
   // U-223 (R-6): every verdict from here on says once that the source is under unreadable paths,
-  // and none of them writes a number read from it.
-  const hidden = await isUnreadable(source, workspace, reading);
-  const finish = (verdict: Verdict): Verdict => (hidden ? withUnreadableNote(verdict) : verdict);
+  // and none of them writes a number read from it; the same for the target (PM), once it is read.
+  const hidden: { source: boolean; target: boolean } = { source: await isUnreadable(source, workspace, reading), target: false };
+  const finish = (verdict: Verdict): Verdict => withUnreadableNotes(verdict, hidden);
   const targetTally = new TargetTally(rule.targetColumn, grouped ? (rule.targetKeyColumn as string) : null);
   const target = await loadTable(rule.target, workspace, reading, targetTally);
   if (!target.ok) return finish(loadVerdict("target", rule.target, target));
+  hidden.target = await isUnreadable(target, workspace, reading);
 
   const sourceColumn = findColumn(source, rule.column);
   if (!sourceColumn.ok) return finish(undecided(`source column ${shownName(rule.column)} is ${sourceColumn.problem}`));
@@ -517,10 +543,11 @@ async function checkAggregate(
   if (!grouped) {
     const outcome = sourceTally.total.result();
     if (!outcome.ok) return finish(sourceProblem(outcome, rule.column, ""));
-    if (target.rows !== 1) return finish(notHeld(`target has ${target.rows} data rows; expected exactly 1`));
+    if (target.rows !== 1) return finish(notHeld(hidden.target ? "target does not have exactly 1 data row" : `target has ${target.rows} data rows; expected exactly 1`));
     const cell = targetTally.firstCell;
     if (compareValue(outcome.value, cell, 1, rule.targetColumn, tolerance, problems, "", hidden)) {
-      return finish(held(hidden ? "target data row 1 agrees" : `recomputed ${outcome.value} from ${outcome.values} cells; target data row 1 agrees`));
+      // The recomputed number agrees with the target's own: written for neither hidden table.
+      return finish(held(hidden.source || hidden.target ? "target data row 1 agrees" : `recomputed ${outcome.value} from ${outcome.values} cells; target data row 1 agrees`));
     }
     return finish(notHeld(problems.text()));
   }
@@ -564,9 +591,10 @@ async function checkAggregate(
   }
   // U-223 (R-6): how many source rows had no group value is a number read from the source.
   const skipped =
-    sourceTally.withoutKey === 0 ? "" : hidden ? "; source rows without a group value left out" : `; ${sourceTally.withoutKey} source rows without a group value left out`;
+    sourceTally.withoutKey === 0 ? "" : hidden.source ? "; source rows without a group value left out" : `; ${sourceTally.withoutKey} source rows without a group value left out`;
   if (problems.size > 0) return finish(notHeld(`${problems.text()}${skipped}`));
-  return finish(held(`${agreed} groups agree${skipped}`));
+  // How many groups agreed is how many rows the target has.
+  return finish(held(hidden.target ? `the groups agree${skipped}` : `${agreed} groups agree${skipped}`));
 }
 
 async function checkRule(rule: DataRule, workspace: Workspace, reading: Reading): Promise<Verdict> {

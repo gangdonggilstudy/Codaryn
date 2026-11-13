@@ -28,6 +28,7 @@ import {
   REVERT_RECORD_FILE_NAME,
   CONTENT_HASH_PATTERN_SOURCE,
   RUN_EXIT_CODES,
+  runPhaseOf,
   RUN_TIMESTAMP_PATTERN_SOURCE,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
@@ -50,6 +51,7 @@ import type {
 import { assertRunId, errorCode, hasExactRunEntry, isOwnRunDir, isPlainDirectory, runDir, sameFsPath } from "./common.js";
 import { recordsChangedMarkIn } from "./marks.js";
 import { reviewRecordIn } from "./review.js";
+import { inspectLock } from "./lock.js";
 
 const realpathNative = promisify(realpathCallback.native);
 
@@ -469,10 +471,22 @@ export async function listRunsAt(request: { readonly workspaceRoot: string }, no
     }
   }
   damaged.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  // U-162 (AXM-8, U-158): each checked run's phase by the contract's one rule. Only a run without
+  // result.json can be running, so the lock is read (once, reading only) when there is one. Running
+  // needs the lock to name the run with a holder that still runs (`held`); a lock that cannot be read,
+  // a reclaim left behind, a stale lock or none give no ground to say it runs: no_result (PM).
+  const lockHolder = checked.some((entry) => entry.status === null) ? await lockHolderRunId(request.workspaceRoot) : null;
+  const phased = checked.map((entry): CheckedRun => ({ ...entry, phase: runPhaseOf({ hasResult: entry.status !== null, lockedByThisRun: entry.runId === lockHolder }) }));
   const listing: RunListing = {
-    runs: [...checked.sort(newestFirst), ...damaged.map((runId) => ({ state: "damaged" as const, runId }))],
+    runs: [...phased.sort(newestFirst), ...damaged.map((runId) => ({ state: "damaged" as const, runId }))],
   };
   return listing;
+}
+
+/** U-162: the run id of the workspace lock's holder when it still runs (`held`), else null. Never rejects. */
+async function lockHolderRunId(workspaceRoot: string): Promise<string | null> {
+  const lock = await inspectLock(workspaceRoot);
+  return lock.state === "held" ? lock.holder.runId : null;
 }
 
 /** N-26: how one run's records stand, as the run list would judge them. */

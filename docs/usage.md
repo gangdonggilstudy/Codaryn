@@ -1201,7 +1201,7 @@ node --test dist/tests/live/openai-live.js
 | 끝난 실행의 잠금 옆에 회수 파일 `lock.json.reclaim`이 남음(그 안의 `pid`가 살아 있는 다른 프로그램) | A를 고른다 | `workspace_locked`(종료 6). 회수 파일이 있는 동안 잠금을 회수하지 않는다 | `[warning]` `a lock reclaim file (.codaryn/lock.json.reclaim) is left, so a lock left by an ended process is not reclaimed; if no Codaryn is running in this workspace, remove that file` | `lock.json.reclaim`을 지운다. 그 뒤 새 실행이 남은 잠금을 회수하고 `done`이었다 |
 
 - 막힌 동안에도 실행 id를 직접 주면 그 실행을 볼 수 있다. 위 모든 경우에 `report --run <A의 id>`는 종료 0이었다. `run_in_progress`의 고치는 법 줄(`To see an earlier run, give its id; codaryn runs lists the runs of the workspace.`)이 이것이다.
-- 멈춘 실행 B는 `runs`에 `no result (running or stopped)`(한국어 `결과 없음(진행 중이거나 중단됨)`)로 남는다. 정리 미리보기는 B를 고르지 않고, 잠금이 쥔 것으로 보이면 `running (it holds the workspace lock)`, 아니면 `no result yet (it may still be running)`이라고 적는다.
+- 멈춘 실행 B는 `runs`에 `stopped without a result`(한국어 `결과 없이 중단됨`)로 남는다(`runs --json`의 `phase`는 `no_result`, U-162). 잠금이 B를 가리키고 그 주인이 살아 있는 것으로 보일 때만, 곧 위 셋째 경우(시작 시각이 없는 옛 판의 잠금, 그 `pid`를 다른 프로그램이 씀)에만 `running`(한국어 `진행 중`)이다. 읽을 수 없는 잠금이나 남은 회수 파일로는 B가 돈다고 말하지 않는다. 정리 미리보기는 B를 고르지 않고, 잠금이 쥔 것으로 보이면 `running (it holds the workspace lock)`, 아니면 `no result yet (it may still be running)`이라고 적는다.
 - `workspace_locked`의 사람용 오류는 이렇게 끝난다(실제 출력, 한국어는 `이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.`).
 
   ```
@@ -1253,7 +1253,7 @@ node --test dist/tests/live/openai-live.js
     codaryn: run started — provider scripted · the task type's own rules turn off restoring path tokens, which the configured policy allows · the task type's own checks leave out checks given in the config or task with the same id: 1
     ```
 
-    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류 자체 규칙 때문에, 설정한 정책이 허용한 경로 토큰 복원을 끕니다 · 작업 종류 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
+    한국어로는 `codaryn: 실행 시작 — 모델 제공자 scripted · 작업 종류 자체 규칙 때문에, 설정한 정책이 허용한 경로의 가린 값 되살리기를 끕니다 · 작업 종류 자체 검증과 id가 같아, 설정이나 task에 준 검증 1개를 뺐습니다`이다. 모두 한 줄이라 좁은 터미널에서는 접힌다(16절).
   - 검증기(결정 DR-43 (a)): 작업 종류 정의의 검증기는 늘 실행된다. 설정·프로필·task의 검증기는 그 뒤에 더해지고, 정의의 검증기와 id가 같은 것만 빠진다(정의의 것이 판정한다). 빈 목록(`[]`)도 정의의 검증기를 지우지 않는다. id가 같은데 내용이 다른 검증기가 빠지면 `doctor`가 `a run of this task type leaves out checks given in the config or task with the same id as its own: 1`처럼 알리고, `run_started`에 `verifiers_dropped`가 남는다.
     - 확인(main `6df2eae`): 설정의 작업 종류 `notes`에 검증기 `has-summary`(`summary.md`가 있다)를 두고, task 파일이 `workflowRef: "notes"`로 같은 id를 더 느슨하게(`a.txt`가 있다) 적고 `a-kept`를 더하면, `has-summary`(정의의 것)와 `a-kept`가 실행됐다. `doctor --task`가 위 줄을 냈다.
 - **한도:** 작업 종류 정의의 한도(`organize`: 턴 8, 도구 호출 40)는 task가 비운 한도를 채우는 기본값이다. 상한은 설정 파일의 한도만 정한다(6절).
@@ -1357,7 +1357,7 @@ The digest names exactly these actions and the contents the plan's files had whe
     3. 폐기  inbox/old-draft.tmp  (지울 때까지 폐기 보관함 .codaryn/discarded/에 남음)
   에이전트의 설명(모델이 쓴 말이며 검증되지 않았고, 승인하는 대상이 아님):
     | 사진과 영수증을 연도 폴더로 옮기고 임시 파일을 폐기한다
-  적용하려면: codaryn apply <같은 task 형식> --run 20261112T235113Z-bcb77c7d --digest 55c7dc68225a
+  적용하려면: codaryn apply <같은 작업 지정> --run 20261112T235113Z-bcb77c7d --digest 55c7dc68225a
   ```
 
   - 그 아래 끝 문장도 한국어다(`다이제스트는 바로 이 동작들과, …`).
@@ -1378,6 +1378,7 @@ Actions applied: 3 of 3
   action #1 — moved inbox/beach-2025.jpg → photos/2025/beach-2025.jpg
   action #2 — moved inbox/receipt-2026.pdf → documents/2026/receipt-2026.pdf
   action #3 — moved to the discarded files inbox/old-draft.tmp
+Folders the actions left without files (kept in place): 1
 Plan run: 20261112T200120Z-c27683db
 Checks passed: 2 of 2 (within the configured checks)
 Read the report, and revert if needed.

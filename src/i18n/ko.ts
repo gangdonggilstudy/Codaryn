@@ -220,7 +220,7 @@ export const KO_MESSAGES: MessageTexts = {
   "changes.heading": "실행 {runId}의 변경. 지금 등록된 가릴 값으로 가렸습니다(실행이 가린 것이 아님)",
   "changes.no_text_note": "일부 파일은 내용을 보이지 않습니다. 파일 내용은 지금 등록된 가릴 값이 실행 때와 같게 가리고 파일이 실행이 남긴 그대로일 때만 보이며, 나머지는 경로와 상태만 보입니다",
   "changes.none": "실행이 바꾼 파일이 없습니다",
-  "changes.plan_only": "이 실행은 계획만 만들었고 스스로 바꾼 파일은 없습니다.",
+  "changes.plan_only": "이 실행은 계획만 만들었고 파일을 직접 바꾸지 않았습니다.",
   "changes.plan_applied": "그 계획을 적용한 실행: {runId}. 옮긴 것은 그 실행의 보고서에 있습니다.",
   "changes.plan_apply_other": "그 계획을 맡은 적용 실행: {runId}. 그 적용이 어떻게 끝났는지는 codaryn runs가 보여 줍니다.",
   "changes.file.created": "실행이 만듦",

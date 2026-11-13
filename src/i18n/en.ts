@@ -49,6 +49,7 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.result": "Result: {status} — {reason}",
   "summary.verifiers": "Checks passed: {passed} of {total} (within the configured checks)",
   "summary.no_verifiers": "Checks: none configured",
+  "summary.integrity_unchanged": "Protected material checks that found no change: {count}",
   "summary.changes": "Files changed: {count}",
   "summary.denied": "Denied calls: {count}",
   "summary.failed": "Failed calls: {count}",

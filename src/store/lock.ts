@@ -35,6 +35,15 @@
  * - EPERM and EBUSY (Windows reports them for files that are being deleted or are in use) are
  *   retried a few times and then end as `workspace_locked`, never as an exception.
  * - A lock file that cannot be understood is never reclaimed.
+ * - U-176: releasing tries again, briefly, when removing the lock fails with EPERM or EBUSY (a handle
+ *   that does not share deletion, as some scanners open files), and throws when it still cannot.
+ * - U-176: a lock of this very process that no attempt here holds any more (its release failed) is
+ *   taken back like a dead lock: its pid is this process's, its recorded start is this process's to
+ *   the letter (and its Linux identity, when it has one), and it is not in this process's list of
+ *   held locks. A lock is listed before the link that makes it, and leaves the list when it is
+ *   released (also when that failed). No other process's lock is judged differently: no other live
+ *   process has this pid, a previous process with it has another start, and a lock without a
+ *   recorded start is never taken back by this rule.
  */
 
 import { execFile } from "node:child_process";
@@ -301,6 +310,41 @@ const heldReclaims: Set<string> = (() => {
   return shared[HELD_RECLAIMS_KEY];
 })();
 
+/**
+ * U-176: the locks (lock file and text) that attempts in this process hold right now. Shared through
+ * `globalThis` as heldReclaims is, so that two copies of this module in one process agree.
+ */
+const HELD_LOCKS_KEY = Symbol.for("codaryn.store.lock.heldLocks");
+const heldLocks: Set<string> = (() => {
+  const shared = globalThis as { [HELD_LOCKS_KEY]?: Set<string> };
+  shared[HELD_LOCKS_KEY] ??= new Set<string>();
+  return shared[HELD_LOCKS_KEY];
+})();
+const heldLockKey = (lockFile: string, text: string): string => `${lockFile}\u0000${text}`;
+/** The start this process records in its locks (acquireLock writes exactly this). */
+const OWN_PROCESS_STARTED_AT = new Date(performance.timeOrigin).toISOString();
+
+/**
+ * U-176: whether a lock read from `lockFile` is this very process's and held by no attempt here: the
+ * pid and the recorded start are this process's (the start to the letter), the Linux identity too
+ * when the lock has one, and the lock is not listed as held. Such a lock is left over (its release
+ * failed) and is taken back as a dead one. Anything else is judged by liveness as before.
+ */
+async function isOwnLeftOver(
+  lockFile: string,
+  read: { readonly text: string; readonly holder: LockInfo },
+  identityOf: (pid: number) => Promise<ProcessIdentity | null>,
+): Promise<boolean> {
+  const holder = read.holder;
+  if (holder.pid !== process.pid || holder.processStartedAt !== OWN_PROCESS_STARTED_AT) return false;
+  if (heldLocks.has(heldLockKey(lockFile, read.text))) return false;
+  if (holder.processStartTicks !== undefined || holder.bootId !== undefined) {
+    const own = await identityOf(process.pid).catch(() => null);
+    if (own === null || own.startTicks !== holder.processStartTicks || own.bootId !== holder.bootId) return false;
+  }
+  return true;
+}
+
 function uniqueSuffix(): string {
   return `${process.pid}.${randomBytes(6).toString("hex")}`;
 }
@@ -503,6 +547,9 @@ export async function inspectLock(workspaceRoot: string, options: InspectLockOpt
   }
   if (lock === "missing") return { state: "none" };
   if (stillWritten(lock.text) || lock.holder === null) return { state: "unreadable" };
+  // U-176: a lock of this process that nothing here holds any more is taken back by the next run.
+  const identityOf = options.processIdentity ?? ((pid: number) => linuxProcessIdentity(pid));
+  if (await isOwnLeftOver(join(stateDir, LOCK_FILE_NAME), { text: lock.text, holder: lock.holder }, identityOf)) return { state: "stale", holder: lock.holder };
   return (await holderAlive(lock.holder)) ? { state: "held", holder: lock.holder } : { state: "stale", holder: lock.holder };
 }
 
@@ -591,7 +638,11 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     if (await tryCreate(fs, temporary, lockFile, lockText)) return { kind: "acquired" };
     const seen = await readSettled(fs, lockFile);
     if (seen === "missing") return { kind: "retry" };
-    if (seen.holder === null || (await holderAlive(seen.holder))) return { kind: "locked", holder: seen.holder };
+    if (seen.holder === null) return { kind: "locked", holder: null };
+    // U-176: this process's own lock that no attempt here holds any more is reclaimed as a dead one.
+    if (!(await isOwnLeftOver(lockFile, { text: seen.text, holder: seen.holder }, identityOf)) && (await holderAlive(seen.holder))) {
+      return { kind: "locked", holder: seen.holder };
+    }
     await reclaim(seen.text);
     return { kind: "retry" };
   }
@@ -608,6 +659,10 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
 
   let lastHolder: LockInfo | null = null;
   const deadline = Date.now() + (options.retryForMs ?? DEFAULT_LOCK_RETRY_MS);
+  // U-176: listed before any link can make it, so no attempt in this process sees it unlisted.
+  const ownKey = heldLockKey(lockFile, lockText);
+  heldLocks.add(ownKey);
+  let acquired = false;
   try {
     for (let first = true; first || Date.now() < deadline; first = false) {
       let step: Step;
@@ -617,7 +672,10 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
         if (!(error instanceof TransientLockError)) throw error;
         step = { kind: "retry" };
       }
-      if (step.kind === "acquired") return { ok: true, lock };
+      if (step.kind === "acquired") {
+        acquired = true;
+        return { ok: true, lock };
+      }
       if (step.kind === "locked") return locked(step.holder);
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS + Math.floor(Math.random() * RETRY_DELAY_MS)));
       const seen = await readSettled(fs, lockFile).catch(() => "missing" as const);
@@ -625,19 +683,44 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
     }
     return locked(lastHolder);
   } finally {
+    if (!acquired) heldLocks.delete(ownKey);
     await fs.remove(temporary).catch(() => undefined);
     await fs.remove(reclaimTemporary).catch(() => undefined);
   }
 }
 
-/** Removes the lock only when this process and this run hold it. Resolves to whether it was removed. */
+/** U-176: the waits between the tries of a release that meets EPERM or EBUSY (about 0.8 s in all). */
+export const RELEASE_RETRY_DELAYS_MS: readonly number[] = [25, 50, 100, 200, 400];
+
+/**
+ * Removes the lock only when this process and this run hold it. Resolves to whether it was removed.
+ * U-176: reading and removing are tried again after RELEASE_RETRY_DELAYS_MS when they fail with EPERM or
+ * EBUSY; when they still fail, the last error is thrown and the lock is left, no longer listed as held
+ * by this process, so this process's next acquire takes it back.
+ */
 export async function releaseLock(options: ReleaseLockOptions): Promise<boolean> {
   const { workspaceRoot, runId } = options;
   assertRunId(runId);
   const lockFile = join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME);
-  const held = await readState(nodeLockFileSystem, lockFile);
-  if (held === "missing" || held.holder === null) return false;
-  if (held.holder.runId !== runId || held.holder.pid !== process.pid) return false;
-  await rm(lockFile, { force: true });
-  return true;
+  for (let attempt = 0; ; attempt += 1) {
+    let ownText: string | null = null;
+    try {
+      const held = await readState(nodeLockFileSystem, lockFile);
+      if (held === "missing" || held.holder === null) return false;
+      if (held.holder.runId !== runId || held.holder.pid !== process.pid) return false;
+      ownText = held.text;
+      await rm(lockFile, { force: true });
+      heldLocks.delete(heldLockKey(lockFile, held.text));
+      return true;
+    } catch (error) {
+      const delay = RELEASE_RETRY_DELAYS_MS[attempt];
+      if ((error instanceof TransientLockError || isTransient(error)) && delay !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      // Left: not held by this process any more (its operation is over), so it can be taken back.
+      if (ownText !== null) heldLocks.delete(heldLockKey(lockFile, ownText));
+      throw error;
+    }
+  }
 }

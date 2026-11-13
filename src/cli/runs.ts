@@ -9,12 +9,11 @@
  *   CLI's one rule (resolveRunReference with the store's functions), as every command has it.
  *
  * The argument parser lives here until N-A moves it into args.ts; main.ts connects the command.
+ * U-315 (the CLI migration's C-9a, the run list's side): `resolveWorkspaceRoot` is the app's
+ * (src/app/workspace-root.ts), re-exported here (plan A); the JSON's key hiding is the shared
+ * `hideKeysInStrings`. The text is still drawn first and its key shapes hidden after (N-23 a).
  */
 
-import { realpath as realpathCallback } from "node:fs";
-import { lstat } from "node:fs/promises";
-import path from "node:path";
-import { promisify } from "node:util";
 import {
   ANTHROPIC_API_KEY_ENV,
   RUNS_DEFAULT_LIMIT,
@@ -27,12 +26,12 @@ import type { CommandOutcome, JsonOutcome } from "./guard.js";
 import { STORE_RUN_REFERENCE_DEPS, resolveRunReference } from "./run-ref.js";
 import { argumentsError, cliError } from "./run.js";
 import { knownKeyValues } from "../app/input/settings.js";
-import type { KnownKeys } from "../app/input/security/index.js";
 import type { SettingsEnvironment } from "../app/input/settings.js";
-import { localPathProblem } from "../app/input/task.js";
-import { hideKeys } from "../app/input/text-safety.js";
+import { hideKeys, hideKeysInStrings } from "../app/input/text-safety.js";
+import { resolveWorkspaceRoot } from "../app/workspace-root.js";
 
-const realpathNative = promisify(realpathCallback.native);
+/** U-315: the app's (src/app/workspace-root.ts), kept at this path (plan A). */
+export { resolveWorkspaceRoot };
 
 export const RUNS_USAGE = "codaryn runs [--workspace <dir>] [--limit <n>] [--json]";
 
@@ -87,19 +86,6 @@ export function parseRunsArgs(argv: readonly string[]): ParseRunsArgsOutcome {
 
 type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: JsonOutcome };
 
-/** The workspace's real path. A network or device path is refused before the file system is touched (S-5). */
-export async function resolveWorkspaceRoot(workspace: string, cwd: string): Promise<Resolved<string>> {
-  const problem = localPathProblem(workspace, cwd);
-  if (problem !== null) return { ok: false, error: cliError("invalid_arguments", `the path given by --workspace ${problem}`) };
-  try {
-    const root = await realpathNative(path.resolve(cwd, workspace));
-    if (!(await lstat(root)).isDirectory()) throw new Error("not a directory");
-    return { ok: true, value: root };
-  } catch {
-    return { ok: false, error: cliError("workspace_not_found", "the workspace is not an existing directory") };
-  }
-}
-
 /**
  * The run id a `--run` value names. Any value but LATEST_RUN_ALIAS is returned as it is (args.ts
  * has already checked its form). `latest` follows the CLI's one rule, resolveRunReference with
@@ -150,17 +136,4 @@ export async function runRuns(io: RunsEnvironment): Promise<CommandOutcome> {
   // task ids are names a command allowed during a run could have chosen.
   if (json) return { output: hideKeysInStrings(output, currentKey), exitCode: output.exitCode };
   return { text: hideKeys(io.human.runsText(output), currentKey), exitCode: output.exitCode };
-}
-
-/** Every string in `value` with key-shaped text and the current key hidden. */
-function hideKeysInStrings<T>(value: T, currentKey: KnownKeys): T {
-  const walk = (item: unknown): unknown => {
-    if (typeof item === "string") return hideKeys(item, currentKey);
-    if (Array.isArray(item)) return item.map(walk);
-    if (typeof item === "object" && item !== null) {
-      return Object.fromEntries(Object.entries(item).map(([name, child]) => [name, walk(child)]));
-    }
-    return item;
-  };
-  return walk(value) as T;
 }

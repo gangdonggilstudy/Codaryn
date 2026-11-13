@@ -836,7 +836,8 @@ startGui({
         model: { provider: "scripted", scriptPath: "./script.json" },
         policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false },
         privacy: { secretEnv: [] },
-        limits: { maxModelTurns: 3, maxToolCalls: 3, maxTotalTokens: null, maxDurationMs: 60_000 },
+        // Within the config file's limits (a task may not go past them).
+        limits: { maxModelTurns: 3, maxToolCalls: 3, maxTotalTokens: 50_000, maxDurationMs: 60_000 },
         verifiers: [],
       });
       writeFileSync(join(taskDir, "script.json"), JSON.stringify({ schemaVersion: 1, steps: [{ text: "the task file ran" }] }));
@@ -851,8 +852,10 @@ startGui({
       openAnswers.push(join(taskDir, "task.json"), join(taskDir, "vars.env"));
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+      const beforeTask = await resultId();
       await js("(() => { document.getElementById('task-with-vars').checked = true; document.getElementById('task-run-file').click(); return true; })()");
-      const taskDone = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 60_000);
+      const taskRunId = await newResult(beforeTask, 60_000);
+      const taskDone = typeof taskRunId === "string" && taskRunId !== beforeTask ? "done" : taskRunId;
       results["taskFileRun"] = {
         cancelled,
         inside,

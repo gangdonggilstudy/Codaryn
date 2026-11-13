@@ -34,5 +34,9 @@ export function planCheckValue(outcome: unknown): Obj {
     found.push({ index: item["index"], problem: item["problem"] });
   }
   if (!unsafeMoves.every(count)) return HOST_ERROR;
-  return { ok: true, planRunId, digest, problems: found, unsafeMoves: [...unsafeMoves], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
+  // U-206 (U-196): a run plan's check names its kind; its problems are files the later run's gate denies.
+  const planKind = output["planKind"];
+  if (planKind !== undefined && planKind !== "changes") return HOST_ERROR;
+  if (planKind === "changes" && unsafeMoves.length > 0) return HOST_ERROR;
+  return { ok: true, ...(planKind === "changes" ? { planKind } : {}), planRunId, digest, problems: found, unsafeMoves: [...unsafeMoves], inventoryLimitReached, probesLeft, probesRemoved, lockLeft };
 }

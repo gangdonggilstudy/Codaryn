@@ -699,10 +699,12 @@ export function registerIpc(deps: IpcDeps): void {
     if (!checked.ok) return checked;
     if (checked.view.runId !== parsed.runId) return { ok: false, code: "host_error" };
     const moves = checked.view.actions.filter((action) => action.kind === "move").length;
+    // U-206 (U-196): a run plan's token stands for its files (the check's indexes); its apply is refused here.
+    const changes = checked.view.planKind === "changes" ? { planKind: "changes" as const, files: checked.view.files?.length ?? 0 } : {};
     // U-32: a marked plan run gets no token (planApprovable): its apply is refused before any dialog.
     const approval =
       planApprovable(checked.view)
-        ? deps.approvals.issue({ workspace: parsed.workspace, profile: parsed.profile, workflowRef: parsed.workflow, planRunId: parsed.runId, digest: checked.view.digest, moves, discards: checked.view.actions.length - moves })
+        ? deps.approvals.issue({ workspace: parsed.workspace, profile: parsed.profile, workflowRef: parsed.workflow, planRunId: parsed.runId, digest: checked.view.digest, moves, discards: checked.view.actions.length - moves, ...changes })
         : null;
     return { ok: true, view: checked.view, approval };
   });
@@ -712,6 +714,9 @@ export function registerIpc(deps: IpcDeps): void {
     if (parsed === null) return { ok: false, code: "invalid_args" };
     const approval = deps.approvals.get(parsed.approval);
     if (approval === null) return { ok: false, code: "unknown_plan" };
+    // U-206 (U-196): carrying out a run plan is not this app's yet (the app layer's part comes with
+    // U-195); refused before any dialog, run or engine call.
+    if (approval.planKind === "changes") return { ok: false, code: "run_plan_apply_unavailable" };
     if (deps.runs.running || starting) return { ok: false, code: "run_active" };
     const root = workspaces.path(approval.workspace);
     if (root === null) return { ok: false, code: "unknown_workspace" };
@@ -766,7 +771,9 @@ export function registerIpc(deps: IpcDeps): void {
       PLAN_CHECK_TIMEOUT_MS,
     );
     if (!response.ok) return { ok: false, code: response.error.code };
-    return toPlanCheckReply(response.value, approval.planRunId, approval.digest, approval.moves + approval.discards);
+    return approval.planKind === "changes"
+      ? toPlanCheckReply(response.value, approval.planRunId, approval.digest, approval.files ?? 0, "changes")
+      : toPlanCheckReply(response.value, approval.planRunId, approval.digest, approval.moves + approval.discards);
   });
 
   // U-118 (3.7): one page of a run's records, as the progress list's lines, in the window's language.

@@ -1280,5 +1280,9 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - 줄이 오지 않으면 답이 없는 것이다(`dismissed`, 기록은 `deny`, `default`). 입력 끝(Ctrl+D, Ctrl+Z), Enter 없는 마지막 줄, 묻다가 난 실패가 그렇다. 실행이 취소되거나 시간이 다 되면 엔진의 신호가 질문을 끝내고, 기록은 엔진이 정한다(`cancelled` 또는 `default`).
 - 명령 권한만 묻는다. 다른 권한의 질문은 글이 없어 묻지 않고 답이 없는 것으로 돌려준다.
 - 모든 질문의 한 줄 읽기(`src/cli/terminal.ts`의 `askLine`)는 입력이 끝나면 null로 끝난다. readline의 `question()`만으로는 입력 끝에서 끝나지 않아, `apply`·`revert`·`models`·`init`의 질문도 Ctrl+D·Ctrl+Z에서 멈춰 있었다. 이제 그 질문들도 입력 끝을 '아니오'(또는 답 없음)로 받는다.
-- 진행 줄: 질문 기록마다 영어 진행 줄(`progressLine`, U-74)이 있다. 고른 언어의 진행 줄(사람용 렌더러 `src/cli/human`)은 nc-human 몫이다.
+- 진행 줄: 질문 기록마다 영어 진행 줄(`progressLine`, U-74)이 있다. 고른 언어의 진행 줄(사람용 렌더러 `src/cli/human`)은 `confirmation_answered`마다 `progress.confirmation_allowed` 또는 `progress.confirmation_denied.<by>`다(R-85 M1, nc-human 몫).
+- 끝 요약(R-85 M1): `run`은 질문 뒤 거부된 호출을 누가 정했는지(`user`, `default`, `cancelled`)와 이 실행이 물을 수 있었는지(`couldAsk`)를 `RunSummaryContext.confirmationDenied`로 렌더러에 넘긴다. 그런 거부가 없으면 필드가 없다. 그 호출은 `deniedCommandCalls`에도 들어 있다.
+  - 렌더러는 그 호출에 '규칙을 더하라'(`summary.denied_hint`)를 내지 않는다. 그 안내는 나머지 거부된 명령 호출이 있을 때만이다.
+  - 대신 0보다 큰 것마다 한 줄: `summary.confirm_denied.user`(사람이 거부), `.cancelled`(기다리는 동안 취소), `default`는 `couldAsk`면 `.unanswered`(입력 끝이나 시간 한도), 아니면 `.unasked`(이 실행은 물을 수 없었다: 터미널이 아니거나 `--quiet`).
+  - 앱 계층의 실행(GUI)은 이 필드를 아직 채우지 않는다(선택 필드라 지금 출력 그대로).
 - 시험: `tests/unit/cli/g-u110-terminal-confirm.test.ts`(실행 안의 질문과 답, `--quiet`, 통로 없음), `tests/unit/cli/g-u110-terminal-line.test.ts`(한 줄 읽기, 질문 글, 답 규칙, 파이프로 넣은 `y`는 답이 되지 않음).

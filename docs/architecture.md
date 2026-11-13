@@ -6,8 +6,8 @@
   - 두 번째 제공자 OpenAI(DR-31)와 두 제공자가 함께 쓰는 전송 `src/model/http`
   - 사용성 개선 N-1~N-28(N-11은 단계 5로 미뤘고, N-13은 DR-20이 대체했다)
   - 단계 4 범용 작업의 P0, 앱 계층 `src/app`, 독립 GUI `gui/`(DR-20, DR-26)
+  - 실행 중 권한 확인(판정 `ask`, DR-3). 설정 파일과 프로필의 명령 규칙에 둔 `confirm: true`만 질문을 만든다. CLI의 `run`은 터미널에서만 묻고, 물을 수 없으면 거부한다(U-74, U-108~U-110, U-137. 3절, main `cd1cace`)
 - **없는 것:**
-  - 실행 중 권한 확인(판정 `ask`, DR-3)
   - 단계 4의 P1 묶음(`query_table`, `analyze-private` 등)
   - CLI의 앱 계층 이행(CLI에서 앱 계층을 거치는 명령은 `changes`뿐이다). 기능 뒤에 직렬로 한다(DR-65)
   - 줄 프로토콜의 CLI 연결과 VS Code 확장(DR-20으로 만들지 않는다). 남아 있던 코드는 지웠다(DR-66, U-81)
@@ -105,7 +105,7 @@
 - 타입은 계약 폴더가 아니라 `src/app/types.ts`에 있다(`StartRunRequest`, `RunHandle`, `RunEvent`, `RunObserver`, `AppError` 등, 코드 기준). **일부**
 - 실행 요청의 `workflowRef`(DR-2), 계획 보기·`applyPlan(runId, digest)`·`review`(DR-1), 다시 가린 변경 비교 `changes`(DR-7)는 앱 계층에 있다. **구현**
 - `Journal.append`는 저장한 레코드를 돌려주지 않는다(`append(event): Promise<void>`, 코드 기준). AC-D3은 **없음**이다.
-- 확인 질문 기록(`confirmation_requested`, `confirmation_answered`)과 `ConfirmRequest`는 **결정만**(DR-1, DR-3)이다. `src/app/types.ts`는 "단계 5 시작까지 `RunObserver.confirm`은 불리지 않는다"고 적는다.
+- 확인 질문 기록(`confirmation_requested`, `confirmation_answered`)과 `ConfirmRequest`는 **구현**(U-74, DR-1, DR-3)이다. 앱 계층은 엔진의 질문을 `RunObserver.confirm`으로 어댑터에 넘긴다(U-108, `app/permission.ts`). 통로가 없거나, 답하다 실패하거나, 답이 정한 결정이 아니면 `dismissed`이고, 엔진은 그것을 `deny`/`default`로 기록한다(DR-10, 코드 기준).
 
 범용 작업 계약([범용 작업](design/general-tasks.md) 9절, G-A). **구현**
 - task·설정: `workflowRef`, 펼친 `tools`·`instructions`·`plan`·`completion`, 정책 `planActions`, 설정 `workflows`.
@@ -113,7 +113,7 @@
 - 결과 이유: `plan_pending`·`awaiting_review`·`consent_required`(`needs-input`), `plan_stale`·`apply_incomplete`(`failed`). 적용 결과는 실행 결과와 같은 이유 표를 쓴다(DR-16).
 - 기록 사건: 계획 실행은 일반 실행의 사건을 쓴다(`propose_plan`의 `tool_result`). 적용 실행은 `apply_started`, `plan_checked`, `plan_item_started`, `file_moved`, `file_discarded`, `plan_item_failed`를 쓴다(`plan.ts`, 코드 기준). 설계안의 `plan_proposed`, `plan_rejected`, `plan_approved`는 두지 않았다.
 - 검증기: `data_checks`, `inventory`. `inventory`는 계획 대상의 해시와 나머지의 경로·크기 목록을 쓰고 자체 상한을 둔다(DR-6).
-- `ask`와 `EngineDeps.confirm`은 단계 5 시작에 넣는다(DR-3). **결정만**
+- `ask`(명령 규칙의 `confirm` 표시)와 `EngineDeps.confirm`은 엔진에 있다(U-74, DR-3). 판정과 기록 차례는 3절 끝에 있다. **구현**
 
 사용성 계약(N-A): 설정 `language`·`profiles`, 기본 설정 위치, 새 명령의 출력 객체(`InitOutput`, `RunsOutput` 등), 문구 계약(`human.ts`). **구현**. CLI 명령에 연결돼 있다(5절).
 
@@ -126,12 +126,12 @@
 | 네트워크 | 네트워크를 쓰는 도구가 없다. 정책값 `network: "deny"`만 받는다. 단계 4에도 네트워크 도구를 두지 않았다(general-tasks 7.1) |
 | 파괴적 동작 | 삭제·무버전 덮어쓰기 도구가 없다. `write_file`은 `expectedHash`가 맞을 때만 쓴다. 파일 이동과 폐기는 모델 도구가 아니다. 사람이 다이제스트로 승인한 계획을 결정적 적용기가 실행하고, 폐기는 실행 디렉터리 밖 보관함 `.codaryn/discarded/<runId>/`로 옮긴다(GT-D4, GT-D5, DR-9). 계획 행동의 종류는 `planActions`가 허용한 것만 받는다. 영구 삭제 도구는 없다. **구현** |
 
-- 판정 값은 지금 허용·거부 둘뿐이다("never ask"). **구현**
-- 세 번째 값 `ask`(확인 후 허용)는 **결정만**이다(GT-D9, AC-D5, DR-3). 단계 5 시작에 어댑터 확인 질문 통로와 함께 구현한다.
-  - `ask`를 낼 수 있는 것은 사용자 설정과 프로필의 규칙뿐이다. task 파일의 규칙은 질문을 만들 수 없다(DR-3, M-9). 나중에 들일 네트워크 도구도 같은 통로를 쓴다.
-  - 루트 밖, 상태 디렉터리, 보호 경로, 토큰 복원 거부는 묻지 않고 거부한다.
-  - 물을 수 없으면 거부하고 `by: "default"`로 기록한다. 기록은 새 사건 `confirmation_requested`·`confirmation_answered`다(DR-3).
-  - 답은 그 호출 한 번에만 쓴다. 답을 받은 뒤 실효 인자 검사(정책 2차 판정)를 다시 한다(DR-3).
+- 판정 값은 허용, 거부, 그리고 확인 후 허용(`ask`, GT-D9, AC-D5, DR-3)이다. `ask`는 명령 규칙의 `confirm: true`로만 생긴다. **구현**(U-74, U-109, U-110, U-137, 코드 기준. 실제 출력은 [사용 안내](usage.md) 13절)
+  - 질문을 만들 수 있는 것은 사용자 설정 파일과 프로필의 명령 규칙뿐이다(`policy.commands[i].confirm`, 값은 `true`만). task 파일이나 작업 종류 정의의 규칙에 두면 모르는 필드(`unknown_field`)다(DR-3, M-9). 묻는 권한은 명령 하나다.
+  - `confirm` 규칙만 그 호출을 허용할 때 정책 2차 판정이 확인 표시(`confirmation_required`)를 낸다. 다른 거부가 하나라도 있으면 그 거부가 이긴다. 그래서 루트 밖, 상태 디렉터리, 보호 경로, 토큰 복원 거부, 허용 목록 밖의 명령은 묻지 않고 거부한다. 같은 호출을 `confirm` 없는 규칙도 허용하면 묻지 않고 실행한다.
+  - 물을 통로가 없으면 묻지 않고 거부하고 `by: "default"`로 기록한다. CLI의 `run`은 표준 입력과 stderr가 모두 터미널이고 `--quiet`가 아닐 때만 통로를 준다(U-110). 답은 `y`·`yes`·`예`·`네`면 그 호출 한 번만 허용, 그 밖의 줄(Enter 포함)은 그 사람의 거부, 입력 끝은 답 없음(기본 거부)이다. 질문 중의 Ctrl+C는 실행 전체를 취소한다.
+  - 기록 차례(U-137): `confirmation_requested`, `confirmation_answered`, 그 호출의 `tool_decision`이다. 허용이면 실행과 `tool_result`가 이어진다. 거부면 거부(`policy_effective`, `command`/`confirmation_required`)가 `tool_result`로 모델에 돌아간다. 질문 중에 실행이 취소되거나 시간이 다 되면 답은 `deny`(`cancelled` 또는 `default`)이고, 거부 `tool_decision` 뒤 `tool_result` 없이 실행이 끝난다.
+  - 답은 그 호출 한 번에만 쓴다. `allow_once`를 받으면 같은 호출을 다시 판정한다(정책 2차, DR-3). 질문을 기다리는 시간도 `maxDurationMs`에 든다.
 
 ## 4. 실행 흐름(`codaryn run`)
 
@@ -170,7 +170,7 @@
    2. 정책 1차(토큰이 든 인자 그대로)
    3. 허용된 필드만 복원
    4. 형식 재검사
-   5. 정책 2차(실효 인자)
+   5. 정책 2차(실효 인자). 확인 표시면 묻고, 답을 기록한 뒤 다시 판정한다(3절 끝, U-74)
    6. 실행. 명령 앞뒤에는 상태 디렉터리를 점검한다(`before_command`, `after_command`)
    7. 결과 가림
    8. `tool_result`(쓰기면 `file_changed`) 기록
@@ -217,7 +217,7 @@
   - 환경 사본은 Windows에서 이름을 대소문자 없이 맞춘다(`app/environment.ts`). 앱 계층의 조립은 명령 실행기의 부모 환경을 이 사본에서 넘긴다(DR-4, `app/assemble.ts`, 코드 기준). DR-4가 CLI 이행의 완료 기준에 넣은 두 시험은 이행을 하지 않아 아직 해당이 없다.
 - 진행 이벤트는 journal에 쓴 가림본 `JournalRecord` 그대로다(AC-D2). 사람용 문장은 어댑터가 문구 카탈로그(N-4)로 만든다.
 - 취소: 앱 계층과 GUI에서는 `handle.cancel()` 하나로 모인다. CLI의 신호·취소 파일은 앱 계층을 거치지 않고 CLI의 취소 출처(`cli/cancel.ts`)가 받는다. **일부**
-- 확인 질문 통로(AC 5.7)는 실행 중 권한 확인 전용이다(DR-1). 형태는 DR-3(3절)이고 엔진 연결은 단계 5 몫이다. **결정만**
+- 확인 질문 통로(AC 5.7)는 실행 중 권한 확인 전용이다(DR-1). 엔진은 `EngineDeps.confirm`으로 묻고(U-74), 앱 계층은 그것을 `RunObserver.confirm`으로 넘긴다(U-108). CLI의 `run`은 앱 계층을 거치지 않고 터미널 질문(`cli/confirm.ts`, `cli/terminal.ts`)을 엔진에 직접 준다(U-110). 형태는 DR-3(3절). **구현**
 - 계획 승인은 실행 사이 확인 하나다(DR-1, GT-D4). 앱 계층에 `plan`, `applyPlan(runId, digest)`, `review`가 있고, CLI에는 같은 이름의 명령이 있다. **구현**
 - 변경 비교는 다시 가린 비교만 내준다. 비교는 앱 계층의 `changes`가 만들고, CLI `changes`와 GUI가 이것을 쓴다. 어댑터는 스냅샷 저장 형식을 직접 읽지 않는다(DR-7). **구현**
 - 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, AC-D7, AC-D8)은 **중단**(DR-20)이다. 연결되지 않았던 `src/cli/protocol/`은 지웠다(DR-66, U-81). `--cancel-file`은 `run`과 `apply`에 있다(실제 CLI, `--help`).

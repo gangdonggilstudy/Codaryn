@@ -110,11 +110,23 @@ interface Output {
   readonly reason?: string;
   readonly code?: string;
   readonly message?: string;
+  /** R-110 M-1: the reason a person is told (error.hint.<hint>). */
+  readonly hint?: string;
   readonly plan?: { readonly digest: string };
   readonly notices?: readonly string[];
   readonly usage?: { readonly modelTurns: number };
 }
 const outputOf = (run: CliRun): Output => JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Output;
+
+/**
+ * R-110 M-1 (U-210 2fcc01c): a refusal for bundle A's settings carries the hint `hint` in its JSON and
+ * says why on stderr in the chosen language (error.hint.<hint>).
+ */
+function assertReason(run: CliRun, hint: string, label: string, lang: "en" | "ko" = "en"): void {
+  assert.equal(outputOf(run).hint, hint, `${label}: ${run.stdout}`);
+  const line = (createMessageCatalog(lang).format as (id: string) => string)(`error.hint.${hint}`);
+  assert.ok(run.stderr.includes(line), `${label}: the reason on stderr (${lang}):\n${run.stderr}`);
+}
 
 function journalOf(sb: Sandbox, runId: string): JournalRecord[] {
   return readFileSync(path.join(sb.workspace, ".codaryn", "runs", runId, "journal.jsonl"), "utf8")
@@ -352,6 +364,7 @@ test("U-245: unreadable paths from any place beside a command rule or a command 
       const label = `unreadable in ${unreadable}, ${command}`;
       assert.deepEqual([output.kind, output.code, run.exitCode], ["error", command.startsWith("definition") ? "invalid_config" : "invalid_task", 2], `${label}: ${run.stdout}`);
       assert.match(output.message ?? "", command.endsWith("rule") ? /must be empty while unreadablePaths is set/ : /cannot be a command verifier while unreadablePaths is set/, label);
+      assertReason(run, "unreadable_with_commands", label);
       assert.equal(existsSync(path.join(sb.workspace, ".codaryn")), false, `${label}: nothing recorded`);
     }
   }
@@ -384,6 +397,7 @@ test(`${MOCK_LABEL} U-245: the same in the quick form: the config's or the profi
     const label = `unreadable in ${unreadable}, ${command}`;
     assert.deepEqual([output.kind, output.code, run.exitCode], ["error", "invalid_config", 2], `${label}: ${run.stdout}`);
     assert.match(output.message ?? "", /must be empty while unreadablePaths is set/, label);
+    assertReason(run, "unreadable_with_commands", label);
     assert.equal(existsSync(path.join(sb.workspace, ".codaryn")), false, `${label}: nothing recorded`);
   }
 });
@@ -413,7 +427,55 @@ test("U-245: k below 5 in any place is refused before the run, also beside a lar
     const output = outputOf(run);
     assert.deepEqual([output.kind, output.code, run.exitCode], ["error", code, 2], `${label}: ${run.stdout}`);
     assert.match(output.message ?? "", /policy\.minGroupSize must be a whole number from 5 to 1000/, label);
+    assertReason(run, "min_group_size_range", label);
     assert.equal(existsSync(path.join(sb.workspace, ".codaryn")), false, `${label}: nothing recorded`);
+  }
+});
+
+test(`${MOCK_LABEL} U-245 (R-110 M-1): analyze-private whose run gets no unreadable path from the places it uses is refused and says why, in English and Korean; so do a definition's command and k`, { timeout: 180_000 }, async (t) => {
+  const entry = { unreadablePaths: ["data/private"] };
+  for (const lang of ["en", "ko"] as const) {
+    const env = cliEnv({ extra: { CODARYN_LANG: lang } });
+    // 1. A task file naming analyze-private; the config's only entry is in a profile the run does not apply.
+    const sb1 = createSandbox(t);
+    const config1 = writeConfigFile(sb1, { schemaVersion: 1, limits: LIMITS, profiles: { q: { policy: { ...POLICY, ...entry } } } });
+    const task1 = writeGeneralTask(sb1, { id: "u245-no-entry", fields: { workflowRef: PRIVATE }, limits: LIMITS }, [textStep("never asked")]);
+    const run1 = await runGuarded(sb1, ["run", "--task", task1, "--config", config1], env);
+    assert.deepEqual([outputOf(run1).code, run1.exitCode], ["invalid_task", 2], run1.stdout);
+    assertReason(run1, "unreadable_paths_required", `${lang}: a profile not applied`, lang);
+    // 2. The quick form under a profile naming analyze-private; the entry is in another profile.
+    const sb2 = createSandbox(t);
+    const config2 = writeConfigFile(
+      sb2,
+      fakeApiConfig("http://127.0.0.1:9", { model: FAKE_MODEL_CONFIG, limits: ANTHROPIC_LIMITS, profiles: { p: { workflowRef: PRIVATE, policy: POLICY }, q: { policy: { ...POLICY, ...entry } } } } as object),
+    );
+    const run2 = await runGuarded(sb2, ["run", "--config", config2, "--profile", "p", "--workspace", sb2.workspace, "--goal", "Count the people."], cliEnv({ fakeApiKey: FAKE_API_KEY, extra: { CODARYN_LANG: lang } }));
+    assert.deepEqual([outputOf(run2).code, run2.exitCode], ["invalid_config", 2], run2.stdout);
+    assertReason(run2, "unreadable_paths_required", `${lang}: the quick form, another profile's entry`, lang);
+    // 3. A task file whose own list is empty, under a config with none.
+    const sb3 = createSandbox(t);
+    const config3 = writeConfigFile(sb3, { schemaVersion: 1, limits: LIMITS, policy: POLICY });
+    const task3 = writeGeneralTask(sb3, { id: "u245-empty", fields: { workflowRef: PRIVATE }, limits: LIMITS, policy: { unreadablePaths: [] } }, [textStep("never asked")]);
+    const run3 = await runGuarded(sb3, ["run", "--task", task3, "--config", config3], env);
+    assert.deepEqual([outputOf(run3).code, run3.exitCode], ["invalid_task", 2], run3.stdout);
+    assertReason(run3, "unreadable_paths_required", `${lang}: an empty list`, lang);
+    // 4. A definition's own command verifier under a profile's entry, and a definition's k of 3 (each
+    //    its own config file: a config file is read whole, so a bad definition refuses every run of it).
+    const definitions = [
+      ["cmd", { tools: ["read_file", "search_files", "query_table", "write_file"], policy: POLICY, verifiers: [COMMAND_VERIFIER] }, "unreadable_with_commands"],
+      ["low", privateLike({ minGroupSize: 3 }), "min_group_size_range"],
+    ] as const;
+    const sandboxes = [sb1, sb2, sb3];
+    for (const [ref, definition, hint] of definitions) {
+      const sb4 = createSandbox(t);
+      sandboxes.push(sb4);
+      const config4 = writeConfigFile(sb4, { schemaVersion: 1, limits: LIMITS, profiles: { p: { policy: { ...POLICY, ...entry } } }, workflows: { [ref]: definition } });
+      const task4 = writeGeneralTask(sb4, { id: `u245-${ref}`, fields: { workflowRef: ref }, limits: LIMITS }, [textStep("never asked")]);
+      const run4 = await runGuarded(sb4, ["run", "--task", task4, "--config", config4, "--profile", "p"], env);
+      assert.deepEqual([outputOf(run4).code, run4.exitCode], ["invalid_config", 2], run4.stdout);
+      assertReason(run4, hint, `${lang}: the definition ${ref}`, lang);
+    }
+    for (const sb of sandboxes) assert.equal(existsSync(path.join(sb.workspace, ".codaryn")), false, "nothing recorded");
   }
 });
 

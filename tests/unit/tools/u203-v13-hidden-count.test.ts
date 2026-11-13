@@ -8,6 +8,9 @@
  *   failure to read it changes nothing: it is never read.
  * - M-2: a name search does not show a link (a junction) whose real path is under an unreadable path,
  *   nor one whose real path cannot be found; a link to a readable folder stays.
+ * - V-13b L-1: an empty unreadable list is no list: every result is byte for byte the one without
+ *   the option, a dangling link and one that leaves the root included. A value that is not a list
+ *   still covers everything.
  *
  * Each case has its control without unreadable paths, which shows the trace the fix removes.
  */
@@ -190,6 +193,7 @@ describe("U-203 (V-13 M-2): a name search does not show a link that leads under 
 
   before(async () => {
     const root = path.join(base, "alias");
+    fs.mkdirSync(path.join(base, "outside-target"), { recursive: true });
     fs.mkdirSync(path.join(root, "private", "person-folder"), { recursive: true });
     fs.mkdirSync(path.join(root, "docs"));
     fs.writeFileSync(path.join(root, "private", "person-folder", "record.txt"), "synthetic record\n");
@@ -198,6 +202,7 @@ describe("U-203 (V-13 M-2): a name search does not show a link that leads under 
       ["person-alias", path.join(root, "private", "person-folder")],
       ["docs-alias", path.join(root, "docs")],
       ["gone-alias", path.join(root, "private", "gone")],
+      ["outside-alias", path.join(base, "outside-target")],
     ];
     for (const [name, target] of links) {
       try {
@@ -234,5 +239,24 @@ describe("U-203 (V-13 M-2): a name search does not show a link that leads under 
     const control = paths(await search(workspace, { path: ".", nameContains: "gone" }));
     assert.deepEqual(control, ["gone-alias"], "the control lists it");
     assert.deepEqual(paths(await search(workspace, { path: ".", nameContains: "gone" }, ["private"])), []);
+  });
+
+  test("V-13b L-1: an empty list gives byte for byte the results without the option, the dangling and outside links included", async (t) => {
+    if (made["gone-alias"] !== true || made["outside-alias"] !== true) return t.skip("these junctions cannot be made here");
+    const without = paths(await search(workspace, { path: ".", nameContains: "alias" }));
+    assert.ok(without.includes("gone-alias") && without.includes("outside-alias"), without.join(","));
+    const calls: readonly Record<string, unknown>[] = [{ path: "." }, { path: ".", nameContains: "alias" }, { path: ".", text: "synthetic" }];
+    for (const args of calls) {
+      assert.equal(text(await search(workspace, args, [])), text(await search(workspace, args)), text(args));
+    }
+    assert.equal(text(await inspect(workspace, { path: ".", hash: true }, [])), text(await inspect(workspace, { path: ".", hash: true })));
+  });
+
+  test("V-13b L-1: a value that is not a list is unusable and still covers everything", async () => {
+    const outcome = await search(workspace, { path: "." }, "private" as never);
+    assert.ok(outcome.ok, text(outcome));
+    const payload = outcome.payload as unknown as { entries: unknown[]; withheld?: true };
+    assert.deepEqual(payload.entries, []);
+    assert.equal(payload.withheld, true);
   });
 });

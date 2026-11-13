@@ -29,6 +29,11 @@
  * applyPlan, from plan runs made the same way. The carrying run done; a plan made stale by a person's
  * edit; a lock a live process holds; a write outside the approved files refused and counted; a cancel
  * file there before the apply. The result, the records and whether the plan was claimed must match.
+ *
+ * U-304 (ne-verify R-116 I-2; U-1, U-195): the plan run's records-changed mark, there before the apply
+ * (apply's own look refuses) and written as the apply makes the workspace lock file (only the look under
+ * the lock can find it; mark-at-lock.ts makes that moment deterministic, no race). Both refusals are the
+ * same on both ways, the lock is released, and nothing is claimed, written or recorded.
  */
 
 import assert from "node:assert/strict";
@@ -39,7 +44,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { createCodarynApp, createNodeAppEnvironment } from "../../src/app/index.js";
 import type { CodarynApp, TaskForm } from "../../src/app/index.js";
-import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
+import { PLAN_FILE_NAME, PRIVACY_TOKEN_PATTERN_SOURCE, RECORDS_CHANGED_FILE_NAME, RUNS_DIR_NAME, STATE_DIR_NAME } from "../../src/contracts/index.js";
 import type { ApplyJournalRecord, ApplyResult, CommandVerifierConfig, EngineResult, JournalRecord, ScriptStep } from "../../src/contracts/index.js";
 import { fakeApiConfig, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
@@ -50,6 +55,7 @@ import { FAKE_API_KEY, FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secr
 import { NODE, cliEnv, expectCliError, expectRunResult, lockPath, readRunFiles, runDirOf, runTask, sha256Hex, startCli, waitFor } from "../support/cli.js";
 import { MOCK_LABEL, replyText, replyTools, runGuarded, startFakeAnthropic, toolUse } from "../support/fake-anthropic.js";
 import { applyArgs, expectApplyResult, planDigestOf, readApplyJournal, shortDigest } from "../support/general.js";
+import { MARK_AT_LOCK_ENV, MARK_AT_LOCK_MODULE_URL, installMarkAtLock } from "../support/mark-at-lock.js";
 import { attemptSteps, spareSteps } from "../support/repair-script.js";
 import type { Attempt } from "../support/repair-script.js";
 
@@ -419,7 +425,14 @@ interface Carried {
   readonly planStatus: unknown;
   readonly exitCode: number | null;
   readonly stderr: string;
+  /** U-304: the app layer gave a handle and then the refusal in `done` (false for the CLI, and for a refusal at the start). */
+  readonly refusedAfterStart: boolean;
+  /** U-304: whether the plan run's records-changed mark was there after the apply. */
+  readonly marked: boolean;
 }
+
+/** U-304: the plan run's records-changed mark (DR-38: what a state check writes when another hand changed its records). */
+const markFileOf = (side: PlanSide, planRunId: string): string => join(runDirOf(side.sb.workspace, planRunId), RECORDS_CHANGED_FILE_NAME);
 
 /** A workspace with the guide, a config whose task type "rewrite" has plan "run", and a task that picks it. */
 function planSideOf(t: TestContext): PlanSide {
@@ -461,6 +474,12 @@ interface CarryOptions {
   /** Done after the plan and before the apply: a person's edit, a lock. Returns its undoing. */
   readonly between?: (side: PlanSide) => (() => void) | void;
   readonly cancel?: boolean;
+  /**
+   * U-304 (U-1): the plan run's records-changed mark, "before" the apply (apply's own look finds it), or
+   * written "atLock", as the apply makes the workspace lock file (mark-at-lock.ts: in the CLI process by
+   * its preload, in this process for the app layer), so only the look under the lock can find it.
+   */
+  readonly mark?: "before" | "atLock";
 }
 
 /** (a) The CLI: `run` makes the plan, `apply --digest <12>` carries it out. */
@@ -471,8 +490,11 @@ async function carryByCli(side: PlanSide, env: NodeJS.ProcessEnv, options: Carry
   writeScript(side.sb, carrySteps(options.before));
   const undo = options.between?.(side);
   if (options.cancel === true) writeFileSync(side.sb.cancelFile, "cancel");
+  if (options.mark === "before") writeFileSync(markFileOf(side, planned.runId), "{}\n");
   const args = ["apply", ...cliForm(side), "--run", planned.runId, "--digest", shortDigest(digest), ...(options.cancel === true ? ["--cancel-file", side.sb.cancelFile] : [])];
-  const run = await startCli(args, { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done;
+  const atLock = options.mark === "atLock";
+  const applyEnv = atLock ? { ...env, [MARK_AT_LOCK_ENV]: `${lockPath(side.sb.workspace)}|${markFileOf(side, planned.runId)}` } : env;
+  const run = await startCli(args, { cwd: side.sb.base, env: applyEnv, timeoutMs: TIMEOUT_MS, ...(atLock ? { preload: [MARK_AT_LOCK_MODULE_URL] } : {}) }).done;
   undo?.();
   const output = JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Record<string, unknown>;
   const result = output["kind"] === "run" ? (output as unknown as EngineResult) : null;
@@ -487,6 +509,8 @@ async function carryByCli(side: PlanSide, env: NodeJS.ProcessEnv, options: Carry
     planStatus: await planStatusOf(side, env, planned.runId),
     exitCode: run.exitCode,
     stderr: run.stderr,
+    refusedAfterStart: false,
+    marked: existsSync(markFileOf(side, planned.runId)),
   };
 }
 
@@ -503,16 +527,30 @@ async function carryByApp(side: PlanSide, env: NodeJS.ProcessEnv, options: Carry
   writeScript(side.sb, carrySteps(options.before));
   const undo = options.between?.(side);
   if (options.cancel === true) writeFileSync(side.sb.cancelFile, "cancel");
-  const applying = await app.applyPlan({ settings: formOf(side), planRunId: planned.runId, digest: shortDigest(digest), cancelFile: options.cancel === true ? side.sb.cancelFile : null, unsafeMoveConsent: null });
+  if (options.mark === "before") writeFileSync(markFileOf(side, planned.runId), "{}\n");
+  const hook = options.mark === "atLock" ? installMarkAtLock(lockPath(side.sb.workspace), markFileOf(side, planned.runId)) : null;
   let result: EngineResult | null = null;
   let refusal: Carried["refusal"] = null;
-  if (!applying.ok) refusal = { code: applying.error.code, message: applying.error.message, category: applying.error.category, retryable: applying.error.retryable };
-  else {
-    const done = await applying.handle.done;
-    assert.ok(done.ok, `the app layer's apply ended with an error: ${JSON.stringify(done)}`);
-    assert.equal(done.output.kind, "run", "a run plan is carried out by a run");
-    result = done.output as EngineResult;
+  let refusedAfterStart = false;
+  try {
+    const applying = await app.applyPlan({ settings: formOf(side), planRunId: planned.runId, digest: shortDigest(digest), cancelFile: options.cancel === true ? side.sb.cancelFile : null, unsafeMoveConsent: null });
+    if (!applying.ok) refusal = { code: applying.error.code, message: applying.error.message, category: applying.error.category, retryable: applying.error.retryable };
+    else {
+      const done = await applying.handle.done;
+      if (!done.ok) {
+        // U-304: a refusal found after the start (under the lock) comes in `done`, after the handle.
+        assert.equal(options.mark, "atLock", `the app layer's apply ended with an error: ${JSON.stringify(done)}`);
+        refusal = { code: done.error.code, message: done.error.message, category: done.error.category, retryable: done.error.retryable };
+        refusedAfterStart = true;
+      } else {
+        assert.equal(done.output.kind, "run", "a run plan is carried out by a run");
+        result = done.output as EngineResult;
+      }
+    }
+  } finally {
+    hook?.remove();
   }
+  if (hook !== null) assert.ok(hook.made(), "the mark was written as the lock was made");
   undo?.();
   return {
     plan: { result: planned, records: readRunFiles(side.sb.workspace, planned).records },
@@ -524,6 +562,8 @@ async function carryByApp(side: PlanSide, env: NodeJS.ProcessEnv, options: Carry
     planStatus: await planStatusOf(side, env, planned.runId),
     exitCode: null,
     stderr: "",
+    refusedAfterStart,
+    marked: existsSync(markFileOf(side, planned.runId)),
   };
 }
 
@@ -619,4 +659,47 @@ test("U-302 run 계획의 수행 전부터 있는 취소 파일: 두 길 모두 
   assert.equal(cli.planStatus, "pending");
   for (const side of [cliSide, appSide]) assert.equal(readText(side.sb, "docs/guide.md"), OLD_GUIDE);
   assertSameCarry(cli, cliSide, app, appSide);
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-304: the plan run's records-changed mark (U-1): apply's own look, and the look under the lock
+
+/** Neither way left anything: no lock, the plan not claimed, the guide as it was, no run but the plan run. */
+function assertNothingLeft(side: PlanSide, carried: Carried): void {
+  assert.equal(existsSync(lockPath(side.sb.workspace)), false, "the lock is released");
+  assert.equal(carried.planStatus, "pending", "the plan is not claimed");
+  assert.equal(readText(side.sb, "docs/guide.md"), OLD_GUIDE, "nothing written");
+  assert.deepEqual(readdirSync(join(side.sb.workspace, STATE_DIR_NAME, RUNS_DIR_NAME)), [carried.planRunId], "nothing recorded but the plan run");
+  assert.equal(carried.marked, true, "the mark stays");
+}
+
+test("U-304 run 계획 실행의 기록 변경 표시가 적용 앞에 있을 때: 두 길 모두 잠금 전에 같은 글로 거부하고 아무것도 남기지 않는다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env, { mark: "before" });
+  const app = await carryByApp(appSide, env, { mark: "before" });
+  assert.deepEqual([cli.exitCode, cli.refusal?.code], [2, "plan_records_changed"]);
+  assert.match(cli.refusal?.message ?? "", /so its plan may not be the one shown; nothing was asked, sent or written/);
+  assert.equal(app.refusedAfterStart, false, "the app refuses at the start, before a handle");
+  assert.deepEqual(app.refusal, cli.refusal, "the same code, message, category and retryable");
+  for (const [side, carried] of [[cliSide, cli], [appSide, app]] as const) assertNothingLeft(side, carried);
+  assertSameRun(cli.plan, cliSide.sb, app.plan, appSide.sb);
+});
+
+test("U-304 잠금을 만드는 순간에 생긴 기록 변경 표시(U-1): 두 길 모두 잠금 아래에서 같은 글로 거부하고, 잠금을 풀며, 아무것도 남기지 않는다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env, { mark: "atLock" });
+  const app = await carryByApp(appSide, env, { mark: "atLock" });
+  // The CLI's apply looked before the lock and found nothing; the mark came with the lock, and the look
+  // under it refused (run-life.ts), with its own words.
+  assert.deepEqual([cli.exitCode, cli.refusal?.code], [2, "plan_records_changed"]);
+  assert.match(cli.refusal?.message ?? "", /found under the workspace lock; its plan may not be the one approved, so nothing was recorded, sent or written/);
+  // As now: the app layer gives the handle once the run is assembled, so this refusal comes in `done`.
+  assert.equal(app.refusedAfterStart, true, "the app's refusal comes after its handle");
+  assert.deepEqual(app.refusal, cli.refusal, "the same code, message, category and retryable");
+  for (const [side, carried] of [[cliSide, cli], [appSide, app]] as const) assertNothingLeft(side, carried);
+  assertSameRun(cli.plan, cliSide.sb, app.plan, appSide.sb);
 });

@@ -60,6 +60,8 @@ export interface HostApp {
   changes(request: { readonly settings: HostTaskForm; readonly runId: string }): Promise<unknown>;
   /** GU-3 (3.7): a run's report (ReportOutput), read only. */
   report(request: { readonly workspace: string; readonly runId: string }): Promise<unknown>;
+  /** U-103 (U-89, adapter-contract 5.12): one directory of the workspace for the file tree (tree.ts). */
+  listWorkspaceDir(request: { readonly settings: HostTaskForm; readonly dir: string; readonly offset: number }): Promise<unknown>;
   /** U-11 (3.11): the config file with the defaults (init without questions), and init's fixed suggestions for a workspace. */
   createSettings(request: { readonly configPath: null; readonly workspace: string | null }): Promise<unknown>;
   settingsSuggestions(request: { readonly workspace: string }): Promise<unknown>;
@@ -85,7 +87,7 @@ export interface HostMessages {
   texts(osLocale: string | null, ids: readonly string[], configLanguage?: "ko" | "en" | null): { readonly language: string; readonly texts: Readonly<Record<string, string>> };
 }
 
-/** GU-2: one directory of a workspace (tree.ts). */
+/** GU-2, U-103: one directory of a workspace, by the app layer's listWorkspaceDir (tree.ts). */
 export type HostTree = (request: { readonly workspace: string; readonly dir: string; readonly offset: number }) => Promise<unknown>;
 
 export interface HostDeps {

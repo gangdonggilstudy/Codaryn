@@ -54,6 +54,8 @@ export interface CodarynApi {
   reveal(workspace: string, node: string): Promise<unknown>;
   /** U-62: copies a run id or a digest's first 12 characters (the main process takes nothing else). */
   copyText(text: string): Promise<unknown>;
+  /** U-103 (3.3): copies a tree entry's relative path, by its id (the main process resolves and checks it). */
+  copyPath(workspace: string, node: string): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;

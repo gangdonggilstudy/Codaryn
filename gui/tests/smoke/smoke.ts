@@ -215,6 +215,33 @@ startGui({
         "(() => { const tree = document.querySelector('.tree'); const first = tree.querySelector('[tabindex=\"0\"]'); first.focus(); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); const last = document.activeElement?.getAttribute('data-key'); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); return { moved: last !== null && last !== document.activeElement?.getAttribute('data-key'), inTree: tree.contains(document.activeElement) }; })()",
       );
       results["treeText"] = await js("document.querySelector('.tree')?.textContent ?? ''");
+      // U-103 (G-list, 3.3): the tree is the app layer's list. The key-shaped name comes masked without an
+      // id; a plain entry's path is copied by its id (the main process resolves it), nothing else.
+      results["treeCopyPath"] = await (async () => {
+        const handleText = JSON.stringify(second.ok ? second.handle : "");
+        type Listed = { ok: boolean; entries?: { id: string | null; name: string; masked: boolean }[] };
+        const top = (await js(`window.codaryn.tree(${handleText}, null, 0)`)) as Listed;
+        const idOf = (list: Listed, name: string): string => list.entries?.find((entry) => entry.name === name)?.id ?? "";
+        const sub = (await js(`window.codaryn.tree(${handleText}, ${JSON.stringify(idOf(top, "sub"))}, 0)`)) as Listed;
+        const copy = (workspace: string, node: string): Promise<unknown> => js(`window.codaryn.copyPath(${workspace}, ${JSON.stringify(node)}).then((r) => (r.ok ? "copied" : r.code))`);
+        const before = copied.length;
+        const result = {
+          masked: top.entries?.filter((entry) => entry.masked).map((entry) => entry.id) ?? "none",
+          top: await copy(handleText, idOf(top, "a.txt")),
+          nested: await copy(handleText, idOf(sub, "b.txt")),
+          unknown: await copy(handleText, "0".repeat(32)),
+          pathString: await copy(handleText, "sub/b.txt"),
+          otherWorkspace: await copy(JSON.stringify("f".repeat(32)), idOf(top, "a.txt")),
+          button: await (async () => {
+            await js("[...document.querySelectorAll('.tree [data-kind=\"file\"]')].find((li) => li.textContent.trim().endsWith('a.txt'))?.click(); true");
+            await js("document.getElementById('tree-copy-path')?.click(); true");
+            return waitFor("document.getElementById('tree-copy-status')?.getAttribute('data-copied') ?? null");
+          })(),
+          texts: [] as string[],
+        };
+        result.texts = copied.slice(before);
+        return result;
+      })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
@@ -400,7 +427,6 @@ startGui({
           words: await code("window.codaryn.copyText('any text at all')"),
           digestUpper: await code("window.codaryn.copyText('0123456789AB')"),
           lineBreak: await code("window.codaryn.copyText('a\\nb')"),
-          noPathCopy: await js("typeof window.codaryn.copyPath"),
           written: copied.length - before,
         };
       })();

@@ -11,6 +11,7 @@ export const IPC_CHANNELS = {
   info: "codaryn:app:info",
   restartEngine: "codaryn:app:restartengine",
   copyText: "codaryn:app:copy",
+  copyPath: "codaryn:workspace:copypath",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -109,8 +110,7 @@ export function parseRevealArgs(value: unknown): { readonly workspace: string; r
  * U-62 (6.4, 2 principle 4; review R-73 M1, L1, PM decision): the main process copies only the two
  * things the window copies: a run id, or a digest's first 12 characters (lowercase hexadecimal, what
  * the CLI's apply --digest takes). Anything else is refused (invalid_args), so the page cannot put
- * other text on the clipboard. A path is not copied until the tree comes from the app layer's
- * workspace list, which masks the registered secrets as well (G-list).
+ * other text on the clipboard. A tree entry's path is copied by its own call (copyPath, U-103).
  */
 const DIGEST_START = /^[0-9a-f]{12}$/;
 
@@ -125,6 +125,24 @@ export function parseCopyArgs(value: unknown): string | null {
 }
 
 export type CopyReply = { readonly ok: true } | { readonly ok: false; readonly code: string };
+
+/**
+ * U-103 (G-list, 3.3): the longest relative path copyPath copies, and the characters it refuses (any
+ * control, line, format, direction or invisible character): a pasted path is what the tree shows.
+ */
+export const MAX_COPY_PATH_CHARS = 4096;
+const NOT_COPYABLE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/;
+
+/**
+ * U-103: a tree entry's path as the main process resolved it from the entry's id, or null. The path
+ * is made of the names the app layer's listWorkspaceDir gave for entries it did not mask (a masked
+ * entry has no name and no id), so it holds no key shape, key value or registered value it saw.
+ * It is checked again here: "/"-separated plain segments, the length, no hidden character.
+ */
+export function copyablePath(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_COPY_PATH_CHARS || NOT_COPYABLE.test(value)) return null;
+  return value.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !/[\\:]/.test(segment)) ? value : null;
+}
 
 /** U-64 (3.12, 4.4): the answer to restartEngine: the new engine host is ready, or why not. */
 export type RestartReply = { readonly ok: true } | { readonly ok: false; readonly code: string };

@@ -1275,6 +1275,11 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - 간편 형식 `plan`·`apply`·`review`의 설정 안내(R-11 L-2)는 JSON `message`에만 있다. 사람용 stderr에는 일반 고치는 법만 나온다(검토 R-12 L-2). 안내 문구 id(계약 담당)와 두 언어 글(N-B)이 생기면 stderr에도 붙인다. 재현은 `tests/unit/cli/g-r12.test.ts`에 `todo`로 있다.
 - 영어 고정 글
   - `plan`·`review`의 글 출력과 질문 세 개(`Apply this plan?`, 적용과 되돌리기의 위험한 이동 동의)는 아직 영어 고정 글이다. 문구 id가 생기면 카탈로그로 옮긴다.
+- run 계획의 사람용 글 가운데 CLI가 아직 쓰지 않는 것(U-216, main `13ea1ac`의 실제 CLI로 확인):
+  - 터미널의 승인 질문은 이동 계획과 같은 `Apply this plan? [y/N]`이다. U-198의 `changesApprovalText`(`apply.changes.what`, `apply.changes.summary_note`, `apply.changes.commands_note`)와 `changesApplyQuestion`(`apply.changes_question`)은 `src/cli/human`에 있지만 `apply`가 부르지 않는다.
+  - 계획을 만든 실행(`plan_pending`, 계획 `kind: "changes"`)의 끝 요약은 이동 계획의 글이다: `A plan is ready: actions 2. …`와, 요약의 표지 `The agent's description (… not what you approve)`. run 계획의 요약은 다이제스트 안이라 계획과 함께 승인된다(18.3, R-99 L-1).
+  - 검증기 없이 `needs-input`/`no_verifier`로 끝난 수행을 `runs`는 계획을 만든 실행의 줄에서 `plan apply not finished`라 부른다. `plan`은 그 계획을 `applied`로, `report`는 `carried out by run …, which ended as no_verifier`로 보인다.
+  - 계획 없이 끝난 계획 실행(예: 계획 파일이 `writablePaths` 밖이라 `propose_changes`가 거부됨, 또는 작업 종류에 `propose_changes`가 없음)은 `failed`/`model_error`(`malformed_response`)이고, 끝 요약의 마지막 안내는 모델 설정 점검(`Check with codaryn doctor and codaryn models, …`)이다. `doctor`는 `plan: "run"`인데 `propose_changes`가 없는 작업 종류를 알리지 않는다.
 
 ### 18.10 되돌리기의 위험한 이동에 대한 동의 (DR-25)
 

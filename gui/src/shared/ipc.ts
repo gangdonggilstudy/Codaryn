@@ -57,6 +57,7 @@ export const IPC_EVENTS = {
   runEvents: "codaryn:event:runevents",
   runDone: "codaryn:event:rundone",
   engineState: "codaryn:event:enginestate",
+  treeReset: "codaryn:event:treereset",
 } as const;
 
 /** A workspace handle the main process issued: 128 random bits as lowercase hex. */

@@ -16,10 +16,11 @@ import {
   hasRecordsChangedMark,
   listRuns as storeListRuns,
   releaseLock,
+  stateUncheckedSince,
   writeResult,
 } from "../store/index.js";
 import type { LockInfo, RunInspection } from "../store/index.js";
-import { createCommandRunner, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
+import { createCommandRunner, createPlannedFileProbe, createToolRunner, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createVerifierRunner } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import type {
@@ -32,6 +33,9 @@ import type {
   ListRuns,
   LoadPlan,
   ModelProvider,
+  PlannedFileProbe,
+  PolicyGate,
+  PrivacyGateway,
   ResolvedTaskSpec,
   ReadRevertRecord,
   RevertOutcome,
@@ -39,6 +43,7 @@ import type {
   RevertStatus,
   WriteRevertRecord,
   Workspace,
+  WritablePathSet,
 } from "../contracts/index.js";
 import { resolveRunReference } from "./run-ref.js";
 import type { CheckedRun } from "./run-ref.js";
@@ -53,6 +58,26 @@ export interface AssemblyInput {
   readonly signal: AbortSignal;
   /** U-1: the config file's `integrity.paths`, already checked by the CLI. Absent means none. */
   readonly integrityPaths?: readonly string[];
+  /**
+   * U-195 (DR-69 B-3, B-4): the plan run whose approved `run` plan this run carries out. The outcome
+   * then has `approvedPlan`. Absent: an ordinary run, as before.
+   */
+  readonly planRunId?: string;
+}
+
+/**
+ * U-195: what the engine's runApprovedPlan needs beside EngineDeps (ApprovedPlanRunDeps,
+ * ApprovedChangesPlan), made where the workspace and the recorders are.
+ * - policyFor: the run's gate with the given writable lists (the engine adds the plan's files).
+ * - markApplied: the recorders' claim of the plan (RunRecorders.markApplied, with planRunId).
+ * - fileNow: the tools' probe of a planned file (B-6).
+ * - planRecordsUnchecked: the store's question for the plan run, with this run as the apply run.
+ */
+export interface ApprovedPlanParts {
+  policyFor(writablePathSets: readonly WritablePathSet[]): PolicyGate;
+  markApplied(): Promise<"marked" | "already_applied">;
+  readonly fileNow: PlannedFileProbe;
+  planRecordsUnchecked(): Promise<boolean>;
 }
 
 export type AssemblyOutcome =
@@ -64,6 +89,8 @@ export type AssemblyOutcome =
        * then releases the workspace lock (also when the run threw and `result` is null).
        */
       finish(result: EngineResult | null): Promise<void>;
+      /** U-195: present exactly when AssemblyInput.planRunId was given. */
+      readonly approvedPlan?: ApprovedPlanParts;
     }
   | { readonly ok: false; readonly code: CliErrorCode; readonly message: string };
 
@@ -357,7 +384,29 @@ export function createRevertCommand(revertRun: RevertRun, options: RevertCommand
   };
 }
 
-export const assembleRun: Assemble = async (input) => {
+/**
+ * U-195 (PM decision on the app layer, U-196): what a host other than the CLI's own process gives the
+ * assembly, so there is one assembly (createAssemble) and the app layer does not keep its own copy,
+ * also for a run that carries out an approved run plan (AssemblyInput.planRunId).
+ * - parentEnv, platform (DR-4): the command runner's parent environment, the run's environment copy
+ *   with its variables file loaded, and the platform it was made for. Absent: `process.env` and this
+ *   process's platform, as the CLI.
+ * - onAssembled: told the run's privacy gateway and the real workspace root once the lock is held.
+ */
+export interface AssembleHooks {
+  readonly parentEnv?: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
+  readonly onAssembled?: (assembled: { readonly privacy: PrivacyGateway; readonly workspaceRoot: string }) => void;
+}
+
+/** The assembly of one run with a host's hooks (AssembleHooks); assembleRun is the CLI's, without any. */
+export function createAssemble(hooks: AssembleHooks = {}): Assemble {
+  return (input) => assembleWith(input, hooks);
+}
+
+export const assembleRun: Assemble = createAssemble();
+
+async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise<AssemblyOutcome> {
   const { task, runId, model, secrets, clock, signal } = input;
 
   let workspace: Workspace;
@@ -377,12 +426,20 @@ export const assembleRun: Assemble = async (input) => {
     const policy = createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) });
     // T-1: one runner for tools and verifiers. The value check keeps registered secrets out of
     // the child environment; the workspace root lets .cmd/.bat run (and refuses those inside it).
-    const commandRunner = createCommandRunner({ allowEnvValue: envValueFreeOfSecrets(privacy), workspaceRoot });
+    const commandRunner = createCommandRunner({
+      allowEnvValue: envValueFreeOfSecrets(privacy),
+      workspaceRoot,
+      ...(hooks.parentEnv === undefined ? {} : { parentEnv: hooks.parentEnv }),
+      ...(hooks.platform === undefined ? {} : { platform: hooks.platform }),
+    });
     // R-6: write_file keeps each file's original under runs/<runId>/snapshots/ before it writes.
     // G-A, G-F: propose_plan stores plan.json for this run (runs/<runId>/plan.json); the other tools never use it.
     // DR-38: the three recorders come with the state guard that knows what they write, so the
     // engine's checks of the state directory count only what the run did not write as a change.
-    const { journal, changeRecorder, planRecorder, stateGuard } = createRunRecorders({ workspaceRoot, runId, clock });
+    // U-195 (B-3, B-7): with the plan run, the recorders can claim its plan (markApplied).
+    const planRunId = input.planRunId;
+    const recorders = createRunRecorders({ workspaceRoot, runId, clock, ...(planRunId === undefined ? {} : { planRunId }) });
+    const { journal, changeRecorder, planRecorder, stateGuard } = recorders;
     const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
     const verifiers = createVerifierRunner({ workspace, commandRunner });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep
@@ -408,9 +465,22 @@ export const assembleRun: Assemble = async (input) => {
       stateGuard,
       ...(integrity === undefined ? {} : { integrity }),
     };
+    let approvedPlan: ApprovedPlanParts | undefined;
+    if (planRunId !== undefined) {
+      const markApplied = recorders.markApplied;
+      if (markApplied === undefined) throw new Error("the recorders cannot claim the plan");
+      approvedPlan = {
+        policyFor: (writablePathSets) => createPolicyGate({ config: task.policy, workspace, writablePathSets }),
+        markApplied: () => markApplied(),
+        fileNow: createPlannedFileProbe({ workspace }),
+        planRecordsUnchecked: () => stateUncheckedSince({ workspaceRoot, planRunId, applyRunId: runId }),
+      };
+    }
+    hooks.onAssembled?.({ privacy, workspaceRoot });
     return {
       ok: true,
       deps,
+      ...(approvedPlan === undefined ? {} : { approvedPlan }),
       async finish(result) {
         try {
           if (result !== null) await writeResult(workspaceRoot, result);
@@ -423,4 +493,4 @@ export const assembleRun: Assemble = async (input) => {
     await releaseLock({ workspaceRoot, runId });
     throw error;
   }
-};
+}

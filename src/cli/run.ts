@@ -35,6 +35,8 @@ import type {
   AnthropicProviderDeps,
   ApiProviderDeps,
   ApiProviderName,
+  ApprovalChannel,
+  ApprovedPlanRunDeps,
   CliErrorCode,
   CliErrorHint,
   CliErrorHintDetail,
@@ -42,11 +44,13 @@ import type {
   CliOutput,
   Clock,
   CodarynConfig,
+  ContentHash,
   CreateAnthropicProvider,
   CreateApiProvider,
   DefaultConfigDisplay,
   DefaultConfigLocation,
   DetailedCliErrorHint,
+  EngineDeps,
   EngineResult,
   InputDiagnostic,
   InputDiagnosticFile,
@@ -58,9 +62,11 @@ import type {
   HumanOutput,
   MessageCatalog,
   PolicyNarrowing,
+  RunApprovedPlan,
   RunSummaryContext,
   RunTask,
   ShownWorkspace,
+  StoredChangesPlan,
   WorkflowDefinition,
   WorkflowProblem,
   WorkflowSettings,
@@ -71,11 +77,11 @@ import { cleanText } from "./text-safety.js";
 import { createMessageCatalog } from "../i18n/index.js";
 import { terminalConfirm } from "./confirm.js";
 import type { AskLine } from "./confirm.js";
-import { runTask as engineRunTask } from "../engine/index.js";
+import { runApprovedPlan as engineRunApprovedPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
 import type { RunArgs } from "./args.js";
-import type { Assemble } from "./assemble.js";
+import type { ApprovedPlanParts, Assemble } from "./assemble.js";
 import { parseConfig } from "./config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "./config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";
@@ -125,6 +131,8 @@ export interface CliEnvironment {
   readonly randomBytes: (size: number) => Uint8Array;
   readonly assemble: Assemble;
   readonly runTask?: RunTask;
+  /** U-195: overrides the engine's runApprovedPlan in tests (a run that carries out an approved run plan). */
+  readonly runApprovedPlan?: RunApprovedPlan;
   /** Overrides `anthropicProviderFactory` in tests. `null` stands for a provider that is not connected. */
   readonly createAnthropicProvider?: CreateAnthropicProvider | null;
   /** Passed to the anthropic provider. Tests inject `fetch` here; the real CLI leaves it unset. */
@@ -310,6 +318,28 @@ function withModelHint(
   if (!masked.ok) return result;
   if (write !== undefined) writeMasked(write, privacy, progressText);
   return { ...result, notices: [...result.notices, masked.text] };
+}
+
+/**
+ * U-195: ApprovedPlanRunDeps from a run's deps: no gate of its own (the engine makes it with
+ * policyFor, adding the plan's files as one more writable list), and the approved plan with the
+ * assembly's probe, claim and records question.
+ */
+function approvedDeps(deps: EngineDeps, approved: ApprovedRunPlan, parts: ApprovedPlanParts): ApprovedPlanRunDeps {
+  const { policy: _gate, ...rest } = deps;
+  return {
+    ...rest,
+    approved: {
+      planRunId: approved.planRunId,
+      digest: approved.digest,
+      approval: approved.approval,
+      plan: approved.plan,
+      fileNow: parts.fileNow,
+      markApplied: () => parts.markApplied(),
+      planRecordsUnchecked: () => parts.planRecordsUnchecked(),
+    },
+    policyFor: (sets) => parts.policyFor(sets),
+  };
 }
 
 /** U-182: the English of progress.not_writable_hint, when no catalog is given. */
@@ -815,8 +845,31 @@ export async function prepareTask(
 async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Promise<CliRunOutcome> {
   const ready = await prepareTask(io, args, notes);
   if (!("prepared" in ready)) return ready;
-  const { task, config, integrityPaths, defaultDisplay } = ready.prepared;
-  const secrets = [...ready.prepared.secrets];
+  return runPrepared(io, args, notes, ready.prepared);
+}
+
+/**
+ * U-195 (DR-69 B-3, B-4): an approved `run` plan that `codaryn apply` carries out (ApprovedChangesPlan
+ * without what the assembly makes): the plan run, the approved digest, how the person approved it,
+ * and the plan as loaded (LoadAnyPlan).
+ */
+export interface ApprovedRunPlan {
+  readonly planRunId: string;
+  readonly digest: ContentHash;
+  readonly approval: ApprovalChannel;
+  readonly plan: StoredChangesPlan;
+}
+
+/**
+ * Steps 8 on (the model, the assembly, the engine, the end summary) for a prepared task. `run` gives
+ * no `approved`. U-195: `codaryn apply` gives the approved `run` plan it checked: the assembly then
+ * claims that plan run (AssemblyInput.planRunId) and the engine's runApprovedPlan carries it out
+ * (EngineResult with planRunId and planDigest); the rest (progress lines, end summary, result.json)
+ * is a run's.
+ */
+export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunNotes, prepared: PreparedTask, approved?: ApprovedRunPlan): Promise<CliRunOutcome> {
+  const { task, config, integrityPaths, defaultDisplay } = prepared;
+  const secrets = [...prepared.secrets];
   const addSecret = (value: string): void => {
     if (value.length > 0 && !secrets.includes(value)) secrets.push(value);
   };
@@ -864,8 +917,23 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
   const runId = createRunId(new Date(io.clock.now()), io.randomBytes);
   const cancel = io.cancelSignal(args.cancelFile === null ? null : path.resolve(io.cwd, args.cancelFile));
   try {
-    const assembled = await io.assemble({ task, runId, model: watchedModel, secrets, clock: io.clock, signal: cancel.signal, integrityPaths });
+    const assembled = await io.assemble({
+      task,
+      runId,
+      model: watchedModel,
+      secrets,
+      clock: io.clock,
+      signal: cancel.signal,
+      integrityPaths,
+      ...(approved === undefined ? {} : { planRunId: approved.planRunId }),
+    });
     if (!assembled.ok) return error(assembled.code, scrub(assembled.message, secrets));
+    // U-195: an assembly that cannot claim a plan (an older one) carries none out.
+    const parts = assembled.approvedPlan;
+    if (approved !== undefined && parts === undefined) {
+      await assembled.finish(null);
+      return error("internal_error", "this build cannot carry out a run plan; nothing was sent or written");
+    }
     const recorded = assembled.deps.journal;
     // U-18: the calls allowed and then failed, counted as the records are written.
     const failed = createFailedCalls();
@@ -950,7 +1018,11 @@ async function runParsed(io: CliEnvironment, args: RunArgs, notes: RunNotes): Pr
     let result: EngineResult | null = null;
     try {
       // DR-38 (PM after bf04750): an empty stateChanged is left out, in the output and in result.json.
-      const ended = withoutEmptyStateChanged(await (io.runTask ?? engineRunTask)(deps));
+      const ended = withoutEmptyStateChanged(
+        approved === undefined || parts === undefined
+          ? await (io.runTask ?? engineRunTask)(deps)
+          : await (io.runApprovedPlan ?? engineRunApprovedPlan)(approvedDeps(deps, approved, parts)),
+      );
       const hint = human === undefined ? undefined : human.messages.format("progress.model_not_found");
       const hinted = modelNotFound && ended.reason === "model_error" ? withModelHint(ended, privacy, write, hint) : ended;
       // U-182 (DR-69 B-4): writes denied as path_not_writable, and how to allow a file. A progress

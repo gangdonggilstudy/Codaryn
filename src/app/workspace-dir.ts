@@ -3,18 +3,29 @@
  * of a workspace for an adapter's file tree (`listWorkspaceDir`, adapter-contract 5.12).
  *
  * - The directory is named by plain relative segments (WORKSPACE_DIR_SHAPE); anything else is
- *   `invalid_arguments` before anything is read. It is resolved by the engine's workspace rules
- *   (`Workspace.resolve`: inside the root, not the state directory, no invalid names), and every
- *   segment of it is looked at with `lstat`: a link or junction on the way is `refused`, so nothing
- *   is ever followed.
+ *   `invalid_arguments` before anything is read (U-102: so is a segment holding a character that
+ *   makes a listed name masked for its shape, a C1 control, a line or paragraph separator or a
+ *   default ignorable character: such an entry is not listed in turn). It is resolved by the
+ *   engine's workspace rules (`Workspace.resolve`: inside the root, not the state directory, no
+ *   invalid names), and every segment of it is looked at with `lstat`: a link or junction on the
+ *   way is `refused`, so nothing is ever followed.
  * - Entries are read one level deep (`readdir` with their own types, which do not follow links): a
  *   link or junction is `link`, the root's `.codaryn` is `state`; neither can be listed in turn.
- * - Names are shown masked: a name with a control character is not shown at all (""); otherwise
- *   `cleanText`, then the key shapes and every key value set now (`hideKeys`), then the values the
- *   settings register now (the gateway's `mask`, AC-D14). An entry whose shown name is not its name
- *   is `masked` and carries no `name`: the real name of a masked entry never leaves the app layer.
- * - `protected`: the effective policy's protected paths (`compileProtectedPaths`, lexical, as the
- *   policy judges a path) cover the entry's relative path.
+ * - Names are shown masked: a name with a control character is not shown at all (""); otherwise the
+ *   key shapes and every key value set now (`hideKeys`), then the values the settings register now
+ *   (the gateway's `mask`, AC-D14), both on the name as it is, so a value split by an invisible
+ *   character is still found; then `cleanText`, and (U-102, R-78 L-2) every default ignorable
+ *   character (zero width space and joiners, BOM, soft hyphen, Hangul fillers, variation selectors)
+ *   is shown as "?", so two names cannot look the same. An entry whose shown name is not its name is
+ *   `masked` and carries no `name`: the real name of a masked entry never leaves the app layer, and
+ *   the entry can be neither opened nor chosen.
+ * - `protected` (U-102, R-78 L-1): what the policy gate's write check says of the entry's path, with
+ *   the policy's own matcher (`compileProtectedPaths`): by its letters (`covers`, as checkRequested),
+ *   then by its real path (`coversEffective`, as checkEffective). So the target of a protected link,
+ *   a link into a protected folder and a protected folder reached by its short name are protected
+ *   too. The real path of a file or directory entry is the listed directory's real path and its name;
+ *   a link or other entry is resolved as a write would resolve it. The workspace's resolutions are
+ *   kept for the one listing. A check that cannot be made shows the entry as protected.
  * - A directory with more than MAX_WORKSPACE_DIR_ENTRIES entries is `too_large`: never listed in
  *   part. Pages of at most WORKSPACE_PAGE_SIZE, directories first, then the rest, each in a fixed
  *   order (numeric collation, then code points).
@@ -25,8 +36,8 @@ import { lstat, readdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { STATE_DIR_NAME } from "../contracts/index.js";
-import type { MaskedText, PrivacyGateway } from "../contracts/index.js";
-import { cleanText, hideKeys } from "../cli/text-safety.js";
+import type { MaskedText, PathAccess, PrivacyGateway, ResolvePathOutcome, Workspace } from "../contracts/index.js";
+import { REPLACEMENT, cleanText, hideKeys } from "../cli/text-safety.js";
 import { compileProtectedPaths } from "../policy/protected.js";
 import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
@@ -38,10 +49,16 @@ export const WORKSPACE_PAGE_SIZE = 500;
 export const MAX_WORKSPACE_DIR_ENTRIES = 100_000;
 const MAX_DEPTH = 64;
 const MAX_SEGMENT = 255;
-/** Characters a segment may not hold: separators of another kind, a drive colon, control characters. */
-const SEGMENT_REFUSED = /[\\:\u0000-\u001f\u007f]/;
+/**
+ * Characters a segment may not hold: separators of another kind, a drive colon, control characters,
+ * and (U-102) the characters that make a listed name masked for its shape: C1 controls, line and
+ * paragraph separators, default ignorable characters.
+ */
+const SEGMENT_REFUSED = /[\\:\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Default_Ignorable_Code_Point}]/u;
 /** C0, DEL and C1 controls: a name holding one is not shown at all. */
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+/** U-102 (R-78 L-2): invisible characters (zero width space and joiners, BOM, soft hyphen, fillers), shown as REPLACEMENT. */
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
 const ORDER = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 /** "" for the root, else "/"-separated plain segments: no empty, ".", ".." or refused characters, at most 255 each and 64 deep. */
@@ -63,7 +80,7 @@ export function workspaceDirArguments(
   if (typeof request !== "object" || request === null) return refuse("the request must be an object");
   const { dir, offset, limit } = request as { dir?: unknown; offset?: unknown; limit?: unknown };
   if (!isWorkspaceDir(dir)) {
-    return refuse(`dir must be "" or relative segments joined by "/" (no empty, ".", ".." or "\\", ":" or control characters; at most ${MAX_SEGMENT} characters each, ${MAX_DEPTH} deep)`);
+    return refuse(`dir must be "" or relative segments joined by "/" (no empty, ".", ".." or "\\", ":", control or invisible characters; at most ${MAX_SEGMENT} characters each, ${MAX_DEPTH} deep)`);
   }
   if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) return refuse("offset must be a whole number from 0");
   if (limit !== undefined && (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > WORKSPACE_PAGE_SIZE)) {
@@ -106,11 +123,34 @@ function shownOf(name: string, source: WorkspaceDirSource): string {
   if (CONTROL.test(name)) return "";
   let masked;
   try {
-    masked = source.privacy.mask(hideKeys(cleanText(name), source.keys));
+    // On the name as it is: hideKeys and the gateway find a value split by an invisible character.
+    masked = source.privacy.mask(hideKeys(name, source.keys));
   } catch {
     return "";
   }
-  return masked.ok ? masked.text : "";
+  return masked.ok ? cleanText(masked.text).replace(INVISIBLE, REPLACEMENT) : "";
+}
+
+/** `workspace` with its path resolutions kept for one listing (the policy's matcher resolves its entries for every path). */
+function listingWorkspace(workspace: Workspace): Workspace {
+  const resolved = new Map<string, Promise<ResolvePathOutcome>>();
+  return new Proxy(workspace, {
+    get(target, key) {
+      if (key === "resolve") {
+        return (relative: string, access: PathAccess): Promise<ResolvePathOutcome> => {
+          const id = `${access}:${relative}`;
+          let outcome = resolved.get(id);
+          if (outcome === undefined) {
+            outcome = target.resolve(relative, access);
+            resolved.set(id, outcome);
+          }
+          return outcome;
+        };
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
 }
 
 /** Lists `dir` (checked by workspaceDirArguments) of the workspace the settings resolved to. */
@@ -135,10 +175,13 @@ export async function listWorkspaceDirIn(
   }
 
   const segments = dir === "" ? [] : dir.split("/");
+  /** The listed directory's real path relative to the root ("." for the root). */
+  let realDir = ".";
   if (segments.length > 0) {
     // The engine's rules first (inside the root, not the state directory, no invalid names).
     const resolved = await workspace.resolve(dir, "read");
     if (!resolved.ok || (segments[0] !== undefined && isStateName(segments[0]))) return status("refused");
+    realDir = resolved.path.relative;
     // Then every segment as it is on disk: a link or junction on the way is never followed.
     for (let index = 0; index < segments.length; index += 1) {
       let stat;
@@ -163,8 +206,29 @@ export async function listWorkspaceDirIn(
   if (dirents.length > (options.maxEntries ?? MAX_WORKSPACE_DIR_ENTRIES)) return status("too_large");
 
   const covered = compileProtectedPaths(source.protectedPaths);
+  const resolving = listingWorkspace(workspace);
   const atRoot = segments.length === 0;
-  const all = dirents.map((dirent) => {
+  /** U-102 (R-78 L-1): the policy gate's write check of the entry's path, by its letters, then by its real path. */
+  const protectedOf = async (name: string, kind: WorkspaceEntryKind): Promise<boolean> => {
+    const relative = atRoot ? name : `${dir}/${name}`;
+    try {
+      if (covered.covers(relative)) return true;
+      let real: string;
+      if (kind === "dir" || kind === "file") {
+        real = realDir === "." ? name : `${realDir}/${name}`;
+      } else {
+        const outcome = await resolving.resolve(relative, "write");
+        // A write the workspace refuses (outside the root, the state directory) meets no protected path.
+        if (!outcome.ok) return false;
+        real = outcome.path.relative;
+      }
+      return await covered.coversEffective(real, resolving);
+    } catch {
+      return true;
+    }
+  };
+  const all: { sortName: string; entry: WorkspaceEntry }[] = [];
+  for (const dirent of dirents) {
     const name = dirent.name;
     const kind = kindOf(dirent, atRoot);
     const shown = shownOf(name, source);
@@ -174,10 +238,10 @@ export async function listWorkspaceDirIn(
       shown: shown as MaskedText,
       kind,
       masked,
-      protected: covered.covers(atRoot ? name : `${dir}/${name}`),
+      protected: await protectedOf(name, kind),
     };
-    return { sortName: name, entry };
-  });
+    all.push({ sortName: name, entry });
+  }
   all.sort(
     (a, b) =>
       rank(a.entry.kind) - rank(b.entry.kind) ||

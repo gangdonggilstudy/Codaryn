@@ -7,8 +7,9 @@
  * - L-2: a name holding an invisible character (default ignorable: zero width space, BOM, soft
  *   hyphen, Hangul filler and the like) was shown as it is, so two entries could look the same. Such
  *   a name now shows each of those characters as "?" and is masked (no `name`), so it can be neither
- *   opened nor chosen, and a `dir` holding one is refused before anything is read.
- * Reproduced first (todo until fixed). Temporary folders, fake values only.
+ *   opened nor chosen, and a `dir` holding one is refused before anything is read. The name is
+ *   masked before the characters are replaced, so a key or a value split by one is still found.
+ * Reproduced first (b35d7d1, todo until fixed). Temporary folders, fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -20,10 +21,7 @@ import { createCodarynApp } from "../../../src/app/index.js";
 import type { AppCallOutcome, CodarynApp, TaskForm, WorkspaceDirListing } from "../../../src/app/index.js";
 import { createPolicyGate } from "../../../src/policy/index.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
-import { FAKE_SECRET, appEnvironment, setupRun, taskForm } from "./support.js";
-
-const TODO_L1 = { todo: "U-102 L-1: protected does not look at real paths yet" };
-const TODO_L2 = { todo: "U-102 L-2: names with invisible characters are shown as they are" };
+import { FAKE_SECRET, SECRET_ENV, appEnvironment, setupRun, taskForm } from "./support.js";
 
 type Entry = { readonly name: string | null; readonly shown: string; readonly kind: string; readonly masked: boolean; readonly protected: boolean };
 type Listing = { readonly status: string; readonly entries?: readonly Entry[] };
@@ -85,7 +83,7 @@ const HANGUL_FILLER = String.fromCodePoint(0x3164);
 const INVISIBLES = [ZWSP, BOM, SOFT_HYPHEN, HANGUL_FILLER];
 
 describe("U-102 L-1: protected says what the policy's write check says, real paths included", () => {
-  test("the target of a protected link and a link into a protected folder are protected; others are not", TODO_L1, async () => {
+  test("the target of a protected link and a link into a protected folder are protected; others are not", async () => {
     const w = await protectedWorkspace();
     const root = byShown(ok(await w.app.listWorkspaceDir({ settings: w.form, dir: "", offset: 0 })));
     assert.deepEqual(
@@ -106,7 +104,7 @@ describe("U-102 L-1: protected says what the policy's write check says, real pat
     assert.equal(plain.get("x.txt")?.protected, false);
   });
 
-  test("a protected folder reached by its short name: its entries are protected", TODO_L1, async (t) => {
+  test("a protected folder reached by its short name: its entries are protected", async (t) => {
     const w = await protectedWorkspace();
     const short = await shortName(w.work);
     if (short === null) {
@@ -117,7 +115,7 @@ describe("U-102 L-1: protected says what the policy's write check says, real pat
     assert.equal(inner.get("inner.txt")?.protected, true);
   });
 
-  test("every entry of every listing agrees with the policy gate's write check", TODO_L1, async () => {
+  test("every entry of every listing agrees with the policy gate's write check", async () => {
     const w = await protectedWorkspace();
     const dirs = ["", "real-target", "plain", "Protected Folder Long", ...((await shortName(w.work)) === null ? [] : ["PROTEC~1"])];
     const differ: string[] = [];
@@ -133,7 +131,7 @@ describe("U-102 L-1: protected says what the policy's write check says, real pat
 });
 
 describe("U-102 L-2: a name with an invisible character shows it as ? and is masked", () => {
-  test("zero width space, BOM, soft hyphen, Hangul filler: shown with ?, masked, no name, the character nowhere", TODO_L2, async () => {
+  test("zero width space, BOM, soft hyphen, Hangul filler: shown with ?, masked, no name, the character nowhere", async () => {
     const base = await setupRun({ "report.txt": "r\n" }, {}, []);
     const work = path.join(base, "work");
     for (const [index, char] of INVISIBLES.entries()) await writeFile(path.join(work, `re${char}port-${index}.txt`), "x\n");
@@ -149,7 +147,7 @@ describe("U-102 L-2: a name with an invisible character shows it as ? and is mas
     assert.equal(INVISIBLES.some((char) => text.includes(char)), false, "no invisible character in the listing");
   });
 
-  test("a directory so named cannot be listed by its real name; a registered value split by one stays masked", TODO_L2, async () => {
+  test("a directory so named cannot be listed by its real name; a registered value split by one stays masked", async () => {
     const base = await setupRun({}, {}, []);
     const work = path.join(base, "work");
     await mkdir(path.join(work, `dir${ZWSP}x`));
@@ -163,5 +161,21 @@ describe("U-102 L-2: a name with an invisible character shows it as ? and is mas
     assert.equal(outcome.ok ? outcome.output.status : outcome.error.code, "invalid_arguments");
     const text = JSON.stringify(listing);
     assert.equal(text.includes(FAKE_SECRET.slice(0, half)) || text.includes(FAKE_SECRET.slice(half)), false, "neither half of the value is shown");
+  });
+
+  test("a key shape and a key value set now, split by an invisible character, stay hidden (masked before ? is shown)", async () => {
+    const base = await setupRun({}, {}, []);
+    const work = path.join(base, "work");
+    // Built here so no source holds a key shape (G-10); the key value is a fake, not key-shaped.
+    const keyShaped = ["sk", "ant", "api03", "FAKE".repeat(20)].join("-");
+    const keyValue = `fake-openai-value-${"q".repeat(24)}`;
+    await writeFile(path.join(work, `${keyShaped.slice(0, 20)}${ZWSP}${keyShaped.slice(20)}.txt`), "k\n");
+    await writeFile(path.join(work, `v-${keyValue.slice(0, 10)}${ZWSP}${keyValue.slice(10)}.txt`), "v\n");
+    const app = createCodarynApp(await appEnvironment(base, { env: { [SECRET_ENV]: FAKE_SECRET, OPENAI_API_KEY: keyValue } }));
+    const listing = ok(await app.listWorkspaceDir({ settings: taskForm(base), dir: "", offset: 0 }));
+    const text = JSON.stringify(listing);
+    assert.equal(text.includes(keyShaped.slice(24)), false, "no part of the key shape after the split");
+    assert.equal(text.includes(keyValue.slice(10)), false, "no part of the key value after the split");
+    assert.equal((listing.entries ?? []).filter((entry) => entry.masked && entry.name === null).length, 2);
   });
 });

@@ -1204,6 +1204,7 @@ codaryn changes [--task <task.json> | --workspace <dir> [--profile <name>]] [--c
 - `run_not_plan`, `plan_not_approved`, `plan_already_applied`, `run_not_awaiting_review`
 - `plan_secrets_differ`(DR-28, 18.3): 지금 가릴 값이 계획 실행과 다르게 가린다. 계획을 읽은 직후에 확인한다.
 - `plan_run_missing`(R-9c C-1): 계획 실행이 `plan_pending`으로 끝났는데 `plan.json`이 없다(`plan`, `apply`). 적용 실행의 되돌리기에서는 그 계획 실행이나 계획이 사라졌다(14절).
+  - 사람용 두 줄(`error.plan_run_missing.what`·`.fix`)은 렌더러가 코드로만 고르므로, 두 경우에 모두 맞는 글이다(U-190, AXM-21). 무엇이 일어났나는 적용을 말하지 않는다. 고치는 법은 계획을 보거나 적용하려면 `codaryn run`으로 다시 만들고, 적용을 되돌리려면 그 계획 실행을 남기거나 되살리라고 한다.
 - 뜻은 `src/contracts/engine.ts`의 `CLI_ERROR_EXIT_CODES` 주석과 위 절을 따른다.
 
 ### 18.9 아직 없는 것

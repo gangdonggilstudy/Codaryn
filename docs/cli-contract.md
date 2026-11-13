@@ -633,7 +633,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 - **형식(R-1):** 보호 경로(13절)와 같은 형식이고 같은 검사(`checkProtectedPaths`)를 쓴다. 잘못된 항목은 `policy.unreadablePaths[i]`처럼 자리만 말한다. 판정도 보호 경로와 같다. 글자를 먼저 보고 그다음 실경로를 보며(U-203), 쓸 수 없는 항목은 모두를 덮는다(fail closed).
 - **둘 수 있는 곳:** task 파일, 설정 파일, 프로필, 설정 파일의 작업 종류 정의. 넷 모두 `policy` 안이다.
 - **더하기만 한다(R-2).**
-  - 실행의 목록(`ResolvedTaskSpec.unreadablePaths`)은 원천마다의 항목을 합친 것이다. 순서는 config, profile, definition, task이고 항목마다 한 번이다(`unreadablePathsOf`, `src/cli/unreadable.ts`).
+  - 실행의 목록(`ResolvedTaskSpec.unreadablePaths`)은 원천마다의 항목을 합친 것이다. 순서는 config, profile, definition, task이고 항목마다 한 번이다(`unreadablePathsOf`, `src/app/input/unreadable.ts`).
   - 설정 파일 자신의 항목과 프로필의 항목은 task 파일로 실행할 때도 걸린다. 그래서 task 파일 하나로 설정의 읽기 제외를 뺄 수 없다.
   - 아무 원천에도 없으면 필드가 없고 실행은 전과 같다.
   - `task.policy.unreadablePaths`는 한 원천의 목록이다. 실행이 쓰는 것은 합친 목록이다(검토 R-102 M-1).
@@ -646,7 +646,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`와, U-258부터 실행의 k `minGroupSize`. 아래의 `data_checks` 항목).
   - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
   - 승인된 계획을 수행하는 실행: 엔진이 계획 파일 목록을 더해 만드는 게이트(`ApprovedPlanParts.policyFor`)도 실행의 목록을 받는다(검토 R-108 H-1). 전에는 그 게이트만 목록 없이 만들어져, task 파일 아래에서 설정·프로필이 준 항목 밑의 `read_file`이 계획 수행 중에 허용되었다.
-  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/cli/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
+  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/app/input/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
   - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
 - **명령 금지(R-5)**
   - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
@@ -1416,7 +1416,7 @@ codaryn revert --workspace <dir> --run <runId|latest> [--dry-run | --allow-unsaf
 - task 파일의 `model: { provider: "openai", model?, maxOutputTokens? }`의 출력 토큰은 그 제공자의 범위로 검사한다.
 - 고른 제공자가 API 제공자이면 `limits.maxTotalTokens`는 숫자여야 한다(11절 "한도"의 anthropic 규칙과 같다). 오류 글은 제공자 이름을 적는다.
 
-### 19.3 해석 (`resolveApiSettings`, `src/cli/settings.ts`)
+### 19.3 해석 (`resolveApiSettings`, `src/app/input/settings.ts`)
 
 모두 고른 제공자 몫으로 해석한다. 그 제공자의 설정은 `providers.<이름>`이고, anthropic은 그것이 없으면 최상위 필드다(`providerSettingsOf`). 다른 제공자의 항목은 읽지 않는다.
 

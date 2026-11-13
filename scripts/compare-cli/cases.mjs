@@ -415,4 +415,29 @@ export const CASES = [
       (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
     ],
   },
+  // U-254 (the CLI migration's C-1, the app layer's types into the contracts): `changes` is the CLI's
+  // one command that goes through the app layer (src/cli/changes.ts, CodarynApp.changes, toCliError).
+  // Its forms the other cases leave out: the quick form, `latest`, a run that does not exist and a run
+  // id that is not one, in text and JSON, in both languages.
+  {
+    name: "changes-forms",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [
+      run(),
+      { args: ["changes", "--workspace", "work", "--run", "latest"] },
+      { args: ["changes", "--workspace", "work", "--run", "latest", "--json"] },
+      { args: ["changes", "--task", "task.json", "--run", "latest"] },
+      { args: ["changes", "--workspace", "work", "--run", NO_RUN] },
+      { args: ["changes", "--workspace", "work", "--run", NO_RUN, "--json"] },
+      { args: ["changes", "--workspace", "work", "--run", "../x"] },
+      { args: ["changes", "--workspace", "work", "--run", "../x", "--json"] },
+      { args: ["changes", "--workspace", "work"] },
+    ],
+  },
+  {
+    name: "changes-forms-ko",
+    lang: "ko",
+    setup: documentSetup(DOCUMENT_STEPS),
+    steps: [run(), { args: ["changes", "--workspace", "work", "--run", "latest"] }, { args: ["changes", "--workspace", "work", "--run", NO_RUN] }],
+  },
 ];

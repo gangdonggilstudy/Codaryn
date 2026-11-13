@@ -1,6 +1,6 @@
 # Codaryn 아키텍처
 
-상태: 2026-11-13, main `ac7dd6d` 기준.
+상태: 2026-11-13, main `f8fb993` 기준.
 - **main에 있는 것:**
   - 단계 0 설계(2026-11-12 Codex 채택)를 바탕으로 한 단계 1a, 1b(모의 API까지), 2, 3의 오프라인 기구와 `codaryn models`
   - 두 번째 제공자 OpenAI(DR-31)와 두 제공자가 함께 쓰는 전송 `src/model/http`
@@ -10,7 +10,7 @@
   - 실행 중 권한 확인(판정 `ask`, DR-3)
   - 단계 4의 P1 묶음(`query_table`, `analyze-private` 등)
   - CLI의 앱 계층 이행(CLI에서 앱 계층을 거치는 명령은 `changes`뿐이다). 기능 뒤에 직렬로 한다(DR-65)
-  - 줄 프로토콜의 CLI 연결과 VS Code 확장(DR-20으로 만들지 않는다). 남아 있는 코드는 지우기로 했다(DR-66, U-81)
+  - 줄 프로토콜의 CLI 연결과 VS Code 확장(DR-20으로 만들지 않는다). 남아 있던 코드는 지웠다(DR-66, U-81)
   - GUI 설치 패키지(GU-9). 기능이 끝난 뒤 다시 묻는다(DR-67)
 - **실제 Anthropic API와 실제 OpenAI API는 한 번도 호출하지 않았다**(`tests/live` 미실행). 모든 검증은 대본 모델, 가짜 HTTP 서버, 실제 CLI 프로세스로 한 오프라인 검증이다.
 - 이 문서의 대조는 [설계 대조 조사](reviews/2026-11-13-design-gap-survey.md) 2.4절, 단계별 판정은 같은 조사 3절을 따른다.
@@ -25,8 +25,8 @@
   - **없음**: 결정도 코드도 없다.
   - **중단**: 결정으로 만들지 않기로 했다.
 - 확인 방법
-  - **코드 기준**: main `ac7dd6d`의 소스를 읽어 확인했다.
-  - **실제 CLI**: main `ac7dd6d`를 빌드한 CLI를 임시 폴더에서 실행해 확인했다(대본 모델, 키 없음, 닫힌 루프백 포트).
+  - **코드 기준**: main `f8fb993`의 소스를 읽어 확인했다.
+  - **실제 CLI**: main `f8fb993`를 빌드한 CLI를 임시 폴더에서 실행해 확인했다(대본 모델, 키 없음, 닫힌 루프백 포트).
   - 표시가 없는 "구현"은 앞선 판의 시험과 검토가 근거다([개발 진행 현황](progress.md)).
 - 근거: [decisions.md](decisions.md). 결정 번호(C-, R-, S-, T-, N-, AC-D, VX-D, GT-D, DR- 등)의 원문은 `docs/work-orders/`와 각 설계 문서의 결정 표다. "AC 5.7"은 [어댑터 계약](design/adapter-contract.md) 5.7절이다.
 
@@ -40,7 +40,7 @@
     - 명령과 검증기를 자식 프로세스로 실행하는 것은 지금과 같다(7절).
     - 알려진 예외(한계): 허용된 명령이 분리해 띄운 자손은 실행과 CLI보다 오래 살 수 있다(T-2, 7절). Codaryn이 띄우는 상주 프로세스가 아니라 사용자가 허용한 명령의 동작이다. OS 격리가 없어서 막지 못한다.
   - 단일 패키지의 예외: 독립 GUI는 같은 저장소의 `gui/`에 별도 매니페스트(`gui/package.json`)로 둔다. 루트 `package.json`은 GUI 의존성을 갖지 않는다. **구현(코드 기준)**
-    - VS Code 확장의 `vscode/`(VX-D3)는 **중단**(DR-20)이다. 그 전에 커밋된 `vscode/src/core`가 매니페스트 없이 남아 있고, 그 시험과 함께 지우기로 했다(DR-66, U-81).
+    - VS Code 확장의 `vscode/`(VX-D3)는 **중단**(DR-20)이다. 그 전에 커밋된 `vscode/src/core`는 그 시험과 함께 지웠다(DR-66, U-81).
 - [선택] 엔진은 하나다. CLI와 독립 GUI는 엔진을 부르는 어댑터이며 작업 논리를 갖지 않는다(M-2). **일부**
   - 어댑터가 함께 쓰는 실행 준비(입력 해석, 실행 전 보안 검사, 조립, 실행 수명)를 앱 계층 `src/app`에 둔다(AC-D1). `src/app`은 있고, GUI 엔진 호스트는 앱 계층만 부른다(`gui/src/engine-host/host.ts`).
   - CLI의 이행(어댑터 계약 7절의 이행 2~5: run, 진행·취소, report·revert·runs, doctor·models)은 하지 않았다. CLI에서 앱 계층을 거치는 명령은 `changes`뿐이다(`src/cli/main.ts`, 코드 기준). 사용자 결정으로 이행은 "최종 설계까지 구현"에 들지만, 실행 중 권한 확인·GUI 남은 항목·사용성 지적 뒤에 직렬로 하고, 단위마다 고정 출력이 글자까지 같아야 병합한다(DR-65).
@@ -57,7 +57,7 @@
 | 모듈 | 책임 | 알지 못해야 하는 것 | 상태 |
 | --- | --- | --- | --- |
 | `contracts` | 모듈 사이의 타입·상수·한도(계약). 역할 1(계약 담당)만 바꾼다 | 구현 | 구현 |
-| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(`cli/security`), 조립(`assemble.ts`), 5절의 명령, 사람용 출력(`cli/human`), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 줄 프로토콜 `cli/protocol`은 파일만 있고 `main.ts`에 연결되지 않았다(DR-20, 코드 기준). 지우기로 했다(DR-66, U-81) |
+| `cli` | 인자 해석, 설정·task 해석, 실행 전 보안 검사(`cli/security`), 조립(`assemble.ts`), 5절의 명령, 사람용 출력(`cli/human`), 진행 표시, 취소 신호 | 모델 형식, 도구 내부 | 구현. 연결되지 않았던 줄 프로토콜 코드 `cli/protocol`은 지웠다(DR-20, DR-66, U-81) |
 | `engine` | 상태 기계, 모델↔도구 반복, 한도, 가림 적용 순서, 검증 회차, 재수정 판단, 무결성·상태 디렉터리 점검 시점(DR-38), 에이전트의 마지막 답(`final-message.ts`, DR-47), 승인한 계획의 적용(`apply.ts`, GT-D4) | 파일 시스템, Git, 테스트 러너, 제공자 형식 | 구현 |
 | `model` | 제공자 중립 `complete`·모델 목록. `anthropic`(Messages API), `openai`(Responses API, DR-31), 두 제공자가 함께 쓰는 전송 `http`, 대본 제공자 `scripted.ts` | 파일 시스템, 정책 | 구현. 실제 API 미확인 |
 | `tools` | 내장 도구 네 개(`read_file`, `search_files`, `write_file`, `run_command`), 작업 종류 도구 두 개(`inspect_files`, `propose_plan`, `workflow-tools.ts`), 명령 실행기(`command-runner.ts`, Windows 실행 `windows-launch.ts`), 계획 적용기(`plan-executor.ts`, `plan-files.ts`) | 모델 제공자 | 구현 |
@@ -75,7 +75,7 @@
   - 엔진은 `contracts`만 import한다(코드 기준). `cli/assemble.ts`와 `app/assemble.ts`가 모듈을 만들어 `EngineDeps`로 엔진에 넣는다. **구현**
   - 목표는 `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`다. 지금은 `app` → `cli`의 역방향 의존이 있다(AC-D16). **일부**
   - "다른 모듈은 각 모듈의 `index.ts` 공개 export로만 쓴다"는 규칙도 **일부**다. 앱 계층이 `src/cli`의 파일을 직접 가져다 쓴다.
-  - `src` 밖의 어댑터: `gui/`(Electron, DR-20). 엔진 호스트는 빌드한 엔진(`dist/src`)을 불러 앱 계층을 쓴다. `vscode/src/core`는 중단(DR-20)이고 지우기로 했다(DR-66).
+  - `src` 밖의 어댑터: `gui/`(Electron, DR-20). 엔진 호스트는 빌드한 엔진(`dist/src`)을 불러 앱 계층을 쓴다. `vscode/src/core`는 지웠다(DR-20, DR-66, U-81).
 - 작업 유형(워크플로)
   - 작업 종류 정의(도구 묶음, 지시문, 계획 방식, 완료 방식, 기본값과 상한)를 내장(`src/workflows`)과 사용자 설정 `workflows`에 두고, task의 `workflowRef`나 간편 형식의 `--workflow <id>`로 고른다(GT-D1, GT-D2). **구현**
   - CLI가 정의를 펼쳐 명시적 task 필드로 엔진에 넣는다. 엔진은 정의 이름을 모른다.
@@ -220,7 +220,7 @@
 - 확인 질문 통로(AC 5.7)는 실행 중 권한 확인 전용이다(DR-1). 형태는 DR-3(3절)이고 엔진 연결은 단계 5 몫이다. **결정만**
 - 계획 승인은 실행 사이 확인 하나다(DR-1, GT-D4). 앱 계층에 `plan`, `applyPlan(runId, digest)`, `review`가 있고, CLI에는 같은 이름의 명령이 있다. **구현**
 - 변경 비교는 다시 가린 비교만 내준다. 비교는 앱 계층의 `changes`가 만들고, CLI `changes`와 GUI가 이것을 쓴다. 어댑터는 스냅샷 저장 형식을 직접 읽지 않는다(DR-7). **구현**
-- 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, AC-D7, AC-D8)은 **중단**(DR-20)이다. `src/cli/protocol/`은 남아 있지만 CLI 명령에 연결되지 않았고, 지우기로 했다(DR-66, U-81). `--cancel-file`은 `run`과 `apply`에 있다(실제 CLI, `--help`).
+- 프로세스 밖 어댑터용 줄 프로토콜(`--events jsonl`, `--confirm stdio`, AC-D7, AC-D8)은 **중단**(DR-20)이다. 연결되지 않았던 `src/cli/protocol/`은 지웠다(DR-66, U-81). `--cancel-file`은 `run`과 `apply`에 있다(실제 CLI, `--help`).
 
 단계 4 엔진 변경([범용 작업](design/general-tasks.md) 4.3절, 이유는 [decisions.md](decisions.md) 3절). **구현**
 
@@ -263,7 +263,7 @@ revert --run <적용 runId>         이동을 되돌리고 보관함의 파일�
 | `report [--workspace <d>] --run <id\|latest> [--json]` | result.json과 journal만 읽어 보고서를 만든다. 잠금을 잡지 않는다(U-5, X-2) | 구현 |
 | `doctor [--config] [--vars-file] [--task \| --workspace] [--profile] [--json]` | 네트워크 없이 14개 항목을 점검한다(실제 CLI: `node_version`, `config_file`, `vars_file`, `task_file`, `api_key`, `model`, `limits`, `file_locations`, `commands`, `workspace`, `install_dir`, `integrity_paths`, `language`, `lock`). 키 값은 출력하지 않는다(U-6, W-5, X-1, X-3) | 구현 |
 | `models [--provider <name>] [--json] [--use <번호\|id>]` | 제공자의 모델 목록 조회와 선택(Y-1~Y-4, SP-6). 키와 실제 접속이 필요하다 | 구현(가짜 서버 통합 `y01`, `o04`). 실제 API 미실행 |
-| `init [--config] [--workspace] [--json]` | 기본 설정 위치에 설정 파일을 만든다. 키는 받지 않는다(N-2) | 구현 |
+| `init [--config] [--workspace] [--json]` | 기본 설정 위치에 설정 파일을 만든다. 키는 받지 않는다(N-2). 터미널에서는 제공자를 묻고 그 제공자의 형식으로 쓴다. 터미널이 아니거나 `--json`이면 예전과 같다(U-26, UXM-11, 코드 기준) | 구현 |
 | `runs [--workspace <d>] [--limit <n>] [--json]` | 실행 목록(N-7, N-16). `--run latest`는 가장 최근 실행이다(N-18, N-23) | 구현 |
 | `plan`, `apply`, `review` | 계획 보기, 승인한 계획의 적용, 사람 확인의 판정을 `review.json`에 기록(GT-D4, GT-D6). `review`는 결과 상태를 바꾸지 않는다 | 구현 |
 | `changes (--task \| --workspace) --run <id\|latest> [--json]` | 다시 가린 변경 비교(DR-7, DR-14). 앱 계층을 거친다 | 구현 |
@@ -482,7 +482,7 @@ OpenAI(`src/model/openai/index.ts`, SP-5, DR-31. 코드 기준)
 
 ## 11. 결정 필요
 
-| 번호 | 선택지 | 권고 | 지금(main `ac7dd6d`) |
+| 번호 | 선택지 | 권고 | 지금(main `f8fb993`) |
 | --- | --- | --- | --- |
 | A-1 | 키 형식 검사(S-11)를 실행 전 단계로 올릴지. 지금은 잠금·journal을 만든 뒤 실패한다 | 올린다. run 사전 단계와 doctor에서 같은 함수로 검사해 실행 디렉터리를 만들지 않는다 | 없음. 검사는 제공자 안에 있다(코드 기준) |
 | A-2 | 무결성 계약에 `run_end` 단계를 둘지. W-1 종료 점검이 `before_verify`/`after_verify` 이름으로 기록돼 report에서 구분되지 않는다 | 둔다(계약 담당). 기록 해석이 명확해진다 | 없음. `INTEGRITY_PHASES`에 `run_end`가 없다(상태 디렉터리 점검에는 있다) |

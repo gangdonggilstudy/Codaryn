@@ -106,6 +106,10 @@ export const EN_MESSAGES: MessageTexts = {
   "progress.tool_denied": "{tool} — denied ({permission}/{code})",
   "progress.tool_rejected": "{tool} — rejected by a check of the call ({code})",
   "progress.tool_failed": "{tool} — failed ({code})",
+  "progress.confirmation_allowed": "permission question — allowed by the person, for this call only",
+  "progress.confirmation_denied.user": "permission question — denied by the person",
+  "progress.confirmation_denied.default": "permission question — denied by default (no answer, nobody could be asked, or the time limit ended the wait)",
+  "progress.confirmation_denied.cancelled": "permission question — denied: the run was cancelled while it waited",
   "progress.command_exited": "command ran — exit code {exitCode}",
   "progress.command_timed_out": "command ran — stopped at its time limit",
   "progress.file_created": "created",
@@ -233,6 +237,7 @@ export const EN_MESSAGES: MessageTexts = {
 
   "prompt.yes_no_default_yes": "[Y/n]",
   "prompt.yes_no_default_no": "[y/N]",
+  "confirm.question.command": "Allow a command for this one call? With no answer it is denied. Only its executable and its number of arguments ({count}) are shown, not the arguments themselves. Executable",
 
   "language.chosen": "message language {language}, set by: {source}",
   "language.env_ignored": "CODARYN_LANG is neither ko nor en, so it was ignored.",
@@ -550,6 +555,7 @@ export const EN_MESSAGES: MessageTexts = {
   "denial.network_denied": "network not allowed",
   "denial.destructive_denied": "destructive action not allowed",
   "denial.restore_denied": "restoring masked values not allowed",
+  "denial.confirmation_required": "not allowed by the person during the run",
   "denial.protected_path": "protected path",
   "denial.plan_action_not_allowed": "plan action not allowed",
   "denial.unknown_tool": "unknown tool",

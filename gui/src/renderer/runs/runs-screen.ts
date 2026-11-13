@@ -82,7 +82,7 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   item.append(el("span", facts.filter((fact) => fact !== "").join(" · "), { class: "run-facts" }), el("span", run.taskId, { class: "task-id" }), el("code", run.runId, { class: "run-id", lang: "en" }), copyControl(t, t.format("copy.runId"), () => copy(run.runId), { "data-copy": run.runId }));
   if (run.reverted !== null) item.append(el("span", t.format(run.reverted.status === "partial" ? "runs.revertedPartial" : "runs.reverted", { time: localDateTime(run.reverted.at) }), { class: "reverted" }));
   if (run.revertRecordDamaged) item.append(el("span", t.format("runs.revertDamaged"), { class: "damaged" }));
-  // UXM-14, DR-38: as the CLI's runs says it.
+  // UXM-14, DR-38: as the CLI's runs says it (U-157, U-163: a short mark; its explanation is one line under the list).
   if (run.recordsChanged === true) item.append(el("span", t.format("runs.recordsChanged"), { class: "damaged", "data-records-changed": "true" }));
   // U-61 (U-16, R-55): what became of this plan's apply, by the contract's rule, in the CLI's runs words.
   if (run.planApply != null) {
@@ -120,6 +120,8 @@ export function runsScreen(deps: RunsDeps): RunsScreen {
         return;
       }
       const list = el("ul", undefined, { id: "runs-list", class: "runs" });
+      // U-163: the line that says what the rows' records-changed mark means (empty when no row has it).
+      const note = el("div", undefined, { id: "runs-notes" });
       const panel = el("section", undefined, { id: "revert-panel", "aria-live": "polite" });
       const head = el("div", undefined, { class: "screen-head" });
 
@@ -187,6 +189,7 @@ export function runsScreen(deps: RunsDeps): RunsScreen {
         const reply = asRuns(await api.listRuns(workspace.handle));
         if (!reply.ok) {
           list.replaceChildren();
+          note.replaceChildren();
           list.setAttribute("data-runs-ready", "error");
           panel.replaceChildren(errorBox(t, reply.code));
           return;
@@ -203,6 +206,8 @@ export function runsScreen(deps: RunsDeps): RunsScreen {
         };
         list.replaceChildren(...(reply.runs.length === 0 ? [el("li", t.format("runs.empty"), { class: "empty" })] : reply.runs.map((run) => row(t, run, (id) => void showPreview(id), (id) => openWithForm(id, "plan"), (id) => openWithForm(id, "changes"), (id) => openWithForm(id, "report"), (id) => openWithForm(id, "review"), (id) => api.copyText(id)))));
         if (reply.omitted > 0) list.append(el("li", t.format("runs.omitted", { count: String(reply.omitted) }), { class: "omitted" }));
+        // U-163 (U-157): what the short mark means, once under the list when a row has it (the CLI's line under its table).
+        note.replaceChildren(...(marked.size > 0 ? [el("p", t.format("runs.recordsChangedNote"), { class: "notice", id: "runs-records-changed-note" })] : []));
         list.setAttribute("data-runs-ready", String(reply.runs.length));
         // U-61: a preview asked from a result, once the list (which the main process checks it against) is in.
         const chosen = pendingPreview;
@@ -211,7 +216,7 @@ export function runsScreen(deps: RunsDeps): RunsScreen {
       };
 
       head.append(el("h2", t.format("runs.titleIn", { name: workspace.name })), button(t.format("runs.refresh"), () => void load(), { id: "runs-refresh" }));
-      root.replaceChildren(head, list, panel);
+      root.replaceChildren(head, list, note, panel);
       void load();
     },
   };

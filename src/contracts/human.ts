@@ -50,7 +50,7 @@ import type { ChangedFileState, ChangedFileUnavailableReason } from "./changes.j
 import { PLAN_ACTION_KINDS, PLAN_STATUSES } from "./plan.js";
 import type { PlanActionKind, PlanStatus } from "./plan.js";
 import { REVIEW_VERDICTS } from "./workflow.js";
-import type { ReviewVerdict } from "./workflow.js";
+import type { PolicyNarrowing, ReviewVerdict } from "./workflow.js";
 
 export const MESSAGE_LANGUAGES = ["ko", "en"] as const;
 export type MessageLanguage = (typeof MESSAGE_LANGUAGES)[number];
@@ -804,7 +804,8 @@ export const FIXED_MESSAGES = {
   // progress line: allowed for this call once, or `progress.confirmation_denied.<by>`.
   "confirm.question.command": { count: "count" },
   "progress.confirmation_allowed": {},
-  // DR-41: lines at the run's start from run_started.policyNarrowings. Counts only.
+  // DR-41: lines at the run's start from run_started.policyNarrowings. Counts only. U-140 (UXM-18):
+  // the end summary repeats them with the same texts (RunSummaryContext.policyNarrowings).
   "progress.workflow_policy.commands_dropped": { count: "count" },
   "progress.workflow_policy.commands_narrowed": { count: "count" },
   "progress.workflow_policy.plan_actions_dropped": { count: "count" },
@@ -1231,6 +1232,13 @@ export type DoctorText = {
  *   `.unanswered` when couldAsk, else `.unasked`. U-137 (R88b-L1): "among deniedCommandCalls" holds also
  *   for a call whose run ended at its question (cancelled, or the time limit): the engine records its
  *   denied `tool_decision` after the answer (journal.ts), so the hint still counts the other calls.
+ * - policyNarrowings (U-140, UXM-18): what the task type's own rules left out of the given policy
+ *   and checks (ResolvedTaskSpec.policyNarrowings, as `run_started.policyNarrowings` records them),
+ *   so the end summary tells it once more: the start line's notice is easy to pass over. One line
+ *   per narrowing, in the record's order, with the start line's text (`progress.workflow_policy.<kind>`,
+ *   with `{count}` where the kind has one). Kinds and counts only, never a rule. Optional: absent or
+ *   empty says nothing was left out (or a caller that does not pass it), and no line is written.
+ *   `--quiet` writes no summary, as before.
  * - failedToolCalls (U-18, AXM-4): the failed calls of this run, `summary.failed` when above 0.
  *   Optional (PM, after e94decc): absent counts as 0, so no line; `run` gives it.
  *   The failed-call rule, shared by the progress line (`progress.tool_failed`), this count and the
@@ -1248,6 +1256,7 @@ export interface RunSummaryContext {
   readonly deniedCommandCalls: number;
   readonly failedToolCalls?: number;
   readonly confirmationDenied?: { readonly user: number; readonly default: number; readonly cancelled: number; readonly couldAsk: boolean };
+  readonly policyNarrowings?: readonly PolicyNarrowing[];
   readonly policySource: "task" | "config";
   readonly workspaceShown?: ShownWorkspace;
 }

@@ -14,6 +14,7 @@
 
 import { existsSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type {
   AnthropicProviderDeps,
   ApiProviderDeps,
@@ -44,7 +45,7 @@ import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "../cli/assemble.js";
 import { createCancelSource } from "../cli/cancel.js";
-import { defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
+import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "../cli/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
 import { runInit } from "../cli/init.js";
@@ -69,6 +70,8 @@ import { listWorkspaceDirIn, workspaceDirArguments } from "./workspace-dir.js";
 import { listRunEventsIn, runEventsArguments } from "./run-events.js";
 import { checkApplyArguments, checkApplyIn } from "./check-apply.js";
 import type { ApplyCheckOperations } from "./check-apply.js";
+import { readWorkspaceTextArguments, readWorkspaceTextIn, writeWorkspaceTextArguments, writeWorkspaceTextIn } from "./workspace-text.js";
+import type { WorkspaceTextOperations, WorkspaceTextSource } from "./workspace-text.js";
 import { copyEnvironment, loadVarsInto } from "./environment.js";
 import { INTERNAL_ERROR, appError, fromCliError } from "./errors.js";
 import { deliver, journalWithEvents } from "./events.js";
@@ -110,6 +113,10 @@ import type {
   SettingsChangeProposal,
   SettingsChangeRequest,
   WorkspaceDirListing,
+  ReadWorkspaceTextRequest,
+  WorkspaceText,
+  WorkspaceTextWritten,
+  WriteWorkspaceTextRequest,
   SettingsSuggestions,
   SettingsSuggestionsRequest,
   SettingsView,
@@ -150,6 +157,8 @@ export interface AppHooks {
   readonly cleanupOperations?: CleanupOperations;
   /** U-91: the check's executor file operations, probe removal and lock release. Tests give ones that fail. */
   readonly applyCheck?: ApplyCheckOperations;
+  /** U-172: writeWorkspaceText's lock release, and a pause at each check (V-1's races). Tests only. */
+  readonly workspaceText?: WorkspaceTextOperations;
 }
 
 /** The `codaryn run` arguments for a request. The CLI parser judges them (values, combinations). */
@@ -353,6 +362,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
         readonly protectedPaths: readonly string[] | undefined;
         readonly keys: readonly string[];
         readonly task: ResolvedTaskSpec;
+        /** U-172: the config, task and variables files these settings name, absolute (the config as prepareTask chose it). */
+        readonly settingsFiles: readonly string[];
       }
     | { readonly ok: false; readonly error: AppError }
   > {
@@ -382,6 +393,12 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
     const ready = await prepareTask(io, args, notes, { readOnly: true });
     if (!("prepared" in ready)) return { ok: false, error: ready.output.kind === "error" ? fromCliError(ready.output) : INTERNAL_ERROR };
+    // U-172: with the variables file loaded, as prepareTask chose the config.
+    const settingsFiles: string[] = [];
+    if (settings.input.kind === "task") settingsFiles.push(path.resolve(environment.cwd, settings.input.taskPath));
+    if (settings.varsFile !== null) settingsFiles.push(path.resolve(environment.cwd, settings.varsFile));
+    const config = chooseConfigFile({ argument: settings.configPath, env, cwd: environment.cwd, defaultLocation: defaultConfigOf() });
+    if (config.ok && config.candidate !== null) settingsFiles.push(config.candidate.path);
     return {
       ok: true,
       secrets: ready.prepared.secrets,
@@ -389,6 +406,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       protectedPaths: ready.prepared.task.policy.protectedPaths,
       keys: knownKeyValues(env),
       task: ready.prepared.task,
+      settingsFiles,
     };
   }
 
@@ -420,6 +438,50 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return await listWorkspaceDirIn(source, checked.dir, checked.offset, checked.limit);
     } catch {
       return { ok: false, error: appError("internal_error", "the directory could not be listed") };
+    }
+  }
+
+  /** U-172: what the settings resolve to for a workspace text file. */
+  async function workspaceTextSource(settings: TaskForm): Promise<{ readonly ok: true; readonly source: WorkspaceTextSource } | { readonly ok: false; readonly error: AppError }> {
+    const probe = await readingSecrets(settings);
+    if (!probe.ok) return probe;
+    const root = await workspaceRootOf(probe.workspaceRoot, environment.cwd);
+    if (!root.ok) return root;
+    return {
+      ok: true,
+      source: { workspaceRoot: root.value, privacy: createPrivacyGateway({ secrets: probe.secrets }), keys: probe.keys, protectedPaths: probe.protectedPaths, settingsFiles: probe.settingsFiles },
+    };
+  }
+
+  /** U-172 (DR-72, adapter-contract 5.15): a workspace text file for a person, and whether it can be edited here (workspace-text.ts). */
+  async function readWorkspaceText(request: ReadWorkspaceTextRequest): Promise<AppCallOutcome<WorkspaceText>> {
+    // The request first: nothing is read for one that does not fit.
+    const checked = readWorkspaceTextArguments(request);
+    if (!checked.ok) return checked;
+    try {
+      const ready = await workspaceTextSource(request.settings);
+      if (!ready.ok) return ready;
+      return await readWorkspaceTextIn(ready.source, checked.path, hooks.workspaceText);
+    } catch {
+      return { ok: false, error: appError("internal_error", "the file could not be read") };
+    }
+  }
+
+  /** U-172 (DR-72, adapter-contract 5.15): a person's edit, judged again under the workspace lock; no run record (workspace-text.ts). */
+  async function writeWorkspaceText(request: WriteWorkspaceTextRequest): Promise<AppCallOutcome<WorkspaceTextWritten>> {
+    // The request first: nothing is read or locked for one that does not fit.
+    const checked = writeWorkspaceTextArguments(request);
+    if (!checked.ok) return checked;
+    try {
+      const ready = await workspaceTextSource(request.settings);
+      if (!ready.ok) return ready;
+      return await writeWorkspaceTextIn(
+        { ...ready.source, clock: environment.clock, randomBytes: environment.randomBytes },
+        { path: checked.path, text: checked.text, baseDigest: checked.baseDigest },
+        hooks.workspaceText,
+      );
+    } catch {
+      return { ok: false, error: appError("internal_error", "the file could not be written") };
     }
   }
 
@@ -836,6 +898,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     doctor,
     changes,
     listWorkspaceDir,
+    readWorkspaceText,
+    writeWorkspaceText,
     listRunEvents,
     listModels,
     selectModel,

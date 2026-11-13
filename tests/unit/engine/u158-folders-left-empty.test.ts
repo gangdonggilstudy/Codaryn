@@ -77,7 +77,7 @@ function deps(actions: readonly ResolvedPlanAction[], inventory: InventoryChecke
     privacy: fakePrivacy(),
     verifiers: new FakeVerifiers(),
     inventory,
-    journal: { append: async (event) => void events.push(event), close: async () => undefined },
+    journal: { append: async (event) => (events.push(event), { seq: events.length, at: "1970-01-01T00:00:00.000Z", runId: "apply-run", ...event }), close: async () => undefined },
     clock: new FakeClock(),
     signal: controller.signal,
     markApplied: async () => "marked",

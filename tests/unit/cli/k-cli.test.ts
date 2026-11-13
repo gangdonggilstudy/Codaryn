@@ -271,7 +271,7 @@ describe("U-8 progress lines", () => {
 
   test("lines are masked with the run's secrets and a failing write is ignored", async () => {
     const appended: JournalEvent[] = [];
-    const inner: Journal = { append: async (event) => void appended.push(event), close: async () => {} };
+    const inner: Journal = { append: async (event) => (appended.push(event), { seq: appended.length, at: "1970-01-01T00:00:00.000Z", runId: "k-run", ...event }), close: async () => {} };
     const privacy = createPrivacyGateway({ secrets: [FAKE_SECRET] });
     const lines: string[] = [];
     const journal = withProgress(inner, privacy, (line) => lines.push(line));

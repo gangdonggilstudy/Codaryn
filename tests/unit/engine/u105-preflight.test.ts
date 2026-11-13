@@ -13,6 +13,7 @@ import { describe, test } from "node:test";
 
 import { APPLY_JOURNAL_ENTRY_TYPES, JOURNAL_EVENT_TYPES, PLAN_ACTION_DESCRIPTORS, asRawText, planActionShown } from "../../../src/contracts/index.js";
 import type {
+  ApplyJournalEntryRecord,
   ApplyDeps,
   ApplyJournalEntry,
   InventoryChecker,
@@ -86,8 +87,9 @@ function stored(action: ResolvedPlanAction): StoredPlanAction {
 
 class ApplyRecords {
   readonly events: ApplyJournalEntry[] = [];
-  async append(event: ApplyJournalEntry): Promise<void> {
+  async append(event: ApplyJournalEntry): Promise<ApplyJournalEntryRecord> {
     this.events.push(event);
+    return { seq: this.events.length, at: new Date(0).toISOString(), runId: "fake-apply", ...event };
   }
   async close(): Promise<void> {}
 }

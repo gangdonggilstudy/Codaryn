@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { CodarynApi } from "../../src/renderer/api.js";
-import { OpenCheck } from "../../src/renderer/workspace/open-check.js";
+import { OpenCheck, heldFor } from "../../src/renderer/workspace/open-check.js";
 import type { OpenCheckState } from "../../src/renderer/workspace/open-check.js";
 import { toDoctorView } from "../../src/shared/ipc.js";
 
@@ -58,4 +58,50 @@ test("U-247: checking the same workspace again keeps a held lock held until the 
   assert.deepEqual([now().phase, held()], ["checking", undefined], "another workspace starts without it");
   answer(3, "doctor.lock.none");
   await other;
+});
+
+/**
+ * Codex V-27 L-1: a check again that ends in a failure (the host timed out or ended, a host error) said
+ * nothing about the lock, yet the carried "held" was dropped and the run button came on; and a doctor
+ * call that rejected left the check "checking" for good. A failure now keeps "held" (only a free answer
+ * frees it), is shown as the check's error, and the next check recovers.
+ */
+test("U-247 (V-27 L-1): a check again that fails or rejects keeps a held lock held until a free answer", async () => {
+  for (const failure of ["adapter_timeout", "adapter_host_exited", "host_error", "rejected"] as const) {
+    const answers: { resolve: (value: unknown) => void; reject: (error: unknown) => void }[] = [];
+    const api = { doctor: () => new Promise((resolve, reject) => answers.push({ resolve, reject })) } as unknown as CodarynApi;
+    const check = new OpenCheck(api);
+    const now = (): OpenCheckState => check.state;
+    const first = check.run({ handle: HANDLE, name: "ws" });
+    answers[0]?.resolve({ ok: true, view: toDoctorView(doctorOutput("doctor.lock.held")), labels: {}, workspaceName: "ws" });
+    await first;
+    const again = check.run({ handle: HANDLE, name: "ws" });
+    if (failure === "rejected") answers[1]?.reject(new Error("the channel broke"));
+    else answers[1]?.resolve({ ok: false, code: failure });
+    await again;
+    const failed = now();
+    assert.equal(failed.phase, "error", `${failure}: shown as the check's error`);
+    assert.equal(failed.phase === "error" ? failed.code : null, failure === "rejected" ? "host_error" : failure);
+    assert.equal(heldFor(failed, HANDLE), true, `${failure}: still held, the run button stays off`);
+    assert.equal(heldFor(failed, OTHER), false, "for that workspace only");
+    // A second failure keeps it too; a free answer frees it.
+    const third = check.run({ handle: HANDLE, name: "ws" });
+    answers[2]?.resolve({ ok: false, code: "host_error" });
+    await third;
+    assert.equal(heldFor(now(), HANDLE), true, `${failure}: held through a second failure`);
+    const fourth = check.run({ handle: HANDLE, name: "ws" });
+    answers[3]?.resolve({ ok: true, view: toDoctorView(doctorOutput("doctor.lock.none")), labels: {}, workspaceName: "ws" });
+    await fourth;
+    assert.deepEqual([now().phase, heldFor(now(), HANDLE)], ["done", false], `${failure}: recovered by the next check`);
+  }
+});
+
+test("U-247 (V-27 L-1): a failure without a held lock before it holds nothing; a rejection never leaves it checking", async () => {
+  const api = { doctor: () => Promise.reject(new Error("no host")) } as unknown as CodarynApi;
+  const check = new OpenCheck(api);
+  await check.run({ handle: HANDLE, name: "ws" });
+  const state: OpenCheckState = check.state;
+  assert.deepEqual([state.phase, state.phase === "error" ? state.code : null, heldFor(state, HANDLE)], ["error", "host_error", false]);
+  assert.equal(heldFor({ phase: "none" }, HANDLE), false);
+  assert.equal(heldFor({ phase: "checking", handle: HANDLE }, HANDLE), false);
 });

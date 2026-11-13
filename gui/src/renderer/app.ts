@@ -27,7 +27,7 @@ import { setupScreen } from "./setup/setup-screen.js";
 import { settingsScreen } from "./settings/settings.js";
 import { homeScreen } from "./workspace/home.js";
 import { TreeView } from "./workspace/tree-view.js";
-import { OpenCheck } from "./workspace/open-check.js";
+import { OpenCheck, heldFor } from "./workspace/open-check.js";
 
 async function start(): Promise<void> {
   const root = document.getElementById("app");
@@ -94,9 +94,8 @@ async function start(): Promise<void> {
   const run = new RunModel();
   // U-68: this window's own run in the open workspace holds its lock; that is not another run's.
   const ownRunHere = (): boolean => runWorkspace !== null && runWorkspace === current?.handle && run.phase !== "idle" && run.phase !== "done";
-  // U-247: while the same workspace is checked again after the lock was found held, it counts as held still.
-  const lockedByOther = (): boolean =>
-    (openCheck.state.phase === "done" || openCheck.state.phase === "checking") && openCheck.state.lockHeld === true && openCheck.state.handle === current?.handle && !ownRunHere();
+  // U-247, Codex V-27 L-1: held until an answer says free (a check going on or failed keeps it).
+  const lockedByOther = (): boolean => heldFor(openCheck.state, current?.handle) && !ownRunHere();
   const runGoing = (): boolean => run.phase !== "idle" && run.phase !== "done";
   // U-64 (3.12, 4.4): when the engine ended (or did not start), its card and the restart button.
   const restartEngine = async (): Promise<string> => {

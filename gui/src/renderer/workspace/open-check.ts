@@ -26,8 +26,17 @@ export type OpenCheckState =
    * lock held, so a screen shown meanwhile keeps the run button off until the new answer says otherwise.
    */
   | { readonly phase: "checking"; readonly handle: string; readonly lockHeld?: true }
-  | { readonly phase: "error"; readonly handle: string; readonly code: string }
+  /** Codex V-27 L-1: a failed check says nothing of the lock, so a held lock before it stays held (`lockHeld`). */
+  | { readonly phase: "error"; readonly handle: string; readonly code: string; readonly lockHeld?: true }
   | { readonly phase: "done"; readonly handle: string; readonly reply: DoctorDone; readonly lockHeld: boolean };
+
+/**
+ * U-247, Codex V-27 L-1: whether the check counts the workspace `handle`'s lock as held by another
+ * process: its answer said so, or a check of it since (still going, or failed) has not said it is free.
+ */
+export function heldFor(state: OpenCheckState, handle: string | undefined): boolean {
+  return state.phase !== "none" && state.lockHeld === true && state.handle === handle;
+}
 
 /** Whether the doctor's lock check says a live process holds the workspace's lock. */
 export function lockHeld(reply: DoctorDone): boolean {
@@ -55,12 +64,19 @@ export class OpenCheck {
       return;
     }
     const handle = workspace.handle;
-    const before = this.state;
-    const stillHeld = (before.phase === "done" || before.phase === "checking") && before.handle === handle && before.lockHeld === true;
+    // Only an answer frees a held lock: a check that is still going or failed keeps it (V-27 L-1).
+    const stillHeld = heldFor(this.state, handle);
     this.set(stillHeld ? { phase: "checking", handle, lockHeld: true } : { phase: "checking", handle });
-    const reply = asDoctor(await this.api.doctor(handle));
+    let reply: DoctorReply;
+    try {
+      reply = asDoctor(await this.api.doctor(handle));
+    } catch {
+      // A call that rejected is a failure as the host's own are: shown, the lock kept, the next check recovers.
+      reply = { ok: false, code: "host_error" };
+    }
     if (generation !== this.generation) return;
-    this.set(reply.ok ? { phase: "done", handle, reply, lockHeld: lockHeld(reply) } : { phase: "error", handle, code: reply.code });
+    if (reply.ok) this.set({ phase: "done", handle, reply, lockHeld: lockHeld(reply) });
+    else this.set(stillHeld ? { phase: "error", handle, code: reply.code, lockHeld: true } : { phase: "error", handle, code: reply.code });
   }
 
   /** One watcher per key (a screen shown again replaces its own). */

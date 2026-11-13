@@ -124,6 +124,8 @@ const notices: { readonly title: string; readonly body: string }[] = [];
 const openAnswers: (string | null)[] = [];
 /** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
 const copied: string[] = [];
+/** U-66: the paths "show in folder" would select (recorded, not the OS file manager). */
+const revealed: string[] = [];
 const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
 let pretendInactive = false;
 /** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
@@ -153,6 +155,9 @@ startGui({
   answerOpenDialog: async () => openAnswers.shift() ?? null,
   writeClipboard: (text) => {
     copied.push(text);
+  },
+  showItemInFolder: (path) => {
+    revealed.push(path);
   },
   notify: (notice) => {
     notices.push(notice);
@@ -451,6 +456,23 @@ startGui({
         focus: await js("document.getElementById('changes')?.getAttribute('data-focus-file') ?? null"),
         focused: await js("document.activeElement?.querySelector('.path')?.textContent ?? null"),
       };
+      // U-66 (3.4): side by side, wrapping off, and "show in folder" from the comparison by the main process's id.
+      results["changesViews"] = await (async () => {
+        const flip = (id: string, on: boolean): Promise<unknown> => js(`(() => { const b = document.getElementById(${JSON.stringify(id)}); if (!b) return false; b.checked = ${on}; b.dispatchEvent(new Event('change')); return true; })()`);
+        await flip("changes-side", true);
+        const side = await js(
+          "({ view: document.getElementById('changes')?.getAttribute('data-view'), tables: document.querySelectorAll('#changes table.diff-side').length, columns: document.querySelectorAll('#changes ol.diff').length, hunks: document.querySelectorAll('#changes table.diff-side tr[data-hunk]').length, first: [document.querySelector('#changes table.diff-side tbody tr')?.getAttribute('data-left') ?? null, document.querySelector('#changes table.diff-side tbody tr')?.getAttribute('data-right') ?? null] })",
+        );
+        await flip("changes-wrap", false);
+        const wrap = await js("document.getElementById('changes')?.getAttribute('data-wrap') ?? null");
+        const before = revealed.length;
+        await js("document.querySelector('#changes [data-reveal]')?.click(); true");
+        const status = await waitFor("document.querySelector('#changes .reveal-status')?.getAttribute('data-revealed') ?? null");
+        const shown = revealed.slice(before).map((path) => path.split(/[\\/]/).pop());
+        await flip("changes-side", false);
+        await flip("changes-wrap", true);
+        return { side, wrap, status, shown, back: await js("[document.getElementById('changes')?.getAttribute('data-view'), document.getElementById('changes')?.getAttribute('data-wrap')]") };
+      })();
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
       // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging

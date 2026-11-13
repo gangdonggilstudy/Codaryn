@@ -6,7 +6,7 @@
  */
 
 import { isAbsolute, join, relative } from "node:path";
-import { dialog, ipcMain, shell } from "electron";
+import { dialog, ipcMain } from "electron";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import {
   IPC_CHANNELS,
@@ -58,7 +58,7 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCopyArgs, parseStartTaskArgs } from "../shared/ipc.js";
+import { copyablePath, parseCopyArgs, parseStartTaskArgs, revealableChange } from "../shared/ipc.js";
 import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
@@ -137,6 +137,8 @@ export interface IpcDeps {
   readonly chooseOpenFile: (kind: "task" | "vars") => Promise<string | null>;
   /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
   readonly writeClipboard: (text: string) => void;
+  /** U-66: shows an entry selected in the file manager (the OS one; smoke tests record it instead). Nothing is opened or run. */
+  readonly showItemInFolder: (path: string) => void;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -239,7 +241,7 @@ export function registerIpc(deps: IpcDeps): void {
     const inside = relative(root, target);
     if (inside.length === 0 || inside.startsWith("..") || isAbsolute(inside)) return false;
     // Shows the entry selected in the file manager. Nothing is opened or run.
-    shell.showItemInFolder(target);
+    deps.showItemInFolder(target);
     return true;
   });
 
@@ -672,7 +674,10 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("changes", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toChangesReply(response.value);
-    return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
+    if (!reply.ok) return reply;
+    if (reply.runId !== parsed.runId) return { ok: false, code: "host_error" };
+    // U-66 (3.4): "show in folder" takes the tree's ids, given here for plain paths that are there; the page never names a path.
+    return { ...reply, files: reply.files.map((file) => ({ ...file, id: revealableChange(file) ? workspaces.treeIds.issue(parsed.workspace, file.path) : null })) };
   });
 
   // GU-3 (3.7): a run's report. It reads; it changes nothing. A run id, never "latest".

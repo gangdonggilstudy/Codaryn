@@ -90,16 +90,34 @@ export function maskStrings<T>(value: T, privacy: PrivacyGateway): T | null {
 }
 
 /**
+ * U-292, U-293 (C-6a): gives `observer` a record as the journal stored it (RunObserver.onStoredRecord),
+ * a copy, so neither the observer's changes nor its exception or absence reach the run.
+ */
+export function deliverStored(observer: RunObserver | undefined, record: JournalRecord): void {
+  if (observer?.onStoredRecord === undefined) return;
+  try {
+    observer.onStoredRecord(structuredClone(record));
+  } catch {
+    // An observer cannot change the run.
+  }
+}
+
+/**
  * Wraps the run's journal so that each record the engine appends is delivered to `observer` once
- * the journal stored it. Without an `onEvent` the journal is returned as it is.
+ * the journal stored it: U-293 (C-6a, U-292), first as stored (onStoredRecord), then masked again as
+ * an event (onEvent). A record that cannot be masked again is no event, but is still given as stored,
+ * as the CLI draws its line from it. Without either the journal is returned as it is.
  */
 export function journalWithEvents(journal: Journal, observer: RunObserver | undefined, privacy: PrivacyGateway): Journal {
-  if (observer?.onEvent === undefined) return journal;
+  if (observer?.onEvent === undefined && observer?.onStoredRecord === undefined) return journal;
   return {
     async append(event) {
       const record = await journal.append(event);
-      const shown = sanitizeRecord(record, privacy);
-      if (shown !== null) deliver(observer, { kind: "record", record: shown });
+      deliverStored(observer, record);
+      if (observer.onEvent !== undefined) {
+        const shown = sanitizeRecord(record, privacy);
+        if (shown !== null) deliver(observer, { kind: "record", record: shown });
+      }
       return record;
     },
     close: () => journal.close(),

@@ -50,7 +50,7 @@ import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, wri
 import type { CleanupOperations } from "../store/index.js";
 import { createRevertCommand } from "../cli/assemble.js";
 import type { Assemble } from "./assembly.js";
-import { createCancelSource } from "../cli/cancel.js";
+import { createRunCancelSource } from "./cancel.js";
 import { chooseConfigFile, defaultLocationRefused, findDefaultConfigLocation } from "./input/config-file.js";
 import { runDoctor } from "../cli/doctor.js";
 import type { CommandOutcome } from "../cli/guard.js";
@@ -62,11 +62,14 @@ import type { ModelsEnvironment } from "../cli/models.js";
 import { API_MODEL_LISTERS, anthropicModelLister } from "../cli/provider.js";
 import { runReport } from "../cli/report.js";
 import { runRevert } from "../cli/revert.js";
-import { runCli } from "../cli/run.js";
+import { parseArgs } from "../cli/args.js";
 import type { CliEnvironment } from "../cli/run.js";
 import { locateInWorkspace, relateRealPaths } from "./input/security/index.js";
-import { prepareTask } from "./prepare.js";
-import type { CliRunOutcome, PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
+import { argumentsError, prepareTask } from "./prepare.js";
+import type { PrepareEnvironment, RunArgs, RunNotes } from "./prepare.js";
+import { runLife } from "./run-life.js";
+import type { RunLifeEnd } from "./run-life.js";
+import { tallyOf } from "./tally.js";
 import { knownKeyValues } from "./input/settings.js";
 import { applyArguments, applyJournalWithEvents } from "./apply.js";
 import { planArguments, reviewArguments } from "./plans.js";
@@ -269,15 +272,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     };
   }
 
-  /** The CLI's `run` with this environment. */
-  function cliRun(
-    request: StartRunRequest,
-    env: Record<string, string | undefined>,
-    parts: Pick<CliEnvironment, "assemble" | "cancelSignal"> & { readonly runTask?: RunTask; readonly runApprovedPlan?: RunApprovedPlan },
-  ): Promise<CliRunOutcome | null> {
-    return runCli(cliEnvironmentOf(runArguments(request), env, parts)).catch(() => null);
-  }
-
   /** N-1: where the CLI would look for the user's config file now, from this environment. */
   function defaultConfigOf(): DefaultConfigLocation | null {
     return findDefaultConfigLocation(platform, environment.env, environment.homeDir ?? null);
@@ -297,8 +291,8 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
    */
   function appRunHooks(env: Record<string, string | undefined>, observer: RunObserver | undefined) {
     const cancelHandlers = new Set<() => void>();
-    let reportStart: (value: { runId: string; workspaceRoot: string }) => void = () => {};
-    const started = new Promise<{ runId: string; workspaceRoot: string }>((resolve) => {
+    let reportStart: (value: { runId: string; workspaceRoot: string; privacy: PrivacyGateway }) => void = () => {};
+    const started = new Promise<{ runId: string; workspaceRoot: string; privacy: PrivacyGateway }>((resolve) => {
       reportStart = resolve;
     });
     let openGate: () => void = () => {};
@@ -326,7 +320,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       const { privacy, workspaceRoot } = assembledRun;
       // DR-15: events from the records the engine appends, in memory, masked again with this gateway.
       const journal = journalWithEvents(assembled.deps.journal, observer, privacy);
-      reportStart({ runId: input.runId, workspaceRoot });
+      reportStart({ runId: input.runId, workspaceRoot, privacy });
       // U-108 (B-4, DR-3): the engine's permission questions go to the observer (permission.ts).
       return { ...assembled, deps: { ...assembled.deps, journal, confirm: confirmThrough(observer) } };
     };
@@ -345,13 +339,18 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       return ended;
     };
     const cancelSignal: CliEnvironment["cancelSignal"] = (cancelFile) =>
-      createCancelSource({
+      createRunCancelSource({
         cancelFile,
         fileExists: (file) => existsSync(file),
-        onSignal: (_name, handler) => {
+        onSignal: (name, handler) => {
+          // U-293 (C-6a, 6.2): the process's signals too, when the adapter listens to them (AppEnvironment.onSignal, the CLI).
+          // Codex V-31 L-1: kept for handle.cancel only once that registration worked, and taken out
+          // before the adapter's removal is called (cancel.ts tries each removal on its own).
+          const off = environment.onSignal?.(name, handler);
           cancelHandlers.add(handler);
           return () => {
             cancelHandlers.delete(handler);
+            off?.();
           };
         },
       });
@@ -372,31 +371,66 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     };
   }
 
+  /**
+   * adapter-contract 5.1. U-293 (the CLI migration's C-6a): the run's life is the app layer's own
+   * (run-life.ts), no longer the CLI's runCli: the arguments as `codaryn run` parses them
+   * (runArguments, parseArgs), its steps 1 to 7 (prepareTask), then steps 8 on, in the CLI's order
+   * with its codes and messages. Refused before the run is assembled: the error, beside it the
+   * config's language once it was read. Assembled: the handle, with what an adapter that draws its
+   * own text needs (the config's language, the default location shown, the run's mask); the outcome
+   * carries the end summary's counts (tally) and whether the Y-4 hint was added.
+   */
   async function startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome> {
     const env = copyEnvironment(environment.env, platform);
     const run = appRunHooks(env, observer);
-    const running = cliRun(request, env, run.parts);
+    const io = cliEnvironmentOf(runArguments(request), env, run.parts);
+    const notes: RunNotes = { configLanguage: null, configDefault: null, deniedToolCalls: 0, deniedCommandCalls: 0, failedToolCalls: 0 };
+    const living: Promise<RunLifeEnd | null> = (async (): Promise<RunLifeEnd | null> => {
+      const parsed = parseArgs(io.argv);
+      if (!parsed.ok) return { kind: "refused", output: argumentsError(parsed).output };
+      const ready = await prepareTask(io, parsed.args, notes);
+      if (!("prepared" in ready)) return ready.output.kind === "error" ? { kind: "refused", output: ready.output } : null;
+      return runLife(io, parsed.args, notes, ready.prepared);
+    })().catch(() => null);
 
     const first = await Promise.race([
       run.started.then((info) => ({ kind: "started" as const, info })),
-      running.then((outcome) => ({ kind: "ended" as const, outcome })),
+      living.then((end) => ({ kind: "ended" as const, end })),
     ]);
     if (first.kind === "ended") {
-      const output = first.outcome?.output;
-      return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
+      const error = first.end?.kind === "refused" ? fromCliError(first.end.output) : INTERNAL_ERROR;
+      return { ok: false, error, ...(notes.configLanguage === null ? {} : { configLanguage: notes.configLanguage }) };
     }
 
-    const done: Promise<RunOutcome> = running.then((outcome) => {
-      const output = outcome?.output;
-      if (output === undefined) return { ok: false, error: INTERNAL_ERROR };
-      if (output.kind === "error") return { ok: false, error: fromCliError(output) };
-      return run.ended(output).lockLeft ? { ok: true, result: output, lockLeft: true } : { ok: true, result: output };
+    const done: Promise<RunOutcome> = living.then((end): RunOutcome => {
+      if (end === null) return { ok: false, error: INTERNAL_ERROR };
+      if (end.kind === "refused") return { ok: false, error: fromCliError(end.output) };
+      // The notices the life added after the engine (Y-4, N-1) are delivered; whether the lock was left.
+      const { lockLeft } = run.ended(end.result);
+      return {
+        ok: true,
+        result: end.result,
+        ...(lockLeft ? { lockLeft: true as const } : {}),
+        tally: tallyOf(notes),
+        ...(end.modelNotFound ? { modelNotFound: true as const } : {}),
+      };
     });
+    const { privacy } = first.info;
     const handle: RunHandle = {
       runId: first.info.runId,
       workspaceRoot: first.info.workspaceRoot,
       cancel: run.cancel,
       done,
+      configLanguage: notes.configLanguage,
+      defaultConfig: notes.configDefault,
+      mask(text) {
+        try {
+          const masked = privacy.mask(text);
+          return masked.ok ? masked.text : null;
+        } catch {
+          return null;
+        }
+      },
     };
     run.open();
     return { ok: true, handle };

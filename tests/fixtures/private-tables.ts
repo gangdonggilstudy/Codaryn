@@ -172,6 +172,49 @@ export function groupsOf(table: PrivateTable, groupBy: readonly GroupColumn[]): 
   return [...groups.values()].sort((a, b) => compare(a.keys, b.keys));
 }
 
+/** U-245: an operation the oracle can answer: count of any column, sum or mean of a number column. */
+export interface OracleOperation {
+  readonly op: "count" | "sum" | "mean";
+  readonly column: PrivateColumn;
+}
+
+export interface ExpectedGroup {
+  readonly keys: readonly string[];
+  readonly rows: number;
+  /** One per operation; null where fewer than k cells went into it. */
+  readonly values: readonly (number | null)[];
+  /** The indexes of the operations of fewer than k cells. */
+  readonly fewCells: readonly number[];
+}
+
+/**
+ * U-245: what query_table must give for `operations` grouped by `groupBy` on a table under unreadable
+ * paths with group size `k` (k at least 2): the groups of at least k rows in the oracle's order, each
+ * value of fewer than k cells null with its index in fewCells (U-208, Codex V-19), and how many
+ * groups were left out. A text column's cells are its rows (none is empty).
+ */
+export function expectedGroupsOf(table: PrivateTable, groupBy: readonly GroupColumn[], operations: readonly OracleOperation[], k: number): { readonly groups: ExpectedGroup[]; readonly suppressedGroups: number } {
+  const all = groupsOf(table, groupBy);
+  const shown = all.filter((group) => group.rows >= k);
+  const isNumber = (column: PrivateColumn): column is NumberColumn => (NUMBER_COLUMNS as readonly string[]).includes(column);
+  return {
+    suppressedGroups: all.length - shown.length,
+    groups: shown.map((group) => {
+      const cellsOf = (column: PrivateColumn): number => (isNumber(column) ? group.cells[column] : group.rows);
+      const fewCells = operations.flatMap((operation, index) => (cellsOf(operation.column) < k ? [index] : []));
+      const values = operations.map((operation, index) => {
+        if (fewCells.includes(index)) return null;
+        const cells = cellsOf(operation.column);
+        if (operation.op === "count") return cells;
+        if (!isNumber(operation.column)) throw new Error(`${operation.op} of the text column ${operation.column}`);
+        const sum = group.sum[operation.column];
+        return operation.op === "sum" ? sum : sum / cells;
+      });
+      return { keys: group.keys, rows: group.rows, values, fewCells };
+    }),
+  };
+}
+
 export interface NumberFact {
   /** What the number is, for an assertion message. */
   readonly label: string;

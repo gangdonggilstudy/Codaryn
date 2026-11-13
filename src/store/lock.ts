@@ -35,6 +35,11 @@
  * - EPERM and EBUSY (Windows reports them for files that are being deleted or are in use) are
  *   retried a few times and then end as `workspace_locked`, never as an exception.
  * - A lock file that cannot be understood is never reclaimed.
+ * - U-176: releasing tries again, briefly, when reading or removing the lock fails with EPERM or
+ *   EBUSY (a handle that does not share deletion or reading, as some scanners open files), and
+ *   throws when it still cannot. The lock then stays and is judged by the rules above: held while
+ *   this process lives, stale once it has ended. This process never takes its own lock back (V-4
+ *   H-1: taking it back could move another process's new lock if the release succeeded meanwhile).
  */
 
 import { execFile } from "node:child_process";
@@ -630,14 +635,34 @@ export async function acquireLock(options: AcquireLockOptions): Promise<AcquireL
   }
 }
 
-/** Removes the lock only when this process and this run hold it. Resolves to whether it was removed. */
+/** U-176: the waits between the tries of a release that meets EPERM or EBUSY (775 ms in all, six tries at most). */
+export const RELEASE_RETRY_DELAYS_MS: readonly number[] = [25, 50, 100, 200, 400];
+
+/**
+ * Removes the lock only when this process and this run hold it. Resolves to whether it was removed.
+ * U-176: reading the lock and removing it are tried again after RELEASE_RETRY_DELAYS_MS when either fails
+ * with EPERM or EBUSY. When they still fail, the last error is thrown (never swallowed here) and the lock
+ * stays, judged as any other: held while this process lives (a later release of this run may still
+ * remove it), stale once the process has ended, when the next acquire reclaims it.
+ */
 export async function releaseLock(options: ReleaseLockOptions): Promise<boolean> {
   const { workspaceRoot, runId } = options;
   assertRunId(runId);
   const lockFile = join(workspaceRoot, STATE_DIR_NAME, LOCK_FILE_NAME);
-  const held = await readState(nodeLockFileSystem, lockFile);
-  if (held === "missing" || held.holder === null) return false;
-  if (held.holder.runId !== runId || held.holder.pid !== process.pid) return false;
-  await rm(lockFile, { force: true });
-  return true;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const held = await readState(nodeLockFileSystem, lockFile);
+      if (held === "missing" || held.holder === null) return false;
+      if (held.holder.runId !== runId || held.holder.pid !== process.pid) return false;
+      await rm(lockFile, { force: true });
+      return true;
+    } catch (error) {
+      const delay = RELEASE_RETRY_DELAYS_MS[attempt];
+      if ((error instanceof TransientLockError || isTransient(error)) && delay !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
 }

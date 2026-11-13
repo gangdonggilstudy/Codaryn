@@ -129,6 +129,30 @@ const questionsSeen: { id: string; tool: string; permission: string; subject: st
 const permissionAnswers: ("allow_once" | "deny" | "dismissed")[] = [];
 /** U-123: run starts whose button was off when the test pressed it (diagnostic). */
 const startsBlocked: unknown[] = [];
+/**
+ * U-178: a run id as the window shows it. A result wait's "timeout", or the "error:<code>" a start or
+ * an end the window showed instead, is not one: it builds no path, and the steps that need that run
+ * are left out (their checks fail; the others go on).
+ */
+const RUN_ID_SHAPE = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+const isRunIdValue = (value: unknown): value is string => typeof value === "string" && RUN_ID_SHAPE.test(value);
+/** U-178: each result wait that got no run id: the step, what came instead, and why (start blocks, the lock file, the window). */
+const stepFailures: unknown[] = [];
+/** U-178: once a result wait has failed, the later ones wait at most this long (the app may be stuck; the rest is still checked). */
+const AFTER_FAILURE_MS = 20_000;
+/** U-178: no wait goes past this, so the result file is written before smoke.mjs stops the app (240 s after its start). */
+const WAIT_DEADLINE = Date.now() + 210_000;
+/** U-178: the workspace lock file as it is now (holder pid and run id), for a failed result wait. */
+function lockNow(): unknown {
+  const file = join(SECOND, ".codaryn", "lock.json");
+  try {
+    if (!existsSync(file)) return null;
+    const lock = JSON.parse(readFileSync(file, "utf8")) as { pid?: unknown; runId?: unknown };
+    return { pid: lock.pid ?? null, runId: lock.runId ?? null };
+  } catch (error) {
+    return { unreadable: error instanceof Error ? error.message : String(error) };
+  }
+}
 /** U-66: the paths "show in folder" would select (recorded, not the OS file manager). */
 const revealed: string[] = [];
 const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
@@ -194,7 +218,9 @@ startGui({
       const contents = window.webContents;
       const js = (code: string): Promise<unknown> => contents.executeJavaScript(code, true);
       const waitFor = async (code: string, ms = 60_000): Promise<unknown> => {
-        for (let waited = 0; waited < ms; waited += 100) {
+        // U-178: a wait ends by WAIT_DEADLINE (it still looks once), so what was seen is written.
+        const budget = Math.min(ms, Math.max(100, WAIT_DEADLINE - Date.now()));
+        for (let waited = 0; waited < budget; waited += 100) {
           const value = await js(code);
           if (value !== null && value !== undefined && value !== false) return value;
           await sleep(100);
@@ -646,8 +672,32 @@ startGui({
 
       // 5f. GU-5: a plan run (organize), the plan screen, refused requests, and an apply the main process asked about.
       const resultId = (): Promise<unknown> => js("document.getElementById('run-result-id')?.textContent ?? null");
-      const newResult = (previous: unknown, ms = 90_000): Promise<unknown> =>
-        waitFor(`(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; return id !== null && id !== ${JSON.stringify(previous)} ? id : null; })()`, ms);
+      // U-178: a new result id, or "error:<code>" as soon as the run screen (when it is the one shown: its
+      // own #run-state and #run-end) shows a start or an end that failed (no waiting out the time for a run
+      // that is not going on), or "timeout". Anything but a run id is noted in stepFailures with what the
+      // window, the start blocks and the lock file showed.
+      results["stepFailures"] = stepFailures;
+      const newResult = async (previous: unknown, ms = 90_000, step = "result"): Promise<unknown> => {
+        const startedAt = Date.now();
+        const value = await waitFor(
+          `(() => { const id = document.getElementById('run-result-id')?.textContent ?? null; if (id !== null && id !== ${JSON.stringify(previous)}) return id; const phase = document.getElementById('run-state')?.getAttribute('data-phase') ?? null; const error = document.querySelector('#run-end [data-error]')?.getAttribute('data-error') ?? null; return error !== null && (phase === 'idle' || phase === 'done') ? 'error:' + error : null; })()`,
+          stepFailures.length > 0 ? Math.min(ms, AFTER_FAILURE_MS) : ms,
+        );
+        if (isRunIdValue(value)) return value;
+        stepFailures.push({
+          step,
+          previous,
+          value,
+          waitedMs: Date.now() - startedAt,
+          screen: await js("document.getElementById('work')?.getAttribute('data-screen') ?? null"),
+          runPhase: await js("document.getElementById('run-state')?.getAttribute('data-phase') ?? null"),
+          error: await js("document.querySelector('#work [data-error]')?.getAttribute('data-error') ?? null"),
+          startsBlocked: [...startsBlocked],
+          lock: lockNow(),
+          apiMessages: messagesReceived(),
+        });
+        return value;
+      };
       const taskWith = async (workflow: string, goal: string): Promise<void> => {
         await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
@@ -660,7 +710,7 @@ startGui({
       // file moved, through the task form's workflowRef.
       const beforeDirect = await resultId();
       await taskWith("organize", "a.txt를 moved 폴더로 옮긴다");
-      const directRunId = await newResult(beforeDirect);
+      const directRunId = await newResult(beforeDirect, 90_000, "5f plan run A");
       await js("document.getElementById('run-view-plan')?.click(); true");
       // U-119: the apply waits for the check before an apply.
       const planCheckReady = (): Promise<unknown> => waitFor("(() => { const c = document.getElementById('plan-check')?.getAttribute('data-check'); return c && c !== 'checking' ? c : null; })()", 60_000);
@@ -679,7 +729,7 @@ startGui({
       );
       await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
-      await newResult(directRunId);
+      await newResult(directRunId, 90_000, "5f apply A");
       results["applyByWorkflow"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
@@ -690,7 +740,7 @@ startGui({
       await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
       await js("(() => { document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'tidy'; const g = document.getElementById('task-goal'); g.value = 'sub/b.txt를 moved 폴더로 옮긴다'; document.getElementById('task-run').click(); return true; })()");
-      const planRunId = (await newResult(beforePlan)) as string;
+      const planRunId = (await newResult(beforePlan, 90_000, "5f plan run B")) as string;
       results["planRun"] = await js("document.getElementById('run-result')?.getAttribute('data-reason') ?? null");
       // R21b-L-1: B's plan is opened from the run list, with the form the main process remembered
       // when B started (profile tidy), and applied from there.
@@ -713,7 +763,7 @@ startGui({
         forged: await js(`window.codaryn.checkPlan(${JSON.stringify("0".repeat(32))}).then((r) => (r.ok ? 'checked' : r.code))`),
       };
       await js("document.getElementById('plan-apply')?.click(); true");
-      await newResult(planRunId);
+      await newResult(planRunId, 90_000, "5f apply B");
       results["applyDone"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
@@ -740,7 +790,7 @@ startGui({
       // 5g. GU-5: an analyze run that ends waiting for a person's review; the verdict is recorded.
       const beforeReview = await resultId();
       await taskWith("analyze", "a.txt를 분석한다");
-      const analyzeRunId = (await newResult(beforeReview)) as string;
+      const analyzeRunId = (await newResult(beforeReview, 90_000, "5g analyze run")) as string;
       // U-54 (R-65 L-1): this run's codaryn-call-1 failed after the first run's codaryn-call-1 was
       // denied, in the same window (one engine host): its line is in this run's progress list.
       results["failedAfterDenial"] = {
@@ -829,7 +879,7 @@ startGui({
 
       // 5i2. UXM-14, DR-38: a records-changed mark on the analyze run, as a command outside the run could
       // leave it. The run list marks the run and its report warns.
-      writeFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "records-changed.json"), "{}");
+      if (isRunIdValue(analyzeRunId)) writeFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "records-changed.json"), "{}");
       await js("document.querySelector('[data-screen=\"runs\"]')?.click(); true");
       await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
       results["runsRecordsChanged"] = await js(`document.querySelector('[data-run="${analyzeRunId}"] [data-records-changed]') !== null`);
@@ -901,69 +951,75 @@ startGui({
       // delete them removes both.
       const beforeDiscard = await resultId();
       await taskWith("organize", "sub/deeper/c.txt를 폐기한다");
-      const discardPlanId = await newResult(beforeDiscard);
-      // U-32 (UXM-14, U-14 AXM-2): with a records-changed mark (written here, as in 5i2) the pending plan
-      // shows the warning first, no summary and no apply, and the main process gives it no approval
-      // token, so nothing is asked. The test removes the mark it wrote; the plan is then applied as before.
-      const discardMark = join(SECOND, ".codaryn", "runs", String(discardPlanId), "records-changed.json");
-      writeFileSync(discardMark, "{}");
-      await js("document.getElementById('run-view-plan')?.click(); true");
-      await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
-      const askedMarked = dialogs.length;
-      results["markedPlan"] = {
-        first: await js("document.getElementById('plan')?.firstElementChild?.id ?? null"),
-        apply: await js("document.getElementById('plan-apply') !== null"),
-        cannotApply: await js("document.getElementById('plan-cannot-apply') !== null"),
-        words: await js("document.getElementById('plan-agent-words') !== null"),
-        approval: await js(`window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(discardPlanId)}, null, 'organize').then((r) => (r.ok ? r.approval : r.code))`),
-        dialogs: dialogs.length - askedMarked,
-      };
-      unlinkSync(discardMark);
-      await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
-      await js("document.getElementById('run-view-plan')?.click(); true");
-      await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' && document.getElementById('plan-apply') !== null ? r : null; })()");
-      await planCheckReady();
-      await js("document.getElementById('plan-apply')?.click(); true");
-      const discardApplyId = String(await newResult(discardPlanId));
-      const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);
-      const discardRecords = join(SECOND, ".codaryn", "runs", discardApplyId);
-      results["discardApplied"] = { fileGone: !existsSync(join(SECOND, "sub", "deeper", "c.txt")), box: existsSync(discardBox) };
-      const cleanupOf = async (chooseDiscarded: boolean, keepThem = false): Promise<Record<string, unknown>> => {
-        const asked = dialogs.length;
-        await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
-        await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
-        const chosen = await js(
-          `(() => { const run = document.querySelector('[data-run-select="${discardApplyId}"]'); const box = document.querySelector('[data-discarded-select="${discardApplyId}"]'); if (run === null || box === null) return false; run.checked = true; box.checked = ${chooseDiscarded}; document.getElementById('cleanup-preview').click(); return true; })()`,
-        );
-        const plan = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
-        const warnings = await js(`document.querySelector('#cleanup-items [data-target="run"][data-id="${discardApplyId}"]')?.getAttribute('data-warnings') ?? null`);
-        const planNotice = await js("document.getElementById('cleanup-plan-discarded-left') !== null");
-        keepDiscarded = keepThem;
-        await js("document.getElementById('cleanup-apply')?.click(); true");
-        const result = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
-        return {
-          chosen,
-          plan,
-          warnings,
-          planNotice,
-          result,
-          removed: await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null"),
-          kept: await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-reason')])"),
-          keptText: await js("document.querySelector('#cleanup-kept [data-reason=\"discarded_left\"]')?.textContent ?? null"),
-          keptNotice: await js("document.getElementById('cleanup-kept-discarded-left') !== null"),
-          status: await js("document.getElementById('cleanup-result')?.getAttribute('data-status') ?? null"),
-          dialogs: dialogs.slice(asked),
-          left: { records: existsSync(discardRecords), box: existsSync(discardBox) },
+      const discardPlanId = await newResult(beforeDiscard, 90_000, "5j2 discard plan run");
+      // U-178: the rest of 5j2 needs this plan run (a path from its id, its plan screen and apply); without it
+      // the step is left out (stepFailures says why) and its checks fail alone.
+      if (isRunIdValue(discardPlanId)) {
+        // U-32 (UXM-14, U-14 AXM-2): with a records-changed mark (written here, as in 5i2) the pending plan
+        // shows the warning first, no summary and no apply, and the main process gives it no approval
+        // token, so nothing is asked. The test removes the mark it wrote; the plan is then applied as before.
+        const discardMark = join(SECOND, ".codaryn", "runs", String(discardPlanId), "records-changed.json");
+        writeFileSync(discardMark, "{}");
+        await js("document.getElementById('run-view-plan')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+        const askedMarked = dialogs.length;
+        results["markedPlan"] = {
+          first: await js("document.getElementById('plan')?.firstElementChild?.id ?? null"),
+          apply: await js("document.getElementById('plan-apply') !== null"),
+          cannotApply: await js("document.getElementById('plan-cannot-apply') !== null"),
+          words: await js("document.getElementById('plan-agent-words') !== null"),
+          approval: await js(`window.codaryn.plan(${JSON.stringify(secondHandle)}, ${JSON.stringify(discardPlanId)}, null, 'organize').then((r) => (r.ok ? r.approval : r.code))`),
+          dialogs: dialogs.length - askedMarked,
         };
-      };
-      results["discardLeftKept"] = await cleanupOf(false);
-      results["discardLeftKeepBox"] = await cleanupOf(true, true);
-      results["discardLeftBoth"] = await cleanupOf(true);
+        unlinkSync(discardMark);
+        await js("document.querySelector('[data-screen=\"run\"]')?.click(); true");
+        await js("document.getElementById('run-view-plan')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' && document.getElementById('plan-apply') !== null ? r : null; })()");
+        await planCheckReady();
+        await js("document.getElementById('plan-apply')?.click(); true");
+        const discardApplyId = String(await newResult(discardPlanId, 90_000, "5j2 discard apply"));
+        const discardBox = join(SECOND, ".codaryn", "discarded", discardApplyId);
+        const discardRecords = join(SECOND, ".codaryn", "runs", discardApplyId);
+        results["discardApplied"] = { fileGone: !existsSync(join(SECOND, "sub", "deeper", "c.txt")), box: existsSync(discardBox) };
+        const cleanupOf = async (chooseDiscarded: boolean, keepThem = false): Promise<Record<string, unknown>> => {
+          const asked = dialogs.length;
+          await js("document.querySelector('[data-screen=\"cleanup\"]')?.click(); true");
+          await waitFor("(() => { const r = document.getElementById('cleanup')?.getAttribute('data-cleanup-ready'); return r && r !== 'none' ? r : null; })()");
+          const chosen = await js(
+            `(() => { const run = document.querySelector('[data-run-select="${discardApplyId}"]'); const box = document.querySelector('[data-discarded-select="${discardApplyId}"]'); if (run === null || box === null) return false; run.checked = true; box.checked = ${chooseDiscarded}; document.getElementById('cleanup-preview').click(); return true; })()`,
+          );
+          const plan = await waitFor("document.getElementById('cleanup-plan')?.getAttribute('data-plan') ?? null");
+          const warnings = await js(`document.querySelector('#cleanup-items [data-target="run"][data-id="${discardApplyId}"]')?.getAttribute('data-warnings') ?? null`);
+          const planNotice = await js("document.getElementById('cleanup-plan-discarded-left') !== null");
+          keepDiscarded = keepThem;
+          await js("document.getElementById('cleanup-apply')?.click(); true");
+          const result = await waitFor("document.getElementById('cleanup-result')?.getAttribute('data-result') ?? null");
+          return {
+            chosen,
+            plan,
+            warnings,
+            planNotice,
+            result,
+            removed: await js("document.getElementById('cleanup-removed')?.getAttribute('data-removed') ?? null"),
+            kept: await js("[...document.querySelectorAll('#cleanup-kept [data-reason]')].map((li) => [li.getAttribute('data-target'), li.getAttribute('data-reason')])"),
+            keptText: await js("document.querySelector('#cleanup-kept [data-reason=\"discarded_left\"]')?.textContent ?? null"),
+            keptNotice: await js("document.getElementById('cleanup-kept-discarded-left') !== null"),
+            status: await js("document.getElementById('cleanup-result')?.getAttribute('data-status') ?? null"),
+            dialogs: dialogs.slice(asked),
+            left: { records: existsSync(discardRecords), box: existsSync(discardBox) },
+          };
+        };
+        if (isRunIdValue(discardApplyId)) {
+          results["discardLeftKept"] = await cleanupOf(false);
+          results["discardLeftKeepBox"] = await cleanupOf(true, true);
+          results["discardLeftBoth"] = await cleanupOf(true);
+        }
+      }
 
       // 5j3. U-22 (DR-48, R51-M-1): a cleanup that fails in part is shown as what it did. On Windows a file
       // of the analyze run's records held open stops the folder's move aside: kept as io_error, the
       // cleanup partly_failed, nothing of the run removed. The file is closed after (this test opened it).
-      if (process.platform === "win32") {
+      if (process.platform === "win32" && isRunIdValue(analyzeRunId)) {
         const records = join(SECOND, ".codaryn", "runs", analyzeRunId);
         const held = openSync(join(records, readdirSync(records).find((name) => name.endsWith(".jsonl")) ?? "journal.jsonl"), "r");
         try {
@@ -988,7 +1044,8 @@ startGui({
           closeSync(held);
         }
       } else {
-        results["partlyFailed"] = "not measured on this platform";
+        // U-178: on Windows without the analyze run (no run id) the step is left out; the check fails alone.
+        results["partlyFailed"] = process.platform === "win32" ? `not measured: the analyze run gave no run id (${String(analyzeRunId)})` : "not measured on this platform";
       }
 
       // 5k. U-11 (3.11): the first-run guide on this workspace. The config file exists (used as it is), the
@@ -1064,8 +1121,9 @@ startGui({
       await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
       const beforeTask = await resultId();
       await js("(() => { document.getElementById('task-with-vars').checked = true; document.getElementById('task-run-file').click(); return true; })()");
-      const taskRunId = await newResult(beforeTask, 60_000);
-      const taskDone = typeof taskRunId === "string" && taskRunId !== beforeTask ? "done" : taskRunId;
+      const taskRunId = await newResult(beforeTask, 60_000, "U-63 task file run");
+      // U-178: "done" only for a run id (a wait's "timeout" or an "error:<code>" is shown as it is).
+      const taskDone = isRunIdValue(taskRunId) && taskRunId !== beforeTask ? "done" : taskRunId;
       results["taskFileRun"] = {
         cancelled,
         inside,
@@ -1097,7 +1155,7 @@ startGui({
         const checks = kinds.length > 0 && kinds.length < lines && kinds.every((kind) => kind === "verifier_result" || kind === "integrity_checked");
         const recordsNote = await js("document.getElementById('report-log-records-changed') !== null");
         const notes = await js("document.getElementById('report-log-notes')?.children.length ?? -1");
-        appendFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "journal.jsonl"), "{not a record\n");
+        if (isRunIdValue(analyzeRunId)) appendFileSync(join(SECOND, ".codaryn", "runs", analyzeRunId, "journal.jsonl"), "{not a record\n");
         const damaged = await js(
           `window.codaryn.runEvents(${JSON.stringify(secondHandle)}, ${JSON.stringify(analyzeRunId)}, null, null, 0).then((r) => (r.ok ? { status: r.status, skipped: r.skipped, missing: r.missing, lines: r.items.length > 0 } : r.code), (e) => 'threw: ' + String(e && e.message))`,
         );

@@ -9,7 +9,8 @@
   - 단계 4 P1 묶음 가운데 Markdown 규칙 `markdown_headings`, `markdown_links`(`file_rules`, U-116 `4df5be8`)
   - 실행 중 권한 확인(판정 `ask`, DR-3). 설정 파일과 프로필의 명령 규칙에 둔 `confirm: true`만 질문을 만든다. CLI의 `run`은 터미널에서만 묻고, 물을 수 없으면 거부한다(U-74, U-108~U-110, U-137. 3절, main `cd1cace`). GUI는 메인 프로세스의 OS 대화상자로 묻고 기본과 Esc는 거부다(U-124, 병합 `aa723d2`, [독립 GUI 설계](design/standalone-gui.md) 3.6)
 - **없는 것:**
-  - 단계 4 P1 묶음의 나머지(`query_table`, `analyze-private`, `plan:"run"`, 읽기 제외 경로)
+  - 단계 4 P1 묶음 A(`query_table`, 읽기 제외 경로, `analyze-private`, DR-69·DR-70)
+  - 단계 4 P1 묶음 B의 계획 실행(`plan: "run"`, DR-69). 계약만 있고 실행하는 것이 없다(U-170, U-175, U-177, 병합 `a2f67c1`): `PLAN_MODES`의 `run`, 도구 정의 `propose_changes`(`ProposeChangesArgs`, 파일 `MAX_PLANNED_FILES` 100개), 저장할 변경 계획 `StoredChangesPlan`(`kind: "changes"`), 결과의 `plan.kind: "changes"`·`planRunId`·`planDigest`. 엔진에는 그 도구가 없고, CLI는 `plan: "run"`을 모델 요청 전에 거부한다(`plan_run_not_available`, 사용 안내 18.1절)
   - CLI의 앱 계층 이행(CLI에서 앱 계층을 거치는 명령은 `changes`뿐이다). 기능 뒤에 직렬로 한다(DR-65)
   - 줄 프로토콜의 CLI 연결과 VS Code 확장(DR-20으로 만들지 않는다). 남아 있던 코드는 지웠다(DR-66, U-81)
   - GUI 설치 패키지(GU-9). 기능이 끝난 뒤 다시 묻는다(DR-67)

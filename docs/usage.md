@@ -1288,6 +1288,18 @@ node --test dist/tests/live/openai-live.js
 - task의 `workflow`는 표시용 이름표일 뿐이다. `"workflow": "organize"`만 쓰고 `workflowRef`가 없으면 예전 방식으로 실행되고 계획 도구가 없다.
 - **사용자 정의 작업 종류:** 설정 파일의 `workflows`에 `"<id>": { 정의 }`로 둔다. 내장 id는 다시 정의할 수 없다.
   - 필드: `label`, `tools`, `instructions`, `plan`(`none`·`apply`), `completion`(`verifiers`·`human_review`), `humanReview`(`checklist`), `allowCommands`, `policy`, `verifiers`, `limits`
+  - **`plan: "run"`은 아직 쓸 수 없다**(U-177). 계약에는 있지만 그것을 실행하는 것이 없어, CLI가 모델 요청 전에 거부한다. 실행도 기록도 만들지 않는다(종료 2). 설정 파일의 작업 종류 정의에 두면 `invalid_config`, task 파일에 두면 `invalid_task`다. task 파일의 실제 출력(main `b249171`, stderr):
+
+    ```
+    codaryn: error — the task file cannot be read or has an invalid value (invalid_task)
+      To fix: Check that the file given with --task exists and is outside the workspace. If a field is named, fix that field. codaryn doctor --task <file> checks it.
+      Check: codaryn doctor
+      Plan mode "run" cannot be used in this version yet; set plan to "none" or "apply". Nothing was sent to a model.
+    ```
+
+    - stdout의 오류 JSON은 `"message":"plan \"run\" is not available yet: nothing carries out a run plan in this version; use none or apply"`와 `"hint":"plan_run_not_available"`을 담는다. 정의의 것은 `message`가 `workflows[0].plan "run" is not available yet: …`로 시작한다.
+    - 마지막 줄은 한국어로 `계획 방식 "run"은 이 판에서 아직 쓸 수 없습니다. plan을 "none"이나 "apply"로 두세요. 모델에는 아무것도 보내지 않았습니다.`다.
+    - 그 밖의 틀린 값(예: `"later"`)은 예전처럼 `plan must be one of none, apply`다.
   - 정의는 사용자 설정 파일에만 있다. task 파일은 작업 종류를 정의할 수 없고, 작업 공간 안의 파일로는 바꿀 수 없다(5절).
 - **task가 바꿀 수 있는 범위**(넘으면 `invalid_task`, 간편 형식·프로필의 값이면 `invalid_config`):
   - `tools`는 작업 종류가 주는 도구 안에서 줄이기만 한다.

@@ -26,7 +26,8 @@ import type { CliErrorOutput, HumanOutput, MessageCatalog, MessageLanguage } fro
 import { createCodarynApp, createNodeAppEnvironment } from "../app/index.js";
 import { createMessageCatalog, explainMessageLanguage, runtimeLocale, selectMessageLanguage } from "../i18n/index.js";
 import { inspectRun, listRuns, loadPlan, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
-import { assembleRun, createRevertCommand } from "./assemble.js";
+import { assembleRun } from "../app/assembly.js";
+import { createRevertCommand } from "./assemble.js";
 import { createCancelSource } from "./cancel.js";
 import { runChanges } from "./changes.js";
 import { runCleanup } from "./cleanup.js";

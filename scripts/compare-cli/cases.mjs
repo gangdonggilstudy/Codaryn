@@ -502,6 +502,26 @@ export const CASES = [
     setup: documentSetup(DOCUMENT_STEPS, {}, { "near-task.json": { ...task(), verifier: [] }, "near-config.json": { schemaVersion: 1, limit: {} } }),
     steps: [{ args: ["run", "--task", "near-task.json"] }, { args: ["run", "--task", "task.json", "--config", "near-config.json"] }, { args: ["doctor", "--config", "near-config.json"] }],
   },
+  // U-285 (the CLI migration's C-4: the run's assembly moves to the app layer): what the assembly makes
+  // for a run, through its records. A config's writablePaths with a task's own list (the gate judges each
+  // write by every list), and a task's protected path (the gate refuses the write; the integrity checks
+  // run before and after), in text, JSON and the report; and the first in Korean.
+  {
+    name: "assembly-guards",
+    setup: (dir) => {
+      documentSetup(
+        [
+          { toolCalls: [writeFile("other.md", "not listed\n")] },
+          { toolCalls: [writeFile("notes.md", "protected\n", createHash("sha256").update("# Weekly notes\n\n- The site moves next week.\n", "utf8").digest("hex"))] },
+          { toolCalls: [writeFile("summary.md", SUMMARY)] },
+          { text: "The summary is written." },
+        ],
+        { policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, protectedPaths: ["notes.md"], writablePaths: ["summary.md", "other.md"] } },
+        { "writable-config.json": { schemaVersion: 1, policy: { commands: [], network: "deny", destructive: "deny", restorePathTokens: false, writablePaths: ["summary.md"] } } },
+      )(dir);
+    },
+    steps: [run("--config", "writable-config.json"), report("latest"), report("latest", "--json"), { ...run("--config", "writable-config.json"), lang: "ko" }],
+  },
   // U-135: terminal cases (imitated: see the tool).
   {
     name: "terminal-first-page",

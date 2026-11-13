@@ -79,7 +79,7 @@ describe("applyPlan", () => {
     const started = await app.applyPlan(request(base, plan.runId, digest.slice(0, 12)), { onEvent: (event) => events.push(event) });
     assert.ok(started?.ok, JSON.stringify(started));
     assert.equal(events.length, 0, "no event before the handle");
-    const result = ok<ApplyResult>(await started.handle.done);
+    const result = ok<ApplyResult>((await started.handle.done) as AppCallOutcome<ApplyResult>);
     assert.deepEqual([result.kind, result.runId, result.planRunId, result.digest], ["apply", started.handle.runId, plan.runId, digest]);
     assert.equal(await exists(path.join(base, "work", "sorted", "a.txt")), true, "the move was made");
 
@@ -104,13 +104,13 @@ describe("applyPlan", () => {
 
     const without = await app.applyPlan(request(base, plan.runId, digest.slice(0, 12)));
     assert.ok(without?.ok);
-    const stopped = ok<ApplyResult>(await without.handle.done);
+    const stopped = ok<ApplyResult>((await without.handle.done) as AppCallOutcome<ApplyResult>);
     assert.deepEqual([stopped.status, stopped.reason], ["needs-input", "consent_required"]);
     assert.deepEqual([engine.calls[0]?.approval, engine.calls[0]?.unsafeMoveConsent ?? null], ["adapter", null]);
 
     const withConsent = await app.applyPlan(request(base, plan.runId, digest.slice(0, 12), digest));
     assert.ok(withConsent?.ok);
-    assert.equal(ok<ApplyResult>(await withConsent.handle.done).reason, "verified");
+    assert.equal(ok<ApplyResult>((await withConsent.handle.done) as AppCallOutcome<ApplyResult>).reason, "verified");
     assert.deepEqual(engine.calls[1]?.unsafeMoveConsent, { channel: "adapter", digest });
   });
 

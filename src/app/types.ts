@@ -914,16 +914,34 @@ export type ApplyEvent =
   | { readonly kind: "notice"; readonly text: MaskedText };
 
 export interface ApplyObserver {
-  /** Called synchronously for each event. Exceptions are ignored. */
+  /** Called synchronously for each event of a plan of moves. Exceptions are ignored. */
   onEvent?(event: ApplyEvent): void;
+  /**
+   * U-218 (DR-69 B-4): a run plan (plan "run") is carried out by a model run; its events, as
+   * RunObserver.onEvent gets a run's (records masked again, notices). Exceptions are ignored.
+   */
+  onRunEvent?(event: RunEvent): void;
+  /** U-218: that run's permission questions, as RunObserver.confirm (U-108: absent or failing is `dismissed`). */
+  confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;
 }
+
+/**
+ * DR-2: an apply's end. U-218: a run plan's apply is a model run, so its outcome is that run's
+ * EngineResult (kind "run", with planRunId and planDigest; the run's verifiers and changes) and, as a
+ * run's (U-193), `lockLeft` when its lock could not be released at its end (U-211 tries again later).
+ */
+export type ApplyOutcome =
+  | { readonly ok: true; readonly output: ApplyResult }
+  | { readonly ok: true; readonly output: EngineResult; readonly lockLeft?: true }
+  | { readonly ok: false; readonly error: AppError };
 
 /** DR-2: applying has the same event and cancel channel as a run. */
 export interface ApplyHandle {
+  /** The run that applies: the apply run of a plan of moves, or (U-218) the run that carries out a run plan. */
   readonly runId: string;
   cancel(): void;
   /** Never rejects; resolves after the apply's result.json is written and the lock released. */
-  readonly done: Promise<AppCallOutcome<ApplyResult>>;
+  readonly done: Promise<ApplyOutcome>;
 }
 
 /** DR-17, R-4 L-4: `codaryn review` takes the task form; the note is masked with its secrets before it is stored. */

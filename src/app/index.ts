@@ -52,6 +52,7 @@ export type {
   ApplyEvent,
   ApplyHandle,
   ApplyObserver,
+  ApplyOutcome,
   ApplyPlanRequest,
   ApplySettingsChangeRequest,
   ChangedFileUnavailable,

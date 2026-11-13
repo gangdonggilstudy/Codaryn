@@ -324,7 +324,16 @@ review(request: { settings: TaskForm; runId: string; decision: "accept" | "rejec
 
 // PlanOutput, ApplyResult, ApplyJournalRecord, ReviewOutput은 G-A 계약의 타입 그대로다(DR-17)
 type ApplyEvent = { kind: "record"; record: ApplyJournalRecord } | { kind: "notice"; text: MaskedText };
-interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutcome<ApplyResult>> }
+interface ApplyHandle { runId: string; cancel(): void; done: Promise<ApplyOutcome> }   // U-218
+type ApplyOutcome =
+  | { ok: true; output: ApplyResult }                              // 이동 계획(plan "apply")
+  | { ok: true; output: EngineResult; lockLeft?: true }            // U-218: 실행 계획(plan "run")을 수행한 실행
+  | { ok: false; error: AppError };
+interface ApplyObserver {
+  onEvent?(event: ApplyEvent): void;                               // 이동 계획의 적용 기록
+  onRunEvent?(event: RunEvent): void;                              // U-218: 실행 계획을 수행하는 실행의 이벤트
+  confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;   // U-218: 그 실행의 권한 질문
+}
 ```
 
 - 계획 보기도 task 형식을 받아, 실행과 같은 비밀(task·설정의 `secretEnv`, 키, 변수 파일 값)로 `plan.json`을 다시 가린다(DR-17, R-4 M-3). 사람 확인의 메모도 같은 비밀로 가려 저장된다(R-4 L-4, G-A `720aa5a`).
@@ -336,7 +345,18 @@ interface ApplyHandle { runId: string; cancel(): void; done: Promise<AppCallOutc
   - 계획 모드는 묻지 않는다(보기는 비밀과 작업 공간만 정한다, DR-17). `latest`도 다른 계획처럼 푼다.
   - PM (가), AC-D16: CLI의 `plan`·`apply`가 종류로 나누는 것은 na-core의 U-195다. CLI의 `plan`이 실행 계획을 보이게 되면 앱은 그것을 받아 쓰고 이 보기는 없앤다.
   - 저장 꼴에는 얇게 기댄다(Codex V-11의 고침으로 바뀔 수 있음): `kind`, 관문용 파일 경로, 그리고 읽은 계획을 통째로 `changesPlanOutput`에 넘기는 것뿐이다.
-  - 실행 계획의 적용(앱 `applyPlan`의 종류 나눔)은 CLI의 `runApply`가 나누면 그 길에 앱의 고리(이벤트 관찰자, 취소, 승인 `adapter`)를 넘긴다. 실행할 goal은 계획을 만든 실행의 goal이다. 읽을 수 없으면 시작하지 않는다(PM). 그 연결은 U-195 뒤의 앱 단위다.
+- U-218(DR-69 B-4, U-195 뒤): `applyPlan`이 실행 계획을 수행한다. CLI의 `runApply`가 과제의 plan 설정으로 나눈다(AC-D16). 앱은 나누지 않고 두 길의 고리를 다 넘긴다.
+  - plan "run": CLI의 `applyChangesPlan`이 승인(`--digest`, 앱이면 `adapter`)을 보고, 계획을 만든 실행의 goal로 모델 실행을 돌린다(`runPrepared`, 승인된 계획). 그 goal을 읽을 수 없으면 시작하지 않는다(PM, DR-74).
+  - 앱은 그 `run` 환경에 `startRun`과 같은 고리를 준다(`appRunHooks`, `startRun`과 함께 쓴다).
+    - 조립(`createAppAssemble`): 기록에서 만든 이벤트(DR-15)는 `observer.onRunEvent`로, 권한 질문(U-108)은 `observer.confirm`으로 간다. 풀지 못한 잠금은 `lockLeft`(U-193)이고 몇 초 뒤 다시 풀어 본다(U-211).
+    - 승인된 계획의 부품(`approvedPlan`)을 CLI의 조립(U-195)과 같게 준다: 쓰기 목록을 받는 관문, 계획 차지(`markApplied`), 계획 파일 살피기, 계획 실행 기록에 대한 store의 두 물음. 없으면 CLI가 수행을 거부한다.
+    - 시작 게이트: 핸들(수행하는 새 실행의 id)이 첫 이벤트와 엔진 시작보다 먼저다. 취소는 `handle.cancel()` 하나다.
+    - 환경은 적용의 사본 그대로다. 그래서 변수 파일 값이 그 실행의 명령과 검증기에 간다(DR-4, U-71과 같음).
+  - 결과(`ApplyOutcome`)는 그 실행의 `EngineResult`다(`kind: "run"`, `planRunId`, `planDigest`). 실행의 `run_started` 기록에 `approval: "adapter"`가 남는다.
+  - 이동 동의(`unsafeMoveConsent`)는 이동 계획의 것이라, 실행 계획에 주면 CLI가 `invalid_arguments`로 거부한다. plan "run"으로 풀리지 않는 과제 형식은 `run_not_plan`이고, 다이제스트가 다르면 `plan_not_approved`, 이미 수행했으면 `plan_already_applied`다.
+  - 이동 계획(plan "apply")은 전과 같다. 이벤트는 `observer.onEvent`로 간다.
+  - 시험은 `tests/unit/app/u218-run-plan-apply.test.ts`(11건)다. 이동 계획만 다루는 기존 시험은 `done`을 이동 계획의 꼴로 좁혔다.
+  - 게이트를 빼는 변이는 시험이 가르지 못한다. CLI가 조립과 엔진 사이에 파일을 읽으므로(계획 실행의 기록 변경 표시 등), 게이트가 없어도 핸들이 먼저 나간다. `startRun`의 게이트도 같다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
 

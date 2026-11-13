@@ -12,7 +12,7 @@
  * The approval is recorded as `adapter` (run_started.approval); the result is the carrying run's
  * EngineResult with planRunId and planDigest. A plan of moves applies as before.
  * The scripted model starts each run's script at its first step, so the carrying run's steps are
- * written after the plan run. Reproduced first (todo until the app hands the CLI its run hooks).
+ * written after the plan run. Reproduced first (246ec8a, todo until the app handed the CLI its run hooks).
  * Temporary folders, scripted model, fake values only.
  */
 
@@ -28,7 +28,6 @@ import { runApprovedPlan as engineRunApprovedPlan } from "../../../src/engine/in
 import { releaseLock } from "../../../src/store/index.js";
 import { WRITE_NOTES, appEnvironment, exists, readJournal, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-218: the app does not hand the CLI's run plan way its run hooks yet" };
 const windowsOnly = process.platform === "win32" ? false : "a handle that does not share deletion is made with PowerShell on Windows";
 
 const REWRITE = { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" };
@@ -49,20 +48,28 @@ interface Made {
   readonly digest: string;
 }
 
-/** A run plan made through the app (a config task type with plan "run"), then the carrying run's steps in the script. */
-async function runPlanMade(hooks: Hooks = {}, carrying: readonly unknown[] = [WRITE_NOTES, { text: "done" }]): Promise<Made> {
-  const base = await setupRun({}, { workflowRef: "rewrite" }, [PROPOSE, { text: "planned" }]);
+/**
+ * A run plan made through the app (a config task type with plan "run"), then the carrying run's steps
+ * in the script. `more` adds task fields and files next to the workspace, and may name a variables file.
+ */
+async function runPlanMade(
+  hooks: Hooks = {},
+  carrying: readonly unknown[] = [WRITE_NOTES, { text: "done" }],
+  more: { readonly task?: Record<string, unknown>; readonly prepare?: (base: string) => Promise<string | null> } = {},
+): Promise<Made> {
+  const base = await setupRun({}, { workflowRef: "rewrite", ...more.task }, [PROPOSE, { text: "planned" }]);
+  const varsFile = (await more.prepare?.(base)) ?? null;
   const config = path.join(base, "config.json");
   await writeFile(config, JSON.stringify({ schemaVersion: 1, workflows: { rewrite: REWRITE } }));
   const app = createCodarynApp(await appEnvironment(base), hooksWith(hooks));
-  const started = await app.startRun(taskRequest(base, { configPath: config }));
+  const started = await app.startRun(taskRequest(base, { configPath: config, varsFile }));
   assert.ok(started.ok, JSON.stringify(started));
   const ended = await started.handle.done;
   assert.ok(ended.ok, JSON.stringify(ended));
   const plan = ended.result.plan as { digest: string; kind?: string } | undefined;
   assert.deepEqual([ended.result.reason, plan?.kind], ["plan_pending", "changes"], JSON.stringify(ended.result));
   await writeFile(path.join(base, "script.json"), JSON.stringify({ schemaVersion: 1, steps: carrying }));
-  return { base, form: taskForm(base, { configPath: config }), app, planRunId: ended.result.runId, digest: (plan as { digest: string }).digest };
+  return { base, form: taskForm(base, { configPath: config, varsFile }), app, planRunId: ended.result.runId, digest: (plan as { digest: string }).digest };
 }
 
 const request = (made: Made, overrides: Record<string, unknown> = {}) => ({ settings: made.form, planRunId: made.planRunId, digest: made.digest, cancelFile: null, unsafeMoveConsent: null, ...overrides });
@@ -90,7 +97,7 @@ async function holdOpen(file: string, ms: number): Promise<{ readonly closed: Pr
 }
 
 describe("U-218: applyPlan carries out a run plan through the CLI's way", () => {
-  test("the handle names the carrying run before its first event; its events reach onRunEvent; the result names the plan run", TODO, async () => {
+  test("the handle names the carrying run before its first event; its events reach onRunEvent; the result names the plan run", async () => {
     const made = await runPlanMade();
     const runEvents: RunEvent[] = [];
     const applyEvents: unknown[] = [];
@@ -110,7 +117,7 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
     assert.deepEqual([startedRecord?.approval, startedRecord?.planRunId], ["adapter", made.planRunId], "the approval is the adapter's");
   });
 
-  test("the carrying run's permission questions reach the observer's confirm", TODO, async () => {
+  test("the carrying run's permission questions reach the observer's confirm", async () => {
     const question: ConfirmRequest = { kind: "permission", id: "c-1", callId: "call-1", tool: "run_command", permission: "command", subject: "node" as ConfirmRequest["subject"], argumentCount: 1 };
     let answer: unknown = null;
     const made = await runPlanMade({
@@ -132,7 +139,7 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
     assert.deepEqual(answer, { decision: "allow_once" });
   });
 
-  test("handle.cancel() ends the carrying run as cancelled", TODO, async () => {
+  test("handle.cancel() ends the carrying run as cancelled", async () => {
     const made = await runPlanMade({}, [WRITE_NOTES, WAIT]);
     let handle: ApplyHandle | undefined;
     let cancelledWithHandle = false;
@@ -150,7 +157,26 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
     assert.deepEqual([done.output.status, done.output.reason], ["cancelled", "cancelled"]);
   });
 
-  test("a lock left at the carrying run's end is told and tried again later", { ...TODO, skip: windowsOnly }, async () => {
+  test("DR-4: the carrying run's command verifier gets the variables file's LANG from the apply's own environment copy", async () => {
+    // Short enough not to be registered as a secret (S-4), so it reaches the child, as in U-71.
+    const lang = "u218ko";
+    const made = await runPlanMade({}, [WRITE_NOTES, { text: "done" }], {
+      task: { verifiers: [{ id: "lang", kind: "command", executable: process.execPath, args: [path.join("..", "check-lang.mjs")], expectExitCode: 0 }] },
+      prepare: async (base) => {
+        await writeFile(path.join(base, "check-lang.mjs"), `process.exit(process.env.LANG === ${JSON.stringify(lang)} ? 0 : 3);\n`, "utf8");
+        const varsFile = path.join(base, "run.vars");
+        await writeFile(varsFile, `LANG=${lang}\n`, "utf8");
+        return varsFile;
+      },
+    });
+    const done = (await (await started(made.app, made)).done) as unknown as Done;
+    assert.ok(done.ok, JSON.stringify(done));
+    const verifier = done.output.verifiers.find((item) => item.id === "lang");
+    assert.equal(verifier?.outcome, "pass", JSON.stringify(done.output.verifiers));
+    assert.equal(process.env["LANG"] === lang, false, "not from this process's environment");
+  });
+
+  test("a lock left at the carrying run's end is told and tried again later", { skip: windowsOnly }, async () => {
     let holder: { readonly closed: Promise<void> } | null = null;
     let ended: string | null = null;
     let work = "";
@@ -179,14 +205,14 @@ describe("U-218: applyPlan carries out a run plan through the CLI's way", () => 
 });
 
 describe("U-218: what refuses a run plan's apply", () => {
-  test("a digest that is not the plan's: plan_not_approved, nothing run", TODO, async () => {
+  test("a digest that is not the plan's: plan_not_approved, nothing run", async () => {
     const made = await runPlanMade();
     const applied = await made.app.applyPlan(request(made, { digest: "0".repeat(64) }));
     assert.equal(failed(applied), "plan_not_approved");
     assert.equal(await exists(path.join(made.base, "work", "NOTES.md")), false);
   });
 
-  test("a second apply of the same plan: plan_already_applied", TODO, async () => {
+  test("a second apply of the same plan: plan_already_applied", async () => {
     const made = await runPlanMade();
     const first = await started(made.app, made);
     assert.ok((await first.done).ok);
@@ -217,7 +243,7 @@ describe("U-218: checkApply on a run plan with the plan run's own form", () => {
     assert.deepEqual([check.kind, check.planKind, check.problems, check.lockLeft], ["plan_check", "changes", [], false]);
   });
 
-  test("after the apply, the check says plan_already_applied", TODO, async () => {
+  test("after the apply, the check says plan_already_applied", async () => {
     const made = await runPlanMade();
     const first = await started(made.app, made);
     assert.ok((await first.done).ok);

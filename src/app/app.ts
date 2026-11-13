@@ -28,6 +28,7 @@ import type {
   CreateAnthropicProvider,
   DefaultConfigLocation,
   DoctorOutput,
+  EngineResult,
   InitOutput,
   ListAnthropicModels,
   ModelsOutput,
@@ -35,11 +36,12 @@ import type {
   ReportOutput,
   ResolvedTaskSpec,
   RevertOutput,
+  RunApprovedPlan,
   RunTask,
   RunsOutput,
 } from "../contracts/index.js";
 import { workflowSettingsOf } from "../contracts/index.js";
-import { applyPlan as engineApplyPlan, runTask as engineRunTask } from "../engine/index.js";
+import { applyPlan as engineApplyPlan, runApprovedPlan as engineRunApprovedPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createMessageCatalog, explainMessageLanguage } from "../i18n/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import { inspectRun, listRuns as storeListRuns, readRevertRecord, revertRun, writeRevertRecord } from "../store/index.js";
@@ -92,6 +94,7 @@ import type {
   AppError,
   ApplyHandle,
   ApplyObserver,
+  ApplyOutcome,
   ApplyPlanRequest,
   CheckApplyRequest,
   ChangesOutput,
@@ -151,6 +154,8 @@ export interface AppHooks {
    */
   readonly providerDeps?: { readonly [P in ApiProviderName]?: ApiProviderDeps };
   readonly runTask?: RunTask;
+  /** U-218: the engine of a run that carries out an approved run plan (runApprovedPlan of src/engine when absent). Tests only. */
+  readonly runApprovedPlan?: RunApprovedPlan;
   /** The apply engine (`applyPlan` of src/engine when absent). Tests give a stand-in to see what it was given. */
   readonly applyPlan?: ApplyPlan;
   /** The model listing (`listAnthropicModels` when absent). Tests give a fake so nothing is sent. */
@@ -228,16 +233,18 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   const relate = (target: string, base: string) => relateRealPaths(target, base);
 
   /**
-   * The CLI's `run` with this environment. `env` is the call's own copy; the variables file is
-   * loaded into it, never into the caller's object or `process.env`.
+   * The CLI's run environment with this environment's parts. `env` is the call's own copy; the
+   * variables file is loaded into it, never into the caller's object or `process.env`. U-218: also
+   * the `run` environment of an apply that carries out a run plan, on the apply's own copy, so the
+   * variables file its preparation loaded is the run's.
    */
-  function cliRun(
-    request: StartRunRequest,
+  function cliEnvironmentOf(
+    argv: readonly string[],
     env: Record<string, string | undefined>,
-    parts: Pick<CliEnvironment, "assemble" | "cancelSignal"> & { readonly runTask?: RunTask },
-  ): Promise<CliRunOutcome | null> {
-    return runCli({
-      argv: runArguments(request),
+    parts: Pick<CliEnvironment, "assemble" | "cancelSignal"> & { readonly runTask?: RunTask; readonly runApprovedPlan?: RunApprovedPlan },
+  ): CliEnvironment {
+    return {
+      argv,
       env,
       cwd: environment.cwd,
       readFile: environment.readFile,
@@ -254,7 +261,16 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       anthropicDeps: hooks.anthropicDeps,
       ...(hooks.providerDeps === undefined ? {} : { providerDeps: hooks.providerDeps }),
       ...parts,
-    }).catch(() => null);
+    };
+  }
+
+  /** The CLI's `run` with this environment. */
+  function cliRun(
+    request: StartRunRequest,
+    env: Record<string, string | undefined>,
+    parts: Pick<CliEnvironment, "assemble" | "cancelSignal"> & { readonly runTask?: RunTask; readonly runApprovedPlan?: RunApprovedPlan },
+  ): Promise<CliRunOutcome | null> {
+    return runCli(cliEnvironmentOf(runArguments(request), env, parts)).catch(() => null);
   }
 
   /** N-1: where the CLI would look for the user's config file now, from this environment. */
@@ -262,23 +278,30 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     return findDefaultConfigLocation(platform, environment.env, environment.homeDir ?? null);
   }
 
-  async function startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome> {
-    const env = copyEnvironment(environment.env, platform);
+  /**
+   * The hooks of a run through the app, for the CLI's run environment: startRun's, and since U-218
+   * those of the run that carries out an approved run plan (applyPlan).
+   * - The assembly (createAppAssemble): DR-15's events from the records the engine appends, masked
+   *   again with the run's gateway, to `observer`; U-108's permission questions to `observer.confirm`;
+   *   U-193's lockLeft and U-211's later release tries.
+   * - The start gate (adapter-contract 5.1): `started` gives the run id and workspace once the run
+   *   is assembled; the engine (runTask, or runApprovedPlan for an approved plan) waits for `open`,
+   *   which the caller calls after it handed out the handle, so the id is known before the first event.
+   * - The cancel channel: no signal handler on the process; the CLI's two signal sources become
+   *   `cancel`, and the cancel file, when requested, is watched as in the CLI (P-2).
+   */
+  function appRunHooks(env: Record<string, string | undefined>, observer: RunObserver | undefined) {
     const cancelHandlers = new Set<() => void>();
-
     let reportStart: (value: { runId: string; workspaceRoot: string }) => void = () => {};
     const started = new Promise<{ runId: string; workspaceRoot: string }>((resolve) => {
       reportStart = resolve;
     });
-    // The engine starts only after startRun has handed out the handle, so the caller knows the
-    // run id before the first event (adapter-contract 5.1).
     let openGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       openGate = resolve;
     });
     /** Notices of the engine's own result; the CLI may add more afterwards (Y-4). */
     let engineNotices: number | null = null;
-
     let assembledRun: { readonly privacy: PrivacyGateway; readonly workspaceRoot: string } | null = null;
     /** U-193: the run's lock could not be released at its end (told in the outcome, the result kept). */
     let lockLeft = false;
@@ -303,7 +326,6 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       // U-108 (B-4, DR-3): the engine's permission questions go to the observer (permission.ts).
       return { ...assembled, deps: { ...assembled.deps, journal, confirm: confirmThrough(observer) } };
     };
-
     const runTask: RunTask = async (deps) => {
       await gate;
       await nextMacrotask();
@@ -311,27 +333,48 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       engineNotices = ended.notices.length;
       return ended;
     };
+    const runApprovedPlan: RunApprovedPlan = async (deps) => {
+      await gate;
+      await nextMacrotask();
+      const ended = await (hooks.runApprovedPlan ?? engineRunApprovedPlan)(deps);
+      engineNotices = ended.notices.length;
+      return ended;
+    };
+    const cancelSignal: CliEnvironment["cancelSignal"] = (cancelFile) =>
+      createCancelSource({
+        cancelFile,
+        fileExists: (file) => existsSync(file),
+        onSignal: (_name, handler) => {
+          cancelHandlers.add(handler);
+          return () => {
+            cancelHandlers.delete(handler);
+          };
+        },
+      });
+    return {
+      parts: { assemble, runTask, runApprovedPlan, cancelSignal },
+      started,
+      open: (): void => openGate(),
+      cancel: (): void => {
+        for (const handler of [...cancelHandlers]) handler();
+      },
+      /** The run's end, from the CLI's result: the notices the CLI added are delivered; whether the lock was left. */
+      ended: (output: EngineResult): { readonly lockLeft: boolean } => {
+        if (engineNotices !== null) {
+          for (const text of output.notices.slice(engineNotices)) deliver(observer, { kind: "notice", text });
+        }
+        return { lockLeft };
+      },
+    };
+  }
 
-    const running = cliRun(request, env, {
-      assemble,
-      runTask,
-      // No signal handlers on the process: the CLI's two signal sources become handle.cancel().
-      // The cancel file, when requested, is watched as in the CLI (P-2).
-      cancelSignal: (cancelFile) =>
-        createCancelSource({
-          cancelFile,
-          fileExists: (file) => existsSync(file),
-          onSignal: (_name, handler) => {
-            cancelHandlers.add(handler);
-            return () => {
-              cancelHandlers.delete(handler);
-            };
-          },
-        }),
-    });
+  async function startRun(request: StartRunRequest, observer?: RunObserver): Promise<StartOutcome> {
+    const env = copyEnvironment(environment.env, platform);
+    const run = appRunHooks(env, observer);
+    const running = cliRun(request, env, run.parts);
 
     const first = await Promise.race([
-      started.then((info) => ({ kind: "started" as const, info })),
+      run.started.then((info) => ({ kind: "started" as const, info })),
       running.then((outcome) => ({ kind: "ended" as const, outcome })),
     ]);
     if (first.kind === "ended") {
@@ -343,20 +386,15 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       const output = outcome?.output;
       if (output === undefined) return { ok: false, error: INTERNAL_ERROR };
       if (output.kind === "error") return { ok: false, error: fromCliError(output) };
-      if (engineNotices !== null) {
-        for (const text of output.notices.slice(engineNotices)) deliver(observer, { kind: "notice", text });
-      }
-      return lockLeft ? { ok: true, result: output, lockLeft: true } : { ok: true, result: output };
+      return run.ended(output).lockLeft ? { ok: true, result: output, lockLeft: true } : { ok: true, result: output };
     });
     const handle: RunHandle = {
       runId: first.info.runId,
       workspaceRoot: first.info.workspaceRoot,
-      cancel() {
-        for (const handler of [...cancelHandlers]) handler();
-      },
+      cancel: run.cancel,
       done,
     };
-    openGate();
+    run.open();
     return { ok: true, handle };
   }
 
@@ -794,9 +832,16 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
 
   /**
    * DR-1, DR-2, DR-21: the CLI's `apply` as an adapter (AdapterApply): the approval is recorded as
-   * `adapter` and the consent comes only from the request. The engine is the same `applyPlan`; only
-   * its journal is wrapped so the apply's events reach `observer` (start records left out). The
-   * handle comes before the first event, as for a run.
+   * `adapter` and the consent comes only from the request. The CLI chooses by the task's plan setting.
+   * - A plan of moves (plan "apply"): the engine is the same `applyPlan`; only its journal is
+   *   wrapped so the apply's events reach `observer.onEvent` (start records left out).
+   * - U-218 (DR-69 B-4, after U-195): a run plan (plan "run") is carried out by a model run, the
+   *   CLI's applyChangesPlan with the `run` environment: the hooks of a run through the app
+   *   (appRunHooks), whose events reach `observer.onRunEvent` and permission questions
+   *   `observer.confirm`. The outcome is that run's EngineResult (planRunId, planDigest) with
+   *   lockLeft as a run's.
+   * Either way the handle, with the id of the run that applies, comes before the first event, and
+   * handle.cancel() is the one cancel channel.
    */
   async function applyPlan(
     request: ApplyPlanRequest,
@@ -804,60 +849,68 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
   ): Promise<{ readonly ok: true; readonly handle: ApplyHandle } | { readonly ok: false; readonly error: AppError }> {
     const consent = unsafeMoveConsentOf(request);
     if (!consent.ok) return consent;
-    const cancelHandlers = new Set<() => void>();
-    let reportStart: (runId: string) => void = () => {};
-    const started = new Promise<string>((resolve) => {
-      reportStart = resolve;
+    const argv = applyArguments(request);
+    const io = planCommandEnvironment(argv);
+    // U-218: the carrying run's observer: its events and permission questions, read from `observer` when they come.
+    const runObserver: RunObserver | undefined =
+      observer === undefined
+        ? undefined
+        : {
+            onEvent: (event) => observer.onRunEvent?.(event),
+            confirm: (question, signal) => {
+              const ask = observer.confirm;
+              return typeof ask === "function" ? ask.call(observer, question, signal) : Promise.resolve({ decision: "dismissed" });
+            },
+          };
+    const run = appRunHooks(io.env, runObserver);
+    let reportMoves: (runId: string) => void = () => {};
+    const movesStarted = new Promise<string>((resolve) => {
+      reportMoves = resolve;
     });
-    let openGate: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      openGate = resolve;
+    let openMoves: () => void = () => {};
+    const movesGate = new Promise<void>((resolve) => {
+      openMoves = resolve;
     });
     const wrapped: ApplyPlan = async (deps) => {
       const journal = applyJournalWithEvents(deps.journal, deps.runId, observer, deps.privacy, deps.clock);
-      reportStart(deps.runId);
-      await gate;
+      reportMoves(deps.runId);
+      await movesGate;
       await nextMacrotask();
       return (hooks.applyPlan ?? engineApplyPlan)({ ...deps, journal });
     };
     const running = runApply({
-      ...planCommandEnvironment(applyArguments(request)),
+      ...io,
       applyPlan: wrapped,
       adapter: { unsafeMoveConsent: consent.consent },
-      cancelSignal: (cancelFile) =>
-        createCancelSource({
-          cancelFile,
-          fileExists: (file) => existsSync(file),
-          onSignal: (_name, handler) => {
-            cancelHandlers.add(handler);
-            return () => {
-              cancelHandlers.delete(handler);
-            };
-          },
-        }),
+      cancelSignal: run.parts.cancelSignal,
+      run: cliEnvironmentOf(argv, io.env, run.parts),
     }).catch(() => null);
 
     const first = await Promise.race([
-      started.then((runId) => ({ kind: "started" as const, runId })),
+      movesStarted.then((runId) => ({ kind: "started" as const, runId })),
+      run.started.then((info) => ({ kind: "started" as const, runId: info.runId })),
       running.then((outcome) => ({ kind: "ended" as const, outcome })),
     ]);
     if (first.kind === "ended") {
       const output = first.outcome !== null && "output" in first.outcome ? first.outcome.output : undefined;
       return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
     }
-    const done: Promise<AppCallOutcome<ApplyResult>> = running.then((outcome) => {
+    const done: Promise<ApplyOutcome> = running.then((outcome): ApplyOutcome => {
       const output = outcome !== null && "output" in outcome ? outcome.output : undefined;
       if (output?.kind === "apply") return { ok: true, output: output as ApplyResult };
+      if (output?.kind === "run") {
+        const result = output as EngineResult;
+        return run.ended(result).lockLeft ? { ok: true, output: result, lockLeft: true } : { ok: true, output: result };
+      }
       return { ok: false, error: output?.kind === "error" ? fromCliError(output) : INTERNAL_ERROR };
     });
     const handle: ApplyHandle = {
       runId: first.runId,
-      cancel() {
-        for (const handler of [...cancelHandlers]) handler();
-      },
+      cancel: run.cancel,
       done,
     };
-    openGate();
+    openMoves();
+    run.open();
     return { ok: true, handle };
   }
 

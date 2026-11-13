@@ -593,9 +593,11 @@ export function approvedPlanWritablePathSets(
  * planned file before its first model request (U-187, B-6): a write of `path` with
  * PLANNED_FILE_DESCRIPTOR (call id `approved-plan`), the requested decision and, only when it
  * allows, the effective one (the text, then the real path). `policy` is that run's gate: the task's
- * policy with approvedPlanWritablePathSets. The engine's check and the app layer's check before the
- * approval call this one function (src/engine `judgePlannedFile`), not a copy, as PreflightPlan is
- * shared. The file's staleness (plannedFileStale) is not in it; a gate that throws rejects it.
+ * policy with approvedPlanWritablePathSets. The engine's check calls this function (src/engine
+ * `judgePlannedFile`), given out as PreflightPlan is so the app layer's check before the approval can
+ * call the same one. Codex V-21: the app does not yet; checkChangesPlanFiles still builds the lists
+ * and asks the gate in its own lines (call id `plan-check`), the same judgement, until p5a connects
+ * it (U-229). The file's staleness (plannedFileStale) is not in it; a gate that throws rejects it.
  */
 export type JudgePlannedFile = (policy: PolicyGate, path: string) => Promise<PolicyDecision>;
 

@@ -80,7 +80,10 @@ describe("resolveWorkflow (GT-U02)", () => {
 
   test("plan apply cannot be weakened; none may be strengthened", () => {
     assert.deepEqual(resolveWorkflow(input({ task: { workflowRef: "organize", plan: "none" } })), { ok: false, problem: "plan_weakened", field: "plan" });
-    const strengthened = resolveWorkflow(input({ task: { workflowRef: "document", plan: "apply" } }));
+    // U-224: strengthening needs the mode's plan tool among the tools; document offers none.
+    assert.deepEqual(resolveWorkflow(input({ task: { workflowRef: "document", plan: "apply" } })), { ok: false, problem: "plan_tool_missing", field: "plan" });
+    const withPlanTool = { ...definitions, "doc-plan": { tools: ["read_file", "search_files", "write_file", "propose_plan"] } satisfies WorkflowDefinition };
+    const strengthened = resolveWorkflow(input({ definitions: withPlanTool, task: { workflowRef: "doc-plan", plan: "apply" } }));
     assert.ok(strengthened.ok && strengthened.settings.plan === "apply");
   });
 

@@ -57,6 +57,7 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
   { file: "config.js", names: ["parseConfig"], step: "C-3b" },
   { file: "config-file.js", names: ["chooseConfigFile"], step: "C-3b" },
   { file: "unreadable.js", names: ["runGuards", "runUnreadablePaths", "runMinGroupSize"], step: "C-3b" },
+  { file: "assemble.js", names: ["assembleRun", "createAssemble", "createRevertCommand", "revertStatus"], step: "C-4 (names in a file that stays; the pinned file takes assembleRun)" },
 ];
 
 describe("U-282: the old paths the CLI migration keeps as re-exports are there (plan A)", () => {

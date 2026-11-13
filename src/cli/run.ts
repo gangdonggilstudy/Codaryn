@@ -86,7 +86,7 @@ import { runApprovedPlan as engineRunApprovedPlan, runTask as engineRunTask } fr
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
 import type { RunArgs } from "./args.js";
-import type { ApprovedPlanParts, Assemble } from "./assemble.js";
+import type { ApprovedPlanParts, Assemble } from "../app/assembly.js";
 import { parseConfig } from "../app/input/config.js";
 import { chooseConfigFile, isMissingFile, selectProfile } from "../app/input/config-file.js";
 import { jsonSyntaxPosition } from "./json-position.js";

@@ -646,7 +646,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 실행: 게이트(`PolicyGateOptions.unreadablePaths`), 도구 실행기(`search_files`와 `inspect_files`가 그 아래 항목을 이름째 빼고 `withheld: true`; `query_table`은 그 아래 표에 count·sum·mean만 허용하고 k 미만 묶음을 뺀다), 무결성 확인(`integrityPathsOf`, 보호 경로와 함께), 검증기 실행기(`VerifierRunnerOptions.unreadablePaths`와, U-258부터 실행의 k `minGroupSize`. 아래의 `data_checks` 항목).
   - 이동 계획의 적용: 적용 task의 목록을 게이트, 무결성 확인, 이동 뒤 검증기 실행기에 건다.
   - 승인된 계획을 수행하는 실행: 엔진이 계획 파일 목록을 더해 만드는 게이트(`ApprovedPlanParts.policyFor`)도 실행의 목록을 받는다(검토 R-108 H-1). 전에는 그 게이트만 목록 없이 만들어져, task 파일 아래에서 설정·프로필이 준 항목 밑의 `read_file`이 계획 수행 중에 허용되었다.
-  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/app/input/unreadable.ts`)가 준다. 실행의 조립과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
+  - **한 곳에서(R-108 H-1):** 위의 넷(게이트, 도구 실행기, 검증기 실행기, 무결성 대상)은 모두 `runGuards(task, workspace)`(`src/app/input/unreadable.ts`)가 준다. 실행의 조립(`src/app/assembly.ts`, 이행 C-4부터 앱 계층의 것)과 이동 계획의 적용이 이것만 쓴다. revert는 이 가운데 어느 것도 만들지 않는다. 목록도 k도 없으면 각 부분은 전과 같다.
   - 그 아래의 읽기, 목록의 시작, 쓰기는 `path`/`unreadable_path`로 거부된다(U-203). 모델에게는 `REFUSAL_HINTS.unreadable_path`가 간다.
 - **명령 금지(R-5)**
   - 실행에 읽기 제외가 하나라도 있으면 명령 규칙도 `command` 검증기도 둘 수 없다. 명령은 어떤 파일이든 읽을 수 있고, 명령 검증기의 출력은 재수정 때 모델로 가기 때문이다.
@@ -666,7 +666,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
   - 진행 줄은 무엇을 물었는지만 말한다(`progress.query_table`, `_whole`, `_describe`와 연산 코드, U-207). 경로, 열 이름, 묶음 키, 행 수, 집계 값은 없다.
 - **카나리(ne-verify U-232의 틀):** `g-u210-canary-cli`가 그 틀의 작업 공간(세 형식의 표, 칸마다 표지, 묶음 키 표지, 줄마다 표지인 메모, 이름이 표지인 파일과 폴더)에서 analyze-private를 대본 모델과 모의 Anthropic API로 돌린다. 행·이름·k 미만 묶음 키가 모델로 간 것, 기록, 사람용 출력 어디에도 없고(`leaksOf`가 빔), 한 열로 묶은 k 이상 묶음의 키는 모두 모델에게 간다(양성 대조).
 - **끝에서 끝까지(U-210 둘째 몫의 시험):** 실제 CLI를 대본 모델과 127.0.0.1의 모의 Anthropic API로 돌린다. 표의 칸마다 실행 때 만든 표지를 두고, 행의 표지와 k 미만 묶음의 키가 도구 결과, 기록(`.codaryn` 아래 전부), 모델 요청 본문, 사람용 출력(stdout, stderr) 어디에도 없음을 확인한다. k 이상 묶음의 키, 열 이름, 수는 모델에게 간다.
-- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 실행 조립은 CLI의 `createAssemble`이고(`src/app/assemble.ts`, U-237), 적용 점검(`src/app/check-apply.ts`)과 run 계획 보기(`src/app/changes-plan.ts`)는 `runGuards`의 게이트를 쓴다. 그래서 GUI에서 시작한 실행도 같은 게이트·도구 실행기·검증기·무결성 대상을 받는다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-204, U-212).
+- **앱 계층:** 같은 `prepareTask`로 같은 목록과 k를 받는다. 앱의 실행 조립은 CLI와 같은 `createAssemble`이고(조립은 `src/app/assembly.ts`, 앱의 감싸개는 `src/app/assemble.ts`, U-237·U-285), 적용 점검(`src/app/check-apply.ts`)과 run 계획 보기(`src/app/changes-plan.ts`)는 `runGuards`의 게이트를 쓴다. 그래서 GUI에서 시작한 실행도 같은 게이트·도구 실행기·검증기·무결성 대상을 받는다. 설정 변경의 넓히기 판정(항목 빼기, k 낮추기, R-7)은 [어댑터 계약](design/adapter-contract.md) 5.11이다(U-204, U-212).
 - **작업 종류(U-210 둘째 몫, P-1~P-3):** `analyze-private`가 내장이고 `analyze`도 `query_table`을 준다(18.1).
 - **`data_checks`의 근거와 판정(R-6, U-223, U-258).** 사람에게 하는 설명은 [개인정보 문서](privacy.md) 13절의 "검증기가 알려 주는 것"과 15절의 표다. 재수정이 작은 묶음의 참값이나 자리, 모델이 추측한 값의 맞음·틀림을 모델에게 실어 가지 못하게 한다.
   - 원본이나 대상이 읽기 제외 아래면 근거에 그 표에서 읽은 수(다시 계산한 값, 칸 수, 행 수)를 쓰지 않는다. "대상 데이터 행 N, 열 X가 맞지 않음"과 그 까닭(`UNREADABLE_SOURCE_NOTE`)만 쓴다(U-223).
@@ -720,7 +720,7 @@ node dist/src/cli/main.js revert --workspace D:\work\notes --run 20261112T031500
 ### 연결 상태 (연결 완료)
 
 - 엔진의 재수정 반복과 CLI의 새 한도·보호 경로 전달은 연결되어 있다.
-- 실행 조립(`src/cli/assemble.ts`의 `assembleRun`)은 실행마다 `createChangeRecorder({ workspaceRoot, runId })`를 만들어 `createToolRunner`의 `changeRecorder`로 넘긴다. 따라서 `write_file`은 쓰기 전에 원문을 스냅샷으로 남긴다.
+- 실행 조립(`src/app/assembly.ts`의 `assembleRun`. 이행 C-4 전에는 `src/cli/assemble.ts`)은 실행마다 `createChangeRecorder({ workspaceRoot, runId })`를 만들어 `createToolRunner`의 `changeRecorder`로 넘긴다. 따라서 `write_file`은 쓰기 전에 원문을 스냅샷으로 남긴다.
 - `src/cli/main.ts`는 `revert` 명령에 `createRevertCommand(revertRun)`을 넘긴다. 이 함수는 journal 확인, 잠금, `revertRun` 호출, 잠금 해제를 한다.
 - 유닛 검증(`tests/unit/cli/sc-wire.test.ts`)에서 실제 저장소로 실행하고 되돌려 다음을 확인했다.
   - 원래 바이트가 복원된다.

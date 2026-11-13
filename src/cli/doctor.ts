@@ -90,6 +90,7 @@ import type { SettingsEnvironment } from "./settings.js";
 import { inspectLock, listParkedFiles, nodeLockFileSystem } from "../store/index.js";
 import { buildQuickTask, localPathProblem, parseTask, quickProvider } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
+import { displayWidth, padEnd } from "./human/index.js";
 import { hideKeys } from "./text-safety.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
@@ -521,7 +522,8 @@ function renderDoctorLines(output: DoctorOutput, messages: MessageCatalog, platf
   };
   const status = (value: DoctorCheckStatus): string => `[${format(`doctor.status.${value}`, value)}]`;
   const labels = output.checks.map((check) => format(`doctor.check.${check.id}`, check.id));
-  const width = Math.max(...labels.map((label) => label.length));
+  // U-127: terminal columns (displayWidth), so a Korean label lines up as an English one does.
+  const width = Math.max(...labels.map((label) => displayWidth(label)));
   const lines = output.checks.flatMap((check, index) => {
     // The check's own text; when the catalog has none, the message, which already holds the notes.
     let fromCatalog = check.text !== undefined;
@@ -533,7 +535,7 @@ function renderDoctorLines(output: DoctorOutput, messages: MessageCatalog, platf
         fromCatalog = false;
       }
     }
-    const first = `${status(check.status).padEnd(10)}${(labels[index] ?? check.id).padEnd(width)}  ${body}`;
+    const first = `${padEnd(status(check.status), 10)}${padEnd(labels[index] ?? check.id, width)}  ${body}`;
     // DR-36 (b): each note on its own line under the check's text.
     const indent = " ".repeat(10 + width + 2);
     const notes = fromCatalog ? (check.notes ?? []).map((note) => `${indent}${format(note.id, noteEnglish(note), "params" in note ? note.params : undefined)}`) : [];

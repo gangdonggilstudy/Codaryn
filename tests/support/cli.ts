@@ -179,6 +179,8 @@ export interface StartOptions {
    * keeps open and never writes to: not a terminal, and a read on it would wait (Y-3 prompts).
    */
   readonly stdin?: "ignore" | "pipe";
+  /** U-304: test harness modules (URLs) the CLI process imports first (`node --import`), after the network guard. */
+  readonly preload?: readonly string[];
 }
 
 /** Compiled next to this file as `dist/tests/support/net-guard.js`. */
@@ -191,7 +193,8 @@ export function startCli(args: readonly string[], options: StartOptions): Starte
   const started = Date.now();
   const guard = options.netGuardLog;
   const baseEnv = options.env ?? cliEnv();
-  const nodeArgs = guard === undefined ? [cli, ...args] : ["--import", NET_GUARD_URL, cli, ...args];
+  const preloads = (options.preload ?? []).flatMap((module) => ["--import", module]);
+  const nodeArgs = [...(guard === undefined ? [] : ["--import", NET_GUARD_URL]), ...preloads, cli, ...args];
   const child = spawn(NODE, nodeArgs, {
     cwd: options.cwd,
     env: guard === undefined ? baseEnv : { ...baseEnv, [NET_GUARD_LOG_ENV]: guard },

@@ -996,7 +996,13 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     }
     if (!shown.digest.startsWith(digest)) return { ok: false, error: appError("plan_not_approved", "the digest does not match the plan's digest; nothing was checked") };
     const problems = await checkChangesPlanFiles(
-      { workspaceRoot, policy: probe.task.policy, ...(probe.task.writablePathSets === undefined ? {} : { writablePathSets: probe.task.writablePathSets }) },
+      {
+        workspaceRoot,
+        policy: probe.task.policy,
+        ...(probe.task.writablePathSets === undefined ? {} : { writablePathSets: probe.task.writablePathSets }),
+        // U-237 (R-108 H-2): the run's unreadable paths, as the carried-out run's gate has them.
+        ...(probe.task.unreadablePaths === undefined ? {} : { unreadablePaths: probe.task.unreadablePaths }),
+      },
       view.output.files,
     );
     return {

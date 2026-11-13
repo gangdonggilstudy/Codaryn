@@ -9,17 +9,21 @@
  * - The check (checkChangesPlanFiles): each planned file judged by the gate the run that carries the
  *   plan out will have (the task's policy, its writable lists and the plan's files as one more list,
  *   approvedPlanWritablePathSets), with PLANNED_FILE_DESCRIPTOR, by the text and then the real path:
- *   what the engine's check before its first model request judges after a file's staleness. The
+ *   what the engine's check before its first model request judges after a file's staleness. U-237
+ *   (R-108 H-2, U-219, Codex V-21): that gate is made from runGuards (the run's unreadable paths
+ *   included, as approvedPlan.policyFor makes it), and each file is judged by the engine's own
+ *   judgePlannedFile, not by lines of this module. The
  *   staleness (the file as the plan saw it, plannedFileStale) is the engine's: it reads the files
  *   then, and the check here would only say what may change before the run. Reads only, no lock.
  * - Thin on the stored plan's form (Codex V-11 may change it): only `kind`, each file's `path` for
  *   the gate, and the loaded plan handed whole to changesPlanOutput.
  */
 
-import { PLANNED_FILE_DESCRIPTOR } from "../contracts/index.js";
+import { approvedPlanWritablePathSets } from "../contracts/index.js";
 import type { ChangesPlanOutput, LoadPlanOutcome, PolicyConfig, PrivacyGateway, WritablePathSet } from "../contracts/index.js";
 import { changesPlanOutput } from "../cli/human/changes-plan.js";
-import { createPolicyGate } from "../policy/index.js";
+import { runGuards } from "../cli/unreadable.js";
+import { judgePlannedFile } from "../engine/index.js";
 import { hasRecordsChangedMark, loadAnyPlan } from "../store/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { appError } from "./errors.js";
@@ -81,11 +85,13 @@ export async function changesPlanViewIn(
   return { ok: true, output: { output: view.output, files: loaded.plan.files.map((file) => ({ path: file.path })) } };
 }
 
-/** What a run that carries a run plan out is given: its policy and writable lists (ResolvedTaskSpec's). */
+/** What a run that carries a run plan out is given: its policy, writable lists and unreadable paths (ResolvedTaskSpec's). */
 export interface ChangesPlanCheckSource {
   readonly workspaceRoot: string;
   readonly policy: PolicyConfig;
   readonly writablePathSets?: readonly WritablePathSet[];
+  /** U-237 (R-108 H-2): the run's unreadable paths, every source's united (ResolvedTaskSpec.unreadablePaths). */
+  readonly unreadablePaths?: readonly string[];
 }
 
 /**
@@ -95,13 +101,12 @@ export interface ChangesPlanCheckSource {
  */
 export async function checkChangesPlanFiles(source: ChangesPlanCheckSource, files: readonly { readonly path: string }[]): Promise<readonly { readonly index: number; readonly problem: "denied" }[]> {
   const workspace = await createWorkspace({ root: source.workspaceRoot });
-  const writablePathSets: readonly WritablePathSet[] = [...(source.writablePathSets ?? []), { source: "plan", entries: files.map((file) => file.path) }];
-  const gate = createPolicyGate({ config: source.policy, workspace, writablePathSets });
+  // U-237 (R-108 H-2): the gate approvedPlan.policyFor gives the carried-out run, from runGuards.
+  const gate = runGuards(source, workspace).gate(approvedPlanWritablePathSets(source.writablePathSets, { files }));
   const problems: { index: number; problem: "denied" }[] = [];
   for (const [index, file] of files.entries()) {
-    const call = { id: "plan-check", name: PLANNED_FILE_DESCRIPTOR.name, args: { path: file.path } };
-    const requested = gate.checkRequested(call, PLANNED_FILE_DESCRIPTOR);
-    const decision = requested.allowed ? await gate.checkEffective(call, PLANNED_FILE_DESCRIPTOR) : requested;
+    // U-219 (Codex V-21): the engine's own judgement of a planned file.
+    const decision = await judgePlannedFile(gate, file.path);
     if (!decision.allowed) problems.push({ index, problem: "denied" });
   }
   return problems;

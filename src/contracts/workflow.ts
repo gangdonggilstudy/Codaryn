@@ -17,8 +17,10 @@
  * decide).
  *
  * P1: `writablePaths` is a policy field of this contract (task.ts, U-170; DR-69 B-4) and plan mode
- * `run` a plan mode (plan.ts). Named here only, not yet part of it: `unreadablePaths`, the
- * `query_table` tool, Markdown file rules, the `analyze-private` definition.
+ * `run` a plan mode (plan.ts). Bundle A (DR-70): `unreadablePaths` is a policy field too, united over
+ * the definition and the configured policy (mergeWorkflowPolicy; U-197, R-2), and the `query_table`
+ * tool's contract is query.ts (U-197; its runner is A-5, U-208). Named here only, not yet part of
+ * it: Markdown file rules and the `analyze-private` definition (A-6).
  */
 
 import type { PlanActionKind, PlanMode } from "./plan.js";
@@ -41,7 +43,8 @@ export const MAX_WORKFLOWS = 32;
  * - document: read_file, search_files, write_file; verifiers decide (no verifier: "no automatic
  *   verification")
  * - analyze: read_file, search_files, write_file; `human_review` after the verifiers (GT-D7).
- *   Data with personal information is out of scope until the P1 aggregate tool (GT-D8)
+ *   Data with personal information is not for it (GT-D8): P1 gives such tables `analyze-private`
+ *   with query_table (query.ts, A-6)
  * - organize: read_file, search_files, inspect_files, propose_plan; `plan: "apply"`; no command
  *   rules allowed (GT-D10)
  */
@@ -333,6 +336,12 @@ export interface WorkflowDefinition {
  * - commands_not_allowed: command rules under `allowCommands: false`
  * - review_without_checklist, checklist_without_review: humanReview and completion disagree
  * - instructions_too_long, checklist_too_long: over the MAX_ constants above
+ * - plan_tool_missing (U-224): the resolved plan mode is "apply" or "run" but the resolved tools lack
+ *   its own plan tool (the one whose descriptor ends the run with that planMode: `propose_plan`,
+ *   `propose_changes`), so the run could never store a plan and would end failed/model_error. The
+ *   field: `tools` when the task's list leaves out a plan tool the definition offers; `plan` when
+ *   the task sets the mode under a definition (or the legacy settings) without the tool; otherwise
+ *   `workflows.tools`, the definition's own list.
  */
 export const WORKFLOW_PROBLEMS = [
   "unknown_workflow",
@@ -343,6 +352,7 @@ export const WORKFLOW_PROBLEMS = [
   "checklist_without_review",
   "instructions_too_long",
   "checklist_too_long",
+  "plan_tool_missing",
 ] as const;
 export type WorkflowProblem = (typeof WORKFLOW_PROBLEMS)[number];
 

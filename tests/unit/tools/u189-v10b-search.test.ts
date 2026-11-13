@@ -16,6 +16,7 @@ import type { SearchFilesPayload } from "../../../src/contracts/index.js";
 import { createToolRunner } from "../../../src/tools/index.js";
 import { nodeFileLayer } from "../../../src/workspace/file-layer.js";
 import type { FileLayer } from "../../../src/workspace/file-layer.js";
+import { GUARD_ATTEMPTS } from "../../../src/workspace/guard.js";
 import { createWorkspace } from "../../../src/workspace/index.js";
 import { createWorkspaceWithFileLayer } from "../../../src/workspace/workspace.js";
 import { createFakePrivacy } from "./doubles.js";
@@ -64,7 +65,8 @@ test("V-10b: a file whose read saw its folder change on every try makes the sear
     },
   };
   const payload = await search(await createWorkspaceWithFileLayer({ root }, layer));
-  assert.equal(opens, 3, "tried three times");
+  // U-213: as many tries as the guard makes (six since ne-verify's measurement).
+  assert.equal(opens, GUARD_ATTEMPTS, "tried every time the guard tries");
   assert.deepEqual(payload.entries, []);
   assert.equal(payload.truncated, true, "the result says it is not complete");
 });

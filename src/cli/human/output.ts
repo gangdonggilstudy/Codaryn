@@ -258,6 +258,16 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     reverted: () => catalog.format("runs.plan_apply_reverted", { runId: applyRunId }),
     record_missing: () => catalog.format("runs.plan_apply_missing", { runId: applyRunId }),
   });
+  // U-221 (ne-verify, nd-docs): a run plan's plan run by the same rule, in the report's words (carried out
+  // by run …; a run that ended otherwise than done names how, as no_verifier when it had no checks).
+  // record_missing is not reached with a carrying run in the list, and keeps its words.
+  const planCarriedWords = (carryRunId: RunId, reason: RunReason | undefined): { readonly [S in PlanApplyState]: () => CatalogText } => ({
+    applied: () => catalog.format("runs.plan_carried_out", { runId: carryRunId }),
+    unfinished: () => catalog.format("runs.plan_carried_ended", { runId: carryRunId, reason: reason ?? ("?" as RunReason) }),
+    applying: () => catalog.format("runs.plan_carrying", { runId: carryRunId }),
+    reverted: () => catalog.format("runs.plan_carried_reverted", { runId: carryRunId }),
+    record_missing: () => catalog.format("runs.plan_apply_missing", { runId: carryRunId }),
+  });
 
   function diagnosticText(diagnostic: InputDiagnostic): string | null {
     const file = isOneOf(diagnostic.file, ["config", "task", "script"] as const) ? diagnostic.file : null;
@@ -430,9 +440,13 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
     runSummary(result: EngineResult, context: RunSummaryContext): string {
       const pair = validStatusReason(result.status, result.reason);
       const out: string[] = [heading(pair, result.status, result.reason)];
-      // G-A: a plan waiting for approval says so first.
+      // G-A: a plan waiting for approval says so first. U-221 (ne-verify's U-217 F-1): a run plan
+      // (EngineResult.plan.kind "changes") as its plan view says it: files to write, not actions.
       const planReady = pair?.reason === "plan_pending" && result.plan !== undefined && isCount(result.plan.actions);
-      if (planReady && result.plan !== undefined) out.push(catalog.format("summary.plan_ready", { actions: result.plan.actions }));
+      const runPlan = planReady && result.plan?.kind === "changes";
+      if (planReady && result.plan !== undefined) {
+        out.push(runPlan ? catalog.format("summary.plan_ready_changes", { count: result.plan.actions }) : catalog.format("summary.plan_ready", { actions: result.plan.actions }));
+      }
       // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run (EngineResult.planRunId),
       // as an apply's summary does; absent in every other run, so no other summary changes.
       const carried: unknown = result.planRunId;
@@ -471,13 +485,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
-      // U-198 (B-4, V-14 L-1): of those, the writes refused as not writable, by why, each with its own
-      // advice: not one of the carried-out plan's files (make a new plan), then outside the settings'
-      // writablePaths (add the file). The fields are optional: absent is 0, no line.
+      // U-198 (B-4, V-14 L-1): of those, the writes refused as not writable, by why: not one of the
+      // carried-out plan's files, with its advice (make a new plan), then outside the settings'
+      // writablePaths. U-221 (nd-docs): the latter without its advice, which the CLI's progress line
+      // (progress.not_writable_hint) gives right before this summary whenever the count is above 0.
+      // The fields are optional: absent is 0, no line.
       const notPlanned = isCount(context.deniedNotPlanned) ? context.deniedNotPlanned : 0;
       if (notPlanned > 0) out.push(catalog.format("summary.denied_not_planned", { count: notPlanned }), catalog.format("summary.denied_not_planned_hint"));
       const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
-      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }), catalog.format("summary.denied_not_writable_hint"));
+      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
       // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
@@ -514,11 +530,12 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // U-152 (AXM-15): a plan run shows the agent's description of its plan (EngineResult.planSummary,
       // U-59) where another run shows its last message: under the plan view's label (plan.summary_label),
       // quoted rows as the plan view draws them. The model's own words, not checked and not what a person
-      // approves (not in plan.json or the digest).
+      // approves (not in plan.json or the digest). U-221 (F-1): a run plan's summary is under its digest
+      // and approved with its files (R-99 L-1), so it takes the run plan view's label.
       const planSummary: unknown = result.planSummary;
       if (planReady && typeof planSummary === "string") {
         const rows = quoteModelText(planSummary, FINAL_MESSAGE_MAX_LINES);
-        if (rows.length > 0) out.push(`${catalog.format("plan.summary_label")}:`, ...rows);
+        if (rows.length > 0) out.push(`${catalog.format(runPlan ? "plan.changes.summary_label" : "plan.summary_label")}:`, ...rows);
       }
       // DR-47 (AXM-1): the agent's last message, after the facts and before the advice. It is the
       // agent's own words: under its label, each line set apart; not for a plan run.
@@ -770,11 +787,15 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         const appliedRunId: unknown = typeof appliedBy === "object" && appliedBy !== null ? (appliedBy as { runId?: unknown }).runId : undefined;
         const claimedBy = pair?.reason === "plan_pending" && typeof appliedRunId === "string" ? toRunId(appliedRunId) : null;
         const judged = claimedBy === null ? null : planApplyStateOf({ ...entry, appliedBy: { runId: claimedBy, at: "" } }, runs);
+        // U-221: the plan was a run plan when the entry that took it up (the one planApplyStateOf read) is
+        // a run that carried it out, not an apply run; a plan of moves' words are as before.
+        const taker = judged === null ? undefined : runs.find((other) => other.state === "checked" && other.runId === judged.applyRunId && other.planRunId === entry.runId);
+        const carried = taker !== undefined && taker.state === "checked" && taker.kind !== "apply";
         const words =
           pair === null
             ? null
             : judged !== null
-              ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
+              ? (carried ? planCarriedWords : planApplyWords)(judged.applyRunId, judged.reason)[judged.state]()
               : catalog.format(`status.${pair.status}`);
         // U-162 (AXM-8): a run without a result says what its phase is when the list knows it.
         const phase: unknown = entry.phase;

@@ -63,6 +63,14 @@ const KEPT: readonly { readonly file: string; readonly names: readonly string[];
     names: ["prepareTask", "cliError", "withHint", "argumentsError", "settingsError", "positionDiagnostic", "jsonSyntaxError", "workflowProblemText", "runCli"],
     step: "C-5 (names in a file that stays; the pinned file takes runCli)",
   },
+  {
+    file: "run.js",
+    names: ["MODEL_NOT_FOUND_HINT", "notePrivateData", "defaultConfigNotice", "runPrepared"],
+    step: "C-6a (U-296; names in a file that stays: tests take the first three, plan-commands runPrepared)",
+  },
+  { file: "failed-calls.js", names: ["createFailedCalls"], step: "C-6a (U-293 moved it; progress.ts takes it)" },
+  { file: "result-fields.js", names: ["withoutEmptyStateChanged"], step: "C-6a (U-293 moved it)" },
+  { file: "human/query-table.js", names: ["queryTableFacts"], step: "C-6a (U-293 moved it; nc-human's file)" },
   { file: "json-position.js", names: ["jsonErrorOffset", "lineAndColumn", "jsonSyntaxPosition"], step: "C-5" },
 ];
 

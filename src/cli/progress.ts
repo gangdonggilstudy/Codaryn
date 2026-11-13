@@ -12,7 +12,7 @@
  */
 
 import { ALL_TOOL_NAMES } from "../contracts/index.js";
-import type { Journal, JournalEvent, PrivacyGateway } from "../contracts/index.js";
+import type { Journal, JournalEvent, MaskedText, PrivacyGateway } from "../contracts/index.js";
 import { createFailedCalls } from "./failed-calls.js";
 import { cleanText, safeToken } from "../app/input/text-safety.js";
 
@@ -154,6 +154,34 @@ export function progressLine(event: JournalEvent): string | null {
   }
 }
 
+/** What withProgress draws one record with: the renderer's progressLine, or the English lines above. */
+type ProgressRender = (event: JournalEvent) => string | readonly string[] | null;
+
+/**
+ * U-296 (C-6a): one record's progress lines (if any), each masked (`mask`: null leaves the line out)
+ * and cleaned, then written with its line feed; best effort. withProgress's step for each stored
+ * record, and since C-6a also the CLI run's, which draws each record as stored
+ * (RunObserver.onStoredRecord) and masks with the run's gateway as RunHandle.mask does.
+ */
+export function writeProgressLines(event: JournalEvent, mask: (text: string) => MaskedText | null, write: (line: string) => void, render: ProgressRender): void {
+  let lines: readonly string[];
+  try {
+    const drawn = render(event);
+    lines = drawn === null ? [] : typeof drawn === "string" ? [drawn] : drawn;
+  } catch {
+    lines = [];
+  }
+  for (const line of lines) {
+    const masked = mask(`${PROGRESS_PREFIX}${line}`);
+    if (masked === null) continue;
+    try {
+      write(`${cleanText(masked)}\n`);
+    } catch {
+      // Progress is best effort.
+    }
+  }
+}
+
 /**
  * Wraps the run's journal: after a record is stored, its progress line (if any) is written.
  * `write` receives one complete line including the line feed.
@@ -167,27 +195,17 @@ export function withProgress(
    * otherwise (one state per journal, U-18). DR-43 (b): it may give several lines for one record,
    * each written on its own.
    */
-  render: (event: JournalEvent) => string | readonly string[] | null = englishProgressLines(),
+  render: ProgressRender = englishProgressLines(),
 ): Journal {
+  // As before: the run's gateway; a text it cannot mask leaves its line out (a throw is not caught here).
+  const mask = (text: string): MaskedText | null => {
+    const masked = privacy.mask(text);
+    return masked.ok ? masked.text : null;
+  };
   return {
     async append(event) {
       const stored = await journal.append(event);
-      let lines: readonly string[];
-      try {
-        const drawn = render(event);
-        lines = drawn === null ? [] : typeof drawn === "string" ? [drawn] : drawn;
-      } catch {
-        lines = [];
-      }
-      for (const line of lines) {
-        const masked = privacy.mask(`${PROGRESS_PREFIX}${line}`);
-        if (!masked.ok) continue;
-        try {
-          write(`${cleanText(masked.text)}\n`);
-        } catch {
-          // Progress is best effort.
-        }
-      }
+      writeProgressLines(event, mask, write, render);
       return stored;
     },
     close: () => journal.close(),

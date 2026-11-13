@@ -145,7 +145,8 @@ describe("N-5, N-17, N-23 human output of run", () => {
       deps: {
         task: input.task,
         privacy: { mask: (text: string) => ({ ok: true, text: text.split("fake-secret-0042").join("[masked]") }) },
-        journal: { append: async () => {}, close: async () => {} },
+        // AC-D3 (C-2): append gives the record as stored; a run draws its progress lines from it (C-6a).
+        journal: { append: async (event: unknown) => event, close: async () => {} },
       } as never,
       finish: async () => {},
     });

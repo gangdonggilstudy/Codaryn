@@ -34,6 +34,12 @@
  * (apply's own look refuses) and written as the apply makes the workspace lock file (only the look under
  * the lock can find it; mark-at-lock.ts makes that moment deterministic, no race). Both refusals are the
  * same on both ways, the lock is released, and nothing is claimed, written or recorded.
+ *
+ * U-310 (ne-verify R-117 I-1; before C-7b): the app layer's plan, review and checkApply, which the GUI
+ * uses, beside the CLI's plan, review and apply's own preflight, now that C-7a gave them one set of rules
+ * (showPlan, recordReview). What is left to differ is the wrapping: the task form and the workspace form
+ * (with its task type), where DR-28's secrets come from (the task file's or the config's), and an
+ * error's way back (fromCliError).
  */
 
 import assert from "node:assert/strict";
@@ -54,7 +60,7 @@ import { EDIT_RIGHT_FIX, EDIT_WRONG_FIX, PRICE_CHECK_PATH, PRICE_PATH, writeRepa
 import { FAKE_API_KEY, FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
 import { NODE, cliEnv, expectCliError, expectRunResult, lockPath, readRunFiles, runDirOf, runTask, sha256Hex, startCli, waitFor } from "../support/cli.js";
 import { MOCK_LABEL, replyText, replyTools, runGuarded, startFakeAnthropic, toolUse } from "../support/fake-anthropic.js";
-import { applyArgs, expectApplyResult, planDigestOf, readApplyJournal, shortDigest } from "../support/general.js";
+import { applyArgs, expectApplyResult, planDigestOf, readApplyJournal, recordsOf, shortDigest } from "../support/general.js";
 import { MARK_AT_LOCK_ENV, MARK_AT_LOCK_MODULE_URL, installMarkAtLock } from "../support/mark-at-lock.js";
 import { attemptSteps, spareSteps } from "../support/repair-script.js";
 import type { Attempt } from "../support/repair-script.js";
@@ -702,4 +708,211 @@ test("U-304 잠금을 만드는 순간에 생긴 기록 변경 표시(U-1): 두 
   assert.deepEqual(app.refusal, cli.refusal, "the same code, message, category and retryable");
   for (const [side, carried] of [[cliSide, cli], [appSide, app]] as const) assertNothingLeft(side, carried);
   assertSameRun(cli.plan, cliSide.sb, app.plan, appSide.sb);
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-310: before C-7b, the app's plan, review and checkApply beside the CLI's plan, review and apply
+
+const SECRET_FILE = `inbox/${FAKE_SECRET_A}.txt`;
+/** The CLI's and the app's environment: the registered secret's value, and the fake key a review note must not hold. */
+const viewEnv = (): NodeJS.ProcessEnv => cliEnv({ fakeApiKey: FAKE_API_KEY, extra: { [FAKE_SECRET_ENV_A]: FAKE_SECRET_A } });
+
+interface ViewSide {
+  readonly sb: Sandbox;
+  readonly task: string;
+  /** Registers the secret too (secretEnv), so the workspace form masks as the task form does. */
+  readonly config: string;
+  /** Registers nothing: the workspace form with it masks the plan's paths differently (DR-28). */
+  readonly plainConfig: string;
+}
+
+/**
+ * The organize workspace with a file named after the registered secret, a task file that registers it
+ * (privacy.secretEnv), a config that registers it too and one that does not, and `steps` as the script.
+ */
+function viewSideOf(t: TestContext, steps: readonly ScriptStep[]): ViewSide {
+  const sb = createSandbox(t);
+  writeOrganizeWorkspace(sb);
+  writeWorkspaceFile(sb, SECRET_FILE, "named after the secret\n");
+  const config = writeConfigFile(sb, {
+    schemaVersion: 1,
+    secretEnv: [FAKE_SECRET_ENV_A],
+    workflows: { checked: { tools: ["read_file", "write_file"], completion: "human_review", humanReview: { checklist: ["the summary is right"] } } },
+  });
+  const plainConfig = writeConfigFile(sb, { schemaVersion: 1 }, "plain-config.json");
+  const task = writeGeneralTask(sb, { id: "u310-view", label: "organize", fields: { workflowRef: "organize", privacy: { secretEnv: [FAKE_SECRET_ENV_A] } }, policy: { planActions: ["move", "discard"] } }, steps);
+  return { sb, task, config, plainConfig };
+}
+
+/** The plan: a move of the budget table and of the secret-named file. */
+const VIEW_PLAN_STEPS: ScriptStep[] = [
+  toolStep("propose_plan", { summary: "sort two files", actions: [{ kind: "move", from: "inbox/budget.csv", to: "data/budget.csv" }, { kind: "move", from: SECRET_FILE, to: `sorted/${FAKE_SECRET_A}.txt` }] }),
+  textStep("never asked"),
+];
+
+async function cliJson(sb: Sandbox, args: readonly string[], env: NodeJS.ProcessEnv): Promise<{ readonly exitCode: number | null; readonly json: Record<string, unknown> }> {
+  const run = await startCli(args, { cwd: sb.base, env, timeoutMs: TIMEOUT_MS }).done;
+  return { exitCode: run.exitCode, json: JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Record<string, unknown> };
+}
+
+/** An error's facts as the CLI's JSON line and the app's AppError both carry them. */
+const errorFacts = (error: object): Record<string, unknown> => {
+  const given = error as Record<string, unknown>;
+  return { code: given["code"], message: given["message"], category: given["category"], retryable: given["retryable"], hint: given["hint"] };
+};
+
+test("U-310 계획 보기: CLI와 앱이 task 형식과 작업 공간 형식으로 같은 계획을 같게 보이고, 기록 변경 표시도 같으며, 가릴 값이 다른 형식은 같은 오류로 거부한다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = viewEnv();
+  const side = viewSideOf(t, VIEW_PLAN_STEPS);
+  const planned = expectRunResult(await startCli(["run", "--task", side.task, "--config", side.config], { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done);
+  const planRunId = planned.runId;
+  const ids = { PLAN: planRunId, DIGEST: planDigestOf(planned) };
+  const app = await appFor(side.sb, env);
+  const taskForm: TaskForm = { input: { kind: "task", taskPath: side.task }, configPath: side.config, varsFile: null, profile: null, workflowRef: null };
+  const workspaceForm = (config: string): TaskForm => ({ input: { kind: "workspace", workspace: side.sb.workspace }, configPath: config, varsFile: null, profile: null, workflowRef: "organize" });
+  const cliTaskArgs = ["plan", "--task", side.task, "--config", side.config, "--run", planRunId, "--json"];
+  const cliWorkspaceArgs = (config: string): string[] => ["plan", "--workspace", side.sb.workspace, "--workflow", "organize", "--config", config, "--run", planRunId, "--json"];
+  const appView = async (form: TaskForm): Promise<unknown> => {
+    const outcome = await app.plan({ settings: form, runId: planRunId });
+    assert.ok(outcome.ok, JSON.stringify(outcome));
+    return outcome.output;
+  };
+
+  // The task form and the workspace form, on both ways: one view, its secret-named path masked.
+  const cliTask = await cliJson(side.sb, cliTaskArgs, env);
+  assert.equal(cliTask.json["status"], "pending");
+  const shown = normalized(cliTask.json, side.sb, ids) as { readonly actions: readonly { readonly from: string }[] };
+  assert.match(shown.actions[1]?.from ?? "", /^inbox\/<TOKEN1>\.txt$/, "the secret-named path is masked");
+  for (const [label, view] of [
+    ["app, task form", await appView(taskForm)],
+    ["CLI, workspace form", (await cliJson(side.sb, cliWorkspaceArgs(side.config), env)).json],
+    ["app, workspace form", await appView(workspaceForm(side.config))],
+  ] as const) {
+    assert.deepEqual(normalized(view, side.sb, ids), shown, `${label}: the same view as the CLI's task form`);
+  }
+
+  // DR-28: a workspace form whose config registers no secret masks the paths otherwise: refused alike.
+  const cliRefused = await cliJson(side.sb, cliWorkspaceArgs(side.plainConfig), env);
+  const appRefused = await app.plan({ settings: workspaceForm(side.plainConfig), runId: planRunId });
+  assert.deepEqual([cliRefused.exitCode, cliRefused.json["code"]], [2, "plan_secrets_differ"]);
+  assert.ok(!appRefused.ok, JSON.stringify(appRefused));
+  assert.deepEqual(errorFacts(appRefused.error), errorFacts(cliRefused.json), "the same error back from the app");
+
+  // A records-changed mark: both views carry it.
+  writeFileSync(join(runDirOf(side.sb.workspace, planRunId), RECORDS_CHANGED_FILE_NAME), "{}\n");
+  const cliMarked = await cliJson(side.sb, cliTaskArgs, env);
+  assert.equal(cliMarked.json["recordsChanged"], true);
+  assert.deepEqual(normalized(await appView(taskForm), side.sb, ids), normalized(cliMarked.json, side.sb, ids), "the same marked view");
+
+  // A run plan (plan "run", U-302's): the same changes view.
+  const runSide = planSideOf(t);
+  writeScript(runSide.sb, PLAN_STEPS);
+  const runPlanned = expectRunResult(await startCli(["run", ...cliForm(runSide)], { cwd: runSide.sb.base, env, timeoutMs: TIMEOUT_MS }).done);
+  const runIds = { PLAN: runPlanned.runId, DIGEST: planDigestOf(runPlanned) };
+  const cliChanges = await cliJson(runSide.sb, ["plan", ...cliForm(runSide), "--run", runPlanned.runId, "--json"], env);
+  assert.equal(cliChanges.json["planKind"], "changes");
+  const appChanges = await (await appFor(runSide.sb, env)).plan({ settings: formOf(runSide), runId: runPlanned.runId });
+  assert.ok(appChanges.ok, JSON.stringify(appChanges));
+  assert.deepEqual(normalized(appChanges.output, runSide.sb, runIds), normalized(cliChanges.json, runSide.sb, runIds), "the same changes view");
+});
+
+test("U-310 사람 확인: CLI의 review와 앱의 review가 같은 실행에 같은 판정을 기록하고(가린 메모, latest로 바꿈), 키 값이 든 메모는 같은 오류로 거부한다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = viewEnv();
+  const steps: ScriptStep[] = [toolStep("write_file", createFileArgs("summary.md", "summary\n")), textStep("done, please look")];
+  /** A run that waits for a person's review (the config's task type "checked"), made by the CLI on each side. */
+  const reviewSideOf = async (): Promise<{ readonly side: ViewSide; readonly runId: string; readonly form: TaskForm; readonly args: readonly string[] }> => {
+    const side = viewSideOf(t, steps);
+    writeGeneralTask(side.sb, { id: "u310-review", label: "checked", fields: { workflowRef: "checked", privacy: { secretEnv: [FAKE_SECRET_ENV_A] } } }, steps);
+    const ran = expectRunResult(await startCli(["run", "--task", side.task, "--config", side.config], { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done);
+    assert.deepEqual([ran.status, ran.reason], ["needs-input", "awaiting_review"]);
+    return { side, runId: ran.runId, form: { input: { kind: "task", taskPath: side.task }, configPath: side.config, varsFile: null, profile: null, workflowRef: null }, args: ["--task", side.task, "--config", side.config] };
+  };
+  const cli = await reviewSideOf();
+  const app = await reviewSideOf();
+  const appOf = await appFor(app.side.sb, env);
+  const recordOf = (side: ViewSide, runId: string): unknown => JSON.parse(readFileSync(join(runDirOf(side.sb.workspace, runId), "review.json"), "utf8"));
+  const same = (label: string, appValue: unknown, cliValue: unknown): void =>
+    assert.deepEqual(normalized(appValue, app.side.sb, { RUN: app.runId }), normalized(cliValue, cli.side.sb, { RUN: cli.runId }), label);
+
+  // Accepted with a note that holds the registered value: masked in the output and in review.json.
+  const note = `looks right ${FAKE_SECRET_A}`;
+  const cliAccepted = await cliJson(cli.side.sb, ["review", ...cli.args, "--run", cli.runId, "--accept", "--note", note, "--json"], env);
+  const appAccepted = await appOf.review({ settings: app.form, runId: app.runId, decision: "accept", note });
+  assert.ok(appAccepted.ok, JSON.stringify(appAccepted));
+  assert.deepEqual([cliAccepted.json["verdict"], cliAccepted.json["replaced"]], ["accepted", false]);
+  same("the same accepted review", appAccepted.output, cliAccepted.json);
+  assert.ok(!JSON.stringify(recordOf(cli.side, cli.runId)).includes(FAKE_SECRET_A), "the note's registered value is masked in review.json");
+  same("the same review.json", recordOf(app.side, app.runId), recordOf(cli.side, cli.runId));
+
+  // Rejected by `latest`, the run reference both resolve alike: it replaces the verdict.
+  const cliRejected = await cliJson(cli.side.sb, ["review", ...cli.args, "--run", "latest", "--reject", "--note", "on second look, no", "--json"], env);
+  const appRejected = await appOf.review({ settings: app.form, runId: "latest", decision: "reject", note: "on second look, no" });
+  assert.ok(appRejected.ok, JSON.stringify(appRejected));
+  assert.deepEqual([cliRejected.json["verdict"], cliRejected.json["replaced"]], ["rejected", true]);
+  same("the same replacing review", appRejected.output, cliRejected.json);
+
+  // A note with the key's value: refused alike, review.json left as it was.
+  const keyNote = `the key is ${FAKE_API_KEY}`;
+  const cliKey = await cliJson(cli.side.sb, ["review", ...cli.args, "--run", cli.runId, "--accept", "--note", keyNote, "--json"], env);
+  const appKey = await appOf.review({ settings: app.form, runId: app.runId, decision: "accept", note: keyNote });
+  assert.deepEqual([cliKey.exitCode, cliKey.json["code"]], [2, "key_in_file"]);
+  assert.ok(!appKey.ok, JSON.stringify(appKey));
+  assert.deepEqual(errorFacts(appKey.error), errorFacts(cliKey.json), "the same error back from the app");
+  same("review.json is the rejection still", recordOf(app.side, app.runId), recordOf(cli.side, cli.runId));
+  assert.equal((recordOf(cli.side, cli.runId) as { readonly verdict?: unknown }).verdict, "rejected");
+
+  // The workspace form, as the GUI asks (its secrets from the config's secretEnv): the same accepted review.
+  const cliWorkspace = await cliJson(cli.side.sb, ["review", "--workspace", cli.side.sb.workspace, "--workflow", "checked", "--config", cli.side.config, "--run", cli.runId, "--accept", "--json"], env);
+  const appWorkspace = await appOf.review({
+    settings: { input: { kind: "workspace", workspace: app.side.sb.workspace }, configPath: app.side.config, varsFile: null, profile: null, workflowRef: "checked" },
+    runId: app.runId,
+    decision: "accept",
+    note: null,
+  });
+  assert.ok(appWorkspace.ok, JSON.stringify(appWorkspace));
+  assert.deepEqual([cliWorkspace.json["verdict"], cliWorkspace.json["replaced"]], ["accepted", true]);
+  same("the same review through the workspace form", appWorkspace.output, cliWorkspace.json);
+  same("the same review.json after it", recordOf(app.side, app.runId), recordOf(cli.side, cli.runId));
+});
+
+test("U-310 적용 전 점검: 앱의 checkApply가 CLI apply의 사전 점검(plan_checked)과 같은 문제를 찾고, 기록 변경 표시는 같은 코드로 거부한다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = viewEnv();
+  /** A plan made by the CLI; the app's check of it; then the CLI's apply, whose plan_checked is compared. */
+  const checkThenApply = async (change: (side: ViewSide, planRunId: string) => void) => {
+    const side = viewSideOf(t, VIEW_PLAN_STEPS);
+    const planned = expectRunResult(await startCli(["run", "--task", side.task, "--config", side.config], { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done);
+    const digest = planDigestOf(planned);
+    change(side, planned.runId);
+    const form: TaskForm = { input: { kind: "task", taskPath: side.task }, configPath: side.config, varsFile: null, profile: null, workflowRef: null };
+    const check = await (await appFor(side.sb, env)).checkApply({ settings: form, planRunId: planned.runId, digest });
+    const applied = await cliJson(side.sb, ["apply", "--task", side.task, "--config", side.config, "--run", planned.runId, "--digest", shortDigest(digest)], env);
+    const preflight = applied.json["kind"] === "apply" ? recordsOf(readApplyJournal(side.sb.workspace, String(applied.json["runId"])), "plan_checked")[0] : undefined;
+    return { check, applied, preflight };
+  };
+  const editSource = (side: ViewSide): void => writeFileSync(join(side.sb.workspace, "inbox", "budget.csv"), "changed by a person\n");
+  const mark = (side: ViewSide, planRunId: string): void => writeFileSync(join(runDirOf(side.sb.workspace, planRunId), RECORDS_CHANGED_FILE_NAME), "{}\n");
+
+  for (const [label, change, applyEnd, problems] of [
+    ["clean", () => undefined, ["done", "verified"], []],
+    ["a source changed", editSource, ["failed", "plan_stale"], [{ index: 0, problem: "source_changed" }]],
+  ] as const) {
+    const { check, applied, preflight } = await checkThenApply(change);
+    assert.ok(check.ok, `${label}: ${JSON.stringify(check)}`);
+    assert.deepEqual([applied.json["status"], applied.json["reason"]], applyEnd, label);
+    assert.ok(preflight !== undefined, `${label}: the apply recorded its preflight`);
+    assert.deepEqual(check.output.problems, problems, `${label}: the check's problems`);
+    assert.deepEqual(
+      { problems: check.output.problems, unsafeMoves: check.output.unsafeMoves, inventoryLimitReached: check.output.inventoryLimitReached },
+      { problems: preflight.problems, unsafeMoves: preflight.unsafeMoves ?? [], inventoryLimitReached: preflight.inventoryLimitReached },
+      `${label}: the check finds what the apply's preflight found`,
+    );
+  }
+
+  // A records-changed mark: both refuse with the same code, each in its own words (a check, an apply).
+  const { check: markedCheck, applied: markedApply } = await checkThenApply(mark);
+  assert.ok(!markedCheck.ok, JSON.stringify(markedCheck));
+  assert.deepEqual([markedApply.exitCode, markedApply.json["code"]], [2, "plan_records_changed"]);
+  assert.equal(markedCheck.error.code, markedApply.json["code"]);
+  assert.match(markedCheck.error.message, /records were changed by something other than the run, so its plan may not be the one shown; nothing was checked$/);
+  assert.match(String(markedApply.json["message"]), /^the plan run's records were changed by something other than the run \(a records-changed mark\), so its plan may not be the one shown; nothing was asked, recorded or moved/);
 });

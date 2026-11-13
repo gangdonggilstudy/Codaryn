@@ -201,7 +201,9 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.incomplete": "결과 없음(진행 중이거나 중단됨)",
   "runs.damaged": "손상(기록을 확인할 수 없음)",
   "runs.revert_record_damaged": "되돌리기 기록 손상(실행 기록은 정상)",
-  "runs.records_changed": "기록 변경됨(실행이 아닌 것이 바꿈)",
+  "runs.records_changed": "기록 변경됨",
+  // U-157 (UXM-18, nb-i18n이 다듬을 초안): runs 표 아래에서 표시를 설명하는 줄.
+  "runs.records_changed_note": "기록 변경됨: 실행이 아닌 것이 그 실행의 기록을 바꿨습니다",
   "runs.plan_applied": "계획 적용됨(적용 실행 {runId})",
   "runs.plan_apply_unfinished": "계획 적용이 끝나지 않음(적용 실행 {runId}, {reason})",
   "runs.plan_applying": "계획 적용 중이거나 적용이 멈춤(적용 실행 {runId}, 결과 없음)",

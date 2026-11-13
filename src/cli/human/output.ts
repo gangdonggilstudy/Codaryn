@@ -777,6 +777,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
           .join("  ")
           .trimEnd(),
       );
+      // U-157 (UXM-18): a row carries only the short records-changed mark; what it means is one line under
+      // the table, once, when a listed run has the mark.
+      if (runs.some((entry) => entry.state === "checked" && entry.recordsChanged === true)) out.push(catalog.format("runs.records_changed_note"));
       if (omitted > 0) out.push(catalog.format("runs.omitted", { count: omitted }));
       return lines(out);
     },

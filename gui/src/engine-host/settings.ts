@@ -20,13 +20,16 @@ const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_LIST = 500;
 const MAX_MODEL_ID_CHARS = 200;
 
-export type HostFailure = { readonly ok: false; readonly code: string };
+export type HostFailure = { readonly ok: false; readonly code: string; readonly hint?: string };
 
 /** An AppCallOutcome that is not ok, as its code only. */
 export function failureOf(outcome: unknown): HostFailure {
   const error = isObj(outcome) ? outcome["error"] : undefined;
   const code = isObj(error) ? error["code"] : undefined;
-  return { ok: false, code: typeof code === "string" && CODE.test(code) ? code : "host_error" };
+  // U-212 (bundle A): the CLI's hint that came with the error, so the window can say why in the CLI's
+  // words (error.hint.<hint>) where it has them. An id only, never a text.
+  const hint = isObj(error) ? error["hint"] : undefined;
+  return { ok: false, code: typeof code === "string" && CODE.test(code) ? code : "host_error", ...(typeof hint === "string" && CODE.test(hint) ? { hint } : {}) };
 }
 
 /** The output of an ok AppCallOutcome, or null. */

@@ -62,7 +62,7 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCheckPlanArgs, toPlanCheckReply, parseCopyArgs, parseRunEventsArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
+import { copyablePath, parseCheckPlanArgs, toPlanCheckReply, toStartFailure, parseCopyArgs, parseRunEventsArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange, toRunEventsReply } from "../shared/ipc.js";
 import type { PlanCheckReply, RunEventsReply } from "../shared/ipc.js";
 import { parseRunItems } from "../shared/protocol.js";
 import type { UiMemoryView } from "../shared/ipc.js";
@@ -95,7 +95,7 @@ const PLAN_CHECK_TIMEOUT_MS = 120_000;
 const REVERT_TIMEOUT_MS = 120_000;
 
 /** What `startRun` answers the window. */
-export type StartRunReply = { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string };
+export type StartRunReply = { readonly ok: true; readonly runId: string } | { readonly ok: false; readonly code: string; readonly hint?: string };
 
 export interface IpcDeps {
   readonly window: () => BrowserWindow | null;
@@ -561,7 +561,8 @@ export function registerIpc(deps: IpcDeps): void {
       const response = await state.host.call("startRun", request, START_TIMEOUT_MS);
       if (!response.ok) return { ok: false, code: response.error.code };
       const value = response.value as Record<string, unknown> | null;
-      if (typeof value !== "object" || value === null || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+      // U-212: with the CLI's hint id, when the app layer gave one (why the run was refused).
+      if (typeof value !== "object" || value === null || value["ok"] !== true) return toStartFailure(value);
       const token = value["run"];
       const runId = value["runId"];
       if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };
@@ -598,7 +599,7 @@ export function registerIpc(deps: IpcDeps): void {
       const response = await state.host.call("startTaskRun", { taskPath, varsFile, language }, START_TIMEOUT_MS);
       if (!response.ok) return { ok: false, code: response.error.code };
       const value = response.value as Record<string, unknown> | null;
-      if (typeof value !== "object" || value === null || value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+      if (typeof value !== "object" || value === null || value["ok"] !== true) return toStartFailure(value);
       const token = value["run"];
       const runId = value["runId"];
       if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token) || !isRunId(runId)) return { ok: false, code: "host_error" };

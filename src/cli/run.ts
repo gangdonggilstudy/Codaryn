@@ -26,6 +26,7 @@ import {
   RESULT_SCHEMA_VERSION,
   mergeWorkflowPolicy,
   mergeWorkflowVerifiers,
+  privateDataProblem,
   toSchemaFieldPath,
   toShownWorkspace,
   workflowPolicyNarrowings,
@@ -55,6 +56,7 @@ import type {
   InputDiagnostic,
   InputDiagnosticFile,
   Journal,
+  JournalEvent,
   MessageLanguage,
   ResolvedTaskSpec,
   ModelProvider,
@@ -62,12 +64,14 @@ import type {
   HumanOutput,
   MessageCatalog,
   PlanMode,
+  PolicyConfig,
   PolicyNarrowing,
   RunApprovedPlan,
   RunSummaryContext,
   RunTask,
   ShownWorkspace,
   StoredChangesPlan,
+  VerifierConfig,
   WorkflowDefinition,
   WorkflowProblem,
   WorkflowSettings,
@@ -109,6 +113,8 @@ import type { SettingsEnvironment, SettingsFailure } from "./settings.js";
 import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "./task.js";
 import type { InputErrorPosition } from "./task.js";
 import { writablePathSetsOf } from "./writable.js";
+import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "./unreadable.js";
+import { queryTableFacts } from "./human/index.js";
 
 export interface CliEnvironment {
   readonly argv: readonly string[];
@@ -213,6 +219,26 @@ export interface RunNotes {
   couldAsk?: boolean;
   /** U-148 (U-140, UXM-18): `run_started.policyNarrowings` as recorded; absent when it has none. */
   policyNarrowings?: readonly PolicyNarrowing[];
+  /** U-210 (U-207, R-8): the denied calls whose code is `unreadable_path`; absent while there is none. */
+  deniedUnreadable?: number;
+  /** U-210 (U-207, DR-70): query_table results that hid groups, and the largest k they applied; absent while there is none. */
+  hiddenGroups?: { results: number; minGroupSize: number };
+}
+
+/**
+ * U-210 (U-207's two end summary counts, RunSummaryContext.deniedUnreadable and .hiddenGroups): a
+ * denied call at a path the task may not read (`tool_decision`, code `unreadable_path`), and a
+ * query_table result that left out groups of fewer than k rows (`tool_result`, read with U-207's
+ * queryTableFacts, which reads two counts and nothing of the table). Exported for its test.
+ */
+export function notePrivateData(notes: RunNotes, event: JournalEvent): void {
+  if (event.type === "tool_decision" && !event.allowed && event.code === "unreadable_path") notes.deniedUnreadable = (notes.deniedUnreadable ?? 0) + 1;
+  if (event.type !== "tool_result") return;
+  const facts = queryTableFacts(event.result);
+  // R-108 L-2: a result that left out whole groups, or values from fewer than k cells (V-19), counts.
+  if (facts === null || facts.kind !== "groups" || (facts.suppressedGroups === 0 && (facts.hiddenValues ?? 0) === 0)) return;
+  const hidden = notes.hiddenGroups;
+  notes.hiddenGroups = { results: (hidden?.results ?? 0) + 1, minGroupSize: Math.max(hidden?.minGroupSize ?? 0, facts.minGroupSize) };
 }
 
 export interface CliRunOutcome {
@@ -371,7 +397,48 @@ const WORKFLOW_PROBLEM_TEXT: { readonly [P in WorkflowProblem]: string } = {
   checklist_without_review: 'is only allowed with completion "human_review"',
   instructions_too_long: "is longer than the limit",
   checklist_too_long: "must have 1 to the maximum number of non-blank lines within the length limit",
+  // U-210 (bundle A, R-5, P-1): a command rule (a command verifier's text is unreadableWithCommandsText's).
+  unreadable_with_commands: "must be empty while unreadablePaths is set: a command can read any file, the ones kept from the agent too",
+  unreadable_paths_required: UNREADABLE_PATHS_REQUIRED_TEXT,
 };
+
+/**
+ * U-210 (bundle A, R-5): why a command rule or a `command` verifier is refused beside unreadable
+ * paths, by the field that holds it. A command can read any file, the unreadable ones too, and a
+ * command verifier's output goes to the model in a repair.
+ */
+function unreadableWithCommandsText(field: string): string {
+  return field.endsWith("policy.commands")
+    ? WORKFLOW_PROBLEM_TEXT.unreadable_with_commands
+    : "cannot be a command verifier while unreadablePaths is set: a command can read any file, and its output goes to the model";
+}
+
+/**
+ * U-210 (bundle A, R-5; privateDataProblem): with any unreadable path in the run, the first command
+ * rule or `command` verifier, where it was written: the task type definition's own (the config
+ * file's `workflows`), then the given ones (the task file's, else the config's or the profile's),
+ * then, failing closed, the merged ones the run would use. Null when none is there or no path is
+ * unreadable.
+ */
+function unreadableWithCommands(
+  unreadablePaths: readonly string[],
+  definition: WorkflowDefinition | undefined,
+  given: { readonly policy: Pick<PolicyConfig, "commands"> | undefined; readonly verifiers: readonly VerifierConfig[] | undefined; readonly file: "task" | "config" },
+  merged: { readonly policy: Pick<PolicyConfig, "commands">; readonly verifiers: readonly VerifierConfig[] },
+): { output: CliErrorOutput; exitCode: number } | null {
+  const places: [string, "task" | "config", Pick<PolicyConfig, "commands">, readonly VerifierConfig[]][] = [
+    ["workflows.", "config", definition?.policy ?? { commands: [] }, definition?.verifiers ?? []],
+    ["", given.file, given.policy ?? { commands: [] }, given.verifiers ?? []],
+    ["", given.file, merged.policy, merged.verifiers],
+  ];
+  for (const [prefix, file, policy, verifiers] of places) {
+    const found = privateDataProblem(unreadablePaths, policy, verifiers);
+    if (found === null) continue;
+    const field = `${prefix}${found.field}`;
+    return error(file === "task" ? "invalid_task" : "invalid_config", `${field} ${unreadableWithCommandsText(field)}`, positionDiagnostic(file, { code: "invalid_value", field }));
+  }
+  return null;
+}
 
 /**
  * U-195 (U-177's note): plan_weakened names the task's and the definition's plan modes (U-180: a task
@@ -504,6 +571,9 @@ function summaryContext(args: RunArgs, notes: RunNotes): RunSummaryContext {
     // U-195 (Codex V-14 L-1, U-198): the writes refused as not writable, by why; not when none.
     ...(notes.deniedNotPlanned === undefined ? {} : { deniedNotPlanned: notes.deniedNotPlanned }),
     ...(notes.deniedNotWritable === undefined ? {} : { deniedNotWritable: notes.deniedNotWritable }),
+    // U-210 (U-207): the calls refused at unreadable paths and the table results that hid groups; not when none.
+    ...(notes.deniedUnreadable === undefined ? {} : { deniedUnreadable: notes.deniedUnreadable }),
+    ...(notes.hiddenGroups === undefined ? {} : { hiddenGroups: { ...notes.hiddenGroups } }),
     // U-220 (U-201): the run's lock could not be released at its end; not when it was.
     ...(notes.lockLeft === true ? { lockLeft: true } : {}),
     policySource: args.input.kind === "task" ? "task" : "config",
@@ -758,6 +828,13 @@ export async function prepareTask(
   }
   // G-A: resolve the workflow settings under the definition's ceilings (resolveWorkflow).
   const parsed = taskOutcome.task;
+  // U-210 (bundle A, A-6; R-2, Q-4, R-102 M-1): the run's unreadable paths, every source's united (the
+  // config file's also under a task file and a profile), and its k, the largest a source states (never
+  // below 5). Neither field when no source states one, so a run without them is as before. P-1: the
+  // resolution needs the list (analyze-private).
+  const runSources = { config: fileConfig, profile: args.profile, definition, taskFilePolicy: taskFile !== null ? parsed.policy : null };
+  const unreadablePaths = runUnreadablePaths(runSources);
+  const minGroupSize = runMinGroupSize(runSources);
   const resolved = resolveWorkflow({
     definitions,
     task: {
@@ -769,6 +846,7 @@ export async function prepareTask(
     },
     profileWorkflowRef,
     commandRules: parsed.policy.commands.length,
+    unreadablePaths,
   });
   if (!resolved.ok) {
     const fromConfig = taskFile === null || resolved.field.startsWith("profiles") || resolved.field.startsWith("workflows");
@@ -781,7 +859,13 @@ export async function prepareTask(
     // U-37: a task type neither built in nor in the config's workflows.
     if (resolved.problem === "unknown_workflow") return withHint(workflowError, "task_type_not_found");
     // U-228 (U-224): which plan tool each plan mode needs, in the chosen language.
-    return resolved.problem === "plan_tool_missing" ? withHint(workflowError, "plan_tool_missing") : workflowError;
+    if (resolved.problem === "plan_tool_missing") return withHint(workflowError, "plan_tool_missing");
+    // U-210 (R-110 M-1): bundle A's reasons, in the chosen language. A task type that allows no command
+    // refuses the task's own rule as commands_not_allowed; with unreadable paths in the run it is also
+    // the reason unreadable_with_commands gives (organize without them: no hint, as before).
+    if (resolved.problem === "unreadable_paths_required") return withHint(workflowError, "unreadable_paths_required");
+    if (resolved.problem === "commands_not_allowed" && unreadablePaths.length > 0) return withHint(workflowError, "unreadable_with_commands");
+    return workflowError;
   }
   // DR-41 (PM after 27afb01): where a definition applies its rules are not loosened. A task file's
   // own policy is merged with them here (resolveWorkflow above counted its own command rules first,
@@ -799,11 +883,25 @@ export async function prepareTask(
   // U-182 (DR-69 B-4): every source's writable list, each its own (the gate needs all to cover a
   // write); none when no source states one, so a run without them is as before.
   const writablePathSets = writablePathSetsOf({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: taskFile !== null ? parsed.policy : null });
+  // U-210 (R-5): with the run's unreadable paths (above) no command rule and no command verifier,
+  // refused before anything is recorded.
+  const commandsRefused = unreadableWithCommands(
+    unreadablePaths,
+    definition,
+    taskFile !== null
+      ? { policy: parsed.policy, verifiers: parsed.verifiers, file: "task" }
+      : { policy: config?.policy, verifiers: config?.verifiers, file: "config" },
+    { policy: mergedPolicy, verifiers: mergedVerifiers },
+  );
+  // R-110 M-1: the reason in the chosen language.
+  if (commandsRefused !== null) return withHint(commandsRefused, "unreadable_with_commands");
   const task = withConfigSecrets(
     {
       ...withWorkflow({ ...parsed, policy: mergedPolicy, verifiers: mergedVerifiers }, resolved.workflowRef, resolved.settings),
       ...(policyNarrowings.length === 0 ? {} : { policyNarrowings }),
       ...(writablePathSets.length === 0 ? {} : { writablePathSets }),
+      ...(unreadablePaths.length === 0 ? {} : { unreadablePaths }),
+      ...(minGroupSize === undefined ? {} : { minGroupSize }),
     },
     config,
   );
@@ -1006,6 +1104,7 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
           const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
           denied[event.by] += 1;
         }
+        notePrivateData(notes, event);
         // U-148 (U-140, UXM-18): the end summary repeats what run_started recorded as left out.
         if (event.type === "run_started" && event.policyNarrowings !== undefined && event.policyNarrowings.length > 0) {
           notes.policyNarrowings = event.policyNarrowings;

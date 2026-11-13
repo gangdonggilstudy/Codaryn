@@ -179,6 +179,9 @@ export const WIDENING_KINDS = [
   // U-192 (U-183, DR-69 B-4): a list of writable paths widened, or gone (no limit again).
   "writable_path_added",
   "writable_paths_unlimited",
+  // U-212 (U-204, DR-69 bundle A, A-7): an unreadable path no longer kept out, or a lower group size k.
+  "unreadable_path_removed",
+  "min_group_size_lowered",
   "other",
 ] as const;
 
@@ -232,6 +235,8 @@ const WIDEN_KO: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   confirm_removed: "묻던 명령을 묻지 않고 허용",
   writable_path_added: "쓰기 허용 경로 더함",
   writable_paths_unlimited: "쓰기 허용 경로 제한 없앰(파일 도구가 작업 공간 어디든 씀)",
+  unreadable_path_removed: "읽기 제외 경로 뺌(모델이 그 파일을 읽을 수 있게 됨)",
+  min_group_size_lowered: "묶음 최소 크기 k 낮춤(읽기 제외 경로의 표에서 더 작은 묶음이 모델에게 보임)",
   other: "그 밖의 넓히기",
 };
 
@@ -253,6 +258,8 @@ const WIDEN_EN: { readonly [K in (typeof WIDENING_KINDS)[number]]: string } = {
   confirm_removed: "a command that was asked about runs without asking",
   writable_path_added: "a writable path added",
   writable_paths_unlimited: "the writable paths limit removed (file tools may write anywhere in the workspace)",
+  unreadable_path_removed: "an unreadable path removed (the model may read those files)",
+  min_group_size_lowered: "the minimum group size k lowered (smaller groups of the tables under unreadable paths are shown to the model)",
   other: "another widening",
 };
 

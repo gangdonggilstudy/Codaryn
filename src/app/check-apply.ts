@@ -11,7 +11,7 @@
  * - The judgement is the apply preflight's, action by action, with the apply task's settings:
  *   - U-111: the engine's own preflight loop, `preflightPlan` (U-105), the one `applyPlan` calls:
  *     the apply task's `planActions`, the policy gate before and after the paths are resolved
- *     (`createPolicyGate`, PLAN_ACTION_DESCRIPTORS), then the executor's `check` (tools'
+ *     (runGuards' gate, as the CLI's apply makes it, U-237; PLAN_ACTION_DESCRIPTORS), then the executor's `check` (tools'
  *     `createPlanExecutor`): the source, its hash, the destination, and DR-21's hard link probe. The
  *     tests still compare the result with the apply's own `plan_checked`;
  *   - the inventory limit (DR-6) is the plan view's listing (the same `createInventoryChecker`).
@@ -38,7 +38,7 @@ import type { Clock, ContentHash, PlanItemProblem, ResolvedPlanAction, ResolvedT
 import { RUN_ID_PATTERN } from "../cli/args.js";
 import { createRunId } from "../cli/run-id.js";
 import { preflightPlan } from "../engine/index.js";
-import { createPolicyGate } from "../policy/index.js";
+import { runGuards } from "../cli/unreadable.js";
 import { acquireLock, loadPlan, releaseLock as storeReleaseLock } from "../store/index.js";
 import { createPlanExecutor } from "../tools/index.js";
 import type { PlanFileOps } from "../tools/index.js";
@@ -181,7 +181,8 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
     const before = await probesIn([...dirs]);
     try {
       // U-186 (DR-69 B-4, after U-182): the apply task's writable path lists, as the apply's gate gets them.
-      const policy = createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) });
+      // U-237 (R-108 H-2): and its unreadable paths: the gate the CLI's apply makes, from runGuards.
+      const policy = runGuards(task, workspace).gate();
       const planActions = task.policy.planActions ?? [];
       const executor = createPlanExecutor({ workspace, workspaceRoot: workspace.root, runId: lockId, ...(operations.fileOps === undefined ? {} : { fileOps: operations.fileOps }) });
       // U-111: the engine's own preflight loop (U-105), the one applyPlan calls; never stopped here.

@@ -11,7 +11,7 @@
  */
 
 import type { Texts } from "../i18n/catalog.js";
-import { errorText } from "../i18n/catalog.js";
+import { errorText, startErrorText } from "../i18n/catalog.js";
 import { asSettings, asStartRun } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
 import { button, el } from "../shell/dom.js";
@@ -110,7 +110,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
 
         const message = el("div", undefined, { id: "task-message", role: "alert" });
         if (!reply.ok) message.append(el("p", `${errorText(t, reply.code)} ${t.format("error.code", { code: reply.code })}`));
-        if (run.startError !== null) message.append(el("p", `${errorText(t, run.startError)} ${t.format("error.code", { code: run.startError })}`, { "data-error": run.startError }));
+        if (run.startError !== null) message.append(el("p", startErrorText(t, run.startError, run.startHint), { "data-error": run.startError, ...(run.startHint === null ? {} : { "data-hint": run.startHint }) }));
 
         const start = (): void => {
           const text = goal.value;
@@ -128,7 +128,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
               deps.rememberForm?.({ profile: request.profile, workflow: request.workflow });
               deps.showRun();
             } else {
-              run.failedToStart(started.code);
+              run.failedToStart(started.code, started.hint);
             }
           })();
           deps.showRun();
@@ -172,7 +172,7 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
               return;
             }
             // A dialog closed without a file starts nothing; the session's goal stays as it was.
-            run.failedToStart(started.code === "cancelled" ? "start_cancelled" : started.code);
+            run.failedToStart(started.code === "cancelled" ? "start_cancelled" : started.code, started.hint);
             run.last = before;
           })();
         }, { id: "task-run-file" });

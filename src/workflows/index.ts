@@ -7,10 +7,12 @@
 
 import {
   ALL_TOOL_DESCRIPTORS,
+  ANALYZE_PRIVATE_WORKFLOW_ID,
   LEGACY_WORKFLOW_SETTINGS,
   MAX_REVIEW_CHECKLIST_ITEMS,
   MAX_REVIEW_CHECKLIST_ITEM_CHARS,
   MAX_WORKFLOW_INSTRUCTIONS_CHARS,
+  PRIVATE_REVIEW_ITEM,
   TOOL_NAMES,
 } from "../contracts/index.js";
 import type {
@@ -30,9 +32,16 @@ import type {
  * - code: the four built-in tools; commands as the policy allows.
  * - document: read, search and write; no command tool.
  * - analyze: read, search and write; ends with a person's review after the automatic checks
- *   (GT-D7). Raw rows reach the model, so personal data is out of scope until P1 (GT-D8).
+ *   (GT-D7). Raw rows reach the model, so personal data is out of scope (GT-D8): that is
+ *   analyze-private's. U-210 (P-2): query_table too, for large tables; k applies to unreadable
+ *   tables only, so it gives every group of any other table.
  * - organize: read-only tools and `propose_plan`; a person approves the plan and the applier moves
  *   or discards files (GT-D4, GT-D5). No command may be allowed (GT-D10).
+ * - analyze-private (U-210, bundle A P-1, P-3; GT-D8 (b), DR-23): the tables with personal data lie
+ *   under the run's unreadable paths and reach the model only as query_table's aggregates (DR-70).
+ *   Read and search stay for the files outside them (the gate and the listing tools keep the ones
+ *   under them away, U-203). No command, since a command can read any file (R-5). A person's review
+ *   with analyze's two items and PRIVATE_REVIEW_ITEM. Resolved only with an unreadable path.
  */
 export const BUILTIN_WORKFLOWS: { readonly [Id in BuiltinWorkflowId]: WorkflowDefinition } = Object.freeze({
   general: {
@@ -52,7 +61,7 @@ export const BUILTIN_WORKFLOWS: { readonly [Id in BuiltinWorkflowId]: WorkflowDe
   },
   analyze: {
     label: "Data analysis",
-    tools: ["read_file", "search_files", "write_file"],
+    tools: ["read_file", "search_files", "query_table", "write_file"],
     instructions:
       "Read the input tables and write the result table and the report the goal names. Compute every number from the input tables. Keep the input files unchanged.",
     completion: "human_review",
@@ -76,6 +85,17 @@ export const BUILTIN_WORKFLOWS: { readonly [Id in BuiltinWorkflowId]: WorkflowDe
     },
     limits: { maxModelTurns: 8, maxToolCalls: 40 },
   },
+  "analyze-private": {
+    label: "Private data analysis",
+    tools: ["read_file", "search_files", "query_table", "write_file"],
+    instructions:
+      "The input tables are not readable. Use query_table for every number. Write only the result table and the report the goal names. Do not write values that identify a person.",
+    completion: "human_review",
+    humanReview: {
+      checklist: ["The report's interpretation matches the result table.", "No input data the goal names is missing from the analysis.", PRIVATE_REVIEW_ITEM],
+    },
+    allowCommands: false,
+  },
 } satisfies { readonly [Id in BuiltinWorkflowId]: WorkflowDefinition });
 
 /** True when the instructions or a checklist entry is over its limit. */
@@ -98,6 +118,8 @@ function checklistProblem(review: HumanReviewConfig): boolean {
  *   the tools (`tool_not_allowed`, at the task's tool or at the definition's tools): it would
  *   never be offered;
  * - `allowCommands: false` admits no command rule in the effective policy (`commands_not_allowed`);
+ * - U-210 (P-1): `analyze-private` needs an unreadable path in the run (input.unreadablePaths,
+ *   `unreadable_paths_required` at `policy.unreadablePaths`);
  * - `completion: "human_review"` needs a checklist and "verifiers" admits none given by the task
  *   (`review_without_checklist`, `checklist_without_review`); a definition's checklist is dropped
  *   when the task chooses "verifiers";
@@ -138,6 +160,11 @@ export const resolveWorkflow: ResolveWorkflow = (input): ResolveWorkflowOutcome 
   if (!allowCommands) {
     if (input.commandRules > 0) return { ok: false, problem: "commands_not_allowed", field: "policy.commands" };
     tools = tools.filter((tool) => tool !== "run_command");
+  }
+  // U-210 (P-1): no private data analysis without data kept from the agent. A config entry cannot
+  // take a built-in id, so the id names the built-in.
+  if (ref === ANALYZE_PRIVATE_WORKFLOW_ID && (input.unreadablePaths ?? []).length === 0) {
+    return { ok: false, problem: "unreadable_paths_required", field: "policy.unreadablePaths" };
   }
 
   // U-175, U-180 (R-99 L-2): a definition's plan mode stays; a task sets one only under "none".

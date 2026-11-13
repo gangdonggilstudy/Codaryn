@@ -7,8 +7,8 @@
  * - k: 5 by default, 5 to 1000 (review V-12 M-1: DR-70 before Q-4); no source lowers it, each only
  *   raises it. ResolvedTaskSpec.minGroupSize and .unreadablePaths are what a run reads (R-102 M-1).
  * - next is a cursor of shown-group ordinals, never a key or a row's value (V-12 M-2, R-102 L-1).
- * - Not carried out yet: analyze-private is not a built-in id, and the two problems not among
- *   WORKFLOW_PROBLEMS (A-6 adds them with their parts). U-208 (A-5) made query_table a task type tool.
+ * - U-208 (A-5) made query_table a task type tool; U-210 (A-6) made analyze-private a built-in id
+ *   and the two problems WORKFLOW_PROBLEMS entries.
  */
 
 import assert from "node:assert/strict";
@@ -167,10 +167,10 @@ describe("U-197: query_table's descriptor and definition", () => {
     assert.equal(args.operations?.length, 1);
   });
 
-  test("A-5 (U-208) made it a task type tool; A-6 adds analyze-private and the two problems", () => {
+  test("A-5 (U-208) made it a task type tool; A-6 (U-210) added analyze-private and the two problems", () => {
     assert.equal((ALL_TOOL_NAMES as readonly string[]).includes(QUERY_TABLE_TOOL_NAME), true);
-    assert.equal((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(ANALYZE_PRIVATE_WORKFLOW_ID), false);
-    for (const problem of PRIVATE_DATA_WORKFLOW_PROBLEMS) assert.equal((WORKFLOW_PROBLEMS as readonly string[]).includes(problem), false, problem);
+    assert.equal((BUILTIN_WORKFLOW_IDS as readonly string[]).includes(ANALYZE_PRIVATE_WORKFLOW_ID), true);
+    for (const problem of PRIVATE_DATA_WORKFLOW_PROBLEMS) assert.equal((WORKFLOW_PROBLEMS as readonly string[]).includes(problem), true, problem);
     assert.equal(new Set(QUERY_TABLE_PROBLEMS).size, QUERY_TABLE_PROBLEMS.length);
   });
 });

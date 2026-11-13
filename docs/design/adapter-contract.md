@@ -158,6 +158,8 @@ export interface AppEnvironment {
   - 실제로 자식에 가는 것은 값이 8자 미만인 허용 목록 변수뿐이다(R-4 I-1). 변수 파일이 새로 설정한 8자 이상 값은 비밀로 등록되고(S-4), 실행기는 등록 비밀이 든 변수를 자식 환경에서 뺀다(T-1). 그래서 변수 파일의 긴 `PATH`·`TEMP`는 CLI에서도 앱 계층에서도 자식에 가지 않는다.
   - 같은 프로세스 어댑터에서는 호스트의 환경이 자식에 새지 않는다.
   - 이를 위해 A-1은 조립을 앱 계층에 두었다(`src/app/assemble.ts`). CLI의 `assembleRun`과 순서가 같고 `parentEnv`만 다르다.
+  - U-237(p4g의 R-108 H-2, na-core의 U-210과 함께): 조립은 한 벌이다. 앱의 실행은 CLI의 조립(`createAssemble`)에 앱의 고리(`parentEnv`, `platform`, `onAssembled`)를 주어 만든다. 앱이 따로 두던 사본은 같은 꼴로 두 번 뒤처졌다(U-186 앞의 쓰기 목록, U-210의 읽기 제외와 k). 이제 관문, 도구 실행기, 검증기, 무결성 대상, 수행하는 계획의 관문(`approvedPlan.policyFor`)이 모두 CLI와 같은 한 곳(`runGuards`)에서 실행의 읽기 제외 목록(모든 원천을 합친 것)과 k를 받는다. 풀지 못한 잠금은 CLI의 `finish`가 주는 표시(U-220)를 보고 `onLockLeft`로 알린다(U-193).
+    - 시험 `tests/unit/app/u237-app-unreadable.test.ts`: 앱으로 실행하면 설정 파일의 목록 아래 읽기가 `unreadable_path`로 거부되고, 검색과 `query_table`이 그 아래를 빼며, 모델로 간 것과 기록 어디에도 표지(행, 이름, k보다 작은 묶음의 키)가 없다(`tests/support/private-canary.ts`). task 파일의 목록도 같다.
 
 ## 5. 계약
 
@@ -360,6 +362,7 @@ interface ApplyObserver {
   - 이동 동의(`unsafeMoveConsent`)는 이동 계획의 것이라, 실행 계획에 주면 CLI가 `invalid_arguments`로 거부한다. plan "run"으로 풀리지 않는 과제 형식은 `run_not_plan`이고, 다이제스트가 다르면 `plan_not_approved`, 이미 수행했으면 `plan_already_applied`다.
   - 이동 계획(plan "apply")은 전과 같다. 이벤트는 `observer.onEvent`로 간다.
   - 시험은 `tests/unit/app/u218-run-plan-apply.test.ts`(11건)다. 이동 계획만 다루는 기존 시험은 `done`을 이동 계획의 꼴로 좁혔다.
+  - U-237(Codex V-24 M-3): 앱의 조립이 CLI의 것이 되어, 수행하는 실행도 관문·도구·검증기·무결성 대상을 `runGuards`에서 받는다. 그래서 설정 파일이나 프로필의 읽기 제외 아래 읽기는 `unreadable_path`로 거부되고, 검색은 그 아래를 빼며, 그 내용은 모델·기록·실행 이벤트 어디에도 없다. 시험 `tests/unit/app/u237-v24-carry-and-view.test.ts`.
   - 게이트를 빼는 변이는 시험이 가르지 못한다. CLI가 조립과 엔진 사이에 파일을 읽으므로(계획 실행의 기록 변경 표시 등), 게이트가 없어도 핸들이 먼저 나간다. `startRun`의 게이트도 같다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
@@ -467,6 +470,8 @@ interface ChangedFileView {
 - 스냅샷 파일이 일반 파일이 아니면(링크 등) 따라가지 않고 `snapshot_missing`이다(R-4 L-3).
 - 원본과 기록은 store의 `readRunOriginals`(DR-14)로 읽는다(`89692ac`). A-1의 스냅샷 직접 읽기는 없앴다.
 - 요청은 task 형식이다(DR-17). 작업 공간 형식이면 앱 계층이 고정 문구 목표(`PROBE_GOAL`)로 CLI의 간편 형식을 부른다. 목표는 비밀을 정하지 않는다.
+- **읽기 제외와 이 보기(U-237, Codex V-24 M-2, PM 결정).** 읽기 제외(`unreadablePaths`)는 모델로 가는 것을 막는다. 변경 보기와 파일 보기는 사람이 자기 파일을 보는 화면이라 읽기 제외 아래 파일도 그대로 보인다. 실행 뒤에 읽기 제외가 된 파일의 이전 원문(`before`)도 그렇다. 가릴 값 규칙(DR-28, DR-29)은 그대로 걸린다.
+  - 그 글은 모델 요청이나 실행 기록으로 가지 않는다. 보기는 아무것도 쓰지 않는다. 그 뒤의 실행은 그 파일도, 상태 폴더에 둔 실행의 원본도 읽지 못한다(`unreadable_path`, 상태 폴더 거부). 시험 `tests/unit/app/u237-v24-carry-and-view.test.ts`.
 - 예전의 한계 R-4 L-3(anthropic task는 키·모델·출력 상한이 풀려야 함)은 U-17(DR-46)로 없어졌다.
   - 앱 계층은 CLI의 1~7단계(`prepareTask`, 읽기 명령)만 돌린다. 8단계(모델)는 돌리지 않는다.
   - 그래서 비교에 제공자 설정이 필요 없다(`tests/unit/app/u17-read-changes.test.ts`).
@@ -561,6 +566,7 @@ GUI의 첫 실행 마법사와 설정 화면이 쓴다. 파일을 고르는 규�
 readSettings({ configPath }) → SettingsView               // a86cd12
   // file: 출처(argument·environment·default), 경로, 표시 이름, 있는지 / config / profiles / workflows / keyAvailable / policyNarrowings(DR-41)
   // builtinWorkflows: G-A BUILTIN_WORKFLOW_IDS (설정 파일 없이도) / profileWorkflows: 프로필마다 { profile, workflowRef | null }   // 59dc39a
+  // privateData: { unreadablePaths, minGroupSize: { configured | null, effective, min, max } }   // U-215, 묶음 A
 createSettings({ configPath, workspace }) → InitOutput     // b015c9f, `init --json` 그대로(질문 없음)
 settingsSuggestions({ workspace }) → { commands: { shown, rule }[], protectedPaths }   // b015c9f
 proposeSettingsChange({ configPath, next }) → { baseDigest, digest, changes, widening, policyNarrowings, config }   // c1957d8, DR-41
@@ -578,6 +584,12 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
   6. `parseConfig`. 필드 위치를 준다(N-6).
   - 키 검사(3, 5)는 지금 설정된 모든 API 제공자의 키 값으로 한다(SP-2, CLI의 `knownKeyValues`). 그래서 OpenAI 키 값이 든 설정 파일도 읽기와 변경 제안·적용에서 `key_in_file`로 거부된다.
   - `keyAvailable`은 간편 실행이 쓸 제공자(설정의 `provider`, 없으면 anthropic)의 키가 있는지다. 값은 주지 않는다.
+  - U-215(DR-69 묶음 A): `privateData`는 설정 화면이 읽기 제외 경로와 묶음 최소 크기 k를 보이고 고치는 데 쓴다(`privateDataOf`).
+    - `unreadablePaths`는 설정의 `policy.unreadablePaths`를 파일 순서 그대로 준다. 없으면 빈 목록이다.
+    - `minGroupSize`의 `configured`는 설정의 값이고 없으면 null이다. `effective`는 설정만으로 실행이 받는 k다(`effectiveMinGroupSize`, 5 아래 없음). 프로필·정의·과제 파일은 이것을 올릴 수 있다. `min`·`max`는 어느 출처든 둘 수 있는 값(`MIN_GROUP_SIZE_LIMITS`, 정수)이다. 그래서 창이 계약의 수를 베껴 둘 필요가 없다.
+    - 설정의 정책만 본다. 프로필·정의·과제 파일의 자기 항목과 k는 여기 없다.
+    - GUI는 보호 경로처럼 고친다. 편집을 설정에 적용한 뒤 새 설정 전체로 제안을 받는다. 판정은 U-204다: 항목을 더하거나 k를 올리면 좁히기라 묻지 않고 쓴다. 항목을 빼거나 k를 내리면 넓히기라 사람이 확인해야 쓴다.
+    - 파서는 두 필드를 na-core의 U-210까지 거부한다. 그래서 두 필드를 담은 설정 파일을 읽고 쓰는 시험은 그때까지 todo다(`tests/unit/app/u215-private-data-settings.test.ts`). U-210과 합친 임시 판에서는 모두 통과했다.
   - `listRuns`의 출력도 모든 API 제공자의 키 값을 가린다(CLI `runs`와 같다). 시험은 `tests/unit/app/provider-keys.test.ts`다.
 - **만들기.**
   - CLI `init`을 `--json`, 질문 없이 부른다. 그래서 기본값만 쓴다: 모델 자리표시자, 기본 한도, 모두 거부하는 정책.
@@ -609,6 +621,17 @@ applySettingsChange({ configPath, next, baseDigest, confirmWidening }) → { wri
       - 좁히기: 항목을 뺌, 같은 항목을 다른 순서나 표기로, 목록이 없던 자리에 새로 둠(한정 없음보다 어디서나 좁다), 빈 목록.
       - 처음 판(ba7cec7)은 글자로 더 덮는 항목만 넓히기로 보았다. 예전 항목 안의 항목을 좁히기로 본 것을 V-8로 고쳤다.
       - 설정 파서는 U-182(병합 `a1d5c65`)부터 이 필드를 받는다(설정 파일, 프로필, 작업 종류 정의의 `policy.writablePaths`). U-183이 쓰일 때는 판정이 파서보다 먼저였다. 시험은 `tests/unit/app/u183-writable-widening.test.ts`와 `u183-v8-writable-links.test.ts`다. GUI의 설정 화면에는 이 필드를 고치는 편집이 없고, 넓히기 확인 대화상자는 두 종류에 이름을 붙인다(U-192, 병합 `111e25d`).
+    - U-204(DR-69 묶음 A, A-7, R-7): 읽기 제외 경로(`unreadablePaths`)를 빼는 것과 묶음 최소 크기 k(`minGroupSize`)를 낮추는 것.
+      - 읽기 제외 목록은 거부 목록이고 더하기만 한다. 설정·적용한 프로필·작업 종류 정의·과제 파일의 항목이 합집합으로 걸린다(계약 `PolicyConfig.unreadablePaths`, `mergeWorkflowPolicy`). 관문은 항목을 글자와 실경로 둘 다로 본다(보호 경로의 규칙).
+      - 예전 항목이 새 목록에 없으면 `unreadable_path_removed`다. 필드는 그 목록(`policy.unreadablePaths`, `profiles.<이름>.policy.unreadablePaths`, `workflows.<id>.policy.unreadablePaths`)이고 한 번만 준다. 항목을 뺌, 목록을 비움, 목록이나 프로필의 정책이 없어짐이 여기에 든다.
+        - 같은 항목인지는 글자 그대로이거나 관문의 판정(`compilePathSet`의 `exact`)으로 본다. 그래서 `data/private`와 `data/private/`는 같다.
+        - 더 넓은 항목으로 바꾼 것(`data/private` → `data`)도 넓히기다. 관문은 거부 항목을 실경로로도 풀어 보므로, `data/private`가 다른 곳을 가리키는 링크나 정션이면 그 대상을 막고 있었다. `data`는 그 대상을 덮지 않는다. 목록은 모든 작업 공간에서 쓰이므로 설정을 바꾸는 때 확인할 수 없고, 확인할 수 없으면 넓히기다(V-8 M-1과 같은 까닭).
+        - 프로필이나 정의의 목록에서 뺀 항목을 설정의 **새** 목록이 아직 갖고 있으면 넓히기가 아니다. 그 실행은 설정의 항목을 그대로 받는다. 적용할 프로필은 설정을 바꾸는 때 알 수 없으므로, 정의의 목록은 설정의 목록만 빼고 본다.
+      - k는 5 아래로 내려가지 않는다(DR-70, U-197의 V-12 M-1 고침). 실행의 k는 5와 설정·프로필·정의·과제 파일의 값 가운데 가장 큰 것이다(`effectiveMinGroupSize`). 그래서 어느 출처도 올리기만 한다.
+        - 설정의 k가 실제로 낮아지면 `min_group_size_lowered`(`policy.minGroupSize`)다. 5보다 큰 값을 지운 것(5로 돌아감)도 든다. 5 아래 값(파서가 거부함)은 5로 센다.
+        - 프로필이나 정의 자기 k(`profiles.<이름>.policy.minGroupSize`, `workflows.<id>.policy.minGroupSize`)는 전과 후를 모두 설정의 **새** 값과 함께 견준다. 그래서 설정의 k가 바뀐 것은 설정 자리에서 한 번만 말한다. 설정의 값(또는 5) 이하이던 값은 아무것도 올리지 않았으므로 지워도 넓히기가 아니다.
+      - 좁히기: 항목을 더함, 목록을 새로 둠, 같은 항목을 다른 순서나 표기로, k를 올림.
+      - 아직 파서는 두 필드를 받지 않는다(A-6까지). 판정이 먼저 안다. GUI는 모르는 넓히기 종류가 든 제안을 `unknown_widening`으로 거부하므로, GUI가 두 종류를 알기 전까지도 열리지 않고 닫힌다. 시험은 `tests/unit/app/u204-unreadable-k-widening.test.ts`다.
     - API 주소 변경, 프로필·워크플로 정의 변경
     - 제공자의 주소 변경(`providers.<이름>.apiBaseUrl`, 실행이 읽는 대로)과 간편 실행의 제공자 변경(`provider_changed`). 작업 공간의 글과 그 제공자의 키가 다른 곳으로 간다(GUI F-3). 모델·출력 상한 변경은 넓히기가 아니다
       - 주소는 실행이 보내는 곳으로 비교한다(R-27 I1). 설정의 주소가 없으면 그 제공자의 기본 주소다(CLI `resolveConnection`).
@@ -784,6 +807,8 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   - 계획 파일마다, 그 계획을 수행할 실행의 관문이 쓰기로 거부하는지 본다(`checkChangesPlanFiles`).
     - 관문은 task의 정책·쓰기 경로 목록에 계획 파일 목록을 하나 더한 것이다(`approvedPlanWritablePathSets`와 같음). `PLANNED_FILE_DESCRIPTOR`로 글자와 실경로를 모두 본다.
     - 이는 엔진이 첫 모델 요청 전에 하는 판정이다. 거부된 파일은 그 순번으로 `problems`에 `denied`로 담긴다.
+    - U-237(R-108 H-2, U-219, Codex V-21): 관문은 수행하는 실행이 받는 그것(`approvedPlan.policyFor`)과 같게 `runGuards`로 만든다. 그래서 실행의 읽기 제외 목록(모든 원천을 합친 것) 아래 파일도 거부된다. 판정은 엔진 자신의 `judgePlannedFile`을 부른다(이 모듈의 따로 쓴 줄이 아니다).
+  - U-237: 이동 계획의 점검도 관문을 `runGuards`로 만든다(CLI의 이동 계획 적용과 같다). 그래서 읽기 제외 아래로 옮기거나 버리는 동작은 적용처럼 점검에서도 문제로 나온다. 전에는 점검이 아무 말 없이 지나고 적용만 거부했다. 시험 `tests/unit/app/u237-app-checks-unreadable.test.ts`.
   - 파일이 계획 때와 같은지(낡음, `plannedFileStale`)는 엔진이 실행 직전에 읽어 본다. 여기서 보면 그 사이에 바뀔 수 있는 것을 말할 뿐이라 보지 않는다(PM).
   - 잠금, 시험 링크, 이동이 없다. 결과에는 `planKind: "changes"`가 붙고 `unsafeMoves` `[]`, `inventoryLimitReached` false, `probesLeft`·`probesRemoved` 0, `lockLeft` false다. 기존 `PlanCheck` 꼴에 표지 하나만 더했다.
 

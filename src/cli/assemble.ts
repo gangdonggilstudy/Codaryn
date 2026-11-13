@@ -7,7 +7,6 @@ import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
 import { JOURNAL_FILE_NAME, REVERT_ERROR_CODES, RUNS_DIR_NAME, STATE_DIR_NAME, planApplyStateOf } from "../contracts/index.js";
 import type { PlanApplyState, RunId, RunListEntry, RunReason } from "../contracts/index.js";
-import { createPolicyGate } from "../policy/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
   RevertRunError,
@@ -46,6 +45,7 @@ import type {
   WritablePathSet,
 } from "../contracts/index.js";
 import { resolveRunReference } from "./run-ref.js";
+import { runGuards } from "./unreadable.js";
 import type { CheckedRun } from "./run-ref.js";
 
 export interface AssemblyInput {
@@ -442,7 +442,10 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
   try {
     const privacy = createPrivacyGateway({ secrets });
     // U-182 (DR-69 B-4): the task's writable lists (one per source); none, no such limit.
-    const policy = createPolicyGate({ config: task.policy, workspace, ...(task.writablePathSets === undefined ? {} : { writablePathSets: task.writablePathSets }) });
+    // U-210 (bundle A, A-6; R-102 M-1, R-108 H-1): the run's unreadable paths, every source's united,
+    // and its k, for every part below that judges or reads, from one place (runGuards); none, as before.
+    const guards = runGuards(task, workspace);
+    const policy = guards.gate();
     // T-1: one runner for tools and verifiers. The value check keeps registered secrets out of
     // the child environment; the workspace root lets .cmd/.bat run (and refuses those inside it).
     const commandRunner = createCommandRunner({
@@ -459,11 +462,15 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
     const planRunId = input.planRunId;
     const recorders = createRunRecorders({ workspaceRoot, runId, clock, ...(planRunId === undefined ? {} : { planRunId }) });
     const { journal, changeRecorder, planRecorder, stateGuard } = recorders;
-    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder });
-    const verifiers = createVerifierRunner({ workspace, commandRunner });
+    // U-210 (bundle A, Q-4): the listing tools and query_table get the run's list and k (absent, the runner's 5).
+    const tools = createToolRunner({ workspace, privacy, commandRunner, changeRecorder, planRecorder, ...guards.tools });
+    // U-210 (bundle A, A-7, R-6; U-223): data_checks writes no number read from a table under the
+    // run's unreadable paths, so a repair cannot carry a small group's value to the model.
+    const verifiers = createVerifierRunner({ workspace, commandRunner, ...guards.verifiers });
     // U-1 (K1 connection): only when something is protected, so runs without protection keep
     // the phase 2 journal. The engine checks at run start and around each verification round.
-    const protectedPaths = task.policy.protectedPaths ?? [];
+    // U-203 (R-3): the unreadable paths are watched as the protected ones are.
+    const protectedPaths = guards.protectedPaths;
     const externalPaths = input.integrityPaths ?? [];
     const integrity =
       protectedPaths.length > 0 || externalPaths.length > 0
@@ -489,7 +496,8 @@ async function assembleWith(input: AssemblyInput, hooks: AssembleHooks): Promise
       const markApplied = recorders.markApplied;
       if (markApplied === undefined) throw new Error("the recorders cannot claim the plan");
       approvedPlan = {
-        policyFor: (writablePathSets) => createPolicyGate({ config: task.policy, workspace, writablePathSets }),
+        // R-108 H-1: the carried-out plan's gate has the run's unreadable paths too (runGuards).
+        policyFor: (writablePathSets) => guards.gate(writablePathSets),
         markApplied: () => markApplied(),
         fileNow: createPlannedFileProbe({ workspace }),
         planRecordsUnchecked: () => stateUncheckedSince({ workspaceRoot, planRunId, applyRunId: runId }),

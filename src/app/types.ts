@@ -169,7 +169,20 @@ export interface SettingsWidening {
      */
     | "writable_path_added"
     /** U-183 (DR-69 B-4): a list of writable paths is gone, so that limit is lifted (no limit). The field is the list. */
-    | "writable_paths_unlimited";
+    | "writable_paths_unlimited"
+    /**
+     * U-204 (DR-69 bundle A, A-7, R-7): a list of unreadable paths (the config's
+     * `policy.unreadablePaths`, a profile's, a workflow definition's) no longer has an entry it had,
+     * by the gate's matching: removed, replaced by a broader one, the list gone or emptied. A
+     * profile's or a definition's entry the config's new list still has is not one. The field is the list.
+     */
+    | "unreadable_path_removed"
+    /**
+     * U-204 (A-7, R-7, Q-4, DR-70): a lower group size k (never below 5): the config's
+     * (`policy.minGroupSize`, 5 when it sets none), or a profile's or a workflow definition's own
+     * raise judged with the config's new value. The field is the `minGroupSize` that changed.
+     */
+    | "min_group_size_lowered";
   /** Where: a field path such as "policy.commands[2]". Never a value. */
   readonly field: string;
 }
@@ -249,6 +262,28 @@ export interface SettingsView {
   readonly keyAvailable: boolean;
   /** DR-41: what each workflow's own rules leave out of this config's policy. See WorkflowPolicyNarrowing. */
   readonly policyNarrowings: readonly WorkflowPolicyNarrowing[];
+  /** U-215 (DR-69 bundle A): the config's unreadable paths and group size k, for the settings screen. See SettingsPrivateData. */
+  readonly privateData: SettingsPrivateData;
+}
+
+/**
+ * U-215 (DR-69 bundle A, DR-70): the config's own private data settings, as the settings screen shows
+ * and changes them (an edit applied to the config, then proposeSettingsChange, which judges taking an
+ * entry away and lowering k as widenings, U-204). From the config's `policy` only: a profile's, a
+ * workflow definition's and a task file's own entries and k are not here.
+ */
+export interface SettingsPrivateData {
+  /** The config's `policy.unreadablePaths`, in the file's order; empty when it has none. */
+  readonly unreadablePaths: readonly string[];
+  readonly minGroupSize: {
+    /** The config's `policy.minGroupSize`, or null when it sets none. */
+    readonly configured: number | null;
+    /** What a run gets from the config alone (effectiveMinGroupSize: never below 5); a profile, a definition or a task file may raise it. */
+    readonly effective: number;
+    /** The values any source may set (MIN_GROUP_SIZE_LIMITS: whole numbers), so the window needs no copy of the contract's numbers. */
+    readonly min: number;
+    readonly max: number;
+  };
 }
 
 /** The settings of one run, as `codaryn run` takes them. */

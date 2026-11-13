@@ -6,7 +6,6 @@
  * are dropped, because they may hold paths, file contents or secret values.
  */
 
-import type { CommandOutput } from "../contracts/index.js";
 import { cliError } from "../app/prepare.js";
 import type { CommandOutcome, JsonOutcome } from "../app/command-outcome.js";
 

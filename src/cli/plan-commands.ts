@@ -13,108 +13,74 @@
  * - review: writes review.json only, under the lock, for a run that ended as `awaiting_review`.
  */
 
-import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  JOURNAL_FILE_NAME,
-  MAX_PLAN_SUMMARY_CHARS,
-  MAX_REPORT_FILE_BYTES,
   MIN_PLAN_DIGEST_PREFIX,
   PLAN_ACTION_KINDS,
-  PLAN_EXIT_CODES,
-  RESULT_FILE_NAME,
-  RESULT_SCHEMA_VERSION,
-  REVIEW_EXIT_CODES,
-  RUNS_DIR_NAME,
-  STATE_DIR_NAME,
   UNSAFE_MOVE_CONSENT_ARGUMENT,
-  planActionShownMatches,
   toRunId,
   toShownWorkspace,
   workflowSettingsOf,
 } from "../contracts/index.js";
 import type {
-  AnyStoredPlan,
   ApplyJournal,
-  InventoryChecker,
   ApplyJournalEntry,
   ApplyJournalEvent,
   ApplyPlan,
   ApplyResult,
   ApprovalChannel,
-  ChangesPlanOutput,
   UnsafeMoveConsent,
-  Clock,
-  ContentHash,
   EngineResult,
   HumanOutput,
-  ListRuns,
-  LoadAnyPlan,
-  LoadPlan,
   LoadPlanOutcome,
   MaskedPlanAction,
-  MaskedText,
   MessageCatalog,
   PlanOutput,
   PrivacyGateway,
-  ResolvedPlanAction,
   ReviewOutput,
   RunId,
   ShownWorkspace,
   StateUncheckedSince,
-  StoredPlan,
 } from "../contracts/index.js";
 import { applyPlan as engineApplyPlan } from "../engine/index.js";
-import { createPrivacyGateway } from "../privacy/index.js";
 import {
   acquireLock,
   createApplyRecorders,
-  hasRecordsChangedMark as storeHasRecordsChangedMark,
   stateUncheckedSince as storeStateUncheckedSince,
   prepareDiscardedRoot,
-  inspectRun as storeInspectRun,
   isRunTimestamp,
   latestRun,
   listRuns as storeListRuns,
-  loadAnyPlan as storeLoadAnyPlan,
-  readReviewRecord,
-  readRevertRecord,
   releaseLock,
   writeResult,
-  writeReviewRecord,
 } from "../store/index.js";
-import type { RunInspection } from "../store/index.js";
 import { createCommandRunner, createPlanExecutor, envValueFreeOfSecrets } from "../tools/index.js";
 import { createIntegrityChecker, createInventoryChecker, createVerifierRunner } from "../verify/index.js";
-import type { InventoryCheckerOptions } from "../verify/index.js";
 import { createWorkspace } from "../workspace/index.js";
 import { parseApplyArgs, parsePlanArgs, parseReviewArgs } from "./args.js";
-import type { ApplyArgs, TaskFormArgs } from "./args.js";
+import type { ApplyArgs } from "./args.js";
 import type { CommandOutcome } from "./guard.js";
 import { jsonLine } from "./guard.js";
 import { PROGRESS_PREFIX } from "./progress.js";
-import { resolveRunReference } from "./run-ref.js";
-import type { CheckedRun } from "./run-ref.js";
 import { runPrepared } from "./run.js";
 import type { CliEnvironment } from "./run.js";
-import { argumentsError, cliError, prepareTask, withHint } from "../app/prepare.js";
-import type { PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "../app/prepare.js";
+import { argumentsError, cliError, withHint } from "../app/prepare.js";
+import type { PreparedTask } from "../app/prepare.js";
 import { createRunId } from "../app/input/run-id.js";
-import { goalHoldsKey } from "../app/input/security/index.js";
-import { envValue, knownKeyValues } from "../app/input/settings.js";
+import { knownKeyValues } from "../app/input/settings.js";
 import type { KnownKeys } from "../app/input/security/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText, hideKeys } from "../app/input/text-safety.js";
 import { runGuards } from "../app/input/unreadable.js";
-import { NO_GOAL, runArgsOf, notes, prepareFor, LOAD_MESSAGES, loadAny, changesView, loadShown, planRunMarked, readPlanJournal, field, planSummary, awaitingReview } from "../app/plan-view.js";
+import { runArgsOf, prepareFor, LOAD_MESSAGES, loadAny, changesView, loadShown, planRunMarked, readPlanJournal, field, planSummary } from "../app/plan-view.js";
 import type { PlanViewEnvironment, Prepared } from "../app/plan-view.js";
+import { recordReview, showPlan } from "../app/plan-view.js";
 
 // U-306 (CLI migration C-7a): the plan view's and review's preparation and checks are the app layer's
 // (src/app/plan-view.ts); these names stay for the tests (plan A).
 export { NO_GOAL } from "../app/plan-view.js";
 export type { PlanViewEnvironment, Prepared } from "../app/plan-view.js";
-import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, changesPlanOutput, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
-import type { LoadedChangesPlan } from "./human/index.js";
+import { FINAL_MESSAGE_MAX_LINES, builtinReviewItemText, changesApplyQuestion, changesApprovalText, displayWidth, formatLocalTime, quoteModelText, renderChangesPlan } from "./human/index.js";
 
 /** U-21: rows of the plan's summary in the plan view, as many as the run summary gives the last message. */
 const PLAN_SUMMARY_MAX_ROWS = FINAL_MESSAGE_MAX_LINES;
@@ -314,26 +280,14 @@ export function renderPlan(output: PlanOutput, currentKey: KnownKeys, messages?:
 export async function runPlan(io: PlanCommandEnvironment): Promise<CommandOutcome> {
   const parsed = parsePlanArgs(io.argv);
   if (!parsed.ok) return argumentsError(parsed);
-  const ready = await prepareFor(io, parsed.args.form, parsed.args.runId, null, false);
-  if (!ready.ok) return ready.outcome;
-  const loaded = await loadAny(io, ready.value);
-  // U-195 (DR-69 B-4): a run plan (kind "changes") has its own view (U-191); a plan of mode apply, as before.
-  if (loaded.ok && loaded.plan.kind === "changes") {
-    const view = await changesView(io, ready.value, { plan: loaded.plan, digest: loaded.digest, applied: loaded.applied });
-    if (!view.ok) return view.outcome;
-    if (parsed.args.json) return { output: view.output, exitCode: view.output.exitCode };
-    return { text: renderChangesPlan(view.output, knownKeyValues(io.env), io.messages), exitCode: view.output.exitCode };
-  }
-  const shown = await loadShown(io, ready.value, true, loaded as LoadPlanOutcome);
+  // U-306 (C-7a): the plan view's rules are the app layer's (showPlan); the JSON line and the text are the CLI's.
+  const shown = await showPlan(io, parsed.args.form, parsed.args.runId);
   if (!shown.ok) return shown.outcome;
-  // U-14 (AXM-2): a marked plan run is still shown, as one that cannot be applied; its journal may
-  // have been changed too, so the summary is left out.
-  const marked = await planRunMarked(io, ready.value.workspaceRoot, ready.value.runId);
-  const summary = marked ? null : await planSummary(io, ready.value.workspaceRoot, ready.value.runId, shown.digest, shown.privacy);
-  const output: PlanOutput = { ...shown.output, ...(summary === null ? {} : { summary }), ...(marked ? { recordsChanged: true as const } : {}) };
+  if (parsed.args.json) return { output: shown.output, exitCode: shown.output.exitCode };
   const currentKey = knownKeyValues(io.env);
-  if (parsed.args.json) return { output, exitCode: output.exitCode };
-  return { text: renderPlan(output, currentKey, io.messages), exitCode: output.exitCode };
+  // U-195 (DR-69 B-4): a run plan (kind "changes") has its own view (U-191); a plan of mode apply, as before.
+  if (shown.kind === "changes") return { text: renderChangesPlan(shown.output, currentKey, io.messages), exitCode: shown.output.exitCode };
+  return { text: renderPlan(shown.output, currentKey, io.messages), exitCode: shown.output.exitCode };
 }
 
 const YES = new Set(["y", "yes", "예", "네"]);
@@ -842,64 +796,12 @@ export async function runReview(io: PlanCommandEnvironment): Promise<CommandOutc
   if (!parsed.ok) return argumentsError(parsed);
   const args = parsed.args;
   const currentKey = knownKeyValues(io.env);
-  // S-8: a note is written to review.json and shown by report; a key never goes there.
-  if (args.note !== null && goalHoldsKey(args.note, currentKey)) {
-    return cliError("key_in_file", "the note contains a key value; nothing was written");
-  }
-  // R-4 L-4: without a note no secret is needed and none is read.
-  const ready = await prepareFor(io, args.form, args.runId, null, false, args.note !== null);
-  if (!ready.ok) return ready.outcome;
-  const { prepared, workspaceRoot, runId } = ready.value;
-  const review = await awaitingReview(workspaceRoot, runId);
-  if (!review.ok) return review.outcome;
-
-  let note: MaskedText | null = null;
-  if (args.note !== null) {
-    const masked = createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(cleanText(args.note));
-    if (!masked.ok) return cliError("internal_error", "the note could not be masked; nothing was written");
-    note = masked.text;
-  }
-
-  const lockId = createRunId(new Date(io.clock.now()), io.randomBytes);
-  const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: io.clock });
-  if (!lock.ok) return cliError("workspace_locked", "another run or revert holds the workspace; nothing was written");
-  let replaced: boolean;
-  try {
-    replaced = (await readReviewRecord(workspaceRoot, runId).catch(() => null)) !== null;
-    await writeReviewRecord(workspaceRoot, {
-      schemaVersion: 1,
-      kind: "review_record",
-      runId,
-      at: new Date(io.clock.now()).toISOString(),
-      verdict: args.verdict,
-      note,
-    });
-  } catch {
-    return cliError("internal_error", "the review could not be written; review.json was left as it was");
-  } finally {
-    await releaseLock({ workspaceRoot, runId: lockId });
-  }
-  const output: ReviewOutput = {
-    schemaVersion: RESULT_SCHEMA_VERSION,
-    kind: "review",
-    runId,
-    verdict: args.verdict,
-    exitCode: REVIEW_EXIT_CODES[args.verdict],
-    checklist: review.checklist,
-    replaced,
-  };
-  if (args.json) return { output, exitCode: output.exitCode };
-  // U-131 (N3): a rejected run that changed files: how to undo them, with the workspace as typed.
-  // U-153 (R-94 I2): not when its changes were already reverted completely (the command would only
-  // end as already_reverted). A record that cannot be read counts as none: the line is given.
-  let revert: { readonly workspaceShown: ShownWorkspace | null } | undefined;
-  const revertedFully = args.verdict === "rejected" && review.changedFiles > 0 && (await readRevertRecord(workspaceRoot, runId).catch(() => null))?.status === "complete";
-  if (args.verdict === "rejected" && review.changedFiles > 0 && !revertedFully) {
-    const typed = args.form.input.kind === "quick" ? args.form.input.workspace : null;
-    const masked = typed === null ? null : createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(typed);
-    revert = { workspaceShown: typed === null || masked === null ? null : toShownWorkspace(typed, masked.ok ? masked.text : null) };
-  }
-  return { text: renderReview(output, currentKey, io.messages, revert), exitCode: output.exitCode };
+  // U-306 (C-7a): the review's rules are the app layer's (recordReview); the JSON line and the text are
+  // the CLI's. The revert line is asked for only when the text is shown, as before.
+  const recorded = await recordReview(io, { form: args.form, run: args.runId, verdict: args.verdict, note: args.note, revertLine: !args.json });
+  if (!recorded.ok) return recorded.outcome;
+  if (args.json) return { output: recorded.output, exitCode: recorded.output.exitCode };
+  return { text: renderReview(recorded.output, currentKey, io.messages, recorded.revert), exitCode: recorded.output.exitCode };
 }
 
 /** Exposed for tests: the latest run rule the commands share with the store (N-23 b). */

@@ -8,7 +8,10 @@
  * (TaskFormArgs in src/cli/args.ts), but for: the functions take PlanViewEnvironment (the fields of the
  * CLI's PlanCommandEnvironment they read, their comments as they were; PlanCommandEnvironment widens
  * it with argv and the catalog), and the names the CLI's apply and its plan and review commands use
- * are exported. The CLI's old places re-export what tests take (plan A).
+ * are exported. The CLI's old places re-export what tests take (plan A). The rules of the two commands
+ * follow at the end (showPlan, recordReview, the second commit of U-306): runPlan's and runReview's
+ * lines, with an error given as { ok: false, outcome }; the CLI keeps the arguments, the JSON line and
+ * the text.
  */
 
 import { lstat, readFile } from "node:fs/promises";
@@ -20,9 +23,11 @@ import {
   PLAN_EXIT_CODES,
   RESULT_FILE_NAME,
   RESULT_SCHEMA_VERSION,
+  REVIEW_EXIT_CODES,
   RUNS_DIR_NAME,
   STATE_DIR_NAME,
   planActionShownMatches,
+  toShownWorkspace,
 } from "../contracts/index.js";
 import type {
   AnyStoredPlan,
@@ -40,14 +45,21 @@ import type {
   PlanOutput,
   PrivacyGateway,
   ResolvedPlanAction,
+  ReviewOutput,
+  ShownWorkspace,
   StoredPlan,
 } from "../contracts/index.js";
 import { createPrivacyGateway } from "../privacy/index.js";
 import {
+  acquireLock,
   hasRecordsChangedMark as storeHasRecordsChangedMark,
   inspectRun as storeInspectRun,
   listRuns as storeListRuns,
   loadAnyPlan as storeLoadAnyPlan,
+  readReviewRecord,
+  readRevertRecord,
+  releaseLock,
+  writeReviewRecord,
 } from "../store/index.js";
 import type { RunInspection } from "../store/index.js";
 import { createInventoryChecker } from "../verify/index.js";
@@ -57,6 +69,8 @@ import type { CommandOutcome } from "./command-outcome.js";
 import { resolveRunReference } from "./input/run-ref.js";
 import type { CheckedRun } from "./input/run-ref.js";
 import { cliError, prepareTask } from "./prepare.js";
+import { createRunId } from "./input/run-id.js";
+import { goalHoldsKey } from "./input/security/index.js";
 import type { PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "./prepare.js";
 import { knownKeyValues } from "./input/settings.js";
 import { cleanText, hideKeys } from "./input/text-safety.js";
@@ -410,4 +424,124 @@ export async function awaitingReview(
   // U-131 (N3): whether the run changed files (a rejected run then has something to revert).
   const changedFiles = Array.isArray(result.changes) ? result.changes.length : 0;
   return { ok: true, checklist: checklist as MaskedText[], changedFiles };
+}
+
+/**
+ * U-306 (C-7a): `codaryn plan`'s rules (DR-5, DR-17) for a task form and its `--run`, as runPlan had
+ * them: steps 1 to 7 and the run (prepareFor), the plan of either kind; a run plan's view (U-195,
+ * DR-69 B-4: U-191's own view), or a plan of mode apply masked again (DR-5, DR-28), with the model's
+ * summary unless the plan run has a records-changed mark, and then the mark (U-14). The CLI prints the
+ * output as its JSON line or its text.
+ */
+export async function showPlan(
+  io: PlanViewEnvironment,
+  form: TaskFormArgs,
+  run: string,
+): Promise<
+  | { readonly ok: true; readonly kind: "changes"; readonly output: ChangesPlanOutput }
+  | { readonly ok: true; readonly kind: "plan"; readonly output: PlanOutput }
+  | { readonly ok: false; readonly outcome: CommandOutcome }
+> {
+  const ready = await prepareFor(io, form, run, null, false);
+  if (!ready.ok) return ready;
+  const loaded = await loadAny(io, ready.value);
+  // U-195 (DR-69 B-4): a run plan (kind "changes") has its own view (U-191); a plan of mode apply, as before.
+  if (loaded.ok && loaded.plan.kind === "changes") {
+    const view = await changesView(io, ready.value, { plan: loaded.plan, digest: loaded.digest, applied: loaded.applied });
+    if (!view.ok) return view;
+    return { ok: true, kind: "changes", output: view.output };
+  }
+  const shown = await loadShown(io, ready.value, true, loaded as LoadPlanOutcome);
+  if (!shown.ok) return shown;
+  // U-14 (AXM-2): a marked plan run is still shown, as one that cannot be applied; its journal may
+  // have been changed too, so the summary is left out.
+  const marked = await planRunMarked(io, ready.value.workspaceRoot, ready.value.runId);
+  const summary = marked ? null : await planSummary(io, ready.value.workspaceRoot, ready.value.runId, shown.digest, shown.privacy);
+  const output: PlanOutput = { ...shown.output, ...(summary === null ? {} : { summary }), ...(marked ? { recordsChanged: true as const } : {}) };
+  return { ok: true, kind: "plan", output };
+}
+
+/** What `codaryn review` was given: the task form, `--run`, the verdict and the note (GT-D6). */
+export interface ReviewRequest {
+  readonly form: TaskFormArgs;
+  readonly run: string;
+  readonly verdict: "accepted" | "rejected";
+  readonly note: string | null;
+  /** Whether the revert line is wanted (the CLI's text; not its JSON line). */
+  readonly revertLine: boolean;
+}
+
+/**
+ * U-306 (C-7a): `codaryn review`'s rules (GT-D6), as runReview had them: no key in the note (S-8);
+ * without a note no secret is read (R-4 L-4); a run that ended as awaiting_review; the note masked;
+ * review.json written under the workspace lock, and whether it replaced one. U-131 (N3), U-153: with
+ * `revertLine`, a rejected run that changed files and was not reverted completely also gives the
+ * workspace as typed for the revert line (DR-51). The CLI prints the output as its JSON line or its text.
+ */
+export async function recordReview(
+  io: PlanViewEnvironment,
+  request: ReviewRequest,
+): Promise<
+  | { readonly ok: true; readonly output: ReviewOutput; readonly revert?: { readonly workspaceShown: ShownWorkspace | null } }
+  | { readonly ok: false; readonly outcome: CommandOutcome }
+> {
+  const currentKey = knownKeyValues(io.env);
+  // S-8: a note is written to review.json and shown by report; a key never goes there.
+  if (request.note !== null && goalHoldsKey(request.note, currentKey)) {
+    return { ok: false, outcome: cliError("key_in_file", "the note contains a key value; nothing was written") };
+  }
+  // R-4 L-4: without a note no secret is needed and none is read.
+  const ready = await prepareFor(io, request.form, request.run, null, false, request.note !== null);
+  if (!ready.ok) return ready;
+  const { prepared, workspaceRoot, runId } = ready.value;
+  const review = await awaitingReview(workspaceRoot, runId);
+  if (!review.ok) return review;
+
+  let note: MaskedText | null = null;
+  if (request.note !== null) {
+    const masked = createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(cleanText(request.note));
+    if (!masked.ok) return { ok: false, outcome: cliError("internal_error", "the note could not be masked; nothing was written") };
+    note = masked.text;
+  }
+
+  const lockId = createRunId(new Date(io.clock.now()), io.randomBytes);
+  const lock = await acquireLock({ workspaceRoot, runId: lockId, clock: io.clock });
+  if (!lock.ok) return { ok: false, outcome: cliError("workspace_locked", "another run or revert holds the workspace; nothing was written") };
+  let replaced: boolean;
+  try {
+    replaced = (await readReviewRecord(workspaceRoot, runId).catch(() => null)) !== null;
+    await writeReviewRecord(workspaceRoot, {
+      schemaVersion: 1,
+      kind: "review_record",
+      runId,
+      at: new Date(io.clock.now()).toISOString(),
+      verdict: request.verdict,
+      note,
+    });
+  } catch {
+    return { ok: false, outcome: cliError("internal_error", "the review could not be written; review.json was left as it was") };
+  } finally {
+    await releaseLock({ workspaceRoot, runId: lockId });
+  }
+  const output: ReviewOutput = {
+    schemaVersion: RESULT_SCHEMA_VERSION,
+    kind: "review",
+    runId,
+    verdict: request.verdict,
+    exitCode: REVIEW_EXIT_CODES[request.verdict],
+    checklist: review.checklist,
+    replaced,
+  };
+  if (!request.revertLine) return { ok: true, output };
+  // U-131 (N3): a rejected run that changed files: how to undo them, with the workspace as typed.
+  // U-153 (R-94 I2): not when its changes were already reverted completely (the command would only
+  // end as already_reverted). A record that cannot be read counts as none: the line is given.
+  let revert: { readonly workspaceShown: ShownWorkspace | null } | undefined;
+  const revertedFully = request.verdict === "rejected" && review.changedFiles > 0 && (await readRevertRecord(workspaceRoot, runId).catch(() => null))?.status === "complete";
+  if (request.verdict === "rejected" && review.changedFiles > 0 && !revertedFully) {
+    const typed = request.form.input.kind === "quick" ? request.form.input.workspace : null;
+    const masked = typed === null ? null : createPrivacyGateway({ secrets: [...prepared.secrets] }).mask(typed);
+    revert = { workspaceShown: typed === null || masked === null ? null : toShownWorkspace(typed, masked.ok ? masked.text : null) };
+  }
+  return { ok: true, output, ...(revert === undefined ? {} : { revert }) };
 }

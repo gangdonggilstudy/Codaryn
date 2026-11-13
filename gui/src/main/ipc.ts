@@ -6,7 +6,7 @@
  */
 
 import { isAbsolute, join, relative } from "node:path";
-import { dialog, ipcMain, shell } from "electron";
+import { dialog, ipcMain } from "electron";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import {
   IPC_CHANNELS,
@@ -58,7 +58,8 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCopyArgs, parseStartTaskArgs } from "../shared/ipc.js";
+import { copyablePath, parseCopyArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange } from "../shared/ipc.js";
+import type { UiMemoryView } from "../shared/ipc.js";
 import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
@@ -137,6 +138,11 @@ export interface IpcDeps {
   readonly chooseOpenFile: (kind: "task" | "vars") => Promise<string | null>;
   /** U-62 (6.4): puts checked text on the clipboard (the OS clipboard; smoke tests record it instead). */
   readonly writeClipboard: (text: string) => void;
+  /** U-66: shows an entry selected in the file manager (the OS one; smoke tests record it instead). Nothing is opened or run. */
+  readonly showItemInFolder: (path: string) => void;
+  /** U-70 (4.5): what the window remembers of itself, and keeping a change to it. */
+  readonly uiMemory: () => Promise<UiMemoryView>;
+  readonly saveUi: (change: { readonly screen?: string; readonly treeWidth?: number }) => Promise<void>;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -190,7 +196,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (chosen === null) return { language: "en", engine: "host_error", initialWorkspace };
     language = chosen.language;
     deps.onLanguage(language);
-    return { language: chosen.language, engine: "ready", initialWorkspace };
+    return { language: chosen.language, engine: "ready", initialWorkspace, ui: await deps.uiMemory() };
   });
 
   handle(IPC_CHANNELS.openFolder, async (args): Promise<OpenFolderReply> => {
@@ -239,7 +245,7 @@ export function registerIpc(deps: IpcDeps): void {
     const inside = relative(root, target);
     if (inside.length === 0 || inside.startsWith("..") || isAbsolute(inside)) return false;
     // Shows the entry selected in the file manager. Nothing is opened or run.
-    shell.showItemInFolder(target);
+    deps.showItemInFolder(target);
     return true;
   });
 
@@ -268,6 +274,34 @@ export function registerIpc(deps: IpcDeps): void {
     if (text === null) return { ok: false, code: "not_copyable" };
     deps.writeClipboard(text);
     return { ok: true };
+  });
+
+  /**
+   * U-69 (3.10): shows the config file selected in the file manager. Its path comes from the engine
+   * host (the settings a run reads) and stays in this process; the page names nothing.
+   */
+  handle(IPC_CHANNELS.revealConfig, async (args): Promise<CopyReply> => {
+    if (!isNoArgs(args)) return { ok: false, code: "invalid_args" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("configFile", {}, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const value = response.value as Record<string, unknown> | null;
+    if (typeof value !== "object" || value === null) return { ok: false, code: "host_error" };
+    if (value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+    const path = value["path"];
+    if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || typeof value["exists"] !== "boolean") return { ok: false, code: "host_error" };
+    if (value["exists"] !== true) return { ok: false, code: "config_missing" };
+    deps.showItemInFolder(path);
+    return { ok: true };
+  });
+
+  // U-70 (4.5): the last screen and the file panel's width, checked here, kept in gui-state.json.
+  handle(IPC_CHANNELS.saveUi, async (args): Promise<boolean> => {
+    const parsed = args.length === 1 ? parseSaveUiArgs(args[0]) : null;
+    if (parsed === null) return false;
+    await deps.saveUi(parsed);
+    return true;
   });
 
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {
@@ -672,7 +706,10 @@ export function registerIpc(deps: IpcDeps): void {
     const response = await state.host.call("changes", { workspace: root, profile: parsed.profile, workflowRef: parsed.workflow, runId: parsed.runId }, RUNS_TIMEOUT_MS);
     if (!response.ok) return { ok: false, code: response.error.code };
     const reply = toChangesReply(response.value);
-    return reply.ok && reply.runId !== parsed.runId ? { ok: false, code: "host_error" } : reply;
+    if (!reply.ok) return reply;
+    if (reply.runId !== parsed.runId) return { ok: false, code: "host_error" };
+    // U-66 (3.4): "show in folder" takes the tree's ids, given here for plain paths that are there; the page never names a path.
+    return { ...reply, files: reply.files.map((file) => ({ ...file, id: revealableChange(file) ? workspaces.treeIds.issue(parsed.workspace, file.path) : null })) };
   });
 
   // GU-3 (3.7): a run's report. It reads; it changes nothing. A run id, never "latest".

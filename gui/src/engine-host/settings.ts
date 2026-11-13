@@ -155,6 +155,20 @@ export function configLanguageOf(outcome: unknown): "ko" | "en" | null {
   return language === "ko" || language === "en" ? language : null;
 }
 
+/**
+ * U-69 (3.10): the config file's absolute path and whether it is there, for the main process's
+ * "show in folder" only; the window gets the display form (settingsValue), never this path.
+ */
+export function configFileValue(outcome: unknown): Obj | HostFailure {
+  const view = outputOf(outcome);
+  if (view === null) return failureOf(outcome);
+  const file = view["file"];
+  if (!isObj(file)) return { ok: false, code: "config_missing" };
+  const path = file["path"];
+  if (typeof path !== "string" || path.length === 0) return { ok: false, code: "host_error" };
+  return { ok: true, path, exists: file["exists"] === true };
+}
+
 export function settingsValue(
   outcome: unknown,
   shown: Shown,

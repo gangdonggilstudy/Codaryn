@@ -158,6 +158,21 @@ export class TreeModel {
     return search(this.root);
   }
 
+  /**
+   * U-67 (10): first-letter jump. The next shown entry after `focusKey` (wrapping around) whose
+   * shown name starts with `letter`, case ignored; null when none does.
+   */
+  jump(focusKey: string | null, letter: string): string | null {
+    const wanted = letter.toLocaleLowerCase();
+    const rows = this.rows().filter((row): row is Extract<TreeRow, { type: "node" }> => row.type === "node");
+    const at = rows.findIndex((row) => row.key === focusKey);
+    for (let step = 1; step <= rows.length; step += 1) {
+      const row = rows[(at + step + rows.length) % rows.length] as Extract<TreeRow, { type: "node" }>;
+      if (row.node.name.toLocaleLowerCase().startsWith(wanted)) return row.key;
+    }
+    return null;
+  }
+
   /** Opens a folder; loads its first page if it was never loaded. */
   expand(node: TreeNode): TreeAction {
     if (!isExpandable(node) || node.expanded) return null;

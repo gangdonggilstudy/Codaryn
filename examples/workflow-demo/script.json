@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "toolCalls": [
+        {
+          "name": "search_files",
+          "args": {
+            "path": ".",
+            "text": "fix"
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "CHANGES.txt"
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "RELEASE-NOTES.md",
+            "expectedHash": null,
+            "change": {
+              "kind": "replace_all",
+              "content": "# 릴리스 노트\n\n## 더한 것\n\n- 보고서 끝에 합계 줄을 더함\n- 한국어 도움말\n\n## 고친 것\n\n- 빈 줄이 두 번 들어가던 문제\n"
+            }
+          }
+        }
+      ],
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "text": "RELEASE-NOTES.md를 썼다.",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    }
+  ]
+}

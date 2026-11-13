@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "workflow-demo",
+  "workflow": "release-notes",
+  "workflowRef": "release-notes",
+  "goal": "CHANGES.txt로 이번 판의 RELEASE-NOTES.md를 만든다.",
+  "workspaceRoot": "workspace",
+  "model": {
+    "provider": "scripted",
+    "scriptPath": "script.json"
+  },
+  "policy": {
+    "commands": [],
+    "network": "deny",
+    "destructive": "deny",
+    "restorePathTokens": false
+  },
+  "privacy": {
+    "secretEnv": []
+  },
+  "limits": {
+    "maxModelTurns": 6,
+    "maxToolCalls": 6,
+    "maxTotalTokens": 1000,
+    "maxDurationMs": 60000,
+    "maxRepairAttempts": 0,
+    "maxSameFailures": 2
+  },
+  "verifiers": []
+}

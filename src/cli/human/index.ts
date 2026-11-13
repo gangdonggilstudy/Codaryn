@@ -10,4 +10,5 @@ export { jsonSyntaxErrorOffset, jsonSyntaxErrorPosition, positionOf } from "./js
 export type { JsonPosition } from "./json-position.js";
 export { createHumanWriter } from "./writer.js";
 export type { HumanWriter, HumanWriterOptions } from "./writer.js";
-export { MODEL_TEXT_COLUMNS, MODEL_TEXT_FALLBACK_COLUMNS, MODEL_TEXT_PREFIX, displayWidth, formatLocalTime, quoteModelText, shellArg, terminalColumns } from "./format.js";
+// U-125: displayWidth, padEnd and padStart are the one terminal width for every table (doctor, models: U-127).
+export { MODEL_TEXT_COLUMNS, MODEL_TEXT_FALLBACK_COLUMNS, MODEL_TEXT_PREFIX, displayWidth, formatLocalTime, padEnd, padStart, quoteModelText, shellArg, terminalColumns } from "./format.js";

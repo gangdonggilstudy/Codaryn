@@ -97,36 +97,74 @@ export function shellArg(value: string): string | null {
   return QUOTABLE_ARG.test(value) && !value.endsWith("\\") ? `"${value}"` : null;
 }
 
-function isWide(cp: number): boolean {
-  return (
-    (cp >= 0x1100 && cp <= 0x115f) ||
-    (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f) ||
-    (cp >= 0xac00 && cp <= 0xd7a3) ||
-    (cp >= 0xf900 && cp <= 0xfaff) ||
-    (cp >= 0xfe30 && cp <= 0xfe4f) ||
-    (cp >= 0xff00 && cp <= 0xff60) ||
-    (cp >= 0xffe0 && cp <= 0xffe6) ||
-    (cp >= 0x1f300 && cp <= 0x1f64f) ||
-    (cp >= 0x1f900 && cp <= 0x1f9ff) ||
-    (cp >= 0x20000 && cp <= 0x3fffd)
-  );
+/**
+ * U-125: code point ranges, inclusive, of characters a terminal draws two columns wide: the East
+ * Asian wide and fullwidth blocks (Hangul, kana, CJK ideographs and their symbols, fullwidth forms)
+ * and the common emoji blocks. No dependency: a fixed table, as the Unicode East Asian Width data
+ * gives them (`W` and `F`) for the blocks a Korean, Japanese or Chinese text uses.
+ */
+const WIDE_RANGES: readonly (readonly [number, number])[] = [
+  [0x1100, 0x115f], // Hangul Jamo: initial consonants
+  [0x2e80, 0x303e], // CJK radicals, Kangxi radicals, ideographic description, CJK symbols and punctuation
+  [0x3040, 0xa4cf], // kana, Bopomofo, Hangul compatibility Jamo, Kanbun, CJK strokes, enclosed CJK, CJK ideographs, Yi
+  [0xa960, 0xa97f], // Hangul Jamo Extended-A: initial consonants
+  [0xac00, 0xd7a3], // Hangul syllables
+  [0xf900, 0xfaff], // CJK compatibility ideographs
+  [0xfe10, 0xfe19], // vertical forms
+  [0xfe30, 0xfe6f], // CJK compatibility forms, small form variants
+  [0xff00, 0xff60], // fullwidth forms
+  [0xffe0, 0xffe6], // fullwidth signs
+  [0x1f300, 0x1f64f], // emoji: symbols and pictographs, emoticons
+  [0x1f900, 0x1f9ff], // emoji: supplemental symbols and pictographs
+  [0x20000, 0x3fffd], // CJK ideographs, extensions B and later
+];
+
+/**
+ * U-125: code point ranges, inclusive, of characters that take no column: combining marks (drawn on
+ * the character before them), the Hangul Jamo vowels and final consonants that join an initial into
+ * one syllable, the kana voiced sound marks, zero-width spaces and joiners, and variation selectors.
+ * Looked up before WIDE_RANGES, so a mark inside a wide block still takes none.
+ */
+const ZERO_WIDTH_RANGES: readonly (readonly [number, number])[] = [
+  [0x0300, 0x036f], // combining diacritical marks
+  [0x1160, 0x11ff], // Hangul Jamo: vowels and final consonants (conjoining)
+  [0x1ab0, 0x1aff], // combining diacritical marks extended
+  [0x1dc0, 0x1dff], // combining diacritical marks supplement
+  [0x200b, 0x200d], // zero width space, non-joiner, joiner
+  [0x2060, 0x2060], // word joiner
+  [0x20d0, 0x20ff], // combining diacritical marks for symbols
+  [0x3099, 0x309a], // combining kana voiced and semi-voiced sound marks
+  [0xd7b0, 0xd7ff], // Hangul Jamo Extended-B: vowels and final consonants (conjoining)
+  [0xfe00, 0xfe0f], // variation selectors
+  [0xfe20, 0xfe2f], // combining half marks
+  [0xfeff, 0xfeff], // zero width no-break space
+  [0xe0100, 0xe01ef], // variation selectors supplement
+];
+
+function inRanges(cp: number, ranges: readonly (readonly [number, number])[]): boolean {
+  return ranges.some(([low, high]) => cp >= low && cp <= high);
 }
 
-function isZeroWidth(cp: number): boolean {
-  return (cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x1160 && cp <= 0x11ff) || cp === 0x200b || (cp >= 0xfe00 && cp <= 0xfe0f);
-}
-
-/** Columns the text takes in a terminal: East Asian wide characters (Hangul, CJK) count 2. */
+/**
+ * Columns the text takes in a terminal (U-125: the one width every table and fold of the human
+ * output uses): a character in ZERO_WIDTH_RANGES counts 0, one in WIDE_RANGES (Hangul, CJK) 2,
+ * any other 1. For ASCII text it is the length.
+ */
 export function displayWidth(text: string): number {
   let width = 0;
   for (const char of text) {
     const cp = char.codePointAt(0) as number;
-    width += isZeroWidth(cp) ? 0 : isWide(cp) ? 2 : 1;
+    width += inRanges(cp, ZERO_WIDTH_RANGES) ? 0 : inRanges(cp, WIDE_RANGES) ? 2 : 1;
   }
   return width;
 }
 
-/** `text` followed by spaces up to `width` columns. */
+/** U-125: spaces up to `width` columns, then `text` (a right-aligned cell); never cut. */
+export function padStart(text: string, width: number): string {
+  return " ".repeat(Math.max(0, width - displayWidth(text))) + text;
+}
+
+/** `text` followed by spaces up to `width` columns (displayWidth); never cut. */
 export function padEnd(text: string, width: number): string {
   return text + " ".repeat(Math.max(0, width - displayWidth(text)));
 }

@@ -14,6 +14,8 @@ const CHANNELS = {
   restartEngine: "codaryn:app:restartengine",
   copyText: "codaryn:app:copy",
   copyPath: "codaryn:workspace:copypath",
+  revealConfig: "codaryn:settings:revealconfig",
+  saveUi: "codaryn:app:saveui",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -91,6 +93,14 @@ const api = Object.freeze({
   reveal: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.reveal, { workspace: text(workspace), node: text(node) }),
   copyText: (value: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyText, { text: text(value) }),
   copyPath: (workspace: unknown, node: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.copyPath, { workspace: text(workspace), node: text(node) }),
+  revealConfig: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.revealConfig),
+  saveUi: (change: unknown): Promise<unknown> => {
+    const given = typeof change === "object" && change !== null ? (change as Record<string, unknown>) : {};
+    return ipcRenderer.invoke(CHANNELS.saveUi, {
+      ...(typeof given["screen"] === "string" ? { screen: given["screen"] } : {}),
+      ...(typeof given["treeWidth"] === "number" ? { treeWidth: given["treeWidth"] } : {}),
+    });
+  },
   doctor: (workspace: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.doctor, { workspace: text(workspace) }),
   settings: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.settings),
   listModels: (provider: unknown): Promise<unknown> => ipcRenderer.invoke(CHANNELS.listModels, { provider: text(provider) }),

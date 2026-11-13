@@ -12,6 +12,8 @@ export const IPC_CHANNELS = {
   restartEngine: "codaryn:app:restartengine",
   copyText: "codaryn:app:copy",
   copyPath: "codaryn:workspace:copypath",
+  revealConfig: "codaryn:settings:revealconfig",
+  saveUi: "codaryn:app:saveui",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -167,6 +169,8 @@ export interface DoctorCheckView {
   readonly status: DoctorCheckStatusView;
   /** Fixed English text from the engine (DoctorCheck.message): never a value from a file or the environment. */
   readonly message: string;
+  /** U-68: the check's catalog message id (DoctorCheck.text.id, e.g. "doctor.lock.held"), when it has one; never its parameters. */
+  readonly textId?: string;
 }
 
 export interface DoctorView {
@@ -178,6 +182,9 @@ export interface DoctorView {
  * The parts of a DoctorOutput (src/contracts/commands.ts) the window shows, checked field by
  * field. Anything else in the output is not passed on. Null when the shape does not fit.
  */
+/** U-68: a doctor check's message id, as the catalog names them (doctor.<check>.<outcome>). */
+const DOCTOR_TEXT_ID = /^doctor(\.[a-z0-9_]{1,40}){1,3}$/;
+
 export function toDoctorView(output: unknown): DoctorView | null {
   if (!isObj(output) || output["kind"] !== "doctor") return null;
   const status = output["status"];
@@ -191,7 +198,9 @@ export function toDoctorView(output: unknown): DoctorView | null {
     if (typeof id !== "string" || !CHECK_ID.test(id)) return null;
     if (typeof checkStatus !== "string" || !(DOCTOR_CHECK_STATUSES as readonly string[]).includes(checkStatus)) return null;
     if (typeof message !== "string") return null;
-    views.push({ id, status: checkStatus as DoctorCheckStatusView, message: message.slice(0, MAX_MESSAGE) });
+    const text = check["text"];
+    const textId = isObj(text) && typeof text["id"] === "string" && DOCTOR_TEXT_ID.test(text["id"]) ? text["id"] : null;
+    views.push({ id, status: checkStatus as DoctorCheckStatusView, message: message.slice(0, MAX_MESSAGE), ...(textId === null ? {} : { textId }) });
   }
   return { status: status as DoctorStatusView, checks: views };
 }
@@ -206,6 +215,27 @@ export function doctorMessageIds(view: DoctorView): string[] {
   return [...ids];
 }
 
+/** U-70 (4.5): the file panel's width range in CSS pixels, and the shape of a screen id the window keeps. */
+export const TREE_WIDTH_MIN = 160;
+export const TREE_WIDTH_MAX = 800;
+export const SCREEN_ID = /^[a-z]{1,20}$/;
+
+/** U-70: what the window remembers of itself (the main process keeps it in gui-state.json). */
+export interface UiMemoryView {
+  readonly screen: string | null;
+  readonly treeWidth: number | null;
+}
+
+/** `saveUi` arguments: a screen id, a width in range, or both; nothing else. */
+export function parseSaveUiArgs(value: unknown): { readonly screen?: string; readonly treeWidth?: number } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["screen", "treeWidth"])) return null;
+  const { screen, treeWidth } = value;
+  if (screen !== undefined && !(typeof screen === "string" && SCREEN_ID.test(screen))) return null;
+  if (treeWidth !== undefined && !(typeof treeWidth === "number" && Number.isSafeInteger(treeWidth) && treeWidth >= TREE_WIDTH_MIN && treeWidth <= TREE_WIDTH_MAX)) return null;
+  if (screen === undefined && treeWidth === undefined) return null;
+  return { ...(screen === undefined ? {} : { screen: screen as string }), ...(treeWidth === undefined ? {} : { treeWidth: treeWidth as number }) };
+}
+
 /** What `info` answers. */
 export interface InfoView {
   /** "ko" or "en", chosen by the engine host as the CLI chooses (CODARYN_LANG, then the OS). */
@@ -214,6 +244,8 @@ export interface InfoView {
   readonly engine: string;
   /** A workspace named on the command line, already opened by the main process. */
   readonly initialWorkspace: { readonly handle: string; readonly name: string } | null;
+  /** U-70 (4.5): the last screen and the file panel's width. */
+  readonly ui?: UiMemoryView;
 }
 
 /** What `doctor` answers. Errors carry a code only; the window turns it into its own text. */
@@ -965,6 +997,20 @@ export interface ChangedFileItem {
   readonly unavailable: string | null;
   readonly before: string | null;
   readonly after: string | null;
+  /**
+   * U-66 (3.4): the main process's id for "show in folder" (the tree's ids), or null: given only for a
+   * plain path that is there (not missing, not masked, outside the state directory). Not from the host.
+   */
+  readonly id?: string | null;
+}
+
+/**
+ * U-66: whether the main process gives a changed file an id for "show in folder": its path is plain
+ * (copyablePath), outside the state directory, and the file is not missing or behind a masked path.
+ */
+export function revealableChange(file: ChangedFileItem): boolean {
+  if (file.state === "missing" || file.unavailable === "masked_path" || copyablePath(file.path) === null) return false;
+  return (file.path.split("/")[0] ?? "").toLowerCase() !== ".codaryn";
 }
 
 /** U-48 (U-43, DR-38): `recordsChanged`, the run has a records-changed mark (its files then have no text). */

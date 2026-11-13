@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "workflows": {
+    "release-notes": {
+      "label": "Release notes",
+      "tools": [
+        "read_file",
+        "write_file"
+      ],
+      "instructions": "CHANGES.txt의 줄을 읽어 RELEASE-NOTES.md를 쓴다. add: 줄은 ## 더한 것, fix: 줄은 ## 고친 것 아래에 둔다. CHANGES.txt는 바꾸지 않는다.",
+      "policy": {
+        "commands": [],
+        "network": "deny",
+        "destructive": "deny",
+        "restorePathTokens": false,
+        "protectedPaths": [
+          "CHANGES.txt"
+        ]
+      },
+      "verifiers": [
+        {
+          "id": "notes",
+          "kind": "file_rules",
+          "rules": [
+            {
+              "type": "exists",
+              "path": "RELEASE-NOTES.md"
+            },
+            {
+              "type": "contains",
+              "path": "RELEASE-NOTES.md",
+              "text": "## 더한 것"
+            },
+            {
+              "type": "contains",
+              "path": "RELEASE-NOTES.md",
+              "text": "## 고친 것"
+            }
+          ]
+        }
+      ],
+      "limits": {
+        "maxModelTurns": 6,
+        "maxToolCalls": 6
+      }
+    }
+  }
+}

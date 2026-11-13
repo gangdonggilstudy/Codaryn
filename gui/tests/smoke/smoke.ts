@@ -124,6 +124,8 @@ const notices: { readonly title: string; readonly body: string }[] = [];
 const openAnswers: (string | null)[] = [];
 /** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
 const copied: string[] = [];
+/** U-66: the paths "show in folder" would select (recorded, not the OS file manager). */
+const revealed: string[] = [];
 const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
 let pretendInactive = false;
 /** PM (a): the engine host's answer to "transport" (its mode and how many requests it refused). */
@@ -153,6 +155,9 @@ startGui({
   answerOpenDialog: async () => openAnswers.shift() ?? null,
   writeClipboard: (text) => {
     copied.push(text);
+  },
+  showItemInFolder: (path) => {
+    revealed.push(path);
   },
   notify: (notice) => {
     notices.push(notice);
@@ -241,6 +246,112 @@ startGui({
         };
         result.texts = copied.slice(before);
         return result;
+      })();
+      // U-67 (3.13, 10): the command palette, the shortcuts, F5 and the tree's first-letter jump.
+      results["keys"] = await (async () => {
+        const press = (target: string, key: string, ctrl = false, shift = false): Promise<unknown> =>
+          js(`(() => { const t = ${target}; if (!t) return false; t.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true })); return true; })()`);
+        const commandsShown = "[...document.querySelectorAll('#palette-list [data-command]')].map((li) => li.getAttribute('data-command'))";
+        await press("document", "P", true, true);
+        const opened = await js("document.getElementById('palette')?.hasAttribute('hidden') === false && document.activeElement?.id === 'palette-input'");
+        const listed = await js(commandsShown);
+        const cancel = await js("document.querySelector('#palette-list [data-command=\"cancel\"]')?.getAttribute('aria-disabled') ?? null");
+        await js("(() => { const name = document.querySelector('#palette-list [data-command=\"checks\"] .palette-name')?.textContent ?? ''; const input = document.getElementById('palette-input'); input.value = name; input.dispatchEvent(new Event('input')); return true; })()");
+        const filtered = await js(commandsShown);
+        await press("document.getElementById('palette-input')", "Enter");
+        const ran = await js("[document.getElementById('palette')?.hasAttribute('hidden'), document.getElementById('work')?.getAttribute('data-screen')]");
+        await js("document.querySelector('[data-screen=\"runs\"]')?.focus(); true");
+        await press("document", "P", true, true);
+        await press("document.getElementById('palette-input')", "Escape");
+        const escaped = await js("document.getElementById('palette')?.hasAttribute('hidden') === true && document.activeElement?.getAttribute('data-screen') === 'runs'");
+        await press("document", "n", true);
+        const newTask = await js("document.getElementById('work')?.getAttribute('data-screen')");
+        await press("document", ",", true);
+        const settings = await js("document.getElementById('work')?.getAttribute('data-screen')");
+        await js("document.querySelector('.tree')?.removeAttribute('data-tree-ready'); true");
+        await press("document.body", "F5");
+        const refreshed = await waitFor("document.querySelector('.tree')?.getAttribute('data-tree-ready') ?? null", 20_000);
+        await waitFor("[...document.querySelectorAll('.tree [data-key]')].some((li) => li.textContent.includes('b.txt')) ? 'ok' : null", 20_000);
+        await js("document.querySelector('.tree [tabindex=\"0\"]')?.focus(); true");
+        const from = await js("document.activeElement?.querySelector('.name')?.textContent ?? null");
+        await press("document.querySelector('.tree')", "s");
+        const jumped = await js("document.activeElement?.querySelector('.name')?.textContent ?? null");
+        return { opened, listed, cancel, filtered, ran, escaped, newTask, settings, refreshed, jump: [from === "sub" ? "same" : "moved", jumped] };
+      })();
+      // U-68 (3.2): the checks on opening. A lock a live process holds (this test's own pid; judged by
+      // the pid alone) shows on the workspace screen and turns the new task's run off; gone, it is on again.
+      results["openCheck"] = await (async () => {
+        const pressF5 = (): Promise<unknown> => js("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', bubbles: true, cancelable: true })); true");
+        const card = "(() => { const c = document.getElementById('open-check'); const p = c?.getAttribute('data-open-check'); return p === 'done' || p === 'error' ? p + ':' + c.getAttribute('data-locked') : null; })()";
+        await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");
+        const first = await waitFor(card, 60_000);
+        const lockFile = join(SECOND, ".codaryn", "lock.json");
+        writeFileSync(lockFile, JSON.stringify({ pid: process.pid, runId: "20261113T000000Z-0000a068", startedAt: new Date().toISOString() }));
+        try {
+          await pressF5();
+          const held = await waitFor("document.getElementById('open-check')?.getAttribute('data-locked') === 'true' ? 'held' : null", 60_000);
+          const line = await js("document.querySelector('#open-check [data-lock=\"held\"]')?.getAttribute('role') ?? null");
+          await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+          await waitFor("document.getElementById('task-run') ? 'ready' : null", 30_000);
+          const runOff = await js("[document.getElementById('task-run')?.hasAttribute('disabled'), document.getElementById('task-locked')?.hasAttribute('hidden')]");
+          unlinkSync(lockFile);
+          await pressF5();
+          const freed = await waitFor("document.getElementById('task-locked')?.hasAttribute('hidden') === true ? 'free' : null", 60_000);
+          const runOn = await js("document.getElementById('task-run')?.hasAttribute('disabled') === false");
+          return { first, held, line, runOff, freed, runOn };
+        } finally {
+          if (existsSync(lockFile)) unlinkSync(lockFile);
+        }
+      })();
+      // U-69 (11, 3.10): the config file shown in its folder (recorded), and a language written in the
+      // settings redraws the window in it at once; "auto" brings the OS language back.
+      results["languageNow"] = await (async () => {
+        await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+        await waitFor("document.getElementById('settings-reveal-config') ? 'ready' : null", 30_000);
+        const before = revealed.length;
+        await js("document.getElementById('settings-reveal-config')?.click(); true");
+        const shown = await waitFor("document.getElementById('settings-reveal-status')?.getAttribute('data-revealed') ?? null");
+        const file = revealed.slice(before).map((p) => p.split(/[\\/]/).pop());
+        const from = String(await js("document.documentElement.lang"));
+        const to = from === "ko" ? "en" : "ko";
+        const homeBefore = await js("document.querySelector('#screens [data-screen=\"home\"]')?.textContent ?? null");
+        const choose = async (value: string, lang: string): Promise<unknown> => {
+          await waitFor("document.getElementById('settings-language-choice') ? 'ready' : null", 30_000);
+          await js(`(() => { const c = document.getElementById('settings-language-choice'); c.value = ${JSON.stringify(value)}; document.getElementById('settings-language-change').click(); return true; })()`);
+          await waitFor("document.getElementById('settings-write') ? 'ready' : null", 30_000);
+          await js("document.getElementById('settings-write')?.click(); true");
+          return waitFor(`document.documentElement.lang === ${JSON.stringify(lang)} ? 'redrawn' : null`, 30_000);
+        };
+        const switched = await choose(to, to);
+        const homeAfter = await js("document.querySelector('#screens [data-screen=\"home\"]')?.textContent ?? null");
+        const screen = await js("document.getElementById('work')?.getAttribute('data-screen')");
+        const back = await choose("auto", from);
+        return { shown, file, switched, renamed: homeAfter !== homeBefore, screen, back, lang: await js("document.documentElement.lang === " + JSON.stringify(from)) };
+      })();
+      // U-70 (4.5, 3.1): the separator by the keys and by the pointer, and the width and screen in gui-state.json.
+      results["windowState"] = await (async () => {
+        const width = (): Promise<unknown> => js("Number(document.getElementById('splitter')?.getAttribute('aria-valuenow') ?? 'NaN')");
+        const key = (name: string): Promise<unknown> => js(`document.getElementById('splitter')?.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true })); true`);
+        await key("Home");
+        const min = await width();
+        await key("ArrowRight");
+        const step = Number(await width()) - Number(min);
+        const panel = await js(
+          "(() => { const s = document.getElementById('splitter'); const r = s.getBoundingClientRect(); const x = r.left + r.width / 2; const y = r.top + 20; const fire = (type, cx) => s.dispatchEvent(new PointerEvent(type, { clientX: cx, clientY: y, pointerId: 7, bubbles: true })); fire('pointerdown', x); fire('pointermove', x + 100); fire('pointerup', x + 100); return Math.round(document.getElementById('files').getBoundingClientRect().width); })()",
+        );
+        const dragged = Number(await width());
+        await js("document.querySelector('[data-screen=\"checks\"]')?.click(); true");
+        let saved: unknown = null;
+        for (let waited = 0; waited < 10_000 && saved === null; waited += 200) {
+          try {
+            const memory = (JSON.parse(readFileSync(STATE, "utf8")) as { window?: { screen?: string; treeWidth?: number } }).window;
+            if (memory?.screen === "checks" && memory.treeWidth === dragged) saved = { screen: memory.screen, treeWidth: memory.treeWidth };
+          } catch {
+            // Written through a temporary file; read again.
+          }
+          if (saved === null) await sleep(200);
+        }
+        return { min, step, dragged: dragged - Number(min) - step, panel: panel === dragged, saved };
       })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
@@ -451,6 +562,23 @@ startGui({
         focus: await js("document.getElementById('changes')?.getAttribute('data-focus-file') ?? null"),
         focused: await js("document.activeElement?.querySelector('.path')?.textContent ?? null"),
       };
+      // U-66 (3.4): side by side, wrapping off, and "show in folder" from the comparison by the main process's id.
+      results["changesViews"] = await (async () => {
+        const flip = (id: string, on: boolean): Promise<unknown> => js(`(() => { const b = document.getElementById(${JSON.stringify(id)}); if (!b) return false; b.checked = ${on}; b.dispatchEvent(new Event('change')); return true; })()`);
+        await flip("changes-side", true);
+        const side = await js(
+          "({ view: document.getElementById('changes')?.getAttribute('data-view'), tables: document.querySelectorAll('#changes table.diff-side').length, columns: document.querySelectorAll('#changes ol.diff').length, hunks: document.querySelectorAll('#changes table.diff-side tr[data-hunk]').length, first: [document.querySelector('#changes table.diff-side tbody tr')?.getAttribute('data-left') ?? null, document.querySelector('#changes table.diff-side tbody tr')?.getAttribute('data-right') ?? null] })",
+        );
+        await flip("changes-wrap", false);
+        const wrap = await js("document.getElementById('changes')?.getAttribute('data-wrap') ?? null");
+        const before = revealed.length;
+        await js("document.querySelector('#changes [data-reveal]')?.click(); true");
+        const status = await waitFor("document.querySelector('#changes .reveal-status')?.getAttribute('data-revealed') ?? null");
+        const shown = revealed.slice(before).map((path) => path.split(/[\\/]/).pop());
+        await flip("changes-side", false);
+        await flip("changes-wrap", true);
+        return { side, wrap, status, shown, back: await js("[document.getElementById('changes')?.getAttribute('data-view'), document.getElementById('changes')?.getAttribute('data-wrap')]") };
+      })();
 
       // 5d. GU-3: a run that hangs, cancelled from the window (asked first; "keep running" is the default).
       // R29-L1: cancelled only once its model request reached the fake API, so the script's hanging

@@ -10,7 +10,8 @@ import { existsSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { BrowserWindow, Menu, Notification, app, clipboard, dialog, session } from "electron";
+import { BrowserWindow, Menu, Notification, app, clipboard, dialog, nativeTheme, screen, session, shell } from "electron";
+import { fitBounds } from "./window-bounds.js";
 import type { MessageBoxOptions, OpenDialogOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
@@ -67,6 +68,8 @@ export interface GuiOptions {
   readonly answerOpenDialog?: (kind: "task" | "vars") => Promise<string | null>;
   /** Smoke tests only: receives what would be copied instead of the OS clipboard (U-62). */
   readonly writeClipboard?: (text: string) => void;
+  /** Smoke tests only: receives the path "show in folder" would select instead of the OS file manager (U-66). */
+  readonly showItemInFolder?: (path: string) => void;
   /** Smoke tests only: whether the window counts as active (focus cannot be taken away reliably in a test). */
   readonly windowActive?: () => boolean;
 }
@@ -178,6 +181,10 @@ export function startGui(options: GuiOptions): void {
     });
   };
   let restarting = false;
+  /** U-70: the state file's saves were waited for once the app began to quit. */
+  let stateFlushed = false;
+  /** U-70: keeps the window's size and place now (before-quit comes before the windows close). */
+  let saveWindowNow = (): void => undefined;
   const workspaces = new Workspaces({
     stateFile: options.stateFile === undefined ? defaultStateFile() : options.stateFile,
     platform: process.platform,
@@ -259,11 +266,21 @@ export function startGui(options: GuiOptions): void {
       window.close();
       return;
     }
-    if (closingHost || currentHost === null || currentHost.exited) return;
+    if (closingHost || currentHost === null || currentHost.exited) {
+      // U-70: the state file's saves under way end before the app does.
+      if (stateFlushed) return;
+      event.preventDefault();
+      stateFlushed = true;
+      saveWindowNow();
+      void workspaces.flush().finally(() => app.quit());
+      return;
+    }
     // DR-8: the engine host ends with the app. Close its stdin, wait, then quit.
     event.preventDefault();
     closingHost = true;
-    void currentHost.close().finally(() => app.quit());
+    stateFlushed = true;
+    saveWindowNow();
+    void Promise.all([currentHost.close(), workspaces.flush()]).finally(() => app.quit());
   });
 
   void app.whenReady().then(async () => {
@@ -298,6 +315,12 @@ export function startGui(options: GuiOptions): void {
         }
       },
       writeClipboard: options.writeClipboard ?? ((text) => clipboard.writeText(text)),
+      showItemInFolder: options.showItemInFolder ?? ((path) => shell.showItemInFolder(path)),
+      uiMemory: async () => {
+        const memory = await workspaces.windowMemory();
+        return { screen: memory.screen, treeWidth: memory.treeWidth };
+      },
+      saveUi: (change) => workspaces.rememberWindow(change),
       host: () => hostState,
       workspaces,
       osLocale: () => app.getLocale(),
@@ -404,13 +427,36 @@ export function startGui(options: GuiOptions): void {
     });
 
     const devTools = !app.isPackaged && process.env["CODARYN_GUI_DEVTOOLS"] === "1";
+    // U-70 (4.5): the size and place the window was left in, when enough of them is on a display now.
+    const remembered = await workspaces.windowMemory();
+    const placed = fitBounds(remembered.bounds, screen.getAllDisplays().map((display) => display.workArea));
     window = new BrowserWindow({
-      width: 1100,
-      height: 760,
+      ...(placed === null ? { width: 1100, height: 760 } : placed),
       show: false,
       title: "Codaryn",
+      // U-69 (10): no white flash before the page in the OS's dark theme.
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#1e1e1e" : "#ffffff",
       webPreferences: secureWebPreferences(join(options.guiRoot, "build", "src", "preload", "preload.cjs"), devTools),
     });
+    if (remembered.maximized) window.maximize();
+    // U-70: the size, place and maximized state are kept a moment after they change, and on closing.
+    let boundsTimer: ReturnType<typeof setTimeout> | null = null;
+    const keepBounds = (): void => {
+      if (boundsTimer !== null) clearTimeout(boundsTimer);
+      boundsTimer = null;
+      if (window === null || window.isDestroyed()) return;
+      void workspaces.rememberWindow({ bounds: window.getNormalBounds(), maximized: window.isMaximized() });
+    };
+    const keepBoundsSoon = (): void => {
+      if (boundsTimer !== null) clearTimeout(boundsTimer);
+      boundsTimer = setTimeout(keepBounds, 500);
+    };
+    window.on("resize", keepBoundsSoon);
+    window.on("move", keepBoundsSoon);
+    window.on("maximize", keepBounds);
+    window.on("unmaximize", keepBounds);
+    window.on("close", keepBounds);
+    saveWindowNow = keepBounds;
     window.once("ready-to-show", () => window?.show());
     // 3.6: closing while a run goes on asks first (default: keep running); then cancel, and wait
     // for the end (result.json written, lock released) at most 10 seconds.

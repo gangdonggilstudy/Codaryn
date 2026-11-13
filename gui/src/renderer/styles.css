@@ -44,8 +44,22 @@ body {
 
 #body {
   display: grid;
-  grid-template-columns: minmax(14rem, 22rem) 1fr;
+  /* U-70: the separator sets --tree-width; without it the panel takes its own width. */
+  grid-template-columns: var(--tree-width, minmax(14rem, 22rem)) 0.4rem 1fr;
   min-height: 0;
+}
+
+#splitter {
+  cursor: col-resize;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  touch-action: none;
+}
+
+#splitter:hover,
+#splitter:focus-visible {
+  background: color-mix(in srgb, currentColor 30%, transparent);
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
 }
 
 #files {
@@ -272,10 +286,135 @@ button:focus-visible,
   outline: 2px solid #1a5fb4;
   outline-offset: -2px;
 }
+/* U-67 (3.13): the command palette, over the window near its top. */
+#palette {
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(36rem, 90vw);
+  background: Canvas;
+  color: CanvasText;
+  border: 1px solid #888;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
+  padding: 0.5rem;
+  z-index: 10;
+}
+#palette input {
+  width: 100%;
+  box-sizing: border-box;
+}
+#palette-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+#palette-list li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  cursor: default;
+}
+#palette-list li[aria-selected="true"] {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+#palette-list li[aria-disabled="true"] {
+  opacity: 0.6;
+}
+#palette-list .palette-keys,
+#palette-list .palette-note {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+/* U-66 (3.4): side by side (before | now), and long lines kept on one line when wrapping is off. */
+.changes-view {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+.diff-side {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  border: 1px solid #c8c8c8;
+}
+.diff-side th {
+  text-align: left;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem;
+}
+.diff-side td.no {
+  width: 3.5rem;
+  color: #555;
+  text-align: right;
+  padding-right: 0.5rem;
+  user-select: none;
+  vertical-align: top;
+}
+.diff-side td.text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  vertical-align: top;
+}
+.diff-side .mark {
+  user-select: none;
+  display: inline-block;
+  width: 1.2rem;
+}
+.diff-side tr:focus {
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
+}
+#changes[data-wrap="off"] .diff li,
+#changes[data-wrap="off"] .diff-side td.text {
+  white-space: pre;
+  word-break: normal;
+}
+#changes[data-wrap="off"] .changed-file {
+  overflow-x: auto;
+}
+#changes[data-wrap="off"] .diff-side {
+  table-layout: auto;
+}
 @media (forced-colors: active) {
   .diff-added,
   .diff-removed {
     background: none;
+  }
+}
+/* U-69 (10): the dark theme follows the OS (system colours already do through color-scheme); the
+   fixed colours of the comparison, the line numbers, borders and focus rings get dark values. */
+@media (prefers-color-scheme: dark) {
+  .diff,
+  .diff-side {
+    border-color: #555;
+  }
+  .diff .no,
+  .diff-side td.no {
+    color: #aaa;
+  }
+  .diff-added {
+    background: #1d3b26;
+  }
+  .diff-removed {
+    background: #4a1f22;
+  }
+  .diff li:focus,
+  .diff-side tr:focus,
+  #palette-list li[aria-selected="true"] {
+    outline-color: #8ab4f8;
+  }
+  #palette {
+    border-color: #777;
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.6);
   }
 }
 /* U-21 (DR-47): the agent's own words, set apart from what was checked; lines and tabs kept. */

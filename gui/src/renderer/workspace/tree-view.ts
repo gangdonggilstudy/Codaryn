@@ -280,6 +280,16 @@ export class TreeView {
 
   private onKey(event: KeyboardEvent): void {
     if (this.focusKey === null) return;
+    // U-67 (10): a letter or digit moves to the next entry whose name starts with it.
+    if (event.key.length === 1 && event.key !== " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      const key = this.model.jump(this.focusKey, event.key);
+      if (key === null) return;
+      event.preventDefault();
+      this.focusKey = key;
+      this.render();
+      this.focusRow();
+      return;
+    }
     const result = this.model.navigate(this.focusKey, event.key);
     if (result === null) return;
     event.preventDefault();

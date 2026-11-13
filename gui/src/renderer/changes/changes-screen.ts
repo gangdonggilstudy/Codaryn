@@ -10,16 +10,22 @@
  *   and previous file. Nothing here edits; copying copies the masked text on the screen.
  * - U-65 (3.3): opened from the file tree's changed file, the view starts at that file; the files it
  *   loaded go back to the tree as its marks.
+ * - U-66 (3.4): two views of a comparison, one column (the default) or side by side (before | now,
+ *   diff/side-by-side.ts), and long lines wrapped (the default) or not; both stay while the window
+ *   is open and redraw the loaded files without asking again. "Show in folder" for a file the main
+ *   process gave an id (a plain path that is there now); the page never names a path.
  */
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
 import { asChanges } from "../api.js";
 import type { CodarynApi, Workspace } from "../api.js";
-import { el } from "../shell/dom.js";
+import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
 import type { ChangedFileItem } from "../../shared/ipc.js";
 import { hunkStarts, lineDiff } from "../diff/line-diff.js";
+import type { DiffLine } from "../diff/line-diff.js";
+import { sideBySide } from "../diff/side-by-side.js";
 
 export interface ChangesDeps {
   readonly texts: Texts;
@@ -37,17 +43,63 @@ export interface ChangesScreen extends Screen {
 /** Lines drawn for one file; a longer comparison says how many were left out. */
 export const MAX_SHOWN_LINES = 5000;
 
+/** U-66: how comparisons are drawn: side by side or in one column; long lines wrapped or not. */
+export interface ChangesView {
+  readonly side: boolean;
+  readonly wrap: boolean;
+}
+
+/** U-66: shows a file in the file manager by the main process's id; the status cell says if it could not. */
+type Reveal = (file: ChangedFileItem, status: HTMLElement) => void;
+
+/** U-66: one side of a side-by-side row: the line number, then the mark and the text. */
+function sideCells(t: Texts, line: DiffLine | null, side: "old" | "new"): HTMLElement[] {
+  if (line === null) return [el("td", "", { class: "no" }), el("td", "", { class: "text diff-empty", "data-kind": "none" })];
+  const no = side === "old" ? line.oldNo : line.newNo;
+  const mark = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
+  const cell = el("td", undefined, { class: `text diff-${line.kind}`, "data-kind": line.kind });
+  cell.append(el("span", mark, { class: "mark", "aria-label": word(t, "diffkind", line.kind) }), el("span", line.text));
+  return [el("td", no === null ? "" : String(no), { class: "no", "aria-hidden": "true" }), cell];
+}
+
+/** U-66: the side-by-side table of a two-sided comparison; the first row of each change can take the focus (F7). */
+function sideTable(t: Texts, file: ChangedFileItem, lines: readonly DiffLine[]): { readonly table: HTMLElement; readonly rows: number } {
+  const rows = sideBySide(lines);
+  const table = el("table", undefined, { class: "diff-side", "aria-label": t.format("changes.diffOf", { path: file.path }) });
+  const head = el("tr");
+  head.append(el("th", t.format("changes.before"), { colspan: "2", scope: "col" }), el("th", t.format("changes.now"), { colspan: "2", scope: "col" }));
+  const thead = el("thead");
+  thead.append(head);
+  const tbody = el("tbody");
+  for (const row of rows.slice(0, MAX_SHOWN_LINES)) {
+    const tr = el("tr", undefined, { "data-left": row.left?.kind ?? "none", "data-right": row.right?.kind ?? "none" });
+    if (row.hunk) {
+      tr.setAttribute("data-hunk", "");
+      tr.setAttribute("tabindex", "-1");
+    }
+    tr.append(...sideCells(t, row.left, "old"), ...sideCells(t, row.right, "new"));
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
+  return { table, rows: rows.length };
+}
+
 function word(t: Texts, prefix: string, value: string): string {
   const id = `${prefix}.${value}`;
   return t.has(id) ? t.format(id) : value;
 }
 
-function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boolean): HTMLElement {
+function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boolean, view: ChangesView = { side: false, wrap: true }, reveal: Reveal | null = null): HTMLElement {
   const section = el("section", undefined, { class: "changed-file", "data-file": String(index), "data-state": file.state, "data-created": String(file.created), tabindex: "-1" });
   const facts = [word(t, "changestate", file.state)];
   if (file.created) facts.push(t.format("changes.created"));
   if (file.unavailable !== null && file.unavailable !== "masking_unverified") facts.push(word(t, "unavailable", file.unavailable));
   section.append(el("h3", file.path, { class: "path" }), el("p", facts.join(" · "), { class: "facts" }));
+  // U-66 (3.4): the file in the file manager, by the main process's id (a plain path that is there).
+  if (reveal !== null && typeof file.id === "string") {
+    const status = el("span", undefined, { role: "status", class: "reveal-status" });
+    section.append(button(t.format("tree.reveal"), () => reveal(file, status), { class: "reveal", "data-reveal": String(index) }), status);
+  }
   if (file.before === null && file.after === null) {
     if (file.unavailable === "masking_unverified") section.append(el("p", t.format(marked ? "changes.unverifiedMarked" : "changes.unverified"), { class: "notice", "data-text": "hidden" }));
     section.setAttribute("data-text", "none");
@@ -74,6 +126,13 @@ function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boo
     return section;
   }
   const lines = lineDiff(file.before, file.after);
+  if (view.side) {
+    const { table, rows } = sideTable(t, file, lines);
+    section.append(table);
+    if (rows > MAX_SHOWN_LINES) section.append(el("p", t.format("changes.truncated", { count: String(rows - MAX_SHOWN_LINES) }), { class: "notice" }));
+    section.setAttribute("data-text", "shown");
+    return section;
+  }
   const starts = new Set(hunkStarts(lines));
   const list = el("ol", undefined, { class: "diff", "aria-label": t.format("changes.diffOf", { path: file.path }) });
   for (const [k, line] of lines.slice(0, MAX_SHOWN_LINES).entries()) {
@@ -100,6 +159,8 @@ function fileSection(t: Texts, file: ChangedFileItem, index: number, marked: boo
 export function changesScreen(deps: ChangesDeps): ChangesScreen {
   const { texts: t, api } = deps;
   let chosen: { runId: string; profile: string | null; workflow: string | null; file: string | null } | null = null;
+  // U-66: the view stays while the window is open.
+  let view: ChangesView = { side: false, wrap: true };
   return {
     id: "changes",
     title: "nav.changes",
@@ -116,6 +177,8 @@ export function changesScreen(deps: ChangesDeps): ChangesScreen {
         return;
       }
       const target = chosen;
+      body.setAttribute("data-view", view.side ? "side" : "column");
+      body.setAttribute("data-wrap", view.wrap ? "on" : "off");
       body.addEventListener("keydown", (event) => {
         if (event.key !== "F7") return;
         event.preventDefault();
@@ -137,14 +200,47 @@ export function changesScreen(deps: ChangesDeps): ChangesScreen {
         }
         // U-48 (DR-38): the mark's warning first; every file below is the marked run's record.
         const warning = reply.recordsChanged ? [el("p", t.format("changes.recordsChanged"), { class: "notice", id: "changes-records-changed" })] : [];
-        const sections = reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged));
+        const reveal: Reveal = (file, status) => {
+          void (async () => {
+            const shown = typeof file.id === "string" && (await api.reveal(workspace.handle, file.id)) === true;
+            status.textContent = shown ? "" : t.format("changes.revealFailed");
+            status.setAttribute("data-revealed", shown ? "ok" : "no");
+          })();
+        };
+        const files = el("div", undefined, { id: "changes-files" });
+        const draw = (): HTMLElement[] => {
+          const sections = reply.files.map((file, index) => fileSection(t, file, index, reply.recordsChanged, view, reveal));
+          files.replaceChildren(...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : sections));
+          return sections;
+        };
+        // U-66 (3.4): the two view switches; a change redraws the loaded files (nothing is asked again).
+        const toggle = (id: string, label: string, on: boolean, change: (value: boolean) => void): HTMLElement => {
+          const box = el("input", undefined, { type: "checkbox", id });
+          box.checked = on;
+          box.addEventListener("change", () => {
+            change(box.checked);
+            body.setAttribute("data-view", view.side ? "side" : "column");
+            body.setAttribute("data-wrap", view.wrap ? "on" : "off");
+            draw();
+          });
+          const wrap = el("label", undefined, { class: "toggle" });
+          wrap.append(box, el("span", label));
+          return wrap;
+        };
+        const controls = el("div", undefined, { class: "changes-view", role: "group", "aria-label": t.format("changes.viewLabel") });
+        controls.append(
+          toggle("changes-side", t.format("changes.sideBySide"), view.side, (value) => (view = { ...view, side: value })),
+          toggle("changes-wrap", t.format("changes.wrap"), view.wrap, (value) => (view = { ...view, wrap: value })),
+        );
+        const sections = draw();
         body.replaceChildren(
           ...warning,
           el("p", t.format("changes.of", { runId: reply.runId, count: String(reply.files.length) }), { id: "changes-summary" }),
           el("p", t.format("changes.masking"), { class: "notice" }),
           el("p", t.format("changes.textRule"), { class: "notice" }),
           el("p", t.format("changes.keys"), { class: "notice" }),
-          ...(reply.files.length === 0 ? [el("p", t.format("changes.empty"))] : sections),
+          controls,
+          files,
         );
         body.setAttribute("data-changes-ready", String(reply.files.length));
         deps.loaded?.({ runId: target.runId, profile: target.profile, workflow: target.workflow }, reply.files);

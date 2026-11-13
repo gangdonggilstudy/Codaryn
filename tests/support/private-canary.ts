@@ -10,7 +10,8 @@
  *   and reasoning). The model's own earlier turns come back in every request as conversation; they
  *   are left out, so a marker the script itself put in a tool's arguments is not taken for a row that
  *   went out. `modelEchoSources` keeps the whole bodies when that is wanted. For the scripted model,
- *   the journals' `model_request` records (what each request added: the goal, tool results, notices).
+ *   the journals' `model_request` records (what each request added: the goal, tool results, notices),
+ *   their assistant messages left out as well (U-236: they hold the model's own text and calls).
  * - "records": every file under `<workspace>/.codaryn` but change snapshots (raw copies of workspace
  *   files by contract), each also decoded when it is JSON or JSON lines.
  * - "output": a CLI process's stdout and stderr (stdout also decoded), or any text a test adds.
@@ -23,7 +24,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { PrivateCanary } from "../fixtures/private-tables.js";
+import type { NumberFact, PrivateCanary } from "../fixtures/private-tables.js";
 import type { CliRun } from "./cli.js";
 import type { FakeAnthropic } from "./fake-anthropic.js";
 import type { FakeOpenAI } from "./fake-openai.js";
@@ -130,7 +131,8 @@ export function scriptedModelSources(workspace: string): ChannelSource[] {
       }
       const item = record(parsed);
       if (item.type !== "model_request") continue;
-      out.push({ channel: "model", label: `run ${runId} model_request turn ${String(item.turn)}`, text: textOf(item.system, item.newMessages, item.tools) });
+      const added = Array.isArray(item.newMessages) ? item.newMessages.filter((message) => record(message).role !== "assistant") : [];
+      out.push({ channel: "model", label: `run ${runId} model_request turn ${String(item.turn)}`, text: textOf(item.system, added, item.tools) });
     }
   }
   return out;
@@ -254,4 +256,73 @@ export function foundIn(findings: readonly CanaryFinding[], channel: CanaryChann
 export function describeFindings(findings: readonly CanaryFinding[], limit = 20): string {
   const lines = findings.slice(0, limit).map((finding) => `${finding.kind} ${finding.marker} in ${finding.channel}: ${finding.source} (${finding.form})`);
   return findings.length > limit ? `${lines.join("\n")}\n… and ${findings.length - limit} more` : lines.join("\n");
+}
+
+/** A tool result as the journal recorded it (what the model was sent for that call). */
+export interface RecordedToolResult {
+  readonly runId: string;
+  readonly callId: string;
+  readonly tool: string;
+  readonly ok: boolean;
+  readonly errorCode?: string;
+  readonly content: string;
+  /** The content parsed as JSON, or null when it is not JSON (a failure's text). */
+  readonly payload: unknown;
+}
+
+/** U-236: every tool_result record of every run's journal, in order. */
+export function recordedToolResults(workspace: string): RecordedToolResult[] {
+  const runs = path.join(workspace, ".codaryn", "runs");
+  if (!existsSync(runs)) return [];
+  const out: RecordedToolResult[] = [];
+  for (const runId of readdirSync(runs)) {
+    const journal = path.join(runs, runId, "journal.jsonl");
+    if (!existsSync(journal)) continue;
+    for (const line of readFileSync(journal, "utf8").split("\n")) {
+      if (line.trim() === "") continue;
+      const item = record(JSON.parse(line));
+      if (item.type !== "tool_result") continue;
+      const result = record(item.result);
+      const content = typeof result.content === "string" ? result.content : JSON.stringify(result.content);
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(content);
+      } catch {
+        // a failure's text
+      }
+      out.push({
+        runId,
+        callId: String(result.callId),
+        tool: String(result.tool),
+        ok: result.ok === true,
+        ...(typeof result.errorCode === "string" ? { errorCode: result.errorCode } : {}),
+        content,
+        payload,
+      });
+    }
+  }
+  return out;
+}
+
+/** U-236: every number in a parsed JSON value, and in any string of it that is itself JSON. */
+export function numbersIn(value: unknown, out: number[] = [], depth = 0): number[] {
+  if (typeof value === "number") out.push(value);
+  else if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (depth < 4 && (trimmed.startsWith("{") || trimmed.startsWith("["))) {
+      try {
+        numbersIn(JSON.parse(trimmed), out, depth + 1);
+      } catch {
+        // not JSON text
+      }
+    }
+  } else if (Array.isArray(value)) for (const item of value) numbersIn(item, out, depth);
+  else if (value !== null && typeof value === "object") for (const child of Object.values(value as Record<string, unknown>)) numbersIn(child, out, depth);
+  return out;
+}
+
+/** U-236: the facts whose value is among `numbers` (relative tolerance 1e-9, so a sum in another order still matches). */
+export function factsAmong(numbers: readonly number[], facts: readonly NumberFact[]): NumberFact[] {
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  return facts.filter((fact) => numbers.some((number) => near(number, fact.value)));
 }

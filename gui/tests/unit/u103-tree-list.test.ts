@@ -65,7 +65,7 @@ test("U-103: the main process issues ids for plain entries only; an id resolves 
   assert.equal(copyablePath(file), "sub/b.txt");
   assert.equal(copyablePath(workspaces.treeIds.resolve(HANDLE, folder?.id)), "sub/deeper");
   assert.equal(workspaces.treeIds.resolve("f".repeat(32), plain?.id), null, "an id belongs to its workspace");
-  assert.equal(JSON.stringify(reply).includes("protected"), false, "the mark is U-65's; not passed on here");
+  assert.deepEqual([plain?.protected, masked?.protected, folder?.protected], [false, false, true], "U-65: the app layer's mark is passed on");
 });
 
 test("U-103: the tree's copy button copies the focused plain entry by its id and says so; a masked entry cannot be copied", async () => {

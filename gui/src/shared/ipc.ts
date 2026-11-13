@@ -267,6 +267,8 @@ export interface TreeEntryView {
   readonly name: string;
   readonly kind: TreeKind;
   readonly masked: boolean;
+  /** U-65: the config file's protected paths cover it (a guide; the engine checks every write). */
+  readonly protected?: boolean;
 }
 
 export type TreeReply =

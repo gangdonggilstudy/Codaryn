@@ -367,6 +367,11 @@ const expected = [
   ["runMasking", maskingShown],
   ["runText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes(second) && !v.includes(api.url)],
   ["runAgainWhileIdle", (v) => v === false],
+  // U-65 (3.3): after the run, the tree marks the file it made; choosing it opens its comparison at that file.
+  ["treeMarks", (v) => v?.made === "made.txt" && v.note === true],
+  ["treeOpensChange", (v) => JSON.stringify(v) === JSON.stringify({ ready: "1", focus: "0", focused: "made.txt" })],
+  // U-65: F5 reads the tree again; the protected path setup added is marked, with its note.
+  ["treeProtected", (v) => JSON.stringify(v) === JSON.stringify({ before: 0, marked: "package.json", note: true })],
   // U-64 (3.12, 4.4): the engine ended: its card, calls fail, no restart on its own; the button starts a new host; no second restart while it runs.
   [
     "engineRestart",

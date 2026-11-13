@@ -16,6 +16,8 @@ export interface TreeNode {
   readonly name: string;
   readonly kind: TreeKind;
   readonly masked: boolean;
+  /** U-65: the config file's protected paths cover it (the engine host says so). */
+  readonly protected: boolean;
   readonly depth: number;
   readonly parent: TreeNode | null;
   expanded: boolean;
@@ -45,6 +47,19 @@ export function isExpandable(node: TreeNode): boolean {
   return node.kind === "dir" && node.id !== null;
 }
 
+/**
+ * U-65: a node's workspace-relative path as shown (names joined with `/`), or null when it or a
+ * folder above it has a hidden or unshowable name: such a path cannot be matched to anything.
+ */
+export function pathOf(node: TreeNode): string | null {
+  const names: string[] = [];
+  for (let at: TreeNode | null = node; at !== null && at.parent !== null; at = at.parent) {
+    if (at.masked || at.name === "") return null;
+    names.unshift(at.name);
+  }
+  return names.length === 0 ? null : names.join("/");
+}
+
 function makeNode(entry: TreeEntryView, parent: TreeNode, index: number): TreeNode {
   return {
     key: entry.id ?? `${parent.key}/#${index}`,
@@ -52,6 +67,7 @@ function makeNode(entry: TreeEntryView, parent: TreeNode, index: number): TreeNo
     name: entry.name,
     kind: entry.kind,
     masked: entry.masked,
+    protected: entry.protected === true,
     depth: parent.depth + 1,
     parent,
     expanded: false,
@@ -72,6 +88,7 @@ export class TreeModel {
     name: "",
     kind: "dir",
     masked: false,
+    protected: false,
     depth: -1,
     parent: null,
     expanded: true,

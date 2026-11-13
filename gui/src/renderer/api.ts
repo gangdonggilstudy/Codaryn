@@ -159,7 +159,7 @@ export function asTree(value: unknown): TreeReply {
       return { ok: false, code: "host_error" };
     }
     const id = entry["id"];
-    views.push({ id: str(id) && HEX.test(id) ? id : null, name: entry["name"], kind: entry["kind"] as TreeEntryView["kind"], masked: entry["masked"] });
+    views.push({ id: str(id) && HEX.test(id) ? id : null, name: entry["name"], kind: entry["kind"] as TreeEntryView["kind"], masked: entry["masked"], protected: entry["protected"] === true });
   }
   return { ok: true, entries: views, total, offset, nextOffset };
 }

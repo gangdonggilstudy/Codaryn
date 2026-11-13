@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   copyText: "codaryn:app:copy",
   copyPath: "codaryn:workspace:copypath",
   revealConfig: "codaryn:settings:revealconfig",
+  saveUi: "codaryn:app:saveui",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",
@@ -214,6 +215,27 @@ export function doctorMessageIds(view: DoctorView): string[] {
   return [...ids];
 }
 
+/** U-70 (4.5): the file panel's width range in CSS pixels, and the shape of a screen id the window keeps. */
+export const TREE_WIDTH_MIN = 160;
+export const TREE_WIDTH_MAX = 800;
+export const SCREEN_ID = /^[a-z]{1,20}$/;
+
+/** U-70: what the window remembers of itself (the main process keeps it in gui-state.json). */
+export interface UiMemoryView {
+  readonly screen: string | null;
+  readonly treeWidth: number | null;
+}
+
+/** `saveUi` arguments: a screen id, a width in range, or both; nothing else. */
+export function parseSaveUiArgs(value: unknown): { readonly screen?: string; readonly treeWidth?: number } | null {
+  if (!isObj(value) || !hasOnlyKeys(value, ["screen", "treeWidth"])) return null;
+  const { screen, treeWidth } = value;
+  if (screen !== undefined && !(typeof screen === "string" && SCREEN_ID.test(screen))) return null;
+  if (treeWidth !== undefined && !(typeof treeWidth === "number" && Number.isSafeInteger(treeWidth) && treeWidth >= TREE_WIDTH_MIN && treeWidth <= TREE_WIDTH_MAX)) return null;
+  if (screen === undefined && treeWidth === undefined) return null;
+  return { ...(screen === undefined ? {} : { screen: screen as string }), ...(treeWidth === undefined ? {} : { treeWidth: treeWidth as number }) };
+}
+
 /** What `info` answers. */
 export interface InfoView {
   /** "ko" or "en", chosen by the engine host as the CLI chooses (CODARYN_LANG, then the OS). */
@@ -222,6 +244,8 @@ export interface InfoView {
   readonly engine: string;
   /** A workspace named on the command line, already opened by the main process. */
   readonly initialWorkspace: { readonly handle: string; readonly name: string } | null;
+  /** U-70 (4.5): the last screen and the file panel's width. */
+  readonly ui?: UiMemoryView;
 }
 
 /** What `doctor` answers. Errors carry a code only; the window turns it into its own text. */

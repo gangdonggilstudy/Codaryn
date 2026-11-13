@@ -44,8 +44,22 @@ body {
 
 #body {
   display: grid;
-  grid-template-columns: minmax(14rem, 22rem) 1fr;
+  /* U-70: the separator sets --tree-width; without it the panel takes its own width. */
+  grid-template-columns: var(--tree-width, minmax(14rem, 22rem)) 0.4rem 1fr;
   min-height: 0;
+}
+
+#splitter {
+  cursor: col-resize;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  touch-action: none;
+}
+
+#splitter:hover,
+#splitter:focus-visible {
+  background: color-mix(in srgb, currentColor 30%, transparent);
+  outline: 2px solid #1a5fb4;
+  outline-offset: -2px;
 }
 
 #files {

@@ -279,6 +279,8 @@ function asProfile(value: unknown): ProfileView | null {
     commands: value["commands"],
     verifiers: n(value["verifiers"]),
     protectedPaths: n(value["protectedPaths"]),
+    hasPolicy: value["hasPolicy"] === true,
+    unreadablePaths: n(value["unreadablePaths"]),
   };
 }
 

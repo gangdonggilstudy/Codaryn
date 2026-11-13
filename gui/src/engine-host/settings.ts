@@ -63,11 +63,16 @@ function profileView(name: string, profile: unknown, workflowRef: string | null,
   const protectedPaths = own(policy, "protectedPaths");
   const verifiers = own(profile, "verifiers");
   const provider = own(profile, "provider");
+  // U-247 (R-111 L-2, L-3): a profile's own policy takes the config's place in a quick run (its commands
+  // with it); its unreadable paths are added to the config's.
+  const unreadable = own(policy, "unreadablePaths");
   return {
     name: shown(name),
     workflowRef: workflowRef === null ? null : shown(workflowRef),
     // SP-D10: a profile's provider wins over the config's for runs with that profile.
     provider: typeof provider === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(provider) ? provider : null,
+    hasPolicy: isObj(policy),
+    unreadablePaths: Array.isArray(unreadable) ? unreadable.length : 0,
     limits,
     commands,
     verifiers: Array.isArray(verifiers) ? verifiers.length : 0,

@@ -176,3 +176,57 @@ test("U-247: choosing analyze-private says what it does and, from the config, wh
     restore();
   }
 });
+
+/**
+ * R-111 L-2, L-3: the warnings judge the run as the CLI resolves a quick run: the config's unreadable
+ * paths are kept and the chosen profile's added; a profile with its own policy takes the config's place,
+ * its command rules too. The engine host says which profile has its own policy and how many unreadable
+ * paths it lists; the main process checks both.
+ */
+test("U-247 (R-111): the analyze-private warnings follow the chosen profile's policy and list", async () => {
+  const config = { policy: { commands: [{ executable: "npm" }] }, profiles: { own: { policy: { commands: [], unreadablePaths: ["data/private"] } }, cmds: { policy: { commands: [{ executable: "node" }] } }, bare: { limits: { maxModelTurns: 3 } } } };
+  const value = settingsValue({ ok: true, output: { file: null, config, profiles: ["own", "cmds", "bare"], builtinWorkflows: ["analyze-private"], workflows: [], keyAvailable: false } }, same, []) as { ok: true; view: { profiles: Record<string, unknown>[] } };
+  assert.deepEqual(value.view.profiles.map((p) => [p["name"], p["hasPolicy"], p["unreadablePaths"]]), [
+    ["own", true, 1],
+    ["cmds", true, 0],
+    ["bare", false, 0],
+  ]);
+  const checked = toSettingsView(value, { model: false, language: false });
+  assert.ok(checked.ok && checked.view.profiles[0]?.hasPolicy === true && checked.view.profiles[0]?.unreadablePaths === 1);
+  const forged = (profile: Record<string, unknown>) => toSettingsView({ ...value, view: { ...value.view, profiles: [profile] } }, { model: false, language: false }).ok;
+  assert.equal(forged({ ...value.view.profiles[0], hasPolicy: "yes" }), false);
+  assert.equal(forged({ ...value.view.profiles[0], unreadablePaths: -1 }), false);
+  const restore = installFakeDom();
+  try {
+    const profiles = [
+      { name: "own", workflowRef: null, provider: null, limits: [], commands: [], verifiers: 0, protectedPaths: 0, hasPolicy: true, unreadablePaths: 1 },
+      { name: "cmds", workflowRef: null, provider: null, limits: [], commands: ["node"], verifiers: 0, protectedPaths: 0, hasPolicy: true, unreadablePaths: 0 },
+      { name: "bare", workflowRef: null, provider: null, limits: [], commands: [], verifiers: 0, protectedPaths: 0, hasPolicy: false, unreadablePaths: 0 },
+    ];
+    const view = { ...baseView(["npm"], [], null), profiles };
+    for (const [chosenProfile, needs, commands] of [
+      ["own", false, null],
+      ["cmds", true, "profile"],
+      ["bare", true, "config"],
+      ["", true, "config"],
+    ] as const) {
+      const api = new Proxy({} as CodarynApi, { get: (_t, name: string) => async () => (name === "settings" ? { ok: true, view } : null) });
+      const screen = newTaskScreen({ texts: textsFor("en"), api, run: new RunModel(), current: () => ({ handle: HANDLE, name: "ws" }), open: () => undefined, showRun: () => undefined });
+      const root = new FakeElement("main");
+      screen.show(root as unknown as HTMLElement);
+      await settle();
+      const profile = byId(root, "task-profile") as FakeElement;
+      profile.value = chosenProfile;
+      profile.dispatch("change");
+      const workflow = byId(root, "task-workflow") as FakeElement;
+      workflow.value = "analyze-private";
+      workflow.dispatch("change");
+      assert.equal(byId(root, "task-private-needs-unreadable") !== undefined, needs, `${chosenProfile || "no profile"}: needs`);
+      assert.equal(byId(root, "task-private-commands")?.getAttribute("data-policy") ?? null, commands, `${chosenProfile || "no profile"}: commands`);
+    }
+    assert.match(EN["task.privateCommandsProfile"], /chosen profile's policy/);
+    assert.match(KO["task.privateCommands"], /명령을 허용하지 않아/, "the reason is the task type's own (R-111 L-3)");
+  } finally {
+    restore();
+  }
+});

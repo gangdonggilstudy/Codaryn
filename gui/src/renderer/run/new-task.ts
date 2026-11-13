@@ -105,9 +105,17 @@ export function newTaskScreen(deps: NewTaskDeps): Screen {
           if (taskType === "analyze") analyze.removeAttribute("hidden");
           else analyze.setAttribute("hidden", "");
           if (taskType === "analyze-private") {
+            // R-111 L-2, L-3: as the CLI resolves a quick run: the config's unreadable paths are always kept
+            // and the chosen profile's are added; a profile with its own policy takes the config's place,
+            // command rules too. analyze-private allows no command rule at all.
+            const unreadable = (view?.privateData?.unreadablePaths.length ?? 0) + (chosen?.unreadablePaths ?? 0);
+            const ownPolicy = chosen?.hasPolicy === true;
+            const commands = ownPolicy ? (chosen?.commands.length ?? 0) : (view?.rules.commands.length ?? 0);
             const lines: HTMLElement[] = [el("p", t.format("task.privateNotice"))];
-            if ((view?.privateData?.unreadablePaths.length ?? 0) === 0) lines.push(el("p", t.format("task.privateNeedsUnreadable"), { role: "alert", id: "task-private-needs-unreadable" }));
-            if ((view?.rules.commands.length ?? 0) > 0) lines.push(el("p", t.format("task.privateCommands"), { role: "alert", id: "task-private-commands" }));
+            if (unreadable === 0) lines.push(el("p", t.format("task.privateNeedsUnreadable"), { role: "alert", id: "task-private-needs-unreadable" }));
+            if (commands > 0) {
+              lines.push(el("p", t.format(ownPolicy ? "task.privateCommandsProfile" : "task.privateCommands"), { role: "alert", id: "task-private-commands", "data-policy": ownPolicy ? "profile" : "config" }));
+            }
             privateNotice.replaceChildren(...lines);
             privateNotice.removeAttribute("hidden");
           } else {

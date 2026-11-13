@@ -1018,4 +1018,52 @@ export const CASES = [
     ),
     steps: [run(), report("latest", "--json")],
   })),
+  // U-303 (the CLI migration's C-6b, first commit): a run that carries out an approved run plan, where
+  // only workflow-tools-run-plan reached it (English, planned files only): a write outside the plan's
+  // files (refused, counted as outside the plan, no writablePaths line), in English and Korean; the
+  // config at the default location (N-1: the line after the carrying run's start, and its notice);
+  // and the apply with --quiet (the JSON line only).
+  ...["", "-ko"].map((suffix) => ({
+    name: `run-plan-outside-plan${suffix}`,
+    ...(suffix === "-ko" ? { lang: "ko" } : {}),
+    setup: runPlanSetup,
+    steps: [
+      run("--config", "config.json"),
+      (ctx) => {
+        write(ctx.dir, "script.json", {
+          schemaVersion: 1,
+          steps: [{ toolCalls: [writeFile("other.md", "not in the plan\n")] }, { toolCalls: [writeFile("summary.md", SUMMARY)] }, { text: "The summary is written." }],
+        });
+        return { args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      report("latest"),
+    ],
+  })),
+  {
+    name: "run-plan-default-config",
+    setup: (dir) => {
+      runPlanSetup(dir);
+      rmSync(path.join(dir, "config.json"), { force: true });
+      defaultConfigAt(dir, RUN_PLAN_CONFIG);
+    },
+    steps: [
+      { args: ["run", "--task", "task.json"] },
+      (ctx) => {
+        carryingScript(ctx.dir);
+        return { args: ["apply", "--task", "task.json", "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+    ],
+  },
+  {
+    name: "run-plan-quiet",
+    setup: runPlanSetup,
+    steps: [
+      run("--config", "config.json"),
+      (ctx) => {
+        carryingScript(ctx.dir);
+        return { args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx), "--quiet"] };
+      },
+      report("latest", "--json"),
+    ],
+  },
 ];

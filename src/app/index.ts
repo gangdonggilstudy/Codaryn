@@ -4,8 +4,11 @@
 
 export { PROBE_GOAL, createCodarynApp, runArguments, runRequestOf } from "./app.js";
 export type { AppHooks } from "./app.js";
+// U-293 (C-6a): a run's life from step 8 on, its end summary's counts, and what a run gives an adapter that draws its own text.
+export { MODEL_NOT_FOUND_HINT, defaultConfigNotice } from "./run-life.js";
+export { countingJournal, notePrivateData, tallyOf } from "./tally.js";
 export { copyEnvironment, createNodeAppEnvironment, loadVarsInto, lookupEnv, readVarsFileSync } from "./environment.js";
-export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, toCliError } from "./errors.js";
+export { INTERNAL_ERROR, appError, appErrorExitCode, fromCliError, runErrorOutput, toCliError } from "./errors.js";
 export { CONNECTED_MODEL_PROVIDERS, modelsArguments } from "./models.js";
 export { initArguments, suggestionsFor } from "./init.js";
 export { changesOf, digestOf, wideningOf } from "./settings-change.js";

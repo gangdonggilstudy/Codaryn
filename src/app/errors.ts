@@ -41,4 +41,29 @@ export function toCliError(error: AppError): CliErrorOutput {
   return { schemaVersion: 1, kind: "error", ...error, category, ...(retryable === undefined ? {} : { retryable }), exitCode: appErrorExitCode(error) };
 }
 
+/**
+ * U-293 (the CLI migration's C-6a): the CliErrorOutput `codaryn run` prints for an error of a run's
+ * start, in the CLI's own key order (cliError, src/app/prepare.ts: code, exitCode, message,
+ * diagnostic, category, retryable, then a hint and its detail, withHint), so its JSON line stays as
+ * it was before the run moved into the app layer. The exact inverse of fromCliError for every error the
+ * CLI makes: fromCliError keeps the other keys in their order, and an object's rest keeps its symbol
+ * key (the hint's detail, CLI_ERROR_HINT_DETAIL). An error the app made itself (no category) gets its
+ * code's facts where cliError puts them. toCliError keeps its order (exitCode last) for the commands
+ * already printed through it (changes).
+ */
+export function runErrorOutput(error: AppError): CliErrorOutput {
+  const { code, message, diagnostic, category, retryable, ...after } = error as AppError & { readonly [key: PropertyKey]: unknown };
+  const facts = category === undefined ? cliErrorFacts(code) : { category, ...(retryable === undefined ? {} : { retryable }) };
+  return {
+    schemaVersion: 1,
+    kind: "error",
+    code,
+    exitCode: appErrorExitCode(error),
+    message,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
+    ...facts,
+    ...after,
+  } as CliErrorOutput;
+}
+
 export const INTERNAL_ERROR: AppError = appError("internal_error", INTERNAL_ERROR_MESSAGE);

@@ -36,7 +36,6 @@ import type {
   InputDiagnostic,
   InputDiagnosticFile,
   Journal,
-  JournalEvent,
   MessageLanguage,
   ModelProvider,
   PrivacyGateway,
@@ -58,10 +57,9 @@ import { parseArgs } from "./args.js";
 import type { ApprovedPlanParts, Assemble } from "../app/assembly.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "../app/input/run-id.js";
-import { createFailedCalls } from "./failed-calls.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
 import { resolveApiSettings } from "../app/input/settings.js";
-import { queryTableFacts } from "./human/index.js";
+import { countingJournal } from "../app/tally.js";
 import { argumentsError, cliError as error, jsonSyntaxError, parseJson, prepareTask, readText, scrub, settingsError } from "../app/prepare.js";
 import type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "../app/prepare.js";
 
@@ -70,6 +68,8 @@ import type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunArgs, RunNotes
 // commands until they import from there, and the app layer (plan A); steps 8 on stay here until C-6a.
 export { argumentsError, cliError, jsonSyntaxError, positionDiagnostic, prepareTask, settingsError, withHint, workflowProblemText } from "../app/prepare.js";
 export type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunNotes, RunOutcomeInfo } from "../app/prepare.js";
+// U-293 (C-6a): the end summary's counting is the app layer's (src/app/tally.ts); its test keeps this name.
+export { notePrivateData } from "../app/tally.js";
 
 export interface CliEnvironment extends PrepareEnvironment {
   readonly argv: readonly string[];
@@ -105,22 +105,6 @@ export interface CliEnvironment extends PrepareEnvironment {
    * none). Called once the config is read. Absent: English progress lines and no end summary.
    */
   readonly human?: (configLanguage: MessageLanguage | null) => { readonly output: HumanOutput; readonly messages: MessageCatalog };
-}
-
-/**
- * U-210 (U-207's two end summary counts, RunSummaryContext.deniedUnreadable and .hiddenGroups): a
- * denied call at a path the task may not read (`tool_decision`, code `unreadable_path`), and a
- * query_table result that left out groups of fewer than k rows (`tool_result`, read with U-207's
- * queryTableFacts, which reads two counts and nothing of the table). Exported for its test.
- */
-export function notePrivateData(notes: RunNotes, event: JournalEvent): void {
-  if (event.type === "tool_decision" && !event.allowed && event.code === "unreadable_path") notes.deniedUnreadable = (notes.deniedUnreadable ?? 0) + 1;
-  if (event.type !== "tool_result") return;
-  const facts = queryTableFacts(event.result);
-  // R-108 L-2: a result that left out whole groups, or values from fewer than k cells (V-19), counts.
-  if (facts === null || facts.kind !== "groups" || (facts.suppressedGroups === 0 && (facts.hiddenValues ?? 0) === 0)) return;
-  const hidden = notes.hiddenGroups;
-  notes.hiddenGroups = { results: (hidden?.results ?? 0) + 1, minGroupSize: Math.max(hidden?.minGroupSize ?? 0, facts.minGroupSize) };
 }
 
 /** N-15: a message that starts with a schema field path (the script parser's messages do). */
@@ -371,36 +355,8 @@ export async function runPrepared(io: CliEnvironment, args: RunArgs, notes: RunN
       }
     }
     const recorded = assembled.deps.journal;
-    // U-18: the calls allowed and then failed, counted as the records are written.
-    const failed = createFailedCalls();
-    const watched: Journal = {
-      async append(event) {
-        const stored = await recorded.append(event);
-        if (failed.observe(event)) notes.failedToolCalls += 1;
-        if (event.type === "tool_decision" && !event.allowed) {
-          notes.deniedToolCalls += 1;
-          if (event.permission === "command") notes.deniedCommandCalls += 1;
-          // U-195 (Codex V-14 L-1, U-198): in a run that carries out a plan, every such write is outside
-          // the plan's files: before the model the engine judged each planned file at the same gate and
-          // ended the run as plan_stale if a writable list left one out (U-187, checkApprovedPlan).
-          if (event.code === "path_not_writable") {
-            if (approved === undefined) notes.deniedNotWritable = (notes.deniedNotWritable ?? 0) + 1;
-            else notes.deniedNotPlanned = (notes.deniedNotPlanned ?? 0) + 1;
-          }
-        }
-        if (event.type === "confirmation_answered" && event.decision === "deny" && (event.by === "user" || event.by === "default" || event.by === "cancelled")) {
-          const denied = (notes.confirmationDenied ??= { user: 0, default: 0, cancelled: 0 });
-          denied[event.by] += 1;
-        }
-        notePrivateData(notes, event);
-        // U-148 (U-140, UXM-18): the end summary repeats what run_started recorded as left out.
-        if (event.type === "run_started" && event.policyNarrowings !== undefined && event.policyNarrowings.length > 0) {
-          notes.policyNarrowings = event.policyNarrowings;
-        }
-        return stored;
-      },
-      close: () => recorded.close(),
-    };
+    // The end summary's counts, as the records are written (U-293: the counting moved to src/app/tally.ts).
+    const watched = countingJournal(recorded, notes, approved);
     // U-8: progress lines follow the journal; they start only once the run has started.
     const write = args.quiet ? undefined : io.writeProgress;
     const privacy = assembled.deps.privacy;

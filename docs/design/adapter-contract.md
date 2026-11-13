@@ -115,7 +115,7 @@ CLI와 독립 GUI가 엔진을 부르는 공통 계약을 설계한다. 다룰 �
 - 의존 방향
   - 목표: `cli` → `app` → (`engine`, `store`, `tools`, `policy`, `privacy`, `verify`, `workspace`, `model`) → `contracts`.
   - 지금(이행 C-5 뒤, U-287. U-272가 main 6ef6e3a의 코드에서 센 수에서 C-3a~C-5가 옮긴 것을 뺐다): 두 방향이다.
-    - `app` → `cli`: 앱 계층의 6파일이 CLI 모듈 14개를 부른다(U-289에서 셈). 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립(`createAssemble` 한 벌, U-237, 4절)은 C-4부터 `src/app/assembly.ts`에 있다. 앱의 감싸개(`src/app/assemble.ts`)와 `app.ts`는 그것을 바로 부른다(U-286). 옛 자리 `src/cli/assemble.ts`는 시험을 위한 다시 내보내기와 되돌리기 명령(`createRevertCommand`, C-9a)을 갖고, `app.ts`가 그 명령을 부르므로 14개에 그대로 든다. 입력 층은 `src/app/input/`에 있다: 보안 검사·글 정리·설치 확인·실행 id·모델 글 꼴(C-3a), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b), JSON 문법 위치(C-5). 실행 전 1~7단계(`prepareTask`)와 오류 결과를 만드는 함수(`cliError` 등)는 C-5부터 `src/app/prepare.ts`에 있다. `app.ts`와 `settings.ts`는 그것을 바로 부른다(U-289). `run.ts`에는 실행의 8단계 뒤(`runCli`, C-6a)가 남아 있고 `app.ts`가 그것을 부르므로 `run.ts`는 14개에 그대로 든다. 옛 자리(`src/cli/security/index.ts`, `src/cli/settings.ts` 등)는 시험과 고정 파일, GUI가 경로로 부르는 곳을 위한 다시 내보내기다.
+    - `app` → `cli`: 앱 계층의 7파일이 CLI 모듈 14개를 부른다(U-293에서 셈. 실행의 취소 원천은 Codex V-31 L-1 뒤로 앱의 것, `src/app/cancel.ts`). 검사를 복사하지 않으려고 그렇게 했다(AC-D16). 실행의 조립(`createAssemble` 한 벌, U-237, 4절)은 C-4부터 `src/app/assembly.ts`에 있다. 앱의 감싸개(`src/app/assemble.ts`)와 `app.ts`는 그것을 바로 부른다(U-286). 옛 자리 `src/cli/assemble.ts`는 시험을 위한 다시 내보내기와 되돌리기 명령(`createRevertCommand`, C-9a)을 갖고, `app.ts`가 그 명령을 부르므로 14개에 그대로 든다. 입력 층은 `src/app/input/`에 있다: 보안 검사·글 정리·설치 확인·실행 id·모델 글 꼴(C-3a), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b), JSON 문법 위치(C-5). 실행 전 1~7단계(`prepareTask`)와 오류 결과를 만드는 함수(`cliError` 등)는 C-5부터 `src/app/prepare.ts`에 있다. `app.ts`와 `settings.ts`는 그것을 바로 부른다(U-289). 실행 수명은 U-293(C-6a)부터 앱의 것(`src/app/run-life.ts`)이다. 앱은 `run.ts`에서 형(`CliEnvironment`)만 가져오고, 요청을 `codaryn run`처럼 해석하려고 `args.ts`의 `parseArgs`를 다시 부른다. 옛 자리(`src/cli/security/index.ts`, `src/cli/settings.ts` 등)는 시험과 고정 파일, GUI가 경로로 부르는 곳을 위한 다시 내보내기다.
     - `cli` → `app`: `src/cli/changes.ts`와 `main.ts` 두 파일이 앱 계층의 명령을 부른다. 전에 있던 `protocol/*`는 DR-66으로 지웠다(U-81). C-3a 뒤로는 CLI의 다른 모듈도 `src/app/input/`과 `src/app/model-text.ts`를, C-4·C-5 뒤로는 `src/app/assembly.ts`와 `src/app/prepare.ts`를 가져온다(목표 방향).
   - 목표로 가는 이행 1~5(7.2)는 사용자 결정 DR-65로 한다. 기능 뒤에 직렬로 한다. 그때까지 AC-D16이 그대로 유효하다.
 - 이름은 `src/app`이다(AC-D1 채택).
@@ -181,14 +181,26 @@ export interface StartRunRequest {
 export interface RunHandle {
   readonly runId: string;          // 엔진 시작과 첫 이벤트보다 먼저 정해진다
   readonly workspaceRoot: string;  // 작업 공간 루트의 실경로
+  readonly configLanguage?: MessageLanguage | null;     // C-6a(U-290): 설정의 language. 앱의 수명이 준다(U-293)
+  readonly defaultConfig?: DefaultConfigDisplay | null; // C-6a: 기본 위치에서 읽었을 때 그 표시(N-1)
+  readonly mask?: (text: string) => MaskedText | null;  // C-6a: 실행의 가림. 어댑터가 그리는 사람 글에만
   cancel(): void;                  // 여러 번 불러도 된다. 끝난 뒤에는 효과가 없다
   readonly done: Promise<RunOutcome>;  // reject하지 않는다. result.json 저장과 잠금 해제 뒤에 풀린다
 }
-export type RunOutcome = { ok: true; result: EngineResult; lockLeft?: true } | { ok: false; error: AppError };  // 시작 뒤 내부 예외만 오류
-export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error: AppError };
+export type RunOutcome =
+  | { ok: true; result: EngineResult; lockLeft?: true; tally?: RunTally; modelNotFound?: true }  // tally: 끝 요약의 수(C-6a)
+  | { ok: false; error: AppError };  // 시작 뒤 내부 예외만 오류
+export type StartOutcome = { ok: true; handle: RunHandle } | { ok: false; error: AppError; configLanguage?: MessageLanguage };
 ```
 
-- `startRun`은 `codaryn run`의 실행 전 검사를 같은 순서·코드·문구로 한다. A-1은 CLI의 `runCli`를 요청으로 만든 인자 목록으로 부른다.
+- `startRun`은 `codaryn run`의 실행 전 검사를 같은 순서·코드·문구로 한다. A-1은 CLI의 `runCli`를 요청으로 만든 인자 목록으로 불렀다.
+- U-293(CLI 이행 C-6a의 셋째 커밋)부터 `startRun`은 `runCli`를 부르지 않고 실행 수명을 스스로 한다(`src/app/run-life.ts`).
+  - 인자는 `codaryn run`이 해석하듯 한다(`runArguments` → `parseArgs`). 1~7단계는 `prepareTask`다.
+  - 8단계 뒤(모델, Y-4 감시, 실행 id와 취소 원천, 조립과 잠금, 엔진, 안내, 끝)는 CLI의 `runPrepared`와 같은 순서·코드·문구다. 사람에게 보이는 줄(진행 줄, 기본 위치 줄, writablePaths 줄, 끝 요약)은 하지 않는다. 어댑터가 `onStoredRecord`(5.2), 손잡이, 결과로 그린다.
+  - 끝 요약의 수(`RunOutcome.tally`)는 엔진이 넘긴 기록 그대로로 센다. CLI의 세기 코드(`watched`, `notePrivateData`)를 글자대로 `src/app/tally.ts`로 옮겼다. 이벤트(다시 가린 기록)로는 세지 않는다.
+  - 손잡이는 `configLanguage`, `defaultConfig`, `mask`를 준다. Y-4 안내를 더했으면 `modelNotFound: true`다. 조립 전의 거부에는 설정을 읽은 뒤이고 그것이 language를 둘 때 `configLanguage`가 곁에 있다.
+  - 취소 원천은 조립 직전에 만든다. 그때 `AppEnvironment.onSignal`(있으면)로 SIGINT·SIGTERM을 걸고, 실행 끝에 뗀다. 실행 전 검사 중에는 걸지 않는다.
+  - CLI의 `run`은 C-6a의 넷째 커밋까지 제 수명(`runPrepared`)을 쓴다. 그동안 두 수명을 c01과 `tests/unit/app/u293-run-life.test.ts`(끝 요약의 수, 손잡이, 진행 줄, 오류 줄, Y-4, 신호)가 맞댄다. 실행 계획을 수행하는 실행(`applyPlan`, U-218)은 C-6b까지 CLI의 수명이다.
 - 실패하면 아무것도 만들지 않고 `AppError`를 돌려준다(`engine.ts:86-88`의 "실행 전 오류에는 기록이 없다").
 - 성공은 잠금을 잡은 뒤에 돌려준다. 엔진은 핸들을 돌려준 뒤(다음 매크로태스크)에 시작한다.
   - 시험이 엔진 시작 시점을 직접 확인한다.
@@ -219,8 +231,11 @@ export type RunEvent =
 export interface RunObserver {
   onEvent?(event: RunEvent): void;                                   // 동기. 예외는 무시
   confirm?(request: ConfirmRequest, signal: AbortSignal): Promise<ConfirmAnswer>;  // 5.9, 단계 5
+  onStoredRecord?(record: JournalRecord): void;                     // C-6a(U-292): 저장된 그대로. 같은 프로세스에서 그리는 어댑터만
 }
 ```
+
+- U-292·U-293: `onStoredRecord`는 기록이 저장된 직후, 같은 기록의 `onEvent`보다 먼저, 그 기록의 사본을 받는다. 엔진의 가림만 있고 닫힌 낱말은 쓴 그대로다. 다시 가리지 못해 이벤트가 되지 않는 기록도 받는다. CLI가 진행 줄을 그려 `RunHandle.mask`로 가린다. 창이나 IPC로 넘기는 호스트는 쓰지 않는다(GUI의 엔진 호스트는 주지 않는다, u292 시험).
 
 보장
 1. **이벤트는 엔진이 기록에 넘긴 메모리의 사건으로 만든다(DR-15, R-4 H-1).** journal 파일을 다시 읽지 않는다.
@@ -954,7 +969,7 @@ VS Code 확장(VX-D1 B)과, 독립 GUI가 같은 방식을 고를 경우에 쓴�
 | 이행 | 내용 | 바뀌는 파일 | 지금의 상태 |
 | --- | --- | --- | --- |
 | 1 계약 | `src/contracts/app.ts`(4·5절 타입), `Journal.append` 반환값(AC-D3), 질문 사건 타입 | `src/contracts/**`, `docs/cli-contract.md`(역할 1) | 일부. 4·5절 타입은 `src/contracts/app.ts`에 있다(1a, U-254). `src/app/types.ts`는 다시 내보내기만 한다. 질문 사건 타입은 계약에 있다(U-74). 남은 것: `Journal.append`는 아직 `Promise<void>`다(1b, AC-D3. 앱 계층이 `seq`를 스스로 센다) |
-| 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 일부. 입력 층이 `src/app/input/`에 있다: 보안 검사, 글 정리, 설치 확인, 실행 id, 모델 글 꼴(C-3a, U-280), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b, U-282), JSON 문법 위치(C-5, U-287). 조립은 `createAssemble` 한 벌이고(U-237), C-4(U-285)부터 `src/app/assembly.ts`에 있다. 앱 계층은 그것에 DR-4의 환경 사본 등 앱의 고리를 주어 감싸고, CLI의 실행은 고리 없이 부른다(부모 환경은 `process.env`). 실행 전 1~7단계(`prepareTask`)와 오류 결과를 만드는 함수는 C-5(U-287)부터 `src/app/prepare.ts`에 있다. 실행 수명(C-6a)은 아직 CLI다. 실행 전 검사는 아직 `runCli` 호출이다 |
+| 2 앱 계층 추출 | `run.ts`의 2~8단계를 `src/app`으로. `runCli`는 인자 → `startRun` → 출력만 | `src/app/**`, `src/cli/run.ts`, `src/cli/assemble.ts`, 관련 유닛의 import | 일부. 입력 층이 `src/app/input/`에 있다: 보안 검사, 글 정리, 설치 확인, 실행 id, 모델 글 꼴(C-3a, U-280), task·설정·설정 파일 위치·제공자 설정 해석, 쓰기 목록, 읽기 제외와 k, `runGuards`(C-3b, U-282), JSON 문법 위치(C-5, U-287). 조립은 `createAssemble` 한 벌이고(U-237), C-4(U-285)부터 `src/app/assembly.ts`에 있다. 앱 계층은 그것에 DR-4의 환경 사본 등 앱의 고리를 주어 감싸고, CLI의 실행은 고리 없이 부른다(부모 환경은 `process.env`). 실행 전 1~7단계(`prepareTask`)와 오류 결과를 만드는 함수는 C-5(U-287)부터 `src/app/prepare.ts`에 있다. 실행 수명은 U-293(C-6a의 셋째 커밋)부터 앱의 것(`src/app/run-life.ts`)이고, 끝 요약의 수도 앱이 센다(`src/app/tally.ts`). CLI의 `run`은 아직 제 수명(`runPrepared`)이다(C-6a의 넷째 커밋에서 뒤집는다) |
 | 3 이벤트와 취소 | CLI 진행 줄을 관찰자로, Y-4 안내를 앱 계층 `notice`로, 신호·취소 파일을 `handle.cancel()`로 | `src/cli/progress.ts`, `src/cli/cancel.ts`, `src/cli/main.ts` | 일부. 앱 계층 쪽은 됐다(이벤트, 다시 가림, notice, cancel). CLI는 아직 쓰지 않는다. DR-65: 기능 뒤 |
 | 4 읽기 명령 | `report`, `revert`, `runs`(+`dryRun`, `latest`), `changes`(새 CLI 명령)를 앱 계층 함수로. store가 스냅샷 읽기를 내보냄 | `src/cli/report.ts`, `src/cli/revert.ts`, `src/cli/runs.ts`, `src/store/**`, `src/app/**` | 일부. 앱 함수는 모두 있다: `report`, `revert`(미리보기·`latest`·되돌리기 기록은 CLI의 명령 그대로), `listRuns`, `resolveRun`, `changes`. CLI 명령 가운데 앱 함수를 부르는 것은 `changes`뿐이다(`main.ts`가 연결). 나머지는 거꾸로 앱이 CLI를 감싼다. store의 스냅샷 읽기는 `readRunOriginals`로 있다. DR-65: 기능 뒤 |
 | 5 점검·모델 | `doctor`, `models`를 앱 계층으로 | `src/cli/doctor.ts`, `src/cli/models.ts` | 일부. 앱 계층이 CLI의 `runDoctor`·`runModels`를 감싼다(`doctor`, `listModels`, `selectModel`). DR-65: 기능 뒤 |

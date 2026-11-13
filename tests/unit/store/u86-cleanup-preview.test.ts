@@ -1,16 +1,15 @@
 /**
- * U-86 (C-18, UXM-10, UXM-1; PM: plan B), the store's part: a cleanup preview tells, for each item,
- * what a confirmed cleanup does with it under each confirmation (--confirm alone, with
- * --include-not-reverted, with --delete-discarded, with both): removed, or kept and why
- * (not_reverted_not_confirmed, discarded_left, used_by_kept_apply with the apply run that keeps the
- * plan run, not_confirmed). People's preview is grouped by it. It must say what applyCleanup does:
- * each prediction here is checked against a real applyCleanup on the same workspace, for two
- * workspaces, seven selections and the four confirmations (removals succeeding).
- * And the summary's records-less discarded-files folders (UXM-1): folders holding files whose run
- * has no records any more.
- * Before the contract (p4g-general) names the symbol key the preview carries them under, the store
- * gives them through previewCleanup and recordlessDiscarded; planCleanup's plan is as before.
- * Fake values only.
+ * U-86 (C-18, UXM-10, UXM-1; PM: plan B; contract c0c9933), the store's part:
+ * - planCleanup's plan carries each item's fate under CLEANUP_ITEM_FATES (CleanupItemFate): the fewest
+ *   flags besides --confirm with which applyCleanup removes it (removedWith, in CLEANUP_CONFIRM_FLAGS
+ *   order), or why no confirmation removes it in this selection (keptFor: used_by_kept_apply,
+ *   discarded_left). People's preview is grouped by it. It must say what applyCleanup does: here each
+ *   fate is checked against a real applyCleanup on the same workspace, for two workspaces, seven
+ *   selections and the four confirmations (removals succeeding): an item is removed exactly when its
+ *   removedWith is within the flags given, and a keptFor item is kept for that reason with both.
+ * - summarizeState carries, under STATE_DISCARDED_WITHOUT_RECORDS, the discarded-files folders that
+ *   hold files and whose run has no records left (UXM-1).
+ * Both under symbol keys: the JSON (cleanup --json) and the digest do not change. Fake values only.
  */
 
 import assert from "node:assert/strict";
@@ -19,9 +18,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import type { ApplyJournalEvent, CleanupItem, CleanupSelection, ContentHash, EngineResult, JournalEvent, MaskedText } from "../../../src/contracts/index.js";
-import { previewCleanup, recordlessDiscarded } from "../../../src/store/cleanup.js";
-import type { PredictedCleanupFate } from "../../../src/store/cleanup.js";
+import { CLEANUP_CONFIRM_FLAGS, CLEANUP_ITEM_FATES, STATE_DISCARDED_WITHOUT_RECORDS } from "../../../src/contracts/index.js";
+import type {
+  ApplyJournalEvent,
+  CleanupConfirmFlag,
+  CleanupItem,
+  CleanupItemFate,
+  CleanupPlan,
+  CleanupSelection,
+  ContentHash,
+  EngineResult,
+  JournalEvent,
+  MaskedText,
+} from "../../../src/contracts/index.js";
 import {
   applyCleanup,
   createApplyJournal,
@@ -29,6 +38,7 @@ import {
   journalRelativePath,
   planCleanup,
   prepareDiscardedRoot,
+  summarizeState,
   writeResult,
   writeRevertRecord,
 } from "../../../src/store/index.js";
@@ -95,8 +105,9 @@ async function workspace(applyReverted: boolean): Promise<string> {
   return root;
 }
 
+const ALL: CleanupSelection = { runs: { olderThanDays: 0 }, discarded: { olderThanDays: 0 } };
 const SELECTIONS: readonly [string, CleanupSelection][] = [
-  ["every run record and every discarded folder", { runs: { olderThanDays: 0 }, discarded: { olderThanDays: 0 } }],
+  ["every run record and every discarded folder", ALL],
   ["every run record", { runs: { olderThanDays: 0 } }],
   ["the apply run and its plan run", { runs: { runIds: [APPLY, PLAN] } }],
   ["the apply run alone", { runs: { runIds: [APPLY] } }],
@@ -104,84 +115,101 @@ const SELECTIONS: readonly [string, CleanupSelection][] = [
   ["the discarded folders alone", { discarded: { olderThanDays: 0 } }],
   ["the reverted runs", { runs: { reverted: true } }],
 ];
-const CONFIRMATIONS = [
-  { name: "--confirm alone", includeNotReverted: false, discarded: false },
-  { name: "with --include-not-reverted", includeNotReverted: true, discarded: false },
-  { name: "with --delete-discarded", includeNotReverted: false, discarded: true },
-  { name: "with both", includeNotReverted: true, discarded: true },
-] as const;
+const CONFIRMATIONS: readonly (readonly CleanupConfirmFlag[])[] = [[], ["include_not_reverted"], ["delete_discarded"], ["include_not_reverted", "delete_discarded"]];
 
 const idOf = (item: { target: string; runId?: string; leftoverId?: string }): string => item.runId ?? item.leftoverId ?? "?";
-const predictedRemoved = (items: readonly CleanupItem[], fates: readonly PredictedCleanupFate[]) =>
-  items.flatMap((item, index) => (fates[index]?.removed === true ? [`${item.target} ${idOf(item)}`] : [])).sort();
-const predictedKept = (items: readonly CleanupItem[], fates: readonly PredictedCleanupFate[]) =>
-  items.flatMap((item, index) => {
-    const fate = fates[index];
-    return fate !== undefined && !fate.removed ? [`${item.target} ${idOf(item)} ${fate.reason}`] : [];
-  }).sort();
+const nameOf = (item: CleanupItem): string => `${item.target} ${idOf(item)}`;
+const fatesOf = (plan: CleanupPlan): readonly CleanupItemFate[] => plan[CLEANUP_ITEM_FATES] ?? [];
+const goesWith = (fate: CleanupItemFate | undefined, flags: readonly CleanupConfirmFlag[]): boolean =>
+  fate !== undefined && "removedWith" in fate && fate.removedWith.every((flag) => flags.includes(flag));
+/** Each item's fate by name, for the readable cases. */
+const byName = (plan: CleanupPlan): Record<string, CleanupItemFate | undefined> =>
+  Object.fromEntries(plan.items.map((item, index) => [nameOf(item), fatesOf(plan)[index]]));
 
-describe("U-86: a cleanup preview says what a confirmed cleanup does with each item", () => {
+describe("U-86: the plan carries each item's fate, as applyCleanup decides", () => {
   for (const applyReverted of [false, true]) {
     for (const [name, selection] of SELECTIONS) {
-      test(`${applyReverted ? "the apply reverted" : "the apply not reverted"}, ${name}: each confirmation's prediction is what applyCleanup does`, async () => {
-        for (const confirmation of CONFIRMATIONS) {
+      test(`${applyReverted ? "the apply reverted" : "the apply not reverted"}, ${name}: removed exactly with its removedWith; keptFor kept for that reason`, async () => {
+        for (const flags of CONFIRMATIONS) {
           const root = await workspace(applyReverted);
-          const preview = await previewCleanup({ workspaceRoot: root, selection, now: NOW }, [confirmation]);
-          const fates = preview.fates[0] ?? [];
-          assert.equal(fates.length, preview.plan.items.length, confirmation.name);
+          const plan = await planCleanup({ workspaceRoot: root, selection, now: NOW });
+          const fates = fatesOf(plan);
+          assert.equal(fates.length, plan.items.length, flags.join(","));
+          for (const fate of fates) {
+            if ("removedWith" in fate) assert.deepEqual([...fate.removedWith], CLEANUP_CONFIRM_FLAGS.filter((flag) => fate.removedWith.includes(flag)), "in order, each once");
+          }
           const outcome = await applyCleanup({
             workspaceRoot: root, selection, now: NOW,
-            confirmation: { digest: preview.plan.digest, includeNotReverted: confirmation.includeNotReverted, discarded: confirmation.discarded },
+            confirmation: { digest: plan.digest, includeNotReverted: flags.includes("include_not_reverted"), discarded: flags.includes("delete_discarded") },
           });
-          assert.ok(outcome.ok, `${confirmation.name}: ${JSON.stringify(outcome)}`);
+          assert.ok(outcome.ok, `${flags.join(",")}: ${JSON.stringify(outcome)}`);
           if (!outcome.ok) continue;
-          assert.deepEqual(outcome.removed.map((item) => `${item.target} ${idOf(item)}`).sort(), predictedRemoved(preview.plan.items, fates), `${confirmation.name}: removed`);
-          assert.deepEqual(outcome.kept.map((item) => `${item.target} ${idOf(item)} ${item.reason}`).sort(), predictedKept(preview.plan.items, fates), `${confirmation.name}: kept`);
+          const expected = plan.items.filter((_, index) => goesWith(fates[index], flags)).map(nameOf).sort();
+          assert.deepEqual(outcome.removed.map((item) => `${item.target} ${idOf(item)}`).sort(), expected, `[${flags.join(",")}]: removed`);
+          if (flags.length === CLEANUP_CONFIRM_FLAGS.length) {
+            const keptFor = plan.items.flatMap((item, index) => {
+              const fate = fates[index];
+              return fate !== undefined && "keptFor" in fate ? [`${nameOf(item)} ${fate.keptFor}`] : [];
+            });
+            assert.deepEqual(outcome.kept.map((item) => `${item.target} ${idOf(item)} ${item.reason}`).sort(), keptFor.sort(), "with both: kept for its reason");
+          }
         }
       });
     }
   }
 
-  test("a plan run kept with its apply names that apply run", async () => {
-    const root = await workspace(false);
-    const preview = await previewCleanup({ workspaceRoot: root, selection: { runs: { runIds: [APPLY, PLAN] } }, now: NOW }, [CONFIRMATIONS[0], CONFIRMATIONS[3]]);
-    const plan = preview.plan.items.findIndex((item) => item.target === "run" && item.runId === PLAN);
-    assert.deepEqual(preview.fates[0]?.[plan], { removed: false, reason: "used_by_kept_apply", keptWith: APPLY });
-    // With both confirmations the folder is not selected, so the apply and its plan run still stay.
-    assert.deepEqual(preview.fates[1]?.[plan], { removed: false, reason: "used_by_kept_apply", keptWith: APPLY });
+  test("the readable case: every run record and every folder, the apply not reverted", async () => {
+    const plan = await planCleanup({ workspaceRoot: await workspace(false), selection: ALL, now: NOW });
+    assert.deepEqual(byName(plan), {
+      [`run ${LONE}`]: { removedWith: ["include_not_reverted"] },
+      [`run ${APPLY}`]: { removedWith: ["include_not_reverted", "delete_discarded"] },
+      [`run ${PLAN}`]: { removedWith: ["include_not_reverted", "delete_discarded"] },
+      [`run ${FULL}`]: { removedWith: [] },
+      [`run ${PART}`]: { removedWith: ["include_not_reverted"] },
+      [`discarded ${APPLY}`]: { removedWith: ["delete_discarded"] },
+    });
   });
 
-  test("several confirmations at once give one list each, in order; the plan is planCleanup's, unchanged", async () => {
-    const root = await workspace(false);
-    const selection = { runs: { olderThanDays: 0 }, discarded: { olderThanDays: 0 } };
-    const preview = await previewCleanup({ workspaceRoot: root, selection, now: NOW }, CONFIRMATIONS);
-    assert.equal(preview.fates.length, 4);
-    assert.deepEqual(preview.plan, await planCleanup({ workspaceRoot: root, selection, now: NOW }));
-    assert.deepEqual(Object.keys(preview.plan).sort(), ["blocked", "digest", "items", "parked", "totals"]);
-    // --confirm alone removes only the fully reverted run here; with both, everything selected.
-    assert.deepEqual(predictedRemoved(preview.plan.items, preview.fates[0] ?? []), [`run ${FULL}`]);
-    assert.equal(predictedKept(preview.plan.items, preview.fates[3] ?? []).length, 0);
+  test("the apply and its plan run without the folder: no confirmation removes them", async () => {
+    const plan = await planCleanup({ workspaceRoot: await workspace(false), selection: { runs: { runIds: [APPLY, PLAN] } }, now: NOW });
+    assert.deepEqual(byName(plan), { [`run ${APPLY}`]: { keptFor: "discarded_left" }, [`run ${PLAN}`]: { keptFor: "used_by_kept_apply" } });
   });
 
-  test("no confirmation asked: no list; nothing is removed or written by a preview", async () => {
+  test("the apply reverted: its folder is empty, so it and its plan run go with --confirm alone", async () => {
+    const plan = await planCleanup({ workspaceRoot: await workspace(true), selection: { runs: { runIds: [APPLY, PLAN] } }, now: NOW });
+    assert.deepEqual(byName(plan), { [`run ${APPLY}`]: { removedWith: [] }, [`run ${PLAN}`]: { removedWith: [] } });
+  });
+
+  test("the JSON and the digest do not carry the fates; a spread copy keeps them; a preview writes nothing", async () => {
     const root = await workspace(false);
     const before = (await readdir(state(root), { recursive: true })).sort();
-    const preview = await previewCleanup({ workspaceRoot: root, selection: { runs: { olderThanDays: 0 } }, now: NOW }, []);
-    assert.deepEqual(preview.fates, []);
+    const plan = await planCleanup({ workspaceRoot: root, selection: ALL, now: NOW });
+    assert.deepEqual(Object.keys(plan).sort(), ["blocked", "digest", "items", "parked", "totals"]);
+    const json = JSON.stringify(plan);
+    for (const word of ["removedWith", "keptFor", "include_not_reverted", "delete_discarded"]) assert.equal(json.includes(word), false, word);
+    assert.deepEqual({ ...plan }[CLEANUP_ITEM_FATES], plan[CLEANUP_ITEM_FATES]);
+    // The same digest as a second plan of the same state: the fates are outside it.
+    assert.equal((await planCleanup({ workspaceRoot: root, selection: ALL, now: NOW })).digest, plan.digest);
     assert.deepEqual((await readdir(state(root), { recursive: true })).sort(), before);
   });
 });
 
-describe("U-86 (UXM-1): discarded-files folders whose run has no records", () => {
-  test("none while every folder's run has its records", async () => {
-    assert.deepEqual(await recordlessDiscarded({ workspaceRoot: await workspace(false) }), { count: 0, files: 0, bytes: 0 });
+describe("U-86 (UXM-1): the summary's discarded-files folders whose run has no records", () => {
+  const withoutRecords = async (root: string) => (await summarizeState({ workspaceRoot: root }))[STATE_DISCARDED_WITHOUT_RECORDS];
+
+  test("none while every folder's run has its records; the summary's JSON is as before", async () => {
+    const root = await workspace(false);
+    const summary = await summarizeState({ workspaceRoot: root });
+    assert.deepEqual(summary[STATE_DISCARDED_WITHOUT_RECORDS], { count: 0, files: 0, bytes: 0 });
+    assert.equal(JSON.stringify(summary).includes("withoutRecords"), false);
+    assert.deepEqual(Object.keys(summary).sort(), ["discarded", "entries", "leftovers", "parked", "runs"]);
   });
 
   test("an apply whose records were removed by hand: its folder, with its file, counts", async () => {
     const root = await workspace(false);
     await rm(state(root, "runs", APPLY), { recursive: true });
     await rm(state(root, "runs", PLAN), { recursive: true });
-    assert.deepEqual(await recordlessDiscarded({ workspaceRoot: root }), { count: 1, files: 1, bytes: Buffer.byteLength(DRAFT) });
+    assert.deepEqual(await withoutRecords(root), { count: 1, files: 1, bytes: Buffer.byteLength(DRAFT) });
   });
 
   test("an empty folder holds nothing to lose: not counted; a name that is no run id is not a folder of a run", async () => {
@@ -189,12 +217,12 @@ describe("U-86 (UXM-1): discarded-files folders whose run has no records", () =>
     await rm(state(root, "runs", APPLY), { recursive: true });
     await mkdir(state(root, "discarded", ".notes"), { recursive: true });
     await writeFile(state(root, "discarded", ".notes", "x"), "x", "utf8");
-    assert.deepEqual(await recordlessDiscarded({ workspaceRoot: root }), { count: 0, files: 0, bytes: 0 });
+    assert.deepEqual(await withoutRecords(root), { count: 0, files: 0, bytes: 0 });
   });
 
   test("no state directory: none", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "codaryn-u86-empty-")));
     roots.push(root);
-    assert.deepEqual(await recordlessDiscarded({ workspaceRoot: root }), { count: 0, files: 0, bytes: 0 });
+    assert.deepEqual(await withoutRecords(root), { count: 0, files: 0, bytes: 0 });
   });
 });

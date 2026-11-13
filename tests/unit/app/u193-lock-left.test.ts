@@ -23,7 +23,6 @@ import { runTask as engineRunTask } from "../../../src/engine/index.js";
 import { inspectLock, releaseLock } from "../../../src/store/index.js";
 import { WRITE_NOTES, appEnvironment, exists, plannedRun, setupRun, taskForm, taskRequest } from "./support.js";
 
-const TODO = { todo: "U-193: a lock left is not told by the app layer yet" };
 const windowsOnly = process.platform === "win32" ? false : "a handle that does not share deletion is made with PowerShell on Windows";
 
 /** Another process opens `file` for `ms` milliseconds sharing reading only (no deletion); resolves once it holds it. */
@@ -47,7 +46,7 @@ function ok<T>(outcome: AppCallOutcome<T>): T {
 const lockFile = (work: string): string => path.join(work, ".codaryn", "lock.json");
 
 describe("U-193: a run through the app whose lock cannot be released", () => {
-  test("the run's result stays and lockLeft is told; result.json is the result", { ...TODO, skip: windowsOnly }, async () => {
+  test("the run's result stays and lockLeft is told; result.json is the result", { skip: windowsOnly }, async () => {
     const base = await setupRun({}, {}, [WRITE_NOTES, { text: "done" }]);
     const work = path.join(base, "work");
     let holder: { readonly closed: Promise<void> } | null = null;
@@ -101,7 +100,7 @@ describe("U-193: checkApply's release", () => {
     await releaseLock({ workspaceRoot: work, runId });
   };
 
-  test("a release that answers false is a lock left", TODO, async () => {
+  test("a release that answers false is a lock left", async () => {
     const { check, work } = await checkWith(async () => false);
     try {
       assert.equal(check.lockLeft, true);

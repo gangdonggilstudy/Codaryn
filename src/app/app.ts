@@ -265,9 +265,18 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
     let engineNotices: number | null = null;
 
     let assembledRun: { readonly privacy: PrivacyGateway; readonly workspaceRoot: string } | null = null;
-    const ownAssemble = createAppAssemble(env, platform, (assembled) => {
-      assembledRun = assembled;
-    });
+    /** U-193: the run's lock could not be released at its end (told in the outcome, the result kept). */
+    let lockLeft = false;
+    const ownAssemble = createAppAssemble(
+      env,
+      platform,
+      (assembled) => {
+        assembledRun = assembled;
+      },
+      () => {
+        lockLeft = true;
+      },
+    );
     const assemble: Assemble = async (input) => {
       const assembled = await ownAssemble(input);
       if (!assembled.ok || assembledRun === null) return assembled;
@@ -321,7 +330,7 @@ export function createCodarynApp(environment: AppEnvironment, hooks: AppHooks = 
       if (engineNotices !== null) {
         for (const text of output.notices.slice(engineNotices)) deliver(observer, { kind: "notice", text });
       }
-      return { ok: true, result: output };
+      return lockLeft ? { ok: true, result: output, lockLeft: true } : { ok: true, result: output };
     });
     const handle: RunHandle = {
       runId: first.info.runId,

@@ -473,6 +473,7 @@ export const KO_MESSAGES: MessageTexts = {
   "doctor.lock.parked_left":
     "되돌리기가 제자리에 돌려놓지 못한 파일 {count}개가 .codaryn/parked/에 남아 있습니다. 저절로 지워지지 않으니 직접 제자리로 옮기거나 지우세요",
   "lock.remove_hint": "이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.",
+  "lock.release_failed": "작업 공간 잠금을 풀지 못했습니다. Codaryn을 모두 닫으면 다음 실행이 정리합니다. 그 전에 실행이 막히면 codaryn doctor로 확인하세요.",
 
   "error.invalid_arguments.what": "명령 인수가 올바르지 않습니다",
   "error.invalid_arguments.fix": "codaryn help <명령>으로 그 명령의 사용법을, codaryn --help로 명령 목록을 확인하세요.",

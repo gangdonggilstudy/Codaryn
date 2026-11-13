@@ -342,6 +342,12 @@ export type CleanupOutcome =
       readonly removed: readonly (CleanupItemRef & { readonly size: StateSize })[];
       readonly kept: readonly (CleanupItemRef & { readonly reason: CleanupKeptReason })[];
       readonly totals: CleanupPlan["totals"];
+      /**
+       * U-193 (U-176's hand-off; drafted by p5a for this unit, p4g to confirm): true when the cleanup
+       * finished but the workspace lock could not be released (the release threw after its retries,
+       * or answered false). The cleanup's status does not change. Absent: released.
+       */
+      readonly lockLeft?: boolean;
     }
   | { readonly ok: false; readonly code: CleanupFailureCode };
 

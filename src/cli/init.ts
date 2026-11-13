@@ -44,7 +44,7 @@ import type {
 import { parseInitArgs } from "./args.js";
 import { chooseConfigFile } from "../app/input/config-file.js";
 import type { CommandOutcome } from "./guard.js";
-import { argumentsError, cliError } from "./run.js";
+import { argumentsError, cliError } from "../app/prepare.js";
 import type { WorkspaceLocation } from "../app/input/security/index.js";
 import { envValue, resolveListSettings } from "../app/input/settings.js";
 import type { SettingsEnvironment } from "../app/input/settings.js";

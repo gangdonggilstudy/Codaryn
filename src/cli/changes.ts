@@ -36,7 +36,7 @@ import { ENV_FILE_REFUSED_MESSAGE, RUN_ID_PATTERN } from "./args.js";
 import type { ArgsFailure } from "./args.js";
 import { jsonLine } from "./guard.js";
 import type { CommandOutcome } from "./guard.js";
-import { argumentsError, cliError } from "./run.js";
+import { argumentsError, cliError } from "../app/prepare.js";
 import { knownKeyValues } from "../app/input/settings.js";
 import type { SettingsEnvironment } from "../app/input/settings.js";
 import { inputFileTooLarge } from "../app/input/security/index.js";

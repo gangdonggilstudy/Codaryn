@@ -15,42 +15,22 @@
  *     task, script and cancel files are outside it (S-1); `integrity.paths` exist outside it (U-1)
  *  7. secret values: secretEnv (S-3 messages), the key in every run (S-2), env file values (S-4)
  *  8. model, then the assembled engine
+ * Steps 1 to 7 are prepareTask's, in src/app/prepare.ts since the CLI migration's C-5 (U-287); steps
+ * 8 on are here until C-6a.
  */
 
 import path from "node:path";
-import {
-  CLI_ERROR_EXIT_CODES,
-  CLI_ERROR_HINT_DETAIL,
-  cliErrorFacts,
-  LEGACY_WORKFLOW_SETTINGS,
-  RESULT_SCHEMA_VERSION,
-  mergeWorkflowPolicy,
-  mergeWorkflowVerifiers,
-  privateDataProblem,
-  toSchemaFieldPath,
-  toShownWorkspace,
-  workflowPolicyNarrowings,
-  workflowVerifierNarrowings,
-} from "../contracts/index.js";
+import { toSchemaFieldPath, toShownWorkspace } from "../contracts/index.js";
 import type {
   AnthropicProviderDeps,
   ApiProviderDeps,
   ApiProviderName,
   ApprovalChannel,
   ApprovedPlanRunDeps,
-  CliErrorCode,
-  CliErrorHint,
-  CliErrorHintDetail,
-  CliErrorOutput,
-  CliOutput,
   Clock,
-  CodarynConfig,
   ContentHash,
   CreateAnthropicProvider,
   CreateApiProvider,
-  DefaultConfigDisplay,
-  DefaultConfigLocation,
-  DetailedCliErrorHint,
   EngineDeps,
   EngineResult,
   InputDiagnostic,
@@ -58,25 +38,15 @@ import type {
   Journal,
   JournalEvent,
   MessageLanguage,
-  ResolvedTaskSpec,
   ModelProvider,
   PrivacyGateway,
   HumanOutput,
   MessageCatalog,
-  PlanMode,
-  PolicyConfig,
-  PolicyNarrowing,
   RunApprovedPlan,
   RunSummaryContext,
   RunTask,
-  ShownWorkspace,
   StoredChangesPlan,
-  VerifierConfig,
-  WorkflowDefinition,
-  WorkflowProblem,
-  WorkflowSettings,
 } from "../contracts/index.js";
-import { resolveWorkflow, workflowDefinitions } from "../workflows/index.js";
 import { withoutEmptyStateChanged } from "./result-fields.js";
 import { cleanText } from "../app/input/text-safety.js";
 import { createMessageCatalog } from "../i18n/index.js";
@@ -85,38 +55,15 @@ import type { AskLine } from "./confirm.js";
 import { runApprovedPlan as engineRunApprovedPlan, runTask as engineRunTask } from "../engine/index.js";
 import { createScriptedProvider, parseScript } from "../model/index.js";
 import { parseArgs } from "./args.js";
-import type { RunArgs } from "./args.js";
 import type { ApprovedPlanParts, Assemble } from "../app/assembly.js";
-import { parseConfig } from "../app/input/config.js";
-import { chooseConfigFile, isMissingFile, selectProfile } from "../app/input/config-file.js";
-import { jsonSyntaxPosition } from "./json-position.js";
 import { API_PROVIDER_FACTORIES } from "./provider.js";
 import { createRunId } from "../app/input/run-id.js";
 import { createFailedCalls } from "./failed-calls.js";
 import { PROGRESS_PREFIX, withProgress } from "./progress.js";
-import {
-  MAX_KEY_SCAN_DEPTH,
-  findKeyInJson,
-  goalHoldsKey,
-  inputFileTooLarge,
-  inputFileTooLargeMessage,
-  keyHintFor,
-  keyOwnerIn,
-  rawTextHoldsKey,
-  relateRealPaths,
-  secretEnvNotSetMessage,
-  selectEnvFileSecrets,
-} from "../app/input/security/index.js";
-import type { PathRelation, WorkspaceLocation } from "../app/input/security/index.js";
-import { SETTINGS_MISSING, envValue, knownKeyEntries, knownKeyValues, resolveApiSettings, runKeySecrets } from "../app/input/settings.js";
-import type { SettingsEnvironment, SettingsFailure } from "../app/input/settings.js";
-import { buildQuickTask, localPathProblem, parseTask, withConfigSecrets } from "../app/input/task.js";
-import type { InputErrorPosition } from "../app/input/task.js";
-import { writablePathSetsOf } from "../app/input/writable.js";
-import { UNREADABLE_PATHS_REQUIRED_TEXT, runMinGroupSize, runUnreadablePaths } from "../app/input/unreadable.js";
+import { resolveApiSettings } from "../app/input/settings.js";
 import { queryTableFacts } from "./human/index.js";
 import { argumentsError, cliError as error, jsonSyntaxError, parseJson, prepareTask, readText, scrub, settingsError } from "../app/prepare.js";
-import type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunNotes } from "../app/prepare.js";
+import type { CliRunOutcome, PrepareEnvironment, PreparedTask, RunArgs, RunNotes } from "../app/prepare.js";
 
 // U-287 (CLI migration C-5): the run's steps 1 to 7 (prepareTask) and the error outcomes are the app
 // layer's now (src/app/prepare.ts). These re-exports keep the old names for the tests, the CLI's

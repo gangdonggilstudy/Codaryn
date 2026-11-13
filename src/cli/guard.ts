@@ -7,7 +7,7 @@
  */
 
 import type { CommandOutput } from "../contracts/index.js";
-import { cliError } from "./run.js";
+import { cliError } from "../app/prepare.js";
 
 export const UNEXPECTED_ERROR_MESSAGE = "codaryn stopped because of an unexpected internal error";
 

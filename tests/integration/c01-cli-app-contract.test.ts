@@ -23,9 +23,16 @@
  * cancel source sees it as it is made); a permission question with no way to ask (the CLI is not at
  * a terminal, the app has no observer: both record deny by default), through the local fake API; and
  * a refusal of a lock another run holds (the CLI's error JSON and the app's StartOutcome).
+ *
+ * U-302 (before C-6b moves the run that carries out an approved plan into the app layer): a run plan
+ * (a task type with plan "run") carried out by the CLI's `apply --digest` and by the app layer's
+ * applyPlan, from plan runs made the same way. The carrying run done; a plan made stale by a person's
+ * edit; a lock a live process holds; a write outside the approved files refused and counted; a cancel
+ * file there before the apply. The result, the records and whether the plan was claimed must match.
  */
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -37,7 +44,7 @@ import type { ApplyJournalRecord, ApplyResult, CommandVerifierConfig, EngineResu
 import { fakeApiConfig, writeConfigFile } from "../fixtures/anthropic.js";
 import { createSandbox, writeTask, writeWorkspaceFile } from "../fixtures/builders.js";
 import type { Sandbox } from "../fixtures/builders.js";
-import { organizeScript, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
+import { createFileArgs, organizeScript, sha256Of, textStep, toolStep, writeGeneralTask, writeOrganizeTask, writeOrganizeWorkspace } from "../fixtures/general-tasks.js";
 import { EDIT_RIGHT_FIX, EDIT_WRONG_FIX, PRICE_CHECK_PATH, PRICE_PATH, writeRepairProject } from "../fixtures/repair-project.js";
 import { FAKE_API_KEY, FAKE_SECRET_A, FAKE_SECRET_ENV_A } from "../fixtures/secrets.js";
 import { NODE, cliEnv, expectCliError, expectRunResult, lockPath, readRunFiles, runDirOf, runTask, sha256Hex, startCli, waitFor } from "../support/cli.js";
@@ -371,4 +378,245 @@ test("U-295 다른 실행이 쥔 잠금: CLI의 오류 JSON과 앱 계층의 거
     writeFileSync(sb.cancelFile, "cancel");
     assert.equal(expectRunResult(await holder.done).status, "cancelled");
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-302: before C-6b, a run plan carried out by the CLI's apply and by the app layer's applyPlan
+
+const OLD_GUIDE = "old guide\n";
+const PLANNED_FILES = [
+  { path: "docs/guide.md", change: "modify" },
+  { path: "docs/new.md", change: "create" },
+] as const;
+/** The plan run: reads the guide and proposes the two files; anything after the proposal is never asked. */
+const PLAN_STEPS: ScriptStep[] = [
+  toolStep("read_file", { path: "docs/guide.md" }),
+  toolStep("propose_changes", { summary: "rewrite the guide and add a page", files: PLANNED_FILES.map((file) => ({ ...file })) }),
+  textStep("never asked"),
+];
+/** The carrying run: `before`, then the two approved writes and its answer. */
+const carrySteps = (before: readonly ScriptStep[] = []): ScriptStep[] => [
+  ...before,
+  toolStep("write_file", { path: "docs/guide.md", expectedHash: sha256Of(OLD_GUIDE), change: { kind: "replace_all", content: "new guide\n" } }),
+  toolStep("write_file", createFileArgs("docs/new.md", "new page\n")),
+  textStep("complete"),
+];
+const UNPLANNED_WRITE = toolStep("write_file", createFileArgs("docs/other.md", "not in the plan\n"));
+
+interface PlanSide {
+  readonly sb: Sandbox;
+  readonly config: string;
+}
+
+interface Carried {
+  readonly planRunId: string;
+  readonly digest: string;
+  /** The carrying run's result, or the refusal before it started. */
+  readonly result: EngineResult | null;
+  readonly refusal: { readonly code: string; readonly message: string; readonly category?: string; readonly retryable?: boolean } | null;
+  readonly records: readonly JournalRecord[];
+  /** `codaryn plan --json`'s status of the plan afterwards. */
+  readonly planStatus: unknown;
+  readonly exitCode: number | null;
+  readonly stderr: string;
+}
+
+/** A workspace with the guide, a config whose task type "rewrite" has plan "run", and a task that picks it. */
+function planSideOf(t: TestContext): PlanSide {
+  const sb = createSandbox(t);
+  writeWorkspaceFile(sb, "docs/guide.md", OLD_GUIDE);
+  writeWorkspaceFile(sb, "keep.txt", "untouched\n");
+  const config = writeConfigFile(sb, {
+    schemaVersion: 1,
+    language: "en",
+    limits: { maxModelTurns: 8, maxToolCalls: 24, maxTotalTokens: 200_000, maxDurationMs: 60_000 },
+    workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" } },
+  });
+  writeGeneralTask(sb, {
+    id: "u302-run-plan",
+    goal: "rewrite the guide",
+    fields: { workflowRef: "rewrite" },
+    verifiers: [{ id: "guide", kind: "file_rules", rules: [{ type: "contains", path: "docs/guide.md", text: "new guide" }, { type: "exists", path: "docs/new.md" }] }],
+  });
+  return { sb, config };
+}
+
+const writeScript = (sb: Sandbox, steps: readonly ScriptStep[]): void => writeFileSync(sb.scriptPath, JSON.stringify({ schemaVersion: 1, steps }, null, 2));
+const formOf = (side: PlanSide): TaskForm => ({ input: { kind: "task", taskPath: side.sb.taskPath }, configPath: side.config, varsFile: null, profile: null, workflowRef: null });
+const cliForm = (side: PlanSide): string[] => ["--task", side.sb.taskPath, "--config", side.config];
+
+function recordsOfRun(sb: Sandbox, runId: string): JournalRecord[] {
+  const file = join(runDirOf(sb.workspace, runId), "journal.jsonl");
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as JournalRecord);
+}
+
+async function planStatusOf(side: PlanSide, env: NodeJS.ProcessEnv, planRunId: string): Promise<unknown> {
+  const run = await startCli(["plan", ...cliForm(side), "--run", planRunId, "--json"], { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done;
+  return (JSON.parse(run.stdout.trim()) as { readonly status?: unknown }).status;
+}
+
+interface CarryOptions {
+  readonly before?: readonly ScriptStep[];
+  /** Done after the plan and before the apply: a person's edit, a lock. Returns its undoing. */
+  readonly between?: (side: PlanSide) => (() => void) | void;
+  readonly cancel?: boolean;
+}
+
+/** (a) The CLI: `run` makes the plan, `apply --digest <12>` carries it out. */
+async function carryByCli(side: PlanSide, env: NodeJS.ProcessEnv, options: CarryOptions = {}): Promise<Carried & { readonly plan: RunSide }> {
+  writeScript(side.sb, PLAN_STEPS);
+  const planned = expectRunResult(await startCli(["run", ...cliForm(side)], { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done);
+  const digest = planDigestOf(planned);
+  writeScript(side.sb, carrySteps(options.before));
+  const undo = options.between?.(side);
+  if (options.cancel === true) writeFileSync(side.sb.cancelFile, "cancel");
+  const args = ["apply", ...cliForm(side), "--run", planned.runId, "--digest", shortDigest(digest), ...(options.cancel === true ? ["--cancel-file", side.sb.cancelFile] : [])];
+  const run = await startCli(args, { cwd: side.sb.base, env, timeoutMs: TIMEOUT_MS }).done;
+  undo?.();
+  const output = JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Record<string, unknown>;
+  const result = output["kind"] === "run" ? (output as unknown as EngineResult) : null;
+  const refusal = output["kind"] === "error" ? { code: String(output["code"]), message: String(output["message"]), category: output["category"] as string, retryable: output["retryable"] as boolean } : null;
+  return {
+    plan: { result: planned, records: readRunFiles(side.sb.workspace, planned).records },
+    planRunId: planned.runId,
+    digest,
+    result,
+    refusal,
+    records: result === null ? [] : recordsOfRun(side.sb, result.runId),
+    planStatus: await planStatusOf(side, env, planned.runId),
+    exitCode: run.exitCode,
+    stderr: run.stderr,
+  };
+}
+
+/** (b) The app layer: startRun makes the plan, applyPlan carries it out, as the GUI's main process asks. */
+async function carryByApp(side: PlanSide, env: NodeJS.ProcessEnv, options: CarryOptions = {}): Promise<Carried & { readonly plan: RunSide }> {
+  const app = await appFor(side.sb, env);
+  writeScript(side.sb, PLAN_STEPS);
+  const started = await app.startRun({ input: { kind: "task", taskPath: side.sb.taskPath }, configPath: side.config, varsFile: null, profile: null, workflowRef: null, cancelFile: null });
+  assert.ok(started.ok, JSON.stringify(started));
+  const planDone = await started.handle.done;
+  assert.ok(planDone.ok, JSON.stringify(planDone));
+  const planned = planDone.result;
+  const digest = planDigestOf(planned);
+  writeScript(side.sb, carrySteps(options.before));
+  const undo = options.between?.(side);
+  if (options.cancel === true) writeFileSync(side.sb.cancelFile, "cancel");
+  const applying = await app.applyPlan({ settings: formOf(side), planRunId: planned.runId, digest: shortDigest(digest), cancelFile: options.cancel === true ? side.sb.cancelFile : null, unsafeMoveConsent: null });
+  let result: EngineResult | null = null;
+  let refusal: Carried["refusal"] = null;
+  if (!applying.ok) refusal = { code: applying.error.code, message: applying.error.message, category: applying.error.category, retryable: applying.error.retryable };
+  else {
+    const done = await applying.handle.done;
+    assert.ok(done.ok, `the app layer's apply ended with an error: ${JSON.stringify(done)}`);
+    assert.equal(done.output.kind, "run", "a run plan is carried out by a run");
+    result = done.output as EngineResult;
+  }
+  undo?.();
+  return {
+    plan: { result: planned, records: readRunFiles(side.sb.workspace, planned).records },
+    planRunId: planned.runId,
+    digest,
+    result,
+    refusal,
+    records: result === null ? [] : recordsOfRun(side.sb, result.runId),
+    planStatus: await planStatusOf(side, env, planned.runId),
+    exitCode: null,
+    stderr: "",
+  };
+}
+
+/** The plan runs, then the carrying runs (result and records, normalized by role), then the plan's claim. */
+function assertSameCarry(cli: Carried & { readonly plan: RunSide }, cliSide: PlanSide, app: Carried & { readonly plan: RunSide }, appSide: PlanSide): void {
+  assertSameRun(cli.plan, cliSide.sb, app.plan, appSide.sb);
+  assert.deepEqual(app.records.map((record) => record.type), cli.records.map((record) => record.type), "the carrying runs record the same kinds in the same order");
+  const ids = (carried: Carried): Record<string, string> => ({ PLAN: carried.planRunId, DIGEST: carried.digest, ...(carried.result === null ? {} : { RUN: carried.result.runId }) });
+  assert.deepEqual(normalized(app.result, appSide.sb, ids(app)), normalized(cli.result, cliSide.sb, ids(cli)), "the same carrying run's result");
+  // The approval channel is the carrying run's run_started's by design, as an apply's (APPROVAL_CHANNELS):
+  // `cli-flag` for --digest, `adapter` for an adapter's apply. Each side's is checked, then it is left out.
+  const approvalOf = (records: readonly JournalRecord[]): unknown => (records[0] as { readonly approval?: unknown } | undefined)?.approval;
+  assert.equal(approvalOf(cli.records), "cli-flag", "the CLI's --digest is its own channel");
+  assert.equal(approvalOf(app.records), "adapter", "the app layer's apply is an adapter's");
+  assert.deepEqual(normalized(app.records, appSide.sb, ids(app), ["approval"]), normalized(cli.records, cliSide.sb, ids(cli), ["approval"]), "the same carrying run's records (approval aside)");
+  assert.equal(app.planStatus, cli.planStatus, "the plan is claimed alike");
+}
+
+const readText = (sb: Sandbox, file: string): string | null => (existsSync(join(sb.workspace, ...file.split("/"))) ? readFileSync(join(sb.workspace, ...file.split("/")), "utf8") : null);
+
+test("U-302 run 계획의 정상 수행: CLI의 apply와 앱 계층의 applyPlan이 같은 실행을 만들고 계획을 차지한다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env);
+  const app = await carryByApp(appSide, env);
+  assert.deepEqual([cli.result?.status, cli.result?.reason, cli.exitCode, cli.result?.planRunId], ["done", "verified", 0, cli.planRunId]);
+  assert.deepEqual([readText(cliSide.sb, "docs/guide.md"), readText(appSide.sb, "docs/guide.md")], ["new guide\n", "new guide\n"]);
+  assert.equal(cli.planStatus, "applied");
+  assertSameCarry(cli, cliSide, app, appSide);
+});
+
+test("U-302 run 계획이 낡음(사람이 승인된 파일을 고침): 두 길 모두 모델 전에 failed/plan_stale, 계획은 차지되지 않는다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const edit = (side: PlanSide): void => writeFileSync(join(side.sb.workspace, "docs", "guide.md"), "changed by a person\n");
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env, { between: edit });
+  const app = await carryByApp(appSide, env, { between: edit });
+  assert.deepEqual([cli.result?.status, cli.result?.reason, cli.exitCode, cli.result?.usage.modelTurns], ["failed", "plan_stale", 1, 0]);
+  assert.deepEqual(cli.records.map((record) => record.type), ["run_started", "state_checked", "run_finished"]);
+  assert.equal(cli.planStatus, "pending");
+  assert.deepEqual([readText(cliSide.sb, "docs/guide.md"), readText(appSide.sb, "docs/guide.md")], ["changed by a person\n", "changed by a person\n"]);
+  assertSameCarry(cli, cliSide, app, appSide);
+});
+
+test("U-302 run 계획의 수행 때 살아 있는 프로세스가 쥔 잠금: CLI의 오류 JSON과 앱 계층의 거부가 같고, 실행도 차지도 없다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  // One live process holds both workspaces' locks (n03's way: no run of the workspace, so the plan's
+  // records stay as they were); the lock files name the same pid, so the two messages are the same.
+  const holder = spawn(NODE, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  t.after(() => {
+    holder.kill();
+  });
+  const lock = (side: PlanSide): void => writeFileSync(lockPath(side.sb.workspace), JSON.stringify({ pid: holder.pid, runId: "20261114T000000Z-0a0a0a0a", startedAt: "2026-11-14T00:00:00.000Z" }));
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env, { between: lock });
+  const app = await carryByApp(appSide, env, { between: lock });
+  assert.equal(cli.exitCode, 6);
+  assert.equal(cli.refusal?.code, "workspace_locked");
+  assert.deepEqual(app.refusal, cli.refusal, "the same code, message, category and retryable");
+  for (const [side, carried] of [[cliSide, cli], [appSide, app]] as const) {
+    assert.equal(readdirSync(join(side.sb.workspace, STATE_DIR_NAME, RUNS_DIR_NAME)).length, 1, "only the plan run");
+    assert.equal(carried.planStatus, "pending");
+    assert.equal(readText(side.sb, "docs/guide.md"), OLD_GUIDE);
+  }
+  assertSameRun(cli.plan, cliSide.sb, app.plan, appSide.sb);
+});
+
+test("U-302 run 계획 밖의 쓰기: 두 길 모두 거부하고 같은 수로 기록하며, CLI의 끝 요약이 그 수를 말한다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env, { before: [UNPLANNED_WRITE] });
+  const app = await carryByApp(appSide, env, { before: [UNPLANNED_WRITE] });
+  assert.deepEqual([cli.result?.status, cli.result?.reason, cli.exitCode], ["done", "verified", 0]);
+  const refused = (carried: Carried): string[] => carried.records.flatMap((record) => (record.type === "tool_decision" && !record.allowed ? [`${record.permission ?? "?"}/${record.code ?? "?"}`] : []));
+  assert.deepEqual(refused(cli), ["path/path_not_writable"]);
+  assert.deepEqual(refused(app), refused(cli));
+  for (const side of [cliSide, appSide]) assert.equal(readText(side.sb, "docs/other.md"), null, "the unplanned file is not written");
+  assert.ok(cli.stderr.split(/\r?\n/).includes("Writes denied because the file is not in the approved plan: 1"), cli.stderr);
+  assertSameCarry(cli, cliSide, app, appSide);
+});
+
+test("U-302 run 계획의 수행 전부터 있는 취소 파일: 두 길 모두 모델 전에 cancelled, 계획은 차지되지 않는다", { timeout: TIMEOUT_MS * 3 }, async (t) => {
+  const env = cliEnv();
+  const cliSide = planSideOf(t);
+  const appSide = planSideOf(t);
+  const cli = await carryByCli(cliSide, env, { cancel: true });
+  const app = await carryByApp(appSide, env, { cancel: true });
+  assert.deepEqual([cli.result?.status, cli.result?.reason, cli.exitCode, cli.result?.usage.modelTurns], ["cancelled", "cancelled", 5, 0]);
+  assert.equal(cli.planStatus, "pending");
+  for (const side of [cliSide, appSide]) assert.equal(readText(side.sb, "docs/guide.md"), OLD_GUIDE);
+  assertSameCarry(cli, cliSide, app, appSide);
 });

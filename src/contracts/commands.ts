@@ -406,7 +406,11 @@ export type RunListEntry =
        * written before G-A have no apply runs.
        */
       readonly kind?: "run" | "apply";
-      /** G-A: for an apply run, the plan run it applied (`apply_started.planRunId`). Absent for a run. */
+      /**
+       * G-A: for an apply run, the plan run it applied (`apply_started.planRunId`). U-175 (R-99 M-3,
+       * DR-69 B-3): also for a run that carried out an approved `run` plan, that plan run
+       * (`run_started.planRunId`). Absent for any other run, and in every list built before B-3.
+       */
       readonly planRunId?: RunId;
       /**
        * U-16 (UXM-5): for a plan run whose plan was applied, the apply run and when it claimed the
@@ -526,8 +530,12 @@ export interface ChangesApplyRun {
  * - applying: it has no result yet, running or stopped without one (`runs.plan_applying`)
  * - reverted: its last revert was complete (`runs.plan_apply_reverted`)
  * - record_missing: the list has no records of an apply of this plan under that id
- *   (`runs.plan_apply_missing`): no checked entry (removed, or damaged), or the entry is not an apply
- *   run (`kind` not "apply"), or it applied another plan (`planRunId` not this plan run)
+ *   (`runs.plan_apply_missing`): no checked entry (removed, or damaged), or the entry names no plan
+ *   run or another one (`planRunId` absent or not this plan run)
+ * U-175 (R-99 M-3, DR-69 B-3): the entry that applied a plan is an apply run (`kind: "apply"`) for a
+ * plan of mode apply, and a run (`kind: "run"`) for a plan of mode run; either names the plan run in
+ * `planRunId`, and the states above read its status the same way. Lists built before B-3 have no
+ * run that names a plan run, so every state they give is as before.
  * A partial revert, or a revert record that cannot be read (revertRecordDamaged; `reverted` then
  * says nothing), is judged by how the apply ended (a done apply: applied); the apply run's own line
  * tells of the revert.
@@ -553,9 +561,10 @@ export function planApplyStateOf(
   const applyRunId = entry.appliedBy?.runId;
   if (applyRunId === undefined) return null;
   const apply = entries.find((other): other is Extract<RunListEntry, { readonly state: "checked" }> => other.state === "checked" && other.runId === applyRunId);
-  // R-55b: only an apply run of this plan says how its apply ended; any other entry of that id is
-  // not the records of that apply.
-  if (apply === undefined || apply.kind !== "apply" || apply.planRunId !== entry.runId) return { state: "record_missing", applyRunId };
+  // R-55b: only the entry that applied this plan says how its apply ended; any other entry of that id
+  // is not the records of that apply. U-175 (R-99 M-3): an apply run, or (B-3) a run that carried out
+  // a `run` plan; both name the plan run in planRunId, and before B-3 only apply runs do.
+  if (apply === undefined || apply.planRunId !== entry.runId) return { state: "record_missing", applyRunId };
   if (apply.reverted?.status === "complete") return { state: "reverted", applyRunId };
   if (apply.status === null) return { state: "applying", applyRunId };
   if (apply.status === "done") return { state: "applied", applyRunId };

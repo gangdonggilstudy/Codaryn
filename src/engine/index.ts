@@ -30,7 +30,9 @@
  *   same checks and run through `ToolRunner.executeWorkflowTool`.
  * - GT-E2: `instructions` follow the fixed prompt under INSTRUCTIONS_LABEL, masked with it.
  * - GT-E3, GT-E5: with `plan: "apply"` only read tools and the tool whose descriptor says
- *   `endsRun: "plan"` are offered. Each plan action is judged on its own (the task's `planActions`,
+ *   `endsRun: "plan"` are offered. U-170 (B-1): a plan tool only in a run of its own plan mode
+ *   (ToolDescriptor.planMode), and `plan: "run"` is a plan run as well; until its tool is offered
+ *   (B-3) it has read tools only and ends without a plan. Each plan action is judged on its own (the task's `planActions`,
  *   the gate before and after restoration). A stored plan ends the run as needs-input/plan_pending
  *   with `EngineResult.plan` and no verification; ending without one is failed/model_error.
  * - GT-E4: with `completion: "human_review"`, checks that are done (all pass, or no verifier) end
@@ -85,6 +87,7 @@ import type {
   PolicyDecision,
   PolicyNarrowing,
   PolicyNarrowingKind,
+  PlanMode,
   ProposePlanArgs,
   RawText,
   RawToolOutcome,
@@ -292,16 +295,17 @@ function isWorkflowToolName(name: string): name is WorkflowToolName {
 
 /**
  * GT-E1, GT-E3: the tools a run offers, from the task's settings, in their order and once each.
- * A plan run (`plan: "apply"`) offers read tools and the plan tool only; any other run offers every
- * listed tool except the plan tool. A legacy task lists TOOL_NAMES and gets exactly those.
+ * A plan run (`plan: "apply"`, U-170 also `plan: "run"`) offers read tools and the plan tool of its
+ * own mode only (ToolDescriptor.planMode); any other run offers every listed tool except the plan
+ * tools. A legacy task lists TOOL_NAMES and gets exactly those.
  */
-export function offeredTools(tools: readonly AnyToolName[], plan: "none" | "apply"): readonly AnyToolName[] {
+export function offeredTools(tools: readonly AnyToolName[], plan: PlanMode): readonly AnyToolName[] {
   const offered: AnyToolName[] = [];
   for (const name of tools) {
     if (offered.includes(name) || !Object.hasOwn(ALL_TOOL_DESCRIPTORS, name)) continue;
     const descriptor = ALL_TOOL_DESCRIPTORS[name];
     const endsPlan = descriptor.endsRun === "plan";
-    const allowed = plan === "apply" ? descriptor.displayClass === "read" || endsPlan : !endsPlan;
+    const allowed = plan === "none" ? !endsPlan : descriptor.displayClass === "read" || (endsPlan && descriptor.planMode === plan);
     if (allowed) offered.push(name);
   }
   return offered;
@@ -1464,8 +1468,8 @@ export const runTask: RunTask = async (deps: EngineDeps): Promise<EngineResult> 
       const conversed = await converse(system);
       if (conversed !== null) return conversed;
       // GT-E3: a plan run is verified only after its plan is applied (an apply run). A model that
-      // ends without a stored plan has not done what a plan run asks for.
-      if (settings.plan === "apply") {
+      // ends without a stored plan has not done what a plan run asks for. U-170: `run` too.
+      if (settings.plan !== "none") {
         const message = mask(NO_PLAN_MESSAGE);
         if (message !== null) {
           notices.push(message);

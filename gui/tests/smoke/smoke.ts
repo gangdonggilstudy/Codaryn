@@ -844,13 +844,18 @@ startGui({
       );
       await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
-      await newResult(directRunId, 90_000, "5f apply A");
+      const applyARunId = await newResult(directRunId, 90_000, "5f apply A");
       results["applyByWorkflow"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
       results["applyByWorkflowMoved"] = { from: existsSync(join(SECOND, "a.txt")), to: existsSync(join(SECOND, "moved", "a.txt")) };
       // U-271 (R-112 L-1): its action's start record is not given, and that is no missing progress line.
       results["applyNoGap"] = await js("document.getElementById('run-gap')?.hasAttribute('hidden') ?? null");
+      // U-271 (3.3): the tree marks what apply A moved, at its new place (the folder above it holds it).
+      results["applyTreeMarks"] = {
+        note: await js(`document.getElementById('tree-marks-text')?.textContent?.includes(${JSON.stringify(applyARunId)}) === true`),
+        holds: await waitFor("document.querySelector('.tree [data-holds-changes] .name')?.textContent ?? null", 20_000),
+      };
 
       // B: through a profile whose workflowRef is organize: the plan's apply takes the same profile.
       const beforePlan = await resultId();

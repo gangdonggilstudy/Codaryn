@@ -302,8 +302,11 @@ async function start(): Promise<void> {
     // U-65 (3.3): the tree is read again, and marks what this run did when it ran in the open workspace
     // with a form the window knows (a task file's run names its own workspace); else the old marks go.
     const here = runWorkspace !== null && runWorkspace === current?.handle && run.last !== null && run.last.taskFile !== true;
+    const applyHere = runWorkspace !== null && runWorkspace === current?.handle;
     runWorkspace = null;
     if (done.ok && done.result.kind === "run" && here) tree?.markRun({ runId: done.runId, profile: run.last?.profile ?? null, workflow: run.last?.workflow ?? null }, done.result.changes);
+    // U-271 (3.3): an apply of moves in the open workspace: what it moved, and how many it discarded.
+    else if (done.ok && done.result.kind === "apply" && applyHere) tree?.markApply({ runId: done.runId, profile: null, workflow: null }, done.result.applied);
     else tree?.clearMarks();
     tree?.refresh();
     // U-68: the lock this run held is gone; check again.

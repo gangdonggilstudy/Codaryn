@@ -590,6 +590,7 @@ const expected = [
   ["applyByWorkflow", (v) => v !== null && v.applied === 1 && v.reason !== "consent_required" && v.reason !== "plan_stale"],
   ["applyByWorkflowMoved", (v) => v.from === false && v.to === true],
   ["applyNoGap", (v) => v === true],
+  ["applyTreeMarks", (v) => v !== null && v.note === true && v.holds === "moved"],
   ["planRun", (v) => v === "plan_pending"],
   ["planShown", (v) => v === "pending"],
   // R21b-L-1: opened from the run list with the remembered form, so it can be applied there.

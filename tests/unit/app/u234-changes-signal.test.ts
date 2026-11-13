@@ -89,7 +89,9 @@ describe("U-234: the changes view and the caller's signal", () => {
     setTimeout(() => controller.abort(), 30);
     const cancelled = view(await changesWith(app, request, { signal: controller.signal }));
     const elapsed = Date.now() - started;
-    assert.ok(elapsed < 400, `the wait ended at the abort (${elapsed} ms)`);
+    // The call costs the same besides the read (the reading command's preparation, a few hundred ms on
+    // a busy machine); the abort takes the waits away, so it is shorter by most of their 750 ms.
+    assert.ok(fullWait - elapsed >= 500, `the wait ended at the abort (${elapsed} ms against ${fullWait} ms)`);
     for (const output of [unbounded, cancelled]) {
       assert.deepEqual(output.files.map((file) => [file.path, file.unavailable]), [["NOTES.md", "unreadable"]], "a file still changing is unreadable, as before");
     }

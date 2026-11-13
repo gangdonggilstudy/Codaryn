@@ -328,6 +328,31 @@ startGui({
         const back = await choose("auto", from);
         return { shown, file, switched, renamed: homeAfter !== homeBefore, screen, back, lang: await js("document.documentElement.lang === " + JSON.stringify(from)) };
       })();
+      // U-70 (4.5, 3.1): the separator by the keys and by the pointer, and the width and screen in gui-state.json.
+      results["windowState"] = await (async () => {
+        const width = (): Promise<unknown> => js("Number(document.getElementById('splitter')?.getAttribute('aria-valuenow') ?? 'NaN')");
+        const key = (name: string): Promise<unknown> => js(`document.getElementById('splitter')?.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true })); true`);
+        await key("Home");
+        const min = await width();
+        await key("ArrowRight");
+        const step = Number(await width()) - Number(min);
+        const panel = await js(
+          "(() => { const s = document.getElementById('splitter'); const r = s.getBoundingClientRect(); const x = r.left + r.width / 2; const y = r.top + 20; const fire = (type, cx) => s.dispatchEvent(new PointerEvent(type, { clientX: cx, clientY: y, pointerId: 7, bubbles: true })); fire('pointerdown', x); fire('pointermove', x + 100); fire('pointerup', x + 100); return Math.round(document.getElementById('files').getBoundingClientRect().width); })()",
+        );
+        const dragged = Number(await width());
+        await js("document.querySelector('[data-screen=\"checks\"]')?.click(); true");
+        let saved: unknown = null;
+        for (let waited = 0; waited < 10_000 && saved === null; waited += 200) {
+          try {
+            const memory = (JSON.parse(readFileSync(STATE, "utf8")) as { window?: { screen?: string; treeWidth?: number } }).window;
+            if (memory?.screen === "checks" && memory.treeWidth === dragged) saved = { screen: memory.screen, treeWidth: memory.treeWidth };
+          } catch {
+            // Written through a temporary file; read again.
+          }
+          if (saved === null) await sleep(200);
+        }
+        return { min, step, dragged: dragged - Number(min) - step, panel: panel === dragged, saved };
+      })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");

@@ -45,6 +45,9 @@ async function start(): Promise<void> {
   let runWorkspace: string | null = null;
   /** U-64, U-69: the engine's state, kept over a redraw. */
   let engineState = info.engine;
+  /** U-70 (4.5): the file panel's width as last chosen (kept over a redraw and by the main process). */
+  let treeWidth = info.ui?.treeWidth ?? null;
+  let savedScreen = info.ui?.screen ?? null;
 
   // U-68 (3.2): the checks when a workspace opens (again when a run ends and on F5).
   const openCheck = new OpenCheck(api);
@@ -107,6 +110,15 @@ async function start(): Promise<void> {
       newTask: () => shell?.show("newtask"),
       settings: () => shell?.show("settings"),
       refresh: readAgain,
+      treeWidth: (width) => {
+        treeWidth = width;
+        void api.saveUi({ treeWidth: width });
+      },
+      shown: (id) => {
+        if (id === savedScreen) return;
+        savedScreen = id;
+        void api.saveUi({ screen: id });
+      },
     });
     shell = frame;
     frame.mount(root);
@@ -202,6 +214,7 @@ async function start(): Promise<void> {
     root.append(palette.element);
     frame.setEngine(engineState);
     if (engineState !== "ready") frame.engineEnded(engineState, restartEngine);
+    frame.setTreeWidth(treeWidth);
     frame.setWorkspace(current?.name ?? null);
     if (current !== null) tree.setWorkspace(current);
     updateRunStatus();
@@ -229,7 +242,9 @@ async function start(): Promise<void> {
     shell?.setRun(texts.format("run.statusBar", { state: texts.format(`run.phase.${run.phase}`), time: seconds === null ? "-" : clock(seconds), turns: String(run.counts.turns), tools: String(run.counts.tools) }));
   };
 
-  mountUi("home");
+  // U-70 (4.5): the last screen when it is one that stands on its own (not a run's plan, changes or report).
+  const RESTORED = new Set(["home", "newtask", "runs", "cleanup", "checks", "settings"]);
+  mountUi(info.ui?.screen !== null && info.ui?.screen !== undefined && RESTORED.has(info.ui.screen) ? info.ui.screen : "home");
   api.onEngineState((payload) => {
     const state = asEngineState(payload);
     if (state === null) return;

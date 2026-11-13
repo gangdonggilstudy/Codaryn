@@ -8,6 +8,7 @@ export const EN: { readonly [K in TextId]: string } = {
   "nav.home": "Workspace",
   "nav.checks": "Checks",
   "region.files": "Files",
+  "region.splitter": "File panel width (Left and Right arrows change it)",
   "region.main": "Work area",
   "region.status": "Status",
   "status.engineReady": "Engine ready",

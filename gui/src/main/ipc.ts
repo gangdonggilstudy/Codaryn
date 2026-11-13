@@ -58,7 +58,8 @@ import type { CleanupPreviewReply, CleanupResultReply, StateSummaryReply } from 
 import type { CleanupPreviewRecord, CleanupPreviews } from "./cleanup-previews.js";
 import { reportFileName, writeTextFile } from "./save-file.js";
 import { toHostReportMarkdown } from "../shared/ipc.js";
-import { copyablePath, parseCopyArgs, parseStartTaskArgs, revealableChange } from "../shared/ipc.js";
+import { copyablePath, parseCopyArgs, parseSaveUiArgs, parseStartTaskArgs, revealableChange } from "../shared/ipc.js";
+import type { UiMemoryView } from "../shared/ipc.js";
 import type { CopyReply, RestartReply } from "../shared/ipc.js";
 import type { SaveReportReply } from "../shared/ipc.js";
 import { parseCreateSettingsArgs, toCreateSettingsReply, toSuggestionsReply } from "../shared/ipc.js";
@@ -139,6 +140,9 @@ export interface IpcDeps {
   readonly writeClipboard: (text: string) => void;
   /** U-66: shows an entry selected in the file manager (the OS one; smoke tests record it instead). Nothing is opened or run. */
   readonly showItemInFolder: (path: string) => void;
+  /** U-70 (4.5): what the window remembers of itself, and keeping a change to it. */
+  readonly uiMemory: () => Promise<UiMemoryView>;
+  readonly saveUi: (change: { readonly screen?: string; readonly treeWidth?: number }) => Promise<void>;
 }
 
 /** Only the app window's main frame on the app's own origin may call. */
@@ -192,7 +196,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (chosen === null) return { language: "en", engine: "host_error", initialWorkspace };
     language = chosen.language;
     deps.onLanguage(language);
-    return { language: chosen.language, engine: "ready", initialWorkspace };
+    return { language: chosen.language, engine: "ready", initialWorkspace, ui: await deps.uiMemory() };
   });
 
   handle(IPC_CHANNELS.openFolder, async (args): Promise<OpenFolderReply> => {
@@ -290,6 +294,14 @@ export function registerIpc(deps: IpcDeps): void {
     if (value["exists"] !== true) return { ok: false, code: "config_missing" };
     deps.showItemInFolder(path);
     return { ok: true };
+  });
+
+  // U-70 (4.5): the last screen and the file panel's width, checked here, kept in gui-state.json.
+  handle(IPC_CHANNELS.saveUi, async (args): Promise<boolean> => {
+    const parsed = args.length === 1 ? parseSaveUiArgs(args[0]) : null;
+    if (parsed === null) return false;
+    await deps.saveUi(parsed);
+    return true;
   });
 
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {

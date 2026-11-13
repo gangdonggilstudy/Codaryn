@@ -8,10 +8,12 @@
  *   so a link there can have covered what the broader entry does not (as V-8 for writable paths).
  *   An entry taken out of a profile's or a workflow's own list that the config's new list still
  *   has is not one: those runs keep it.
- * - k: the config's value (DEFAULT_MIN_GROUP_SIZE when it sets none) is the base; a profile and a
- *   definition can only raise it (effectiveMinGroupSize). A lower effective k is
- *   `min_group_size_lowered`: for the config, and for a profile's or a workflow's own raise judged
- *   on the new base (the config's own change is said once, at the config).
+ * - k is never below 5 (DR-70; U-197 after V-12 M-1): a run's k is the largest of 5 and every
+ *   source's value, the config's, a profile's, a definition's and a task file's
+ *   (effectiveMinGroupSize). A lower effective k is `min_group_size_lowered`: for the config's
+ *   value, and for a profile's or a workflow's own value judged with the config's new value (the
+ *   config's own change is said once, at the config). A value below 5, which the parsers refuse,
+ *   counts as 5.
  * - Adding an entry and raising k narrow.
  * The parsers still refuse both fields until A-6, so the judgment is called directly.
  * Reproduced first (todo until the judgment knew the fields). Fake values only.
@@ -52,17 +54,22 @@ describe("U-204: the config's unreadablePaths", () => {
 });
 
 describe("U-204: the config's group size k", () => {
-  test("a lower effective k is a widening: set lower, lowered, or taken away above the default", () => {
-    assert.deepEqual(config({}, { minGroupSize: 3 }), ["min_group_size_lowered policy.minGroupSize"], "from the default 5");
+  test("a lower effective k is a widening: lowered, or a value above 5 taken away", () => {
+    assert.deepEqual(config({ minGroupSize: 6 }, { minGroupSize: 5 }), ["min_group_size_lowered policy.minGroupSize"]);
     assert.deepEqual(config({ minGroupSize: 10 }, { minGroupSize: 8 }), ["min_group_size_lowered policy.minGroupSize"]);
-    assert.deepEqual(config({ minGroupSize: 10 }, {}), ["min_group_size_lowered policy.minGroupSize"], "back to the default 5");
+    assert.deepEqual(config({ minGroupSize: 10 }, {}), ["min_group_size_lowered policy.minGroupSize"], "back to 5");
   });
 
   test("raising k, or the same effective k: no widening", () => {
     assert.deepEqual(config({}, { minGroupSize: 10 }), []);
-    assert.deepEqual(config({ minGroupSize: 5 }, {}), [], "the default is 5");
-    assert.deepEqual(config({ minGroupSize: 3 }, {}), [], "back to the default raises it");
+    assert.deepEqual(config({ minGroupSize: 5 }, {}), [], "k is 5 without a value");
     assert.deepEqual(config({ minGroupSize: 8 }, { minGroupSize: 8 }), []);
+  });
+
+  test("k is never below 5 (DR-70, V-12 M-1): a value below 5, which the parsers refuse, lowers nothing", () => {
+    assert.deepEqual(config({}, { minGroupSize: 3 }), []);
+    assert.deepEqual(config({ minGroupSize: 5 }, { minGroupSize: 2 }), []);
+    assert.deepEqual(config({ minGroupSize: 3 }, {}), [], "it was 5 in effect");
   });
 });
 
@@ -82,7 +89,7 @@ describe("U-204: a profile's and a workflow's own entries and raise", () => {
     assert.deepEqual(kinds(withPolicy({ unreadablePaths: ["c"] }, { profiles: profile({ unreadablePaths: ["c"] }) }), withPolicy({ unreadablePaths: ["c"] }, { profiles: profile({ unreadablePaths: [] }) })), ["profile_changed profiles"]);
   });
 
-  test("a profile's raise lowered is said for it; the config's base change is said once, at the config", () => {
+  test("a profile's raise lowered is said for it; the config's own change is said once, at the config", () => {
     assert.deepEqual(kinds(withPolicy({}, { profiles: profile({ minGroupSize: 10 }) }), withPolicy({}, { profiles: profile({ minGroupSize: 7 }) })), [
       "profile_changed profiles",
       "min_group_size_lowered profiles.docs.policy.minGroupSize",
@@ -91,7 +98,8 @@ describe("U-204: a profile's and a workflow's own entries and raise", () => {
       "profile_changed profiles",
       "min_group_size_lowered profiles.docs.policy.minGroupSize",
     ]);
-    assert.deepEqual(kinds(withPolicy({}, { profiles: profile({ minGroupSize: 3 }) }), withPolicy({}, { profiles: profile({}) })), ["profile_changed profiles"], "a raise below the base raised nothing");
+    assert.deepEqual(kinds(withPolicy({}, { profiles: profile({ minGroupSize: 3 }) }), withPolicy({}, { profiles: profile({}) })), ["profile_changed profiles"], "a value below 5 raised nothing");
+    assert.deepEqual(kinds(withPolicy({ minGroupSize: 8 }, { profiles: profile({ minGroupSize: 6 }) }), withPolicy({ minGroupSize: 8 }, { profiles: profile({}) })), ["profile_changed profiles"], "a value below the config's raised nothing");
     assert.deepEqual(kinds(withPolicy({ minGroupSize: 10 }, { profiles: profile({ minGroupSize: 8 }) }), withPolicy({}, { profiles: profile({ minGroupSize: 8 }) })), ["min_group_size_lowered policy.minGroupSize"]);
   });
 

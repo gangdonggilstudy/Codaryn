@@ -171,11 +171,12 @@ function unreadableWidening(
 }
 
 /**
- * U-204 (A-7, R-7, Q-4): a profile's or a workflow definition's own k, which can only raise the
- * config's (effectiveMinGroupSize). Both sides are judged on the config's new value, so a change of
- * the config's own k is said once, at the config: `min_group_size_lowered` at `field` when the runs
- * it applies to would now have a lower k by this source's change alone. A raise below the base
- * raised nothing, so removing it lowers nothing.
+ * U-204 (A-7, R-7, Q-4, DR-70): a profile's or a workflow definition's own k. A run's k is the
+ * largest of 5 and every source's value (effectiveMinGroupSize; never below 5 since V-12 M-1), so
+ * this source can only raise what the config's value gives. Both sides are judged with the config's
+ * new value, so a change of the config's own k is said once, at the config: `min_group_size_lowered`
+ * at `field` when the runs it applies to would now have a lower k by this source's change alone. A
+ * value at or below the config's (or 5) raised nothing, so removing it lowers nothing.
  */
 function ownRaiseLowered(base: number | undefined, before: number | undefined, after: number | undefined, field: string): SettingsWidening[] {
   return effectiveMinGroupSize(base, [after]) < effectiveMinGroupSize(base, [before]) ? [{ kind: "min_group_size_lowered", field }] : [];
@@ -273,8 +274,8 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     if (!oldActions.has(action)) found.push({ kind: "plan_action_allowed", field: "policy.planActions" });
   }
   found.push(...writableWidening(before.policy?.writablePaths, after.policy?.writablePaths, "policy.writablePaths"));
-  // U-204 (A-7, R-7): the config's unreadable paths, and its k (DEFAULT_MIN_GROUP_SIZE when it sets
-  // none, Q-4): lower is a widening, so is a value above the default taken away.
+  // U-204 (A-7, R-7): the config's unreadable paths, and its k as the runs get it (never below 5,
+  // DR-70): lower is a widening, so is a value above 5 taken away; a value below 5 counts as 5.
   found.push(...unreadableWidening(before.policy?.unreadablePaths, after.policy?.unreadablePaths, "policy.unreadablePaths"));
   if (effectiveMinGroupSize(after.policy?.minGroupSize, []) < effectiveMinGroupSize(before.policy?.minGroupSize, [])) {
     found.push({ kind: "min_group_size_lowered", field: "policy.minGroupSize" });
@@ -311,8 +312,8 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     const profile = after.profiles?.[name];
     if (profile === undefined) continue;
     found.push(...writableWidening(old.policy?.writablePaths, profile.policy?.writablePaths, `profiles.${name}.policy.writablePaths`));
-    // U-204 (A-7): a profile's unreadable paths add to the config's and its k only raises it, so
-    // what it takes away is judged with the config's new list and new k.
+    // U-204 (A-7): a profile's unreadable paths add to the config's and its k only raises the
+    // config's, so what it takes away is judged with the config's new list and new k.
     found.push(...unreadableWidening(old.policy?.unreadablePaths, profile.policy?.unreadablePaths, `profiles.${name}.policy.unreadablePaths`, after.policy?.unreadablePaths));
     found.push(...ownRaiseLowered(after.policy?.minGroupSize, old.policy?.minGroupSize, profile.policy?.minGroupSize, `profiles.${name}.policy.minGroupSize`));
   }
@@ -339,8 +340,9 @@ export function wideningOf(before: CodarynConfig, after: CodarynConfig): Setting
     const is = definitionsAfter[id];
     if (is === undefined) continue;
     found.push(...writableWidening(was.policy?.writablePaths, is.policy?.writablePaths, `workflows.${id}.policy.writablePaths`));
-    // U-204 (A-7): mergeWorkflowPolicy joins the definition's unreadable paths with the config's and
-    // takes the larger k, so the definition's own are judged as a profile's.
+    // U-204 (A-7): a definition's unreadable paths are joined with the config's (mergeWorkflowPolicy,
+    // the run's union) and its k is one more source of the run's (effectiveMinGroupSize), so the
+    // definition's own are judged as a profile's.
     found.push(...unreadableWidening(was.policy?.unreadablePaths, is.policy?.unreadablePaths, `workflows.${id}.policy.unreadablePaths`, after.policy?.unreadablePaths));
     found.push(...ownRaiseLowered(after.policy?.minGroupSize, was.policy?.minGroupSize, is.policy?.minGroupSize, `workflows.${id}.policy.minGroupSize`));
   }

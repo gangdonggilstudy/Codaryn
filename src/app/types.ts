@@ -177,9 +177,9 @@ export interface SettingsWidening {
      */
     | "unreadable_path_removed"
     /**
-     * U-204 (A-7, R-7, Q-4): a lower group size k: the config's (`policy.minGroupSize`, the default 5
-     * when it sets none), or a profile's or a workflow definition's own raise judged on the config's
-     * new k. The field is the `minGroupSize` that changed.
+     * U-204 (A-7, R-7, Q-4, DR-70): a lower group size k (never below 5): the config's
+     * (`policy.minGroupSize`, 5 when it sets none), or a profile's or a workflow definition's own
+     * raise judged with the config's new value. The field is the `minGroupSize` that changed.
      */
     | "min_group_size_lowered";
   /** Where: a field path such as "policy.commands[2]". Never a value. */

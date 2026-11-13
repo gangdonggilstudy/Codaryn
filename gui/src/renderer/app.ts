@@ -15,7 +15,7 @@ import { Shell } from "./shell/shell.js";
 import { Palette } from "./shell/palette.js";
 import type { Command } from "./shell/palette.js";
 import { newTaskScreen } from "./run/new-task.js";
-import { RunModel, clock } from "./run/run-model.js";
+import { RunModel, clock, countValues } from "./run/run-model.js";
 import { runScreen } from "./run/run-screen.js";
 import { runsScreen } from "./runs/runs-screen.js";
 import { planScreen } from "./plan/plan-screen.js";
@@ -271,7 +271,8 @@ async function start(): Promise<void> {
       return;
     }
     const seconds = run.elapsed(Date.now());
-    shell?.setRun(texts.format("run.statusBar", { state: texts.format(`run.phase.${run.phase}`), time: seconds === null ? "-" : clock(seconds), turns: String(run.counts.turns), tools: String(run.counts.tools) }));
+    // U-271 (3.6): with the run's limits as denominators once its start gave them.
+    shell?.setRun(texts.format("run.statusBar", { state: texts.format(`run.phase.${run.phase}`), ...countValues(run.counts, seconds) }));
   };
 
   // U-70 (4.5): the last screen when it is one that stands on its own (not a run's plan, changes or report).

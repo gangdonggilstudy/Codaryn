@@ -743,7 +743,8 @@ export interface RunItemView {
 export interface RunEventsPayload {
   readonly runId: string;
   readonly items: readonly RunItemView[];
-  readonly counts: { readonly turns: number; readonly tools: number };
+  /** U-271 (3.6): `limits`, the run's limits once known (protocol.ts RunLimitsView). */
+  readonly counts: { readonly turns: number; readonly tools: number; readonly limits?: { readonly turns: number; readonly tools: number; readonly durationMs: number } };
 }
 
 /**

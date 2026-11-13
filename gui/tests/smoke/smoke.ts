@@ -662,6 +662,8 @@ startGui({
       pretendInactive = true;
       await startTask("a.txt를 읽고 요약한다");
       results["runDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 90_000);
+      // U-271 (3.6): the counts against the limits the run started with.
+      results["runCountsLimits"] = await js("document.getElementById('run-counts')?.textContent ?? null");
       results["runResult"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), runId: document.getElementById('run-result-id')?.textContent ?? null }; })()",
       );

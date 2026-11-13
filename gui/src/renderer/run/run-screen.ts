@@ -17,7 +17,7 @@ import { button, el } from "../shell/dom.js";
 import { withMoves } from "../shell/error-move.js";
 import type { Screen } from "../shell/shell.js";
 import type { RunItemView, RunResultView } from "../../shared/ipc.js";
-import { FINAL_MESSAGE_LIMIT, clock, localTime } from "./run-model.js";
+import { FINAL_MESSAGE_LIMIT, clock, countValues, localTime } from "./run-model.js";
 import { maskingLine, saveReportButton } from "../report/report-screen.js";
 import { copyControl } from "../shell/copy.js";
 import type { RunFilter, RunModel } from "./run-model.js";
@@ -310,7 +310,7 @@ export function runScreen(deps: RunScreenDeps): Screen {
         state.textContent = t.format("run.state", { state: word });
         state.setAttribute("data-phase", phase);
         const seconds = run.elapsed(Date.now());
-        counts.textContent = t.format("run.counts", { time: seconds === null ? "-" : clock(seconds), turns: String(run.counts.turns), tools: String(run.counts.tools) });
+        counts.textContent = t.format("run.counts", countValues(run.counts, seconds));
         if (run.canCancel) cancel.removeAttribute("disabled");
         else cancel.setAttribute("disabled", "");
         cancel.textContent = phase === "starting" ? t.format("run.preparing") : phase === "cancelling" ? t.format("run.cancelling") : t.format("run.cancel");

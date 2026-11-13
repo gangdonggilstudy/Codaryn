@@ -22,6 +22,7 @@ import {
 } from "../contracts/index.js";
 import type {
   ApiProviderName,
+  CliErrorHint,
   CodarynConfig,
   ConfigProfile,
   IntegrityConfig,
@@ -48,7 +49,13 @@ import type { InputErrorPosition, Rec } from "./task.js";
 
 export type ParseConfigOutcome =
   | { readonly ok: true; readonly config: CodarynConfig }
-  | { readonly ok: false; readonly message: string; readonly position?: InputErrorPosition };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly position?: InputErrorPosition;
+      /** U-177: the error's hint when the parser knows the cause (a definition's plan "run"). */
+      readonly hint?: CliErrorHint;
+    };
 
 /** S-9: the strict form, without a trailing slash. */
 function parseApiBaseUrl(value: unknown): string | undefined {
@@ -191,7 +198,11 @@ function prefixed<T>(at: string, parse: () => T): T {
   try {
     return parse();
   } catch (error) {
-    if (error instanceof InputError) return fail(`${at}.${error.message}`, error.code);
+    // U-177: a hint stays with the error (the position is the prefixed message's, as before).
+    if (error instanceof InputError) {
+      if (error.hint === undefined) return fail(`${at}.${error.message}`, error.code);
+      throw new InputError(`${at}.${error.message}`, error.code, undefined, error.hint);
+    }
     throw error;
   }
 }
@@ -351,7 +362,12 @@ export function parseConfig(value: unknown): ParseConfigOutcome {
     return { ok: true, config };
   } catch (error) {
     if (error instanceof InputError) {
-      return { ok: false, message: error.message, ...(error.position === undefined ? {} : { position: error.position }) };
+      return {
+        ok: false,
+        message: error.message,
+        ...(error.position === undefined ? {} : { position: error.position }),
+        ...(error.hint === undefined ? {} : { hint: error.hint }),
+      };
     }
     throw error;
   }

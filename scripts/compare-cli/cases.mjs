@@ -158,6 +158,56 @@ function otherTaskSetup(dir) {
 const digestOf = (step) => (ctx) => String(ctx.json(step)?.plan?.digest ?? "none").slice(0, 12);
 const QUICK_APPLY = ["apply", "--workspace", "work", "--workflow", "organize", "--config", "quick-config.json"];
 
+/**
+ * U-250 (the migration plan's P-2): runs that call the task-type tools (inspect_files, propose_plan,
+ * query_table, propose_changes), whose names the app's run events now show (they read "(unknown
+ * tool)" before). The CLI uses no events, so its output and records must stay the same.
+ */
+/** An organize run that looks at the inbox (inspect_files) before it proposes the plan. */
+function inspectSetup(dir) {
+  planSetup(dir);
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [
+      { toolCalls: [{ name: "inspect_files", args: { path: "inbox", hash: true } }] },
+      { toolCalls: [{ name: "propose_plan", args: { summary: "Sort the inbox", actions: [{ kind: "move", from: "inbox/a.txt", to: "sorted/a.txt" }] } }] },
+    ],
+  });
+}
+/** A config task type with query_table (a table of no personal data: every group shown). */
+function querySetup(dir) {
+  write(dir, "work/data/sales.csv", "region,amount\nnorth,10\nsouth,5\nnorth,2.5\n");
+  write(dir, "config.json", { schemaVersion: 1, workflows: { tables: { tools: ["read_file", "query_table", "write_file"] } } });
+  write(dir, "task.json", task({ id: "compare-query", workflowRef: "tables", goal: "Total the sales by region.", verifiers: [{ id: "report", kind: "file_rules", rules: [{ type: "contains", path: "out/report.md", text: "# Sales" }] }] }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [
+      { toolCalls: [{ name: "query_table", args: { path: "data/sales.csv", groupBy: ["region"], operations: [{ op: "sum", column: "amount" }, { op: "count", column: "amount" }] } }] },
+      { toolCalls: [writeFile("out/report.md", "# Sales\n\n- north 12.5, south 5.\n")] },
+      { text: "The totals are written." },
+    ],
+  });
+}
+/** A config task type with plan "run": the model proposes the files to change (propose_changes). */
+const RUN_PLAN_CONFIG = { schemaVersion: 1, workflows: { rewrite: { tools: ["read_file", "search_files", "write_file", "propose_changes"], plan: "run" } } };
+function runPlanSetup(dir) {
+  write(dir, "work/notes.md", "# Weekly notes\n\n- The site moves next week.\n");
+  write(dir, "config.json", RUN_PLAN_CONFIG);
+  write(dir, "task.json", task({ id: "compare-run-plan", workflowRef: "rewrite", goal: "Write a summary of notes.md into summary.md." }));
+  write(dir, "script.json", {
+    schemaVersion: 1,
+    steps: [{ toolCalls: [{ name: "propose_changes", args: { summary: "Add the summary", files: [{ path: "summary.md", change: "create" }] } }] }, { text: "The plan is proposed." }],
+  });
+}
+/**
+ * The run that carries the plan out starts its script at the first step again, so the step before its
+ * apply writes that run's steps (each build has its own fresh case folder; both get the same file).
+ */
+function carryingScript(dir) {
+  write(dir, "script.json", { schemaVersion: 1, steps: [{ toolCalls: [{ name: "read_file", args: { path: "notes.md" } }] }, { toolCalls: [writeFile("summary.md", SUMMARY)] }, { text: "The summary is written." }] });
+}
+const RUN_PLAN = ["--task", "task.json", "--config", "config.json"];
+
 export const CASES = [
   {
     name: "document-run",
@@ -413,6 +463,24 @@ export const CASES = [
       run(),
       (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx)], terminal: ASKED, answers: ["n"] }),
       (ctx) => ({ args: [...QUICK_APPLY, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] }),
+    ],
+  },
+  // U-250 (P-2): the task-type tools' names in a run's progress lines, records and report.
+  { name: "workflow-tools-inspect", setup: inspectSetup, steps: [run(), report("latest"), report("latest", "--json"), runs("--json")] },
+  { name: "workflow-tools-query", setup: querySetup, steps: [run("--config", "config.json"), report("latest"), report("latest", "--json")] },
+  {
+    name: "workflow-tools-run-plan",
+    setup: runPlanSetup,
+    steps: [
+      run("--config", "config.json"),
+      (ctx) => ({ args: ["plan", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--json"] }),
+      (ctx) => ({ args: ["plan", ...RUN_PLAN, "--run", runIdOf(0)(ctx)] }),
+      (ctx) => {
+        carryingScript(ctx.dir);
+        return { args: ["apply", ...RUN_PLAN, "--run", runIdOf(0)(ctx), "--digest", digestOf(0)(ctx)] };
+      },
+      report("latest"),
+      runs("--json"),
     ],
   },
   // U-254 (the CLI migration's C-1, the app layer's types into the contracts): `changes` is the CLI's

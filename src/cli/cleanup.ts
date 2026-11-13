@@ -8,7 +8,10 @@
  *   more lowercase hex). People's discarded files (`discarded/<runId>/`) need `--delete-discarded`
  *   besides: the two confirmations are apart in the same command (DR-39 P-4). The CLI checks the
  *   given digest against a plan made now; the store makes the plan again under the workspace lock
- *   and removes nothing unless its digest is the same (plan_changed).
+ *   and removes nothing unless its digest is the same (plan_changed). U-268 (nc-human's migration
+ *   preparation, C-9b (a)): both plans are made at one time, the clock read once, as the app's
+ *   cleanup does; before, the store's was made at a second reading, so a run that crossed an
+ *   `--older-than` boundary in between ended the command as cleanup_plan_changed.
  * - DR-44 (가): the records of a run not reverted, or only partly (NOT_REVERTED_WARNINGS), need
  *   `--include-not-reverted` besides (CleanupConfirmation.includeNotReverted): a confirmation apart
  *   from the other two. The preview's head line says how many such runs the plan holds
@@ -234,11 +237,13 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
   const summarize = io.summarizeState ?? storeSummarizeState;
   const plan = io.planCleanup ?? storePlanCleanup;
   const apply = io.applyCleanup ?? storeApplyCleanup;
-  const now = (): string => new Date(io.clock.now()).toISOString();
+  // U-268: one reading of the clock for the plan shown and the store's plan under the lock (the
+  // request's time selects by age only; the cleanup record's time is the store's own).
+  const now = new Date(io.clock.now()).toISOString();
 
   let output: CleanupOutput;
   try {
-    const shown = await plan({ workspaceRoot, selection, now: now() });
+    const shown = await plan({ workspaceRoot, selection, now });
     if (confirm === null) {
       output = { schemaVersion: 1, kind: "cleanup", status: "preview", exitCode: CLEANUP_EXIT_CODES.preview, summary: await summarize({ workspaceRoot }), plan: shown };
     } else if (!shown.digest.startsWith(confirm)) {
@@ -247,7 +252,7 @@ export async function runCleanup(io: CleanupEnvironment): Promise<CommandOutcome
       const outcome = await apply({
         workspaceRoot,
         selection,
-        now: now(),
+        now,
         confirmation: { digest: shown.digest, discarded: deleteDiscarded, includeNotReverted },
       });
       if (!outcome.ok) {

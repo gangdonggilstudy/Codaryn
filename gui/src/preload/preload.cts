@@ -55,6 +55,7 @@ const EVENTS = {
   runEvents: "codaryn:event:runevents",
   runDone: "codaryn:event:rundone",
   engineState: "codaryn:event:enginestate",
+  treeReset: "codaryn:event:treereset",
 } as const;
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
@@ -82,6 +83,8 @@ ipcRenderer.on(EVENTS.runEvents, (_event, payload: unknown) => runEventsListener
 ipcRenderer.on(EVENTS.runDone, (_event, payload: unknown) => runDoneListener?.(plain(payload)));
 let engineListener: ((payload: unknown) => void) | null = null;
 ipcRenderer.on(EVENTS.engineState, (_event, payload: unknown) => engineListener?.(plain(payload)));
+let treeResetListener: (() => void) | null = null;
+ipcRenderer.on(EVENTS.treeReset, () => treeResetListener?.());
 
 const api = Object.freeze({
   info: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.info),
@@ -150,6 +153,10 @@ const api = Object.freeze({
   /** U-64: the engine's state when it changes (one listener at a time). */
   onEngineState: (listener: unknown): void => {
     engineListener = typeof listener === "function" ? (listener as (payload: unknown) => void) : null;
+  },
+  /** U-123: the tree's ids were dropped (settings written); the tree is read again. One listener at a time. */
+  onTreeReset: (listener: unknown): void => {
+    treeResetListener = typeof listener === "function" ? (listener as () => void) : null;
   },
   /** One listener at a time; a new one replaces the old. */
   onWorkspaceOpened: (listener: unknown): void => {

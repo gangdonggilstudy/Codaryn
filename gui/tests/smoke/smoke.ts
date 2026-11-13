@@ -124,6 +124,8 @@ const notices: { readonly title: string; readonly body: string }[] = [];
 const openAnswers: (string | null)[] = [];
 /** U-62: what the app would have put on the clipboard (the OS clipboard is never touched by the test). */
 const copied: string[] = [];
+/** U-123: run starts whose button was off when the test pressed it (diagnostic). */
+const startsBlocked: unknown[] = [];
 /** U-66: the paths "show in folder" would select (recorded, not the OS file manager). */
 const revealed: string[] = [];
 const COPY_KEY_SHAPED = ["sk", "ant", "FAKE".repeat(10)].join("-");
@@ -295,7 +297,8 @@ startGui({
           await waitFor("document.getElementById('task-run') ? 'ready' : null", 30_000);
           const runOff = await js("[document.getElementById('task-run')?.hasAttribute('disabled'), document.getElementById('task-locked')?.hasAttribute('hidden')]");
           unlinkSync(lockFile);
-          await pressF5();
+          // U-123 (R-87 U-68 L1): showing the screen again looks again; no F5.
+          await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
           const freed = await waitFor("document.getElementById('task-locked')?.hasAttribute('hidden') === true ? 'free' : null", 60_000);
           const runOn = await js("document.getElementById('task-run')?.hasAttribute('disabled') === false");
           return { first, held, line, runOff, freed, runOn };
@@ -305,6 +308,9 @@ startGui({
       })();
       // U-69 (11, 3.10): the config file shown in its folder (recorded), and a language written in the
       // settings redraws the window in it at once; "auto" brings the OS language back.
+      const treeIdOf = async (name: string): Promise<string> =>
+        ((await js(`window.codaryn.tree(${JSON.stringify(second.ok ? second.handle : "")}, null, 0)`)) as { entries?: { id: string | null; name: string }[] }).entries?.find((entry) => entry.name === name)?.id ?? "";
+      const idBeforeWrites = await treeIdOf("a.txt");
       results["languageNow"] = await (async () => {
         await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
         await waitFor("document.getElementById('settings-reveal-config') ? 'ready' : null", 30_000);
@@ -327,6 +333,14 @@ startGui({
         const screen = await js("document.getElementById('work')?.getAttribute('data-screen')");
         const back = await choose("auto", from);
         return { shown, file, switched, renamed: homeAfter !== homeBefore, screen, back, lang: await js("document.documentElement.lang === " + JSON.stringify(from)) };
+      })();
+      // U-123 (R-82 U-103 L1): the settings writes above dropped the tree's ids; the window read its tree again.
+      results["treeIdsDropped"] = await (async () => {
+        const copy = (id: string): Promise<unknown> => js(`window.codaryn.copyPath(${JSON.stringify(second.ok ? second.handle : "")}, ${JSON.stringify(id)}).then((r) => (r.ok ? 'copied' : r.code))`);
+        const old = await copy(idBeforeWrites);
+        const fresh = await copy(await treeIdOf("a.txt"));
+        const reread = await waitFor("document.querySelector('.tree')?.getAttribute('data-tree-ready') ?? null", 20_000);
+        return { taken: idBeforeWrites.length === 32, old, fresh, reread };
       })();
       // U-70 (4.5, 3.1): the separator by the keys and by the pointer, and the width and screen in gui-state.json.
       results["windowState"] = await (async () => {
@@ -630,6 +644,9 @@ startGui({
       const taskWith = async (workflow: string, goal: string): Promise<void> => {
         await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
         await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+        // U-123: a start whose run button is off is recorded (it would not start; the reason helps).
+        const off = await js("document.getElementById('task-run')?.hasAttribute('disabled') ? { workflow: " + JSON.stringify(workflow) + ", locked: document.getElementById('task-locked')?.hasAttribute('hidden') === false, message: document.getElementById('task-message')?.textContent ?? null } : null");
+        if (off !== null) startsBlocked.push(off);
         await js(`(() => { document.getElementById('task-workflow').value = ${JSON.stringify(workflow)}; const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)}; document.getElementById('task-run').click(); return true; })()`);
       };
       // A: the task kind chosen directly (R-14 L-3, R21-M-1): the plan view, its apply and the
@@ -1080,6 +1097,7 @@ startGui({
         const tab = await js("[document.getElementById('report')?.getAttribute('data-report-ready') ?? null, document.getElementById('report-tab-log') !== null, document.getElementById('report-log-notes')?.textContent ?? null]");
         return { ready, lines: lines > 0, checks, notes, recordsNote, damaged, ...(ready === "complete" ? {} : { tab }) };
       })();
+      results["startsBlocked"] = startsBlocked;
       results["renderer"] = await js(
         "({ process: typeof process, require: typeof require, ipcRenderer: typeof ipcRenderer, module: typeof module, api: Object.keys(window.codaryn).sort().join(',') })",
       );

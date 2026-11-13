@@ -81,6 +81,8 @@ export interface CodarynApi {
   restartEngine(): Promise<unknown>;
   /** U-64: the engine's state when it changes ("ready", or an error code). */
   onEngineState(listener: (payload: unknown) => void): void;
+  /** U-123: the main process dropped the tree's ids (settings written). */
+  onTreeReset(listener: () => void): void;
   listRuns(workspace: string): Promise<unknown>;
   previewRevert(workspace: string, runId: string): Promise<unknown>;
   revert(preview: string): Promise<unknown>;

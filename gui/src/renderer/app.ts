@@ -115,6 +115,8 @@ async function start(): Promise<void> {
         void api.saveUi({ treeWidth: width });
       },
       shown: (id) => {
+        // U-123 (R-87 U-68 L1): while another process's lock is seen, showing these screens looks again.
+        if ((id === "home" || id === "newtask") && lockedByOther()) void openCheck.run(current);
         if (id === savedScreen) return;
         savedScreen = id;
         void api.saveUi({ screen: id });
@@ -286,6 +288,8 @@ async function start(): Promise<void> {
     updateRunStatus();
   });
 
+  // U-123 (R-82 U-103 L1): settings were written; the main process dropped the tree's ids, so it is read again.
+  api.onTreeReset(() => tree?.refresh());
   api.onWorkspaceOpened((payload) => {
     const opened = asOpen({ ok: true, ...(typeof payload === "object" && payload !== null ? payload : {}) });
     if (opened.ok) setWorkspace({ handle: opened.handle, name: opened.name });

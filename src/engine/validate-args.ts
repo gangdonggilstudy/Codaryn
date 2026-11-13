@@ -6,7 +6,17 @@
  * an unknown key among them, is never put in the text.
  */
 
-import { CONTENT_HASH_PATTERN_SOURCE, MAX_COMMAND_TIMEOUT_MS, MAX_PLAN_ACTIONS, MAX_PLAN_SUMMARY_CHARS, MAX_PLANNED_FILES } from "../contracts/index.js";
+import {
+  AGGREGATE_OPS,
+  CONTENT_HASH_PATTERN_SOURCE,
+  MAX_COMMAND_TIMEOUT_MS,
+  MAX_PLAN_ACTIONS,
+  MAX_PLAN_SUMMARY_CHARS,
+  MAX_PLANNED_FILES,
+  MAX_QUERY_GROUP_COLUMNS,
+  MAX_QUERY_OPERATIONS,
+  TABLE_FORMATS,
+} from "../contracts/index.js";
 import type {
   JsonObject,
   JsonValue,
@@ -45,6 +55,13 @@ export const ARGS_RULES = {
   files: `required: a list of 1 to ${MAX_PLANNED_FILES} files`,
   file: 'required: an object with a path and change "create" or "modify"',
   fileChange: 'must be "create" or "modify"',
+  // U-208 (bundle A, A-5): query_table.
+  tableFormat: 'must be "csv", "tsv" or "jsonl"',
+  describeOnly: "with describe true, give no groupBy, operations or after",
+  groupBy: `must be a list of at most ${MAX_QUERY_GROUP_COLUMNS} column names`,
+  operations: `required: a list of 1 to ${MAX_QUERY_OPERATIONS} operations, or describe true`,
+  operation: 'required: an object with op ("sum", "count", "min", "max" or "mean") and column',
+  op: 'must be "sum", "count", "min", "max" or "mean"',
 } as const;
 
 /** The lead of the message an argument problem gives the model. */
@@ -153,6 +170,39 @@ function plannedFileProblem(file: JsonValue | undefined, field: string): ArgsPro
   return file["change"] === "create" || file["change"] === "modify" ? null : { field: `${field}.change`, rule: ARGS_RULES.fileChange };
 }
 
+/** U-208: one query_table operation: an op and a column, nothing else. */
+function queryOperationProblem(operation: JsonValue | undefined, field: string): ArgsProblem | null {
+  if (!isObject(operation)) return { field, rule: ARGS_RULES.operation };
+  const problem = unknownKeys(operation, ["op", "column"], field) ?? nonEmpty(operation, "column", field);
+  if (problem !== null) return problem;
+  return (AGGREGATE_OPS as readonly unknown[]).includes(operation["op"]) ? null : { field: `${field}.op`, rule: ARGS_RULES.op };
+}
+
+/** U-208: query_table's arguments: describe alone, or 1 to 8 operations over up to 2 group columns. */
+function queryTableProblem(args: JsonObject): ArgsProblem | null {
+  const problem = unknownKeys(args, ["path", "format", "describe", "groupBy", "operations", "after"], "") ?? nonEmpty(args, "path");
+  if (problem !== null) return problem;
+  if (args["format"] !== undefined && !(TABLE_FORMATS as readonly unknown[]).includes(args["format"])) return { field: "format", rule: ARGS_RULES.tableFormat };
+  if (args["describe"] !== undefined && typeof args["describe"] !== "boolean") return { field: "describe", rule: ARGS_RULES.boolean };
+  if (args["describe"] === true) {
+    return args["groupBy"] === undefined && args["operations"] === undefined && args["after"] === undefined ? null : { field: "describe", rule: ARGS_RULES.describeOnly };
+  }
+  const groupBy = args["groupBy"];
+  if (groupBy !== undefined) {
+    // A name given twice is the table's problem (`duplicate_column`, query.ts), told after reading it.
+    if (!Array.isArray(groupBy) || groupBy.length > MAX_QUERY_GROUP_COLUMNS || !groupBy.every(isNonEmptyString)) {
+      return { field: "groupBy", rule: ARGS_RULES.groupBy };
+    }
+  }
+  const operations = args["operations"];
+  if (!Array.isArray(operations) || operations.length < 1 || operations.length > MAX_QUERY_OPERATIONS) return { field: "operations", rule: ARGS_RULES.operations };
+  for (const [index, operation] of operations.entries()) {
+    const found = queryOperationProblem(operation, `operations[${index}]`);
+    if (found !== null) return found;
+  }
+  return args["after"] === undefined || isNonEmptyString(args["after"]) ? null : { field: "after", rule: ARGS_RULES.optionalNonEmpty };
+}
+
 /**
  * G-B: the shapes WORKFLOW_TOOL_DEFINITIONS describe. Structure only, as for the built-in tools.
  * U-15 (AXM-5): the first problem, or null when they fit.
@@ -191,6 +241,8 @@ export function workflowToolArgsProblem(name: WorkflowToolName, args: JsonObject
       }
       return null;
     }
+    case "query_table":
+      return queryTableProblem(args);
   }
 }
 

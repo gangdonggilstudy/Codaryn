@@ -25,14 +25,15 @@ const call = (id: string, name: string, args: ToolCall["args"]): ToolCall => ({ 
 
 describe("U-170: offeredTools by plan mode", () => {
   test("run: the read tools and its own plan tool only, never the other mode's plan tool or a writing tool", () => {
-    // U-180 (B-3): propose_changes is a task type tool now, offered in a run plan run only.
-    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "run"), ["read_file", "search_files", "inspect_files", "propose_changes"]);
+    // U-180 (B-3): propose_changes is a task type tool now, offered in a run plan run only. U-208:
+    // query_table is a read tool by its descriptor, offered with the other read tools.
+    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "run"), ["read_file", "search_files", "inspect_files", "propose_changes", "query_table"]);
   });
 
   test("apply and none offer what they did before", () => {
-    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "apply"), ["read_file", "search_files", "inspect_files", "propose_plan"]);
+    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "apply"), ["read_file", "search_files", "inspect_files", "propose_plan", "query_table"]);
     assert.deepEqual(offeredTools([...TOOL_NAMES], "none"), [...TOOL_NAMES]);
-    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "none"), ["read_file", "search_files", "write_file", "run_command", "inspect_files"]);
+    assert.deepEqual(offeredTools([...ALL_TOOL_NAMES], "none"), ["read_file", "search_files", "write_file", "run_command", "inspect_files", "query_table"]);
   });
 });
 

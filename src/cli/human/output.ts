@@ -433,6 +433,11 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // G-A: a plan waiting for approval says so first.
       const planReady = pair?.reason === "plan_pending" && result.plan !== undefined && isCount(result.plan.actions);
       if (planReady && result.plan !== undefined) out.push(catalog.format("summary.plan_ready", { actions: result.plan.actions }));
+      // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run (EngineResult.planRunId),
+      // as an apply's summary does; absent in every other run, so no other summary changes.
+      const carried: unknown = result.planRunId;
+      const carriedPlan = typeof carried === "string" ? toRunId(carried) : null;
+      if (carriedPlan !== null) out.push(catalog.format("summary.apply_plan_run", { runId: carriedPlan }));
       // One labelled fact per line: the catalog's own texts use " · " inside a fact (usage).
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];
       const changes = Array.isArray(result.changes) ? result.changes : [];
@@ -466,6 +471,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
 
       const denied = isCount(context.deniedToolCalls) ? context.deniedToolCalls : 0;
       if (denied > 0) out.push(catalog.format("summary.denied", { count: denied }));
+      // U-198 (B-4): of those, the writes no writable list of the run covers (outside a carried plan's
+      // approved files). The field is optional: absent is 0, no line.
+      const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
+      if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
       // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
@@ -771,6 +780,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
         const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
         if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
+        // U-198 (DR-69 B-3): a run that carried out a `run` plan names that plan run in the same place
+        // (RunListEntry.planRunId on a run that is not an apply run; absent on every other run).
+        const carriedPlan = entry.kind !== "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
+        if (carriedPlan !== null) status += ` · ${catalog.format("runs.carried_plan", { runId: carriedPlan })}`;
         // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
         // review.json); the time is in the JSON only. Before the marks of what came after the run.
         const review: unknown = entry.review;

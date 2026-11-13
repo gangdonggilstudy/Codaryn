@@ -55,6 +55,8 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.changes": "Files changed: {count}",
   "summary.denied": "Denied calls: {count}",
   "summary.failed": "Failed calls: {count}",
+  // U-198 (draft for nb-i18n): writes outside the files the run may write.
+  "summary.denied_not_writable": "Writes refused because the file is not among those this run may write: {count}",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",
@@ -105,6 +107,11 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.changes.digest_guarantee":
     "The digest names exactly these files, the contents the files to modify had when the plan was made, and the words above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
   "apply.question": "Apply this plan?",
+  // U-198 (drafts for nb-i18n): apply's question for a run plan.
+  "apply.changes.what": "Approving starts a run whose file tools can write only these {count} file(s).",
+  "apply.changes.summary_note": "The instruction above is the model's own words: the run is told them, but nothing checks that it follows them. Only the file list is enforced.",
+  "apply.changes.commands_note": "This task also allows commands, and a command the policy allows is not limited to these files.",
+  "apply.changes_question": "Start the run that makes these changes?",
   "apply.unsafe_move_question": "Moves of this plan that could replace a file at the destination, since the drive has no hard links: {count}. Nothing was moved. Apply again and make such moves anyway, for this apply only?",
   "review.recorded": "Review of run {runId}: {verdict}.",
   "review.recorded_replaced": "Review of run {runId}: {verdict} (an earlier review was replaced).",
@@ -230,6 +237,8 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.review": "review: {verdict}",
   // U-139 (UXM-5; draft for nb-i18n): the plan run an apply run applied.
   "runs.apply_of": "applies the plan of run {runId}",
+  // U-198 (draft for nb-i18n): a run that carried out a run plan.
+  "runs.carried_plan": "carries out the plan of run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",

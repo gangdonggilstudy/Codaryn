@@ -250,7 +250,7 @@ const U13_DIALOGS = [
 const U22_DIALOGS = process.platform === "win32" ? ["cleanup.message", "cleanup.notReverted.message"] : [];
 // U-62: copyText joined the page's functions (a run id or a digest's first 12 only; no path, R-73).
 // U-63: startTaskRun joined them (no path argument; the main process's dialogs choose the files).
-const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onTreeReset,onWorkspaceOpened,openFolder,openRecent,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,tree";
+const API = "applyCleanup,applyPlan,applySettings,cancelRun,changes,checkPlan,copyPath,copyText,createSettings,doctor,forgetRecent,info,listModels,listRuns,onEngineState,onRunDone,onRunEvents,onTreeReset,onWorkspaceOpened,openFolder,openRecent,openText,plan,previewCleanup,previewRevert,proposeSettings,recent,report,restartEngine,reveal,revealConfig,revert,revertConsent,review,runEvents,saveReport,saveText,saveUi,selectModel,settings,settingsSuggestions,startRun,startTaskRun,stateSummary,textDirty,tree";
 seen.apiRequests = apiRequests;
 seen.discardLeftStatuses = ["discardLeftKept", "discardLeftKeepBox", "discardLeftBoth"].map((key) => seen[key]?.status ?? null);
 seen.setupSandbox = { made: sandboxMade, realUntouched: realDefaultAfter === realDefaultBefore };
@@ -296,6 +296,45 @@ const expected = [
     (v) =>
       JSON.stringify(v) ===
       JSON.stringify({ masked: [null], top: "copied", nested: "copied", unknown: "unknown_entry", pathString: "invalid_args", otherWorkspace: "unknown_workspace", button: "ok", texts: ["a.txt", "sub/b.txt", "a.txt"] }),
+  ],
+  // U-174 (DR-72, 3.14): the text view by id: a plain CRLF file comes with LF and editable, a key-shaped text masked and read only
+  // (the key never reaches the page), a large file and a binary one not opened; an unknown id and a path refused; from the tree's Open,
+  // the file is a read-only textarea and Close goes back.
+  [
+    "textView",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        plain: { opened: true, text: "line one\nline two\n", masked: false, editable: true, reasons: [], lines: 3 },
+        key: { opened: true, masked: true, editable: false, firstReason: "masked", keyShown: false },
+        big: "too_large",
+        binary: "not_text",
+        unknown: "unknown_entry",
+        pathString: "invalid_args",
+        // U-184: a.txt is editable now (the textarea is not read only).
+        ui: { ready: "opened", value: "alpha", readOnly: false, back: "home" },
+      }),
+  ],
+  // U-184 (DR-72, 3.14): saving. The first save of an opened file asks once (the main process's dialog),
+  // the CRLF file is written with CRLF, a later save does not ask, the old token is gone; a key-shaped text
+  // is refused and a file changed on disk is a conflict (both write nothing). In the window: typing marks the
+  // edit unsaved, leaving asks (keep stays), Save writes and the edit is saved.
+  [
+    "textEdit",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        editable: true,
+        first: "saved",
+        disk: "line one\r\nline 2\r\n",
+        second: "saved",
+        asked: 1,
+        oldToken: "unknown_entry",
+        refused: { status: "text_refused", problems: ["masked"] },
+        conflict: "conflict",
+        unchangedOnDisk: true,
+        ui: { unsaved: true, leaveAsked: true, stayed: "text", saved: "saved", asked: 2, disk: "alpha beta", clean: true },
+      }),
   ],
   // U-67 (3.13, 10): the palette's fixed list (cancel not available with no run), found by name and run, Escape gives the focus back; Ctrl+N, Ctrl+comma, F5 and the first-letter jump.
   [
@@ -712,7 +751,8 @@ const expected = [
   ["setupCheckItems", (v) => typeof v === "number" && v >= 5],
   ["setupOnDisk", (v) => v.npmTest === true && v.packageJson === true],
   ["setupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
-  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
+  // U-184: the text view's two first-save confirmations (textEdit) come first.
+  ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's
   // network service held a UDP socket for the DNS lookup of its dictionary download.)

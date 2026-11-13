@@ -127,7 +127,10 @@ function matchesRule(rule: CommandRule, args: readonly string[]): boolean {
  * entry covers nothing.
  */
 function compileWritablePathSets(sets: readonly WritablePathSet[] | undefined): readonly PathSet[] {
-  return (sets ?? []).map((set) => compilePathSet(set.entries, { match: set.source === "plan" ? "exact" : "prefix", onUnusable: "misses" }));
+  // Review V-11 H-1: the plan's entries are effective paths; they cover only themselves, unlinked.
+  return (sets ?? []).map((set) =>
+    compilePathSet(set.entries, set.source === "plan" ? { match: "exact", onUnusable: "misses", entryLinks: "refuse" } : { match: "prefix", onUnusable: "misses" }),
+  );
 }
 
 export const createPolicyGate: CreatePolicyGate = ({ config, workspace, writablePathSets }) => {

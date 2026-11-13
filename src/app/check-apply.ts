@@ -203,8 +203,8 @@ export async function checkApplyIn(source: ApplyCheckSource, operations: ApplyCh
     let released = false;
     for (let attempt = 0; attempt < 2 && !released; attempt += 1) {
       try {
-        await release({ workspaceRoot: workspace.root, runId: lockId });
-        released = true;
+        // U-193 (as V-1 L-1): the store answers false when the lock is not this check's any more; not taken back either.
+        released = (await release({ workspaceRoot: workspace.root, runId: lockId })) === true;
       } catch {
         // Tried once more, then told.
       }

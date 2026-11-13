@@ -29,6 +29,7 @@ import { cancelActiveRun, registerIpc, texts } from "./ipc.js";
 import { RunManager } from "./runs.js";
 import { RunHistory } from "./history.js";
 import { PlanApprovals } from "./plans.js";
+import { TextEdits } from "./text-edits.js";
 import { SettingsProposals } from "./settings-proposals.js";
 import { CleanupPreviews } from "./cleanup-previews.js";
 import { saveDialogOptions } from "./save-file.js";
@@ -200,6 +201,10 @@ export function startGui(options: GuiOptions): void {
   let language: DialogLanguage = "en";
   const history = new RunHistory((size) => randomBytes(size), () => Date.now());
   const approvals = new PlanApprovals((size) => randomBytes(size), () => Date.now());
+  // U-184 (3.14): the text view's edit tokens, and whether it holds an unsaved edit.
+  const textEdits = new TextEdits((size) => randomBytes(size));
+  let textDirty = false;
+  let discardText = false;
   const runs = new RunManager({
     send: (channel, payload) => {
       if (window !== null && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -334,6 +339,17 @@ export function startGui(options: GuiOptions): void {
       },
       writeClipboard: options.writeClipboard ?? ((text) => clipboard.writeText(text)),
       showItemInFolder: options.showItemInFolder ?? ((path) => shell.showItemInFolder(path)),
+      textEdits,
+      // U-184 (principle 6, GUI-D22): once per opened file; "do not save" is the default and what Esc gives.
+      confirmTextSave: async () => {
+        const buttons = [dialogText(language, "textSave.confirm"), dialogText(language, "textSave.keep")];
+        const answer = await ask("textSave.message", { type: "question", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "textSave.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true });
+        return answer === 0;
+      },
+      setTextDirty: (dirty) => {
+        textDirty = dirty;
+        if (dirty) discardText = false;
+      },
       uiMemory: async () => {
         const memory = await workspaces.windowMemory();
         return { screen: memory.screen, treeWidth: memory.treeWidth };
@@ -478,7 +494,21 @@ export function startGui(options: GuiOptions): void {
     window.once("ready-to-show", () => window?.show());
     // 3.6: closing while a run goes on asks first (default: keep running); then cancel, and wait
     // for the end (result.json written, lock released) at most 10 seconds.
+    // U-184 (3.14): closing with an unsaved edit in the text view asks first (default: keep the window).
     window.on("close", (event) => {
+      if (!textDirty || discardText) return;
+      event.preventDefault();
+      void (async () => {
+        const buttons = [dialogText(language, "textClose.discard"), dialogText(language, "textClose.keep")];
+        const answer = await ask("textClose.message", { type: "question", title: dialogText(language, "closeRun.title"), detail: dialogText(language, "textClose.detail"), buttons, defaultId: 1, cancelId: 1, noLink: true });
+        if (answer !== 0) return;
+        discardText = true;
+        if (window !== null && !window.isDestroyed()) window.close();
+      })();
+    });
+    window.on("close", (event) => {
+      // U-184: the unsaved edit is asked about first; this asks after it was discarded.
+      if (textDirty && !discardText) return;
       if (closeAfterRun || !runs.running) return;
       event.preventDefault();
       void (async () => {
@@ -495,6 +525,8 @@ export function startGui(options: GuiOptions): void {
     });
     window.on("closed", () => {
       window = null;
+      textEdits.clear();
+      textDirty = false;
       workspaces.clear();
       history.clear();
       approvals.clear();

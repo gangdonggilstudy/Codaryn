@@ -35,11 +35,16 @@ function lockedMessage(holder: LockInfo | null): string {
 /**
  * `parentEnv` is the run's environment after the variables file was loaded. `onAssembled` receives
  * the run's privacy gateway and the real workspace root once the lock is held.
+ * U-193 (after U-176): when the run's lock cannot be released at its end (the release threw after
+ * its retries, or answered false), `onLockLeft` is called and the run's end goes on: its result
+ * (written to result.json first) stays, not an internal error. The lock is then held while this
+ * process lives, and a later run of another process finds it stale once it has ended.
  */
 export function createAppAssemble(
   parentEnv: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform,
   onAssembled: (assembled: { readonly privacy: PrivacyGateway; readonly workspaceRoot: string }) => void,
+  onLockLeft: () => void = () => undefined,
 ): Assemble {
   return async (input) => {
     const { task, runId, model, secrets, clock, signal } = input;
@@ -101,7 +106,14 @@ export function createAppAssemble(
           try {
             if (result !== null) await writeResult(workspaceRoot, result);
           } finally {
-            await releaseLock({ workspaceRoot, runId });
+            // U-193: a lock left is told, never a reason to lose the run's result.
+            let released = false;
+            try {
+              released = (await releaseLock({ workspaceRoot, runId })) === true;
+            } catch {
+              released = false;
+            }
+            if (!released) onLockLeft();
           }
         },
       };

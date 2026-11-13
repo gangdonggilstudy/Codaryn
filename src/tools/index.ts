@@ -6,6 +6,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  effectiveMinGroupSize,
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_COMMAND_OUTPUT_BYTES,
   MAX_SEARCH_ENTRIES,
@@ -47,6 +48,7 @@ import { nodePlanFileOps } from "./plan-files.js";
 import type { PlanFileOps } from "./plan-files.js";
 import { createPlannedFileProbe as plannedFileProbeFor, inspectFiles, proposeChanges, proposePlan } from "./workflow-tools.js";
 import { listVisible } from "./visible-list.js";
+import { queryTableTool } from "./query-table.js";
 
 export { createPlanExecutor, discardedRootOf } from "./plan-executor.js";
 export type { CountingPlanExecutor, PlanExecutorDeps } from "./plan-executor.js";
@@ -126,6 +128,13 @@ export interface ToolRunnerOptions {
    * empty: nothing is left out, as before (Codex V-13b L-1).
    */
   readonly unreadablePaths?: readonly string[];
+  /**
+   * U-208 (bundle A, A-5): the run's k, ResolvedTaskSpec.minGroupSize, for query_table on a table
+   * under the unreadable paths. Absent: DEFAULT_MIN_GROUP_SIZE. Never below 5 (effectiveMinGroupSize).
+   */
+  readonly minGroupSize?: number;
+  /** For tests: a smaller table size limit for query_table than MAX_QUERY_TABLE_BYTES. */
+  readonly maxTableBytes?: number;
 }
 
 /**
@@ -570,6 +579,17 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
             return await proposePlan(workflowDeps, call.args, signal);
           case "propose_changes":
             return await proposeChanges(workflowDeps, call.args, signal);
+          case "query_table":
+            return await queryTableTool(
+              {
+                workspace,
+                ...(unreadable === null ? {} : { unreadable }),
+                minGroupSize: effectiveMinGroupSize(options.minGroupSize, []),
+                ...(options.maxTableBytes === undefined ? {} : { maxTableBytes: options.maxTableBytes }),
+              },
+              call.args,
+              signal,
+            );
         }
       } catch {
         // No error detail: it could carry raw file text or paths.

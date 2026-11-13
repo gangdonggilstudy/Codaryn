@@ -209,6 +209,8 @@ export const KO_MESSAGES: MessageTexts = {
   "runs.apply_actions": "동작 {count}",
   "runs.apply_action_one": "동작 1",
   "runs.review": "검토: {verdict}",
+  // U-139 (UXM-5, nb-i18n이 다듬을 초안): 적용 실행이 적용한 계획 실행.
+  "runs.apply_of": "실행 {runId}의 계획 적용",
   "report.records_changed": "이 실행에는 기록 변경 표시가 있습니다. 실행이 아닌 것이 기록을 바꿔, 이 보고서가 실제로 일어난 일과 다를 수 있습니다.",
   "report.final_message": "에이전트의 마지막 답입니다. 에이전트의 말이며 검증된 사실이 아닙니다.",
   "changes.records_changed": "이 실행에는 기록 변경 표시가 있어 파일 글을 보이지 않습니다. 경로와 상태만 보입니다.",

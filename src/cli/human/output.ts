@@ -724,6 +724,9 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
               ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
               : catalog.format(`status.${pair.status}`);
         let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
+        // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
+        const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
+        if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
         // U-129 (2), AXM-21: a person's verdict on a run that waited for review (the store reads its
         // review.json); the time is in the JSON only. Before the marks of what came after the run.
         const review: unknown = entry.review;

@@ -80,6 +80,12 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   ];
   item.setAttribute("data-status", run.status ?? "none");
   item.append(el("span", facts.filter((fact) => fact !== "").join(" · "), { class: "run-facts" }), el("span", run.taskId, { class: "task-id" }), el("code", run.runId, { class: "run-id", lang: "en" }), copyControl(t, t.format("copy.runId"), () => copy(run.runId), { "data-copy": run.runId }));
+  // U-244 (U-139, U-198): an apply run names the plan run it applied, a run that carried out a changes plan
+  // the plan run it carried out, right after its facts, in the CLI's runs words.
+  if (run.planRunId != null) {
+    const of = run.kind === "apply" ? "apply" : "carried";
+    item.append(el("span", t.format(of === "apply" ? "runs.applyOf" : "runs.carriedPlan", { runId: run.planRunId }), { class: "plan-of", "data-plan-of": run.planRunId, "data-plan-of-kind": of }));
+  }
   if (run.reverted !== null) item.append(el("span", t.format(run.reverted.status === "partial" ? "runs.revertedPartial" : "runs.reverted", { time: localDateTime(run.reverted.at) }), { class: "reverted" }));
   if (run.revertRecordDamaged) item.append(el("span", t.format("runs.revertDamaged"), { class: "damaged" }));
   // UXM-14, DR-38: as the CLI's runs says it (U-157, U-163: a short mark; its explanation is one line under the list).
@@ -87,7 +93,15 @@ function row(t: Texts, run: RunListItem, preview: (runId: string) => void, openP
   // U-61 (U-16, R-55): what became of this plan's apply, by the contract's rule, in the CLI's runs words.
   if (run.planApply != null) {
     const { state, applyRunId, reason } = run.planApply;
-    item.append(el("span", t.format(`runs.planApply.${state}`, { runId: applyRunId, reason: reason ?? "-" }), { class: "plan-apply", "data-plan-apply": state }));
+    // U-226 (U-221): a run plan carried out by a run, in the CLI's carried words (record_missing keeps the apply's).
+    const carried = run.planApply.carried === true && state !== "record_missing";
+    item.append(
+      el("span", t.format(carried ? `runs.planCarried.${state}` : `runs.planApply.${state}`, { runId: applyRunId, reason: reason ?? "-" }), {
+        class: "plan-apply",
+        "data-plan-apply": state,
+        ...(carried ? { "data-plan-carried": "true" } : {}),
+      }),
+    );
   }
   const open = button(t.format("runs.preview"), () => preview(run.runId), { "data-preview": run.runId });
   open.setAttribute("aria-label", `${t.format("runs.preview")}: ${run.runId}`);

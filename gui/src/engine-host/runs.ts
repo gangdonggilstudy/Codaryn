@@ -11,7 +11,7 @@
  *   no journal path; every text is masked by the engine and cleaned again here.
  */
 
-import { MAX_FINAL_MESSAGE_CHARS, maskingOf } from "../shared/ipc.js";
+import { MAX_FINAL_MESSAGE_CHARS, isRunId, maskingOf } from "../shared/ipc.js";
 import { encodeLine, parseQuestion } from "../shared/protocol.js";
 import type { HostRunItem, PermissionQuestion } from "../shared/protocol.js";
 import { failureOf } from "./settings.js";
@@ -41,8 +41,12 @@ export interface HostApplyRequest {
 
 export interface RunsDeps {
   readonly startRun: (request: HostStartRunRequest, observer: RunObserverOf) => Promise<unknown>;
-  /** GU-5: the app layer's applyPlan (ApplyPlanRequest); absent before the general task commands. */
-  readonly applyPlan?: (request: HostApplyRequest, observer: { onEvent(event: unknown): void }) => Promise<unknown>;
+  /**
+   * GU-5: the app layer's applyPlan (ApplyPlanRequest); absent before the general task commands.
+   * U-226 (U-218): a run plan's apply is a model run: its events come by `onRunEvent` and its
+   * permission questions by `confirm`, as a run's.
+   */
+  readonly applyPlan?: (request: HostApplyRequest, observer: RunObserverOf & { onRunEvent(event: unknown): void }) => Promise<unknown>;
   readonly itemOf: RunItemOf;
   readonly shown: Shown;
   /** The display filter that keeps line breaks and tabs (the agent's last message); by line with `shown` when absent. */
@@ -105,12 +109,15 @@ export function runResultValue(outcome: unknown, shown: Shown, shownText: Shown 
         durationMs: num(usage["durationMs"]),
       },
       notices: texts(result["notices"], shown),
-      plan: isObj(plan) && typeof plan["digest"] === "string" ? { digest: plan["digest"], actions: num(plan["actions"]) } : null,
+      // U-226 (U-221): a run plan's `actions` is its number of files; its kind says so.
+      plan: isObj(plan) && typeof plan["digest"] === "string" ? { digest: plan["digest"], actions: num(plan["actions"]), ...(plan["kind"] === "changes" ? { kind: "changes" } : {}) } : null,
       review: isObj(review) ? { checklist: texts(review["checklist"], shown) } : null,
       protectedChanged: Array.isArray(result["protectedChanged"]) ? result["protectedChanged"].length : null,
       finalMessage: finalMessageValue(result["finalMessage"], shownText),
       // U-40 (DR-52): the masking counts, two counts only; null when none or not counts.
       masking: maskingOf(result["masking"]),
+      // U-226 (R-109, U-193): the run's workspace lock could not be released at its end; told, never hidden.
+      ...(outcome["lockLeft"] === true ? { lockLeft: true } : {}),
     },
   };
 }
@@ -187,7 +194,7 @@ export function taskForm(workspace: string, profile: string | null, workflowRef:
 export function applyResultValue(outcome: unknown, shown: Shown, unsafeMoves: number | null): Obj | HostFailure {
   if (!isObj(outcome) || outcome["ok"] !== true || !isObj(outcome["output"])) return failureOf(outcome);
   const output = outcome["output"];
-  const base = runResultValue({ ok: true, result: { ...output, changes: [], plan: undefined, review: undefined } }, shown);
+  const base = runResultValue({ ok: true, result: { ...output, changes: [], plan: undefined, review: undefined }, lockLeft: outcome["lockLeft"] }, shown);
   if (base["ok"] !== true) return base as HostFailure;
   const applied = Array.isArray(output["applied"]) ? output["applied"].slice(0, MAX_LIST) : [];
   return {
@@ -209,6 +216,22 @@ export function applyResultValue(outcome: unknown, shown: Shown, unsafeMoves: nu
       }),
     },
   };
+}
+
+/**
+ * U-226 (U-218): an apply's end. A run plan's apply ends as the run that carried it out (kind "run",
+ * an EngineResult with planRunId): the window sees it as a run's result, with the plan run's id and
+ * `deniedNotPlanned`, its writes refused because the approved plan does not name the file (counted
+ * from its records, as the CLI's end summary does). A plan of moves ends as an apply, as before.
+ */
+export function applyOutcomeValue(outcome: unknown, shown: Shown, shownText: Shown | undefined, unsafeMoves: number | null, deniedNotPlanned: number): Obj | HostFailure {
+  const output = isObj(outcome) && outcome["ok"] === true && isObj(outcome["output"]) ? outcome["output"] : null;
+  if (output === null || output["kind"] !== "run") return applyResultValue(outcome, shown, unsafeMoves);
+  const base = runResultValue({ ok: true, result: output, lockLeft: (outcome as Obj)["lockLeft"] }, shown, shownText);
+  if (base["ok"] !== true) return base;
+  const planRunId = isRunId(output["planRunId"]) ? output["planRunId"] : null;
+  if (planRunId === null) return { ok: false, code: "host_error" };
+  return { ok: true, result: { ...((base as Obj)["result"] as Obj), planRunId, deniedNotPlanned } };
 }
 
 export function createRunRegistry(deps: RunsDeps): RunRegistry {
@@ -233,7 +256,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
   /** Starts through `begin` and tracks the run; `resultOf` turns its end into the done value. */
   async function launch(
     begin: (observer: RunObserverOf) => Promise<unknown>,
-    resultOf: (done: unknown, unsafeMoves: number | null) => Obj | HostFailure,
+    resultOf: (done: unknown, unsafeMoves: number | null, deniedNotPlanned: number) => Obj | HostFailure,
     asks = false,
   ): Promise<Obj | HostFailure> {
     {
@@ -243,6 +266,8 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
       const run: Running = { cancel: () => undefined, pending: [], dropped: false, open: false, timer: null, turns: 0, tools: 0, questions: new Map() };
       let lastSeq = 0;
       let unsafeMoves: number | null = null;
+      // U-226: writes refused as path_not_writable; in a run that carries out a plan, each is outside the plan's files.
+      let deniedNotPlanned = 0;
       const observer = {
         onEvent(event: unknown): void {
           const record = isObj(event) && event["kind"] === "record" && isObj(event["record"]) ? event["record"] : null;
@@ -253,6 +278,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             if (record["type"] === "model_request") run.turns += 1;
             if (record["type"] === "tool_result") run.tools += 1;
             if (record["type"] === "plan_checked") unsafeMoves = Array.isArray(record["unsafeMoves"]) ? record["unsafeMoves"].length : 0;
+            if (record["type"] === "tool_decision" && record["allowed"] === false && record["code"] === "path_not_writable") deniedNotPlanned += 1;
             if (record["type"] === "confirmation_answered") {
               const by = record["by"];
               if (record["decision"] === "allow_once") tally.allowed += 1;
@@ -318,7 +344,7 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
             run.open = false;
             runs.delete(token);
             try {
-              const value = resultOf(done, unsafeMoves);
+              const value = resultOf(done, unsafeMoves, deniedNotPlanned);
               const asked = tally.allowed + tally.user + tally.default + tally.cancelled > 0;
               const result = (value as Obj)["result"];
               const outcome = asked && value["ok"] === true && isObj(result) ? { ...value, result: { ...result, confirmations: tally } } : value;
@@ -373,9 +399,11 @@ export function createRunRegistry(deps: RunsDeps): RunRegistry {
               // DR-21: a consent only when the main process asked the person; it names this plan's digest.
               unsafeMoveConsent: args.consent ? { digest: args.digest } : null,
             },
-            observer,
+            // U-226 (U-218): a run plan's run gives run events and asks as a run does.
+            { ...observer, onRunEvent: (event: unknown) => observer.onEvent(event) },
           ),
-        (done, unsafeMoves) => applyResultValue(done, deps.shown, unsafeMoves),
+        (done, unsafeMoves, deniedNotPlanned) => applyOutcomeValue(done, deps.shown, deps.shownText, unsafeMoves, deniedNotPlanned),
+        true,
       );
     },
 

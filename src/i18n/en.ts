@@ -56,9 +56,9 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.denied": "Denied calls: {count}",
   "summary.failed": "Failed calls: {count}",
   // U-198 (draft for nb-i18n): writes outside the files the run may write.
-  "summary.denied_not_planned": "Writes refused because the file is not one this plan approved: {count}",
+  "summary.denied_not_planned": "Writes denied because the file is not in the approved plan: {count}",
   "summary.denied_not_planned_hint": "To change other files, make a new plan that names them and approve it.",
-  "summary.denied_not_writable": "Writes refused because the file is outside the settings' writablePaths: {count}",
+  "summary.denied_not_writable": "Writes denied because the file is not in writablePaths: {count}",
   "summary.denied_not_writable_hint":
     "To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",

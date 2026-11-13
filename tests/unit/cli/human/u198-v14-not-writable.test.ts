@@ -68,11 +68,11 @@ describe("U-198 V-14 L-1: the drafts say what the PM asked", () => {
   test("English and Korean", () => {
     const en = createMessageCatalog("en");
     const ko = createMessageCatalog("ko");
-    assert.equal(en.format("summary.denied_not_planned", { count: 2 }), "Writes refused because the file is not one this plan approved: 2");
+    assert.equal(en.format("summary.denied_not_planned", { count: 2 }), "Writes denied because the file is not in the approved plan: 2");
     assert.equal(en.format("summary.denied_not_planned_hint"), "To change other files, make a new plan that names them and approve it.");
-    assert.equal(en.format("summary.denied_not_writable", { count: 2 }), "Writes refused because the file is outside the settings' writablePaths: 2");
-    assert.equal(ko.format("summary.denied_not_planned", { count: 2 }), "이 계획이 승인한 파일이 아니라 거부된 쓰기: 2건");
+    assert.equal(en.format("summary.denied_not_writable", { count: 2 }), "Writes denied because the file is not in writablePaths: 2");
+    assert.equal(ko.format("summary.denied_not_planned", { count: 2 }), "승인한 계획에 없는 파일이라 거부된 쓰기: 2건");
     assert.equal(ko.format("summary.denied_not_planned_hint"), "다른 파일을 바꾸려면 그 파일을 담은 새 계획을 만들어 승인하세요.");
-    assert.equal(ko.format("summary.denied_not_writable", { count: 2 }), "설정의 writablePaths 밖이라 거부된 쓰기: 2건");
+    assert.equal(ko.format("summary.denied_not_writable", { count: 2 }), "writablePaths에 없는 파일이라 거부된 쓰기: 2건");
   });
 });

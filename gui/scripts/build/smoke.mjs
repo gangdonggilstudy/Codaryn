@@ -122,6 +122,40 @@ try {
 } catch {
   junction = false;
 }
+// U-206 (U-196, DR-69 B-3): a run plan (plan.json `kind: "changes"`) and its plan run's records, as the
+// root's store writes them, staged here: no model run can make one yet (B-4). smoke.ts copies the run
+// folder into the second workspace before step 8, after every step that lists that workspace's runs.
+// The digest is the plan.json bytes' (run id, summary, relative paths), so the copy keeps it.
+const { createPlanRecorder } = await fromRoot("src", "store", "index.js");
+const { maskedParts } = await fromRoot("src", "contracts", "index.js");
+const RUN_PLAN_ID = "20261101T120000Z-0b206b20";
+const runPlanStage = mkdtempSync(join(tmpdir(), "codaryn-smoke-runplan-"));
+const runPlanDir = join(runPlanStage, ".codaryn", "runs", RUN_PLAN_ID);
+mkdirSync(runPlanDir, { recursive: true });
+const runPlanDigest = await createPlanRecorder({ workspaceRoot: runPlanStage, runId: RUN_PLAN_ID }).saveChangesPlan({
+  summary: maskedParts("Add the guide and fix the notes"),
+  files: [
+    { path: "docs/new.md", change: "create", sha256: null, shown: maskedParts("docs/new.md") },
+    { path: "notes.md", change: "modify", sha256: "a".repeat(64), shown: maskedParts("notes.md") },
+  ],
+});
+writeFileSync(
+  join(runPlanDir, "journal.jsonl"),
+  [
+    { seq: 1, at: "2026-11-01T12:00:01.000Z", runId: RUN_PLAN_ID, type: "run_started", schemaVersion: 1, taskId: "smoke-run-plan", workflow: "write", provider: "scripted", limits: { maxModelTurns: 2, maxToolCalls: 2, maxTotalTokens: null, maxDurationMs: 1000 } },
+    { seq: 2, at: "2026-11-01T12:00:02.000Z", runId: RUN_PLAN_ID, type: "run_finished", status: "needs-input", reason: "plan_pending", usage: { modelTurns: 1, toolCalls: 1, inputTokens: null, outputTokens: null, durationMs: 1, repairAttempts: 0 } },
+  ]
+    .map((record) => `${JSON.stringify(record)}\n`)
+    .join(""),
+);
+writeFileSync(
+  join(runPlanDir, "result.json"),
+  `${JSON.stringify({
+    schemaVersion: 1, kind: "run", runId: RUN_PLAN_ID, taskId: "smoke-run-plan", status: "needs-input", reason: "plan_pending", exitCode: 3, provider: "scripted", verifiers: [], changes: [],
+    usage: { modelTurns: 1, toolCalls: 1, inputTokens: null, outputTokens: null, durationMs: 1 }, journalPath: `.codaryn/runs/${RUN_PLAN_ID}/journal.jsonl`, notices: [],
+    plan: { digest: runPlanDigest, actions: 2, kind: "changes" },
+  })}\n`,
+);
 
 const env = {};
 for (const [name, value] of Object.entries(process.env)) {
@@ -140,6 +174,7 @@ env[ANTHROPIC_API_KEY_ENV] = FAKE_API_KEY;
 env[API_PROVIDERS.openai.keyEnv] = FAKE_OPENAI_KEY;
 env.npm_node_execpath = process.execPath;
 env.CODARYN_SMOKE_SECOND = second;
+env.CODARYN_SMOKE_RUN_PLAN = runPlanDir;
 // U-11: the default config location (N-1: %APPDATA%\Codaryn, else $XDG_CONFIG_HOME/codaryn) of the app's
 // engine host is a folder of this test. createSettings writes there, never into this machine's own.
 const sandboxAppData = join(gui, "build", "smoke-appdata");
@@ -221,7 +256,7 @@ try {
 } catch {
   configModel = "unreadable";
 }
-for (const dir of [first, second]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+for (const dir of [first, second, runPlanStage]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 // The link itself is removed, not what it points to; then the folder it pointed to.
 try {
   rmSync(outsideLink, { force: true });
@@ -752,6 +787,37 @@ const expected = [
   ["setupOnDisk", (v) => v.npmTest === true && v.packageJson === true],
   ["setupText", (v) => typeof v === "string" && !v.includes(FAKE_API_KEY) && !v.includes(FAKE_OPENAI_KEY) && !v.includes("smoke-config")],
   // U-184: the text view's two first-save confirmations (textEdit) come first.
+  // U-206 (U-196, DR-69 B-3): the run plan from the run list: its files (create, modify) in place of a move
+  // table, its summary under the approved plan's label, apply off with its reason (the window does not
+  // know its form: no check). The main process refuses its apply, with or without consent, before any
+  // dialog; its check gives the app's refusal as it is (no task resolves to plan "run" yet, U-177).
+  [
+    "runPlan",
+    (v) =>
+      JSON.stringify(v) ===
+      JSON.stringify({
+        shown: "pending",
+        files: [
+          ["create", "docs/new.md"],
+          ["modify", "notes.md"],
+        ],
+        kind: "changes",
+        approved: "true",
+        words: "Add the guide and fix the notes",
+        moves: false,
+        applyOff: true,
+        why: true,
+        check: false,
+        planKind: "changes",
+        fileCount: 2,
+        digest: runPlanDigest,
+        approval: "string",
+        apply: "run_plan_apply_unavailable",
+        consent: "run_plan_apply_unavailable",
+        checked: "run_not_plan",
+        dialogs: 0,
+      }),
+  ],
   ["closeGuard", (v) => JSON.stringify(v.dialogs) === JSON.stringify(["textSave.message", "textSave.message", "widen.message", "widen.message", "widen.message", "widen.message", "widen.message", "revert.message", "apply.message", "apply.message", "cleanup.message", "cleanup.notReverted.message", "cleanup.message", ...U13_DIALOGS, ...U22_DIALOGS, "widen.message", "closeRun.message"]) && v.closed === true && v.ms < 15000],
   // DR-8, GS-1, GS-11: no listening TCP socket, no bound UDP endpoint, no connection to anything
   // but this machine, in any app process. (Before the spellchecker was turned off, Chromium's

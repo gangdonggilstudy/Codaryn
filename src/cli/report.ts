@@ -27,6 +27,7 @@ import {
   MODEL_PROVIDER_NAMES,
   PLAN_ITEM_PROBLEMS,
   planApplyStateOf,
+  toRunId,
   REPORT_EXIT_CODES,
   RESULT_FILE_NAME,
   RESULT_SCHEMA_VERSION,
@@ -403,7 +404,20 @@ export function readResult(text: string, runId: string, taskId: string): EngineR
     ...maskingOf(rec["masking"]),
     // U-55 (AXM-9): the model error that ended the run, in its known form.
     ...modelErrorOf(rec["modelError"], reason, usage.modelTurns),
+    // U-195 (DR-69 B-3): the plan run this run carried out and the approved digest, as recorded.
+    ...carriedPlanOf(rec["planRunId"], rec["planDigest"]),
   };
+}
+
+/**
+ * U-195 (DR-69 B-3): EngineResult.planRunId and planDigest, present together in a run that carried out
+ * an approved run plan and absent in every other run. A run id and a digest; one without the other,
+ * or another form, is a damaged field.
+ */
+function carriedPlanOf(planRunId: unknown, planDigest: unknown): { planRunId?: string; planDigest?: ContentHash } {
+  if (planRunId === undefined && planDigest === undefined) return {};
+  if (typeof planRunId !== "string" || toRunId(planRunId) === null) bad("result.json has a field of the wrong type");
+  return { planRunId, planDigest: hashOf(planDigest) as ContentHash };
 }
 
 /**
@@ -449,9 +463,12 @@ function finalMessageOf(value: unknown, reason: RunReason): { finalMessage?: { t
   return { finalMessage: { text: recorded(rec["text"]), truncated } };
 }
 
-function planOf(value: unknown): { digest: ContentHash; actions: number } {
+function planOf(value: unknown): { digest: ContentHash; actions: number; kind?: "changes" } {
   const rec = obj(value);
-  return { digest: hashOf(rec["digest"]) as ContentHash, actions: int(rec["actions"], 1) };
+  // U-195 (U-180): a run plan's result says kind "changes" (its files are `actions`); nothing else is a kind.
+  const kind = rec["kind"];
+  if (kind !== undefined && kind !== "changes") bad("result.json has a field of the wrong type");
+  return { digest: hashOf(rec["digest"]) as ContentHash, actions: int(rec["actions"], 1), ...(kind === undefined ? {} : { kind }) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -538,7 +555,8 @@ export function renderReport(report: RunReportOutput, currentKey: KnownKeys = nu
  * U-131 (N2, UXM-5): a plan run's line. Without an apply of it, the plan waits for approval as
  * before; with one, what became of that apply, in the words `runs` uses (runs.plan_*).
  */
-function planLine(actions: number, digest: string, runId: string, apply: ReportPlanApply): string {
+function planLine(actions: number, digest: string, runId: string, apply: ReportPlanApply, kind?: "changes"): string {
+  if (kind === "changes") return changesPlanLine(actions, digest, runId, apply);
   if (apply === null) return `- Plan: ${actions} action(s) waiting for approval, digest ${code(digest)}. See it with ${code("codaryn plan --run " + runId)}.`;
   const id = code(apply.applyRunId);
   const itsReport = `(its report: ${code("codaryn report --run " + apply.applyRunId)})`;
@@ -556,6 +574,29 @@ function planLine(actions: number, digest: string, runId: string, apply: ReportP
   }
 }
 
+/**
+ * U-195 (DR-69 B-3): a run plan's line. Its files are written by a later run that carries the plan
+ * out, which ends as a run does (a run without checks ends needs-input/no_verifier, its work done),
+ * so the line names that run's end instead of an apply that did not finish.
+ */
+function changesPlanLine(files: number, digest: string, runId: string, apply: ReportPlanApply): string {
+  if (apply === null) return `- Plan: ${files} file(s) to write, waiting for approval, digest ${code(digest)}. See it with ${code("codaryn plan --run " + runId)}.`;
+  const id = code(apply.applyRunId);
+  const itsReport = `(its report: ${code("codaryn report --run " + apply.applyRunId)})`;
+  switch (apply.state) {
+    case "applied":
+      return `- Plan: ${files} file(s) to write, carried out by run ${id} ${itsReport}.`;
+    case "unfinished":
+      return `- Plan: ${files} file(s) to write; carried out by run ${id}, which ended as ${apply.reason === undefined ? "other than done" : code(apply.reason)} ${itsReport}.`;
+    case "applying":
+      return `- Plan: ${files} file(s) to write; being carried out by run ${id}, or that run stopped without a result.`;
+    case "reverted":
+      return `- Plan: ${files} file(s) to write, carried out by run ${id}, then reverted ${itsReport}.`;
+    case "record_missing":
+      return `- Plan: ${files} file(s) to write; taken up by run ${id}, whose records cannot be read (removed, or they cannot be checked).`;
+  }
+}
+
 function renderReportText(report: RunReportOutput, failedToolCalls: number, planApply: ReportPlanApply = null): string {
   const { result, journal } = report;
   const out: string[] = ["# Codaryn run report", ""];
@@ -567,7 +608,11 @@ function renderReportText(report: RunReportOutput, failedToolCalls: number, plan
   );
   if (result !== null) {
     out.push(`- Result: ${code(result.status)} / ${code(result.reason)}, exit code ${result.exitCode}`);
-    if (result.plan !== undefined) out.push(planLine(result.plan.actions, result.plan.digest, report.runId, planApply));
+    if (result.plan !== undefined) out.push(planLine(result.plan.actions, result.plan.digest, report.runId, planApply, result.plan.kind));
+    // U-195 (DR-69 B-3): the run that carried out an approved run plan names it.
+    if (result.planRunId !== undefined && result.planDigest !== undefined) {
+      out.push(`- Plan run: ${code(result.planRunId)}, digest ${code(result.planDigest)} (this run carried out its approved plan)`);
+    }
   } else {
     out.push("- Result: none. The run has no result.json: it is still running, or it stopped without writing one.");
     out.push(

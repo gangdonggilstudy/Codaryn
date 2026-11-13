@@ -26,7 +26,7 @@ describe("plan", () => {
   test("shows the stored plan, masked with the task form's secrets; after the apply it names that apply", async () => {
     const secretName = `${FAKE_SECRET}.txt`;
     const { base, app, plan, digest } = await plannedRun({ [secretName]: "alpha\n" }, planSteps(secretName, "sorted/b.txt"));
-    const view = ok<PlanOutput>(await app.plan({ settings: taskForm(base), runId: "latest" }));
+    const view = ok(await app.plan({ settings: taskForm(base), runId: "latest" })) as PlanOutput;
     assert.deepEqual([view.kind, view.runId, view.status, view.digest, view.appliedBy], ["plan", plan.runId, "pending", digest, null]);
     assert.equal(view.actions.length, 1);
     assert.equal(JSON.stringify(view).includes(FAKE_SECRET), false, "the file name's secret is masked");
@@ -34,7 +34,7 @@ describe("plan", () => {
     const started = await app.applyPlan({ settings: taskForm(base), planRunId: plan.runId, digest: digest.slice(0, 12), cancelFile: null, unsafeMoveConsent: null });
     assert.ok(started.ok, JSON.stringify(started));
     const applied = ok<ApplyResult>(await started.handle.done);
-    const after = ok<PlanOutput>(await app.plan({ settings: taskForm(base), runId: plan.runId }));
+    const after = ok(await app.plan({ settings: taskForm(base), runId: plan.runId })) as PlanOutput;
     assert.deepEqual([after.status, after.appliedBy?.runId], ["applied", applied.runId]);
   });
 

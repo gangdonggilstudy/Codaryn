@@ -17,7 +17,7 @@ import type { ModelProviderName, ResolvedTaskSpec, WritablePathSet } from "./tas
 import type { ContentHash, MaskedText } from "./text.js";
 import type { ToolRunner } from "./tool.js";
 import type { VerifierResult, VerifierRunner } from "./verify.js";
-import type { ApplyResult, ApprovedChangesPlan, PlanOutput } from "./plan.js";
+import type { ApplyResult, ApprovedChangesPlan, ChangesPlanOutput, PlanOutput } from "./plan.js";
 import type { ReviewOutput } from "./workflow.js";
 
 export const RUN_STATUSES = [
@@ -735,6 +735,8 @@ export type CommandOutput =
   | RunsOutput
   | ApplyResult
   | PlanOutput
+  // U-195 (DR-69 B-4; in na-core's unit for p4g-general to confirm): `codaryn plan --json` of a run plan.
+  | ChangesPlanOutput
   | ReviewOutput;
 
 /** Injected time source in milliseconds. */

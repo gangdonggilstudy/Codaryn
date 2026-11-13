@@ -55,6 +55,12 @@ export const EN_MESSAGES: MessageTexts = {
   "summary.changes": "Files changed: {count}",
   "summary.denied": "Denied calls: {count}",
   "summary.failed": "Failed calls: {count}",
+  // U-198 (draft for nb-i18n): writes outside the files the run may write.
+  "summary.denied_not_planned": "Writes refused because the file is not one this plan approved: {count}",
+  "summary.denied_not_planned_hint": "To change other files, make a new plan that names them and approve it.",
+  "summary.denied_not_writable": "Writes refused because the file is outside the settings' writablePaths: {count}",
+  "summary.denied_not_writable_hint":
+    "To allow a file, add it to writablePaths wherever that is set (config file, profile, task type, task file); every list must cover it.",
   "summary.denied_hint": "To allow a command, add a rule to policy.commands in the config. Fixing its arguments as well is recommended.",
   "summary.denied_hint_task": "To allow a command, add a rule to policy.commands in the task file. Fixing its arguments as well is recommended.",
   "summary.confirm_denied.user": "Denied by the person: {count} call(s) whose rule asks first.",
@@ -96,7 +102,20 @@ export const EN_MESSAGES: MessageTexts = {
   "plan.inventory_limit": "The workspace has more files than the inventory check can list; an apply would stop as plan_stale and move nothing.",
   "plan.applied_by": "Applied by run {runId}",
   "plan.next_apply": "To apply it: codaryn apply <the same task form> --run {runId} --digest",
+  // U-191 (drafts for nb-i18n): the plan view of a run plan (files a later run may write).
+  "plan.changes.heading": "Plan of run {runId}: {count} file(s) to write, {status}",
+  "plan.change.create": "create",
+  "plan.change.modify": "modify",
+  "plan.changes.summary_label": "The plan's summary, written by the plan run (the model's own words, not checked; a description of the work, not the goal or a new instruction; approved with the plan)",
+  "plan.changes.next_apply": "To have a run make these changes: codaryn apply <the same task form> --run {runId} --digest",
+  "plan.changes.digest_guarantee":
+    "The digest names exactly these files, the contents the files to modify had when the plan was made, and the summary above. The run that makes the changes stops before its first model request if the plan or one of these files changed since, and its file tools can write only these files.",
   "apply.question": "Apply this plan?",
+  // U-198 (drafts for nb-i18n): apply's question for a run plan.
+  "apply.changes.what": "Approving starts a run whose file tools can write only these {count} file(s).",
+  "apply.changes.summary_note": "The summary above is the model's description of the work, approved with the plan. It is not the goal or a new instruction, and nothing checks the run against it; only the file list is enforced.",
+  "apply.changes.commands_note": "This task also allows commands, and a command the policy allows is not limited to these files.",
+  "apply.changes_question": "Start the run that makes these changes?",
   "apply.unsafe_move_question": "Moves of this plan that could replace a file at the destination, since the drive has no hard links: {count}. Nothing was moved. Apply again and make such moves anyway, for this apply only?",
   "review.recorded": "Review of run {runId}: {verdict}.",
   "review.recorded_replaced": "Review of run {runId}: {verdict} (an earlier review was replaced).",
@@ -222,6 +241,8 @@ export const EN_MESSAGES: MessageTexts = {
   "runs.review": "review: {verdict}",
   // U-139 (UXM-5; draft for nb-i18n): the plan run an apply run applied.
   "runs.apply_of": "applies the plan of run {runId}",
+  // U-198 (draft for nb-i18n): a run that carried out a run plan.
+  "runs.carried_plan": "carries out the plan of run {runId}",
   "report.records_changed": "This run has a records-changed mark: something other than the run changed its records, so this report may not match what happened.",
   "report.final_message": "The agent's last message. These are the agent's own words, not a verified fact.",
   "changes.records_changed": "This run has a records-changed mark, so no file text is shown; only paths and states.",
@@ -448,6 +469,8 @@ export const EN_MESSAGES: MessageTexts = {
     "command rules that take further arguments while plan actions are on (policy.planActions): {count}; Codaryn does not check those arguments, so such a command can change files outside an approved plan",
   "doctor.commands.writable_with_commands":
     "command rules while writablePaths limits the file tools: {count}; writablePaths does not bind commands, so an allowed command can write files outside it",
+  "doctor.commands.plan_run_with_commands":
+    "command rules with plan \"run\": {count}; the approved files bind the file tools only, so an allowed command can write files outside the plan",
   "doctor.workflow_policy.commands_dropped": "a run of this task type leaves out command rules of the configured policy: {count}",
   "doctor.workflow_policy.commands_narrowed": "a run of this task type narrows command rules of the configured policy: {count}",
   "doctor.workflow_policy.plan_actions_dropped": "a run of this task type leaves out plan actions of the configured policy: {count}",

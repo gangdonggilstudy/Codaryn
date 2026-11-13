@@ -27,13 +27,32 @@
  * number too, not only the rows of its group. On a table under unreadablePaths (k at least 5; a
  * table's k 1 hides nothing):
  * - a group's value (QueryGroup.values) is given only when at least k cells went into it: for sum and
- *   mean the column's non-empty cells of the group (each one a number, or the query is not_number),
- *   for count the cells it counts, which is the value itself. Otherwise the value is null and its
+ *   mean the numbers of the group's column that went into it (U-277: a cell that is not a number is
+ *   left out, below), for count the cells it counts, which is the value itself. Otherwise the value is null and its
  *   operation's index is in QueryGroup.fewCells. A group of k rows whose column holds one number
  *   gives neither that number as its sum or mean nor a count of 1.
  * - The same holds for the one group without groupBy, and would hold for any row merging hidden
  *   groups (there is none: they are merged into suppressedGroups, a number of groups only).
  * - describe: a column's nonEmpty or numeric below k is null, as when the table's rows are hidden.
+ *
+ * Codex V-28 M1 (U-277, PM): nor does a cell that is not a number tell anything of a single row. On a
+ * table under unreadablePaths:
+ * - Such a cell in a sum's or mean's column is read as an empty one: left out of the value, as
+ *   describe's `numeric` leaves it out. A count counts it, as a count counts any non-empty cell on
+ *   every table (describe's `nonEmpty`).
+ * - The query is not_number only when the groups shown hold at least k such cells together in a sum's
+ *   or mean's column. The groups are chosen first (shownGroups), so a cell of a group of fewer than k
+ *   rows never makes the error, and a group's being hidden is never decided by one.
+ * - The error names the lowest such operation and its column: neither the rows' order nor a row, a
+ *   line or a number of cells decides or is told.
+ * - Chosen over giving such a value as one of fewer than k cells (null): a null differs from the same
+ *   group with that cell empty, so it would tell one cell's type; left out, the group answers as
+ *   describe counts the column, and as a group with the cell empty does in its sum and mean.
+ * - Known, as with describe (Q-8): a count of a column beside its sum and mean gives how many of a
+ *   shown group's non-empty cells are not numbers (count minus sum over mean), as describe's nonEmpty
+ *   minus numeric gives it for the table; only aggregates of shown groups go into it.
+ * - A table outside unreadablePaths is as before: the first data row whose cell is not a number is
+ *   not_number at that row (U-202).
  *
  * The reading's rules (U-202, accepted by the PM for U-208):
  * - A row whose cell in any groupBy column is empty is left out of the groups and counted apart; that
@@ -47,7 +66,9 @@
  *   header holds twice, or a groupBy name given twice; other doubled header names do not matter.
  * - Which problem wins: the table first (`not_text`, then `not_table`), then the columns (groupBy in
  *   order, then the operations' columns in order), then the first data row whose cell is not a
- *   number for a numeric operation (the lowest operation on a tie), then too many groups.
+ *   number for a numeric operation (the lowest operation on a tie), then too many groups. U-277: on a
+ *   table under unreadablePaths no row decides a not_number, so too many groups comes before it,
+ *   then not_number as above (on the groups shown), then after_not_found.
  */
 
 import { AGGREGATE_OPS } from "./verify.js";
@@ -103,7 +124,9 @@ export const MAX_QUERY_TABLE_BYTES = 64 * 1024 * 1024;
 /**
  * One aggregate: data_checks' operations (src/tabular), empty cells skipped. `count` counts the
  * column's non-empty cells and needs no number; the others need every non-empty cell of the column to
- * be a number (else `invalid_table`, `not_number`).
+ * be a number (else `invalid_table`, `not_number`). U-277: on a table under unreadablePaths, unless
+ * the groups shown hold fewer than k cells of the column that are not numbers; those are left out as
+ * empty cells are (above).
  */
 export interface QueryOperation {
   readonly op: AggregateOp;
@@ -203,12 +226,14 @@ export type QueryTablePayload =
  * row or line number, never a cell's text and never a parser's own message, which can hold one; U-261:
  * then the problem's hint, QUERY_TABLE_PROBLEM_HINTS. On a table under unreadablePaths no row and no
  * line number: not_table names its parse problem's code only, and not_number the operation and its
- * column with "holds a cell that is not a number", never which cell or how many, DR-70):
+ * column with "holds cells that are not numbers", never which cells or how many, DR-70):
  * - not_text: the file is not UTF-8 text (U-208, U-202's reading tells it before a parse problem)
  * - not_table: the file does not parse as its format (quotes, field counts, a JSON line)
  * - unknown_column: a groupBy or operation column the header does not have
  * - duplicate_column: the header names a column twice, or groupBy names one twice
- * - not_number: a numeric operation met a non-empty cell that is not a number
+ * - not_number: a numeric operation met a non-empty cell that is not a number (U-277: under
+ *   unreadablePaths, at least k such cells in the groups shown in one operation's column; the lowest
+ *   such operation)
  * - op_not_allowed: min or max on a table under unreadablePaths (UNREADABLE_TABLE_OPS)
  * - after_not_found: `after` is not a cursor (QUERY_CURSOR_PATTERN_SOURCE), or names no shown group of
  *   this query
@@ -223,7 +248,10 @@ export type QueryTableProblem = (typeof QUERY_TABLE_PROBLEMS)[number];
  * table under unreadablePaths for max was told to look at the columns. Model-bound fixed texts
  * (FIXED_MODEL_TEXTS): nothing read from the table or the call in them.
  * Under unreadablePaths a message also leaves out the data row and the line it names elsewhere, so
- * nothing of a single row reaches the model (DR-70); the operation's index stays.
+ * nothing of a single row reaches the model (DR-70); the operation's index stays. U-277 (Codex V-28
+ * M1): nor does a single row decide whether a not_number is given or which operation it names: it is
+ * given only for at least k cells that are not numbers in the groups shown in an operation's column,
+ * at the lowest such operation, decided after the groups to hide are chosen (above).
  */
 export const QUERY_TABLE_PROBLEM_HINTS: { readonly [P in QueryTableProblem]: string } = {
   not_text: "The file is not UTF-8 text, so it cannot be read as a table.",
@@ -247,7 +275,8 @@ export function shownGroups(groups: readonly QueryGroup[], minGroupSize: number)
 /**
  * V-19 (DR-70): a group's values as they may be given: with k above 1 (a table under
  * unreadablePaths), each value into which fewer than `minGroupSize` cells went (`cells`, one count per
- * value) is null and its index listed in `fewCells`. With k 1 the values as they are. Pure.
+ * value: a count's non-empty cells, a sum's or mean's numbers, U-277) is null and its index listed in
+ * `fewCells`. With k 1 the values as they are. Pure.
  */
 export function shownValues(
   values: readonly (number | null)[],

@@ -54,11 +54,32 @@ export class RunningAggregate {
   /** Numbers taken (sum, min, max, mean). */
   private numbers = 0;
   private notNumberAt: number | null = null;
+  /** U-277: non-empty cells that are not numbers, left out (`nonNumbers: "skip"`). */
+  private skipped = 0;
   private sum = 0;
   private compensation = 0;
   private extreme = 0;
 
-  constructor(readonly op: AggregateOp) {}
+  /**
+   * `nonNumbers`: "refuse" (the default, data_checks and query_table on any table): a non-empty
+   * cell that is not a number makes the result `not_a_number` at its data row. U-277 (Codex V-28
+   * M1), query_table on a table under unreadablePaths: "skip": such a cell is left out as an empty
+   * one would be and only counted (notNumbers); the caller decides what a count of them means.
+   */
+  constructor(
+    readonly op: AggregateOp,
+    private readonly nonNumbers: "refuse" | "skip" = "refuse",
+  ) {}
+
+  /** U-277: the cells that went into the value: count's non-empty cells, the others' numbers. */
+  taken(): number {
+    return this.op === "count" ? this.present : this.numbers;
+  }
+
+  /** U-277: the non-empty cells left out for not being numbers ("skip"); 0 for count. */
+  notNumbers(): number {
+    return this.skipped;
+  }
 
   add(cell: string, dataRow: number): void {
     if (cell.length === 0) return;
@@ -66,7 +87,8 @@ export class RunningAggregate {
     if (this.op === "count" || this.notNumberAt !== null) return;
     const value = parseNumber(cell);
     if (value === null) {
-      this.notNumberAt = dataRow;
+      if (this.nonNumbers === "skip") this.skipped += 1;
+      else this.notNumberAt = dataRow;
       return;
     }
     this.numbers += 1;

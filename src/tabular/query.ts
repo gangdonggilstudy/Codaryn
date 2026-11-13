@@ -21,7 +21,8 @@
  *   then the operations' in order; a name the header holds twice is duplicate_column), then the
  *   first data row whose cell is not a number for a numeric operation (lowest operation on a tie),
  *   then too many groups. Groups beyond `maxGroups` are not kept; their rows are still checked for
- *   numbers.
+ *   numbers. U-277: with `nonNumbers: "skip"` (a table under unreadablePaths) no cell is a not_number
+ *   here; the tool decides one on the groups it shows (TableQuery.nonNumbers).
  * - Groups come in code unit order of their keys (the payload's order), compared key by key.
  */
 
@@ -39,6 +40,21 @@ export interface TableQuery {
   readonly operations: readonly QueryOperation[];
   /** Most groups kept; one more makes the query `too_many_groups`. Default MAX_QUERY_COUNTED_GROUPS. */
   readonly maxGroups?: number;
+  /**
+   * U-277 (Codex V-28 M1): "refuse" (the default): a numeric operation's cell that is not a number
+   * is `not_number` at the first such data row, as below. "skip", for a table under
+   * unreadablePaths: no such cell is a problem here; each is left out as an empty cell is and
+   * counted, and the outcome's `tallies` give, per group and operation, the cells that went into the
+   * value and the cells left out, so the tool can decide on the groups it shows (query.ts in the
+   * contracts). A group not kept (too many groups) is not checked for numbers in this mode.
+   */
+  readonly nonNumbers?: "refuse" | "skip";
+}
+
+/** U-277: one group's cells per operation (`nonNumbers: "skip"`): taken into the value, and left out. */
+export interface QueryTally {
+  readonly cells: readonly number[];
+  readonly notNumbers: readonly number[];
 }
 
 /** Why a table cannot be read at all: the problem names a code and where, never a cell's text. */
@@ -55,6 +71,8 @@ export type TableQueryOutcome =
       readonly withoutKey: number;
       /** Every group counted, before any is hidden for k, in code unit order of their keys. */
       readonly groups: readonly QueryGroup[];
+      /** U-277: with `nonNumbers: "skip"` only, each group's tally, in the order of `groups`. */
+      readonly tallies?: readonly QueryTally[];
     }
   | TableReadFailure
   /** A column the query names: which argument (`groupBy[index]` or `operations[index].column`). */
@@ -125,8 +143,11 @@ export class TableQuerySink implements TableSink {
   private tooMany = false;
   /** Per operation: the first data row of a group not kept whose cell is not a number. */
   private readonly notKeptNotNumber: (number | null)[];
+  /** U-277: cells that are not numbers are left out and counted, not a problem (TableQuery.nonNumbers). */
+  private readonly skip: boolean;
 
   constructor(private readonly query: TableQuery) {
+    this.skip = query.nonNumbers === "skip";
     this.keyColumns = query.groupBy.map((name) => new ColumnAt(name));
     this.opColumns = query.operations.map((operation) => new ColumnAt(operation.column));
     this.maxGroups = query.maxGroups ?? MAX_QUERY_COUNTED_GROUPS;
@@ -135,7 +156,7 @@ export class TableQuerySink implements TableSink {
   }
 
   private newGroup(keys: readonly string[]): GroupTally {
-    return { keys, rows: 0, aggregates: this.query.operations.map((operation) => new RunningAggregate(operation.op)) };
+    return { keys, rows: 0, aggregates: this.query.operations.map((operation) => new RunningAggregate(operation.op, this.skip ? "skip" : "refuse")) };
   }
 
   columns(columns: readonly string[]): void {
@@ -154,7 +175,7 @@ export class TableQuerySink implements TableSink {
     if (group === undefined) {
       if (this.groups.size >= this.maxGroups) {
         this.tooMany = true;
-        this.checkNumbers(cells, dataRow);
+        if (!this.skip) this.checkNumbers(cells, dataRow);
         return;
       }
       group = this.newGroup(keys);
@@ -197,17 +218,21 @@ export class TableQuerySink implements TableSink {
     }
     if (first !== null) return { ok: false, problem: "not_number", ...first };
     if (this.tooMany) return { ok: false, problem: "too_many_groups" };
-    const groups: QueryGroup[] = [...this.groups.values()]
-      .sort((a, b) => compareKeys(a.keys, b.keys))
-      .map((group) => ({
-        keys: group.keys,
-        rows: group.rows,
-        values: group.aggregates.map((aggregate) => {
-          const result = aggregate.result();
-          return result.ok ? result.value : null;
-        }),
-      }));
-    return { ok: true, rows: outcome.rows, withoutKey: this.withoutKey, groups };
+    const sorted = [...this.groups.values()].sort((a, b) => compareKeys(a.keys, b.keys));
+    const groups: QueryGroup[] = sorted.map((group) => ({
+      keys: group.keys,
+      rows: group.rows,
+      values: group.aggregates.map((aggregate) => {
+        const result = aggregate.result();
+        return result.ok ? result.value : null;
+      }),
+    }));
+    if (!this.skip) return { ok: true, rows: outcome.rows, withoutKey: this.withoutKey, groups };
+    const tallies: QueryTally[] = sorted.map((group) => ({
+      cells: group.aggregates.map((aggregate) => aggregate.taken()),
+      notNumbers: group.aggregates.map((aggregate) => aggregate.notNumbers()),
+    }));
+    return { ok: true, rows: outcome.rows, withoutKey: this.withoutKey, groups, tallies };
   }
 }
 

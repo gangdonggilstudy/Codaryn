@@ -12,14 +12,19 @@
  *   other table: all five operations and k 1 (nothing hidden).
  * - Codex V-19: on such a table a value into which fewer than k cells went is null too, its index in
  *   the group's `fewCells` (shownValues), and describe hides each count below k (shownShape). The
- *   cells of a sum or mean are its column's non-empty cells in the group, read with one more count of
- *   that column, which is not given.
+ *   cells of a sum or mean are the numbers that went into it; a count's, the non-empty cells (the
+ *   reading's tally, U-277).
+ * - Codex V-28 M1 (U-277): on such a table a cell that is not a number is read as an empty one (left
+ *   out of sums and means, as describe's `numeric` leaves it out) unless the groups shown hold at
+ *   least k of them in an operation's column; then the query is not_number at the lowest such
+ *   operation. A group of fewer than k rows never makes the error, and the rows' order never picks
+ *   the operation.
  * - Groups come MAX_QUERY_RESULT_GROUPS at a time; `next` is a cursor of the shown groups' ordinals
  *   (QUERY_CURSOR_PATTERN_SOURCE), never a key.
  * - A failure's message names a code and a row, line or argument index, never a cell's text or a
  *   path, then the problem's hint (U-261). On a table under unreadable paths it names no row and no
  *   line: a not_number names the operation and its column (the model's own name for it) and says the
- *   column holds a cell that is not a number, nothing about which or how many. Numbers are given as
+ *   column holds cells that are not numbers, nothing about which or how many. Numbers are given as
  *   computed, not rounded (Q-9).
  * - Raw local text like every tool payload: the engine masks it before it is recorded or sent.
  */
@@ -44,7 +49,7 @@ import {
 import type { QueryGroup, QueryOperation, QueryTableArgs, QueryTableProblem, RawWorkflowToolOutcome, TableFormat, ToolErrorCode, Workspace } from "../contracts/index.js";
 import type { PathSet } from "../policy/path-set.js";
 import { queryTable, tableShape } from "../tabular/index.js";
-import type { TableQueryOutcome, TableReadFailure, TableShapeOutcome } from "../tabular/index.js";
+import type { QueryTally, TableQueryOutcome, TableReadFailure, TableShapeOutcome } from "../tabular/index.js";
 import { nodeFileLayer } from "../workspace/file-layer.js";
 import { retried, sameChain, sameId, walkChain } from "../workspace/guard.js";
 import { takeJudged } from "../workspace/judged.js";
@@ -155,7 +160,7 @@ function readFailure(failure: TableReadFailure, unreadable: boolean): Failure {
 
 /**
  * U-261: under unreadablePaths a not_number names the operation and its column (as the model gave it)
- * and says a cell of it is not a number; never the data row (DR-70).
+ * and says it holds cells that are not numbers; never the data row (DR-70). U-277: never how many.
  */
 function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>, unreadable: boolean, operations: readonly QueryOperation[]): Failure {
   switch (outcome.problem) {
@@ -166,42 +171,37 @@ function queryFailure(outcome: Exclude<TableQueryOutcome, { ok: true }>, unreada
     case "duplicate_column":
       return rejected(outcome.problem, outcome.field === "groupBy" ? `groupBy[${outcome.index}]` : `operations[${outcome.index}].column`);
     case "not_number":
-      return rejected(
-        "not_number",
-        unreadable
-          ? `operations[${outcome.operation}] (column ${JSON.stringify(operations[outcome.operation]?.column ?? "")} holds a cell that is not a number)`
-          : `data row ${outcome.dataRow}, operations[${outcome.operation}]`,
-      );
+      // U-277: an unreadable table is read with nonNumbers "skip", so its not_number comes from
+      // unreadableNotNumber; this form is kept for it all the same.
+      return unreadable ? notNumberAt(outcome.operation, operations) : rejected("not_number", `data row ${outcome.dataRow}, operations[${outcome.operation}]`);
     case "too_many_groups":
       return fail("too_many_groups", `the query counts more than ${MAX_QUERY_COUNTED_GROUPS} groups`);
   }
 }
 
-/**
- * V-19: the operations to read and, for each asked one, the index of the read value that counts its
- * cells: a count is its own; a sum or mean takes a count of its column added after the asked ones
- * (every non-empty cell of that column in a group is a number, or the query is not_number). With
- * k 1 nothing is added.
- */
-function withCellCounts(operations: readonly QueryOperation[], minGroupSize: number): { readonly read: readonly QueryOperation[]; readonly cells: readonly number[] } {
-  if (minGroupSize <= 1) return { read: operations, cells: operations.map((_, index) => index) };
-  const read: QueryOperation[] = [...operations];
-  const counted = new Map<string, number>();
-  const cells = operations.map((operation, index) => {
-    if (operation.op === "count") return index;
-    const known = counted.get(operation.column);
-    if (known !== undefined) return known;
-    read.push({ op: "count", column: operation.column });
-    counted.set(operation.column, read.length - 1);
-    return read.length - 1;
-  });
-  return { read, cells };
+/** U-277: an unreadable table's not_number: the operation and its column, never a row or a count. */
+function notNumberAt(operation: number, operations: readonly QueryOperation[]): Failure {
+  return rejected("not_number", `operations[${operation}] (column ${JSON.stringify(operations[operation]?.column ?? "")} holds cells that are not numbers)`);
 }
 
-/** V-19: a computed group as it may be given: the asked values, those of fewer than k cells left null. */
-function shownGroup(group: QueryGroup, asked: number, cells: readonly number[], minGroupSize: number): QueryGroup {
-  const counts = cells.map((index) => group.values[index] ?? 0);
-  const shown = shownValues(group.values.slice(0, asked), counts, minGroupSize);
+/**
+ * U-277 (Codex V-28 M1): on a table under unreadablePaths, the lowest operation whose column holds
+ * at least k cells that are not numbers in the groups shown, or null. The reading left every such
+ * cell out and counted it (nonNumbers "skip"); fewer than k of them are read as empty cells.
+ */
+function unreadableNotNumber(shown: readonly QueryGroup[], tallyOf: ReadonlyMap<QueryGroup, QueryTally>, operations: readonly QueryOperation[], minGroupSize: number): number | null {
+  for (const [index, operation] of operations.entries()) {
+    if (operation.op === "count") continue;
+    let notNumbers = 0;
+    for (const group of shown) notNumbers += tallyOf.get(group)?.notNumbers[index] ?? 0;
+    if (notNumbers >= minGroupSize) return index;
+  }
+  return null;
+}
+
+/** V-19: a computed group as it may be given: the values of fewer than k cells (its tally) left null. */
+function shownGroup(group: QueryGroup, tally: QueryTally | undefined, minGroupSize: number): QueryGroup {
+  const shown = shownValues(group.values, tally?.cells ?? [], minGroupSize);
   return { keys: group.keys, rows: group.rows, values: shown.values, ...(shown.fewCells.length > 0 ? { fewCells: shown.fewCells } : {}) };
 }
 
@@ -247,12 +247,13 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
   }
 
   const limits = { maxBytes: deps.maxTableBytes ?? MAX_QUERY_TABLE_BYTES, chunkBytes: deps.chunkBytes ?? CHUNK_BYTES };
-  const reading = withCellCounts(operations, k);
   let outcome: TableQueryOutcome | TableShapeOutcome | "changed" | "not_found" | "not_file" | "too_large" | "io_error";
   try {
     outcome = await retried(() =>
       readChunks<TableQueryOutcome | TableShapeOutcome>(workspace, resolved.path.relative, resolved.path.absolute, limits, signal, (chunks) =>
-        args.describe === true ? tableShape(chunks, format) : queryTable(chunks, format, { groupBy: args.groupBy ?? [], operations: reading.read, maxGroups: MAX_QUERY_COUNTED_GROUPS }),
+        args.describe === true
+          ? tableShape(chunks, format)
+          : queryTable(chunks, format, { groupBy: args.groupBy ?? [], operations, maxGroups: MAX_QUERY_COUNTED_GROUPS, ...(unreadable ? { nonNumbers: "skip" as const } : {}) }),
       ),
     );
   } catch (error) {
@@ -278,7 +279,13 @@ export async function queryTableTool(deps: QueryTableDeps, args: QueryTableArgs,
   // DR-70: only the groups of at least k rows; the others merged into their number. V-19: in those,
   // only the values of at least k cells.
   const shown = shownGroups(result.groups, k);
-  const given = shown.groups.map((group) => shownGroup(group, operations.length, reading.cells, k));
+  const tallyOf = new Map(result.groups.map((group, index) => [group, result.tallies?.[index]] as const).filter((pair): pair is readonly [QueryGroup, QueryTally] => pair[1] !== undefined));
+  // U-277 (V-28 M1): on an unreadable table, decided on the groups shown, after they are chosen.
+  if (unreadable) {
+    const refused = unreadableNotNumber(shown.groups, tallyOf, operations, k);
+    if (refused !== null) return notNumberAt(refused, operations);
+  }
+  const given = shown.groups.map((group) => shownGroup(group, tallyOf.get(group), k));
   // A cursor names a shown group; one at or past the end names none (`next` is null there).
   if (args.after !== undefined && start >= given.length) return rejected("after_not_found");
   const end = start + MAX_QUERY_RESULT_GROUPS;

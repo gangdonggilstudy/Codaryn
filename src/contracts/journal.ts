@@ -97,8 +97,8 @@ export type JournalEvent =
   | { readonly type: "tool_result"; readonly result: ToolResult }
   /**
    * U-74 (DR-3): a permission question, recorded before it is asked, also when nobody can be asked
-   * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable and a count; no
-   * argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
+   * (DR-10). The fields of ConfirmRequest: fixed values, the masked executable (key shapes hidden,
+   * U-106) and a count; no argument text. Then `confirmation_answered` with the same id, then the call's `tool_decision`.
    */
   | {
       readonly type: "confirmation_requested";

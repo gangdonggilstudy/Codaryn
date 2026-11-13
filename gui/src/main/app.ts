@@ -364,6 +364,8 @@ export function startGui(options: GuiOptions): void {
       envFacts: () => ({
         model: (envValue(process.env, "CODARYN_MODEL", process.platform) ?? "").trim().length > 0,
         language: (envValue(process.env, "CODARYN_LANG", process.platform) ?? "").trim().length > 0,
+        // U-271 (C-23): which steps register a key here, as the CLI's init chooses them.
+        ...(process.platform === "win32" ? { os: "windows" as const } : process.platform === "darwin" || process.platform === "linux" ? { os: "posix" as const } : {}),
       }),
       runs,
       onLanguage: (chosen) => {

@@ -140,6 +140,8 @@ const startsBlocked: unknown[] = [];
  * are left out (their checks fail; the others go on).
  */
 const RUN_ID_SHAPE = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+/** GS-3 (p5a's proposal, U-271): the goal of the GS-3 run, text that would be markup as HTML (smoke.mjs has the others). */
+const GS3_GOAL = 'GS-3 <img src=x onerror="window.__gs3=1"> <script>window.__gs3=2</script>';
 const isRunIdValue = (value: unknown): value is string => typeof value === "string" && RUN_ID_SHAPE.test(value);
 /** U-178: each result wait that got no run id: the step, what came instead, and why (start blocks, the lock file, the window). */
 const stepFailures: unknown[] = [];
@@ -662,6 +664,8 @@ startGui({
       pretendInactive = true;
       await startTask("a.txt를 읽고 요약한다");
       results["runDone"] = await waitFor("document.querySelector('#work')?.getAttribute('data-run-phase') === 'done' ? 'done' : null", 90_000);
+      // U-271 (3.6): the counts against the limits the run started with.
+      results["runCountsLimits"] = await js("document.getElementById('run-counts')?.textContent ?? null");
       results["runResult"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), runId: document.getElementById('run-result-id')?.textContent ?? null }; })()",
       );
@@ -787,6 +791,9 @@ startGui({
       results["changesText"] = await js("document.getElementById('changes')?.textContent ?? ''");
       results["changesLatest"] = await js(`window.codaryn.changes(${JSON.stringify(secondHandle)}, 'latest', null)`);
 
+      // GS-3 (U-271): CSP violations from here on are counted in the page (none is expected). A reload would
+      // lose the count, and the check would see that it is gone.
+      await js("window.__gs3csp = 0; document.addEventListener('securitypolicyviolation', () => { window.__gs3csp += 1; }); true");
       // 5f. GU-5: a plan run (organize), the plan screen, refused requests, and an apply the main process asked about.
       const resultId = (): Promise<unknown> => js("document.getElementById('run-result-id')?.textContent ?? null");
       // U-178: a new result id, or "error:<code>" as soon as the run screen (when it is the one shown: its
@@ -844,11 +851,18 @@ startGui({
       );
       await planCheckReady();
       await js("document.getElementById('plan-apply')?.click(); true");
-      await newResult(directRunId, 90_000, "5f apply A");
+      const applyARunId = await newResult(directRunId, 90_000, "5f apply A");
       results["applyByWorkflow"] = await js(
         "(() => { const r = document.getElementById('run-result'); return r === null ? null : { status: r.getAttribute('data-status'), reason: r.getAttribute('data-reason'), applied: document.querySelectorAll('#run-applied li').length }; })()",
       );
       results["applyByWorkflowMoved"] = { from: existsSync(join(SECOND, "a.txt")), to: existsSync(join(SECOND, "moved", "a.txt")) };
+      // U-271 (R-112 L-1): its action's start record is not given, and that is no missing progress line.
+      results["applyNoGap"] = await js("document.getElementById('run-gap')?.hasAttribute('hidden') ?? null");
+      // U-271 (3.3): the tree marks what apply A moved, at its new place (the folder above it holds it).
+      results["applyTreeMarks"] = {
+        note: await js(`document.getElementById('tree-marks-text')?.textContent?.includes(${JSON.stringify(applyARunId)}) === true`),
+        holds: await waitFor("document.querySelector('.tree [data-holds-changes] .name')?.textContent ?? null", 20_000),
+      };
 
       // B: through a profile whose workflowRef is organize: the plan's apply takes the same profile.
       const beforePlan = await resultId();
@@ -863,6 +877,9 @@ startGui({
       await waitFor("(() => { const r = document.getElementById('runs-list')?.getAttribute('data-runs-ready'); return r && r !== 'loading' ? r : null; })()");
       await js(`document.querySelector('[data-plan="${planRunId}"]')?.click(); true`);
       results["planShown"] = await waitFor("(() => { const r = document.getElementById('plan')?.getAttribute('data-plan-ready'); return r && r !== 'none' ? r : null; })()");
+      // GS-3 (U-271): plan B's summary holds text that would be markup; it is shown as text, with no CSP
+      // violation since 5f (step 6, later, makes some on purpose).
+      results["gs3PlanSummary"] = await js("({ text: document.getElementById('plan-agent-words-text')?.textContent ?? null, img: document.querySelectorAll('img, [onerror]').length, csp: typeof window.__gs3csp === 'number' ? window.__gs3csp : null })");
       results["planFromList"] = await js("({ apply: document.getElementById('plan-apply') !== null, unknown: document.getElementById('plan-form-unknown') !== null })");
       results["planActions"] = await js("[...document.querySelectorAll('#plan-actions li')].map((li) => li.getAttribute('data-kind'))");
       results["planForged"] = await js(`window.codaryn.applyPlan(${JSON.stringify("0".repeat(32))}, false)`);
@@ -1492,6 +1509,41 @@ startGui({
         const removed = { written: await settle(), paths: await paths() };
         return { builtin, before, refused, section, addProposal, added, raiseProposal, raised, noticeWith, refusedWith, lowerProposal, lowered, removeProposal, removed, dialogs: dialogs.slice(asked) };
       })();
+
+      // GS-3 (p5a's proposal, U-271): a run whose goal, file name, check evidence and last words would be
+      // markup if the page parsed them as HTML. No element is made (no img, no element with onerror, the
+      // scripts as they were, no marker set), no CSP violation during the run and its screens, and each is shown as it is: the
+      // words under the agent's label, the file in the tree, the evidence in the report's checks tab, the
+      // goal kept as typed for a run again. GS-4: the goal also holds the fake secret's value, and the run
+      // reads the file that holds it; smoke.mjs then looks for it, and for the fake keys, in what is kept.
+      results["gs3"] = await (async () => {
+        const markup = (): Promise<unknown> =>
+          js("({ img: document.querySelectorAll('img').length, script: document.querySelectorAll('script').length, onerror: document.querySelectorAll('[onerror]').length, ran: typeof window.__gs3 === 'undefined' ? null : String(window.__gs3) })");
+        const before = await markup();
+        // Step 6 made CSP violations on purpose (outside fetches, an outside module): counted from here.
+        await js("window.__gs3csp = 0; true");
+        const goal = `${GS3_GOAL} ${process.env["SMOKE_GS4_SECRET"] ?? ""}`;
+        await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+        await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+        const previous = await resultId();
+        await pressRun("gs3", `document.getElementById('task-workflow').value = ''; document.getElementById('task-profile').value = 'gs3'; const g = document.getElementById('task-goal'); g.value = ${JSON.stringify(goal)};`);
+        const runId = await newResult(previous, 90_000, "gs3 run");
+        const status = await js("document.getElementById('run-result')?.getAttribute('data-status') ?? null");
+        const words = await js("document.getElementById('run-final-message-text')?.textContent ?? null");
+        const file = await waitFor("[...document.querySelectorAll('.tree [role=\"treeitem\"] .name')].map((n) => n.textContent).find((t) => t.startsWith('&lt;img')) ?? null", 20_000);
+        await js("document.getElementById('run-view-report')?.click(); true");
+        await waitFor("(() => { const r = document.getElementById('report')?.getAttribute('data-report-ready'); return r && r !== 'loading' ? r : null; })()", 30_000);
+        await js("document.getElementById('report-tab-checks')?.click(); true");
+        const evidence = await js("[...document.querySelectorAll('#report-panel pre.evidence')].map((p) => p.textContent).join('\\n')");
+        await js("document.querySelector('[data-screen=\"newtask\"]')?.click(); true");
+        await waitFor("document.getElementById('newtask')?.getAttribute('data-newtask-ready') ?? null");
+        const typed = await js("document.getElementById('task-goal')?.value ?? null");
+        const after = await markup();
+        const csp = await js("typeof window.__gs3csp === 'number' ? window.__gs3csp : null");
+        return { before, after, csp, runId: isRunIdValue(runId), status, words, file, evidence, goalKept: typed === goal, goalMarkup: typeof typed === "string" && typed.startsWith(GS3_GOAL) };
+      })();
+      // GS-4 (U-271): the window's title after those runs (smoke.mjs looks for the fake values in it).
+      results["gs4Title"] = window.getTitle();
 
       // 8. GU-3: closing the window while a run goes on asks (answered "cancel and close" here),
       // cancels, waits for the end and closes. Last, because the window is gone afterwards.

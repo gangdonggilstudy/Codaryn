@@ -56,11 +56,14 @@ export function planValue(outcome: unknown, shown: Shown, modelText?: ModelText)
     if (action["kind"] === "move" && typeof action["from"] === "string" && typeof action["to"] === "string") actions.push({ kind: "move", from: shown(action["from"]), to: shown(action["to"]) });
     else if (action["kind"] === "discard" && typeof action["path"] === "string") actions.push({ kind: "discard", from: shown(action["path"]), to: null });
   }
+  // U-271 (G-sec, U-274): only the contract's statuses (PLAN_STATUSES); any other is not shown as one to approve.
+  const status = output["status"];
+  if (status !== "pending" && status !== "applied") return { ok: false, code: "host_error" };
   const applied = output["appliedBy"];
   return {
     ok: true,
     runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
-    status: output["status"] === "applied" ? "applied" : "pending",
+    status,
     digest,
     actions,
     inventoryLimitReached: output["inventoryLimitReached"] === true,
@@ -85,12 +88,15 @@ function changesPlanValue(output: Obj, digest: string, marked: boolean, summary:
     if (!isObj(file) || typeof file["path"] !== "string" || (file["change"] !== "create" && file["change"] !== "modify")) return { ok: false, code: "host_error" };
     files.push({ path: shown(file["path"]), change: file["change"] });
   }
+  // U-271 (G-sec, U-274): only the contract's statuses (PLAN_STATUSES); any other is not shown as one to approve.
+  const status = output["status"];
+  if (status !== "pending" && status !== "applied") return { ok: false, code: "host_error" };
   const applied = output["appliedBy"];
   return {
     ok: true,
     planKind: "changes",
     runId: typeof output["runId"] === "string" && RUN_ID.test(output["runId"]) ? output["runId"] : null,
-    status: output["status"] === "applied" ? "applied" : "pending",
+    status,
     digest,
     actions: [],
     files,

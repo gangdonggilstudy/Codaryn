@@ -87,6 +87,19 @@ export class TreeView {
     this.render();
   }
 
+  /**
+   * U-271 (3.3): marks what an apply of moves did: each file it moved, at its new place ("moved here"),
+   * and the number it sent to the discard box (said above the tree; they have no entry). Nothing done
+   * clears the marks.
+   */
+  markApply(run: MarkedRun, applied: readonly { readonly kind: "move" | "discard"; readonly to: string | null }[]): void {
+    const moved = applied.flatMap((action) => (action.kind === "move" && action.to !== null ? [{ path: action.to, created: false, moved: true as const }] : []));
+    const discarded = applied.filter((action) => action.kind === "discard").length;
+    const marks = new ChangeMarks(run, moved, discarded);
+    this.marks = marks.size === 0 && discarded === 0 ? null : marks;
+    this.render();
+  }
+
   clearMarks(): void {
     this.marks = null;
     this.render();
@@ -182,12 +195,12 @@ export class TreeView {
     const mark = path === null || this.marks === null || node.kind !== "file" ? null : this.marks.file(path);
     const holds = path !== null && this.marks !== null && node.kind === "dir" && this.marks.holds(path);
     if (mark !== null) {
-      words.push(t.format(mark.created ? "tree.mark.created" : "tree.mark.changed"));
+      words.push(t.format(mark.moved ? "tree.mark.moved" : mark.created ? "tree.mark.created" : "tree.mark.changed"));
       if (mark.state === "changed_since_run") words.push(t.format("tree.mark.changedSince"));
     }
     if (holds) words.push(t.format("tree.mark.holds"));
     if (node.protected) words.push(t.format("tree.mark.protected"));
-    return { words, change: mark === null ? null : mark.created ? "created" : "changed", holds };
+    return { words, change: mark === null ? null : mark.moved ? "moved" : mark.created ? "created" : "changed", holds };
   }
 
   private rowElement(row: TreeRow): HTMLLIElement {
@@ -248,7 +261,12 @@ export class TreeView {
     else this.openButton.setAttribute("disabled", "");
     if (this.marks === null) this.marksNote.setAttribute("hidden", "");
     else {
-      this.marksText.textContent = `${this.texts.format("tree.marksOf", { runId: this.marks.run.runId, count: String(this.marks.size) })} `;
+      // U-271 (3.3): an apply's marks say what it moved, and how many it sent to the discard box.
+      const marks = this.marks;
+      const applied = marks.discarded > 0 || (marks.size > 0 && [...marks.paths()].every((path) => marks.file(path)?.moved === true));
+      this.marksText.textContent = applied
+        ? `${this.texts.format("tree.marksOfApply", { runId: marks.run.runId, count: String(marks.size) })}${marks.discarded > 0 ? ` ${this.texts.format("tree.marksDiscarded", { count: String(marks.discarded) })}` : ""} `
+        : `${this.texts.format("tree.marksOf", { runId: marks.run.runId, count: String(marks.size) })} `;
       this.marksNote.removeAttribute("hidden");
     }
     if (rows.some((row) => row.type === "node" && row.node.protected)) this.protectedNote.removeAttribute("hidden");
@@ -283,7 +301,9 @@ export class TreeView {
   private openIfChanged(node: TreeNode | null): void {
     if (node === null || node.kind !== "file" || this.marks === null || this.options.openChange === undefined) return;
     const path = pathOf(node);
-    if (path !== null && this.marks.file(path) !== null) this.options.openChange(this.marks.run, path);
+    // U-271: a file an apply moved has no comparison (an apply's changes view does not exist).
+    const mark = path === null ? null : this.marks.file(path);
+    if (path !== null && mark !== null && !mark.moved) this.options.openChange(this.marks.run, path);
   }
 
   private onKey(event: KeyboardEvent): void {

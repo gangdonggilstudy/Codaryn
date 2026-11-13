@@ -305,7 +305,7 @@ export function asSettings(value: unknown): SettingsReply {
       workflows: { builtin: strList(workflows["builtin"]) ? workflows["builtin"] : [], config: strList(workflows["config"]) ? workflows["config"] : [] },
       keyAvailable: view["keyAvailable"] === true,
       providers: strList(view["providers"]) ? view["providers"] : [],
-      env: { model: env["model"] === true, language: env["language"] === true },
+      env: { model: env["model"] === true, language: env["language"] === true, ...(env["os"] === "windows" || env["os"] === "posix" ? { os: env["os"] } : {}) },
       rules: asRules(view["rules"]),
       policyNarrowings: asNarrowings(view["policyNarrowings"]),
       provider: str(view["provider"]) ? view["provider"] : null,
@@ -440,7 +440,14 @@ export function asRunEvents(value: unknown): RunEventsPayload | null {
     isObj(item) && str(item["kind"]) && str(item["text"]) && (item["at"] === null || str(item["at"])) ? [{ at: item["at"] as string | null, kind: item["kind"], text: item["text"] }] : [],
   );
   const n = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
-  return { runId: value["runId"], items, counts: { turns: n(value["counts"]["turns"]), tools: n(value["counts"]["tools"]) } };
+  // U-271 (3.6): the run's limits checked again (whole numbers above 0); left out when they do not fit.
+  const given = value["counts"]["limits"];
+  const above = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
+  const lTurns = isObj(given) ? given["turns"] : null;
+  const lTools = isObj(given) ? given["tools"] : null;
+  const lTime = isObj(given) ? given["durationMs"] : null;
+  const limits = above(lTurns) && above(lTools) && above(lTime) ? { turns: lTurns, tools: lTools, durationMs: lTime } : null;
+  return { runId: value["runId"], items, counts: { turns: n(value["counts"]["turns"]), tools: n(value["counts"]["tools"]), ...(limits === null ? {} : { limits }) } };
 }
 
 /** GU-3: a run's end; null when it does not fit. The main process checked the result already. */
@@ -484,6 +491,7 @@ export function asRuns(value: unknown): RunsReply {
         recordsChanged: run["recordsChanged"] === true,
         planApply: asPlanApply(run["planApply"]),
         planRunId: str(run["planRunId"]) && RUN_ID.test(run["planRunId"]) ? run["planRunId"] : null,
+        phase: run["phase"] === "running" || run["phase"] === "no_result" ? run["phase"] : null,
         form: asForm(run["form"]),
       },
     ];

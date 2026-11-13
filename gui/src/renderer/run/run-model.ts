@@ -14,6 +14,9 @@
 
 import type { RunDonePayload, RunEventsPayload, RunItemView } from "../../shared/ipc.js";
 
+/** A run's counts, with its limits once known (U-271). */
+export type RunCounts = RunEventsPayload["counts"];
+
 export type RunPhase = "idle" | "starting" | "running" | "cancelling" | "done";
 export type RunFilter = "all" | "denied" | "files" | "checks";
 
@@ -64,7 +67,7 @@ export class RunModel {
   runId: string | null = null;
   startedAt: number | null = null;
   items: RunItemView[] = [];
-  counts = { turns: 0, tools: 0 };
+  counts: RunCounts = { turns: 0, tools: 0 };
   /** Records went missing from the progress (once per run). */
   gap = false;
   done: RunDonePayload | null = null;
@@ -230,6 +233,20 @@ export class RunModel {
 }
 
 /** `m:ss` or `h:mm:ss`. */
+/**
+ * U-271 (docs/design/standalone-gui.md 3.6): the time, turns and tool calls as the status bar and the run
+ * screen show them: "3/12" with the run's limit once its start gave it, the count alone before.
+ */
+export function countValues(counts: RunCounts, seconds: number | null): { readonly time: string; readonly turns: string; readonly tools: string } {
+  const limits = counts.limits;
+  const of = (value: string, max: string): string => (limits === undefined ? value : `${value}/${max}`);
+  return {
+    time: seconds === null ? "-" : of(clock(seconds), limits === undefined ? "" : clock(Math.ceil(limits.durationMs / 1000))),
+    turns: of(String(counts.turns), String(limits?.turns ?? "")),
+    tools: of(String(counts.tools), String(limits?.tools ?? "")),
+  };
+}
+
 export function clock(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);

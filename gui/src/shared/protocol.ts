@@ -65,8 +65,23 @@ export interface HostRunEvents {
   readonly type: "events";
   readonly run: string;
   readonly items: readonly HostRunItem[];
-  /** Model turns and tool calls so far. */
-  readonly counts: { readonly turns: number; readonly tools: number };
+  /** Model turns and tool calls so far. U-271 (3.6): the run's limits once run_started gave them. */
+  readonly counts: { readonly turns: number; readonly tools: number; readonly limits?: RunLimitsView };
+}
+
+/** U-271 (3.6): a run's limits of turns, tool calls and time (run_started.limits), whole numbers above 0. */
+export interface RunLimitsView {
+  readonly turns: number;
+  readonly tools: number;
+  readonly durationMs: number;
+}
+
+/** U-271: the limits checked; null when they do not fit (then the counts go without them). */
+export function parseRunLimits(value: unknown): RunLimitsView | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { turns, tools, durationMs } = value as Record<string, unknown>;
+  const fits = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
+  return fits(turns) && fits(tools) && fits(durationMs) ? { turns, tools, durationMs } : null;
 }
 
 /** Host → main, once, after the run's last events: how it ended (checked by the main process). */
@@ -222,7 +237,9 @@ export function parseHostMessage(line: string): HostMessage | null {
     const counts = value["counts"];
     if (items === null || typeof counts !== "object" || counts === null) return null;
     const { turns, tools } = counts as Record<string, unknown>;
-    return isCount(turns) && isCount(tools) ? { v: 1, type: "events", run, items, counts: { turns, tools } } : null;
+    // U-271 (3.6): limits that do not fit are left out; the counts still go.
+    const limits = parseRunLimits((counts as Record<string, unknown>)["limits"]);
+    return isCount(turns) && isCount(tools) ? { v: 1, type: "events", run, items, counts: { turns, tools, ...(limits === null ? {} : { limits }) } } : null;
   }
   if (value["type"] !== undefined) return null;
   const id = value["id"];

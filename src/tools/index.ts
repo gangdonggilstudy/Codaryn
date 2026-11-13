@@ -37,6 +37,7 @@ import type {
   WriteFileArgs,
 } from "../contracts/index.js";
 
+import { compilePathSet } from "../policy/path-set.js";
 import { createCommandRunner } from "./command-runner.js";
 import type { CommandRunner } from "./command-runner.js";
 import { nodePlanFileOps } from "./plan-files.js";
@@ -97,6 +98,13 @@ export interface ToolRunnerOptions {
   readonly fileOps?: Partial<PlanFileOps>;
   /** For tests. Defaults to `process.platform`. Decides whether plan paths compare without case. */
   readonly platform?: NodeJS.Platform;
+  /**
+   * U-203 (bundle A, R-3, R-4): the run's PolicyConfig.unreadablePaths. search_files and inspect_files
+   * leave out what is under them, names included, judged by the text and the real path (the gate
+   * refuses a start under them); a result whose folder holds such a path says `withheld`. Absent:
+   * nothing is left out, as before.
+   */
+  readonly unreadablePaths?: readonly string[];
 }
 
 /**
@@ -252,11 +260,18 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     };
   }
 
+  // U-203 (R-1): the unreadable paths with the gate's rule (a deny list: an unusable one covers all).
+  const unreadable = options.unreadablePaths === undefined ? null : compilePathSet(options.unreadablePaths, { match: "prefix", onUnusable: "covers" });
+
   async function searchFiles(args: SearchFilesArgs, signal: AbortSignal): Promise<RawToolOutcome> {
     const resolved = await resolvePath(args.path, "read");
     if (!resolved.ok) return resolved;
     const listed = await workspace.list(resolved.path);
     if (!listed.ok) return fail(listed.code, `cannot list directory: ${listed.code}`);
+    // U-203 (R-3, R-4): what is under an unreadable path is left out, names included. `withheld`
+    // follows the entries alone (one lies in this folder), never what exists there.
+    const hidden = unreadable === null ? null : await unreadable.snapshot(workspace);
+    const withheld = hidden !== null && hidden.within(resolved.path.relative);
 
     // Matching works on masked text only: the path names and the file contents a model would
     // see. Matching raw text would let the result reveal secrets one character at a time.
@@ -264,6 +279,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
     const entries: SearchEntry[] = [];
     for (const entry of listed.entries) {
       if (signal.aborted) return fail("cancelled", "search cancelled");
+      if (hidden !== null && hidden.covers(entry.relative)) continue;
       const maskedPath = maskText(entry.relative);
       if (maskedPath === null) return fail("masking_failed", "masking a path failed");
       if (args.nameContains !== undefined && !maskedPath.includes(args.nameContains)) continue;
@@ -274,6 +290,8 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
         // Each file is resolved again, so a link that leaves the root is never read.
         const file = await workspace.resolve(entry.relative, "read");
         if (!file.ok) continue;
+        // U-203: a link that leads under an unreadable path is not read either.
+        if (hidden !== null && hidden.covers(file.path.relative)) continue;
         const read = await workspace.readText(file.path);
         if (!read.ok) continue;
         const raw: string = read.snapshot.text;
@@ -308,7 +326,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
           : { path: maskedPath, kind: entry.kind, matches },
       );
     }
-    return { ok: true, payload: { entries, truncated } };
+    return { ok: true, payload: { entries, truncated, ...(withheld ? { withheld: true as const } : {}) } };
   }
 
   /**
@@ -470,6 +488,7 @@ export function createToolRunner(options: ToolRunnerOptions): ToolRunner {
   const workflowDeps = {
     workspace,
     privacy,
+    ...(unreadable === null ? {} : { unreadable }),
     ...(options.planRecorder === undefined ? {} : { planRecorder: options.planRecorder }),
     fileOps: { ...nodePlanFileOps, ...options.fileOps },
     platform: options.platform ?? process.platform,

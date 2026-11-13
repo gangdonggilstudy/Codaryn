@@ -49,6 +49,7 @@ import {
   pathKey,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
+import type { PathSet } from "../policy/path-set.js";
 
 /**
  * Most entries `inspect_files` walks under one directory. Above it the call fails with
@@ -86,6 +87,8 @@ export interface WorkflowToolDeps {
   readonly planRecorder?: PlanRecorder;
   readonly fileOps: PlanFileOps;
   readonly platform: NodeJS.Platform;
+  /** U-203 (R-3, R-4): the run's unreadable paths (ToolRunnerOptions.unreadablePaths); inspect_files leaves them out. */
+  readonly unreadable?: PathSet;
 }
 
 interface WalkedEntry {
@@ -176,6 +179,7 @@ export async function inspectFiles(
 
   const walked = await walk(workspace.root, resolved.path.absolute, signal);
   if (!Array.isArray(walked)) return walked;
+  const withheld = await withholdUnreadable(deps, walked, resolved.path.relative);
 
   let start = 0;
   if (args.after !== undefined) {
@@ -232,7 +236,7 @@ export async function inspectFiles(
   }
   const last = entries[entries.length - 1];
   const next = index < walked.length && last !== undefined ? last.path : null;
-  return { ok: true, payload: { entries, next, hashesIncomplete } };
+  return { ok: true, payload: { entries, next, hashesIncomplete, ...(withheld ? { withheld: true as const } : {}) } };
 }
 
 interface CheckedAction {
@@ -408,4 +412,19 @@ export async function proposePlan(
     return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
   }
   return { ok: true, payload: { digest, actions } };
+}
+
+/**
+ * U-203 (bundle A, R-3, R-4): leaves out of a walk, in place, every entry under the run's unreadable
+ * paths, by its text or its real path, before anything is hashed or paged (so `next` never names
+ * one). True when an unreadable entry lies in the walked folder (`withheld`), which depends on the
+ * entries alone, never on what exists there.
+ */
+async function withholdUnreadable(deps: WorkflowToolDeps, walked: WalkedEntry[], folder: string): Promise<boolean> {
+  if (deps.unreadable === undefined) return false;
+  const hidden = await deps.unreadable.snapshot(deps.workspace);
+  for (let index = walked.length - 1; index >= 0; index -= 1) {
+    if (hidden.covers((walked[index] as WalkedEntry).relative)) walked.splice(index, 1);
+  }
+  return hidden.within(folder);
 }

@@ -42,10 +42,9 @@ function signals(throwing: { readonly on?: SignalName; readonly off?: SignalName
   };
 }
 
-const FIXED = "the CLI's cancel helper passes on the app's createRunCancelSource (U-296)";
 
 describe("U-296: the CLI's cancel source at its edges", () => {
-  test("a registration that throws after one succeeded: that one is removed and the error is thrown on", { todo: FIXED }, () => {
+  test("a registration that throws after one succeeded: that one is removed and the error is thrown on", () => {
     const { calls, onSignal } = signals({ on: "SIGTERM" });
     assert.throws(() => createCancelSource({ cancelFile: null, fileExists: () => false, onSignal }), /registering SIGTERM failed/);
     assert.deepEqual(calls, ["on SIGINT", "off SIGINT"], "no registration is left behind");
@@ -57,14 +56,14 @@ describe("U-296: the CLI's cancel source at its edges", () => {
     assert.deepEqual(calls, []);
   });
 
-  test("a removal that throws: the other is still removed and dispose does not throw", { todo: FIXED }, () => {
+  test("a removal that throws: the other is still removed and dispose does not throw", () => {
     const { calls, onSignal } = signals({ off: "SIGINT" });
     const source = createCancelSource({ cancelFile: null, fileExists: () => false, onSignal });
     source.dispose();
     assert.deepEqual(calls, ["on SIGINT", "on SIGTERM", "off SIGINT", "off SIGTERM"], "both removals were tried");
   });
 
-  test("codaryn run, a registration that throws: the run is refused before anything is assembled and nothing is left registered", { todo: FIXED }, async () => {
+  test("codaryn run, a registration that throws: the run is refused before anything is assembled and nothing is left registered", async () => {
     const base = await setupRun({ "README.md": "# Title\n" }, {}, [{ text: "done" }]);
     const { calls, onSignal } = signals({ on: "SIGTERM" });
     await assert.rejects(runCli(cliIo(base, { cancelSignal: (cancelFile) => createCancelSource({ cancelFile, fileExists: () => false, onSignal }) })), /registering SIGTERM failed/);
@@ -72,7 +71,7 @@ describe("U-296: the CLI's cancel source at its edges", () => {
     assert.equal(await exists(path.join(base, "work", ".codaryn", "lock.json")), false, "the run was not assembled");
   });
 
-  test("codaryn run, a removal that throws: the other is still removed and the run's end stands", { todo: FIXED }, async () => {
+  test("codaryn run, a removal that throws: the other is still removed and the run's end stands", async () => {
     const base = await setupRun({ "README.md": "# Title\n" }, {}, [{ text: "done" }]);
     const { calls, onSignal } = signals({ off: "SIGINT" });
     const outcome = await runCli(cliIo(base, { cancelSignal: (cancelFile) => createCancelSource({ cancelFile, fileExists: () => false, onSignal }) }));

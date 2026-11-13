@@ -7,7 +7,8 @@
  * Now every part of a run that judges or reads gets the run's list and k from one place, and on the
  * real CLI (scripted model) the carried-out run refuses that read as unreadable_path, its search
  * leaves the table out, and the canary of the table is in no record, result or output. The plan run
- * refused the same read before, which stays.
+ * refused the same read before, which stays. runGuards is that one place: what it gives the tool
+ * runner, the verifier runner and the integrity checks, and nothing more without a list or k.
  */
 
 import assert from "node:assert/strict";
@@ -15,7 +16,9 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
-import type { JournalRecord } from "../../../src/contracts/index.js";
+import type { JournalRecord, ResolvedTaskSpec } from "../../../src/contracts/index.js";
+import { runGuards } from "../../../src/cli/unreadable.js";
+import { createWorkspace } from "../../../src/workspace/index.js";
 import { cliEnv } from "../../support/cli.js";
 import type { CliRun } from "../../support/cli.js";
 import { cliOutputSources, runGuarded } from "../../support/fake-anthropic.js";
@@ -89,5 +92,24 @@ describe("U-210 (R-108 H-1): the run that carries out a plan has the run's unrea
     assert.deepEqual([found.entries.map((entry) => entry.path), found.withheld], [[], true], "the table's line is left out of the search");
     assert.deepEqual(findLeaks(cliOutputSources(sb.workspace, carried), [CANARY]), [], "no cell of the unreadable table in a record, a result or the output");
     assert.equal(readFileSync(path.join(sb.workspace, "docs", "guide.md"), "utf8"), "new guide\n", "the planned write went through");
+  });
+});
+
+describe("U-210 (R-108 H-1): runGuards, the one place that gives the run's list and k", () => {
+  const policy = { ...POLICY, protectedPaths: ["tests"] } as unknown as ResolvedTaskSpec["policy"];
+
+  test("with a list and k: the tool runner gets both, the verifier runner the list, the integrity checks both lists", async (t) => {
+    const sb = createSandbox(t);
+    const guards = runGuards({ policy, unreadablePaths: ["private", "tests"], minGroupSize: 7 }, await createWorkspace({ root: sb.workspace }));
+    assert.deepEqual(guards.tools, { unreadablePaths: ["private", "tests"], minGroupSize: 7 });
+    assert.deepEqual(guards.verifiers, { unreadablePaths: ["private", "tests"] });
+    assert.deepEqual(guards.protectedPaths, ["tests", "private"], "each once, the protected paths first");
+    assert.equal(typeof guards.gate().checkRequested, "function");
+  });
+
+  test("without them: nothing more for any part, as before", async (t) => {
+    const sb = createSandbox(t);
+    const guards = runGuards({ policy }, await createWorkspace({ root: sb.workspace }));
+    assert.deepEqual([guards.tools, guards.verifiers, guards.protectedPaths], [{}, {}, ["tests"]]);
   });
 });

@@ -1,11 +1,13 @@
 /**
  * U-210 (P1 bundle A, A-6; R-2, Q-4, review R-102 M-1): the run's unreadable paths and its group size
  * k (ResolvedTaskSpec.unreadablePaths, .minGroupSize), from every source a run has. Shared by the
- * task's preparation (run.ts) and doctor, so both see the same list.
+ * task's preparation (run.ts) and doctor, so both see the same list. Review R-108 H-1: and the one
+ * place that gives them to the parts of a run that judge or read (runGuards).
  */
 
-import { ANALYZE_PRIVATE_WORKFLOW_ID, effectiveMinGroupSize, unreadablePathsOf } from "../contracts/index.js";
-import type { PolicyConfig } from "../contracts/index.js";
+import { ANALYZE_PRIVATE_WORKFLOW_ID, effectiveMinGroupSize, integrityPathsOf, unreadablePathsOf } from "../contracts/index.js";
+import type { PolicyConfig, PolicyGate, ResolvedTaskSpec, WritablePathSet, Workspace } from "../contracts/index.js";
+import { createPolicyGate } from "../policy/index.js";
 import type { WritableSources } from "./writable.js";
 
 /**
@@ -33,6 +35,37 @@ function policiesOf(sources: WritableSources): readonly (PolicyConfig | undefine
 /** Every source's unreadable entries united, each once, in that order; empty when no source states any. */
 export function runUnreadablePaths(sources: WritableSources): readonly string[] {
   return unreadablePathsOf(policiesOf(sources).map((policy) => policy?.unreadablePaths));
+}
+
+/**
+ * U-210 (review R-108 H-1): what the run's unreadable paths and k give each part of a run that judges
+ * or reads, so no part is made without them (R-108 found the gate of a carried-out plan made without
+ * the list). The CLI makes every one of these from it: a run's assembly (src/cli/assemble.ts: the
+ * gate, the tool runner, the verifier runner, the integrity checks, and a carried-out plan's gate),
+ * and a plan of moves' apply (src/cli/plan-commands.ts: its gate, its verifier runner and its
+ * integrity checks). A revert makes none of them. The app's assembly and its checks can make theirs
+ * from it too (p5a). Without unreadable paths and k every part is as before.
+ */
+export interface RunGuards {
+  /** The policy gate: these writable lists (a carried-out plan's, from the engine), else the task's. */
+  gate(writablePathSets?: readonly WritablePathSet[]): PolicyGate;
+  /** For createToolRunner: the run's unreadable paths (listing tools, query_table) and k (query_table). */
+  readonly tools: { readonly unreadablePaths?: readonly string[]; readonly minGroupSize?: number };
+  /** For createVerifierRunner: the run's unreadable paths (data_checks' evidence, U-223). */
+  readonly verifiers: { readonly unreadablePaths?: readonly string[] };
+  /** For createIntegrityChecker's protectedPaths: the policy's protected paths and the unreadable ones. */
+  readonly protectedPaths: readonly string[];
+}
+
+export function runGuards(task: Pick<ResolvedTaskSpec, "policy" | "writablePathSets" | "unreadablePaths" | "minGroupSize">, workspace: Workspace): RunGuards {
+  const unreadable = task.unreadablePaths === undefined ? {} : { unreadablePaths: task.unreadablePaths };
+  return {
+    gate: (writablePathSets = task.writablePathSets) =>
+      createPolicyGate({ config: task.policy, workspace, ...(writablePathSets === undefined ? {} : { writablePathSets }), ...unreadable }),
+    tools: { ...unreadable, ...(task.minGroupSize === undefined ? {} : { minGroupSize: task.minGroupSize }) },
+    verifiers: unreadable,
+    protectedPaths: integrityPathsOf(task.policy.protectedPaths, task.unreadablePaths),
+  };
 }
 
 /**

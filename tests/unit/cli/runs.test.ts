@@ -262,6 +262,8 @@ describe("listRuns (N-7, N-16)", () => {
       // DR-37 (d), store f1d5125: the run list names the profile and the workflow definition.
       profile: null,
       workflowRef: null,
+      // U-162 (AXM-8): its result.json is there.
+      phase: "finished",
     });
   });
 
@@ -284,6 +286,8 @@ describe("listRuns (N-7, N-16)", () => {
         revertRecordDamaged: false,
         profile: null,
         workflowRef: null,
+        // U-162 (AXM-8): no result.json and no lock naming it.
+        phase: "no_result",
       },
       { state: "damaged", runId: "20260102T030406Z-bbbbbbbb" },
     ]);

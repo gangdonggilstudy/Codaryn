@@ -135,6 +135,8 @@ describe("apply runs in the run list (G-E, DR-12)", () => {
       changes: 2,
       reverted: null,
       revertRecordDamaged: false,
+      // U-162 (AXM-8): its result.json is there.
+      phase: "finished",
     });
     assert.equal(await inspectRun(root, APPLY_RUN), "checked");
     assert.equal(await latestRunId(root), APPLY_RUN);

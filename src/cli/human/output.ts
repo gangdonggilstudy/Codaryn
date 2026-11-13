@@ -745,7 +745,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
             : judged !== null
               ? planApplyWords(judged.applyRunId, judged.reason)[judged.state]()
               : catalog.format(`status.${pair.status}`);
-        let status = pair === null ? catalog.format("runs.incomplete") : `${words} (${pair.status}/${pair.reason})`;
+        // U-162 (AXM-8): a run without a result says what its phase is when the list knows it.
+        const phase: unknown = entry.phase;
+        const noResult = phase === "running" ? "runs.running" : phase === "no_result" ? "runs.no_result" : "runs.incomplete";
+        let status = pair === null ? catalog.format(noResult) : `${words} (${pair.status}/${pair.reason})`;
         // U-139 (UXM-5): an apply run names the plan run it applied, right after its status words.
         const appliedPlan = entry.kind === "apply" && typeof entry.planRunId === "string" ? toRunId(entry.planRunId) : null;
         if (appliedPlan !== null) status += ` · ${catalog.format("runs.apply_of", { runId: appliedPlan })}`;
@@ -870,6 +873,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
         );
       }
       if (applied.length > REVERT_MAX_LISTED) out.push(moreLine(applied.length - REVERT_MAX_LISTED));
+      // U-162 (GT-D14, PM): right after the actions, how many folders they left without files (kept).
+      if (isCount(result.foldersLeftEmpty, 1)) out.push(catalog.format("summary.folders_left_empty", { count: result.foldersLeftEmpty }));
       const planRunId = toRunId(String(result.planRunId));
       if (planRunId !== null) out.push(catalog.format("summary.apply_plan_run", { runId: planRunId }));
       const verifiers = Array.isArray(result.verifiers) ? result.verifiers : [];

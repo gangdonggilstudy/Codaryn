@@ -1201,7 +1201,7 @@ node --test dist/tests/live/openai-live.js
 | 끝난 실행의 잠금 옆에 회수 파일 `lock.json.reclaim`이 남음(그 안의 `pid`가 살아 있는 다른 프로그램) | A를 고른다 | `workspace_locked`(종료 6). 회수 파일이 있는 동안 잠금을 회수하지 않는다 | `[warning]` `a lock reclaim file (.codaryn/lock.json.reclaim) is left, so a lock left by an ended process is not reclaimed; if no Codaryn is running in this workspace, remove that file` | `lock.json.reclaim`을 지운다. 그 뒤 새 실행이 남은 잠금을 회수하고 `done`이었다 |
 
 - 막힌 동안에도 실행 id를 직접 주면 그 실행을 볼 수 있다. 위 모든 경우에 `report --run <A의 id>`는 종료 0이었다. `run_in_progress`의 고치는 법 줄(`To see an earlier run, give its id; codaryn runs lists the runs of the workspace.`)이 이것이다.
-- 멈춘 실행 B는 `runs`에 `no result (running or stopped)`(한국어 `결과 없음(진행 중이거나 중단됨)`)로 남는다. 정리 미리보기는 B를 고르지 않고, 잠금이 쥔 것으로 보이면 `running (it holds the workspace lock)`, 아니면 `no result yet (it may still be running)`이라고 적는다.
+- 멈춘 실행 B는 `runs`에 `stopped without a result`(한국어 `결과 없이 중단됨`)로 남는다(`runs --json`의 `phase`는 `no_result`, U-162). 잠금이 B를 가리키고 그 주인이 살아 있는 것으로 보일 때만, 곧 위 셋째 경우(시작 시각이 없는 옛 판의 잠금, 그 `pid`를 다른 프로그램이 씀)에만 `running`(한국어 `진행 중`)이다. 읽을 수 없는 잠금이나 남은 회수 파일로는 B가 돈다고 말하지 않는다. 정리 미리보기는 B를 고르지 않고, 잠금이 쥔 것으로 보이면 `running (it holds the workspace lock)`, 아니면 `no result yet (it may still be running)`이라고 적는다.
 - `workspace_locked`의 사람용 오류는 이렇게 끝난다(실제 출력, 한국어는 `이 작업 공간에서 실행 중인 Codaryn이 없으면 .codaryn/lock.json과, 있다면 .codaryn/lock.json.reclaim을 지우세요.`).
 
   ```
@@ -1378,6 +1378,7 @@ Actions applied: 3 of 3
   action #1 — moved inbox/beach-2025.jpg → photos/2025/beach-2025.jpg
   action #2 — moved inbox/receipt-2026.pdf → documents/2026/receipt-2026.pdf
   action #3 — moved to the discarded files inbox/old-draft.tmp
+Folders the actions left without files (kept in place): 1
 Plan run: 20261112T200120Z-c27683db
 Checks passed: 2 of 2 (within the configured checks)
 Read the report, and revert if needed.

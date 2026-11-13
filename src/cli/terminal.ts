@@ -39,19 +39,35 @@ export async function askLine(question: string, source: LineSource, signal?: Abo
   if (input.readableEnded === true || endedInputs.has(input)) return { none: true };
   input.ref?.();
   const prompt = createInterface({ input, output: source.output });
+  let answer: AskAnswer = { none: true };
+  // An aborted question is ended by readline itself (it clears the line with a line end).
+  let lineEnded = false;
   try {
-    return await new Promise<AskAnswer>((resolve) => {
+    answer = await new Promise<AskAnswer>((resolve) => {
       // With a listener, readline reports Ctrl+C here instead of closing the question.
       prompt.once("SIGINT", () => resolve({ interrupted: true }));
       prompt.once("close", () => resolve({ none: true }));
       prompt.question(question, signal === undefined ? {} : { signal }).then(
         (line) => resolve({ line }),
-        () => resolve({ none: true }),
+        () => {
+          lineEnded = signal?.aborted === true;
+          resolve({ none: true });
+        },
       );
     });
+    return answer;
   } finally {
     prompt.close();
     input.pause();
     input.unref?.();
+    // U-141 (R-88b I1): no line came, so nothing ended the prompt's line; end it here, once, so the
+    // next text starts on a line of its own. A typed line ends it itself.
+    if (!("line" in answer) && !lineEnded) {
+      try {
+        source.output.write("\n");
+      } catch {
+        // The line end is best effort, as all human output.
+      }
+    }
   }
 }

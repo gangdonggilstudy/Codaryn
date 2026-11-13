@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
   restartEngine: "codaryn:app:restartengine",
   copyText: "codaryn:app:copy",
   copyPath: "codaryn:workspace:copypath",
+  revealConfig: "codaryn:settings:revealconfig",
   openFolder: "codaryn:workspace:open",
   recent: "codaryn:workspace:recent",
   openRecent: "codaryn:workspace:openrecent",

@@ -13,7 +13,7 @@ import { changesValue, planValue, reviewValue } from "./plans.js";
 import { reportValue } from "./report.js";
 import { createRunRegistry, taskForm } from "./runs.js";
 import type { HostApplyRequest, HostStartRunRequest, HostTaskForm, RunItemOf } from "./runs.js";
-import { configLanguageOf, modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
+import { configFileValue, configLanguageOf, modelsValue, proposalValue, selectedValue, settingsValue, writtenValue } from "./settings.js";
 import type { ApiProviderEntry } from "./settings.js";
 import { applySettingsEdit, parseSettingsEdit } from "../shared/settings-edit.js";
 import { isCleanupTimestamp, parseCleanupSelection } from "../shared/cleanup.js";
@@ -281,6 +281,10 @@ export function createHostHandler(deps: HostDeps): HostHandler {
       }
       case "tree":
         return deps.tree(treeArgs(args));
+      case "configFile":
+        // U-69: for the main process only (show the config file in the folder).
+        noArgs(args);
+        return configFileValue(await deps.app.readSettings({ configPath: null }));
       case "settings":
         noArgs(args);
         return settingsValue(await deps.app.readSettings({ configPath: null }), deps.shown, deps.providers, deps.envSet, deps.apiProviders);

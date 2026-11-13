@@ -207,7 +207,8 @@ function parseUsage(value: unknown): ModelUsage | null {
 }
 
 function malformed(message: string): Failure {
-  return { ok: false, kind: "malformed_response", message: `malformed response: ${message}` };
+  // U-82: asking again gets the same reply shape.
+  return { ok: false, kind: "malformed_response", message: `malformed response: ${message}`, retryable: false };
 }
 
 /** Turns a 2xx body into a response. Unknown structure is `malformed_response`. */
@@ -223,7 +224,7 @@ function parseMessageBody(text: string): ModelOutcome {
 
   const reason = value.stop_reason;
   if (reason === "refusal") {
-    return { ok: false, kind: "api_error", message: "the model declined the request (stop_reason refusal)" };
+    return { ok: false, kind: "api_error", message: "the model declined the request (stop_reason refusal)", retryable: false };
   }
   if (typeof reason !== "string" || !Object.hasOwn(STOP_MAP, reason)) {
     return malformed(`unexpected stop_reason ${typeof reason === "string" ? JSON.stringify(reason.slice(0, 40)) : String(reason)}`);
@@ -352,11 +353,13 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
   };
   const redact = createRedactor(settings.apiKey, ANTHROPIC_KEY_SHAPES);
 
-  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number): Failure => ({
+  // U-82 (DR-68): `retryable` is the transport's verdict for what was sent, or the adapter's own.
+  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number, retryable?: boolean): Failure => ({
     ok: false,
     kind,
     message: redact(message),
     ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(retryable === undefined ? {} : { retryable }),
   });
   const aborted = (when: string): Failure => fail("aborted", `cancelled ${when}`);
 
@@ -364,15 +367,15 @@ export const createAnthropicProvider: CreateAnthropicProvider = (
     if (signal.aborted) return aborted("before the request was sent");
     if (!keyUsable) {
       // No position, length or character code: any of them would describe the key.
-      return fail("not_configured", UNUSABLE_KEY_MESSAGE);
+      return fail("not_configured", UNUSABLE_KEY_MESSAGE, undefined, false);
     }
     const built = buildBody(settings, request);
-    if (typeof built === "string") return fail("api_error", `request not sent: ${built}`);
+    if (typeof built === "string") return fail("api_error", `request not sent: ${built}`, undefined, false);
 
     const sent = await sendWithRetries(transport, { method: "POST", url, body: built.body }, signal);
-    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus);
+    if (!sent.ok) return fail(sent.kind, sent.message, sent.httpStatus, sent.retryable);
     const outcome = parseMessageBody(sent.text);
-    return outcome.ok ? outcome : fail(outcome.kind, outcome.message);
+    return outcome.ok ? outcome : fail(outcome.kind, outcome.message, undefined, outcome.retryable);
   }
 
   return {
@@ -470,11 +473,12 @@ export const listAnthropicModels: ListAnthropicModels = async (
 ): Promise<ListModelsOutcome> => {
   const apiKey = typeof settings?.apiKey === "string" ? settings.apiKey : "";
   const redact = createRedactor(apiKey, ANTHROPIC_KEY_SHAPES);
-  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number): ListModelsOutcome => ({
+  const fail = (kind: ModelErrorKind, message: string, httpStatus?: number, retryable?: boolean): ListModelsOutcome => ({
     ok: false,
     kind,
     message: redact(message),
     ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(retryable === undefined ? {} : { retryable }),
   });
 
   try {
@@ -484,10 +488,10 @@ export const listAnthropicModels: ListAnthropicModels = async (
     } catch (error) {
       // The checks throw fixed text only; anything else is not quoted.
       const reason = error instanceof TypeError ? error.message.replace(/^anthropic provider: /, "") : "invalid settings";
-      return fail("not_configured", `model listing not started: ${reason}; nothing was sent`);
+      return fail("not_configured", `model listing not started: ${reason}; nothing was sent`, undefined, false);
     }
     if (signal.aborted) return fail("aborted", "cancelled before the request was sent");
-    if (!isUsableApiKey(apiKey)) return fail("not_configured", UNUSABLE_KEY_MESSAGE);
+    if (!isUsableApiKey(apiKey)) return fail("not_configured", UNUSABLE_KEY_MESSAGE, undefined, false);
 
     const transport: Transport = {
       fetch: deps.fetch ?? globalThis.fetch,
@@ -507,20 +511,20 @@ export const listAnthropicModels: ListAnthropicModels = async (
       const where = pageNumber > 1 ? ` (page ${pageNumber})` : "";
       const query = `?limit=${MODEL_LIST_PAGE_SIZE}${cursor === null ? "" : `&after_id=${encodeURIComponent(cursor)}`}`;
       const sent = await sendWithRetries(transport, { method: "GET", url: `${base}${ANTHROPIC_MODELS_PATH}${query}` }, signal);
-      if (!sent.ok) return fail(sent.kind, `${sent.message}${where}`, sent.httpStatus);
+      if (!sent.ok) return fail(sent.kind, `${sent.message}${where}`, sent.httpStatus, sent.retryable);
 
       const parsed = parseModelPage(sent.text, holdsKeyMaterial);
-      if (!parsed.ok) return fail("malformed_response", `malformed response: ${parsed.message}${where}`);
+      if (!parsed.ok) return fail("malformed_response", `malformed response: ${parsed.message}${where}`, undefined, false);
       for (const [index, info] of parsed.models.entries()) {
-        if (seen.has(info.id)) return fail("malformed_response", `malformed response: entry ${index} repeats an earlier id${where}`);
+        if (seen.has(info.id)) return fail("malformed_response", `malformed response: entry ${index} repeats an earlier id${where}`, undefined, false);
         seen.add(info.id);
         models.push(info);
       }
       if (!parsed.hasMore) return { ok: true, models };
-      if (parsed.lastId === cursor) return fail("malformed_response", `malformed response: the list cursor did not advance${where}`);
+      if (parsed.lastId === cursor) return fail("malformed_response", `malformed response: the list cursor did not advance${where}`, undefined, false);
       cursor = parsed.lastId;
     }
-    return fail("api_error", `the model list has more than ${MAX_MODEL_LIST_PAGES} pages; stopped without a result`);
+    return fail("api_error", `the model list has more than ${MAX_MODEL_LIST_PAGES} pages; stopped without a result`, undefined, false);
   } catch {
     if (signal.aborted) return fail("aborted", "cancelled during the request");
     // Fixed phrase: the error's text is not copied (S-11).

@@ -29,7 +29,6 @@ export const KO_MESSAGES: MessageTexts = {
   "error.hint.profile_not_found": "설정 파일에 --profile 옵션으로 준 이름의 프로필이 없습니다. 설정 파일의 프로필 이름을 확인하세요.",
   "error.hint.task_type_not_found": "준 작업 종류(--workflow 옵션이나 task 파일)가 기본으로 있는 것도 아니고 설정 파일에 정의된 것도 아닙니다. 이름을 확인하세요.",
   "error.hint.config_missing": "설정 파일이 아직 없습니다(기본 위치에 없음). codaryn init으로 만드세요.",
-  "error.hint.plan_run_not_available": "계획 방식 \"run\"은 이 판에서 아직 쓸 수 없습니다. plan을 \"none\"이나 \"apply\"로 두세요. 모델에는 아무것도 보내지 않았습니다.",
   // U-228 (nb-i18n이 다듬을 초안).
   "error.hint.plan_kind_differs":
     "계획을 만든 실행이 쓴 task를 apply에 주세요. 이동·폐기 계획은 계획 방식이 \"apply\"인 작업 종류가, 바꿀 파일 계획은 \"run\"인 작업 종류가 수행합니다. 어느 쪽인지는 codaryn plan이 보여 줍니다.",

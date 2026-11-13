@@ -303,6 +303,31 @@ startGui({
           if (existsSync(lockFile)) unlinkSync(lockFile);
         }
       })();
+      // U-69 (11, 3.10): the config file shown in its folder (recorded), and a language written in the
+      // settings redraws the window in it at once; "auto" brings the OS language back.
+      results["languageNow"] = await (async () => {
+        await js("document.querySelector('[data-screen=\"settings\"]')?.click(); true");
+        await waitFor("document.getElementById('settings-reveal-config') ? 'ready' : null", 30_000);
+        const before = revealed.length;
+        await js("document.getElementById('settings-reveal-config')?.click(); true");
+        const shown = await waitFor("document.getElementById('settings-reveal-status')?.getAttribute('data-revealed') ?? null");
+        const file = revealed.slice(before).map((p) => p.split(/[\\/]/).pop());
+        const from = String(await js("document.documentElement.lang"));
+        const to = from === "ko" ? "en" : "ko";
+        const homeBefore = await js("document.querySelector('#screens [data-screen=\"home\"]')?.textContent ?? null");
+        const choose = async (value: string, lang: string): Promise<unknown> => {
+          await waitFor("document.getElementById('settings-language-choice') ? 'ready' : null", 30_000);
+          await js(`(() => { const c = document.getElementById('settings-language-choice'); c.value = ${JSON.stringify(value)}; document.getElementById('settings-language-change').click(); return true; })()`);
+          await waitFor("document.getElementById('settings-write') ? 'ready' : null", 30_000);
+          await js("document.getElementById('settings-write')?.click(); true");
+          return waitFor(`document.documentElement.lang === ${JSON.stringify(lang)} ? 'redrawn' : null`, 30_000);
+        };
+        const switched = await choose(to, to);
+        const homeAfter = await js("document.querySelector('#screens [data-screen=\"home\"]')?.textContent ?? null");
+        const screen = await js("document.getElementById('work')?.getAttribute('data-screen')");
+        const back = await choose("auto", from);
+        return { shown, file, switched, renamed: homeAfter !== homeBefore, screen, back, lang: await js("document.documentElement.lang === " + JSON.stringify(from)) };
+      })();
 
       // 4. The recent list on the workspace screen and in gui-state.json: second first.
       await js("document.querySelector('[data-screen=\"home\"]')?.click(); true");

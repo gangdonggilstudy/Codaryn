@@ -272,6 +272,26 @@ export function registerIpc(deps: IpcDeps): void {
     return { ok: true };
   });
 
+  /**
+   * U-69 (3.10): shows the config file selected in the file manager. Its path comes from the engine
+   * host (the settings a run reads) and stays in this process; the page names nothing.
+   */
+  handle(IPC_CHANNELS.revealConfig, async (args): Promise<CopyReply> => {
+    if (!isNoArgs(args)) return { ok: false, code: "invalid_args" };
+    const state = await deps.host();
+    if (!("host" in state)) return { ok: false, code: state.failure };
+    const response = await state.host.call("configFile", {}, SETTINGS_TIMEOUT_MS);
+    if (!response.ok) return { ok: false, code: response.error.code };
+    const value = response.value as Record<string, unknown> | null;
+    if (typeof value !== "object" || value === null) return { ok: false, code: "host_error" };
+    if (value["ok"] !== true) return { ok: false, code: hostCodeOf(value) };
+    const path = value["path"];
+    if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || typeof value["exists"] !== "boolean") return { ok: false, code: "host_error" };
+    if (value["exists"] !== true) return { ok: false, code: "config_missing" };
+    deps.showItemInFolder(path);
+    return { ok: true };
+  });
+
   handle(IPC_CHANNELS.doctor, async (args): Promise<DoctorReply> => {
     const parsed = args.length === 1 ? parseDoctorArgs(args[0]) : null;
     if (parsed === null) return { ok: false, code: "invalid_args" };

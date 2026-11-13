@@ -20,7 +20,7 @@
 
 import type { Texts } from "../i18n/catalog.js";
 import { errorText } from "../i18n/catalog.js";
-import { asModels, asProposal, asSelectModel, asSettings, asWritten } from "../api.js";
+import { asCopy, asModels, asProposal, asSelectModel, asSettings, asWritten } from "../api.js";
 import type { CodarynApi } from "../api.js";
 import { button, el } from "../shell/dom.js";
 import type { Screen } from "../shell/shell.js";
@@ -32,6 +32,8 @@ export interface SettingsDeps {
   /** The window's language, as the engine host chose it. */
   readonly language: "ko" | "en";
   readonly announce: (text: string) => void;
+  /** U-69 (11): a change was written; the window looks again at its language (a new one redraws it at once). */
+  readonly languageChanged?: () => void;
 }
 
 function errorBox(t: Texts, code: string): HTMLElement {
@@ -270,7 +272,7 @@ function providerSection(t: Texts, view: SettingsView, propose: Propose | null, 
   return box;
 }
 
-function general(t: Texts, view: SettingsView, language: "ko" | "en", propose?: Propose): HTMLElement {
+function general(t: Texts, view: SettingsView, language: "ko" | "en", propose?: Propose, revealConfig?: () => Promise<unknown>): HTMLElement {
   const box = section("settings-general", t.format("settings.general"));
   const file = view.file;
   box.append(
@@ -279,6 +281,24 @@ function general(t: Texts, view: SettingsView, language: "ko" | "en", propose?: 
   if (file !== null) {
     box.append(el("p", t.format(`settings.source.${file.source}`)));
     if (!file.exists) box.append(el("p", t.format("settings.fileMissing")));
+  }
+  // U-69 (3.10): the config file in the file manager (the main process has its path).
+  if (revealConfig !== undefined && view.file !== null && view.file.exists) {
+    const status = el("span", undefined, { role: "status", id: "settings-reveal-status" });
+    box.append(
+      button(
+        t.format("settings.revealConfig"),
+        () => {
+          void (async () => {
+            const reply = asCopy(await revealConfig());
+            status.textContent = reply.ok ? "" : t.format("settings.revealFailed", { code: reply.code });
+            status.setAttribute("data-revealed", reply.ok ? "ok" : reply.code);
+          })();
+        },
+        { id: "settings-reveal-config" },
+      ),
+      status,
+    );
   }
   box.append(el("p", t.format("settings.language", { language: t.format(`language.${language}`) })));
   if (view.env.language) box.append(el("p", t.format("settings.languageEnv")));
@@ -355,6 +375,8 @@ export function settingsScreen(deps: SettingsDeps): Screen {
                 written = t.format(done.written ? "settings.written" : "settings.noChange");
                 deps.announce(written);
                 screen.show(root);
+                // U-69 (11): a written language redraws the window in it (the engine host chooses: CODARYN_LANG wins).
+                if (done.written) deps.languageChanged?.();
               })();
             },
             { id: "settings-write" },
@@ -465,7 +487,7 @@ export function settingsScreen(deps: SettingsDeps): Screen {
         key.append(el("p", t.format("settings.keyHow")));
 
         const editable = view.file !== null && view.file.exists;
-        const sections = [general(t, view, deps.language, propose), providerSection(t, view, editable ? propose : null, warn), model, profiles, workflows];
+        const sections = [general(t, view, deps.language, propose, () => api.revealConfig()), providerSection(t, view, editable ? propose : null, warn), model, profiles, workflows];
         if (editable) sections.push(rulesSection(t, view.rules, view.policyNarrowings, propose, warn), secretsSection(t, view.rules, propose, warn));
         else sections.push(el("p", t.format("settings.createFirst"), { class: "notice", id: "settings-create-first" }));
         body.replaceChildren(proposal, ...sections, key);

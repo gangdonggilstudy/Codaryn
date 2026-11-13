@@ -376,6 +376,33 @@ button:focus-visible,
     background: none;
   }
 }
+/* U-69 (10): the dark theme follows the OS (system colours already do through color-scheme); the
+   fixed colours of the comparison, the line numbers, borders and focus rings get dark values. */
+@media (prefers-color-scheme: dark) {
+  .diff,
+  .diff-side {
+    border-color: #555;
+  }
+  .diff .no,
+  .diff-side td.no {
+    color: #aaa;
+  }
+  .diff-added {
+    background: #1d3b26;
+  }
+  .diff-removed {
+    background: #4a1f22;
+  }
+  .diff li:focus,
+  .diff-side tr:focus,
+  #palette-list li[aria-selected="true"] {
+    outline-color: #8ab4f8;
+  }
+  #palette {
+    border-color: #777;
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.6);
+  }
+}
 /* U-21 (DR-47): the agent's own words, set apart from what was checked; lines and tabs kept. */
 .agent-words {
   white-space: pre-wrap;

@@ -56,6 +56,8 @@ export interface CodarynApi {
   copyText(text: string): Promise<unknown>;
   /** U-103 (3.3): copies a tree entry's relative path, by its id (the main process resolves and checks it). */
   copyPath(workspace: string, node: string): Promise<unknown>;
+  /** U-69 (3.10): shows the config file in the file manager (the main process has its path; the page does not). */
+  revealConfig(): Promise<unknown>;
   doctor(workspace: string | null): Promise<unknown>;
   settings(): Promise<unknown>;
   listModels(provider: string): Promise<unknown>;

@@ -39,6 +39,8 @@ export class Shell {
   private readonly screens: Screen[] = [];
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private current: string | null = null;
+  /** U-69: the document's key listener, taken away when the frame is built again in another language. */
+  private readonly keyListener = (event: KeyboardEvent): void => this.onKey(event);
 
   constructor(
     private readonly texts: Texts,
@@ -58,7 +60,12 @@ export class Shell {
     const body = el("div", undefined, { id: "body" });
     body.append(this.filePanel, this.work);
     root.replaceChildren(header, this.engineCard, body, footer, this.announcer);
-    document.addEventListener("keydown", (event) => this.onKey(event));
+    document.addEventListener("keydown", this.keyListener);
+  }
+
+  /** U-69: stops listening to the document's keys (the frame is being built again). */
+  destroy(): void {
+    document.removeEventListener?.("keydown", this.keyListener);
   }
 
   add(screen: Screen): void {

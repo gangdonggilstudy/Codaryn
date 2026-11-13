@@ -10,7 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { BrowserWindow, Menu, Notification, app, clipboard, dialog, session, shell } from "electron";
+import { BrowserWindow, Menu, Notification, app, clipboard, dialog, nativeTheme, session, shell } from "electron";
 import type { MessageBoxOptions, OpenDialogOptions } from "electron";
 import { IPC_EVENTS } from "../shared/ipc.js";
 import type { OpenReply } from "../shared/ipc.js";
@@ -412,6 +412,8 @@ export function startGui(options: GuiOptions): void {
       height: 760,
       show: false,
       title: "Codaryn",
+      // U-69 (10): no white flash before the page in the OS's dark theme.
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#1e1e1e" : "#ffffff",
       webPreferences: secureWebPreferences(join(options.guiRoot, "build", "src", "preload", "preload.cjs"), devTools),
     });
     window.once("ready-to-show", () => window?.show());

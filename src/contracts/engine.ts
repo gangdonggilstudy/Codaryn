@@ -584,6 +584,12 @@ export interface CliErrorOutput {
  *   run_not_plan's own lines, which speak of a run without a plan.
  * - invalid_task, invalid_config: plan_tool_missing (U-228, U-224): the task type resolves to a plan
  *   mode without its plan tool among the tools (WORKFLOW_PROBLEMS `plan_tool_missing`).
+ * - invalid_task, invalid_config (U-210, review R-110 M-1; bundle A): unreadable_paths_required
+ *   (analyze-private while the run has no unreadable path, WORKFLOW_PROBLEMS
+ *   `unreadable_paths_required`); unreadable_with_commands (a command rule or a `command` verifier
+ *   while the run has unreadable paths: `unreadable_with_commands`, and `commands_not_allowed` when
+ *   the run has them); min_group_size_range (`policy.minGroupSize` outside MIN_GROUP_SIZE_LIMITS, in a
+ *   task file, the config file or a profile).
  * Each has a listed `error.hint.<hint>` without parameters; DETAILED_CLI_ERROR_HINTS are apart.
  */
 export const CLI_ERROR_HINTS = [
@@ -607,6 +613,9 @@ export const CLI_ERROR_HINTS = [
   "config_missing",
   "plan_kind_differs",
   "plan_tool_missing",
+  "unreadable_paths_required",
+  "unreadable_with_commands",
+  "min_group_size_range",
 ] as const;
 export type CliErrorHint = (typeof CLI_ERROR_HINTS)[number];
 /**

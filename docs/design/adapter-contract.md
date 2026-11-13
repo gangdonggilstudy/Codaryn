@@ -158,6 +158,8 @@ export interface AppEnvironment {
   - 실제로 자식에 가는 것은 값이 8자 미만인 허용 목록 변수뿐이다(R-4 I-1). 변수 파일이 새로 설정한 8자 이상 값은 비밀로 등록되고(S-4), 실행기는 등록 비밀이 든 변수를 자식 환경에서 뺀다(T-1). 그래서 변수 파일의 긴 `PATH`·`TEMP`는 CLI에서도 앱 계층에서도 자식에 가지 않는다.
   - 같은 프로세스 어댑터에서는 호스트의 환경이 자식에 새지 않는다.
   - 이를 위해 A-1은 조립을 앱 계층에 두었다(`src/app/assemble.ts`). CLI의 `assembleRun`과 순서가 같고 `parentEnv`만 다르다.
+  - U-237(p4g의 R-108 H-2, na-core의 U-210과 함께): 조립은 한 벌이다. 앱의 실행은 CLI의 조립(`createAssemble`)에 앱의 고리(`parentEnv`, `platform`, `onAssembled`)를 주어 만든다. 앱이 따로 두던 사본은 같은 꼴로 두 번 뒤처졌다(U-186 앞의 쓰기 목록, U-210의 읽기 제외와 k). 이제 관문, 도구 실행기, 검증기, 무결성 대상, 수행하는 계획의 관문(`approvedPlan.policyFor`)이 모두 CLI와 같은 한 곳(`runGuards`)에서 실행의 읽기 제외 목록(모든 원천을 합친 것)과 k를 받는다. 풀지 못한 잠금은 CLI의 `finish`가 주는 표시(U-220)를 보고 `onLockLeft`로 알린다(U-193).
+    - 시험 `tests/unit/app/u237-app-unreadable.test.ts`: 앱으로 실행하면 설정 파일의 목록 아래 읽기가 `unreadable_path`로 거부되고, 검색과 `query_table`이 그 아래를 빼며, 모델로 간 것과 기록 어디에도 표지(행, 이름, k보다 작은 묶음의 키)가 없다(`tests/support/private-canary.ts`). task 파일의 목록도 같다.
 
 ## 5. 계약
 
@@ -360,6 +362,7 @@ interface ApplyObserver {
   - 이동 동의(`unsafeMoveConsent`)는 이동 계획의 것이라, 실행 계획에 주면 CLI가 `invalid_arguments`로 거부한다. plan "run"으로 풀리지 않는 과제 형식은 `run_not_plan`이고, 다이제스트가 다르면 `plan_not_approved`, 이미 수행했으면 `plan_already_applied`다.
   - 이동 계획(plan "apply")은 전과 같다. 이벤트는 `observer.onEvent`로 간다.
   - 시험은 `tests/unit/app/u218-run-plan-apply.test.ts`(11건)다. 이동 계획만 다루는 기존 시험은 `done`을 이동 계획의 꼴로 좁혔다.
+  - U-237(Codex V-24 M-3): 앱의 조립이 CLI의 것이 되어, 수행하는 실행도 관문·도구·검증기·무결성 대상을 `runGuards`에서 받는다. 그래서 설정 파일이나 프로필의 읽기 제외 아래 읽기는 `unreadable_path`로 거부되고, 검색은 그 아래를 빼며, 그 내용은 모델·기록·실행 이벤트 어디에도 없다. 시험 `tests/unit/app/u237-v24-carry-and-view.test.ts`.
   - 게이트를 빼는 변이는 시험이 가르지 못한다. CLI가 조립과 엔진 사이에 파일을 읽으므로(계획 실행의 기록 변경 표시 등), 게이트가 없어도 핸들이 먼저 나간다. `startRun`의 게이트도 같다.
 - G-A 타입: 계약 기준(`claude/general-tasks` b89ee16)을 받은 뒤 `src/app/general-tasks.ts`는 계약 타입의 re-export만 한다(`ec1914d`).
   - G-A는 N-B의 문구와 한 묶음으로 main에 들어간다(DR-12). 혼자서는 main 위에서 typecheck가 통과하지 않는다.
@@ -467,6 +470,8 @@ interface ChangedFileView {
 - 스냅샷 파일이 일반 파일이 아니면(링크 등) 따라가지 않고 `snapshot_missing`이다(R-4 L-3).
 - 원본과 기록은 store의 `readRunOriginals`(DR-14)로 읽는다(`89692ac`). A-1의 스냅샷 직접 읽기는 없앴다.
 - 요청은 task 형식이다(DR-17). 작업 공간 형식이면 앱 계층이 고정 문구 목표(`PROBE_GOAL`)로 CLI의 간편 형식을 부른다. 목표는 비밀을 정하지 않는다.
+- **읽기 제외와 이 보기(U-237, Codex V-24 M-2, PM 결정).** 읽기 제외(`unreadablePaths`)는 모델로 가는 것을 막는다. 변경 보기와 파일 보기는 사람이 자기 파일을 보는 화면이라 읽기 제외 아래 파일도 그대로 보인다. 실행 뒤에 읽기 제외가 된 파일의 이전 원문(`before`)도 그렇다. 가릴 값 규칙(DR-28, DR-29)은 그대로 걸린다.
+  - 그 글은 모델 요청이나 실행 기록으로 가지 않는다. 보기는 아무것도 쓰지 않는다. 그 뒤의 실행은 그 파일도, 상태 폴더에 둔 실행의 원본도 읽지 못한다(`unreadable_path`, 상태 폴더 거부). 시험 `tests/unit/app/u237-v24-carry-and-view.test.ts`.
 - 예전의 한계 R-4 L-3(anthropic task는 키·모델·출력 상한이 풀려야 함)은 U-17(DR-46)로 없어졌다.
   - 앱 계층은 CLI의 1~7단계(`prepareTask`, 읽기 명령)만 돌린다. 8단계(모델)는 돌리지 않는다.
   - 그래서 비교에 제공자 설정이 필요 없다(`tests/unit/app/u17-read-changes.test.ts`).
@@ -802,6 +807,8 @@ checkApply({ settings: TaskForm, planRunId, digest }) → PlanCheck
   - 계획 파일마다, 그 계획을 수행할 실행의 관문이 쓰기로 거부하는지 본다(`checkChangesPlanFiles`).
     - 관문은 task의 정책·쓰기 경로 목록에 계획 파일 목록을 하나 더한 것이다(`approvedPlanWritablePathSets`와 같음). `PLANNED_FILE_DESCRIPTOR`로 글자와 실경로를 모두 본다.
     - 이는 엔진이 첫 모델 요청 전에 하는 판정이다. 거부된 파일은 그 순번으로 `problems`에 `denied`로 담긴다.
+    - U-237(R-108 H-2, U-219, Codex V-21): 관문은 수행하는 실행이 받는 그것(`approvedPlan.policyFor`)과 같게 `runGuards`로 만든다. 그래서 실행의 읽기 제외 목록(모든 원천을 합친 것) 아래 파일도 거부된다. 판정은 엔진 자신의 `judgePlannedFile`을 부른다(이 모듈의 따로 쓴 줄이 아니다).
+  - U-237: 이동 계획의 점검도 관문을 `runGuards`로 만든다(CLI의 이동 계획 적용과 같다). 그래서 읽기 제외 아래로 옮기거나 버리는 동작은 적용처럼 점검에서도 문제로 나온다. 전에는 점검이 아무 말 없이 지나고 적용만 거부했다. 시험 `tests/unit/app/u237-app-checks-unreadable.test.ts`.
   - 파일이 계획 때와 같은지(낡음, `plannedFileStale`)는 엔진이 실행 직전에 읽어 본다. 여기서 보면 그 사이에 바뀔 수 있는 것을 말할 뿐이라 보지 않는다(PM).
   - 잠금, 시험 링크, 이동이 없다. 결과에는 `planKind: "changes"`가 붙고 `unsafeMoves` `[]`, `inventoryLimitReached` false, `probesLeft`·`probesRemoved` 0, `lockLeft` false다. 기존 `PlanCheck` 꼴에 표지 하나만 더했다.
 

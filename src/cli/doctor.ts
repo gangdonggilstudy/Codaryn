@@ -93,6 +93,7 @@ import type { InputErrorPosition } from "./task.js";
 import { displayWidth, padEnd } from "./human/index.js";
 import { hideKeys } from "./text-safety.js";
 import { writablePathSetsOf } from "./writable.js";
+import { UNREADABLE_PATHS_REQUIRED_TEXT, privateAnalysisWithoutData, runUnreadablePaths } from "./unreadable.js";
 
 /** Y-4: doctor makes no network access, so it cannot know whether the model id exists. */
 export const MODELS_HINT = "`codaryn models` lists the models the key can use";
@@ -662,7 +663,7 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
   // U-182: the config file as parsed, before --profile (its own writable list, as a run sees it).
   let fileConfig: CodarynConfig | null = null;
   let configPath: string | null = null;
-  // U-228: where the valid config file was found, for a later failure of its check.
+  // U-210, U-228: where the valid config file was found, for a later failure of its check.
   let configDisplay: ConfigLocationDisplay | null = null;
   const chosen = chooseConfigFile({ argument: args.configPath, env, cwd: io.cwd, defaultLocation: io.defaultConfig ?? null });
   const refusedNote = io.defaultConfigRefused === true ? "; the default location is a network or device path and is not used" : "";
@@ -710,6 +711,8 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
           field === null
             ? { id: "doctor.config_file.invalid_unlocated", params: { location: candidate.display } }
             : { id: "doctor.config_file.invalid", params: { location: candidate.display, field } },
+          // U-210 (R-110 M-1): k outside its range says why.
+          outcome.hint === "min_group_size_range" ? [{ id: "doctor.private_data.min_group_size_range" }] : undefined,
         );
       }
     }
@@ -720,6 +723,22 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     const selected = selectProfile(config, args.profile);
     if (selected.ok) config = selected.config;
     else set("config_file", "fail", selected.message, { id: "doctor.config_file.profile_missing" });
+  }
+  // U-210 (bundle A, P-1): the quick form under a profile whose task type is analyze-private, with no
+  // unreadable path in the run (as run.ts unites them): a run refuses it at resolution.
+  if (args.taskPath === null && args.profile !== null && configDisplay !== null && results.get("config_file")?.status === "ok") {
+    const profileRef = config?.profiles?.[args.profile]?.workflowRef ?? null;
+    if (privateAnalysisWithoutData(profileRef, { config: fileConfig, profile: args.profile, definition: undefined, taskFilePolicy: null })) {
+      const field = toSchemaFieldPath("policy.unreadablePaths");
+      set(
+        "config_file",
+        "fail",
+        `policy.unreadablePaths ${UNREADABLE_PATHS_REQUIRED_TEXT}`,
+        field === null ? { id: "doctor.config_file.invalid_unlocated", params: { location: configDisplay } } : { id: "doctor.config_file.invalid", params: { location: configDisplay, field } },
+        // R-110 M-1: why.
+        [{ id: "doctor.private_data.unreadable_paths_required" }],
+      );
+    }
   }
 
   // task_file
@@ -736,10 +755,23 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
       if (outcome.ok) {
         task = outcome.task;
         taskPath = loaded.path;
-        set("task_file", "ok", "the task file is valid", { id: "doctor.task_file.valid" });
+        // U-210 (bundle A, P-1): its task type (else the profile's) is analyze-private and the run has
+        // no unreadable path (as run.ts unites them): a run refuses the task at resolution.
+        const ref = outcome.task.workflowRef ?? (args.profile === null ? null : (config?.profiles?.[args.profile]?.workflowRef ?? null));
+        if (privateAnalysisWithoutData(ref, { config: fileConfig, profile: args.profile, definition: undefined, taskFilePolicy: outcome.task.policy })) {
+          const field = toSchemaFieldPath("policy.unreadablePaths");
+          // R-110 M-1: the note says why.
+          set("task_file", "fail", `policy.unreadablePaths ${UNREADABLE_PATHS_REQUIRED_TEXT}`, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } }, [
+            { id: "doctor.private_data.unreadable_paths_required" },
+          ]);
+        } else {
+          set("task_file", "ok", "the task file is valid", { id: "doctor.task_file.valid" });
+        }
       } else {
         const field = fieldOf(outcome.position);
-        set("task_file", "fail", outcome.message, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } });
+        // U-210 (R-110 M-1): k outside its range says why.
+        const why = outcome.hint === "min_group_size_range" ? [{ id: "doctor.private_data.min_group_size_range" } as const] : undefined;
+        set("task_file", "fail", outcome.message, field === null ? { id: "doctor.task_file.invalid_unlocated" } : { id: "doctor.task_file.invalid", params: { field } }, why);
       }
     }
   }
@@ -973,6 +1005,17 @@ export async function runDoctor(io: DoctorEnvironment): Promise<CommandOutcome> 
     set("commands", "skipped", "the task file could not be used", { id: "doctor.task_unusable" });
   } else if (commandEntries.length === 0) {
     set("commands", "skipped", "no command is allowed and no command verifier is configured", { id: "doctor.commands.none" }, policyNotes);
+  } else if (runUnreadablePaths({ config: fileConfig, profile: args.profile, definition, taskFilePolicy: task?.policy ?? null }).length > 0) {
+    // U-210 (bundle A, R-5): the run's unreadable paths (as run.ts unites them) with command rules or
+    // command verifiers: a run refuses to start, so the check fails without running the commands.
+    const count = commandEntries.length;
+    set(
+      "commands",
+      "fail",
+      `command rules and command checks while unreadablePaths is set: ${count}; a run refuses them, since a command can read any file, the ones kept from the agent too`,
+      { id: "doctor.commands.unreadable_with_commands", params: { count } },
+      policyNotes,
+    );
   } else {
     const checked = await checkCommands(io, commandEntries, env, workspaceReady ? workspaceRoot : null, platform);
     // U-182 (DR-69 B-8): writable lists bind the file tools only; an allowed command can write

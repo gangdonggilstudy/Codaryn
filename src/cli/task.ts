@@ -10,6 +10,7 @@ import {
   API_PROVIDERS,
   API_PROVIDER_NAMES,
   DENY_ALL_POLICY,
+  MIN_GROUP_SIZE_LIMITS,
   MODEL_PROVIDER_NAMES,
   QUICK_TASK_ID,
   QUICK_TASK_WORKFLOW,
@@ -314,8 +315,9 @@ const PROTECTED_PATH_MESSAGES: { readonly [R in ProtectedPathProblemReason]: str
  * Entries are kept as written; the gate compares them with resolved paths (R-5).
  * U-182 (DR-69 B-4): `policy.writablePaths` has the same format (PolicyConfig.writablePaths), so
  * the same check names its position. An empty list is kept: it allows no file tool write.
+ * U-210 (bundle A, R-1): so has `policy.unreadablePaths` (PolicyConfig.unreadablePaths).
  */
-function parsePathList(value: unknown, field: "policy.protectedPaths" | "policy.writablePaths"): string[] {
+function parsePathList(value: unknown, field: "policy.protectedPaths" | "policy.writablePaths" | "policy.unreadablePaths"): string[] {
   const [problem] = checkProtectedPaths(value);
   if (problem !== undefined) {
     const at = problem.index === null ? field : `${field}[${problem.index}]`;
@@ -338,7 +340,7 @@ const COMMAND_RULE_FIELDS = ["executable", "argsPrefix", "allowExtraArgs"] as co
 export function parsePolicy(value: unknown, source: "settings"): ConfirmablePolicyConfig;
 export function parsePolicy(value: unknown, source: "task" | "definition"): PolicyConfig;
 export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePolicyConfig {
-  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions", "writablePaths"]);
+  const rec = record(value, "policy", ["commands", "network", "destructive", "restorePathTokens", "protectedPaths", "planActions", "writablePaths", "unreadablePaths", "minGroupSize"]);
   if (!Array.isArray(rec["commands"])) fail("policy.commands must be an array");
   const ruleFields: readonly string[] = source === "settings" ? [...COMMAND_RULE_FIELDS, "confirm"] : COMMAND_RULE_FIELDS;
   const commands = (rec["commands"] as unknown[]).map((item, index): ConfirmableCommandRule => {
@@ -362,6 +364,10 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
   // U-182 (DR-69 B-4): each source's list is kept as given; the run builds writablePathSets from them.
   const writablePaths = rec["writablePaths"] === undefined ? undefined : parsePathList(rec["writablePaths"], "policy.writablePaths");
   const planActions = rec["planActions"] === undefined ? undefined : parsePlanActions(rec["planActions"]);
+  // U-210 (bundle A, A-6; R-2, Q-4): each source's list and k are kept as given; the run unites the
+  // lists and takes the largest k (ResolvedTaskSpec.unreadablePaths, .minGroupSize).
+  const unreadablePaths = rec["unreadablePaths"] === undefined ? undefined : parsePathList(rec["unreadablePaths"], "policy.unreadablePaths");
+  const minGroupSize = rec["minGroupSize"] === undefined ? undefined : parseMinGroupSize(rec["minGroupSize"]);
   return {
     commands,
     network: "deny",
@@ -370,7 +376,23 @@ export function parsePolicy(value: unknown, source: PolicySource): ConfirmablePo
     ...(protectedPaths === undefined ? {} : { protectedPaths }),
     ...(planActions === undefined ? {} : { planActions }),
     ...(writablePaths === undefined ? {} : { writablePaths }),
+    ...(unreadablePaths === undefined ? {} : { unreadablePaths }),
+    ...(minGroupSize === undefined ? {} : { minGroupSize }),
   };
+}
+
+/**
+ * U-210 (bundle A, Q-4, DR-70): `policy.minGroupSize`, a whole number within MIN_GROUP_SIZE_LIMITS in
+ * every source, the config file's included: no source lowers k below 5, each can only raise it.
+ */
+function parseMinGroupSize(value: unknown): number {
+  const { min, max } = MIN_GROUP_SIZE_LIMITS;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max) {
+    // U-210 (R-110 M-1): the hint says why in the chosen language; the message is as before.
+    const message = `policy.minGroupSize must be a whole number from ${min} to ${max}`;
+    throw new InputError(message, undefined, positionFromMessage(message), "min_group_size_range");
+  }
+  return value;
 }
 
 /** G-A: `policy.planActions`, the plan action kinds an applied plan may carry. Unique entries. */
@@ -396,7 +418,8 @@ export function parseToolList(value: unknown, field: string): AnyToolName[] {
 /**
  * A task file's or a config definition's `plan` (invalid_task or invalid_config by the caller).
  * U-195 (DR-69 B-4): every PLAN_MODES value, "run" again: codaryn apply carries out a run plan now.
- * U-177's refusal (the hint plan_run_not_available) is no longer given; the hint stays listed.
+ * U-177's refusal is no longer given, and U-235 took its hint plan_run_not_available out of the
+ * contract's list (cli-contract 8.3's one exception).
  */
 export function parsePlanMode(value: unknown, field: string): PlanMode {
   if (!(PLAN_MODES as readonly unknown[]).includes(value)) fail(`${field} must be one of ${PLAN_MODES.join(", ")}`);

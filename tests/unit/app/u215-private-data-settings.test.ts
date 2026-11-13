@@ -9,8 +9,9 @@
  *   proposeSettingsChange with the whole new config). The proposal judges them with U-204's
  *   wideningOf: adding an entry or raising k narrows and is written without a question; taking an
  *   entry away or lowering k widens and is written only once the person confirmed it.
- * - The parsers refuse both fields until U-210, so the cases that read or write a config file that
- *   holds them are todo until then; privateDataOf is tested on configs built here.
+ * - The parsers refused both fields until U-210, so the cases that read or write a config file that
+ *   holds them were todo until then (taken away with U-210, through U-237); privateDataOf is tested on
+ *   configs built here too.
  * Reproduced first (1ff75f3, todo until the view gave them). Temporary folders, fake values only.
  */
 
@@ -25,7 +26,6 @@ import { ANTHROPIC_API_KEY_ENV } from "../../../src/contracts/index.js";
 import type { CodarynConfig } from "../../../src/contracts/index.js";
 import { appEnvironment, tempDir } from "./support.js";
 
-const TODO_PARSER = { todo: "U-210: the config parser refuses unreadablePaths and minGroupSize until then" };
 const FAKE_KEY = "fake-private-key-value-0215";
 
 type PrivateData = {
@@ -77,7 +77,7 @@ describe("U-215: readSettings gives the private data settings", () => {
     assert.deepEqual(privateDataOf(null), NONE);
   });
 
-  test("a config file that holds them: shown as written", TODO_PARSER, async () => {
+  test("a config file that holds them: shown as written", async () => {
     const { app, config, current } = await setup();
     await writeFile(config, `${JSON.stringify(withPolicy(await current(), { unreadablePaths: ["data/private", "hr"], minGroupSize: 10 }), null, 2)}\n`);
     assert.deepEqual(privateDataIn(ok(await app.readSettings({ configPath: config }))), {
@@ -88,7 +88,7 @@ describe("U-215: readSettings gives the private data settings", () => {
 });
 
 describe("U-215: changing them through a proposal", () => {
-  test("adding an unreadable path and raising k narrow: no question, written", TODO_PARSER, async () => {
+  test("adding an unreadable path and raising k narrow: no question, written", async () => {
     const { app, config, current } = await setup();
     const next = withPolicy(await current(), { unreadablePaths: ["data/private"], minGroupSize: 10 });
     const proposal = ok<SettingsChangeProposal>(await app.proposeSettingsChange({ configPath: config, next }));
@@ -99,7 +99,7 @@ describe("U-215: changing them through a proposal", () => {
     assert.deepEqual(privateDataIn(ok(await app.readSettings({ configPath: config }))), { unreadablePaths: ["data/private"], minGroupSize: { configured: 10, effective: 10, min: 5, max: 1000 } });
   });
 
-  test("taking an unreadable path away widens: refused unconfirmed, written once confirmed", TODO_PARSER, async () => {
+  test("taking an unreadable path away widens: refused unconfirmed, written once confirmed", async () => {
     const { app, config, current } = await setup();
     const start = withPolicy(await current(), { unreadablePaths: ["data/private", "hr"] });
     await writeFile(config, `${JSON.stringify(start, null, 2)}\n`);
@@ -113,7 +113,7 @@ describe("U-215: changing them through a proposal", () => {
     assert.deepEqual(privateDataIn(ok(await app.readSettings({ configPath: config })))?.unreadablePaths, ["hr"]);
   });
 
-  test("lowering k widens, so does taking a value above 5 away; a value at 5 taken away does not", TODO_PARSER, async () => {
+  test("lowering k widens, so does taking a value above 5 away; a value at 5 taken away does not", async () => {
     const { app, config, current } = await setup();
     const start = withPolicy(await current(), { minGroupSize: 10 });
     await writeFile(config, `${JSON.stringify(start, null, 2)}\n`);
@@ -127,7 +127,7 @@ describe("U-215: changing them through a proposal", () => {
     assert.deepEqual(widening(atFive), []);
   });
 
-  test("a k outside 5 to 1000 or not whole, and an entry the gate cannot use: invalid_config at that field, nothing written", TODO_PARSER, async () => {
+  test("a k outside 5 to 1000 or not whole, and an entry the gate cannot use: invalid_config at that field, nothing written", async () => {
     const { app, config, current } = await setup();
     const base = await current();
     const before = await readFile(config, "utf8");

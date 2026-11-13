@@ -86,6 +86,22 @@ export interface GuardedCallOptions {
   readonly retryUntil?: number;
 }
 
+/**
+ * U-242: Workspace.list's options, GuardedCallOptions and `leaveOut`, through which search_files
+ * keeps a run's unreadable paths out of its listing (U-203, Codex V-13): one listing, the
+ * workspace's, with or without them.
+ */
+export interface ListOptions extends GuardedCallOptions {
+  /**
+   * Asked once for each entry the listing meets, with its root-relative path and whether it is a
+   * link (neither a folder nor a file: a link, a junction, another special entry), before the entry
+   * is kept. True leaves it out: it is not listed, not counted toward MAX_SEARCH_ENTRIES, and a
+   * folder is not read, so what it leaves out changes neither `entries`, `truncated` nor the outcome.
+   * A throw ends the listing as io_error. Absent: nothing is left out, as without options.
+   */
+  readonly leaveOut?: (entry: { readonly relative: string; readonly link: boolean }) => boolean | Promise<boolean>;
+}
+
 export interface Workspace {
   /** Real absolute path of the workspace root. */
   readonly root: string;
@@ -98,9 +114,10 @@ export interface Workspace {
 
   /**
    * Lists a directory recursively up to MAX_SEARCH_ENTRIES, skipping the state directory. U-213: its
-   * tries again are limited in time too, by `retryUntil` or else 2 s from the call.
+   * tries again are limited in time too, by `retryUntil` or else 2 s from the call. U-242: what
+   * `options.leaveOut` answers true for is left out before it is counted (ListOptions).
    */
-  list(dir: ResolvedPath, options?: GuardedCallOptions): Promise<ListOutcome>;
+  list(dir: ResolvedPath, options?: ListOptions): Promise<ListOutcome>;
 
   /**
    * Compares the current hash with `expectedHash` and replaces the file atomically.

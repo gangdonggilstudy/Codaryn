@@ -31,6 +31,7 @@ import {
   PLAN_ITEM_PROBLEMS,
   PLAN_RECORDS_UNCHECKED_CAUSES,
   PERMISSION_KINDS,
+  PRIVATE_REVIEW_ITEM,
   POLICY_NARROWING_KINDS,
   PROVIDER_SETTINGS,
   POLICY_DENIAL_CODES,
@@ -78,6 +79,8 @@ import type {
 } from "../../contracts/index.js";
 import { isRunTimestamp } from "../../store/index.js";
 import { displayWidth, finalLine, formatLocalTime, padEnd, quoteModelText, shownPath, token } from "./format.js";
+import { queryTableFacts } from "./query-table.js";
+import type { QueryTableFacts } from "./query-table.js";
 
 /** As PROGRESS_PREFIX in ../progress.ts. Error and revert titles start with it. */
 export const HUMAN_PREFIX = "codaryn: ";
@@ -144,6 +147,15 @@ function withCode(title: string, code: string): string {
  */
 export function lockReleaseFailedLine(lockLeft: unknown, messages: MessageCatalog): string | null {
   return lockLeft === true ? messages.format("lock.release_failed") : null;
+}
+
+/**
+ * U-207 (P-3): a review checklist entry that a built-in task type records in English, in the chosen
+ * language: analyze-private's item (PRIVATE_REVIEW_ITEM, `review.item.no_identifying_values`). Null
+ * for any other entry, which is shown as recorded. For `codaryn review` and the GUI as well.
+ */
+export function builtinReviewItemText(entry: unknown, messages: MessageCatalog): string | null {
+  return entry === PRIVATE_REVIEW_ITEM ? messages.format("review.item.no_identifying_values") : null;
 }
 
 function lines(out: readonly string[]): string {
@@ -231,11 +243,21 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
    * that succeeded, content that does not parse, an exit code that is not a count, or a null exit
    * code without a timeout (a stopped command): no line.
    */
+  /** U-207: a table query's line: the operation kinds and the number of group columns, or the shape asked. */
+  const queryLine = (query: QueryTableFacts): string => {
+    if (query.kind === "describe") return catalog.format("progress.query_table_describe");
+    // The operation kinds are codes, in parentheses after the words (the renderer's layout).
+    const words = query.groupColumns === 0 ? catalog.format("progress.query_table_whole") : catalog.format("progress.query_table", { groupColumns: query.groupColumns });
+    return `${words} (${query.operations.join(", ")})`;
+  };
   const resultLine = (told: { readonly callId?: unknown; readonly tool?: unknown; readonly ok?: unknown; readonly content?: unknown; readonly errorCode?: unknown }): string | null => {
     if (told.ok === false) {
       if (deniedCalls.has(String(told.callId))) return null;
       return isOneOf(told.errorCode, TOOL_ERROR_CODES) ? catalog.format("progress.tool_failed", { tool: toolText(String(told.tool)), code: told.errorCode }) : null;
     }
+    // U-207 (bundle A): a query_table result that succeeded says what was asked, nothing of the table.
+    const query = queryTableFacts(told);
+    if (query !== null) return queryLine(query);
     if (told.ok !== true || told.tool !== "run_command" || typeof told.content !== "string") return null;
     let payload: unknown;
     try {
@@ -501,6 +523,10 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (notPlanned > 0) out.push(catalog.format("summary.denied_not_planned", { count: notPlanned }), catalog.format("summary.denied_not_planned_hint"));
       const notWritable = isCount(context.deniedNotWritable) ? context.deniedNotWritable : 0;
       if (notWritable > 0) out.push(catalog.format("summary.denied_not_writable", { count: notWritable }));
+      // U-207 (bundle A, R-8): of those, the calls refused at a path this task may not read, and once
+      // what a person can do about it, after the not-writable lines. Optional: absent is 0, no line.
+      const unreadable = isCount(context.deniedUnreadable) ? context.deniedUnreadable : 0;
+      if (unreadable > 0) out.push(catalog.format("summary.denied_unreadable", { count: unreadable }), catalog.format("summary.denied_unreadable_hint"));
       // U-18 (AXM-4): the calls that ran and failed, right after the denied ones; the hints after both.
       // The field is optional: absent (a caller that does not count them) is 0, no line.
       const failed = isCount(context.failedToolCalls) ? context.failedToolCalls : 0;
@@ -515,6 +541,12 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       // first would let it run without the question.
       if (isCount(context.deniedCommandCalls) && context.deniedCommandCalls > asked.total) {
         out.push(catalog.format(context.policySource === "task" ? "summary.denied_hint_task" : "summary.denied_hint"));
+      }
+      // U-207 (DR-70): table results that left out groups of fewer than k rows; counts only, never a value.
+      const hidden: unknown = context.hiddenGroups;
+      if (typeof hidden === "object" && hidden !== null) {
+        const { results, minGroupSize } = hidden as { readonly results?: unknown; readonly minGroupSize?: unknown };
+        if (isCount(results, 1) && isCount(minGroupSize, 1)) out.push(catalog.format("summary.groups_hidden", { results, k: minGroupSize }));
       }
       const usage = result.usage;
       if (isCount(usage?.modelTurns) && isCount(usage.toolCalls) && isCount(usage.durationMs)) {
@@ -577,7 +609,8 @@ export const createHumanOutput: CreateHumanOutput = (catalog: MessageCatalog): H
       if (runId !== null && pair?.reason === "awaiting_review" && result.review !== undefined && Array.isArray(result.review.checklist)) {
         const checklist = result.review.checklist;
         out.push(catalog.format("summary.review_checklist", { count: checklist.length }));
-        for (const entry of checklist.slice(0, REVERT_MAX_LISTED)) out.push(`  - ${shownPath(String(entry))}`);
+        // U-207 (P-3): a built-in task type's item in the chosen language; any other entry as recorded.
+        for (const entry of checklist.slice(0, REVERT_MAX_LISTED)) out.push(`  - ${builtinReviewItemText(entry, catalog) ?? shownPath(String(entry))}`);
         out.push(catalog.format("summary.next_review", { form, runId }));
       }
       return lines(out);

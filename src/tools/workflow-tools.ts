@@ -1,7 +1,9 @@
 /**
  * The workflow tools `inspect_files` and `propose_plan` (G-C). Design: docs/design/general-tasks.md
  * 5.3 and 6.3. Contracts: InspectFilesArgs/InspectFilesPayload (tool.ts), ProposePlanArgs,
- * ProposePlanPayload, PLAN_PROBLEMS, PlanRecorder (plan.ts).
+ * ProposePlanPayload, PLAN_PROBLEMS, PlanRecorder (plan.ts). U-180 (DR-69 B-1, B-3):
+ * `propose_changes` (ProposeChangesArgs, ProposeChangesPayload, CHANGES_PLAN_PROBLEMS), which writes
+ * only plan.json of a `run` plan, through PlanRecorder.saveChangesPlan.
  *
  * Both return raw local text, like the built-in tools: the engine masks every result before it is
  * recorded or sent. Neither changes a workspace file. `propose_plan` writes only plan.json, through
@@ -20,23 +22,32 @@ import {
   MAX_PLAN_ACTIONS,
   CONTENT_HASH_PATTERN_SOURCE,
   MAX_PLAN_SOURCE_BYTES,
+  MAX_PLANNED_FILES,
   PRIVACY_TOKEN_PATTERN_SOURCE,
   asRawText,
+  maskedParts,
+  safeModelText,
   planActionShown,
 } from "../contracts/index.js";
 import type {
+  ChangesPlanProblem,
   InspectEntry,
   InspectFilesArgs,
   MaskedPlanAction,
   PlanActionArgs,
   PlanProblem,
   PlanRecorder,
+  PlannedFileNow,
+  PlannedFileProbe,
   PrivacyGateway,
+  ProposeChangesArgs,
   ProposePlanArgs,
   RawWorkflowToolOutcome,
   ResolvedPath,
   ResolvedPlanAction,
+  ResolvedPlannedFile,
   StoredPlanAction,
+  StoredPlannedFile,
   ToolErrorCode,
   Workspace,
 } from "../contracts/index.js";
@@ -49,6 +60,9 @@ import {
   pathKey,
 } from "./plan-files.js";
 import type { FileIdentity, PlanFileOps } from "./plan-files.js";
+import { nodeFileLayer } from "../workspace/file-layer.js";
+import { FolderWatch, retried, sameChain, walkChain } from "../workspace/guard.js";
+import { takeJudged } from "../workspace/judged.js";
 
 /**
  * Most entries `inspect_files` walks under one directory. Above it the call fails with
@@ -98,12 +112,14 @@ interface WalkedEntry {
  * Every file and directory under `dir`, sorted by root-relative path. Links and other special
  * entries are skipped and never followed. The state directory is never entered.
  */
-async function walk(root: string, dir: string, signal: AbortSignal): Promise<WalkedEntry[] | Failure> {
+async function walk(root: string, dir: string, signal: AbortSignal, watch: FolderWatch): Promise<WalkedEntry[] | Failure | "changed"> {
   const found: WalkedEntry[] = [];
   const pending: string[] = [dir];
   while (pending.length > 0) {
     if (signal.aborted) return fail("cancelled", "inspect_files cancelled");
     const current = pending.pop() as string;
+    // U-189 (Codex V-10): each folder is looked at before it is read; a link there now is a swap.
+    if (!(await watch.enter(current))) return "changed";
     let children: Dirent[];
     try {
       children = await fs.readdir(current, { withFileTypes: true });
@@ -163,18 +179,42 @@ export async function inspectFiles(
   args: InspectFilesArgs,
   signal: AbortSignal,
 ): Promise<RawWorkflowToolOutcome> {
-  const { workspace, privacy } = deps;
+  const { workspace } = deps;
   if (typeof args.path !== "string") return fail("invalid_args", "path must be a string");
+  // U-189 (T-1, Codex V-10): the real path the policy gate judged for this argument, if it judged one.
+  const judged = takeJudged(workspace, args.path, "read");
   const resolved = await workspace.resolve(args.path, "read");
   if (!resolved.ok) return fail("policy_denied", `path rejected by workspace: ${resolved.code}`);
+  if (judged !== undefined && judged !== resolved.path.absolute) {
+    return fail("policy_denied", "the path leads elsewhere than when the policy judged it; nothing was done");
+  }
   try {
     const stat = await fs.stat(resolved.path.absolute);
     if (!stat.isDirectory()) return fail("invalid_args", "path is not a directory");
   } catch (error) {
     return fail(isMissing(error) ? "not_found" : "io_error", "cannot read directory");
   }
+  // U-189 (P-1, Codex V-10): names, sizes, times and hashes come only from folders that stayed the
+  // ones checked (guard.ts); a change seen is tried again, still seen it is io_error.
+  const outcome = await retried(async () => {
+    const first = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
+    if (!first.ok) return first.code === "changed" ? "changed" : fail(first.code === "not_found" ? "not_found" : "io_error", "cannot read directory");
+    const watch = new FolderWatch(nodeFileLayer.lstatId);
+    const result = await inspectOnce(deps, args, signal, resolved.path.absolute, watch);
+    if (result === "changed") return "changed";
+    if (!result.ok) return result;
+    const second = await walkChain(nodeFileLayer.lstatId, workspace.root, resolved.path.relative);
+    if (!second.ok || !sameChain(first.seen, second.seen) || !(await watch.unchanged())) return "changed";
+    return result;
+  });
+  return outcome === "changed" ? fail("io_error", "the folders changed while they were read; nothing was given") : outcome;
+}
 
-  const walked = await walk(workspace.root, resolved.path.absolute, signal);
+/** One pass of inspect_files over the checked folder `dir`, every folder read kept in `watch`. */
+async function inspectOnce(deps: WorkflowToolDeps, args: InspectFilesArgs, signal: AbortSignal, dir: string, watch: FolderWatch): Promise<RawWorkflowToolOutcome | "changed"> {
+  const { workspace, privacy } = deps;
+  const walked = await walk(workspace.root, dir, signal, watch);
+  if (walked === "changed") return "changed";
   if (!Array.isArray(walked)) return walked;
 
   let start = 0;
@@ -408,4 +448,185 @@ export async function proposePlan(
     return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
   }
   return { ok: true, payload: { digest, actions } };
+}
+
+function invalidChanges(index: number | null, problem: ChangesPlanProblem): Failure {
+  // As invalidPlan: the file index and the code, never a path (plan.ts).
+  return fail("invalid_plan", index === null ? `plan rejected: ${problem}` : `plan rejected: file ${index}: ${problem}`);
+}
+
+interface CheckedFile {
+  readonly path: ResolvedPath;
+  readonly change: "create" | "modify";
+  /** For `modify`: the file as it was checked, so the hash is of that file. */
+  readonly identity: FileIdentity | null;
+}
+
+/**
+ * U-180 (B-1, B-5): checks a `run` plan's files (CHANGES_PLAN_PROBLEMS). The first problem by file
+ * order rejects the whole plan. Files only: a `modify` path must be a regular file now (not a link,
+ * not a directory), a `create` path must hold nothing (not even a dangling link) with every existing
+ * parent a directory, and no create may lie under another planned file. Nothing is written.
+ */
+async function checkChanges(
+  deps: WorkflowToolDeps,
+  files: ProposeChangesArgs["files"],
+  signal: AbortSignal,
+): Promise<CheckedFile[] | Failure> {
+  const { workspace, fileOps, platform } = deps;
+  if (files.length === 0) return invalidChanges(null, "empty");
+  if (files.length > MAX_PLANNED_FILES) return invalidChanges(null, "too_many");
+
+  const resolved: ResolvedPath[] = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const given = (files[index] as ProposeChangesArgs["files"][number]).path;
+    if (typeof given !== "string") return fail("invalid_args", `file ${index}: path must be a string`);
+    const where = await workspace.resolve(given, "write");
+    if (!where.ok) return fail("policy_denied", `file ${index}: path rejected by workspace: ${where.code}`);
+    resolved.push(where.path);
+  }
+  const key = (p: ResolvedPath): string => pathKey(p.relative, platform);
+  const allPaths = new Set(resolved.map(key));
+  const seen = new Set<string>();
+  const checked: CheckedFile[] = [];
+  let totalBytes = 0n;
+
+  for (let index = 0; index < files.length; index += 1) {
+    if (signal.aborted) return fail("cancelled", "propose_changes cancelled");
+    const file = files[index] as ProposeChangesArgs["files"][number];
+    const where = resolved[index] as ResolvedPath;
+    const fileKey = key(where);
+    if (seen.has(fileKey)) return invalidChanges(index, "duplicate_path");
+    seen.add(fileKey);
+    // A planned file inside another planned file would need that file to be a directory.
+    const parents = where.relative.split("/").slice(0, -1);
+    for (let depth = 1; depth <= parents.length; depth += 1) {
+      if (allPaths.has(pathKey(parents.slice(0, depth).join("/"), platform))) return invalidChanges(index, "parent_not_dir");
+    }
+    if (file.change === "modify") {
+      const now = await inspectSource(workspace, file.path, fileOps);
+      if (!now.ok) {
+        if (now.problem === "denied") return fail("policy_denied", `file ${index}: path rejected by workspace`);
+        if (now.problem === "io_error") return fail("io_error", `file ${index}: cannot read the file`);
+        return invalidChanges(index, now.problem === "source_missing" ? "file_missing" : "not_file");
+      }
+      totalBytes += now.identity.size;
+      if (totalBytes > BigInt(MAX_PLAN_SOURCE_BYTES)) return invalidChanges(index, "too_large");
+      checked.push({ path: now.path, change: "modify", identity: now.identity });
+    } else if (file.change === "create") {
+      const now = await inspectDestination(workspace, file.path, fileOps);
+      if (!now.ok) {
+        if (now.problem === "denied") return fail("policy_denied", `file ${index}: path rejected by workspace`);
+        if (now.problem === "io_error") return fail("io_error", `file ${index}: cannot check the path`);
+        return invalidChanges(index, now.problem === "destination_exists" ? "file_exists" : "parent_not_dir");
+      }
+      checked.push({ path: now.path, change: "create", identity: null });
+    } else {
+      return fail("invalid_args", `file ${index}: unknown change`);
+    }
+  }
+  return checked;
+}
+
+/**
+ * U-180 (DR-69 B-1, B-3): `propose_changes`. Checks the files, hashes every `modify` file (the model
+ * never supplies a hash), and stores plan.json of a `run` plan through PlanRecorder.saveChangesPlan:
+ * the summary and each path as this run's own gateway masks them, as visible parts (MaskedParts: no
+ * privacy token, no secret value); the summary also made safe with safeModelText (V-7 M-1: key
+ * shapes hidden, control and invisible characters left out). It is stored under the digest (R-99 L-1). Without a
+ * recorder that can store such a plan, or when a text cannot be masked, nothing is stored
+ * (`io_error`).
+ */
+export async function proposeChanges(
+  deps: WorkflowToolDeps,
+  args: ProposeChangesArgs,
+  signal: AbortSignal,
+): Promise<RawWorkflowToolOutcome> {
+  if (!Array.isArray(args.files)) return fail("invalid_args", "files must be an array");
+  const checked = await checkChanges(deps, args.files, signal);
+  if (!Array.isArray(checked)) return checked;
+
+  const files: ResolvedPlannedFile[] = [];
+  for (let index = 0; index < checked.length; index += 1) {
+    const item = checked[index] as CheckedFile;
+    if (item.change === "create" || item.identity === null) {
+      files.push({ path: item.path.relative, change: "create", sha256: null });
+      continue;
+    }
+    const hashed = await hashFile(item.path.absolute, { expected: item.identity, signal });
+    if (!hashed.ok) {
+      if (hashed.reason === "aborted") return fail("cancelled", "propose_changes cancelled");
+      if (hashed.reason === "missing") return invalidChanges(index, "file_missing");
+      if (hashed.reason === "changed") return invalidChanges(index, "not_file");
+      return fail("io_error", `file ${index}: cannot read the file`);
+    }
+    files.push({ path: item.path.relative, change: "modify", sha256: hashed.hash });
+  }
+
+  if (signal.aborted) return fail("cancelled", "propose_changes cancelled");
+  const recorder = deps.planRecorder;
+  if (recorder === undefined || typeof recorder.saveChangesPlan !== "function") {
+    return fail("io_error", "no plan store for this kind of plan is available; nothing was stored");
+  }
+  // Review V-7 M-1: the summary is made safe as the engine's last message and plan summary are
+  // (safeModelText): control and invisible characters left out, the registered values masked, and
+  // key shapes hidden (HIDDEN_KEY_MARKER) also when nobody registered them. It goes into plan.json
+  // and from there into the system text of the run that carries the plan out.
+  const summary = typeof args.summary === "string" ? safeModelText(args.summary, (text) => deps.privacy.mask(text)) : null;
+  if (summary === null) return fail("io_error", "masking the summary failed; nothing was stored");
+  const stored: StoredPlannedFile[] = [];
+  for (const file of files) {
+    const masked = deps.privacy.mask(file.path);
+    if (!masked.ok) return fail("io_error", "masking a plan path failed; nothing was stored");
+    stored.push({ ...file, shown: maskedParts(masked.text) });
+  }
+  let digest: string;
+  try {
+    digest = await recorder.saveChangesPlan({ summary: maskedParts(summary), files: stored });
+  } catch {
+    // No detail: it could carry raw paths.
+    return fail("io_error", "storing the plan failed; no plan exists");
+  }
+  // R-5 I-4, as propose_plan: only a SHA-256 in the contract's form can be approved.
+  if (typeof digest !== "string" || !DIGEST_PATTERN.test(digest)) {
+    return fail("io_error", "the plan store returned no valid digest; the plan cannot be approved");
+  }
+  return { ok: true, payload: { digest, files } };
+}
+
+/**
+ * U-187 (DR-69 B-6): the PlannedFileProbe for a workspace (contract plan.ts): what is at a planned
+ * file's path now, with propose_changes' own checks. `create`: `missing` when nothing is at the path
+ * and its existing parents are folders (inspectDestination), else `other`. `modify`: `file` with the
+ * SHA-256 of the regular file the path names, its last name not a link (inspectSource, hashFile),
+ * `missing` when it is gone, else `other`. A check that fails, a path the workspace refuses and a
+ * cancel answer `other` (fail closed: plannedFileStale takes it as stale). Reads only.
+ * Review V-11 H-1: a planned file's path is its effective path when the plan was made (links
+ * resolved, ResolvedPlannedFile). It still fits only while it resolves to itself: a link now on its
+ * way (a parent folder turned into a junction) leads elsewhere, and that is `other`.
+ */
+export function createPlannedFileProbe(options: {
+  readonly workspace: Workspace;
+  readonly fileOps: PlanFileOps;
+  readonly platform?: NodeJS.Platform;
+}): PlannedFileProbe {
+  const { workspace, fileOps } = options;
+  const platform = options.platform ?? process.platform;
+  const itself = (resolved: ResolvedPath, planned: string): boolean => pathKey(resolved.relative, platform) === pathKey(planned, platform);
+  return async (file, signal): Promise<PlannedFileNow> => {
+    try {
+      if (file.change === "create") {
+        const now = await inspectDestination(workspace, file.path, fileOps);
+        return now.ok && itself(now.path, file.path) ? { kind: "missing" } : { kind: "other" };
+      }
+      const now = await inspectSource(workspace, file.path, fileOps);
+      if (!now.ok) return now.problem === "source_missing" ? { kind: "missing" } : { kind: "other" };
+      if (!itself(now.path, file.path)) return { kind: "other" };
+      const hashed = await hashFile(now.path.absolute, { expected: now.identity, signal });
+      if (hashed.ok) return { kind: "file", sha256: hashed.hash };
+      return hashed.reason === "missing" ? { kind: "missing" } : { kind: "other" };
+    } catch {
+      return { kind: "other" };
+    }
+  };
 }

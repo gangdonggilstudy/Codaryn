@@ -6,6 +6,7 @@
  */
 
 import {
+  ALL_TOOL_DESCRIPTORS,
   LEGACY_WORKFLOW_SETTINGS,
   MAX_REVIEW_CHECKLIST_ITEMS,
   MAX_REVIEW_CHECKLIST_ITEM_CHARS,
@@ -91,7 +92,11 @@ function checklistProblem(review: HumanReviewConfig): boolean {
  * `workflowRef`, else the profile's), then the task's own fields, under these ceilings:
  * - `tools` only narrows (`tool_not_allowed`); with `allowCommands: false` `run_command` is dropped;
  * - a definition's `plan: "apply"` or (U-175, DR-69 B-1) `plan: "run"` cannot become "none"
- *   (`plan_weakened`): both ask a person before anything is written;
+ *   (`plan_weakened`): both ask a person before anything is written. U-180 (R-99 L-2): nor the
+ *   other of the two: a task keeps a definition's plan mode, and sets one only under "none";
+ * - U-180 (R-99 L-2): under a plan mode, no plan tool of another mode (ToolDescriptor.planMode) in
+ *   the tools (`tool_not_allowed`, at the task's tool or at the definition's tools): it would
+ *   never be offered;
  * - `allowCommands: false` admits no command rule in the effective policy (`commands_not_allowed`);
  * - `completion: "human_review"` needs a checklist and "verifiers" admits none given by the task
  *   (`review_without_checklist`, `checklist_without_review`); a definition's checklist is dropped
@@ -135,8 +140,21 @@ export const resolveWorkflow: ResolveWorkflow = (input): ResolveWorkflowOutcome 
     tools = tools.filter((tool) => tool !== "run_command");
   }
 
-  if (base.plan !== "none" && task.plan === "none") return { ok: false, problem: "plan_weakened", field: "plan" };
+  // U-175, U-180 (R-99 L-2): a definition's plan mode stays; a task sets one only under "none".
+  if (base.plan !== "none" && task.plan !== undefined && task.plan !== base.plan) return { ok: false, problem: "plan_weakened", field: "plan" };
   const plan = task.plan ?? base.plan;
+  if (plan !== "none") {
+    const otherMode = (name: AnyToolName): boolean => {
+      const descriptor = ALL_TOOL_DESCRIPTORS[name];
+      return descriptor.endsRun === "plan" && descriptor.planMode !== plan;
+    };
+    if (task.tools !== undefined) {
+      const index = task.tools.findIndex(otherMode);
+      if (index !== -1) return { ok: false, problem: "tool_not_allowed", field: `tools[${index}]` };
+    } else if (tools.some(otherMode)) {
+      return { ok: false, problem: "tool_not_allowed", field: "workflows.tools" };
+    }
+  }
 
   const completion = task.completion ?? base.completion;
   let humanReview: HumanReviewConfig | null;
